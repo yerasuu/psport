@@ -263,7 +263,6 @@ static uintptr_t resolve_scoped(const char *name, int is_data) {
 }
 static const struct { const char *nid, *symbol; } import_names[]={
 #include "import_names.inc"
-#include "import_names_sdk.inc"
 };
 /* The NIDs before any "#<library>#<module>" scope are equal. */
 static int same_nid(const char *a, const char *b) {
@@ -271,9 +270,19 @@ static int same_nid(const char *a, const char *b) {
     return (!*a || *a=='#') && (!*b || *b=='#');
 }
 /* Symbol name for a NID in any scope, or NULL when no listed title imports it. */
+static const struct { char nid[12]; const char *symbol; } all_names[]={
+#include "import_names_all.inc"
+};
 const char *runtime_symbol(const char *nid) {
     for (size_t i=0;i<sizeof(import_names)/sizeof(*import_names);++i)
         if (same_nid(nid,import_names[i].nid)) return import_names[i].symbol;
+    size_t low=0, high=sizeof(all_names)/sizeof(*all_names);
+    while (low<high) {
+        size_t mid=low+(high-low)/2;
+        int order=strncmp(nid,all_names[mid].nid,11);
+        if (!order) return all_names[mid].symbol;
+        if (order<0) high=mid; else low=mid+1;
+    }
     return NULL;
 }
 /* The suffix after the NID numbers the library and module in the importing executable's own
