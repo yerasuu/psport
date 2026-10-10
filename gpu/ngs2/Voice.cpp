@@ -6,6 +6,8 @@
 #include <numbers>
 #include <stdexcept>
 #include <string>
+#include <vector>
+#include <cstdio>
 
 #include "ngs2_compat.hpp"
 #include "Ngs2Internal.hpp"
@@ -32,6 +34,7 @@ void Ngs2Voice::SetEvent(std::uint32_t eventId) {
         case SCE_NGS2_VOICE_EVENT_STOP:
             if (state == Ngs2PlayState::Playing || state == Ngs2PlayState::Paused) state = Ngs2PlayState::Stopped;
             break;
+        case SCE_NGS2_VOICE_EVENT_RESET:
         case SCE_NGS2_VOICE_EVENT_STOP_IMM:
         case SCE_NGS2_VOICE_EVENT_KILL:
             state = Ngs2PlayState::Empty;
@@ -118,6 +121,17 @@ static void Patch(Ngs2Voice& voice, const Ngs2VoicePatchParam& patch) {
     auto* dest = Ngs2FindVoice(patch.dest_handle);
     if (dest == nullptr || dest->rack->system != voice.rack->system || dest->rack->rackId == SCE_NGS2_RACK_ID_SAMPLER) APS5_INVALID_ARG_EX;
     port.dest = dest;
+}
+
+// An effect not implemented (an envelope, a peak meter, mastering's matrix and LFE): its parameter
+// is accepted and leaves the sound as it is, so the rest of the same parameter list still applies.
+static void IgnoreParam(std::uint32_t id) {
+    static std::mutex lock;
+    static std::vector<std::uint32_t> told;
+    std::lock_guard guard(lock);
+    if (std::find(told.begin(), told.end(), id) != told.end()) return;
+    told.push_back(id);
+    std::printf("Ngs2: voice param %#x is not implemented; ignored\n", id);
 }
 
 static void ApplyCommonParam(Ngs2Voice& voice, const Ngs2VoiceParamHeader& param) {
@@ -289,6 +303,7 @@ static void ApplySamplerParam(Ngs2Voice& voice, const Ngs2VoiceParamHeader& para
             break;
         }
         case SCE_NGS2_SAMPLER_VOICE_PARAM_FILTER: SetFilter(voice, ParamAs<Ngs2SamplerVoiceFilterParam>(param)); break;
+        case SCE_NGS2_SAMPLER_VOICE_PARAM_ENVELOPE: IgnoreParam(param.id); break;
         default: throw std::runtime_error("NGS2: sampler voice param " + Ngs2Hex(param.id) + " is not implemented");
     }
 }
@@ -320,6 +335,10 @@ static void ApplyParam(Ngs2Voice& voice, const Ngs2VoiceParamHeader& param) {
                 voice.userFxFlags = fx.handler ? 1 : 0;
                 return;
             }
+            if (param.id == SCE_NGS2_SUBMIXER_VOICE_PARAM_PEAK_METER) {
+                IgnoreParam(param.id);
+                return;
+            }
             if (param.id != SCE_NGS2_SUBMIXER_VOICE_PARAM_SETUP) break;
             if (ParamAs<Ngs2SubmixerVoiceSetupParam>(param).flags != 0) throw std::runtime_error("NGS2: submixer setup flags are not implemented");
             SetupMixer(voice, ParamAs<Ngs2SubmixerVoiceSetupParam>(param).num_io_channels);
@@ -349,6 +368,11 @@ static void ApplyParam(Ngs2Voice& voice, const Ngs2VoiceParamHeader& param) {
                 if (!std::isfinite(gain.fbw_level) || !std::isfinite(gain.lfe_level)) APS5_INVALID_ARG_EX;
                 voice.fbwLevel = gain.fbw_level;
                 voice.lfeLevel = gain.lfe_level;
+                return;
+            }
+            if (param.id == SCE_NGS2_MASTERING_VOICE_PARAM_MATRIX || param.id == SCE_NGS2_MASTERING_VOICE_PARAM_LFE ||
+                param.id == SCE_NGS2_MASTERING_VOICE_PARAM_PEAK_METER) {
+                IgnoreParam(param.id);
                 return;
             }
             if (param.id == SCE_NGS2_MASTERING_VOICE_PARAM_OUTPUT) {
@@ -432,6 +456,20 @@ int APS5_VABI sceNgs2VoiceGetState(uintptr_t voice_handle, Ngs2VoiceState* state
             auto& submixer = *reinterpret_cast<Ngs2SubmixerVoiceState*>(state);
             submixer = {};
             submixer.voice_state.state_flags = voice.stateFlags;
+            return SCE_NGS2_OK;
+        }
+        case SCE_NGS2_RACK_ID_MASTERING: {
+            if (state_size != sizeof(Ngs2MasteringVoiceState)) return SCE_NGS2_ERROR_INVALID_OUT_SIZE;
+            auto& mastering = *reinterpret_cast<Ngs2MasteringVoiceState*>(state);
+            mastering = {};
+            mastering.voice_state.state_flags = voice.stateFlags;
+            return SCE_NGS2_OK;
+        }
+        case SCE_NGS2_RACK_ID_CUSTOM_SUBMIXER: {
+            if (state_size != sizeof(Ngs2CustomSubmixerVoiceState)) return SCE_NGS2_ERROR_INVALID_OUT_SIZE;
+            auto& custom = *reinterpret_cast<Ngs2CustomSubmixerVoiceState*>(state);
+            custom = {};
+            custom.voice_state.state_flags = voice.stateFlags;
             return SCE_NGS2_OK;
         }
         default: throw std::runtime_error("NGS2: voice state of rack " + Ngs2Hex(voice.rack->rackId) + " is not implemented");
