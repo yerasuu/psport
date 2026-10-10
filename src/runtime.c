@@ -201,7 +201,8 @@ static ABI __attribute__((noreturn)) void guest_libc_exit(int status) {
     runtime_report();
     exit(status);
 }
-uintptr_t runtime_resolve(const char *name, int is_data) {
+static const char *bloodborne_scope(const char *name);
+static uintptr_t resolve_scoped(const char *name, int is_data) {
     if (!(capabilities & 1)) return 0;
     if (is_data) {
         static int32_t need_libc_internal = 1; /* SDK marker variable referenced by Fios2 */
@@ -268,6 +269,24 @@ const char *runtime_symbol(const char *nid) {
     for (size_t i=0;i<sizeof(import_names)/sizeof(*import_names);++i)
         if (!strcmp(nid,import_names[i].nid)) return import_names[i].symbol;
     return NULL;
+}
+/* The suffix after the NID numbers the library and module in the importing executable's own
+ * tables, so another title imports the same function as e.g. "JTvBflhYazQ#i#f" where Bloodborne
+ * has "#p#J"; the tables above are written for Bloodborne's. */
+static const char *bloodborne_scope(const char *name) {
+    const char *hash=strchr(name,'#');
+    if (!hash) return NULL;
+    size_t length=(size_t)(hash-name)+1;
+    for (size_t i=0;i<sizeof(import_names)/sizeof(*import_names);++i)
+        if (!strncmp(name,import_names[i].nid,length) && strcmp(name,import_names[i].nid))
+            return import_names[i].nid;
+    return NULL;
+}
+uintptr_t runtime_resolve(const char *name, int is_data) {
+    uintptr_t found=resolve_scoped(name,is_data);
+    if (found) return found;
+    const char *scoped=bloodborne_scope(name);
+    return scoped ? resolve_scoped(scoped,is_data) : 0;
 }
 /* Same symbol name means same contract whether imported from libkernel or
  * libScePosix, so newer modules resolve by name through runtime_symbol. */
