@@ -260,6 +260,16 @@ def compile_patches(xml, names, app_version, segments):
 BLOODBORNE_IDS={'CUSA00207','CUSA00208','CUSA00900','CUSA01363','CUSA03173','CUSA03023'}
 
 
+def game_title(game):
+    """TITLE_ID from the game's param.sfo; empty when it has none or it does not parse."""
+    from prepare import sfo  # same directory
+    path=Path(game)/'sce_sys/param.sfo'
+    try:
+        return sfo(path.read_bytes()).get('TITLE_ID','')
+    except (OSError,ValueError,struct.error):
+        return ''
+
+
 def external_patches(directory, app_version='01.09', exclude=Path(__file__).resolve().parent.parent/'patches/Bloodborne.xml'):
     """[(key, file, metadata)] of eboot patches for this version in directory/*.xml.
     key is "<file name>/<patch name>" (the launcher's selection, patches.json)."""
@@ -340,6 +350,13 @@ def main():
             settings['preset']=os.environ['BB_UPSCALE_PRESET']
         size=render_size(settings)
         if size: print(f'{size[0]}x{size[1]}')
+        return
+    # Every built-in patch, the resolution ones included, is an address in Bloodborne 1.09's
+    # executable: another title gets an empty patch file rather than writes into its own code.
+    title=game_title(a.game_dir)
+    if title not in BLOODBORNE_IDS:
+        (a.out/'patches.bin').write_bytes(struct.pack('<8sQQ',b'BBPATCH2',EBOOT_BASE,0))
+        print(f'Patches: none for {title or "an unknown title"}')
         return
     names=FPS_PRESETS[a.fps]+[n.strip() for n in a.extra.split(';') if n.strip()]
     names+=[n for n in effect_patches(read_settings(a.settings)) if n not in names]
