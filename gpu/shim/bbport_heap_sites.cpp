@@ -5,6 +5,7 @@
 // its code on the stack). Report() prints the sites whose live bytes grew since the last report:
 // what leaks when the guest heap runs out.
 #include "bbport_heap_sites.h"
+#include "game_profile.h"
 
 #include <algorithm>
 #include <atomic>
@@ -222,6 +223,11 @@ void InstallWrappers(bool counters) {
     }();
     static bool done = false;
     if ((!wanted && !counters) || done) {
+        return;
+    }
+    // LibcBase and the slots are where Bloodborne's libc.prx lands; another title's memory there
+    // is something else, or nothing.
+    if (!Game::Active()) {
         return;
     }
     auto* slots = reinterpret_cast<u64*>(LibcBase);
