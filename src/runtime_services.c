@@ -90,6 +90,13 @@ static ABI int32_t system_status(unsigned char *status) {
 static ABI int32_t system_event(void *event) { (void)event; return SYSTEM_NO_EVENT; }
 static ABI int32_t hide_splash(void) { note("SystemService: splash screen hidden"); return 0; }
 static ABI int32_t launch_browser(void) { note("SystemService: web browser request ignored (offline)"); return 0; }
+/* The share of the screen the user's display settings leave for UI: all of it. A title that sizes
+ * its render targets by it (Atelier Ryza) gets a 0x0 target and a null texture from 0. */
+static ABI int32_t display_safe_area(float *ratio) {
+    if (!ratio) return (int32_t)0x80A10003; /* SCE_SYSTEM_SERVICE_ERROR_PARAMETER */
+    *ratio=1.0f;
+    return 0;
+}
 
 /* ---- NetCtl / Net / Http / Ssl: no network ---- */
 static int32_t net_errno;
@@ -359,6 +366,7 @@ static const RuntimeExport exports[]={
     {"sceSystemServiceParamGetInt",system_param}, {"sceSystemServiceGetStatus",system_status},
     {"sceSystemServiceReceiveEvent",system_event}, {"sceSystemServiceHideSplashScreen",hide_splash},
     {"sceSystemServiceLaunchWebBrowser",launch_browser},
+    {"sceSystemServiceGetDisplaySafeAreaInfo",display_safe_area},
     {"sceNetInit",net_init}, {"sceNetTerm",net_term}, {"sceNetErrnoLoc",net_errno_loc},
     {"sceNetPoolCreate",net_pool_create}, {"sceNetPoolDestroy",net_pool_destroy},
     {"sceNetEpollCreate",net_epoll_create}, {"sceNetEpollDestroy",net_epoll_destroy},
