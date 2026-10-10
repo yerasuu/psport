@@ -263,11 +263,17 @@ static uintptr_t resolve_scoped(const char *name, int is_data) {
 }
 static const struct { const char *nid, *symbol; } import_names[]={
 #include "import_names.inc"
+#include "import_names_sdk.inc"
 };
-/* Symbol name for a scoped NID, or NULL when this eboot/libc never imports it. */
+/* The NIDs before any "#<library>#<module>" scope are equal. */
+static int same_nid(const char *a, const char *b) {
+    while (*a && *a!='#' && *a==*b) ++a, ++b;
+    return (!*a || *a=='#') && (!*b || *b=='#');
+}
+/* Symbol name for a NID in any scope, or NULL when no listed title imports it. */
 const char *runtime_symbol(const char *nid) {
     for (size_t i=0;i<sizeof(import_names)/sizeof(*import_names);++i)
-        if (!strcmp(nid,import_names[i].nid)) return import_names[i].symbol;
+        if (same_nid(nid,import_names[i].nid)) return import_names[i].symbol;
     return NULL;
 }
 /* The suffix after the NID numbers the library and module in the importing executable's own
