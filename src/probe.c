@@ -112,6 +112,15 @@ static void protect(void *p, size_t size, unsigned flags) {
     if (mprotect(p, size, mode)) fail("mprotect failed");
 #endif
 }
+/* BB_PERMISSIVE=1: an import the runtime lacks returns 0 instead of stopping, so a title other
+ * than Bloodborne gets past the first one and its log lists every import it reached (each once). */
+static unsigned char *permissive_seen;
+static ABI uint64_t unresolved_permissive(uint32_t id, uintptr_t argument) {
+    if (id < import_count && !__atomic_exchange_n(&permissive_seen[id], 1, __ATOMIC_RELAXED))
+        printf("Runtime: unsupported import %s (%s) returns 0; first argument: 0x%" PRIxPTR "\n",
+               names[id], runtime_import_name(names[id]), argument);
+    return 0;
+}
 static ABI __attribute__((noreturn)) void unresolved(uint32_t id, uintptr_t argument) {
     if (id >= import_count) fail("bad import trap index");
     printf("STOP: first unsupported PS4 import: %s (index %u)\n", names[id], id);
@@ -507,14 +516,20 @@ int main(int argc, char **argv) {
         if (bbgpu_init(&gpu)) fail("GPU initialization failed");
         printf("GPU: window and Vulkan presenter ready; SDK 0x%08x, %u HLE symbols\n",(unsigned)sdk,bbgpu_symbol_count());
     }
+    const char *permissive = getenv("BB_PERMISSIVE");
+    if (permissive && !strcmp(permissive, "1")) {
+        permissive_seen = calloc(import_count ? import_count : 1, 1);
+        if (!permissive_seen) fail("allocation failed");
+    }
     unsigned char *traps = allocate(round_page((import_count + 1) * 32));
     unsigned char *data_traps = allocate((import_count + 1) * page_size);
     protect(data_traps, (import_count + 1) * page_size, 0);
     for (uint64_t i = 0; i < import_count; ++i) {
         unsigned char *t = traps + i * 32;
-        /* SysV: mov edi, index; movabs rax, handler; jmp rax. No fake return values. */
+        /* SysV: mov edi, index; movabs rax, handler; jmp rax. No fake return values, unless
+         * BB_PERMISSIVE asked for them. */
         uint32_t index = (uint32_t)i;
-        uintptr_t handler = (uintptr_t)unresolved;
+        uintptr_t handler = permissive_seen ? (uintptr_t)unresolved_permissive : (uintptr_t)unresolved;
         t[0] = 0x48; t[1] = 0x89; t[2] = 0xfe; /* mov rsi,rdi: preserve arg0 */
         t[3] = 0xbf; memcpy(t + 4, &index, 4);
         t[8] = 0x48; t[9] = 0xb8; memcpy(t + 10, &handler, 8);
