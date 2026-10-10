@@ -287,6 +287,26 @@ static ABI int32_t posix_key_create(uint32_t *k,KeyDestructor d) { int32_t r=key
 static ABI int32_t posix_key_delete(uint32_t k) { int32_t r=key_delete(k); return r ? r&0xffff : 0; }
 static ABI int32_t posix_key_set(uint32_t k,void *v) { int32_t r=key_set(k,v); return r ? r&0xffff : 0; }
 
+/* What newer SDKs' libc.prx registers or asks for while it starts (Atelier Ryza, CUSA16458).
+ * Thread destructors and atexit reports are the kernel's bookkeeping for that libc: nothing here
+ * runs them. No sanitizer replaces malloc or new. */
+static ABI int32_t set_thread_dtors(void *dtors) { (void)dtors; return 0; }
+static ABI int32_t set_thread_atexit_count(void *count) { (void)count; return 0; }
+static ABI int32_t set_thread_atexit_report(void *report) { (void)report; return 0; }
+static ABI void *sanitizer_replace(void *table) { (void)table; return NULL; }
+/* libc follows the info's two pointers when it starts tracing its heap, a null one faults
+ * (guest offset 0x19fe22c in libc.prx); tracing stays off with an empty mask and table. The
+ * layout is upstream universal_ps4_native's. */
+static uint64_t heap_trace_mask, heap_trace_table[512];
+static ABI int32_t libc_heap_trace_info(void *info) {
+    if (info) {
+        ((uint32_t *)info)[3]=0;
+        ((uint64_t **)info)[2]=&heap_trace_mask;
+        ((uint64_t **)info)[3]=heap_trace_table;
+    }
+    return 0;
+}
+
 static const RuntimeExport exports[]={
     {"sceKernelClockGettime",kernel_clock_gettime}, {"clock_gettime",posix_clock_gettime},
     {"clock_getres",posix_clock_getres},
@@ -311,6 +331,11 @@ static const RuntimeExport exports[]={
     {"scePthreadSetspecific",key_set}, {"scePthreadGetspecific",key_get},
     {"pthread_key_create",posix_key_create}, {"pthread_key_delete",posix_key_delete},
     {"pthread_setspecific",posix_key_set}, {"pthread_getspecific",key_get},
+    {"_sceKernelSetThreadDtors",set_thread_dtors}, {"_sceKernelSetThreadAtexitCount",set_thread_atexit_count},
+    {"_sceKernelSetThreadAtexitReport",set_thread_atexit_report},
+    {"sceKernelGetSanitizerMallocReplaceExternal",sanitizer_replace},
+    {"sceKernelGetSanitizerNewReplaceExternal",sanitizer_replace},
+    {"sceLibcHeapGetTraceInfo",libc_heap_trace_info},
 };
 uintptr_t runtime_kernel_resolve(const char *name) { return RUNTIME_LOOKUP(exports,name); }
 #else
