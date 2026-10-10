@@ -33,6 +33,8 @@
 #include <time.h>
 #include <SDL3/SDL.h>
 #include <sys/stat.h>
+#include <sys/uio.h>
+#include <unistd.h>
 
 #define ERR_INVALID_ARG ((int32_t)0x80920001)
 #define ERR_INVALID_HANDLE ((int32_t)0x80920003)
@@ -257,7 +259,11 @@ static void report_guest_heap(void) {
     if (!enabled || now-last<5000000) return;
     last=now;
     const uint8_t *stub=(const uint8_t *)(0x800000000ull+0x56e0000+0x1f8c0);
-    if (stub[0]!=0xff || stub[1]!=0x25) return; /* another libc */
+    /* Read without touching it first: in another title nothing need be mapped there. */
+    uint8_t head[2];
+    struct iovec local={head,sizeof(head)}, remote={(void *)stub,sizeof(head)};
+    if (process_vm_readv(getpid(),&local,1,&remote,1,0)!=(ssize_t)sizeof(head)) return;
+    if (head[0]!=0xff || head[1]!=0x25) return; /* another libc */
     ABI int (*stats)(MallocManagedSize *)=(ABI int (*)(MallocManagedSize *))(uintptr_t)stub;
     MallocManagedSize m={.size=sizeof(m),.version=1};
     const int result=stats(&m);
