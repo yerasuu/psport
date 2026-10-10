@@ -4,7 +4,11 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "prx/libc/include/general/VabiMacros.hpp"
+#include "ngs2_compat.hpp"
+
+// PS4 layouts (sizes checked against shadPS4's Orbis* types), where AnyPS5's are PS5's: 16-byte
+// system and rack names, no job scheduler or voice channel options, 32-bit waveform block
+// offsets, a 4-byte voice state, a 32-bit sampler filter channel mask.
 
 static constexpr int SCE_NGS2_OK = 0;
 static constexpr int SCE_NGS2_ERROR_INVALID_OUT_ADDRESS = static_cast<int>(0x804A8010);
@@ -91,19 +95,17 @@ struct Ngs2BufferAllocator {
 
 struct Ngs2SystemOption {
     std::size_t size;
-    char name[64];
-    std::uintptr_t job_scheduler_options[4];
+    char name[16];
     std::uint32_t flags;
     std::uint32_t max_grain_samples;
     std::uint32_t num_grain_samples;
     std::uint32_t sample_rate;
-    std::uint32_t max_voice_channels;
-    std::uint32_t reserved[5];
+    std::uint32_t reserved[6];
 };
-static_assert(sizeof(Ngs2SystemOption) == 144);
+static_assert(sizeof(Ngs2SystemOption) == 64);
 
 struct Ngs2SystemInfo {
-    char name[64];
+    char name[16];
     Ngs2Handle system_handle;
     Ngs2ContextBufferInfo buffer_info;
     std::uint32_t uid;
@@ -117,22 +119,20 @@ struct Ngs2SystemInfo {
     std::uint32_t sample_rate;
     std::uint32_t num_grain_samples;
 };
-static_assert(sizeof(Ngs2SystemInfo) == 184);
+static_assert(sizeof(Ngs2SystemInfo) == 136);
 
 struct Ngs2RackOption {
     std::size_t size;
-    char name[64];
+    char name[16];
     std::uint32_t flags;
     std::uint32_t max_grain_samples;
     std::uint32_t max_voices;
     std::uint32_t max_input_delay_blocks;
     std::uint32_t max_matrices;
     std::uint32_t max_ports;
-    std::uint32_t max_voice_channels;
-    std::uint32_t max_output_channels;
-    std::uint32_t reserved[18];
+    std::uint32_t reserved[20];
 };
-static_assert(sizeof(Ngs2RackOption) == 176);
+static_assert(sizeof(Ngs2RackOption) == 128);
 
 struct Ngs2SamplerRackOption {
     Ngs2RackOption rack_option;
@@ -271,17 +271,17 @@ struct Ngs2CustomRackOption {
     Ngs2CustomRackModuleInfo module[SCE_NGS2_CUSTOM_MAX_MODULES];
     Ngs2CustomRackPortInfo port[SCE_NGS2_CUSTOM_MAX_PORTS];
 };
-static_assert(sizeof(Ngs2CustomRackOption) == 1280);
+static_assert(sizeof(Ngs2CustomRackOption) == 1232);
 
 struct Ngs2CustomSubmixerRackOption {
     Ngs2CustomRackOption custom_rack_option;
     std::uint32_t max_channels;
     std::uint32_t max_inputs;
 };
-static_assert(sizeof(Ngs2CustomSubmixerRackOption) == 1288);
+static_assert(sizeof(Ngs2CustomSubmixerRackOption) == 1240);
 
 struct Ngs2RackInfo {
-    char name[64];
+    char name[16];
     Ngs2Handle rack_handle;
     Ngs2ContextBufferInfo buffer_info;
     Ngs2Handle owner_system_handle;
@@ -302,7 +302,7 @@ struct Ngs2RackInfo {
     std::uint32_t active_voice_count;
     std::uint32_t active_channel_work_count;
 };
-static_assert(sizeof(Ngs2RackInfo) == 216);
+static_assert(sizeof(Ngs2RackInfo) == 168);
 
 struct Ngs2VoiceParamHeader {
     std::uint16_t size;
@@ -382,15 +382,15 @@ struct Ngs2WaveformFormat {
 static_assert(sizeof(Ngs2WaveformFormat) == 24);
 
 struct Ngs2WaveformBlock {
-    std::uint64_t data_offset;
-    std::uint64_t data_size;
+    std::uint32_t data_offset;
+    std::uint32_t data_size;
     std::uint32_t num_repeats;
     std::uint32_t num_skip_samples;
     std::uint32_t num_samples;
     std::uint32_t reserved;
     std::uintptr_t user_data;
 };
-static_assert(sizeof(Ngs2WaveformBlock) == 40);
+static_assert(sizeof(Ngs2WaveformBlock) == 32);
 
 struct Ngs2SamplerVoiceSetupParam {
     Ngs2VoiceParamHeader header;
@@ -415,13 +415,13 @@ struct Ngs2SamplerVoiceFilterParam {
     std::uint32_t index;
     std::uint32_t location;
     std::uint32_t type;
-    std::uint64_t channel_mask;
+    std::uint32_t channel_mask;
     float frequency;
     float q;
     float level;
     std::uint32_t reserved[3];
 };
-static_assert(sizeof(Ngs2SamplerVoiceFilterParam) == 56);
+static_assert(sizeof(Ngs2SamplerVoiceFilterParam) == 48);
 
 struct Ngs2SubmixerVoiceSetupParam {
     Ngs2VoiceParamHeader header;
@@ -548,9 +548,8 @@ static_assert(sizeof(Ngs2VoicePortInfo) == 24);
 
 struct Ngs2VoiceState {
     std::uint32_t state_flags;
-    std::int32_t error_code;
 };
-static_assert(sizeof(Ngs2VoiceState) == 8);
+static_assert(sizeof(Ngs2VoiceState) == 4);
 
 struct Ngs2SubmixerVoiceState {
     Ngs2VoiceState voice_state;
@@ -558,7 +557,7 @@ struct Ngs2SubmixerVoiceState {
     float peak_height;
     float compressor_height;
 };
-static_assert(sizeof(Ngs2SubmixerVoiceState) == 20);
+static_assert(sizeof(Ngs2SubmixerVoiceState) == 16);
 
 struct Ngs2SamplerVoiceState {
     Ngs2VoiceState voice_state;
@@ -570,7 +569,7 @@ struct Ngs2SamplerVoiceState {
     std::uintptr_t user_data;
     const void* waveform_data;
 };
-static_assert(sizeof(Ngs2SamplerVoiceState) == 56);
+static_assert(sizeof(Ngs2SamplerVoiceState) == 48);
 
 struct Ngs2WaveformInfo {
     Ngs2WaveformFormat format;
@@ -588,7 +587,7 @@ struct Ngs2WaveformInfo {
     std::uint32_t num_blocks;
     Ngs2WaveformBlock block[4];
 };
-static_assert(sizeof(Ngs2WaveformInfo) == 232);
+static_assert(sizeof(Ngs2WaveformInfo) == 200);
 
 struct Ngs2PanParam {
     float angle;

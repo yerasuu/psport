@@ -11,7 +11,7 @@
 #include <string>
 #include <vector>
 
-#include "prx/libSceNgs2.native/include/Ngs2Types.hpp"
+#include "Ngs2Types.hpp"
 
 static constexpr std::uint32_t NGS2_MAX_CHANNELS = 8;
 static constexpr std::uint32_t MIN_GRAIN_SAMPLES = 64;
@@ -145,7 +145,7 @@ struct Ngs2Rack {
     Ngs2System* system = nullptr;
     std::uint32_t rackId = 0;
     std::uint32_t uid = 0;
-    char name[64] = {};
+    char name[16] = {};
     std::uint32_t maxChannels = 0;
     std::uint32_t maxFilters = 0;
     std::uint32_t maxGrainSamples = 0;

@@ -8,7 +8,7 @@
 #include <stdexcept>
 #include <string>
 
-#include "prx/libc/include/General.hpp"
+#include "ngs2_compat.hpp"
 #include "Ngs2Internal.hpp"
 
 union RackOptions {

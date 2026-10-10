@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-#include "prx/libc/include/General.hpp"
+#include "ngs2_compat.hpp"
 #include "Ngs2Internal.hpp"
 
 static constexpr std::uint32_t USER_FX2_FLAG_FIRST_PROCESS = 1;

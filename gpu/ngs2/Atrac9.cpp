@@ -12,8 +12,24 @@
 #include <vector>
 
 #include "libatrac9.h"
-#include "prx/libc/include/General.hpp"
+#include "ngs2_compat.hpp"
 #include "Ngs2Internal.hpp"
+
+// bbport's LibAtrac9 is upstream's, which decodes to 16-bit PCM only; AnyPS5 builds shadPS4's
+// fork with a float decoder. Same frame, scaled to [-1, 1).
+static int Atrac9DecodeF32(void* handle, const unsigned char* input, int input_size, float* output, int* used,
+                           int nointerleave) {
+    (void)input_size; // upstream's decoder reads one frame and takes no bound
+    (void)nointerleave; // always 0 here: interleaved
+    Atrac9CodecInfo info{};
+    if (const int status = Atrac9GetCodecInfo(handle, &info); status != 0) return status;
+    thread_local std::vector<short> pcm;
+    pcm.resize(static_cast<std::size_t>(info.frameSamples) * static_cast<std::size_t>(info.channels));
+    const int status = Atrac9Decode(handle, input, pcm.data(), used);
+    if (status != 0) return status;
+    std::transform(pcm.begin(), pcm.end(), output, [](short sample) { return static_cast<float>(sample) / 32768.0f; });
+    return 0;
+}
 
 static constexpr std::uint16_t WAVE_FORMAT_PCM = 0x1;
 static constexpr std::uint16_t WAVE_FORMAT_EXTENSIBLE = 0xfffe;

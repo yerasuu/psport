@@ -7,7 +7,7 @@
 #include <stdexcept>
 #include <string>
 
-#include "prx/libc/include/General.hpp"
+#include "ngs2_compat.hpp"
 #include "Ngs2Internal.hpp"
 
 static constexpr float DEGREES = 360.0f;
