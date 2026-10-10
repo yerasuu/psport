@@ -1,4 +1,6 @@
 #include <algorithm>
+#include <atomic>
+#include <cstdio>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -12,14 +14,32 @@
 static constexpr std::uint32_t USER_FX2_FLAG_FIRST_PROCESS = 1;
 static constexpr std::uint32_t USER_FX2_FLAG_PARAM_CHANGED = 2;
 
+// The built-in modules (envelope, compressor, reverb, peak meter and the rest) are not implemented:
+// one passes its input through unchanged and ignores its parameters, so a rack that uses them
+// still sounds, without that effect. In the rack it is a UserFx2 slot with no process handler.
+static bool IsUserFx2(const Ngs2CustomRackModuleInfo& info) {
+    return info.module_id == SCE_NGS2_CUSTOM_MODULE_ID_USER_FX2;
+}
+
+static void NoteMissingModule(std::uint32_t module_id) {
+    static std::atomic<std::uint32_t> told{0};
+    const std::uint32_t bit = 1u << (module_id & 0x1f);
+    if (!(told.fetch_or(bit) & bit)) {
+        std::printf("Ngs2: custom module id %#x is not implemented; it passes audio through\n", module_id);
+    }
+}
+
 void Ngs2CheckCustomRack(const Ngs2CustomRackOption& option) {
     if (option.num_buffers != 1) throw std::runtime_error("NGS2: custom racks with " + std::to_string(option.num_buffers) + " buffers are not implemented");
     if (option.num_modules > SCE_NGS2_CUSTOM_MAX_MODULES || option.rack_option.max_ports > SCE_NGS2_CUSTOM_MAX_PORTS) APS5_INVALID_ARG_EX;
     for (std::uint32_t m = 0; m < option.num_modules; m++) {
         const auto& info = option.module[m];
-        if (info.module_id != SCE_NGS2_CUSTOM_MODULE_ID_USER_FX2) throw std::runtime_error("NGS2: custom module id " + Ngs2Hex(info.module_id) + " is not implemented");
-        if (info.option == nullptr || info.option->size != sizeof(Ngs2CustomUserFx2ModuleOption)) APS5_INVALID_ARG_EX;
         if (info.source_buffer_id != 0 || info.dest_buffer_id != 0) APS5_INVALID_ARG_EX;
+        if (!IsUserFx2(info)) {
+            NoteMissingModule(info.module_id);
+            continue;
+        }
+        if (info.option == nullptr || info.option->size != sizeof(Ngs2CustomUserFx2ModuleOption)) APS5_INVALID_ARG_EX;
         if (reinterpret_cast<const Ngs2CustomUserFx2ModuleOption*>(info.option)->process_handler == nullptr) APS5_INVALID_ARG_EX;
     }
     for (std::uint32_t p = 0; p < option.rack_option.max_ports; p++) {
@@ -38,6 +58,10 @@ void Ngs2SetupUserFx(Ngs2Rack& rack, const Ngs2CustomRackOption& option) {
     rack.userFxCommon.resize(option.num_modules);
     for (auto& voice : rack.voices) voice.userFx.resize(option.num_modules);
     for (std::uint32_t m = 0; m < option.num_modules; m++) {
+        if (!IsUserFx2(option.module[m])) {
+            rack.userFx[m] = {};
+            continue;
+        }
         const auto& module = *reinterpret_cast<const Ngs2CustomUserFx2ModuleOption*>(option.module[m].option);
         rack.userFx[m] = module;
         rack.userFxCommon[m].resize(module.common_size);
@@ -89,6 +113,11 @@ void Ngs2ApplyCustomParam(Ngs2Voice& voice, const Ngs2VoiceParamHeader& param) {
         SetupCustomSubmixer(voice, ParamAs<Ngs2CustomSubmixerVoiceSetupParam>(param));
         return;
     }
+    // Module parameters are 0x4000 << 16 | module id << 8 | module index.
+    if ((param.id & 0xffff0000u) == 0x40000000u && (param.id & 0x1f) < voice.userFx.size() &&
+        voice.rack->userFx[param.id & 0x1f].process_handler == nullptr) {
+        return;
+    }
     if ((param.id & ~0x1fu) == SCE_NGS2_CUSTOM_VOICE_PARAM_USER_FX2) {
         SetUserFxParam(voice, param.id & 0x1f, ParamAs<Ngs2CustomVoiceUserFx2Param>(param));
         return;
@@ -103,6 +132,7 @@ void Ngs2ProcessUserFx(Ngs2Voice& voice, std::uint32_t grain, std::uint32_t samp
     for (std::size_t m = 0; m < voice.userFx.size(); m++) {
         auto& fx = voice.userFx[m];
         const auto& module = voice.rack->userFx[m];
+        if (module.process_handler == nullptr) continue;
         Ngs2UserFx2ProcessContext context{channels.data(), voice.rack->userFxCommon[m].data(), fx.param.data(), fx.work.data(), fx.state.data(),
                                           module.user_data, fx.flags, voice.channels, voice.channels, grain, sampleRate, 0, {}};
         const int result = module.process_handler(&context);
