@@ -1679,13 +1679,13 @@ bool Rasterizer::ObtainStreamOut(const GraphicsPipeline* pipeline, StreamOutBind
         return skip("guest memory buffers have no transform feedback usage on this driver");
     }
     const auto sharp = DrawPipe::OnStageB() ? packet_strmout : ReadStreamOutSharp(*gs, regs);
-    const u64 limit = StreamOutSize(sharp, regs);
-    const u64 start = u64(regs.vgt_strmout_buffers[0].offset) * 4;
-    if (limit <= start) {
+    // Bound from the V# base: the write offset is the counter's (StreamOutCounters), which is what
+    // VGT_STRMOUT_BUFFER_OFFSET holds and the filled size the guest is told, both from the base.
+    const VAddr address = sharp.base_address;
+    const u64 size = StreamOutSize(sharp, regs);
+    if (size == 0) {
         return skip("the stream-out buffer's V# or size leaves nothing to write");
     }
-    const VAddr address = sharp.base_address + start;
-    const u64 size = limit - start;
     const auto [buffer, offset] = buffer_cache.ObtainBuffer(address, u32(size), true);
     if (!buffer || !buffer->Handle()) {
         return skip("the buffer cache gave no buffer for the stream-out range");
@@ -1700,6 +1700,9 @@ void Rasterizer::PrepareStreamOut(const StreamOutBinding& binding) {
     if (binding.buffer) {
         needs_barrier |=
             runtime.IsBufferAccessed(binding.buffer, binding.offset, binding.size, true);
+        // The previous capture's end, a store of the filled size or a new offset touched it:
+        // begin reads it, end writes it.
+        needs_barrier |= runtime.IsBufferAccessed(StreamOutCounters(), 0, sizeof(u32), true);
     }
 }
 
@@ -1708,6 +1711,44 @@ void Rasterizer::NoteStreamOut(const StreamOutBinding& binding) {
         runtime.AccessBuffer(binding.buffer, binding.offset, binding.size,
                              vk::PipelineStageFlagBits2::eTransformFeedbackEXT,
                              vk::AccessFlagBits2::eTransformFeedbackWriteEXT);
+        runtime.AccessBuffer(StreamOutCounters(), 0, sizeof(u32),
+                             vk::PipelineStageFlagBits2::eTransformFeedbackEXT |
+                                 vk::PipelineStageFlagBits2::eDrawIndirect,
+                             vk::AccessFlagBits2::eTransformFeedbackCounterReadEXT |
+                                 vk::AccessFlagBits2::eTransformFeedbackCounterWriteEXT);
+    }
+}
+
+const VideoCore::Buffer* Rasterizer::StreamOutCounters() {
+    if (!strmout_counters) {
+        constexpr u64 size = sizeof(u32) * 4;
+        strmout_counters = std::make_unique<VideoCore::Buffer>(
+            instance, 0, size, VideoCore::MemoryType::DeviceLocal, "Stream-out counters");
+        runtime.FillBuffer(strmout_counters.get(), 0, size, 0);
+    }
+    return strmout_counters.get();
+}
+
+void Rasterizer::StreamOutBufferUpdate(const StreamOutUpdate& update) {
+    if (!instance.IsTransformFeedbackSupported()) {
+        return; // nothing is captured, and no counter holds a filled size
+    }
+    const auto* counters = StreamOutCounters();
+    const u64 slot = u64(update.buffer) * sizeof(u32);
+    if (update.store_address && IsMapped(update.store_address, sizeof(u32))) {
+        texture_cache.InvalidateMemoryFromGPU(update.store_address, sizeof(u32));
+        const auto [buffer, offset] =
+            buffer_cache.ObtainBuffer(update.store_address, sizeof(u32), true);
+        const vk::BufferCopy copy = {.srcOffset = slot, .dstOffset = offset, .size = sizeof(u32)};
+        runtime.CopyBuffer(counters, buffer, std::span{&copy, 1});
+    }
+    if (update.set_offset) {
+        runtime.FillBuffer(counters, slot, sizeof(u32), update.offset);
+    } else if (update.load_address && IsMapped(update.load_address, sizeof(u32))) {
+        const auto [buffer, offset] =
+            buffer_cache.ObtainBuffer(update.load_address, sizeof(u32), false);
+        const vk::BufferCopy copy = {.srcOffset = offset, .dstOffset = slot, .size = sizeof(u32)};
+        runtime.CopyBuffer(buffer, counters, std::span{&copy, 1});
     }
 }
 
@@ -1917,13 +1958,14 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
     const vk::Buffer xfb_buffer = strmout.buffer ? strmout.buffer->Handle() : vk::Buffer{};
     const vk::DeviceSize xfb_offset = strmout.offset;
     const vk::DeviceSize xfb_size = strmout.size;
+    const vk::Buffer xfb_counter = xfb_buffer ? StreamOutCounters()->Handle() : vk::Buffer{};
     // One closure with the draw: a chunk boundary or EndRendering cannot fall between the
     // capture's begin and end, which must stay in the render pass instance the draw is in.
     scheduler.RecordCrumb(crumb, [=](vk::CommandBuffer cmdbuf) {
         cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, handle);
         if (xfb_buffer) {
             cmdbuf.bindTransformFeedbackBuffersEXT(0, xfb_buffer, xfb_offset, xfb_size);
-            cmdbuf.beginTransformFeedbackEXT(0, {}, {});
+            cmdbuf.beginTransformFeedbackEXT(0, xfb_counter, vk::DeviceSize{0});
         }
         if (is_indexed) {
             cmdbuf.drawIndexed(num_indices, num_instances, 0, s32(first_vertex), first_instance);
@@ -1931,7 +1973,7 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
             cmdbuf.draw(num_indices, num_instances, first_vertex, first_instance);
         }
         if (xfb_buffer) {
-            cmdbuf.endTransformFeedbackEXT(0, {}, {});
+            cmdbuf.endTransformFeedbackEXT(0, xfb_counter, vk::DeviceSize{0});
         }
     });
     NoteStreamOut(strmout);
@@ -2073,12 +2115,13 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
     const vk::Buffer xfb_buffer = strmout.buffer ? strmout.buffer->Handle() : vk::Buffer{};
     const vk::DeviceSize xfb_offset = strmout.offset;
     const vk::DeviceSize xfb_size = strmout.size;
+    const vk::Buffer xfb_counter = xfb_buffer ? StreamOutCounters()->Handle() : vk::Buffer{};
     // As in DrawRecord: the capture's begin and end in the draw's closure.
     scheduler.RecordCrumb(crumb, [=](vk::CommandBuffer cmdbuf) {
         cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, handle);
         if (xfb_buffer) {
             cmdbuf.bindTransformFeedbackBuffersEXT(0, xfb_buffer, xfb_offset, xfb_size);
-            cmdbuf.beginTransformFeedbackEXT(0, {}, {});
+            cmdbuf.beginTransformFeedbackEXT(0, xfb_counter, vk::DeviceSize{0});
         }
         if (is_indexed) {
             if (counts) {
@@ -2093,7 +2136,7 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
             cmdbuf.drawIndirect(args, args_offset, max_count, stride);
         }
         if (xfb_buffer) {
-            cmdbuf.endTransformFeedbackEXT(0, {}, {});
+            cmdbuf.endTransformFeedbackEXT(0, xfb_counter, vk::DeviceSize{0});
         }
     });
     NoteStreamOut(strmout);

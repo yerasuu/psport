@@ -89,6 +89,17 @@ public:
                                  bool from_guest = false);
 
     void FillBuffer(VAddr address, u32 num_bytes, u32 value, bool is_gds);
+    /// IT_STRMOUT_BUFFER_UPDATE, translated for StreamOutBufferUpdate.
+    struct StreamOutUpdate {
+        VAddr store_address; ///< where the buffer's filled size (bytes) goes, or 0
+        VAddr load_address;  ///< a new write offset (bytes) to load from, or 0
+        u32 buffer;
+        u32 offset; ///< new write offset in bytes, when set_offset
+        bool set_offset;
+    };
+    /// In stream order with the draws (RunInOrder): the filled size is stored before the write
+    /// offset changes.
+    void StreamOutBufferUpdate(const StreamOutUpdate& update);
     void CopyBuffer(VAddr dst, VAddr src, u32 num_bytes, bool dst_gds, bool src_gds);
     /// bbport: whether FillBuffer/CopyBuffer into guest memory at `dst` may write it on the CPU
     /// now (otherwise the GPU writes it, in stream order).
@@ -367,6 +378,10 @@ private:
     bool ObtainStreamOut(const GraphicsPipeline* pipeline, StreamOutBinding& out);
     /// After ObtainStreamOut and BindResources: barriers for the capture's buffer ranges.
     void PrepareStreamOut(const StreamOutBinding& binding);
+    /// Transform feedback counters, a u32 per stream-out buffer: VGT's write offset of that
+    /// buffer in bytes from its V# base (recording thread only; created zeroed on first use).
+    const VideoCore::Buffer* StreamOutCounters();
+    std::unique_ptr<VideoCore::Buffer> strmout_counters;
     /// After the draw is recorded: the capture's writes, for later barriers.
     void NoteStreamOut(const StreamOutBinding& binding);
     /// Everything of an indirect dispatch after the pipeline selection.
