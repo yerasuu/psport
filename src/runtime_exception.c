@@ -101,7 +101,7 @@ int runtime_exception_wait(pthread_cond_t *cond, pthread_mutex_t *lock, const st
 static void deliver(int sig, siginfo_t *info, void *raw) {
     (void)sig; (void)info;
     GuestHandler handler=atomic_load(&handlers[GUEST_SIGUSR1]);
-    if (!handler) return;
+    if (!handler) { deferred=0; return; }
     if (holding_lock()) { deferred=1; return; }
     deferred=0;
     ucontext_t *host=raw;
