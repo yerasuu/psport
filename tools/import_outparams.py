@@ -26,6 +26,8 @@ INPUT_NAME = re.compile(r'^(?:p?(?:buf|buffer|data|src|source|input|in|param|par
                         r'cmd|cmds|list|array|ptr|p|userdata|user_data|udata|context|ctx|desc|'
                         r'option|options|opt|config|cfg|attr|callback|cb|addr_in))$', re.I)
 
+STRING_NAME = re.compile(r'(?:path|name|file|url|uri|host|dir|title|text|message|msg|format|fmt)$', re.I)
+
 
 def strip_comments(text):
     text = re.sub(r'/\*.*?\*/', lambda m: ' ' * len(m.group()), text, flags=re.S)
@@ -97,6 +99,9 @@ def is_output(base, name, depth, body):
         return True
     if depth >= 2:
         return True
+    # A char* named for what it holds (path, name, text) is a string shadPS4 forgot to make const.
+    if base == 'char' and STRING_NAME.search(name):
+        return False
     if SCALAR.match(base):
         # A plural names an array the caller passes in (slotIds), not one value handed back.
         last = words[-1] if words else ''
