@@ -55,10 +55,11 @@ static ABI int32_t flag_create(uint64_t *out,const char *name,uint32_t attr,uint
     host_check(pthread_condattr_destroy(&cattr));
     runtime_exception_lock(&lock);
     f->id=next_id++; f->attr=attr; f->pattern=pattern;
-    f->next=registry; registry=f; *out=f->id; ++created;
-    printf("Runtime: event flag id=%llu '%s', attr=%#x, pattern=%#llx\n",
-           (unsigned long long)f->id,name,attr,(unsigned long long)pattern);
+    uint64_t id=f->id;
+    f->next=registry; registry=f; *out=id; ++created;
     runtime_exception_unlock(&lock);
+    printf("Runtime: event flag id=%llu '%s', attr=%#x, pattern=%#llx\n",
+           (unsigned long long)id,name,attr,(unsigned long long)pattern);
     return 0;
 }
 static int valid_mode(uint32_t mode) {

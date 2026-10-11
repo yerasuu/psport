@@ -56,13 +56,22 @@ uintptr_t runtime_exception_resolve(const char *name);
 void runtime_exception_report(void);
 #ifndef _WIN32
 #include <pthread.h>
+/* The host signal a guest exception raise arrives on. SIGUSR1 stays free for host libraries;
+ * SIGUSR2, SIGALRM and SIGPROF are probe.c's thread dumps, watchdog and the wait sampler. */
+#define RUNTIME_EXCEPTION_SIGNAL (SIGRTMIN+3)
 /* For runtime locks a guest exception handler takes again (kernel semaphores, event flags): a raise
  * that lands on the lock's holder is delivered once it lets go, or the handler would wait on its
  * own thread. */
 void runtime_exception_lock(pthread_mutex_t *lock);
 void runtime_exception_unlock(pthread_mutex_t *lock);
-/* pthread_cond_wait, or pthread_cond_timedwait until end, under such a lock; a raise is delivered
- * while the thread sleeps. Returns 0 early, as a spurious wakeup, to deliver one held back. */
+/* The same around a runtime lock of another kind (runtime_memory's rwlock): hold before taking it,
+ * release after letting it go. */
+void runtime_exception_hold(void);
+void runtime_exception_release(void);
+/* pthread_cond_wait, or a wait until end on CLOCK_MONOTONIC, under such a lock. glibc's condition
+ * wait has no point at which the thread is known not to hold the mutex, so a raise stays held back
+ * while it sleeps; the sleep is cut into slices and returns 0 early, as a spurious wakeup, to deliver
+ * one. */
 int runtime_exception_wait(pthread_cond_t *cond, pthread_mutex_t *lock, const struct timespec *end);
 #endif
 /* The calling thread runs guest code on this stack from now on (the guest main stack): what

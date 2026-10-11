@@ -99,7 +99,7 @@ static GuestThread *new_thread(void) {
     return t;
 }
 static void publish(GuestThread *t) {
-    pthread_mutex_lock(&lock); t->next=threads; threads=t; pthread_mutex_unlock(&lock);
+    runtime_exception_lock(&lock); t->next=threads; threads=t; runtime_exception_unlock(&lock);
 }
 /* Host threads that call into guest code without being created by the guest
  * (the main thread, test threads) get a record on first use. */
@@ -128,27 +128,27 @@ void runtime_thread_set_stack(void *addr, uint64_t size) {
 }
 static GuestThread *find_thread(void *handle) {
     GuestThread *found=NULL;
-    pthread_mutex_lock(&lock);
+    runtime_exception_lock(&lock);
     for (GuestThread *t=threads;t;t=t->next) if (t==handle) { found=t; break; }
-    pthread_mutex_unlock(&lock);
+    runtime_exception_unlock(&lock);
     return found;
 }
 /* Under the table's lock, so the host thread cannot be joined and its pthread_t reused between
  * the lookup and the kill. */
 int32_t runtime_thread_kill(void *handle, int host_signal) {
     int e=ESRCH;
-    pthread_mutex_lock(&lock);
+    runtime_exception_lock(&lock);
     for (GuestThread *t=threads;t;t=t->next)
         if (t==handle) { if (!t->finished && t->host) e=pthread_kill(t->host,host_signal); break; }
-    pthread_mutex_unlock(&lock);
+    runtime_exception_unlock(&lock);
     return e==ESRCH ? ERR(3) : e ? ERR(22) : 0;
 }
 static ThreadAttr *find_attr(ThreadAttr **slot) {
     if (!slot || !*slot) return NULL;
     ThreadAttr *found=NULL;
-    pthread_mutex_lock(&lock);
+    runtime_exception_lock(&lock);
     for (ThreadAttr *a=attributes;a;a=a->next) if (a==*slot && a->magic==ATTR_MAGIC) { found=a; break; }
-    pthread_mutex_unlock(&lock);
+    runtime_exception_unlock(&lock);
     return found;
 }
 
@@ -161,17 +161,17 @@ static ABI int32_t attr_init(ThreadAttr **out) {
     ThreadAttr *a=calloc(1,sizeof(*a));
     if (!a) return ERR(12);
     *a=(ThreadAttr){.magic=ATTR_MAGIC,.policy=1,.prio=DEFAULT_PRIO,.inherit=4,.stack=DEFAULT_STACK,.guard=4096,.affinity=0x7f};
-    pthread_mutex_lock(&lock); a->next=attributes; attributes=a; pthread_mutex_unlock(&lock);
+    runtime_exception_lock(&lock); a->next=attributes; attributes=a; runtime_exception_unlock(&lock);
     *out=a; return 0;
 }
 static ABI int32_t attr_destroy(ThreadAttr **slot) {
     ThreadAttr *a=find_attr(slot);
     if (!a) return ERR(22);
-    pthread_mutex_lock(&lock);
+    runtime_exception_lock(&lock);
     ThreadAttr **link=&attributes;
     while (*link!=a) link=&(*link)->next;
     *link=a->next; a->magic=0;
-    pthread_mutex_unlock(&lock);
+    runtime_exception_unlock(&lock);
     free(a); *slot=NULL; return 0;
 }
 static ABI int32_t attr_get(void *thread,ThreadAttr **out) {
@@ -272,7 +272,7 @@ static void *host_start(void *p) {
     set_host_name(t->name);
     if (!setjmp(t->exit_jump)) t->result=t->entry(t->argument);
     runtime_thread_keys_cleanup();
-    pthread_mutex_lock(&lock); t->finished=1; ++exited; pthread_mutex_unlock(&lock);
+    runtime_exception_lock(&lock); t->finished=1; ++exited; runtime_exception_unlock(&lock);
     return t->result;
 }
 static int32_t create(GuestThread **out,ThreadAttr **attr_slot,GuestEntry entry,void *argument,const char *name) {
@@ -330,7 +330,7 @@ static int32_t create(GuestThread **out,ThreadAttr **attr_slot,GuestEntry entry,
     pthread_sigmask(SIG_SETMASK,&t->start_mask,NULL);
     if (e) { fprintf(stderr,"STOP: host pthread_create failed: %d\n",e); exit(21); }
     if (t->detached) pthread_detach(t->host);
-    pthread_mutex_lock(&lock); ++created; pthread_mutex_unlock(&lock);
+    runtime_exception_lock(&lock); ++created; runtime_exception_unlock(&lock);
     printf("Runtime: guest thread '%s' created (stack=%llu, prio=%d)\n",t->name,(unsigned long long)stack,t->attr.prio);
     return 0;
 }
@@ -346,7 +346,7 @@ static ABI int32_t thread_join(GuestThread *t,void **result) {
     int e=pthread_join(t->host,&value);
     if (e) { fprintf(stderr,"STOP: host pthread_join failed: %d\n",e); exit(21); }
     if (result) *result=t->result;
-    pthread_mutex_lock(&lock); ++joined_count; pthread_mutex_unlock(&lock);
+    runtime_exception_lock(&lock); ++joined_count; runtime_exception_unlock(&lock);
     return 0;
 }
 static ABI int32_t thread_detach(GuestThread *t) {
@@ -443,9 +443,9 @@ uintptr_t runtime_thread_resolve(const char *name) {
     return 0;
 }
 void runtime_thread_report(void) {
-    pthread_mutex_lock(&lock);
+    runtime_exception_lock(&lock);
     printf("Runtime: guest threads created=%zu, exited=%zu, joined=%zu\n",created,exited,joined_count);
-    pthread_mutex_unlock(&lock);
+    runtime_exception_unlock(&lock);
 }
 #else
 uintptr_t runtime_thread_resolve(const char *name) { (void)name; return 0; }

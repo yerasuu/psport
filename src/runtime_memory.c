@@ -65,13 +65,15 @@ static __thread unsigned exclusive_depth;
 /* Odd while a writer holds the lock; readers' region caches are valid for one even value. */
 static uint64_t table_generation;
 static void write_lock(void) {
+    runtime_exception_hold();
     if (!exclusive_depth++) { pthread_rwlock_wrlock(&lock); __atomic_add_fetch(&table_generation,1,__ATOMIC_ACQ_REL); }
 }
 static void write_unlock(void) {
     if (!--exclusive_depth) { __atomic_add_fetch(&table_generation,1,__ATOMIC_RELEASE); pthread_rwlock_unlock(&lock); }
+    runtime_exception_release();
 }
-static void read_lock(void) { if (!exclusive_depth) pthread_rwlock_rdlock(&lock); }
-static void read_unlock(void) { if (!exclusive_depth) pthread_rwlock_unlock(&lock); }
+static void read_lock(void) { runtime_exception_hold(); if (!exclusive_depth) pthread_rwlock_rdlock(&lock); }
+static void read_unlock(void) { if (!exclusive_depth) pthread_rwlock_unlock(&lock); runtime_exception_release(); }
 static Block blocks[LIMIT];
 static Vma *vmas; static size_t vma_count, vma_capacity;
 static int pool_fd=-1;

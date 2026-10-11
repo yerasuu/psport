@@ -182,10 +182,7 @@ static void fault(int sig, siginfo_t *info, void *context) {
     if ((sig == SIGSEGV || sig == SIGBUS) && runtime_fault_recover) {
         sigjmp_buf *recover = runtime_fault_recover;
         runtime_fault_recover = NULL;
-        sigset_t unblock;
-        sigemptyset(&unblock);
-        sigaddset(&unblock, sig);
-        pthread_sigmask(SIG_UNBLOCK, &unblock, NULL);
+        pthread_sigmask(SIG_SETMASK, &((ucontext_t *)context)->uc_sigmask, NULL);
         siglongjmp(*recover, 1);
     }
     /* The process is terminating: dladdr/snprintf are acceptable here. */
@@ -457,7 +454,7 @@ int main(int argc, char **argv) {
 #else
     page_size = (size_t)sysconf(_SC_PAGESIZE);
     struct sigaction sa = {0}; sa.sa_sigaction = fault; sa.sa_flags = SA_SIGINFO;
-    sigemptyset(&sa.sa_mask);
+    sigemptyset(&sa.sa_mask); sigaddset(&sa.sa_mask, RUNTIME_EXCEPTION_SIGNAL);
     sigaction(SIGSEGV, &sa, NULL); sigaction(SIGILL, &sa, NULL); sigaction(SIGBUS, &sa, NULL);
     Dl_info self_info;
     if (dladdr((void *)main,&self_info)) exe_base=(uintptr_t)self_info.dli_fbase;

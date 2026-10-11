@@ -19,9 +19,10 @@
 #define ERR(n) ((int32_t)(UINT32_C(0x80020000)|(n)))
 #define GUEST_SIGNALS 128
 #define GUEST_SIGUSR1 30
-/* SIGUSR1 stays free for host libraries; SIGUSR2, SIGALRM and SIGPROF are probe.c's thread dumps,
- * watchdog and the wait sampler. */
-#define HOST_SIGNAL (SIGRTMIN+3)
+/* How long a thread in runtime_exception_wait sleeps before it looks for a raise held back, with a
+ * handler installed and without one (only a handler installed during the sleep can need it). */
+#define RAISE_SLICE_NS 2000000
+#define IDLE_SLICE_NS 100000000
 
 typedef void (ABI *GuestHandler)(int, void *);
 /* FreeBSD amd64 mcontext_t and ucontext_t as the PS4 kernel passes them (shadPS4's exception.h). */
@@ -51,58 +52,49 @@ _Static_assert(sizeof(GuestUcontext)==0x500,"PS4 ucontext_t size");
 _Static_assert(offsetof(GuestUcontext,mcontext.rsp)==0xf8,"ucontext rsp offset");
 
 static _Atomic(GuestHandler) handlers[GUEST_SIGNALS];
-/* Locks of runtime_exception_lock this thread holds or is taking, the one it sleeps on in
- * runtime_exception_wait, and a raise held back until it lets go. */
+/* Runtime locks this thread holds, is taking or sleeps on in runtime_exception_wait, and a raise
+ * held back until it lets go. */
 static _Thread_local unsigned held;
-static _Thread_local pthread_mutex_t *sleeping_on;
 static _Thread_local volatile sig_atomic_t deferred;
 static _Atomic unsigned raised, delivered;
 
 /* The signals libkernel lets a game handle (shadPS4's orbis_allowed_signals). */
 static int allowed(int sig) { return sig==1 || sig==4 || sig==8 || sig==10 || sig==11 || sig==GUEST_SIGUSR1; }
 
-static int holding_lock(void) {
-    if (held) return 1;
-    /* Woken in pthread_cond_wait, the thread holds the mutex again before `held` counts it; glibc
-     * records the owner's tid as it takes the mutex. */
-    pthread_mutex_t *m=sleeping_on;
-    return m && m->__data.__owner==(int)syscall(SYS_gettid);
-}
-void runtime_exception_lock(pthread_mutex_t *lock) {
+void runtime_exception_hold(void) {
     ++held;
     atomic_signal_fence(memory_order_seq_cst);
+}
+void runtime_exception_release(void) {
+    atomic_signal_fence(memory_order_seq_cst);
+    --held;
+    atomic_signal_fence(memory_order_seq_cst);
+    if (!held && deferred) pthread_kill(pthread_self(),RUNTIME_EXCEPTION_SIGNAL);
+}
+void runtime_exception_lock(pthread_mutex_t *lock) {
+    runtime_exception_hold();
     pthread_mutex_lock(lock);
 }
 void runtime_exception_unlock(pthread_mutex_t *lock) {
     pthread_mutex_unlock(lock);
-    atomic_signal_fence(memory_order_seq_cst);
-    --held;
-    atomic_signal_fence(memory_order_seq_cst);
-    if (!held && deferred) pthread_kill(pthread_self(),HOST_SIGNAL);
+    runtime_exception_release();
 }
 int runtime_exception_wait(pthread_cond_t *cond, pthread_mutex_t *lock, const struct timespec *end) {
-    /* Otherwise a raise held back since the lock was taken would wait for as long as the thread
-     * sleeps, and the collector with it. */
     if (deferred && held==1) { runtime_exception_unlock(lock); runtime_exception_lock(lock); return 0; }
-    /* Saved: a handler run while this thread sleeps can sleep on another lock in turn. */
-    pthread_mutex_t *outer=sleeping_on;
-    sleeping_on=lock;
-    atomic_signal_fence(memory_order_seq_cst);
-    --held;
-    atomic_signal_fence(memory_order_seq_cst);
-    int e=end ? pthread_cond_timedwait(cond,lock,end) : pthread_cond_wait(cond,lock);
-    atomic_signal_fence(memory_order_seq_cst);
-    ++held;
-    atomic_signal_fence(memory_order_seq_cst);
-    sleeping_on=outer;
-    return e;
+    struct timespec slice;
+    clock_gettime(CLOCK_MONOTONIC,&slice);
+    slice.tv_nsec+=atomic_load(&handlers[GUEST_SIGUSR1]) ? RAISE_SLICE_NS : IDLE_SLICE_NS;
+    slice.tv_sec+=slice.tv_nsec/1000000000; slice.tv_nsec%=1000000000;
+    int last=end && (end->tv_sec<slice.tv_sec || (end->tv_sec==slice.tv_sec && end->tv_nsec<=slice.tv_nsec));
+    int e=pthread_cond_clockwait(cond,lock,CLOCK_MONOTONIC,last ? end : &slice);
+    return e==ETIMEDOUT && !last ? 0 : e;
 }
 
 static void deliver(int sig, siginfo_t *info, void *raw) {
     (void)sig; (void)info;
     GuestHandler handler=atomic_load(&handlers[GUEST_SIGUSR1]);
-    if (!handler) return;
-    if (holding_lock()) { deferred=1; return; }
+    if (!handler) { deferred=0; return; }
+    if (held) { deferred=1; return; }
     deferred=0;
     ucontext_t *host=raw;
     greg_t *r=host->uc_mcontext.gregs;
@@ -158,7 +150,7 @@ static ABI int32_t install_handler(int sig, GuestHandler handler) {
         action.sa_sigaction=deliver;
         action.sa_flags=SA_SIGINFO|SA_RESTART;
         sigemptyset(&action.sa_mask);
-        if (sigaction(HOST_SIGNAL,&action,NULL)) { atomic_store(&handlers[sig],NULL); return ERR(runtime_guest_errno(errno)); }
+        if (sigaction(RUNTIME_EXCEPTION_SIGNAL,&action,NULL)) { atomic_store(&handlers[sig],NULL); return ERR(runtime_guest_errno(errno)); }
     }
     printf("Runtime: guest exception handler for signal %d installed at %p%s\n",sig,(void *)handler,
            sig==GUEST_SIGUSR1 ? "" : " (host faults are not forwarded to it)");
@@ -171,9 +163,13 @@ static ABI int32_t remove_handler(int sig) {
 }
 static ABI int32_t raise_exception(void *thread, int sig) {
     if (sig!=GUEST_SIGUSR1) return ERR(22);
-    int32_t result=runtime_thread_kill(thread,HOST_SIGNAL);
-    if (!result && !atomic_fetch_add(&raised,1))
-        printf("Runtime: first guest exception raised (signal %d) to thread %p\n",sig,thread);
+    int32_t result=runtime_thread_kill(thread,RUNTIME_EXCEPTION_SIGNAL);
+    if (!result && !atomic_fetch_add(&raised,1)) {
+        /* write, not stdio: the thread may stop in the handler while it holds stdout's lock. */
+        char line[96];
+        int n=snprintf(line,sizeof(line),"Runtime: first guest exception raised (signal %d) to thread %p\n",sig,thread);
+        ssize_t written=write(2,line,(size_t)n); (void)written;
+    }
     return result;
 }
 
