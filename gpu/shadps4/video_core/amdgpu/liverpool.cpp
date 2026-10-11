@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <array>
 #include <optional>
+#include <unordered_set>
 #include <utility>
 #include <time.h>
 #include "bbport_threads.h"
@@ -2213,13 +2214,32 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                 break;
             }
             case PM4ItOpcode::StrmoutBufferUpdate: {
+                // bbport: still unimplemented. Each distinct control word is described once and
+                // the packets counted, every 5000 reported, so that the warning no longer repeats
+                // per packet.
                 const auto* strmout = reinterpret_cast<const PM4CmdStrmoutBufferUpdate*>(header);
-                LOG_WARNING(Render_Vulkan,
-                            "Unimplemented IT_STRMOUT_BUFFER_UPDATE, update_memory = {}, "
-                            "source_select = {}, buffer_select = {}",
-                            strmout->update_memory.Value(),
-                            magic_enum::enum_name(strmout->source_select.Value()),
-                            strmout->buffer_select.Value());
+                static std::mutex strmout_lock;
+                static std::unordered_set<u32> strmout_described;
+                static u64 strmout_packets;
+                std::scoped_lock guard{strmout_lock};
+                if (strmout_described.insert(strmout->control).second) {
+                    const u64 dst = u64(strmout->dst_address_lo.Value()) << 2 |
+                                    u64(strmout->dst_address_hi & 0xFFFF) << 32;
+                    const u64 src = u64(strmout->src_address_lo.Value()) << 2 |
+                                    u64(strmout->src_address_hi & 0xFFFF) << 32;
+                    LOG_WARNING(Render_Vulkan,
+                                "Unimplemented IT_STRMOUT_BUFFER_UPDATE control {:#x}: buffer {}, "
+                                "update_memory {} (dst {:#x}), source_select {} (buffer_offset "
+                                "{:#x}, src {:#x}), data_type {}",
+                                strmout->control, strmout->buffer_select.Value(),
+                                strmout->update_memory.Value(), dst,
+                                magic_enum::enum_name(strmout->source_select.Value()),
+                                strmout->buffer_offset, src, strmout->data_type.Value());
+                }
+                if (++strmout_packets % 5000 == 0) {
+                    LOG_WARNING(Render_Vulkan, "IT_STRMOUT_BUFFER_UPDATE packets so far: {}",
+                                strmout_packets);
+                }
                 break;
             }
             case PM4ItOpcode::GetLodStats: {

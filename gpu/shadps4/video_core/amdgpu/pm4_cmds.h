@@ -258,6 +258,7 @@ struct PM4CmdStrmoutBufferUpdate {
     union {
         BitField<0, 1, u32> update_memory;
         BitField<1, 2, SourceSelect> source_select;
+        BitField<7, 1, u32> data_type;
         BitField<8, 2, u32> buffer_select;
         u32 control;
     };
