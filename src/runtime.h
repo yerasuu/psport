@@ -64,8 +64,10 @@ void runtime_exception_report(void);
  * own thread. */
 void runtime_exception_lock(pthread_mutex_t *lock);
 void runtime_exception_unlock(pthread_mutex_t *lock);
-/* pthread_cond_wait, or pthread_cond_timedwait until end, under such a lock; a raise is delivered
- * while the thread sleeps. Returns 0 early, as a spurious wakeup, to deliver one held back. */
+/* pthread_cond_wait, or a wait until end on CLOCK_MONOTONIC, under such a lock. glibc's condition
+ * wait has no point at which the thread is known not to hold the mutex, so a raise stays held back
+ * while it sleeps; the sleep is cut into slices and returns 0 early, as a spurious wakeup, to deliver
+ * one. */
 int runtime_exception_wait(pthread_cond_t *cond, pthread_mutex_t *lock, const struct timespec *end);
 #endif
 /* The calling thread runs guest code on this stack from now on (the guest main stack): what

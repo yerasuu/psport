@@ -19,6 +19,10 @@
 #define ERR(n) ((int32_t)(UINT32_C(0x80020000)|(n)))
 #define GUEST_SIGNALS 128
 #define GUEST_SIGUSR1 30
+/* How long a thread in runtime_exception_wait sleeps before it looks for a raise held back, with a
+ * handler installed and without one (only a handler installed during the sleep can need it). */
+#define RAISE_SLICE_NS 2000000
+#define IDLE_SLICE_NS 100000000
 
 typedef void (ABI *GuestHandler)(int, void *);
 /* FreeBSD amd64 mcontext_t and ucontext_t as the PS4 kernel passes them (shadPS4's exception.h). */
@@ -48,23 +52,15 @@ _Static_assert(sizeof(GuestUcontext)==0x500,"PS4 ucontext_t size");
 _Static_assert(offsetof(GuestUcontext,mcontext.rsp)==0xf8,"ucontext rsp offset");
 
 static _Atomic(GuestHandler) handlers[GUEST_SIGNALS];
-/* Locks of runtime_exception_lock this thread holds or is taking, the one it sleeps on in
+/* Locks of runtime_exception_lock this thread holds, is taking or sleeps on in
  * runtime_exception_wait, and a raise held back until it lets go. */
 static _Thread_local unsigned held;
-static _Thread_local pthread_mutex_t *sleeping_on;
 static _Thread_local volatile sig_atomic_t deferred;
 static _Atomic unsigned raised, delivered;
 
 /* The signals libkernel lets a game handle (shadPS4's orbis_allowed_signals). */
 static int allowed(int sig) { return sig==1 || sig==4 || sig==8 || sig==10 || sig==11 || sig==GUEST_SIGUSR1; }
 
-static int holding_lock(void) {
-    if (held) return 1;
-    /* Woken in pthread_cond_wait, the thread holds the mutex again before `held` counts it; glibc
-     * records the owner's tid as it takes the mutex. */
-    pthread_mutex_t *m=sleeping_on;
-    return m && m->__data.__owner==(int)syscall(SYS_gettid);
-}
 void runtime_exception_lock(pthread_mutex_t *lock) {
     ++held;
     atomic_signal_fence(memory_order_seq_cst);
@@ -78,28 +74,21 @@ void runtime_exception_unlock(pthread_mutex_t *lock) {
     if (!held && deferred) pthread_kill(pthread_self(),RUNTIME_EXCEPTION_SIGNAL);
 }
 int runtime_exception_wait(pthread_cond_t *cond, pthread_mutex_t *lock, const struct timespec *end) {
-    /* Otherwise a raise held back since the lock was taken would wait for as long as the thread
-     * sleeps, and the collector with it. */
     if (deferred && held==1) { runtime_exception_unlock(lock); runtime_exception_lock(lock); return 0; }
-    /* Saved: a handler run while this thread sleeps can sleep on another lock in turn. */
-    pthread_mutex_t *outer=sleeping_on;
-    sleeping_on=lock;
-    atomic_signal_fence(memory_order_seq_cst);
-    --held;
-    atomic_signal_fence(memory_order_seq_cst);
-    int e=end ? pthread_cond_timedwait(cond,lock,end) : pthread_cond_wait(cond,lock);
-    atomic_signal_fence(memory_order_seq_cst);
-    ++held;
-    atomic_signal_fence(memory_order_seq_cst);
-    sleeping_on=outer;
-    return e;
+    struct timespec slice;
+    clock_gettime(CLOCK_MONOTONIC,&slice);
+    slice.tv_nsec+=atomic_load(&handlers[GUEST_SIGUSR1]) ? RAISE_SLICE_NS : IDLE_SLICE_NS;
+    slice.tv_sec+=slice.tv_nsec/1000000000; slice.tv_nsec%=1000000000;
+    int last=end && (end->tv_sec<slice.tv_sec || (end->tv_sec==slice.tv_sec && end->tv_nsec<=slice.tv_nsec));
+    int e=pthread_cond_clockwait(cond,lock,CLOCK_MONOTONIC,last ? end : &slice);
+    return e==ETIMEDOUT && !last ? 0 : e;
 }
 
 static void deliver(int sig, siginfo_t *info, void *raw) {
     (void)sig; (void)info;
     GuestHandler handler=atomic_load(&handlers[GUEST_SIGUSR1]);
     if (!handler) { deferred=0; return; }
-    if (holding_lock()) { deferred=1; return; }
+    if (held) { deferred=1; return; }
     deferred=0;
     ucontext_t *host=raw;
     greg_t *r=host->uc_mcontext.gregs;
