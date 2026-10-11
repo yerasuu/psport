@@ -1642,7 +1642,10 @@ AmdGpu::Buffer Rasterizer::ReadStreamOutSharp(const Shader::Info& gs,
 
 u64 Rasterizer::StreamOutSize(const AmdGpu::Buffer& sharp, const AmdGpu::Regs& regs) const {
     const VAddr base = sharp.base_address;
-    const u64 size = std::min<u64>(sharp.GetSize(), u64(regs.vgt_strmout_buffers[0].size) * 4);
+    // Not GetSize(): its u32 product wraps for the huge num_records stream-out V#s may carry.
+    const u64 sharp_size =
+        sharp.stride == 0 ? sharp.num_records : sharp.stride * u64(sharp.num_records);
+    const u64 size = std::min<u64>(sharp_size, u64(regs.vgt_strmout_buffers[0].size) * 4);
     if (base == 0 || size == 0 || !memory->IsValidGpuMapping(base, size)) {
         return 0;
     }
