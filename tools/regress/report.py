@@ -28,14 +28,18 @@ OTHER_FAULT = re.compile(r'^Fault \(signal (\d+)\) at RIP')
 # glibc's assert() as well as the GPU library's: the runtime uses both.
 STOP = re.compile(r'^(STOP: .*|.*Assertion Failed!.*|.*: Assertion .* failed\.|terminate called .*)')
 AUDIO_FLOOR_DBFS = -60.0
-# Mean Rec. 709 luma (0-255) above which a frame counts as drawn: a black clear with a cursor or a
-# few dim pixels stays below it, a logo on black does not.
-BLACK_LUMA = 4.0
+# A frame counts as drawn when this share of its pixels is lit (a channel above LIT_LEVEL): a black
+# clear with a cursor stays far below it. Mean luma can't tell: Bloodborne's logo on black and its
+# dark brightness screen measure 4.6 to 7 against 0 for black, its lit share is 3.5 to 4 %.
+DRAWN_LIT_SHARE = 0.005
+LIT_LEVEL = 24
+LIT = bytes(v > LIT_LEVEL for v in range(256))
 DUMP_NAME = re.compile(r'_(\d+)x(\d+)_(bgra|rgba)\.raw$')
 
 
-def mean_luma(path):
-    """Mean luma of an 8-bit present dump, or None for a format this does not read."""
+def measure(path):
+    """Mean Rec. 709 luma (0-255) and lit share of an 8-bit present dump, or None for a format this
+    does not read."""
     m = DUMP_NAME.search(path.name)
     if not m:
         return None
@@ -45,7 +49,9 @@ def mean_luma(path):
         return None
     r, b = (2, 0) if order == 'bgra' else (0, 2)
     pixels = w * h
-    return (0.2126 * sum(data[r::4]) + 0.7152 * sum(data[1::4]) + 0.0722 * sum(data[b::4])) / pixels
+    luma = (0.2126 * sum(data[r::4]) + 0.7152 * sum(data[1::4]) + 0.0722 * sum(data[b::4])) / pixels
+    lit = sum(sum(data[c:pixels * 4:4].translate(LIT)) for c in (0, 1, 2)) / (3 * pixels)
+    return luma, lit
 
 
 def crash_signature(line):
@@ -65,7 +71,7 @@ def classify(run_dir):
     result = {'name': meta.get('name', run_dir.name), 'title': meta.get('title', ''),
               'status': f"skipped ({meta['skipped']})" if 'skipped' in meta else meta.get('ended', 'unknown'),
               'seconds': int(meta.get('seconds', 0)), 'crash': '', 'no_impl': None, 'peak_dbfs': None,
-              'frames_drawn': 0, 'frames_dumped': 0, 'max_luma': None}
+              'frames_drawn': 0, 'frames_dumped': 0, 'max_luma': None, 'max_lit_pct': None}
     result.update({m: False for m in MILESTONES})
     log = run_dir / 'log'
     if 'skipped' in meta or not log.exists():
@@ -91,12 +97,14 @@ def classify(run_dir):
     if not result['crash'] and result['status'] == 'exited':
         result['crash'] = 'exited without a fault line'
     for dump in sorted((run_dir / 'shots').glob('*_present_*.raw')):
-        luma = mean_luma(dump)
-        if luma is None:
+        measured = measure(dump)
+        if measured is None:
             continue
+        luma, lit = measured
         result['frames_dumped'] += 1
         result['max_luma'] = round(max(luma, result['max_luma'] or 0), 1)
-        result['frames_drawn'] += luma > BLACK_LUMA
+        result['max_lit_pct'] = round(max(100 * lit, result['max_lit_pct'] or 0), 2)
+        result['frames_drawn'] += lit >= DRAWN_LIT_SHARE
     result['frames'] = result['frames_drawn'] > 0
     result['audio'] = result['peak_dbfs'] is not None and result['peak_dbfs'] > AUDIO_FLOOR_DBFS
     return result
@@ -125,7 +133,7 @@ def main(argv):
                 r['regressions'] = regressions(r, before)
                 r['no_impl_before'] = before.get('no_impl')
 
-    columns = ['name', 'title', 'status', 'seconds', *MILESTONES, 'frames_drawn', 'frames_dumped', 'max_luma',
+    columns = ['name', 'title', 'status', 'seconds', *MILESTONES, 'frames_drawn', 'frames_dumped', 'max_luma', 'max_lit_pct',
                'peak_dbfs', 'no_impl', 'crash'] + (['regressions'] if previous else [])
     def cell(r, c):
         v = r.get(c)
@@ -143,7 +151,7 @@ def main(argv):
     def reached(r):
         got = [m for m in MILESTONES[:5] if r[m]]
         return got[-1] if got else '-'
-    head = ['title', 'id', 'status', 's', 'reached', 'ld', 'en', 'in', 'gp', 'fr', 'au', 'luma', 'peak',
+    head = ['title', 'id', 'status', 's', 'reached', 'ld', 'en', 'in', 'gp', 'fr', 'au', 'luma', 'lit%', 'peak',
             'no impl', 'crash']
     rows = []
     for r in results:
@@ -152,7 +160,7 @@ def main(argv):
         if r.get('no_impl_before') is not None and r['no_impl'] is not None and r['no_impl'] != r['no_impl_before']:
             no_impl += f" ({r['no_impl'] - r['no_impl_before']:+d})"
         rows.append([r['name'], r['title'], r['status'], str(r['seconds']), reached(r), *map(mark, MILESTONES),
-                     cell(r, 'max_luma'), cell(r, 'peak_dbfs'), no_impl, r['crash']])
+                     cell(r, 'max_luma'), cell(r, 'max_lit_pct'), cell(r, 'peak_dbfs'), no_impl, r['crash']])
     widths = [max(len(x) for x in col) for col in zip(head, *rows)]
     for row in [head, *rows]:
         print('  '.join(x.ljust(w) for x, w in zip(row, widths)).rstrip())

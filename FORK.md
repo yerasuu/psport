@@ -69,7 +69,7 @@ Milestones, from the log and the dumps:
 | entered | `Entering original x86-64 code` |
 | initialized | the first `Runtime: guest thread '...' created` |
 | gpu | `Presenter: first game frame presented` |
-| frames | a present dump whose mean luma (Rec. 709, 0-255) is above 4 |
+| frames | a present dump with at least 0.5 % of its pixels lit (a channel above 24 of 255) |
 | audio | a `BB_AUDIO_STATS` peak above -60 dBFS |
 
 It also records the first fault or stop logged before the title is told to end (`Guest fault`
