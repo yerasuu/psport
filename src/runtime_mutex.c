@@ -112,8 +112,8 @@ static ABI int32_t mutex_destroy(GuestMutex **mutex) {
     if (!e) { free(*mutex); *mutex = (GuestMutex *)(uintptr_t)2; }
     return orbis_error(e);
 }
-static int deadline_after(struct timespec *end, uint64_t usec) {
-    if (clock_gettime(CLOCK_REALTIME, end)) return errno;
+static int deadline_after(clockid_t clock, struct timespec *end, uint64_t usec) {
+    if (clock_gettime(clock, end)) return errno;
     uint64_t ns = (uint64_t)end->tv_nsec + (usec % 1000000) * 1000;
     end->tv_sec += (time_t)(usec / 1000000 + ns / 1000000000);
     end->tv_nsec = (long)(ns % 1000000000);
@@ -124,21 +124,56 @@ static ABI int32_t mutex_timedlock(GuestMutex **mutex, uint32_t usec) {
     int32_t e = ensure_mutex(mutex);
     if (e) return e;
     struct timespec end;
-    if (deadline_after(&end, usec)) return orbis_error(EINVAL);
+    if (deadline_after(CLOCK_REALTIME, &end, usec)) return orbis_error(EINVAL);
     e = timed_error(pthread_mutex_timedlock(&(*mutex)->native, &end));
     if (!e) ++locks;
     return e;
 }
-/* Condition variables: opaque handles over host pthread_cond (CLOCK_REALTIME,
- * like FreeBSD's default), sharing the host mutex behind GuestMutex. */
-typedef struct { pthread_cond_t native; } GuestCond;
+/* Condition attributes: the clock timed waits measure deadlines on (FreeBSD ids: 0 realtime,
+ * 1 virtual, 2 prof, 4 monotonic) and process sharing, of which only private exists. */
+typedef struct { int32_t clock; } GuestCondAttr;
+static ABI int32_t condattr_init(GuestCondAttr **out) {
+    if (!out) return orbis_error(EINVAL);
+    GuestCondAttr *attr = malloc(sizeof(*attr));
+    if (!attr) return orbis_error(ENOMEM);
+    attr->clock = 0; *out = attr; return 0;
+}
+static ABI int32_t condattr_destroy(GuestCondAttr **attr) {
+    if (!attr || !*attr) return orbis_error(EINVAL);
+    free(*attr); *attr = NULL; return 0;
+}
+static ABI int32_t condattr_getclock(GuestCondAttr **attr, int32_t *clock) {
+    if (!attr || !*attr || !clock) return orbis_error(EINVAL);
+    *clock = (*attr)->clock; return 0;
+}
+static ABI int32_t condattr_setclock(GuestCondAttr **attr, int32_t clock) {
+    if (!attr || !*attr || (clock != 0 && clock != 1 && clock != 2 && clock != 4)) return orbis_error(EINVAL);
+    (*attr)->clock = clock; return 0;
+}
+static ABI int32_t condattr_getpshared(GuestCondAttr **attr, int32_t *shared) {
+    if (!attr || !*attr || !shared) return orbis_error(EINVAL);
+    *shared = 0; return 0;
+}
+static ABI int32_t condattr_setpshared(GuestCondAttr **attr, int32_t shared) {
+    if (!attr || !*attr || shared) return orbis_error(EINVAL);
+    return 0;
+}
+/* Condition variables: opaque handles over host pthread_cond (CLOCK_REALTIME, like FreeBSD's
+ * default, unless the attributes ask for the monotonic clock), sharing the host mutex behind
+ * GuestMutex. */
+typedef struct { pthread_cond_t native; clockid_t clock; } GuestCond;
 static size_t conds, waits, wakeups;
-static ABI int32_t cond_init(GuestCond **out, void **attr, const char *name) {
-    (void)attr; (void)name;
+static ABI int32_t cond_init(GuestCond **out, GuestCondAttr **attr, const char *name) {
+    (void)name;
     if (!out) return orbis_error(EINVAL);
     GuestCond *c = malloc(sizeof(*c));
     if (!c) return orbis_error(ENOMEM);
-    int e = pthread_cond_init(&c->native, NULL);
+    c->clock = attr && *attr && (*attr)->clock == 4 ? CLOCK_MONOTONIC : CLOCK_REALTIME;
+    pthread_condattr_t native_attr;
+    int e = pthread_condattr_init(&native_attr);
+    if (!e) e = pthread_condattr_setclock(&native_attr, c->clock);
+    if (!e) e = pthread_cond_init(&c->native, &native_attr);
+    pthread_condattr_destroy(&native_attr);
     if (e) { free(c); return orbis_error(e); }
     *out = c; ++conds; return 0;
 }
@@ -183,8 +218,10 @@ static int32_t cond_wait_until(GuestCond **cond, GuestMutex **mutex, const struc
     return timed_error(e2);
 }
 static ABI int32_t cond_timedwait(GuestCond **cond, GuestMutex **mutex, uint32_t usec) {
+    int32_t e = ensure_cond(cond);
+    if (e) return e;
     struct timespec end;
-    if (deadline_after(&end, usec)) return orbis_error(EINVAL);
+    if (deadline_after((*cond)->clock, &end, usec)) return orbis_error(EINVAL);
     return cond_wait_until(cond, mutex, &end);
 }
 static ABI int32_t cond_signal(GuestCond **cond) {
@@ -214,12 +251,26 @@ static ABI int32_t posix_mutex_destroy(GuestMutex **m) { return posix_result(mut
 static ABI int32_t posix_mutex_lock(GuestMutex **m) { return posix_result(mutex_lock(m)); }
 static ABI int32_t posix_mutex_trylock(GuestMutex **m) { return posix_result(mutex_trylock(m)); }
 static ABI int32_t posix_mutex_unlock(GuestMutex **m) { return posix_result(mutex_unlock(m)); }
-static ABI int32_t posix_cond_init(GuestCond **c, void **a) { return posix_result(cond_init(c, a, NULL)); }
+static ABI int32_t posix_cond_init(GuestCond **c, GuestCondAttr **a) { return posix_result(cond_init(c, a, NULL)); }
 static ABI int32_t posix_cond_destroy(GuestCond **c) { return posix_result(cond_destroy(c)); }
 static ABI int32_t posix_cond_wait(GuestCond **c, GuestMutex **m) { return posix_result(cond_wait(c, m)); }
 static ABI int32_t posix_cond_timedwait(GuestCond **c, GuestMutex **m, const GuestTimespec *t) { return posix_result(cond_abs_timedwait(c, m, t)); }
 static ABI int32_t posix_cond_signal(GuestCond **c) { return posix_result(cond_signal(c)); }
 static ABI int32_t posix_cond_broadcast(GuestCond **c) { return posix_result(cond_broadcast(c)); }
+static ABI int32_t posix_condattr_init(GuestCondAttr **a) { return posix_result(condattr_init(a)); }
+static ABI int32_t posix_condattr_destroy(GuestCondAttr **a) { return posix_result(condattr_destroy(a)); }
+static ABI int32_t posix_condattr_getclock(GuestCondAttr **a, int32_t *c) { return posix_result(condattr_getclock(a, c)); }
+static ABI int32_t posix_condattr_setclock(GuestCondAttr **a, int32_t c) { return posix_result(condattr_setclock(a, c)); }
+static ABI int32_t posix_condattr_getpshared(GuestCondAttr **a, int32_t *p) { return posix_result(condattr_getpshared(a, p)); }
+static ABI int32_t posix_condattr_setpshared(GuestCondAttr **a, int32_t p) { return posix_result(condattr_setpshared(a, p)); }
+static const RuntimeExport exports[] = {
+    {"scePthreadCondattrInit", condattr_init}, {"scePthreadCondattrDestroy", condattr_destroy},
+    {"scePthreadCondattrGetclock", condattr_getclock}, {"scePthreadCondattrSetclock", condattr_setclock},
+    {"scePthreadCondattrGetpshared", condattr_getpshared}, {"scePthreadCondattrSetpshared", condattr_setpshared},
+    {"pthread_condattr_init", posix_condattr_init}, {"pthread_condattr_destroy", posix_condattr_destroy},
+    {"pthread_condattr_getclock", posix_condattr_getclock}, {"pthread_condattr_setclock", posix_condattr_setclock},
+    {"pthread_condattr_getpshared", posix_condattr_getpshared}, {"pthread_condattr_setpshared", posix_condattr_setpshared},
+};
 uintptr_t runtime_mutex_resolve(const char *name) {
     if (!strcmp(name,"0TyVk4MSLt0#I#J")) return (uintptr_t)posix_cond_init;
     if (!strcmp(name,"RXXqi4CtF8w#I#J")) return (uintptr_t)posix_cond_destroy;
@@ -251,7 +302,7 @@ uintptr_t runtime_mutex_resolve(const char *name) {
     if (!strcmp(name, "upoVrzMHFeE#p#J")) return (uintptr_t)mutex_trylock;
     if (!strcmp(name, "tn3VlD0hG60#p#J")) return (uintptr_t)mutex_unlock;
     if (!strcmp(name, "2Of0f+3mhhE#p#J")) return (uintptr_t)mutex_destroy;
-    return 0;
+    return RUNTIME_LOOKUP(exports, name);
 }
 void runtime_mutex_report(void) {
     printf("Runtime: mutexes created=%zu, locks=%zu, unlocks=%zu\n", created, locks, unlocks);
