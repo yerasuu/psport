@@ -408,6 +408,8 @@ int main(int argc,char **argv) {
     assert(runtime_import_outputs("B+vc2AO2Zrc#q#q")==0x08 && runtime_import_outputs("+7B2AEKKns8")==0x02
            && runtime_import_outputs("zvyKP0Z3UvU")==0x01);
     assert(runtime_import_outputs("bzQExy189ZI#q#q")==0 && runtime_import_outputs("unknown")==0);
+    /* sceKernelFstat's stat buffer is written by the fstat it hands it to, not in its own body. */
+    assert(runtime_import_outputs("kBwCPsYX-m4#p#n")==0x02);
     if (argc>1 && !strcmp(argv[1],"--guard-recursion")) {
         uint64_t guard=0; Acquire acquire=GET(Acquire,"3GPpjQdAMTw#q#q");
         acquire(&guard); acquire(&guard); return 99;

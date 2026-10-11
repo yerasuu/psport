@@ -6,8 +6,9 @@ argument, from shadPS4's prototypes and their LIB_FUNCTION registrations.
 
 BB_PERMISSIVE answers an import the port lacks with 0; for these the caller then reads an output
 that was never written, and faults far from the import. An argument counts as an output when it is
-a non-const pointer that shadPS4's body writes through, or whose name or type says it is one (out,
-result, handle, id, a pointer to a pointer, a pointer to a scalar that is not a buffer).
+a non-const pointer that shadPS4's body writes through (itself or by handing it to a function that
+does), or whose name or type says it is one (out, result, handle, id, a pointer to a pointer, a
+pointer to a scalar that is not a buffer).
 """
 import re, sys
 from pathlib import Path
@@ -103,32 +104,85 @@ def is_output(base, name, depth, body):
     return bool(OUT_SUFFIX.search(name))
 
 
+HELPER = re.compile(r'^[ \t]*(?:(?:static|inline|constexpr)\s+)*[A-Za-z_][\w:<>]*[\s*&]+([A-Za-z_][\w:]*)\s*\(', re.M)
+KEYWORDS = {'if', 'for', 'while', 'switch', 'return', 'sizeof', 'case', 'else', 'do', 'new', 'delete'}
+CALL = re.compile(r'\b([A-Za-z_][\w:]*)\s*\(')
+
+
+def definitions(text, pattern):
+    """(name, params text, body or None) of each match of pattern followed by a parameter list."""
+    for m in pattern.finditer(text):
+        name = m.group(1).split('::')[-1]
+        if name in KEYWORDS:
+            continue
+        close = matching(text, m.end() - 1, '(', ')')
+        if close < 0:
+            continue
+        rest = text[close + 1:close + 200].lstrip()
+        if re.match(r'^(?:const\s*)?(?:noexcept\s*)?\{', rest):
+            open_ = text.index('{', close)
+            end = matching(text, open_, '{', '}')
+            yield name, text[m.end():close], text[open_:end] if end > 0 else ''
+        elif rest.startswith(';'):
+            yield name, text[m.end():close], None
+
+
+def forwarded(body, name, functions):
+    """Whether body passes the pointer on, unchanged, as an argument its callee writes through."""
+    for m in CALL.finditer(body):
+        callee = functions.get(m.group(1).split('::')[-1])
+        if not callee:
+            continue
+        close = matching(body, m.end() - 1, '(', ')')
+        if close < 0:
+            continue
+        for index, argument in enumerate(split_params(body[m.end():close])):
+            if argument == name and index < 8 and any(f['mask'] >> index & 1 for f in callee):
+                return True
+    return False
+
+
 def prototypes(root):
-    """Function name -> {file: [(mask, has_body)]}, from every PS4_SYSV_ABI prototype."""
-    found = {}
+    """Function name -> {file: [(mask, has_body)]}, from every PS4_SYSV_ABI prototype.
+
+    A pointer the body hands on to another function (an export or a helper of shadPS4's) that writes
+    through it counts as written, so sceKernelFstat inherits fstat's output and scePthreadMutexInit
+    MutexInit's; this runs to a fixed point over every definition."""
+    exports, functions = [], {}
     for path in sorted(root.rglob('*')):
         if path.suffix not in ('.cpp', '.h', '.hpp', '.inc'):
             continue
         text = strip_comments(path.read_text(errors='replace'))
-        for m in PROTOTYPE.finditer(text):
-            close = matching(text, m.end() - 1, '(', ')')
-            if close < 0:
-                continue
-            rest = text[close + 1:close + 200].lstrip()
-            body = None
-            if rest.startswith('{') or re.match(r'^(?:noexcept\s*)?\{', rest):
-                open_ = text.index('{', close)
-                end = matching(text, open_, '{', '}')
-                body = text[open_:end] if end > 0 else ''
-            elif not rest.startswith(';'):
-                continue
-            mask = 0
-            for index, param in enumerate(split_params(text[m.end():close])):
-                pointer = pointer_param(param)
-                if pointer and index < 8 and is_output(*pointer, body):
-                    mask |= 1 << index
-            name = m.group(1).split('::')[-1]
-            found.setdefault(name, {}).setdefault(path, []).append((mask, body is not None))
+        for pattern, exported in ((PROTOTYPE, True), (HELPER, False)):
+            for name, params, body in definitions(text, pattern):
+                if not exported and body is None:
+                    continue
+                pointers = [(index, pointer_param(param)) for index, param in enumerate(split_params(params))]
+                pointers = [(index, p) for index, p in pointers if p and index < 8]
+                mask = 0
+                for index, pointer in pointers:
+                    # A helper has no PS4 contract to read names against: only its writes count.
+                    written = is_output(*pointer, body) if exported else writes_through(body, pointer[1])
+                    if written:
+                        mask |= 1 << index
+                entry = {'mask': mask, 'pointers': pointers, 'body': body}
+                functions.setdefault(name, []).append(entry)
+                if exported:
+                    exports.append((name, path, entry))
+    changed = True
+    while changed:
+        changed = False
+        for entries in functions.values():
+            for entry in entries:
+                if entry['body'] is None:
+                    continue
+                for index, (_, pname, _) in entry['pointers']:
+                    if not entry['mask'] >> index & 1 and forwarded(entry['body'], pname, functions):
+                        entry['mask'] |= 1 << index
+                        changed = True
+    found = {}
+    for name, path, entry in exports:
+        found.setdefault(name, {}).setdefault(path, []).append((entry['mask'], entry['body'] is not None))
     return found
 
 
