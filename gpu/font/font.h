@@ -482,7 +482,7 @@ OrbisFontTextCharacter* PS4_SYSV_ABI
 sceFontCharacterRefersTextNext(OrbisFontTextCharacter* textCharacter);
 s32 PS4_SYSV_ABI sceFontCharactersRefersTextCodes();
 s32 PS4_SYSV_ABI sceFontClearDeviceCache(OrbisFontLib library);
-s32 PS4_SYSV_ABI sceFontCloseFont();
+s32 PS4_SYSV_ABI sceFontCloseFont(OrbisFontHandle fontHandle);
 s32 PS4_SYSV_ABI sceFontControl();
 s32 PS4_SYSV_ABI sceFontCreateGraphicsDevice();
 s32 PS4_SYSV_ABI sceFontCreateGraphicsService();

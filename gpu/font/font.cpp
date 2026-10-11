@@ -922,8 +922,84 @@ s32 PS4_SYSV_ABI sceFontClearDeviceCache(OrbisFontLib library) {
     return rc;
 }
 
-s32 PS4_SYSV_ABI sceFontCloseFont() {
-    LOG_ERROR(Lib_Font, "(STUBBED) called");
+// bbport: a stub in shadPS4. Atelier Ayesha DX opens its font from memory for every text object
+// and closes it in the object's destructor, and each open copies the whole font file into the
+// handle's state, so without a close the process grew by the font's size for every text drawn.
+s32 PS4_SYSV_ABI sceFontCloseFont(OrbisFontHandle fontHandle) {
+    auto* font = GetNativeFont(fontHandle);
+    if (!font || font->magic != 0x0F02) {
+        LOG_ERROR(Lib_Font, "INVALID_HANDLE");
+        return ORBIS_FONT_ERROR_INVALID_FONT_HANDLE;
+    }
+    auto* lib = static_cast<Internal::FontLibOpaque*>(font->library);
+    u32 prev_lib_lock = 0;
+    if (!lib || !AcquireLibraryLock(lib, prev_lib_lock)) {
+        LOG_ERROR(Lib_Font, "INVALID_LIBRARY");
+        return ORBIS_FONT_ERROR_INVALID_LIBRARY;
+    }
+    u32 prev_font_lock = 0;
+    if (!AcquireFontLock(font, prev_font_lock)) {
+        ReleaseLibraryLock(lib, prev_lib_lock);
+        LOG_ERROR(Lib_Font, "INVALID_HANDLE");
+        return ORBIS_FONT_ERROR_INVALID_FONT_HANDLE;
+    }
+
+    Internal::ReleaseFontObjectsForHandle(fontHandle, -1);
+
+    // Only handles the library allocated were linked into its list by the open.
+    const u16 flags = font->flags;
+    if ((flags & 0x10) != 0) {
+        auto* tail = reinterpret_cast<Internal::FontLibTail*>(lib + 1);
+        auto* list_lock = &tail->list_head_ptr;
+        const auto locked = reinterpret_cast<void*>(std::numeric_limits<std::uintptr_t>::max());
+        void* list_ptr = nullptr;
+        for (;;) {
+            list_ptr = *list_lock;
+            if (list_ptr != locked) {
+                std::atomic_ref<void*> ref(*list_lock);
+                void* expected = list_ptr;
+                if (ref.compare_exchange_weak(expected, locked, std::memory_order_acq_rel)) {
+                    break;
+                }
+            }
+            Libraries::Kernel::sceKernelUsleep(0x1e);
+        }
+        const OrbisFontHandle prev = font->prevFont;
+        const OrbisFontHandle next = font->nextFont;
+        if (auto* prev_native = prev ? GetNativeFont(prev) : nullptr) {
+            prev_native->nextFont = next;
+        } else if (auto* head_ptr = static_cast<OrbisFontHandle*>(list_ptr);
+                   head_ptr && *head_ptr == fontHandle) {
+            *head_ptr = next;
+        }
+        if (auto* next_native = next ? GetNativeFont(next) : nullptr) {
+            next_native->prevFont = prev;
+        }
+        *list_lock = list_ptr;
+    }
+
+    if (auto* st = Internal::TryGetState(fontHandle)) {
+        Internal::DestroyFreeTypeFace(st->ext_ft_face);
+        for (auto& fb : st->system_fallback_faces) {
+            Internal::DestroyFreeTypeFace(fb.ft_face);
+        }
+    }
+    Internal::RemoveState(fontHandle);
+
+    font->magic = 0;
+    font->flags = 0;
+    font->prevFont = nullptr;
+    font->nextFont = nullptr;
+    font->renderer_binding.renderer = nullptr;
+    font->lock_word = 0;
+    if ((flags & 0x10) != 0) {
+        if (const auto free_fn = lib->alloc_vtbl
+                                     ? reinterpret_cast<Internal::FontFreeFn>(lib->alloc_vtbl[1])
+                                     : nullptr) {
+            free_fn(lib->alloc_ctx, fontHandle);
+        }
+    }
+    ReleaseLibraryLock(lib, prev_lib_lock);
     return ORBIS_OK;
 }
 
