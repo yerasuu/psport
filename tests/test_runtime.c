@@ -392,6 +392,37 @@ static void rw_timeouts(void) {
     assert(rw_unlock(&f.lock)==0);
     fixture_destroy(&f);
 }
+static int module_starts;
+static uint64_t module_args;
+static ABI int32_t module_start(uint64_t args, const void *argp, void *unused) {
+    (void)argp; (void)unused; ++module_starts; module_args=args; return 7;
+}
+static void loaded_modules(void) {
+    typedef int32_t (ABI *LoadStart)(const char *,uint64_t,const void *,uint32_t,const void *,int32_t *);
+    typedef int32_t (ABI *Dlsym)(int32_t,const char *,void **);
+    static unsigned char data[64];
+    static RuntimeModule table[2]={{.name="eboot.bin",.size=32},{.name="Media/Modules/Test.prx",.base=32,.size=32,.deferred=1}};
+    /* Dlsym hashes the name to its NID: these are the NIDs of the names asked for below. */
+    static RuntimeModuleExport eboot_exports[]={{"LwG8g3niqwA",8}}, own_exports[]={{"wzvqT4UqKX8",48}};
+    static unsigned char started[2];
+    table[0].exports=eboot_exports; table[0].export_count=1;
+    table[1].exports=own_exports; table[1].export_count=1;
+    table[1].init=(uint64_t)((uintptr_t)module_start-(uintptr_t)data);
+    runtime_modules_configure(data,table,2,started);
+    LoadStart load=GET(LoadStart,"wzvqT4UqKX8#p#n");
+    Dlsym dlsym=GET(Dlsym,"LwG8g3niqwA#p#n");
+    assert(load && dlsym);
+    int32_t result=0;
+    assert(load("/app0/Media/Modules/Test.prx",5,NULL,0,NULL,&result)==1 && result==7 && module_starts==1 && module_args==5);
+    /* Unity spells the data folder either way; a second load finds the module started. */
+    assert(load("/app0/media/modules/test.prx",0,NULL,0,NULL,&result)==1 && result==0 && module_starts==1);
+    assert(load("/app0/Media/Plugins/Missing.prx",0,NULL,0,NULL,NULL)==(int32_t)0x80020002);
+    void *address=NULL;
+    assert(dlsym(1,"sceKernelLoadStartModule",&address)==0 && address==data+48);
+    assert(dlsym(0,"sceKernelDlsym",&address)==0 && address==data+8);
+    assert(dlsym(1,"sceKernelDlsym",&address)==(int32_t)0x80020003 && address==data+8);
+    assert(dlsym(2,"sceKernelDlsym",&address)==(int32_t)0x80020003);
+}
 int main(int argc,char **argv) {
     runtime_start(0); assert(runtime_resolve("bzQExy189ZI#q#q",0)==0);
     runtime_start(1);
@@ -427,7 +458,7 @@ int main(int argc,char **argv) {
     if (argc>1 && !strcmp(argv[1],"--rwlock-concurrency")) { rw_concurrency(); return 0; }
     if (argc>1 && !strcmp(argv[1],"--rwlock-timeouts")) { rw_timeouts(); return 0; }
     libc_support(); posix_mutexes(); wall_time(); exit_handlers(); guards(); mutexes(); direct_memory(); write_traps(); memory_primitives();
-    rw_lifecycle(); rw_concurrency(); rw_timeouts();
-    puts("PASS: callback lifecycle, guard ABI, mutex errors, shared direct memory, memory primitives, resolver scope");
+    rw_lifecycle(); rw_concurrency(); rw_timeouts(); loaded_modules();
+    puts("PASS: callback lifecycle, guard ABI, mutex errors, shared direct memory, memory primitives, resolver scope, loaded modules");
     return 0;
 }
