@@ -335,3 +335,16 @@ const char *runtime_import_name(const char *name) {
     const char *symbol=runtime_symbol(name);
     return symbol ? symbol : "name not resolved; see analysis.json import_name_hints";
 }
+static const struct { char nid[12]; const char *function; unsigned char outputs; } output_arguments[]={
+#include "import_outparams.inc"
+};
+unsigned runtime_import_outputs(const char *nid) {
+    size_t low=0, high=sizeof(output_arguments)/sizeof(*output_arguments);
+    while (low<high) {
+        size_t mid=low+(high-low)/2;
+        int order=strncmp(nid,output_arguments[mid].nid,11);
+        if (!order) return output_arguments[mid].outputs;
+        if (order<0) high=mid; else low=mid+1;
+    }
+    return 0;
+}

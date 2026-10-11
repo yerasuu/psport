@@ -115,11 +115,38 @@ static void protect(void *p, size_t size, unsigned flags) {
 /* BB_PERMISSIVE=1: an import the runtime lacks returns 0 instead of stopping, so a title other
  * than Bloodborne gets past the first one and its log lists every import it reached (each once). */
 static unsigned char *permissive_seen;
-static ABI uint64_t unresolved_permissive(uint32_t id, uintptr_t argument) {
-    if (id < import_count && !__atomic_exchange_n(&permissive_seen[id], 1, __ATOMIC_RELAXED))
-        printf("Runtime: unsupported import %s (%s) returns 0; first argument: 0x%" PRIxPTR "\n",
-               names[id], runtime_import_name(names[id]), argument);
-    return 0;
+/* Its output arguments (runtime_import_outputs) per import: answered with 0 the caller goes on to
+ * read memory nothing wrote, and faults far from the import. BB_PERMISSIVE_OUT=error answers these
+ * with SCE_KERNEL_ERROR_EINVAL instead, so the caller's own error path runs. */
+static unsigned char *permissive_outputs;
+static int permissive_out_error;
+static ABI int64_t unresolved_permissive(uint32_t id, uintptr_t a0, uintptr_t a1, uintptr_t a2, uintptr_t a3,
+                                         uintptr_t a4) {
+    if (id >= import_count) return 0;
+    const unsigned outputs = permissive_outputs[id];
+    const int32_t result = outputs && permissive_out_error ? (int32_t)0x80020016 : 0;
+    if (!__atomic_exchange_n(&permissive_seen[id], 1, __ATOMIC_RELAXED)) {
+        if (!outputs) {
+            printf("Runtime: unsupported import %s (%s) returns 0; first argument: 0x%" PRIxPTR "\n",
+                   names[id], runtime_import_name(names[id]), a0);
+            return 0;
+        }
+        /* The trampoline keeps the first five arguments; the sixth (r9) is gone by now. */
+        const uintptr_t arguments[5] = {a0, a1, a2, a3, a4};
+        char list[256];
+        size_t used = 0;
+        for (unsigned n = 0; n < 8 && used < sizeof(list); ++n) {
+            if (!(outputs >> n & 1)) continue;
+            int written = n < 5 ? snprintf(list + used, sizeof(list) - used, "%s%u (0x%" PRIxPTR ")",
+                                           used ? ", " : "", n, arguments[n])
+                                : snprintf(list + used, sizeof(list) - used, "%s%u", used ? ", " : "", n);
+            if (written > 0) used += (size_t)written;
+        }
+        printf("Runtime: unsupported import %s (%s) returns 0x%x but leaves its output argument%s %s unwritten\n",
+               names[id], runtime_import_name(names[id]), (unsigned)result, outputs & (outputs - 1) ? "s" : "",
+               list);
+    }
+    return result;
 }
 static ABI __attribute__((noreturn)) void unresolved(uint32_t id, uintptr_t argument) {
     if (id >= import_count) fail("bad import trap index");
@@ -528,21 +555,34 @@ int main(int argc, char **argv) {
     const char *permissive = getenv("BB_PERMISSIVE");
     if (permissive && !strcmp(permissive, "1")) {
         permissive_seen = calloc(import_count ? import_count : 1, 1);
-        if (!permissive_seen) fail("allocation failed");
+        permissive_outputs = calloc(import_count ? import_count : 1, 1);
+        if (!permissive_seen || !permissive_outputs) fail("allocation failed");
+        for (uint64_t i = 0; i < import_count; ++i)
+            permissive_outputs[i] = (unsigned char)runtime_import_outputs(names[i]);
+        const char *out = getenv("BB_PERMISSIVE_OUT");
+        permissive_out_error = out && !strcmp(out, "error");
     }
     unsigned char *traps = allocate(round_page((import_count + 1) * 32));
     unsigned char *data_traps = allocate((import_count + 1) * page_size);
     protect(data_traps, (import_count + 1) * page_size, 0);
     for (uint64_t i = 0; i < import_count; ++i) {
         unsigned char *t = traps + i * 32;
-        /* SysV: mov edi, index; movabs rax, handler; jmp rax. No fake return values, unless
-         * BB_PERMISSIVE asked for them. */
+        /* SysV: the arguments move up one register (the sixth drops off) so the handler gets the
+         * index first and the guest's first five after it; then movabs rax, handler; jmp rax. No
+         * fake return values, unless BB_PERMISSIVE asked for them. Exactly the 32 bytes a slot has. */
         uint32_t index = (uint32_t)i;
         uintptr_t handler = permissive_seen ? (uintptr_t)unresolved_permissive : (uintptr_t)unresolved;
-        t[0] = 0x48; t[1] = 0x89; t[2] = 0xfe; /* mov rsi,rdi: preserve arg0 */
-        t[3] = 0xbf; memcpy(t + 4, &index, 4);
-        t[8] = 0x48; t[9] = 0xb8; memcpy(t + 10, &handler, 8);
-        t[18] = 0xff; t[19] = 0xe0;
+        static const unsigned char shift[15] = {
+            0x4d, 0x89, 0xc1, /* mov r9,r8 */
+            0x49, 0x89, 0xc8, /* mov r8,rcx */
+            0x48, 0x89, 0xd1, /* mov rcx,rdx */
+            0x48, 0x89, 0xf2, /* mov rdx,rsi */
+            0x48, 0x89, 0xfe, /* mov rsi,rdi */
+        };
+        memcpy(t, shift, sizeof(shift));
+        t[15] = 0xbf; memcpy(t + 16, &index, 4);
+        t[20] = 0x48; t[21] = 0xb8; memcpy(t + 22, &handler, 8);
+        t[30] = 0xff; t[31] = 0xe0;
     }
     /* What each import got, for the report below: 1 host, 2 native module, 3 stub, 4 nothing,
      * 5 a system module (link_modules.py binding kinds 3 and 4, which win over the host). */
@@ -578,7 +618,10 @@ int main(int argc, char **argv) {
                    names[i], runtime_import_name(names[i]));
         else if (import_state[i] == 4)
             printf("Runtime: import %s (%s) has no implementation: %s\n", names[i], runtime_import_name(names[i]),
-                   permissive_seen ? "returns 0 when called (BB_PERMISSIVE)" : "the game stops if it calls it");
+                   !permissive_seen ? "the game stops if it calls it"
+                   : permissive_out_error && permissive_outputs[i]
+                       ? "returns 0x80020016 when called (BB_PERMISSIVE_OUT=error)"
+                       : "returns 0 when called (BB_PERMISSIVE)");
     }
     printf("Runtime: imports %llu: host %u, game modules %u, system modules %u, stubs %u, without implementation %u\n",
            (unsigned long long)import_count, counts[1], counts[2], counts[5], counts[3], counts[4]);

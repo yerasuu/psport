@@ -161,7 +161,7 @@ static void posix_mutexes(void) {
     m=NULL;
     assert(lock(&m)==0 && lock(&m)==11 && trylock(&m)==16);
     assert(unlock(&m)==0 && destroy(&m)==0);
-    assert(!runtime_resolve("dQHWEsJtoE4#q#q",0));
+    assert(runtime_resolve("dQHWEsJtoE4#q#q",0)==runtime_resolve("dQHWEsJtoE4#I#J",0)); /* scope-independent */
 }
 static void wall_time(void) {
     typedef int (ABI *GetTime)(int64_t *,int32_t *);
@@ -175,7 +175,7 @@ static void wall_time(void) {
     assert(t.value[1]>=0 && t.value[1]<1000000);
     assert(t.canary==0xabcdef && z.canary==0x123456);
     assert(get(NULL,NULL)==0 && get(NULL,z.value)==0);
-    assert(!runtime_resolve("n88vx3C5nW8#q#q",0));
+    assert(runtime_resolve("n88vx3C5nW8#q#q",0)); /* scope-independent; libc scope may pick its own */
 }
 static void direct_memory(void) {
     Allocate alloc=GET(Allocate,"rTXw65xmLIA#p#J");
@@ -395,12 +395,21 @@ static void rw_timeouts(void) {
 int main(int argc,char **argv) {
     runtime_start(0); assert(runtime_resolve("bzQExy189ZI#q#q",0)==0);
     runtime_start(1);
-    assert(runtime_resolve("bzQExy189ZI#wrong#module",0)==0);
+    /* Imports resolve by NID whatever their #lib#mod scope (runtime_same_nid). */
+    assert(runtime_resolve("bzQExy189ZI#wrong#module",0)!=0);
+    assert(runtime_resolve("bzQExy189ZI#wrong#module",0)==runtime_resolve("bzQExy189ZI#q#q",0));
     assert(runtime_resolve("unknown",0)==0);
     assert(runtime_resolve("8zTFvBIAIN8#q#q",1)==0);
     assert(runtime_resolve("f7uOxY9mM1U#p#J",0)==0);
     uint64_t *canary=(uint64_t *)runtime_resolve("f7uOxY9mM1U#p#J",1);
     assert(canary && *canary && !(*canary & 255));
+    /* sceKernelAllocateMainDirectMemory writes its physical address through the fourth argument;
+     * the lookup ignores the importer's library suffix and must reach both ends of the table. */
+    assert(runtime_import_outputs("B+vc2AO2Zrc#q#q")==0x08 && runtime_import_outputs("+7B2AEKKns8")==0x02
+           && runtime_import_outputs("zvyKP0Z3UvU")==0x01);
+    assert(runtime_import_outputs("bzQExy189ZI#q#q")==0 && runtime_import_outputs("unknown")==0);
+    /* sceKernelFstat's stat buffer is written by the fstat it hands it to, not in its own body. */
+    assert(runtime_import_outputs("kBwCPsYX-m4#p#n")==0x02);
     if (argc>1 && !strcmp(argv[1],"--guard-recursion")) {
         uint64_t guard=0; Acquire acquire=GET(Acquire,"3GPpjQdAMTw#q#q");
         acquire(&guard); acquire(&guard); return 99;
