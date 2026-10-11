@@ -1606,7 +1606,9 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset, const PreparedDraw* pre
 
 const Shader::Info* Rasterizer::StreamOutStage(const GraphicsPipeline& pipeline,
                                                const AmdGpu::Regs& regs) const {
-    if (!regs.vgt_strmout_config.streamout_0_en || !instance.IsTransformFeedbackSupported()) {
+    // Exactly the pipelines whose GS module declares the Xfb execution mode: beginning transform
+    // feedback with any other bound pipeline is invalid.
+    if (!regs.vgt_strmout_config.streamout_0_en || pipeline.GetXfbStride() == 0) {
         return nullptr;
     }
     const auto* gs = pipeline.GetStages()[u32(Shader::SwStage::Geometry)];
