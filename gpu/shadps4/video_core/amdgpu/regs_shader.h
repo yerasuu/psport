@@ -70,6 +70,9 @@ struct ShaderProgram {
         u32 num_user_regs : 5;
         u32 : 1;
         u32 oc_lds_en : 1;
+        // Stream-out enables only in the VS stage's RSRC2; other stages put other fields here.
+        u32 so_base_en : 4;
+        u32 so_en : 1;
     } settings;
     UserData user_data;
 
