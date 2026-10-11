@@ -618,7 +618,10 @@ int main(int argc, char **argv) {
                    names[i], runtime_import_name(names[i]));
         else if (import_state[i] == 4)
             printf("Runtime: import %s (%s) has no implementation: %s\n", names[i], runtime_import_name(names[i]),
-                   permissive_seen ? "returns 0 when called (BB_PERMISSIVE)" : "the game stops if it calls it");
+                   !permissive_seen ? "the game stops if it calls it"
+                   : permissive_out_error && permissive_outputs[i]
+                       ? "returns 0x80020016 when called (BB_PERMISSIVE_OUT=error)"
+                       : "returns 0 when called (BB_PERMISSIVE)");
     }
     printf("Runtime: imports %llu: host %u, game modules %u, system modules %u, stubs %u, without implementation %u\n",
            (unsigned long long)import_count, counts[1], counts[2], counts[5], counts[3], counts[4]);
