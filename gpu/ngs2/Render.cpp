@@ -256,8 +256,8 @@ static std::size_t SampleBytes(std::uint32_t waveformType) {
     throw std::runtime_error("NGS2: render waveform type " + Ngs2Hex(waveformType) + " is not implemented");
 }
 
-static bool IsStereoIntoSurround(const Ngs2Voice& voice, const Ngs2RenderBufferInfo& output) {
-    return voice.channels == 2 && (output.num_channels == 6 || output.num_channels == 8);
+static bool HasDefaultMap(std::uint32_t channels) {
+    return channels == 1 || channels == 2 || channels == 6 || channels == 8;
 }
 
 static std::vector<float>& OutputMix(std::vector<std::vector<float>>& mixes, const Ngs2RenderBufferInfo* bufferInfo, std::uint32_t numBufferInfo,
@@ -265,7 +265,7 @@ static std::vector<float>& OutputMix(std::vector<std::vector<float>>& mixes, con
     if (voice.outputId >= numBufferInfo) throw std::invalid_argument("NGS2: mastering output " + std::to_string(voice.outputId) + " has no render buffer");
     const auto& output = bufferInfo[voice.outputId];
     const auto sampleBytes = SampleBytes(output.waveform_type);
-    if (output.num_channels != voice.channels && !IsStereoIntoSurround(voice, output)) throw std::runtime_error("NGS2: mixing " + std::to_string(voice.channels) + " mastering channels into " + std::to_string(output.num_channels) + " is not implemented");
+    if (output.num_channels != voice.channels && !HasDefaultMap(output.num_channels)) throw std::runtime_error("NGS2: mixing " + std::to_string(voice.channels) + " mastering channels into " + std::to_string(output.num_channels) + " is not implemented");
     if (output.buffer == nullptr || output.buffer_size < static_cast<std::size_t>(grain) * output.num_channels * sampleBytes) {
         throw std::invalid_argument("NGS2: render buffer " + std::to_string(voice.outputId) + " is missing or too small");
     }
@@ -303,7 +303,14 @@ void Ngs2RenderSystem(Ngs2System& system, const Ngs2RenderBufferInfo* bufferInfo
         for (std::uint32_t channel = 0; channel < voice->channels; channel++) {
             const bool lfe = channel == 3 && (voice->channels == 6 || voice->channels == 8);
             const float level = lfe ? voice->lfeLevel : voice->fbwLevel;
-            for (std::uint32_t i = 0; i < grain; i++) mix[i * outputChannels + channel] += voice->samples[channel * grain + i] * level;
+            // A render buffer with other channels than the mastering voice (Ryza masters 5.1 into
+            // the stereo buffer it sends to AudioOut) takes the default down- or upmix.
+            for (std::uint32_t dst = 0; dst < outputChannels; dst++) {
+                const float gain = outputChannels == voice->channels ? (dst == channel ? level : 0.0f)
+                                                                     : level * Ngs2DefaultLevel(voice->channels, channel, outputChannels, dst);
+                if (gain == 0.0f) continue;
+                for (std::uint32_t i = 0; i < grain; i++) mix[i * outputChannels + dst] += voice->samples[channel * grain + i] * gain;
+            }
         }
     }
     for (std::uint32_t i = 0; i < numBufferInfo; i++) {
