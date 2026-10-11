@@ -64,6 +64,10 @@ void runtime_exception_report(void);
  * own thread. */
 void runtime_exception_lock(pthread_mutex_t *lock);
 void runtime_exception_unlock(pthread_mutex_t *lock);
+/* The same around a runtime lock of another kind (runtime_memory's rwlock): hold before taking it,
+ * release after letting it go. */
+void runtime_exception_hold(void);
+void runtime_exception_release(void);
 /* pthread_cond_wait, or a wait until end on CLOCK_MONOTONIC, under such a lock. glibc's condition
  * wait has no point at which the thread is known not to hold the mutex, so a raise stays held back
  * while it sleeps; the sleep is cut into slices and returns 0 early, as a spurious wakeup, to deliver

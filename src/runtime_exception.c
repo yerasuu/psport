@@ -52,8 +52,8 @@ _Static_assert(sizeof(GuestUcontext)==0x500,"PS4 ucontext_t size");
 _Static_assert(offsetof(GuestUcontext,mcontext.rsp)==0xf8,"ucontext rsp offset");
 
 static _Atomic(GuestHandler) handlers[GUEST_SIGNALS];
-/* Locks of runtime_exception_lock this thread holds, is taking or sleeps on in
- * runtime_exception_wait, and a raise held back until it lets go. */
+/* Runtime locks this thread holds, is taking or sleeps on in runtime_exception_wait, and a raise
+ * held back until it lets go. */
 static _Thread_local unsigned held;
 static _Thread_local volatile sig_atomic_t deferred;
 static _Atomic unsigned raised, delivered;
@@ -61,17 +61,23 @@ static _Atomic unsigned raised, delivered;
 /* The signals libkernel lets a game handle (shadPS4's orbis_allowed_signals). */
 static int allowed(int sig) { return sig==1 || sig==4 || sig==8 || sig==10 || sig==11 || sig==GUEST_SIGUSR1; }
 
-void runtime_exception_lock(pthread_mutex_t *lock) {
+void runtime_exception_hold(void) {
     ++held;
     atomic_signal_fence(memory_order_seq_cst);
-    pthread_mutex_lock(lock);
 }
-void runtime_exception_unlock(pthread_mutex_t *lock) {
-    pthread_mutex_unlock(lock);
+void runtime_exception_release(void) {
     atomic_signal_fence(memory_order_seq_cst);
     --held;
     atomic_signal_fence(memory_order_seq_cst);
     if (!held && deferred) pthread_kill(pthread_self(),RUNTIME_EXCEPTION_SIGNAL);
+}
+void runtime_exception_lock(pthread_mutex_t *lock) {
+    runtime_exception_hold();
+    pthread_mutex_lock(lock);
+}
+void runtime_exception_unlock(pthread_mutex_t *lock) {
+    pthread_mutex_unlock(lock);
+    runtime_exception_release();
 }
 int runtime_exception_wait(pthread_cond_t *cond, pthread_mutex_t *lock, const struct timespec *end) {
     if (deferred && held==1) { runtime_exception_unlock(lock); runtime_exception_lock(lock); return 0; }
