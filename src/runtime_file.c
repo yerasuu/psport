@@ -562,7 +562,6 @@ static int64_t do_truncate(const char *guest,int64_t length) {
     return truncate(path,length) ? -errno : 0;
 }
 typedef struct { int64_t sec, usec; } GuestTimeval;
-/* times: access then modification time; NULL sets both to now. */
 static int64_t do_utimes(const char *guest,const GuestTimeval *times) {
     struct timeval host[2];
     for (int i=0;times && i<2;++i) {

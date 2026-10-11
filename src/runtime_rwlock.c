@@ -143,7 +143,6 @@ static ABI int32_t rw_destroy(Rwlock **handle) {
     }
     pthread_mutex_unlock(&registry_lock); return error(e);
 }
-/* libScePosix/libkernel pthread_rwlock_*: the same locks, positive errno values instead of codes. */
 static int32_t posix_result(int32_t r) { return r ? (int32_t)((uint32_t)r&0xffff) : 0; }
 static ABI int32_t posix_init(Rwlock **out,void *const *attr) { return posix_result(rw_init(out,attr,NULL)); }
 static ABI int32_t posix_destroy(Rwlock **r) { return posix_result(rw_destroy(r)); }

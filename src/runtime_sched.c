@@ -15,8 +15,6 @@ typedef int32_t (ABI *GetPrio)(void *thread, int32_t *prio);
 typedef int32_t (ABI *SetPrio)(void *thread, int32_t prio);
 typedef void *(ABI *Self)(void);
 
-/* Policies set through scePthreadSetschedparam; a thread not listed has the default. Entries of
- * exited threads stay until their slot is reused for the same handle. */
 #define POLICIES 64
 static struct { void *thread; int32_t policy; } policies[POLICIES];
 static pthread_rwlock_t policy_lock=PTHREAD_RWLOCK_INITIALIZER;

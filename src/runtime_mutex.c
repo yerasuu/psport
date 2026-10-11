@@ -158,9 +158,6 @@ static ABI int32_t condattr_setpshared(GuestCondAttr **attr, int32_t shared) {
     if (!attr || !*attr || shared) return orbis_error(EINVAL);
     return 0;
 }
-/* Condition variables: opaque handles over host pthread_cond (CLOCK_REALTIME, like FreeBSD's
- * default, unless the attributes ask for the monotonic clock), sharing the host mutex behind
- * GuestMutex. */
 typedef struct { pthread_cond_t native; clockid_t clock; } GuestCond;
 static size_t conds, waits, wakeups;
 static ABI int32_t cond_init(GuestCond **out, GuestCondAttr **attr, const char *name) {

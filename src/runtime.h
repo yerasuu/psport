@@ -87,7 +87,6 @@ extern int runtime_last_stub;
 const char *runtime_symbol(const char *nid);
 uintptr_t runtime_lookup(const RuntimeExport *table, size_t count, const char *nid);
 uintptr_t runtime_kernel_resolve(const char *name);
-/* The eboot's SDK version (SceProcParam) and param.sfo ATTRIBUTE, for the kernel's queries about them. */
 void runtime_process_configure(uint32_t sdk_version, uint32_t psf_attributes);
 uintptr_t runtime_file_resolve(const char *name);
 uintptr_t runtime_services_resolve(const char *name);
