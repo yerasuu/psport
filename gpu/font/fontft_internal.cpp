@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include "core/libraries/font/fontft_internal.h"
+#include "fontft_internal.h"
 
 #include <algorithm>
 #include <array>
@@ -28,11 +28,8 @@
 #include FT_TRUETYPE_TABLES_H
 
 #include "common/logging/log.h"
-#include "common/singleton.h"
-#include "core/file_sys/fs.h"
-#include "core/libraries/font/font_internal.h"
-#include "core/libraries/kernel/kernel.h"
-#include "core/tls.h"
+#include "font_internal.h"
+#include "core/libraries/kernel/time.h"
 #include "font_error.h"
 
 namespace Libraries::Font::Internal {
@@ -2993,18 +2990,10 @@ s32 PS4_SYSV_ABI LibraryOpenFontMemoryStub(void* library, u32 mode, const void* 
         }
 
         open_path = path;
+        // bbport: the callers (sceFontOpenFontFile, the font sets) already resolved the guest
+        // path through the runtime's mounts, and there are no package archives to read from.
         if (path[0] == '/') {
-            auto* mnt = Common::Singleton<Core::FileSys::MntPoints>::Instance();
-            if (mnt) {
-                if (auto handle = mnt->Open(path, /*writable=*/false)) {
-                    if (auto host = handle->GetHostPath(); host.has_value()) {
-                        host_path_fs = *host;
-                        open_path = host_path_fs.string();
-                    } else if (auto bytes = mnt->ReadFile(path)) {
-                        archive_font_bytes = std::make_shared<std::vector<u8>>(std::move(*bytes));
-                    }
-                }
-            }
+            host_path_fs = path;
         }
     } else {
         return ORBIS_FONT_ERROR_INVALID_PARAMETER;

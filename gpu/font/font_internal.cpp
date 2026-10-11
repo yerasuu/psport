@@ -11,14 +11,16 @@
 #include FT_TRUETYPE_TABLES_H
 
 #include "core/emulator_settings.h"
-#include "core/libraries/font/fontft_internal.h"
-#include "core/libraries/kernel/kernel.h"
-#include "imgui/notifications_layer.h"
-#include "imgui/renderer/font_data.h"
+#include "fontft_internal.h"
+#include "core/libraries/kernel/time.h"
+
+// bbport: the runtime's mounts (runtime_file.c) map guest paths to the host.
+extern "C" int runtime_file_translate(const char* guest, char* out, size_t size);
+// DejaVu Sans, embedded for the overlay (shim/bbport_overlay.cpp).
+extern "C" const unsigned char bb_font_ttf[];
+extern "C" const unsigned char bb_font_ttf_end[];
 
 namespace Libraries::Font::Internal {
-
-Core::FileSys::MntPoints* g_mnt = Common::Singleton<Core::FileSys::MntPoints>::Instance();
 
 using Libraries::Font::OrbisFontGenerateGlyphParams;
 using Libraries::Font::OrbisFontGlyph;
@@ -125,194 +127,6 @@ constexpr std::string_view kBuiltinFontCjkJp = "@builtin/NotoSansCJK-Regular.jp.
 constexpr std::string_view kBuiltinFontCjkKr = "@builtin/NotoSansCJK-Regular.kr.ttc";
 constexpr std::string_view kBuiltinFontCjkSc = "@builtin/NotoSansCJK-Regular.sc.ttc";
 constexpr std::string_view kBuiltinFontCjkTc = "@builtin/NotoSansCJK-Regular.tc.ttc";
-
-struct BuiltinFontBlob {
-    std::string_view virtual_path;
-    const unsigned char* compressed_data = nullptr;
-    unsigned int compressed_size = 0;
-    u32 face_index = 0;
-};
-
-static const std::array<BuiltinFontBlob, 8> kBuiltinFontBlobs{{
-    BuiltinFontBlob{kBuiltinFontLatin, imgui_font_notosans_regular_compressed_data,
-                    imgui_font_notosans_regular_compressed_size, 0},
-    BuiltinFontBlob{kBuiltinFontArabic, imgui_font_notosansarabic_regular_compressed_data,
-                    imgui_font_notosansarabic_regular_compressed_size, 0},
-    BuiltinFontBlob{kBuiltinFontThai, imgui_font_notosansthai_regular_compressed_data,
-                    imgui_font_notosansthai_regular_compressed_size, 0},
-    BuiltinFontBlob{kBuiltinFontSymbols, imgui_font_notosanssymbols2_regular_compressed_data,
-                    imgui_font_notosanssymbols2_regular_compressed_size, 0},
-    BuiltinFontBlob{kBuiltinFontCjkJp, imgui_font_notosanscjk_regular_compressed_data,
-                    imgui_font_notosanscjk_regular_compressed_size, 0},
-    BuiltinFontBlob{kBuiltinFontCjkKr, imgui_font_notosanscjk_regular_compressed_data,
-                    imgui_font_notosanscjk_regular_compressed_size, 1},
-    BuiltinFontBlob{kBuiltinFontCjkSc, imgui_font_notosanscjk_regular_compressed_data,
-                    imgui_font_notosanscjk_regular_compressed_size, 2},
-    BuiltinFontBlob{kBuiltinFontCjkTc, imgui_font_notosanscjk_regular_compressed_data,
-                    imgui_font_notosanscjk_regular_compressed_size, 3},
-}};
-
-static unsigned char* g_stb_barrier_out_e = nullptr;
-static unsigned char* g_stb_barrier_out_b = nullptr;
-static const unsigned char* g_stb_barrier_in_b = nullptr;
-static unsigned char* g_stb_dout = nullptr;
-
-static unsigned int StbDecompressLength(const unsigned char* input) {
-    return (input[8] << 24) + (input[9] << 16) + (input[10] << 8) + input[11];
-}
-
-static void StbMatch(const unsigned char* data, unsigned int length) {
-    if (g_stb_dout + length > g_stb_barrier_out_e) {
-        g_stb_dout += length;
-        return;
-    }
-    if (data < g_stb_barrier_out_b) {
-        g_stb_dout = g_stb_barrier_out_e + 1;
-        return;
-    }
-    while (length-- != 0u) {
-        *g_stb_dout++ = *data++;
-    }
-}
-
-static void StbLiteral(const unsigned char* data, unsigned int length) {
-    if (g_stb_dout + length > g_stb_barrier_out_e) {
-        g_stb_dout += length;
-        return;
-    }
-    if (data < g_stb_barrier_in_b) {
-        g_stb_dout = g_stb_barrier_out_e + 1;
-        return;
-    }
-    std::memcpy(g_stb_dout, data, length);
-    g_stb_dout += length;
-}
-
-#define STB_IN2(x) ((i[x] << 8) + i[(x) + 1])
-#define STB_IN3(x) ((i[x] << 16) + STB_IN2((x) + 1))
-#define STB_IN4(x) ((i[x] << 24) + STB_IN3((x) + 1))
-
-static const unsigned char* StbDecompressToken(const unsigned char* i) {
-    if (*i >= 0x20) {
-        if (*i >= 0x80) {
-            StbMatch(g_stb_dout - i[1] - 1, i[0] - 0x80 + 1);
-            i += 2;
-        } else if (*i >= 0x40) {
-            StbMatch(g_stb_dout - (STB_IN2(0) - 0x4000 + 1), i[2] + 1);
-            i += 3;
-        } else {
-            StbLiteral(i + 1, i[0] - 0x20 + 1);
-            i += 1 + (i[0] - 0x20 + 1);
-        }
-    } else {
-        if (*i >= 0x18) {
-            StbMatch(g_stb_dout - (STB_IN3(0) - 0x180000 + 1), i[3] + 1);
-            i += 4;
-        } else if (*i >= 0x10) {
-            StbMatch(g_stb_dout - (STB_IN3(0) - 0x100000 + 1), STB_IN2(3) + 1);
-            i += 5;
-        } else if (*i >= 0x08) {
-            StbLiteral(i + 2, STB_IN2(0) - 0x0800 + 1);
-            i += 2 + (STB_IN2(0) - 0x0800 + 1);
-        } else if (*i == 0x07) {
-            StbLiteral(i + 3, STB_IN2(1) + 1);
-            i += 3 + (STB_IN2(1) + 1);
-        } else if (*i == 0x06) {
-            StbMatch(g_stb_dout - (STB_IN3(1) + 1), i[4] + 1);
-            i += 5;
-        } else if (*i == 0x04) {
-            StbMatch(g_stb_dout - (STB_IN3(1) + 1), STB_IN2(4) + 1);
-            i += 6;
-        }
-    }
-    return i;
-}
-
-static unsigned int StbAdler32(unsigned int adler32, unsigned char* buffer,
-                               unsigned int buffer_len) {
-    constexpr unsigned long kAdlerMod = 65521;
-    unsigned long s1 = adler32 & 0xffff;
-    unsigned long s2 = adler32 >> 16;
-    unsigned long block_len = buffer_len % 5552;
-
-    while (buffer_len != 0u) {
-        unsigned long i = 0;
-        for (; i + 7 < block_len; i += 8) {
-            s1 += buffer[0];
-            s2 += s1;
-            s1 += buffer[1];
-            s2 += s1;
-            s1 += buffer[2];
-            s2 += s1;
-            s1 += buffer[3];
-            s2 += s1;
-            s1 += buffer[4];
-            s2 += s1;
-            s1 += buffer[5];
-            s2 += s1;
-            s1 += buffer[6];
-            s2 += s1;
-            s1 += buffer[7];
-            s2 += s1;
-            buffer += 8;
-        }
-        for (; i < block_len; ++i) {
-            s1 += *buffer++;
-            s2 += s1;
-        }
-        s1 %= kAdlerMod;
-        s2 %= kAdlerMod;
-        buffer_len -= static_cast<unsigned int>(block_len);
-        block_len = 5552;
-    }
-    return (static_cast<unsigned int>(s2) << 16) + static_cast<unsigned int>(s1);
-}
-
-static unsigned int StbDecompress(unsigned char* output, const unsigned char* i) {
-    if (STB_IN4(0) != 0x57BC0000u || STB_IN4(4) != 0u) {
-        return 0;
-    }
-
-    const unsigned int output_len = StbDecompressLength(i);
-    g_stb_barrier_in_b = i;
-    g_stb_barrier_out_e = output + output_len;
-    g_stb_barrier_out_b = output;
-    i += 16;
-
-    g_stb_dout = output;
-    for (;;) {
-        const unsigned char* old_i = i;
-        i = StbDecompressToken(i);
-        if (i == old_i) {
-            if (*i == 0x05 && i[1] == 0xFA) {
-                if (g_stb_dout != output + output_len) {
-                    return 0;
-                }
-                return StbAdler32(1, output, output_len) == static_cast<unsigned int>(STB_IN4(2))
-                           ? output_len
-                           : 0;
-            }
-            return 0;
-        }
-        if (g_stb_dout > output + output_len) {
-            return 0;
-        }
-    }
-}
-
-#undef STB_IN2
-#undef STB_IN3
-#undef STB_IN4
-
-static const BuiltinFontBlob* FindBuiltinFontBlob(const std::filesystem::path& path) {
-    const std::string normalized = path.generic_string();
-    for (const auto& blob : kBuiltinFontBlobs) {
-        if (normalized == blob.virtual_path) {
-            return &blob;
-        }
-    }
-    return nullptr;
-}
 
 static std::string LowerAsciiString(std::string value) {
     for (auto& c : value) {
@@ -901,19 +715,14 @@ void LogFontOpenParams(const Libraries::Font::OrbisFontOpenParams* params) {
 }
 
 std::filesystem::path ResolveGuestPath(const char* guest_path) {
-    if (!guest_path) {
+    if (!guest_path || !*guest_path) {
         return {};
     }
-    if (guest_path[0] != '/') {
-        return std::filesystem::path(guest_path);
-    }
-    if (!g_mnt) {
-        g_mnt = Common::Singleton<Core::FileSys::MntPoints>::Instance();
-    }
-    if (!g_mnt) {
+    char host[1024];
+    if (runtime_file_translate(guest_path, host, sizeof(host)) != 0) {
         return {};
     }
-    return g_mnt->GetHostPath(guest_path);
+    return std::filesystem::path(host);
 }
 
 bool LoadGuestFileBytes(const std::filesystem::path& host_path,
@@ -948,16 +757,8 @@ bool LoadGuestPathBytes(const char* guest_path, std::vector<unsigned char>& out_
         return false;
     }
     if (guest_path[0] == '/') {
-        if (!g_mnt) {
-            g_mnt = Common::Singleton<Core::FileSys::MntPoints>::Instance();
-        }
-        if (g_mnt) {
-            if (auto bytes = g_mnt->ReadFile(guest_path)) {
-                out_bytes = std::move(*bytes);
-                return true;
-            }
-        }
-        return false;
+        const auto host_path = ResolveGuestPath(guest_path);
+        return !host_path.empty() && LoadGuestFileBytes(host_path, out_bytes);
     }
     // Non-guest path: treat as a host path (builtin/system fonts).
     return LoadGuestFileBytes(std::filesystem::path(guest_path), out_bytes);
@@ -1875,41 +1676,134 @@ s32 ComputeSysfontShiftValue(FT_Face face) {
     return 0;
 }
 
+namespace {
+
+// bbport: shadPS4 bundles these Noto fonts with its ImGui; here they are the host's (SteamOS and
+// most distributions ship them), looked up by file name in BB_FALLBACK_FONTS (folders separated
+// by ':') and then the usual font folders. The Latin one falls back to the overlay's embedded
+// DejaVu Sans, so a title gets glyphs on any host.
+struct HostFallbackFont {
+    std::string_view virtual_path;
+    std::string_view file_name_lower;
+    u32 face_index;
+};
+
+constexpr std::array<HostFallbackFont, 8> kHostFallbackFonts{{
+    {kBuiltinFontLatin, "notosans-regular.ttf", 0},
+    {kBuiltinFontArabic, "notosansarabic-regular.ttf", 0},
+    {kBuiltinFontThai, "notosansthai-regular.ttf", 0},
+    {kBuiltinFontSymbols, "notosanssymbols2-regular.ttf", 0},
+    // One collection holds the CJK faces, Japanese, Korean, Simplified and Traditional Chinese.
+    {kBuiltinFontCjkJp, "notosanscjk-regular.ttc", 0},
+    {kBuiltinFontCjkKr, "notosanscjk-regular.ttc", 1},
+    {kBuiltinFontCjkSc, "notosanscjk-regular.ttc", 2},
+    {kBuiltinFontCjkTc, "notosanscjk-regular.ttc", 3},
+}};
+
+const HostFallbackFont* FindHostFallbackFont(const std::filesystem::path& path) {
+    const std::string normalized = path.generic_string();
+    for (const auto& font : kHostFallbackFonts) {
+        if (normalized == font.virtual_path) {
+            return &font;
+        }
+    }
+    return nullptr;
+}
+
+// Lower-case file name to the first file of that name, from one walk of the folders.
+const std::unordered_map<std::string, std::filesystem::path>& HostFontFiles() {
+    static const auto files = [] {
+        std::vector<std::filesystem::path> dirs;
+        if (const char* list = std::getenv("BB_FALLBACK_FONTS")) {
+            std::string_view rest(list);
+            for (auto colon = rest.find(':'); !rest.empty(); colon = rest.find(':')) {
+                dirs.emplace_back(std::string(rest.substr(0, colon)));
+                rest.remove_prefix(colon == std::string_view::npos ? rest.size() : colon + 1);
+            }
+        }
+        if (const char* data_home = std::getenv("XDG_DATA_HOME"); data_home && *data_home) {
+            dirs.emplace_back(std::filesystem::path(data_home) / "fonts");
+        } else if (const char* home = std::getenv("HOME"); home && *home) {
+            dirs.emplace_back(std::filesystem::path(home) / ".local/share/fonts");
+        }
+        dirs.emplace_back("/usr/local/share/fonts");
+        dirs.emplace_back("/usr/share/fonts");
+        dirs.emplace_back("/run/current-system/sw/share/X11/fonts");
+
+        std::unordered_map<std::string, std::filesystem::path> found;
+        for (const auto& dir : dirs) {
+            std::error_code ec;
+            std::filesystem::recursive_directory_iterator it(
+                dir, std::filesystem::directory_options::skip_permission_denied, ec);
+            for (; !ec && it != std::filesystem::recursive_directory_iterator(); it.increment(ec)) {
+                std::error_code type_ec;
+                if (it->is_regular_file(type_ec)) {
+                    found.emplace(LowerAsciiString(it->path().filename().string()), it->path());
+                }
+            }
+        }
+        return found;
+    }();
+    return files;
+}
+
+std::filesystem::path HostFallbackFontPath(const HostFallbackFont& font) {
+    const auto& files = HostFontFiles();
+    const auto it = files.find(std::string(font.file_name_lower));
+    return it != files.end() ? it->second : std::filesystem::path{};
+}
+
+} // namespace
+
 std::shared_ptr<std::vector<unsigned char>> LoadBuiltinFontBytesShared(
     const std::filesystem::path& path, u32* out_subfont_index) {
-    const auto* blob = FindBuiltinFontBlob(path);
-    if (!blob) {
+    const auto* font = FindHostFallbackFont(path);
+    if (!font) {
         return {};
     }
     if (out_subfont_index) {
-        *out_subfont_index = blob->face_index;
+        *out_subfont_index = font->face_index;
     }
 
     static std::mutex cache_mutex;
-    static std::unordered_map<std::string, std::shared_ptr<std::vector<unsigned char>>> cache;
+    static std::unordered_map<std::string_view, std::shared_ptr<std::vector<unsigned char>>> cache;
+    std::scoped_lock lock(cache_mutex);
+    if (const auto it = cache.find(font->file_name_lower); it != cache.end()) {
+        return it->second;
+    }
 
-    const std::string cache_key(blob->virtual_path);
+    std::shared_ptr<std::vector<unsigned char>> bytes;
+    std::vector<unsigned char> file_bytes;
+    if (const auto host_path = HostFallbackFontPath(*font);
+        !host_path.empty() && LoadGuestFileBytes(host_path, file_bytes) && !file_bytes.empty()) {
+        bytes = std::make_shared<std::vector<unsigned char>>(std::move(file_bytes));
+    } else if (font->virtual_path == kBuiltinFontLatin) {
+        bytes = std::make_shared<std::vector<unsigned char>>(bb_font_ttf, bb_font_ttf_end);
+    } else {
+        return {};
+    }
+    return cache.emplace(font->file_name_lower, std::move(bytes)).first->second;
+}
+
+void LogFontSetFileOnce(u32 font_set_type, const std::filesystem::path& path) {
+    static std::mutex mutex;
+    static std::unordered_set<u32> logged;
     {
-        std::scoped_lock lock(cache_mutex);
-        if (const auto it = cache.find(cache_key); it != cache.end()) {
-            return it->second;
+        std::scoped_lock lock(mutex);
+        if (!logged.insert(font_set_type).second) {
+            return;
         }
     }
-
-    const unsigned int output_len = StbDecompressLength(blob->compressed_data);
-    if (output_len == 0u) {
-        return {};
+    std::string file = path.string();
+    if (const auto* font = FindHostFallbackFont(path)) {
+        const auto host_path = HostFallbackFontPath(*font);
+        if (!host_path.empty()) {
+            file = fmt::format("{} (face {}, fallback)", host_path.string(), font->face_index);
+        } else if (font->virtual_path == kBuiltinFontLatin) {
+            file = "embedded DejaVu Sans (fallback)";
+        }
     }
-
-    auto bytes = std::make_shared<std::vector<unsigned char>>(output_len);
-    if (StbDecompress(bytes->data(), blob->compressed_data) != output_len) {
-        return {};
-    }
-
-    {
-        std::scoped_lock lock(cache_mutex);
-        return cache.emplace(cache_key, std::move(bytes)).first->second;
-    }
+    std::printf("Font: set 0x%08X -> %s\n", font_set_type, file.c_str());
 }
 
 bool IsBuiltinFontPath(const std::filesystem::path& path) {
@@ -2042,10 +1936,9 @@ static bool DirectoryContainsAnyFontFiles(const std::filesystem::path& dir) {
 static std::filesystem::path GetSysFontBaseDirImpl(bool log_errors) {
     std::filesystem::path base = EmulatorSettings.GetFontsDir();
     std::error_code ec;
+    // bbport: unset is the usual case (no dump of the console's fonts); the fallback notice says
+    // so once instead of an error on every font set opened.
     if (base.empty()) {
-        if (log_errors) {
-            LOG_ERROR(Lib_Font, "SystemFonts: FontsPath not set");
-        }
         return {};
     }
     if (std::filesystem::is_directory(base, ec)) {
@@ -2276,11 +2169,8 @@ void AddBuiltinFallbackFaces(FontState& st, u32 font_set_type, u32 subfont_index
 void NotifyBuiltinFontFallbackOnce() {
     static std::once_flag once;
     std::call_once(once, [] {
-        shadNotifications::QueueNotification("WARNING! PS4 system fonts not found.\n"
-                                             "Using bundled fallback fonts instead.\n"
-                                             "Text rendering may be inaccurate.",
-                                             30.0f, shadNotifications::position::BottomRight,
-                                             shadNotifications::stockIcons::shadPS4);
+        std::printf("Font: PS4 system fonts not found (BB_SYS_FONTS); text uses fallback fonts and "
+                    "may not look as on the console\n");
     });
 }
 
@@ -2345,6 +2235,7 @@ bool AttachSystemFont(FontState& st, Libraries::Font::OrbisFontHandle handle) {
         NotifyBuiltinFontFallbackOnce();
     }
 
+    LogFontSetFileOnce(st.font_set_type, primary_path);
     LOG_INFO(Lib_Font, "system font attached");
     LOG_DEBUG(Lib_Font,
               "system font attach params:\n"

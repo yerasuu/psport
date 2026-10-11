@@ -15,8 +15,8 @@
 #include FT_FREETYPE_H
 #include FT_SYSTEM_H
 
-#include "core/libraries/font/font.h"
-#include "core/libraries/font/fontft.h"
+#include "font.h"
+#include "fontft.h"
 
 namespace Libraries::Font {
 

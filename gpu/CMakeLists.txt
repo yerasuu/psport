@@ -133,9 +133,12 @@ file(GLOB CP_SOURCES CONFIGURE_DEPENDS cp/*.cpp)
 file(GLOB NGS2_SOURCES CONFIGURE_DEPENDS ngs2/*.cpp)
 # libSceFiber, the fibers libSceUlt's job threads run on (fiber/README.md).
 file(GLOB FIBER_SOURCES CONFIGURE_DEPENDS fiber/*.cpp)
+# libSceFont and libSceFontFt, text rendered over FreeType (font/README.md).
+file(GLOB FONT_SOURCES CONFIGURE_DEPENDS font/*.cpp)
+pkg_check_modules(FREETYPE REQUIRED IMPORTED_TARGET freetype2)
 file(GLOB ATRAC9_SOURCES CONFIGURE_DEPENDS ../third_party/LibAtrac9/C/src/*.c)
 add_library(bbgpu SHARED ${VIDEO_CORE} ${RECOMPILER} ${COMMON} ${SHIM_SOURCES} ${LAYER_SOURCES} ${GAME_SOURCES} ${CP_SOURCES}
-    ${NGS2_SOURCES} ${FIBER_SOURCES} ${ATRAC9_SOURCES}
+    ${NGS2_SOURCES} ${FIBER_SOURCES} ${FONT_SOURCES} ${ATRAC9_SOURCES}
     shadps4/core/libraries/gnmdriver/gnmdriver.cpp
     shadps4/core/libraries/videoout/driver.cpp shadps4/core/libraries/videoout/video_out.cpp
     shadps4/core/libraries/kernel/equeue.cpp ${AVPLAYER}
@@ -172,7 +175,7 @@ target_compile_options(bbgpu PRIVATE -ftls-model=initial-exec)
 target_link_options(bbgpu PRIVATE -Wl,--allow-shlib-undefined)
 target_link_libraries(bbgpu PRIVATE ffx-vulkan::portable ffx-vulkan::fsr4-v07-vulkan)
 target_link_libraries(bbgpu PUBLIC Vulkan::Headers fmt::fmt Boost::headers magic_enum::magic_enum
-    tsl::robin_map GPUOpen::VulkanMemoryAllocator PkgConfig::XXHASH PkgConfig::SDL3 PkgConfig::X11 PkgConfig::FFMPEG miniz::miniz Zydis::Zydis sirit)
+    tsl::robin_map GPUOpen::VulkanMemoryAllocator PkgConfig::XXHASH PkgConfig::SDL3 PkgConfig::X11 PkgConfig::FFMPEG PkgConfig::FREETYPE miniz::miniz Zydis::Zydis sirit)
 
 # Explicit test targets; neither launches the game nor needs a Vulkan device.
 add_executable(motion-history-test EXCLUDE_FROM_ALL ../tests/test_motion_history.cpp)
@@ -231,6 +234,12 @@ target_compile_options(translation-memory-test PRIVATE -UNDEBUG -fPIC)
 set_source_files_properties(../tests/test_translation_memory.cpp PROPERTIES
     COMPILE_OPTIONS "-fvisibility=hidden;-fvisibility-inlines-hidden")
 target_link_libraries(translation-memory-test PRIVATE bbgpu)
+
+add_executable(font-test EXCLUDE_FROM_ALL ../tests/test_font.cpp ../tests/test_gpu_runtime_stubs.cpp)
+target_include_directories(font-test PRIVATE . shim shadps4)
+target_compile_options(font-test PRIVATE -UNDEBUG)
+set_source_files_properties(../tests/test_font.cpp PROPERTIES COMPILE_OPTIONS "-Wall;-Wextra;-Werror")
+target_link_libraries(font-test PRIVATE bbgpu)
 
 # bbport: FSR 4 benchmark outside the game (tools/fsr4_bench.cpp): ninja -C out/gpu fsr4-bench.
 add_executable(upscaler-support-test EXCLUDE_FROM_ALL ../tests/test_upscaler_support.cpp

@@ -17,6 +17,7 @@ is the files as they were at the source; later commits adapt them.
 |---|---|---|---|---|
 | libSceNgs2 (software audio mixer) | `gpu/ngs2/` | [AnyPS5](https://github.com/boykopovar/AnyPS5) `5edae353`, `core/libs/prx/libSceNgs2.native` | GPL-2.0 | PS4 structure layouts (AnyPS5's are PS5's), exceptions turned into error codes at the game boundary, unimplemented effects pass audio through, decoding over upstream LibAtrac9 |
 | libSceFiber (user-level fibers) | `gpu/fiber/` | [shadPS4](https://github.com/shadps4-emu/shadPS4) `3a9f572`, `src/core/libraries/fiber` | GPL-2.0-or-later | TCB read through GS, failures logged, `BB_FIBER_TRACE` |
+| libSceFont, libSceFontFt (text over FreeType) | `gpu/font/` | [shadPS4](https://github.com/shadps4-emu/shadPS4) `3a9f572`, `src/core/libraries/font` | GPL-2.0-or-later | guest paths through the runtime's mounts, system fonts from `BB_SYS_FONTS` else the host's Noto (or the embedded DejaVu Sans), exceptions turned into error codes, `sceFontGlyphRenderImage` and `sceFontCloseFont` implemented |
 | NID to name table | `src/import_names_all.inc` | shadPS4's aerolib list (via universal_ps4_native's `data/aerolib.csv`) | GPL-2.0-or-later | generated, sorted for binary search |
 | ulobjmgr contracts | `src/runtime_ulobjmgr.c` | written from shadPS4's `core/libraries/ulobjmgr` | GPL-2.0-or-later | ids handed out per object |
 
@@ -26,6 +27,10 @@ is the files as they were at the source; later commits adapt them.
 title needs. They are never part of this repository or of anything built from it, and each is a
 stopgap until the port implements its library: `BB_HLE=libSceX` keeps one to the port,
 `BB_LLE=libSceFiber` links one the port already implements, to compare the two.
+
+`BB_SYS_FONTS=<folder>` likewise reads the user's own dump of the console's system fonts (SST and the
+rest). Without it libSceFont draws each font set with the host's Noto fonts (`BB_FALLBACK_FONTS`
+adds folders to look in) and logs the file it chose once per set.
 
 ## Diagnostics
 

@@ -37,9 +37,8 @@
 
 #include "common/logging/log.h"
 #include "common/singleton.h"
-#include "core/file_sys/fs.h"
 #include "core/libraries/error_codes.h"
-#include "core/libraries/font/font.h"
+#include "font.h"
 #include "core/libraries/libs.h"
 #include "font_error.h"
 
@@ -832,7 +831,6 @@ extern const u8 kStyleFrameFlagScale;
 extern const u8 kStyleFrameFlagWeight;
 extern const u8 kStyleFrameFlagSlant;
 
-extern Core::FileSys::MntPoints* g_mnt;
 extern std::unordered_map<Libraries::Font::OrbisFontHandle, FontState> g_font_state;
 extern std::unordered_map<Libraries::Font::OrbisFontLib, LibraryState> g_library_state;
 extern std::unordered_map<Libraries::Font::OrbisFontRenderSurface*,
@@ -918,6 +916,8 @@ bool AddSystemFallbackFace(FontState& st, const std::filesystem::path& path, u32
 void AddBuiltinFallbackFaces(FontState& st, u32 font_set_type, u32 subfont_index,
                              std::string* preferred_latin_name_lower);
 void NotifyBuiltinFontFallbackOnce();
+// bbport: names, once per font set, the host file its primary font was read from.
+void LogFontSetFileOnce(u32 font_set_type, const std::filesystem::path& path);
 bool AttachSystemFont(FontState& st, Libraries::Font::OrbisFontHandle handle);
 std::string ReportSystemFaceRequest(FontState& st, Libraries::Font::OrbisFontHandle handle,
                                     bool& attached_out);

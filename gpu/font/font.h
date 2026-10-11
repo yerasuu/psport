@@ -482,7 +482,7 @@ OrbisFontTextCharacter* PS4_SYSV_ABI
 sceFontCharacterRefersTextNext(OrbisFontTextCharacter* textCharacter);
 s32 PS4_SYSV_ABI sceFontCharactersRefersTextCodes();
 s32 PS4_SYSV_ABI sceFontClearDeviceCache(OrbisFontLib library);
-s32 PS4_SYSV_ABI sceFontCloseFont();
+s32 PS4_SYSV_ABI sceFontCloseFont(OrbisFontHandle fontHandle);
 s32 PS4_SYSV_ABI sceFontControl();
 s32 PS4_SYSV_ABI sceFontCreateGraphicsDevice();
 s32 PS4_SYSV_ABI sceFontCreateGraphicsService();
@@ -565,9 +565,24 @@ sceFontGlyphRefersMetricsHorizontalAdvance(OrbisFontGlyph fontGlyph);
 const OrbisFontGlyphMetricsHorizontalX* PS4_SYSV_ABI
 sceFontGlyphRefersMetricsHorizontalX(OrbisFontGlyph fontGlyph);
 OrbisFontGlyphOutline* PS4_SYSV_ABI sceFontGlyphRefersOutline(OrbisFontGlyph glyph);
-s32 PS4_SYSV_ABI sceFontGlyphRenderImage();
-s32 PS4_SYSV_ABI sceFontGlyphRenderImageHorizontal();
-s32 PS4_SYSV_ABI sceFontGlyphRenderImageVertical();
+s32 PS4_SYSV_ABI sceFontGlyphRenderImage(OrbisFontGlyph fontGlyph,
+                                         OrbisFontStyleFrame* fontStyleFrame,
+                                         OrbisFontRenderer fontRenderer,
+                                         OrbisFontRenderSurface* surface, float x, float y,
+                                         OrbisFontGlyphMetrics* metrics,
+                                         OrbisFontRenderOutput* result);
+s32 PS4_SYSV_ABI sceFontGlyphRenderImageHorizontal(OrbisFontGlyph fontGlyph,
+                                                   OrbisFontStyleFrame* fontStyleFrame,
+                                                   OrbisFontRenderer fontRenderer,
+                                                   OrbisFontRenderSurface* surface, float x,
+                                                   float y, OrbisFontGlyphMetrics* metrics,
+                                                   OrbisFontRenderOutput* result);
+s32 PS4_SYSV_ABI sceFontGlyphRenderImageVertical(OrbisFontGlyph fontGlyph,
+                                                 OrbisFontStyleFrame* fontStyleFrame,
+                                                 OrbisFontRenderer fontRenderer,
+                                                 OrbisFontRenderSurface* surface, float x, float y,
+                                                 OrbisFontGlyphMetrics* metrics,
+                                                 OrbisFontRenderOutput* result);
 s32 PS4_SYSV_ABI sceFontGraphicsBeginFrame();
 s32 PS4_SYSV_ABI sceFontGraphicsDrawingCancel();
 s32 PS4_SYSV_ABI sceFontGraphicsDrawingFinish();
