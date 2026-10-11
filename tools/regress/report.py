@@ -25,7 +25,8 @@ AUDIO = re.compile(r'^Audio stats port \d+:.* peak (-?[\d.]+|-inf) dBFS')
 GUEST_FAULT = re.compile(r'^Guest fault \(signal (\d+)\) at guest offset (0x[0-9a-f]+)')
 HOST_FAULT = re.compile(r'^Host fault \(signal (\d+)\) in (\S+)\+(0x[0-9a-f]+) \(([^)]*)\)')
 OTHER_FAULT = re.compile(r'^Fault \(signal (\d+)\) at RIP')
-STOP = re.compile(r'^(STOP: .*|.*Assertion Failed!.*|terminate called .*)')
+# glibc's assert() as well as the GPU library's: the runtime uses both.
+STOP = re.compile(r'^(STOP: .*|.*Assertion Failed!.*|.*: Assertion .* failed\.|terminate called .*)')
 AUDIO_FLOOR_DBFS = -60.0
 # Mean Rec. 709 luma (0-255) above which a frame counts as drawn: a black clear with a cursor or a
 # few dim pixels stays below it, a logo on black does not.
@@ -86,6 +87,9 @@ def classify(run_dir):
                 result['peak_dbfs'] = peak
         elif not result['crash'] and not stopping and (sig := crash_signature(line)):
             result['crash'] = sig
+    # SIGABRT, SIGFPE or SIGKILL leave no fault line, yet the game ended before its schedule did.
+    if not result['crash'] and result['status'] == 'exited':
+        result['crash'] = 'exited without a fault line'
     for dump in sorted((run_dir / 'shots').glob('*_present_*.raw')):
         luma = mean_luma(dump)
         if luma is None:
