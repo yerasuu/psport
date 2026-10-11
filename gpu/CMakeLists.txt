@@ -235,6 +235,12 @@ set_source_files_properties(../tests/test_translation_memory.cpp PROPERTIES
     COMPILE_OPTIONS "-fvisibility=hidden;-fvisibility-inlines-hidden")
 target_link_libraries(translation-memory-test PRIVATE bbgpu)
 
+add_executable(font-test EXCLUDE_FROM_ALL ../tests/test_font.cpp ../tests/test_gpu_runtime_stubs.cpp)
+target_include_directories(font-test PRIVATE . shim shadps4)
+target_compile_options(font-test PRIVATE -UNDEBUG)
+set_source_files_properties(../tests/test_font.cpp PROPERTIES COMPILE_OPTIONS "-Wall;-Wextra;-Werror")
+target_link_libraries(font-test PRIVATE bbgpu)
+
 # bbport: FSR 4 benchmark outside the game (tools/fsr4_bench.cpp): ninja -C out/gpu fsr4-bench.
 add_executable(upscaler-support-test EXCLUDE_FROM_ALL ../tests/test_upscaler_support.cpp
     shim/bbport_settings.cpp)
