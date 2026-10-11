@@ -668,6 +668,12 @@ static ABI int32_t direct_memory_query(uint64_t offset, int flags, DirectQueryIn
     read_unlock();
     return 0;
 }
+/* Locking only keeps pages resident, which the guest cannot observe: the range is checked and
+ * left as it is. */
+static ABI int32_t lock_range(const void *address, uint64_t size) {
+    if (!address || !size || (uintptr_t)address+size<(uintptr_t)address) return INVALID;
+    return 0;
+}
 /* Range names only label mappings for the console's debugging tools, so they are checked and
  * dropped; VirtualQuery names a range by its kind. */
 static ABI int32_t set_virtual_range_name(const void *address, uint64_t size, const char *name) {
@@ -710,6 +716,7 @@ static const RuntimeExport exports[]={
     {"sceKernelMprotect",kernel_mprotect}, {"sceKernelQueryMemoryProtection",query_protection},
     {"sceKernelVirtualQuery",virtual_query}, {"sceKernelGetDirectMemoryType",direct_memory_type},
     {"sceKernelDirectMemoryQuery",direct_memory_query}, {"sceKernelSetVirtualRangeName",set_virtual_range_name},
+    {"sceKernelMlock",lock_range},
     {"sceKernelBatchMap",batch_map}, {"sceKernelBatchMap2",batch_map2},
     {"mmap",posix_mmap},
 };
