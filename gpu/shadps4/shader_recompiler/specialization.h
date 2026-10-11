@@ -92,6 +92,9 @@ struct StageSpecialization {
     boost::container::small_vector<FMaskSpecialization, 8> fmasks;
     boost::container::small_vector<SamplerSpecialization, 16> samplers;
     Backend::Bindings start{};
+    /// bbport: Info::xfb_stride of this permutation's translation. A result of the translation
+    /// rather than an input that selects it, so operator== leaves it out.
+    u32 xfb_stride{};
 
     StageSpecialization() = default;
     StageSpecialization(const Info& info_, RuntimeInfo runtime_info_, const Profile& profile_,

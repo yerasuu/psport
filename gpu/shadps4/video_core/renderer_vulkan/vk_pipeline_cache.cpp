@@ -998,6 +998,7 @@ bool PipelineCache::RefreshGraphicsStages(PipelineSelection& sel) {
     sel.fetch_shader = std::nullopt;
 
     Shader::Backend::Bindings binding{};
+    u32 bound_xfb_stride{};
     const auto bind_stage = [&](HwStage stage_in, SwStage stage_out) -> bool {
         const auto stage_in_idx = static_cast<u32>(stage_in);
         const auto stage_out_idx = static_cast<u32>(stage_out);
@@ -1017,7 +1018,7 @@ bool PipelineCache::RefreshGraphicsStages(PipelineSelection& sel) {
         const auto params = AmdGpu::GetParams(*pgm);
         std::optional<Shader::Gcn::FetchShaderData> fetch_shader_;
         std::tie(sel.infos[stage_out_idx], sel.modules[stage_out_idx], fetch_shader_,
-                 key.stage_hashes[stage_out_idx]) =
+                 key.stage_hashes[stage_out_idx], bound_xfb_stride) =
             GetProgram(sel, stage_in, stage_out, params, binding);
         if (fetch_shader_) {
             sel.fetch_shader = fetch_shader_;
@@ -1026,11 +1027,12 @@ bool PipelineCache::RefreshGraphicsStages(PipelineSelection& sel) {
     };
 
     // bbport: a stream-out GS whose module came out without transform feedback (the copy
-    // shader's stores didn't map onto it, Info::xfb_stride) must not draw: the vertices later draws
-    // read back would not be written. The emitter logs why.
+    // shader's stores didn't map onto it) must not draw: the vertices later draws read back would
+    // not be written. The emitter logs why. Called right after the GS is bound, so
+    // bound_xfb_stride is that permutation's.
     const auto loses_stream_out = [&] {
         const u32 stride = sel.runtime_infos[u32(SwStage::Geometry)].hw.gs.xfb_stride;
-        return stride != 0 && sel.infos[u32(SwStage::Geometry)]->xfb_stride != stride;
+        return stride != 0 && bound_xfb_stride != stride;
     };
 
     sel.infos.fill(nullptr);
@@ -1126,7 +1128,7 @@ bool PipelineCache::RefreshComputeKey() {
     Shader::Backend::Bindings binding{};
     const auto& cs_pgm = liverpool->GetCsRegs();
     const auto cs_params = AmdGpu::GetParams(cs_pgm);
-    std::tie(sel.infos[0], sel.modules[0], sel.fetch_shader, compute_key.value) =
+    std::tie(sel.infos[0], sel.modules[0], sel.fetch_shader, compute_key.value, std::ignore) =
         GetProgram(sel, HwStage::Compute, SwStage::Compute, cs_params, binding);
     return true;
 }
@@ -1207,7 +1209,7 @@ PipelineCache::Result PipelineCache::GetProgram(PipelineSelection& sel, HwStage 
         worker.stages.push_back(
             {program, params.hash, hw_stage, info.pgm_base, &info.flattened_ud_buf});
         return std::make_tuple(&info, it->module, it->spec.fetch_shader_data,
-                               HashCombine(params.hash, perm_idx));
+                               HashCombine(params.hash, perm_idx), it->spec.xfb_stride);
     }
 
     auto it_pgm = program_cache.find(params.hash); // this thread is the only writer
@@ -1217,6 +1219,7 @@ PipelineCache::Result PipelineCache::GetProgram(PipelineSelection& sel, HwStage 
         const auto module =
             CompileModule(new_program->info, runtime_info, params.code, 0, binding);
         auto spec = Shader::StageSpecialization(new_program->info, runtime_info, profile, start);
+        spec.xfb_stride = new_program->info.xfb_stride;
         const auto perm_hash = HashCombine(params.hash, 0);
 
         RegisterShaderMeta(new_program->info, spec.fetch_shader_data, spec, perm_hash, 0);
@@ -1228,7 +1231,7 @@ PipelineCache::Result PipelineCache::GetProgram(PipelineSelection& sel, HwStage 
             program_cache.emplace(params.hash, std::move(new_program));
         }
         return std::make_tuple(&program->info, module, program->modules[0].spec.fetch_shader_data,
-                               perm_hash);
+                               perm_hash, program->modules[0].spec.xfb_stride);
     }
 
     auto& program = it_pgm.value();
@@ -1259,6 +1262,7 @@ PipelineCache::Result PipelineCache::GetProgram(PipelineSelection& sel, HwStage 
     if (it == program->modules.end()) {
         auto new_info = Shader::Info(hw_stage, sw_stage, params);
         module = CompileModule(new_info, runtime_info, params.code, perm_idx, binding);
+        spec.xfb_stride = new_info.xfb_stride;
 
         RegisterShaderMeta(info, spec.fetch_shader_data, spec, perm_hash, perm_idx);
         std::unique_lock lk{programs_mutex};
@@ -1270,7 +1274,8 @@ PipelineCache::Result PipelineCache::GetProgram(PipelineSelection& sel, HwStage 
         perm_hash = HashCombine(params.hash, perm_idx);
     }
     return std::make_tuple(&program->info, module,
-                           program->modules[perm_idx].spec.fetch_shader_data, perm_hash);
+                           program->modules[perm_idx].spec.fetch_shader_data, perm_hash,
+                           program->modules[perm_idx].spec.xfb_stride);
 }
 
 std::optional<vk::ShaderModule> PipelineCache::ReplaceShader(vk::ShaderModule module,
