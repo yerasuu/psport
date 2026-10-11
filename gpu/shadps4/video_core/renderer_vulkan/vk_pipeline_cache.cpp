@@ -4,7 +4,9 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdio>
 #include <cstdlib>
+#include <format>
 #include <cstring>
 #include <deque>
 #include <functional>
@@ -898,6 +900,71 @@ bool PipelineCache::RefreshGraphicsKey(PipelineSelection& sel) {
     return true;
 }
 
+// bbport: which geometry-shader setups the translator still skips, and how often. Each distinct
+// setup (stream-out streams and buffers, on-chip mode, GS program) is described once; the skipped
+// draws are counted, every 5000 reported. What to implement first is read off this.
+static bool SkipUnsupportedGeometry(const AmdGpu::Regs& regs, const char* stages) {
+    const bool onchip = regs.vgt_gs_mode.onchip != 0;
+    const u32 strmout = regs.vgt_strmout_config.raw;
+    if (!onchip && !strmout) {
+        return false;
+    }
+    static std::mutex lock;
+    static std::unordered_set<u64> described;
+    static u64 skipped_streamout, skipped_onchip;
+    const auto* gs = regs.ProgramForStage(static_cast<u32>(HwStage::Geometry));
+    const u64 gs_address = gs ? reinterpret_cast<u64>(gs->Address<u32*>()) : 0;
+    const u32 buffers = *reinterpret_cast<const u32*>(&regs.vgt_strmout_buffer_config);
+    const u64 key = gs_address ^ (u64(strmout) << 48) ^ (u64(buffers) << 32) ^ (onchip ? 1ull << 63 : 0);
+    std::scoped_lock guard{lock};
+    (strmout ? skipped_streamout : skipped_onchip)++;
+    if (described.insert(key).second) {
+        // BB_DUMP_SKIPPED_GS=<dir>: the GS and its copy shader (the VS stage), up to s_endpgm, to
+        // disassemble what a stream-out implementation has to reproduce.
+        if (const char* dir = std::getenv("BB_DUMP_SKIPPED_GS")) {
+            for (const auto [stage, label] : {std::pair{HwStage::Geometry, "gs"}, std::pair{HwStage::Vertex, "copy"},
+                                              std::pair{HwStage::Export, "es"}}) {
+                const auto* program = regs.ProgramForStage(static_cast<u32>(stage));
+                const u32* code = program ? program->Address<u32*>() : nullptr;
+                if (!code) {
+                    continue;
+                }
+                size_t words = 0;
+                while (words < 16384 && code[words] != 0xBF810000u) {
+                    ++words;
+                }
+                const std::string path = std::format("{}/{}_{:x}.bin", dir, label, reinterpret_cast<u64>(code));
+                if (FILE* f = std::fopen(path.c_str(), "wb")) {
+                    std::fwrite(code, 4, words + 1, f);
+                    std::fclose(f);
+                }
+            }
+        }
+        std::string buffer_regs;
+        const u32 buffer_mask = (buffers | buffers >> 4 | buffers >> 8 | buffers >> 12) & 0xf;
+        for (u32 i = 0; i < 4; ++i) {
+            if (buffer_mask >> i & 1) {
+                const auto& buffer = regs.vgt_strmout_buffers[i];
+                buffer_regs += std::format(", buffer {} size/stride/offset {:#x}/{}/{:#x} dwords", i, buffer.size,
+                                           static_cast<u32>(buffer.vtx_stride), buffer.offset);
+            }
+        }
+        const auto& vs = regs.vs_program.settings;
+        LOG_WARNING(Render_Vulkan,
+                    "Skipped {} draw: {}{}stream-out config {:#x} (streams {:04b}, rasterized {}), "
+                    "buffers {:#06x}{}, copy VS so_en {} so_base_en {:04b} user SGPRs {}, GS program {:#x}",
+                    stages, onchip ? "on-chip GS, " : "", strmout ? "" : "no ", strmout, strmout & 0xf,
+                    static_cast<u32>(regs.vgt_strmout_config.rast_stream), buffers, buffer_regs,
+                    static_cast<u32>(vs.so_en), static_cast<u32>(vs.so_base_en), static_cast<u32>(vs.num_user_regs),
+                    gs_address);
+    }
+    if ((skipped_streamout + skipped_onchip) % 5000 == 0) {
+        LOG_WARNING(Render_Vulkan, "Skipped geometry-shader draws so far: {} with stream-out, {} on-chip only",
+                    skipped_streamout, skipped_onchip);
+    }
+    return true;
+}
+
 bool PipelineCache::RefreshGraphicsStages(PipelineSelection& sel) {
     const auto& regs = (*sel.regs);
     auto& key = sel.graphics_key;
@@ -946,8 +1013,7 @@ bool PipelineCache::RefreshGraphicsStages(PipelineSelection& sel) {
             LOG_WARNING(Render_Vulkan, "Geometry shader stage unsupported, skipping");
             return false;
         }
-        if (regs.vgt_gs_mode.onchip || regs.vgt_strmout_config.raw) {
-            LOG_WARNING(Render_Vulkan, "Geometry shader features unsupported, skipping");
+        if (SkipUnsupportedGeometry(regs, "ES-GS")) {
             return false;
         }
         if (!bind_stage(HwStage::Export, SwStage::Vertex)) {
@@ -979,8 +1045,7 @@ bool PipelineCache::RefreshGraphicsStages(PipelineSelection& sel) {
             LOG_WARNING(Render_Vulkan, "Geometry shader stage unsupported, skipping");
             return false;
         }
-        if (regs.vgt_gs_mode.onchip || regs.vgt_strmout_config.raw) {
-            LOG_WARNING(Render_Vulkan, "Geometry shader features unsupported, skipping");
+        if (SkipUnsupportedGeometry(regs, "LS-HS-ES-GS")) {
             return false;
         }
         if (!bind_stage(HwStage::Hull, SwStage::TessellationControl)) {

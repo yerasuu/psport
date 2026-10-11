@@ -94,6 +94,8 @@ if [[ ${1:-} == --test ]]; then
     out/sema-test
     "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -pthread -I. -Isrc tests/test_online.c "${runtime[@]}" out/libatrac9.a -lm "${gpu[@]}" "${libraries[@]}" -o out/online-test
     out/online-test
+    ninja -C out/gpu copy-shader-test >/dev/null
+    out/gpu/copy-shader-test
     "$CC" -std=c11 -D_GNU_SOURCE -O2 -g -Wall -Wextra -Werror -I. -Isrc tests/test_content.c src/runtime_content.c -o out/content-test
     out/content-test
 fi
