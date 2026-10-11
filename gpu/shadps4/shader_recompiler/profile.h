@@ -44,6 +44,7 @@ struct Profile {
     bool supports_amd_shader_explicit_vertex_parameter{};
     bool supports_fragment_shader_barycentric{};
     bool supports_shader_subgroup_clock{};
+    bool supports_transform_feedback{};
     bool has_broken_spirv_clamp{};
     bool lower_left_origin_mode{};
     bool needs_manual_interpolation{};
