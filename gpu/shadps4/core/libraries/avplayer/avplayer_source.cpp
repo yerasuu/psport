@@ -543,6 +543,7 @@ void AvPlayerSource::DemuxerThread(std::stop_token stop) {
     }
     LOG_INFO(Lib_AvPlayer, "Demuxer Thread started");
 
+    bool read_since_loop = false;
     while (!stop.stop_requested()) {
         if (m_video_packets.Size() > 30 &&
             (!m_audio_stream_index.has_value() || m_audio_packets.Size() > 8)) {
@@ -553,8 +554,12 @@ void AvPlayerSource::DemuxerThread(std::stop_token stop) {
         const auto res = av_read_frame(m_avformat_context.get(), up_packet.get());
         if (res < 0) {
             if (res == AVERROR_EOF) {
-                if (m_is_looping) {
+                // bbport: a loop that yields no packet, or a seek that fails, would otherwise spin
+                // this thread at full CPU forever; end the source as if it did not loop.
+                if (m_is_looping && read_since_loop) {
                     LOG_INFO(Lib_AvPlayer, "EOF reached in demuxer. Looping the source...");
+                    read_since_loop = false;
+                    bool seeked = true;
                     m_state.OnWarning(ORBIS_AVPLAYER_ERROR_WAR_LOOPING_BACK);
                     // bbport: no raw avio_seek to byte 0 first: the mov demuxer then reads the
                     // moov atom again as a new root, drops it as a duplicate and returns EOF
@@ -562,16 +567,20 @@ void AvPlayerSource::DemuxerThread(std::stop_token stop) {
                     if (m_video_stream_index.has_value()) {
                         const auto index = m_streams[m_video_stream_index.value()].ffmpeg_index;
                         const auto stream = m_avformat_context->streams[index];
-                        avformat_seek_file(m_avformat_context.get(), index, 0, 0, stream->duration,
-                                           0);
+                        seeked &= avformat_seek_file(m_avformat_context.get(), index, 0, 0,
+                                                     stream->duration, 0) >= 0;
                     }
                     if (m_audio_stream_index.has_value()) {
                         const auto index = m_streams[m_audio_stream_index.value()].ffmpeg_index;
                         const auto stream = m_avformat_context->streams[index];
-                        avformat_seek_file(m_avformat_context.get(), index, 0, 0, stream->duration,
-                                           0);
+                        seeked &= avformat_seek_file(m_avformat_context.get(), index, 0, 0,
+                                                     stream->duration, 0) >= 0;
                     }
-                    continue;
+                    if (seeked) {
+                        continue;
+                    }
+                    LOG_WARNING(Lib_AvPlayer, "Could not seek back to the start. Ending the source.");
+                    break;
                 } else {
                     LOG_INFO(Lib_AvPlayer, "EOF reached in demuxer. Exiting.");
                     break;
@@ -583,6 +592,7 @@ void AvPlayerSource::DemuxerThread(std::stop_token stop) {
             }
             break;
         }
+        read_since_loop = true;
         if (up_packet->stream_index == m_video_stream_index) {
             m_video_packets.Push(std::move(up_packet));
             m_video_packets_cv.Notify();
