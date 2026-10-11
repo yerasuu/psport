@@ -14,7 +14,7 @@
 
 namespace Serialization {
 /* You should increment versions below once corresponding serialization scheme is changed. */
-static constexpr u32 ShaderBinaryVersion = 9u; // layer page-table pairs / guarded write-through stores
+static constexpr u32 ShaderBinaryVersion = 10u; // bbport: point-list GS output mode (OutputPoints)
 static constexpr u32 ShaderMetaVersion = 10u; // bbport: StageSpecialization::xfb_stride
 static constexpr u32 PipelineKeyVersion = 6u; // bbport: SerializationSupport::xfb_stride
 } // namespace Serialization
