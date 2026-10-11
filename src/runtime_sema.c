@@ -189,14 +189,6 @@ static const RuntimeExport exports[]={
     {"scePthreadSemTimedwait",psem_timedwait}, {"scePthreadSemPost",psem_post},
     {"scePthreadSemDestroy",psem_destroy}, {"scePthreadSemGetvalue",psem_getvalue},
 };
-/* Read-only test/diagnostic snapshot, not exposed to guest code. */
-unsigned runtime_sema_waiters(uint32_t id) {
-    runtime_exception_lock(&lock);
-    Sema *s=find(id); unsigned n=0;
-    if (s) for (Waiter *w=s->first;w;w=w->next) ++n;
-    runtime_exception_unlock(&lock);
-    return n;
-}
 uintptr_t runtime_sema_resolve(const char *name) {
     if (!strcmp(name,"188x57JYp0g#p#J")) return (uintptr_t)sem_create;
     if (!strcmp(name,"Zxa0VhQVTsk#p#J")) return (uintptr_t)sem_wait;
@@ -215,5 +207,4 @@ void runtime_sema_report(void) {
 #else
 uintptr_t runtime_sema_resolve(const char *name) { (void)name; return 0; }
 void runtime_sema_report(void) { puts("Runtime: Windows semaphore backend not implemented"); }
-unsigned runtime_sema_waiters(uint32_t id) { (void)id; return 0; }
 #endif

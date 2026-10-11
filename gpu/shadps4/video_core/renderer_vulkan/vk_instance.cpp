@@ -116,9 +116,6 @@ Instance::Instance(Frontend::WindowSDL& window, s32 physical_device_index,
                    bool enable_validation /*= false*/, bool enable_crash_diagnostic /*= false*/)
     : Instance(window.GetWindowInfo(), physical_device_index, enable_validation, enable_crash_diagnostic) {}
 
-Instance::Instance(s32 index, bool validation)
-    : Instance(Frontend::WindowSystemInfo{}, index, validation, false) {}
-
 Instance::Instance(const Frontend::WindowSystemInfo& window_info, s32 physical_device_index,
                    bool enable_validation, bool enable_crash_diagnostic)
     : instance{CreateInstance(window_info.type, enable_validation, enable_crash_diagnostic)},

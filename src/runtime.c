@@ -48,12 +48,10 @@ static ABI void guest_set_heap_api(void **api) {
     application_heap_api=api;
     puts("Runtime: application heap API registered");
 }
-void **runtime_application_heap_api(void) { return application_heap_api; }
 void runtime_set_module_tls(uint64_t module, const void *data, uint64_t filesz, uint64_t memsz) {
     if (module<2 || module>=TLS_MODULES) { fputs("STOP: unsupported TLS module id\n",stderr); exit(21); }
     tls_modules[module].data=data; tls_modules[module].filesz=filesz; tls_modules[module].memsz=memsz;
 }
-void runtime_set_libc_tls(const void *data, uint64_t filesz, uint64_t memsz) { runtime_set_module_tls(2,data,filesz,memsz); }
 static ABI void *guest_tls_get_addr(const uint64_t *index) {
     if (!index || index[0]<2 || index[0]>=TLS_MODULES || !tls_modules[index[0]].data || index[1]>=tls_modules[index[0]].memsz) {
         fputs("STOP: unsupported TLS module/offset\n",stderr); exit(21);
