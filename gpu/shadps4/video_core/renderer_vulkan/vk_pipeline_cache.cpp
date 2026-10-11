@@ -4,7 +4,9 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdio>
 #include <cstdlib>
+#include <format>
 #include <cstring>
 #include <deque>
 #include <functional>
@@ -917,6 +919,27 @@ static bool SkipUnsupportedGeometry(const AmdGpu::Regs& regs, const char* stages
     std::scoped_lock guard{lock};
     (strmout ? skipped_streamout : skipped_onchip)++;
     if (described.insert(key).second) {
+        // BB_DUMP_SKIPPED_GS=<dir>: the GS and its copy shader (the VS stage), up to s_endpgm, to
+        // disassemble what a stream-out implementation has to reproduce.
+        if (const char* dir = std::getenv("BB_DUMP_SKIPPED_GS")) {
+            for (const auto [stage, label] : {std::pair{HwStage::Geometry, "gs"}, std::pair{HwStage::Vertex, "copy"},
+                                              std::pair{HwStage::Export, "es"}}) {
+                const auto* program = regs.ProgramForStage(static_cast<u32>(stage));
+                const u32* code = program ? program->Address<u32*>() : nullptr;
+                if (!code) {
+                    continue;
+                }
+                size_t words = 0;
+                while (words < 16384 && code[words] != 0xBF810000u) {
+                    ++words;
+                }
+                const std::string path = std::format("{}/{}_{:x}.bin", dir, label, reinterpret_cast<u64>(code));
+                if (FILE* f = std::fopen(path.c_str(), "wb")) {
+                    std::fwrite(code, 4, words + 1, f);
+                    std::fclose(f);
+                }
+            }
+        }
         LOG_WARNING(Render_Vulkan,
                     "Skipped {} draw: {}{}stream-out config {:#x} (streams {:04b}, rasterized {}), "
                     "buffers {:#06x}, GS program {:#x}",
