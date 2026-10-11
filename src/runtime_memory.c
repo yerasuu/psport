@@ -50,8 +50,10 @@ typedef struct {
     uint32_t flags; char name[32];
 } VirtualQueryInfo; /* flags: flexible, direct, stack, pooled, committed */
 typedef struct { void *start; uint64_t offset, length; int8_t prot, type; int16_t reserved; int32_t operation; } BatchEntry;
+typedef struct { uint64_t start, end; int32_t memory_type; } DirectQueryInfo;
 _Static_assert(sizeof(VirtualQueryInfo)==72,"PS4 virtual query info layout");
 _Static_assert(sizeof(BatchEntry)==32,"PS4 batch map entry layout");
+_Static_assert(sizeof(DirectQueryInfo)==24,"PS4 direct memory query info layout");
 
 /* Region table lock. Lookups (GPU per-draw queries, VirtualQuery, GPU page
  * protection) share it; map/unmap/protect take it exclusively. Both nest: code
@@ -642,6 +644,38 @@ static ABI int32_t direct_memory_type(uint64_t phys, int *type, void **start, vo
     read_unlock();
     return ACCESS;
 }
+/* The allocation holding offset (flags 1: else the first one above it), reported to the end of
+ * the run of allocations that follow it without a gap and with its type, as libkernel merges them. */
+static ABI int32_t direct_memory_query(uint64_t offset, int flags, DirectQueryInfo *info, uint64_t info_size) {
+    if (!info || info_size!=sizeof(*info)) return INVALID;
+    if (offset>=POOL_SIZE) return ACCESS;
+    read_lock();
+    int found=-1;
+    for (int i=0;i<LIMIT;++i) {
+        if (!blocks[i].used) continue;
+        if (offset>=blocks[i].start && offset-blocks[i].start<blocks[i].size) { found=i; break; }
+        if (flags==1 && blocks[i].start>offset && (found<0 || blocks[i].start<blocks[found].start)) found=i;
+    }
+    if (found<0) { read_unlock(); return ACCESS; }
+    const int type=blocks[found].type;
+    uint64_t end=blocks[found].start+blocks[found].size;
+    for (int grew=1; grew;) {
+        grew=0;
+        for (int i=0;i<LIMIT;++i)
+            if (blocks[i].used && blocks[i].start==end && blocks[i].type==type) { end+=blocks[i].size; grew=1; }
+    }
+    info->start=blocks[found].start; info->end=end; info->memory_type=type;
+    read_unlock();
+    return 0;
+}
+/* Range names only label mappings for the console's debugging tools, so they are checked and
+ * dropped; VirtualQuery names a range by its kind. */
+static ABI int32_t set_virtual_range_name(const void *address, uint64_t size, const char *name) {
+    (void)address; (void)size;
+    if (!name) return (int32_t)UINT32_C(0x8002000e); /* EFAULT */
+    if (strnlen(name,32)>=32) return (int32_t)UINT32_C(0x8002003f); /* ENAMETOOLONG */
+    return 0;
+}
 static ABI int32_t batch_map2(BatchEntry *entries, int count, int *processed, int flags) {
     if (!entries || count<0) return INVALID;
     int32_t result=0; int done=0;
@@ -675,6 +709,7 @@ static const RuntimeExport exports[]={
     {"sceKernelReleaseFlexibleMemory",release_flexible}, {"sceKernelReserveVirtualRange",reserve_range},
     {"sceKernelMprotect",kernel_mprotect}, {"sceKernelQueryMemoryProtection",query_protection},
     {"sceKernelVirtualQuery",virtual_query}, {"sceKernelGetDirectMemoryType",direct_memory_type},
+    {"sceKernelDirectMemoryQuery",direct_memory_query}, {"sceKernelSetVirtualRangeName",set_virtual_range_name},
     {"sceKernelBatchMap",batch_map}, {"sceKernelBatchMap2",batch_map2},
     {"mmap",posix_mmap},
 };
