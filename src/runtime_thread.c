@@ -292,8 +292,12 @@ static int32_t create(GuestThread **out,ThreadAttr **attr_slot,GuestEntry entry,
     *out=t;
     /* Blocked until host_start has set GS: a signal handler that runs guest code on the thread
      * before then would find no TCB. */
+    /* Faults stay open: one taken while blocked kills the process instead of reaching the GPU's
+     * write tracking (bbgpu_handle_fault), and pthread_create writes into the guest's stack. */
     sigset_t all;
     sigfillset(&all);
+    sigdelset(&all,SIGSEGV); sigdelset(&all,SIGBUS); sigdelset(&all,SIGILL); sigdelset(&all,SIGFPE);
+    sigdelset(&all,SIGTRAP);
     pthread_sigmask(SIG_SETMASK,&all,&t->start_mask);
     int e=EINVAL;
     if (t->attr.stack_addr) {
