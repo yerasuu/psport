@@ -17,6 +17,7 @@
 #include <pthread.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #define ERR(n) ((int32_t)(UINT32_C(0x80020000)|(n)))
 #define MAX_FILES 1024
 #define MAX_MOUNTS 16
@@ -560,6 +561,21 @@ static int64_t do_truncate(const char *guest,int64_t length) {
     if (save_trace() && save_path(guest)) printf("Save trace: truncate(%s, %lld)\n",guest,(long long)length);
     return truncate(path,length) ? -errno : 0;
 }
+typedef struct { int64_t sec, usec; } GuestTimeval;
+/* times: access then modification time; NULL sets both to now. */
+static int64_t do_utimes(const char *guest,const GuestTimeval *times) {
+    struct timeval host[2];
+    for (int i=0;times && i<2;++i) {
+        if (times[i].usec<0 || times[i].usec>=1000000) return -EINVAL;
+        host[i].tv_sec=(time_t)times[i].sec; host[i].tv_usec=(suseconds_t)times[i].usec;
+    }
+    if (game_path(guest)) return -EROFS;
+    char path[1024];
+    int e=translate(guest,path,sizeof(path));
+    if (e) return -e;
+    if (save_path(guest)) current_copy(path,sizeof(path),1);
+    return utimes(path,times ? host : NULL) ? -errno : 0;
+}
 static int64_t do_fsync(int fd) { int h=host_fd(fd); if (h<0) return -EBADF; return fsync(h) ? -errno : 0; }
 static int64_t do_access(const char *guest,int mode) {
     char path[1024];
@@ -591,6 +607,7 @@ PAIR(rename,(const char *a,const char *b),(a,b))
 PAIR(ftruncate,(int fd,int64_t l),(fd,l))
 PAIR(truncate,(const char *p,int64_t l),(p,l))
 PAIR(fsync,(int fd),(fd))
+PAIR(utimes,(const char *p,const GuestTimeval *t),(p,t))
 /* getdirentries without the position out-parameter (Atelier Ryza lists its UI style folders with
  * it; answered by a stub, they read as empty and every UI image fell back to NO IMAGE). */
 static ABI int64_t sce_getdents_plain(int fd,char *b,uint64_t n) { return sce(do_getdents(fd,b,n,NULL)); }
@@ -622,6 +639,7 @@ static const RuntimeExport exports[]={
     {"sceKernelFtruncate",sce_ftruncate}, {"ftruncate",posix_ftruncate},
     {"sceKernelTruncate",sce_truncate}, {"truncate",posix_truncate},
     {"sceKernelFsync",sce_fsync}, {"fsync",posix_fsync},
+    {"sceKernelUtimes",sce_utimes}, {"utimes",posix_utimes},
     {"access",posix_access}, {"sceKernelCheckReachability",sce_check_reachability},
     {"sceKernelMkdir",sce_mkdir}, {"mkdir",posix_mkdir},
     {"sceKernelRmdir",sce_rmdir}, {"rmdir",posix_rmdir},
