@@ -43,3 +43,37 @@ adds folders to look in) and logs the file it chose once per set.
 | `BB_AUDIO_STATS=1` | per audio port, every 5 s: cadence, peak and RMS in dBFS (sound or silence) |
 | `BB_NGS2_TRACE=1` | first calls of each Ngs2 function and the level of each render |
 | `BB_FIBER_TRACE=1` | first calls of each Fiber function with their arguments |
+
+## Regression runs
+
+`tools/regress.sh` runs every title in `tools/regress/titles.txt` headless and says how far each
+got, so a change can be checked against all of them at once:
+
+```
+SYS_MODULES=<folder> tools/regress.sh [-j 2] [-o out/regress/<time>] [-c <earlier results.json>] \
+    [-n ryza,bloodborne] [-s <toolchain nix file>] <games root>
+```
+
+Each title runs inside a headless gamescope with `BB_AUDIO=none`: no window and no sound on the
+desktop. Its pad schedule (`tools/regress/*.sched`: `<second> shot`, `<second> press <a+b> [hold]`,
+`<second> end`) drives `BB_PAD_FILE` and takes frame dumps; a last one is taken before it stops. At
+most `-j` titles (default 2) run at once. The titles file names the folder under the games root and
+the title's own environment; `$NAME` there comes from the caller's environment, and a title whose
+variable is empty is skipped (`$SYS_MODULES`: the folder of system modules above).
+
+Milestones, from the log and the dumps:
+
+| Milestone | Evidence |
+|---|---|
+| loaded | `Mapped N bytes, N segments` |
+| entered | `Entering original x86-64 code` |
+| initialized | the first `Runtime: guest thread '...' created` |
+| gpu | `Presenter: first game frame presented` |
+| frames | a present dump whose mean luma (Rec. 709, 0-255) is above 4 |
+| audio | a `BB_AUDIO_STATS` peak above -60 dBFS |
+
+It also records the first fault or stop (`Guest fault` offset, `Host fault` library+offset and
+function, `STOP:`, assertion) and the summary's count of imports without implementation. The table
+goes to stdout, `results.tsv` and `results.json` to the output folder with each title's log and
+dumps (`tools/regress/report.py <folder>` classifies a folder again). With `-c`, a milestone lost or
+a crash signature that is new or different is a regression: it is listed and the exit status is 1.
