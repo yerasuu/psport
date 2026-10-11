@@ -50,6 +50,9 @@ uintptr_t runtime_thread_resolve(const char *name);
 void runtime_thread_report(void);
 void runtime_set_main_tls(const void *data, uint64_t filesz, uint64_t memsz, uint64_t align);
 void runtime_thread_attach_main(void);
+/* The calling thread runs guest code on this stack from now on (the guest main stack): what
+ * scePthreadAttrGet reports, which garbage collectors scan up to. */
+void runtime_thread_set_stack(void *addr, uint64_t size);
 int32_t *runtime_errno(void);
 uintptr_t runtime_sema_resolve(const char *name);
 void runtime_sema_report(void);
