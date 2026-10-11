@@ -13,6 +13,7 @@ void runtime_restart(void) { abort(); }
 #include <pthread.h>
 #include <stdatomic.h>
 #include <time.h>
+#include <unistd.h>
 
 typedef int (ABI *Register)(GuestCallback);
 typedef int (ABI *RegisterCxa)(void (ABI *)(void *), void *, void *);
@@ -467,6 +468,40 @@ static ABI void *exception_sleeper(void *unused) {
     clock_gettime(CLOCK_MONOTONIC,&b);
     return (void *)(uintptr_t)((b.tv_sec-a.tv_sec)*1000+(b.tv_nsec-a.tv_nsec)/1000000);
 }
+static uint32_t exception_busy;
+static _Atomic int exception_stop;
+/* Unity's job workers signal and poll semaphores all the time: a raise that lands inside the
+ * runtime's semaphore lock must not leave the handler waiting on it. */
+static ABI void *exception_worker(void *unused) {
+    (void)unused;
+    SemaSignal signal_sema=GET(SemaSignal,"4czppHBiriw#p#J");
+    int32_t (ABI *poll_sema)(uint32_t,int32_t)=GET(int32_t (ABI *)(uint32_t,int32_t),"12wOHk8ywb0#p#J");
+    while (!atomic_load(&exception_stop)) { signal_sema(exception_busy,1); poll_sema(exception_busy,1); }
+    return NULL;
+}
+static void exception_storm(RaiseException raise_exception) {
+    void *worker=NULL;
+    assert(GET(SemaCreate,"188x57JYp0g#p#J")(&exception_busy,"busy",1,0,64,NULL)==0);
+    assert(runtime_thread_spawn(&worker,exception_worker,NULL,0,"worker")==0);
+    exception_target=worker;
+    /* A handler waiting on a lock its own thread holds hangs the worker and then this thread: fail
+     * instead of hanging the build. */
+    alarm(30);
+    for (int i=0;i<2000;++i) {
+        uint32_t timeout=2000000;
+        int returns=atomic_load(&exception_returns);
+        assert(raise_exception(worker,30)==0);
+        assert(GET(SemaWait,"Zxa0VhQVTsk#p#J")(exception_ack,1,&timeout)==0);
+        assert(GET(FlagSet,"IOnSvHzqu6A#p#J")(exception_resume,1)==0);
+        /* Each raise lands where the worker got to on its own, not where the last one left it. */
+        while (atomic_load(&exception_returns)==returns) sched_yield();
+        struct timespec nap={0,(i%20)*1000};
+        nanosleep(&nap,NULL);
+    }
+    alarm(0);
+    atomic_store(&exception_stop,1);
+    assert(runtime_thread_join_spawned(worker,NULL)==0);
+}
 static void exceptions(void) {
     InstallHandler install=GET(InstallHandler,"WkwEd3N7w0Y#q#q");
     RaiseException raise_exception=GET(RaiseException,"il03nluKfMk#q#q");
@@ -495,6 +530,7 @@ static void exceptions(void) {
     void *elapsed=NULL;
     assert(runtime_thread_join_spawned(exception_target,&elapsed)==0);
     assert(atomic_load(&exception_returns)==1 && (uintptr_t)elapsed>=290);
+    exception_storm(raise_exception);
     assert(remove_handler(30)==0 && remove_handler(31)==(int32_t)0x80020016);
     assert(install(30,exception_handler)==0 && remove_handler(30)==0);
 }

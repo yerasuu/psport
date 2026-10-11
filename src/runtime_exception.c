@@ -9,6 +9,7 @@
 #include <string.h>
 #ifndef _WIN32
 #include <errno.h>
+#include <pthread.h>
 #include <signal.h>
 #include <stdatomic.h>
 #include <ucontext.h>
@@ -50,15 +51,59 @@ _Static_assert(sizeof(GuestUcontext)==0x500,"PS4 ucontext_t size");
 _Static_assert(offsetof(GuestUcontext,mcontext.rsp)==0xf8,"ucontext rsp offset");
 
 static _Atomic(GuestHandler) handlers[GUEST_SIGNALS];
+/* Locks of runtime_exception_lock this thread holds or is taking, the one it sleeps on in
+ * runtime_exception_wait, and a raise held back until it lets go. */
+static _Thread_local unsigned held;
+static _Thread_local pthread_mutex_t *sleeping_on;
+static _Thread_local volatile sig_atomic_t deferred;
 static _Atomic unsigned raised, delivered;
 
 /* The signals libkernel lets a game handle (shadPS4's orbis_allowed_signals). */
 static int allowed(int sig) { return sig==1 || sig==4 || sig==8 || sig==10 || sig==11 || sig==GUEST_SIGUSR1; }
 
+static int holding_lock(void) {
+    if (held) return 1;
+    /* Woken in pthread_cond_wait, the thread holds the mutex again before `held` counts it; glibc
+     * records the owner's tid as it takes the mutex. */
+    pthread_mutex_t *m=sleeping_on;
+    return m && m->__data.__owner==(int)syscall(SYS_gettid);
+}
+void runtime_exception_lock(pthread_mutex_t *lock) {
+    ++held;
+    atomic_signal_fence(memory_order_seq_cst);
+    pthread_mutex_lock(lock);
+}
+void runtime_exception_unlock(pthread_mutex_t *lock) {
+    pthread_mutex_unlock(lock);
+    atomic_signal_fence(memory_order_seq_cst);
+    --held;
+    atomic_signal_fence(memory_order_seq_cst);
+    if (!held && deferred) pthread_kill(pthread_self(),HOST_SIGNAL);
+}
+int runtime_exception_wait(pthread_cond_t *cond, pthread_mutex_t *lock, const struct timespec *end) {
+    /* Otherwise a raise held back since the lock was taken would wait for as long as the thread
+     * sleeps, and the collector with it. */
+    if (deferred && held==1) { runtime_exception_unlock(lock); runtime_exception_lock(lock); return 0; }
+    /* Saved: a handler run while this thread sleeps can sleep on another lock in turn. */
+    pthread_mutex_t *outer=sleeping_on;
+    sleeping_on=lock;
+    atomic_signal_fence(memory_order_seq_cst);
+    --held;
+    atomic_signal_fence(memory_order_seq_cst);
+    int e=end ? pthread_cond_timedwait(cond,lock,end) : pthread_cond_wait(cond,lock);
+    atomic_signal_fence(memory_order_seq_cst);
+    ++held;
+    atomic_signal_fence(memory_order_seq_cst);
+    sleeping_on=outer;
+    return e;
+}
+
 static void deliver(int sig, siginfo_t *info, void *raw) {
     (void)sig; (void)info;
     GuestHandler handler=atomic_load(&handlers[GUEST_SIGUSR1]);
     if (!handler) return;
+    if (holding_lock()) { deferred=1; return; }
+    deferred=0;
     ucontext_t *host=raw;
     greg_t *r=host->uc_mcontext.gregs;
     /* The handler may call back into the runtime, which sets both errnos. */
