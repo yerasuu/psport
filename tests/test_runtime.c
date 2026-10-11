@@ -403,22 +403,27 @@ static void loaded_modules(void) {
     static unsigned char data[64];
     static RuntimeModule table[2]={{.name="eboot.bin",.size=32},{.name="Media/Modules/Test.prx",.base=32,.size=32,.deferred=1}};
     /* Dlsym hashes the name to its NID: these are the NIDs of the names asked for below. */
-    static RuntimeModuleExport eboot_exports[]={{"LwG8g3niqwA",8}}, own_exports[]={{"wzvqT4UqKX8",48}};
+    static RuntimeModuleExport eboot_exports[]={{"LwG8g3niqwA",8}}, own_exports[]={{"wzvqT4UqKX8",48},{"4MDhDJ6H6FY",56}};
     static unsigned char started[2];
     table[0].exports=eboot_exports; table[0].export_count=1;
-    table[1].exports=own_exports; table[1].export_count=1;
+    table[1].exports=own_exports; table[1].export_count=2;
     table[1].init=(uint64_t)((uintptr_t)module_start-(uintptr_t)data);
     runtime_modules_configure(data,table,2,started);
     LoadStart load=GET(LoadStart,"wzvqT4UqKX8#p#n");
     Dlsym dlsym=GET(Dlsym,"LwG8g3niqwA#p#n");
     assert(load && dlsym);
     int32_t result=0;
+    void *address=NULL;
     assert(load("/app0/Media/Modules/Test.prx",5,NULL,0,NULL,&result)==1 && result==7 && module_starts==1 && module_args==5);
     /* Unity spells the data folder either way; a second load finds the module started. */
     assert(load("/app0/media/modules/test.prx",0,NULL,0,NULL,&result)==1 && result==0 && module_starts==1);
     assert(load("/app0/Media/Plugins/Missing.prx",0,NULL,0,NULL,NULL)==(int32_t)0x80020002);
-    void *address=NULL;
     assert(dlsym(1,"sceKernelLoadStartModule",&address)==0 && address==data+48);
+    /* A name longer than any fixed buffer still hashes whole (NID from Python's hashlib). */
+    char long_name[1104]="_ZN";
+    memset(long_name+3,'x',1100);
+    long_name[1103]=0;
+    assert(dlsym(1,long_name,&address)==0 && address==data+56);
     assert(dlsym(0,"sceKernelDlsym",&address)==0 && address==data+8);
     assert(dlsym(1,"sceKernelDlsym",&address)==(int32_t)0x80020003 && address==data+8);
     assert(dlsym(2,"sceKernelDlsym",&address)==(int32_t)0x80020003);

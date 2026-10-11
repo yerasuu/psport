@@ -6,6 +6,7 @@
 #include "runtime.h"
 #include <pthread.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 #define ERR(n) ((int32_t)(UINT32_C(0x80020000)|(n)))
@@ -69,10 +70,13 @@ static void nid_of(const char *name, char out[12]) {
     static const unsigned char salt[16]={0x51,0x8D,0x64,0xA6,0x35,0xDE,0xD8,0xC1,0xE6,0xB0,0x39,0xB1,0xC3,0xE5,0x52,0x30};
     static const char codes[]="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+-";
     size_t length=strlen(name);
-    unsigned char input[1024], hash[20];
-    if (length>sizeof(input)-sizeof(salt)) length=sizeof(input)-sizeof(salt);
+    unsigned char small[256], hash[20];
+    /* Mangled C++ names run past any fixed buffer, and a truncated one hashes to another NID. */
+    unsigned char *input=length+sizeof(salt)<=sizeof(small) ? small : malloc(length+sizeof(salt));
+    if (!input) { out[0]=0; return; }
     memcpy(input,name,length); memcpy(input+length,salt,sizeof(salt));
     sha1(input,length+sizeof(salt),hash);
+    if (input!=small) free(input);
     uint64_t digest=0;
     for (int i=7;i>=0;--i) digest=digest<<8|hash[i];
     for (int i=0;i<10;++i) out[i]=codes[(digest>>(58-i*6))&0x3f];
