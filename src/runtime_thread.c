@@ -133,6 +133,16 @@ static GuestThread *find_thread(void *handle) {
     pthread_mutex_unlock(&lock);
     return found;
 }
+/* Under the table's lock, so the host thread cannot be joined and its pthread_t reused between
+ * the lookup and the kill. */
+int32_t runtime_thread_kill(void *handle, int host_signal) {
+    int e=ESRCH;
+    pthread_mutex_lock(&lock);
+    for (GuestThread *t=threads;t;t=t->next)
+        if (t==handle) { if (!t->finished && t->host) e=pthread_kill(t->host,host_signal); break; }
+    pthread_mutex_unlock(&lock);
+    return e==ESRCH ? ERR(3) : e ? ERR(22) : 0;
+}
 static ThreadAttr *find_attr(ThreadAttr **slot) {
     if (!slot || !*slot) return NULL;
     ThreadAttr *found=NULL;

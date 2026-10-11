@@ -50,6 +50,11 @@ uintptr_t runtime_thread_resolve(const char *name);
 void runtime_thread_report(void);
 void runtime_set_main_tls(const void *data, uint64_t filesz, uint64_t memsz, uint64_t align);
 void runtime_thread_attach_main(void);
+/* Sends a host signal to a guest thread (ScePthread handle): 0, or 0x80020003 when the handle names
+ * no live thread. */
+int32_t runtime_thread_kill(void *thread, int host_signal);
+uintptr_t runtime_exception_resolve(const char *name);
+void runtime_exception_report(void);
 /* The calling thread runs guest code on this stack from now on (the guest main stack): what
  * scePthreadAttrGet reports, which garbage collectors scan up to. */
 void runtime_thread_set_stack(void *addr, uint64_t size);
