@@ -233,6 +233,8 @@ static uintptr_t resolve_scoped(const char *name, int is_data) {
     if (mutex) return mutex;
     uintptr_t thread = runtime_thread_resolve(name);
     if (thread) return thread;
+    uintptr_t sched = runtime_sched_resolve(name);
+    if (sched) return sched;
     uintptr_t content=runtime_content_resolve(name);
     if (content) return content;
     uintptr_t timer = runtime_time_resolve(name);
