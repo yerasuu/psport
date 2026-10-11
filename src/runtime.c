@@ -20,8 +20,7 @@ static uint64_t capabilities;
 static _Atomic size_t guards_acquired, guards_released;
 static uint64_t stack_canary;
 static _Atomic size_t memory_calls;
-/* Dynamic TLS of linked modules: module IDs 2..7 (1 is the eboot's static TLS). */
-#define TLS_MODULES 8
+#define TLS_MODULES RUNTIME_TLS_MODULES
 static struct { const void *data; uint64_t filesz, memsz; } tls_modules[TLS_MODULES];
 static _Thread_local unsigned char *tls_blocks[TLS_MODULES];
 static void *process_param;
@@ -308,10 +307,18 @@ uintptr_t runtime_resolve(const char *name, int is_data) {
 }
 /* Same symbol name means same contract whether imported from libkernel or
  * libScePosix, so newer modules resolve by name through runtime_symbol. */
+/* Arguments are ignored: under the System V ABI the caller removes them, so one function stands
+ * for every signature returning a status. */
+ABI int32_t runtime_stub(void) { return 0; }
+int runtime_last_stub;
 uintptr_t runtime_lookup(const RuntimeExport *table,size_t count,const char *nid) {
     const char *symbol=runtime_symbol(nid);
     if (!symbol) return 0;
-    for (size_t i=0;i<count;++i) if (!strcmp(symbol,table[i].name)) return (uintptr_t)table[i].function;
+    for (size_t i=0;i<count;++i)
+        if (!strcmp(symbol,table[i].name)) {
+            runtime_last_stub=table[i].function==(void *)runtime_stub;
+            return (uintptr_t)table[i].function;
+        }
     return 0;
 }
 const char *runtime_import_name(const char *name) {

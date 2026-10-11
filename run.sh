@@ -74,7 +74,11 @@ if [[ $game != "$(realpath "$original_game")" ]]; then
 fi
 "$PYTHON" scripts/prepare.py "$game" --out "$out"
 "$PYTHON" scripts/link_libc.py "$game" --out "$out"
-"$PYTHON" scripts/link_modules.py "$game" --out "$out"
+# BB_SYS_MODULES: a folder with the user's own dump of the console's system modules (*.sprx),
+# linked when the game needs their library; BB_HLE=libA,libB keeps those to the port instead.
+link_args=()
+if [[ -n ${BB_SYS_MODULES:-} ]]; then link_args+=(--system-modules "$BB_SYS_MODULES" --hle "${BB_HLE:-}"); fi
+"$PYTHON" scripts/link_modules.py "$game" --out "$out" "${link_args[@]}"
 "$PYTHON" scripts/content_profile.py "$game" --out "$out" --sku "${BB_CONTENT_SKU:-full}"
 # Sizes chosen below for the previous launch are recomputed after an in-game restart.
 if [[ ${BB_AUTO_RENDER_RES:-} == 1 ]]; then
