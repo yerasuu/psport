@@ -95,6 +95,9 @@ void runtime_file_configure(const char *app0,const char *user) {
     snprintf(user_root,sizeof(user_root),"%s",user);
     runtime_file_mount("/app0",app0);
     runtime_file_mount("/hostapp",app0);
+    /* Games seed their RNGs from the console's random devices; the host's give the same stream. */
+    runtime_file_mount("/dev/urandom","/dev/urandom");
+    runtime_file_mount("/dev/random","/dev/random");
     const char *writable[]={"temp0","download0","data"};
     mkdir(user,0755);
     for (int i=0;i<3;++i) {
