@@ -13,6 +13,7 @@ void runtime_restart(void) { abort(); }
 #include <pthread.h>
 #include <stdatomic.h>
 #include <time.h>
+#include <unistd.h>
 
 typedef int (ABI *Register)(GuestCallback);
 typedef int (ABI *RegisterCxa)(void (ABI *)(void *), void *, void *);
@@ -430,6 +431,109 @@ static void loaded_modules(void) {
     assert(dlsym(1,"sceKernelDlsym",&address)==(int32_t)0x80020003 && address==data+8);
     assert(dlsym(2,"sceKernelDlsym",&address)==(int32_t)0x80020003);
 }
+/* IL2CPP's collector suspends a thread with sceKernelRaiseException: its handler, on that thread,
+ * keeps the stack pointer from ucontext+0xf8, signals a semaphore and waits on an event flag until
+ * the collector resumes it. The thread was asleep: its sleep goes on whole afterwards. */
+typedef int32_t (ABI *InstallHandler)(int,void (ABI *)(int,void *));
+typedef int32_t (ABI *RaiseException)(void *,int);
+typedef int32_t (ABI *Usleep)(uint32_t);
+typedef int32_t (ABI *ThreadStack)(void *,void **,uint64_t *);
+typedef int32_t (ABI *SemaCreate)(uint32_t *,const char *,uint32_t,int32_t,int32_t,const void *);
+typedef int32_t (ABI *SemaWait)(uint32_t,int32_t,uint32_t *);
+typedef int32_t (ABI *SemaSignal)(uint32_t,int32_t);
+typedef int32_t (ABI *FlagCreate)(uint64_t *,const char *,uint32_t,uint64_t,const void *);
+typedef int32_t (ABI *FlagWait)(uint64_t,uint64_t,uint32_t,uint64_t *,uint32_t *);
+typedef int32_t (ABI *FlagSet)(uint64_t,uint64_t);
+static void *exception_target;
+static uint32_t exception_ack;
+static uint64_t exception_resume;
+static _Atomic int exception_hits, exception_returns, exception_sleeping;
+static _Atomic uint64_t exception_rsp;
+static ABI void exception_handler(int sig,void *context) {
+    assert(sig==30 && GET(ThreadSelf,"aI+OeCz8xrQ#p#J")()==exception_target);
+    uint64_t rsp;
+    memcpy(&rsp,(unsigned char *)context+0xf8,8);
+    atomic_store(&exception_rsp,rsp);
+    atomic_fetch_add(&exception_hits,1);
+    assert(GET(SemaSignal,"4czppHBiriw#p#J")(exception_ack,1)==0);
+    assert(GET(FlagWait,"JTvBflhYazQ#p#J")(exception_resume,1,0x11,NULL,NULL)==0); /* OR, clear all */
+    atomic_fetch_add(&exception_returns,1);
+}
+static ABI void *exception_sleeper(void *unused) {
+    (void)unused;
+    struct timespec a,b;
+    clock_gettime(CLOCK_MONOTONIC,&a);
+    atomic_store(&exception_sleeping,1);
+    GET(Usleep,"1jfXLRVzisc#p#J")(300000);
+    clock_gettime(CLOCK_MONOTONIC,&b);
+    return (void *)(uintptr_t)((b.tv_sec-a.tv_sec)*1000+(b.tv_nsec-a.tv_nsec)/1000000);
+}
+static uint32_t exception_busy;
+static _Atomic int exception_stop;
+/* Unity's job workers signal and poll semaphores all the time: a raise that lands inside the
+ * runtime's semaphore lock must not leave the handler waiting on it. */
+static ABI void *exception_worker(void *unused) {
+    (void)unused;
+    SemaSignal signal_sema=GET(SemaSignal,"4czppHBiriw#p#J");
+    int32_t (ABI *poll_sema)(uint32_t,int32_t)=GET(int32_t (ABI *)(uint32_t,int32_t),"12wOHk8ywb0#p#J");
+    while (!atomic_load(&exception_stop)) { signal_sema(exception_busy,1); poll_sema(exception_busy,1); }
+    return NULL;
+}
+static void exception_storm(RaiseException raise_exception) {
+    void *worker=NULL;
+    assert(GET(SemaCreate,"188x57JYp0g#p#J")(&exception_busy,"busy",1,0,64,NULL)==0);
+    assert(runtime_thread_spawn(&worker,exception_worker,NULL,0,"worker")==0);
+    exception_target=worker;
+    /* A handler waiting on a lock its own thread holds hangs the worker and then this thread: fail
+     * instead of hanging the build. */
+    alarm(30);
+    for (int i=0;i<2000;++i) {
+        uint32_t timeout=2000000;
+        int returns=atomic_load(&exception_returns);
+        assert(raise_exception(worker,30)==0);
+        assert(GET(SemaWait,"Zxa0VhQVTsk#p#J")(exception_ack,1,&timeout)==0);
+        assert(GET(FlagSet,"IOnSvHzqu6A#p#J")(exception_resume,1)==0);
+        /* Each raise lands where the worker got to on its own, not where the last one left it. */
+        while (atomic_load(&exception_returns)==returns) sched_yield();
+        struct timespec nap={0,(i%20)*1000};
+        nanosleep(&nap,NULL);
+    }
+    alarm(0);
+    atomic_store(&exception_stop,1);
+    assert(runtime_thread_join_spawned(worker,NULL)==0);
+}
+static void exceptions(void) {
+    InstallHandler install=GET(InstallHandler,"WkwEd3N7w0Y#q#q");
+    RaiseException raise_exception=GET(RaiseException,"il03nluKfMk#q#q");
+    int32_t (ABI *remove_handler)(int)=GET(int32_t (ABI *)(int),"Qhv5ARAoOEc#q#q");
+    assert(install && raise_exception && remove_handler);
+    assert(GET(SemaCreate,"188x57JYp0g#p#J")(&exception_ack,"ack",1,0,64,NULL)==0);
+    assert(GET(FlagCreate,"BpFoboUJoZU#p#J")(&exception_resume,"resume",0x20,0,NULL)==0);
+    assert(install(31,exception_handler)==(int32_t)0x80020016);
+    assert(install(30,exception_handler)==0);
+    assert(install(30,exception_handler)==(int32_t)0x80020023);
+    assert(runtime_thread_spawn(&exception_target,exception_sleeper,NULL,0,"sleeper")==0);
+    while (!atomic_load(&exception_sleeping)) sched_yield();
+    struct timespec nap={0,50000000};
+    nanosleep(&nap,NULL);
+    assert(raise_exception(exception_target,11)==(int32_t)0x80020016);
+    assert(raise_exception(&nap,30)==(int32_t)0x80020003);
+    assert(raise_exception(exception_target,30)==0);
+    assert(GET(SemaWait,"Zxa0VhQVTsk#p#J")(exception_ack,1,NULL)==0);
+    void *stack=NULL; uint64_t size=0;
+    assert(GET(ThreadStack,"ruZ9hhQ8oUk#p#J")(exception_target,&stack,&size)==0);
+    uint64_t rsp=atomic_load(&exception_rsp);
+    assert(rsp>(uintptr_t)stack && rsp<(uintptr_t)stack+size);
+    nanosleep(&nap,NULL);
+    assert(atomic_load(&exception_hits)==1 && atomic_load(&exception_returns)==0);
+    assert(GET(FlagSet,"IOnSvHzqu6A#p#J")(exception_resume,1)==0);
+    void *elapsed=NULL;
+    assert(runtime_thread_join_spawned(exception_target,&elapsed)==0);
+    assert(atomic_load(&exception_returns)==1 && (uintptr_t)elapsed>=290);
+    exception_storm(raise_exception);
+    assert(remove_handler(30)==0 && remove_handler(31)==(int32_t)0x80020016);
+    assert(install(30,exception_handler)==0 && remove_handler(30)==0);
+}
 int main(int argc,char **argv) {
     runtime_start(0); assert(runtime_resolve("bzQExy189ZI#q#q",0)==0);
     runtime_start(1);
@@ -465,7 +569,7 @@ int main(int argc,char **argv) {
     if (argc>1 && !strcmp(argv[1],"--rwlock-concurrency")) { rw_concurrency(); return 0; }
     if (argc>1 && !strcmp(argv[1],"--rwlock-timeouts")) { rw_timeouts(); return 0; }
     libc_support(); posix_mutexes(); wall_time(); exit_handlers(); guards(); mutexes(); direct_memory(); write_traps(); memory_primitives();
-    rw_lifecycle(); rw_concurrency(); rw_timeouts(); loaded_modules();
-    puts("PASS: callback lifecycle, guard ABI, mutex errors, shared direct memory, memory primitives, resolver scope, loaded modules");
+    rw_lifecycle(); rw_concurrency(); rw_timeouts(); loaded_modules(); exceptions();
+    puts("PASS: callback lifecycle, guard ABI, mutex errors, shared direct memory, memory primitives, resolver scope, loaded modules, exceptions");
     return 0;
 }

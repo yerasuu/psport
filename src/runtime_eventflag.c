@@ -53,12 +53,12 @@ static ABI int32_t flag_create(uint64_t *out,const char *name,uint32_t attr,uint
     host_check(pthread_condattr_setclock(&cattr,CLOCK_MONOTONIC));
     host_check(pthread_cond_init(&f->changed,&cattr));
     host_check(pthread_condattr_destroy(&cattr));
-    pthread_mutex_lock(&lock);
+    runtime_exception_lock(&lock);
     f->id=next_id++; f->attr=attr; f->pattern=pattern;
     f->next=registry; registry=f; *out=f->id; ++created;
     printf("Runtime: event flag id=%llu '%s', attr=%#x, pattern=%#llx\n",
            (unsigned long long)f->id,name,attr,(unsigned long long)pattern);
-    pthread_mutex_unlock(&lock);
+    runtime_exception_unlock(&lock);
     return 0;
 }
 static int valid_mode(uint32_t mode) {
@@ -82,7 +82,7 @@ static void release(Flag *f) {
     }
 }
 static int32_t wait_flag(uint64_t id,uint64_t bits,uint32_t mode,uint64_t *result,uint32_t *timeout,int block) {
-    pthread_mutex_lock(&lock);
+    runtime_exception_lock(&lock);
     Flag *f=find(id);
     int32_t status=0;
     if (!f) status=ERR(3);
@@ -100,7 +100,7 @@ static int32_t wait_flag(uint64_t id,uint64_t bits,uint32_t mode,uint64_t *resul
             if (f->deleted) { status=ERR(13); break; }
             if (f->cancels!=cancels) { status=ERR(85); if (result) *result=f->pattern; break; }
             if (take(f,bits,mode,result)) { ++waits; break; }
-            int e=timeout ? pthread_cond_timedwait(&f->changed,&lock,&end) : pthread_cond_wait(&f->changed,&lock);
+            int e=runtime_exception_wait(&f->changed,&lock,timeout ? &end : NULL);
             if (e==ETIMEDOUT) {
                 if (take(f,bits,mode,result)) { ++waits; break; }
                 status=ERR(60); if (result) *result=f->pattern; ++timed_out;
@@ -115,7 +115,7 @@ static int32_t wait_flag(uint64_t id,uint64_t bits,uint32_t mode,uint64_t *resul
         }
         release(f);
     }
-    pthread_mutex_unlock(&lock);
+    runtime_exception_unlock(&lock);
     return status;
 }
 static ABI int32_t flag_wait(uint64_t id,uint64_t bits,uint32_t mode,uint64_t *result,uint32_t *timeout) {
@@ -125,40 +125,40 @@ static ABI int32_t flag_poll(uint64_t id,uint64_t bits,uint32_t mode,uint64_t *r
     return wait_flag(id,bits,mode,result,NULL,0);
 }
 static ABI int32_t flag_set(uint64_t id,uint64_t bits) {
-    pthread_mutex_lock(&lock);
+    runtime_exception_lock(&lock);
     Flag *f=find(id);
     if (f) { f->pattern|=bits; host_check(pthread_cond_broadcast(&f->changed)); }
-    pthread_mutex_unlock(&lock);
+    runtime_exception_unlock(&lock);
     return f ? 0 : ERR(3);
 }
 /* The console keeps the bits that are set in the argument: pattern &= bits. */
 static ABI int32_t flag_clear(uint64_t id,uint64_t bits) {
-    pthread_mutex_lock(&lock);
+    runtime_exception_lock(&lock);
     Flag *f=find(id);
     if (f) f->pattern&=bits;
-    pthread_mutex_unlock(&lock);
+    runtime_exception_unlock(&lock);
     return f ? 0 : ERR(3);
 }
 static ABI int32_t flag_cancel(uint64_t id,uint64_t pattern,int32_t *waiting) {
-    pthread_mutex_lock(&lock);
+    runtime_exception_lock(&lock);
     Flag *f=find(id);
     if (f) {
         if (waiting) *waiting=(int32_t)f->waiters;
         f->pattern=pattern; ++f->cancels;
         host_check(pthread_cond_broadcast(&f->changed));
     }
-    pthread_mutex_unlock(&lock);
+    runtime_exception_unlock(&lock);
     return f ? 0 : ERR(3);
 }
 static ABI int32_t flag_delete(uint64_t id) {
-    pthread_mutex_lock(&lock);
+    runtime_exception_lock(&lock);
     Flag **p=&registry;
     while (*p && (*p)->id!=id) p=&(*p)->next;
-    if (!*p) { pthread_mutex_unlock(&lock); return ERR(3); }
+    if (!*p) { runtime_exception_unlock(&lock); return ERR(3); }
     Flag *f=*p; *p=f->next; f->deleted=1; ++deleted;
     if (f->waiters) host_check(pthread_cond_broadcast(&f->changed));
     else { host_check(pthread_cond_destroy(&f->changed)); free(f); }
-    pthread_mutex_unlock(&lock);
+    runtime_exception_unlock(&lock);
     return 0;
 }
 static const RuntimeExport exports[]={
@@ -169,10 +169,10 @@ static const RuntimeExport exports[]={
 };
 uintptr_t runtime_eventflag_resolve(const char *name) { return RUNTIME_LOOKUP(exports,name); }
 void runtime_eventflag_report(void) {
-    pthread_mutex_lock(&lock);
+    runtime_exception_lock(&lock);
     printf("Runtime: event flags created=%zu, deleted=%zu, waits=%zu, timeouts=%zu\n",
            created,deleted,waits,timed_out);
-    pthread_mutex_unlock(&lock);
+    runtime_exception_unlock(&lock);
 }
 #else
 uintptr_t runtime_eventflag_resolve(const char *name) { (void)name; return 0; }

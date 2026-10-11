@@ -50,6 +50,22 @@ uintptr_t runtime_thread_resolve(const char *name);
 void runtime_thread_report(void);
 void runtime_set_main_tls(const void *data, uint64_t filesz, uint64_t memsz, uint64_t align);
 void runtime_thread_attach_main(void);
+/* Sends a host signal to a guest thread (ScePthread handle): 0, or 0x80020003 when the handle names
+ * no live thread. */
+int32_t runtime_thread_kill(void *thread, int host_signal);
+uintptr_t runtime_exception_resolve(const char *name);
+void runtime_exception_report(void);
+#ifndef _WIN32
+#include <pthread.h>
+/* For runtime locks a guest exception handler takes again (kernel semaphores, event flags): a raise
+ * that lands on the lock's holder is delivered once it lets go, or the handler would wait on its
+ * own thread. */
+void runtime_exception_lock(pthread_mutex_t *lock);
+void runtime_exception_unlock(pthread_mutex_t *lock);
+/* pthread_cond_wait, or pthread_cond_timedwait until end, under such a lock; a raise is delivered
+ * while the thread sleeps. Returns 0 early, as a spurious wakeup, to deliver one held back. */
+int runtime_exception_wait(pthread_cond_t *cond, pthread_mutex_t *lock, const struct timespec *end);
+#endif
 /* The calling thread runs guest code on this stack from now on (the guest main stack): what
  * scePthreadAttrGet reports, which garbage collectors scan up to. */
 void runtime_thread_set_stack(void *addr, uint64_t size);

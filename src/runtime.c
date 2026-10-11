@@ -88,6 +88,7 @@ void runtime_report(void) {
            calls_init, calls_atexit, calls_cxa, handler_count);
     printf("Runtime: static guards acquired=%zu, released=%zu\n", (size_t)guards_acquired, (size_t)guards_released);
     runtime_thread_report();
+    runtime_exception_report();
     runtime_mutex_report();
     runtime_rwlock_report();
     runtime_sema_report();
@@ -248,6 +249,8 @@ static uintptr_t resolve_scoped(const char *name, int is_data) {
     if (rwlock) return rwlock;
     uintptr_t memory = runtime_memory_resolve(name);
     if (memory) return memory;
+    uintptr_t exception = runtime_exception_resolve(name);
+    if (exception) return exception;
     uintptr_t kernel = runtime_kernel_resolve(name);
     if (kernel) return kernel;
     uintptr_t loader = runtime_module_resolve(name);
