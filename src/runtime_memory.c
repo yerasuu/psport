@@ -415,6 +415,11 @@ static ABI int32_t direct_allocate(int64_t low, int64_t high, uint64_t size,
     printf("Runtime: direct allocation offset=0x%" PRIx64 ", size=%" PRIu64 " bytes, type=%d\n", start, size, type);
     return 0;
 }
+/* The main pool is the whole direct memory the port offers: newer SDKs allocate from it without a
+ * search range. */
+static ABI int32_t direct_allocate_main(uint64_t size, uint64_t alignment, int type, int64_t *out) {
+    return direct_allocate(0, (int64_t)POOL_SIZE, size, alignment, type, out);
+}
 static int32_t map_direct_locked(void **out, uint64_t size, int prot, int flags, int64_t physical, uint64_t alignment) {
     if (!alignment) alignment=PAGE;
     if (!out || physical < 0 || (uint64_t)physical % PAGE || !size || size % PAGE || !valid_alignment(alignment) ||
@@ -641,6 +646,7 @@ static ABI int32_t batch_map(BatchEntry *entries, int count, int *processed) {
 }
 static const RuntimeExport exports[]={
     {"sceKernelGetDirectMemorySize",direct_size}, {"sceKernelAllocateDirectMemory",direct_allocate},
+    {"sceKernelAllocateMainDirectMemory",direct_allocate_main},
     {"sceKernelMapDirectMemory",direct_map}, {"sceKernelMapNamedDirectMemory",direct_map_named},
     {"sceKernelReleaseDirectMemory",direct_release}, {"sceKernelMunmap",direct_unmap}, {"munmap",direct_unmap},
     {"sceKernelMapFlexibleMemory",map_flexible}, {"sceKernelMapNamedFlexibleMemory",map_flexible_named},
