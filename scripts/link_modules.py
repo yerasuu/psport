@@ -144,7 +144,9 @@ def link(game, out, module_names=DEFAULT_MODULES):
             segments.append((base + p['vaddr'], p['memsz'], p['flags']))
         tls = next((p for p in m['ph'] if p['type'] == 7), None)
         module_id = 0
-        if tls:
+        # A PT_TLS of no size needs no module id: ids are what the runtime keeps a block per
+        # thread for, and titles with many modules (Atelier Ryza, 11) mostly have empty ones.
+        if tls and tls['memsz']:
             if tls['filesz'] > tls['memsz'] or not mapped(tls['vaddr'], tls['memsz']):
                 raise ValueError(f'{filename}: unsupported TLS layout')
             module_id = tls_module

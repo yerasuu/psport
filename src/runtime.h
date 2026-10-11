@@ -14,6 +14,8 @@ void runtime_restart(void);
 typedef void (ABI *GuestCallback)(void);
 void runtime_start(uint64_t capabilities);
 uintptr_t runtime_resolve(const char *name, int is_data);
+/* Linked modules' dynamic TLS ids run from 2 (1 is the eboot's static TLS) below this. */
+#define RUNTIME_TLS_MODULES 32
 void runtime_report(void);
 void runtime_finalize(void *dso);
 uintptr_t runtime_mutex_resolve(const char *name);
