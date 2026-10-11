@@ -588,6 +588,10 @@ PAIR(rename,(const char *a,const char *b),(a,b))
 PAIR(ftruncate,(int fd,int64_t l),(fd,l))
 PAIR(truncate,(const char *p,int64_t l),(p,l))
 PAIR(fsync,(int fd),(fd))
+/* getdirentries without the position out-parameter (Atelier Ryza lists its UI style folders with
+ * it; answered by a stub, they read as empty and every UI image fell back to NO IMAGE). */
+static ABI int64_t sce_getdents_plain(int fd,char *b,uint64_t n) { return sce(do_getdents(fd,b,n,NULL)); }
+static ABI int64_t posix_getdents_plain(int fd,char *b,uint64_t n) { return posix(do_getdents(fd,b,n,NULL)); }
 static ABI int64_t posix_access(const char *p,int m) { return posix(do_access(p,m)); }
 static ABI int64_t sce_mkdir(const char *p,int m) { return sce(path_op(p,0,m)); }
 static ABI int64_t posix_mkdir(const char *p,int m) { return posix(path_op(p,0,m)); }
@@ -610,6 +614,7 @@ static const RuntimeExport exports[]={
     {"sceKernelFstat",sce_fstat}, {"fstat",posix_fstat},
     {"sceKernelStat",sce_stat}, {"stat",posix_stat},
     {"sceKernelGetdirentries",sce_getdents}, {"getdirentries",posix_getdents},
+    {"sceKernelGetdents",sce_getdents_plain}, {"getdents",posix_getdents_plain},
     {"sceKernelRename",sce_rename}, {"rename",posix_rename},
     {"sceKernelFtruncate",sce_ftruncate}, {"ftruncate",posix_ftruncate},
     {"sceKernelTruncate",sce_truncate}, {"truncate",posix_truncate},

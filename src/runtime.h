@@ -14,6 +14,8 @@ void runtime_restart(void);
 typedef void (ABI *GuestCallback)(void);
 void runtime_start(uint64_t capabilities);
 uintptr_t runtime_resolve(const char *name, int is_data);
+/* Equal NIDs whatever their "#<library>#<module>" scope: one title's scope letters are not another's. */
+int runtime_same_nid(const char *a, const char *b);
 /* Linked modules' dynamic TLS ids run from 2 (1 is the eboot's static TLS) below this. */
 #define RUNTIME_TLS_MODULES 32
 void runtime_report(void);
@@ -50,6 +52,7 @@ uintptr_t runtime_sema_resolve(const char *name);
 void runtime_sema_report(void);
 unsigned runtime_sema_waiters(uint32_t id);
 uintptr_t runtime_eventflag_resolve(const char *name);
+uintptr_t runtime_ulobjmgr_resolve(const char *name);
 void runtime_eventflag_report(void);
 uintptr_t runtime_time_resolve(const char *name);
 void runtime_content_configure(const uint32_t values[5]);

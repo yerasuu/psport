@@ -1,0 +1,38 @@
+# psport: what this fork adds to bbport
+
+psport is decanter's fork of [bbport](https://github.com/deadinside28/bloodborne_pc). Its goal is
+bbport's own idea taken past one game: PS4 titles run natively on Linux, their x86-64 code on the
+CPU as it is, with the system libraries provided by this port (a compatibility layer, as Wine is,
+not an emulator). Bloodborne keeps working as upstream ships it; other titles start with
+`BB_SKIP_GAME_CHECK=1`.
+
+Upstream releases are merged in as they come; the changes below live on top.
+
+## Ported components
+
+Code taken from other projects to move forward, each in its own directory. The first commit of each
+is the files as they were at the source; later commits adapt them.
+
+| Component | Directory | Source | License | Changes here |
+|---|---|---|---|---|
+| libSceNgs2 (software audio mixer) | `gpu/ngs2/` | [AnyPS5](https://github.com/boykopovar/AnyPS5) `5edae353`, `core/libs/prx/libSceNgs2.native` | GPL-2.0 | PS4 structure layouts (AnyPS5's are PS5's), exceptions turned into error codes at the game boundary, unimplemented effects pass audio through, decoding over upstream LibAtrac9 |
+| libSceFiber (user-level fibers) | `gpu/fiber/` | [shadPS4](https://github.com/shadps4-emu/shadPS4) `3a9f572`, `src/core/libraries/fiber` | GPL-2.0-or-later | TCB read through GS, failures logged, `BB_FIBER_TRACE` |
+| NID to name table | `src/import_names_all.inc` | shadPS4's aerolib list (via universal_ps4_native's `data/aerolib.csv`) | GPL-2.0-or-later | generated, sorted for binary search |
+| ulobjmgr contracts | `src/runtime_ulobjmgr.c` | written from shadPS4's `core/libraries/ulobjmgr` | GPL-2.0-or-later | ids handed out per object |
+
+## System modules
+
+`BB_SYS_MODULES=<folder>` links the user's own dump of the console's system modules (`*.sprx`) that a
+title needs. They are never part of this repository or of anything built from it, and each is a
+stopgap until the port implements its library: `BB_HLE=libSceX` keeps one to the port,
+`BB_LLE=libSceFiber` links one the port already implements, to compare the two.
+
+## Diagnostics
+
+| Variable | What it shows |
+|---|---|
+| `BB_PERMISSIVE=1` | imports the port lacks return 0 instead of stopping, each logged once |
+| (always) | before the game starts: every import without implementation or answered by a stub, and a summary |
+| `BB_AUDIO_STATS=1` | per audio port, every 5 s: cadence, peak and RMS in dBFS (sound or silence) |
+| `BB_NGS2_TRACE=1` | first calls of each Ngs2 function and the level of each render |
+| `BB_FIBER_TRACE=1` | first calls of each Fiber function with their arguments |

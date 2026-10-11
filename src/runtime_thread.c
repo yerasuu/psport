@@ -28,6 +28,9 @@ typedef struct ThreadAttr {
     uint32_t magic;
     int detached, policy, prio, inherit;
     uint64_t stack, guard, affinity;
+    /* Lowest address of the stack: the game's own (scePthreadAttrSetstack) or, once the
+     * thread runs, the one it got. libSceUlt builds fibers on it. */
+    void *stack_addr;
     struct ThreadAttr *next;
 } ThreadAttr;
 typedef struct GuestThread {
@@ -61,6 +64,15 @@ static void set_gs(void *base) {
     if (syscall(SYS_arch_prctl,ARCH_SET_GS,(unsigned long)base)) { perror("STOP: arch_prctl(ARCH_SET_GS)"); exit(21); }
 }
 /* Build TCB/static TLS for the calling host thread and point GS at it. */
+/* The stack this host thread runs on, kept in the attributes scePthreadAttrGet copies. */
+static void record_stack(GuestThread *t) {
+    if (t->attr.stack_addr) return;
+    pthread_attr_t self;
+    void *addr=NULL; size_t size=0;
+    if (pthread_getattr_np(pthread_self(),&self)) return;
+    if (!pthread_attr_getstack(&self,&addr,&size)) { t->attr.stack_addr=addr; t->attr.stack=size; }
+    pthread_attr_destroy(&self);
+}
 static void attach(GuestThread *t) {
     uint64_t offset=tls_offset();
     size_t total=offset+256;
@@ -94,7 +106,7 @@ GuestThread *runtime_thread_current(void) {
     if (!t) { fputs("Cannot allocate guest thread\n",stderr); exit(1); }
     t->host=pthread_self(); t->host_owned=1;
     snprintf(t->name,sizeof(t->name),"host");
-    attach(t); publish(t);
+    attach(t); record_stack(t); publish(t);
     return t;
 }
 /* Host threads that call guest code (HLE decoders invoking guest callbacks) need
@@ -160,6 +172,24 @@ static ABI int32_t attr_set_stack(ThreadAttr **slot,uint64_t size) {
     if (!a || size<16384) return ERR(22);
     a->stack=size; return 0;
 }
+static ABI int32_t attr_set_stack_region(ThreadAttr **slot,void *addr,uint64_t size) {
+    ThreadAttr *a=find_attr(slot);
+    if (!a || !addr || size<16384) return ERR(22);
+    a->stack_addr=addr; a->stack=size; return 0;
+}
+static ABI int32_t attr_get_stack_addr(ThreadAttr **slot,void **addr) {
+    ThreadAttr *a=find_attr(slot);
+    if (!a || !addr) return ERR(22);
+    *addr=a->stack_addr; return 0;
+}
+/* libSceFiber checks a fiber's bounds against its thread's stack: the lowest address and size,
+ * as pthread_attr_getstack gives them. */
+static ABI int32_t thread_get_stack(void *thread,void **addr,uint64_t *size) {
+    GuestThread *t=thread ? find_thread(thread) : runtime_thread_current();
+    if (!t || !addr || !size) return 22;
+    *addr=t->attr.stack_addr; *size=t->attr.stack;
+    return 0;
+}
 static ABI int32_t attr_get_stack(ThreadAttr **slot,uint64_t *size) {
     ThreadAttr *a=find_attr(slot);
     if (!a || !size) return ERR(22);
@@ -220,6 +250,7 @@ static void set_host_name(const char *name) {
 static void *host_start(void *p) {
     GuestThread *t=p;
     attach(t);
+    record_stack(t);
     set_host_name(t->name);
     if (!setjmp(t->exit_jump)) t->result=t->entry(t->argument);
     runtime_thread_keys_cleanup();
@@ -238,15 +269,36 @@ static int32_t create(GuestThread **out,ThreadAttr **attr_slot,GuestEntry entry,
     pthread_attr_t host;
     pthread_attr_init(&host);
     uint64_t stack=t->attr.stack<MIN_STACK ? MIN_STACK : t->attr.stack;
-    /* Stacks below 1 TiB as on PS4; guest code may pack stack addresses. */
-    size_t stack_bytes=(size_t)stack+STACK_MARGIN;
-    void *stack_memory=runtime_low_map(stack_bytes,PROT_READ|PROT_WRITE);
-    if (stack_memory) pthread_attr_setstack(&host,stack_memory,stack_bytes);
-    else pthread_attr_setstacksize(&host,stack_bytes);
     publish(t);
     /* Publish the handle before the thread can run and inspect itself. */
     *out=t;
-    int e=pthread_create(&t->host,&host,host_start,t);
+    int e=EINVAL;
+    if (t->attr.stack_addr) {
+        /* The game's own memory, as the console runs it. glibc keeps its thread record and the
+         * process's static TLS at its top and refuses a stack too small for them. */
+        pthread_attr_setstack(&host,t->attr.stack_addr,t->attr.stack);
+        e=pthread_create(&t->host,&host,host_start,t);
+        if (e==EINVAL) {
+            printf("Runtime: guest thread '%s': its own %llu-byte stack is too small for the host; "
+                   "it runs on one of the runtime's\n",t->name,(unsigned long long)t->attr.stack);
+            /* The attributes then name the stack it really runs on (record_stack). */
+            t->attr.stack_addr=NULL;
+            pthread_attr_destroy(&host);
+            pthread_attr_init(&host);
+        }
+    }
+    if (e==EINVAL && !t->attr.stack_addr) {
+        /* Stacks below 1 TiB as on PS4; guest code may pack stack addresses. */
+        size_t stack_bytes=(size_t)stack+STACK_MARGIN;
+        void *stack_memory=runtime_low_map(stack_bytes,PROT_READ|PROT_WRITE);
+        if (stack_memory) {
+            pthread_attr_setstack(&host,stack_memory,stack_bytes);
+            /* Known before the thread runs: libSceUlt reads it (scePthreadAttrGet) right after
+             * creating its workers, and builds their fibers' contexts on it. */
+            t->attr.stack_addr=stack_memory; t->attr.stack=stack_bytes;
+        } else pthread_attr_setstacksize(&host,stack_bytes);
+        e=pthread_create(&t->host,&host,host_start,t);
+    }
     pthread_attr_destroy(&host);
     if (e) { fprintf(stderr,"STOP: host pthread_create failed: %d\n",e); exit(21); }
     if (t->detached) pthread_detach(t->host);
@@ -345,6 +397,8 @@ uintptr_t runtime_thread_resolve(const char *name) {
         {"3qxgM4ezETA#p#J",attr_set_affinity}, {"eXbUSpEaTsA#p#J",attr_set_inherit},
         {"JaRMy+QcpeU#p#J",attr_get_detach}, {"-fA+7ZlGDQs#p#J",attr_get_stack},
         {"FXPWHNk8Of0#p#J",attr_get_param}, {"El+cQ20DynU#p#J",attr_set_guard},
+        {"Bvn74vj6oLo#p#J",attr_set_stack_region}, {"Ru36fiTtJzA#p#J",attr_get_stack_addr},
+        {"ruZ9hhQ8oUk#p#J",thread_get_stack},
         {"6UgtwV+0zb4#p#J",thread_create}, {"onNY9Byn-W8#p#J",thread_join},
         {"4qGrR6eoP9Y#p#J",thread_detach}, {"3kg7rT0NQIs#p#J",thread_exit},
         {"T72hz6ffq08#p#J",thread_yield}, {"1tKyG7RlMJo#p#J",thread_get_prio},
@@ -357,7 +411,7 @@ uintptr_t runtime_thread_resolve(const char *name) {
         {"FJrT5LuUBAU#I#J",thread_exit},
     };
     for (size_t i=0;i<sizeof(table)/sizeof(*table);++i)
-        if (!strcmp(name,table[i].nid)) return (uintptr_t)table[i].fn;
+        if (runtime_same_nid(name,table[i].nid)) return (uintptr_t)table[i].fn;
     return 0;
 }
 void runtime_thread_report(void) {
