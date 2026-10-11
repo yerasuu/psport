@@ -1,0 +1,9 @@
+# Logos, then the opening movie (options skips it) to the title menu, which cross opens.
+60 shot
+90 press cross
+100 shot
+110 press options
+125 shot
+130 press cross
+145 shot
+150 end

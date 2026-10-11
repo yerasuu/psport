@@ -1,0 +1,6 @@
+# Seconds since launch: "shot" dumps the presented frame, "press <a+b> [hold]" holds buttons on
+# the scripted pad (0.3 s by default), "end" stops (after a last shot). Title screen, then cross.
+60 shot
+75 press cross
+90 shot
+100 end
