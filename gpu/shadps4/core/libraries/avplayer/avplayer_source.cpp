@@ -556,7 +556,9 @@ void AvPlayerSource::DemuxerThread(std::stop_token stop) {
                 if (m_is_looping) {
                     LOG_INFO(Lib_AvPlayer, "EOF reached in demuxer. Looping the source...");
                     m_state.OnWarning(ORBIS_AVPLAYER_ERROR_WAR_LOOPING_BACK);
-                    avio_seek(m_avformat_context->pb, 0, SEEK_SET);
+                    // bbport: no raw avio_seek to byte 0 first: the mov demuxer then reads the
+                    // moov atom again as a new root, drops it as a duplicate and returns EOF
+                    // forever, so a looping movie froze on its last frame (Atelier Ayesha).
                     if (m_video_stream_index.has_value()) {
                         const auto index = m_streams[m_video_stream_index.value()].ffmpeg_index;
                         const auto stream = m_avformat_context->streams[index];
