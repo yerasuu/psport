@@ -1693,6 +1693,10 @@ bool Rasterizer::ObtainStreamOut(const GraphicsPipeline* pipeline, StreamOutBind
     if (!buffer || !buffer->Handle()) {
         return skip("the buffer cache gave no buffer for the stream-out range");
     }
+    // vkCmdBindTransformFeedbackBuffersEXT takes offsets that are multiples of 4 only.
+    if (offset % 4 != 0) {
+        return skip("the stream-out buffer is not 4-byte aligned");
+    }
     texture_cache.InvalidateMemoryFromGPU(address, size);
     const u64 max_size = instance.GetTransformFeedbackProperties().maxTransformFeedbackBufferSize;
     out = {buffer, offset, std::min<u64>({size, buffer->SizeBytes() - offset, max_size})};
