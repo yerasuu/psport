@@ -161,7 +161,7 @@ static void posix_mutexes(void) {
     m=NULL;
     assert(lock(&m)==0 && lock(&m)==11 && trylock(&m)==16);
     assert(unlock(&m)==0 && destroy(&m)==0);
-    assert(!runtime_resolve("dQHWEsJtoE4#q#q",0));
+    assert(runtime_resolve("dQHWEsJtoE4#q#q",0)==runtime_resolve("dQHWEsJtoE4#I#J",0)); /* scope-independent */
 }
 static void wall_time(void) {
     typedef int (ABI *GetTime)(int64_t *,int32_t *);
@@ -175,7 +175,7 @@ static void wall_time(void) {
     assert(t.value[1]>=0 && t.value[1]<1000000);
     assert(t.canary==0xabcdef && z.canary==0x123456);
     assert(get(NULL,NULL)==0 && get(NULL,z.value)==0);
-    assert(!runtime_resolve("n88vx3C5nW8#q#q",0));
+    assert(runtime_resolve("n88vx3C5nW8#q#q",0)); /* scope-independent; libc scope may pick its own */
 }
 static void direct_memory(void) {
     Allocate alloc=GET(Allocate,"rTXw65xmLIA#p#J");
@@ -395,7 +395,9 @@ static void rw_timeouts(void) {
 int main(int argc,char **argv) {
     runtime_start(0); assert(runtime_resolve("bzQExy189ZI#q#q",0)==0);
     runtime_start(1);
-    assert(runtime_resolve("bzQExy189ZI#wrong#module",0)==0);
+    /* Imports resolve by NID whatever their #lib#mod scope (runtime_same_nid). */
+    assert(runtime_resolve("bzQExy189ZI#wrong#module",0)!=0);
+    assert(runtime_resolve("bzQExy189ZI#wrong#module",0)==runtime_resolve("bzQExy189ZI#q#q",0));
     assert(runtime_resolve("unknown",0)==0);
     assert(runtime_resolve("8zTFvBIAIN8#q#q",1)==0);
     assert(runtime_resolve("f7uOxY9mM1U#p#J",0)==0);
