@@ -47,6 +47,20 @@ expand() {
     printf '%s' "$value"
 }
 
+# stop_session PID: the game first, then gamescope: the other way round the game loses its display
+# mid-frame.
+stop_session() {
+    local pid=$1 game_pid
+    game_pid=$(pgrep -s "$pid" -x bb-probe | head -1)
+    if [[ -n $game_pid ]]; then
+        kill -TERM "$game_pid" 2>/dev/null
+        for ((i = 0; i < 10; i++)); do kill -0 "$game_pid" 2>/dev/null || break; sleep 0.5; done
+    fi
+    kill -INT -- -"$pid" 2>/dev/null
+    for ((i = 0; i < 10; i++)); do kill -0 -- -"$pid" 2>/dev/null || break; sleep 0.5; done
+    kill -KILL -- -"$pid" 2>/dev/null; wait "$pid" 2>/dev/null
+}
+
 # run_title NAME TITLE_ID GAME_DIR SCHEDULE ENV...: one headless session, as the scratch
 # session.sh of the porting work: own session (setsid) so the whole tree can be stopped.
 run_title() {
@@ -63,6 +77,9 @@ run_title() {
         BB_MODS_ENABLED=0 BB_PAD_FILE="$dir/pad" BB_PRESENT_DUMP_TRIGGER="$dir/shot" BB_DUMP_DIR="$dir/shots" \
         "${launch[@]}" ) > "$dir/log" 2>&1 < /dev/null &
     local pid=$! start=$SECONDS ended=schedule at what rest buttons hold
+    # setsid put the session out of reach of the terminal and of a kill aimed at this script, so
+    # an interrupted run would leave the game and gamescope running headless indefinitely.
+    trap 'stop_session $pid; exit 143' TERM
     while read -r at what rest; do
         [[ -z $at || $at == \#* ]] && continue
         while ((SECONDS - start < at)); do kill -0 $pid 2>/dev/null || { ended=exited; break 2; }; sleep 0.2; done
@@ -81,21 +98,14 @@ run_title() {
     fi
     kill -0 $pid 2>/dev/null || ended=exited
     printf 'ended\t%s\nseconds\t%d\n' "$ended" $((SECONDS - start)) >> "$dir/run.tsv"
-    # The game first, then gamescope: the other way round the game loses its display mid-frame.
-    local game_pid
-    game_pid=$(pgrep -s $pid -x bb-probe | head -1)
-    if [[ -n $game_pid ]]; then
-        kill -TERM "$game_pid" 2>/dev/null
-        for ((i = 0; i < 10; i++)); do kill -0 "$game_pid" 2>/dev/null || break; sleep 0.5; done
-    fi
-    kill -INT -- -$pid 2>/dev/null
-    for ((i = 0; i < 10; i++)); do kill -0 -- -$pid 2>/dev/null || break; sleep 0.5; done
-    kill -KILL -- -$pid 2>/dev/null; wait $pid 2>/dev/null
+    stop_session $pid
     # The prepared game (out/) is rebuilt by every run and is the bulk of the directory.
     rm -rf -- "$dir/out"
     echo "regress: $name $ended after $((SECONDS - start)) s" >&2
 }
 
+# Background jobs of a script ignore SIGINT, and the sessions ignore both: pass the stop on.
+trap 'trap "" TERM; kill -TERM $(jobs -rp) 2>/dev/null; wait; exit 130' INT TERM HUP
 while read -r name title game schedule envs; do
     [[ -z $name || $name == \#* ]] && continue
     [[ -z $only || $only == *,$name,* ]] || continue
