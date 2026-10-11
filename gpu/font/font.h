@@ -565,9 +565,24 @@ sceFontGlyphRefersMetricsHorizontalAdvance(OrbisFontGlyph fontGlyph);
 const OrbisFontGlyphMetricsHorizontalX* PS4_SYSV_ABI
 sceFontGlyphRefersMetricsHorizontalX(OrbisFontGlyph fontGlyph);
 OrbisFontGlyphOutline* PS4_SYSV_ABI sceFontGlyphRefersOutline(OrbisFontGlyph glyph);
-s32 PS4_SYSV_ABI sceFontGlyphRenderImage();
-s32 PS4_SYSV_ABI sceFontGlyphRenderImageHorizontal();
-s32 PS4_SYSV_ABI sceFontGlyphRenderImageVertical();
+s32 PS4_SYSV_ABI sceFontGlyphRenderImage(OrbisFontGlyph fontGlyph,
+                                         OrbisFontStyleFrame* fontStyleFrame,
+                                         OrbisFontRenderer fontRenderer,
+                                         OrbisFontRenderSurface* surface, float x, float y,
+                                         OrbisFontGlyphMetrics* metrics,
+                                         OrbisFontRenderOutput* result);
+s32 PS4_SYSV_ABI sceFontGlyphRenderImageHorizontal(OrbisFontGlyph fontGlyph,
+                                                   OrbisFontStyleFrame* fontStyleFrame,
+                                                   OrbisFontRenderer fontRenderer,
+                                                   OrbisFontRenderSurface* surface, float x,
+                                                   float y, OrbisFontGlyphMetrics* metrics,
+                                                   OrbisFontRenderOutput* result);
+s32 PS4_SYSV_ABI sceFontGlyphRenderImageVertical(OrbisFontGlyph fontGlyph,
+                                                 OrbisFontStyleFrame* fontStyleFrame,
+                                                 OrbisFontRenderer fontRenderer,
+                                                 OrbisFontRenderSurface* surface, float x, float y,
+                                                 OrbisFontGlyphMetrics* metrics,
+                                                 OrbisFontRenderOutput* result);
 s32 PS4_SYSV_ABI sceFontGraphicsBeginFrame();
 s32 PS4_SYSV_ABI sceFontGraphicsDrawingCancel();
 s32 PS4_SYSV_ABI sceFontGraphicsDrawingFinish();

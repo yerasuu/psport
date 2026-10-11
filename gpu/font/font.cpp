@@ -2392,19 +2392,123 @@ OrbisFontGlyphOutline* PS4_SYSV_ABI sceFontGlyphRefersOutline(OrbisFontGlyph gly
     return &boxed->outline;
 }
 
-s32 PS4_SYSV_ABI sceFontGlyphRenderImage() {
-    LOG_ERROR(Lib_Font, "(STUBBED) called");
-    return ORBIS_OK;
+// bbport: the glyph counterparts of sceFontRenderCharGlyphImage{,Horizontal,Vertical}, on
+// RenderGlyphImageCore. Mode 0 places the glyph as sceFontRenderCharGlyphImage places a character:
+// (x, y) is the top of the line (the left of the column for a vertical font), so the line's
+// baseline (column offset) at the scale the glyph is drawn at is added here; the core's own mode 0
+// adds only an offset another render left on the surface. Modes 1 and 2 take (x, y) on the
+// baseline or the vertical centre line, as the core does.
+static s32 GlyphRenderImage(OrbisFontGlyph fontGlyph, OrbisFontStyleFrame* styleFrame,
+                            OrbisFontRenderer renderer, OrbisFontRenderSurface* surf, float x,
+                            float y, int mode, OrbisFontGlyphMetrics* metrics,
+                            OrbisFontRenderOutput* result) {
+    LOG_DEBUG(Lib_Font, "{}",
+              formatParams({
+                  Param("fontGlyph", fontGlyph),
+                  Param("styleFrame", styleFrame),
+                  Param("renderer", renderer),
+                  Param("surf", surf),
+                  Param("x", x),
+                  Param("y", y),
+                  Param("mode", mode),
+                  Param("metrics", metrics),
+                  Param("result", result),
+              }));
+
+    auto* gg = fontGlyph && fontGlyph->magic == 0x0F03 ? Internal::TryGetGeneratedGlyph(fontGlyph)
+                                                        : nullptr;
+    auto* font = gg ? GetNativeFont(gg->owner_handle) : nullptr;
+    if (!gg || !font || font->magic != 0x0F02 || !renderer || !surf || !metrics || !result) {
+        // The core sorts out which argument is wrong.
+        return Internal::RenderGlyphImageCore(fontGlyph, styleFrame, renderer, surf, x, y, mode,
+                                              metrics, result);
+    }
+
+    u32 prev_lock_word = 0;
+    if (!AcquireFontLock(font, prev_lock_word)) {
+        ClearRenderOutputs(metrics, result);
+        return ORBIS_FONT_ERROR_INVALID_FONT_HANDLE;
+    }
+
+    const bool vertical = static_cast<s16>(font->flags) < 0;
+    s32 rc = ORBIS_OK;
+    if (mode == 0) {
+        Internal::StyleStateBlock state{};
+        state.dpi_x = font->cached_style.hDpi;
+        state.dpi_y = font->cached_style.vDpi;
+        state.scale_w = fontGlyph->scale_x;
+        state.scale_h = fontGlyph->base_scale;
+
+        // A style frame's scale replaces the glyph's in the core, the call's over the surface's.
+        const OrbisFontStyleFrame* frame = nullptr;
+        if (Internal::ValidateStyleFramePtr(styleFrame) && (styleFrame->flags1 & 1) != 0) {
+            frame = styleFrame;
+        } else if ((surf->styleFlag & 0x1) != 0) {
+            auto* sys = reinterpret_cast<Internal::RenderSurfaceSystemUse*>(surf->reserved_q);
+            if (sys && Internal::ValidateStyleFramePtr(sys->styleframe) &&
+                (sys->styleframe->flags1 & 1) != 0) {
+                frame = sys->styleframe;
+            }
+        }
+        if (frame) {
+            state.dpi_x = frame->hDpi;
+            state.dpi_y = frame->vDpi;
+            rc = Internal::StyleStateGetScalePixel(&frame->hDpi, &state.scale_w, &state.scale_h);
+        }
+
+        if (rc == ORBIS_OK && vertical) {
+            Internal::VerticalLayoutBlocks layout{};
+            rc = Internal::ComputeVerticalLayoutBlocksTyped(gg->owner_handle, &state, &layout);
+            x += layout.baseline_offset_x();
+        } else if (rc == ORBIS_OK) {
+            Internal::HorizontalLayoutBlocks layout{};
+            rc = Internal::ComputeHorizontalLayoutBlocksTyped(gg->owner_handle, &state, &layout);
+            y += layout.baseline();
+        }
+        mode = vertical ? 2 : 1;
+    }
+    if (rc == ORBIS_OK) {
+        rc = Internal::RenderGlyphImageCore(fontGlyph, styleFrame, renderer, surf, x, y, mode,
+                                            metrics, result);
+    } else {
+        ClearRenderOutputs(metrics, result);
+    }
+    font->lock_word = prev_lock_word;
+
+    if (rc != ORBIS_OK) {
+        LOG_ERROR(Lib_Font, "FAILED rc={:#x} code=U+{:04X}", static_cast<u32>(rc), gg->codepoint);
+    }
+    return rc;
 }
 
-s32 PS4_SYSV_ABI sceFontGlyphRenderImageHorizontal() {
-    LOG_ERROR(Lib_Font, "(STUBBED) called");
-    return ORBIS_OK;
+s32 PS4_SYSV_ABI sceFontGlyphRenderImage(OrbisFontGlyph fontGlyph,
+                                         OrbisFontStyleFrame* fontStyleFrame,
+                                         OrbisFontRenderer fontRenderer,
+                                         OrbisFontRenderSurface* surface, float x, float y,
+                                         OrbisFontGlyphMetrics* metrics,
+                                         OrbisFontRenderOutput* result) {
+    return GlyphRenderImage(fontGlyph, fontStyleFrame, fontRenderer, surface, x, y, 0, metrics,
+                            result);
 }
 
-s32 PS4_SYSV_ABI sceFontGlyphRenderImageVertical() {
-    LOG_ERROR(Lib_Font, "(STUBBED) called");
-    return ORBIS_OK;
+s32 PS4_SYSV_ABI sceFontGlyphRenderImageHorizontal(OrbisFontGlyph fontGlyph,
+                                                   OrbisFontStyleFrame* fontStyleFrame,
+                                                   OrbisFontRenderer fontRenderer,
+                                                   OrbisFontRenderSurface* surface, float x,
+                                                   float y, OrbisFontGlyphMetrics* metrics,
+                                                   OrbisFontRenderOutput* result) {
+    return GlyphRenderImage(fontGlyph, fontStyleFrame, fontRenderer, surface, x, y, 1, metrics,
+                            result);
+}
+
+s32 PS4_SYSV_ABI sceFontGlyphRenderImageVertical(OrbisFontGlyph fontGlyph,
+                                                 OrbisFontStyleFrame* fontStyleFrame,
+                                                 OrbisFontRenderer fontRenderer,
+                                                 OrbisFontRenderSurface* surface, float x, float y,
+                                                 OrbisFontGlyphMetrics* metrics,
+                                                 OrbisFontRenderOutput* result) {
+    return GlyphRenderImage(fontGlyph, fontStyleFrame, fontRenderer, surface, x, y, 2, metrics,
+                            result);
 }
 
 s32 PS4_SYSV_ABI sceFontGraphicsBeginFrame() {
