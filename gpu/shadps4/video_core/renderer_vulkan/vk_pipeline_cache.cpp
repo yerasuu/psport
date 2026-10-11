@@ -940,11 +940,23 @@ static bool SkipUnsupportedGeometry(const AmdGpu::Regs& regs, const char* stages
                 }
             }
         }
+        std::string buffer_regs;
+        const u32 buffer_mask = (buffers | buffers >> 4 | buffers >> 8 | buffers >> 12) & 0xf;
+        for (u32 i = 0; i < 4; ++i) {
+            if (buffer_mask >> i & 1) {
+                const auto& buffer = regs.vgt_strmout_buffers[i];
+                buffer_regs += std::format(", buffer {} size/stride/offset {:#x}/{}/{:#x} dwords", i, buffer.size,
+                                           static_cast<u32>(buffer.vtx_stride), buffer.offset);
+            }
+        }
+        const auto& vs = regs.vs_program.settings;
         LOG_WARNING(Render_Vulkan,
                     "Skipped {} draw: {}{}stream-out config {:#x} (streams {:04b}, rasterized {}), "
-                    "buffers {:#06x}, GS program {:#x}",
-                    stages, onchip ? "on-chip GS, " : "", strmout ? "" : "no ", strmout,
-                    strmout & 0xf, static_cast<u32>(regs.vgt_strmout_config.rast_stream), buffers, gs_address);
+                    "buffers {:#06x}{}, copy VS so_en {} so_base_en {:04b} user SGPRs {}, GS program {:#x}",
+                    stages, onchip ? "on-chip GS, " : "", strmout ? "" : "no ", strmout, strmout & 0xf,
+                    static_cast<u32>(regs.vgt_strmout_config.rast_stream), buffers, buffer_regs,
+                    static_cast<u32>(vs.so_en), static_cast<u32>(vs.so_base_en), static_cast<u32>(vs.num_user_regs),
+                    gs_address);
     }
     if ((skipped_streamout + skipped_onchip) % 5000 == 0) {
         LOG_WARNING(Render_Vulkan, "Skipped geometry-shader draws so far: {} with stream-out, {} on-chip only",
