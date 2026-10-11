@@ -52,6 +52,19 @@ static ABI int32_t module_unload(uint16_t id) {
     if (id==0xb4) { refs=module_refs[id]; if (!refs) initialized=0; }
     return 0;
 }
+/* Internal ids (bit 31 set) name what the SDK's own libraries load; those are the host's too, so
+ * loading one counts a reference and reports the start result of a module that has none: 0. */
+static unsigned internal_refs[0x10000];
+static ABI int32_t module_load_internal(uint32_t id,int32_t argc,const void *argv,uint64_t reserved,int32_t *result) {
+    (void)argc; (void)argv;
+    const uint32_t index=id&0x7fffffff;
+    if (!index || index>=0x10000 || reserved) return INVALID_ID;
+    if (internal_refs[index]==UINT32_MAX) { fputs("STOP: module reference overflow\n",stderr); exit(21); }
+    ++internal_refs[index];
+    if (result) *result=0;
+    printf("Runtime: internal system module 0x%x loaded (host implementation)\n",id);
+    return 0;
+}
 static void require_loaded(void) {
     require_provider();
     if (!refs) { fputs("STOP: AppContent called before module load\n",stderr); exit(21); }
@@ -124,6 +137,8 @@ uintptr_t runtime_content_resolve(const char *name) {
     if (!strcmp(name,"g8cM39EUZ6o#M#N")) return (uintptr_t)module_load;
     if (!strcmp(name,"fMP5NHUOaMk#M#N")) return (uintptr_t)module_loaded;
     if (!strcmp(name,"eR2bZFAAU0Q#M#N")) return (uintptr_t)module_unload;
+    /* Bloodborne does not import it, so the NID matches in any title's scope. */
+    if (!strncmp(name,"hHrGoGoNf+s",11) && (!name[11] || name[11]=='#')) return (uintptr_t)module_load_internal;
     if (!strcmp(name,"R9lA82OraNs#c#d")) return (uintptr_t)content_init;
     if (!strcmp(name,"99b82IKXpH4#c#d")) return (uintptr_t)param_int;
     if (!strcmp(name,"xnd8BJzAxmk#c#d")) return (uintptr_t)addon_list;
