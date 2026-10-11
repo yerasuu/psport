@@ -566,15 +566,13 @@ void AvPlayerSource::DemuxerThread(std::stop_token stop) {
                     // forever, so a looping movie froze on its last frame (Atelier Ayesha).
                     if (m_video_stream_index.has_value()) {
                         const auto index = m_streams[m_video_stream_index.value()].ffmpeg_index;
-                        const auto stream = m_avformat_context->streams[index];
                         seeked &= avformat_seek_file(m_avformat_context.get(), index, 0, 0,
-                                                     stream->duration, 0) >= 0;
+                                                     INT64_MAX, 0) >= 0;
                     }
                     if (m_audio_stream_index.has_value()) {
                         const auto index = m_streams[m_audio_stream_index.value()].ffmpeg_index;
-                        const auto stream = m_avformat_context->streams[index];
                         seeked &= avformat_seek_file(m_avformat_context.get(), index, 0, 0,
-                                                     stream->duration, 0) >= 0;
+                                                     INT64_MAX, 0) >= 0;
                     }
                     if (seeked) {
                         continue;

@@ -59,6 +59,7 @@ private:
 
     void EmitEvent(AvPlayerEvents event_id, void* event_data = nullptr);
     bool SetState(AvState state);
+    bool StopLocked();
 
     void AvControllerThread(std::stop_token stop);
 
