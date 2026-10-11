@@ -15,7 +15,7 @@ static constexpr double PHASE_ONE = 4294967296.0;
 static constexpr std::uint64_t PHASE_FRACTION = 0xffffffff;
 
 static const std::uint8_t* FrameAt(const Ngs2Voice& voice, const Ngs2Block& block, std::uint32_t frame) {
-    const std::size_t frameBytes = voice.channels * sizeof(std::int16_t);
+    const std::size_t frameBytes = Ngs2FrameBytes(voice);
     if (block.streaming) {
         for (const auto& piece : block.pieces) {
             if (frame >= piece.firstFrame && frame - piece.firstFrame < piece.frames) return piece.data + (frame - piece.firstFrame) * frameBytes;
@@ -28,6 +28,10 @@ static const std::uint8_t* FrameAt(const Ngs2Voice& voice, const Ngs2Block& bloc
 static void ReadPcm(const Ngs2Voice& voice, const std::uint8_t* frame, float* out) {
     if (frame == nullptr) {
         for (std::uint32_t channel = 0; channel < voice.channels; channel++) out[channel] = 0.0f;
+        return;
+    }
+    if (voice.waveformType == SCE_NGS2_WAVEFORM_TYPE_PCM_F32L) {
+        std::memcpy(out, frame, voice.channels * sizeof(float));
         return;
     }
     for (std::uint32_t channel = 0; channel < voice.channels; channel++) {
@@ -89,7 +93,7 @@ static void Advance(Ngs2Voice& voice, std::uint64_t frames) {
         const auto step = std::min<std::uint64_t>(frames, limit - block.cursor);
         block.cursor += static_cast<std::uint32_t>(step);
         voice.decodedSamples += step;
-        if (voice.waveformType != SCE_NGS2_WAVEFORM_TYPE_ATRAC9) voice.decodedBytes += step * voice.channels * sizeof(std::int16_t);
+        if (voice.waveformType != SCE_NGS2_WAVEFORM_TYPE_ATRAC9) voice.decodedBytes += step * Ngs2FrameBytes(voice);
         frames -= step;
         if (block.streaming) {
             while (block.pieces.size() > 1 && block.cursor >= block.pieces.front().firstFrame + block.pieces.front().frames) block.pieces.erase(block.pieces.begin());
