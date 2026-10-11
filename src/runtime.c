@@ -241,6 +241,8 @@ static uintptr_t resolve_scoped(const char *name, int is_data) {
     if (sema) return sema;
     uintptr_t eventflag = runtime_eventflag_resolve(name);
     if (eventflag) return eventflag;
+    uintptr_t ulobjmgr = runtime_ulobjmgr_resolve(name);
+    if (ulobjmgr) return ulobjmgr;
     uintptr_t rwlock = runtime_rwlock_resolve(name);
     if (rwlock) return rwlock;
     uintptr_t memory = runtime_memory_resolve(name);
@@ -285,6 +287,13 @@ const char *runtime_symbol(const char *nid) {
         if (!order) return all_names[mid].symbol;
         if (order<0) high=mid; else low=mid+1;
     }
+    /* Exports aerolib does not name, called as shadPS4 calls them. */
+    static const struct { const char *nid, *symbol; } extra[]={
+        {"BG26hBGiNlw","_sceUlobjmgrRegisterObject"}, {"Smf+fUNblPc","_sceUlobjmgrUnregisterObject"},
+        {"HZ9Q2c+4BU4","ulobjmgr Func_1D9F50D9CFB8054E"}, {"SweJO7t3pkk","ulobjmgr Func_4B07893BBB77A649"},
+    };
+    for (size_t i=0;i<sizeof(extra)/sizeof(*extra);++i)
+        if (runtime_same_nid(nid,extra[i].nid)) return extra[i].symbol;
     return NULL;
 }
 /* The suffix after the NID numbers the library and module in the importing executable's own
