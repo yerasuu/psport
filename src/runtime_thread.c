@@ -408,7 +408,7 @@ uintptr_t runtime_thread_resolve(const char *name) {
         {"E+tyo3lp5Lw#I#J",posix_attr_set_detach}, {"2Q0z6rnBrTE#I#J",posix_attr_set_stack},
         {"euKRgm0Vn2M#I#J",posix_attr_set_param}, {"OxhIB8LB-PQ#I#J",posix_create},
         {"Jmi+9w9u0E4#I#J",posix_create_name}, {"h9CcP3J0oVM#I#J",posix_join},
-        {"FJrT5LuUBAU#I#J",thread_exit},
+        {"FJrT5LuUBAU#I#J",thread_exit}, {"7Xl257M4VNI#I#J",thread_equal},
     };
     for (size_t i=0;i<sizeof(table)/sizeof(*table);++i)
         if (runtime_same_nid(name,table[i].nid)) return (uintptr_t)table[i].fn;
