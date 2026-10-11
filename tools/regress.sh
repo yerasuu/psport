@@ -97,7 +97,9 @@ run_title() {
         sleep 1
     fi
     kill -0 $pid 2>/dev/null || ended=exited
-    printf 'ended\t%s\nseconds\t%d\n' "$ended" $((SECONDS - start)) >> "$dir/run.tsv"
+    # stop_offset: what the game logs after it is told to stop (a lost swapchain once gamescope goes)
+    # is not how the run went, and report.py takes no crash signature past it.
+    printf 'ended\t%s\nseconds\t%d\nstop_offset\t%d\n' "$ended" $((SECONDS - start)) "$(stat -c %s -- "$dir/log")" >> "$dir/run.tsv"
     stop_session $pid
     # The prepared game (out/) is rebuilt by every run and is the bulk of the directory.
     rm -rf -- "$dir/out"

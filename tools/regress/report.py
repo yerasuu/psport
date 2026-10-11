@@ -69,7 +69,12 @@ def classify(run_dir):
     log = run_dir / 'log'
     if 'skipped' in meta or not log.exists():
         return result
-    for line in log.read_text(errors='replace').splitlines():
+    stop_offset = int(meta.get('stop_offset', -1))
+    offset = 0
+    for raw in log.read_bytes().splitlines(keepends=True):
+        stopping = 0 <= stop_offset <= offset
+        offset += len(raw)
+        line = raw.decode(errors='replace').rstrip('\r\n')
         for name, pattern in LOG_MILESTONES.items():
             if not result[name] and pattern.match(line):
                 result[name] = True
@@ -79,7 +84,7 @@ def classify(run_dir):
             peak = float(m[1])
             if result['peak_dbfs'] is None or peak > result['peak_dbfs']:
                 result['peak_dbfs'] = peak
-        elif not result['crash'] and (sig := crash_signature(line)):
+        elif not result['crash'] and not stopping and (sig := crash_signature(line)):
             result['crash'] = sig
     for dump in sorted((run_dir / 'shots').glob('*_present_*.raw')):
         luma = mean_luma(dump)

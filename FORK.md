@@ -72,8 +72,10 @@ Milestones, from the log and the dumps:
 | frames | a present dump whose mean luma (Rec. 709, 0-255) is above 4 |
 | audio | a `BB_AUDIO_STATS` peak above -60 dBFS |
 
-It also records the first fault or stop (`Guest fault` offset, `Host fault` library+offset and
-function, `STOP:`, assertion) and the summary's count of imports without implementation. The table
-goes to stdout, `results.tsv` and `results.json` to the output folder with each title's log and
-dumps (`tools/regress/report.py <folder>` classifies a folder again). With `-c`, a milestone lost or
-a crash signature that is new or different is a regression: it is listed and the exit status is 1.
+It also records the first fault or stop logged before the title is told to end (`Guest fault`
+offset, `Host fault` library+offset and function, `STOP:`, assertion; what a game logs while it
+loses its display at the end is not a crash) and the summary's count of imports without
+implementation. The table goes to stdout, `results.tsv` and `results.json` to the output folder
+with each title's log and dumps (`tools/regress/report.py <folder>` classifies a folder again).
+With `-c`, a milestone lost or a crash signature that is new or different is a regression: it is
+listed and the exit status is 1.
