@@ -1,11 +1,26 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <algorithm>
+
 #include "shader_recompiler/frontend/copy_shader.h"
 #include "shader_recompiler/frontend/decode.h"
 #include "shader_recompiler/ir/attribute.h"
 
 namespace Shader {
+
+namespace {
+
+// GCN dfmt of the 32-bit-per-component formats, by component count.
+constexpr std::array<u32, 5> StoreDfmt{0, 4, 11, 13, 14};
+
+struct PendingStore {
+    u32 buffer;
+    u32 byte_offset;
+    s32 ring_offset;
+};
+
+} // namespace
 
 CopyShaderData ParseCopyShader(std::span<const u32> code) {
     Gcn::GcnCodeSlice code_slice{code.data(), code.data() + code.size()};
@@ -20,14 +35,45 @@ CopyShaderData ParseCopyShader(std::span<const u32> code) {
     std::array<s32, 256> sources{};
     sources.fill(-1);
 
+    // S_LOAD_DWORDX4 destination SGPR -> where it loaded from, to find a store's V#.
+    std::map<u32, CopyShaderData::StreamOutBuffer> vsharp_loads;
+    std::vector<PendingStore> pending_stores;
+
     CopyShaderData data{};
+    // Stores come before the exports that fill attr_map, so they are resolved after the walk.
+    const auto record_store = [&](const Gcn::GcnInst& inst, u32 count, u32 offset) {
+        const auto load = vsharp_loads.find(inst.src[2].code * 4);
+        if (load == vsharp_loads.end()) {
+            data.stream_out_parsed = false;
+            return;
+        }
+        const auto& source = load->second;
+        // The buffer index is the order in which distinct V#s appear; Ryza's copy shaders use
+        // buffer 0 only, so nothing confirms how other titles number theirs.
+        const auto it = std::ranges::find_if(data.stream_out_buffers, [&](const auto& buffer) {
+            return buffer.sgpr_pair == source.sgpr_pair && buffer.byte_offset == source.byte_offset;
+        });
+        const u32 buffer = static_cast<u32>(it - data.stream_out_buffers.begin());
+        if (it == data.stream_out_buffers.end()) {
+            data.stream_out_buffers.push_back(source);
+        }
+        for (u32 k = 0; k < count; ++k) {
+            const u32 vgpr = inst.src[1].code + k;
+            const s32 ring_offset = vgpr < offsets.size() ? offsets[vgpr] : -1;
+            pending_stores.push_back({buffer, offset + 4 * k, ring_offset});
+        }
+    };
     auto last_attr{IR::Attribute::Position0};
     while (!code_slice.atEnd()) {
         auto inst = decoder.decodeInstruction(code_slice);
         switch (inst.opcode) {
         case Gcn::Opcode::S_LSHL_B32: {
-            ASSERT(inst.src[0].field == Gcn::OperandField::SignedConstIntPos &&
-                   inst.src[1].field == Gcn::OperandField::SignedConstIntPos);
+            // Stream-out shaders shift streamout_offset0 (an SGPR) into soffset.
+            if (inst.src[0].field != Gcn::OperandField::SignedConstIntPos ||
+                inst.src[1].field != Gcn::OperandField::SignedConstIntPos) {
+                sources[inst.dst[0].code] = -1;
+                break;
+            }
             sources[inst.dst[0].code] =
                 (inst.src[0].code - Gcn::OperandFieldRange::SignedConstIntPosMin + 1)
                 << (inst.src[1].code - Gcn::OperandFieldRange::SignedConstIntPosMin + 1);
@@ -82,6 +128,38 @@ CopyShaderData ParseCopyShader(std::span<const u32> code) {
             data.num_comps++;
             break;
         }
+        case Gcn::Opcode::S_LOAD_DWORDX4: {
+            const auto& smrd = inst.control.smrd;
+            if (smrd.imm) {
+                vsharp_loads[inst.dst[0].code] = {inst.src[0].code, smrd.offset * 4u};
+            } else {
+                vsharp_loads.erase(inst.dst[0].code);
+            }
+            break;
+        }
+        case Gcn::Opcode::TBUFFER_STORE_FORMAT_X:
+        case Gcn::Opcode::TBUFFER_STORE_FORMAT_XY:
+        case Gcn::Opcode::TBUFFER_STORE_FORMAT_XYZ:
+        case Gcn::Opcode::TBUFFER_STORE_FORMAT_XYZW: {
+            const auto& mtbuf = inst.control.mtbuf;
+            // byte_offset is relative to the vertex's record only when the store indexes by vertex.
+            if (mtbuf.dfmt != StoreDfmt[mtbuf.count] || mtbuf.offen || !mtbuf.idxen) {
+                data.stream_out_parsed = false;
+            }
+            record_store(inst, mtbuf.count, mtbuf.offset);
+            break;
+        }
+        case Gcn::Opcode::BUFFER_STORE_DWORD:
+        case Gcn::Opcode::BUFFER_STORE_DWORDX2:
+        case Gcn::Opcode::BUFFER_STORE_DWORDX3:
+        case Gcn::Opcode::BUFFER_STORE_DWORDX4: {
+            const auto& mubuf = inst.control.mubuf;
+            if (mubuf.offen || !mubuf.idxen) {
+                data.stream_out_parsed = false;
+            }
+            record_store(inst, mubuf.count, mubuf.offset);
+            break;
+        }
         default:
             break;
         }
@@ -94,6 +172,20 @@ CopyShaderData ParseCopyShader(std::span<const u32> code) {
         const auto it = data.attr_map.begin();
         const u32 comp_stride = std::next(it)->first - it->first;
         data.output_vertices = comp_stride / 64;
+    }
+
+    data.stream_out_stores.reserve(pending_stores.size());
+    for (const auto& store : pending_stores) {
+        const auto attr = store.ring_offset == -1 ? data.attr_map.end()
+                                                  : data.attr_map.find(store.ring_offset);
+        if (attr == data.attr_map.end()) {
+            data.stream_out_stores.push_back(
+                {store.buffer, store.byte_offset, CopyShaderData::StreamOutUnexported, 0});
+            data.stream_out_parsed = false;
+            continue;
+        }
+        const auto [semantic, comp] = attr->second;
+        data.stream_out_stores.push_back({store.buffer, store.byte_offset, semantic, comp});
     }
 
     return data;
