@@ -1717,6 +1717,13 @@ void Rasterizer::PrepareStreamOut(const StreamOutBinding& binding) {
 
 void Rasterizer::NoteStreamOut(const StreamOutBinding& binding) {
     if (binding.buffer) {
+        // Captures leave no trace on screen by themselves (Ryza's rasterize nothing): counted so a
+        // log shows they happen, next to the skipped count.
+        static std::atomic<u64> captured{0};
+        if (const u64 count = captured.fetch_add(1, std::memory_order_relaxed) + 1;
+            count == 1 || count % 5000 == 0) {
+            LOG_WARNING(Render_Vulkan, "GS draws captured with transform feedback so far: {}", count);
+        }
         runtime.AccessBuffer(binding.buffer, binding.offset, binding.size,
                              vk::PipelineStageFlagBits2::eTransformFeedbackEXT,
                              vk::AccessFlagBits2::eTransformFeedbackWriteEXT);

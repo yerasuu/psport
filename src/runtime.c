@@ -26,11 +26,12 @@ static _Thread_local unsigned char *tls_blocks[TLS_MODULES];
 static void *process_param;
 void runtime_set_procparam(void *param) {
     process_param=param;
-    /* bbport: the game's libc heap settings (SceProcParam +0x30: SceLibcParam; its +0x10.. pointers to
-     * the heap size, delayed and extended allocation flags, initial size). */
+    /* bbport: the game's libc heap settings (SceProcParam +0x38: SceLibcParam; its +0x10.. pointers to
+     * the heap size, delayed and extended allocation flags, initial size). +0x30 is the main thread's
+     * stack size pointer, which newer SDKs fill, so reading the libc block from there faulted. */
     const uint64_t *p=(const uint64_t *)param;
-    if (!p || p[0]<0x38 || !p[6]) return;
-    const uint64_t *libc=(const uint64_t *)p[6];
+    if (!p || p[0]<0x40 || !p[7]) return;
+    const uint64_t *libc=(const uint64_t *)p[7];
     printf("Runtime: libc param size %#llx, entries %u", (unsigned long long)libc[0], (unsigned)libc[1]);
     static const char *names[]={"heap size","delayed alloc","extended alloc","initial size"};
     for (int i=0;i<4 && (uint64_t)(2+i)*8<libc[0];++i) {
