@@ -1676,19 +1676,134 @@ s32 ComputeSysfontShiftValue(FT_Face face) {
     return 0;
 }
 
-// bbport: shadPS4 bundles Noto fonts with its ImGui; libbbgpu carries only the overlay's DejaVu
-// Sans, which stands in for the Latin one. The other scripts have no glyphs here.
+namespace {
+
+// bbport: shadPS4 bundles these Noto fonts with its ImGui; here they are the host's (SteamOS and
+// most distributions ship them), looked up by file name in BB_FALLBACK_FONTS (folders separated
+// by ':') and then the usual font folders. The Latin one falls back to the overlay's embedded
+// DejaVu Sans, so a title gets glyphs on any host.
+struct HostFallbackFont {
+    std::string_view virtual_path;
+    std::string_view file_name_lower;
+    u32 face_index;
+};
+
+constexpr std::array<HostFallbackFont, 8> kHostFallbackFonts{{
+    {kBuiltinFontLatin, "notosans-regular.ttf", 0},
+    {kBuiltinFontArabic, "notosansarabic-regular.ttf", 0},
+    {kBuiltinFontThai, "notosansthai-regular.ttf", 0},
+    {kBuiltinFontSymbols, "notosanssymbols2-regular.ttf", 0},
+    // One collection holds the CJK faces, Japanese, Korean, Simplified and Traditional Chinese.
+    {kBuiltinFontCjkJp, "notosanscjk-regular.ttc", 0},
+    {kBuiltinFontCjkKr, "notosanscjk-regular.ttc", 1},
+    {kBuiltinFontCjkSc, "notosanscjk-regular.ttc", 2},
+    {kBuiltinFontCjkTc, "notosanscjk-regular.ttc", 3},
+}};
+
+const HostFallbackFont* FindHostFallbackFont(const std::filesystem::path& path) {
+    const std::string normalized = path.generic_string();
+    for (const auto& font : kHostFallbackFonts) {
+        if (normalized == font.virtual_path) {
+            return &font;
+        }
+    }
+    return nullptr;
+}
+
+// Lower-case file name to the first file of that name, from one walk of the folders.
+const std::unordered_map<std::string, std::filesystem::path>& HostFontFiles() {
+    static const auto files = [] {
+        std::vector<std::filesystem::path> dirs;
+        if (const char* list = std::getenv("BB_FALLBACK_FONTS")) {
+            std::string_view rest(list);
+            for (auto colon = rest.find(':'); !rest.empty(); colon = rest.find(':')) {
+                dirs.emplace_back(std::string(rest.substr(0, colon)));
+                rest.remove_prefix(colon == std::string_view::npos ? rest.size() : colon + 1);
+            }
+        }
+        if (const char* data_home = std::getenv("XDG_DATA_HOME"); data_home && *data_home) {
+            dirs.emplace_back(std::filesystem::path(data_home) / "fonts");
+        } else if (const char* home = std::getenv("HOME"); home && *home) {
+            dirs.emplace_back(std::filesystem::path(home) / ".local/share/fonts");
+        }
+        dirs.emplace_back("/usr/local/share/fonts");
+        dirs.emplace_back("/usr/share/fonts");
+        dirs.emplace_back("/run/current-system/sw/share/X11/fonts");
+
+        std::unordered_map<std::string, std::filesystem::path> found;
+        for (const auto& dir : dirs) {
+            std::error_code ec;
+            std::filesystem::recursive_directory_iterator it(
+                dir, std::filesystem::directory_options::skip_permission_denied, ec);
+            for (; !ec && it != std::filesystem::recursive_directory_iterator(); it.increment(ec)) {
+                std::error_code type_ec;
+                if (it->is_regular_file(type_ec)) {
+                    found.emplace(LowerAsciiString(it->path().filename().string()), it->path());
+                }
+            }
+        }
+        return found;
+    }();
+    return files;
+}
+
+std::filesystem::path HostFallbackFontPath(const HostFallbackFont& font) {
+    const auto& files = HostFontFiles();
+    const auto it = files.find(std::string(font.file_name_lower));
+    return it != files.end() ? it->second : std::filesystem::path{};
+}
+
+} // namespace
+
 std::shared_ptr<std::vector<unsigned char>> LoadBuiltinFontBytesShared(
     const std::filesystem::path& path, u32* out_subfont_index) {
-    if (path.generic_string() != kBuiltinFontLatin) {
+    const auto* font = FindHostFallbackFont(path);
+    if (!font) {
         return {};
     }
     if (out_subfont_index) {
-        *out_subfont_index = 0;
+        *out_subfont_index = font->face_index;
     }
-    static const auto bytes =
-        std::make_shared<std::vector<unsigned char>>(bb_font_ttf, bb_font_ttf_end);
-    return bytes;
+
+    static std::mutex cache_mutex;
+    static std::unordered_map<std::string_view, std::shared_ptr<std::vector<unsigned char>>> cache;
+    std::scoped_lock lock(cache_mutex);
+    if (const auto it = cache.find(font->file_name_lower); it != cache.end()) {
+        return it->second;
+    }
+
+    std::shared_ptr<std::vector<unsigned char>> bytes;
+    std::vector<unsigned char> file_bytes;
+    if (const auto host_path = HostFallbackFontPath(*font);
+        !host_path.empty() && LoadGuestFileBytes(host_path, file_bytes) && !file_bytes.empty()) {
+        bytes = std::make_shared<std::vector<unsigned char>>(std::move(file_bytes));
+    } else if (font->virtual_path == kBuiltinFontLatin) {
+        bytes = std::make_shared<std::vector<unsigned char>>(bb_font_ttf, bb_font_ttf_end);
+    } else {
+        return {};
+    }
+    return cache.emplace(font->file_name_lower, std::move(bytes)).first->second;
+}
+
+void LogFontSetFileOnce(u32 font_set_type, const std::filesystem::path& path) {
+    static std::mutex mutex;
+    static std::unordered_set<u32> logged;
+    {
+        std::scoped_lock lock(mutex);
+        if (!logged.insert(font_set_type).second) {
+            return;
+        }
+    }
+    std::string file = path.string();
+    if (const auto* font = FindHostFallbackFont(path)) {
+        const auto host_path = HostFallbackFontPath(*font);
+        if (!host_path.empty()) {
+            file = fmt::format("{} (face {}, fallback)", host_path.string(), font->face_index);
+        } else if (font->virtual_path == kBuiltinFontLatin) {
+            file = "embedded DejaVu Sans (fallback)";
+        }
+    }
+    std::printf("Font: set 0x%08X -> %s\n", font_set_type, file.c_str());
 }
 
 bool IsBuiltinFontPath(const std::filesystem::path& path) {
@@ -1821,10 +1936,9 @@ static bool DirectoryContainsAnyFontFiles(const std::filesystem::path& dir) {
 static std::filesystem::path GetSysFontBaseDirImpl(bool log_errors) {
     std::filesystem::path base = EmulatorSettings.GetFontsDir();
     std::error_code ec;
+    // bbport: unset is the usual case (no dump of the console's fonts); the fallback notice says
+    // so once instead of an error on every font set opened.
     if (base.empty()) {
-        if (log_errors) {
-            LOG_ERROR(Lib_Font, "SystemFonts: FontsPath not set");
-        }
         return {};
     }
     if (std::filesystem::is_directory(base, ec)) {
@@ -2121,6 +2235,7 @@ bool AttachSystemFont(FontState& st, Libraries::Font::OrbisFontHandle handle) {
         NotifyBuiltinFontFallbackOnce();
     }
 
+    LogFontSetFileOnce(st.font_set_type, primary_path);
     LOG_INFO(Lib_Font, "system font attached");
     LOG_DEBUG(Lib_Font,
               "system font attach params:\n"

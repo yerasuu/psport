@@ -4133,6 +4133,7 @@ s32 PS4_SYSV_ABI sceFontOpenFontSet(OrbisFontLib library, u32 fontSetType, u32 o
                         fontSetType);
             Internal::NotifyBuiltinFontFallbackOnce();
         }
+        Internal::LogFontSetFileOnce(fontSetType, primary_path);
         LOG_INFO(Lib_Font, "OpenFontSet: stage=loaded_primary_bytes");
 
         OrbisFontHandle handle = *pFontHandle;
