@@ -32,6 +32,9 @@ bool whole_only = false; // the driver's dma-buf maps at offset 0 only: a chunk 
 enum class Mode { DmaBuf, HostImport };
 Mode mode = Mode::DmaBuf;
 std::atomic<u64> chunk_bytes{0};
+bool usable_checked = false;
+vk::BufferUsageFlags xfb_dmabuf;
+vk::BufferUsageFlags xfb_host;
 
 bool GuestInVram() {
     // bbport BB_GUEST_VRAM=1 (experiment): the game's direct memory in VRAM the CPU maps through
@@ -66,7 +69,7 @@ std::uint32_t FindType(std::uint32_t bits) {
 
 /// Uses of a chunk's buffer. With the layer's memory module the chunk buffers are what the GPU
 /// binds (no sparse arena): every buffer use, texel buffers and a device address too.
-vk::BufferUsageFlags ChunkBufferUsage() {
+vk::BufferUsageFlags ChunkBufferUsage(vk::ExternalMemoryHandleTypeFlagBits type) {
     vk::BufferUsageFlags usage =
         vk::BufferUsageFlagBits::eTransferSrc | vk::BufferUsageFlagBits::eTransferDst |
         vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eUniformBuffer |
@@ -75,7 +78,8 @@ vk::BufferUsageFlags ChunkBufferUsage() {
     if (LayerMemory()) {
         usage |= vk::BufferUsageFlagBits::eUniformTexelBuffer |
                  vk::BufferUsageFlagBits::eStorageTexelBuffer |
-                 vk::BufferUsageFlagBits::eShaderDeviceAddress;
+                 vk::BufferUsageFlagBits::eShaderDeviceAddress |
+                 (type == vk::ExternalMemoryHandleTypeFlagBits::eDmaBufEXT ? xfb_dmabuf : xfb_host);
     }
     return usage;
 }
@@ -112,7 +116,7 @@ int AllocChunk(u64 phys, u64 size) {
     const vk::BufferCreateInfo buffer_ci{
         .pNext = &external,
         .size = size,
-        .usage = ChunkBufferUsage(),
+        .usage = ChunkBufferUsage(vk::ExternalMemoryHandleTypeFlagBits::eDmaBufEXT),
         .sharingMode = vk::SharingMode::eExclusive,
     };
     const auto [buffer_result, buffer] = device.createBuffer(buffer_ci);
@@ -211,7 +215,7 @@ bool ImportHost(void* pointer, u64 size, vk::Buffer& buffer, vk::DeviceMemory& m
     const auto [buffer_result, created] = device.createBuffer({
         .pNext = &external,
         .size = size,
-        .usage = ChunkBufferUsage(),
+        .usage = ChunkBufferUsage(vk::ExternalMemoryHandleTypeFlagBits::eHostAllocationEXT),
         .sharingMode = vk::SharingMode::eExclusive,
     });
     if (buffer_result != vk::Result::eSuccess) {
@@ -405,7 +409,7 @@ bool HostImportWorks(const Vulkan::Instance& instance, const char*& why) {
             .flags = vk::BufferCreateFlagBits::eSparseBinding |
                      vk::BufferCreateFlagBits::eSparseResidency,
             .size = Size,
-            .usage = ChunkUsage,
+            .usage = ChunkUsage | xfb_host,
             .sharingMode = vk::SharingMode::eExclusive,
         });
         why = "a sparse buffer for imported memory";
@@ -661,10 +665,44 @@ bool DmaBufWorks(const Vulkan::Instance& instance) {
 }
 } // namespace
 
+namespace {
+/// The instance's transform feedback usage if buffers over `type` memory lose no external memory
+/// feature with it, plain or sparse (the arena), else none: the probes and the chunks rely on
+/// creating those buffers.
+vk::BufferUsageFlags ExternalXfbUsage(const Vulkan::Instance& instance,
+                                      vk::ExternalMemoryHandleTypeFlagBits type) {
+    const vk::BufferUsageFlags xfb = instance.GetTransformFeedbackBufferUsage();
+    if (!xfb) {
+        return {};
+    }
+    const vk::PhysicalDevice physical = instance.GetPhysicalDevice();
+    for (const vk::BufferCreateFlags flags :
+         {vk::BufferCreateFlags{},
+          vk::BufferCreateFlagBits::eSparseBinding | vk::BufferCreateFlagBits::eSparseResidency}) {
+        const auto features = [&](vk::BufferUsageFlags usage) {
+            return physical
+                .getExternalBufferProperties({.flags = flags, .usage = usage, .handleType = type})
+                .externalMemoryProperties.externalMemoryFeatures;
+        };
+        const auto without = features(ChunkUsage);
+        if ((features(ChunkUsage | xfb) & without) != without) {
+            std::printf("Guest memory: %s memory does not take transform feedback buffers\n",
+                        vk::to_string(type).c_str());
+            return {};
+        }
+    }
+    return xfb;
+}
+} // namespace
+
 bool Usable(const Vulkan::Instance& instance) {
     static const bool usable = [&] {
         device = instance.GetDevice();
         memory_properties = instance.GetPhysicalDevice().getMemoryProperties();
+        xfb_dmabuf = ExternalXfbUsage(instance, vk::ExternalMemoryHandleTypeFlagBits::eDmaBufEXT);
+        xfb_host =
+            ExternalXfbUsage(instance, vk::ExternalMemoryHandleTypeFlagBits::eHostAllocationEXT);
+        usable_checked = true;
         // BB_GUEST_MEMORY=dmabuf|host chooses; else AMD uses dma-buf chunks (tested the most) and
         // other GPUs host memory import first (NVIDIA: its dma-buf maps at offset 0 only, and
         // CPU access through it may be slow).
@@ -696,6 +734,13 @@ bool Usable(const Vulkan::Instance& instance) {
 vk::ExternalMemoryHandleTypeFlagBits HandleType() {
     return mode == Mode::HostImport ? vk::ExternalMemoryHandleTypeFlagBits::eHostAllocationEXT
                                     : vk::ExternalMemoryHandleTypeFlagBits::eDmaBufEXT;
+}
+
+vk::BufferUsageFlags TransformFeedbackUsage(const Vulkan::Instance& instance) {
+    if (!usable_checked) {
+        return instance.GetTransformFeedbackBufferUsage();
+    }
+    return mode == Mode::HostImport ? xfb_host : xfb_dmabuf;
 }
 
 void Install(const Vulkan::Instance& instance) {

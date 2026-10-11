@@ -242,6 +242,16 @@ public:
         return transform_feedback && transform_feedback_features.geometryStreams;
     }
 
+    /// Usage for buffers stream-out may write or count into: none without transform feedback, as
+    /// the usage bits are invalid then.
+    vk::BufferUsageFlags GetTransformFeedbackBufferUsage() const {
+        if (!transform_feedback) {
+            return {};
+        }
+        return vk::BufferUsageFlagBits::eTransformFeedbackBufferEXT |
+               vk::BufferUsageFlagBits::eTransformFeedbackCounterBufferEXT;
+    }
+
     /// Valid only when IsTransformFeedbackSupported().
     const vk::PhysicalDeviceTransformFeedbackPropertiesEXT& GetTransformFeedbackProperties() const {
         return transform_feedback_props;
