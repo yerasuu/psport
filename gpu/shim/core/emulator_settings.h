@@ -3,6 +3,7 @@
 #pragma once
 #include <algorithm>
 #include <cstdlib>
+#include <filesystem>
 #include <string>
 #include "common/types.h"
 
@@ -19,6 +20,8 @@ public:
         const char* v = std::getenv(name);
         return v ? std::strtol(v, nullptr, 10) : fallback;
     }
+    /// The console's system fonts (SST and the rest), dumped by the user: BB_SYS_FONTS.
+    std::filesystem::path GetFontsDir() { const char* v = std::getenv("BB_SYS_FONTS"); return v ? v : ""; }
     s32 GetGpuId() { static const auto value = s32(Number("BB_GPU_ID", -1)); return value; }
     u32 GetInternalScreenWidth() { static const auto value = u32(Number("BB_INTERNAL_WIDTH", 1920)); return value; }
     u32 GetInternalScreenHeight() { static const auto value = u32(Number("BB_INTERNAL_HEIGHT", 1080)); return value; }

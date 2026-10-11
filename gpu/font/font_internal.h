@@ -37,9 +37,8 @@
 
 #include "common/logging/log.h"
 #include "common/singleton.h"
-#include "core/file_sys/fs.h"
 #include "core/libraries/error_codes.h"
-#include "core/libraries/font/font.h"
+#include "font.h"
 #include "core/libraries/libs.h"
 #include "font_error.h"
 
@@ -832,7 +831,6 @@ extern const u8 kStyleFrameFlagScale;
 extern const u8 kStyleFrameFlagWeight;
 extern const u8 kStyleFrameFlagSlant;
 
-extern Core::FileSys::MntPoints* g_mnt;
 extern std::unordered_map<Libraries::Font::OrbisFontHandle, FontState> g_font_state;
 extern std::unordered_map<Libraries::Font::OrbisFontLib, LibraryState> g_library_state;
 extern std::unordered_map<Libraries::Font::OrbisFontRenderSurface*,

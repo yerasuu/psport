@@ -61,6 +61,8 @@ namespace Libraries::AvPlayer { void RegisterLib(Core::Loader::SymbolsResolver* 
 namespace Libraries::VideoOut { void RegisterLib(Core::Loader::SymbolsResolver* sym); }
 namespace Libraries::Ngs2 { void RegisterLib(Core::Loader::SymbolsResolver* sym); }
 namespace Libraries::Fiber { void RegisterLib(Core::Loader::SymbolsResolver* sym); }
+namespace Libraries::Font { void RegisterLib(Core::Loader::SymbolsResolver* sym); }
+namespace Libraries::FontFt { void RegisterLib(Core::Loader::SymbolsResolver* sym); }
 namespace Libraries::Kernel { void RegisterEventQueue(Core::Loader::SymbolsResolver* sym); }
 
 namespace {
@@ -312,6 +314,8 @@ extern "C" void bbgpu_register_kernel(void) {
     Libraries::AvPlayer::RegisterLib(&resolver);
     Libraries::Ngs2::RegisterLib(&resolver);
     Libraries::Fiber::RegisterLib(&resolver);
+    Libraries::Font::RegisterLib(&resolver);
+    Libraries::FontFt::RegisterLib(&resolver);
 }
 
 extern "C" uintptr_t bbgpu_resolve(const char* scoped_nid) {
