@@ -357,11 +357,7 @@ OpenSSL, zlib и miniupnpc (`shell.nix`), входит в AppImage. Включа
 | `launcher/`, `packaging/` | Лаунчер GTK4; пакет Nix и AppImage |
 | `patches/` | Патчи сообщества для Bloodborne |
 | `tools/` | Утилиты разработчика: скриптовые запуски, A/B-переключатели, бенчмарк FSR, переписывание шейдеров FSR 4, `fsr4cap` (запись и извлечение FSR 4.1.1) |
-| `tests/` | Тесты загрузчика, рантайма, патчей и рендерера |
 | `docs/` | Заметки и замеры ([апскейлер](docs/upscaler.md), [многопоточный GPU](docs/parallel_gpu.md), [векторы движения](docs/motion_vectors.md), [план](docs/ROADMAP.md), [журнал разработки](docs/DEVELOPMENT_LOG.ru.md)) |
-
-Тесты: `bash build.sh --test`, `python3 -m unittest discover -s tests` и
-`ninja -C out/gpu motion-history-test ui-composition-test scene-resolution-test motion-shader-test settings-test`.
 
 ## Что будет дальше
 

@@ -26,10 +26,7 @@ packaged data directory's `fsr4_411`. Fatal asset failures now select FSR 3.1 in
 the live settings, so the menu shows the active provider, retains the error, and
 allows retrying FSR 4 after changing the output/installing assets.
 
-`taa-shader-test` checks real SPIR-V output for accumulation, clipping, depth
-disocclusion, invalid history and out-of-frame motion on Vulkan (Lavapipe works).
-`out/taa-appimage-build.log` records these checks, settings round trips and 64
-Python tests. `out/taa-live-validation.log` and `out/taa-appimage-validation.log`
+`out/taa-live-validation.log` and `out/taa-appimage-validation.log`
 check TAA at 1080p/720p/1440p/4K, TAA ↔ FSR 3, and a missing 2160-tier FSR 4.1.1
 model in one gameplay process, including output captures and camera movement.
 `out/taa-launcher-validation.log` checks actual GTK controls and saved settings.
@@ -75,8 +72,7 @@ and intermediate detail can differ from the old startup-patched render sizes.
 Verification: `out/dev/live-resolution-summary.log` switches output, preset and FSR
 off/on in one PID. `BB_PRESENT_DUMP_TRIGGER` captures the completed host display
 buffer (including HUD) into `BB_DUMP_DIR`. Captures confirm actual 720p/1440p/2160p
-buffers. `scene-resolution-test` covers color/depth/stencil round trips through
-proxies both smaller and larger than the guest allocation. `BB_PRESET_FILE` accepts
+buffers. `BB_PRESET_FILE` accepts
 `preset [output-index [upscaler-index]]` for scripted menu-equivalent changes.
 
 Frame analyzer: `BB_CAPTURE_TRIGGER=<file> BB_CAPTURE_DIR=<dir>`; creating the file records

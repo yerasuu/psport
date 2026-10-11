@@ -124,11 +124,5 @@ object motion — 127 MiB вместо 63 MiB при 4K render. Это такж�
 пропускной способности памяти. Возможная следующая оптимизация — отдельный R32F depth
 при сохранении цвета и motion в FP16, с теми же тестами корректности.
 
-Для регрессий:
-
-```sh
-nix-shell shell.nix --run 'ninja -C out/gpu taa-shader-test camera-motion-test && out/gpu/taa-shader-test && out/gpu/camera-motion-test'
-```
-
 Подход с движением для всех входных пикселей согласуется с рекомендациями
 [AMD FSR 3.1 integration](https://gpuopen.com/presentations/2024/FidelityFX_Super_Resolution_3-1_Release-Overview_and_Integration.pdf).

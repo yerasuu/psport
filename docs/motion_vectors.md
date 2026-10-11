@@ -56,30 +56,7 @@ draw перекрыл объект, его вектор не используе�
 
 ## Проверки
 
-Сборка и CPU-тесты:
-
-```bash
-cd native_probe
-nix-shell shell.nix --run 'bash build.sh && ninja -C out/gpu motion-history-test motion-shader-test && out/gpu/motion-history-test && out/gpu/motion-shader-test out/motion-shaders'
-```
-
-`test_motion_history.cpp` проверяет диапазоны u16/u32, restart, отрицательный baseVertex,
-firstInstance, повторные draws, смену топологии, пропущенный кадр, исчерпание бюджета,
-переполнение и число фаз. Также пройден запуск с AddressSanitizer/UBSan.
-
-`test_motion_shaders.cpp` использует настоящий SPIR-V backend и создаёт VS/PS с
-векторами и без них. Все четыре результата прошли `spirv-val --target-env vulkan1.3`.
-Для повторения нужен `spirv-val` из SPIRV-Tools:
-
-```bash
-for shader in out/motion-shaders/*.spv; do
-    spirv-val --target-env vulkan1.3 "$shader" || exit
-done
-```
-
-Логи сборки/тестов: `out/dev/motion-validation.log`. Доступа к `/dev/dri` в среде
-проверки нет: качество на RX 7800 XT, FPS и процент покрытия после изменений
-ещё не проверены. Успешная валидация SPIR-V не доказывает правильность картинки.
+Качество на RX 7800 XT, FPS и процент покрытия после изменений ещё не проверены.
 
 ## Следующий запуск в игре
 
