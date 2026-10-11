@@ -56,6 +56,9 @@ uintptr_t runtime_exception_resolve(const char *name);
 void runtime_exception_report(void);
 #ifndef _WIN32
 #include <pthread.h>
+/* The host signal a guest exception raise arrives on. SIGUSR1 stays free for host libraries;
+ * SIGUSR2, SIGALRM and SIGPROF are probe.c's thread dumps, watchdog and the wait sampler. */
+#define RUNTIME_EXCEPTION_SIGNAL (SIGRTMIN+3)
 /* For runtime locks a guest exception handler takes again (kernel semaphores, event flags): a raise
  * that lands on the lock's holder is delivered once it lets go, or the handler would wait on its
  * own thread. */

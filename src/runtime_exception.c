@@ -19,9 +19,6 @@
 #define ERR(n) ((int32_t)(UINT32_C(0x80020000)|(n)))
 #define GUEST_SIGNALS 128
 #define GUEST_SIGUSR1 30
-/* SIGUSR1 stays free for host libraries; SIGUSR2, SIGALRM and SIGPROF are probe.c's thread dumps,
- * watchdog and the wait sampler. */
-#define HOST_SIGNAL (SIGRTMIN+3)
 
 typedef void (ABI *GuestHandler)(int, void *);
 /* FreeBSD amd64 mcontext_t and ucontext_t as the PS4 kernel passes them (shadPS4's exception.h). */
@@ -78,7 +75,7 @@ void runtime_exception_unlock(pthread_mutex_t *lock) {
     atomic_signal_fence(memory_order_seq_cst);
     --held;
     atomic_signal_fence(memory_order_seq_cst);
-    if (!held && deferred) pthread_kill(pthread_self(),HOST_SIGNAL);
+    if (!held && deferred) pthread_kill(pthread_self(),RUNTIME_EXCEPTION_SIGNAL);
 }
 int runtime_exception_wait(pthread_cond_t *cond, pthread_mutex_t *lock, const struct timespec *end) {
     /* Otherwise a raise held back since the lock was taken would wait for as long as the thread
@@ -158,7 +155,7 @@ static ABI int32_t install_handler(int sig, GuestHandler handler) {
         action.sa_sigaction=deliver;
         action.sa_flags=SA_SIGINFO|SA_RESTART;
         sigemptyset(&action.sa_mask);
-        if (sigaction(HOST_SIGNAL,&action,NULL)) { atomic_store(&handlers[sig],NULL); return ERR(runtime_guest_errno(errno)); }
+        if (sigaction(RUNTIME_EXCEPTION_SIGNAL,&action,NULL)) { atomic_store(&handlers[sig],NULL); return ERR(runtime_guest_errno(errno)); }
     }
     printf("Runtime: guest exception handler for signal %d installed at %p%s\n",sig,(void *)handler,
            sig==GUEST_SIGUSR1 ? "" : " (host faults are not forwarded to it)");
@@ -171,7 +168,7 @@ static ABI int32_t remove_handler(int sig) {
 }
 static ABI int32_t raise_exception(void *thread, int sig) {
     if (sig!=GUEST_SIGUSR1) return ERR(22);
-    int32_t result=runtime_thread_kill(thread,HOST_SIGNAL);
+    int32_t result=runtime_thread_kill(thread,RUNTIME_EXCEPTION_SIGNAL);
     if (!result && !atomic_fetch_add(&raised,1))
         printf("Runtime: first guest exception raised (signal %d) to thread %p\n",sig,thread);
     return result;
