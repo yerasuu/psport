@@ -187,6 +187,12 @@ target_include_directories(ui-composition-test PRIVATE ..)
 add_executable(cp-decoder-test EXCLUDE_FROM_ALL ../tests/test_cp_decoder.cpp cp/cp_decoder.cpp)
 target_compile_options(cp-decoder-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_include_directories(cp-decoder-test PRIVATE cp)
+add_executable(copy-shader-test EXCLUDE_FROM_ALL ../tests/test_copy_shader.cpp
+    shadps4/shader_recompiler/frontend/copy_shader.cpp shadps4/shader_recompiler/frontend/decode.cpp
+    shadps4/shader_recompiler/frontend/instruction.cpp shadps4/shader_recompiler/frontend/format.cpp)
+target_compile_options(copy-shader-test PRIVATE -UNDEBUG)
+target_include_directories(copy-shader-test PRIVATE shim shadps4)
+target_link_libraries(copy-shader-test PRIVATE fmt::fmt magic_enum::magic_enum)
 add_executable(settings-test EXCLUDE_FROM_ALL ../tests/test_settings.cpp shim/bbport_settings.cpp)
 target_compile_options(settings-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_include_directories(settings-test PRIVATE .. shim)
