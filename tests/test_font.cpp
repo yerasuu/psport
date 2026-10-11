@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // libSceFont as a title drives it, without the game: a library and a renderer over FreeType, the
 // European font set (its fallback, without the console's fonts), a glyph for 'A' rendered into a
-// buffer as Atelier Ayesha does.
+// buffer as Atelier Ayesha does (scale in points, zero-filled glyph parameters, the font closed).
 #include <cassert>
 #include <cstdio>
 #include <cstdlib>
@@ -38,11 +38,14 @@ int main() {
 
     OrbisFontHandle font{};
     assert(sceFontOpenFontSet(library, FontSetSstStdEuropean, 1, nullptr, &font) == 0);
+    assert(sceFontSetScalePoint(font, 32.0f, 32.0f) == 0);
     assert(sceFontBindRenderer(font, renderer) == 0);
-    assert(sceFontSetScalePixel(font, 32.0f, 32.0f) == 0);
+    OrbisFontGlyphMetrics char_metrics{};
+    assert(sceFontGetCharGlyphMetrics(font, 'A', &char_metrics) == 0);
 
     OrbisFontGlyph glyph{};
-    assert(sceFontGenerateCharGlyph(font, 'A', nullptr, &glyph) == 0 && glyph);
+    const OrbisFontGenerateGlyphParams defaults{};
+    assert(sceFontGenerateCharGlyph(font, 'A', &defaults, &glyph) == 0 && glyph);
 
     std::vector<u8> pixels(Side * Side);
     OrbisFontRenderSurface surface{};
@@ -58,12 +61,13 @@ int main() {
     std::printf("font test: 'A' covers %zu of %d pixels, %ux%u at (%u, %u)\n", covered, Side * Side,
                 result.UpdateRect.w, result.UpdateRect.h, result.UpdateRect.x, result.UpdateRect.y);
     assert(covered > 0);
-    assert(metrics.width > 0.0f && metrics.height > 0.0f);
+    assert(metrics.width > 0.0f && metrics.height == char_metrics.height);
     assert(result.UpdateRect.x + result.UpdateRect.w <= Side);
     assert(result.UpdateRect.y + result.UpdateRect.h <= Side);
 
     assert(sceFontDeleteGlyph(&memory, &glyph) == 0);
     assert(sceFontUnbindRenderer(font) == 0);
+    assert(sceFontCloseFont(font) == 0);
     assert(sceFontDestroyRenderer(&renderer) == 0);
     std::printf("font test: ok\n");
     return 0;
