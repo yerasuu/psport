@@ -267,7 +267,7 @@ static const struct { const char *nid, *symbol; } import_names[]={
 #include "import_names.inc"
 };
 /* The NIDs before any "#<library>#<module>" scope are equal. */
-static int same_nid(const char *a, const char *b) {
+int runtime_same_nid(const char *a, const char *b) {
     while (*a && *a!='#' && *a==*b) ++a, ++b;
     return (!*a || *a=='#') && (!*b || *b=='#');
 }
@@ -277,7 +277,7 @@ static const struct { char nid[12]; const char *symbol; } all_names[]={
 };
 const char *runtime_symbol(const char *nid) {
     for (size_t i=0;i<sizeof(import_names)/sizeof(*import_names);++i)
-        if (same_nid(nid,import_names[i].nid)) return import_names[i].symbol;
+        if (runtime_same_nid(nid,import_names[i].nid)) return import_names[i].symbol;
     size_t low=0, high=sizeof(all_names)/sizeof(*all_names);
     while (low<high) {
         size_t mid=low+(high-low)/2;
