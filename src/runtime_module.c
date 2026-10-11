@@ -134,8 +134,73 @@ static ABI int32_t dlsym(int32_t handle, const char *symbol, void **address) {
     return ESRCH_;
 }
 
+static const RuntimeModule *find_address(uintptr_t address) {
+    for (size_t i=0;i<module_count;++i)
+        if (address-(uintptr_t)(image+modules[i].base)<modules[i].size) return &modules[i];
+    return NULL;
+}
+typedef struct { uint64_t address; uint32_t size; int32_t prot; } GuestSegment;
+typedef struct {
+    uint64_t st_size;
+    char name[256];
+    int32_t id;
+    uint32_t tls_index;
+    uint64_t tls_init_addr;
+    uint32_t tls_init_size, tls_size, tls_offset, tls_align;
+    uint64_t init_proc_addr, fini_proc_addr, reserved1, reserved2, eh_frame_hdr_addr, eh_frame_addr;
+    uint32_t eh_frame_hdr_size, eh_frame_size;
+    GuestSegment segments[4];
+    uint32_t segment_count;
+} GuestModuleInfoEx;
+typedef struct {
+    uint64_t st_size;
+    char name[256];
+    uint64_t eh_frame_hdr_addr, eh_frame_addr, eh_frame_size, seg0_addr, seg0_size;
+} GuestModuleInfoForUnwind;
+static uint64_t absolute(uint64_t offset) { return (uint64_t)(uintptr_t)(image+offset); }
+static ABI int32_t module_info_from_address(uintptr_t address, int32_t flags, GuestModuleInfoEx *info) {
+    if (flags>=3) { if (info) memset(info,0,sizeof(*info)); return EINVAL_; }
+    if (!info) return EFAULT_;
+    const RuntimeModule *m=find_address(address);
+    if (!m) return ESRCH_;
+    memset(info,0,sizeof(*info));
+    info->st_size=sizeof(*info);
+    snprintf(info->name,sizeof(info->name),"%s",strrchr(m->name,'/') ? strrchr(m->name,'/')+1 : m->name);
+    info->id=(int32_t)(m-modules);
+    info->tls_index=(uint32_t)m->tls_module;
+    info->tls_init_addr=m->tls_module ? absolute(m->tls_address) : 0;
+    info->tls_init_size=(uint32_t)m->tls_filesz;
+    info->tls_size=(uint32_t)m->tls_memsz;
+    info->init_proc_addr=m!=modules ? absolute(m->init) : 0;
+    if (m->eh_frame_hdr_size) info->eh_frame_hdr_addr=absolute(m->eh_frame_hdr);
+    if (m->eh_frame_size) info->eh_frame_addr=absolute(m->eh_frame);
+    info->eh_frame_hdr_size=(uint32_t)m->eh_frame_hdr_size;
+    info->eh_frame_size=(uint32_t)m->eh_frame_size;
+    for (uint64_t i=0;i<m->segment_count;++i)
+        info->segments[i]=(GuestSegment){absolute(m->segments[i].address),(uint32_t)m->segments[i].size,(int32_t)m->segments[i].prot};
+    info->segment_count=(uint32_t)m->segment_count;
+    return 0;
+}
+static ABI int32_t module_info_for_unwind(uintptr_t address, int32_t flags, GuestModuleInfoForUnwind *info) {
+    if (flags>=3) { if (info) memset(info,0,sizeof(*info)); return EINVAL_; }
+    if (!info) return EFAULT_;
+    if (info->st_size<sizeof(*info)) return EINVAL_;
+    const RuntimeModule *m=find_address(address);
+    if (!m) return ESRCH_;
+    memset(info,0,sizeof(*info));
+    info->st_size=sizeof(*info);
+    snprintf(info->name,sizeof(info->name),"%s",strrchr(m->name,'/') ? strrchr(m->name,'/')+1 : m->name);
+    if (m->eh_frame_hdr_size) info->eh_frame_hdr_addr=absolute(m->eh_frame_hdr);
+    if (m->eh_frame_size) info->eh_frame_addr=absolute(m->eh_frame);
+    info->eh_frame_size=m->eh_frame_size;
+    if (m->segment_count) { info->seg0_addr=absolute(m->segments[0].address); info->seg0_size=m->segments[0].size; }
+    return 0;
+}
+
 static const RuntimeExport exports[]={
     {"sceKernelLoadStartModule",load_start_module}, {"sceKernelStopUnloadModule",stop_unload_module},
-    {"sceKernelDlsym",dlsym},
+    {"sceKernelDlsym",dlsym}, {"sceKernelGetModuleInfoFromAddr",module_info_from_address},
+    {"sceKernelGetModuleInfoForUnwind",module_info_for_unwind},
+    {"sceSysmoduleGetModuleInfoForUnwind",module_info_for_unwind},
 };
 uintptr_t runtime_module_resolve(const char *name) { return module_count ? RUNTIME_LOOKUP(exports,name) : 0; }
