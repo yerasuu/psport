@@ -1697,13 +1697,21 @@ s32 PS4_SYSV_ABI sceFontGenerateCharGlyph(OrbisFontHandle glyph_handle, u32 code
     boxed->glyph.flags = form_options;
     boxed->glyph.glyph_form = glyph_form;
     boxed->glyph.metrics_form = metrics_form;
-    boxed->glyph.em_size = ClampToU16(st->scale_h);
+    // bbport: the glyph keeps the pixel scale its metrics were taken at. FontState's scale_w/h
+    // only follow sceFontSetScalePixel, so a title setting points (Atelier Ayesha DX) got its
+    // glyphs rendered at the 16 px default; the font's style state converts points by its DPI.
+    float scale_w = st->scale_w;
+    float scale_h = st->scale_h;
+    if (auto* font = GetNativeFont(glyph_handle); font && font->magic == 0x0F02) {
+        Internal::StyleStateGetScalePixel(font->style_frame, &scale_w, &scale_h);
+    }
+    boxed->glyph.em_size = ClampToU16(scale_h);
     boxed->glyph.baseline = ClampToU16(metrics.Horizontal.bearingY);
     boxed->glyph.height_px = ClampToU16(metrics.height);
     boxed->glyph.origin_x = 0;
     boxed->glyph.origin_y = boxed->glyph.baseline;
-    boxed->glyph.scale_x = st->scale_w;
-    boxed->glyph.base_scale = st->scale_h;
+    boxed->glyph.scale_x = scale_w;
+    boxed->glyph.base_scale = scale_h;
     boxed->glyph.memory = glyph_memory;
     boxed->owner_handle = glyph_handle;
     boxed->outline = {};
