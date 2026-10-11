@@ -155,6 +155,38 @@ static ABI int32_t kernel_gettimeofday(GuestTimeval *tv) {
     return posix_gettimeofday(tv,NULL);
 }
 static ABI int64_t posix_time(int64_t *out) { int64_t t=(int64_t)time(NULL); if (out) *out=t; return t; }
+/* SceKernelTimesec: west_sec is the standard offset east of UTC (whatever its name says), dst_sec
+ * the daylight saving on top of it; local time is UTC plus both. */
+typedef struct { int64_t t; uint32_t west_sec, dst_sec; } GuestTimesec;
+/* Daylight saving in effect at a broken-down time: its offset beyond the zone's standard one. */
+static int64_t daylight_saving(const struct tm *t) { return t->tm_isdst>0 ? t->tm_gmtoff+timezone : 0; }
+static ABI int32_t utc_to_local(int64_t utc,int64_t *local,GuestTimesec *zone,uint64_t *dst_sec) {
+    if (!local) return ERR(22);
+    tzset();
+    time_t at=(time_t)utc; struct tm t;
+    if (!localtime_r(&at,&t)) return ERR(22);
+    const int64_t dst=daylight_saving(&t);
+    *local=utc+t.tm_gmtoff;
+    if (zone) { zone->t=utc; zone->west_sec=(uint32_t)(t.tm_gmtoff-dst); zone->dst_sec=(uint32_t)dst; }
+    if (dst_sec) *dst_sec=(uint64_t)dst;
+    return 0;
+}
+/* The second argument's meaning is unknown (shadPS4 ignores it too); the zone is the one in effect
+ * at that local time. */
+static ABI int32_t local_to_utc(int64_t local,int64_t unknown,int64_t *utc,GuestTimezone *tz,int32_t *dst_sec) {
+    (void)unknown;
+    if (!tz) return ERR(22);
+    tzset();
+    time_t at=(time_t)local; struct tm t;
+    if (!gmtime_r(&at,&t)) return ERR(22);
+    t.tm_isdst=-1;
+    const time_t when=mktime(&t);
+    const int64_t dst=daylight_saving(&t);
+    if (utc) *utc=(int64_t)when;
+    tz->minuteswest=(int32_t)(-(t.tm_gmtoff-dst)/60); tz->dsttime=0;
+    if (dst_sec) *dst_sec=(int32_t)dst;
+    return 0;
+}
 
 /* ---- process ---- */
 static uint32_t sdk_version, psf_attributes;
@@ -334,6 +366,7 @@ static const RuntimeExport exports[]={
     {"sceKernelGettimezone",kernel_gettimezone}, {"gettimeofday",posix_gettimeofday},
     {"sceKernelGettimeofday",kernel_gettimeofday},
     {"time",posix_time},
+    {"sceKernelConvertUtcToLocaltime",utc_to_local}, {"sceKernelConvertLocaltimeToUtc",local_to_utc},
     {"sceKernelIsNeoMode",is_neo_mode}, {"sceKernelGetCompiledSdkVersion",compiled_sdk_version},
     {"sceKernelGetCpumode",cpu_mode},
     {"getpagesize",get_pagesize}, {"getpid",get_pid}, {"sched_yield",yield},
