@@ -345,6 +345,30 @@ private:
     /// Everything of an indirect draw after the pipeline selection (GPU thread or stage B).
     void DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_indexed,
                             const IndirectDraw& indirect);
+    /// The geometry stage whose copy shader writes stream-out buffer 0, when this draw captures
+    /// it (stream 0 enabled, a parsed copy shader, transform feedback on the device), else null.
+    /// NOTE: the one place deciding it, to switch to the shader translation's own accessor.
+    const Shader::Info* StreamOutStage(const GraphicsPipeline& pipeline,
+                                       const AmdGpu::Regs& regs) const;
+    /// Stream-out buffer 0's V#, loaded the way the copy shader loads it (S_LOAD_DWORDX4 from the
+    /// pointer in its user SGPR pair); zero when that pointer is not GPU memory.
+    AmdGpu::Buffer ReadStreamOutSharp(const Shader::Info& gs, const AmdGpu::Regs& regs) const;
+    /// Bytes of buffer 0 from its V# base that stream-out may write: the V# and
+    /// VGT_STRMOUT_BUFFER_SIZE bound it; 0 when nothing can be written.
+    u64 StreamOutSize(const AmdGpu::Buffer& sharp, const AmdGpu::Regs& regs) const;
+    /// Transform feedback target of the draw being recorded; `buffer` null when it captures none.
+    struct StreamOutBinding {
+        const VideoCore::Buffer* buffer = nullptr;
+        u64 offset = 0;
+        u64 size = 0;
+    };
+    /// Resolves the draw's stream-out target. False: the draw captures stream-out this port
+    /// cannot bind, and is skipped (counted).
+    bool ObtainStreamOut(const GraphicsPipeline* pipeline, StreamOutBinding& out);
+    /// After ObtainStreamOut and BindResources: barriers for the capture's buffer ranges.
+    void PrepareStreamOut(const StreamOutBinding& binding);
+    /// After the draw is recorded: the capture's writes, for later barriers.
+    void NoteStreamOut(const StreamOutBinding& binding);
     /// Everything of an indirect dispatch after the pipeline selection.
     void DispatchIndirectRecord(const ComputePipeline* pipeline, VAddr args, u32 size);
     /// Hands a draw (or, with `cs`, a dispatch) to the recording thread.
@@ -655,6 +679,9 @@ private:
     u32 num_ring_stages = 0;
     /// bbport: the vertex stream V#s of the packet being recorded (stage B; empty elsewhere).
     std::span<const AmdGpu::Buffer> packet_vsharps;
+    /// Stream-out buffer 0's V# read when the packet being recorded was posted (stage B).
+    AmdGpu::Buffer packet_strmout{};
+    u64 strmout_skipped = 0; ///< draws capturing stream-out that could not be bound
     const RingBinding* FindRingBinding(const Shader::Info& stage, u32 index) const {
         for (u32 i = 0; i < num_ring_stages; ++i) {
             if (ring_stages[i].info == &stage) {
