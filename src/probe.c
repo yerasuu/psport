@@ -206,6 +206,19 @@ static void fault(int sig, siginfo_t *info, void *context) {
     /* Guest code keeps frame pointers: its call chain says which caller handed over the bad
      * value, where the host backtrace below stops at the first guest frame. */
     if (rip - (uintptr_t)image < 0x10000000) dump_frames(uc);
+    /* A call through a null or stale pointer (an import BB_PERMISSIVE answered with 0, a symbol
+     * lookup that failed): the return address on the stack names the guest caller. */
+    else if (!(dladdr((void *)rip, &where) && where.dli_fname)) {
+        uintptr_t caller = 0;
+        struct iovec local = {&caller, sizeof(caller)}, remote = {(void *)uc->uc_mcontext.gregs[REG_RSP], sizeof(caller)};
+        if (process_vm_readv(getpid(), &local, 1, &remote, 1, 0) == (ssize_t)sizeof(caller) &&
+            caller - (uintptr_t)image < 0x10000000) {
+            snprintf(line, sizeof(line), "  called from guest offset 0x%lx\n", (unsigned long)(caller - (uintptr_t)image));
+            { ssize_t written_=write(2, line, strlen(line)); (void)written_; }
+            uc->uc_mcontext.gregs[REG_RIP] = (greg_t)caller;
+            dump_frames(uc);
+        }
+    }
     /* Outside the image and any shared object (generated code, a freed mapping): the mapping
      * from /proc/self/maps, and the thread. */
     if (rip - (uintptr_t)image >= 0x10000000 && !(dladdr((void *)rip, &where) && where.dli_fname)) {
