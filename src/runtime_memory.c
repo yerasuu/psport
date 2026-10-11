@@ -526,13 +526,35 @@ static ABI int32_t map_flexible_named(void **inout, uint64_t size, int prot, int
 static ABI int32_t release_flexible(void *address, uint64_t size) { return direct_unmap(address,size); }
 /* POSIX mmap: the game's libc grows its malloc heap with anonymous private mappings once the
  * heap it started with is full (seen after minutes of area streaming). They come from flexible
- * memory as sceKernelMapFlexibleMemory does; files are not mapped. MAP_FAILED (-1) and errno on
- * failure, as POSIX. */
+ * memory as sceKernelMapFlexibleMemory does. A file is mapped as a copy of its contents, read-only
+ * (IL2CPP maps global-metadata.dat that way); a writable shared one would need writing back and
+ * is refused. MAP_FAILED (-1) and errno on failure, as POSIX. */
 static _Atomic uint64_t heap_growths;
 uint64_t runtime_heap_growths(void) { return atomic_load(&heap_growths); }
+static ABI int32_t kernel_mprotect(const void *address, uint64_t size, int prot);
+static ABI void *map_file(void *addr, uint64_t size, int prot, int flags, int fd, int64_t offset) {
+    enum { MAP_SHARED_FLAG=1, POSIX_ENOMEM=12, POSIX_ENODEV=19, POSIX_EINVAL=22 };
+    if ((flags & MAP_SHARED_FLAG) && (prot & 2)) { *runtime_errno()=POSIX_ENODEV; return (void *)-1; }
+    if (!size || offset<0 || offset%PAGE) { *runtime_errno()=POSIX_EINVAL; return (void *)-1; }
+    void *out=(flags & MAP_FIXED_FLAG) ? addr : NULL;
+    const uint64_t length=align_up(size,PAGE);
+    const int32_t result=map_flexible(&out,length,(prot & 0x37)|3,flags & MAP_FIXED_FLAG);
+    if (result) { *runtime_errno()=result==NO_MEMORY ? POSIX_ENOMEM : POSIX_EINVAL; return (void *)-1; }
+    const int64_t read=runtime_file_pread(fd,out,size,offset);
+    if (read<0) {
+        direct_unmap(out,length);
+        *runtime_errno()=runtime_guest_errno((int)-read);
+        return (void *)-1;
+    }
+    if (!(prot & 2)) kernel_mprotect(out,length,prot & 0x37);
+    printf("Runtime: mmap of file descriptor %d: %#" PRIx64 " bytes from offset %#" PRIx64 " copied to %p\n",
+           fd,(uint64_t)read,(uint64_t)offset,out);
+    return out;
+}
 static ABI void *posix_mmap(void *addr, uint64_t size, int prot, int flags, int fd, int64_t offset) {
-    atomic_fetch_add(&heap_growths,1);
     enum { MAP_ANON_FLAG=0x1000, POSIX_ENOMEM=12, POSIX_ENODEV=19, POSIX_EINVAL=22 };
+    if (!(flags & MAP_ANON_FLAG) && fd>=0) return map_file(addr,size,prot,flags,fd,offset);
+    atomic_fetch_add(&heap_growths,1);
     if (!(flags & MAP_ANON_FLAG) || fd!=-1 || offset) { *runtime_errno()=POSIX_ENODEV; return (void *)-1; }
     if (!size) { *runtime_errno()=POSIX_EINVAL; return (void *)-1; }
     void *out=(flags & MAP_FIXED_FLAG) ? addr : NULL;

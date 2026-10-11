@@ -12,7 +12,11 @@ System modules (--system-modules DIR: the user's own dump of the console's *.spr
 shipped) are linked too when anything linked imports their library, and their exports win over
 the host runtime's (binding kinds 3 and 4), except for libraries named in --hle, so an own
 implementation can stand in for one and be compared with it.
-Output: out/boot-linked.bin (format BBPROBE5) and out/link.json.
+Modules the game loads itself with sceKernelLoadStartModule (any *.prx outside sce_module and
+sce_sys, such as Unity's Media/Modules and Media/Plugins) are linked unstarted: the runtime runs
+their initializer when the game asks for the path, and their exports win over the host (binding
+kinds 5 and 6), as the PS4 linker rebinds imports once such a module is loaded.
+Output: out/boot-linked.bin (format BBPROBE6) and out/link.json.
 """
 import collections
 import hashlib
@@ -30,6 +34,35 @@ NEVER_SYSTEM = {'libSceLibcInternal'}
 # --lle names it, to compare the two.
 PORT_IMPLEMENTS = {'libSceFiber'}
 FS_LOAD = bytes.fromhex('64488b042500000000')  # mov rax, fs:[0]
+MAX_MODULE_SEGMENTS = 4  # SCE_DBG_MAX_SEGMENTS of sceKernelGetModuleInfo
+
+
+def loadable_modules(game):
+    """Modules the game itself loads by path, relative to /app0."""
+    return [f.relative_to(game).as_posix() for f in sorted(game.rglob('*'))
+            if f.suffix.lower() in ('.prx', '.sprx') and f.is_file()
+            and f.relative_to(game).parts[0] not in ('sce_module', 'sce_sys')]
+
+
+def eh_frame(m, base):
+    """PT_GNU_EH_FRAME and the .eh_frame it points at, for sceKernelGetModuleInfoForUnwind."""
+    hdr = next((p for p in m['ph'] if p['type'] == 0x6474e550), None)
+    if not hdr or hdr['filesz'] < 8:
+        return 0, 0, 0, 0
+    data = span(m['elf'], hdr['offset'], 8)
+    if data[0] != 1 or data[1] != 0x1b:  # version 1, eh_frame_ptr DW_EH_PE_pcrel|sdata4
+        return base + hdr['vaddr'], hdr['memsz'], 0, 0
+    frame = hdr['vaddr'] + 4 + struct.unpack_from('<i', data, 4)[0]
+    loads = [p for p in m['ph'] if p['type'] == 1]
+    end = max(p['vaddr'] + p['memsz'] for p in loads)
+    # As shadPS4: .eh_frame_hdr follows .eh_frame, else .eh_frame runs to the image end.
+    size = hdr['vaddr'] - frame if hdr['vaddr'] > frame else end - frame
+    return base + hdr['vaddr'], hdr['memsz'], base + frame, max(size, 0)
+
+
+def module_segments(m, base):
+    return [(base + p['vaddr'], p['memsz'], p['flags']) for p in m['ph']
+            if p['type'] in (1, 0x61000010)][:MAX_MODULE_SEGMENTS]
 
 
 def module(path):
@@ -153,11 +186,16 @@ def link(game, out, module_names=DEFAULT_MODULES, system_modules=None, hle=(), l
     first = [system[lib].name for lib in wanted_system()]
     module_names += first
     from_system.update(first)
+    deferred = loadable_modules(game)
+    module_names += deferred
+    deferred = set(deferred)
     index = 0
     while index < len(module_names):
         filename = module_names[index]
         index += 1
         bundled = game / 'sce_module' / filename
+        if filename in deferred:
+            bundled = game / filename
         m = module(bundled if bundled.exists() or filename not in from_system else system[Path(filename).stem])
         loads = [p for p in m['ph'] if p['type'] in (1, 0x61000010)]
         modsize = max(p['vaddr'] + p['memsz'] for p in loads)
@@ -210,7 +248,7 @@ def link(game, out, module_names=DEFAULT_MODULES, system_modules=None, hle=(), l
                     relocs.append((target, rk, imported(symbol), addend))
             else:
                 raise ValueError(f'{filename}: unsupported relocation type {kind}')
-        count = 0
+        own_exports = []
         for s in m['symbols']:
             if s['section'] and s['binding'] in (1, 2) and s['identity'] and s['type'] in (1, 2):
                 if not mapped(s['value'], max(1, s['size'])):
@@ -218,15 +256,18 @@ def link(game, out, module_names=DEFAULT_MODULES, system_modules=None, hle=(), l
                 if s['identity'] in exports:
                     raise ValueError(f'{filename}: ambiguous export')
                 kind = 2 if s['type'] == 1 else 1
-                entry_value = (base + s['value'], kind + 2 if filename in from_system else kind, filename)
+                kind += 4 if filename in deferred else 2 if filename in from_system else 0
+                entry_value = (base + s['value'], kind, filename)
                 exports[s['identity']] = entry_value
                 by_nid[(s['identity'][0], s['identity'][1][0])].append(entry_value)
-                count += 1
+                own_exports.append((s['identity'][0], base + s['value']))
         fs_patched += patch_fs_loads(image, m['ph'], base)
         table.append(dict(file=filename, base=base, size=modsize, init=base + m['tags'].get(12, 0),
                           tls_address=base + tls['vaddr'] if tls else 0, tls_memsz=tls['memsz'] if tls else 0,
                           tls_filesz=tls['filesz'] if tls else 0, tls_module=module_id,
-                          tls_relocations=tls_relocations, exports=count, sha256=m['sha256']))
+                          tls_relocations=tls_relocations, exports=len(own_exports), sha256=m['sha256'],
+                          deferred=filename in deferred, eh_frame=eh_frame(m, base),
+                          segments=module_segments(m, base), export_list=own_exports))
         base = (base + modsize + 65535) & ~65535
         # Linking a module can import a library only another system module provides.
         for lib in wanted_system():
@@ -251,13 +292,30 @@ def link(game, out, module_names=DEFAULT_MODULES, system_modules=None, hle=(), l
         raise ValueError('unsupported eboot TLS layout')
     procparam = next(p for p in main['ph'] if p['type'] == 0x61000001)
     with (out / 'boot-linked.bin').open('wb') as f:
-        f.write(struct.pack('<8s6Q', b'BBPROBE5', len(image), entry, len(segments), len(relocs), len(names), flags))
+        f.write(struct.pack('<8s6Q', b'BBPROBE6', len(image), entry, len(segments), len(relocs), len(names), flags))
         f.write(struct.pack('<Q', procparam['vaddr']))
         f.write(struct.pack('<4Q', *main_tls_values))
+
+        def described(name, eh, module_segs, export_list):
+            f.write(name.encode().ljust(128, b'\0'))
+            f.write(struct.pack('<4Q', *eh))
+            f.write(struct.pack('<Q', len(module_segs)))
+            for i in range(MAX_MODULE_SEGMENTS):
+                f.write(struct.pack('<3Q', *(module_segs[i] if i < len(module_segs) else (0, 0, 0))))
+            f.write(struct.pack('<Q', len(export_list)))
+            for nid, address in export_list:
+                f.write(struct.pack('<16sQ', nid.encode(), address))
+        # Unity's IL2CPP code asks the eboot (sceKernelDlsym handle 0) for the player's functions.
+        main_exports = [(s['identity'][0], s['value']) for s in main['symbols']
+                        if s['section'] and s['binding'] in (1, 2) and s['identity'] and s['type'] in (1, 2)]
+        described('eboot.bin', eh_frame(main, 0), module_segments(main, 0), main_exports)
         f.write(struct.pack('<Q', len(table)))
         for t in table:
-            f.write(struct.pack('<7Q', t['base'], t['size'], t['init'], t['tls_address'], t['tls_memsz'],
-                                t['tls_filesz'], t['tls_module']))
+            if len(t['file'].encode()) >= 128:
+                raise ValueError(f"{t['file']}: path too long")
+            f.write(struct.pack('<8Q', t['base'], t['size'], t['init'], t['tls_address'], t['tls_memsz'],
+                                t['tls_filesz'], t['tls_module'], int(t['deferred'])))
+            described(t['file'], t['eh_frame'], t['segments'], t['export_list'])
         f.write(struct.pack('<Q', len(bindings)))
         for binding in bindings:
             f.write(struct.pack('<3Q', *binding))
@@ -270,12 +328,13 @@ def link(game, out, module_names=DEFAULT_MODULES, system_modules=None, hle=(), l
         for relocation in relocs:
             f.write(struct.pack('<QQqq', *relocation))
         f.write(image)
-    report = dict(modules=[{k: (hex(v) if k in ('base', 'init', 'tls_address') else v) for k, v in t.items()} for t in table],
+    report = dict(modules=[{k: (hex(v) if k in ('base', 'init', 'tls_address') else v) for k, v in t.items()
+                            if k not in ('eh_frame', 'segments', 'export_list')} for t in table],
                   bindings=len(bindings), imports=len(names), fs_loads_patched=fs_patched,
                   main_tls=dict(zip(('vaddr', 'filesz', 'memsz', 'align'), main_tls_values)),
                   unresolved_imports=unresolved)
     (out / 'link.json').write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
-    summary = ', '.join(f"{t['file']}@{t['base']:#x}" for t in table)
+    summary = ', '.join(f"{t['file']}@{t['base']:#x}{' (loaded by the game)' if t['deferred'] else ''}" for t in table)
     print(f'Linked modules: {summary}; {len(bindings)} native bindings, {len(unresolved)} imports left to the host runtime, '
           f'fs->gs patched={fs_patched}')
 

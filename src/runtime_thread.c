@@ -119,6 +119,10 @@ void runtime_thread_attach_main(void) {
     GuestThread *t=runtime_thread_current();
     snprintf(t->name,sizeof(t->name),"main");
 }
+void runtime_thread_set_stack(void *addr, uint64_t size) {
+    GuestThread *t=runtime_thread_current();
+    t->attr.stack_addr=addr; t->attr.stack=size;
+}
 static GuestThread *find_thread(void *handle) {
     GuestThread *found=NULL;
     pthread_mutex_lock(&lock);
@@ -408,7 +412,7 @@ uintptr_t runtime_thread_resolve(const char *name) {
         {"E+tyo3lp5Lw#I#J",posix_attr_set_detach}, {"2Q0z6rnBrTE#I#J",posix_attr_set_stack},
         {"euKRgm0Vn2M#I#J",posix_attr_set_param}, {"OxhIB8LB-PQ#I#J",posix_create},
         {"Jmi+9w9u0E4#I#J",posix_create_name}, {"h9CcP3J0oVM#I#J",posix_join},
-        {"FJrT5LuUBAU#I#J",thread_exit},
+        {"FJrT5LuUBAU#I#J",thread_exit}, {"7Xl257M4VNI#I#J",thread_equal},
     };
     for (size_t i=0;i<sizeof(table)/sizeof(*table);++i)
         if (runtime_same_nid(name,table[i].nid)) return (uintptr_t)table[i].fn;
@@ -423,5 +427,6 @@ void runtime_thread_report(void) {
 uintptr_t runtime_thread_resolve(const char *name) { (void)name; return 0; }
 void runtime_thread_report(void) {}
 void runtime_thread_attach_main(void) {}
+void runtime_thread_set_stack(void *addr, uint64_t size) { (void)addr; (void)size; }
 void runtime_set_main_tls(const void *d,uint64_t f,uint64_t m,uint64_t a) { (void)d;(void)f;(void)m;(void)a; }
 #endif

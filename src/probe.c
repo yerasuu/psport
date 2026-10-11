@@ -33,8 +33,8 @@ static char (*names)[128];
 static uint64_t import_count;
 static unsigned char *image;
 static size_t page_size;
-typedef struct { uint64_t base, size, init, tls_address, tls_memsz, tls_filesz, tls_module; } LinkedModule;
-static LinkedModule modules[16];
+/* all_modules[0] describes the eboot; modules are the linked ones after it. */
+static RuntimeModule *all_modules, *modules;
 static uint64_t module_count;
 static int entered_game;
 static int gpu_enabled;
@@ -157,7 +157,7 @@ static ABI __attribute__((noreturn)) void unresolved(uint32_t id, uintptr_t argu
     uintptr_t caller=(uintptr_t)__builtin_return_address(0)-(uintptr_t)image;
     for (uint64_t m=0;m<module_count;++m)
         if (caller>=modules[m].base && caller-modules[m].base<modules[m].size)
-            printf("Caller in linked module %" PRIu64 " (%s): +0x%" PRIxPTR "\n",m,m==0 ? "libc.prx" : "system module",caller-modules[m].base);
+            printf("Caller in linked module %" PRIu64 " (%s): +0x%" PRIxPTR "\n",m,modules[m].name,caller-modules[m].base);
     runtime_report();
     puts(entered_game ? "Original guest entry instructions executed; game initialization is incomplete." :
                         "Native libc initialization is incomplete; game entry has not run.");
@@ -206,6 +206,19 @@ static void fault(int sig, siginfo_t *info, void *context) {
     /* Guest code keeps frame pointers: its call chain says which caller handed over the bad
      * value, where the host backtrace below stops at the first guest frame. */
     if (rip - (uintptr_t)image < 0x10000000) dump_frames(uc);
+    /* A call through a null or stale pointer (an import BB_PERMISSIVE answered with 0, a symbol
+     * lookup that failed): the return address on the stack names the guest caller. */
+    else if (!(dladdr((void *)rip, &where) && where.dli_fname)) {
+        uintptr_t caller = 0;
+        struct iovec local = {&caller, sizeof(caller)}, remote = {(void *)uc->uc_mcontext.gregs[REG_RSP], sizeof(caller)};
+        if (process_vm_readv(getpid(), &local, 1, &remote, 1, 0) == (ssize_t)sizeof(caller) &&
+            caller - (uintptr_t)image < 0x10000000) {
+            snprintf(line, sizeof(line), "  called from guest offset 0x%lx\n", (unsigned long)(caller - (uintptr_t)image));
+            { ssize_t written_=write(2, line, strlen(line)); (void)written_; }
+            uc->uc_mcontext.gregs[REG_RIP] = (greg_t)caller;
+            dump_frames(uc);
+        }
+    }
     /* Outside the image and any shared object (generated code, a freed mapping): the mapping
      * from /proc/self/maps, and the thread. */
     if (rip - (uintptr_t)image >= 0x10000000 && !(dladdr((void *)rip, &where) && where.dli_fname)) {
@@ -307,6 +320,23 @@ static int sfo_value(const char *path, const char *key, char *text, size_t text_
         return 1;
     }
     return 0;
+}
+/* link_modules.py described(): name, eh_frame_hdr, its size, .eh_frame, its size, segments, exports. */
+static void read_description(FILE *f, RuntimeModule *m) {
+    if (fread(m->name,1,128,f)!=128 || m->name[127]) fail("invalid module name");
+    m->eh_frame_hdr=read64(f); m->eh_frame_hdr_size=read64(f); m->eh_frame=read64(f); m->eh_frame_size=read64(f);
+    m->segment_count=read64(f);
+    if (m->segment_count>4) fail("invalid module segments");
+    for (int i=0;i<4;++i) {
+        m->segments[i].address=read64(f); m->segments[i].size=read64(f); m->segments[i].prot=read64(f);
+    }
+    m->export_count=read64(f);
+    if (m->export_count>100000 || !(m->exports=calloc(m->export_count ? m->export_count : 1,sizeof(*m->exports))))
+        fail("invalid module exports");
+    for (uint64_t e=0;e<m->export_count;++e) {
+        if (fread(m->exports[e].nid,1,16,f)!=16 || m->exports[e].nid[15]) fail("invalid module export");
+        m->exports[e].address=read64(f);
+    }
 }
 static int mapped(Segment *segments, uint64_t count, uint64_t address, uint64_t bytes) {
     for (uint64_t i = 0; i < count; ++i)
@@ -440,15 +470,15 @@ int main(int argc, char **argv) {
     FILE *f = fopen(argv[1], "rb");
     if (!f) fail("cannot open boot file; run prepare.py first");
     char magic[8];
-    if (fread(magic, 1, 8, f) != 8 || (memcmp(magic, "BBPROBE1", 8) && memcmp(magic, "BBPROBE2", 8) && memcmp(magic,"BBPROBE3",8) && memcmp(magic,"BBPROBE4",8) && memcmp(magic,"BBPROBE5",8))) fail("bad boot file signature");
+    if (fread(magic, 1, 8, f) != 8 || (memcmp(magic, "BBPROBE1", 8) && memcmp(magic, "BBPROBE2", 8) && memcmp(magic,"BBPROBE3",8) && memcmp(magic,"BBPROBE4",8) && memcmp(magic,"BBPROBE6",8))) fail("bad boot file signature");
     uint64_t size = read64(f), entry = read64(f), ns = read64(f), nr = read64(f);
     import_count = read64(f);
     uint64_t capabilities = memcmp(magic, "BBPROBE1", 8) ? read64(f) : 0;
     if (capabilities & ~UINT64_C(1)) fail("unknown runtime capabilities");
     runtime_start(strict_imports ? 0 : capabilities);
-    if (!size || size > 512*1024*1024 || entry >= size || !ns || ns > 64 || nr > 1000000 || import_count > 100000)
+    if (!size || size > 512*1024*1024 || entry >= size || !ns || ns > 256 || nr > 4000000 || import_count > 100000)
         fail("boot file limits exceeded");
-    int multi=!memcmp(magic,"BBPROBE5",8);
+    int multi=!memcmp(magic,"BBPROBE6",8);
     int linked=!memcmp(magic,"BBPROBE3",8) || !memcmp(magic,"BBPROBE4",8) || multi;
     int native_libc=linked && !strict_imports && (capabilities&1);
     uint64_t main_tls[4]={0};
@@ -457,19 +487,34 @@ int main(int argc, char **argv) {
     uint64_t *binding_kinds=calloc(import_count ? import_count : 1,sizeof(*binding_kinds));
     if (!bindings || !binding_kinds) fail("allocation failed");
     if (multi) {
-        /* BBPROBE5: procparam, eboot TLS, module table, bindings (link_modules.py). */
+        /* BBPROBE6: procparam, eboot TLS and description, module table with descriptions and
+         * exports, bindings (link_modules.py). */
         procparam=read64(f);
         for (int i=0;i<4;++i) main_tls[i]=read64(f);
+        RuntimeModule eboot={0};
+        read_description(f,&eboot);
         module_count=read64(f);
-        if (!module_count || module_count>sizeof(modules)/sizeof(*modules)) fail("invalid module count");
+        if (!module_count || module_count>64) fail("invalid module count");
+        all_modules=calloc(module_count+1,sizeof(*all_modules));
+        if (!all_modules) fail("allocation failed");
+        all_modules[0]=eboot;
+        modules=all_modules+1;
         for (uint64_t m=0;m<module_count;++m) {
-            LinkedModule *x=&modules[m];
+            RuntimeModule *x=&modules[m];
             x->base=read64(f); x->size=read64(f); x->init=read64(f); x->tls_address=read64(f);
-            x->tls_memsz=read64(f); x->tls_filesz=read64(f); x->tls_module=read64(f);
+            x->tls_memsz=read64(f); x->tls_filesz=read64(f); x->tls_module=read64(f); x->deferred=read64(f);
+            read_description(f,x);
+            for (uint64_t e=0;e<x->export_count;++e)
+                if (x->exports[e].address-x->base>=x->size) fail("module export outside its module");
         }
         nb=read64(f);
     } else if (linked) {
-        LinkedModule *x=&modules[0];
+        all_modules=calloc(2,sizeof(*all_modules));
+        if (!all_modules) fail("allocation failed");
+        strcpy(all_modules[0].name,"eboot.bin");
+        modules=all_modules+1;
+        RuntimeModule *x=&modules[0];
+        strcpy(x->name,"libc.prx");
         module_count=1;
         x->base=read64(f); x->size=read64(f); x->init=read64(f);
         x->tls_address=read64(f); x->tls_memsz=read64(f); x->tls_filesz=read64(f); x->tls_module=2; nb=read64(f);
@@ -481,7 +526,7 @@ int main(int argc, char **argv) {
             main_tls[1]>size-main_tls[0] || (main_tls[3] & (main_tls[3]-1)) || main_tls[3]>4096)
             fail("invalid eboot TLS metadata");
         for (uint64_t m=0;m<module_count;++m) {
-            LinkedModule *x=&modules[m];
+            RuntimeModule *x=&modules[m];
             if (x->base>=size || !x->size || x->size>size-x->base || x->init<x->base || x->init-x->base>=x->size ||
                 (x->tls_module && (x->tls_address>=size || x->tls_memsz>size-x->tls_address || x->tls_memsz>1024*1024 ||
                                    x->tls_filesz>x->tls_memsz || x->tls_module<2 || x->tls_module>=RUNTIME_TLS_MODULES)))
@@ -493,7 +538,7 @@ int main(int argc, char **argv) {
             int inside=0;
             for (uint64_t m=0;m<module_count;++m)
                 if (address>=modules[m].base && address-modules[m].base<modules[m].size) inside=1;
-            if (index>=import_count || !inside || kind<1 || kind>4 || bindings[index]) fail("invalid native binding");
+            if (index>=import_count || !inside || kind<1 || kind>6 || bindings[index]) fail("invalid native binding");
             bindings[index]=address; binding_kinds[index]=kind;
         }
     }
@@ -538,6 +583,18 @@ int main(int argc, char **argv) {
     image = allocate(round_page(size));
     if (fread(image, 1, size, f) != size || fgetc(f) != EOF) fail("incorrect memory image size");
     fclose(f);
+    if (all_modules) {
+        for (uint64_t i=0;i<all_modules[0].segment_count;++i) {
+            const RuntimeModuleSegment *x=&all_modules[0].segments[i];
+            if (x->address+x->size>all_modules[0].size) all_modules[0].size=x->address+x->size;
+        }
+        if (!all_modules[0].size) all_modules[0].size=modules[0].base;
+        for (uint64_t e=0;e<all_modules[0].export_count;++e)
+            if (all_modules[0].exports[e].address>=all_modules[0].size) fail("eboot export outside the eboot");
+        unsigned char *started=calloc(module_count+1,1);
+        if (!started) fail("allocation failed");
+        runtime_modules_configure(image,all_modules,module_count+1,started);
+    }
     if (!cpu_only) {
         char title[128]="Bloodborne", serial[16]="UNKNOWN", sfo[4096];
         uint32_t attributes=0;
@@ -585,7 +642,8 @@ int main(int argc, char **argv) {
         t[30] = 0xff; t[31] = 0xe0;
     }
     /* What each import got, for the report below: 1 host, 2 native module, 3 stub, 4 nothing,
-     * 5 a system module (link_modules.py binding kinds 3 and 4, which win over the host). */
+     * 5 a system module (link_modules.py binding kinds 3 and 4, which win over the host), 6 a module
+     * the game loads itself (kinds 5 and 6, which win too). */
     unsigned char *import_state = calloc(import_count ? import_count : 1, 1);
     if (!import_state) fail("allocation failed");
     for (uint64_t i = 0; i < nr; ++i) {
@@ -603,14 +661,14 @@ int main(int argc, char **argv) {
                 uint64_t address=bindings[relocs[i].value];
                 if ((bound_kind - 1) % 2 + 1 != relocs[i].kind || !mapped(segments,ns,address,relocs[i].addend+1)) fail("native export kind/range mismatch");
                 value=(uintptr_t)image+address+relocs[i].addend;
-                import_state[relocs[i].value] = bound_kind > 2 ? 5 : 2;
+                import_state[relocs[i].value] = bound_kind > 4 ? 6 : bound_kind > 2 ? 5 : 2;
             } else import_state[relocs[i].value] = 4;
         }
         memcpy(image + relocs[i].target, &value, 8);
     }
     /* Before the game runs: every import that will not do what it asks, so a log shows what
      * cannot work even when the game never gets as far as calling it. */
-    unsigned counts[6] = {0};
+    unsigned counts[7] = {0};
     for (uint64_t i = 0; i < import_count; ++i) {
         ++counts[import_state[i]];
         if (import_state[i] == 3)
@@ -623,8 +681,8 @@ int main(int argc, char **argv) {
                        ? "returns 0x80020016 when called (BB_PERMISSIVE_OUT=error)"
                        : "returns 0 when called (BB_PERMISSIVE)");
     }
-    printf("Runtime: imports %llu: host %u, game modules %u, system modules %u, stubs %u, without implementation %u\n",
-           (unsigned long long)import_count, counts[1], counts[2], counts[5], counts[3], counts[4]);
+    printf("Runtime: imports %llu: host %u, game modules %u, system modules %u, modules the game loads %u, stubs %u, without implementation %u\n",
+           (unsigned long long)import_count, counts[1], counts[2], counts[5], counts[6], counts[3], counts[4]);
     free(import_state);
     if (patch_file) apply_patches(patch_file, segments, ns, relocs, nr);
     if (!cpu_only) bbgpu_patch_image(image, size);
@@ -652,9 +710,13 @@ int main(int argc, char **argv) {
         runtime_set_procparam(image+procparam);
         /* Dependencies start in link order (libc first), as the PS4 dynamic linker does. */
         for (uint64_t m=0;m<module_count;++m) {
+            if (modules[m].deferred) {
+                printf("Linked module %" PRIu64 " (%s) waits for the game to load it\n",m,modules[m].name);
+                continue;
+            }
             printf("Starting linked module %" PRIu64 " at image offset 0x%" PRIx64 "; native bindings=%" PRIu64 "\n",m,modules[m].init,nb);
-            typedef int (ABI *ModuleInit)(uint64_t,void *,void *);
-            int result=((ModuleInit)(image+modules[m].init))(0,NULL,NULL);
+            int32_t result=0;
+            runtime_module_start(m+1,0,NULL,&result);
             printf("Module %" PRIu64 " initializer returned %d\n",m,result);
             if (result) fail("module initializer failed");
         }
@@ -670,6 +732,7 @@ int main(int argc, char **argv) {
     enum { MAIN_STACK=8*1024*1024 };
     unsigned char *stack=runtime_low_map(MAIN_STACK,PROT_READ|PROT_WRITE);
     if (!stack) fail("cannot allocate guest main stack");
+    if (native_libc) runtime_thread_set_stack(stack,MAIN_STACK);
     enter_on_stack(image+entry,&params,(void *)guest_exit,stack+MAIN_STACK-64);
 #endif
     fail("entry unexpectedly returned");
