@@ -108,6 +108,28 @@ static u32 MapOutputs(std::span<Shader::OutputMap, 3> outputs, const AmdGpu::VsO
     return num_outputs;
 }
 
+// bbport: the stream-out setups transform feedback reproduces: stream 0 alone, also the
+// rasterized one, written to buffer 0 alone by an off-chip GS's copy shader. Vulkan captures one
+// rasterization stream's outputs in emission order, which is the order the copy shader writes
+// records in; other streams, several buffers and on-chip GS have no such one-to-one mapping.
+static u32 StreamOutXfbStride(const AmdGpu::Regs& regs, const Instance& instance) {
+    const auto& config = regs.vgt_strmout_config;
+    if (!instance.IsTransformFeedbackSupported() || !config.streamout_0_en ||
+        (config.raw & 0xe) != 0 || config.rast_stream != 0 || config.use_rast_stream_mask ||
+        regs.vgt_strmout_buffer_config.stream_0_buf_en != 1 || regs.vgt_gs_mode.onchip != 0) {
+        return 0;
+    }
+    const u32 stride = regs.vgt_strmout_buffers[0].vtx_stride * 4;
+    // Every captured offset lies within the stride, so bounding it bounds all per-vertex limits.
+    const auto& props = instance.GetTransformFeedbackProperties();
+    if (stride == 0 || stride > props.maxTransformFeedbackBufferDataStride ||
+        stride > props.maxTransformFeedbackBufferDataSize ||
+        stride > props.maxTransformFeedbackStreamDataSize) {
+        return 0;
+    }
+    return stride;
+}
+
 const Shader::RuntimeInfo& PipelineCache::BuildRuntimeInfo(PipelineSelection& sel, HwStage stage,
                                                              SwStage l_stage) {
     auto& info = sel.runtime_infos[u32(l_stage)];
@@ -171,6 +193,7 @@ const Shader::RuntimeInfo& PipelineCache::BuildRuntimeInfo(PipelineSelection& se
         const auto params_vc = AmdGpu::GetParams(regs.vs_program);
         info.hw.gs.vs_copy = params_vc.code;
         info.hw.gs.vs_copy_hash = params_vc.hash;
+        info.hw.gs.xfb_stride = StreamOutXfbStride(regs, instance);
         DumpShader(info.hw.gs.vs_copy, info.hw.gs.vs_copy_hash, Shader::HwStage::Vertex, 0,
                    "copy.bin");
         break;

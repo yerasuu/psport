@@ -167,6 +167,9 @@ struct HwGeometryRuntimeInfo {
     AmdGpu::GsScenario mode;
     std::span<const u32> vs_copy;
     u64 vs_copy_hash;
+    /// bbport: vertex record stride in bytes of stream-out buffer 0 when the copy shader's
+    /// stream-out can be reproduced with transform feedback, 0 when it is not to be captured.
+    u32 xfb_stride{};
 
     bool operator==(const HwGeometryRuntimeInfo& other) const {
         return num_outputs == other.num_outputs && outputs == other.outputs &&
@@ -176,7 +179,7 @@ struct HwGeometryRuntimeInfo {
                out_vertex_data_size == other.out_vertex_data_size &&
                in_primitive == other.in_primitive &&
                std::ranges::equal(out_primitive, other.out_primitive) && mode == other.mode &&
-               vs_copy_hash == other.vs_copy_hash;
+               vs_copy_hash == other.vs_copy_hash && xfb_stride == other.xfb_stride;
     }
 };
 
