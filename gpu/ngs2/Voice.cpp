@@ -34,7 +34,6 @@ void Ngs2Voice::SetEvent(std::uint32_t eventId) {
         case SCE_NGS2_VOICE_EVENT_STOP:
             if (state == Ngs2PlayState::Playing || state == Ngs2PlayState::Paused) state = Ngs2PlayState::Stopped;
             break;
-        case SCE_NGS2_VOICE_EVENT_RESET:
         case SCE_NGS2_VOICE_EVENT_STOP_IMM:
         case SCE_NGS2_VOICE_EVENT_KILL:
             state = Ngs2PlayState::Empty;
@@ -74,9 +73,13 @@ void Ngs2Voice::ResetSetup() {
     userFxFlags = 0;
 }
 
+std::size_t Ngs2FrameBytes(const Ngs2Voice& voice) {
+    return voice.channels * (voice.waveformType == SCE_NGS2_WAVEFORM_TYPE_PCM_F32L ? sizeof(float) : sizeof(std::int16_t));
+}
+
 const std::uint8_t* Ngs2StreamEnd(const Ngs2Voice& voice, const Ngs2Block& block) {
     const auto& last = block.pieces.back();
-    return last.data + last.frames * voice.channels * sizeof(std::int16_t);
+    return last.data + last.frames * Ngs2FrameBytes(voice);
 }
 
 const std::uint8_t* Ngs2Voice::WaveformData() const {
@@ -85,11 +88,11 @@ const std::uint8_t* Ngs2Voice::WaveformData() const {
     if (waveformType == SCE_NGS2_WAVEFORM_TYPE_ATRAC9) return block.data + block.dataCursor;
     if (block.streaming) {
         for (const auto& piece : block.pieces) {
-            if (block.cursor >= piece.firstFrame && block.cursor - piece.firstFrame < piece.frames) return piece.data + (block.cursor - piece.firstFrame) * channels * sizeof(std::int16_t);
+            if (block.cursor >= piece.firstFrame && block.cursor - piece.firstFrame < piece.frames) return piece.data + (block.cursor - piece.firstFrame) * Ngs2FrameBytes(*this);
         }
         return Ngs2StreamEnd(*this, block);
     }
-    return block.data + (static_cast<std::size_t>(block.info.num_skip_samples) + block.cursor) * channels * sizeof(std::int16_t);
+    return block.data + (static_cast<std::size_t>(block.info.num_skip_samples) + block.cursor) * Ngs2FrameBytes(*this);
 }
 
 static Ngs2Port& PortAt(Ngs2Voice& voice, std::uint32_t port) {
@@ -173,7 +176,8 @@ static void ApplyCommonParam(Ngs2Voice& voice, const Ngs2VoiceParamHeader& param
 static void SetupSampler(Ngs2Voice& voice, const Ngs2WaveformFormat& format) {
     voice.ResetSetup();
     if (format.waveform_type == 0 && format.num_channels == 0 && format.sample_rate == 0) return;
-    if (format.waveform_type != SCE_NGS2_WAVEFORM_TYPE_PCM_I16L && format.waveform_type != SCE_NGS2_WAVEFORM_TYPE_ATRAC9) {
+    if (format.waveform_type != SCE_NGS2_WAVEFORM_TYPE_PCM_I16L && format.waveform_type != SCE_NGS2_WAVEFORM_TYPE_PCM_F32L &&
+        format.waveform_type != SCE_NGS2_WAVEFORM_TYPE_ATRAC9) {
         throw std::runtime_error("NGS2: waveform type " + Ngs2Hex(format.waveform_type) + " is not implemented");
     }
     if (format.frame_offset != 0 || format.frame_margin != 0) throw std::runtime_error("NGS2: waveform frame offset and margin are not implemented");
@@ -225,7 +229,7 @@ static void AddWaveformBlocks(Ngs2Voice& voice, const Ngs2SamplerVoiceWaveformBl
         voice.waveformEnd = nullptr;
         if (voice.waveformType == SCE_NGS2_WAVEFORM_TYPE_ATRAC9) Ngs2RestartAtrac9(voice);
     }
-    const std::size_t frameBytes = voice.channels * sizeof(std::int16_t);
+    const std::size_t frameBytes = Ngs2FrameBytes(voice);
     if ((param.flags & SCE_NGS2_WAVEFORM_BLOCKS_FLAG_APPEND) != 0) {
         AppendStreamData(voice, param, frameBytes);
         voice.acceptsBlocks = (param.flags & SCE_NGS2_WAVEFORM_BLOCKS_FLAG_CONTINUE) != 0;
@@ -237,7 +241,7 @@ static void AddWaveformBlocks(Ngs2Voice& voice, const Ngs2SamplerVoiceWaveformBl
         if (block.num_samples == 0 && block.data_size == 0) continue;
         const std::uint64_t bytes = voice.waveformType == SCE_NGS2_WAVEFORM_TYPE_ATRAC9 ? Ngs2Atrac9BlockBytes(voice, block)
                                   : (static_cast<std::uint64_t>(block.num_skip_samples) + block.num_samples) * frameBytes;
-        const bool streaming = block.num_samples != 0 && bytes > block.data_size && voice.waveformType == SCE_NGS2_WAVEFORM_TYPE_PCM_I16L &&
+        const bool streaming = block.num_samples != 0 && bytes > block.data_size && voice.waveformType != SCE_NGS2_WAVEFORM_TYPE_ATRAC9 &&
                                block.num_skip_samples == 0 && block.num_repeats == 0 && block.data_size >= frameBytes && block.data_size % frameBytes == 0;
         const bool compressedStream = voice.waveformType == SCE_NGS2_WAVEFORM_TYPE_ATRAC9 && voice.acceptsBlocks && block.num_repeats == 0;
         if (block.num_samples == 0 || (bytes > block.data_size && !streaming && !compressedStream)) {

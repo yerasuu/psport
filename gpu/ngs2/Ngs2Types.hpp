@@ -29,14 +29,14 @@ static constexpr std::uint32_t SCE_NGS2_WAVEFORM_TYPE_PCM_I16L = 0x12;
 static constexpr std::uint32_t SCE_NGS2_WAVEFORM_TYPE_PCM_F32L = 0x18;
 static constexpr std::uint32_t SCE_NGS2_WAVEFORM_TYPE_ATRAC9 = 0x40;
 
-// Ryza (CUSA16458) sends 0 too: taken as a reset, as the other events are bits from 1 up.
-static constexpr std::uint32_t SCE_NGS2_VOICE_EVENT_RESET = 0;
-static constexpr std::uint32_t SCE_NGS2_VOICE_EVENT_PLAY = 1;
-static constexpr std::uint32_t SCE_NGS2_VOICE_EVENT_STOP = 2;
-static constexpr std::uint32_t SCE_NGS2_VOICE_EVENT_STOP_IMM = 4;
-static constexpr std::uint32_t SCE_NGS2_VOICE_EVENT_KILL = 8;
-static constexpr std::uint32_t SCE_NGS2_VOICE_EVENT_PAUSE = 16;
-static constexpr std::uint32_t SCE_NGS2_VOICE_EVENT_RESUME = 32;
+// PS4 numbers its voice events 0 up (AnyPS5's are PS5 bit values): Ryza (CUSA16458) plays each
+// voice with 0 after its setup and frees it with 3.
+static constexpr std::uint32_t SCE_NGS2_VOICE_EVENT_PLAY = 0;
+static constexpr std::uint32_t SCE_NGS2_VOICE_EVENT_STOP = 1;
+static constexpr std::uint32_t SCE_NGS2_VOICE_EVENT_STOP_IMM = 2;
+static constexpr std::uint32_t SCE_NGS2_VOICE_EVENT_KILL = 3;
+static constexpr std::uint32_t SCE_NGS2_VOICE_EVENT_PAUSE = 4;
+static constexpr std::uint32_t SCE_NGS2_VOICE_EVENT_RESUME = 5;
 
 static constexpr std::uint32_t SCE_NGS2_VOICE_STATE_FLAG_INUSE = 1;
 static constexpr std::uint32_t SCE_NGS2_VOICE_STATE_FLAG_PLAYING = 2;

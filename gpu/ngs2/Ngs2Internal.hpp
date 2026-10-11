@@ -169,6 +169,7 @@ struct Ngs2System {
 };
 
 std::string Ngs2Hex(std::uint32_t value);
+std::size_t Ngs2FrameBytes(const Ngs2Voice& voice);
 const std::uint8_t* Ngs2StreamEnd(const Ngs2Voice& voice, const Ngs2Block& block);
 std::recursive_mutex& Ngs2Mutex();
 Ngs2System* Ngs2FindSystem(Ngs2Handle handle);
