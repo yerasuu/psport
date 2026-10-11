@@ -117,13 +117,17 @@ while read -r name title game schedule envs; do
         value=$(expand "${entry#*=}") || { missing=$value; break; }
         env_args+=("${entry%%=*}=$value")
     done
-    if [[ -n $missing ]]; then
-        mkdir -p "$out/$name"
-        printf 'name\t%s\ntitle\t%s\nskipped\t%s unset\n' "$name" "$title" "$missing" > "$out/$name/run.tsv"
-        echo "regress: $name skipped (\$$missing unset)" >&2
+    # A title that can't run still gets a row, so that its absence shows in the table.
+    skip=''
+    if [[ -n $missing ]]; then skip="\$$missing unset"
+    elif [[ ! -f $games/$game/eboot.bin ]]; then skip="no eboot.bin"
+    fi
+    if [[ -n $skip ]]; then
+        rm -rf -- "${out:?}/$name"; mkdir -p "$out/$name"
+        printf 'name\t%s\ntitle\t%s\nskipped\t%s\n' "$name" "$title" "$skip" > "$out/$name/run.tsv"
+        echo "regress: $name skipped ($skip)" >&2
         continue
     fi
-    [[ -f $games/$game/eboot.bin ]] || { echo "regress: $name: no eboot.bin in $games/$game" >&2; continue; }
     while (($(jobs -rp | wc -l) >= jobs)); do wait -n; done
     run_title "$name" "$title" "$games/$game" "$sched_dir/$schedule" "${env_args[@]}" < /dev/null &
 done < "$titles"
