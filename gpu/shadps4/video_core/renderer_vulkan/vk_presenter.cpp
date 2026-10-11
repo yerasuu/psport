@@ -27,6 +27,7 @@
 #include <chrono>
 #include <cmath>
 #include <csetjmp>
+#include <cstdio>
 #include <cstring>
 #include <ctime>
 #include <filesystem>
@@ -740,6 +741,12 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
     free_frame();
     if (!is_reusing_frame && is_game_frame) {
         DebugState.IncFlipFrameNum();
+        // bbport: once, so that a log says whether the game ever got a frame on screen
+        // (tools/regress.sh reads it as the gpu milestone).
+        static std::atomic<bool> first_shown{false};
+        if (!first_shown.exchange(true, std::memory_order_relaxed)) {
+            std::printf("Presenter: first game frame presented (%ux%u)\n", frame->width, frame->height);
+        }
     }
 }
 
