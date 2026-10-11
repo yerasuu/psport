@@ -138,7 +138,13 @@ union Regs {
         INSERT_PADDING_WORDS(1);
         u32 vgt_esgs_ring_itemsize;
         u32 vgt_gsvs_ring_itemsize;
-        INSERT_PADDING_WORDS(33);
+        INSERT_PADDING_WORDS(7);
+        StreamOutBuffer vgt_strmout_buffers[4];
+        INSERT_PADDING_WORDS(6);
+        u32 vgt_strmout_draw_opaque_offset;
+        u32 vgt_strmout_draw_opaque_buffer_filled_size;
+        u32 vgt_strmout_draw_opaque_vertex_stride;
+        INSERT_PADDING_WORDS(1);
         u32 vgt_gs_max_vert_out : 11;
         INSERT_PADDING_WORDS(6);
         ShaderStageEnable stage_enable;
@@ -160,7 +166,9 @@ union Regs {
         u32 vgt_esgs_ring_size;
         u32 vgt_gsvs_ring_size;
         PrimitiveType primitive_type;
-        INSERT_PADDING_WORDS(9);
+        INSERT_PADDING_WORDS(1);
+        u32 vgt_strmout_buffer_filled_size[4];
+        INSERT_PADDING_WORDS(4);
         u32 num_indices;
         VgtNumInstances num_instances;
         INSERT_PADDING_WORDS(2);
