@@ -26,6 +26,9 @@ DEFAULT_MODULES = ('libc.prx', 'libSceFios2.prx')
 # Served by the game's libc.prx, whose functions the runtime partly replaces to track the game's
 # writes into GPU memory (memcpy, memset): a native copy of this one would bypass that.
 NEVER_SYSTEM = {'libSceLibcInternal'}
+# Libraries the port implements itself (gpu/fiber): their system module is linked only when
+# --lle names it, to compare the two.
+PORT_IMPLEMENTS = {'libSceFiber'}
 FS_LOAD = bytes.fromhex('64488b042500000000')  # mov rax, fs:[0]
 
 
@@ -96,7 +99,7 @@ def patch_fs_loads(image, ph, base):
     return patched
 
 
-def link(game, out, module_names=DEFAULT_MODULES, system_modules=None, hle=()):
+def link(game, out, module_names=DEFAULT_MODULES, system_modules=None, hle=(), lle=()):
     main = module(game / 'eboot.bin')
     raw = (out / 'boot.bin').read_bytes()
     magic, size, entry, ns, nr, ni, flags = unpack('<8s6Q', raw, 0)
@@ -138,7 +141,8 @@ def link(game, out, module_names=DEFAULT_MODULES, system_modules=None, hle=()):
     system = {}
     if system_modules:
         system = {f.stem: f for f in sorted(Path(system_modules).glob('*.sprx'))
-                  if f.stem not in NEVER_SYSTEM and f.stem not in hle}
+                  if f.stem not in NEVER_SYSTEM and f.stem not in hle
+                  and (f.stem not in PORT_IMPLEMENTS or f.stem in lle)}
     from_system = set()
 
     def wanted_system():
@@ -284,5 +288,7 @@ if __name__ == '__main__':
     p.add_argument('--modules', nargs='*', default=list(DEFAULT_MODULES))
     p.add_argument('--system-modules', type=Path, help="the user's dump of the console's *.sprx")
     p.add_argument('--hle', default='', help='libraries left to the host runtime, comma-separated')
+    p.add_argument('--lle', default='', help="system modules linked although the port implements them")
     a = p.parse_args()
-    link(a.game, a.out, a.modules, a.system_modules, {n.strip() for n in a.hle.split(',') if n.strip()})
+    names = lambda text: {n.strip() for n in text.split(',') if n.strip()}
+    link(a.game, a.out, a.modules, a.system_modules, names(a.hle), names(a.lle))
