@@ -143,6 +143,23 @@ static ABI int32_t rw_destroy(Rwlock **handle) {
     }
     pthread_mutex_unlock(&registry_lock); return error(e);
 }
+static int32_t posix_result(int32_t r) { return r ? (int32_t)((uint32_t)r&0xffff) : 0; }
+static ABI int32_t posix_init(Rwlock **out,void *const *attr) { return posix_result(rw_init(out,attr,NULL)); }
+static ABI int32_t posix_destroy(Rwlock **r) { return posix_result(rw_destroy(r)); }
+static ABI int32_t posix_read(Rwlock **r) { return posix_result(rw_read(r)); }
+static ABI int32_t posix_write(Rwlock **r) { return posix_result(rw_write(r)); }
+static ABI int32_t posix_tryread(Rwlock **r) { return posix_result(rw_tryread(r)); }
+static ABI int32_t posix_trywrite(Rwlock **r) { return posix_result(rw_trywrite(r)); }
+static ABI int32_t posix_timedread(Rwlock **r,const GuestTime *t) { return posix_result(rw_timedread(r,t)); }
+static ABI int32_t posix_timedwrite(Rwlock **r,const GuestTime *t) { return posix_result(rw_timedwrite(r,t)); }
+static ABI int32_t posix_unlock(Rwlock **r) { return posix_result(rw_unlock(r)); }
+static const RuntimeExport exports[]={
+    {"pthread_rwlock_init",posix_init}, {"pthread_rwlock_destroy",posix_destroy},
+    {"pthread_rwlock_rdlock",posix_read}, {"pthread_rwlock_wrlock",posix_write},
+    {"pthread_rwlock_tryrdlock",posix_tryread}, {"pthread_rwlock_trywrlock",posix_trywrite},
+    {"pthread_rwlock_timedrdlock",posix_timedread}, {"pthread_rwlock_timedwrlock",posix_timedwrite},
+    {"pthread_rwlock_unlock",posix_unlock},
+};
 uintptr_t runtime_rwlock_resolve(const char *name) {
     if (!strcmp(name,"6ULAa0fq4jA#p#J")) return (uintptr_t)rw_init;
     if (!strcmp(name,"BB+kb08Tl9A#p#J")) return (uintptr_t)rw_destroy;
@@ -153,7 +170,7 @@ uintptr_t runtime_rwlock_resolve(const char *name) {
     if (!strcmp(name,"+L98PIbGttk#p#J")) return (uintptr_t)rw_unlock;
     if (!strcmp(name,"iPtZRWICjrM#p#J")) return (uintptr_t)rw_timedread;
     if (!strcmp(name,"adh--6nIqTk#p#J")) return (uintptr_t)rw_timedwrite;
-    return 0;
+    return RUNTIME_LOOKUP(exports,name);
 }
 void runtime_rwlock_report(void) {
     pthread_mutex_lock(&registry_lock);

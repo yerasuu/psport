@@ -233,6 +233,8 @@ static uintptr_t resolve_scoped(const char *name, int is_data) {
     if (mutex) return mutex;
     uintptr_t thread = runtime_thread_resolve(name);
     if (thread) return thread;
+    uintptr_t sched = runtime_sched_resolve(name);
+    if (sched) return sched;
     uintptr_t content=runtime_content_resolve(name);
     if (content) return content;
     uintptr_t timer = runtime_time_resolve(name);
@@ -295,6 +297,7 @@ const char *runtime_symbol(const char *nid) {
     static const struct { const char *nid, *symbol; } extra[]={
         {"BG26hBGiNlw","_sceUlobjmgrRegisterObject"}, {"Smf+fUNblPc","_sceUlobjmgrUnregisterObject"},
         {"HZ9Q2c+4BU4","ulobjmgr Func_1D9F50D9CFB8054E"}, {"SweJO7t3pkk","ulobjmgr Func_4B07893BBB77A649"},
+        {"fJgP+wqifno","sceDiscMap_7C980FFB0AA27E7A"},
     };
     for (size_t i=0;i<sizeof(extra)/sizeof(*extra);++i)
         if (runtime_same_nid(nid,extra[i].nid)) return extra[i].symbol;

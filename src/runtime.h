@@ -45,6 +45,7 @@ void runtime_rwlock_report(void);
 void runtime_set_module_tls(uint64_t module, const void *data, uint64_t filesz, uint64_t memsz);
 void runtime_set_procparam(void *param);
 uintptr_t runtime_thread_resolve(const char *name);
+uintptr_t runtime_sched_resolve(const char *name);
 void runtime_thread_report(void);
 void runtime_set_main_tls(const void *data, uint64_t filesz, uint64_t memsz, uint64_t align);
 void runtime_thread_attach_main(void);
@@ -86,6 +87,7 @@ extern int runtime_last_stub;
 const char *runtime_symbol(const char *nid);
 uintptr_t runtime_lookup(const RuntimeExport *table, size_t count, const char *nid);
 uintptr_t runtime_kernel_resolve(const char *name);
+void runtime_process_configure(uint32_t sdk_version, uint32_t psf_attributes);
 uintptr_t runtime_file_resolve(const char *name);
 uintptr_t runtime_services_resolve(const char *name);
 /* Online play (runtime_net.c, BB_ONLINE=1): the online module answers the network and PSN imports. */

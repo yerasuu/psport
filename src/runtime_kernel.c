@@ -155,8 +155,55 @@ static ABI int32_t kernel_gettimeofday(GuestTimeval *tv) {
     return posix_gettimeofday(tv,NULL);
 }
 static ABI int64_t posix_time(int64_t *out) { int64_t t=(int64_t)time(NULL); if (out) *out=t; return t; }
+/* SceKernelTimesec: west_sec is the standard offset east of UTC (whatever its name says), dst_sec
+ * the daylight saving on top of it; local time is UTC plus both. */
+typedef struct { int64_t t; uint32_t west_sec, dst_sec; } GuestTimesec;
+/* Daylight saving in effect at a broken-down time: its offset beyond the zone's standard one. */
+static int64_t daylight_saving(const struct tm *t) { return t->tm_isdst>0 ? t->tm_gmtoff+timezone : 0; }
+static ABI int32_t utc_to_local(int64_t utc,int64_t *local,GuestTimesec *zone,uint64_t *dst_sec) {
+    if (!local) return ERR(22);
+    tzset();
+    time_t at=(time_t)utc; struct tm t;
+    if (!localtime_r(&at,&t)) return ERR(22);
+    const int64_t dst=daylight_saving(&t);
+    *local=utc+t.tm_gmtoff;
+    if (zone) { zone->t=utc; zone->west_sec=(uint32_t)(t.tm_gmtoff-dst); zone->dst_sec=(uint32_t)dst; }
+    if (dst_sec) *dst_sec=(uint64_t)dst;
+    return 0;
+}
+/* The second argument's meaning is unknown (shadPS4 ignores it too); the zone is the one in effect
+ * at that local time. */
+static ABI int32_t local_to_utc(int64_t local,int64_t unknown,int64_t *utc,GuestTimezone *tz,int32_t *dst_sec) {
+    (void)unknown;
+    if (!tz) return ERR(22);
+    tzset();
+    time_t at=(time_t)local; struct tm t;
+    if (!gmtime_r(&at,&t)) return ERR(22);
+    t.tm_isdst=-1;
+    const time_t when=mktime(&t);
+    const int64_t dst=daylight_saving(&t);
+    if (utc) *utc=(int64_t)when;
+    tz->minuteswest=(int32_t)(-(t.tm_gmtoff-dst)/60); tz->dsttime=0;
+    if (dst_sec) *dst_sec=(int32_t)dst;
+    return 0;
+}
 
 /* ---- process ---- */
+static uint32_t sdk_version, psf_attributes;
+void runtime_process_configure(uint32_t sdk, uint32_t attributes) { sdk_version=sdk; psf_attributes=attributes; }
+/* Always the base console: the GPU library builds its command buffers for it (its own
+ * sceKernelIsNeoMode answers 0), so a Pro answer here would contradict what it draws. */
+static ABI int32_t is_neo_mode(void) { return 0; }
+static ABI int32_t compiled_sdk_version(int32_t *version) {
+    if (!version) return ERR(22);
+    *version=(int32_t)sdk_version; return 0;
+}
+/* param.sfo ATTRIBUTE bits 15 and 16 ask for the sixth and seventh core; the answers are
+ * shadPS4's. */
+static ABI int32_t cpu_mode(void) {
+    const int six=(psf_attributes>>15)&1, seven=(psf_attributes>>16)&1;
+    return six && seven ? 2 : seven ? 5 : 0;
+}
 static ABI int32_t get_pagesize(void) { return PAGE; }
 static ABI int32_t get_pid(void) { return 1000; }
 static ABI int32_t yield(void) { sched_yield(); return 0; }
@@ -294,6 +341,7 @@ static ABI int32_t set_thread_dtors(void *dtors) { (void)dtors; return 0; }
 static ABI int32_t set_thread_atexit_count(void *count) { (void)count; return 0; }
 static ABI int32_t set_thread_atexit_report(void *report) { (void)report; return 0; }
 static ABI void *sanitizer_replace(void *table) { (void)table; return NULL; }
+static ABI int32_t sanitizer_enabled(void) { return 0; }
 /* libc follows the info's two pointers when it starts tracing its heap, a null one faults
  * (guest offset 0x19fe22c in libc.prx); tracing stays off with an empty mask and table. The
  * layout is upstream universal_ps4_native's. */
@@ -314,10 +362,13 @@ static const RuntimeExport exports[]={
     {"sceKernelGetProcessTimeCounterFrequency",process_time_frequency},
     {"sceKernelReadTsc",read_tsc}, {"sceKernelGetTscFrequency",tsc_frequency},
     {"sceKernelUsleep",kernel_usleep}, {"usleep",posix_usleep}, {"sleep",posix_sleep},
-    {"nanosleep",posix_nanosleep}, {"sceKernelNanosleep",kernel_nanosleep},
+    {"nanosleep",posix_nanosleep}, {"_nanosleep",posix_nanosleep}, {"sceKernelNanosleep",kernel_nanosleep},
     {"sceKernelGettimezone",kernel_gettimezone}, {"gettimeofday",posix_gettimeofday},
     {"sceKernelGettimeofday",kernel_gettimeofday},
     {"time",posix_time},
+    {"sceKernelConvertUtcToLocaltime",utc_to_local}, {"sceKernelConvertLocaltimeToUtc",local_to_utc},
+    {"sceKernelIsNeoMode",is_neo_mode}, {"sceKernelGetCompiledSdkVersion",compiled_sdk_version},
+    {"sceKernelGetCpumode",cpu_mode},
     {"getpagesize",get_pagesize}, {"getpid",get_pid}, {"sched_yield",yield},
     {"_exit",hard_exit},
     {"sceKernelDebugRaiseException",raise_exception},
@@ -335,11 +386,13 @@ static const RuntimeExport exports[]={
     {"_sceKernelSetThreadAtexitReport",set_thread_atexit_report},
     {"sceKernelGetSanitizerMallocReplaceExternal",sanitizer_replace},
     {"sceKernelGetSanitizerNewReplaceExternal",sanitizer_replace},
+    {"sceKernelIsAddressSanitizerEnabled",sanitizer_enabled},
     {"sceLibcHeapGetTraceInfo",libc_heap_trace_info},
 };
 uintptr_t runtime_kernel_resolve(const char *name) { return RUNTIME_LOOKUP(exports,name); }
 #else
 uintptr_t runtime_kernel_resolve(const char *name) { (void)name; return 0; }
+void runtime_process_configure(uint32_t sdk, uint32_t attributes) { (void)sdk; (void)attributes; }
 int32_t runtime_guest_errno(int e) { return e ? 5 : 0; }
 void runtime_thread_keys_cleanup(void) {}
 #endif
