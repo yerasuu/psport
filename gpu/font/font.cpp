@@ -2446,8 +2446,8 @@ static s32 GlyphRenderImage(OrbisFontGlyph fontGlyph, OrbisFontStyleFrame* style
     s32 rc = ORBIS_OK;
     if (mode == 0) {
         Internal::StyleStateBlock state{};
-        state.dpi_x = font->cached_style.hDpi;
-        state.dpi_y = font->cached_style.vDpi;
+        state.dpi_x = font->style_frame[0];
+        state.dpi_y = font->style_frame[1];
         state.scale_w = fontGlyph->scale_x;
         state.scale_h = fontGlyph->base_scale;
 
