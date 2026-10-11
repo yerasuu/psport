@@ -13,6 +13,7 @@
 #include <string.h>
 #include <pthread.h>
 #include <time.h>
+#include <math.h>
 #include <SDL3/SDL.h>
 
 #define PORTS 25
@@ -41,6 +42,8 @@ typedef struct {
     int stats;
     uint64_t stat_start_ns, stat_last_ns, stat_max_gap_ns; /* BB_AUDIO_STATS */
     unsigned stat_starved, stat_buffers; int stat_min_queued;
+    /* Level of what the game sent (after volume), so a test can tell sound from silence. */
+    float stat_peak; double stat_sum_sq; uint64_t stat_samples;
 } Port;
 typedef struct { uint16_t output; uint8_t channel, reserved; int16_t volume; uint16_t reroute; uint64_t flag, reserved64[2]; } PortState;
 _Static_assert(sizeof(PortState)==32,"AudioOut port state layout");
@@ -160,9 +163,15 @@ static int32_t output_port(int32_t handle, const void *data, int pace) {
             int target=p->channels==8 && !p->std_layout ? remap[c] : c;
             size_t from=f*(size_t)p->channels+(size_t)c, to=f*(size_t)p->channels+(size_t)target;
             float gain=(float)p->volume[c]/VOLUME_0DB;
-            if (p->is_float) { float v; memcpy(&v,(const char *)data+from*4,4); v*=gain; memcpy(converted+to*4,&v,4); }
-            else { int16_t v; memcpy(&v,(const char *)data+from*2,2); v=(int16_t)((float)v*gain); memcpy(converted+to*2,&v,2); }
+            float level;
+            if (p->is_float) { float v; memcpy(&v,(const char *)data+from*4,4); v*=gain; memcpy(converted+to*4,&v,4); level=v; }
+            else { int16_t v; memcpy(&v,(const char *)data+from*2,2); v=(int16_t)((float)v*gain); memcpy(converted+to*2,&v,2); level=v/32768.0f; }
+            if (p->stats) {
+                if (fabsf(level)>p->stat_peak) p->stat_peak=fabsf(level);
+                p->stat_sum_sq+=(double)level*level;
+            }
         }
+        if (p->stats) p->stat_samples+=samples;
         if (p->dump) fwrite(converted,1,bytes,p->dump);
         if (p->stats) {
             uint64_t now=now_ns();
@@ -175,10 +184,14 @@ static int32_t output_port(int32_t handle, const void *data, int pace) {
                 if (queued==0) ++p->stat_starved;
             }
             if (now-p->stat_start_ns>=5000000000u) {
-                printf("Audio stats port %d: %u buffers/5s (expected %u), max gap %.2f ms, min queued %d bytes, starved %u\n",
+                const double rms=p->stat_samples ? sqrt(p->stat_sum_sq/(double)p->stat_samples) : 0;
+                printf("Audio stats port %d: %u buffers/5s (expected %u), max gap %.2f ms, min queued %d bytes, starved %u, ",
                        (int)(p-ports),p->stat_buffers,(unsigned)(5u*48000u/(unsigned)p->frames),p->stat_max_gap_ns/1e6,
                        p->stat_min_queued,p->stat_starved);
+                if (p->stat_peak>0) printf("peak %.1f dBFS, rms %.1f dBFS\n",20*log10(p->stat_peak),20*log10(rms));
+                else printf("silent\n");
                 p->stat_start_ns=now; p->stat_max_gap_ns=0; p->stat_starved=0; p->stat_buffers=0; p->stat_min_queued=1<<30;
+                p->stat_peak=0; p->stat_sum_sq=0; p->stat_samples=0;
             }
         }
         if (pace) {
