@@ -176,21 +176,21 @@ bool AvPlayerState::GetStreamInfo(u32 stream_index, AvPlayerStreamInfo& info) {
 // Called inside GAME thread
 bool AvPlayerState::Start() {
     std::unique_lock lock(m_source_mutex);
-    if (m_current_state == AvState::Ready || m_current_state == AvState::Stop || Stop()) {
-        m_eof_stop_event_sent = false;
-        SetState(AvState::Starting);
-        if (!m_up_source->Start()) {
-            LOG_ERROR(Lib_AvPlayer, "Could not start playback.");
-            SetState(AvState::Error);
-            return false;
-        }
-        SetState(AvState::Play);
-        OnPlaybackStateChanged(AvState::Play);
-        return true;
+    if (m_current_state != AvState::Ready && m_current_state != AvState::Stop && !StopLocked()) {
+        LOG_ERROR(Lib_AvPlayer, "Could not start playback.");
+        return false;
     }
-
-    LOG_ERROR(Lib_AvPlayer, "Could not start playback.");
-    return false;
+    m_eof_stop_event_sent = false;
+    SetState(AvState::Starting);
+    if (!m_up_source->Start()) {
+        LOG_ERROR(Lib_AvPlayer, "Could not start playback.");
+        SetState(AvState::Error);
+        return false;
+    }
+    SetState(AvState::Play);
+    lock.unlock();
+    OnPlaybackStateChanged(AvState::Play);
+    return true;
 }
 
 // Called inside GAME thread
@@ -209,6 +209,7 @@ bool AvPlayerState::Pause() {
     if (!SetState(AvState::Pause)) {
         return false;
     }
+    lock.unlock();
     OnPlaybackStateChanged(AvState::Pause);
     return true;
 }
@@ -223,6 +224,7 @@ bool AvPlayerState::Resume() {
     m_up_source->Resume();
     const auto state = m_previous_state.load();
     SetState(state);
+    lock.unlock();
     OnPlaybackStateChanged(state);
     return true;
 }
@@ -280,6 +282,15 @@ bool AvPlayerState::EnableStream(u32 stream_index) {
 // Called inside GAME thread
 bool AvPlayerState::Stop() {
     std::shared_lock lock(m_source_mutex);
+    if (!StopLocked()) {
+        return false;
+    }
+    lock.unlock();
+    OnPlaybackStateChanged(AvState::Stop);
+    return true;
+}
+
+bool AvPlayerState::StopLocked() {
     if (m_up_source == nullptr || m_current_state == AvState::Stop) {
         return false;
     }
@@ -290,7 +301,6 @@ bool AvPlayerState::Stop() {
         return false;
     }
     m_eof_stop_event_sent = true;
-    OnPlaybackStateChanged(AvState::Stop);
     return true;
 }
 
