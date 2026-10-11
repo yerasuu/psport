@@ -81,6 +81,20 @@ static ABI int32_t system_param(int32_t id,int32_t *value) {
     }
     return 0;
 }
+/* The only string parameter is the console's name (6, SYSTEM_NAME). */
+static ABI int32_t system_param_string(int32_t id,char *buffer,uint64_t size) {
+    static const char name[]="PS4";
+    if (id!=6 || !buffer || size<sizeof(name)) return SYSTEM_PARAMETER;
+    memcpy(buffer,name,sizeof(name));
+    return 0;
+}
+/* SceSystemServiceHdrToneMapLuminance in nits: max full frame, max, min. The console's HDR
+ * adjustment is never run here, so a common HDR10 display's range stands in for it. */
+static ABI int32_t hdr_tone_map_luminance(float *luminance) {
+    if (!luminance) return SYSTEM_PARAMETER;
+    luminance[0]=1000.0f; luminance[1]=1000.0f; luminance[2]=0.01f;
+    return 0;
+}
 static ABI int32_t system_status(unsigned char *status) {
     if (!status) return SYSTEM_PARAMETER;
     memset(status,0,12); /* event_num=0, no overlay, foreground, normal CPU mode */
@@ -374,7 +388,14 @@ static const RuntimeExport exports[]={
     {"sceUserServiceInitialize",user_initialize}, {"sceUserServiceTerminate",runtime_stub},
     {"sceUserServiceGetInitialUser",user_initial}, {"sceUserServiceGetLoginUserIdList",user_list},
     {"sceUserServiceGetUserName",user_name}, {"sceUserServiceGetEvent",user_event},
-    {"sceSystemServiceParamGetInt",system_param}, {"sceSystemServiceGetStatus",system_status},
+    {"sceSystemServiceParamGetInt",system_param}, {"sceSystemServiceParamGetString",system_param_string},
+    {"sceSystemServiceGetStatus",system_status}, {"sceSystemServiceGetHdrToneMapLuminance",hdr_tone_map_luminance},
+    {"sceSystemServiceDisableMusicPlayer",runtime_stub}, {"sceSystemServiceReenableMusicPlayer",runtime_stub},
+    {"sceSystemServiceDisableSuspendConfirmationDialog",runtime_stub},
+    {"sceSystemServiceEnableSuspendConfirmationDialog",runtime_stub},
+    {"sceSystemServiceDisablePersonalEyeToEyeDistanceSetting",runtime_stub},
+    {"sceSystemServiceEnablePersonalEyeToEyeDistanceSetting",runtime_stub},
+    {"sceSystemServicePowerTick",runtime_stub}, {"sceSystemServiceReportAbnormalTermination",runtime_stub},
     {"sceSystemServiceReceiveEvent",system_event}, {"sceSystemServiceHideSplashScreen",hide_splash},
     {"sceSystemServiceLaunchWebBrowser",launch_browser},
     {"sceSystemServiceGetDisplaySafeAreaInfo",display_safe_area},
