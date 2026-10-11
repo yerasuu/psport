@@ -39,6 +39,12 @@ GraphicsPipeline::GraphicsPipeline(
       fetch_shader{std::move(fetch_shader_)} {
     const vk::Device device = instance.GetDevice();
     std::ranges::copy(infos, stages.begin());
+    // The GS Info is the program's, translated for its first permutation; the runtime info is this
+    // pipeline's own, so a stride both agree on is the one this module was emitted with.
+    if (const auto* gs = infos[u32(Shader::SwStage::Geometry)]) {
+        const u32 stride = runtime_infos[u32(Shader::SwStage::Geometry)].hw.gs.xfb_stride;
+        xfb_stride = gs->xfb_stride == stride ? stride : 0;
+    }
     BuildDescSetLayout(preloading);
     const auto debug_str = GetDebugString();
 

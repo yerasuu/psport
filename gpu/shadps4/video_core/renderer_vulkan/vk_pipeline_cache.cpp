@@ -928,11 +928,12 @@ bool PipelineCache::RefreshGraphicsKey(PipelineSelection& sel) {
 
 // bbport: which geometry-shader setups the translator still skips, and how often. Each distinct
 // setup (stream-out streams and buffers, on-chip mode, GS program) is described once; the skipped
-// draws are counted, every 5000 reported. What to implement first is read off this.
-static bool SkipUnsupportedGeometry(const AmdGpu::Regs& regs, const char* stages) {
+// draws are counted, every 5000 reported. What to implement first is read off this. Stream-out
+// that transform feedback reproduces (StreamOutXfbStride) goes through.
+static bool SkipUnsupportedGeometry(const AmdGpu::Regs& regs, const Instance& instance, const char* stages) {
     const bool onchip = regs.vgt_gs_mode.onchip != 0;
     const u32 strmout = regs.vgt_strmout_config.raw;
-    if (!onchip && !strmout) {
+    if ((!onchip && !strmout) || StreamOutXfbStride(regs, instance) != 0) {
         return false;
     }
     static std::mutex lock;
@@ -1024,6 +1025,14 @@ bool PipelineCache::RefreshGraphicsStages(PipelineSelection& sel) {
         return true;
     };
 
+    // bbport: a stream-out GS whose module came out without transform feedback (the copy
+    // shader's stores didn't map onto it, Info::xfb_stride) must not draw: the vertices later draws
+    // read back would not be written. The emitter logs why.
+    const auto loses_stream_out = [&] {
+        const u32 stride = sel.runtime_infos[u32(SwStage::Geometry)].hw.gs.xfb_stride;
+        return stride != 0 && sel.infos[u32(SwStage::Geometry)]->xfb_stride != stride;
+    };
+
     sel.infos.fill(nullptr);
     sel.modules.fill(nullptr);
 
@@ -1039,13 +1048,13 @@ bool PipelineCache::RefreshGraphicsStages(PipelineSelection& sel) {
             LOG_WARNING(Render_Vulkan, "Geometry shader stage unsupported, skipping");
             return false;
         }
-        if (SkipUnsupportedGeometry(regs, "ES-GS")) {
+        if (SkipUnsupportedGeometry(regs, instance, "ES-GS")) {
             return false;
         }
         if (!bind_stage(HwStage::Export, SwStage::Vertex)) {
             return false;
         }
-        if (!bind_stage(HwStage::Geometry, SwStage::Geometry)) {
+        if (!bind_stage(HwStage::Geometry, SwStage::Geometry) || loses_stream_out()) {
             return false;
         }
         break;
@@ -1071,7 +1080,7 @@ bool PipelineCache::RefreshGraphicsStages(PipelineSelection& sel) {
             LOG_WARNING(Render_Vulkan, "Geometry shader stage unsupported, skipping");
             return false;
         }
-        if (SkipUnsupportedGeometry(regs, "LS-HS-ES-GS")) {
+        if (SkipUnsupportedGeometry(regs, instance, "LS-HS-ES-GS")) {
             return false;
         }
         if (!bind_stage(HwStage::Hull, SwStage::TessellationControl)) {
@@ -1083,7 +1092,7 @@ bool PipelineCache::RefreshGraphicsStages(PipelineSelection& sel) {
         if (!bind_stage(HwStage::Local, SwStage::Vertex)) {
             return false;
         }
-        if (!bind_stage(HwStage::Geometry, SwStage::Geometry)) {
+        if (!bind_stage(HwStage::Geometry, SwStage::Geometry) || loses_stream_out()) {
             return false;
         }
         break;
