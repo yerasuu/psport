@@ -3,11 +3,16 @@
 
 #include "fiber.h"
 
+#include <cstdio>
+#include <cstdlib>
+#include <tuple>
+#include <type_traits>
+
 #include "common/elf_info.h"
 #include "common/logging/log.h"
-#include "core/libraries/fiber/fiber_error.h"
+#include "fiber_error.h"
 #include "core/libraries/libs.h"
-#include "core/tls.h"
+#include "fiber_tcb.h"
 
 namespace Libraries::Fiber {
 
@@ -545,30 +550,70 @@ s32 PS4_SYSV_ABI sceFiberSwitch(OrbisFiber* fiber, u64 arg_on_run_to, u64* arg_o
     return sceFiberSwitchImpl(fiber, nullptr, 0, arg_on_run_to, arg_on_run);
 }
 
+// bbport: every failure a function returns is logged (each function and code a few times), so a
+// title the library rejects shows why instead of failing silently further on. The wrapper's frame
+// stays on the caller's stack, which a switch leaves and comes back to.
+template <auto F>
+struct Checked;
+template <typename... Args, s32 (*F)(Args...)>
+struct Checked<F> {
+    static const char* name;
+    static s32 PS4_SYSV_ABI Call(Args... args) {
+        // BB_FIBER_TRACE=1: the first calls of each function, with their arguments.
+        static const bool tracing = [] {
+            const char* env = std::getenv("BB_FIBER_TRACE");
+            return env && env[0] == '1';
+        }();
+        static std::atomic<u32> traced{0};
+        if (tracing && traced.fetch_add(1, std::memory_order_relaxed) < 16) {
+            std::printf("Fiber trace: %s(", name);
+            const char* separator = "";
+            auto print = [&](auto value) {
+                if constexpr (std::is_pointer_v<decltype(value)>) {
+                    std::printf("%s%#llx", separator, static_cast<unsigned long long>(reinterpret_cast<u64>(value)));
+                } else {
+                    std::printf("%s%#llx", separator, static_cast<unsigned long long>(value));
+                }
+                separator = ", ";
+            };
+            (print(args), ...);
+            std::printf(")\n");
+        }
+        const s32 result = F(args...);
+        static std::atomic<u32> logged{0};
+        if (result < 0 && logged.fetch_add(1, std::memory_order_relaxed) < 8) {
+            LOG_ERROR(Lib_Fiber, "{} returned {:#x}", name, static_cast<u32>(result));
+        }
+        return result;
+    }
+};
+template <typename... Args, s32 (*F)(Args...)>
+const char* Checked<F>::name = "?";
+
+#define FIBER_FUNCTION(nid, function)                                                              \
+    Checked<function>::name = #function;                                                           \
+    LIB_FUNCTION(nid, "libSceFiber", 1, "libSceFiber", Checked<function>::Call)
+
 void RegisterLib(Core::Loader::SymbolsResolver* sym) {
-    LIB_FUNCTION("hVYD7Ou2pCQ", "libSceFiber", 1, "libSceFiber", sceFiberInitialize);
-    LIB_FUNCTION("7+OJIpko9RY", "libSceFiber", 1, "libSceFiber",
-                 sceFiberInitializeImpl); // _sceFiberInitializeWithInternalOptionImpl
-    LIB_FUNCTION("asjUJJ+aa8s", "libSceFiber", 1, "libSceFiber", sceFiberOptParamInitialize);
-    LIB_FUNCTION("JeNX5F-NzQU", "libSceFiber", 1, "libSceFiber", sceFiberFinalize);
+    FIBER_FUNCTION("hVYD7Ou2pCQ", sceFiberInitialize);
+    FIBER_FUNCTION("7+OJIpko9RY", sceFiberInitializeImpl); // _sceFiberInitializeWithInternalOptionImpl
+    FIBER_FUNCTION("asjUJJ+aa8s", sceFiberOptParamInitialize);
+    FIBER_FUNCTION("JeNX5F-NzQU", sceFiberFinalize);
 
-    LIB_FUNCTION("a0LLrZWac0M", "libSceFiber", 1, "libSceFiber", sceFiberRun);
-    LIB_FUNCTION("PFT2S-tJ7Uk", "libSceFiber", 1, "libSceFiber", sceFiberSwitch);
-    LIB_FUNCTION("p+zLIOg27zU", "libSceFiber", 1, "libSceFiber", sceFiberGetSelf);
-    LIB_FUNCTION("B0ZX2hx9DMw", "libSceFiber", 1, "libSceFiber", sceFiberReturnToThread);
+    FIBER_FUNCTION("a0LLrZWac0M", sceFiberRun);
+    FIBER_FUNCTION("PFT2S-tJ7Uk", sceFiberSwitch);
+    FIBER_FUNCTION("p+zLIOg27zU", sceFiberGetSelf);
+    FIBER_FUNCTION("B0ZX2hx9DMw", sceFiberReturnToThread);
 
-    LIB_FUNCTION("avfGJ94g36Q", "libSceFiber", 1, "libSceFiber",
-                 sceFiberRunImpl); // _sceFiberAttachContextAndRun
-    LIB_FUNCTION("ZqhZFuzKT6U", "libSceFiber", 1, "libSceFiber",
-                 sceFiberSwitchImpl); // _sceFiberAttachContextAndSwitch
+    FIBER_FUNCTION("avfGJ94g36Q", sceFiberRunImpl); // _sceFiberAttachContextAndRun
+    FIBER_FUNCTION("ZqhZFuzKT6U", sceFiberSwitchImpl); // _sceFiberAttachContextAndSwitch
 
-    LIB_FUNCTION("uq2Y5BFz0PE", "libSceFiber", 1, "libSceFiber", sceFiberGetInfo);
-    LIB_FUNCTION("Lcqty+QNWFc", "libSceFiber", 1, "libSceFiber", sceFiberStartContextSizeCheck);
-    LIB_FUNCTION("Kj4nXMpnM8Y", "libSceFiber", 1, "libSceFiber", sceFiberStopContextSizeCheck);
-    LIB_FUNCTION("JzyT91ucGDc", "libSceFiber", 1, "libSceFiber", sceFiberRename);
+    FIBER_FUNCTION("uq2Y5BFz0PE", sceFiberGetInfo);
+    FIBER_FUNCTION("Lcqty+QNWFc", sceFiberStartContextSizeCheck);
+    FIBER_FUNCTION("Kj4nXMpnM8Y", sceFiberStopContextSizeCheck);
+    FIBER_FUNCTION("JzyT91ucGDc", sceFiberRename);
 
-    LIB_FUNCTION("0dy4JtMUcMQ", "libSceFiber", 1, "libSceFiber",
-                 sceFiberGetThreadFramePointerAddress);
+    FIBER_FUNCTION("0dy4JtMUcMQ", sceFiberGetThreadFramePointerAddress);
 }
 
 } // namespace Libraries::Fiber

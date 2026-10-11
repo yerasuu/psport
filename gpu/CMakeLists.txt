@@ -131,9 +131,11 @@ file(GLOB CP_SOURCES CONFIGURE_DEPENDS cp/*.cpp)
 # Ngs2, the software audio mixer of titles other than Bloodborne (ngs2/README.md), with the ATRAC9
 # decoder its waveforms use.
 file(GLOB NGS2_SOURCES CONFIGURE_DEPENDS ngs2/*.cpp)
+# libSceFiber, the fibers libSceUlt's job threads run on (fiber/README.md).
+file(GLOB FIBER_SOURCES CONFIGURE_DEPENDS fiber/*.cpp)
 file(GLOB ATRAC9_SOURCES CONFIGURE_DEPENDS ../third_party/LibAtrac9/C/src/*.c)
 add_library(bbgpu SHARED ${VIDEO_CORE} ${RECOMPILER} ${COMMON} ${SHIM_SOURCES} ${LAYER_SOURCES} ${GAME_SOURCES} ${CP_SOURCES}
-    ${NGS2_SOURCES} ${ATRAC9_SOURCES}
+    ${NGS2_SOURCES} ${FIBER_SOURCES} ${ATRAC9_SOURCES}
     shadps4/core/libraries/gnmdriver/gnmdriver.cpp
     shadps4/core/libraries/videoout/driver.cpp shadps4/core/libraries/videoout/video_out.cpp
     shadps4/core/libraries/kernel/equeue.cpp ${AVPLAYER}
