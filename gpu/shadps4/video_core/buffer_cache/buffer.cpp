@@ -175,7 +175,8 @@ Buffer::Buffer(const Vulkan::Instance& instance, u64 size_bytes_, vk::DeviceMemo
     if (layer) {
         usage |= vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eIndexBuffer |
                  vk::BufferUsageFlagBits::eIndirectBuffer |
-                 vk::BufferUsageFlagBits::eShaderDeviceAddress;
+                 vk::BufferUsageFlagBits::eShaderDeviceAddress |
+                 BbGuestMemory::TransformFeedbackUsage(instance);
     }
     const vk::BufferCreateInfo buffer_ci = {
         .pNext = &external,
@@ -200,9 +201,13 @@ Buffer::Buffer(const Vulkan::Instance& instance, VAddr cpu_addr_, u64 size_bytes
     : cpu_addr{cpu_addr_}, size_bytes{size_bytes_}, mem_type{mem_type_},
       buffer{instance.GetDevice(), instance.GetAllocator()} {
 
+    // An in-place arena is bound to external memory, which may not take stream-out usage.
+    const vk::BufferUsageFlags xfb_usage = mem_type == MemoryType::Sparse && GuestInPlace()
+                                               ? BbGuestMemory::TransformFeedbackUsage(instance)
+                                               : instance.GetTransformFeedbackBufferUsage();
     vk::BufferCreateInfo buffer_ci = {
         .size = size_bytes,
-        .usage = AllFlags,
+        .usage = AllFlags | xfb_usage,
         .sharingMode = vk::SharingMode::eExclusive,
     };
     // bbport: arenas are also read by the readback queue (BufferCache::DownloadMemory).

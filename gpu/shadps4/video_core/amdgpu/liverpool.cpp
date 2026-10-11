@@ -597,6 +597,12 @@ void RunCopyData(Vulkan::Rasterizer& rasterizer, const u8* data) {
     rasterizer.CopyBuffer(task.dst, task.src, task.num_bytes, task.dst_gds, task.src_gds);
 }
 
+void RunStreamOutUpdate(Vulkan::Rasterizer& rasterizer, const u8* data) {
+    Vulkan::Rasterizer::StreamOutUpdate update;
+    std::memcpy(&update, data, sizeof(update));
+    rasterizer.StreamOutBufferUpdate(update);
+}
+
 void SignalFlip(Vulkan::Rasterizer& rasterizer, const u8*) {
     rasterizer.WaitDeferredSignals();
     Platform::IrqC::Instance()->Signal(Platform::InterruptId::GfxFlip);
@@ -2214,31 +2220,51 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                 break;
             }
             case PM4ItOpcode::StrmoutBufferUpdate: {
-                // bbport: still unimplemented. Each distinct control word is described once and
-                // the packets counted, every 5000 reported, so that the warning no longer repeats
-                // per packet.
                 const auto* strmout = reinterpret_cast<const PM4CmdStrmoutBufferUpdate*>(header);
+                // Not DstAddress()/SrcAddress(): they leave the dword address fields unshifted.
+                const VAddr dst = u64(strmout->dst_address_lo.Value()) << 2 |
+                                  u64(strmout->dst_address_hi & 0xFFFF) << 32;
+                const VAddr src = u64(strmout->src_address_lo.Value()) << 2 |
+                                  u64(strmout->src_address_hi & 0xFFFF) << 32;
+                const auto source = strmout->source_select.Value();
+                // data_type is the unit of the offset loaded (packet or memory), 1 = bytes. The
+                // filled size is stored in bytes either way, as Mesa's r600 (no data_type) and
+                // radeonsi use it.
+                const bool bytes = strmout->data_type.Value() != 0;
+                Vulkan::Rasterizer::StreamOutUpdate update{
+                    .store_address = strmout->update_memory.Value() ? dst : 0,
+                    .load_address = source == SourceSelect::SrcAddress && bytes ? src : 0,
+                    .buffer = strmout->buffer_select.Value(),
+                    .offset = bytes ? strmout->buffer_offset : strmout->buffer_offset * 4,
+                    .set_offset = source == SourceSelect::BufferOffset,
+                };
                 static std::mutex strmout_lock;
                 static std::unordered_set<u32> strmout_described;
-                static u64 strmout_packets;
-                std::scoped_lock guard{strmout_lock};
-                if (strmout_described.insert(strmout->control).second) {
-                    const u64 dst = u64(strmout->dst_address_lo.Value()) << 2 |
-                                    u64(strmout->dst_address_hi & 0xFFFF) << 32;
-                    const u64 src = u64(strmout->src_address_lo.Value()) << 2 |
-                                    u64(strmout->src_address_hi & 0xFFFF) << 32;
-                    LOG_WARNING(Render_Vulkan,
-                                "Unimplemented IT_STRMOUT_BUFFER_UPDATE control {:#x}: buffer {}, "
-                                "update_memory {} (dst {:#x}), source_select {} (buffer_offset "
-                                "{:#x}, src {:#x}), data_type {}",
-                                strmout->control, strmout->buffer_select.Value(),
-                                strmout->update_memory.Value(), dst,
-                                magic_enum::enum_name(strmout->source_select.Value()),
-                                strmout->buffer_offset, src, strmout->data_type.Value());
+                if (std::scoped_lock guard{strmout_lock};
+                    strmout_described.insert(strmout->control).second) {
+                    LOG_INFO(Render_Vulkan,
+                             "IT_STRMOUT_BUFFER_UPDATE control {:#x}: buffer {}, update_memory {} "
+                             "(dst {:#x}), source_select {} (buffer_offset {:#x}, src {:#x}), "
+                             "data_type {}",
+                             strmout->control, strmout->buffer_select.Value(),
+                             strmout->update_memory.Value(), dst, magic_enum::enum_name(source),
+                             strmout->buffer_offset, src, strmout->data_type.Value());
+                    if (source == SourceSelect::SrcAddress && !bytes) {
+                        LOG_WARNING(Render_Vulkan,
+                                    "Unimplemented IT_STRMOUT_BUFFER_UPDATE offset from memory in "
+                                    "dwords: the write offset stays where it was");
+                    }
                 }
-                if (++strmout_packets % 5000 == 0) {
-                    LOG_WARNING(Render_Vulkan, "IT_STRMOUT_BUFFER_UPDATE packets so far: {}",
-                                strmout_packets);
+                // VgtStrmoutBufferFilledSize and None leave the offset: the counter already
+                // holds where the last capture ended, which is that filled size.
+                if (!rasterizer || (!update.store_address && !update.load_address &&
+                                    !update.set_offset)) {
+                    break;
+                }
+                rasterizer->RunInOrder(&RunStreamOutUpdate, &update, sizeof(update),
+                                       BbToggle::PipelinedMemoryWrites, update.load_address != 0);
+                if (update.store_address) {
+                    rasterizer->NotePendingGpuWrite(update.store_address, sizeof(u32));
                 }
                 break;
             }

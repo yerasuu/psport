@@ -265,6 +265,15 @@ public:
     [[nodiscard]] bool FragmentMotion() const {
         return sw_stage == SwStage::Fragment && runtime_info.hw.fs.motion_vectors;
     }
+    // bbport: GS stream-out (DefineXfbOutputs). Each output holds num_comps components of param
+    // output_params[param] from first_comp on, copied there before every emitted vertex.
+    struct XfbOutput {
+        Id id;
+        u32 param;
+        u32 first_comp;
+        u32 num_comps;
+    };
+    boost::container::small_vector<XfbOutput, 4> xfb_outputs;
     Id base_vertex{};
     Id base_instance{};
     Id frag_coord{};
@@ -427,6 +436,7 @@ private:
     void DefineInputs();
     void DefineVertexBlock();
     void DefineOutputs();
+    void DefineXfbOutputs();
     void DefinePushDataBlock();
     void DefineBuffers();
     void DefineImagesAndSamplers();

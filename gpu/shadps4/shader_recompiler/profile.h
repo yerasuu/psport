@@ -11,6 +11,8 @@ struct Profile {
     u32 max_viewport_width{};
     u32 max_viewport_height{};
     u32 max_shared_memory_size{};
+    u32 max_geometry_output_components{};
+    u32 max_geometry_total_output_components{};
     u32 supported_spirv{0x00010000};
     u32 subgroup_size{};
     u32 sparse_page_shift{};
@@ -44,6 +46,7 @@ struct Profile {
     bool supports_amd_shader_explicit_vertex_parameter{};
     bool supports_fragment_shader_barycentric{};
     bool supports_shader_subgroup_clock{};
+    bool supports_transform_feedback{};
     bool has_broken_spirv_clamp{};
     bool lower_left_origin_mode{};
     bool needs_manual_interpolation{};

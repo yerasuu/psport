@@ -232,6 +232,31 @@ public:
         return provoking_vertex;
     }
 
+    /// Returns true when VK_EXT_transform_feedback is supported with the transformFeedback feature.
+    bool IsTransformFeedbackSupported() const {
+        return transform_feedback;
+    }
+
+    /// Returns true when VK_EXT_transform_feedback also supports streams other than stream 0.
+    bool IsTransformFeedbackGeometryStreamsSupported() const {
+        return transform_feedback && transform_feedback_features.geometryStreams;
+    }
+
+    /// Usage for buffers stream-out may write or count into: none without transform feedback, as
+    /// the usage bits are invalid then.
+    vk::BufferUsageFlags GetTransformFeedbackBufferUsage() const {
+        if (!transform_feedback) {
+            return {};
+        }
+        return vk::BufferUsageFlagBits::eTransformFeedbackBufferEXT |
+               vk::BufferUsageFlagBits::eTransformFeedbackCounterBufferEXT;
+    }
+
+    /// Valid only when IsTransformFeedbackSupported().
+    const vk::PhysicalDeviceTransformFeedbackPropertiesEXT& GetTransformFeedbackProperties() const {
+        return transform_feedback_props;
+    }
+
     /// Returns true when VK_AMD_shader_image_load_store_lod is supported.
     bool IsImageLoadStoreLodSupported() const {
         return image_load_store_lod;
@@ -410,6 +435,17 @@ public:
         return properties.limits.maxComputeSharedMemorySize;
     }
 
+    /// Returns the maximum number of output components of one geometry shader vertex.
+    u32 MaxGeometryOutputComponents() const {
+        return properties.limits.maxGeometryOutputComponents;
+    }
+
+    /// Returns the maximum number of output components of all vertices one geometry shader
+    /// invocation emits.
+    u32 MaxGeometryTotalOutputComponents() const {
+        return properties.limits.maxGeometryTotalOutputComponents;
+    }
+
     /// Returns the maximum sampler LOD bias.
     float MaxSamplerLodBias() const {
         return properties.limits.maxSamplerLodBias;
@@ -556,6 +592,7 @@ private:
     vk::PhysicalDeviceVulkan12Properties vk12_props;
     vk::PhysicalDeviceVulkan13Properties vk13_props;
     vk::PhysicalDevicePushDescriptorPropertiesKHR push_descriptor_props;
+    vk::PhysicalDeviceTransformFeedbackPropertiesEXT transform_feedback_props;
     vk::PhysicalDeviceFeatures features;
     vk::PhysicalDeviceVulkan12Features vk12_features;
     vk::PhysicalDeviceVulkan13Features vk13_features;
@@ -565,6 +602,7 @@ private:
         workgroup_memory_explicit_layout_features;
     vk::PhysicalDeviceImage2DViewOf3DFeaturesEXT image_2d_view_of_3d_features;
     vk::PhysicalDevicePrimitiveTopologyListRestartFeaturesEXT list_restart_features;
+    vk::PhysicalDeviceTransformFeedbackFeaturesEXT transform_feedback_features;
     vk::PhysicalDeviceShaderClockFeaturesKHR shader_clock_features;
     vk::PhysicalDeviceComputeShaderDerivativesFeaturesKHR compute_shader_derivatives_features;
     vk::DriverIdKHR driver_id;
@@ -592,6 +630,7 @@ private:
     bool vertex_input_dynamic_state{};
     bool list_restart{};
     bool provoking_vertex{};
+    bool transform_feedback{};
     bool shader_stencil_export{};
     bool image_load_store_lod{};
     bool amd_gcn_shader{};

@@ -45,6 +45,10 @@ bool LayerMemory();
 /// The external memory handle type of the chunks (dma-buf or imported host memory): buffers bound
 /// to them (the arena, chunk buffers) are created with it. Valid after Usable().
 vk::ExternalMemoryHandleTypeFlagBits HandleType();
+/// Transform feedback usage for buffers the GPU binds over guest memory: the instance's, unless
+/// the driver reports that the chunks' external memory type loses a feature with it (the arena and
+/// chunk buffers then go without, as before). Stream-out must check it before writing to them.
+vk::BufferUsageFlags TransformFeedbackUsage(const Vulkan::Instance& instance);
 /// Hands the runtime direct memory chunks from now on (when enabled and supported).
 void Install(const Vulkan::Instance& instance);
 /// The chunk holding direct memory address `phys`, or null.

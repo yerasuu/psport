@@ -126,6 +126,11 @@ struct Info : InfoPersistent {
 
     ReadConstType readconst_types{};
     CopyShaderData gs_copy_data;
+    /// bbport: stride in bytes of transform feedback buffer 0 the GS module just translated
+    /// captures stream-out with, 0 when it has no transform feedback outputs. Only the translation
+    /// this Info was passed to sets it, and a program keeps the Info of its first permutation, so
+    /// the pipeline cache reads it per permutation from StageSpecialization::xfb_stride.
+    u32 xfb_stride{};
     u32 uses_patches{};
 
     VAddr pgm_base;

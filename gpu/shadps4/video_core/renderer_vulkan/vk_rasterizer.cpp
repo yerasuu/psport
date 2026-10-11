@@ -788,6 +788,7 @@ struct DrawPacket {
     u32 num_vsharps; ///< V#s of the vertex streams, after the indirect arguments
     u32 pad;
     u64 ring_end; ///< constant ring position after this packet's copies
+    AmdGpu::Buffer strmout_sharp; ///< stream-out buffer 0's V#, zero unless the draw captures
 };
 struct PacketStage {
     const Shader::Info* info;
@@ -1173,6 +1174,17 @@ void Rasterizer::PostDraw(const Pipeline* pipeline, const PreparedDraw* used_pre
             NotePendingRead(index_address, index_bytes);
         }
     }
+    // Read here like the vertex streams' V#s: its table may be constant engine memory that a
+    // later dump rewrites before the recording thread gets to the draw (issue #44).
+    AmdGpu::Buffer strmout_sharp{};
+    if (pipeline && !pipeline->IsCompute()) {
+        const auto& regs = liverpool->regs;
+        const auto& graphics = *static_cast<const GraphicsPipeline*>(pipeline);
+        if (const auto* gs = StreamOutStage(graphics, regs)) {
+            strmout_sharp = ReadStreamOutSharp(*gs, regs);
+            NotePendingGpuWrite(strmout_sharp.base_address, StreamOutSize(strmout_sharp, regs));
+        }
+    }
     size += AlignPacket(u32(vsharps.size() * sizeof(AmdGpu::Buffer)));
     const u32 interval = VerifyInterval();
     const bool verify = interval && (draw_pipe->packets % interval) == 0;
@@ -1199,6 +1211,7 @@ void Rasterizer::PostDraw(const Pipeline* pipeline, const PreparedDraw* used_pre
     packet.db_extent = liverpool->last_db_extent;
     packet.ring_end = constant_ring ? constant_ring->Position() : 0;
     packet.num_vsharps = static_cast<u32>(vsharps.size());
+    packet.strmout_sharp = strmout_sharp;
     out += sizeof(DrawPacket);
     std::memcpy(out, blocks.data(), num_blocks * sizeof(u16));
     out += AlignPacket(num_blocks * sizeof(u16));
@@ -1348,6 +1361,7 @@ void Rasterizer::RunDrawPacket(void* context, const u8* data, u32 size) {
         in += AlignPacket(sizeof(IndirectDraw));
     }
     self.packet_vsharps = {reinterpret_cast<const AmdGpu::Buffer*>(in), packet.num_vsharps};
+    self.packet_strmout = packet.strmout_sharp;
     in += AlignPacket(u32(packet.num_vsharps * sizeof(AmdGpu::Buffer)));
     if (packet.verify) {
         // The resource tables the GPU thread walked must read the same now: else a write
@@ -1590,6 +1604,163 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset, const PreparedDraw* pre
     DrawRecord(pipeline, used_prepared, is_indexed, index_offset);
 }
 
+const Shader::Info* Rasterizer::StreamOutStage(const GraphicsPipeline& pipeline,
+                                               const AmdGpu::Regs& regs) const {
+    // Exactly the pipelines whose GS module declares the Xfb execution mode: beginning transform
+    // feedback with any other bound pipeline is invalid.
+    if (!regs.vgt_strmout_config.streamout_0_en || pipeline.GetXfbStride() == 0) {
+        return nullptr;
+    }
+    const auto* gs = pipeline.GetStages()[u32(Shader::SwStage::Geometry)];
+    if (!gs) {
+        return nullptr;
+    }
+    const auto& copy = gs->gs_copy_data;
+    if (!copy.stream_out_parsed || copy.stream_out_stores.empty() ||
+        copy.stream_out_buffers.empty()) {
+        return nullptr;
+    }
+    return gs;
+}
+
+AmdGpu::Buffer Rasterizer::ReadStreamOutSharp(const Shader::Info& gs,
+                                              const AmdGpu::Regs& regs) const {
+    const auto& source = gs.gs_copy_data.stream_out_buffers[0];
+    const auto& user_data = regs.vs_program.user_data;
+    const u32 sgpr = source.sgpr_pair * 2;
+    if (sgpr + 1 >= user_data.size()) {
+        return {};
+    }
+    const VAddr address =
+        (u64(user_data[sgpr]) | u64(user_data[sgpr + 1]) << 32) + source.byte_offset;
+    AmdGpu::Buffer sharp{};
+    if (!memory->IsValidGpuMapping(address, sizeof(sharp)) ||
+        memory->ClampRangeSize(address, sizeof(sharp)) != sizeof(sharp)) {
+        return {};
+    }
+    memory->CopySparseMemory(address, reinterpret_cast<u8*>(&sharp), sizeof(sharp));
+    return sharp;
+}
+
+u64 Rasterizer::StreamOutSize(const AmdGpu::Buffer& sharp, const AmdGpu::Regs& regs) const {
+    const VAddr base = sharp.base_address;
+    // Not GetSize(): its u32 product wraps for the huge num_records stream-out V#s may carry.
+    const u64 sharp_size =
+        sharp.stride == 0 ? sharp.num_records : sharp.stride * u64(sharp.num_records);
+    const u64 size = std::min<u64>(sharp_size, u64(regs.vgt_strmout_buffers[0].size) * 4);
+    if (base == 0 || size == 0 || !memory->IsValidGpuMapping(base, size)) {
+        return 0;
+    }
+    return memory->ClampRangeSize(base, size);
+}
+
+bool Rasterizer::ObtainStreamOut(const GraphicsPipeline* pipeline, StreamOutBinding& out) {
+    out = {};
+    const auto& regs = Regs();
+    const auto* gs = StreamOutStage(*pipeline, regs);
+    if (!gs) {
+        return true;
+    }
+    const auto skip = [&](const char* why) {
+        static std::unordered_set<const char*> described;
+        if (described.insert(why).second) {
+            LOG_WARNING(Render_Vulkan, "Skipped a GS draw capturing stream-out (GS {:#x}): {}",
+                        gs->pgm_hash, why);
+        }
+        if (++strmout_skipped % 5000 == 0) {
+            LOG_WARNING(Render_Vulkan, "GS draws capturing stream-out skipped so far: {}",
+                        strmout_skipped);
+        }
+        return false;
+    };
+    // The translation captures buffer 0 only; a store to another would go nowhere bound.
+    for (const auto& store : gs->gs_copy_data.stream_out_stores) {
+        if (store.buffer != 0) {
+            return skip("the copy shader writes a stream-out buffer other than 0");
+        }
+    }
+    // An in-place arena or chunk buffer over guest memory may lack transform feedback usage.
+    if (VideoCore::GuestInPlace() && !BbGuestMemory::TransformFeedbackUsage(instance)) {
+        return skip("guest memory buffers have no transform feedback usage on this driver");
+    }
+    const auto sharp = DrawPipe::OnStageB() ? packet_strmout : ReadStreamOutSharp(*gs, regs);
+    // Bound from the V# base: the write offset is the counter's (StreamOutCounters), which is what
+    // VGT_STRMOUT_BUFFER_OFFSET holds and the filled size the guest is told, both from the base.
+    const VAddr address = sharp.base_address;
+    const u64 size = StreamOutSize(sharp, regs);
+    if (size == 0) {
+        return skip("the stream-out buffer's V# or size leaves nothing to write");
+    }
+    const auto [buffer, offset] = buffer_cache.ObtainBuffer(address, u32(size), true);
+    if (!buffer || !buffer->Handle()) {
+        return skip("the buffer cache gave no buffer for the stream-out range");
+    }
+    // vkCmdBindTransformFeedbackBuffersEXT takes offsets that are multiples of 4 only.
+    if (offset % 4 != 0) {
+        return skip("the stream-out buffer is not 4-byte aligned");
+    }
+    texture_cache.InvalidateMemoryFromGPU(address, size);
+    const u64 max_size = instance.GetTransformFeedbackProperties().maxTransformFeedbackBufferSize;
+    out = {buffer, offset, std::min<u64>({size, buffer->SizeBytes() - offset, max_size})};
+    return true;
+}
+
+void Rasterizer::PrepareStreamOut(const StreamOutBinding& binding) {
+    if (binding.buffer) {
+        needs_barrier |=
+            runtime.IsBufferAccessed(binding.buffer, binding.offset, binding.size, true);
+        // The previous capture's end, a store of the filled size or a new offset touched it:
+        // begin reads it, end writes it.
+        needs_barrier |= runtime.IsBufferAccessed(StreamOutCounters(), 0, sizeof(u32), true);
+    }
+}
+
+void Rasterizer::NoteStreamOut(const StreamOutBinding& binding) {
+    if (binding.buffer) {
+        runtime.AccessBuffer(binding.buffer, binding.offset, binding.size,
+                             vk::PipelineStageFlagBits2::eTransformFeedbackEXT,
+                             vk::AccessFlagBits2::eTransformFeedbackWriteEXT);
+        runtime.AccessBuffer(StreamOutCounters(), 0, sizeof(u32),
+                             vk::PipelineStageFlagBits2::eTransformFeedbackEXT |
+                                 vk::PipelineStageFlagBits2::eDrawIndirect,
+                             vk::AccessFlagBits2::eTransformFeedbackCounterReadEXT |
+                                 vk::AccessFlagBits2::eTransformFeedbackCounterWriteEXT);
+    }
+}
+
+const VideoCore::Buffer* Rasterizer::StreamOutCounters() {
+    if (!strmout_counters) {
+        constexpr u64 size = sizeof(u32) * 4;
+        strmout_counters = std::make_unique<VideoCore::Buffer>(
+            instance, 0, size, VideoCore::MemoryType::DeviceLocal, "Stream-out counters");
+        runtime.FillBuffer(strmout_counters.get(), 0, size, 0);
+    }
+    return strmout_counters.get();
+}
+
+void Rasterizer::StreamOutBufferUpdate(const StreamOutUpdate& update) {
+    if (!instance.IsTransformFeedbackSupported()) {
+        return; // nothing is captured, and no counter holds a filled size
+    }
+    const auto* counters = StreamOutCounters();
+    const u64 slot = u64(update.buffer) * sizeof(u32);
+    if (update.store_address && IsMapped(update.store_address, sizeof(u32))) {
+        texture_cache.InvalidateMemoryFromGPU(update.store_address, sizeof(u32));
+        const auto [buffer, offset] =
+            buffer_cache.ObtainBuffer(update.store_address, sizeof(u32), true);
+        const vk::BufferCopy copy = {.srcOffset = slot, .dstOffset = offset, .size = sizeof(u32)};
+        runtime.CopyBuffer(counters, buffer, std::span{&copy, 1});
+    }
+    if (update.set_offset) {
+        runtime.FillBuffer(counters, slot, sizeof(u32), update.offset);
+    } else if (update.load_address && IsMapped(update.load_address, sizeof(u32))) {
+        const auto [buffer, offset] =
+            buffer_cache.ObtainBuffer(update.load_address, sizeof(u32), false);
+        const vk::BufferCopy copy = {.srcOffset = offset, .dstOffset = slot, .size = sizeof(u32)};
+        runtime.CopyBuffer(buffer, counters, std::span{&copy, 1});
+    }
+}
+
 void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw* used_prepared,
                             bool is_indexed, u32 index_offset) {
     BB_SECTION(DrawRecord);
@@ -1640,6 +1811,11 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
                          UiComposition::NativeViewport(viewport.xscale * 2, viewport.yscale * 2));
     }
     const PreparedDraw* draw_prepared = bind_prepared;
+    StreamOutBinding strmout;
+    if (!ObtainStreamOut(pipeline, strmout)) {
+        bind_prepared = nullptr;
+        return;
+    }
     // bbport: vertex and index buffers are resolved while the helper binds textures (their
     // commands are recorded after BeginRendering, as before).
     draw_inputs = {pipeline, draw_prepared, index_offset, is_indexed, true, false};
@@ -1662,6 +1838,7 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
     if (is_indexed) {
         EmitIndexBuffer();
     }
+    PrepareStreamOut(strmout);
 
     if (needs_barrier) {
         runtime.FlushBarriers();
@@ -1787,14 +1964,28 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
         .program = {vs_info.ProgramBase(), ps_info ? ps_info->ProgramBase() : 0},
         .count = {num_indices, num_instances, 0},
     };
+    const vk::Buffer xfb_buffer = strmout.buffer ? strmout.buffer->Handle() : vk::Buffer{};
+    const vk::DeviceSize xfb_offset = strmout.offset;
+    const vk::DeviceSize xfb_size = strmout.size;
+    const vk::Buffer xfb_counter = xfb_buffer ? StreamOutCounters()->Handle() : vk::Buffer{};
+    // One closure with the draw: a chunk boundary or EndRendering cannot fall between the
+    // capture's begin and end, which must stay in the render pass instance the draw is in.
     scheduler.RecordCrumb(crumb, [=](vk::CommandBuffer cmdbuf) {
         cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, handle);
+        if (xfb_buffer) {
+            cmdbuf.bindTransformFeedbackBuffersEXT(0, xfb_buffer, xfb_offset, xfb_size);
+            cmdbuf.beginTransformFeedbackEXT(0, xfb_counter, vk::DeviceSize{0});
+        }
         if (is_indexed) {
             cmdbuf.drawIndexed(num_indices, num_instances, 0, s32(first_vertex), first_instance);
         } else {
             cmdbuf.draw(num_indices, num_instances, first_vertex, first_instance);
         }
+        if (xfb_buffer) {
+            cmdbuf.endTransformFeedbackEXT(0, xfb_counter, vk::DeviceSize{0});
+        }
     });
+    NoteStreamOut(strmout);
     if (FrameCapture::Active()) {
         const auto* ps = pipeline->GetStages()[u32(Shader::SwStage::Fragment)];
         FrameCapture::Draw(vs_info.pgm_hash, ps ? ps->pgm_hash : 0, num_indices, num_instances);
@@ -1868,6 +2059,10 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
                          cb_descs[0].first, db_desc.first,
                          UiComposition::NativeViewport(viewport.xscale * 2, viewport.yscale * 2));
     }
+    StreamOutBinding strmout;
+    if (!ObtainStreamOut(pipeline, strmout)) {
+        return;
+    }
     if (!BindResources(pipeline)) {
         return;
     }
@@ -1888,6 +2083,7 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
         std::tie(count_buffer, count_offset) = buffer_cache.ObtainBuffer(count_address, 4, false);
         needs_barrier |= runtime.IsBufferAccessed(count_buffer, count_offset, 4);
     }
+    PrepareStreamOut(strmout);
 
     if (needs_barrier) {
         runtime.FlushBarriers();
@@ -1925,8 +2121,17 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
         .address = indirect.args,
         .count = {max_count, stride, 0},
     };
+    const vk::Buffer xfb_buffer = strmout.buffer ? strmout.buffer->Handle() : vk::Buffer{};
+    const vk::DeviceSize xfb_offset = strmout.offset;
+    const vk::DeviceSize xfb_size = strmout.size;
+    const vk::Buffer xfb_counter = xfb_buffer ? StreamOutCounters()->Handle() : vk::Buffer{};
+    // As in DrawRecord: the capture's begin and end in the draw's closure.
     scheduler.RecordCrumb(crumb, [=](vk::CommandBuffer cmdbuf) {
         cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, handle);
+        if (xfb_buffer) {
+            cmdbuf.bindTransformFeedbackBuffersEXT(0, xfb_buffer, xfb_offset, xfb_size);
+            cmdbuf.beginTransformFeedbackEXT(0, xfb_counter, vk::DeviceSize{0});
+        }
         if (is_indexed) {
             if (counts) {
                 cmdbuf.drawIndexedIndirectCount(args, args_offset, counts, counts_offset, max_count,
@@ -1939,7 +2144,11 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
         } else {
             cmdbuf.drawIndirect(args, args_offset, max_count, stride);
         }
+        if (xfb_buffer) {
+            cmdbuf.endTransformFeedbackEXT(0, xfb_counter, vk::DeviceSize{0});
+        }
     });
+    NoteStreamOut(strmout);
     DebugState.IncDrawCall();
 
     ResetBindings(false);

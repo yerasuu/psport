@@ -830,12 +830,13 @@ void Runtime::AccessBuffer(const VideoCore::Buffer* handle, u64 offset, u64 size
         vk::AccessFlagBits2::eUniformRead | vk::AccessFlagBits2::eShaderRead |
         vk::AccessFlagBits2::eColorAttachmentRead |
         vk::AccessFlagBits2::eDepthStencilAttachmentRead | vk::AccessFlagBits2::eTransferRead |
-        vk::AccessFlagBits2::eMemoryRead;
+        vk::AccessFlagBits2::eMemoryRead | vk::AccessFlagBits2::eTransformFeedbackCounterReadEXT;
 
     constexpr static vk::AccessFlags2 WRITE_MASK =
         vk::AccessFlagBits2::eShaderWrite | vk::AccessFlagBits2::eColorAttachmentWrite |
         vk::AccessFlagBits2::eDepthStencilAttachmentWrite | vk::AccessFlagBits2::eTransferWrite |
-        vk::AccessFlagBits2::eMemoryWrite | vk::AccessFlagBits2::eTransformFeedbackWriteEXT;
+        vk::AccessFlagBits2::eMemoryWrite | vk::AccessFlagBits2::eTransformFeedbackWriteEXT |
+        vk::AccessFlagBits2::eTransformFeedbackCounterWriteEXT;
 
     // bbport: reads are tracked at 4 KiB granularity. Constant data comes from ring allocations
     // at a new offset every draw; rounded, they land in ranges already present and the

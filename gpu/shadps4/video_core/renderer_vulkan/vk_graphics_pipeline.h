@@ -79,6 +79,8 @@ public:
         std::vector<u32> tcs{};
         std::vector<u32> tes{};
         std::vector<u32> fragment{};
+        /// bbport: GetXfbStride, saved because a preloaded pipeline has no runtime infos.
+        u32 xfb_stride{};
 
         void Serialize(Serialization::Archive& ar) const;
         bool Deserialize(Serialization::Archive& ar);
@@ -102,6 +104,15 @@ public:
         return key;
     }
 
+    /// bbport: stride in bytes of transform feedback buffer 0, which the GS captures its copy
+    /// shader's stream-out into (vertex records in emission order, as the copy shader writes
+    /// them); 0 when it captures nothing. Nonzero only while the draw's stream-out setup asks for
+    /// exactly this capture (HwGeometryRuntimeInfo::xfb_stride); a stream-out GS that can't capture
+    /// is never selected (PipelineCache::RefreshGraphicsStages).
+    u32 GetXfbStride() const noexcept {
+        return xfb_stride;
+    }
+
     /// Gets the attributes and bindings for vertex inputs.
     /// bbport: `sharps`, when given, are the V#s of the fetch shader's attributes as the GPU
     /// command thread read them (in the draw packet): the V# tables they come from may have been
@@ -118,6 +129,7 @@ private:
 private:
     GraphicsPipelineKey key;
     std::optional<const Shader::Gcn::FetchShaderData> fetch_shader{};
+    u32 xfb_stride{};
 };
 
 struct ClipDistanceShaderKey {

@@ -150,8 +150,9 @@ public:
 
     const ComputePipeline* GetComputePipeline();
 
+    /// bbport: the last element is the module's StageSpecialization::xfb_stride.
     using Result = std::tuple<const Shader::Info*, vk::ShaderModule,
-                              std::optional<Shader::Gcn::FetchShaderData>, u64>;
+                              std::optional<Shader::Gcn::FetchShaderData>, u64, u32>;
     Result GetProgram(PipelineSelection& sel, Shader::HwStage stage, Shader::SwStage l_stage,
                       const Shader::ShaderParams& params, Shader::Backend::Bindings& binding);
 

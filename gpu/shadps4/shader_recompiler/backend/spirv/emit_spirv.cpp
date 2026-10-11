@@ -323,6 +323,9 @@ void SetupCapabilities(const Info& info, const Profile& profile, const RuntimeIn
     }
     if (stage == SwStage::Geometry) {
         ctx.AddCapability(spv::Capability::Geometry);
+        if (info.xfb_stride != 0) {
+            ctx.AddCapability(spv::Capability::TransformFeedback);
+        }
     }
     if (info.hw_stage == HwStage::Fragment) {
         if (profile.supports_amd_shader_explicit_vertex_parameter) {
@@ -439,6 +442,9 @@ void DefineEntryPoint(const Info& info, EmitContext& ctx, Id main) {
                              ctx.runtime_info.hw.gs.output_vertices);
         ctx.AddExecutionMode(main, spv::ExecutionMode::Invocations,
                              ctx.runtime_info.hw.gs.num_invocations);
+        if (info.xfb_stride != 0) {
+            ctx.AddExecutionMode(main, spv::ExecutionMode::Xfb);
+        }
         break;
     default:
         UNREACHABLE_MSG("Stage {}", u32(info.hw_stage));

@@ -593,7 +593,8 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
         .flags =
             vk::BufferCreateFlagBits::eSparseBinding | vk::BufferCreateFlagBits::eSparseResidency,
         .size = ARENA_PAGE_SIZE,
-        .usage = ARENA_USAGE,
+        .usage = ARENA_USAGE | (GuestInPlace() ? BbGuestMemory::TransformFeedbackUsage(instance)
+                                               : instance.GetTransformFeedbackBufferUsage()),
         .sharingMode = shared ? vk::SharingMode::eConcurrent : vk::SharingMode::eExclusive,
         .queueFamilyIndexCount = shared ? 2u : 0u,
         .pQueueFamilyIndices = shared ? families.data() : nullptr,

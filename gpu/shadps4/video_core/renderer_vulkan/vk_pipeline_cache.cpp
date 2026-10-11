@@ -108,6 +108,28 @@ static u32 MapOutputs(std::span<Shader::OutputMap, 3> outputs, const AmdGpu::VsO
     return num_outputs;
 }
 
+// bbport: the stream-out setups transform feedback reproduces: stream 0 alone, also the
+// rasterized one, written to buffer 0 alone by an off-chip GS's copy shader. Vulkan captures one
+// rasterization stream's outputs in emission order, which is the order the copy shader writes
+// records in; other streams, several buffers and on-chip GS have no such one-to-one mapping.
+static u32 StreamOutXfbStride(const AmdGpu::Regs& regs, const Instance& instance) {
+    const auto& config = regs.vgt_strmout_config;
+    if (!instance.IsTransformFeedbackSupported() || !config.streamout_0_en ||
+        (config.raw & 0xe) != 0 || config.rast_stream != 0 || config.use_rast_stream_mask ||
+        regs.vgt_strmout_buffer_config.stream_0_buf_en != 1 || regs.vgt_gs_mode.onchip != 0) {
+        return 0;
+    }
+    const u32 stride = regs.vgt_strmout_buffers[0].vtx_stride * 4;
+    // Every captured offset lies within the stride, so bounding it bounds all per-vertex limits.
+    const auto& props = instance.GetTransformFeedbackProperties();
+    if (stride == 0 || stride > props.maxTransformFeedbackBufferDataStride ||
+        stride > props.maxTransformFeedbackBufferDataSize ||
+        stride > props.maxTransformFeedbackStreamDataSize) {
+        return 0;
+    }
+    return stride;
+}
+
 const Shader::RuntimeInfo& PipelineCache::BuildRuntimeInfo(PipelineSelection& sel, HwStage stage,
                                                              SwStage l_stage) {
     auto& info = sel.runtime_infos[u32(l_stage)];
@@ -171,6 +193,7 @@ const Shader::RuntimeInfo& PipelineCache::BuildRuntimeInfo(PipelineSelection& se
         const auto params_vc = AmdGpu::GetParams(regs.vs_program);
         info.hw.gs.vs_copy = params_vc.code;
         info.hw.gs.vs_copy_hash = params_vc.hash;
+        info.hw.gs.xfb_stride = StreamOutXfbStride(regs, instance);
         DumpShader(info.hw.gs.vs_copy, info.hw.gs.vs_copy_hash, Shader::HwStage::Vertex, 0,
                    "copy.bin");
         break;
@@ -299,6 +322,8 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
         .max_viewport_width = instance.GetMaxViewportWidth(),
         .max_viewport_height = instance.GetMaxViewportHeight(),
         .max_shared_memory_size = instance.MaxComputeSharedMemorySize(),
+        .max_geometry_output_components = instance.MaxGeometryOutputComponents(),
+        .max_geometry_total_output_components = instance.MaxGeometryTotalOutputComponents(),
         .supported_spirv = SpirvVersion1_6,
         .subgroup_size = instance.SubgroupSize(),
         .sparse_page_shift = sparse_page_shift,
@@ -340,6 +365,7 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
             instance_.IsAmdShaderExplicitVertexParameterSupported(),
         .supports_fragment_shader_barycentric = instance_.IsFragmentShaderBarycentricSupported(),
         .supports_shader_subgroup_clock = instance_.IsShaderSubgroupClockSupported(),
+        .supports_transform_feedback = instance_.IsTransformFeedbackSupported(),
         .needs_manual_interpolation = instance.IsFragmentShaderBarycentricSupported() &&
                                       instance.GetDriverID() == vk::DriverId::eNvidiaProprietary,
         // bbport: older NVIDIA (Pascal) has no barycentrics; BB_INTERP_INT_FIX=0/1 overrides.
@@ -902,11 +928,12 @@ bool PipelineCache::RefreshGraphicsKey(PipelineSelection& sel) {
 
 // bbport: which geometry-shader setups the translator still skips, and how often. Each distinct
 // setup (stream-out streams and buffers, on-chip mode, GS program) is described once; the skipped
-// draws are counted, every 5000 reported. What to implement first is read off this.
-static bool SkipUnsupportedGeometry(const AmdGpu::Regs& regs, const char* stages) {
+// draws are counted, every 5000 reported. What to implement first is read off this. Stream-out
+// that transform feedback reproduces (StreamOutXfbStride) goes through.
+static bool SkipUnsupportedGeometry(const AmdGpu::Regs& regs, const Instance& instance, const char* stages) {
     const bool onchip = regs.vgt_gs_mode.onchip != 0;
     const u32 strmout = regs.vgt_strmout_config.raw;
-    if (!onchip && !strmout) {
+    if ((!onchip && !strmout) || StreamOutXfbStride(regs, instance) != 0) {
         return false;
     }
     static std::mutex lock;
@@ -971,6 +998,7 @@ bool PipelineCache::RefreshGraphicsStages(PipelineSelection& sel) {
     sel.fetch_shader = std::nullopt;
 
     Shader::Backend::Bindings binding{};
+    u32 bound_xfb_stride{};
     const auto bind_stage = [&](HwStage stage_in, SwStage stage_out) -> bool {
         const auto stage_in_idx = static_cast<u32>(stage_in);
         const auto stage_out_idx = static_cast<u32>(stage_out);
@@ -990,12 +1018,21 @@ bool PipelineCache::RefreshGraphicsStages(PipelineSelection& sel) {
         const auto params = AmdGpu::GetParams(*pgm);
         std::optional<Shader::Gcn::FetchShaderData> fetch_shader_;
         std::tie(sel.infos[stage_out_idx], sel.modules[stage_out_idx], fetch_shader_,
-                 key.stage_hashes[stage_out_idx]) =
+                 key.stage_hashes[stage_out_idx], bound_xfb_stride) =
             GetProgram(sel, stage_in, stage_out, params, binding);
         if (fetch_shader_) {
             sel.fetch_shader = fetch_shader_;
         }
         return true;
+    };
+
+    // bbport: a stream-out GS whose module came out without transform feedback (the copy
+    // shader's stores didn't map onto it) must not draw: the vertices later draws read back would
+    // not be written. The emitter logs why. Called right after the GS is bound, so
+    // bound_xfb_stride is that permutation's.
+    const auto loses_stream_out = [&] {
+        const u32 stride = sel.runtime_infos[u32(SwStage::Geometry)].hw.gs.xfb_stride;
+        return stride != 0 && bound_xfb_stride != stride;
     };
 
     sel.infos.fill(nullptr);
@@ -1013,13 +1050,13 @@ bool PipelineCache::RefreshGraphicsStages(PipelineSelection& sel) {
             LOG_WARNING(Render_Vulkan, "Geometry shader stage unsupported, skipping");
             return false;
         }
-        if (SkipUnsupportedGeometry(regs, "ES-GS")) {
+        if (SkipUnsupportedGeometry(regs, instance, "ES-GS")) {
             return false;
         }
         if (!bind_stage(HwStage::Export, SwStage::Vertex)) {
             return false;
         }
-        if (!bind_stage(HwStage::Geometry, SwStage::Geometry)) {
+        if (!bind_stage(HwStage::Geometry, SwStage::Geometry) || loses_stream_out()) {
             return false;
         }
         break;
@@ -1045,7 +1082,7 @@ bool PipelineCache::RefreshGraphicsStages(PipelineSelection& sel) {
             LOG_WARNING(Render_Vulkan, "Geometry shader stage unsupported, skipping");
             return false;
         }
-        if (SkipUnsupportedGeometry(regs, "LS-HS-ES-GS")) {
+        if (SkipUnsupportedGeometry(regs, instance, "LS-HS-ES-GS")) {
             return false;
         }
         if (!bind_stage(HwStage::Hull, SwStage::TessellationControl)) {
@@ -1057,7 +1094,7 @@ bool PipelineCache::RefreshGraphicsStages(PipelineSelection& sel) {
         if (!bind_stage(HwStage::Local, SwStage::Vertex)) {
             return false;
         }
-        if (!bind_stage(HwStage::Geometry, SwStage::Geometry)) {
+        if (!bind_stage(HwStage::Geometry, SwStage::Geometry) || loses_stream_out()) {
             return false;
         }
         break;
@@ -1091,7 +1128,7 @@ bool PipelineCache::RefreshComputeKey() {
     Shader::Backend::Bindings binding{};
     const auto& cs_pgm = liverpool->GetCsRegs();
     const auto cs_params = AmdGpu::GetParams(cs_pgm);
-    std::tie(sel.infos[0], sel.modules[0], sel.fetch_shader, compute_key.value) =
+    std::tie(sel.infos[0], sel.modules[0], sel.fetch_shader, compute_key.value, std::ignore) =
         GetProgram(sel, HwStage::Compute, SwStage::Compute, cs_params, binding);
     return true;
 }
@@ -1172,7 +1209,7 @@ PipelineCache::Result PipelineCache::GetProgram(PipelineSelection& sel, HwStage 
         worker.stages.push_back(
             {program, params.hash, hw_stage, info.pgm_base, &info.flattened_ud_buf});
         return std::make_tuple(&info, it->module, it->spec.fetch_shader_data,
-                               HashCombine(params.hash, perm_idx));
+                               HashCombine(params.hash, perm_idx), it->spec.xfb_stride);
     }
 
     auto it_pgm = program_cache.find(params.hash); // this thread is the only writer
@@ -1182,6 +1219,7 @@ PipelineCache::Result PipelineCache::GetProgram(PipelineSelection& sel, HwStage 
         const auto module =
             CompileModule(new_program->info, runtime_info, params.code, 0, binding);
         auto spec = Shader::StageSpecialization(new_program->info, runtime_info, profile, start);
+        spec.xfb_stride = new_program->info.xfb_stride;
         const auto perm_hash = HashCombine(params.hash, 0);
 
         RegisterShaderMeta(new_program->info, spec.fetch_shader_data, spec, perm_hash, 0);
@@ -1193,7 +1231,7 @@ PipelineCache::Result PipelineCache::GetProgram(PipelineSelection& sel, HwStage 
             program_cache.emplace(params.hash, std::move(new_program));
         }
         return std::make_tuple(&program->info, module, program->modules[0].spec.fetch_shader_data,
-                               perm_hash);
+                               perm_hash, program->modules[0].spec.xfb_stride);
     }
 
     auto& program = it_pgm.value();
@@ -1224,6 +1262,7 @@ PipelineCache::Result PipelineCache::GetProgram(PipelineSelection& sel, HwStage 
     if (it == program->modules.end()) {
         auto new_info = Shader::Info(hw_stage, sw_stage, params);
         module = CompileModule(new_info, runtime_info, params.code, perm_idx, binding);
+        spec.xfb_stride = new_info.xfb_stride;
 
         RegisterShaderMeta(info, spec.fetch_shader_data, spec, perm_hash, perm_idx);
         std::unique_lock lk{programs_mutex};
@@ -1235,7 +1274,8 @@ PipelineCache::Result PipelineCache::GetProgram(PipelineSelection& sel, HwStage 
         perm_hash = HashCombine(params.hash, perm_idx);
     }
     return std::make_tuple(&program->info, module,
-                           program->modules[perm_idx].spec.fetch_shader_data, perm_hash);
+                           program->modules[perm_idx].spec.fetch_shader_data, perm_hash,
+                           program->modules[perm_idx].spec.xfb_stride);
 }
 
 std::optional<vk::ShaderModule> PipelineCache::ReplaceShader(vk::ShaderModule module,
