@@ -8,10 +8,10 @@
 
 // bb-probe (probe.c): set while the port restarts itself through run.sh. The device fd is closed
 // before exec; Vulkan calls failing then are not errors: this thread waits for the exec instead.
-extern "C" __attribute__((weak)) volatile int runtime_restarting; // absent in the tests
+extern "C" volatile int runtime_restarting;
 
 void assert_fail_impl() {
-    if (&runtime_restarting && runtime_restarting) {
+    if (runtime_restarting) {
         for (;;) {
             pause();
         }

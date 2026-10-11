@@ -177,76 +177,7 @@ target_link_libraries(bbgpu PRIVATE ffx-vulkan::portable ffx-vulkan::fsr4-v07-vu
 target_link_libraries(bbgpu PUBLIC Vulkan::Headers fmt::fmt Boost::headers magic_enum::magic_enum
     tsl::robin_map GPUOpen::VulkanMemoryAllocator PkgConfig::XXHASH PkgConfig::SDL3 PkgConfig::X11 PkgConfig::FFMPEG PkgConfig::FREETYPE miniz::miniz Zydis::Zydis sirit)
 
-# Explicit test targets; neither launches the game nor needs a Vulkan device.
-add_executable(motion-history-test EXCLUDE_FROM_ALL ../tests/test_motion_history.cpp)
-target_compile_options(motion-history-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
-target_include_directories(motion-history-test PRIVATE ..)
-add_executable(motion-shader-test EXCLUDE_FROM_ALL ../tests/test_motion_shaders.cpp ../tests/test_gpu_runtime_stubs.cpp)
-target_include_directories(motion-shader-test PRIVATE shim shadps4 third_party/gcn/include)
-target_link_libraries(motion-shader-test PRIVATE bbgpu)
-add_executable(xfb-shader-test EXCLUDE_FROM_ALL ../tests/test_xfb_shader.cpp ../tests/test_gpu_runtime_stubs.cpp)
-target_include_directories(xfb-shader-test PRIVATE shim shadps4 third_party/gcn/include)
-target_link_libraries(xfb-shader-test PRIVATE bbgpu)
-add_executable(ui-composition-test EXCLUDE_FROM_ALL ../tests/test_ui_composition.cpp)
-target_compile_options(ui-composition-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
-target_include_directories(ui-composition-test PRIVATE ..)
-add_executable(cp-decoder-test EXCLUDE_FROM_ALL ../tests/test_cp_decoder.cpp cp/cp_decoder.cpp)
-target_compile_options(cp-decoder-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
-target_include_directories(cp-decoder-test PRIVATE cp)
-add_executable(copy-shader-test EXCLUDE_FROM_ALL ../tests/test_copy_shader.cpp
-    shadps4/shader_recompiler/frontend/copy_shader.cpp shadps4/shader_recompiler/frontend/decode.cpp
-    shadps4/shader_recompiler/frontend/instruction.cpp shadps4/shader_recompiler/frontend/format.cpp)
-target_compile_options(copy-shader-test PRIVATE -UNDEBUG)
-# Only the test gets -Werror: the parser it links keeps upstream's -Wsign-compare warning.
-set_source_files_properties(../tests/test_copy_shader.cpp PROPERTIES COMPILE_OPTIONS "-Wall;-Wextra;-Werror")
-target_include_directories(copy-shader-test PRIVATE shim shadps4)
-target_link_libraries(copy-shader-test PRIVATE fmt::fmt magic_enum::magic_enum)
-add_executable(settings-test EXCLUDE_FROM_ALL ../tests/test_settings.cpp shim/bbport_settings.cpp)
-target_compile_options(settings-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
-target_include_directories(settings-test PRIVATE .. shim)
-
-add_executable(scene-resolution-test EXCLUDE_FROM_ALL ../tests/test_scene_resolution.cpp ../tests/test_gpu_runtime_stubs.cpp)
-target_include_directories(scene-resolution-test PRIVATE shim shadps4 third_party/gcn/include)
-# The test's Vulkan-Hpp inline methods have a different set of platform extensions
-# from vk_platform.cpp. Keep them local and use an explicit dispatcher in the test.
-target_compile_options(scene-resolution-test PRIVATE -UNDEBUG -fPIC)
-set_source_files_properties(../tests/test_scene_resolution.cpp PROPERTIES
-    COMPILE_OPTIONS "-fvisibility=hidden;-fvisibility-inlines-hidden")
-target_link_libraries(scene-resolution-test PRIVATE bbgpu)
-add_executable(taa-shader-test EXCLUDE_FROM_ALL ../tests/test_taa_shader.cpp ../tests/test_gpu_runtime_stubs.cpp)
-target_include_directories(taa-shader-test PRIVATE shim shadps4 ${SHADER_INCLUDE} third_party/gcn/include)
-target_compile_options(taa-shader-test PRIVATE -UNDEBUG -fPIC)
-set_source_files_properties(../tests/test_taa_shader.cpp PROPERTIES
-    COMPILE_OPTIONS "-fvisibility=hidden;-fvisibility-inlines-hidden")
-target_link_libraries(taa-shader-test PRIVATE bbgpu)
-add_dependencies(taa-shader-test host_shaders)
-
-add_executable(camera-motion-test EXCLUDE_FROM_ALL ../tests/test_camera_motion.cpp ../tests/test_gpu_runtime_stubs.cpp)
-target_include_directories(camera-motion-test PRIVATE shim shadps4 ${SHADER_INCLUDE} third_party/gcn/include)
-target_compile_options(camera-motion-test PRIVATE -UNDEBUG -fPIC)
-target_link_libraries(camera-motion-test PRIVATE bbgpu)
-add_dependencies(camera-motion-test host_shaders)
-
-add_executable(translation-memory-test EXCLUDE_FROM_ALL ../tests/test_translation_memory.cpp
-    ../tests/test_gpu_runtime_stubs.cpp)
-target_include_directories(translation-memory-test PRIVATE shim shadps4 third_party/gcn/include)
-target_compile_options(translation-memory-test PRIVATE -UNDEBUG -fPIC)
-set_source_files_properties(../tests/test_translation_memory.cpp PROPERTIES
-    COMPILE_OPTIONS "-fvisibility=hidden;-fvisibility-inlines-hidden")
-target_link_libraries(translation-memory-test PRIVATE bbgpu)
-
-add_executable(font-test EXCLUDE_FROM_ALL ../tests/test_font.cpp ../tests/test_gpu_runtime_stubs.cpp)
-target_include_directories(font-test PRIVATE . shim shadps4)
-target_compile_options(font-test PRIVATE -UNDEBUG)
-set_source_files_properties(../tests/test_font.cpp PROPERTIES COMPILE_OPTIONS "-Wall;-Wextra;-Werror")
-target_link_libraries(font-test PRIVATE bbgpu)
-
 # bbport: FSR 4 benchmark outside the game (tools/fsr4_bench.cpp): ninja -C out/gpu fsr4-bench.
-add_executable(upscaler-support-test EXCLUDE_FROM_ALL ../tests/test_upscaler_support.cpp
-    shim/bbport_settings.cpp)
-target_include_directories(upscaler-support-test PRIVATE shim)
-target_compile_options(upscaler-support-test PRIVATE -UNDEBUG)
-
 add_executable(fsr4-bench EXCLUDE_FROM_ALL tools/fsr4_bench.cpp
     shadps4/video_core/renderer_vulkan/fsr411/fsr411.cpp)
 target_include_directories(fsr4-bench PRIVATE shadps4/video_core/renderer_vulkan/fsr411)

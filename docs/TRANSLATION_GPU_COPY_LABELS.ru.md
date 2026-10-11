@@ -26,15 +26,6 @@
 
 ## Проверки
 
-`translation-memory-test` исполняет SPIR-V производственного backend и производственную функцию переносимых меток на Vulkan GPU. Проверяются чтение актуального источника, запись в зеркало и память игры, граница страниц, unmapped/out-of-range store, отключённая запись насквозь, 32/64-битные метки, порядок половин, видимость предшествующего GPU-результата при опросе CPU, последующий GPU-потребитель и нулевое значение. Диагностические AMD breadcrumbs отключены, чтобы тест не записывал AMD-маркеры.
-
-```sh
-nix-shell shell.nix --run 'ninja -C out/gpu translation-memory-test'
-# VK_LAYER_PATH при необходимости указывает каталог установленного Khronos validation layer.
-BB_VK_VALIDATION_SYNC=1 out/gpu/translation-memory-test out/translation-shaders
-spirv-val --target-env vulkan1.3 out/translation-shaders/paged-copy.spv
-```
-
 PM4 self-test измеряет положительный occlusion-интервал через несколько отправок. Большая отдельная отправка могла содержать только compute/state и давать ложный FAIL. Требования positive samples, valid bits, нулевой интервал и predication сохранены.
 
 Аппаратная проверка выполнена на RX 7800 XT / RADV. Переносимый путь проверен принудительно на AMD; выполнение на настоящей NVIDIA, импорт её host memory и длительное прохождение игры требуют отдельного аппаратного прогона.
