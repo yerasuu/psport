@@ -33,6 +33,15 @@ stopgap until the port implements its library: `BB_HLE=libSceX` keeps one to the
 rest). Without it libSceFont draws each font set with the host's Noto fonts (`BB_FALLBACK_FONTS`
 adds folders to look in) and logs the file it chose once per set.
 
+## Modules the game loads
+
+Modules a title loads itself with `sceKernelLoadStartModule` (every `*.prx` outside `sce_module` and
+`sce_sys`, such as Unity's `Media/Modules` and `Media/Plugins`) are linked into the image at start like
+the others, relocated and bound, but left unstarted: loading the path runs their initializer once and
+returns their handle, `sceKernelDlsym` finds their exports (and the eboot's, handle 0) by name, and
+imports of other modules bound to them, which the PS4 linker would rebind at that point, already
+point at them.
+
 ## Diagnostics
 
 | Variable | What it shows |

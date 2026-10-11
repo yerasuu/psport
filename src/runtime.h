@@ -110,4 +110,22 @@ void runtime_savedata_configure(const char *title);
 uintptr_t runtime_savedata_resolve(const char *name);
 void runtime_savedata_report(void);
 void runtime_thread_attach_host(const char *name);
+/* What link_modules.py prelinked, at image offsets; [0] is the eboot. Deferred modules (loaded by
+ * the game with sceKernelLoadStartModule) start there, the others at boot through
+ * runtime_module_start, which runs an initializer at most once. */
+typedef struct { uint64_t address, size, prot; } RuntimeModuleSegment;
+typedef struct { char nid[16]; uint64_t address; } RuntimeModuleExport;
+typedef struct {
+    char name[128];
+    uint64_t base, size, init, tls_address, tls_memsz, tls_filesz, tls_module, deferred;
+    uint64_t eh_frame_hdr, eh_frame_hdr_size, eh_frame, eh_frame_size, segment_count;
+    RuntimeModuleSegment segments[4];
+    uint64_t export_count;
+    RuntimeModuleExport *exports;
+} RuntimeModule;
+/* state: one byte per module, nonzero once started; owned by the caller for the process. */
+void runtime_modules_configure(unsigned char *image, RuntimeModule *modules, size_t count, unsigned char *state);
+/* 1 when this call ran the initializer (its value in *result), 0 when it had run already. */
+int runtime_module_start(size_t handle, uint64_t args, const void *argp, int32_t *result);
+uintptr_t runtime_module_resolve(const char *name);
 #endif
