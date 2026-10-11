@@ -155,6 +155,40 @@ static ABI int32_t sem_delete(uint32_t id) {
     pthread_mutex_unlock(&lock);
     return 0;
 }
+/* scePthreadSem*: POSIX-style semaphores whose handle the game keeps in its own 8 bytes; backed by a
+ * kernel semaphore whose id lives in that handle. */
+static ABI int32_t psem_init(uint64_t *sem,int flag,uint32_t value,const char *name) {
+    (void)flag;
+    if (!sem || value>INT32_MAX) return ERR(22);
+    uint32_t id;
+    int32_t result=sem_create(&id,name ? name : "",1,(int32_t)value,INT32_MAX,NULL);
+    if (!result) *sem=id;
+    return result;
+}
+static ABI int32_t psem_wait(uint64_t *sem) { return sem ? wait_count((uint32_t)*sem,1,NULL,1) : ERR(22); }
+static ABI int32_t psem_trywait(uint64_t *sem) {
+    if (!sem) return ERR(22);
+    int32_t result=wait_count((uint32_t)*sem,1,NULL,0);
+    return result==ERR(16) ? ERR(35) : result; /* POSIX trywait reports EAGAIN, the kernel call EBUSY */
+}
+static ABI int32_t psem_timedwait(uint64_t *sem,uint32_t usec) {
+    return sem ? wait_count((uint32_t)*sem,1,&usec,1) : ERR(22);
+}
+static ABI int32_t psem_post(uint64_t *sem) { return sem ? sem_signal((uint32_t)*sem,1) : ERR(22); }
+static ABI int32_t psem_destroy(uint64_t *sem) { return sem ? sem_delete((uint32_t)*sem) : ERR(22); }
+static ABI int32_t psem_getvalue(uint64_t *sem,int32_t *value) {
+    if (!sem || !value) return ERR(22);
+    pthread_mutex_lock(&lock);
+    Sema *s=find((uint32_t)*sem);
+    if (s) *value=s->count;
+    pthread_mutex_unlock(&lock);
+    return s ? 0 : ERR(22);
+}
+static const RuntimeExport exports[]={
+    {"scePthreadSemInit",psem_init}, {"scePthreadSemWait",psem_wait}, {"scePthreadSemTrywait",psem_trywait},
+    {"scePthreadSemTimedwait",psem_timedwait}, {"scePthreadSemPost",psem_post},
+    {"scePthreadSemDestroy",psem_destroy}, {"scePthreadSemGetvalue",psem_getvalue},
+};
 /* Read-only test/diagnostic snapshot, not exposed to guest code. */
 unsigned runtime_sema_waiters(uint32_t id) {
     pthread_mutex_lock(&lock);
@@ -170,7 +204,7 @@ uintptr_t runtime_sema_resolve(const char *name) {
     if (!strcmp(name,"12wOHk8ywb0#p#J")) return (uintptr_t)sem_poll;
     if (!strcmp(name,"4DM06U2BNEY#p#J")) return (uintptr_t)sem_cancel;
     if (!strcmp(name,"R1Jvn8bSCW8#p#J")) return (uintptr_t)sem_delete;
-    return 0;
+    return RUNTIME_LOOKUP(exports,name);
 }
 void runtime_sema_report(void) {
     pthread_mutex_lock(&lock);
