@@ -31,13 +31,19 @@ int runtime_module_start(size_t handle, uint64_t args, const void *argp, int32_t
     int32_t value=0;
     int ran=!started[handle];
     if (ran) {
-        started[handle]=1; /* before the call: a module_start loading itself must not recurse */
+        /* before the call: a module_start loading itself must not recurse */
+        __atomic_store_n(&started[handle],1,__ATOMIC_RELEASE);
         typedef int32_t (ABI *ModuleStart)(uint64_t,const void *,void *);
         value=((ModuleStart)(image+modules[handle].init))(args,argp,NULL);
     }
     pthread_mutex_unlock(&start_lock);
     if (result) *result=value;
     return ran;
+}
+/* A deferred module has no handle until the game loads it, as on the PS4 where it is not mapped. */
+static int loaded(int32_t handle) {
+    if (handle<0 || (size_t)handle>=module_count) return 0;
+    return !modules[handle].deferred || __atomic_load_n(&started[handle],__ATOMIC_ACQUIRE);
 }
 
 /* NID = first 8 bytes of SHA-1(name + salt), read little-endian, base64 with '+' '-'
@@ -118,12 +124,12 @@ static ABI int32_t load_start_module(const char *path, uint64_t args, const void
 static ABI int32_t stop_unload_module(int32_t handle, uint64_t args, const void *argp, uint32_t flags,
                                       const void *options, int32_t *result) {
     (void)args; (void)argp; (void)flags; (void)options;
-    if (handle<0 || (size_t)handle>=module_count) return ESRCH_;
+    if (!loaded(handle)) return ESRCH_;
     if (result) *result=0;
     return 0;
 }
 static ABI int32_t dlsym(int32_t handle, const char *symbol, void **address) {
-    if (handle<0 || (size_t)handle>=module_count) return ESRCH_;
+    if (!loaded(handle)) return ESRCH_;
     if (!symbol || !address) return EFAULT_;
     char nid[12];
     nid_of(symbol,nid);

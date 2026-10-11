@@ -414,6 +414,8 @@ static void loaded_modules(void) {
     assert(load && dlsym);
     int32_t result=0;
     void *address=NULL;
+    /* Not loaded yet: the module has no handle. */
+    assert(dlsym(1,"sceKernelLoadStartModule",&address)==(int32_t)0x80020003 && !address);
     assert(load("/app0/Media/Modules/Test.prx",5,NULL,0,NULL,&result)==1 && result==7 && module_starts==1 && module_args==5);
     /* Unity spells the data folder either way; a second load finds the module started. */
     assert(load("/app0/media/modules/test.prx",0,NULL,0,NULL,&result)==1 && result==0 && module_starts==1);
