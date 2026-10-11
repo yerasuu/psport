@@ -8,6 +8,10 @@ function (host contracts first) and otherwise binds the native export.
 Exports are matched by (NID, library identity, module identity). Imports of
 libSceLibcInternal are served by libc.prx's same-NID exports: the internal
 library is not shipped with the game and exposes the same functions.
+System modules (--system-modules DIR: the user's own dump of the console's *.sprx, never
+shipped) are linked too when anything linked imports their library, and their exports win over
+the host runtime's (binding kinds 3 and 4), except for libraries named in --hle, so an own
+implementation can stand in for one and be compared with it.
 Output: out/boot-linked.bin (format BBPROBE5) and out/link.json.
 """
 import collections
@@ -19,6 +23,9 @@ from prepare import parse_self, span, unpack
 from link_libc import encode_id
 
 DEFAULT_MODULES = ('libc.prx', 'libSceFios2.prx')
+# Served by the game's libc.prx, whose functions the runtime partly replaces to track the game's
+# writes into GPU memory (memcpy, memset): a native copy of this one would bypass that.
+NEVER_SYSTEM = {'libSceLibcInternal'}
 FS_LOAD = bytes.fromhex('64488b042500000000')  # mov rax, fs:[0]
 
 
@@ -89,7 +96,7 @@ def patch_fs_loads(image, ph, base):
     return patched
 
 
-def link(game, out, module_names=DEFAULT_MODULES):
+def link(game, out, module_names=DEFAULT_MODULES, system_modules=None, hle=()):
     main = module(game / 'eboot.bin')
     raw = (out / 'boot.bin').read_bytes()
     magic, size, entry, ns, nr, ni, flags = unpack('<8s6Q', raw, 0)
@@ -127,8 +134,27 @@ def link(game, out, module_names=DEFAULT_MODULES):
     base = (size + 65535) & ~65535
     fs_patched = patch_fs_loads(image, main['ph'], 0)
     tls_module = 2
-    for filename in module_names:
-        m = module(game / 'sce_module' / filename)
+    module_names = list(module_names)
+    system = {}
+    if system_modules:
+        system = {f.stem: f for f in sorted(Path(system_modules).glob('*.sprx'))
+                  if f.stem not in NEVER_SYSTEM and f.stem not in hle}
+    from_system = set()
+
+    def wanted_system():
+        """System modules whose library something linked imports and nothing linked provides."""
+        imported_libraries = {identity[1][0] for identity in identities if identity}
+        linked = {Path(name).stem for name in module_names}
+        return [lib for lib in system if lib in imported_libraries and lib not in linked]
+    first = [system[lib].name for lib in wanted_system()]
+    module_names += first
+    from_system.update(first)
+    index = 0
+    while index < len(module_names):
+        filename = module_names[index]
+        index += 1
+        bundled = game / 'sce_module' / filename
+        m = module(bundled if bundled.exists() or filename not in from_system else system[Path(filename).stem])
         loads = [p for p in m['ph'] if p['type'] in (1, 0x61000010)]
         modsize = max(p['vaddr'] + p['memsz'] for p in loads)
         if base + modsize > 512 * 1024 * 1024:
@@ -187,7 +213,8 @@ def link(game, out, module_names=DEFAULT_MODULES):
                     raise ValueError(f'{filename}: export outside load segments')
                 if s['identity'] in exports:
                     raise ValueError(f'{filename}: ambiguous export')
-                entry_value = (base + s['value'], 2 if s['type'] == 1 else 1, filename)
+                kind = 2 if s['type'] == 1 else 1
+                entry_value = (base + s['value'], kind + 2 if filename in from_system else kind, filename)
                 exports[s['identity']] = entry_value
                 by_nid[(s['identity'][0], s['identity'][1][0])].append(entry_value)
                 count += 1
@@ -197,6 +224,10 @@ def link(game, out, module_names=DEFAULT_MODULES):
                           tls_filesz=tls['filesz'] if tls else 0, tls_module=module_id,
                           tls_relocations=tls_relocations, exports=count, sha256=m['sha256']))
         base = (base + modsize + 65535) & ~65535
+        # Linking a module can import a library only another system module provides.
+        for lib in wanted_system():
+            module_names.append(system[lib].name)
+            from_system.add(system[lib].name)
 
     bindings, unresolved = [], []
     for identity, index in identities.items():
@@ -251,5 +282,7 @@ if __name__ == '__main__':
     p.add_argument('game', type=Path)
     p.add_argument('--out', type=Path, default=Path(__file__).resolve().parent.parent / 'out')
     p.add_argument('--modules', nargs='*', default=list(DEFAULT_MODULES))
+    p.add_argument('--system-modules', type=Path, help="the user's dump of the console's *.sprx")
+    p.add_argument('--hle', default='', help='libraries left to the host runtime, comma-separated')
     a = p.parse_args()
-    link(a.game, a.out, a.modules)
+    link(a.game, a.out, a.modules, a.system_modules, {n.strip() for n in a.hle.split(',') if n.strip()})

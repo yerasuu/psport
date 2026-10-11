@@ -466,7 +466,7 @@ int main(int argc, char **argv) {
             int inside=0;
             for (uint64_t m=0;m<module_count;++m)
                 if (address>=modules[m].base && address-modules[m].base<modules[m].size) inside=1;
-            if (index>=import_count || !inside || (kind!=1 && kind!=2) || bindings[index]) fail("invalid native binding");
+            if (index>=import_count || !inside || kind<1 || kind>4 || bindings[index]) fail("invalid native binding");
             bindings[index]=address; binding_kinds[index]=kind;
         }
     }
@@ -544,7 +544,8 @@ int main(int argc, char **argv) {
         t[8] = 0x48; t[9] = 0xb8; memcpy(t + 10, &handler, 8);
         t[18] = 0xff; t[19] = 0xe0;
     }
-    /* What each import got, for the report below: 1 host, 2 native libc, 3 stub, 4 nothing. */
+    /* What each import got, for the report below: 1 host, 2 native module, 3 stub, 4 nothing,
+     * 5 a system module (link_modules.py binding kinds 3 and 4, which win over the host). */
     unsigned char *import_state = calloc(import_count ? import_count : 1, 1);
     if (!import_state) fail("allocation failed");
     for (uint64_t i = 0; i < nr; ++i) {
@@ -553,22 +554,23 @@ int main(int argc, char **argv) {
                         : (uintptr_t)image + relocs[i].value;
         if (relocs[i].kind) {
             runtime_last_stub = 0;
-            uintptr_t resolved = runtime_resolve(names[relocs[i].value], relocs[i].kind == 2);
+            const uint64_t bound_kind = native_libc ? binding_kinds[relocs[i].value] : 0;
+            uintptr_t resolved = bound_kind > 2 ? 0 : runtime_resolve(names[relocs[i].value], relocs[i].kind == 2);
             if (resolved) {
                 value = resolved + relocs[i].addend;
                 import_state[relocs[i].value] = runtime_last_stub ? 3 : 1;
             } else if (native_libc && bindings[relocs[i].value]) {
                 uint64_t address=bindings[relocs[i].value];
-                if (binding_kinds[relocs[i].value]!=relocs[i].kind || !mapped(segments,ns,address,relocs[i].addend+1)) fail("native export kind/range mismatch");
+                if ((bound_kind - 1) % 2 + 1 != relocs[i].kind || !mapped(segments,ns,address,relocs[i].addend+1)) fail("native export kind/range mismatch");
                 value=(uintptr_t)image+address+relocs[i].addend;
-                import_state[relocs[i].value] = 2;
+                import_state[relocs[i].value] = bound_kind > 2 ? 5 : 2;
             } else import_state[relocs[i].value] = 4;
         }
         memcpy(image + relocs[i].target, &value, 8);
     }
     /* Before the game runs: every import that will not do what it asks, so a log shows what
      * cannot work even when the game never gets as far as calling it. */
-    unsigned counts[5] = {0};
+    unsigned counts[6] = {0};
     for (uint64_t i = 0; i < import_count; ++i) {
         ++counts[import_state[i]];
         if (import_state[i] == 3)
@@ -578,8 +580,8 @@ int main(int argc, char **argv) {
             printf("Runtime: import %s (%s) has no implementation: %s\n", names[i], runtime_import_name(names[i]),
                    permissive_seen ? "returns 0 when called (BB_PERMISSIVE)" : "the game stops if it calls it");
     }
-    printf("Runtime: imports %llu: host %u, native libc %u, stubs %u, without implementation %u\n",
-           (unsigned long long)import_count, counts[1], counts[2], counts[3], counts[4]);
+    printf("Runtime: imports %llu: host %u, game modules %u, system modules %u, stubs %u, without implementation %u\n",
+           (unsigned long long)import_count, counts[1], counts[2], counts[5], counts[3], counts[4]);
     free(import_state);
     if (patch_file) apply_patches(patch_file, segments, ns, relocs, nr);
     if (!cpu_only) bbgpu_patch_image(image, size);
