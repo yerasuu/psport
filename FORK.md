@@ -38,6 +38,7 @@ adds folders to look in) and logs the file it chose once per set.
 | Variable | What it shows |
 |---|---|
 | `BB_PERMISSIVE=1` | imports the port lacks return 0 instead of stopping, each logged once |
+| `BB_PERMISSIVE_OUT=error` | with `BB_PERMISSIVE=1`, those of them that write through a pointer argument (`src/import_outparams.inc`) return `0x80020016` instead of 0, so the game takes its error path rather than reading an output nothing wrote; either way their log line names the output arguments left unwritten and the pointers passed |
 | (always) | before the game starts: every import without implementation or answered by a stub, and a summary |
 | `BB_AUDIO_STATS=1` | per audio port, every 5 s: cadence, peak and RMS in dBFS (sound or silence) |
 | `BB_NGS2_TRACE=1` | first calls of each Ngs2 function and the level of each render |
