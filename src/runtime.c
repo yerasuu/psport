@@ -308,10 +308,18 @@ uintptr_t runtime_resolve(const char *name, int is_data) {
 }
 /* Same symbol name means same contract whether imported from libkernel or
  * libScePosix, so newer modules resolve by name through runtime_symbol. */
+/* Arguments are ignored: under the System V ABI the caller removes them, so one function stands
+ * for every signature returning a status. */
+ABI int32_t runtime_stub(void) { return 0; }
+int runtime_last_stub;
 uintptr_t runtime_lookup(const RuntimeExport *table,size_t count,const char *nid) {
     const char *symbol=runtime_symbol(nid);
     if (!symbol) return 0;
-    for (size_t i=0;i<count;++i) if (!strcmp(symbol,table[i].name)) return (uintptr_t)table[i].function;
+    for (size_t i=0;i<count;++i)
+        if (!strcmp(symbol,table[i].name)) {
+            runtime_last_stub=table[i].function==(void *)runtime_stub;
+            return (uintptr_t)table[i].function;
+        }
     return 0;
 }
 const char *runtime_import_name(const char *name) {
