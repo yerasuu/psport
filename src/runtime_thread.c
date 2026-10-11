@@ -10,6 +10,7 @@
 #ifndef _WIN32
 #include <pthread.h>
 #include <sched.h>
+#include <signal.h>
 #include <setjmp.h>
 #include <errno.h>
 #include <unistd.h>
@@ -43,6 +44,8 @@ typedef struct GuestThread {
     ThreadAttr attr;
     char name[32];
     int detached, finished, joined, host_owned;
+    /* The creator's signal mask, which the thread takes once its TCB is in place. */
+    sigset_t start_mask;
     jmp_buf exit_jump;
     struct GuestThread *next;
 } GuestThread;
@@ -254,6 +257,7 @@ static void set_host_name(const char *name) {
 static void *host_start(void *p) {
     GuestThread *t=p;
     attach(t);
+    pthread_sigmask(SIG_SETMASK,&t->start_mask,NULL);
     record_stack(t);
     set_host_name(t->name);
     if (!setjmp(t->exit_jump)) t->result=t->entry(t->argument);
@@ -276,6 +280,11 @@ static int32_t create(GuestThread **out,ThreadAttr **attr_slot,GuestEntry entry,
     publish(t);
     /* Publish the handle before the thread can run and inspect itself. */
     *out=t;
+    /* Blocked until host_start has set GS: a signal handler that runs guest code on the thread
+     * before then would find no TCB. */
+    sigset_t all;
+    sigfillset(&all);
+    pthread_sigmask(SIG_SETMASK,&all,&t->start_mask);
     int e=EINVAL;
     if (t->attr.stack_addr) {
         /* The game's own memory, as the console runs it. glibc keeps its thread record and the
@@ -304,6 +313,7 @@ static int32_t create(GuestThread **out,ThreadAttr **attr_slot,GuestEntry entry,
         e=pthread_create(&t->host,&host,host_start,t);
     }
     pthread_attr_destroy(&host);
+    pthread_sigmask(SIG_SETMASK,&t->start_mask,NULL);
     if (e) { fprintf(stderr,"STOP: host pthread_create failed: %d\n",e); exit(21); }
     if (t->detached) pthread_detach(t->host);
     pthread_mutex_lock(&lock); ++created; pthread_mutex_unlock(&lock);
