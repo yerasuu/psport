@@ -1655,14 +1655,18 @@ s32 PS4_SYSV_ABI sceFontGenerateCharGlyph(OrbisFontHandle glyph_handle, u32 code
         return ORBIS_FONT_ERROR_INVALID_FONT_HANDLE;
     }
 
+    // bbport: Atelier Ayesha DX passes a zero-filled parameter block (id 0) and draws its text on
+    // the console, so id 0 means the defaults rather than the INVALID_PARAMETER shadPS4 returns.
+    if (gen_params && gen_params->id == 0) {
+        gen_params = nullptr;
+    }
+    if (gen_params && gen_params->id != 0x0FD3) {
+        return ORBIS_FONT_ERROR_INVALID_PARAMETER;
+    }
     const u8 glyph_form = gen_params ? gen_params->glyph_form : 0;
     const u8 metrics_form = gen_params ? gen_params->metrics_form : 0;
     const u16 form_options = gen_params ? gen_params->form_options : 0;
     const OrbisFontMem* glyph_memory = gen_params ? gen_params->mem : nullptr;
-
-    if (gen_params && gen_params->id != 0x0FD3) {
-        return ORBIS_FONT_ERROR_INVALID_PARAMETER;
-    }
     if ((form_options & static_cast<u16>(~0x11)) != 0) {
         return ORBIS_FONT_ERROR_INVALID_PARAMETER;
     }
