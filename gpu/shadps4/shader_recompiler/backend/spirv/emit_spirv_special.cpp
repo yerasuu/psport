@@ -218,6 +218,22 @@ void EmitDiscardCond(EmitContext& ctx, Id condition) {
 }
 
 void EmitEmitVertex(EmitContext& ctx) {
+    // Output variables are undefined after OpEmitVertex, so the copy is made for every vertex.
+    for (const auto& xfb : ctx.xfb_outputs) {
+        const Id param{ctx.OpLoad(ctx.F32[4], ctx.output_params[xfb.param].id)};
+        Id value;
+        if (xfb.num_comps == 1) {
+            value = ctx.OpCompositeExtract(ctx.F32[1], param, xfb.first_comp);
+        } else {
+            std::array<Sirit::Literal, 4> comps{};
+            for (u32 i = 0; i < xfb.num_comps; ++i) {
+                comps[i] = xfb.first_comp + i;
+            }
+            const std::span<const Sirit::Literal> used{comps.data(), xfb.num_comps};
+            value = ctx.OpVectorShuffle(ctx.F32[xfb.num_comps], param, param, used);
+        }
+        ctx.OpStore(xfb.id, value);
+    }
     ctx.OpEmitVertex();
 }
 

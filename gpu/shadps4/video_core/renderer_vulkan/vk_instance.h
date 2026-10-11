@@ -435,6 +435,17 @@ public:
         return properties.limits.maxComputeSharedMemorySize;
     }
 
+    /// Returns the maximum number of output components of one geometry shader vertex.
+    u32 MaxGeometryOutputComponents() const {
+        return properties.limits.maxGeometryOutputComponents;
+    }
+
+    /// Returns the maximum number of output components of all vertices one geometry shader
+    /// invocation emits.
+    u32 MaxGeometryTotalOutputComponents() const {
+        return properties.limits.maxGeometryTotalOutputComponents;
+    }
+
     /// Returns the maximum sampler LOD bias.
     float MaxSamplerLodBias() const {
         return properties.limits.maxSamplerLodBias;

@@ -75,6 +75,10 @@ struct InfoPersistent {
     bool has_fetch_shader{};
     bool has_bitwise_xor{};
     bool uses_dma{};
+    /// bbport: stride in bytes of transform feedback buffer 0 the GS module captures stream-out
+    /// with, set by the SPIR-V emitter; 0 = the module has no transform feedback outputs, so a
+    /// stream-out draw with it would lose the vertices later draws read back.
+    u32 xfb_stride{};
 
     InfoPersistent() = default;
     InfoPersistent(HwStage hw_stage_, SwStage sw_stage_, u64 pgm_hash_)

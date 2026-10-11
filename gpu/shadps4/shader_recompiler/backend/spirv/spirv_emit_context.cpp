@@ -13,6 +13,7 @@
 #include <fmt/format.h>
 #include <spirv/unified1/spirv.hpp11>
 
+#include <algorithm>
 #include <numbers>
 #include <string_view>
 
@@ -763,6 +764,7 @@ void EmitContext::DefineOutputs() {
             Name(id, fmt::format("out_attr{}", attr_id));
             output_params[attr_id] = GetAttributeInfo(AmdGpu::NumberFormat::Float, id, 4, true);
         }
+        DefineXfbOutputs();
         break;
     }
     case SwStage::Compute:
@@ -770,6 +772,93 @@ void EmitContext::DefineOutputs() {
     default:
         UNREACHABLE();
     }
+}
+
+// bbport: GS stream-out (HwGeometryRuntimeInfo::xfb_stride). The copy shader's stores into buffer
+// 0 become transform feedback outputs of their own, located past the param outputs so that no
+// location the fragment shader reads changes meaning. Each output is a run of stores that are
+// consecutive both in the vertex record and in the components of one param. Stores the copy
+// shader makes under an exec mask (Atelier Ryza's param1.x) are captured unconditionally: where
+// GCN leaves the buffer's old dword in place, this writes the param's value, a known difference.
+// A layout transform feedback can't express leaves the module without any of it (Info::xfb_stride
+// stays 0), so the draw side knows not to draw.
+void EmitContext::DefineXfbOutputs() {
+    const u32 stride = runtime_info.hw.gs.xfb_stride;
+    if (stride == 0) {
+        return;
+    }
+    const auto& copy = info.gs_copy_data;
+    const auto reject = [&](std::string_view reason) {
+        LOG_WARNING(Render_Recompiler, "GS {:#x} stream-out not captured ({}-byte records): {}",
+                    info.pgm_hash, stride, reason);
+    };
+    if (!copy.stream_out_parsed || copy.stream_out_stores.empty()) {
+        reject("copy shader stores not parsed");
+        return;
+    }
+    using Store = CopyShaderData::StreamOutStore;
+    boost::container::small_vector<Store, 16> stores(copy.stream_out_stores.begin(),
+                                                     copy.stream_out_stores.end());
+    std::ranges::sort(stores, {}, &Store::byte_offset);
+    for (size_t i = 0; i < stores.size(); ++i) {
+        const auto& store = stores[i];
+        if (store.buffer != 0 || !IR::IsParam(store.attr) ||
+            u32(store.attr) - u32(IR::Attribute::Param0) >= copy.num_attrs) {
+            reject("store to another buffer or of no param output");
+            return;
+        }
+        if (store.byte_offset % 4 != 0 || store.byte_offset + 4 > stride) {
+            reject(fmt::format("store at byte {} outside the record", store.byte_offset));
+            return;
+        }
+        if (i > 0 && stores[i - 1].byte_offset == store.byte_offset) {
+            reject(fmt::format("stores overlap at byte {}", store.byte_offset));
+            return;
+        }
+    }
+
+    struct Run {
+        u32 byte_offset;
+        u32 param;
+        u32 first_comp;
+        u32 num_comps;
+    };
+    boost::container::small_vector<Run, 4> runs;
+    for (const auto& store : stores) {
+        const u32 param = u32(store.attr) - u32(IR::Attribute::Param0);
+        if (!runs.empty()) {
+            auto& run = runs.back();
+            if (run.param == param && run.num_comps < 4 &&
+                run.byte_offset + run.num_comps * 4 == store.byte_offset &&
+                run.first_comp + run.num_comps == store.comp) {
+                ++run.num_comps;
+                continue;
+            }
+        }
+        runs.push_back({store.byte_offset, param, store.comp, 1});
+    }
+
+    // Locations 30 and 31 carry motion vectors into fragment shaders that use them.
+    const u32 num_locations = copy.num_attrs + static_cast<u32>(runs.size());
+    const u32 vertex_components = num_locations * 4 + 4;
+    if (num_locations > MotionVectors::CurrentLocation ||
+        num_locations * 4 > profile.max_geometry_output_components ||
+        vertex_components * runtime_info.hw.gs.output_vertices >
+            profile.max_geometry_total_output_components) {
+        reject(fmt::format("{} output locations exceed the device's", num_locations));
+        return;
+    }
+
+    for (u32 i = 0; i < runs.size(); ++i) {
+        const auto& run = runs[i];
+        const Id id{DefineOutput(F32[run.num_comps], copy.num_attrs + i)};
+        Decorate(id, spv::Decoration::XfbBuffer, 0U);
+        Decorate(id, spv::Decoration::XfbStride, stride);
+        Decorate(id, spv::Decoration::Offset, run.byte_offset);
+        Name(id, fmt::format("xfb_out{}", run.byte_offset));
+        xfb_outputs.push_back({id, run.param, run.first_comp, run.num_comps});
+    }
+    info.xfb_stride = stride;
 }
 
 void EmitContext::DefinePushDataBlock() {
