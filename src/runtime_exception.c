@@ -164,8 +164,12 @@ static ABI int32_t remove_handler(int sig) {
 static ABI int32_t raise_exception(void *thread, int sig) {
     if (sig!=GUEST_SIGUSR1) return ERR(22);
     int32_t result=runtime_thread_kill(thread,RUNTIME_EXCEPTION_SIGNAL);
-    if (!result && !atomic_fetch_add(&raised,1))
-        printf("Runtime: first guest exception raised (signal %d) to thread %p\n",sig,thread);
+    if (!result && !atomic_fetch_add(&raised,1)) {
+        /* write, not stdio: the thread may stop in the handler while it holds stdout's lock. */
+        char line[96];
+        int n=snprintf(line,sizeof(line),"Runtime: first guest exception raised (signal %d) to thread %p\n",sig,thread);
+        ssize_t written=write(2,line,(size_t)n); (void)written;
+    }
     return result;
 }
 
