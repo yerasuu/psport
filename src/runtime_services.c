@@ -347,6 +347,14 @@ static ABI int32_t playgo_speed(int32_t handle,int32_t speed) { (void)speed; ret
 static ABI int32_t discmap_on_hdd(const char *path,int64_t offset,int64_t size,int32_t *result) {
     (void)path; (void)offset; (void)size; (void)result; return DISC_MAP_NO_BITMAP;
 }
+/* The one the games call at boot succeeds instead, as in shadPS4, with its three outputs zero:
+ * they read them. */
+static ABI int32_t discmap_7c98(const char *path,int64_t offset,int64_t size,int32_t *flags,int32_t *r1,int32_t *r2) {
+    (void)path; (void)offset; (void)size;
+    if (!flags || !r1 || !r2) return (int32_t)0x81100001; /* INVALID_ARGUMENT */
+    *flags=0; *r1=0; *r2=0;
+    return 0;
+}
 static ABI int32_t discmap_8a82(const char *path,int64_t offset,int64_t size,int32_t *flags,int32_t *r1,int32_t *r2) {
     (void)path; (void)offset; (void)size; (void)flags; (void)r1; (void)r2; return DISC_MAP_NO_BITMAP;
 }
@@ -479,6 +487,7 @@ static const RuntimeExport exports[]={
     {"sceMouseInit",runtime_stub}, {"sceMouseOpen",mouse_open}, {"sceMouseRead",mouse_read}, {"sceMouseClose",runtime_stub},
     {"sceAudioInOpen",audio_in_open},
     {"sceDiscMapIsRequestOnHDD",discmap_on_hdd}, {"sceDiscMap_8A828CAEE7EDD5E9",discmap_8a82},
+    {"sceDiscMap_7C980FFB0AA27E7A",discmap_7c98},
     {"sceVoiceInit",runtime_stub}, {"sceVoiceEnd",runtime_stub},
 };
 uintptr_t runtime_services_resolve(const char *name) {
