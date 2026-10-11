@@ -39,12 +39,15 @@ GraphicsPipeline::GraphicsPipeline(
       fetch_shader{std::move(fetch_shader_)} {
     const vk::Device device = instance.GetDevice();
     std::ranges::copy(infos, stages.begin());
-    // The GS Info is the program's, translated for its first permutation; the runtime info is this
-    // pipeline's own, so a stride both agree on is the one this module was emitted with.
-    if (const auto* gs = infos[u32(Shader::SwStage::Geometry)]) {
-        const u32 stride = runtime_infos[u32(Shader::SwStage::Geometry)].hw.gs.xfb_stride;
-        xfb_stride = gs->xfb_stride == stride ? stride : 0;
+    // Stage selection drops a stream-out draw whose GS module doesn't capture at the runtime stride
+    // (PipelineCache::RefreshGraphicsStages), so that stride is the module's. The GS runtime info
+    // is stale when no GS is bound, since selection only rebuilds it for a GS.
+    if (!preloading) {
+        sdata.xfb_stride = infos[u32(Shader::SwStage::Geometry)]
+                               ? runtime_infos[u32(Shader::SwStage::Geometry)].hw.gs.xfb_stride
+                               : 0;
     }
+    xfb_stride = sdata.xfb_stride;
     BuildDescSetLayout(preloading);
     const auto debug_str = GetDebugString();
 

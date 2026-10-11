@@ -79,6 +79,8 @@ public:
         std::vector<u32> tcs{};
         std::vector<u32> tes{};
         std::vector<u32> fragment{};
+        /// bbport: GetXfbStride, saved because a preloaded pipeline has no runtime infos.
+        u32 xfb_stride{};
 
         void Serialize(Serialization::Archive& ar) const;
         bool Deserialize(Serialization::Archive& ar);

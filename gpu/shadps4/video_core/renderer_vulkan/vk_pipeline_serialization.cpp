@@ -16,7 +16,7 @@ namespace Serialization {
 /* You should increment versions below once corresponding serialization scheme is changed. */
 static constexpr u32 ShaderBinaryVersion = 9u; // layer page-table pairs / guarded write-through stores
 static constexpr u32 ShaderMetaVersion = 9u; // bbport: Info::xfb_stride
-static constexpr u32 PipelineKeyVersion = 5u; // bbport: Info layout (ImageResource::needs_native)
+static constexpr u32 PipelineKeyVersion = 6u; // bbport: SerializationSupport::xfb_stride
 } // namespace Serialization
 
 namespace Vulkan {
@@ -204,6 +204,7 @@ void GraphicsPipeline::SerializationSupport::Serialize(Serialization::Archive& a
     sdata.Write(multisampling);
     sdata.Write(tcs);
     sdata.Write(tes);
+    sdata.Write(xfb_stride);
 }
 
 bool GraphicsPipeline::SerializationSupport::Deserialize(Serialization::Archive& ar) {
@@ -215,6 +216,7 @@ bool GraphicsPipeline::SerializationSupport::Deserialize(Serialization::Archive&
     sdata.Read(multisampling);
     sdata.Read(tcs);
     sdata.Read(tes);
+    sdata.Read(xfb_stride);
     return true;
 }
 
