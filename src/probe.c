@@ -595,15 +595,17 @@ int main(int argc, char **argv) {
         if (!started) fail("allocation failed");
         runtime_modules_configure(image,all_modules,module_count+1,started);
     }
+    char sfo[4096];
+    uint32_t attributes=0;
+    snprintf(sfo,sizeof(sfo),"%s/sce_sys/param.sfo",app0 ? app0 : ".");
+    sfo_value(sfo,"ATTRIBUTE",NULL,0,&attributes);
+    uint64_t sdk=0;
+    if (procparam) memcpy(&sdk,image+procparam+16,8); /* procparam: size, magic, count, sdk_version */
+    runtime_process_configure((uint32_t)sdk,attributes);
     if (!cpu_only) {
-        char title[128]="Bloodborne", serial[16]="UNKNOWN", sfo[4096];
-        uint32_t attributes=0;
-        snprintf(sfo,sizeof(sfo),"%s/sce_sys/param.sfo",app0 ? app0 : ".");
+        char title[128]="Bloodborne", serial[16]="UNKNOWN";
         sfo_value(sfo,"TITLE",title,sizeof(title),NULL);
         sfo_value(sfo,"TITLE_ID",serial,sizeof(serial),NULL);
-        sfo_value(sfo,"ATTRIBUTE",NULL,0,&attributes);
-        uint64_t sdk=0;
-        if (procparam) memcpy(&sdk,image+procparam+16,8); /* procparam: size, magic, count, sdk_version */
         BbGpuConfig gpu={title,serial,user_dir ? user_dir : "user",(uint32_t)sdk,attributes,1920,1080};
         gpu_enabled=1; /* page tracking starts while the rasterizer registers guest memory */
         if (bbgpu_init(&gpu)) fail("GPU initialization failed");
