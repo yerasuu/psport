@@ -232,6 +232,21 @@ public:
         return provoking_vertex;
     }
 
+    /// Returns true when VK_EXT_transform_feedback is supported with the transformFeedback feature.
+    bool IsTransformFeedbackSupported() const {
+        return transform_feedback;
+    }
+
+    /// Returns true when VK_EXT_transform_feedback also supports streams other than stream 0.
+    bool IsTransformFeedbackGeometryStreamsSupported() const {
+        return transform_feedback && transform_feedback_features.geometryStreams;
+    }
+
+    /// Valid only when IsTransformFeedbackSupported().
+    const vk::PhysicalDeviceTransformFeedbackPropertiesEXT& GetTransformFeedbackProperties() const {
+        return transform_feedback_props;
+    }
+
     /// Returns true when VK_AMD_shader_image_load_store_lod is supported.
     bool IsImageLoadStoreLodSupported() const {
         return image_load_store_lod;
@@ -556,6 +571,7 @@ private:
     vk::PhysicalDeviceVulkan12Properties vk12_props;
     vk::PhysicalDeviceVulkan13Properties vk13_props;
     vk::PhysicalDevicePushDescriptorPropertiesKHR push_descriptor_props;
+    vk::PhysicalDeviceTransformFeedbackPropertiesEXT transform_feedback_props;
     vk::PhysicalDeviceFeatures features;
     vk::PhysicalDeviceVulkan12Features vk12_features;
     vk::PhysicalDeviceVulkan13Features vk13_features;
@@ -565,6 +581,7 @@ private:
         workgroup_memory_explicit_layout_features;
     vk::PhysicalDeviceImage2DViewOf3DFeaturesEXT image_2d_view_of_3d_features;
     vk::PhysicalDevicePrimitiveTopologyListRestartFeaturesEXT list_restart_features;
+    vk::PhysicalDeviceTransformFeedbackFeaturesEXT transform_feedback_features;
     vk::PhysicalDeviceShaderClockFeaturesKHR shader_clock_features;
     vk::PhysicalDeviceComputeShaderDerivativesFeaturesKHR compute_shader_derivatives_features;
     vk::DriverIdKHR driver_id;
@@ -592,6 +609,7 @@ private:
     bool vertex_input_dynamic_state{};
     bool list_restart{};
     bool provoking_vertex{};
+    bool transform_feedback{};
     bool shader_stencil_export{};
     bool image_load_store_lod{};
     bool amd_gcn_shader{};

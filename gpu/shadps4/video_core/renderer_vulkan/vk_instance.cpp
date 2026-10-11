@@ -238,17 +238,21 @@ bool Instance::CreateDevice() {
         vk::PhysicalDeviceImage2DViewOf3DFeaturesEXT, vk::PhysicalDeviceShaderClockFeaturesKHR,
         vk::PhysicalDeviceComputeShaderDerivativesFeaturesKHR,
         vk::PhysicalDeviceShaderMixedFloatDotProductFeaturesVALVE,
-        vk::PhysicalDeviceCooperativeMatrixFeaturesKHR, vk::PhysicalDeviceShaderFloat8FeaturesEXT>();
+        vk::PhysicalDeviceCooperativeMatrixFeaturesKHR, vk::PhysicalDeviceShaderFloat8FeaturesEXT,
+        vk::PhysicalDeviceTransformFeedbackFeaturesEXT>();
     features = feature_chain.get().features;
 
     const vk::StructureChain properties_chain = physical_device.getProperties2<
         vk::PhysicalDeviceProperties2, vk::PhysicalDeviceVulkan11Properties,
         vk::PhysicalDeviceVulkan12Properties, vk::PhysicalDeviceVulkan13Properties,
-        vk::PhysicalDevicePushDescriptorPropertiesKHR>();
+        vk::PhysicalDevicePushDescriptorPropertiesKHR,
+        vk::PhysicalDeviceTransformFeedbackPropertiesEXT>();
     vk11_props = properties_chain.get<vk::PhysicalDeviceVulkan11Properties>();
     vk12_props = properties_chain.get<vk::PhysicalDeviceVulkan12Properties>();
     vk13_props = properties_chain.get<vk::PhysicalDeviceVulkan13Properties>();
     push_descriptor_props = properties_chain.get<vk::PhysicalDevicePushDescriptorPropertiesKHR>();
+    transform_feedback_props =
+        properties_chain.get<vk::PhysicalDeviceTransformFeedbackPropertiesEXT>();
     LOG_INFO(Render_Vulkan, "Physical device subgroup size {}", vk11_props.subgroupSize);
 
     if (available_extensions.empty()) {
@@ -333,6 +337,22 @@ bool Instance::CreateDevice() {
             add_extension(VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME);
     }
     provoking_vertex = add_extension(VK_EXT_PROVOKING_VERTEX_EXTENSION_NAME);
+    // bbport: GCN geometry-shader stream-out (VGT_STRMOUT_*).
+    transform_feedback =
+        feature_chain.get<vk::PhysicalDeviceTransformFeedbackFeaturesEXT>().transformFeedback &&
+        add_extension(VK_EXT_TRANSFORM_FEEDBACK_EXTENSION_NAME);
+    if (transform_feedback) {
+        transform_feedback_features =
+            feature_chain.get<vk::PhysicalDeviceTransformFeedbackFeaturesEXT>();
+        LOG_INFO(Render_Vulkan, "- geometryStreams: {}",
+                 transform_feedback_features.geometryStreams);
+        LOG_INFO(Render_Vulkan, "- maxTransformFeedbackStreams: {}",
+                 transform_feedback_props.maxTransformFeedbackStreams);
+        LOG_INFO(Render_Vulkan, "- maxTransformFeedbackBuffers: {}",
+                 transform_feedback_props.maxTransformFeedbackBuffers);
+        LOG_INFO(Render_Vulkan, "- transformFeedbackDraw: {}",
+                 transform_feedback_props.transformFeedbackDraw);
+    }
     shader_stencil_export = add_extension(VK_EXT_SHADER_STENCIL_EXPORT_EXTENSION_NAME);
     image_load_store_lod = add_extension(VK_AMD_SHADER_IMAGE_LOAD_STORE_LOD_EXTENSION_NAME);
     amd_gcn_shader = add_extension(VK_AMD_GCN_SHADER_EXTENSION_NAME);
@@ -580,6 +600,10 @@ bool Instance::CreateDevice() {
         vk::PhysicalDeviceProvokingVertexFeaturesEXT{
             .provokingVertexLast = true,
         },
+        vk::PhysicalDeviceTransformFeedbackFeaturesEXT{
+            .transformFeedback = true,
+            .geometryStreams = transform_feedback_features.geometryStreams,
+        },
         vk::PhysicalDeviceVertexAttributeDivisorFeatures{
             .vertexAttributeInstanceRateDivisor = true,
         },
@@ -661,6 +685,9 @@ bool Instance::CreateDevice() {
     }
     if (!provoking_vertex) {
         device_chain.unlink<vk::PhysicalDeviceProvokingVertexFeaturesEXT>();
+    }
+    if (!transform_feedback) {
+        device_chain.unlink<vk::PhysicalDeviceTransformFeedbackFeaturesEXT>();
     }
     if (!maintenance_5) {
         device_chain.unlink<vk::PhysicalDeviceMaintenance5FeaturesKHR>();
