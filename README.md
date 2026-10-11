@@ -3,6 +3,8 @@ THIS PROJECT IS NOT RELATED TO SHADPS4. ALL QUESTIONS RELATED TO THIS PROJECT SH
 
 # bbport — a native Linux port of Bloodborne
 
+> This is **psport**, decanter's fork: other PS4 titles on top of bbport. What it adds, what it ports from other projects and why: [FORK.md](FORK.md).
+
 **English** · [Русский](README.ru.md)
 
 bbport is the counterpart of Wine + DXVK for a single game: *Bloodborne* for PlayStation 4
