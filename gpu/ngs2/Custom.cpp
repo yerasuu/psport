@@ -14,11 +14,15 @@
 static constexpr std::uint32_t USER_FX2_FLAG_FIRST_PROCESS = 1;
 static constexpr std::uint32_t USER_FX2_FLAG_PARAM_CHANGED = 2;
 
-// The built-in modules (envelope, compressor, reverb, peak meter and the rest) are not implemented:
-// one passes its input through unchanged and ignores its parameters, so a rack that uses them
-// still sounds, without that effect. In the rack it is a UserFx2 slot with no process handler.
+// The built-in modules other than UserFx (envelope, compressor, reverb, peak meter and the rest) are
+// not implemented: one passes its input through unchanged and ignores its parameters, so a rack that
+// uses them still sounds, without that effect. In the rack it is a UserFx2 slot with no process handler.
 static bool IsUserFx2(const Ngs2CustomRackModuleInfo& info) {
     return info.module_id == SCE_NGS2_CUSTOM_MODULE_ID_USER_FX2;
+}
+
+static bool IsUserFx(const Ngs2CustomRackModuleInfo& info) {
+    return info.module_id == SCE_NGS2_CUSTOM_MODULE_ID_USER_FX;
 }
 
 static void NoteMissingModule(std::uint32_t module_id) {
@@ -35,6 +39,7 @@ void Ngs2CheckCustomRack(const Ngs2CustomRackOption& option) {
     for (std::uint32_t m = 0; m < option.num_modules; m++) {
         const auto& info = option.module[m];
         if (info.source_buffer_id != 0 || info.dest_buffer_id != 0) APS5_INVALID_ARG_EX;
+        if (IsUserFx(info)) continue;
         if (!IsUserFx2(info)) {
             NoteMissingModule(info.module_id);
             continue;
@@ -54,6 +59,8 @@ static Ngs2UserFx2SetupContext UserFxContext(Ngs2Rack& rack, std::size_t module,
 }
 
 void Ngs2SetupUserFx(Ngs2Rack& rack, const Ngs2CustomRackOption& option) {
+    rack.moduleIds.resize(option.num_modules);
+    for (std::uint32_t m = 0; m < option.num_modules; m++) rack.moduleIds[m] = option.module[m].module_id;
     rack.userFx.resize(option.num_modules);
     rack.userFxCommon.resize(option.num_modules);
     for (auto& voice : rack.voices) voice.userFx.resize(option.num_modules);
@@ -114,6 +121,15 @@ void Ngs2ApplyCustomParam(Ngs2Voice& voice, const Ngs2VoiceParamHeader& param) {
         return;
     }
     // Module parameters are 0x4000 << 16 | module id << 8 | module index.
+    if ((param.id & ~0x1fu) == SCE_NGS2_CUSTOM_VOICE_PARAM_USER_FX && (param.id & 0x1f) < voice.userFx.size() &&
+        voice.rack->moduleIds[param.id & 0x1f] == SCE_NGS2_CUSTOM_MODULE_ID_USER_FX) {
+        const auto& fx = ParamAs<Ngs2SubmixerVoiceUserFxParam>(param);
+        auto& module = voice.userFx[param.id & 0x1f];
+        module.handler = fx.handler;
+        module.userData = {fx.user_data0, fx.user_data1, fx.user_data2};
+        module.flags = USER_FX2_FLAG_FIRST_PROCESS;
+        return;
+    }
     if ((param.id & 0xffff0000u) == 0x40000000u && (param.id & 0x1f) < voice.userFx.size() &&
         voice.rack->userFx[param.id & 0x1f].process_handler == nullptr) {
         return;
@@ -131,6 +147,13 @@ void Ngs2ProcessUserFx(Ngs2Voice& voice, std::uint32_t grain, std::uint32_t samp
     for (std::uint32_t c = 0; c < voice.channels; c++) channels[c] = voice.samples.data() + static_cast<std::size_t>(c) * grain;
     for (std::size_t m = 0; m < voice.userFx.size(); m++) {
         auto& fx = voice.userFx[m];
+        if (fx.handler != nullptr) {
+            Ngs2UserFxProcessContext context{channels.data(), fx.userData[0], fx.userData[1], fx.userData[2], fx.flags, voice.channels, grain, sampleRate};
+            const int result = fx.handler(&context);
+            if (result != SCE_NGS2_OK) throw std::runtime_error("NGS2: the UserFx process handler failed with " + std::to_string(result));
+            fx.flags = 0;
+            continue;
+        }
         const auto& module = voice.rack->userFx[m];
         if (module.process_handler == nullptr) continue;
         Ngs2UserFx2ProcessContext context{channels.data(), voice.rack->userFxCommon[m].data(), fx.param.data(), fx.work.data(), fx.state.data(),

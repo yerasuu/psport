@@ -111,6 +111,8 @@ struct Ngs2UserFx2 {
     std::vector<std::uint8_t> work;
     std::vector<std::uint8_t> state;
     std::uint32_t flags = 0;
+    Ngs2UserFxProcessHandler handler = nullptr;
+    std::array<std::uintptr_t, 3> userData{};
 };
 
 struct Ngs2Voice {
@@ -167,6 +169,7 @@ struct Ngs2Rack {
     Ngs2ContextBufferInfo bufferInfo{};
     Ngs2BufferAllocator allocator{};
     std::vector<Ngs2Voice> voices;
+    std::vector<std::uint32_t> moduleIds;
     std::vector<Ngs2CustomUserFx2ModuleOption> userFx;
     std::vector<std::vector<std::uint8_t>> userFxCommon;
 };

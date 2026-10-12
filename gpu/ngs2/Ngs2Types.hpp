@@ -71,10 +71,12 @@ static constexpr std::uint32_t SCE_NGS2_MASTERING_VOICE_PARAM_SETUP = 0x30000000
 static constexpr std::uint32_t SCE_NGS2_MASTERING_VOICE_PARAM_GAIN = 0x30000004;
 static constexpr std::uint32_t SCE_NGS2_MASTERING_VOICE_PARAM_OUTPUT = 0x30000005;
 static constexpr std::uint32_t SCE_NGS2_CUSTOM_SUBMIXER_VOICE_PARAM_SETUP = 0x40020000;
+static constexpr std::uint32_t SCE_NGS2_CUSTOM_VOICE_PARAM_USER_FX = 0x40001900;
 static constexpr std::uint32_t SCE_NGS2_CUSTOM_VOICE_PARAM_USER_FX2 = 0x40001f00;
 
 static constexpr std::uint32_t SCE_NGS2_CUSTOM_MAX_MODULES = 24;
 static constexpr std::uint32_t SCE_NGS2_CUSTOM_MAX_PORTS = 16;
+static constexpr std::uint32_t SCE_NGS2_CUSTOM_MODULE_ID_USER_FX = 0x19;
 static constexpr std::uint32_t SCE_NGS2_CUSTOM_MODULE_ID_USER_FX2 = 0x1f;
 
 static constexpr std::uint32_t SCE_NGS2_WAVEFORM_BLOCKS_FLAG_CONTINUE = 1;
