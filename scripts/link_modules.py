@@ -33,12 +33,12 @@ DEFAULT_MODULES = ('libc.prx', 'libSceFios2.prx')
 # Served by the game's libc.prx, whose functions the runtime partly replaces to track the game's
 # writes into GPU memory (memcpy, memset): a native copy of this one would bypass that.
 NEVER_SYSTEM = {'libSceLibcInternal'}
-# Libraries the port implements itself (the runtime's kernel, GPU, video, pad and audio output; the
-# ported gpu/fiber, gpu/font, gpu/audiodec and gpu/ngs2): their system module is linked only when
-# --lle names it, to compare the two.
+# Libraries the port implements itself (the runtime's kernel, GPU, video, pad, audio output, clock and
+# user-level threads; the ported gpu/fiber, gpu/font, gpu/audiodec and gpu/ngs2): their system module
+# is linked only when --lle names it, to compare the two.
 PORT_IMPLEMENTS = {'libkernel', 'libkernel_unity', 'libkernel_sys', 'libSceGnmDriver', 'libSceVideoOut',
                    'libScePad', 'libSceAudioOut', 'libSceFiber', 'libSceFont', 'libSceFontFt',
-                   'libSceAudiodec', 'libSceNgs2'}
+                   'libSceAudiodec', 'libSceNgs2', 'libSceUlt', 'libSceRtc'}
 FS_LOAD = bytes.fromhex('64488b042500000000')  # mov rax, fs:[0]
 MAX_MODULE_SEGMENTS = 4  # SCE_DBG_MAX_SEGMENTS of sceKernelGetModuleInfo
 
