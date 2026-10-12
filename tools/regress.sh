@@ -23,6 +23,7 @@ while getopts 'j:o:c:t:n:s:' opt; do
     esac
 done
 shift $((OPTIND - 1))
+[[ $jobs =~ ^[1-9][0-9]*$ ]] || { echo "regress.sh: -j needs a positive integer" >&2; exit 2; }
 (($# == 1)) || { sed -n '2,16p' "$0" | cut -c3-; exit 2; }
 games=$(realpath -- "$1")
 [[ -x $root/out/bb-probe ]] || { echo "regress.sh: no out/bb-probe (run build.sh)" >&2; exit 1; }
