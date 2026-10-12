@@ -3171,11 +3171,10 @@ s32 PS4_SYSV_ABI LibraryCloseFontObjStub(void* fontObj, u32 /*flags*/) {
     }
     if (free_fn) {
         FontObj* next = obj->next;
-        if (obj->prev == nullptr) {
-            if (next != nullptr) {
-                next->prev = nullptr;
-            }
-        } else {
+        if (next != nullptr) {
+            next->prev = obj->prev;
+        }
+        if (obj->prev != nullptr) {
             obj->prev->next = next;
         }
         free_fn(ctx->alloc_ctx, obj);
