@@ -1,6 +1,6 @@
 # psport — игры PS4 нативно на Linux
 
-[English](README.md) · **Русский**
+[English](README.md) · **Русский** · [Español](README.es.md)
 
 psport — форк [bbport](https://github.com/deadinside28/bloodborne_pc), нативного порта Bloodborne
 для Linux, сделанный для decanter и рассчитанный не на одну игру. Оригинальный исполняемый файл
