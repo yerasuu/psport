@@ -71,9 +71,39 @@ point at them.
 | `BB_PERMISSIVE=1` | imports the port lacks return 0 instead of stopping, each logged once |
 | `BB_PERMISSIVE_OUT=error` | with `BB_PERMISSIVE=1`, those of them that write through a pointer argument (`src/import_outparams.inc`) return `0x80020016` instead of 0, so the game takes its error path rather than reading an output nothing wrote; either way their log line names the output arguments left unwritten and the pointers passed |
 | (always) | before the game starts: every import without implementation or answered by a stub, and a summary |
+| (always) | calls that nothing answers for real or that fail, see [Call report](#call-report) |
+| `BB_CALL_REPORT=<file>` | the call report's summary lines, also written to that file when the process ends |
 | `BB_AUDIO_STATS=1` | per audio port, every 5 s: cadence, peak and RMS in dBFS (sound or silence) |
 | `BB_NGS2_TRACE=1` | first calls of each Ngs2 function and the level of each render |
 | `BB_FIBER_TRACE=1` | first calls of each Fiber function with their arguments |
+
+### Call report
+
+Every import the game calls without getting real work done is logged the first time and counted:
+
+| Line | When |
+|---|---|
+| `Runtime: unsupported import <NID> (<name>) ...` | first call of an import without implementation (`BB_PERMISSIVE=1`), with its first argument or the output arguments it leaves unwritten |
+| `Calls: stub <NID> (<name>) returns 0 without doing anything; arguments <a0>, ..., <a4>` | first call of an import answered by the runtime's stub |
+| `GPU [<class>] <<level>> <file>:<line> <function>: (STUBBED) ...` | first call of a GPU library (HLE) function that does not do its work, whatever `BB_GPU_LOG` says |
+| `Calls: failed <NID> (<name>) -> 0x8xxxxxxx; arguments <a0>, ..., <a5>` | first time an import fails with that SCE error code |
+| `Calls: failed <NID> (<name>) -> -1, errno <n>; arguments <a0>, ..., <a5>` | first time a POSIX import fails with that errno |
+
+Failures are watched for the imports bound to the runtime's or the GPU library's own functions whose
+result reports one, per shadPS4's prototypes (`src/import_returns.inc`, `tools/import_returns.py`:
+sce functions returning a 32- or 64-bit result, POSIX functions returning -1 with errno) and whose
+arguments all travel in registers; a thunk calls the function and only a result that looks like a
+failure takes the slow path. When the process ends (the guest exits, the window is closed, SIGTERM,
+SIGINT or SIGHUP, a fault, the watchdog, a `STOP:`), a summary follows, most calls first:
+
+```
+Calls: summary: <n> unimplemented, <n> stub, <n> failed (import and error code)
+Calls: summary unimplemented <calls> <NID> (<name>)
+Calls: summary stub <calls> <NID> (<name>)
+Calls: summary stub <calls> <function> (HLE)
+Calls: summary failed <calls> <NID> (<name>) -> 0x8xxxxxxx
+Calls: summary failed <calls> <NID> (<name>) -> -1, errno <n>
+```
 
 ## Regression runs
 
