@@ -35,6 +35,9 @@ void runtime_memory_prepare_cpu_write(uintptr_t address, uint64_t size);
 /* libkernel memory pools (runtime_mempool.c) over the runtime's direct memory and mapping table. */
 uintptr_t runtime_mempool_resolve(const char *name);
 void runtime_mempool_report(void);
+/* libkernel asynchronous file I/O (runtime_aio.c) on worker threads over the runtime's file layer. */
+uintptr_t runtime_aio_resolve(const char *name);
+void runtime_aio_report(void);
 int32_t runtime_memory_pool_expand(uint64_t low, uint64_t high, uint64_t size, uint64_t alignment, int64_t *phys);
 int32_t runtime_memory_pool_reserve(void **inout, uint64_t size, int flags, uint64_t alignment);
 /* Maps [phys, phys+size) of direct memory over a pool reservation; EINVAL unless all of the range is one. */
@@ -155,6 +158,7 @@ int64_t runtime_file_close(int fd);
 int64_t runtime_file_read(int fd, void *buffer, uint64_t size);
 int64_t runtime_file_pread(int fd, void *buffer, uint64_t size, int64_t offset);
 int64_t runtime_file_write(int fd, const void *buffer, uint64_t size);
+int64_t runtime_file_pwrite(int fd, const void *buffer, uint64_t size, int64_t offset);
 int64_t runtime_file_lseek(int fd, int64_t offset, int whence);
 int64_t runtime_file_stat(const char *path, void *guest_stat);
 int64_t runtime_file_fstat(int fd, void *guest_stat);

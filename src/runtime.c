@@ -101,6 +101,7 @@ void runtime_report(void) {
     runtime_pad_report();
     runtime_savedata_report();
     runtime_file_report();
+    runtime_aio_report();
     printf("Runtime: memory operations=%zu\n", (size_t)memory_calls);
     runtime_calls_report();
 }
@@ -288,6 +289,8 @@ static uintptr_t resolve_scoped(const char *name, int is_data) {
     if (save) return save;
     uintptr_t file = runtime_file_resolve(name);
     if (file) return file;
+    uintptr_t aio = runtime_aio_resolve(name);
+    if (aio) return aio;
     return bbgpu_resolve(name);
 }
 static const struct { const char *nid, *symbol; } import_names[]={
