@@ -43,6 +43,7 @@
 #define ERR_INVALID_HANDLE ((int32_t)0x80920003)
 #define ERR_ALREADY_OPENED ((int32_t)0x80920004)
 #define ERR_NOT_INITIALIZED ((int32_t)0x80920005)
+#define ERR_NO_HANDLE ((int32_t)0x80920008)
 #define PAD_HANDLE 1
 
 enum {
@@ -716,6 +717,10 @@ static ABI int32_t pad_open(int32_t user, int32_t type, int32_t index, const voi
     puts("Runtime: pad opened for user 1 (SDL gamepad or keyboard)");
     return PAD_HANDLE;
 }
+static ABI int32_t pad_get_handle(int32_t user, int32_t type, int32_t index) {
+    if (!initialized) return ERR_NOT_INITIALIZED;
+    return user==1 && (type==0 || type==2) && !index && opened ? PAD_HANDLE : ERR_NO_HANDLE;
+}
 static ABI int32_t pad_close(int32_t handle) {
     if (handle!=PAD_HANDLE || !opened) return ERR_INVALID_HANDLE;
     opened=0; return 0;
@@ -761,7 +766,7 @@ static ABI int32_t pad_ok_handle(int32_t handle) { return handle==PAD_HANDLE && 
 static ABI int32_t pad_ok_handle_flag(int32_t handle, uint8_t flag) { (void)flag; return pad_ok_handle(handle); }
 
 static const RuntimeExport exports[]={
-    {"scePadInit",pad_init}, {"scePadOpen",pad_open}, {"scePadClose",pad_close},
+    {"scePadInit",pad_init}, {"scePadOpen",pad_open}, {"scePadGetHandle",pad_get_handle}, {"scePadClose",pad_close},
     {"scePadReadState",pad_read_state}, {"scePadRead",pad_read},
     {"scePadGetControllerInformation",pad_info}, {"scePadSetVibration",pad_vibration},
     {"scePadResetOrientation",pad_ok_handle},
