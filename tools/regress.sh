@@ -80,7 +80,7 @@ run_title() {
     local pid=$! start=$SECONDS ended=schedule at what rest buttons hold
     # setsid put the session out of reach of the terminal and of a kill aimed at this script, so
     # an interrupted run would leave the game and gamescope running headless indefinitely.
-    trap 'stop_session $pid; exit 143' TERM
+    trap 'stop_session $pid; exit 143' TERM HUP INT
     while read -r at what rest; do
         [[ -z $at || $at == \#* ]] && continue
         while ((SECONDS - start < at)); do kill -0 $pid 2>/dev/null || { ended=exited; break 2; }; sleep 0.2; done
