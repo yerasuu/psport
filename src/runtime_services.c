@@ -191,16 +191,6 @@ static ABI int32_t np_compare(const void *a,const void *b) {
     return memcmp(a,b,16) ? (int32_t)0x80550609 : 0; /* NP_UTIL NOT_MATCH */
 }
 
-/* ---- Voice chat: ports exist, carry no audio ---- */
-static ABI int32_t voice_port(void *param,uint32_t *port) { (void)param; if (!port) return (int32_t)0x8029000b; *port=(uint32_t)new_id(); return 0; }
-static ABI int32_t voice_read(uint32_t port,void *data,uint32_t *size) { (void)port; (void)data; if (size) *size=0; return 0; }
-static ABI int32_t voice_info(uint32_t port,uint32_t *info) {
-    (void)port;
-    if (!info) return (int32_t)0x8029000b;
-    memset(info,0,40); /* type, state=unconnected, no bytes available */
-    return 0;
-}
-
 /* ---- Common dialogs: nothing is displayed; an opened dialog finishes. ---- */
 typedef struct { const char *name; int initialized, status; } Dialog;
 static Dialog dialogs[]={{"CommonDialog",0,0},{"MsgDialog",0,0},{"SaveDataDialog",0,0},
@@ -525,7 +515,7 @@ static ABI int32_t discmap_8a82(const char *path,int64_t offset,int64_t size,int
     (void)path; (void)offset; (void)size; (void)flags; (void)r1; (void)r2; return DISC_MAP_NO_BITMAP;
 }
 
-/* ---- Devices that are absent: mouse, microphone, voice chat ---- */
+/* ---- Devices that are absent: mouse, microphone ---- */
 /* A mouse port opens but never reports a connected device. */
 static ABI int32_t mouse_open(int32_t user,int32_t type,int32_t index,const void *param) { (void)user; (void)type; (void)index; (void)param; return new_id(); }
 static ABI int32_t mouse_read(int32_t handle,unsigned char *data,int32_t count) {
@@ -698,10 +688,6 @@ static const RuntimeExport exports[]={
     {"sceNpScoreGetRankingByNpIdPcId",np_signed_out}, {"sceNpScoreGetRankingByRange",np_signed_out},
     {"sceNpScoreRecordGameData",np_signed_out}, {"sceNpScoreRecordScore",np_signed_out},
     {"sceNpScoreSetPlayerCharacterId",runtime_stub}, {"sceNpTusCreateNpTitleCtxA",np_signed_out},
-    {"sceVoiceCreatePort",voice_port}, {"sceVoiceDeletePort",runtime_stub},
-    {"sceVoiceConnectIPortToOPort",runtime_stub}, {"sceVoiceDisconnectIPortFromOPort",runtime_stub},
-    {"sceVoiceStart",runtime_stub}, {"sceVoiceStop",runtime_stub}, {"sceVoiceGetPortInfo",voice_info},
-    {"sceVoiceReadFromOPort",voice_read}, {"sceVoiceWriteToIPort",runtime_stub},
     {"sceAudioInInput",audio_in_open}, {"sceAudioInClose",audio_in_open},
     {"sceNpMatching2Initialize",runtime_stub}, {"sceNpMatching2Terminate",runtime_stub},
     {"sceNpMatching2CreateContext",np_signed_out},
@@ -761,7 +747,6 @@ static const RuntimeExport exports[]={
     {"sceImeKeyboardGetInfo",keyboard_info}, {"sceImeKeyboardClose",keyboard_close}, {"sceImeUpdate",ime_update},
     {"sceDiscMapIsRequestOnHDD",discmap_on_hdd}, {"sceDiscMap_8A828CAEE7EDD5E9",discmap_8a82},
     {"sceDiscMap_7C980FFB0AA27E7A",discmap_7c98},
-    {"sceVoiceInit",runtime_stub}, {"sceVoiceEnd",runtime_stub},
     {"sceScreenShotEnable",runtime_stub}, {"sceScreenShotDisable",runtime_stub}, {"sceScreenShotSetParam",runtime_stub},
     {"sceScreenShotSetOverlayImage",runtime_stub}, {"sceScreenShotSetOverlayImageWithOrigin",runtime_stub},
     {"sceSharePlayInitialize",runtime_stub}, {"sceGameLiveStreamingInitialize",runtime_stub},

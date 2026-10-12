@@ -270,6 +270,8 @@ static uintptr_t resolve_scoped(const char *name, int is_data) {
     if (loader) return loader;
     uintptr_t playgo = runtime_playgo_resolve(name);
     if (playgo) return playgo;
+    uintptr_t voice = runtime_voice_resolve(name);
+    if (voice) return voice;
     uintptr_t services = runtime_services_resolve(name);
     if (services) return services;
     uintptr_t ajm = runtime_ajm_resolve(name);
