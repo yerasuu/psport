@@ -114,6 +114,9 @@ baked-in 60 fps patch crashes in the gestures menu.
   preset's size through a patch at start, so changing them needs a restart. Live resolution
   changes (`bbport.ini` `live_resolution=0|1|auto`, `BB_LIVE_RES=1`) switch without one, at a
   higher cost.
+- **Controls.** A gamepad through SDL3 (`BB_GAMEPAD=<GUID or part of the name>` picks one) or
+  the keyboard, both remapped in the launcher; the touchpad's left half (Tab) opens the gestures,
+  the right half (Backspace) the key items.
 - **Settings.** In the game's own menu (*System → Display / Effects*), in the overlay (Insert or
   L3+R3) and in the launcher.
 - **Mods, patches, DLC.** Loose-file mod folders and shadPS4-format XML patches, both from the
