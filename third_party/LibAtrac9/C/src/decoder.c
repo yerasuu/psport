@@ -13,10 +13,10 @@ static void ImdctBlock(Block* block);
 static void ApplyIntensityStereo(Block* block);
 static void PcmFloatToShort(Frame* frame, short* pcmOut);
 
-At9Status Decode(Atrac9Handle* handle, const unsigned char* audio, unsigned char* pcm, int* bytesUsed)
+At9Status Decode(Atrac9Handle* handle, const unsigned char* audio, int audioSize, unsigned char* pcm, int* bytesUsed)
 {
 	BitReaderCxt br;
-	InitBitReaderCxt(&br, audio);
+	InitBitReaderCxt(&br, audio, audioSize);
 	ERROR_CHECK(DecodeFrame(&handle->Frame, &br));
 
 	PcmFloatToShort(&handle->Frame, (short*)pcm);

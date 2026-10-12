@@ -187,7 +187,8 @@ static uint32_t at9_frame(Instance *in, const unsigned char **input, uint64_t *i
     int channels=in->info.channels, frame=in->info.frameSamples, used=0;
     int16_t pcm[256*8];
     if (frame*channels>(int)(sizeof(pcm)/sizeof(*pcm))) return RESULT_CODEC_ERROR|RESULT_FATAL;
-    int e=Atrac9Decode(in->handle,*input,pcm,&used);
+    uint64_t available=in->superframe_remain<*input_size ? in->superframe_remain : *input_size;
+    int e=Atrac9Decode(in->handle,*input,(int)available,pcm,&used);
     if (e) { *internal=e; return RESULT_CODEC_ERROR|RESULT_FATAL; }
     *input+=used; *input_size-=(uint64_t)used; in->superframe_remain-=(uint32_t)used;
     ++frames_decoded;
@@ -221,7 +222,8 @@ static uint32_t at9_frame(Instance *in, const unsigned char **input, uint64_t *i
     } else if (gapless_end(in)) {
         /* Drain the rest of the superframe so the next stream starts aligned. */
         while (in->frames%(uint32_t)in->info.framesInSuperframe && *input_size) {
-            if (Atrac9Decode(in->handle,*input,pcm,&used)) break;
+            uint64_t available=in->superframe_remain<*input_size ? in->superframe_remain : *input_size;
+            if (Atrac9Decode(in->handle,*input,(int)available,pcm,&used)) break;
             *input+=used; *input_size-=(uint64_t)used; in->superframe_remain-=(uint32_t)used; ++in->frames;
         }
         uint64_t skip_bytes=in->superframe_remain<*input_size ? in->superframe_remain : *input_size;

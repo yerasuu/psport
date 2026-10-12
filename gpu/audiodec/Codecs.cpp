@@ -183,7 +183,7 @@ public:
         for (int frame = 0; frame < info.framesInSuperframe; ++frame) {
             int used = 0;
             samples.resize(static_cast<std::size_t>(info.frameSamples) * info.channels);
-            const int status = Atrac9Decode(handle, input.data() + offset, samples.data(), &used);
+            const int status = Atrac9Decode(handle, input.data() + offset, static_cast<int>(superframeSize - offset), samples.data(), &used);
             if (status == 0) {
                 for (std::size_t i = 0; i < samples.size(); ++i) writeSample(samples[i] / 32768.0f, wordSize, pcm + result.produced + i * sampleBytes);
             }

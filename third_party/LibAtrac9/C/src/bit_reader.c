@@ -3,10 +3,11 @@
 
 static int PeekIntFallback(BitReaderCxt* br, int bitCount);
 
-void InitBitReaderCxt(BitReaderCxt* br, const void * buffer)
+void InitBitReaderCxt(BitReaderCxt* br, const void * buffer, const int length)
 {
 	br->Buffer = buffer;
 	br->Position = 0;
+	br->Length = length;
 }
 
 int ReadInt(BitReaderCxt* br, const int bits)
@@ -33,11 +34,23 @@ int ReadOffsetBinary(BitReaderCxt* br, const int bits)
 
 int PeekInt(BitReaderCxt* br, const int bits)
 {
+	const int remaining = br->Length * 8 - br->Position;
+	if (remaining <= 0)
+	{
+		return 0;
+	}
+
+	if (bits > remaining)
+	{
+		return PeekIntFallback(br, remaining) << (bits - remaining);
+	}
+
 	const int byteIndex = br->Position / 8;
 	const int bitIndex = br->Position % 8;
+	const int available = br->Length - byteIndex;
 	const unsigned char* buffer = br->Buffer;
 
-	if (bits <= 9)
+	if (bits <= 9 && available >= 2)
 	{
 		int value = buffer[byteIndex] << 8 | buffer[byteIndex + 1];
 		value &= 0xFFFF >> bitIndex;
@@ -45,7 +58,7 @@ int PeekInt(BitReaderCxt* br, const int bits)
 		return value;
 	}
 
-	if (bits <= 17)
+	if (bits <= 17 && available >= 3)
 	{
 		int value = buffer[byteIndex] << 16 | buffer[byteIndex + 1] << 8 | buffer[byteIndex + 2];
 		value &= 0xFFFFFF >> bitIndex;
@@ -53,7 +66,7 @@ int PeekInt(BitReaderCxt* br, const int bits)
 		return value;
 	}
 
-	if (bits <= 25)
+	if (bits <= 25 && available >= 4)
 	{
 		int value = buffer[byteIndex] << 24
 			| buffer[byteIndex + 1] << 16
