@@ -33,8 +33,17 @@ mkdir -p pgo
 if [[ ! -f gpu/third_party/imgui/imgui.h ]]; then
     git submodule update --init --recursive
 fi
+# ccache when installed, one cache for every checkout and worktree: paths under each one's root
+# are hashed relative to it. Empty otherwise, so a launcher cached by an earlier configure goes.
+launcher=
+if command -v ccache >/dev/null; then
+    launcher=ccache
+    export CCACHE_DIR=${CCACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/bbport/ccache}
+    export CCACHE_BASEDIR=${CCACHE_BASEDIR:-$PWD} CCACHE_NOHASHDIR=${CCACHE_NOHASHDIR:-1}
+fi
 cmake -S gpu -B out/gpu -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBB_PGO="$pgo" \
-    -DBB_LTO="${BB_LTO:-ON}" -DBB_PGO_DIR="$PWD/pgo" >/dev/null
+    -DBB_LTO="${BB_LTO:-ON}" -DBB_PGO_DIR="$PWD/pgo" \
+    -DCMAKE_C_COMPILER_LAUNCHER="$launcher" -DCMAKE_CXX_COMPILER_LAUNCHER="$launcher" >/dev/null
 echo "GPU library: PGO $pgo, LTO ${BB_LTO:-ON}"
 # A failed GPU build must stop here: an older libbbgpu.so would otherwise be used silently.
 if ! ninja -C out/gpu bbgpu $(grep -q "^build bbnet:" out/gpu/build.ninja && echo bbnet) > out/gpu-build.log 2>&1; then
@@ -46,7 +55,8 @@ fi
 # libnvidia-ngx-dlss.so. Without them the DLSS upscaler is listed as unavailable.
 if [[ -n ${DLSS_SDK_ROOT:-} ]]; then
     cmake -S gpu/dlss_bridge -B out/dlss-bridge -G Ninja -DCMAKE_BUILD_TYPE=Release \
-        -DDLSS_SDK_ROOT="$DLSS_SDK_ROOT" >/dev/null
+        -DDLSS_SDK_ROOT="$DLSS_SDK_ROOT" \
+        -DCMAKE_C_COMPILER_LAUNCHER="$launcher" -DCMAKE_CXX_COMPILER_LAUNCHER="$launcher" >/dev/null
     ninja -C out/dlss-bridge >/dev/null
     rm -f out/libnvidia-ngx-dlss.so.*
     cp out/dlss-bridge/libbbport_dlss.so "$DLSS_SDK_ROOT"/lib/Linux_x86_64/rel/libnvidia-ngx-dlss.so.* out/
