@@ -77,6 +77,10 @@ upstream's and built around Bloodborne.
   `git submodule update --init --recursive`.
 - `BB_LTO=OFF` disables link-time optimization; `BB_PGO=generate|use|off` sets profile-guided
   optimization (`use` by default when `pgo/` holds a profile).
+- With [ccache](https://ccache.dev) installed (`shell.nix` has it), the GPU library is compiled
+  through it, one cache for every checkout and worktree (`~/.cache/bbport/ccache`, `CCACHE_DIR`).
+- `nix-build packaging/port.nix` builds the port from source in Nix's sandbox; CI publishes that
+  build of every commit on `master` as a Nix binary cache (FORK.md, "CI and binary cache").
 
 ## Measuring progress
 

@@ -81,6 +81,10 @@ BB_GAME_DIR=/путь/к/дампу BB_SKIP_GAME_CHECK=1 BB_PERMISSIVE=1 bash ru
   выполнит `git submodule update --init --recursive`.
 - `BB_LTO=OFF` отключает оптимизацию при линковке; `BB_PGO=generate|use|off` задаёт оптимизацию по
   профилю (по умолчанию `use`, если в `pgo/` есть профиль).
+- Если установлен [ccache](https://ccache.dev) (он есть в `shell.nix`), библиотека GPU собирается
+  через него, с одним кэшем для всех копий и worktree (`~/.cache/bbport/ccache`, `CCACHE_DIR`).
+- `nix-build packaging/port.nix` собирает порт из исходников в песочнице Nix; CI публикует эту
+  сборку каждого коммита в `master` как бинарный кэш Nix (FORK.md, «CI and binary cache»).
 
 ## Измерение прогресса
 
