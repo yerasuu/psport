@@ -42,7 +42,7 @@ expand() {
     while [[ $value =~ \$\{?([A-Za-z_][A-Za-z0-9_]*)\}? ]]; do
         name=${BASH_REMATCH[1]}
         [[ -n ${!name:-} ]] || { printf '%s' "$name"; return 1; }
-        value=${value//"${BASH_REMATCH[0]}"/${!name}}
+        value=${value//"${BASH_REMATCH[0]}"/"${!name}"}
     done
     printf '%s' "$value"
 }
