@@ -110,9 +110,14 @@ def classify(run_dir):
     return result
 
 
+def crash_key(signature):
+    """The signature without the offset in a host library, which moves with every rebuild of it."""
+    return re.sub(r'^(host fault sig\d+ \S+?)\+0x[0-9a-f]+ ', r'\1 ', signature)
+
+
 def regressions(now, before):
     found = [f'lost {m}' for m in MILESTONES if before.get(m) and not now[m]]
-    if now['crash'] and now['crash'] != before.get('crash', ''):
+    if now['crash'] and crash_key(now['crash']) != crash_key(before.get('crash', '')):
         found.append(f"crash {before.get('crash') or 'none'} -> {now['crash']}")
     return found
 
