@@ -2,6 +2,7 @@
  *   - one local user (id 1) who is logged in but not signed in to PSN;
  *   - network cable unplugged: NetCtl disconnected, sockets unavailable;
  *   - common dialogs complete immediately (no UI is drawn yet);
+ *   - no PlayStation VR headset is connected;
  *   - the whole package is installed (PlayGo reports every chunk local).
  * Every entry here is an explicit contract; unknown functions still stop. */
 #define _GNU_SOURCE
@@ -35,6 +36,10 @@
 #define PLAYGO_BAD_CHUNK ((int32_t)0x80B2000C)
 #define AUDIO_IN_NOT_OPENED ((int32_t)0x80260109)
 #define TROPHY_INVALID ((int32_t)0x80551604)
+#define HMD_ALREADY_INITIALIZED ((int32_t)0x81110001)
+#define HMD_NOT_INITIALIZED ((int32_t)0x81110002)
+#define HMD_HANDLE_INVALID ((int32_t)0x81110003)
+#define HMD_PARAMETER_NULL ((int32_t)0x81110008)
 
 static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
 static int next_id=1;
@@ -183,7 +188,10 @@ static ABI int32_t voice_info(uint32_t port,uint32_t *info) {
 /* ---- Common dialogs: nothing is displayed; an opened dialog finishes. ---- */
 typedef struct { const char *name; int initialized, status; } Dialog;
 static Dialog dialogs[]={{"CommonDialog",0,0},{"MsgDialog",0,0},{"SaveDataDialog",0,0},
-                         {"NpProfileDialog",0,0},{"NpCommerceDialog",0,0},{"ImeDialog",0,0}};
+                         {"NpProfileDialog",0,0},{"NpCommerceDialog",0,0},{"ImeDialog",0,0},
+                         {"ErrorDialog",0,0},{"WebBrowserDialog",0,0},{"InvitationDialog",0,0},
+                         {"SigninDialog",0,0},{"SocialScreenDialog",0,0},
+                         {"HmdSetupDialog",0,0}};
 static int common_initialized;
 static ABI int32_t common_init(void) { common_initialized=1; return 0; }
 static int32_t dialog_init(int i) {
@@ -206,7 +214,24 @@ static int32_t dialog_term(int i) {
     static ABI int32_t tag##_status(void) { return dialog_status(i); } \
     static ABI int32_t tag##_term(void) { return dialog_term(i); }
 DIALOG(msg,1) DIALOG(save,2) DIALOG(profile,3) DIALOG(commerce,4)
+DIALOG(web,7) DIALOG(invitation,8) DIALOG(signin,9) DIALOG(social,10) DIALOG(hmd_setup,11)
 static ABI int32_t profile_result(void *result) { if (result) memset(result,0,4); return 0; }
+typedef struct {
+    void *callback_arg; int32_t error_code, result; uint32_t *sent_count; uint8_t reserved[32];
+} InvitationResult;
+static void *invitation_callback_arg;
+static ABI int32_t invitation_start(const uint8_t *param) {
+    if (param) memcpy(&invitation_callback_arg,param+64,sizeof(invitation_callback_arg));
+    return invitation_open(param);
+}
+static ABI int32_t invitation_result(InvitationResult *result) {
+    if (!dialogs[8].initialized) return DIALOG_NOT_INITIALIZED;
+    if (dialogs[8].status!=3) return (int32_t)0x80B80005;
+    if (!result) return (int32_t)0x80B8000D;
+    result->callback_arg=invitation_callback_arg; result->error_code=0; result->result=0;
+    if (result->sent_count) *result->sent_count=0;
+    return 0;
+}
 /* With nothing displayed, a dialog is ready to show whenever it is initialized (Atelier Ayesha
  * waited on these before opening its auto-load dialog; answered 0 they never turned true). */
 static ABI int32_t save_ready(void) { return dialogs[2].initialized; }
@@ -222,6 +247,43 @@ static ABI int32_t save_result(int32_t *result) {
     return 0;
 }
 static ABI int32_t save_close(const void *param) { (void)param; dialogs[2].status=3; return 0; }
+/* OrbisMsgDialogResult: mode, result, buttonId, reserved[32]; ends as accepted, like SaveDataDialog. */
+static ABI int32_t msg_result(int32_t *result) {
+    if (dialogs[1].status!=3) return (int32_t)0x80B80005; /* SCE_COMMON_DIALOG_ERROR_NOT_FINISHED */
+    if (!result) return (int32_t)0x80B8000D;              /* SCE_COMMON_DIALOG_ERROR_ARG_NULL */
+    memset(result,0,44);
+    result[2]=1;
+    return 0;
+}
+static ABI int32_t msg_close(void) { dialogs[1].status=3; return 0; }
+typedef struct { int32_t size, error_code, user, reserved; } ErrorDialogParam;
+static ABI int32_t error_init(void) { return dialog_init(6); }
+static ABI int32_t error_open(const ErrorDialogParam *param) {
+    static uint32_t logged[32];
+    static int logged_count;
+    if (dialogs[6].status!=1 && dialogs[6].status!=3) return (int32_t)0x80B80006; /* INVALID_STATE */
+    if (!param) return (int32_t)0x80B8000D;                                         /* ARG_NULL */
+    const uint32_t code=(uint32_t)param->error_code;
+    int seen=0;
+    for (int k=0;k<logged_count;++k) seen|=logged[k]==code;
+    if (!seen && logged_count<32) {
+        logged[logged_count++]=code;
+        printf("Runtime: ErrorDialog 0x%08X\n",code);
+    }
+    dialogs[6].status=3; return 0;
+}
+static ABI int32_t error_status(void) { return dialog_status(6); }
+static ABI int32_t error_close(void) { return (int32_t)0x80B8000B; } /* NOT_RUNNING: an opened one has already finished */
+static ABI int32_t error_term(void) { return dialog_term(6); }
+/* OrbisHmdSetupDialogResult: result, reserved. With no headset to set up, the user can only
+ * back out of the dialog: SCE_COMMON_DIALOG_RESULT_USER_CANCELED. */
+static ABI int32_t hmd_setup_result(int32_t *result) {
+    if (dialogs[11].status!=3) return (int32_t)0x80B80005; /* NOT_FINISHED */
+    if (!result) return (int32_t)0x80B8000D;               /* ARG_NULL */
+    result[0]=1;
+    return 0;
+}
+static ABI int32_t hmd_setup_close(void) { dialogs[11].status=3; return 0; }
 /* ImeDialog: text typed on the keyboard into the game window (title bar shows it).
  * OrbisImeDialogParam: user, type, languages(8), enter label, method, filter,
  * option, max length, char16 buffer, position, alignment, placeholder, title. */
@@ -292,6 +354,28 @@ static ABI int32_t ime_result(uint32_t *result) {
     return 0;
 }
 static ABI int32_t ime_term(void) { memset(&ime,0,sizeof(ime)); return 0; }
+
+/* ---- PlayStation VR: the library runs, no headset is detected ---- */
+static int hmd_initialized;
+static ABI int32_t hmd_init(const void *param) {
+    if (hmd_initialized) return HMD_ALREADY_INITIALIZED;
+    if (!param) return HMD_PARAMETER_NULL;
+    hmd_initialized=1; return 0;
+}
+static ABI int32_t hmd_term(void) {
+    if (!hmd_initialized) return HMD_NOT_INITIALIZED;
+    hmd_initialized=0; return 0;
+}
+/* OrbisHmdDeviceInformation (32 bytes): status, user, reserved, panel size, latencies, HMU mount. */
+static ABI int32_t hmd_device_info(int32_t *info) {
+    if (!info) return HMD_PARAMETER_NULL;
+    if (!hmd_initialized) return HMD_NOT_INITIALIZED;
+    memset(info,0,32);
+    info[0]=2; /* SCE_HMD_DEVICE_STATUS_NOT_DETECTED */
+    info[1]=-1;
+    return 0;
+}
+static ABI int32_t hmd_handle_invalid(void) { return HMD_HANDLE_INVALID; }
 
 /* ---- Trophies: accepted locally, recorded in the log ---- */
 static ABI int32_t trophy_context(int32_t *ctx,int32_t user,uint32_t label,uint64_t options) {
@@ -488,6 +572,7 @@ static const RuntimeExport exports[]={
     {"sceCommonDialogInitialize",common_init},
     {"sceMsgDialogInitialize",msg_init}, {"sceMsgDialogOpen",msg_open},
     {"sceMsgDialogUpdateStatus",msg_status}, {"sceMsgDialogTerminate",msg_term},
+    {"sceMsgDialogGetStatus",msg_status}, {"sceMsgDialogGetResult",msg_result}, {"sceMsgDialogClose",msg_close},
     {"sceSaveDataDialogInitialize",save_init}, {"sceSaveDataDialogOpen",save_open},
     {"sceSaveDataDialogUpdateStatus",save_status}, {"sceSaveDataDialogTerminate",save_term},
     {"sceSaveDataDialogGetStatus",save_status}, {"sceSaveDataDialogIsReadyToDisplay",save_ready},
@@ -495,11 +580,35 @@ static const RuntimeExport exports[]={
     {"sceSaveDataDialogProgressBarSetValue",runtime_stub}, {"sceSaveDataDialogProgressBarInc",runtime_stub},
     {"sceNpProfileDialogInitialize",profile_init}, {"sceNpProfileDialogOpen",profile_open},
     {"sceNpProfileDialogUpdateStatus",profile_status}, {"sceNpProfileDialogTerminate",profile_term},
-    {"sceNpProfileDialogGetResult",profile_result},
+    {"sceNpProfileDialogGetResult",profile_result}, {"sceNpProfileDialogOpenA",profile_open},
+    {"sceNpProfileDialogGetStatus",profile_status},
     {"sceNpCommerceDialogInitialize",commerce_init}, {"sceNpCommerceDialogOpen",commerce_open},
     {"sceNpCommerceDialogUpdateStatus",commerce_status}, {"sceNpCommerceDialogTerminate",commerce_term},
     {"sceImeDialogInit",ime_init}, {"sceImeDialogGetStatus",ime_status}, {"sceImeDialogGetResult",ime_result},
     {"sceImeDialogTerm",ime_term}, {"sceImeDialogAbort",ime_term},
+    {"sceWebBrowserDialogInitialize",web_init}, {"sceWebBrowserDialogOpen",web_open},
+    {"sceWebBrowserDialogOpenForPredeterminedContent",web_open}, {"sceWebBrowserDialogUpdateStatus",web_status},
+    {"sceWebBrowserDialogGetStatus",web_status}, {"sceWebBrowserDialogTerminate",web_term},
+    {"sceInvitationDialogInitialize",invitation_init}, {"sceInvitationDialogOpen",invitation_start},
+    {"sceInvitationDialogOpenA",invitation_start}, {"sceInvitationDialogUpdateStatus",invitation_status},
+    {"sceInvitationDialogGetStatus",invitation_status}, {"sceInvitationDialogTerminate",invitation_term},
+    {"sceInvitationDialogGetResultA",invitation_result},
+    {"sceSigninDialogInitialize",signin_init}, {"sceSigninDialogOpen",signin_open},
+    {"sceSigninDialogUpdateStatus",signin_status}, {"sceSigninDialogGetStatus",signin_status},
+    {"sceSigninDialogTerminate",signin_term},
+    {"sceSocialScreenDialogInitialize",social_init}, {"sceSocialScreenDialogOpen",social_open},
+    {"sceSocialScreenDialogUpdateStatus",social_status}, {"sceSocialScreenDialogGetStatus",social_status},
+    {"sceSocialScreenDialogTerminate",social_term},
+    {"sceErrorDialogInitialize",error_init}, {"sceErrorDialogOpen",error_open},
+    {"sceErrorDialogUpdateStatus",error_status}, {"sceErrorDialogGetStatus",error_status},
+    {"sceErrorDialogClose",error_close}, {"sceErrorDialogTerminate",error_term},
+    {"sceHmdSetupDialogInitialize",hmd_setup_init}, {"sceHmdSetupDialogOpen",hmd_setup_open},
+    {"sceHmdSetupDialogUpdateStatus",hmd_setup_status}, {"sceHmdSetupDialogGetStatus",hmd_setup_status},
+    {"sceHmdSetupDialogGetResult",hmd_setup_result}, {"sceHmdSetupDialogClose",hmd_setup_close},
+    {"sceHmdSetupDialogTerminate",hmd_setup_term},
+    {"sceHmdInitialize",hmd_init}, {"sceHmdInitialize315",hmd_init}, {"sceHmdTerminate",hmd_term},
+    {"sceHmdGetDeviceInformation",hmd_device_info},
+    {"sceHmdGetDeviceInformationByHandle",hmd_handle_invalid}, {"sceHmdGetFieldOfView",hmd_handle_invalid},
     {"sceNpTrophyCreateContext",trophy_context}, {"sceNpTrophyCreateHandle",trophy_handle},
     {"sceNpTrophyRegisterContext",runtime_stub}, {"sceNpTrophyUnlockTrophy",trophy_unlock},
     {"sceNpTrophyGetGameInfo",trophy_game_info}, {"sceNpTrophyGetTrophyInfo",trophy_info},
