@@ -603,7 +603,7 @@ int main(int argc, char **argv) {
         char title[128]="Bloodborne", serial[16]="UNKNOWN";
         sfo_value(sfo,"TITLE",title,sizeof(title),NULL);
         sfo_value(sfo,"TITLE_ID",serial,sizeof(serial),NULL);
-        BbGpuConfig gpu={title,serial,user_dir ? user_dir : "user",(uint32_t)sdk,attributes,1920,1080};
+        BbGpuConfig gpu={title,serial,user_dir ? user_dir : "user",(uint32_t)sdk,attributes,1920,1080,app0 ? app0 : "."};
         gpu_enabled=1; /* page tracking starts while the rasterizer registers guest memory */
         if (bbgpu_init(&gpu)) fail("GPU initialization failed");
         printf("GPU: window and Vulkan presenter ready; SDK 0x%08x, %u HLE symbols\n",(unsigned)sdk,bbgpu_symbol_count());

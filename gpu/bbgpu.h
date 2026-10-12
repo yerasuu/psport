@@ -13,6 +13,7 @@ typedef struct {
     uint32_t sdk_version;       /* from the eboot's procparam */
     uint32_t psf_attributes;    /* param.sfo ATTRIBUTE */
     int32_t width, height;      /* initial window size */
+    const char *app0;           /* game folder: sce_sys/icon0.png is the window icon */
 } BbGpuConfig;
 /* Registers kernel event queues (needed with or without graphics). */
 void bbgpu_register_kernel(void);

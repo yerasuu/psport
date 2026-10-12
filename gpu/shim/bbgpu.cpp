@@ -277,10 +277,11 @@ extern "C" int bbgpu_init(const BbGpuConfig* config) {
     if (config->user_dir) setenv("BB_GPU_USER_DIR", config->user_dir, 0);
     Core::Emulator::FillElfInfo(*config);
     const std::string title = config->title ? config->title : "Bloodborne";
+    const std::string icon = std::string(config->app0 ? config->app0 : ".") + "/sce_sys/icon0.png";
     const s32 width = config->width, height = config->height;
-    g_window_thread = std::thread([title, width, height] {
+    g_window_thread = std::thread([title, icon, width, height] {
         Common::SetCurrentThreadName("bb:window");
-        auto* window = new Frontend::WindowSDL(width, height, title.c_str());
+        auto* window = new Frontend::WindowSDL(width, height, title.c_str(), icon.c_str());
         {
             std::scoped_lock lock{g_window_mutex};
             g_window = window;

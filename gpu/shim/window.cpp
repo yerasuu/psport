@@ -54,10 +54,13 @@ SDL_DisplayID ChooseDisplay() {
 
 } // namespace
 
-WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title) : width{width_}, height{height_} {
+WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title, const char* icon_path)
+    : width{width_}, height{height_} {
     // Gamepads are sampled by runtime_pad.c; their events are pumped here with the window's.
     const char* host_pad = std::getenv("BB_PAD_HOST");
     const SDL_InitFlags gamepad = host_pad && host_pad[0] == '0' ? 0 : SDL_INIT_GAMEPAD;
+    // SDL_APP_ID from the environment still takes precedence over this identifier.
+    SDL_SetAppMetadata("psport", nullptr, "psport");
     if (!SDL_InitSubSystem(SDL_INIT_VIDEO | gamepad)) {
         UNREACHABLE_MSG("Failed to initialize SDL video: {}", SDL_GetError());
     }
@@ -76,6 +79,13 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title) : width{width_}
     window = SDL_CreateWindowWithProperties(props);
     SDL_DestroyProperties(props);
     ASSERT_MSG(window, "Failed to create window: {}", SDL_GetError());
+    if (SDL_Surface* icon = SDL_LoadPNG(icon_path)) {
+        SDL_SetWindowIcon(window, icon);
+        std::printf("Window icon: %s (%dx%d)\n", icon_path, icon->w, icon->h);
+        SDL_DestroySurface(icon);
+    } else {
+        std::printf("Window icon: %s: %s\n", icon_path, SDL_GetError());
+    }
 
     const char* driver = SDL_GetCurrentVideoDriver();
     const SDL_PropertiesID wp = SDL_GetWindowProperties(window);
@@ -95,6 +105,7 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title) : width{width_}
     width = w;
     height = h;
     LOG_INFO(Frontend, "Window {}x{} on {}", w, h, driver);
+    std::printf("Window: %s (app id %s)\n", title, SDL_GetAppMetadataProperty(SDL_PROP_APP_METADATA_IDENTIFIER_STRING));
 }
 
 WindowSDL::~WindowSDL() {
