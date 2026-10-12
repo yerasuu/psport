@@ -70,7 +70,7 @@ The overlay (Insert or L3+R3, `gpu/shim/bbport_overlay.cpp`) is drawn in English
 
 | Source, first that is set | Values |
 |---|---|
-| `menu_language` in `bbport.ini` (written once one is chosen in the overlay) | `en`, `ru`, `es` |
+| `menu_language` in `bbport.ini` (written whenever the overlay saves a setting) | `en`, `ru`, `es` |
 | `BB_MENU_LANGUAGE` (decanter passes its own UI language) | a language code: `ru...` Russian, `es...` Spanish, anything else English |
 | `LC_ALL`, `LC_MESSAGES`, `LANG`, `LANGUAGE` | the same |
 
