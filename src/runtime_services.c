@@ -698,6 +698,7 @@ static const RuntimeExport exports[]={
     {"sceHmdGetDeviceInformationByHandle",hmd_handle_invalid}, {"sceHmdGetFieldOfView",hmd_handle_invalid},
     {"sceNpTrophyCreateContext",trophy_context}, {"sceNpTrophyCreateHandle",trophy_handle},
     {"sceNpTrophyRegisterContext",runtime_stub}, {"sceNpTrophyUnlockTrophy",trophy_unlock},
+    {"sceNpTrophyDestroyHandle",runtime_stub},
     {"sceNpTrophyGetGameInfo",trophy_game_info}, {"sceNpTrophyGetTrophyInfo",trophy_info},
     {"sceNpTrophyGetTrophyUnlockState",trophy_unlock_state},
     {"scePlayGoInitialize",playgo_init}, {"scePlayGoOpen",playgo_open}, {"scePlayGoGetChunkId",playgo_chunk_ids},
