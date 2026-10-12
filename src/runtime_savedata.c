@@ -211,26 +211,20 @@ static int slot_of(const MountPoint *point) {
     int slot=atoi(point->data+9);
     return slot>=0 && slot<SLOTS && slots[slot].used ? slot : -1;
 }
-static ABI int32_t save_umount(const MountPoint *point) {
-    if (!initialized) return ERR_NOT_INITIALIZED;
-    pthread_mutex_lock(&lock);
-    int slot=slot_of(point);
-    if (slot>=0) { runtime_file_unmount(point->data); slots[slot].used=0; }
-    pthread_mutex_unlock(&lock);
-    return slot>=0 ? 0 : ERR_NOT_FOUND;
-}
-static ABI int32_t save_umount_with_backup(const MountPoint *point) {
+static int32_t umount(const MountPoint *point, int backup) {
     if (!initialized) return ERR_NOT_INITIALIZED;
     pthread_mutex_lock(&lock);
     int slot=slot_of(point);
     if (slot>=0) {
         runtime_file_unmount(point->data); slots[slot].used=0;
-        if (event_count<SLOTS)
+        if (backup && event_count<SLOTS)
             events[event_count++]=(Event){.type=EVENT_UMOUNT_BACKUP,.user=slots[slot].user,.title=slots[slot].title,.dir=slots[slot].dir};
     }
     pthread_mutex_unlock(&lock);
     return slot>=0 ? 0 : ERR_NOT_FOUND;
 }
+static ABI int32_t save_umount(const MountPoint *point) { return umount(point,0); }
+static ABI int32_t save_umount_with_backup(const MountPoint *point) { return umount(point,1); }
 static ABI int32_t save_event_result(const void *param, Event *event) {
     (void)param;
     if (!initialized) return ERR_NOT_INITIALIZED;
