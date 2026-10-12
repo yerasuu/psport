@@ -314,10 +314,6 @@ bool AvPlayerSource::Stop() {
         return false;
     }
 
-    if (m_up_data_streamer) {
-        m_up_data_streamer->Reset();
-    }
-
     m_video_decoder_thread.Stop();
     m_audio_decoder_thread.Stop();
     m_demuxer_thread.Stop();
