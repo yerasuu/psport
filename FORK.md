@@ -138,7 +138,9 @@ got, so a change can be checked against all of them at once:
 
 Each title runs inside a headless gamescope with `BB_AUDIO=none` and `BB_PAD_HOST=0`: no window, no
 sound and none of the user's controllers. Its pad schedule (`tools/regress/*.sched`: `<second> shot`,
-`<second> press <a+b> [hold]`, `<second> end`) drives `BB_PAD_FILE` and takes frame dumps; a last one
+`<second> press <a+b> [hold]`, `<second> hold <a+b> [seconds]` which keeps them held until the next
+`hold`, `press` or `release`, `<second> release`, `<second> end`; lines with the same second run one
+after the other) drives `BB_PAD_FILE` and takes frame dumps; a last one
 is taken before it stops. At most `-j` titles (default 2) run at once. The titles file names the
 folder under the games root and the title's own environment; `$NAME` there comes from the caller's
 environment, and an entry whose variable is empty is left out. Every title runs without a dump; with
