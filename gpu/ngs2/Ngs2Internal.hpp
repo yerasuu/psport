@@ -16,6 +16,7 @@
 static constexpr std::uint32_t NGS2_MAX_CHANNELS = 8;
 static constexpr std::uint32_t MIN_GRAIN_SAMPLES = 64;
 static constexpr std::uint32_t NGS2_VAG_FRAME_SAMPLES = 28;
+static constexpr std::uint32_t NGS2_LFE_CHANNEL = 3;
 
 struct Ngs2System;
 struct Ngs2Rack;
@@ -149,6 +150,8 @@ struct Ngs2Voice {
     std::uint32_t outputId = 0;
     float fbwLevel = 1.0f;
     float lfeLevel = 1.0f;
+    std::uint32_t lfeCutoff = 0;
+    std::array<Ngs2Filter, 2> lfeFilters;
     std::vector<Ngs2UserFx2> userFx;
     Ngs2UserFxProcessHandler userFxHandler = nullptr;
     std::array<std::uintptr_t, 3> userFxData{};
@@ -227,6 +230,7 @@ void Ngs2ClearReverb(Ngs2Voice& voice);
 bool Ngs2ProcessReverb(Ngs2ReverbState& reverb, float* samples, std::uint32_t channels, std::uint32_t grain, std::uint32_t sampleRate);
 void Ngs2SetFilter(Ngs2Filter& filter, const Ngs2FilterParam& param);
 void Ngs2UpdateFilter(Ngs2Filter& filter, std::uint32_t sampleRate);
+void Ngs2SetLfeLowPass(std::array<Ngs2Filter, 2>& stages, std::uint32_t cutoff, std::uint32_t channels, std::uint32_t sampleRate);
 bool Ngs2FilterHasHistory(const Ngs2Filter& filter);
 void Ngs2ApplyFilter(Ngs2Voice& voice, Ngs2Filter& filter, std::uint32_t grain);
 void Ngs2Ramp(float* samples, float from, float to, std::uint32_t grain, const float* source, bool accumulate);

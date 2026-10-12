@@ -56,6 +56,8 @@ void Ngs2Voice::ResetSetup() {
     filters.clear();
     fbwLevel = 1.0f;
     lfeLevel = 1.0f;
+    lfeCutoff = 0;
+    lfeFilters = {};
     channels = 0;
     sampleRate = 0;
     waveformType = 0;
@@ -127,7 +129,7 @@ static void Patch(Ngs2Voice& voice, const Ngs2VoicePatchParam& patch) {
     port.dest = dest;
 }
 
-// An effect not implemented (an envelope, a peak meter, mastering's matrix and LFE): its parameter
+// An effect not implemented (an envelope, a peak meter, mastering's matrix): its parameter
 // is accepted and leaves the sound as it is, so the rest of the same parameter list still applies.
 static void IgnoreParam(std::uint32_t id) {
     static std::mutex lock;
@@ -361,8 +363,15 @@ static void ApplyParam(Ngs2Voice& voice, const Ngs2VoiceParamHeader& param) {
                 voice.lfeLevel = gain.lfe_level;
                 return;
             }
-            if (param.id == SCE_NGS2_MASTERING_VOICE_PARAM_MATRIX || param.id == SCE_NGS2_MASTERING_VOICE_PARAM_LFE ||
-                param.id == SCE_NGS2_MASTERING_VOICE_PARAM_PEAK_METER) {
+            if (param.id == SCE_NGS2_MASTERING_VOICE_PARAM_LFE) {
+                const auto& lfe = ParamAs<Ngs2MasteringVoiceLfeParam>(param);
+                if (lfe.frequency != 80 && lfe.frequency != 120 && lfe.frequency != 240) APS5_INVALID_ARG_EX;
+                voice.lfeCutoff = lfe.enabled != 0 ? lfe.frequency : 0;
+                if (voice.lfeCutoff == 0) voice.lfeFilters = {};
+                for (auto& stage : voice.lfeFilters) stage.sampleRate = 0;
+                return;
+            }
+            if (param.id == SCE_NGS2_MASTERING_VOICE_PARAM_MATRIX || param.id == SCE_NGS2_MASTERING_VOICE_PARAM_PEAK_METER) {
                 IgnoreParam(param.id);
                 return;
             }

@@ -252,6 +252,14 @@ static void MixInputs(Ngs2Voice& voice, const std::vector<Ngs2Voice*>& voices, s
     }
 }
 
+static void FilterLfe(Ngs2Voice& voice, std::uint32_t grain, std::uint32_t systemRate) {
+    if (voice.lfeCutoff == 0 || voice.channels <= NGS2_LFE_CHANNEL) return;
+    if (voice.lfeFilters[0].sampleRate != systemRate) Ngs2SetLfeLowPass(voice.lfeFilters, voice.lfeCutoff, voice.channels, systemRate);
+    if (!voice.hasSamples && !Ngs2FilterHasHistory(voice.lfeFilters[0]) && !Ngs2FilterHasHistory(voice.lfeFilters[1])) return;
+    for (auto& stage : voice.lfeFilters) Ngs2ApplyFilter(voice, stage, grain);
+    voice.hasSamples = true;
+}
+
 static void RenderVoice(Ngs2Voice& voice, const std::vector<Ngs2Voice*>& voices, std::uint32_t grain, std::uint32_t systemRate) {
     if (voice.rendered) return;
     if (voice.rendering) throw std::invalid_argument("NGS2: the voice patches form a cycle");
@@ -265,6 +273,7 @@ static void RenderVoice(Ngs2Voice& voice, const std::vector<Ngs2Voice*>& voices,
     if (voice.state == Ngs2PlayState::Playing && voice.channels != 0) {
         if (voice.rack->rackId == SCE_NGS2_RACK_ID_SAMPLER) RenderSampler(voice, grain, systemRate);
         else MixInputs(voice, voices, grain, systemRate);
+        if (voice.rack->rackId == SCE_NGS2_RACK_ID_MASTERING) FilterLfe(voice, grain, systemRate);
         if (voice.rack->rackId == SCE_NGS2_RACK_ID_REVERB && voice.reverb) voice.hasSamples = Ngs2ProcessReverb(*voice.reverb, voice.samples.data(), voice.channels, grain, systemRate);
         Ngs2ProcessLegacyUserFx(voice, grain, systemRate);
         if (voice.rack->rackId == SCE_NGS2_RACK_ID_SAMPLER) ApplyFilters(voice, 1, grain, systemRate);

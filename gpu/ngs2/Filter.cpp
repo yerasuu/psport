@@ -1,6 +1,9 @@
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <complex>
 #include <cstdint>
+#include <numbers>
 
 #include "ngs2_compat.hpp"
 #include "Ngs2Internal.hpp"
@@ -100,4 +103,30 @@ void Ngs2UpdateFilter(Ngs2Filter& filter, std::uint32_t sampleRate) {
     if (filter.sampleRate == sampleRate) return;
     SetCoefficients(filter, filter.param, sampleRate);
     filter.sampleRate = sampleRate;
+}
+
+// The mastering LFE low-pass is a 4th order Chebyshev type I filter with 0.1 dB of ripple up to the
+// cutoff, made by the bilinear transform; its gain sits in the first stage.
+void Ngs2SetLfeLowPass(std::array<Ngs2Filter, 2>& stages, std::uint32_t cutoff, std::uint32_t channels, std::uint32_t sampleRate) {
+    const double epsilon = std::sqrt(std::pow(10.0, 0.01) - 1.0);
+    const double mu = std::asinh(1.0 / epsilon) / 4.0;
+    const double warped = 2.0 * sampleRate * std::tan(std::numbers::pi * cutoff / sampleRate);
+    const double twice = 2.0 * sampleRate;
+    double gain = 1.0 / std::sqrt(1.0 + epsilon * epsilon);
+    std::array<std::array<double, 2>, 2> poles;
+    for (std::uint32_t stage = 0; stage < 2; stage++) {
+        const double theta = (3.0 - 2.0 * stage) * std::numbers::pi / 8.0;
+        const std::complex<double> pole(-std::sinh(mu) * std::sin(theta) * warped, std::cosh(mu) * std::cos(theta) * warped);
+        const double square = std::norm(pole);
+        const double denominator = twice * twice - 2.0 * pole.real() * twice + square;
+        gain *= square / denominator;
+        poles[stage] = {(2.0 * twice * twice - 2.0 * square) / denominator, -(twice * twice + 2.0 * pole.real() * twice + square) / denominator};
+    }
+    for (std::uint32_t stage = 0; stage < 2; stage++) {
+        const float scale = stage == 0 ? static_cast<float>(gain) : 1.0f;
+        Ngs2SetFilter(stages[stage], {SCE_NGS2_FILTER_TYPE_COEFFICIENTS, 0xff & ~(1u << NGS2_LFE_CHANNEL),
+                                      {scale, 2.0f * scale, scale, static_cast<float>(poles[stage][0]), static_cast<float>(poles[stage][1])}});
+        stages[stage].history.resize(channels);
+        Ngs2UpdateFilter(stages[stage], sampleRate);
+    }
 }

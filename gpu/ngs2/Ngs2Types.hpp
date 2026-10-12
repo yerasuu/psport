@@ -548,6 +548,13 @@ struct Ngs2MasteringVoiceGainParam {
 };
 static_assert(sizeof(Ngs2MasteringVoiceGainParam) == 16);
 
+struct Ngs2MasteringVoiceLfeParam {
+    Ngs2VoiceParamHeader header;
+    std::uint32_t enabled;
+    std::uint32_t frequency;
+};
+static_assert(sizeof(Ngs2MasteringVoiceLfeParam) == 16);
+
 struct Ngs2MasteringVoiceOutputParam {
     Ngs2VoiceParamHeader header;
     std::uint32_t output_id;
