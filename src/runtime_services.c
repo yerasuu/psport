@@ -540,6 +540,11 @@ static ABI int32_t keyboard_open(int32_t user,const KeyboardParam *param) {
     if (keyboard_opened) return IME_BUSY;
     keyboard_opened=1; return 0;
 }
+static ABI int32_t keyboard_close(int32_t user) {
+    if (!keyboard_opened) return IME_NOT_OPENED;
+    if (user==-1) return IME_INVALID_USER_ID;
+    keyboard_opened=0; return 0;
+}
 static ABI int32_t keyboard_resource_id(int32_t user,int32_t *ids) {
     if (!ids) return IME_INVALID_ADDRESS;
     if (user==-1) return IME_INVALID_USER_ID;
@@ -714,7 +719,7 @@ static const RuntimeExport exports[]={
     {"sceMoveReadStateRecent",move_read_recent}, {"sceMoveSetLightSphere",move_no_controller},
     {"sceMoveSetVibration",move_no_controller}, {"sceMoveTerm",move_term},
     {"sceImeKeyboardOpen",keyboard_open}, {"sceImeKeyboardGetResourceId",keyboard_resource_id},
-    {"sceImeKeyboardGetInfo",keyboard_info}, {"sceImeUpdate",ime_update},
+    {"sceImeKeyboardGetInfo",keyboard_info}, {"sceImeKeyboardClose",keyboard_close}, {"sceImeUpdate",ime_update},
     {"sceDiscMapIsRequestOnHDD",discmap_on_hdd}, {"sceDiscMap_8A828CAEE7EDD5E9",discmap_8a82},
     {"sceDiscMap_7C980FFB0AA27E7A",discmap_7c98},
     {"sceVoiceInit",runtime_stub}, {"sceVoiceEnd",runtime_stub},
