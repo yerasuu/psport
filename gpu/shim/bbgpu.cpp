@@ -413,6 +413,10 @@ extern "C" int bbgpu_overlay_captures_input(void) {
     return BbOverlay::CapturesInput() ? 1 : 0;
 }
 
+extern "C" int bbgpu_overlay_pad_file_press(int guide, int cross, int circle) {
+    return BbOverlay::PadFilePress(guide != 0, cross != 0, circle != 0) ? 1 : 0;
+}
+
 extern "C" void bbgpu_mouse_take(double* dx, double* dy, int* wheel_up, int* wheel_down) {
     double x = 0, y = 0;
     int up = 0, down = 0;

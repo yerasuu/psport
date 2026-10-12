@@ -2,6 +2,7 @@
 #include "bbport_settings.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -29,7 +30,8 @@ void Set(Values& v, const std::string& key, const std::string& value) {
     if (key == "menu_language") {
         if (value == "en") v.menu_language = MenuLanguage::English;
         else if (value == "ru") v.menu_language = MenuLanguage::Russian;
-        else std::printf("Settings: unknown menu_language '%s' (expected en or ru)\n", value.c_str());
+        else if (value == "es") v.menu_language = MenuLanguage::Spanish;
+        else std::printf("Settings: unknown menu_language '%s' (expected en, ru or es)\n", value.c_str());
     } else if (key == "upscaler") {
         for (int u = 0; u < UpscalerCount; ++u) {
             if (value == UpscalerName(u)) {
@@ -95,8 +97,9 @@ Values& Get() {
     return values;
 }
 
-const char* MenuText(const char* english, const char* russian) {
-    return Get().menu_language == MenuLanguage::Russian ? russian : english;
+const char* MenuText(const char* english, const char* russian, const char* spanish) {
+    const MenuLanguage language = Get().menu_language;
+    return language == MenuLanguage::Russian ? russian : language == MenuLanguage::Spanish ? spanish : english;
 }
 
 void Load() {
@@ -116,9 +119,12 @@ void Load() {
                 }
             }
         }
-        v.menu_language = lang && (lang[0] == 'r' || lang[0] == 'R') && (lang[1] == 'u' || lang[1] == 'U')
-                              ? MenuLanguage::Russian
-                              : MenuLanguage::English;
+        const auto is = [lang](char first, char second) {
+            return lang && std::tolower(static_cast<unsigned char>(lang[0])) == first && std::tolower(static_cast<unsigned char>(lang[1])) == second;
+        };
+        v.menu_language = is('r', 'u')   ? MenuLanguage::Russian
+                          : is('e', 's') ? MenuLanguage::Spanish
+                                         : MenuLanguage::English;
     }
     if (FILE* file = std::fopen(Path(), "r")) {
         char line[256];
@@ -222,7 +228,9 @@ void Save() {
         return std::string(text);
     };
     const auto flag = [](bool value) { return std::string(value ? "1" : "0"); };
-    put("menu_language", v.menu_language == MenuLanguage::Russian ? "ru" : "en");
+    put("menu_language", v.menu_language == MenuLanguage::Russian   ? "ru"
+                         : v.menu_language == MenuLanguage::Spanish ? "es"
+                                                                    : "en");
     put("upscaler", UpscalerName(v.upscaler));
     put("preset", std::to_string(v.preset.load()));
     put("sharpen", flag(v.sharpen));
