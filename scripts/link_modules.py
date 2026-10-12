@@ -38,7 +38,7 @@ NEVER_SYSTEM = {'libSceLibcInternal'}
 # --lle names it, to compare the two.
 PORT_IMPLEMENTS = {'libkernel', 'libkernel_unity', 'libkernel_sys', 'libSceGnmDriver', 'libSceVideoOut',
                    'libScePad', 'libSceAudioOut', 'libSceFiber', 'libSceFont', 'libSceFontFt',
-                   'libSceAudiodec'}
+                   'libSceAudiodec', 'libSceNgs2'}
 FS_LOAD = bytes.fromhex('64488b042500000000')  # mov rax, fs:[0]
 MAX_MODULE_SEGMENTS = 4  # SCE_DBG_MAX_SEGMENTS of sceKernelGetModuleInfo
 

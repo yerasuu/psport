@@ -27,6 +27,7 @@ static constexpr std::uint32_t SCE_NGS2_RACK_ID_CUSTOM_SUBMIXER = 0x4002;
 
 static constexpr std::uint32_t SCE_NGS2_WAVEFORM_TYPE_PCM_I16L = 0x12;
 static constexpr std::uint32_t SCE_NGS2_WAVEFORM_TYPE_PCM_F32L = 0x18;
+static constexpr std::uint32_t SCE_NGS2_WAVEFORM_TYPE_VAG = 0x1c;
 static constexpr std::uint32_t SCE_NGS2_WAVEFORM_TYPE_ATRAC9 = 0x40;
 
 // PS4 numbers its voice events 0 up (AnyPS5's are PS5 bit values): Ryza (CUSA16458) plays each
@@ -57,6 +58,7 @@ static constexpr std::uint32_t SCE_NGS2_SAMPLER_VOICE_PARAM_PITCH = 0x10000005;
 static constexpr std::uint32_t SCE_NGS2_SAMPLER_VOICE_PARAM_FILTER = 0x1000000a;
 // Named by their place in each rack's list (setup 0 up, as the known ids above sit); used by Ryza.
 static constexpr std::uint32_t SCE_NGS2_SAMPLER_VOICE_PARAM_ENVELOPE = 0x10000006;
+static constexpr std::uint32_t SCE_NGS2_SAMPLER_VOICE_PARAM_USER_FX = 0x10000008;
 static constexpr std::uint32_t SCE_NGS2_SUBMIXER_VOICE_PARAM_PEAK_METER = 0x20000005;
 static constexpr std::uint32_t SCE_NGS2_MASTERING_VOICE_PARAM_MATRIX = 0x30000001;
 static constexpr std::uint32_t SCE_NGS2_MASTERING_VOICE_PARAM_LFE = 0x30000002;
@@ -69,10 +71,12 @@ static constexpr std::uint32_t SCE_NGS2_MASTERING_VOICE_PARAM_SETUP = 0x30000000
 static constexpr std::uint32_t SCE_NGS2_MASTERING_VOICE_PARAM_GAIN = 0x30000004;
 static constexpr std::uint32_t SCE_NGS2_MASTERING_VOICE_PARAM_OUTPUT = 0x30000005;
 static constexpr std::uint32_t SCE_NGS2_CUSTOM_SUBMIXER_VOICE_PARAM_SETUP = 0x40020000;
+static constexpr std::uint32_t SCE_NGS2_CUSTOM_VOICE_PARAM_USER_FX = 0x40001900;
 static constexpr std::uint32_t SCE_NGS2_CUSTOM_VOICE_PARAM_USER_FX2 = 0x40001f00;
 
 static constexpr std::uint32_t SCE_NGS2_CUSTOM_MAX_MODULES = 24;
 static constexpr std::uint32_t SCE_NGS2_CUSTOM_MAX_PORTS = 16;
+static constexpr std::uint32_t SCE_NGS2_CUSTOM_MODULE_ID_USER_FX = 0x19;
 static constexpr std::uint32_t SCE_NGS2_CUSTOM_MODULE_ID_USER_FX2 = 0x1f;
 
 static constexpr std::uint32_t SCE_NGS2_WAVEFORM_BLOCKS_FLAG_CONTINUE = 1;

@@ -15,6 +15,7 @@
 
 static constexpr std::uint32_t NGS2_MAX_CHANNELS = 8;
 static constexpr std::uint32_t MIN_GRAIN_SAMPLES = 64;
+static constexpr std::uint32_t NGS2_VAG_FRAME_SAMPLES = 28;
 
 struct Ngs2System;
 struct Ngs2Rack;
@@ -62,6 +63,17 @@ struct Ngs2Atrac9 {
     bool finishOnDrain = false;
 };
 
+struct Ngs2VagFrame {
+    const std::uint8_t* data = nullptr;
+    std::array<float, NGS2_VAG_FRAME_SAMPLES * NGS2_MAX_CHANNELS> samples;
+};
+
+struct Ngs2Vag {
+    std::array<Ngs2VagFrame, 2> frames;
+    std::uint32_t latest = 0;
+    std::array<std::array<std::int32_t, 2>, NGS2_MAX_CHANNELS> history{};
+};
+
 struct Ngs2ReverbState;
 
 struct Ngs2ReverbDeleter {
@@ -99,6 +111,8 @@ struct Ngs2UserFx2 {
     std::vector<std::uint8_t> work;
     std::vector<std::uint8_t> state;
     std::uint32_t flags = 0;
+    Ngs2UserFxProcessHandler handler = nullptr;
+    std::array<std::uintptr_t, 3> userData{};
 };
 
 struct Ngs2Voice {
@@ -109,6 +123,7 @@ struct Ngs2Voice {
     std::uint32_t sampleRate = 0;
     std::uint32_t waveformType = 0;
     Ngs2Atrac9 atrac9;
+    Ngs2Vag vag;
     std::unique_ptr<Ngs2ReverbState, Ngs2ReverbDeleter> reverb;
     float pitch = 1.0f;
     std::uint64_t phase = 0;
@@ -154,6 +169,7 @@ struct Ngs2Rack {
     Ngs2ContextBufferInfo bufferInfo{};
     Ngs2BufferAllocator allocator{};
     std::vector<Ngs2Voice> voices;
+    std::vector<std::uint32_t> moduleIds;
     std::vector<Ngs2CustomUserFx2ModuleOption> userFx;
     std::vector<std::vector<std::uint8_t>> userFxCommon;
 };
@@ -190,6 +206,9 @@ std::size_t Ngs2Atrac9BlockBytes(const Ngs2Voice& voice, const Ngs2WaveformBlock
 void Ngs2RestartAtrac9(Ngs2Voice& voice);
 void Ngs2ConsumeAtrac9(Ngs2Voice& voice, std::uint32_t grain, std::uint32_t systemRate);
 bool Ngs2FinishBlock(Ngs2Voice& voice);
+std::size_t Ngs2VagBlockBytes(const Ngs2Voice& voice, const Ngs2WaveformBlock& block);
+const std::uint8_t* Ngs2VagFrameAt(const Ngs2Voice& voice, const Ngs2Block& block, std::uint64_t sample);
+void Ngs2ReadVag(Ngs2Voice& voice, const Ngs2Block& block, std::uint64_t sample, float* out);
 void Ngs2CheckCustomRack(const Ngs2CustomRackOption& option);
 void Ngs2SetupUserFx(Ngs2Rack& rack, const Ngs2CustomRackOption& option);
 void Ngs2CleanupUserFx(Ngs2Rack& rack);
