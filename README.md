@@ -73,7 +73,7 @@ upstream's and built around Bloodborne.
   dependencies, plus protobuf, nlohmann_json, OpenSSL, zlib and miniupnpc for the optional online
   module. When these are missing and [Nix](https://nixos.org) is installed, `build.sh` and
   `run.sh` re-enter `shell.nix` themselves.
-- Submodules (Dear ImGui, LibAtrac9): clone with `--recursive`, or `build.sh` runs
+- Submodule (Dear ImGui): clone with `--recursive`, or `build.sh` runs
   `git submodule update --init --recursive`.
 - `BB_LTO=OFF` disables link-time optimization; `BB_PGO=generate|use|off` sets profile-guided
   optimization (`use` by default when `pgo/` holds a profile).
