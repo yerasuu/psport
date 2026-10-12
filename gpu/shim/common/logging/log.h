@@ -45,7 +45,7 @@ void Stubbed(const char* function, const std::uint64_t* count);
 
 #define LOG_GENERIC(log_class, log_level, fmt_str, ...)                                             \
     do {                                                                                           \
-        if (Common::Log::IsStubbed(fmt_str)) {                                                     \
+        if constexpr (Common::Log::IsStubbed(fmt_str)) {                                           \
             static std::uint64_t bbport_stub_calls;                                                \
             if (__atomic_fetch_add(&bbport_stub_calls, 1, __ATOMIC_RELAXED)) {                     \
                 break;                                                                             \
