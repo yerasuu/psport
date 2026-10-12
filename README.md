@@ -3,7 +3,15 @@ THIS PROJECT IS NOT RELATED TO SHADPS4. ALL QUESTIONS RELATED TO THIS PROJECT SH
 
 # bbport — a native Linux port of Bloodborne
 
-> This is **psport**, decanter's fork: other PS4 titles on top of bbport. What it adds, what it ports from other projects and why: [FORK.md](FORK.md).
+> This is **psport**, decanter's fork of bbport: the same native approach taken past one game.
+> Other PS4 titles run with `BB_SKIP_GAME_CHECK=1`; the port provides their system libraries
+> itself (its own libSceFont, libSceNgs2, libSceAudiodec, libSceUlt, libSceFiber, exception
+> delivery, runtime module loading, the libkernel/POSIX surface newer SDKs use), so no title
+> needs a dump of the console's system modules. Six of seven tested titles (Bloodborne, two
+> Atelier games and three Unity games) reach gameplay with sound; titles that require PS VR
+> do not run. Progress is measured with `tools/regress.sh`, headless; the fork has no test
+> suite and no game-specific hacks. What it adds, what it ports from other projects (source
+> commit, license) and what it changes in inherited shadPS4 code: [FORK.md](FORK.md).
 
 **English** · [Русский](README.ru.md)
 

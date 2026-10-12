@@ -5,9 +5,10 @@
 
 Each OUTDIR/<title>/ holds run.tsv (written by regress.sh), log and shots/. Milestones are read from
 the log in the order the port reaches them; frames needs a dumped frame that is not black, audio a
-BB_AUDIO_STATS peak above -60 dBFS. A regression is a milestone the earlier run had and this one
-lacks, or a crash signature that is new or different. Python's standard library only, so that it
-runs wherever run.sh does.
+BB_AUDIO_STATS peak above -60 dBFS. submit_forced counts the GPU library's "Forcing submitDone" lines:
+the game went without a submitDone long enough for the driver to send one itself, the sign of a stall
+on the GPU. A regression is a milestone the earlier run had and this one lacks, or a crash signature
+that is new or different. Python's standard library only, so that it runs wherever run.sh does.
 """
 import json, re, sys
 from pathlib import Path
@@ -21,6 +22,7 @@ LOG_MILESTONES = {
     'gpu': re.compile(r'^Presenter: first game frame presented'),
 }
 SUMMARY = re.compile(r'^Runtime: imports \d+:.*without implementation (\d+)')
+SUBMIT_FORCED = 'Forcing submitDone'
 AUDIO = re.compile(r'^Audio stats port \d+:.* peak (-?[\d.]+|-inf) dBFS')
 GUEST_FAULT = re.compile(r'^Guest fault \(signal (\d+)\) at guest offset (0x[0-9a-f]+)')
 HOST_FAULT = re.compile(r'^Host fault \(signal (\d+)\) in (\S+)\+(0x[0-9a-f]+) \(([^)]*)\)')
@@ -81,13 +83,14 @@ def classify(run_dir):
     meta = dict(line.split('\t', 1) for line in (run_dir / 'run.tsv').read_text().splitlines() if '\t' in line)
     result = {'name': meta.get('name', run_dir.name), 'title': meta.get('title', ''),
               'status': f"skipped ({meta['skipped']})" if 'skipped' in meta else meta.get('ended', 'unknown'),
-              'seconds': int(meta.get('seconds', 0)), 'crash': '', 'no_impl': None, 'peak_dbfs': None,
-              'frames_drawn': 0, 'frames_dumped': 0, 'max_luma': None, 'max_lit_pct': None}
+              'seconds': int(meta.get('seconds', 0)), 'crash': '', 'no_impl': None, 'submit_forced': None,
+              'peak_dbfs': None, 'frames_drawn': 0, 'frames_dumped': 0, 'max_luma': None, 'max_lit_pct': None}
     result.update({m: False for m in MILESTONES})
     log = run_dir / 'log'
     if 'skipped' in meta or not log.exists():
         return result
     stop_offset = int(meta.get('stop_offset', -1))
+    result['submit_forced'] = 0
     offset = 0
     for raw in log.read_bytes().splitlines(keepends=True):
         stopping = 0 <= stop_offset <= offset
@@ -102,6 +105,8 @@ def classify(run_dir):
             peak = float(m[1])
             if result['peak_dbfs'] is None or peak > result['peak_dbfs']:
                 result['peak_dbfs'] = peak
+        elif SUBMIT_FORCED in line:
+            result['submit_forced'] += not stopping
         elif not result['crash'] and not stopping and (sig := crash_signature(line)):
             result['crash'] = sig
     # SIGABRT, SIGFPE or SIGKILL leave no fault line, yet the game ended before its schedule did.
@@ -148,9 +153,10 @@ def main(argv):
             if before and not r['status'].startswith('skipped'):
                 r['regressions'] = regressions(r, before)
                 r['no_impl_before'] = before.get('no_impl')
+                r['submit_forced_before'] = before.get('submit_forced')
 
     columns = ['name', 'title', 'status', 'seconds', *MILESTONES, 'frames_drawn', 'frames_dumped', 'max_luma', 'max_lit_pct',
-               'peak_dbfs', 'no_impl', 'crash'] + (['regressions'] if previous else [])
+               'peak_dbfs', 'no_impl', 'submit_forced', 'crash'] + (['regressions'] if previous else [])
     def cell(r, c):
         v = r.get(c)
         if isinstance(v, bool):
@@ -168,15 +174,19 @@ def main(argv):
         got = [m for m in MILESTONES[:5] if r[m]]
         return got[-1] if got else '-'
     head = ['title', 'id', 'status', 's', 'reached', 'ld', 'en', 'in', 'gp', 'fr', 'au', 'luma', 'lit%', 'peak',
-            'no impl', 'crash']
+            'no impl', 'forced', 'crash']
+    def with_delta(r, c):
+        now, before = r[c], r.get(f'{c}_before')
+        text = cell(r, c)
+        if before is not None and now is not None and now != before:
+            text += f' ({now - before:+d})'
+        return text
     rows = []
     for r in results:
         mark = lambda m: 'x' if r[m] else '.'
-        no_impl = cell(r, 'no_impl')
-        if r.get('no_impl_before') is not None and r['no_impl'] is not None and r['no_impl'] != r['no_impl_before']:
-            no_impl += f" ({r['no_impl'] - r['no_impl_before']:+d})"
         rows.append([r['name'], r['title'], r['status'], str(r['seconds']), reached(r), *map(mark, MILESTONES),
-                     cell(r, 'max_luma'), cell(r, 'max_lit_pct'), cell(r, 'peak_dbfs'), no_impl, r['crash']])
+                     cell(r, 'max_luma'), cell(r, 'max_lit_pct'), cell(r, 'peak_dbfs'), with_delta(r, 'no_impl'),
+                     with_delta(r, 'submit_forced'), r['crash']])
     widths = [max(len(x) for x in col) for col in zip(head, *rows)]
     for row in [head, *rows]:
         print('  '.join(x.ljust(w) for x, w in zip(row, widths)).rstrip())

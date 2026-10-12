@@ -1,0 +1,216 @@
+# Logos and the files menu to a new game, the intro movies, then the first rooms: walking and jumping right, the pause menu.
+20 shot
+26 shot
+27 press cross
+32 shot
+32 press options
+37 press cross
+38 shot
+42 press cross
+44 shot
+47 press options
+50 shot
+52 press cross
+56 shot
+57 press cross
+62 shot
+62 press options
+67 press cross
+68 shot
+72 press cross
+74 shot
+77 press options
+80 shot
+82 press cross
+86 shot
+87 press cross
+92 shot
+92 press options
+97 press cross
+98 shot
+104 shot
+110 shot
+116 shot
+122 shot
+128 shot
+134 shot
+142 press lx=255 5
+148 shot
+149 press lx=255+cross 0.6
+150 press lx=255 3
+154 shot
+155 press cross
+156 press lx=255+cross 0.6
+157 press lx=255 4
+162 shot
+163 press lx=0 2
+166 shot
+167 press square
+168 press lx=255+ly=0 3
+172 shot
+173 press triangle
+176 shot
+178 press circle
+180 shot
+182 press lx=255 5
+188 shot
+189 press lx=255+cross 0.6
+190 press lx=255 3
+194 shot
+195 press cross
+196 press lx=255+cross 0.6
+197 press lx=255 4
+202 shot
+203 press lx=0 2
+206 shot
+207 press square
+208 press lx=255+ly=0 3
+212 shot
+213 press lx=255 5
+219 shot
+220 press lx=255+cross 0.6
+221 press lx=255 3
+225 shot
+226 press cross
+227 press lx=255+cross 0.6
+228 press lx=255 4
+233 shot
+234 press lx=0 2
+237 shot
+238 press square
+239 press lx=255+ly=0 3
+243 shot
+244 press options
+247 shot
+249 press down
+251 shot
+253 press circle
+256 shot
+258 press lx=255 5
+264 shot
+265 press lx=255+cross 0.6
+266 press lx=255 3
+270 shot
+271 press cross
+272 press lx=255+cross 0.6
+273 press lx=255 4
+278 shot
+279 press lx=0 2
+282 shot
+283 press square
+284 press lx=255+ly=0 3
+288 shot
+289 press lx=255 5
+295 shot
+296 press lx=255+cross 0.6
+297 press lx=255 3
+301 shot
+302 press cross
+303 press lx=255+cross 0.6
+304 press lx=255 4
+309 shot
+310 press lx=0 2
+313 shot
+314 press square
+315 press lx=255+ly=0 3
+319 shot
+320 press triangle
+323 shot
+325 press circle
+327 shot
+329 press lx=255 5
+335 shot
+336 press lx=255+cross 0.6
+337 press lx=255 3
+341 shot
+342 press cross
+343 press lx=255+cross 0.6
+344 press lx=255 4
+349 shot
+350 press lx=0 2
+353 shot
+354 press square
+355 press lx=255+ly=0 3
+359 shot
+360 press options
+363 shot
+365 press down
+367 shot
+369 press circle
+372 shot
+374 press lx=255 5
+380 shot
+381 press lx=255+cross 0.6
+382 press lx=255 3
+386 shot
+387 press cross
+388 press lx=255+cross 0.6
+389 press lx=255 4
+394 shot
+395 press lx=0 2
+398 shot
+399 press square
+400 press lx=255+ly=0 3
+404 shot
+405 press lx=255 5
+411 shot
+412 press lx=255+cross 0.6
+413 press lx=255 3
+417 shot
+418 press cross
+419 press lx=255+cross 0.6
+420 press lx=255 4
+425 shot
+426 press lx=0 2
+429 shot
+430 press square
+431 press lx=255+ly=0 3
+435 shot
+436 press lx=255 5
+442 shot
+443 press lx=255+cross 0.6
+444 press lx=255 3
+448 shot
+449 press cross
+450 press lx=255+cross 0.6
+451 press lx=255 4
+456 shot
+457 press lx=0 2
+460 shot
+461 press square
+462 press lx=255+ly=0 3
+466 shot
+467 press options
+470 shot
+472 press down
+474 shot
+476 press circle
+479 shot
+481 press triangle
+484 shot
+486 press circle
+488 shot
+490 press lx=255 5
+496 shot
+497 press lx=255+cross 0.6
+498 press lx=255 3
+502 shot
+503 press cross
+504 press lx=255+cross 0.6
+505 press lx=255 4
+510 shot
+511 press lx=0 2
+514 shot
+515 press square
+516 press lx=255+ly=0 3
+520 shot
+521 press lx=255 5
+527 shot
+528 press lx=255+cross 0.6
+529 press lx=255 3
+533 shot
+534 press cross
+535 press lx=255+cross 0.6
+536 press lx=255 4
+548 shot
+550 end
