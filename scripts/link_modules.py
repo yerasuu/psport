@@ -3,7 +3,9 @@
 Successor of link_libc.py for several modules (default: libc.prx, then
 libSceFios2.prx). Every module is placed after the previous one; imports of
 all modules share one import table, so the C runtime can override any
-function (host contracts first) and otherwise binds the native export.
+function (host contracts first) and otherwise binds the native export. The other modules the game
+bundles in sce_module (libSceNpToolkit2, libSceJobManager, ...) are linked the same way once anything
+linked imports their library.
 
 Exports are matched by (NID, library identity, module identity). Imports of
 libSceLibcInternal are served by libc.prx's same-NID exports: the internal
@@ -182,14 +184,23 @@ def link(game, out, module_names=DEFAULT_MODULES, system_modules=None, hle=(), l
                   and (f.stem not in PORT_IMPLEMENTS or f.stem in lle)}
     from_system = set()
 
-    def wanted_system():
-        """System modules whose library something linked imports and nothing linked provides."""
+    bundled_modules = {f.stem: f.name for f in sorted((game / 'sce_module').glob('*.prx'))}
+
+    def wanted():
+        """Bundled and system modules whose library something linked imports and nothing linked provides."""
         imported_libraries = {identity[1][0] for identity in identities if identity}
         linked = {Path(name).stem for name in module_names}
-        return [lib for lib in system if lib in imported_libraries and lib not in linked]
-    first = [system[lib].name for lib in wanted_system()]
-    module_names += first
-    from_system.update(first)
+        return [lib for lib in {**system, **bundled_modules}
+                if lib in imported_libraries and lib not in linked]
+
+    def link_wanted():
+        for lib in wanted():
+            if lib in bundled_modules:
+                module_names.append(bundled_modules[lib])
+            else:
+                module_names.append(system[lib].name)
+                from_system.add(system[lib].name)
+    link_wanted()
     deferred = loadable_modules(game)
     module_names += deferred
     deferred = set(deferred)
@@ -273,10 +284,8 @@ def link(game, out, module_names=DEFAULT_MODULES, system_modules=None, hle=(), l
                           deferred=filename in deferred, eh_frame=eh_frame(m, base),
                           segments=module_segments(m, base), export_list=own_exports))
         base = (base + modsize + 65535) & ~65535
-        # Linking a module can import a library only another system module provides.
-        for lib in wanted_system():
-            module_names.append(system[lib].name)
-            from_system.add(system[lib].name)
+        # Linking a module can import a library only another bundled or system module provides.
+        link_wanted()
 
     bindings, unresolved = [], []
     for identity, index in identities.items():
