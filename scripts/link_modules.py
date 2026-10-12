@@ -172,6 +172,10 @@ def link(game, out, module_names=DEFAULT_MODULES, system_modules=None, hle=(), l
         return identities[key]
 
     exports, by_nid = {}, collections.defaultdict(list)
+    # Modules the game loads by path (a PS2 emulator's per-disc AOT modules) may export the same
+    # names: the game reaches them through sceKernelDlsym on its own handle, so none of them binds
+    # imports at link time.
+    by_handle_only = set()
     table = []
     base = (size + 65535) & ~65535
     fs_patched = patch_fs_loads(image, main['ph'], 0)
@@ -269,7 +273,9 @@ def link(game, out, module_names=DEFAULT_MODULES, system_modules=None, hle=(), l
                 if not mapped(s['value'], max(1, s['size'])):
                     raise ValueError(f'{filename}: export outside load segments')
                 if s['identity'] in exports:
-                    raise ValueError(f'{filename}: ambiguous export')
+                    if filename not in deferred or exports[s['identity']][2] not in deferred:
+                        raise ValueError(f'{filename}: ambiguous export')
+                    by_handle_only.add(s['identity'])
                 kind = 2 if s['type'] == 1 else 1
                 kind += 4 if filename in deferred else 2 if filename in from_system else 0
                 entry_value = (base + s['value'], kind, filename)
@@ -289,7 +295,7 @@ def link(game, out, module_names=DEFAULT_MODULES, system_modules=None, hle=(), l
 
     bindings, unresolved = [], []
     for identity, index in identities.items():
-        found = exports.get(identity)
+        found = exports.get(identity) if identity not in by_handle_only else None
         if not found and identity and identity[1][0] == 'libSceLibcInternal':
             candidates = by_nid.get((identity[0], 'libc'), [])
             found = candidates[0] if len(candidates) == 1 else None
