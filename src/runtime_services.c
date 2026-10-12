@@ -583,6 +583,7 @@ static const RuntimeExport exports[]={
     {"sceNetCtlGetState",netctl_state}, {"sceNetCtlGetInfo",netctl_info},
     {"sceNetCtlRegisterCallback",netctl_register}, {"sceNetCtlCheckCallback",runtime_stub},
     {"sceNetCtlUnregisterCallback",runtime_stub}, {"sceNetCtlGetNatInfo",netctl_nat},
+    {"sceNetCtlRegisterCallbackForNpToolkit",netctl_register}, {"sceNetCtlCheckCallbackForNpToolkit",runtime_stub},
     {"sceSslInit",lib_init_id}, {"sceSslTerm",runtime_stub},
     {"sceHttpInit",lib_init_id}, {"sceHttpTerm",runtime_stub},
     {"sceHttpCreateTemplate",http_object}, {"sceHttpDeleteTemplate",runtime_stub},
