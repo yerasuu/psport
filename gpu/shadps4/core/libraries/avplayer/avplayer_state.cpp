@@ -229,6 +229,19 @@ bool AvPlayerState::Resume() {
     return true;
 }
 
+// Called inside GAME thread
+bool AvPlayerState::JumpToTime(u64 time) {
+    std::unique_lock lock(m_source_mutex);
+    if (m_up_source == nullptr || !IsStateTransitionValid(AvState::Jump) ||
+        !m_up_source->JumpToTime(time)) {
+        LOG_ERROR(Lib_AvPlayer, "Could not jump to {} ms.", time);
+        return false;
+    }
+    lock.unlock();
+    OnWarning(ORBIS_AVPLAYER_ERROR_WAR_JUMP_COMPLETE);
+    return true;
+}
+
 void AvPlayerState::SetAvSyncMode(AvPlayerAvSyncMode sync_mode) {
     m_sync_mode = sync_mode;
 }
