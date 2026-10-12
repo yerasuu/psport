@@ -677,6 +677,11 @@ int main(int argc, char **argv) {
             if (resolved) {
                 value = resolved + relocs[i].addend;
                 import_state[relocs[i].value] = runtime_last_stub ? 3 : 1;
+                if (relocs[i].kind == 1 && runtime_last_stub) {
+                    const uintptr_t handler = (uintptr_t)runtime_calls_stub;
+                    memcpy(traps + 32 * relocs[i].value + 22, &handler, 8);
+                    value = (uintptr_t)(traps + 32 * relocs[i].value);
+                }
             } else if (native_libc && bindings[relocs[i].value]) {
                 uint64_t address=bindings[relocs[i].value];
                 if ((bound_kind - 1) % 2 + 1 != relocs[i].kind || !mapped(segments,ns,address,relocs[i].addend+1)) fail("native export kind/range mismatch");

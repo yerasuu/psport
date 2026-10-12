@@ -12,7 +12,7 @@
 
 static const char (*import_names)[128];
 static uint64_t imports;
-static uint64_t *unimplemented_calls;
+static uint64_t *unimplemented_calls, *stub_calls;
 typedef struct { uint64_t count; uint32_t id; int kind; } Entry;
 static Entry *entries;
 
@@ -20,8 +20,9 @@ void runtime_calls_configure(const char (*names)[128], uint64_t count) {
     import_names = names;
     imports = count;
     unimplemented_calls = calloc(count ? count : 1, sizeof(*unimplemented_calls));
-    entries = calloc(count ? count : 1, sizeof(*entries));
-    if (!unimplemented_calls || !entries) { fputs("Cannot allocate call counters\n", stderr); exit(1); }
+    stub_calls = calloc(count ? count : 1, sizeof(*stub_calls));
+    entries = calloc(2 * count + 1, sizeof(*entries));
+    if (!unimplemented_calls || !stub_calls || !entries) { fputs("Cannot allocate call counters\n", stderr); exit(1); }
 }
 
 static void put(int fd, const char *text) {
@@ -32,8 +33,27 @@ static void put(int fd, const char *text) {
     }
 }
 
+static int list_arguments(char *out, size_t size, const uintptr_t *arguments, unsigned count) {
+    int used = 0;
+    for (unsigned i = 0; i < count && (size_t)used < size; ++i)
+        used += snprintf(out + used, size - (size_t)used, "%s0x%" PRIxPTR, i ? ", " : "", arguments[i]);
+    return used;
+}
+
 void runtime_calls_unimplemented(uint32_t id) {
     if (id < imports) __atomic_fetch_add(&unimplemented_calls[id], 1, __ATOMIC_RELAXED);
+}
+
+ABI int64_t runtime_calls_stub(uint32_t id, uintptr_t a0, uintptr_t a1, uintptr_t a2, uintptr_t a3, uintptr_t a4) {
+    if (id >= imports || __atomic_fetch_add(&stub_calls[id], 1, __ATOMIC_RELAXED)) return 0;
+    const uintptr_t arguments[5] = {a0, a1, a2, a3, a4};
+    char line[512];
+    int used = snprintf(line, sizeof(line), "Calls: stub %s (%s) returns 0 without doing anything; arguments ",
+                        import_names[id], runtime_import_name(import_names[id]));
+    used += list_arguments(line + used, sizeof(line) - (size_t)used, arguments, 5);
+    snprintf(line + used, sizeof(line) - (size_t)used, "\n");
+    put(1, line);
+    return 0;
 }
 
 static int report_line(char *out, size_t size, const Entry *e) {
@@ -49,7 +69,9 @@ void runtime_calls_report(void) {
     size_t count = 0, totals[3] = {0};
     for (uint64_t id = 0; id < imports; ++id) {
         const uint64_t unimplemented = __atomic_load_n(&unimplemented_calls[id], __ATOMIC_RELAXED);
+        const uint64_t stub = __atomic_load_n(&stub_calls[id], __ATOMIC_RELAXED);
         if (unimplemented) entries[count++] = (Entry){unimplemented, (uint32_t)id, 0};
+        if (stub) entries[count++] = (Entry){stub, (uint32_t)id, 1};
     }
     for (size_t i = 1; i < count; ++i)
         for (size_t j = i; j && entries[j - 1].count < entries[j].count; --j) {
