@@ -276,6 +276,13 @@ static ABI int32_t guest_sysctl(const int32_t *name,uint32_t namelen,void *old,u
     fputc('\n',stderr);
     exit(21);
 }
+static ABI int32_t uuid_create(uint8_t *uuid) {
+    if (!uuid) return ERR(22);
+    if (getrandom(uuid,16,0)!=16) return ERR(14);
+    uuid[7]=(uint8_t)((uuid[7]&0x0f)|0x40); /* version 4 in the high bits of the little-endian time_hi */
+    uuid[8]=(uint8_t)((uuid[8]&0x3f)|0x80);
+    return 0;
+}
 
 /* ---- pthread_once and thread-specific data ---- */
 static ABI int32_t thread_once(int32_t *once,void (ABI *routine)(void)) {
@@ -379,7 +386,7 @@ static const RuntimeExport exports[]={
     {"sceKernelPrintBacktraceWithModuleInfo",print_backtrace},
     {"signal",guest_signal}, {"sigprocmask",guest_sigprocmask}, {"_sigprocmask",guest_sigprocmask},
     {"sigfillset",guest_sigfillset}, {"sigemptyset",guest_sigemptyset}, {"_is_signal_return",is_signal_return},
-    {"getrusage",guest_getrusage}, {"sysctl",guest_sysctl},
+    {"getrusage",guest_getrusage}, {"sysctl",guest_sysctl}, {"sceKernelUuidCreate",uuid_create},
     {"scePthreadOnce",thread_once}, {"pthread_once",posix_once},
     {"scePthreadKeyCreate",key_create}, {"scePthreadKeyDelete",key_delete},
     {"scePthreadSetspecific",key_set}, {"scePthreadGetspecific",key_get},
