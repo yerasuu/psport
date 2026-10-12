@@ -8,12 +8,17 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <pthread.h>
 #include <unistd.h>
 
+enum { HLE_STUB_SLOTS = 1024 };
 static const char (*import_names)[128];
 static uint64_t imports;
 static uint64_t *unimplemented_calls, *stub_calls;
-typedef struct { uint64_t count; uint32_t id; int kind; } Entry;
+static struct { const char *function; const uint64_t *count; } hle_stubs[HLE_STUB_SLOTS];
+static size_t hle_stub_count;
+static pthread_mutex_t hle_stub_lock = PTHREAD_MUTEX_INITIALIZER;
+typedef struct { uint64_t count; uint32_t id; int kind; const char *function; } Entry;
 static Entry *entries;
 
 void runtime_calls_configure(const char (*names)[128], uint64_t count) {
@@ -21,7 +26,7 @@ void runtime_calls_configure(const char (*names)[128], uint64_t count) {
     imports = count;
     unimplemented_calls = calloc(count ? count : 1, sizeof(*unimplemented_calls));
     stub_calls = calloc(count ? count : 1, sizeof(*stub_calls));
-    entries = calloc(2 * count + 1, sizeof(*entries));
+    entries = calloc(2 * count + HLE_STUB_SLOTS, sizeof(*entries));
     if (!unimplemented_calls || !stub_calls || !entries) { fputs("Cannot allocate call counters\n", stderr); exit(1); }
 }
 
@@ -56,9 +61,20 @@ ABI int64_t runtime_calls_stub(uint32_t id, uintptr_t a0, uintptr_t a1, uintptr_
     return 0;
 }
 
+void runtime_calls_hle_stub(const char *function, const uint64_t *count) {
+    pthread_mutex_lock(&hle_stub_lock);
+    if (hle_stub_count < HLE_STUB_SLOTS) {
+        hle_stubs[hle_stub_count].function = function;
+        hle_stubs[hle_stub_count].count = count;
+        __atomic_store_n(&hle_stub_count, hle_stub_count + 1, __ATOMIC_RELEASE);
+    }
+    pthread_mutex_unlock(&hle_stub_lock);
+}
+
 static int report_line(char *out, size_t size, const Entry *e) {
     static const char *const kinds[] = {"unimplemented", "stub", "failed"};
     int used = snprintf(out, size, "Calls: summary %s %" PRIu64 " ", kinds[e->kind], e->count);
+    if (e->function) return used + snprintf(out + used, size - (size_t)used, "%s (HLE)\n", e->function);
     return used + snprintf(out + used, size - (size_t)used, "%s (%s)\n", import_names[e->id],
                            runtime_import_name(import_names[e->id]));
 }
@@ -70,9 +86,12 @@ void runtime_calls_report(void) {
     for (uint64_t id = 0; id < imports; ++id) {
         const uint64_t unimplemented = __atomic_load_n(&unimplemented_calls[id], __ATOMIC_RELAXED);
         const uint64_t stub = __atomic_load_n(&stub_calls[id], __ATOMIC_RELAXED);
-        if (unimplemented) entries[count++] = (Entry){unimplemented, (uint32_t)id, 0};
-        if (stub) entries[count++] = (Entry){stub, (uint32_t)id, 1};
+        if (unimplemented) entries[count++] = (Entry){unimplemented, (uint32_t)id, 0, NULL};
+        if (stub) entries[count++] = (Entry){stub, (uint32_t)id, 1, NULL};
     }
+    for (size_t i = 0, n = __atomic_load_n(&hle_stub_count, __ATOMIC_ACQUIRE); i < n; ++i)
+        entries[count++] =
+            (Entry){__atomic_load_n(hle_stubs[i].count, __ATOMIC_RELAXED), 0, 1, hle_stubs[i].function};
     for (size_t i = 1; i < count; ++i)
         for (size_t j = i; j && entries[j - 1].count < entries[j].count; --j) {
             const Entry swap = entries[j]; entries[j] = entries[j - 1]; entries[j - 1] = swap;

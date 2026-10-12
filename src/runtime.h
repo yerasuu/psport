@@ -45,6 +45,8 @@ unsigned runtime_import_outputs(const char *nid);
 void runtime_calls_configure(const char (*names)[128], uint64_t count);
 void runtime_calls_unimplemented(uint32_t id);
 ABI int64_t runtime_calls_stub(uint32_t id, uintptr_t a0, uintptr_t a1, uintptr_t a2, uintptr_t a3, uintptr_t a4);
+/* An HLE function logging "(STUBBED)" was called the first time; *count keeps counting its calls. */
+void runtime_calls_hle_stub(const char *function, const uint64_t *count);
 void runtime_calls_report(void);
 uintptr_t runtime_rwlock_resolve(const char *name);
 void runtime_rwlock_report(void);
