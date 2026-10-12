@@ -194,6 +194,24 @@ void Menu() {
             dirty = true;
         }
     }
+    // Issues #74, #116: leaving the game from the pad (this menu opens with L3+R3). A second
+    // press confirms; the window thread then closes like the window's own close button.
+    static bool quit_armed;
+    if (ImGui::Button(quit_armed ? BbSettings::MenuText("Press again to quit###quit_game",
+                                                        "Нажмите ещё раз для выхода###quit_game",
+                                                        "Pulsa otra vez para salir###quit_game")
+                                 : BbSettings::MenuText("Quit game###quit_game", "Выйти из игры###quit_game",
+                                                        "Salir del juego###quit_game"))) {
+        if (quit_armed) {
+            SDL_Event quit{};
+            quit.type = SDL_EVENT_QUIT;
+            SDL_PushEvent(&quit);
+        }
+        quit_armed = !quit_armed;
+    }
+    if (quit_armed && !ImGui::IsItemFocused() && !ImGui::IsItemHovered()) {
+        quit_armed = false;
+    }
     // Always readable, whatever language the rest of the menu is in.
     static const char* languages[] = {"English", "Русский", "Español"};
     int language = int(s.menu_language.load());
@@ -620,25 +638,6 @@ void Menu() {
     ImGui::Spacing();
     if (ImGui::Button(BbSettings::MenuText("Close", "Закрыть", "Cerrar"))) {
         keep_open = false;
-    }
-    // Issues #74, #116: leaving the game from the pad (this menu opens with L3+R3). A second
-    // press confirms; the window thread then closes like the window's own close button.
-    static bool quit_armed;
-    ImGui::SameLine();
-    if (ImGui::Button(quit_armed ? BbSettings::MenuText("Press again to quit###quit_game",
-                                                        "Нажмите ещё раз для выхода###quit_game",
-                                                        "Pulsa otra vez para salir###quit_game")
-                                 : BbSettings::MenuText("Quit game###quit_game", "Выйти из игры###quit_game",
-                                                        "Salir del juego###quit_game"))) {
-        if (quit_armed) {
-            SDL_Event quit{};
-            quit.type = SDL_EVENT_QUIT;
-            SDL_PushEvent(&quit);
-        }
-        quit_armed = !quit_armed;
-    }
-    if (quit_armed && !ImGui::IsItemFocused() && !ImGui::IsItemHovered()) {
-        quit_armed = false;
     }
     ImGui::TextDisabled("%s", BbSettings::MenuText("Settings are saved to bbport.ini",
                                              "Настройки сохраняются в bbport.ini",
