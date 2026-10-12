@@ -9,6 +9,10 @@
 #include <pthread.h>
 #include <errno.h>
 #include <time.h>
+#include <stdatomic.h>
+#include <unistd.h>
+#include <sys/syscall.h>
+#include <linux/futex.h>
 #define ERR(n) ((int32_t)(UINT32_C(0x80020000)|(n)))
 typedef struct Waiter {
     int32_t need, result;
@@ -185,33 +189,79 @@ static ABI int32_t psem_getvalue(uint64_t *sem,int32_t *value) {
     runtime_exception_unlock(&lock);
     return s ? 0 : ERR(22);
 }
-static int32_t posix_result(int32_t r) {
-    if (!r) return 0;
-    *runtime_errno()=r==ERR(3) ? 22 : (int32_t)((uint32_t)r&0xffff);
+/* POSIX sem_t as the console's libkernel lays it out inline (FreeBSD's struct _usem behind a 16-bit magic
+ * and the id of its named object), so a semaphore the game initializes itself works with these calls.
+ * Waiters sleep on the count word. */
+typedef struct {
+    uint16_t magic, object;
+    _Atomic uint32_t has_waiters, count;
+    uint32_t flags;
+} GuestSem;
+enum { SEM_MAGIC=0x736d, SEM_NO_OBJECT=0xffff, SEM_SHARED=1, SEM_NAMED=2 };
+static int usem_init(GuestSem *s,int shared,uint32_t value) {
+    if (!s || value>INT32_MAX) return 22;
+    s->magic=SEM_MAGIC; s->object=SEM_NO_OBJECT; s->flags=shared ? SEM_SHARED : 0;
+    atomic_store(&s->has_waiters,0); atomic_store(&s->count,value);
+    return 0;
+}
+static int usem_valid(const GuestSem *s) { return s && s->magic==SEM_MAGIC; }
+static int usem_futex(GuestSem *s,int op) { return op|(s->flags&SEM_SHARED ? 0 : FUTEX_PRIVATE_FLAG); }
+static int usem_take(GuestSem *s) {
+    uint32_t count=atomic_load(&s->count);
+    while (count) if (atomic_compare_exchange_weak(&s->count,&count,count-1)) return 1;
+    return 0;
+}
+static int usem_trywait(GuestSem *s) { return !usem_valid(s) ? 22 : usem_take(s) ? 0 : 35; }
+/* end: absolute time on `clock`, NULL to wait without a limit. */
+static int usem_wait(GuestSem *s,clockid_t clock,const struct timespec *end) {
+    if (!usem_valid(s)) return 22;
+    if (usem_take(s)) return 0;
+    if (end && (end->tv_nsec<0 || end->tv_nsec>=1000000000)) return 22;
+    const int op=usem_futex(s,FUTEX_WAIT_BITSET)|(clock==CLOCK_REALTIME ? FUTEX_CLOCK_REALTIME : 0);
+    const uint64_t wait_start=runtime_wait_clock();
+    int result=0;
+    while (!usem_take(s)) {
+        atomic_store(&s->has_waiters,1);
+        if (syscall(SYS_futex,&s->count,op,0,end,NULL,FUTEX_BITSET_MATCH_ANY) && errno==ETIMEDOUT) {
+            result=usem_take(s) ? 0 : 60;
+            break;
+        }
+    }
+    runtime_wait_note(2,runtime_wait_clock()-wait_start);
+    return result;
+}
+static int usem_post(GuestSem *s) {
+    if (!usem_valid(s)) return 22;
+    atomic_fetch_add(&s->count,1);
+    if (atomic_load(&s->has_waiters)) syscall(SYS_futex,&s->count,usem_futex(s,FUTEX_WAKE),1,NULL,NULL,0);
+    return 0;
+}
+static int usem_destroy(GuestSem *s) {
+    if (!usem_valid(s) || s->flags&SEM_NAMED) return 22;
+    s->magic=0;
+    return 0;
+}
+static int usem_getvalue(GuestSem *s,int32_t *value) {
+    if (!usem_valid(s) || !value) return 22;
+    *value=(int32_t)atomic_load(&s->count);
+    return 0;
+}
+static int32_t posix_result(int e) {
+    if (!e) return 0;
+    *runtime_errno()=e;
     return -1;
 }
 typedef struct { int64_t seconds, nanoseconds; } GuestTime;
-static ABI int32_t posix_sem_init(uint64_t *sem,int shared,uint32_t value) { return posix_result(psem_init(sem,shared,value,NULL)); }
-static ABI int32_t posix_sem_destroy(uint64_t *sem) { return posix_result(psem_destroy(sem)); }
-static ABI int32_t posix_sem_wait(uint64_t *sem) { return posix_result(psem_wait(sem)); }
-static ABI int32_t posix_sem_trywait(uint64_t *sem) { return posix_result(psem_trywait(sem)); }
-static ABI int32_t posix_sem_post(uint64_t *sem) { return posix_result(psem_post(sem)); }
-static ABI int32_t posix_sem_getvalue(uint64_t *sem,int32_t *value) { return posix_result(psem_getvalue(sem,value)); }
-static ABI int32_t posix_sem_timedwait(uint64_t *sem,const GuestTime *end) {
-    if (!sem) return posix_result(ERR(22));
-    int32_t result=wait_count((uint32_t)*sem,1,NULL,0);
-    if (result!=ERR(16)) return posix_result(result);
-    if (!end || end->nanoseconds<0 || end->nanoseconds>=1000000000) return posix_result(ERR(22));
-    for (;;) {
-        struct timespec now;
-        clock_gettime(CLOCK_REALTIME,&now);
-        int64_t seconds=end->seconds-now.tv_sec;
-        int64_t left=seconds>4294 ? INT64_MAX : seconds*1000000+(end->nanoseconds-now.tv_nsec)/1000;
-        uint32_t usec=left<=0 ? 0 : left>UINT32_MAX ? UINT32_MAX : (uint32_t)left;
-        result=wait_count((uint32_t)*sem,1,&usec,1);
-        if (result!=ERR(60) || left<=UINT32_MAX) break;
-    }
-    return posix_result(result);
+static ABI int32_t posix_sem_init(GuestSem *sem,int shared,uint32_t value) { return posix_result(usem_init(sem,shared,value)); }
+static ABI int32_t posix_sem_destroy(GuestSem *sem) { return posix_result(usem_destroy(sem)); }
+static ABI int32_t posix_sem_wait(GuestSem *sem) { return posix_result(usem_wait(sem,CLOCK_MONOTONIC,NULL)); }
+static ABI int32_t posix_sem_trywait(GuestSem *sem) { return posix_result(usem_trywait(sem)); }
+static ABI int32_t posix_sem_post(GuestSem *sem) { return posix_result(usem_post(sem)); }
+static ABI int32_t posix_sem_getvalue(GuestSem *sem,int32_t *value) { return posix_result(usem_getvalue(sem,value)); }
+static ABI int32_t posix_sem_timedwait(GuestSem *sem,const GuestTime *end) {
+    if (!end) return posix_result(usem_wait(sem,CLOCK_REALTIME,NULL));
+    struct timespec t={.tv_sec=(time_t)end->seconds,.tv_nsec=(long)end->nanoseconds};
+    return posix_result(usem_wait(sem,CLOCK_REALTIME,&t));
 }
 static const RuntimeExport exports[]={
     {"sem_init",posix_sem_init}, {"sem_destroy",posix_sem_destroy}, {"sem_wait",posix_sem_wait},
