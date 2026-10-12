@@ -17,7 +17,7 @@ from pathlib import Path
 from import_outparams import REGISTRATION, matching, split_params, strip_comments
 
 PROTOTYPE = re.compile(r'([^\n;{}()]*?)\bPS4_SYSV_ABI\s+([A-Za-z_][\w:]*)\s*\(')
-AGGREGATE = re.compile(r'\b(?:struct|class|union)\s+(?:alignas\s*\([^)]*\)\s*)?([A-Za-z_]\w*)\s*(?:final\s*)?(?::[^{;]*)?\{')
+AGGREGATE = re.compile(r'(?<!enum )\b(?:struct|class|union)\s+(?:alignas\s*\([^)]*\)\s*)?([A-Za-z_]\w*)\s*(?:final\s*)?(?::[^{;]*)?\{')
 TYPEDEF_AGGREGATE = re.compile(r'\btypedef\s+(?:struct|union)\b[^;]*?\}\s*([A-Za-z_]\w*)\s*;', re.S)
 USING_AGGREGATE = re.compile(r'\busing\s+([A-Za-z_]\w*)\s*=\s*(?:struct|union|std::)')
 SCE_RESULT = {'s32': 1, 'int': 1, 'int32_t': 1, 'Error': 1, 's64': 4, 'int64_t': 4}
