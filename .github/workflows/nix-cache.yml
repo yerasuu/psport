@@ -2,7 +2,7 @@ name: Release
 
 on:
   push:
-    tags: ['v*']
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
 
 permissions: {}
 
@@ -39,7 +39,9 @@ jobs:
           # From the API, since the checkout's copy of an annotated tag can lose its message.
           object=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq '.object | [.type, .sha] | @tsv')
           if [[ $object == tag$'\t'* ]]; then
-            gh api "repos/$GITHUB_REPOSITORY/git/tags/${object#*$'\t'}" --jq .message > notes
+            # A signed tag's message carries its signature block, which isn't release notes.
+            gh api "repos/$GITHUB_REPOSITORY/git/tags/${object#*$'\t'}" --jq .message |
+              sed '/^-----BEGIN \(PGP\|SSH\) SIGNATURE-----$/,$d' > notes
           else
             : > notes
           fi
