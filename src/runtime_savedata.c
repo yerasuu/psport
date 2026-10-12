@@ -56,15 +56,20 @@ typedef struct { uint64_t blocks, free_blocks; uint8_t reserved[32]; } SearchInf
 typedef struct { uint32_t hits; int32_t pad; DirName *names; uint32_t names_capacity, set_count;
                  Param *params; SearchInfo *infos; uint8_t reserved[12]; int32_t pad2; } SearchResult;
 typedef struct { const void *buffer; uint64_t buffer_size, data_size; uint8_t reserved[32]; } Icon;
+typedef struct { uint32_t type; int32_t error, user, pad; TitleId title; DirName dir; uint8_t reserved[40]; } Event;
 _Static_assert(sizeof(Param)==1328,"OrbisSaveDataParam layout");
 _Static_assert(sizeof(Mount1)==80 && sizeof(Mount2)==64,"OrbisSaveDataMount layouts");
 _Static_assert(sizeof(MountResult)==64,"OrbisSaveDataMountResult layout");
 _Static_assert(sizeof(SearchCond)==64 && sizeof(SearchResult)==56,"dir name search layouts");
+_Static_assert(sizeof(Event)==104,"OrbisSaveDataEvent layout");
+#define EVENT_UMOUNT_BACKUP 1
 
 static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
 static int initialized;
 static char title_id[16]="UNKNOWN";
-static struct { int used; char host[700], meta[700]; } slots[SLOTS];
+static struct { int used; int32_t user; TitleId title; DirName dir; char host[700], meta[700]; } slots[SLOTS];
+static Event events[SLOTS];
+static size_t event_count;
 static char memory_path[720];
 static uint64_t memory_size;
 static size_t mounts_done, memory_writes;
@@ -175,6 +180,10 @@ static int32_t mount(int32_t user, const char *title, const DirName *dir, uint32
     if (!exists && (make_dirs(host) || make_dirs(meta))) { pthread_mutex_unlock(&lock); return ERR_INTERNAL; }
     if (!exists) { Param empty={0}; write_param(meta,&empty); }
     slots[slot].used=1;
+    slots[slot].user=user;
+    memset(&slots[slot].title,0,sizeof(TitleId));
+    snprintf(slots[slot].title.data,sizeof(slots[slot].title.data),"%.9s",title && *title ? title : title_id);
+    slots[slot].dir=*dir;
     snprintf(slots[slot].host,sizeof(slots[slot].host),"%s",host);
     snprintf(slots[slot].meta,sizeof(slots[slot].meta),"%s",meta);
     memset(result,0,sizeof(*result));
@@ -209,6 +218,28 @@ static ABI int32_t save_umount(const MountPoint *point) {
     if (slot>=0) { runtime_file_unmount(point->data); slots[slot].used=0; }
     pthread_mutex_unlock(&lock);
     return slot>=0 ? 0 : ERR_NOT_FOUND;
+}
+static ABI int32_t save_umount_with_backup(const MountPoint *point) {
+    if (!initialized) return ERR_NOT_INITIALIZED;
+    pthread_mutex_lock(&lock);
+    int slot=slot_of(point);
+    if (slot>=0) {
+        runtime_file_unmount(point->data); slots[slot].used=0;
+        if (event_count<SLOTS)
+            events[event_count++]=(Event){.type=EVENT_UMOUNT_BACKUP,.user=slots[slot].user,.title=slots[slot].title,.dir=slots[slot].dir};
+    }
+    pthread_mutex_unlock(&lock);
+    return slot>=0 ? 0 : ERR_NOT_FOUND;
+}
+static ABI int32_t save_event_result(const void *param, Event *event) {
+    (void)param;
+    if (!initialized) return ERR_NOT_INITIALIZED;
+    if (!event) return ERR_PARAMETER;
+    pthread_mutex_lock(&lock);
+    const int found=event_count>0;
+    if (found) { *event=events[0]; memmove(events,events+1,--event_count*sizeof(Event)); }
+    pthread_mutex_unlock(&lock);
+    return found ? 0 : ERR_NOT_FOUND;
 }
 static ABI int32_t save_set_param(const MountPoint *point, uint32_t type, const void *buffer, uint64_t size) {
     if (!initialized) return ERR_NOT_INITIALIZED;
@@ -352,6 +383,7 @@ static const RuntimeExport exports[]={
     {"sceSaveDataInitialize",save_initialize}, {"sceSaveDataInitialize2",save_initialize},
     {"sceSaveDataInitialize3",save_initialize}, {"sceSaveDataTerminate",save_terminate},
     {"sceSaveDataMount",save_mount}, {"sceSaveDataMount2",save_mount2}, {"sceSaveDataUmount",save_umount},
+    {"sceSaveDataUmountWithBackup",save_umount_with_backup}, {"sceSaveDataGetEventResult",save_event_result},
     {"sceSaveDataSetParam",save_set_param}, {"sceSaveDataSaveIcon",save_icon}, {"sceSaveDataDelete",save_delete},
     {"sceSaveDataDirNameSearch",save_search},
     {"sceSaveDataSetupSaveDataMemory",memory_setup}, {"sceSaveDataGetSaveDataMemory",memory_get},
