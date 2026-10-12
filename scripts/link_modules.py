@@ -11,7 +11,8 @@ library is not shipped with the game and exposes the same functions.
 System modules (--system-modules DIR: the user's own dump of the console's *.sprx, never
 shipped) are linked too when anything linked imports their library, and their exports win over
 the host runtime's (binding kinds 3 and 4), except for libraries named in --hle, so an own
-implementation can stand in for one and be compared with it.
+implementation can stand in for one and be compared with it, and for those the port implements
+(PORT_IMPLEMENTS) unless --lle names them.
 Modules the game loads itself with sceKernelLoadStartModule (any *.prx outside sce_module and
 sce_sys, such as Unity's Media/Modules and Media/Plugins) are linked unstarted: the runtime runs
 their initializer when the game asks for the path, and their exports win over the host (binding
@@ -30,9 +31,12 @@ DEFAULT_MODULES = ('libc.prx', 'libSceFios2.prx')
 # Served by the game's libc.prx, whose functions the runtime partly replaces to track the game's
 # writes into GPU memory (memcpy, memset): a native copy of this one would bypass that.
 NEVER_SYSTEM = {'libSceLibcInternal'}
-# Libraries the port implements itself (gpu/fiber): their system module is linked only when
+# Libraries the port implements itself (the runtime's kernel, GPU, video, pad and audio output; the
+# ported gpu/fiber, gpu/font, gpu/audiodec and gpu/ngs2): their system module is linked only when
 # --lle names it, to compare the two.
-PORT_IMPLEMENTS = {'libSceFiber'}
+PORT_IMPLEMENTS = {'libkernel', 'libkernel_unity', 'libkernel_sys', 'libSceGnmDriver', 'libSceVideoOut',
+                   'libScePad', 'libSceAudioOut', 'libSceFiber', 'libSceFont', 'libSceFontFt',
+                   'libSceAudiodec', 'libSceNgs2'}
 FS_LOAD = bytes.fromhex('64488b042500000000')  # mov rax, fs:[0]
 MAX_MODULE_SEGMENTS = 4  # SCE_DBG_MAX_SEGMENTS of sceKernelGetModuleInfo
 
