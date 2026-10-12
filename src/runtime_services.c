@@ -40,6 +40,10 @@
 #define HMD_NOT_INITIALIZED ((int32_t)0x81110002)
 #define HMD_HANDLE_INVALID ((int32_t)0x81110003)
 #define HMD_PARAMETER_NULL ((int32_t)0x81110008)
+#define MOVE_NO_CONTROLLER 1
+#define MOVE_NOT_INIT ((int32_t)0x80EE0001)
+#define MOVE_ALREADY_INIT ((int32_t)0x80EE0002)
+#define MOVE_INVALID_ARG ((int32_t)0x80EE0003)
 
 static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
 static int next_id=1;
@@ -480,6 +484,34 @@ static ABI int32_t mouse_read(int32_t handle,unsigned char *data,int32_t count) 
     memset(data,0,40); return 1; /* timestamp 0, connected=false */
 }
 static ABI int32_t audio_in_open(void) { return AUDIO_IN_NOT_OPENED; }
+/* PlayStation Move: the library runs, no motion controller is ever connected. A handle is still
+ * handed out per open, distinct from other devices' handles, as on the console. */
+static int move_initialized;
+static ABI int32_t move_init(void) {
+    if (move_initialized) return MOVE_ALREADY_INIT;
+    move_initialized=1; return 0;
+}
+static ABI int32_t move_open(int32_t user,int32_t type,int32_t index) {
+    (void)user; (void)type; (void)index;
+    static int32_t handle=0x30b0000;
+    if (!move_initialized) return MOVE_NOT_INIT;
+    return __atomic_add_fetch(&handle,0x100,__ATOMIC_RELAXED);
+}
+/* OrbisMoveDeviceInfo: sphere radius and accelerometer offset, four floats. */
+static ABI int32_t move_device_info(int32_t handle,float *info) {
+    (void)handle;
+    if (!move_initialized) return MOVE_NOT_INIT;
+    if (!info) return MOVE_INVALID_ARG;
+    memset(info,0,16);
+    return MOVE_NO_CONTROLLER;
+}
+static ABI int32_t move_read_recent(int32_t handle,int64_t timestamp,void *data,int32_t *count) {
+    (void)handle;
+    if (!move_initialized) return MOVE_NOT_INIT;
+    if (timestamp<0 || !data || !count) return MOVE_INVALID_ARG;
+    *count=0;
+    return MOVE_NO_CONTROLLER;
+}
 
 
 static const RuntimeExport exports[]={
@@ -633,6 +665,8 @@ static const RuntimeExport exports[]={
     {"scePlayGoGetLocus",playgo_locus}, {"scePlayGoSetInstallSpeed",playgo_speed},
     {"sceMouseInit",runtime_stub}, {"sceMouseOpen",mouse_open}, {"sceMouseRead",mouse_read}, {"sceMouseClose",runtime_stub},
     {"sceAudioInOpen",audio_in_open},
+    {"sceMoveInit",move_init}, {"sceMoveOpen",move_open}, {"sceMoveGetDeviceInfo",move_device_info},
+    {"sceMoveReadStateRecent",move_read_recent},
     {"sceDiscMapIsRequestOnHDD",discmap_on_hdd}, {"sceDiscMap_8A828CAEE7EDD5E9",discmap_8a82},
     {"sceDiscMap_7C980FFB0AA27E7A",discmap_7c98},
     {"sceVoiceInit",runtime_stub}, {"sceVoiceEnd",runtime_stub},
