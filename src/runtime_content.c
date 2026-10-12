@@ -16,7 +16,6 @@
 #define INVALID_ID ((int32_t)0x805a1000)
 #define NOT_LOADED ((int32_t)0x805a1001)
 #define PARAMETER ((int32_t)0x80d90002)
-#define BUSY ((int32_t)0x80d90003)
 static unsigned refs, initialized, configured;
 static uint32_t parameters[5];
 static unsigned queries, lists;
@@ -73,10 +72,12 @@ static void require_loaded(void) {
 static ABI int32_t content_init(const unsigned char *init,unsigned char *boot) {
     require_loaded();
     if (!init || !boot) return PARAMETER;
-    if (initialized) return BUSY;
     /* Only the reserved-zero init profile is implemented. */
     for (unsigned i=0;i<32;++i) if (init[i]) return PARAMETER;
-    memset(boot,0,40); initialized=1;
+    /* Every module of the process shares the library, and each initializes it: Unity's engine and
+     * its libil2cpp both do, and the second one gives up on temporary data if refused. */
+    memset(boot,0,40);
+    if (initialized++) { printf("Runtime: AppContent initialized again (%u calls)\n",initialized); return 0; }
     puts("Runtime: AppContent initialized; offline base-game profile, no mounted add-ons");
     return 0;
 }
