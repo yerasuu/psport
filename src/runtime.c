@@ -268,6 +268,8 @@ static uintptr_t resolve_scoped(const char *name, int is_data) {
     if (kernel) return kernel;
     uintptr_t loader = runtime_module_resolve(name);
     if (loader) return loader;
+    uintptr_t playgo = runtime_playgo_resolve(name);
+    if (playgo) return playgo;
     uintptr_t services = runtime_services_resolve(name);
     if (services) return services;
     uintptr_t ajm = runtime_ajm_resolve(name);

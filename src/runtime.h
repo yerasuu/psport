@@ -132,6 +132,9 @@ uintptr_t runtime_kernel_resolve(const char *name);
 void runtime_process_configure(uint32_t sdk_version, uint32_t psf_attributes);
 uintptr_t runtime_file_resolve(const char *name);
 uintptr_t runtime_services_resolve(const char *name);
+/* sceSystemServiceParamGetInt's language (BB_LANGUAGE, default 1 = English US). */
+int runtime_system_language(void);
+uintptr_t runtime_playgo_resolve(const char *name);
 /* Online play (runtime_net.c, BB_ONLINE=1): the online module answers the network and PSN imports. */
 void runtime_net_configure(const char *app0, const char *serial, const char *title, const char *version);
 int runtime_net_enabled(void);

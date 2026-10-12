@@ -2,8 +2,7 @@
  *   - one local user (id 1) who is logged in but not signed in to PSN;
  *   - network cable unplugged: NetCtl disconnected, sockets unavailable;
  *   - common dialogs complete immediately (no UI is drawn yet);
- *   - no PlayStation VR headset is connected;
- *   - the whole package is installed (PlayGo reports every chunk local).
+ *   - no PlayStation VR headset is connected.
  * Every entry here is an explicit contract; unknown functions still stop. */
 #define _GNU_SOURCE
 #include "runtime.h"
@@ -30,10 +29,6 @@
 #define NET_EINVAL ((int32_t)0x80410116)
 #define HTTP_NETWORK ((int32_t)0x80431063)
 #define DIALOG_NOT_INITIALIZED ((int32_t)0x80B80003)
-#define PLAYGO_BAD_HANDLE ((int32_t)0x80B20009)
-#define PLAYGO_BAD_POINTER ((int32_t)0x80B2000A)
-#define PLAYGO_BAD_SIZE ((int32_t)0x80B2000B)
-#define PLAYGO_BAD_CHUNK ((int32_t)0x80B2000C)
 #define AUDIO_IN_NOT_OPENED ((int32_t)0x80260109)
 #define TROPHY_INVALID ((int32_t)0x80551604)
 #define HMD_ALREADY_INITIALIZED ((int32_t)0x81110001)
@@ -87,11 +82,11 @@ static ABI int32_t user_event(int32_t *event) {
 }
 
 /* ---- SystemService ---- */
-static int language(void) { const char *v=getenv("BB_LANGUAGE"); return v ? atoi(v) : 1; }
+int runtime_system_language(void) { const char *v=getenv("BB_LANGUAGE"); return v ? atoi(v) : 1; }
 static ABI int32_t system_param(int32_t id,int32_t *value) {
     if (!value) return SYSTEM_PARAMETER;
     switch (id) {
-    case 1: *value=language(); break;           /* language (1 = English US, 8 = Russian) */
+    case 1: *value=runtime_system_language(); break; /* language (1 = English US, 8 = Russian) */
     case 2: *value=1; break;                    /* date format DD/MM/YYYY */
     case 3: *value=1; break;                    /* 24-hour clock */
     case 4: { time_t now=time(NULL); struct tm t; localtime_r(&now,&t); *value=(int32_t)(t.tm_gmtoff/60); break; }
@@ -513,46 +508,6 @@ static ABI int32_t trophy_unlock_state(int32_t ctx,int32_t handle,uint32_t *flag
     return 0;
 }
 
-/* ---- PlayGo: fully installed package ---- */
-static int playgo_handle, playgo_chunks=-1;
-static ABI int32_t playgo_init(const void *params) {
-    (void)params;
-    int fd=(int)runtime_file_open("/app0/sce_sys/playgo-chunk.dat",0,0);
-    unsigned char header[12];
-    playgo_chunks=1;
-    if (fd>=0) {
-        if (runtime_file_read(fd,header,sizeof(header))==sizeof(header)) playgo_chunks=header[10]|header[11]<<8;
-        runtime_file_close(fd);
-    }
-    printf("Runtime: PlayGo initialized; %d chunks, all installed locally\n",playgo_chunks);
-    return 0;
-}
-static ABI int32_t playgo_open(int32_t *handle,const void *param) {
-    (void)param;
-    if (!handle) return PLAYGO_BAD_POINTER;
-    playgo_handle=1; *handle=1; return 0;
-}
-static ABI int32_t playgo_chunk_ids(int32_t handle,uint16_t *ids,uint32_t count,uint32_t *out) {
-    if (handle!=playgo_handle || !handle) return PLAYGO_BAD_HANDLE;
-    if (!out) return PLAYGO_BAD_POINTER;
-    if (ids && !count) return PLAYGO_BAD_SIZE;
-    if (!ids) { *out=(uint32_t)playgo_chunks; return 0; }
-    uint32_t n=count<(uint32_t)playgo_chunks ? count : (uint32_t)playgo_chunks;
-    for (uint32_t i=0;i<n;++i) ids[i]=(uint16_t)i;
-    *out=n; return 0;
-}
-static ABI int32_t playgo_locus(int32_t handle,const uint16_t *ids,uint32_t count,int8_t *loci) {
-    if (handle!=playgo_handle || !handle) return PLAYGO_BAD_HANDLE;
-    if (!ids || !loci) return PLAYGO_BAD_POINTER;
-    if (!count) return PLAYGO_BAD_SIZE;
-    for (uint32_t i=0;i<count;++i) {
-        if (ids[i]>=playgo_chunks) return PLAYGO_BAD_CHUNK;
-        loci[i]=3; /* LocalFast */
-    }
-    return 0;
-}
-static ABI int32_t playgo_speed(int32_t handle,int32_t speed) { (void)speed; return handle==playgo_handle && handle ? 0 : PLAYGO_BAD_HANDLE; }
-
 /* ---- DiscMap: the game is fully installed, no disc bitmap exists ---- */
 #define DISC_MAP_NO_BITMAP ((int32_t)0x81100004)
 static ABI int32_t discmap_on_hdd(const char *path,int64_t offset,int64_t size,int32_t *result) {
@@ -797,8 +752,6 @@ static const RuntimeExport exports[]={
     {"sceNpTrophyDestroyHandle",runtime_stub},
     {"sceNpTrophyGetGameInfo",trophy_game_info}, {"sceNpTrophyGetTrophyInfo",trophy_info},
     {"sceNpTrophyGetTrophyUnlockState",trophy_unlock_state},
-    {"scePlayGoInitialize",playgo_init}, {"scePlayGoOpen",playgo_open}, {"scePlayGoGetChunkId",playgo_chunk_ids},
-    {"scePlayGoGetLocus",playgo_locus}, {"scePlayGoSetInstallSpeed",playgo_speed},
     {"sceMouseInit",runtime_stub}, {"sceMouseOpen",mouse_open}, {"sceMouseRead",mouse_read}, {"sceMouseClose",runtime_stub},
     {"sceAudioInOpen",audio_in_open},
     {"sceMoveInit",move_init}, {"sceMoveOpen",move_open}, {"sceMoveGetDeviceInfo",move_device_info},
