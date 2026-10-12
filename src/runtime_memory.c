@@ -577,10 +577,11 @@ static ABI void *posix_mmap(void *addr, uint64_t size, int prot, int flags, int 
 static ABI int32_t reserve_range(void **inout, uint64_t size, int flags, uint64_t alignment) {
     if (!alignment) alignment=PAGE;
     if (!inout || !size || size%PAGE || !valid_alignment(alignment)) return INVALID;
+    /* MAP_FIXED replaces what is mapped there (games decommit by reserving over their mappings),
+     * so the GPU forgets the range first, as for an unmap. */
+    if ((flags & (MAP_FIXED_FLAG|MAP_NO_OVERWRITE))==MAP_FIXED_FLAG && hook_unmap && *inout && !((uintptr_t)*inout%PAGE))
+        hook_unmap((uintptr_t)*inout,size);
     write_lock();
-    if ((flags & MAP_FIXED_FLAG) && overlaps((uintptr_t)*inout,(uintptr_t)*inout+size,0)) {
-        write_unlock(); return NO_MEMORY;
-    }
     int32_t result=place(inout,size,0,flags,alignment,KIND_RESERVED,0,0);
     if (!result) ++reservations;
     write_unlock();
