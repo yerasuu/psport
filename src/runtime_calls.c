@@ -11,14 +11,15 @@
 #include <pthread.h>
 #include <unistd.h>
 
-enum { HLE_STUB_SLOTS = 1024 };
+enum { FAILURE_SLOTS = 4096, HLE_STUB_SLOTS = 1024 };
 static const char (*import_names)[128];
 static uint64_t imports;
 static uint64_t *unimplemented_calls, *stub_calls;
+static struct { uint64_t key, count; } failures[FAILURE_SLOTS];
 static struct { const char *function; const uint64_t *count; } hle_stubs[HLE_STUB_SLOTS];
 static size_t hle_stub_count;
 static pthread_mutex_t hle_stub_lock = PTHREAD_MUTEX_INITIALIZER;
-typedef struct { uint64_t count; uint32_t id; int kind; const char *function; } Entry;
+typedef struct { uint64_t count; uint32_t id, code; int kind; const char *function; } Entry;
 static Entry *entries;
 
 void runtime_calls_configure(const char (*names)[128], uint64_t count) {
@@ -26,7 +27,7 @@ void runtime_calls_configure(const char (*names)[128], uint64_t count) {
     imports = count;
     unimplemented_calls = calloc(count ? count : 1, sizeof(*unimplemented_calls));
     stub_calls = calloc(count ? count : 1, sizeof(*stub_calls));
-    entries = calloc(2 * count + HLE_STUB_SLOTS, sizeof(*entries));
+    entries = calloc(2 * count + FAILURE_SLOTS + HLE_STUB_SLOTS, sizeof(*entries));
     if (!unimplemented_calls || !stub_calls || !entries) { fputs("Cannot allocate call counters\n", stderr); exit(1); }
 }
 
@@ -61,6 +62,37 @@ ABI int64_t runtime_calls_stub(uint32_t id, uintptr_t a0, uintptr_t a1, uintptr_
     return 0;
 }
 
+static int describe_failure(char *out, size_t size, uint32_t code) {
+    return code >= 0x80000000u ? snprintf(out, size, "0x%08x", code) : snprintf(out, size, "-1, errno %u", code);
+}
+
+ABI int64_t runtime_calls_failed(uint32_t id, const uintptr_t *arguments, int64_t result, uint32_t kind) {
+    const uint32_t low = (uint32_t)result;
+    uint32_t code;
+    if (kind == 2 || kind == 3) code = (uint32_t)*runtime_errno() & 0x7fffffffu;
+    else if (low >> 28 == 8 && (kind == 1 || result < 0)) code = low;
+    else return result;
+    if (id >= imports) return result;
+    const uint64_t key = (uint64_t)(id + 1) << 32 | code;
+    for (uint64_t i = 0, slot = key * 0x9E3779B97F4A7C15ull >> 52; i < FAILURE_SLOTS; ++i) {
+        uint64_t *at = &failures[(slot + i) % FAILURE_SLOTS].key, expected = 0;
+        if (__atomic_load_n(at, __ATOMIC_ACQUIRE) != key &&
+            !__atomic_compare_exchange_n(at, &expected, key, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE) && expected != key)
+            continue;
+        if (__atomic_fetch_add(&failures[(slot + i) % FAILURE_SLOTS].count, 1, __ATOMIC_RELAXED)) return result;
+        char line[512];
+        int used = snprintf(line, sizeof(line), "Calls: failed %s (%s) -> ", import_names[id],
+                            runtime_import_name(import_names[id]));
+        used += describe_failure(line + used, sizeof(line) - (size_t)used, code);
+        used += snprintf(line + used, sizeof(line) - (size_t)used, "; arguments ");
+        used += list_arguments(line + used, sizeof(line) - (size_t)used, arguments, 6);
+        snprintf(line + used, sizeof(line) - (size_t)used, "\n");
+        put(1, line);
+        return result;
+    }
+    return result;
+}
+
 void runtime_calls_hle_stub(const char *function, const uint64_t *count) {
     pthread_mutex_lock(&hle_stub_lock);
     if (hle_stub_count < HLE_STUB_SLOTS) {
@@ -75,8 +107,13 @@ static int report_line(char *out, size_t size, const Entry *e) {
     static const char *const kinds[] = {"unimplemented", "stub", "failed"};
     int used = snprintf(out, size, "Calls: summary %s %" PRIu64 " ", kinds[e->kind], e->count);
     if (e->function) return used + snprintf(out + used, size - (size_t)used, "%s (HLE)\n", e->function);
-    return used + snprintf(out + used, size - (size_t)used, "%s (%s)\n", import_names[e->id],
-                           runtime_import_name(import_names[e->id]));
+    used += snprintf(out + used, size - (size_t)used, "%s (%s)", import_names[e->id],
+                     runtime_import_name(import_names[e->id]));
+    if (e->kind == 2) {
+        used += snprintf(out + used, size - (size_t)used, " -> ");
+        used += describe_failure(out + used, size - (size_t)used, e->code);
+    }
+    return used + snprintf(out + used, size - (size_t)used, "\n");
 }
 
 void runtime_calls_report(void) {
@@ -86,12 +123,18 @@ void runtime_calls_report(void) {
     for (uint64_t id = 0; id < imports; ++id) {
         const uint64_t unimplemented = __atomic_load_n(&unimplemented_calls[id], __ATOMIC_RELAXED);
         const uint64_t stub = __atomic_load_n(&stub_calls[id], __ATOMIC_RELAXED);
-        if (unimplemented) entries[count++] = (Entry){unimplemented, (uint32_t)id, 0, NULL};
-        if (stub) entries[count++] = (Entry){stub, (uint32_t)id, 1, NULL};
+        if (unimplemented) entries[count++] = (Entry){unimplemented, (uint32_t)id, 0, 0, NULL};
+        if (stub) entries[count++] = (Entry){stub, (uint32_t)id, 0, 1, NULL};
     }
     for (size_t i = 0, n = __atomic_load_n(&hle_stub_count, __ATOMIC_ACQUIRE); i < n; ++i)
         entries[count++] =
-            (Entry){__atomic_load_n(hle_stubs[i].count, __ATOMIC_RELAXED), 0, 1, hle_stubs[i].function};
+            (Entry){__atomic_load_n(hle_stubs[i].count, __ATOMIC_RELAXED), 0, 0, 1, hle_stubs[i].function};
+    for (size_t i = 0; i < FAILURE_SLOTS; ++i) {
+        const uint64_t key = __atomic_load_n(&failures[i].key, __ATOMIC_ACQUIRE);
+        if (key)
+            entries[count++] = (Entry){__atomic_load_n(&failures[i].count, __ATOMIC_RELAXED), (uint32_t)(key >> 32) - 1,
+                                       (uint32_t)key, 2, NULL};
+    }
     for (size_t i = 1; i < count; ++i)
         for (size_t j = i; j && entries[j - 1].count < entries[j].count; --j) {
             const Entry swap = entries[j]; entries[j] = entries[j - 1]; entries[j - 1] = swap;

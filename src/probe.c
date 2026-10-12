@@ -175,6 +175,43 @@ __asm__(".text\n.globl enter_on_stack\nenter_on_stack:\n"
         " mov %rbp,%rsp\n pop %rbp\n ret\n");
 #endif
 static ABI void guest_exit(void) { puts("Runtime: process finalizer callback reached"); }
+/* An import bound to the runtime's or the GPU library's own function whose result tells a failure
+ * (runtime_import_failure) is called through one of these: it keeps the six argument registers on
+ * its stack, calls the function and hands a result that looks like a failure, with them, to
+ * runtime_calls_failed. Arguments on the stack would move, so those imports are not listed. */
+enum { THUNK_SIZE = 96 };
+static void write_thunk(unsigned char *t, uint32_t id, uint32_t kind, uintptr_t target) {
+    static const unsigned char save[33] = {
+        0x48, 0x83, 0xec, 0x38,       /* sub rsp,56 */
+        0x48, 0x89, 0x3c, 0x24,       /* mov [rsp],rdi */
+        0x48, 0x89, 0x74, 0x24, 0x08, /* mov [rsp+8],rsi */
+        0x48, 0x89, 0x54, 0x24, 0x10, /* mov [rsp+16],rdx */
+        0x48, 0x89, 0x4c, 0x24, 0x18, /* mov [rsp+24],rcx */
+        0x4c, 0x89, 0x44, 0x24, 0x20, /* mov [rsp+32],r8 */
+        0x4c, 0x89, 0x4c, 0x24, 0x28, /* mov [rsp+40],r9 */
+    };
+    static const unsigned char checks[5][7] = {
+        {0},
+        {0x3d, 0x00, 0x00, 0x00, 0x80, 0x73, 0x05}, /* cmp eax,0x80000000; jae slow */
+        {0x90, 0x90, 0x83, 0xf8, 0xff, 0x74, 0x05}, /* cmp eax,-1; je slow */
+        {0x90, 0x48, 0x83, 0xf8, 0xff, 0x74, 0x05}, /* cmp rax,-1; je slow */
+        {0x90, 0x90, 0x48, 0x85, 0xc0, 0x78, 0x05}, /* test rax,rax; js slow */
+    };
+    static const unsigned char done[5] = {0x48, 0x83, 0xc4, 0x38, 0xc3}; /* add rsp,56; ret */
+    const uintptr_t handler = (uintptr_t)runtime_calls_failed;
+    memcpy(t, save, 33);
+    t[33] = 0x49; t[34] = 0xbb; memcpy(t + 35, &target, 8); /* movabs r11,target */
+    t[43] = 0x41; t[44] = 0xff; t[45] = 0xd3;               /* call r11 */
+    memcpy(t + 46, checks[kind], 7);
+    memcpy(t + 53, done, 5);
+    t[58] = 0xbf; memcpy(t + 59, &id, 4);                    /* slow: mov edi,id */
+    t[63] = 0xb9; memcpy(t + 64, &kind, 4);                  /* mov ecx,kind */
+    t[68] = 0x48; t[69] = 0x89; t[70] = 0xe6;                /* mov rsi,rsp */
+    t[71] = 0x48; t[72] = 0x89; t[73] = 0xc2;                /* mov rdx,rax */
+    t[74] = 0x49; t[75] = 0xbb; memcpy(t + 76, &handler, 8); /* movabs r11,runtime_calls_failed */
+    t[84] = 0x41; t[85] = 0xff; t[86] = 0xd3;               /* call r11 */
+    memcpy(t + 87, done, 5);
+}
 #ifndef _WIN32
 /* Termination signals SDL does not take (--cpu-only): the call summary, then the default action. */
 static void shutdown_signal(int sig) {
@@ -640,6 +677,7 @@ int main(int argc, char **argv) {
         permissive_out_error = out && !strcmp(out, "error");
     }
     unsigned char *traps = allocate(round_page((import_count + 1) * 32));
+    unsigned char *thunks = allocate(round_page((import_count + 1) * THUNK_SIZE));
     unsigned char *data_traps = allocate((import_count + 1) * page_size);
     protect(data_traps, (import_count + 1) * page_size, 0);
     for (uint64_t i = 0; i < import_count; ++i) {
@@ -677,10 +715,14 @@ int main(int argc, char **argv) {
             if (resolved) {
                 value = resolved + relocs[i].addend;
                 import_state[relocs[i].value] = runtime_last_stub ? 3 : 1;
+                const unsigned failure = relocs[i].kind == 1 ? runtime_import_failure(names[relocs[i].value]) : 0;
                 if (relocs[i].kind == 1 && runtime_last_stub) {
                     const uintptr_t handler = (uintptr_t)runtime_calls_stub;
                     memcpy(traps + 32 * relocs[i].value + 22, &handler, 8);
                     value = (uintptr_t)(traps + 32 * relocs[i].value);
+                } else if (failure) {
+                    write_thunk(thunks + THUNK_SIZE * relocs[i].value, (uint32_t)relocs[i].value, failure, resolved);
+                    value = (uintptr_t)(thunks + THUNK_SIZE * relocs[i].value);
                 }
             } else if (native_libc && bindings[relocs[i].value]) {
                 uint64_t address=bindings[relocs[i].value];
@@ -712,6 +754,7 @@ int main(int argc, char **argv) {
     if (patch_file) apply_patches(patch_file, segments, ns, relocs, nr);
     if (!cpu_only) bbgpu_patch_image(image, size);
     protect(traps, round_page((import_count + 1) * 32), 5);
+    protect(thunks, round_page((import_count + 1) * THUNK_SIZE), 5);
     protect(image, round_page(size), 0);
     int executable_entry = 0;
     for (uint64_t i = 0; i < ns; ++i) {

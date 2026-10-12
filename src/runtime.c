@@ -357,3 +357,16 @@ unsigned runtime_import_outputs(const char *nid) {
     }
     return 0;
 }
+static const struct { char nid[12]; unsigned char kind; } failure_kinds[]={
+#include "import_returns.inc"
+};
+unsigned runtime_import_failure(const char *nid) {
+    size_t low=0, high=sizeof(failure_kinds)/sizeof(*failure_kinds);
+    while (low<high) {
+        size_t mid=low+(high-low)/2;
+        int order=strncmp(nid,failure_kinds[mid].nid,11);
+        if (!order) return failure_kinds[mid].kind;
+        if (order<0) high=mid; else low=mid+1;
+    }
+    return 0;
+}
