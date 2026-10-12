@@ -96,7 +96,7 @@
   кадра: статичная геометрия совпадает.
 - **Jitter**: субпиксельный сдвиг геометрии сцены через viewport, последовательность
   Halton(2,3); число фаз 8·(вывод/рендер)². Интерфейс и пост-обработка не сдвигаются.
-- **FSR 3.1** (FireBurn/FSR-Vulkan, нативный Vulkan, подмодуль `gpu/third_party/fsr-vulkan`):
+- **FSR 3.1** (FireBurn/FSR-Vulkan, нативный Vulkan, `gpu/third_party/fsr-vulkan`):
   - *Native AA*: на HDR-цвете сцены перед пост-обработкой, 1:1.
   - *Пресеты Quality/Balanced/Performance/Ultra Performance* (x1.5/1.7/2/3): игра рендерит в
     пониженном разрешении (патч разрешения, который `patches.py` выводит из патча 720p

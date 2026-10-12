@@ -19,13 +19,12 @@
 // fork with a float decoder. Same frame, scaled to [-1, 1).
 static int Atrac9DecodeF32(void* handle, const unsigned char* input, int input_size, float* output, int* used,
                            int nointerleave) {
-    (void)input_size; // upstream's decoder reads one frame and takes no bound
     (void)nointerleave; // always 0 here: interleaved
     Atrac9CodecInfo info{};
     if (const int status = Atrac9GetCodecInfo(handle, &info); status != 0) return status;
     thread_local std::vector<short> pcm;
     pcm.resize(static_cast<std::size_t>(info.frameSamples) * static_cast<std::size_t>(info.channels));
-    const int status = Atrac9Decode(handle, input, pcm.data(), used);
+    const int status = Atrac9Decode(handle, input, input_size, pcm.data(), used);
     if (status != 0) return status;
     std::transform(pcm.begin(), pcm.end(), output, [](short sample) { return static_cast<float>(sample) / 32768.0f; });
     return 0;
@@ -128,8 +127,6 @@ static bool GatherSuperframe(Ngs2Voice& voice) {
 static bool DecodeSuperframe(Ngs2Voice& voice) {
     if (!GatherSuperframe(voice)) return false;
     auto& atrac9 = voice.atrac9;
-    // Upstream's bit reader takes no bound: the last frame's reads past the superframe land in zeros.
-    atrac9.input.resize(static_cast<std::size_t>(atrac9.superframeBytes) * 2);
     if (atrac9.windowCursor != 0) {
         atrac9.window.erase(atrac9.window.begin(), atrac9.window.begin() + static_cast<std::ptrdiff_t>(atrac9.windowCursor) * voice.channels);
         atrac9.windowCursor = 0;

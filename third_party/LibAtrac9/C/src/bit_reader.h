@@ -3,11 +3,12 @@
 typedef struct {
 	const unsigned char * Buffer;
 	int Position;
+	int Length;
 } BitReaderCxt;
 
 // Make MSVC compiler happy. Leave const in for value parameters
 
-void InitBitReaderCxt(BitReaderCxt* br, const void * buffer);
+void InitBitReaderCxt(BitReaderCxt* br, const void * buffer, const int length);
 int PeekInt(BitReaderCxt* br, const int bits);
 int ReadInt(BitReaderCxt* br, const int bits);
 int ReadSignedInt(BitReaderCxt* br, const int bits);

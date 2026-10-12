@@ -20,9 +20,9 @@ int Atrac9InitDecoder(void* handle, unsigned char * pConfigData)
 	return InitDecoder(handle, pConfigData, 16);
 }
 
-int Atrac9Decode(void* handle, const unsigned char *pAtrac9Buffer, short *pPcmBuffer, int *pNBytesUsed)
+int Atrac9Decode(void* handle, const unsigned char *pAtrac9Buffer, int atrac9BufferSize, short *pPcmBuffer, int *pNBytesUsed)
 {
-	return Decode(handle, pAtrac9Buffer, (unsigned char*)pPcmBuffer, pNBytesUsed);
+	return Decode(handle, pAtrac9Buffer, atrac9BufferSize, (unsigned char*)pPcmBuffer, pNBytesUsed);
 }
 
 int Atrac9GetCodecInfo(void* handle, Atrac9CodecInfo * pCodecInfo)

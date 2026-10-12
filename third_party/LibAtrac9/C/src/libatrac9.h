@@ -30,7 +30,7 @@ DLLEXPORT void* Atrac9GetHandle(void);
 DLLEXPORT void Atrac9ReleaseHandle(void* handle);
 
 DLLEXPORT int Atrac9InitDecoder(void* handle, unsigned char *pConfigData);
-DLLEXPORT int Atrac9Decode(void* handle, const unsigned char *pAtrac9Buffer, short *pPcmBuffer, int *pNBytesUsed);
+DLLEXPORT int Atrac9Decode(void* handle, const unsigned char *pAtrac9Buffer, int atrac9BufferSize, short *pPcmBuffer, int *pNBytesUsed);
 
 DLLEXPORT int Atrac9GetCodecInfo(void* handle, Atrac9CodecInfo *pCodecInfo);
 
