@@ -140,7 +140,16 @@ s32 PS4_SYSV_ABI sceVideoOutRegisterBuffers(s32 handle, s32 startIndex, void* co
 
 s32 PS4_SYSV_ABI sceVideoOutSetFlipRate(s32 handle, s32 rate) {
     LOG_TRACE(Lib_VideoOut, "called");
-    driver->GetPort(handle)->flip_rate = rate;
+    auto* port = driver->GetPort(handle);
+    if (!port || !port->is_open) {
+        LOG_ERROR(Lib_VideoOut, "Invalid handle = {}", handle);
+        return ORBIS_VIDEO_OUT_ERROR_INVALID_HANDLE;
+    }
+    if (rate < 0 || rate > 2) {
+        LOG_ERROR(Lib_VideoOut, "Invalid rate = {}", rate);
+        return ORBIS_VIDEO_OUT_ERROR_INVALID_VALUE;
+    }
+    port->flip_rate = rate;
     return ORBIS_OK;
 }
 
