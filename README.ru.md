@@ -42,7 +42,7 @@ Bloodborne работает так же, как в апстриме, с его �
 | Tales of Symphonia Remastered | CUSA50989 | титульный экран, первая комната, звук |
 | Astrea | CUSA49515 | сюжетные кадры вступления, звук |
 | SaGa Emerald Beyond | CUSA43027 | титульный экран, первые сюжетные сцены с диалогами, звук |
-| ALTDEUS: Beyond Chronos | CUSA26563 | не запускается: нужен шлем PS VR, режима для обычного экрана нет |
+| ALTDEUS: Beyond Chronos | CUSA26563 | чёрный экран: нужен шлем PS VR, режима для обычного экрана нет |
 
 Игры, которым обязателен PS VR (`require_ps_vr` в `param.sfo`), не поддерживаются. Основательно
 проверена одна машина (AMD Radeon RX 7800 XT, Mesa/RADV).
@@ -100,7 +100,7 @@ BB_GAME_DIR=/путь/к/дампу BB_SKIP_GAME_CHECK=1 BB_PERMISSIVE=1 bash ru
   или `30` (без патча).
 - **Апскейлинг.** В Bloodborne нет буфера скоростей, поэтому порт сам вычисляет векторы движения
   (камера — по глубине и матрицам сцены, объекты — по вершинам прошлого кадра) и сдвигает сцену
-  джиттером. `BB_UPSCALER=taa|fsr3|fsr4|fsr411|off|none`:
+  джиттером. `BB_UPSCALER=taa|fsr3|fsr4|fsr411|dlss|off`:
   - FSR 3.1 (FSR-Vulkan), без дополнительных файлов;
   - FSR 4 (INT8, модель v07): `bash tools/fetch_fsr4_assets.sh`;
   - FSR 4.1.1: DLL AMD один раз записывается под vkd3d-proton и воспроизводится на Vulkan,

@@ -38,7 +38,7 @@ Tested headless with `tools/regress.sh` (see below): six of seven reach gameplay
 | Tales of Symphonia Remastered | CUSA50989 | title screen, the first room, sound |
 | Astrea | CUSA49515 | the intro's story panels, sound |
 | SaGa Emerald Beyond | CUSA43027 | title screen, first story scenes with dialogue, sound |
-| ALTDEUS: Beyond Chronos | CUSA26563 | does not run: requires a PS VR headset, no flat-screen mode |
+| ALTDEUS: Beyond Chronos | CUSA26563 | black screen: requires a PS VR headset, no flat-screen mode |
 
 Titles that require PS VR (`require_ps_vr` in `param.sfo`) are unsupported. Only one machine
 (AMD Radeon RX 7800 XT, Mesa/RADV) has been tested thoroughly.
@@ -96,7 +96,7 @@ baked-in 60 fps patch crashes in the gestures menu.
   (unpatched).
 - **Upscaling.** Bloodborne has no velocity buffer, so the port computes motion vectors itself
   (camera from depth and the scene matrices, objects from the previous frame's vertices) and
-  jitters the scene. `BB_UPSCALER=taa|fsr3|fsr4|fsr411|off|none`:
+  jitters the scene. `BB_UPSCALER=taa|fsr3|fsr4|fsr411|dlss|off`:
   - FSR 3.1 (FSR-Vulkan), no assets needed;
   - FSR 4 (INT8, model v07): `bash tools/fetch_fsr4_assets.sh`;
   - FSR 4.1.1: AMD's DLL recorded once under vkd3d-proton and replayed on Vulkan, bit-exact with
