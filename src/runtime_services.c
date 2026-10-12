@@ -184,7 +184,8 @@ static ABI int32_t voice_info(uint32_t port,uint32_t *info) {
 typedef struct { const char *name; int initialized, status; } Dialog;
 static Dialog dialogs[]={{"CommonDialog",0,0},{"MsgDialog",0,0},{"SaveDataDialog",0,0},
                          {"NpProfileDialog",0,0},{"NpCommerceDialog",0,0},{"ImeDialog",0,0},
-                         {"ErrorDialog",0,0}};
+                         {"ErrorDialog",0,0},{"WebBrowserDialog",0,0},{"InvitationDialog",0,0},
+                         {"SigninDialog",0,0},{"SocialScreenDialog",0,0}};
 static int common_initialized;
 static ABI int32_t common_init(void) { common_initialized=1; return 0; }
 static int32_t dialog_init(int i) {
@@ -207,6 +208,7 @@ static int32_t dialog_term(int i) {
     static ABI int32_t tag##_status(void) { return dialog_status(i); } \
     static ABI int32_t tag##_term(void) { return dialog_term(i); }
 DIALOG(msg,1) DIALOG(save,2) DIALOG(profile,3) DIALOG(commerce,4)
+DIALOG(web,7) DIALOG(invitation,8) DIALOG(signin,9) DIALOG(social,10)
 static ABI int32_t profile_result(void *result) { if (result) memset(result,0,4); return 0; }
 /* With nothing displayed, a dialog is ready to show whenever it is initialized (Atelier Ayesha
  * waited on these before opening its auto-load dialog; answered 0 they never turned true). */
@@ -531,6 +533,18 @@ static const RuntimeExport exports[]={
     {"sceNpCommerceDialogUpdateStatus",commerce_status}, {"sceNpCommerceDialogTerminate",commerce_term},
     {"sceImeDialogInit",ime_init}, {"sceImeDialogGetStatus",ime_status}, {"sceImeDialogGetResult",ime_result},
     {"sceImeDialogTerm",ime_term}, {"sceImeDialogAbort",ime_term},
+    {"sceWebBrowserDialogInitialize",web_init}, {"sceWebBrowserDialogOpen",web_open},
+    {"sceWebBrowserDialogOpenForPredeterminedContent",web_open}, {"sceWebBrowserDialogUpdateStatus",web_status},
+    {"sceWebBrowserDialogGetStatus",web_status}, {"sceWebBrowserDialogTerminate",web_term},
+    {"sceInvitationDialogInitialize",invitation_init}, {"sceInvitationDialogOpen",invitation_open},
+    {"sceInvitationDialogOpenA",invitation_open}, {"sceInvitationDialogUpdateStatus",invitation_status},
+    {"sceInvitationDialogGetStatus",invitation_status}, {"sceInvitationDialogTerminate",invitation_term},
+    {"sceSigninDialogInitialize",signin_init}, {"sceSigninDialogOpen",signin_open},
+    {"sceSigninDialogUpdateStatus",signin_status}, {"sceSigninDialogGetStatus",signin_status},
+    {"sceSigninDialogTerminate",signin_term},
+    {"sceSocialScreenDialogInitialize",social_init}, {"sceSocialScreenDialogOpen",social_open},
+    {"sceSocialScreenDialogUpdateStatus",social_status}, {"sceSocialScreenDialogGetStatus",social_status},
+    {"sceSocialScreenDialogTerminate",social_term},
     {"sceErrorDialogInitialize",error_init}, {"sceErrorDialogOpen",error_open},
     {"sceErrorDialogUpdateStatus",error_status}, {"sceErrorDialogGetStatus",error_status},
     {"sceErrorDialogClose",error_close}, {"sceErrorDialogTerminate",error_term},
