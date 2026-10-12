@@ -194,6 +194,11 @@ static ABI int32_t attr_set_stack_region(ThreadAttr **slot,void *addr,uint64_t s
     if (!a || !addr || size<16384) return ERR(22);
     a->stack_addr=addr; a->stack=size; return 0;
 }
+static ABI int32_t attr_get_stack_region(ThreadAttr **slot,void **addr,uint64_t *size) {
+    ThreadAttr *a=find_attr(slot);
+    if (!a || !addr || !size) return ERR(22);
+    *addr=a->stack_addr; *size=a->stack; return 0;
+}
 static ABI int32_t attr_get_stack_addr(ThreadAttr **slot,void **addr) {
     ThreadAttr *a=find_attr(slot);
     if (!a || !addr) return ERR(22);
@@ -439,6 +444,7 @@ uintptr_t runtime_thread_resolve(const char *name) {
         {"JaRMy+QcpeU#p#J",attr_get_detach}, {"-fA+7ZlGDQs#p#J",attr_get_stack},
         {"FXPWHNk8Of0#p#J",attr_get_param}, {"El+cQ20DynU#p#J",attr_set_guard},
         {"Bvn74vj6oLo#p#J",attr_set_stack_region}, {"Ru36fiTtJzA#p#J",attr_get_stack_addr},
+        {"-quPa4SEJUw#p#J",attr_get_stack_region},
         {"ruZ9hhQ8oUk#p#J",thread_get_stack},
         {"6UgtwV+0zb4#p#J",thread_create}, {"onNY9Byn-W8#p#J",thread_join},
         {"4qGrR6eoP9Y#p#J",thread_detach}, {"3kg7rT0NQIs#p#J",thread_exit},
