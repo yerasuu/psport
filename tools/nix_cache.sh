@@ -2,8 +2,8 @@
 # tools/nix_cache.sh STORE_PATH COMMIT TARGET: publishes STORE_PATH's closure (nix-build
 # packaging/port.nix) as a flat Nix binary cache, for COMMIT. TARGET: github:OWNER/REPO, the assets
 # of that repository's release "nix-cache" (gh, with GH_TOKEN), or a local directory with the same
-# files. Only paths the target lacks are uploaded; then the commits older than the newest
-# NIX_CACHE_KEEP (default 30) and the paths only they used are pruned.
+# files. First the commits beyond the newest NIX_CACHE_KEEP (default 30), or beyond 1000 files, and
+# the paths only they used are pruned; then only the paths the target lacks are uploaded.
 # The closure is made content-addressed first: Nix accepts those paths without a signature, also
 # from users the daemon doesn't trust, so the cache needs no key.
 # Files, all at the top level: nix-cache-info, <hash>.narinfo and <hash>.nar.zst per store path
@@ -45,14 +45,44 @@ ca=$("${nix[@]}" store make-content-addressed --json "$path" | python3 -c '
 import json, sys
 print(json.load(sys.stdin)["rewrites"][sys.argv[1]])' "$path")
 "${nix[@]}" path-info --recursive "$ca" > "$work/closure-$commit"
+hashes() { xargs -rn1 basename | cut -d- -f1; }
+hashes < "$work/closure-$commit" | sort -u > "$work/own-hashes"
+cp "$work/own-hashes" "$work/live-hashes"
 list > "$work/assets"
-present() { cut -f1 "$work/assets" | grep -qxF "$1"; }
+# Read from a file: piped into grep -q, cut can die of SIGPIPE, which pipefail reports as absent.
+cut -f1 "$work/assets" > "$work/names"
+# A path counts only with both files: a run stopped while pruning may have left one.
+present() { grep -qxF "$1.narinfo" "$work/names" && grep -qxF "$1.nar.zst" "$work/names"; }
+
+# Pruned before uploading, since a release holds at most 1000 files and a full one takes no more:
+# this commit and the newest others up to NIX_CACHE_KEEP, as many as fit with their paths.
+echo "$commit" > "$work/kept"
+awk -F'\t' -v own="commit-$commit" '$1 ~ /^commit-/ && $1 != own { print substr($1, 8) }' \
+    "$work/assets" > "$work/commits"
+prune=1
+while read -r other && (($(wc -l < "$work/kept") < keep)); do
+    # Without a kept commit's closure, its paths can't be told apart: nothing is pruned.
+    fetch "closure-$other" > "$work/other" || { echo "No closure-$other: not pruning" >&2; prune=0; break; }
+    hashes < "$work/other" | sort -u - "$work/live-hashes" > "$work/with"
+    (($(wc -l < "$work/with") * 2 + ($(wc -l < "$work/kept") + 1) * 2 + 1 <= 1000)) || break
+    mv "$work/with" "$work/live-hashes"
+    echo "$other" >> "$work/kept"
+done < "$work/commits"
+pruned=0
+while ((prune)) && IFS=$'\t' read -r name id; do
+    case $name in
+        commit-* | closure-*) grep -qxF "${name#*-}" "$work/kept" && continue ;;
+        *.narinfo | *.nar.zst) grep -qxF "${name%%.*}" "$work/live-hashes" && continue ;;
+        *) continue ;;
+    esac
+    remove "$name" "$id"
+    pruned=$((pruned + 1))
+done < "$work/assets"
 
 missing=()
-while read -r store_path; do
-    hash=$(basename "$store_path" | cut -d- -f1)
-    present "$hash.narinfo" || missing+=("$hash")
-done < "$work/closure-$commit"
+while read -r hash; do
+    present "$hash" || missing+=("$hash")
+done < "$work/own-hashes"
 if ((${#missing[@]})); then
     # The whole closure: a binary cache only takes a path whose references it already holds.
     "${nix[@]}" copy --to "file://$work/cache?compression=zstd" "$ca"
@@ -60,7 +90,8 @@ if ((${#missing[@]})); then
     for hash in "${missing[@]}"; do
         info=$work/cache/$hash.narinfo
         nar=$(sed -n 's|^URL: ||p' "$info")
-        mv "$work/cache/$nar" "$work/$hash.nar.zst"
+        # Copied: paths with the same contents share one NAR.
+        cp "$work/cache/$nar" "$work/$hash.nar.zst"
         sed "s|^URL: .*|URL: $hash.nar.zst|" "$info" > "$work/$hash.narinfo"
         nars+=("$work/$hash.nar.zst") narinfos+=("$work/$hash.narinfo")
     done
@@ -75,26 +106,4 @@ fi
 echo "$ca" > "$work/commit-$commit"
 upload "$work/closure-$commit"
 upload "$work/commit-$commit"
-echo "Published $ca for $commit (${#missing[@]} new store paths)"
-
-list > "$work/assets"
-grep '^commit-' "$work/assets" | cut -f1 | sed 's/^commit-//' > "$work/commits"
-# This commit's own closure whatever the listing says: a fresh upload may not be listed yet.
-cp "$work/closure-$commit" "$work/live"
-while read -r kept; do
-    # Without a kept commit's closure, its paths can't be told apart: nothing is pruned.
-    fetch "closure-$kept" >> "$work/live" || { echo "No closure-$kept: not pruning" >&2; exit 0; }
-done < <(head -n "$keep" "$work/commits")
-xargs -rn1 basename < "$work/live" | cut -d- -f1 | sort -u > "$work/live-hashes"
-tail -n +"$((keep + 1))" "$work/commits" > "$work/old"
-pruned=0
-while IFS=$'\t' read -r name id; do
-    case $name in
-        commit-* | closure-*) grep -qxF "${name#*-}" "$work/old" || continue ;;
-        *.narinfo | *.nar.zst) grep -qxF "${name%%.*}" "$work/live-hashes" && continue ;;
-        *) continue ;;
-    esac
-    remove "$name" "$id"
-    pruned=$((pruned + 1))
-done < "$work/assets"
-echo "Pruned $pruned files; $(($(wc -l < "$work/assets") - pruned)) left (a release holds at most 1000)"
+echo "Published $ca for $commit (${#missing[@]} new store paths, $pruned files pruned)"
