@@ -110,22 +110,34 @@ Every import the game calls without getting real work done is logged the first t
 | `GPU [<class>] <<level>> <file>:<line> <function>: (STUBBED) ...` | first call of a GPU library (HLE) function that does not do its work, whatever `BB_GPU_LOG` says |
 | `Calls: failed <NID> (<name>) -> 0x8xxxxxxx; arguments <a0>, ..., <a5>` | first time an import fails with that SCE error code |
 | `Calls: failed <NID> (<name>) -> -1, errno <n>; arguments <a0>, ..., <a5>` | first time a POSIX import fails with that errno |
+| `Calls: status <NID> (<name>) -> 0x8xxxxxxx; arguments <a0>, ..., <a5>` | first time an import reports a state its caller polls or waits for with that code (no event pending, timed out, busy) |
+| `Calls: status <NID> (<name>) -> -1, errno <n>; arguments <a0>, ..., <a5>` | the same for a POSIX import (`sem_trywait`'s `EAGAIN`, `sem_timedwait`'s `ETIMEDOUT`) |
 
 Failures are watched for the imports bound to the runtime's or the GPU library's own functions whose
 result reports one, per shadPS4's prototypes (`src/import_returns.inc`, `tools/import_returns.py`:
 sce functions returning a 32- or 64-bit result, POSIX functions returning -1 with errno) and whose
 arguments all travel in registers; a thunk calls the function and only a result that looks like a
-failure takes the slow path. When the process ends (the guest exits, the window is closed, SIGTERM,
+failure takes the slow path. The results `src/import_statuses.inc` lists for an import (kept by hand
+from the codes the runtime's implementations return: `sceUserServiceGetEvent`'s no event, the
+timeouts of the `Wait`/`Timedwait`/`Timedlock` calls, the busy result of the `Poll`/`Try` calls)
+are no failure but the state the caller asked about: they are logged and counted all the same, as
+`status`. When the process ends (the guest exits, the window is closed, SIGTERM,
 SIGINT or SIGHUP, a fault, the watchdog, a `STOP:`), a summary follows, most calls first:
 
 ```
-Calls: summary: <n> unimplemented, <n> stub, <n> failed (import and error code)
+Calls: summary: <n> unimplemented, <n> stub, <n> failed, <n> status (import and error code)
 Calls: summary unimplemented <calls> <NID> (<name>)
 Calls: summary stub <calls> <NID> (<name>)
 Calls: summary stub <calls> <function> (HLE)
 Calls: summary failed <calls> <NID> (<name>) -> 0x8xxxxxxx
 Calls: summary failed <calls> <NID> (<name>) -> -1, errno <n>
+Calls: summary status <calls> <NID> (<name>) -> 0x8xxxxxxx
+Calls: summary status <calls> <NID> (<name>) -> -1, errno <n>
 ```
+
+The `status` count is appended to the first line and its entries carry a list name of their own,
+so a parser that knows only `unimplemented`, `stub` and `failed` still reads those as before, skips
+the `status` lines and no longer sees these results among the failures.
 
 ## Regression runs
 
