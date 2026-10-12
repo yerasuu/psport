@@ -110,6 +110,7 @@ static int CreateRack(Ngs2Handle systemHandle, std::uint32_t rackId, const RackO
     rack->rackId = rackId;
     rack->maxChannels = RackMaxChannels(rackId, options);
     rack->maxFilters = rackId == SCE_NGS2_RACK_ID_SAMPLER ? options.sampler.max_filters : 0;
+    rack->maxEnvelopePoints = rackId == SCE_NGS2_RACK_ID_SAMPLER ? options.sampler.max_envelope_points : 0;
     rack->uid = nextUid++;
     std::memcpy(rack->name, options.common.name, sizeof(rack->name));
     rack->name[sizeof(rack->name) - 1] = '\0';

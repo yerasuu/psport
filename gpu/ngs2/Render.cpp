@@ -174,6 +174,7 @@ static void RenderSampler(Ngs2Voice& voice, std::uint32_t grain, std::uint32_t s
     if (voice.waveformType == SCE_NGS2_WAVEFORM_TYPE_ATRAC9) Ngs2ConsumeAtrac9(voice, grain, systemRate);
     else ConsumeSamples(voice, grain, systemRate);
     ApplyFilters(voice, 0, grain, systemRate);
+    if (!Ngs2ApplyEnvelope(voice, grain)) voice.state = Ngs2PlayState::Empty;
     const bool buffered = voice.waveformType == SCE_NGS2_WAVEFORM_TYPE_ATRAC9 && voice.atrac9.windowCursor * voice.channels < voice.atrac9.window.size();
     if (voice.state == Ngs2PlayState::Playing && voice.blocks.empty() && !buffered && !voice.acceptsBlocks && std::none_of(voice.filters.begin(), voice.filters.end(), Ngs2FilterHasHistory)) {
         voice.state = Ngs2PlayState::Empty;
@@ -352,6 +353,7 @@ void Ngs2RenderSystem(Ngs2System& system, const Ngs2RenderBufferInfo* bufferInfo
     for (auto* voice : voices) {
         if (voice->state == Ngs2PlayState::Stopped) voice->state = Ngs2PlayState::Empty;
         voice->stateFlags = static_cast<std::uint32_t>(voice->state);
+        if (voice->state != Ngs2PlayState::Empty && voice->envelope.phase == Ngs2EnvelopePhase::Release) voice->stateFlags |= SCE_NGS2_VOICE_STATE_FLAG_STOPPED;
     }
     system.renderCount++;
 }

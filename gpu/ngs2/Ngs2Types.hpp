@@ -440,6 +440,21 @@ struct Ngs2SamplerVoicePitchParam {
     float ratio;
 };
 
+struct Ngs2EnvelopePoint {
+    std::uint32_t curve;
+    std::uint32_t duration;
+    float height;
+};
+static_assert(sizeof(Ngs2EnvelopePoint) == 12);
+
+struct Ngs2SamplerVoiceEnvelopeParam {
+    Ngs2VoiceParamHeader header;
+    std::uint32_t num_forward_points;
+    std::uint32_t num_release_points;
+    const Ngs2EnvelopePoint* points;
+};
+static_assert(sizeof(Ngs2SamplerVoiceEnvelopeParam) == 24);
+
 // values: frequency, q and gain, or for SCE_NGS2_FILTER_TYPE_COEFFICIENTS b0, b1, b2, -a1 and -a2.
 struct Ngs2FilterParam {
     std::uint32_t type;

@@ -104,6 +104,19 @@ struct Ngs2Filter {
     std::vector<Ngs2FilterHistory> history;
 };
 
+enum class Ngs2EnvelopePhase : std::uint8_t { Idle, Forward, Release };
+
+struct Ngs2Envelope {
+    bool enabled = false;
+    std::uint32_t forwardPoints = 0;
+    std::vector<Ngs2EnvelopePoint> points;
+    Ngs2EnvelopePhase phase = Ngs2EnvelopePhase::Idle;
+    std::uint32_t index = 0;
+    std::uint32_t position = 0;
+    float start = 0.0f;
+    float level = 1.0f;
+};
+
 struct Ngs2Port {
     Ngs2Voice* dest = nullptr;
     float volume = 1.0f;
@@ -147,6 +160,7 @@ struct Ngs2Voice {
     std::vector<Ngs2Port> ports;
     std::vector<std::vector<float>> matrices;
     std::vector<Ngs2Filter> filters;
+    Ngs2Envelope envelope;
     std::uint32_t outputId = 0;
     float fbwLevel = 1.0f;
     float lfeLevel = 1.0f;
@@ -173,6 +187,7 @@ struct Ngs2Rack {
     char name[16] = {};
     std::uint32_t maxChannels = 0;
     std::uint32_t maxFilters = 0;
+    std::uint32_t maxEnvelopePoints = 0;
     std::uint32_t maxGrainSamples = 0;
     std::uint32_t maxChannelWorks = 0;
     std::uint32_t maxInputs = 0;
@@ -230,6 +245,9 @@ void Ngs2ClearReverb(Ngs2Voice& voice);
 bool Ngs2ProcessReverb(Ngs2ReverbState& reverb, float* samples, std::uint32_t channels, std::uint32_t grain, std::uint32_t sampleRate);
 void Ngs2SetFilter(Ngs2Filter& filter, const Ngs2FilterParam& param);
 void Ngs2UpdateFilter(Ngs2Filter& filter, std::uint32_t sampleRate);
+void Ngs2SetEnvelope(Ngs2Voice& voice, const Ngs2SamplerVoiceEnvelopeParam& param);
+void Ngs2StartEnvelope(Ngs2Envelope& envelope);
+bool Ngs2ApplyEnvelope(Ngs2Voice& voice, std::uint32_t grain);
 void Ngs2SetLfeLowPass(std::array<Ngs2Filter, 2>& stages, std::uint32_t cutoff, std::uint32_t channels, std::uint32_t sampleRate);
 bool Ngs2FilterHasHistory(const Ngs2Filter& filter);
 void Ngs2ApplyFilter(Ngs2Voice& voice, Ngs2Filter& filter, std::uint32_t grain);

@@ -28,10 +28,20 @@ void Ngs2Voice::SetEvent(std::uint32_t eventId) {
                 state = Ngs2PlayState::Playing;
                 stateFlags |= SCE_NGS2_VOICE_STATE_FLAG_INUSE;
                 if (userFxHandler) userFxFlags = 1;
+                Ngs2StartEnvelope(envelope);
             }
             break;
         case SCE_NGS2_VOICE_EVENT_STOP:
-            if (state == Ngs2PlayState::Playing || state == Ngs2PlayState::Paused) state = Ngs2PlayState::Stopped;
+            if (state != Ngs2PlayState::Playing && state != Ngs2PlayState::Paused) break;
+            // A voice with an envelope plays on through its release points, then ends.
+            if (envelope.enabled && envelope.phase == Ngs2EnvelopePhase::Forward) {
+                envelope.phase = Ngs2EnvelopePhase::Release;
+                envelope.index = envelope.forwardPoints;
+                envelope.position = 0;
+                envelope.start = envelope.level;
+                break;
+            }
+            state = Ngs2PlayState::Stopped;
             break;
         case SCE_NGS2_VOICE_EVENT_STOP_IMM:
         case SCE_NGS2_VOICE_EVENT_KILL:
@@ -54,6 +64,7 @@ void Ngs2Voice::ResetSetup() {
     std::fill(ports.begin(), ports.end(), Ngs2Port{});
     for (auto& matrix : matrices) matrix.clear();
     filters.clear();
+    envelope = {};
     fbwLevel = 1.0f;
     lfeLevel = 1.0f;
     lfeCutoff = 0;
@@ -129,7 +140,7 @@ static void Patch(Ngs2Voice& voice, const Ngs2VoicePatchParam& patch) {
     port.dest = dest;
 }
 
-// An effect not implemented (an envelope, a peak meter, mastering's matrix): its parameter
+// An effect not implemented (a peak meter, mastering's matrix): its parameter
 // is accepted and leaves the sound as it is, so the rest of the same parameter list still applies.
 static void IgnoreParam(std::uint32_t id) {
     static std::mutex lock;
@@ -299,7 +310,7 @@ static void ApplySamplerParam(Ngs2Voice& voice, const Ngs2VoiceParamHeader& para
         }
         case SCE_NGS2_SAMPLER_VOICE_PARAM_USER_FX: SetUserFx(voice, ParamAs<Ngs2SubmixerVoiceUserFxParam>(param)); break;
         case SCE_NGS2_SAMPLER_VOICE_PARAM_FILTER: SetFilter(voice, ParamAs<Ngs2SamplerVoiceFilterParam>(param)); break;
-        case SCE_NGS2_SAMPLER_VOICE_PARAM_ENVELOPE: IgnoreParam(param.id); break;
+        case SCE_NGS2_SAMPLER_VOICE_PARAM_ENVELOPE: Ngs2SetEnvelope(voice, ParamAs<Ngs2SamplerVoiceEnvelopeParam>(param)); break;
         default: throw std::runtime_error("NGS2: sampler voice param " + Ngs2Hex(param.id) + " is not implemented");
     }
 }
@@ -438,7 +449,7 @@ int APS5_VABI sceNgs2VoiceGetState(uintptr_t voice_handle, Ngs2VoiceState* state
             auto& sampler = *reinterpret_cast<Ngs2SamplerVoiceState*>(state);
             sampler = {};
             sampler.voice_state.state_flags = voice.stateFlags;
-            sampler.envelope_height = 1.0f;
+            sampler.envelope_height = voice.envelope.level;
             sampler.num_decoded_samples = voice.decodedSamples;
             sampler.decoded_data_size = voice.decodedBytes;
             sampler.user_data = voice.blocks.empty() ? 0 : voice.blocks.front().info.user_data;
