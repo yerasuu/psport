@@ -19,6 +19,9 @@ int runtime_same_nid(const char *a, const char *b);
 /* Linked modules' dynamic TLS ids run from 2 (1 is the eboot's static TLS) below this. */
 #define RUNTIME_TLS_MODULES 32
 void runtime_report(void);
+/* Ends the process after a STOP: the call report, then _exit, since exit() from a game thread runs the
+ * GPU library's destructors while its threads are still running and never returns. */
+__attribute__((noreturn)) void runtime_stop(int status);
 void runtime_finalize(void *dso);
 uintptr_t runtime_mutex_resolve(const char *name);
 void runtime_mutex_report(void);

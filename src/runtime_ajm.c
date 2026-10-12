@@ -2,14 +2,17 @@
  * builder functions are imports, but games may also build chunks inline), and
  * run synchronously at submission: decoding a batch takes well under a
  * millisecond, so waiting always finds it complete. ATRAC9 is decoded by
- * LibAtrac9 (MIT, third_party/LibAtrac9). MP3/AAC instances stop explicitly. */
+ * LibAtrac9 (MIT, third_party/LibAtrac9), MP3 and AAC by libSceAudiodec's FFmpeg decoders in the GPU
+ * library (bbgpu_audio_decoder_*). */
 #define _GNU_SOURCE
 #include "runtime.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 #include <pthread.h>
 #include "third_party/LibAtrac9/C/src/libatrac9.h"
+#include "gpu/bbgpu.h"
 
 #define ERR_INVALID_CONTEXT ((int32_t)0x80930002)
 #define ERR_INVALID_INSTANCE ((int32_t)0x80930003)
@@ -34,6 +37,11 @@
 enum { IDENT_JOB=0, IDENT_INPUT_RUN=1, IDENT_INPUT_CONTROL=2, IDENT_CONTROL_FLAGS=3, IDENT_RUN_FLAGS=4,
        IDENT_RETURN_ADDRESS=6, IDENT_INLINE=7, IDENT_OUTPUT_RUN=17, IDENT_OUTPUT_CONTROL=18 };
 enum { FORMAT_S16=0, FORMAT_S32=1, FORMAT_FLOAT=2 };
+enum { CODEC_MP3=0, CODEC_AT9=1, CODEC_AAC=2 };
+enum { AAC_ADTS=1, AAC_RAW=2 };
+enum { MP3_IGNORE_OFL=1, AAC_NONDELAY_OUTPUT=2 };
+/* An HE-AAC frame: 2048 samples, up to 8 channels. */
+#define MPEG_PCM_SAMPLES (2048*8)
 /* Job flags: version:3 codec:8 run:2 control:3 reserved:29 sideband:3 */
 #define RUN_CODEC_INFO(f) (((f)>>11)&1)
 #define RUN_MULTIPLE_FRAMES(f) (((f)>>12)&1)
@@ -51,8 +59,11 @@ typedef struct { int32_t input_consumed, output_written; uint64_t total_decoded_
 typedef struct { uint32_t channels, channel_mask, sample_rate, encoding, bitrate, reserved; } SidebandFormat;
 typedef struct { uint32_t total_samples; uint16_t skip_samples, skipped_samples; } SidebandGapless;
 typedef struct { uint32_t super_frame_size, frames_in_super_frame, next_frame_size, frame_samples; } At9Info;
+typedef struct { uint32_t header; uint8_t has_crc, channel_mode, mode_extension, copyright, original, emphasis; uint16_t reserved[3]; } Mp3Info;
+typedef struct { uint32_t heaac, reserved; } AacInfo;
 typedef struct { int error_code; const void *job_address; uint32_t command_offset; const void *job_return_address; } BatchError;
 _Static_assert(sizeof(ChunkBuffer)==16,"Ajm buffer chunk");
+_Static_assert(sizeof(Mp3Info)==16 && sizeof(AacInfo)==8,"Ajm codec info layout");
 _Static_assert(sizeof(SidebandFormat)==24 && sizeof(SidebandGapless)==8 && sizeof(SidebandStream)==16,"Ajm sideband layout");
 
 typedef struct {
@@ -65,6 +76,10 @@ typedef struct {
     uint32_t superframe_remain, frames;
     SidebandGapless gapless_init, gapless;
     uint64_t total_samples;
+    void *decoder;
+    uint32_t aac_header_type, skip_frames;
+    float *pcm;
+    BbAudioFrame frame;
 } Instance;
 typedef struct { int used, registered[24]; Instance instances[MAX_INSTANCES+1]; } Context;
 typedef struct { int used, context, canceled; } Batch;
@@ -72,7 +87,7 @@ typedef struct { int used, context, canceled; } Batch;
 static pthread_mutex_t lock=PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
 static Context *contexts[MAX_CONTEXTS+1];
 static Batch batches[MAX_BATCHES];
-static size_t jobs_run, frames_decoded, batches_run;
+static size_t jobs_run, frames_decoded, mp3_frames, aac_frames, batches_run, codec_errors;
 
 /* BB_AUDIO_TRACE=1: instance configurations and jobs that return a non-zero result. */
 static int trace_left=-1;
@@ -159,18 +174,38 @@ static void gapless_reset(Instance *in) {
     in->gapless.skipped_samples=0;
 }
 static int gapless_end(const Instance *in) { return in->gapless_init.total_samples && !in->gapless.total_samples; }
+static uint32_t frame_channels(const Instance *in) {
+    return in->codec==CODEC_AT9 ? (uint32_t)in->info.channels : in->frame.channels;
+}
+/* 0 for MP3 and AAC before their first frame: its size is only known once decoded. */
 static uint32_t next_frame_bytes(const Instance *in) {
-    uint32_t frame=(uint32_t)in->info.frameSamples;
+    uint32_t frame=in->codec==CODEC_AT9 ? (uint32_t)in->info.frameSamples : in->frame.samples;
     uint32_t skip=in->gapless.skip_samples<frame ? in->gapless.skip_samples : frame;
     uint32_t samples=frame-skip;
     if (in->gapless_init.total_samples && in->gapless.total_samples<samples) samples=in->gapless.total_samples;
-    return samples*(uint32_t)in->info.channels*(uint32_t)pcm_size(in->format);
+    return samples*frame_channels(in)*(uint32_t)pcm_size(in->format);
 }
 typedef struct { ChunkBuffer *chunks; int count, current; uint32_t offset; } Output;
 static uint64_t output_room(const Output *o) {
     uint64_t room=0;
     for (int i=o->current;i<o->count;++i) room+=o->chunks[i].size-(i==o->current ? o->offset : 0);
     return room;
+}
+/* Samples of a decoded frame that reach the output; *skip are dropped first for gapless decoding. */
+static uint32_t frame_window(Instance *in, const Output *out, uint32_t frame, uint32_t channels, uint32_t *skip) {
+    *skip=0;
+    if (in->gapless.skip_samples) {
+        *skip=in->gapless.skip_samples<frame ? in->gapless.skip_samples : frame;
+        in->gapless.skip_samples-=(uint16_t)*skip;
+    }
+    uint32_t samples=frame-*skip;
+    if (in->gapless_init.total_samples && samples>in->gapless.total_samples) samples=in->gapless.total_samples;
+    uint64_t room=output_room(out)/((uint64_t)channels*(uint64_t)pcm_size(in->format));
+    return samples>room ? (uint32_t)room : samples;
+}
+static void frame_account(Instance *in, uint32_t frame, uint32_t samples) {
+    in->gapless.skipped_samples+=(uint16_t)(frame-samples);
+    if (in->gapless_init.total_samples) in->gapless.total_samples-=samples;
 }
 static void output_write(Output *o, const unsigned char *data, uint64_t size) {
     while (size && o->current<o->count) {
@@ -192,15 +227,7 @@ static uint32_t at9_frame(Instance *in, const unsigned char **input, uint64_t *i
     if (e) { *internal=e; return RESULT_CODEC_ERROR|RESULT_FATAL; }
     *input+=used; *input_size-=(uint64_t)used; in->superframe_remain-=(uint32_t)used;
     ++frames_decoded;
-    uint32_t skip=0;
-    if (in->gapless.skip_samples) {
-        skip=in->gapless.skip_samples<(uint32_t)frame ? in->gapless.skip_samples : (uint32_t)frame;
-        in->gapless.skip_samples-=(uint16_t)skip;
-    }
-    uint32_t samples=(uint32_t)frame-skip;
-    if (in->gapless_init.total_samples && samples>in->gapless.total_samples) samples=in->gapless.total_samples;
-    uint64_t room=output_room(out)/(uint64_t)(channels*pcm_size(in->format));
-    if (samples>room) samples=(uint32_t)room;
+    uint32_t skip, samples=frame_window(in,out,(uint32_t)frame,(uint32_t)channels,&skip);
     /* Convert (and optionally de-interleave) into the requested encoding. */
     unsigned char converted[256*8*4];
     int non_interleaved=(in->codec_flags>>8)&1;
@@ -213,8 +240,7 @@ static uint32_t at9_frame(Instance *in, const unsigned char **input, uint64_t *i
     }
     output_write(out,converted,(uint64_t)samples*(uint64_t)channels*(uint64_t)pcm_size(in->format));
     *samples_written=samples;
-    in->gapless.skipped_samples+=(uint16_t)((uint32_t)frame-samples);
-    if (in->gapless_init.total_samples) in->gapless.total_samples-=samples;
+    frame_account(in,(uint32_t)frame,samples);
     if (++in->frames%(uint32_t)in->info.framesInSuperframe==0) {
         uint64_t skip_bytes=in->superframe_remain<*input_size ? in->superframe_remain : *input_size;
         *input+=skip_bytes; *input_size-=skip_bytes;
@@ -250,6 +276,66 @@ static void parse_riff(Instance *in, const unsigned char **input, uint64_t *size
     *size-=(uint64_t)(p-*input); *input=p;
 }
 
+/* ---- MP3 and AAC decoding ---- */
+/* AAC holds back its first two frames unless the instance asks for non-delayed output. */
+static void mpeg_reset(Instance *in) {
+    if (in->decoder) bbgpu_audio_decoder_reset(in->decoder);
+    memset(&in->frame,0,sizeof(in->frame));
+    in->skip_frames=in->codec==CODEC_AAC && !(in->codec_flags & AAC_NONDELAY_OUTPUT) ? 2 : 0;
+}
+/* AAC_ADTS or AAC_RAW with its sampling frequency index; ADTS until a control job initializes the instance. */
+static void aac_configure(Instance *in, uint32_t header_type, uint32_t frequency_index) {
+    if (in->decoder) bbgpu_audio_decoder_destroy(in->decoder);
+    uint32_t channels=in->channels_hint ? (uint32_t)in->channels_hint : 2;
+    in->aac_header_type=header_type;
+    in->decoder=bbgpu_audio_decoder_create(1,header_type!=AAC_RAW,frequency_index,channels);
+    in->initialized=in->decoder!=NULL;
+    mpeg_reset(in);
+    if (ajm_trace())
+        printf("Audio trace: AAC init %s: %s, frequency index %u, %u channels, format %d, flags %#x\n",in->initialized ? "ok" : "FAILED",
+               header_type==AAC_RAW ? "raw" : "ADTS",frequency_index,channels,in->format,in->codec_flags);
+}
+static void put_sample(unsigned char *out, int format, float value) {
+    if (format==FORMAT_FLOAT) { memcpy(out,&value,4); return; }
+    double max=format==FORMAT_S32 ? 2147483647.0 : 32767.0, scaled=(double)value*(max+1.0);
+    scaled=scaled>max ? max : scaled<-max-1.0 ? -max-1.0 : scaled;
+    if (format==FORMAT_S32) { int32_t w=(int32_t)lrint(scaled); memcpy(out,&w,4); }
+    else { int16_t v=(int16_t)lrint(scaled); memcpy(out,&v,2); }
+}
+/* One frame; returns result flags, RESULT_PARTIAL_INPUT alone when no whole frame is left. */
+static uint32_t mpeg_frame(Instance *in, const unsigned char **input, uint64_t *input_size, Output *out,
+                           uint32_t *samples_written, int32_t *internal) {
+    uint64_t header=in->codec==CODEC_MP3 ? 4 : in->aac_header_type==AAC_RAW ? 1 : 7;
+    if (*input_size<header) return RESULT_PARTIAL_INPUT;
+    BbAudioFrame frame;
+    int e=bbgpu_audio_decoder_decode(in->decoder,*input,*input_size,in->pcm,MPEG_PCM_SAMPLES*sizeof(float),&frame);
+    if (e==1) return RESULT_PARTIAL_INPUT;
+    if (e) { *internal=e; return RESULT_CODEC_ERROR|RESULT_FATAL; }
+    *input+=frame.consumed; *input_size-=frame.consumed;
+    ++*(in->codec==CODEC_MP3 ? &mp3_frames : &aac_frames);
+    if (in->codec==CODEC_MP3 && !(in->codec_flags & MP3_IGNORE_OFL) && (frame.encoder_delay || frame.total_samples)) {
+        in->gapless_init=(SidebandGapless){frame.total_samples,(uint16_t)frame.encoder_delay,0};
+        in->gapless=in->gapless_init;
+    }
+    if (!frame.samples) return 0;
+    if (!in->frame.samples && ajm_trace())
+        printf("Audio trace: %s first frame: %u ch, %u Hz, %u samples, %u bytes, %u bit/s, format %d, flags %#x, gapless %u/%u\n",
+               in->codec==CODEC_MP3 ? "MP3" : "AAC",frame.channels,frame.sample_rate,frame.samples,(unsigned)frame.consumed,
+               frame.bitrate,in->format,in->codec_flags,in->gapless_init.skip_samples,in->gapless_init.total_samples);
+    in->frame=frame;
+    if (in->skip_frames) { --in->skip_frames; return 0; }
+    uint32_t skip, samples=frame_window(in,out,frame.samples,frame.channels,&skip);
+    /* In place: an output sample is never wider than the float it comes from. */
+    unsigned char *pcm=(unsigned char *)in->pcm;
+    const float *source=in->pcm+(size_t)skip*frame.channels;
+    size_t width=(size_t)pcm_size(in->format);
+    for (size_t i=0, n=(size_t)samples*frame.channels;i<n;++i) put_sample(pcm+i*width,in->format,source[i]);
+    output_write(out,pcm,(uint64_t)samples*frame.channels*width);
+    *samples_written=samples;
+    frame_account(in,frame.samples,samples);
+    return 0;
+}
+
 /* ---- job execution ---- */
 typedef struct {
     uint64_t flags; int have_flags;
@@ -276,20 +362,22 @@ static int parse_job(const unsigned char *p, uint32_t size, Job *job) {
     }
     return job->have_flags ? 0 : -1;
 }
-static void run_job(Context *ctx, uint32_t id, Job *job) {
-    ++jobs_run;
-    unsigned char *side=job->output_control.size ? job->output_control.address : NULL;
-    unsigned char *side_end=side ? side+job->output_control.size : NULL;
-    SidebandResult *result=NULL;
-    if (side && side+sizeof(SidebandResult)<=side_end) { result=(void *)side; side+=sizeof(*result); memset(result,0,sizeof(*result)); }
-    if (id==STATISTICS_INSTANCE) { if (side) memset(side,0,(size_t)(side_end-side)); return; }
-    Instance *in=&ctx->instances[id & MAX_INSTANCES];
-    if ((id & MAX_INSTANCES)==0 || !in->used) { if (result) result->result=(int32_t)(RESULT_FATAL|RESULT_INVALID_PARAMETER); return; }
+static void reset_instance(Instance *in) {
+    in->total_samples=0; gapless_reset(in);
+    if (in->codec!=CODEC_AT9) mpeg_reset(in);
+    else if (in->initialized) at9_reset(in);
+}
+static void initialize_instance(Instance *in, const unsigned char *params) {
+    if (in->codec==CODEC_AT9) { memcpy(in->config,params,4); at9_reset(in); }
+    else if (in->codec==CODEC_AAC) { uint32_t p[2]; memcpy(p,params,8); aac_configure(in,p[0],p[1]); }
+}
+/* Input control sideband order: format, gapless, resample, initialize. */
+static uint32_t apply_control(Instance *in, const Job *job) {
     uint64_t f=job->flags;
     uint32_t flags_result=0;
     const unsigned char *control=job->input_control.size ? job->input_control.address : NULL;
     const unsigned char *control_end=control ? control+job->input_control.size : NULL;
-    if (CONTROL_RESET(f)) { in->total_samples=0; gapless_reset(in); if (in->initialized) at9_reset(in); }
+    if (CONTROL_RESET(f)) reset_instance(in);
     if (control && SIDEBAND_FORMAT(f) && control+24<=control_end) control+=24; /* output format fixed per instance */
     if (control && SIDEBAND_GAPLESS(f) && control+8<=control_end) {
         SidebandGapless g; memcpy(&g,control,8); control+=8;
@@ -309,7 +397,11 @@ static void run_job(Context *ctx, uint32_t id, Job *job) {
         }
     }
     if (control && CONTROL_RESAMPLE(f) && control+8<=control_end) control+=8;
-    if (control && CONTROL_INITIALIZE(f) && control+8<=control_end) { memcpy(in->config,control,4); at9_reset(in); }
+    if (control && CONTROL_INITIALIZE(f) && control+8<=control_end) initialize_instance(in,control);
+    return flags_result;
+}
+typedef struct { uint64_t in_start, in_left, out_start; uint32_t frames; int32_t internal; } Progress;
+static uint32_t decode_input(Instance *in, const Job *job, Output *out, Progress *p) {
     uint64_t in_size=0;
     for (int i=0;i<job->input_count;++i) in_size+=job->inputs[i].size;
     unsigned char *joined=NULL;
@@ -321,51 +413,98 @@ static void run_job(Context *ctx, uint32_t id, Job *job) {
         for (int i=0;i<job->input_count;++i) { memcpy(joined+at,job->inputs[i].address,job->inputs[i].size); at+=job->inputs[i].size; }
         input=joined;
     }
-    Output out={job->outputs,job->output_count,0,0};
-    uint64_t in_start=in_size, out_start=output_room(&out);
-    uint32_t frames=0;
-    int32_t internal=0;
+    p->in_start=in_size; p->out_start=output_room(out);
+    uint32_t flags_result=0;
     if (in_size) for (;;) {
         if (in->gapless_loop && gapless_end(in)) { gapless_reset(in); in->total_samples=0; }
-        if ((in->codec_flags & 1) && in_size>=4 && !memcmp(input,"RIFF",4)) { parse_riff(in,&input,&in_size); in->total_samples=0; }
+        if (in->codec==CODEC_AT9 && (in->codec_flags & 1) && in_size>=4 && !memcmp(input,"RIFF",4)) {
+            parse_riff(in,&input,&in_size); in->total_samples=0;
+        }
         if (!in->initialized) { flags_result|=RESULT_NOT_INITIALIZED; break; }
-        if (!gapless_end(in) && output_room(&out)<next_frame_bytes(in)) flags_result|=RESULT_NOT_ENOUGH_ROOM;
-        if (in_size<in->superframe_remain) flags_result|=RESULT_PARTIAL_INPUT;
+        if (!gapless_end(in) && output_room(out)<next_frame_bytes(in)) flags_result|=RESULT_NOT_ENOUGH_ROOM;
+        if (in->codec==CODEC_AT9 && in_size<in->superframe_remain) flags_result|=RESULT_PARTIAL_INPUT;
         if (flags_result) break;
         uint32_t written=0;
-        uint32_t r=at9_frame(in,&input,&in_size,&out,&written,&internal);
-        in->total_samples+=written; ++frames;
+        uint32_t r=in->codec==CODEC_AT9 ? at9_frame(in,&input,&in_size,out,&written,&p->internal)
+                                        : mpeg_frame(in,&input,&in_size,out,&written,&p->internal);
+        if (r==RESULT_PARTIAL_INPUT) { flags_result|=r; break; }
+        in->total_samples+=written; ++p->frames;
         if (r) { flags_result|=r; break; }
-        if (!RUN_MULTIPLE_FRAMES(f)) break;
+        if (!RUN_MULTIPLE_FRAMES(job->flags)) break;
     }
     free(joined);
+    p->in_left=in_size;
+    return flags_result;
+}
+static SidebandFormat format_of(const Instance *in) {
+    if (in->codec!=CODEC_AT9)
+        return (SidebandFormat){in->frame.channels,channel_mask((int)in->frame.channels),in->frame.sample_rate,(uint32_t)in->format,
+                                in->frame.bitrate,0};
+    SidebandFormat s={(uint32_t)in->info.channels,channel_mask(in->info.channels),(uint32_t)in->info.samplingRate,(uint32_t)in->format,0,0};
+    if (in->info.framesInSuperframe && in->info.frameSamples)
+        s.bitrate=(uint32_t)((uint64_t)in->info.samplingRate*(uint64_t)in->info.superframeSize*8/
+                             ((uint64_t)in->info.framesInSuperframe*(uint64_t)in->info.frameSamples));
+    return s;
+}
+static void write_codec_info(const Instance *in, unsigned char *side, const unsigned char *side_end) {
+    if (in->codec==CODEC_MP3 && side+sizeof(Mp3Info)<=side_end) {
+        uint32_t h=in->frame.mp3_header;
+        Mp3Info info={h,!((h>>16)&1),(uint8_t)((h>>6)&3),(uint8_t)((h>>4)&3),(uint8_t)((h>>3)&1),(uint8_t)((h>>2)&1),(uint8_t)(h&3),{0}};
+        memcpy(side,&info,sizeof(info));
+    } else if (in->codec==CODEC_AAC && side+sizeof(AacInfo)<=side_end) {
+        AacInfo info={in->frame.high_efficiency,0};
+        memcpy(side,&info,sizeof(info));
+    } else if (in->codec==CODEC_AT9 && side+sizeof(At9Info)<=side_end) {
+        At9Info info={(uint32_t)in->info.superframeSize,(uint32_t)in->info.framesInSuperframe,in->superframe_remain,(uint32_t)in->info.frameSamples};
+        memcpy(side,&info,sizeof(info));
+    }
+}
+static void run_job(Context *ctx, uint32_t id, Job *job) {
+    ++jobs_run;
+    unsigned char *side=job->output_control.size ? job->output_control.address : NULL;
+    unsigned char *side_end=side ? side+job->output_control.size : NULL;
+    SidebandResult *result=NULL;
+    if (side && side+sizeof(SidebandResult)<=side_end) { result=(void *)side; side+=sizeof(*result); memset(result,0,sizeof(*result)); }
+    if (id==STATISTICS_INSTANCE) { if (side) memset(side,0,(size_t)(side_end-side)); return; }
+    Instance *in=&ctx->instances[id & MAX_INSTANCES];
+    if ((id & MAX_INSTANCES)==0 || !in->used) { if (result) result->result=(int32_t)(RESULT_FATAL|RESULT_INVALID_PARAMETER); return; }
+    uint64_t f=job->flags;
+    uint32_t flags_result=apply_control(in,job);
+    Output out={job->outputs,job->output_count,0,0};
+    Progress p={0};
+    flags_result|=decode_input(in,job,&out,&p);
+    uint64_t written=p.out_start-output_room(&out);
+    if (flags_result & RESULT_CODEC_ERROR) ++codec_errors;
     if (flags_result && ajm_trace())
         printf("Audio trace: Ajm job instance %u flags %#llx -> result %#x internal %d; input %llu/%llu used, output %llu/%llu written, frames %u\n",
-               id,(unsigned long long)f,flags_result,internal,(unsigned long long)(in_start-in_size),(unsigned long long)in_start,
-               (unsigned long long)(out_start-output_room(&out)),(unsigned long long)out_start,frames);
-    if (result) { result->result=(int32_t)flags_result; result->internal_result=internal; }
+               id,(unsigned long long)f,flags_result,p.internal,(unsigned long long)(p.in_start-p.in_left),(unsigned long long)p.in_start,
+               (unsigned long long)written,(unsigned long long)p.out_start,p.frames);
+    if (result) { result->result=(int32_t)flags_result; result->internal_result=p.internal; }
     /* Output sideband order: stream, format, gapless, multi-frame, codec info. */
     if (side && SIDEBAND_STREAM(f) && side+16<=side_end) {
-        SidebandStream s={(int32_t)(in_start-in_size),(int32_t)(out_start-output_room(&out)),in->total_samples};
+        SidebandStream s={(int32_t)(p.in_start-p.in_left),(int32_t)written,in->total_samples};
         memcpy(side,&s,16); side+=16;
     }
-    if (side && SIDEBAND_FORMAT(f) && side+24<=side_end) {
-        SidebandFormat s={(uint32_t)in->info.channels,channel_mask(in->info.channels),(uint32_t)in->info.samplingRate,
-                          (uint32_t)in->format,0,0};
-        if (in->info.framesInSuperframe && in->info.frameSamples)
-            s.bitrate=(uint32_t)((uint64_t)in->info.samplingRate*(uint64_t)in->info.superframeSize*8/
-                                 ((uint64_t)in->info.framesInSuperframe*(uint64_t)in->info.frameSamples));
-        memcpy(side,&s,24); side+=24;
-    }
+    if (side && SIDEBAND_FORMAT(f) && side+24<=side_end) { SidebandFormat s=format_of(in); memcpy(side,&s,24); side+=24; }
     if (side && SIDEBAND_GAPLESS(f) && side+8<=side_end) { memcpy(side,&in->gapless,8); side+=8; }
-    if (side && RUN_MULTIPLE_FRAMES(f) && side+8<=side_end) { uint32_t m[2]={frames,0}; memcpy(side,m,8); side+=8; }
-    if (side && RUN_CODEC_INFO(f) && side+16<=side_end) {
-        At9Info info={(uint32_t)in->info.superframeSize,(uint32_t)in->info.framesInSuperframe,in->superframe_remain,(uint32_t)in->info.frameSamples};
-        memcpy(side,&info,16);
-    }
+    if (side && RUN_MULTIPLE_FRAMES(f) && side+8<=side_end) { uint32_t m[2]={p.frames,0}; memcpy(side,m,8); side+=8; }
+    if (side && RUN_CODEC_INFO(f)) write_codec_info(in,side,side_end);
 }
 
 /* ---- API ---- */
+static void release_instance(Instance *in) {
+    if (in->handle) Atrac9ReleaseHandle(in->handle);
+    if (in->decoder) bbgpu_audio_decoder_destroy(in->decoder);
+    free(in->pcm);
+}
+/* MP3 needs no configuration; AAC starts as ADTS until a control job initializes it. */
+static int32_t open_mpeg(Instance *in) {
+    in->pcm=malloc(MPEG_PCM_SAMPLES*sizeof(float));
+    if (!in->pcm) return ERR_OUT_OF_RESOURCES;
+    if (in->codec==CODEC_AAC) aac_configure(in,AAC_ADTS,0);
+    else { in->decoder=bbgpu_audio_decoder_create(0,0,0,0); in->initialized=in->decoder!=NULL; }
+    return in->initialized ? 0 : ERR_OUT_OF_RESOURCES;
+}
 static Context *context(uint32_t id) { return id && id<=MAX_CONTEXTS ? contexts[id] : NULL; }
 static ABI int32_t ajm_initialize(int64_t reserved, uint32_t *out) {
     if (!out || reserved) return ERR_INVALID_PARAMETER;
@@ -374,7 +513,7 @@ static ABI int32_t ajm_initialize(int64_t reserved, uint32_t *out) {
         contexts[i]=calloc(1,sizeof(Context));
         pthread_mutex_unlock(&lock);
         if (!contexts[i]) return ERR_OUT_OF_RESOURCES;
-        *out=i; puts("Runtime: Ajm context initialized (ATRAC9 via LibAtrac9)");
+        *out=i; puts("Runtime: Ajm context initialized (ATRAC9 via LibAtrac9, MP3 and AAC via FFmpeg)");
         return 0;
     }
     pthread_mutex_unlock(&lock);
@@ -384,7 +523,7 @@ static ABI int32_t ajm_finalize(uint32_t id) {
     pthread_mutex_lock(&lock);
     Context *c=context(id);
     if (!c) { pthread_mutex_unlock(&lock); return ERR_INVALID_CONTEXT; }
-    for (int i=0;i<=MAX_INSTANCES;++i) if (c->instances[i].handle) Atrac9ReleaseHandle(c->instances[i].handle);
+    for (int i=0;i<=MAX_INSTANCES;++i) release_instance(&c->instances[i]);
     free(c); contexts[id]=NULL;
     pthread_mutex_unlock(&lock);
     return 0;
@@ -409,7 +548,7 @@ static ABI int32_t ajm_module_unregister(uint32_t id, uint32_t codec) {
 static ABI int32_t ajm_instance_create(uint32_t id, uint32_t codec, uint64_t flags, uint32_t *out) {
     if (!out || codec>=24) return ERR_INVALID_PARAMETER;
     if (!(flags & 7)) return ERR_WRONG_REVISION;
-    if (codec!=1) { fprintf(stderr,"STOP: Ajm codec %u (0=MP3, 2=AAC) is not implemented\n",codec); exit(21); }
+    if (codec>CODEC_AAC) { fprintf(stderr,"STOP: Ajm codec %u is not implemented (0=MP3, 1=ATRAC9, 2=AAC are)\n",codec); runtime_stop(21); }
     if (ajm_trace()) printf("Audio trace: Ajm instance create codec %u flags %#llx\n",codec,(unsigned long long)flags);
     pthread_mutex_lock(&lock);
     Context *c=context(id);
@@ -420,6 +559,7 @@ static ABI int32_t ajm_instance_create(uint32_t id, uint32_t codec, uint64_t fla
         in->used=1; in->codec=(int)codec; in->channels_hint=(int)((flags>>3)&15); in->format=(int)((flags>>7)&7);
         in->gapless_loop=(int)((flags>>10)&1); in->codec_flags=(uint32_t)(flags>>32);
         if (in->format>FORMAT_FLOAT) { in->used=0; r=ERR_INVALID_PARAMETER; break; }
+        if (codec!=CODEC_AT9 && (r=open_mpeg(in))) { release_instance(in); memset(in,0,sizeof(*in)); break; }
         *out=i|(codec<<14); r=0; break;
     }
     pthread_mutex_unlock(&lock);
@@ -430,7 +570,7 @@ static ABI int32_t ajm_instance_destroy(uint32_t id, uint32_t instance) {
     Context *c=context(id);
     Instance *in=c ? &c->instances[instance & MAX_INSTANCES] : NULL;
     int32_t r=!c ? ERR_INVALID_CONTEXT : !(instance & MAX_INSTANCES) || !in->used ? ERR_INVALID_INSTANCE : 0;
-    if (!r) { if (in->handle) Atrac9ReleaseHandle(in->handle); memset(in,0,sizeof(*in)); }
+    if (!r) { release_instance(in); memset(in,0,sizeof(*in)); }
     pthread_mutex_unlock(&lock);
     return r;
 }
@@ -493,5 +633,6 @@ static const RuntimeExport exports[]={
 };
 uintptr_t runtime_ajm_resolve(const char *name) { return RUNTIME_LOOKUP(exports,name); }
 void runtime_ajm_report(void) {
-    printf("Runtime: Ajm batches=%zu, jobs=%zu, ATRAC9 frames decoded=%zu\n",batches_run,jobs_run,frames_decoded);
+    printf("Runtime: Ajm batches=%zu, jobs=%zu, frames decoded: ATRAC9=%zu, MP3=%zu, AAC=%zu, jobs with a codec error=%zu\n",
+           batches_run,jobs_run,frames_decoded,mp3_frames,aac_frames,codec_errors);
 }

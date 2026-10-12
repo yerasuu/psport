@@ -13,7 +13,7 @@ static ABI int guest_gettimeofday(GuestTimeval *value,GuestTimezone *zone) {
     struct timezone z;
     if (gettimeofday(&t,&z)) {
         /* Guest errno/TLS failure path is not implemented yet. */
-        perror("STOP: host gettimeofday failed"); exit(21);
+        perror("STOP: host gettimeofday failed"); runtime_stop(21);
     }
     if (value) { value->seconds=t.tv_sec; value->microseconds=t.tv_usec; }
     if (zone) { zone->minuteswest=z.tz_minuteswest; zone->dsttime=z.tz_dsttime; }

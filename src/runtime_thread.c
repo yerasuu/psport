@@ -64,7 +64,7 @@ void runtime_set_main_tls(const void *data,uint64_t filesz,uint64_t memsz,uint64
 }
 static uint64_t tls_offset(void) { return (tls_memsz+tls_align-1)&~(tls_align-1); }
 static void set_gs(void *base) {
-    if (syscall(SYS_arch_prctl,ARCH_SET_GS,(unsigned long)base)) { perror("STOP: arch_prctl(ARCH_SET_GS)"); exit(21); }
+    if (syscall(SYS_arch_prctl,ARCH_SET_GS,(unsigned long)base)) { perror("STOP: arch_prctl(ARCH_SET_GS)"); runtime_stop(21); }
 }
 /* Build TCB/static TLS for the calling host thread and point GS at it. */
 /* The stack this host thread runs on, kept in the attributes scePthreadAttrGet copies. */
@@ -333,7 +333,7 @@ static int32_t create(GuestThread **out,ThreadAttr **attr_slot,GuestEntry entry,
     }
     pthread_attr_destroy(&host);
     pthread_sigmask(SIG_SETMASK,&t->start_mask,NULL);
-    if (e) { fprintf(stderr,"STOP: host pthread_create failed: %d\n",e); exit(21); }
+    if (e) { fprintf(stderr,"STOP: host pthread_create failed: %d\n",e); runtime_stop(21); }
     if (t->detached) pthread_detach(t->host);
     runtime_exception_lock(&lock); ++created; runtime_exception_unlock(&lock);
     printf("Runtime: guest thread '%s' created (stack=%llu, prio=%d)\n",t->name,(unsigned long long)stack,t->attr.prio);
@@ -349,7 +349,7 @@ static ABI int32_t thread_join(GuestThread *t,void **result) {
     t->joined=1;
     void *value=NULL;
     int e=pthread_join(t->host,&value);
-    if (e) { fprintf(stderr,"STOP: host pthread_join failed: %d\n",e); exit(21); }
+    if (e) { fprintf(stderr,"STOP: host pthread_join failed: %d\n",e); runtime_stop(21); }
     if (result) *result=t->result;
     runtime_exception_lock(&lock); ++joined_count; runtime_exception_unlock(&lock);
     return 0;
@@ -363,7 +363,7 @@ static ABI int32_t thread_detach(GuestThread *t) {
 }
 static ABI __attribute__((noreturn)) void thread_exit(void *value) {
     GuestThread *t=runtime_thread_current();
-    if (t->host_owned) { fputs("STOP: pthread_exit on host-owned/main thread\n",stderr); exit(21); }
+    if (t->host_owned) { fputs("STOP: pthread_exit on host-owned/main thread\n",stderr); runtime_stop(21); }
     t->result=value;
     /* No host unwinder: guest frames have no registered FDEs. */
     longjmp(t->exit_jump,1);
