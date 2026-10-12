@@ -6,7 +6,9 @@
 #endif
 #include "runtime.h"
 #include <dirent.h>
+#include <errno.h>
 #include <fcntl.h>
+#include <ftw.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,7 +18,9 @@
 #define INVALID_ID ((int32_t)0x805a1000)
 #define NOT_LOADED ((int32_t)0x805a1001)
 #define PARAMETER ((int32_t)0x80d90002)
+#define NOT_MOUNTED ((int32_t)0x80d90004)
 static unsigned refs, initialized, configured;
+static char title_id[16]="UNKNOWN";
 static uint32_t parameters[5];
 static unsigned queries, lists;
 void runtime_content_configure(const uint32_t values[5]) {
@@ -24,6 +28,9 @@ void runtime_content_configure(const uint32_t values[5]) {
         fputs("ERROR: invalid or late content profile\n",stderr); exit(1);
     }
     memcpy(parameters,values,sizeof(parameters)); configured=1;
+}
+void runtime_content_title(const char *title) {
+    if (title && *title) snprintf(title_id,sizeof(title_id),"%s",title);
 }
 static void require_provider(void) {
     if (!configured) { fputs("STOP: AppContent needs --content-profile\n",stderr); exit(21); }
@@ -146,12 +153,72 @@ static ABI int32_t download_space(const char *mount,uint64_t *kb) {
     *kb=(uint64_t)fs.f_bavail*fs.f_frsize/1024;
     return 0;
 }
+/* Temporary data is /temp0, backed by <user>/temp/<title id> so titles sharing a user folder don't
+ * see each other's files. It survives the run until the title formats it. */
+#define TEMP_MOUNT "/temp0"
+static unsigned temp_mounted;
+static void temp_folder(char *out,size_t size) { snprintf(out,size,"%s/temp/%s",runtime_file_user_dir(),title_id); }
+static int remove_entry(const char *path,const struct stat *st,int type,struct FTW *ftw) {
+    (void)st; (void)type;
+    return ftw->level ? remove(path) : 0;
+}
+static int temp_format(void) {
+    char host[4096];
+    temp_folder(host,sizeof(host));
+    return nftw(host,remove_entry,16,FTW_DEPTH|FTW_PHYS) && errno!=ENOENT ? -1 : 0;
+}
+static int temp_point(const char *mount) { return mount && memchr(mount,0,16) && !strcmp(mount,TEMP_MOUNT); }
+static ABI int32_t temp_mount(uint32_t option,char *mount) {
+    require_initialized();
+    if (!mount || option>1) return PARAMETER;
+    char host[4096];
+    temp_folder(host,sizeof(host));
+    char parent[4096];
+    snprintf(parent,sizeof(parent),"%s/temp",runtime_file_user_dir());
+    if ((mkdir(parent,0755) && errno!=EEXIST) || (mkdir(host,0755) && errno!=EEXIST) || (option && temp_format()) ||
+        runtime_file_mount(TEMP_MOUNT,host)) {
+        fprintf(stderr,"Runtime: AppContent temporary data mount of %s failed: %s\n",host,strerror(errno));
+        return PARAMETER;
+    }
+    memset(mount,0,16); memcpy(mount,TEMP_MOUNT,sizeof(TEMP_MOUNT));
+    printf("Runtime: AppContent temporary data mounted at %s -> %s%s (mounts=%u)\n",TEMP_MOUNT,host,option ? ", formatted" : "",++temp_mounted);
+    return 0;
+}
+static ABI int32_t temp_unmount(const char *mount) {
+    require_initialized();
+    if (!temp_point(mount)) return PARAMETER;
+    if (!temp_mounted) return NOT_MOUNTED;
+    if (!--temp_mounted) runtime_file_unmount(TEMP_MOUNT);
+    printf("Runtime: AppContent temporary data unmounted (mounts=%u)\n",temp_mounted);
+    return 0;
+}
+static ABI int32_t temp_format_mounted(const char *mount) {
+    require_initialized();
+    if (!temp_point(mount)) return PARAMETER;
+    if (!temp_mounted) return NOT_MOUNTED;
+    if (temp_format()) { fprintf(stderr,"Runtime: AppContent temporary data format failed: %s\n",strerror(errno)); return PARAMETER; }
+    puts("Runtime: AppContent temporary data formatted");
+    return 0;
+}
+static ABI int32_t temp_space(const char *mount,uint64_t *kb) {
+    require_initialized();
+    if (!temp_point(mount) || !kb) return PARAMETER;
+    if (!temp_mounted) return NOT_MOUNTED;
+    char host[4096];
+    struct statvfs fs;
+    temp_folder(host,sizeof(host));
+    if (statvfs(host,&fs)) return PARAMETER;
+    *kb=(uint64_t)fs.f_bavail*fs.f_frsize/1024;
+    return 0;
+}
 static const RuntimeExport exports[]={
     {"sceSysmoduleLoadModule",module_load}, {"sceSysmoduleIsLoaded",module_loaded},
     {"sceSysmoduleUnloadModule",module_unload}, {"sceSysmoduleLoadModuleInternalWithArg",module_load_internal},
     {"sceAppContentInitialize",content_init}, {"sceAppContentAppParamGetInt",param_int},
     {"sceAppContentGetAddcontInfoList",addon_list},
     {"sceAppContentDownloadDataGetAvailableSpaceKb",download_space},
+    {"sceAppContentTemporaryDataMount2",temp_mount}, {"sceAppContentTemporaryDataUnmount",temp_unmount},
+    {"sceAppContentTemporaryDataFormat",temp_format_mounted}, {"sceAppContentTemporaryDataGetAvailableSpaceKb",temp_space},
 };
 uintptr_t runtime_content_resolve(const char *name) { return RUNTIME_LOOKUP(exports,name); }
 void runtime_content_report(void) {
