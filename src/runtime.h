@@ -101,6 +101,7 @@ uintptr_t runtime_ult_resolve(const char *name);
 void runtime_eventflag_report(void);
 uintptr_t runtime_time_resolve(const char *name);
 void runtime_content_configure(const uint32_t values[5]);
+void runtime_content_title(const char *title);
 uintptr_t runtime_content_resolve(const char *name);
 void runtime_content_report(void);
 typedef struct { const char *name; void *function; } RuntimeExport;

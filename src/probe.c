@@ -496,6 +496,7 @@ int main(int argc, char **argv) {
         sfo_value(sfo,"TITLE",title,sizeof(title),NULL);
         sfo_value(sfo,"APP_VER",version,sizeof(version),NULL);
         runtime_net_configure(app0,serial,title,version);
+        runtime_content_title(serial);
     }
     bbgpu_register_kernel();
 #ifdef _WIN32
