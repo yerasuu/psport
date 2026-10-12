@@ -245,6 +245,8 @@ static uintptr_t resolve_scoped(const char *name, int is_data) {
     if (eventflag) return eventflag;
     uintptr_t ulobjmgr = runtime_ulobjmgr_resolve(name);
     if (ulobjmgr) return ulobjmgr;
+    uintptr_t ult = runtime_ult_resolve(name);
+    if (ult) return ult;
     uintptr_t rwlock = runtime_rwlock_resolve(name);
     if (rwlock) return rwlock;
     uintptr_t memory = runtime_memory_resolve(name);
