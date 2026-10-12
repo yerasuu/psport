@@ -11,21 +11,23 @@
 #   -n NAMES    only these titles (comma-separated)
 #   -s SHELL    run run.sh inside `nix-shell SHELL --argstr checkout <repo>` (a toolchain env such
 #               as decanter's bbport.nix); without it, run.sh as it is
+#   -u EARLIER  start each title's user folder (saves, settings) as a copy of its folder in the
+#               EARLIER output folder, to load in this run what that one saved
 # Variables the titles file refers to ($SYS_MODULES...) come from the environment; an entry whose
 # variable is empty is left out, so nothing user-specific lives in the repository.
 # Uses the build in out/ (BB_PREBUILT=1): build.sh first.
 set -uo pipefail
 root=$(cd -- "$(dirname -- "$0")/.." && pwd)
-jobs=2 out='' previous='' titles=$root/tools/regress/titles.txt only='' shell_file=''
-while getopts 'j:o:c:t:n:s:' opt; do
+jobs=2 out='' previous='' titles=$root/tools/regress/titles.txt only='' shell_file='' seed=''
+while getopts 'j:o:c:t:n:s:u:' opt; do
     case $opt in
         j) jobs=$OPTARG ;; o) out=$OPTARG ;; c) previous=$OPTARG ;; t) titles=$OPTARG ;;
-        n) only=,$OPTARG, ;; s) shell_file=$OPTARG ;; *) exit 2 ;;
+        n) only=,$OPTARG, ;; s) shell_file=$OPTARG ;; u) seed=$(realpath -- "$OPTARG") ;; *) exit 2 ;;
     esac
 done
 shift $((OPTIND - 1))
 [[ $jobs =~ ^[1-9][0-9]*$ ]] || { echo "regress.sh: -j needs a positive integer" >&2; exit 2; }
-(($# == 1)) || { sed -n '2,16p' "$0" | cut -c3-; exit 2; }
+(($# == 1)) || { sed -n '2,18p' "$0" | cut -c3-; exit 2; }
 games=$(realpath -- "$1")
 [[ -x $root/out/bb-probe ]] || { echo "regress.sh: no out/bb-probe (run build.sh)" >&2; exit 1; }
 printf -v stamp '%(%Y%m%d_%H%M%S)T' -1
@@ -69,6 +71,7 @@ run_title() {
     local name=$1 title=$2 game=$3 schedule=$4; shift 4
     local dir=$out/$name
     rm -rf -- "$dir"; mkdir -p "$dir/shots"; : > "$dir/pad"
+    [[ -n $seed && -d $seed/$name/user ]] && cp -a -- "$seed/$name/user" "$dir/user"
     printf 'name\t%s\ntitle\t%s\ngame\t%s\nschedule\t%s\n' "$name" "$title" "$game" "$schedule" > "$dir/run.tsv"
     # Inside a headless gamescope (its own X display, no window) and without the desktop's display
     # variables, with BB_AUDIO=none and BB_PAD_HOST=0 last so a title's env can't turn sound or the
