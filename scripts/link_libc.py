@@ -126,7 +126,8 @@ def link(game, out):
             # libc is module 2 in this probe. Descriptor offset is already stored
             # in the adjacent word; __tls_get_addr will use a separate TLS block.
             symbol = libc['symbols'][symid]
-            if symbol['name'] or symbol['type'] != 3 or addend:
+            own = symbol['type'] == 6 and symbol['section'] if symbol['name'] else symbol['type'] == 3
+            if not own or addend:
                 raise ValueError('unsupported external TLS relocation')
             struct.pack_into('<Q',image,target,2)
             tls_count += 1

@@ -247,7 +247,8 @@ def link(game, out, module_names=DEFAULT_MODULES, system_modules=None, hle=(), l
                 relocs.append((target, 0, base + addend, 0))
             elif kind == 16:
                 symbol = m['symbols'][symid]
-                if symbol['name'] or symbol['type'] != 3 or addend or not module_id:
+                own = symbol['type'] == 6 and symbol['section'] if symbol['name'] else symbol['type'] == 3
+                if not own or addend or not module_id:
                     raise ValueError(f'{filename}: unsupported external TLS relocation')
                 struct.pack_into('<Q', image, target, module_id)
                 tls_relocations += 1
