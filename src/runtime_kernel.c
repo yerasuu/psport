@@ -244,6 +244,9 @@ static ABI int32_t guest_sigprocmask(int how,const GuestSigset *set,GuestSigset 
 }
 static ABI int32_t guest_sigfillset(GuestSigset *set) { if (!set) return fail_posix(EINVAL); memset(set,0xff,sizeof(*set)); return 0; }
 static ABI int32_t guest_sigemptyset(GuestSigset *set) { if (!set) return fail_posix(EINVAL); memset(set,0,sizeof(*set)); return 0; }
+/* Guest exception handlers are called from the runtime's host signal handler and return into it, so
+ * no guest frame is a signal trampoline. */
+static ABI int32_t is_signal_return(const void *address) { (void)address; return 0; }
 typedef struct { GuestTimeval utime, stime; int64_t rest[14]; } GuestRusage;
 static ABI int32_t guest_getrusage(int who,GuestRusage *out) {
     struct rusage r;
@@ -272,6 +275,13 @@ static ABI int32_t guest_sysctl(const int32_t *name,uint32_t namelen,void *old,u
     for (uint32_t i=0;i<namelen && i<8;++i) fprintf(stderr," %d",name[i]);
     fputc('\n',stderr);
     exit(21);
+}
+static ABI int32_t uuid_create(uint8_t *uuid) {
+    if (!uuid) return ERR(22);
+    if (getrandom(uuid,16,0)!=16) return ERR(14);
+    uuid[7]=(uint8_t)((uuid[7]&0x0f)|0x40); /* version 4 in the high bits of the little-endian time_hi */
+    uuid[8]=(uint8_t)((uuid[8]&0x3f)|0x80);
+    return 0;
 }
 
 /* ---- pthread_once and thread-specific data ---- */
@@ -375,8 +385,8 @@ static const RuntimeExport exports[]={
     {"sceKernelDebugRaiseExceptionOnReleaseMode",raise_exception},
     {"sceKernelPrintBacktraceWithModuleInfo",print_backtrace},
     {"signal",guest_signal}, {"sigprocmask",guest_sigprocmask}, {"_sigprocmask",guest_sigprocmask},
-    {"sigfillset",guest_sigfillset}, {"sigemptyset",guest_sigemptyset},
-    {"getrusage",guest_getrusage}, {"sysctl",guest_sysctl},
+    {"sigfillset",guest_sigfillset}, {"sigemptyset",guest_sigemptyset}, {"_is_signal_return",is_signal_return},
+    {"getrusage",guest_getrusage}, {"sysctl",guest_sysctl}, {"sceKernelUuidCreate",uuid_create},
     {"scePthreadOnce",thread_once}, {"pthread_once",posix_once},
     {"scePthreadKeyCreate",key_create}, {"scePthreadKeyDelete",key_delete},
     {"scePthreadSetspecific",key_set}, {"scePthreadGetspecific",key_get},

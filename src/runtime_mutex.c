@@ -8,7 +8,7 @@
 #include <pthread.h>
 #include <errno.h>
 #include <time.h>
-typedef struct { int type; } GuestAttr;
+typedef struct { int type, protocol; } GuestAttr;
 typedef struct { pthread_mutex_t native; } GuestMutex;
 static size_t created, locks, unlocks;
 static int32_t orbis_error(int e) {
@@ -29,7 +29,7 @@ static ABI int32_t attr_init(GuestAttr **out) {
     if (!out) return orbis_error(EINVAL);
     GuestAttr *attr = malloc(sizeof(*attr));
     if (!attr) return orbis_error(ENOMEM);
-    attr->type = 1; *out = attr; return 0;
+    attr->type = 1; attr->protocol = 0; *out = attr; return 0;
 }
 static ABI int32_t attr_type(GuestAttr **attr, int type) {
     if (!attr || !*attr || type < 1 || type > 4) return orbis_error(EINVAL);
@@ -38,7 +38,11 @@ static ABI int32_t attr_type(GuestAttr **attr, int type) {
 /* Priority protocols need a PS4 scheduler; the value is validated and recorded only. */
 static ABI int32_t attr_protocol(GuestAttr **attr, int protocol) {
     if (!attr || !*attr || protocol < 0 || protocol > 2) return orbis_error(EINVAL);
-    return 0;
+    (*attr)->protocol = protocol; return 0;
+}
+static ABI int32_t attr_get_protocol(GuestAttr **attr, int *protocol) {
+    if (!attr || !*attr || !protocol) return orbis_error(EINVAL);
+    *protocol = (*attr)->protocol; return 0;
 }
 static ABI int32_t attr_destroy(GuestAttr **attr) {
     if (!attr || !*attr) return orbis_error(EINVAL);
@@ -243,6 +247,8 @@ static int32_t posix_result(int32_t result) { return result ? (int32_t)((uint32_
 static ABI int32_t posix_attr_init(GuestAttr **out) { return posix_result(attr_init(out)); }
 static ABI int32_t posix_attr_type(GuestAttr **attr,int type) { return posix_result(attr_type(attr,type)); }
 static ABI int32_t posix_attr_destroy(GuestAttr **attr) { return posix_result(attr_destroy(attr)); }
+static ABI int32_t posix_attr_protocol(GuestAttr **attr,int protocol) { return posix_result(attr_protocol(attr,protocol)); }
+static ABI int32_t posix_attr_get_protocol(GuestAttr **attr,int *protocol) { return posix_result(attr_get_protocol(attr,protocol)); }
 static ABI int32_t posix_mutex_init(GuestMutex **out,GuestAttr **attr) { return posix_result(mutex_init(out,attr,NULL)); }
 static ABI int32_t posix_mutex_destroy(GuestMutex **m) { return posix_result(mutex_destroy(m)); }
 static ABI int32_t posix_mutex_lock(GuestMutex **m) { return posix_result(mutex_lock(m)); }
@@ -267,6 +273,7 @@ static const RuntimeExport exports[] = {
     {"pthread_condattr_init", posix_condattr_init}, {"pthread_condattr_destroy", posix_condattr_destroy},
     {"pthread_condattr_getclock", posix_condattr_getclock}, {"pthread_condattr_setclock", posix_condattr_setclock},
     {"pthread_condattr_getpshared", posix_condattr_getpshared}, {"pthread_condattr_setpshared", posix_condattr_setpshared},
+    {"pthread_mutexattr_setprotocol", posix_attr_protocol}, {"pthread_mutexattr_getprotocol", posix_attr_get_protocol},
 };
 uintptr_t runtime_mutex_resolve(const char *name) {
     if (!strcmp(name,"0TyVk4MSLt0#I#J")) return (uintptr_t)posix_cond_init;
