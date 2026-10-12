@@ -2,7 +2,9 @@
 # Yes), the intro skipped by holding options (once more in the loading screen, where it does
 # nothing, in case the first came before the intro), then Slumbering Streets: hops right, each
 # third one back left first so a fall into the pit before the tall block climbs out again; the wall
-# that opens to the violin played by its gramophone; on to the curtain. The stick stays held between
+# that opens to the violin played by its gramophone; on to the curtain, opened by holding triangle at
+# the gramophone left of it; through it to the next street, where the tall step is climbed by a jump
+# and the bow's bounce (r2) just before landing, on until the spikes. The stick stays held between
 # hops: the bounce off the roses before the statue's ledge clears it only with right held to landing.
 20 shot
 26 shot
@@ -248,4 +250,57 @@
 205 hold lx=255+cross 0.45
 205 hold lx=255 0.75
 210 shot
-211 end
+211 press lx=0 2.1
+214 shot
+215 press triangle 4.2
+220 shot
+223 shot
+226 press lx=255 3
+229 shot
+230 press lx=255 3
+233 shot
+234 press lx=255 3
+237 shot
+238 press lx=255 3
+241 shot
+242 press lx=255 3
+245 shot
+246 press lx=255 3
+249 shot
+250 press lx=0 0.6
+250 hold lx=255+cross 0.35
+250 hold lx=255 0.3
+250 hold lx=255+r2 0.2
+250 hold lx=255 1.5
+250 release
+254 shot
+255 press lx=0 0.6
+255 hold lx=255+cross 0.35
+255 hold lx=255 0.3
+255 hold lx=255+r2 0.2
+255 hold lx=255 1.5
+255 release
+259 shot
+260 press lx=0 0.6
+260 hold lx=255+cross 0.35
+260 hold lx=255 0.3
+260 hold lx=255+r2 0.2
+260 hold lx=255 1.5
+260 release
+264 shot
+265 press lx=0 0.6
+265 hold lx=255+cross 0.35
+265 hold lx=255 0.3
+265 hold lx=255+r2 0.2
+265 hold lx=255 1.5
+265 release
+269 shot
+270 press lx=0 0.6
+270 hold lx=255+cross 0.35
+270 hold lx=255 0.3
+270 hold lx=255+r2 0.2
+270 hold lx=255 1.5
+270 release
+274 shot
+275 shot
+276 end
