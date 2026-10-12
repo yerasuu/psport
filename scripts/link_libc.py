@@ -50,7 +50,7 @@ def module(path):
     def identity(name):
         parts = name.split('#')
         if len(parts) != 3:
-            raise ValueError(f'unsupported symbol encoding {name!r}')
+            return None
         n, lib, mod = parts
         return (n, libraries[lib], modules[mod])
     symbols = []
@@ -126,7 +126,8 @@ def link(game, out):
             # libc is module 2 in this probe. Descriptor offset is already stored
             # in the adjacent word; __tls_get_addr will use a separate TLS block.
             symbol = libc['symbols'][symid]
-            if symbol['name'] or symbol['type'] != 3 or addend:
+            own = symbol['type'] == 6 and symbol['section'] if symbol['name'] else symbol['type'] == 3
+            if not own or addend:
                 raise ValueError('unsupported external TLS relocation')
             struct.pack_into('<Q',image,target,2)
             tls_count += 1
@@ -137,6 +138,8 @@ def link(game, out):
                     struct.pack_into('<Q',image,target,symbol['value']+addend)
                 else:
                     relocs.append((target,0,base+symbol['value']+addend,0))
+            elif not symbol['identity'] and symbol['binding'] == 2:
+                struct.pack_into('<Q',image,target,0)
             else:
                 rk = 2 if symbol['type']==1 else 1
                 if (rk==1 and addend) or not 0 <= addend < 4096:
