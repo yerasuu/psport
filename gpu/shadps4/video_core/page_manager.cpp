@@ -315,13 +315,6 @@ struct PageManager::Impl {
 
     virtual void Protect(VAddr address, size_t size, Core::MemoryPermission perms) = 0;
 
-    static void TrapBuffer(VAddr address, size_t size, Core::MemoryPermission perms) {
-        if (BufferTraps()) {
-            BbLayer::WriteTraps::Set(address, size, BbLayer::WriteTraps::Buffer,
-                                     !True(perms & Core::MemoryPermission::Write));
-        }
-    }
-
     static bool GuestFaultSignalHandler(void* context, void* fault_address) {
         const auto addr = reinterpret_cast<VAddr>(fault_address);
         NoteFaultSite(context, addr);
@@ -362,7 +355,7 @@ struct PageManager::Impl {
         return false;
     }
 
-    template <bool track, bool is_read, bool buffer = false>
+    template <bool track, bool is_read>
     void UpdatePageWatchers(VAddr addr, u64 size) {
         RENDERER_TRACE;
 
@@ -384,9 +377,6 @@ struct PageManager::Impl {
                 RENDERER_TRACE;
                 // Perform pending (un)protect action
                 Protect(range_begin << PM_PAGE_BITS, range_bytes, perms);
-                if constexpr (buffer) {
-                    TrapBuffer(range_begin << PM_PAGE_BITS, range_bytes, perms);
-                }
                 range_bytes = 0;
                 potential_range_bytes = 0;
             }
@@ -442,7 +432,7 @@ struct PageManager::Impl {
             // if all pages are contiguous, use the regular UpdatePageWatchers
             const VAddr start_addr = base_addr + (start_range.first << PM_PAGE_BITS);
             const u64 size = (start_range.second - start_range.first) << PM_PAGE_BITS;
-            return UpdatePageWatchers<track, is_read, true>(start_addr, size);
+            return UpdatePageWatchers<track, is_read>(start_addr, size);
         }
 
         size_t base_page = (base_addr >> PM_PAGE_BITS);
@@ -458,7 +448,6 @@ struct PageManager::Impl {
                 RENDERER_TRACE;
                 // Perform pending (un)protect action
                 Protect((range_begin << PM_PAGE_BITS), range_bytes, perms);
-                TrapBuffer(range_begin << PM_PAGE_BITS, range_bytes, perms);
                 range_bytes = 0;
                 potential_range_bytes = 0;
             }
@@ -503,40 +492,43 @@ struct PageManager::Impl {
         release_pending();
     }
 
-    /// bbport ImageTraps: the images over each page; a page is trapped while one is there.
-    template <bool track>
-    void UpdateImageTraps(VAddr addr, u64 size) {
-        std::call_once(image_watchers_once, [this] {
+    /// bbport: the owners over each page for one trap reason; a page is trapped while one is there.
+    /// Not the page states: they count images and buffer watches together, so one's last watch
+    /// going would lift or leave the other's trap (left, the write faults again forever).
+    struct TrapOwners {
+        u16* counts = nullptr;
+        std::once_flag once;
+    };
+
+    template <bool track, typename ForEachPage>
+    static void UpdateTraps(TrapOwners& owners, BbLayer::WriteTraps::Reason reason,
+                            ForEachPage&& for_each_page) {
+        std::call_once(owners.once, [&owners] {
             void* mem = mmap(nullptr, NUM_ADDRESS_PAGES * sizeof(u16), PROT_READ | PROT_WRITE,
                              MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
-            ASSERT_MSG(mem != MAP_FAILED, "image watcher table");
-            image_watchers = static_cast<u16*>(mem);
+            ASSERT_MSG(mem != MAP_FAILED, "trap owner table");
+            owners.counts = static_cast<u16*>(mem);
         });
-        size_t page = addr >> PM_PAGE_BITS;
-        const u64 page_end = Common::DivCeil(addr + size, PM_PAGE_SIZE);
-        const auto lock_start = locks.begin() + (page / PAGES_PER_LOCK);
-        const auto lock_end = locks.begin() + Common::DivCeil(page_end, PAGES_PER_LOCK);
-        Common::RangeLockGuard lk(lock_start, lock_end);
-        // Runs of pages whose first image came or last one went: one trap change each.
+        // Runs of pages whose first owner came or last one went: one trap change each.
         u64 run_begin = 0, run_pages = 0;
         const auto flush = [&] {
             if (run_pages != 0) {
                 BbLayer::WriteTraps::Set(run_begin << PM_PAGE_BITS, run_pages << PM_PAGE_BITS,
-                                         BbLayer::WriteTraps::Image, track);
+                                         reason, track);
                 run_pages = 0;
             }
         };
-        for (; page != page_end; ++page) {
-            u16& count = image_watchers[page];
+        for_each_page([&](u64 page) {
+            u16& count = owners.counts[page];
             bool change;
             if constexpr (track) {
                 change = count++ == 0;
             } else {
-                ASSERT_MSG(count > 0, "image watchers below zero");
+                ASSERT_MSG(count > 0, "trap owners below zero");
                 change = --count == 0;
             }
             if (!change) {
-                continue;
+                return;
             }
             if (run_pages != 0 && run_begin + run_pages == page) {
                 ++run_pages;
@@ -545,11 +537,40 @@ struct PageManager::Impl {
                 run_begin = page;
                 run_pages = 1;
             }
-        }
+        });
         flush();
     }
-    u16* image_watchers = nullptr;
-    std::once_flag image_watchers_once;
+
+    /// bbport ImageTraps: the images over each page.
+    template <bool track>
+    void UpdateImageTraps(VAddr addr, u64 size) {
+        size_t page = addr >> PM_PAGE_BITS;
+        const u64 page_end = Common::DivCeil(addr + size, PM_PAGE_SIZE);
+        const auto lock_start = locks.begin() + (page / PAGES_PER_LOCK);
+        const auto lock_end = locks.begin() + Common::DivCeil(page_end, PAGES_PER_LOCK);
+        Common::RangeLockGuard lk(lock_start, lock_end);
+        UpdateTraps<track>(image_owners, BbLayer::WriteTraps::Image, [&](auto&& visit) {
+            for (; page != page_end; ++page) {
+                visit(page);
+            }
+        });
+    }
+
+    /// bbport BufferTraps: the buffer cache's watches (writes and readbacks) over each page.
+    template <bool track>
+    void UpdateBufferTraps(VAddr base_addr, RegionBits& mask) {
+        const size_t base_page = base_addr >> PM_PAGE_BITS;
+        std::scoped_lock lk(locks[base_page / PAGES_PER_LOCK]);
+        UpdateTraps<track>(buffer_owners, BbLayer::WriteTraps::Buffer, [&](auto&& visit) {
+            for (size_t page = mask.FirstRange().first; page < mask.LastRange().second; ++page) {
+                if (mask.Get(page)) {
+                    visit(base_page + page);
+                }
+            }
+        });
+    }
+    TrapOwners image_owners;
+    TrapOwners buffer_owners;
 
     std::array<PageState, NUM_ADDRESS_PAGES> cached_pages{};
 #ifdef PTHREAD_ADAPTIVE_MUTEX_INITIALIZER_NP
@@ -780,6 +801,9 @@ void PageManager::UpdatePageWatchers(VAddr addr, u64 size) const {
 template <bool track, bool is_read>
 void PageManager::UpdatePageWatchersForRegion(VAddr base_addr, RegionBits& mask) const {
     impl->UpdatePageWatchersForRegion<track, is_read>(base_addr, mask);
+    if (BufferTraps()) {
+        impl->UpdateBufferTraps<track>(base_addr, mask);
+    }
 }
 
 template void PageManager::UpdatePageWatchers<true>(VAddr addr, u64 size) const;
