@@ -1,12 +1,20 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+// The functions are called through Guarded: what the codecs throw (FFmpeg or ATRAC9 failing to
+// open, an output format not converted) becomes a logged error code, as an exception must not
+// unwind through the game's frames.
 #include <cstdint>
 #include <cstddef>
 #include <array>
+#include <atomic>
+#include <cstdio>
+#include <exception>
 #include <memory>
 #include <mutex>
-#include "SceTypes.hpp"
-#include "prx/libc/include/General.hpp"
-#include "prx/libSceAudiodec/src/Codecs.hpp"
+#include "AudiodecTypes.hpp"
+#include "Codecs.hpp"
+#include "core/libraries/libs.h"
 
+namespace Libraries::Audiodec {
 namespace {
 
 constexpr std::int32_t ERROR_API_FAIL = static_cast<std::int32_t>(0x807F0000);
@@ -48,8 +56,8 @@ static_assert(sizeof(AudiodecParamM4aac) == 24 && sizeof(AudiodecM4aacInfo) == 2
 
 struct Instance {
     std::uint32_t codecType = 0;
-    std::unique_ptr<Audiodec::Decoder> decoder;
-    Audiodec::At9Format at9{};
+    std::unique_ptr<::Audiodec::Decoder> decoder;
+    ::Audiodec::At9Format at9{};
     std::uint32_t channels = 0;
     std::uint32_t sampleRate = 0;
 };
@@ -67,8 +75,8 @@ std::int32_t wordSizeOf(const void* param) {
 }
 
 std::int32_t validateWordSize(std::int32_t wordSize) {
-    if (wordSize == Audiodec::WORD_SIZE_16BIT || wordSize == Audiodec::WORD_SIZE_FLOAT) return 0;
-    if (wordSize == 0) NotImplemented_nid_no_patch("libSceAudiodec 24-bit PCM output");
+    if (wordSize == ::Audiodec::WORD_SIZE_16BIT || wordSize == ::Audiodec::WORD_SIZE_FLOAT) return 0;
+    if (wordSize == 0) std::printf("Audiodec: 24-bit PCM output is not implemented\n");
     return ERROR_INVALID_WORD_LENGTH;
 }
 
@@ -107,7 +115,7 @@ std::int32_t validateBuffers(const AudiodecCtrl* ctrl) {
     return 0;
 }
 
-void fillAt9Info(AudiodecAt9Info* info, const Audiodec::At9Format& format) {
+void fillAt9Info(AudiodecAt9Info* info, const ::Audiodec::At9Format& format) {
     const std::uint32_t superframeSamples = format.frameSamples * format.framesInSuperframe;
     info->ui_channel = format.channels;
     info->ui_bitrate = static_cast<std::uint32_t>(static_cast<std::uint64_t>(format.superframeSize) * 8 * format.sampleRate / superframeSamples);
@@ -119,7 +127,7 @@ void fillAt9Info(AudiodecAt9Info* info, const Audiodec::At9Format& format) {
     info->i_result = 0;
 }
 
-void fillMp3Info(AudiodecMp3Info* info, const Audiodec::Mp3Header& header) {
+void fillMp3Info(AudiodecMp3Info* info, const ::Audiodec::Mp3Header& header) {
     info->ui_header = header.word;
     info->uc_crc = header.crc;
     info->uc_mode = header.mode;
@@ -134,12 +142,12 @@ void fillMp3Info(AudiodecMp3Info* info, const Audiodec::Mp3Header& header) {
 
 std::int32_t createAac(const AudiodecParamM4aac* param, AudiodecM4aacInfo* info, Instance& instance) {
     if (param->ui_config_number != M4AAC_CONFIG_ADTS && param->ui_config_number != M4AAC_CONFIG_RAW) return ERROR_M4AAC_INVALID_CONFIG_NUMBER;
-    const std::uint32_t sampleRate = Audiodec::AacSampleRate(param->ui_sampling_freq_index);
+    const std::uint32_t sampleRate = ::Audiodec::AacSampleRate(param->ui_sampling_freq_index);
     if (param->ui_config_number == M4AAC_CONFIG_RAW && sampleRate == 0) return ERROR_M4AAC_INVALID_SAMPLING_FREQ;
     if (param->ui_max_channels > 8) return ERROR_M4AAC_INVALID_MAX_CHANNELS;
     if (param->ui_enable_heaac > 1) return ERROR_M4AAC_INVALID_ENABLE_HEAAC;
     const std::uint32_t channels = param->ui_max_channels == 0 ? 2 : param->ui_max_channels;
-    instance.decoder = Audiodec::CreateAac(param->i_bw_pcm, param->ui_config_number == M4AAC_CONFIG_ADTS, param->ui_sampling_freq_index, channels);
+    instance.decoder = ::Audiodec::CreateAac(param->i_bw_pcm, param->ui_config_number == M4AAC_CONFIG_ADTS, param->ui_sampling_freq_index, channels);
     instance.channels = channels;
     instance.sampleRate = sampleRate;
     info->ui_sampling_freq = sampleRate;
@@ -155,27 +163,37 @@ Instance* find(std::int32_t handle) {
     return instance.decoder ? &instance : nullptr;
 }
 
+void LogCreate(std::uint32_t codecType, const AudiodecCtrl* ctrl) {
+    static std::atomic<unsigned> logged{0};
+    if (logged.fetch_add(1, std::memory_order_relaxed) >= 16) return;
+    if (codecType == TYPE_M4AAC) {
+        const auto* param = static_cast<const AudiodecParamM4aac*>(ctrl->pParam);
+        std::printf("Audiodec: M4AAC decoder, word size %d, config %u, sampling frequency index %u, %u channels, HE-AAC %u\n",
+                    param->i_bw_pcm, param->ui_config_number, param->ui_sampling_freq_index, param->ui_max_channels,
+                    param->ui_enable_heaac);
+    } else {
+        std::printf("Audiodec: decoder of type %u, word size %d\n", codecType, wordSizeOf(ctrl->pParam));
+    }
 }
 
-extern "C" {
-
-int32_t APS5_VABI sceAudiodecInitLibrary(uint32_t codec_type) {
+int32_t sceAudiodecInitLibrary(uint32_t codec_type) {
     if (!validType(codec_type)) return ERROR_INVALID_TYPE;
     std::lock_guard lock(g_mutex);
     ++g_initialized[codec_type];
     return 0;
 }
 
-int32_t APS5_VABI sceAudiodecTermLibrary(uint32_t codec_type) {
+int32_t sceAudiodecTermLibrary(uint32_t codec_type) {
     if (!validType(codec_type)) return ERROR_INVALID_TYPE;
     std::lock_guard lock(g_mutex);
     if (g_initialized[codec_type] > 0) --g_initialized[codec_type];
     return 0;
 }
 
-int32_t APS5_VABI sceAudiodecCreateDecoder(AudiodecCtrl* ctrl, uint32_t codec_type) {
+int32_t sceAudiodecCreateDecoder(AudiodecCtrl* ctrl, uint32_t codec_type) {
     if (!validType(codec_type)) return ERROR_INVALID_TYPE;
     if (const std::int32_t result = validateCtrl(ctrl, codec_type); result != 0) return result;
+    LogCreate(codec_type, ctrl);
     std::lock_guard lock(g_mutex);
     if (g_initialized[codec_type] == 0) return ERROR_ARG;
     for (std::size_t i = 0; i < g_instances.size(); ++i) {
@@ -185,11 +203,11 @@ int32_t APS5_VABI sceAudiodecCreateDecoder(AudiodecCtrl* ctrl, uint32_t codec_ty
         instance.codecType = codec_type;
         if (codec_type == TYPE_AT9) {
             const auto* param = static_cast<const AudiodecParamAt9*>(ctrl->pParam);
-            instance.decoder = Audiodec::CreateAt9(param->i_bw_pcm, param->ui_config_data, instance.at9);
+            instance.decoder = ::Audiodec::CreateAt9(param->i_bw_pcm, param->ui_config_data, instance.at9);
             if (!instance.decoder) return ERROR_AT9_INVALID_CONFIG_DATA;
             fillAt9Info(static_cast<AudiodecAt9Info*>(ctrl->pBsiInfo), instance.at9);
         } else if (codec_type == TYPE_MP3) {
-            instance.decoder = Audiodec::CreateMp3(static_cast<const AudiodecParamMp3*>(ctrl->pParam)->i_bw_pcm);
+            instance.decoder = ::Audiodec::CreateMp3(static_cast<const AudiodecParamMp3*>(ctrl->pParam)->i_bw_pcm);
         } else if (const std::int32_t result = createAac(static_cast<const AudiodecParamM4aac*>(ctrl->pParam), static_cast<AudiodecM4aacInfo*>(ctrl->pBsiInfo), instance); result != 0) {
             instance = {};
             return result;
@@ -199,7 +217,7 @@ int32_t APS5_VABI sceAudiodecCreateDecoder(AudiodecCtrl* ctrl, uint32_t codec_ty
     return ERROR_API_FAIL;
 }
 
-int32_t APS5_VABI sceAudiodecDeleteDecoder(int32_t handle) {
+int32_t sceAudiodecDeleteDecoder(int32_t handle) {
     std::lock_guard lock(g_mutex);
     Instance* instance = find(handle);
     if (!instance) return ERROR_INVALID_HANDLE;
@@ -207,7 +225,7 @@ int32_t APS5_VABI sceAudiodecDeleteDecoder(int32_t handle) {
     return 0;
 }
 
-int32_t APS5_VABI sceAudiodecClearContext(int32_t handle) {
+int32_t sceAudiodecClearContext(int32_t handle) {
     std::lock_guard lock(g_mutex);
     Instance* instance = find(handle);
     if (!instance) return ERROR_INVALID_HANDLE;
@@ -215,27 +233,27 @@ int32_t APS5_VABI sceAudiodecClearContext(int32_t handle) {
     return 0;
 }
 
-int32_t APS5_VABI sceAudiodecDecode(int32_t handle, AudiodecCtrl* ctrl) {
+int32_t sceAudiodecDecode(int32_t handle, AudiodecCtrl* ctrl) {
     std::lock_guard lock(g_mutex);
     Instance* instance = find(handle);
     if (!instance) return ERROR_INVALID_HANDLE;
     if (const std::int32_t result = validateCtrl(ctrl, instance->codecType); result != 0) return result;
     if (const std::int32_t result = validateBuffers(ctrl); result != 0) return result;
 
-    const Audiodec::DecodeResult decoded = instance->decoder->Decode(static_cast<const std::uint8_t*>(ctrl->pAuInfo->p_au_addr), ctrl->pAuInfo->ui_au_size,
+    const ::Audiodec::DecodeResult decoded = instance->decoder->Decode(static_cast<const std::uint8_t*>(ctrl->pAuInfo->p_au_addr), ctrl->pAuInfo->ui_au_size,
                                                                      static_cast<std::uint8_t*>(ctrl->pPcmItem->p_pcm_addr), ctrl->pPcmItem->ui_pcm_size);
     if (instance->codecType == TYPE_M4AAC) {
         auto* info = static_cast<AudiodecM4aacInfo*>(ctrl->pBsiInfo);
-        info->i_result = decoded.status == Audiodec::DecodeStatus::InvalidData ? M4AAC_RESULT_DECODE_ERROR
-            : decoded.status == Audiodec::DecodeStatus::PartialInput ? M4AAC_RESULT_INSUFFICIENT_DATA : 0;
+        info->i_result = decoded.status == ::Audiodec::DecodeStatus::InvalidData ? M4AAC_RESULT_DECODE_ERROR
+            : decoded.status == ::Audiodec::DecodeStatus::PartialInput ? M4AAC_RESULT_INSUFFICIENT_DATA : 0;
         if (decoded.channels != 0) {
             info->ui_sampling_freq = decoded.sampleRate;
             info->ui_number_of_channels = decoded.channels;
             info->ui_heaac = decoded.highEfficiency;
         }
     }
-    if (decoded.status == Audiodec::DecodeStatus::NotEnoughRoom) return ERROR_INVALID_PCM_SIZE;
-    if (decoded.status != Audiodec::DecodeStatus::Ok) {
+    if (decoded.status == ::Audiodec::DecodeStatus::NotEnoughRoom) return ERROR_INVALID_PCM_SIZE;
+    if (decoded.status != ::Audiodec::DecodeStatus::Ok) {
         ctrl->pAuInfo->ui_au_size = 0;
         ctrl->pPcmItem->ui_pcm_size = 0;
         return ERROR_API_FAIL;
@@ -247,4 +265,37 @@ int32_t APS5_VABI sceAudiodecDecode(int32_t handle, AudiodecCtrl* ctrl) {
     return 0;
 }
 
+template <auto F>
+struct Guarded;
+template <typename... Args, int32_t (*F)(Args...)>
+struct Guarded<F> {
+    static const char* name;
+    static int32_t PS4_SYSV_ABI Call(Args... args) {
+        try {
+            return F(args...);
+        } catch (const std::exception& error) {
+            static std::atomic<unsigned> logged{0};
+            if (logged.fetch_add(1, std::memory_order_relaxed) < 8) std::printf("Audiodec: %s failed: %s\n", name, error.what());
+            return ERROR_API_FAIL;
+        }
+    }
+};
+template <typename... Args, int32_t (*F)(Args...)>
+const char* Guarded<F>::name = "?";
+
+} // namespace
+
+#define AUDIODEC_FUNCTION(nid, function)                                                                               \
+    Guarded<function>::name = #function;                                                                               \
+    LIB_FUNCTION(nid, "libSceAudiodec", 1, "libSceAudiodec", Guarded<function>::Call)
+
+void RegisterLib(Core::Loader::SymbolsResolver* sym) {
+    AUDIODEC_FUNCTION("6Vf9WTLDoss", sceAudiodecClearContext);
+    AUDIODEC_FUNCTION("O3f1sLMWRvs", sceAudiodecCreateDecoder);
+    AUDIODEC_FUNCTION("KHXHMDLkILw", sceAudiodecDecode);
+    AUDIODEC_FUNCTION("Tp+ZEy69mLk", sceAudiodecDeleteDecoder);
+    AUDIODEC_FUNCTION("VjhsmxpcezI", sceAudiodecInitLibrary);
+    AUDIODEC_FUNCTION("h5jSB2QIDV0", sceAudiodecTermLibrary);
 }
+
+} // namespace Libraries::Audiodec

@@ -1,9 +1,9 @@
-#include "prx/libSceAudiodec/src/Codecs.hpp"
+// SPDX-License-Identifier: GPL-2.0-or-later
+#include "Codecs.hpp"
 
 #include "libatrac9.h"
 extern "C" {
 #include <libavcodec/avcodec.h>
-#include <libavutil/log.h>
 }
 
 #include <algorithm>
@@ -31,8 +31,6 @@ void writeSample(float value, std::int32_t wordSize, std::uint8_t* out) {
 class FfmpegDecoder : public Decoder {
 public:
     FfmpegDecoder(AVCodecID id, std::int32_t wordSize, std::vector<std::uint8_t> extradata = {}) : wordSize(wordSize), extradata(std::move(extradata)), id(id) {
-        static const bool quiet = (av_log_set_level(AV_LOG_QUIET), true);
-        (void)quiet;
         open();
     }
 
@@ -179,9 +177,11 @@ public:
         std::size_t offset = 0;
         for (int frame = 0; frame < info.framesInSuperframe; ++frame) {
             int used = 0;
-            const int status = wordSize == WORD_SIZE_FLOAT
-                ? Atrac9DecodeF32(handle, data + offset, static_cast<int>(superframeSize - offset), reinterpret_cast<float*>(pcm + result.produced), &used, 0)
-                : Atrac9Decode(handle, data + offset, static_cast<int>(superframeSize - offset), reinterpret_cast<short*>(pcm + result.produced), &used, 0);
+            samples.resize(static_cast<std::size_t>(info.frameSamples) * info.channels);
+            const int status = Atrac9Decode(handle, data + offset, samples.data(), &used);
+            if (status == 0) {
+                for (std::size_t i = 0; i < samples.size(); ++i) writeSample(samples[i] / 32768.0f, wordSize, pcm + result.produced + i * sampleBytes);
+            }
             if (status != 0 || used <= 0 || offset + static_cast<std::size_t>(used) > superframeSize) {
                 Reset();
                 return {DecodeStatus::InvalidData};
@@ -202,6 +202,7 @@ private:
     std::uint8_t config[4];
     void* handle = nullptr;
     Atrac9CodecInfo info{};
+    std::vector<short> samples;
 };
 
 }
