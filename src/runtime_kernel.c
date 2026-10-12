@@ -244,6 +244,9 @@ static ABI int32_t guest_sigprocmask(int how,const GuestSigset *set,GuestSigset 
 }
 static ABI int32_t guest_sigfillset(GuestSigset *set) { if (!set) return fail_posix(EINVAL); memset(set,0xff,sizeof(*set)); return 0; }
 static ABI int32_t guest_sigemptyset(GuestSigset *set) { if (!set) return fail_posix(EINVAL); memset(set,0,sizeof(*set)); return 0; }
+/* Guest exception handlers are called from the runtime's host signal handler and return into it, so
+ * no guest frame is a signal trampoline. */
+static ABI int32_t is_signal_return(const void *address) { (void)address; return 0; }
 typedef struct { GuestTimeval utime, stime; int64_t rest[14]; } GuestRusage;
 static ABI int32_t guest_getrusage(int who,GuestRusage *out) {
     struct rusage r;
@@ -375,7 +378,7 @@ static const RuntimeExport exports[]={
     {"sceKernelDebugRaiseExceptionOnReleaseMode",raise_exception},
     {"sceKernelPrintBacktraceWithModuleInfo",print_backtrace},
     {"signal",guest_signal}, {"sigprocmask",guest_sigprocmask}, {"_sigprocmask",guest_sigprocmask},
-    {"sigfillset",guest_sigfillset}, {"sigemptyset",guest_sigemptyset},
+    {"sigfillset",guest_sigfillset}, {"sigemptyset",guest_sigemptyset}, {"_is_signal_return",is_signal_return},
     {"getrusage",guest_getrusage}, {"sysctl",guest_sysctl},
     {"scePthreadOnce",thread_once}, {"pthread_once",posix_once},
     {"scePthreadKeyCreate",key_create}, {"scePthreadKeyDelete",key_delete},
