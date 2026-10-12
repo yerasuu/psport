@@ -33,7 +33,7 @@ static Flag *find(uint64_t id) {
     return NULL;
 }
 static void host_check(int e) {
-    if (e) { fprintf(stderr,"STOP: event flag host error %d\n",e); exit(21); }
+    if (e) { fprintf(stderr,"STOP: event flag host error %d\n",e); runtime_stop(21); }
 }
 static uint64_t now_ns(void) {
     struct timespec t;
