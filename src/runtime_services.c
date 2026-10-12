@@ -646,7 +646,7 @@ static const RuntimeExport exports[]={
     {"sceNpScoreGetBoardInfo",np_signed_out}, {"sceNpScoreGetGameData",np_signed_out},
     {"sceNpScoreGetRankingByNpIdPcId",np_signed_out}, {"sceNpScoreGetRankingByRange",np_signed_out},
     {"sceNpScoreRecordGameData",np_signed_out}, {"sceNpScoreRecordScore",np_signed_out},
-    {"sceNpScoreSetPlayerCharacterId",runtime_stub},
+    {"sceNpScoreSetPlayerCharacterId",runtime_stub}, {"sceNpTusCreateNpTitleCtxA",np_signed_out},
     {"sceVoiceCreatePort",voice_port}, {"sceVoiceDeletePort",runtime_stub},
     {"sceVoiceConnectIPortToOPort",runtime_stub}, {"sceVoiceDisconnectIPortFromOPort",runtime_stub},
     {"sceVoiceStart",runtime_stub}, {"sceVoiceStop",runtime_stub}, {"sceVoiceGetPortInfo",voice_info},
