@@ -3,6 +3,7 @@
 // 1.09 executable (game_check.py makes sure that is the one running); every retail release runs
 // the same one.
 #include "game_profile.h"
+#include "bbport_game_menu.h"
 #include "bbport_guest_hooks.h"
 
 namespace Game {
@@ -36,6 +37,7 @@ extern const Profile BloodborneProfile = {
     .name = "Bloodborne",
     .serials = Serials,
     .install_hooks = InstallHooks,
+    .patch_image = BbGameMenu::PatchImage,
     .dynamic_writers = DynamicWriters,
     // The game's buffer-copy compute shader (not the export-stage copy shader).
     .buffer_copy_shader = 0xfefebf9f,
