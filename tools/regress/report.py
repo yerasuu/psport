@@ -34,12 +34,21 @@ AUDIO_FLOOR_DBFS = -60.0
 DRAWN_LIT_SHARE = 0.005
 LIT_LEVEL = 24
 LIT = bytes(v > LIT_LEVEL for v in range(256))
-DUMP_NAME = re.compile(r'_(\d+)x(\d+)_(bgra|rgba)\.raw$')
+DUMP_NAME = re.compile(r'_(\d+)x(\d+)_(bgra|rgba|a2r10g10b10|a2b10g10r10)\.raw$')
+
+
+def eight_bit(data, pixels, red_low):
+    """RGBA bytes from packed 10-bit pixels (the top 8 bits of each channel)."""
+    words = memoryview(data)[:pixels * 4].cast('I')
+    out = bytearray(pixels * 4)
+    for c, shift in enumerate((2, 12, 22) if red_low else (22, 12, 2)):
+        out[c::4] = bytes((v >> shift) & 255 for v in words)
+    return bytes(out)
 
 
 def measure(path):
-    """Mean Rec. 709 luma (0-255) and lit share of an 8-bit present dump, or None for a format this
-    does not read."""
+    """Mean Rec. 709 luma (0-255) and lit share of an 8-bit or 10-bit present dump, or None for a
+    format this does not read."""
     m = DUMP_NAME.search(path.name)
     if not m:
         return None
@@ -47,6 +56,8 @@ def measure(path):
     data = path.read_bytes()
     if len(data) < w * h * 4:
         return None
+    if order.startswith('a2'):
+        data, order = eight_bit(data, w * h, order == 'a2b10g10r10'), 'rgba'
     r, b = (2, 0) if order == 'bgra' else (0, 2)
     pixels = w * h
     luma = (0.2126 * sum(data[r::4]) + 0.7152 * sum(data[1::4]) + 0.0722 * sum(data[b::4])) / pixels
