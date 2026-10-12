@@ -126,7 +126,7 @@ The previous frame's matrices are not there; the port keeps them itself.
 
 - Camera motion vectors: verified by reprojecting the previous frame (`BB_DEBUG_MOTION=1`,
   toggles 1<<22 reprojected frame, 1<<23 error map): static geometry matches.
-- FSR 3.1 (`BB_UPSCALER=fsr3`, FireBurn/FSR-Vulkan submodule): scene color before the
+- FSR 3.1 (`BB_UPSCALER=fsr3`, FireBurn/FSR-Vulkan in `gpu/third_party/fsr-vulkan`): scene color before the
   post-processing combine (compute shader 9a9cf8a9), 1:1, RGB written back (the game keeps data
   in the alpha). Toggle 1<<24 switches it off at run time.
 - Jitter: viewport offset of scene geometry (drawn with the scene depth, not full-screen
@@ -161,8 +161,8 @@ The previous frame's matrices are not there; the port keeps them itself.
 
 ## 2026-10-01: FSR 4 быстрее — проход post (2.9 → 0.8 мс в 4K)
 
-Замеры: `BB_FSR4_PROFILE=1` (время каждого прохода FSR 4, патч провайдера в субмодуле,
-см. `gpu/patches/fsr-vulkan`), бенчмарк вне игры `out/gpu/fsr4-bench` (`ninja -C out/gpu
+Замеры: `BB_FSR4_PROFILE=1` (время каждого прохода FSR 4, в провайдере
+`gpu/third_party/fsr-vulkan/src/ffx_vk_fsr4_v07.c`), бенчмарк вне игры `out/gpu/fsr4-bench` (`ninja -C out/gpu
 fsr4-bench`; `--stats` — регистры и инструкции от RADV). 4K Balanced (2260x1272 → 3840x2160),
 RX 7800 XT: весь FSR 4 — 5.8 мс, из них **post 2.5–2.9 мс** (не нейросеть: последние слои,
 pixel shuffle 2x2 и смешивание с историей), 12 проходов модели — 2.4 мс, pre 0.55.

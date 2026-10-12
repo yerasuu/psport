@@ -77,7 +77,7 @@ BB_GAME_DIR=/путь/к/дампу BB_SKIP_GAME_CHECK=1 BB_PERMISSIVE=1 bash ru
   shadPS4, а также protobuf, nlohmann_json, OpenSSL, zlib и miniupnpc для необязательного сетевого
   модуля. Если их нет, а [Nix](https://nixos.org) установлен, `build.sh` и `run.sh` сами
   перезапускаются в `shell.nix`.
-- Подмодули (FSR-Vulkan, Dear ImGui, LibAtrac9): клонируйте с `--recursive`, иначе `build.sh`
+- Подмодули (Dear ImGui, LibAtrac9): клонируйте с `--recursive`, иначе `build.sh`
   выполнит `git submodule update --init --recursive`.
 - `BB_LTO=OFF` отключает оптимизацию при линковке; `BB_PGO=generate|use|off` задаёт оптимизацию по
   профилю (по умолчанию `use`, если в `pgo/` есть профиль).
