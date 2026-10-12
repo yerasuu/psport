@@ -153,7 +153,7 @@ static ABI const char *net_ntop(int af,const void *src,char *dst,uint32_t size) 
 }
 static ABI int32_t netctl_state(int32_t *state) { if (!state) return NET_CTL_INVALID_ADDR; *state=0; return 0; }
 static ABI int32_t netctl_info(int code,void *info) { (void)code; (void)info; return NET_CTL_NOT_CONNECTED; }
-static ABI int32_t netctl_register(void *cb,void *arg,int32_t *cid) { (void)cb; (void)arg; if (!cid) return NET_CTL_INVALID_ADDR; *cid=new_id(); return 0; }
+static ABI int32_t netctl_register(void *cb,void *arg,int32_t *cid) { (void)arg; if (!cb || !cid) return NET_CTL_INVALID_ADDR; *cid=new_id(); return 0; }
 static ABI int32_t netctl_nat(uint32_t *info) {
     if (!info) return NET_CTL_INVALID_ADDR;
     info[1]=0; info[2]=3; info[3]=0; /* stun failed, NAT type 3, no mapped address */
