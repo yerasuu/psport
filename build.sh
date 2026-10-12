@@ -43,7 +43,8 @@ if command -v ccache >/dev/null; then
 fi
 cmake -S gpu -B out/gpu -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBB_PGO="$pgo" \
     -DBB_LTO="${BB_LTO:-ON}" -DBB_PGO_DIR="$PWD/pgo" \
-    -DCMAKE_C_COMPILER_LAUNCHER="$launcher" -DCMAKE_CXX_COMPILER_LAUNCHER="$launcher" >/dev/null
+    -DCMAKE_C_COMPILER_LAUNCHER="$launcher" -DCMAKE_CXX_COMPILER_LAUNCHER="$launcher" \
+    ${BB_ORIGIN_RPATH_ONLY:+-DCMAKE_BUILD_RPATH_USE_ORIGIN=ON} >/dev/null
 echo "GPU library: PGO $pgo, LTO ${BB_LTO:-ON}"
 # A failed GPU build must stop here: an older libbbgpu.so would otherwise be used silently.
 if ! ninja -C out/gpu bbgpu $(grep -q "^build bbnet:" out/gpu/build.ninja && echo bbnet) > out/gpu-build.log 2>&1; then
@@ -64,7 +65,10 @@ if [[ -n ${DLSS_SDK_ROOT:-} ]]; then
     echo "DLSS bridge: out/libbbport_dlss.so"
 fi
 # $ORIGIN/gpu: packaged copies keep the library next to the binary without patching it.
-gpu=(-Lout/gpu -lbbgpu -Wl,-rpath,'$ORIGIN/gpu' -Wl,-rpath,"$PWD/out/gpu" -rdynamic)
+# The build's own out/gpu too, except for a Nix build (BB_ORIGIN_RPATH_ONLY, packaging/port.nix,
+# also for the libraries CMake links above): its sandbox's path would stay in the store's binaries.
+gpu=(-Lout/gpu -lbbgpu -Wl,-rpath,'$ORIGIN/gpu' -rdynamic)
+[[ -n ${BB_ORIGIN_RPATH_ONLY:-} ]] || gpu+=(-Wl,-rpath,"$PWD/out/gpu")
 runtime=(src/runtime*.c)
 # Third-party decoders: compiled once, without this project's -Werror policy.
 atrac9=(third_party/LibAtrac9/C/src/*.c)
