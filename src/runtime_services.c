@@ -187,6 +187,7 @@ static ABI int32_t np_account_id(int32_t user,uint64_t *id) {
 }
 static ABI int32_t np_register(void *cb,void *arg) { (void)cb; (void)arg; return new_id(); }
 static ABI void np_register_void(void *cb,void *arg) { (void)cb; (void)arg; }
+static ABI int32_t np_register_toolkit(void *cb,void *arg) { (void)arg; return cb ? 0 : NP_INVALID_ARGUMENT; }
 static ABI int32_t np_request(const void *param) { (void)param; return new_id(); }
 static ABI int32_t np_request_ctx(int32_t ctx,const void *param) { (void)ctx; (void)param; return new_id(); }
 static ABI int32_t np_poll(int32_t request,int32_t *result) { (void)request; if (result) *result=NP_SIGNED_OUT; return 0; }
@@ -602,6 +603,7 @@ static const RuntimeExport exports[]={
     {"sceNpRegisterStateCallback",np_register}, {"sceNpUnregisterStateCallback",runtime_stub},
     {"sceNpRegisterGamePresenceCallback",np_register_void}, {"sceNpRegisterPlusEventCallback",np_register},
     {"sceNpUnregisterPlusEventCallback",runtime_stub}, {"sceNpCheckCallback",runtime_stub},
+    {"sceNpRegisterStateCallbackForToolkit",np_register_toolkit}, {"sceNpCheckCallbackForLib",runtime_stub},
     {"sceNpSetNpTitleId",runtime_stub}, {"sceNpNotifyPlusFeature",runtime_stub}, {"sceNpSetContentRestriction",runtime_stub},
     {"sceNpCreateAsyncRequest",np_request}, {"sceNpDeleteRequest",runtime_stub}, {"sceNpAbortRequest",runtime_stub},
     {"sceNpPollAsync",np_poll}, {"sceNpCheckNpAvailability",np_signed_out},
