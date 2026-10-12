@@ -169,3 +169,39 @@ count that keeps growing means the game is stalled on the GPU. The table goes to
 With `-c`, a milestone lost or a crash signature that is new or different is a regression: it is
 listed and the exit status is 1. The `no impl` and `forced` columns show their change against the
 earlier run without counting it as a regression (blank in an earlier file that predates `forced`).
+
+## CI and binary cache
+
+`.github/workflows/nix-cache.yml` runs on every push to `master` (and by hand): it builds
+`packaging/port.nix` (the port from source in Nix's sandbox with `build.sh`, LTO on, no PGO profile,
+nixpkgs pinned in `packaging/nixpkgs.nix` to decanter's revision) and publishes its closure with
+`tools/nix_cache.sh` as a flat Nix binary cache: the assets of the release `nix-cache`, with only the
+workflow's `GITHUB_TOKEN`. The output is laid out as a checkout after `build.sh` (`run.sh`,
+`scripts/`, `patches/`, `out/bb-probe`, `out/bb-gpu-capabilities`, `out/gpu/`); the Vulkan drivers
+are not in it.
+
+The closure is made content-addressed before it is published (`nix store make-content-addressed`):
+Nix accepts such paths without a signature, also from a user the daemon does not trust, so the cache
+has no key. Every file sits at the top of
+`https://github.com/yerasuu/psport/releases/download/nix-cache/`:
+
+| File | Contents |
+|---|---|
+| `nix-cache-info` | `StoreDir: /nix/store`, `Priority: 50` |
+| `<hash>.narinfo` | one per store path (`<hash>` of the path); its `URL` is the flat `<hash>.nar.zst` |
+| `<hash>.nar.zst` | the path's NAR, zstd |
+| `closure-<commit>` | the store paths of that commit's closure |
+| `commit-<commit>` | the store path of that commit's output, uploaded last |
+
+A commit's build is then fetched with
+`nix copy --no-check-sigs --from https://github.com/yerasuu/psport/releases/download/nix-cache <path from commit-<commit>>`,
+and runs as `BB_PREBUILT=1 BB_PROBE=<path>/out/bb-probe BB_DATA_DIR=<writable folder> bash <path>/run.sh`
+with Python and the Vulkan drivers of the same nixpkgs from the caller. A commit without
+`commit-<commit>` (not on `master`, or still building) has no build: build it locally.
+
+Each run first keeps the newest 30 commits (`NIX_CACHE_KEEP`), fewer if their paths would not fit in
+the 1000 files a release holds, and deletes the other commits' `commit-`/`closure-` files and the
+paths no kept commit uses; then it uploads only the paths the release lacks. A closure is about 220
+paths (440 files), and a commit that changes only the port adds 4. Runs are serialized (a run prunes what another could be
+publishing). `tools/nix_cache.sh <store path> <commit> <directory>` writes the same files to a local
+folder, for `nix copy --from file://<directory>`.
