@@ -43,6 +43,20 @@ int bbgpu_mouse_captured(void);
 void bbgpu_mouse_look_enable(int enabled);
 /* Patches the loaded image before the game runs (image still writable): libGnm entry hooks. */
 void bbgpu_patch_image(unsigned char *image, uint64_t size);
+/* libSceAjm's MP3 and AAC decoders (runtime_ajm.c) over libSceAudiodec's FFmpeg codecs (audiodec/).
+ * create returns NULL when FFmpeg cannot open the decoder. decode takes the frame at the start of data
+ * and writes it to pcm as interleaved float: 0 decoded, 1 the frame is longer than size, 2 not a frame
+ * or not decodable, 3 pcm too small. mp3_header is the frame header word (0 for AAC); encoder_delay and
+ * total_samples are the gapless window an MP3 frame's LAME, VBRI or FGH header announces (0 without one). */
+typedef struct {
+    uint64_t consumed;
+    uint32_t samples, channels, sample_rate, bitrate, mp3_header, high_efficiency, encoder_delay, total_samples;
+} BbAudioFrame;
+void *bbgpu_audio_decoder_create(int aac, int adts, uint32_t frequency_index, uint32_t channels);
+int bbgpu_audio_decoder_decode(void *decoder, const uint8_t *data, uint64_t size, float *pcm, uint64_t pcm_size,
+                               BbAudioFrame *frame);
+void bbgpu_audio_decoder_reset(void *decoder);
+void bbgpu_audio_decoder_destroy(void *decoder);
 /* Number of symbols registered by the vendored libraries (diagnostics). */
 unsigned bbgpu_symbol_count(void);
 #ifdef __cplusplus

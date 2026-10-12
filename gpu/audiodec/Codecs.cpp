@@ -225,6 +225,7 @@ bool ParseMp3Header(const std::uint8_t* data, std::size_t size, Mp3Header& heade
     const std::uint32_t sampleRate = rates[version][rateIndex];
     const std::uint32_t bitrate = (mpeg1 ? mpeg1Kbps : mpeg2Kbps)[bitrateIndex] * 1000;
     header.word = word;
+    header.bitrate = bitrate;
     header.frameBytes = (mpeg1 ? 144 : 72) * bitrate / sampleRate + (word >> 9 & 1);
     header.crc = (word >> 16 & 1) == 0;
     header.mode = static_cast<std::uint8_t>(word >> 6 & 3);
