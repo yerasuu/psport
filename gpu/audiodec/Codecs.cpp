@@ -40,6 +40,8 @@ public:
 
 protected:
     DecodeResult decodePacket(const std::uint8_t* data, std::size_t size, std::uint8_t* pcm, std::size_t pcmSize) {
+        input.assign(data, data + size);
+        input.resize(size + AV_INPUT_BUFFER_PADDING_SIZE);
         AVPacket* packet = av_packet_alloc();
         AVFrame* frame = av_frame_alloc();
         if (!packet || !frame) {
@@ -47,7 +49,7 @@ protected:
             av_frame_free(&frame);
             throw std::bad_alloc();
         }
-        packet->data = const_cast<std::uint8_t*>(data);
+        packet->data = input.data();
         packet->size = static_cast<int>(size);
         DecodeResult result{};
         result.consumed = size;
@@ -102,6 +104,7 @@ private:
 
     std::int32_t wordSize;
     std::vector<std::uint8_t> extradata;
+    std::vector<std::uint8_t> input;
     AVCodecID id;
     AVCodecContext* context = nullptr;
 };
