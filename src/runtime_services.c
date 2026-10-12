@@ -223,6 +223,15 @@ static ABI int32_t save_result(int32_t *result) {
     return 0;
 }
 static ABI int32_t save_close(const void *param) { (void)param; dialogs[2].status=3; return 0; }
+/* OrbisMsgDialogResult: mode, result, buttonId, reserved[32]; ends as accepted, like SaveDataDialog. */
+static ABI int32_t msg_result(int32_t *result) {
+    if (dialogs[1].status!=3) return (int32_t)0x80B80005; /* SCE_COMMON_DIALOG_ERROR_NOT_FINISHED */
+    if (!result) return (int32_t)0x80B8000D;              /* SCE_COMMON_DIALOG_ERROR_ARG_NULL */
+    memset(result,0,44);
+    result[2]=1;
+    return 0;
+}
+static ABI int32_t msg_close(void) { dialogs[1].status=3; return 0; }
 typedef struct { int32_t size, error_code, user, reserved; } ErrorDialogParam;
 static ABI int32_t error_init(void) { return dialog_init(6); }
 static ABI int32_t error_open(const ErrorDialogParam *param) {
@@ -508,6 +517,7 @@ static const RuntimeExport exports[]={
     {"sceCommonDialogInitialize",common_init},
     {"sceMsgDialogInitialize",msg_init}, {"sceMsgDialogOpen",msg_open},
     {"sceMsgDialogUpdateStatus",msg_status}, {"sceMsgDialogTerminate",msg_term},
+    {"sceMsgDialogGetStatus",msg_status}, {"sceMsgDialogGetResult",msg_result}, {"sceMsgDialogClose",msg_close},
     {"sceSaveDataDialogInitialize",save_init}, {"sceSaveDataDialogOpen",save_open},
     {"sceSaveDataDialogUpdateStatus",save_status}, {"sceSaveDataDialogTerminate",save_term},
     {"sceSaveDataDialogGetStatus",save_status}, {"sceSaveDataDialogIsReadyToDisplay",save_ready},
