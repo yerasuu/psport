@@ -488,10 +488,9 @@ struct Sampler {
             return 4.0f;
         case AnisoRatio::Eight:
             return 8.0f;
-        case AnisoRatio::Sixteen:
-            return 16.0f;
         default:
-            UNREACHABLE();
+            // Values 5..7 of the 3-bit field reach the sampler too; 16x is the hardware's maximum.
+            return 16.0f;
         }
     }
 };
