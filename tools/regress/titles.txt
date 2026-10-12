@@ -1,6 +1,7 @@
 # tools/regress.sh titles: name, title id, game folder under GAMES_ROOT, pad schedule (beside this
 # file), then the title's own environment (- for none). $NAME values come from the caller's
-# environment; SYS_MODULES is the folder with the user's dump of the system modules (FORK.md).
+# environment, and an entry whose variable is empty is left out; SYS_MODULES is the optional folder
+# with the user's dump of the system modules (FORK.md).
 bloodborne  CUSA03173  CUSA03173_UNIFIED                         bloodborne.sched  -
 ryza        CUSA16458  UP4108-CUSA16458_00-RYZA000000MASTER      ryza.sched        BB_SKIP_GAME_CHECK=1 BB_PERMISSIVE=1 BB_SYS_MODULES=$SYS_MODULES
 ayesha      CUSA16921  UP4108-CUSA16921_00-APPA14DX00000000      generic.sched     BB_SKIP_GAME_CHECK=1 BB_PERMISSIVE=1 BB_SYS_MODULES=$SYS_MODULES

@@ -11,8 +11,8 @@
 #   -n NAMES    only these titles (comma-separated)
 #   -s SHELL    run run.sh inside `nix-shell SHELL --argstr checkout <repo>` (a toolchain env such
 #               as decanter's bbport.nix); without it, run.sh as it is
-# Variables the titles file refers to ($SYS_MODULES...) come from the environment; a title whose
-# variable is empty is skipped, so nothing user-specific lives in the repository.
+# Variables the titles file refers to ($SYS_MODULES...) come from the environment; an entry whose
+# variable is empty is left out, so nothing user-specific lives in the repository.
 # Uses the build in out/ (BB_PREBUILT=1): build.sh first.
 set -uo pipefail
 root=$(cd -- "$(dirname -- "$0")/.." && pwd)
@@ -38,12 +38,12 @@ if [[ -n $shell_file ]]; then
     launch=("$nix_shell" "$(realpath -- "$shell_file")" --argstr checkout "$root" --run 'bash run.sh')
 fi
 
-# expand VALUE: $NAME / ${NAME} from the environment; when one is empty, prints its name and fails.
+# expand VALUE: $NAME / ${NAME} from the environment; fails when one is empty.
 expand() {
     local value=$1 name
     while [[ $value =~ \$\{?([A-Za-z_][A-Za-z0-9_]*)\}? ]]; do
         name=${BASH_REMATCH[1]}
-        [[ -n ${!name:-} ]] || { printf '%s' "$name"; return 1; }
+        [[ -n ${!name:-} ]] || return 1
         value=${value//"${BASH_REMATCH[0]}"/"${!name}"}
     done
     printf '%s' "$value"
@@ -114,17 +114,15 @@ trap 'trap "" TERM; kill -TERM $(jobs -rp) 2>/dev/null; wait; exit 130' INT TERM
 while read -r name title game schedule envs; do
     [[ -z $name || $name == \#* ]] && continue
     [[ -z $only || $only == *,$name,* ]] || continue
-    env_args=() missing=''
+    env_args=()
     for entry in ${envs:-}; do
         [[ $entry == - ]] && continue
-        value=$(expand "${entry#*=}") || { missing=$value; break; }
+        value=$(expand "${entry#*=}") || continue
         env_args+=("${entry%%=*}=$value")
     done
     # A title that can't run still gets a row, so that its absence shows in the table.
     skip=''
-    if [[ -n $missing ]]; then skip="\$$missing unset"
-    elif [[ ! -f $games/$game/eboot.bin ]]; then skip="no eboot.bin"
-    fi
+    [[ -f $games/$game/eboot.bin ]] || skip="no eboot.bin"
     if [[ -n $skip ]]; then
         rm -rf -- "${out:?}/$name"; mkdir -p "$out/$name"
         printf 'name\t%s\ntitle\t%s\nskipped\t%s\n' "$name" "$title" "$skip" > "$out/$name/run.tsv"
