@@ -190,7 +190,8 @@ typedef struct { const char *name; int initialized, status; } Dialog;
 static Dialog dialogs[]={{"CommonDialog",0,0},{"MsgDialog",0,0},{"SaveDataDialog",0,0},
                          {"NpProfileDialog",0,0},{"NpCommerceDialog",0,0},{"ImeDialog",0,0},
                          {"ErrorDialog",0,0},{"WebBrowserDialog",0,0},{"InvitationDialog",0,0},
-                         {"SigninDialog",0,0},{"SocialScreenDialog",0,0}};
+                         {"SigninDialog",0,0},{"SocialScreenDialog",0,0},
+                         {"HmdSetupDialog",0,0}};
 static int common_initialized;
 static ABI int32_t common_init(void) { common_initialized=1; return 0; }
 static int32_t dialog_init(int i) {
@@ -213,7 +214,7 @@ static int32_t dialog_term(int i) {
     static ABI int32_t tag##_status(void) { return dialog_status(i); } \
     static ABI int32_t tag##_term(void) { return dialog_term(i); }
 DIALOG(msg,1) DIALOG(save,2) DIALOG(profile,3) DIALOG(commerce,4)
-DIALOG(web,7) DIALOG(invitation,8) DIALOG(signin,9) DIALOG(social,10)
+DIALOG(web,7) DIALOG(invitation,8) DIALOG(signin,9) DIALOG(social,10) DIALOG(hmd_setup,11)
 static ABI int32_t profile_result(void *result) { if (result) memset(result,0,4); return 0; }
 typedef struct {
     void *callback_arg; int32_t error_code, result; uint32_t *sent_count; uint8_t reserved[32];
@@ -274,6 +275,15 @@ static ABI int32_t error_open(const ErrorDialogParam *param) {
 static ABI int32_t error_status(void) { return dialog_status(6); }
 static ABI int32_t error_close(void) { return (int32_t)0x80B8000B; } /* NOT_RUNNING: an opened one has already finished */
 static ABI int32_t error_term(void) { return dialog_term(6); }
+/* OrbisHmdSetupDialogResult: result, reserved. With no headset to set up, the user can only
+ * back out of the dialog: SCE_COMMON_DIALOG_RESULT_USER_CANCELED. */
+static ABI int32_t hmd_setup_result(int32_t *result) {
+    if (dialogs[11].status!=3) return (int32_t)0x80B80005; /* NOT_FINISHED */
+    if (!result) return (int32_t)0x80B8000D;               /* ARG_NULL */
+    result[0]=1;
+    return 0;
+}
+static ABI int32_t hmd_setup_close(void) { dialogs[11].status=3; return 0; }
 /* ImeDialog: text typed on the keyboard into the game window (title bar shows it).
  * OrbisImeDialogParam: user, type, languages(8), enter label, method, filter,
  * option, max length, char16 buffer, position, alignment, placeholder, title. */
@@ -592,6 +602,10 @@ static const RuntimeExport exports[]={
     {"sceErrorDialogInitialize",error_init}, {"sceErrorDialogOpen",error_open},
     {"sceErrorDialogUpdateStatus",error_status}, {"sceErrorDialogGetStatus",error_status},
     {"sceErrorDialogClose",error_close}, {"sceErrorDialogTerminate",error_term},
+    {"sceHmdSetupDialogInitialize",hmd_setup_init}, {"sceHmdSetupDialogOpen",hmd_setup_open},
+    {"sceHmdSetupDialogUpdateStatus",hmd_setup_status}, {"sceHmdSetupDialogGetStatus",hmd_setup_status},
+    {"sceHmdSetupDialogGetResult",hmd_setup_result}, {"sceHmdSetupDialogClose",hmd_setup_close},
+    {"sceHmdSetupDialogTerminate",hmd_setup_term},
     {"sceHmdInitialize",hmd_init}, {"sceHmdInitialize315",hmd_init}, {"sceHmdTerminate",hmd_term},
     {"sceHmdGetDeviceInformation",hmd_device_info},
     {"sceHmdGetDeviceInformationByHandle",hmd_handle_invalid}, {"sceHmdGetFieldOfView",hmd_handle_invalid},
