@@ -84,53 +84,67 @@ BB_GAME_DIR=/путь/к/дампу BB_SKIP_GAME_CHECK=1 BB_PERMISSIVE=1 bash ru
 
 ## Bloodborne
 
-Нужен свой расшифрованный дамп с обновлением 1.09 (папка обновления копируется поверх базовой
-игры): у всех изданий из магазина (CUSA03173, CUSA00900, CUSA03023, ...) один и тот же
-исполняемый файл. `run.sh` его проверяет (`scripts/game_check.py`): базовая игра без обновления
-(1.00) падает при запуске, а eboot со встроенным патчем 60 fps падает в меню жестов.
+Нужен свой расшифрованный дамп с обновлением 1.09 (папка обновления копируется поверх базовой игры):
+у всех изданий из магазина (CUSA03173, CUSA00900, CUSA03023, ...) один и тот же исполняемый файл.
+`run.sh` его проверяет (`scripts/game_check.py`): базовая игра без обновления (1.00) падает при
+запуске, а eboot со встроенным патчем 60 fps падает в меню жестов.
 
-- **Модели памяти.** `BB_PC_MODEL=1/0`, без него — по видеокарте (*Авто* в лаунчере). Новая
-  модель (по умолчанию на AMD): память игры остаётся в системной RAM, видеочип читает её на месте
-  и держит часто читаемые данные в VRAM, а записи в память, DMA и fence командного процессора
-  транслируются в команды Vulkan. Старая модель, как в bbport 0.3 (по умолчанию на остальных):
-  копии в VRAM, согласованные через отслеживание записи защитой страниц. `BB_LAYER_MEMORY=1/0`
-  выбирает в новой модели между разреженной ареной и модулем памяти слоя.
-- **Частота кадров.** Патчи сообщества (`patches/Bloodborne.xml`, компилируются при запуске
-  `scripts/patches.py`): `BB_FPS=uncap` (по умолчанию, патч на реальное время кадра), `90`, `60`
-  или `30` (без патча).
-- **Апскейлинг.** В Bloodborne нет буфера скоростей, поэтому порт сам вычисляет векторы движения
-  (камера — по глубине и матрицам сцены, объекты — по вершинам прошлого кадра) и сдвигает сцену
-  джиттером. `BB_UPSCALER=taa|fsr3|fsr4|fsr411|dlss|off`:
-  - FSR 3.1 (FSR-Vulkan), без дополнительных файлов;
-  - FSR 4 (INT8, модель v07): `bash tools/fetch_fsr4_assets.sh`;
-  - FSR 4.1.1: DLL AMD один раз записывается под vkd3d-proton и воспроизводится на Vulkan,
-    побитово совпадая с DLL; файлы собираются из своей `amd_fidelityfx_upscaler_dx12.dll` 4.1.x
-    командой `bash tools/fsr4cap/build_assets.sh <dll>` (GE-Proton 10 или новее) или кнопкой
-    лаунчера *Выбрать DLL…*; на видеокартах с `VK_EXT_shader_float8` используется вариант FP8
-    (`BB_FSR411_VARIANT=int8` включает INT8);
-  - DLSS на NVIDIA RTX: сборка с `DLSS_SDK_ROOT=<checkout NVIDIA/DLSS> bash build.sh`
-    (`gpu/dlss_bridge`); SDK не входит в репозиторий.
+### Модели памяти
 
-  FSR 4 и 4.1.1 требуют, среди прочего, шейдерных Float16, Int8/Int16 и целочисленных скалярных
-  произведений; недоступный выбор откатывается на FSR 3.1. Подробнее:
-  [docs/upscaler.md](docs/upscaler.md), [docs/motion_vectors.md](docs/motion_vectors.md).
-- **Разрешение.** При выводе не в 1080p (720p, 1440p, 2160p) вся игра рендерится в размере
-  пресета через патч при запуске, поэтому их смена требует перезапуска. Смена разрешения на лету
-  (`bbport.ini` `live_resolution=0|1|auto`, `BB_LIVE_RES=1`) обходится без перезапуска, но
-  дороже.
-- **Управление.** Геймпад через SDL3 (`BB_GAMEPAD=<GUID или часть имени>` выбирает один) или
-  клавиатура, и то и другое переназначается в лаунчере; левая половина тачпада (Tab) открывает
-  жесты, правая (Backspace) — ключевые предметы.
-- **Настройки.** В меню самой игры (*System → Display / Effects*, в русской версии
+`BB_PC_MODEL=1/0`; без него — по видеокарте (*Авто* в лаунчере).
+
+- **Новая модель** (по умолчанию на AMD): память игры остаётся в системной RAM, видеочип читает её
+  на месте и держит часто читаемые данные в VRAM, а записи в память, DMA и fence командного
+  процессора транслируются в команды Vulkan. `BB_LAYER_MEMORY=1/0` выбирает между разреженной
+  ареной и модулем памяти слоя.
+- **Старая модель**, как в bbport 0.3 (по умолчанию на остальных): копии в VRAM, согласованные
+  через отслеживание записи защитой страниц.
+
+### Частота кадров
+
+Патчи сообщества (`patches/Bloodborne.xml`, компилируются при запуске `scripts/patches.py`):
+`BB_FPS=uncap` (по умолчанию, патч на реальное время кадра), `90`, `60` или `30` (без патча).
+
+### Апскейлинг
+
+В Bloodborne нет буфера скоростей, поэтому порт сам вычисляет векторы движения (камера — по глубине и
+матрицам сцены, объекты — по вершинам прошлого кадра) и сдвигает сцену джиттером. Выбор —
+`BB_UPSCALER=taa|fsr3|fsr4|fsr411|dlss|off`.
+
+| Апскейлер | Что нужно |
+|---|---|
+| FSR 3.1 | ничего (FSR-Vulkan) |
+| FSR 4 (INT8, модель v07) | `bash tools/fetch_fsr4_assets.sh` |
+| FSR 4.1.1 | файлы, собранные из своей `amd_fidelityfx_upscaler_dx12.dll` 4.1.x командой `bash tools/fsr4cap/build_assets.sh <dll>` (GE-Proton 10 или новее) или кнопкой лаунчера *Выбрать DLL…*; DLL AMD один раз записывается под vkd3d-proton и воспроизводится на Vulkan, побитово совпадая с ней; FP8 на видеокартах с `VK_EXT_shader_float8` (`BB_FSR411_VARIANT=int8` включает INT8) |
+| DLSS (NVIDIA RTX) | сборка с `DLSS_SDK_ROOT=<checkout NVIDIA/DLSS> bash build.sh` (`gpu/dlss_bridge`); SDK не входит в репозиторий |
+
+FSR 4 и 4.1.1 требуют, среди прочего, шейдерных Float16, Int8/Int16 и целочисленных скалярных
+произведений; недоступный выбор откатывается на FSR 3.1. Подробнее:
+[docs/upscaler.md](docs/upscaler.md), [docs/motion_vectors.md](docs/motion_vectors.md).
+
+### Разрешение
+
+При выводе не в 1080p (720p, 1440p, 2160p) вся игра рендерится в размере пресета через патч при
+запуске, поэтому их смена требует перезапуска. Смена разрешения на лету (`bbport.ini`
+`live_resolution=0|1|auto`, `BB_LIVE_RES=1`) обходится без перезапуска, но дороже.
+
+### Управление и настройки
+
+- Геймпад через SDL3 (`BB_GAMEPAD=<GUID или часть имени>` выбирает один) или клавиатура, и то и
+  другое переназначается в лаунчере. Левая половина тачпада (Tab) открывает жесты, правая
+  (Backspace) — ключевые предметы.
+- Настройки — в меню самой игры (*System → Display / Effects*, в русской версии
   *Изображение / Эффекты*), в оверлее (Insert или L3+R3) и в лаунчере.
-- **Моды, патчи, DLC.** Папки модов из отдельных файлов и XML-патчи в формате shadPS4, и то и
-  другое — из лаунчера ([docs/MODS.md](docs/MODS.md)); дополнения — в
-  `user/addcont/<title id>/<метка>/`.
-- **Сеть.** Необязательный `out/gpu/libbbnet.so` (`gpu/bbnet`, клиент shadNet) собирается, если
-  есть его библиотеки, и загружается только с `BB_ONLINE=1`.
 
-Остальные переменные (`BB_FRAME_STATS`, `BB_GPU_PROFILE`, `BB_ANISO`, `BB_VRAM_LIMIT_MB`, ...)
-описаны там, где их читают `run.sh` и `gpu/`. Многопоточность видеочасти:
+### Моды, патчи, DLC и сеть
+
+- Папки модов из отдельных файлов и XML-патчи в формате shadPS4, и то и другое — из лаунчера
+  ([docs/MODS.md](docs/MODS.md)); дополнения — в `user/addcont/<title id>/<метка>/`.
+- Необязательный `out/gpu/libbbnet.so` (`gpu/bbnet`, клиент shadNet) собирается, если есть его
+  библиотеки, и загружается только с `BB_ONLINE=1`.
+
+Остальные переменные (`BB_FRAME_STATS`, `BB_GPU_PROFILE`, `BB_ANISO`, `BB_VRAM_LIMIT_MB`, ...) описаны
+там, где их читают `run.sh` и `gpu/`. Многопоточность видеочасти:
 [docs/parallel_gpu.md](docs/parallel_gpu.md).
 
 ## Измерение прогресса
@@ -139,9 +153,9 @@ BB_GAME_DIR=/путь/к/дампу BB_SKIP_GAME_CHECK=1 BB_PERMISSIVE=1 bash ru
 (`BB_AUDIO=none`, `BB_PAD_HOST=0`: ни окна, ни звука, ни геймпадов пользователя), ведёт её по
 расписанию нажатий (`tools/regress/*.sched`) и сообщает, докуда она дошла (загружена, вход в код
 игры, инициализирована, первый кадр видеочипа, нарисованные кадры, звук), её сигнатуру падения и
-число импортов без реализации; с `-c <прежний results.json>` отмечает регрессии. Файл игр
-по-прежнему передаёт остальным шести `BB_SYS_MODULES=$SYS_MODULES`, поэтому без `SYS_MODULES` они
-пропускаются. Запуск и вехи: [FORK.md](FORK.md#regression-runs).
+число импортов без реализации; с `-c <прежний results.json>` отмечает регрессии. Все семь
+запускаются без дампа системных модулей; `SYS_MODULES=<папка>` при желании передаёт его играм,
+кроме Bloodborne, чтобы сравнить с собственными библиотеками порта. Запуск и вехи: [FORK.md](FORK.md#regression-runs).
 
 ## Диагностика
 
@@ -170,19 +184,43 @@ BB_GAME_DIR=/путь/к/дампу BB_SKIP_GAME_CHECK=1 BB_PERMISSIVE=1 bash ru
 
 ## Благодарности и лицензии
 
-Лицензия — **GNU GPL v2 или новее** ([LICENSE](LICENSE)).
-[bbport](https://github.com/deadinside28/bloodborne_pc) — апстрим, на котором построен этот форк.
-Сторонние компоненты сохраняют свои лицензии: видеоядро и рекомпилятор шейдеров
-[shadPS4](https://github.com/shadps4-emu/shadPS4) и перенесённые из него libSceFiber и libSceFont
-(GPL-2.0-or-later); libSceNgs2 и libSceAudiodec, перенесённые из
-[AnyPS5](https://github.com/boykopovar/AnyPS5) (GPL-2.0); [sirit](https://github.com/shadps4-emu/sirit),
-[half](https://half.sourceforge.net/), [FSR-Vulkan](https://github.com/FireBurn/FSR-Vulkan) от
-FireBurn (MIT), AMD FidelityFX SDK (MIT), [LibAtrac9](https://github.com/Thealexbarney/LibAtrac9)
-(MIT), [Dear ImGui](https://github.com/ocornut/imgui) (MIT), FreeType, шрифты DejaVu,
-[dxil-spirv](https://github.com/HansKristian-Work/dxil-spirv) (MIT, для сборки файлов FSR 4.1.1).
+psport распространяется под лицензией **GNU GPL v2 или новее** ([LICENSE](LICENSE)).
+
+### На чём построен
+
+| Проект | Что даёт | Лицензия |
+|---|---|---|
+| [bbport](https://github.com/deadinside28/bloodborne_pc) от deadinside | апстрим: нативный загрузчик, HLE-рантайм, рендерер на Vulkan, всё для Bloodborne | GPL-2.0-or-later |
+| [shadPS4](https://github.com/shadps4-emu/shadPS4) | видеоядро, рекомпилятор шейдеров, AvPlayer и другие библиотеки, которые несёт bbport; источник переноса libSceFiber и libSceFont | GPL-2.0-or-later |
+| [AnyPS5](https://github.com/boykopovar/AnyPS5) | источник переноса libSceNgs2 и libSceAudiodec | GPL-2.0 |
+
+Сам psport поддерживает Yerasuu для [decanter](#использование). Что форк меняет в унаследованном
+коде и что переносит (с коммитами источников), записано в [FORK.md](FORK.md).
+
+### Встроенный сторонний код
+
+| Компонент | Для чего | Лицензия |
+|---|---|---|
+| [sirit](https://github.com/shadps4-emu/sirit) | генерация SPIR-V | BSD-3-Clause |
+| заголовки AMD GCN (`gpu/third_party/gcn`) | декодирование инструкций GCN | MIT |
+| [half](https://half.sourceforge.net/) | числа половинной точности | MIT |
+| [FSR-Vulkan](https://github.com/FireBurn/FSR-Vulkan) от FireBurn, AMD FidelityFX SDK | FSR 3.1 | MIT |
+| [LibAtrac9](https://github.com/Thealexbarney/LibAtrac9) | декодирование звука ATRAC9 | MIT |
+| [Dear ImGui](https://github.com/ocornut/imgui) | оверлей и игровые меню | MIT |
+| [cpp-httplib](https://github.com/yhirose/cpp-httplib) | сетевой модуль | MIT |
+| мост DLSS (`gpu/dlss_bridge`) из [Windows-порта Supermedo](https://github.com/Supermedo/bloodborne_pc), адаптированного из [IFreemz/shadPS4-Bloodborne-DLSS-FSR](https://github.com/IFreemz/shadPS4-Bloodborne-DLSS-FSR) | DLSS | MIT |
+| [шрифты DejaVu](https://dejavu-fonts.github.io/) | текст оверлея, запасной шрифт для libSceFont | Bitstream Vera (изменения DejaVu — общественное достояние) |
+| [dxil-spirv](https://github.com/HansKristian-Work/dxil-spirv) | сборка файлов FSR 4.1.1 на машине пользователя | MIT |
+
+Подключаются из системы или оболочки Nix, а не встраиваются, под своими лицензиями: FFmpeg,
+FreeType, Vulkan, SDL3, Boost, fmt и остальное из `shell.nix`.
+
+### Сообщество
+
 Патчи Bloodborne — Kyo, Lance McDonald, auser1337, illusion, emoose и другие участники сообщества
-(`patches/Bloodborne.xml`). Мост DLSS (`gpu/dlss_bridge`, MIT) взят из
-[Windows-порта Supermedo](https://github.com/Supermedo/bloodborne_pc), адаптированного из
-[IFreemz/shadPS4-Bloodborne-DLSS-FSR](https://github.com/IFreemz/shadPS4-Bloodborne-DLSS-FSR).
-DLL и данные моделей FSR 4 от AMD, а также SDK и библиотеки DLSS от NVIDIA здесь не
-распространяются.
+(`patches/Bloodborne.xml`).
+
+### Не распространяется
+
+Никаких файлов игры и системных модулей консоли. DLL и данные моделей FSR 4 от AMD, а также SDK и
+библиотеки DLSS от NVIDIA тоже не включены — их предоставляет пользователь.

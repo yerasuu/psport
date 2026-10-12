@@ -80,49 +80,64 @@ upstream's and built around Bloodborne.
 
 ## Bloodborne
 
-Your decrypted dump with update 1.09 (the update's folder copied over the base game): every retail
-release (CUSA03173, CUSA00900, CUSA03023, ...) runs the same executable. `run.sh` checks it
-(`scripts/game_check.py`): the base game alone (1.00) crashes at start, and an eboot with a
+You need your own decrypted dump with update 1.09 (the update's folder copied over the base game):
+every retail release (CUSA03173, CUSA00900, CUSA03023, ...) runs the same executable. `run.sh`
+checks it (`scripts/game_check.py`): the base game alone (1.00) crashes at start, and an eboot with a
 baked-in 60 fps patch crashes in the gestures menu.
 
-- **Memory models.** `BB_PC_MODEL=1/0`, by GPU when unset (the launcher's *Auto*). The new model
-  (default on AMD): the game's memory stays in system RAM, the GPU reads it in place and keeps
-  often-read data in VRAM, and the command processor's memory writes, DMA and fences are
-  translated into Vulkan commands. The old model, as in bbport 0.3 (default elsewhere): VRAM
-  copies kept coherent by page-protection write tracking. `BB_LAYER_MEMORY=1/0` chooses between
-  the sparse arena and the layer's memory module under the new model.
-- **Frame rate.** Community patches (`patches/Bloodborne.xml`, compiled at start by
-  `scripts/patches.py`): `BB_FPS=uncap` (default, delta-time patch), `90`, `60`, or `30`
-  (unpatched).
-- **Upscaling.** Bloodborne has no velocity buffer, so the port computes motion vectors itself
-  (camera from depth and the scene matrices, objects from the previous frame's vertices) and
-  jitters the scene. `BB_UPSCALER=taa|fsr3|fsr4|fsr411|dlss|off`:
-  - FSR 3.1 (FSR-Vulkan), no assets needed;
-  - FSR 4 (INT8, model v07): `bash tools/fetch_fsr4_assets.sh`;
-  - FSR 4.1.1: AMD's DLL recorded once under vkd3d-proton and replayed on Vulkan, bit-exact with
-    the DLL; assets built from your own `amd_fidelityfx_upscaler_dx12.dll` 4.1.x with
-    `bash tools/fsr4cap/build_assets.sh <dll>` (GE-Proton 10 or newer) or the launcher's
-    *Choose DLL…*; the FP8 variant is used on GPUs with `VK_EXT_shader_float8`
-    (`BB_FSR411_VARIANT=int8` forces INT8);
-  - DLSS on NVIDIA RTX: build with `DLSS_SDK_ROOT=<NVIDIA/DLSS checkout> bash build.sh`
-    (`gpu/dlss_bridge`); the SDK is not included.
+### Memory models
 
-  FSR 4 and 4.1.1 need shader Float16, Int8/Int16 and integer dot products, among others;
-  unsupported choices fall back to FSR 3.1. Details: [docs/upscaler.md](docs/upscaler.md),
-  [docs/motion_vectors.md](docs/motion_vectors.md).
-- **Resolution.** Outputs other than 1080p (720p, 1440p, 2160p) render the whole game at the
-  preset's size through a patch at start, so changing them needs a restart. Live resolution
-  changes (`bbport.ini` `live_resolution=0|1|auto`, `BB_LIVE_RES=1`) switch without one, at a
-  higher cost.
-- **Controls.** A gamepad through SDL3 (`BB_GAMEPAD=<GUID or part of the name>` picks one) or
-  the keyboard, both remapped in the launcher; the touchpad's left half (Tab) opens the gestures,
-  the right half (Backspace) the key items.
-- **Settings.** In the game's own menu (*System → Display / Effects*), in the overlay (Insert or
+`BB_PC_MODEL=1/0`; unset, it is chosen by GPU (the launcher's *Auto*).
+
+- **New model** (default on AMD): the game's memory stays in system RAM, the GPU reads it in place
+  and keeps often-read data in VRAM, and the command processor's memory writes, DMA and fences are
+  translated into Vulkan commands. `BB_LAYER_MEMORY=1/0` chooses between the sparse arena and the
+  layer's memory module.
+- **Old model**, as in bbport 0.3 (default elsewhere): VRAM copies kept coherent by page-protection
+  write tracking.
+
+### Frame rate
+
+Community patches (`patches/Bloodborne.xml`, compiled at start by `scripts/patches.py`):
+`BB_FPS=uncap` (default, delta-time patch), `90`, `60`, or `30` (unpatched).
+
+### Upscaling
+
+Bloodborne has no velocity buffer, so the port computes motion vectors itself (camera from depth and
+the scene matrices, objects from the previous frame's vertices) and jitters the scene. Choose with
+`BB_UPSCALER=taa|fsr3|fsr4|fsr411|dlss|off`.
+
+| Upscaler | What it needs |
+|---|---|
+| FSR 3.1 | nothing (FSR-Vulkan) |
+| FSR 4 (INT8, model v07) | `bash tools/fetch_fsr4_assets.sh` |
+| FSR 4.1.1 | assets built from your own `amd_fidelityfx_upscaler_dx12.dll` 4.1.x with `bash tools/fsr4cap/build_assets.sh <dll>` (GE-Proton 10 or newer) or the launcher's *Choose DLL…*; AMD's DLL is recorded once under vkd3d-proton and replayed on Vulkan, bit-exact with it; FP8 on GPUs with `VK_EXT_shader_float8` (`BB_FSR411_VARIANT=int8` forces INT8) |
+| DLSS (NVIDIA RTX) | build with `DLSS_SDK_ROOT=<NVIDIA/DLSS checkout> bash build.sh` (`gpu/dlss_bridge`); the SDK is not included |
+
+FSR 4 and 4.1.1 need shader Float16, Int8/Int16 and integer dot products, among others; an
+unsupported choice falls back to FSR 3.1. Details: [docs/upscaler.md](docs/upscaler.md),
+[docs/motion_vectors.md](docs/motion_vectors.md).
+
+### Resolution
+
+Outputs other than 1080p (720p, 1440p, 2160p) render the whole game at the preset's size through a
+patch at start, so changing them needs a restart. Live resolution changes (`bbport.ini`
+`live_resolution=0|1|auto`, `BB_LIVE_RES=1`) switch without one, at a higher cost.
+
+### Controls and settings
+
+- A gamepad through SDL3 (`BB_GAMEPAD=<GUID or part of the name>` picks one) or the keyboard, both
+  remapped in the launcher. The touchpad's left half (Tab) opens the gestures, the right half
+  (Backspace) the key items.
+- Settings live in the game's own menu (*System → Display / Effects*), in the overlay (Insert or
   L3+R3) and in the launcher.
-- **Mods, patches, DLC.** Loose-file mod folders and shadPS4-format XML patches, both from the
-  launcher ([docs/MODS.md](docs/MODS.md)); add-ons under `user/addcont/<title id>/<label>/`.
-- **Online.** The optional `out/gpu/libbbnet.so` (`gpu/bbnet`, a shadNet client) is built when its
-  libraries are present and loaded only with `BB_ONLINE=1`.
+
+### Mods, patches, DLC and online
+
+- Loose-file mod folders and shadPS4-format XML patches, both from the launcher
+  ([docs/MODS.md](docs/MODS.md)); add-ons under `user/addcont/<title id>/<label>/`.
+- The optional `out/gpu/libbbnet.so` (`gpu/bbnet`, a shadNet client) is built when its libraries are
+  present and loaded only with `BB_ONLINE=1`.
 
 Other variables (`BB_FRAME_STATS`, `BB_GPU_PROFILE`, `BB_ANISO`, `BB_VRAM_LIMIT_MB`, ...) are
 described where `run.sh` and `gpu/` read them. The GPU's threading:
@@ -134,9 +149,9 @@ described where `run.sh` and `gpu/` read them. The GPU's threading:
 (`BB_AUDIO=none`, `BB_PAD_HOST=0`: no window, no sound, none of the user's controllers), drives
 each with a pad schedule (`tools/regress/*.sched`) and reports how far it got (loaded, entered,
 initialized, first GPU frame, drawn frames, audio), its crash signature and its count of imports
-without implementation; with `-c <earlier results.json>` it flags regressions. The titles file
-still passes `BB_SYS_MODULES=$SYS_MODULES` to the six other titles, so they are skipped unless
-`SYS_MODULES` is set. Usage and milestones: [FORK.md](FORK.md#regression-runs).
+without implementation; with `-c <earlier results.json>` it flags regressions. All seven run
+without a dump of system modules; `SYS_MODULES=<folder>` optionally passes one to the titles other
+than Bloodborne, to compare with the port's own libraries. Usage and milestones: [FORK.md](FORK.md#regression-runs).
 
 ## Diagnostics
 
@@ -165,18 +180,43 @@ hardware tests, when needed, are OpenOrbis homebrew); match the surrounding code
 
 ## Credits and licenses
 
-Licensed under the **GNU GPL v2 or later** ([LICENSE](LICENSE)).
-[bbport](https://github.com/deadinside28/bloodborne_pc) is the upstream this fork builds on.
-Third-party components keep their licenses: [shadPS4](https://github.com/shadps4-emu/shadPS4)'s
-video core and shader recompiler and the libSceFiber and libSceFont ports (GPL-2.0-or-later);
-libSceNgs2 and libSceAudiodec ported from [AnyPS5](https://github.com/boykopovar/AnyPS5)
-(GPL-2.0); [sirit](https://github.com/shadps4-emu/sirit), [half](https://half.sourceforge.net/),
-[FSR-Vulkan](https://github.com/FireBurn/FSR-Vulkan) by FireBurn (MIT), AMD FidelityFX SDK (MIT),
-[LibAtrac9](https://github.com/Thealexbarney/LibAtrac9) (MIT),
-[Dear ImGui](https://github.com/ocornut/imgui) (MIT), FreeType, DejaVu fonts,
-[dxil-spirv](https://github.com/HansKristian-Work/dxil-spirv) (MIT, used to build the FSR 4.1.1
-assets). Bloodborne patches by Kyo, Lance McDonald, auser1337, illusion, emoose and other community
-members (`patches/Bloodborne.xml`). The DLSS bridge (`gpu/dlss_bridge`, MIT) comes from
-[Supermedo's Windows port](https://github.com/Supermedo/bloodborne_pc), adapted from
-[IFreemz/shadPS4-Bloodborne-DLSS-FSR](https://github.com/IFreemz/shadPS4-Bloodborne-DLSS-FSR).
-AMD's FSR 4 DLLs and model data and NVIDIA's DLSS SDK and libraries are not distributed here.
+psport is licensed under the **GNU GPL v2 or later** ([LICENSE](LICENSE)).
+
+### Projects it builds on
+
+| Project | What it provides | License |
+|---|---|---|
+| [bbport](https://github.com/deadinside28/bloodborne_pc) by deadinside | the upstream: native loader, HLE runtime, Vulkan renderer, everything for Bloodborne | GPL-2.0-or-later |
+| [shadPS4](https://github.com/shadps4-emu/shadPS4) | video core, shader recompiler, AvPlayer and other libraries carried by bbport; source of the libSceFiber and libSceFont ports | GPL-2.0-or-later |
+| [AnyPS5](https://github.com/boykopovar/AnyPS5) | source of the libSceNgs2 and libSceAudiodec ports | GPL-2.0 |
+
+psport itself is maintained by Yerasuu for [decanter](#using-it). What the fork changes in inherited
+code and what it ports (with source commits) is recorded in [FORK.md](FORK.md).
+
+### Bundled third-party code
+
+| Component | Used for | License |
+|---|---|---|
+| [sirit](https://github.com/shadps4-emu/sirit) | SPIR-V emission | BSD-3-Clause |
+| AMD GCN headers (`gpu/third_party/gcn`) | GCN instruction decoding | MIT |
+| [half](https://half.sourceforge.net/) | half-precision floats | MIT |
+| [FSR-Vulkan](https://github.com/FireBurn/FSR-Vulkan) by FireBurn, AMD FidelityFX SDK | FSR 3.1 | MIT |
+| [LibAtrac9](https://github.com/Thealexbarney/LibAtrac9) | ATRAC9 audio decoding | MIT |
+| [Dear ImGui](https://github.com/ocornut/imgui) | overlay and in-game menus | MIT |
+| [cpp-httplib](https://github.com/yhirose/cpp-httplib) | online module | MIT |
+| DLSS bridge (`gpu/dlss_bridge`) from [Supermedo's Windows port](https://github.com/Supermedo/bloodborne_pc), adapted from [IFreemz/shadPS4-Bloodborne-DLSS-FSR](https://github.com/IFreemz/shadPS4-Bloodborne-DLSS-FSR) | DLSS | MIT |
+| [DejaVu fonts](https://dejavu-fonts.github.io/) | overlay text, fallback for libSceFont | Bitstream Vera (DejaVu changes public domain) |
+| [dxil-spirv](https://github.com/HansKristian-Work/dxil-spirv) | building the FSR 4.1.1 assets on the user's machine | MIT |
+
+Linked from the system or the Nix shell, not bundled, under their own licenses: FFmpeg, FreeType,
+Vulkan, SDL3, Boost, fmt and the rest listed in `shell.nix`.
+
+### Community
+
+Bloodborne patches by Kyo, Lance McDonald, auser1337, illusion, emoose and other community members
+(`patches/Bloodborne.xml`).
+
+### Not distributed
+
+No game files and no console system modules. AMD's FSR 4 DLLs and model data and NVIDIA's DLSS SDK
+and libraries are not included either; the user provides them.
