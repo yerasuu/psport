@@ -153,6 +153,13 @@ uintptr_t runtime_ajm_resolve(const char *name);
 void runtime_ajm_report(void);
 uintptr_t runtime_audio_resolve(const char *name);
 void runtime_audio_report(void);
+/* libSceAudioOut's own calls, for the libraries that output through its ports (libSceAudio3d). */
+int32_t runtime_audio_init(void);
+int32_t runtime_audio_open(int32_t user, int32_t type, int32_t index, uint32_t length, uint32_t freq, uint32_t param);
+int32_t runtime_audio_output(int32_t handle, const void *data);
+int32_t runtime_audio_close(int32_t handle);
+uintptr_t runtime_audio3d_resolve(const char *name);
+void runtime_audio3d_report(void);
 uintptr_t runtime_pad_resolve(const char *name);
 void runtime_pad_report(void);
 uintptr_t runtime_rtc_resolve(const char *name);

@@ -96,6 +96,7 @@ void runtime_report(void) {
     runtime_memory_report();
     runtime_ajm_report();
     runtime_audio_report();
+    runtime_audio3d_report();
     runtime_pad_report();
     runtime_savedata_report();
     runtime_file_report();
@@ -270,6 +271,8 @@ static uintptr_t resolve_scoped(const char *name, int is_data) {
     if (ajm) return ajm;
     uintptr_t audio = runtime_audio_resolve(name);
     if (audio) return audio;
+    uintptr_t audio3d = runtime_audio3d_resolve(name);
+    if (audio3d) return audio3d;
     uintptr_t pad = runtime_pad_resolve(name);
     if (pad) return pad;
     uintptr_t rtc = runtime_rtc_resolve(name);
