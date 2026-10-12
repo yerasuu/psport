@@ -247,8 +247,7 @@ static bool ImageTraps() {
 // bbport: as ImageTraps for the pages the buffer cache watches (VRAM copies in its arena): a write
 // nobody announced reaches the copy instead of the GPU reading the older data uploaded there.
 static bool BufferTraps() {
-    static const bool on = VideoCore::GuestInPlace() && !VideoCore::WriteTracking() &&
-                           !VideoCore::WriteVerify() && !BbGuestMemory::LayerMemory();
+    static const bool on = ImageTraps() && !BbGuestMemory::LayerMemory();
     return on;
 }
 
