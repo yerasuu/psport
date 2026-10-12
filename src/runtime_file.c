@@ -45,6 +45,9 @@ static Mount mounts[MAX_MOUNTS];
 static size_t mount_count, opens, reads, writes, missing;
 static uint64_t bytes_read;
 static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
+#define MAX_UNMOUNTED 32
+static struct { char root[64]; size_t count; } unmounted[MAX_UNMOUNTED];
+static size_t unmounted_count;
 
 static int save_path(const char *p) { return p && !strncmp(p,"/savedata",9); }
 static int temp_name(const char *name) {
@@ -122,11 +125,21 @@ static int translate(const char *guest,char *out,size_t size) {
         size_t n=strlen(mounts[i].guest);
         if (!strncmp(buffer,mounts[i].guest,n) && (buffer[n]=='/' || !buffer[n]) && n>best) { best=n; m=&mounts[i]; }
     }
-    int result=0;
-    if (!m) result=ENOENT;
+    int result=0, first=1, counted=0;
+    size_t root=1+strcspn(buffer+1,"/");
+    if (root>=sizeof(unmounted[0].root)) root=sizeof(unmounted[0].root)-1;
+    if (!m) {
+        result=ENOENT;
+        size_t i=0;
+        while (i<unmounted_count && (strlen(unmounted[i].root)!=root || strncmp(unmounted[i].root,buffer,root))) ++i;
+        if (i==unmounted_count && i<MAX_UNMOUNTED) { memcpy(unmounted[i].root,buffer,root); __atomic_store_n(&unmounted_count,i+1,__ATOMIC_RELEASE); }
+        if (i<unmounted_count) { first=!__atomic_fetch_add(&unmounted[i].count,1,__ATOMIC_RELAXED); counted=1; }
+    }
     else if ((size_t)snprintf(out,size,"%s%s",m->host,buffer+best)>=size) result=ENAMETOOLONG;
     pthread_mutex_unlock(&lock);
-    if (result==ENOENT) fprintf(stderr,"Runtime: no mount for guest path %s\n",guest);
+    if (!m && first && counted)
+        fprintf(stderr,"Runtime: no mount for guest path %s (further misses under %.*s are counted for the exit report)\n",guest,(int)root,buffer);
+    else if (!m && first) fprintf(stderr,"Runtime: no mount for guest path %s\n",guest);
     /* BB_FILE_TRACE=1: every guest path the game opens, stats or checks (mods, missing files). */
     static int trace=-1;
     if (trace<0) { const char *t=getenv("BB_FILE_TRACE"); trace=t && t[0]=='1'; }
@@ -660,8 +673,18 @@ void runtime_file_report(void) {
     printf("Runtime: files opened=%zu, reads=%zu (%llu bytes), writes=%zu, not found=%zu\n",
            opens,reads,(unsigned long long)bytes_read,writes,missing);
 }
+/* Part of the call report, which runs from the shutdown and fault handlers: no stdio, no lock. */
+void runtime_file_unmounted_report(void) {
+    char line[160];
+    for (size_t i=0,n=__atomic_load_n(&unmounted_count,__ATOMIC_ACQUIRE);i<n;++i) {
+        int used=snprintf(line,sizeof(line),"Runtime: no mount for %zu guest paths under %s\n",
+                          __atomic_load_n(&unmounted[i].count,__ATOMIC_RELAXED),unmounted[i].root);
+        if (used>0 && write(1,line,(size_t)used)<0) return;
+    }
+}
 #else
 uintptr_t runtime_file_resolve(const char *name) { (void)name; return 0; }
 void runtime_file_report(void) {}
+void runtime_file_unmounted_report(void) {}
 void runtime_file_configure(const char *a,const char *u) { (void)a; (void)u; }
 #endif

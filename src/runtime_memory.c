@@ -129,9 +129,10 @@ static GpuRange hook_note_write; /* bbport: data written into GPU memory (runtim
 enum { HOOK_MAP, HOOK_UNMAP, HOOK_INVALIDATE };
 typedef struct { int kind; uintptr_t address; uint64_t size; } PendingHook;
 static PendingHook pending[64]; static size_t pending_count;
-static size_t allocations, maps, flexible_maps, protects, queries;
+static size_t allocations, maps, reservations, flexible_maps, protects, queries;
 static uint64_t live_bytes, flexible_bytes;
 
+static int trace_memory(void) { static int v=-1; if (v<0) v=getenv("BB_TRACE_MEM")!=NULL; return v; }
 static int valid_alignment(uint64_t a) { return a >= PAGE && a <= POOL_SIZE && !(a & (a-1)); }
 static uint64_t align_up(uint64_t n, uint64_t a) { return (n+a-1) & ~(a-1); }
 static int host_prot(int prot) {
@@ -417,7 +418,7 @@ static ABI int32_t direct_allocate(int64_t low, int64_t high, uint64_t size,
     ensure_chunks(start,size);
     ++allocations; live_bytes += size;
     write_unlock();
-    printf("Runtime: direct allocation offset=0x%" PRIx64 ", size=%" PRIu64 " bytes, type=%d\n", start, size, type);
+    if (trace_memory()) printf("Runtime: direct allocation offset=0x%" PRIx64 ", size=%" PRIu64 " bytes, type=%d\n", start, size, type);
     return 0;
 }
 /* The main pool is the whole direct memory the port offers: newer SDKs allocate from it without a
@@ -439,8 +440,8 @@ static ABI int32_t direct_map(void **out, uint64_t size, int prot, int flags, in
     int32_t result=map_direct_locked(out,size,prot,flags,physical,alignment);
     write_unlock();
     flush_hooks();
-    if (!result) printf("Runtime: mapped direct memory %p, size=%" PRIu64 ", prot=0x%x\n", *out, size, prot);
-    else printf("Runtime: mapping direct memory %#" PRIx64 ", size=%" PRIu64 " failed (error %#x)\n", (uint64_t)physical, size, (unsigned)result);
+    if (result) printf("Runtime: mapping direct memory %#" PRIx64 ", size=%" PRIu64 " failed (error %#x)\n", (uint64_t)physical, size, (unsigned)result);
+    else if (trace_memory()) printf("Runtime: mapped direct memory %p, size=%" PRIu64 ", prot=0x%x\n", *out, size, prot);
     return result;
 }
 static ABI int32_t direct_map_named(void **out, uint64_t size, int prot, int flags, int64_t physical,
@@ -576,13 +577,15 @@ static ABI void *posix_mmap(void *addr, uint64_t size, int prot, int flags, int 
 static ABI int32_t reserve_range(void **inout, uint64_t size, int flags, uint64_t alignment) {
     if (!alignment) alignment=PAGE;
     if (!inout || !size || size%PAGE || !valid_alignment(alignment)) return INVALID;
+    /* MAP_FIXED replaces what is mapped there (games decommit by reserving over their mappings),
+     * so the GPU forgets the range first, as for an unmap. */
+    if ((flags & (MAP_FIXED_FLAG|MAP_NO_OVERWRITE))==MAP_FIXED_FLAG && hook_unmap && *inout && !((uintptr_t)*inout%PAGE))
+        hook_unmap((uintptr_t)*inout,size);
     write_lock();
-    if ((flags & MAP_FIXED_FLAG) && overlaps((uintptr_t)*inout,(uintptr_t)*inout+size,0)) {
-        write_unlock(); return NO_MEMORY;
-    }
     int32_t result=place(inout,size,0,flags,alignment,KIND_RESERVED,0,0);
+    if (!result) ++reservations;
     write_unlock();
-    if (!result) printf("Runtime: reserved virtual range %p, size=%" PRIu64 "\n", *inout, size);
+    if (!result && trace_memory()) printf("Runtime: reserved virtual range %p, size=%" PRIu64 "\n", *inout, size);
     return result;
 }
 static int32_t protect_locked(uintptr_t start, uint64_t size, int prot, int type) {
@@ -1111,6 +1114,7 @@ int runtime_memory_is_mapped(uintptr_t address, uint64_t size) {
 void runtime_memory_report(void) {
     printf("Runtime: direct memory allocations=%zu, maps=%zu, live=%" PRIu64 ", budget=%" PRIu64 "\n",
            allocations, maps, live_bytes, POOL_SIZE);
+    printf("Runtime: virtual ranges reserved=%zu\n", reservations);
     printf("Runtime: flexible maps=%zu, in use=%" PRIu64 ", protects=%zu, queries=%zu, regions=%zu\n",
            flexible_maps, flexible_bytes, protects, queries, vma_count);
 }

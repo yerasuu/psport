@@ -98,6 +98,9 @@ English, 3 Spanish, 8 Russian).
 | `BB_AUDIO_STATS=1` | per audio port, every 5 s: cadence, peak and RMS in dBFS (sound or silence) |
 | `BB_NGS2_TRACE=1` | first calls of each Ngs2 function and the level of each render |
 | `BB_FIBER_TRACE=1` | first calls of each Fiber function with their arguments |
+| (always) | the first guest path without a mount under each root (`/archive`, `/etc`, ...), and after the call report how many there were per root |
+| `BB_TRACE_SEMA=1` | each semaphore created and each blocking wait on one |
+| `BB_TRACE_MEM=1` | each direct memory allocation, direct mapping and virtual range reservation; a failed direct mapping is logged without it |
 
 ### Call report
 
