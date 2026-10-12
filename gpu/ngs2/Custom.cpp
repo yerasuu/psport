@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstdio>
 #include <cstddef>
 #include <cstdint>
@@ -15,7 +16,7 @@ static constexpr std::uint32_t USER_FX2_FLAG_FIRST_PROCESS = 1;
 static constexpr std::uint32_t USER_FX2_FLAG_PARAM_CHANGED = 2;
 static constexpr float MAX_GAIN_LEVEL = 32.0f;
 
-// The built-in modules other than UserFx and gain (envelope, compressor, reverb, peak meter and the
+// The built-in modules other than UserFx, filter and gain (envelope, compressor, reverb, peak meter and the
 // rest) are not implemented: one passes its input through unchanged and ignores its parameters, so a
 // rack that uses them still sounds, without that effect. In the rack it is a UserFx2 slot with no process handler.
 static bool IsUserFx2(const Ngs2CustomRackModuleInfo& info) {
@@ -27,7 +28,7 @@ static bool IsUserFx(const Ngs2CustomRackModuleInfo& info) {
 }
 
 static bool IsBuiltIn(std::uint32_t moduleId) {
-    return moduleId == SCE_NGS2_CUSTOM_MODULE_ID_GAIN;
+    return moduleId == SCE_NGS2_CUSTOM_MODULE_ID_FILTER || moduleId == SCE_NGS2_CUSTOM_MODULE_ID_GAIN;
 }
 
 static void NoteMissingModule(std::uint32_t module_id) {
@@ -140,6 +141,13 @@ void Ngs2ApplyCustomParam(Ngs2Voice& voice, const Ngs2VoiceParamHeader& param) {
         module.flags = USER_FX2_FLAG_FIRST_PROCESS;
         return;
     }
+    if ((param.id & ~0x1fu) == SCE_NGS2_CUSTOM_VOICE_PARAM_FILTER && (param.id & 0x1f) < voice.userFx.size() &&
+        voice.rack->moduleIds[param.id & 0x1f] == SCE_NGS2_CUSTOM_MODULE_ID_FILTER) {
+        auto& fx = voice.userFx[param.id & 0x1f];
+        fx.filterParam = ParamAs<Ngs2CustomFilterParam>(param);
+        fx.flags |= USER_FX2_FLAG_PARAM_CHANGED;
+        return;
+    }
     if ((param.id & ~0x1fu) == SCE_NGS2_CUSTOM_VOICE_PARAM_GAIN && (param.id & 0x1f) < voice.userFx.size() &&
         voice.rack->moduleIds[param.id & 0x1f] == SCE_NGS2_CUSTOM_MODULE_ID_GAIN) {
         const auto& gain = ParamAs<Ngs2CustomGainParam>(param);
@@ -158,6 +166,109 @@ void Ngs2ApplyCustomParam(Ngs2Voice& voice, const Ngs2VoiceParamHeader& param) {
     throw std::runtime_error("NGS2: voice param " + Ngs2Hex(param.id) + " is not implemented");
 }
 
+static void SetFilterCoefficients(Ngs2Filter& filter, const Ngs2CustomFilterParam& param, std::uint32_t sampleRate) {
+    const auto type = param.type & 0xff;
+    if (type == SCE_NGS2_FILTER_TYPE_COEFFICIENTS) {
+        filter.b0 = param.values[0];
+        filter.b1 = param.values[1];
+        filter.b2 = param.values[2];
+        filter.a1 = -param.values[3];
+        filter.a2 = -param.values[4];
+        return;
+    }
+    if (type < SCE_NGS2_FILTER_TYPE_LOW_PASS || type > SCE_NGS2_FILTER_TYPE_FIRST_ORDER_HIGH_PASS) {
+        filter.b0 = 1.0;
+        filter.b1 = filter.b2 = filter.a1 = filter.a2 = 0.0;
+        return;
+    }
+    const float ratio = param.values[0] / static_cast<float>(sampleRate);
+    const float omega = ratio < 0.001f ? 0.0062831859f : std::min(0.499f, ratio) * 6.2831855f;
+    const float q = param.values[1] < 1e-4f ? 1e-4f : std::min(32.0f, param.values[1]);
+    const float sine = std::sin(omega);
+    const float cosine = std::cos(omega);
+    const float alpha = sine / (q + q);
+    const float amplitude = std::sqrt(std::max(param.values[2], 1e-4f));
+    const float shelf = std::sqrt(amplitude) / q * sine;
+    float b0, b1, b2, a0, a1, a2;
+    switch (type) {
+        case SCE_NGS2_FILTER_TYPE_LOW_PASS:
+            b1 = 1.0f - cosine;
+            b0 = b2 = b1 * 0.5f;
+            a0 = 1.0f + alpha, a1 = -2.0f * cosine, a2 = 1.0f - alpha;
+            break;
+        case SCE_NGS2_FILTER_TYPE_HIGH_PASS:
+            b1 = -(1.0f + cosine);
+            b0 = b2 = (1.0f + cosine) * 0.5f;
+            a0 = 1.0f + alpha, a1 = -2.0f * cosine, a2 = 1.0f - alpha;
+            break;
+        case SCE_NGS2_FILTER_TYPE_BAND_PASS:
+            b0 = sine * 0.5f, b1 = 0.0f, b2 = -b0;
+            a0 = 1.0f + alpha, a1 = -2.0f * cosine, a2 = 1.0f - alpha;
+            break;
+        case SCE_NGS2_FILTER_TYPE_BAND_PASS_PEAK:
+            b0 = alpha, b1 = 0.0f, b2 = -alpha;
+            a0 = 1.0f + alpha, a1 = -2.0f * cosine, a2 = 1.0f - alpha;
+            break;
+        case SCE_NGS2_FILTER_TYPE_NOTCH:
+            b0 = 1.0f, b1 = -2.0f * cosine, b2 = 1.0f;
+            a0 = 1.0f + alpha, a1 = b1, a2 = 1.0f - alpha;
+            break;
+        case SCE_NGS2_FILTER_TYPE_HIGH_SHELF:
+            b0 = amplitude * ((amplitude + 1.0f) + (amplitude - 1.0f) * cosine + shelf);
+            b1 = -2.0f * amplitude * ((amplitude - 1.0f) + (amplitude + 1.0f) * cosine);
+            b2 = amplitude * ((amplitude + 1.0f) + (amplitude - 1.0f) * cosine - shelf);
+            a0 = (amplitude + 1.0f) - (amplitude - 1.0f) * cosine + shelf;
+            a1 = 2.0f * ((amplitude - 1.0f) - (amplitude + 1.0f) * cosine);
+            a2 = (amplitude + 1.0f) - (amplitude - 1.0f) * cosine - shelf;
+            break;
+        case SCE_NGS2_FILTER_TYPE_LOW_SHELF:
+            b0 = amplitude * ((amplitude + 1.0f) - (amplitude - 1.0f) * cosine + shelf);
+            b1 = 2.0f * amplitude * ((amplitude - 1.0f) - (amplitude + 1.0f) * cosine);
+            b2 = amplitude * ((amplitude + 1.0f) - (amplitude - 1.0f) * cosine - shelf);
+            a0 = (amplitude + 1.0f) + (amplitude - 1.0f) * cosine + shelf;
+            a1 = -2.0f * ((amplitude - 1.0f) + (amplitude + 1.0f) * cosine);
+            a2 = (amplitude + 1.0f) + (amplitude - 1.0f) * cosine - shelf;
+            break;
+        case SCE_NGS2_FILTER_TYPE_PEAKING:
+            b0 = 1.0f + alpha * amplitude, b1 = -2.0f * cosine, b2 = 1.0f - alpha * amplitude;
+            a0 = 1.0f + alpha / amplitude, a1 = b1, a2 = 1.0f - alpha / amplitude;
+            break;
+        case SCE_NGS2_FILTER_TYPE_FIRST_ORDER_LOW_PASS:
+            b0 = b1 = sine, b2 = 0.0f;
+            a0 = sine + cosine + 1.0f, a1 = sine - cosine - 1.0f, a2 = 0.0f;
+            break;
+        default:
+            b0 = 1.0f + cosine, b1 = -b0, b2 = 0.0f;
+            a0 = sine + b0, a1 = sine - b0, a2 = 0.0f;
+            break;
+    }
+    const float inverse = 1.0f / a0;
+    filter.b0 = b0 * inverse;
+    filter.b1 = b1 * inverse;
+    filter.b2 = b2 * inverse;
+    filter.a1 = a1 * inverse;
+    filter.a2 = a2 * inverse;
+}
+
+static void ProcessFilter(Ngs2Voice& voice, Ngs2UserFx2& fx, std::uint32_t grain, std::uint32_t sampleRate) {
+    auto& filter = fx.filter;
+    filter.enabled = true;
+    filter.bypassMask = fx.filterParam.channel_mask & 0xff;
+    filter.history.resize(voice.channels);
+    if ((fx.flags & USER_FX2_FLAG_FIRST_PROCESS) != 0) std::fill(filter.history.begin(), filter.history.end(), Ngs2FilterHistory{});
+    if ((fx.flags & USER_FX2_FLAG_PARAM_CHANGED) != 0 || fx.filterRate != sampleRate) {
+        SetFilterCoefficients(filter, fx.filterParam, sampleRate);
+        fx.filterRate = sampleRate;
+    }
+    fx.flags = 0;
+    if (!voice.hasSamples && !Ngs2FilterHasHistory(filter)) return;
+    Ngs2ApplyFilter(voice, filter, grain);
+    for (std::uint32_t c = 0; c < voice.channels; c++) {
+        if ((filter.bypassMask >> c & 1) != 0) filter.history[c] = {};
+    }
+    voice.hasSamples = true;
+}
+
 static void ProcessGain(Ngs2UserFx2& fx, float* const* channels, std::uint32_t numChannels, std::uint32_t grain, bool hasSamples) {
     for (std::uint32_t c = 0; c < numChannels; c++) {
         const float from = (fx.flags & USER_FX2_FLAG_FIRST_PROCESS) != 0 ? fx.levels[c] : fx.appliedLevels[c];
@@ -173,6 +284,10 @@ void Ngs2ProcessUserFx(Ngs2Voice& voice, std::uint32_t grain, std::uint32_t samp
     for (std::uint32_t c = 0; c < voice.channels; c++) channels[c] = voice.samples.data() + static_cast<std::size_t>(c) * grain;
     for (std::size_t m = 0; m < voice.userFx.size(); m++) {
         auto& fx = voice.userFx[m];
+        if (voice.rack->moduleIds[m] == SCE_NGS2_CUSTOM_MODULE_ID_FILTER) {
+            ProcessFilter(voice, fx, grain, sampleRate);
+            continue;
+        }
         if (voice.rack->moduleIds[m] == SCE_NGS2_CUSTOM_MODULE_ID_GAIN) {
             ProcessGain(fx, channels.data(), voice.channels, grain, voice.hasSamples);
             continue;

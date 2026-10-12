@@ -134,7 +134,7 @@ static bool Bypasses(const Ngs2Filter& filter, std::uint32_t channel) {
     return channel < 64 && (filter.bypassMask & (std::uint64_t{1} << channel)) != 0;
 }
 
-static bool HasHistory(const Ngs2Filter& filter) {
+bool Ngs2FilterHasHistory(const Ngs2Filter& filter) {
     if (!filter.enabled) return false;
     for (std::uint32_t channel = 0; channel < filter.history.size(); channel++) {
         const auto& h = filter.history[channel];
@@ -143,7 +143,7 @@ static bool HasHistory(const Ngs2Filter& filter) {
     return false;
 }
 
-static void ApplyFilter(Ngs2Voice& voice, Ngs2Filter& filter, std::uint32_t grain) {
+void Ngs2ApplyFilter(Ngs2Voice& voice, Ngs2Filter& filter, std::uint32_t grain) {
     for (std::uint32_t channel = 0; channel < voice.channels; channel++) {
         if (Bypasses(filter, channel)) continue;
         auto& h = filter.history[channel];
@@ -162,12 +162,12 @@ static void RenderSampler(Ngs2Voice& voice, std::uint32_t grain, std::uint32_t s
     if (voice.waveformType == SCE_NGS2_WAVEFORM_TYPE_ATRAC9) Ngs2ConsumeAtrac9(voice, grain, systemRate);
     else ConsumeSamples(voice, grain, systemRate);
     for (auto& filter : voice.filters) {
-        if (!filter.enabled || (!voice.hasSamples && !HasHistory(filter))) continue;
-        ApplyFilter(voice, filter, grain);
+        if (!filter.enabled || (!voice.hasSamples && !Ngs2FilterHasHistory(filter))) continue;
+        Ngs2ApplyFilter(voice, filter, grain);
         voice.hasSamples = true;
     }
     const bool buffered = voice.waveformType == SCE_NGS2_WAVEFORM_TYPE_ATRAC9 && voice.atrac9.windowCursor * voice.channels < voice.atrac9.window.size();
-    if (voice.state == Ngs2PlayState::Playing && voice.blocks.empty() && !buffered && !voice.acceptsBlocks && std::none_of(voice.filters.begin(), voice.filters.end(), HasHistory)) {
+    if (voice.state == Ngs2PlayState::Playing && voice.blocks.empty() && !buffered && !voice.acceptsBlocks && std::none_of(voice.filters.begin(), voice.filters.end(), Ngs2FilterHasHistory)) {
         voice.state = Ngs2PlayState::Empty;
     }
 }

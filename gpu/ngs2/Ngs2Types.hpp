@@ -71,15 +71,29 @@ static constexpr std::uint32_t SCE_NGS2_MASTERING_VOICE_PARAM_SETUP = 0x30000000
 static constexpr std::uint32_t SCE_NGS2_MASTERING_VOICE_PARAM_GAIN = 0x30000004;
 static constexpr std::uint32_t SCE_NGS2_MASTERING_VOICE_PARAM_OUTPUT = 0x30000005;
 static constexpr std::uint32_t SCE_NGS2_CUSTOM_SUBMIXER_VOICE_PARAM_SETUP = 0x40020000;
+static constexpr std::uint32_t SCE_NGS2_CUSTOM_VOICE_PARAM_FILTER = 0x40001300;
 static constexpr std::uint32_t SCE_NGS2_CUSTOM_VOICE_PARAM_GAIN = 0x40001500;
 static constexpr std::uint32_t SCE_NGS2_CUSTOM_VOICE_PARAM_USER_FX = 0x40001900;
 static constexpr std::uint32_t SCE_NGS2_CUSTOM_VOICE_PARAM_USER_FX2 = 0x40001f00;
 
 static constexpr std::uint32_t SCE_NGS2_CUSTOM_MAX_MODULES = 24;
 static constexpr std::uint32_t SCE_NGS2_CUSTOM_MAX_PORTS = 16;
+static constexpr std::uint32_t SCE_NGS2_CUSTOM_MODULE_ID_FILTER = 0x13;
 static constexpr std::uint32_t SCE_NGS2_CUSTOM_MODULE_ID_GAIN = 0x15;
 static constexpr std::uint32_t SCE_NGS2_CUSTOM_MODULE_ID_USER_FX = 0x19;
 static constexpr std::uint32_t SCE_NGS2_CUSTOM_MODULE_ID_USER_FX2 = 0x1f;
+
+static constexpr std::uint32_t SCE_NGS2_FILTER_TYPE_LOW_PASS = 1;
+static constexpr std::uint32_t SCE_NGS2_FILTER_TYPE_HIGH_PASS = 2;
+static constexpr std::uint32_t SCE_NGS2_FILTER_TYPE_BAND_PASS = 3;
+static constexpr std::uint32_t SCE_NGS2_FILTER_TYPE_BAND_PASS_PEAK = 4;
+static constexpr std::uint32_t SCE_NGS2_FILTER_TYPE_NOTCH = 5;
+static constexpr std::uint32_t SCE_NGS2_FILTER_TYPE_HIGH_SHELF = 6;
+static constexpr std::uint32_t SCE_NGS2_FILTER_TYPE_LOW_SHELF = 7;
+static constexpr std::uint32_t SCE_NGS2_FILTER_TYPE_PEAKING = 8;
+static constexpr std::uint32_t SCE_NGS2_FILTER_TYPE_FIRST_ORDER_LOW_PASS = 9;
+static constexpr std::uint32_t SCE_NGS2_FILTER_TYPE_FIRST_ORDER_HIGH_PASS = 10;
+static constexpr std::uint32_t SCE_NGS2_FILTER_TYPE_COEFFICIENTS = 0x20;
 
 static constexpr std::uint32_t SCE_NGS2_WAVEFORM_BLOCKS_FLAG_CONTINUE = 1;
 static constexpr std::uint32_t SCE_NGS2_WAVEFORM_BLOCKS_FLAG_APPEND = 2;
@@ -495,6 +509,16 @@ struct Ngs2CustomSubmixerVoiceSetupParam {
     std::uint32_t reserved;
 };
 static_assert(sizeof(Ngs2CustomSubmixerVoiceSetupParam) == 24);
+
+// values: frequency, q and gain, or for SCE_NGS2_FILTER_TYPE_COEFFICIENTS b0, b1, b2, -a1 and -a2.
+struct Ngs2CustomFilterParam {
+    Ngs2VoiceParamHeader header;
+    std::uint32_t type;
+    std::uint32_t channel_mask;
+    float values[5];
+    std::uint32_t reserved;
+};
+static_assert(sizeof(Ngs2CustomFilterParam) == 40);
 
 struct Ngs2CustomGainParam {
     Ngs2VoiceParamHeader header;

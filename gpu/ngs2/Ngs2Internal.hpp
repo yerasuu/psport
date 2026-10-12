@@ -115,6 +115,9 @@ struct Ngs2UserFx2 {
     std::array<std::uintptr_t, 3> userData{};
     std::array<float, NGS2_MAX_CHANNELS> levels{};
     std::array<float, NGS2_MAX_CHANNELS> appliedLevels{};
+    Ngs2CustomFilterParam filterParam{};
+    std::uint32_t filterRate = 0;
+    Ngs2Filter filter;
 };
 
 struct Ngs2Voice {
@@ -220,6 +223,8 @@ void Ngs2SetReverbParams(Ngs2Voice& voice, const Ngs2ReverbI3DL2Param& params);
 void Ngs2SetupReverb(Ngs2Voice& voice);
 void Ngs2ClearReverb(Ngs2Voice& voice);
 bool Ngs2ProcessReverb(Ngs2Voice& voice, std::uint32_t grain, std::uint32_t sampleRate);
+bool Ngs2FilterHasHistory(const Ngs2Filter& filter);
+void Ngs2ApplyFilter(Ngs2Voice& voice, Ngs2Filter& filter, std::uint32_t grain);
 void Ngs2Ramp(float* samples, float from, float to, std::uint32_t grain, const float* source, bool accumulate);
 void Ngs2ProcessLegacyUserFx(Ngs2Voice& voice, std::uint32_t grain, std::uint32_t sampleRate);
 void Ngs2RenderSystem(Ngs2System& system, const Ngs2RenderBufferInfo* bufferInfo, std::uint32_t numBufferInfo);
