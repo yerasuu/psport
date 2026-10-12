@@ -80,6 +80,9 @@ run_title() {
         BB_MODS_ENABLED=0 BB_PAD_FILE="$dir/pad" BB_PRESENT_DUMP_TRIGGER="$dir/shot" BB_DUMP_DIR="$dir/shots" \
         "${launch[@]}" ) > "$dir/log" 2>&1 < /dev/null &
     local pid=$! start=$SECONDS ended=schedule at what rest buttons hold
+    # Replaced by a rename, never rewritten in place: the runtime polls the file and could read it
+    # truncated, an empty pad that drops the stick for a frame and stops a run-up.
+    pad() { printf '%s\n' "$1" > "$dir/pad.new" && mv -f -- "$dir/pad.new" "$dir/pad"; }
     # setsid put the session out of reach of the terminal and of a kill aimed at this script, so
     # an interrupted run would leave the game and gamescope running headless indefinitely.
     trap 'stop_session $pid; exit 143' TERM HUP INT
@@ -88,7 +91,9 @@ run_title() {
         while ((SECONDS - start < at)); do kill -0 $pid 2>/dev/null || { ended=exited; break 2; }; sleep 0.2; done
         case $what in
             shot) : > "$dir/shot" ;;
-            press) read -r buttons hold <<< "$rest"; echo "${buttons//+/ }" > "$dir/pad"; sleep "${hold:-0.3}"; : > "$dir/pad" ;;
+            press) read -r buttons hold <<< "$rest"; pad "${buttons//+/ }"; sleep "${hold:-0.3}"; pad '' ;;
+            hold) read -r buttons hold <<< "$rest"; pad "${buttons//+/ }"; sleep "${hold:-0}" ;;
+            release) pad '' ;;
             end) break ;;
         esac
     done < "$schedule"
