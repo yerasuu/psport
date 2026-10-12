@@ -2,6 +2,7 @@
  *   - one local user (id 1) who is logged in but not signed in to PSN;
  *   - network cable unplugged: NetCtl disconnected, sockets unavailable;
  *   - common dialogs complete immediately (no UI is drawn yet);
+ *   - no PlayStation VR headset is connected;
  *   - the whole package is installed (PlayGo reports every chunk local).
  * Every entry here is an explicit contract; unknown functions still stop. */
 #define _GNU_SOURCE
@@ -35,6 +36,10 @@
 #define PLAYGO_BAD_CHUNK ((int32_t)0x80B2000C)
 #define AUDIO_IN_NOT_OPENED ((int32_t)0x80260109)
 #define TROPHY_INVALID ((int32_t)0x80551604)
+#define HMD_ALREADY_INITIALIZED ((int32_t)0x81110001)
+#define HMD_NOT_INITIALIZED ((int32_t)0x81110002)
+#define HMD_HANDLE_INVALID ((int32_t)0x81110003)
+#define HMD_PARAMETER_NULL ((int32_t)0x81110008)
 
 static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
 static int next_id=1;
@@ -340,6 +345,28 @@ static ABI int32_t ime_result(uint32_t *result) {
 }
 static ABI int32_t ime_term(void) { memset(&ime,0,sizeof(ime)); return 0; }
 
+/* ---- PlayStation VR: the library runs, no headset is detected ---- */
+static int hmd_initialized;
+static ABI int32_t hmd_init(const void *param) {
+    if (hmd_initialized) return HMD_ALREADY_INITIALIZED;
+    if (!param) return HMD_PARAMETER_NULL;
+    hmd_initialized=1; return 0;
+}
+static ABI int32_t hmd_term(void) {
+    if (!hmd_initialized) return HMD_NOT_INITIALIZED;
+    hmd_initialized=0; return 0;
+}
+/* OrbisHmdDeviceInformation (32 bytes): status, user, reserved, panel size, latencies, HMU mount. */
+static ABI int32_t hmd_device_info(int32_t *info) {
+    if (!info) return HMD_PARAMETER_NULL;
+    if (!hmd_initialized) return HMD_NOT_INITIALIZED;
+    memset(info,0,32);
+    info[0]=2; /* SCE_HMD_DEVICE_STATUS_NOT_DETECTED */
+    info[1]=-1;
+    return 0;
+}
+static ABI int32_t hmd_handle_invalid(void) { return HMD_HANDLE_INVALID; }
+
 /* ---- Trophies: accepted locally, recorded in the log ---- */
 static ABI int32_t trophy_context(int32_t *ctx,int32_t user,uint32_t label,uint64_t options) {
     (void)user; (void)label; (void)options;
@@ -565,6 +592,9 @@ static const RuntimeExport exports[]={
     {"sceErrorDialogInitialize",error_init}, {"sceErrorDialogOpen",error_open},
     {"sceErrorDialogUpdateStatus",error_status}, {"sceErrorDialogGetStatus",error_status},
     {"sceErrorDialogClose",error_close}, {"sceErrorDialogTerminate",error_term},
+    {"sceHmdInitialize",hmd_init}, {"sceHmdInitialize315",hmd_init}, {"sceHmdTerminate",hmd_term},
+    {"sceHmdGetDeviceInformation",hmd_device_info},
+    {"sceHmdGetDeviceInformationByHandle",hmd_handle_invalid}, {"sceHmdGetFieldOfView",hmd_handle_invalid},
     {"sceNpTrophyCreateContext",trophy_context}, {"sceNpTrophyCreateHandle",trophy_handle},
     {"sceNpTrophyRegisterContext",runtime_stub}, {"sceNpTrophyUnlockTrophy",trophy_unlock},
     {"sceNpTrophyGetGameInfo",trophy_game_info}, {"sceNpTrophyGetTrophyInfo",trophy_info},
