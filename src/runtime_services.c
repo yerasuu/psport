@@ -1,9 +1,8 @@
 /* System services for an offline, single-user console:
  *   - one local user (id 1) who is logged in but not signed in to PSN;
- *   - network cable unplugged: NetCtl disconnected, sockets unavailable;
+ *   - network cable unplugged: NetCtl disconnected, sockets on loopback only (runtime_socket.c);
  *   - common dialogs complete immediately (no UI is drawn yet);
- *   - no PlayStation VR headset is connected;
- *   - the whole package is installed (PlayGo reports every chunk local).
+ *   - no PlayStation VR headset is connected.
  * Every entry here is an explicit contract; unknown functions still stop. */
 #define _GNU_SOURCE
 #include "runtime.h"
@@ -30,10 +29,6 @@
 #define NET_EINVAL ((int32_t)0x80410116)
 #define HTTP_NETWORK ((int32_t)0x80431063)
 #define DIALOG_NOT_INITIALIZED ((int32_t)0x80B80003)
-#define PLAYGO_BAD_HANDLE ((int32_t)0x80B20009)
-#define PLAYGO_BAD_POINTER ((int32_t)0x80B2000A)
-#define PLAYGO_BAD_SIZE ((int32_t)0x80B2000B)
-#define PLAYGO_BAD_CHUNK ((int32_t)0x80B2000C)
 #define AUDIO_IN_NOT_OPENED ((int32_t)0x80260109)
 #define TROPHY_INVALID ((int32_t)0x80551604)
 #define HMD_ALREADY_INITIALIZED ((int32_t)0x81110001)
@@ -87,11 +82,11 @@ static ABI int32_t user_event(int32_t *event) {
 }
 
 /* ---- SystemService ---- */
-static int language(void) { const char *v=getenv("BB_LANGUAGE"); return v ? atoi(v) : 1; }
+int runtime_system_language(void) { const char *v=getenv("BB_LANGUAGE"); return v ? atoi(v) : 1; }
 static ABI int32_t system_param(int32_t id,int32_t *value) {
     if (!value) return SYSTEM_PARAMETER;
     switch (id) {
-    case 1: *value=language(); break;           /* language (1 = English US, 8 = Russian) */
+    case 1: *value=runtime_system_language(); break; /* language (1 = English US, 8 = Russian) */
     case 2: *value=1; break;                    /* date format DD/MM/YYYY */
     case 3: *value=1; break;                    /* 24-hour clock */
     case 4: { time_t now=time(NULL); struct tm t; localtime_r(&now,&t); *value=(int32_t)(t.tm_gmtoff/60); break; }
@@ -133,10 +128,8 @@ static ABI int32_t display_safe_area(float *ratio) {
 }
 
 /* ---- NetCtl / Net / Http / Ssl: no network ---- */
-static int32_t net_errno;
-static ABI int32_t *net_errno_loc(void) { return &net_errno; }
 static ABI int32_t net_pool_create(const char *name,int size,int flags) { (void)name; (void)size; (void)flags; return new_id(); }
-static ABI int32_t net_unreachable(void) { net_errno=51; return NET_ENETUNREACH; }
+static ABI int32_t net_unreachable(void) { *runtime_net_errno()=51; return NET_ENETUNREACH; }
 static ABI int32_t net_epoll_create(const char *name,int flags) { (void)name; (void)flags; return new_id(); }
 static ABI int32_t net_resolver_create(const char *name,int pool,int flags) { (void)name; (void)pool; (void)flags; return new_id(); }
 static ABI uint16_t net_htons(uint16_t v) { return htons(v); }
@@ -144,11 +137,11 @@ static ABI uint16_t net_ntohs(uint16_t v) { return ntohs(v); }
 static ABI uint32_t net_htonl(uint32_t v) { return htonl(v); }
 static ABI uint32_t net_ntohl(uint32_t v) { return ntohl(v); }
 static ABI int32_t net_pton(int af,const char *src,void *dst) {
-    if (af!=2) { net_errno=47; return NET_EINVAL; }
+    if (af!=2) { *runtime_net_errno()=47; return NET_EINVAL; }
     return inet_pton(AF_INET,src,dst);
 }
 static ABI const char *net_ntop(int af,const void *src,char *dst,uint32_t size) {
-    if (af!=2) { net_errno=47; return NULL; }
+    if (af!=2) { *runtime_net_errno()=47; return NULL; }
     return inet_ntop(AF_INET,src,dst,size);
 }
 static ABI int32_t netctl_state(int32_t *state) { if (!state) return NET_CTL_INVALID_ADDR; *state=0; return 0; }
@@ -194,16 +187,6 @@ static ABI int32_t np_poll(int32_t request,int32_t *result) { (void)request; if 
 static ABI int32_t np_compare(const void *a,const void *b) {
     if (!a || !b) return NP_INVALID_ARGUMENT;
     return memcmp(a,b,16) ? (int32_t)0x80550609 : 0; /* NP_UTIL NOT_MATCH */
-}
-
-/* ---- Voice chat: ports exist, carry no audio ---- */
-static ABI int32_t voice_port(void *param,uint32_t *port) { (void)param; if (!port) return (int32_t)0x8029000b; *port=(uint32_t)new_id(); return 0; }
-static ABI int32_t voice_read(uint32_t port,void *data,uint32_t *size) { (void)port; (void)data; if (size) *size=0; return 0; }
-static ABI int32_t voice_info(uint32_t port,uint32_t *info) {
-    (void)port;
-    if (!info) return (int32_t)0x8029000b;
-    memset(info,0,40); /* type, state=unconnected, no bytes available */
-    return 0;
 }
 
 /* ---- Common dialogs: nothing is displayed; an opened dialog finishes. ---- */
@@ -513,46 +496,6 @@ static ABI int32_t trophy_unlock_state(int32_t ctx,int32_t handle,uint32_t *flag
     return 0;
 }
 
-/* ---- PlayGo: fully installed package ---- */
-static int playgo_handle, playgo_chunks=-1;
-static ABI int32_t playgo_init(const void *params) {
-    (void)params;
-    int fd=(int)runtime_file_open("/app0/sce_sys/playgo-chunk.dat",0,0);
-    unsigned char header[12];
-    playgo_chunks=1;
-    if (fd>=0) {
-        if (runtime_file_read(fd,header,sizeof(header))==sizeof(header)) playgo_chunks=header[10]|header[11]<<8;
-        runtime_file_close(fd);
-    }
-    printf("Runtime: PlayGo initialized; %d chunks, all installed locally\n",playgo_chunks);
-    return 0;
-}
-static ABI int32_t playgo_open(int32_t *handle,const void *param) {
-    (void)param;
-    if (!handle) return PLAYGO_BAD_POINTER;
-    playgo_handle=1; *handle=1; return 0;
-}
-static ABI int32_t playgo_chunk_ids(int32_t handle,uint16_t *ids,uint32_t count,uint32_t *out) {
-    if (handle!=playgo_handle || !handle) return PLAYGO_BAD_HANDLE;
-    if (!out) return PLAYGO_BAD_POINTER;
-    if (ids && !count) return PLAYGO_BAD_SIZE;
-    if (!ids) { *out=(uint32_t)playgo_chunks; return 0; }
-    uint32_t n=count<(uint32_t)playgo_chunks ? count : (uint32_t)playgo_chunks;
-    for (uint32_t i=0;i<n;++i) ids[i]=(uint16_t)i;
-    *out=n; return 0;
-}
-static ABI int32_t playgo_locus(int32_t handle,const uint16_t *ids,uint32_t count,int8_t *loci) {
-    if (handle!=playgo_handle || !handle) return PLAYGO_BAD_HANDLE;
-    if (!ids || !loci) return PLAYGO_BAD_POINTER;
-    if (!count) return PLAYGO_BAD_SIZE;
-    for (uint32_t i=0;i<count;++i) {
-        if (ids[i]>=playgo_chunks) return PLAYGO_BAD_CHUNK;
-        loci[i]=3; /* LocalFast */
-    }
-    return 0;
-}
-static ABI int32_t playgo_speed(int32_t handle,int32_t speed) { (void)speed; return handle==playgo_handle && handle ? 0 : PLAYGO_BAD_HANDLE; }
-
 /* ---- DiscMap: the game is fully installed, no disc bitmap exists ---- */
 #define DISC_MAP_NO_BITMAP ((int32_t)0x81100004)
 static ABI int32_t discmap_on_hdd(const char *path,int64_t offset,int64_t size,int32_t *result) {
@@ -570,7 +513,7 @@ static ABI int32_t discmap_8a82(const char *path,int64_t offset,int64_t size,int
     (void)path; (void)offset; (void)size; (void)flags; (void)r1; (void)r2; return DISC_MAP_NO_BITMAP;
 }
 
-/* ---- Devices that are absent: mouse, microphone, voice chat ---- */
+/* ---- Devices that are absent: mouse, microphone ---- */
 /* A mouse port opens but never reports a connected device. */
 static ABI int32_t mouse_open(int32_t user,int32_t type,int32_t index,const void *param) { (void)user; (void)type; (void)index; (void)param; return new_id(); }
 static ABI int32_t mouse_read(int32_t handle,unsigned char *data,int32_t count) {
@@ -663,18 +606,12 @@ static const RuntimeExport exports[]={
     {"sceSystemServiceReceiveEvent",system_event}, {"sceSystemServiceHideSplashScreen",hide_splash},
     {"sceSystemServiceLaunchWebBrowser",launch_browser},
     {"sceSystemServiceGetDisplaySafeAreaInfo",display_safe_area},
-    {"sceNetInit",runtime_stub}, {"sceNetTerm",runtime_stub}, {"sceNetErrnoLoc",net_errno_loc},
+    {"sceNetInit",runtime_stub}, {"sceNetTerm",runtime_stub},
     {"sceNetPoolCreate",net_pool_create}, {"sceNetPoolDestroy",runtime_stub},
     {"sceNetEpollCreate",net_epoll_create}, {"sceNetEpollDestroy",runtime_stub},
     {"sceNetResolverCreate",net_resolver_create}, {"sceNetResolverDestroy",runtime_stub},
     {"sceNetHtons",net_htons}, {"sceNetNtohs",net_ntohs}, {"sceNetHtonl",net_htonl}, {"sceNetNtohl",net_ntohl},
     {"sceNetInetPton",net_pton}, {"sceNetInetNtop",net_ntop},
-    {"sceNetSocket",net_unreachable}, {"sceNetConnect",net_unreachable}, {"sceNetBind",net_unreachable},
-    {"sceNetListen",net_unreachable}, {"sceNetAccept",net_unreachable}, {"sceNetSend",net_unreachable},
-    {"sceNetSendto",net_unreachable}, {"sceNetRecv",net_unreachable}, {"sceNetRecvfrom",net_unreachable},
-    {"sceNetSetsockopt",net_unreachable}, {"sceNetGetsockopt",net_unreachable},
-    {"sceNetGetsockname",net_unreachable}, {"sceNetShutdown",net_unreachable},
-    {"sceNetSocketClose",net_unreachable}, {"sceNetSocketAbort",net_unreachable},
     {"sceNetEpollControl",net_unreachable}, {"sceNetEpollWait",net_unreachable}, {"sceNetEpollAbort",net_unreachable},
     {"sceNetResolverStartNtoa",net_unreachable}, {"sceNetResolverStartAton",net_unreachable},
     {"sceNetCtlGetState",netctl_state}, {"sceNetCtlGetInfo",netctl_info},
@@ -743,10 +680,6 @@ static const RuntimeExport exports[]={
     {"sceNpScoreGetRankingByNpIdPcId",np_signed_out}, {"sceNpScoreGetRankingByRange",np_signed_out},
     {"sceNpScoreRecordGameData",np_signed_out}, {"sceNpScoreRecordScore",np_signed_out},
     {"sceNpScoreSetPlayerCharacterId",runtime_stub}, {"sceNpTusCreateNpTitleCtxA",np_signed_out},
-    {"sceVoiceCreatePort",voice_port}, {"sceVoiceDeletePort",runtime_stub},
-    {"sceVoiceConnectIPortToOPort",runtime_stub}, {"sceVoiceDisconnectIPortFromOPort",runtime_stub},
-    {"sceVoiceStart",runtime_stub}, {"sceVoiceStop",runtime_stub}, {"sceVoiceGetPortInfo",voice_info},
-    {"sceVoiceReadFromOPort",voice_read}, {"sceVoiceWriteToIPort",runtime_stub},
     {"sceAudioInInput",audio_in_open}, {"sceAudioInClose",audio_in_open},
     {"sceNpMatching2Initialize",runtime_stub}, {"sceNpMatching2Terminate",runtime_stub},
     {"sceNpMatching2CreateContext",np_signed_out},
@@ -797,8 +730,6 @@ static const RuntimeExport exports[]={
     {"sceNpTrophyDestroyHandle",runtime_stub},
     {"sceNpTrophyGetGameInfo",trophy_game_info}, {"sceNpTrophyGetTrophyInfo",trophy_info},
     {"sceNpTrophyGetTrophyUnlockState",trophy_unlock_state},
-    {"scePlayGoInitialize",playgo_init}, {"scePlayGoOpen",playgo_open}, {"scePlayGoGetChunkId",playgo_chunk_ids},
-    {"scePlayGoGetLocus",playgo_locus}, {"scePlayGoSetInstallSpeed",playgo_speed},
     {"sceMouseInit",runtime_stub}, {"sceMouseOpen",mouse_open}, {"sceMouseRead",mouse_read}, {"sceMouseClose",runtime_stub},
     {"sceAudioInOpen",audio_in_open},
     {"sceMoveInit",move_init}, {"sceMoveOpen",move_open}, {"sceMoveGetDeviceInfo",move_device_info},
@@ -808,14 +739,15 @@ static const RuntimeExport exports[]={
     {"sceImeKeyboardGetInfo",keyboard_info}, {"sceImeKeyboardClose",keyboard_close}, {"sceImeUpdate",ime_update},
     {"sceDiscMapIsRequestOnHDD",discmap_on_hdd}, {"sceDiscMap_8A828CAEE7EDD5E9",discmap_8a82},
     {"sceDiscMap_7C980FFB0AA27E7A",discmap_7c98},
-    {"sceVoiceInit",runtime_stub}, {"sceVoiceEnd",runtime_stub},
     {"sceScreenShotEnable",runtime_stub}, {"sceScreenShotDisable",runtime_stub}, {"sceScreenShotSetParam",runtime_stub},
     {"sceScreenShotSetOverlayImage",runtime_stub}, {"sceScreenShotSetOverlayImageWithOrigin",runtime_stub},
     {"sceSharePlayInitialize",runtime_stub}, {"sceGameLiveStreamingInitialize",runtime_stub},
 };
 uintptr_t runtime_services_resolve(const char *name) {
     const uintptr_t online=runtime_net_resolve(name); /* BB_ONLINE=1: the online module first */
-    return online ? online : RUNTIME_LOOKUP(exports,name);
+    if (online) return online;
+    const uintptr_t found=RUNTIME_LOOKUP(exports,name);
+    return found ? found : runtime_socket_resolve(name);
 }
 #else
 uintptr_t runtime_services_resolve(const char *name) { (void)name; return 0; }

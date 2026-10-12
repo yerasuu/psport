@@ -35,6 +35,9 @@ void runtime_memory_prepare_cpu_write(uintptr_t address, uint64_t size);
 /* libkernel memory pools (runtime_mempool.c) over the runtime's direct memory and mapping table. */
 uintptr_t runtime_mempool_resolve(const char *name);
 void runtime_mempool_report(void);
+/* libkernel asynchronous file I/O (runtime_aio.c) on worker threads over the runtime's file layer. */
+uintptr_t runtime_aio_resolve(const char *name);
+void runtime_aio_report(void);
 int32_t runtime_memory_pool_expand(uint64_t low, uint64_t high, uint64_t size, uint64_t alignment, int64_t *phys);
 int32_t runtime_memory_pool_reserve(void **inout, uint64_t size, int flags, uint64_t alignment);
 /* Maps [phys, phys+size) of direct memory over a pool reservation; EINVAL unless all of the range is one. */
@@ -132,6 +135,13 @@ uintptr_t runtime_kernel_resolve(const char *name);
 void runtime_process_configure(uint32_t sdk_version, uint32_t psf_attributes);
 uintptr_t runtime_file_resolve(const char *name);
 uintptr_t runtime_services_resolve(const char *name);
+/* sceSystemServiceParamGetInt's language (BB_LANGUAGE, default 1 = English US). */
+int runtime_system_language(void);
+uintptr_t runtime_playgo_resolve(const char *name);
+uintptr_t runtime_voice_resolve(const char *name);
+/* Offline libSceNet sockets (runtime_socket.c), consulted by runtime_services_resolve. */
+uintptr_t runtime_socket_resolve(const char *name);
+int32_t *runtime_net_errno(void);
 /* Online play (runtime_net.c, BB_ONLINE=1): the online module answers the network and PSN imports. */
 void runtime_net_configure(const char *app0, const char *serial, const char *title, const char *version);
 int runtime_net_enabled(void);
@@ -151,6 +161,7 @@ int64_t runtime_file_close(int fd);
 int64_t runtime_file_read(int fd, void *buffer, uint64_t size);
 int64_t runtime_file_pread(int fd, void *buffer, uint64_t size, int64_t offset);
 int64_t runtime_file_write(int fd, const void *buffer, uint64_t size);
+int64_t runtime_file_pwrite(int fd, const void *buffer, uint64_t size, int64_t offset);
 int64_t runtime_file_lseek(int fd, int64_t offset, int whence);
 int64_t runtime_file_stat(const char *path, void *guest_stat);
 int64_t runtime_file_fstat(int fd, void *guest_stat);
@@ -168,6 +179,8 @@ int32_t runtime_audio_init(void);
 int32_t runtime_audio_open(int32_t user, int32_t type, int32_t index, uint32_t length, uint32_t freq, uint32_t param);
 int32_t runtime_audio_output(int32_t handle, const void *data);
 int32_t runtime_audio_close(int32_t handle);
+/* Channels of the host's default playback device: 2 without one. */
+int runtime_audio_device_channels(void);
 uintptr_t runtime_audio3d_resolve(const char *name);
 void runtime_audio3d_report(void);
 uintptr_t runtime_pad_resolve(const char *name);

@@ -101,6 +101,7 @@ void runtime_report(void) {
     runtime_pad_report();
     runtime_savedata_report();
     runtime_file_report();
+    runtime_aio_report();
     printf("Runtime: memory operations=%zu\n", (size_t)memory_calls);
     runtime_calls_report();
 }
@@ -268,6 +269,10 @@ static uintptr_t resolve_scoped(const char *name, int is_data) {
     if (kernel) return kernel;
     uintptr_t loader = runtime_module_resolve(name);
     if (loader) return loader;
+    uintptr_t playgo = runtime_playgo_resolve(name);
+    if (playgo) return playgo;
+    uintptr_t voice = runtime_voice_resolve(name);
+    if (voice) return voice;
     uintptr_t services = runtime_services_resolve(name);
     if (services) return services;
     uintptr_t ajm = runtime_ajm_resolve(name);
@@ -284,6 +289,8 @@ static uintptr_t resolve_scoped(const char *name, int is_data) {
     if (save) return save;
     uintptr_t file = runtime_file_resolve(name);
     if (file) return file;
+    uintptr_t aio = runtime_aio_resolve(name);
+    if (aio) return aio;
     return bbgpu_resolve(name);
 }
 static const struct { const char *nid, *symbol; } import_names[]={

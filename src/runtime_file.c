@@ -664,6 +664,7 @@ int64_t runtime_file_close(int fd) { return do_close(fd); }
 int64_t runtime_file_read(int fd,void *b,uint64_t n) { return do_read(fd,b,n); }
 int64_t runtime_file_pread(int fd,void *b,uint64_t n,int64_t o) { return do_pread(fd,b,n,o); }
 int64_t runtime_file_write(int fd,const void *b,uint64_t n) { return do_write(fd,b,n); }
+int64_t runtime_file_pwrite(int fd,const void *b,uint64_t n,int64_t o) { return do_pwrite(fd,b,n,o); }
 int64_t runtime_file_lseek(int fd,int64_t o,int w) { return do_lseek(fd,o,w); }
 int64_t runtime_file_stat(const char *p,void *s) { return do_stat(p,s); }
 int64_t runtime_file_fstat(int fd,void *s) { return do_fstat(fd,s); }
