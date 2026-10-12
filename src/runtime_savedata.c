@@ -270,6 +270,11 @@ static ABI int32_t save_icon(const MountPoint *point, const Icon *icon) {
     pthread_mutex_unlock(&lock);
     return r;
 }
+static ABI int32_t save_transferring_mount(const void *mount, void *result) {
+    if (!initialized) return ERR_NOT_INITIALIZED;
+    if (!mount || !result) return ERR_PARAMETER;
+    return ERR_NOT_FOUND;
+}
 static ABI int32_t save_delete(const Delete *d) {
     if (!initialized) return ERR_NOT_INITIALIZED;
     if (!d || !d->dir || !valid_name(d->dir->data,sizeof(d->dir->data))) return ERR_PARAMETER;
@@ -379,7 +384,7 @@ static const RuntimeExport exports[]={
     {"sceSaveDataMount",save_mount}, {"sceSaveDataMount2",save_mount2}, {"sceSaveDataUmount",save_umount},
     {"sceSaveDataUmountWithBackup",save_umount_with_backup}, {"sceSaveDataGetEventResult",save_event_result},
     {"sceSaveDataSetParam",save_set_param}, {"sceSaveDataSaveIcon",save_icon}, {"sceSaveDataDelete",save_delete},
-    {"sceSaveDataDirNameSearch",save_search},
+    {"sceSaveDataDirNameSearch",save_search}, {"sceSaveDataTransferringMount",save_transferring_mount},
     {"sceSaveDataSetupSaveDataMemory",memory_setup}, {"sceSaveDataGetSaveDataMemory",memory_get},
     {"sceSaveDataSetSaveDataMemory",memory_set},
 };
