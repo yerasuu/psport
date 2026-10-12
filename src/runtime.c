@@ -94,6 +94,7 @@ void runtime_report(void) {
     runtime_eventflag_report();
     runtime_content_report();
     runtime_memory_report();
+    runtime_mempool_report();
     runtime_ajm_report();
     runtime_audio_report();
     runtime_audio3d_report();
@@ -259,6 +260,8 @@ static uintptr_t resolve_scoped(const char *name, int is_data) {
     if (rwlock) return rwlock;
     uintptr_t memory = runtime_memory_resolve(name);
     if (memory) return memory;
+    uintptr_t mempool = runtime_mempool_resolve(name);
+    if (mempool) return mempool;
     uintptr_t exception = runtime_exception_resolve(name);
     if (exception) return exception;
     uintptr_t kernel = runtime_kernel_resolve(name);

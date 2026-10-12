@@ -45,7 +45,7 @@ static uint64_t pool_size_bytes(void) {
 #define MAP_NO_OVERWRITE 0x80
 enum { KIND_RESERVED=1, KIND_DIRECT, KIND_FLEXIBLE };
 typedef struct { uint64_t start, size; int type, used; } Block;
-typedef struct { uintptr_t start, end; int kind, prot, type; uint64_t phys; } Vma;
+typedef struct { uintptr_t start, end; int kind, prot, type; uint64_t phys; int pooled; } Vma;
 typedef struct {
     uintptr_t start, end; uint64_t offset; int32_t protection, memory_type;
     uint32_t flags; char name[32];
@@ -368,7 +368,7 @@ static int32_t place(void **inout, uint64_t size, int prot, int flags, uint64_t 
     if (mapped==MAP_FAILED) return NO_MEMORY;
     drop_range(address,address+size);
     trap_forget(address,address+size); /* a new mapping starts without traps */
-    if (vma_insert(vma_index(address),(Vma){address,address+size,kind,prot,type,phys})) return NO_MEMORY;
+    if (vma_insert(vma_index(address),(Vma){address,address+size,kind,prot,type,phys,0})) return NO_MEMORY;
     if (kind==KIND_FLEXIBLE) flexible_bytes+=size;
     if (kind!=KIND_RESERVED) queue_hook(HOOK_MAP,address,size);
     *inout=mapped;
@@ -635,7 +635,8 @@ static ABI int32_t virtual_query(const void *address, int flags, VirtualQueryInf
     info->start=v.start; info->end=v.end;
     info->offset=v.kind==KIND_DIRECT ? v.phys : 0;
     info->protection=v.prot; info->memory_type=v.type;
-    info->flags=(v.kind==KIND_FLEXIBLE ? 1u : 0) | (v.kind==KIND_DIRECT ? 2u : 0) | (v.kind!=KIND_RESERVED ? 16u : 0);
+    info->flags=(v.kind==KIND_FLEXIBLE ? 1u : 0) | (v.kind==KIND_DIRECT ? 2u : 0) | (v.pooled ? 8u : 0) |
+                (v.kind!=KIND_RESERVED ? 16u : 0);
     strcpy(info->name, v.kind==KIND_RESERVED ? "reserved" : v.kind==KIND_DIRECT ? "direct" : "flexible");
     __atomic_add_fetch(&queries,1,__ATOMIC_RELAXED);
     read_unlock();
@@ -714,6 +715,101 @@ static ABI int32_t batch_map2(BatchEntry *entries, int count, int *processed, in
 static ABI int32_t batch_map(BatchEntry *entries, int count, int *processed) {
     return batch_map2(entries,count,processed,MAP_FIXED_FLAG);
 }
+static ABI int32_t available_flexible_size(uint64_t *out) {
+    if (!out) return INVALID;
+    read_lock();
+    *out=FLEXIBLE_SIZE-flexible_bytes;
+    read_unlock();
+    return 0;
+}
+static ABI int32_t configured_flexible_size(uint64_t *out) {
+    if (!out) return INVALID;
+    *out=FLEXIBLE_SIZE;
+    return 0;
+}
+/* The start of the first allocation in [at, end), else end (lock held). */
+static uint64_t next_block_start(uint64_t at, uint64_t end) {
+    for (int i=0;i<LIMIT;++i)
+        if (blocks[i].used && blocks[i].start>=at && blocks[i].start<end) end=blocks[i].start;
+    return end;
+}
+/* The largest free range of direct memory in [low, high) once its start is aligned, as libkernel
+ * answers it. */
+static ABI int32_t available_direct_size(uint64_t low, uint64_t high, uint64_t alignment, uint64_t *phys, uint64_t *size) {
+    if (!alignment) alignment=PAGE;
+    if (!phys || !size || !valid_alignment(alignment)) return INVALID;
+    const uint64_t end=high<POOL_SIZE ? high : POOL_SIZE;
+    uint64_t best_start=0, best_size=0;
+    read_lock();
+    for (uint64_t at=low; at<end;) {
+        int inside=0;
+        for (int i=0;i<LIMIT;++i) if (blocks[i].used && at>=blocks[i].start && at-blocks[i].start<blocks[i].size) {
+            at=blocks[i].start+blocks[i].size; inside=1; break;
+        }
+        if (inside) continue;
+        const uint64_t gap_end=next_block_start(at,end), start=align_up(at,alignment);
+        if (start<gap_end && gap_end-start>best_size) { best_start=start; best_size=gap_end-start; }
+        at=gap_end;
+    }
+    read_unlock();
+    if (!best_size) return NO_MEMORY;
+    *phys=best_start; *size=best_size;
+    return 0;
+}
+/* Memory pools (runtime_mempool.c): a pool reservation is a reserved range marked pooled, and
+ * committing maps direct memory the pool expanded into there, marked pooled too. */
+int32_t runtime_memory_pool_expand(uint64_t low, uint64_t high, uint64_t size, uint64_t alignment, int64_t *phys) {
+    return direct_allocate((int64_t)low,(int64_t)high,size,alignment,0,phys);
+}
+static void mark_pooled(uintptr_t start, uintptr_t end) {
+    for (size_t i=vma_index(start); i<vma_count && vmas[i].start<end; ++i) vmas[i].pooled=1;
+}
+static int all_pooled(uintptr_t start, uintptr_t end, int kind) {
+    if (!covered(start,end,1)) return 0;
+    for (size_t i=vma_index(start); i<vma_count && vmas[i].start<end; ++i)
+        if (!vmas[i].pooled || (kind && vmas[i].kind!=kind)) return 0;
+    return 1;
+}
+int32_t runtime_memory_pool_reserve(void **inout, uint64_t size, int flags, uint64_t alignment) {
+    int32_t result=reserve_range(inout,size,flags,alignment);
+    if (result) return result;
+    write_lock();
+    mark_pooled((uintptr_t)*inout,(uintptr_t)*inout+size);
+    write_unlock();
+    return 0;
+}
+int32_t runtime_memory_pool_commit(uintptr_t address, uint64_t size, int prot, int type, uint64_t phys) {
+    write_lock();
+    if (pool() || !all_pooled(address,address+size,KIND_RESERVED)) { write_unlock(); return INVALID; }
+    void *at=(void *)address;
+    int32_t result=place(&at,size,prot,MAP_FIXED_FLAG,PAGE,KIND_DIRECT,type,phys);
+    if (!result) { mark_pooled(address,address+size); ++maps; }
+    write_unlock();
+    flush_hooks();
+    return result;
+}
+int32_t runtime_memory_pool_decommit(uintptr_t address, uint64_t size, void (*release)(uint64_t phys, uint64_t size)) {
+    read_lock();
+    int ok=!(address%PAGE) && size && all_pooled(address,address+size,0);
+    read_unlock();
+    if (!ok) return INVALID;
+    if (hook_unmap) hook_unmap(address,size);
+    write_lock();
+    if (!all_pooled(address,address+size,0)) { write_unlock(); return INVALID; }
+    for (size_t i=vma_index(address); i<vma_count && vmas[i].start<address+size; ++i) {
+        if (vmas[i].kind!=KIND_DIRECT) continue;
+        const uintptr_t a=vmas[i].start>address ? vmas[i].start : address;
+        const uintptr_t b=vmas[i].end<address+size ? vmas[i].end : address+size;
+        const uint64_t phys=vmas[i].phys+(a-vmas[i].start);
+        zero_phys(phys,b-a);
+        release(phys,b-a);
+    }
+    void *at=(void *)address;
+    int32_t result=place(&at,size,0,MAP_FIXED_FLAG,PAGE,KIND_RESERVED,0,0);
+    if (!result) mark_pooled(address,address+size);
+    write_unlock();
+    return result;
+}
 static const RuntimeExport exports[]={
     {"sceKernelGetDirectMemorySize",direct_size}, {"sceKernelAllocateDirectMemory",direct_allocate},
     {"sceKernelAllocateMainDirectMemory",direct_allocate_main},
@@ -728,6 +824,9 @@ static const RuntimeExport exports[]={
     {"sceKernelMlock",lock_range},
     {"sceKernelBatchMap",batch_map}, {"sceKernelBatchMap2",batch_map2},
     {"mmap",posix_mmap},
+    {"sceKernelAvailableFlexibleMemorySize",available_flexible_size},
+    {"sceKernelConfiguredFlexibleMemorySize",configured_flexible_size},
+    {"sceKernelAvailableDirectMemorySize",available_direct_size},
 };
 uintptr_t runtime_memory_resolve(const char *name) {
     /* Direct-memory NIDs are exercised by test_runtime.c before names are loaded. */
