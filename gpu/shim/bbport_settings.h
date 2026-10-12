@@ -17,7 +17,7 @@ inline bool IsFsr4(int upscaler) {
 }
 enum Preset : int { NativeAA = 0, Quality, Balanced, Performance, UltraPerformance, PresetCount };
 enum DebugView : int { DebugNone = 0, DebugReactive = 1, DebugMotion = 2, DebugViewCount };
-enum class MenuLanguage { English, Russian };
+enum class MenuLanguage { English, Russian, Spanish };
 
 /// Game effects switched by the community patches at start (patches.py EFFECTS): ini key,
 /// menu label, default (the game's own behaviour).
@@ -25,19 +25,20 @@ struct Effect {
     const char* key;
     const char* label;
     const char* label_ru;
+    const char* label_es;
     bool default_on;
 };
 inline constexpr Effect Effects[] = {
-    {"effect_chromatic_aberration", "Chromatic aberration", "Хроматическая аберрация", true},
-    {"effect_dof", "Depth of field (DoF)", "Глубина резкости (DoF)", true},
-    {"effect_motion_blur", "Motion blur", "Размытие в движении", true},
-    {"effect_ssao", "Ambient occlusion (SSAO)", "Затенение SSAO", true},
-    {"effect_game_aa", "Game's own anti-aliasing", "Собственное сглаживание игры", true},
-    {"effect_dynamic_shadows", "Shadows from dynamic lights", "Тени от динамических источников", true},
-    {"effect_ssr", "Screen-space reflections (not in original game)", "Отражения SSR (не было в игре)", false},
-    {"skip_intro", "Skip startup intros", "Пропуск заставок при запуске", false},
-    {"debug_camera", "Free camera (Cross + L3)", "Свободная камера (Cross + L3)", false},
-    {"debug_menu", "Debug menu (requires font files)", "Debug menu (нужны файлы шрифтов)", false},
+    {"effect_chromatic_aberration", "Chromatic aberration", "Хроматическая аберрация", "Aberración cromática", true},
+    {"effect_dof", "Depth of field (DoF)", "Глубина резкости (DoF)", "Profundidad de campo (DoF)", true},
+    {"effect_motion_blur", "Motion blur", "Размытие в движении", "Desenfoque de movimiento", true},
+    {"effect_ssao", "Ambient occlusion (SSAO)", "Затенение SSAO", "Oclusión ambiental (SSAO)", true},
+    {"effect_game_aa", "Game's own anti-aliasing", "Собственное сглаживание игры", "Antialiasing propio del juego", true},
+    {"effect_dynamic_shadows", "Shadows from dynamic lights", "Тени от динамических источников", "Sombras de luces dinámicas", true},
+    {"effect_ssr", "Screen-space reflections (not in original game)", "Отражения SSR (не было в игре)", "Reflejos en espacio de pantalla (no estaban en el juego)", false},
+    {"skip_intro", "Skip startup intros", "Пропуск заставок при запуске", "Saltar las intros al iniciar", false},
+    {"debug_camera", "Free camera (Cross + L3)", "Свободная камера (Cross + L3)", "Cámara libre (Cross + L3)", false},
+    {"debug_menu", "Debug menu (requires font files)", "Debug menu (нужны файлы шрифтов)", "Menú de depuración (necesita archivos de fuentes)", false},
 };
 inline constexpr int EffectCount = int(sizeof(Effects) / sizeof(Effects[0]));
 /// Live output resolutions: the upscaler's output and the UI host targets.
@@ -92,7 +93,7 @@ struct Values {
 
 Values& Get();
 /// Localized overlay text; the Language selector itself stays in English.
-const char* MenuText(const char* english, const char* russian);
+const char* MenuText(const char* english, const char* russian, const char* spanish);
 
 /// Reads the file, then the environment overrides. Called once at start.
 void Load();

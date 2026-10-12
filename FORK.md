@@ -64,6 +64,19 @@ returns their handle, `sceKernelDlsym` finds their exports (and the eboot's, han
 imports of other modules bound to them, which the PS4 linker would rebind at that point, already
 point at them.
 
+## In-game overlay
+
+The overlay (Insert or L3+R3, `gpu/shim/bbport_overlay.cpp`) is drawn in English, Russian or Spanish:
+
+| Source, first that is set | Values |
+|---|---|
+| `menu_language` in `bbport.ini` (written once one is chosen in the overlay) | `en`, `ru`, `es` |
+| `BB_MENU_LANGUAGE` (decanter passes its own UI language) | a language code: `ru...` Russian, `es...` Spanish, anything else English |
+| `LC_ALL`, `LC_MESSAGES`, `LANG`, `LANGUAGE` | the same |
+
+`BB_LANGUAGE` is not this: it is the system language the game reads (`sceSystemServiceParamGetInt`: 1
+English, 3 Spanish, 8 Russian).
+
 ## Diagnostics
 
 | Variable | What it shows |
