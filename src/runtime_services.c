@@ -183,7 +183,8 @@ static ABI int32_t voice_info(uint32_t port,uint32_t *info) {
 /* ---- Common dialogs: nothing is displayed; an opened dialog finishes. ---- */
 typedef struct { const char *name; int initialized, status; } Dialog;
 static Dialog dialogs[]={{"CommonDialog",0,0},{"MsgDialog",0,0},{"SaveDataDialog",0,0},
-                         {"NpProfileDialog",0,0},{"NpCommerceDialog",0,0},{"ImeDialog",0,0}};
+                         {"NpProfileDialog",0,0},{"NpCommerceDialog",0,0},{"ImeDialog",0,0},
+                         {"ErrorDialog",0,0}};
 static int common_initialized;
 static ABI int32_t common_init(void) { common_initialized=1; return 0; }
 static int32_t dialog_init(int i) {
@@ -222,6 +223,25 @@ static ABI int32_t save_result(int32_t *result) {
     return 0;
 }
 static ABI int32_t save_close(const void *param) { (void)param; dialogs[2].status=3; return 0; }
+typedef struct { int32_t size, error_code, user, reserved; } ErrorDialogParam;
+static ABI int32_t error_init(void) { return dialog_init(6); }
+static ABI int32_t error_open(const ErrorDialogParam *param) {
+    static uint32_t logged[32];
+    static int logged_count;
+    if (dialogs[6].status!=1 && dialogs[6].status!=3) return (int32_t)0x80B80006; /* INVALID_STATE */
+    if (!param) return (int32_t)0x80B8000D;                                         /* ARG_NULL */
+    const uint32_t code=(uint32_t)param->error_code;
+    int seen=0;
+    for (int k=0;k<logged_count;++k) seen|=logged[k]==code;
+    if (!seen && logged_count<32) {
+        logged[logged_count++]=code;
+        printf("Runtime: ErrorDialog 0x%08X\n",code);
+    }
+    dialogs[6].status=3; return 0;
+}
+static ABI int32_t error_status(void) { return dialog_status(6); }
+static ABI int32_t error_close(void) { return (int32_t)0x80B8000B; } /* NOT_RUNNING: an opened one has already finished */
+static ABI int32_t error_term(void) { return dialog_term(6); }
 /* ImeDialog: text typed on the keyboard into the game window (title bar shows it).
  * OrbisImeDialogParam: user, type, languages(8), enter label, method, filter,
  * option, max length, char16 buffer, position, alignment, placeholder, title. */
@@ -500,6 +520,9 @@ static const RuntimeExport exports[]={
     {"sceNpCommerceDialogUpdateStatus",commerce_status}, {"sceNpCommerceDialogTerminate",commerce_term},
     {"sceImeDialogInit",ime_init}, {"sceImeDialogGetStatus",ime_status}, {"sceImeDialogGetResult",ime_result},
     {"sceImeDialogTerm",ime_term}, {"sceImeDialogAbort",ime_term},
+    {"sceErrorDialogInitialize",error_init}, {"sceErrorDialogOpen",error_open},
+    {"sceErrorDialogUpdateStatus",error_status}, {"sceErrorDialogGetStatus",error_status},
+    {"sceErrorDialogClose",error_close}, {"sceErrorDialogTerminate",error_term},
     {"sceNpTrophyCreateContext",trophy_context}, {"sceNpTrophyCreateHandle",trophy_handle},
     {"sceNpTrophyRegisterContext",runtime_stub}, {"sceNpTrophyUnlockTrophy",trophy_unlock},
     {"sceNpTrophyGetGameInfo",trophy_game_info}, {"sceNpTrophyGetTrophyInfo",trophy_info},
