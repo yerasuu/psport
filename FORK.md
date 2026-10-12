@@ -105,8 +105,12 @@ Milestones, from the log and the dumps:
 
 It also records the first fault or stop logged before the title is told to end (`Guest fault`
 offset, `Host fault` library+offset and function, `STOP:`, assertion; what a game logs while it
-loses its display at the end is not a crash) and the summary's count of imports without
-implementation. The table goes to stdout, `results.tsv` and `results.json` to the output folder
-with each title's log and dumps (`tools/regress/report.py <folder>` classifies a folder again).
+loses its display at the end is not a crash), the summary's count of imports without
+implementation and, as `forced` (`submit_forced`), the number of `Forcing submitDone` lines before
+then: the GPU library sends a submitDone itself once the game has gone too long without one, so a
+count that keeps growing means the game is stalled on the GPU. The table goes to stdout,
+`results.tsv` and `results.json` to the output folder with each title's log and dumps
+(`tools/regress/report.py <folder>` classifies a folder again).
 With `-c`, a milestone lost or a crash signature that is new or different is a regression: it is
-listed and the exit status is 1.
+listed and the exit status is 1. The `no impl` and `forced` columns show their change against the
+earlier run without counting it as a regression (blank in an earlier file that predates `forced`).
