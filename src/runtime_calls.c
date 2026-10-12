@@ -29,6 +29,7 @@ void runtime_calls_configure(const char (*names)[128], uint64_t count) {
     stub_calls = calloc(count ? count : 1, sizeof(*stub_calls));
     entries = calloc(2 * count + FAILURE_SLOTS + HLE_STUB_SLOTS, sizeof(*entries));
     if (!unimplemented_calls || !stub_calls || !entries) { fputs("Cannot allocate call counters\n", stderr); exit(1); }
+    atexit(runtime_calls_report);
 }
 
 static void put(int fd, const char *text) {
