@@ -752,18 +752,6 @@ bool LoadGuestFileBytes(const std::filesystem::path& host_path,
     return true;
 }
 
-bool LoadGuestPathBytes(const char* guest_path, std::vector<unsigned char>& out_bytes) {
-    if (!guest_path) {
-        return false;
-    }
-    if (guest_path[0] == '/') {
-        const auto host_path = ResolveGuestPath(guest_path);
-        return !host_path.empty() && LoadGuestFileBytes(host_path, out_bytes);
-    }
-    // Non-guest path: treat as a host path (builtin/system fonts).
-    return LoadGuestFileBytes(std::filesystem::path(guest_path), out_bytes);
-}
-
 FaceMetrics LoadFaceMetrics(FT_Face face) {
     FaceMetrics m{};
     if (!face) {
