@@ -1,4 +1,6 @@
-# Logos and the files menu to a new game, the intro movies, then Slumbering Streets: hops right, each
+# Logos and the files menu to a new game (the last cross again in case the game was slow to show
+# Yes), the intro skipped by holding options (once more in the loading screen, where it does
+# nothing, in case the first came before the intro), then Slumbering Streets: hops right, each
 # third one back left first so a fall into the pit before the tall block climbs out again; the wall
 # that opens to the violin played by its gramophone; on to the curtain. The stick stays held between
 # hops: the bounce off the roses before the statue's ledge clears it only with right held to landing.
@@ -6,258 +8,244 @@
 26 shot
 27 press cross
 32 shot
-32 press options
 37 press cross
 38 shot
 42 press cross
 44 shot
-47 press options
 50 shot
 52 press cross
-56 shot
-57 press cross
-62 shot
-62 press options
-67 press cross
-68 shot
-72 press cross
-74 shot
-77 press options
-80 shot
-82 press cross
-86 shot
-87 press cross
+55 press cross
+58 shot
+60 press options
+61 hold options 2.5
+64 shot
+64 release
+66 press options
+67 hold options 2.5
+70 shot
+70 release
+76 shot
+82 shot
+82 hold lx=255+cross 0.45
+82 hold lx=255 0.75
+82 hold lx=255+cross 0.45
+82 hold lx=255 0.75
+82 hold lx=0+cross 0.3
+82 hold lx=0 0.1
+82 hold lx=255+cross 0.5
+82 hold lx=255 1
+87 shot
+87 hold lx=255+cross 0.45
+87 hold lx=255 0.75
+87 hold lx=255+cross 0.45
+87 hold lx=255 0.75
+87 hold lx=0+cross 0.4
+87 hold lx=0 0.1
+87 hold lx=255+cross 0.5
+87 hold lx=255 1
 92 shot
-92 press options
-97 press cross
-98 shot
-104 shot
-110 shot
-116 shot
+92 hold lx=255+cross 0.45
+92 hold lx=255 0.75
+92 hold lx=255+cross 0.45
+92 hold lx=255 0.75
+92 hold lx=0+cross 0.5
+92 hold lx=0 0.1
+92 hold lx=255+cross 0.5
+92 hold lx=255 1
+97 shot
+97 hold lx=255+cross 0.45
+97 hold lx=255 0.75
+97 hold lx=255+cross 0.45
+97 hold lx=255 0.75
+97 hold lx=0+cross 0.3
+97 hold lx=0 0.1
+97 hold lx=255+cross 0.5
+97 hold lx=255 1
+102 shot
+102 hold lx=255+cross 0.45
+102 hold lx=255 0.75
+102 hold lx=255+cross 0.45
+102 hold lx=255 0.75
+102 hold lx=0+cross 0.4
+102 hold lx=0 0.1
+102 hold lx=255+cross 0.5
+102 hold lx=255 1
+107 shot
+107 hold lx=255+cross 0.45
+107 hold lx=255 0.75
+107 hold lx=255+cross 0.45
+107 hold lx=255 0.75
+107 hold lx=0+cross 0.5
+107 hold lx=0 0.1
+107 hold lx=255+cross 0.5
+107 hold lx=255 1
+112 shot
+112 hold lx=255+cross 0.45
+112 hold lx=255 0.75
+112 hold lx=255+cross 0.45
+112 hold lx=255 0.75
+112 hold lx=0+cross 0.3
+112 hold lx=0 0.1
+112 hold lx=255+cross 0.5
+112 hold lx=255 1
+117 shot
+117 hold lx=255+cross 0.45
+117 hold lx=255 0.75
+117 hold lx=255+cross 0.45
+117 hold lx=255 0.75
+117 hold lx=0+cross 0.4
+117 hold lx=0 0.1
+117 hold lx=255+cross 0.5
+117 hold lx=255 1
 122 shot
-128 shot
-134 shot
-140 shot
-140 hold lx=255+cross 0.45
-140 hold lx=255 0.75
-140 hold lx=255+cross 0.45
-140 hold lx=255 0.75
-140 hold lx=0+cross 0.3
-140 hold lx=0 0.1
-140 hold lx=255+cross 0.5
-140 hold lx=255 1
-145 shot
-145 hold lx=255+cross 0.45
-145 hold lx=255 0.75
-145 hold lx=255+cross 0.45
-145 hold lx=255 0.75
-145 hold lx=0+cross 0.4
-145 hold lx=0 0.1
-145 hold lx=255+cross 0.5
-145 hold lx=255 1
-150 shot
-150 hold lx=255+cross 0.45
-150 hold lx=255 0.75
-150 hold lx=255+cross 0.45
-150 hold lx=255 0.75
-150 hold lx=0+cross 0.5
-150 hold lx=0 0.1
-150 hold lx=255+cross 0.5
-150 hold lx=255 1
-155 shot
-155 hold lx=255+cross 0.45
-155 hold lx=255 0.75
-155 hold lx=255+cross 0.45
-155 hold lx=255 0.75
-155 hold lx=0+cross 0.3
-155 hold lx=0 0.1
-155 hold lx=255+cross 0.5
-155 hold lx=255 1
-160 shot
-160 hold lx=255+cross 0.45
-160 hold lx=255 0.75
-160 hold lx=255+cross 0.45
-160 hold lx=255 0.75
-160 hold lx=0+cross 0.4
-160 hold lx=0 0.1
-160 hold lx=255+cross 0.5
-160 hold lx=255 1
-165 shot
-165 hold lx=255+cross 0.45
-165 hold lx=255 0.75
-165 hold lx=255+cross 0.45
-165 hold lx=255 0.75
-165 hold lx=0+cross 0.5
-165 hold lx=0 0.1
-165 hold lx=255+cross 0.5
-165 hold lx=255 1
-170 shot
-170 hold lx=255+cross 0.45
-170 hold lx=255 0.75
-170 hold lx=255+cross 0.45
-170 hold lx=255 0.75
-170 hold lx=0+cross 0.3
-170 hold lx=0 0.1
-170 hold lx=255+cross 0.5
-170 hold lx=255 1
-175 shot
-175 hold lx=255+cross 0.45
-175 hold lx=255 0.75
-175 hold lx=255+cross 0.45
-175 hold lx=255 0.75
-175 hold lx=0+cross 0.4
-175 hold lx=0 0.1
-175 hold lx=255+cross 0.5
-175 hold lx=255 1
-180 shot
-180 hold lx=255+cross 0.45
-180 hold lx=255 0.75
-180 hold lx=255+cross 0.45
-180 hold lx=255 0.75
-180 hold lx=0+cross 0.5
-180 hold lx=0 0.1
-180 hold lx=255+cross 0.5
-180 hold lx=255 1
+122 hold lx=255+cross 0.45
+122 hold lx=255 0.75
+122 hold lx=255+cross 0.45
+122 hold lx=255 0.75
+122 hold lx=0+cross 0.5
+122 hold lx=0 0.1
+122 hold lx=255+cross 0.5
+122 hold lx=255 1
+127 shot
+127 hold lx=255+cross 0.45
+127 hold lx=255 0.75
+127 hold lx=255+cross 0.45
+127 hold lx=255 0.75
+127 hold lx=0+cross 0.3
+127 hold lx=0 0.1
+127 hold lx=255+cross 0.5
+127 hold lx=255 1
+132 shot
+132 hold lx=255+cross 0.45
+132 hold lx=255 0.75
+132 hold lx=255+cross 0.45
+132 hold lx=255 0.75
+132 hold lx=0+cross 0.4
+132 hold lx=0 0.1
+132 hold lx=255+cross 0.5
+132 hold lx=255 1
+137 shot
+137 hold lx=255+cross 0.45
+137 hold lx=255 0.75
+137 hold lx=255+cross 0.45
+137 hold lx=255 0.75
+137 hold lx=0+cross 0.5
+137 hold lx=0 0.1
+137 hold lx=255+cross 0.5
+137 hold lx=255 1
+142 shot
+142 hold lx=255+cross 0.45
+142 hold lx=255 0.75
+142 hold lx=255+cross 0.45
+142 hold lx=255 0.75
+142 hold lx=0+cross 0.3
+142 hold lx=0 0.1
+142 hold lx=255+cross 0.5
+142 hold lx=255 1
+147 shot
+147 hold lx=255+cross 0.45
+147 hold lx=255 0.75
+147 hold lx=255+cross 0.45
+147 hold lx=255 0.75
+147 hold lx=0+cross 0.4
+147 hold lx=0 0.1
+147 hold lx=255+cross 0.5
+147 hold lx=255 1
+152 shot
+152 hold lx=255+cross 0.45
+152 hold lx=255 0.75
+152 hold lx=255+cross 0.45
+152 hold lx=255 0.75
+152 hold lx=0+cross 0.5
+152 hold lx=0 0.1
+152 hold lx=255+cross 0.5
+152 hold lx=255 1
+157 shot
+157 hold lx=255+cross 0.45
+157 hold lx=255 0.75
+157 hold lx=255+cross 0.45
+157 hold lx=255 0.75
+157 hold lx=0+cross 0.3
+157 hold lx=0 0.1
+157 hold lx=255+cross 0.5
+157 hold lx=255 1
+162 shot
+162 hold lx=255+cross 0.45
+162 hold lx=255 0.75
+162 hold lx=255+cross 0.45
+162 hold lx=255 0.75
+162 hold lx=0+cross 0.4
+162 hold lx=0 0.1
+162 hold lx=255+cross 0.5
+162 hold lx=255 1
+167 shot
+167 hold lx=255+cross 0.45
+167 hold lx=255 0.75
+167 hold lx=255+cross 0.45
+167 hold lx=255 0.75
+167 hold lx=0+cross 0.5
+167 hold lx=0 0.1
+167 hold lx=255+cross 0.5
+167 hold lx=255 1
+172 shot
+172 hold lx=255+cross 0.45
+172 hold lx=255 0.75
+172 hold lx=255+cross 0.45
+172 hold lx=255 0.75
+172 hold lx=0+cross 0.3
+172 hold lx=0 0.1
+172 hold lx=255+cross 0.5
+172 hold lx=255 1
+177 shot
+177 hold lx=255+cross 0.45
+177 hold lx=255 0.75
+177 hold lx=255+cross 0.45
+177 hold lx=255 0.75
+177 hold lx=0+cross 0.4
+177 hold lx=0 0.1
+177 hold lx=255+cross 0.5
+177 hold lx=255 1
+182 shot
+182 hold lx=255 2
+182 hold lx=0 0.5
+182 release
 185 shot
-185 hold lx=255+cross 0.45
-185 hold lx=255 0.75
-185 hold lx=255+cross 0.45
-185 hold lx=255 0.75
-185 hold lx=0+cross 0.3
-185 hold lx=0 0.1
-185 hold lx=255+cross 0.5
-185 hold lx=255 1
+185 press triangle 4.2
 190 shot
 190 hold lx=255+cross 0.45
 190 hold lx=255 0.75
 190 hold lx=255+cross 0.45
 190 hold lx=255 0.75
-190 hold lx=0+cross 0.4
-190 hold lx=0 0.1
-190 hold lx=255+cross 0.5
-190 hold lx=255 1
+190 hold lx=255+cross 0.45
+190 hold lx=255 0.75
+190 hold lx=255+cross 0.45
+190 hold lx=255 0.75
 195 shot
 195 hold lx=255+cross 0.45
 195 hold lx=255 0.75
 195 hold lx=255+cross 0.45
 195 hold lx=255 0.75
-195 hold lx=0+cross 0.5
-195 hold lx=0 0.1
-195 hold lx=255+cross 0.5
-195 hold lx=255 1
+195 hold lx=255+cross 0.45
+195 hold lx=255 0.75
+195 hold lx=255+cross 0.45
+195 hold lx=255 0.75
 200 shot
 200 hold lx=255+cross 0.45
 200 hold lx=255 0.75
 200 hold lx=255+cross 0.45
 200 hold lx=255 0.75
-200 hold lx=0+cross 0.3
-200 hold lx=0 0.1
-200 hold lx=255+cross 0.5
-200 hold lx=255 1
+200 hold lx=255+cross 0.45
+200 hold lx=255 0.75
+200 hold lx=255+cross 0.45
+200 hold lx=255 0.75
 205 shot
 205 hold lx=255+cross 0.45
 205 hold lx=255 0.75
 205 hold lx=255+cross 0.45
 205 hold lx=255 0.75
-205 hold lx=0+cross 0.4
-205 hold lx=0 0.1
-205 hold lx=255+cross 0.5
-205 hold lx=255 1
+205 hold lx=255+cross 0.45
+205 hold lx=255 0.75
+205 hold lx=255+cross 0.45
+205 hold lx=255 0.75
 210 shot
-210 hold lx=255+cross 0.45
-210 hold lx=255 0.75
-210 hold lx=255+cross 0.45
-210 hold lx=255 0.75
-210 hold lx=0+cross 0.5
-210 hold lx=0 0.1
-210 hold lx=255+cross 0.5
-210 hold lx=255 1
-215 shot
-215 hold lx=255+cross 0.45
-215 hold lx=255 0.75
-215 hold lx=255+cross 0.45
-215 hold lx=255 0.75
-215 hold lx=0+cross 0.3
-215 hold lx=0 0.1
-215 hold lx=255+cross 0.5
-215 hold lx=255 1
-220 shot
-220 hold lx=255+cross 0.45
-220 hold lx=255 0.75
-220 hold lx=255+cross 0.45
-220 hold lx=255 0.75
-220 hold lx=0+cross 0.4
-220 hold lx=0 0.1
-220 hold lx=255+cross 0.5
-220 hold lx=255 1
-225 shot
-225 hold lx=255+cross 0.45
-225 hold lx=255 0.75
-225 hold lx=255+cross 0.45
-225 hold lx=255 0.75
-225 hold lx=0+cross 0.5
-225 hold lx=0 0.1
-225 hold lx=255+cross 0.5
-225 hold lx=255 1
-230 shot
-230 hold lx=255+cross 0.45
-230 hold lx=255 0.75
-230 hold lx=255+cross 0.45
-230 hold lx=255 0.75
-230 hold lx=0+cross 0.3
-230 hold lx=0 0.1
-230 hold lx=255+cross 0.5
-230 hold lx=255 1
-235 shot
-235 hold lx=255+cross 0.45
-235 hold lx=255 0.75
-235 hold lx=255+cross 0.45
-235 hold lx=255 0.75
-235 hold lx=0+cross 0.4
-235 hold lx=0 0.1
-235 hold lx=255+cross 0.5
-235 hold lx=255 1
-240 shot
-240 hold lx=255 2
-240 hold lx=0 0.5
-240 release
-243 shot
-243 press triangle 4.2
-248 shot
-248 hold lx=255+cross 0.45
-248 hold lx=255 0.75
-248 hold lx=255+cross 0.45
-248 hold lx=255 0.75
-248 hold lx=255+cross 0.45
-248 hold lx=255 0.75
-248 hold lx=255+cross 0.45
-248 hold lx=255 0.75
-253 shot
-253 hold lx=255+cross 0.45
-253 hold lx=255 0.75
-253 hold lx=255+cross 0.45
-253 hold lx=255 0.75
-253 hold lx=255+cross 0.45
-253 hold lx=255 0.75
-253 hold lx=255+cross 0.45
-253 hold lx=255 0.75
-258 shot
-258 hold lx=255+cross 0.45
-258 hold lx=255 0.75
-258 hold lx=255+cross 0.45
-258 hold lx=255 0.75
-258 hold lx=255+cross 0.45
-258 hold lx=255 0.75
-258 hold lx=255+cross 0.45
-258 hold lx=255 0.75
-263 shot
-263 hold lx=255+cross 0.45
-263 hold lx=255 0.75
-263 hold lx=255+cross 0.45
-263 hold lx=255 0.75
-263 hold lx=255+cross 0.45
-263 hold lx=255 0.75
-263 hold lx=255+cross 0.45
-263 hold lx=255 0.75
-268 shot
-269 end
+211 end
