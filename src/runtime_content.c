@@ -175,9 +175,12 @@ static ABI int32_t temp_mount(uint32_t option,char *mount) {
     temp_folder(host,sizeof(host));
     char parent[4096];
     snprintf(parent,sizeof(parent),"%s/temp",runtime_file_user_dir());
-    if ((mkdir(parent,0755) && errno!=EEXIST) || (mkdir(host,0755) && errno!=EEXIST) || (option && temp_format()) ||
-        runtime_file_mount(TEMP_MOUNT,host)) {
+    if ((mkdir(parent,0755) && errno!=EEXIST) || (mkdir(host,0755) && errno!=EEXIST) || (option && temp_format())) {
         fprintf(stderr,"Runtime: AppContent temporary data mount of %s failed: %s\n",host,strerror(errno));
+        return PARAMETER;
+    }
+    if (runtime_file_mount(TEMP_MOUNT,host)) {
+        fprintf(stderr,"Runtime: AppContent temporary data mount of %s failed: mount table full or path too long\n",host);
         return PARAMETER;
     }
     memset(mount,0,16); memcpy(mount,TEMP_MOUNT,sizeof(TEMP_MOUNT));
