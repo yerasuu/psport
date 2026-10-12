@@ -40,6 +40,7 @@ static uint64_t pool_size_bytes(void) {
 #define NO_MEMORY ((int32_t)UINT32_C(0x8002000c))
 #define ACCESS ((int32_t)UINT32_C(0x8002000d))
 #define NO_SPACE ((int32_t)UINT32_C(0x80020023))
+#define NOT_FOUND ((int32_t)UINT32_C(0x80020002))
 #define MAP_FIXED_FLAG 0x10
 #define MAP_NO_OVERWRITE 0x80
 enum { KIND_RESERVED=1, KIND_DIRECT, KIND_FLEXIBLE };
@@ -472,11 +473,11 @@ static ABI int32_t direct_unmap(void *address, uint64_t size) {
     write_unlock();
     return result;
 }
-static ABI int32_t direct_release(uint64_t start, uint64_t size) {
+static int32_t release_direct(uint64_t start, uint64_t size, int32_t unallocated) {
     if (start % PAGE || size % PAGE) return INVALID;
     if (!size) return 0;
     write_lock();
-    if (!direct_range_allocated(start,size)) { write_unlock(); return INVALID; }
+    if (!direct_range_allocated(start,size)) { write_unlock(); return unallocated; }
     /* Mappings of released physical pages disappear with them. */
     for (size_t i=0; i<vma_count;) {
         Vma v=vmas[i];
@@ -505,6 +506,8 @@ static ABI int32_t direct_release(uint64_t start, uint64_t size) {
     flush_hooks();
     return 0;
 }
+static ABI int32_t direct_release(uint64_t start, uint64_t size) { return release_direct(start,size,INVALID); }
+static ABI int32_t direct_checked_release(uint64_t start, uint64_t size) { return release_direct(start,size,NOT_FOUND); }
 static int32_t map_flexible_locked(void **inout, uint64_t size, int prot, int flags) {
     if (!inout || !size || size%PAGE || (prot & ~0x37)) return INVALID;
     if (flexible_bytes+size>FLEXIBLE_SIZE || pool()) return NO_MEMORY;
@@ -713,6 +716,7 @@ static const RuntimeExport exports[]={
     {"sceKernelAllocateMainDirectMemory",direct_allocate_main},
     {"sceKernelMapDirectMemory",direct_map}, {"sceKernelMapNamedDirectMemory",direct_map_named},
     {"sceKernelReleaseDirectMemory",direct_release}, {"sceKernelMunmap",direct_unmap}, {"munmap",direct_unmap},
+    {"sceKernelCheckedReleaseDirectMemory",direct_checked_release},
     {"sceKernelMapFlexibleMemory",map_flexible}, {"sceKernelMapNamedFlexibleMemory",map_flexible_named},
     {"sceKernelReleaseFlexibleMemory",release_flexible}, {"sceKernelReserveVirtualRange",reserve_range},
     {"sceKernelMprotect",kernel_mprotect}, {"sceKernelQueryMemoryProtection",query_protection},
