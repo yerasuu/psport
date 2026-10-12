@@ -5,6 +5,8 @@
 #include <mutex>
 #include "common/logging/log.h"
 
+extern "C" void runtime_calls_hle_stub(const char* function, const std::uint64_t* count);
+
 namespace Common::Log {
 static Level threshold() {
     static const Level level = [] {
@@ -18,6 +20,7 @@ static Level threshold() {
     return level;
 }
 bool ShouldLog(Level level) { return level >= threshold(); }
+void Stubbed(const char* function, const std::uint64_t* count) { runtime_calls_hle_stub(function, count); }
 void Write(std::string_view log_class, Level level, const char* file, int line, const char* function,
            std::string&& message) {
     static std::mutex mutex;

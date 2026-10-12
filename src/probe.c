@@ -123,6 +123,7 @@ static int permissive_out_error;
 static ABI int64_t unresolved_permissive(uint32_t id, uintptr_t a0, uintptr_t a1, uintptr_t a2, uintptr_t a3,
                                          uintptr_t a4) {
     if (id >= import_count) return 0;
+    runtime_calls_unimplemented(id);
     const unsigned outputs = permissive_outputs[id];
     const int32_t result = outputs && permissive_out_error ? (int32_t)0x80020016 : 0;
     if (!__atomic_exchange_n(&permissive_seen[id], 1, __ATOMIC_RELAXED)) {
@@ -150,6 +151,7 @@ static ABI int64_t unresolved_permissive(uint32_t id, uintptr_t a0, uintptr_t a1
 }
 static ABI __attribute__((noreturn)) void unresolved(uint32_t id, uintptr_t argument) {
     if (id >= import_count) fail("bad import trap index");
+    runtime_calls_unimplemented(id);
     printf("STOP: first unsupported PS4 import: %s (index %u)\n", names[id], id);
     printf("API: %s\n", runtime_import_name(names[id]));
     printf("Caller return offset: 0x%" PRIxPTR "; first argument: 0x%" PRIxPTR "\n",
@@ -173,6 +175,51 @@ __asm__(".text\n.globl enter_on_stack\nenter_on_stack:\n"
         " mov %rbp,%rsp\n pop %rbp\n ret\n");
 #endif
 static ABI void guest_exit(void) { puts("Runtime: process finalizer callback reached"); }
+/* An import bound to the runtime's or the GPU library's own function whose result tells a failure
+ * (runtime_import_failure) is called through one of these: it keeps the six argument registers on
+ * its stack, calls the function and hands a result that looks like a failure, with them, to
+ * runtime_calls_failed. Arguments on the stack would move, so those imports are not listed. */
+enum { THUNK_SIZE = 96 };
+static void write_thunk(unsigned char *t, uint32_t id, uint32_t kind, uintptr_t target) {
+    static const unsigned char save[33] = {
+        0x48, 0x83, 0xec, 0x38,       /* sub rsp,56 */
+        0x48, 0x89, 0x3c, 0x24,       /* mov [rsp],rdi */
+        0x48, 0x89, 0x74, 0x24, 0x08, /* mov [rsp+8],rsi */
+        0x48, 0x89, 0x54, 0x24, 0x10, /* mov [rsp+16],rdx */
+        0x48, 0x89, 0x4c, 0x24, 0x18, /* mov [rsp+24],rcx */
+        0x4c, 0x89, 0x44, 0x24, 0x20, /* mov [rsp+32],r8 */
+        0x4c, 0x89, 0x4c, 0x24, 0x28, /* mov [rsp+40],r9 */
+    };
+    static const unsigned char checks[5][7] = {
+        {0},
+        {0x3d, 0x00, 0x00, 0x00, 0x80, 0x73, 0x05}, /* cmp eax,0x80000000; jae slow */
+        {0x90, 0x90, 0x83, 0xf8, 0xff, 0x74, 0x05}, /* cmp eax,-1; je slow */
+        {0x90, 0x48, 0x83, 0xf8, 0xff, 0x74, 0x05}, /* cmp rax,-1; je slow */
+        {0x90, 0x90, 0x48, 0x85, 0xc0, 0x78, 0x05}, /* test rax,rax; js slow */
+    };
+    static const unsigned char done[5] = {0x48, 0x83, 0xc4, 0x38, 0xc3}; /* add rsp,56; ret */
+    const uintptr_t handler = (uintptr_t)runtime_calls_failed;
+    memcpy(t, save, 33);
+    t[33] = 0x49; t[34] = 0xbb; memcpy(t + 35, &target, 8); /* movabs r11,target */
+    t[43] = 0x41; t[44] = 0xff; t[45] = 0xd3;               /* call r11 */
+    memcpy(t + 46, checks[kind], 7);
+    memcpy(t + 53, done, 5);
+    t[58] = 0xbf; memcpy(t + 59, &id, 4);                    /* slow: mov edi,id */
+    t[63] = 0xb9; memcpy(t + 64, &kind, 4);                  /* mov ecx,kind */
+    t[68] = 0x48; t[69] = 0x89; t[70] = 0xe6;                /* mov rsi,rsp */
+    t[71] = 0x48; t[72] = 0x89; t[73] = 0xc2;                /* mov rdx,rax */
+    t[74] = 0x49; t[75] = 0xbb; memcpy(t + 76, &handler, 8); /* movabs r11,runtime_calls_failed */
+    t[84] = 0x41; t[85] = 0xff; t[86] = 0xd3;               /* call r11 */
+    memcpy(t + 87, done, 5);
+}
+#ifndef _WIN32
+/* Termination signals SDL does not take (--cpu-only): the call summary, then the default action. */
+static void shutdown_signal(int sig) {
+    runtime_calls_report();
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
+#endif
 #ifndef _WIN32
 static void dump_frames(ucontext_t *uc);
 static void fault(int sig, siginfo_t *info, void *context) {
@@ -247,6 +294,7 @@ static void fault(int sig, siginfo_t *info, void *context) {
             snprintf(line, sizeof(line), "  #%d %p\n", i, frames[i]);
         ssize_t written_=write(2, line, strlen(line)); (void)written_;
     }
+    runtime_calls_report();
     _exit(128 + sig);
 }
 #endif
@@ -293,6 +341,7 @@ static void watchdog(int sig, siginfo_t *info, void *context) {
             at+=d->reclen;
         }
     usleep(100000);
+    runtime_calls_report();
     _exit(128 + sig);
 }
 /* param.sfo lookup: string or integer value of key, 0 when absent. */
@@ -553,6 +602,7 @@ int main(int argc, char **argv) {
     if (fread(names, 128, import_count, f) != import_count) fail("truncated import names");
     for (uint64_t i = 0; i < import_count; ++i)
         if (!memchr(names[i], 0, 128)) fail("unterminated import name");
+    runtime_calls_configure((const char (*)[128])names, import_count);
     for (uint64_t i = 0; i < nr; ++i) {
         relocs[i].target = read64(f);
         relocs[i].kind = read64(f);
@@ -608,6 +658,14 @@ int main(int argc, char **argv) {
         if (bbgpu_init(&gpu)) fail("GPU initialization failed");
         printf("GPU: window and Vulkan presenter ready; SDK 0x%08x, %u HLE symbols\n",(unsigned)sdk,bbgpu_symbol_count());
     }
+#ifndef _WIN32
+    static const int shutdown_signals[] = {SIGTERM, SIGINT, SIGHUP};
+    for (size_t i = 0; i < sizeof(shutdown_signals) / sizeof(*shutdown_signals); ++i) {
+        struct sigaction current;
+        if (!sigaction(shutdown_signals[i], NULL, &current) && current.sa_handler == SIG_DFL)
+            signal(shutdown_signals[i], shutdown_signal);
+    }
+#endif
     const char *permissive = getenv("BB_PERMISSIVE");
     if (permissive && !strcmp(permissive, "1")) {
         permissive_seen = calloc(import_count ? import_count : 1, 1);
@@ -619,6 +677,7 @@ int main(int argc, char **argv) {
         permissive_out_error = out && !strcmp(out, "error");
     }
     unsigned char *traps = allocate(round_page((import_count + 1) * 32));
+    unsigned char *thunks = allocate(round_page((import_count + 1) * THUNK_SIZE));
     unsigned char *data_traps = allocate((import_count + 1) * page_size);
     protect(data_traps, (import_count + 1) * page_size, 0);
     for (uint64_t i = 0; i < import_count; ++i) {
@@ -656,6 +715,15 @@ int main(int argc, char **argv) {
             if (resolved) {
                 value = resolved + relocs[i].addend;
                 import_state[relocs[i].value] = runtime_last_stub ? 3 : 1;
+                const unsigned failure = relocs[i].kind == 1 ? runtime_import_failure(names[relocs[i].value]) : 0;
+                if (relocs[i].kind == 1 && runtime_last_stub) {
+                    const uintptr_t handler = (uintptr_t)runtime_calls_stub;
+                    memcpy(traps + 32 * relocs[i].value + 22, &handler, 8);
+                    value = (uintptr_t)(traps + 32 * relocs[i].value);
+                } else if (failure) {
+                    write_thunk(thunks + THUNK_SIZE * relocs[i].value, (uint32_t)relocs[i].value, failure, resolved);
+                    value = (uintptr_t)(thunks + THUNK_SIZE * relocs[i].value);
+                }
             } else if (native_libc && bindings[relocs[i].value]) {
                 uint64_t address=bindings[relocs[i].value];
                 if ((bound_kind - 1) % 2 + 1 != relocs[i].kind || !mapped(segments,ns,address,relocs[i].addend+1)) fail("native export kind/range mismatch");
@@ -686,6 +754,7 @@ int main(int argc, char **argv) {
     if (patch_file) apply_patches(patch_file, segments, ns, relocs, nr);
     if (!cpu_only) bbgpu_patch_image(image, size);
     protect(traps, round_page((import_count + 1) * 32), 5);
+    protect(thunks, round_page((import_count + 1) * THUNK_SIZE), 5);
     protect(image, round_page(size), 0);
     int executable_entry = 0;
     for (uint64_t i = 0; i < ns; ++i) {

@@ -99,6 +99,7 @@ void runtime_report(void) {
     runtime_savedata_report();
     runtime_file_report();
     printf("Runtime: memory operations=%zu\n", (size_t)memory_calls);
+    runtime_calls_report();
 }
 static ABI void init_env(void) {
     /* prepare.py verified the supplied libc export consists of exactly C3. */
@@ -352,6 +353,19 @@ unsigned runtime_import_outputs(const char *nid) {
         size_t mid=low+(high-low)/2;
         int order=strncmp(nid,output_arguments[mid].nid,11);
         if (!order) return output_arguments[mid].outputs;
+        if (order<0) high=mid; else low=mid+1;
+    }
+    return 0;
+}
+static const struct { char nid[12]; unsigned char kind; } failure_kinds[]={
+#include "import_returns.inc"
+};
+unsigned runtime_import_failure(const char *nid) {
+    size_t low=0, high=sizeof(failure_kinds)/sizeof(*failure_kinds);
+    while (low<high) {
+        size_t mid=low+(high-low)/2;
+        int order=strncmp(nid,failure_kinds[mid].nid,11);
+        if (!order) return failure_kinds[mid].kind;
         if (order<0) high=mid; else low=mid+1;
     }
     return 0;

@@ -40,6 +40,21 @@ const char *runtime_import_name(const char *name);
 /* Arguments (bit N: argument N) the export writes through a pointer, per shadPS4's prototypes; 0
  * when it has none or the NID is not listed. */
 unsigned runtime_import_outputs(const char *nid);
+/* How the export reports a failure, per shadPS4's prototypes (import_returns.inc): 1 a 32-bit SCE
+ * error code, 2 and 3 -1 with errno as a 32-bit or 64-bit result, 4 a 64-bit SCE error code; 0 when
+ * its result says nothing about failure or it takes arguments on the stack. */
+unsigned runtime_import_failure(const char *nid);
+/* Calls nothing answers for real or that fail (runtime_calls.c): logged once per import and error
+ * code, counted, and summed up by runtime_calls_report (also into BB_CALL_REPORT). */
+void runtime_calls_configure(const char (*names)[128], uint64_t count);
+void runtime_calls_unimplemented(uint32_t id);
+ABI int64_t runtime_calls_stub(uint32_t id, uintptr_t a0, uintptr_t a1, uintptr_t a2, uintptr_t a3, uintptr_t a4);
+/* A call to import id with these six arguments returned result, which kind says may be a failure;
+ * returns result. */
+ABI int64_t runtime_calls_failed(uint32_t id, const uintptr_t *arguments, int64_t result, uint32_t kind);
+/* An HLE function logging "(STUBBED)" was called the first time; *count keeps counting its calls. */
+void runtime_calls_hle_stub(const char *function, const uint64_t *count);
+void runtime_calls_report(void);
 uintptr_t runtime_rwlock_resolve(const char *name);
 void runtime_rwlock_report(void);
 void runtime_set_module_tls(uint64_t module, const void *data, uint64_t filesz, uint64_t memsz);
