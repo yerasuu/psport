@@ -185,7 +185,38 @@ static ABI int32_t psem_getvalue(uint64_t *sem,int32_t *value) {
     runtime_exception_unlock(&lock);
     return s ? 0 : ERR(22);
 }
+static int32_t posix_result(int32_t r) {
+    if (!r) return 0;
+    *runtime_errno()=r==ERR(3) ? 22 : (int32_t)((uint32_t)r&0xffff);
+    return -1;
+}
+typedef struct { int64_t seconds, nanoseconds; } GuestTime;
+static ABI int32_t posix_sem_init(uint64_t *sem,int shared,uint32_t value) { return posix_result(psem_init(sem,shared,value,NULL)); }
+static ABI int32_t posix_sem_destroy(uint64_t *sem) { return posix_result(psem_destroy(sem)); }
+static ABI int32_t posix_sem_wait(uint64_t *sem) { return posix_result(psem_wait(sem)); }
+static ABI int32_t posix_sem_trywait(uint64_t *sem) { return posix_result(psem_trywait(sem)); }
+static ABI int32_t posix_sem_post(uint64_t *sem) { return posix_result(psem_post(sem)); }
+static ABI int32_t posix_sem_getvalue(uint64_t *sem,int32_t *value) { return posix_result(psem_getvalue(sem,value)); }
+static ABI int32_t posix_sem_timedwait(uint64_t *sem,const GuestTime *end) {
+    if (!sem) return posix_result(ERR(22));
+    int32_t result=wait_count((uint32_t)*sem,1,NULL,0);
+    if (result!=ERR(16)) return posix_result(result);
+    if (!end || end->nanoseconds<0 || end->nanoseconds>=1000000000) return posix_result(ERR(22));
+    for (;;) {
+        struct timespec now;
+        clock_gettime(CLOCK_REALTIME,&now);
+        int64_t seconds=end->seconds-now.tv_sec;
+        int64_t left=seconds>4294 ? INT64_MAX : seconds*1000000+(end->nanoseconds-now.tv_nsec)/1000;
+        uint32_t usec=left<=0 ? 0 : left>UINT32_MAX ? UINT32_MAX : (uint32_t)left;
+        result=wait_count((uint32_t)*sem,1,&usec,1);
+        if (result!=ERR(60) || left<=UINT32_MAX) break;
+    }
+    return posix_result(result);
+}
 static const RuntimeExport exports[]={
+    {"sem_init",posix_sem_init}, {"sem_destroy",posix_sem_destroy}, {"sem_wait",posix_sem_wait},
+    {"sem_trywait",posix_sem_trywait}, {"sem_timedwait",posix_sem_timedwait}, {"sem_post",posix_sem_post},
+    {"sem_getvalue",posix_sem_getvalue},
     {"scePthreadSemInit",psem_init}, {"scePthreadSemWait",psem_wait}, {"scePthreadSemTrywait",psem_trywait},
     {"scePthreadSemTimedwait",psem_timedwait}, {"scePthreadSemPost",psem_post},
     {"scePthreadSemDestroy",psem_destroy}, {"scePthreadSemGetvalue",psem_getvalue},
