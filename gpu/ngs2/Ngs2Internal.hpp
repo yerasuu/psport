@@ -136,6 +136,19 @@ struct Ngs2UserFx2 {
     std::unique_ptr<Ngs2ReverbState, Ngs2ReverbDeleter> reverb;
 };
 
+// A mastering matrix type is the index here of its source channels * 4 + that of its destination channels.
+static constexpr std::array<std::uint32_t, 4> NGS2_MATRIX_CHANNELS{1, 2, 6, 8};
+static constexpr std::uint32_t NGS2_MASTERING_MATRIX_TYPES = NGS2_MATRIX_CHANNELS.size() * NGS2_MATRIX_CHANNELS.size();
+
+struct Ngs2PeakMeter {
+    std::uint32_t mode = 0;
+    std::uint32_t next = 0;
+    std::uint32_t filled = 0;
+    std::vector<std::uint32_t> blockSamples;
+    std::array<std::vector<float>, NGS2_MAX_CHANNELS> blocks;
+    std::array<float, NGS2_MAX_CHANNELS> heights{};
+};
+
 struct Ngs2Voice {
     Ngs2Rack* rack = nullptr;
     Ngs2PlayState state = Ngs2PlayState::Empty;
@@ -166,6 +179,9 @@ struct Ngs2Voice {
     float lfeLevel = 1.0f;
     std::uint32_t lfeCutoff = 0;
     std::array<Ngs2Filter, 2> lfeFilters;
+    std::array<std::vector<float>, NGS2_MASTERING_MATRIX_TYPES> outputMatrices;
+    Ngs2PeakMeter peakMeter;
+    Ngs2PeakMeter outputPeakMeter;
     std::vector<Ngs2UserFx2> userFx;
     Ngs2UserFxProcessHandler userFxHandler = nullptr;
     std::array<std::uintptr_t, 3> userFxData{};
@@ -191,6 +207,7 @@ struct Ngs2Rack {
     std::uint32_t maxGrainSamples = 0;
     std::uint32_t maxChannelWorks = 0;
     std::uint32_t maxInputs = 0;
+    std::uint32_t peakMeterBlocks = 0;
     Ngs2ContextBufferInfo bufferInfo{};
     Ngs2BufferAllocator allocator{};
     std::vector<Ngs2Voice> voices;
@@ -255,6 +272,9 @@ void Ngs2Ramp(float* samples, float from, float to, std::uint32_t grain, const f
 void Ngs2ProcessLegacyUserFx(Ngs2Voice& voice, std::uint32_t grain, std::uint32_t sampleRate);
 void Ngs2RenderSystem(Ngs2System& system, const Ngs2RenderBufferInfo* bufferInfo, std::uint32_t numBufferInfo);
 float Ngs2DefaultLevel(std::uint32_t sourceChannels, std::uint32_t source, std::uint32_t destChannels, std::uint32_t dest);
+void Ngs2SetPeakMeter(Ngs2PeakMeter& meter, std::uint32_t mode, std::uint32_t blocks);
+void Ngs2MeasurePeaks(Ngs2PeakMeter& meter, const float* samples, std::uint32_t channels, std::uint32_t grain);
+float Ngs2PeakHeight(const Ngs2PeakMeter& meter);
 int Ngs2PanInit(Ngs2PanWork* work, const float* speaker_angles, float unit_angle, uint32_t num_speakers);
 int Ngs2PanGetVolumeMatrix(Ngs2PanWork* work, const Ngs2PanParam* params, uint32_t num_params, uint32_t matrix_format, float* out_volume_matrix);
 

@@ -274,11 +274,15 @@ static void RenderVoice(Ngs2Voice& voice, const std::vector<Ngs2Voice*>& voices,
     if (voice.state == Ngs2PlayState::Playing && voice.channels != 0) {
         if (voice.rack->rackId == SCE_NGS2_RACK_ID_SAMPLER) RenderSampler(voice, grain, systemRate);
         else MixInputs(voice, voices, grain, systemRate);
-        if (voice.rack->rackId == SCE_NGS2_RACK_ID_MASTERING) FilterLfe(voice, grain, systemRate);
+        if (voice.rack->rackId == SCE_NGS2_RACK_ID_MASTERING) {
+            Ngs2MeasurePeaks(voice.peakMeter, voice.samples.data(), voice.channels, grain);
+            FilterLfe(voice, grain, systemRate);
+        }
         if (voice.rack->rackId == SCE_NGS2_RACK_ID_REVERB && voice.reverb) voice.hasSamples = Ngs2ProcessReverb(*voice.reverb, voice.samples.data(), voice.channels, grain, systemRate);
         Ngs2ProcessLegacyUserFx(voice, grain, systemRate);
         if (voice.rack->rackId == SCE_NGS2_RACK_ID_SAMPLER) ApplyFilters(voice, 1, grain, systemRate);
         Ngs2ProcessUserFx(voice, grain, systemRate);
+        if (voice.rack->rackId == SCE_NGS2_RACK_ID_SUBMIXER) Ngs2MeasurePeaks(voice.peakMeter, voice.samples.data(), voice.channels, grain);
     }
     voice.rendered = true;
 }
@@ -307,6 +311,35 @@ static std::vector<float>& OutputMix(std::vector<std::vector<float>>& mixes, con
     return mix;
 }
 
+static float OutputLevel(const Ngs2Voice& voice, std::uint32_t source, std::uint32_t destChannels, std::uint32_t dest) {
+    const auto sourceType = std::find(NGS2_MATRIX_CHANNELS.begin(), NGS2_MATRIX_CHANNELS.end(), voice.channels) - NGS2_MATRIX_CHANNELS.begin();
+    const auto destType = std::find(NGS2_MATRIX_CHANNELS.begin(), NGS2_MATRIX_CHANNELS.end(), destChannels) - NGS2_MATRIX_CHANNELS.begin();
+    if (sourceType < static_cast<std::ptrdiff_t>(NGS2_MATRIX_CHANNELS.size()) && destType < static_cast<std::ptrdiff_t>(NGS2_MATRIX_CHANNELS.size())) {
+        const auto& matrix = voice.outputMatrices[sourceType * NGS2_MATRIX_CHANNELS.size() + destType];
+        if (!matrix.empty()) return matrix[source * destChannels + dest];
+    }
+    if (destChannels == voice.channels) return dest == source ? 1.0f : 0.0f;
+    return Ngs2DefaultLevel(voice.channels, source, destChannels, dest);
+}
+
+// As firmware 11.00 does, the mastering matrix (Ryza masters 5.1 into the stereo buffer it sends to
+// AudioOut) comes before the gain, so the LFE level applies to the destination's LFE channel.
+static void MixMastering(Ngs2Voice& voice, std::vector<float>& mix, std::uint32_t outputChannels, std::uint32_t grain) {
+    std::vector<float> output(static_cast<std::size_t>(grain) * outputChannels);
+    for (std::uint32_t dst = 0; dst < outputChannels; dst++) {
+        const bool lfe = dst == NGS2_LFE_CHANNEL && (outputChannels == 6 || outputChannels == 8);
+        const float level = lfe ? voice.lfeLevel : voice.fbwLevel;
+        float* out = output.data() + static_cast<std::size_t>(dst) * grain;
+        for (std::uint32_t src = 0; src < voice.channels; src++) {
+            const float gain = level * OutputLevel(voice, src, outputChannels, dst);
+            if (gain == 0.0f) continue;
+            for (std::uint32_t i = 0; i < grain; i++) out[i] += voice.samples[src * grain + i] * gain;
+        }
+        for (std::uint32_t i = 0; i < grain; i++) mix[i * outputChannels + dst] += out[i];
+    }
+    Ngs2MeasurePeaks(voice.outputPeakMeter, output.data(), outputChannels, grain);
+}
+
 static void WriteOutput(const Ngs2RenderBufferInfo& output, const std::vector<float>& mix) {
     if (output.waveform_type == SCE_NGS2_WAVEFORM_TYPE_PCM_F32L) {
         std::memcpy(output.buffer, mix.data(), mix.size() * sizeof(float));
@@ -330,21 +363,12 @@ void Ngs2RenderSystem(Ngs2System& system, const Ngs2RenderBufferInfo* bufferInfo
     std::vector<std::vector<float>> mixes(numBufferInfo);
     for (auto* voice : voices) {
         RenderVoice(*voice, voices, grain, system.option.sample_rate);
-        if (voice->rack->rackId != SCE_NGS2_RACK_ID_MASTERING || !voice->hasSamples) continue;
-        auto& mix = OutputMix(mixes, bufferInfo, numBufferInfo, *voice, grain);
-        const std::uint32_t outputChannels = bufferInfo[voice->outputId].num_channels;
-        for (std::uint32_t channel = 0; channel < voice->channels; channel++) {
-            const bool lfe = channel == 3 && (voice->channels == 6 || voice->channels == 8);
-            const float level = lfe ? voice->lfeLevel : voice->fbwLevel;
-            // A render buffer with other channels than the mastering voice (Ryza masters 5.1 into
-            // the stereo buffer it sends to AudioOut) takes the default down- or upmix.
-            for (std::uint32_t dst = 0; dst < outputChannels; dst++) {
-                const float gain = outputChannels == voice->channels ? (dst == channel ? level : 0.0f)
-                                                                     : level * Ngs2DefaultLevel(voice->channels, channel, outputChannels, dst);
-                if (gain == 0.0f) continue;
-                for (std::uint32_t i = 0; i < grain; i++) mix[i * outputChannels + dst] += voice->samples[channel * grain + i] * gain;
-            }
+        if (voice->rack->rackId != SCE_NGS2_RACK_ID_MASTERING || voice->state != Ngs2PlayState::Playing) continue;
+        if (!voice->hasSamples) {
+            Ngs2MeasurePeaks(voice->outputPeakMeter, voice->samples.data(), voice->channels, grain);
+            continue;
         }
+        MixMastering(*voice, OutputMix(mixes, bufferInfo, numBufferInfo, *voice, grain), bufferInfo[voice->outputId].num_channels, grain);
     }
     for (std::uint32_t i = 0; i < numBufferInfo; i++) {
         if (bufferInfo[i].buffer != nullptr) std::memset(bufferInfo[i].buffer, 0, bufferInfo[i].buffer_size);

@@ -5,8 +5,6 @@
 #include <mutex>
 #include <stdexcept>
 #include <string>
-#include <vector>
-#include <cstdio>
 
 #include "ngs2_compat.hpp"
 #include "Ngs2Internal.hpp"
@@ -69,6 +67,7 @@ void Ngs2Voice::ResetSetup() {
     lfeLevel = 1.0f;
     lfeCutoff = 0;
     lfeFilters = {};
+    for (auto& matrix : outputMatrices) matrix.clear();
     channels = 0;
     sampleRate = 0;
     waveformType = 0;
@@ -138,17 +137,6 @@ static void Patch(Ngs2Voice& voice, const Ngs2VoicePatchParam& patch) {
     auto* dest = Ngs2FindVoice(patch.dest_handle);
     if (dest == nullptr || dest->rack->system != voice.rack->system || dest->rack->rackId == SCE_NGS2_RACK_ID_SAMPLER) APS5_INVALID_ARG_EX;
     port.dest = dest;
-}
-
-// An effect not implemented (a peak meter, mastering's matrix): its parameter
-// is accepted and leaves the sound as it is, so the rest of the same parameter list still applies.
-static void IgnoreParam(std::uint32_t id) {
-    static std::mutex lock;
-    static std::vector<std::uint32_t> told;
-    std::lock_guard guard(lock);
-    if (std::find(told.begin(), told.end(), id) != told.end()) return;
-    told.push_back(id);
-    std::printf("Ngs2: voice param %#x is not implemented; ignored\n", id);
 }
 
 static void ApplyCommonParam(Ngs2Voice& voice, const Ngs2VoiceParamHeader& param) {
@@ -315,6 +303,16 @@ static void ApplySamplerParam(Ngs2Voice& voice, const Ngs2VoiceParamHeader& para
     }
 }
 
+static void SetOutputMatrix(Ngs2Voice& voice, const Ngs2MasteringVoiceMatrixParam& param) {
+    if (param.type >= NGS2_MASTERING_MATRIX_TYPES || (param.levels == nullptr && param.num_levels != 0) || param.num_levels > NGS2_MAX_CHANNELS * NGS2_MAX_CHANNELS) {
+        APS5_INVALID_ARG_EX;
+    }
+    const std::uint32_t size = NGS2_MATRIX_CHANNELS[param.type / NGS2_MATRIX_CHANNELS.size()] * NGS2_MATRIX_CHANNELS[param.type % NGS2_MATRIX_CHANNELS.size()];
+    auto& matrix = voice.outputMatrices[param.type];
+    matrix.assign(size, 0.0f);
+    for (std::uint32_t i = 0; i < std::min(size, param.num_levels); i++) matrix[i] = std::clamp(param.levels[i], -MAX_MATRIX_LEVEL, MAX_MATRIX_LEVEL);
+}
+
 static void SetupMixer(Ngs2Voice& voice, std::uint32_t numChannels) {
     if (numChannels == 0 || numChannels > voice.rack->maxChannels) APS5_INVALID_ARG_EX;
     voice.ResetSetup();
@@ -340,7 +338,7 @@ static void ApplyParam(Ngs2Voice& voice, const Ngs2VoiceParamHeader& param) {
                 return;
             }
             if (param.id == SCE_NGS2_SUBMIXER_VOICE_PARAM_PEAK_METER) {
-                IgnoreParam(param.id);
+                Ngs2SetPeakMeter(voice.peakMeter, ParamAs<Ngs2VoicePeakMeterParam>(param).mode, voice.rack->peakMeterBlocks);
                 return;
             }
             if (param.id != SCE_NGS2_SUBMIXER_VOICE_PARAM_SETUP) break;
@@ -382,8 +380,14 @@ static void ApplyParam(Ngs2Voice& voice, const Ngs2VoiceParamHeader& param) {
                 for (auto& stage : voice.lfeFilters) stage.sampleRate = 0;
                 return;
             }
-            if (param.id == SCE_NGS2_MASTERING_VOICE_PARAM_MATRIX || param.id == SCE_NGS2_MASTERING_VOICE_PARAM_PEAK_METER) {
-                IgnoreParam(param.id);
+            if (param.id == SCE_NGS2_MASTERING_VOICE_PARAM_MATRIX) {
+                SetOutputMatrix(voice, ParamAs<Ngs2MasteringVoiceMatrixParam>(param));
+                return;
+            }
+            if (param.id == SCE_NGS2_MASTERING_VOICE_PARAM_PEAK_METER) {
+                const auto mode = ParamAs<Ngs2VoicePeakMeterParam>(param).mode;
+                Ngs2SetPeakMeter(voice.peakMeter, mode, voice.rack->peakMeterBlocks);
+                Ngs2SetPeakMeter(voice.outputPeakMeter, mode, voice.rack->peakMeterBlocks);
                 return;
             }
             if (param.id == SCE_NGS2_MASTERING_VOICE_PARAM_OUTPUT) {
@@ -467,6 +471,7 @@ int APS5_VABI sceNgs2VoiceGetState(uintptr_t voice_handle, Ngs2VoiceState* state
             auto& submixer = *reinterpret_cast<Ngs2SubmixerVoiceState*>(state);
             submixer = {};
             submixer.voice_state.state_flags = voice.stateFlags;
+            submixer.peak_height = Ngs2PeakHeight(voice.peakMeter);
             return SCE_NGS2_OK;
         }
         case SCE_NGS2_RACK_ID_MASTERING: {
@@ -474,6 +479,8 @@ int APS5_VABI sceNgs2VoiceGetState(uintptr_t voice_handle, Ngs2VoiceState* state
             auto& mastering = *reinterpret_cast<Ngs2MasteringVoiceState*>(state);
             mastering = {};
             mastering.voice_state.state_flags = voice.stateFlags;
+            std::copy(voice.peakMeter.heights.begin(), voice.peakMeter.heights.end(), mastering.input_peak_height);
+            std::copy(voice.outputPeakMeter.heights.begin(), voice.outputPeakMeter.heights.end(), mastering.output_peak_height);
             return SCE_NGS2_OK;
         }
         case SCE_NGS2_RACK_ID_CUSTOM_SUBMIXER: {
