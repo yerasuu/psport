@@ -457,14 +457,20 @@ void RunEventWriteEop(Vulkan::Rasterizer& rasterizer, const u8* data) {
         const bool writes = eop.data_sel.Value() != DataSelect::None;
         const u64 value = eop.data_sel.Value() == DataSelect::Data32Low ? eop.DataDWord()
                                                                         : eop.DataQWord();
-        // bbport: the GPU writes the label at the end of the pipe, as the command processor does;
-        // labels with an interrupt keep the CPU signal (the interrupt comes from there).
+        // bbport: the GPU writes the label at the end of the pipe, as the command processor does,
+        // also when an interrupt follows (the CPU raises it once the GPU is done): written by the
+        // CPU then, it landed after the GPU's later labels to the same address and set it back.
         if ((eop.data_sel.Value() == DataSelect::Data32Low ||
              eop.data_sel.Value() == DataSelect::Data64) &&
-            eop.int_sel.Value() == InterruptSelect::None &&
+            (eop.int_sel.Value() == InterruptSelect::None ||
+             eop.int_sel.Value() == InterruptSelect::IrqWhenWriteConfirm) &&
             rasterizer.WriteLabelOnGpu(reinterpret_cast<VAddr>(eop.Address<u8>()), value,
                                        eop.data_sel.Value() == DataSelect::Data32Low ? 4 : 8)) {
             BbStats::eop_written.fetch_add(1, std::memory_order_relaxed);
+            if (eop.int_sel.Value() != InterruptSelect::None) {
+                rasterizer.SignalAfterGpu(
+                    [] { Platform::IrqC::Instance()->Signal(Platform::InterruptId::GfxEop); });
+            }
             return;
         }
         rasterizer.SignalAfterGpu([eop, seq] { SignalEop(eop, seq); },
@@ -2637,15 +2643,22 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
                     rasterizer->WriteTimestampOnGpu(rm->Address<VAddr>(), true)) {
                     break;
                 }
-                // bbport: a label without an interrupt is written by the GPU (end of pipe).
+                // bbport: the label is written by the GPU (end of pipe), in stream order with the
+                // queue's other labels, also before an interrupt (raised once the GPU is done).
                 if ((rm->data_sel.Value() == DataSelect::Data32Low ||
                      rm->data_sel.Value() == DataSelect::Data64) &&
-                    rm->int_sel.Value() == InterruptSelect::None &&
+                    rm->int_sel.Value() != InterruptSelect::IrqOnly &&
                     rasterizer->WriteLabelOnGpu(
                         rm->Address<VAddr>(),
                         rm->data_sel.Value() == DataSelect::Data32Low ? rm->DataDWord()
                                                                       : rm->DataQWord(),
                         rm->data_sel.Value() == DataSelect::Data32Low ? 4 : 8)) {
+                    if (rm->int_sel.Value() != InterruptSelect::None) {
+                        rasterizer->SignalAfterGpu([pipe_id = queue.pipe_id] {
+                            Platform::IrqC::Instance()->Signal(
+                                static_cast<Platform::InterruptId>(pipe_id));
+                        });
+                    }
                     break;
                 }
                 const PM4CmdReleaseMem release = *rm;
