@@ -286,5 +286,12 @@ int32_t runtime_audio_open(int32_t user, int32_t type, int32_t index, uint32_t l
 }
 int32_t runtime_audio_output(int32_t handle, const void *data) { return audio_output(handle,data); }
 int32_t runtime_audio_close(int32_t handle) { return audio_close(handle); }
+int runtime_audio_device_channels(void) {
+    pthread_mutex_lock(&table_lock);
+    SDL_AudioSpec spec;
+    int channels=sdl_audio() && SDL_GetAudioDeviceFormat(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,&spec,NULL) ? spec.channels : 2;
+    pthread_mutex_unlock(&table_lock);
+    return channels;
+}
 uintptr_t runtime_audio_resolve(const char *name) { return RUNTIME_LOOKUP(exports,name); }
 void runtime_audio_report(void) { printf("Runtime: audio ports opened=%zu, buffers output=%zu\n",ports_opened,buffers_out); }

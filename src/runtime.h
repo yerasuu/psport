@@ -171,6 +171,8 @@ int32_t runtime_audio_init(void);
 int32_t runtime_audio_open(int32_t user, int32_t type, int32_t index, uint32_t length, uint32_t freq, uint32_t param);
 int32_t runtime_audio_output(int32_t handle, const void *data);
 int32_t runtime_audio_close(int32_t handle);
+/* Channels of the host's default playback device: 2 without one. */
+int runtime_audio_device_channels(void);
 uintptr_t runtime_audio3d_resolve(const char *name);
 void runtime_audio3d_report(void);
 uintptr_t runtime_pad_resolve(const char *name);
