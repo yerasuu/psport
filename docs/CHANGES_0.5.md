@@ -4,8 +4,6 @@ bbport is the counterpart of Wine + DXVK for a single game: Bloodborne (CUSA0317
 The game's x86-64 code runs directly on the CPU, a runtime written for this game replaces the PS4
 system libraries, and the graphics are translated to Vulkan.
 
-Questions about this project: Discord https://discord.gg/KYZRKk9CB — not the shadPS4 server.
-
 ### What's new since 0.4
 
 Details and measurements of each step are in the prerelease notes:
@@ -90,8 +88,6 @@ are not bundled. `SHA256SUMS` accompanies the download.
 bbport — аналог Wine + DXVK для одной игры: Bloodborne (CUSA03173, v1.09) на Linux. Код игры x86-64
 выполняется прямо на процессоре, системные библиотеки PS4 заменяет рантайм, написанный под эту игру,
 графика переводится в Vulkan.
-
-Вопросы по проекту: Discord https://discord.gg/KYZRKk9CB — не сервер shadPS4.
 
 ### Что нового после 0.4
 

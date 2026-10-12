@@ -4,8 +4,6 @@ bbport is the counterpart of Wine + DXVK for a single game: Bloodborne (v1.09) o
 Changes since [0.5](https://github.com/deadinside28/bloodborne_pc/releases/tag/0.5); details and
 measurements: [CHANGES_after_0.5.md](https://github.com/deadinside28/bloodborne_pc/blob/master/docs/CHANGES_after_0.5.md) (Russian).
 
-Questions about this project: Discord https://discord.gg/KYZRKk9CB — not the shadPS4 server.
-
 ### New
 
 - **Online play (shadNet)**, as a separate module (`libbbnet.so`, loaded only when online play is
@@ -59,8 +57,6 @@ accompanies the download.
 bbport — аналог Wine + DXVK для одной игры: Bloodborne (v1.09) на Linux. Изменения после
 [0.5](https://github.com/deadinside28/bloodborne_pc/releases/tag/0.5); подробности и замеры —
 [CHANGES_after_0.5.md](https://github.com/deadinside28/bloodborne_pc/blob/master/docs/CHANGES_after_0.5.md).
-
-Вопросы по проекту: Discord https://discord.gg/KYZRKk9CB — не сервер shadPS4.
 
 ### Новое
 
