@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <unistd.h>
 #define INVALID_ID ((int32_t)0x805a1000)
 #define NOT_LOADED ((int32_t)0x805a1001)
@@ -133,17 +134,25 @@ static ABI int32_t addon_list(uint32_t service,void *list,uint32_t capacity,uint
     if (count) printf("Runtime: AppContent add-ons reported installed (%s): %u\n",root,(unsigned)count);
     ++lists; return 0;
 }
-uintptr_t runtime_content_resolve(const char *name) {
-    if (!strcmp(name,"g8cM39EUZ6o#M#N")) return (uintptr_t)module_load;
-    if (!strcmp(name,"fMP5NHUOaMk#M#N")) return (uintptr_t)module_loaded;
-    if (!strcmp(name,"eR2bZFAAU0Q#M#N")) return (uintptr_t)module_unload;
-    /* Bloodborne does not import it, so the NID matches in any title's scope. */
-    if (!strncmp(name,"hHrGoGoNf+s",11) && (!name[11] || name[11]=='#')) return (uintptr_t)module_load_internal;
-    if (!strcmp(name,"R9lA82OraNs#c#d")) return (uintptr_t)content_init;
-    if (!strcmp(name,"99b82IKXpH4#c#d")) return (uintptr_t)param_int;
-    if (!strcmp(name,"xnd8BJzAxmk#c#d")) return (uintptr_t)addon_list;
+/* SceAppContentMountPoint: the mount point's path, NUL-terminated within 16 bytes. The space left
+ * for download data is the free space of the host folder behind it. */
+static ABI int32_t download_space(const char *mount,uint64_t *kb) {
+    require_initialized();
+    if (!mount || !kb || !memchr(mount,0,16)) return PARAMETER;
+    char host[4096];
+    struct statvfs fs;
+    if (runtime_file_translate(mount,host,sizeof(host)) || statvfs(host,&fs)) return PARAMETER;
+    *kb=(uint64_t)fs.f_bavail*fs.f_frsize/1024;
     return 0;
 }
+static const RuntimeExport exports[]={
+    {"sceSysmoduleLoadModule",module_load}, {"sceSysmoduleIsLoaded",module_loaded},
+    {"sceSysmoduleUnloadModule",module_unload}, {"sceSysmoduleLoadModuleInternalWithArg",module_load_internal},
+    {"sceAppContentInitialize",content_init}, {"sceAppContentAppParamGetInt",param_int},
+    {"sceAppContentGetAddcontInfoList",addon_list},
+    {"sceAppContentDownloadDataGetAvailableSpaceKb",download_space},
+};
+uintptr_t runtime_content_resolve(const char *name) { return RUNTIME_LOOKUP(exports,name); }
 void runtime_content_report(void) {
     printf("Runtime: AppContent references=%u, initialized=%u, parameter queries=%u, list queries=%u\n",refs,initialized,queries,lists);
 }

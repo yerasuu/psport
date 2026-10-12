@@ -40,6 +40,18 @@
 #define HMD_NOT_INITIALIZED ((int32_t)0x81110002)
 #define HMD_HANDLE_INVALID ((int32_t)0x81110003)
 #define HMD_PARAMETER_NULL ((int32_t)0x81110008)
+#define MOVE_NO_CONTROLLER 1
+#define MOVE_NOT_INIT ((int32_t)0x80EE0001)
+#define MOVE_ALREADY_INIT ((int32_t)0x80EE0002)
+#define MOVE_INVALID_ARG ((int32_t)0x80EE0003)
+#define IME_BUSY ((int32_t)0x80BC0001)
+#define IME_NOT_OPENED ((int32_t)0x80BC0002)
+#define IME_CONNECTION_FAILED ((int32_t)0x80BC0004)
+#define IME_INVALID_USER_ID ((int32_t)0x80BC0010)
+#define IME_INVALID_OPTION ((int32_t)0x80BC0015)
+#define IME_INVALID_HANDLER ((int32_t)0x80BC0022)
+#define IME_INVALID_ADDRESS ((int32_t)0x80BC0031)
+#define IME_INVALID_RESERVED ((int32_t)0x80BC0032)
 
 static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
 static int next_id=1;
@@ -141,7 +153,7 @@ static ABI const char *net_ntop(int af,const void *src,char *dst,uint32_t size) 
 }
 static ABI int32_t netctl_state(int32_t *state) { if (!state) return NET_CTL_INVALID_ADDR; *state=0; return 0; }
 static ABI int32_t netctl_info(int code,void *info) { (void)code; (void)info; return NET_CTL_NOT_CONNECTED; }
-static ABI int32_t netctl_register(void *cb,void *arg,int32_t *cid) { (void)cb; (void)arg; if (!cid) return NET_CTL_INVALID_ADDR; *cid=new_id(); return 0; }
+static ABI int32_t netctl_register(void *cb,void *arg,int32_t *cid) { (void)arg; if (!cb || !cid) return NET_CTL_INVALID_ADDR; *cid=new_id(); return 0; }
 static ABI int32_t netctl_nat(uint32_t *info) {
     if (!info) return NET_CTL_INVALID_ADDR;
     info[1]=0; info[2]=3; info[3]=0; /* stun failed, NAT type 3, no mapped address */
@@ -175,6 +187,7 @@ static ABI int32_t np_account_id(int32_t user,uint64_t *id) {
 }
 static ABI int32_t np_register(void *cb,void *arg) { (void)cb; (void)arg; return new_id(); }
 static ABI void np_register_void(void *cb,void *arg) { (void)cb; (void)arg; }
+static ABI int32_t np_register_toolkit(void *cb,void *arg) { (void)arg; return cb ? 0 : NP_INVALID_ARGUMENT; }
 static ABI int32_t np_request(const void *param) { (void)param; return new_id(); }
 static ABI int32_t np_request_ctx(int32_t ctx,const void *param) { (void)ctx; (void)param; return new_id(); }
 static ABI int32_t np_poll(int32_t request,int32_t *result) { (void)request; if (result) *result=NP_SIGNED_OUT; return 0; }
@@ -480,13 +493,79 @@ static ABI int32_t mouse_read(int32_t handle,unsigned char *data,int32_t count) 
     memset(data,0,40); return 1; /* timestamp 0, connected=false */
 }
 static ABI int32_t audio_in_open(void) { return AUDIO_IN_NOT_OPENED; }
+/* PlayStation Move: the library runs, no motion controller is ever connected. A handle is still
+ * handed out per open, distinct from other devices' handles, as on the console. */
+static int move_initialized;
+static ABI int32_t move_init(void) {
+    if (move_initialized) return MOVE_ALREADY_INIT;
+    move_initialized=1; return 0;
+}
+static ABI int32_t move_open(int32_t user,int32_t type,int32_t index) {
+    (void)user; (void)type; (void)index;
+    static int32_t handle=0x30b0000;
+    if (!move_initialized) return MOVE_NOT_INIT;
+    return __atomic_add_fetch(&handle,0x100,__ATOMIC_RELAXED);
+}
+/* OrbisMoveDeviceInfo: sphere radius and accelerometer offset, four floats. */
+static ABI int32_t move_device_info(int32_t handle,float *info) {
+    (void)handle;
+    if (!move_initialized) return MOVE_NOT_INIT;
+    if (!info) return MOVE_INVALID_ARG;
+    memset(info,0,16);
+    return MOVE_NO_CONTROLLER;
+}
+static ABI int32_t move_read_recent(int32_t handle,int64_t timestamp,void *data,int32_t *count) {
+    (void)handle;
+    if (!move_initialized) return MOVE_NOT_INIT;
+    if (timestamp<0 || !data || !count) return MOVE_INVALID_ARG;
+    *count=0;
+    return MOVE_NO_CONTROLLER;
+}
+static ABI int32_t move_no_controller(int32_t handle) { (void)handle; return move_initialized ? MOVE_NO_CONTROLLER : MOVE_NOT_INIT; }
+static ABI int32_t move_term(void) {
+    if (!move_initialized) return MOVE_NOT_INIT;
+    move_initialized=0; return 0;
+}
+/* Ime keyboard: opening it succeeds, but no USB keyboard is ever connected, so no key events come
+ * and every keyboard reports itself disconnected. */
+typedef struct { uint32_t option; int8_t reserved1[4]; void *arg, *handler; int8_t reserved2[8]; } KeyboardParam;
+static int keyboard_opened;
+static ABI int32_t keyboard_open(int32_t user,const KeyboardParam *param) {
+    if (!param) return IME_INVALID_ADDRESS;
+    if (!param->handler) return IME_INVALID_HANDLER;
+    if (param->option&~0x3fu) return IME_INVALID_OPTION;
+    if (user==-1) return IME_INVALID_USER_ID;
+    for (size_t i=0;i<sizeof(param->reserved1);++i) if (param->reserved1[i]) return IME_INVALID_RESERVED;
+    for (size_t i=0;i<sizeof(param->reserved2);++i) if (param->reserved2[i]) return IME_INVALID_RESERVED;
+    if (keyboard_opened) return IME_BUSY;
+    keyboard_opened=1; return 0;
+}
+static ABI int32_t keyboard_close(int32_t user) {
+    if (!keyboard_opened) return IME_NOT_OPENED;
+    if (user==-1) return IME_INVALID_USER_ID;
+    keyboard_opened=0; return 0;
+}
+static ABI int32_t keyboard_resource_id(int32_t user,int32_t *ids) {
+    if (!ids) return IME_INVALID_ADDRESS;
+    if (user==-1) return IME_INVALID_USER_ID;
+    ids[0]=user; memset(ids+1,0,20);
+    return keyboard_opened ? IME_CONNECTION_FAILED : IME_NOT_OPENED;
+}
+/* OrbisImeKeyboardInfo: user, device type, keyboard type, repeat delay and rate, status
+ * (0, disconnected), reserved. */
+static ABI int32_t keyboard_info(uint32_t resource,void *info) {
+    (void)resource;
+    if (info) memset(info,0,36);
+    return 0;
+}
+static ABI int32_t ime_update(void *handler) { (void)handler; return keyboard_opened ? 0 : IME_NOT_OPENED; }
 
 
 static const RuntimeExport exports[]={
     {"sceUserServiceInitialize",user_initialize}, {"sceUserServiceTerminate",runtime_stub},
     {"sceUserServiceGetInitialUser",user_initial}, {"sceUserServiceGetLoginUserIdList",user_list},
     {"sceUserServiceGetUserName",user_name}, {"sceUserServiceGetEvent",user_event},
-    {"sceUserServiceGetUserColor",user_color},
+    {"sceUserServiceGetUserColor",user_color}, {"sceUserServiceRegisterEventCallback",runtime_stub},
     {"sceSystemServiceParamGetInt",system_param}, {"sceSystemServiceParamGetString",system_param_string},
     {"sceSystemServiceGetStatus",system_status}, {"sceSystemServiceGetHdrToneMapLuminance",hdr_tone_map_luminance},
     {"sceSystemServiceDisableMusicPlayer",runtime_stub}, {"sceSystemServiceReenableMusicPlayer",runtime_stub},
@@ -515,6 +594,7 @@ static const RuntimeExport exports[]={
     {"sceNetCtlGetState",netctl_state}, {"sceNetCtlGetInfo",netctl_info},
     {"sceNetCtlRegisterCallback",netctl_register}, {"sceNetCtlCheckCallback",runtime_stub},
     {"sceNetCtlUnregisterCallback",runtime_stub}, {"sceNetCtlGetNatInfo",netctl_nat},
+    {"sceNetCtlRegisterCallbackForNpToolkit",netctl_register}, {"sceNetCtlCheckCallbackForNpToolkit",runtime_stub},
     {"sceSslInit",lib_init_id}, {"sceSslTerm",runtime_stub},
     {"sceHttpInit",lib_init_id}, {"sceHttpTerm",runtime_stub},
     {"sceHttpCreateTemplate",http_object}, {"sceHttpDeleteTemplate",runtime_stub},
@@ -533,6 +613,7 @@ static const RuntimeExport exports[]={
     {"sceNpRegisterStateCallback",np_register}, {"sceNpUnregisterStateCallback",runtime_stub},
     {"sceNpRegisterGamePresenceCallback",np_register_void}, {"sceNpRegisterPlusEventCallback",np_register},
     {"sceNpUnregisterPlusEventCallback",runtime_stub}, {"sceNpCheckCallback",runtime_stub},
+    {"sceNpRegisterStateCallbackForToolkit",np_register_toolkit}, {"sceNpCheckCallbackForLib",runtime_stub},
     {"sceNpSetNpTitleId",runtime_stub}, {"sceNpNotifyPlusFeature",runtime_stub}, {"sceNpSetContentRestriction",runtime_stub},
     {"sceNpCreateAsyncRequest",np_request}, {"sceNpDeleteRequest",runtime_stub}, {"sceNpAbortRequest",runtime_stub},
     {"sceNpPollAsync",np_poll}, {"sceNpCheckNpAvailability",np_signed_out},
@@ -575,7 +656,7 @@ static const RuntimeExport exports[]={
     {"sceNpScoreGetBoardInfo",np_signed_out}, {"sceNpScoreGetGameData",np_signed_out},
     {"sceNpScoreGetRankingByNpIdPcId",np_signed_out}, {"sceNpScoreGetRankingByRange",np_signed_out},
     {"sceNpScoreRecordGameData",np_signed_out}, {"sceNpScoreRecordScore",np_signed_out},
-    {"sceNpScoreSetPlayerCharacterId",runtime_stub},
+    {"sceNpScoreSetPlayerCharacterId",runtime_stub}, {"sceNpTusCreateNpTitleCtxA",np_signed_out},
     {"sceVoiceCreatePort",voice_port}, {"sceVoiceDeletePort",runtime_stub},
     {"sceVoiceConnectIPortToOPort",runtime_stub}, {"sceVoiceDisconnectIPortFromOPort",runtime_stub},
     {"sceVoiceStart",runtime_stub}, {"sceVoiceStop",runtime_stub}, {"sceVoiceGetPortInfo",voice_info},
@@ -627,15 +708,24 @@ static const RuntimeExport exports[]={
     {"sceHmdGetDeviceInformationByHandle",hmd_handle_invalid}, {"sceHmdGetFieldOfView",hmd_handle_invalid},
     {"sceNpTrophyCreateContext",trophy_context}, {"sceNpTrophyCreateHandle",trophy_handle},
     {"sceNpTrophyRegisterContext",runtime_stub}, {"sceNpTrophyUnlockTrophy",trophy_unlock},
+    {"sceNpTrophyDestroyHandle",runtime_stub},
     {"sceNpTrophyGetGameInfo",trophy_game_info}, {"sceNpTrophyGetTrophyInfo",trophy_info},
     {"sceNpTrophyGetTrophyUnlockState",trophy_unlock_state},
     {"scePlayGoInitialize",playgo_init}, {"scePlayGoOpen",playgo_open}, {"scePlayGoGetChunkId",playgo_chunk_ids},
     {"scePlayGoGetLocus",playgo_locus}, {"scePlayGoSetInstallSpeed",playgo_speed},
     {"sceMouseInit",runtime_stub}, {"sceMouseOpen",mouse_open}, {"sceMouseRead",mouse_read}, {"sceMouseClose",runtime_stub},
     {"sceAudioInOpen",audio_in_open},
+    {"sceMoveInit",move_init}, {"sceMoveOpen",move_open}, {"sceMoveGetDeviceInfo",move_device_info},
+    {"sceMoveReadStateRecent",move_read_recent}, {"sceMoveSetLightSphere",move_no_controller},
+    {"sceMoveSetVibration",move_no_controller}, {"sceMoveTerm",move_term},
+    {"sceImeKeyboardOpen",keyboard_open}, {"sceImeKeyboardGetResourceId",keyboard_resource_id},
+    {"sceImeKeyboardGetInfo",keyboard_info}, {"sceImeKeyboardClose",keyboard_close}, {"sceImeUpdate",ime_update},
     {"sceDiscMapIsRequestOnHDD",discmap_on_hdd}, {"sceDiscMap_8A828CAEE7EDD5E9",discmap_8a82},
     {"sceDiscMap_7C980FFB0AA27E7A",discmap_7c98},
     {"sceVoiceInit",runtime_stub}, {"sceVoiceEnd",runtime_stub},
+    {"sceScreenShotEnable",runtime_stub}, {"sceScreenShotDisable",runtime_stub}, {"sceScreenShotSetParam",runtime_stub},
+    {"sceScreenShotSetOverlayImage",runtime_stub}, {"sceScreenShotSetOverlayImageWithOrigin",runtime_stub},
+    {"sceSharePlayInitialize",runtime_stub}, {"sceGameLiveStreamingInitialize",runtime_stub},
 };
 uintptr_t runtime_services_resolve(const char *name) {
     const uintptr_t online=runtime_net_resolve(name); /* BB_ONLINE=1: the online module first */

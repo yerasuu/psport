@@ -378,6 +378,8 @@ static int32_t memory_io(void *buffer, uint64_t size, int64_t offset, int write)
 static ABI int32_t memory_get(int32_t user, void *buffer, uint64_t size, int64_t offset) { (void)user; return memory_io(buffer,size,offset,0); }
 static ABI int32_t memory_set(int32_t user, void *buffer, uint64_t size, int64_t offset) { (void)user; return memory_io(buffer,size,offset,1); }
 
+static ABI int32_t save_clear_progress(void) { return initialized ? 0 : ERR_NOT_INITIALIZED; }
+
 static const RuntimeExport exports[]={
     {"sceSaveDataInitialize",save_initialize}, {"sceSaveDataInitialize2",save_initialize},
     {"sceSaveDataInitialize3",save_initialize}, {"sceSaveDataTerminate",save_terminate},
@@ -386,7 +388,7 @@ static const RuntimeExport exports[]={
     {"sceSaveDataSetParam",save_set_param}, {"sceSaveDataSaveIcon",save_icon}, {"sceSaveDataDelete",save_delete},
     {"sceSaveDataDirNameSearch",save_search}, {"sceSaveDataTransferringMount",save_transferring_mount},
     {"sceSaveDataSetupSaveDataMemory",memory_setup}, {"sceSaveDataGetSaveDataMemory",memory_get},
-    {"sceSaveDataSetSaveDataMemory",memory_set},
+    {"sceSaveDataSetSaveDataMemory",memory_set}, {"sceSaveDataClearProgress",save_clear_progress},
 };
 uintptr_t runtime_savedata_resolve(const char *name) { return RUNTIME_LOOKUP(exports,name); }
 void runtime_savedata_report(void) { printf("Runtime: save data mounts=%zu, memory writes=%zu\n",mounts_done,memory_writes); }
