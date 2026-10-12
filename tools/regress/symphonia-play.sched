@@ -1,0 +1,261 @@
+# Logos and the files menu to a new game, the intro movies, then Slumbering Streets: hops right, each
+# third one back left first so a fall into the pit before the tall block climbs out again; the wall
+# that opens to the violin played by its gramophone; on to the curtain.
+20 shot
+26 shot
+27 press cross
+32 shot
+32 press options
+37 press cross
+38 shot
+42 press cross
+44 shot
+47 press options
+50 shot
+52 press cross
+56 shot
+57 press cross
+62 shot
+62 press options
+67 press cross
+68 shot
+72 press cross
+74 shot
+77 press options
+80 shot
+82 press cross
+86 shot
+87 press cross
+92 shot
+92 press options
+97 press cross
+98 shot
+104 shot
+110 shot
+116 shot
+122 shot
+128 shot
+134 shot
+140 shot
+140 press lx=255+cross 0.45
+140 press lx=255 0.75
+140 press lx=255+cross 0.45
+140 press lx=255 0.75
+140 press lx=0+cross 0.3
+140 press lx=0 0.1
+140 press lx=255+cross 0.5
+140 press lx=255 1
+145 shot
+145 press lx=255+cross 0.45
+145 press lx=255 0.75
+145 press lx=255+cross 0.45
+145 press lx=255 0.75
+145 press lx=0+cross 0.4
+145 press lx=0 0.1
+145 press lx=255+cross 0.5
+145 press lx=255 1
+150 shot
+150 press lx=255+cross 0.45
+150 press lx=255 0.75
+150 press lx=255+cross 0.45
+150 press lx=255 0.75
+150 press lx=0+cross 0.5
+150 press lx=0 0.1
+150 press lx=255+cross 0.5
+150 press lx=255 1
+155 shot
+155 press lx=255+cross 0.45
+155 press lx=255 0.75
+155 press lx=255+cross 0.45
+155 press lx=255 0.75
+155 press lx=0+cross 0.3
+155 press lx=0 0.1
+155 press lx=255+cross 0.5
+155 press lx=255 1
+160 shot
+160 press lx=255+cross 0.45
+160 press lx=255 0.75
+160 press lx=255+cross 0.45
+160 press lx=255 0.75
+160 press lx=0+cross 0.4
+160 press lx=0 0.1
+160 press lx=255+cross 0.5
+160 press lx=255 1
+165 shot
+165 press lx=255+cross 0.45
+165 press lx=255 0.75
+165 press lx=255+cross 0.45
+165 press lx=255 0.75
+165 press lx=0+cross 0.5
+165 press lx=0 0.1
+165 press lx=255+cross 0.5
+165 press lx=255 1
+170 shot
+170 press lx=255+cross 0.45
+170 press lx=255 0.75
+170 press lx=255+cross 0.45
+170 press lx=255 0.75
+170 press lx=0+cross 0.3
+170 press lx=0 0.1
+170 press lx=255+cross 0.5
+170 press lx=255 1
+175 shot
+175 press lx=255+cross 0.45
+175 press lx=255 0.75
+175 press lx=255+cross 0.45
+175 press lx=255 0.75
+175 press lx=0+cross 0.4
+175 press lx=0 0.1
+175 press lx=255+cross 0.5
+175 press lx=255 1
+180 shot
+180 press lx=255+cross 0.45
+180 press lx=255 0.75
+180 press lx=255+cross 0.45
+180 press lx=255 0.75
+180 press lx=0+cross 0.5
+180 press lx=0 0.1
+180 press lx=255+cross 0.5
+180 press lx=255 1
+185 shot
+185 press lx=255+cross 0.45
+185 press lx=255 0.75
+185 press lx=255+cross 0.45
+185 press lx=255 0.75
+185 press lx=0+cross 0.3
+185 press lx=0 0.1
+185 press lx=255+cross 0.5
+185 press lx=255 1
+190 shot
+190 press lx=255+cross 0.45
+190 press lx=255 0.75
+190 press lx=255+cross 0.45
+190 press lx=255 0.75
+190 press lx=0+cross 0.4
+190 press lx=0 0.1
+190 press lx=255+cross 0.5
+190 press lx=255 1
+195 shot
+195 press lx=255+cross 0.45
+195 press lx=255 0.75
+195 press lx=255+cross 0.45
+195 press lx=255 0.75
+195 press lx=0+cross 0.5
+195 press lx=0 0.1
+195 press lx=255+cross 0.5
+195 press lx=255 1
+200 shot
+200 press lx=255+cross 0.45
+200 press lx=255 0.75
+200 press lx=255+cross 0.45
+200 press lx=255 0.75
+200 press lx=0+cross 0.3
+200 press lx=0 0.1
+200 press lx=255+cross 0.5
+200 press lx=255 1
+205 shot
+205 press lx=255+cross 0.45
+205 press lx=255 0.75
+205 press lx=255+cross 0.45
+205 press lx=255 0.75
+205 press lx=0+cross 0.4
+205 press lx=0 0.1
+205 press lx=255+cross 0.5
+205 press lx=255 1
+210 shot
+210 press lx=255+cross 0.45
+210 press lx=255 0.75
+210 press lx=255+cross 0.45
+210 press lx=255 0.75
+210 press lx=0+cross 0.5
+210 press lx=0 0.1
+210 press lx=255+cross 0.5
+210 press lx=255 1
+215 shot
+215 press lx=255+cross 0.45
+215 press lx=255 0.75
+215 press lx=255+cross 0.45
+215 press lx=255 0.75
+215 press lx=0+cross 0.3
+215 press lx=0 0.1
+215 press lx=255+cross 0.5
+215 press lx=255 1
+220 shot
+220 press lx=255+cross 0.45
+220 press lx=255 0.75
+220 press lx=255+cross 0.45
+220 press lx=255 0.75
+220 press lx=0+cross 0.4
+220 press lx=0 0.1
+220 press lx=255+cross 0.5
+220 press lx=255 1
+225 shot
+225 press lx=255+cross 0.45
+225 press lx=255 0.75
+225 press lx=255+cross 0.45
+225 press lx=255 0.75
+225 press lx=0+cross 0.5
+225 press lx=0 0.1
+225 press lx=255+cross 0.5
+225 press lx=255 1
+230 shot
+230 press lx=255+cross 0.45
+230 press lx=255 0.75
+230 press lx=255+cross 0.45
+230 press lx=255 0.75
+230 press lx=0+cross 0.3
+230 press lx=0 0.1
+230 press lx=255+cross 0.5
+230 press lx=255 1
+235 shot
+235 press lx=255+cross 0.45
+235 press lx=255 0.75
+235 press lx=255+cross 0.45
+235 press lx=255 0.75
+235 press lx=0+cross 0.4
+235 press lx=0 0.1
+235 press lx=255+cross 0.5
+235 press lx=255 1
+240 shot
+240 press lx=255 2
+240 press lx=0 0.5
+243 shot
+243 press triangle 4.2
+248 shot
+248 press lx=255+cross 0.45
+248 press lx=255 0.75
+248 press lx=255+cross 0.45
+248 press lx=255 0.75
+248 press lx=255+cross 0.45
+248 press lx=255 0.75
+248 press lx=255+cross 0.45
+248 press lx=255 0.75
+253 shot
+253 press lx=255+cross 0.45
+253 press lx=255 0.75
+253 press lx=255+cross 0.45
+253 press lx=255 0.75
+253 press lx=255+cross 0.45
+253 press lx=255 0.75
+253 press lx=255+cross 0.45
+253 press lx=255 0.75
+258 shot
+258 press lx=255+cross 0.45
+258 press lx=255 0.75
+258 press lx=255+cross 0.45
+258 press lx=255 0.75
+258 press lx=255+cross 0.45
+258 press lx=255 0.75
+258 press lx=255+cross 0.45
+258 press lx=255 0.75
+263 shot
+263 press lx=255+cross 0.45
+263 press lx=255 0.75
+263 press lx=255+cross 0.45
+263 press lx=255 0.75
+263 press lx=255+cross 0.45
+263 press lx=255 0.75
+263 press lx=255+cross 0.45
+263 press lx=255 0.75
+268 shot
+269 end
