@@ -19,7 +19,6 @@ enum class DecodeStatus {
 
 struct Mp3Header {
     std::uint32_t word;
-    std::uint32_t bitrate;
     std::size_t frameBytes;
     bool crc;
     std::uint8_t mode;

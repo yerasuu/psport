@@ -35,7 +35,7 @@ static int32_t error(int e) {
     case EINVAL: code=22; break;
     case EAGAIN: code=35; break;
     case ETIMEDOUT: code=60; break;
-    default: fprintf(stderr,"STOP: unmapped rwlock error %d\n",e); runtime_stop(21);
+    default: fprintf(stderr,"STOP: unmapped rwlock error %d\n",e); exit(21);
     }
     return (int32_t)(UINT32_C(0x80020000)|code);
 }
@@ -54,7 +54,7 @@ static int create_locked(Rwlock **out) {
 static ABI int32_t rw_init(Rwlock **out, void *const *attr, const char *name) {
     (void)name;
     if (!out || (attr && !*attr)) return error(EINVAL);
-    if (attr) { fputs("STOP: non-default PS4 rwlock attributes are not implemented\n",stderr); runtime_stop(21); }
+    if (attr) { fputs("STOP: non-default PS4 rwlock attributes are not implemented\n",stderr); exit(21); }
     pthread_mutex_lock(&registry_lock);
     /* POSIX allows uninitialized storage, so never read *out during init. */
     int e=create_locked(out);

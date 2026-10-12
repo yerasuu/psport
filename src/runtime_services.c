@@ -98,7 +98,7 @@ static ABI int32_t system_param(int32_t id,int32_t *value) {
     case 5: *value=0; break;                    /* summer time */
     case 7: *value=0; break;                    /* parental level off */
     case 1000: *value=1; break;                 /* enter button = cross */
-    default: fprintf(stderr,"STOP: unsupported system parameter %d\n",id); runtime_stop(21);
+    default: fprintf(stderr,"STOP: unsupported system parameter %d\n",id); exit(21);
     }
     return 0;
 }
@@ -234,7 +234,7 @@ static int32_t dialog_term(int i) {
     static ABI int32_t tag##_open(const void *p) { (void)p; return dialog_open(i); } \
     static ABI int32_t tag##_status(void) { return dialog_status(i); } \
     static ABI int32_t tag##_term(void) { return dialog_term(i); }
-DIALOG(msg,1) DIALOG(save,2) DIALOG(profile,3) DIALOG(commerce,4)
+DIALOG(msg,1) DIALOG(profile,3) DIALOG(commerce,4)
 DIALOG(web,7) DIALOG(invitation,8) DIALOG(signin,9) DIALOG(social,10) DIALOG(hmd_setup,11)
 static ABI int32_t profile_result(void *result) { if (result) memset(result,0,4); return 0; }
 typedef struct {
@@ -256,15 +256,101 @@ static ABI int32_t invitation_result(InvitationResult *result) {
 /* With nothing displayed, a dialog is ready to show whenever it is initialized (Atelier Ayesha
  * waited on these before opening its auto-load dialog; answered 0 they never turned true). */
 static ABI int32_t save_ready(void) { return dialogs[2].initialized; }
+/* OrbisSaveDataDialogParam (0x98 bytes): common base 0x30, size, mode at 0x34, items at 0x48,
+ * user message parameter at 0x50 (its buttonType first), userData at 0x70. */
+static struct { int32_t mode; void *user_data; char dir[32]; _Alignas(8) uint8_t param[0x530]; } save_dialog;
+/* OrbisSaveDataDialogItems: userId, titleId at 8, dirName array and its count at 0x10 and 0x18,
+ * newItem at 0x20, focusPos at 0x28, focusPosDirName at 0x30. The list shows the saves that exist
+ * and is accepted on the item it opens on; the new item, which heads the list, leaves dir empty. */
+static void save_list_focus(const uint8_t *items) {
+    memset(save_dialog.dir,0,sizeof(save_dialog.dir));
+    if (!items) return;
+    int32_t user, focus;
+    uint32_t count;
+    const char *title, *dirs, *new_item, *focus_dir;
+    memcpy(&user,items,sizeof(user));
+    memcpy(&title,items+0x08,sizeof(title));
+    memcpy(&dirs,items+0x10,sizeof(dirs));
+    memcpy(&count,items+0x18,sizeof(count));
+    memcpy(&new_item,items+0x20,sizeof(new_item));
+    memcpy(&focus,items+0x28,sizeof(focus));
+    memcpy(&focus_dir,items+0x30,sizeof(focus_dir));
+    if (dirs && !(focus==0 && new_item)) {
+        _Alignas(8) uint8_t param[sizeof(save_dialog.param)];
+        int64_t best=0;
+        for (uint32_t i=0;i<count;++i) {
+            const char *dir=dirs+32*i;
+            if (runtime_savedata_param(user,title,dir,param)) continue;
+            int64_t mtime;
+            memcpy(&mtime,param+0x508,sizeof(mtime));
+            int take;
+            switch (focus) {
+            case 1: case 3: take=1; break;                                     /* LISTTAIL, DATATAIL */
+            case 4: take=!save_dialog.dir[0] || mtime>best; break;             /* DATALATEST */
+            case 5: take=!save_dialog.dir[0] || mtime<best; break;             /* DATAOLDEST */
+            case 6: take=focus_dir && !strncmp(dir,focus_dir,32); break;       /* DIRNAME */
+            default: take=!save_dialog.dir[0]; break;                          /* LISTHEAD, DATAHEAD */
+            }
+            if (!take) continue;
+            best=mtime;
+            memcpy(save_dialog.dir,dir,sizeof(save_dialog.dir));
+            memcpy(save_dialog.param,param,sizeof(param));
+        }
+    }
+    if (save_dialog.dir[0])
+        printf("Runtime: SaveDataDialog list (focus %d, %u items) answered with '%.32s'\n",focus,count,save_dialog.dir);
+    else
+        printf("Runtime: SaveDataDialog list (focus %d, %u items) answered with %s\n",focus,count,
+               new_item ? "the new item" : "no save (none of its items exists)");
+}
+static ABI int32_t save_init(void) { return dialog_init(2); }
+static ABI int32_t save_status(void) { return dialog_status(2); }
+static ABI int32_t save_term(void) { return dialog_term(2); }
+/* A progress bar or a user message without buttons has nothing for the user to answer: it stays
+ * running until the game closes it (Atelier Ryza reopened a progress bar that ended by itself, in
+ * a loop, and never wrote its save). */
+static ABI int32_t save_open(const uint8_t *param) {
+    if (!dialogs[2].initialized) return DIALOG_NOT_INITIALIZED;
+    if (!param) return (int32_t)0x80B8000D; /* SCE_COMMON_DIALOG_ERROR_ARG_NULL */
+    int32_t mode;
+    const int32_t *user_msg;
+    memcpy(&mode,param+0x34,sizeof(mode));
+    memcpy(&user_msg,param+0x50,sizeof(user_msg));
+    memcpy(&save_dialog.user_data,param+0x70,sizeof(save_dialog.user_data));
+    save_dialog.mode=mode;
+    if (mode==1) {
+        const uint8_t *items;
+        memcpy(&items,param+0x48,sizeof(items));
+        save_list_focus(items);
+    }
+    if (mode==5 || (mode==2 && user_msg && user_msg[0]==2)) {
+        printf("Runtime: SaveDataDialog opened (mode %d); runs until the game closes it (no dialog UI yet)\n",mode);
+        dialogs[2].status=2;
+        return 0;
+    }
+    return dialog_open(2);
+}
 /* OrbisSaveDataDialogResult: mode, result, buttonId, pad, then the caller's own dirName, param
  * and userData pointers (shadPS4's savedatadialog_ui.h). A dialog with no UI ends as if the user
- * accepted it: result OK, button OK/YES; mode and the caller's buffers are left as they are.
- * Answered by a stub, Atelier Ayesha read the result it never got and faulted. */
+ * accepted it: result OK, button OK/YES, the opened mode and userData, and for a list the chosen
+ * directory and its param in the caller's buffers (Atelier Ryza mounted the empty name it got and
+ * failed to load). Answered by a stub, Atelier Ayesha read the result it never got
+ * and faulted. */
 static ABI int32_t save_result(int32_t *result) {
     if (!result) return (int32_t)0x80B8000D; /* SCE_COMMON_DIALOG_ERROR_ARG_NULL */
     if (dialogs[2].status!=3) return (int32_t)0x80B80005; /* SCE_COMMON_DIALOG_ERROR_NOT_FINISHED */
+    result[0]=save_dialog.mode;
     result[1]=0;
     result[2]=1;
+    memcpy(result+8,&save_dialog.user_data,sizeof(save_dialog.user_data));
+    if (save_dialog.mode==1) {
+        char *dir;
+        void *param;
+        memcpy(&dir,result+4,sizeof(dir));
+        memcpy(&param,result+6,sizeof(param));
+        if (dir) memcpy(dir,save_dialog.dir,sizeof(save_dialog.dir));
+        if (param && save_dialog.dir[0] && save_dialog.param[0]) memcpy(param,save_dialog.param,sizeof(save_dialog.param));
+    }
     return 0;
 }
 static ABI int32_t save_close(const void *param) { (void)param; dialogs[2].status=3; return 0; }

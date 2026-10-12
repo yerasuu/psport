@@ -118,7 +118,7 @@ static ABI int32_t runtime_create(void *object,const char *name,uint32_t max,uin
     for (uint32_t i=0;i<worker_count;++i)
         if (runtime_thread_spawn(&r->workers[i],worker,r,opt ? opt->stack : 0x4000,name)) {
             fprintf(stderr,"STOP: ULT runtime '%s' could not start its worker threads\n",name);
-            runtime_stop(21);
+            exit(21);
         }
     return 0;
 }

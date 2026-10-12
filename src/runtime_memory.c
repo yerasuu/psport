@@ -250,7 +250,7 @@ static void zero_phys(uint64_t phys, uint64_t size) {
 static void queue_hook(int kind, uintptr_t address, uint64_t size) {
     GpuRange hook = kind==HOOK_MAP ? hook_map : kind==HOOK_UNMAP ? hook_unmap : hook_invalidate;
     if (!hook) return;
-    if (pending_count==sizeof(pending)/sizeof(*pending)) { fputs("STOP: GPU hook queue overflow\n",stderr); runtime_stop(21); }
+    if (pending_count==sizeof(pending)/sizeof(*pending)) { fputs("STOP: GPU hook queue overflow\n",stderr); exit(21); }
     pending[pending_count++]=(PendingHook){kind,address,size};
 }
 /* Runs queued GPU notifications; callers invoke it after dropping the lock. */

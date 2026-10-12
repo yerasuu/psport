@@ -8,7 +8,6 @@
 #include <stdatomic.h>
 #include <sched.h>
 #include <pthread.h>
-#include <unistd.h>
 
 typedef struct {
     union { GuestCallback plain; void (ABI *with_arg)(void *); } callback;
@@ -50,12 +49,12 @@ static ABI void guest_set_heap_api(void **api) {
     puts("Runtime: application heap API registered");
 }
 void runtime_set_module_tls(uint64_t module, const void *data, uint64_t filesz, uint64_t memsz) {
-    if (module<2 || module>=TLS_MODULES) { fputs("STOP: unsupported TLS module id\n",stderr); runtime_stop(21); }
+    if (module<2 || module>=TLS_MODULES) { fputs("STOP: unsupported TLS module id\n",stderr); exit(21); }
     tls_modules[module].data=data; tls_modules[module].filesz=filesz; tls_modules[module].memsz=memsz;
 }
 static ABI void *guest_tls_get_addr(const uint64_t *index) {
     if (!index || index[0]<2 || index[0]>=TLS_MODULES || !tls_modules[index[0]].data || index[1]>=tls_modules[index[0]].memsz) {
-        fputs("STOP: unsupported TLS module/offset\n",stderr); runtime_stop(21);
+        fputs("STOP: unsupported TLS module/offset\n",stderr); exit(21);
     }
     unsigned char **block=&tls_blocks[index[0]];
     if (!*block) {
@@ -101,11 +100,6 @@ void runtime_report(void) {
     runtime_file_report();
     printf("Runtime: memory operations=%zu\n", (size_t)memory_calls);
     runtime_calls_report();
-}
-void runtime_stop(int status) {
-    runtime_calls_report();
-    fflush(NULL);
-    _exit(status);
 }
 static ABI void init_env(void) {
     /* prepare.py verified the supplied libc export consists of exactly C3. */
@@ -165,7 +159,7 @@ static ABI int guard_acquire(uint64_t *guard) {
         if (expected & 1) return 0;
         if ((uint32_t)(expected >> 32) == guard_owner) {
             fputs("STOP: recursive/concurrent static initialization is not supported yet\n", stderr);
-            runtime_stop(21);
+            exit(21);
         }
         sched_yield(); /* another thread is running the initializer */
     }
@@ -181,7 +175,7 @@ static ABI void guard_abort(uint64_t *guard) {
 }
 static ABI __attribute__((noreturn)) void stack_fail(void) {
     fputs("STOP: guest stack protector detected corruption\n", stderr);
-    runtime_stop(22);
+    exit(22);
 }
 static ABI void *guest_memset(void *dst, int value, size_t size) {
     atomic_fetch_add_explicit(&memory_calls,1,memory_order_relaxed);

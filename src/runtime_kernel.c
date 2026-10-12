@@ -225,7 +225,7 @@ static ABI __attribute__((noreturn)) void hard_exit(int status) {
 static ABI __attribute__((noreturn)) void raise_exception(uint32_t code,uint64_t argument) {
     fprintf(stderr,"STOP: guest raised debug exception code=0x%x argument=0x%llx\n",code,(unsigned long long)argument);
     runtime_report();
-    runtime_stop(23);
+    exit(23);
 }
 static ABI int32_t print_backtrace(void) {
     fputs("Runtime: guest requested a backtrace (not available)\n",stderr);
@@ -283,7 +283,7 @@ static ABI int32_t guest_sysctl(const int32_t *name,uint32_t namelen,void *old,u
     fprintf(stderr,"STOP: unsupported sysctl mib");
     for (uint32_t i=0;i<namelen && i<8;++i) fprintf(stderr," %d",name[i]);
     fputc('\n',stderr);
-    runtime_stop(21);
+    exit(21);
 }
 static ABI int32_t uuid_create(uint8_t *uuid) {
     if (!uuid) return ERR(22);
