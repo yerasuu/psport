@@ -714,6 +714,47 @@ static ABI int32_t batch_map2(BatchEntry *entries, int count, int *processed, in
 static ABI int32_t batch_map(BatchEntry *entries, int count, int *processed) {
     return batch_map2(entries,count,processed,MAP_FIXED_FLAG);
 }
+static ABI int32_t available_flexible_size(uint64_t *out) {
+    if (!out) return INVALID;
+    read_lock();
+    *out=FLEXIBLE_SIZE-flexible_bytes;
+    read_unlock();
+    return 0;
+}
+static ABI int32_t configured_flexible_size(uint64_t *out) {
+    if (!out) return INVALID;
+    *out=FLEXIBLE_SIZE;
+    return 0;
+}
+/* The start of the first allocation in [at, end), else end (lock held). */
+static uint64_t next_block_start(uint64_t at, uint64_t end) {
+    for (int i=0;i<LIMIT;++i)
+        if (blocks[i].used && blocks[i].start>=at && blocks[i].start<end) end=blocks[i].start;
+    return end;
+}
+/* The largest free range of direct memory in [low, high) once its start is aligned, as libkernel
+ * answers it. */
+static ABI int32_t available_direct_size(uint64_t low, uint64_t high, uint64_t alignment, uint64_t *phys, uint64_t *size) {
+    if (!alignment) alignment=PAGE;
+    if (!phys || !size || !valid_alignment(alignment)) return INVALID;
+    const uint64_t end=high<POOL_SIZE ? high : POOL_SIZE;
+    uint64_t best_start=0, best_size=0;
+    read_lock();
+    for (uint64_t at=low; at<end;) {
+        int inside=0;
+        for (int i=0;i<LIMIT;++i) if (blocks[i].used && at>=blocks[i].start && at-blocks[i].start<blocks[i].size) {
+            at=blocks[i].start+blocks[i].size; inside=1; break;
+        }
+        if (inside) continue;
+        const uint64_t gap_end=next_block_start(at,end), start=align_up(at,alignment);
+        if (start<gap_end && gap_end-start>best_size) { best_start=start; best_size=gap_end-start; }
+        at=gap_end;
+    }
+    read_unlock();
+    if (!best_size) return NO_MEMORY;
+    *phys=best_start; *size=best_size;
+    return 0;
+}
 static const RuntimeExport exports[]={
     {"sceKernelGetDirectMemorySize",direct_size}, {"sceKernelAllocateDirectMemory",direct_allocate},
     {"sceKernelAllocateMainDirectMemory",direct_allocate_main},
@@ -728,6 +769,9 @@ static const RuntimeExport exports[]={
     {"sceKernelMlock",lock_range},
     {"sceKernelBatchMap",batch_map}, {"sceKernelBatchMap2",batch_map2},
     {"mmap",posix_mmap},
+    {"sceKernelAvailableFlexibleMemorySize",available_flexible_size},
+    {"sceKernelConfiguredFlexibleMemorySize",configured_flexible_size},
+    {"sceKernelAvailableDirectMemorySize",available_direct_size},
 };
 uintptr_t runtime_memory_resolve(const char *name) {
     /* Direct-memory NIDs are exercised by test_runtime.c before names are loaded. */
