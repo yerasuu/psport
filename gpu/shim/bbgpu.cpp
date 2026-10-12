@@ -65,6 +65,7 @@ namespace Libraries::Fiber { void RegisterLib(Core::Loader::SymbolsResolver* sym
 namespace Libraries::Font { void RegisterLib(Core::Loader::SymbolsResolver* sym); }
 namespace Libraries::FontFt { void RegisterLib(Core::Loader::SymbolsResolver* sym); }
 namespace Libraries::Audiodec { void RegisterLib(Core::Loader::SymbolsResolver* sym); }
+namespace Libraries::Videodec2 { void RegisterLib(Core::Loader::SymbolsResolver* sym); }
 namespace Libraries::Kernel { void RegisterEventQueue(Core::Loader::SymbolsResolver* sym); }
 
 namespace {
@@ -321,6 +322,7 @@ extern "C" void bbgpu_register_kernel(void) {
     Libraries::Font::RegisterLib(&resolver);
     Libraries::FontFt::RegisterLib(&resolver);
     Libraries::Audiodec::RegisterLib(&resolver);
+    Libraries::Videodec2::RegisterLib(&resolver);
 }
 
 extern "C" uintptr_t bbgpu_resolve(const char* scoped_nid) {
