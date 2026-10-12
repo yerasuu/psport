@@ -189,13 +189,18 @@ earlier run without counting it as a regression (blank in an earlier file that p
 
 ## CI and binary cache
 
-`.github/workflows/nix-cache.yml` runs on every push to `master` (and by hand): it builds
-`packaging/port.nix` (the port from source in Nix's sandbox with `build.sh`, LTO on, no PGO profile,
-nixpkgs pinned in `packaging/nixpkgs.nix` to decanter's revision) and publishes its closure with
-`tools/nix_cache.sh` as a flat Nix binary cache: the assets of the release `nix-cache`, with only the
-workflow's `GITHUB_TOKEN`. The output is laid out as a checkout after `build.sh` (`run.sh`,
-`scripts/`, `patches/`, `out/bb-probe`, `out/bb-gpu-capabilities`, `out/gpu/`); the Vulkan drivers
-are not in it.
+`.github/workflows/build.yml` builds `packaging/port.nix` on every push to `master` (and by hand), as
+a check only: nothing is published. `packaging/port.nix` is the port from source in Nix's sandbox
+with `build.sh`, LTO on, no PGO profile, nixpkgs pinned in `packaging/nixpkgs.nix` to decanter's
+revision.
+
+Versions are annotated tags `vX.Y.Z`. Pushing one runs `.github/workflows/nix-cache.yml`: it builds
+the tag the same way, publishes its closure with `tools/nix_cache.sh` as a flat Nix binary cache in
+the assets of the release `nix-cache`, then creates or updates the GitHub Release of the tag with the
+tag's annotation as its notes, marked latest when the tag is the highest version published. Only that
+job has `contents: write`, with the workflow's `GITHUB_TOKEN`. The output is laid out as a checkout
+after `build.sh` (`run.sh`, `scripts/`, `patches/`, `out/bb-probe`, `out/bb-gpu-capabilities`,
+`out/gpu/`); the Vulkan drivers are not in it.
 
 The closure is made content-addressed before it is published (`nix store make-content-addressed`):
 Nix accepts such paths without a signature, also from a user the daemon does not trust, so the cache
@@ -208,17 +213,22 @@ has no key. Every file sits at the top of
 | `<hash>.narinfo` | one per store path (`<hash>` of the path); its `URL` is the flat `<hash>.nar.zst` |
 | `<hash>.nar.zst` | the path's NAR, zstd |
 | `closure-<commit>` | the store paths of that commit's closure |
-| `commit-<commit>` | the store path of that commit's output, uploaded last |
+| `commit-<commit>` | the store path of that commit's output |
+| `release-<tag>` | the commit of that release |
+| `latest-release` | `<tag> <commit> <store path>` of the highest version published, one line, uploaded last |
 
-A commit's build is then fetched with
-`nix copy --no-check-sigs --from https://github.com/yerasuu/psport/releases/download/nix-cache <path from commit-<commit>>`,
+The current release is read from
+`https://github.com/yerasuu/psport/releases/download/nix-cache/latest-release`, fetched with
+`nix copy --no-check-sigs --from https://github.com/yerasuu/psport/releases/download/nix-cache <store path>`,
 and runs as `BB_PREBUILT=1 BB_PROBE=<path>/out/bb-probe BB_DATA_DIR=<writable folder> bash <path>/run.sh`
-with Python and the Vulkan drivers of the same nixpkgs from the caller. A commit without
-`commit-<commit>` (not on `master`, or still building) has no build: build it locally.
+with Python and the Vulkan drivers of the same nixpkgs from the caller. A tag pushed for a version
+lower than the latest (a fix on an earlier line) is published without moving `latest-release`.
+Commits on `master` between releases have no build: build them locally.
 
-Each run first keeps the newest 30 commits (`NIX_CACHE_KEEP`), fewer if their paths would not fit in
-the 1000 files a release holds, and deletes the other commits' `commit-`/`closure-` files and the
-paths no kept commit uses; then it uploads only the paths the release lacks. A closure is about 220
-paths (440 files), and a commit that changes only the port adds 4. Runs are serialized (a run prunes what another could be
-publishing). `tools/nix_cache.sh <store path> <commit> <directory>` writes the same files to a local
-folder, for `nix copy --from file://<directory>`.
+Each run first keeps this release, the one `latest-release` names and the newest others up to 30
+(`NIX_CACHE_KEEP`), fewer if their paths would not fit in the 1000 files a release holds, and deletes
+the other releases' `release-` files, the `commit-`/`closure-` files of commits no kept release names
+and the paths no kept commit uses; then it uploads only the paths the release lacks. A closure is
+about 220 paths (440 files), and a release that changes only the port adds 5. Runs are serialized (a
+run prunes what another could be publishing). `tools/nix_cache.sh <store path> <commit> <tag>
+<directory>` writes the same files to a local folder, for `nix copy --from file://<directory>`.

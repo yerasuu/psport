@@ -85,8 +85,9 @@ Bloodborne.
 - Con [ccache](https://ccache.dev) instalado (`shell.nix` lo incluye), la biblioteca de la GPU se
   compila a través de él, con una sola caché para todos los checkouts y worktrees
   (`~/.cache/bbport/ccache`, `CCACHE_DIR`).
-- `nix-build packaging/port.nix` compila el port desde el código en el sandbox de Nix; la CI publica
-  esa build de cada commit de `master` como caché binaria de Nix (FORK.md, "CI and binary cache").
+- `nix-build packaging/port.nix` compila el port desde el código en el sandbox de Nix; la CI compila
+  cada commit de `master` y publica la build de cada tag `vX.Y.Z` como caché binaria de Nix y como
+  GitHub Release (FORK.md, "CI and binary cache").
 
 ## Medir el progreso
 

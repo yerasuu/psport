@@ -79,8 +79,9 @@ upstream's and built around Bloodborne.
   optimization (`use` by default when `pgo/` holds a profile).
 - With [ccache](https://ccache.dev) installed (`shell.nix` has it), the GPU library is compiled
   through it, one cache for every checkout and worktree (`~/.cache/bbport/ccache`, `CCACHE_DIR`).
-- `nix-build packaging/port.nix` builds the port from source in Nix's sandbox; CI publishes that
-  build of every commit on `master` as a Nix binary cache (FORK.md, "CI and binary cache").
+- `nix-build packaging/port.nix` builds the port from source in Nix's sandbox; CI builds every
+  commit on `master` and publishes the build of each `vX.Y.Z` tag as a Nix binary cache and a GitHub
+  Release (FORK.md, "CI and binary cache").
 
 ## Measuring progress
 
