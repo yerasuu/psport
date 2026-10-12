@@ -525,6 +525,7 @@ static const RuntimeExport exports[]={
     {"sceHttpGetStatusCode",http_fail}, {"sceHttpGetResponseContentLength",http_fail},
     {"sceHttpReadData",http_fail},
     {"sceNpGetState",np_state}, {"sceNpGetOnlineId",np_signed_out}, {"sceNpGetNpId",np_signed_out},
+    {"sceNpGetAccountIdA",np_signed_out},
     {"sceNpRegisterStateCallback",np_register}, {"sceNpUnregisterStateCallback",runtime_stub},
     {"sceNpRegisterGamePresenceCallback",np_register_void}, {"sceNpRegisterPlusEventCallback",np_register},
     {"sceNpUnregisterPlusEventCallback",runtime_stub}, {"sceNpCheckCallback",runtime_stub},
