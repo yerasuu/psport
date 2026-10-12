@@ -21,7 +21,7 @@ struct WindowSystemInfo {
 
 class WindowSDL {
 public:
-    WindowSDL(s32 width, s32 height, const char* title);
+    WindowSDL(s32 width, s32 height, const char* title, const char* icon_path);
     ~WindowSDL();
     s32 GetWidth() const { return width.load(std::memory_order_relaxed); }
     s32 GetHeight() const { return height.load(std::memory_order_relaxed); }
