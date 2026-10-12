@@ -15,9 +15,10 @@
 static constexpr std::uint32_t USER_FX2_FLAG_FIRST_PROCESS = 1;
 static constexpr std::uint32_t USER_FX2_FLAG_PARAM_CHANGED = 2;
 static constexpr float MAX_GAIN_LEVEL = 32.0f;
+static constexpr std::uint32_t REVERB_MODULE_OPTION_SIZE = 12;
 
-// The built-in modules other than UserFx, filter and gain (envelope, compressor, reverb, peak meter and the
-// rest) are not implemented: one passes its input through unchanged and ignores its parameters, so a
+// The built-in modules other than UserFx, filter, gain and reverb (envelope, compressor, peak meter and
+// the rest) are not implemented: one passes its input through unchanged and ignores its parameters, so a
 // rack that uses them still sounds, without that effect. In the rack it is a UserFx2 slot with no process handler.
 static bool IsUserFx2(const Ngs2CustomRackModuleInfo& info) {
     return info.module_id == SCE_NGS2_CUSTOM_MODULE_ID_USER_FX2;
@@ -28,7 +29,7 @@ static bool IsUserFx(const Ngs2CustomRackModuleInfo& info) {
 }
 
 static bool IsBuiltIn(std::uint32_t moduleId) {
-    return moduleId == SCE_NGS2_CUSTOM_MODULE_ID_FILTER || moduleId == SCE_NGS2_CUSTOM_MODULE_ID_GAIN;
+    return moduleId == SCE_NGS2_CUSTOM_MODULE_ID_FILTER || moduleId == SCE_NGS2_CUSTOM_MODULE_ID_GAIN || moduleId == SCE_NGS2_CUSTOM_MODULE_ID_REVERB;
 }
 
 static void NoteMissingModule(std::uint32_t module_id) {
@@ -45,6 +46,7 @@ void Ngs2CheckCustomRack(const Ngs2CustomRackOption& option) {
     for (std::uint32_t m = 0; m < option.num_modules; m++) {
         const auto& info = option.module[m];
         if (info.source_buffer_id != 0 || info.dest_buffer_id != 0) APS5_INVALID_ARG_EX;
+        if (info.module_id == SCE_NGS2_CUSTOM_MODULE_ID_REVERB && info.option != nullptr && info.option->size != REVERB_MODULE_OPTION_SIZE) APS5_INVALID_ARG_EX;
         if (IsUserFx(info) || IsBuiltIn(info.module_id)) continue;
         if (!IsUserFx2(info)) {
             NoteMissingModule(info.module_id);
@@ -77,6 +79,7 @@ void Ngs2SetupUserFx(Ngs2Rack& rack, const Ngs2CustomRackOption& option) {
             for (auto& voice : rack.voices) {
                 voice.userFx[m].levels.fill(1.0f);
                 voice.userFx[m].flags = USER_FX2_FLAG_FIRST_PROCESS;
+                if (option.module[m].module_id == SCE_NGS2_CUSTOM_MODULE_ID_REVERB) Ngs2SetupReverb(voice.userFx[m].reverb);
             }
             continue;
         }
@@ -146,6 +149,11 @@ void Ngs2ApplyCustomParam(Ngs2Voice& voice, const Ngs2VoiceParamHeader& param) {
         auto& fx = voice.userFx[param.id & 0x1f];
         fx.filterParam = ParamAs<Ngs2CustomFilterParam>(param);
         fx.flags |= USER_FX2_FLAG_PARAM_CHANGED;
+        return;
+    }
+    if ((param.id & ~0x1fu) == SCE_NGS2_CUSTOM_VOICE_PARAM_REVERB && (param.id & 0x1f) < voice.userFx.size() &&
+        voice.rack->moduleIds[param.id & 0x1f] == SCE_NGS2_CUSTOM_MODULE_ID_REVERB) {
+        Ngs2SetReverbParams(voice.userFx[param.id & 0x1f].reverb, ParamAs<Ngs2ReverbVoiceI3DL2Param>(param).i3dl2);
         return;
     }
     if ((param.id & ~0x1fu) == SCE_NGS2_CUSTOM_VOICE_PARAM_GAIN && (param.id & 0x1f) < voice.userFx.size() &&
@@ -286,6 +294,10 @@ void Ngs2ProcessUserFx(Ngs2Voice& voice, std::uint32_t grain, std::uint32_t samp
         auto& fx = voice.userFx[m];
         if (voice.rack->moduleIds[m] == SCE_NGS2_CUSTOM_MODULE_ID_FILTER) {
             ProcessFilter(voice, fx, grain, sampleRate);
+            continue;
+        }
+        if (voice.rack->moduleIds[m] == SCE_NGS2_CUSTOM_MODULE_ID_REVERB) {
+            voice.hasSamples = Ngs2ProcessReverb(*fx.reverb, voice.samples.data(), voice.channels, grain, sampleRate);
             continue;
         }
         if (voice.rack->moduleIds[m] == SCE_NGS2_CUSTOM_MODULE_ID_GAIN) {

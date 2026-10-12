@@ -74,6 +74,7 @@ static constexpr std::uint32_t SCE_NGS2_CUSTOM_SUBMIXER_VOICE_PARAM_SETUP = 0x40
 static constexpr std::uint32_t SCE_NGS2_CUSTOM_VOICE_PARAM_FILTER = 0x40001300;
 static constexpr std::uint32_t SCE_NGS2_CUSTOM_VOICE_PARAM_GAIN = 0x40001500;
 static constexpr std::uint32_t SCE_NGS2_CUSTOM_VOICE_PARAM_USER_FX = 0x40001900;
+static constexpr std::uint32_t SCE_NGS2_CUSTOM_VOICE_PARAM_REVERB = 0x40001b00;
 static constexpr std::uint32_t SCE_NGS2_CUSTOM_VOICE_PARAM_USER_FX2 = 0x40001f00;
 
 static constexpr std::uint32_t SCE_NGS2_CUSTOM_MAX_MODULES = 24;
@@ -81,6 +82,7 @@ static constexpr std::uint32_t SCE_NGS2_CUSTOM_MAX_PORTS = 16;
 static constexpr std::uint32_t SCE_NGS2_CUSTOM_MODULE_ID_FILTER = 0x13;
 static constexpr std::uint32_t SCE_NGS2_CUSTOM_MODULE_ID_GAIN = 0x15;
 static constexpr std::uint32_t SCE_NGS2_CUSTOM_MODULE_ID_USER_FX = 0x19;
+static constexpr std::uint32_t SCE_NGS2_CUSTOM_MODULE_ID_REVERB = 0x1b;
 static constexpr std::uint32_t SCE_NGS2_CUSTOM_MODULE_ID_USER_FX2 = 0x1f;
 
 static constexpr std::uint32_t SCE_NGS2_FILTER_TYPE_LOW_PASS = 1;

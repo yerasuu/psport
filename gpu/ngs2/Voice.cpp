@@ -366,11 +366,11 @@ static void ApplyParam(Ngs2Voice& voice, const Ngs2VoiceParamHeader& param) {
                 if (setup.num_input_channels != setup.num_output_channels) throw std::runtime_error("NGS2: reverb channel conversion is not implemented");
                 if (setup.num_output_channels != 1 && setup.num_output_channels != 2 && setup.num_output_channels != 6 && setup.num_output_channels != 8) APS5_INVALID_ARG_EX;
                 SetupMixer(voice, setup.num_output_channels);
-                Ngs2SetupReverb(voice);
+                Ngs2SetupReverb(voice.reverb);
                 return;
             }
             if (param.id == SCE_NGS2_REVERB_VOICE_PARAM_I3DL2) {
-                Ngs2SetReverbParams(voice, ParamAs<Ngs2ReverbVoiceI3DL2Param>(param).i3dl2);
+                Ngs2SetReverbParams(voice.reverb, ParamAs<Ngs2ReverbVoiceI3DL2Param>(param).i3dl2);
                 return;
             }
             break;
