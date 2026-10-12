@@ -37,7 +37,7 @@ inline constexpr Effect Effects[] = {
     {"effect_dynamic_shadows", "Shadows from dynamic lights", "Тени от динамических источников", "Sombras de luces dinámicas", true},
     {"effect_ssr", "Screen-space reflections (not in original game)", "Отражения SSR (не было в игре)", "Reflejos en espacio de pantalla (no estaban en el juego)", false},
     {"skip_intro", "Skip startup intros", "Пропуск заставок при запуске", "Saltar las intros al iniciar", false},
-    {"debug_camera", "Free camera (Cross + L3)", "Свободная камера (Cross + L3)", "Cámara libre (Cross + L3)", false},
+    {"debug_camera", "Free camera (Cross + L3)", "Свободная камера (Cross + L3)", "Cámara libre (X + L3)", false},
     {"debug_menu", "Debug menu (requires font files)", "Debug menu (нужны файлы шрифтов)", "Menú de depuración (necesita archivos de fuentes)", false},
 };
 inline constexpr int EffectCount = int(sizeof(Effects) / sizeof(Effects[0]));

@@ -616,7 +616,7 @@ void Menu() {
         if (std::string_view(effect.key) == "debug_camera") {
             Hint(BbSettings::MenuText("Hold Cross and press L3 (keyboard: Space + Z).",
                                       "Удерживайте Cross и нажмите L3 (клавиатура: Space + Z).",
-                                      "Mantén Cross y pulsa L3 (teclado: Espacio + Z)."));
+                                      "Mantén X y pulsa L3 (teclado: Espacio + Z)."));
         } else if (std::string_view(effect.key) == "debug_menu") {
             Hint(BbSettings::MenuText(
                 "Left side of the touchpad (Tab); right side: Backspace. Needs the adhoc folder "
