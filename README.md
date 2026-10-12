@@ -1,6 +1,6 @@
 # psport — PS4 titles natively on Linux
 
-**English** · [Русский](README.ru.md)
+**English** · [Русский](README.ru.md) · [Español](README.es.md)
 
 psport is decanter's fork of [bbport](https://github.com/deadinside28/bloodborne_pc), the native
 Linux port of Bloodborne, taken past one game. A PS4 title's original executable runs on an x86-64
