@@ -4,6 +4,7 @@
 #include <boost/container/small_vector.hpp>
 #include "bbport_toggles.h"
 #include "bblayer_write_traps.h"
+#include "bbport_guest_memory.h"
 #include "common/assert.h"
 #include "common/debug.h"
 #include "common/div_ceil.h"
@@ -243,6 +244,14 @@ static bool ImageTraps() {
     return on;
 }
 
+// bbport: as ImageTraps for the pages the buffer cache watches (VRAM copies in its arena): a write
+// nobody announced reaches the copy instead of the GPU reading the older data uploaded there.
+static bool BufferTraps() {
+    static const bool on = VideoCore::GuestInPlace() && !VideoCore::WriteTracking() &&
+                           !VideoCore::WriteVerify() && !BbGuestMemory::LayerMemory();
+    return on;
+}
+
 struct PageManager::Impl {
     struct PageState {
         u8 num_write_watchers : 7;
@@ -306,6 +315,13 @@ struct PageManager::Impl {
 
     virtual void Protect(VAddr address, size_t size, Core::MemoryPermission perms) = 0;
 
+    static void TrapBuffer(VAddr address, size_t size, Core::MemoryPermission perms) {
+        if (BufferTraps()) {
+            BbLayer::WriteTraps::Set(address, size, BbLayer::WriteTraps::Buffer,
+                                     !True(perms & Core::MemoryPermission::Write));
+        }
+    }
+
     static bool GuestFaultSignalHandler(void* context, void* fault_address) {
         const auto addr = reinterpret_cast<VAddr>(fault_address);
         NoteFaultSite(context, addr);
@@ -324,8 +340,8 @@ struct PageManager::Impl {
                 Common::IsWriteError(context), is_gpu_thread);
         }
         if (Common::IsWriteError(context)) {
-            if (ImageTraps() &&
-                !(BbLayer::WriteTraps::Reasons(addr) & BbLayer::WriteTraps::Image)) {
+            if (ImageTraps() && !(BbLayer::WriteTraps::Reasons(addr) &
+                                  (BbLayer::WriteTraps::Image | BbLayer::WriteTraps::Buffer))) {
                 // Not an image's trap: another owner's being lifted by another thread, or one
                 // lifted meanwhile (the write runs again), or a write the game may not do.
                 int prot = 0, type = -1;
@@ -346,7 +362,7 @@ struct PageManager::Impl {
         return false;
     }
 
-    template <bool track, bool is_read>
+    template <bool track, bool is_read, bool buffer = false>
     void UpdatePageWatchers(VAddr addr, u64 size) {
         RENDERER_TRACE;
 
@@ -368,6 +384,9 @@ struct PageManager::Impl {
                 RENDERER_TRACE;
                 // Perform pending (un)protect action
                 Protect(range_begin << PM_PAGE_BITS, range_bytes, perms);
+                if constexpr (buffer) {
+                    TrapBuffer(range_begin << PM_PAGE_BITS, range_bytes, perms);
+                }
                 range_bytes = 0;
                 potential_range_bytes = 0;
             }
@@ -423,7 +442,7 @@ struct PageManager::Impl {
             // if all pages are contiguous, use the regular UpdatePageWatchers
             const VAddr start_addr = base_addr + (start_range.first << PM_PAGE_BITS);
             const u64 size = (start_range.second - start_range.first) << PM_PAGE_BITS;
-            return UpdatePageWatchers<track, is_read>(start_addr, size);
+            return UpdatePageWatchers<track, is_read, true>(start_addr, size);
         }
 
         size_t base_page = (base_addr >> PM_PAGE_BITS);
@@ -439,6 +458,7 @@ struct PageManager::Impl {
                 RENDERER_TRACE;
                 // Perform pending (un)protect action
                 Protect((range_begin << PM_PAGE_BITS), range_bytes, perms);
+                TrapBuffer(range_begin << PM_PAGE_BITS, range_bytes, perms);
                 range_bytes = 0;
                 potential_range_bytes = 0;
             }
