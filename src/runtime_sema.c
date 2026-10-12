@@ -52,7 +52,7 @@ static ABI int32_t sem_create(uint32_t *out,const char *name,uint32_t attr,
     uint32_t id=s->id;
     s->next=registry; registry=s; *out=id; ++created;
     runtime_exception_unlock(&lock);
-    printf("Runtime: semaphore id=%u, attr=%u, initial=%d, max=%d\n",id,attr,initial,maximum);
+    if (getenv("BB_TRACE_SEMA")) printf("Runtime: semaphore id=%u, attr=%u, initial=%d, max=%d\n",id,attr,initial,maximum);
     return 0;
 }
 static int32_t wait_count(uint32_t id,int32_t need,uint32_t *timeout,int block) {
