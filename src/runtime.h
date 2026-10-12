@@ -40,6 +40,11 @@ const char *runtime_import_name(const char *name);
 /* Arguments (bit N: argument N) the export writes through a pointer, per shadPS4's prototypes; 0
  * when it has none or the NID is not listed. */
 unsigned runtime_import_outputs(const char *nid);
+/* Calls nothing answers for real or that fail (runtime_calls.c): logged once per import and error
+ * code, counted, and summed up by runtime_calls_report (also into BB_CALL_REPORT). */
+void runtime_calls_configure(const char (*names)[128], uint64_t count);
+void runtime_calls_unimplemented(uint32_t id);
+void runtime_calls_report(void);
 uintptr_t runtime_rwlock_resolve(const char *name);
 void runtime_rwlock_report(void);
 void runtime_set_module_tls(uint64_t module, const void *data, uint64_t filesz, uint64_t memsz);

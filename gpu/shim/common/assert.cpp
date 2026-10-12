@@ -9,6 +9,7 @@
 // bb-probe (probe.c): set while the port restarts itself through run.sh. The device fd is closed
 // before exec; Vulkan calls failing then are not errors: this thread waits for the exec instead.
 extern "C" volatile int runtime_restarting;
+extern "C" void runtime_calls_report(void);
 
 void assert_fail_impl() {
     if (runtime_restarting) {
@@ -18,6 +19,7 @@ void assert_fail_impl() {
     }
     std::fflush(stdout);
     std::fputs("STOP: GPU library assertion failed (see GPU log above)\n", stderr);
+    runtime_calls_report();
     std::_Exit(23);
 }
 

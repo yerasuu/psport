@@ -51,6 +51,8 @@ int32_t* runtime_errno(void);
 void runtime_memory_set_gpu_hooks(RuntimeGpuRange map, RuntimeGpuRange unmap, RuntimeGpuRange invalidate);
 void runtime_memory_set_note_write_hook(RuntimeGpuRange note);
 void runtime_memory_set_cpu_write_hook(RuntimeGpuRange hook);
+// runtime_calls.c
+void runtime_calls_report(void);
 }
 
 Frontend::WindowSDL* g_window = nullptr;
@@ -293,6 +295,7 @@ extern "C" int bbgpu_init(const BbGpuConfig* config) {
         }
         LOG_INFO(Frontend, "Window closed by user");
         std::fflush(stdout);
+        runtime_calls_report();
         std::_Exit(0);
     });
     g_window_thread.detach();

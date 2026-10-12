@@ -123,6 +123,7 @@ static int permissive_out_error;
 static ABI int64_t unresolved_permissive(uint32_t id, uintptr_t a0, uintptr_t a1, uintptr_t a2, uintptr_t a3,
                                          uintptr_t a4) {
     if (id >= import_count) return 0;
+    runtime_calls_unimplemented(id);
     const unsigned outputs = permissive_outputs[id];
     const int32_t result = outputs && permissive_out_error ? (int32_t)0x80020016 : 0;
     if (!__atomic_exchange_n(&permissive_seen[id], 1, __ATOMIC_RELAXED)) {
@@ -150,6 +151,7 @@ static ABI int64_t unresolved_permissive(uint32_t id, uintptr_t a0, uintptr_t a1
 }
 static ABI __attribute__((noreturn)) void unresolved(uint32_t id, uintptr_t argument) {
     if (id >= import_count) fail("bad import trap index");
+    runtime_calls_unimplemented(id);
     printf("STOP: first unsupported PS4 import: %s (index %u)\n", names[id], id);
     printf("API: %s\n", runtime_import_name(names[id]));
     printf("Caller return offset: 0x%" PRIxPTR "; first argument: 0x%" PRIxPTR "\n",
@@ -173,6 +175,14 @@ __asm__(".text\n.globl enter_on_stack\nenter_on_stack:\n"
         " mov %rbp,%rsp\n pop %rbp\n ret\n");
 #endif
 static ABI void guest_exit(void) { puts("Runtime: process finalizer callback reached"); }
+#ifndef _WIN32
+/* Termination signals SDL does not take (--cpu-only): the call summary, then the default action. */
+static void shutdown_signal(int sig) {
+    runtime_calls_report();
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
+#endif
 #ifndef _WIN32
 static void dump_frames(ucontext_t *uc);
 static void fault(int sig, siginfo_t *info, void *context) {
@@ -247,6 +257,7 @@ static void fault(int sig, siginfo_t *info, void *context) {
             snprintf(line, sizeof(line), "  #%d %p\n", i, frames[i]);
         ssize_t written_=write(2, line, strlen(line)); (void)written_;
     }
+    runtime_calls_report();
     _exit(128 + sig);
 }
 #endif
@@ -293,6 +304,7 @@ static void watchdog(int sig, siginfo_t *info, void *context) {
             at+=d->reclen;
         }
     usleep(100000);
+    runtime_calls_report();
     _exit(128 + sig);
 }
 /* param.sfo lookup: string or integer value of key, 0 when absent. */
@@ -553,6 +565,7 @@ int main(int argc, char **argv) {
     if (fread(names, 128, import_count, f) != import_count) fail("truncated import names");
     for (uint64_t i = 0; i < import_count; ++i)
         if (!memchr(names[i], 0, 128)) fail("unterminated import name");
+    runtime_calls_configure((const char (*)[128])names, import_count);
     for (uint64_t i = 0; i < nr; ++i) {
         relocs[i].target = read64(f);
         relocs[i].kind = read64(f);
@@ -608,6 +621,14 @@ int main(int argc, char **argv) {
         if (bbgpu_init(&gpu)) fail("GPU initialization failed");
         printf("GPU: window and Vulkan presenter ready; SDK 0x%08x, %u HLE symbols\n",(unsigned)sdk,bbgpu_symbol_count());
     }
+#ifndef _WIN32
+    static const int shutdown_signals[] = {SIGTERM, SIGINT, SIGHUP};
+    for (size_t i = 0; i < sizeof(shutdown_signals) / sizeof(*shutdown_signals); ++i) {
+        struct sigaction current;
+        if (!sigaction(shutdown_signals[i], NULL, &current) && current.sa_handler == SIG_DFL)
+            signal(shutdown_signals[i], shutdown_signal);
+    }
+#endif
     const char *permissive = getenv("BB_PERMISSIVE");
     if (permissive && !strcmp(permissive, "1")) {
         permissive_seen = calloc(import_count ? import_count : 1, 1);

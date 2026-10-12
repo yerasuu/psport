@@ -99,6 +99,7 @@ void runtime_report(void) {
     runtime_savedata_report();
     runtime_file_report();
     printf("Runtime: memory operations=%zu\n", (size_t)memory_calls);
+    runtime_calls_report();
 }
 static ABI void init_env(void) {
     /* prepare.py verified the supplied libc export consists of exactly C3. */
