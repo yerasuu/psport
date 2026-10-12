@@ -72,6 +72,10 @@ typedef struct {
     int32_t device_class;
     uint8_t reserve[8];
 } ControllerInfo;
+typedef struct {
+    int32_t device_class;
+    uint8_t reserved[4], class_data[12];
+} DeviceClassInfo;
 _Static_assert(sizeof(PadData)==120,"OrbisPadData layout");
 _Static_assert(sizeof(PadTouch)==8,"OrbisPadTouch layout");
 _Static_assert(__builtin_offsetof(PadData,touches)==60,"OrbisPadData touch offset");
@@ -756,6 +760,12 @@ static ABI int32_t pad_info(int32_t handle, ControllerInfo *info) {
     pthread_mutex_unlock(&lock);
     return 0;
 }
+static ABI int32_t pad_class_info(int32_t handle, DeviceClassInfo *info) {
+    if (handle!=PAD_HANDLE || !opened) return ERR_INVALID_HANDLE;
+    if (!info) return ERR_INVALID_ARG;
+    memset(info,0,sizeof(*info));
+    return 0;
+}
 static ABI int32_t pad_vibration(int32_t handle, const uint8_t *param) {
     if (handle!=PAD_HANDLE || !opened) return ERR_INVALID_HANDLE;
     if (!param) return ERR_INVALID_ARG;
@@ -771,7 +781,8 @@ static ABI int32_t pad_ok_handle_flag(int32_t handle, uint8_t flag) { (void)flag
 static const RuntimeExport exports[]={
     {"scePadInit",pad_init}, {"scePadOpen",pad_open}, {"scePadGetHandle",pad_get_handle}, {"scePadClose",pad_close},
     {"scePadReadState",pad_read_state}, {"scePadRead",pad_read},
-    {"scePadGetControllerInformation",pad_info}, {"scePadSetVibration",pad_vibration},
+    {"scePadGetControllerInformation",pad_info},
+    {"scePadDeviceClassGetExtendedInformation",pad_class_info}, {"scePadSetVibration",pad_vibration},
     {"scePadResetOrientation",pad_ok_handle},
     {"scePadSetAngularVelocityDeadbandState",pad_ok_handle_flag}, {"scePadSetTiltCorrectionState",pad_ok_handle_flag},
     {"scePadSetMotionSensorState",pad_ok_handle_flag},

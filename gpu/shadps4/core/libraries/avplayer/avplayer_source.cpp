@@ -231,7 +231,7 @@ std::optional<bool> AvPlayerSource::HasFrames(u32 num_frames) {
     return m_video_packets.Size() > num_frames || m_is_eof;
 }
 
-bool AvPlayerSource::Start() {
+bool AvPlayerSource::Start(u64 time) {
     std::unique_lock lock(m_state_mutex);
 
     if (!m_video_stream_index && !m_audio_stream_index) {
@@ -241,8 +241,9 @@ bool AvPlayerSource::Start() {
     if (m_video_stream_index) {
         const auto stream_index = m_streams[m_video_stream_index.value()].ffmpeg_index;
         const auto stream = m_avformat_context->streams[stream_index];
-        avformat_seek_file(m_avformat_context.get(), m_video_stream_index.value(), 0, 0,
-                           stream->duration, 0);
+        const auto ts = av_rescale_q(time, AVRational{1, 1000}, stream->time_base);
+        avformat_seek_file(m_avformat_context.get(), m_video_stream_index.value(), 0, ts,
+                           time == 0 ? stream->duration : ts, 0);
         const auto decoder = avcodec_find_decoder(stream->codecpar->codec_id);
         if (decoder == nullptr) {
             return false;
@@ -269,8 +270,12 @@ bool AvPlayerSource::Start() {
     if (m_audio_stream_index) {
         const auto stream_index = m_streams[m_audio_stream_index.value()].ffmpeg_index;
         const auto stream = m_avformat_context->streams[stream_index];
-        avformat_seek_file(m_avformat_context.get(), m_audio_stream_index.value(), 0, 0,
-                           stream->duration, 0);
+        const auto ts = av_rescale_q(time, AVRational{1, 1000}, stream->time_base);
+        avformat_seek_file(m_avformat_context.get(), m_audio_stream_index.value(), 0, ts,
+                           time == 0 ? stream->duration : ts, 0);
+        if (time != 0) {
+            m_last_audio_ts = time;
+        }
         const auto decoder = avcodec_find_decoder(stream->codecpar->codec_id);
         if (decoder == nullptr) {
             return false;
@@ -297,7 +302,7 @@ bool AvPlayerSource::Start() {
     m_demuxer_thread.Run([this](std::stop_token stop) { this->DemuxerThread(stop); });
     m_video_decoder_thread.Run([this](std::stop_token stop) { this->VideoDecoderThread(stop); });
     m_audio_decoder_thread.Run([this](std::stop_token stop) { this->AudioDecoderThread(stop); });
-    m_start_time = std::chrono::high_resolution_clock::now();
+    m_start_time = std::chrono::high_resolution_clock::now() - std::chrono::milliseconds(time);
     return true;
 }
 
@@ -336,6 +341,17 @@ bool AvPlayerSource::Stop() {
     m_is_paused = false;
     m_is_eof = false;
 
+    return true;
+}
+
+bool AvPlayerSource::JumpToTime(u64 time) {
+    const bool is_paused = m_is_paused;
+    if (!Stop() || !Start(time)) {
+        return false;
+    }
+    if (is_paused) {
+        Pause();
+    }
     return true;
 }
 

@@ -157,8 +157,9 @@ public:
     bool EnableStream(u32 stream_index);
     void SetLooping(bool is_looping);
     std::optional<bool> HasFrames(u32 num_frames);
-    bool Start();
+    bool Start(u64 time = 0);
     bool Stop();
+    bool JumpToTime(u64 time);
     void Pause();
     void Resume();
     bool GetAudioData(AvPlayerFrameInfo& audio_info);

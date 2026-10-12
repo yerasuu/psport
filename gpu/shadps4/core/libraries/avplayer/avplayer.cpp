@@ -153,11 +153,11 @@ bool PS4_SYSV_ABI sceAvPlayerIsActive(AvPlayerHandle handle) {
 }
 
 s32 PS4_SYSV_ABI sceAvPlayerJumpToTime(AvPlayerHandle handle, uint64_t time) {
-    LOG_ERROR(Lib_AvPlayer, "(STUBBED) called, time (msec) = {}", time);
+    LOG_TRACE(Lib_AvPlayer, "time (msec) = {}", time);
     if (handle == nullptr) {
         return ORBIS_AVPLAYER_ERROR_INVALID_PARAMS;
     }
-    return ORBIS_OK;
+    return handle->JumpToTime(time);
 }
 
 s32 PS4_SYSV_ABI sceAvPlayerPause(AvPlayerHandle handle) {
