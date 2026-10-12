@@ -50,6 +50,13 @@ float base_scale = 1.0f;
 std::mutex prompt_mutex;
 std::atomic<bool> prompt_active{false};
 std::string prompt_title, prompt_text;
+// Guide (or Home) asks whether to close the game, as the console's PS button leads there. The game
+// reads the pad's state rather than its events, so the key or button that cancelled stays away
+// from it until released.
+std::atomic<bool> close_prompt{false};
+std::atomic<bool> close_release{false};
+SDL_Keycode release_key = SDLK_UNKNOWN;
+int release_button = -1;
 
 // Present rate for the FPS counter.
 std::chrono::steady_clock::time_point last_present{};
@@ -74,6 +81,22 @@ void SetOpen(bool value) {
     if (!value && dirty) {
         dirty = false;
         BbSettings::Save();
+    }
+}
+
+void OpenClosePrompt() {
+    SetOpen(false);
+    close_prompt = true;
+    std::printf("Overlay: close prompt open\n");
+}
+
+void AnswerClosePrompt(bool quit) {
+    close_prompt = false;
+    std::printf("Overlay: close prompt %s\n", quit ? "confirmed, quitting" : "cancelled");
+    if (quit) {
+        SDL_Event event{};
+        event.type = SDL_EVENT_QUIT;
+        SDL_PushEvent(&event);
     }
 }
 
@@ -672,6 +695,24 @@ void FpsCounter() {
     ImGui::End();
 }
 
+void ClosePrompt() {
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x + viewport->WorkSize.x * 0.5f,
+                                   viewport->WorkPos.y + viewport->WorkSize.y * 0.5f),
+                            ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowBgAlpha(0.9f);
+    ImGui::Begin("##closeprompt", nullptr,
+                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+                     ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoNav |
+                     ImGuiWindowFlags_NoFocusOnAppearing);
+    ImGui::TextUnformatted(BbSettings::MenuText("Close the game?", "Закрыть игру?", "¿Cerrar el juego?"));
+    ImGui::Separator();
+    ImGui::TextUnformatted(BbSettings::MenuText("Cross / Enter: close     Circle / Esc: cancel",
+                                                "Крест / Enter — закрыть     Круг / Esc — отмена",
+                                                "X / Intro: cerrar     Círculo / Esc: cancelar"));
+    ImGui::End();
+}
+
 void TextPrompt() {
     std::string title, text;
     {
@@ -848,6 +889,26 @@ bool HandleEvent(const SDL_Event& event) {
     case SDL_EVENT_KEY_DOWN:
     case SDL_EVENT_KEY_UP: {
         const bool down = event.type == SDL_EVENT_KEY_DOWN;
+        if (!down && close_release && event.key.key == release_key) {
+            close_release = false;
+            return true;
+        }
+        if (close_prompt) {
+            if (down && !event.key.repeat) {
+                if (event.key.key == SDLK_RETURN || event.key.key == SDLK_KP_ENTER) {
+                    AnswerClosePrompt(true);
+                } else if (event.key.key == SDLK_ESCAPE || event.key.key == SDLK_HOME) {
+                    AnswerClosePrompt(false);
+                    release_key = event.key.key;
+                    close_release = true;
+                }
+            }
+            return true;
+        }
+        if (down && !event.key.repeat && !is_open && event.key.key == SDLK_HOME) {
+            OpenClosePrompt();
+            return true;
+        }
         if (down && !event.key.repeat &&
             (event.key.key == SDLK_INSERT || (is_open && event.key.key == SDLK_ESCAPE))) {
             SetOpen(event.key.key == SDLK_INSERT ? !is_open : false);
@@ -872,6 +933,24 @@ bool HandleEvent(const SDL_Event& event) {
             l3_down = down;
         } else if (button == SDL_GAMEPAD_BUTTON_RIGHT_STICK) {
             r3_down = down;
+        }
+        if (!down && close_release && button == release_button) {
+            close_release = false;
+            return true;
+        }
+        if (close_prompt) {
+            if (down && button == SDL_GAMEPAD_BUTTON_SOUTH) {
+                AnswerClosePrompt(true);
+            } else if (down && (button == SDL_GAMEPAD_BUTTON_EAST || button == SDL_GAMEPAD_BUTTON_GUIDE)) {
+                AnswerClosePrompt(false);
+                release_button = button;
+                close_release = true;
+            }
+            return true;
+        }
+        if (down && button == SDL_GAMEPAD_BUTTON_GUIDE) {
+            OpenClosePrompt();
+            return true;
         }
         if (down && l3_down && r3_down) {
             SetOpen(!is_open);
@@ -928,7 +1007,7 @@ bool HandleEvent(const SDL_Event& event) {
 }
 
 bool Visible() {
-    return initialized && (menu_open || prompt_active || BbSettings::Get().show_fps);
+    return initialized && (menu_open || prompt_active || close_prompt || BbSettings::Get().show_fps);
 }
 
 bool MenuOpen() {
@@ -937,7 +1016,24 @@ bool MenuOpen() {
 
 bool CapturesInput() {
     // The text dialog too: keys typed into it (Backspace is the touchpad) stay out of the game.
-    return menu_open || prompt_active;
+    return menu_open || prompt_active || close_prompt || close_release;
+}
+
+bool PadFilePress(bool guide, bool cross, bool circle) {
+    std::scoped_lock lock{imgui_mutex};
+    if (!initialized) {
+        return false;
+    }
+    if (!close_prompt) {
+        if (guide) {
+            OpenClosePrompt();
+        }
+        return guide;
+    }
+    if (guide || cross || circle) {
+        AnswerClosePrompt(cross);
+    }
+    return true;
 }
 
 void Render(vk::CommandBuffer cmdbuf, vk::ImageView view, vk::Extent2D extent) {
@@ -979,6 +1075,9 @@ void Render(vk::CommandBuffer cmdbuf, vk::ImageView view, vk::Extent2D extent) {
     }
     if (prompt_active && !menu_open) {
         TextPrompt();
+    }
+    if (close_prompt) {
+        ClosePrompt();
     }
     ImGui::Render();
 

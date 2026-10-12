@@ -74,6 +74,11 @@ The overlay (Insert or L3+R3, `gpu/shim/bbport_overlay.cpp`) is drawn in English
 | `BB_MENU_LANGUAGE` (decanter passes its own UI language) | a language code: `ru...` Russian, `es...` Spanish, anything else English |
 | `LC_ALL`, `LC_MESSAGES`, `LANG`, `LANGUAGE` | the same |
 
+As on the console, the gamepad's Guide (PS) button, or Home on the keyboard, asks whether to close
+the game: cross or Enter closes it the way the overlay's Quit game does (the window's close, with the
+call report summary), circle, Esc or Guide again goes back to the game. While the prompt is shown the
+game keeps running with its input held neutral. `BB_PAD_FILE`'s `ps` token presses Guide.
+
 `BB_LANGUAGE` is not this: it is the system language the game reads (`sceSystemServiceParamGetInt`: 1
 English, 3 Spanish, 8 Russian).
 

@@ -570,7 +570,8 @@ static void sample_host(PadData *d) {
  * tokens, re-read when it changes: button names (cross circle square triangle l1 r1 l2 r2 l3 r3
  * options touchpad touchpad_left touchpad_right up down left right) are held while listed;
  * touchpad defaults to a left-side click; lx= ly= rx= ry= (0..255) override
- * the sticks. An empty file releases everything. */
+ * the sticks; ps presses the Guide button (the overlay's close prompt, answered with cross or
+ * circle). An empty file releases everything. */
 static struct { uint32_t buttons; int stick[4]; int touch_side; } injected={0,{-1,-1,-1,-1},-1};
 static int replay_armed;      /* 1 while a BB_PAD_REPLAY recording plays, 2 once it ended */
 static uint64_t replay_start; /* 0: (re)start at the next sample */
@@ -597,8 +598,10 @@ static void read_inject(void) {
     injected.buttons=0;
     injected.touch_side=-1;
     for (int i=0;i<4;++i) injected.stick[i]=-1;
+    int guide=0;
     char token[64];
     while (fscanf(f,"%63s",token)==1) {
+        if (!strcmp(token,"ps")) guide=1;
         if (!strcmp(token,"replay") && replay_armed!=1) { replay_armed=1; replay_start=0; } /* BB_PAD_REPLAY */
         if (!strcmp(token,"touchpad_left") || !strcmp(token,"touchpad_right")) {
             injected.buttons|=BTN_TOUCHPAD;
@@ -608,6 +611,8 @@ static void read_inject(void) {
         for (int i=0;i<4;++i) if (!strncmp(token,sticks[i],3)) { int v=atoi(token+3); injected.stick[i]=v<0 ? 0 : v>255 ? 255 : v; }
     }
     fclose(f);
+    if (bbgpu_overlay_pad_file_press(guide,(injected.buttons & BTN_CROSS)!=0,(injected.buttons & BTN_CIRCLE)!=0))
+        injected.buttons&=~(uint32_t)(BTN_CROSS|BTN_CIRCLE);
     printf("Runtime: pad file: buttons 0x%x sticks %d %d %d %d\n",injected.buttons,
            injected.stick[0],injected.stick[1],injected.stick[2],injected.stick[3]);
 }
@@ -696,9 +701,9 @@ static void touch_ids(PadData *d) {
 }
 static void sample(PadData *d) {
     sample_host(d);
+    read_inject();
     if (bbgpu_overlay_captures_input()) return;
     record_sample(d);
-    read_inject();
     replay_sample(d);
     d->buttons|=injected.buttons;
     if (injected.touch_side>=0) touch_click(d,injected.touch_side);
