@@ -714,6 +714,7 @@ static const RuntimeExport exports[]={
     {"sceVoiceInit",runtime_stub}, {"sceVoiceEnd",runtime_stub},
     {"sceScreenShotEnable",runtime_stub}, {"sceScreenShotDisable",runtime_stub}, {"sceScreenShotSetParam",runtime_stub},
     {"sceScreenShotSetOverlayImage",runtime_stub}, {"sceScreenShotSetOverlayImageWithOrigin",runtime_stub},
+    {"sceSharePlayInitialize",runtime_stub}, {"sceGameLiveStreamingInitialize",runtime_stub},
 };
 uintptr_t runtime_services_resolve(const char *name) {
     const uintptr_t online=runtime_net_resolve(name); /* BB_ONLINE=1: the online module first */
