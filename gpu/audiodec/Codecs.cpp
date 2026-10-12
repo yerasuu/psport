@@ -1,9 +1,9 @@
-#include "prx/libSceAudiodec/src/Codecs.hpp"
+// SPDX-License-Identifier: GPL-2.0-or-later
+#include "Codecs.hpp"
 
 #include "libatrac9.h"
 extern "C" {
 #include <libavcodec/avcodec.h>
-#include <libavutil/log.h>
 }
 
 #include <algorithm>
@@ -31,8 +31,6 @@ void writeSample(float value, std::int32_t wordSize, std::uint8_t* out) {
 class FfmpegDecoder : public Decoder {
 public:
     FfmpegDecoder(AVCodecID id, std::int32_t wordSize, std::vector<std::uint8_t> extradata = {}) : wordSize(wordSize), extradata(std::move(extradata)), id(id) {
-        static const bool quiet = (av_log_set_level(AV_LOG_QUIET), true);
-        (void)quiet;
         open();
     }
 
@@ -42,6 +40,8 @@ public:
 
 protected:
     DecodeResult decodePacket(const std::uint8_t* data, std::size_t size, std::uint8_t* pcm, std::size_t pcmSize) {
+        input.assign(data, data + size);
+        input.resize(size + AV_INPUT_BUFFER_PADDING_SIZE);
         AVPacket* packet = av_packet_alloc();
         AVFrame* frame = av_frame_alloc();
         if (!packet || !frame) {
@@ -49,7 +49,7 @@ protected:
             av_frame_free(&frame);
             throw std::bad_alloc();
         }
-        packet->data = const_cast<std::uint8_t*>(data);
+        packet->data = input.data();
         packet->size = static_cast<int>(size);
         DecodeResult result{};
         result.consumed = size;
@@ -104,6 +104,7 @@ private:
 
     std::int32_t wordSize;
     std::vector<std::uint8_t> extradata;
+    std::vector<std::uint8_t> input;
     AVCodecID id;
     AVCodecContext* context = nullptr;
 };
@@ -179,9 +180,11 @@ public:
         std::size_t offset = 0;
         for (int frame = 0; frame < info.framesInSuperframe; ++frame) {
             int used = 0;
-            const int status = wordSize == WORD_SIZE_FLOAT
-                ? Atrac9DecodeF32(handle, data + offset, static_cast<int>(superframeSize - offset), reinterpret_cast<float*>(pcm + result.produced), &used, 0)
-                : Atrac9Decode(handle, data + offset, static_cast<int>(superframeSize - offset), reinterpret_cast<short*>(pcm + result.produced), &used, 0);
+            samples.resize(static_cast<std::size_t>(info.frameSamples) * info.channels);
+            const int status = Atrac9Decode(handle, data + offset, samples.data(), &used);
+            if (status == 0) {
+                for (std::size_t i = 0; i < samples.size(); ++i) writeSample(samples[i] / 32768.0f, wordSize, pcm + result.produced + i * sampleBytes);
+            }
             if (status != 0 || used <= 0 || offset + static_cast<std::size_t>(used) > superframeSize) {
                 Reset();
                 return {DecodeStatus::InvalidData};
@@ -202,6 +205,7 @@ private:
     std::uint8_t config[4];
     void* handle = nullptr;
     Atrac9CodecInfo info{};
+    std::vector<short> samples;
 };
 
 }
