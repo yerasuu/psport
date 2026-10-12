@@ -145,8 +145,11 @@ bool Ngs2FilterHasHistory(const Ngs2Filter& filter) {
 
 void Ngs2ApplyFilter(Ngs2Voice& voice, Ngs2Filter& filter, std::uint32_t grain) {
     for (std::uint32_t channel = 0; channel < voice.channels; channel++) {
-        if (Bypasses(filter, channel)) continue;
         auto& h = filter.history[channel];
+        if (Bypasses(filter, channel)) {
+            h = {};
+            continue;
+        }
         for (std::uint32_t i = 0; i < grain; i++) {
             auto& sample = voice.samples[channel * grain + i];
             const double x = sample;
@@ -158,14 +161,19 @@ void Ngs2ApplyFilter(Ngs2Voice& voice, Ngs2Filter& filter, std::uint32_t grain) 
     }
 }
 
-static void RenderSampler(Ngs2Voice& voice, std::uint32_t grain, std::uint32_t systemRate) {
-    if (voice.waveformType == SCE_NGS2_WAVEFORM_TYPE_ATRAC9) Ngs2ConsumeAtrac9(voice, grain, systemRate);
-    else ConsumeSamples(voice, grain, systemRate);
+static void ApplyFilters(Ngs2Voice& voice, std::uint32_t location, std::uint32_t grain, std::uint32_t systemRate) {
     for (auto& filter : voice.filters) {
-        if (!filter.enabled || (!voice.hasSamples && !Ngs2FilterHasHistory(filter))) continue;
+        if (!filter.enabled || filter.location != location || (!voice.hasSamples && !Ngs2FilterHasHistory(filter))) continue;
+        Ngs2UpdateFilter(filter, systemRate);
         Ngs2ApplyFilter(voice, filter, grain);
         voice.hasSamples = true;
     }
+}
+
+static void RenderSampler(Ngs2Voice& voice, std::uint32_t grain, std::uint32_t systemRate) {
+    if (voice.waveformType == SCE_NGS2_WAVEFORM_TYPE_ATRAC9) Ngs2ConsumeAtrac9(voice, grain, systemRate);
+    else ConsumeSamples(voice, grain, systemRate);
+    ApplyFilters(voice, 0, grain, systemRate);
     const bool buffered = voice.waveformType == SCE_NGS2_WAVEFORM_TYPE_ATRAC9 && voice.atrac9.windowCursor * voice.channels < voice.atrac9.window.size();
     if (voice.state == Ngs2PlayState::Playing && voice.blocks.empty() && !buffered && !voice.acceptsBlocks && std::none_of(voice.filters.begin(), voice.filters.end(), Ngs2FilterHasHistory)) {
         voice.state = Ngs2PlayState::Empty;
@@ -259,6 +267,7 @@ static void RenderVoice(Ngs2Voice& voice, const std::vector<Ngs2Voice*>& voices,
         else MixInputs(voice, voices, grain, systemRate);
         if (voice.rack->rackId == SCE_NGS2_RACK_ID_REVERB && voice.reverb) voice.hasSamples = Ngs2ProcessReverb(*voice.reverb, voice.samples.data(), voice.channels, grain, systemRate);
         Ngs2ProcessLegacyUserFx(voice, grain, systemRate);
+        if (voice.rack->rackId == SCE_NGS2_RACK_ID_SAMPLER) ApplyFilters(voice, 1, grain, systemRate);
         Ngs2ProcessUserFx(voice, grain, systemRate);
     }
     voice.rendered = true;

@@ -91,6 +91,9 @@ struct Ngs2FilterHistory {
 
 struct Ngs2Filter {
     bool enabled = false;
+    std::uint32_t location = 0;
+    Ngs2FilterParam param{};
+    std::uint32_t sampleRate = 0;
     std::uint64_t bypassMask = 0;
     double b0 = 1.0;
     double b1 = 0.0;
@@ -115,8 +118,6 @@ struct Ngs2UserFx2 {
     std::array<std::uintptr_t, 3> userData{};
     std::array<float, NGS2_MAX_CHANNELS> levels{};
     std::array<float, NGS2_MAX_CHANNELS> appliedLevels{};
-    Ngs2CustomFilterParam filterParam{};
-    std::uint32_t filterRate = 0;
     Ngs2Filter filter;
     std::unique_ptr<Ngs2ReverbState, Ngs2ReverbDeleter> reverb;
 };
@@ -224,6 +225,8 @@ void Ngs2SetReverbParams(std::unique_ptr<Ngs2ReverbState, Ngs2ReverbDeleter>& re
 void Ngs2SetupReverb(std::unique_ptr<Ngs2ReverbState, Ngs2ReverbDeleter>& reverb);
 void Ngs2ClearReverb(Ngs2Voice& voice);
 bool Ngs2ProcessReverb(Ngs2ReverbState& reverb, float* samples, std::uint32_t channels, std::uint32_t grain, std::uint32_t sampleRate);
+void Ngs2SetFilter(Ngs2Filter& filter, const Ngs2FilterParam& param);
+void Ngs2UpdateFilter(Ngs2Filter& filter, std::uint32_t sampleRate);
 bool Ngs2FilterHasHistory(const Ngs2Filter& filter);
 void Ngs2ApplyFilter(Ngs2Voice& voice, Ngs2Filter& filter, std::uint32_t grain);
 void Ngs2Ramp(float* samples, float from, float to, std::uint32_t grain, const float* source, bool accumulate);

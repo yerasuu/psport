@@ -440,16 +440,19 @@ struct Ngs2SamplerVoicePitchParam {
     float ratio;
 };
 
+// values: frequency, q and gain, or for SCE_NGS2_FILTER_TYPE_COEFFICIENTS b0, b1, b2, -a1 and -a2.
+struct Ngs2FilterParam {
+    std::uint32_t type;
+    std::uint32_t channel_mask;
+    float values[5];
+};
+
 struct Ngs2SamplerVoiceFilterParam {
     Ngs2VoiceParamHeader header;
     std::uint32_t index;
     std::uint32_t location;
-    std::uint32_t type;
-    std::uint32_t channel_mask;
-    float frequency;
-    float q;
-    float level;
-    std::uint32_t reserved[3];
+    Ngs2FilterParam filter;
+    std::uint32_t reserved;
 };
 static_assert(sizeof(Ngs2SamplerVoiceFilterParam) == 48);
 
@@ -512,12 +515,9 @@ struct Ngs2CustomSubmixerVoiceSetupParam {
 };
 static_assert(sizeof(Ngs2CustomSubmixerVoiceSetupParam) == 24);
 
-// values: frequency, q and gain, or for SCE_NGS2_FILTER_TYPE_COEFFICIENTS b0, b1, b2, -a1 and -a2.
 struct Ngs2CustomFilterParam {
     Ngs2VoiceParamHeader header;
-    std::uint32_t type;
-    std::uint32_t channel_mask;
-    float values[5];
+    Ngs2FilterParam filter;
     std::uint32_t reserved;
 };
 static_assert(sizeof(Ngs2CustomFilterParam) == 40);
