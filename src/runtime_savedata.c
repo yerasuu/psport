@@ -391,9 +391,21 @@ static const RuntimeExport exports[]={
     {"sceSaveDataSetSaveDataMemory",memory_set}, {"sceSaveDataClearProgress",save_clear_progress},
 };
 uintptr_t runtime_savedata_resolve(const char *name) { return RUNTIME_LOOKUP(exports,name); }
+int runtime_savedata_param(int32_t user, const char *title, const char *dir, void *param) {
+    char base[600], path[680];
+    struct stat st;
+    if (!valid_name(dir,32)) return -1;
+    root(user,title,base,sizeof(base));
+    snprintf(path,sizeof(path),"%s/%s",base,dir);
+    if (stat(path,&st) || !S_ISDIR(st.st_mode)) return -1;
+    snprintf(path,sizeof(path),"%s/%s.sce_sys",base,dir);
+    read_param(path,param);
+    return 0;
+}
 void runtime_savedata_report(void) { printf("Runtime: save data mounts=%zu, memory writes=%zu\n",mounts_done,memory_writes); }
 #else
 void runtime_savedata_configure(const char *title) { (void)title; }
 uintptr_t runtime_savedata_resolve(const char *name) { (void)name; return 0; }
+int runtime_savedata_param(int32_t user, const char *title, const char *dir, void *param) { (void)user; (void)title; (void)dir; (void)param; return -1; }
 void runtime_savedata_report(void) {}
 #endif
