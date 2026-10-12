@@ -199,9 +199,9 @@ and runs as `BB_PREBUILT=1 BB_PROBE=<path>/out/bb-probe BB_DATA_DIR=<writable fo
 with Python and the Vulkan drivers of the same nixpkgs from the caller. A commit without
 `commit-<commit>` (not on `master`, or still building) has no build: build it locally.
 
-Each run uploads only the paths the release lacks, then keeps the newest 30 commits
-(`NIX_CACHE_KEEP`) and deletes the older ones' `commit-`/`closure-` files and the paths no kept
-commit uses, since a release holds at most 1000 files: a closure is about 220 paths (440 files), and
-a commit that changes only the port adds 4. Runs are serialized (a run prunes what another could be
+Each run first keeps the newest 30 commits (`NIX_CACHE_KEEP`), fewer if their paths would not fit in
+the 1000 files a release holds, and deletes the other commits' `commit-`/`closure-` files and the
+paths no kept commit uses; then it uploads only the paths the release lacks. A closure is about 220
+paths (440 files), and a commit that changes only the port adds 4. Runs are serialized (a run prunes what another could be
 publishing). `tools/nix_cache.sh <store path> <commit> <directory>` writes the same files to a local
 folder, for `nix copy --from file://<directory>`.
