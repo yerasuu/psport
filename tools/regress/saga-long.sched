@@ -1,0 +1,186 @@
+# Title, protagonist select, the first story scenes and the combat tutorial battle; stick moves and menus between.
+20 shot
+27 shot
+34 shot
+41 shot
+41 press cross
+45 press cross
+48 shot
+49 press options
+53 press cross
+55 shot
+57 press cross
+61 press options
+62 shot
+65 press cross
+69 shot
+69 press cross
+73 press options
+76 shot
+77 press cross
+81 press cross
+83 shot
+85 press options
+89 press cross
+90 shot
+93 press cross
+97 shot
+97 press options
+101 press cross
+104 shot
+105 press cross
+109 press options
+111 shot
+113 press cross
+117 press cross
+118 shot
+121 press options
+125 shot
+125 press cross
+129 press cross
+132 shot
+133 press options
+137 press cross
+139 shot
+141 press cross
+145 press options
+146 shot
+149 press cross
+153 shot
+153 press cross
+157 press options
+160 shot
+161 press cross
+165 press cross
+167 shot
+169 press options
+173 press cross
+174 shot
+177 press cross
+181 shot
+181 press options
+185 press cross
+188 shot
+189 press cross
+193 press options
+195 shot
+197 press cross
+202 press cross
+205 press cross
+208 shot
+210 press lx=255 3
+215 press cross
+218 shot
+220 press ly=0 3
+225 press cross
+228 shot
+230 press lx=0 3
+235 press cross
+238 shot
+240 press ly=255 3
+245 press cross
+248 shot
+250 press triangle
+253 press cross
+256 shot
+258 press circle
+261 press circle
+264 shot
+266 press square
+269 press circle
+272 shot
+274 press down
+277 press cross
+280 shot
+282 press r1
+285 press l1
+288 shot
+290 press cross
+293 press cross
+296 shot
+298 press lx=255 3
+303 press cross
+306 shot
+308 press ly=0 3
+313 press cross
+316 shot
+318 press lx=0 3
+323 press cross
+326 shot
+328 press ly=255 3
+333 press cross
+336 shot
+338 press triangle
+341 press cross
+344 shot
+346 press circle
+349 press circle
+352 shot
+354 press square
+357 press circle
+360 shot
+362 press down
+365 press cross
+368 shot
+370 press r1
+373 press l1
+376 shot
+378 press cross
+381 press cross
+384 shot
+386 press lx=255 3
+391 press cross
+394 shot
+396 press ly=0 3
+401 press cross
+404 shot
+406 press lx=0 3
+411 press cross
+414 shot
+416 press ly=255 3
+421 press cross
+424 shot
+426 press triangle
+429 press cross
+432 shot
+434 press circle
+437 press circle
+440 shot
+442 press square
+445 press circle
+448 shot
+450 press down
+453 press cross
+456 shot
+458 press r1
+461 press l1
+464 shot
+466 press cross
+469 press cross
+472 shot
+474 press lx=255 3
+479 press cross
+482 shot
+484 press ly=0 3
+489 press cross
+492 shot
+494 press lx=0 3
+499 press cross
+502 shot
+504 press ly=255 3
+509 press cross
+512 shot
+514 press triangle
+517 press cross
+520 shot
+522 press circle
+525 press circle
+528 shot
+530 press square
+533 press circle
+536 shot
+538 press down
+541 press cross
+544 shot
+548 shot
+550 end
