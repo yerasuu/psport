@@ -131,8 +131,9 @@ described where `run.sh` and `gpu/` read them. The GPU's threading:
 (`BB_AUDIO=none`, `BB_PAD_HOST=0`: no window, no sound, none of the user's controllers), drives
 each with a pad schedule (`tools/regress/*.sched`) and reports how far it got (loaded, entered,
 initialized, first GPU frame, drawn frames, audio), its crash signature and its count of imports
-without implementation; with `-c <earlier results.json>` it flags regressions. Usage and
-milestones: [FORK.md](FORK.md#regression-runs).
+without implementation; with `-c <earlier results.json>` it flags regressions. The titles file
+still passes `BB_SYS_MODULES=$SYS_MODULES` to the six other titles, so they are skipped unless
+`SYS_MODULES` is set. Usage and milestones: [FORK.md](FORK.md#regression-runs).
 
 ## Diagnostics
 
