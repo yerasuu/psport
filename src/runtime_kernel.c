@@ -42,6 +42,10 @@ int32_t runtime_guest_errno(int e) {
     case EMLINK: return 31; case EPIPE: return 32; case ERANGE: return 34; case EAGAIN: return 35;
     case ENAMETOOLONG: return 63; case ENOTEMPTY: return 66; case ETIMEDOUT: return 60;
     case ELOOP: return 62; case ENOSYS: return 78; case EOVERFLOW: return 84; case ECANCELED: return 85;
+    case EINPROGRESS: return 36; case EALREADY: return 37; case ENOTSOCK: return 38; case EMSGSIZE: return 40;
+    case ENOPROTOOPT: return 42; case EOPNOTSUPP: return 45; case EADDRINUSE: return 48; case EADDRNOTAVAIL: return 49;
+    case ENETUNREACH: return 51; case ECONNABORTED: return 53; case ECONNRESET: return 54; case ENOBUFS: return 55;
+    case EISCONN: return 56; case ENOTCONN: return 57; case ECONNREFUSED: return 61; case EHOSTUNREACH: return 65;
     default: return 5; /* EIO: unmapped host error */
     }
 }

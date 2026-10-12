@@ -1,6 +1,6 @@
 /* System services for an offline, single-user console:
  *   - one local user (id 1) who is logged in but not signed in to PSN;
- *   - network cable unplugged: NetCtl disconnected, sockets unavailable;
+ *   - network cable unplugged: NetCtl disconnected, sockets on loopback only (runtime_socket.c);
  *   - common dialogs complete immediately (no UI is drawn yet);
  *   - no PlayStation VR headset is connected.
  * Every entry here is an explicit contract; unknown functions still stop. */
@@ -128,10 +128,8 @@ static ABI int32_t display_safe_area(float *ratio) {
 }
 
 /* ---- NetCtl / Net / Http / Ssl: no network ---- */
-static int32_t net_errno;
-static ABI int32_t *net_errno_loc(void) { return &net_errno; }
 static ABI int32_t net_pool_create(const char *name,int size,int flags) { (void)name; (void)size; (void)flags; return new_id(); }
-static ABI int32_t net_unreachable(void) { net_errno=51; return NET_ENETUNREACH; }
+static ABI int32_t net_unreachable(void) { *runtime_net_errno()=51; return NET_ENETUNREACH; }
 static ABI int32_t net_epoll_create(const char *name,int flags) { (void)name; (void)flags; return new_id(); }
 static ABI int32_t net_resolver_create(const char *name,int pool,int flags) { (void)name; (void)pool; (void)flags; return new_id(); }
 static ABI uint16_t net_htons(uint16_t v) { return htons(v); }
@@ -139,11 +137,11 @@ static ABI uint16_t net_ntohs(uint16_t v) { return ntohs(v); }
 static ABI uint32_t net_htonl(uint32_t v) { return htonl(v); }
 static ABI uint32_t net_ntohl(uint32_t v) { return ntohl(v); }
 static ABI int32_t net_pton(int af,const char *src,void *dst) {
-    if (af!=2) { net_errno=47; return NET_EINVAL; }
+    if (af!=2) { *runtime_net_errno()=47; return NET_EINVAL; }
     return inet_pton(AF_INET,src,dst);
 }
 static ABI const char *net_ntop(int af,const void *src,char *dst,uint32_t size) {
-    if (af!=2) { net_errno=47; return NULL; }
+    if (af!=2) { *runtime_net_errno()=47; return NULL; }
     return inet_ntop(AF_INET,src,dst,size);
 }
 static ABI int32_t netctl_state(int32_t *state) { if (!state) return NET_CTL_INVALID_ADDR; *state=0; return 0; }
@@ -608,18 +606,12 @@ static const RuntimeExport exports[]={
     {"sceSystemServiceReceiveEvent",system_event}, {"sceSystemServiceHideSplashScreen",hide_splash},
     {"sceSystemServiceLaunchWebBrowser",launch_browser},
     {"sceSystemServiceGetDisplaySafeAreaInfo",display_safe_area},
-    {"sceNetInit",runtime_stub}, {"sceNetTerm",runtime_stub}, {"sceNetErrnoLoc",net_errno_loc},
+    {"sceNetInit",runtime_stub}, {"sceNetTerm",runtime_stub},
     {"sceNetPoolCreate",net_pool_create}, {"sceNetPoolDestroy",runtime_stub},
     {"sceNetEpollCreate",net_epoll_create}, {"sceNetEpollDestroy",runtime_stub},
     {"sceNetResolverCreate",net_resolver_create}, {"sceNetResolverDestroy",runtime_stub},
     {"sceNetHtons",net_htons}, {"sceNetNtohs",net_ntohs}, {"sceNetHtonl",net_htonl}, {"sceNetNtohl",net_ntohl},
     {"sceNetInetPton",net_pton}, {"sceNetInetNtop",net_ntop},
-    {"sceNetSocket",net_unreachable}, {"sceNetConnect",net_unreachable}, {"sceNetBind",net_unreachable},
-    {"sceNetListen",net_unreachable}, {"sceNetAccept",net_unreachable}, {"sceNetSend",net_unreachable},
-    {"sceNetSendto",net_unreachable}, {"sceNetRecv",net_unreachable}, {"sceNetRecvfrom",net_unreachable},
-    {"sceNetSetsockopt",net_unreachable}, {"sceNetGetsockopt",net_unreachable},
-    {"sceNetGetsockname",net_unreachable}, {"sceNetShutdown",net_unreachable},
-    {"sceNetSocketClose",net_unreachable}, {"sceNetSocketAbort",net_unreachable},
     {"sceNetEpollControl",net_unreachable}, {"sceNetEpollWait",net_unreachable}, {"sceNetEpollAbort",net_unreachable},
     {"sceNetResolverStartNtoa",net_unreachable}, {"sceNetResolverStartAton",net_unreachable},
     {"sceNetCtlGetState",netctl_state}, {"sceNetCtlGetInfo",netctl_info},
@@ -753,7 +745,9 @@ static const RuntimeExport exports[]={
 };
 uintptr_t runtime_services_resolve(const char *name) {
     const uintptr_t online=runtime_net_resolve(name); /* BB_ONLINE=1: the online module first */
-    return online ? online : RUNTIME_LOOKUP(exports,name);
+    if (online) return online;
+    const uintptr_t found=RUNTIME_LOOKUP(exports,name);
+    return found ? found : runtime_socket_resolve(name);
 }
 #else
 uintptr_t runtime_services_resolve(const char *name) { (void)name; return 0; }
