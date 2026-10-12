@@ -59,6 +59,8 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title, const char* ico
     // Gamepads are sampled by runtime_pad.c; their events are pumped here with the window's.
     const char* host_pad = std::getenv("BB_PAD_HOST");
     const SDL_InitFlags gamepad = host_pad && host_pad[0] == '0' ? 0 : SDL_INIT_GAMEPAD;
+    // SDL_APP_ID from the environment still takes precedence over this identifier.
+    SDL_SetAppMetadata("psport", nullptr, "psport");
     if (!SDL_InitSubSystem(SDL_INIT_VIDEO | gamepad)) {
         UNREACHABLE_MSG("Failed to initialize SDL video: {}", SDL_GetError());
     }
@@ -103,6 +105,7 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title, const char* ico
     width = w;
     height = h;
     LOG_INFO(Frontend, "Window {}x{} on {}", w, h, driver);
+    std::printf("Window: %s (app id %s)\n", title, SDL_GetAppMetadataProperty(SDL_PROP_APP_METADATA_IDENTIFIER_STRING));
 }
 
 WindowSDL::~WindowSDL() {
