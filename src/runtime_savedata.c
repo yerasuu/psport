@@ -268,6 +268,34 @@ bad:
     pthread_mutex_unlock(&lock);
     return ERR_PARAMETER;
 }
+static uint64_t copy_text(void *buffer, uint64_t size, const char *text, size_t capacity) {
+    size_t length=strnlen(text,capacity-1);
+    if (length>=size) length=size-1;
+    memcpy(buffer,text,length); ((char *)buffer)[length]=0;
+    return length+1;
+}
+static ABI int32_t save_get_param(const MountPoint *point, uint32_t type, void *buffer, uint64_t size, uint64_t *got) {
+    if (!initialized) return ERR_NOT_INITIALIZED;
+    if (!buffer || !size) return ERR_PARAMETER;
+    pthread_mutex_lock(&lock);
+    int slot=slot_of(point);
+    Param p;
+    if (slot>=0) read_param(slots[slot].meta,&p);
+    pthread_mutex_unlock(&lock);
+    if (slot<0) return ERR_NOT_MOUNTED;
+    uint64_t written;
+    switch (type) {
+    case 0: if (size<sizeof(p)) return ERR_PARAMETER; memcpy(buffer,&p,written=sizeof(p)); break;
+    case 1: written=copy_text(buffer,size,p.title,sizeof(p.title)); break;
+    case 2: written=copy_text(buffer,size,p.subtitle,sizeof(p.subtitle)); break;
+    case 3: written=copy_text(buffer,size,p.detail,sizeof(p.detail)); break;
+    case 4: if (size<sizeof(p.user_param)) return ERR_PARAMETER; memcpy(buffer,&p.user_param,written=sizeof(p.user_param)); break;
+    case 5: if (size<sizeof(p.mtime)) return ERR_PARAMETER; memcpy(buffer,&p.mtime,written=sizeof(p.mtime)); break;
+    default: return ERR_PARAMETER;
+    }
+    if (got) *got=written;
+    return 0;
+}
 static ABI int32_t save_icon(const MountPoint *point, const Icon *icon) {
     if (!initialized) return ERR_NOT_INITIALIZED;
     if (!icon || !icon->buffer) return ERR_PARAMETER;
@@ -466,7 +494,8 @@ static const RuntimeExport exports[]={
     {"sceSaveDataInitialize3",save_initialize}, {"sceSaveDataTerminate",save_terminate},
     {"sceSaveDataMount",save_mount}, {"sceSaveDataMount2",save_mount2}, {"sceSaveDataUmount",save_umount},
     {"sceSaveDataUmountWithBackup",save_umount_with_backup}, {"sceSaveDataGetEventResult",save_event_result},
-    {"sceSaveDataSetParam",save_set_param}, {"sceSaveDataSaveIcon",save_icon}, {"sceSaveDataDelete",save_delete},
+    {"sceSaveDataSetParam",save_set_param}, {"sceSaveDataGetParam",save_get_param},
+    {"sceSaveDataSaveIcon",save_icon}, {"sceSaveDataDelete",save_delete},
     {"sceSaveDataDirNameSearch",save_search}, {"sceSaveDataTransferringMount",save_transferring_mount},
     {"sceSaveDataSetupSaveDataMemory",memory_setup}, {"sceSaveDataGetSaveDataMemory",memory_get},
     {"sceSaveDataSetSaveDataMemory",memory_set}, {"sceSaveDataSetupSaveDataMemory2",memory_setup2},
