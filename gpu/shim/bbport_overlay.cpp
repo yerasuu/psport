@@ -551,8 +551,9 @@ void Menu() {
     // press confirms; the window thread then closes like the window's own close button.
     static bool quit_armed;
     ImGui::SameLine();
-    if (ImGui::Button(quit_armed ? BbSettings::MenuText("Press again to quit", "Нажмите ещё раз для выхода")
-                                 : BbSettings::MenuText("Quit game", "Выйти из игры"))) {
+    if (ImGui::Button(quit_armed ? BbSettings::MenuText("Press again to quit###quit_game",
+                                                        "Нажмите ещё раз для выхода###quit_game")
+                                 : BbSettings::MenuText("Quit game###quit_game", "Выйти из игры###quit_game"))) {
         if (quit_armed) {
             SDL_Event quit{};
             quit.type = SDL_EVENT_QUIT;

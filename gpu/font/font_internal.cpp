@@ -727,6 +727,10 @@ std::filesystem::path ResolveGuestPath(const char* guest_path) {
 
 bool LoadGuestFileBytes(const std::filesystem::path& host_path,
                         std::vector<unsigned char>& out_bytes) {
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(host_path, ec)) {
+        return false;
+    }
     std::ifstream file(host_path, std::ios::binary | std::ios::ate);
     if (!file) {
         return false;
@@ -739,10 +743,14 @@ bool LoadGuestFileBytes(const std::filesystem::path& host_path,
         out_bytes.clear();
         return true;
     }
-    if (static_cast<std::uint64_t>(size) > std::numeric_limits<std::size_t>::max()) {
+    if (static_cast<std::uint64_t>(size) > out_bytes.max_size()) {
         return false;
     }
-    out_bytes.resize(static_cast<std::size_t>(size));
+    try {
+        out_bytes.resize(static_cast<std::size_t>(size));
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
     file.seekg(0, std::ios::beg);
     if (!file.read(reinterpret_cast<char*>(out_bytes.data()),
                    static_cast<std::streamsize>(out_bytes.size()))) {
@@ -750,18 +758,6 @@ bool LoadGuestFileBytes(const std::filesystem::path& host_path,
         return false;
     }
     return true;
-}
-
-bool LoadGuestPathBytes(const char* guest_path, std::vector<unsigned char>& out_bytes) {
-    if (!guest_path) {
-        return false;
-    }
-    if (guest_path[0] == '/') {
-        const auto host_path = ResolveGuestPath(guest_path);
-        return !host_path.empty() && LoadGuestFileBytes(host_path, out_bytes);
-    }
-    // Non-guest path: treat as a host path (builtin/system fonts).
-    return LoadGuestFileBytes(std::filesystem::path(guest_path), out_bytes);
 }
 
 FaceMetrics LoadFaceMetrics(FT_Face face) {

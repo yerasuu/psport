@@ -56,7 +56,9 @@ SDL_DisplayID ChooseDisplay() {
 
 WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title) : width{width_}, height{height_} {
     // Gamepads are sampled by runtime_pad.c; their events are pumped here with the window's.
-    if (!SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
+    const char* host_pad = std::getenv("BB_PAD_HOST");
+    const SDL_InitFlags gamepad = host_pad && host_pad[0] == '0' ? 0 : SDL_INIT_GAMEPAD;
+    if (!SDL_InitSubSystem(SDL_INIT_VIDEO | gamepad)) {
         UNREACHABLE_MSG("Failed to initialize SDL video: {}", SDL_GetError());
     }
     SDL_PropertiesID props = SDL_CreateProperties();

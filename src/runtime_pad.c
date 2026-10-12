@@ -223,10 +223,13 @@ static int is_preferred(SDL_JoystickID id, const char *want) {
     return !strcasecmp(guid,want) || (name && strcasestr(name,want));
 }
 /* The chosen gamepad, else the first while it is not connected (checked again every second, it
- * is taken as soon as it connects); called under lock. */
+ * is taken as soon as it connects); called under lock. BB_PAD_HOST=0 (scripted runs) opens none. */
 static SDL_Gamepad *current_gamepad(void) {
     static int on_preferred; static uint64_t last_scan;
-    if (!sdl_ready) sdl_ready = SDL_WasInit(SDL_INIT_GAMEPAD) ? 1 : SDL_InitSubSystem(SDL_INIT_GAMEPAD) ? 1 : -1;
+    if (!sdl_ready) {
+        const char *host=getenv("BB_PAD_HOST");
+        sdl_ready = host && *host=='0' ? -1 : SDL_WasInit(SDL_INIT_GAMEPAD) ? 1 : SDL_InitSubSystem(SDL_INIT_GAMEPAD) ? 1 : -1;
+    }
     if (sdl_ready<0) return NULL;
     if (gamepad && !SDL_GamepadConnected(gamepad)) { SDL_CloseGamepad(gamepad); gamepad=NULL; }
     const char *want=preferred_gamepad();

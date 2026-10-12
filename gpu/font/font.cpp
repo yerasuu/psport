@@ -578,7 +578,6 @@ using Internal::GetNativeFont;
 using Internal::kPointsPerInch;
 using Internal::kStyleFrameMagic;
 using Internal::LoadGuestFileBytes;
-using Internal::LoadGuestPathBytes;
 using Internal::LogCachedStyleOnce;
 using Internal::LogFontOpenError;
 using Internal::LogRenderResultSample;
@@ -3002,14 +3001,12 @@ s32 PS4_SYSV_ABI sceFontOpenFontFile(OrbisFontLib library, const char* guest_pat
     }
 
     const auto host_path = ResolveGuestPath(guest_path);
-    const std::filesystem::path path_to_open =
-        host_path.empty() ? std::filesystem::path(guest_path) : host_path;
-    const std::string host_path_str = path_to_open.string();
-    if (host_path_str.empty()) {
+    if (host_path.empty()) {
         release_library_and_clear_out();
-        LOG_ERROR(Lib_Font, "INVALID_PARAMETER");
-        return ORBIS_FONT_ERROR_INVALID_PARAMETER;
+        LOG_ERROR(Lib_Font, "FS_OPEN_FAILED");
+        return ORBIS_FONT_ERROR_FS_OPEN_FAILED;
     }
+    const std::string host_path_str = host_path.string();
     const std::string guest_name = std::filesystem::path(guest_path).filename().string();
 
     OrbisFontHandle handle = *out_handle;
@@ -3384,7 +3381,7 @@ s32 PS4_SYSV_ABI sceFontOpenFontFile(OrbisFontLib library, const char* guest_pat
     ReleaseLibraryLock(lib, prev_lib_lock);
 
     std::vector<unsigned char> file_bytes;
-    if (LoadGuestPathBytes(guest_path, file_bytes) &&
+    if (LoadGuestFileBytes(host_path, file_bytes) &&
         file_bytes.size() <= std::numeric_limits<u32>::max()) {
         auto& st = Internal::GetState(handle);
         Internal::DestroyFreeTypeFace(st.ext_ft_face);

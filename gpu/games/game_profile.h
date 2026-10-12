@@ -30,6 +30,9 @@ struct Profile {
     /// left alone). They make the core learn of writes sooner; it does not depend on them for
     /// what it shows (write traps catch what nobody announces).
     void (*install_hooks)(const CoreServices& services) = nullptr;
+    /// Patches the game's code once, before any of it runs, while the image is still writable
+    /// (each patch checks the bytes it replaces, as the hooks do).
+    void (*patch_image)(unsigned char* image, std::uint64_t size) = nullptr;
     /// Guest code known to write per-frame data into GPU memory: the blocks it writes stay in
     /// the game's memory from its first write instead of after a few frames.
     std::span<const CodeRange> dynamic_writers;

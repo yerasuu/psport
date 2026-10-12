@@ -23,6 +23,7 @@ while getopts 'j:o:c:t:n:s:' opt; do
     esac
 done
 shift $((OPTIND - 1))
+[[ $jobs =~ ^[1-9][0-9]*$ ]] || { echo "regress.sh: -j needs a positive integer" >&2; exit 2; }
 (($# == 1)) || { sed -n '2,16p' "$0" | cut -c3-; exit 2; }
 games=$(realpath -- "$1")
 [[ -x $root/out/bb-probe ]] || { echo "regress.sh: no out/bb-probe (run build.sh)" >&2; exit 1; }
@@ -42,7 +43,7 @@ expand() {
     while [[ $value =~ \$\{?([A-Za-z_][A-Za-z0-9_]*)\}? ]]; do
         name=${BASH_REMATCH[1]}
         [[ -n ${!name:-} ]] || { printf '%s' "$name"; return 1; }
-        value=${value//"${BASH_REMATCH[0]}"/${!name}}
+        value=${value//"${BASH_REMATCH[0]}"/"${!name}"}
     done
     printf '%s' "$value"
 }
@@ -69,17 +70,18 @@ run_title() {
     rm -rf -- "$dir"; mkdir -p "$dir/shots"; : > "$dir/pad"
     printf 'name\t%s\ntitle\t%s\ngame\t%s\nschedule\t%s\n' "$name" "$title" "$game" "$schedule" > "$dir/run.tsv"
     # Inside a headless gamescope (its own X display, no window) and without the desktop's display
-    # variables, with BB_AUDIO=none last so a title's env can't turn sound back on: a run never
-    # shows anything or plays sound on the user's session; what it shows comes back as dumps.
+    # variables, with BB_AUDIO=none and BB_PAD_HOST=0 last so a title's env can't turn sound or the
+    # user's controllers back on: a run never shows anything, plays sound or reads a pad on the
+    # user's session; what it shows comes back as dumps.
     ( cd "$root" && exec setsid env -u DISPLAY -u WAYLAND_DISPLAY gamescope --backend headless -W 1920 -H 1080 -- \
-        env -u WAYLAND_DISPLAY "$@" SDL_VIDEO_DRIVER=x11 ENABLE_GAMESCOPE_WSI=0 BB_AUDIO=none BB_AUDIO_STATS=1 \
+        env -u WAYLAND_DISPLAY "$@" SDL_VIDEO_DRIVER=x11 ENABLE_GAMESCOPE_WSI=0 BB_AUDIO=none BB_PAD_HOST=0 BB_AUDIO_STATS=1 \
         BB_PREBUILT=1 BB_PROBE="$root/out/bb-probe" BB_DATA_DIR="$dir" BB_USER_DIR="$dir/user" BB_GAME_DIR="$game" \
         BB_MODS_ENABLED=0 BB_PAD_FILE="$dir/pad" BB_PRESENT_DUMP_TRIGGER="$dir/shot" BB_DUMP_DIR="$dir/shots" \
         "${launch[@]}" ) > "$dir/log" 2>&1 < /dev/null &
     local pid=$! start=$SECONDS ended=schedule at what rest buttons hold
     # setsid put the session out of reach of the terminal and of a kill aimed at this script, so
     # an interrupted run would leave the game and gamescope running headless indefinitely.
-    trap 'stop_session $pid; exit 143' TERM
+    trap 'stop_session $pid; exit 143' TERM HUP INT
     while read -r at what rest; do
         [[ -z $at || $at == \#* ]] && continue
         while ((SECONDS - start < at)); do kill -0 $pid 2>/dev/null || { ended=exited; break 2; }; sleep 0.2; done

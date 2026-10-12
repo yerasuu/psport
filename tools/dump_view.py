@@ -5,6 +5,7 @@
 
 Files are <dir>/fNNN_<name>_<w>x<h>_<format>.raw (vk_temporal_upscaler.cpp DumpImages):
 - rgba / bgra: 8-bit color as is;
+- a2r10g10b10 / a2b10g10r10 (10-bit display buffers, red in the high or low bits): top 8 bits;
 - rgba16f / rgba32f / r11g11b10f: HDR color, Reinhard-mapped and sRGB-encoded (alpha dropped);
 - rg16f (motion vectors, in pixels of the render size: TAA adds them to the pixel position,
   FSR gets motionVectorScale 1): hue = direction, brightness =
@@ -79,6 +80,11 @@ def convert(path):
         if fmt == 'bgra':
             img = img[..., ::-1]
         Image.fromarray(np.ascontiguousarray(img)).save(out)
+    elif fmt in ('a2r10g10b10', 'a2b10g10r10'):
+        packed = np.frombuffer(data, np.uint32)[: w * h].reshape(h, w)
+        channels = [(packed >> shift) & 0x3FF for shift in (0, 10, 20)]
+        img = np.stack(channels if fmt == 'a2b10g10r10' else channels[::-1], axis=-1) >> 2
+        Image.fromarray(img.astype(np.uint8)).save(out)
     elif fmt in ('rgba16f', 'rgba32f'):
         dtype = np.float16 if fmt == 'rgba16f' else np.float32
         img = np.frombuffer(data, dtype)[: w * h * 4].reshape(h, w, 4)[..., :3].astype(np.float32)

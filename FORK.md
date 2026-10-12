@@ -79,12 +79,13 @@ SYS_MODULES=<folder> tools/regress.sh [-j 2] [-o out/regress/<time>] [-c <earlie
     [-n ryza,bloodborne] [-s <toolchain nix file>] <games root>
 ```
 
-Each title runs inside a headless gamescope with `BB_AUDIO=none`: no window and no sound on the
-desktop. Its pad schedule (`tools/regress/*.sched`: `<second> shot`, `<second> press <a+b> [hold]`,
-`<second> end`) drives `BB_PAD_FILE` and takes frame dumps; a last one is taken before it stops. At
-most `-j` titles (default 2) run at once. The titles file names the folder under the games root and
-the title's own environment; `$NAME` there comes from the caller's environment, and a title whose
-variable is empty is skipped (`$SYS_MODULES`: the folder of system modules above).
+Each title runs inside a headless gamescope with `BB_AUDIO=none` and `BB_PAD_HOST=0`: no window, no
+sound and none of the user's controllers. Its pad schedule (`tools/regress/*.sched`: `<second> shot`,
+`<second> press <a+b> [hold]`, `<second> end`) drives `BB_PAD_FILE` and takes frame dumps; a last one
+is taken before it stops. At most `-j` titles (default 2) run at once. The titles file names the
+folder under the games root and the title's own environment; `$NAME` there comes from the caller's
+environment, and a title whose variable is empty is skipped (`$SYS_MODULES`: the folder of system
+modules above).
 
 Milestones, from the log and the dumps:
 

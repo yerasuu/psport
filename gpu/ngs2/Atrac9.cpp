@@ -128,6 +128,8 @@ static bool GatherSuperframe(Ngs2Voice& voice) {
 static bool DecodeSuperframe(Ngs2Voice& voice) {
     if (!GatherSuperframe(voice)) return false;
     auto& atrac9 = voice.atrac9;
+    // Upstream's bit reader takes no bound: the last frame's reads past the superframe land in zeros.
+    atrac9.input.resize(static_cast<std::size_t>(atrac9.superframeBytes) * 2);
     if (atrac9.windowCursor != 0) {
         atrac9.window.erase(atrac9.window.begin(), atrac9.window.begin() + static_cast<std::ptrdiff_t>(atrac9.windowCursor) * voice.channels);
         atrac9.windowCursor = 0;

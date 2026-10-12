@@ -738,6 +738,7 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
         }
     }
 
+    const u32 width = frame->width, height = frame->height;
     free_frame();
     if (!is_reusing_frame && is_game_frame) {
         DebugState.IncFlipFrameNum();
@@ -745,7 +746,7 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
         // (tools/regress.sh reads it as the gpu milestone).
         static std::atomic<bool> first_shown{false};
         if (!first_shown.exchange(true, std::memory_order_relaxed)) {
-            std::printf("Presenter: first game frame presented (%ux%u)\n", frame->width, frame->height);
+            std::printf("Presenter: first game frame presented (%ux%u)\n", width, height);
         }
     }
 }

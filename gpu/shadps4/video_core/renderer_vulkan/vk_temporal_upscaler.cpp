@@ -147,6 +147,21 @@ void DumpImages(const Instance& instance, Scheduler& scheduler, vk::CommandBuffe
     std::printf("Dump: frame %d -> %s\n", frame, dir.c_str());
 }
 
+/// The pixel layout a dump's file name carries (tools/dump_view.py, tools/regress/report.py).
+const char* ColorDumpLayout(vk::Format format) {
+    switch (format) {
+    case vk::Format::eB8G8R8A8Unorm:
+    case vk::Format::eB8G8R8A8Srgb:
+        return "bgra";
+    case vk::Format::eA2R10G10B10UnormPack32:
+        return "a2r10g10b10";
+    case vk::Format::eA2B10G10R10UnormPack32:
+        return "a2b10g10r10";
+    default:
+        return "rgba";
+    }
+}
+
 void PrintIssues(const char* what, u64 issues) {
     std::printf("Upscaler: %s invalid:", what);
     for (u32 bit = 0; bit < 64; ++bit) {
@@ -166,9 +181,8 @@ void DumpFinalFrameIfDue(const Instance& instance, Scheduler& scheduler, vk::Com
     if (!trigger || std::remove(trigger) != 0) {
         return;
     }
-    const bool bgra = format == vk::Format::eB8G8R8A8Unorm || format == vk::Format::eB8G8R8A8Srgb;
     DumpImages(instance, scheduler, cmdbuf, index++,
-               {{image, width, height, 4, "final", bgra ? "bgra" : "rgba"}});
+               {{image, width, height, 4, "final", ColorDumpLayout(format)}});
 }
 
 TemporalUpscaler::TemporalUpscaler(const Instance& instance_, Scheduler& scheduler_,
@@ -2214,9 +2228,8 @@ bool TemporalUpscaler::PresentDumpDue() {
 
 void TemporalUpscaler::DumpPresented(vk::Image image, u32 width, u32 height, vk::Format format) {
     scheduler.EndRendering();
-    const bool bgra = format == vk::Format::eB8G8R8A8Unorm || format == vk::Format::eB8G8R8A8Srgb;
     DumpImages(instance, scheduler, scheduler.CommandBuffer(), present_dump_index++,
-               {{image, width, height, 4, "present", bgra ? "bgra" : "rgba"}});
+               {{image, width, height, 4, "present", ColorDumpLayout(format)}});
 }
 
 } // namespace Vulkan

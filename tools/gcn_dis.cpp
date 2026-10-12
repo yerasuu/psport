@@ -29,6 +29,7 @@ void Write(std::string_view log_class, Level, const char*, int line, const char*
 } // namespace Common::Log
 void assert_fail_impl() {
     std::fprintf(stderr, "decoder assertion failed\n");
+    std::abort();
 }
 [[noreturn]] void unreachable_impl() {
     std::fprintf(stderr, "decoder reached unreachable code\n");
@@ -45,12 +46,18 @@ int main(int argc, char** argv) {
         return 2;
     }
     std::ifstream file(argv[1], std::ios::binary);
+    if (!file) {
+        std::fprintf(stderr, "gcn_dis: cannot open %s\n", argv[1]);
+        return 1;
+    }
     std::vector<char> bytes{std::istreambuf_iterator<char>(file), {}};
-    std::vector<u32> code(bytes.size() / 4);
-    std::memcpy(code.data(), bytes.data(), code.size() * 4);
+    const std::size_t dwords = bytes.size() / 4;
+    // A truncated last instruction (64-bit, or with a literal) is decoded from zeros, not past the end.
+    std::vector<u32> code(dwords + 2);
+    std::memcpy(code.data(), bytes.data(), dwords * 4);
     GcnCodeSlice slice{code.data(), code.data() + code.size()};
     GcnDecodeContext decoder;
-    while (!slice.atEnd()) {
+    while (slice.position() < code.data() + dwords) {
         const u32 pc = static_cast<u32>(slice.position() - code.data()) * 4;
         const GcnInst inst = decoder.decodeInstruction(slice);
         std::printf("%04x %-28s", pc, magic_enum::enum_name(inst.opcode).data());
