@@ -291,6 +291,12 @@ static void SetFilter(Ngs2Voice& voice, const Ngs2SamplerVoiceFilterParam& param
     filter.a2 = (1.0 - alpha) * inverseA0;
 }
 
+static void SetUserFx(Ngs2Voice& voice, const Ngs2SubmixerVoiceUserFxParam& fx) {
+    voice.userFxHandler = fx.handler;
+    voice.userFxData = {fx.user_data0, fx.user_data1, fx.user_data2};
+    voice.userFxFlags = fx.handler ? 1 : 0;
+}
+
 static void ApplySamplerParam(Ngs2Voice& voice, const Ngs2VoiceParamHeader& param) {
     switch (param.id) {
         case SCE_NGS2_SAMPLER_VOICE_PARAM_SETUP: SetupSampler(voice, ParamAs<Ngs2SamplerVoiceSetupParam>(param).format); break;
@@ -306,6 +312,7 @@ static void ApplySamplerParam(Ngs2Voice& voice, const Ngs2VoiceParamHeader& para
             voice.pitch = ratio;
             break;
         }
+        case SCE_NGS2_SAMPLER_VOICE_PARAM_USER_FX: SetUserFx(voice, ParamAs<Ngs2SubmixerVoiceUserFxParam>(param)); break;
         case SCE_NGS2_SAMPLER_VOICE_PARAM_FILTER: SetFilter(voice, ParamAs<Ngs2SamplerVoiceFilterParam>(param)); break;
         case SCE_NGS2_SAMPLER_VOICE_PARAM_ENVELOPE: IgnoreParam(param.id); break;
         default: throw std::runtime_error("NGS2: sampler voice param " + Ngs2Hex(param.id) + " is not implemented");
@@ -333,10 +340,7 @@ static void ApplyParam(Ngs2Voice& voice, const Ngs2VoiceParamHeader& param) {
         case SCE_NGS2_RACK_ID_SAMPLER: ApplySamplerParam(voice, param); return;
         case SCE_NGS2_RACK_ID_SUBMIXER:
             if (param.id == SCE_NGS2_SUBMIXER_VOICE_PARAM_USER_FX) {
-                const auto& fx = ParamAs<Ngs2SubmixerVoiceUserFxParam>(param);
-                voice.userFxHandler = fx.handler;
-                voice.userFxData = {fx.user_data0, fx.user_data1, fx.user_data2};
-                voice.userFxFlags = fx.handler ? 1 : 0;
+                SetUserFx(voice, ParamAs<Ngs2SubmixerVoiceUserFxParam>(param));
                 return;
             }
             if (param.id == SCE_NGS2_SUBMIXER_VOICE_PARAM_PEAK_METER) {

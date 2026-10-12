@@ -57,6 +57,7 @@ static constexpr std::uint32_t SCE_NGS2_SAMPLER_VOICE_PARAM_PITCH = 0x10000005;
 static constexpr std::uint32_t SCE_NGS2_SAMPLER_VOICE_PARAM_FILTER = 0x1000000a;
 // Named by their place in each rack's list (setup 0 up, as the known ids above sit); used by Ryza.
 static constexpr std::uint32_t SCE_NGS2_SAMPLER_VOICE_PARAM_ENVELOPE = 0x10000006;
+static constexpr std::uint32_t SCE_NGS2_SAMPLER_VOICE_PARAM_USER_FX = 0x10000008;
 static constexpr std::uint32_t SCE_NGS2_SUBMIXER_VOICE_PARAM_PEAK_METER = 0x20000005;
 static constexpr std::uint32_t SCE_NGS2_MASTERING_VOICE_PARAM_MATRIX = 0x30000001;
 static constexpr std::uint32_t SCE_NGS2_MASTERING_VOICE_PARAM_LFE = 0x30000002;
