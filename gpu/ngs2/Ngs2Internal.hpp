@@ -16,6 +16,7 @@
 static constexpr std::uint32_t NGS2_MAX_CHANNELS = 8;
 static constexpr std::uint32_t MIN_GRAIN_SAMPLES = 64;
 static constexpr std::uint32_t NGS2_VAG_FRAME_SAMPLES = 28;
+static constexpr std::uint32_t NGS2_LFE_CHANNEL = 3;
 
 struct Ngs2System;
 struct Ngs2Rack;
@@ -91,6 +92,9 @@ struct Ngs2FilterHistory {
 
 struct Ngs2Filter {
     bool enabled = false;
+    std::uint32_t location = 0;
+    Ngs2FilterParam param{};
+    std::uint32_t sampleRate = 0;
     std::uint64_t bypassMask = 0;
     double b0 = 1.0;
     double b1 = 0.0;
@@ -98,6 +102,19 @@ struct Ngs2Filter {
     double a1 = 0.0;
     double a2 = 0.0;
     std::vector<Ngs2FilterHistory> history;
+};
+
+enum class Ngs2EnvelopePhase : std::uint8_t { Idle, Forward, Release };
+
+struct Ngs2Envelope {
+    bool enabled = false;
+    std::uint32_t forwardPoints = 0;
+    std::vector<Ngs2EnvelopePoint> points;
+    Ngs2EnvelopePhase phase = Ngs2EnvelopePhase::Idle;
+    std::uint32_t index = 0;
+    std::uint32_t position = 0;
+    float start = 0.0f;
+    float level = 1.0f;
 };
 
 struct Ngs2Port {
@@ -113,6 +130,10 @@ struct Ngs2UserFx2 {
     std::uint32_t flags = 0;
     Ngs2UserFxProcessHandler handler = nullptr;
     std::array<std::uintptr_t, 3> userData{};
+    std::array<float, NGS2_MAX_CHANNELS> levels{};
+    std::array<float, NGS2_MAX_CHANNELS> appliedLevels{};
+    Ngs2Filter filter;
+    std::unique_ptr<Ngs2ReverbState, Ngs2ReverbDeleter> reverb;
 };
 
 struct Ngs2Voice {
@@ -139,9 +160,12 @@ struct Ngs2Voice {
     std::vector<Ngs2Port> ports;
     std::vector<std::vector<float>> matrices;
     std::vector<Ngs2Filter> filters;
+    Ngs2Envelope envelope;
     std::uint32_t outputId = 0;
     float fbwLevel = 1.0f;
     float lfeLevel = 1.0f;
+    std::uint32_t lfeCutoff = 0;
+    std::array<Ngs2Filter, 2> lfeFilters;
     std::vector<Ngs2UserFx2> userFx;
     Ngs2UserFxProcessHandler userFxHandler = nullptr;
     std::array<std::uintptr_t, 3> userFxData{};
@@ -163,6 +187,7 @@ struct Ngs2Rack {
     char name[16] = {};
     std::uint32_t maxChannels = 0;
     std::uint32_t maxFilters = 0;
+    std::uint32_t maxEnvelopePoints = 0;
     std::uint32_t maxGrainSamples = 0;
     std::uint32_t maxChannelWorks = 0;
     std::uint32_t maxInputs = 0;
@@ -214,10 +239,19 @@ void Ngs2SetupUserFx(Ngs2Rack& rack, const Ngs2CustomRackOption& option);
 void Ngs2CleanupUserFx(Ngs2Rack& rack);
 void Ngs2ApplyCustomParam(Ngs2Voice& voice, const Ngs2VoiceParamHeader& param);
 void Ngs2ProcessUserFx(Ngs2Voice& voice, std::uint32_t grain, std::uint32_t sampleRate);
-void Ngs2SetReverbParams(Ngs2Voice& voice, const Ngs2ReverbI3DL2Param& params);
-void Ngs2SetupReverb(Ngs2Voice& voice);
+void Ngs2SetReverbParams(std::unique_ptr<Ngs2ReverbState, Ngs2ReverbDeleter>& reverb, const Ngs2ReverbI3DL2Param& params);
+void Ngs2SetupReverb(std::unique_ptr<Ngs2ReverbState, Ngs2ReverbDeleter>& reverb);
 void Ngs2ClearReverb(Ngs2Voice& voice);
-bool Ngs2ProcessReverb(Ngs2Voice& voice, std::uint32_t grain, std::uint32_t sampleRate);
+bool Ngs2ProcessReverb(Ngs2ReverbState& reverb, float* samples, std::uint32_t channels, std::uint32_t grain, std::uint32_t sampleRate);
+void Ngs2SetFilter(Ngs2Filter& filter, const Ngs2FilterParam& param);
+void Ngs2UpdateFilter(Ngs2Filter& filter, std::uint32_t sampleRate);
+void Ngs2SetEnvelope(Ngs2Voice& voice, const Ngs2SamplerVoiceEnvelopeParam& param);
+void Ngs2StartEnvelope(Ngs2Envelope& envelope);
+bool Ngs2ApplyEnvelope(Ngs2Voice& voice, std::uint32_t grain);
+void Ngs2SetLfeLowPass(std::array<Ngs2Filter, 2>& stages, std::uint32_t cutoff, std::uint32_t channels, std::uint32_t sampleRate);
+bool Ngs2FilterHasHistory(const Ngs2Filter& filter);
+void Ngs2ApplyFilter(Ngs2Voice& voice, Ngs2Filter& filter, std::uint32_t grain);
+void Ngs2Ramp(float* samples, float from, float to, std::uint32_t grain, const float* source, bool accumulate);
 void Ngs2ProcessLegacyUserFx(Ngs2Voice& voice, std::uint32_t grain, std::uint32_t sampleRate);
 void Ngs2RenderSystem(Ngs2System& system, const Ngs2RenderBufferInfo* bufferInfo, std::uint32_t numBufferInfo);
 float Ngs2DefaultLevel(std::uint32_t sourceChannels, std::uint32_t source, std::uint32_t destChannels, std::uint32_t dest);

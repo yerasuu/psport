@@ -109,7 +109,7 @@ static std::uint32_t Samples(float milliseconds, float rate) {
     return static_cast<std::uint32_t>(rate * milliseconds * 0.001f + 0.5f);
 }
 
-static void Ramp(float* samples, float from, float to, std::uint32_t grain, const float* source, bool accumulate) {
+void Ngs2Ramp(float* samples, float from, float to, std::uint32_t grain, const float* source, bool accumulate) {
     const float step = (to - from) / static_cast<float>(grain);
     float gain = from;
     for (std::uint32_t i = 0; i < grain; i++) {
@@ -279,10 +279,8 @@ static void MixDown(const float* input, std::uint32_t channels, std::uint32_t gr
     }
 }
 
-bool Ngs2ProcessReverb(Ngs2Voice& voice, std::uint32_t grain, std::uint32_t sampleRate) {
-    auto& reverb = *voice.reverb;
+bool Ngs2ProcessReverb(Ngs2ReverbState& reverb, float* samples, std::uint32_t channels, std::uint32_t grain, std::uint32_t sampleRate) {
     const float rate = static_cast<float>(sampleRate);
-    const std::uint32_t channels = voice.channels;
     if (reverb.sampleRate != sampleRate) {
         reverb.sampleRate = sampleRate;
         reverb.reset = true;
@@ -292,7 +290,7 @@ bool Ngs2ProcessReverb(Ngs2Voice& voice, std::uint32_t grain, std::uint32_t samp
         Reset(reverb);
         reverb.changed = true;
     }
-    const std::vector<float> input = voice.samples;
+    const std::vector<float> input(samples, samples + static_cast<std::size_t>(channels) * grain);
     std::vector<float> mono(grain), early(grain), late(grain);
     MixDown(input.data(), channels, grain, mono.data());
     if (reverb.changed) {
@@ -300,10 +298,10 @@ bool Ngs2ProcessReverb(Ngs2Voice& voice, std::uint32_t grain, std::uint32_t samp
         RunTaps(reverb, reverb.taps, mono.data(), grain, oldEarly.data(), oldLate.data());
         ApplyParams(reverb, rate);
         RunTaps(reverb, reverb.taps, mono.data(), grain, early.data(), late.data());
-        Ramp(early.data(), 0.0f, 1.0f, grain, early.data(), false);
-        Ramp(early.data(), 1.0f, 0.0f, grain, oldEarly.data(), true);
-        Ramp(late.data(), 0.0f, 1.0f, grain, late.data(), false);
-        Ramp(late.data(), 1.0f, 0.0f, grain, oldLate.data(), true);
+        Ngs2Ramp(early.data(), 0.0f, 1.0f, grain, early.data(), false);
+        Ngs2Ramp(early.data(), 1.0f, 0.0f, grain, oldEarly.data(), true);
+        Ngs2Ramp(late.data(), 0.0f, 1.0f, grain, late.data(), false);
+        Ngs2Ramp(late.data(), 1.0f, 0.0f, grain, oldLate.data(), true);
     } else {
         RunTaps(reverb, reverb.taps, mono.data(), grain, early.data(), late.data());
     }
@@ -318,7 +316,7 @@ bool Ngs2ProcessReverb(Ngs2Voice& voice, std::uint32_t grain, std::uint32_t samp
     bool audible = false;
     for (std::uint32_t channel = 0; channel < channels; channel++) {
         auto& state = reverb.channels[channel];
-        float* out = voice.samples.data() + static_cast<std::size_t>(channel) * grain;
+        float* out = samples + static_cast<std::size_t>(channel) * grain;
         const float* in = input.data() + static_cast<std::size_t>(channel) * grain;
         if (channel == LFE_CHANNEL) {
             std::copy(in, in + grain, out);
@@ -342,8 +340,8 @@ bool Ngs2ProcessReverb(Ngs2Voice& voice, std::uint32_t grain, std::uint32_t samp
             }
         }
         const float wet = channel == LFE_CHANNEL ? 0.0f : params.wet;
-        Ramp(out, reset ? wet : state.wet, wet, grain, out, false);
-        Ramp(out, reset ? params.dry : state.dry, params.dry, grain, in, true);
+        Ngs2Ramp(out, reset ? wet : state.wet, wet, grain, out, false);
+        Ngs2Ramp(out, reset ? params.dry : state.dry, params.dry, grain, in, true);
         state.wet = wet;
         state.dry = params.dry;
         for (std::uint32_t n = 0; n < grain && !audible; n++) audible = out[n] != 0.0f;
@@ -353,13 +351,13 @@ bool Ngs2ProcessReverb(Ngs2Voice& voice, std::uint32_t grain, std::uint32_t samp
     return audible;
 }
 
-void Ngs2SetReverbParams(Ngs2Voice& voice, const Ngs2ReverbI3DL2Param& params) {
+void Ngs2SetReverbParams(std::unique_ptr<Ngs2ReverbState, Ngs2ReverbDeleter>& reverb, const Ngs2ReverbI3DL2Param& params) {
     if (std::isnan(params.wet) || std::isnan(params.dry) || std::isnan(params.decay_time) || std::isnan(params.decay_hf_ratio) || std::isnan(params.reflections_delay) ||
         std::isnan(params.reverb_delay) || std::isnan(params.diffusion) || std::isnan(params.density) || std::isnan(params.hf_reference)) {
         APS5_INVALID_ARG_EX;
     }
-    if (!voice.reverb) voice.reverb.reset(new Ngs2ReverbState{});
-    auto& stored = voice.reverb->params;
+    if (!reverb) reverb.reset(new Ngs2ReverbState{});
+    auto& stored = reverb->params;
     stored = params;
     stored.wet = Clamp(params.wet, 0.0f, 32.0f);
     stored.dry = Clamp(params.dry, 0.0f, 32.0f);
@@ -371,14 +369,17 @@ void Ngs2SetReverbParams(Ngs2Voice& voice, const Ngs2ReverbI3DL2Param& params) {
     stored.diffusion = Clamp(params.diffusion, 0.0f, 100.0f);
     stored.density = Clamp(params.density, 0.0f, 100.0f);
     stored.hf_reference = Clamp(params.hf_reference, 20.0f, 20000.0f);
-    voice.reverb->changed = true;
+    reverb->changed = true;
 }
 
-void Ngs2SetupReverb(Ngs2Voice& voice) {
-    voice.reverb.reset(new Ngs2ReverbState{});
-    Ngs2SetReverbParams(voice, SETUP_PARAMS);
+void Ngs2SetupReverb(std::unique_ptr<Ngs2ReverbState, Ngs2ReverbDeleter>& reverb) {
+    reverb.reset(new Ngs2ReverbState{});
+    Ngs2SetReverbParams(reverb, SETUP_PARAMS);
 }
 
 void Ngs2ClearReverb(Ngs2Voice& voice) {
     if (voice.reverb) voice.reverb->reset = true;
+    for (auto& fx : voice.userFx) {
+        if (fx.reverb) fx.reverb->reset = true;
+    }
 }

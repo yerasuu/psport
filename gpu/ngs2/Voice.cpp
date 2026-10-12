@@ -3,7 +3,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
-#include <numbers>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -29,10 +28,20 @@ void Ngs2Voice::SetEvent(std::uint32_t eventId) {
                 state = Ngs2PlayState::Playing;
                 stateFlags |= SCE_NGS2_VOICE_STATE_FLAG_INUSE;
                 if (userFxHandler) userFxFlags = 1;
+                Ngs2StartEnvelope(envelope);
             }
             break;
         case SCE_NGS2_VOICE_EVENT_STOP:
-            if (state == Ngs2PlayState::Playing || state == Ngs2PlayState::Paused) state = Ngs2PlayState::Stopped;
+            if (state != Ngs2PlayState::Playing && state != Ngs2PlayState::Paused) break;
+            // A voice with an envelope plays on through its release points, then ends.
+            if (envelope.enabled && envelope.phase == Ngs2EnvelopePhase::Forward) {
+                envelope.phase = Ngs2EnvelopePhase::Release;
+                envelope.index = envelope.forwardPoints;
+                envelope.position = 0;
+                envelope.start = envelope.level;
+                break;
+            }
+            state = Ngs2PlayState::Stopped;
             break;
         case SCE_NGS2_VOICE_EVENT_STOP_IMM:
         case SCE_NGS2_VOICE_EVENT_KILL:
@@ -55,8 +64,11 @@ void Ngs2Voice::ResetSetup() {
     std::fill(ports.begin(), ports.end(), Ngs2Port{});
     for (auto& matrix : matrices) matrix.clear();
     filters.clear();
+    envelope = {};
     fbwLevel = 1.0f;
     lfeLevel = 1.0f;
+    lfeCutoff = 0;
+    lfeFilters = {};
     channels = 0;
     sampleRate = 0;
     waveformType = 0;
@@ -128,7 +140,7 @@ static void Patch(Ngs2Voice& voice, const Ngs2VoicePatchParam& patch) {
     port.dest = dest;
 }
 
-// An effect not implemented (an envelope, a peak meter, mastering's matrix and LFE): its parameter
+// An effect not implemented (a peak meter, mastering's matrix): its parameter
 // is accepted and leaves the sound as it is, so the rest of the same parameter list still applies.
 static void IgnoreParam(std::uint32_t id) {
     static std::mutex lock;
@@ -267,36 +279,12 @@ static void AddWaveformBlocks(Ngs2Voice& voice, const Ngs2SamplerVoiceWaveformBl
 
 static void SetFilter(Ngs2Voice& voice, const Ngs2SamplerVoiceFilterParam& param) {
     if (param.index >= voice.rack->maxFilters) APS5_INVALID_ARG_EX;
+    if (param.location > 1) throw std::runtime_error("NGS2: sampler filter location " + std::to_string(param.location) + " is not implemented");
     if (voice.filters.size() <= param.index) voice.filters.resize(param.index + 1);
     auto& filter = voice.filters[param.index];
-    if (param.type == 0) {
-        filter = {};
-        return;
-    }
-    if (param.location != 1 || param.type != 1) {
-        throw std::runtime_error("NGS2: sampler filter location " + std::to_string(param.location) + " type " + std::to_string(param.type) + " is not implemented");
-    }
-    if (!std::isfinite(param.frequency) || param.frequency < 0.0f || !std::isfinite(param.q) || param.q <= 0.0f || !std::isfinite(param.level) || param.level < 0.0f) {
-        APS5_INVALID_ARG_EX;
-    }
-    const double rate = voice.rack->system->option.sample_rate;
-    filter.enabled = true;
-    filter.bypassMask = param.channel_mask;
+    filter.location = param.location;
     filter.history.resize(voice.channels);
-    if (param.frequency == 0.0f || param.frequency >= rate * 0.5) {
-        filter.b0 = param.frequency == 0.0f ? 0.0 : param.level;
-        filter.b1 = filter.b2 = filter.a1 = filter.a2 = 0.0;
-        return;
-    }
-    const double omega = 2.0 * std::numbers::pi * param.frequency / rate;
-    const double cosine = std::cos(omega);
-    const double alpha = std::sin(omega) / (2.0 * param.q);
-    const double inverseA0 = 1.0 / (1.0 + alpha);
-    filter.b0 = (1.0 - cosine) * 0.5 * inverseA0 * param.level;
-    filter.b1 = 2.0 * filter.b0;
-    filter.b2 = filter.b0;
-    filter.a1 = -2.0 * cosine * inverseA0;
-    filter.a2 = (1.0 - alpha) * inverseA0;
+    Ngs2SetFilter(filter, param.filter);
 }
 
 static void SetUserFx(Ngs2Voice& voice, const Ngs2SubmixerVoiceUserFxParam& fx) {
@@ -322,7 +310,7 @@ static void ApplySamplerParam(Ngs2Voice& voice, const Ngs2VoiceParamHeader& para
         }
         case SCE_NGS2_SAMPLER_VOICE_PARAM_USER_FX: SetUserFx(voice, ParamAs<Ngs2SubmixerVoiceUserFxParam>(param)); break;
         case SCE_NGS2_SAMPLER_VOICE_PARAM_FILTER: SetFilter(voice, ParamAs<Ngs2SamplerVoiceFilterParam>(param)); break;
-        case SCE_NGS2_SAMPLER_VOICE_PARAM_ENVELOPE: IgnoreParam(param.id); break;
+        case SCE_NGS2_SAMPLER_VOICE_PARAM_ENVELOPE: Ngs2SetEnvelope(voice, ParamAs<Ngs2SamplerVoiceEnvelopeParam>(param)); break;
         default: throw std::runtime_error("NGS2: sampler voice param " + Ngs2Hex(param.id) + " is not implemented");
     }
 }
@@ -366,11 +354,11 @@ static void ApplyParam(Ngs2Voice& voice, const Ngs2VoiceParamHeader& param) {
                 if (setup.num_input_channels != setup.num_output_channels) throw std::runtime_error("NGS2: reverb channel conversion is not implemented");
                 if (setup.num_output_channels != 1 && setup.num_output_channels != 2 && setup.num_output_channels != 6 && setup.num_output_channels != 8) APS5_INVALID_ARG_EX;
                 SetupMixer(voice, setup.num_output_channels);
-                Ngs2SetupReverb(voice);
+                Ngs2SetupReverb(voice.reverb);
                 return;
             }
             if (param.id == SCE_NGS2_REVERB_VOICE_PARAM_I3DL2) {
-                Ngs2SetReverbParams(voice, ParamAs<Ngs2ReverbVoiceI3DL2Param>(param).i3dl2);
+                Ngs2SetReverbParams(voice.reverb, ParamAs<Ngs2ReverbVoiceI3DL2Param>(param).i3dl2);
                 return;
             }
             break;
@@ -386,8 +374,15 @@ static void ApplyParam(Ngs2Voice& voice, const Ngs2VoiceParamHeader& param) {
                 voice.lfeLevel = gain.lfe_level;
                 return;
             }
-            if (param.id == SCE_NGS2_MASTERING_VOICE_PARAM_MATRIX || param.id == SCE_NGS2_MASTERING_VOICE_PARAM_LFE ||
-                param.id == SCE_NGS2_MASTERING_VOICE_PARAM_PEAK_METER) {
+            if (param.id == SCE_NGS2_MASTERING_VOICE_PARAM_LFE) {
+                const auto& lfe = ParamAs<Ngs2MasteringVoiceLfeParam>(param);
+                if (lfe.frequency != 80 && lfe.frequency != 120 && lfe.frequency != 240) APS5_INVALID_ARG_EX;
+                voice.lfeCutoff = lfe.enabled != 0 ? lfe.frequency : 0;
+                if (voice.lfeCutoff == 0) voice.lfeFilters = {};
+                for (auto& stage : voice.lfeFilters) stage.sampleRate = 0;
+                return;
+            }
+            if (param.id == SCE_NGS2_MASTERING_VOICE_PARAM_MATRIX || param.id == SCE_NGS2_MASTERING_VOICE_PARAM_PEAK_METER) {
                 IgnoreParam(param.id);
                 return;
             }
@@ -454,7 +449,7 @@ int APS5_VABI sceNgs2VoiceGetState(uintptr_t voice_handle, Ngs2VoiceState* state
             auto& sampler = *reinterpret_cast<Ngs2SamplerVoiceState*>(state);
             sampler = {};
             sampler.voice_state.state_flags = voice.stateFlags;
-            sampler.envelope_height = 1.0f;
+            sampler.envelope_height = voice.envelope.level;
             sampler.num_decoded_samples = voice.decodedSamples;
             sampler.decoded_data_size = voice.decodedBytes;
             sampler.user_data = voice.blocks.empty() ? 0 : voice.blocks.front().info.user_data;

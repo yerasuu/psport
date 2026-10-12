@@ -134,7 +134,7 @@ static bool Bypasses(const Ngs2Filter& filter, std::uint32_t channel) {
     return channel < 64 && (filter.bypassMask & (std::uint64_t{1} << channel)) != 0;
 }
 
-static bool HasHistory(const Ngs2Filter& filter) {
+bool Ngs2FilterHasHistory(const Ngs2Filter& filter) {
     if (!filter.enabled) return false;
     for (std::uint32_t channel = 0; channel < filter.history.size(); channel++) {
         const auto& h = filter.history[channel];
@@ -143,10 +143,13 @@ static bool HasHistory(const Ngs2Filter& filter) {
     return false;
 }
 
-static void ApplyFilter(Ngs2Voice& voice, Ngs2Filter& filter, std::uint32_t grain) {
+void Ngs2ApplyFilter(Ngs2Voice& voice, Ngs2Filter& filter, std::uint32_t grain) {
     for (std::uint32_t channel = 0; channel < voice.channels; channel++) {
-        if (Bypasses(filter, channel)) continue;
         auto& h = filter.history[channel];
+        if (Bypasses(filter, channel)) {
+            h = {};
+            continue;
+        }
         for (std::uint32_t i = 0; i < grain; i++) {
             auto& sample = voice.samples[channel * grain + i];
             const double x = sample;
@@ -158,16 +161,22 @@ static void ApplyFilter(Ngs2Voice& voice, Ngs2Filter& filter, std::uint32_t grai
     }
 }
 
+static void ApplyFilters(Ngs2Voice& voice, std::uint32_t location, std::uint32_t grain, std::uint32_t systemRate) {
+    for (auto& filter : voice.filters) {
+        if (!filter.enabled || filter.location != location || (!voice.hasSamples && !Ngs2FilterHasHistory(filter))) continue;
+        Ngs2UpdateFilter(filter, systemRate);
+        Ngs2ApplyFilter(voice, filter, grain);
+        voice.hasSamples = true;
+    }
+}
+
 static void RenderSampler(Ngs2Voice& voice, std::uint32_t grain, std::uint32_t systemRate) {
     if (voice.waveformType == SCE_NGS2_WAVEFORM_TYPE_ATRAC9) Ngs2ConsumeAtrac9(voice, grain, systemRate);
     else ConsumeSamples(voice, grain, systemRate);
-    for (auto& filter : voice.filters) {
-        if (!filter.enabled || (!voice.hasSamples && !HasHistory(filter))) continue;
-        ApplyFilter(voice, filter, grain);
-        voice.hasSamples = true;
-    }
+    ApplyFilters(voice, 0, grain, systemRate);
+    if (!Ngs2ApplyEnvelope(voice, grain)) voice.state = Ngs2PlayState::Empty;
     const bool buffered = voice.waveformType == SCE_NGS2_WAVEFORM_TYPE_ATRAC9 && voice.atrac9.windowCursor * voice.channels < voice.atrac9.window.size();
-    if (voice.state == Ngs2PlayState::Playing && voice.blocks.empty() && !buffered && !voice.acceptsBlocks && std::none_of(voice.filters.begin(), voice.filters.end(), HasHistory)) {
+    if (voice.state == Ngs2PlayState::Playing && voice.blocks.empty() && !buffered && !voice.acceptsBlocks && std::none_of(voice.filters.begin(), voice.filters.end(), Ngs2FilterHasHistory)) {
         voice.state = Ngs2PlayState::Empty;
     }
 }
@@ -244,6 +253,14 @@ static void MixInputs(Ngs2Voice& voice, const std::vector<Ngs2Voice*>& voices, s
     }
 }
 
+static void FilterLfe(Ngs2Voice& voice, std::uint32_t grain, std::uint32_t systemRate) {
+    if (voice.lfeCutoff == 0 || voice.channels <= NGS2_LFE_CHANNEL) return;
+    if (voice.lfeFilters[0].sampleRate != systemRate) Ngs2SetLfeLowPass(voice.lfeFilters, voice.lfeCutoff, voice.channels, systemRate);
+    if (!voice.hasSamples && !Ngs2FilterHasHistory(voice.lfeFilters[0]) && !Ngs2FilterHasHistory(voice.lfeFilters[1])) return;
+    for (auto& stage : voice.lfeFilters) Ngs2ApplyFilter(voice, stage, grain);
+    voice.hasSamples = true;
+}
+
 static void RenderVoice(Ngs2Voice& voice, const std::vector<Ngs2Voice*>& voices, std::uint32_t grain, std::uint32_t systemRate) {
     if (voice.rendered) return;
     if (voice.rendering) throw std::invalid_argument("NGS2: the voice patches form a cycle");
@@ -257,9 +274,11 @@ static void RenderVoice(Ngs2Voice& voice, const std::vector<Ngs2Voice*>& voices,
     if (voice.state == Ngs2PlayState::Playing && voice.channels != 0) {
         if (voice.rack->rackId == SCE_NGS2_RACK_ID_SAMPLER) RenderSampler(voice, grain, systemRate);
         else MixInputs(voice, voices, grain, systemRate);
-        if (voice.rack->rackId == SCE_NGS2_RACK_ID_REVERB && voice.reverb) voice.hasSamples = Ngs2ProcessReverb(voice, grain, systemRate);
+        if (voice.rack->rackId == SCE_NGS2_RACK_ID_MASTERING) FilterLfe(voice, grain, systemRate);
+        if (voice.rack->rackId == SCE_NGS2_RACK_ID_REVERB && voice.reverb) voice.hasSamples = Ngs2ProcessReverb(*voice.reverb, voice.samples.data(), voice.channels, grain, systemRate);
         Ngs2ProcessLegacyUserFx(voice, grain, systemRate);
-        if (voice.hasSamples) Ngs2ProcessUserFx(voice, grain, systemRate);
+        if (voice.rack->rackId == SCE_NGS2_RACK_ID_SAMPLER) ApplyFilters(voice, 1, grain, systemRate);
+        Ngs2ProcessUserFx(voice, grain, systemRate);
     }
     voice.rendered = true;
 }
@@ -334,6 +353,7 @@ void Ngs2RenderSystem(Ngs2System& system, const Ngs2RenderBufferInfo* bufferInfo
     for (auto* voice : voices) {
         if (voice->state == Ngs2PlayState::Stopped) voice->state = Ngs2PlayState::Empty;
         voice->stateFlags = static_cast<std::uint32_t>(voice->state);
+        if (voice->state != Ngs2PlayState::Empty && voice->envelope.phase == Ngs2EnvelopePhase::Release) voice->stateFlags |= SCE_NGS2_VOICE_STATE_FLAG_STOPPED;
     }
     system.renderCount++;
 }
