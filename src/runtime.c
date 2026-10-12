@@ -370,3 +370,17 @@ unsigned runtime_import_failure(const char *nid) {
     }
     return 0;
 }
+static const struct { char nid[12]; const char *function; uint32_t code; } status_results[]={
+#include "import_statuses.inc"
+};
+int runtime_import_status(const char *nid, uint32_t code) {
+    size_t low=0, high=sizeof(status_results)/sizeof(*status_results);
+    while (low<high) {
+        size_t mid=low+(high-low)/2;
+        int order=strncmp(nid,status_results[mid].nid,11);
+        if (!order) order=code<status_results[mid].code ? -1 : code>status_results[mid].code;
+        if (!order) return 1;
+        if (order<0) high=mid; else low=mid+1;
+    }
+    return 0;
+}

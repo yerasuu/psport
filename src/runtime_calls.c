@@ -1,7 +1,7 @@
-/* Calls the game makes that nothing answers for real, or that fail: each kind logged once per
- * import (and error code) with its first arguments, every call counted, and the counts summed up
- * when the process ends. Writes go straight to the descriptors so the report can run from the
- * fault and watchdog handlers. */
+/* Calls the game makes that nothing answers for real, or that fail or report a polled state: each
+ * kind logged once per import (and error code) with its first arguments, every call counted, and the
+ * counts summed up when the process ends. Writes go straight to the descriptors so the report can
+ * run from the fault and watchdog handlers. */
 #include "runtime.h"
 #include <inttypes.h>
 #include <fcntl.h>
@@ -82,7 +82,8 @@ ABI int64_t runtime_calls_failed(uint32_t id, const uintptr_t *arguments, int64_
             continue;
         if (__atomic_fetch_add(&failures[(slot + i) % FAILURE_SLOTS].count, 1, __ATOMIC_RELAXED)) return result;
         char line[512];
-        int used = snprintf(line, sizeof(line), "Calls: failed %s (%s) -> ", import_names[id],
+        int used = snprintf(line, sizeof(line), "Calls: %s %s (%s) -> ",
+                            runtime_import_status(import_names[id], code) ? "status" : "failed", import_names[id],
                             runtime_import_name(import_names[id]));
         used += describe_failure(line + used, sizeof(line) - (size_t)used, code);
         used += snprintf(line + used, sizeof(line) - (size_t)used, "; arguments ");
@@ -105,12 +106,12 @@ void runtime_calls_hle_stub(const char *function, const uint64_t *count) {
 }
 
 static int report_line(char *out, size_t size, const Entry *e) {
-    static const char *const kinds[] = {"unimplemented", "stub", "failed"};
+    static const char *const kinds[] = {"unimplemented", "stub", "failed", "status"};
     int used = snprintf(out, size, "Calls: summary %s %" PRIu64 " ", kinds[e->kind], e->count);
     if (e->function) return used + snprintf(out + used, size - (size_t)used, "%s (HLE)\n", e->function);
     used += snprintf(out + used, size - (size_t)used, "%s (%s)", import_names[e->id],
                      runtime_import_name(import_names[e->id]));
-    if (e->kind == 2) {
+    if (e->kind >= 2) {
         used += snprintf(out + used, size - (size_t)used, " -> ");
         used += describe_failure(out + used, size - (size_t)used, e->code);
     }
@@ -120,7 +121,7 @@ static int report_line(char *out, size_t size, const Entry *e) {
 void runtime_calls_report(void) {
     static int reported;
     if (!entries || __atomic_exchange_n(&reported, 1, __ATOMIC_ACQ_REL)) return;
-    size_t count = 0, totals[3] = {0};
+    size_t count = 0, totals[4] = {0};
     for (uint64_t id = 0; id < imports; ++id) {
         const uint64_t unimplemented = __atomic_load_n(&unimplemented_calls[id], __ATOMIC_RELAXED);
         const uint64_t stub = __atomic_load_n(&stub_calls[id], __ATOMIC_RELAXED);
@@ -132,9 +133,10 @@ void runtime_calls_report(void) {
             (Entry){__atomic_load_n(hle_stubs[i].count, __ATOMIC_RELAXED), 0, 0, 1, hle_stubs[i].function};
     for (size_t i = 0; i < FAILURE_SLOTS; ++i) {
         const uint64_t key = __atomic_load_n(&failures[i].key, __ATOMIC_ACQUIRE);
-        if (key)
-            entries[count++] = (Entry){__atomic_load_n(&failures[i].count, __ATOMIC_RELAXED), (uint32_t)(key >> 32) - 1,
-                                       (uint32_t)key, 2, NULL};
+        if (!key) continue;
+        const uint32_t id = (uint32_t)(key >> 32) - 1, code = (uint32_t)key;
+        entries[count++] = (Entry){__atomic_load_n(&failures[i].count, __ATOMIC_RELAXED), id, code,
+                                   runtime_import_status(import_names[id], code) ? 3 : 2, NULL};
     }
     for (size_t i = 1; i < count; ++i)
         for (size_t j = i; j && entries[j - 1].count < entries[j].count; --j) {
@@ -144,8 +146,9 @@ void runtime_calls_report(void) {
     const char *path = getenv("BB_CALL_REPORT");
     const int file = path && *path ? open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644) : -1;
     char line[512];
-    snprintf(line, sizeof(line), "Calls: summary: %zu unimplemented, %zu stub, %zu failed (import and error code)\n",
-             totals[0], totals[1], totals[2]);
+    snprintf(line, sizeof(line),
+             "Calls: summary: %zu unimplemented, %zu stub, %zu failed, %zu status (import and error code)\n",
+             totals[0], totals[1], totals[2], totals[3]);
     put(1, line);
     if (file >= 0) put(file, line);
     for (size_t i = 0; i < count; ++i) {

@@ -44,6 +44,9 @@ unsigned runtime_import_outputs(const char *nid);
  * error code, 2 and 3 -1 with errno as a 32-bit or 64-bit result, 4 a 64-bit SCE error code; 0 when
  * its result says nothing about failure or it takes arguments on the stack. */
 unsigned runtime_import_failure(const char *nid);
+/* 1 when the export reports a state its caller polls or waits for with this code (an SCE code, or
+ * the errno of a POSIX export), per import_statuses.inc: counted apart from the failures. */
+int runtime_import_status(const char *nid, uint32_t code);
 /* Calls nothing answers for real or that fail (runtime_calls.c): logged once per import and error
  * code, counted, and summed up by runtime_calls_report (also into BB_CALL_REPORT). */
 void runtime_calls_configure(const char (*names)[128], uint64_t count);
