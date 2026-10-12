@@ -11,6 +11,8 @@
 #include "ngs2_compat.hpp"
 #include "Ngs2Internal.hpp"
 
+static constexpr std::uint32_t MAX_PEAK_METER_BLOCKS = 256;
+
 union RackOptions {
     Ngs2RackOption common;
     Ngs2SamplerRackOption sampler;
@@ -83,6 +85,12 @@ static std::uint32_t RackMaxChannels(std::uint32_t rackId, const RackOptions& op
     return NGS2_MAX_CHANNELS;
 }
 
+static std::uint32_t RackPeakMeterBlocks(std::uint32_t rackId, const RackOptions& options) {
+    if (rackId == SCE_NGS2_RACK_ID_SUBMIXER) return options.submixer.num_peak_meter_blocks;
+    if (rackId == SCE_NGS2_RACK_ID_MASTERING) return options.mastering.num_peak_meter_blocks;
+    return 0;
+}
+
 static RackOptions CheckedRackOption(std::uint32_t rackId, const Ngs2RackOption* option) {
     const auto size = RackOptionSize(rackId);
     if (option == nullptr) return DefaultRackOption(rackId);
@@ -96,6 +104,10 @@ static RackOptions CheckedRackOption(std::uint32_t rackId, const Ngs2RackOption*
     if (rackId == SCE_NGS2_RACK_ID_CUSTOM_SUBMIXER) Ngs2CheckCustomRack(options.customSubmixer.custom_rack_option);
     if (rackId == SCE_NGS2_RACK_ID_REVERB && options.reverb.reverb_size != 1) {
         throw std::runtime_error("NGS2: reverb rack size " + std::to_string(options.reverb.reverb_size) + " is not implemented");
+    }
+    const auto peakMeterBlocks = RackPeakMeterBlocks(rackId, options);
+    if ((rackId == SCE_NGS2_RACK_ID_SUBMIXER || rackId == SCE_NGS2_RACK_ID_MASTERING) && (peakMeterBlocks == 0 || peakMeterBlocks > MAX_PEAK_METER_BLOCKS)) {
+        throw std::invalid_argument("NGS2: invalid number of peak meter blocks " + std::to_string(peakMeterBlocks));
     }
     return options;
 }
@@ -118,6 +130,7 @@ static int CreateRack(Ngs2Handle systemHandle, std::uint32_t rackId, const RackO
     if (rackId == SCE_NGS2_RACK_ID_SAMPLER) rack->maxChannelWorks = options.sampler.max_channel_works;
     if (rackId == SCE_NGS2_RACK_ID_SUBMIXER) rack->maxInputs = options.submixer.max_inputs;
     if (rackId == SCE_NGS2_RACK_ID_CUSTOM_SUBMIXER) rack->maxInputs = options.customSubmixer.max_inputs;
+    rack->peakMeterBlocks = RackPeakMeterBlocks(rackId, options);
     rack->bufferInfo = bufferInfo;
     rack->allocator = allocator;
     rack->voices.resize(options.common.max_voices);

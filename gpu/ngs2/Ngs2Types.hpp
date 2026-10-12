@@ -576,6 +576,24 @@ struct Ngs2MasteringVoiceOutputParam {
     std::uint32_t reserved;
 };
 
+struct Ngs2MasteringVoiceMatrixParam {
+    Ngs2VoiceParamHeader header;
+    std::uint32_t type;
+    std::uint32_t num_levels;
+    const float* levels;
+};
+static_assert(sizeof(Ngs2MasteringVoiceMatrixParam) == 24);
+
+static constexpr std::uint32_t SCE_NGS2_PEAK_METER_MODE_PEAK = 1;
+static constexpr std::uint32_t SCE_NGS2_PEAK_METER_MODE_RMS = 2;
+
+struct Ngs2VoicePeakMeterParam {
+    Ngs2VoiceParamHeader header;
+    std::uint32_t mode;
+    std::uint32_t reserved;
+};
+static_assert(sizeof(Ngs2VoicePeakMeterParam) == 16);
+
 struct Ngs2VoiceCommand {
     std::uint32_t id;
     std::uint8_t flags;
