@@ -32,6 +32,16 @@ int runtime_memory_is_mapped(uintptr_t address, uint64_t size);
 void runtime_memory_note_write(uintptr_t address, uint64_t size);
 void runtime_memory_note_cpu_write(uintptr_t address, uint64_t size);
 void runtime_memory_prepare_cpu_write(uintptr_t address, uint64_t size);
+/* libkernel memory pools (runtime_mempool.c) over the runtime's direct memory and mapping table. */
+uintptr_t runtime_mempool_resolve(const char *name);
+void runtime_mempool_report(void);
+int32_t runtime_memory_pool_expand(uint64_t low, uint64_t high, uint64_t size, uint64_t alignment, int64_t *phys);
+int32_t runtime_memory_pool_reserve(void **inout, uint64_t size, int flags, uint64_t alignment);
+/* Maps [phys, phys+size) of direct memory over a pool reservation; EINVAL unless all of the range is one. */
+int32_t runtime_memory_pool_commit(uintptr_t address, uint64_t size, int prot, int type, uint64_t phys);
+/* Turns committed or reserved pool range back into a pool reservation; release receives each piece of
+ * direct memory that was committed there, under the runtime's lock. */
+int32_t runtime_memory_pool_decommit(uintptr_t address, uint64_t size, void (*release)(uint64_t phys, uint64_t size));
 /* bbport (frame stats): a guest thread was blocked `ns` in the runtime (0 cond, 1 mutex, 2 sema, 3 sleep). */
 void runtime_wait_note(int kind, uint64_t ns);
 void runtime_wait_report(double frames);
