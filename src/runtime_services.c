@@ -210,6 +210,22 @@ static int32_t dialog_term(int i) {
 DIALOG(msg,1) DIALOG(save,2) DIALOG(profile,3) DIALOG(commerce,4)
 DIALOG(web,7) DIALOG(invitation,8) DIALOG(signin,9) DIALOG(social,10)
 static ABI int32_t profile_result(void *result) { if (result) memset(result,0,4); return 0; }
+typedef struct {
+    void *callback_arg; int32_t error_code, result; uint32_t *sent_count; uint8_t reserved[32];
+} InvitationResult;
+static void *invitation_callback_arg;
+static ABI int32_t invitation_start(const uint8_t *param) {
+    if (param) memcpy(&invitation_callback_arg,param+64,sizeof(invitation_callback_arg));
+    return invitation_open(param);
+}
+static ABI int32_t invitation_result(InvitationResult *result) {
+    if (!dialogs[8].initialized) return DIALOG_NOT_INITIALIZED;
+    if (dialogs[8].status!=3) return (int32_t)0x80B80005;
+    if (!result) return (int32_t)0x80B8000D;
+    result->callback_arg=invitation_callback_arg; result->error_code=0; result->result=0;
+    if (result->sent_count) *result->sent_count=0;
+    return 0;
+}
 /* With nothing displayed, a dialog is ready to show whenever it is initialized (Atelier Ayesha
  * waited on these before opening its auto-load dialog; answered 0 they never turned true). */
 static ABI int32_t save_ready(void) { return dialogs[2].initialized; }
@@ -536,9 +552,10 @@ static const RuntimeExport exports[]={
     {"sceWebBrowserDialogInitialize",web_init}, {"sceWebBrowserDialogOpen",web_open},
     {"sceWebBrowserDialogOpenForPredeterminedContent",web_open}, {"sceWebBrowserDialogUpdateStatus",web_status},
     {"sceWebBrowserDialogGetStatus",web_status}, {"sceWebBrowserDialogTerminate",web_term},
-    {"sceInvitationDialogInitialize",invitation_init}, {"sceInvitationDialogOpen",invitation_open},
-    {"sceInvitationDialogOpenA",invitation_open}, {"sceInvitationDialogUpdateStatus",invitation_status},
+    {"sceInvitationDialogInitialize",invitation_init}, {"sceInvitationDialogOpen",invitation_start},
+    {"sceInvitationDialogOpenA",invitation_start}, {"sceInvitationDialogUpdateStatus",invitation_status},
     {"sceInvitationDialogGetStatus",invitation_status}, {"sceInvitationDialogTerminate",invitation_term},
+    {"sceInvitationDialogGetResultA",invitation_result},
     {"sceSigninDialogInitialize",signin_init}, {"sceSigninDialogOpen",signin_open},
     {"sceSigninDialogUpdateStatus",signin_status}, {"sceSigninDialogGetStatus",signin_status},
     {"sceSigninDialogTerminate",signin_term},
