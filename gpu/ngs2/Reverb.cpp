@@ -109,7 +109,7 @@ static std::uint32_t Samples(float milliseconds, float rate) {
     return static_cast<std::uint32_t>(rate * milliseconds * 0.001f + 0.5f);
 }
 
-static void Ramp(float* samples, float from, float to, std::uint32_t grain, const float* source, bool accumulate) {
+void Ngs2Ramp(float* samples, float from, float to, std::uint32_t grain, const float* source, bool accumulate) {
     const float step = (to - from) / static_cast<float>(grain);
     float gain = from;
     for (std::uint32_t i = 0; i < grain; i++) {
@@ -300,10 +300,10 @@ bool Ngs2ProcessReverb(Ngs2Voice& voice, std::uint32_t grain, std::uint32_t samp
         RunTaps(reverb, reverb.taps, mono.data(), grain, oldEarly.data(), oldLate.data());
         ApplyParams(reverb, rate);
         RunTaps(reverb, reverb.taps, mono.data(), grain, early.data(), late.data());
-        Ramp(early.data(), 0.0f, 1.0f, grain, early.data(), false);
-        Ramp(early.data(), 1.0f, 0.0f, grain, oldEarly.data(), true);
-        Ramp(late.data(), 0.0f, 1.0f, grain, late.data(), false);
-        Ramp(late.data(), 1.0f, 0.0f, grain, oldLate.data(), true);
+        Ngs2Ramp(early.data(), 0.0f, 1.0f, grain, early.data(), false);
+        Ngs2Ramp(early.data(), 1.0f, 0.0f, grain, oldEarly.data(), true);
+        Ngs2Ramp(late.data(), 0.0f, 1.0f, grain, late.data(), false);
+        Ngs2Ramp(late.data(), 1.0f, 0.0f, grain, oldLate.data(), true);
     } else {
         RunTaps(reverb, reverb.taps, mono.data(), grain, early.data(), late.data());
     }
@@ -342,8 +342,8 @@ bool Ngs2ProcessReverb(Ngs2Voice& voice, std::uint32_t grain, std::uint32_t samp
             }
         }
         const float wet = channel == LFE_CHANNEL ? 0.0f : params.wet;
-        Ramp(out, reset ? wet : state.wet, wet, grain, out, false);
-        Ramp(out, reset ? params.dry : state.dry, params.dry, grain, in, true);
+        Ngs2Ramp(out, reset ? wet : state.wet, wet, grain, out, false);
+        Ngs2Ramp(out, reset ? params.dry : state.dry, params.dry, grain, in, true);
         state.wet = wet;
         state.dry = params.dry;
         for (std::uint32_t n = 0; n < grain && !audible; n++) audible = out[n] != 0.0f;
