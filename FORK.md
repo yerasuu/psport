@@ -43,7 +43,10 @@ obvious.
 `BB_SYS_MODULES=<folder>` links the user's own dump of the console's system modules (`*.sprx`) that a
 title needs. They are never part of this repository or of anything built from it, and each is a
 stopgap until the port implements its library: `BB_HLE=libSceX` keeps one to the port,
-`BB_LLE=libSceFiber` links one the port already implements, to compare the two.
+`BB_LLE=libSceFiber` links one the port already implements, to compare the two. The modules a title
+bundles in `sce_module` (libSceNpToolkit2, libSceJobManager, ...) are linked the same way, ahead of the
+user's dump, once anything linked imports their library, as the console loads them with
+`sceSysmoduleLoadModule`.
 
 `BB_SYS_FONTS=<folder>` likewise reads the user's own dump of the console's system fonts (SST and the
 rest). Without it libSceFont draws each font set with the host's Noto fonts (`BB_FALLBACK_FONTS`
