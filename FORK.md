@@ -80,7 +80,7 @@ point at them.
 got, so a change can be checked against all of them at once:
 
 ```
-SYS_MODULES=<folder> tools/regress.sh [-j 2] [-o out/regress/<time>] [-c <earlier results.json>] \
+[SYS_MODULES=<folder>] tools/regress.sh [-j 2] [-o out/regress/<time>] [-c <earlier results.json>] \
     [-n ryza,bloodborne] [-s <toolchain nix file>] <games root>
 ```
 
@@ -89,8 +89,9 @@ sound and none of the user's controllers. Its pad schedule (`tools/regress/*.sch
 `<second> press <a+b> [hold]`, `<second> end`) drives `BB_PAD_FILE` and takes frame dumps; a last one
 is taken before it stops. At most `-j` titles (default 2) run at once. The titles file names the
 folder under the games root and the title's own environment; `$NAME` there comes from the caller's
-environment, and a title whose variable is empty is skipped (`$SYS_MODULES`: the folder of system
-modules above).
+environment, and an entry whose variable is empty is left out. Every title runs without a dump; with
+`SYS_MODULES` set, the titles that name it get it as `BB_SYS_MODULES` (the folder of system modules
+above), for instance to compare a library with `BB_LLE`.
 
 Milestones, from the log and the dumps:
 
