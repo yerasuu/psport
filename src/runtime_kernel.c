@@ -171,11 +171,20 @@ static ABI int32_t utc_to_local(int64_t utc,int64_t *local,GuestTimesec *zone,ui
     if (dst_sec) *dst_sec=(uint64_t)dst;
     return 0;
 }
-/* The second argument's meaning is unknown (shadPS4 ignores it too); the zone is the one in effect
- * at that local time. */
-static ABI int32_t local_to_utc(int64_t local,int64_t unknown,int64_t *utc,GuestTimezone *tz,int32_t *dst_sec) {
-    (void)unknown;
-    if (!tz) return ERR(22);
+/* The zone's daylight saving whether or not it is in effect at that time: libc's mktime moves a
+ * time the caller marks as daylight saving by it when the zone is on standard time then. */
+static int64_t zone_daylight_saving(time_t at) {
+    for (int half=0; half<2; ++half) {
+        const time_t probe=at+half*183*86400; struct tm t;
+        if (localtime_r(&probe,&t) && t.tm_isdst>0) return daylight_saving(&t);
+    }
+    return 0;
+}
+/* libc's mktime passes the tm_isdst it was given as the second argument and settles a conflict
+ * with the zone itself, from the zone in effect at that local time written to `zone`. */
+static ABI int32_t local_to_utc(int64_t local,int32_t is_dst,int64_t *utc,GuestTimesec *zone,int32_t *dst_sec) {
+    (void)is_dst;
+    if (!zone) return ERR(22);
     tzset();
     time_t at=(time_t)local; struct tm t;
     if (!gmtime_r(&at,&t)) return ERR(22);
@@ -183,8 +192,8 @@ static ABI int32_t local_to_utc(int64_t local,int64_t unknown,int64_t *utc,Guest
     const time_t when=mktime(&t);
     const int64_t dst=daylight_saving(&t);
     if (utc) *utc=(int64_t)when;
-    tz->minuteswest=(int32_t)(-(t.tm_gmtoff-dst)/60); tz->dsttime=0;
-    if (dst_sec) *dst_sec=(int32_t)dst;
+    zone->t=(int64_t)when; zone->west_sec=(uint32_t)(t.tm_gmtoff-dst); zone->dst_sec=(uint32_t)dst;
+    if (dst_sec) *dst_sec=(int32_t)zone_daylight_saving(when);
     return 0;
 }
 

@@ -3,7 +3,9 @@
 Successor of link_libc.py for several modules (default: libc.prx, then
 libSceFios2.prx). Every module is placed after the previous one; imports of
 all modules share one import table, so the C runtime can override any
-function (host contracts first) and otherwise binds the native export.
+function (host contracts first) and otherwise binds the native export. The other modules the game
+bundles in sce_module (libSceNpToolkit2, libSceJobManager, ...) are linked the same way once anything
+linked imports their library.
 
 Exports are matched by (NID, library identity, module identity). Imports of
 libSceLibcInternal are served by libc.prx's same-NID exports: the internal
@@ -11,7 +13,8 @@ library is not shipped with the game and exposes the same functions.
 System modules (--system-modules DIR: the user's own dump of the console's *.sprx, never
 shipped) are linked too when anything linked imports their library, and their exports win over
 the host runtime's (binding kinds 3 and 4), except for libraries named in --hle, so an own
-implementation can stand in for one and be compared with it.
+implementation can stand in for one and be compared with it, and for those the port implements
+(PORT_IMPLEMENTS) unless --lle names them.
 Modules the game loads itself with sceKernelLoadStartModule (any *.prx outside sce_module and
 sce_sys, such as Unity's Media/Modules and Media/Plugins) are linked unstarted: the runtime runs
 their initializer when the game asks for the path, and their exports win over the host (binding
@@ -30,9 +33,12 @@ DEFAULT_MODULES = ('libc.prx', 'libSceFios2.prx')
 # Served by the game's libc.prx, whose functions the runtime partly replaces to track the game's
 # writes into GPU memory (memcpy, memset): a native copy of this one would bypass that.
 NEVER_SYSTEM = {'libSceLibcInternal'}
-# Libraries the port implements itself (gpu/fiber): their system module is linked only when
+# Libraries the port implements itself (the runtime's kernel, GPU, video, pad and audio output; the
+# ported gpu/fiber, gpu/font, gpu/audiodec and gpu/ngs2): their system module is linked only when
 # --lle names it, to compare the two.
-PORT_IMPLEMENTS = {'libSceFiber'}
+PORT_IMPLEMENTS = {'libkernel', 'libkernel_unity', 'libkernel_sys', 'libSceGnmDriver', 'libSceVideoOut',
+                   'libScePad', 'libSceAudioOut', 'libSceFiber', 'libSceFont', 'libSceFontFt',
+                   'libSceAudiodec'}
 FS_LOAD = bytes.fromhex('64488b042500000000')  # mov rax, fs:[0]
 MAX_MODULE_SEGMENTS = 4  # SCE_DBG_MAX_SEGMENTS of sceKernelGetModuleInfo
 
@@ -178,14 +184,23 @@ def link(game, out, module_names=DEFAULT_MODULES, system_modules=None, hle=(), l
                   and (f.stem not in PORT_IMPLEMENTS or f.stem in lle)}
     from_system = set()
 
-    def wanted_system():
-        """System modules whose library something linked imports and nothing linked provides."""
+    bundled_modules = {f.stem: f.name for f in sorted((game / 'sce_module').glob('*.prx'))}
+
+    def wanted():
+        """Bundled and system modules whose library something linked imports and nothing linked provides."""
         imported_libraries = {identity[1][0] for identity in identities if identity}
         linked = {Path(name).stem for name in module_names}
-        return [lib for lib in system if lib in imported_libraries and lib not in linked]
-    first = [system[lib].name for lib in wanted_system()]
-    module_names += first
-    from_system.update(first)
+        return [lib for lib in {**system, **bundled_modules}
+                if lib in imported_libraries and lib not in linked]
+
+    def link_wanted():
+        for lib in wanted():
+            if lib in bundled_modules:
+                module_names.append(bundled_modules[lib])
+            else:
+                module_names.append(system[lib].name)
+                from_system.add(system[lib].name)
+    link_wanted()
     deferred = loadable_modules(game)
     module_names += deferred
     deferred = set(deferred)
@@ -269,10 +284,8 @@ def link(game, out, module_names=DEFAULT_MODULES, system_modules=None, hle=(), l
                           deferred=filename in deferred, eh_frame=eh_frame(m, base),
                           segments=module_segments(m, base), export_list=own_exports))
         base = (base + modsize + 65535) & ~65535
-        # Linking a module can import a library only another system module provides.
-        for lib in wanted_system():
-            module_names.append(system[lib].name)
-            from_system.add(system[lib].name)
+        # Linking a module can import a library only another bundled or system module provides.
+        link_wanted()
 
     bindings, unresolved = [], []
     for identity, index in identities.items():
