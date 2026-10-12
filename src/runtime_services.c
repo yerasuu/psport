@@ -44,6 +44,14 @@
 #define MOVE_NOT_INIT ((int32_t)0x80EE0001)
 #define MOVE_ALREADY_INIT ((int32_t)0x80EE0002)
 #define MOVE_INVALID_ARG ((int32_t)0x80EE0003)
+#define IME_BUSY ((int32_t)0x80BC0001)
+#define IME_NOT_OPENED ((int32_t)0x80BC0002)
+#define IME_CONNECTION_FAILED ((int32_t)0x80BC0004)
+#define IME_INVALID_USER_ID ((int32_t)0x80BC0010)
+#define IME_INVALID_OPTION ((int32_t)0x80BC0015)
+#define IME_INVALID_HANDLER ((int32_t)0x80BC0022)
+#define IME_INVALID_ADDRESS ((int32_t)0x80BC0031)
+#define IME_INVALID_RESERVED ((int32_t)0x80BC0032)
 
 static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
 static int next_id=1;
@@ -512,6 +520,34 @@ static ABI int32_t move_read_recent(int32_t handle,int64_t timestamp,void *data,
     *count=0;
     return MOVE_NO_CONTROLLER;
 }
+/* Ime keyboard: opening it succeeds, but no USB keyboard is ever connected, so no key events come
+ * and every keyboard reports itself disconnected. */
+typedef struct { uint32_t option; int8_t reserved1[4]; void *arg, *handler; int8_t reserved2[8]; } KeyboardParam;
+static int keyboard_opened;
+static ABI int32_t keyboard_open(int32_t user,const KeyboardParam *param) {
+    if (!param) return IME_INVALID_ADDRESS;
+    if (!param->handler) return IME_INVALID_HANDLER;
+    if (param->option&~0x3fu) return IME_INVALID_OPTION;
+    if (user==-1) return IME_INVALID_USER_ID;
+    for (size_t i=0;i<sizeof(param->reserved1);++i) if (param->reserved1[i]) return IME_INVALID_RESERVED;
+    for (size_t i=0;i<sizeof(param->reserved2);++i) if (param->reserved2[i]) return IME_INVALID_RESERVED;
+    if (keyboard_opened) return IME_BUSY;
+    keyboard_opened=1; return 0;
+}
+static ABI int32_t keyboard_resource_id(int32_t user,int32_t *ids) {
+    if (!ids) return IME_INVALID_ADDRESS;
+    if (user==-1) return IME_INVALID_USER_ID;
+    ids[0]=user; memset(ids+1,0,20);
+    return keyboard_opened ? IME_CONNECTION_FAILED : IME_NOT_OPENED;
+}
+/* OrbisImeKeyboardInfo: user, device type, keyboard type, repeat delay and rate, status
+ * (0, disconnected), reserved. */
+static ABI int32_t keyboard_info(uint32_t resource,void *info) {
+    (void)resource;
+    if (info) memset(info,0,36);
+    return 0;
+}
+static ABI int32_t ime_update(void *handler) { (void)handler; return keyboard_opened ? 0 : IME_NOT_OPENED; }
 
 
 static const RuntimeExport exports[]={
@@ -667,6 +703,8 @@ static const RuntimeExport exports[]={
     {"sceAudioInOpen",audio_in_open},
     {"sceMoveInit",move_init}, {"sceMoveOpen",move_open}, {"sceMoveGetDeviceInfo",move_device_info},
     {"sceMoveReadStateRecent",move_read_recent},
+    {"sceImeKeyboardOpen",keyboard_open}, {"sceImeKeyboardGetResourceId",keyboard_resource_id},
+    {"sceImeKeyboardGetInfo",keyboard_info}, {"sceImeUpdate",ime_update},
     {"sceDiscMapIsRequestOnHDD",discmap_on_hdd}, {"sceDiscMap_8A828CAEE7EDD5E9",discmap_8a82},
     {"sceDiscMap_7C980FFB0AA27E7A",discmap_7c98},
     {"sceVoiceInit",runtime_stub}, {"sceVoiceEnd",runtime_stub},
