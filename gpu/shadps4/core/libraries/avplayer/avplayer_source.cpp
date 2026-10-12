@@ -623,7 +623,9 @@ void AvPlayerSource::DemuxerThread(std::stop_token stop) {
 
     m_video_decoder_thread.Join();
     m_audio_decoder_thread.Join();
-    m_state.OnEOF();
+    if (!stop.stop_requested()) {
+        m_state.OnEOF();
+    }
 
     LOG_INFO(Lib_AvPlayer, "Demuxer Thread exited normally");
     m_demuxer_thread.Join();

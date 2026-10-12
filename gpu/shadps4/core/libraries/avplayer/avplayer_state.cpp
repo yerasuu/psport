@@ -294,7 +294,7 @@ bool AvPlayerState::EnableStream(u32 stream_index) {
 
 // Called inside GAME thread
 bool AvPlayerState::Stop() {
-    std::shared_lock lock(m_source_mutex);
+    std::unique_lock lock(m_source_mutex);
     if (!StopLocked()) {
         return false;
     }
@@ -441,6 +441,18 @@ bool AvPlayerState::SetState(AvState state) {
 }
 
 // Called inside CONTROLLER thread
+bool AvPlayerState::SetStateFrom(AvState from, AvState state) {
+    std::lock_guard guard(m_state_machine_mutex);
+
+    if (m_current_state != from) {
+        return false;
+    }
+    m_previous_state.store(from);
+    m_current_state.store(state);
+    return true;
+}
+
+// Called inside CONTROLLER thread
 std::optional<bool> AvPlayerState::OnBufferingCheckEvent(u32 num_frames) {
     std::shared_lock lock(m_source_mutex);
     if (!m_up_source) {
@@ -517,16 +529,16 @@ void AvPlayerState::UpdateBufferingState() {
         if (has_frames.value()) {
             const auto state =
                 m_previous_state >= AvState::C0x0B ? m_previous_state.load() : AvState::Play;
-            SetState(state);
-            OnPlaybackStateChanged(state);
+            if (SetStateFrom(AvState::Buffering, state)) {
+                OnPlaybackStateChanged(state);
+            }
         }
     } else if (m_current_state == AvState::Play) {
         const auto has_frames = OnBufferingCheckEvent(0);
         if (!has_frames.has_value()) {
             return;
         }
-        if (!has_frames.value()) {
-            SetState(AvState::Buffering);
+        if (!has_frames.value() && SetStateFrom(AvState::Play, AvState::Buffering)) {
             OnPlaybackStateChanged(AvState::Buffering);
         }
     }
