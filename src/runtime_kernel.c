@@ -297,6 +297,13 @@ static ABI int32_t uuid_create(uint8_t *uuid) {
     return 0;
 }
 
+#define RANDOM_INVALID ((int32_t)0x817C0016)
+#define RANDOM_MAX_SIZE 64
+static ABI int32_t random_number(void *buffer,uint64_t size) {
+    if (!buffer || size>RANDOM_MAX_SIZE) return RANDOM_INVALID;
+    return getrandom(buffer,size,0)==(ssize_t)size ? 0 : RANDOM_INVALID;
+}
+
 /* ---- pthread_once and thread-specific data ---- */
 static ABI int32_t thread_once(int32_t *once,void (ABI *routine)(void)) {
     if (!once || !routine) return ERR(22);
@@ -400,6 +407,7 @@ static const RuntimeExport exports[]={
     {"signal",guest_signal}, {"sigprocmask",guest_sigprocmask}, {"_sigprocmask",guest_sigprocmask},
     {"sigfillset",guest_sigfillset}, {"sigemptyset",guest_sigemptyset}, {"_is_signal_return",is_signal_return},
     {"getrusage",guest_getrusage}, {"sysctl",guest_sysctl}, {"sceKernelUuidCreate",uuid_create},
+    {"sceRandomGetRandomNumber",random_number},
     {"scePthreadOnce",thread_once}, {"pthread_once",posix_once},
     {"scePthreadKeyCreate",key_create}, {"scePthreadKeyDelete",key_delete},
     {"scePthreadSetspecific",key_set}, {"scePthreadGetspecific",key_get},
