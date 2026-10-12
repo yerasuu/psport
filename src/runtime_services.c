@@ -521,6 +521,11 @@ static ABI int32_t move_read_recent(int32_t handle,int64_t timestamp,void *data,
     *count=0;
     return MOVE_NO_CONTROLLER;
 }
+static ABI int32_t move_no_controller(int32_t handle) { (void)handle; return move_initialized ? MOVE_NO_CONTROLLER : MOVE_NOT_INIT; }
+static ABI int32_t move_term(void) {
+    if (!move_initialized) return MOVE_NOT_INIT;
+    move_initialized=0; return 0;
+}
 /* Ime keyboard: opening it succeeds, but no USB keyboard is ever connected, so no key events come
  * and every keyboard reports itself disconnected. */
 typedef struct { uint32_t option; int8_t reserved1[4]; void *arg, *handler; int8_t reserved2[8]; } KeyboardParam;
@@ -706,7 +711,8 @@ static const RuntimeExport exports[]={
     {"sceMouseInit",runtime_stub}, {"sceMouseOpen",mouse_open}, {"sceMouseRead",mouse_read}, {"sceMouseClose",runtime_stub},
     {"sceAudioInOpen",audio_in_open},
     {"sceMoveInit",move_init}, {"sceMoveOpen",move_open}, {"sceMoveGetDeviceInfo",move_device_info},
-    {"sceMoveReadStateRecent",move_read_recent},
+    {"sceMoveReadStateRecent",move_read_recent}, {"sceMoveSetLightSphere",move_no_controller},
+    {"sceMoveSetVibration",move_no_controller}, {"sceMoveTerm",move_term},
     {"sceImeKeyboardOpen",keyboard_open}, {"sceImeKeyboardGetResourceId",keyboard_resource_id},
     {"sceImeKeyboardGetInfo",keyboard_info}, {"sceImeUpdate",ime_update},
     {"sceDiscMapIsRequestOnHDD",discmap_on_hdd}, {"sceDiscMap_8A828CAEE7EDD5E9",discmap_8a82},
