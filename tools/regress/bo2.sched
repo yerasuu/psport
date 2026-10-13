@@ -1,0 +1,74 @@
+# Black Ops II: cross every 8 s through the first-run settings (brightness, audio, safe area,
+# graphic content) to Campaign, New Story and Regular, skipping the briefing and cutscenes into
+# Pyrrhic Victory; then forward with R2, aim and fire, and a turn, every 20 s.
+60 shot
+110 shot
+112 press cross
+118 shot
+120 press cross
+126 shot
+128 press cross
+134 shot
+136 press cross
+142 shot
+144 press cross
+150 shot
+152 press cross
+158 shot
+160 press cross
+166 shot
+168 press cross
+174 shot
+176 press cross
+182 shot
+184 press cross
+190 shot
+192 press cross
+198 shot
+200 press cross
+206 shot
+208 press cross
+214 shot
+216 press cross
+222 shot
+224 press cross
+230 shot
+232 press cross
+250 shot
+252 press ly=0+r2 6
+260 press l2+r2 2
+264 press rx=200 1
+270 shot
+272 press ly=0+r2 6
+280 press l2+r2 2
+284 press rx=200 1
+290 shot
+292 press ly=0+r2 6
+300 press l2+r2 2
+304 press rx=200 1
+310 shot
+312 press ly=0+r2 6
+320 press l2+r2 2
+324 press rx=200 1
+330 shot
+332 press ly=0+r2 6
+340 press l2+r2 2
+344 press rx=200 1
+350 shot
+352 press ly=0+r2 6
+360 press l2+r2 2
+364 press rx=200 1
+370 shot
+372 press ly=0+r2 6
+380 press l2+r2 2
+384 press rx=200 1
+390 shot
+392 press ly=0+r2 6
+400 press l2+r2 2
+404 press rx=200 1
+410 shot
+412 press ly=0+r2 6
+420 press l2+r2 2
+424 press rx=200 1
+430 shot
+440 end
