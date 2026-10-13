@@ -1,0 +1,29 @@
+# With -u from a run of symphonia-play.sched: the files menu shows its file, Continue loads it at its
+# last checkpoint (the curtain of Slumbering Streets).
+20 shot
+26 shot
+27 press cross
+32 shot
+37 press cross
+38 shot
+41 shot
+42 press cross
+44 shot
+47 shot
+50 shot
+52 press cross
+54 shot
+58 shot
+62 shot
+66 shot
+70 shot
+74 shot
+78 shot
+82 shot
+86 shot
+90 shot
+90 hold lx=255 2
+92 release
+94 shot
+98 shot
+99 end

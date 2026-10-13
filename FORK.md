@@ -151,7 +151,7 @@ got, so a change can be checked against all of them at once:
 
 ```
 [SYS_MODULES=<folder>] tools/regress.sh [-j 2] [-o out/regress/<time>] [-c <earlier results.json>] \
-    [-n ryza,bloodborne] [-s <toolchain nix file>] <games root>
+    [-n ryza,bloodborne] [-s <toolchain nix file>] [-u <earlier output folder>] <games root>
 ```
 
 Each title runs inside a headless gamescope with `BB_AUDIO=none` and `BB_PAD_HOST=0`: no window, no
@@ -183,7 +183,9 @@ implementation and, as `forced` (`submit_forced`), the number of `Forcing submit
 then: the GPU library sends a submitDone itself once the game has gone too long without one, so a
 count that keeps growing means the game is stalled on the GPU. The table goes to stdout,
 `results.tsv` and `results.json` to the output folder with each title's log and dumps
-(`tools/regress/report.py <folder>` classifies a folder again).
+(`tools/regress/report.py <folder>` classifies a folder again). With `-u`, each title's user
+folder (saves and settings) starts as a copy of its own in that earlier output folder, so a run can
+load what an earlier one saved.
 With `-c`, a milestone lost or a crash signature that is new or different is a regression: it is
 listed and the exit status is 1. The `no impl` and `forced` columns show their change against the
 earlier run without counting it as a regression (blank in an earlier file that predates `forced`).
