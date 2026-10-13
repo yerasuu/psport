@@ -1,4 +1,4 @@
-/* libkernel memory calls: direct memory allocation and mapping, flexible memory, POSIX mmap,
+/* libkernel memory calls: direct memory allocation and mapping, flexible memory, mmap,
  * virtual ranges, protection, queries, batch maps and the memory pools' side (runtime_mempool.c). */
 #define _GNU_SOURCE
 #include "runtime_memory.h"
@@ -9,6 +9,7 @@
 #include <stdatomic.h>
 #ifndef _WIN32
 #define LIMIT 4096
+#define ERR(n) ((int32_t)(UINT32_C(0x80020000)|(n)))
 typedef struct { uint64_t start, size; int type, used; } Block;
 typedef struct {
     uintptr_t start, end; uint64_t offset; int32_t protection, memory_type;
@@ -183,46 +184,63 @@ static ABI int32_t map_flexible_named(void **inout, uint64_t size, int prot, int
     (void)name; return map_flexible(inout,size,prot,flags);
 }
 static ABI int32_t release_flexible(void *address, uint64_t size) { return direct_unmap(address,size); }
-/* POSIX mmap: the game's libc grows its malloc heap with anonymous private mappings once the
- * heap it started with is full (seen after minutes of area streaming). They come from flexible
- * memory as sceKernelMapFlexibleMemory does. A file is mapped as a copy of its contents, read-only
+/* mmap (sceKernelMmap, and POSIX mmap over it): the game's libc grows its malloc heap with
+ * anonymous private mappings once the heap it started with is full (seen after minutes of area
+ * streaming). They come from flexible memory as sceKernelMapFlexibleMemory does, at the hint
+ * when it is free, as FreeBSD places them. MAP_VOID reserves the range as
+ * sceKernelReserveVirtualRange does. A file is mapped as a copy of its contents, read-only
  * (IL2CPP maps global-metadata.dat that way); a writable shared one would need writing back and
- * is refused. MAP_FAILED (-1) and errno on failure, as POSIX. */
+ * is refused. */
+enum { MAP_SHARED_FLAG=1, MAP_VOID_FLAG=0x100, MAP_ANON_FLAG=0x1000 };
 static _Atomic uint64_t heap_growths;
 uint64_t runtime_heap_growths(void) { return atomic_load(&heap_growths); }
 static ABI int32_t kernel_mprotect(const void *address, uint64_t size, int prot);
-static ABI void *map_file(void *addr, uint64_t size, int prot, int flags, int fd, int64_t offset) {
-    enum { MAP_SHARED_FLAG=1, POSIX_ENOMEM=12, POSIX_ENODEV=19, POSIX_EINVAL=22 };
-    if ((flags & MAP_SHARED_FLAG) && (prot & 2)) { *runtime_errno()=POSIX_ENODEV; return (void *)-1; }
-    if (!size || offset<0 || offset%PAGE) { *runtime_errno()=POSIX_EINVAL; return (void *)-1; }
-    void *out=(flags & MAP_FIXED_FLAG) ? addr : NULL;
+static ABI int32_t reserve_range(void **inout, uint64_t size, int flags, uint64_t alignment);
+static int32_t map_file(void **inout, uint64_t size, int prot, int flags, int fd, int64_t offset) {
+    if ((flags & MAP_SHARED_FLAG) && (prot & 2)) return ERR(19); /* ENODEV */
+    if (offset<0 || offset%PAGE) return INVALID;
     const uint64_t length=align_up(size,PAGE);
-    const int32_t result=map_flexible(&out,length,(prot & 0x37)|3,flags & MAP_FIXED_FLAG);
-    if (result) { *runtime_errno()=result==NO_MEMORY ? POSIX_ENOMEM : POSIX_EINVAL; return (void *)-1; }
-    const int64_t read=runtime_file_pread(fd,out,size,offset);
+    const int32_t result=map_flexible(inout,length,(prot & 0x37)|3,flags & (MAP_FIXED_FLAG|MAP_NO_OVERWRITE));
+    if (result) return result;
+    const int64_t read=runtime_file_pread(fd,*inout,size,offset);
     if (read<0) {
-        direct_unmap(out,length);
-        *runtime_errno()=runtime_guest_errno((int)-read);
-        return (void *)-1;
+        direct_unmap(*inout,length);
+        return ERR(runtime_guest_errno((int)-read));
     }
-    if (!(prot & 2)) kernel_mprotect(out,length,prot & 0x37);
+    if (!(prot & 2)) kernel_mprotect(*inout,length,prot & 0x37);
     printf("Runtime: mmap of file descriptor %d: %#" PRIx64 " bytes from offset %#" PRIx64 " copied to %p\n",
-           fd,(uint64_t)read,(uint64_t)offset,out);
-    return out;
+           fd,(uint64_t)read,(uint64_t)offset,*inout);
+    return 0;
+}
+static ABI int32_t kernel_mmap(void *addr, uint64_t size, int prot, int flags, int fd, int64_t offset, void **out) {
+    if (!out || !size) return INVALID;
+    void *at=addr;
+    int32_t result;
+    if (flags & MAP_VOID_FLAG)
+        result=reserve_range(&at,align_up(size,PAGE),flags & (MAP_FIXED_FLAG|MAP_NO_OVERWRITE),PAGE);
+    else if (!(flags & MAP_ANON_FLAG))
+        result=fd<0 ? ERR(9) /* EBADF */ : map_file(&at,size,prot,flags,fd,offset);
+    else if (fd!=-1 || offset)
+        result=INVALID;
+    else
+        result=map_flexible(&at,align_up(size,PAGE),prot & 0x37,flags & (MAP_FIXED_FLAG|MAP_NO_OVERWRITE));
+    if (trace_memory() || result)
+        printf("Runtime: mmap %p+%#" PRIx64 " prot=0x%x flags=0x%x fd=%d offset=%#" PRIx64 " -> %p (0x%x)\n",
+               addr,size,prot,flags,fd,(uint64_t)offset,result ? NULL : at,(unsigned)result);
+    if (!result) *out=at;
+    return result;
 }
 static ABI void *posix_mmap(void *addr, uint64_t size, int prot, int flags, int fd, int64_t offset) {
-    enum { MAP_ANON_FLAG=0x1000, POSIX_ENOMEM=12, POSIX_ENODEV=19, POSIX_EINVAL=22 };
-    if (!(flags & MAP_ANON_FLAG) && fd>=0) return map_file(addr,size,prot,flags,fd,offset);
-    atomic_fetch_add(&heap_growths,1);
-    if (!(flags & MAP_ANON_FLAG) || fd!=-1 || offset) { *runtime_errno()=POSIX_ENODEV; return (void *)-1; }
-    if (!size) { *runtime_errno()=POSIX_EINVAL; return (void *)-1; }
-    void *out=(flags & MAP_FIXED_FLAG) ? addr : NULL;
-    const int32_t result=map_flexible(&out,align_up(size,PAGE),prot & 0x37,flags & MAP_FIXED_FLAG);
-    uint64_t sites[3];
-    runtime_guest_call_sites(sites);
-    printf("Runtime: mmap %#" PRIx64 " bytes for the game (its heap grows) from +%#" PRIx64 " < +%#" PRIx64 " < +%#" PRIx64 "\n",
-           size,sites[0],sites[1],sites[2]);
-    if (result) { *runtime_errno()=result==NO_MEMORY ? POSIX_ENOMEM : POSIX_EINVAL; return (void *)-1; }
+    void *out=NULL;
+    const int32_t result=kernel_mmap(addr,size,prot,flags,fd,offset,&out);
+    if ((flags & MAP_ANON_FLAG) && !(flags & MAP_VOID_FLAG)) {
+        atomic_fetch_add(&heap_growths,1);
+        uint64_t sites[3];
+        runtime_guest_call_sites(sites);
+        printf("Runtime: mmap %#" PRIx64 " bytes for the game (its heap grows) from +%#" PRIx64 " < +%#" PRIx64 " < +%#" PRIx64 "\n",
+               size,sites[0],sites[1],sites[2]);
+    }
+    if (result) { *runtime_errno()=result & 0xffff; return (void *)-1; }
     return out;
 }
 static ABI int32_t reserve_range(void **inout, uint64_t size, int flags, uint64_t alignment) {
@@ -474,7 +492,7 @@ static const RuntimeExport exports[]={
     {"sceKernelDirectMemoryQuery",direct_memory_query}, {"sceKernelSetVirtualRangeName",set_virtual_range_name},
     {"sceKernelMlock",lock_range},
     {"sceKernelBatchMap",batch_map}, {"sceKernelBatchMap2",batch_map2},
-    {"mmap",posix_mmap},
+    {"mmap",posix_mmap}, {"sceKernelMmap",kernel_mmap},
     {"sceKernelAvailableFlexibleMemorySize",available_flexible_size},
     {"sceKernelConfiguredFlexibleMemorySize",configured_flexible_size},
     {"sceKernelAvailableDirectMemorySize",available_direct_size},
