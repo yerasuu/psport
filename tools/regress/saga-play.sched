@@ -1,0 +1,582 @@
+# Title and the protagonist select (the first, Tsunanori) to a new game, then the story scenes and
+# the tutorials read through by a cross every second, which reaches the first battle (the combat
+# tutorial) at about 185 s. In battle each character takes its last tech (up from the first) or, when
+# it lacks the BP, the second (down again), then engage and the tips and dialogue between; the
+# united attacks this gives win it by 310-350 s. On the platform after it the same presses scan, and
+# the circles close what is left open; l1 opens Save/Load, where Create New Saved Data is confirmed
+# with Save (up from the default Cancel).
+20 shot
+27 shot
+34 shot
+41 shot
+41 press cross
+45 press cross
+48 shot
+53 press cross
+55 shot
+57 press cross
+63 press cross
+64 press cross
+65 press cross
+66 shot
+66 press cross
+67 press cross
+68 press cross
+69 press cross
+70 press cross
+71 press cross
+72 shot
+72 press cross
+73 press cross
+74 press cross
+75 press cross
+76 press cross
+77 press cross
+78 shot
+78 press cross
+79 press cross
+80 press cross
+81 press cross
+82 press cross
+83 press cross
+84 shot
+84 press cross
+85 press cross
+86 press cross
+87 press cross
+88 press cross
+89 press cross
+90 shot
+90 press cross
+91 press cross
+92 press cross
+93 press cross
+94 press cross
+95 press cross
+96 shot
+96 press cross
+97 press cross
+98 press cross
+99 press cross
+100 press cross
+101 press cross
+102 shot
+102 press cross
+103 press cross
+104 press cross
+105 press cross
+106 press cross
+107 press cross
+108 shot
+108 press cross
+109 press cross
+110 press cross
+111 press cross
+112 press cross
+113 press cross
+114 shot
+114 press cross
+115 press cross
+116 press cross
+117 press cross
+118 press cross
+119 press cross
+120 shot
+120 press cross
+121 press cross
+122 press cross
+123 press cross
+124 press cross
+125 press cross
+126 shot
+126 press cross
+127 press cross
+128 press cross
+129 press cross
+130 press cross
+131 press cross
+132 shot
+132 press cross
+133 press cross
+134 press cross
+135 press cross
+136 press cross
+137 press cross
+138 shot
+138 press cross
+139 press cross
+140 press cross
+141 press cross
+142 press cross
+143 press cross
+144 shot
+144 press cross
+145 press cross
+146 press cross
+147 press cross
+148 press cross
+149 press cross
+150 shot
+150 press cross
+151 press cross
+152 press cross
+153 press cross
+154 press cross
+155 press cross
+156 shot
+156 press cross
+157 press cross
+158 press cross
+159 press cross
+160 press cross
+161 press cross
+162 shot
+162 press cross
+163 press cross
+164 press cross
+165 press cross
+166 press cross
+167 press cross
+168 shot
+168 press cross
+169 press cross
+170 press cross
+171 press cross
+172 press cross
+173 press cross
+174 shot
+174 press cross
+175 press cross
+176 press cross
+177 press cross
+178 press cross
+179 press cross
+180 press up
+180 press square
+181 press down
+181 press square
+182 press cross
+183 press cross
+184 shot
+184 press up
+184 press square
+185 press down
+185 press square
+186 press cross
+187 press cross
+188 press up
+188 press square
+189 press down
+189 press square
+190 press cross
+191 press cross
+192 shot
+192 press up
+192 press square
+193 press down
+193 press square
+194 press cross
+195 press cross
+196 press up
+196 press square
+197 press down
+197 press square
+198 press cross
+199 press cross
+200 shot
+200 press up
+200 press square
+201 press down
+201 press square
+202 press cross
+203 press cross
+204 press up
+204 press square
+205 press down
+205 press square
+206 press cross
+207 press cross
+208 shot
+208 press up
+208 press square
+209 press down
+209 press square
+210 press cross
+211 press cross
+212 press up
+212 press square
+213 press down
+213 press square
+214 press cross
+215 press cross
+216 shot
+216 press up
+216 press square
+217 press down
+217 press square
+218 press cross
+219 press cross
+220 press up
+220 press square
+221 press down
+221 press square
+222 press cross
+223 press cross
+224 shot
+224 press up
+224 press square
+225 press down
+225 press square
+226 press cross
+227 press cross
+228 press up
+228 press square
+229 press down
+229 press square
+230 press cross
+231 press cross
+232 shot
+232 press up
+232 press square
+233 press down
+233 press square
+234 press cross
+235 press cross
+236 press up
+236 press square
+237 press down
+237 press square
+238 press cross
+239 press cross
+240 shot
+240 press up
+240 press square
+241 press down
+241 press square
+242 press cross
+243 press cross
+244 press up
+244 press square
+245 press down
+245 press square
+246 press cross
+247 press cross
+248 shot
+248 press up
+248 press square
+249 press down
+249 press square
+250 press cross
+251 press cross
+252 press up
+252 press square
+253 press down
+253 press square
+254 press cross
+255 press cross
+256 shot
+256 press up
+256 press square
+257 press down
+257 press square
+258 press cross
+259 press cross
+260 press up
+260 press square
+261 press down
+261 press square
+262 press cross
+263 press cross
+264 shot
+264 press up
+264 press square
+265 press down
+265 press square
+266 press cross
+267 press cross
+268 press up
+268 press square
+269 press down
+269 press square
+270 press cross
+271 press cross
+272 shot
+272 press up
+272 press square
+273 press down
+273 press square
+274 press cross
+275 press cross
+276 press up
+276 press square
+277 press down
+277 press square
+278 press cross
+279 press cross
+280 shot
+280 press up
+280 press square
+281 press down
+281 press square
+282 press cross
+283 press cross
+284 press up
+284 press square
+285 press down
+285 press square
+286 press cross
+287 press cross
+288 shot
+288 press up
+288 press square
+289 press down
+289 press square
+290 press cross
+291 press cross
+292 press up
+292 press square
+293 press down
+293 press square
+294 press cross
+295 press cross
+296 shot
+296 press up
+296 press square
+297 press down
+297 press square
+298 press cross
+299 press cross
+300 press up
+300 press square
+301 press down
+301 press square
+302 press cross
+303 press cross
+304 shot
+304 press up
+304 press square
+305 press down
+305 press square
+306 press cross
+307 press cross
+308 press up
+308 press square
+309 press down
+309 press square
+310 press cross
+311 press cross
+312 shot
+312 press up
+312 press square
+313 press down
+313 press square
+314 press cross
+315 press cross
+316 press up
+316 press square
+317 press down
+317 press square
+318 press cross
+319 press cross
+320 shot
+320 press up
+320 press square
+321 press down
+321 press square
+322 press cross
+323 press cross
+324 press up
+324 press square
+325 press down
+325 press square
+326 press cross
+327 press cross
+328 shot
+328 press up
+328 press square
+329 press down
+329 press square
+330 press cross
+331 press cross
+332 press up
+332 press square
+333 press down
+333 press square
+334 press cross
+335 press cross
+336 shot
+336 press up
+336 press square
+337 press down
+337 press square
+338 press cross
+339 press cross
+340 press up
+340 press square
+341 press down
+341 press square
+342 press cross
+343 press cross
+344 shot
+344 press up
+344 press square
+345 press down
+345 press square
+346 press cross
+347 press cross
+348 press up
+348 press square
+349 press down
+349 press square
+350 press cross
+351 press cross
+352 shot
+352 press up
+352 press square
+353 press down
+353 press square
+354 press cross
+355 press cross
+356 press up
+356 press square
+357 press down
+357 press square
+358 press cross
+359 press cross
+360 shot
+360 press up
+360 press square
+361 press down
+361 press square
+362 press cross
+363 press cross
+364 press up
+364 press square
+365 press down
+365 press square
+366 press cross
+367 press cross
+368 shot
+368 press up
+368 press square
+369 press down
+369 press square
+370 press cross
+371 press cross
+372 press up
+372 press square
+373 press down
+373 press square
+374 press cross
+375 press cross
+376 shot
+376 press up
+376 press square
+377 press down
+377 press square
+378 press cross
+379 press cross
+380 press up
+380 press square
+381 press down
+381 press square
+382 press cross
+383 press cross
+384 shot
+384 press up
+384 press square
+385 press down
+385 press square
+386 press cross
+387 press cross
+388 press up
+388 press square
+389 press down
+389 press square
+390 press cross
+391 press cross
+392 shot
+392 press up
+392 press square
+393 press down
+393 press square
+394 press cross
+395 press cross
+396 press up
+396 press square
+397 press down
+397 press square
+398 press cross
+399 press cross
+400 shot
+400 press up
+400 press square
+401 press down
+401 press square
+402 press cross
+403 press cross
+404 press up
+404 press square
+405 press down
+405 press square
+406 press cross
+407 press cross
+408 shot
+408 press up
+408 press square
+409 press down
+409 press square
+410 press cross
+411 press cross
+412 press up
+412 press square
+413 press down
+413 press square
+414 press cross
+415 press cross
+416 shot
+416 press up
+416 press square
+417 press down
+417 press square
+418 press cross
+419 press cross
+420 press up
+420 press square
+421 press down
+421 press square
+422 press cross
+423 press cross
+424 shot
+424 press up
+424 press square
+425 press down
+425 press square
+426 press cross
+427 press cross
+428 press up
+428 press square
+429 press down
+429 press square
+430 press cross
+431 press cross
+436 press circle
+438 press circle
+440 shot
+442 press l1
+444 shot
+445 press cross
+447 shot
+448 press up
+449 shot
+450 press cross
+452 shot
+455 shot
+458 shot
+459 press cross
+461 shot
+464 shot
+465 press circle
+467 press circle
+469 shot
+470 end
