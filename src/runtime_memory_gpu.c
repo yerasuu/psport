@@ -254,7 +254,7 @@ int runtime_memory_write_backing(uintptr_t address, const void *data, uint64_t s
     int ok=1;
     for (uintptr_t at=address, end=address+size; at<end && ok;) {
         size_t i=vma_index(at);
-        if (i==vma_count || vmas[i].start>at || vmas[i].kind==KIND_RESERVED) { ok=0; break; }
+        if (i==vma_count || vmas[i].start>at || vmas[i].kind==KIND_RESERVED || vmas[i].kind==KIND_FILE) { ok=0; break; }
         uint64_t n=(vmas[i].end<end ? vmas[i].end : end)-at;
         store_once(backing_base+vmas[i].phys+(at-vmas[i].start),(const unsigned char *)data+(at-address),n);
         at+=n;
@@ -274,7 +274,7 @@ void runtime_memory_read_backing(uintptr_t address, void *data, uint64_t size) {
         uint64_t n;
         if (i<vma_count && vmas[i].start<=at && vmas[i].kind!=KIND_RESERVED) {
             n=(vmas[i].end<end ? vmas[i].end : end)-at;
-            memcpy(out+(at-address),backing_base+vmas[i].phys+(at-vmas[i].start),n);
+            memcpy(out+(at-address),vmas[i].kind==KIND_FILE ? (const void *)at : backing_base+vmas[i].phys+(at-vmas[i].start),n);
         } else {
             const uintptr_t next=i==vma_count ? end : vmas[i].start>at ? vmas[i].start : vmas[i].end;
             n=(next<end ? next : end)-at;

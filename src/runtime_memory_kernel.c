@@ -188,17 +188,26 @@ static ABI int32_t release_flexible(void *address, uint64_t size) { return direc
  * anonymous private mappings once the heap it started with is full (seen after minutes of area
  * streaming). They come from flexible memory as sceKernelMapFlexibleMemory does, at the hint
  * when it is free, as FreeBSD places them. MAP_VOID reserves the range as
- * sceKernelReserveVirtualRange does. A file is mapped as a copy of its contents, read-only
- * (IL2CPP maps global-metadata.dat that way); a writable shared one would need writing back and
- * is refused. */
+ * sceKernelReserveVirtualRange does. A shared file mapping is the host file's (emulators alias
+ * one file at several addresses); a private one is a copy of its contents (IL2CPP maps
+ * global-metadata.dat that way). */
 enum { MAP_SHARED_FLAG=1, MAP_VOID_FLAG=0x100, MAP_ANON_FLAG=0x1000 };
 static _Atomic uint64_t heap_growths;
 uint64_t runtime_heap_growths(void) { return atomic_load(&heap_growths); }
 static ABI int32_t kernel_mprotect(const void *address, uint64_t size, int prot);
 static ABI int32_t reserve_range(void **inout, uint64_t size, int flags, uint64_t alignment);
 static int32_t map_file(void **inout, uint64_t size, int prot, int flags, int fd, int64_t offset) {
-    if ((flags & MAP_SHARED_FLAG) && (prot & 2)) return ERR(19); /* ENODEV */
     if (offset<0 || offset%PAGE) return INVALID;
+    if (flags & MAP_SHARED_FLAG) {
+        const int host=runtime_file_shared_host(fd);
+        if (host<0) return ERR(9); /* EBADF */
+        write_lock();
+        const int32_t result=place_file(inout,align_up(size,PAGE),prot & 0x37,flags & (MAP_FIXED_FLAG|MAP_NO_OVERWRITE),
+                                        host,(uint64_t)offset);
+        write_unlock();
+        flush_hooks();
+        return result;
+    }
     const uint64_t length=align_up(size,PAGE);
     const int32_t result=map_flexible(inout,length,(prot & 0x37)|3,flags & (MAP_FIXED_FLAG|MAP_NO_OVERWRITE));
     if (result) return result;
@@ -306,7 +315,7 @@ static ABI int32_t virtual_query(const void *address, int flags, VirtualQueryInf
     info->protection=v.prot; info->memory_type=v.type;
     info->flags=(v.kind==KIND_FLEXIBLE ? 1u : 0) | (v.kind==KIND_DIRECT ? 2u : 0) | (v.pooled ? 8u : 0) |
                 (v.kind!=KIND_RESERVED ? 16u : 0);
-    strcpy(info->name, v.kind==KIND_RESERVED ? "reserved" : v.kind==KIND_DIRECT ? "direct" : "flexible");
+    strcpy(info->name, v.kind==KIND_RESERVED ? "reserved" : v.kind==KIND_DIRECT ? "direct" : v.kind==KIND_FILE ? "file" : "flexible");
     __atomic_add_fetch(&queries,1,__ATOMIC_RELAXED);
     read_unlock();
     return 0;
