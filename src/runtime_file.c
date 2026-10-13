@@ -663,6 +663,8 @@ int64_t runtime_file_open(const char *p,int f,int m) { return do_open(p,f,m); }
 int64_t runtime_file_close(int fd) { return do_close(fd); }
 int64_t runtime_file_read(int fd,void *b,uint64_t n) { return do_read(fd,b,n); }
 int64_t runtime_file_pread(int fd,void *b,uint64_t n,int64_t o) { return do_pread(fd,b,n,o); }
+/* A shared mapping may write the file at any time, so it counts as written from the start. */
+int runtime_file_shared_host(int fd) { return host_fd_written(fd); }
 int64_t runtime_file_write(int fd,const void *b,uint64_t n) { return do_write(fd,b,n); }
 int64_t runtime_file_pwrite(int fd,const void *b,uint64_t n,int64_t o) { return do_pwrite(fd,b,n,o); }
 int64_t runtime_file_lseek(int fd,int64_t o,int w) { return do_lseek(fd,o,w); }

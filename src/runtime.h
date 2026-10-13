@@ -160,6 +160,7 @@ int64_t runtime_file_open(const char *path, int flags, int mode);
 int64_t runtime_file_close(int fd);
 int64_t runtime_file_read(int fd, void *buffer, uint64_t size);
 int64_t runtime_file_pread(int fd, void *buffer, uint64_t size, int64_t offset);
+int runtime_file_shared_host(int fd);
 int64_t runtime_file_write(int fd, const void *buffer, uint64_t size);
 int64_t runtime_file_pwrite(int fd, const void *buffer, uint64_t size, int64_t offset);
 int64_t runtime_file_lseek(int fd, int64_t offset, int whence);

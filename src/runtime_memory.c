@@ -275,7 +275,7 @@ static int split_at(uintptr_t a) {
     if (i==vma_count || vmas[i].start>=a) return 0;
     Vma right=vmas[i];
     right.start=a;
-    if (right.kind==KIND_DIRECT) right.phys+=a-vmas[i].start;
+    if (right.kind==KIND_DIRECT || right.kind==KIND_FILE) right.phys+=a-vmas[i].start;
     vmas[i].end=a;
     return vma_insert(i+1,right);
 }
@@ -317,9 +317,8 @@ void drop_range(uintptr_t start, uintptr_t end) {
     }
     vma_erase(i,n);
 }
-/* Places a host mapping; with MAP_FIXED it replaces what the guest had there. */
-int32_t place(void **inout, uint64_t size, int prot, int flags, uint64_t alignment,
-              int kind, int type, uint64_t phys) {
+static int32_t place_backed(void **inout, uint64_t size, int prot, int flags, uint64_t alignment,
+                            int kind, int type, uint64_t phys, int file) {
     uintptr_t address=(uintptr_t)*inout;
     if (flags & MAP_FIXED_FLAG) {
         if (!address || address%PAGE) return INVALID;
@@ -328,10 +327,11 @@ int32_t place(void **inout, uint64_t size, int prot, int flags, uint64_t alignme
         address=find_free(address,size,alignment);
         if (!address) return NO_MEMORY;
     }
-    void *mapped = kind!=KIND_RESERVED
-        ? map_phys(address,size,host_prot(prot),phys)
-        : mmap((void *)address,size,PROT_NONE,MAP_PRIVATE|MAP_ANONYMOUS|MAP_NORESERVE|MAP_FIXED,-1,0);
-    if (mapped==MAP_FAILED) return NO_MEMORY;
+    void *mapped = kind==KIND_RESERVED
+        ? mmap((void *)address,size,PROT_NONE,MAP_PRIVATE|MAP_ANONYMOUS|MAP_NORESERVE|MAP_FIXED,-1,0)
+        : kind==KIND_FILE ? mmap((void *)address,size,host_prot(prot),MAP_SHARED|MAP_FIXED,file,(off_t)phys)
+        : map_phys(address,size,host_prot(prot),phys);
+    if (mapped==MAP_FAILED) return kind==KIND_FILE && errno==EACCES ? ACCESS : NO_MEMORY;
     drop_range(address,address+size);
     trap_forget(address,address+size); /* a new mapping starts without traps */
     if (vma_insert(vma_index(address),(Vma){address,address+size,kind,prot,type,phys,0})) return NO_MEMORY;
@@ -339,6 +339,16 @@ int32_t place(void **inout, uint64_t size, int prot, int flags, uint64_t alignme
     if (kind!=KIND_RESERVED) queue_hook(HOOK_MAP,address,size);
     *inout=mapped;
     return 0;
+}
+/* Places a host mapping; with MAP_FIXED it replaces what the guest had there. */
+int32_t place(void **inout, uint64_t size, int prot, int flags, uint64_t alignment,
+              int kind, int type, uint64_t phys) {
+    return place_backed(inout,size,prot,flags,alignment,kind,type,phys,-1);
+}
+/* A shared mapping of a host file at offset: every mapping of the same file aliases it, and
+ * writes reach the file. */
+int32_t place_file(void **inout, uint64_t size, int prot, int flags, int file, uint64_t offset) {
+    return place_backed(inout,size,prot,flags,PAGE,KIND_FILE,0,offset,file);
 }
 /* Host-owned memory the guest can see (image, stacks, trampolines) lives in
  * [LOW_MIN, USER_MIN): PS4 code packs pointers into 40-bit fields. */

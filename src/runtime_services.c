@@ -178,6 +178,13 @@ static ABI int32_t np_account_id(int32_t user,uint64_t *id) {
     if (!id) return NP_INVALID_ARGUMENT;
     (void)user; *id=0; return NP_SIGNED_OUT;
 }
+static ABI int32_t np_account_id_online(const void *online_id,uint64_t *id) {
+    if (!online_id || !id) return NP_INVALID_ARGUMENT;
+    *id=0; return NP_SIGNED_OUT;
+}
+static ABI int32_t np_account_info(const void *online_id,void *info) {
+    return online_id && info ? NP_SIGNED_OUT : NP_INVALID_ARGUMENT;
+}
 static ABI int32_t np_register(void *cb,void *arg) { (void)cb; (void)arg; return new_id(); }
 static ABI void np_register_void(void *cb,void *arg) { (void)cb; (void)arg; }
 static ABI int32_t np_register_toolkit(void *cb,void *arg) { (void)arg; return cb ? 0 : NP_INVALID_ARGUMENT; }
@@ -632,18 +639,21 @@ static const RuntimeExport exports[]={
     {"sceHttpGetStatusCode",http_fail}, {"sceHttpGetResponseContentLength",http_fail},
     {"sceHttpReadData",http_fail},
     {"sceNpGetState",np_state}, {"sceNpGetOnlineId",np_signed_out}, {"sceNpGetNpId",np_signed_out},
-    {"sceNpGetAccountIdA",np_account_id},
+    {"sceNpGetAccountIdA",np_account_id}, {"sceNpGetAccountId",np_account_id_online},
+    {"sceNpGetAccountCountry",np_account_info}, {"sceNpGetAccountDateOfBirth",np_account_info},
     {"sceNpRegisterStateCallback",np_register}, {"sceNpUnregisterStateCallback",runtime_stub},
     {"sceNpRegisterGamePresenceCallback",np_register_void}, {"sceNpRegisterPlusEventCallback",np_register},
     {"sceNpUnregisterPlusEventCallback",runtime_stub}, {"sceNpCheckCallback",runtime_stub},
     {"sceNpRegisterStateCallbackForToolkit",np_register_toolkit}, {"sceNpCheckCallbackForLib",runtime_stub},
     {"sceNpSetNpTitleId",runtime_stub}, {"sceNpNotifyPlusFeature",runtime_stub}, {"sceNpSetContentRestriction",runtime_stub},
-    {"sceNpCreateAsyncRequest",np_request}, {"sceNpDeleteRequest",runtime_stub}, {"sceNpAbortRequest",runtime_stub},
+    {"sceNpCreateRequest",np_request}, {"sceNpCreateAsyncRequest",np_request},
+    {"sceNpDeleteRequest",runtime_stub}, {"sceNpAbortRequest",runtime_stub},
     {"sceNpPollAsync",np_poll}, {"sceNpCheckNpAvailability",np_signed_out},
     {"sceNpGetParentalControlInfo",np_signed_out}, {"sceNpCheckPlus",np_signed_out},
     {"sceNpGetGamePresenceStatus",np_signed_out},
     {"sceNpCmpNpId",np_compare}, {"sceNpCmpOnlineId",np_compare},
-    {"sceNpAuthCreateAsyncRequest",np_request}, {"sceNpAuthDeleteRequest",runtime_stub},
+    {"sceNpAuthCreateRequest",np_request}, {"sceNpAuthCreateAsyncRequest",np_request},
+    {"sceNpAuthDeleteRequest",runtime_stub},
     {"sceNpAuthPollAsync",np_poll}, {"sceNpAuthGetAuthorizationCode",np_signed_out},
     {"sceNpLookupCreateTitleCtx",np_request}, {"sceNpLookupDeleteTitleCtx",runtime_stub},
     {"sceNpLookupCreateAsyncRequest",np_request_ctx}, {"sceNpLookupDeleteRequest",runtime_stub},
