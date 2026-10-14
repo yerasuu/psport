@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The game files bbport runs: Bloodborne with the 1.09 update merged in. The retail releases (the
+"""Bloodborne's supported game files: the game with the 1.09 update merged in. The retail releases (the
 US CUSA00900, the European Game of the Year edition CUSA03173, the Asian The Old Hunters Edition
 CUSA03023, ...) share the same 1.09 executable.
 

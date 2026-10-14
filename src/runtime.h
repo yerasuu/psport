@@ -197,7 +197,7 @@ uintptr_t runtime_savedata_resolve(const char *name);
 int runtime_savedata_param(int32_t user, const char *title, const char *dir, void *param);
 void runtime_savedata_report(void);
 void runtime_thread_attach_host(const char *name);
-/* What link_modules.py prelinked, at image offsets; [0] is the eboot. Deferred modules (loaded by
+/* What the loader prelinked (src/loader_link.c), at image offsets; [0] is the eboot. Deferred modules (loaded by
  * the game with sceKernelLoadStartModule) start there, the others at boot through
  * runtime_module_start, which runs an initializer at most once. */
 typedef struct { uint64_t address, size, prot; } RuntimeModuleSegment;

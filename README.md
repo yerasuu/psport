@@ -2,24 +2,31 @@
 
 **English** · [Русский](README.ru.md) · [Español](README.es.md)
 
-psport is decanter's fork of [bbport](https://github.com/deadinside28/bloodborne_pc), the native
-Linux port of Bloodborne, taken past one game. A PS4 title's original executable runs on an x86-64
-Linux PC the way a Windows program runs under Wine: a compatibility layer, not an emulator.
+psport is a PS4 compatibility layer for Linux. A PS4 title's original executable runs on an
+x86-64 Linux PC the way a Windows program runs under Wine: psport loads it, provides the system
+libraries it imports and translates its GPU work to Vulkan. It is not an emulator. psport started
+as decanter's fork of [bbport](https://github.com/deadinside28/bloodborne_pc), the native Linux
+port of Bloodborne, and is being generalised into a layer for any title; Bloodborne remains a
+supported title with its own profile.
 
 - **CPU.** The PS4 CPU is x86-64, so the game's code runs on the PC's CPU as it is, with no
-  emulation and no instruction translation. The eboot is converted offline (`scripts/`) into a flat
-  memory image with the game's libc linked in; a C loader (`src/probe.c`) maps it and jumps into it.
-- **System libraries.** The port provides them itself: the runtime in `src/runtime_*.c` (memory,
-  threads, synchronization, files, audio, pad, saves, exceptions, user-level threads, modules a
-  game loads at run time) and the libraries in `gpu/` (libSceNgs2, libSceAudiodec, libSceFiber,
-  libSceFont). No tested title needs a dump of the console's system modules.
+  emulation and no instruction translation. A C loader (`src/probe.c`, `src/loader_*.c`) reads the
+  eboot and the modules it links (SELF or ELF) straight from the game's folder, relocates and binds
+  them into one image and jumps into it.
+- **System libraries.** psport provides them itself: the C runtime in `src/runtime_*.c` (memory,
+  threads, synchronization, files, audio, pad, saves, exceptions, services, user-level threads,
+  modules a game loads at run time) and the libraries in `gpu/` (GnmDriver, VideoOut, AvPlayer,
+  Videodec2, Ngs2, Audiodec, Fiber, Font, PngEnc). No tested title needs a dump of the console's
+  system modules.
 - **Graphics.** The GPU command stream and GCN shaders are translated to Vulkan by a renderer
   derived from [shadPS4](https://github.com/shadps4-emu/shadPS4)'s video core and shader
   recompiler (`gpu/shadps4/`), as bbport extended it.
+- **Game profiles.** What is specific to one title (hooks and optimisations in its code) lives in
+  its profile under `gpu/games/`; every title runs on the generic paths without one.
 
-Bloodborne keeps working as upstream ships it, with its patches, upscalers and settings. What the
-fork adds to bbport, what it ports from other projects (source commit, license) and what it changes
-in inherited shadPS4 code: [FORK.md](FORK.md). Upstream releases are merged in as they come.
+How it fits together: [docs/en/ARCHITECTURE.md](docs/en/ARCHITECTURE.md). What the fork ports from
+other projects (source commit, license) and what it changes in inherited shadPS4 code:
+[FORK.md](FORK.md).
 
 > **No game files are included.** You need your own dumps of the games you own.
 > This project is not affiliated with Sony Interactive Entertainment, FromSoftware, AMD or the
@@ -27,7 +34,9 @@ in inherited shadPS4 code: [FORK.md](FORK.md). Upstream releases are merged in a
 
 ## Titles
 
-Tested headless with `tools/regress.sh` (see below): six of seven reach gameplay with sound.
+Every title in `tools/regress/titles.txt` is run headless with `tools/regress.sh` (see below).
+The state is how far a title has been seen to get; "regress" rows are what its scripted run shows
+(first GPU frame, frames drawn, sound), not a play-through.
 
 | Title | Title ID | State |
 |---|---|---|
@@ -38,6 +47,13 @@ Tested headless with `tools/regress.sh` (see below): six of seven reach gameplay
 | Astrea | CUSA49515 | the intro's story panels, sound |
 | SaGa Emerald Beyond | CUSA43027 | title screen, first story scenes with dialogue, sound |
 | ALTDEUS: Beyond Chronos | CUSA26563 | black screen: requires a PS VR headset, no flat-screen mode |
+| Gal Guardians: Demon Purge | CUSA41240 | regress: frames drawn, sound |
+| Gal Guardians: Servants of the Dark (JP) | CUSA52187 | regress: frames drawn, sound |
+| Call of Duty: Black Ops | CUSA57547 | regress: frames drawn, sound |
+| Call of Duty: Black Ops II | CUSA57548 | regress: frames drawn, sound |
+| Blood Omen 2 | CUSA49769 | regress: frames drawn, no sound |
+| Onigiri | CUSA01458 | regress: first GPU frame and sound, no lit frame in its schedule |
+| OCTOPATH TRAVELER 0 (JP) | CUSA53477 | loads a saved game, then the GPU faults; left out of routine runs |
 
 Titles that require PS VR (`require_ps_vr` in `param.sfo`) are unsupported. Only one machine
 (AMD Radeon RX 7800 XT, Mesa/RADV) has been tested thoroughly.
@@ -57,7 +73,7 @@ BB_GAME_DIR=/path/to/CUSA03173 bash run.sh      # Bloodborne
 BB_GAME_DIR=/path/to/dump BB_PERMISSIVE=1 bash run.sh
 ```
 
-`BB_GAME_DIR` defaults to `../CUSA03173`. `BB_PERMISSIVE=1` makes imports the port lacks return 0
+`BB_GAME_DIR` defaults to `../CUSA03173`. `BB_PERMISSIVE=1` makes imports psport lacks return 0
 instead of stopping. `BB_SYS_MODULES=<folder>` optionally links the user's own dump of system
 modules (`*.sprx`) where the port has no library yet; nothing from it is shipped. Saves and the
 shader cache go to `user/`, settings to `bbport.ini`. The GTK4 launcher
@@ -88,9 +104,11 @@ upstream's and built around Bloodborne.
 (`BB_AUDIO=none`, `BB_PAD_HOST=0`: no window, no sound, none of the user's controllers), drives
 each with a pad schedule (`tools/regress/*.sched`) and reports how far it got (loaded, entered,
 initialized, first GPU frame, drawn frames, audio), its crash signature and its count of imports
-without implementation; with `-c <earlier results.json>` it flags regressions. All seven run
+without implementation; with `-c <earlier results.json>` it flags regressions. Every title runs
 without a dump of system modules; `SYS_MODULES=<folder>` optionally passes one to the titles other
-than Bloodborne, to compare with the port's own libraries. Usage and milestones: [FORK.md](FORK.md#regression-runs).
+than Bloodborne, to compare with psport's own libraries. Usage and milestones:
+[FORK.md](FORK.md#regression-runs); bringing up a new title:
+[docs/en/ADDING_A_TITLE.md](docs/en/ADDING_A_TITLE.md).
 
 ## Diagnostics
 
@@ -102,20 +120,31 @@ described in [FORK.md](FORK.md). `tools/gcn_dis.sh` disassembles GCN shaders.
 ## Rules
 
 From [CLAUDE.md](CLAUDE.md): no game-specific or shader-specific hacks, fixes address the
-underlying behavior; no tests in the repository (changes are checked with `tools/regress.sh`;
+underlying behavior; optimisations for one title go in its game profile (`gpu/games/`), and every
+title must run correctly without one (`BB_GAME_PROFILE=none`); no tests in the repository (changes are checked with `tools/regress.sh`;
 hardware tests, when needed, are OpenOrbis homebrew); match the surrounding code.
+
+## Read next
+
+- [docs/en/ARCHITECTURE.md](docs/en/ARCHITECTURE.md): components and the launch flow.
+- [docs/en/ADDING_A_TITLE.md](docs/en/ADDING_A_TITLE.md): bringing up a new dump.
+- [FORK.md](FORK.md): ported components, changes to inherited code, variables, call report,
+  regression runs, CI.
+- Feature notes: [upscaler](docs/en/upscaler.md), [parallel GPU work](docs/en/parallel_gpu.md),
+  [motion vectors](docs/en/motion_vectors.md), [mods and patches](docs/en/MODS.md).
+- [docs/en/history/](docs/en/history/): bbport's design notes, plans and change logs.
 
 ## Repository layout
 
 | Path | Contents |
 |---|---|
-| `src/` | Loader (`probe.c`) and runtime (`runtime_*.c`) |
-| `scripts/` | Game image preparation, module linking, game check, patch compiler, mods |
-| `gpu/` | Renderer library: shadPS4 video core with bbport's changes (`gpu/VENDOR.txt`), ported libraries (`ngs2/`, `audiodec/`, `fiber/`, `font/`), overlay and in-game menu (`shim/`), DLSS bridge, online module |
+| `src/` | Entry (`probe.c`), native loader (`loader_*.c`) and C runtime (`runtime_*.c`) |
+| `scripts/` | Launch helpers run by `run.sh`: mods, AppContent profile, Bloodborne's patch compiler and game check, online addresses |
+| `gpu/` | GPU library: shadPS4 video core with bbport's changes (`gpu/VENDOR.txt`), own PM4 decoder (`cp/`) and memory module (`layer/`), ported libraries (`ngs2/`, `audiodec/`, `fiber/`, `font/`, `pngenc/`), game profiles (`games/`), overlay and in-game menu (`shim/`), DLSS bridge, online module |
 | `launcher/`, `packaging/` | Upstream's GTK4 launcher; Nix package and AppImage script |
 | `patches/` | Community patches for Bloodborne |
 | `tools/` | Regression runs, GCN disassembler, FSR 4 tools and `fsr4cap`, scripted-run helpers |
-| `docs/` | Upstream's design notes, measurements and change logs |
+| `docs/` | One folder per language: `docs/en/` (architecture, bringing up a title, feature notes, bbport's history in English), `docs/ru/` (bbport's Russian originals, same file names) |
 
 ## Credits and licenses
 

@@ -2,9 +2,15 @@
 
 psport is decanter's fork of [bbport](https://github.com/deadinside28/bloodborne_pc). Its goal is
 bbport's own idea taken past one game: PS4 titles run natively on Linux, their x86-64 code on the
-CPU as it is, with the system libraries provided by this port (a compatibility layer, as Wine is,
-not an emulator). Bloodborne keeps working as upstream ships it; other titles start without a game
-check.
+CPU as it is, with the system libraries provided by psport (a compatibility layer, as Wine is,
+not an emulator). Bloodborne keeps working, with its own game profile, patches and mods; other
+titles start without a game check.
+
+This file is the reference of what the fork ports from other projects, what it changes in
+inherited shadPS4 code, and the variables and reports it adds. How the system fits together:
+[docs/en/ARCHITECTURE.md](docs/en/ARCHITECTURE.md); bringing up a new title:
+[docs/en/ADDING_A_TITLE.md](docs/en/ADDING_A_TITLE.md); bbport's own notes and change logs:
+[docs/en/history/](docs/en/history/) (Russian originals in [docs/ru/](docs/ru/)).
 
 Upstream releases are merged in as they come; the changes below live on top.
 
@@ -103,6 +109,7 @@ English, 3 Spanish, 8 Russian).
 | Variable | What it shows |
 |---|---|
 | `BB_PERMISSIVE=1` | imports the port lacks return 0 instead of stopping, each logged once |
+| `BB_GAME_PROFILE=none` | the game runs without its game profile (`gpu/games/`), on the generic paths only |
 | `BB_PERMISSIVE_OUT=error` | with `BB_PERMISSIVE=1`, those of them that write through a pointer argument (`src/import_outparams.inc`) return `0x80020016` instead of 0, so the game takes its error path rather than reading an output nothing wrote; either way their log line names the output arguments left unwritten and the pointers passed |
 | (always) | before the game starts: every import without implementation or answered by a stub, and a summary |
 | (always) | calls that nothing answers for real or that fail, see [Call report](#call-report) |
@@ -163,7 +170,8 @@ got, so a change can be checked against all of them at once:
 
 ```
 [SYS_MODULES=<folder>] tools/regress.sh [-j 2] [-o out/regress/<time>] [-c <earlier results.json>] \
-    [-n ryza,bloodborne] [-s <toolchain nix file>] [-u <earlier output folder>] <games root>
+    [-n ryza,bloodborne] [-t <titles file>] [-s <toolchain nix file>] [-u <earlier output folder>] \
+    <games root>
 ```
 
 Each title runs inside a headless gamescope with `BB_AUDIO=none` and `BB_PAD_HOST=0`: no window, no
@@ -197,7 +205,9 @@ count that keeps growing means the game is stalled on the GPU. The table goes to
 `results.tsv` and `results.json` to the output folder with each title's log and dumps
 (`tools/regress/report.py <folder>` classifies a folder again). With `-u`, each title's user
 folder (saves and settings) starts as a copy of its own in that earlier output folder, so a run can
-load what an earlier one saved.
+load what an earlier one saved. `-t tools/regress/perf.txt` runs the titles whose schedules measure
+the frame rate in play (`bloodborne-perf.sched`, from a save given with `-u`; run alone on the
+machine).
 With `-c`, a milestone lost or a crash signature that is new or different is a regression: it is
 listed and the exit status is 1. The `no impl` and `forced` columns show their change against the
 earlier run without counting it as a regression (blank in an earlier file that predates `forced`).

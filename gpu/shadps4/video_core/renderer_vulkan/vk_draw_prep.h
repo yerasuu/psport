@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// bbport: speculative draw preparation on worker threads (docs/parallel_gpu.md, steps 1-2).
+// bbport: speculative draw preparation on worker threads (docs/en/parallel_gpu.md, steps 1-2).
 //
 // Every submitted graphics command buffer is copied. A scanner thread replays the register
 // writes of the whole stream in order (ApplyGraphicsRegisterPacket, the same code the GPU
@@ -38,7 +38,7 @@ struct PreparedStage {
     const u32* flat; ///< flattened user data the worker computed, owned by the submission
     u32 flat_size;
     // Resource sharps read from `flat` in the order of the program's resource lists, and the
-    // texture description hash of each image (docs/parallel_gpu.md, step 2). Valid for the
+    // texture description hash of each image (docs/en/parallel_gpu.md, step 2). Valid for the
     // GPU thread exactly when `flat` matched: sharps depend on nothing else.
     const AmdGpu::Image* image_sharps;
     const u64* image_hashes;

@@ -261,7 +261,7 @@ Bloodborne ничего из этого не использует.
 
 В `BB_PC_MODEL=1 BB_LAYER_MEMORY=1` оригинальный `fefebf9f` теперь исполняется по умолчанию: paged stores обновляют память игры и актуальные зеркала. HLE доступен через `BB_COPY_SHADER_NATIVE=0`.
 
-Без `VK_AMD_buffer_marker` метки EOP/EOS и применимый RELEASE_MEM пишет GPU стандартными Vulkan updates с барьерами. AMD сохраняет быстрые markers; `BB_GPU_LABELS_PORTABLE=1` позволяет проверить переносимый вариант. Подробности и аппаратные ограничения: [TRANSLATION_GPU_COPY_LABELS.ru.md](TRANSLATION_GPU_COPY_LABELS.ru.md).
+Без `VK_AMD_buffer_marker` метки EOP/EOS и применимый RELEASE_MEM пишет GPU стандартными Vulkan updates с барьерами. AMD сохраняет быстрые markers; `BB_GPU_LABELS_PORTABLE=1` позволяет проверить переносимый вариант. Подробности и аппаратные ограничения: [TRANSLATION_GPU_COPY_LABELS.md](TRANSLATION_GPU_COPY_LABELS.md).
 
 ## План от 2026-10-10: что осталось и как перевести на трансляцию
 
