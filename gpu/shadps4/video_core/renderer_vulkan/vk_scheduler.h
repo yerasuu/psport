@@ -1085,8 +1085,8 @@ private:
     /// Runs `func()` on a recording thread, in order with the other ordered tasks (guest memory
     /// copies and the fence signals after them) and after every command recorded before it, in
     /// all segments: the guest sees its fences no earlier than in 0.2. Fences signalled ahead of
-    /// the queued recording coincided with frequent guest heap corruption (guest offset
-    /// 0x263b8e7: 3 of 4 soak runs instead of none).
+    /// the queued recording coincided with frequent guest heap corruption (a guest fault in its
+    /// allocator: 3 of 4 soak runs instead of none).
     template <typename Func>
     void RecordOrdered(Func&& func) {
         ProducerScope producer{*this, "RecordOrdered"};

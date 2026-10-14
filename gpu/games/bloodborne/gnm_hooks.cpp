@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-#include "bbport_gnm_hooks.h"
+#include "gnm_hooks.h"
 
 #include <algorithm>
 #include <initializer_list>
@@ -27,7 +27,7 @@ struct Entry {
     const char* pm4;
 };
 constexpr Entry Table[] = {
-#include "bbport_gnm_table.inc"
+#include "gnm_table.inc"
 };
 constexpr std::size_t Count = sizeof(Table) / sizeof(Table[0]);
 
@@ -593,10 +593,8 @@ void PatchImage(unsigned char* image, std::uint64_t size) {
                 patched, Count, mismatched, observe ? "; command buffer methods observed" : "");
     std::thread(ReportLoop).detach();
 }
-} // namespace BbGnmHooks
 
-namespace BbGnmHooks {
-DriverWrite::~DriverWrite() {
+void NoteDriverWrite(std::uint32_t* commands, std::uint64_t dwords) {
     if (!observe || !commands) {
         return;
     }

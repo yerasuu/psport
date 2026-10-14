@@ -16,11 +16,7 @@ void PatchImage(unsigned char* image, std::uint64_t size);
 /// wrote (the submitting thread; statistics in the census report).
 void CheckSubmission(const std::uint32_t* commands, std::uint64_t dwords);
 
-/// BB_GNM_OBSERVE: packets our GnmDriver writes into space the game reserved ([commands,
-/// commands + dwords)), marked when the guard goes out of scope.
-struct DriverWrite {
-    std::uint32_t* commands;
-    std::uint64_t dwords;
-    ~DriverWrite();
-};
+/// BB_GNM_OBSERVE: packets our GnmDriver wrote into space the game reserved ([commands,
+/// commands + dwords)).
+void NoteDriverWrite(std::uint32_t* commands, std::uint64_t dwords);
 } // namespace BbGnmHooks

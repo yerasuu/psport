@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-#include "bbport_guest_hooks.h"
-#include "bbport_heap_sites.h"
+#include "guest_hooks.h"
+#include "heap_sites.h"
 #include "bbport_toggles.h"
 
 #include <array>

@@ -10,7 +10,7 @@
 
 namespace Game {
 
-// One per game (games/<game>.cpp).
+// One per game (games/<game>.cpp, games/<game>/profile.cpp).
 extern const Profile BloodborneProfile;
 
 namespace {

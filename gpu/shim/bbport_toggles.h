@@ -128,7 +128,7 @@ inline std::atomic<std::uint64_t> gnm_frame_waits{0}, gnm_frame_wait_ns{0};
 inline std::atomic<std::uint64_t> submit_guard_ns{0}, submit_guard_bytes{0};
 /// Submissions to the compute queues (sceGnmDingDong).
 inline std::atomic<std::uint64_t> asc_submits{0};
-/// The game's GPU range allocators (seen at their collector, 0x26aa860): object, live ranges, bytes.
+/// The game's GPU range allocators, as its profile's hooks see them: object, live ranges, bytes.
 inline std::array<std::atomic<std::uint64_t>, 4> range_allocators{}, range_live{}, range_bytes{};
 inline std::atomic<std::int64_t> hot_pages{0};
 /// Stall diagnostics (BB_FRAME_STATS): per-frame deltas printed for frames over 40 ms.

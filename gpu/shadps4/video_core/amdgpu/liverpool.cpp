@@ -280,8 +280,8 @@ void Liverpool::Process(std::stop_token stoken) {
         // GPU idle only if nothing was submitted meanwhile: the drain and the deferred fences take
         // milliseconds (Steam Deck), and a submission plus sceGnmSubmitDone in that time set the
         // submission lock for work not even decoded yet. Releasing it then let the guest free
-        // that frame's labels and command buffers: late fences in its heap (guest fault
-        // 0x263b8e7) and reused command buffers decoded as garbage ("PM4 type 0"). The loop
+        // that frame's labels and command buffers: late fences in its heap (a guest fault in its
+        // allocator) and reused command buffers decoded as garbage ("PM4 type 0"). The loop
         // runs again for the new submissions and signals once they are done.
         // BB_HONEST_LABELS: idle once the GPU has finished what was recorded (its fences written)
         // and nothing was submitted since; the work is submitted below if this thread stays idle.
@@ -522,7 +522,7 @@ void RunDmaData(Vulkan::Rasterizer& rasterizer, const u8* data) {
     // bbport: a DMA into guest memory is written by this thread (FillBuffer/CopyBuffer) when the
     // GPU has not modified the range. Like WriteData, it must not overtake the copies and the
     // fences deferred to the recording thread: the guest, seeing it, frees objects whose labels
-    // an earlier fence still writes (a corrupted guest heap free list, guest offset 0x263b8e7).
+    // an earlier fence still writes (a corrupted guest heap free list).
     // With the new memory model, recorded as a GPU fill or copy (memory used in place, or
     // written by the GPU) it lands after the submission goes out, which is after those copies
     // and signals: no wait (~16 us each, ~900 a second of 4-byte counter copies).

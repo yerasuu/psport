@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "bbport_free_check.h"
+#include "game_profile.h"
 
 #include <algorithm>
 #include <array>
@@ -26,7 +27,7 @@ namespace {
 using u64 = std::uint64_t;
 using u32 = std::uint32_t;
 
-// The game's small-object pool (allocation at guest offset 0x263b8b0, release at 0x263b9b0).
+// The game's small-object pool.
 constexpr u64 PageSize = 0x1000;
 constexpr u64 HeaderOffset = 0xfc0;
 constexpr u64 BlockSize = 0x30;
@@ -51,8 +52,8 @@ bool IsBlock(u64 page, u64 p) {
 
 bool Plausible(u64 page, const Header& h) {
     const auto pointer = [](u64 p) { return p != 0 && (p & 7) == 0 && p < (1ull << 47); };
-    // A page with every block free has gone back to the allocator below (the release at
-    // 0x263b9b0): its old header means nothing. The page list links point at other page
+    // A page with every block free has gone back to the allocator below (by the pool's
+    // release): its old header means nothing. The page list links point at other page
     // headers or at the pool's list heads; at least one of them is a header (pools of one
     // page are skipped: other data at a page end looked like headers).
     if (!pointer(h.next) || !pointer(h.prev) || h.count >= MaxBlocks) {
@@ -649,10 +650,8 @@ LabelTrap& Trap() {
     return trap;
 }
 constexpr u64 ImageBase = 0x800000000ull, ImageEnd = 0x810000000ull;
-/// The guest allocator's release, and the branch of its GPU range collector (0x26aa860) taken
-/// for a block whose label reads 4 (done).
-constexpr u64 FreeHook = ImageBase + 0x263b9b0;
-constexpr u64 GcHook = ImageBase + 0x26aa986;
+/// The game's label release code (Game::LabelReleaseCode), set while the breakpoints are in.
+u64 free_hook = 0, gc_hook = 0;
 
 /// BB_LABEL_TRAP: 1 pool pages with pending labels read-only (every guest write into them is
 /// single-stepped: slow, it hid the bug), 2 breakpoints on the guest allocator's release and on
@@ -762,11 +761,11 @@ void OnGcHook(void* ucontext);
 void OnStepTrap(int sig, siginfo_t* info, void* ucontext) {
     // BB_LABEL_TRAP=2: the breakpoints (RIP is past the int3).
     const u64 rip = u64(static_cast<ucontext_t*>(ucontext)->uc_mcontext.gregs[REG_RIP]);
-    if (rip == FreeHook + 1) {
+    if (free_hook && rip == free_hook + 1) {
         OnFreeHook(ucontext);
         return;
     }
-    if (rip == GcHook + 1) {
+    if (gc_hook && rip == gc_hook + 1) {
         OnGcHook(ucontext);
         return;
     }
@@ -823,10 +822,22 @@ bool PatchInt3(u64 address, std::initializer_list<unsigned char> expected) {
 /// The release starts with `mov rax, rsi` (48 89 f0), the collector's branch with
 /// `mov rcx, [rsp+0x28]` (48 8b 4c 24 28).
 bool InstallFreeHook() {
-    if (!PatchInt3(FreeHook, {0x48, 0x89, 0xf0, 0x48, 0x85, 0xc0})) {
+    const Game::Profile* game = Game::Active();
+    if (!game || !game->label_release.release) {
+        std::fprintf(stderr, "Free check: BB_LABEL_TRAP=2 needs the game's label release code (its "
+                             "profile): off\n");
         return false;
     }
-    PatchInt3(GcHook, {0x48, 0x8b, 0x4c, 0x24, 0x28});
+    // Set before the int3 goes in, since another thread may reach it at once.
+    free_hook = game->label_release.release;
+    if (!PatchInt3(free_hook, {0x48, 0x89, 0xf0, 0x48, 0x85, 0xc0})) {
+        free_hook = 0;
+        return false;
+    }
+    gc_hook = game->label_release.collector_done;
+    if (gc_hook && !PatchInt3(gc_hook, {0x48, 0x8b, 0x4c, 0x24, 0x28})) {
+        gc_hook = 0;
+    }
     return true;
 }
 
@@ -957,7 +968,7 @@ void Emit(char* line, int n, int size) {
 void OnFreeHook(void* ucontext) {
     auto* g = static_cast<ucontext_t*>(ucontext)->uc_mcontext.gregs;
     g[REG_RAX] = g[REG_RSI];
-    g[REG_RIP] = greg_t(FreeHook + 3);
+    g[REG_RIP] = greg_t(free_hook + 3);
     const u64 block = u64(g[REG_RSI]);
     Pending p;
     if (!FindPending(block, p)) {
@@ -985,7 +996,7 @@ void OnFreeHook(void* ucontext) {
 void OnGcHook(void* ucontext) {
     auto* g = static_cast<ucontext_t*>(ucontext)->uc_mcontext.gregs;
     g[REG_RCX] = greg_t(*reinterpret_cast<const u64*>(u64(g[REG_RSP]) + 0x28));
-    g[REG_RIP] = greg_t(GcHook + 5);
+    g[REG_RIP] = greg_t(gc_hook + 5);
     const u64 node = u64(g[REG_R14]);
     u64 raw = 0;
     ReadQword(node, raw);
