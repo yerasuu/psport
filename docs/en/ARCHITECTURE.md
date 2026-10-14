@@ -141,7 +141,7 @@ in link order (libc first) and the eboot's entry runs with `argv[0] = /app0/eboo
 | files, async I/O, AppContent, PlayGo, saves | `runtime_file.c`, `runtime_aio.c`, `runtime_content.c`, `runtime_playgo.c`, `runtime_savedata.c` |
 | system and user services, dialogs, NP offline, sockets | `runtime_services.c`, `runtime_socket.c`, `runtime_net.c`, `runtime_voice.c` |
 | audio | `runtime_audio.c` (AudioOut), `runtime_audio3d.c`, `runtime_ajm.c` |
-| input | `runtime_pad.c`, `runtime_gesture.c` |
+| input | `runtime_pad.c`, `runtime_pad_script.c` (scripted input for automated runs), `runtime_gesture.c` |
 | call report | `runtime_calls.c` |
 
 Each file keeps a table of `RuntimeExport {symbol name, function}` and a `runtime_<area>_resolve`
