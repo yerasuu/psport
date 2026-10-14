@@ -780,13 +780,20 @@ static ABI int32_t pad_vibration(int32_t handle, const uint8_t *param) {
     pthread_mutex_unlock(&lock);
     return 0;
 }
+/* Remote Play's pad is the only remote one, and this port has no Remote Play. */
+static ABI int32_t pad_is_remote(int32_t handle, uint8_t *remote) {
+    if (handle!=PAD_HANDLE || !opened) return ERR_INVALID_HANDLE;
+    if (!remote) return ERR_INVALID_ARG;
+    *remote=0;
+    return 0;
+}
 static ABI int32_t pad_ok_handle(int32_t handle) { return handle==PAD_HANDLE && opened ? 0 : ERR_INVALID_HANDLE; }
 static ABI int32_t pad_ok_handle_flag(int32_t handle, uint8_t flag) { (void)flag; return pad_ok_handle(handle); }
 
 static const RuntimeExport exports[]={
     {"scePadInit",pad_init}, {"scePadOpen",pad_open}, {"scePadGetHandle",pad_get_handle}, {"scePadClose",pad_close},
     {"scePadReadState",pad_read_state}, {"scePadRead",pad_read},
-    {"scePadGetControllerInformation",pad_info},
+    {"scePadGetControllerInformation",pad_info}, {"scePadIsRemoteController",pad_is_remote},
     {"scePadDeviceClassGetExtendedInformation",pad_class_info}, {"scePadSetVibration",pad_vibration},
     {"scePadResetOrientation",pad_ok_handle},
     {"scePadSetAngularVelocityDeadbandState",pad_ok_handle_flag}, {"scePadSetTiltCorrectionState",pad_ok_handle_flag},

@@ -1,6 +1,7 @@
-/* NID -> symbol name for every PS4 library export known (shadPS4 aerolib, 97623 names), sorted
- * by NID in strcmp order for runtime_symbol's binary search. Regenerate: LC_ALL=C sort aerolib.csv
- * | awk '{printf "{\"%s\",\"%s\"},\n", $1, $2}' */
+/* NID -> symbol name for every PS4 library export known (shadPS4 aerolib, 97623 names, plus
+ * scePadIsRemoteController, whose NID hashes from that name), sorted by NID in strcmp order for
+ * runtime_symbol's binary search. Regenerate: LC_ALL=C sort aerolib.csv
+ * | awk '{printf "{\"%s\",\"%s\"},\n", $1, $2}' and add the names aerolib lacks */
 {"++-URPJNZ18","_ZN9Inspector17ScriptDebugServer23removeBreakpointActionsEm"},
 {"++67uYkhqBU","_ZN7WebCore28InspectorFrontendClientLocal8Settings11getPropertyERKN3WTF6StringE"},
 {"++8RYr2gjrw","_ZN9Inspector21InjectedScriptManagerdaEPv"},
@@ -65748,6 +65749,7 @@
 {"fCRfZ8ZqDWA","_ZZN3sce2Np9CppWebApi6Common6VectorINS1_11Matchmaking2V18PlatformEE7reserveEiENKUlRNS2_10LibContextEmE_clES9_m"},
 {"fCRxMsn6aEQ","_ZN3sce2Np9CppWebApi6Common12IntrusivePtrINS2_6VectorINS3_INS1_14SessionManager2V118MatchmakingForReadEEEEEE7get_refEv"},
 {"fCTlLNZyo-U","_ZN3sce2Np9CppWebApi6Common12IntrusivePtrINS2_6VectorINS3_INS1_14SessionManager2V120RequestPlayerSessionEEEEEED2Ev"},
+{"fCWdlnmB1Ks","scePadIsRemoteController"},
 {"fCYZ8Ta2DJc","sceDeci4hDrfpGetMsgBuf"},
 {"fCa7-ihdRdc","sceNetShowRoute6"},
 {"fCdaM2pKOpo","_ZN3sce2np18HttpConnectionPool13GetConnectionERKNS0_12HttpTemplateEPKcPi"},
