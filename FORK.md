@@ -97,6 +97,7 @@ English, 3 Spanish, 8 Russian).
 | (always) | before the game starts: every import without implementation or answered by a stub, and a summary |
 | (always) | calls that nothing answers for real or that fail, see [Call report](#call-report) |
 | `BB_CALL_REPORT=<file>` | the call report's summary lines, also written to that file when the process ends |
+| `BB_SUBMIT_GUARD=0` | frames overlap (`BB_SUBMIT_AHEAD`) unguarded: a submitted frame's command buffers are neither made read-only nor checksummed until the GPU retires the frame (`gpu/shim/bbport_submit_guard.h`), so a game that rewrites them in flight is not caught and the overlap stays on; `=trap` or `=hash` keeps one of the two watches |
 | `BB_AUDIO_STATS=1` | per audio port, every 5 s: cadence, peak and RMS in dBFS (sound or silence) |
 | `BB_NGS2_TRACE=1` | first calls of each Ngs2 function and the level of each render |
 | `BB_FIBER_TRACE=1` | first calls of each Fiber function with their arguments |

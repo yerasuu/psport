@@ -118,7 +118,7 @@ void runtime_memory_note_cpu_write(uintptr_t address, uint64_t size) {
     }
 }
 /* bbport: write traps the GPU side keeps on guest pages, by reason (bits: a VRAM copy of the page,
- * an image made from it, ...). A page with any reason is read-only for the game even where its
+ * an image made from it, a command buffer of a frame in flight, ...). A page with any reason is read-only for the game even where its
  * own protection allows writes; the fault goes to the GPU library's handlers, and each clears
  * only its own reason. One owner for these protections: the layer's VRAM copies and the texture
  * cache trap the same pages, and one's unprotect must not drop the other's trap. Reasons from 16 up

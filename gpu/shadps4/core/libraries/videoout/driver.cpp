@@ -659,6 +659,11 @@ void VideoOutDriver::Flip(const Request& req) {
                         BbStats::gnm_frame_waits.exchange(0) / double(frames),
                         BbStats::gnm_frame_wait_ns.exchange(0) / (1e6 * double(frames)),
                         BbStats::asc_submits.exchange(0) / double(frames));
+            if (const u64 guarded = BbStats::submit_guard_bytes.exchange(0)) {
+                std::printf("Gnm: overlap guard checksummed %.1f KB/frame in %.1f us/frame\n",
+                            guarded / (1e3 * double(frames)),
+                            BbStats::submit_guard_ns.exchange(0) / (1e3 * double(frames)));
+            }
             std::printf("EOP fences: %llu decoded, %llu labels written, %lld pending; %.1f labels/frame "
                         "written by the GPU\n",
                         (unsigned long long)BbStats::eop_decoded.load(),

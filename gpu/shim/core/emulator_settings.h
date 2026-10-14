@@ -66,7 +66,7 @@ public:
     bool IsPipelineCacheArchived() { return false; }
     bool IsPipelineCacheEnabled() { static const auto value = Flag("BB_PIPELINE_CACHE", true); return value; }
     bool IsRcasEnabled() { static const auto value = Flag("BB_RCAS", true); return value; }
-    bool IsReadbackLinearImagesEnabled() { static const auto value = Flag("BB_READBACK_LINEAR", false); return value; }
+    bool IsReadbackLinearImagesEnabled() { static const auto value = Flag("BB_READBACK_LINEAR", true); return value; }
     bool IsRenderdocEnabled() { return false; }
     bool IsShaderCollect() { return false; }
     bool IsUserfaultfdTracking() { return false; }

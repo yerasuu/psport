@@ -124,6 +124,8 @@ inline std::atomic<std::uint64_t> eop_decoded{0}, eop_written{0}, gpu_labels{0};
 inline std::atomic<std::uint64_t> submits_allowed_queries{0}, submits_refused{0}, submit_done_calls{0};
 /// Guest time blocked in Gnm submissions on the previous frame (submission lock or BB_SUBMIT_LOCK=frame).
 inline std::atomic<std::uint64_t> gnm_frame_waits{0}, gnm_frame_wait_ns{0};
+/// Command buffers checksummed by the frame overlap guard (BbSubmitGuard): time (ns) and bytes.
+inline std::atomic<std::uint64_t> submit_guard_ns{0}, submit_guard_bytes{0};
 /// Submissions to the compute queues (sceGnmDingDong).
 inline std::atomic<std::uint64_t> asc_submits{0};
 /// The game's GPU range allocators (seen at their collector, 0x26aa860): object, live ranges, bytes.
