@@ -73,7 +73,13 @@ static int32_t posix(int32_t r) { return r ? (int32_t)((uint32_t)r&0xffff) : 0; 
 static ABI int32_t posix_get_sched_param(void *t, int32_t *p, GuestSchedParam *s) { return posix(get_sched_param(t,p,s)); }
 static ABI int32_t posix_set_sched_param(void *t, int32_t p, const GuestSchedParam *s) { return posix(set_sched_param(t,p,s)); }
 
+/* Every policy schedules over the same range, highest first: SCE_KERNEL_PRIO_FIFO_HIGHEST (256) is
+ * the maximum, SCE_KERNEL_PRIO_FIFO_LOWEST (767) the minimum. */
+static ABI int32_t priority_max(int32_t policy) { (void)policy; return 256; }
+static ABI int32_t priority_min(int32_t policy) { (void)policy; return 767; }
+
 static const RuntimeExport exports[]={
+    {"sched_get_priority_max",priority_max}, {"sched_get_priority_min",priority_min},
     {"scePthreadGetschedparam",get_sched_param}, {"scePthreadSetschedparam",set_sched_param},
     {"pthread_getschedparam",posix_get_sched_param}, {"pthread_setschedparam",posix_set_sched_param},
     {"scePthreadGetname",get_name},

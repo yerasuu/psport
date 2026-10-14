@@ -124,7 +124,6 @@ uintptr_t runtime_ulobjmgr_resolve(const char *name);
 uintptr_t runtime_ult_resolve(const char *name);
 void runtime_eventflag_report(void);
 void runtime_eventflag_created_report(void);
-uintptr_t runtime_time_resolve(const char *name);
 void runtime_content_configure(const uint32_t values[5]);
 void runtime_content_title(const char *title);
 uintptr_t runtime_content_resolve(const char *name);
@@ -144,6 +143,10 @@ uintptr_t runtime_services_resolve(const char *name);
 /* sceSystemServiceParamGetInt's language (PS_LANGUAGE, default 1 = English US). */
 int runtime_system_language(void);
 uintptr_t runtime_playgo_resolve(const char *name);
+/* Absent peripherals: USB devices and the PlayStation Camera (runtime_devices.c). */
+uintptr_t runtime_devices_resolve(const char *sz_name);
+/* Remote Play, Share Play, video recording and core dumps, none of them running (runtime_capture.c). */
+uintptr_t runtime_capture_resolve(const char *sz_name);
 uintptr_t runtime_voice_resolve(const char *name);
 /* Offline libSceNet sockets (runtime_socket.c), consulted by runtime_services_resolve. */
 uintptr_t runtime_socket_resolve(const char *name);

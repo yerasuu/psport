@@ -64,6 +64,11 @@ static ABI int32_t recognizers_update(int32_t handle) { return valid(handle) ? 0
 static ABI int32_t recognizer_events(int32_t handle,const void *recognizer) {
     return valid(handle) && recognizer ? 0 : GESTURE_INVALID_ARGUMENT;
 }
+/* With no event ever counted, every index is past the end. */
+static ABI int32_t recognizer_event_by_index(int32_t h_gesture,const void *p_recognizer,uint32_t i_event,void *p_out_event) {
+    (void)h_gesture; (void)p_recognizer; (void)i_event; (void)p_out_event;
+    return GESTURE_INVALID_ARGUMENT;
+}
 
 static const RuntimeExport exports[]={
     {"sceSystemGestureOpen",gesture_open}, {"sceSystemGestureClose",gesture_close},
@@ -75,6 +80,7 @@ static const RuntimeExport exports[]={
     {"sceSystemGestureRemoveTouchRecognizer",recognizer_attach},
     {"sceSystemGestureUpdateAllTouchRecognizer",recognizers_update},
     {"sceSystemGestureGetTouchEventsCount",recognizer_events},
+    {"sceSystemGestureGetTouchEventByIndex",recognizer_event_by_index},
 };
 uintptr_t runtime_gesture_resolve(const char *name) { return RUNTIME_LOOKUP(exports,name); }
 #else

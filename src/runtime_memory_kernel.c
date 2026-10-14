@@ -8,6 +8,7 @@
 #include <inttypes.h>
 #include <stdatomic.h>
 #include <unistd.h>
+#include <errno.h>
 #ifndef _WIN32
 #define LIMIT 4096
 #define ERR(n) ((int32_t)(UINT32_C(0x80020000)|(n)))
@@ -498,6 +499,32 @@ int32_t runtime_memory_pool_decommit(uintptr_t address, uint64_t size, void (*re
     write_unlock();
     return result;
 }
+/* FreeBSD's msync flags: MS_ASYNC 1, MS_INVALIDATE 2, MS_SYNC 0. Shared file mappings reach their
+ * file; anonymous memory has nothing to write back. */
+static int sync_range(uintptr_t va_start,uint64_t cb_range,int32_t flags) {
+    if ((va_start&4095) || (flags&~3) || (flags&1 && flags&2)) return EINVAL;
+    if (!runtime_memory_is_mapped(va_start,cb_range)) return ENOMEM;
+    const int host_flags=(flags&1 ? MS_ASYNC : MS_SYNC)|(flags&2 ? MS_INVALIDATE : 0);
+    return msync((void *)va_start,cb_range,host_flags) ? errno : 0;
+}
+static ABI int32_t kernel_msync(void *p_start,uint64_t cb_range,int32_t flags) {
+    const int error=sync_range((uintptr_t)p_start,cb_range,flags);
+    return error ? ERR(runtime_guest_errno(error)) : 0;
+}
+static ABI int32_t posix_msync(void *p_start,uint64_t cb_range,int32_t flags) {
+    const int error=sync_range((uintptr_t)p_start,cb_range,flags);
+    if (!error) return 0;
+    *runtime_errno()=runtime_guest_errno(error);
+    return -1;
+}
+/* struct { void *address; uint64_t size; }: the segment the kernel sets aside in a module for libc's
+ * internal heap. Modules here get none, and libc then keeps that heap in ordinary memory (it checks
+ * the address for NULL). */
+static ABI int32_t module_segment_info(uint64_t *p_out_segment) {
+    if (!p_out_segment) return INVALID;
+    p_out_segment[0]=p_out_segment[1]=0;
+    return 0;
+}
 static const RuntimeExport exports[]={
     {"sceKernelGetDirectMemorySize",direct_size}, {"sceKernelAllocateDirectMemory",direct_allocate},
     {"sceKernelAllocateMainDirectMemory",direct_allocate_main},
@@ -515,6 +542,8 @@ static const RuntimeExport exports[]={
     {"sceKernelAvailableFlexibleMemorySize",available_flexible_size},
     {"sceKernelConfiguredFlexibleMemorySize",configured_flexible_size},
     {"sceKernelAvailableDirectMemorySize",available_direct_size},
+    {"sceKernelMsync",kernel_msync}, {"msync",posix_msync},
+    {"sceKernelInternalMemoryGetModuleSegmentInfo",module_segment_info},
 };
 uintptr_t runtime_memory_resolve(const char *name) {
     return RUNTIME_LOOKUP(exports,name);

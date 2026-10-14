@@ -75,6 +75,8 @@ _Static_assert(sizeof(Event)==104,"OrbisSaveDataEvent layout");
 _Static_assert(sizeof(MemorySetup2)==64 && sizeof(MemorySetupResult)==24,"OrbisSaveDataMemorySetup2 layouts");
 _Static_assert(sizeof(MemoryData)==64 && sizeof(MemoryGet2)==64 && sizeof(MemorySet2)==64,"SaveDataMemory2 layouts");
 #define EVENT_UMOUNT_BACKUP 1
+#define EVENT_BACKUP 2
+#define EVENT_MEMORY_SYNC 3
 
 static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
 static int initialized;
@@ -194,12 +196,14 @@ static int slot_of(const MountPoint *point) {
     int slot=atoi(point->data+9);
     return slot>=0 && slot<SLOTS && slots[slot].used ? slot : -1;
 }
+static int32_t copy_save_locked(int32_t user, const TitleId *p_title, const char *sz_dir, int is_restore);
 static int32_t umount(const MountPoint *point, int backup) {
     if (!initialized) return ERR_NOT_INITIALIZED;
     pthread_mutex_lock(&lock);
     int slot=slot_of(point);
     if (slot>=0) {
         runtime_file_unmount(point->data); slots[slot].used=0;
+        if (backup) copy_save_locked(slots[slot].user,&slots[slot].title,slots[slot].dir.data,0);
         if (backup && event_count<SLOTS)
             events[event_count++]=(Event){.type=EVENT_UMOUNT_BACKUP,.user=slots[slot].user,.title=slots[slot].title,.dir=slots[slot].dir};
     }
@@ -484,6 +488,141 @@ static ABI int32_t memory_set2(const MemorySet2 *set) {
     return r;
 }
 
+/* Backups: <saves>/.backup/<dir> and its .sce_sys beside it, out of DirNameSearch's sight (it skips
+ * names starting with a dot). Each request completes before it returns, so the progress is always
+ * full and the event the game waits for is already queued. */
+typedef struct { int32_t user; int32_t pad; const TitleId *title; const DirName *dir; const void *param;
+                 uint8_t reserved[32]; } BackupRequest;
+typedef struct { int32_t user; int32_t pad; const TitleId *title; const DirName *dir; Param *param; Icon *icon;
+                 uint8_t reserved[32]; } BackupCheck;
+typedef struct { int32_t user; int32_t pad; const TitleId *title; const DirName *dir; const void *fingerprint;
+                 uint32_t unused; uint8_t reserved[32]; int32_t pad2; } BackupRestore;
+typedef struct { int32_t user; uint32_t slot, option; uint8_t reserved[28]; } MemorySync;
+_Static_assert(sizeof(BackupRequest)==64 && sizeof(BackupCheck)==72 && sizeof(BackupRestore)==72,"backup layouts");
+static const char *s_sz_copy_source, *s_sz_copy_target;
+static int copy_entry(const char *sz_path, const struct stat *p_stat, int flag, struct FTW *p_ftw) {
+    (void)p_stat; (void)p_ftw;
+    char sz_target[1400];
+    snprintf(sz_target,sizeof(sz_target),"%s%s",s_sz_copy_target,sz_path+strlen(s_sz_copy_source));
+    if (flag==FTW_D) return mkdir(sz_target,0755) && errno!=EEXIST ? -1 : 0;
+    if (flag!=FTW_F) return 0;
+    FILE *p_in=fopen(sz_path,"rb"), *p_out=p_in ? fopen(sz_target,"wb") : NULL;
+    int is_copied=p_out!=NULL;
+    char buffer[65536];
+    for (size_t cb_read; is_copied && (cb_read=fread(buffer,1,sizeof(buffer),p_in));)
+        is_copied=fwrite(buffer,1,cb_read,p_out)==cb_read;
+    if (p_out) is_copied=!fclose(p_out) && is_copied && !ferror(p_in);
+    if (p_in) fclose(p_in);
+    return is_copied ? 0 : -1;
+}
+/* Replaces sz_target with a copy of the folder sz_source; requires lock. */
+static int copy_tree_locked(const char *sz_source, const char *sz_target) {
+    nftw(sz_target,remove_entry,16,FTW_DEPTH|FTW_PHYS);
+    s_sz_copy_source=sz_source; s_sz_copy_target=sz_target;
+    return nftw(sz_source,copy_entry,16,FTW_PHYS);
+}
+static void save_paths(int32_t user, const TitleId *p_title, const char *sz_dir, int is_backup, char *sz_out_host,
+                       char *sz_out_meta) {
+    char sz_base[600];
+    root(user,p_title ? p_title->data : NULL,sz_base,sizeof(sz_base));
+    snprintf(sz_out_host,640,"%s%s/%s",sz_base,is_backup ? "/.backup" : "",sz_dir);
+    snprintf(sz_out_meta,680,"%s%s/%s.sce_sys",sz_base,is_backup ? "/.backup" : "",sz_dir);
+}
+static int is_folder(const char *sz_path) { struct stat st; return !stat(sz_path,&st) && S_ISDIR(st.st_mode); }
+static int32_t copy_save_locked(int32_t user, const TitleId *p_title, const char *sz_dir, int is_restore) {
+    char sz_host[640], sz_meta[680], sz_backup_host[640], sz_backup_meta[680];
+    save_paths(user,p_title,sz_dir,0,sz_host,sz_meta);
+    save_paths(user,p_title,sz_dir,1,sz_backup_host,sz_backup_meta);
+    const char *sz_from_host=is_restore ? sz_backup_host : sz_host, *sz_from_meta=is_restore ? sz_backup_meta : sz_meta;
+    if (!is_folder(sz_from_host)) return ERR_NOT_FOUND;
+    if (!is_restore && make_dirs(sz_backup_host)) return ERR_INTERNAL;
+    const int has_failed=copy_tree_locked(sz_from_host,is_restore ? sz_host : sz_backup_host) ||
+                         (is_folder(sz_from_meta) && copy_tree_locked(sz_from_meta,is_restore ? sz_meta : sz_backup_meta));
+    printf("Runtime: save data '%s' %s%s\n",sz_dir,is_restore ? "restored from its backup" : "backed up",
+           has_failed ? " (failed)" : "");
+    return has_failed ? ERR_INTERNAL : 0;
+}
+static void queue_event_locked(uint32_t type, int32_t user, const TitleId *p_title, const DirName *p_dir) {
+    if (event_count>=SLOTS) return;
+    Event event={.type=type,.user=user};
+    if (p_title) event.title=*p_title;
+    else snprintf(event.title.data,sizeof(event.title.data),"%.9s",title_id);
+    if (p_dir) event.dir=*p_dir;
+    events[event_count++]=event;
+}
+static ABI int32_t save_backup(const BackupRequest *p_request) {
+    if (!initialized) return ERR_NOT_INITIALIZED;
+    if (!p_request || !p_request->dir || !valid_name(p_request->dir->data,sizeof(p_request->dir->data))) return ERR_PARAMETER;
+    pthread_mutex_lock(&lock);
+    const int32_t result=copy_save_locked(p_request->user,p_request->title,p_request->dir->data,0);
+    if (!result) queue_event_locked(EVENT_BACKUP,p_request->user,p_request->title,p_request->dir);
+    pthread_mutex_unlock(&lock);
+    return result;
+}
+static ABI int32_t save_check_backup(const BackupCheck *p_check) {
+    if (!initialized) return ERR_NOT_INITIALIZED;
+    if (!p_check || !p_check->dir || !valid_name(p_check->dir->data,sizeof(p_check->dir->data))) return ERR_PARAMETER;
+    char sz_host[640], sz_meta[680];
+    save_paths(p_check->user,p_check->title,p_check->dir->data,1,sz_host,sz_meta);
+    if (!is_folder(sz_host)) return ERR_NOT_FOUND;
+    if (p_check->param) read_param(sz_meta,p_check->param);
+    if (p_check->icon && p_check->icon->buffer) {
+        char sz_icon[700];
+        snprintf(sz_icon,sizeof(sz_icon),"%s/icon0.png",sz_meta);
+        FILE *p_file=fopen(sz_icon,"rb");
+        uint64_t cb_icon=p_file ? fread((void *)p_check->icon->buffer,1,p_check->icon->buffer_size,p_file) : 0;
+        if (p_file) fclose(p_file);
+        p_check->icon->data_size=cb_icon;
+    }
+    return 0;
+}
+static ABI int32_t save_restore_backup(const BackupRestore *p_restore) {
+    if (!initialized) return ERR_NOT_INITIALIZED;
+    if (!p_restore || !p_restore->dir || !valid_name(p_restore->dir->data,sizeof(p_restore->dir->data))) return ERR_PARAMETER;
+    pthread_mutex_lock(&lock);
+    const int32_t result=copy_save_locked(p_restore->user,p_restore->title,p_restore->dir->data,1);
+    pthread_mutex_unlock(&lock);
+    return result;
+}
+static ABI int32_t save_progress(float *p_out_progress) {
+    if (!initialized) return ERR_NOT_INITIALIZED;
+    if (!p_out_progress) return ERR_PARAMETER;
+    *p_out_progress=1.0f;
+    return 0;
+}
+static ABI int32_t save_load_icon(const MountPoint *p_point, Icon *p_icon) {
+    if (!initialized) return ERR_NOT_INITIALIZED;
+    if (!p_icon || !p_icon->buffer) return ERR_PARAMETER;
+    pthread_mutex_lock(&lock);
+    const int i_slot=slot_of(p_point);
+    int32_t result=ERR_NOT_MOUNTED;
+    if (i_slot>=0) {
+        char sz_icon[700];
+        snprintf(sz_icon,sizeof(sz_icon),"%s/icon0.png",slots[i_slot].meta);
+        FILE *p_file=fopen(sz_icon,"rb");
+        result=p_file ? 0 : ERR_NOT_FOUND;
+        if (p_file) { p_icon->data_size=fread((void *)p_icon->buffer,1,p_icon->buffer_size,p_file); fclose(p_file); }
+    }
+    pthread_mutex_unlock(&lock);
+    return result;
+}
+/* Save data memory is written to its file on every set; syncing makes it durable. */
+static ABI int32_t memory_sync(const MemorySync *p_sync) {
+    if (!initialized) return ERR_NOT_INITIALIZED;
+    if (!p_sync || p_sync->slot>=SLOTS) return ERR_PARAMETER;
+    pthread_mutex_lock(&lock);
+    int32_t result=ERR_MEMORY_NOT_READY;
+    if (memories[p_sync->slot].size) {
+        char sz_path[700];
+        snprintf(sz_path,sizeof(sz_path),"%s/memory.dat",memories[p_sync->slot].dir);
+        FILE *p_file=fopen(sz_path,"r+b");
+        result=p_file && !fsync(fileno(p_file)) ? 0 : ERR_INTERNAL;
+        if (p_file) fclose(p_file);
+        if (!result) queue_event_locked(EVENT_MEMORY_SYNC,p_sync->user,NULL,NULL);
+    }
+    pthread_mutex_unlock(&lock);
+    return result;
+}
 static ABI int32_t save_clear_progress(void) { return initialized ? 0 : ERR_NOT_INITIALIZED; }
 
 static const RuntimeExport exports[]={
@@ -498,6 +637,9 @@ static const RuntimeExport exports[]={
     {"sceSaveDataSetSaveDataMemory",memory_set}, {"sceSaveDataSetupSaveDataMemory2",memory_setup2},
     {"sceSaveDataGetSaveDataMemory2",memory_get2}, {"sceSaveDataSetSaveDataMemory2",memory_set2},
     {"sceSaveDataClearProgress",save_clear_progress}, {"sceSaveDataGetMountInfo",save_mount_info},
+    {"sceSaveDataBackup",save_backup}, {"sceSaveDataCheckBackupData",save_check_backup},
+    {"sceSaveDataRestoreBackupData",save_restore_backup}, {"sceSaveDataGetProgress",save_progress},
+    {"sceSaveDataLoadIcon",save_load_icon}, {"sceSaveDataSyncSaveDataMemory",memory_sync},
 };
 uintptr_t runtime_savedata_resolve(const char *name) { return RUNTIME_LOOKUP(exports,name); }
 int runtime_savedata_param(int32_t user, const char *title, const char *dir, void *param) {

@@ -9,6 +9,7 @@
 #include <sched.h>
 #include <pthread.h>
 #include <unistd.h>
+#include <elf.h>
 
 typedef struct {
     union { GuestCallback plain; void (ABI *with_arg)(void *); } callback;
@@ -156,6 +157,22 @@ void runtime_finalize(void *dso) {
     }
 }
 static ABI void guest_finalize(void *dso) { runtime_finalize(dso); }
+/* FreeBSD's struct dl_phdr_info, as libc's __cxa_finalize hands it over for an object it unloads. */
+typedef struct { uint64_t dlpi_addr; const char *dlpi_name; const Elf64_Phdr *dlpi_phdr; uint16_t dlpi_phnum; } PhdrInfo;
+/* Whether the address lies in one of the object's executable segments, as FreeBSD's libc answers it. */
+static ABI int32_t guest_phdr_match_address(const PhdrInfo *p_info, const void *p_code) {
+    const uintptr_t va_code=(uintptr_t)p_code;
+    for (uint16_t i=0;i<p_info->dlpi_phnum;++i) {
+        const Elf64_Phdr *p_segment=&p_info->dlpi_phdr[i];
+        if (p_segment->p_type!=PT_LOAD || !(p_segment->p_flags&PF_X)) continue;
+        const uintptr_t va_start=p_info->dlpi_addr+p_segment->p_vaddr;
+        if (va_start<=va_code && va_code+sizeof(p_code)<va_start+p_segment->p_memsz) return 1;
+    }
+    return 0;
+}
+/* libthr drops the unloading object's pthread_atfork handlers here; the runtime keeps none (it has
+ * no fork), so there is nothing to drop. */
+static ABI void guest_pthread_cxa_finalize(const PhdrInfo *p_info) { (void)p_info; }
 static _Atomic uint32_t next_guard_owner=1;
 static _Thread_local uint32_t guard_owner;
 static ABI int guard_acquire(uint64_t *guard) {
@@ -217,8 +234,15 @@ static ABI __attribute__((noreturn)) void guest_libc_exit(int status) {
 /* Imports the runtime answers itself ahead of the libraries (the game's libc wrappers, TLS, its
  * process parameters), whichever library the executable names for them. */
 static int32_t need_libc_internal = 1; /* SDK marker variable referenced by Fios2 */
+/* The command line the eboot's entry receives (probe.c): its path alone, as the console starts an
+ * application; __progname is its last component, as FreeBSD's crt sets it. */
+static char *s_arguments[] = {"/app0/eboot.bin", NULL};
+static const char *s_sz_progname = "eboot.bin";
+static ABI int32_t guest_getargc(void) { return 1; }
+static ABI char **guest_getargv(void) { return s_arguments; }
 static const RuntimeExport own_data[]={
     {"__stack_chk_guard",&stack_canary}, {"Need_sceLibcInternal",&need_libc_internal},
+    {"__progname",&s_sz_progname},
 };
 static const RuntimeExport own_functions[]={
     {"_init_env",init_env}, {"atexit",guest_atexit}, {"__cxa_atexit",guest_cxa_atexit}, {"exit",guest_libc_exit},
@@ -227,6 +251,8 @@ static const RuntimeExport own_functions[]={
     {"memcpy",guest_memcpy}, {"memmove",guest_memmove}, {"memcmp",guest_memcmp}, {"strlen",guest_strlen},
     {"__tls_get_addr",guest_tls_get_addr}, {"sceKernelGetProcParam",guest_procparam},
     {"_sceKernelRtldSetApplicationHeapAPI",guest_set_heap_api},
+    {"getargc",guest_getargc}, {"getargv",guest_getargv},
+    {"__elf_phdr_match_addr",guest_phdr_match_address}, {"__pthread_cxa_finalize",guest_pthread_cxa_finalize},
 };
 uintptr_t runtime_resolve(const char *name, int is_data) {
     if (!(capabilities & 1)) return 0;
@@ -241,8 +267,6 @@ uintptr_t runtime_resolve(const char *name, int is_data) {
     if (sched) return sched;
     uintptr_t content=runtime_content_resolve(name);
     if (content) return content;
-    uintptr_t timer = runtime_time_resolve(name);
-    if (timer) return timer;
     uintptr_t sema = runtime_sema_resolve(name);
     if (sema) return sema;
     uintptr_t eventflag = runtime_eventflag_resolve(name);
@@ -281,6 +305,10 @@ uintptr_t runtime_resolve(const char *name, int is_data) {
     if (pad) return pad;
     uintptr_t gesture = runtime_gesture_resolve(name);
     if (gesture) return gesture;
+    uintptr_t va_devices = runtime_devices_resolve(name);
+    if (va_devices) return va_devices;
+    uintptr_t va_capture = runtime_capture_resolve(name);
+    if (va_capture) return va_capture;
     uintptr_t mouse = runtime_mouse_resolve(name);
     if (mouse) return mouse;
     uintptr_t keyboard = runtime_keyboard_resolve(name);

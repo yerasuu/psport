@@ -249,6 +249,16 @@ static ABI int32_t audio_volume(int32_t handle, int32_t flags, const int32_t *vo
     pthread_mutex_unlock(&p->lock);
     return 0;
 }
+/* How much of a port also plays on the pad's speaker. No pad speaker is driven from the host, so
+ * the level is checked and has nothing to change. */
+static ABI int32_t audio_pad_speaker_mix(int32_t h_port, int32_t mix_level) {
+    int32_t error=0;
+    pthread_mutex_lock(&table_lock);
+    const Port *p_port=port_of(h_port,&error);
+    pthread_mutex_unlock(&table_lock);
+    if (!p_port) return error;
+    return mix_level<0 || mix_level>VOLUME_0DB ? ERR_INVALID_VOLUME : 0;
+}
 static ABI int32_t audio_state(int32_t handle, PortState *state) {
     int32_t error=0;
     pthread_mutex_lock(&table_lock);
@@ -277,7 +287,7 @@ static ABI int32_t audio_last_time(int32_t handle, uint64_t *time) {
 static const RuntimeExport exports[]={
     {"sceAudioOutInit",audio_init}, {"sceAudioOutOpen",audio_open}, {"sceAudioOutClose",audio_close},
     {"sceAudioOutOutput",audio_output}, {"sceAudioOutOutputs",audio_outputs},
-    {"sceAudioOutSetVolume",audio_volume}, {"sceAudioOutGetPortState",audio_state},
+    {"sceAudioOutSetVolume",audio_volume}, {"sceAudioOutSetMixLevelPadSpk",audio_pad_speaker_mix}, {"sceAudioOutGetPortState",audio_state},
     {"sceAudioOutGetLastOutputTime",audio_last_time},
 };
 int32_t runtime_audio_init(void) { return audio_init(); }

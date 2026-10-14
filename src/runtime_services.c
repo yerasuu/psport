@@ -111,6 +111,13 @@ static ABI int32_t system_status(unsigned char *status) {
 static ABI int32_t system_event(void *event) { (void)event; return SYSTEM_NO_EVENT; }
 static ABI int32_t hide_splash(void) { note("SystemService: splash screen hidden"); return 0; }
 static ABI int32_t launch_browser(void) { note("SystemService: web browser request ignored (offline)"); return 0; }
+/* The system's controller settings screen, like the common dialogs, has no UI here: it closes at
+ * once with nothing changed. */
+static ABI int32_t show_controller_settings(int32_t h_user) {
+    (void)h_user;
+    note("SystemService: controller settings requested; closed at once (no system UI yet)");
+    return 0;
+}
 /* The share of the screen the user's display settings leave for UI: all of it. A title that sizes
  * its render targets by it (Atelier Ryza) gets a 0x0 target and a null texture from 0. */
 static ABI int32_t display_safe_area(float *ratio) {
@@ -196,7 +203,7 @@ static Dialog dialogs[]={{"CommonDialog",0,0},{"MsgDialog",0,0},{"SaveDataDialog
                          {"NpProfileDialog",0,0},{"NpCommerceDialog",0,0},{"ImeDialog",0,0},
                          {"ErrorDialog",0,0},{"WebBrowserDialog",0,0},{"InvitationDialog",0,0},
                          {"SigninDialog",0,0},{"SocialScreenDialog",0,0},
-                         {"HmdSetupDialog",0,0}};
+                         {"HmdSetupDialog",0,0},{"PlayGoDialog",0,0}};
 static int common_initialized;
 static ABI int32_t common_init(void) { common_initialized=1; return 0; }
 static int32_t dialog_init(int i) {
@@ -219,7 +226,7 @@ static int32_t dialog_term(int i) {
     static ABI int32_t tag##_status(void) { return dialog_status(i); } \
     static ABI int32_t tag##_term(void) { return dialog_term(i); }
 DIALOG(msg,1) DIALOG(profile,3) DIALOG(commerce,4)
-DIALOG(web,7) DIALOG(invitation,8) DIALOG(signin,9) DIALOG(social,10) DIALOG(hmd_setup,11)
+DIALOG(web,7) DIALOG(invitation,8) DIALOG(signin,9) DIALOG(social,10) DIALOG(hmd_setup,11) DIALOG(playgo,12)
 static ABI int32_t profile_result(void *result) { if (result) memset(result,0,4); return 0; }
 /* OrbisNpCommerceDialogParam keeps userData at 0x58 and the result hands it back. Signed out, the
  * store cannot open, so the dialog ends as backed out of: USER_CANCELED, nothing authorized. */
@@ -398,6 +405,23 @@ static ABI int32_t hmd_setup_result(int32_t *result) {
     return 0;
 }
 static ABI int32_t hmd_setup_close(void) { dialogs[11].status=3; return 0; }
+/* ScePlayGoDialogResult: result, reserved. Every chunk is installed, so the dialog has nothing to
+ * wait for and ends as accepted: SCE_COMMON_DIALOG_RESULT_OK. */
+static ABI int32_t playgo_result(int32_t *p_out_result) {
+    if (dialogs[12].status!=3) return (int32_t)0x80B80005; /* NOT_FINISHED */
+    if (!p_out_result) return (int32_t)0x80B8000D;         /* ARG_NULL */
+    p_out_result[0]=0;
+    return 0;
+}
+static ABI int32_t playgo_close(void) { dialogs[12].status=3; return 0; }
+/* SceWebBrowserDialogResult: result, then reserved. Offline, no page loads and the user can only
+ * back out: SCE_COMMON_DIALOG_RESULT_USER_CANCELED. */
+static ABI int32_t web_result(int32_t *p_out_result) {
+    if (dialogs[7].status!=3) return (int32_t)0x80B80005; /* NOT_FINISHED */
+    if (!p_out_result) return (int32_t)0x80B8000D;         /* ARG_NULL */
+    p_out_result[0]=1;
+    return 0;
+}
 /* ImeDialog: text typed on the keyboard into the game window (title bar shows it).
  * OrbisImeDialogParam: user, type, languages(8), enter label, method, filter,
  * option, max length, char16 buffer, position, alignment, placeholder, title. */
@@ -468,6 +492,11 @@ static ABI int32_t ime_result(uint32_t *result) {
     return 0;
 }
 static ABI int32_t ime_term(void) { memset(&ime,0,sizeof(ime)); return 0; }
+/* A dialog is in use from its initialization until its termination, and the IME dialog while it runs. */
+static ABI int32_t common_is_used(void) {
+    for (size_t i=0;i<sizeof(dialogs)/sizeof(*dialogs);++i) if (dialogs[i].initialized) return 1;
+    return ime.running;
+}
 
 /* ---- PlayStation VR: the library runs, no headset is detected ---- */
 static int hmd_initialized;
@@ -598,6 +627,7 @@ static const RuntimeExport exports[]={
     {"sceSystemServicePowerTick",runtime_stub}, {"sceSystemServiceReportAbnormalTermination",runtime_stub},
     {"sceSystemServiceReceiveEvent",system_event}, {"sceSystemServiceHideSplashScreen",hide_splash},
     {"sceSystemServiceLaunchWebBrowser",launch_browser},
+    {"sceSystemServiceShowControllerSettings",show_controller_settings},
     {"sceSystemServiceGetDisplaySafeAreaInfo",display_safe_area},
     {"sceNetInit",runtime_stub}, {"sceNetTerm",runtime_stub}, {"sceNetPoolDestroy",runtime_stub},
     {"sceNetEpollCreate",net_epoll_create}, {"sceNetEpollDestroy",runtime_stub},
@@ -679,6 +709,8 @@ static const RuntimeExport exports[]={
     {"sceMsgDialogInitialize",msg_init}, {"sceMsgDialogOpen",msg_open},
     {"sceMsgDialogUpdateStatus",msg_status}, {"sceMsgDialogTerminate",msg_term},
     {"sceMsgDialogGetStatus",msg_status}, {"sceMsgDialogGetResult",msg_result}, {"sceMsgDialogClose",msg_close},
+    {"sceMsgDialogProgressBarSetValue",runtime_stub}, {"sceMsgDialogProgressBarSetMsg",runtime_stub},
+    {"sceMsgDialogProgressBarInc",runtime_stub},
     {"sceSaveDataDialogInitialize",save_init}, {"sceSaveDataDialogOpen",save_open},
     {"sceSaveDataDialogUpdateStatus",save_status}, {"sceSaveDataDialogTerminate",save_term},
     {"sceSaveDataDialogGetStatus",save_status}, {"sceSaveDataDialogIsReadyToDisplay",save_ready},
@@ -694,6 +726,8 @@ static const RuntimeExport exports[]={
     {"sceImeDialogInit",ime_init}, {"sceImeDialogGetStatus",ime_status}, {"sceImeDialogGetResult",ime_result},
     {"sceImeDialogTerm",ime_term}, {"sceImeDialogAbort",ime_term},
     {"sceWebBrowserDialogInitialize",web_init}, {"sceWebBrowserDialogOpen",web_open},
+    {"sceWebBrowserDialogGetResult",web_result}, {"sceWebBrowserDialogSetCookie",runtime_stub},
+    {"sceWebBrowserDialogResetCookie",runtime_stub},
     {"sceWebBrowserDialogOpenForPredeterminedContent",web_open}, {"sceWebBrowserDialogUpdateStatus",web_status},
     {"sceWebBrowserDialogGetStatus",web_status}, {"sceWebBrowserDialogTerminate",web_term},
     {"sceInvitationDialogInitialize",invitation_init}, {"sceInvitationDialogOpen",invitation_start},
@@ -713,6 +747,10 @@ static const RuntimeExport exports[]={
     {"sceHmdSetupDialogUpdateStatus",hmd_setup_status}, {"sceHmdSetupDialogGetStatus",hmd_setup_status},
     {"sceHmdSetupDialogGetResult",hmd_setup_result}, {"sceHmdSetupDialogClose",hmd_setup_close},
     {"sceHmdSetupDialogTerminate",hmd_setup_term},
+    {"scePlayGoDialogInitialize",playgo_init}, {"scePlayGoDialogOpen",playgo_open},
+    {"scePlayGoDialogUpdateStatus",playgo_status}, {"scePlayGoDialogGetStatus",playgo_status},
+    {"scePlayGoDialogGetResult",playgo_result}, {"scePlayGoDialogClose",playgo_close},
+    {"scePlayGoDialogTerminate",playgo_term}, {"sceCommonDialogIsUsed",common_is_used},
     {"sceHmdInitialize",hmd_init}, {"sceHmdInitialize315",hmd_init}, {"sceHmdTerminate",hmd_term},
     {"sceHmdGetDeviceInformation",hmd_device_info},
     {"sceHmdGetDeviceInformationByHandle",hmd_handle_invalid}, {"sceHmdGetFieldOfView",hmd_handle_invalid},
@@ -721,7 +759,7 @@ static const RuntimeExport exports[]={
     {"sceNpTrophyDestroyHandle",runtime_stub},
     {"sceNpTrophyGetGameInfo",trophy_game_info}, {"sceNpTrophyGetTrophyInfo",trophy_info},
     {"sceNpTrophyGetTrophyUnlockState",trophy_unlock_state},
-    {"sceAudioInOpen",audio_in_open},
+    {"sceAudioInOpen",audio_in_open}, {"sceAudioInHqOpen",audio_in_open}, {"sceAudioInGetSilentState",audio_in_open},
     {"sceMoveInit",move_init}, {"sceMoveOpen",move_open}, {"sceMoveGetDeviceInfo",move_device_info},
     {"sceMoveReadStateRecent",move_read_recent}, {"sceMoveSetLightSphere",move_no_controller},
     {"sceMoveSetVibration",move_no_controller}, {"sceMoveTerm",move_term},
@@ -729,9 +767,9 @@ static const RuntimeExport exports[]={
     {"sceDiscMap_7C980FFB0AA27E7A",discmap_7c98},
     {"sceScreenShotEnable",runtime_stub}, {"sceScreenShotDisable",runtime_stub}, {"sceScreenShotSetParam",runtime_stub},
     {"sceScreenShotSetOverlayImage",runtime_stub}, {"sceScreenShotSetOverlayImageWithOrigin",runtime_stub},
-    {"sceSharePlayInitialize",runtime_stub}, {"sceGameLiveStreamingInitialize",runtime_stub},
+    {"sceGameLiveStreamingInitialize",runtime_stub},
     {"sceGameLiveStreamingEnableLiveStreaming",runtime_stub}, {"sceVoiceQoSInit",runtime_stub},
-    {"sceContentExportInit2",runtime_stub}, {"sceVideoRecordingSetInfo",runtime_stub},
+    {"sceContentExportInit2",runtime_stub},
     {"sceRazorCpuPushMarker",razor_idle}, {"sceRazorCpuPushMarkerStatic",razor_idle},
     {"sceRazorCpuPopMarker",razor_idle}, {"sceRazorCpuSync",razor_idle}, {"sceRazorCpuNamedSync",razor_idle},
     {"sceRazorCpuPlotValue",razor_idle}, {"sceRazorCpuWriteBookmark",razor_idle},
