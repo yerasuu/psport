@@ -17,6 +17,8 @@ enum Reason : unsigned {
     Mirror = 1, ///< a VRAM copy of the page (the layer's memory module)
     Image = 2,  ///< an image made from the page (the texture cache)
     Buffer = 4, ///< a VRAM copy of the page in the buffer cache's arena (BB_GUEST_IN_PLACE)
+    /// A command buffer of a frame the GPU has not retired (BbSubmitGuard, BB_SUBMIT_AHEAD).
+    FrameCommands = 8,
     /// Reads too: occlusion counters, until the game's first access after an event there
     /// (BB_OCCLUSION_READ_TRACE, diagnostics).
     QueryReads = 16,

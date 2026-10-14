@@ -25,6 +25,7 @@
 #include "bbport_timeline.h"
 #include "bbport_heap_sites.h"
 #include "bbport_gnm_hooks.h"
+#include "bbport_submit_guard.h"
 #include "video_core/amdgpu/pm4_cmds.h"
 #include "video_core/renderer_vulkan/vk_presenter.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
@@ -112,6 +113,7 @@ void NoteFramesRetired(u64 frames) {
     BbTimeline::Note(BbTimeline::FrameRetired, frames);
     std::unique_lock lock{m_wait_idle};
     frames_retired = std::max(frames_retired, frames);
+    BbSubmitGuard::Retire(frames);
     cv_lock.notify_all();
 }
 
@@ -137,7 +139,8 @@ static void WaitPreviousFrame();
 // the previous frame instead of after it (1080p, Yahar'gul: 101 -> 154 FPS). Further on it
 // assumes the previous frame finished: K 8 or more, or no wait at all, and its heap leaked (~2
 // resource objects a frame, out of memory after minutes). Should the heap grow anyway (the game
-// asks for more memory with mmap, which it never does otherwise), K becomes 0 for the session.
+// asks for more memory with mmap, which it never does otherwise), or the game write into a frame
+// the GPU still runs (BbSubmitGuard), K becomes 0 for the session.
 extern "C" std::uint64_t runtime_heap_growths(void);
 static u32 submits_this_frame = 0;
 static bool overlap_off = false;
@@ -146,7 +149,7 @@ static u32 SubmitsAhead() {
         const char* env = std::getenv("BB_SUBMIT_AHEAD");
         return env ? u32(std::max(0, std::atoi(env))) : 2u;
     }();
-    return overlap_off ? 0u : ahead;
+    return overlap_off || BbSubmitGuard::Tripped() ? 0u : ahead;
 }
 // Once a frame: the game's live heap allocations (malloc minus free, counted by wrappers on its
 // malloc) are watched; the leak added ~1800 a second, so 100000 over the lowest count seen is
@@ -2398,6 +2401,10 @@ static inline s32 PerformSubmit(u32 count, const u32* dcb_gpu_addrs[], u32* dcb_
         }
         BbGnmHooks::CheckSubmission(dcb_span.data(), dcb_span.size());
         BbGnmHooks::CheckSubmission(ccb_span.data(), ccb_span.size());
+        if (SubmitLockOnDecode() && SubmitsAhead() > 0) {
+            BbSubmitGuard::Arm(dcb_span.data(), dcb_span.size_bytes(), u64(frames_submitted) + 1);
+            BbSubmitGuard::Arm(ccb_span.data(), ccb_span.size_bytes(), u64(frames_submitted) + 1);
+        }
         liverpool->SubmitGfx(dcb_span, ccb_span);
     }
     return ORBIS_OK;
@@ -2533,6 +2540,7 @@ s32 PS4_SYSV_ABI sceGnmSubmitDone() {
         submits_this_frame = 0;
         WatchOverlapLeak();
         ++frames_submitted;
+        BbSubmitGuard::Close(u64(frames_submitted));
         liverpool->SubmitDone(u64(frames_submitted));
     } else {
         WaitGpuIdle();
