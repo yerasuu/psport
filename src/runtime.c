@@ -111,7 +111,7 @@ void runtime_stop(int status) {
     _exit(status);
 }
 static ABI void init_env(void) {
-    /* prepare.py verified the supplied libc export consists of exactly C3. */
+    /* The loader checked that libc.prx's export is exactly C3 (loader_init_env_is_ret). */
     ++calls_init;
     puts("Runtime: _init_env returned (verified libc implementation: RET)");
 }
@@ -329,7 +329,7 @@ uintptr_t runtime_lookup(const RuntimeExport *table,size_t count,const char *nid
 }
 const char *runtime_import_name(const char *name) {
     const char *symbol=runtime_symbol(name);
-    return symbol ? symbol : "name not resolved; see analysis.json import_name_hints";
+    return symbol ? symbol : "name not resolved";
 }
 static const struct { char nid[12]; const char *function; unsigned char outputs; } output_arguments[]={
 #include "import_outparams.inc"

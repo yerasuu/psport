@@ -12,6 +12,8 @@ import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+from sce_file import parse_self
+
 EBOOT_BASE=0x400000
 # BB_FPS presets: patch names from patches/Bloodborne.xml (app version 01.09).
 # Above 60 FPS the sprint fix always goes with the frame rate patch: without it sprinting drops to
@@ -264,7 +266,7 @@ BLOODBORNE_IDS={'CUSA00900','CUSA00207','CUSA00208','CUSA00299','CUSA01363',
 
 def game_title(game):
     """TITLE_ID from the game's param.sfo; empty when it has none or it does not parse."""
-    from prepare import sfo  # same directory
+    from sce_file import sfo  # same directory
     path=Path(game)/'sce_sys/param.sfo'
     try:
         return sfo(path.read_bytes()).get('TITLE_ID','')
@@ -370,7 +372,7 @@ def main():
     if skip_network_choice() and SKIP_NETWORK_CHOICE not in names:
         names.append(SKIP_NETWORK_CHOICE)
     names=validate_patch_requirements(names,a.game_dir)
-    segments=eboot_segments((a.out/'eboot.elf').read_bytes())
+    segments=eboot_segments(parse_self((a.game_dir/'eboot.bin').read_bytes())[0])
     writes=compile_patches(a.xml,names,a.app_version,segments)
     size=render_size(read_settings(a.settings),a.render_res) if a.render_res else None
     # The UI keeps the game's 1920x1080 coordinates even for a larger output: the port draws

@@ -72,16 +72,15 @@ if [[ $game != "$(realpath "$original_game")" ]]; then
     mod_game=$game
     trap '"$PYTHON" -c '\''import shutil,sys; shutil.rmtree(sys.argv[1])'\'' "$mod_game"' EXIT
 fi
-"$PYTHON" scripts/prepare.py "$game" --out "$out"
-"$PYTHON" scripts/link_libc.py "$game" --out "$out"
-# BB_SYS_MODULES: a folder with the user's own dump of the console's system modules (*.sprx),
-# linked when the game needs their library; BB_HLE=libA,libB keeps those to the port instead, and
+"$PYTHON" scripts/game_check.py --launch "$game"
+# bb-probe loads and links the game from its folder (src/loader_*.c). BB_SYS_MODULES: a folder with
+# the user's own dump of the console's system modules (*.sprx), linked when the game needs their library; BB_HLE=libA,libB keeps those to the port instead, and
 # BB_LLE=libC links one the port implements itself, to compare them.
 link_args=()
 if [[ -n ${BB_SYS_MODULES:-} ]]; then
     link_args+=(--system-modules "$BB_SYS_MODULES" --hle "${BB_HLE:-}" --lle "${BB_LLE:-}")
 fi
-"$PYTHON" scripts/link_modules.py "$game" --out "$out" "${link_args[@]}"
+boot_args=(--game "$game" "${link_args[@]}")
 "$PYTHON" scripts/content_profile.py "$game" --out "$out" --sku "${BB_CONTENT_SKU:-full}"
 # Sizes chosen below for the previous launch are recomputed after an in-game restart.
 if [[ ${BB_AUTO_RENDER_RES:-} == 1 ]]; then
@@ -238,7 +237,7 @@ if [[ ${BB_ONLINE:-0} == 1 && -f scripts/online.py ]]; then
     SHADPS4_HTTP_HOST_OVERRIDES_JSON=$("$PYTHON" scripts/online.py overrides --user "${BB_USER_DIR:-$data/user}") || true
     export SHADPS4_HTTP_HOST_OVERRIDES_JSON
 fi
-probe_args=("$out/boot-linked.bin" --content-profile "$out/content.bin" --patches "$out/patches.bin" --app0 "$game" --user "${BB_USER_DIR:-$data/user}" --timeout "${BB_TIMEOUT:-0}" "$@")
+probe_args=("${boot_args[@]}" --content-profile "$out/content.bin" --patches "$out/patches.bin" --app0 "$game" --user "${BB_USER_DIR:-$data/user}" --timeout "${BB_TIMEOUT:-0}" "$@")
 if [[ -n ${mod_game:-} ]]; then
     "$probe" "${probe_args[@]}" &
     mod_pid=$!

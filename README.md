@@ -17,10 +17,9 @@ Linux PC the way a Windows program runs under Wine: a compatibility layer, not a
   derived from [shadPS4](https://github.com/shadps4-emu/shadPS4)'s video core and shader
   recompiler (`gpu/shadps4/`), as bbport extended it.
 
-Bloodborne keeps working as upstream ships it, with its patches, upscalers and settings. Other
-titles start with `BB_SKIP_GAME_CHECK=1`. What the fork adds to bbport, what it ports from other
-projects (source commit, license) and what it changes in inherited shadPS4 code:
-[FORK.md](FORK.md). Upstream releases are merged in as they come.
+Bloodborne keeps working as upstream ships it, with its patches, upscalers and settings. What the
+fork adds to bbport, what it ports from other projects (source commit, license) and what it changes
+in inherited shadPS4 code: [FORK.md](FORK.md). Upstream releases are merged in as they come.
 
 > **No game files are included.** You need your own dumps of the games you own.
 > This project is not affiliated with Sony Interactive Entertainment, FromSoftware, AMD or the
@@ -47,7 +46,7 @@ Titles that require PS VR (`require_ps_vr` in `param.sfo`) are unsupported. Only
 
 Normally through decanter: its PS section clones psport, builds it with `build.sh`, rebuilds it
 when the checkout moves and runs each dump through `run.sh` (titles other than Bloodborne with
-`BB_SKIP_GAME_CHECK=1 BB_PERMISSIVE=1`).
+`BB_PERMISSIVE=1`).
 
 Standalone:
 
@@ -55,7 +54,7 @@ Standalone:
 git clone --recursive https://github.com/yerasuu/psport.git && cd psport
 bash build.sh                                   # out/bb-probe and out/gpu/libbbgpu.so
 BB_GAME_DIR=/path/to/CUSA03173 bash run.sh      # Bloodborne
-BB_GAME_DIR=/path/to/dump BB_SKIP_GAME_CHECK=1 BB_PERMISSIVE=1 bash run.sh
+BB_GAME_DIR=/path/to/dump BB_PERMISSIVE=1 bash run.sh
 ```
 
 `BB_GAME_DIR` defaults to `../CUSA03173`. `BB_PERMISSIVE=1` makes imports the port lacks return 0

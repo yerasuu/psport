@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Find PM4 type-3 packet headers built as immediates in the eboot's code, grouped by function.
 
-Function bounds come from .eh_frame_hdr (the eboot is stripped). Usage: pm4_scan.py out/eboot.elf
+Function bounds come from .eh_frame_hdr (the eboot is stripped). Usage: pm4_scan.py GAME/eboot.bin
 """
 import struct, sys, collections
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'scripts'))
+from sce_file import parse_self
 
 OPCODES = {0x10:'NOP',0x12:'CLEAR_STATE',0x15:'DISPATCH_DIRECT',0x16:'DISPATCH_INDIRECT',0x22:'COND_EXEC',
  0x26:'INDEX_BASE',0x27:'DRAW_INDEX_2',0x28:'CONTEXT_CONTROL',0x2a:'INDEX_TYPE',0x2c:'DRAW_INDIRECT_MULTI',
@@ -18,7 +21,7 @@ OPCODES = {0x10:'NOP',0x12:'CLEAR_STATE',0x15:'DISPATCH_DIRECT',0x16:'DISPATCH_I
  0x80:'LOAD_CONST_RAM',0x9d:'DRAW_INDEX_INDIRECT_COUNT_MULTI'}
 
 def main(path):
-    f = open(path,'rb').read()
+    f = bytes(parse_self(open(path, 'rb').read())[0])
     # program headers
     phoff, = struct.unpack_from('<Q', f, 0x20); phnum, = struct.unpack_from('<H', f, 0x38)
     segs = []

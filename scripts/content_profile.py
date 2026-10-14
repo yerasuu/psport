@@ -3,7 +3,7 @@ import argparse
 import json
 import struct
 from pathlib import Path
-from prepare import sfo
+from sce_file import sfo
 
 
 def prepare(game, out, sku='full'):
