@@ -341,9 +341,10 @@ def main():
     p.add_argument('--output-res',default='',help='output resolution WxH (the upscaler\'s; the UI stays 1920x1080)')
     p.add_argument('--print-scaled',action='store_true',
                    help='print "RENDER OUTPUT" (WxH) when bbport.ini selects an output other than 1080p')
-    p.add_argument('--is-bloodborne',action='store_true',help='exit status 0 for a Bloodborne release, else 1')
+    p.add_argument('--has-presets',action='store_true',
+                   help='exit status 0 when the frame rate and resolution presets are for this title, else 1')
     a=p.parse_args()
-    if a.is_bloodborne:
+    if a.has_presets:
         sys.exit(0 if game_title(a.game_dir) in BLOODBORNE_IDS else 1)
     if a.print_scaled:
         sizes=scaled_sizes(read_settings(a.settings))
