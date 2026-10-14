@@ -46,9 +46,9 @@ static void fail(const char *message) { fprintf(stderr, "ERROR: %s\n", message);
 /* The game's code was compiled for the PS4's CPU (AMD Jaguar) and runs as it is: AVX, BMI1
  * (andn/bextr/blsr/tzcnt), MOVBE, LZCNT and POPCNT, thousands of each in eboot.bin. A CPU without
  * them stops at the first one with SIGILL (exit code 132, issue #26), and lzcnt/tzcnt even run as
- * bsr/bsf there, with other results. Said before the game starts; BB_SKIP_CPU_CHECK=1 skips it. */
+ * bsr/bsf there, with other results. Said before the game starts; PS_SKIP_CPU_CHECK=1 skips it. */
 static void check_cpu(void) {
-    const char *skip = getenv("BB_SKIP_CPU_CHECK");
+    const char *skip = getenv("PS_SKIP_CPU_CHECK");
     if (skip && !strcmp(skip, "1")) return;
     unsigned a, b, c, d, leaf1_c = 0, leaf7_b = 0, ext1_c = 0;
     if (__get_cpuid(1, &a, &b, &c, &d)) leaf1_c = c;
@@ -75,7 +75,7 @@ static void check_cpu(void) {
     fprintf(stderr,
             "ERROR: this CPU lacks %s. The game's code was compiled for the PS4's CPU and uses "
             "these instructions directly: it needs an Intel Haswell (4th generation Core, 2013) or "
-            "newer, or an AMD Ryzen. BB_SKIP_CPU_CHECK=1 starts anyway.\n", missing);
+            "newer, or an AMD Ryzen. PS_SKIP_CPU_CHECK=1 starts anyway.\n", missing);
     exit(1);
 }
 static uint64_t read64(FILE *f) {
@@ -113,12 +113,12 @@ static void protect(void *p, size_t size, unsigned flags) {
     if (mprotect(p, size, mode)) fail("mprotect failed");
 #endif
 }
-/* BB_PERMISSIVE=1: an import the runtime lacks returns 0 instead of stopping, so a title
+/* PS_PERMISSIVE=1: an import the runtime lacks returns 0 instead of stopping, so a title
  * the runtime does not cover fully gets past the first one and its log lists every import it reached
  * (each once). */
 static unsigned char *permissive_seen;
 /* Its output arguments (runtime_import_outputs) per import: answered with 0 the caller goes on to
- * read memory nothing wrote, and faults far from the import. BB_PERMISSIVE_OUT=error answers these
+ * read memory nothing wrote, and faults far from the import. PS_PERMISSIVE_OUT=error answers these
  * with SCE_KERNEL_ERROR_EINVAL instead, so the caller's own error path runs. */
 static unsigned char *permissive_outputs;
 static int permissive_out_error;
@@ -252,7 +252,7 @@ static void fault(int sig, siginfo_t *info, void *context) {
     /* Guest code keeps frame pointers: its call chain says which caller handed over the bad
      * value, where the host backtrace below stops at the first guest frame. */
     if (rip - (uintptr_t)image < 0x10000000) dump_frames(uc);
-    /* A call through a null or stale pointer (an import BB_PERMISSIVE answered with 0, a symbol
+    /* A call through a null or stale pointer (an import PS_PERMISSIVE answered with 0, a symbol
      * lookup that failed): the return address on the stack names the guest caller. */
     else if (!(dladdr((void *)rip, &where) && where.dli_fname)) {
         uintptr_t caller = 0;
@@ -430,9 +430,48 @@ void runtime_restart(void) {
 #endif
 }
 
+#ifndef _WIN32
+extern char **environ;
+/* bbport, and psport releases before the rename, read BB_* names: launchers written for them keep
+   working for a transition. Each one set is copied to its PS_* name unless that is set too, then
+   the process starts again, since the GPU library's initializers have already read the
+   environment by the time main runs. Through run.sh, which copies them first, nothing is left. */
+static void accept_deprecated_names(char **argv) {
+    size_t count=0;
+    for (char **entry=environ; *entry; ++entry) count+=!strncmp(*entry,"BB_",3);
+    if (!count) return;
+    char **found=calloc(count,sizeof(*found));
+    if (!found) return;
+    size_t n=0;
+    for (char **entry=environ; *entry && n<count; ++entry)
+        if (!strncmp(*entry,"BB_",3) && strchr(*entry,'=')) found[n++]=strdup(*entry);
+    char list[4096]="";
+    size_t used=0, copied=0;
+    for (size_t i=0; i<n; ++i) {
+        if (!found[i]) continue;
+        char *value=strchr(found[i],'=');
+        *value++='\0';
+        char renamed[256];
+        if (snprintf(renamed,sizeof(renamed),"PS_%s",found[i]+3)<(int)sizeof(renamed) && !getenv(renamed)) {
+            setenv(renamed,value,0);
+            int wrote=snprintf(list+used,sizeof(list)-used,"%s%s",copied?", ":"",found[i]);
+            if (wrote>0 && (size_t)wrote<sizeof(list)-used) used+=(size_t)wrote;
+            copied++;
+        }
+        free(found[i]);
+    }
+    free(found);
+    if (!copied) return;
+    printf("psport: BB_* variables are deprecated, use PS_*: %s\n",list);
+    execv("/proc/self/exe",argv);
+    perror("psport: restart with the PS_* variables");
+}
+#endif
+
 int main(int argc, char **argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
 #ifndef _WIN32
+    accept_deprecated_names(argv);
     /* Keep host heap objects handed to the guest (thread handles, TLS) in the
        non-PIE brk heap, i.e. below 1 TiB: the guest packs pointers into 40 bits. */
     mallopt(M_ARENA_MAX,1);
@@ -614,14 +653,14 @@ int main(int argc, char **argv) {
             signal(shutdown_signals[i], shutdown_signal);
     }
 #endif
-    const char *permissive = getenv("BB_PERMISSIVE");
+    const char *permissive = getenv("PS_PERMISSIVE");
     if (permissive && !strcmp(permissive, "1")) {
         permissive_seen = calloc(import_count ? import_count : 1, 1);
         permissive_outputs = calloc(import_count ? import_count : 1, 1);
         if (!permissive_seen || !permissive_outputs) fail("allocation failed");
         for (uint64_t i = 0; i < import_count; ++i)
             permissive_outputs[i] = (unsigned char)runtime_import_outputs(names[i]);
-        const char *out = getenv("BB_PERMISSIVE_OUT");
+        const char *out = getenv("PS_PERMISSIVE_OUT");
         permissive_out_error = out && !strcmp(out, "error");
     }
     unsigned char *traps = allocate(round_page((import_count + 1) * 32));
@@ -632,7 +671,7 @@ int main(int argc, char **argv) {
         unsigned char *t = traps + i * 32;
         /* SysV: the arguments move up one register (the sixth drops off) so the handler gets the
          * index first and the guest's first five after it; then movabs rax, handler; jmp rax. No
-         * fake return values, unless BB_PERMISSIVE asked for them. Exactly the 32 bytes a slot has. */
+         * fake return values, unless PS_PERMISSIVE asked for them. Exactly the 32 bytes a slot has. */
         uint32_t index = (uint32_t)i;
         uintptr_t handler = permissive_seen ? (uintptr_t)unresolved_permissive : (uintptr_t)unresolved;
         static const unsigned char shift[15] = {
@@ -693,8 +732,8 @@ int main(int argc, char **argv) {
             printf("Runtime: import %s (%s) has no implementation: %s\n", names[i], runtime_import_name(names[i]),
                    !permissive_seen ? "the game stops if it calls it"
                    : permissive_out_error && permissive_outputs[i]
-                       ? "returns 0x80020016 when called (BB_PERMISSIVE_OUT=error)"
-                       : "returns 0 when called (BB_PERMISSIVE)");
+                       ? "returns 0x80020016 when called (PS_PERMISSIVE_OUT=error)"
+                       : "returns 0 when called (PS_PERMISSIVE)");
     }
     printf("Runtime: imports %llu: host %u, game modules %u, system modules %u, modules the game loads %u, stubs %u, without implementation %u\n",
            (unsigned long long)import_count, counts[1], counts[2], counts[5], counts[6], counts[3], counts[4]);

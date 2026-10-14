@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// What the Ngs2 sources took from AnyPS5's libc (General.hpp, VabiMacros.hpp), in libbbgpu terms.
+// What the Ngs2 sources took from AnyPS5's libc (General.hpp, VabiMacros.hpp), in libpsport-gpu terms.
 // Their unimplemented and invalid cases throw; Exports.cpp turns that into an error code at the
 // guest boundary, since an exception must not unwind through the game's frames.
 #pragma once

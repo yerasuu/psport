@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// bbport BB_SECTIONS=1 (diagnostics): time the draw recording thread spends per part of a draw,
+// bbport PS_SECTIONS=1 (diagnostics): time the draw recording thread spends per part of a draw,
 // inclusive (nested parts count in their parent too), printed with the draw pipe statistics.
 #pragma once
 
@@ -34,7 +34,7 @@ enum Id : std::uint32_t {
     EnsureResident,
     ObtainStream,  ///< ObtainBuffer's copy of a small read-only buffer into the stream buffer
     ObtainVram,    ///< ObtainBuffer's VRAM path (SynchronizeMemory)
-    LayerBind,     ///< BB_LAYER_MEMORY: BufferCache::LayerBind
+    LayerBind,     ///< PS_LAYER_MEMORY: BufferCache::LayerBind
     Count,
 };
 inline constexpr const char* Names[Count] = {
@@ -48,7 +48,7 @@ inline std::array<std::atomic<std::uint64_t>, Count> cycles{};
 
 inline bool Enabled() {
     static const bool on = [] {
-        const char* env = std::getenv("BB_SECTIONS");
+        const char* env = std::getenv("PS_SECTIONS");
         return env && env[0] == '1';
     }();
     return on;

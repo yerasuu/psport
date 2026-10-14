@@ -72,7 +72,7 @@ std::array<FaultSite, 512> fault_sites;
 std::atomic<u64> fault_sites_dropped{0};
 constexpr u64 GuestImage = 0x800000000ull, GuestImageEnd = 0x810000000ull;
 constexpr u64 HostSite = 1ull << 63;
-constexpr u64 ReadSite = 1ull << 62; ///< a read fault (BB_READBACKS=2 protects GPU data from reads)
+constexpr u64 ReadSite = 1ull << 62; ///< a read fault (PS_READBACKS=2 protects GPU data from reads)
 
 /// "+offset" for guest code, the symbol for host code.
 std::string SiteName(u64 key) {
@@ -228,15 +228,15 @@ void PageManager::ReportFaultSites() {
 // trapped for writes (BbLayer::WriteTraps::Image): a write nobody announced (the game's own copy
 // loops, its heap over an old texture) still reaches the texture cache, on any game and GPU,
 // without hooks in the game's code; the hooks and the libc wrappers only make it sooner.
-// BB_IMAGE_TRAPS=0: announced writes only, as before. Latched at the first use: the counts must
+// PS_IMAGE_TRAPS=0: announced writes only, as before. Latched at the first use: the counts must
 // match their traps for the whole run.
 static bool ImageTraps() {
     static const bool on = [] {
-        const char* env = std::getenv("BB_IMAGE_TRAPS");
+        const char* env = std::getenv("PS_IMAGE_TRAPS");
         const bool enabled = !(env && env[0] == '0') && VideoCore::GuestInPlace() &&
                              !VideoCore::WriteTracking() && !VideoCore::WriteVerify();
         if (enabled) {
-            std::printf("Guest memory: writes under images are trapped (BB_IMAGE_TRAPS=0: "
+            std::printf("Guest memory: writes under images are trapped (PS_IMAGE_TRAPS=0: "
                         "announced writes only)\n");
         }
         return enabled;
@@ -586,7 +586,7 @@ struct PageManager::Impl {
 // per-frame buffers and the GPU thread re-protects uploaded pages, every page fault in the
 // process (copy threads included) waits for it. UFFDIO_WRITEPROTECT changes page table bits
 // under the lock for reading. Read protection (readbacks) still uses mprotect: userfaultfd
-// write-protection cannot deny reads. BB_UFFD=1.
+// write-protection cannot deny reads. PS_UFFD=1.
 struct UffdImpl : public PageManager::Impl {
 private:
     std::jthread ufd_thread;
@@ -674,7 +674,7 @@ public:
                 address_space.Protect(address, size, Core::MemoryPermission::ReadWrite);
             }
         }
-        // Counted like AddressSpace::Protect (BB_FRAME_LOG protect_ms).
+        // Counted like AddressSpace::Protect (PS_FRAME_LOG protect_ms).
         BbStats::Timer timer{BbStats::t_protect};
         BbStats::protect_calls.fetch_add(1, std::memory_order_relaxed);
         BbStats::protect_pages.fetch_add(last - first, std::memory_order_relaxed);
@@ -731,7 +731,7 @@ struct SignalImpl : public PageManager::Impl {
     SignalImpl(Vulkan::Rasterizer* rasterizer_) : Impl() {
         rasterizer = rasterizer_;
 
-        // Should be called first (bbport: after BB_VRAM_ACCESS_TRAP, priority 0, diagnostics only).
+        // Should be called first (bbport: after PS_VRAM_ACCESS_TRAP, priority 0, diagnostics only).
         constexpr u32 priority = 1;
         Core::Signals::Instance()->RegisterAccessViolationHandler(GuestFaultSignalHandler,
                                                                   priority);
@@ -739,7 +739,7 @@ struct SignalImpl : public PageManager::Impl {
 
     void Protect(VAddr address, size_t size, Core::MemoryPermission perms) override {
         RENDERER_TRACE;
-        // bbport BB_GUEST_IN_PLACE: no page protection; the pages are marked in the runtime's write
+        // bbport PS_GUEST_IN_PLACE: no page protection; the pages are marked in the runtime's write
         // watch instead, and the writers that check it tell the GPU side (WriteTracking).
         if (!VideoCore::WriteTracking()) {
             runtime_memory_set_write_watch(address, size, !True(perms & Core::MemoryPermission::Write));
@@ -758,13 +758,13 @@ struct SignalImpl : public PageManager::Impl {
 
 PageManager::PageManager(Vulkan::Rasterizer* rasterizer_) {
 #ifdef __linux__
-    // bbport: dma-buf guest memory (BB_GUEST_GPU_MEMORY=1) cannot be write-protected by userfaultfd
+    // bbport: dma-buf guest memory (PS_GUEST_GPU_MEMORY=1) cannot be write-protected by userfaultfd
     // (anonymous and shmem only): its registration would fail and writes go unseen.
-    const char* guest_gpu_memory = std::getenv("BB_GUEST_GPU_MEMORY");
+    const char* guest_gpu_memory = std::getenv("PS_GUEST_GPU_MEMORY");
     const bool dma_buf_guest = guest_gpu_memory && guest_gpu_memory[0] == '1';
-    if (std::getenv("BB_UFFD") && std::getenv("BB_UFFD")[0] == '1' && dma_buf_guest) {
-        std::printf("GPU: userfaultfd off with BB_GUEST_GPU_MEMORY=1 (dma-buf memory)\n");
-    } else if (std::getenv("BB_UFFD") && std::getenv("BB_UFFD")[0] == '1') {
+    if (std::getenv("PS_UFFD") && std::getenv("PS_UFFD")[0] == '1' && dma_buf_guest) {
+        std::printf("GPU: userfaultfd off with PS_GUEST_GPU_MEMORY=1 (dma-buf memory)\n");
+    } else if (std::getenv("PS_UFFD") && std::getenv("PS_UFFD")[0] == '1') {
         try {
             impl = std::make_unique<UffdImpl>(rasterizer_);
             LOG_INFO(Config, "Memory tracking method: userfaultfd");

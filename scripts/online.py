@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-or-later
-"""Co-op addresses (BB_ONLINE=1): the game's own server, the shadNet server and its WebAPI.
+"""Co-op addresses (PS_ONLINE=1): the game's own server, the shadNet server and its WebAPI.
 
 From run.py and the launcher of the Windows port of bbport. Messages,
 bloodstains and ghosts come from the community game server (The Hunter's Dream by default);
@@ -121,9 +121,9 @@ def main():
     overrides.add_argument('--user', required=True)
     sub.add_parser('check')
     a = parser.parse_args()
-    server = os.environ.get('BB_SHADNET_SERVER') or SHADNET_SERVER
-    community = community_address(os.environ.get('BB_COMMUNITY_SERVER'))
-    webapi = webapi_setting(os.environ.get('BB_SHADNET_WEBAPI'), server, community)
+    server = os.environ.get('PS_SHADNET_SERVER') or SHADNET_SERVER
+    community = community_address(os.environ.get('PS_COMMUNITY_SERVER'))
+    webapi = webapi_setting(os.environ.get('PS_SHADNET_WEBAPI'), server, community)
     if a.command == 'overrides':
         print(write_overrides(a.user, community, webapi))
     else:

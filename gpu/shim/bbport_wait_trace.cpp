@@ -60,7 +60,7 @@ std::string Describe(void* address) {
 
 bool Enabled() {
     static const bool enabled = [] {
-        const char* env = std::getenv("BB_WAIT_TRACE");
+        const char* env = std::getenv("PS_WAIT_TRACE");
         return env && env[0] == '1';
     }();
     return enabled;

@@ -10,7 +10,7 @@ The launcher has a **Mods** group: folder selection, a master switch, a switch p
 for the load order. Changes apply on the next launch. The lowest enabled mod has the highest
 priority; when files collide, the log says which mod replaced the previous one.
 
-The default folder is `mods/` in the data directory (`BB_DATA_DIR`, the checkout by default); in
+The default folder is `mods/` in the data directory (`PS_DATA_DIR`, the checkout by default); in
 the AppImage, `~/.local/share/bbport/mods/`. Unpack a downloaded mod like this:
 
 ```text
@@ -56,14 +56,14 @@ such folders are not used by the next launch.
 
 Mods that replace `eboot.bin`, `sce_module` or `sce_sys`, DLL injectors and script plugins are not
 supported by this loader. Patches to executable code stay in the existing `patches/` /
-`BB_PATCHES` system. Symbolic links inside a mod are not accepted. Whether a mod works with
+`PS_PATCHES` system. Symbolic links inside a mod are not accepted. Whether a mod works with
 CUSA03173 1.09 is up to its author.
 
 From a terminal:
 
 ```sh
-BB_GAME_DIR=/path/to/CUSA03173 BB_MODS_DIR=/path/to/mods bash run.sh
-BB_GAME_DIR=/path/to/CUSA03173 BB_MODS_ENABLED=0 bash run.sh
+PS_GAME_DIR=/path/to/CUSA03173 PS_MODS_DIR=/path/to/mods bash run.sh
+PS_GAME_DIR=/path/to/CUSA03173 PS_MODS_ENABLED=0 bash run.sh
 ```
 
 Order and disabled mods are kept in the data directory's `mods.json`:
@@ -72,8 +72,8 @@ Order and disabled mods are kept in the data directory's `mods.json`:
 {"order": ["First", "Second"], "disabled": ["First"]}
 ```
 
-New folders are enabled automatically and appended in alphabetical order. `BB_MODS_CONFIG` changes
-the profile's path. `BB_MOD_TRACE=1` with `BB_MODS_DIR` logs the first reads of files that actually
+New folders are enabled automatically and appended in alphabetical order. `PS_MODS_CONFIG` changes
+the profile's path. `PS_MOD_TRACE=1` with `PS_MODS_DIR` logs the first reads of files that actually
 come from a mod, for diagnostics.
 
 ## Third-party patches (shadPS4 XML)
@@ -93,7 +93,7 @@ Supported lines: `bytes`, `bytes16/32/64`, `float32/64`, `utf8`, `utf16`. A patc
 lines (pattern search) or with an address outside the eboot is skipped whole, with a message in
 the log. Third-party patches are applied after the built-in ones (`patches/Bloodborne.xml`): where
 they overlap, the third-party one wins. From a terminal:
-`BB_PATCHES_DIR=/path BB_PATCHES_CONFIG=/path/patches.json bash run.sh`.
+`PS_PATCHES_DIR=/path PS_PATCHES_CONFIG=/path/patches.json bash run.sh`.
 
 Patches that replace pointers in tables (such as `60 FPS++` and `90 FPS++`) are moved by the loader
 to the image's real address. Earlier such patches stopped the launch with

@@ -410,7 +410,7 @@ void Watcher() {
 void StartWatcher() {
     static std::once_flag once;
     std::call_once(once, [] {
-        std::fprintf(stderr, "Free check: on (BB_FREE_CHECK=1): pool pages of %llu-byte "
+        std::fprintf(stderr, "Free check: on (PS_FREE_CHECK=1): pool pages of %llu-byte "
                              "blocks, header at +%#llx\n",
                      (unsigned long long)BlockSize, (unsigned long long)HeaderOffset);
         std::thread(Watcher).detach();
@@ -488,7 +488,7 @@ void CheckPage(u64 page, u64 begin, u64 end, u64 value, u64 size, Source source,
 
 bool Enabled() {
     static const bool enabled = [] {
-        const char* env = std::getenv("BB_FREE_CHECK");
+        const char* env = std::getenv("PS_FREE_CHECK");
         return env && env[0] == '1';
     }();
     return enabled;
@@ -550,11 +550,11 @@ void Check(u64 address, u64 size, const void* data, Source source, u64 seq) {
         if (latency > 20000000) {
             late_20ms.fetch_add(1, std::memory_order_relaxed);
         }
-        // Honest labels (BB_GUEST_IN_PLACE, BB_HONEST_LABELS) are written once the GPU has done the
+        // Honest labels (PS_GUEST_IN_PLACE, PS_HONEST_LABELS) are written once the GPU has done the
         // work: tens of ms after the recording thread are normal there; only stalls are reported.
         static const u64 report_ns = [] {
-            const char* in_place = std::getenv("BB_GUEST_IN_PLACE");
-            const char* honest = std::getenv("BB_HONEST_LABELS");
+            const char* in_place = std::getenv("PS_GUEST_IN_PLACE");
+            const char* honest = std::getenv("PS_HONEST_LABELS");
             return (in_place && in_place[0] == '1') || (honest && honest[0] == '1') ? 500000000ull
                                                                                       : 50000000ull;
         }();
@@ -625,7 +625,7 @@ void DumpAtFault(u64 rax, u64 r14) {
     PrintRecent(page, page + PageSize, NowNs(), 64);
 }
 namespace {
-/// BB_LABEL_TRAP: fences decoded into pool pages (labels) until their write has landed.
+/// PS_LABEL_TRAP: fences decoded into pool pages (labels) until their write has landed.
 struct Pending {
     u32 count = 0;
     u64 decoded_ns = 0;
@@ -653,20 +653,20 @@ constexpr u64 ImageBase = 0x800000000ull, ImageEnd = 0x810000000ull;
 /// The game's label release code (Game::LabelReleaseCode), set while the breakpoints are in.
 u64 free_hook = 0, gc_hook = 0;
 
-/// BB_LABEL_TRAP: 1 pool pages with pending labels read-only (every guest write into them is
+/// PS_LABEL_TRAP: 1 pool pages with pending labels read-only (every guest write into them is
 /// single-stepped: slow, it hid the bug), 2 breakpoints on the guest allocator's release and on
 /// the collector's "done" branch: a label block released, or taken as done, before its fence
 /// landed is reported with the guest's view and call chain.
 int TrapMode() {
     static const int mode = [] {
-        const char* env = std::getenv("BB_LABEL_TRAP");
+        const char* env = std::getenv("PS_LABEL_TRAP");
         const int m = Enabled() && env && (env[0] == '1' || env[0] == '2') ? env[0] - '0' : 0;
         if (m != 0) {
             InstallStepTrap();
             if (m == 2 && !InstallFreeHook()) {
                 return 0;
             }
-            std::fprintf(stderr, "Free check: label trap on (BB_LABEL_TRAP=%d)\n", m);
+            std::fprintf(stderr, "Free check: label trap on (PS_LABEL_TRAP=%d)\n", m);
         }
         return m;
     }();
@@ -759,7 +759,7 @@ void OnFreeHook(void* ucontext);
 void OnGcHook(void* ucontext);
 
 void OnStepTrap(int sig, siginfo_t* info, void* ucontext) {
-    // BB_LABEL_TRAP=2: the breakpoints (RIP is past the int3).
+    // PS_LABEL_TRAP=2: the breakpoints (RIP is past the int3).
     const u64 rip = u64(static_cast<ucontext_t*>(ucontext)->uc_mcontext.gregs[REG_RIP]);
     if (free_hook && rip == free_hook + 1) {
         OnFreeHook(ucontext);
@@ -824,7 +824,7 @@ bool PatchInt3(u64 address, std::initializer_list<unsigned char> expected) {
 bool InstallFreeHook() {
     const Game::Profile* game = Game::Active();
     if (!game || !game->label_release.release) {
-        std::fprintf(stderr, "Free check: BB_LABEL_TRAP=2 needs the game's label release code (its "
+        std::fprintf(stderr, "Free check: PS_LABEL_TRAP=2 needs the game's label release code (its "
                              "profile): off\n");
         return false;
     }

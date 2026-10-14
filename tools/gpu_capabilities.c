@@ -1,8 +1,8 @@
 /* Check whether native-size depth/stencil images can be blitted to reduced
  * renderer targets. The renderer needs both directions for live presets.
  * --gamepads: the connected gamepads, "GUID<tab>name" per line (the launcher's controller list,
- * BB_GAMEPAD). --displays: the monitors, "name<tab>WxH<tab>primary (1 or 0)" per line in SDL's
- * order (the launcher's monitor list, BB_DISPLAY; issue #69). --read-input: one key or button for the
+ * PS_GAMEPAD). --displays: the monitors, "name<tab>WxH<tab>primary (1 or 0)" per line in SDL's
+ * order (the launcher's monitor list, PS_DISPLAY; issue #69). --read-input: one key or button for the
  * launcher's controls (below). --device: "vendorID<tab>name" of the GPU the game takes (run.sh:
  * memory model and driver workarounds by vendor and chip). */
 #include <stdio.h>
@@ -127,7 +127,7 @@ static int read_input(const char *kind) {
     const char *prompt = want_key && want_pad ? "Press a key, a mouse button or a gamepad button"
                          : want_key           ? "Press a key or a mouse button"
                                               : "Press a gamepad button";
-    if (!SDL_CreateWindowAndRenderer("bbport", 520, 90, 0, &window, &renderer)) {
+    if (!SDL_CreateWindowAndRenderer("psport", 520, 90, 0, &window, &renderer)) {
         fprintf(stderr, "read-input: %s\n", SDL_GetError());
         SDL_Quit();
         return 1;
@@ -217,7 +217,7 @@ int main(int argc, char **argv) {
     const int device_mode = argc > 1 && !strcmp(argv[1], "--device");
     const VkApplicationInfo app = {
         .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
-        .pApplicationName = "bbport scene scaling probe",
+        .pApplicationName = "psport scene scaling probe",
         .apiVersion = VK_API_VERSION_1_3,
     };
     const VkInstanceCreateInfo create = {
@@ -242,13 +242,13 @@ int main(int argc, char **argv) {
         vkDestroyInstance(instance, NULL);
         return 1;
     }
-    /* Match vk_instance.cpp's default ranking or its explicit BB_GPU_ID index. */
+    /* Match vk_instance.cpp's default ranking or its explicit PS_GPU_ID index. */
     VkPhysicalDevice selected = devices[0];
-    const char *gpu_id = getenv("BB_GPU_ID");
+    const char *gpu_id = getenv("PS_GPU_ID");
     if (gpu_id && atoi(gpu_id) >= 0) {
         const unsigned long index = strtoul(gpu_id, NULL, 10);
         if (index >= count) {
-            fputs("GPU scene scaling: BB_GPU_ID is outside the device list\n", stderr);
+            fputs("GPU scene scaling: PS_GPU_ID is outside the device list\n", stderr);
             free(devices);
             vkDestroyInstance(instance, NULL);
             return 1;

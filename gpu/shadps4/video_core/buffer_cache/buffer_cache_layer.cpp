@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// bbport BB_LAYER_MEMORY: the BufferCache side of the layer's memory module
+// bbport PS_LAYER_MEMORY: the BufferCache side of the layer's memory module
 // (gpu/layer/bblayer_gpu_memory.h, docs/en/history/MEMORY_MODULE_PLAN.md). The game's memory is bound in
 // place through its chunk buffers; blocks of known data (what loaders wrote) get VRAM copies in
 // mirrors: one buffer per run of such blocks, runs that meet merged into a new mirror. No sparse
@@ -55,7 +55,7 @@ bool IsGuestCode(u64 rip) {
     return rip >= Image && rip < Image + ImageSize;
 }
 
-// Volatile blocks (BB_LAYER_VOLATILE=1; off by default): a range with a few unannounced blocks
+// Volatile blocks (PS_LAYER_VOLATILE=1; off by default): a range with a few unannounced blocks
 // goes into one mirror anyway, those blocks refreshed for every binding that reads them. Off, the
 // range stays mixed (in place). Their refreshes were ~300 MB/s of copies and, in render passes,
 // up to ~100 pass breaks a frame; on a recorded route off was 4.29-4.31 ms of GPU time a frame,
@@ -63,7 +63,7 @@ bool IsGuestCode(u64 rip) {
 // bytes bound.
 bool LayerVolatileAllowed() {
     static const bool on = [] {
-        const char* env = std::getenv("BB_LAYER_VOLATILE");
+        const char* env = std::getenv("PS_LAYER_VOLATILE");
         return env && env[0] == '1';
     }();
     return on;
@@ -103,9 +103,9 @@ std::optional<std::pair<const Buffer*, u64>> BufferCache::LayerBind(VAddr addres
             memo = {address, size, layer_generation + 1, resolution};
         }
     }
-    // BB_RESIDENCY_MIX=1: bindings per kind (none, in place, mirror, mixed) and written, per 2 s.
+    // PS_RESIDENCY_MIX=1: bindings per kind (none, in place, mirror, mixed) and written, per 2 s.
     static const bool mix_stats = [] {
-        const char* env = std::getenv("BB_RESIDENCY_MIX");
+        const char* env = std::getenv("PS_RESIDENCY_MIX");
         return env && (env[0] == '1' || env[0] == '2');
     }();
     if (mix_stats) {
@@ -114,7 +114,7 @@ std::optional<std::pair<const Buffer*, u64>> BufferCache::LayerBind(VAddr addres
         const size_t k = size_t(resolution.kind) * 2 + (is_written ? 1 : 0);
         // In place: whether all its blocks may go to VRAM (else: why not, by block).
         static std::array<std::atomic<u64>, 4> in_place_why{}; // eligible, asset gap, dynamic, chunk
-        // Unknown bytes, by why not watched (BB_LAYER_WATCH): watchable, the GPU's dynamic,
+        // Unknown bytes, by why not watched (PS_LAYER_WATCH): watchable, the GPU's dynamic,
         // volatile, failed before, mapping smaller than a block, written binding.
         static std::array<std::atomic<u64>, 6> unwatched_why{};
         if (resolution.kind == Kind::InPlace) {
@@ -159,9 +159,9 @@ std::optional<std::pair<const Buffer*, u64>> BufferCache::LayerBind(VAddr addres
                         (unsigned long long)(unwatched_why[4].exchange(0) >> 20),
                         (unsigned long long)(unwatched_why[5].exchange(0) >> 20));
         }
-        // BB_RESIDENCY_MIX=2: also the bindings in place or mixed with the most bytes, and per
+        // PS_RESIDENCY_MIX=2: also the bindings in place or mixed with the most bytes, and per
         // range its blocks in VRAM, eligible, dynamic and with unannounced bytes.
-        static const bool mix_top = std::getenv("BB_RESIDENCY_MIX")[0] == '2';
+        static const bool mix_top = std::getenv("PS_RESIDENCY_MIX")[0] == '2';
         if (mix_top && (resolution.kind == Kind::InPlace || resolution.kind == Kind::Mixed)) {
             static std::map<std::tuple<VAddr, u64, bool, int>, u64> top;
             static u32 top_printed = 0;
@@ -221,7 +221,7 @@ std::optional<std::pair<const Buffer*, u64>> BufferCache::LayerBind(VAddr addres
     // mirror as volatile blocks, refreshed for every binding that reads them. Not for a range the
     // GPU writes: copying its bytes back after the draw would also put back stale copies of what
     // the CPU (a frame ahead) wrote there meanwhile (exploding vertices).
-    // Experiment bit 8 of BB_TOGGLE_FILE (diagnostics, while the game runs): reads bound in place
+    // Experiment bit 8 of PS_TOGGLE_FILE (diagnostics, while the game runs): reads bound in place
     // even where a VRAM copy is (a stale copy then shows by going away; nothing is moved).
     if (BbToggle::Experiment(8) && !is_written && resolution.kind == Kind::Mirror) {
         if (const auto in_place = LayerInPlace(address, size, true)) {
@@ -249,7 +249,7 @@ std::optional<std::pair<const Buffer*, u64>> BufferCache::LayerBind(VAddr addres
         const u32 frame = static_cast<u32>(BbStats::frame_number.load(std::memory_order_relaxed));
         const bool skip = t.first == first && t.end == end && t.generation == layer_generation &&
                           t.frame == frame && t.written == is_written;
-        // Blocks with unannounced bytes are watched copies for a reading binding (BB_LAYER_WATCH).
+        // Blocks with unannounced bytes are watched copies for a reading binding (PS_LAYER_WATCH).
         std::vector<u64> blocks, unknown, watch;
         for (u64 block = first; !skip && block < end && unknown.size() <= VolatileMaxBlocks;
              ++block) {
@@ -301,9 +301,9 @@ std::optional<std::pair<const Buffer*, u64>> BufferCache::LayerBind(VAddr addres
     // and a copy ends the pass: the same pass was stored and loaded again up to ~100 times a frame
     // (light volumes, one draw each), the GPU 1.3-1.5x slower for the whole launch in the launches
     // that made such blocks. Outside a pass (dispatches, the first draw) the mirror is refreshed.
-    // BB_LAYER_VOLATILE_IN_PASS=0: refreshed in passes too (as before).
+    // PS_LAYER_VOLATILE_IN_PASS=0: refreshed in passes too (as before).
     static const bool volatile_in_place = [] {
-        const char* env = std::getenv("BB_LAYER_VOLATILE_IN_PASS");
+        const char* env = std::getenv("PS_LAYER_VOLATILE_IN_PASS");
         return !(env && env[0] == '0');
     }();
     if (resolution.kind == Kind::Mirror && vram_allowed && !is_written && volatile_in_place &&
@@ -408,17 +408,17 @@ bool BufferCache::LayerEligible(u64 block) {
 }
 
 bool BufferCache::LayerWatchEnabled() {
-    // BB_LAYER_WATCH=1/0 (default 1). The reads over the bus cost far more on NVIDIA's imported
+    // PS_LAYER_WATCH=1/0 (default 1). The reads over the bus cost far more on NVIDIA's imported
     // host memory than on AMD's dma-buf (GTX 1660 Ti: 30-35 FPS with the module, 60-70 with the
     // model of 0.3; RX 7800 XT: on par). It also replaces most volatile blocks, refreshed for
     // every binding (RX 7800 XT: 1.3 GB/s of copies -> 36 MB/s). Needs the write traps
-    // (BB_LAYER_WRITE_TRAPS).
+    // (PS_LAYER_WRITE_TRAPS).
     static const bool on = [] {
-        const char* env = std::getenv("BB_LAYER_WATCH");
+        const char* env = std::getenv("PS_LAYER_WATCH");
         const bool enabled = !(env && env[0] == '0');
         if (enabled && LayerTrapsOn()) {
             std::printf("Guest memory: blocks the CPU writes unannounced get VRAM copies too, "
-                        "uploaded again after its next write (BB_LAYER_WATCH=1)\n");
+                        "uploaded again after its next write (PS_LAYER_WATCH=1)\n");
         }
         return enabled;
     }();
@@ -426,12 +426,12 @@ bool BufferCache::LayerWatchEnabled() {
 }
 
 bool BufferCache::LayerWatchHot() {
-    // BB_LAYER_WATCH_HOT=1 (experiment): blocks the CPU writes often (NoteCpuWrite: in 3 of 60
+    // PS_LAYER_WATCH_HOT=1 (experiment): blocks the CPU writes often (NoteCpuWrite: in 3 of 60
     // frames) are watched too and uploaded again after every write, as the model of 0.3 uploads
     // them. Off: they go back in place. Uploading them before bindings ended render passes
     // (RX 7800 XT: the GPU's frame 4.8 -> 7.2 ms).
     static const bool on = [] {
-        const char* env = std::getenv("BB_LAYER_WATCH_HOT");
+        const char* env = std::getenv("PS_LAYER_WATCH_HOT");
         return env && env[0] == '1';
     }();
     return on;
@@ -439,7 +439,7 @@ bool BufferCache::LayerWatchHot() {
 
 bool BufferCache::LayerWatchable(u64 block) {
     // Dynamic for the GPU's writes (in place in a mixed range): never; for the CPU's (often
-    // written) only with BB_LAYER_WATCH_HOT=1.
+    // written) only with PS_LAYER_WATCH_HOT=1.
     const bool dynamic = dynamic_blocks.Contains(block) &&
                          !(LayerWatchHot() && layer_cpu_hot.Contains(block, block + 1));
     if (!LayerWatchEnabled() || dynamic || layer_volatile.Contains(block, block + 1) ||
@@ -608,9 +608,9 @@ u64 BufferCache::LayerPromoteRun(u64 first, u64 end) {
 }
 
 u64 BufferCache::LayerGrowthEnd(u64 lo, u64 hi) {
-    // BB_LAYER_MIRROR_GROWTH_MB (64; 0: none): the most room a growing mirror gets above it.
+    // PS_LAYER_MIRROR_GROWTH_MB (64; 0: none): the most room a growing mirror gets above it.
     static const u64 growth_bytes = [] {
-        const char* env = std::getenv("BB_LAYER_MIRROR_GROWTH_MB");
+        const char* env = std::getenv("PS_LAYER_MIRROR_GROWTH_MB");
         return (env && *env ? std::strtoull(env, nullptr, 10) : 64ull) << 20;
     }();
     const u64 extra = std::min(hi - lo, growth_bytes >> block_shift);
@@ -901,10 +901,10 @@ void BufferCache::LayerYieldToImages(u32 now) {
     }
     const u64 wanted = usage + PromoteCriticalMargin + StaleHeadroom - critical;
     static const u32 idle_seconds = [] {
-        const char* env = std::getenv("BB_VRAM_PRESSURE_IDLE_SECONDS");
+        const char* env = std::getenv("PS_VRAM_PRESSURE_IDLE_SECONDS");
         return env && *env ? u32(std::strtoul(env, nullptr, 10)) : 3u;
     }();
-    // 1. Valid blocks in 2 MiB groups no binding took directly for BB_VRAM_PRESSURE_IDLE_SECONDS
+    // 1. Valid blocks in 2 MiB groups no binding took directly for PS_VRAM_PRESSURE_IDLE_SECONDS
     // (3): an area left behind, a lamp travelled from. They go back in place, the longest unused
     // first, whatever the mirrors' floor, as far as the mirrors' memory without valid blocks does
     // not already cover the need. Only direct bindings count (layer_group_use): paged bindings
@@ -979,7 +979,7 @@ void BufferCache::LayerWriteEntries(u64 first, u64 end) {
     if (first >= end) {
         return;
     }
-    // Diagnostics (BB_FRAME_STATS): where the time goes (t_layer 8-11).
+    // Diagnostics (PS_FRAME_STATS): where the time goes (t_layer 8-11).
     auto mark = std::chrono::steady_clock::now();
     const auto lap = [&](size_t kind) {
         if (!BbStats::enabled) {
@@ -1198,9 +1198,9 @@ bool BufferCache::LayerActive() {
 
 namespace VideoCore {
 bool BufferCache::LayerPagedActive() {
-    // BB_LAYER_PAGED=0 (tests): huge bindings cut in place instead of the page table.
+    // PS_LAYER_PAGED=0 (tests): huge bindings cut in place instead of the page table.
     static const bool paged = [] {
-        const char* env = std::getenv("BB_LAYER_PAGED");
+        const char* env = std::getenv("PS_LAYER_PAGED");
         return !(env && env[0] == '0');
     }();
     return paged && LayerActive();
@@ -1211,7 +1211,7 @@ int BufferCache::LayerGpuWritesMode() {
     // the CPU also uses (the game's buffers, its heap's headers, reused allocations) went stale or
     // was copied back over newer CPU data. Images (render targets) are the GPU's own.
     static const int mode = [] {
-        const char* env = std::getenv("BB_LAYER_GPU_WRITES");
+        const char* env = std::getenv("PS_LAYER_GPU_WRITES");
         return env && (env[0] == '0' || env[0] == '2') ? env[0] - '0' : 1;
     }();
     return mode;
@@ -1231,8 +1231,8 @@ bool BufferCache::LayerGpuWriteToVram(VAddr address, u64 size) {
     const bool vram =
         mode == 2 || (mode == 1 && !layer_cpu_blocks.Overlaps(address >> block_shift,
                                                               ((address + size - 1) >> block_shift) + 1));
-    // BB_LAYER_WRITE_LOG=1 (diagnostics): large GPU writes kept in place, and the images near them.
-    static const bool log = std::getenv("BB_LAYER_WRITE_LOG") != nullptr;
+    // PS_LAYER_WRITE_LOG=1 (diagnostics): large GPU writes kept in place, and the images near them.
+    static const bool log = std::getenv("PS_LAYER_WRITE_LOG") != nullptr;
     if (log && !vram && size >= (u64{1} << 20)) {
         static std::map<std::pair<VAddr, u64>, u32> seen;
         if (seen.size() < 64 && seen[{address, size}]++ == 0) {
@@ -1282,12 +1282,12 @@ void BufferCache::LayerCopyBack(u64 first, u64 end) {
 }
 
 
-// BB_LAYER_READ_TRAPS=1: what the GPU writes into a VRAM copy only is no access for the CPU until
+// PS_LAYER_READ_TRAPS=1: what the GPU writes into a VRAM copy only is no access for the CPU until
 // it is copied back (LayerReadTrapHit): the game or the translator reading it on the CPU would
 // see stale data (on the PS4 the memory is one). Off by default for now.
 bool BufferCache::LayerReadTrapsOn() {
     static const bool on = [] {
-        const char* env = std::getenv("BB_LAYER_READ_TRAPS");
+        const char* env = std::getenv("PS_LAYER_READ_TRAPS");
         return env && env[0] == '1';
     }();
     return on;
@@ -1383,7 +1383,7 @@ void BufferCache::LayerRefreshVolatile(VAddr address, u64 size) {
 }
 } // namespace VideoCore
 
-// bbport BB_LAYER_MEMORY: blocks with a VRAM copy are write-protected (BB_LAYER_WRITE_TRAPS=0:
+// bbport PS_LAYER_MEMORY: blocks with a VRAM copy are write-protected (PS_LAYER_WRITE_TRAPS=0:
 // off). The game's own code writes some of them without telling us (its heap's headers, parts of
 // its resource loaders), and a stale copy then gives exploding vertices and garbage textures. A
 // write there is let through at once; the block goes back in place before the next binding (the
@@ -1399,7 +1399,7 @@ u32 layer_trap_shift = 16;
 
 bool LayerTrapsOn() {
     static const bool on = [] {
-        const char* env = std::getenv("BB_LAYER_WRITE_TRAPS");
+        const char* env = std::getenv("PS_LAYER_WRITE_TRAPS");
         return !(env && env[0] == '0');
     }();
     return on;
@@ -1539,7 +1539,7 @@ void BufferCache::LayerProcessTraps() {
         // out again), so a VRAM copy never holds GPU data the CPU's data could meet.
         layer_cpu_blocks.Add({block, block + 1});
         // A watched block the CPU wrote (the game's code or ours: HLE command buffers): it stays in
-        // VRAM, uploaded again; with BB_LAYER_WATCH_HOT=1 however often (as the model of 0.3
+        // VRAM, uploaded again; with PS_LAYER_WATCH_HOT=1 however often (as the model of 0.3
         // uploads what the CPU wrote), else until it counts as often written (NoteCpuWrite: then
         // a request sends it in place). An announced write may still be under way (a file read):
         // in place as below, no trap set meanwhile. The runtime's file reads retry once their

@@ -94,11 +94,11 @@ void Scheduler::ProducerScope::Leave() noexcept {
 
 namespace {
 
-/// bbport: Vulkan recording threads: BB_VK_RECORD_THREADS, else 2 from 8 hardware threads and 3
+/// bbport: Vulkan recording threads: PS_VK_RECORD_THREADS, else 2 from 8 hardware threads and 3
 /// from 12. One thread records ~75% of a core at 200 FPS (4 cores / 8 threads); the segments
 /// let the stream use more than one.
 u32 RecordingThreadCount() {
-    if (const char* env = std::getenv("BB_VK_RECORD_THREADS")) {
+    if (const char* env = std::getenv("PS_VK_RECORD_THREADS")) {
         return std::clamp(std::atoi(env), 1, 8);
     }
     const unsigned available = BbThreads::Available();
@@ -117,14 +117,14 @@ Scheduler::Scheduler(const Instance& instance, bool threaded_recording)
     : instance{instance}, work_semaphore{instance}, command_pool{instance, &work_semaphore} {
     crumb_stream = Breadcrumbs::NewStream(
         instance, threaded_recording ? "draws: game and presenter" : "presentation");
-    // bbport: BB_VK_RECORD_THREAD=0 records on the calling thread.
-    const char* env = std::getenv("BB_VK_RECORD_THREAD");
+    // bbport: PS_VK_RECORD_THREAD=0 records on the calling thread.
+    const char* env = std::getenv("PS_VK_RECORD_THREAD");
     if (threaded_recording && !(env && env[0] == '0')) {
         record_chunk = AcquireChunk();
         ordered_chunk = AcquireChunk();
         // A segment of ~64 KiB of closures is ~60 draws: a frame of ~700 draws gives each
         // thread several segments, and the render passes a cut reopens stay few.
-        const char* segment_kb = std::getenv("BB_VK_SEGMENT_KB");
+        const char* segment_kb = std::getenv("PS_VK_SEGMENT_KB");
         split_bytes = size_t(segment_kb ? std::max(1, std::atoi(segment_kb)) : 64) * 1024;
         const u32 count = RecordingThreadCount();
         for (u32 i = 0; i < count; ++i) {
@@ -147,13 +147,13 @@ Scheduler::Scheduler(const Instance& instance, bool threaded_recording)
 #if TRACY_GPU_ENABLED
     profiler_scope = reinterpret_cast<tracy::VkCtxScope*>(std::malloc(sizeof(tracy::VkCtxScope)));
 #endif
-    // bbport BB_ASYNC_SUBMIT (default on; 0: off): submissions go out from the recording threads
+    // bbport PS_ASYNC_SUBMIT (default on; 0: off): submissions go out from the recording threads
     // once their segments are recorded, instead of this thread waiting for them (~65 us each).
     if (!workers.empty()) {
-        const char* async = std::getenv("BB_ASYNC_SUBMIT");
+        const char* async = std::getenv("PS_ASYNC_SUBMIT");
         async_submit = !async || async[0] != '0';
         if (async_submit) {
-            std::printf("GPU: submissions go out from the recording threads (BB_ASYNC_SUBMIT)\n");
+            std::printf("GPU: submissions go out from the recording threads (PS_ASYNC_SUBMIT)\n");
         }
     }
     AllocateWorkerCommandBuffers();
@@ -264,7 +264,7 @@ void Scheduler::EndRendering() {
         return;
     }
     static const bool trace = [] {
-        const char* env = std::getenv("BB_PASS_BREAK_TRACE");
+        const char* env = std::getenv("PS_PASS_BREAK_TRACE");
         return env && env[0] == '1';
     }();
     if (trace) {
@@ -312,7 +312,7 @@ void Scheduler::TracePassBreak(void* caller) {
 
 void Scheduler::TraceDirectRecording(void* caller) {
     static const bool enabled = [] {
-        const char* env = std::getenv("BB_RECORDER_TRACE");
+        const char* env = std::getenv("PS_RECORDER_TRACE");
         return env && env[0] == '1';
     }();
     if (!enabled) {
@@ -644,9 +644,9 @@ void Scheduler::EnterDirectMode() {
     // bbport: with submissions going out from the recording threads, the commands recorded
     // here get a segment of their own, from this thread's pool, after the segments handed over:
     // the recording threads go on with those instead of this thread waiting for them (~90 us,
-    // the upscaler's passes every frame). BB_DIRECT_SEGMENT=0: the wait.
+    // the upscaler's passes every frame). PS_DIRECT_SEGMENT=0: the wait.
     static const bool own_segment = [] {
-        const char* env = std::getenv("BB_DIRECT_SEGMENT");
+        const char* env = std::getenv("PS_DIRECT_SEGMENT");
         return !(env && env[0] == '0');
     }();
     if (own_segment && async_submit && current_segment + 2 < MaxSegments &&
@@ -870,7 +870,7 @@ SubmissionBatch* Scheduler::AcquireBatch() {
 
 void Scheduler::AllocateWorkerCommandBuffers() {
     if (async_submit) {
-        // BB_ASYNC_SUBMIT: the earlier submissions may still be recorded (and their pools
+        // PS_ASYNC_SUBMIT: the earlier submissions may still be recorded (and their pools
         // used) on the recording threads: segment 0 is begun there too, on its first chunk,
         // or by EnterDirectMode once they are idle.
         batch = AcquireBatch();

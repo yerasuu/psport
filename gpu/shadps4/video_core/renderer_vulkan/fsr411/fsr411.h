@@ -34,7 +34,7 @@ struct Features {
     /// Vulkan memory model, required subgroup size 32 with full subgroups: the FP8 variant.
     bool fp8_matrices = false;
     /// The same with FP16 instead of FP8 matrices: the FP8 variant emulated (fp8emu, testing only:
-    /// BB_FSR411_VARIANT=fp8emu).
+    /// PS_FSR411_VARIANT=fp8emu).
     bool fp16_matrices = false;
 };
 
@@ -55,7 +55,7 @@ struct Frame {
 class Upscaler {
 public:
     /// `dir`: the asset sets (t1080_m0 ... t2160_m1, fp8/..., fp8emu/...). The FP8 variant when
-    /// the device has FP8 matrices and its sets are there, else INT8; BB_FSR411_VARIANT=int8,
+    /// the device has FP8 matrices and its sets are there, else INT8; PS_FSR411_VARIANT=int8,
     /// fp8 or fp8emu picks one (when the device can run it).
     Upscaler(VkPhysicalDevice physical, VkDevice device, std::string dir, Features features = {});
     ~Upscaler();

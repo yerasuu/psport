@@ -23,7 +23,7 @@ psport — форк [bbport](https://github.com/deadinside28/bloodborne_pc), н�
   (`gpu/shadps4/`) в том виде, как его доработал bbport.
 
 Bloodborne работает так же, как в апстриме, с его патчами, апскейлерами и настройками. Остальные
-игры запускаются с `BB_SKIP_GAME_CHECK=1`. Что форк добавляет к bbport, что переносит из других
+игры запускаются с `PS_SKIP_GAME_CHECK=1`. Что форк добавляет к bbport, что переносит из других
 проектов (коммит источника, лицензия) и что меняет в унаследованном коде shadPS4:
 [FORK.md](FORK.md). Релизы апстрима вливаются по мере выхода.
 
@@ -53,19 +53,19 @@ Bloodborne работает так же, как в апстриме, с его �
 
 Обычно через decanter: его раздел PS клонирует psport, собирает его через `build.sh`, пересобирает,
 когда checkout сдвинулся, и запускает каждый дамп через `run.sh` (все игры, кроме Bloodborne, — с
-`BB_SKIP_GAME_CHECK=1 BB_PERMISSIVE=1`).
+`PS_SKIP_GAME_CHECK=1 PS_PERMISSIVE=1`).
 
 Отдельно:
 
 ```bash
 git clone --recursive https://github.com/yerasuu/psport.git && cd psport
-bash build.sh                                   # out/bb-probe и out/gpu/libbbgpu.so
-BB_GAME_DIR=/путь/к/CUSA03173 bash run.sh       # Bloodborne
-BB_GAME_DIR=/путь/к/дампу BB_SKIP_GAME_CHECK=1 BB_PERMISSIVE=1 bash run.sh
+bash build.sh                                   # out/psport и out/gpu/libpsport-gpu.so
+PS_GAME_DIR=/путь/к/CUSA03173 bash run.sh       # Bloodborne
+PS_GAME_DIR=/путь/к/дампу PS_SKIP_GAME_CHECK=1 PS_PERMISSIVE=1 bash run.sh
 ```
 
-По умолчанию `BB_GAME_DIR` — `../CUSA03173`. С `BB_PERMISSIVE=1` импорты, которых нет в порте,
-возвращают 0, а не останавливают игру. `BB_SYS_MODULES=<папка>` по желанию подключает
+По умолчанию `PS_GAME_DIR` — `../CUSA03173`. С `PS_PERMISSIVE=1` импорты, которых нет в порте,
+возвращают 0, а не останавливают игру. `PS_SYS_MODULES=<папка>` по желанию подключает
 собственный дамп системных модулей (`*.sprx`) там, где у порта ещё нет своей библиотеки; из него
 ничего не распространяется. Сохранения и кэш шейдеров лежат в `user/`, настройки — в `bbport.ini`.
 Лаунчер на GTK4 (`bash launcher/bb-launcher.sh`; `launcher/install-desktop.sh` добавляет его в меню
@@ -81,10 +81,10 @@ BB_GAME_DIR=/путь/к/дампу BB_SKIP_GAME_CHECK=1 BB_PERMISSIVE=1 bash ru
   перезапускаются в `shell.nix`.
 - Подмодуль (Dear ImGui): клонируйте с `--recursive`, иначе `build.sh`
   выполнит `git submodule update --init --recursive`.
-- `BB_LTO=OFF` отключает оптимизацию при линковке; `BB_PGO=generate|use|off` задаёт оптимизацию по
+- `PS_LTO=OFF` отключает оптимизацию при линковке; `PS_PGO=generate|use|off` задаёт оптимизацию по
   профилю (по умолчанию `use`, если в `pgo/` есть профиль).
 - Если установлен [ccache](https://ccache.dev) (он есть в `shell.nix`), библиотека GPU собирается
-  через него, с одним кэшем для всех копий и worktree (`~/.cache/bbport/ccache`, `CCACHE_DIR`).
+  через него, с одним кэшем для всех копий и worktree (`~/.cache/psport/ccache`, `CCACHE_DIR`).
 - `nix-build packaging/port.nix` собирает порт из исходников в песочнице Nix; CI собирает каждый
   коммит в `master` и публикует сборку каждого тега `vX.Y.Z` как бинарный кэш Nix и GitHub Release
   (FORK.md, «CI and binary cache»).
@@ -92,7 +92,7 @@ BB_GAME_DIR=/путь/к/дампу BB_SKIP_GAME_CHECK=1 BB_PERMISSIVE=1 bash ru
 ## Измерение прогресса
 
 `tools/regress.sh` запускает каждую игру из `tools/regress/titles.txt` в gamescope без окна
-(`BB_AUDIO=none`, `BB_PAD_HOST=0`: ни окна, ни звука, ни геймпадов пользователя), ведёт её по
+(`PS_AUDIO=none`, `PS_PAD_HOST=0`: ни окна, ни звука, ни геймпадов пользователя), ведёт её по
 расписанию нажатий (`tools/regress/*.sched`) и сообщает, докуда она дошла (загружена, вход в код
 игры, инициализирована, первый кадр видеочипа, нарисованные кадры, звук), её сигнатуру падения и
 число импортов без реализации; с `-c <прежний results.json>` отмечает регрессии. Все семь
@@ -102,8 +102,8 @@ BB_GAME_DIR=/путь/к/дампу BB_SKIP_GAME_CHECK=1 BB_PERMISSIVE=1 bash ru
 ## Диагностика
 
 Перед запуском игры перечисляются все импорты без реализации или с заглушкой. Диагностические
-переменные (`BB_PERMISSIVE_OUT`, `BB_AUDIO_STATS`, `BB_NGS2_TRACE`, `BB_FIBER_TRACE`) и
-переключатели системных модулей (`BB_SYS_MODULES`, `BB_HLE`, `BB_LLE`, `BB_SYS_FONTS`) описаны в
+переменные (`PS_PERMISSIVE_OUT`, `PS_AUDIO_STATS`, `PS_NGS2_TRACE`, `PS_FIBER_TRACE`) и
+переключатели системных модулей (`PS_SYS_MODULES`, `PS_HLE`, `PS_LLE`, `PS_SYS_FONTS`) описаны в
 [FORK.md](FORK.md). `tools/gcn_dis.sh` дизассемблирует шейдеры GCN.
 
 ## Правила

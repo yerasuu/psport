@@ -23,15 +23,15 @@ namespace Vulkan {
 
 namespace {
 
-/// bbport BB_VRAM_LIMIT_MB=N (tests): the driver's VRAM budget taken as at most N MiB, at startup
+/// bbport PS_VRAM_LIMIT_MB=N (tests): the driver's VRAM budget taken as at most N MiB, at startup
 /// and while the game runs, so the texture collector and VRAM copies behave as on a smaller card
 /// (a 6 GB GTX 1660 Ti reports ~5600). Allocations themselves are not limited.
 u64 VramLimit() {
     static const u64 limit = [] {
-        const char* env = std::getenv("BB_VRAM_LIMIT_MB");
+        const char* env = std::getenv("PS_VRAM_LIMIT_MB");
         const u64 mib = env && *env ? std::strtoull(env, nullptr, 10) : 0;
         if (mib != 0) {
-            std::printf("GPU: VRAM budget limited to %llu MiB (BB_VRAM_LIMIT_MB)\n",
+            std::printf("GPU: VRAM budget limited to %llu MiB (PS_VRAM_LIMIT_MB)\n",
                         (unsigned long long)mib);
         }
         return mib << 20;
@@ -404,7 +404,7 @@ bool Instance::CreateDevice() {
             .shaderMixedFloatDotProductFloat16AccFloat32 &&
         add_extension(VK_VALVE_SHADER_MIXED_FLOAT_DOT_PRODUCT_EXTENSION_NAME);
     // bbport: FSR 4.1.1's FP8 variant (RDNA4): FP8 cooperative matrices. Cooperative matrices
-    // alone (FP16) run it emulated, for testing (BB_FSR411_VARIANT=fp8emu).
+    // alone (FP16) run it emulated, for testing (PS_FSR411_VARIANT=fp8emu).
     cooperative_matrix =
         feature_chain.get<vk::PhysicalDeviceCooperativeMatrixFeaturesKHR>().cooperativeMatrix &&
         add_extension(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME);
@@ -453,10 +453,10 @@ bool Instance::CreateDevice() {
     };
     // bbport: a queue of a compute and transfer family without graphics, for reading back GPU
     // data the GPU finished writing long ago without waiting behind the queued frame
-    // (BufferCache::DownloadMemory). BB_READBACK_QUEUE=0 turns it off.
+    // (BufferCache::DownloadMemory). PS_READBACK_QUEUE=0 turns it off.
     std::array<vk::DeviceQueueCreateInfo, 2> queue_infos{queue_info};
     u32 queue_info_count = 1;
-    if (const char* env = std::getenv("BB_READBACK_QUEUE"); !env || env[0] != '0') {
+    if (const char* env = std::getenv("PS_READBACK_QUEUE"); !env || env[0] != '0') {
         for (std::size_t i = 0; i < family_properties.size(); i++) {
             const auto flags = family_properties[i].queueFlags;
             if (!(flags & vk::QueueFlagBits::eGraphics) && (flags & vk::QueueFlagBits::eCompute) &&
@@ -803,7 +803,7 @@ void Instance::CreateAllocator() {
         .vkGetInstanceProcAddr = VULKAN_HPP_DEFAULT_DISPATCHER.vkGetInstanceProcAddr,
         .vkGetDeviceProcAddr = VULKAN_HPP_DEFAULT_DISPATCHER.vkGetDeviceProcAddr,
     };
-    // bbport: new device memory per frame (BB_FRAME_LOG alloc_mb).
+    // bbport: new device memory per frame (PS_FRAME_LOG alloc_mb).
     static const VmaDeviceMemoryCallbacks memory_callbacks = {
         .pfnAllocate = [](VmaAllocator, uint32_t, VkDeviceMemory, VkDeviceSize size, void*) {
             BbStats::device_alloc_bytes.fetch_add(size, std::memory_order_relaxed);
@@ -815,9 +815,9 @@ void Instance::CreateAllocator() {
 
     // bbport: 64 MiB blocks (VMA default 256 MiB). A block goes back to the driver only once
     // empty: images freed here and there (the texture collector) left 256 MiB blocks mostly
-    // empty and held. BB_VMA_BLOCK_MB=N.
+    // empty and held. PS_VMA_BLOCK_MB=N.
     static const VkDeviceSize block_size = [] {
-        const char* env = std::getenv("BB_VMA_BLOCK_MB");
+        const char* env = std::getenv("PS_VMA_BLOCK_MB");
         return VkDeviceSize(env ? std::max(1ul, std::strtoul(env, nullptr, 10)) : 64ul) << 20;
     }();
     const VmaAllocatorCreateInfo allocator_info = {

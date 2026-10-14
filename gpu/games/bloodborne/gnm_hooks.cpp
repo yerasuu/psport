@@ -66,7 +66,7 @@ bool Rel32(const u8* from_next, const void* to, std::int32_t& rel) {
     return true;
 }
 
-/// BB_GNM_OBSERVE=1: command buffer methods run through an observing stub. It saves the argument
+/// PS_GNM_OBSERVE=1: command buffer methods run through an observing stub. It saves the argument
 /// registers, calls Enter (which notes the buffer's write pointer and puts ExitThunk in place of the
 /// return address), runs the function; ExitThunk calls Leave, which marks every packet the call
 /// wrote in a shadow table (writer, checksum). Submissions are checked against it: which packets
@@ -79,9 +79,9 @@ struct Frame {
     u64 cb;
     u64 before;
     u64 ret;
-    u64 args[6]; // rdi, rsi, rdx, rcx, r8, r9 (BB_GNM_TRACE)
+    u64 args[6]; // rdi, rsi, rdx, rcx, r8, r9 (PS_GNM_TRACE)
 };
-/// BB_GNM_TRACE=offset[:count]: prints the arguments, the caller and the packets written by the
+/// PS_GNM_TRACE=offset[:count]: prints the arguments, the caller and the packets written by the
 /// first `count` (default 40) calls of that function.
 std::uint32_t trace_index = ~0u;
 std::atomic<int> trace_left{0};
@@ -434,8 +434,8 @@ void ReportLoop() {
             }
         }
         std::sort(rates.rbegin(), rates.rend());
-        // BB_GNM_CENSUS_FILE: every function's total calls so far (offset, calls, cb method, PM4).
-        if (const char* path = std::getenv("BB_GNM_CENSUS_FILE")) {
+        // PS_GNM_CENSUS_FILE: every function's total calls so far (offset, calls, cb method, PM4).
+        if (const char* path = std::getenv("PS_GNM_CENSUS_FILE")) {
             if (FILE* f = std::fopen(path, "w")) {
                 for (std::size_t i = 0; i < Count; ++i) {
                     std::fprintf(f, "0x%07llx %llu %d %s\n", (unsigned long long)Table[i].offset,
@@ -510,8 +510,8 @@ void CheckSubmission(const std::uint32_t* commands, std::uint64_t dwords) {
 }
 
 void PatchImage(unsigned char* image, std::uint64_t size) {
-    const char* env = std::getenv("BB_GNM_CENSUS");
-    const char* observe_env = std::getenv("BB_GNM_OBSERVE");
+    const char* env = std::getenv("PS_GNM_CENSUS");
+    const char* observe_env = std::getenv("PS_GNM_OBSERVE");
     observe = observe_env && observe_env[0] == '1';
     if (!observe && (!env || env[0] != '1')) {
         return;
@@ -521,7 +521,7 @@ void PatchImage(unsigned char* image, std::uint64_t size) {
     const std::size_t code_bytes = (stub_bytes + page - 1) / page * page;
     const std::size_t map_bytes = code_bytes + Count * CounterStride;
     image_base = reinterpret_cast<u64>(image);
-    if (const char* t = std::getenv("BB_GNM_TRACE")) {
+    if (const char* t = std::getenv("PS_GNM_TRACE")) {
         unsigned long long offset = 0;
         int count = 40;
         std::sscanf(t, "%llx:%d", &offset, &count);
@@ -540,9 +540,9 @@ void PatchImage(unsigned char* image, std::uint64_t size) {
     std::size_t patched = 0, mismatched = 0;
     exit_thunk = stubs + Count * SlotSize;
     WriteExitThunk(exit_thunk);
-    // BB_GNM_CENSUS_RANGE=first:last (table indices, bisecting).
+    // PS_GNM_CENSUS_RANGE=first:last (table indices, bisecting).
     std::size_t first = 0, last = Count;
-    if (const char* r = std::getenv("BB_GNM_CENSUS_RANGE")) {
+    if (const char* r = std::getenv("PS_GNM_CENSUS_RANGE")) {
         std::sscanf(r, "%zu:%zu", &first, &last);
     }
     u8* counters = stubs + code_bytes;

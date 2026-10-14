@@ -37,12 +37,12 @@ RangeCallback on_range_allocated = nullptr;
 constexpr std::array<u64, 3> HeapAllocReturns = {0x11e6629, 0x11e6736, 0x11e6846};
 constexpr unsigned char HeapAllocReturnCode[3] = {0x48, 0x89, 0xc3};
 
-/// BB_FRAME_STATS: the range allocator's collector (0x26aa860, `push rbp`; rdi the allocator): its
+/// PS_FRAME_STATS: the range allocator's collector (0x26aa860, `push rbp`; rdi the allocator): its
 /// live range count [+0xc8] and byte count [+0xd0] are noted for the frame stats.
 constexpr u64 CollectorEntry = 0x26aa860;
 constexpr unsigned char CollectorEntryCode[1] = {0x55};
 
-/// BB_HEAP_SITES=1: the game's deferred object release (0xbb5f10) skips the destruction when the
+/// PS_HEAP_SITES=1: the game's deferred object release (0xbb5f10) skips the destruction when the
 /// registry check (0xbf0790) fails: `js 0xbb5fc7` there, its result counted (eax).
 constexpr u64 ReleaseCheck = 0xbb5fb0;
 constexpr unsigned char ReleaseCheckCode[2] = {0x78, 0x15};
@@ -69,7 +69,7 @@ void* LoaderCopy(void* dst, const void* src, std::size_t size) {
     return dst;
 }
 
-/// bbport: native detours (default; BB_GUEST_HOOK_TRAPS=1: int3 traps). Each hooked site jumps to
+/// bbport: native detours (default; PS_GUEST_HOOK_TRAPS=1: int3 traps). Each hooked site jumps to
 /// a stub next to the image that calls the handler and runs the instructions the jump covers;
 /// the copy call sites call LoaderCopy through a trampoline there. An int3 trap costs a signal
 /// (a few microseconds in the kernel) per call; a detour costs a call. The int3 written first
@@ -378,8 +378,8 @@ void Install(RangeCallback on_gpu_range_allocated) {
                 patched, MemcpySites.size());
     on_range_allocated = on_gpu_range_allocated;
     const bool allocator = Patch(ImageBase + AllocReturn, AllocReturnCode, sizeof(AllocReturnCode));
-    // BB_HEAP_HOOKS=0 (bisecting): the heap's ranges are not reported.
-    const char* heap_env = std::getenv("BB_HEAP_HOOKS");
+    // PS_HEAP_HOOKS=0 (bisecting): the heap's ranges are not reported.
+    const char* heap_env = std::getenv("PS_HEAP_HOOKS");
     const bool heap_hooks = !heap_env || heap_env[0] != '0';
     if (BbStats::enabled) {
         Patch(ImageBase + CollectorEntry, CollectorEntryCode, sizeof(CollectorEntryCode));
@@ -394,8 +394,8 @@ void Install(RangeCallback on_gpu_range_allocated) {
     std::printf("Guest hooks: GPU heap allocations seen at %d of %zu call sites\n", heap_sites,
                 HeapAllocReturns.size());
     std::printf("Guest hooks: GPU memory allocator %s\n", allocator ? "tells the GPU side of new ranges" : "not found");
-    // Native detours over the traps just placed (BB_GUEST_HOOK_TRAPS=1 keeps the traps).
-    const char* traps_env = std::getenv("BB_GUEST_HOOK_TRAPS");
+    // Native detours over the traps just placed (PS_GUEST_HOOK_TRAPS=1 keeps the traps).
+    const char* traps_env = std::getenv("PS_GUEST_HOOK_TRAPS");
     if (!(traps_env && traps_env[0] == '1') && (stub_page = MapStubPage()) != nullptr) {
         int detours = 0;
         for (const auto& site : MemcpySites) {
@@ -409,11 +409,11 @@ void Install(RangeCallback on_gpu_range_allocated) {
             }
         }
         mprotect(stub_page, StubPageSize, PROT_READ | PROT_EXEC);
-        std::printf("Guest hooks: %d native detours (no traps; BB_GUEST_HOOK_TRAPS=1: int3)\n",
+        std::printf("Guest hooks: %d native detours (no traps; PS_GUEST_HOOK_TRAPS=1: int3)\n",
                     detours);
     }
     BbHeapSites::Install();
-    if (const char* env = std::getenv("BB_HEAP_SITES"); env && env[0] == '1') {
+    if (const char* env = std::getenv("PS_HEAP_SITES"); env && env[0] == '1') {
         Patch(ImageBase + ReleaseCheck, ReleaseCheckCode, sizeof(ReleaseCheckCode));
     }
 }

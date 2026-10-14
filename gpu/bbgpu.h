@@ -23,7 +23,7 @@ int bbgpu_init(const BbGpuConfig *config);
 uintptr_t bbgpu_resolve(const char *scoped_nid);
 /* Called first by the loader's SIGSEGV handler: 1 when a GPU page-tracking fault was handled. */
 int bbgpu_handle_fault(void *ucontext, void *address);
-/* BB_WRITE_LOG=1: prints the logged GPU-side writes to guest memory near the fault. */
+/* PS_WRITE_LOG=1: prints the logged GPU-side writes to guest memory near the fault. */
 void bbgpu_dump_guest_writes(void *ucontext);
 /* Keyboard text entry through the game window (IME dialog). begin returns 0 when
  * no window exists; poll returns 0 typing, 1 confirmed, 2 cancelled (UTF-8 text). */
@@ -31,7 +31,7 @@ int bbgpu_text_input_begin(const char *initial_utf8, const char *prompt_utf8);
 int bbgpu_text_input_poll(char *out_utf8, uint64_t size);
 /* 1 while the in-game settings menu is open: the game's pad input is held neutral. */
 int bbgpu_overlay_captures_input(void);
-/* BB_PAD_FILE's ps, cross and circle for the overlay's close prompt (Guide opens it): 1 when the
+/* PS_PAD_FILE's ps, cross and circle for the overlay's close prompt (Guide opens it): 1 when the
  * prompt took them, so cross and circle are not passed to the game. */
 int bbgpu_overlay_pad_file_press(int guide, int cross, int circle);
 /* Mouse look (runtime_pad.c): the window takes the mouse when it is clicked (relative mode) and

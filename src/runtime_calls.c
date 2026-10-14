@@ -143,7 +143,7 @@ void runtime_calls_report(void) {
             const Entry swap = entries[j]; entries[j] = entries[j - 1]; entries[j - 1] = swap;
         }
     for (size_t i = 0; i < count; ++i) ++totals[entries[i].kind];
-    const char *path = getenv("BB_CALL_REPORT");
+    const char *path = getenv("PS_CALL_REPORT");
     const int file = path && *path ? open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644) : -1;
     char line[512];
     snprintf(line, sizeof(line),

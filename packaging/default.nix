@@ -9,19 +9,19 @@
 let
   lib = pkgs.lib;
   root = ./..;
-  # FSR 4.1.1 models are extracted from AMD's DLLs: never in a public package. BB_PACKAGE_FSR411=1
+  # FSR 4.1.1 models are extracted from AMD's DLLs: never in a public package. PS_PACKAGE_FSR411=1
   # (appimage.sh runs nix with --impure) bundles the local fsr4_411 for one's own devices.
-  fsr411 = builtins.getEnv "BB_PACKAGE_FSR411" == "1";
+  fsr411 = builtins.getEnv "PS_PACKAGE_FSR411" == "1";
   assetDirs = [ "scripts" "patches" "fsr4_shaders" "launcher" "tools/fsr4cap" ]
     ++ lib.optional fsr411 "fsr4_411";
   # Only what the package needs (the tree also holds builds, profiles and captures).
   wanted = [
-    "run.sh" "out" "out/bb-probe" "out/bb-gpu-capabilities" "out/gpu" "out/gpu/libbbgpu.so" "tools"
+    "run.sh" "out" "out/psport" "out/bb-gpu-capabilities" "out/gpu" "out/gpu/libpsport-gpu.so" "tools"
   ] ++ assetDirs;
   # DLSS (a build with DLSS_SDK_ROOT): the bridge, NVIDIA's runtime library and its license, as
   # NVIDIA's RTX SDK license allows in an application. Without them the launcher lets the player
   # choose NVIDIA's library (the bridge is still needed).
-  dlssFiles = [ "out/libbbport_dlss.so" "out/NVIDIA-DLSS-LICENSE.txt" "out/gpu/libbbnet.so" ];
+  dlssFiles = [ "out/libpsport_dlss.so" "out/NVIDIA-DLSS-LICENSE.txt" "out/gpu/libbbnet.so" ];
   isNgx = rel: lib.hasPrefix "out/libnvidia-ngx-dlss.so." rel;
   src = builtins.path {
     name = "bbport-src";
@@ -130,7 +130,7 @@ let
       --set-default FONTCONFIG_FILE ${fontsConf} \
       --set-default LC_ALL C.UTF-8 \
       --prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath [ pkgs.libglvnd pkgs.libx11 pkgs.libxext ]} \
-      --set BB_VULKANINFO ${pkgs.vulkan-tools}/bin/vulkaninfo \
+      --set PS_VULKANINFO ${pkgs.vulkan-tools}/bin/vulkaninfo \
       --run '[ -r "''${SSL_CERT_FILE:-}" ] || export SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt; [ -d "''${SSL_CERT_DIR:-}" ] || unset SSL_CERT_DIR' \
   '';
 in
@@ -163,7 +163,7 @@ pkgs.stdenv.mkDerivation {
     mkdir -p $d/tools/fsr4cap/bin
     ln -s ${dxilSpirv}/bin/dxil-spirv $d/tools/fsr4cap/bin/dxil-spirv
     install -m644 ${fsr4capExe} $d/tools/fsr4cap/bin/fsr4cap.exe
-    # FSR 4.1.1 models only with BB_PACKAGE_FSR411=1 (see above); otherwise run.sh finds them in
+    # FSR 4.1.1 models only with PS_PACKAGE_FSR411=1 (see above); otherwise run.sh finds them in
     # the data directory (~/.local/share/bbport/fsr4_411).
     if [ -d fsr4_411 ]; then
       ${pkgs.python3}/bin/python3 - <<'PY'
@@ -179,18 +179,18 @@ pkgs.stdenv.mkDerivation {
     PY
       cp -r fsr4_411 $d/
     fi
-    install -m755 out/bb-probe $d/bin/bb-probe
+    install -m755 out/psport $d/bin/psport
     install -m755 out/bb-gpu-capabilities $d/bin/bb-gpu-capabilities
-    install -Dm755 out/gpu/libbbgpu.so $d/bin/gpu/libbbgpu.so
+    install -Dm755 out/gpu/libpsport-gpu.so $d/bin/gpu/libpsport-gpu.so
     # Their debug info names the build environment's headers (the full GCC, Vulkan headers): Nix
     # took those for dependencies, ~300 MB. Symbols stay (crash reports).
-    ${pkgs.binutils-unwrapped}/bin/strip --strip-debug $d/bin/bb-probe $d/bin/bb-gpu-capabilities
+    ${pkgs.binutils-unwrapped}/bin/strip --strip-debug $d/bin/psport $d/bin/bb-gpu-capabilities
     # The online module (gpu/bbnet), when the build has it.
     if [ -f out/gpu/libbbnet.so ]; then
       install -Dm755 out/gpu/libbbnet.so $d/bin/gpu/libbbnet.so
     fi
-    if [ -f out/libbbport_dlss.so ]; then
-      install -m755 out/libbbport_dlss.so $d/bin/libbbport_dlss.so
+    if [ -f out/libpsport_dlss.so ]; then
+      install -m755 out/libpsport_dlss.so $d/bin/libpsport_dlss.so
       for ngx in out/libnvidia-ngx-dlss.so.*; do
         [ -f "$ngx" ] && install -m755 "$ngx" $d/bin/
       done
@@ -207,21 +207,21 @@ pkgs.stdenv.mkDerivation {
     makeShellWrapper ${python}/bin/python3 $out/libexec/bbport \
       "''${gappsWrapperArgs[@]}" \
       ${common}      --add-flags "$out/share/bbport/launcher/bbport_vulkan.py ${python}/bin/python3 $out/share/bbport/launcher/bbport_launcher.py" \
-      --set BB_PREBUILT 1 \
+      --set PS_PREBUILT 1 \
       --set PYTHON ${pkgs.python3}/bin/python3 \
-      --set BB_BUNDLED_VK_DRIVER_FILES ${icds} \
+      --set PS_BUNDLED_VK_DRIVER_FILES ${icds} \
       --prefix PATH : ${lib.makeBinPath [ pkgs.bash pkgs.coreutils pkgs.util-linux pkgs.procps
                                           pkgs.gawk pkgs.gnused pkgs.gnugrep pkgs.spirv-tools
                                           pkgs.systemdMinimal ]} \
-      --run 'export BB_DATA_DIR=''${BB_DATA_DIR:-''${XDG_DATA_HOME:-$HOME/.local/share}/bbport}; mkdir -p "$BB_DATA_DIR"'
+      --run 'export PS_DATA_DIR=''${PS_DATA_DIR:-''${XDG_DATA_HOME:-$HOME/.local/share}/bbport}; mkdir -p "$PS_DATA_DIR"'
     # The game alone, without the launcher (settings from the data directory's bbport.ini).
     makeShellWrapper ${pkgs.python3}/bin/python3 $out/bin/bbport-game \
       ${common}      --add-flags "$out/share/bbport/launcher/bbport_vulkan.py ${pkgs.bash}/bin/bash $out/share/bbport/run.sh" \
-      --set BB_PREBUILT 1 \
+      --set PS_PREBUILT 1 \
       --set PYTHON ${pkgs.python3}/bin/python3 \
-      --set BB_BUNDLED_VK_DRIVER_FILES ${icds} \
+      --set PS_BUNDLED_VK_DRIVER_FILES ${icds} \
       --prefix PATH : ${lib.makeBinPath [ pkgs.bash pkgs.coreutils pkgs.procps ]} \
-      --run 'export BB_DATA_DIR=''${BB_DATA_DIR:-''${XDG_DATA_HOME:-$HOME/.local/share}/bbport}; mkdir -p "$BB_DATA_DIR"'
+      --run 'export PS_DATA_DIR=''${PS_DATA_DIR:-''${XDG_DATA_HOME:-$HOME/.local/share}/bbport}; mkdir -p "$PS_DATA_DIR"'
   '';
   meta.mainProgram = "bbport";
 }

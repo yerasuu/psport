@@ -108,7 +108,7 @@ void UniqueBuffer::Create(vk::BufferCreateInfo& buffer_ci, MemoryType mem_type,
     } else {
         buffer_ci.flags |=
             vk::BufferCreateFlagBits::eSparseBinding | vk::BufferCreateFlagBits::eSparseResidency;
-        // Bound to exported guest memory chunks (BB_GUEST_IN_PLACE) as well as VRAM blocks.
+        // Bound to exported guest memory chunks (PS_GUEST_IN_PLACE) as well as VRAM blocks.
         const vk::ExternalMemoryBufferCreateInfo external{
             .handleTypes = BbGuestMemory::HandleType(),
         };
@@ -165,7 +165,7 @@ Buffer::Buffer(const Vulkan::Instance& instance, u64 size_bytes_, vk::DeviceMemo
     const vk::ExternalMemoryBufferCreateInfo external{
         .handleTypes = BbGuestMemory::HandleType(),
     };
-    // bbport BB_LAYER_MEMORY: what the GPU binds for the game's memory in place (no arena):
+    // bbport PS_LAYER_MEMORY: what the GPU binds for the game's memory in place (no arena):
     // vertex, index and indirect data and device addresses too (the memory has them).
     const bool layer = BbGuestMemory::LayerMemory();
     vk::BufferUsageFlags usage =

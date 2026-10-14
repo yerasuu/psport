@@ -1,5 +1,5 @@
 // bbport: replaces shadPS4's spdlog-based logger with a small fmt sink.
-// Level from BB_GPU_LOG (trace|debug|info|warning|error; default warning).
+// Level from PS_GPU_LOG (trace|debug|info|warning|error; default warning).
 #pragma once
 #include <algorithm>
 #include <array>
@@ -30,7 +30,7 @@ void Write(std::string_view log_class, Level level, const char* file, int line, 
            std::string&& message);
 inline void Flush() {}
 // bbport: a "(STUBBED)" line names a function that answers without doing its work. It is shown on
-// the first call whatever BB_GPU_LOG says, and every call is counted for the call summary
+// the first call whatever PS_GPU_LOG says, and every call is counted for the call summary
 // (src/runtime_calls.c).
 template <class T>
 constexpr bool IsStubbed(const T& format) {

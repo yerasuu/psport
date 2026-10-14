@@ -122,7 +122,7 @@ void TextureCache::DownloadImageMemory(ImageId image_id, bool sync) {
         .imageOffset = {0, 0, 0},
         .imageExtent = {image.info.size.width, image.info.size.height, image.info.size.depth},
     };
-    // bbport BB_GUEST_IN_PLACE: the GPU copies the image into the game's memory itself, in stream
+    // bbport PS_GUEST_IN_PLACE: the GPU copies the image into the game's memory itself, in stream
     // order: before the fences that follow, no wait here and no CPU copy afterwards.
     // Where the memory has a VRAM copy the GPU copies into that copy as well: buffers bound over
     // it read the image's data in stream order (issue #122: motion blur read a render target as a
@@ -225,10 +225,10 @@ void TextureCache::InvalidateMemory(VAddr addr, size_t size) {
     });
 }
 
-// bbport BB_IMAGE_WATCH=addr (diagnostics): how the image at that address is used (first 300).
+// bbport PS_IMAGE_WATCH=addr (diagnostics): how the image at that address is used (first 300).
 void TextureCache::WatchImage(const Image& image, const char* what) {
     static const u64 watched = [] {
-        const char* env = std::getenv("BB_IMAGE_WATCH");
+        const char* env = std::getenv("PS_IMAGE_WATCH");
         return env ? std::strtoull(env, nullptr, 0) : 0ull;
     }();
     if (!watched || image.info.guest_address != watched) {
@@ -246,7 +246,7 @@ void TextureCache::InvalidateMemoryFromGPU(VAddr address, size_t max_size) {
     // bbport: only an image starting at `address` is affected, so the images over its first byte
     // are all there is to look at (the whole range was walked for every GPU write binding).
     ForEachImageInRegion(address, 1, [&](ImageId image_id, Image& image) {
-        static const bool log = std::getenv("BB_IMAGE_SYNC_LOG") != nullptr;
+        static const bool log = std::getenv("PS_IMAGE_SYNC_LOG") != nullptr;
         if (log) {
             static std::atomic<u32> printed{0};
             if (printed.fetch_add(1) < 200) {
@@ -903,7 +903,7 @@ void TextureCache::RefreshImage(Image& image) {
     const u32 num_mips = image.info.resources.levels;
     const bool is_gpu_modified = True(image.flags & ImageFlagBits::GpuModified);
     const bool is_gpu_dirty = True(image.flags & ImageFlagBits::GpuDirty);
-    static const bool sync_log = std::getenv("BB_IMAGE_SYNC_LOG") != nullptr;
+    static const bool sync_log = std::getenv("PS_IMAGE_SYNC_LOG") != nullptr;
     if (sync_log && is_gpu_dirty) {
         static std::atomic<u32> printed{0};
         if (printed.fetch_add(1) < 100) {
@@ -914,7 +914,7 @@ void TextureCache::RefreshImage(Image& image) {
     }
 
     if (sync_log) {
-        // BB_IMAGE_SYNC_LOG: the images refreshed most per 5 s (any reason), with their flags.
+        // PS_IMAGE_SYNC_LOG: the images refreshed most per 5 s (any reason), with their flags.
         struct Refreshes {
             u64 count = 0, bytes = 0;
             u32 width = 0, height = 0, format = 0, tiling = 0, flags = 0;
@@ -1180,9 +1180,9 @@ void TextureCache::GarbageCollectImages() {
         // ~1 GB after its 8 GB system reserve: usage stayed above the critical mark, so the
         // collector evicted images used two or three frames ago on every submission and wrote
         // GPU-written ones back. Compare with the driver's current budget instead.
-        // BB_GC_BUDGET_MB=N: this rule with a fixed budget on any GPU (tests on a desktop).
+        // PS_GC_BUDGET_MB=N: this rule with a fixed budget on any GPU (tests on a desktop).
         static const u64 forced_budget = [] {
-            const char* env = std::getenv("BB_GC_BUDGET_MB");
+            const char* env = std::getenv("PS_GC_BUDGET_MB");
             return env ? std::strtoull(env, nullptr, 10) << 20 : 0;
         }();
         if (instance.IsIntegrated() || forced_budget) {
@@ -1201,7 +1201,7 @@ void TextureCache::GarbageCollectImages() {
     // seconds, for ages in seconds. The usage compared is all of our VRAM, not only images: on a
     // discrete GPU it stays over the trigger, where an age of 16 ticks (~3 frames) evicted every
     // texture briefly off screen and uploaded it again. Below the pressure mark an image goes
-    // once unused for BB_GC_IDLE_SECONDS (20): the textures of an area left behind.
+    // once unused for PS_GC_IDLE_SECONDS (20): the textures of an area left behind.
     const u64 second = u64(std::chrono::duration_cast<std::chrono::seconds>(
                                std::chrono::steady_clock::now().time_since_epoch())
                                .count());
@@ -1226,17 +1226,17 @@ void TextureCache::GarbageCollectImages() {
         return;
     }
     static const u64 idle_seconds = [] {
-        const char* env = std::getenv("BB_GC_IDLE_SECONDS");
+        const char* env = std::getenv("PS_GC_IDLE_SECONDS");
         return std::clamp<u64>(env ? std::strtoull(env, nullptr, 10) : 20, 1, 63);
     }();
-    // Under pressure an image goes once unused for BB_GC_PRESSURE_IDLE_SECONDS (5), over the
+    // Under pressure an image goes once unused for PS_GC_PRESSURE_IDLE_SECONDS (5), over the
     // critical mark for 1 s first, and only then by submissions as before (80/160 ticks, a
     // fraction of a second). On cards up to 8 GB the pressure mark is 40 % of the budget: the
     // usage stayed over it, so textures off screen for a moment were evicted and uploaded again
     // when the camera turned back (9000 a minute with a 4.5 GB budget), read over the bus each
     // time: NVIDIA testers saw the frame rate fall the longer they played.
     static const u64 pressure_idle_seconds = [] {
-        const char* env = std::getenv("BB_GC_PRESSURE_IDLE_SECONDS");
+        const char* env = std::getenv("PS_GC_PRESSURE_IDLE_SECONDS");
         return std::clamp<u64>(env ? std::strtoull(env, nullptr, 10) : 5, 0, 63);
     }();
     // The tick at the start of that second (an older one where no submission came then).
@@ -1321,7 +1321,7 @@ void TextureCache::GarbageCollectImages() {
         configure(true, true);
         lru_cache.ForEachItemBelow(below_tick, clean_up);
     }
-    // bbport: evictions under memory pressure, at most every 5 s (BB_FRAME_STATS or not).
+    // bbport: evictions under memory pressure, at most every 5 s (PS_FRAME_STATS or not).
     if (pressured || gc_downloads != 0) {
         const auto now = std::chrono::steady_clock::now();
         if (now - gc_report_time >= std::chrono::seconds(5)) {

@@ -7,8 +7,8 @@
 // timeout, was reset: device lost, the game gone. Bloodborne's real counts are at most a few
 // hundred. Before each indirect dispatch a one-thread shader (indirect_guard.comp) copies the
 // counts to a slot of our own, zero if they are implausible (past the device's limits or
-// BB_INDIRECT_GUARD_MAX groups in all, default 4M), and the dispatch reads that slot. Skipped
-// dispatches are counted and reported. BB_INDIRECT_GUARD=0: the game's counts as they are.
+// PS_INDIRECT_GUARD_MAX groups in all, default 4M), and the dispatch reads that slot. Skipped
+// dispatches are counted and reported. PS_INDIRECT_GUARD=0: the game's counts as they are.
 #pragma once
 
 #include <atomic>

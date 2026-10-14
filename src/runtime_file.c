@@ -140,9 +140,9 @@ static int translate(const char *guest,char *out,size_t size) {
     if (!m && first && counted)
         fprintf(stderr,"Runtime: no mount for guest path %s (further misses under %.*s are counted for the exit report)\n",guest,(int)root,buffer);
     else if (!m && first) fprintf(stderr,"Runtime: no mount for guest path %s\n",guest);
-    /* BB_FILE_TRACE=1: every guest path the game opens, stats or checks (mods, missing files). */
+    /* PS_FILE_TRACE=1: every guest path the game opens, stats or checks (mods, missing files). */
     static int trace=-1;
-    if (trace<0) { const char *t=getenv("BB_FILE_TRACE"); trace=t && t[0]=='1'; }
+    if (trace<0) { const char *t=getenv("PS_FILE_TRACE"); trace=t && t[0]=='1'; }
     if (trace) printf("File trace: %s -> %s\n",guest,result ? "(no mount)" : out);
     return result;
 }
@@ -235,10 +235,10 @@ static File *get(int fd) {
     if (fd<3 || fd>=MAX_FILES || !files[fd].used) return NULL;
     return &files[fd];
 }
-/* BB_AUDIO_TRACE=1: sound file opens and failed reads (missing game sounds). */
-static int audio_trace(void) { static int v=-1; if (v<0) { const char *e=getenv("BB_AUDIO_TRACE"); v=e && e[0]=='1'; } return v; }
-/* BB_SAVE_TRACE=1: every operation on save files (/savedataN). */
-static int save_trace(void) { static int v=-1; if (v<0) { const char *e=getenv("BB_SAVE_TRACE"); v=e && e[0]=='1'; } return v; }
+/* PS_AUDIO_TRACE=1: sound file opens and failed reads (missing game sounds). */
+static int audio_trace(void) { static int v=-1; if (v<0) { const char *e=getenv("PS_AUDIO_TRACE"); v=e && e[0]=='1'; } return v; }
+/* PS_SAVE_TRACE=1: every operation on save files (/savedataN). */
+static int save_trace(void) { static int v=-1; if (v<0) { const char *e=getenv("PS_SAVE_TRACE"); v=e && e[0]=='1'; } return v; }
 /* Game mounts (including linked mod overlays) are read-only. Saves use other mounts. */
 static int game_path(const char *p) {
     if (!p || !*p) return 0;
@@ -364,7 +364,7 @@ static int64_t do_open(const char *guest,int flags,int mode) {
     ++opens;
     pthread_mutex_unlock(&lock);
     if (audio_trace() && strstr(guest,"sound/")) printf("Audio trace: open(%s) -> fd %d, %lld bytes\n",guest,fd,(long long)s.st_size);
-    const char *mod_trace=getenv("BB_MOD_TRACE"), *mod_root=getenv("BB_MODS_DIR");
+    const char *mod_trace=getenv("PS_MOD_TRACE"), *mod_root=getenv("PS_MODS_DIR");
     if (mod_trace && mod_trace[0]=='1' && mod_root) {
         char actual[PATH_MAX],root[PATH_MAX];
         static unsigned traced;

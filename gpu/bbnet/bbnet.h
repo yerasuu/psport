@@ -1,5 +1,5 @@
 /* bbport online module (libbbnet.so, gpu/bbnet): the PS4 network and PSN libraries with the
- * shadNet client. A separate library the runtime loads only for online play (BB_ONLINE=1,
+ * shadNet client. A separate library the runtime loads only for online play (PS_ONLINE=1,
  * src/runtime_net.c); offline the port never touches it, and a build without it runs offline.
  * Its C++ inside is private (hidden symbols, -Bsymbolic): these two calls are all it exports. */
 #ifndef BBNET_H

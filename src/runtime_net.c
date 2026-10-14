@@ -1,5 +1,5 @@
-/* Online play (BB_ONLINE=1): the game's network and PSN imports go to the online module
- * (gpu/bbnet: libbbnet.so beside libbbgpu.so), loaded here on the first such import. Offline,
+/* Online play (PS_ONLINE=1): the game's network and PSN imports go to the online module
+ * (gpu/bbnet: libbbnet.so beside libpsport-gpu.so), loaded here on the first such import. Offline,
  * or when the module is missing or fails to start, they stay with the runtime's offline
  * versions (runtime_services.c). Trophies, voice and the store/profile dialogs always stay here. */
 #define _GNU_SOURCE
@@ -23,7 +23,7 @@ void runtime_net_configure(const char *app0, const char *serial, const char *tit
 
 int runtime_net_enabled(void) {
     static int enabled=-1;
-    if (enabled<0) { const char *v=getenv("BB_ONLINE"); enabled=v && v[0]=='1'; }
+    if (enabled<0) { const char *v=getenv("PS_ONLINE"); enabled=v && v[0]=='1'; }
     return enabled;
 }
 
@@ -40,14 +40,14 @@ int runtime_net_symbol(const char *symbol) {
     return match;
 }
 
-/* The module: BB_NET_MODULE, else gpu/libbbnet.so beside bb-probe (where libbbgpu.so is). */
+/* The module: PS_NET_MODULE, else gpu/libbbnet.so beside psport (where libpsport-gpu.so is). */
 static BbNetResolveFn module_resolve(void) {
     static int tried;
     static BbNetResolveFn resolve;
     if (tried) return resolve;
     tried=1;
     char path[PATH_MAX];
-    const char *forced=getenv("BB_NET_MODULE");
+    const char *forced=getenv("PS_NET_MODULE");
     if (forced && forced[0]) {
         snprintf(path,sizeof(path),"%s",forced);
     } else {

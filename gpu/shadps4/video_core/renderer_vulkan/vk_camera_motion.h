@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // bbport: camera motion vectors for temporal upscaling (docs/en/upscaler.md). The scene constants
-// give the camera of each frame; the previous one is kept here. BB_DEBUG_MOTION=1 blends the
+// give the camera of each frame; the previous one is kept here. PS_DEBUG_MOTION=1 blends the
 // motion vectors as colors into the frame before it is copied to the display.
 
 #pragma once
@@ -64,7 +64,7 @@ public:
     // Current projection, previous projection, and row Z of previous-view * inverse-view.
     [[nodiscard]] std::array<std::array<float, 4>, 3> TaaDepthParameters() const noexcept;
     /// bbport: the matrices and jitter of the motion of this frame, printed with an upscaler dump
-    /// (BB_DUMP_TRIGGER) for offline checks of the vectors.
+    /// (PS_DUMP_TRIGGER) for offline checks of the vectors.
     void PrintState(int frame) const;
 
     /// Records the motion vector pass (Scheduler::Record): `depth_view` (depth aspect, General

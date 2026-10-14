@@ -3,10 +3,10 @@
 # its scripts and the launcher, bundled with their Nix closure (nix-appimage: the AppImage mounts
 # its /nix/store with user namespaces, available on SteamOS and most desktops).
 # Running it opens the launcher; `--play` starts the game with the launcher's saved settings.
-# Data (generated files, saves, bbport.ini): ~/.local/share/bbport (BB_DATA_DIR).
+# Data (generated files, saves, bbport.ini): ~/.local/share/bbport (PS_DATA_DIR).
 set -euo pipefail
 cd -- "$(dirname -- "$0")/.."
-[[ -f out/bb-probe && -f out/gpu/libbbgpu.so ]] || { echo 'Build first: bash build.sh' >&2; exit 1; }
+[[ -f out/psport && -f out/gpu/libpsport-gpu.so ]] || { echo 'Build first: bash build.sh' >&2; exit 1; }
 root=$PWD
 # The libraries' store paths: for each library a binary needs (NEEDED), the RUNPATH directory it
 # is found in (their closures come along). Not every RUNPATH entry: built in nix-shell, the
@@ -24,7 +24,7 @@ needed_dirs() {
 }
 {
     echo '['
-    for elf in out/bb-probe out/gpu/libbbgpu.so $(ls out/libbbport_dlss.so out/gpu/libbbnet.so 2>/dev/null); do
+    for elf in out/psport out/gpu/libpsport-gpu.so $(ls out/libpsport_dlss.so out/gpu/libbbnet.so 2>/dev/null); do
         needed_dirs "$elf"
     done | grep -o '^/nix/store/[^/]*' | sort -u | grep -v -- '-nix-shell$' | sed 's/.*/  "&"/'
     echo ']'

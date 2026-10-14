@@ -5,7 +5,7 @@
 
 Each OUTDIR/<title>/ holds run.tsv (written by regress.sh), log and shots/. Milestones are read from
 the log in the order the port reaches them; frames needs a dumped frame that is not black, audio a
-BB_AUDIO_STATS peak above -60 dBFS. submit_forced counts the GPU library's "Forcing submitDone" lines:
+PS_AUDIO_STATS peak above -60 dBFS. submit_forced counts the GPU library's "Forcing submitDone" lines:
 the game went without a submitDone long enough for the driver to send one itself, the sign of a stall
 on the GPU. A regression is a milestone the earlier run had and this one lacks, or a crash signature
 that is new or different. Python's standard library only, so that it runs wherever run.sh does.

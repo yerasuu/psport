@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // bbport: user settings changed at run time from the in-game menu (bbport_overlay.h) and kept
-// in bbport.ini (BB_CONFIG overrides the path). Environment variables override the file at
+// in bbport.ini (PS_CONFIG overrides the path). Environment variables override the file at
 // start. Readers load the atomics every frame; writers are the menu and Load().
 
 #pragma once
@@ -81,7 +81,7 @@ struct Values {
     std::atomic<bool> dlss_supported{false};
     std::atomic<const char*> dlss_problem{nullptr};
 
-    /// Startup settings for the explicit BB_RENDER_RES compatibility patch only.
+    /// Startup settings for the explicit PS_RENDER_RES compatibility patch only.
     int startup_preset = NativeAA;
     int startup_upscaler = UpscalerFsr3;
     bool startup_object_motion = true;

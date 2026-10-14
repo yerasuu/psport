@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// bbport: frames overlap (BB_SUBMIT_AHEAD) only while the game leaves a submitted frame's command
+// bbport: frames overlap (PS_SUBMIT_AHEAD) only while the game leaves a submitted frame's command
 // buffers alone until the GPU has retired it. Two watches on every submitted DCB and CCB: its
 // whole pages are read-only for the game until its frame retires (runtime_memory_trap,
 // FrameCommands), and its bytes are checksummed at submit and again at retire. A game that builds
 // the next frame over them (Gal Guardians 2: another thread reuses the region of F-1 as soon as
 // the submit of F returns, so the GPU's late labels land in the new commands and pending draws
 // read descriptor tables already overwritten) faults once: that thread waits for the frame, and
-// the frames no longer overlap for the session (BB_SUBMIT_AHEAD 0, the submission lock's
+// the frames no longer overlap for the session (PS_SUBMIT_AHEAD 0, the submission lock's
 // contract). The checksum catches what no page fault shows (writes by the kernel or the GPU,
-// memory above the trap table) a frame later. BB_SUBMIT_GUARD=0 turns both off, =trap or =hash
+// memory above the trap table) a frame later. PS_SUBMIT_GUARD=0 turns both off, =trap or =hash
 // keeps one.
 #pragma once
 #include <cstdint>

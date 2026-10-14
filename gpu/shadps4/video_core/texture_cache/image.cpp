@@ -104,11 +104,11 @@ void UniqueImage::Destroy() {
 void UniqueImage::Create(const vk::ImageCreateInfo& image_ci) {
     this->image_ci = image_ci;
     ASSERT(!image);
-    // bbport: images of BB_VMA_DEDICATED_MB (4) or more get memory of their own, given back to
+    // bbport: images of PS_VMA_DEDICATED_MB (4) or more get memory of their own, given back to
     // the driver when they are freed. In shared VMA blocks the texture collector's evictions left
     // holes (~0.9 GB on an RX 7800 XT) that a block only returns once wholly empty.
     static const vk::DeviceSize dedicated_from = [] {
-        const char* env = std::getenv("BB_VMA_DEDICATED_MB");
+        const char* env = std::getenv("PS_VMA_DEDICATED_MB");
         return vk::DeviceSize(env ? std::strtoull(env, nullptr, 10) : 4) << 20;
     }();
     VmaAllocationCreateFlags dedicated = 0;

@@ -457,7 +457,7 @@ void Configure(const char* app0, const char* serial, const char* title, const ch
 
 // ---- Registration and the C interface ------------------------------------------------------------
 
-// The module's own table (the port's libbbgpu keeps another one: this library's symbols are its
+// The module's own table (the port's libpsport-gpu keeps another one: this library's symbols are its
 // own, -Bsymbolic).
 namespace {
 struct Symbol {

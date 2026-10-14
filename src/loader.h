@@ -26,7 +26,7 @@ typedef struct {
     uint64_t binding_count;
     unsigned char *image; /* malloc'd, size bytes */
 } LoaderImage;
-/* hle and lle: comma-separated library names, as run.sh passes BB_HLE and BB_LLE. */
+/* hle and lle: comma-separated library names, as run.sh passes PS_HLE and PS_LLE. */
 typedef struct { const char *game, *system_modules, *hle, *lle; } LoaderOptions;
 
 void loader_load_game(const LoaderOptions *options, LoaderImage *out);

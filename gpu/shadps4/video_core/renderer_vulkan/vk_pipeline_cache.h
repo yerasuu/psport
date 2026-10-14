@@ -210,7 +210,7 @@ private:
                    std::vector<std::variant<GraphicsPipelineKey, ComputePipelineKey>>>
         module_related_pipelines;
 
-    /// bbport BB_ASYNC_PIPELINES: a new graphics pipeline of a pass drawn every frame is compiled
+    /// bbport PS_ASYNC_PIPELINES: a new graphics pipeline of a pass drawn every frame is compiled
     /// on worker threads (PipelineCompiler) while its draws go without it for a frame or two,
     /// instead of the game standing still for the driver (18 ms a pipeline on a GTX 1060, 1-4 s
     /// hitches on a first session). Other passes (one-time renders) compile at once, as before.

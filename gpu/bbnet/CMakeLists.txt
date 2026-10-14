@@ -2,9 +2,9 @@
 # (shadp2p, a shadPS4 fork, GPL-2.0), loaded by the runtime only for online play
 # (src/runtime_net.c). Its headers (include/) extend the port's shim for these libraries alone;
 # everything in it is hidden and bound to itself (-Bsymbolic) except bbnet.h's two calls, so its
-# copies of shadPS4's kernel shims and symbol table never meet libbbgpu's.
+# copies of shadPS4's kernel shims and symbol table never meet libpsport-gpu's.
 # Needs protobuf, nlohmann_json, OpenSSL, zlib and miniupnpc (shell.nix); without them the port
-# builds without it and plays offline (gpu/CMakeLists.txt: BB_NET).
+# builds without it and plays offline (gpu/CMakeLists.txt: PS_NET).
 
 set(SHADNET_PROTO_OUT "${CMAKE_CURRENT_BINARY_DIR}/shadnet_proto_gen")
 file(MAKE_DIRECTORY "${SHADNET_PROTO_OUT}")
@@ -29,9 +29,9 @@ target_compile_definitions(bbnet PRIVATE BOOST_ASIO_STANDALONE NDEBUG
 target_compile_options(bbnet PRIVATE -fvisibility=hidden -fvisibility-inlines-hidden
     -Wno-deprecated-declarations -Wno-missing-field-initializers)
 target_link_options(bbnet PRIVATE -Wl,-Bsymbolic -Wl,--exclude-libs,ALL)
-# libbbgpu (already in the process) provides shadPS4's common code: logging, threads' names.
+# libpsport-gpu (already in the process) provides shadPS4's common code: logging, threads' names.
 set_target_properties(bbnet PROPERTIES BUILD_RPATH "\$ORIGIN" INSTALL_RPATH "\$ORIGIN"
-    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}") # beside libbbgpu.so, where the runtime looks
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}") # beside libpsport-gpu.so, where the runtime looks
 target_link_libraries(bbnet PRIVATE bbgpu nlohmann_json::nlohmann_json protobuf::libprotobuf
     OpenSSL::SSL OpenSSL::Crypto ZLIB::ZLIB "${MINIUPNPC_LIBRARY}" Vulkan::Headers fmt::fmt
     Boost::headers magic_enum::magic_enum)

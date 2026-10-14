@@ -95,7 +95,7 @@ if (object_motion.b > 0.99 && abs(object_motion.a - depth) < depth_threshold &&
 
 **File:** `gpu/shadps4/video_core/host_shaders/camera_motion.comp`
 
-The `BB_DEBUG_MOTION=1` modes are now structured:
+The `PS_DEBUG_MOTION=1` modes are now structured:
 ```glsl
 if (mode == 1) {
     // Raw depth visualization
@@ -128,7 +128,7 @@ if (mode == 1) {
 ### Visual check
 ```bash
 # TAA at native resolution
-BB_UPSCALER=taa bash run.sh
+PS_UPSCALER=taa bash run.sh
 
 # Check:
 # 1. Flickering of distant walls (Hunter's Dream, upper floors)
@@ -140,7 +140,7 @@ BB_UPSCALER=taa bash run.sh
 ### Debug modes
 ```bash
 # Depth visualisation
-BB_DEBUG_MOTION=1 bash run.sh
+PS_DEBUG_MOTION=1 bash run.sh
 # Toggle: (1<<21) = raw depth, (1<<22) = view-space z
 
 # Motion vector check

@@ -1,5 +1,5 @@
 // bbport co-op: shadPS4's user list, reduced to the one user the runtime logs in (id 1).
-// The shadNet account comes from the launcher through BB_SHADNET_NPID / BB_SHADNET_PASSWORD.
+// The shadNet account comes from the launcher through PS_SHADNET_NPID / PS_SHADNET_PASSWORD.
 #pragma once
 #include <array>
 #include <cstdlib>
@@ -35,15 +35,15 @@ public:
             return std::string{value && value[0] ? value : fallback};
         };
         user.user_id = RuntimeUserId;
-        user.user_name = text("BB_USER_NAME", "Hunter");
+        user.user_name = text("PS_USER_NAME", "Hunter");
         user.player_index = 1;
         user.logged_in = true;
-        user.shadnet_npid = text("BB_SHADNET_NPID", "");
-        user.shadnet_password = text("BB_SHADNET_PASSWORD", "");
-        user.shadnet_token = text("BB_SHADNET_TOKEN", "");
+        user.shadnet_npid = text("PS_SHADNET_NPID", "");
+        user.shadnet_password = text("PS_SHADNET_PASSWORD", "");
+        user.shadnet_token = text("PS_SHADNET_TOKEN", "");
         user.shadnet_enabled = !user.shadnet_npid.empty();
-        user.np_country = text("BB_NP_COUNTRY", "us");
-        user.np_language = text("BB_NP_LANGUAGE", "en");
+        user.np_country = text("PS_NP_COUNTRY", "us");
+        user.np_language = text("PS_NP_LANGUAGE", "en");
     }
 
     User* GetUserByID(s32 user_id) { return user_id == RuntimeUserId ? &user : nullptr; }

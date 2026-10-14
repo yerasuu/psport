@@ -191,8 +191,8 @@ void DefineTexts() {
     // Two pages of the ControllSetting layout's six rows (the game's other layouts are fixed
     // forms): the picture, then the game's effects. The other patches (intros, the free camera,
     // the debug menu) and the game's own AA are in the overlay menu and the launcher.
-    page("Display", "Изображение", "Resolution, upscaler, sharpness and model detail (bbport)",
-         "Разрешение, апскейлер, резкость и детализация (bbport)");
+    page("Display", "Изображение", "Resolution, upscaler, sharpness and model detail (psport)",
+         "Разрешение, апскейлер, резкость и детализация (psport)");
     // Sliders and toggles first, the pop-up list last: a list opens downwards over the rows
     // below it, and their values showed through it.
     row(Preset, "Quality preset", "Пресет",
@@ -223,8 +223,8 @@ void DefineTexts() {
         {off, AddText("FSR 3.1", "FSR 3.1"), AddText("FSR 4", "FSR 4"), AddText("FSR 4.1.1", "FSR 4.1.1"),
          AddText("TAA", "TAA"), AddText("DLSS", "DLSS")});
 
-    page("Effects", "Эффекты", "The game's effects (bbport; after a restart)",
-         "Эффекты игры (bbport; после перезапуска)");
+    page("Effects", "Эффекты", "The game's effects (psport; after a restart)",
+         "Эффекты игры (psport; после перезапуска)");
 
     // Short names for the game's narrow name column (BbSettings::Effects order); the help line
     // has the details.
@@ -425,9 +425,9 @@ std::atomic<const void*> screen_sound_text{nullptr};
 
 const char16_t* LookupHook(void* repository, u32 table, u32 category, u32 id) {
     if (id >= IdBase && id < IdBase + texts.size()) {
-        // BB_GAME_MENU_TRACE=1: how often the game asks for our texts (per 2 s).
+        // PS_GAME_MENU_TRACE=1: how often the game asks for our texts (per 2 s).
         static const bool count = [] {
-            const char* env = std::getenv("BB_GAME_MENU_TRACE");
+            const char* env = std::getenv("PS_GAME_MENU_TRACE");
             return env && env[0] == '1';
         }();
         if (count) {
@@ -450,7 +450,7 @@ const char16_t* LookupHook(void* repository, u32 table, u32 category, u32 id) {
     }
     const char16_t* text = lookup_original(repository, table, category, id);
     static const bool trace = [] {
-        const char* env = std::getenv("BB_GAME_MENU_TRACE");
+        const char* env = std::getenv("PS_GAME_MENU_TRACE");
         return env && env[0] == '1';
     }();
     if (trace && id >= 110000 && id < 120000) {
@@ -549,7 +549,7 @@ u8* MapNear(unsigned char* image, u64 image_size, std::size_t size) {
 } // namespace
 
 void PatchImage(unsigned char* image, std::uint64_t size) {
-    if (const char* env = std::getenv("BB_GAME_MENU"); env && env[0] == '0') {
+    if (const char* env = std::getenv("PS_GAME_MENU"); env && env[0] == '0') {
         return;
     }
     image_base = reinterpret_cast<u64>(image);

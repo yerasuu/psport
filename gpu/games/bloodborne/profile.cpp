@@ -21,7 +21,7 @@ constexpr std::uint64_t ImageBase = 0x800000000ull;
 /// region ran on the generic paths alone, and the new memory model crashed on entering the world
 /// (issue #119, the US release: a null read in the allocator, 0x2085xxx). Its bookkeeping is in
 /// GPU-mapped pages; DynamicWriters below keeps them in place from the first write (the hooks
-/// alone do not matter for it: BB_GUEST_HOOKS=0 runs; BB_GAME_PROFILE=none crashes).
+/// alone do not matter for it: PS_GUEST_HOOKS=0 runs; PS_GAME_PROFILE=none crashes).
 constexpr const char* Serials[] = {"CUSA00900", "CUSA00207", "CUSA00208", "CUSA00299", "CUSA01363",
                                    "CUSA03179", "CUSA03173", "CUSA03014", "CUSA03023"};
 
@@ -35,9 +35,9 @@ constexpr CodeRange DynamicWriters[] = {
 
 /// The "sound hack" (rainvmaker, from the Diegolix29 shadPS4 fork): the game data save carries a
 /// flag at 0x204E of SPRJ0005/userdata0010; with it clear, parts of the game's audio (e.g. the
-/// player's weapon sounds) never play. BB_SOUND_HACK=0 leaves saves untouched.
+/// player's weapon sounds) never play. PS_SOUND_HACK=0 leaves saves untouched.
 void PrepareSaves(const char* saves, const char* save_title) {
-    if (const char* env = std::getenv("BB_SOUND_HACK"); env && env[0] == '0') {
+    if (const char* env = std::getenv("PS_SOUND_HACK"); env && env[0] == '0') {
         return;
     }
     DIR* users = opendir(saves);
@@ -80,7 +80,7 @@ void ReportStats() {
     }
 }
 
-/// BB_LABEL_TRAP=2: the small-object pool's release, and the branch of the GPU range collector
+/// PS_LABEL_TRAP=2: the small-object pool's release, and the branch of the GPU range collector
 /// (0x26aa860) taken for a block whose label reads 4 (done).
 constexpr LabelReleaseCode LabelRelease = {
     .release = ImageBase + 0x263b9b0,

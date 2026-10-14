@@ -85,8 +85,8 @@ static std::optional<std::filesystem::path> GetBundleParentDirectory() {
 #endif
 
 static auto UserPaths = [] {
-    // bbport: the port keeps GPU caches where BB_GPU_USER_DIR points.
-    const char* port_dir = std::getenv("BB_GPU_USER_DIR");
+    // bbport: the port keeps GPU caches where PS_GPU_USER_DIR points.
+    const char* port_dir = std::getenv("PS_GPU_USER_DIR");
     auto user_dir = port_dir ? std::filesystem::path(port_dir) : std::filesystem::current_path() / PORTABLE_DIR;
     if (!std::filesystem::exists(user_dir)) {
         // If it doesn't exist, use the standard path for the platform instead.

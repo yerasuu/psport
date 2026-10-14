@@ -53,7 +53,7 @@ std::atomic<bool> tripped{false};
 enum Mode : unsigned { Off = 0, Traps = 1, Hashes = 2 };
 unsigned Modes() {
     static const unsigned modes = [] {
-        const char* env = std::getenv("BB_SUBMIT_GUARD");
+        const char* env = std::getenv("PS_SUBMIT_GUARD");
         const std::string_view value = env ? env : "1";
         if (value == "0") {
             return unsigned(Off);
@@ -165,7 +165,7 @@ void Trip(const char* what, const Range& range, std::uintptr_t address, const ch
         return;
     }
     std::printf("Gnm: %s the commands of frame %llu at %#llx%s while the GPU ran them: frames no "
-                "longer overlap (BB_SUBMIT_AHEAD 0)\n",
+                "longer overlap (PS_SUBMIT_AHEAD 0)\n",
                 what, (unsigned long long)range.frame, (unsigned long long)address, detail);
 }
 

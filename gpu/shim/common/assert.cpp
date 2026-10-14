@@ -6,7 +6,7 @@
 #include "common/logging/log.h"
 #include <unistd.h>
 
-// bb-probe (probe.c): set while the port restarts itself through run.sh. The device fd is closed
+// psport (probe.c): set while the port restarts itself through run.sh. The device fd is closed
 // before exec; Vulkan calls failing then are not errors: this thread waits for the exec instead.
 extern "C" volatile int runtime_restarting;
 extern "C" void runtime_calls_report(void);

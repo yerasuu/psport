@@ -133,14 +133,14 @@ void Liverpool::Process(std::stop_token stoken) {
 #endif
 
     while (!stoken.stop_requested()) {
-        // BB_HONEST_LABELS: fences (and GPU idle) wait for work not submitted yet. Submitted once
+        // PS_HONEST_LABELS: fences (and GPU idle) wait for work not submitted yet. Submitted once
         // this thread has had nothing to do for 0.2 ms: the guest may be waiting for them.
-        // BB_PIPE_SIGNALS: signals may still be on their way to the recording thread (tasks).
+        // PS_PIPE_SIGNALS: signals may still be on their way to the recording thread (tasks).
         if (rasterizer && Vulkan::Rasterizer::HonestLabels() &&
             (rasterizer->HasUnsubmittedSignals() || !rasterizer->DrawPipeIdle())) {
             std::unique_lock lk{submit_mutex};
             static const auto idle_wait = std::chrono::microseconds([] {
-                const char* env = std::getenv("BB_HONEST_IDLE_US");
+                const char* env = std::getenv("PS_HONEST_IDLE_US");
                 return env ? std::strtoll(env, nullptr, 10) : 200ll;
             }());
             const bool work = submit_cv.wait_for(lk, idle_wait, [this] {
@@ -162,9 +162,9 @@ void Liverpool::Process(std::stop_token stoken) {
             BbTimeline::Note(BbTimeline::DecoderIdleBegin);
             // bbport: the game submits a frame in ~20 parts: waking from the condition variable for
             // each took tens of microseconds on the way to the GPU. Spins first, with cores to spare
-            // (BB_GPU_SPIN_US, default 200 with 12+ hardware threads, else 0).
+            // (PS_GPU_SPIN_US, default 200 with 12+ hardware threads, else 0).
             static const auto spin_time = std::chrono::microseconds([] {
-                if (const char* env = std::getenv("BB_GPU_SPIN_US")) {
+                if (const char* env = std::getenv("PS_GPU_SPIN_US")) {
                     return std::max(0, std::atoi(env));
                 }
                 return BbThreads::Available() >= 12 ? 200 : 0;
@@ -236,7 +236,7 @@ void Liverpool::Process(std::stop_token stoken) {
                     frame_end = !frame_ends.empty() && frame_ends.front().first <= decoded_total;
                     submit_cv.notify_all();
                 }
-                // BB_SUBMIT_LOCK=frame: the last submission of a frame (any queue) is decoded.
+                // PS_SUBMIT_LOCK=frame: the last submission of a frame (any queue) is decoded.
                 if (frame_end) {
                     SignalDecodedFrames();
                 }
@@ -246,7 +246,7 @@ void Liverpool::Process(std::stop_token stoken) {
         if (submit_done) {
             VideoCore::EndCapture();
             if (rasterizer && rasterizer->PipeSignals()) {
-                // BB_PIPE_SIGNALS: the frame's cache work runs on the recording thread after the
+                // PS_PIPE_SIGNALS: the frame's cache work runs on the recording thread after the
                 // frame (this thread decodes the next one meanwhile instead of waiting for it).
                 static constexpr u8 none = 0;
                 rasterizer->RunInOrder(
@@ -261,7 +261,7 @@ void Liverpool::Process(std::stop_token stoken) {
             }
             submit_done = false;
         }
-        // BB_SUBMIT_LOCK=decode: a frame ended after its submissions were all decoded.
+        // PS_SUBMIT_LOCK=decode: a frame ended after its submissions were all decoded.
         SignalDecodedFrames();
 
         // bbport: the guest takes GPU idle (sceGnmSubmitDone) as its work being done and frees
@@ -271,7 +271,7 @@ void Liverpool::Process(std::stop_token stoken) {
         // heap free list after minutes of play).
         // The same holds when sceGnmSubmitDone finds the GPU idle and does not block at all:
         // decoded (num_submits 0) is not done until then (work_retired).
-        // BB_PIPE_SIGNALS: the recording thread does both in order (a task below) instead.
+        // PS_PIPE_SIGNALS: the recording thread does both in order (a task below) instead.
         const bool pipe_signals = rasterizer && rasterizer->PipeSignals();
         if (rasterizer && !pipe_signals) {
             rasterizer->DrainDrawPipe(Vulkan::DrawPipe::ReasonSubmissionEnd);
@@ -283,7 +283,7 @@ void Liverpool::Process(std::stop_token stoken) {
         // that frame's labels and command buffers: late fences in its heap (a guest fault in its
         // allocator) and reused command buffers decoded as garbage ("PM4 type 0"). The loop
         // runs again for the new submissions and signals once they are done.
-        // BB_HONEST_LABELS: idle once the GPU has finished what was recorded (its fences written)
+        // PS_HONEST_LABELS: idle once the GPU has finished what was recorded (its fences written)
         // and nothing was submitted since; the work is submitted below if this thread stays idle.
         if (rasterizer && Vulkan::Rasterizer::HonestLabels()) {
             u64 generation;
@@ -291,7 +291,7 @@ void Liverpool::Process(std::stop_token stoken) {
                 std::scoped_lock lk{submit_mutex};
                 generation = submissions_total;
             }
-            // BB_SUBMIT_LOCK=decode: everything is decoded, so the next submission need not wait
+            // PS_SUBMIT_LOCK=decode: everything is decoded, so the next submission need not wait
             // for the GPU to finish (the interrupt below still waits for it).
             if (Libraries::GnmDriver::SubmitLockOnDecode()) {
                 bool decoded;
@@ -403,13 +403,13 @@ void SignalEop(const PM4CmdEventWriteEop& eop, u64 seq) {
     eop.SignalFence(
         [seq](void* address, u64 data, u32 num_bytes) {
             auto* memory = Core::Memory::Instance();
-            // bbport: BB_FENCE_DELAY_TEST=1 (experiment) holds every 200th fence back 80 ms: if
+            // bbport: PS_FENCE_DELAY_TEST=1 (experiment) holds every 200th fence back 80 ms: if
             // the guest frees label objects after a timeout, late labels corrupt its heap.
             static const bool delay_test = [] {
-                const char* env = std::getenv("BB_FENCE_DELAY_TEST");
+                const char* env = std::getenv("PS_FENCE_DELAY_TEST");
                 return env && env[0] == '1';
             }();
-            if (delay_test && seq != 0 && seq % 200 == 0) { // seq: BB_FREE_CHECK=1
+            if (delay_test && seq != 0 && seq % 200 == 0) { // seq: PS_FREE_CHECK=1
                 std::this_thread::sleep_for(std::chrono::milliseconds(80));
             }
             BbFreeCheck::Check(reinterpret_cast<u64>(address), num_bytes, &data, BbFreeCheck::Eop,
@@ -441,10 +441,10 @@ void RunEventWriteEop(Vulkan::Rasterizer& rasterizer, const u8* data) {
     if (eop.data_sel.Value() != DataSelect::None) {
         BbStats::eop_decoded.fetch_add(1, std::memory_order_relaxed);
     }
-    // BB_FREE_CHECK: the order of the fences in the command stream, checked where they land.
+    // PS_FREE_CHECK: the order of the fences in the command stream, checked where they land.
     const u64 seq = BbFreeCheck::NextFenceSeq();
     rasterizer.ProcessDownloadImages();
-    // BB_HONEST_LABELS: written once the GPU has finished the work before it, as the hardware
+    // PS_HONEST_LABELS: written once the GPU has finished the work before it, as the hardware
     // does (an end-of-pipe event), instead of when that work is recorded.
     // bbport: a timestamp without an interrupt: the GPU's own clock at the end of the pipe.
     if (Vulkan::Rasterizer::HonestLabels() && eop.data_sel.Value() == DataSelect::GpuClock64 &&
@@ -478,11 +478,11 @@ void RunEventWriteEop(Vulkan::Rasterizer& rasterizer, const u8* data) {
         return;
     }
     // Guest memory copies on the copy threads precede the fence the guest sees.
-    // BB_ASYNC_FENCES=1 writes it once they are done instead of waiting for them; measured
+    // PS_ASYNC_FENCES=1 writes it once they are done instead of waiting for them; measured
     // slower (79 vs 83 FPS): the guest waits on these fences, and later fences stall it more
     // than the wait costs.
     static const bool async_fences = [] {
-        const char* env = std::getenv("BB_ASYNC_FENCES");
+        const char* env = std::getenv("PS_ASYNC_FENCES");
         return env && env[0] == '1';
     }();
     if (async_fences && !BbToggle::Disabled(BbToggle::AsyncFences)) {
@@ -500,12 +500,12 @@ void RunEventWriteEop(Vulkan::Rasterizer& rasterizer, const u8* data) {
 }
 
 // bbport: a MEM_SEMAPHORE signal once the GPU has finished the work before it, in stream order
-// (BB_HONEST_LABELS), as the command processor gives it when it gets there: signalled when decoded
+// (PS_HONEST_LABELS), as the command processor gives it when it gets there: signalled when decoded
 // (a frame ahead of the GPU), a queue waiting on it would read what that work had not written
-// yet. BB_MEM_SEMAPHORE_ORDER=0: when decoded (as before).
+// yet. PS_MEM_SEMAPHORE_ORDER=0: when decoded (as before).
 bool MemSemaphoreInOrder() {
     static const bool on = [] {
-        const char* env = std::getenv("BB_MEM_SEMAPHORE_ORDER");
+        const char* env = std::getenv("PS_MEM_SEMAPHORE_ORDER");
         return !(env && env[0] == '0');
     }();
     return on && Vulkan::Rasterizer::HonestLabels();
@@ -631,7 +631,7 @@ void RunGpuClockCopy(Vulkan::Rasterizer& rasterizer, const u8* data) {
 void RunWriteData(Vulkan::Rasterizer& rasterizer, const u8* data) {
     const auto* header = reinterpret_cast<const PM4Header*>(data);
     const auto* write_data = reinterpret_cast<const PM4CmdWriteData*>(data);
-    // bbport BB_GUEST_IN_PLACE: the GPU writes it in stream order, as the command processor
+    // bbport PS_GUEST_IN_PLACE: the GPU writes it in stream order, as the command processor
     // does. A CPU store here lands before the GPU has run the work recorded before it, which may
     // still read the old value (the game orders such writes after its own fences and
     // WAIT_REG_MEMs, which this thread takes as met in stream order).
@@ -673,7 +673,7 @@ void WriteEosLabel(void* address, u64 value, u32 num_bytes) {
 
 void RunEventWriteEos(Vulkan::Rasterizer& rasterizer, const u8* data) {
     const auto& event_eos = *reinterpret_cast<const PM4CmdEventWriteEos*>(data);
-    // BB_HONEST_LABELS: end of shader work, so written once the GPU has finished it.
+    // PS_HONEST_LABELS: end of shader work, so written once the GPU has finished it.
     if (Vulkan::Rasterizer::HonestLabels() &&
         event_eos.command == PM4CmdEventWriteEos::Command::SignalFence) {
         rasterizer.ProcessDownloadImages();
@@ -693,7 +693,7 @@ void RunEventWriteEos(Vulkan::Rasterizer& rasterizer, const u8* data) {
     event_eos.SignalFence(&WriteEosLabel);
     if (event_eos.command == PM4CmdEventWriteEos::Command::GdsStore) {
         ASSERT(event_eos.size == 1);
-        // bbport BB_GUEST_IN_PLACE: a GPU copy from GDS in stream order, as the command processor
+        // bbport PS_GUEST_IN_PLACE: a GPU copy from GDS in stream order, as the command processor
         // stores it, instead of waiting for the whole GPU and storing on the CPU.
         if (VideoCore::GuestInPlace()) {
             rasterizer.CopyBuffer(reinterpret_cast<VAddr>(event_eos.Address()),
@@ -752,7 +752,7 @@ bool Liverpool::PendingFenceValue(VAddr address, u32& value) {
             return true;
         }
     }
-    // BB_HONEST_LABELS: past the recording thread, a fence waits for the GPU to finish the work
+    // PS_HONEST_LABELS: past the recording thread, a fence waits for the GPU to finish the work
     // before it; in stream order it is met already.
     if (Vulkan::Rasterizer::HonestLabels() && rasterizer) {
         u64 data = 0;
@@ -809,7 +809,7 @@ Liverpool::Task Liverpool::ProcessCeUpdate(std::span<const u32> ccb) {
                                BbFreeCheck::ConstRam);
             memcpy(dump_const->Address<void*>(),
                    cblock.constants_heap.data() + dump_const->Offset(), dump_const->Size());
-            // bbport: no write tracking (BB_GUEST_IN_PLACE): the caches hear of it (in order, on the
+            // bbport: no write tracking (PS_GUEST_IN_PLACE): the caches hear of it (in order, on the
             // recording thread).
             if (rasterizer && !VideoCore::WriteTracking()) {
                 rasterizer->NoteCommandWriteInOrder(dump_const->Address<VAddr>(),
@@ -867,7 +867,7 @@ bool Liverpool::CpDecoderEnabled() {
     static const bool enabled = [] {
         // Opt-in for now: the GPU thread spends ~7 % more per draw than the old walk (3.86 vs
         // 4.13 us on a 5700X3D), the cause not found yet.
-        const char* env = std::getenv("BB_CP_DECODER");
+        const char* env = std::getenv("PS_CP_DECODER");
         const bool on = env && env[0] == '1';
         if (on) {
             std::printf("GPU: command buffers decoded by the translator's own decoder (gpu/cp)\n");
@@ -1032,7 +1032,7 @@ void Liverpool::ApplyGraphicsRegisterPacket(Regs& regs, const PM4Header* header,
     checksum = HashRegisterPacket(checksum, reinterpret_cast<const u32*>(header), count + 1);
 }
 
-// bbport: BB_DCB_STATS=1 — structure of graphics command buffers (read-only scan, printed every
+// bbport: PS_DCB_STATS=1 — structure of graphics command buffers (read-only scan, printed every
 // 5 s): how many buffers, draws per buffer, state set before the first draw. Input for
 // processing command buffers on several threads.
 namespace {
@@ -1067,7 +1067,7 @@ bool IsDrawOpcode(PM4ItOpcode op) {
     }
 }
 
-// bbport BB_CP_SHADOW=1: the translator's own decoder (gpu/cp, step 2 of
+// bbport PS_CP_SHADOW=1: the translator's own decoder (gpu/cp, step 2 of
 // docs/en/history/TRANSLATOR_ARCHITECTURE.md) decodes every top-level graphics buffer as well, from the
 // same state. Once this decoder is done with the buffer both register files must be equal (the
 // compute program's SH range aside: this one keeps it per queue); the first differences are
@@ -1114,7 +1114,7 @@ CpShadow& Shadow() {
 
 bool CpShadowEnabled() {
     static const bool enabled = [] {
-        const char* env = std::getenv("BB_CP_SHADOW");
+        const char* env = std::getenv("PS_CP_SHADOW");
         return env && env[0] == '1' && !Pm4SelfTest::Enabled() && !Liverpool::CpDecoderEnabled();
     }();
     return enabled;
@@ -1324,7 +1324,7 @@ void Liverpool::SyncForCpuRead(VAddr address, u64 size) {
     }
     // The command processor reads memory when it reaches the packet; the GPU work recorded before
     // it may still be queued or running here (this thread decodes ahead of it).
-    static const bool trace = std::getenv("BB_SYNC_TRACE") != nullptr;
+    static const bool trace = std::getenv("PS_SYNC_TRACE") != nullptr;
     if (trace) std::printf("SyncForCpuRead %#llx: drain\n", (unsigned long long)address);
     rasterizer->DrainDrawPipe();
     if (trace) std::printf("SyncForCpuRead: finish\n");
@@ -1391,7 +1391,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
     if (draw_prep) {
         draw_prep->BeginSubmission(seq, regs, gfx_reg_checksum);
     }
-    static const bool dcb_stats = EmulatorSettingsImpl::Flag("BB_DCB_STATS", false);
+    static const bool dcb_stats = EmulatorSettingsImpl::Flag("PS_DCB_STATS", false);
     const int dcb_depth = g_dcb_depth;
     if (dcb_stats) {
         ScanDcb(dcb, dcb_depth);
@@ -1409,7 +1409,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
         RESUME_GFX(ce_task);
     }
 
-    // bbport BB_PM4_SELFTEST: test packets decoded before and after this submission, as a
+    // bbport PS_PM4_SELFTEST: test packets decoded before and after this submission, as a
     // nested indirect buffer would be (pm4_selftest.h).
     Pm4SelfTest::Injection selftest{};
     if (seq != NoSeq && Pm4SelfTest::Enabled()) {
@@ -1435,7 +1435,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
     }
     const auto base_addr = reinterpret_cast<uintptr_t>(dcb.data());
     const std::size_t dcb_dwords = dcb.size();
-    // bbport BB_CP_DECODER=1: packets and their register writes come from the
+    // bbport PS_CP_DECODER=1: packets and their register writes come from the
     // translator's own decoder (gpu/cp); what each packet does stays below.
     const u32* const dcb_end = dcb.data() + dcb.size();
     struct CpSink final : BbCp::Sink {
@@ -2182,7 +2182,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                         rasterizer->DrainDrawPipe(static_cast<u32>(opcode));
                         continue;
                     }
-                    // BB_HONEST_LABELS: a fence from another queue may wait for work not
+                    // PS_HONEST_LABELS: a fence from another queue may wait for work not
                     // submitted yet; this thread would spin on it forever.
                     if (rasterizer && rasterizer->HasUnsubmittedSignals()) {
                         rasterizer->Flush();
@@ -2622,7 +2622,7 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
             const auto* wait_reg_mem = reinterpret_cast<const PM4CmdWaitRegMem*>(header);
             ASSERT(wait_reg_mem->engine.Value() == PM4CmdWaitRegMem::Engine::Me);
             while (!wait_reg_mem->Test(regs.reg_array)) {
-                // BB_HONEST_LABELS: the value may come from a fence waiting for work not
+                // PS_HONEST_LABELS: the value may come from a fence waiting for work not
                 // submitted yet; this thread would spin on it forever.
                 if (rasterizer && rasterizer->HasUnsubmittedSignals()) {
                     rasterizer->Flush();
@@ -2632,7 +2632,7 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
             break;
         }
         case PM4ItOpcode::ReleaseMem: {
-            // BB_HONEST_LABELS: written once the GPU has finished the work before it (not a GDS store,
+            // PS_HONEST_LABELS: written once the GPU has finished the work before it (not a GDS store,
             // which needs the GPU copy recorded here).
             if (const auto* rm = reinterpret_cast<const PM4CmdReleaseMem*>(header);
                 rasterizer && Vulkan::Rasterizer::HonestLabels() &&
@@ -2880,7 +2880,7 @@ void Liverpool::CheckSubmittedCopy(const SubmittedCopy& copy, u64 seq) {
             const std::size_t n = std::min(buf.size(), dwords - at);
             iovec local{buf.data(), n * 4}, remote{const_cast<u32*>(guest + at), n * 4};
             if (process_vm_readv(getpid(), &local, 1, &remote, 1, 0) != ssize_t(n * 4)) {
-                // bbport BB_GUEST_IN_PLACE: dma-buf guest memory is not readable that way; still
+                // bbport PS_GUEST_IN_PLACE: dma-buf guest memory is not readable that way; still
                 // mapped, it is read directly.
                 int prot = 0, type = -1;
                 uintptr_t end = 0;

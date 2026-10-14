@@ -219,7 +219,7 @@ public:
         LOG_INFO(Lib_Net,
                  "P2P transport ready: UDP physical_port={} (set SHADPS4_P2P_PORT to pin it)",
                  physical_port);
-        // bbport: open the port on the router (UPnP, BB_UPNP). Discovery runs in the background,
+        // bbport: open the port on the router (UPnP, PS_UPNP). Discovery runs in the background,
         // so the mapping waits for it (issue #121: the port was never mapped, and summons from
         // behind a NAT without a manual forward could not reach this player).
         if (EmulatorSettings.IsUPnPEnabled()) {

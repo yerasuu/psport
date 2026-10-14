@@ -1675,7 +1675,7 @@ s32 ComputeSysfontShiftValue(FT_Face face) {
 namespace {
 
 // bbport: shadPS4 bundles these Noto fonts with its ImGui; here they are the host's (SteamOS and
-// most distributions ship them), looked up by file name in BB_FALLBACK_FONTS (folders separated
+// most distributions ship them), looked up by file name in PS_FALLBACK_FONTS (folders separated
 // by ':') and then the usual font folders. The Latin one falls back to the overlay's embedded
 // DejaVu Sans, so a title gets glyphs on any host.
 struct HostFallbackFont {
@@ -1710,7 +1710,7 @@ const HostFallbackFont* FindHostFallbackFont(const std::filesystem::path& path) 
 const std::unordered_map<std::string, std::filesystem::path>& HostFontFiles() {
     static const auto files = [] {
         std::vector<std::filesystem::path> dirs;
-        if (const char* list = std::getenv("BB_FALLBACK_FONTS")) {
+        if (const char* list = std::getenv("PS_FALLBACK_FONTS")) {
             std::string_view rest(list);
             for (auto colon = rest.find(':'); !rest.empty(); colon = rest.find(':')) {
                 dirs.emplace_back(std::string(rest.substr(0, colon)));
@@ -2165,7 +2165,7 @@ void AddBuiltinFallbackFaces(FontState& st, u32 font_set_type, u32 subfont_index
 void NotifyBuiltinFontFallbackOnce() {
     static std::once_flag once;
     std::call_once(once, [] {
-        std::printf("Font: PS4 system fonts not found (BB_SYS_FONTS); text uses fallback fonts and "
+        std::printf("Font: PS4 system fonts not found (PS_SYS_FONTS); text uses fallback fonts and "
                     "may not look as on the console\n");
     });
 }

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// bbport: BB_FREE_CHECK=1 — a diagnostic for a guest heap corruption (a crash in the game's
+// bbport: PS_FREE_CHECK=1 — a diagnostic for a guest heap corruption (a crash in the game's
 // small-object allocator). The game keeps its GPU label objects (48 bytes) in a small-object
 // pool: 4 KiB pages, blocks from the page start, a header at page + 0xfc0 (list links, free list
 // head, free count), the free list linked through the first qword of each free block. The crash
@@ -42,11 +42,11 @@ std::uint64_t NextFenceSeq();
 /// buffer in guest memory, and the submission (Liverpool::SubmitGfx order).
 void NoteFenceDecoded(std::uint64_t label, std::uint64_t value, const void* packet,
                       const void* buffer, std::uint64_t submit);
-/// BB_LABEL_TRAP: a decoded fence's write starts, and has landed (`write_ns` it took; slow
+/// PS_LABEL_TRAP: a decoded fence's write starts, and has landed (`write_ns` it took; slow
 /// ones are reported). Until then its label is pending.
 void NoteFenceWriting(std::uint64_t label);
 void NoteFenceWritten(std::uint64_t label, std::uint64_t write_ns = 0);
-/// BB_LABEL_TRAP=1 (with BB_FREE_CHECK=1): a pool page holding labels whose fences are decoded
+/// PS_LABEL_TRAP=1 (with PS_FREE_CHECK=1): a pool page holding labels whose fences are decoded
 /// but not yet written is read-only; a guest write into such a label block is reported with
 /// the guest code and call chain that made it (who frees a label before its fence). True when
 /// the fault was the trap's (the page is writable again).

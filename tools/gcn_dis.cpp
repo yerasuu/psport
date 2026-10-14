@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// gcn_dis FILE: prints a raw GCN program (as BB_DUMP_SKIPPED_GS writes them) one instruction per
+// gcn_dis FILE: prints a raw GCN program (as PS_DUMP_SKIPPED_GS writes them) one instruction per
 // line with the recompiler's own decoder: what the translator sees, operand fields and the
 // memory-instruction offsets, to read a title's shaders when LLVM cannot (it does not disassemble
 // gfx7). Build: tools/gcn_dis.sh.
@@ -18,7 +18,7 @@
 
 using namespace Shader::Gcn;
 
-// What the decoder links against in libbbgpu: messages to stderr, failed asserts end the tool.
+// What the decoder links against in libpsport-gpu: messages to stderr, failed asserts end the tool.
 namespace Common::Log {
 bool ShouldLog(Level) {
     return true;

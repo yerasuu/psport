@@ -24,7 +24,7 @@ static Block blocks[LIMIT];
 static size_t allocations, maps, reservations, flexible_maps, protects, queries;
 static uint64_t live_bytes;
 
-static int trace_memory(void) { static int v=-1; if (v<0) v=getenv("BB_TRACE_MEM")!=NULL; return v; }
+static int trace_memory(void) { static int v=-1; if (v<0) v=getenv("PS_TRACE_MEM")!=NULL; return v; }
 static int valid_alignment(uint64_t a) { return a >= PAGE && a <= POOL_SIZE && !(a & (a-1)); }
 static int block_type(uint64_t phys) {
     for (int i=0;i<LIMIT;++i)

@@ -52,7 +52,7 @@ bool GameCursorShown();
 /// The menu, the text dialog or the close prompt is open: the game's input is held neutral.
 bool CapturesInput();
 
-/// Pad thread, scripted input (BB_PAD_FILE): Guide opens the close prompt, which cross confirms and
+/// Pad thread, scripted input (PS_PAD_FILE): Guide opens the close prompt, which cross confirms and
 /// circle or Guide cancels. True when the prompt took the press, which then stays out of the game.
 bool PadFilePress(bool guide, bool cross, bool circle);
 

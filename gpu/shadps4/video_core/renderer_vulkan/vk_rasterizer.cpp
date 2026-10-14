@@ -95,11 +95,11 @@ Rasterizer::~Rasterizer() = default;
 
 bool Rasterizer::HonestLabels() {
     static const bool on = [] {
-        const char* env = std::getenv("BB_HONEST_LABELS");
+        const char* env = std::getenv("PS_HONEST_LABELS");
         const bool enabled = (env && env[0] == '1') || VideoCore::GuestInPlace();
         if (enabled) {
             std::printf("GPU: fences written when the GPU has finished the work before them "
-                        "(BB_HONEST_LABELS=1)\n");
+                        "(PS_HONEST_LABELS=1)\n");
         }
         return enabled;
     }();
@@ -209,13 +209,13 @@ bool Rasterizer::WriteGuestMemory(VAddr address, const void* data, u32 size) {
 
 bool Rasterizer::WriteDataOnGpu(VAddr address, const void* data, u32 size) {
     static const bool enabled = [] {
-        const char* env = std::getenv("BB_GPU_COMMAND_WRITES");
+        const char* env = std::getenv("PS_GPU_COMMAND_WRITES");
         return !env || env[0] != '0';
     }();
     if (!enabled || !VideoCore::GuestInPlace() || size == 0 || (address | size) % 4 != 0) {
         return false;
     }
-    // bbport BB_LAYER_MEMORY: a range whole in a mirror is written there too (asked first: the
+    // bbport PS_LAYER_MEMORY: a range whole in a mirror is written there too (asked first: the
     // target demotes it otherwise).
     const auto mirror = buffer_cache.CommandWriteMirror(address, size);
     const auto target = buffer_cache.CommandWriteTarget(address, size);
@@ -235,18 +235,18 @@ bool Rasterizer::WriteDataOnGpu(VAddr address, const void* data, u32 size) {
 }
 
 bool Rasterizer::OcclusionTranslated() {
-    // BB_OCCLUSION_QUERIES=1 (opt-in): Vulkan occlusion queries. Else the counters stay the fixed
+    // PS_OCCLUSION_QUERIES=1 (opt-in): Vulkan occlusion queries. Else the counters stay the fixed
     // sequence written when decoded (everything visible, as in the 0.3 model). With an upscaler
     // the scene is drawn smaller and jittered: a light's sub-pixel test shape passed samples in
     // one frame and none in the next, and its glow flashed grey over the whole frame (a lamp in
     // the cathedral at 640x360). Counting has to become stable against that first.
-    // The PM4 self-test (BB_PM4_SELFTEST=1) checks them, so it turns them on.
+    // The PM4 self-test (PS_PM4_SELFTEST=1) checks them, so it turns them on.
     static const bool enabled = [] {
-        const char* env = std::getenv("BB_OCCLUSION_QUERIES");
-        const char* selftest = std::getenv("BB_PM4_SELFTEST");
+        const char* env = std::getenv("PS_OCCLUSION_QUERIES");
+        const char* selftest = std::getenv("PS_PM4_SELFTEST");
         return (env && env[0] == '1') || (selftest && selftest[0] == '1');
     }();
-    // Experiment bit 4 of BB_TOGGLE_FILE: the fixed sequence while the game runs (A/B).
+    // Experiment bit 4 of PS_TOGGLE_FILE: the fixed sequence while the game runs (A/B).
     return enabled && VideoCore::GuestInPlace() && !BbToggle::Experiment(4);
 }
 
@@ -277,9 +277,9 @@ bool Rasterizer::OnVramDataAccess(VAddr addr, bool assume_locks) {
 }
 
 bool Rasterizer::WriteTimestampOnGpu(VAddr address, bool end_of_pipe) {
-    // BB_GPU_TIMESTAMPS=0: written by the CPU (EOP: once the GPU is done; COPY_DATA: when decoded).
+    // PS_GPU_TIMESTAMPS=0: written by the CPU (EOP: once the GPU is done; COPY_DATA: when decoded).
     static const bool enabled = [] {
-        const char* env = std::getenv("BB_GPU_TIMESTAMPS");
+        const char* env = std::getenv("PS_GPU_TIMESTAMPS");
         return !(env && env[0] == '0');
     }();
     if (!enabled || !VideoCore::GuestInPlace() || address % 8 != 0) {
@@ -293,7 +293,7 @@ bool Rasterizer::WriteTimestampOnGpu(VAddr address, bool end_of_pipe) {
 
 bool Rasterizer::WriteLabelOnGpu(VAddr address, u64 value, u32 num_bytes) {
     static const bool enabled = [] {
-        const char* env = std::getenv("BB_GPU_LABELS");
+        const char* env = std::getenv("PS_GPU_LABELS");
         return !env || env[0] != '0';
     }();
     if (!enabled || !VideoCore::GuestInPlace() || !HonestLabels() ||
@@ -306,13 +306,13 @@ bool Rasterizer::WriteLabelOnGpu(VAddr address, u64 value, u32 num_bytes) {
         return false;
     }
     static const bool force_portable = [] {
-        const char* env = std::getenv("BB_GPU_LABELS_PORTABLE");
+        const char* env = std::getenv("PS_GPU_LABELS_PORTABLE");
         return env && env[0] != '0';
     }();
     const bool marker = instance.IsBufferMarkerSupported() && !force_portable;
     static const bool announced = [&] {
         std::printf("GPU: end-of-pipe labels are written by the GPU (%s; "
-                    "BB_GPU_LABELS=0: by a CPU thread after the GPU)\n",
+                    "PS_GPU_LABELS=0: by a CPU thread after the GPU)\n",
                     marker ? "AMD buffer markers" : "portable Vulkan updates");
         return true;
     }();
@@ -356,7 +356,7 @@ bool Rasterizer::WriteLabelOnGpu(VAddr address, u64 value, u32 num_bytes) {
 
 bool Rasterizer::PipeSignals() const {
     static const bool enabled = [] {
-        const char* env = std::getenv("BB_PIPE_SIGNALS");
+        const char* env = std::getenv("PS_PIPE_SIGNALS");
         return !env || env[0] != '0';
     }();
     return enabled && HonestLabels() && UseDrawPipe() && OnStageA();
@@ -380,23 +380,23 @@ void Rasterizer::SubmitForSignals() {
 void Rasterizer::SubmitForSignalsNow() {
     PublishSignals(); // the end of a guest submission
     static const auto interval = std::chrono::microseconds([] {
-        const char* env = std::getenv("BB_HONEST_FLUSH_US");
+        const char* env = std::getenv("PS_HONEST_FLUSH_US");
         return env ? std::strtoll(env, nullptr, 10) : 2000ll;
     }());
     if (!HasUnsubmittedSignals()) {
         return;
     }
-    // Batched (one submission per BB_HONEST_FLUSH_US) while the GPU still has work; at once when it
+    // Batched (one submission per PS_HONEST_FLUSH_US) while the GPU still has work; at once when it
     // has finished everything submitted: holding the work back then only leaves it idle. Not at
-    // once while draws are queued for this thread (BB_HONEST_IDLE_BACKLOG bytes, default 64 KiB):
+    // once while draws are queued for this thread (PS_HONEST_IDLE_BACKLOG bytes, default 64 KiB):
     // it is then what the GPU waits for, and a submission costs it ~65 us (heavy scenes: 13 a
     // frame; 95 -> 100 FPS with half as many).
     static const bool idle_flush = [] {
-        const char* env = std::getenv("BB_HONEST_IDLE_FLUSH");
+        const char* env = std::getenv("PS_HONEST_IDLE_FLUSH");
         return !env || env[0] != '0';
     }();
     static const u64 idle_backlog = [] {
-        const char* env = std::getenv("BB_HONEST_IDLE_BACKLOG");
+        const char* env = std::getenv("PS_HONEST_IDLE_BACKLOG");
         return env ? std::strtoull(env, nullptr, 10) : u64(64 * 1024);
     }();
     const bool gpu_idle =
@@ -803,7 +803,7 @@ constexpr u32 AlignPacket(u32 size) {
 }
 u32 VerifyInterval() {
     static const u32 interval = [] {
-        const char* env = std::getenv("BB_PIPE_VERIFY");
+        const char* env = std::getenv("PS_PIPE_VERIFY");
         return env ? static_cast<u32>(std::strtoul(env, nullptr, 10)) : 0u;
     }();
     return interval;
@@ -811,7 +811,7 @@ u32 VerifyInterval() {
 } // namespace
 
 bool Rasterizer::DrawPipeWanted() {
-    const char* env = std::getenv("BB_DRAW_PIPE");
+    const char* env = std::getenv("PS_DRAW_PIPE");
     if (env && env[0]) {
         return env[0] == '1';
     }
@@ -829,7 +829,7 @@ bool Rasterizer::OnStageA() const {
 }
 
 namespace {
-/// Stage A: cycles waited per drain site (BB_FRAME_STATS), keyed by function name and line.
+/// Stage A: cycles waited per drain site (PS_FRAME_STATS), keyed by function name and line.
 std::unordered_map<const char*, std::unordered_map<u32, u64>> drain_sites;
 } // namespace
 
@@ -837,7 +837,7 @@ void Rasterizer::DrainDrawPipe(u32 reason, u32 line, const char* function) {
     if (!draw_pipe || !OnStageA()) {
         return;
     }
-    static const bool stats = std::getenv("BB_FRAME_STATS") != nullptr;
+    static const bool stats = std::getenv("PS_FRAME_STATS") != nullptr;
     if (!stats) {
         draw_pipe->Drain(reason);
         return;
@@ -881,7 +881,7 @@ void Rasterizer::NotePendingRead(VAddr address, u64 size) {
 
 void Rasterizer::WaitForPendingReads(VAddr address, u64 size) {
     static const bool enabled = [] {
-        const char* env = std::getenv("BB_CONSTRAM_PIPE");
+        const char* env = std::getenv("PS_CONSTRAM_PIPE");
         return !env || env[0] != '0';
     }();
     if (!draw_pipe || !OnStageA()) {
@@ -901,7 +901,7 @@ void Rasterizer::WaitForPendingReads(VAddr address, u64 size) {
 
 void Rasterizer::NoteCommandWriteInOrder(VAddr addr, const void* data, u64 size) {
     static const bool enabled = [] {
-        const char* env = std::getenv("BB_CONSTRAM_PIPE");
+        const char* env = std::getenv("PS_CONSTRAM_PIPE");
         return !env || env[0] != '0';
     }();
     if (VideoCore::WriteTracking() || !IsMapped(addr, size)) {
@@ -972,7 +972,7 @@ void Rasterizer::CollectRingBindings(const Shader::Info& stage, const PreparedDr
     // Compute stages may run as HLE copy shaders, which read their buffers on the recording
     // thread whether or not they were copied here.
     const bool hle_candidate = stage.sw_stage == Shader::SwStage::Compute;
-    // BB_CONSTANTS_IN_PLACE: nothing is copied here; the recording thread binds the game's memory
+    // PS_CONSTANTS_IN_PLACE: nothing is copied here; the recording thread binds the game's memory
     // (or copies what is not in place, a read noted below).
     const bool constants_in_place = VideoCore::ConstantsInPlace();
     for (u32 index = 0; index < stage.buffers.size(); ++index) {
@@ -1054,10 +1054,10 @@ void Rasterizer::PostDraw(const Pipeline* pipeline, const PreparedDraw* used_pre
                 BbCeStats::Get().checks[BbCeStats::DmaStage]++;
                 BbCeStats::Get().hits[0][BbCeStats::DmaStage] += stage->uses_dma ? 1 : 0;
             }
-            // bbport BB_WATCH=addr,size (diagnostics): what the translator reads from that range on
+            // bbport PS_WATCH=addr,size (diagnostics): what the translator reads from that range on
             // the CPU: user data pointing into it, constants copied from it; printed every 2 s.
             static const std::pair<u64, u64> watch = [] {
-                const char* env = std::getenv("BB_WATCH");
+                const char* env = std::getenv("PS_WATCH");
                 if (!env) {
                     return std::pair<u64, u64>{0, 0};
                 }
@@ -1293,7 +1293,7 @@ bool Rasterizer::RunInOrder(OrderedTask task, const void* data, u32 size, u64 to
 }
 
 namespace {
-// BB_SECTIONS: ordered tasks by function (cycles, count), stage B only.
+// PS_SECTIONS: ordered tasks by function (cycles, count), stage B only.
 constexpr std::size_t TaskKinds = 16;
 std::array<void*, TaskKinds> task_kinds{};
 std::array<u64, TaskKinds> task_cycles{}, task_counts{};
@@ -1454,7 +1454,7 @@ void Rasterizer::RunDrawPacket(void* context, const u8* data, u32 size) {
 }
 
 void Rasterizer::PrintPipeStats() {
-    static const bool stats = std::getenv("BB_FRAME_STATS") != nullptr;
+    static const bool stats = std::getenv("PS_FRAME_STATS") != nullptr;
     if (!stats || (draw_pipe->packets & 1023) != 0) {
         return;
     }
@@ -1776,14 +1776,14 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
         FrameCapture::Poll();
         scheduler.PopPendingOperations();
     }
-    // bbport (BB_PREUPLOAD): once a frame, guest GPU memory the CPU wrote and then left alone is
-    // uploaded ahead of its use, BB_PREUPLOAD_MB (16) at most per frame.
+    // bbport (PS_PREUPLOAD): once a frame, guest GPU memory the CPU wrote and then left alone is
+    // uploaded ahead of its use, PS_PREUPLOAD_MB (16) at most per frame.
     if (const u32 frame = BbStats::frame_number.load(std::memory_order_relaxed);
         frame != preupload_frame) {
         preupload_frame = frame;
         BB_SECTION(Preupload);
         static const u64 budget = [] {
-            const char* env = std::getenv("BB_PREUPLOAD_MB");
+            const char* env = std::getenv("PS_PREUPLOAD_MB");
             return (env ? std::strtoull(env, nullptr, 10) : 16ull) << 20;
         }();
         buffer_cache.Preupload(budget);
@@ -1802,7 +1802,7 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
         camera_motion->SetJitter(upscaler->Jitter());
         object_motion->OnFrameStart();
         NoteFrameStart();
-        static const char* scene_debug = std::getenv("BB_SCENE_DEBUG");
+        static const char* scene_debug = std::getenv("PS_SCENE_DEBUG");
         scene_debug_frame = scene_debug && std::remove(scene_debug) == 0;
         scene_targets->debug = scene_debug_frame;
     }
@@ -1869,7 +1869,7 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
         // since last frame (model constants follow the camera, the palette does not). The
         // check comes first: most gated draws are static world pieces with long index lists.
         static const bool all_motion = [] {
-            const char* value = std::getenv("BB_OBJECT_MOTION_ALL");
+            const char* value = std::getenv("PS_OBJECT_MOTION_ALL");
             return value && value[0] == '1';
         }();
         bool gated = !all_motion;
@@ -2212,7 +2212,7 @@ void Rasterizer::DispatchRecord(const ComputePipeline* pipeline) {
     if (hle) {
         return;
     }
-    // bbport: the game's copy shader running as itself (BB_COPY_SHADER_NATIVE): its destinations stay in
+    // bbport: the game's copy shader running as itself (PS_COPY_SHADER_NATIVE): its destinations stay in
     // the game's memory. They hold data our translator reads on the CPU (next to shader code the
     // game uploads this way); a VRAM copy of them showed it a stale copy (a black scene). The
     // copy list read on the CPU (vk_shader_hle.cpp) kept them in place too.
@@ -2377,7 +2377,7 @@ const PreparedStage* Rasterizer::FindPreparedStage(const Shader::Info& stage) co
 
 bool Rasterizer::BindHelperWanted() {
     // A spinning helper pays off only with cores to spare (the recording thread spins too).
-    const char* env = std::getenv("BB_TEXTURE_HELPER");
+    const char* env = std::getenv("PS_TEXTURE_HELPER");
     if (env && env[0]) {
         return env[0] == '1';
     }
@@ -2472,7 +2472,7 @@ void Rasterizer::JoinBindHelper(void* context) {
 }
 
 namespace {
-// bbport: BB_RES_STATS=1 (diagnostics) — what the bound shaders read their resource descriptors
+// bbport: PS_RES_STATS=1 (diagnostics) — what the bound shaders read their resource descriptors
 // from: user data registers (state the API call set) or tables in memory (SRT walker), by kind,
 // per draw and dispatch; printed every 5 s. Measures the step "descriptors read by the GPU"
 // (docs/en/history/EMULATION_REMOVAL_PLAN.md).
@@ -2499,7 +2499,7 @@ int SharpSource(const Fetch& fetch) {
 }
 void NoteResStats(const Pipeline* pipeline) {
     static const bool enabled = [] {
-        const char* env = std::getenv("BB_RES_STATS");
+        const char* env = std::getenv("PS_RES_STATS");
         return env && env[0] == '1';
     }();
     if (!enabled) {
@@ -2566,15 +2566,15 @@ bool Rasterizer::BindResources(const Pipeline* pipeline) {
     BB_SECTION(BindResources);
     NoteResStats(pipeline);
     {
-        // bbport BB_HLE_STATS=1 (diagnostics): how often the compute shader substitutions fire.
-        static const bool hle_stats = std::getenv("BB_HLE_STATS") != nullptr;
-        // BB_HLE_OFF=mask (experiment): 1 image copy, 2 metadata clear, 4 image clear run as the
+        // bbport PS_HLE_STATS=1 (diagnostics): how often the compute shader substitutions fire.
+        static const bool hle_stats = std::getenv("PS_HLE_STATS") != nullptr;
+        // PS_HLE_OFF=mask (experiment): 1 image copy, 2 metadata clear, 4 image clear run as the
         // game's shaders.
         static const u32 hle_off = [] {
-            const char* env = std::getenv("BB_HLE_OFF");
+            const char* env = std::getenv("PS_HLE_OFF");
             return env ? u32(std::strtoul(env, nullptr, 0)) : 0u;
         }();
-        static const bool copy_log = std::getenv("BB_IMAGE_COPY_LOG") != nullptr;
+        static const bool copy_log = std::getenv("PS_IMAGE_COPY_LOG") != nullptr;
         if ((hle_off & 1) && copy_log) {
             IsComputeImageCopy(pipeline, true);
         }
@@ -2622,7 +2622,7 @@ bool Rasterizer::BindResources(const Pipeline* pipeline) {
 
     bool uses_dma = false;
 
-    static const bool stats = std::getenv("BB_FRAME_STATS") != nullptr;
+    static const bool stats = std::getenv("PS_FRAME_STATS") != nullptr;
     if (stats && ((helper_full + helper_partial + helper_serial) & 1023) == 0) {
         static auto window = std::chrono::steady_clock::now();
         const auto now = std::chrono::steady_clock::now();
@@ -2975,7 +2975,7 @@ void Rasterizer::ResetBindings(bool is_compute) {
         const auto write_flag =
             is_written ? vk::AccessFlagBits2::eShaderWrite : vk::AccessFlagBits2::eNone;
         if (!buffer) {
-            // bbport BB_LAYER_MEMORY: a paged binding (any buffer of the game's memory).
+            // bbport PS_LAYER_MEMORY: a paged binding (any buffer of the game's memory).
             runtime.AccessGlobal(dst_stage, vk::AccessFlagBits2::eShaderRead | write_flag);
             continue;
         }
@@ -2988,7 +2988,7 @@ void Rasterizer::ResetBindings(bool is_compute) {
 }
 
 namespace {
-// bbport BB_LAYER_MEMORY: the page table the info collection pass appends to every shader with
+// bbport PS_LAYER_MEMORY: the page table the info collection pass appends to every shader with
 // guest buffers is not one of the shader's own (the HLE patterns below count those).
 size_t ShaderBufferCount(const Shader::Info& info) {
     size_t count = info.buffers.size();
@@ -3086,8 +3086,8 @@ bool Rasterizer::IsComputeImageCopy(const Pipeline* pipeline, bool dry_run) {
     // Perform image copy
     VideoCore::Image& src_image = desc0.is_written ? image1 : image0;
     VideoCore::Image& dst_image = desc0.is_written ? image0 : image1;
-    // bbport BB_IMAGE_COPY_LOG=1 (diagnostics): the copies this recognizes.
-    static const bool copy_log = std::getenv("BB_IMAGE_COPY_LOG") != nullptr;
+    // bbport PS_IMAGE_COPY_LOG=1 (diagnostics): the copies this recognizes.
+    static const bool copy_log = std::getenv("PS_IMAGE_COPY_LOG") != nullptr;
     if (copy_log) {
         static std::atomic<u32> printed{0};
         if (printed.fetch_add(1) < 40) {
@@ -3167,14 +3167,14 @@ bool Rasterizer::IsComputeImageClear(const Pipeline* pipeline) {
 }
 
 namespace {
-// bbport: BB_TRACE_SHADER=hash[,hash...] (diagnostics) — the buffers those shaders bind: address,
+// bbport: PS_TRACE_SHADER=hash[,hash...] (diagnostics) — the buffers those shaders bind: address,
 // size, written or read, where the data is (in place: the game's memory over PCIe on a discrete
 // GPU; VRAM; partly), how often; printed every 5 s.
 void TraceShaderBinding(const Shader::Info& stage, VAddr addr, u64 size, bool written,
                         const VideoCore::BufferCache& cache) {
     static const std::vector<u64> hashes = [] {
         std::vector<u64> out;
-        const char* env = std::getenv("BB_TRACE_SHADER");
+        const char* env = std::getenv("PS_TRACE_SHADER");
         for (const char* at = env; at && *at;) {
             char* end = nullptr;
             out.push_back(std::strtoull(at, &end, 16));
@@ -3316,13 +3316,13 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, const PreparedStage* pre
             if (vsharp.base_address == 0 || vsharp.GetSize() == 0) {
                 buffer_infos.emplace_back(VK_NULL_HANDLE, 0, VK_WHOLE_SIZE);
             } else if (Shader::IsPagedBuffer(VideoCore::BufferCache::LayerPagedActive(), vsharp)) {
-                // bbport BB_LAYER_MEMORY: nearly all memory as one buffer: the shader reaches it
+                // bbport PS_LAYER_MEMORY: nearly all memory as one buffer: the shader reaches it
                 // through the page table; the descriptor holds its record. It may touch any
                 // buffer of the game's memory: barriers before it, and after it if it writes.
                 const auto [record, record_offset] = buffer_cache.LayerPagedRecord(
                     vsharp.base_address, vsharp.GetSize(), desc.is_written);
-                // BB_LAYER_PAGED_STATS=1: paged bindings per shader, every 5 s.
-                static const bool paged_stats = std::getenv("BB_LAYER_PAGED_STATS") != nullptr;
+                // PS_LAYER_PAGED_STATS=1: paged bindings per shader, every 5 s.
+                static const bool paged_stats = std::getenv("PS_LAYER_PAGED_STATS") != nullptr;
                 if (paged_stats) {
                     static std::map<std::pair<u64, u64>, std::pair<u64, u64>> counts;
                     static u32 printed = 0;
@@ -3370,7 +3370,7 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, const PreparedStage* pre
                                 stage.pgm_hash);
                 }
                 push_data.AddOffset(binding.buffer, adjust);
-                // bbport BB_LAYER_MEMORY: a huge binding may come back cut at the end of its
+                // bbport PS_LAYER_MEMORY: a huge binding may come back cut at the end of its
                 // guest chunk's buffer.
                 buffer_infos.emplace_back(
                     buffer->Handle(), offset_aligned,
@@ -3476,7 +3476,7 @@ void Rasterizer::BindTextures(const Shader::Info& stage, const PreparedStage* pr
         const auto tsharp =
             prepared ? prepared->image_sharps[image_index] : image_desc.GetSharp(stage);
         // bbport: a hash lookup per texture per draw for a diagnostic only.
-        static const bool warn_meta = std::getenv("BB_WARN_META_TEXTURE") != nullptr;
+        static const bool warn_meta = std::getenv("PS_WARN_META_TEXTURE") != nullptr;
         if (warn_meta && texture_cache.IsMeta(tsharp.Address())) {
             LOG_WARNING(Render_Vulkan, "Unexpected metadata read by a shader (texture)");
         }
@@ -3518,7 +3518,7 @@ void Rasterizer::BindTextures(const Shader::Info& stage, const PreparedStage* pr
         auto& desc_entry =
             prepared ? CachedImageDescEntry(tsharp, image_desc, prepared->image_hashes[image_index])
                      : CachedImageDescEntry(tsharp, image_desc);
-        // BB_SCENE_DEBUG: proxied scene targets this binding reads at the native size, and why.
+        // PS_SCENE_DEBUG: proxied scene targets this binding reads at the native size, and why.
         const auto debug_native = [&](const VideoCore::Image& image) {
             if (!scene_debug_frame || proxy_candidate || !image.scene_proxy) return;
             std::printf("Scene native read: %s %016llx %s %ux%u needs_native %d written %d "
@@ -3721,10 +3721,10 @@ void Rasterizer::BindTextures(const Shader::Info& stage, const PreparedStage* pr
 // bbport: the PS4 build samples most scene textures with little or no anisotropic filtering.
 // Behind the temporal upscaler the output shows the detail of the output's mip level, and
 // surfaces seen at a grazing angle (stairs, floors, walls along the view) stay blurred.
-// Mipmapped linear samplers of graphics draws get BB_ANISO (16; 0 = the game's) times.
+// Mipmapped linear samplers of graphics draws get PS_ANISO (16; 0 = the game's) times.
 void Rasterizer::ForceAnisotropy(AmdGpu::Sampler& sharp, bool is_depth) const {
     static const int forced = [] {
-        const char* value = std::getenv("BB_ANISO");
+        const char* value = std::getenv("PS_ANISO");
         return value ? std::atoi(value) : 16;
     }();
     if (!is_depth && !pipeline_is_compute) {
@@ -3968,7 +3968,7 @@ RenderState Rasterizer::BeginRenderingFull(const GraphicsPipeline* pipeline) {
     // A proxy attachment cannot represent MSAA or a feedback loop that reads the
     // same image through the guest's native descriptor during this draw.
     bool reduced = scene_started && upscaler->RasterScaling() && key.num_samples == 1;
-    // BB_SCENE_DEBUG=<file>: once the file exists, why the passes of one frame keep the
+    // PS_SCENE_DEBUG=<file>: once the file exists, why the passes of one frame keep the
     // native size (see NoteFrameStart).
     const bool debug_pass = scene_debug_frame && scene_started;
     std::string why;
@@ -4317,7 +4317,7 @@ void Rasterizer::FillBuffer(VAddr address, u32 num_bytes, u32 value, bool is_gds
                "FillBuffer address and size must be a multiple of 4 bytes");
     if (!is_gds) {
         texture_cache.ClearMeta(address);
-        // bbport BB_GUEST_IN_PLACE: memory the GPU uses in place is filled by the GPU in stream order
+        // bbport PS_GUEST_IN_PLACE: memory the GPU uses in place is filled by the GPU in stream order
         // (a fill on the CPU now would land before earlier draws read the old data). Elsewhere
         // (VRAM copies, unbound memory: shader code, descriptors this thread reads) on the CPU in
         // decode order, as before; the VRAM copy follows through write tracking.
@@ -4356,11 +4356,11 @@ bool Rasterizer::DmaMayWriteOnCpu(VAddr dst, u32 num_bytes) {
 
 void Rasterizer::CopyBuffer(VAddr dst, VAddr src, u32 num_bytes, bool dst_gds, bool src_gds) {
     DrainDrawPipe();
-    // bbport BB_GUEST_IN_PLACE: see FillBuffer (in place: the GPU, in stream order).
+    // bbport PS_GUEST_IN_PLACE: see FillBuffer (in place: the GPU, in stream order).
     if (!dst_gds && !buffer_cache.IsAnyInPlace(dst, num_bytes) &&
         !buffer_cache.IsRegionGpuModified(dst, num_bytes) &&
         !VideoCore::BufferCache::LayerMirrored(dst, num_bytes)) {
-        // bbport BB_LAYER_MEMORY: a VRAM copy of the source may hold newer data than the game's memory.
+        // bbport PS_LAYER_MEMORY: a VRAM copy of the source may hold newer data than the game's memory.
         if (!src_gds && !buffer_cache.IsRegionGpuModified(src, num_bytes) &&
             !VideoCore::BufferCache::LayerMirrored(src, num_bytes) &&
             !texture_cache.FindImageFromRange(src, num_bytes)) {
@@ -4919,10 +4919,10 @@ void Rasterizer::NoteFrameStart() {
         profiler->BeginFrame();
     }
     const u64 frame = BbStats::gpu_frames.fetch_add(1, std::memory_order_relaxed) + 1;
-    // BB_BUFFER_STATS=1: how many earlier frames the GPU has not finished when the GPU thread
+    // PS_BUFFER_STATS=1: how many earlier frames the GPU has not finished when the GPU thread
     // starts a frame — the lag that decides whether guest memory can be read in place.
     static const bool stats = [] {
-        const char* value = std::getenv("BB_BUFFER_STATS");
+        const char* value = std::getenv("PS_BUFFER_STATS");
         return value && value[0] == '1';
     }();
     if (!stats) {

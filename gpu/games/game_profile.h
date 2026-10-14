@@ -19,7 +19,7 @@ struct CodeRange {
 };
 
 /// Guest code that frees the game's GPU label blocks (the fence targets of its command buffers),
-/// for the free check's BB_LABEL_TRAP=2 breakpoints (bbport_free_check.h).
+/// for the free check's PS_LABEL_TRAP=2 breakpoints (bbport_free_check.h).
 struct LabelReleaseCode {
     /// The allocator's release: its first instruction must be `mov rax, rsi` followed by
     /// `test rax, rax`, rsi the block released.
@@ -63,11 +63,11 @@ struct Profile {
     /// The game submitted [commands, commands + dwords) (each DCB and CCB of a submission, on the
     /// submitting thread, before the core translates it); it must not write them.
     void (*commands_submitted)(const std::uint32_t* commands, std::uint64_t dwords) = nullptr;
-    /// Once a frame while frames overlap (BB_SUBMIT_AHEAD above 0), from sceGnmSubmitDone under
+    /// Once a frame while frames overlap (PS_SUBMIT_AHEAD above 0), from sceGnmSubmitDone under
     /// the submission lock: true when the game shows it cannot take the overlap, with why in
     /// reason (a NUL-terminated phrase that fits in size); the core then stops it for the session.
     bool (*frame_overlap_unsafe)(char* reason, std::size_t size) = nullptr;
-    /// With each frame statistics report (BB_FRAME_STATS, the video out thread): the profile's
+    /// With each frame statistics report (PS_FRAME_STATS, the video out thread): the profile's
     /// own diagnostics.
     void (*report_stats)() = nullptr;
     /// Each presented frame, on the presenter thread before the overlay is drawn: what the
@@ -78,11 +78,11 @@ struct Profile {
     LabelReleaseCode label_release;
 };
 
-/// Chooses the profile for the game by its TITLE_ID (bbgpu_init). BB_GAME_PROFILE=none runs the
+/// Chooses the profile for the game by its TITLE_ID (bbgpu_init). PS_GAME_PROFILE=none runs the
 /// game as an unknown one (no profile), for checking the generic paths.
 void Select(const char* serial);
 
-/// The active profile, or nullptr (an unknown game, or BB_GAME_PROFILE=none).
+/// The active profile, or nullptr (an unknown game, or PS_GAME_PROFILE=none).
 const Profile* Active();
 
 /// The active profile's buffer copy shader, or 0.

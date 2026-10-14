@@ -23,9 +23,9 @@
  * directions reach full deflection even when the two travels differ by a few percent (that
  * difference is what makes one direction run and the other only walk). A genuine pad keeps the
  * plain -32768..32767 -> -128..127 read. The stick is then converted as shadPS4 does, with an
- * inner/outer dead zone (BB_PAD_DEADZONE, default 5; BB_PAD_DEADZONE_OUTER, default 127) mapping
- * the axis' travel up to full deflection. BB_PAD_CENTER=lx,ly,rx,ry overrides the neutral,
- * BB_PAD_CENTER_CAL=0 disables the measurement. */
+ * inner/outer dead zone (PS_PAD_DEADZONE, default 5; PS_PAD_DEADZONE_OUTER, default 127) mapping
+ * the axis' travel up to full deflection. PS_PAD_CENTER=lx,ly,rx,ry overrides the neutral,
+ * PS_PAD_CENTER_CAL=0 disables the measurement. */
 #define _GNU_SOURCE
 #include "runtime.h"
 #include "gpu/bbgpu.h"
@@ -109,18 +109,18 @@ static void cal_load(void) {
     static int loaded;
     if (loaded) return;
     loaded=1;
-    const char *v=getenv("BB_PAD_CENTER_CAL"); cal_enabled=!(v && *v=='0');
+    const char *v=getenv("PS_PAD_CENTER_CAL"); cal_enabled=!(v && *v=='0');
     /* Inner/outer dead zone, as shadPS4's analog_deadzone: [inner, outer] maps linearly to the
      * full deflection, so an axis with a reduced travel (outer below 127) reaches full. */
-    v=getenv("BB_PAD_DEADZONE"); pad_deadzone=v && *v ? atoi(v) : 5;
+    v=getenv("PS_PAD_DEADZONE"); pad_deadzone=v && *v ? atoi(v) : 5;
     if (pad_deadzone<0) pad_deadzone=0; else if (pad_deadzone>126) pad_deadzone=126;
-    v=getenv("BB_PAD_DEADZONE_OUTER"); pad_deadzone_outer=v && *v ? atoi(v) : 127;
+    v=getenv("PS_PAD_DEADZONE_OUTER"); pad_deadzone_outer=v && *v ? atoi(v) : 127;
     if (pad_deadzone_outer<=pad_deadzone) pad_deadzone_outer=pad_deadzone<127 ? pad_deadzone+1 : 127;
-    v=getenv("BB_PAD_CENTER");
+    v=getenv("PS_PAD_CENTER");
     if (v && *v && sscanf(v,"%d,%d,%d,%d",&cal_manual_center[0],&cal_manual_center[1],
                           &cal_manual_center[2],&cal_manual_center[3])==4) {
         cal_manual=1;
-        printf("Runtime: pad center (BB_PAD_CENTER): lx=%d ly=%d rx=%d ry=%d\n",
+        printf("Runtime: pad center (PS_PAD_CENTER): lx=%d ly=%d rx=%d ry=%d\n",
                cal_manual_center[0],cal_manual_center[1],cal_manual_center[2],cal_manual_center[3]);
     }
 }
@@ -187,8 +187,8 @@ static void cal_sample(const int16_t raw[4]) {
 }
 /* One stick axis in the PS4 0..255 scale. The neutral is subtracted and the axis' own travel
  * (cal_travel) is read as -128..127, so a full push reaches full deflection in both directions
- * whatever part of SDL's range the pad uses; the inner/outer dead zone (BB_PAD_DEADZONE /
- * BB_PAD_DEADZONE_OUTER) then maps that travel to the full deflection, as shadPS4 does. */
+ * whatever part of SDL's range the pad uses; the inner/outer dead zone (PS_PAD_DEADZONE /
+ * PS_PAD_DEADZONE_OUTER) then maps that travel to the full deflection, as shadPS4 does. */
 static uint8_t stick_axis(int axis,int16_t raw) {
     const int d=raw-cal_center[axis];
     const int travel=cal_travel(axis,d>=0 ? 1 : 0);
@@ -213,11 +213,11 @@ static void touch_click(PadData *d, int right) {
     d->touches[0]=(PadTouch){.x=right ? 1440 : 480,.y=471,.id=0};
 }
 
-/* BB_GAMEPAD (the launcher's controller choice): its SDL GUID, or part of its name. Issue #15:
+/* PS_GAMEPAD (the launcher's controller choice): its SDL GUID, or part of its name. Issue #15:
  * wheels and other controllers connected for good came first. */
 static const char *preferred_gamepad(void) {
     static const char *want; static int read;
-    if (!read) { want=getenv("BB_GAMEPAD"); if (want && !*want) want=NULL; read=1; }
+    if (!read) { want=getenv("PS_GAMEPAD"); if (want && !*want) want=NULL; read=1; }
     return want;
 }
 static int is_preferred(SDL_JoystickID id, const char *want) {
@@ -227,11 +227,11 @@ static int is_preferred(SDL_JoystickID id, const char *want) {
     return !strcasecmp(guid,want) || (name && strcasestr(name,want));
 }
 /* The chosen gamepad, else the first while it is not connected (checked again every second, it
- * is taken as soon as it connects); called under lock. BB_PAD_HOST=0 (scripted runs) opens none. */
+ * is taken as soon as it connects); called under lock. PS_PAD_HOST=0 (scripted runs) opens none. */
 static SDL_Gamepad *current_gamepad(void) {
     static int on_preferred; static uint64_t last_scan;
     if (!sdl_ready) {
-        const char *host=getenv("BB_PAD_HOST");
+        const char *host=getenv("PS_PAD_HOST");
         sdl_ready = host && *host=='0' ? -1 : SDL_WasInit(SDL_INIT_GAMEPAD) ? 1 : SDL_InitSubSystem(SDL_INIT_GAMEPAD) ? 1 : -1;
     }
     if (sdl_ready<0) return NULL;
@@ -265,7 +265,7 @@ static SDL_Gamepad *current_gamepad(void) {
 typedef struct { uint16_t size, version; uint32_t reserved; uint64_t max_system, system, max_in_use, in_use; } MallocManagedSize;
 static void report_guest_heap(void) {
     static int enabled=-1; static uint64_t last;
-    if (enabled<0) enabled=getenv("BB_FRAME_STATS")!=NULL;
+    if (enabled<0) enabled=getenv("PS_FRAME_STATS")!=NULL;
     const uint64_t now=now_us();
     if (!enabled || now-last<5000000) return;
     last=now;
@@ -284,7 +284,7 @@ static void report_guest_heap(void) {
                m.in_use/1048576.0,m.max_in_use/1048576.0,m.system/1048576.0,m.max_system/1048576.0);
     }
 }
-/* Controls: what each PS4 input is bound to. Defaults below; bbport.ini (BB_CONFIG) lines
+/* Controls: what each PS4 input is bound to. Defaults below; bbport.ini (PS_CONFIG) lines
  * key.<input>=<SDL key names> and pad.<input>=<SDL gamepad button names>, comma-separated,
  * replace an input's binding (empty: unbound). Inputs: the buttons (cross ... right, touchpad =
  * a left-side click, touchpad_right), and on the keyboard the sticks: move_* (left), look_*
@@ -376,7 +376,7 @@ static float mouse_sensitivity=1.0f;
 static void load_bindings(void) {
     bind_defaults();
     mouse_look=1; mouse_invert_y=0; mouse_sensitivity=1.0f;
-    const char *path=getenv("BB_CONFIG");
+    const char *path=getenv("PS_CONFIG");
     FILE *f=path ? fopen(path,"r") : NULL;
     if (!f) return;
     char line[512];
@@ -478,7 +478,7 @@ static void apply_keyboard(PadData *d, const bool *k) {
  * the mouse's speed. Each sample adds the motion since the last one and the sum decays over
  * LOOK_TAU (linearly per sample: the level a steady speed holds, speed * gain * LOOK_TAU, is the
  * same at any frame rate). ~1000 pixels/s reach full deflection at sensitivity 1. The game ignores
- * small deflections, so a moving mouse starts past them (BB_MOUSE_DEADZONE, default 16 of 127):
+ * small deflections, so a moving mouse starts past them (PS_MOUSE_DEADZONE, default 16 of 127):
  * slow aiming still turns the camera. While the mouse moves it replaces the right stick. */
 #define LOOK_TAU_US 60000.0f
 static float look_x, look_y;
@@ -497,7 +497,7 @@ static void apply_mouse_look(PadData *d, double dx, double dy, uint64_t now, int
     if (dt>LOOK_TAU_US) dt=LOOK_TAU_US;
     static int deadzone=-1;
     if (deadzone<0) {
-        const char *env=getenv("BB_MOUSE_DEADZONE");
+        const char *env=getenv("PS_MOUSE_DEADZONE");
         deadzone=env && *env ? atoi(env) : 16;
         if (deadzone<0 || deadzone>100) deadzone=16;
     }
@@ -566,18 +566,18 @@ static void sample_host(PadData *d) {
     apply_mouse_look(d,mouse_dx,mouse_dy,d->timestamp,captured);
 }
 
-/* BB_PAD_FILE=<file>: scripted input for automated runs. The file holds whitespace-separated
+/* PS_PAD_FILE=<file>: scripted input for automated runs. The file holds whitespace-separated
  * tokens, re-read when it changes: button names (cross circle square triangle l1 r1 l2 r2 l3 r3
  * options touchpad touchpad_left touchpad_right up down left right) are held while listed;
  * touchpad defaults to a left-side click; lx= ly= rx= ry= (0..255) override
  * the sticks; ps presses the Guide button (the overlay's close prompt, answered with cross or
  * circle). An empty file releases everything. */
 static struct { uint32_t buttons; int stick[4]; int touch_side; } injected={0,{-1,-1,-1,-1},-1};
-static int replay_armed;      /* 1 while a BB_PAD_REPLAY recording plays, 2 once it ended */
+static int replay_armed;      /* 1 while a PS_PAD_REPLAY recording plays, 2 once it ended */
 static uint64_t replay_start; /* 0: (re)start at the next sample */
 static void read_inject(void) {
     static const char *path; static int checked; static uint64_t last_check; static struct timespec mtime;
-    if (!checked) { path=getenv("BB_PAD_FILE"); checked=1; }
+    if (!checked) { path=getenv("PS_PAD_FILE"); checked=1; }
     if (!path || !*path) return;
     uint64_t now=now_us();
     if (now-last_check<20000) return;
@@ -602,7 +602,7 @@ static void read_inject(void) {
     char token[64];
     while (fscanf(f,"%63s",token)==1) {
         if (!strcmp(token,"ps")) guide=1;
-        if (!strcmp(token,"replay") && replay_armed!=1) { replay_armed=1; replay_start=0; } /* BB_PAD_REPLAY */
+        if (!strcmp(token,"replay") && replay_armed!=1) { replay_armed=1; replay_start=0; } /* PS_PAD_REPLAY */
         if (!strcmp(token,"touchpad_left") || !strcmp(token,"touchpad_right")) {
             injected.buttons|=BTN_TOUCHPAD;
             injected.touch_side=!strcmp(token,"touchpad_right");
@@ -616,9 +616,9 @@ static void read_inject(void) {
     printf("Runtime: pad file: buttons 0x%x sticks %d %d %d %d\n",injected.buttons,
            injected.stick[0],injected.stick[1],injected.stick[2],injected.stick[3]);
 }
-/* BB_PAD_RECORD=<file>: F9 starts and stops recording the pad state (gamepad or keyboard) with
- * the time since F9; BB_PAD_REPLAY=<file> plays such a recording back, started by the token
- * "replay" in BB_PAD_FILE (scripted tests repeat a route the player ran once). Lines: ms buttons
+/* PS_PAD_RECORD=<file>: F9 starts and stops recording the pad state (gamepad or keyboard) with
+ * the time since F9; PS_PAD_REPLAY=<file> plays such a recording back, started by the token
+ * "replay" in PS_PAD_FILE (scripted tests repeat a route the player ran once). Lines: ms buttons
  * lx ly rx ry l2 r2, written when the state changes. */
 typedef struct { uint32_t ms, buttons; uint8_t axes[4], l2, r2; } PadSample;
 static FILE *record_file;
@@ -626,7 +626,7 @@ static uint64_t record_start;
 static PadSample record_last;
 static void record_sample(const PadData *d) {
     static const char *path; static int checked, f9_was_down;
-    if (!checked) { path=getenv("BB_PAD_RECORD"); checked=1; }
+    if (!checked) { path=getenv("PS_PAD_RECORD"); checked=1; }
     if (!path || !*path || !sdl_ready) return;
     const bool *k=SDL_GetKeyboardState(NULL);
     const int f9=k && k[SDL_SCANCODE_F9];
@@ -658,7 +658,7 @@ static void replay_sample(PadData *d) {
         static int loaded;
         if (!loaded) {
             loaded=1;
-            const char *path=getenv("BB_PAD_REPLAY");
+            const char *path=getenv("PS_PAD_REPLAY");
             FILE *f=path ? fopen(path,"r") : NULL;
             PadSample s; unsigned v[8]; size_t cap=0;
             while (f && fscanf(f,"%u %u %u %u %u %u %u %u",&v[0],&v[1],&v[2],&v[3],&v[4],&v[5],&v[6],&v[7])==8) {
