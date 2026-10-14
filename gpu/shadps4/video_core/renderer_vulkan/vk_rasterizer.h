@@ -457,6 +457,9 @@ private:
     void MarkPass(const GraphicsPipeline* pipeline, const RenderState& state);
     void BindVertexBuffers(const GraphicsPipeline* pipeline,
                            const PreparedDraw* prepared = nullptr);
+    bool ArePreparedVsharpsCurrent(const PreparedVertexInputs& inputs,
+                                   const Shader::Gcn::FetchShaderData& fetch,
+                                   const Shader::Info& vs) const;
     void BindIndexBuffer(u32 index_offset = 0);
     /// bbport: BindVertexBuffers/BindIndexBuffer in two halves: obtaining the buffers
     /// (vertex_binds, index_bind) and recording the binds.
