@@ -588,6 +588,33 @@ static int64_t do_utimes(const char *guest,const GuestTimeval *times) {
     if (save_path(guest)) current_copy(path,sizeof(path),1);
     return utimes(path,times ? host : NULL) ? -errno : 0;
 }
+static int64_t do_futimes(int h_fd,const GuestTimeval *p_times) {
+    struct timeval host_times[2];
+    for (int i=0;p_times && i<2;++i) {
+        if (p_times[i].usec<0 || p_times[i].usec>=1000000) return -EINVAL;
+        host_times[i].tv_sec=(time_t)p_times[i].sec; host_times[i].tv_usec=(suseconds_t)p_times[i].usec;
+    }
+    const File *p_file=get(h_fd);
+    if (p_file && game_path(p_file->path)) return -EROFS;
+    int h_host=host_fd_written(h_fd);
+    if (h_host<0) return -EBADF;
+    return futimes(h_host,p_times ? host_times : NULL) ? -errno : 0;
+}
+static int64_t do_chmod(const char *sz_guest,int mode) {
+    if (game_path(sz_guest)) return -EROFS;
+    char sz_path[1024];
+    int error=translate(sz_guest,sz_path,sizeof(sz_path));
+    if (error) return -error;
+    if (save_path(sz_guest)) current_copy(sz_path,sizeof(sz_path),1);
+    return chmod(sz_path,(mode_t)(mode&07777)) ? -errno : 0;
+}
+static int64_t do_fchmod(int h_fd,int mode) {
+    const File *p_file=get(h_fd);
+    if (p_file && game_path(p_file->path)) return -EROFS;
+    int h_host=host_fd_written(h_fd);
+    if (h_host<0) return -EBADF;
+    return fchmod(h_host,(mode_t)(mode&07777)) ? -errno : 0;
+}
 static int64_t do_fsync(int fd) { int h=host_fd(fd); if (h<0) return -EBADF; return fsync(h) ? -errno : 0; }
 static int64_t do_access(const char *guest,int mode) {
     char path[1024];
@@ -620,6 +647,9 @@ PAIR(ftruncate,(int fd,int64_t l),(fd,l))
 PAIR(truncate,(const char *p,int64_t l),(p,l))
 PAIR(fsync,(int fd),(fd))
 PAIR(utimes,(const char *p,const GuestTimeval *t),(p,t))
+PAIR(futimes,(int h_fd,const GuestTimeval *p_times),(h_fd,p_times))
+PAIR(chmod,(const char *sz_path,int mode),(sz_path,mode))
+PAIR(fchmod,(int h_fd,int mode),(h_fd,mode))
 /* getdirentries without the position out-parameter (Atelier Ryza lists its UI style folders with
  * it; answered by a stub, they read as empty and every UI image fell back to NO IMAGE). */
 static ABI int64_t sce_getdents_plain(int fd,char *b,uint64_t n) { return sce(do_getdents(fd,b,n,NULL)); }
@@ -652,6 +682,8 @@ static const RuntimeExport exports[]={
     {"sceKernelTruncate",sce_truncate}, {"truncate",posix_truncate},
     {"sceKernelFsync",sce_fsync}, {"fsync",posix_fsync},
     {"sceKernelUtimes",sce_utimes}, {"utimes",posix_utimes},
+    {"sceKernelFutimes",sce_futimes}, {"futimes",posix_futimes},
+    {"sceKernelChmod",sce_chmod}, {"chmod",posix_chmod}, {"sceKernelFchmod",sce_fchmod}, {"fchmod",posix_fchmod},
     {"access",posix_access}, {"sceKernelCheckReachability",sce_check_reachability},
     {"sceKernelMkdir",sce_mkdir}, {"mkdir",posix_mkdir},
     {"sceKernelRmdir",sce_rmdir}, {"rmdir",posix_rmdir},
