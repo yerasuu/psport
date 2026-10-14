@@ -1,0 +1,2 @@
+# tools/regress.sh titles (format of titles.txt) whose schedules measure the frame rate in play.
+bloodborne  CUSA03173  CUSA03173_UNIFIED                         bloodborne-perf.sched  -

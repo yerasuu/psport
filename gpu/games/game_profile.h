@@ -36,6 +36,9 @@ struct Profile {
     /// Guest code known to write per-frame data into GPU memory: the blocks it writes stay in
     /// the game's memory from its first write instead of after a few frames.
     std::span<const CodeRange> dynamic_writers;
+    /// Changes to the user's saves the game needs, made before any of its code runs. saves is the
+    /// folder holding one folder per user, each with the game's saves under save_title.
+    void (*prepare_saves)(const char* saves, const char* save_title) = nullptr;
     /// A compute shader (GCN program hash) that only copies buffers, into memory the translator
     /// reads on the CPU: its stores go through to the game's memory; 0 = none known.
     std::uint64_t buffer_copy_shader = 0;

@@ -40,14 +40,14 @@ static void remember_policy(void *thread, int32_t policy) {
 static ABI int32_t get_sched_param(void *thread, int32_t *policy, GuestSchedParam *param) {
     if (!policy || !param) return ERR(22);
     int32_t priority;
-    const int32_t r=((GetPrio)runtime_thread_resolve("1tKyG7RlMJo#p#J"))(thread,&priority);
+    const int32_t r=((GetPrio)runtime_thread_resolve("1tKyG7RlMJo"))(thread,&priority);
     if (r) return r;
     *policy=policy_of(thread); param->priority=priority;
     return 0;
 }
 static ABI int32_t set_sched_param(void *thread, int32_t policy, const GuestSchedParam *param) {
     if (!param || policy<1 || policy>3) return ERR(22);
-    const int32_t r=((SetPrio)runtime_thread_resolve("W0Hpm2X0uPE#p#J"))(thread,param->priority);
+    const int32_t r=((SetPrio)runtime_thread_resolve("W0Hpm2X0uPE"))(thread,param->priority);
     if (r) return r;
     remember_policy(thread,policy);
     return 0;
@@ -57,9 +57,9 @@ static ABI int32_t set_sched_param(void *thread, int32_t policy, const GuestSche
 static ABI int32_t get_name(void *thread, char *name) {
     if (!name) return ERR(22);
     int32_t priority;
-    const int32_t r=((GetPrio)runtime_thread_resolve("1tKyG7RlMJo#p#J"))(thread,&priority);
+    const int32_t r=((GetPrio)runtime_thread_resolve("1tKyG7RlMJo"))(thread,&priority);
     if (r) return r;
-    if (thread!=((Self)runtime_thread_resolve("aI+OeCz8xrQ#p#J"))()) {
+    if (thread!=((Self)runtime_thread_resolve("aI+OeCz8xrQ"))()) {
         static int warned;
         if (!warned) { warned=1; fputs("Runtime: scePthreadGetname of another thread is not supported\n",stderr); }
         return ERR(78); /* ENOSYS */

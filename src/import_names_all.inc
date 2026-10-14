@@ -1,6 +1,5 @@
 /* NID -> symbol name for every PS4 library export known (shadPS4 aerolib, 97623 names), sorted
- * by NID in strcmp order for runtime_symbol's binary search. Bloodborne's scoped list covers
- * what it imports; this names what other titles import. Regenerate: LC_ALL=C sort aerolib.csv
+ * by NID in strcmp order for runtime_symbol's binary search. Regenerate: LC_ALL=C sort aerolib.csv
  * | awk '{printf "{\"%s\",\"%s\"},\n", $1, $2}' */
 {"++-URPJNZ18","_ZN9Inspector17ScriptDebugServer23removeBreakpointActionsEm"},
 {"++67uYkhqBU","_ZN7WebCore28InspectorFrontendClientLocal8Settings11getPropertyERKN3WTF6StringE"},

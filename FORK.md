@@ -3,8 +3,8 @@
 psport is decanter's fork of [bbport](https://github.com/deadinside28/bloodborne_pc). Its goal is
 bbport's own idea taken past one game: PS4 titles run natively on Linux, their x86-64 code on the
 CPU as it is, with the system libraries provided by this port (a compatibility layer, as Wine is,
-not an emulator). Bloodborne keeps working as upstream ships it; other titles start with
-`BB_SKIP_GAME_CHECK=1`.
+not an emulator). Bloodborne keeps working as upstream ships it; other titles start without a game
+check.
 
 Upstream releases are merged in as they come; the changes below live on top.
 
@@ -46,6 +46,15 @@ obvious.
 | AvPlayer stopping | `core/libraries/avplayer/avplayer_source.cpp` | `Stop()` no longer rewinds the file streamer's position to 0: FFmpeg's byte stream kept its own position and buffer, so after a restart (`sceAvPlayerJumpToTime`, Unity's movies) its next refill read the file from the start as packet data (`Invalid NAL unit size`, `partial file`) and Symphonia hung at the end of its intro | bug present at `3a9f572` |
 | AvPlayer end of file | `core/libraries/avplayer/avplayer_source.cpp`, `avplayer_state.*` | the demuxer reports end of file only when the source ran out, not when `Stop()` ends it: every restart (`sceAvPlayerStart` while playing, `sceAvPlayerJumpToTime`, `sceAvPlayerStop`) put the state machine in `EndOfFile`, so after a jump `Pause()` did nothing and a buffering check racing a stop logged `EndOfFile -> Buffering` (Tales of Symphonia); the controller thread moves between `Play` and `Buffering` only from the state it checked, and `Stop()` holds the source mutex exclusively, so a stop no longer reads as a buffer underrun | bug present at `3a9f572` |
 | Presenter | `video_core/renderer_vulkan/vk_presenter.cpp` | logs the first presented game frame once (`tools/regress.sh` reads it) | no |
+
+## Loading the game
+
+`bb-probe --game <folder>` loads `eboot.bin` and every module it links straight from the game's
+folder (`src/loader_self.c` reads SELF and ELF files, `src/loader_link.c` lays them out, relocates
+and binds them), with `--system-modules`, `--hle` and `--lle` as `BB_SYS_MODULES`, `BB_HLE` and
+`BB_LLE` set them. No Python runs to load a game. Only the permission bits of a segment's flags
+become its protection: some system modules set high bits there. Bloodborne's own check of its game
+files (`scripts/game_check.py --launch`, 1.09 and an intact extraction) runs for its releases only.
 
 ## System modules
 

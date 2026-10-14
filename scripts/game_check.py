@@ -10,7 +10,8 @@ around it differ). The shaders must also unpack: an extraction tool that leaves
 parts of compressed sectors stale (LibOrbisPkg PkgTool on .NET 6 or newer, issue #81) makes the
 game hang while it loads them, with no error. BB_SKIP_GAME_CHECK=1 skips both.
 
-Run as a script, it checks every .dcx file of a game folder: game_check.py GAME_DIR
+Run as a script, it checks every .dcx file of a game folder: game_check.py GAME_DIR. run.sh runs
+it with --launch before loading a Bloodborne release.
 """
 import hashlib
 import os
@@ -35,7 +36,7 @@ CHECKED_FOLDER = 'dvdroot_ps4/shader'
 
 def image_sha256(game):
     """The SHA-256 of eboot.bin's loaded image (its loadable segments at their addresses)."""
-    from prepare import parse_self, span  # same directory
+    from sce_file import parse_self, span  # same directory
     elf, header, ph, _segments, _missing = parse_self((Path(game) / 'eboot.bin').read_bytes())
     loads = [p for p in ph if p['type'] in (1, 0x61000010)]
     image = bytearray(max(p['vaddr'] + p['memsz'] for p in loads))
@@ -71,7 +72,7 @@ def problem(game, image_hash=None):
     broken extraction)."""
     if os.environ.get('BB_SKIP_GAME_CHECK') == '1':
         return None
-    from prepare import sfo
+    from sce_file import sfo
     try:
         info = sfo((Path(game) / 'sce_sys/param.sfo').read_bytes())
     except (OSError, ValueError, IndexError):
@@ -117,10 +118,28 @@ def explain(kind, title, version):
     }[kind]
 
 
+def launch_check(game):
+    """run.sh, before loading: a Bloodborne release must be the supported 1.09 game; other titles are
+    not checked (the check is part of Bloodborne's own support, not of the loader)."""
+    from sce_file import sfo
+    try:
+        title = sfo((Path(game) / 'sce_sys/param.sfo').read_bytes()).get('TITLE_ID')
+    except (OSError, ValueError, IndexError):
+        return 0
+    if title not in SUPPORTED_TITLES or not (found := problem(game)):
+        return 0
+    print(f'ERROR: Unsupported game files: {explain(*found)} Set BB_SKIP_GAME_CHECK=1 to start anyway.',
+          file=sys.stderr)
+    return 2
+
+
 def main(argv):
-    """game_check.py GAME_DIR: every .dcx file of the game, those that do not unpack listed."""
+    """game_check.py GAME_DIR: every .dcx file of the game, those that do not unpack listed.
+    game_check.py --launch GAME_DIR: launch_check."""
+    if len(argv) == 3 and argv[1] == '--launch':
+        return launch_check(argv[2])
     if len(argv) != 2:
-        print('Usage: game_check.py GAME_DIR', file=sys.stderr)
+        print('Usage: game_check.py [--launch] GAME_DIR', file=sys.stderr)
         return 2
     game = Path(argv[1])
     files = sorted((game / 'dvdroot_ps4').rglob('*.dcx'))

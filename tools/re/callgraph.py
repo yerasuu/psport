@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 """Direct call graph (E8/E9 rel32 to function starts from .eh_frame_hdr) for a target address range.
 
-Usage: callgraph.py out/eboot.elf LO HI [out.txt]
+Usage: callgraph.py GAME/eboot.bin LO HI [out.txt]
 Prints, for each function in [LO, HI), its size, the number of call sites and of calling functions,
 split into callers inside and outside the range.
 """
 import struct, sys, bisect, collections
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'scripts'))
+from sce_file import parse_self
 
 def load(path):
-    f = open(path, 'rb').read()
+    f = bytes(parse_self(open(path, 'rb').read())[0])
     phoff, = struct.unpack_from('<Q', f, 0x20); phnum, = struct.unpack_from('<H', f, 0x38)
     segs = [struct.unpack_from('<IIQQQQQQ', f, phoff + 56 * i) for i in range(phnum)]
     text = next(s for s in segs if s[0] == 1 and s[1] & 1)

@@ -264,6 +264,8 @@ static ABI int32_t posix_sem_timedwait(GuestSem *sem,const GuestTime *end) {
     return posix_result(usem_wait(sem,CLOCK_REALTIME,&t));
 }
 static const RuntimeExport exports[]={
+    {"sceKernelCreateSema",sem_create}, {"sceKernelWaitSema",sem_wait}, {"sceKernelSignalSema",sem_signal},
+    {"sceKernelPollSema",sem_poll}, {"sceKernelCancelSema",sem_cancel}, {"sceKernelDeleteSema",sem_delete},
     {"sem_init",posix_sem_init}, {"sem_destroy",posix_sem_destroy}, {"sem_wait",posix_sem_wait},
     {"sem_trywait",posix_sem_trywait}, {"sem_timedwait",posix_sem_timedwait}, {"sem_post",posix_sem_post},
     {"sem_getvalue",posix_sem_getvalue},
@@ -272,12 +274,6 @@ static const RuntimeExport exports[]={
     {"scePthreadSemDestroy",psem_destroy}, {"scePthreadSemGetvalue",psem_getvalue},
 };
 uintptr_t runtime_sema_resolve(const char *name) {
-    if (!strcmp(name,"188x57JYp0g#p#J")) return (uintptr_t)sem_create;
-    if (!strcmp(name,"Zxa0VhQVTsk#p#J")) return (uintptr_t)sem_wait;
-    if (!strcmp(name,"4czppHBiriw#p#J")) return (uintptr_t)sem_signal;
-    if (!strcmp(name,"12wOHk8ywb0#p#J")) return (uintptr_t)sem_poll;
-    if (!strcmp(name,"4DM06U2BNEY#p#J")) return (uintptr_t)sem_cancel;
-    if (!strcmp(name,"R1Jvn8bSCW8#p#J")) return (uintptr_t)sem_delete;
     return RUNTIME_LOOKUP(exports,name);
 }
 void runtime_sema_report(void) {
