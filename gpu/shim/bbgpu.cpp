@@ -301,7 +301,6 @@ extern "C" int bbgpu_init(const BbGpuConfig* config) {
         while (window->PollEvents()) {
             SDL_Delay(2);
         }
-        LOG_INFO(Frontend, "Window closed by user");
         std::fflush(stdout);
         runtime_calls_report();
         std::_Exit(0);
