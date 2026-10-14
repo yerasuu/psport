@@ -53,6 +53,8 @@ void runtime_memory_set_note_write_hook(RuntimeGpuRange note);
 void runtime_memory_set_cpu_write_hook(RuntimeGpuRange hook);
 // runtime_calls.c
 void runtime_calls_report(void);
+const char* runtime_file_user_dir(void);
+const char* runtime_savedata_title(void);
 }
 
 Frontend::WindowSDL* g_window = nullptr;
@@ -273,13 +275,18 @@ extern "C" int bbgpu_init(const BbGpuConfig* config) {
     BbSettings::Load();
     // What the translator knows about this game (games/), before anything asks for it.
     Game::Select(config->serial);
+    if (const Game::Profile* game = Game::Active(); game && game->prepare_saves) {
+        const std::string saves = std::string(runtime_file_user_dir()) + "/savedata";
+        game->prepare_saves(saves.c_str(), runtime_savedata_title());
+    }
 #ifdef BB_PGO_GENERATE
     StartProfileWriter();
 #endif
     g_sdk_version = config->sdk_version;
     if (config->user_dir) setenv("BB_GPU_USER_DIR", config->user_dir, 0);
     Core::Emulator::FillElfInfo(*config);
-    const std::string title = config->title ? config->title : "Bloodborne";
+    const std::string title = config->title && *config->title ? config->title
+                                  : config->serial ? config->serial : "UNKNOWN";
     const std::string icon = std::string(config->app0 ? config->app0 : ".") + "/sce_sys/icon0.png";
     const s32 width = config->width, height = config->height;
     g_window_thread = std::thread([title, icon, width, height] {

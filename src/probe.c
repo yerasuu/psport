@@ -73,7 +73,7 @@ static void check_cpu(void) {
     }
     if (!missing[0]) return;
     fprintf(stderr,
-            "ERROR: this CPU lacks %s. Bloodborne's code was compiled for the PS4's CPU and uses "
+            "ERROR: this CPU lacks %s. The game's code was compiled for the PS4's CPU and uses "
             "these instructions directly: it needs an Intel Haswell (4th generation Core, 2013) or "
             "newer, or an AMD Ryzen. BB_SKIP_CPU_CHECK=1 starts anyway.\n", missing);
     exit(1);
@@ -113,8 +113,9 @@ static void protect(void *p, size_t size, unsigned flags) {
     if (mprotect(p, size, mode)) fail("mprotect failed");
 #endif
 }
-/* BB_PERMISSIVE=1: an import the runtime lacks returns 0 instead of stopping, so a title other
- * than Bloodborne gets past the first one and its log lists every import it reached (each once). */
+/* BB_PERMISSIVE=1: an import the runtime lacks returns 0 instead of stopping, so a title
+ * the runtime does not cover fully gets past the first one and its log lists every import it reached
+ * (each once). */
 static unsigned char *permissive_seen;
 /* Its output arguments (runtime_import_outputs) per import: answered with 0 the caller goes on to
  * read memory nothing wrote, and faults far from the import. BB_PERMISSIVE_OUT=error answers these
@@ -597,7 +598,7 @@ int main(int argc, char **argv) {
     if (procparam) memcpy(&sdk,image+procparam+16,8); /* procparam: size, magic, count, sdk_version */
     runtime_process_configure((uint32_t)sdk,attributes);
     if (!cpu_only) {
-        char title[128]="Bloodborne", serial[16]="UNKNOWN";
+        char title[128]="", serial[16]="UNKNOWN";
         sfo_value(sfo,"TITLE",title,sizeof(title),NULL);
         sfo_value(sfo,"TITLE_ID",serial,sizeof(serial),NULL);
         BbGpuConfig gpu={title,serial,user_dir ? user_dir : "user",(uint32_t)sdk,attributes,1920,1080,app0 ? app0 : "."};

@@ -189,6 +189,8 @@ void runtime_pad_report(void);
 uintptr_t runtime_rtc_resolve(const char *name);
 const char *runtime_file_user_dir(void);
 void runtime_savedata_configure(const char *title);
+/* The title id the game's saves are kept under (INSTALL_DIR_SAVEDATA, else TITLE_ID). */
+const char *runtime_savedata_title(void);
 uintptr_t runtime_savedata_resolve(const char *name);
 /* Fills an OrbisSaveDataParam (zeroed when the save has none); -1 when the save does not exist. */
 int runtime_savedata_param(int32_t user, const char *title, const char *dir, void *param);
