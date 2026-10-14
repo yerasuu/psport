@@ -729,7 +729,9 @@ uintptr_t runtime_services_resolve(const char *name) {
     const uintptr_t online=runtime_net_resolve(name); /* PS_ONLINE=1: the online module first */
     if (online) return online;
     const uintptr_t found=RUNTIME_LOOKUP(exports,name);
-    return found ? found : runtime_socket_resolve(name);
+    if (found) return found;
+    const uintptr_t va_json=runtime_json_resolve(name);
+    return va_json ? va_json : runtime_socket_resolve(name);
 }
 #else
 uintptr_t runtime_services_resolve(const char *name) { (void)name; return 0; }

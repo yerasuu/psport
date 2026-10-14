@@ -145,6 +145,8 @@ uintptr_t runtime_playgo_resolve(const char *name);
 uintptr_t runtime_voice_resolve(const char *name);
 /* Offline libSceNet sockets (runtime_socket.c), consulted by runtime_services_resolve. */
 uintptr_t runtime_socket_resolve(const char *name);
+/* libSceJson (runtime_json.c), consulted by runtime_services_resolve. */
+uintptr_t runtime_json_resolve(const char *sz_name);
 int32_t *runtime_net_errno(void);
 /* Online play (runtime_net.c, PS_ONLINE=1): the online module answers the network and PSN imports. */
 void runtime_net_configure(const char *app0, const char *serial, const char *title, const char *version);
