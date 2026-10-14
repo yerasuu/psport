@@ -65,10 +65,10 @@ directory from `PS_DATA_DIR` (default the checkout: `out/`, `user/`, `bbport.ini
 
 `src/probe.c` checks the CPU, reads `param.sfo` (title, title ID, save directory, SDK version,
 attributes), configures the file mounts (`/app0` is the game folder, saves under `user/`), loads
-the game, binds its imports, installs the fault (`SIGSEGV`, `SIGILL`, `SIGBUS`), dump (`SIGUSR2`)
-and watchdog (`SIGALRM`, `--timeout`) handlers and jumps to the eboot's entry. Host heap objects
-handed to the guest stay below 1 TiB (`mallopt` keeps glibc in the non-PIE brk heap): PS4 code
-packs pointers into 40 bits. Guest memory is placed there too.
+the game, binds its imports, installs the fault (`SIGSEGV`, `SIGILL`, `SIGBUS`, `SIGFPE`), dump
+(`SIGUSR2`) and watchdog (`SIGALRM`, `--timeout`) handlers and jumps to the eboot's entry. Host
+heap objects handed to the guest stay below 1 TiB (`mallopt` keeps glibc in the non-PIE brk heap):
+PS4 code packs pointers into 40 bits. Guest memory is placed there too.
 
 ### Native loader
 
