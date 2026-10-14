@@ -227,19 +227,21 @@ Milestones, from the log and the dumps:
 
 It also records the first fault or stop logged before the title is told to end (`Guest fault`
 offset, `Host fault` library+offset and function, `STOP:`, assertion; what a game logs while it
-loses its display at the end is not a crash), the summary's count of imports without
-implementation and, as `forced` (`submit_forced`), the number of `Forcing submitDone` lines before
-then: the GPU library sends a submitDone itself once the game has gone too long without one, so a
-count that keeps growing means the game is stalled on the GPU. The table goes to stdout,
+loses its display at the end is not a crash), as `no impl` (`no_impl_called`) the count of the call
+report's `Calls: summary: N unimplemented` line (the distinct imports without implementation the
+game called, not the ones bound before it starts that `Runtime: imports ...` counts, which include
+code that never runs) and, as `forced` (`submit_forced`), the number of `Forcing submitDone` lines
+before then: the GPU library sends a submitDone itself once the game has gone too long without one,
+so a count that keeps growing means the game is stalled on the GPU. The table goes to stdout,
 `results.tsv` and `results.json` to the output folder with each title's log and dumps
-(`tools/regress/report.py <folder>` classifies a folder again). With `-u`, each title's user
-folder (saves and settings) starts as a copy of its own in that earlier output folder, so a run can
-load what an earlier one saved. `-t tools/regress/perf.txt` runs the titles whose schedules measure
-the frame rate in play (`bloodborne-perf.sched`, from a save given with `-u`; run alone on the
-machine).
+(`tools/regress/report.py <folder>` classifies a folder again). With `-u`, each title's user folder
+(saves and settings) starts as a copy of its own in that earlier output folder, so a run can load
+what an earlier one saved. `-t tools/regress/perf.txt` runs the titles whose schedules measure the
+frame rate in play (`bloodborne-perf.sched`, from a save given with `-u`; run alone on the machine).
 With `-c`, a milestone lost or a crash signature that is new or different is a regression: it is
 listed and the exit status is 1. The `no impl` and `forced` columns show their change against the
-earlier run without counting it as a regression (blank in an earlier file that predates `forced`).
+earlier run without counting it as a regression (blank in an earlier file that predates `forced` or
+`no_impl_called`).
 
 ## CI and binary cache
 

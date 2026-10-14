@@ -101,10 +101,10 @@ upstream's and built around Bloodborne.
 ## Measuring progress
 
 `tools/regress.sh` runs every title in `tools/regress/titles.txt` inside a headless gamescope
-(`PS_AUDIO=none`, `PS_PAD_HOST=0`: no window, no sound, none of the user's controllers), drives
-each with a pad schedule (`tools/regress/*.sched`) and reports how far it got (loaded, entered,
-initialized, first GPU frame, drawn frames, audio), its crash signature and its count of imports
-without implementation; with `-c <earlier results.json>` it flags regressions. Every title runs
+(`PS_AUDIO=none`, `PS_PAD_HOST=0`: no window, no sound, none of the user's controllers), drives each
+with a pad schedule (`tools/regress/*.sched`) and reports how far it got (loaded, entered,
+initialized, first GPU frame, drawn frames, audio), its crash signature and how many imports without
+implementation it called; with `-c <earlier results.json>` it flags regressions. Every title runs
 without a dump of system modules; `SYS_MODULES=<folder>` optionally passes one to the titles other
 than Bloodborne, to compare with psport's own libraries. Usage and milestones:
 [FORK.md](FORK.md#regression-runs); bringing up a new title:

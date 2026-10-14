@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # tools/regress.sh [options] GAMES_ROOT: runs every title of the titles file headless, follows its
 # pad schedule, and reports how far each got (loaded, entered, initialized, gpu, frames, audio), the
-# crash signature, the imports without implementation and the forced submitDones (GPU stalls).
+# crash signature, the imports without implementation it called and the forced submitDones (GPU
+# stalls).
 # Results: OUTDIR/results.{tsv,json} and a table on stdout; with -c, regressions against an earlier
 # results.json (or its directory).
 #   -j N        titles at once (default 2: each is a full game with its own gamescope)
