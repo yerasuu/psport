@@ -197,8 +197,8 @@ The translator, from the game's submission to the screen:
 | GCN shader recompiler to SPIR-V | `gpu/shadps4/shader_recompiler/` |
 | GPU memory without sparse binding (memory module) | `gpu/layer/` |
 
-`PS_SUBMIT_AHEAD` (default 2) lets a frame's first submissions run without waiting for the
-previous frame; the submit guard (`gpu/shim/bbport_submit_guard.*`) stops the overlap for the
+`PS_SUBMIT_AHEAD` (else the game profile's `c_submits_ahead`, else 0) lets a frame's first
+submissions run without waiting for the previous frame; the submit guard (`gpu/shim/bbport_submit_guard.*`) stops the overlap for the
 session when a game rewrites command buffers in flight. Multithreaded draw preparation and the
 two-stage draw pipeline: [parallel_gpu.md](parallel_gpu.md). Temporal upscaling (FSR 3.1, FSR 4,
 TAA, DLSS): [upscaler.md](upscaler.md). Changes to inherited shadPS4 files:
@@ -235,6 +235,9 @@ kept out of the core. `Game::Select` picks a profile by `param.sfo` `TITLE_ID` i
 | `buffer_copy_shader` | hash of a compute shader that only copies buffers |
 | `driver_commands_written`, `commands_submitted` | observe the game's command buffers |
 | `frame_overlap_unsafe` | tells the core to stop `PS_SUBMIT_AHEAD` overlap for the session |
+| `c_submits_ahead` | the frame overlap the game takes when `PS_SUBMIT_AHEAD` is unset |
+| `anisotropy` | anisotropic filtering forced on its textures when `PS_ANISO` is unset |
+| `upscaler` | where the temporal upscaler goes in its frame (scene combine and UI shaders); without it the upscaler stays off |
 | `report_stats`, `before_present` | profile diagnostics; per-frame work on the presenter thread |
 | `label_release` | the game's label release code, for the free check's `PS_LABEL_TRAP=2` |
 | `small_object_pool` | the layout of the pool holding its GPU labels, for the free check (`PS_FREE_CHECK`) |

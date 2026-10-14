@@ -16,6 +16,7 @@
 #include "video_core/renderer_vulkan/vk_runtime.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_shader_util.h"
+#include "video_core/renderer_vulkan/vk_temporal_upscaler.h"
 #include "video_core/texture_cache/texture_cache.h"
 
 namespace Vulkan {
@@ -76,10 +77,9 @@ CameraMotion::CameraMotion(const Instance& instance_, Scheduler& scheduler_,
     : instance{instance_}, scheduler{scheduler_}, texture_cache{texture_cache_}, runtime{runtime_} {
     const char* env = std::getenv("PS_DEBUG_MOTION");
     debug_overlay = env && env[0] == '1';
-    const char* upscaler = std::getenv("PS_UPSCALER");
     // The upscaler can be switched on from the menu at any time: the camera is always tracked
-    // unless PS_UPSCALER=none.
-    for_upscaler = !(upscaler && std::strcmp(upscaler, "none") == 0);
+    // while it is available.
+    for_upscaler = IsUpscalerAvailable();
     const auto device = instance.GetDevice();
     if (for_upscaler) {
         const std::array<vk::DescriptorSetLayoutBinding, 3> motion_bindings = {{

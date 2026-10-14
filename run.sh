@@ -103,9 +103,11 @@ fi
 # Frame rate: PS_FPS=uncap (default; delta-time patch, vblank 480 Hz, frames shown at once),
 # 60/90 (fixed-timestep patches) or 30 (unpatched). PS_PATCHES adds patch names ("a;b").
 fps=${PS_FPS:-uncap}
-# The presets are patches to Bloodborne's executable: another title runs unpatched, on the console's
-# 60 Hz vblank (at 480 Hz a title asking for 30 FPS through its flip rate got 240).
-if ! "$PYTHON" scripts/patches.py --game-dir "$game" --is-bloodborne; then fps=30; fi
+# The frame rate and resolution presets are patches to one title's executable (patches/): another
+# title runs unpatched at its own size, on the console's 60 Hz vblank (at 480 Hz a title asking for
+# 30 FPS through its flip rate got 240) and with the console's direct memory.
+has_presets=1
+if ! "$PYTHON" scripts/patches.py --game-dir "$game" --has-presets; then fps=30 has_presets=0; fi
 # bbport.ini output_res other than 1080p (720p for the Steam Deck, 1440p, 2160p): the whole game
 # renders at the preset's size of the output (a patch), the upscaler fills the output, the UI is
 # drawn at the output size. Preset and output changes need a restart.
@@ -118,7 +120,7 @@ if ! "$PYTHON" scripts/patches.py --game-dir "$game" --is-bloodborne; then fps=3
 if [[ -n ${PS_PROBE:-} ]]; then caps=$(dirname -- "$PS_PROBE")/bb-gpu-capabilities
 elif [[ -n ${PS_PREBUILT:-} ]]; then caps=bin/bb-gpu-capabilities
 else caps=out/bb-gpu-capabilities; fi
-if [[ -z ${PS_RENDER_RES:-} ]]; then
+if [[ -z ${PS_RENDER_RES:-} && $has_presets == 1 ]]; then
     read -r scaled_render scaled_output < <("$PYTHON" scripts/patches.py --print-scaled --settings "$PS_CONFIG") || true
 fi
 live=0

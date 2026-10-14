@@ -39,6 +39,15 @@ struct SmallObjectPool {
     std::uint64_t block_size = 0;
 };
 
+/// Where the temporal upscaler goes in the game's frame (docs/en/upscaler.md): it upscales the
+/// scene color right before the first dispatch of scene_combine_shader, and the frame's UI starts
+/// with the first draw of ui_shader (GCN program hashes). The upscaler, its jitter and the camera
+/// and object motion vectors run only once the scene combine is known.
+struct UpscalerPlacement {
+    std::uint64_t scene_combine_shader = 0;
+    std::uint64_t ui_shader = 0;
+};
+
 /// What the core offers a profile's hooks.
 struct CoreServices {
     /// The game handed out GPU memory [address, address + size): what the GPU had there is dead.
@@ -76,6 +85,17 @@ struct Profile {
     /// the submission lock: true when the game shows it cannot take the overlap, with why in
     /// reason (a NUL-terminated phrase that fits in size); the core then stops it for the session.
     bool (*frame_overlap_unsafe)(char* reason, std::size_t size) = nullptr;
+    /// Submissions of a frame that go to the GPU before it has finished the frame before
+    /// (PS_SUBMIT_AHEAD, which overrides it). Only for a game whose first c_submits_ahead
+    /// submissions of a frame never touch what the previous frame's GPU work still uses; 0, the
+    /// submission lock's contract, for any other.
+    std::uint32_t c_submits_ahead = 0;
+    /// Anisotropic filtering forced on the game's mipmapped textures in graphics draws (2, 4, 8 or
+    /// 16; PS_ANISO overrides it); 0 keeps the game's own samplers.
+    std::uint32_t anisotropy = 0;
+    /// Zeros when unknown: the temporal upscaler stays off (PS_UPSCALE_BEFORE_CS and
+    /// PS_UI_TRIGGER_VS place it by hand).
+    UpscalerPlacement upscaler;
     /// With each frame statistics report (PS_FRAME_STATS, the video out thread): the profile's
     /// own diagnostics.
     void (*report_stats)() = nullptr;
@@ -100,6 +120,24 @@ const Profile* Active();
 inline std::uint64_t BufferCopyShader() {
     const Profile* profile = Active();
     return profile ? profile->buffer_copy_shader : 0;
+}
+
+/// The active profile's frame overlap (Profile::c_submits_ahead), or 0.
+inline std::uint32_t SubmitsAhead() {
+    const Profile* profile = Active();
+    return profile ? profile->c_submits_ahead : 0;
+}
+
+/// The active profile's forced anisotropy, or 0.
+inline std::uint32_t Anisotropy() {
+    const Profile* profile = Active();
+    return profile ? profile->anisotropy : 0;
+}
+
+/// The active profile's upscaler placement, or zeros.
+inline UpscalerPlacement Upscaler() {
+    const Profile* profile = Active();
+    return profile ? profile->upscaler : UpscalerPlacement{};
 }
 
 /// Whether guest_rip is in code the active profile knows to write per-frame data.

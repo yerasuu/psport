@@ -100,6 +100,16 @@ extern const Profile BloodborneProfile = {
     .driver_commands_written = BbGnmHooks::NoteDriverWrite,
     .commands_submitted = BbGnmHooks::CheckSubmission,
     .frame_overlap_unsafe = BbHeapSites::OverlapLeaks,
+    // The game keeps two frame contexts and builds the next frame in the one of the frame before
+    // the previous: its first two submissions are translated while the GPU finishes the previous
+    // frame (1080p, Yahar'gul: 101 -> 154 FPS). With 8 or more, or no wait at all, its heap leaked
+    // (~2 resource objects a frame, out of memory after minutes).
+    .c_submits_ahead = 2,
+    // Its scene textures have little or no anisotropic filtering: behind the upscaler, surfaces
+    // seen at a grazing angle (stairs, floors, walls along the view) stayed blurred.
+    .anisotropy = 16,
+    // The post-processing combine, and the UI's first vertex shader.
+    .upscaler = {.scene_combine_shader = 0x9a9cf8a9, .ui_shader = 0x34e8a281},
     .report_stats = ReportStats,
     .before_present = BbGameMenu::Poll,
     .label_release = LabelRelease,

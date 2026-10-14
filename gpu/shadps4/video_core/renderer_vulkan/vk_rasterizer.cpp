@@ -3736,14 +3736,12 @@ void Rasterizer::BindTextures(const Shader::Info& stage, const PreparedStage* pr
     BindSamplers(stage, prepared, binding, write_index);
 }
 
-// bbport: the PS4 build samples most scene textures with little or no anisotropic filtering.
-// Behind the temporal upscaler the output shows the detail of the output's mip level, and
-// surfaces seen at a grazing angle (stairs, floors, walls along the view) stay blurred.
-// Mipmapped linear samplers of graphics draws get PS_ANISO (16; 0 = the game's) times.
+// bbport: mipmapped linear samplers of graphics draws get PS_ANISO times anisotropic filtering,
+// else the game profile's (Game::Profile::anisotropy); 0 keeps the game's own samplers.
 void Rasterizer::ForceAnisotropy(AmdGpu::Sampler& sharp, bool is_depth) const {
     static const int forced = [] {
         const char* value = std::getenv("PS_ANISO");
-        return value ? std::atoi(value) : 16;
+        return value ? std::atoi(value) : int(Game::Anisotropy());
     }();
     if (!is_depth && !pipeline_is_compute) {
         // The game's filters, once per kind: min filter, mip filter, ratio.
