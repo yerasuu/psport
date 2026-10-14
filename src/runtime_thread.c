@@ -44,7 +44,7 @@ typedef struct GuestThread {
     void *argument, *result;
     ThreadAttr attr;
     char name[32];
-    int detached, finished, joined, host_owned;
+    int detached, finished, joined, host_owned, is_cancel_requested;
     /* The creator's signal mask, which the thread takes once its TCB is in place. */
     sigset_t start_mask;
     jmp_buf exit_jump;
@@ -59,6 +59,7 @@ static _Thread_local int32_t guest_errno;
 static const unsigned char *tls_template;
 static uint64_t tls_filesz, tls_memsz, tls_align=16;
 static size_t created, joined_count, exited;
+static size_t s_c_cancel_requests, s_c_cancels_taken;
 
 void runtime_set_main_tls(const void *data,uint64_t filesz,uint64_t memsz,uint64_t align) {
     tls_template=data; tls_filesz=filesz; tls_memsz=memsz; tls_align=align ? align : 16;
@@ -367,9 +368,29 @@ static ABI int32_t thread_detach(GuestThread *t) {
     if (!t->host_owned) pthread_detach(t->host);
     return 0;
 }
+/* FreeBSD's struct pthread_cleanup, laid over the _pthread_cleanup_info the guest's
+ * pthread_cleanup_push macro keeps on its stack. */
+typedef struct CleanupHandler {
+    struct CleanupHandler *prev;
+    void (ABI *routine)(void *);
+    void *routine_arg;
+    int32_t onheap;
+} CleanupHandler;
+static _Thread_local CleanupHandler *s_p_cleanup_handlers;
+static ABI void push_cleanup_handler(void (ABI *pfn_routine)(void *),void *p_argument,CleanupHandler *p_handler) {
+    p_handler->routine=pfn_routine; p_handler->routine_arg=p_argument; p_handler->onheap=0;
+    p_handler->prev=s_p_cleanup_handlers; s_p_cleanup_handlers=p_handler;
+}
+static ABI void pop_cleanup_handler(int32_t should_execute) {
+    CleanupHandler *p_top=s_p_cleanup_handlers;
+    if (!p_top) return;
+    s_p_cleanup_handlers=p_top->prev;
+    if (should_execute) p_top->routine(p_top->routine_arg);
+}
 static ABI __attribute__((noreturn)) void thread_exit(void *value) {
     GuestThread *t=runtime_thread_current();
     if (t->host_owned) { fputs("STOP: pthread_exit on host-owned/main thread\n",stderr); runtime_stop(21); }
+    while (s_p_cleanup_handlers) pop_cleanup_handler(1);
     t->result=value;
     /* No host unwinder: guest frames have no registered FDEs. */
     longjmp(t->exit_jump,1);
@@ -426,6 +447,27 @@ static ABI int32_t posix_set_cancel_type(int type,int *old) {
     if (old) *old=cancel_type;
     cancel_type=type; return 0;
 }
+/* Deferred cancellation: a request is taken when the target reaches pthread_testcancel. The
+ * blocking calls that are cancellation points on FreeBSD (waits, sleeps, I/O) do not take it, and
+ * asynchronous cancellation is held to the next pthread_testcancel too; the report counts both. */
+static ABI int32_t thread_cancel(GuestThread *p_thread) {
+    if (!find_thread(p_thread) || p_thread->host_owned) return ERR(3);
+    runtime_exception_lock(&lock);
+    const int is_first_request=!s_c_cancel_requests && !p_thread->is_cancel_requested;
+    if (!p_thread->is_cancel_requested) ++s_c_cancel_requests;
+    p_thread->is_cancel_requested=1;
+    runtime_exception_unlock(&lock);
+    if (is_first_request)
+        printf("Runtime: guest thread '%s' asked to cancel; it ends at its next pthread_testcancel\n",p_thread->name);
+    return 0;
+}
+static ABI int32_t posix_cancel(GuestThread *p_thread) { return posix(thread_cancel(p_thread)); }
+static ABI void thread_test_cancel(void) {
+    GuestThread *p_thread=current;
+    if (!p_thread || p_thread->host_owned || !p_thread->is_cancel_requested || cancel_state) return;
+    runtime_exception_lock(&lock); ++s_c_cancels_taken; runtime_exception_unlock(&lock);
+    thread_exit((void *)1); /* PTHREAD_CANCELED */
+}
 
 int32_t runtime_thread_spawn(void **out,void *(ABI *entry)(void *),void *argument,uint64_t stack,const char *name) {
     ThreadAttr *attr=NULL;
@@ -465,6 +507,9 @@ uintptr_t runtime_thread_resolve(const char *name) {
         {"Jmi+9w9u0E4",posix_create_name}, {"h9CcP3J0oVM",posix_join},
         {"+U1R4WtXvoc",posix_detach}, {"FJrT5LuUBAU",thread_exit}, {"7Xl257M4VNI",thread_equal},
         {"lZzFeSxPl08",posix_set_cancel_state}, {"2dEhvvjlq30",posix_set_cancel_type},
+        {"qBDmpCyGssE",thread_cancel}, {"0D4-FVvEikw",posix_cancel},
+        {"LapIb799SSE",thread_test_cancel}, {"nYBrkGDqxh8",thread_test_cancel},
+        {"1xvtUVx1-Sg",push_cleanup_handler}, {"iWsFlYMf3Kw",pop_cleanup_handler},
     };
     for (size_t i=0;i<sizeof(table)/sizeof(*table);++i)
         if (runtime_same_nid(name,table[i].nid)) return (uintptr_t)table[i].fn;
@@ -473,6 +518,10 @@ uintptr_t runtime_thread_resolve(const char *name) {
 void runtime_thread_report(void) {
     runtime_exception_lock(&lock);
     printf("Runtime: guest threads created=%zu, exited=%zu, joined=%zu\n",created,exited,joined_count);
+    if (s_c_cancel_requests)
+        printf("Runtime: thread cancellation: %zu requested, %zu taken at pthread_testcancel (blocking "
+               "cancellation points and asynchronous cancellation are not honoured)\n",s_c_cancel_requests,
+               s_c_cancels_taken);
     runtime_exception_unlock(&lock);
 }
 #else

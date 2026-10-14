@@ -79,6 +79,8 @@ void runtime_calls_hle_stub(const char *function, const uint64_t *count);
 void runtime_calls_report(void);
 uintptr_t runtime_rwlock_resolve(const char *name);
 void runtime_rwlock_report(void);
+uintptr_t runtime_barrier_resolve(const char *sz_name);
+void runtime_barrier_report(void);
 void runtime_set_module_tls(uint64_t module, const void *data, uint64_t filesz, uint64_t memsz);
 void runtime_set_procparam(void *param);
 uintptr_t runtime_thread_resolve(const char *name);

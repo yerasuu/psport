@@ -135,7 +135,7 @@ in link order (libc first) and the eboot's entry runs with `argv[0] = /app0/eboo
 | process, libc hooks, TLS, procparam, `runtime_resolve` | `runtime.c`, `runtime.h` |
 | kernel misc, process, time | `runtime_kernel.c`, `runtime_time.c`, `runtime_rtc.c` |
 | memory: direct, flexible, mappings, pools, write traps, GPU interface | `runtime_memory.c`, `runtime_memory_kernel.c`, `runtime_memory_gpu.c`, `runtime_mempool.c` |
-| threads and synchronisation | `runtime_thread.c`, `runtime_sched.c`, `runtime_mutex.c`, `runtime_rwlock.c`, `runtime_sema.c`, `runtime_eventflag.c`, `runtime_ult.c`, `runtime_ulobjmgr.c` |
+| threads and synchronisation | `runtime_thread.c`, `runtime_sched.c`, `runtime_mutex.c`, `runtime_rwlock.c`, `runtime_sema.c`, `runtime_eventflag.c`, `runtime_barrier.c`, `runtime_ult.c`, `runtime_ulobjmgr.c` |
 | exceptions | `runtime_exception.c` |
 | modules loaded at run time | `runtime_module.c` |
 | files, async I/O, AppContent, PlayGo, saves | `runtime_file.c`, `runtime_aio.c`, `runtime_content.c`, `runtime_playgo.c`, `runtime_savedata.c` |
@@ -151,7 +151,7 @@ shadPS4's aerolib list, plus a few extra NIDs in `runtime_symbol`) and compares 
 function serves the NID whichever library the executable names (`libkernel` or `libScePosix`).
 `runtime_resolve` (`src/runtime.c`) asks the tables in a fixed chain: the runtime's own libc,
 TLS and procparam entries, then mutex, thread, sched, content, time, sema, eventflag, ulobjmgr,
-ult, rwlock, memory, mempool, exception, kernel, module, playgo, voice, services, ajm, audio,
+ult, rwlock, barrier, memory, mempool, exception, kernel, module, playgo, voice, services, ajm, audio,
 audio3d, pad, gesture, rtc, savedata, file, aio, and last `bbgpu_resolve`. The first table that
 has the symbol wins.
 
