@@ -141,6 +141,7 @@ in link order (libc first) and the eboot's entry runs with `argv[0] = /app0/eboo
 | files, async I/O, AppContent, PlayGo, saves | `runtime_file.c`, `runtime_aio.c`, `runtime_content.c`, `runtime_playgo.c`, `runtime_savedata.c` |
 | system and user services, dialogs, NP offline, sockets | `runtime_services.c`, `runtime_socket.c`, `runtime_net.c`, `runtime_voice.c` |
 | audio | `runtime_audio.c` (AudioOut), `runtime_audio3d.c`, `runtime_ajm.c` |
+| absent peripherals: USB devices (libSceUsbd), PlayStation Camera | `runtime_devices.c` |
 | input | `runtime_pad.c`, `runtime_pad_script.c` (scripted input for automated runs), `runtime_gesture.c` |
 | call report | `runtime_calls.c` |
 
@@ -152,7 +153,7 @@ function serves the NID whichever library the executable names (`libkernel` or `
 `runtime_resolve` (`src/runtime.c`) asks the tables in a fixed chain: the runtime's own libc,
 TLS and procparam entries, then mutex, thread, sched, content, time, sema, eventflag, ulobjmgr,
 ult, rwlock, barrier, memory, mempool, exception, kernel, module, playgo, voice, services, ajm, audio,
-audio3d, pad, gesture, rtc, savedata, file, aio, and last `bbgpu_resolve`. The first table that
+audio3d, pad, gesture, devices, rtc, savedata, file, aio, and last `bbgpu_resolve`. The first table that
 has the symbol wins.
 
 Guest-visible errno values are FreeBSD's (`runtime_guest_errno`). Guest threads are host pthreads

@@ -281,6 +281,8 @@ uintptr_t runtime_resolve(const char *name, int is_data) {
     if (pad) return pad;
     uintptr_t gesture = runtime_gesture_resolve(name);
     if (gesture) return gesture;
+    uintptr_t va_devices = runtime_devices_resolve(name);
+    if (va_devices) return va_devices;
     uintptr_t mouse = runtime_mouse_resolve(name);
     if (mouse) return mouse;
     uintptr_t keyboard = runtime_keyboard_resolve(name);

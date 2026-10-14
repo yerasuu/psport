@@ -144,6 +144,8 @@ uintptr_t runtime_services_resolve(const char *name);
 /* sceSystemServiceParamGetInt's language (PS_LANGUAGE, default 1 = English US). */
 int runtime_system_language(void);
 uintptr_t runtime_playgo_resolve(const char *name);
+/* Absent peripherals: USB devices and the PlayStation Camera (runtime_devices.c). */
+uintptr_t runtime_devices_resolve(const char *sz_name);
 uintptr_t runtime_voice_resolve(const char *name);
 /* Offline libSceNet sockets (runtime_socket.c), consulted by runtime_services_resolve. */
 uintptr_t runtime_socket_resolve(const char *name);
