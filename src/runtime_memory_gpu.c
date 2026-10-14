@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <inttypes.h>
 #include <limits.h>
 #include <stdatomic.h>
 #include <pthread.h>
@@ -249,14 +250,25 @@ static void store_once(unsigned char *dst, const unsigned char *src, uint64_t n)
         else { __atomic_store_n(dst,*src,__ATOMIC_RELEASE); ++dst; ++src; --n; }
     }
 }
+static unsigned char *backing_of(const Vma *v, uintptr_t at) {
+    return v->kind==KIND_FILE ? v->view+(at-v->start) : backing_base+v->phys+(at-v->start);
+}
+static uint64_t viewless_file_writes;
 int runtime_memory_write_backing(uintptr_t address, const void *data, uint64_t size) {
     read_lock();
     int ok=1;
     for (uintptr_t at=address, end=address+size; at<end && ok;) {
         size_t i=vma_index(at);
-        if (i==vma_count || vmas[i].start>at || vmas[i].kind==KIND_RESERVED || vmas[i].kind==KIND_FILE) { ok=0; break; }
+        if (i==vma_count || vmas[i].start>at || vmas[i].kind==KIND_RESERVED) { ok=0; break; }
+        if (vmas[i].kind==KIND_FILE && !vmas[i].view) {
+            if (!__atomic_fetch_add(&viewless_file_writes,1,__ATOMIC_RELAXED)) {
+                printf("Runtime: GPU write to file mapping %#" PRIxPTR " without a host view: dropped\n",at);
+                runtime_calls_hle_stub("GPU write to a file mapping without a host view",&viewless_file_writes);
+            }
+            ok=0; break;
+        }
         uint64_t n=(vmas[i].end<end ? vmas[i].end : end)-at;
-        store_once(backing_base+vmas[i].phys+(at-vmas[i].start),(const unsigned char *)data+(at-address),n);
+        store_once(backing_of(&vmas[i],at),(const unsigned char *)data+(at-address),n);
         at+=n;
     }
     read_unlock();
@@ -274,7 +286,7 @@ void runtime_memory_read_backing(uintptr_t address, void *data, uint64_t size) {
         uint64_t n;
         if (i<vma_count && vmas[i].start<=at && vmas[i].kind!=KIND_RESERVED) {
             n=(vmas[i].end<end ? vmas[i].end : end)-at;
-            memcpy(out+(at-address),vmas[i].kind==KIND_FILE ? (const void *)at : backing_base+vmas[i].phys+(at-vmas[i].start),n);
+            memcpy(out+(at-address),vmas[i].kind==KIND_FILE && !vmas[i].view ? (const void *)at : backing_of(&vmas[i],at),n);
         } else {
             const uintptr_t next=i==vma_count ? end : vmas[i].start>at ? vmas[i].start : vmas[i].end;
             n=(next<end ? next : end)-at;

@@ -21,7 +21,10 @@ uint64_t pool_size_bytes(void);
 #define MAP_FIXED_FLAG 0x10
 #define MAP_NO_OVERWRITE 0x80
 enum { KIND_RESERVED=1, KIND_DIRECT, KIND_FLEXIBLE, KIND_FILE };
-typedef struct { uintptr_t start, end; int kind, prot, type; uint64_t phys; int pooled; } Vma;
+/* view: a KIND_FILE region's second host mapping of its file, at start (NULL when the file could
+ * not be mapped writable): the GPU's backing reads and writes, which the guest's own protection of
+ * the region (read traps, read-only prot) must not stop. */
+typedef struct { uintptr_t start, end; int kind, prot, type; uint64_t phys; int pooled; unsigned char *view; } Vma;
 void write_lock(void);
 void write_unlock(void);
 void read_lock(void);

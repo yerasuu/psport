@@ -276,6 +276,7 @@ static int split_at(uintptr_t a) {
     Vma right=vmas[i];
     right.start=a;
     if (right.kind==KIND_DIRECT || right.kind==KIND_FILE) right.phys+=a-vmas[i].start;
+    if (right.view) right.view+=a-vmas[i].start;
     vmas[i].end=a;
     return vma_insert(i+1,right);
 }
@@ -313,6 +314,7 @@ void drop_range(uintptr_t start, uintptr_t end) {
             flexible_bytes-=vmas[i+n].end-vmas[i+n].start;
             flex_free(vmas[i+n].phys,vmas[i+n].end-vmas[i+n].start);
         }
+        if (vmas[i+n].view) munmap(vmas[i+n].view,vmas[i+n].end-vmas[i+n].start);
         ++n;
     }
     vma_erase(i,n);
@@ -332,9 +334,18 @@ static int32_t place_backed(void **inout, uint64_t size, int prot, int flags, ui
         : kind==KIND_FILE ? mmap((void *)address,size,host_prot(prot),MAP_SHARED|MAP_FIXED,file,(off_t)phys)
         : map_phys(address,size,host_prot(prot),phys);
     if (mapped==MAP_FAILED) return kind==KIND_FILE && errno==EACCES ? ACCESS : NO_MEMORY;
+    unsigned char *view=NULL;
+    if (kind==KIND_FILE) {
+        view=mmap(NULL,size,PROT_READ|PROT_WRITE,MAP_SHARED,file,(off_t)phys);
+        if (view==MAP_FAILED) {
+            view=NULL;
+            printf("Runtime: file mapping %p+%#" PRIx64 " has no host view (%s): the GPU's writes to it are dropped\n",
+                   mapped,size,strerror(errno));
+        }
+    }
     drop_range(address,address+size);
     trap_forget(address,address+size); /* a new mapping starts without traps */
-    if (vma_insert(vma_index(address),(Vma){address,address+size,kind,prot,type,phys,0})) return NO_MEMORY;
+    if (vma_insert(vma_index(address),(Vma){address,address+size,kind,prot,type,phys,0,view})) return NO_MEMORY;
     if (kind==KIND_FLEXIBLE) flexible_bytes+=size;
     if (kind!=KIND_RESERVED) queue_hook(HOOK_MAP,address,size);
     *inout=mapped;
