@@ -217,8 +217,15 @@ static ABI __attribute__((noreturn)) void guest_libc_exit(int status) {
 /* Imports the runtime answers itself ahead of the libraries (the game's libc wrappers, TLS, its
  * process parameters), whichever library the executable names for them. */
 static int32_t need_libc_internal = 1; /* SDK marker variable referenced by Fios2 */
+/* The command line the eboot's entry receives (probe.c): its path alone, as the console starts an
+ * application; __progname is its last component, as FreeBSD's crt sets it. */
+static char *s_arguments[] = {"/app0/eboot.bin", NULL};
+static const char *s_sz_progname = "eboot.bin";
+static ABI int32_t guest_getargc(void) { return 1; }
+static ABI char **guest_getargv(void) { return s_arguments; }
 static const RuntimeExport own_data[]={
     {"__stack_chk_guard",&stack_canary}, {"Need_sceLibcInternal",&need_libc_internal},
+    {"__progname",&s_sz_progname},
 };
 static const RuntimeExport own_functions[]={
     {"_init_env",init_env}, {"atexit",guest_atexit}, {"__cxa_atexit",guest_cxa_atexit}, {"exit",guest_libc_exit},
@@ -227,6 +234,7 @@ static const RuntimeExport own_functions[]={
     {"memcpy",guest_memcpy}, {"memmove",guest_memmove}, {"memcmp",guest_memcmp}, {"strlen",guest_strlen},
     {"__tls_get_addr",guest_tls_get_addr}, {"sceKernelGetProcParam",guest_procparam},
     {"_sceKernelRtldSetApplicationHeapAPI",guest_set_heap_api},
+    {"getargc",guest_getargc}, {"getargv",guest_getargv},
 };
 uintptr_t runtime_resolve(const char *name, int is_data) {
     if (!(capabilities & 1)) return 0;
