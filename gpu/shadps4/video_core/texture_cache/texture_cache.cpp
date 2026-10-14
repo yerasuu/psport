@@ -162,8 +162,10 @@ void TextureCache::DownloadImageMemory(ImageId image_id, bool sync) {
                            BbFreeCheck::ImageDownload);
         Core::Memory::Instance()->TryWriteBacking(std::bit_cast<u8*>(image.info.guest_address),
                                                   download.mapped, download_size);
+        // bbport: synchronous downloads run on the GPU command thread or the draw recording
+        // thread; a readback queued to the command thread from either never ran (deadlock).
         if (!WriteTracking()) {
-            buffer_cache.InvalidateMemory(image.info.guest_address, download_size);
+            buffer_cache.InvalidateMemory(image.info.guest_address, download_size, true);
         }
     } else {
         scheduler.DeferPriorityOperation(
