@@ -1,5 +1,5 @@
 /* Kernel semaphores: 32-bit IDs, counted tokens and FIFO waiters.
- * Priority-ordered semaphores are approximated by FIFO order. */
+ * Priority-ordered semaphores are approximated by FIFO order. POSIX semaphores and _umtx_op below. */
 #define _GNU_SOURCE
 #include "runtime.h"
 #include <stdio.h>
@@ -263,12 +263,89 @@ static ABI int32_t posix_sem_timedwait(GuestSem *sem,const GuestTime *end) {
     struct timespec t={.tv_sec=(time_t)end->seconds,.tv_nsec=(long)end->nanoseconds};
     return posix_result(usem_wait(sem,CLOCK_REALTIME,&t));
 }
+/* FreeBSD's _umtx_op for the ops libc's own primitives build on: plain waits and wakes on a word
+ * (over futexes, private ones for the _PRIVATE ops as FreeBSD keys them apart) and the _usem
+ * semaphore inside sem_t. A spurious return from a wait is allowed, so a signal or a word that
+ * changed before the sleep returns 0. */
+enum {
+    UMTX_OP_WAIT=2, UMTX_OP_WAKE=3, UMTX_OP_WAIT_UINT=11, UMTX_OP_WAIT_UINT_PRIVATE=15, UMTX_OP_WAKE_PRIVATE=16,
+    UMTX_OP_SEM_WAIT=19, UMTX_OP_SEM_WAKE=20, UMTX_OP_NWAKE_PRIVATE=21, UMTX_OP_COUNT=32,
+};
+typedef struct { _Atomic uint32_t has_waiters, count; uint32_t flags; } GuestUsem;
+typedef struct { GuestTime timeout; uint32_t flags, clock; } GuestUmtxTime;
+/* The timeout as an absolute CLOCK_MONOTONIC or CLOCK_REALTIME time: FreeBSD 9 passes a relative
+ * timespec in uaddr2; later ABIs put its size in uaddr and, past a timespec, a _umtx_time with
+ * UMTX_ABSTIME (1) and a clock (0 realtime). */
+static int umtx_deadline(const void *p_size, const void *p_timeout, clockid_t *p_out_clock, struct timespec *p_out_end) {
+    GuestUmtxTime timeout={.clock=4};
+    memcpy(&timeout,p_timeout,(uintptr_t)p_size>sizeof(GuestTime) ? sizeof(timeout) : sizeof(GuestTime));
+    if (timeout.timeout.seconds<0 || timeout.timeout.nanoseconds<0 || timeout.timeout.nanoseconds>=1000000000) return 22;
+    *p_out_clock=timeout.clock==0 ? CLOCK_REALTIME : CLOCK_MONOTONIC;
+    *p_out_end=(struct timespec){.tv_sec=(time_t)timeout.timeout.seconds,.tv_nsec=(long)timeout.timeout.nanoseconds};
+    if (timeout.flags&1) return 0;
+    struct timespec now;
+    clock_gettime(*p_out_clock,&now);
+    p_out_end->tv_sec+=now.tv_sec;
+    p_out_end->tv_nsec+=now.tv_nsec;
+    if (p_out_end->tv_nsec>=1000000000) { p_out_end->tv_nsec-=1000000000; ++p_out_end->tv_sec; }
+    return 0;
+}
+static int umtx_sleep(void *p_word, uint32_t expected, int is_private, const void *p_size, const void *p_timeout) {
+    clockid_t clock=CLOCK_MONOTONIC;
+    struct timespec end;
+    if (p_timeout) {
+        const int error=umtx_deadline(p_size,p_timeout,&clock,&end);
+        if (error) return error;
+    }
+    const int op=FUTEX_WAIT_BITSET|(is_private ? FUTEX_PRIVATE_FLAG : 0)|(clock==CLOCK_REALTIME ? FUTEX_CLOCK_REALTIME : 0);
+    const uint64_t wait_start=runtime_wait_clock();
+    const long result=syscall(SYS_futex,p_word,op,expected,p_timeout ? &end : NULL,NULL,FUTEX_BITSET_MATCH_ANY);
+    runtime_wait_note(2,runtime_wait_clock()-wait_start);
+    return result && errno==ETIMEDOUT ? 60 : 0;
+}
+static void umtx_wake(void *p_word, uint64_t count, int is_private) {
+    syscall(SYS_futex,p_word,FUTEX_WAKE|(is_private ? FUTEX_PRIVATE_FLAG : 0),count>INT32_MAX ? INT32_MAX : (int)count,NULL,NULL,0);
+}
+static ABI int32_t posix_umtx_op(void *p_object, int op, uint64_t value, void *p_address, void *p_address2) {
+    static _Atomic unsigned char s_is_op_reported[UMTX_OP_COUNT];
+    if (!p_object) return posix_result(14);
+    switch (op) {
+    case UMTX_OP_WAIT:
+        if (*(volatile uint64_t *)p_object!=value) return 0;
+        return posix_result(umtx_sleep(p_object,(uint32_t)value,0,p_address,p_address2));
+    case UMTX_OP_WAIT_UINT:
+    case UMTX_OP_WAIT_UINT_PRIVATE:
+        return posix_result(umtx_sleep(p_object,(uint32_t)value,op==UMTX_OP_WAIT_UINT_PRIVATE,p_address,p_address2));
+    case UMTX_OP_WAKE:
+    case UMTX_OP_WAKE_PRIVATE:
+        umtx_wake(p_object,value,op==UMTX_OP_WAKE_PRIVATE);
+        return 0;
+    case UMTX_OP_NWAKE_PRIVATE:
+        for (uint64_t i=0;i<value;++i) umtx_wake(((void **)p_object)[i],INT32_MAX,1);
+        return 0;
+    case UMTX_OP_SEM_WAIT: {
+        GuestUsem *p_sem=p_object;
+        atomic_store(&p_sem->has_waiters,1);
+        if (atomic_load(&p_sem->count)) return 0;
+        return posix_result(umtx_sleep(&p_sem->count,0,!(p_sem->flags&SEM_SHARED),p_address,p_address2));
+    }
+    case UMTX_OP_SEM_WAKE: {
+        GuestUsem *p_sem=p_object;
+        umtx_wake(&p_sem->count,1,!(p_sem->flags&SEM_SHARED));
+        return 0;
+    }
+    default:
+        if (op>=0 && op<UMTX_OP_COUNT && !atomic_exchange(&s_is_op_reported[op],1))
+            fprintf(stderr,"Runtime: _umtx_op op %d on %p not supported\n",op,p_object);
+        return posix_result(22);
+    }
+}
 static const RuntimeExport exports[]={
     {"sceKernelCreateSema",sem_create}, {"sceKernelWaitSema",sem_wait}, {"sceKernelSignalSema",sem_signal},
     {"sceKernelPollSema",sem_poll}, {"sceKernelCancelSema",sem_cancel}, {"sceKernelDeleteSema",sem_delete},
     {"sem_init",posix_sem_init}, {"sem_destroy",posix_sem_destroy}, {"sem_wait",posix_sem_wait},
     {"sem_trywait",posix_sem_trywait}, {"sem_timedwait",posix_sem_timedwait}, {"sem_post",posix_sem_post},
-    {"sem_getvalue",posix_sem_getvalue},
+    {"sem_getvalue",posix_sem_getvalue}, {"_umtx_op",posix_umtx_op},
     {"scePthreadSemInit",psem_init}, {"scePthreadSemWait",psem_wait}, {"scePthreadSemTrywait",psem_trywait},
     {"scePthreadSemTimedwait",psem_timedwait}, {"scePthreadSemPost",psem_post},
     {"scePthreadSemDestroy",psem_destroy}, {"scePthreadSemGetvalue",psem_getvalue},

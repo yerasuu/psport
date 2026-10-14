@@ -174,11 +174,13 @@ static ABI int32_t keyboard_info(uint32_t resource, KeyboardInfo *info) {
     if (connected) { info->user=user; info->type=KEYBOARD_TYPE_ENGLISH_US; info->status=KEYBOARD_CONNECTED; }
     return 0;
 }
-/* The handler runs outside the lock: it may call back into the library (GetInfo, Close). */
+/* The handler runs outside the lock: it may call back into the library (GetInfo, Close). The
+ * on-screen keyboard's events (runtime_ime.c) come first. */
 static ABI int32_t ime_update(ImeHandler handler) {
     ImeEvent events[EVENTS_PER_UPDATE];
+    const int is_panel_open=runtime_ime_update((void *)handler);
     pthread_mutex_lock(&lock);
-    if (!kbd.open) { pthread_mutex_unlock(&lock); return IME_NOT_OPENED; }
+    if (!kbd.open) { pthread_mutex_unlock(&lock); return is_panel_open ? 0 : IME_NOT_OPENED; }
     const int count=collect(events);
     ImeHandler call=handler ? handler : kbd.handler;
     void *arg=kbd.arg;
@@ -192,7 +194,10 @@ static const RuntimeExport exports[]={
     {"sceImeKeyboardOpen",keyboard_open}, {"sceImeKeyboardGetResourceId",keyboard_resource_id},
     {"sceImeKeyboardGetInfo",keyboard_info}, {"sceImeKeyboardClose",keyboard_close}, {"sceImeUpdate",ime_update},
 };
-uintptr_t runtime_keyboard_resolve(const char *name) { return RUNTIME_LOOKUP(exports,name); }
+uintptr_t runtime_keyboard_resolve(const char *name) {
+    const uintptr_t va_found=RUNTIME_LOOKUP(exports,name);
+    return va_found ? va_found : runtime_ime_resolve(name);
+}
 int runtime_keyboard_taken(void) { return __atomic_load_n(&taken,__ATOMIC_RELAXED); }
 void runtime_keyboard_report(void) {
     if (host_logged<0) return;

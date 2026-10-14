@@ -123,6 +123,12 @@ void WindowSDL::BeginTextInput(const std::string& initial, const std::string& pr
     text_requested = true;
 }
 
+void WindowSDL::EndTextInput() {
+    std::scoped_lock lock{text_mutex};
+    text_requested = false;
+    m_is_text_end_requested = true;
+}
+
 int WindowSDL::PollTextInput(std::string& out) {
     std::scoped_lock lock{text_mutex};
     out = text;
@@ -271,6 +277,15 @@ void WindowSDL::UpdateTextTitle() {
 bool WindowSDL::PollEvents() {
     {
         std::scoped_lock lock{text_mutex};
+        if (m_is_text_end_requested) {
+            m_is_text_end_requested = false;
+            if (text_active) {
+                text_active = false;
+                text_state = 2;
+                SDL_StopTextInput(window);
+                UpdateTextTitle();
+            }
+        }
         if (text_requested) { // SDL text input must be toggled from the window thread
             text_requested = false;
             text_active = true;

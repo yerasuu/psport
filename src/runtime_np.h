@@ -23,6 +23,13 @@ enum {
     NP_IN_GAME_MESSAGE_HANDLE,
     NP_TUS_REQUEST,
     NP_WORD_FILTER_REQUEST,
+    NP_HTTP_TEMPLATE,
+    NP_HTTP_CONNECTION,
+    NP_HTTP_REQUEST,
+    NP_HTTP_REQUEST_SENT,
+    NP_HTTP_REQUEST_ABORTED,
+    NP_TROPHY_CONTEXT,
+    NP_TROPHY_HANDLE,
 };
 
 #define NP_SIGNED_OUT ((int32_t)0x80550006)
@@ -32,6 +39,10 @@ enum {
 int64_t np_object_create(uint32_t kind);
 bool np_object_exists(uint32_t kind, int64_t h_object);
 bool np_object_delete(uint32_t kind, int64_t h_object);
+/* The kind of an existing object, or NP_OBJECT_FREE. */
+uint32_t np_object_kind(int64_t h_object);
+/* Moves an object to another kind (a request's state), keeping its id. */
+bool np_object_change(int64_t h_object, uint32_t kind);
 
 uintptr_t runtime_np_community_resolve(const char *sz_name);
 #endif

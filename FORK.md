@@ -153,6 +153,13 @@ Without a window or a host keyboard the keyboard opens and lists none, so `GetRe
 `0x80BC0004` as on a console with no keyboard. The log says whether the host keyboard reaches the
 game (`Runtime: keyboard: ...`) and sums up the events delivered at exit.
 
+libSceIme's on-screen keyboard (`src/runtime_ime.c`) is the same text entry as the IME dialog: while
+the game has it open, the game window takes the host keyboard's typing and the overlay draws the
+panel with the text. `sceImeUpdate` hands the game the open event (the panel's place and size), each
+change of the text (also written to the game's buffer) and Enter or Esc as the panel's enter or close
+button; the caret stays at the end of the text and no input method composes. Without a window the
+panel is entered at once with `PS_IME_TEXT` or the text the game opened it with.
+
 ## Diagnostics
 
 | Variable | What it shows |

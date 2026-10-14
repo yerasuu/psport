@@ -139,7 +139,7 @@ in link order (libc first) and the eboot's entry runs with `argv[0] = /app0/eboo
 | exceptions | `runtime_exception.c` |
 | modules loaded at run time | `runtime_module.c` |
 | files, async I/O, AppContent, PlayGo, saves | `runtime_file.c`, `runtime_aio.c`, `runtime_content.c`, `runtime_playgo.c`, `runtime_savedata.c` |
-| system and user services, dialogs, NP offline, sockets | `runtime_services.c`, `runtime_socket.c`, `runtime_net.c`, `runtime_voice.c` |
+| system and user services, dialogs, NP offline, trophies, sockets, HTTP | `runtime_services.c`, `runtime_trophy.c`, `runtime_socket.c`, `runtime_http.c`, `runtime_net.c`, `runtime_voice.c` |
 | audio | `runtime_audio.c` (AudioOut), `runtime_audio3d.c`, `runtime_ajm.c` |
 | absent peripherals: USB devices (libSceUsbd), PlayStation Camera | `runtime_devices.c` |
 | Remote Play, Share Play, video recording, core dumps (none running) | `runtime_capture.c` |
@@ -157,7 +157,9 @@ ult, rwlock, barrier, memory, mempool, exception, kernel, module, playgo, voice,
 audio3d, pad, gesture, devices, capture, rtc, savedata, file, aio, and last `bbgpu_resolve`. The first table that
 has the symbol wins.
 
-Guest-visible errno values are FreeBSD's (`runtime_guest_errno`). Guest threads are host pthreads
+Guest-visible errno values are FreeBSD's (`runtime_guest_errno`). Sockets, libSceNet's and POSIX's,
+take their descriptors from the file table (`runtime_file.c`), as kernel descriptors do on the console,
+so `close`, `read`, `write`, `fcntl` and `select` serve both. Guest threads are host pthreads
 with PS4 stacks below 1 TiB.
 
 ### Call report

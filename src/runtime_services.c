@@ -1,6 +1,7 @@
 /* System services for an offline, single-user console:
  *   - one local user (id 1) who is logged in but not signed in to PSN;
- *   - network cable unplugged: NetCtl disconnected, sockets on loopback only (runtime_socket.c);
+ *   - network cable unplugged: NetCtl disconnected, sockets on loopback only (runtime_socket.c),
+ *     no HTTP transfer (runtime_http.c);
  *   - common dialogs complete immediately (no UI is drawn yet);
  *   - no PlayStation VR headset is connected.
  * Every entry here is an explicit contract; unknown functions still stop. */
@@ -27,10 +28,8 @@
 #define NP_INVALID_ARGUMENT ((int32_t)0x80550003)
 #define NET_ENETUNREACH ((int32_t)0x80410133)
 #define NET_EINVAL ((int32_t)0x80410116)
-#define HTTP_NETWORK ((int32_t)0x80431063)
 #define DIALOG_NOT_INITIALIZED ((int32_t)0x80B80003)
 #define AUDIO_IN_NOT_OPENED ((int32_t)0x80260109)
-#define TROPHY_INVALID ((int32_t)0x80551604)
 #define HMD_ALREADY_INITIALIZED ((int32_t)0x81110001)
 #define HMD_NOT_INITIALIZED ((int32_t)0x81110002)
 #define HMD_HANDLE_INVALID ((int32_t)0x81110003)
@@ -126,10 +125,12 @@ static ABI int32_t display_safe_area(float *ratio) {
     return 0;
 }
 
-/* ---- NetCtl / Net / Http / Ssl: no network ---- */
+/* ---- NetCtl / Net / Ssl: no network ---- */
 static ABI int32_t net_unreachable(void) { *runtime_net_errno()=51; return NET_ENETUNREACH; }
 static ABI int32_t net_epoll_create(const char *name,int flags) { (void)name; (void)flags; return new_id(); }
 static ABI int32_t net_resolver_create(const char *name,int pool,int flags) { (void)name; (void)pool; (void)flags; return new_id(); }
+/* Every lookup fails at once offline (sceNetResolverStartNtoa/Aton), so none is left to abort. */
+static ABI int32_t net_resolver_abort(int32_t h_resolver, int32_t flags) { (void)h_resolver; (void)flags; return 0; }
 static ABI uint16_t net_htons(uint16_t v) { return htons(v); }
 static ABI uint16_t net_ntohs(uint16_t v) { return ntohs(v); }
 static ABI uint32_t net_htonl(uint32_t v) { return htonl(v); }
@@ -149,20 +150,6 @@ static ABI int32_t netctl_nat(uint32_t *info) {
     if (!info) return NET_CTL_INVALID_ADDR;
     info[1]=0; info[2]=3; info[3]=0; /* stun failed, NAT type 3, no mapped address */
     return 0;
-}
-static ABI int32_t lib_init_id(void) { return new_id(); }
-static ABI int32_t http_fail(void) { return HTTP_NETWORK; }
-/* Objects are created so setup code proceeds; any transfer fails as unplugged. */
-static ABI int32_t http_object(void) { return new_id(); }
-static ABI int32_t http_epoll(int32_t ctx,void **handle) {
-    (void)ctx;
-    if (!handle) return (int32_t)0x80431077; /* HTTP INVALID_VALUE */
-    *handle=(void *)(uintptr_t)(0x100+new_id()); return 0;
-}
-static ABI int32_t http_wait(void *handle,void *events,int32_t max,int64_t timeout) {
-    (void)handle; (void)events; (void)max;
-    if (timeout>0) { struct timespec t={timeout/1000000,(timeout%1000000)*1000}; nanosleep(&t,NULL); }
-    return 0; /* no events: nothing is in flight */
 }
 
 /* ---- NP (PSN): signed out ---- */
@@ -431,7 +418,7 @@ typedef struct {
     float x, y; uint32_t halign, valign; const uint16_t *placeholder, *title; int8_t reserved[16];
 } ImeParam;
 static struct { int running, finished, end_status; uint16_t *buffer; uint32_t max_length; } ime;
-static size_t utf16_to_utf8(const uint16_t *in, size_t limit, char *out, size_t size) {
+size_t utf16_to_utf8(const uint16_t *in, size_t limit, char *out, size_t size) {
     size_t n=0;
     for (size_t i=0; in && i<limit && in[i] && n+4<size; ++i) {
         uint32_t c=in[i];
@@ -443,7 +430,7 @@ static size_t utf16_to_utf8(const uint16_t *in, size_t limit, char *out, size_t 
     }
     out[n]=0; return n;
 }
-static void utf8_to_utf16(const char *in, uint16_t *out, uint32_t max) {
+void utf8_to_utf16(const char *in, uint16_t *out, uint32_t max) {
     uint32_t n=0;
     for (const unsigned char *p=(const unsigned char *)in; *p && n<max;) {
         uint32_t c; int extra;
@@ -492,6 +479,13 @@ static ABI int32_t ime_result(uint32_t *result) {
     return 0;
 }
 static ABI int32_t ime_term(void) { memset(&ime,0,sizeof(ime)); return 0; }
+/* The dialog's panel is the on-screen keyboard's (runtime_ime.c), whatever the extended parameters ask. */
+static ABI int32_t ime_panel_size_extended(const ImeParam *param, const void *extended, uint32_t *width, uint32_t *height) {
+    (void)extended;
+    if (!param || !width || !height) return (int32_t)0x80BC0031; /* IME INVALID_ADDRESS */
+    runtime_ime_panel_size(param->type,width,height);
+    return 0;
+}
 /* A dialog is in use from its initialization until its termination, and the IME dialog while it runs. */
 static ABI int32_t common_is_used(void) {
     for (size_t i=0;i<sizeof(dialogs)/sizeof(*dialogs);++i) if (dialogs[i].initialized) return 1;
@@ -519,35 +513,6 @@ static ABI int32_t hmd_device_info(int32_t *info) {
     return 0;
 }
 static ABI int32_t hmd_handle_invalid(void) { return HMD_HANDLE_INVALID; }
-
-/* ---- Trophies: accepted locally, recorded in the log ---- */
-static ABI int32_t trophy_context(int32_t *ctx,int32_t user,uint32_t label,uint64_t options) {
-    (void)user; (void)label; (void)options;
-    if (!ctx) return TROPHY_INVALID;
-    *ctx=new_id(); return 0;
-}
-static ABI int32_t trophy_handle(int32_t *handle) { if (!handle) return TROPHY_INVALID; *handle=new_id(); return 0; }
-static ABI int32_t trophy_unlock(int32_t ctx,int32_t handle,int32_t id,int32_t *platinum) {
-    (void)ctx; (void)handle;
-    printf("Runtime: trophy %d unlocked\n",id);
-    if (platinum) *platinum=-1;
-    return 0;
-}
-static ABI int32_t trophy_game_info(int32_t ctx,int32_t handle,void *details,void *data) {
-    (void)ctx; (void)handle;
-    if (details) { uint64_t size; memcpy(&size,details,8); memset((char *)details+8,0,size>8 && size<4096 ? size-8 : 0); }
-    if (data) { uint64_t size; memcpy(&size,data,8); memset((char *)data+8,0,size>8 && size<4096 ? size-8 : 0); }
-    return 0;
-}
-static ABI int32_t trophy_info(int32_t ctx,int32_t handle,int32_t id,void *details,void *data) {
-    (void)id; return trophy_game_info(ctx,handle,details,data);
-}
-static ABI int32_t trophy_unlock_state(int32_t ctx,int32_t handle,uint32_t *flags,uint32_t *count) {
-    (void)ctx; (void)handle;
-    if (!flags || !count) return TROPHY_INVALID;
-    memset(flags,0,16); *count=0;
-    return 0;
-}
 
 /* ---- DiscMap: the game is fully installed, no disc bitmap exists ---- */
 #define DISC_MAP_NO_BITMAP ((int32_t)0x81100004)
@@ -632,6 +597,7 @@ static const RuntimeExport exports[]={
     {"sceNetInit",runtime_stub}, {"sceNetTerm",runtime_stub}, {"sceNetPoolDestroy",runtime_stub},
     {"sceNetEpollCreate",net_epoll_create}, {"sceNetEpollDestroy",runtime_stub},
     {"sceNetResolverCreate",net_resolver_create}, {"sceNetResolverDestroy",runtime_stub},
+    {"sceNetResolverAbort",net_resolver_abort},
     {"sceNetHtons",net_htons}, {"sceNetNtohs",net_ntohs}, {"sceNetHtonl",net_htonl}, {"sceNetNtohl",net_ntohl},
     {"sceNetInetPton",net_pton}, {"sceNetInetNtop",net_ntop},
     {"sceNetEpollControl",net_unreachable}, {"sceNetEpollWait",net_unreachable}, {"sceNetEpollAbort",net_unreachable},
@@ -640,20 +606,7 @@ static const RuntimeExport exports[]={
     {"sceNetCtlRegisterCallback",netctl_register}, {"sceNetCtlCheckCallback",nothing_due},
     {"sceNetCtlUnregisterCallback",runtime_stub}, {"sceNetCtlGetNatInfo",netctl_nat},
     {"sceNetCtlRegisterCallbackForNpToolkit",netctl_register}, {"sceNetCtlCheckCallbackForNpToolkit",nothing_due},
-    {"sceSslTerm",runtime_stub}, {"sceHttpTerm",runtime_stub},
-    {"sceHttpCreateTemplate",http_object}, {"sceHttpDeleteTemplate",runtime_stub},
-    {"sceHttpCreateConnectionWithURL",http_object}, {"sceHttpCreateRequestWithURL",http_object},
-    {"sceHttpSendRequest",http_fail}, {"sceHttpCreateEpoll",http_epoll},
-    {"sceHttpSetNonblock",runtime_stub}, {"sceHttpSetConnectTimeOut",runtime_stub},
-    {"sceHttpsEnableOption",runtime_stub}, {"sceHttpsDisableOption",runtime_stub},
-    {"sceHttpAddRequestHeader",runtime_stub}, {"sceHttpSetRequestContentLength",runtime_stub},
-    {"sceHttpDeleteConnection",runtime_stub}, {"sceHttpDeleteRequest",runtime_stub},
-    {"sceHttpAbortWaitRequest",runtime_stub}, {"sceHttpDestroyEpoll",runtime_stub},
-    {"sceHttpSetEpoll",runtime_stub}, {"sceHttpUnsetEpoll",runtime_stub}, {"sceHttpWaitRequest",http_wait},
-    {"sceHttpGetStatusCode",http_fail}, {"sceHttpGetResponseContentLength",http_fail},
-    {"sceHttpReadData",http_fail},
-    {"sceHttp2Init",lib_init_id}, {"sceHttp2Term",runtime_stub},
-    {"sceHttp2CreateTemplate",http_object}, {"sceHttp2DeleteTemplate",runtime_stub},
+    {"sceSslTerm",runtime_stub},
     {"sceNpGetState",np_state}, {"sceNpGetOnlineId",np_signed_out}, {"sceNpGetNpId",np_signed_out},
     {"sceNpGetAccountIdA",np_account_id}, {"sceNpGetAccountId",np_account_id_online},
     {"sceNpGetAccountCountry",np_account_info}, {"sceNpGetAccountDateOfBirth",np_account_info},
@@ -725,6 +678,7 @@ static const RuntimeExport exports[]={
     {"sceNpCommerceDialogGetStatus",commerce_status}, {"sceNpCommerceDialogGetResult",commerce_result},
     {"sceImeDialogInit",ime_init}, {"sceImeDialogGetStatus",ime_status}, {"sceImeDialogGetResult",ime_result},
     {"sceImeDialogTerm",ime_term}, {"sceImeDialogAbort",ime_term},
+    {"sceImeDialogGetPanelSizeExtended",ime_panel_size_extended},
     {"sceWebBrowserDialogInitialize",web_init}, {"sceWebBrowserDialogOpen",web_open},
     {"sceWebBrowserDialogGetResult",web_result}, {"sceWebBrowserDialogSetCookie",runtime_stub},
     {"sceWebBrowserDialogResetCookie",runtime_stub},
@@ -754,11 +708,6 @@ static const RuntimeExport exports[]={
     {"sceHmdInitialize",hmd_init}, {"sceHmdInitialize315",hmd_init}, {"sceHmdTerminate",hmd_term},
     {"sceHmdGetDeviceInformation",hmd_device_info},
     {"sceHmdGetDeviceInformationByHandle",hmd_handle_invalid}, {"sceHmdGetFieldOfView",hmd_handle_invalid},
-    {"sceNpTrophyCreateContext",trophy_context}, {"sceNpTrophyCreateHandle",trophy_handle},
-    {"sceNpTrophyRegisterContext",runtime_stub}, {"sceNpTrophyUnlockTrophy",trophy_unlock},
-    {"sceNpTrophyDestroyHandle",runtime_stub},
-    {"sceNpTrophyGetGameInfo",trophy_game_info}, {"sceNpTrophyGetTrophyInfo",trophy_info},
-    {"sceNpTrophyGetTrophyUnlockState",trophy_unlock_state},
     {"sceAudioInOpen",audio_in_open}, {"sceAudioInHqOpen",audio_in_open}, {"sceAudioInGetSilentState",audio_in_open},
     {"sceMoveInit",move_init}, {"sceMoveOpen",move_open}, {"sceMoveGetDeviceInfo",move_device_info},
     {"sceMoveReadStateRecent",move_read_recent}, {"sceMoveSetLightSphere",move_no_controller},
@@ -780,6 +729,10 @@ uintptr_t runtime_services_resolve(const char *name) {
     if (online) return online;
     const uintptr_t found=RUNTIME_LOOKUP(exports,name);
     if (found) return found;
+    const uintptr_t va_http=runtime_http_resolve(name);
+    if (va_http) return va_http;
+    const uintptr_t va_trophy=runtime_trophy_resolve(name);
+    if (va_trophy) return va_trophy;
     const uintptr_t va_json=runtime_json_resolve(name);
     if (va_json) return va_json;
     const uintptr_t va_np=runtime_np_resolve(name);

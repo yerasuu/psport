@@ -103,6 +103,27 @@ bool np_object_delete(uint32_t kind, int64_t h_object) {
     return is_found;
 }
 
+uint32_t np_object_kind(int64_t h_object) {
+    uint32_t kind = NP_OBJECT_FREE;
+    pthread_rwlock_rdlock(&s_objects_lock);
+    for (size_t i = 0; i < s_c_objects && kind == NP_OBJECT_FREE; ++i)
+        if (s_p_objects[i].kind != NP_OBJECT_FREE && s_p_objects[i].h_object == h_object) kind = s_p_objects[i].kind;
+    pthread_rwlock_unlock(&s_objects_lock);
+    return kind;
+}
+
+bool np_object_change(int64_t h_object, uint32_t kind) {
+    bool is_found = false;
+    pthread_rwlock_wrlock(&s_objects_lock);
+    for (size_t i = 0; i < s_c_objects && !is_found; ++i)
+        if (s_p_objects[i].kind != NP_OBJECT_FREE && s_p_objects[i].h_object == h_object) {
+            s_p_objects[i].kind = kind;
+            is_found = true;
+        }
+    pthread_rwlock_unlock(&s_objects_lock);
+    return is_found;
+}
+
 static int32_t create_or(uint32_t kind, int32_t no_memory_error) {
     const int64_t h_object = np_object_create(kind);
     return h_object > 0 && h_object <= INT32_MAX ? (int32_t)h_object : no_memory_error;

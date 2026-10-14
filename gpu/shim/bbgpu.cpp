@@ -472,6 +472,10 @@ extern "C" int bbgpu_text_input_begin(const char* initial, const char* prompt) {
     return 1;
 }
 
+extern "C" void bbgpu_text_input_end(void) {
+    if (g_window) g_window->EndTextInput();
+}
+
 extern "C" int bbgpu_text_input_poll(char* out, uint64_t size) {
     if (!g_window) return 2;
     std::string text;
