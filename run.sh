@@ -45,7 +45,9 @@ mkdir -p "$PS_GPU_USER_DIR"
 if [[ -z ${PS_FSR411_DIR:-} && ! -d fsr4_411 && -d $data/fsr4_411 ]]; then
     export PS_FSR411_DIR=$data/fsr4_411
 fi
-if [[ -z ${PS_PREBUILT:-} && -z ${PS_IN_NIX_SHELL:-} ]] && ! { command -v pkg-config >/dev/null && pkg-config --exists vulkan sdl3; } && command -v nix-shell >/dev/null; then
+# The same check as build.sh's: when it builds in shell.nix, the port it builds links Nix's Vulkan
+# loader and must run there too, where shell.nix gives it Nix's Mesa drivers.
+if [[ -z ${PS_PREBUILT:-} && -z ${PS_IN_NIX_SHELL:-} ]] && ! { command -v pkg-config >/dev/null && pkg-config --exists vulkan sdl3 freetype2 && command -v cmake >/dev/null && command -v ninja >/dev/null; } && command -v nix-shell >/dev/null; then
     args=''; if (( $# )); then args=$(printf '%q ' "$@"); fi
     exec env PS_IN_NIX_SHELL=1 nix-shell shell.nix --run "bash run.sh $args"
 fi
