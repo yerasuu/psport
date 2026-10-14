@@ -134,8 +134,9 @@ sce functions returning a 32- or 64-bit result, POSIX functions returning -1 wit
 arguments all travel in registers; a thunk calls the function and only a result that looks like a
 failure takes the slow path. The results `src/import_statuses.inc` lists for an import (kept by hand
 from the codes the runtime's implementations return: `sceUserServiceGetEvent`'s no event, the
-timeouts of the `Wait`/`Timedwait`/`Timedlock` calls, the busy result of the `Poll`/`Try` calls)
-are no failure but the state the caller asked about: they are logged and counted all the same, as
+timeouts of the `Wait`/`Timedwait`/`Timedlock` calls, the busy result of the `Poll`/`Try` calls,
+`scePthreadMutexLock`'s `EDEADLK` on an error-checking or adaptive mutex the thread already holds,
+which Unreal Engine's critical sections take for a recursive lock) are no failure but the state the caller asked about: they are logged and counted all the same, as
 `status`. When the process ends (the guest exits, the window is closed, SIGTERM,
 SIGINT or SIGHUP, a fault, the watchdog, a `STOP:`), a summary follows, most calls first:
 

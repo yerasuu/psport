@@ -1,9 +1,10 @@
 /* NID -> function name and the result with which the export reports a state its caller polls or
- * waits for (no event pending, timed out, busy, would block), not a failure: the call report counts
- * these apart. Sorted by NID in strcmp order, then by result, for a binary search. Kept by hand from
+ * waits for (no event pending, timed out, busy, would block, already held by the caller), not a
+ * failure: the call report counts these apart. Sorted by NID in strcmp order, then by result, for a binary search. Kept by hand from
  * the codes the runtime's implementations return. */
 {"12wOHk8ywb0","sceKernelPollSema",0x80020010},
 {"656LMQSrg6U","sceSystemServiceReceiveEvent",0x80a10004},
+{"9UK1vLZQft4","scePthreadMutexLock",0x8002000b},
 {"9lvj5DjHZiA","sceKernelPollEventFlag",0x80020010},
 {"BmMjYxmew1w","scePthreadCondTimedwait",0x8002003c},
 {"H2a+IN9TP0E","scePthreadSemTrywait",0x80020023},
