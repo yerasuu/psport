@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
+#include <atomic>
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/texture_cache/sampler.h"
@@ -22,6 +23,17 @@ Sampler::Sampler(const Vulkan::Instance& instance, const AmdGpu::Sampler& sample
         !instance.IsCustomBorderColorSupported()) {
         LOG_WARNING(Render_Vulkan, "Custom border color is not supported, falling back to black");
         border_color = vk::BorderColor::eFloatOpaqueBlack;
+    }
+    // bbport: with TA_BC_BASE unprogrammed the hardware's table fetch hits an unmapped page and
+    // reads zeros; dereferencing guest address 0 here killed the process instead.
+    if (border_color == vk::BorderColor::eFloatCustomEXT && border_color_base.base_addr == 0) {
+        static std::atomic<u64> without_table{};
+        if (const u64 n = without_table.fetch_add(1, std::memory_order_relaxed); (n & (n + 1)) == 0) {
+            LOG_WARNING(Render_Vulkan,
+                        "Custom border color {} with TA_BC_BASE unset, using transparent black ({} samplers)",
+                        sampler.border_color_ptr.Value(), n + 1);
+        }
+        border_color = vk::BorderColor::eFloatTransparentBlack;
     }
 
     const auto custom_color = [&]() -> std::optional<vk::SamplerCustomBorderColorCreateInfoEXT> {

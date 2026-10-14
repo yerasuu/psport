@@ -103,6 +103,7 @@ extern const Profile BloodborneProfile = {
     .report_stats = ReportStats,
     .before_present = BbGameMenu::Poll,
     .label_release = LabelRelease,
+    .small_object_pool = {.header_offset = 0xfc0, .block_size = 0x30},
 };
 
 } // namespace Game

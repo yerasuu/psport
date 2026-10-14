@@ -634,6 +634,12 @@ public:
         return storage + offset;
     }
 
+    /// Storage outside the chunk for data too large to share it with its command; freed once
+    /// the chunk's commands have run.
+    void* Spill(size_t bytes) {
+        return spilled.emplace_back(std::make_unique<std::byte[]>(bytes)).get();
+    }
+
     void Execute(vk::CommandBuffer cmdbuf) {
         for (CommandBase* command = first; command;) {
             CommandBase* const next = command->next;
@@ -643,6 +649,7 @@ public:
         }
         first = last = nullptr;
         used = 0;
+        spilled.clear();
     }
 
     [[nodiscard]] bool Empty() const noexcept {
@@ -686,6 +693,7 @@ private:
     };
 
     alignas(64) std::byte storage[Capacity];
+    std::vector<std::unique_ptr<std::byte[]>> spilled;
     size_t used = 0;
     CommandBase* first{};
     CommandBase* last{};
@@ -820,6 +828,7 @@ public:
             const bool pushed = CurrentChunk().Push(std::forward<Func>(func));
             ASSERT(pushed);
         }
+        spilling = false;
     }
 
     /// bbport: Record() for a draw, dispatch or pass that runs shaders, between GPU breadcrumbs
@@ -863,11 +872,17 @@ public:
 
     /// Makes room for `bytes` of RecordData() plus the command that uses them in the current
     /// chunk: data and command must share a chunk, which is recycled once executed.
+    /// Data larger than a chunk goes to the chunk's spill storage (RecordData) until the
+    /// command is recorded: only the command needs room then.
     void ReserveRecordData(size_t bytes) {
         if (!IsRecordingDeferred()) {
             return;
         }
-        ASSERT(bytes + 1024 <= RecordChunk::Capacity);
+        if (bytes + 1024 > RecordChunk::Capacity) {
+            NoteSpill(bytes);
+            spilling = true;
+            bytes = 0;
+        }
         if (RecordChunk::Capacity - CurrentChunk().Size() < bytes + 1024) {
             RetireChunk();
         }
@@ -883,8 +898,10 @@ public:
         }
         // Room for the data and the command that follows it, so both stay in one chunk.
         const size_t bytes = data.size_bytes();
-        ReserveRecordData(bytes + alignof(T));
-        auto* dst = static_cast<T*>(CurrentChunk().Allocate(bytes, alignof(T)));
+        if (!spilling) {
+            ReserveRecordData(bytes + alignof(T));
+        }
+        auto* dst = static_cast<T*>(spilling ? CurrentChunk().Spill(bytes) : CurrentChunk().Allocate(bytes, alignof(T)));
         std::memcpy(dst, data.data(), bytes);
         return {dst, data.size()};
     }
@@ -1033,6 +1050,7 @@ private:
     void SubmitAsync(SubmitInfo& info);
 
     std::unique_ptr<RecordChunk> AcquireChunk();
+    void NoteSpill(size_t bytes);
 
     /// Moves the full current chunk aside; a new one takes its place (swapped in: never null).
     void RetireChunk() {
@@ -1165,6 +1183,8 @@ private:
     bool resume_rendering = false;     ///< a cut closed the render pass with render_state
     void* pass_end_caller = nullptr;   ///< PS_PASS_BREAK_TRACE: who ended the last render pass
     std::unique_ptr<RecordChunk> record_chunk;
+    /// Set by a reservation larger than a chunk until the command that uses the data is recorded.
+    bool spilling = false;
     std::vector<std::unique_ptr<RecordChunk>> full_chunks;
     std::unique_ptr<RecordChunk> ordered_chunk;
     std::vector<std::unique_ptr<RecordChunk>> ordered_full;
