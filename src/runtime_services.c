@@ -120,7 +120,6 @@ static ABI int32_t display_safe_area(float *ratio) {
 }
 
 /* ---- NetCtl / Net / Http / Ssl: no network ---- */
-static ABI int32_t net_pool_create(const char *name,int size,int flags) { (void)name; (void)size; (void)flags; return new_id(); }
 static ABI int32_t net_unreachable(void) { *runtime_net_errno()=51; return NET_ENETUNREACH; }
 static ABI int32_t net_epoll_create(const char *name,int flags) { (void)name; (void)flags; return new_id(); }
 static ABI int32_t net_resolver_create(const char *name,int pool,int flags) { (void)name; (void)pool; (void)flags; return new_id(); }
@@ -222,6 +221,29 @@ static int32_t dialog_term(int i) {
 DIALOG(msg,1) DIALOG(profile,3) DIALOG(commerce,4)
 DIALOG(web,7) DIALOG(invitation,8) DIALOG(signin,9) DIALOG(social,10) DIALOG(hmd_setup,11)
 static ABI int32_t profile_result(void *result) { if (result) memset(result,0,4); return 0; }
+/* OrbisNpCommerceDialogParam keeps userData at 0x58 and the result hands it back. Signed out, the
+ * store cannot open, so the dialog ends as backed out of: USER_CANCELED, nothing authorized. */
+static void *s_p_commerce_user_data;
+static ABI int32_t commerce_start(const uint8_t *p_param) {
+    if (p_param) memcpy(&s_p_commerce_user_data,p_param+0x58,sizeof(s_p_commerce_user_data));
+    return commerce_open(p_param);
+}
+typedef struct { int32_t result; uint8_t is_authorized; uint8_t reserved_0[3]; void *p_user_data; uint8_t reserved[32]; } CommerceResult;
+static ABI int32_t commerce_result(CommerceResult *p_out_result) {
+    if (!p_out_result) return (int32_t)0x80B8000D;           /* ARG_NULL */
+    if (dialogs[4].status!=3) return (int32_t)0x80B80005;   /* NOT_FINISHED */
+    memset(p_out_result,0,sizeof(*p_out_result));
+    p_out_result->result=1;
+    p_out_result->p_user_data=s_p_commerce_user_data;
+    return 0;
+}
+/* The user cannot sign in to PSN here, so the sign-in dialog always ends cancelled. */
+static ABI int32_t signin_result(int32_t *p_out_result) {
+    if (!p_out_result) return (int32_t)0x80B8000D;           /* ARG_NULL */
+    if (dialogs[9].status!=3) return (int32_t)0x80B80005;   /* NOT_FINISHED */
+    *p_out_result=1;
+    return 0;
+}
 typedef struct {
     void *callback_arg; int32_t error_code, result; uint32_t *sent_count; uint8_t reserved[32];
 } InvitationResult;
@@ -577,8 +599,7 @@ static const RuntimeExport exports[]={
     {"sceSystemServiceReceiveEvent",system_event}, {"sceSystemServiceHideSplashScreen",hide_splash},
     {"sceSystemServiceLaunchWebBrowser",launch_browser},
     {"sceSystemServiceGetDisplaySafeAreaInfo",display_safe_area},
-    {"sceNetInit",runtime_stub}, {"sceNetTerm",runtime_stub},
-    {"sceNetPoolCreate",net_pool_create}, {"sceNetPoolDestroy",runtime_stub},
+    {"sceNetInit",runtime_stub}, {"sceNetTerm",runtime_stub}, {"sceNetPoolDestroy",runtime_stub},
     {"sceNetEpollCreate",net_epoll_create}, {"sceNetEpollDestroy",runtime_stub},
     {"sceNetResolverCreate",net_resolver_create}, {"sceNetResolverDestroy",runtime_stub},
     {"sceNetHtons",net_htons}, {"sceNetNtohs",net_ntohs}, {"sceNetHtonl",net_htonl}, {"sceNetNtohl",net_ntohl},
@@ -589,8 +610,7 @@ static const RuntimeExport exports[]={
     {"sceNetCtlRegisterCallback",netctl_register}, {"sceNetCtlCheckCallback",nothing_due},
     {"sceNetCtlUnregisterCallback",runtime_stub}, {"sceNetCtlGetNatInfo",netctl_nat},
     {"sceNetCtlRegisterCallbackForNpToolkit",netctl_register}, {"sceNetCtlCheckCallbackForNpToolkit",nothing_due},
-    {"sceSslInit",lib_init_id}, {"sceSslTerm",runtime_stub},
-    {"sceHttpInit",lib_init_id}, {"sceHttpTerm",runtime_stub},
+    {"sceSslTerm",runtime_stub}, {"sceHttpTerm",runtime_stub},
     {"sceHttpCreateTemplate",http_object}, {"sceHttpDeleteTemplate",runtime_stub},
     {"sceHttpCreateConnectionWithURL",http_object}, {"sceHttpCreateRequestWithURL",http_object},
     {"sceHttpSendRequest",http_fail}, {"sceHttpCreateEpoll",http_epoll},
@@ -628,16 +648,7 @@ static const RuntimeExport exports[]={
     {"sceNpLookupAbortRequest",runtime_stub}, {"sceNpLookupPollAsync",np_poll}, {"sceNpLookupNpId",np_signed_out},
     {"sceNpScoreCreateNpTitleCtx",np_request_ctx}, {"sceNpScoreDeleteNpTitleCtx",runtime_stub},
     {"sceNpScoreCreateRequest",np_request}, {"sceNpScoreDeleteRequest",runtime_stub}, {"sceNpScoreAbortRequest",runtime_stub},
-    {"sceNpWebApiInitialize",lib_init_id}, {"sceNpWebApiTerminate",runtime_stub},
     {"sceNpWebApiCheckTimeout",nothing_due},
-    {"sceNpWebApiCreateContext",np_signed_out},
-    {"sceNpWebApiCreateRequest",np_signed_out}, {"sceNpWebApiSendRequest",np_signed_out},
-    {"sceNpWebApiDeleteRequest",runtime_stub}, {"sceNpWebApiAbortRequest",runtime_stub},
-    {"sceNpWebApiDeleteContext",runtime_stub}, {"sceNpWebApiReadData",np_signed_out},
-    {"sceNpWebApiGetHttpStatusCode",np_signed_out}, {"sceNpWebApiGetHttpResponseHeaderValue",np_signed_out},
-    {"sceNpWebApiGetHttpResponseHeaderValueLength",np_signed_out},
-    {"sceNpWebApiCreatePushEventFilter",np_signed_out}, {"sceNpWebApiDeletePushEventFilter",runtime_stub},
-    {"sceNpWebApiRegisterPushEventCallback",np_signed_out}, {"sceNpWebApiUnregisterPushEventCallback",runtime_stub},
     {"sceNpWebApiUtilityParseNpId",np_signed_out},
     {"sceNpMatching2ContextStart",np_signed_out}, {"sceNpMatching2ContextStop",runtime_stub},
     {"sceNpMatching2DestroyContext",runtime_stub},
@@ -677,8 +688,9 @@ static const RuntimeExport exports[]={
     {"sceNpProfileDialogUpdateStatus",profile_status}, {"sceNpProfileDialogTerminate",profile_term},
     {"sceNpProfileDialogGetResult",profile_result}, {"sceNpProfileDialogOpenA",profile_open},
     {"sceNpProfileDialogGetStatus",profile_status},
-    {"sceNpCommerceDialogInitialize",commerce_init}, {"sceNpCommerceDialogOpen",commerce_open},
+    {"sceNpCommerceDialogInitialize",commerce_init}, {"sceNpCommerceDialogOpen",commerce_start},
     {"sceNpCommerceDialogUpdateStatus",commerce_status}, {"sceNpCommerceDialogTerminate",commerce_term},
+    {"sceNpCommerceDialogGetStatus",commerce_status}, {"sceNpCommerceDialogGetResult",commerce_result},
     {"sceImeDialogInit",ime_init}, {"sceImeDialogGetStatus",ime_status}, {"sceImeDialogGetResult",ime_result},
     {"sceImeDialogTerm",ime_term}, {"sceImeDialogAbort",ime_term},
     {"sceWebBrowserDialogInitialize",web_init}, {"sceWebBrowserDialogOpen",web_open},
@@ -690,7 +702,7 @@ static const RuntimeExport exports[]={
     {"sceInvitationDialogGetResultA",invitation_result},
     {"sceSigninDialogInitialize",signin_init}, {"sceSigninDialogOpen",signin_open},
     {"sceSigninDialogUpdateStatus",signin_status}, {"sceSigninDialogGetStatus",signin_status},
-    {"sceSigninDialogTerminate",signin_term},
+    {"sceSigninDialogTerminate",signin_term}, {"sceSigninDialogGetResult",signin_result},
     {"sceSocialScreenDialogInitialize",social_init}, {"sceSocialScreenDialogOpen",social_open},
     {"sceSocialScreenDialogUpdateStatus",social_status}, {"sceSocialScreenDialogGetStatus",social_status},
     {"sceSocialScreenDialogTerminate",social_term},
@@ -731,7 +743,9 @@ uintptr_t runtime_services_resolve(const char *name) {
     const uintptr_t found=RUNTIME_LOOKUP(exports,name);
     if (found) return found;
     const uintptr_t va_json=runtime_json_resolve(name);
-    return va_json ? va_json : runtime_socket_resolve(name);
+    if (va_json) return va_json;
+    const uintptr_t va_np=runtime_np_resolve(name);
+    return va_np ? va_np : runtime_socket_resolve(name);
 }
 #else
 uintptr_t runtime_services_resolve(const char *name) { (void)name; return 0; }
