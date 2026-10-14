@@ -9,6 +9,7 @@
 #include <sched.h>
 #include <pthread.h>
 #include <unistd.h>
+#include <elf.h>
 
 typedef struct {
     union { GuestCallback plain; void (ABI *with_arg)(void *); } callback;
@@ -156,6 +157,22 @@ void runtime_finalize(void *dso) {
     }
 }
 static ABI void guest_finalize(void *dso) { runtime_finalize(dso); }
+/* FreeBSD's struct dl_phdr_info, as libc's __cxa_finalize hands it over for an object it unloads. */
+typedef struct { uint64_t dlpi_addr; const char *dlpi_name; const Elf64_Phdr *dlpi_phdr; uint16_t dlpi_phnum; } PhdrInfo;
+/* Whether the address lies in one of the object's executable segments, as FreeBSD's libc answers it. */
+static ABI int32_t guest_phdr_match_address(const PhdrInfo *p_info, const void *p_code) {
+    const uintptr_t va_code=(uintptr_t)p_code;
+    for (uint16_t i=0;i<p_info->dlpi_phnum;++i) {
+        const Elf64_Phdr *p_segment=&p_info->dlpi_phdr[i];
+        if (p_segment->p_type!=PT_LOAD || !(p_segment->p_flags&PF_X)) continue;
+        const uintptr_t va_start=p_info->dlpi_addr+p_segment->p_vaddr;
+        if (va_start<=va_code && va_code+sizeof(p_code)<va_start+p_segment->p_memsz) return 1;
+    }
+    return 0;
+}
+/* libthr drops the unloading object's pthread_atfork handlers here; the runtime keeps none (it has
+ * no fork), so there is nothing to drop. */
+static ABI void guest_pthread_cxa_finalize(const PhdrInfo *p_info) { (void)p_info; }
 static _Atomic uint32_t next_guard_owner=1;
 static _Thread_local uint32_t guard_owner;
 static ABI int guard_acquire(uint64_t *guard) {
@@ -235,6 +252,7 @@ static const RuntimeExport own_functions[]={
     {"__tls_get_addr",guest_tls_get_addr}, {"sceKernelGetProcParam",guest_procparam},
     {"_sceKernelRtldSetApplicationHeapAPI",guest_set_heap_api},
     {"getargc",guest_getargc}, {"getargv",guest_getargv},
+    {"__elf_phdr_match_addr",guest_phdr_match_address}, {"__pthread_cxa_finalize",guest_pthread_cxa_finalize},
 };
 uintptr_t runtime_resolve(const char *name, int is_data) {
     if (!(capabilities & 1)) return 0;
