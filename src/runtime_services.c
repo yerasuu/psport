@@ -111,6 +111,13 @@ static ABI int32_t system_status(unsigned char *status) {
 static ABI int32_t system_event(void *event) { (void)event; return SYSTEM_NO_EVENT; }
 static ABI int32_t hide_splash(void) { note("SystemService: splash screen hidden"); return 0; }
 static ABI int32_t launch_browser(void) { note("SystemService: web browser request ignored (offline)"); return 0; }
+/* The system's controller settings screen, like the common dialogs, has no UI here: it closes at
+ * once with nothing changed. */
+static ABI int32_t show_controller_settings(int32_t h_user) {
+    (void)h_user;
+    note("SystemService: controller settings requested; closed at once (no system UI yet)");
+    return 0;
+}
 /* The share of the screen the user's display settings leave for UI: all of it. A title that sizes
  * its render targets by it (Atelier Ryza) gets a 0x0 target and a null texture from 0. */
 static ABI int32_t display_safe_area(float *ratio) {
@@ -407,6 +414,14 @@ static ABI int32_t playgo_result(int32_t *p_out_result) {
     return 0;
 }
 static ABI int32_t playgo_close(void) { dialogs[12].status=3; return 0; }
+/* SceWebBrowserDialogResult: result, then reserved. Offline, no page loads and the user can only
+ * back out: SCE_COMMON_DIALOG_RESULT_USER_CANCELED. */
+static ABI int32_t web_result(int32_t *p_out_result) {
+    if (dialogs[7].status!=3) return (int32_t)0x80B80005; /* NOT_FINISHED */
+    if (!p_out_result) return (int32_t)0x80B8000D;         /* ARG_NULL */
+    p_out_result[0]=1;
+    return 0;
+}
 /* ImeDialog: text typed on the keyboard into the game window (title bar shows it).
  * OrbisImeDialogParam: user, type, languages(8), enter label, method, filter,
  * option, max length, char16 buffer, position, alignment, placeholder, title. */
@@ -613,6 +628,7 @@ static const RuntimeExport exports[]={
     {"sceSystemServicePowerTick",runtime_stub}, {"sceSystemServiceReportAbnormalTermination",runtime_stub},
     {"sceSystemServiceReceiveEvent",system_event}, {"sceSystemServiceHideSplashScreen",hide_splash},
     {"sceSystemServiceLaunchWebBrowser",launch_browser},
+    {"sceSystemServiceShowControllerSettings",show_controller_settings},
     {"sceSystemServiceGetDisplaySafeAreaInfo",display_safe_area},
     {"sceNetInit",runtime_stub}, {"sceNetTerm",runtime_stub}, {"sceNetPoolDestroy",runtime_stub},
     {"sceNetEpollCreate",net_epoll_create}, {"sceNetEpollDestroy",runtime_stub},
@@ -711,6 +727,8 @@ static const RuntimeExport exports[]={
     {"sceImeDialogInit",ime_init}, {"sceImeDialogGetStatus",ime_status}, {"sceImeDialogGetResult",ime_result},
     {"sceImeDialogTerm",ime_term}, {"sceImeDialogAbort",ime_term},
     {"sceWebBrowserDialogInitialize",web_init}, {"sceWebBrowserDialogOpen",web_open},
+    {"sceWebBrowserDialogGetResult",web_result}, {"sceWebBrowserDialogSetCookie",runtime_stub},
+    {"sceWebBrowserDialogResetCookie",runtime_stub},
     {"sceWebBrowserDialogOpenForPredeterminedContent",web_open}, {"sceWebBrowserDialogUpdateStatus",web_status},
     {"sceWebBrowserDialogGetStatus",web_status}, {"sceWebBrowserDialogTerminate",web_term},
     {"sceInvitationDialogInitialize",invitation_init}, {"sceInvitationDialogOpen",invitation_start},
