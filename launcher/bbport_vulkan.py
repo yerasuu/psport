@@ -68,10 +68,10 @@ def configure(env, manifest_dirs=MANIFEST_DIRS, library_dirs=LIBRARY_DIRS,
     # VK_ICD_FILENAMES. In particular don't replace an explicit Lavapipe setup.
     if env.get("VK_DRIVER_FILES") or env.get("VK_ICD_FILENAMES"):
         return "Vulkan: using explicit driver override"
-    bundled = env.get("BB_BUNDLED_VK_DRIVER_FILES", "")
+    bundled = env.get("PS_BUNDLED_VK_DRIVER_FILES", "")
     if env.get("VK_ADD_DRIVER_FILES"):
         bundled = env["VK_ADD_DRIVER_FILES"] + (":" + bundled if bundled else "")
-    extra = env.get("BB_NVIDIA_LIB_DIR")
+    extra = env.get("PS_NVIDIA_LIB_DIR")
     if extra:
         library_dirs = (Path(extra), *library_dirs)
     found = host_nvidia(manifest_dirs, library_dirs)
@@ -84,7 +84,7 @@ def configure(env, manifest_dirs=MANIFEST_DIRS, library_dirs=LIBRARY_DIRS,
     # The driver version/path and mtime give each installed driver its own small
     # cache. exec preserves process/signal behavior; the cache survives launch.
     key = hashlib.sha256(f"{driver}:{driver.stat().st_mtime_ns}".encode()).hexdigest()[:16]
-    data_dir = Path(env.get("BB_DATA_DIR") or
+    data_dir = Path(env.get("PS_DATA_DIR") or
                     str(Path(env.get("XDG_DATA_HOME", str(Path.home() / ".local/share"))) / "bbport"))
     cache = data_dir / "vulkan" / "nvidia" / key
     libraries = cache / "lib"
@@ -113,8 +113,8 @@ def configure(env, manifest_dirs=MANIFEST_DIRS, library_dirs=LIBRARY_DIRS,
         ":" + env["LD_LIBRARY_PATH"] if env.get("LD_LIBRARY_PATH") else "")
     # #107: NVIDIA's ICD gave no vkCreateInstance on some hosts (a GTX 1650 laptop on CachyOS)
     # until glvnd saw the host's EGL vendor files, NVIDIA's first; the package's glvnd only looks
-    # in its own store. The user's own list, or BB_NVIDIA_EGL=0, keeps it as it is.
-    if not env.get("__EGL_VENDOR_LIBRARY_FILENAMES") and env.get("BB_NVIDIA_EGL") != "0":
+    # in its own store. The user's own list, or PS_NVIDIA_EGL=0, keeps it as it is.
+    if not env.get("__EGL_VENDOR_LIBRARY_FILENAMES") and env.get("PS_NVIDIA_EGL") != "0":
         vendors = [p for d in egl_dirs for p in sorted(d.glob("*.json"))]
         vendors.sort(key=lambda p: "nvidia" not in p.name.lower())
         if any("nvidia" in p.name.lower() for p in vendors):
@@ -187,7 +187,7 @@ def main():
         print(f"bbport: cannot prepare NVIDIA driver: {error}", file=sys.stderr)
         return 1
     if "--vulkan-info" in sys.argv[1:]:
-        tool = os.environ.get("BB_VULKANINFO", "vulkaninfo")
+        tool = os.environ.get("PS_VULKANINFO", "vulkaninfo")
         os.environ.setdefault("VK_LOADER_DEBUG", "error,warn,driver")
         # Everything on stdout, with the summary: one file for an issue report (#107: the report
         # went to stderr and was missing from saved output).

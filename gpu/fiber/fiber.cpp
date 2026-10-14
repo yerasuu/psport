@@ -559,9 +559,9 @@ template <typename... Args, s32 (*F)(Args...)>
 struct Checked<F> {
     static const char* name;
     static s32 PS4_SYSV_ABI Call(Args... args) {
-        // BB_FIBER_TRACE=1: the first calls of each function, with their arguments.
+        // PS_FIBER_TRACE=1: the first calls of each function, with their arguments.
         static const bool tracing = [] {
-            const char* env = std::getenv("BB_FIBER_TRACE");
+            const char* env = std::getenv("PS_FIBER_TRACE");
             return env && env[0] == '1';
         }();
         static std::atomic<u32> traced{0};

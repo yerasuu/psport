@@ -34,15 +34,15 @@ from mods import discover as discover_mods  # noqa: E402
 import game_check  # noqa: E402
 import online  # noqa: E402  (the online module: addresses and the connection test)
 from patches import external_patches  # noqa: E402
-# Packaged (AppImage): generated files, saves and bbport.ini live in BB_DATA_DIR.
-PACKAGED = bool(os.environ.get("BB_PREBUILT"))
-DATA_DIR = Path(os.environ.get("BB_DATA_DIR", PORT_DIR))
+# Packaged (AppImage): generated files, saves and bbport.ini live in PS_DATA_DIR.
+PACKAGED = bool(os.environ.get("PS_PREBUILT"))
+DATA_DIR = Path(os.environ.get("PS_DATA_DIR", PORT_DIR))
 CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "bbport-launcher"
 CONFIG_FILE = CONFIG_DIR / "settings.json"
 MAX_LOG_LINES = 5000
-# The memory model (run.sh: BB_PC_MODEL): "auto" leaves it to the GPU (the new one on AMD, the
+# The memory model (run.sh: PS_PC_MODEL): "auto" leaves it to the GPU (the new one on AMD, the
 # 0.3 one elsewhere), or either by hand. The new one goes through the layer's memory module on
-# every GPU (no sparse binding of the game's memory; BB_LAYER_MEMORY=0: AMD's sparse arena).
+# every GPU (no sparse binding of the game's memory; PS_LAYER_MEMORY=0: AMD's sparse arena).
 PC_MODEL_SUBTITLE = ("Новая: видеокарта работает с памятью игры напрямую, как в игре для ПК, а команды "
                      "графики переводятся, а не эмулируются. Старая — модель памяти 0.3 со всеми "
                      "исправлениями. Если драйвер не проходит проверку при запуске — старая")
@@ -113,7 +113,7 @@ LANGUAGES = [("Английский", "1"), ("Русский", "8"), ("Япон�
              ("Испанский", "3"), ("Немецкий", "4"), ("Итальянский", "5")]
 LIVE_RESOLUTION = [("Авто (по видеокарте)", "auto"), ("Выключена (быстрее)", "0"), ("Включена", "1")]
 READBACKS = [("Relaxed", "", "По умолчанию"), ("Выключены", "0"), ("Precise", "2")]
-# Background pre-upload of the game's GPU memory into VRAM (BB_PREUPLOAD): auto = on with a discrete GPU.
+# Background pre-upload of the game's GPU memory into VRAM (PS_PREUPLOAD): auto = on with a discrete GPU.
 PREUPLOAD = [("Обычная", "", "Без лишней видеопамяти"), ("Полная", "2", "Около 3 ГБ видеопамяти сверху"),
              ("Выключена", "0")]
 
@@ -192,7 +192,7 @@ def save_settings(settings):
 
 
 def ini_path():
-    return Path(os.environ.get("BB_CONFIG", DATA_DIR / "bbport.ini"))
+    return Path(os.environ.get("PS_CONFIG", DATA_DIR / "bbport.ini"))
 
 
 def load_ini():
@@ -224,7 +224,7 @@ def save_ini(values, lines):
                 continue
         out.append(line)
     if not lines:
-        out.append("# bbport settings (in-game menu: Insert / L3+R3)")
+        out.append("# psport settings (in-game menu: Insert / L3+R3)")
     for key, value in values.items():
         if key not in written and value is not None:
             out.append(f"{key}={value}")
@@ -235,8 +235,8 @@ def patches_dir(settings):
     return Path(settings.get("patches_dir") or DATA_DIR / "patches").expanduser()
 
 
-# DLSS (vk_dlss.cpp): the bridge (libbbport_dlss.so) and NVIDIA's runtime library
-# libnvidia-ngx-dlss.so.<version>, beside bb-probe (the package, a build with DLSS_SDK_ROOT) or the
+# DLSS (vk_dlss.cpp): the bridge (libpsport_dlss.so) and NVIDIA's runtime library
+# libnvidia-ngx-dlss.so.<version>, beside psport (the package, a build with DLSS_SDK_ROOT) or the
 # player's own in <user>/dlss, which the game prefers. Linux needs the .so from NVIDIA's DLSS SDK
 # (github.com/NVIDIA/DLSS, lib/Linux_x86_64/rel); a game's nvngx_dlss.dll is Windows-only.
 NGX_PREFIX = "libnvidia-ngx-dlss.so."
@@ -259,8 +259,8 @@ def ngx_libraries(directory):
 
 def fsr411_dir():
     """Where the FSR 4.1.1 assets are looked up, as run.sh does."""
-    if os.environ.get("BB_FSR411_DIR"):
-        return Path(os.environ["BB_FSR411_DIR"])
+    if os.environ.get("PS_FSR411_DIR"):
+        return Path(os.environ["PS_FSR411_DIR"])
     return PORT_DIR / "fsr4_411" if (PORT_DIR / "fsr4_411").is_dir() else DATA_DIR / "fsr4_411"
 
 
@@ -271,12 +271,12 @@ def fsr411_build_command(upscaler, loader=None):
     if PACKAGED:
         for key in PACKAGE_ONLY_ENV:
             env.pop(key, None)
-        env["BB_FSR4CAP_WORK"] = str(DATA_DIR / "fsr4cap")
-        env["BB_FSR4CAP_CLEAN"] = "1"
+        env["PS_FSR4CAP_WORK"] = str(DATA_DIR / "fsr4cap")
+        env["PS_FSR4CAP_CLEAN"] = "1"
     tools = FSR4CAP_DIR / "bin"
     if (tools / "dxil-spirv").is_file() and (tools / "fsr4cap.exe").is_file():
-        env["BB_FSR4CAP_TOOLS"] = str(tools)
-    env["BB_FSR411_OUT"] = os.environ.get("BB_FSR411_DIR") or str(
+        env["PS_FSR4CAP_TOOLS"] = str(tools)
+    env["PS_FSR411_OUT"] = os.environ.get("PS_FSR411_DIR") or str(
         (DATA_DIR if PACKAGED else PORT_DIR) / "fsr4_411")
     command = ["bash", str(FSR4CAP_DIR / "build_assets.sh"), str(upscaler)]
     return command + ([str(loader)] if loader else []), env
@@ -290,69 +290,69 @@ def online_module():
 def game_environment(s):
     """Environment for run.sh from the launcher settings."""
     env = dict(os.environ)
-    env["BB_GAME_DIR"] = str(Path(s["game_dir"]).expanduser())
+    env["PS_GAME_DIR"] = str(Path(s["game_dir"]).expanduser())
     if s["user_dir"]:
-        env["BB_USER_DIR"] = s["user_dir"]
-    env["BB_MODS_DIR"] = str(Path(s.get("mods_dir") or DATA_DIR / "mods").expanduser())
-    env["BB_MODS_CONFIG"] = str(DATA_DIR / "mods.json")
-    env["BB_MODS_ENABLED"] = "1" if s.get("mods_enabled", True) else "0"
-    env["BB_PATCHES_DIR"] = str(patches_dir(s))
-    env["BB_PATCHES_CONFIG"] = str(DATA_DIR / "patches.json")
-    env["BB_LANGUAGE"] = s["language"]
+        env["PS_USER_DIR"] = s["user_dir"]
+    env["PS_MODS_DIR"] = str(Path(s.get("mods_dir") or DATA_DIR / "mods").expanduser())
+    env["PS_MODS_CONFIG"] = str(DATA_DIR / "mods.json")
+    env["PS_MODS_ENABLED"] = "1" if s.get("mods_enabled", True) else "0"
+    env["PS_PATCHES_DIR"] = str(patches_dir(s))
+    env["PS_PATCHES_CONFIG"] = str(DATA_DIR / "patches.json")
+    env["PS_LANGUAGE"] = s["language"]
     # The in-game menu speaks the launcher's language until one is chosen in it (menu_language).
-    env["BB_MENU_LANGUAGE"] = language()
-    env["BB_FULLSCREEN"] = "1" if s["fullscreen"] else "0"
-    env["BB_PRESENT_MODE"] = s["present_mode"]
+    env["PS_MENU_LANGUAGE"] = language()
+    env["PS_FULLSCREEN"] = "1" if s["fullscreen"] else "0"
+    env["PS_PRESENT_MODE"] = s["present_mode"]
     if s.get("gamepad"):
-        env["BB_GAMEPAD"] = s["gamepad"]
+        env["PS_GAMEPAD"] = s["gamepad"]
     if s.get("display"):
-        env["BB_DISPLAY"] = s["display"]
-    env["BB_SKIP_NETWORK_CHOICE"] = "1" if s.get("skip_network_choice", True) else "0"
+        env["PS_DISPLAY"] = s["display"]
+    env["PS_SKIP_NETWORK_CHOICE"] = "1" if s.get("skip_network_choice", True) else "0"
     if s["hdr"]:
-        env["BB_HDR"] = "1"
-    env["BB_FPS"] = s["fps_mode"]
+        env["PS_HDR"] = "1"
+    env["PS_FPS"] = s["fps_mode"]
     if s["fps_limit"] > 0:
-        env["BB_FPS_LIMIT"] = str(s["fps_limit"])
+        env["PS_FPS_LIMIT"] = str(s["fps_limit"])
     if s["draw_pipe"]:
-        env["BB_DRAW_PIPE"] = s["draw_pipe"]
+        env["PS_DRAW_PIPE"] = s["draw_pipe"]
     if s["readbacks"]:
-        env["BB_READBACKS"] = s["readbacks"]
+        env["PS_READBACKS"] = s["readbacks"]
     if s.get("preupload"):
-        env["BB_PREUPLOAD"] = s["preupload"]
+        env["PS_PREUPLOAD"] = s["preupload"]
     if s["mangohud"]:
         env["MANGOHUD"] = "1"
     if s["frame_stats"]:
-        env["BB_FRAME_STATS"] = "1"
+        env["PS_FRAME_STATS"] = "1"
     if s.get("save_log"):
-        env["BB_SAVE_LOG"] = "1"
+        env["PS_SAVE_LOG"] = "1"
     # The memory model: "auto" is run.sh's choice by GPU (the new one on AMD, the 0.3 one
     # elsewhere). "pc_model", "pc_memory", "old_memory_model", "new_memory_model" and
     # "legacy_memory_model" of older settings are ignored (0.5: auto for everyone).
-    # BB_PC_MODEL from the shell (or the extra variables) still wins over "auto".
+    # PS_PC_MODEL from the shell (or the extra variables) still wins over "auto".
     model = s.get("memory_model", "auto")
     if model in ("new", "old"):
-        env["BB_PC_MODEL"] = "1" if model == "new" else "0"
-    # Synchronisation and memory as released in 0.3 (run.sh: BB_AS_0_3), for comparisons.
+        env["PS_PC_MODEL"] = "1" if model == "new" else "0"
+    # Synchronisation and memory as released in 0.3 (run.sh: PS_AS_0_3), for comparisons.
     if s.get("as_0_3"):
-        env["BB_AS_0_3"] = "1"
+        env["PS_AS_0_3"] = "1"
     if s.get("crash_diag"):
-        env["BB_FREE_CHECK"] = "1"
-        env["BB_WRITE_LOG"] = "1"
-        env["BB_PRODUCER_CHECK"] = "1"
+        env["PS_FREE_CHECK"] = "1"
+        env["PS_WRITE_LOG"] = "1"
+        env["PS_PRODUCER_CHECK"] = "1"
     if s["gpu_profile"]:
-        env["BB_GPU_PROFILE"] = "1"
+        env["PS_GPU_PROFILE"] = "1"
     if s["vk_validation"]:
-        env["BB_VK_VALIDATION"] = "1"
+        env["PS_VK_VALIDATION"] = "1"
     if s.get("online") and online_module():
         server = s["online_server"].strip() or online.SHADNET_SERVER
         community = online.community_address(s["online_community"])
-        env["BB_ONLINE"] = "1"
-        env["BB_SHADNET_SERVER"] = server
-        env["BB_SHADNET_WEBAPI"] = online.webapi_setting(s["online_webapi"], server, community)
-        env["BB_SHADNET_NPID"] = s["online_npid"].strip()
-        env["BB_SHADNET_PASSWORD"] = s["online_password"]
-        env["BB_UPNP"] = "1" if s["online_upnp"] else "0"
-        env["BB_COMMUNITY_SERVER"] = community
+        env["PS_ONLINE"] = "1"
+        env["PS_SHADNET_SERVER"] = server
+        env["PS_SHADNET_WEBAPI"] = online.webapi_setting(s["online_webapi"], server, community)
+        env["PS_SHADNET_NPID"] = s["online_npid"].strip()
+        env["PS_SHADNET_PASSWORD"] = s["online_password"]
+        env["PS_UPNP"] = "1" if s["online_upnp"] else "0"
+        env["PS_COMMUNITY_SERVER"] = community
     for item in s["extra_env"].split():
         if "=" in item:
             key, value = item.split("=", 1)
@@ -440,7 +440,7 @@ def connected_gamepads():
 
 
 def connected_displays():
-    """(BB_DISPLAY value, label) of the monitors (bb-gpu-capabilities --displays), [] if unknown.
+    """(PS_DISPLAY value, label) of the monitors (bb-gpu-capabilities --displays), [] if unknown.
     The value is the monitor's name, or its number when two monitors share a name."""
     tool = PORT_DIR / ("bin" if PACKAGED else "out") / "bb-gpu-capabilities"
     try:
@@ -794,11 +794,11 @@ class LauncherWindow(Adw.ApplicationWindow):
             active=self.settings.get("as_0_3", False))
         dev.add(self.as_0_3_row)
         self.stats_row = Adw.SwitchRow(title=tr("Статистика кадров в журнале"),
-                                       subtitle="BB_FRAME_STATS",
+                                       subtitle="PS_FRAME_STATS",
                                        active=self.settings["frame_stats"])
         dev.add(self.stats_row)
         self.profile_row = Adw.SwitchRow(title=tr("Профиль GPU в журнале"),
-                                         subtitle="BB_GPU_PROFILE",
+                                         subtitle="PS_GPU_PROFILE",
                                          active=self.settings["gpu_profile"])
         dev.add(self.profile_row)
         self.validation_row = Adw.SwitchRow(title=tr("Слои валидации Vulkan"),
@@ -884,10 +884,10 @@ class LauncherWindow(Adw.ApplicationWindow):
             hint = tr("Ассеты для выбранного режима найдены") if not problem else (
                 tr("{}. Соберите FSR 4.1.1 из своей DLL кнопкой «Выбрать DLL…» ниже").format(problem))
         elif value == "dlss":
-            # The game looks for the bridge and NVIDIA's library next to bb-probe (vk_dlss.cpp); the
+            # The game looks for the bridge and NVIDIA's library next to psport (vk_dlss.cpp); the
             # AppImage has neither (NVIDIA's DLSS SDK is not bundled): DLSS then falls back to FSR 3.1.
             binaries = PORT_DIR / ("bin" if PACKAGED else "out")
-            found = (binaries / "libbbport_dlss.so").is_file() and bool(
+            found = (binaries / "libpsport_dlss.so").is_file() and bool(
                 ngx_libraries(self.user_dir() / "dlss") or ngx_libraries(binaries))
             hint = tr("DLSS найден (нужна видеокарта NVIDIA RTX)") if found else tr(
                 "DLSS не найден: выберите библиотеку NVIDIA ниже (и нужна сборка с мостом DLSS). Игра включит FSR 3.1")
@@ -1463,7 +1463,7 @@ class LauncherWindow(Adw.ApplicationWindow):
     def update_dlss_row(self):
         own = ngx_libraries(self.user_dir() / "dlss")
         bundled = ngx_libraries(binaries_dir())
-        bridge = (binaries_dir() / "libbbport_dlss.so").is_file()
+        bridge = (binaries_dir() / "libpsport_dlss.so").is_file()
         if own:
             text = tr("Своя: {}").format(own[-1].name[len(NGX_PREFIX):])
         elif bundled:

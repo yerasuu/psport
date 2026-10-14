@@ -16,7 +16,7 @@ namespace BbSettings {
 namespace {
 
 const char* Path() {
-    const char* env = std::getenv("BB_CONFIG");
+    const char* env = std::getenv("PS_CONFIG");
     return env && env[0] ? env : "bbport.ini";
 }
 
@@ -108,9 +108,9 @@ void Load() {
         v.effects[e] = Effects[e].default_on;
     }
     // bbport: the menu's language until one is chosen in it (menu_language in bbport.ini): the
-    // launcher's (BB_MENU_LANGUAGE), else the system's, as the launcher picks its own.
+    // launcher's (PS_MENU_LANGUAGE), else the system's, as the launcher picks its own.
     {
-        const char* lang = std::getenv("BB_MENU_LANGUAGE");
+        const char* lang = std::getenv("PS_MENU_LANGUAGE");
         if (!lang || !*lang) {
             for (const char* key : {"LC_ALL", "LC_MESSAGES", "LANG", "LANGUAGE"}) {
                 if (const char* value = std::getenv(key); value && *value) {
@@ -141,17 +141,17 @@ void Load() {
         std::printf("Settings: %s\n", Path());
     }
     // Environment overrides (scripts, A/B tests).
-    if (const char* env = std::getenv("BB_UPSCALER")) {
+    if (const char* env = std::getenv("PS_UPSCALER")) {
         v.upscaler = UpscalerOff;
         for (int u = 0; u < UpscalerCount; ++u) {
             if (std::strcmp(env, UpscalerName(u)) == 0) v.upscaler = u;
         }
     }
     const std::pair<const char*, const char*> env_keys[] = {
-        {"BB_FSR_SHARPNESS", "sharpness"},        {"BB_JITTER", "jitter"},
-        {"BB_REACTIVE", "reactive"},              {"BB_REACTIVE_SCALE", "reactive_scale"},
-        {"BB_REACTIVE_THRESHOLD", "reactive_threshold"}, {"BB_REACTIVE_MAX", "reactive_max"},
-        {"BB_UPSCALE_PRESET", "preset"},            {"BB_OBJECT_MOTION", "object_motion"},
+        {"PS_FSR_SHARPNESS", "sharpness"},        {"PS_JITTER", "jitter"},
+        {"PS_REACTIVE", "reactive"},              {"PS_REACTIVE_SCALE", "reactive_scale"},
+        {"PS_REACTIVE_THRESHOLD", "reactive_threshold"}, {"PS_REACTIVE_MAX", "reactive_max"},
+        {"PS_UPSCALE_PRESET", "preset"},            {"PS_OBJECT_MOTION", "object_motion"},
     };
     for (const auto& [env, key] : env_keys) {
         if (const char* value = std::getenv(env)) {
@@ -197,7 +197,7 @@ void ConfigureDlssSupport(bool available, const char* problem) {
 }
 
 bool FixedRenderSession() {
-    const char* size = std::getenv("BB_RENDER_RES");
+    const char* size = std::getenv("PS_RENDER_RES");
     return size && size[0];
 }
 
@@ -285,7 +285,7 @@ void Save() {
         std::fclose(file);
     }
     if (!had_lines) {
-        out = "# bbport settings (in-game menu: Insert / L3+R3)\n";
+        out = "# psport settings (in-game menu: Insert / L3+R3)\n";
     }
     for (size_t k = 0; k < keys.size(); ++k) {
         if (!written[k]) {

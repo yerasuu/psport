@@ -11,14 +11,14 @@ endif()
 # Frame pointers keep the loader's thread dumps (watchdog, SIGUSR2 sampling) walkable.
 add_compile_options(-fno-omit-frame-pointer)
 
-# bbport: link-time optimization (BB_LTO, default on) and profile-guided optimization
-# (BB_PGO: off, generate = instrumented build writing into BB_PGO_DIR, use = build with that
+# bbport: link-time optimization (PS_LTO, default on) and profile-guided optimization
+# (PS_PGO: off, generate = instrumented build writing into PS_PGO_DIR, use = build with that
 # profile). Covers bbgpu and the static libraries linked into it. No -march: the same build
 # runs on the Steam Deck.
-option(BB_LTO "Link-time optimization of bbgpu" ON)
-set(BB_PGO "off" CACHE STRING "Profile-guided optimization: off, generate, use")
-set(BB_PGO_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../pgo" CACHE PATH "Profile directory")
-if (BB_LTO)
+option(PS_LTO "Link-time optimization of bbgpu" ON)
+set(PS_PGO "off" CACHE STRING "Profile-guided optimization: off, generate, use")
+set(PS_PGO_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../pgo" CACHE PATH "Profile directory")
+if (PS_LTO)
     include(CheckIPOSupported)
     check_ipo_supported(RESULT bb_ipo_ok OUTPUT bb_ipo_error)
     if (bb_ipo_ok)
@@ -27,16 +27,16 @@ if (BB_LTO)
         message(WARNING "LTO unavailable: ${bb_ipo_error}")
     endif()
 endif()
-if (BB_PGO STREQUAL "generate")
+if (PS_PGO STREQUAL "generate")
     # Atomic counters: the GPU, recording, preparation and copy threads run the same code.
-    add_compile_options(-fprofile-generate=${BB_PGO_DIR} -fprofile-update=atomic)
-    add_link_options(-fprofile-generate=${BB_PGO_DIR})
-    add_compile_definitions(BB_PGO_GENERATE)
-elseif (BB_PGO STREQUAL "use")
+    add_compile_options(-fprofile-generate=${PS_PGO_DIR} -fprofile-update=atomic)
+    add_link_options(-fprofile-generate=${PS_PGO_DIR})
+    add_compile_definitions(PS_PGO_GENERATE)
+elseif (PS_PGO STREQUAL "use")
     # Partial training keeps unprofiled code optimized normally; counters from concurrent
     # threads can be slightly inconsistent (correction). Functions changed since the profile
     # (or built differently for it, bbgpu_init) are compiled without it.
-    add_compile_options(-fprofile-use=${BB_PGO_DIR} -fprofile-partial-training
+    add_compile_options(-fprofile-use=${PS_PGO_DIR} -fprofile-partial-training
                         -fprofile-correction -Wno-missing-profile -Wno-coverage-mismatch)
 endif()
 
@@ -148,6 +148,7 @@ add_library(bbgpu SHARED ${VIDEO_CORE} ${RECOMPILER} ${COMMON} ${SHIM_SOURCES} $
     shadps4/core/libraries/kernel/equeue.cpp ${AVPLAYER}
     shadps4/core/libraries/videodec/video_utils.cpp shadps4/core/libraries/videodec/videodec2.cpp
     shadps4/core/libraries/videodec/videodec2_impl.cpp)
+set_target_properties(bbgpu PROPERTIES OUTPUT_NAME psport-gpu)
 add_dependencies(bbgpu host_shaders)
 # In-game settings menu: Dear ImGui (third_party/imgui, MIT) with its Vulkan backend, and an
 # embedded Cyrillic font (third_party/fonts).
@@ -155,7 +156,7 @@ target_sources(bbgpu PRIVATE third_party/imgui/imgui.cpp third_party/imgui/imgui
     third_party/imgui/imgui_tables.cpp third_party/imgui/imgui_widgets.cpp
     third_party/imgui/backends/imgui_impl_vulkan.cpp)
 target_include_directories(bbgpu PRIVATE third_party/imgui third_party/imgui/backends)
-# Dear ImGui stays private to libbbgpu.so. The library is linked into bb-probe, so its exports are
+# Dear ImGui stays private to libpsport-gpu.so. The library is linked into psport, so its exports are
 # in the global symbol scope; a Vulkan layer carrying its own Dear ImGui without -Bsymbolic
 # (vkShade 0.1) had its ImGui_ImplVulkan_Init bound to this copy, which called the Vulkan loader
 # with the layer's down-chain physical device handle ("Invalid physicalDevice", abort).
@@ -164,7 +165,7 @@ set_source_files_properties(third_party/imgui/imgui.cpp third_party/imgui/imgui_
     third_party/imgui/backends/imgui_impl_vulkan.cpp PROPERTIES
     COMPILE_OPTIONS "-fvisibility=hidden;-fvisibility-inlines-hidden")
 target_compile_definitions(bbgpu PRIVATE IMGUI_IMPL_VULKAN_NO_PROTOTYPES
-    BB_FONT_PATH="${CMAKE_CURRENT_SOURCE_DIR}/third_party/fonts/DejaVuSans.ttf")
+    PS_FONT_PATH="${CMAKE_CURRENT_SOURCE_DIR}/third_party/fonts/DejaVuSans.ttf")
 set_source_files_properties(shim/bbport_overlay.cpp PROPERTIES
     OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/fonts/DejaVuSans.ttf")
 target_include_directories(bbgpu PRIVATE shim layer games cp shadps4 ${SHADER_INCLUDE} third_party/gcn/include third_party/half/include
@@ -173,10 +174,10 @@ target_include_directories(bbgpu PRIVATE shim layer games cp shadps4 ${SHADER_IN
 set_source_files_properties(${ATRAC9_SOURCES} PROPERTIES COMPILE_OPTIONS -w)
 target_compile_definitions(bbgpu PRIVATE BOOST_ASIO_STANDALONE NDEBUG)
 target_compile_options(bbgpu PRIVATE -Wno-deprecated-declarations -Wno-missing-field-initializers)
-# Loaded with bb-probe at startup (DT_NEEDED, never dlopen): thread_local access without a
+# Loaded with psport at startup (DT_NEEDED, never dlopen): thread_local access without a
 # TLS descriptor call (_dl_tlsdesc_return was ~2% of the draw recording thread).
 target_compile_options(bbgpu PRIVATE -ftls-model=initial-exec)
-# Runtime symbols (runtime_memory_*, runtime_process_*) resolve against bb-probe.
+# Runtime symbols (runtime_memory_*, runtime_process_*) resolve against psport.
 target_link_options(bbgpu PRIVATE -Wl,--allow-shlib-undefined)
 target_link_libraries(bbgpu PRIVATE ffx-vulkan::portable ffx-vulkan::fsr4-v07-vulkan)
 target_link_libraries(bbgpu PUBLIC Vulkan::Headers fmt::fmt Boost::headers magic_enum::magic_enum
@@ -189,9 +190,9 @@ target_include_directories(fsr4-bench PRIVATE shadps4/video_core/renderer_vulkan
 target_link_libraries(fsr4-bench PRIVATE ffx-vulkan::fsr4-v07-vulkan ffx-vulkan::fsr4-v07-assets Vulkan::Vulkan)
 
 # bbport online module (gpu/bbnet, libbbnet.so): built when its libraries are there (shell.nix);
-# BB_NET=OFF leaves it out. Without it the port plays offline.
-option(BB_NET "Build the online module (shadNet)" ON)
-if (BB_NET)
+# PS_NET=OFF leaves it out. Without it the port plays offline.
+option(PS_NET "Build the online module (shadNet)" ON)
+if (PS_NET)
     find_package(Protobuf CONFIG QUIET)
     find_package(nlohmann_json CONFIG QUIET)
     find_package(OpenSSL QUIET)

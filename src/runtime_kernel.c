@@ -462,7 +462,7 @@ static void guest_call_sites(uint64_t out[3]) {
 }
 void runtime_wait_note(int kind, uint64_t ns) {
     static int enabled=-1;
-    if (enabled<0) enabled=getenv("BB_FRAME_STATS")!=NULL;
+    if (enabled<0) enabled=getenv("PS_FRAME_STATS")!=NULL;
     if (!enabled) return;
     if (!wait_tid) wait_tid=(int)syscall(SYS_gettid);
     uint64_t sites[3];
@@ -489,7 +489,7 @@ void runtime_wait_report(double frames) {
     }
     if (!n || frames<=0) return;
     static FILE *dump; static int dump_checked;
-    if (!dump_checked) { const char *path=getenv("BB_WAIT_LOG"); if (path && *path) dump=fopen(path,"w"); dump_checked=1; }
+    if (!dump_checked) { const char *path=getenv("PS_WAIT_LOG"); if (path && *path) dump=fopen(path,"w"); dump_checked=1; }
     if (dump) {
         for (int i=0;i<n;++i)
             fprintf(dump,"%s %d %s %#lx %#lx %#lx %.2f %.3f\n", rows[i].w->name, rows[i].w->tid, kinds[rows[i].w->kind&3],
@@ -506,7 +506,7 @@ void runtime_wait_report(double frames) {
     printf("\n");
 }
 
-/* bbport BB_SAMPLE_THREAD=<name> (with frame stats): where that thread runs, sampled with SIGPROF
+/* bbport PS_SAMPLE_THREAD=<name> (with frame stats): where that thread runs, sampled with SIGPROF
  * every 0.5 ms; reported with the wait profile. A thread that never blocks but waits for the GPU
  * shows up spinning in its polling loop. */
 static _Atomic uint64_t sample_keys[1024], sample_counts[1024];
@@ -564,7 +564,7 @@ static void *sampler_main(void *arg) {
 }
 static void sample_start(void) {
     static int started;
-    const char *name=getenv("BB_SAMPLE_THREAD");
+    const char *name=getenv("PS_SAMPLE_THREAD");
     if (started || !name || !*name) return;
     started=1;
     struct sigaction action={0};
@@ -580,7 +580,7 @@ static void sample_report(void) {
     static int got_dumped;
     if (!got_dumped) {
         got_dumped=1;
-        const char *got=getenv("BB_DUMP_GOT"); /* a guest GOT slot (offset): which host function it calls */
+        const char *got=getenv("PS_DUMP_GOT"); /* a guest GOT slot (offset): which host function it calls */
         if (got && *got) {
             const uint64_t target=*(const uint64_t *)(0x800000000ull+strtoull(got,NULL,0));
             Dl_info dl={0};

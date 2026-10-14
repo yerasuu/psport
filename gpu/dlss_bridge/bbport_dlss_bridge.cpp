@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2026 IFreemz (shadps4_dlss bridge), bbport contributors
 // SPDX-License-Identifier: MIT
 //
-// libbbport_dlss.so / bbport_dlss.dll: the only part of the project that uses the NVIDIA DLSS
+// libpsport_dlss.so / psport_dlss.dll: the only part of the project that uses the NVIDIA DLSS
 // (NGX) SDK; the port loads it at run time. Linux: build.sh with DLSS_SDK_ROOT; Windows: MSVC
 // (the SDK's Windows libraries are MSVC only), see CMakeLists.txt.
 // Adapted from IFreemz/shadPS4-Bloodborne-DLSS-FSR (dlss_bridge).
@@ -21,9 +21,9 @@ namespace {
 
 constexpr char ProjectId[] = "42359704-c9f3-4806-9fb5-d469000fdb8a";
 #ifdef _WIN32
-constexpr char EngineVersion[] = "bbport-windows";
+constexpr char EngineVersion[] = "psport-windows";
 #else
-constexpr char EngineVersion[] = "bbport-linux";
+constexpr char EngineVersion[] = "psport-linux";
 #endif
 
 struct State {

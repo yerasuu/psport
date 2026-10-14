@@ -4,7 +4,7 @@ argument, from shadPS4's prototypes and their LIB_FUNCTION registrations.
 
     python3 tools/import_outparams.py <shadPS4 checkout> > src/import_outparams.inc
 
-BB_PERMISSIVE answers an import the port lacks with 0; for these the caller then reads an output
+PS_PERMISSIVE answers an import the port lacks with 0; for these the caller then reads an output
 that was never written, and faults far from the import. An argument counts as an output when it is
 a non-const pointer that shadPS4's body writes through (itself or by handing it to a function that
 does), or whose name or type says it is one (out, result, handle, id, a pointer to a pointer, a

@@ -1,5 +1,5 @@
 # With -u from a folder holding a copy of a Bloodborne save (<folder>/bloodborne/user/savedata) and
-# BB_FRAME_STATS=1: past the title, Continue, then the hunter stands where the save left them. The
+# PS_FRAME_STATS=1: past the title, Continue, then the hunter stands where the save left them. The
 # frame rate is the mean of the last 10 'Frame stats' lines (the 50 s before the end):
 #   grep '^Frame stats' LOG | tail -10 | awk '{s+=$3} END {printf "%.1f FPS\n", s/NR}'
 # Run it alone (another game on the machine moves the result by several percent) through

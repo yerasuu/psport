@@ -15,7 +15,7 @@ from pathlib import Path
 from sce_file import parse_self
 
 EBOOT_BASE=0x400000
-# BB_FPS presets: patch names from patches/Bloodborne.xml (app version 01.09).
+# PS_FPS presets: patch names from patches/Bloodborne.xml (app version 01.09).
 # Above 60 FPS the sprint fix always goes with the frame rate patch: without it sprinting drops to
 # half speed (the game's wall detector measured distance per frame, a 30 FPS rule).
 FPS_PRESETS={'30':[],'60':['60 FPS++'],'90':['90 FPS++','Sprint Fix (High FPS)'],
@@ -45,7 +45,7 @@ EFFECTS={
 # Intel CPUs: the game's tone mapping turns black (DLC areas most; reported as darker than on the
 # PS4): the game code runs natively, and Intel's approximate float instructions differ from the
 # PS4's AMD CPU, so a block the game gates on a computed flag never runs. The community fix runs
-# it always; on by default on Intel. BB_INTEL_TONEMAP_FIX=0/1 forces it off or on.
+# it always; on by default on Intel. PS_INTEL_TONEMAP_FIX=0/1 forces it off or on.
 INTEL_TONEMAP='Intel Black Tonemap Fix'
 
 
@@ -58,16 +58,16 @@ def intel_cpu(cpuinfo='/proc/cpuinfo'):
 
 
 # The title's PLAY ONLINE / PLAY OFFLINE dialog: the port has no PSN, the game goes straight to the
-# main menu offline. On by default (the launcher's switch); BB_SKIP_NETWORK_CHOICE=0 shows it.
+# main menu offline. On by default (the launcher's switch); PS_SKIP_NETWORK_CHOICE=0 shows it.
 SKIP_NETWORK_CHOICE='Skip Online/Offline Choice'
 
 
 def skip_network_choice(env=os.environ):
-    return env.get('BB_SKIP_NETWORK_CHOICE','1')!='0'
+    return env.get('PS_SKIP_NETWORK_CHOICE','1')!='0'
 
 
 def intel_tonemap_fix(env=os.environ, cpuinfo='/proc/cpuinfo'):
-    forced=env.get('BB_INTEL_TONEMAP_FIX')
+    forced=env.get('PS_INTEL_TONEMAP_FIX')
     return forced=='1' if forced in ('0','1') else intel_cpu(cpuinfo)
 
 # model_lod: -2 highest, 0 the game's, 1 lower, 2 lowest.
@@ -75,7 +75,7 @@ MODEL_LOD={'-2':'Model LOD -2 (Highest)','1':'Model LOD 1 (Lower)','2':'Model LO
 
 
 DEBUG_MENU='Restore Debug Menu (READ NOTES)'
-# What the patched game reads for the debug menu (BB_FILE_TRACE=1), under dvdroot_ps4. The game asks
+# What the patched game reads for the debug menu (PS_FILE_TRACE=1), under dvdroot_ps4. The game asks
 # for lower-case names; the PS4's file system and the port's runtime ignore case.
 DEBUG_MENU_FONTS=('adhoc/font/DbgFont14h.ccm','adhoc/font/DbgFont14h.tpf')
 DEBUG_MENU_SHADERS=('adhoc/FontShader/debugFont_vs.vpo','adhoc/FontShader/debugFont_ps.ppo')
@@ -335,7 +335,7 @@ def main():
     p.add_argument('--app-version',default='01.09')
     p.add_argument('--out',type=Path,default=Path(__file__).resolve().parent.parent/'out')
     p.add_argument('--settings',type=Path,default=Path(__file__).resolve().parent.parent/'bbport.ini')
-    p.add_argument('--game-dir',type=Path,default=Path(os.environ.get('BB_GAME_DIR','../CUSA03173')))
+    p.add_argument('--game-dir',type=Path,default=Path(os.environ.get('PS_GAME_DIR','../CUSA03173')))
     p.add_argument('--render-res',default='',help='render resolution WxH (overrides the preset)')
     p.add_argument('--print-preset-size',action='store_true',help='print the selected preset size, if reduced')
     p.add_argument('--output-res',default='',help='output resolution WxH (the upscaler\'s; the UI stays 1920x1080)')
@@ -351,10 +351,10 @@ def main():
         return
     if a.print_preset_size:
         settings=read_settings(a.settings)
-        if 'BB_UPSCALER' in os.environ:
-            settings['upscaler']='fsr3' if os.environ['BB_UPSCALER']=='fsr3' else 'off'
-        if 'BB_UPSCALE_PRESET' in os.environ:
-            settings['preset']=os.environ['BB_UPSCALE_PRESET']
+        if 'PS_UPSCALER' in os.environ:
+            settings['upscaler']='fsr3' if os.environ['PS_UPSCALER']=='fsr3' else 'off'
+        if 'PS_UPSCALE_PRESET' in os.environ:
+            settings['preset']=os.environ['PS_UPSCALE_PRESET']
         size=render_size(settings)
         if size: print(f'{size[0]}x{size[1]}')
         return

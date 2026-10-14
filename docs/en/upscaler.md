@@ -2,7 +2,7 @@
 
 ## Native TAA and missing FSR 4 assets (2026-10-01)
 
-`upscaler=taa` / `BB_UPSCALER=taa` is a separate native-resolution temporal AA
+`upscaler=taa` / `PS_UPSCALER=taa` is a separate native-resolution temporal AA
 mode, available live in the launcher and overlay. It uses the existing jitter and
 camera/object motion vectors, reprojection, depth rejection and 3×3 neighborhood
 clipping in one compute pass with two ping-pong RGBA16F histories. History stores
@@ -11,7 +11,7 @@ composed afterwards and never enters history. Output changes and AA/provider
 changes reset history. TAA uses Native AA dimensions while preserving the saved
 FSR preset, and does not allocate an FSR context or execute an FSR model/RCAS.
 It still adds GPU work compared with disabling temporal AA; native 4K raster cost
-also remains. The explicit `BB_RENDER_RES` compatibility path must be unset.
+also remains. The explicit `PS_RENDER_RES` compatibility path must be unset.
 
 FSR Native AA is not a fast pass-through: it renders at the output resolution and
 also executes the temporal reconstruction (including the model for FSR 4) and
@@ -21,7 +21,7 @@ FSR 4.1.1 assets have separate 1080p/2160p tiers and standard/Ultra models:
 `t1080_m0`, `t1080_m1`, `t2160_m0`, `t2160_m1`. Outputs above 1080p need the 2160
 tier, irrespective of the preset. A missing `t2160_m0/spd.spv` means missing
 assets, not a GPU feature failure. These assets are not bundled: build the full
-set with `tools/fsr4cap/build_assets.sh` and put it in `BB_FSR411_DIR` or the
+set with `tools/fsr4cap/build_assets.sh` and put it in `PS_FSR411_DIR` or the
 packaged data directory's `fsr4_411`. Fatal asset failures now select FSR 3.1 in
 the live settings, so the menu shows the active provider, retains the error, and
 allows retrying FSR 4 after changing the output/installing assets.
@@ -42,11 +42,11 @@ draws/frame, 185 vs 210 FPS), and on GPUs without shader stencil export every de
 copy took nine draws.
 
 - `run.sh` again patches the game's render size for outputs other than 1080p (as in 0.1) and
-  marks it with `BB_AUTO_RENDER_RES=1`, so an in-game restart recomputes it. Preset and output
-  changes then need a restart (the menu offers it). `BB_LIVE_RES=1` selects the live path.
+  marks it with `PS_AUTO_RENDER_RES=1`, so an in-game restart recomputes it. Preset and output
+  changes then need a restart (the menu offers it). `PS_LIVE_RES=1` selects the live path.
   1080p output and TAA keep the live path.
 - Depth/stencil scene proxies need `VK_EXT_shader_stencil_export` again; without it these
-  targets stay native (as in 0.1). `BB_SCENE_STENCIL_BITS=1` still forces the portable
+  targets stay native (as in 0.1). `PS_SCENE_STENCIL_BITS=1` still forces the portable
   resampler for tests.
 
 ## Live resolution changes (2026-10-01)
@@ -55,7 +55,7 @@ The in-game output selector now resizes 720p/1080p/1440p/2160p host targets at a
 display-pass boundary. Presets use `output / scale`, including raster sizes above
 1080p (4K Quality: 2560×1440; Native AA: 3840×2160). Guest allocations stay at
 1920×1080; `run.sh` no longer inserts a resolution patch for normal output choices.
-The explicit `BB_RENDER_RES` compatibility override is retained.
+The explicit `PS_RENDER_RES` compatibility override is retained.
 
 `SceneTargets` resolves and retires old proxies before changing size. FSR resources
 and history are rebuilt for the new input/output, with completion waits for both
@@ -70,12 +70,12 @@ back to 1080p. This change does not scale every post-processing pass; performanc
 and intermediate detail can differ from the old startup-patched render sizes.
 
 Verification: `out/dev/live-resolution-summary.log` switches output, preset and FSR
-off/on in one PID. `BB_PRESENT_DUMP_TRIGGER` captures the completed host display
-buffer (including HUD) into `BB_DUMP_DIR`. Captures confirm actual 720p/1440p/2160p
-buffers. `BB_PRESET_FILE` accepts
+off/on in one PID. `PS_PRESENT_DUMP_TRIGGER` captures the completed host display
+buffer (including HUD) into `PS_DUMP_DIR`. Captures confirm actual 720p/1440p/2160p
+buffers. `PS_PRESET_FILE` accepts
 `preset [output-index [upscaler-index]]` for scripted menu-equivalent changes.
 
-Frame analyzer: `BB_CAPTURE_TRIGGER=<file> BB_CAPTURE_DIR=<dir>`; creating the file records
+Frame analyzer: `PS_CAPTURE_TRIGGER=<file> PS_CAPTURE_DIR=<dir>`; creating the file records
 the next frame (boundary: the pass writing a display buffer) — passes, targets, shaders,
 sampled textures, and the first 1 KiB of bound constants for small passes and first draws.
 
@@ -124,9 +124,9 @@ The previous frame's matrices are not there; the port keeps them itself.
 
 ## Status
 
-- Camera motion vectors: verified by reprojecting the previous frame (`BB_DEBUG_MOTION=1`,
+- Camera motion vectors: verified by reprojecting the previous frame (`PS_DEBUG_MOTION=1`,
   toggles 1<<22 reprojected frame, 1<<23 error map): static geometry matches.
-- FSR 3.1 (`BB_UPSCALER=fsr3`, FireBurn/FSR-Vulkan in `gpu/third_party/fsr-vulkan`): scene color before the
+- FSR 3.1 (`PS_UPSCALER=fsr3`, FireBurn/FSR-Vulkan in `gpu/third_party/fsr-vulkan`): scene color before the
   post-processing combine (compute shader 9a9cf8a9), 1:1, RGB written back (the game keeps data
   in the alpha). Toggle 1<<24 switches it off at run time.
 - Jitter: viewport offset of scene geometry (drawn with the scene depth, not full-screen
@@ -142,7 +142,7 @@ Video `video_2026-10-01_03-58-59.mp4` (output 3840x2160, FSR 4 Performance): fli
 of all objects. Cause: the upscaler did not run at all in this mode, while jitter stayed
 enabled: the screen got a stretched scene frame, each frame shifted by its own Halton phase.
 
-1. The UI pass was identified by the exact `BB_RENDER_RES` target size (1916x1078), while the game
+1. The UI pass was identified by the exact `PS_RENDER_RES` target size (1916x1078), while the game
    allocates targets with an aligned height (1916x1080; the scene constants also say 1916x1080).
    `RunScaled` was never called (the log had no `UI: native composition`). Alignment up to
    8 pixels is now allowed (`RenderTarget`), and the scene size for FSR is taken from the scene
@@ -151,7 +151,7 @@ enabled: the screen got a stretched scene frame, each frame shifted by its own H
    created new image views every frame, and the FSR 4 registry holds eight. Now it uses the same
    `CachedView` as the Native AA path.
 
-Dump check (`BB_DUMP_TRIGGER=<file> BB_DUMP_DIR=<dir>`, `BB_DUMP_FRAMES`, default 8:
+Dump check (`PS_DUMP_TRIGGER=<file> PS_DUMP_DIR=<dir>`, `PS_DUMP_FRAMES`, default 8:
 FSR input, motion vectors and output, raw): with a static camera, PSNR between adjacent output
 frames is ~45 dB versus ~28 dB for the jittered input; no trails when turning the camera or
 walking. FPS in this mode is ~107 instead of ~220 — previously FSR 4 simply did not run.
@@ -161,7 +161,7 @@ lights — are still not shifted by jitter (the "≤ 6 indices = fullscreen pass
 
 ## 2026-10-01: faster FSR 4 — the post pass (2.9 → 0.8 ms at 4K)
 
-Measurements: `BB_FSR4_PROFILE=1` (time of each FSR 4 pass, in the provider
+Measurements: `PS_FSR4_PROFILE=1` (time of each FSR 4 pass, in the provider
 `gpu/third_party/fsr-vulkan/src/ffx_vk_fsr4_v07.c`), out-of-game benchmark `out/gpu/fsr4-bench` (`ninja -C out/gpu
 fsr4-bench`; `--stats` — registers and instructions from RADV). 4K Balanced (2260x1272 → 3840x2160),
 RX 7800 XT: all of FSR 4 — 5.8 ms, of which **post 2.5–2.9 ms** (not the neural network: the last
@@ -173,7 +173,7 @@ pixel. Removing any one of the three writes sped the pass up 1.3–4 times with 
 
 Solution: `tools/fsr4_optimize.sh` decompiles post (spirv-cross), `tools/fsr4_post_lds.pl`
 gathers the workgroup's 16x16 block in shared memory and writes contiguous rows, glslang
-compiles it back into `fsr4_shaders/opt/`; `vk_fsr4.cpp` takes it from there (`BB_FSR4_OPT=0` —
+compiles it back into `fsr4_shaders/opt/`; `vk_fsr4.cpp` takes it from there (`PS_FSR4_OPT=0` —
 original). Two subtleties found by comparing outputs:
 - spirv-cross translates signed int8 unpacking (`OpBitcast` to `i8vec4`) as `unpack8(uint)`
   (unsigned) — without a fix the result is completely different (PSNR 17 dB);

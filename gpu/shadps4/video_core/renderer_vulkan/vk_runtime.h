@@ -48,7 +48,7 @@ public:
     void FillBuffer(const VideoCore::Buffer* dst, u64 offset, u64 size, u32 value);
 
     void InlineData(VideoCore::Buffer* dst, u64 offset, u32 value);
-    /// bbport BB_GUEST_IN_PLACE: copies from the game's memory itself (a guest memory chunk's
+    /// bbport PS_GUEST_IN_PLACE: copies from the game's memory itself (a guest memory chunk's
     /// buffer, host memory the CPU writes) into `dst`: uploads without a CPU copy.
     void CopyFromGuestChunk(vk::Buffer src, const VideoCore::Buffer* dst,
                             std::span<const vk::BufferCopy> copies);
@@ -59,7 +59,7 @@ public:
                  vk::PipelineStageFlags2 dst_stage, vk::AccessFlags2 dst_access,
                  std::optional<VideoCore::SubresourceRange> subres_range = {});
 
-    /// BB_GPU_PROFILE: a profiler segment for a transfer of `image` while it lives; the
+    /// PS_GPU_PROFILE: a profiler segment for a transfer of `image` while it lives; the
     /// segment it interrupted continues afterwards.
     class TransferMark {
     public:
@@ -101,7 +101,7 @@ public:
     bool IsBufferAccessed(const VideoCore::Buffer* handle, u64 offset, u64 size,
                           bool check_read_access = false);
 
-    /// bbport BB_LAYER_MEMORY: a shader reached memory through the page table (any buffer of the
+    /// bbport PS_LAYER_MEMORY: a shader reached memory through the page table (any buffer of the
     /// game's memory). A write there makes every later access wait for a barrier.
     void AccessGlobal(vk::PipelineStageFlags2 src_stage, vk::AccessFlags2 src_access);
 

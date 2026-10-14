@@ -64,7 +64,7 @@ unsigned runtime_import_failure(const char *nid);
  * the errno of a POSIX export), per import_statuses.inc: counted apart from the failures. */
 int runtime_import_status(const char *nid, uint32_t code);
 /* Calls nothing answers for real or that fail (runtime_calls.c): logged once per import and error
- * code, counted, and summed up by runtime_calls_report (also into BB_CALL_REPORT). */
+ * code, counted, and summed up by runtime_calls_report (also into PS_CALL_REPORT). */
 void runtime_calls_configure(const char (*names)[128], uint64_t count);
 void runtime_calls_unimplemented(uint32_t id);
 ABI int64_t runtime_calls_stub(uint32_t id, uintptr_t a0, uintptr_t a1, uintptr_t a2, uintptr_t a3, uintptr_t a4);
@@ -135,14 +135,14 @@ uintptr_t runtime_kernel_resolve(const char *name);
 void runtime_process_configure(uint32_t sdk_version, uint32_t psf_attributes);
 uintptr_t runtime_file_resolve(const char *name);
 uintptr_t runtime_services_resolve(const char *name);
-/* sceSystemServiceParamGetInt's language (BB_LANGUAGE, default 1 = English US). */
+/* sceSystemServiceParamGetInt's language (PS_LANGUAGE, default 1 = English US). */
 int runtime_system_language(void);
 uintptr_t runtime_playgo_resolve(const char *name);
 uintptr_t runtime_voice_resolve(const char *name);
 /* Offline libSceNet sockets (runtime_socket.c), consulted by runtime_services_resolve. */
 uintptr_t runtime_socket_resolve(const char *name);
 int32_t *runtime_net_errno(void);
-/* Online play (runtime_net.c, BB_ONLINE=1): the online module answers the network and PSN imports. */
+/* Online play (runtime_net.c, PS_ONLINE=1): the online module answers the network and PSN imports. */
 void runtime_net_configure(const char *app0, const char *serial, const char *title, const char *version);
 int runtime_net_enabled(void);
 int runtime_net_symbol(const char *symbol);

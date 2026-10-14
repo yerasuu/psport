@@ -62,19 +62,19 @@ Titles that require PS VR (`require_ps_vr` in `param.sfo`) are unsupported. Only
 
 Normally through decanter: its PS section clones psport, builds it with `build.sh`, rebuilds it
 when the checkout moves and runs each dump through `run.sh` (titles other than Bloodborne with
-`BB_PERMISSIVE=1`).
+`PS_PERMISSIVE=1`).
 
 Standalone:
 
 ```bash
 git clone --recursive https://github.com/yerasuu/psport.git && cd psport
-bash build.sh                                   # out/bb-probe and out/gpu/libbbgpu.so
-BB_GAME_DIR=/path/to/CUSA03173 bash run.sh      # Bloodborne
-BB_GAME_DIR=/path/to/dump BB_PERMISSIVE=1 bash run.sh
+bash build.sh                                   # out/psport and out/gpu/libpsport-gpu.so
+PS_GAME_DIR=/path/to/CUSA03173 bash run.sh      # Bloodborne
+PS_GAME_DIR=/path/to/dump PS_PERMISSIVE=1 bash run.sh
 ```
 
-`BB_GAME_DIR` defaults to `../CUSA03173`. `BB_PERMISSIVE=1` makes imports psport lacks return 0
-instead of stopping. `BB_SYS_MODULES=<folder>` optionally links the user's own dump of system
+`PS_GAME_DIR` defaults to `../CUSA03173`. `PS_PERMISSIVE=1` makes imports psport lacks return 0
+instead of stopping. `PS_SYS_MODULES=<folder>` optionally links the user's own dump of system
 modules (`*.sprx`) where the port has no library yet; nothing from it is shipped. Saves and the
 shader cache go to `user/`, settings to `bbport.ini`. The GTK4 launcher
 (`bash launcher/bb-launcher.sh`; `launcher/install-desktop.sh` adds it to the app menu) is
@@ -90,10 +90,10 @@ upstream's and built around Bloodborne.
   `run.sh` re-enter `shell.nix` themselves.
 - Submodule (Dear ImGui): clone with `--recursive`, or `build.sh` runs
   `git submodule update --init --recursive`.
-- `BB_LTO=OFF` disables link-time optimization; `BB_PGO=generate|use|off` sets profile-guided
+- `PS_LTO=OFF` disables link-time optimization; `PS_PGO=generate|use|off` sets profile-guided
   optimization (`use` by default when `pgo/` holds a profile).
 - With [ccache](https://ccache.dev) installed (`shell.nix` has it), the GPU library is compiled
-  through it, one cache for every checkout and worktree (`~/.cache/bbport/ccache`, `CCACHE_DIR`).
+  through it, one cache for every checkout and worktree (`~/.cache/psport/ccache`, `CCACHE_DIR`).
 - `nix-build packaging/port.nix` builds the port from source in Nix's sandbox; CI builds every
   commit on `master` and publishes the build of each `vX.Y.Z` tag as a Nix binary cache and a GitHub
   Release (FORK.md, "CI and binary cache").
@@ -101,7 +101,7 @@ upstream's and built around Bloodborne.
 ## Measuring progress
 
 `tools/regress.sh` runs every title in `tools/regress/titles.txt` inside a headless gamescope
-(`BB_AUDIO=none`, `BB_PAD_HOST=0`: no window, no sound, none of the user's controllers), drives
+(`PS_AUDIO=none`, `PS_PAD_HOST=0`: no window, no sound, none of the user's controllers), drives
 each with a pad schedule (`tools/regress/*.sched`) and reports how far it got (loaded, entered,
 initialized, first GPU frame, drawn frames, audio), its crash signature and its count of imports
 without implementation; with `-c <earlier results.json>` it flags regressions. Every title runs
@@ -113,15 +113,15 @@ than Bloodborne, to compare with psport's own libraries. Usage and milestones:
 ## Diagnostics
 
 Before a game starts, every import without implementation or answered by a stub is listed. The
-diagnostic variables (`BB_PERMISSIVE_OUT`, `BB_AUDIO_STATS`, `BB_NGS2_TRACE`, `BB_FIBER_TRACE`)
-and the system module switches (`BB_SYS_MODULES`, `BB_HLE`, `BB_LLE`, `BB_SYS_FONTS`) are
+diagnostic variables (`PS_PERMISSIVE_OUT`, `PS_AUDIO_STATS`, `PS_NGS2_TRACE`, `PS_FIBER_TRACE`)
+and the system module switches (`PS_SYS_MODULES`, `PS_HLE`, `PS_LLE`, `PS_SYS_FONTS`) are
 described in [FORK.md](FORK.md). `tools/gcn_dis.sh` disassembles GCN shaders.
 
 ## Rules
 
 From [CLAUDE.md](CLAUDE.md): no game-specific or shader-specific hacks, fixes address the
 underlying behavior; optimisations for one title go in its game profile (`gpu/games/`), and every
-title must run correctly without one (`BB_GAME_PROFILE=none`); no tests in the repository (changes are checked with `tools/regress.sh`;
+title must run correctly without one (`PS_GAME_PROFILE=none`); no tests in the repository (changes are checked with `tools/regress.sh`;
 hardware tests, when needed, are OpenOrbis homebrew); match the surrounding code.
 
 ## Read next

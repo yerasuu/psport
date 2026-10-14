@@ -34,7 +34,7 @@ void Record(std::uint64_t address, const void* data, std::uint64_t size, Source 
 
 int Mode() {
     static const int mode = [] {
-        const char* env = std::getenv("BB_WRITE_LOG");
+        const char* env = std::getenv("PS_WRITE_LOG");
         return env ? std::atoi(env) : 0;
     }();
     return mode;
@@ -80,7 +80,7 @@ void Record(std::uint64_t address, const void* data, std::uint64_t size, Source 
 }
 void DumpRange(std::uint64_t address, std::uint64_t size) {
     if (Mode() == 0) {
-        std::fprintf(stderr, "Write log: off (BB_WRITE_LOG=1 lists the writes into this range)\n");
+        std::fprintf(stderr, "Write log: off (PS_WRITE_LOG=1 lists the writes into this range)\n");
         return;
     }
     const char* sources[] = {"backing",      "WriteData",           "fence",

@@ -164,7 +164,7 @@ for variant, cap in captures:
 if errors:
     print(f'{errors} mismatches: no assets written.')
     if any('groups' in line for line in mismatches):
-        print('The DLL dispatched other group counts than bbport replays (its INT8 variant in '
+        print('The DLL dispatched other group counts than psport replays (its INT8 variant in '
               'capture_*, the FP8 matrix one in fp8/): another DLL version? Report the GPU, the '
               'DLL version and this output.')
     sys.exit(6)

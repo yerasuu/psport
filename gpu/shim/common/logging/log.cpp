@@ -10,7 +10,7 @@ extern "C" void runtime_calls_hle_stub(const char* function, const std::uint64_t
 namespace Common::Log {
 static Level threshold() {
     static const Level level = [] {
-        const char* v = std::getenv("BB_GPU_LOG");
+        const char* v = std::getenv("PS_GPU_LOG");
         if (!v) return Level::warn;
         static const char* names[] = {"trace", "debug", "info", "warning", "error", "critical"};
         for (int i = 0; i < 6; ++i)

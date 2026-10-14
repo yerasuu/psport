@@ -23,7 +23,7 @@ capa de compatibilidad, no un emulador.
   [shadPS4](https://github.com/shadps4-emu/shadPS4) (`gpu/shadps4/`), tal como lo amplió bbport.
 
 Bloodborne sigue funcionando como lo distribuye upstream, con sus parches, reescaladores y ajustes.
-Los demás juegos se arrancan con `BB_SKIP_GAME_CHECK=1`. Qué añade el fork a bbport, qué porta de
+Los demás juegos se arrancan con `PS_SKIP_GAME_CHECK=1`. Qué añade el fork a bbport, qué porta de
 otros proyectos (commit de origen y licencia) y qué cambia en el código heredado de shadPS4:
 [FORK.md](FORK.md). Las versiones de upstream se fusionan a medida que salen.
 
@@ -53,19 +53,19 @@ fondo en una máquina (AMD Radeon RX 7800 XT, Mesa/RADV).
 
 Lo normal es usarlo a través de decanter: su sección de PS clona psport, lo compila con `build.sh`, lo
 recompila cuando el checkout avanza y ejecuta cada volcado con `run.sh` (los juegos que no son
-Bloodborne, con `BB_SKIP_GAME_CHECK=1 BB_PERMISSIVE=1`).
+Bloodborne, con `PS_SKIP_GAME_CHECK=1 PS_PERMISSIVE=1`).
 
 Por separado:
 
 ```bash
 git clone --recursive https://github.com/yerasuu/psport.git && cd psport
-bash build.sh                                   # out/bb-probe y out/gpu/libbbgpu.so
-BB_GAME_DIR=/ruta/a/CUSA03173 bash run.sh       # Bloodborne
-BB_GAME_DIR=/ruta/al/volcado BB_SKIP_GAME_CHECK=1 BB_PERMISSIVE=1 bash run.sh
+bash build.sh                                   # out/psport y out/gpu/libpsport-gpu.so
+PS_GAME_DIR=/ruta/a/CUSA03173 bash run.sh       # Bloodborne
+PS_GAME_DIR=/ruta/al/volcado PS_SKIP_GAME_CHECK=1 PS_PERMISSIVE=1 bash run.sh
 ```
 
-`BB_GAME_DIR` vale `../CUSA03173` por defecto. `BB_PERMISSIVE=1` hace que las importaciones que le
-faltan al port devuelvan 0 en lugar de detener el juego. `BB_SYS_MODULES=<carpeta>` enlaza, de forma
+`PS_GAME_DIR` vale `../CUSA03173` por defecto. `PS_PERMISSIVE=1` hace que las importaciones que le
+faltan al port devuelvan 0 en lugar de detener el juego. `PS_SYS_MODULES=<carpeta>` enlaza, de forma
 opcional, tu propio volcado de módulos del sistema (`*.sprx`) donde el port aún no tiene la
 biblioteca; nada de ese volcado se distribuye. Las partidas guardadas y la caché de shaders van a
 `user/`, y los ajustes a `bbport.ini`. El lanzador GTK4 (`bash launcher/bb-launcher.sh`;
@@ -82,11 +82,11 @@ Bloodborne.
   entran solos en `shell.nix`.
 - Submódulo (Dear ImGui): clona con `--recursive`, o deja que `build.sh` ejecute
   `git submodule update --init --recursive`.
-- `BB_LTO=OFF` desactiva la optimización en el enlazado; `BB_PGO=generate|use|off` controla la
+- `PS_LTO=OFF` desactiva la optimización en el enlazado; `PS_PGO=generate|use|off` controla la
   optimización guiada por perfil (`use` por defecto cuando `pgo/` contiene un perfil).
 - Con [ccache](https://ccache.dev) instalado (`shell.nix` lo incluye), la biblioteca de la GPU se
   compila a través de él, con una sola caché para todos los checkouts y worktrees
-  (`~/.cache/bbport/ccache`, `CCACHE_DIR`).
+  (`~/.cache/psport/ccache`, `CCACHE_DIR`).
 - `nix-build packaging/port.nix` compila el port desde el código en el sandbox de Nix; la CI compila
   cada commit de `master` y publica la build de cada tag `vX.Y.Z` como caché binaria de Nix y como
   GitHub Release (FORK.md, "CI and binary cache").
@@ -94,7 +94,7 @@ Bloodborne.
 ## Medir el progreso
 
 `tools/regress.sh` ejecuta cada juego de `tools/regress/titles.txt` dentro de un gamescope sin
-ventana (`BB_AUDIO=none`, `BB_PAD_HOST=0`: sin ventana, sin sonido y sin los mandos del usuario), lo
+ventana (`PS_AUDIO=none`, `PS_PAD_HOST=0`: sin ventana, sin sonido y sin los mandos del usuario), lo
 maneja con un guion de pulsaciones (`tools/regress/*.sched`) e informa de hasta dónde ha llegado
 (cargado, entrada en el código del juego, inicializado, primer fotograma de la GPU, fotogramas
 dibujados, audio), de su firma de fallo y del número de importaciones sin implementar; con
@@ -106,9 +106,9 @@ Bloodborne, para compararlos con las bibliotecas propias del port. Uso e hitos:
 ## Diagnóstico
 
 Antes de arrancar el juego se listan todas las importaciones sin implementar o atendidas por un
-stub. Las variables de diagnóstico (`BB_PERMISSIVE_OUT`, `BB_AUDIO_STATS`, `BB_NGS2_TRACE`,
-`BB_FIBER_TRACE`) y los interruptores de módulos del sistema (`BB_SYS_MODULES`, `BB_HLE`, `BB_LLE`,
-`BB_SYS_FONTS`) se describen en [FORK.md](FORK.md). `tools/gcn_dis.sh` desensambla shaders GCN.
+stub. Las variables de diagnóstico (`PS_PERMISSIVE_OUT`, `PS_AUDIO_STATS`, `PS_NGS2_TRACE`,
+`PS_FIBER_TRACE`) y los interruptores de módulos del sistema (`PS_SYS_MODULES`, `PS_HLE`, `PS_LLE`,
+`PS_SYS_FONTS`) se describen en [FORK.md](FORK.md). `tools/gcn_dis.sh` desensambla shaders GCN.
 
 ## Reglas
 

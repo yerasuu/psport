@@ -53,12 +53,12 @@ FfxVkPortableImage Describe(vk::Image image, vk::Format format, u32 width, u32 h
     return out;
 }
 
-/// bbport: BB_DUMP_TRIGGER=<file> BB_DUMP_DIR=<dir> (default out/dump): creating the file dumps
-/// the upscaler's images of the next BB_DUMP_FRAMES (8) frames as raw files
+/// bbport: PS_DUMP_TRIGGER=<file> PS_DUMP_DIR=<dir> (default out/dump): creating the file dumps
+/// the upscaler's images of the next PS_DUMP_FRAMES (8) frames as raw files
 /// <dir>/fNNN_<name>_<w>x<h>_<format>.raw, for checking temporal stability offline.
 /// Returns the frame number to dump, or -1.
 int DumpFrame() {
-    static const char* trigger = std::getenv("BB_DUMP_TRIGGER");
+    static const char* trigger = std::getenv("PS_DUMP_TRIGGER");
     static int remaining = 0, index = 0, polls = 0;
     if (!trigger) {
         return -1;
@@ -67,7 +67,7 @@ int DumpFrame() {
         if (++polls % 30 != 0 || std::remove(trigger) != 0) {
             return -1;
         }
-        const char* frames = std::getenv("BB_DUMP_FRAMES");
+        const char* frames = std::getenv("PS_DUMP_FRAMES");
         remaining = frames ? std::max(1, std::atoi(frames)) : 8;
         index = 0;
     }
@@ -88,7 +88,7 @@ struct DumpImage {
 void DumpImages(const Instance& instance, Scheduler& scheduler, vk::CommandBuffer cmdbuf,
                 int frame, std::initializer_list<DumpImage> images) {
     static const std::string dir = [] {
-        const char* env = std::getenv("BB_DUMP_DIR");
+        const char* env = std::getenv("PS_DUMP_DIR");
         return std::string{env && env[0] ? env : "out/dump"};
     }();
     const vk::MemoryBarrier2 before{
@@ -176,7 +176,7 @@ void PrintIssues(const char* what, u64 issues) {
 
 void DumpFinalFrameIfDue(const Instance& instance, Scheduler& scheduler, vk::CommandBuffer cmdbuf,
                          vk::Image image, u32 width, u32 height, vk::Format format) {
-    static const char* trigger = std::getenv("BB_FINAL_DUMP_TRIGGER");
+    static const char* trigger = std::getenv("PS_FINAL_DUMP_TRIGGER");
     static int index = 0;
     if (!trigger || std::remove(trigger) != 0) {
         return;
@@ -201,16 +201,16 @@ TemporalUpscaler::TemporalUpscaler(const Instance& instance_, Scheduler& schedul
                         : dlss->Problem();
         BbSettings::ConfigureDlssSupport(dlss && dlss->Available(), problem.c_str());
     }
-    // Available unless BB_UPSCALER=none; on/off and the parameters are the menu's settings.
-    const char* env = std::getenv("BB_UPSCALER");
+    // Available unless PS_UPSCALER=none; on/off and the parameters are the menu's settings.
+    const char* env = std::getenv("PS_UPSCALER");
     enabled = !(env && std::strcmp(env, "none") == 0);
-    if (const char* hash = std::getenv("BB_UPSCALE_BEFORE_CS")) {
+    if (const char* hash = std::getenv("PS_UPSCALE_BEFORE_CS")) {
         trigger_hash = std::strtoull(hash, nullptr, 16);
     }
-    if (const char* hash = std::getenv("BB_UI_TRIGGER_VS")) {
+    if (const char* hash = std::getenv("PS_UI_TRIGGER_VS")) {
         ui_trigger_vs = std::strtoull(hash, nullptr, 16);
     }
-    if (const char* res = std::getenv("BB_OUTPUT_RES")) {
+    if (const char* res = std::getenv("PS_OUTPUT_RES")) {
         u32 w = 0, h = 0;
         if (std::sscanf(res, "%ux%u", &w, &h) == 2 && w && h) {
             target_width = w;
@@ -219,10 +219,10 @@ TemporalUpscaler::TemporalUpscaler(const Instance& instance_, Scheduler& schedul
     }
     // Explicit resolution overrides retain the old compatibility path. Normal presets
     // keep guest allocations/UI native and change only host raster targets at frame boundaries.
-    scaled_session = std::getenv("BB_RENDER_RES") && std::getenv("BB_RENDER_RES")[0];
+    scaled_session = std::getenv("PS_RENDER_RES") && std::getenv("PS_RENDER_RES")[0];
     render_width = 1920;
     render_height = 1080;
-    if (const char* res = std::getenv("BB_RENDER_RES")) {
+    if (const char* res = std::getenv("PS_RENDER_RES")) {
         u32 w = 0, h = 0;
         if (std::sscanf(res, "%ux%u", &w, &h) == 2 && w && h) {
             render_width = w;
@@ -334,9 +334,9 @@ bool TemporalUpscaler::RasterScaling() const {
 }
 
 bool TemporalUpscaler::OnFrameStart() {
-    // bbport: BB_PRESET_FILE=<file> holding a preset number, read about once a second: switches
+    // bbport: PS_PRESET_FILE=<file> holding a preset number, read about once a second: switches
     // the preset like the menu does (scripted tests of live preset changes).
-    static const char* preset_file = std::getenv("BB_PRESET_FILE");
+    static const char* preset_file = std::getenv("PS_PRESET_FILE");
     if (preset_file && ++preset_file_frames % 64 == 0) {
         if (FILE* f = std::fopen(preset_file, "r")) {
             int value = 0;
@@ -404,7 +404,7 @@ bool TemporalUpscaler::OnFrameStart() {
     last_jitter = jitter_on;
     dispatched_last_frame = false;
 
-    // Diagnostics BB_UI_TRACE=1: the draws of frames that ended without the output-size UI
+    // Diagnostics PS_UI_TRACE=1: the draws of frames that ended without the output-size UI
     // (their display buffer is shown as the game drew it, at its own size), and of one that had it.
     if (ui_trace_on) {
         static int bad = 0, good = 0;
@@ -457,7 +457,7 @@ bool TemporalUpscaler::EnsureResources(u32 w, u32 h, u32 ow, u32 oh, bool hdr) {
     const bool use_fsr4 = UseFsr4() || UseDlss();
     const bool use_taa = BbSettings::Get().upscaler == BbSettings::UpscalerTaa;
     if (use_taa && (w != ow || h != oh)) {
-        std::printf("TAA: remove BB_RENDER_RES to use native-resolution TAA\n");
+        std::printf("TAA: remove PS_RENDER_RES to use native-resolution TAA\n");
         return false;
     }
     if (resources_ready && w == width && h == height && ow == out_width && oh == out_height &&
@@ -808,10 +808,10 @@ void TemporalUpscaler::RecordTaa(vk::CommandBuffer cmdbuf, vk::ImageView color,
         std::array<float, 2> jitter;
         u32 reset, pad;
         std::array<std::array<float, 4>, 3> depth;
-    } params{jitter, reset ? 1u : 0u, std::getenv("BB_TAA_DIAGNOSTICS") ?
-                 u32(std::clamp(std::atoi(std::getenv("BB_TAA_DIAGNOSTICS")),1,3)) : 0u,
+    } params{jitter, reset ? 1u : 0u, std::getenv("PS_TAA_DIAGNOSTICS") ?
+                 u32(std::clamp(std::atoi(std::getenv("PS_TAA_DIAGNOSTICS")),1,3)) : 0u,
              camera_motion.TaaDepthParameters()};
-    // Optional techniques for A/B in one run (BB_TOGGLE_FILE bits 51-54): tonemapped blending,
+    // Optional techniques for A/B in one run (PS_TOGGLE_FILE bits 51-54): tonemapped blending,
     // YCoCg clipping, variance clipping, 3x3 reconstruction. Measured in game on 2026-10-02
     // (static and panning camera, interleaved captures): none improved stability beyond run
     // noise; YCoCg clipping and the reconstruction made it worse. Default: all off.
@@ -958,7 +958,7 @@ void TemporalUpscaler::ExtraSharpen(vk::Image target, bool ldr, u32 w, u32 h) {
 }
 
 void TemporalUpscaler::OnBlendedSceneDraw() {
-    // The mask is opt-in (menu, BB_REACTIVE=1): on Bloodborne's thin mist it trades trails for
+    // The mask is opt-in (menu, PS_REACTIVE=1): on Bloodborne's thin mist it trades trails for
     // jitter shimmer, which looked worse. Toggle 1 << 27 switches it off.
     if (snapshot_taken || !scene_color || !Active() || !ReactiveOn()) {
         return;
@@ -1280,7 +1280,7 @@ void TemporalUpscaler::Run() {
         info.cameraFar = 3000.0f;
         info.cameraVerticalFovRadians = camera_motion.VerticalFov();
         info.viewSpaceToMeters = 1.0f;
-        // RCAS strength 0..1 (menu, BB_FSR_SHARPNESS); jitter at 1:1 softens the image slightly.
+        // RCAS strength 0..1 (menu, PS_FSR_SHARPNESS); jitter at 1:1 softens the image slightly.
         // AMD's RCAS ends at 1; ExtraSharpen adds the rest of the menu's 0..2.
         info.sharpness = std::min(BbSettings::Get().sharpness.load(), 1.0f);
         info.enableSharpening = BbSettings::Get().sharpen ? VK_TRUE : VK_FALSE;
@@ -1313,7 +1313,7 @@ void TemporalUpscaler::Run() {
         if (BbSettings::Get().upscaler != BbSettings::UpscalerTaa) {
             ExtraSharpen(vk::Image(output_image), false, ow, oh);
         }
-        // bbport: BB_DUMP_TRIGGER on this (HDR scene color) path too: the upscaler's inputs and
+        // bbport: PS_DUMP_TRIGGER on this (HDR scene color) path too: the upscaler's inputs and
         // its result, for ghosting and history checks (tools/dump_view.py).
         if (const int dump = DumpFrame(); dump >= 0) {
             camera_motion.PrintState(dump);
@@ -1434,7 +1434,7 @@ namespace Vulkan {
 
 std::array<u32, 2> TemporalUpscaler::SceneSize(u32 w, u32 h) const {
     if (!scaled_session) return {render_width, render_height};
-    // The game's own render size (scene constants); BB_RENDER_RES until the first camera.
+    // The game's own render size (scene constants); PS_RENDER_RES until the first camera.
     auto size = camera_motion.RenderSize();
     if (size[0] == 0 || size[1] == 0) {
         size = {render_width, render_height};
@@ -1835,9 +1835,9 @@ void TemporalUpscaler::RunScaled() {
         } else {
             // bbport: FSR 4 treats its colour as linear light; this frame is the game's
             // tonemapped, sRGB-encoded one. Decoded first, the output encoded again below.
-            // BB_FSR4_LINEAR=0 or toggle bit 63: the encoded frame as before (A/B).
+            // PS_FSR4_LINEAR=0 or toggle bit 63: the encoded frame as before (A/B).
             static const bool linear_env = [] {
-                const char* env = std::getenv("BB_FSR4_LINEAR");
+                const char* env = std::getenv("PS_FSR4_LINEAR");
                 return !env || env[0] != '0';
             }();
             // An sRGB-format frame is decoded by its view already (and encoded by the blit).
@@ -1967,7 +1967,7 @@ void TemporalUpscaler::RunScaled() {
                            {{depth_image, source_width, source_height, 4, "depth", "f32",
                              vk::ImageAspectFlagBits::eDepth}});
                 if (BbSettings::Get().upscaler == BbSettings::UpscalerTaa &&
-                    std::getenv("BB_TAA_DIAGNOSTICS")) {
+                    std::getenv("PS_TAA_DIAGNOSTICS")) {
                     DumpImages(instance, scheduler, cmdbuf, dump,
                                {{vk::Image(taa_history[taa_next]),ow,oh,16,
                                  "previous_history","rgba32f"},
@@ -2210,10 +2210,10 @@ bool TemporalUpscaler::DisplayOverride(VAddr address, Display& display) {
 
 bool TemporalUpscaler::PresentDumpDue() {
     // Diagnostic capture of the actual completed display buffer, including native UI.
-    // BB_PRESENT_DUMP_COUNT=N: the trigger dumps N consecutive frames (temporal stability).
-    static const char* dump = std::getenv("BB_PRESENT_DUMP_TRIGGER");
+    // PS_PRESENT_DUMP_COUNT=N: the trigger dumps N consecutive frames (temporal stability).
+    static const char* dump = std::getenv("PS_PRESENT_DUMP_TRIGGER");
     static const int dump_count = [] {
-        const char* env = std::getenv("BB_PRESENT_DUMP_COUNT");
+        const char* env = std::getenv("PS_PRESENT_DUMP_COUNT");
         return env ? std::max(1, std::atoi(env)) : 1;
     }();
     if (dump && present_dump_remaining == 0 && std::remove(dump) == 0) {

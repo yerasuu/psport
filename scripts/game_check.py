@@ -8,7 +8,7 @@ offset 0x20348b8): hooks and patches use the addresses of this one executable. T
 the loaded executable image, whose hash is the same whatever tool dumped it (the SELF headers
 around it differ). The shaders must also unpack: an extraction tool that leaves
 parts of compressed sectors stale (LibOrbisPkg PkgTool on .NET 6 or newer, issue #81) makes the
-game hang while it loads them, with no error. BB_SKIP_GAME_CHECK=1 skips both.
+game hang while it loads them, with no error. PS_SKIP_GAME_CHECK=1 skips both.
 
 Run as a script, it checks every .dcx file of a game folder: game_check.py GAME_DIR. run.sh runs
 it with --launch before loading a Bloodborne release.
@@ -28,7 +28,7 @@ SUPPORTED_VERSION = '01.09'
 SUPPORTED_IMAGE = '071df19c8880086d97182dbc057bc8cb37badaca57d9112683836b24a0444c0a'
 # The 1.09 executable with Lance McDonald's 60 fps patch applied to it, as some dumps ship it
 # (seen on US CUSA00900): one of its edits inverts a branch in the menu code (+0xf6d90d) and the
-# gestures menu crashes the game. bbport has its own 60 fps; the clean 1.09 eboot.bin is needed.
+# gestures menu crashes the game. psport has its own 60 fps; the clean 1.09 eboot.bin is needed.
 LANCE_60FPS_IMAGE = 'bbc91f4dff6bc3118b039464289e39878a8fdfc802a07fab9d5fe84d935a676f'
 # The game loads these first; a broken extraction damages most files, these among them.
 CHECKED_FOLDER = 'dvdroot_ps4/shader'
@@ -70,7 +70,7 @@ def problem(game, image_hash=None):
     'patched_eboot' (the 1.09 eboot.bin with a 60 fps patch baked in), 'other_title' (another
     edition), 'unreadable' or 'damaged_files' (the right game, but its shaders do not unpack: a
     broken extraction)."""
-    if os.environ.get('BB_SKIP_GAME_CHECK') == '1':
+    if os.environ.get('PS_SKIP_GAME_CHECK') == '1':
         return None
     from sce_file import sfo
     try:
@@ -97,16 +97,16 @@ def explain(kind, title, version):
     """What is wrong and what to do, for the log (English)."""
     found = f'Found {title} version {version} (sce_sys/param.sfo).'
     return {
-        'missing_update': f'{found} bbport needs the 1.09 update merged into the game folder: copy '
+        'missing_update': f'{found} psport needs the 1.09 update merged into the game folder: copy '
                           'everything from the dumped 1.09 update (e.g. CUSA03173-patch) into the '
                           'game folder, replacing files (eboot.bin and sce_sys too).',
         'wrong_eboot': f'{found} param.sfo is from 1.09 but eboot.bin is not: copy eboot.bin from '
                        'the dumped 1.09 update into the game folder, replacing the old one.',
         'patched_eboot': f'{found} This eboot.bin has the 60 fps patch by Lance McDonald applied '
-                         'to it, which crashes the game when the gestures menu opens (bbport has its '
+                         'to it, which crashes the game when the gestures menu opens (psport has its '
                          'own 60 fps): copy eboot.bin from a clean dump of the 1.09 update into the '
                          'game folder, replacing this one.',
-        'other_title': f'{found} This is not a retail release of Bloodborne: bbport runs Bloodborne '
+        'other_title': f'{found} This is not a retail release of Bloodborne: psport runs Bloodborne '
                        '(any region, The Old Hunters editions too) with update 1.09.',
         'unreadable': f'{found} eboot.bin could not be read as a decrypted PS4 executable: dump '
                       'the game and the 1.09 update again.',
@@ -128,7 +128,7 @@ def launch_check(game):
         return 0
     if title not in SUPPORTED_TITLES or not (found := problem(game)):
         return 0
-    print(f'ERROR: Unsupported game files: {explain(*found)} Set BB_SKIP_GAME_CHECK=1 to start anyway.',
+    print(f'ERROR: Unsupported game files: {explain(*found)} Set PS_SKIP_GAME_CHECK=1 to start anyway.',
           file=sys.stderr)
     return 2
 

@@ -163,7 +163,7 @@ u64 MemoryManager::ClampRangeSize(VAddr virtual_addr, u64 size) {
     return runtime_memory_clamp(virtual_addr, size);
 }
 static void CopySparseSerial(VAddr source, u8* dest, u64 size) {
-    // BB_READBACKS=2 protects GPU-written pages against reads: the copy threads and recorders
+    // PS_READBACKS=2 protects GPU-written pages against reads: the copy threads and recorders
     // read through the backing view, as a read fault on them would wait for the GPU thread,
     // which waits for them.
     static const bool precise =
@@ -252,10 +252,10 @@ std::condition_variable g_window_cv;
 bool g_window_ready;
 } // namespace
 
-#ifdef BB_PGO_GENERATE
+#ifdef PS_PGO_GENERATE
 extern "C" void __gcov_dump(void);
 extern "C" void __gcov_reset(void);
-// Instrumented build (BB_PGO=generate): the game often ends through _exit (watchdog, guest
+// Instrumented build (PS_PGO=generate): the game often ends through _exit (watchdog, guest
 // exit), which skips the profile write at exit. Write every 30 s and reset: the files sum the
 // intervals.
 static void StartProfileWriter() {
@@ -279,11 +279,11 @@ extern "C" int bbgpu_init(const BbGpuConfig* config) {
         const std::string saves = std::string(runtime_file_user_dir()) + "/savedata";
         game->prepare_saves(saves.c_str(), runtime_savedata_title());
     }
-#ifdef BB_PGO_GENERATE
+#ifdef PS_PGO_GENERATE
     StartProfileWriter();
 #endif
     g_sdk_version = config->sdk_version;
-    if (config->user_dir) setenv("BB_GPU_USER_DIR", config->user_dir, 0);
+    if (config->user_dir) setenv("PS_GPU_USER_DIR", config->user_dir, 0);
     Core::Emulator::FillElfInfo(*config);
     const std::string title = config->title && *config->title ? config->title
                                   : config->serial ? config->serial : "UNKNOWN";
@@ -345,7 +345,7 @@ extern "C" uintptr_t bbgpu_resolve(const char* scoped_nid) {
 }
 
 extern "C" int bbgpu_handle_fault(void* ucontext, void* address) {
-    // BB_LABEL_TRAP (diagnostic): its read-only label pages first. Not passed on to GPU page
+    // PS_LABEL_TRAP (diagnostic): its read-only label pages first. Not passed on to GPU page
     // tracking (a write fault drains the draw pipe: thousands a second would change the timing
     // under test); label pages are not expected to be GPU-tracked.
     if (BbFreeCheck::OnTrapFault(ucontext, reinterpret_cast<std::uint64_t>(address))) {

@@ -108,7 +108,7 @@ struct Liverpool {
                                             RegDirty* dirty = nullptr);
 
 public:
-    /// bbport BB_CP_DECODER=1 (opt-in; else shadPS4's packet walk): graphics command buffers
+    /// bbport PS_CP_DECODER=1 (opt-in; else shadPS4's packet walk): graphics command buffers
     /// are decoded by the translator's own decoder (gpu/cp/cp_decoder.h).
     static bool CpDecoderEnabled();
 
@@ -118,7 +118,7 @@ public:
     void SubmitGfx(std::span<const u32> dcb, std::span<const u32> ccb);
     void SubmitAsc(u32 gnm_vqid, std::span<const u32> acb);
 
-    /// `frame` (BB_SUBMIT_LOCK=frame): the guest's frame number, reported finished once the GPU
+    /// `frame` (PS_SUBMIT_LOCK=frame): the guest's frame number, reported finished once the GPU
     /// has executed what was submitted until now on every queue, compute queues too (the game
     /// reuses the frame's memory then; the submission lock waited for all of them as well)
     /// (Libraries::GnmDriver::NoteFramesRetired).
@@ -142,10 +142,10 @@ public:
     /// work_retired). sceGnmSubmitDone does not block the guest when this is true.
     bool IsGpuIdle() const {
         static const bool use_retired = [] {
-            const char* env = std::getenv("BB_WORK_RETIRED");
+            const char* env = std::getenv("PS_WORK_RETIRED");
             return !(env && env[0] == '0');
         }();
-        // BB_SUBMIT_LOCK=decode with honest labels: decoded is enough.
+        // PS_SUBMIT_LOCK=decode with honest labels: decoded is enough.
         return num_submits == 0 &&
                (work_retired || !use_retired || Libraries::GnmDriver::SubmitLockOnDecode());
     }
@@ -249,7 +249,7 @@ private:
     using CmdBuffer = std::pair<std::span<const u32>, std::span<const u32>>;
     CmdBuffer CopyCmdBuffers(std::span<const u32> dcb, std::span<const u32> ccb);
     /// bbport: a submission's command buffers copied when the guest submits them
-    /// (BB_COPY_GPU_BUFFERS): the guest reused their memory before the GPU thread decoded
+    /// (PS_COPY_GPU_BUFFERS): the guest reused their memory before the GPU thread decoded
     /// them ("PM4 type 0" from zeros or the next frame's commands, while an area loads).
     struct SubmittedCopy {
         std::vector<u32> data; ///< dcb, then ccb
@@ -300,7 +300,7 @@ private:
         bool skip = false;
         bool draw_if_true = true;
         bool hint_no_wait = false;
-        u64 skipped = 0; ///< packets skipped so far (BB_PM4_SELFTEST)
+        u64 skipped = 0; ///< packets skipped so far (PS_PM4_SELFTEST)
     } predication;
     bool PredicationSkips(const PM4Header* header);
     /// bbport: waits until the GPU has done the work recorded before this point and its writes
@@ -331,23 +331,23 @@ private:
     const bool guest_markers_enabled;
     std::jthread process_thread{};
     std::atomic<u32> num_submits{};
-    /// BB_SUBMIT_LOCK=decode, under submit_mutex: graphics submissions made and decoded, and per frame
+    /// PS_SUBMIT_LOCK=decode, under submit_mutex: graphics submissions made and decoded, and per frame
     /// sceGnmSubmitDone ended the graphics submissions made so far (count, frame number).
     u64 gfx_submitted = 0, gfx_decoded = 0;
     u64 decoded_total = 0; ///< submissions of every queue decoded (submissions_total)
-    void* last_decoded = nullptr; ///< BB_TIMELINE: the submission whose decoding began last
+    void* last_decoded = nullptr; ///< PS_TIMELINE: the submission whose decoding began last
     std::deque<std::pair<u64, u64>> frame_ends;
     /// Frames whose graphics submissions are all decoded are reported finished once the GPU has
     /// executed the work recorded so far (GPU command thread).
     void SignalDecodedFrames();
-    /// BB_HONEST_LABELS: GPU idle once the GPU has finished the work up to `generation` and nothing
+    /// PS_HONEST_LABELS: GPU idle once the GPU has finished the work up to `generation` and nothing
     /// was submitted since (the interrupt, work_retired).
     void SignalGpuIdle(u64 generation);
     /// bbport: false from a submission until its draws and deferred fences are done (stage A
     /// decrements num_submits once it has decoded a submission, before that). Under
     /// submit_mutex with num_submits.
     std::atomic<bool> work_retired{true};
-    /// bbport: submissions so far (submit_mutex): BB_HONEST_LABELS GPU idle checks none came since.
+    /// bbport: submissions so far (submit_mutex): PS_HONEST_LABELS GPU idle checks none came since.
     u64 submissions_total = 0;
     std::atomic<u32> num_commands{};
     std::atomic<bool> submit_done{};

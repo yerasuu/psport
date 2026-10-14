@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """PS4 file formats the remaining launch scripts read: SELF/ELF (the eboot's segments, for patches)
-and param.sfo. The game itself is loaded by bb-probe (src/loader_*.c).
+and param.sfo. The game itself is loaded by psport (src/loader_*.c).
 
 No decryption and no Python dependencies. All offsets are checked before use.
 """

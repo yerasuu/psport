@@ -184,7 +184,7 @@ struct FfxFsr4VkContext {
     VkBool32  dotProductSupported;
     VkBool32  computeDerivativesSupported;
 
-    /* bbport: BB_FSR4_PROFILE=1 — GPU time per pass (timestamps around each
+    /* bbport: PS_FSR4_PROFILE=1 — GPU time per pass (timestamps around each
      * dispatch, read back when the frame retires, printed every 300 frames). */
     VkQueryPool profPool;
     float       profPeriodNs;
@@ -636,7 +636,7 @@ static VkFormat toVkFmt(FfxSurfaceFormat f)
 
 // ── pipeline creation ─────────────────────────────────────────────────────────
 
-/* bbport: BB_FSR4_STATS=1 prints the driver's per-pass statistics (registers, spills,
+/* bbport: PS_FSR4_STATS=1 prints the driver's per-pass statistics (registers, spills,
  * instruction counts) when the executable-statistics extension is enabled. */
 static void printPipelineStats(FfxFsr4VkContext* c, uint32_t passIdx, VkPipeline pipeline)
 {
@@ -750,7 +750,7 @@ static VkResult mkPipeline(FfxFsr4VkContext* c, uint32_t passIdx, VkPipe* out)
     cpci.stage.pName=blob->entryPoint ? blob->entryPoint : "main";
     cpci.layout=out->layout;
 
-    const char* statsEnv = getenv("BB_FSR4_STATS");
+    const char* statsEnv = getenv("PS_FSR4_STATS");
     const PFN_vkGetPipelineExecutableStatisticsKHR getStats =
         (PFN_vkGetPipelineExecutableStatisticsKHR)vkGetDeviceProcAddr(
             c->dev, "vkGetPipelineExecutableStatisticsKHR");
@@ -1794,7 +1794,7 @@ VkResult ffxFsr4VkCreateContext(const FfxFsr4VkCreateInfo* ci, FfxInterface* out
     sci.maxLod=VK_LOD_CLAMP_NONE;
     r=vkCreateSampler(c->dev,&sci,c->alloc,&c->linearSampler);
     {
-        const char* prof = getenv("BB_FSR4_PROFILE");
+        const char* prof = getenv("PS_FSR4_PROFILE");
         if (r == VK_SUCCESS && prof && prof[0] == '1') {
             VkPhysicalDeviceProperties props;
             vkGetPhysicalDeviceProperties(c->phys, &props);

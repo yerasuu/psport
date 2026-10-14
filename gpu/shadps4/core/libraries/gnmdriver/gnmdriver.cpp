@@ -103,9 +103,9 @@ static void ResetSubmissionLock(Platform::InterruptId irq) {
 
 bool SubmitLockOnDecode() {
     // Only with honest labels: without them the GPU idle interrupt comes at decode anyway, and
-    // IsGpuIdle keeps waiting for the deferred fences (BB_WORK_RETIRED, Steam Deck crashes).
+    // IsGpuIdle keeps waiting for the deferred fences (PS_WORK_RETIRED, Steam Deck crashes).
     static const bool on = [] {
-        const char* env = std::getenv("BB_SUBMIT_LOCK");
+        const char* env = std::getenv("PS_SUBMIT_LOCK");
         return !(env && std::string_view{env} == "gpu");
     }();
     return on && Vulkan::Rasterizer::HonestLabels();
@@ -117,7 +117,7 @@ void ReleaseSubmissionLock() {
     cv_lock.notify_all();
 }
 
-// bbport BB_SUBMIT_LOCK=decode: frames (sceGnmSubmitDone calls) the GPU has finished.
+// bbport PS_SUBMIT_LOCK=decode: frames (sceGnmSubmitDone calls) the GPU has finished.
 static u64 frames_retired{};
 
 void NoteFramesRetired(u64 frames) {
@@ -128,15 +128,15 @@ void NoteFramesRetired(u64 frames) {
     cv_lock.notify_all();
 }
 
-// BB_SUBMIT_LOCK=frame: the guest gets what the submission lock gave it - a submission made after
+// PS_SUBMIT_LOCK=frame: the guest gets what the submission lock gave it - a submission made after
 // sceGnmSubmitDone returns once the GPU has finished the frame before (the game frees that frame's
 // memory then: without it, its heap ran out after ~7 minutes) - but the work is handed over first,
 // so the GPU starts the next frame instead of draining between frames.
-// BB_SUBMIT_LOCK=ahead (an experiment): submissions do not wait, sceGnmSubmitDone(F) waits for
+// PS_SUBMIT_LOCK=ahead (an experiment): submissions do not wait, sceGnmSubmitDone(F) waits for
 // frame F-1 (the guest runs up to a frame ahead of the GPU).
 static bool RunAhead() {
     static const bool on = [] {
-        const char* env = std::getenv("BB_SUBMIT_LOCK");
+        const char* env = std::getenv("PS_SUBMIT_LOCK");
         return env && std::string_view{env} == "ahead";
     }();
     return on;
@@ -144,7 +144,7 @@ static bool RunAhead() {
 
 static void WaitPreviousFrame();
 
-// BB_SUBMIT_AHEAD=K (default 2): the first K submissions of a frame do not wait for the previous
+// PS_SUBMIT_AHEAD=K (default 2): the first K submissions of a frame do not wait for the previous
 // frame, the next ones do. The game keeps two frame contexts and builds the next frame in the one
 // of the frame before the previous: the first submissions are translated while the GPU finishes
 // the previous frame instead of after it (1080p, Yahar'gul: 101 -> 154 FPS). Further on it
@@ -156,7 +156,7 @@ static u32 submits_this_frame = 0;
 static bool overlap_off = false;
 static u32 SubmitsAhead() {
     static const u32 ahead = [] {
-        const char* env = std::getenv("BB_SUBMIT_AHEAD");
+        const char* env = std::getenv("PS_SUBMIT_AHEAD");
         return env ? u32(std::max(0, std::atoi(env))) : 2u;
     }();
     return overlap_off || BbSubmitGuard::Tripped() ? 0u : ahead;
@@ -170,7 +170,7 @@ static void WatchOverlap() {
     char reason[160];
     if (game && game->frame_overlap_unsafe && game->frame_overlap_unsafe(reason, sizeof(reason))) {
         overlap_off = true;
-        std::printf("Gnm: %s: frames no longer overlap (BB_SUBMIT_AHEAD 0)\n", reason);
+        std::printf("Gnm: %s: frames no longer overlap (PS_SUBMIT_AHEAD 0)\n", reason);
     }
 }
 static void WaitPreviousFrameAtSubmit() {

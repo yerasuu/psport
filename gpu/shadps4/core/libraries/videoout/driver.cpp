@@ -72,7 +72,7 @@ VideoOutDriver::VideoOutDriver(u32 width, u32 height) {
     main_port.resolution.full_height = height;
     main_port.resolution.pane_width = width;
     main_port.resolution.pane_height = height;
-    const char* separate = std::getenv("BB_PRESENT_THREAD");
+    const char* separate = std::getenv("PS_PRESENT_THREAD");
     separate_swap = !(separate && separate[0] == '0');
     if (separate_swap) {
         swap_thread = std::jthread([&](std::stop_token token) { SwapThread(token); });
@@ -376,8 +376,8 @@ void VideoOutDriver::Flip(const Request& req) {
     Vulkan::FrameCapture::OnFlip(req.index >= 0 ? req.port->buffer_slots[req.index].address_left
                                                 : 0);
 
-    // bbport: BB_FRAME_STATS=1 prints flip rate and frame time spread every 5 seconds.
-    static const bool frame_stats = EmulatorSettingsImpl::Flag("BB_FRAME_STATS", false);
+    // bbport: PS_FRAME_STATS=1 prints flip rate and frame time spread every 5 seconds.
+    static const bool frame_stats = EmulatorSettingsImpl::Flag("PS_FRAME_STATS", false);
     if (frame_stats) {
         using Clock = std::chrono::steady_clock;
         static Clock::time_point window_start = Clock::now(), last = window_start;
@@ -499,10 +499,10 @@ void VideoOutDriver::Flip(const Request& req) {
                         static_cast<unsigned long long>(copy_flt - last_copy_flt),
                         double(copy_bytes - last_copy_bytes) / double(copy_ns - last_copy_ns));
         }
-        // bbport: BB_FRAME_LOG=path (with BB_FRAME_STATS): one line per flip, to find what the
+        // bbport: PS_FRAME_LOG=path (with PS_FRAME_STATS): one line per flip, to find what the
         // long frames (stutter) have in common.
         static FILE* const frame_log = [] () -> FILE* {
-            const char* path = std::getenv("BB_FRAME_LOG");
+            const char* path = std::getenv("PS_FRAME_LOG");
             FILE* file = path && *path ? std::fopen(path, "w") : nullptr;
             if (file) {
                 std::fprintf(file, "t_s,frame_ms,present_wait_ms,tick_wait_ms,stage_a_cpu_ms,"
@@ -723,12 +723,12 @@ void VideoOutDriver::Flip(const Request& req) {
         }
     }
 
-    // bbport BB_HONEST_FLIPS=1 (experiment): the flip completes once the GPU has finished the
+    // bbport PS_HONEST_FLIPS=1 (experiment): the flip completes once the GPU has finished the
     // frame, as on the PS4, where the display flips at a vblank after the end of the frame's
     // commands, instead of when the frame is queued. It did not change how often the game drew
     // every light with FSR on (2 of 4 route runs), so it stays off.
     static const bool honest_flips = [] {
-        const char* env = std::getenv("BB_HONEST_FLIPS");
+        const char* env = std::getenv("PS_HONEST_FLIPS");
         return env && env[0] == '1';
     }();
     if (honest_flips) {

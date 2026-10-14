@@ -45,7 +45,7 @@ public:
     /// False: no timestamps here (the caller writes it with the CPU).
     bool Write(VAddr address, bool end_of_pipe);
 
-    /// Timestamps written so far (BB_PM4_SELFTEST, statistics).
+    /// Timestamps written so far (PS_PM4_SELFTEST, statistics).
     u64 Written() const noexcept {
         return written;
     }

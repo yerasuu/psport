@@ -41,7 +41,7 @@ static size_t live, workers;
 static size_t submissions, commands, failures, cancels, deletes, timeouts;
 static uint64_t bytes_read, bytes_written;
 
-static int trace(void) { static int v=-1; if (v<0) v=getenv("BB_TRACE_AIO")!=NULL; return v; }
+static int trace(void) { static int v=-1; if (v<0) v=getenv("PS_TRACE_AIO")!=NULL; return v; }
 static int settled(uint32_t state) { return state==COMPLETED || state==ABORTED; }
 /* Lock held. */
 static Submission *find(int32_t id) {

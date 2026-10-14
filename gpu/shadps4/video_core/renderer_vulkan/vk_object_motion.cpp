@@ -55,7 +55,7 @@ ObjectMotion::ObjectMotion(const Instance& instance_, Scheduler& scheduler_)
     // animated draws. A setting or environment override can still disable the path.
     if (!BbSettings::Get().object_motion ||
         BbSettings::Get().upscaler == BbSettings::UpscalerOff) {
-        std::puts("Object motion: off (enable in menu or BB_OBJECT_MOTION=1)");
+        std::puts("Object motion: off (enable in menu or PS_OBJECT_MOTION=1)");
         return;
     }
     const auto& features = instance.GetPhysicalDevice().getFeatures();

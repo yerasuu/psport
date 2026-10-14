@@ -359,7 +359,7 @@ public:
         BufferType buffer_type;
         std::array<Id, u32(PointerSize::NumClass)> offsets;
         std::array<BufferSpv, u32(PointerType::NumAlias)> aliases;
-        /// bbport BB_LAYER_MEMORY: reached through the page table (IsPagedBuffer); the descriptor
+        /// bbport PS_LAYER_MEMORY: reached through the page table (IsPagedBuffer); the descriptor
         /// holds {guest address lo, hi, size, write-through, trash address lo, hi} (PagedPointer).
         bool paged = false;
 
@@ -373,7 +373,7 @@ public:
             return self.offsets[u32(size)];
         }
     };
-    /// bbport BB_LAYER_MEMORY: an access of `access_bytes` at `byte_offset` of a paged buffer:
+    /// bbport PS_LAYER_MEMORY: an access of `access_bytes` at `byte_offset` of a paged buffer:
     /// the guest address translated through the page table. `guard` is false out of the
     /// buffer's range or on an unmapped page; the pointer then goes to a trash area (loads
     /// select zero with the guard, stores and atomics land there).

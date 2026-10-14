@@ -11,18 +11,18 @@ supported.
 
 ```bash
 bash build.sh
-BB_GAME_DIR=/path/to/dump BB_PERMISSIVE=1 BB_SAVE_LOG=1 bash run.sh
+PS_GAME_DIR=/path/to/dump PS_PERMISSIVE=1 PS_SAVE_LOG=1 bash run.sh
 ```
 
-- `BB_PERMISSIVE=1`: an import psport lacks returns 0 instead of stopping the game at its first
+- `PS_PERMISSIVE=1`: an import psport lacks returns 0 instead of stopping the game at its first
   call. Without it the first missing import ends the run with its NID and name, which is the
   quickest way to see what a title needs first.
-- `BB_PERMISSIVE_OUT=error`: with `BB_PERMISSIVE=1`, missing imports that write through a pointer
+- `PS_PERMISSIVE_OUT=error`: with `PS_PERMISSIVE=1`, missing imports that write through a pointer
   argument return `0x80020016`, so the game takes its error path instead of reading memory nothing
   wrote.
-- `BB_SAVE_LOG=1`: the output also goes to `<data>/logs/<time>.log`.
-- `BB_GAME_PROFILE=none`: run a title that has a profile without it.
-- `BB_SYS_MODULES=<folder>`: the user's own dump of system modules, for comparison only (see
+- `PS_SAVE_LOG=1`: the output also goes to `<data>/logs/<time>.log`.
+- `PS_GAME_PROFILE=none`: run a title that has a profile without it.
+- `PS_SYS_MODULES=<folder>`: the user's own dump of system modules, for comparison only (see
   [Missing system libraries](#missing-system-libraries)).
 
 ## 2. Read the log
@@ -69,11 +69,11 @@ The report never hides a call: an unimplemented or stubbed function is always lo
 ### Stalls and faults
 
 - `Forcing submitDone` lines that keep growing: the game waits on the GPU.
-- `SIGUSR2` to a thread of `bb-probe` dumps that thread's frames; the watchdog (`BB_TIMEOUT`
+- `SIGUSR2` to a thread of `psport` dumps that thread's frames; the watchdog (`PS_TIMEOUT`
   seconds, `--timeout`) prints `STOP: watchdog timeout`, every thread's stack and the call report,
   then exits.
-- Diagnostic variables (`BB_TRACE_MEM`, `BB_TRACE_SEMA`, `BB_AUDIO_STATS`, `BB_NGS2_TRACE`,
-  `BB_FIBER_TRACE`, ...): [FORK.md](../../FORK.md#diagnostics).
+- Diagnostic variables (`PS_TRACE_MEM`, `PS_TRACE_SEMA`, `PS_AUDIO_STATS`, `PS_NGS2_TRACE`,
+  `PS_FIBER_TRACE`, ...): [FORK.md](../../FORK.md#diagnostics).
 - `tools/gcn_dis.sh` disassembles a GCN shader the recompiler rejected.
 
 ## 3. Implement what is missing
@@ -105,8 +105,8 @@ Notes:
 
 ### Missing system libraries
 
-`BB_SYS_MODULES=<folder>` links the user's own system modules for libraries psport does not
-provide, `BB_HLE=libSceX` keeps one to psport and `BB_LLE=libSceY` links one psport implements, to
+`PS_SYS_MODULES=<folder>` links the user's own system modules for libraries psport does not
+provide, `PS_HLE=libSceX` keeps one to psport and `PS_LLE=libSceY` links one psport implements, to
 compare the two. This is a diagnostic stopgap, never a dependency: nothing from a system dump is
 shipped, every title in `tools/regress/titles.txt` must run without one, and each library a title
 needs gets its own implementation.
@@ -122,7 +122,7 @@ From [CLAUDE.md](../../CLAUDE.md):
   `gpu/games/game_profile.cpp`): hooks in its code, code ranges that write per-frame data, known
   copy shaders, overlap checks. The core keeps only the generic mechanism and must behave the same
   without a profile. A profile speeds a title up; it never makes it work. Check with
-  `BB_GAME_PROFILE=none`.
+  `PS_GAME_PROFILE=none`.
 - No tests in the repository. When a change rests on how the console behaves and the behaviour is
   not documented, confirm it on hardware with an OpenOrbis homebrew test and share it with the
   change.
@@ -138,14 +138,14 @@ Every change is checked against all titles, not only the one being brought up:
 ```
 
 - `tools/regress/titles.txt` lists each title: name, title ID, folder under the games root, pad
-  schedule, and its environment (`BB_PERMISSIVE=1` for titles under bring-up). `$NAME` values come
+  schedule, and its environment (`PS_PERMISSIVE=1` for titles under bring-up). `$NAME` values come
   from the caller's environment; an entry whose variable is empty is left out, so nothing
   user-specific lives in the repository. Add the new title here.
 - Schedules (`tools/regress/*.sched`) drive the scripted pad: `<second> shot`,
   `<second> press <a+b> [hold]`, `<second> hold <a+b> [seconds]`, `<second> release`,
   `<second> end`. `generic.sched` presses cross and options past logos and prompts; a title with a
   known route gets its own (`ryza-play.sched`, `symphonia-long.sched`, ...).
-- Each title runs in a headless gamescope with `BB_AUDIO=none` and `BB_PAD_HOST=0`; at most `-j`
+- Each title runs in a headless gamescope with `PS_AUDIO=none` and `PS_PAD_HOST=0`; at most `-j`
   at once. Results: a table on stdout, `results.tsv` and `results.json` in the output folder with
   each title's log and frame dumps; milestones `loaded`, `entered`, `initialized`, `gpu`, `frames`,
   `audio`, the crash signature, the `no impl` count and `forced` submitDones.
@@ -154,7 +154,7 @@ Every change is checked against all titles, not only the one being brought up:
 - `-u <earlier output folder>` starts each title's user folder (saves, settings) as a copy of its
   folder there, so a run can load what an earlier one saved.
 - `tools/regress/perf.txt` holds the titles whose schedules measure the frame rate in play
-  (`bloodborne-perf.sched`: from a save, with `BB_FRAME_STATS=1`). Run it alone on the machine:
+  (`bloodborne-perf.sched`: from a save, with `PS_FRAME_STATS=1`). Run it alone on the machine:
   `tools/regress.sh -t tools/regress/perf.txt -n bloodborne -u <folder with the save>`.
 - `tools/regress/report.py <folder>` classifies an output folder again.
 

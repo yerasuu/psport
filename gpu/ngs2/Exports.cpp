@@ -60,13 +60,13 @@ namespace {
 // returns in each of these cases is not known.
 constexpr int GuardedFailure = static_cast<int>(0x804A0001);
 
-// BB_NGS2_TRACE=1: the first calls of each function with their result, and the level of what
+// PS_NGS2_TRACE=1: the first calls of each function with their result, and the level of what
 // each traced render wrote, to follow a title through the library when it stays silent.
 constexpr unsigned TracedCalls = 40;
 
 bool Tracing() {
     static const bool tracing = [] {
-        const char* env = std::getenv("BB_NGS2_TRACE");
+        const char* env = std::getenv("PS_NGS2_TRACE");
         return env && env[0] == '1';
     }();
     return tracing;

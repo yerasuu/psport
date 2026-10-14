@@ -16,14 +16,14 @@ namespace BbLayer::WriteTraps {
 enum Reason : unsigned {
     Mirror = 1, ///< a VRAM copy of the page (the layer's memory module)
     Image = 2,  ///< an image made from the page (the texture cache)
-    Buffer = 4, ///< a VRAM copy of the page in the buffer cache's arena (BB_GUEST_IN_PLACE)
-    /// A command buffer of a frame the GPU has not retired (BbSubmitGuard, BB_SUBMIT_AHEAD).
+    Buffer = 4, ///< a VRAM copy of the page in the buffer cache's arena (PS_GUEST_IN_PLACE)
+    /// A command buffer of a frame the GPU has not retired (BbSubmitGuard, PS_SUBMIT_AHEAD).
     FrameCommands = 8,
     /// Reads too: occlusion counters, until the game's first access after an event there
-    /// (BB_OCCLUSION_READ_TRACE, diagnostics).
+    /// (PS_OCCLUSION_READ_TRACE, diagnostics).
     QueryReads = 16,
     /// Reads too: the GPU wrote the page's newest data into a VRAM copy only; copied back into
-    /// the game's memory on the first CPU access (BB_LAYER_READ_TRAPS).
+    /// the game's memory on the first CPU access (PS_LAYER_READ_TRAPS).
     VramData = 32,
 };
 /// Reasons that make a page no access, not only read-only.

@@ -223,9 +223,9 @@ void OcclusionQueries::WriteBeforeLabel() {
     // A label ahead of results not written yet would let the CPU see the label before them. (Once
     // taken for the cause of slow launches; that was volatile blocks' refresh copies breaking
     // render passes, BufferCache::LayerVolatileAllowed. The game reads its results 2-10 ms after
-    // the event and finds them written either way: BB_OCCLUSION_READ_TRACE.)
+    // the event and finds them written either way: PS_OCCLUSION_READ_TRACE.)
     static const bool ordered = [] {
-        const char* env = std::getenv("BB_OCCLUSION_LABEL_ORDER");
+        const char* env = std::getenv("PS_OCCLUSION_LABEL_ORDER");
         return !env || env[0] != '0';
     }();
     if (!ordered) {
@@ -271,9 +271,9 @@ void OcclusionQueries::Event(VAddr address, u32 pairs) {
         started = true;
         scheduler.SetCarriedScope(this);
     }
-    // BB_OCCLUSION_TRACE=N (diagnostics): the first N events, with the frame and the render pass.
+    // PS_OCCLUSION_TRACE=N (diagnostics): the first N events, with the frame and the render pass.
     static const u64 trace = [] {
-        const char* env = std::getenv("BB_OCCLUSION_TRACE");
+        const char* env = std::getenv("PS_OCCLUSION_TRACE");
         return env ? std::strtoull(env, nullptr, 10) : 0ull;
     }();
     if (events < trace) {
@@ -328,7 +328,7 @@ void OcclusionQueries::Event(VAddr address, u32 pairs) {
         ResetAhead();
         BeginSegment(false);
     }
-    // BB_FRAME_STATS: how often the game measures (every 5 s).
+    // PS_FRAME_STATS: how often the game measures (every 5 s).
     static auto last_report = std::chrono::steady_clock::now();
     static u64 reported = 0;
     if (const auto now = std::chrono::steady_clock::now();
@@ -357,7 +357,7 @@ void OcclusionQueries::Event(VAddr address, u32 pairs) {
 
 bool OcclusionQueries::ReadTrace() {
     static const bool enabled = [] {
-        const char* env = std::getenv("BB_OCCLUSION_READ_TRACE");
+        const char* env = std::getenv("PS_OCCLUSION_READ_TRACE");
         return env && env[0] == '1';
     }();
     return enabled;

@@ -12,12 +12,12 @@ namespace Frontend {
 
 namespace {
 
-// Issue #69: the monitor the window (and fullscreen) goes to. BB_DISPLAY: its number in SDL's
+// Issue #69: the monitor the window (and fullscreen) goes to. PS_DISPLAY: its number in SDL's
 // order (1, 2, ...; bb-gpu-capabilities --displays lists them) or a part of its name; without it
 // SDL's primary display. The monitors are logged so a report says which one was taken.
 SDL_DisplayID ChooseDisplay() {
     const SDL_DisplayID primary = SDL_GetPrimaryDisplay();
-    const char* wanted = std::getenv("BB_DISPLAY");
+    const char* wanted = std::getenv("PS_DISPLAY");
     int count = 0;
     SDL_DisplayID* ids = SDL_GetDisplays(&count);
     SDL_DisplayID chosen = 0;
@@ -43,10 +43,10 @@ SDL_DisplayID ChooseDisplay() {
         const SDL_DisplayMode* mode = SDL_GetDesktopDisplayMode(ids[i]);
         std::printf("Display %d: %s %dx%d%s%s\n", i + 1, name ? name : "?", mode ? mode->w : 0,
                     mode ? mode->h : 0, ids[i] == primary ? " (primary)" : "",
-                    ids[i] == display ? " <- the game's (BB_DISPLAY)" : "");
+                    ids[i] == display ? " <- the game's (PS_DISPLAY)" : "");
     }
     if (wanted && *wanted && !chosen) {
-        std::printf("Display: BB_DISPLAY=%s matches none, the primary one is used\n", wanted);
+        std::printf("Display: PS_DISPLAY=%s matches none, the primary one is used\n", wanted);
     }
     SDL_free(ids);
     return display;
@@ -57,7 +57,7 @@ SDL_DisplayID ChooseDisplay() {
 WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title, const char* icon_path)
     : width{width_}, height{height_} {
     // Gamepads are sampled by runtime_pad.c; their events are pumped here with the window's.
-    const char* host_pad = std::getenv("BB_PAD_HOST");
+    const char* host_pad = std::getenv("PS_PAD_HOST");
     const SDL_InitFlags gamepad = host_pad && host_pad[0] == '0' ? 0 : SDL_INIT_GAMEPAD;
     // SDL_APP_ID from the environment still takes precedence over this identifier.
     SDL_SetAppMetadata("psport", nullptr, "psport");
@@ -73,7 +73,7 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title, const char* ico
     SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, height_);
     SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_RESIZABLE_BOOLEAN, true);
     SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_VULKAN_BOOLEAN, true);
-    const char* fullscreen = std::getenv("BB_FULLSCREEN");
+    const char* fullscreen = std::getenv("PS_FULLSCREEN");
     SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_FULLSCREEN_BOOLEAN, fullscreen && fullscreen[0] == '1');
     base_title = title;
     window = SDL_CreateWindowWithProperties(props);

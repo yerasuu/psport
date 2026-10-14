@@ -15,7 +15,7 @@
 #               EARLIER output folder, to load in this run what that one saved
 # Variables the titles file refers to ($SYS_MODULES...) come from the environment; an entry whose
 # variable is empty is left out, so nothing user-specific lives in the repository.
-# Uses the build in out/ (BB_PREBUILT=1): build.sh first.
+# Uses the build in out/ (PS_PREBUILT=1): build.sh first.
 set -uo pipefail
 root=$(cd -- "$(dirname -- "$0")/.." && pwd)
 jobs=2 out='' previous='' titles=$root/tools/regress/titles.txt only='' shell_file='' seed=''
@@ -29,7 +29,7 @@ shift $((OPTIND - 1))
 [[ $jobs =~ ^[1-9][0-9]*$ ]] || { echo "regress.sh: -j needs a positive integer" >&2; exit 2; }
 (($# == 1)) || { sed -n '2,18p' "$0" | cut -c3-; exit 2; }
 games=$(realpath -- "$1")
-[[ -x $root/out/bb-probe ]] || { echo "regress.sh: no out/bb-probe (run build.sh)" >&2; exit 1; }
+[[ -x $root/out/psport ]] || { echo "regress.sh: no out/psport (run build.sh)" >&2; exit 1; }
 printf -v stamp '%(%Y%m%d_%H%M%S)T' -1
 out=$(realpath -m -- "${out:-$root/out/regress/$stamp}")
 mkdir -p "$out"
@@ -55,7 +55,7 @@ expand() {
 # mid-frame.
 stop_session() {
     local pid=$1 game_pid
-    game_pid=$(pgrep -s "$pid" -x bb-probe | head -1)
+    game_pid=$(pgrep -s "$pid" -x psport | head -1)
     if [[ -n $game_pid ]]; then
         kill -TERM "$game_pid" 2>/dev/null
         for ((i = 0; i < 10; i++)); do kill -0 "$game_pid" 2>/dev/null || break; sleep 0.5; done
@@ -74,13 +74,13 @@ run_title() {
     [[ -n $seed && -d $seed/$name/user ]] && cp -a -- "$seed/$name/user" "$dir/user"
     printf 'name\t%s\ntitle\t%s\ngame\t%s\nschedule\t%s\n' "$name" "$title" "$game" "$schedule" > "$dir/run.tsv"
     # Inside a headless gamescope (its own X display, no window) and without the desktop's display
-    # variables, with BB_AUDIO=none and BB_PAD_HOST=0 last so a title's env can't turn sound or the
+    # variables, with PS_AUDIO=none and PS_PAD_HOST=0 last so a title's env can't turn sound or the
     # user's controllers back on: a run never shows anything, plays sound or reads a pad on the
     # user's session; what it shows comes back as dumps.
     ( cd "$root" && exec setsid env -u DISPLAY -u WAYLAND_DISPLAY gamescope --backend headless -W 1920 -H 1080 -- \
-        env -u WAYLAND_DISPLAY "$@" SDL_VIDEO_DRIVER=x11 ENABLE_GAMESCOPE_WSI=0 BB_AUDIO=none BB_PAD_HOST=0 BB_AUDIO_STATS=1 \
-        BB_PREBUILT=1 BB_PROBE="$root/out/bb-probe" BB_DATA_DIR="$dir" BB_USER_DIR="$dir/user" BB_GAME_DIR="$game" \
-        BB_MODS_ENABLED=0 BB_PAD_FILE="$dir/pad" BB_PRESENT_DUMP_TRIGGER="$dir/shot" BB_DUMP_DIR="$dir/shots" \
+        env -u WAYLAND_DISPLAY "$@" SDL_VIDEO_DRIVER=x11 ENABLE_GAMESCOPE_WSI=0 PS_AUDIO=none PS_PAD_HOST=0 PS_AUDIO_STATS=1 \
+        PS_PREBUILT=1 PS_PROBE="$root/out/psport" PS_DATA_DIR="$dir" PS_USER_DIR="$dir/user" PS_GAME_DIR="$game" \
+        PS_MODS_ENABLED=0 PS_PAD_FILE="$dir/pad" PS_PRESENT_DUMP_TRIGGER="$dir/shot" PS_DUMP_DIR="$dir/shots" \
         "${launch[@]}" ) > "$dir/log" 2>&1 < /dev/null &
     local pid=$! start=$SECONDS ended=schedule at what rest buttons hold
     # Replaced by a rename, never rewritten in place: the runtime polls the file and could read it

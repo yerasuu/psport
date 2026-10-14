@@ -26,7 +26,7 @@ asm(".section .rodata\n"
     ".hidden bb_font_ttf\n"
     ".global bb_font_ttf\n"
     "bb_font_ttf:\n"
-    ".incbin \"" BB_FONT_PATH "\"\n"
+    ".incbin \"" PS_FONT_PATH "\"\n"
     ".hidden bb_font_ttf_end\n"
     ".global bb_font_ttf_end\n"
     "bb_font_ttf_end:\n"
@@ -34,7 +34,7 @@ asm(".section .rodata\n"
 extern "C" const unsigned char bb_font_ttf[];
 extern "C" const unsigned char bb_font_ttf_end[];
 
-extern "C" void runtime_restart(void); // bb-probe (probe.c)
+extern "C" void runtime_restart(void); // psport (probe.c)
 
 namespace BbOverlay {
 
@@ -402,7 +402,7 @@ void Menu() {
         ImGui::Text(BbSettings::MenuText("Startup preset: %s", "Пресет при запуске: %s",
                                          "Preajuste al iniciar: %s"),
                     BbSettings::PresetName(s.startup_preset));
-        if (const char* automatic = std::getenv("BB_AUTO_RENDER_RES");
+        if (const char* automatic = std::getenv("PS_AUTO_RENDER_RES");
             automatic && automatic[0] == '1') {
             Hint(BbSettings::MenuText(
                 "When output is not 1080p, the entire game renders at the preset resolution "
@@ -420,11 +420,11 @@ void Menu() {
                 "cambiarlos sin reiniciar (el posprocesado se queda entonces en 1080p, más lento)."));
         } else {
             Hint(BbSettings::MenuText(
-                "BB_RENDER_RES fixes the scene size at startup. Remove this explicit environment "
+                "PS_RENDER_RES fixes the scene size at startup. Remove this explicit environment "
                 "variable to change resolution and presets without restarting the game.",
-                "BB_RENDER_RES фиксирует размер сцены при запуске. Уберите эту явную переменную "
+                "PS_RENDER_RES фиксирует размер сцены при запуске. Уберите эту явную переменную "
                 "для смены разрешения и пресетов без перезапуска игры.",
-                "BB_RENDER_RES fija el tamaño de la escena al iniciar. Quita esta variable de entorno para "
+                "PS_RENDER_RES fija el tamaño de la escena al iniciar. Quita esta variable de entorno para "
                 "cambiar la resolución y los preajustes sin reiniciar el juego."));
         }
     } else {
@@ -777,10 +777,10 @@ void TextPrompt() {
     ImGui::End();
 }
 
-/// BB_MENU_KEYS_FILE=<file> (scripted tests): tokens toggle up down left right enter back l1 r1,
+/// PS_MENU_KEYS_FILE=<file> (scripted tests): tokens toggle up down left right enter back l1 r1,
 /// consumed when the file appears (it is removed), one key press per frame.
 void ScriptedKeys() {
-    static const char* path = std::getenv("BB_MENU_KEYS_FILE");
+    static const char* path = std::getenv("PS_MENU_KEYS_FILE");
     static std::chrono::steady_clock::time_point last_check{};
     static std::vector<std::string> queue;
     static bool release = false;
@@ -852,7 +852,7 @@ void Init(const Vulkan::Instance& instance, vk::Format format, u32 image_count) 
     io.IniFilename = nullptr; // window positions are not kept
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_NavEnableGamepad;
     io.BackendFlags |= ImGuiBackendFlags_HasGamepad;
-    io.BackendPlatformName = "bbport";
+    io.BackendPlatformName = "psport";
 
     ImGui::StyleColorsDark();
     ImGuiStyle& style = ImGui::GetStyle();
@@ -1095,7 +1095,7 @@ void Render(vk::CommandBuffer cmdbuf, vk::ImageView view, vk::Extent2D extent, v
     if (ms > 0.0f && ms < 1000.0f) {
         frame_ms_avg = frame_ms_avg == 0.0f ? ms : frame_ms_avg * 0.95f + ms * 0.05f;
     }
-    if (std::getenv("BB_MENU_KEYS_FILE") && initialized) {
+    if (std::getenv("PS_MENU_KEYS_FILE") && initialized) {
         std::scoped_lock lock{imgui_mutex};
         ScriptedKeys();
     }

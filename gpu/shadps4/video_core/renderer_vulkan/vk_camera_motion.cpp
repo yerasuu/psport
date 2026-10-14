@@ -74,11 +74,11 @@ std::array<float, 12> InverseAffine(const std::array<float, 12>& m) {
 CameraMotion::CameraMotion(const Instance& instance_, Scheduler& scheduler_,
                            VideoCore::TextureCache& texture_cache_, Runtime& runtime_)
     : instance{instance_}, scheduler{scheduler_}, texture_cache{texture_cache_}, runtime{runtime_} {
-    const char* env = std::getenv("BB_DEBUG_MOTION");
+    const char* env = std::getenv("PS_DEBUG_MOTION");
     debug_overlay = env && env[0] == '1';
-    const char* upscaler = std::getenv("BB_UPSCALER");
+    const char* upscaler = std::getenv("PS_UPSCALER");
     // The upscaler can be switched on from the menu at any time: the camera is always tracked
-    // unless BB_UPSCALER=none.
+    // unless PS_UPSCALER=none.
     for_upscaler = !(upscaler && std::strcmp(upscaler, "none") == 0);
     const auto device = instance.GetDevice();
     if (for_upscaler) {
@@ -277,10 +277,10 @@ void CameraMotion::OnConstants(const float* data) {
     }
     std::memcpy(pass_camera.view.data(), data + 8, 12 * sizeof(float));
     std::memcpy(pass_camera.inv_view.data(), data + 180, 12 * sizeof(float));
-    // bbport: BB_CAMERA_INVERSE=own: the inverse of the view matrix itself instead of the one the
-    // game stores beside it (A/B; they agree to float precision). BB_CAMERA_LOG prints the gap.
+    // bbport: PS_CAMERA_INVERSE=own: the inverse of the view matrix itself instead of the one the
+    // game stores beside it (A/B; they agree to float precision). PS_CAMERA_LOG prints the gap.
     static const bool own_inverse = [] {
-        const char* env = std::getenv("BB_CAMERA_INVERSE");
+        const char* env = std::getenv("PS_CAMERA_INVERSE");
         return env && std::strcmp(env, "own") == 0;
     }();
     const auto computed_inverse = InverseAffine(pass_camera.view);
@@ -292,9 +292,9 @@ void CameraMotion::OnConstants(const float* data) {
     if (own_inverse != BbToggle::Disabled(BbToggle::CameraOwnInverse)) {
         pass_camera.inv_view = computed_inverse;
     }
-    // bbport: BB_CAMERA_LOG=1 prints the camera position every 100 ms (scripted tests of how far
+    // bbport: PS_CAMERA_LOG=1 prints the camera position every 100 ms (scripted tests of how far
     // the player moves in a given time at different frame rates).
-    static const bool camera_log = std::getenv("BB_CAMERA_LOG") != nullptr;
+    static const bool camera_log = std::getenv("PS_CAMERA_LOG") != nullptr;
     if (camera_log) {
         using Clock = std::chrono::steady_clock;
         static const auto start = Clock::now();
@@ -310,9 +310,9 @@ void CameraMotion::OnConstants(const float* data) {
     }
     // bbport: the projection as the motion shaders use it: ndc +y down the screen. 0.2 assumed the
     // viewport flips y (ndc +y up, as at Yahar'gul: yscale -540), 0.3 that it does not; the
-    // viewport of the frame's G-buffer pass decides (BB_CAMERA_Y=up/down forces one, for tests).
+    // viewport of the frame's G-buffer pass decides (PS_CAMERA_Y=up/down forces one, for tests).
     static const float forced_y = [] {
-        const char* env = std::getenv("BB_CAMERA_Y");
+        const char* env = std::getenv("PS_CAMERA_Y");
         return !env ? 0.0f : std::strcmp(env, "up") == 0 ? -1.0f : std::strcmp(env, "down") == 0 ? 1.0f : 0.0f;
     }();
     const float y_sign = (forced_y != 0.0f ? forced_y : gbuffer_y_sign) *

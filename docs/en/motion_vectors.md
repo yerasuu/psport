@@ -10,7 +10,7 @@ for shaders with a pose/bone buffer (size 640–16384 bytes, excluding the share
 scene buffer; 16-byte step). In a trial run with a narrower 1024-byte threshold
 this cut the number of processed draws to about 140 per frame, eliminated history
 overflow and gave about 81–87 FPS. The remaining draws keep cheap camera vectors.
-`BB_OBJECT_MOTION=0` disables the whole feature, `BB_OBJECT_MOTION_ALL=1` restores the shared
+`PS_OBJECT_MOTION=0` disables the whole feature, `PS_OBJECT_MOTION_ALL=1` restores the shared
 pass for A/B. The alpha channel of the auxiliary target stores depth: if a later normal
 draw occluded the object, its vector is not used. Quality of the character and weapon in
 motion after the selection still needs visual checking.
@@ -63,11 +63,11 @@ Quality on the RX 7800 XT, FPS and coverage percentage after the changes are not
 From `game_files`:
 
 ```bash
-BB_FRAME_STATS=1 BB_TOGGLE_FILE=out/dev/motion-toggles bash native_probe/run.sh 2>&1 | tee native_probe/out/dev/motion-run.log
+PS_FRAME_STATS=1 PS_TOGGLE_FILE=out/dev/motion-toggles bash native_probe/run.sh 2>&1 | tee native_probe/out/dev/motion-run.log
 ```
 
 Bit 29 in the temporary toggle file disables only history writes. For a correct
-performance comparison, run the game with `BB_OBJECT_MOTION=0` and without it:
+performance comparison, run the game with `PS_OBJECT_MOTION=0` and without it:
 the pipeline selection and the extra target are set at process start.
 After switching, give FSR a few frames to refresh its history.
 Compare the same scene: character/weapon while running, camera turn, combat, static camera.
@@ -83,7 +83,7 @@ and atomic writes needs to be measured in a real run.
 ## September 29: weapons and small skeletons (whirligig saw ghosting)
 
 Video `video_2026-09-29_23-08-26.mp4`: the character stands still, the saw disc spins and leaves
-a trail. The `BB_MOTION_SELECT_LOG=1` log showed the cause: the vertex shader's second buffer is
+a trail. The `PS_MOTION_SELECT_LOG=1` log showed the cause: the vertex shader's second buffer is
 a bone palette of 48 bytes each (3x4), and for weapons/props it is 96–384 bytes (2–8 bones).
 The "from 640 bytes" rule did not include such draws, the disc got only camera vectors,
 i.e. it was static for FSR.
@@ -100,7 +100,7 @@ Changes:
   object vector. A hash with the 416-byte buffer does not work: it changes along with the
   camera for almost all of them (verified: history overflow and FPS drop to ~40).
 - Menu: "Show motion vectors (debug)" («Показать векторы движения (отладка)»). Red/green:
-  |x|/|y|, blue: the pixel got an object vector. `BB_MOTION_SELECT_LOG=1` prints G-buffer
+  |x|/|y|, blue: the pixel got an object vector. `PS_MOTION_SELECT_LOG=1` prints G-buffer
   shaders with buffer sizes and the decision.
 
 Measurement `out/motion-gated.log`: ~225 stored draws and ~600 "static" ones per frame,

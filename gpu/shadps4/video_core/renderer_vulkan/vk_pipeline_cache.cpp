@@ -368,9 +368,9 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
         .supports_transform_feedback = instance_.IsTransformFeedbackSupported(),
         .needs_manual_interpolation = instance.IsFragmentShaderBarycentricSupported() &&
                                       instance.GetDriverID() == vk::DriverId::eNvidiaProprietary,
-        // bbport: older NVIDIA (Pascal) has no barycentrics; BB_INTERP_INT_FIX=0/1 overrides.
+        // bbport: older NVIDIA (Pascal) has no barycentrics; PS_INTERP_INT_FIX=0/1 overrides.
         .needs_integer_interpolation_fix = [&] {
-            if (const char* env = std::getenv("BB_INTERP_INT_FIX")) {
+            if (const char* env = std::getenv("PS_INTERP_INT_FIX")) {
                 return env[0] == '1';
             }
             return !instance.IsFragmentShaderBarycentricSupported() &&
@@ -382,7 +382,7 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
         .needs_unorm_fixup = instance.GetDriverID() == vk::DriverId::eMesaKosmickrisp,
         .needs_clip_distance_emulation = instance.GetDriverID() == vk::DriverId::eNvidiaProprietary,
         .supports_shader_stencil_export = instance_.IsShaderStencilExportSupported(),
-        // bbport BB_LAYER_MEMORY: buffers over nearly all memory go through the page table.
+        // bbport PS_LAYER_MEMORY: buffers over nearly all memory go through the page table.
         .paged_buffers = VideoCore::BufferCache::LayerPagedActive(),
         // The game's buffer copy shader, from its profile (games/).
         .buffer_copy_shader_hash = Game::BufferCopyShader(),
@@ -395,7 +395,7 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
     pipeline_cache = std::move(cache);
 }
 
-/// bbport BB_ASYNC_PIPELINES: worker threads creating graphics pipelines (the driver's compile,
+/// bbport PS_ASYNC_PIPELINES: worker threads creating graphics pipelines (the driver's compile,
 /// vkCreateGraphicsPipelines, with its own VkPipelineCache synchronization). Jobs run in order.
 class PipelineCompiler {
 public:
@@ -456,7 +456,7 @@ struct PipelineCache::PendingPipeline {
 
 PipelineCache::~PipelineCache() = default;
 
-// bbport: shader/pipeline compile time on the GPU thread, reported by BB_FRAME_STATS.
+// bbport: shader/pipeline compile time on the GPU thread, reported by PS_FRAME_STATS.
 std::atomic<u64> g_bb_compile_ns;
 std::atomic<u32> g_bb_compiles;
 namespace {
@@ -513,7 +513,7 @@ const GraphicsPipeline* PipelineCache::TryPreparedPipeline(const PreparedDraw& p
 }
 
 namespace {
-/// bbport BB_ASYNC_PIPELINES: per render target (its address), how many frames in a row draws
+/// bbport PS_ASYNC_PIPELINES: per render target (its address), how many frames in a row draws
 /// went to it. Only the GPU thread (pipeline selection) touches it.
 struct TargetStreak {
     u32 last_frame = ~0u;
@@ -570,7 +570,7 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline(const DrawIndirectPar
     if (const auto found = graphics_pipelines.find(sel.graphics_key); found != graphics_pipelines.end()) {
         return found->second.get();
     }
-    // bbport BB_ASYNC_PIPELINES: being compiled on a worker, or to be.
+    // bbport PS_ASYNC_PIPELINES: being compiled on a worker, or to be.
     const bool skippable = AsyncSkippable(sel, indirect);
     if (const auto pending = pending_graphics.find(sel.graphics_key); pending != pending_graphics.end()) {
         const std::shared_ptr<PendingPipeline> job = pending->second;
@@ -595,12 +595,12 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline(const DrawIndirectPar
     }
     if (skippable) {
         if (!compiler) {
-            const char* env = std::getenv("BB_ASYNC_PIPELINE_THREADS");
+            const char* env = std::getenv("PS_ASYNC_PIPELINE_THREADS");
             const u32 threads = env && *env ? u32(std::strtoul(env, nullptr, 10))
                                             : std::clamp(std::thread::hardware_concurrency() / 4, 1u, 4u);
             compiler = std::make_unique<PipelineCompiler>(std::max(threads, 1u));
             std::printf("GPU: new pipelines of passes drawn every frame compile on %u threads "
-                        "(BB_ASYNC_PIPELINES=0: on the GPU thread, the game waits)\n",
+                        "(PS_ASYNC_PIPELINES=0: on the GPU thread, the game waits)\n",
                         std::max(threads, 1u));
         }
         auto job = std::make_shared<PendingPipeline>();
@@ -675,7 +675,7 @@ bool PipelineCache::AsyncSkippable(const PipelineSelection& selection, bool indi
     // depend on the draw's vertex buffers (VK_EXT_vertex_input_dynamic_state). A size rule (the
     // scene's, the output's) missed most passes: many set a 16384 scissor.
     static const bool enabled = [] {
-        const char* env = std::getenv("BB_ASYNC_PIPELINES");
+        const char* env = std::getenv("PS_ASYNC_PIPELINES");
         return !(env && env[0] == '0');
     }();
     if (!enabled || !instance.IsVertexInputDynamicState() || !selection.regs) {
@@ -834,10 +834,10 @@ bool PipelineCache::RefreshGraphicsKey(PipelineSelection& sel) {
                 }
             }
         }
-        // BB_MOTION_SELECT_LOG=1: each G-buffer vertex shader once, with its buffer sizes
+        // PS_MOTION_SELECT_LOG=1: each G-buffer vertex shader once, with its buffer sizes
         // and the selection, to find animated models that the size rule leaves out.
         static const bool select_log = [] {
-            const char* value = std::getenv("BB_MOTION_SELECT_LOG");
+            const char* value = std::getenv("PS_MOTION_SELECT_LOG");
             return value && value[0] == '1';
         }();
         if (select_log && vs) {
@@ -858,7 +858,7 @@ bool PipelineCache::RefreshGraphicsKey(PipelineSelection& sel) {
         }
         // Keep the old broad path available for visual A/B tests.
         static const bool all_motion = [] {
-            const char* value = std::getenv("BB_OBJECT_MOTION_ALL");
+            const char* value = std::getenv("PS_OBJECT_MOTION_ALL");
             return value && value[0] == '1';
         }();
         if (all_motion) {
@@ -946,9 +946,9 @@ static bool SkipUnsupportedGeometry(const AmdGpu::Regs& regs, const Instance& in
     std::scoped_lock guard{lock};
     (strmout ? skipped_streamout : skipped_onchip)++;
     if (described.insert(key).second) {
-        // BB_DUMP_SKIPPED_GS=<dir>: the GS and its copy shader (the VS stage), up to s_endpgm, to
+        // PS_DUMP_SKIPPED_GS=<dir>: the GS and its copy shader (the VS stage), up to s_endpgm, to
         // disassemble what a stream-out implementation has to reproduce.
-        if (const char* dir = std::getenv("BB_DUMP_SKIPPED_GS")) {
+        if (const char* dir = std::getenv("PS_DUMP_SKIPPED_GS")) {
             for (const auto [stage, label] : {std::pair{HwStage::Geometry, "gs"}, std::pair{HwStage::Vertex, "copy"},
                                               std::pair{HwStage::Export, "es"}}) {
                 const auto* program = regs.ProgramForStage(static_cast<u32>(stage));

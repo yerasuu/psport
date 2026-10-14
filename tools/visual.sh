@@ -7,7 +7,7 @@ set -u
 cd -- "$(dirname -- "$0")/.."
 name=${1:?usage: tools/visual.sh NAME [ENV=VALUE...]}
 shift
-env BB_GAME_DIR="${BB_GAME_DIR:-$PWD/../game_files/CUSA03173}" "$@" tools/restart.sh > /dev/null || exit 1
+env PS_GAME_DIR="${PS_GAME_DIR:-$PWD/../game_files/CUSA03173}" "$@" tools/restart.sh > /dev/null || exit 1
 sleep 6; tools/shot.sh "out/visual_${name}_1.png"
 tools/press.sh rx=255 1.2; sleep 2; tools/shot.sh "out/visual_${name}_2.png"
 if [[ ${VISUAL_WALK:-1} == 1 ]]; then
