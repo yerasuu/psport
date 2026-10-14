@@ -160,6 +160,32 @@ change of the text (also written to the game's buffer) and Enter or Esc as the p
 button; the caret stays at the end of the text and no input method composes. Without a window the
 panel is entered at once with `PS_IME_TEXT` or the text the game opened it with.
 
+## Defaults
+
+Every default is chosen for any game: what the console does, or what changes only how fast the host
+does the same work. A value that only pays off in one game is that game's profile's
+(`gpu/games/<game>/`, `Game::Profile`), and the variable, when set, overrides both. A game without a
+profile (or with `PS_GAME_PROFILE=none`) runs with the values in the first column.
+
+| Setting | Default | Why it holds for any game | Bloodborne's profile |
+|---|---|---|---|
+| Frame overlap, `PS_SUBMIT_AHEAD` | 0 (`Game::Profile::c_submits_ahead`) | the submission lock's contract: after `sceGnmSubmitDone` a submission waits for the previous frame, and a game may reuse what that frame used as soon as it returns (Gal Guardians 2 rebuilt its command buffers over the frame in flight) | 2: it builds each frame in the context of the frame before the previous; its heap leak check (`frame_overlap_unsafe`) and `PS_SUBMIT_GUARD` still turn it off |
+| Frames the GPU command thread runs ahead, `PS_FRAMES_AHEAD` | 1 | pacing only: flips come at the GPU's rate instead of in bursts when the GPU is the bottleneck | |
+| Forced anisotropic filtering, `PS_ANISO` | 0: the game's samplers (`Game::Profile::anisotropy`) | the image the game asks for: forced filtering also reaches textures that are not surfaces (Astrea's backgrounds came out brighter and browner with it) | 16: its scene textures have little or none, and behind the upscaler surfaces at a grazing angle stayed blurred |
+| Temporal upscaler (`upscaler` in `bbport.ini`, `PS_UPSCALER`) | FSR 3.1 at Native AA, where a profile places it (`Game::Profile::upscaler`); elsewhere off, with no scene jitter and no camera or object motion vectors (`Upscaler: off: no game profile places it`) | the upscaler has to know which pass combines the scene and where the UI starts; jittering a frame nothing then resolves would shake its image | its post-processing combine (compute shader `9a9cf8a9`) and its UI's first vertex shader (`34e8a281`); `PS_UPSCALE_BEFORE_CS` and `PS_UI_TRIGGER_VS` place it by hand in another game |
+| Object motion (`object_motion`, `PS_OBJECT_MOTION`) | on, while the upscaler is available | it only feeds the upscaler | |
+| Frame rate (`PS_FPS`) and vblank (`PS_VBLANK_HZ`) | a title without presets: unpatched, 60 Hz vblank (the console's) | the frame rate presets are patches to one executable (`patches/`); at 480 Hz a title pacing itself by its flip rate ran 8 times too fast | `uncap` (delta-time patch, 480 Hz vblank, frames shown at once), 60 or 90 |
+| Scaled output (`output_res`) and `PS_DMEM_MB` 9152 | only for a title with resolution presets; otherwise its own size and the console's 5056 MiB of direct memory | they are a patch to the same executable, and the larger direct memory exists for its larger targets | as `output_res` and `live_resolution` choose |
+| Memory model, `PS_PC_MODEL` | run.sh: the new one on AMD GPUs, the 0.3 one on the others | a property of the driver, not of the game: sparse binding of the game's memory works on RADV and stalls NVIDIA's GPU for seconds; the 0.3 model is being retired | |
+| `PS_COPY_GPU_BUFFERS` | 1 (run.sh) | the GPU thread decodes a submission after the game's call returns, later than the console's command processor reads it; the copy keeps a game that refills that memory from changing what the GPU gets | |
+| `PS_READBACKS` | 1 (relaxed) | the console's memory is shared: the CPU reads what the GPU wrote (vertices, compute results), and relaxed readbacks are the cheapest mode that gives it that | |
+| `PS_GPU_WRITE_TWINS`, `PS_GPU_WRITE_TWINS_MAX` | 1, 65536 bytes (run.sh) | a CPU write next to small GPU outputs keeps the GPU's bytes and the CPU's apart instead of waiting for the GPU; the result is the same | |
+| `PS_PREUPLOAD` | 1 (run.sh; the 0.3 model only) | uploads only memory already in VRAM that the game rewrote: no new VRAM, it only moves an upload earlier | |
+| `PS_UFFD` | 0 | userfaultfd write tracking crashed the Steam Deck; mprotect is the safe path | |
+| Draw pipeline `PS_DRAW_PIPE`, recording threads `PS_VK_RECORD_THREADS`, `PS_ASYNC_SUBMIT`, copy threads `PS_COPY_THREADS` | by the host's hardware threads: the draw pipeline from 8, 1/2/3 recording threads from 1/8/12, submissions from the recording threads, a quarter of the threads (1 to 4) for copies | they decide which host thread does the work, not what the GPU or the game sees | |
+| Optimizations behind `PS_TOGGLE_FILE` (`gpu/shim/bbport_toggles.h`) | on (a set bit switches one off) | caches, memos and pipelining that keep every result the same; the TAA, FSR 4, camera and scene scaling bits act only where the upscaler runs; the optional TAA techniques are off | |
+| `RADV_DEBUG=nohiz` | on GCN 3-5 under RADV (run.sh, `PS_AUTO_NOHIZ=0`: off) | a driver bug: depth compression drew black halos and lost geometry on those chips | |
+
 ## Diagnostics
 
 | Variable | What it shows |
