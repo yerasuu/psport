@@ -371,6 +371,10 @@ static ABI int32_t posix_key_set(uint32_t k,void *v) { int32_t r=key_set(k,v); r
 static ABI int32_t set_thread_dtors(void *dtors) { (void)dtors; return 0; }
 static ABI int32_t set_thread_atexit_count(void *count) { (void)count; return 0; }
 static ABI int32_t set_thread_atexit_report(void *report) { (void)report; return 0; }
+/* libc pins the module of each thread_local destructor it registers so that the module is not
+ * unloaded before the destructor runs; modules here are never unmapped, so there is nothing to pin. */
+static ABI int32_t rtld_thread_atexit_increment(void *module) { (void)module; return 0; }
+static ABI int32_t rtld_thread_atexit_decrement(void *module) { (void)module; return 0; }
 static ABI void *sanitizer_replace(void *table) { (void)table; return NULL; }
 static ABI int32_t sanitizer_enabled(void) { return 0; }
 /* libc follows the info's two pointers when it starts tracing its heap, a null one faults
@@ -417,6 +421,8 @@ static const RuntimeExport exports[]={
     {"pthread_setspecific",posix_key_set}, {"pthread_getspecific",key_get},
     {"_sceKernelSetThreadDtors",set_thread_dtors}, {"_sceKernelSetThreadAtexitCount",set_thread_atexit_count},
     {"_sceKernelSetThreadAtexitReport",set_thread_atexit_report},
+    {"_sceKernelRtldThreadAtexitIncrement",rtld_thread_atexit_increment},
+    {"_sceKernelRtldThreadAtexitDecrement",rtld_thread_atexit_decrement},
     {"sceKernelGetSanitizerMallocReplaceExternal",sanitizer_replace},
     {"sceKernelGetSanitizerNewReplaceExternal",sanitizer_replace},
     {"sceKernelIsAddressSanitizerEnabled",sanitizer_enabled},

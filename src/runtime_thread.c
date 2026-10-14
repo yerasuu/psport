@@ -23,6 +23,7 @@
 #define MIN_STACK (64*1024)
 #define DEFAULT_STACK (1024*1024)
 #define DEFAULT_PRIO 700
+#define DEFAULT_GUARD (16*1024)
 
 typedef void *(ABI *GuestEntry)(void *);
 typedef struct ThreadAttr {
@@ -95,7 +96,7 @@ static void attach(GuestThread *t) {
 static GuestThread *new_thread(void) {
     GuestThread *t=calloc(1,sizeof(*t));
     if (!t) return NULL;
-    t->attr=(ThreadAttr){.magic=ATTR_MAGIC,.policy=1,.prio=DEFAULT_PRIO,.stack=DEFAULT_STACK,.affinity=0x7f};
+    t->attr=(ThreadAttr){.magic=ATTR_MAGIC,.policy=1,.prio=DEFAULT_PRIO,.stack=DEFAULT_STACK,.guard=DEFAULT_GUARD,.affinity=0x7f};
     return t;
 }
 static void publish(GuestThread *t) {
@@ -160,7 +161,7 @@ static ABI int32_t attr_init(ThreadAttr **out) {
     if (!out) return ERR(22);
     ThreadAttr *a=calloc(1,sizeof(*a));
     if (!a) return ERR(12);
-    *a=(ThreadAttr){.magic=ATTR_MAGIC,.policy=1,.prio=DEFAULT_PRIO,.inherit=4,.stack=DEFAULT_STACK,.guard=4096,.affinity=0x7f};
+    *a=(ThreadAttr){.magic=ATTR_MAGIC,.policy=1,.prio=DEFAULT_PRIO,.inherit=4,.stack=DEFAULT_STACK,.guard=DEFAULT_GUARD,.affinity=0x7f};
     runtime_exception_lock(&lock); a->next=attributes; attributes=a; runtime_exception_unlock(&lock);
     *out=a; return 0;
 }
@@ -261,6 +262,11 @@ static ABI int32_t attr_set_guard(ThreadAttr **slot,uint64_t size) {
     ThreadAttr *a=find_attr(slot);
     if (!a) return ERR(22);
     a->guard=size; return 0;
+}
+static ABI int32_t attr_get_guard(ThreadAttr **slot,uint64_t *size) {
+    ThreadAttr *a=find_attr(slot);
+    if (!a || !size) return ERR(22);
+    *size=a->guard; return 0;
 }
 
 /* Linux thread names hold 15 characters; longer ones would be rejected. */
@@ -443,6 +449,7 @@ uintptr_t runtime_thread_resolve(const char *name) {
         {"3qxgM4ezETA",attr_set_affinity}, {"eXbUSpEaTsA",attr_set_inherit},
         {"JaRMy+QcpeU",attr_get_detach}, {"-fA+7ZlGDQs",attr_get_stack},
         {"FXPWHNk8Of0",attr_get_param}, {"El+cQ20DynU",attr_set_guard},
+        {"txHtngJ+eyc",attr_get_guard},
         {"Bvn74vj6oLo",attr_set_stack_region}, {"Ru36fiTtJzA",attr_get_stack_addr},
         {"-quPa4SEJUw",attr_get_stack_region},
         {"ruZ9hhQ8oUk",thread_get_stack},
