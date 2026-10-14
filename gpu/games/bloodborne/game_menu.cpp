@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-#include "bbport_game_menu.h"
+#include "game_menu.h"
 
 #include <sys/mman.h>
 #include <unistd.h>

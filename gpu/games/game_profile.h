@@ -3,9 +3,11 @@
 // command processor, the caches, the shader recompiler) runs any game on its generic paths and
 // asks the active profile only for the rest: hooks in the game's own code that announce its
 // writes earlier than a write trap would, guest code known to write per-frame data, shaders with
-// a known purpose. A game without a profile runs on the generic paths alone. One file per game
-// (games/<game>.cpp) defines its profile; game_profile.cpp lists them.
+// a known purpose, diagnostics that need to know its code. A game without a profile runs on the
+// generic paths alone. One file per game (games/<game>.cpp, or games/<game>/profile.cpp beside the
+// code it hooks in) defines its profile; game_profile.cpp lists them.
 #pragma once
+#include <cstddef>
 #include <cstdint>
 #include <span>
 
@@ -14,6 +16,18 @@ namespace Game {
 /// Guest addresses [begin, end).
 struct CodeRange {
     std::uint64_t begin = 0, end = 0;
+};
+
+/// Guest code that frees the game's GPU label blocks (the fence targets of its command buffers),
+/// for the free check's BB_LABEL_TRAP=2 breakpoints (bbport_free_check.h).
+struct LabelReleaseCode {
+    /// The allocator's release: its first instruction must be `mov rax, rsi` followed by
+    /// `test rax, rax`, rsi the block released.
+    std::uint64_t release = 0;
+    /// The collector's branch for a block it takes as done: its first instruction must be
+    /// `mov rcx, [rsp + 0x28]`, r14 the block (its first qword the label, or with bit 0 set a
+    /// pointer to the label of its batch).
+    std::uint64_t collector_done = 0;
 };
 
 /// What the core offers a profile's hooks.
@@ -42,6 +56,26 @@ struct Profile {
     /// A compute shader (GCN program hash) that only copies buffers, into memory the translator
     /// reads on the CPU: its stores go through to the game's memory; 0 = none known.
     std::uint64_t buffer_copy_shader = 0;
+    /// The core's GnmDriver wrote packets into command buffer space the game reserved,
+    /// [commands, commands + dwords) (the packets end at the first zero dword). Called on the
+    /// game's thread after each such sceGnm call returns its packets; it must not write them.
+    void (*driver_commands_written)(std::uint32_t* commands, std::uint64_t dwords) = nullptr;
+    /// The game submitted [commands, commands + dwords) (each DCB and CCB of a submission, on the
+    /// submitting thread, before the core translates it); it must not write them.
+    void (*commands_submitted)(const std::uint32_t* commands, std::uint64_t dwords) = nullptr;
+    /// Once a frame while frames overlap (BB_SUBMIT_AHEAD above 0), from sceGnmSubmitDone under
+    /// the submission lock: true when the game shows it cannot take the overlap, with why in
+    /// reason (a NUL-terminated phrase that fits in size); the core then stops it for the session.
+    bool (*frame_overlap_unsafe)(char* reason, std::size_t size) = nullptr;
+    /// With each frame statistics report (BB_FRAME_STATS, the video out thread): the profile's
+    /// own diagnostics.
+    void (*report_stats)() = nullptr;
+    /// Each presented frame, on the presenter thread before the overlay is drawn: what the
+    /// player changed in the game's own menus is applied here.
+    void (*before_present)() = nullptr;
+    /// The game's label release code; zeros when unknown, and the free check's breakpoints stay
+    /// off.
+    LabelReleaseCode label_release;
 };
 
 /// Chooses the profile for the game by its TITLE_ID (bbgpu_init). BB_GAME_PROFILE=none runs the

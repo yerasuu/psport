@@ -4,8 +4,7 @@
 // the live allocations are counted per call site in the game (the first two return addresses into
 // its code on the stack). Report() prints the sites whose live bytes grew since the last report:
 // what leaks when the guest heap runs out.
-#include "bbport_heap_sites.h"
-#include "game_profile.h"
+#include "heap_sites.h"
 
 #include <algorithm>
 #include <atomic>
@@ -14,6 +13,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
+
+extern "C" std::uint64_t runtime_heap_growths(void);
 
 namespace BbHeapSites {
 namespace {
@@ -225,11 +226,6 @@ void InstallWrappers(bool counters) {
     if ((!wanted && !counters) || done) {
         return;
     }
-    // LibcBase and the slots are where Bloodborne's libc.prx lands; another title's memory there
-    // is something else, or nothing.
-    if (!Game::Active()) {
-        return;
-    }
     auto* slots = reinterpret_cast<u64*>(LibcBase);
     if (slots[SlotMalloc / 8] == 0) {
         return; // libc.prx has not set up the game's malloc yet: tried again later
@@ -274,17 +270,28 @@ void Install() {
     InstallWrappers(false);
 }
 
-void InstallCounters() {
-    InstallWrappers(true);
-}
-
-bool Counting() {
-    return orig_malloc != nullptr;
-}
-
-long long LiveAllocations() {
-    return s64(count_allocs.load(std::memory_order_relaxed)) -
-           s64(count_frees.load(std::memory_order_relaxed));
+// The game's live heap allocations (malloc minus free, counted by the wrappers) are watched; the
+// leak added ~1800 a second, so 100000 over the lowest count seen is taken as one (or the heap
+// asking for more memory, which the game never does otherwise).
+bool OverlapLeaks(char* reason, std::size_t size) {
+    if (orig_malloc == nullptr) {
+        InstallWrappers(true);
+        return false;
+    }
+    static u64 frames = 0;
+    static long long lowest = 0;
+    const long long live = s64(count_allocs.load(std::memory_order_relaxed)) -
+                           s64(count_frees.load(std::memory_order_relaxed));
+    if (++frames < 600 || live < lowest) {
+        lowest = live; // warming up: area loads
+        return false;
+    }
+    if (live - lowest > 100000 || runtime_heap_growths() != 0) {
+        std::snprintf(reason, size, "the game's heap grows (%lld allocations over %lld)",
+                      live - lowest, lowest);
+        return true;
+    }
+    return false;
 }
 
 void NoteReleaseCheck(unsigned result) {

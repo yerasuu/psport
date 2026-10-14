@@ -13,7 +13,7 @@
 #include <unistd.h>
 #include "common/assert.h"
 #include "bbport_toggles.h"
-#include "bbport_heap_sites.h"
+#include "game_profile.h"
 #include "bbport_wait_trace.h"
 #include "video_core/renderer_vulkan/vk_frame_capture.h"
 #include "common/debug.h"
@@ -637,8 +637,8 @@ void VideoOutDriver::Flip(const Request& req) {
                 }
             }
             Libraries::Kernel::ReportEqueueWaits(frames);
-            if (static int heap_reports = 0; ++heap_reports % 6 == 1) {
-                BbHeapSites::Report();
+            if (const Game::Profile* game = Game::Active(); game && game->report_stats) {
+                game->report_stats();
             }
             runtime_wait_report(frames);
             for (std::size_t i = 0; i < BbStats::range_allocators.size(); ++i) {

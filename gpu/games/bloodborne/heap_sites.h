@@ -2,6 +2,8 @@
 // bbport BB_HEAP_SITES=1: live allocations of the game's heap per call site (diagnostics).
 #pragma once
 
+#include <cstddef>
+
 namespace BbHeapSites {
 /// Wraps the game's malloc replacement once libc.prx has set it up (BB_HEAP_SITES=1).
 void Install();
@@ -9,8 +11,7 @@ void Install();
 void Report();
 /// The result of the game's release check (0xbf0790) seen at 0xbb5fb0.
 void NoteReleaseCheck(unsigned result);
-/// The counters alone (frame overlap leak watch): allocations minus frees since installed.
-void InstallCounters();
-bool Counting();
-long long LiveAllocations();
+/// Once a frame while frames overlap (Game::Profile::frame_overlap_unsafe): with deep overlap the
+/// game's heap leaked (~2 resource objects a frame, out of memory after minutes).
+bool OverlapLeaks(char* reason, std::size_t size);
 } // namespace BbHeapSites

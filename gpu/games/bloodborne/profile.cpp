@@ -7,8 +7,10 @@
 #include <cstdlib>
 #include <dirent.h>
 #include <string>
-#include "bbport_game_menu.h"
-#include "bbport_guest_hooks.h"
+#include "game_menu.h"
+#include "gnm_hooks.h"
+#include "guest_hooks.h"
+#include "heap_sites.h"
 
 namespace Game {
 namespace {
@@ -63,20 +65,44 @@ void PrepareSaves(const char* saves, const char* save_title) {
 }
 
 void InstallHooks(const CoreServices& services) {
-    // The resource loaders' copies, the GPU memory range allocator and the heap (bbport_guest_hooks).
+    // The resource loaders' copies, the GPU memory range allocator and the heap (guest_hooks).
     BbGuestHooks::Install(services.fresh_range);
 }
+
+void PatchImage(unsigned char* image, std::uint64_t size) {
+    BbGnmHooks::PatchImage(image, size);
+    BbGameMenu::PatchImage(image, size);
+}
+
+void ReportStats() {
+    if (static int heap_reports = 0; ++heap_reports % 6 == 1) {
+        BbHeapSites::Report();
+    }
+}
+
+/// BB_LABEL_TRAP=2: the small-object pool's release, and the branch of the GPU range collector
+/// (0x26aa860) taken for a block whose label reads 4 (done).
+constexpr LabelReleaseCode LabelRelease = {
+    .release = ImageBase + 0x263b9b0,
+    .collector_done = ImageBase + 0x26aa986,
+};
 } // namespace
 
 extern const Profile BloodborneProfile = {
     .name = "Bloodborne",
     .serials = Serials,
     .install_hooks = InstallHooks,
-    .patch_image = BbGameMenu::PatchImage,
+    .patch_image = PatchImage,
     .dynamic_writers = DynamicWriters,
     .prepare_saves = PrepareSaves,
     // The game's buffer-copy compute shader (not the export-stage copy shader).
     .buffer_copy_shader = 0xfefebf9f,
+    .driver_commands_written = BbGnmHooks::NoteDriverWrite,
+    .commands_submitted = BbGnmHooks::CheckSubmission,
+    .frame_overlap_unsafe = BbHeapSites::OverlapLeaks,
+    .report_stats = ReportStats,
+    .before_present = BbGameMenu::Poll,
+    .label_release = LabelRelease,
 };
 
 } // namespace Game

@@ -23,9 +23,8 @@
 #include "video_core/amdgpu/liverpool.h"
 #include "bbport_toggles.h"
 #include "bbport_timeline.h"
-#include "bbport_heap_sites.h"
-#include "bbport_gnm_hooks.h"
 #include "bbport_submit_guard.h"
+#include "game_profile.h"
 #include "video_core/amdgpu/pm4_cmds.h"
 #include "video_core/renderer_vulkan/vk_presenter.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
@@ -37,6 +36,18 @@ std::unique_ptr<AmdGpu::Liverpool> liverpool;
 namespace Libraries::GnmDriver {
 
 using namespace AmdGpu;
+
+/// Hands the packets a sceGnm call wrote into the game's command buffer to the game's profile
+/// once the call has written them (at the end of its scope).
+struct DriverWrite {
+    u32* commands;
+    u64 dwords;
+    ~DriverWrite() {
+        if (const Game::Profile* game = Game::Active(); game && game->driver_commands_written) {
+            game->driver_commands_written(commands, dwords);
+        }
+    }
+};
 
 enum GnmEventType : u64 {
     Compute0RelMem = 0x00,
@@ -138,10 +149,9 @@ static void WaitPreviousFrame();
 // of the frame before the previous: the first submissions are translated while the GPU finishes
 // the previous frame instead of after it (1080p, Yahar'gul: 101 -> 154 FPS). Further on it
 // assumes the previous frame finished: K 8 or more, or no wait at all, and its heap leaked (~2
-// resource objects a frame, out of memory after minutes). Should the heap grow anyway (the game
-// asks for more memory with mmap, which it never does otherwise), or the game write into a frame
+// resource objects a frame, out of memory after minutes). Should the game's profile see that it
+// cannot take the overlap (Game::Profile::frame_overlap_unsafe), or the game write into a frame
 // the GPU still runs (BbSubmitGuard), K becomes 0 for the session.
-extern "C" std::uint64_t runtime_heap_growths(void);
 static u32 submits_this_frame = 0;
 static bool overlap_off = false;
 static u32 SubmitsAhead() {
@@ -151,29 +161,16 @@ static u32 SubmitsAhead() {
     }();
     return overlap_off || BbSubmitGuard::Tripped() ? 0u : ahead;
 }
-// Once a frame: the game's live heap allocations (malloc minus free, counted by wrappers on its
-// malloc) are watched; the leak added ~1800 a second, so 100000 over the lowest count seen is
-// taken as one (or the heap asking for more memory). Then the frames stop overlapping.
-static void WatchOverlapLeak() {
+// decanter matches this line in the run log to start the title's next runs without the overlap.
+static void WatchOverlap() {
     if (SubmitsAhead() == 0) {
         return;
     }
-    if (!BbHeapSites::Counting()) {
-        BbHeapSites::InstallCounters();
-        return;
-    }
-    static u64 frames = 0;
-    static long long lowest = 0;
-    const long long live = BbHeapSites::LiveAllocations();
-    if (++frames < 600 || live < lowest) {
-        lowest = live; // warming up: area loads
-        return;
-    }
-    if (live - lowest > 100000 || runtime_heap_growths() != 0) {
+    const Game::Profile* game = Game::Active();
+    char reason[160];
+    if (game && game->frame_overlap_unsafe && game->frame_overlap_unsafe(reason, sizeof(reason))) {
         overlap_off = true;
-        std::printf("Gnm: the game's heap grows (%lld allocations over %lld): frames no longer "
-                    "overlap (BB_SUBMIT_AHEAD 0)\n",
-                    live - lowest, lowest);
+        std::printf("Gnm: %s: frames no longer overlap (BB_SUBMIT_AHEAD 0)\n", reason);
     }
 }
 static void WaitPreviousFrameAtSubmit() {
@@ -557,7 +554,7 @@ s32 PS4_SYSV_ABI sceGnmDispatchIndirectOnMec(u32* cmdbuf, u32 size, VAddr args, 
 }
 
 u32 PS4_SYSV_ABI sceGnmDispatchInitDefaultHardwareState(u32* cmdbuf, u32 size) {
-    BbGnmHooks::DriverWrite bb_observe{cmdbuf, size};
+    DriverWrite bb_observe{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (size < HwInitPacketSize) {
@@ -799,7 +796,7 @@ s32 PS4_SYSV_ABI sceGnmDrawIndirectMulti(u32* cmdbuf, u32 size, u32 data_offset,
 }
 
 u32 PS4_SYSV_ABI sceGnmDrawInitDefaultHardwareState(u32* cmdbuf, u32 size) {
-    BbGnmHooks::DriverWrite bb_observe{cmdbuf, size};
+    DriverWrite bb_observe{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (size < HwInitPacketSize) {
@@ -825,7 +822,7 @@ u32 PS4_SYSV_ABI sceGnmDrawInitDefaultHardwareState(u32* cmdbuf, u32 size) {
 }
 
 u32 PS4_SYSV_ABI sceGnmDrawInitDefaultHardwareState175(u32* cmdbuf, u32 size) {
-    BbGnmHooks::DriverWrite bb_observe{cmdbuf, size};
+    DriverWrite bb_observe{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (size < HwInitPacketSize) {
@@ -844,7 +841,7 @@ u32 PS4_SYSV_ABI sceGnmDrawInitDefaultHardwareState175(u32* cmdbuf, u32 size) {
 }
 
 u32 PS4_SYSV_ABI sceGnmDrawInitDefaultHardwareState200(u32* cmdbuf, u32 size) {
-    BbGnmHooks::DriverWrite bb_observe{cmdbuf, size};
+    DriverWrite bb_observe{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (size < HwInitPacketSize) {
@@ -881,7 +878,7 @@ u32 PS4_SYSV_ABI sceGnmDrawInitDefaultHardwareState200(u32* cmdbuf, u32 size) {
 }
 
 u32 PS4_SYSV_ABI sceGnmDrawInitDefaultHardwareState350(u32* cmdbuf, u32 size) {
-    BbGnmHooks::DriverWrite bb_observe{cmdbuf, size};
+    DriverWrite bb_observe{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (size < HwInitPacketSize) {
@@ -1195,7 +1192,7 @@ void PS4_SYSV_ABI sceGnmGpuPaDebugLeave() {
 }
 
 s32 PS4_SYSV_ABI sceGnmInsertDingDongMarker(u32* cmdbuf, u32 size) {
-    BbGnmHooks::DriverWrite bb_observe{cmdbuf, size};
+    DriverWrite bb_observe{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (cmdbuf == nullptr || size != 4) {
@@ -1206,7 +1203,7 @@ s32 PS4_SYSV_ABI sceGnmInsertDingDongMarker(u32* cmdbuf, u32 size) {
 }
 
 s32 PS4_SYSV_ABI sceGnmInsertPopMarker(u32* cmdbuf, u32 size) {
-    BbGnmHooks::DriverWrite bb_observe{cmdbuf, size};
+    DriverWrite bb_observe{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (cmdbuf && (size == 6)) {
@@ -1219,7 +1216,7 @@ s32 PS4_SYSV_ABI sceGnmInsertPopMarker(u32* cmdbuf, u32 size) {
 }
 
 s32 PS4_SYSV_ABI sceGnmInsertPushColorMarker(u32* cmdbuf, u32 size, const char* marker, u32 color) {
-    BbGnmHooks::DriverWrite bb_observe{cmdbuf, size};
+    DriverWrite bb_observe{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (cmdbuf && marker) {
@@ -1243,7 +1240,7 @@ s32 PS4_SYSV_ABI sceGnmInsertPushColorMarker(u32* cmdbuf, u32 size, const char* 
 }
 
 s32 PS4_SYSV_ABI sceGnmInsertPushMarker(u32* cmdbuf, u32 size, const char* marker) {
-    BbGnmHooks::DriverWrite bb_observe{cmdbuf, size};
+    DriverWrite bb_observe{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (cmdbuf && marker) {
@@ -1270,7 +1267,7 @@ int PS4_SYSV_ABI sceGnmInsertSetColorMarker() {
 }
 
 s32 PS4_SYSV_ABI sceGnmInsertSetMarker(u32* cmdbuf, u32 size, const char* marker) {
-    BbGnmHooks::DriverWrite bb_observe{cmdbuf, size};
+    DriverWrite bb_observe{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (cmdbuf && marker) {
@@ -1298,7 +1295,7 @@ int PS4_SYSV_ABI sceGnmInsertThreadTraceMarker() {
 }
 
 s32 PS4_SYSV_ABI sceGnmInsertWaitFlipDone(u32* cmdbuf, u32 size, s32 vo_handle, u32 buf_idx) {
-    BbGnmHooks::DriverWrite bb_observe{cmdbuf, size};
+    DriverWrite bb_observe{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (size != 7) {
@@ -1529,7 +1526,7 @@ int PS4_SYSV_ABI sceGnmSdmaOpen() {
 }
 
 s32 PS4_SYSV_ABI sceGnmSetCsShader(u32* cmdbuf, u32 size, const u32* cs_regs) {
-    BbGnmHooks::DriverWrite bb_observe{cmdbuf, size};
+    DriverWrite bb_observe{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (!cmdbuf || size <= 0x18) {
@@ -1558,7 +1555,7 @@ s32 PS4_SYSV_ABI sceGnmSetCsShader(u32* cmdbuf, u32 size, const u32* cs_regs) {
 
 s32 PS4_SYSV_ABI sceGnmSetCsShaderWithModifier(u32* cmdbuf, u32 size, const u32* cs_regs,
                                                u32 modifier) {
-    BbGnmHooks::DriverWrite bb_observe{cmdbuf, size};
+    DriverWrite bb_observe{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (!cmdbuf || size <= 0x18) {
@@ -1712,7 +1709,7 @@ s32 PS4_SYSV_ABI sceGnmSetEmbeddedVsShader(u32* cmdbuf, u32 size, u32 shader_id,
 }
 
 s32 PS4_SYSV_ABI sceGnmSetEsShader(u32* cmdbuf, u32 size, const u32* es_regs, u32 shader_modifier) {
-    BbGnmHooks::DriverWrite bb_observe{cmdbuf, size};
+    DriverWrite bb_observe{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (!cmdbuf || size < 0x14) {
@@ -1749,7 +1746,7 @@ int PS4_SYSV_ABI sceGnmSetGsRingSizes() {
 }
 
 s32 PS4_SYSV_ABI sceGnmSetGsShader(u32* cmdbuf, u32 size, const u32* gs_regs) {
-    BbGnmHooks::DriverWrite bb_observe{cmdbuf, size};
+    DriverWrite bb_observe{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (!cmdbuf || size < 0x1d) {
@@ -1778,7 +1775,7 @@ s32 PS4_SYSV_ABI sceGnmSetGsShader(u32* cmdbuf, u32 size, const u32* gs_regs) {
 }
 
 s32 PS4_SYSV_ABI sceGnmSetHsShader(u32* cmdbuf, u32 size, const u32* hs_regs, u32 param4) {
-    BbGnmHooks::DriverWrite bb_observe{cmdbuf, size};
+    DriverWrite bb_observe{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
     if (!cmdbuf || size < 0x1E) {
         return -1;
@@ -1809,7 +1806,7 @@ s32 PS4_SYSV_ABI sceGnmSetHsShader(u32* cmdbuf, u32 size, const u32* hs_regs, u3
 }
 
 s32 PS4_SYSV_ABI sceGnmSetLsShader(u32* cmdbuf, u32 size, const u32* ls_regs, u32 shader_modifier) {
-    BbGnmHooks::DriverWrite bb_observe{cmdbuf, size};
+    DriverWrite bb_observe{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (!cmdbuf || size < 0x17) {
@@ -1843,7 +1840,7 @@ s32 PS4_SYSV_ABI sceGnmSetLsShader(u32* cmdbuf, u32 size, const u32* ls_regs, u3
 }
 
 s32 PS4_SYSV_ABI sceGnmSetPsShader(u32* cmdbuf, u32 size, const u32* ps_regs) {
-    BbGnmHooks::DriverWrite bb_observe{cmdbuf, size};
+    DriverWrite bb_observe{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (!cmdbuf || size <= 0x27) {
@@ -1881,7 +1878,7 @@ s32 PS4_SYSV_ABI sceGnmSetPsShader(u32* cmdbuf, u32 size, const u32* ps_regs) {
 }
 
 s32 PS4_SYSV_ABI sceGnmSetPsShader350(u32* cmdbuf, u32 size, const u32* ps_regs) {
-    BbGnmHooks::DriverWrite bb_observe{cmdbuf, size};
+    DriverWrite bb_observe{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (!cmdbuf || size <= 0x27) {
@@ -1980,7 +1977,7 @@ s32 PS4_SYSV_ABI sceGnmSetVgtControl(u32* cmdbuf, u32 size, u32 prim_group_sz_mi
 }
 
 s32 PS4_SYSV_ABI sceGnmSetVsShader(u32* cmdbuf, u32 size, const u32* vs_regs, u32 shader_modifier) {
-    BbGnmHooks::DriverWrite bb_observe{cmdbuf, size};
+    DriverWrite bb_observe{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (!cmdbuf || size <= 0x1c) {
@@ -2399,8 +2396,10 @@ static inline s32 PerformSubmit(u32 count, const u32* dcb_gpu_addrs[], u32* dcb_
                 .base_addr = reinterpret_cast<uintptr_t>(ccb),
             });
         }
-        BbGnmHooks::CheckSubmission(dcb_span.data(), dcb_span.size());
-        BbGnmHooks::CheckSubmission(ccb_span.data(), ccb_span.size());
+        if (const Game::Profile* game = Game::Active(); game && game->commands_submitted) {
+            game->commands_submitted(dcb_span.data(), dcb_span.size());
+            game->commands_submitted(ccb_span.data(), ccb_span.size());
+        }
         if (SubmitLockOnDecode() && SubmitsAhead() > 0) {
             BbSubmitGuard::Arm(dcb_span.data(), dcb_span.size_bytes(), u64(frames_submitted) + 1);
             BbSubmitGuard::Arm(ccb_span.data(), ccb_span.size_bytes(), u64(frames_submitted) + 1);
@@ -2538,7 +2537,7 @@ s32 PS4_SYSV_ABI sceGnmSubmitDone() {
         // A frame without submissions waits here, as the lock made sceGnmSubmitDone wait.
         WaitPreviousFrame();
         submits_this_frame = 0;
-        WatchOverlapLeak();
+        WatchOverlap();
         ++frames_submitted;
         BbSubmitGuard::Close(u64(frames_submitted));
         liverpool->SubmitDone(u64(frames_submitted));
@@ -2579,7 +2578,7 @@ int PS4_SYSV_ABI sceGnmUnregisterResource() {
 }
 
 s32 PS4_SYSV_ABI sceGnmUpdateGsShader(u32* cmdbuf, u32 size, const u32* gs_regs) {
-    BbGnmHooks::DriverWrite bb_observe{cmdbuf, size};
+    DriverWrite bb_observe{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (!cmdbuf || size < 0x1d) {
@@ -2644,7 +2643,7 @@ int PS4_SYSV_ABI sceGnmUpdateHsShader(u32* cmdbuf, u32 size, const u32* hs_regs,
 }
 
 s32 PS4_SYSV_ABI sceGnmUpdatePsShader(u32* cmdbuf, u32 size, const u32* ps_regs) {
-    BbGnmHooks::DriverWrite bb_observe{cmdbuf, size};
+    DriverWrite bb_observe{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (!cmdbuf || size <= 0x27) {
@@ -2688,7 +2687,7 @@ s32 PS4_SYSV_ABI sceGnmUpdatePsShader(u32* cmdbuf, u32 size, const u32* ps_regs)
 }
 
 s32 PS4_SYSV_ABI sceGnmUpdatePsShader350(u32* cmdbuf, u32 size, const u32* ps_regs) {
-    BbGnmHooks::DriverWrite bb_observe{cmdbuf, size};
+    DriverWrite bb_observe{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (!cmdbuf || size <= 0x27) {
@@ -2735,7 +2734,7 @@ s32 PS4_SYSV_ABI sceGnmUpdatePsShader350(u32* cmdbuf, u32 size, const u32* ps_re
 
 s32 PS4_SYSV_ABI sceGnmUpdateVsShader(u32* cmdbuf, u32 size, const u32* vs_regs,
                                       u32 shader_modifier) {
-    BbGnmHooks::DriverWrite bb_observe{cmdbuf, size};
+    DriverWrite bb_observe{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (!cmdbuf || size <= 0x1c) {

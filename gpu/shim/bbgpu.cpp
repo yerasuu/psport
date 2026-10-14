@@ -1,5 +1,4 @@
 #include "bbport_write_log.h"
-#include "bbport_gnm_hooks.h"
 // bbport: glue between the C loader and the vendored shadPS4 video core.
 #include "bbport_overlay.h"
 #include "bbport_settings.h"
@@ -359,7 +358,6 @@ extern "C" int bbgpu_handle_fault(void* ucontext, void* address) {
 }
 
 extern "C" void bbgpu_patch_image(unsigned char* image, uint64_t size) {
-    BbGnmHooks::PatchImage(image, size);
     if (const Game::Profile* game = Game::Active(); game && game->patch_image) {
         game->patch_image(image, size);
     }
