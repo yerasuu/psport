@@ -76,6 +76,11 @@ struct Profile {
     /// the submission lock: true when the game shows it cannot take the overlap, with why in
     /// reason (a NUL-terminated phrase that fits in size); the core then stops it for the session.
     bool (*frame_overlap_unsafe)(char* reason, std::size_t size) = nullptr;
+    /// Submissions of a frame that go to the GPU before it has finished the frame before
+    /// (PS_SUBMIT_AHEAD, which overrides it). Only for a game whose first c_submits_ahead
+    /// submissions of a frame never touch what the previous frame's GPU work still uses; 0, the
+    /// submission lock's contract, for any other.
+    std::uint32_t c_submits_ahead = 0;
     /// With each frame statistics report (PS_FRAME_STATS, the video out thread): the profile's
     /// own diagnostics.
     void (*report_stats)() = nullptr;
@@ -100,6 +105,12 @@ const Profile* Active();
 inline std::uint64_t BufferCopyShader() {
     const Profile* profile = Active();
     return profile ? profile->buffer_copy_shader : 0;
+}
+
+/// The active profile's frame overlap (Profile::c_submits_ahead), or 0.
+inline std::uint32_t SubmitsAhead() {
+    const Profile* profile = Active();
+    return profile ? profile->c_submits_ahead : 0;
 }
 
 /// Whether guest_rip is in code the active profile knows to write per-frame data.

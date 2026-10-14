@@ -100,6 +100,11 @@ extern const Profile BloodborneProfile = {
     .driver_commands_written = BbGnmHooks::NoteDriverWrite,
     .commands_submitted = BbGnmHooks::CheckSubmission,
     .frame_overlap_unsafe = BbHeapSites::OverlapLeaks,
+    // The game keeps two frame contexts and builds the next frame in the one of the frame before
+    // the previous: its first two submissions are translated while the GPU finishes the previous
+    // frame (1080p, Yahar'gul: 101 -> 154 FPS). With 8 or more, or no wait at all, its heap leaked
+    // (~2 resource objects a frame, out of memory after minutes).
+    .c_submits_ahead = 2,
     .report_stats = ReportStats,
     .before_present = BbGameMenu::Poll,
     .label_release = LabelRelease,

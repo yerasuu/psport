@@ -144,20 +144,24 @@ static bool RunAhead() {
 
 static void WaitPreviousFrame();
 
-// PS_SUBMIT_AHEAD=K (default 2): the first K submissions of a frame do not wait for the previous
-// frame, the next ones do. The game keeps two frame contexts and builds the next frame in the one
-// of the frame before the previous: the first submissions are translated while the GPU finishes
-// the previous frame instead of after it (1080p, Yahar'gul: 101 -> 154 FPS). Further on it
-// assumes the previous frame finished: K 8 or more, or no wait at all, and its heap leaked (~2
-// resource objects a frame, out of memory after minutes). Should the game's profile see that it
-// cannot take the overlap (Game::Profile::frame_overlap_unsafe), or the game write into a frame
-// the GPU still runs (BbSubmitGuard), K becomes 0 for the session.
+// PS_SUBMIT_AHEAD=K: the first K submissions of a frame do not wait for the previous frame, the
+// next ones do, so they are translated while the GPU finishes the previous frame instead of after
+// it. Unset, K is the game profile's (Game::Profile::c_submits_ahead), else 0: the submission
+// lock's contract, since a game may reuse what the previous frame used as soon as the first
+// submission of the next one returns (Gal Guardians 2 rewrote its command buffers). Should the
+// game's profile see that it cannot take the overlap (Game::Profile::frame_overlap_unsafe), or the
+// game write into a frame the GPU still runs (BbSubmitGuard), K becomes 0 for the session.
 static u32 submits_this_frame = 0;
 static bool overlap_off = false;
 static u32 SubmitsAhead() {
     static const u32 ahead = [] {
         const char* env = std::getenv("PS_SUBMIT_AHEAD");
-        return env ? u32(std::max(0, std::atoi(env))) : 2u;
+        const u32 c_submits = env ? u32(std::max(0, std::atoi(env))) : Game::SubmitsAhead();
+        if (c_submits) {
+            std::printf("Gnm: the first %u submissions of a frame overlap the frame before (%s)\n",
+                        c_submits, env ? "PS_SUBMIT_AHEAD" : "game profile");
+        }
+        return c_submits;
     }();
     return overlap_off || BbSubmitGuard::Tripped() ? 0u : ahead;
 }
