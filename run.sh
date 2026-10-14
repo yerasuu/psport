@@ -94,7 +94,6 @@ if [[ -n ${PS_SYS_MODULES:-} ]]; then
     link_args+=(--system-modules "$PS_SYS_MODULES" --hle "${PS_HLE:-}" --lle "${PS_LLE:-}")
 fi
 boot_args=(--game "$game" "${link_args[@]}")
-"$PYTHON" scripts/content_profile.py "$game" --out "$out" --sku "${PS_CONTENT_SKU:-full}"
 # Sizes chosen below for the previous launch are recomputed after an in-game restart.
 if [[ ${PS_AUTO_RENDER_RES:-} == 1 ]]; then
     unset PS_RENDER_RES PS_OUTPUT_RES PS_AUTO_RENDER_RES
@@ -252,7 +251,7 @@ if [[ ${PS_ONLINE:-0} == 1 && -f scripts/online.py ]]; then
     SHADPS4_HTTP_HOST_OVERRIDES_JSON=$("$PYTHON" scripts/online.py overrides --user "${PS_USER_DIR:-$data/user}") || true
     export SHADPS4_HTTP_HOST_OVERRIDES_JSON
 fi
-probe_args=("${boot_args[@]}" --content-profile "$out/content.bin" --patches "$out/patches.bin" --app0 "$game" --user "${PS_USER_DIR:-$data/user}" --timeout "${PS_TIMEOUT:-0}" "$@")
+probe_args=("${boot_args[@]}" --patches "$out/patches.bin" --app0 "$game" --user "${PS_USER_DIR:-$data/user}" --timeout "${PS_TIMEOUT:-0}" "$@")
 if [[ -n ${mod_game:-} ]]; then
     "$probe" "${probe_args[@]}" &
     mod_pid=$!

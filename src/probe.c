@@ -346,7 +346,7 @@ static void watchdog(int sig, siginfo_t *info, void *context) {
     runtime_calls_report();
     _exit(128 + sig);
 }
-/* param.sfo lookup: string or integer value of key, 0 when absent. */
+/* param.sfo lookup: string or integer value of key; the entry's format (0x0404 an integer), 0 when absent. */
 static int sfo_value(const char *path, const char *key, char *text, size_t text_size, uint32_t *number) {
     FILE *f=fopen(path,"rb");
     if (!f) return 0;
@@ -360,14 +360,36 @@ static int sfo_value(const char *path, const char *key, char *text, size_t text_
         uint16_t key_offset, format; uint32_t length, offset;
         memcpy(&key_offset,e,2); memcpy(&format,e+2,2); memcpy(&length,e+4,4); memcpy(&offset,e+12,4);
         if (keys+key_offset>=n || values+offset+length>n || strcmp((const char *)data+keys+key_offset,key)) continue;
-        if (format==0x0404 && number && length>=4) { memcpy(number,data+values+offset,4); return 1; }
+        if (format==0x0404 && number && length>=4) { memcpy(number,data+values+offset,4); return format; }
         if (text && text_size) {
             size_t copy=length<text_size-1 ? length : text_size-1;
             memcpy(text,data+values+offset,copy); text[copy]=0;
         }
-        return 1;
+        return format ? format : 1;
     }
     return 0;
+}
+/* AppContent's base-game profile: param.sfo's user-defined parameters; the SKU is a launch setting
+ * (PS_CONTENT_SKU=full or trial), not a license check. */
+static void configure_content(const char *sfo) {
+    const char *sku=getenv("PS_CONTENT_SKU");
+    if (!sku || !*sku) sku="full";
+    uint32_t values[5]={0};
+    if (!strcmp(sku,"full")) values[0]=3;
+    else if (!strcmp(sku,"trial")) values[0]=1;
+    else fail("PS_CONTENT_SKU must be full or trial");
+    FILE *f=fopen(sfo,"rb");
+    if (!f) { fprintf(stderr,"ERROR: cannot read %s\n",sfo); exit(1); }
+    fclose(f);
+    for (unsigned i=0;i<4;++i) {
+        char key[32];
+        snprintf(key,sizeof(key),"USER_DEFINED_PARAM_%u",i+1);
+        int format=sfo_value(sfo,key,NULL,0,&values[1+i]);
+        if (format && format!=0x0404) fail("invalid user-defined parameter in param.sfo");
+    }
+    runtime_content_configure(values);
+    printf("AppContent profile: SKU=%s (probe setting), user params=[%u, %u, %u, %u], mounted add-ons=0\n",
+           sku,values[1],values[2],values[3],values[4]);
 }
 static int mapped(Segment *segments, uint64_t count, uint64_t address, uint64_t bytes) {
     for (uint64_t i = 0; i < count; ++i)
@@ -464,7 +486,7 @@ int main(int argc, char **argv) {
     check_cpu();
     int cpu_only = 0, strict_imports = 0;
     unsigned timeout_seconds = 10;
-    const char *content_profile=NULL, *app0=NULL, *user_dir=NULL, *patch_file=NULL, *sz_exec=NULL;
+    const char *app0=NULL, *user_dir=NULL, *patch_file=NULL, *sz_exec=NULL;
     LoaderOptions game={0};
     /* The guest's command line: the executable's guest path, the --arg values, NULL. Copied to the
      * heap, below 1 TiB, since the host stack holding argv is above it. */
@@ -478,7 +500,6 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--lle") && i+1<argc) game.lle=argv[++i];
         else if (!strcmp(argv[i], "--cpu-only")) cpu_only = 1;
         else if (!strcmp(argv[i], "--strict-imports")) strict_imports = 1;
-        else if (!strcmp(argv[i], "--content-profile") && i+1<argc) content_profile=argv[++i];
         else if (!strcmp(argv[i], "--app0") && i+1<argc) app0=argv[++i];
         else if (!strcmp(argv[i], "--user") && i+1<argc) user_dir=argv[++i];
         else if (!strcmp(argv[i], "--patches") && i+1<argc) patch_file=argv[++i];
@@ -488,26 +509,14 @@ int main(int argc, char **argv) {
         else { fprintf(stderr, "Unknown option: %s\n", argv[i]); return 1; }
     }
     if (!game.game) {
-        fprintf(stderr, "Usage: %s --game dir [--system-modules dir] [--hle libs] [--lle libs] [--cpu-only] [--strict-imports] [--content-profile file] [--app0 dir] [--user dir] [--patches file] [--timeout seconds] [--exec guest-path [--arg value]...] | --vulkan-only\n", argv[0]);
+        fprintf(stderr, "Usage: %s --game dir [--system-modules dir] [--hle libs] [--lle libs] [--cpu-only] [--strict-imports] [--app0 dir] [--user dir] [--patches file] [--timeout seconds] [--exec guest-path [--arg value]...] | --vulkan-only\n", argv[0]);
         return 1;
-    }
-    if (content_profile) {
-        FILE *profile=fopen(content_profile,"rb");
-        unsigned char data[28];
-        if (!profile) fail("cannot open content profile");
-        if (fread(data,1,sizeof(data),profile)!=sizeof(data) || fgetc(profile)!=EOF || memcmp(data,"BBCONT01",8)) fail("invalid content profile");
-        fclose(profile);
-        uint32_t values[5];
-        for (unsigned i=0;i<5;++i) {
-            unsigned char *p=data+8+i*4;
-            values[i]=(uint32_t)p[0]|(uint32_t)p[1]<<8|(uint32_t)p[2]<<16|(uint32_t)p[3]<<24;
-        }
-        runtime_content_configure(values);
     }
     if (app0) {
         runtime_file_configure(app0, user_dir ? user_dir : "user");
         char sfo[4096], id[16]="";
         snprintf(sfo,sizeof(sfo),"%s/sce_sys/param.sfo",app0);
+        configure_content(sfo);
         if (sfo_value(sfo,"INSTALL_DIR_SAVEDATA",id,sizeof(id),NULL) || sfo_value(sfo,"TITLE_ID",id,sizeof(id),NULL))
             runtime_savedata_configure(id);
         char serial[16]="", title[128]="", version[16]="";
