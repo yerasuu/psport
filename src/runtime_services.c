@@ -186,6 +186,9 @@ static ABI int32_t np_account_info(const void *online_id,void *info) {
     return online_id && info ? NP_SIGNED_OUT : NP_INVALID_ARGUMENT;
 }
 static ABI int32_t np_register(void *cb,void *arg) { (void)cb; (void)arg; return new_id(); }
+/* Unplugged and signed out, no state change, NetCtl event or request reply ever becomes due, so a
+ * check of the registered callbacks or of request timeouts has nothing to run. */
+static ABI int32_t nothing_due(void) { return 0; }
 static ABI void np_register_void(void *cb,void *arg) { (void)cb; (void)arg; }
 static ABI int32_t np_register_toolkit(void *cb,void *arg) { (void)arg; return cb ? 0 : NP_INVALID_ARGUMENT; }
 static ABI int32_t np_request(const void *param) { (void)param; return new_id(); }
@@ -505,8 +508,13 @@ static ABI int32_t trophy_unlock_state(int32_t ctx,int32_t handle,uint32_t *flag
 
 /* ---- DiscMap: the game is fully installed, no disc bitmap exists ---- */
 #define DISC_MAP_NO_BITMAP ((int32_t)0x81100004)
+/* Every byte of an installed title is on the HDD; libSceFios2 takes a failure here for a request
+ * off the disc. */
 static ABI int32_t discmap_on_hdd(const char *path,int64_t offset,int64_t size,int32_t *result) {
-    (void)path; (void)offset; (void)size; (void)result; return DISC_MAP_NO_BITMAP;
+    (void)path; (void)offset; (void)size;
+    if (!result) return (int32_t)0x81100001; /* INVALID_ARGUMENT */
+    *result=1;
+    return 0;
 }
 /* The one the games call at boot succeeds instead, as in shadPS4, with its three outputs zero:
  * they read them. */
@@ -522,7 +530,9 @@ static ABI int32_t discmap_8a82(const char *path,int64_t offset,int64_t size,int
 
 /* ---- Devices that are absent: mouse, microphone ---- */
 /* A mouse port opens but never reports a connected device. */
+static ABI int32_t mouse_init(void) { return 0; }
 static ABI int32_t mouse_open(int32_t user,int32_t type,int32_t index,const void *param) { (void)user; (void)type; (void)index; (void)param; return new_id(); }
+static ABI int32_t mouse_close(int32_t handle) { (void)handle; return 0; }
 static ABI int32_t mouse_read(int32_t handle,unsigned char *data,int32_t count) {
     (void)handle;
     if (!data || count<1) return (int32_t)0x80DF0001;
@@ -596,6 +606,11 @@ static ABI int32_t keyboard_info(uint32_t resource,void *info) {
 }
 static ABI int32_t ime_update(void *handler) { (void)handler; return keyboard_opened ? 0 : IME_NOT_OPENED; }
 
+/* ---- RazorCpu ---- */
+/* The profiler's markers reach Razor only on a devkit capturing with it; a retail console, like
+ * this port, has no capture running and drops them, so they are no stub. */
+static ABI int32_t razor_idle(void) { return 0; }
+
 
 static const RuntimeExport exports[]={
     {"sceUserServiceInitialize",user_initialize}, {"sceUserServiceTerminate",runtime_stub},
@@ -622,9 +637,9 @@ static const RuntimeExport exports[]={
     {"sceNetEpollControl",net_unreachable}, {"sceNetEpollWait",net_unreachable}, {"sceNetEpollAbort",net_unreachable},
     {"sceNetResolverStartNtoa",net_unreachable}, {"sceNetResolverStartAton",net_unreachable},
     {"sceNetCtlGetState",netctl_state}, {"sceNetCtlGetInfo",netctl_info},
-    {"sceNetCtlRegisterCallback",netctl_register}, {"sceNetCtlCheckCallback",runtime_stub},
+    {"sceNetCtlRegisterCallback",netctl_register}, {"sceNetCtlCheckCallback",nothing_due},
     {"sceNetCtlUnregisterCallback",runtime_stub}, {"sceNetCtlGetNatInfo",netctl_nat},
-    {"sceNetCtlRegisterCallbackForNpToolkit",netctl_register}, {"sceNetCtlCheckCallbackForNpToolkit",runtime_stub},
+    {"sceNetCtlRegisterCallbackForNpToolkit",netctl_register}, {"sceNetCtlCheckCallbackForNpToolkit",nothing_due},
     {"sceSslInit",lib_init_id}, {"sceSslTerm",runtime_stub},
     {"sceHttpInit",lib_init_id}, {"sceHttpTerm",runtime_stub},
     {"sceHttpCreateTemplate",http_object}, {"sceHttpDeleteTemplate",runtime_stub},
@@ -638,13 +653,16 @@ static const RuntimeExport exports[]={
     {"sceHttpSetEpoll",runtime_stub}, {"sceHttpUnsetEpoll",runtime_stub}, {"sceHttpWaitRequest",http_wait},
     {"sceHttpGetStatusCode",http_fail}, {"sceHttpGetResponseContentLength",http_fail},
     {"sceHttpReadData",http_fail},
+    {"sceHttp2Init",lib_init_id}, {"sceHttp2Term",runtime_stub},
+    {"sceHttp2CreateTemplate",http_object}, {"sceHttp2DeleteTemplate",runtime_stub},
     {"sceNpGetState",np_state}, {"sceNpGetOnlineId",np_signed_out}, {"sceNpGetNpId",np_signed_out},
     {"sceNpGetAccountIdA",np_account_id}, {"sceNpGetAccountId",np_account_id_online},
     {"sceNpGetAccountCountry",np_account_info}, {"sceNpGetAccountDateOfBirth",np_account_info},
     {"sceNpRegisterStateCallback",np_register}, {"sceNpUnregisterStateCallback",runtime_stub},
+    {"sceNpRegisterStateCallbackA",np_register},
     {"sceNpRegisterGamePresenceCallback",np_register_void}, {"sceNpRegisterPlusEventCallback",np_register},
-    {"sceNpUnregisterPlusEventCallback",runtime_stub}, {"sceNpCheckCallback",runtime_stub},
-    {"sceNpRegisterStateCallbackForToolkit",np_register_toolkit}, {"sceNpCheckCallbackForLib",runtime_stub},
+    {"sceNpUnregisterPlusEventCallback",runtime_stub}, {"sceNpCheckCallback",nothing_due},
+    {"sceNpRegisterStateCallbackForToolkit",np_register_toolkit}, {"sceNpCheckCallbackForLib",nothing_due},
     {"sceNpSetNpTitleId",runtime_stub}, {"sceNpNotifyPlusFeature",runtime_stub}, {"sceNpSetContentRestriction",runtime_stub},
     {"sceNpCreateRequest",np_request}, {"sceNpCreateAsyncRequest",np_request},
     {"sceNpDeleteRequest",runtime_stub}, {"sceNpAbortRequest",runtime_stub},
@@ -655,12 +673,14 @@ static const RuntimeExport exports[]={
     {"sceNpAuthCreateRequest",np_request}, {"sceNpAuthCreateAsyncRequest",np_request},
     {"sceNpAuthDeleteRequest",runtime_stub},
     {"sceNpAuthPollAsync",np_poll}, {"sceNpAuthGetAuthorizationCode",np_signed_out},
+    {"sceNpAuthGetIdTokenA",np_signed_out},
     {"sceNpLookupCreateTitleCtx",np_request}, {"sceNpLookupDeleteTitleCtx",runtime_stub},
     {"sceNpLookupCreateAsyncRequest",np_request_ctx}, {"sceNpLookupDeleteRequest",runtime_stub},
     {"sceNpLookupAbortRequest",runtime_stub}, {"sceNpLookupPollAsync",np_poll}, {"sceNpLookupNpId",np_signed_out},
     {"sceNpScoreCreateNpTitleCtx",np_request_ctx}, {"sceNpScoreDeleteNpTitleCtx",runtime_stub},
     {"sceNpScoreCreateRequest",np_request}, {"sceNpScoreDeleteRequest",runtime_stub}, {"sceNpScoreAbortRequest",runtime_stub},
     {"sceNpWebApiInitialize",lib_init_id}, {"sceNpWebApiTerminate",runtime_stub},
+    {"sceNpWebApiCheckTimeout",nothing_due},
     {"sceNpWebApiCreateContext",np_signed_out},
     {"sceNpWebApiCreateRequest",np_signed_out}, {"sceNpWebApiSendRequest",np_signed_out},
     {"sceNpWebApiDeleteRequest",runtime_stub}, {"sceNpWebApiAbortRequest",runtime_stub},
@@ -740,7 +760,7 @@ static const RuntimeExport exports[]={
     {"sceNpTrophyDestroyHandle",runtime_stub},
     {"sceNpTrophyGetGameInfo",trophy_game_info}, {"sceNpTrophyGetTrophyInfo",trophy_info},
     {"sceNpTrophyGetTrophyUnlockState",trophy_unlock_state},
-    {"sceMouseInit",runtime_stub}, {"sceMouseOpen",mouse_open}, {"sceMouseRead",mouse_read}, {"sceMouseClose",runtime_stub},
+    {"sceMouseInit",mouse_init}, {"sceMouseOpen",mouse_open}, {"sceMouseRead",mouse_read}, {"sceMouseClose",mouse_close},
     {"sceAudioInOpen",audio_in_open},
     {"sceMoveInit",move_init}, {"sceMoveOpen",move_open}, {"sceMoveGetDeviceInfo",move_device_info},
     {"sceMoveReadStateRecent",move_read_recent}, {"sceMoveSetLightSphere",move_no_controller},
@@ -752,6 +772,12 @@ static const RuntimeExport exports[]={
     {"sceScreenShotEnable",runtime_stub}, {"sceScreenShotDisable",runtime_stub}, {"sceScreenShotSetParam",runtime_stub},
     {"sceScreenShotSetOverlayImage",runtime_stub}, {"sceScreenShotSetOverlayImageWithOrigin",runtime_stub},
     {"sceSharePlayInitialize",runtime_stub}, {"sceGameLiveStreamingInitialize",runtime_stub},
+    {"sceGameLiveStreamingEnableLiveStreaming",runtime_stub}, {"sceVoiceQoSInit",runtime_stub},
+    {"sceContentExportInit2",runtime_stub}, {"sceVideoRecordingSetInfo",runtime_stub},
+    {"sceRazorCpuPushMarker",razor_idle}, {"sceRazorCpuPushMarkerStatic",razor_idle},
+    {"sceRazorCpuPopMarker",razor_idle}, {"sceRazorCpuSync",razor_idle}, {"sceRazorCpuNamedSync",razor_idle},
+    {"sceRazorCpuPlotValue",razor_idle}, {"sceRazorCpuWriteBookmark",razor_idle},
+    {"sceRazorCpuIsCapturing",razor_idle},
 };
 uintptr_t runtime_services_resolve(const char *name) {
     const uintptr_t online=runtime_net_resolve(name); /* BB_ONLINE=1: the online module first */

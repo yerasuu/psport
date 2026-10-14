@@ -45,6 +45,7 @@ obvious.
 | AvPlayer jumps | `core/libraries/avplayer/avplayer.cpp`, `avplayer_impl.*`, `avplayer_state.*`, `avplayer_source.*` | `sceAvPlayerJumpToTime` restarts the source at the requested time (paused if it was) and reports `WAR_JUMP_COMPLETE`; Unity's video player draws nothing until that warning arrives, so Symphonia's intro movies showed the previous movie's last frame | stubbed at `3a9f572` |
 | AvPlayer stopping | `core/libraries/avplayer/avplayer_source.cpp` | `Stop()` no longer rewinds the file streamer's position to 0: FFmpeg's byte stream kept its own position and buffer, so after a restart (`sceAvPlayerJumpToTime`, Unity's movies) its next refill read the file from the start as packet data (`Invalid NAL unit size`, `partial file`) and Symphonia hung at the end of its intro | bug present at `3a9f572` |
 | AvPlayer end of file | `core/libraries/avplayer/avplayer_source.cpp`, `avplayer_state.*` | the demuxer reports end of file only when the source ran out, not when `Stop()` ends it: every restart (`sceAvPlayerStart` while playing, `sceAvPlayerJumpToTime`, `sceAvPlayerStop`) put the state machine in `EndOfFile`, so after a jump `Pause()` did nothing and a buffering check racing a stop logged `EndOfFile -> Buffering` (Tales of Symphonia); the controller thread moves between `Play` and `Buffering` only from the state it checked, and `Stop()` holds the source mutex exclusively, so a stop no longer reads as a buffer underrun | bug present at `3a9f572` |
+| VideoOut cursor | `core/libraries/videoout/video_out.cpp`, `driver.h` | `sceVideoOutCursorEnable`/`Disable`/`SetPosition`/`SetHotSpot`/`Set2xMagnify` keep each port's cursor state (image, position, hot spot, magnification); nothing draws the cursor yet, so enabling one is logged as `(STUBBED)` | absent at `3a9f572` |
 | Presenter | `video_core/renderer_vulkan/vk_presenter.cpp` | logs the first presented game frame once (`tools/regress.sh` reads it) | no |
 
 ## Loading the game
@@ -134,8 +135,9 @@ sce functions returning a 32- or 64-bit result, POSIX functions returning -1 wit
 arguments all travel in registers; a thunk calls the function and only a result that looks like a
 failure takes the slow path. The results `src/import_statuses.inc` lists for an import (kept by hand
 from the codes the runtime's implementations return: `sceUserServiceGetEvent`'s no event, the
-timeouts of the `Wait`/`Timedwait`/`Timedlock` calls, the busy result of the `Poll`/`Try` calls)
-are no failure but the state the caller asked about: they are logged and counted all the same, as
+timeouts of the `Wait`/`Timedwait`/`Timedlock` calls, the busy result of the `Poll`/`Try` calls,
+`scePthreadMutexLock`'s `EDEADLK` on an error-checking or adaptive mutex the thread already holds,
+which Unreal Engine's critical sections take for a recursive lock) are no failure but the state the caller asked about: they are logged and counted all the same, as
 `status`. When the process ends (the guest exits, the window is closed, SIGTERM,
 SIGINT or SIGHUP, a fault, the watchdog, a `STOP:`), a summary follows, most calls first:
 

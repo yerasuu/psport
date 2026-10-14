@@ -414,6 +414,71 @@ s32 PS4_SYSV_ABI sceVideoOutAdjustColor(s32 handle, const SceVideoOutColorSettin
     return ORBIS_OK;
 }
 
+// bbport: the cursor's state is kept per port as the game sets it, but no cursor is drawn yet.
+static s32 GetCursor(s32 handle, u32 index, VideoOutCursor** cursor) {
+    auto* port = driver->GetPort(handle);
+    if (!port) {
+        return ORBIS_VIDEO_OUT_ERROR_INVALID_HANDLE;
+    }
+    if (index >= MaxCursors) {
+        return ORBIS_VIDEO_OUT_ERROR_INVALID_INDEX;
+    }
+    *cursor = &port->cursors[index];
+    return ORBIS_OK;
+}
+
+s32 PS4_SYSV_ABI sceVideoOutCursorEnable(s32 handle, u32 index, const void* image) {
+    VideoOutCursor* cursor;
+    if (const s32 result = GetCursor(handle, index, &cursor); result != ORBIS_OK) {
+        return result;
+    }
+    if (!image) {
+        return ORBIS_VIDEO_OUT_ERROR_INVALID_ADDRESS;
+    }
+    LOG_WARNING(Lib_VideoOut, "(STUBBED) cursor {} enabled at {},{}, not drawn", index, cursor->x, cursor->y);
+    cursor->image = image;
+    cursor->enabled = true;
+    return ORBIS_OK;
+}
+
+s32 PS4_SYSV_ABI sceVideoOutCursorDisable(s32 handle, u32 index) {
+    VideoOutCursor* cursor;
+    if (const s32 result = GetCursor(handle, index, &cursor); result != ORBIS_OK) {
+        return result;
+    }
+    cursor->enabled = false;
+    return ORBIS_OK;
+}
+
+s32 PS4_SYSV_ABI sceVideoOutCursorSetPosition(s32 handle, u32 index, s32 x, s32 y) {
+    VideoOutCursor* cursor;
+    if (const s32 result = GetCursor(handle, index, &cursor); result != ORBIS_OK) {
+        return result;
+    }
+    cursor->x = x;
+    cursor->y = y;
+    return ORBIS_OK;
+}
+
+s32 PS4_SYSV_ABI sceVideoOutCursorSetHotSpot(s32 handle, u32 index, u32 x, u32 y) {
+    VideoOutCursor* cursor;
+    if (const s32 result = GetCursor(handle, index, &cursor); result != ORBIS_OK) {
+        return result;
+    }
+    cursor->hot_x = x;
+    cursor->hot_y = y;
+    return ORBIS_OK;
+}
+
+s32 PS4_SYSV_ABI sceVideoOutCursorSet2xMagnify(s32 handle, u32 index, u32 enable) {
+    VideoOutCursor* cursor;
+    if (const s32 result = GetCursor(handle, index, &cursor); result != ORBIS_OK) {
+        return result;
+    }
+    cursor->magnified = enable != 0;
+    return ORBIS_OK;
+}
+
 struct Mode {
     u32 size;
     u8 encoding;
@@ -519,6 +584,11 @@ void RegisterLib(Core::Loader::SymbolsResolver* sym) {
                  sceVideoOutSetWindowModeMargins);
     LIB_FUNCTION("IOdgHlCGU-k", "libSceVideoOut", 1, "libSceVideoOut",
                  sceVideoOutSubmitChangeBufferAttribute);
+    LIB_FUNCTION("UPZWCH8qTM4", "libSceVideoOut", 1, "libSceVideoOut", sceVideoOutCursorEnable);
+    LIB_FUNCTION("fEPEwROdCwM", "libSceVideoOut", 1, "libSceVideoOut", sceVideoOutCursorDisable);
+    LIB_FUNCTION("N17AK88NdD0", "libSceVideoOut", 1, "libSceVideoOut", sceVideoOutCursorSetPosition);
+    LIB_FUNCTION("jr52f45OlWg", "libSceVideoOut", 1, "libSceVideoOut", sceVideoOutCursorSetHotSpot);
+    LIB_FUNCTION("Se-Zs6koGzk", "libSceVideoOut", 1, "libSceVideoOut", sceVideoOutCursorSet2xMagnify);
 }
 
 } // namespace Libraries::VideoOut

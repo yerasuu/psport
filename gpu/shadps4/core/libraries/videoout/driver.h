@@ -20,6 +20,15 @@ struct Frame;
 
 namespace Libraries::VideoOut {
 
+// bbport: the hardware cursor's state; nothing draws it yet.
+struct VideoOutCursor {
+    const void* image;
+    s32 x, y;
+    u32 hot_x, hot_y;
+    bool enabled, magnified;
+};
+constexpr u32 MaxCursors = 2;
+
 struct VideoOutPort {
     SceVideoOutResolutionStatus resolution;
     std::array<VideoOutBuffer, MaxDisplayBuffers> buffer_slots;
@@ -34,6 +43,7 @@ struct VideoOutPort {
     std::mutex port_mutex;
     std::condition_variable vo_cv;
     std::condition_variable vblank_cv;
+    std::array<VideoOutCursor, MaxCursors> cursors{};
     int flip_rate = 0;
     int prev_index = -1;
     bool is_open = false;

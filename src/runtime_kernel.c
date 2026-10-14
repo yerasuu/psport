@@ -131,6 +131,7 @@ static int sleep_ns(uint64_t ns) {
 static ABI int32_t kernel_usleep(uint32_t usec) { sleep_ns((uint64_t)usec*1000); return 0; }
 static ABI int32_t posix_usleep(uint32_t usec) { sleep_ns((uint64_t)usec*1000); return 0; }
 static ABI uint32_t posix_sleep(uint32_t seconds) { sleep_ns((uint64_t)seconds*1000000000); return 0; }
+static ABI int32_t kernel_sleep(uint32_t seconds) { sleep_ns((uint64_t)seconds*1000000000); return 0; }
 static ABI int32_t posix_nanosleep(const GuestTimespec *rq,GuestTimespec *rem) {
     if (!rq || rq->nsec<0 || rq->nsec>=1000000000 || rq->sec<0) return fail_posix(EINVAL);
     sleep_ns((uint64_t)rq->sec*1000000000+(uint64_t)rq->nsec);
@@ -370,6 +371,10 @@ static ABI int32_t posix_key_set(uint32_t k,void *v) { int32_t r=key_set(k,v); r
 static ABI int32_t set_thread_dtors(void *dtors) { (void)dtors; return 0; }
 static ABI int32_t set_thread_atexit_count(void *count) { (void)count; return 0; }
 static ABI int32_t set_thread_atexit_report(void *report) { (void)report; return 0; }
+/* libc pins the module of each thread_local destructor it registers so that the module is not
+ * unloaded before the destructor runs; modules here are never unmapped, so there is nothing to pin. */
+static ABI int32_t rtld_thread_atexit_increment(void *module) { (void)module; return 0; }
+static ABI int32_t rtld_thread_atexit_decrement(void *module) { (void)module; return 0; }
 static ABI void *sanitizer_replace(void *table) { (void)table; return NULL; }
 static ABI int32_t sanitizer_enabled(void) { return 0; }
 /* libc follows the info's two pointers when it starts tracing its heap, a null one faults
@@ -392,6 +397,7 @@ static const RuntimeExport exports[]={
     {"sceKernelGetProcessTimeCounterFrequency",process_time_frequency},
     {"sceKernelReadTsc",read_tsc}, {"sceKernelGetTscFrequency",tsc_frequency},
     {"sceKernelUsleep",kernel_usleep}, {"usleep",posix_usleep}, {"sleep",posix_sleep},
+    {"sceKernelSleep",kernel_sleep},
     {"nanosleep",posix_nanosleep}, {"_nanosleep",posix_nanosleep}, {"sceKernelNanosleep",kernel_nanosleep},
     {"sceKernelGettimezone",kernel_gettimezone}, {"gettimeofday",posix_gettimeofday},
     {"sceKernelGettimeofday",kernel_gettimeofday},
@@ -415,6 +421,8 @@ static const RuntimeExport exports[]={
     {"pthread_setspecific",posix_key_set}, {"pthread_getspecific",key_get},
     {"_sceKernelSetThreadDtors",set_thread_dtors}, {"_sceKernelSetThreadAtexitCount",set_thread_atexit_count},
     {"_sceKernelSetThreadAtexitReport",set_thread_atexit_report},
+    {"_sceKernelRtldThreadAtexitIncrement",rtld_thread_atexit_increment},
+    {"_sceKernelRtldThreadAtexitDecrement",rtld_thread_atexit_decrement},
     {"sceKernelGetSanitizerMallocReplaceExternal",sanitizer_replace},
     {"sceKernelGetSanitizerNewReplaceExternal",sanitizer_replace},
     {"sceKernelIsAddressSanitizerEnabled",sanitizer_enabled},

@@ -274,6 +274,8 @@ uintptr_t runtime_resolve(const char *name, int is_data) {
     if (audio3d) return audio3d;
     uintptr_t pad = runtime_pad_resolve(name);
     if (pad) return pad;
+    uintptr_t gesture = runtime_gesture_resolve(name);
+    if (gesture) return gesture;
     uintptr_t rtc = runtime_rtc_resolve(name);
     if (rtc) return rtc;
     uintptr_t save = runtime_savedata_resolve(name);
