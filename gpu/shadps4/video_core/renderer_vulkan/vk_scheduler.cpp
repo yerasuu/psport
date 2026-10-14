@@ -343,6 +343,15 @@ void Scheduler::TraceDirectRecording(void* caller) {
     callers.clear();
 }
 
+void Scheduler::NoteSpill(size_t bytes) {
+    static std::atomic<u64> spills{0};
+    if (const u64 n = spills.fetch_add(1, std::memory_order_relaxed); (n & (n + 1)) == 0) {
+        std::printf("GPU: %zu bytes of recorded command data stored beside a %zu KiB chunk (%llu "
+                    "commands so far)\n",
+                    bytes, RecordChunk::Capacity / 1024, (unsigned long long)(n + 1));
+    }
+}
+
 std::unique_ptr<RecordChunk> Scheduler::AcquireChunk() {
     std::scoped_lock lk{recorder_mutex};
     if (free_chunks.empty()) {
