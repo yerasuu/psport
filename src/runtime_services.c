@@ -505,8 +505,13 @@ static ABI int32_t trophy_unlock_state(int32_t ctx,int32_t handle,uint32_t *flag
 
 /* ---- DiscMap: the game is fully installed, no disc bitmap exists ---- */
 #define DISC_MAP_NO_BITMAP ((int32_t)0x81100004)
+/* Every byte of an installed title is on the HDD; libSceFios2 takes a failure here for a request
+ * off the disc. */
 static ABI int32_t discmap_on_hdd(const char *path,int64_t offset,int64_t size,int32_t *result) {
-    (void)path; (void)offset; (void)size; (void)result; return DISC_MAP_NO_BITMAP;
+    (void)path; (void)offset; (void)size;
+    if (!result) return (int32_t)0x81100001; /* INVALID_ARGUMENT */
+    *result=1;
+    return 0;
 }
 /* The one the games call at boot succeeds instead, as in shadPS4, with its three outputs zero:
  * they read them. */
