@@ -129,6 +129,8 @@ static ABI int32_t display_safe_area(float *ratio) {
 static ABI int32_t net_unreachable(void) { *runtime_net_errno()=51; return NET_ENETUNREACH; }
 static ABI int32_t net_epoll_create(const char *name,int flags) { (void)name; (void)flags; return new_id(); }
 static ABI int32_t net_resolver_create(const char *name,int pool,int flags) { (void)name; (void)pool; (void)flags; return new_id(); }
+/* Every lookup fails at once offline (sceNetResolverStartNtoa/Aton), so none is left to abort. */
+static ABI int32_t net_resolver_abort(int32_t h_resolver, int32_t flags) { (void)h_resolver; (void)flags; return 0; }
 static ABI uint16_t net_htons(uint16_t v) { return htons(v); }
 static ABI uint16_t net_ntohs(uint16_t v) { return ntohs(v); }
 static ABI uint32_t net_htonl(uint32_t v) { return htonl(v); }
@@ -588,6 +590,7 @@ static const RuntimeExport exports[]={
     {"sceNetInit",runtime_stub}, {"sceNetTerm",runtime_stub}, {"sceNetPoolDestroy",runtime_stub},
     {"sceNetEpollCreate",net_epoll_create}, {"sceNetEpollDestroy",runtime_stub},
     {"sceNetResolverCreate",net_resolver_create}, {"sceNetResolverDestroy",runtime_stub},
+    {"sceNetResolverAbort",net_resolver_abort},
     {"sceNetHtons",net_htons}, {"sceNetNtohs",net_ntohs}, {"sceNetHtonl",net_htonl}, {"sceNetNtohl",net_ntohl},
     {"sceNetInetPton",net_pton}, {"sceNetInetNtop",net_ntop},
     {"sceNetEpollControl",net_unreachable}, {"sceNetEpollWait",net_unreachable}, {"sceNetEpollAbort",net_unreachable},
