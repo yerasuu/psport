@@ -15,7 +15,7 @@ The model is Wine's, not an emulator's.
 | C runtime | `src/runtime*.c`, `src/runtime.h`, `src/import_*.inc` | `out/psport` | libkernel and the other system libraries, import resolution, the call report |
 | GPU library | `gpu/shim/bbgpu.cpp`, `gpu/bbgpu.h` | `out/gpu/libpsport-gpu.so` | C interface between `psport` and the C++ side |
 | Translator | `gpu/shadps4/` (inherited from shadPS4, `gpu/VENDOR.txt`), `gpu/cp/`, `gpu/layer/` | `libpsport-gpu.so` | GnmDriver, VideoOut, command processor, Vulkan rasterizer, caches, shader recompiler |
-| Ported libraries | `gpu/ngs2/`, `gpu/audiodec/`, `gpu/fiber/`, `gpu/font/`, `gpu/pngenc/` | `libpsport-gpu.so` | libSceNgs2, libSceAudiodec, libSceFiber, libSceFont/FontFt, libScePngEnc |
+| Ported libraries | `gpu/ngs2/`, `gpu/audiodec/`, `gpu/fiber/`, `gpu/font/`, `gpu/pngenc/`, `gpu/pngdec/` | `libpsport-gpu.so` | libSceNgs2, libSceAudiodec, libSceFiber, libSceFont/FontFt, libScePngEnc, libScePngDec |
 | Port services | `gpu/shim/bbport_*` | `libpsport-gpu.so` | settings (`bbport.ini`), overlay, submit guard, guest memory, diagnostics |
 | Game profiles | `gpu/games/` | `libpsport-gpu.so` | per-title optimisations (`Game::Profile`) |
 | Online module | `gpu/bbnet/` | `out/gpu/` (optional) | network and PSN imports with `PS_ONLINE=1` |
@@ -135,7 +135,7 @@ in link order (libc first) and the eboot's entry runs with `argv[0] = /app0/eboo
 | process, libc hooks, TLS, procparam, `runtime_resolve` | `runtime.c`, `runtime.h` |
 | kernel misc, process, time | `runtime_kernel.c`, `runtime_time.c`, `runtime_rtc.c` |
 | memory: direct, flexible, mappings, pools, write traps, GPU interface | `runtime_memory.c`, `runtime_memory_kernel.c`, `runtime_memory_gpu.c`, `runtime_mempool.c` |
-| threads and synchronisation | `runtime_thread.c`, `runtime_sched.c`, `runtime_mutex.c`, `runtime_rwlock.c`, `runtime_sema.c`, `runtime_eventflag.c`, `runtime_ult.c`, `runtime_ulobjmgr.c` |
+| threads and synchronisation | `runtime_thread.c`, `runtime_sched.c`, `runtime_mutex.c`, `runtime_rwlock.c`, `runtime_sema.c`, `runtime_eventflag.c`, `runtime_barrier.c`, `runtime_ult.c`, `runtime_ulobjmgr.c` |
 | exceptions | `runtime_exception.c` |
 | modules loaded at run time | `runtime_module.c` |
 | files, async I/O, AppContent, PlayGo, saves | `runtime_file.c`, `runtime_aio.c`, `runtime_content.c`, `runtime_playgo.c`, `runtime_savedata.c` |
@@ -151,7 +151,7 @@ shadPS4's aerolib list, plus a few extra NIDs in `runtime_symbol`) and compares 
 function serves the NID whichever library the executable names (`libkernel` or `libScePosix`).
 `runtime_resolve` (`src/runtime.c`) asks the tables in a fixed chain: the runtime's own libc,
 TLS and procparam entries, then mutex, thread, sched, content, time, sema, eventflag, ulobjmgr,
-ult, rwlock, memory, mempool, exception, kernel, module, playgo, voice, services, ajm, audio,
+ult, rwlock, barrier, memory, mempool, exception, kernel, module, playgo, voice, services, ajm, audio,
 audio3d, pad, gesture, rtc, savedata, file, aio, and last `bbgpu_resolve`. The first table that
 has the symbol wins.
 
@@ -172,7 +172,7 @@ a file.
 `libpsport-gpu.so` holds the C++ side. `gpu/shim/bbgpu.cpp` is its C interface (`gpu/bbgpu.h`):
 
 - `bbgpu_register_kernel` registers the kernel event queues and the libraries that do not need a
-  window: AvPlayer, Ngs2, Fiber, Font, FontFt, Audiodec, Videodec2, PngEnc.
+  window: AvPlayer, Ngs2, Fiber, Font, FontFt, Audiodec, Videodec2, PngEnc, PngDec.
 - `bbgpu_init` loads `bbport.ini`, selects the game profile, prepares saves through it, starts the
   SDL window on its own thread and registers GnmDriver and VideoOut.
 - `bbgpu_resolve` returns the function registered for an import's NID. Libraries register with

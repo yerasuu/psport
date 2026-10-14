@@ -175,6 +175,67 @@ static const char *zone(const char *s, int *minutes) {
     *minutes=(*s=='-' ? -1 : 1)*(hours*60+rest);
     return p;
 }
+/* "2026-10-12T09:30:00.25+02:00" after its four-digit year. */
+static int32_t parse_rfc3339_rest(const char *p_cursor, int *p_month, int *p_day, int *p_hour, int *p_minute,
+                                  int *p_second, int *p_microsecond, int *p_offset_minutes) {
+    if (*p_cursor++!='-' || !(p_cursor=number(p_cursor,2,p_month)) || *p_cursor++!='-' ||
+        !(p_cursor=number(p_cursor,2,p_day)))
+        return ERR_BAD_PARSE;
+    if ((*p_cursor!='T' && *p_cursor!='t' && *p_cursor!=' ') ||
+        !(p_cursor=clock_time(p_cursor+1,p_hour,p_minute,p_second)))
+        return ERR_BAD_PARSE;
+    if (*p_cursor=='.') {
+        int c_digits=0;
+        for (++p_cursor;*p_cursor>='0' && *p_cursor<='9';++p_cursor)
+            if (c_digits<6) *p_microsecond=*p_microsecond*10+(*p_cursor-'0'), ++c_digits;
+        if (!c_digits) return ERR_BAD_PARSE;
+        while (c_digits++<6) *p_microsecond*=10;
+    }
+    return zone(p_cursor,p_offset_minutes) ? 0 : ERR_BAD_PARSE;
+}
+static int32_t make_utc_tick(uint64_t *p_out_tick, int year, int month, int day, int hour, int minute,
+                             int second, int microsecond, int offset_minutes) {
+    DateTime date_time={(uint16_t)year,(uint16_t)month,(uint16_t)day,(uint16_t)hour,(uint16_t)minute,
+                         (uint16_t)second,(uint32_t)microsecond};
+    int32_t error=validate(&date_time);
+    if (error) return error;
+    *p_out_tick=(uint64_t)((int64_t)to_tick(&date_time)-(int64_t)offset_minutes*60000000);
+    return 0;
+}
+static ABI int32_t rtc_parse_rfc3339(uint64_t *p_out_tick, const char *sz_text) {
+    if (!p_out_tick || !sz_text) return ERR_INVALID_POINTER;
+    int year, month, day, hour, minute, second=0, microsecond=0, offset_minutes=0;
+    const char *p_cursor=skip_space(sz_text), *p_year_end=number(p_cursor,4,&year);
+    if (p_year_end!=p_cursor+4) return ERR_BAD_PARSE;
+    int32_t error=parse_rfc3339_rest(p_year_end,&month,&day,&hour,&minute,&second,&microsecond,&offset_minutes);
+    return error ? error : make_utc_tick(p_out_tick,year,month,day,hour,minute,second,microsecond,offset_minutes);
+}
+/* "2026-10-12T07:30:00.25Z", or with the zone's offset: the SDK's two fractional digits. */
+static ABI int32_t rtc_format_rfc3339(char *p_out_text, const uint64_t *p_utc_tick, int32_t offset_minutes) {
+    if (!p_out_text) return ERR_INVALID_POINTER;
+    DateTime date_time;
+    from_tick((uint64_t)((int64_t)(p_utc_tick ? *p_utc_tick : now_utc())+(int64_t)offset_minutes*60000000),&date_time);
+    int c_written_chars=sprintf(p_out_text,"%04u-%02u-%02uT%02u:%02u:%02u.%02u",date_time.year,date_time.month,
+                           date_time.day,date_time.hour,date_time.minute,date_time.second,
+                           date_time.microsecond/10000);
+    const int32_t magnitude_minutes=offset_minutes<0 ? -offset_minutes : offset_minutes;
+    if (!offset_minutes) strcpy(p_out_text+c_written_chars,"Z");
+    else sprintf(p_out_text+c_written_chars,"%c%02d:%02d",offset_minutes<0 ? '-' : '+',magnitude_minutes/60,
+                 magnitude_minutes%60);
+    return 0;
+}
+/* The same date and time that many years on; 29 February becomes the 28th in a common year. */
+static ABI int32_t rtc_add_tick_years(uint64_t *p_out_tick, const uint64_t *p_tick, int32_t years) {
+    if (!p_out_tick || !p_tick) return ERR_INVALID_POINTER;
+    DateTime date_time;
+    from_tick(*p_tick,&date_time);
+    const int32_t year=date_time.year+years;
+    if (year<1 || year>9999) return ERR_INVALID_YEAR;
+    date_time.year=(uint16_t)year;
+    if (date_time.month==2 && date_time.day==29 && !leap(year)) date_time.day=28;
+    *p_out_tick=to_tick(&date_time);
+    return 0;
+}
 /* RFC 3339 ("2026-10-12T09:30:00.25+02:00"), RFC 2822 ("Mon, 12 Oct 2026 09:30:00 +0200") or
  * asctime ("Mon Oct 12 09:30:00 2026", UTC). */
 static ABI int32_t rtc_parse_date_time(uint64_t *tick, const char *text) {
@@ -182,17 +243,8 @@ static ABI int32_t rtc_parse_date_time(uint64_t *tick, const char *text) {
     int year, month, day, hour, minute, second=0, microsecond=0, offset=0, index;
     const char *s=skip_space(text), *p=number(s,4,&year);
     if (p==s+4) {
-        s=p;
-        if (*s++!='-' || !(s=number(s,2,&month)) || *s++!='-' || !(s=number(s,2,&day))) return ERR_BAD_PARSE;
-        if ((*s!='T' && *s!='t' && *s!=' ') || !(s=clock_time(s+1,&hour,&minute,&second))) return ERR_BAD_PARSE;
-        if (*s=='.') {
-            int digits=0;
-            for (++s;*s>='0' && *s<='9';++s)
-                if (digits<6) microsecond=microsecond*10+(*s-'0'), ++digits;
-            if (!digits) return ERR_BAD_PARSE;
-            while (digits++<6) microsecond*=10;
-        }
-        if (!zone(s,&offset)) return ERR_BAD_PARSE;
+        int32_t error=parse_rfc3339_rest(p,&month,&day,&hour,&minute,&second,&microsecond,&offset);
+        if (error) return error;
     } else {
         if (!(s=name(s,day_names,7,&index))) return ERR_BAD_PARSE;
         s=skip_space(*s==',' ? s+1 : s);
@@ -206,12 +258,7 @@ static ABI int32_t rtc_parse_date_time(uint64_t *tick, const char *text) {
             return ERR_BAD_PARSE;
         ++month;
     }
-    DateTime t={(uint16_t)year,(uint16_t)month,(uint16_t)day,(uint16_t)hour,(uint16_t)minute,(uint16_t)second,
-                (uint32_t)microsecond};
-    int32_t e=validate(&t);
-    if (e) return e;
-    *tick=(uint64_t)((int64_t)to_tick(&t)-(int64_t)offset*60000000);
-    return 0;
+    return make_utc_tick(tick,year,month,day,hour,minute,second,microsecond,offset);
 }
 
 static const RuntimeExport exports[]={
@@ -221,6 +268,7 @@ static const RuntimeExport exports[]={
     {"sceRtcGetDayOfWeek",rtc_day_of_week}, {"sceRtcGetTick",rtc_get_tick}, {"sceRtcSetTick",rtc_set_tick},
     {"sceRtcGetTickResolution",rtc_tick_resolution}, {"sceRtcSetTime_t",rtc_set_time_t},
     {"sceRtcGetTime_t",rtc_get_time_t}, {"sceRtcFormatRFC2822LocalTime",rtc_rfc2822_local},
-    {"sceRtcParseDateTime",rtc_parse_date_time},
+    {"sceRtcParseDateTime",rtc_parse_date_time}, {"sceRtcParseRFC3339",rtc_parse_rfc3339},
+    {"sceRtcFormatRFC3339",rtc_format_rfc3339}, {"sceRtcTickAddYears",rtc_add_tick_years},
 };
 uintptr_t runtime_rtc_resolve(const char *name) { return RUNTIME_LOOKUP(exports,name); }

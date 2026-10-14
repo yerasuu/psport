@@ -90,6 +90,7 @@ void runtime_report(void) {
     runtime_exception_report();
     runtime_mutex_report();
     runtime_rwlock_report();
+    runtime_barrier_report();
     runtime_sema_report();
     runtime_eventflag_report();
     runtime_content_report();
@@ -252,6 +253,8 @@ uintptr_t runtime_resolve(const char *name, int is_data) {
     if (ult) return ult;
     uintptr_t rwlock = runtime_rwlock_resolve(name);
     if (rwlock) return rwlock;
+    uintptr_t va_barrier = runtime_barrier_resolve(name);
+    if (va_barrier) return va_barrier;
     uintptr_t memory = runtime_memory_resolve(name);
     if (memory) return memory;
     uintptr_t mempool = runtime_mempool_resolve(name);

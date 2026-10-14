@@ -79,6 +79,8 @@ void runtime_calls_hle_stub(const char *function, const uint64_t *count);
 void runtime_calls_report(void);
 uintptr_t runtime_rwlock_resolve(const char *name);
 void runtime_rwlock_report(void);
+uintptr_t runtime_barrier_resolve(const char *sz_name);
+void runtime_barrier_report(void);
 void runtime_set_module_tls(uint64_t module, const void *data, uint64_t filesz, uint64_t memsz);
 void runtime_set_procparam(void *param);
 uintptr_t runtime_thread_resolve(const char *name);
@@ -145,6 +147,10 @@ uintptr_t runtime_playgo_resolve(const char *name);
 uintptr_t runtime_voice_resolve(const char *name);
 /* Offline libSceNet sockets (runtime_socket.c), consulted by runtime_services_resolve. */
 uintptr_t runtime_socket_resolve(const char *name);
+/* libSceJson (runtime_json.c), consulted by runtime_services_resolve. */
+uintptr_t runtime_json_resolve(const char *sz_name);
+/* PSN libraries offline (runtime_np.c), consulted by runtime_services_resolve. */
+uintptr_t runtime_np_resolve(const char *sz_name);
 int32_t *runtime_net_errno(void);
 /* Online play (runtime_net.c, PS_ONLINE=1): the online module answers the network and PSN imports. */
 void runtime_net_configure(const char *app0, const char *serial, const char *title, const char *version);
