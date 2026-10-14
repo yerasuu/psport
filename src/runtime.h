@@ -185,6 +185,7 @@ int runtime_audio_device_channels(void);
 uintptr_t runtime_audio3d_resolve(const char *name);
 void runtime_audio3d_report(void);
 uintptr_t runtime_pad_resolve(const char *name);
+uintptr_t runtime_gesture_resolve(const char *name);
 void runtime_pad_report(void);
 uintptr_t runtime_rtc_resolve(const char *name);
 const char *runtime_file_user_dir(void);
