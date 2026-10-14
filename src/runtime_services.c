@@ -196,7 +196,7 @@ static Dialog dialogs[]={{"CommonDialog",0,0},{"MsgDialog",0,0},{"SaveDataDialog
                          {"NpProfileDialog",0,0},{"NpCommerceDialog",0,0},{"ImeDialog",0,0},
                          {"ErrorDialog",0,0},{"WebBrowserDialog",0,0},{"InvitationDialog",0,0},
                          {"SigninDialog",0,0},{"SocialScreenDialog",0,0},
-                         {"HmdSetupDialog",0,0}};
+                         {"HmdSetupDialog",0,0},{"PlayGoDialog",0,0}};
 static int common_initialized;
 static ABI int32_t common_init(void) { common_initialized=1; return 0; }
 static int32_t dialog_init(int i) {
@@ -219,7 +219,7 @@ static int32_t dialog_term(int i) {
     static ABI int32_t tag##_status(void) { return dialog_status(i); } \
     static ABI int32_t tag##_term(void) { return dialog_term(i); }
 DIALOG(msg,1) DIALOG(profile,3) DIALOG(commerce,4)
-DIALOG(web,7) DIALOG(invitation,8) DIALOG(signin,9) DIALOG(social,10) DIALOG(hmd_setup,11)
+DIALOG(web,7) DIALOG(invitation,8) DIALOG(signin,9) DIALOG(social,10) DIALOG(hmd_setup,11) DIALOG(playgo,12)
 static ABI int32_t profile_result(void *result) { if (result) memset(result,0,4); return 0; }
 /* OrbisNpCommerceDialogParam keeps userData at 0x58 and the result hands it back. Signed out, the
  * store cannot open, so the dialog ends as backed out of: USER_CANCELED, nothing authorized. */
@@ -398,6 +398,15 @@ static ABI int32_t hmd_setup_result(int32_t *result) {
     return 0;
 }
 static ABI int32_t hmd_setup_close(void) { dialogs[11].status=3; return 0; }
+/* ScePlayGoDialogResult: result, reserved. Every chunk is installed, so the dialog has nothing to
+ * wait for and ends as accepted: SCE_COMMON_DIALOG_RESULT_OK. */
+static ABI int32_t playgo_result(int32_t *p_out_result) {
+    if (dialogs[12].status!=3) return (int32_t)0x80B80005; /* NOT_FINISHED */
+    if (!p_out_result) return (int32_t)0x80B8000D;         /* ARG_NULL */
+    p_out_result[0]=0;
+    return 0;
+}
+static ABI int32_t playgo_close(void) { dialogs[12].status=3; return 0; }
 /* ImeDialog: text typed on the keyboard into the game window (title bar shows it).
  * OrbisImeDialogParam: user, type, languages(8), enter label, method, filter,
  * option, max length, char16 buffer, position, alignment, placeholder, title. */
@@ -468,6 +477,11 @@ static ABI int32_t ime_result(uint32_t *result) {
     return 0;
 }
 static ABI int32_t ime_term(void) { memset(&ime,0,sizeof(ime)); return 0; }
+/* A dialog is in use from its initialization until its termination, and the IME dialog while it runs. */
+static ABI int32_t common_is_used(void) {
+    for (size_t i=0;i<sizeof(dialogs)/sizeof(*dialogs);++i) if (dialogs[i].initialized) return 1;
+    return ime.running;
+}
 
 /* ---- PlayStation VR: the library runs, no headset is detected ---- */
 static int hmd_initialized;
@@ -713,6 +727,10 @@ static const RuntimeExport exports[]={
     {"sceHmdSetupDialogUpdateStatus",hmd_setup_status}, {"sceHmdSetupDialogGetStatus",hmd_setup_status},
     {"sceHmdSetupDialogGetResult",hmd_setup_result}, {"sceHmdSetupDialogClose",hmd_setup_close},
     {"sceHmdSetupDialogTerminate",hmd_setup_term},
+    {"scePlayGoDialogInitialize",playgo_init}, {"scePlayGoDialogOpen",playgo_open},
+    {"scePlayGoDialogUpdateStatus",playgo_status}, {"scePlayGoDialogGetStatus",playgo_status},
+    {"scePlayGoDialogGetResult",playgo_result}, {"scePlayGoDialogClose",playgo_close},
+    {"scePlayGoDialogTerminate",playgo_term}, {"sceCommonDialogIsUsed",common_is_used},
     {"sceHmdInitialize",hmd_init}, {"sceHmdInitialize315",hmd_init}, {"sceHmdTerminate",hmd_term},
     {"sceHmdGetDeviceInformation",hmd_device_info},
     {"sceHmdGetDeviceInformationByHandle",hmd_handle_invalid}, {"sceHmdGetFieldOfView",hmd_handle_invalid},
