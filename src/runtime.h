@@ -215,6 +215,16 @@ uintptr_t runtime_keyboard_resolve(const char *name);
 void runtime_keyboard_report(void);
 /* 1 while the game has libSceImeKeyboard open: the host keyboard is its, not the pad's. */
 int runtime_keyboard_taken(void);
+/* libSceIme's on-screen keyboard (runtime_ime.c), consulted by runtime_keyboard_resolve. update hands
+ * its due events to handler (the one it was opened with when NULL) and returns 0 while it is closed. */
+uintptr_t runtime_ime_resolve(const char *name);
+int runtime_ime_update(void *handler);
+/* The panel's size in pixels of a 1920x1080 screen for an OrbisImeType. */
+void runtime_ime_panel_size(uint32_t type, uint32_t *width, uint32_t *height);
+/* UTF-16 text of the IME and its dialog to UTF-8 and back (runtime_services.c): at most limit units
+ * are read; max units and a terminator are written. */
+size_t utf16_to_utf8(const uint16_t *in, size_t limit, char *out, size_t size);
+void utf8_to_utf16(const char *in, uint16_t *out, uint32_t max);
 uintptr_t runtime_rtc_resolve(const char *name);
 const char *runtime_file_user_dir(void);
 void runtime_savedata_configure(const char *title);

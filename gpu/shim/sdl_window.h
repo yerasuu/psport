@@ -38,6 +38,8 @@ public:
     void BeginTextInput(const std::string& initial, const std::string& prompt);
     /// 0 while typing, 1 confirmed (Enter), 2 cancelled (Escape); text is UTF-8.
     int PollTextInput(std::string& text);
+    /// Ends an entry the game took back (libSceIme closed) as cancelled, without waiting for a key.
+    void EndTextInput();
     /// Mouse look (bbgpu_mouse_take): motion and wheel notches since the last call, reset.
     void TakeMouse(double& dx, double& dy, int& wheel_up, int& wheel_down);
     /// The window holds the mouse (relative mode) for looking around.
@@ -56,7 +58,7 @@ private:
     std::atomic<s32> width, height;
     std::atomic<bool> is_open{true};
     std::mutex text_mutex;
-    bool text_requested{}, text_active{};
+    bool text_requested{}, text_active{}, m_is_text_end_requested{};
     int text_state{};
     std::string text, text_prompt, base_title;
     void UpdateTextTitle();

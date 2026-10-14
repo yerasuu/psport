@@ -25,10 +25,12 @@ uintptr_t bbgpu_resolve(const char *scoped_nid);
 int bbgpu_handle_fault(void *ucontext, void *address);
 /* PS_WRITE_LOG=1: prints the logged GPU-side writes to guest memory near the fault. */
 void bbgpu_dump_guest_writes(void *ucontext);
-/* Keyboard text entry through the game window (IME dialog). begin returns 0 when
+/* Keyboard text entry through the game window (IME dialog, libSceIme). begin returns 0 when
  * no window exists; poll returns 0 typing, 1 confirmed, 2 cancelled (UTF-8 text). */
 int bbgpu_text_input_begin(const char *initial_utf8, const char *prompt_utf8);
 int bbgpu_text_input_poll(char *out_utf8, uint64_t size);
+/* Ends the entry begin started, as cancelled, when the game closes it first (libSceIme). */
+void bbgpu_text_input_end(void);
 /* 1 while the in-game settings menu is open: the game's pad input is held neutral. */
 int bbgpu_overlay_captures_input(void);
 /* PS_PAD_FILE's ps, cross and circle for the overlay's close prompt (Guide opens it): 1 when the

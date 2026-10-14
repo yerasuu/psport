@@ -418,7 +418,7 @@ typedef struct {
     float x, y; uint32_t halign, valign; const uint16_t *placeholder, *title; int8_t reserved[16];
 } ImeParam;
 static struct { int running, finished, end_status; uint16_t *buffer; uint32_t max_length; } ime;
-static size_t utf16_to_utf8(const uint16_t *in, size_t limit, char *out, size_t size) {
+size_t utf16_to_utf8(const uint16_t *in, size_t limit, char *out, size_t size) {
     size_t n=0;
     for (size_t i=0; in && i<limit && in[i] && n+4<size; ++i) {
         uint32_t c=in[i];
@@ -430,7 +430,7 @@ static size_t utf16_to_utf8(const uint16_t *in, size_t limit, char *out, size_t 
     }
     out[n]=0; return n;
 }
-static void utf8_to_utf16(const char *in, uint16_t *out, uint32_t max) {
+void utf8_to_utf16(const char *in, uint16_t *out, uint32_t max) {
     uint32_t n=0;
     for (const unsigned char *p=(const unsigned char *)in; *p && n<max;) {
         uint32_t c; int extra;
@@ -479,6 +479,13 @@ static ABI int32_t ime_result(uint32_t *result) {
     return 0;
 }
 static ABI int32_t ime_term(void) { memset(&ime,0,sizeof(ime)); return 0; }
+/* The dialog's panel is the on-screen keyboard's (runtime_ime.c), whatever the extended parameters ask. */
+static ABI int32_t ime_panel_size_extended(const ImeParam *param, const void *extended, uint32_t *width, uint32_t *height) {
+    (void)extended;
+    if (!param || !width || !height) return (int32_t)0x80BC0031; /* IME INVALID_ADDRESS */
+    runtime_ime_panel_size(param->type,width,height);
+    return 0;
+}
 /* A dialog is in use from its initialization until its termination, and the IME dialog while it runs. */
 static ABI int32_t common_is_used(void) {
     for (size_t i=0;i<sizeof(dialogs)/sizeof(*dialogs);++i) if (dialogs[i].initialized) return 1;
@@ -671,6 +678,7 @@ static const RuntimeExport exports[]={
     {"sceNpCommerceDialogGetStatus",commerce_status}, {"sceNpCommerceDialogGetResult",commerce_result},
     {"sceImeDialogInit",ime_init}, {"sceImeDialogGetStatus",ime_status}, {"sceImeDialogGetResult",ime_result},
     {"sceImeDialogTerm",ime_term}, {"sceImeDialogAbort",ime_term},
+    {"sceImeDialogGetPanelSizeExtended",ime_panel_size_extended},
     {"sceWebBrowserDialogInitialize",web_init}, {"sceWebBrowserDialogOpen",web_open},
     {"sceWebBrowserDialogGetResult",web_result}, {"sceWebBrowserDialogSetCookie",runtime_stub},
     {"sceWebBrowserDialogResetCookie",runtime_stub},
