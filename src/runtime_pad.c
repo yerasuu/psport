@@ -642,6 +642,32 @@ static ABI int32_t pad_vibration(int32_t handle, const uint8_t *param) {
     pthread_mutex_unlock(&lock);
     return 0;
 }
+/* ScePadLightBarParam: red, green, blue, reserved. Shown on the host pad when it has an LED. */
+static int set_host_light_bar(uint8_t red, uint8_t green, uint8_t blue) {
+    pthread_mutex_lock(&lock);
+    SDL_Gamepad *p_gamepad=current_gamepad();
+    const int is_shown=p_gamepad && SDL_SetGamepadLED(p_gamepad,red,green,blue);
+    pthread_mutex_unlock(&lock);
+    return is_shown;
+}
+static ABI int32_t pad_set_light_bar(int32_t h_pad, const uint8_t *p_param) {
+    if (h_pad!=PAD_HANDLE || !opened) return ERR_INVALID_HANDLE;
+    if (!p_param) return ERR_INVALID_ARG;
+    static int s_is_logged;
+    const int is_shown=set_host_light_bar(p_param[0],p_param[1],p_param[2]);
+    if (!s_is_logged) {
+        s_is_logged=1;
+        printf("Runtime: pad light bar set to %u,%u,%u (%s)\n",p_param[0],p_param[1],p_param[2],
+               is_shown ? "shown on the host pad" : "the host pad has no LED");
+    }
+    return 0;
+}
+/* The colour the system gives user 1's pad: blue (sceUserServiceGetUserColor answers 0, blue). */
+static ABI int32_t pad_reset_light_bar(int32_t h_pad) {
+    if (h_pad!=PAD_HANDLE || !opened) return ERR_INVALID_HANDLE;
+    set_host_light_bar(0,0,255);
+    return 0;
+}
 /* Remote Play's pad is the only remote one, and this port has no Remote Play. */
 static ABI int32_t pad_is_remote(int32_t handle, uint8_t *remote) {
     if (handle!=PAD_HANDLE || !opened) return ERR_INVALID_HANDLE;
@@ -657,6 +683,7 @@ static const RuntimeExport exports[]={
     {"scePadReadState",pad_read_state}, {"scePadRead",pad_read},
     {"scePadGetControllerInformation",pad_info}, {"scePadIsRemoteController",pad_is_remote},
     {"scePadDeviceClassGetExtendedInformation",pad_class_info}, {"scePadSetVibration",pad_vibration},
+    {"scePadSetLightBar",pad_set_light_bar}, {"scePadResetLightBar",pad_reset_light_bar},
     {"scePadResetOrientation",pad_ok_handle},
     {"scePadSetAngularVelocityDeadbandState",pad_ok_handle_flag}, {"scePadSetTiltCorrectionState",pad_ok_handle_flag},
     {"scePadSetMotionSensorState",pad_ok_handle_flag},
