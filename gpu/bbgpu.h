@@ -45,6 +45,19 @@ void bbgpu_mouse_look_enable(int enabled);
  * (pixels), wheel and tilt (notches) since the last call, reset; returns 0 while there is no window
  * or the host has no mouse. */
 int bbgpu_game_mouse_take(int32_t *dx, int32_t *dy, int32_t *wheel, int32_t *tilt, uint32_t *buttons);
+/* libSceImeKeyboard (runtime_keyboard.c): open=1 while the game has the keyboard open; the window
+ * then queues for the game the keys the port does not keep (Insert, Home, the menu, F1 while it
+ * holds the mouse). take: up to max queued events, oldest first (max 0 takes none); *keyboard is 0
+ * while there is no window or the host has no keyboard; *dropped counts the events lost to a full
+ * queue. character is the key's Unicode character with the held modifiers, 0 for none. */
+typedef struct {
+    uint64_t time_us; /* CLOCK_REALTIME */
+    uint32_t character;
+    uint16_t scancode, mod; /* SDL_Scancode (USB HID usage), SDL_Keymod */
+    uint8_t down, repeat;
+} BbKeyEvent;
+void bbgpu_game_keyboard_open(int open);
+int bbgpu_game_keyboard_take(BbKeyEvent *events, int max, int *keyboard, uint32_t *dropped);
 /* Patches the loaded image before the game runs (image still writable): libGnm entry hooks. */
 void bbgpu_patch_image(unsigned char *image, uint64_t size);
 /* libSceAjm's MP3 and AAC decoders (runtime_ajm.c) over libSceAudiodec's FFmpeg codecs (audiodec/).

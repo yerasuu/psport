@@ -447,6 +447,19 @@ extern "C" int bbgpu_game_mouse_take(int32_t* dx, int32_t* dy, int32_t* wheel, i
     return g_window && g_window->TakeGameMouse(*dx, *dy, *wheel, *tilt, *buttons) ? 1 : 0;
 }
 
+extern "C" void bbgpu_game_keyboard_open(int open) {
+    Frontend::WindowSDL::OpenGameKeyboard(open != 0);
+}
+
+extern "C" int bbgpu_game_keyboard_take(BbKeyEvent* events, int max, int* keyboard, uint32_t* dropped) {
+    bool host = false;
+    u32 lost = 0;
+    const int count = g_window ? g_window->TakeGameKeys(events, max, host, lost) : 0;
+    *keyboard = host ? 1 : 0;
+    *dropped = lost;
+    return count;
+}
+
 extern "C" void bbgpu_mouse_look_enable(int enabled) {
     Frontend::WindowSDL::EnableMouseLook(enabled != 0);
 }

@@ -1,4 +1,5 @@
 // bbport: SDL3 window for the Vulkan swapchain (X11 or Wayland).
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -107,6 +108,7 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title, const char* ico
     LOG_INFO(Frontend, "Window {}x{} on {}", w, h, driver);
     std::printf("Window: %s (app id %s)\n", title, SDL_GetAppMetadataProperty(SDL_PROP_APP_METADATA_IDENTIFIER_STRING));
     host_mouse = SDL_HasMouse();
+    host_keyboard = SDL_HasKeyboard();
 }
 
 WindowSDL::~WindowSDL() {
@@ -183,6 +185,59 @@ void WindowSDL::GameMouseEvent(const SDL_Event& event) {
     }
 }
 
+int WindowSDL::TakeGameKeys(BbKeyEvent* events, int max, bool& keyboard, u32& dropped) {
+    std::scoped_lock lock{key_mutex};
+    SyncGameKeyboard();
+    int count = 0;
+    for (; count < max && !game_keys.empty(); ++count) {
+        events[count] = game_keys.front();
+        game_keys.pop_front();
+    }
+    keyboard = host_keyboard.load(std::memory_order_relaxed);
+    dropped = game_keys_dropped;
+    return count;
+}
+
+// Opening or closing the game's keyboard starts it afresh: nothing typed before reaches it, and
+// keys still held when it opened are not reported released. Called under key_mutex.
+void WindowSDL::SyncGameKeyboard() {
+    const bool open = game_keyboard_open.load(std::memory_order_relaxed);
+    if (open != game_keyboard_synced) {
+        game_keyboard_synced = open;
+        game_keys.clear();
+        game_keys_held.reset();
+    }
+}
+
+void WindowSDL::GameKeyEvent(const SDL_Event& event) {
+    constexpr size_t queue_limit = 256;
+    std::scoped_lock lock{key_mutex};
+    SyncGameKeyboard();
+    const SDL_Scancode scancode = event.key.scancode;
+    if (!game_keyboard_synced || size_t(scancode) >= game_keys_held.size()) {
+        return;
+    }
+    const bool down = event.type == SDL_EVENT_KEY_DOWN;
+    if (!down && !game_keys_held.test(scancode)) {
+        return;
+    }
+    game_keys_held.set(scancode, down);
+    const SDL_Keycode key = SDL_GetKeyFromScancode(scancode, event.key.mod, false);
+    const auto now = std::chrono::system_clock::now().time_since_epoch();
+    if (game_keys.size() == queue_limit) {
+        game_keys.pop_front();
+        ++game_keys_dropped;
+    }
+    game_keys.push_back(BbKeyEvent{
+        .time_us = u64(std::chrono::duration_cast<std::chrono::microseconds>(now).count()),
+        .character = key & SDLK_SCANCODE_MASK ? 0u : u32(key),
+        .scancode = u16(scancode),
+        .mod = u16(event.key.mod),
+        .down = u8(down),
+        .repeat = u8(event.key.repeat),
+    });
+}
+
 // Mouse look: relative mode while the window holds the mouse (runtime_pad.c turns its motion into
 // the right stick). Motion from before is dropped, so taking the mouse does not turn the camera.
 void WindowSDL::CaptureMouse(bool capture) {
@@ -236,6 +291,11 @@ bool WindowSDL::PollEvents() {
                 mouse_dy += event.motion.yrel;
             }
         }
+        // A release always reaches the game when it saw the press, so a key held while the menu or
+        // the name dialog opened is not left held.
+        if (event.type == SDL_EVENT_KEY_UP) {
+            GameKeyEvent(event);
+        }
         if (text_active && (event.type == SDL_EVENT_TEXT_INPUT || event.type == SDL_EVENT_KEY_DOWN)) {
             std::scoped_lock lock{text_mutex};
             if (event.type == SDL_EVENT_TEXT_INPUT) {
@@ -272,6 +332,9 @@ bool WindowSDL::PollEvents() {
             CaptureMouse(false);
             continue;
         }
+        if (event.type == SDL_EVENT_KEY_DOWN) {
+            GameKeyEvent(event);
+        }
         if (event.type == SDL_EVENT_MOUSE_WHEEL && mouse_captured.load(std::memory_order_relaxed)) {
             const float notches = event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -event.wheel.y : event.wheel.y;
             std::scoped_lock lock{mouse_mutex};
@@ -289,6 +352,10 @@ bool WindowSDL::PollEvents() {
             height = h;
             break;
         }
+        case SDL_EVENT_KEYBOARD_ADDED:
+        case SDL_EVENT_KEYBOARD_REMOVED:
+            host_keyboard = SDL_HasKeyboard();
+            break;
         case SDL_EVENT_QUIT:
         case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
             // SDL turns SIGTERM and SIGINT into a quit event too, so a quit is not always the user's.
