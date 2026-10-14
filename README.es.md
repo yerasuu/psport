@@ -1,5 +1,7 @@
 # psport — juegos de PS4 nativos en Linux
 
+> El README en inglés ([README.md](README.md)) es la referencia; esta traducción puede no estar al día. Documentación técnica: [docs/en/](docs/en/ARCHITECTURE.md).
+
 [English](README.md) · [Русский](README.ru.md) · **Español**
 
 psport es el fork de [bbport](https://github.com/deadinside28/bloodborne_pc) que mantiene decanter:
@@ -125,7 +127,7 @@ seguir las convenciones del código que rodea al cambio.
 | `launcher/`, `packaging/` | El lanzador GTK4 de upstream; paquete de Nix y script de AppImage |
 | `patches/` | Parches de la comunidad para Bloodborne |
 | `tools/` | Ejecuciones de regresión, desensamblador GCN, herramientas de FSR 4 y `fsr4cap`, utilidades para ejecuciones guionizadas |
-| `docs/` | Notas de diseño, mediciones y registros de cambios de upstream |
+| `docs/` | Una carpeta por idioma: `docs/en/` (arquitectura, [cómo añadir un título](docs/en/ADDING_A_TITLE.md), notas de funciones, historia de bbport en inglés) y `docs/ru/` (originales rusos de bbport, mismos nombres) |
 
 ## Créditos y licencias
 
