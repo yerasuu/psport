@@ -442,6 +442,12 @@ extern "C" int bbgpu_mouse_captured(void) {
     return g_window && g_window->MouseCaptured() ? 1 : 0;
 }
 
+extern "C" int bbgpu_game_mouse_take(int32_t* dx, int32_t* dy, int32_t* wheel, int32_t* tilt, uint32_t* buttons) {
+    *dx = *dy = *wheel = *tilt = 0;
+    *buttons = 0;
+    return g_window && g_window->TakeGameMouse(*dx, *dy, *wheel, *tilt, *buttons) ? 1 : 0;
+}
+
 extern "C" void bbgpu_mouse_look_enable(int enabled) {
     Frontend::WindowSDL::EnableMouseLook(enabled != 0);
 }

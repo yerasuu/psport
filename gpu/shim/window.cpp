@@ -106,6 +106,7 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title, const char* ico
     height = h;
     LOG_INFO(Frontend, "Window {}x{} on {}", w, h, driver);
     std::printf("Window: %s (app id %s)\n", title, SDL_GetAppMetadataProperty(SDL_PROP_APP_METADATA_IDENTIFIER_STRING));
+    host_mouse = SDL_HasMouse();
 }
 
 WindowSDL::~WindowSDL() {
@@ -134,6 +135,52 @@ void WindowSDL::TakeMouse(double& dx, double& dy, int& up, int& down) {
     down = wheel_down;
     mouse_dx = mouse_dy = 0;
     wheel_up = wheel_down = 0;
+}
+
+bool WindowSDL::TakeGameMouse(s32& dx, s32& dy, s32& wheel, s32& tilt, u32& buttons) {
+    std::scoped_lock lock{mouse_mutex};
+    dx = s32(game_dx);
+    dy = s32(game_dy);
+    wheel = s32(game_wheel);
+    tilt = s32(game_tilt);
+    // Fractions stay for the next call, so slow motion and smooth scrolling still add up.
+    game_dx -= dx;
+    game_dy -= dy;
+    game_wheel -= float(wheel);
+    game_tilt -= float(tilt);
+    buttons = game_buttons;
+    return host_mouse.load(std::memory_order_relaxed);
+}
+
+void WindowSDL::GameMouseEvent(const SDL_Event& event) {
+    std::scoped_lock lock{mouse_mutex};
+    switch (event.type) {
+    case SDL_EVENT_MOUSE_MOTION:
+        game_dx += event.motion.xrel;
+        game_dy += event.motion.yrel;
+        break;
+    case SDL_EVENT_MOUSE_BUTTON_DOWN:
+        game_buttons |= SDL_BUTTON_MASK(event.button.button);
+        break;
+    case SDL_EVENT_MOUSE_BUTTON_UP:
+        game_buttons &= ~SDL_BUTTON_MASK(event.button.button);
+        break;
+    case SDL_EVENT_MOUSE_WHEEL: {
+        const float flip = event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -1.0f : 1.0f;
+        game_wheel += event.wheel.y * flip;
+        game_tilt += event.wheel.x * flip;
+        break;
+    }
+    case SDL_EVENT_WINDOW_FOCUS_LOST:
+        game_buttons = 0;
+        break;
+    case SDL_EVENT_MOUSE_ADDED:
+    case SDL_EVENT_MOUSE_REMOVED:
+        host_mouse = SDL_HasMouse();
+        break;
+    default:
+        break;
+    }
 }
 
 // Mouse look: relative mode while the window holds the mouse (runtime_pad.c turns its motion into
@@ -205,6 +252,10 @@ bool WindowSDL::PollEvents() {
             UpdateTextTitle();
             continue;
         }
+        // A release always counts, so a button held while the menu opened is not left held.
+        if (!BbOverlay::CapturesInput() || event.type == SDL_EVENT_MOUSE_BUTTON_UP) {
+            GameMouseEvent(event);
+        }
         if (BbOverlay::HandleEvent(event)) {
             continue;
         }
@@ -212,7 +263,7 @@ bool WindowSDL::PollEvents() {
         // button: runtime_pad.c reads the buttons only while it is held); F1 and leaving the
         // window let it go.
         if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && !mouse_captured.load(std::memory_order_relaxed) &&
-            mouse_look.load(std::memory_order_relaxed) && !BbOverlay::MenuOpen()) {
+            mouse_look.load(std::memory_order_relaxed) && !BbOverlay::MenuOpen() && !BbOverlay::GameCursorShown()) {
             CaptureMouse(true);
             continue;
         }
@@ -246,21 +297,23 @@ bool WindowSDL::PollEvents() {
             break;
         }
     }
-    // The menu, the name dialog and mouse_look=0 want the cursor.
+    // The menu, the name dialog, the game's own cursor and mouse_look=0 want the mouse as a pointer.
     if (mouse_captured.load(std::memory_order_relaxed) &&
-        (BbOverlay::MenuOpen() || text_active || !mouse_look.load(std::memory_order_relaxed))) {
+        (BbOverlay::MenuOpen() || text_active || BbOverlay::GameCursorShown() ||
+         !mouse_look.load(std::memory_order_relaxed))) {
         CaptureMouse(false);
     }
     UpdateCursor();
     return is_open;
 }
 
-// Issue #3: the OS cursor over the game. Hidden in fullscreen, and in a window after 3 s without
-// moving the mouse; always shown while the settings menu is open.
+// Issue #3: the OS cursor over the game. Hidden in fullscreen, while the game draws its own
+// (VideoOut's hardware cursor), and in a window after 3 s without moving the mouse; always shown
+// while the settings menu is open.
 void WindowSDL::UpdateCursor() {
     const bool fullscreen = (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) != 0;
-    const bool hide = !BbOverlay::MenuOpen() &&
-                      (fullscreen || SDL_GetTicks() - last_mouse_motion_ms > 3000);
+    const bool hide = !BbOverlay::MenuOpen() && (fullscreen || BbOverlay::GameCursorShown() ||
+                                                 SDL_GetTicks() - last_mouse_motion_ms > 3000);
     if (hide != cursor_hidden) {
         cursor_hidden = hide;
         hide ? SDL_HideCursor() : SDL_ShowCursor();

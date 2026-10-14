@@ -51,7 +51,7 @@ obvious.
 | AvPlayer jumps | `core/libraries/avplayer/avplayer.cpp`, `avplayer_impl.*`, `avplayer_state.*`, `avplayer_source.*` | `sceAvPlayerJumpToTime` restarts the source at the requested time (paused if it was) and reports `WAR_JUMP_COMPLETE`; Unity's video player draws nothing until that warning arrives, so Symphonia's intro movies showed the previous movie's last frame | stubbed at `3a9f572` |
 | AvPlayer stopping | `core/libraries/avplayer/avplayer_source.cpp` | `Stop()` no longer rewinds the file streamer's position to 0: FFmpeg's byte stream kept its own position and buffer, so after a restart (`sceAvPlayerJumpToTime`, Unity's movies) its next refill read the file from the start as packet data (`Invalid NAL unit size`, `partial file`) and Symphonia hung at the end of its intro | bug present at `3a9f572` |
 | AvPlayer end of file | `core/libraries/avplayer/avplayer_source.cpp`, `avplayer_state.*` | the demuxer reports end of file only when the source ran out, not when `Stop()` ends it: every restart (`sceAvPlayerStart` while playing, `sceAvPlayerJumpToTime`, `sceAvPlayerStop`) put the state machine in `EndOfFile`, so after a jump `Pause()` did nothing and a buffering check racing a stop logged `EndOfFile -> Buffering` (Tales of Symphonia); the controller thread moves between `Play` and `Buffering` only from the state it checked, and `Stop()` holds the source mutex exclusively, so a stop no longer reads as a buffer underrun | bug present at `3a9f572` |
-| VideoOut cursor | `core/libraries/videoout/video_out.cpp`, `driver.h` | `sceVideoOutCursorEnable`/`Disable`/`SetPosition`/`SetHotSpot`/`Set2xMagnify` keep each port's cursor state (image, position, hot spot, magnification); nothing draws the cursor yet, so enabling one is logged as `(STUBBED)` | absent at `3a9f572` |
+| VideoOut cursor | `core/libraries/videoout/video_out.cpp`, `driver.h` | `sceVideoOutCursorEnable`/`Disable`/`SetPosition`/`SetHotSpot`/`Set2xMagnify` keep each port's cursor state (image, position, hot spot, magnification) and hand it to the overlay, which draws each enabled cursor's 64x64 image over the game frame, behind the menu (`gpu/shim/bbport_overlay.cpp`); the first enable is logged with how many of its pixels are visible | absent at `3a9f572` |
 | Presenter | `video_core/renderer_vulkan/vk_presenter.cpp` | logs the first presented game frame once (`tools/regress.sh` reads it) | no |
 
 ## Loading the game
@@ -108,6 +108,17 @@ game keeps running with its input held neutral. `BB_PAD_FILE`'s `ps` token press
 
 `BB_LANGUAGE` is not this: it is the system language the game reads (`sceSystemServiceParamGetInt`: 1
 English, 3 Spanish, 8 Russian).
+
+## Mouse
+
+libSceMouse (`src/runtime_mouse.c`) gives every game that opens a mouse port the host mouse, with no
+switch: port index 0 (or a merged port) reports its buttons and its motion, wheel and tilt since the
+handle's previous read, collected by the game window (`gpu/shim/window.cpp`); index 1 never has a
+mouse. Without a window or a host mouse the port opens and reports no device (headless gamescope has
+a pointer, so regression runs see a mouse that never moves or clicks). While
+the menu or the close prompt is open the game sees no motion and no buttons. While the game shows a
+VideoOut cursor, the window hides the system cursor over it and a click does not take the mouse for
+mouse look. The log says once whether the host mouse reaches the game (`Runtime: mouse: ...`).
 
 ## Diagnostics
 

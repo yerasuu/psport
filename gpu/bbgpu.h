@@ -41,6 +41,10 @@ int bbgpu_overlay_pad_file_press(int guide, int cross, int circle);
 void bbgpu_mouse_take(double *dx, double *dy, int *wheel_up, int *wheel_down);
 int bbgpu_mouse_captured(void);
 void bbgpu_mouse_look_enable(int enabled);
+/* libSceMouse (runtime_mouse.c): the host mouse's buttons (SDL_BUTTON_MASK bits) and its motion
+ * (pixels), wheel and tilt (notches) since the last call, reset; returns 0 while there is no window
+ * or the host has no mouse. */
+int bbgpu_game_mouse_take(int32_t *dx, int32_t *dy, int32_t *wheel, int32_t *tilt, uint32_t *buttons);
 /* Patches the loaded image before the game runs (image still writable): libGnm entry hooks. */
 void bbgpu_patch_image(unsigned char *image, uint64_t size);
 /* libSceAjm's MP3 and AAC decoders (runtime_ajm.c) over libSceAudiodec's FFmpeg codecs (audiodec/).

@@ -20,7 +20,7 @@ struct Frame;
 
 namespace Libraries::VideoOut {
 
-// bbport: the hardware cursor's state; nothing draws it yet.
+// bbport: the hardware cursor's state; the presenter draws it over the game frame.
 struct VideoOutCursor {
     const void* image;
     s32 x, y;
