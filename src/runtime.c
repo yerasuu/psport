@@ -211,34 +211,25 @@ static ABI __attribute__((noreturn)) void guest_libc_exit(int status) {
     runtime_report();
     exit(status);
 }
-static const char *bloodborne_scope(const char *name);
-static uintptr_t resolve_scoped(const char *name, int is_data) {
+/* Imports the runtime answers itself ahead of the libraries (the game's libc wrappers, TLS, its
+ * process parameters), whichever library the executable names for them. */
+static int32_t need_libc_internal = 1; /* SDK marker variable referenced by Fios2 */
+static const RuntimeExport own_data[]={
+    {"__stack_chk_guard",&stack_canary}, {"Need_sceLibcInternal",&need_libc_internal},
+};
+static const RuntimeExport own_functions[]={
+    {"_init_env",init_env}, {"atexit",guest_atexit}, {"__cxa_atexit",guest_cxa_atexit}, {"exit",guest_libc_exit},
+    {"__cxa_finalize",guest_finalize}, {"__cxa_guard_acquire",guard_acquire}, {"__cxa_guard_release",guard_release},
+    {"__cxa_guard_abort",guard_abort}, {"__stack_chk_fail",stack_fail}, {"memset",guest_memset},
+    {"memcpy",guest_memcpy}, {"memmove",guest_memmove}, {"memcmp",guest_memcmp}, {"strlen",guest_strlen},
+    {"__tls_get_addr",guest_tls_get_addr}, {"sceKernelGetProcParam",guest_procparam},
+    {"_sceKernelRtldSetApplicationHeapAPI",guest_set_heap_api},
+};
+uintptr_t runtime_resolve(const char *name, int is_data) {
     if (!(capabilities & 1)) return 0;
-    if (is_data) {
-        static int32_t need_libc_internal = 1; /* SDK marker variable referenced by Fios2 */
-        if (!strcmp(name, "f7uOxY9mM1U#p#J")) return (uintptr_t)&stack_canary;
-        if (!strcmp(name, "ZT4ODD2Ts9o#libSceLibcInternal")) return (uintptr_t)&need_libc_internal;
-        return 0;
-    }
-    /* Exact scoped imports for CUSA03173; the suffix identifies library/module. */
-    if (!strcmp(name, "bzQExy189ZI#q#q")) return (uintptr_t)init_env;
-    if (!strcmp(name, "8G2LB+A3rzg#q#q")) return (uintptr_t)guest_atexit;
-    if (!strcmp(name, "tsvEmnenz48#q#q")) return (uintptr_t)guest_cxa_atexit;
-    if (!strcmp(name, "uMei1W9uyNo#q#q")) return (uintptr_t)guest_libc_exit;
-    /* Not imported by the current eboot, exposed for ABI tests/future use. */
-    if (!strcmp(name, "H2e8t5ScQGc#q#q")) return (uintptr_t)guest_finalize;
-    if (!strcmp(name, "3GPpjQdAMTw#q#q")) return (uintptr_t)guard_acquire;
-    if (!strcmp(name, "9rAeANT2tyE#q#q")) return (uintptr_t)guard_release;
-    if (!strcmp(name, "2emaaluWzUw#q#q")) return (uintptr_t)guard_abort;
-    if (!strcmp(name, "Ou3iL1abvng#p#J")) return (uintptr_t)stack_fail;
-    if (!strcmp(name, "8zTFvBIAIN8#q#q")) return (uintptr_t)guest_memset;
-    if (!strcmp(name, "Q3VBxCXhUHs#q#q")) return (uintptr_t)guest_memcpy;
-    if (!strcmp(name, "+P6FRGH4LfA#q#q")) return (uintptr_t)guest_memmove;
-    if (!strcmp(name, "DfivPArhucg#q#q")) return (uintptr_t)guest_memcmp;
-    if (!strcmp(name, "j4ViWNHEgww#q#q")) return (uintptr_t)guest_strlen;
-    if (!strcmp(name, "vNe1w4diLCs#p#J")) return (uintptr_t)guest_tls_get_addr;
-    if (!strcmp(name, "959qrazPIrg#p#J")) return (uintptr_t)guest_procparam;
-    if (!strcmp(name, "p5EcQeEeJAE#p#J")) return (uintptr_t)guest_set_heap_api;
+    if (is_data) return RUNTIME_LOOKUP(own_data,name);
+    uintptr_t own = RUNTIME_LOOKUP(own_functions,name);
+    if (own) return own;
     uintptr_t mutex = runtime_mutex_resolve(name);
     if (mutex) return mutex;
     uintptr_t thread = runtime_thread_resolve(name);
@@ -293,9 +284,6 @@ static uintptr_t resolve_scoped(const char *name, int is_data) {
     if (aio) return aio;
     return bbgpu_resolve(name);
 }
-static const struct { const char *nid, *symbol; } import_names[]={
-#include "import_names.inc"
-};
 /* The NIDs before any "#<library>#<module>" scope are equal. */
 int runtime_same_nid(const char *a, const char *b) {
     while (*a && *a!='#' && *a==*b) ++a, ++b;
@@ -306,8 +294,6 @@ static const struct { char nid[12]; const char *symbol; } all_names[]={
 #include "import_names_all.inc"
 };
 const char *runtime_symbol(const char *nid) {
-    for (size_t i=0;i<sizeof(import_names)/sizeof(*import_names);++i)
-        if (runtime_same_nid(nid,import_names[i].nid)) return import_names[i].symbol;
     size_t low=0, high=sizeof(all_names)/sizeof(*all_names);
     while (low<high) {
         size_t mid=low+(high-low)/2;
@@ -319,29 +305,11 @@ const char *runtime_symbol(const char *nid) {
     static const struct { const char *nid, *symbol; } extra[]={
         {"BG26hBGiNlw","_sceUlobjmgrRegisterObject"}, {"Smf+fUNblPc","_sceUlobjmgrUnregisterObject"},
         {"HZ9Q2c+4BU4","ulobjmgr Func_1D9F50D9CFB8054E"}, {"SweJO7t3pkk","ulobjmgr Func_4B07893BBB77A649"},
-        {"fJgP+wqifno","sceDiscMap_7C980FFB0AA27E7A"},
+        {"fJgP+wqifno","sceDiscMap_7C980FFB0AA27E7A"}, {"ioKMruft1ek","sceDiscMap_8A828CAEE7EDD5E9"},
     };
     for (size_t i=0;i<sizeof(extra)/sizeof(*extra);++i)
         if (runtime_same_nid(nid,extra[i].nid)) return extra[i].symbol;
     return NULL;
-}
-/* The suffix after the NID numbers the library and module in the importing executable's own
- * tables, so another title imports the same function as e.g. "JTvBflhYazQ#i#f" where Bloodborne
- * has "#p#J"; the tables above are written for Bloodborne's. */
-static const char *bloodborne_scope(const char *name) {
-    const char *hash=strchr(name,'#');
-    if (!hash) return NULL;
-    size_t length=(size_t)(hash-name)+1;
-    for (size_t i=0;i<sizeof(import_names)/sizeof(*import_names);++i)
-        if (!strncmp(name,import_names[i].nid,length) && strcmp(name,import_names[i].nid))
-            return import_names[i].nid;
-    return NULL;
-}
-uintptr_t runtime_resolve(const char *name, int is_data) {
-    uintptr_t found=resolve_scoped(name,is_data);
-    if (found) return found;
-    const char *scoped=bloodborne_scope(name);
-    return scoped ? resolve_scoped(scoped,is_data) : 0;
 }
 /* Same symbol name means same contract whether imported from libkernel or
  * libScePosix, so newer modules resolve by name through runtime_symbol. */

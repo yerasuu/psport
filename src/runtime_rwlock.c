@@ -196,6 +196,10 @@ static ABI int32_t posix_timedread(Rwlock **r,const GuestTime *t) { return posix
 static ABI int32_t posix_timedwrite(Rwlock **r,const GuestTime *t) { return posix_result(rw_timedwrite(r,t)); }
 static ABI int32_t posix_unlock(Rwlock **r) { return posix_result(rw_unlock(r)); }
 static const RuntimeExport exports[]={
+    {"scePthreadRwlockInit",rw_init}, {"scePthreadRwlockDestroy",rw_destroy}, {"scePthreadRwlockRdlock",rw_read},
+    {"scePthreadRwlockWrlock",rw_write}, {"scePthreadRwlockTryrdlock",rw_tryread},
+    {"scePthreadRwlockTrywrlock",rw_trywrite}, {"scePthreadRwlockUnlock",rw_unlock},
+    {"scePthreadRwlockTimedrdlock",rw_timedread}, {"scePthreadRwlockTimedwrlock",rw_timedwrite},
     {"scePthreadRwlockattrInit",attr_init}, {"scePthreadRwlockattrDestroy",attr_destroy},
     {"scePthreadRwlockattrSettype",attr_settype}, {"scePthreadRwlockattrGettype",attr_gettype},
     {"scePthreadRwlockattrSetpshared",attr_setpshared}, {"scePthreadRwlockattrGetpshared",attr_getpshared},
@@ -209,15 +213,6 @@ static const RuntimeExport exports[]={
     {"pthread_rwlock_unlock",posix_unlock},
 };
 uintptr_t runtime_rwlock_resolve(const char *name) {
-    if (!strcmp(name,"6ULAa0fq4jA#p#J")) return (uintptr_t)rw_init;
-    if (!strcmp(name,"BB+kb08Tl9A#p#J")) return (uintptr_t)rw_destroy;
-    if (!strcmp(name,"Ox9i0c7L5w0#p#J")) return (uintptr_t)rw_read;
-    if (!strcmp(name,"mqdNorrB+gI#p#J")) return (uintptr_t)rw_write;
-    if (!strcmp(name,"XD3mDeybCnk#p#J")) return (uintptr_t)rw_tryread;
-    if (!strcmp(name,"bIHoZCTomsI#p#J")) return (uintptr_t)rw_trywrite;
-    if (!strcmp(name,"+L98PIbGttk#p#J")) return (uintptr_t)rw_unlock;
-    if (!strcmp(name,"iPtZRWICjrM#p#J")) return (uintptr_t)rw_timedread;
-    if (!strcmp(name,"adh--6nIqTk#p#J")) return (uintptr_t)rw_timedwrite;
     return RUNTIME_LOOKUP(exports,name);
 }
 void runtime_rwlock_report(void) {

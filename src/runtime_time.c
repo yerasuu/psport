@@ -19,10 +19,8 @@ static ABI int guest_gettimeofday(GuestTimeval *value,GuestTimezone *zone) {
     if (zone) { zone->minuteswest=z.tz_minuteswest; zone->dsttime=z.tz_dsttime; }
     return 0;
 }
-uintptr_t runtime_time_resolve(const char *name) {
-    if (!strcmp(name,"n88vx3C5nW8#I#J")) return (uintptr_t)guest_gettimeofday;
-    return 0;
-}
+static const RuntimeExport exports[]={{"gettimeofday",guest_gettimeofday}};
+uintptr_t runtime_time_resolve(const char *name) { return RUNTIME_LOOKUP(exports,name); }
 #else
 uintptr_t runtime_time_resolve(const char *name) { (void)name; return 0; }
 #endif

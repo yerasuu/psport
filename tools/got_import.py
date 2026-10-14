@@ -7,7 +7,7 @@ size, entry, ns, nr, ni, caps = struct.unpack_from('<QQQQQQ', data, 8)
 pos = 56 + ns * 24
 names = [data[pos + i * 128:pos + (i + 1) * 128].split(b'\0')[0].decode() for i in range(ni)]
 pos += ni * 128
-symbols = dict(re.findall(r'\{"([^"]+)","([^"]+)"\}', (here / 'src/import_names.inc').read_text()))
+symbols = dict(re.findall(r'\{"([^"]+)","([^"]+)"\}', (here / 'src/import_names_all.inc').read_text()))
 slots = {}
 for i in range(nr):
     target, kind, value, addend = struct.unpack_from('<QQqq', data, pos + i * 32)
