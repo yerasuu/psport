@@ -185,6 +185,36 @@ void DumpFinalFrameIfDue(const Instance& instance, Scheduler& scheduler, vk::Com
                {{image, width, height, 4, "final", ColorDumpLayout(format)}});
 }
 
+Game::UpscalerPlacement GetUpscalerPlacement() {
+    static const Game::UpscalerPlacement placement = [] {
+        Game::UpscalerPlacement found = Game::Upscaler();
+        if (const char* hash = std::getenv("PS_UPSCALE_BEFORE_CS")) {
+            found.scene_combine_shader = std::strtoull(hash, nullptr, 16);
+        }
+        if (const char* hash = std::getenv("PS_UI_TRIGGER_VS")) {
+            found.ui_shader = std::strtoull(hash, nullptr, 16);
+        }
+        return found;
+    }();
+    return placement;
+}
+
+bool IsUpscalerAvailable() {
+    static const bool is_available = [] {
+        const char* env = std::getenv("PS_UPSCALER");
+        if (env && std::strcmp(env, "none") == 0) {
+            return false;
+        }
+        if (GetUpscalerPlacement().scene_combine_shader == 0) {
+            std::printf("Upscaler: off: no game profile places it in this game's frame "
+                        "(PS_UPSCALE_BEFORE_CS)\n");
+            return false;
+        }
+        return true;
+    }();
+    return is_available;
+}
+
 TemporalUpscaler::TemporalUpscaler(const Instance& instance_, Scheduler& scheduler_,
                                    VideoCore::TextureCache& texture_cache_, Runtime& runtime_,
                                    CameraMotion& camera_motion_, SceneTargets& scene_targets_)
@@ -201,15 +231,10 @@ TemporalUpscaler::TemporalUpscaler(const Instance& instance_, Scheduler& schedul
                         : dlss->Problem();
         BbSettings::ConfigureDlssSupport(dlss && dlss->Available(), problem.c_str());
     }
-    // Available unless PS_UPSCALER=none; on/off and the parameters are the menu's settings.
-    const char* env = std::getenv("PS_UPSCALER");
-    enabled = !(env && std::strcmp(env, "none") == 0);
-    if (const char* hash = std::getenv("PS_UPSCALE_BEFORE_CS")) {
-        trigger_hash = std::strtoull(hash, nullptr, 16);
-    }
-    if (const char* hash = std::getenv("PS_UI_TRIGGER_VS")) {
-        ui_trigger_vs = std::strtoull(hash, nullptr, 16);
-    }
+    // On/off and the parameters are the menu's settings.
+    enabled = IsUpscalerAvailable();
+    trigger_hash = GetUpscalerPlacement().scene_combine_shader;
+    ui_trigger_vs = GetUpscalerPlacement().ui_shader;
     if (const char* res = std::getenv("PS_OUTPUT_RES")) {
         u32 w = 0, h = 0;
         if (std::sscanf(res, "%ux%u", &w, &h) == 2 && w && h) {

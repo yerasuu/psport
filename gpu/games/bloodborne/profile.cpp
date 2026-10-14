@@ -108,6 +108,8 @@ extern const Profile BloodborneProfile = {
     // Its scene textures have little or no anisotropic filtering: behind the upscaler, surfaces
     // seen at a grazing angle (stairs, floors, walls along the view) stayed blurred.
     .anisotropy = 16,
+    // The post-processing combine, and the UI's first vertex shader.
+    .upscaler = {.scene_combine_shader = 0x9a9cf8a9, .ui_shader = 0x34e8a281},
     .report_stats = ReportStats,
     .before_present = BbGameMenu::Poll,
     .label_release = LabelRelease,

@@ -11,6 +11,7 @@
 #include "shader_recompiler/runtime_info.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
+#include "video_core/renderer_vulkan/vk_temporal_upscaler.h"
 
 namespace Vulkan {
 
@@ -53,6 +54,10 @@ ObjectMotion::ObjectMotion(const Instance& instance_, Scheduler& scheduler_)
     : instance{instance_}, scheduler{scheduler_} {
     // Pipeline selection limits the extra attachment and vertex stores to likely
     // animated draws. A setting or environment override can still disable the path.
+    if (!IsUpscalerAvailable()) {
+        std::puts("Object motion: off (no upscaler)");
+        return;
+    }
     if (!BbSettings::Get().object_motion ||
         BbSettings::Get().upscaler == BbSettings::UpscalerOff) {
         std::puts("Object motion: off (enable in menu or PS_OBJECT_MOTION=1)");

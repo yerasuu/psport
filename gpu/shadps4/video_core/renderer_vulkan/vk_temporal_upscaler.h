@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "common/types.h"
+#include "game_profile.h"
 #include "video_core/renderer_vulkan/vk_common.h"
 #include "video_core/renderer_vulkan/vk_dlss.h"
 #include "video_core/renderer_vulkan/vk_fsr4.h"
@@ -42,6 +43,13 @@ class SceneTargets;
 /// as final_<w>x<h> in PS_DUMP_DIR when the trigger file exists (consumed). `image` in General.
 void DumpFinalFrameIfDue(const Instance& instance, Scheduler& scheduler, vk::CommandBuffer cmdbuf,
                          vk::Image image, u32 width, u32 height, vk::Format format);
+
+/// The scene combine and UI shaders that place the upscaler in the frame: PS_UPSCALE_BEFORE_CS
+/// and PS_UI_TRIGGER_VS, else the game profile's (Game::Profile::upscaler).
+Game::UpscalerPlacement GetUpscalerPlacement();
+/// Unless PS_UPSCALER=none, the upscaler runs where its scene combine is known; the camera and
+/// object motion vectors and the scene jitter exist only for it.
+bool IsUpscalerAvailable();
 
 class TemporalUpscaler {
 public:
@@ -204,7 +212,7 @@ private:
     bool failed = false;
     /// An FSR 3 dispatch recorded on a recording thread failed; `failed` at the next frame.
     std::atomic<bool> dispatch_failed{false};
-    u64 trigger_hash = 0x9a9cf8a9;
+    u64 trigger_hash = 0;
     VideoCore::ImageId scene_color{};
     bool done_this_frame = false;
     u32 preset_file_frames = 0; ///< PS_PRESET_FILE polling
@@ -222,7 +230,7 @@ private:
     u32 out_width = 0, out_height = 0;     ///< output size of the context
     bool context_hdr = true;
     u32 target_width = 1920, target_height = 1080; ///< output size of scaled presets
-    u64 ui_trigger_vs = 0x34e8a281;
+    u64 ui_trigger_vs = 0;
     VideoCore::ImageId ldr_target{};
     VideoCore::ImageId ui_color{}, ui_depth{};
     bool ui_phase = false;         ///< from the upscale to the next display pass

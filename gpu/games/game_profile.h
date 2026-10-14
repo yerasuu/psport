@@ -39,6 +39,15 @@ struct SmallObjectPool {
     std::uint64_t block_size = 0;
 };
 
+/// Where the temporal upscaler goes in the game's frame (docs/en/upscaler.md): it upscales the
+/// scene color right before the first dispatch of scene_combine_shader, and the frame's UI starts
+/// with the first draw of ui_shader (GCN program hashes). The upscaler, its jitter and the camera
+/// and object motion vectors run only once the scene combine is known.
+struct UpscalerPlacement {
+    std::uint64_t scene_combine_shader = 0;
+    std::uint64_t ui_shader = 0;
+};
+
 /// What the core offers a profile's hooks.
 struct CoreServices {
     /// The game handed out GPU memory [address, address + size): what the GPU had there is dead.
@@ -84,6 +93,9 @@ struct Profile {
     /// Anisotropic filtering forced on the game's mipmapped textures in graphics draws (2, 4, 8 or
     /// 16; PS_ANISO overrides it); 0 keeps the game's own samplers.
     std::uint32_t anisotropy = 0;
+    /// Zeros when unknown: the temporal upscaler stays off (PS_UPSCALE_BEFORE_CS and
+    /// PS_UI_TRIGGER_VS place it by hand).
+    UpscalerPlacement upscaler;
     /// With each frame statistics report (PS_FRAME_STATS, the video out thread): the profile's
     /// own diagnostics.
     void (*report_stats)() = nullptr;
@@ -120,6 +132,12 @@ inline std::uint32_t SubmitsAhead() {
 inline std::uint32_t Anisotropy() {
     const Profile* profile = Active();
     return profile ? profile->anisotropy : 0;
+}
+
+/// The active profile's upscaler placement, or zeros.
+inline UpscalerPlacement Upscaler() {
+    const Profile* profile = Active();
+    return profile ? profile->upscaler : UpscalerPlacement{};
 }
 
 /// Whether guest_rip is in code the active profile knows to write per-frame data.
