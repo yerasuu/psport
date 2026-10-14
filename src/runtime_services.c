@@ -1,6 +1,7 @@
 /* System services for an offline, single-user console:
  *   - one local user (id 1) who is logged in but not signed in to PSN;
- *   - network cable unplugged: NetCtl disconnected, sockets on loopback only (runtime_socket.c);
+ *   - network cable unplugged: NetCtl disconnected, sockets on loopback only (runtime_socket.c),
+ *     no HTTP transfer (runtime_http.c);
  *   - common dialogs complete immediately (no UI is drawn yet);
  *   - no PlayStation VR headset is connected.
  * Every entry here is an explicit contract; unknown functions still stop. */
@@ -27,7 +28,6 @@
 #define NP_INVALID_ARGUMENT ((int32_t)0x80550003)
 #define NET_ENETUNREACH ((int32_t)0x80410133)
 #define NET_EINVAL ((int32_t)0x80410116)
-#define HTTP_NETWORK ((int32_t)0x80431063)
 #define DIALOG_NOT_INITIALIZED ((int32_t)0x80B80003)
 #define AUDIO_IN_NOT_OPENED ((int32_t)0x80260109)
 #define TROPHY_INVALID ((int32_t)0x80551604)
@@ -126,7 +126,7 @@ static ABI int32_t display_safe_area(float *ratio) {
     return 0;
 }
 
-/* ---- NetCtl / Net / Http / Ssl: no network ---- */
+/* ---- NetCtl / Net / Ssl: no network ---- */
 static ABI int32_t net_unreachable(void) { *runtime_net_errno()=51; return NET_ENETUNREACH; }
 static ABI int32_t net_epoll_create(const char *name,int flags) { (void)name; (void)flags; return new_id(); }
 static ABI int32_t net_resolver_create(const char *name,int pool,int flags) { (void)name; (void)pool; (void)flags; return new_id(); }
@@ -149,20 +149,6 @@ static ABI int32_t netctl_nat(uint32_t *info) {
     if (!info) return NET_CTL_INVALID_ADDR;
     info[1]=0; info[2]=3; info[3]=0; /* stun failed, NAT type 3, no mapped address */
     return 0;
-}
-static ABI int32_t lib_init_id(void) { return new_id(); }
-static ABI int32_t http_fail(void) { return HTTP_NETWORK; }
-/* Objects are created so setup code proceeds; any transfer fails as unplugged. */
-static ABI int32_t http_object(void) { return new_id(); }
-static ABI int32_t http_epoll(int32_t ctx,void **handle) {
-    (void)ctx;
-    if (!handle) return (int32_t)0x80431077; /* HTTP INVALID_VALUE */
-    *handle=(void *)(uintptr_t)(0x100+new_id()); return 0;
-}
-static ABI int32_t http_wait(void *handle,void *events,int32_t max,int64_t timeout) {
-    (void)handle; (void)events; (void)max;
-    if (timeout>0) { struct timespec t={timeout/1000000,(timeout%1000000)*1000}; nanosleep(&t,NULL); }
-    return 0; /* no events: nothing is in flight */
 }
 
 /* ---- NP (PSN): signed out ---- */
@@ -640,20 +626,7 @@ static const RuntimeExport exports[]={
     {"sceNetCtlRegisterCallback",netctl_register}, {"sceNetCtlCheckCallback",nothing_due},
     {"sceNetCtlUnregisterCallback",runtime_stub}, {"sceNetCtlGetNatInfo",netctl_nat},
     {"sceNetCtlRegisterCallbackForNpToolkit",netctl_register}, {"sceNetCtlCheckCallbackForNpToolkit",nothing_due},
-    {"sceSslTerm",runtime_stub}, {"sceHttpTerm",runtime_stub},
-    {"sceHttpCreateTemplate",http_object}, {"sceHttpDeleteTemplate",runtime_stub},
-    {"sceHttpCreateConnectionWithURL",http_object}, {"sceHttpCreateRequestWithURL",http_object},
-    {"sceHttpSendRequest",http_fail}, {"sceHttpCreateEpoll",http_epoll},
-    {"sceHttpSetNonblock",runtime_stub}, {"sceHttpSetConnectTimeOut",runtime_stub},
-    {"sceHttpsEnableOption",runtime_stub}, {"sceHttpsDisableOption",runtime_stub},
-    {"sceHttpAddRequestHeader",runtime_stub}, {"sceHttpSetRequestContentLength",runtime_stub},
-    {"sceHttpDeleteConnection",runtime_stub}, {"sceHttpDeleteRequest",runtime_stub},
-    {"sceHttpAbortWaitRequest",runtime_stub}, {"sceHttpDestroyEpoll",runtime_stub},
-    {"sceHttpSetEpoll",runtime_stub}, {"sceHttpUnsetEpoll",runtime_stub}, {"sceHttpWaitRequest",http_wait},
-    {"sceHttpGetStatusCode",http_fail}, {"sceHttpGetResponseContentLength",http_fail},
-    {"sceHttpReadData",http_fail},
-    {"sceHttp2Init",lib_init_id}, {"sceHttp2Term",runtime_stub},
-    {"sceHttp2CreateTemplate",http_object}, {"sceHttp2DeleteTemplate",runtime_stub},
+    {"sceSslTerm",runtime_stub},
     {"sceNpGetState",np_state}, {"sceNpGetOnlineId",np_signed_out}, {"sceNpGetNpId",np_signed_out},
     {"sceNpGetAccountIdA",np_account_id}, {"sceNpGetAccountId",np_account_id_online},
     {"sceNpGetAccountCountry",np_account_info}, {"sceNpGetAccountDateOfBirth",np_account_info},
@@ -780,6 +753,8 @@ uintptr_t runtime_services_resolve(const char *name) {
     if (online) return online;
     const uintptr_t found=RUNTIME_LOOKUP(exports,name);
     if (found) return found;
+    const uintptr_t va_http=runtime_http_resolve(name);
+    if (va_http) return va_http;
     const uintptr_t va_json=runtime_json_resolve(name);
     if (va_json) return va_json;
     const uintptr_t va_np=runtime_np_resolve(name);
