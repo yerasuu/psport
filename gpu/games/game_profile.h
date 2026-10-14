@@ -30,6 +30,15 @@ struct LabelReleaseCode {
     std::uint64_t collector_done = 0;
 };
 
+/// The game's small-object pool, for the free check (PS_FREE_CHECK, bbport_free_check.h): 4 KiB
+/// pages, blocks of block_size from the page start, a header at page + header_offset (page list
+/// next and prev, free list head and free count, a qword each), the free list linked through the
+/// first qword of each free block. A page has at most 128 blocks.
+struct SmallObjectPool {
+    std::uint64_t header_offset = 0;
+    std::uint64_t block_size = 0;
+};
+
 /// What the core offers a profile's hooks.
 struct CoreServices {
     /// The game handed out GPU memory [address, address + size): what the GPU had there is dead.
@@ -76,6 +85,8 @@ struct Profile {
     /// The game's label release code; zeros when unknown, and the free check's breakpoints stay
     /// off.
     LabelReleaseCode label_release;
+    /// The pool holding the game's GPU labels; zeros when unknown, and the free check stays off.
+    SmallObjectPool small_object_pool;
 };
 
 /// Chooses the profile for the game by its TITLE_ID (bbgpu_init). PS_GAME_PROFILE=none runs the

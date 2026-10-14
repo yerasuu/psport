@@ -27,11 +27,11 @@ namespace {
 using u64 = std::uint64_t;
 using u32 = std::uint32_t;
 
-// The game's small-object pool.
 constexpr u64 PageSize = 0x1000;
-constexpr u64 HeaderOffset = 0xfc0;
-constexpr u64 BlockSize = 0x30;
-constexpr u64 MaxBlocks = HeaderOffset / BlockSize;
+/// Blocks a page can have: the free bitmasks hold 128.
+constexpr u64 MaxPoolBlocks = 128;
+/// The game's small-object pool (Game::SmallObjectPool), set once by Enabled().
+u64 header_offset = 0, block_size = 0, max_blocks = 0;
 
 const char* const SourceNames[] = {"EOP fence",  "EOS fence",   "EOS GDS store", "WriteData",
                                    "compute WriteData", "ReleaseMem", "DumpConstRam",
@@ -47,7 +47,7 @@ struct Header {
 };
 
 bool IsBlock(u64 page, u64 p) {
-    return p >= page && p - page < HeaderOffset && (p - page) % BlockSize == 0;
+    return p >= page && p - page < header_offset && (p - page) % block_size == 0;
 }
 
 bool Plausible(u64 page, const Header& h) {
@@ -56,10 +56,10 @@ bool Plausible(u64 page, const Header& h) {
     // release): its old header means nothing. The page list links point at other page
     // headers or at the pool's list heads; at least one of them is a header (pools of one
     // page are skipped: other data at a page end looked like headers).
-    if (!pointer(h.next) || !pointer(h.prev) || h.count >= MaxBlocks) {
+    if (!pointer(h.next) || !pointer(h.prev) || h.count >= max_blocks) {
         return false;
     }
-    if ((h.next & (PageSize - 1)) != HeaderOffset && (h.prev & (PageSize - 1)) != HeaderOffset) {
+    if ((h.next & (PageSize - 1)) != header_offset && (h.prev & (PageSize - 1)) != header_offset) {
         return false;
     }
     return h.count == 0 ? h.head == 0 : IsBlock(page, h.head);
@@ -80,7 +80,7 @@ bool IsFree(const u64 (&free)[2], u64 index) {
 /// Walks the free list of `page`; `read(address)` returns the qword there.
 template <typename Read>
 WalkResult WalkFree(u64 page, const Header& h, Read&& read) {
-    WalkResult r{true, page + HeaderOffset + 16, h.head, 0, {0, 0}};
+    WalkResult r{true, page + header_offset + 16, h.head, 0, {0, 0}};
     u64 node = h.head;
     while (node != 0) {
         if (!IsBlock(page, node) || r.length >= h.count) {
@@ -88,7 +88,7 @@ WalkResult WalkFree(u64 page, const Header& h, Read&& read) {
             r.value = node;
             return r;
         }
-        const u64 index = (node - page) / BlockSize;
+        const u64 index = (node - page) / block_size;
         if (IsFree(r.free, index)) {
             r.ok = false; // a loop
             r.value = node;
@@ -262,7 +262,7 @@ void PrintRecent(u64 begin, u64 end, u64 now, u32 limit) {
 }
 
 void PrintBlock(const unsigned char* bytes, u64 page, u64 block) {
-    for (u64 at = block; at < block + BlockSize && at + 8 <= page + PageSize; at += 8) {
+    for (u64 at = block; at < block + block_size && at + 8 <= page + PageSize; at += 8) {
         u64 v;
         std::memcpy(&v, bytes + (at - page), 8);
         std::fprintf(stderr, "Free check:   [%#llx] = %#llx\n", (unsigned long long)at,
@@ -281,7 +281,7 @@ bool ReadPage(u64 page, unsigned char* out) {
 struct Track {
     bool valid = false;
     u64 free[2]{};
-    std::array<u64, MaxBlocks> allocated_at{}, freed_at{};
+    std::array<u64, MaxPoolBlocks> allocated_at{}, freed_at{};
 };
 
 void Watcher() {
@@ -294,7 +294,7 @@ void Watcher() {
         if (!ReadPage(page, buf)) {
             return false;
         }
-        std::memcpy(&h, buf + HeaderOffset, sizeof(h));
+        std::memcpy(&h, buf + header_offset, sizeof(h));
         if (!Plausible(page, h)) {
             return false;
         }
@@ -337,7 +337,7 @@ void Watcher() {
             if (r.ok) {
                 const u64 now = NowNs();
                 Track& t = tracks[page];
-                for (u64 i = 0; i < MaxBlocks; ++i) {
+                for (u64 i = 0; i < max_blocks; ++i) {
                     const bool was = IsFree(t.free, i), is = IsFree(r.free, i);
                     if (t.valid && was != is) {
                         (is ? t.freed_at : t.allocated_at)[i] = now;
@@ -380,9 +380,9 @@ void Watcher() {
                          (unsigned long long)h.count, (unsigned long long)h.next,
                          (unsigned long long)h.prev, (unsigned long long)h.head,
                          (unsigned long long)h.count);
-            if (r.holder < page + HeaderOffset) {
+            if (r.holder < page + header_offset) {
                 PrintBlock(buf, page, r.holder);
-                const u64 index = (r.holder - page) / BlockSize;
+                const u64 index = (r.holder - page) / block_size;
                 if (const auto it = tracks.find(page); it != tracks.end()) {
                     const Track& t = it->second;
                     const auto ago = [&](u64 at) { return at ? double(now - at) / 1e6 : -1.0; };
@@ -394,9 +394,9 @@ void Watcher() {
                                  ago(t.freed_at[index]), IsFree(t.free, index) ? "yes" : "no");
                 }
                 std::fprintf(stderr, "Free check:   emulator writes into this block:\n");
-                PrintRecent(r.holder, r.holder + BlockSize, now, 24);
+                PrintRecent(r.holder, r.holder + block_size, now, 24);
                 std::fprintf(stderr, "Free check:   fences decoded for this block:\n");
-                PrintDecoded(r.holder, r.holder + BlockSize, now, 16);
+                PrintDecoded(r.holder, r.holder + block_size, now, 16);
             }
             std::fprintf(stderr, "Free check:   emulator writes into the page:\n");
             PrintRecent(page, page + PageSize, now, 32);
@@ -412,7 +412,7 @@ void StartWatcher() {
     std::call_once(once, [] {
         std::fprintf(stderr, "Free check: on (PS_FREE_CHECK=1): pool pages of %llu-byte "
                              "blocks, header at +%#llx\n",
-                     (unsigned long long)BlockSize, (unsigned long long)HeaderOffset);
+                     (unsigned long long)block_size, (unsigned long long)header_offset);
         std::thread(Watcher).detach();
     });
 }
@@ -421,7 +421,7 @@ void StartWatcher() {
 void CheckPage(u64 page, u64 begin, u64 end, u64 value, u64 size, Source source, u64 seq,
                bool small) {
     Header h;
-    std::memcpy(&h, reinterpret_cast<const void*>(page + HeaderOffset), sizeof(h));
+    std::memcpy(&h, reinterpret_cast<const void*>(page + header_offset), sizeof(h));
     if (!Plausible(page, h)) {
         return;
     }
@@ -442,24 +442,24 @@ void CheckPage(u64 page, u64 begin, u64 end, u64 value, u64 size, Source source,
                      (unsigned long long)seq, what, (unsigned long long)block,
                      (unsigned long long)page, (unsigned long long)h.count, Tid(),
                      double(now) / 1e9);
-        if (block < page + HeaderOffset) {
+        if (block < page + header_offset) {
             PrintBlock(reinterpret_cast<const unsigned char*>(page), page, block);
-            PrintRecent(block, block + BlockSize, now, 16);
-            PrintDecoded(block, block + BlockSize, now, 8);
+            PrintRecent(block, block + block_size, now, 16);
+            PrintDecoded(block, block + block_size, now, 8);
         } else {
             PrintRecent(page, page + PageSize, now, 16);
         }
     };
-    if (end > page + HeaderOffset) {
+    if (end > page + header_offset) {
         header_hits.fetch_add(1, std::memory_order_relaxed);
-        report("the HEADER", page + HeaderOffset);
+        report("the HEADER", page + header_offset);
         return;
     }
     // The game changes the list all the time (labels are taken and released in bursts): a
     // walk that met it halfway is repeated.
     WalkResult r{};
     for (int attempt = 0; attempt < 8; ++attempt) {
-        std::memcpy(&h, reinterpret_cast<const void*>(page + HeaderOffset), sizeof(h));
+        std::memcpy(&h, reinterpret_cast<const void*>(page + header_offset), sizeof(h));
         if (!Plausible(page, h)) {
             return;
         }
@@ -475,9 +475,9 @@ void CheckPage(u64 page, u64 begin, u64 end, u64 value, u64 size, Source source,
     if (!r.ok) {
         return; // still changing, or damaged: the watcher reports damage
     }
-    for (u64 block = page + (begin - page) / BlockSize * BlockSize; block < end;
-         block += BlockSize) {
-        if (IsFree(r.free, (block - page) / BlockSize)) {
+    for (u64 block = page + (begin - page) / block_size * block_size; block < end;
+         block += block_size) {
+        if (IsFree(r.free, (block - page) / block_size)) {
             free_hits.fetch_add(1, std::memory_order_relaxed);
             report("FREE block", block);
             return;
@@ -489,7 +489,21 @@ void CheckPage(u64 page, u64 begin, u64 end, u64 value, u64 size, Source source,
 bool Enabled() {
     static const bool enabled = [] {
         const char* env = std::getenv("PS_FREE_CHECK");
-        return env && env[0] == '1';
+        if (!env || env[0] != '1') {
+            return false;
+        }
+        const Game::Profile* game = Game::Active();
+        const Game::SmallObjectPool pool = game ? game->small_object_pool : Game::SmallObjectPool{};
+        if (pool.block_size < 8 || pool.header_offset + sizeof(Header) > PageSize ||
+            pool.header_offset / pool.block_size > MaxPoolBlocks) {
+            std::fprintf(stderr, "Free check: PS_FREE_CHECK=1 needs the game's small-object pool "
+                                 "(its profile): off\n");
+            return false;
+        }
+        header_offset = pool.header_offset;
+        block_size = pool.block_size;
+        max_blocks = header_offset / block_size;
+        return true;
     }();
     return enabled;
 }
@@ -684,11 +698,11 @@ u32 SignalTid() {
 }
 void NoteTrapDecoded(u64 label) {
     const u64 page = label & ~(PageSize - 1);
-    if (label - page >= HeaderOffset) {
+    if (label - page >= header_offset) {
         return;
     }
     Header h;
-    iovec local{&h, sizeof(h)}, remote{reinterpret_cast<void*>(page + HeaderOffset), sizeof(h)};
+    iovec local{&h, sizeof(h)}, remote{reinterpret_cast<void*>(page + header_offset), sizeof(h)};
     if (process_vm_readv(getpid(), &local, 1, &remote, 1, 0) != ssize_t(sizeof(h)) ||
         !Plausible(page, h)) {
         return;

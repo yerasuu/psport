@@ -233,6 +233,7 @@ kept out of the core. `Game::Select` picks a profile by `param.sfo` `TITLE_ID` i
 | `frame_overlap_unsafe` | tells the core to stop `PS_SUBMIT_AHEAD` overlap for the session |
 | `report_stats`, `before_present` | profile diagnostics; per-frame work on the presenter thread |
 | `label_release` | the game's label release code, for the free check's `PS_LABEL_TRAP=2` |
+| `small_object_pool` | the layout of the pool holding its GPU labels, for the free check (`PS_FREE_CHECK`) |
 
 A profile makes a title faster or easier to diagnose; it never makes it work. The core must run
 every title correctly on its generic paths, which `PS_GAME_PROFILE=none` checks. The only profile
