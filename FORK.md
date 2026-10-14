@@ -131,6 +131,9 @@ a pointer, so regression runs see a mouse that never moves or clicks). While
 the menu or the close prompt is open the game sees no motion and no buttons. While the game shows a
 VideoOut cursor, the window hides the system cursor over it and a click does not take the mouse for
 mouse look. The log says once whether the host mouse reaches the game (`Runtime: mouse: ...`).
+`game_mouse_sensitivity` in `bbport.ini` (0.05 to 20, default 1: the host's pixels as they are)
+scales the motion the game receives, keeping fractions for the next read; a value other than 1 is
+logged. Mouse look keeps its own `mouse_sensitivity`.
 
 ## Keyboard
 

@@ -8,6 +8,7 @@
 #include "runtime.h"
 #include "gpu/bbgpu.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
 #include <time.h>
@@ -38,6 +39,32 @@ static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
 static int initialized, host_connected=-1;
 static MousePort ports[MOUSE_HANDLES];
 static size_t reads;
+static float sensitivity=-1.0f, carry_x, carry_y;
+
+/* game_mouse_sensitivity in bbport.ini (PS_CONFIG), beside mouse look's keys (runtime_pad.c):
+ * scales the motion the game receives; 1 passes the host's pixels as they are. */
+static void load_sensitivity(void) {
+    sensitivity=1.0f;
+    const char *path=getenv("PS_CONFIG");
+    FILE *f=path ? fopen(path,"r") : NULL;
+    if (!f) return;
+    char line[512];
+    while (fgets(line,sizeof line,f))
+        if (!strncmp(line,"game_mouse_sensitivity=",23)) {
+            const float v=strtof(line+23,NULL);
+            if (v>=0.05f && v<=20.0f) sensitivity=v;
+            else printf("Runtime: mouse: game_mouse_sensitivity=%g is outside 0.05-20, 1 is used\n",v);
+        }
+    fclose(f);
+    if (sensitivity!=1.0f) printf("Runtime: mouse: game_mouse_sensitivity=%.2f scales the motion games receive\n",sensitivity);
+}
+/* Fractions stay for the next read, so slow motion still adds up at a low sensitivity. */
+static int32_t scaled(int32_t delta, float *carry) {
+    *carry+=(float)delta*sensitivity;
+    const int32_t whole=(int32_t)*carry;
+    *carry-=(float)whole;
+    return whole;
+}
 
 static uint64_t now_us(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC,&t); return (uint64_t)t.tv_sec*1000000u+(uint64_t)t.tv_nsec/1000u; }
 static MousePort *port_of(int32_t handle) { return handle>=1 && handle<=MOUSE_HANDLES && ports[handle-1].open ? &ports[handle-1] : NULL; }
@@ -51,6 +78,8 @@ static uint32_t ps4_buttons(uint32_t sdl) {
 static int collect(uint32_t *buttons) {
     int32_t dx, dy, wheel, tilt;
     const int host=bbgpu_game_mouse_take(&dx,&dy,&wheel,&tilt,buttons);
+    if (sensitivity<0) load_sensitivity();
+    dx=scaled(dx,&carry_x); dy=scaled(dy,&carry_y);
     if (host!=host_connected) {
         printf("Runtime: mouse: %s\n",host ? "the host mouse reaches libSceMouse's port 0" : "no host mouse, port 0 reports none");
         host_connected=host;
