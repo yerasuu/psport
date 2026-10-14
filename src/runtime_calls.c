@@ -157,5 +157,7 @@ void runtime_calls_report(void) {
         if (file >= 0) put(file, line);
     }
     if (file >= 0) close(file);
+    runtime_eventflag_created_report();
+    runtime_memory_flexible_report();
     runtime_file_unmounted_report();
 }

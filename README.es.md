@@ -97,7 +97,7 @@ Bloodborne.
 ventana (`PS_AUDIO=none`, `PS_PAD_HOST=0`: sin ventana, sin sonido y sin los mandos del usuario), lo
 maneja con un guion de pulsaciones (`tools/regress/*.sched`) e informa de hasta dónde ha llegado
 (cargado, entrada en el código del juego, inicializado, primer fotograma de la GPU, fotogramas
-dibujados, audio), de su firma de fallo y del número de importaciones sin implementar; con
+dibujados, audio), de su firma de fallo y de cuántas importaciones sin implementar ha llamado; con
 `-c <results.json anterior>` señala las regresiones. Los siete se ejecutan sin volcado de módulos
 del sistema; `SYS_MODULES=<carpeta>` pasa uno, de forma opcional, a los juegos que no son
 Bloodborne, para compararlos con las bibliotecas propias del port. Uso e hitos:

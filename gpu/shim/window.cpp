@@ -291,6 +291,12 @@ bool WindowSDL::PollEvents() {
         }
         case SDL_EVENT_QUIT:
         case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
+            // SDL turns SIGTERM and SIGINT into a quit event too, so a quit is not always the user's.
+            if (is_open) {
+                std::printf(event.type == SDL_EVENT_QUIT
+                                ? "Window: quit requested (in-game menu, SIGTERM or SIGINT), the game ends\n"
+                                : "Window: closed by the user, the game ends\n");
+            }
             is_open = false;
             break;
         default:

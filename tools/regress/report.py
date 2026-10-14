@@ -21,7 +21,9 @@ LOG_MILESTONES = {
     'initialized': re.compile(r"^Runtime: guest thread '"),
     'gpu': re.compile(r'^Presenter: first game frame presented'),
 }
-SUMMARY = re.compile(r'^Runtime: imports \d+:.*without implementation (\d+)')
+# The imports without implementation the game called, as the call report counts them at exit; the
+# count of those bound before the game starts ('Runtime: imports ...') includes code that never runs.
+CALLS_SUMMARY = re.compile(r'^Calls: summary: (\d+) unimplemented')
 SUBMIT_FORCED = 'Forcing submitDone'
 AUDIO = re.compile(r'^Audio stats port \d+:.* peak (-?[\d.]+|-inf) dBFS')
 GUEST_FAULT = re.compile(r'^Guest fault \(signal (\d+)\) at guest offset (0x[0-9a-f]+)')
@@ -83,7 +85,7 @@ def classify(run_dir):
     meta = dict(line.split('\t', 1) for line in (run_dir / 'run.tsv').read_text().splitlines() if '\t' in line)
     result = {'name': meta.get('name', run_dir.name), 'title': meta.get('title', ''),
               'status': f"skipped ({meta['skipped']})" if 'skipped' in meta else meta.get('ended', 'unknown'),
-              'seconds': int(meta.get('seconds', 0)), 'crash': '', 'no_impl': None, 'submit_forced': None,
+              'seconds': int(meta.get('seconds', 0)), 'crash': '', 'no_impl_called': None, 'submit_forced': None,
               'peak_dbfs': None, 'frames_drawn': 0, 'frames_dumped': 0, 'max_luma': None, 'max_lit_pct': None}
     result.update({m: False for m in MILESTONES})
     log = run_dir / 'log'
@@ -99,8 +101,8 @@ def classify(run_dir):
         for name, pattern in LOG_MILESTONES.items():
             if not result[name] and pattern.match(line):
                 result[name] = True
-        if m := SUMMARY.match(line):
-            result['no_impl'] = int(m[1])
+        if m := CALLS_SUMMARY.match(line):
+            result['no_impl_called'] = int(m[1])
         elif m := AUDIO.match(line):
             peak = float(m[1])
             if result['peak_dbfs'] is None or peak > result['peak_dbfs']:
@@ -152,11 +154,11 @@ def main(argv):
             before = previous.get(r['name'])
             if before and not r['status'].startswith('skipped'):
                 r['regressions'] = regressions(r, before)
-                r['no_impl_before'] = before.get('no_impl')
+                r['no_impl_called_before'] = before.get('no_impl_called')
                 r['submit_forced_before'] = before.get('submit_forced')
 
     columns = ['name', 'title', 'status', 'seconds', *MILESTONES, 'frames_drawn', 'frames_dumped', 'max_luma', 'max_lit_pct',
-               'peak_dbfs', 'no_impl', 'submit_forced', 'crash'] + (['regressions'] if previous else [])
+               'peak_dbfs', 'no_impl_called', 'submit_forced', 'crash'] + (['regressions'] if previous else [])
     def cell(r, c):
         v = r.get(c)
         if isinstance(v, bool):
@@ -185,7 +187,7 @@ def main(argv):
     for r in results:
         mark = lambda m: 'x' if r[m] else '.'
         rows.append([r['name'], r['title'], r['status'], str(r['seconds']), reached(r), *map(mark, MILESTONES),
-                     cell(r, 'max_luma'), cell(r, 'max_lit_pct'), cell(r, 'peak_dbfs'), with_delta(r, 'no_impl'),
+                     cell(r, 'max_luma'), cell(r, 'max_lit_pct'), cell(r, 'peak_dbfs'), with_delta(r, 'no_impl_called'),
                      with_delta(r, 'submit_forced'), r['crash']])
     widths = [max(len(x) for x in col) for col in zip(head, *rows)]
     for row in [head, *rows]:

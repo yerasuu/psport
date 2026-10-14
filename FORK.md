@@ -148,7 +148,8 @@ mouse look. The log says once whether the host mouse reaches the game (`Runtime:
 | `PS_FIBER_TRACE=1` | first calls of each Fiber function with their arguments |
 | (always) | the first guest path without a mount under each root (`/archive`, `/etc`, ...), and after the call report how many there were per root |
 | `PS_TRACE_SEMA=1` | each semaphore created and each blocking wait on one |
-| `PS_TRACE_MEM=1` | each direct memory allocation, direct mapping and virtual range reservation; a failed direct mapping is logged without it |
+| `PS_TRACE_EVENTFLAG=1` | each event flag created; without it the first 8 are listed, then a count line at each power of two, and the totals after the call report |
+| `PS_TRACE_MEM=1` | each direct memory allocation, direct mapping, flexible memory map and virtual range reservation; a failed direct or flexible mapping is logged without it, and flexible maps as event flags are (the first 8, counts at powers of two, totals after the call report) |
 
 ### Call report
 
@@ -226,19 +227,21 @@ Milestones, from the log and the dumps:
 
 It also records the first fault or stop logged before the title is told to end (`Guest fault`
 offset, `Host fault` library+offset and function, `STOP:`, assertion; what a game logs while it
-loses its display at the end is not a crash), the summary's count of imports without
-implementation and, as `forced` (`submit_forced`), the number of `Forcing submitDone` lines before
-then: the GPU library sends a submitDone itself once the game has gone too long without one, so a
-count that keeps growing means the game is stalled on the GPU. The table goes to stdout,
+loses its display at the end is not a crash), as `no impl` (`no_impl_called`) the count of the call
+report's `Calls: summary: N unimplemented` line (the distinct imports without implementation the
+game called, not the ones bound before it starts that `Runtime: imports ...` counts, which include
+code that never runs) and, as `forced` (`submit_forced`), the number of `Forcing submitDone` lines
+before then: the GPU library sends a submitDone itself once the game has gone too long without one,
+so a count that keeps growing means the game is stalled on the GPU. The table goes to stdout,
 `results.tsv` and `results.json` to the output folder with each title's log and dumps
-(`tools/regress/report.py <folder>` classifies a folder again). With `-u`, each title's user
-folder (saves and settings) starts as a copy of its own in that earlier output folder, so a run can
-load what an earlier one saved. `-t tools/regress/perf.txt` runs the titles whose schedules measure
-the frame rate in play (`bloodborne-perf.sched`, from a save given with `-u`; run alone on the
-machine).
+(`tools/regress/report.py <folder>` classifies a folder again). With `-u`, each title's user folder
+(saves and settings) starts as a copy of its own in that earlier output folder, so a run can load
+what an earlier one saved. `-t tools/regress/perf.txt` runs the titles whose schedules measure the
+frame rate in play (`bloodborne-perf.sched`, from a save given with `-u`; run alone on the machine).
 With `-c`, a milestone lost or a crash signature that is new or different is a regression: it is
 listed and the exit status is 1. The `no impl` and `forced` columns show their change against the
-earlier run without counting it as a regression (blank in an earlier file that predates `forced`).
+earlier run without counting it as a regression (blank in an earlier file that predates `forced` or
+`no_impl_called`).
 
 ## CI and binary cache
 
