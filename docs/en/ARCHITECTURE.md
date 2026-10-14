@@ -133,7 +133,7 @@ in link order (libc first) and the eboot's entry runs with `argv[0] = /app0/eboo
 | Area | Files |
 |---|---|
 | process, libc hooks, TLS, procparam, `runtime_resolve` | `runtime.c`, `runtime.h` |
-| kernel misc, process, time | `runtime_kernel.c`, `runtime_time.c`, `runtime_rtc.c` |
+| kernel misc, process, time | `runtime_kernel.c`, `runtime_rtc.c` |
 | memory: direct, flexible, mappings, pools, write traps, GPU interface | `runtime_memory.c`, `runtime_memory_kernel.c`, `runtime_memory_gpu.c`, `runtime_mempool.c` |
 | threads and synchronisation | `runtime_thread.c`, `runtime_sched.c`, `runtime_mutex.c`, `runtime_rwlock.c`, `runtime_sema.c`, `runtime_eventflag.c`, `runtime_barrier.c`, `runtime_ult.c`, `runtime_ulobjmgr.c` |
 | exceptions | `runtime_exception.c` |

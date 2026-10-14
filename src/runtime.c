@@ -267,8 +267,6 @@ uintptr_t runtime_resolve(const char *name, int is_data) {
     if (sched) return sched;
     uintptr_t content=runtime_content_resolve(name);
     if (content) return content;
-    uintptr_t timer = runtime_time_resolve(name);
-    if (timer) return timer;
     uintptr_t sema = runtime_sema_resolve(name);
     if (sema) return sema;
     uintptr_t eventflag = runtime_eventflag_resolve(name);
