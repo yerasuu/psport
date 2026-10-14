@@ -7,6 +7,7 @@
 #include <string.h>
 #include <inttypes.h>
 #include <stdatomic.h>
+#include <unistd.h>
 #ifndef _WIN32
 #define LIMIT 4096
 #define ERR(n) ((int32_t)(UINT32_C(0x80020000)|(n)))
@@ -22,7 +23,9 @@ _Static_assert(sizeof(BatchEntry)==32,"PS4 batch map entry layout");
 _Static_assert(sizeof(DirectQueryInfo)==24,"PS4 direct memory query info layout");
 static Block blocks[LIMIT];
 static size_t allocations, maps, reservations, flexible_maps, protects, queries;
-static uint64_t live_bytes;
+static uint64_t live_bytes, flexible_mapped_bytes;
+/* Some titles map flexible memory dozens of times a second: past these, maps are counted. */
+enum { LISTED_FLEXIBLE_MAPS=8 };
 
 static int trace_memory(void) { static int v=-1; if (v<0) v=getenv("PS_TRACE_MEM")!=NULL; return v; }
 static int valid_alignment(uint64_t a) { return a >= PAGE && a <= POOL_SIZE && !(a & (a-1)); }
@@ -167,17 +170,24 @@ static int32_t map_flexible_locked(void **inout, uint64_t size, int prot, int fl
     uint64_t phys=flex_alloc(size);
     if (phys==UINT64_MAX) return NO_MEMORY;
     int32_t result=place(inout,size,prot,flags,PAGE,KIND_FLEXIBLE,0,phys);
-    if (result) flex_free(phys,size); else ++flexible_maps;
+    if (result) flex_free(phys,size);
+    else { ++flexible_maps; flexible_mapped_bytes+=size; }
     return result;
 }
 static ABI int32_t map_flexible(void **inout, uint64_t size, int prot, int flags) {
     write_lock();
     int32_t result=map_flexible_locked(inout,size,prot,flags);
+    const size_t count=flexible_maps;
+    const uint64_t in_use=flexible_bytes;
     write_unlock();
     flush_hooks();
-    if (!result) printf("Runtime: mapped flexible memory %p, size=%" PRIu64 ", prot=0x%x\n", *inout, size, prot);
-    else fprintf(stderr,"Runtime: flexible map of %" PRIu64 " bytes failed (0x%x), in use=%" PRIu64 "\n",
-                 size, (unsigned)result, flexible_bytes);
+    if (result) fprintf(stderr,"Runtime: flexible map of %" PRIu64 " bytes failed (0x%x), in use=%" PRIu64 "\n",
+                        size, (unsigned)result, in_use);
+    else if (count<=LISTED_FLEXIBLE_MAPS || trace_memory())
+        printf("Runtime: mapped flexible memory %p, size=%" PRIu64 ", prot=0x%x\n", *inout, size, prot);
+    else if (!(count&(count-1)))
+        printf("Runtime: flexible memory maps=%zu so far, in use=%" PRIu64 "; only the first %d are listed (PS_TRACE_MEM=1: each)\n",
+               count, in_use, LISTED_FLEXIBLE_MAPS);
     return result;
 }
 static ABI int32_t map_flexible_named(void **inout, uint64_t size, int prot, int flags, const char *name) {
@@ -513,7 +523,14 @@ void runtime_memory_report(void) {
     printf("Runtime: direct memory allocations=%zu, maps=%zu, live=%" PRIu64 ", budget=%" PRIu64 "\n",
            allocations, maps, live_bytes, POOL_SIZE);
     printf("Runtime: virtual ranges reserved=%zu\n", reservations);
-    printf("Runtime: flexible maps=%zu, in use=%" PRIu64 ", protects=%zu, queries=%zu, regions=%zu\n",
-           flexible_maps, flexible_bytes, protects, queries, vma_count);
+    printf("Runtime: memory protects=%zu, queries=%zu, regions=%zu\n", protects, queries, vma_count);
+}
+void runtime_memory_flexible_report(void) {
+    char line[160];
+    const int used=snprintf(line,sizeof(line),"Runtime: flexible memory maps=%zu, mapped=%" PRIu64 ", in use=%" PRIu64 "\n",
+                            __atomic_load_n(&flexible_maps,__ATOMIC_RELAXED),
+                            __atomic_load_n(&flexible_mapped_bytes,__ATOMIC_RELAXED),
+                            __atomic_load_n(&flexible_bytes,__ATOMIC_RELAXED));
+    if (used>0 && write(1,line,(size_t)used)<0) return;
 }
 #endif

@@ -72,8 +72,8 @@ The report never hides a call: an unimplemented or stubbed function is always lo
 - `SIGUSR2` to a thread of `psport` dumps that thread's frames; the watchdog (`PS_TIMEOUT`
   seconds, `--timeout`) prints `STOP: watchdog timeout`, every thread's stack and the call report,
   then exits.
-- Diagnostic variables (`PS_TRACE_MEM`, `PS_TRACE_SEMA`, `PS_AUDIO_STATS`, `PS_NGS2_TRACE`,
-  `PS_FIBER_TRACE`, ...): [FORK.md](../../FORK.md#diagnostics).
+- Diagnostic variables (`PS_TRACE_MEM`, `PS_TRACE_SEMA`, `PS_TRACE_EVENTFLAG`, `PS_AUDIO_STATS`,
+  `PS_NGS2_TRACE`, `PS_FIBER_TRACE`, ...): [FORK.md](../../FORK.md#diagnostics).
 - `tools/gcn_dis.sh` disassembles a GCN shader the recompiler rejected.
 
 ## 3. Implement what is missing

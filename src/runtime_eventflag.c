@@ -11,6 +11,7 @@
 #include <pthread.h>
 #include <errno.h>
 #include <time.h>
+#include <unistd.h>
 #define ERR(n) ((int32_t)(UINT32_C(0x80020000)|(n)))
 enum { ATTR_FIFO=0x01, ATTR_PRIO=0x02, ATTR_SINGLE=0x10, ATTR_MULTI=0x20 };
 enum { WAIT_AND=0x01, WAIT_OR=0x02, CLEAR_ALL=0x10, CLEAR_PAT=0x20 };
@@ -28,6 +29,9 @@ static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
 static Flag *registry;
 static uint64_t next_id=1;
 static size_t created, deleted, waits, timed_out;
+/* Some titles create event flags dozens of times a second: past these, creations are counted. */
+enum { LISTED_CREATIONS=8 };
+static int trace_eventflag(void) { static int v=-1; if (v<0) v=getenv("PS_TRACE_EVENTFLAG")!=NULL; return v; }
 static Flag *find(uint64_t id) {
     for (Flag *f=registry;f;f=f->next) if (f->id==id) return f;
     return NULL;
@@ -56,10 +60,15 @@ static ABI int32_t flag_create(uint64_t *out,const char *name,uint32_t attr,uint
     runtime_exception_lock(&lock);
     f->id=next_id++; f->attr=attr; f->pattern=pattern;
     uint64_t id=f->id;
-    f->next=registry; registry=f; *out=id; ++created;
+    f->next=registry; registry=f; *out=id;
+    const size_t count=++created, gone=deleted;
     runtime_exception_unlock(&lock);
-    printf("Runtime: event flag id=%llu '%s', attr=%#x, pattern=%#llx\n",
-           (unsigned long long)id,name,attr,(unsigned long long)pattern);
+    if (count<=LISTED_CREATIONS || trace_eventflag())
+        printf("Runtime: event flag id=%llu '%s', attr=%#x, pattern=%#llx\n",
+               (unsigned long long)id,name,attr,(unsigned long long)pattern);
+    else if (!(count&(count-1)))
+        printf("Runtime: event flags created=%zu so far, deleted=%zu; only the first %d are listed (PS_TRACE_EVENTFLAG=1: each)\n",
+               count,gone,LISTED_CREATIONS);
     return 0;
 }
 static int valid_mode(uint32_t mode) {
@@ -171,11 +180,17 @@ static const RuntimeExport exports[]={
 uintptr_t runtime_eventflag_resolve(const char *name) { return RUNTIME_LOOKUP(exports,name); }
 void runtime_eventflag_report(void) {
     runtime_exception_lock(&lock);
-    printf("Runtime: event flags created=%zu, deleted=%zu, waits=%zu, timeouts=%zu\n",
-           created,deleted,waits,timed_out);
+    printf("Runtime: event flag waits=%zu, timeouts=%zu\n",waits,timed_out);
     runtime_exception_unlock(&lock);
+}
+void runtime_eventflag_created_report(void) {
+    char line[96];
+    const int used=snprintf(line,sizeof(line),"Runtime: event flags created=%zu, deleted=%zu\n",
+                            __atomic_load_n(&created,__ATOMIC_RELAXED),__atomic_load_n(&deleted,__ATOMIC_RELAXED));
+    if (used>0 && write(1,line,(size_t)used)<0) return;
 }
 #else
 uintptr_t runtime_eventflag_resolve(const char *name) { (void)name; return 0; }
 void runtime_eventflag_report(void) { puts("Runtime: Windows event flag backend not implemented"); }
+void runtime_eventflag_created_report(void) {}
 #endif

@@ -27,6 +27,9 @@ uintptr_t runtime_mutex_resolve(const char *name);
 void runtime_mutex_report(void);
 uintptr_t runtime_memory_resolve(const char *name);
 void runtime_memory_report(void);
+/* Printed by runtime_calls_report on every exit, the fault handler and std::_Exit included, so they
+ * take no locks and write to stdout directly. */
+void runtime_memory_flexible_report(void);
 int runtime_memory_is_mapped(uintptr_t address, uint64_t size);
 /* The CPU is about to write the range outside guest code (a file read): tells the GPU side. */
 void runtime_memory_note_write(uintptr_t address, uint64_t size);
@@ -118,6 +121,7 @@ uintptr_t runtime_eventflag_resolve(const char *name);
 uintptr_t runtime_ulobjmgr_resolve(const char *name);
 uintptr_t runtime_ult_resolve(const char *name);
 void runtime_eventflag_report(void);
+void runtime_eventflag_created_report(void);
 uintptr_t runtime_time_resolve(const char *name);
 void runtime_content_configure(const uint32_t values[5]);
 void runtime_content_title(const char *title);

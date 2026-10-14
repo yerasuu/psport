@@ -148,7 +148,8 @@ mouse look. The log says once whether the host mouse reaches the game (`Runtime:
 | `PS_FIBER_TRACE=1` | first calls of each Fiber function with their arguments |
 | (always) | the first guest path without a mount under each root (`/archive`, `/etc`, ...), and after the call report how many there were per root |
 | `PS_TRACE_SEMA=1` | each semaphore created and each blocking wait on one |
-| `PS_TRACE_MEM=1` | each direct memory allocation, direct mapping and virtual range reservation; a failed direct mapping is logged without it |
+| `PS_TRACE_EVENTFLAG=1` | each event flag created; without it the first 8 are listed, then a count line at each power of two, and the totals after the call report |
+| `PS_TRACE_MEM=1` | each direct memory allocation, direct mapping, flexible memory map and virtual range reservation; a failed direct or flexible mapping is logged without it, and flexible maps as event flags are (the first 8, counts at powers of two, totals after the call report) |
 
 ### Call report
 
