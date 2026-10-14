@@ -157,7 +157,9 @@ ult, rwlock, barrier, memory, mempool, exception, kernel, module, playgo, voice,
 audio3d, pad, gesture, devices, capture, rtc, savedata, file, aio, and last `bbgpu_resolve`. The first table that
 has the symbol wins.
 
-Guest-visible errno values are FreeBSD's (`runtime_guest_errno`). Guest threads are host pthreads
+Guest-visible errno values are FreeBSD's (`runtime_guest_errno`). Sockets, libSceNet's and POSIX's,
+take their descriptors from the file table (`runtime_file.c`), as kernel descriptors do on the console,
+so `close`, `read`, `write`, `fcntl` and `select` serve both. Guest threads are host pthreads
 with PS4 stacks below 1 TiB.
 
 ### Call report

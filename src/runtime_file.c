@@ -400,6 +400,17 @@ static int host_fd(int fd) {
     File *f=get(fd);
     return f ? f->host : -1;
 }
+/* Sockets (runtime_socket.c) take descriptors from this table too, so close, read, write and fcntl
+ * find them as the console's kernel would. The table owns the host descriptor once adopted. */
+int runtime_file_adopt(int h_host) {
+    pthread_mutex_lock(&lock);
+    int h_fd=-1;
+    for (int i=3;i<MAX_FILES;++i) if (!files[i].used) { h_fd=i; break; }
+    if (h_fd>=0) files[h_fd]=(File){.used=1,.host=h_host};
+    pthread_mutex_unlock(&lock);
+    return h_fd<0 ? -EMFILE : h_fd;
+}
+int runtime_file_host(int h_fd) { return host_fd(h_fd); }
 static int host_fd_written(int fd) {
     if (fd>=0 && fd<3) return fd;
     File *f=get(fd);
@@ -615,6 +626,28 @@ static int64_t do_fchmod(int h_fd,int mode) {
     if (h_host<0) return -EBADF;
     return fchmod(h_host,(mode_t)(mode&07777)) ? -errno : 0;
 }
+/* FreeBSD's commands and status flags (O_NONBLOCK 0x4, O_APPEND 0x8); FD_CLOEXEC is 1 on both. */
+static int64_t do_fcntl(int h_fd,int command,int64_t argument) {
+    int h_host=host_fd(h_fd);
+    if (h_host<0) return -EBADF;
+    int r;
+    switch (command) {
+    case 1: r=fcntl(h_host,F_GETFD); break;
+    case 2: r=fcntl(h_host,F_SETFD,argument&1 ? FD_CLOEXEC : 0); break;
+    case 3:
+        r=fcntl(h_host,F_GETFL);
+        if (r>=0) r=(r&O_ACCMODE)|(r&O_NONBLOCK ? 0x4 : 0)|(r&O_APPEND ? 0x8 : 0);
+        break;
+    case 4:
+        r=fcntl(h_host,F_GETFL);
+        if (r>=0) r=fcntl(h_host,F_SETFL,(r&~(O_NONBLOCK|O_APPEND))|(argument&0x4 ? O_NONBLOCK : 0)|(argument&0x8 ? O_APPEND : 0));
+        break;
+    default:
+        fprintf(stderr,"Runtime: fcntl command %d on descriptor %d not supported\n",command,h_fd);
+        return -EINVAL;
+    }
+    return r<0 ? -errno : r;
+}
 static int64_t do_fsync(int fd) { int h=host_fd(fd); if (h<0) return -EBADF; return fsync(h) ? -errno : 0; }
 static int64_t do_access(const char *guest,int mode) {
     char path[1024];
@@ -650,6 +683,7 @@ PAIR(utimes,(const char *p,const GuestTimeval *t),(p,t))
 PAIR(futimes,(int h_fd,const GuestTimeval *p_times),(h_fd,p_times))
 PAIR(chmod,(const char *sz_path,int mode),(sz_path,mode))
 PAIR(fchmod,(int h_fd,int mode),(h_fd,mode))
+PAIR(fcntl,(int h_fd,int command,int64_t argument),(h_fd,command,argument))
 /* getdirentries without the position out-parameter (Atelier Ryza lists its UI style folders with
  * it; answered by a stub, they read as empty and every UI image fell back to NO IMAGE). */
 static ABI int64_t sce_getdents_plain(int fd,char *b,uint64_t n) { return sce(do_getdents(fd,b,n,NULL)); }
@@ -684,6 +718,7 @@ static const RuntimeExport exports[]={
     {"sceKernelUtimes",sce_utimes}, {"utimes",posix_utimes},
     {"sceKernelFutimes",sce_futimes}, {"futimes",posix_futimes},
     {"sceKernelChmod",sce_chmod}, {"chmod",posix_chmod}, {"sceKernelFchmod",sce_fchmod}, {"fchmod",posix_fchmod},
+    {"sceKernelFcntl",sce_fcntl}, {"fcntl",posix_fcntl}, {"_fcntl",posix_fcntl},
     {"access",posix_access}, {"sceKernelCheckReachability",sce_check_reachability},
     {"sceKernelMkdir",sce_mkdir}, {"mkdir",posix_mkdir},
     {"sceKernelRmdir",sce_rmdir}, {"rmdir",posix_rmdir},
