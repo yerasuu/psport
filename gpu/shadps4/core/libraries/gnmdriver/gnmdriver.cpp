@@ -111,9 +111,9 @@ static u64 frames_retired{};
 
 void NoteFramesRetired(u64 frames) {
     BbTimeline::Note(BbTimeline::FrameRetired, frames);
+    BbSubmitGuard::Retire(frames); // checksums the frame's command buffers: outside the lock
     std::unique_lock lock{m_wait_idle};
     frames_retired = std::max(frames_retired, frames);
-    BbSubmitGuard::Retire(frames);
     cv_lock.notify_all();
 }
 
