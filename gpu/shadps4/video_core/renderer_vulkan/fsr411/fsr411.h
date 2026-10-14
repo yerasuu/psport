@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // bbport: FSR 4.1.1 (AMD's 4.1.1 upscaler DLL) on Vulkan, replaying what the DLL does on D3D12
-// (docs/upscaler.md; tools/fsr4cap records it, tools/fsr4cap/extract.py builds the asset sets:
+// (docs/en/upscaler.md; tools/fsr4cap records it, tools/fsr4cap/extract.py builds the asset sets:
 // SPIR-V of every pass and the model weights). Two variants of the model passes, as the DLL has
 // them: INT8 dot products (any GPU with VK_VALVE_shader_mixed_float_dot_product) and FP8
 // cooperative matrices (RDNA4: VK_EXT_shader_float8), each with its own weights.

@@ -3,7 +3,7 @@
 Third 0.5 prerelease, built from the `testing` branch. It addresses the first hardware logs of the
 new memory module on NVIDIA (GTX 1660 Ti laptop, 6 GB, driver 615.71). Changes are listed relative
 to [0.5-pre2](https://github.com/deadinside28/bloodborne_pc/releases/tag/0.5-pre2). Details and
-measurements: [NVIDIA_MEMORY_MODEL.ru.md](NVIDIA_MEMORY_MODEL.ru.md).
+measurements: [NVIDIA_MEMORY_MODEL.md](NVIDIA_MEMORY_MODEL.md).
 
 ## English
 

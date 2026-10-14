@@ -2381,7 +2381,7 @@ bool Rasterizer::BindHelperWanted() {
     if (env && env[0]) {
         return env[0] == '1';
     }
-    // Measured neutral on 16 threads (docs/parallel_gpu.md): opt-in.
+    // Measured neutral on 16 threads (docs/en/parallel_gpu.md): opt-in.
     return false;
 }
 
@@ -2475,7 +2475,7 @@ namespace {
 // bbport: BB_RES_STATS=1 (diagnostics) — what the bound shaders read their resource descriptors
 // from: user data registers (state the API call set) or tables in memory (SRT walker), by kind,
 // per draw and dispatch; printed every 5 s. Measures the step "descriptors read by the GPU"
-// (docs/EMULATION_REMOVAL_PLAN.ru.md).
+// (docs/en/history/EMULATION_REMOVAL_PLAN.md).
 struct ResStats {
     u64 calls = 0, stages = 0, walker_stages = 0, readconst_stages = 0, dma_stages = 0;
     u64 flat_dwords = 0;

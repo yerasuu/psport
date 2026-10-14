@@ -2,7 +2,7 @@
 
 Замеры — RX 7800 XT / RADV, Кошмар охотника у лампы (сохранение пользователя), 1080p без лимита
 FPS, новая модель (`BB_PC_MODEL=1`); «4 ядра» — `CPUS=0-3,8-11` (4 ядра / 8 потоков).
-Подробности и что осталось — [EMULATION_REMOVAL_PLAN.ru.md](EMULATION_REMOVAL_PLAN.ru.md),
+Подробности и что осталось — [EMULATION_REMOVAL_PLAN.md](EMULATION_REMOVAL_PLAN.md),
 «Шаг 3».
 
 ## Метки EOP/EOS пишет видеочип (новая модель)
@@ -424,7 +424,7 @@ FPS, новая модель (`BB_PC_MODEL=1`); «4 ядра» — `CPUS=0-3,8-1
 sparse-арены), общий бюджет VRAM с кэшем текстур, запас роста копий вместо их перевыделения,
 записи WRITE_DATA в копию, наблюдаемые блоки (`BB_LAYER_WATCH`), повтор чтения файлов при EFAULT.
 Подробности: [CHANGES_0.5-pre3.md](CHANGES_0.5-pre3.md) и
-[NVIDIA_MEMORY_MODEL.ru.md](NVIDIA_MEMORY_MODEL.ru.md).
+[NVIDIA_MEMORY_MODEL.md](NVIDIA_MEMORY_MODEL.md).
 
 ## 0.5-pre4: компиляция шейдеров в фоне, VRAM на картах 4–6 ГБ, меню как в 0.3
 
