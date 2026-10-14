@@ -20,12 +20,14 @@ PROTOTYPE = re.compile(r'([^\n;{}()]*?)\bPS4_SYSV_ABI\s+([A-Za-z_][\w:]*)\s*\(')
 AGGREGATE = re.compile(r'(?<!enum )\b(?:struct|class|union)\s+(?:alignas\s*\([^)]*\)\s*)?([A-Za-z_]\w*)\s*(?:final\s*)?(?::[^{;]*)?\{')
 TYPEDEF_AGGREGATE = re.compile(r'\btypedef\s+(?:struct|union)\b[^;]*?\}\s*([A-Za-z_]\w*)\s*;', re.S)
 USING_AGGREGATE = re.compile(r'\busing\s+([A-Za-z_]\w*)\s*=\s*(?:struct|union|std::)')
-# POSIX exports the runtime implements itself that shadPS4 registers differently or not at all (the
-# sockets of src/runtime_socket.c, fcntl): NID -> kind, over whatever shadPS4's prototypes say.
+# POSIX and FreeBSD system call exports the runtime implements itself that shadPS4 registers
+# differently or not at all (the sockets of src/runtime_socket.c, fcntl, _umtx_op, the named
+# objects): NID -> kind, over whatever shadPS4's prototypes say.
 RUNTIME_POSIX = {
     'TU-d9PfIHPM': 2, 'fFxGkxF2bVo': 2, '6O8EwYOgH9Y': 2, 'XVL8So3QJUk': 2, 'KuOmgKoqCdY': 2,  # socket setsockopt getsockopt connect bind
     'pxnCmagrtao': 2, '3e+4Iv7IJ8U': 2, 'TXFFFiNldU8': 2, 'RenI1lL1WFk': 2, 'TUuiYS2kE8s': 2,  # listen accept getpeername getsockname shutdown
     'T8fER+tIGgk': 2, '8nY19bKoiZk': 2, 't0fXUzq61Z4': 2, '4n51s0zEf0c': 2,  # select fcntl _fcntl inet_pton
+    '04AjkP0jO9U': 2, '3CNY4Z0Luc8': 2, 'E7CmfLfeSuQ': 2,  # _umtx_op __sys_namedobj_create __sys_namedobj_delete
     'fZOeZIOEmLw': 3, 'Ez8xjo9UF4E': 3, 'oBr313PppNE': 3, 'lUk6wrGXyMw': 3, 'aNeavPDNKzA': 3, 'hI7oVeOluPM': 3,  # send recv sendto recvfrom sendmsg recvmsg
 }
 SCE_RESULT = {'s32': 1, 'int': 1, 'int32_t': 1, 'Error': 1, 's64': 4, 'int64_t': 4}

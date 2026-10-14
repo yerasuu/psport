@@ -390,6 +390,26 @@ static ABI int32_t libc_heap_trace_info(void *info) {
     }
     return 0;
 }
+/* The kernel's named objects only give a synchronization object a name for debuggers, so an id and
+ * its type are all there is to keep. Ids stay small: sem_t keeps one in 16 bits. */
+#define NAMED_OBJECTS 1024
+static _Atomic uint32_t s_named_object_types[NAMED_OBJECTS];
+static ABI int32_t namedobj_create(const char *sz_name, void *p_object, uint32_t type) {
+    (void)p_object;
+    if (!sz_name) return fail_posix(EINVAL);
+    if (strnlen(sz_name,33)>32) return fail_posix(ENAMETOOLONG);
+    for (int32_t h_object=1;h_object<NAMED_OBJECTS;++h_object) {
+        uint32_t free_slot=0;
+        if (atomic_compare_exchange_strong(&s_named_object_types[h_object],&free_slot,(type&0xffff)+1)) return h_object;
+    }
+    return fail_posix(ENOMEM);
+}
+static ABI int32_t namedobj_delete(int32_t h_object, uint32_t type) {
+    uint32_t slot=(type&0xffff)+1;
+    if (h_object<=0 || h_object>=NAMED_OBJECTS || !atomic_compare_exchange_strong(&s_named_object_types[h_object],&slot,0))
+        return fail_posix(ESRCH);
+    return 0;
+}
 
 static const RuntimeExport exports[]={
     {"sceKernelClockGettime",kernel_clock_gettime}, {"clock_gettime",posix_clock_gettime},
@@ -428,6 +448,7 @@ static const RuntimeExport exports[]={
     {"sceKernelGetSanitizerNewReplaceExternal",sanitizer_replace},
     {"sceKernelIsAddressSanitizerEnabled",sanitizer_enabled},
     {"sceLibcHeapGetTraceInfo",libc_heap_trace_info},
+    {"__sys_namedobj_create",namedobj_create}, {"__sys_namedobj_delete",namedobj_delete},
 };
 uintptr_t runtime_kernel_resolve(const char *name) { return RUNTIME_LOOKUP(exports,name); }
 #else
