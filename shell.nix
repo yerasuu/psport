@@ -28,4 +28,11 @@ pkgs.mkShell {
     # Online module (gpu/bbnet): shadNet client, HTTPS, UPnP
     protobuf nlohmann_json openssl zlib miniupnpc
   ];
+  # The port built here links Nix's Vulkan loader, which cannot load the host's Mesa drivers:
+  # it runs on Nix's own, set outright since a value inherited from the host would name drivers
+  # it can't load.
+  shellHook = ''
+    export VK_LOADER_LAYERS_DISABLE=VK_LAYER_MESA_device_select
+    export VK_DRIVER_FILES=${pkgs.mesa}/share/vulkan/icd.d/radeon_icd.x86_64.json:${pkgs.mesa}/share/vulkan/icd.d/intel_icd.x86_64.json
+  '';
 }
