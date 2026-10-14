@@ -2,6 +2,7 @@
 #include "bbport_overlay.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -57,6 +58,10 @@ std::atomic<bool> close_prompt{false};
 std::atomic<bool> close_release{false};
 SDL_Keycode release_key = SDLK_UNKNOWN;
 int release_button = -1;
+
+std::mutex cursor_mutex;
+std::array<GameCursor, MaxGameCursors> game_cursors{};
+std::atomic<bool> game_cursor_shown{false};
 
 // Present rate for the FPS counter.
 std::chrono::steady_clock::time_point last_present{};
@@ -671,6 +676,39 @@ void Menu() {
     }
 }
 
+// Drawn behind the menu's windows, so the menu stays readable over the cursor.
+void GameCursors(const vk::Rect2D& frame) {
+    std::scoped_lock lock{cursor_mutex};
+    ImDrawList* draw = ImGui::GetBackgroundDrawList();
+    for (const GameCursor& cursor : game_cursors) {
+        if (!cursor.enabled || !cursor.width || !cursor.height) {
+            continue;
+        }
+        const float scale_x = float(frame.extent.width) / float(cursor.width);
+        const float scale_y = float(frame.extent.height) / float(cursor.height);
+        const float sx = cursor.magnified ? scale_x * 2.0f : scale_x;
+        const float sy = cursor.magnified ? scale_y * 2.0f : scale_y;
+        const float left = float(frame.offset.x) + float(cursor.x) * scale_x - float(cursor.hot_x) * sx;
+        const float top = float(frame.offset.y) + float(cursor.y) * scale_y - float(cursor.hot_y) * sy;
+        for (u32 row = 0; row < CursorImageSize; ++row) {
+            const u32* pixels = cursor.image + row * CursorImageSize;
+            for (u32 column = 0; column < CursorImageSize;) {
+                const u32 argb = pixels[column];
+                u32 end = column + 1;
+                while (end < CursorImageSize && pixels[end] == argb) {
+                    ++end;
+                }
+                if (argb >> 24) {
+                    draw->AddRectFilled(ImVec2(left + float(column) * sx, top + float(row) * sy),
+                                        ImVec2(left + float(end) * sx, top + float(row + 1) * sy),
+                                        IM_COL32((argb >> 16) & 0xff, (argb >> 8) & 0xff, argb & 0xff, argb >> 24));
+                }
+                column = end;
+            }
+        }
+    }
+}
+
 void FpsCounter() {
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     const float pad = 12.0f * base_scale;
@@ -1007,7 +1045,19 @@ bool HandleEvent(const SDL_Event& event) {
 }
 
 bool Visible() {
-    return initialized && (menu_open || prompt_active || close_prompt || BbSettings::Get().show_fps);
+    return initialized &&
+           (menu_open || prompt_active || close_prompt || game_cursor_shown || BbSettings::Get().show_fps);
+}
+
+void SetGameCursor(u32 index, const GameCursor& cursor) {
+    std::scoped_lock lock{cursor_mutex};
+    game_cursors[index] = cursor;
+    game_cursor_shown = std::any_of(game_cursors.begin(), game_cursors.end(),
+                                    [](const GameCursor& c) { return c.enabled; });
+}
+
+bool GameCursorShown() {
+    return game_cursor_shown;
 }
 
 bool MenuOpen() {
@@ -1036,7 +1086,7 @@ bool PadFilePress(bool guide, bool cross, bool circle) {
     return true;
 }
 
-void Render(vk::CommandBuffer cmdbuf, vk::ImageView view, vk::Extent2D extent) {
+void Render(vk::CommandBuffer cmdbuf, vk::ImageView view, vk::Extent2D extent, vk::Rect2D frame) {
 
     // Present interval for the FPS readout (measured also while nothing is drawn).
     const auto now = std::chrono::steady_clock::now();
@@ -1067,6 +1117,7 @@ void Render(vk::CommandBuffer cmdbuf, vk::ImageView view, vk::Extent2D extent) {
 
     ImGui_ImplVulkan_NewFrame();
     ImGui::NewFrame();
+    GameCursors(frame);
     if (menu_open) {
         Menu();
     }

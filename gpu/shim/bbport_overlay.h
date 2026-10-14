@@ -30,8 +30,24 @@ void UpdateTextInput(SDL_Window* window);
 /// Whether anything is drawn this frame (menu open or FPS counter on).
 bool Visible();
 
-/// Present thread: draws into `view` (layout ColorAttachmentOptimal).
-void Render(vk::CommandBuffer cmdbuf, vk::ImageView view, vk::Extent2D extent);
+/// Present thread: draws into `view` (layout ColorAttachmentOptimal); `frame` is where the game
+/// frame lies in it, under the game's cursors.
+void Render(vk::CommandBuffer cmdbuf, vk::ImageView view, vk::Extent2D extent, vk::Rect2D frame);
+
+/// VideoOut's hardware cursor as the game set it (game threads). The image is the game's
+/// CursorImageSize x CursorImageSize A8R8G8B8 bitmap, read again at every present while enabled;
+/// the position (where the hot spot goes) is in the video port's width x height.
+struct GameCursor {
+    const u32* image;
+    s32 x, y;
+    u32 hot_x, hot_y, width, height;
+    bool enabled, magnified;
+};
+constexpr u32 CursorImageSize = 64;
+constexpr u32 MaxGameCursors = 2;
+void SetGameCursor(u32 index, const GameCursor& cursor);
+/// A game cursor is enabled: the window leaves the mouse as a pointer and hides the system one.
+bool GameCursorShown();
 
 /// The menu, the text dialog or the close prompt is open: the game's input is held neutral.
 bool CapturesInput();

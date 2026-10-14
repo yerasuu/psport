@@ -99,6 +99,7 @@ void runtime_report(void) {
     runtime_audio_report();
     runtime_audio3d_report();
     runtime_pad_report();
+    runtime_mouse_report();
     runtime_savedata_report();
     runtime_file_report();
     runtime_aio_report();
@@ -276,6 +277,8 @@ uintptr_t runtime_resolve(const char *name, int is_data) {
     if (pad) return pad;
     uintptr_t gesture = runtime_gesture_resolve(name);
     if (gesture) return gesture;
+    uintptr_t mouse = runtime_mouse_resolve(name);
+    if (mouse) return mouse;
     uintptr_t rtc = runtime_rtc_resolve(name);
     if (rtc) return rtc;
     uintptr_t save = runtime_savedata_resolve(name);

@@ -528,16 +528,7 @@ static ABI int32_t discmap_8a82(const char *path,int64_t offset,int64_t size,int
     (void)path; (void)offset; (void)size; (void)flags; (void)r1; (void)r2; return DISC_MAP_NO_BITMAP;
 }
 
-/* ---- Devices that are absent: mouse, microphone ---- */
-/* A mouse port opens but never reports a connected device. */
-static ABI int32_t mouse_init(void) { return 0; }
-static ABI int32_t mouse_open(int32_t user,int32_t type,int32_t index,const void *param) { (void)user; (void)type; (void)index; (void)param; return new_id(); }
-static ABI int32_t mouse_close(int32_t handle) { (void)handle; return 0; }
-static ABI int32_t mouse_read(int32_t handle,unsigned char *data,int32_t count) {
-    (void)handle;
-    if (!data || count<1) return (int32_t)0x80DF0001;
-    memset(data,0,40); return 1; /* timestamp 0, connected=false */
-}
+/* ---- Devices that are absent: microphone ---- */
 static ABI int32_t audio_in_open(void) { return AUDIO_IN_NOT_OPENED; }
 /* PlayStation Move: the library runs, no motion controller is ever connected. A handle is still
  * handed out per open, distinct from other devices' handles, as on the console. */
@@ -760,7 +751,6 @@ static const RuntimeExport exports[]={
     {"sceNpTrophyDestroyHandle",runtime_stub},
     {"sceNpTrophyGetGameInfo",trophy_game_info}, {"sceNpTrophyGetTrophyInfo",trophy_info},
     {"sceNpTrophyGetTrophyUnlockState",trophy_unlock_state},
-    {"sceMouseInit",mouse_init}, {"sceMouseOpen",mouse_open}, {"sceMouseRead",mouse_read}, {"sceMouseClose",mouse_close},
     {"sceAudioInOpen",audio_in_open},
     {"sceMoveInit",move_init}, {"sceMoveOpen",move_open}, {"sceMoveGetDeviceInfo",move_device_info},
     {"sceMoveReadStateRecent",move_read_recent}, {"sceMoveSetLightSphere",move_no_controller},

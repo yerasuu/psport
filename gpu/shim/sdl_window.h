@@ -7,6 +7,7 @@
 #include "common/types.h"
 
 struct SDL_Window;
+union SDL_Event;
 
 namespace Frontend {
 
@@ -40,6 +41,9 @@ public:
     bool MouseCaptured() const { return mouse_captured.load(std::memory_order_relaxed); }
     /// mouse_look=0: a click does not take the mouse.
     static void EnableMouseLook(bool enabled) { mouse_look.store(enabled, std::memory_order_relaxed); }
+    /// libSceMouse (bbgpu_game_mouse_take): the buttons held (SDL_BUTTON_MASK bits), and the motion,
+    /// wheel and tilt since the last call, reset. False while the host has no mouse.
+    bool TakeGameMouse(s32& dx, s32& dy, s32& wheel, s32& tilt, u32& buttons);
 
 private:
     std::atomic<s32> width, height;
@@ -53,11 +57,16 @@ private:
     u64 last_mouse_motion_ms{}; ///< SDL_GetTicks of the last mouse motion (UpdateCursor)
     bool cursor_hidden{};
     void CaptureMouse(bool capture);
+    void GameMouseEvent(const SDL_Event& event);
     std::mutex mouse_mutex;
     double mouse_dx{}, mouse_dy{};
     int wheel_up{}, wheel_down{};
     std::atomic<bool> mouse_captured{false};
     static inline std::atomic<bool> mouse_look{true};
+    double game_dx{}, game_dy{};
+    float game_wheel{}, game_tilt{};
+    u32 game_buttons{};
+    std::atomic<bool> host_mouse{false};
     SDL_Window* window{};
     WindowSystemInfo window_info{};
 };

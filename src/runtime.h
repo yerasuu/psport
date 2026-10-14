@@ -187,6 +187,8 @@ void runtime_audio3d_report(void);
 uintptr_t runtime_pad_resolve(const char *name);
 uintptr_t runtime_gesture_resolve(const char *name);
 void runtime_pad_report(void);
+uintptr_t runtime_mouse_resolve(const char *name);
+void runtime_mouse_report(void);
 uintptr_t runtime_rtc_resolve(const char *name);
 const char *runtime_file_user_dir(void);
 void runtime_savedata_configure(const char *title);

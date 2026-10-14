@@ -12,6 +12,7 @@
 #include "core/libraries/videoout/videoout_error.h"
 #include "core/platform.h"
 #include "video_core/renderer_vulkan/vk_presenter.h"
+#include "bbport_overlay.h"
 
 extern std::unique_ptr<Vulkan::Presenter> presenter;
 
@@ -414,7 +415,8 @@ s32 PS4_SYSV_ABI sceVideoOutAdjustColor(s32 handle, const SceVideoOutColorSettin
     return ORBIS_OK;
 }
 
-// bbport: the cursor's state is kept per port as the game sets it, but no cursor is drawn yet.
+// bbport: the cursor's state is kept per port as the game sets it; the presenter draws it over the
+// game frame (BbOverlay::SetGameCursor).
 static s32 GetCursor(s32 handle, u32 index, VideoOutCursor** cursor) {
     auto* port = driver->GetPort(handle);
     if (!port) {
@@ -427,6 +429,22 @@ static s32 GetCursor(s32 handle, u32 index, VideoOutCursor** cursor) {
     return ORBIS_OK;
 }
 
+static void ShowCursor(s32 handle, u32 index) {
+    const auto* port = driver->GetPort(handle);
+    const VideoOutCursor& cursor = port->cursors[index];
+    BbOverlay::SetGameCursor(index, BbOverlay::GameCursor{
+                                        .image = static_cast<const u32*>(cursor.image),
+                                        .x = cursor.x,
+                                        .y = cursor.y,
+                                        .hot_x = cursor.hot_x,
+                                        .hot_y = cursor.hot_y,
+                                        .width = port->resolution.full_width,
+                                        .height = port->resolution.full_height,
+                                        .enabled = cursor.enabled,
+                                        .magnified = cursor.magnified,
+                                    });
+}
+
 s32 PS4_SYSV_ABI sceVideoOutCursorEnable(s32 handle, u32 index, const void* image) {
     VideoOutCursor* cursor;
     if (const s32 result = GetCursor(handle, index, &cursor); result != ORBIS_OK) {
@@ -435,9 +453,18 @@ s32 PS4_SYSV_ABI sceVideoOutCursorEnable(s32 handle, u32 index, const void* imag
     if (!image) {
         return ORBIS_VIDEO_OUT_ERROR_INVALID_ADDRESS;
     }
-    LOG_WARNING(Lib_VideoOut, "(STUBBED) cursor {} enabled at {},{}, not drawn", index, cursor->x, cursor->y);
+    const auto* pixels = static_cast<const u32*>(image);
+    const auto visible = std::count_if(pixels, pixels + BbOverlay::CursorImageSize * BbOverlay::CursorImageSize,
+                                       [](u32 argb) { return (argb >> 24) != 0; });
+    // Once, so that a log says whether a game drew a hardware cursor and whether its image was set.
+    static std::atomic<bool> told{false};
+    if (!told.exchange(true, std::memory_order_relaxed)) {
+        std::printf("VideoOut: cursor %u enabled at %d,%d, %td of its %ux%u pixels visible\n", index, cursor->x,
+                    cursor->y, visible, BbOverlay::CursorImageSize, BbOverlay::CursorImageSize);
+    }
     cursor->image = image;
     cursor->enabled = true;
+    ShowCursor(handle, index);
     return ORBIS_OK;
 }
 
@@ -447,6 +474,7 @@ s32 PS4_SYSV_ABI sceVideoOutCursorDisable(s32 handle, u32 index) {
         return result;
     }
     cursor->enabled = false;
+    ShowCursor(handle, index);
     return ORBIS_OK;
 }
 
@@ -457,6 +485,7 @@ s32 PS4_SYSV_ABI sceVideoOutCursorSetPosition(s32 handle, u32 index, s32 x, s32 
     }
     cursor->x = x;
     cursor->y = y;
+    ShowCursor(handle, index);
     return ORBIS_OK;
 }
 
@@ -467,6 +496,7 @@ s32 PS4_SYSV_ABI sceVideoOutCursorSetHotSpot(s32 handle, u32 index, u32 x, u32 y
     }
     cursor->hot_x = x;
     cursor->hot_y = y;
+    ShowCursor(handle, index);
     return ORBIS_OK;
 }
 
@@ -476,6 +506,7 @@ s32 PS4_SYSV_ABI sceVideoOutCursorSet2xMagnify(s32 handle, u32 index, u32 enable
         return result;
     }
     cursor->magnified = enable != 0;
+    ShowCursor(handle, index);
     return ORBIS_OK;
 }
 
