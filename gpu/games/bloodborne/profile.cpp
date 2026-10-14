@@ -105,6 +105,9 @@ extern const Profile BloodborneProfile = {
     // frame (1080p, Yahar'gul: 101 -> 154 FPS). With 8 or more, or no wait at all, its heap leaked
     // (~2 resource objects a frame, out of memory after minutes).
     .c_submits_ahead = 2,
+    // Its scene textures have little or no anisotropic filtering: behind the upscaler, surfaces
+    // seen at a grazing angle (stairs, floors, walls along the view) stayed blurred.
+    .anisotropy = 16,
     .report_stats = ReportStats,
     .before_present = BbGameMenu::Poll,
     .label_release = LabelRelease,

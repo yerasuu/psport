@@ -81,6 +81,9 @@ struct Profile {
     /// submissions of a frame never touch what the previous frame's GPU work still uses; 0, the
     /// submission lock's contract, for any other.
     std::uint32_t c_submits_ahead = 0;
+    /// Anisotropic filtering forced on the game's mipmapped textures in graphics draws (2, 4, 8 or
+    /// 16; PS_ANISO overrides it); 0 keeps the game's own samplers.
+    std::uint32_t anisotropy = 0;
     /// With each frame statistics report (PS_FRAME_STATS, the video out thread): the profile's
     /// own diagnostics.
     void (*report_stats)() = nullptr;
@@ -111,6 +114,12 @@ inline std::uint64_t BufferCopyShader() {
 inline std::uint32_t SubmitsAhead() {
     const Profile* profile = Active();
     return profile ? profile->c_submits_ahead : 0;
+}
+
+/// The active profile's forced anisotropy, or 0.
+inline std::uint32_t Anisotropy() {
+    const Profile* profile = Active();
+    return profile ? profile->anisotropy : 0;
 }
 
 /// Whether guest_rip is in code the active profile knows to write per-frame data.
