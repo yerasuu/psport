@@ -257,6 +257,7 @@ static ABI int32_t guest_sigprocmask(int how,const GuestSigset *set,GuestSigset 
     }
     return 0;
 }
+void runtime_kernel_set_signal_mask(const uint32_t bits[4]) { memcpy(signal_mask.bits,bits,sizeof(signal_mask.bits)); }
 static ABI int32_t guest_sigfillset(GuestSigset *set) { if (!set) return fail_posix(EINVAL); memset(set,0xff,sizeof(*set)); return 0; }
 static ABI int32_t guest_sigemptyset(GuestSigset *set) { if (!set) return fail_posix(EINVAL); memset(set,0,sizeof(*set)); return 0; }
 /* Guest exception handlers are called from the runtime's host signal handler and return into it, so

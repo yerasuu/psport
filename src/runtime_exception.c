@@ -23,6 +23,14 @@
  * handler installed and without one (only a handler installed during the sleep can need it). */
 #define RAISE_SLICE_NS 2000000
 #define IDLE_SLICE_NS 100000000
+#define MC_FLAG_MASK 0x7u
+#define MC_FPFMT_XMM 0x10002
+#define MC_FPOWNED_FPU 0x20001
+#define GUEST_EFAULT 14
+#define GUEST_EINVAL 22
+#define FXSAVE_SW_RESERVED 464
+#define XSAVE_HEADER 512
+#define XSAVE_YMM_END 832
 
 typedef void (ABI *GuestHandler)(int, void *);
 /* FreeBSD amd64 mcontext_t and ucontext_t as the PS4 kernel passes them (shadPS4's exception.h). */
@@ -57,6 +65,10 @@ static _Atomic(GuestHandler) handlers[GUEST_SIGNALS];
 static _Thread_local unsigned held;
 static _Thread_local volatile sig_atomic_t deferred;
 static _Atomic unsigned raised, delivered;
+/* The errnos deliver puts back when the guest's handler returns, for a handler that leaves by
+ * sigreturn instead. */
+typedef struct { int is_active, host_errno; int32_t guest_errno; } Delivery;
+static _Thread_local Delivery s_delivery;
 
 /* The signals libkernel lets a game handle (shadPS4's orbis_allowed_signals). */
 static int allowed(int sig) { return sig==1 || sig==4 || sig==8 || sig==10 || sig==11 || sig==GUEST_SIGUSR1; }
@@ -126,7 +138,9 @@ static void deliver(int sig, siginfo_t *info, void *raw) {
         /* write, not stdio: this runs in a signal handler. */
         ssize_t written=write(2,first,sizeof(first)-1); (void)written;
     }
+    s_delivery=(Delivery){1,host_errno,guest_errno};
     handler(GUEST_SIGUSR1,&context);
+    s_delivery.is_active=0;
     /* As on the console, register changes the handler makes take effect on return. The FPU area
      * is a copy for the handler to read and is not restored. */
     r[REG_RDI]=(greg_t)m->rdi; r[REG_RSI]=(greg_t)m->rsi; r[REG_RDX]=(greg_t)m->rdx; r[REG_RCX]=(greg_t)m->rcx;
@@ -173,10 +187,109 @@ static ABI int32_t raise_exception(void *thread, int sig) {
     return result;
 }
 
+/* FreeBSD's sigreturn: the whole context through the host's rt_sigreturn, which sets rsp, rip,
+ * rflags, the FPU and the signal mask in one step, so nothing is written below the restored rsp
+ * (an interrupted leaf function's red zone survives). */
+static ABI int32_t guest_sigreturn(const GuestUcontext *p_context) {
+    if (!p_context) { *runtime_errno()=GUEST_EFAULT; return -1; }
+    const GuestMcontext *p_mcontext=&p_context->mcontext;
+    if ((p_mcontext->flags & ~MC_FLAG_MASK) || (p_mcontext->cs & 3)!=3) { *runtime_errno()=GUEST_EINVAL; return -1; }
+    ucontext_t frame;
+    memset(&frame,0,sizeof(frame));
+    greg_t *p_regs=frame.uc_mcontext.gregs;
+    p_regs[REG_RDI]=(greg_t)p_mcontext->rdi; p_regs[REG_RSI]=(greg_t)p_mcontext->rsi;
+    p_regs[REG_RDX]=(greg_t)p_mcontext->rdx; p_regs[REG_RCX]=(greg_t)p_mcontext->rcx;
+    p_regs[REG_R8]=(greg_t)p_mcontext->r8; p_regs[REG_R9]=(greg_t)p_mcontext->r9;
+    p_regs[REG_RAX]=(greg_t)p_mcontext->rax; p_regs[REG_RBX]=(greg_t)p_mcontext->rbx;
+    p_regs[REG_RBP]=(greg_t)p_mcontext->rbp; p_regs[REG_R10]=(greg_t)p_mcontext->r10;
+    p_regs[REG_R11]=(greg_t)p_mcontext->r11; p_regs[REG_R12]=(greg_t)p_mcontext->r12;
+    p_regs[REG_R13]=(greg_t)p_mcontext->r13; p_regs[REG_R14]=(greg_t)p_mcontext->r14;
+    p_regs[REG_R15]=(greg_t)p_mcontext->r15; p_regs[REG_RIP]=(greg_t)p_mcontext->rip;
+    p_regs[REG_RSP]=(greg_t)p_mcontext->rsp; p_regs[REG_EFL]=(greg_t)p_mcontext->rflags;
+    /* The host's own user selectors: the guest runs in the same code segment, whatever it saved. */
+    uint16_t code_selector, stack_selector;
+    __asm__("mov %%cs,%0" : "=r"(code_selector));
+    __asm__("mov %%ss,%0" : "=r"(stack_selector));
+    p_regs[REG_CSGSFS]=(greg_t)((uint64_t)code_selector|(uint64_t)stack_selector<<48);
+    /* With the FPU not owned the kernel resets it, as FreeBSD does for _MC_FPOWNED_NONE. A valid
+     * xsave header that holds AVX state brings the YMM upper halves back too. */
+    _Alignas(64) uint8_t fpu[XSAVE_YMM_END+64];
+    if (p_mcontext->ownedfp==MC_FPOWNED_FPU && p_mcontext->fpformat==MC_FPFMT_XMM) {
+        memset(fpu,0,sizeof(fpu));
+        memcpy(fpu,p_mcontext->fpstate,XSAVE_YMM_END);
+        uint64_t xstate_bv, xcomp_bv;
+        memcpy(&xstate_bv,fpu+XSAVE_HEADER,8);
+        memcpy(&xcomp_bv,fpu+XSAVE_HEADER+8,8);
+        memset(fpu+FXSAVE_SW_RESERVED,0,XSAVE_HEADER-FXSAVE_SW_RESERVED);
+        if ((xstate_bv & 4) && !(xstate_bv & ~UINT64_C(7)) && !xcomp_bv) {
+            const struct _fpx_sw_bytes sw_bytes={.magic1=FP_XSTATE_MAGIC1,.extended_size=XSAVE_YMM_END+4,
+                                                 .xstate_bv=7,.xstate_size=XSAVE_YMM_END};
+            const uint32_t magic2=FP_XSTATE_MAGIC2;
+            memcpy(fpu+FXSAVE_SW_RESERVED,&sw_bytes,sizeof(sw_bytes));
+            memcpy(fpu+XSAVE_YMM_END,&magic2,4);
+        }
+        frame.uc_mcontext.fpregs=(fpregset_t)fpu;
+    }
+    /* Only the guest's SIGUSR1 has a host signal behind it; the others keep their host state. */
+    pthread_sigmask(SIG_SETMASK,NULL,&frame.uc_sigmask);
+    if (p_context->sigmask[0] & 1u<<(GUEST_SIGUSR1-1)) sigaddset(&frame.uc_sigmask,RUNTIME_EXCEPTION_SIGNAL);
+    else sigdelset(&frame.uc_sigmask,RUNTIME_EXCEPTION_SIGNAL);
+    /* rt_sigreturn applies uc_stack as the alternate signal stack. */
+    sigaltstack(NULL,&frame.uc_stack);
+    runtime_kernel_set_signal_mask(p_context->sigmask);
+    if (s_delivery.is_active) {
+        s_delivery.is_active=0;
+        *runtime_errno()=s_delivery.guest_errno;
+        errno=s_delivery.host_errno;
+    }
+    /* A signal taken between the stack switch and the syscall would push its frame over fpu. */
+    sigset_t all;
+    sigfillset(&all);
+    pthread_sigmask(SIG_SETMASK,&all,NULL);
+    __asm__ volatile("mov %0,%%rsp\n\tmov $15,%%eax\n\tsyscall\n\tud2" : : "r"(&frame) : "memory");
+    __builtin_unreachable();
+}
+/* libunwind's x86-64 setcontext as built for FreeBSD: the FPU from fxsave when the context owns
+ * it, rip pushed on the restored stack, rcx and rdi last. r10, r11, rflags and the signal mask
+ * stay as they are. */
+static ABI __attribute__((noreturn)) void unwind_setcontext(const GuestUcontext *p_context) {
+    s_delivery.is_active=0;
+    if (p_context->mcontext.ownedfp==MC_FPOWNED_FPU && p_context->mcontext.fpformat==MC_FPFMT_XMM)
+        __asm__ volatile("fxrstor %0" : : "m"(*(const uint8_t (*)[512])p_context->mcontext.fpstate));
+    __asm__ volatile("mov %c[r8](%%rdi),%%r8\n\t"
+                     "mov %c[r9](%%rdi),%%r9\n\t"
+                     "mov %c[rbx](%%rdi),%%rbx\n\t"
+                     "mov %c[rbp](%%rdi),%%rbp\n\t"
+                     "mov %c[r12](%%rdi),%%r12\n\t"
+                     "mov %c[r13](%%rdi),%%r13\n\t"
+                     "mov %c[r14](%%rdi),%%r14\n\t"
+                     "mov %c[r15](%%rdi),%%r15\n\t"
+                     "mov %c[rsi](%%rdi),%%rsi\n\t"
+                     "mov %c[rdx](%%rdi),%%rdx\n\t"
+                     "mov %c[rax](%%rdi),%%rax\n\t"
+                     "mov %c[rsp](%%rdi),%%rsp\n\t"
+                     "pushq %c[rip](%%rdi)\n\t"
+                     "mov %c[rcx](%%rdi),%%rcx\n\t"
+                     "mov %c[rdi](%%rdi),%%rdi\n\t"
+                     "ret"
+                     :
+                     : "D"(p_context), [r8] "i"(offsetof(GuestUcontext,mcontext.r8)),
+                       [r9] "i"(offsetof(GuestUcontext,mcontext.r9)), [rbx] "i"(offsetof(GuestUcontext,mcontext.rbx)),
+                       [rbp] "i"(offsetof(GuestUcontext,mcontext.rbp)), [r12] "i"(offsetof(GuestUcontext,mcontext.r12)),
+                       [r13] "i"(offsetof(GuestUcontext,mcontext.r13)), [r14] "i"(offsetof(GuestUcontext,mcontext.r14)),
+                       [r15] "i"(offsetof(GuestUcontext,mcontext.r15)), [rsi] "i"(offsetof(GuestUcontext,mcontext.rsi)),
+                       [rdx] "i"(offsetof(GuestUcontext,mcontext.rdx)), [rax] "i"(offsetof(GuestUcontext,mcontext.rax)),
+                       [rsp] "i"(offsetof(GuestUcontext,mcontext.rsp)), [rip] "i"(offsetof(GuestUcontext,mcontext.rip)),
+                       [rcx] "i"(offsetof(GuestUcontext,mcontext.rcx)), [rdi] "i"(offsetof(GuestUcontext,mcontext.rdi))
+                     : "memory");
+    __builtin_unreachable();
+}
+
 static const RuntimeExport exports[]={
     {"sceKernelInstallExceptionHandler",install_handler},
     {"sceKernelRemoveExceptionHandler",remove_handler},
     {"sceKernelRaiseException",raise_exception},
+    {"sigreturn",guest_sigreturn}, {"__Ux86_64_setcontext",unwind_setcontext},
 };
 uintptr_t runtime_exception_resolve(const char *name) { return RUNTIME_LOOKUP(exports,name); }
 void runtime_exception_report(void) {

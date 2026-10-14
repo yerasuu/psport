@@ -91,6 +91,8 @@ void runtime_thread_attach_main(void);
 /* Sends a host signal to a guest thread (ScePthread handle): 0, or 0x80020003 when the handle names
  * no live thread. */
 int32_t runtime_thread_kill(void *thread, int host_signal);
+/* The guest's sigprocmask bookkeeping for the calling thread (sigreturn's uc_sigmask). */
+void runtime_kernel_set_signal_mask(const uint32_t bits[4]);
 uintptr_t runtime_exception_resolve(const char *name);
 void runtime_exception_report(void);
 #ifndef _WIN32
