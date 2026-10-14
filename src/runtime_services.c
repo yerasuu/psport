@@ -596,6 +596,11 @@ static ABI int32_t keyboard_info(uint32_t resource,void *info) {
 }
 static ABI int32_t ime_update(void *handler) { (void)handler; return keyboard_opened ? 0 : IME_NOT_OPENED; }
 
+/* ---- RazorCpu ---- */
+/* The profiler's markers reach Razor only on a devkit capturing with it; a retail console, like
+ * this port, has no capture running and drops them, so they are no stub. */
+static ABI int32_t razor_idle(void) { return 0; }
+
 
 static const RuntimeExport exports[]={
     {"sceUserServiceInitialize",user_initialize}, {"sceUserServiceTerminate",runtime_stub},
@@ -752,6 +757,10 @@ static const RuntimeExport exports[]={
     {"sceScreenShotEnable",runtime_stub}, {"sceScreenShotDisable",runtime_stub}, {"sceScreenShotSetParam",runtime_stub},
     {"sceScreenShotSetOverlayImage",runtime_stub}, {"sceScreenShotSetOverlayImageWithOrigin",runtime_stub},
     {"sceSharePlayInitialize",runtime_stub}, {"sceGameLiveStreamingInitialize",runtime_stub},
+    {"sceRazorCpuPushMarker",razor_idle}, {"sceRazorCpuPushMarkerStatic",razor_idle},
+    {"sceRazorCpuPopMarker",razor_idle}, {"sceRazorCpuSync",razor_idle}, {"sceRazorCpuNamedSync",razor_idle},
+    {"sceRazorCpuPlotValue",razor_idle}, {"sceRazorCpuWriteBookmark",razor_idle},
+    {"sceRazorCpuIsCapturing",razor_idle},
 };
 uintptr_t runtime_services_resolve(const char *name) {
     const uintptr_t online=runtime_net_resolve(name); /* BB_ONLINE=1: the online module first */
