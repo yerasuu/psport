@@ -7,8 +7,9 @@
  * libc.prx's same-NID exports: the internal library is not shipped with the game and exposes the
  * same functions. System modules' exports win over the host runtime's (binding kinds 3 and 4)
  * except for libraries named in --hle, so an own implementation can stand in for one and be
- * compared with it, and for those the port implements unless --lle names them. Modules the game
- * loads by path win too (kinds 5 and 6), as the PS4 linker rebinds imports once one is loaded. */
+ * compared with it, and for those the port implements unless --lle names them. System modules that
+ * are clients of system services are never linked (ipmi_client). Modules the game loads by path
+ * win too (kinds 5 and 6), as the PS4 linker rebinds imports once one is loaded. */
 #define _GNU_SOURCE
 #include "loader.h"
 #include <dirent.h>
@@ -68,6 +69,10 @@ static void *grow(void *array, size_t *capacity, size_t count, size_t element) {
 static void list_add(List *list, const char *text) {
     list->items = grow(list->items, &list->capacity, list->count, sizeof(*list->items));
     if (!(list->items[list->count++] = strdup(text))) loader_fail("allocation failed");
+}
+static void list_remove(List *list, size_t index) {
+    free(list->items[index]);
+    memmove(list->items + index, list->items + index + 1, (--list->count - index) * sizeof(*list->items));
 }
 static int list_has(const List *list, const char *text) {
     for (size_t i = 0; i < list->count; ++i)
@@ -410,6 +415,32 @@ static int linked_stem(const Linker *l, const char *library) {
     }
     return 0;
 }
+static void free_module(LoaderModule *m) {
+    free(m->elf); free(m->ph); free(m->dynamic); free(m->libraries); free(m->modules); free(m->symbols); free(m->relas);
+}
+/* On the console these libraries are clients of system services, which they reach over IPMI
+ * (libSceIpmi's IPMI::Client, the kernel's ipmimgr_call, libSceNpCommon's ServiceIpmiClient,
+ * libSceAudioOut's IPMI session...): with no service process behind them their initialization
+ * fails and they fault on it (libSceAppContent) or stop the game (libSceNpTrophy), so the port's
+ * own library serves them instead. The first such import is written to why. */
+static int ipmi_client(const char *path, char *why, size_t size) {
+    LoaderModule m = {0};
+    loader_file = path;
+    loader_module(path, &m);
+    int found = 0;
+    for (size_t i = 0; i < m.symbol_count && !found; ++i) {
+        const LoaderIdentity *id = &m.symbols[i].identity;
+        if (m.symbols[i].section || !id->valid) continue;
+        const char *symbol = runtime_symbol(id->nid);
+        if ((symbol && strcasestr(symbol, "ipmi")) || !strcmp(id->library->name, "libSceIpmi")) {
+            snprintf(why, size, "%s from %s", symbol ? symbol : "an export", id->library->name);
+            found = 1;
+        }
+    }
+    free_module(&m);
+    loader_file = NULL;
+    return found;
+}
 /* Bundled and system modules whose library something linked imports and nothing linked provides:
  * the system ones in their order, then the bundled ones no system module shares a name with. */
 static void link_wanted(Linker *l) {
@@ -426,14 +457,20 @@ static void link_wanted(Linker *l) {
         }
         size_t s = 0;
         while (strcmp(l->system_stems.items[s], library)) ++s;
+        char why[256];
+        if (ipmi_client(l->system_paths.items[s], why, sizeof(why))) {
+            printf("Loader: system module %s not linked, the port serves %s: it is a client of a system service (imports %s)\n",
+                   strrchr(l->system_paths.items[s], '/') + 1, library, why);
+            list_remove(&l->system_stems, s);
+            list_remove(&l->system_paths, s);
+            --c;
+            --candidates;
+            continue;
+        }
         const char *file = strrchr(l->system_paths.items[s], '/') + 1;
         list_add(&l->module_names, file);
         list_add(&l->from_system, file);
     }
-}
-
-static void free_module(LoaderModule *m) {
-    free(m->elf); free(m->ph); free(m->dynamic); free(m->libraries); free(m->modules); free(m->symbols); free(m->relas);
 }
 
 static void link_module(Linker *l, const char *filename, LoaderModule *m, RuntimeModule *t, uint64_t base, uint64_t *tls_module,

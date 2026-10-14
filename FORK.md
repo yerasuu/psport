@@ -71,7 +71,12 @@ stopgap until the port implements its library: `BB_HLE=libSceX` keeps one to the
 `BB_LLE=libSceFiber` links one the port already implements, to compare the two. The modules a title
 bundles in `sce_module` (libSceNpToolkit2, libSceJobManager, ...) are linked the same way, ahead of the
 user's dump, once anything linked imports their library, as the console loads them with
-`sceSysmoduleLoadModule`.
+`sceSysmoduleLoadModule`. A system module that is a client of a system service is never linked, even
+when the folder has it and `BB_LLE` names it: one whose imports include the IPMI client (libSceIpmi's
+`IPMI::Client`, the kernel's `ipmimgr_call`, libSceNpCommon's `ServiceIpmiClient`, libSceNpManager's
+`GetIpmiClient`, libSceAudioOut's `sceAudioOutInitIpmiGetSession`: any import whose name has `ipmi`)
+fails without the service process behind it, so the port serves its library; the log names each one
+left out and the import that decided it (`Loader: system module ... not linked`).
 
 `BB_SYS_FONTS=<folder>` likewise reads the user's own dump of the console's system fonts (SST and the
 rest). Without it libSceFont draws each font set with the host's Noto fonts (`BB_FALLBACK_FONTS`
