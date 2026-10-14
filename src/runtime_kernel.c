@@ -205,8 +205,9 @@ static ABI int32_t local_to_utc(int64_t local,int32_t is_dst,int64_t *utc,GuestT
 /* ---- process ---- */
 static uint32_t sdk_version, psf_attributes;
 void runtime_process_configure(uint32_t sdk, uint32_t attributes) { sdk_version=sdk; psf_attributes=attributes; }
-/* Always the base console: the GPU library builds its command buffers for it (its own
- * sceKernelIsNeoMode answers 0), so a Pro answer here would contradict what it draws. */
+/* Always the base PS4, never a Pro or a PS5 (sceKernelIsProspero shares the answer): the GPU library
+ * builds its command buffers for it (its own sceKernelIsNeoMode answers 0), so a Pro answer here
+ * would contradict what it draws. */
 static ABI int32_t is_neo_mode(void) { return 0; }
 static ABI int32_t compiled_sdk_version(int32_t *version) {
     if (!version) return ERR(22);
@@ -403,7 +404,7 @@ static const RuntimeExport exports[]={
     {"sceKernelGettimeofday",kernel_gettimeofday},
     {"time",posix_time},
     {"sceKernelConvertUtcToLocaltime",utc_to_local}, {"sceKernelConvertLocaltimeToUtc",local_to_utc},
-    {"sceKernelIsNeoMode",is_neo_mode}, {"sceKernelGetCompiledSdkVersion",compiled_sdk_version},
+    {"sceKernelIsNeoMode",is_neo_mode}, {"sceKernelIsProspero",is_neo_mode}, {"sceKernelSetGPO",runtime_stub}, {"sceKernelGetCompiledSdkVersion",compiled_sdk_version},
     {"sceKernelGetCpumode",cpu_mode},
     {"getpagesize",get_pagesize}, {"getpid",get_pid}, {"sched_yield",yield},
     {"_exit",hard_exit},
