@@ -100,6 +100,7 @@ void runtime_report(void) {
     runtime_audio3d_report();
     runtime_pad_report();
     runtime_mouse_report();
+    runtime_keyboard_report();
     runtime_savedata_report();
     runtime_file_report();
     runtime_aio_report();
@@ -279,6 +280,8 @@ uintptr_t runtime_resolve(const char *name, int is_data) {
     if (gesture) return gesture;
     uintptr_t mouse = runtime_mouse_resolve(name);
     if (mouse) return mouse;
+    uintptr_t keyboard = runtime_keyboard_resolve(name);
+    if (keyboard) return keyboard;
     uintptr_t rtc = runtime_rtc_resolve(name);
     if (rtc) return rtc;
     uintptr_t save = runtime_savedata_resolve(name);

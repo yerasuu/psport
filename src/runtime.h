@@ -193,6 +193,10 @@ uintptr_t runtime_gesture_resolve(const char *name);
 void runtime_pad_report(void);
 uintptr_t runtime_mouse_resolve(const char *name);
 void runtime_mouse_report(void);
+uintptr_t runtime_keyboard_resolve(const char *name);
+void runtime_keyboard_report(void);
+/* 1 while the game has libSceImeKeyboard open: the host keyboard is its, not the pad's. */
+int runtime_keyboard_taken(void);
 uintptr_t runtime_rtc_resolve(const char *name);
 const char *runtime_file_user_dir(void);
 void runtime_savedata_configure(const char *title);

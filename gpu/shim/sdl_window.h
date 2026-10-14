@@ -2,8 +2,11 @@
 // event pump runs on the port's window thread (see window.cpp).
 #pragma once
 #include <atomic>
+#include <bitset>
+#include <deque>
 #include <mutex>
 #include <string>
+#include "../bbgpu.h"
 #include "common/types.h"
 
 struct SDL_Window;
@@ -44,6 +47,10 @@ public:
     /// libSceMouse (bbgpu_game_mouse_take): the buttons held (SDL_BUTTON_MASK bits), and the motion,
     /// wheel and tilt since the last call, reset. False while the host has no mouse.
     bool TakeGameMouse(s32& dx, s32& dy, s32& wheel, s32& tilt, u32& buttons);
+    /// libSceImeKeyboard (bbgpu_game_keyboard_*): while open, the keys the port does not keep are
+    /// queued for the game; take returns up to max of them. keyboard: the host has one.
+    static void OpenGameKeyboard(bool open) { game_keyboard_open.store(open, std::memory_order_relaxed); }
+    int TakeGameKeys(BbKeyEvent* events, int max, bool& keyboard, u32& dropped);
 
 private:
     std::atomic<s32> width, height;
@@ -67,6 +74,15 @@ private:
     float game_wheel{}, game_tilt{};
     u32 game_buttons{};
     std::atomic<bool> host_mouse{false};
+    void GameKeyEvent(const SDL_Event& event);
+    void SyncGameKeyboard();
+    std::mutex key_mutex;
+    std::deque<BbKeyEvent> game_keys;
+    std::bitset<512> game_keys_held; ///< by scancode: presses the game saw, so it gets their release
+    u32 game_keys_dropped{};
+    bool game_keyboard_synced{};
+    std::atomic<bool> host_keyboard{false};
+    static inline std::atomic<bool> game_keyboard_open{false};
     SDL_Window* window{};
     WindowSystemInfo window_info{};
 };

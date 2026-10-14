@@ -131,6 +131,23 @@ a pointer, so regression runs see a mouse that never moves or clicks). While
 the menu or the close prompt is open the game sees no motion and no buttons. While the game shows a
 VideoOut cursor, the window hides the system cursor over it and a click does not take the mouse for
 mouse look. The log says once whether the host mouse reaches the game (`Runtime: mouse: ...`).
+`game_mouse_sensitivity` in `bbport.ini` (0.05 to 20, default 1: the host's pixels as they are)
+scales the motion the game receives, keeping fractions for the next read; a value other than 1 is
+logged. Mouse look keeps its own `mouse_sensitivity`.
+
+## Keyboard
+
+libSceImeKeyboard (`src/runtime_keyboard.c`) gives every game that opens the keyboard the host
+keyboard as resource 1, with no switch. `sceImeUpdate` hands the game's handler the open event, a
+connection or disconnection when the host keyboard comes or goes, and a key down, up or (when the
+open option asks for it) repeat per key, with the USB keycode, the character it types with the held
+modifiers and the modifier and lock state; dead keys and input methods do not compose. While the
+game has the keyboard open its keys are the game's: the keyboard-as-pad (`src/runtime_pad.c`) stops
+reading them, a gamepad keeps working, and games that never open the keyboard keep it as a pad. The
+port keeps Insert, Home, the menu's and the name dialog's keys and F1 while it holds the mouse.
+Without a window or a host keyboard the keyboard opens and lists none, so `GetResourceId` fails with
+`0x80BC0004` as on a console with no keyboard. The log says whether the host keyboard reaches the
+game (`Runtime: keyboard: ...`) and sums up the events delivered at exit.
 
 ## Diagnostics
 
