@@ -1,6 +1,6 @@
 /* Offline AppContent provider for the configured base-game profile.
- * No package/DLC mounting, downloads, entitlement or license emulation; add-on folders in
- * <user>/addcont are reported as installed (see addon_list). */
+ * No packages, downloads or license emulation; add-on folders in <user>/addcont are reported as
+ * installed and entitled (see addon_list), and mounted as /addcont<n> when the game asks. */
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif
@@ -19,6 +19,9 @@
 #define NOT_LOADED ((int32_t)0x805a1001)
 #define PARAMETER ((int32_t)0x80d90002)
 #define NOT_MOUNTED ((int32_t)0x80d90004)
+#define NOT_FOUND ((int32_t)0x80d90005)
+#define MOUNT_FULL ((int32_t)0x80d90006)
+#define DRM_NO_ENTITLEMENT ((int32_t)0x80d90007)
 static unsigned refs, initialized, configured;
 static char title_id[16]="UNKNOWN";
 static uint32_t parameters[5];
@@ -104,8 +107,8 @@ static ABI int32_t param_int(uint32_t id,int32_t *out) {
 #define ADDON_INSTALLED 4u
 typedef struct { char label[LABEL_SIZE]; char padding[3]; uint32_t status; } AddonInfo;
 /* Add-ons are the folders <user>/addcont/<title id>/<entitlement label> (shadPS4's layout),
- * each reported as installed. No add-on data is mounted: Bloodborne: The Old Hunters
- * (SPEXPANSIONDLC03) needs only the entitlement, its data ships with patch 1.09. Without a list
+ * each reported as installed. Data is mounted only when the game asks (addon_mount): Bloodborne:
+ * The Old Hunters (SPEXPANSIONDLC03) needs only the entitlement, its data ships with patch 1.09. Without a list
  * the count is returned, with one at most capacity entries are written. Never touch unused list
  * slots. */
 static ABI int32_t addon_list(uint32_t service,void *list,uint32_t capacity,uint32_t *hits) {
@@ -141,6 +144,76 @@ static ABI int32_t addon_list(uint32_t service,void *list,uint32_t capacity,uint
     if (hits) *hits=count;
     if (count) printf("Runtime: AppContent add-ons reported installed (%s): %u\n",root,(unsigned)count);
     ++lists; return 0;
+}
+/* SceNpUnifiedEntitlementLabel: 16 characters, NUL, padding. Finds the add-on's folder under any
+ * title of <user>/addcont, the folders addon_list reports. */
+static int find_addon_folder(const char *sz_label,char *sz_out_path,size_t cb_out_path) {
+    if (!sz_label || !memchr(sz_label,0,LABEL_SIZE) || !sz_label[0] || strchr(sz_label,'/') || sz_label[0]=='.') return -1;
+    char sz_root[4096];
+    snprintf(sz_root,sizeof(sz_root),"%s/addcont",runtime_file_user_dir());
+    DIR *p_titles=opendir(sz_root);
+    int is_found=0;
+    for (struct dirent *p_title; p_titles && !is_found && (p_title=readdir(p_titles));) {
+        if (p_title->d_name[0]=='.') continue;
+        struct stat entry;
+        if (snprintf(sz_out_path,cb_out_path,"%s/%s/%s",sz_root,p_title->d_name,sz_label)>=(int)cb_out_path) continue;
+        is_found=!stat(sz_out_path,&entry) && S_ISDIR(entry.st_mode);
+    }
+    if (p_titles) closedir(p_titles);
+    return is_found ? 0 : -1;
+}
+static ABI int32_t addon_info(uint32_t service,const char *sz_label,AddonInfo *p_out_info) {
+    require_initialized();
+    if (service || !sz_label || !p_out_info) return PARAMETER;
+    char sz_folder[4096];
+    if (find_addon_folder(sz_label,sz_folder,sizeof(sz_folder))) return DRM_NO_ENTITLEMENT;
+    memset(p_out_info,0,sizeof(*p_out_info));
+    memcpy(p_out_info->label,sz_label,strlen(sz_label));
+    p_out_info->status=ADDON_INSTALLED;
+    return 0;
+}
+/* SceAppContentEntitlementKey: 16 bytes. Add-on data here is never encrypted, so an installed
+ * add-on's key is all zero. */
+static ABI int32_t addon_entitlement_key(uint32_t service,const char *sz_label,uint8_t *p_out_key) {
+    require_initialized();
+    if (service || !sz_label || !p_out_key) return PARAMETER;
+    char sz_folder[4096];
+    if (find_addon_folder(sz_label,sz_folder,sizeof(sz_folder))) return DRM_NO_ENTITLEMENT;
+    memset(p_out_key,0,16);
+    return 0;
+}
+#define ADDON_MOUNT_COUNT 16
+static char s_addon_mounted_labels[ADDON_MOUNT_COUNT][LABEL_SIZE];
+static ABI int32_t addon_mount(uint32_t service,const char *sz_label,char *sz_out_mount) {
+    require_initialized();
+    if (service || !sz_label || !sz_out_mount) return PARAMETER;
+    char sz_folder[4096];
+    if (find_addon_folder(sz_label,sz_folder,sizeof(sz_folder))) return NOT_FOUND;
+    int i_free=-1, i_mount=-1;
+    for (int i=0;i<ADDON_MOUNT_COUNT;++i) {
+        if (!strcmp(s_addon_mounted_labels[i],sz_label)) i_mount=i;
+        else if (!s_addon_mounted_labels[i][0] && i_free<0) i_free=i;
+    }
+    if (i_mount<0) i_mount=i_free;
+    if (i_mount<0) return MOUNT_FULL;
+    char sz_guest[32];
+    snprintf(sz_guest,sizeof(sz_guest),"/addcont%d",i_mount);
+    if (runtime_file_mount(sz_guest,sz_folder)) return MOUNT_FULL;
+    snprintf(s_addon_mounted_labels[i_mount],LABEL_SIZE,"%s",sz_label);
+    memset(sz_out_mount,0,16); memcpy(sz_out_mount,sz_guest,strlen(sz_guest));
+    printf("Runtime: AppContent add-on %s mounted at %s -> %s\n",sz_label,sz_guest,sz_folder);
+    return 0;
+}
+static ABI int32_t addon_unmount(const char *sz_mount) {
+    require_initialized();
+    int i_mount;
+    if (!sz_mount || !memchr(sz_mount,0,16) || sscanf(sz_mount,"/addcont%d",&i_mount)!=1 || i_mount<0 ||
+        i_mount>=ADDON_MOUNT_COUNT)
+        return PARAMETER;
+    if (!s_addon_mounted_labels[i_mount][0]) return NOT_MOUNTED;
+    runtime_file_unmount(sz_mount);
+    s_addon_mounted_labels[i_mount][0]=0;
+    return 0;
 }
 /* SceAppContentMountPoint: the mount point's path, NUL-terminated within 16 bytes. The space left
  * for download data is the free space of the host folder behind it. */
@@ -218,7 +291,9 @@ static const RuntimeExport exports[]={
     {"sceSysmoduleLoadModule",module_load}, {"sceSysmoduleIsLoaded",module_loaded},
     {"sceSysmoduleUnloadModule",module_unload}, {"sceSysmoduleLoadModuleInternalWithArg",module_load_internal},
     {"sceAppContentInitialize",content_init}, {"sceAppContentAppParamGetInt",param_int},
-    {"sceAppContentGetAddcontInfoList",addon_list},
+    {"sceAppContentGetAddcontInfoList",addon_list}, {"sceAppContentGetAddcontInfo",addon_info},
+    {"sceAppContentGetEntitlementKey",addon_entitlement_key}, {"sceAppContentAddcontMount",addon_mount},
+    {"sceAppContentAddcontUnmount",addon_unmount},
     {"sceAppContentDownloadDataGetAvailableSpaceKb",download_space},
     {"sceAppContentTemporaryDataMount2",temp_mount}, {"sceAppContentTemporaryDataUnmount",temp_unmount},
     {"sceAppContentTemporaryDataFormat",temp_format_mounted}, {"sceAppContentTemporaryDataGetAvailableSpaceKb",temp_space},
