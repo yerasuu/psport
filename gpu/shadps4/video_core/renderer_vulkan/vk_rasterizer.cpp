@@ -2727,6 +2727,28 @@ bool Rasterizer::BindResources(const Pipeline* pipeline) {
     return true;
 }
 
+bool Rasterizer::ArePreparedVsharpsCurrent(const PreparedVertexInputs& inputs,
+                                           const Shader::Gcn::FetchShaderData& fetch,
+                                           const Shader::Info& vs) const {
+    const std::span prepared_vsharps{inputs.buffers, inputs.count};
+    const bool is_current =
+        packet_vsharps.size() == inputs.count
+            ? std::ranges::equal(prepared_vsharps, packet_vsharps)
+            : std::ranges::equal(prepared_vsharps, fetch.attributes, {}, {},
+                                 [&](const auto& attrib) { return attrib.GetSharp(vs); });
+    if (BbCeStats::Enabled()) {
+        static u64 s_c_compared = 0, s_c_differed = 0;
+        ++s_c_compared;
+        s_c_differed += !is_current;
+        if ((s_c_compared & 0xFFFF) == 0) {
+            std::printf("CE stats: prepared V#s differed from the in-order ones in %llu of %llu "
+                        "draws\n",
+                        (unsigned long long)s_c_differed, (unsigned long long)s_c_compared);
+        }
+    }
+    return is_current;
+}
+
 void Rasterizer::BindVertexBuffers(const GraphicsPipeline* pipeline, const PreparedDraw* prepared) {
     ResolveVertexBuffers(pipeline, prepared);
     EmitVertexBuffers();
@@ -2793,21 +2815,17 @@ void Rasterizer::ResolveVertexBuffers(const GraphicsPipeline* pipeline,
                 !BbToggle::Disabled(BbToggle::PreparedResources)
             ? &prepared->vertex
             : nullptr;
+    // The worker read the V# tables ahead of the constant engine dumps that rewrite them (issue
+    // #44), and the user data it verified holds only the tables' address: its streams are used
+    // only while they equal the V#s read in order.
+    if (ready && !ArePreparedVsharpsCurrent(*ready, *fetch,
+                                            pipeline->GetStage(Shader::SwStage::Vertex))) {
+        ready = nullptr;
+    }
     if (ready) {
         attributes.assign(ready->attributes, ready->attributes + ready->count);
         bindings.assign(ready->bindings, ready->bindings + ready->count);
         guest_buffers.assign(ready->buffers, ready->buffers + ready->count);
-        if (BbCeStats::Enabled() && packet_vsharps.size() == ready->count) {
-            static u64 compared = 0, differed = 0;
-            ++compared;
-            differed += std::memcmp(ready->buffers, packet_vsharps.data(),
-                                    ready->count * sizeof(AmdGpu::Buffer)) != 0;
-            if ((compared & 0xFFFF) == 0) {
-                std::printf("CE stats: prepared V#s differed from the packet's in %llu of %llu "
-                            "draws\n",
-                            (unsigned long long)differed, (unsigned long long)compared);
-            }
-        }
     } else {
         pipeline->GetVertexInputs(attributes, bindings, divisors, guest_buffers,
                                   regs.vgt_instance_step_rate_0, regs.vgt_instance_step_rate_1,
