@@ -139,7 +139,7 @@ in link order (libc first) and the eboot's entry runs with `argv[0] = /app0/eboo
 | exceptions | `runtime_exception.c` |
 | modules loaded at run time | `runtime_module.c` |
 | files, async I/O, AppContent, PlayGo, saves | `runtime_file.c`, `runtime_aio.c`, `runtime_content.c`, `runtime_playgo.c`, `runtime_savedata.c` |
-| system and user services, dialogs, NP offline, sockets, HTTP | `runtime_services.c`, `runtime_socket.c`, `runtime_http.c`, `runtime_net.c`, `runtime_voice.c` |
+| system and user services, dialogs, NP offline, trophies, sockets, HTTP | `runtime_services.c`, `runtime_trophy.c`, `runtime_socket.c`, `runtime_http.c`, `runtime_net.c`, `runtime_voice.c` |
 | audio | `runtime_audio.c` (AudioOut), `runtime_audio3d.c`, `runtime_ajm.c` |
 | absent peripherals: USB devices (libSceUsbd), PlayStation Camera | `runtime_devices.c` |
 | Remote Play, Share Play, video recording, core dumps (none running) | `runtime_capture.c` |

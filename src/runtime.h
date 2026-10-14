@@ -152,6 +152,8 @@ uintptr_t runtime_voice_resolve(const char *name);
 uintptr_t runtime_socket_resolve(const char *name);
 /* libSceHttp offline (runtime_http.c), consulted by runtime_services_resolve. */
 uintptr_t runtime_http_resolve(const char *name);
+/* libSceNpTrophy (runtime_trophy.c), consulted by runtime_services_resolve. */
+uintptr_t runtime_trophy_resolve(const char *name);
 /* libSceJson (runtime_json.c), consulted by runtime_services_resolve. */
 uintptr_t runtime_json_resolve(const char *sz_name);
 /* PSN libraries offline (runtime_np.c), consulted by runtime_services_resolve. */

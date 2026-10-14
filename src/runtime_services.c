@@ -30,7 +30,6 @@
 #define NET_EINVAL ((int32_t)0x80410116)
 #define DIALOG_NOT_INITIALIZED ((int32_t)0x80B80003)
 #define AUDIO_IN_NOT_OPENED ((int32_t)0x80260109)
-#define TROPHY_INVALID ((int32_t)0x80551604)
 #define HMD_ALREADY_INITIALIZED ((int32_t)0x81110001)
 #define HMD_NOT_INITIALIZED ((int32_t)0x81110002)
 #define HMD_HANDLE_INVALID ((int32_t)0x81110003)
@@ -506,35 +505,6 @@ static ABI int32_t hmd_device_info(int32_t *info) {
 }
 static ABI int32_t hmd_handle_invalid(void) { return HMD_HANDLE_INVALID; }
 
-/* ---- Trophies: accepted locally, recorded in the log ---- */
-static ABI int32_t trophy_context(int32_t *ctx,int32_t user,uint32_t label,uint64_t options) {
-    (void)user; (void)label; (void)options;
-    if (!ctx) return TROPHY_INVALID;
-    *ctx=new_id(); return 0;
-}
-static ABI int32_t trophy_handle(int32_t *handle) { if (!handle) return TROPHY_INVALID; *handle=new_id(); return 0; }
-static ABI int32_t trophy_unlock(int32_t ctx,int32_t handle,int32_t id,int32_t *platinum) {
-    (void)ctx; (void)handle;
-    printf("Runtime: trophy %d unlocked\n",id);
-    if (platinum) *platinum=-1;
-    return 0;
-}
-static ABI int32_t trophy_game_info(int32_t ctx,int32_t handle,void *details,void *data) {
-    (void)ctx; (void)handle;
-    if (details) { uint64_t size; memcpy(&size,details,8); memset((char *)details+8,0,size>8 && size<4096 ? size-8 : 0); }
-    if (data) { uint64_t size; memcpy(&size,data,8); memset((char *)data+8,0,size>8 && size<4096 ? size-8 : 0); }
-    return 0;
-}
-static ABI int32_t trophy_info(int32_t ctx,int32_t handle,int32_t id,void *details,void *data) {
-    (void)id; return trophy_game_info(ctx,handle,details,data);
-}
-static ABI int32_t trophy_unlock_state(int32_t ctx,int32_t handle,uint32_t *flags,uint32_t *count) {
-    (void)ctx; (void)handle;
-    if (!flags || !count) return TROPHY_INVALID;
-    memset(flags,0,16); *count=0;
-    return 0;
-}
-
 /* ---- DiscMap: the game is fully installed, no disc bitmap exists ---- */
 #define DISC_MAP_NO_BITMAP ((int32_t)0x81100004)
 /* Every byte of an installed title is on the HDD; libSceFios2 takes a failure here for a request
@@ -727,11 +697,6 @@ static const RuntimeExport exports[]={
     {"sceHmdInitialize",hmd_init}, {"sceHmdInitialize315",hmd_init}, {"sceHmdTerminate",hmd_term},
     {"sceHmdGetDeviceInformation",hmd_device_info},
     {"sceHmdGetDeviceInformationByHandle",hmd_handle_invalid}, {"sceHmdGetFieldOfView",hmd_handle_invalid},
-    {"sceNpTrophyCreateContext",trophy_context}, {"sceNpTrophyCreateHandle",trophy_handle},
-    {"sceNpTrophyRegisterContext",runtime_stub}, {"sceNpTrophyUnlockTrophy",trophy_unlock},
-    {"sceNpTrophyDestroyHandle",runtime_stub},
-    {"sceNpTrophyGetGameInfo",trophy_game_info}, {"sceNpTrophyGetTrophyInfo",trophy_info},
-    {"sceNpTrophyGetTrophyUnlockState",trophy_unlock_state},
     {"sceAudioInOpen",audio_in_open}, {"sceAudioInHqOpen",audio_in_open}, {"sceAudioInGetSilentState",audio_in_open},
     {"sceMoveInit",move_init}, {"sceMoveOpen",move_open}, {"sceMoveGetDeviceInfo",move_device_info},
     {"sceMoveReadStateRecent",move_read_recent}, {"sceMoveSetLightSphere",move_no_controller},
@@ -755,6 +720,8 @@ uintptr_t runtime_services_resolve(const char *name) {
     if (found) return found;
     const uintptr_t va_http=runtime_http_resolve(name);
     if (va_http) return va_http;
+    const uintptr_t va_trophy=runtime_trophy_resolve(name);
+    if (va_trophy) return va_trophy;
     const uintptr_t va_json=runtime_json_resolve(name);
     if (va_json) return va_json;
     const uintptr_t va_np=runtime_np_resolve(name);
