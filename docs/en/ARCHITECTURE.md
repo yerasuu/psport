@@ -15,7 +15,7 @@ The model is Wine's, not an emulator's.
 | C runtime | `src/runtime*.c`, `src/runtime.h`, `src/import_*.inc` | `out/psport` | libkernel and the other system libraries, import resolution, the call report |
 | GPU library | `gpu/shim/bbgpu.cpp`, `gpu/bbgpu.h` | `out/gpu/libpsport-gpu.so` | C interface between `psport` and the C++ side |
 | Translator | `gpu/shadps4/` (inherited from shadPS4, `gpu/VENDOR.txt`), `gpu/cp/`, `gpu/layer/` | `libpsport-gpu.so` | GnmDriver, VideoOut, command processor, Vulkan rasterizer, caches, shader recompiler |
-| Ported libraries | `gpu/ngs2/`, `gpu/audiodec/`, `gpu/fiber/`, `gpu/font/`, `gpu/pngenc/` | `libpsport-gpu.so` | libSceNgs2, libSceAudiodec, libSceFiber, libSceFont/FontFt, libScePngEnc |
+| Ported libraries | `gpu/ngs2/`, `gpu/audiodec/`, `gpu/fiber/`, `gpu/font/`, `gpu/pngenc/`, `gpu/pngdec/` | `libpsport-gpu.so` | libSceNgs2, libSceAudiodec, libSceFiber, libSceFont/FontFt, libScePngEnc, libScePngDec |
 | Port services | `gpu/shim/bbport_*` | `libpsport-gpu.so` | settings (`bbport.ini`), overlay, submit guard, guest memory, diagnostics |
 | Game profiles | `gpu/games/` | `libpsport-gpu.so` | per-title optimisations (`Game::Profile`) |
 | Online module | `gpu/bbnet/` | `out/gpu/` (optional) | network and PSN imports with `PS_ONLINE=1` |
@@ -172,7 +172,7 @@ a file.
 `libpsport-gpu.so` holds the C++ side. `gpu/shim/bbgpu.cpp` is its C interface (`gpu/bbgpu.h`):
 
 - `bbgpu_register_kernel` registers the kernel event queues and the libraries that do not need a
-  window: AvPlayer, Ngs2, Fiber, Font, FontFt, Audiodec, Videodec2, PngEnc.
+  window: AvPlayer, Ngs2, Fiber, Font, FontFt, Audiodec, Videodec2, PngEnc, PngDec.
 - `bbgpu_init` loads `bbport.ini`, selects the game profile, prepares saves through it, starts the
   SDL window on its own thread and registers GnmDriver and VideoOut.
 - `bbgpu_resolve` returns the function registered for an import's NID. Libraries register with

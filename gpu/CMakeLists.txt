@@ -139,10 +139,12 @@ file(GLOB FONT_SOURCES CONFIGURE_DEPENDS font/*.cpp)
 file(GLOB AUDIODEC_SOURCES CONFIGURE_DEPENDS audiodec/*.cpp)
 # libScePngEnc over miniz's PNG writer.
 file(GLOB PNGENC_SOURCES CONFIGURE_DEPENDS pngenc/*.cpp)
+# libScePngDec: PNG decoding over miniz's inflater.
+file(GLOB PNGDEC_SOURCES CONFIGURE_DEPENDS pngdec/*.cpp)
 pkg_check_modules(FREETYPE REQUIRED IMPORTED_TARGET freetype2)
 file(GLOB ATRAC9_SOURCES CONFIGURE_DEPENDS ../third_party/LibAtrac9/C/src/*.c)
 add_library(bbgpu SHARED ${VIDEO_CORE} ${RECOMPILER} ${COMMON} ${SHIM_SOURCES} ${LAYER_SOURCES} ${GAME_SOURCES} ${CP_SOURCES}
-    ${NGS2_SOURCES} ${FIBER_SOURCES} ${FONT_SOURCES} ${AUDIODEC_SOURCES} ${PNGENC_SOURCES} ${ATRAC9_SOURCES}
+    ${NGS2_SOURCES} ${FIBER_SOURCES} ${FONT_SOURCES} ${AUDIODEC_SOURCES} ${PNGENC_SOURCES} ${PNGDEC_SOURCES} ${ATRAC9_SOURCES}
     shadps4/core/libraries/gnmdriver/gnmdriver.cpp
     shadps4/core/libraries/videoout/driver.cpp shadps4/core/libraries/videoout/video_out.cpp
     shadps4/core/libraries/kernel/equeue.cpp ${AVPLAYER}

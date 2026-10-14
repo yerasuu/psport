@@ -16,7 +16,7 @@ supported title with its own profile.
 - **System libraries.** psport provides them itself: the C runtime in `src/runtime_*.c` (memory,
   threads, synchronization, files, audio, pad, saves, exceptions, services, user-level threads,
   modules a game loads at run time) and the libraries in `gpu/` (GnmDriver, VideoOut, AvPlayer,
-  Videodec2, Ngs2, Audiodec, Fiber, Font, PngEnc). No tested title needs a dump of the console's
+  Videodec2, Ngs2, Audiodec, Fiber, Font, PngEnc, PngDec). No tested title needs a dump of the console's
   system modules.
 - **Graphics.** The GPU command stream and GCN shaders are translated to Vulkan by a renderer
   derived from [shadPS4](https://github.com/shadps4-emu/shadPS4)'s video core and shader
@@ -140,7 +140,7 @@ hardware tests, when needed, are OpenOrbis homebrew); match the surrounding code
 |---|---|
 | `src/` | Entry (`probe.c`), native loader (`loader_*.c`) and C runtime (`runtime_*.c`) |
 | `scripts/` | Launch helpers run by `run.sh`: mods, AppContent profile, Bloodborne's patch compiler and game check, online addresses |
-| `gpu/` | GPU library: shadPS4 video core with bbport's changes (`gpu/VENDOR.txt`), own PM4 decoder (`cp/`) and memory module (`layer/`), ported libraries (`ngs2/`, `audiodec/`, `fiber/`, `font/`, `pngenc/`), game profiles (`games/`), overlay and in-game menu (`shim/`), DLSS bridge, online module |
+| `gpu/` | GPU library: shadPS4 video core with bbport's changes (`gpu/VENDOR.txt`), own PM4 decoder (`cp/`) and memory module (`layer/`), ported libraries (`ngs2/`, `audiodec/`, `fiber/`, `font/`, `pngenc/`, `pngdec/`), game profiles (`games/`), overlay and in-game menu (`shim/`), DLSS bridge, online module |
 | `launcher/`, `packaging/` | Upstream's GTK4 launcher; Nix package and AppImage script |
 | `patches/` | Community patches for Bloodborne |
 | `tools/` | Regression runs, GCN disassembler, FSR 4 tools and `fsr4cap`, scripted-run helpers |
