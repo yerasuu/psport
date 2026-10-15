@@ -58,7 +58,7 @@ ObjectMotion::ObjectMotion(const Instance& instance_, Scheduler& scheduler_)
         std::puts("Object motion: off (no upscaler)");
         return;
     }
-    if (!PsSettings::Get().object_motion ||
+    if (!PsSettings::Get().should_use_object_motion ||
         PsSettings::Get().upscaler == PsSettings::UpscalerOff) {
         std::puts("Object motion: off (enable in menu or PS_OBJECT_MOTION=1)");
         return;
@@ -100,7 +100,7 @@ void ObjectMotion::OnFrameStart() {
     if (!enabled) {
         return;
     }
-    if (PsStats::enabled && (frame % 600) == 0 && history.stats.draws) {
+    if (PsStats::g_is_enabled && (frame % 600) == 0 && history.stats.draws) {
         const auto& s = history.stats;
         std::printf("Object motion: %llu draws, %llu stored, %llu with history, %llu unmatched, "
                     "%llu capacity skips, %llu invalid, %llu still (600 frames); last frame %u/%u vertices; "
@@ -196,7 +196,7 @@ ObjectMotion::Target& ObjectMotion::GetTarget(u32 width, u32 height) {
         });
     }
     static u32 reports = 0;
-    if (PsStats::enabled && reports < 16) {
+    if (PsStats::g_is_enabled && reports < 16) {
         ++reports;
         std::printf("Object motion: motion image %ux%u%s\n", width, height,
                     slot->width ? " (replacing one)" : "");

@@ -44,27 +44,27 @@ inline constexpr const char* Names[Count] = {
     "flush",        "motion",      "descriptors",   "kick",         "preupload",
     "EnsureResident", "stream copy", "VRAM path", "layer bind",
 };
-inline std::array<std::atomic<std::uint64_t>, Count> cycles{};
+inline std::array<std::atomic<std::uint64_t>, Count> g_cycles{};
 
 inline bool Enabled() {
-    static const bool on = [] {
-        const char* env = std::getenv("PS_SECTIONS");
-        return env && env[0] == '1';
+    static const bool s_is_on = [] {
+        const char* sz_env = std::getenv("PS_SECTIONS");
+        return sz_env && sz_env[0] == '1';
     }();
-    return on;
+    return s_is_on;
 }
 /// Set on the draw recording thread (DrawPipe::Run): only its time is counted.
-inline thread_local bool recording_thread = false;
+inline thread_local bool g_is_recording_thread = false;
 
 struct Scope {
-    explicit Scope(Id id_) : id{id_}, start{Enabled() && recording_thread ? __rdtsc() : 0} {}
+    explicit Scope(Id id_) : m_id{id_}, m_start{Enabled() && g_is_recording_thread ? __rdtsc() : 0} {}
     ~Scope() {
-        if (start) {
-            cycles[id].fetch_add(__rdtsc() - start, std::memory_order_relaxed);
+        if (m_start) {
+            g_cycles[m_id].fetch_add(__rdtsc() - m_start, std::memory_order_relaxed);
         }
     }
-    Id id;
-    std::uint64_t start;
+    Id m_id;
+    std::uint64_t m_start;
 };
 } // namespace PsSections
 

@@ -444,7 +444,7 @@ Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& 
     });
 
     // Flush frame creation commands.
-    PsStats::frame_number.fetch_add(1, std::memory_order_relaxed); // psport: game frames shown
+    PsStats::g_frame_number.fetch_add(1, std::memory_order_relaxed); // psport: game frames shown
     frame->ready_semaphore = draw_scheduler.GetWorkSemaphore()->Handle();
     frame->ready_tick = draw_scheduler.CurrentTick();
     SubmitInfo info{};
@@ -466,7 +466,7 @@ Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& 
             const u64 tick = recent_frame_ticks.front();
             recent_frame_ticks.pop_front();
             if (recent_frame_ticks.size() == frames_ahead) {
-                PsStats::WaitTimer timer{PsStats::present_wait_ns};
+                PsStats::WaitTimer timer{PsStats::g_present_wait_ns};
                 draw_scheduler.Wait(tick);
             }
         }

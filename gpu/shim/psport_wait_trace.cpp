@@ -20,76 +20,76 @@ constexpr int Skip = 1; // Scope::Scope itself
 constexpr int Kept = 6; // frames that identify a stack
 
 struct Key {
-    std::array<void*, Kept> frames{};
-    std::array<char, 16> thread{};
+    std::array<void*, Kept> m_frames{};
+    std::array<char, 16> m_thread{};
     bool operator<(const Key& other) const {
-        if (frames != other.frames) {
-            return frames < other.frames;
+        if (m_frames != other.m_frames) {
+            return m_frames < other.m_frames;
         }
-        return thread < other.thread;
+        return m_thread < other.m_thread;
     }
 };
 struct Total {
-    std::uint64_t ns = 0, count = 0;
+    std::uint64_t ns = 0, c_waits = 0;
 };
-std::mutex mutex;
-std::map<Key, Total> totals;
+std::mutex s_mutex;
+std::map<Key, Total> s_totals;
 
-std::string Describe(void* address) {
+std::string Describe(void* p_address) {
     Dl_info info{};
-    if (!dladdr(address, &info)) {
-        char text[32];
-        std::snprintf(text, sizeof(text), "%p", address);
-        return text;
+    if (!dladdr(p_address, &info)) {
+        char sz_text[32];
+        std::snprintf(sz_text, sizeof(sz_text), "%p", p_address);
+        return sz_text;
     }
-    const char* file = info.dli_fname ? std::strrchr(info.dli_fname, '/') : nullptr;
-    file = file ? file + 1 : (info.dli_fname ? info.dli_fname : "?");
-    char text[512];
+    const char* sz_file = info.dli_fname ? std::strrchr(info.dli_fname, '/') : nullptr;
+    sz_file = sz_file ? sz_file + 1 : (info.dli_fname ? info.dli_fname : "?");
+    char sz_text[512];
     if (info.dli_sname) {
-        std::snprintf(text, sizeof(text), "%s+%#lx", info.dli_sname,
-                      (unsigned long)(static_cast<char*>(address) -
+        std::snprintf(sz_text, sizeof(sz_text), "%s+%#lx", info.dli_sname,
+                      (unsigned long)(static_cast<char*>(p_address) -
                                       static_cast<char*>(info.dli_saddr)));
     } else {
-        std::snprintf(text, sizeof(text), "%s+%#lx", file,
-                      (unsigned long)(static_cast<char*>(address) -
+        std::snprintf(sz_text, sizeof(sz_text), "%s+%#lx", sz_file,
+                      (unsigned long)(static_cast<char*>(p_address) -
                                       static_cast<char*>(info.dli_fbase)));
     }
-    return text;
+    return sz_text;
 }
 } // namespace
 
 bool Enabled() {
-    static const bool enabled = [] {
-        const char* env = std::getenv("PS_WAIT_TRACE");
-        return env && env[0] == '1';
+    static const bool s_is_enabled = [] {
+        const char* sz_env = std::getenv("PS_WAIT_TRACE");
+        return sz_env && sz_env[0] == '1';
     }();
-    return enabled;
+    return s_is_enabled;
 }
 
 Scope::Scope() {
     if (!Enabled()) {
         return;
     }
-    depth = backtrace(frames, int(std::size(frames)));
-    start = std::chrono::steady_clock::now();
+    m_depth = backtrace(m_frames, int(std::size(m_frames)));
+    m_start = std::chrono::steady_clock::now();
 }
 
 Scope::~Scope() {
-    if (depth == 0) {
+    if (m_depth == 0) {
         return;
     }
     const auto ns = std::uint64_t(std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                      std::chrono::steady_clock::now() - start)
+                                      std::chrono::steady_clock::now() - m_start)
                                       .count());
     Key key;
-    for (int i = 0; i < Kept && Skip + i < depth; ++i) {
-        key.frames[i] = frames[Skip + i];
+    for (int i = 0; i < Kept && Skip + i < m_depth; ++i) {
+        key.m_frames[i] = m_frames[Skip + i];
     }
-    pthread_getname_np(pthread_self(), key.thread.data(), key.thread.size());
-    std::scoped_lock lk{mutex};
-    auto& total = totals[key];
+    pthread_getname_np(pthread_self(), key.m_thread.data(), key.m_thread.size());
+    std::scoped_lock lk{s_mutex};
+    auto& total = s_totals[key];
     total.ns += ns;
-    ++total.count;
+    ++total.c_waits;
 }
 
 void Report(double window_s) {
@@ -98,9 +98,9 @@ void Report(double window_s) {
     }
     std::vector<std::pair<Key, Total>> list;
     {
-        std::scoped_lock lk{mutex};
-        list.assign(totals.begin(), totals.end());
-        totals.clear();
+        std::scoped_lock lk{s_mutex};
+        list.assign(s_totals.begin(), s_totals.end());
+        s_totals.clear();
     }
     std::sort(list.begin(), list.end(),
               [](const auto& a, const auto& b) { return a.second.ns > b.second.ns; });
@@ -113,10 +113,10 @@ void Report(double window_s) {
     for (std::size_t i = 0; i < list.size() && i < 6; ++i) {
         const auto& [key, total] = list[i];
         std::printf("  %5.1f%% %6llu waits, thread %s:", total.ns / (window_s * 1e7),
-                    (unsigned long long)total.count, key.thread.data());
-        for (void* frame : key.frames) {
-            if (frame) {
-                std::printf(" <- %s", Describe(frame).c_str());
+                    (unsigned long long)total.c_waits, key.m_thread.data());
+        for (void* p_frame : key.m_frames) {
+            if (p_frame) {
+                std::printf(" <- %s", Describe(p_frame).c_str());
             }
         }
         std::printf("\n");

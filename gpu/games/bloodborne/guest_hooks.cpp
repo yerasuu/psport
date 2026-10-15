@@ -271,13 +271,13 @@ void OnTrap(int sig, siginfo_t* info, void* context) {
     }
     if (rip == ImageBase + CollectorEntry) {
         const u64 allocator = u64(g[REG_RDI]);
-        for (std::size_t i = 0; i < PsStats::range_allocators.size(); ++i) {
+        for (std::size_t i = 0; i < PsStats::g_range_allocators.size(); ++i) {
             u64 expected = 0;
-            if (PsStats::range_allocators[i].load(std::memory_order_relaxed) == allocator ||
-                PsStats::range_allocators[i].compare_exchange_strong(expected, allocator)) {
-                PsStats::range_live[i].store(*reinterpret_cast<const u64*>(allocator + 0xc8),
+            if (PsStats::g_range_allocators[i].load(std::memory_order_relaxed) == allocator ||
+                PsStats::g_range_allocators[i].compare_exchange_strong(expected, allocator)) {
+                PsStats::g_range_live[i].store(*reinterpret_cast<const u64*>(allocator + 0xc8),
                                              std::memory_order_relaxed);
-                PsStats::range_bytes[i].store(*reinterpret_cast<const u64*>(allocator + 0xd0),
+                PsStats::g_range_bytes[i].store(*reinterpret_cast<const u64*>(allocator + 0xd0),
                                               std::memory_order_relaxed);
                 break;
             }
@@ -381,7 +381,7 @@ void Install(RangeCallback on_gpu_range_allocated) {
     // PS_HEAP_HOOKS=0 (bisecting): the heap's ranges are not reported.
     const char* heap_env = std::getenv("PS_HEAP_HOOKS");
     const bool heap_hooks = !heap_env || heap_env[0] != '0';
-    if (PsStats::enabled) {
+    if (PsStats::g_is_enabled) {
         Patch(ImageBase + CollectorEntry, CollectorEntryCode, sizeof(CollectorEntryCode));
     }
     int heap_sites = 0;

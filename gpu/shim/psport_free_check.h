@@ -33,14 +33,14 @@ bool Enabled();
 /// Before a write of `size` bytes at `address`; `data` (may be null) is what will be written.
 /// `seq`: the fence's place in the graphics command stream (NextFenceSeq), 0 for none: a
 /// fence written after one that follows it in the stream is reported.
-void Check(std::uint64_t address, std::uint64_t size, const void* data, Source source,
+void Check(std::uint64_t va_range, std::uint64_t cb_range, const void* p_data, Source source,
            std::uint64_t seq = 0);
 /// Numbers the graphics fences in command stream order (0 when the check is off).
 std::uint64_t NextFenceSeq();
 /// Where the GPU command thread decoded a fence: its label and value, the packet and its command
 /// buffer in guest memory, and the submission (Liverpool::SubmitGfx order).
-void NoteFenceDecoded(std::uint64_t label, std::uint64_t value, const void* packet,
-                      const void* buffer, std::uint64_t submit);
+void NoteFenceDecoded(std::uint64_t label, std::uint64_t value, const void* p_packet,
+                      const void* p_buffer, std::uint64_t submit);
 /// PS_LABEL_TRAP: a decoded fence's write starts, and has landed (`write_ns` it took; slow
 /// ones are reported). Until then its label is pending.
 void NoteFenceWriting(std::uint64_t label);
@@ -49,12 +49,12 @@ void NoteFenceWritten(std::uint64_t label, std::uint64_t write_ns = 0);
 /// but not yet written is read-only; a guest write into such a label block is reported with
 /// the guest code and call chain that made it (who frees a label before its fence). True when
 /// the fault was the trap's (the page is writable again).
-bool OnTrapFault(void* ucontext, std::uint64_t address);
+bool OnTrapFault(void* p_ucontext, std::uint64_t va_guest);
 /// After OnTrapFault and GPU page tracking declined a fault: true when it raced with a trapped
 /// page's release (the write is retried).
-bool OnStaleTrapFault(std::uint64_t address);
+bool OnStaleTrapFault(std::uint64_t va_guest);
 /// A graphics submission by the guest (sceGnmSubmitCommandBuffers).
-void NoteSubmit(std::uint64_t submit, const void* buffer, std::uint64_t size);
+void NoteSubmit(std::uint64_t submit, const void* p_buffer, std::uint64_t cb_range);
 /// At a guest fault: the free check's view of the page the guest was in (`rax`, `r14`).
 void DumpAtFault(std::uint64_t rax, std::uint64_t r14);
 } // namespace PsFreeCheck

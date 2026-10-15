@@ -294,7 +294,7 @@ bool TemporalUpscaler::ReactiveOn() const {
     // FSR 4 takes no reactive mask itself: the mask blends its output afterwards
     // (RecordFsr4Reactive).
     // DLSS takes no reactive mask.
-    return PsSettings::Get().reactive && !PsToggle::Disabled(1u << 27) && !UseDlss() &&
+    return PsSettings::Get().should_use_reactive && !PsToggle::Disabled(1u << 27) && !UseDlss() &&
            PsSettings::Get().upscaler != PsSettings::UpscalerTaa;
 }
 
@@ -390,7 +390,7 @@ bool TemporalUpscaler::OnFrameStart() {
         failed = true;
     }
     const bool active = Active();
-    const bool jitter_on = active && settings.jitter && !PsToggle::Disabled(1u << 25);
+    const bool jitter_on = active && settings.should_jitter && !PsToggle::Disabled(1u << 25);
     const int upscaler = settings.upscaler.load();
     const int output = settings.output_res.load();
     const bool output_changed = !scaled_session && applied_output != output;
@@ -407,7 +407,7 @@ bool TemporalUpscaler::OnFrameStart() {
         // A failed provider keeps a fatal flag internally; a user retry gets a fresh context.
         scheduler.Finish();
         fsr4 = std::make_unique<Fsr4Upscaler>(instance, scheduler);
-        if (PsSettings::IsFsr4(upscaler)) PsSettings::Get().fsr4_problem = nullptr;
+        if (PsSettings::IsFsr4(upscaler)) PsSettings::Get().sz_fsr4_problem = nullptr;
     }
     if (applied_upscaler != upscaler) fsr4_failed = false; // retry after a menu change
     // Dynamic scene resolution scaling (live preset switching) works on all GPUs.
@@ -436,7 +436,7 @@ bool TemporalUpscaler::OnFrameStart() {
         if ((!ui_phase && Scaled() && good > 0 && bad < 12) || (ui_phase && good < 1)) {
             ++(ui_phase ? good : bad);
             std::printf("UI trace: frame %llu %s:%s\n",
-                        (unsigned long long)PsStats::frame_number.load(std::memory_order_relaxed),
+                        (unsigned long long)PsStats::g_frame_number.load(std::memory_order_relaxed),
                         ui_phase ? "with the output-size UI" : "WITHOUT it", ui_trace.c_str());
         }
         ui_trace.clear();
@@ -858,7 +858,7 @@ void TemporalUpscaler::RecordTaa(vk::CommandBuffer cmdbuf, vk::ImageView color,
     cmdbuf.dispatch((out_width + 7) / 8, (out_height + 7) / 8, 1);
     const auto& settings = PsSettings::Get();
     const float strength = std::clamp(settings.sharpness.load(), 0.0f, 2.0f);
-    if (settings.sharpen && strength > 0.0f && !(params.pad & 0xffu)) {
+    if (settings.should_sharpen && strength > 0.0f && !(params.pad & 0xffu)) {
         const vk::MemoryBarrier2 resolved{
             .srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
             .srcAccessMask = vk::AccessFlagBits2::eShaderStorageWrite,
@@ -886,7 +886,7 @@ void TemporalUpscaler::RecordTaa(vk::CommandBuffer cmdbuf, vk::ImageView color,
 void TemporalUpscaler::ExtraSharpen(vk::Image target, bool ldr, u32 w, u32 h) {
     const auto& settings = PsSettings::Get();
     const float extra = std::clamp(settings.sharpness.load(), 0.0f, 2.0f) - 1.0f;
-    if (!settings.sharpen || extra <= 0.0f) {
+    if (!settings.should_sharpen || extra <= 0.0f) {
         return;
     }
     const auto device = instance.GetDevice();
@@ -1308,7 +1308,7 @@ void TemporalUpscaler::Run() {
         // RCAS strength 0..1 (menu, PS_FSR_SHARPNESS); jitter at 1:1 softens the image slightly.
         // AMD's RCAS ends at 1; ExtraSharpen adds the rest of the menu's 0..2.
         info.sharpness = std::min(PsSettings::Get().sharpness.load(), 1.0f);
-        info.enableSharpening = PsSettings::Get().sharpen ? VK_TRUE : VK_FALSE;
+        info.enableSharpening = PsSettings::Get().should_sharpen ? VK_TRUE : VK_FALSE;
         info.reset = reset ? VK_TRUE : VK_FALSE;
         info.frameId = frame_id++;
     
@@ -2056,7 +2056,7 @@ void TemporalUpscaler::RunScaled() {
     info.cameraVerticalFovRadians = camera_motion.VerticalFov();
     info.viewSpaceToMeters = 1.0f;
     info.sharpness = std::min(settings.sharpness.load(), 1.0f);
-    info.enableSharpening = settings.sharpen ? VK_TRUE : VK_FALSE;
+    info.enableSharpening = settings.should_sharpen ? VK_TRUE : VK_FALSE;
     info.reset = reset ? VK_TRUE : VK_FALSE;
     info.frameId = frame_id++;
 
@@ -2277,7 +2277,7 @@ bool TemporalUpscaler::RecordFsr4(vk::CommandBuffer cmdbuf, Fsr4Upscaler::Image 
     const auto& settings = PsSettings::Get();
     // Same jitter convention as FSR 3; the menu (or toggle 1 << 26) flips it for tests.
     const float sign =
-        PsToggle::Disabled(1u << 26) != settings.fsr4_invert_jitter.load() ? -1.0f : 1.0f;
+        PsToggle::Disabled(1u << 26) != settings.should_invert_fsr4_jitter.load() ? -1.0f : 1.0f;
     const bool ok = fsr4->Record({
         .cmdbuf = cmdbuf,
         .color = color,
@@ -2293,21 +2293,21 @@ bool TemporalUpscaler::RecordFsr4(vk::CommandBuffer cmdbuf, Fsr4Upscaler::Image 
         .far_plane = 3000.0f,
         .vertical_fov = camera_motion.VerticalFov(),
         .sharpness = std::min(settings.sharpness.load(), 1.0f),
-        .sharpen = settings.sharpen,
+        .sharpen = settings.should_sharpen,
         .reset = reset,
-        .auto_exposure = settings.fsr4_auto_exposure,
+        .auto_exposure = settings.should_use_fsr4_auto_exposure,
     });
     // The menu shows the reason; it outlives this frame (FSR 4 keeps its last message).
     static std::string shown;
     const char* problem = fsr4->Problem();
     if (!problem) {
-        PsSettings::Get().fsr4_problem = nullptr;
+        PsSettings::Get().sz_fsr4_problem = nullptr;
     } else if (shown != problem) {
         shown = problem;
         static std::array<std::string, 8> kept;
         static u32 next = 0;
         kept[next] = shown;
-        PsSettings::Get().fsr4_problem = kept[next].c_str();
+        PsSettings::Get().sz_fsr4_problem = kept[next].c_str();
         next = (next + 1) % kept.size();
     }
     if (!ok && fsr4->Fatal()) {
@@ -2353,7 +2353,7 @@ bool TemporalUpscaler::RecordDlss(vk::CommandBuffer cmdbuf, const Dlss::Resource
             .jitter_y = sign * jitter[1],
             .reset = reset,
             .frame_ms = frame_ms,
-            .sharpness = settings.sharpen ? std::min(settings.sharpness.load(), 1.0f) : 0.0f,
+            .sharpness = settings.should_sharpen ? std::min(settings.sharpness.load(), 1.0f) : 0.0f,
         });
     }
     if (!ok) {

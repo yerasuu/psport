@@ -192,8 +192,8 @@ static void WaitPreviousFrame() {
     PsTimeline::Note(PsTimeline::GuestWaitBegin, u64(frames_submitted));
     const auto start = std::chrono::steady_clock::now();
     cv_lock.wait(lock, [] { return frames_retired >= u64(frames_submitted); });
-    PsStats::gnm_frame_waits.fetch_add(1, std::memory_order_relaxed);
-    PsStats::gnm_frame_wait_ns.fetch_add(
+    PsStats::g_c_gnm_frame_waits.fetch_add(1, std::memory_order_relaxed);
+    PsStats::g_gnm_frame_wait_ns.fetch_add(
         std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start)
             .count(),
         std::memory_order_relaxed);
@@ -208,8 +208,8 @@ static void WaitGpuIdle() {
     }
     const auto start = std::chrono::steady_clock::now();
     cv_lock.wait(lock, [] { return submission_lock == 0; });
-    PsStats::gnm_frame_waits.fetch_add(1, std::memory_order_relaxed);
-    PsStats::gnm_frame_wait_ns.fetch_add(
+    PsStats::g_c_gnm_frame_waits.fetch_add(1, std::memory_order_relaxed);
+    PsStats::g_gnm_frame_wait_ns.fetch_add(
         std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start)
             .count(),
         std::memory_order_relaxed);
@@ -289,9 +289,9 @@ int PS4_SYSV_ABI sceGnmAreSubmitsAllowed() {
     LOG_TRACE(Lib_GnmDriver, "called");
     // psport (frame stats): how often the guest asks, and how often it hears no.
     const bool allowed = submission_lock == 0;
-    PsStats::submits_allowed_queries.fetch_add(1, std::memory_order_relaxed);
+    PsStats::g_c_submits_allowed_queries.fetch_add(1, std::memory_order_relaxed);
     if (!allowed) {
-        PsStats::submits_refused.fetch_add(1, std::memory_order_relaxed);
+        PsStats::g_submits_refused.fetch_add(1, std::memory_order_relaxed);
     }
     return allowed;
 }
@@ -2533,7 +2533,7 @@ s32 PS4_SYSV_ABI sceGnmSubmitCommandBuffers(u32 count, const u32* dcb_gpu_addrs[
 
 s32 PS4_SYSV_ABI sceGnmSubmitDone() {
     HLE_TRACE;
-    PsStats::submit_done_calls.fetch_add(1, std::memory_order_relaxed);
+    PsStats::g_c_submit_done_calls.fetch_add(1, std::memory_order_relaxed);
     PsTimeline::Note(PsTimeline::GuestSubmitDone, u64(frames_submitted) + 1);
     LOG_DEBUG(Lib_GnmDriver, "called");
     std::scoped_lock lk{m_submit_lock};

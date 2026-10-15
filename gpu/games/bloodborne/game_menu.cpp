@@ -140,8 +140,8 @@ void Fill(const PsSettings::Values& s, int* values) {
     values[Preset] = s.preset;
     // One slider for both: 0 is sharpening off.
     values[Sharpness] =
-        s.sharpen ? std::clamp(int(std::lround(s.sharpness / SharpnessStep)), 1, SharpnessSteps - 1) : 0;
-    values[ShowFps] = s.show_fps;
+        s.should_sharpen ? std::clamp(int(std::lround(s.sharpness / SharpnessStep)), 1, SharpnessSteps - 1) : 0;
+    values[ShowFps] = s.should_show_fps;
     values[ModelLod] = 1;
     for (int i = 0; i < 4; ++i) {
         if (LodValues[i] == s.model_lod) values[ModelLod] = i;
@@ -327,9 +327,9 @@ void MakeTexts(u8* pair, u32 name, u32 help) {
 /// Upscalers this GPU and build can run (known once the device exists, before any menu).
 bool UpscalerAvailable(int i) {
     const auto& s = PsSettings::Get();
-    return i == PsSettings::UpscalerFsr4     ? s.fsr4_supported.load()
-           : i == PsSettings::UpscalerFsr411 ? s.fsr411_supported.load()
-           : i == PsSettings::UpscalerDlss   ? s.dlss_supported.load()
+    return i == PsSettings::UpscalerFsr4     ? s.is_fsr4_supported.load()
+           : i == PsSettings::UpscalerFsr411 ? s.is_fsr411_supported.load()
+           : i == PsSettings::UpscalerDlss   ? s.is_dlss_supported.load()
                                              : true;
 }
 
@@ -625,11 +625,11 @@ void Poll() {
     const int upscaler = std::clamp(values[Upscaler], 0, PsSettings::UpscalerCount - 1);
     s.upscaler = UpscalerAvailable(upscaler) ? upscaler : int(PsSettings::UpscalerFsr3);
     s.preset = std::clamp(values[Preset], 0, PsSettings::PresetCount - 1);
-    s.sharpen = values[Sharpness] != 0;
+    s.should_sharpen = values[Sharpness] != 0;
     if (values[Sharpness] != 0) {
         s.sharpness = std::clamp(values[Sharpness], 0, SharpnessSteps - 1) * SharpnessStep;
     }
-    s.show_fps = values[ShowFps] != 0;
+    s.should_show_fps = values[ShowFps] != 0;
     s.model_lod = LodValues[std::clamp(values[ModelLod], 0, 3)];
     for (int e = 0; e < PsEffects::SwitchCount; ++e) {
         s.effects[e] = values[FirstEffect + e] != 0;

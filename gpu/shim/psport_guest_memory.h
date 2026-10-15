@@ -18,10 +18,10 @@ class Instance;
 namespace PsGuestMemory {
 struct Chunk {
     std::uint64_t phys = 0; ///< first byte of direct memory it holds
-    std::uint64_t size = 0;
+    std::uint64_t cb_chunk = 0;
     vk::Buffer buffer;      ///< the whole chunk, for transfers
     vk::DeviceMemory memory;
-    std::uint32_t index = 0; ///< creation order (stable key)
+    std::uint32_t i_creation = 0; ///< creation order (stable key)
 };
 
 /// Whether the runtime can use such chunks: dma-buf export and mmap of the dma-buf. Checked once

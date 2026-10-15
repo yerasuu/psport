@@ -806,10 +806,10 @@ void Instance::CreateAllocator() {
     // psport: new device memory per frame (PS_FRAME_LOG alloc_mb).
     static const VmaDeviceMemoryCallbacks memory_callbacks = {
         .pfnAllocate = [](VmaAllocator, uint32_t, VkDeviceMemory, VkDeviceSize size, void*) {
-            PsStats::device_alloc_bytes.fetch_add(size, std::memory_order_relaxed);
+            PsStats::g_cb_device_alloc.fetch_add(size, std::memory_order_relaxed);
         },
         .pfnFree = [](VmaAllocator, uint32_t, VkDeviceMemory, VkDeviceSize size, void*) {
-            PsStats::device_free_bytes.fetch_add(size, std::memory_order_relaxed);
+            PsStats::g_cb_device_free.fetch_add(size, std::memory_order_relaxed);
         },
     };
 

@@ -17,9 +17,9 @@ public:
     ~Scope();
 
 private:
-    void* frames[10];
-    int depth = 0;
-    std::chrono::steady_clock::time_point start;
+    void* m_frames[10];
+    int m_depth = 0;
+    std::chrono::steady_clock::time_point m_start;
 };
 
 /// Prints the stacks that waited longest since the last report, as a share of `window_s`.

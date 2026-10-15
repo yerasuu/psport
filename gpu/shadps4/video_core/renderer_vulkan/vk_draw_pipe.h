@@ -197,7 +197,7 @@ private:
     void Run(std::stop_token stop) {
         Common::SetCurrentThreadName("bb:DrawRec");
         on_stage_b = true;
-        PsSections::recording_thread = true;
+        PsSections::g_is_recording_thread = true;
         stage_b_tid.store(static_cast<u32>(gettid()), std::memory_order_release);
         u64 at = 0;
         while (true) {

@@ -20,12 +20,12 @@ class Instance;
 namespace PsOverlay {
 
 /// Present thread, once: the ImGui context and its Vulkan backend.
-void Init(const Vulkan::Instance& instance, vk::Format format, u32 image_count);
+void Init(const Vulkan::Instance& instance, vk::Format format, u32 c_images);
 
 /// Window thread, for every SDL event: true when the menu consumed it.
 bool HandleEvent(const SDL_Event& event);
 /// Turns SDL text input on while the menu edits a value (window thread, once per poll).
-void UpdateTextInput(SDL_Window* window);
+void UpdateTextInput(SDL_Window* p_window);
 
 /// Whether anything is drawn this frame (menu open or FPS counter on).
 bool Visible();
@@ -38,14 +38,14 @@ void Render(vk::CommandBuffer cmdbuf, vk::ImageView view, vk::Extent2D extent, v
 /// CursorImageSize x CursorImageSize A8R8G8B8 bitmap, read again at every present while enabled;
 /// the position (where the hot spot goes) is in the video port's width x height.
 struct GameCursor {
-    const u32* image;
+    const u32* p_image;
     s32 x, y;
     u32 hot_x, hot_y, width, height;
-    bool enabled, magnified;
+    bool is_enabled, is_magnified;
 };
 constexpr u32 CursorImageSize = 64;
 constexpr u32 MaxGameCursors = 2;
-void SetGameCursor(u32 index, const GameCursor& cursor);
+void SetGameCursor(u32 i_cursor, const GameCursor& cursor);
 /// A game cursor is enabled: the window leaves the mouse as a pointer and hides the system one.
 bool GameCursorShown();
 
@@ -54,12 +54,12 @@ bool CapturesInput();
 
 /// Pad thread, scripted input (PS_PAD_FILE): Guide opens the close prompt, which cross confirms and
 /// circle or Guide cancels. True when the prompt took the press, which then stays out of the game.
-bool PadFilePress(bool guide, bool cross, bool circle);
+bool PadFilePress(bool is_guide_pressed, bool is_cross_pressed, bool is_circle_pressed);
 
 /// The settings menu is open: the window shows the system cursor over it.
 bool MenuOpen();
 
 /// Window thread: the game's text dialog (ImeDialog) state, drawn as a box over the frame.
-void SetTextPrompt(bool active, const std::string& prompt, const std::string& text);
+void SetTextPrompt(bool is_active, const std::string& prompt, const std::string& text);
 
 } // namespace PsOverlay

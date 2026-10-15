@@ -154,7 +154,7 @@ void OcclusionQueries::Resolve() {
     for (const auto& event : pending) {
         entries.push_back({u32(event.address), u32(event.address >> 32), event.pairs,
                            u32(event.upto - resolved)});
-        if (PsStats::enabled && event.guest_address != 0) {
+        if (PsStats::g_is_enabled && event.guest_address != 0) {
             written_at[event.guest_address] = tick;
         }
         if (event.id != 0 && ReadTrace()) {
@@ -281,7 +281,7 @@ void OcclusionQueries::Event(VAddr address, u32 pairs) {
         std::printf("Occlusion event %llu: %#llx pairs %u, frame %llu, %s %ux%u (%u colors, "
                     "depth %s), %zu pending\n",
                     (unsigned long long)events, (unsigned long long)address, pairs,
-                    (unsigned long long)PsStats::frame_number.load(std::memory_order_relaxed),
+                    (unsigned long long)PsStats::g_frame_number.load(std::memory_order_relaxed),
                     scheduler.IsRendering() ? "in a render pass" : "outside the last pass",
                     state.width, state.height, state.num_color_attachments,
                     state.depth_stencil_attachment.image_view ? "yes" : "no", pending.size());
@@ -295,7 +295,7 @@ void OcclusionQueries::Event(VAddr address, u32 pairs) {
     if (active) {
         EndSegment();
     }
-    if (const auto it = PsStats::enabled ? written_at.find(address) : written_at.end();
+    if (const auto it = PsStats::g_is_enabled ? written_at.find(address) : written_at.end();
         it != written_at.end()) {
         ++reused;
         reused_late += !scheduler.IsFree(it->second);
@@ -332,7 +332,7 @@ void OcclusionQueries::Event(VAddr address, u32 pairs) {
     static auto last_report = std::chrono::steady_clock::now();
     static u64 reported = 0;
     if (const auto now = std::chrono::steady_clock::now();
-        PsStats::enabled && now - last_report >= std::chrono::seconds(5)) {
+        PsStats::g_is_enabled && now - last_report >= std::chrono::seconds(5)) {
         std::printf("Occlusion queries: %llu events in %.0f s, %llu in all; %llu segments, "
                     "%llu not counted; labels after unwritten events: %llu (%llu in a render "
                     "pass); counters reused before their results were written: %llu of %llu; queries "

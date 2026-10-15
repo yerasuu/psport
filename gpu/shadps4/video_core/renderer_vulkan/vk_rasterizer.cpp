@@ -348,7 +348,7 @@ bool Rasterizer::WriteLabelOnGpu(VAddr address, u64 value, u32 num_bytes) {
     }
     // A VRAM copy of these bytes gets them too, at its next binding (as for CPU-written labels).
     buffer_cache.NoteLateCommandWrite(address, &value, num_bytes);
-    PsStats::gpu_labels.fetch_add(1, std::memory_order_relaxed);
+    PsStats::g_c_gpu_labels.fetch_add(1, std::memory_order_relaxed);
     // In stream order for WAIT_REG_MEM, and the submission policy (HasUnsubmittedSignals).
     SignalAfterGpu([] {}, address, value);
     return true;
@@ -410,7 +410,7 @@ void Rasterizer::SubmitForSignalsNow() {
         return;
     }
     if (gpu_idle) {
-        PsStats::idle_flushes.fetch_add(1, std::memory_order_relaxed);
+        PsStats::g_c_idle_flushes.fetch_add(1, std::memory_order_relaxed);
     }
     Flush();
 }
@@ -1501,7 +1501,7 @@ void Rasterizer::PrintPipeStats() {
         const double tsc_hz = cycles / seconds;
         std::printf("\n  stage B us per packet:");
         for (u32 s = 0; s < PsSections::Count; ++s) {
-            const u64 now_cycles = PsSections::cycles[s].load(std::memory_order_relaxed);
+            const u64 now_cycles = PsSections::g_cycles[s].load(std::memory_order_relaxed);
             if (packets > 0) {
                 std::printf(" %s %.2f", PsSections::Names[s],
                             1e6 * double(now_cycles - last_sections[s]) / tsc_hz / packets);
@@ -1569,7 +1569,7 @@ bool Rasterizer::FilterDrawPasses() const {
 
 void Rasterizer::Draw(bool is_indexed, u32 index_offset, const PreparedDraw* prepared) {
     RENDERER_TRACE;
-    PsStats::draws.fetch_add(1, std::memory_order_relaxed);
+    PsStats::g_c_draws.fetch_add(1, std::memory_order_relaxed);
 
     // psport: with the draw pipeline this thread only selects the pipeline and hands the draw
     // to the recording thread (DrawRecord there); draws FilterDraw handles itself run here.
@@ -1778,7 +1778,7 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
     }
     // psport (PS_PREUPLOAD): once a frame, guest GPU memory the CPU wrote and then left alone is
     // uploaded ahead of its use, PS_PREUPLOAD_MB (16) at most per frame.
-    if (const u32 frame = PsStats::frame_number.load(std::memory_order_relaxed);
+    if (const u32 frame = PsStats::g_frame_number.load(std::memory_order_relaxed);
         frame != preupload_frame) {
         preupload_frame = frame;
         BB_SECTION(Preupload);
@@ -2164,7 +2164,7 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
 
 void Rasterizer::DispatchDirect() {
     RENDERER_TRACE;
-    PsStats::dispatches.fetch_add(1, std::memory_order_relaxed);
+    PsStats::g_c_dispatches.fetch_add(1, std::memory_order_relaxed);
     // psport: like draws, handed to the draw recording thread after the pipeline selection.
     const bool pipelined = UseDrawPipe() && !PsToggle::Disabled(PsToggle::PipelinedDispatch);
     if (!pipelined) {
@@ -3348,7 +3348,7 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, const PreparedStage* pre
                                       (vsharp.base_address << 1) | u64(desc.is_written)}];
                     ++c.first;
                     c.second = vsharp.GetSize();
-                    const u32 now = PsStats::coarse_second.load(std::memory_order_relaxed);
+                    const u32 now = PsStats::g_coarse_second.load(std::memory_order_relaxed);
                     if (now - printed >= 5) {
                         printed = now;
                         for (const auto& [key, value] : counts) {
@@ -3912,7 +3912,7 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
     BB_SECTION(BeginRendering);
     // psport: RenderStateMemo (see BeginMemo).
     const bool memo_on = !PsToggle::Disabled(PsToggle::RenderStateMemo) && !FrameCapture::Active();
-    if (PsStats::enabled && ((begin_memo_hits + begin_memo_misses) & 0x3FFFF) == 0x3FFFF) {
+    if (PsStats::g_is_enabled && ((begin_memo_hits + begin_memo_misses) & 0x3FFFF) == 0x3FFFF) {
         std::printf("Render state memo: %llu hits, %llu misses; texture sets: %llu hits, %llu "
                     "misses\n",
                     static_cast<unsigned long long>(begin_memo_hits),
@@ -4039,9 +4039,9 @@ RenderState Rasterizer::BeginRenderingFull(const GraphicsPipeline* pipeline) {
         std::printf("Scene pass: reduced %d %s\n", reduced, why.c_str());
     }
     push_data.scene_size = reduced ? SceneResolution::Pack(scene_targets->Size()) : 0;
-    if (PsStats::enabled) {
-        PsStats::reduced_draws.fetch_add(reduced, std::memory_order_relaxed);
-        PsStats::scene_draws.fetch_add(scene_started, std::memory_order_relaxed);
+    if (PsStats::g_is_enabled) {
+        PsStats::g_c_reduced_draws.fetch_add(reduced, std::memory_order_relaxed);
+        PsStats::g_c_scene_draws.fetch_add(scene_started, std::memory_order_relaxed);
     }
     RenderState state;
     state.width = instance.GetMaxFramebufferWidth();
@@ -4465,8 +4465,8 @@ void Rasterizer::NoteCommandWrite(VAddr addr, const void* data, u64 size, bool r
 }
 
 void Rasterizer::OnCpuWrite(VAddr addr, u64 size) {
-    PsStats::cpu_write_notes.fetch_add(1, std::memory_order_relaxed);
-    PsStats::cpu_write_note_bytes.fetch_add(size, std::memory_order_relaxed);
+    PsStats::g_c_cpu_write_notes.fetch_add(1, std::memory_order_relaxed);
+    PsStats::g_cb_cpu_write_note.fetch_add(size, std::memory_order_relaxed);
     if (IsMapped(addr, size)) {
         InvalidateAfterWrite(addr, size);
         buffer_cache.NoteCpuWriteRange(addr, size);
@@ -4934,7 +4934,7 @@ void Rasterizer::NoteFrameStart() {
     if (auto* profiler = GpuProfiler::Get()) {
         profiler->BeginFrame();
     }
-    const u64 frame = PsStats::gpu_frames.fetch_add(1, std::memory_order_relaxed) + 1;
+    const u64 frame = PsStats::g_c_gpu_frames.fetch_add(1, std::memory_order_relaxed) + 1;
     // PS_BUFFER_STATS=1: how many earlier frames the GPU has not finished when the GPU thread
     // starts a frame — the lag that decides whether guest memory can be read in place.
     static const bool stats = [] {

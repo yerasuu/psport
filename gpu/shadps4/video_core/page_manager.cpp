@@ -320,7 +320,7 @@ struct PageManager::Impl {
         // psport: the draw recording thread handles its faults inline too (vk_draw_pipe.h).
         const auto is_gpu_thread = rasterizer->IsGpuSideThread();
         if (is_gpu_thread) {
-            PsStats::gpu_signal_faults.fetch_add(1, std::memory_order_relaxed);
+            PsStats::g_c_gpu_signal_faults.fetch_add(1, std::memory_order_relaxed);
         }
         // Traps on reads too (no access, PsLayer::WriteTraps::NoAccess): their owner first.
         if (PsLayer::WriteTraps::Reasons(addr) & PsLayer::WriteTraps::VramData) {
@@ -340,15 +340,15 @@ struct PageManager::Impl {
                 uintptr_t end = 0;
                 return runtime_memory_vma_info(addr, &prot, &type, &end) && (prot & 0x2);
             }
-            PsStats::Timer timer{PsStats::t_write_faults};
+            PsStats::Timer timer{PsStats::g_t_write_faults};
             const bool handled = rasterizer->OnWriteFault(
                 addr, is_gpu_thread,
                 u64(static_cast<const ucontext_t*>(context)->uc_mcontext.gregs[REG_RIP]));
             current_fault_rip = 0;
             return handled;
         } else {
-            PsStats::read_faults.fetch_add(1, std::memory_order_relaxed);
-            PsStats::Timer timer{PsStats::t_read_faults};
+            PsStats::g_c_read_faults.fetch_add(1, std::memory_order_relaxed);
+            PsStats::Timer timer{PsStats::g_t_read_faults};
             return rasterizer->ReadMemory(addr, 8, is_gpu_thread);
         }
         return false;
@@ -675,12 +675,12 @@ public:
             }
         }
         // Counted like AddressSpace::Protect (PS_FRAME_LOG protect_ms).
-        PsStats::Timer timer{PsStats::t_protect};
-        PsStats::protect_calls.fetch_add(1, std::memory_order_relaxed);
-        PsStats::protect_pages.fetch_add(last - first, std::memory_order_relaxed);
+        PsStats::Timer timer{PsStats::g_t_protect};
+        PsStats::g_c_protect_calls.fetch_add(1, std::memory_order_relaxed);
+        PsStats::g_c_protect_pages.fetch_add(last - first, std::memory_order_relaxed);
         if (!allow_write) {
-            PsStats::protect_revoke_calls.fetch_add(1, std::memory_order_relaxed);
-            PsStats::protect_revoke_pages.fetch_add(last - first, std::memory_order_relaxed);
+            PsStats::g_c_protect_revoke_calls.fetch_add(1, std::memory_order_relaxed);
+            PsStats::g_c_protect_revoke_pages.fetch_add(last - first, std::memory_order_relaxed);
         }
         uffdio_writeprotect wp{};
         wp.range.start = address;
@@ -714,7 +714,7 @@ public:
             const VAddr addr = msg.arg.pagefault.address;
             const auto ptid = msg.arg.pagefault.feat.ptid;
             {
-                PsStats::Timer timer{PsStats::t_write_faults};
+                PsStats::Timer timer{PsStats::g_t_write_faults};
                 rasterizer->OnWriteFault(addr, rasterizer->IsGpuSideThreadId(ptid));
             }
             // Protect() clears with DONTWAKE (it may run for pages nobody waits on).

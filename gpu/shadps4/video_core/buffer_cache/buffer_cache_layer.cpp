@@ -143,8 +143,8 @@ std::optional<std::pair<const Buffer*, u64>> BufferCache::LayerBind(VAddr addres
             in_place_why[why].fetch_add(size, std::memory_order_relaxed);
         }
         static std::atomic<u32> why_printed{0};
-        if (PsStats::coarse_second.load() - why_printed.load() >= 2) {
-            why_printed.store(PsStats::coarse_second.load());
+        if (PsStats::g_coarse_second.load() - why_printed.load() >= 2) {
+            why_printed.store(PsStats::g_coarse_second.load());
             std::printf("Layer in place (MiB/2 s): eligible %llu, unknown bytes %llu, dynamic %llu, "
                         "not a whole chunk block %llu; unknown bytes not watched: watchable %llu, "
                         "GPU-dynamic %llu, volatile %llu, failed %llu, mapping %llu, written %llu\n",
@@ -166,7 +166,7 @@ std::optional<std::pair<const Buffer*, u64>> BufferCache::LayerBind(VAddr addres
             static std::map<std::tuple<VAddr, u64, bool, int>, u64> top;
             static u32 top_printed = 0;
             top[{address, size, is_written, int(resolution.kind)}] += size;
-            const u32 second = PsStats::coarse_second.load(std::memory_order_relaxed);
+            const u32 second = PsStats::g_coarse_second.load(std::memory_order_relaxed);
             if (second - top_printed >= 4) {
                 top_printed = second;
                 std::vector<std::pair<u64, std::tuple<VAddr, u64, bool, int>>> sorted;
@@ -202,7 +202,7 @@ std::optional<std::pair<const Buffer*, u64>> BufferCache::LayerBind(VAddr addres
         }
         count[k].fetch_add(1, std::memory_order_relaxed);
         bytes[k].fetch_add(size, std::memory_order_relaxed);
-        const u32 now = PsStats::coarse_second.load(std::memory_order_relaxed);
+        const u32 now = PsStats::g_coarse_second.load(std::memory_order_relaxed);
         if (now - printed.load(std::memory_order_relaxed) >= 2) {
             printed.store(now, std::memory_order_relaxed);
             std::string text;
@@ -246,7 +246,7 @@ std::optional<std::pair<const Buffer*, u64>> BufferCache::LayerBind(VAddr addres
         };
         thread_local std::array<TriedMemo, 256> tried{};
         auto& t = tried[(first ^ (end << 7)) & (tried.size() - 1)];
-        const u32 frame = static_cast<u32>(PsStats::frame_number.load(std::memory_order_relaxed));
+        const u32 frame = static_cast<u32>(PsStats::g_frame_number.load(std::memory_order_relaxed));
         const bool skip = t.first == first && t.end == end && t.generation == layer_generation &&
                           t.frame == frame && t.written == is_written;
         // Blocks with unannounced bytes are watched copies for a reading binding (PS_LAYER_WATCH).
@@ -309,7 +309,7 @@ std::optional<std::pair<const Buffer*, u64>> BufferCache::LayerBind(VAddr addres
     if (resolution.kind == Kind::Mirror && vram_allowed && !is_written && volatile_in_place &&
         scheduler.IsRendering() && layer_volatile.Overlaps(first, end)) {
         if (const auto in_place = LayerInPlace(address, size, true)) {
-            PsStats::bound_in_place_bytes.fetch_add(size, std::memory_order_relaxed);
+            PsStats::g_cb_bound_in_place.fetch_add(size, std::memory_order_relaxed);
             layer_volatile_in_pass_bytes += size;
             if (is_texel_buffer) {
                 SynchronizeMemoryFromImage(in_place->first, in_place->second, address,
@@ -321,7 +321,7 @@ std::optional<std::pair<const Buffer*, u64>> BufferCache::LayerBind(VAddr addres
     }
     if (resolution.kind == Kind::Mirror && vram_allowed) {
         auto* mirror = static_cast<Buffer*>(resolution.span.source->owner);
-        PsStats::bound_vram_bytes.fetch_add(size, std::memory_order_relaxed);
+        PsStats::g_cb_bound_vram.fetch_add(size, std::memory_order_relaxed);
         NoteDirectUse(address, size); // stale copies yield first (LayerYieldToImages)
         if (layer_volatile.Overlaps(first, end)) {
             // Experiment bit 16 (diagnostics, while the game runs): no refreshes, the range read
@@ -377,7 +377,7 @@ std::optional<std::pair<const Buffer*, u64>> BufferCache::LayerBind(VAddr addres
     const auto [buffer, offset] = *in_place;
     if (is_written) {
         NoteWriteTick(address, size);
-        PsStats::bound_in_place_written_bytes.fetch_add(size, std::memory_order_relaxed);
+        PsStats::g_cb_bound_in_place_written.fetch_add(size, std::memory_order_relaxed);
         // What the GPU writes often moves to VRAM once its blocks are all known data
         // (NoteGpuWrite: written in 3 of 60 frames). Some writers stay in place (the copy
         // shader's destinations: force_writes_in_place).
@@ -385,7 +385,7 @@ std::optional<std::pair<const Buffer*, u64>> BufferCache::LayerBind(VAddr addres
             NoteGpuWrite(address, size);
         }
     }
-    PsStats::bound_in_place_bytes.fetch_add(size, std::memory_order_relaxed);
+    PsStats::g_cb_bound_in_place.fetch_add(size, std::memory_order_relaxed);
     if (is_texel_buffer && !is_written) {
         SynchronizeMemoryFromImage(buffer, offset, address, static_cast<u32>(size));
     }
@@ -478,7 +478,7 @@ void BufferCache::LayerRefreshWatched(u64 block) {
 }
 
 void BufferCache::LayerPromote(const std::vector<u64>& blocks) {
-    PsStats::Timer timer{PsStats::t_layer[1]};
+    PsStats::Timer timer{PsStats::g_t_layer[1]};
     u64 moved = 0;
     for (size_t i = 0; i < blocks.size();) {
         // A run of consecutive candidate blocks.
@@ -583,7 +583,7 @@ u64 BufferCache::LayerPromoteRun(u64 first, u64 end) {
         }
         Layer().AddMirror(start, bytes, target->Handle(), target->BufferDeviceAddress(), target);
         layer_mirrors.emplace(start, std::move(mirror));
-        PsStats::residency_alloc_bytes.fetch_add(bytes, std::memory_order_relaxed);
+        PsStats::g_cb_residency_alloc.fetch_add(bytes, std::memory_order_relaxed);
     }
     // The run's data: copied from the game's memory now (SynchronizeMemory, which also arms the
     // tracking of later CPU writes there).
@@ -636,7 +636,7 @@ u64 BufferCache::LayerGrowthEnd(u64 lo, u64 hi) {
 static std::array<std::atomic<u64>, 7> layer_demoted_bytes{};
 
 void BufferCache::LayerDemote(u64 first, u64 end, bool copy_back, int reason) {
-    PsStats::Timer timer{PsStats::t_layer[2]};
+    PsStats::Timer timer{PsStats::g_t_layer[2]};
     LayerForgetGpuData();
     std::vector<std::pair<u64, u64>> runs;
     Layer().ForEachValid(first, end, [&](u64 a, u64 b) { runs.emplace_back(a, b); });
@@ -693,7 +693,7 @@ void BufferCache::LayerDemote(u64 first, u64 end, bool copy_back, int reason) {
         Layer().RemoveMirror(mirror.base);
         auto node = layer_mirrors.extract(mirror.base);
         if (!node.empty()) {
-            PsStats::residency_alloc_bytes.fetch_sub(mirror.size, std::memory_order_relaxed);
+            PsStats::g_cb_residency_alloc.fetch_sub(mirror.size, std::memory_order_relaxed);
             layer_retired.push_back({std::move(node.mapped()), scheduler.CurrentTick()});
         }
     }
@@ -707,7 +707,7 @@ void BufferCache::LayerMaintain() {
         return scheduler.GetWorkSemaphore()->IsFree(retired.second);
     });
     static u32 printed = 0;
-    const u32 now = PsStats::coarse_second.load(std::memory_order_relaxed);
+    const u32 now = PsStats::g_coarse_second.load(std::memory_order_relaxed);
     if (now - printed >= 10) {
         printed = now;
         u64 mirror_bytes = 0, asset_total = 0;
@@ -781,7 +781,7 @@ void BufferCache::LayerMaintain() {
 }
 
 void BufferCache::LayerProcessIdle() {
-    const u32 now = PsStats::coarse_second.load(std::memory_order_relaxed);
+    const u32 now = PsStats::g_coarse_second.load(std::memory_order_relaxed);
     if (VramIdleSeconds() == 0) {
         return;
     }
@@ -799,12 +799,12 @@ void BufferCache::LayerProcessIdle() {
     });
     for (const auto& [a, b] : idle) {
         LayerDemote(a, b, true, 6);
-        PsStats::vram_idle_bytes.fetch_add((b - a) << block_shift, std::memory_order_relaxed);
+        PsStats::g_cb_vram_idle.fetch_add((b - a) << block_shift, std::memory_order_relaxed);
     }
 }
 
 void BufferCache::NoteDirectUse(VAddr address, u64 size) {
-    const u32 now = PsStats::coarse_second.load(std::memory_order_relaxed);
+    const u32 now = PsStats::g_coarse_second.load(std::memory_order_relaxed);
     const u64 last = std::min<u64>((address + size - 1) >> USE_GROUP_BITS, layer_group_use.size() - 1);
     for (u64 group = address >> USE_GROUP_BITS; group <= last; ++group) {
         if (layer_group_use[group] != now) {
@@ -867,7 +867,7 @@ u64 BufferCache::LayerCompactMirrors(u64 wanted) {
             }
             Layer().AddMirror(base, size, mirror->Handle(), mirror->BufferDeviceAddress(), mirror.get());
             layer_mirrors.emplace(base, std::move(mirror));
-            PsStats::residency_alloc_bytes.fetch_add(size, std::memory_order_relaxed);
+            PsStats::g_cb_residency_alloc.fetch_add(size, std::memory_order_relaxed);
             kept += size;
         }
         layer_retired.push_back({std::move(node.mapped()), scheduler.CurrentTick()});
@@ -885,7 +885,7 @@ u64 BufferCache::LayerCompactMirrors(u64 wanted) {
 }
 
 void BufferCache::LayerYieldToImages(u32 now) {
-    PsStats::Timer timer{PsStats::t_layer[4]};
+    PsStats::Timer timer{PsStats::g_t_layer[4]};
     // VRAM short: the usage where promotions wait (PromoteCriticalMargin short of the texture
     // collector's critical mark). Past that mark the collector evicts images used a moment ago,
     // re-uploaded at once (stutters), and mirrors are what it cannot free. Meanwhile the copies of
@@ -894,8 +894,8 @@ void BufferCache::LayerYieldToImages(u32 now) {
     if (!instance.CanReportMemoryUsage() || layer_mirrors.empty()) {
         return;
     }
-    const u64 critical = PsStats::gc_critical_bytes.load(std::memory_order_relaxed);
-    const u64 usage = PsStats::gc_used_bytes.load(std::memory_order_relaxed);
+    const u64 critical = PsStats::g_cb_gc_critical.load(std::memory_order_relaxed);
+    const u64 usage = PsStats::g_cb_gc_used.load(std::memory_order_relaxed);
     if (critical == 0 || usage + PromoteCriticalMargin < critical) {
         return;
     }
@@ -940,7 +940,7 @@ void BufferCache::LayerYieldToImages(u32 now) {
             stale_bytes += (b - a) << block_shift;
         }
         if (stale_bytes != 0) {
-            PsStats::vram_idle_bytes.fetch_add(stale_bytes, std::memory_order_relaxed);
+            PsStats::g_cb_vram_idle.fetch_add(stale_bytes, std::memory_order_relaxed);
             static u32 printed = 0;
             if (now - printed >= 5) {
                 printed = now;
@@ -982,16 +982,16 @@ void BufferCache::LayerWriteEntries(u64 first, u64 end) {
     // Diagnostics (PS_FRAME_STATS): where the time goes (t_layer 8-11).
     auto mark = std::chrono::steady_clock::now();
     const auto lap = [&](size_t kind) {
-        if (!PsStats::enabled) {
+        if (!PsStats::g_is_enabled) {
             return;
         }
         const auto now = std::chrono::steady_clock::now();
-        PsStats::t_layer[kind].fetch_add(
+        PsStats::g_t_layer[kind].fetch_add(
             std::chrono::duration_cast<std::chrono::nanoseconds>(now - mark).count(),
             std::memory_order_relaxed);
         mark = now;
     };
-    PsStats::layer_entries_written.fetch_add(end - first, std::memory_order_relaxed);
+    PsStats::g_layer_entries_written.fetch_add(end - first, std::memory_order_relaxed);
     const auto staging =
         staging_pool.Request((end - first) * 2 * sizeof(vk::DeviceAddress), MemoryType::HostUncached);
     lap(8);
@@ -1054,7 +1054,7 @@ void BufferCache::LayerWriteEntries(u64 first, u64 end) {
 }
 
 void BufferCache::LayerRepublish(u64 first, u64 end) {
-    PsStats::Timer timer{PsStats::t_layer[6]};
+    PsStats::Timer timer{PsStats::g_t_layer[6]};
     std::vector<std::pair<u64, u64>> runs;
     layer_published.ForEachInRange(first, end, [&](const Interval& iv) {
         runs.emplace_back(std::max(first, iv.start), std::min(end, iv.end));
@@ -1104,7 +1104,7 @@ void BufferCache::LayerForgetGpuData() {
 }
 
 void BufferCache::LayerFlushUploads() {
-    PsStats::Timer timer{PsStats::t_layer[7]};
+    PsStats::Timer timer{PsStats::g_t_layer[7]};
     // What the CPU wrote into blocks with a VRAM copy: uploaded now, before a paged binding
     // (it reads mirrors through the page table, without the bound path's own upload).
     if (!layer_uploads_pending.load(std::memory_order_acquire)) {
@@ -1186,7 +1186,7 @@ std::pair<const Buffer*, u64> BufferCache::LayerPagedRecord(VAddr address, u64 s
                                             (2 * sizeof(vk::DeviceAddress))),
                            0};
     const u64 offset = stream_buffer.Copy(record, sizeof(record), instance.StorageMinAlignment());
-    PsStats::bound_in_place_bytes.fetch_add(size, std::memory_order_relaxed);
+    PsStats::g_cb_bound_in_place.fetch_add(size, std::memory_order_relaxed);
     return {&stream_buffer, offset};
 }
 
@@ -1363,7 +1363,7 @@ void BufferCache::LayerMakeVolatile(const std::vector<u64>& blocks) {
 }
 
 void BufferCache::LayerRefreshVolatile(VAddr address, u64 size) {
-    PsStats::Timer timer{PsStats::t_layer[5]};
+    PsStats::Timer timer{PsStats::g_t_layer[5]};
     // The binding's bytes in volatile blocks: uploaded from the game's memory by the
     // SynchronizeMemory that follows (as CPU-modified: a GPU copy from its chunk, in stream
     // order). Only reading bindings use them (LayerBind).
@@ -1448,8 +1448,8 @@ void BufferCache::LayerArmTraps(u64 first, u64 end) {
     u64 run_first = 0, run_end = 0;
     const auto flush = [&] {
         if (run_end > run_first) {
-            PsStats::Timer timer{PsStats::t_layer[0]};
-            PsStats::layer_mprotects.fetch_add(1, std::memory_order_relaxed);
+            PsStats::Timer timer{PsStats::g_t_layer[0]};
+            PsStats::g_c_layer_mprotects.fetch_add(1, std::memory_order_relaxed);
             PsLayer::WriteTraps::Set(run_first << block_shift, (run_end - run_first) << block_shift,
                                      PsLayer::WriteTraps::Mirror, true);
         }
@@ -1494,8 +1494,8 @@ void BufferCache::LayerDisarmTraps(u64 first, u64 end, bool demote) {
     u64 run_first = 0, run_end = 0;
     const auto flush = [&] {
         if (run_end > run_first) {
-            PsStats::Timer timer{PsStats::t_layer[0]};
-            PsStats::layer_mprotects.fetch_add(1, std::memory_order_relaxed);
+            PsStats::Timer timer{PsStats::g_t_layer[0]};
+            PsStats::g_c_layer_mprotects.fetch_add(1, std::memory_order_relaxed);
             PsLayer::WriteTraps::Set(run_first << layer_trap_shift,
                                      (run_end - run_first) << layer_trap_shift,
                                      PsLayer::WriteTraps::Mirror, false);
@@ -1521,7 +1521,7 @@ void BufferCache::LayerDisarmTraps(u64 first, u64 end, bool demote) {
 }
 
 void BufferCache::LayerProcessTraps() {
-    PsStats::Timer timer{PsStats::t_layer[3]};
+    PsStats::Timer timer{PsStats::g_t_layer[3]};
     LayerForgetGpuData(); // before any demotion copies the GPU's data back
     if (!layer_trap_pending.load(std::memory_order_acquire)) {
         return;

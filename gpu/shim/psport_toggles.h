@@ -8,9 +8,9 @@
 #include <cstdint>
 #include <cstdlib>
 
-extern "C" std::uint64_t runtime_disabled_optimizations;
+extern "C" std::uint64_t g_runtime_disabled_optimizations;
 /// Temporary experiment bits: the second number in PS_TOGGLE_FILE (runtime_memory.c).
-extern "C" std::uint64_t runtime_experiment_bits;
+extern "C" std::uint64_t g_runtime_experiment_bits;
 /// Recovery point for speculative guest memory reads on this thread (runtime_memory.c).
 extern "C" __thread sigjmp_buf* runtime_fault_recover;
 
@@ -91,137 +91,137 @@ enum : std::uint64_t {
     // Bits 20-29 are used as raw debug toggles by the camera/object motion and the upscaler.
 };
 inline bool Disabled(std::uint64_t bit) {
-    return (__atomic_load_n(&runtime_disabled_optimizations, __ATOMIC_RELAXED) & bit) != 0;
+    return (__atomic_load_n(&g_runtime_disabled_optimizations, __ATOMIC_RELAXED) & bit) != 0;
 }
 /// A temporary experiment switched on by bit `bit` of the second number in PS_TOGGLE_FILE.
 inline bool Experiment(std::uint64_t bit) {
-    return (__atomic_load_n(&runtime_experiment_bits, __ATOMIC_RELAXED) & bit) != 0;
+    return (__atomic_load_n(&g_runtime_experiment_bits, __ATOMIC_RELAXED) & bit) != 0;
 }
 } // namespace PsToggle
 
 namespace PsStats {
 /// Guest writes caught by page protection, and pages currently left unprotected as hot.
-inline std::atomic<std::uint64_t> tracker_faults{0};
+inline std::atomic<std::uint64_t> g_c_tracker_faults{0};
 /// Writes the GPU side heard of from the writers (libc copies over watched pages, no write tracking).
-inline std::atomic<std::uint64_t> cpu_write_notes{0}, cpu_write_note_bytes{0};
+inline std::atomic<std::uint64_t> g_c_cpu_write_notes{0}, g_cb_cpu_write_note{0};
 /// Ranges the game's GPU memory allocator handed out (guest hook, PS_GUEST_IN_PLACE).
-inline std::atomic<std::uint64_t> gpu_range_allocs{0}, gpu_range_alloc_bytes{0};
+inline std::atomic<std::uint64_t> g_c_gpu_range_allocs{0}, g_cb_gpu_range_alloc{0};
 /// Buffer bindings (PS_GUEST_IN_PLACE): bytes bound where the game's memory is (read over PCIe on a
 /// discrete GPU) and bytes bound to VRAM copies.
-inline std::atomic<std::uint64_t> bound_in_place_bytes{0}, bound_vram_bytes{0};
-inline std::atomic<std::uint64_t> bound_in_place_written_bytes{0};
+inline std::atomic<std::uint64_t> g_cb_bound_in_place{0}, g_cb_bound_vram{0};
+inline std::atomic<std::uint64_t> g_cb_bound_in_place_written{0};
 /// Command processor writes put into the GPU's VRAM data (no readback); blocks whose GPU data went
 /// back to the game's memory before moving in place; downloads of GPU data (readbacks).
-inline std::atomic<std::uint64_t> gpu_data_updates{0}, copied_back_blocks{0}, readbacks{0};
-inline std::atomic<std::uint64_t> late_vram_writes{0}; ///< labels and the like put into VRAM copies
+inline std::atomic<std::uint64_t> g_c_gpu_data_updates{0}, g_c_copied_back_blocks{0}, g_c_readbacks{0};
+inline std::atomic<std::uint64_t> g_c_late_vram_writes{0}; ///< labels and the like put into VRAM copies
 /// PS_GUEST_IN_PLACE: copies of in-place data the CPU writes into VRAM for reading (ShadowCopy).
-inline std::atomic<std::uint64_t> shadow_copies{0}, shadow_bytes{0};
+inline std::atomic<std::uint64_t> g_c_shadow_copies{0}, g_cb_shadow{0};
 /// PS_HONEST_LABELS: submissions sent early because the GPU had finished everything before them.
-inline std::atomic<std::uint64_t> idle_flushes{0};
+inline std::atomic<std::uint64_t> g_c_idle_flushes{0};
 /// EOP fences with data: decoded, and their labels written (a growing gap: lost fences, guest leaks).
-inline std::atomic<std::uint64_t> eop_decoded{0}, eop_written{0}, gpu_labels{0};
+inline std::atomic<std::uint64_t> g_eop_decoded{0}, g_eop_written{0}, g_c_gpu_labels{0};
 /// sceGnmAreSubmitsAllowed calls, and those that answered no (submission lock held).
-inline std::atomic<std::uint64_t> submits_allowed_queries{0}, submits_refused{0}, submit_done_calls{0};
+inline std::atomic<std::uint64_t> g_c_submits_allowed_queries{0}, g_submits_refused{0}, g_c_submit_done_calls{0};
 /// Guest time blocked in Gnm submissions on the previous frame (submission lock or PS_SUBMIT_LOCK=frame).
-inline std::atomic<std::uint64_t> gnm_frame_waits{0}, gnm_frame_wait_ns{0};
+inline std::atomic<std::uint64_t> g_c_gnm_frame_waits{0}, g_gnm_frame_wait_ns{0};
 /// Command buffers checksummed by the frame overlap guard (PsSubmitGuard): time (ns) and bytes.
-inline std::atomic<std::uint64_t> submit_guard_ns{0}, submit_guard_bytes{0};
+inline std::atomic<std::uint64_t> g_submit_guard_ns{0}, g_cb_submit_guard{0};
 /// Submissions to the compute queues (sceGnmDingDong).
-inline std::atomic<std::uint64_t> asc_submits{0};
+inline std::atomic<std::uint64_t> g_c_asc_submits{0};
 /// The game's GPU range allocators, as its profile's hooks see them: object, live ranges, bytes.
-inline std::array<std::atomic<std::uint64_t>, 4> range_allocators{}, range_live{}, range_bytes{};
-inline std::atomic<std::int64_t> hot_pages{0};
+inline std::array<std::atomic<std::uint64_t>, 4> g_range_allocators{}, g_range_live{}, g_range_bytes{};
+inline std::atomic<std::int64_t> g_c_hot_pages{0};
 /// Stall diagnostics (PS_FRAME_STATS): per-frame deltas printed for frames over 40 ms.
-inline std::atomic<std::uint64_t> images_registered{0};
-inline std::atomic<std::uint64_t> image_upload_bytes{0};
-inline std::atomic<std::uint64_t> buffer_upload_bytes{0};
-inline std::atomic<int> gpu_thread_clock{-1}; ///< clockid_t of the GPU command thread
-inline std::atomic<std::uint64_t> draws{0}, dispatches{0}, submissions{0};
+inline std::atomic<std::uint64_t> g_images_registered{0};
+inline std::atomic<std::uint64_t> g_cb_image_upload{0};
+inline std::atomic<std::uint64_t> g_cb_buffer_upload{0};
+inline std::atomic<int> g_gpu_thread_clock{-1}; ///< clockid_t of the GPU command thread
+inline std::atomic<std::uint64_t> g_c_draws{0}, g_c_dispatches{0}, g_c_submissions{0};
 /// Frames the GPU command thread has started (display pass), for per-frame diagnostics.
-inline std::atomic<std::uint64_t> gpu_frames{0};
+inline std::atomic<std::uint64_t> g_c_gpu_frames{0};
 /// Wall time spent in operations suspected of stalls (ns, all threads).
-inline std::atomic<std::uint64_t> t_resident{0}, t_protect{0}, t_image_create{0}, t_refresh{0},
-    t_staging{0}, t_host_wait{0}, t_copy{0}, copy_bytes{0}, t_read_faults{0}, read_faults{0},
-    t_write_faults{0}, t_copy_cpu{0}, copy_sys_us{0}, copy_minflt{0};
+inline std::atomic<std::uint64_t> g_t_resident{0}, g_t_protect{0}, g_t_image_create{0}, g_t_refresh{0},
+    g_t_staging{0}, g_t_host_wait{0}, g_t_copy{0}, g_cb_copy{0}, g_t_read_faults{0}, g_c_read_faults{0},
+    g_t_write_faults{0}, g_t_copy_cpu{0}, g_copy_sys_us{0}, g_copy_minflt{0};
 /// Layer memory module (PS_LAYER_MEMORY), wall time per kind (ns, inclusive): 0 mprotect for write
 /// traps, 1 promotions, 2 demotions, 3 trap processing, 4 yielding VRAM, 5 volatile refreshes,
 /// 6 republishing paged entries, 7 paged uploads; and the mprotect calls.
-inline std::array<std::atomic<std::uint64_t>, 12> t_layer{};
+inline std::array<std::atomic<std::uint64_t>, 12> g_t_layer{};
 /// Page table entries written (blocks); 8-11 of t_layer: their staging request, guest view, mirrors,
 /// copy command.
-inline std::atomic<std::uint64_t> layer_entries_written{0};
-inline std::atomic<std::uint64_t> layer_mprotects{0};
+inline std::atomic<std::uint64_t> g_layer_entries_written{0};
+inline std::atomic<std::uint64_t> g_c_layer_mprotects{0};
 /// Diagnostics are collected only with PS_FRAME_STATS=1.
-inline const bool enabled = [] {
-    const char* env = std::getenv("PS_FRAME_STATS");
-    return env && env[0] == '1';
+inline const bool g_is_enabled = [] {
+    const char* sz_env = std::getenv("PS_FRAME_STATS");
+    return sz_env && sz_env[0] == '1';
 }();
 struct Timer {
-    std::atomic<std::uint64_t>& total;
-    std::chrono::steady_clock::time_point start =
-        enabled ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+    std::atomic<std::uint64_t>& m_total;
+    std::chrono::steady_clock::time_point m_start =
+        g_is_enabled ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
     ~Timer() {
-        if (!enabled) {
+        if (!g_is_enabled) {
             return;
         }
-        total.fetch_add(std::chrono::duration_cast<std::chrono::nanoseconds>(
-                            std::chrono::steady_clock::now() - start)
+        m_total.fetch_add(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                            std::chrono::steady_clock::now() - m_start)
                             .count(),
                         std::memory_order_relaxed);
     }
 };
 /// Wall time the GPU command thread waited for guest submissions (ns).
-inline std::atomic<std::uint64_t> gpu_idle_ns{0};
+inline std::atomic<std::uint64_t> g_gpu_idle_ns{0};
 /// Draws recorded into the reduced scene targets, and draws after the scene started.
-inline std::atomic<std::uint64_t> reduced_draws{0}, scene_draws{0};
+inline std::atomic<std::uint64_t> g_c_reduced_draws{0}, g_c_scene_draws{0};
 /// Wall time spent blocked in the scheduler (ns): waiting for the recording thread to drain,
 /// for host copies before a submission or fence, and for GPU ticks.
-inline std::atomic<std::uint64_t> sync_recording_ns{0}, host_copies_wait_ns{0}, tick_wait_ns{0},
-    copy_threads_wait_ns{0}, host_copy_waits{0}, host_copy_waits_skipped{0};
+inline std::atomic<std::uint64_t> g_sync_recording_ns{0}, g_host_copies_wait_ns{0}, g_tick_wait_ns{0},
+    g_copy_threads_wait_ns{0}, g_c_host_copy_waits{0}, g_host_copy_waits_skipped{0};
 /// Wall time the frame preparation waited for the GPU to finish an earlier frame (PS_FRAMES_AHEAD):
 /// how GPU-bound the frames are (PS_FRAME_LOG).
-inline std::atomic<std::uint64_t> present_wait_ns{0};
+inline std::atomic<std::uint64_t> g_present_wait_ns{0};
 /// Frames shown (Presenter::PrepareFrame), and bytes the background pre-upload put into the arena.
-inline std::atomic<std::uint32_t> frame_number{0};
-inline std::atomic<std::uint64_t> preupload_bytes{0};
+inline std::atomic<std::uint32_t> g_frame_number{0};
+inline std::atomic<std::uint64_t> g_cb_preupload{0};
 /// Device memory allocated (VMA blocks, arena residency) and freed, bytes.
-inline std::atomic<std::uint64_t> device_alloc_bytes{0}, device_free_bytes{0};
+inline std::atomic<std::uint64_t> g_cb_device_alloc{0}, g_cb_device_free{0};
 /// Memory statistics: registered images (their guest size) and how many; the buffer cache's VRAM
 /// for guest blocks (allocated, never returned to the driver), and the part of it unused (its
 /// free list and the rest of the current 64 MiB block).
-inline std::atomic<std::uint64_t> live_image_bytes{0}, live_images{0};
+inline std::atomic<std::uint64_t> g_cb_live_image{0}, g_c_live_images{0};
 /// Every Vulkan image we allocated (their memory as allocated: host sizes, mips, scene targets).
-inline std::atomic<std::uint64_t> vk_image_bytes{0};
-inline std::atomic<std::uint64_t> residency_alloc_bytes{0}, residency_unused_bytes{0};
+inline std::atomic<std::uint64_t> g_cb_vk_image{0};
+inline std::atomic<std::uint64_t> g_cb_residency_alloc{0}, g_cb_residency_unused{0};
 /// The texture cache collector: the usage it compares, the mark it starts at, images it freed.
-inline std::atomic<std::uint64_t> gc_used_bytes{0}, gc_trigger_bytes{0}, gc_freed_images{0};
+inline std::atomic<std::uint64_t> g_cb_gc_used{0}, g_cb_gc_trigger{0}, g_c_gc_freed_images{0};
 /// Its critical mark (images used a moment ago evicted past it): VRAM copies of the game's
 /// memory stop short of it and yield first (BufferCache::VramPromotionsPaused, LayerProcessIdle).
-inline std::atomic<std::uint64_t> gc_critical_bytes{0};
+inline std::atomic<std::uint64_t> g_cb_gc_critical{0};
 /// Seconds of a steady clock, updated at every guest submission (cheap ages for caches).
-inline std::atomic<std::uint32_t> coarse_second{0};
+inline std::atomic<std::uint32_t> g_coarse_second{0};
 /// VRAM blocks moved back in place when idle, unbound with the memory the game unmapped, and
 /// residency chunks given back to the driver.
-inline std::atomic<std::uint64_t> vram_idle_bytes{0}, vram_unmapped_bytes{0}, vram_chunks_freed_bytes{0};
+inline std::atomic<std::uint64_t> g_cb_vram_idle{0}, g_cb_vram_unmapped{0}, g_cb_vram_chunks_freed{0};
 /// Residency chunks, chunks sent away (ProcessIdleBlocks), and their blocks that had to stay.
-inline std::atomic<std::uint64_t> residency_chunk_count{0}, evacuations{0}, evac_kept_gpu{0}, evac_kept_other{0};
+inline std::atomic<std::uint64_t> g_c_residency_chunks{0}, g_c_evacuations{0}, g_evac_kept_gpu{0}, g_evac_kept_other{0};
 /// Images the collector passed over (GPU-written, not evictable without memory pressure).
-inline std::atomic<std::uint64_t> gc_kept_images{0};
+inline std::atomic<std::uint64_t> g_c_gc_kept_images{0};
 struct WaitTimer {
-    std::atomic<std::uint64_t>& total;
-    std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
+    std::atomic<std::uint64_t>& m_total;
+    std::chrono::steady_clock::time_point m_start = std::chrono::steady_clock::now();
     ~WaitTimer() {
-        total.fetch_add(std::chrono::duration_cast<std::chrono::nanoseconds>(
-                            std::chrono::steady_clock::now() - start).count(),
+        m_total.fetch_add(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                            std::chrono::steady_clock::now() - m_start).count(),
                         std::memory_order_relaxed);
     }
 };
 /// GPU thread rusage, refreshed after each graphics submission.
-inline std::atomic<std::uint64_t> gpu_sys_us{0}, gpu_user_us{0}, gpu_invol_switches{0},
-    gpu_vol_switches{0}, gpu_minor_faults{0};
+inline std::atomic<std::uint64_t> g_gpu_sys_us{0}, g_gpu_user_us{0}, g_c_gpu_invol_switches{0},
+    g_c_gpu_vol_switches{0}, g_c_gpu_minor_faults{0};
 /// Protection faults (signals) taken by the GPU thread itself.
-inline std::atomic<std::uint64_t> gpu_signal_faults{0};
+inline std::atomic<std::uint64_t> g_c_gpu_signal_faults{0};
 /// Protection changes: calls and pages, those removing write access (TLB shootdowns) apart.
-inline std::atomic<std::uint64_t> protect_calls{0}, protect_pages{0}, protect_revoke_calls{0},
-    protect_revoke_pages{0};
+inline std::atomic<std::uint64_t> g_c_protect_calls{0}, g_c_protect_pages{0}, g_c_protect_revoke_calls{0},
+    g_c_protect_revoke_pages{0};
 } // namespace PsStats

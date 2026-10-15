@@ -27,9 +27,9 @@
  * 524288 small guest copies batched for the copy threads instead of the recording thread,
  * 1073741824 the lock-free UpdateImage path for clean, tracked images. */
 /* Bits 32 and up: the draw pipeline and related GPU thread work (gpu/shim/psport_toggles.h). */
-uint64_t runtime_disabled_optimizations;
+uint64_t g_runtime_disabled_optimizations;
 /* psport: a second number in PS_TOGGLE_FILE: temporary experiment bits (PsToggle::Experiment). */
-uint64_t runtime_experiment_bits;
+uint64_t g_runtime_experiment_bits;
 /* Speculative readers of guest memory (GPU draw-preparation workers) register a recovery
  * point: a fault on that thread jumps back to it instead of terminating (probe.c). */
 __thread sigjmp_buf *runtime_fault_recover;
@@ -38,9 +38,9 @@ static void *toggle_watcher(void *p_path) {
         FILE *p_file=fopen(p_path,"r");
         unsigned long long value=0, experiment=0;
         if (p_file) { if (fscanf(p_file,"%llu %llu",&value,&experiment)<1) value=0; fclose(p_file); }
-        __atomic_store_n(&runtime_experiment_bits,(uint64_t)experiment,__ATOMIC_RELEASE);
+        __atomic_store_n(&g_runtime_experiment_bits,(uint64_t)experiment,__ATOMIC_RELEASE);
         if (value!=last) {
-            __atomic_store_n(&runtime_disabled_optimizations,(uint64_t)value,__ATOMIC_RELEASE);
+            __atomic_store_n(&g_runtime_disabled_optimizations,(uint64_t)value,__ATOMIC_RELEASE);
             printf("Runtime: disabled optimizations mask=%llu\n",value);
             last=value;
         }
@@ -320,7 +320,7 @@ static void cache_region(size_t i) {
 const uint64_t *runtime_memory_generation(void) { return &g_table_generation; }
 /* Mapped length from address, up to size, across adjacent mappings. */
 uint64_t runtime_memory_clamp(uintptr_t va_range, uint64_t cb_range) {
-    const CachedRegion *p_cached_region=(runtime_disabled_optimizations & 1) ? NULL : cached_region(va_range);
+    const CachedRegion *p_cached_region=(g_runtime_disabled_optimizations & 1) ? NULL : cached_region(va_range);
     if (p_cached_region && p_cached_region->kind!=KIND_RESERVED && cb_range<=p_cached_region->end-va_range) return cb_range;
     read_lock();
     { size_t i=vma_index(va_range); if (i<g_c_vmas && g_p_vmas[i].start<=va_range) cache_region(i); }
@@ -334,7 +334,7 @@ uint64_t runtime_memory_clamp(uintptr_t va_range, uint64_t cb_range) {
 }
 /* Region around address: [start,end) mapped or a gap; 0 past the last mapping. */
 int runtime_memory_region(uintptr_t va_guest, uintptr_t *p_start, uintptr_t *p_end, int *p_mapped) {
-    const CachedRegion *p_cached_region=(runtime_disabled_optimizations & 1) ? NULL : cached_region(va_guest);
+    const CachedRegion *p_cached_region=(g_runtime_disabled_optimizations & 1) ? NULL : cached_region(va_guest);
     if (p_cached_region) { *p_start=p_cached_region->start; *p_end=p_cached_region->end; *p_mapped=p_cached_region->kind!=KIND_RESERVED; return 1; }
     read_lock();
     size_t i=vma_index(va_guest);
@@ -363,7 +363,7 @@ void runtime_memory_gpu_protect(uintptr_t va_range, uint64_t cb_range, int read,
 }
 /* Host view of a guest range, for the GPU backend: the range must be mapped. */
 int runtime_memory_is_mapped(uintptr_t va_range, uint64_t cb_range) {
-    const CachedRegion *p_cached_region=(runtime_disabled_optimizations & 1) ? NULL : cached_region(va_range);
+    const CachedRegion *p_cached_region=(g_runtime_disabled_optimizations & 1) ? NULL : cached_region(va_range);
     if (p_cached_region && p_cached_region->kind!=KIND_RESERVED && cb_range<=p_cached_region->end-va_range) return 1;
     read_lock();
     int result=covered(va_range,va_range+cb_range,0);

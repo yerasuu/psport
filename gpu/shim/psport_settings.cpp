@@ -18,8 +18,8 @@ namespace PsSettings {
 namespace {
 
 const char* Path() {
-    const char* env = std::getenv("PS_CONFIG");
-    return env && env[0] ? env : "psport.ini";
+    const char* sz_env = std::getenv("PS_CONFIG");
+    return sz_env && sz_env[0] ? sz_env : "psport.ini";
 }
 
 float Clamp(float v, float lo, float hi) {
@@ -43,15 +43,15 @@ void Set(Values& v, const std::string& key, const std::string& value) {
     } else if (key == "preset") {
         v.preset = std::clamp(i, 0, PresetCount - 1);
     } else if (key == "sharpen") {
-        v.sharpen = i != 0;
+        v.should_sharpen = i != 0;
     } else if (key == "sharpness") {
         v.sharpness = Clamp(f, 0.0f, 2.0f);
     } else if (key == "jitter") {
-        v.jitter = i != 0;
+        v.should_jitter = i != 0;
     } else if (key == "reactive") {
-        v.reactive = i != 0;
+        v.should_use_reactive = i != 0;
     } else if (key == "object_motion") {
-        v.object_motion = i != 0;
+        v.should_use_object_motion = i != 0;
     } else if (key == "reactive_scale") {
         v.reactive_scale = Clamp(f, 0.0f, 16.0f);
     } else if (key == "reactive_threshold") {
@@ -61,7 +61,7 @@ void Set(Values& v, const std::string& key, const std::string& value) {
     } else if (key == "debug_view") {
         v.debug_view = std::clamp(i, 0, DebugViewCount - 1);
     } else if (key == "show_fps") {
-        v.show_fps = i != 0;
+        v.should_show_fps = i != 0;
     } else if (key == "menu_pos") {
         float x = -1.0f, y = -1.0f;
         if (std::sscanf(value.c_str(), "%f,%f", &x, &y) == 2 && x >= 0.0f && x <= 1.0f && y >= 0.0f &&
@@ -70,9 +70,9 @@ void Set(Values& v, const std::string& key, const std::string& value) {
             v.menu_y = y;
         }
     } else if (key == "fsr4_auto_exposure") {
-        v.fsr4_auto_exposure = i != 0;
+        v.should_use_fsr4_auto_exposure = i != 0;
     } else if (key == "fsr4_invert_jitter") {
-        v.fsr4_invert_jitter = i != 0;
+        v.should_invert_fsr4_jitter = i != 0;
     } else if (key == "model_lod") {
         v.model_lod = std::clamp(i, -2, 2);
     } else if (key == "live_resolution") {
@@ -96,13 +96,13 @@ void Set(Values& v, const std::string& key, const std::string& value) {
 } // namespace
 
 Values& Get() {
-    static Values values;
-    return values;
+    static Values s_values;
+    return s_values;
 }
 
-const char* MenuText(const char* english, const char* russian, const char* spanish) {
+const char* MenuText(const char* sz_english, const char* sz_russian, const char* sz_spanish) {
     const MenuLanguage language = Get().menu_language;
-    return language == MenuLanguage::Russian ? russian : language == MenuLanguage::Spanish ? spanish : english;
+    return language == MenuLanguage::Russian ? sz_russian : language == MenuLanguage::Spanish ? sz_spanish : sz_english;
 }
 
 void Load() {
@@ -119,26 +119,26 @@ void Load() {
     // psport: the menu's language until one is chosen in it (menu_language in psport.ini): the
     // launcher's (PS_MENU_LANGUAGE), else the system's, as the launcher picks its own.
     {
-        const char* lang = std::getenv("PS_MENU_LANGUAGE");
-        if (!lang || !*lang) {
-            for (const char* key : {"LC_ALL", "LC_MESSAGES", "LANG", "LANGUAGE"}) {
-                if (const char* value = std::getenv(key); value && *value) {
-                    lang = value;
+        const char* sz_lang = std::getenv("PS_MENU_LANGUAGE");
+        if (!sz_lang || !*sz_lang) {
+            for (const char* sz_key : {"LC_ALL", "LC_MESSAGES", "LANG", "LANGUAGE"}) {
+                if (const char* sz_value = std::getenv(sz_key); sz_value && *sz_value) {
+                    sz_lang = sz_value;
                     break;
                 }
             }
         }
-        const auto is = [lang](char first, char second) {
-            return lang && std::tolower(static_cast<unsigned char>(lang[0])) == first && std::tolower(static_cast<unsigned char>(lang[1])) == second;
+        const auto is = [sz_lang](char first, char second) {
+            return sz_lang && std::tolower(static_cast<unsigned char>(sz_lang[0])) == first && std::tolower(static_cast<unsigned char>(sz_lang[1])) == second;
         };
         v.menu_language = is('r', 'u')   ? MenuLanguage::Russian
                           : is('e', 's') ? MenuLanguage::Spanish
                                          : MenuLanguage::English;
     }
-    if (FILE* file = std::fopen(Path(), "r")) {
-        char line[256];
-        while (std::fgets(line, sizeof(line), file)) {
-            std::string text{line};
+    if (FILE* p_file = std::fopen(Path(), "r")) {
+        char sz_line[256];
+        while (std::fgets(sz_line, sizeof(sz_line), p_file)) {
+            std::string text{sz_line};
             text.erase(text.find_last_not_of(" \t\r\n") + 1);
             const auto eq = text.find('=');
             if (text.empty() || text[0] == '#' || eq == std::string::npos) {
@@ -146,14 +146,14 @@ void Load() {
             }
             Set(v, text.substr(0, eq), text.substr(eq + 1));
         }
-        std::fclose(file);
+        std::fclose(p_file);
         std::printf("Settings: %s\n", Path());
     }
     // Environment overrides (scripts, A/B tests).
-    if (const char* env = std::getenv("PS_UPSCALER")) {
+    if (const char* sz_env = std::getenv("PS_UPSCALER")) {
         v.upscaler = UpscalerOff;
         for (int u = 0; u < UpscalerCount; ++u) {
-            if (std::strcmp(env, UpscalerName(u)) == 0) v.upscaler = u;
+            if (std::strcmp(sz_env, UpscalerName(u)) == 0) v.upscaler = u;
         }
     }
     const std::pair<const char*, const char*> env_keys[] = {
@@ -163,13 +163,13 @@ void Load() {
         {"PS_UPSCALE_PRESET", "preset"},            {"PS_OBJECT_MOTION", "object_motion"},
     };
     for (const auto& [env, key] : env_keys) {
-        if (const char* value = std::getenv(env)) {
-            Set(v, key, value);
+        if (const char* sz_value = std::getenv(env)) {
+            Set(v, key, sz_value);
         }
     }
     v.startup_preset = v.preset;
     v.startup_upscaler = v.upscaler;
-    v.startup_object_motion = v.object_motion;
+    v.is_object_motion_at_startup = v.should_use_object_motion;
     for (int e = 0; e < v.c_effects; ++e) {
         v.startup_effects[e] = v.effects[e];
     }
@@ -178,36 +178,36 @@ void Load() {
     v.startup_live_resolution = v.live_resolution;
 }
 
-void ConfigureUpscalerSupport(bool fsr4, bool fsr411) {
+void ConfigureUpscalerSupport(bool is_fsr4_supported, bool is_fsr411_supported) {
     auto& v = Get();
-    v.fsr4_supported = fsr4;
-    v.fsr411_supported = fsr4 && fsr411;
+    v.is_fsr4_supported = is_fsr4_supported;
+    v.is_fsr411_supported = is_fsr4_supported && is_fsr411_supported;
     const int requested = v.upscaler;
-    if ((requested == UpscalerFsr4 && !v.fsr4_supported) ||
-        (requested == UpscalerFsr411 && !v.fsr411_supported)) {
-        v.fsr4_problem = "GPU does not support the selected FSR 4 shaders; using FSR 3.1";
+    if ((requested == UpscalerFsr4 && !v.is_fsr4_supported) ||
+        (requested == UpscalerFsr411 && !v.is_fsr411_supported)) {
+        v.sz_fsr4_problem = "GPU does not support the selected FSR 4 shaders; using FSR 3.1";
         std::printf("Upscaler: %s unsupported on this GPU; falling back to FSR 3.1 before the first frame\n",
                     UpscalerName(requested));
         v.upscaler = UpscalerFsr3;
     }
 }
 
-void ConfigureDlssSupport(bool available, const char* problem) {
+void ConfigureDlssSupport(bool is_available, const char* sz_problem) {
     auto& v = Get();
-    v.dlss_supported = available;
-    static std::string kept;
-    kept = problem ? problem : "";
-    v.dlss_problem = available || kept.empty() ? nullptr : kept.c_str();
-    if (v.upscaler == UpscalerDlss && !available) {
+    v.is_dlss_supported = is_available;
+    static std::string s_kept;
+    s_kept = sz_problem ? sz_problem : "";
+    v.sz_dlss_problem = is_available || s_kept.empty() ? nullptr : s_kept.c_str();
+    if (v.upscaler == UpscalerDlss && !is_available) {
         std::printf("Upscaler: DLSS unavailable (%s); falling back to FSR 3.1\n",
-                    kept.empty() ? "the DLSS bridge or NVIDIA's DLSS library is missing" : kept.c_str());
+                    s_kept.empty() ? "the DLSS bridge or NVIDIA's DLSS library is missing" : s_kept.c_str());
         v.upscaler = UpscalerFsr3;
     }
 }
 
 bool FixedRenderSession() {
-    const char* size = std::getenv("PS_RENDER_RES");
-    return size && size[0];
+    const char* sz_size = std::getenv("PS_RENDER_RES");
+    return sz_size && sz_size[0];
 }
 
 int RenderPreset() {
@@ -230,30 +230,30 @@ void Save() {
     // The keys the menu writes, in this order; the rest of the file stays as it is: the
     // launcher's controls (key.* / pad.*) and its other keys, comments.
     std::vector<std::pair<std::string, std::string>> keys;
-    const auto put = [&](const char* key, std::string value) { keys.emplace_back(key, std::move(value)); };
+    const auto put = [&](const char* sz_key, std::string value) { keys.emplace_back(sz_key, std::move(value)); };
     const auto fixed = [](float value, int digits) {
-        char text[32];
-        std::snprintf(text, sizeof(text), "%.*f", digits, value);
-        return std::string(text);
+        char sz_text[32];
+        std::snprintf(sz_text, sizeof(sz_text), "%.*f", digits, value);
+        return std::string(sz_text);
     };
-    const auto flag = [](bool value) { return std::string(value ? "1" : "0"); };
+    const auto flag = [](bool is_on) { return std::string(is_on ? "1" : "0"); };
     put("menu_language", v.menu_language == MenuLanguage::Russian   ? "ru"
                          : v.menu_language == MenuLanguage::Spanish ? "es"
                                                                     : "en");
     put("upscaler", UpscalerName(v.upscaler));
     put("preset", std::to_string(v.preset.load()));
-    put("sharpen", flag(v.sharpen));
+    put("sharpen", flag(v.should_sharpen));
     put("sharpness", fixed(v.sharpness, 2));
-    put("jitter", flag(v.jitter));
-    put("reactive", flag(v.reactive));
-    put("object_motion", flag(v.object_motion));
+    put("jitter", flag(v.should_jitter));
+    put("reactive", flag(v.should_use_reactive));
+    put("object_motion", flag(v.should_use_object_motion));
     put("reactive_scale", fixed(v.reactive_scale, 2));
     put("reactive_threshold", fixed(v.reactive_threshold, 2));
     put("reactive_max", fixed(v.reactive_max, 2));
     put("debug_view", std::to_string(v.debug_view.load()));
-    put("show_fps", flag(v.show_fps));
-    put("fsr4_auto_exposure", flag(v.fsr4_auto_exposure));
-    put("fsr4_invert_jitter", flag(v.fsr4_invert_jitter));
+    put("show_fps", flag(v.should_show_fps));
+    put("fsr4_auto_exposure", flag(v.should_use_fsr4_auto_exposure));
+    put("fsr4_invert_jitter", flag(v.should_invert_fsr4_jitter));
     // Read by the game profile at start (its add_patches).
     const Game::GameEffects effects = Game::Effects();
     for (int e = 0; e < v.c_effects; ++e) {
@@ -271,13 +271,13 @@ void Save() {
     }
 
     std::string out;
-    bool had_lines = false;
+    bool has_lines = false;
     std::vector<bool> written(keys.size());
-    if (FILE* file = std::fopen(Path(), "r")) {
-        char line[512];
-        while (std::fgets(line, sizeof(line), file)) {
-            had_lines = true;
-            std::string text{line};
+    if (FILE* p_file = std::fopen(Path(), "r")) {
+        char sz_line[512];
+        while (std::fgets(sz_line, sizeof(sz_line), p_file)) {
+            has_lines = true;
+            std::string text{sz_line};
             text.erase(text.find_last_not_of("\r\n") + 1);
             const auto eq = text.find('=');
             if (!text.empty() && text[0] != '#' && eq != std::string::npos) {
@@ -294,9 +294,9 @@ void Save() {
             }
             out += text + "\n";
         }
-        std::fclose(file);
+        std::fclose(p_file);
     }
-    if (!had_lines) {
+    if (!has_lines) {
         out = "# psport settings (in-game menu: Insert / L3+R3)\n";
     }
     for (size_t k = 0; k < keys.size(); ++k) {
@@ -306,28 +306,28 @@ void Save() {
     }
     // Replaced whole: a crash while writing leaves the old file.
     const std::string temporary = std::string(Path()) + ".tmp";
-    FILE* file = std::fopen(temporary.c_str(), "w");
-    bool ok = file && std::fwrite(out.data(), 1, out.size(), file) == out.size();
-    ok = file && std::fclose(file) == 0 && ok;
-    if (!ok || std::rename(temporary.c_str(), Path()) != 0) {
+    FILE* p_file = std::fopen(temporary.c_str(), "w");
+    bool is_ok = p_file && std::fwrite(out.data(), 1, out.size(), p_file) == out.size();
+    is_ok = p_file && std::fclose(p_file) == 0 && is_ok;
+    if (!is_ok || std::rename(temporary.c_str(), Path()) != 0) {
         std::printf("Settings: cannot write %s\n", Path());
     }
 }
 
 float PresetScale(int preset) {
-    static constexpr float scales[PresetCount] = {1.0f, 1.5f, 1.7f, 2.0f, 3.0f};
-    return scales[std::clamp(preset, 0, PresetCount - 1)];
+    static constexpr float s_scales[PresetCount] = {1.0f, 1.5f, 1.7f, 2.0f, 3.0f};
+    return s_scales[std::clamp(preset, 0, PresetCount - 1)];
 }
 
 const char* PresetName(int preset) {
-    static constexpr const char* names[PresetCount] = {"Native AA", "Quality", "Balanced",
+    static constexpr const char* s_names[PresetCount] = {"Native AA", "Quality", "Balanced",
                                                        "Performance", "Ultra Performance"};
-    return names[std::clamp(preset, 0, PresetCount - 1)];
+    return s_names[std::clamp(preset, 0, PresetCount - 1)];
 }
 
 const char* UpscalerName(int upscaler) {
-    static constexpr const char* names[UpscalerCount] = {"off", "fsr3", "fsr4", "fsr411", "taa", "dlss"};
-    return names[std::clamp(upscaler, 0, UpscalerCount - 1)];
+    static constexpr const char* s_names[UpscalerCount] = {"off", "fsr3", "fsr4", "fsr411", "taa", "dlss"};
+    return s_names[std::clamp(upscaler, 0, UpscalerCount - 1)];
 }
 
 } // namespace PsSettings
