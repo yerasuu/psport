@@ -1,0 +1,22 @@
+# With -u from a run of bo1-car.sched: Resume Game loads the checkpoint at the bottom of the
+# zipline ("Find and kill Castro"); follow.py fights after Woods through the compound for five
+# and a half minutes, breaching the doors he stops at, then Save and Quit writes the furthest
+# checkpoint reached.
+60 shot
+68 press cross
+71 press options
+74 press cross
+78 press cross
+125 shot
+126 follow 330 --fight 5 --keep 15
+456 shot
+457 press options
+459 shot
+460 press up
+461 press cross
+463 shot
+464 press down
+465 press cross
+468 shot
+480 shot
+482 end

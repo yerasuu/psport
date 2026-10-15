@@ -1,0 +1,40 @@
+# With -u from a run of bo1-street.sched: Resume Game loads the alley checkpoint ("Get off the
+# streets"); follow.py fights up the alley to the car and its "Enter" (square, held when the car
+# stops it, or the press after), the pad holds L2 to reverse and R2 to drive until the crash, then
+# past the interrogation cutscene walks to the zipline at the bell arch and holds square to ride
+# it; at the bottom "Find and kill Castro" comes with a checkpoint, and Save and Quit writes it for
+# bo1-compound.sched.
+60 shot
+68 press cross
+71 press options
+74 press cross
+78 press cross
+125 shot
+126 follow 60 --fight 2.5
+186 shot
+187 hold ry=255 0.3
+187 hold ly=0 0.6
+188 hold square 1
+189 release
+190 shot
+190 hold l2 8
+198 hold r2 15
+213 release
+215 shot
+235 shot
+255 shot
+256 follow 8
+264 hold square 1.5
+266 release
+268 shot
+290 shot
+295 press options
+297 shot
+298 press up
+299 press cross
+301 shot
+302 press down
+303 press cross
+306 shot
+318 shot
+320 end
