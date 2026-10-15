@@ -58,7 +58,7 @@ static _Thread_local GuestThread *s_p_current;
 static _Thread_local int32_t s_guest_errno;
 static const unsigned char *s_p_tls_template;
 static uint64_t s_tls_filesz, s_tls_memsz, s_tls_align=16;
-static size_t s_created, s_c_joineds, s_exited;
+static size_t s_c_created, s_c_joined, s_c_exited;
 static size_t s_c_cancel_requests, s_c_cancels_taken;
 
 void runtime_set_main_tls(const void *p_data,uint64_t filesz,uint64_t memsz,uint64_t align) {
@@ -284,7 +284,7 @@ static void *host_start(void *p_argument) {
     set_host_name(p_thread->name);
     if (!setjmp(p_thread->exit_jump)) p_thread->result=p_thread->entry(p_thread->argument);
     runtime_thread_keys_cleanup();
-    runtime_exception_lock(&s_lock); p_thread->finished=1; ++s_exited; runtime_exception_unlock(&s_lock);
+    runtime_exception_lock(&s_lock); p_thread->finished=1; ++s_c_exited; runtime_exception_unlock(&s_lock);
     return p_thread->result;
 }
 static int32_t create(GuestThread **pp_out,ThreadAttr **pp_attr_slot,GuestEntry pfn_entry,void *p_argument,const char *sz_name) {
@@ -342,7 +342,7 @@ static int32_t create(GuestThread **pp_out,ThreadAttr **pp_attr_slot,GuestEntry 
     pthread_sigmask(SIG_SETMASK,&p_thread->start_mask,NULL);
     if (e) { fprintf(stderr,"STOP: host pthread_create failed: %d\n",e); runtime_stop(21); }
     if (p_thread->detached) pthread_detach(p_thread->host);
-    runtime_exception_lock(&s_lock); ++s_created; runtime_exception_unlock(&s_lock);
+    runtime_exception_lock(&s_lock); ++s_c_created; runtime_exception_unlock(&s_lock);
     printf("Runtime: guest thread '%s' created (stack=%llu, prio=%d)\n",p_thread->name,(unsigned long long)stack,p_thread->attr.prio);
     return 0;
 }
@@ -358,7 +358,7 @@ static ABI int32_t thread_join(GuestThread *p_thread,void **pp_result) {
     int e=pthread_join(p_thread->host,&p_value);
     if (e) { fprintf(stderr,"STOP: host pthread_join failed: %d\n",e); runtime_stop(21); }
     if (pp_result) *pp_result=p_thread->result;
-    runtime_exception_lock(&s_lock); ++s_c_joineds; runtime_exception_unlock(&s_lock);
+    runtime_exception_lock(&s_lock); ++s_c_joined; runtime_exception_unlock(&s_lock);
     return 0;
 }
 static ABI int32_t thread_detach(GuestThread *p_thread) {
@@ -517,7 +517,7 @@ uintptr_t runtime_thread_resolve(const char *sz_name) {
 }
 void runtime_thread_report(void) {
     runtime_exception_lock(&s_lock);
-    printf("Runtime: guest threads created=%zu, exited=%zu, joined=%zu\n",s_created,s_exited,s_c_joineds);
+    printf("Runtime: guest threads created=%zu, exited=%zu, joined=%zu\n",s_c_created,s_c_exited,s_c_joined);
     if (s_c_cancel_requests)
         printf("Runtime: thread cancellation: %zu requested, %zu taken at pthread_testcancel (blocking "
                "cancellation points and asynchronous cancellation are not honoured)\n",s_c_cancel_requests,

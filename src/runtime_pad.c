@@ -73,7 +73,7 @@ static pthread_mutex_t s_lock=PTHREAD_MUTEX_INITIALIZER;
 static int s_is_initialized, s_is_opened;
 int runtime_pad_sdl_ready;
 static SDL_Gamepad *s_p_gamepad;
-static size_t s_reads;
+static size_t s_c_reads;
 static uint8_t s_c_connecteds;
 
 /* Per-controller stick neutral (see the file header): the value each axis holds while the
@@ -611,7 +611,7 @@ static ABI int32_t pad_read_state(int32_t h_handle, PadData *p_data) {
     if (h_handle!=PAD_HANDLE || !s_is_opened) return ERR_INVALID_HANDLE;
     if (!p_data) return ERR_INVALID_ARG;
     pthread_mutex_lock(&s_lock);
-    sample(p_data); ++s_reads;
+    sample(p_data); ++s_c_reads;
     pthread_mutex_unlock(&s_lock);
     return 0;
 }
@@ -706,4 +706,4 @@ static const RuntimeExport s_exports[]={
     {"scePadSetMotionSensorState",pad_ok_handle_flag},
 };
 uintptr_t runtime_pad_resolve(const char *sz_name) { return RUNTIME_LOOKUP(s_exports,sz_name); }
-void runtime_pad_report(void) { printf("Runtime: pad reads=%zu, gamepad=%s\n",s_reads,s_p_gamepad ? SDL_GetGamepadName(s_p_gamepad) : "none"); }
+void runtime_pad_report(void) { printf("Runtime: pad reads=%zu, gamepad=%s\n",s_c_reads,s_p_gamepad ? SDL_GetGamepadName(s_p_gamepad) : "none"); }

@@ -38,7 +38,7 @@ typedef struct { int is_open, host; int32_t user, i_device, x, y, wheel, tilt; }
 static pthread_mutex_t s_lock=PTHREAD_MUTEX_INITIALIZER;
 static int s_is_initialized, s_is_host_connected=-1;
 static MousePort s_ports[MOUSE_HANDLES];
-static size_t s_reads;
+static size_t s_c_reads;
 static float s_sensitivity=-1.0f, s_carry_x, s_carry_y;
 
 /* game_mouse_sensitivity in psport.ini (PS_CONFIG), beside mouse look's keys (runtime_pad.c):
@@ -133,7 +133,7 @@ static ABI int32_t mouse_read(int32_t h_handle, MouseData *p_data, int32_t c_dat
         p_data->x=p_mouse_port->x; p_data->y=p_mouse_port->y; p_data->wheel=p_mouse_port->wheel; p_data->tilt=p_mouse_port->tilt;
     }
     p_mouse_port->x=p_mouse_port->y=p_mouse_port->wheel=p_mouse_port->tilt=0;
-    ++s_reads;
+    ++s_c_reads;
     pthread_mutex_unlock(&s_lock);
     return 1;
 }
@@ -143,5 +143,5 @@ static const RuntimeExport s_exports[]={
 };
 uintptr_t runtime_mouse_resolve(const char *sz_name) { return RUNTIME_LOOKUP(s_exports,sz_name); }
 void runtime_mouse_report(void) {
-    if (s_reads) printf("Runtime: mouse reads=%zu, host mouse=%s\n",s_reads,s_is_host_connected>0 ? "yes" : "none");
+    if (s_c_reads) printf("Runtime: mouse reads=%zu, host mouse=%s\n",s_c_reads,s_is_host_connected>0 ? "yes" : "none");
 }

@@ -37,8 +37,8 @@ static pthread_mutex_t s_lock=PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t s_work=PTHREAD_COND_INITIALIZER, s_finished=PTHREAD_COND_INITIALIZER;
 static Submission *s_slots[MAX_SUBMISSIONS], *s_queues[PRIORITY_HIGH];
 static int32_t s_next_id=1;
-static size_t s_live, s_workers;
-static size_t s_submissions, s_commands, s_failures, s_cancels, s_deletes, s_timeouts;
+static size_t s_c_live, s_c_workers;
+static size_t s_c_submissions, s_c_commands, s_c_failures, s_c_cancels, s_c_deletes, s_c_timeouts;
 static uint64_t s_cb_read, s_cb_written;
 
 static int trace(void) { static int s_is_enabled=-1; if (s_is_enabled<0) s_is_enabled=getenv("PS_TRACE_AIO")!=NULL; return s_is_enabled; }
@@ -73,7 +73,7 @@ static int run_command(const AioRequest *p_aio_request, int write) {
     p_aio_request->result->value=cb_transferred<0 ? ERR(runtime_guest_errno((int)-cb_transferred)) : cb_transferred;
     __atomic_store_n(&p_aio_request->result->state,cb_transferred<0 ? ABORTED : COMPLETED,__ATOMIC_RELEASE);
     if (cb_transferred<0) {
-        if (__atomic_fetch_add(&s_failures,1,__ATOMIC_RELAXED)<LOGGED_FAILURES)
+        if (__atomic_fetch_add(&s_c_failures,1,__ATOMIC_RELAXED)<LOGGED_FAILURES)
             printf("Runtime: aio %s of %" PRId64 " bytes at %" PRId64 " on fd %d failed (error %#x)\n",
                    write ? "write" : "read",p_aio_request->nbyte,p_aio_request->offset,p_aio_request->fd,(unsigned)p_aio_request->result->value);
         return 1;
@@ -103,7 +103,7 @@ static void start_workers(void) {
     sigfillset(&all);
     sigdelset(&all,SIGSEGV); sigdelset(&all,SIGBUS); sigdelset(&all,SIGILL); sigdelset(&all,SIGFPE);
     pthread_sigmask(SIG_SETMASK,&all,&previous);
-    for (; s_workers<WORKERS; ++s_workers) {
+    for (; s_c_workers<WORKERS; ++s_c_workers) {
         pthread_t thread;
         int e=pthread_create(&thread,NULL,worker,NULL);
         if (e) { fprintf(stderr,"STOP: aio worker pthread_create failed: %d\n",e); runtime_stop(21); }
@@ -124,7 +124,7 @@ static Submission *create(const AioRequest *p_requests, int32_t c_requests, int 
     }
     s_next_id=s_next_id==INT32_MAX ? 1 : s_next_id+1;
     s_slots[p_submission->id%MAX_SUBMISSIONS]=p_submission;
-    ++s_live;
+    ++s_c_live;
     enqueue(p_submission);
     return p_submission;
 }
@@ -134,7 +134,7 @@ static int32_t submit(const AioRequest *p_requests, int32_t c_requests, int prio
     for (int32_t i=0; i<c_requests; ++i) if (!p_requests[i].result) return EFAULT_CODE;
     const size_t needed=multiple ? (size_t)c_requests : 1;
     runtime_exception_lock(&s_lock);
-    const size_t in_use=s_live;
+    const size_t in_use=s_c_live;
     int32_t result=in_use+needed>MAX_SUBMISSIONS ? ERR(35) : 0;
     for (size_t i=0; !result && i<needed; ++i) {
         Submission *p_submission=multiple ? create(&p_requests[i],1,priority,write) : create(p_requests,c_requests,priority,write);
@@ -142,8 +142,8 @@ static int32_t submit(const AioRequest *p_requests, int32_t c_requests, int prio
         else p_ids[i]=p_submission->id;
     }
     if (!result) {
-        if (!s_workers) start_workers();
-        s_submissions+=needed; s_commands+=(size_t)c_requests;
+        if (!s_c_workers) start_workers();
+        s_c_submissions+=needed; s_c_commands+=(size_t)c_requests;
         pthread_cond_broadcast(&s_work);
     }
     runtime_exception_unlock(&s_lock);
@@ -181,7 +181,7 @@ static int32_t wait_ids(const int32_t *p_ids, int32_t c_ids, int32_t *p_states, 
     int is_done=0;
     int32_t result=check(p_ids,c_ids,p_states,all,&is_done);
     while (!result && !is_done) {
-        if (p_usec && runtime_wait_clock()>=deadline) { result=ERR(60); ++s_timeouts; break; }
+        if (p_usec && runtime_wait_clock()>=deadline) { result=ERR(60); ++s_c_timeouts; break; }
         int e=runtime_exception_wait(&s_finished,&s_lock,p_usec ? &end : NULL);
         if (e && e!=ETIMEDOUT) { fprintf(stderr,"STOP: aio wait host error %d\n",e); runtime_stop(21); }
         result=check(p_ids,c_ids,p_states,all,&is_done);
@@ -221,7 +221,7 @@ static int abort_queued(Submission *p_submission) {
         p_submission->commands[i].result->value=ERR(85);
         __atomic_store_n(&p_submission->commands[i].result->state,ABORTED,__ATOMIC_RELEASE);
     }
-    ++s_cancels;
+    ++s_c_cancels;
     pthread_cond_broadcast(&s_finished);
     return 1;
 }
@@ -255,7 +255,7 @@ static ABI int32_t delete_requests(const int32_t *p_ids, int32_t c_ids, int32_t 
         if (!p_submission) { p_results[i]=ESRCH_CODE; continue; }
         abort_queued(p_submission);
         s_slots[p_submission->id%MAX_SUBMISSIONS]=NULL;
-        --s_live; ++s_deletes;
+        --s_c_live; ++s_c_deletes;
         free(p_submission);
         p_results[i]=0;
     }
@@ -298,7 +298,7 @@ void runtime_aio_report(void) {
     pthread_mutex_lock(&s_lock);
     printf("Runtime: aio submissions=%zu, commands=%zu (failed %zu), read=%" PRIu64 " bytes, written=%" PRIu64
            " bytes, cancels=%zu, deletes=%zu, wait timeouts=%zu, ids in use=%zu\n",
-           s_submissions,s_commands,s_failures,s_cb_read,s_cb_written,s_cancels,s_deletes,s_timeouts,s_live);
+           s_c_submissions,s_c_commands,s_c_failures,s_cb_read,s_cb_written,s_c_cancels,s_c_deletes,s_c_timeouts,s_c_live);
     pthread_mutex_unlock(&s_lock);
 }
 #else

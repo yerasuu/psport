@@ -64,7 +64,7 @@ static _Atomic(GuestHandler) s_handlers[GUEST_SIGNALS];
  * held back until it lets go. */
 static _Thread_local unsigned s_held;
 static _Thread_local volatile sig_atomic_t s_is_deferred;
-static _Atomic unsigned s_raised, s_delivered;
+static _Atomic unsigned s_c_raised, s_c_delivered;
 /* The errnos deliver puts back when the guest's handler returns, for a handler that leaves by
  * sigreturn instead. */
 typedef struct { int is_active, host_errno; int32_t guest_errno; } Delivery;
@@ -133,7 +133,7 @@ static void deliver(int sig, siginfo_t *p_info, void *p_raw) {
     /* The guest's FS base is its TCB, which the runtime keeps in GS. */
     unsigned long tcb=0;
     if (!syscall(SYS_arch_prctl,ARCH_GET_GS,&tcb)) { p_mcontext->fsbase=tcb; p_mcontext->flags=0x2; /* _MC_HASBASES */ }
-    if (!atomic_fetch_add(&s_delivered,1)) {
+    if (!atomic_fetch_add(&s_c_delivered,1)) {
         static const char s_sz_first[]="Runtime: first guest exception delivered to its handler\n";
         /* write, not stdio: this runs in a signal handler. */
         ssize_t written=write(2,s_sz_first,sizeof(s_sz_first)-1); (void)written;
@@ -178,7 +178,7 @@ static ABI int32_t remove_handler(int sig) {
 static ABI int32_t raise_exception(void *p_thread, int sig) {
     if (sig!=GUEST_SIGUSR1) return ERR(22);
     int32_t result=runtime_thread_kill(p_thread,RUNTIME_EXCEPTION_SIGNAL);
-    if (!result && !atomic_fetch_add(&s_raised,1)) {
+    if (!result && !atomic_fetch_add(&s_c_raised,1)) {
         /* write, not stdio: the thread may stop in the handler while it holds stdout's lock. */
         char sz_line[96];
         int cb_line=snprintf(sz_line,sizeof(sz_line),"Runtime: first guest exception raised (signal %d) to thread %p\n",sig,p_thread);
@@ -293,8 +293,8 @@ static const RuntimeExport s_exports[]={
 };
 uintptr_t runtime_exception_resolve(const char *sz_name) { return RUNTIME_LOOKUP(s_exports,sz_name); }
 void runtime_exception_report(void) {
-    unsigned r=atomic_load(&s_raised);
-    if (r) printf("Runtime: exceptions raised=%u, delivered=%u\n",r,atomic_load(&s_delivered));
+    unsigned r=atomic_load(&s_c_raised);
+    if (r) printf("Runtime: exceptions raised=%u, delivered=%u\n",r,atomic_load(&s_c_delivered));
 }
 #else
 uintptr_t runtime_exception_resolve(const char *name) { (void)name; return 0; }

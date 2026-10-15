@@ -113,9 +113,9 @@ uint64_t runtime_process_time_us(void) { return process_time(); }
 uint64_t runtime_process_time_counter(void) { return process_time_counter(); }
 uint64_t runtime_tsc_frequency(void) { return tsc_frequency(); }
 /* psport (frame stats): how often and how long the game sleeps (it polls GPU labels that way). */
-static _Atomic uint64_t s_sleep_calls, s_sleep_total_ns;
+static _Atomic uint64_t s_c_sleep_calls, s_sleep_total_ns;
 void runtime_sleep_stats(uint64_t *p_calls, uint64_t *p_ns) {
-    *p_calls=atomic_exchange(&s_sleep_calls,0); *p_ns=atomic_exchange(&s_sleep_total_ns,0);
+    *p_calls=atomic_exchange(&s_c_sleep_calls,0); *p_ns=atomic_exchange(&s_sleep_total_ns,0);
 }
 static int sleep_ns(uint64_t ns) {
     struct timespec t={.tv_sec=(time_t)(ns/1000000000),.tv_nsec=(long)(ns%1000000000)}, a, b;
@@ -123,7 +123,7 @@ static int sleep_ns(uint64_t ns) {
     int result=0;
     while (nanosleep(&t,&t)) if (errno!=EINTR) { result=errno; break; }
     clock_gettime(CLOCK_MONOTONIC,&b);
-    atomic_fetch_add(&s_sleep_calls,1);
+    atomic_fetch_add(&s_c_sleep_calls,1);
     atomic_fetch_add(&s_sleep_total_ns,(uint64_t)((b.tv_sec-a.tv_sec)*1000000000+(b.tv_nsec-a.tv_nsec)));
     runtime_wait_note(3,(uint64_t)((b.tv_sec-a.tv_sec)*1000000000+(b.tv_nsec-a.tv_nsec)));
     return result;
@@ -532,9 +532,9 @@ void runtime_wait_report(double frames) {
 /* psport PS_SAMPLE_THREAD=<name> (with frame stats): where that thread runs, sampled with SIGPROF
  * every 0.5 ms; reported with the wait profile. A thread that never blocks but waits for the GPU
  * shows up spinning in its polling loop. */
-static _Atomic uint64_t s_sample_keys[1024], s_sample_counts[1024];
+static _Atomic uint64_t s_sample_keys[1024], s_c_slot_samples[1024];
 static uint64_t s_sample_rips[1024], s_sample_callers[1024];
-static _Atomic uint64_t s_samples_total;
+static _Atomic uint64_t s_c_samples;
 static void sample_handler(int sig, siginfo_t *p_info, void *p_context) {
     (void)sig; (void)p_info;
     const ucontext_t *p_ucontext=(const ucontext_t *)p_context;
@@ -549,13 +549,13 @@ static void sample_handler(int sig, siginfo_t *p_info, void *p_context) {
         for (ssize_t i=0;i<got/8;++i) if (stack[i]>=text_lo && stack[i]<text_hi) { caller=stack[i]-text_lo; break; }
     }
     const uint64_t key=(rip*0x9E3779B97F4A7C15ull)^caller^1;
-    atomic_fetch_add(&s_samples_total,1);
+    atomic_fetch_add(&s_c_samples,1);
     for (uint64_t i=0,slot=(key*0x9E3779B97F4A7C15ull)>>54;i<1024;++i) {
         _Atomic uint64_t *p_key=&s_sample_keys[(slot+i)%1024];
         uint64_t expected=0;
         if (atomic_load(p_key)==key || atomic_compare_exchange_strong(p_key,&expected,key)) {
             s_sample_rips[(slot+i)%1024]=rip; s_sample_callers[(slot+i)%1024]=caller;
-            atomic_fetch_add(&s_sample_counts[(slot+i)%1024],1);
+            atomic_fetch_add(&s_c_slot_samples[(slot+i)%1024],1);
             return;
         }
     }
@@ -612,10 +612,10 @@ static void sample_report(void) {
                    dl.dli_sname ? dl.dli_sname : "?",(unsigned long)(target-(uint64_t)(dl.dli_sname ? dl.dli_saddr : dl.dli_fbase)));
         }
     }
-    const uint64_t c_samples=atomic_exchange(&s_samples_total,0);
+    const uint64_t c_samples=atomic_exchange(&s_c_samples,0);
     if (!c_samples) return;
     struct { uint64_t rip, caller, c_samples; } rows[1024]; int c_rows=0;
-    for (int i=0;i<1024;++i) { uint64_t c=atomic_exchange(&s_sample_counts[i],0); if (c) { rows[c_rows].rip=s_sample_rips[i]; rows[c_rows].caller=s_sample_callers[i]; rows[c_rows].c_samples=c; ++c_rows; } }
+    for (int i=0;i<1024;++i) { uint64_t c=atomic_exchange(&s_c_slot_samples[i],0); if (c) { rows[c_rows].rip=s_sample_rips[i]; rows[c_rows].caller=s_sample_callers[i]; rows[c_rows].c_samples=c; ++c_rows; } }
     for (int i=1;i<c_rows;++i) for (int j=i;j>0 && rows[j].c_samples>rows[j-1].c_samples;--j) { __typeof__(rows[0]) t=rows[j]; rows[j]=rows[j-1]; rows[j-1]=t; }
     printf("Thread samples (%llu):",(unsigned long long)c_samples);
     for (int i=0;i<c_rows && i<16;++i) {

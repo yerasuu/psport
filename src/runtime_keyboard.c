@@ -65,12 +65,12 @@ static pthread_mutex_t s_lock=PTHREAD_MUTEX_INITIALIZER;
 static struct { int is_open, is_opened_sent, is_connected; int32_t user; uint32_t option; void *p_arg; ImeHandler pfn_handler; } s_kbd;
 static int s_taken;
 static int s_host_logged=-1;
-static uint64_t s_delivered, s_repeats_dropped, s_unmapped_keys;
-static uint32_t s_dropped;
+static uint64_t s_c_delivered, s_c_repeats_dropped, s_c_unmapped_keys;
+static uint32_t s_c_dropped;
 
 static int host_keyboard(void) {
     int keyboard=0;
-    psport_gpu_game_keyboard_take(NULL,0,&keyboard,&s_dropped);
+    psport_gpu_game_keyboard_take(NULL,0,&keyboard,&s_c_dropped);
     return keyboard;
 }
 static void log_host(int keyboard) {
@@ -100,7 +100,7 @@ static uint32_t key_state(const PsKeyEvent *p_key) {
 static int collect(ImeEvent *p_events) {
     PsKeyEvent keys[EVENTS_PER_UPDATE];
     int keyboard=0, c_events=0;
-    const int taken_keys=psport_gpu_game_keyboard_take(keys,EVENTS_PER_UPDATE-1,&keyboard,&s_dropped);
+    const int taken_keys=psport_gpu_game_keyboard_take(keys,EVENTS_PER_UPDATE-1,&keyboard,&s_c_dropped);
     log_host(keyboard);
     if (!s_kbd.is_opened_sent) {
         s_kbd.is_opened_sent=1; s_kbd.is_connected=keyboard;
@@ -113,8 +113,8 @@ static int collect(ImeEvent *p_events) {
     }
     for (int i=0;i<taken_keys;++i) {
         const PsKeyEvent *p_key=&keys[i];
-        if (p_key->scancode==0 || p_key->scancode>HID_LAST_KEY) { ++s_unmapped_keys; continue; }
-        if (p_key->repeat && !(s_kbd.option & (OPTION_REPEAT|OPTION_REPEAT_EACH_KEY))) { ++s_repeats_dropped; continue; }
+        if (p_key->scancode==0 || p_key->scancode>HID_LAST_KEY) { ++s_c_unmapped_keys; continue; }
+        if (p_key->repeat && !(s_kbd.option & (OPTION_REPEAT|OPTION_REPEAT_EACH_KEY))) { ++s_c_repeats_dropped; continue; }
         ImeEvent *p_ime_event=&p_events[c_events++];
         memset(p_ime_event,0,sizeof(*p_ime_event));
         p_ime_event->id=!p_key->down ? EVENT_KEY_UP : p_key->repeat ? EVENT_KEY_REPEAT : EVENT_KEY_DOWN;
@@ -184,7 +184,7 @@ static ABI int32_t ime_update(ImeHandler pfn_handler) {
     const int c_events=collect(events);
     ImeHandler pfn_call=pfn_handler ? pfn_handler : s_kbd.pfn_handler;
     void *p_arg=s_kbd.p_arg;
-    s_delivered+=(uint64_t)c_events;
+    s_c_delivered+=(uint64_t)c_events;
     pthread_mutex_unlock(&s_lock);
     for (int i=0;i<c_events;++i) pfn_call(p_arg,&events[i]);
     return 0;
@@ -202,6 +202,6 @@ int runtime_keyboard_taken(void) { return __atomic_load_n(&s_taken,__ATOMIC_RELA
 void runtime_keyboard_report(void) {
     if (s_host_logged<0) return;
     printf("Runtime: keyboard events=%llu, host keyboard=%s, queue overflow=%u, repeats not asked for=%llu, keys with no USB keycode=%llu\n",
-           (unsigned long long)s_delivered,s_host_logged>0 ? "yes" : "none",s_dropped,(unsigned long long)s_repeats_dropped,
-           (unsigned long long)s_unmapped_keys);
+           (unsigned long long)s_c_delivered,s_host_logged>0 ? "yes" : "none",s_c_dropped,(unsigned long long)s_c_repeats_dropped,
+           (unsigned long long)s_c_unmapped_keys);
 }

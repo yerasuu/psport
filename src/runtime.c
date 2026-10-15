@@ -17,11 +17,11 @@ typedef struct {
     int with_arg, is_active;
 } ExitHandler;
 static ExitHandler *s_p_handlers;
-static size_t s_c_handlers, s_c_handler_capacity, s_calls_init, s_calls_atexit, s_calls_cxa;
+static size_t s_c_handlers, s_c_handler_capacity, s_c_init_calls, s_c_atexit_calls, s_c_cxa_calls;
 static uint64_t s_capabilities;
-static _Atomic size_t s_guards_acquired, s_guards_released;
+static _Atomic size_t s_c_guards_acquired, s_c_guards_released;
 static uint64_t s_stack_canary;
-static _Atomic size_t s_memory_calls;
+static _Atomic size_t s_c_memory_calls;
 #define TLS_MODULES RUNTIME_TLS_MODULES
 static struct { const void *p_data; uint64_t filesz, memsz; } s_tls_modules[TLS_MODULES];
 static _Thread_local unsigned char *s_tls_blocks[TLS_MODULES];
@@ -85,8 +85,8 @@ void runtime_start(uint64_t flags) {
 }
 void runtime_report(void) {
     printf("Runtime: _init_env=%zu, atexit=%zu, __cxa_atexit=%zu, registered handlers=%zu\n",
-           s_calls_init, s_calls_atexit, s_calls_cxa, s_c_handlers);
-    printf("Runtime: static guards acquired=%zu, released=%zu\n", (size_t)s_guards_acquired, (size_t)s_guards_released);
+           s_c_init_calls, s_c_atexit_calls, s_c_cxa_calls, s_c_handlers);
+    printf("Runtime: static guards acquired=%zu, released=%zu\n", (size_t)s_c_guards_acquired, (size_t)s_c_guards_released);
     runtime_thread_report();
     runtime_exception_report();
     runtime_mutex_report();
@@ -106,7 +106,7 @@ void runtime_report(void) {
     runtime_savedata_report();
     runtime_file_report();
     runtime_aio_report();
-    printf("Runtime: memory operations=%zu\n", (size_t)s_memory_calls);
+    printf("Runtime: memory operations=%zu\n", (size_t)s_c_memory_calls);
     runtime_calls_report();
 }
 void runtime_stop(int status) {
@@ -116,7 +116,7 @@ void runtime_stop(int status) {
 }
 static ABI void init_env(void) {
     /* The loader checked that libc.prx's export is exactly C3 (loader_init_env_is_ret). */
-    ++s_calls_init;
+    ++s_c_init_calls;
     puts("Runtime: _init_env returned (verified libc implementation: RET)");
 }
 static pthread_mutex_t s_handler_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -134,12 +134,12 @@ static int register_handler(ExitHandler value) {
 }
 static ABI int guest_atexit(GuestCallback pfn_callback) {
     if (!pfn_callback) return -1;
-    ++s_calls_atexit;
+    ++s_c_atexit_calls;
     return register_handler((ExitHandler){.callback.pfn_plain=pfn_callback});
 }
 static ABI int guest_cxa_atexit(void (ABI *pfn_callback)(void *), void *p_argument, void *p_dso) {
     if (!pfn_callback) return -1;
-    ++s_calls_cxa;
+    ++s_c_cxa_calls;
     return register_handler((ExitHandler){.callback.pfn_with_arg=pfn_callback, .p_argument=p_argument, .p_dso=p_dso, .with_arg=1});
 }
 void runtime_finalize(void *p_dso) {
@@ -192,12 +192,12 @@ static ABI int guard_acquire(uint64_t *p_guard) {
         }
         sched_yield(); /* another thread is running the initializer */
     }
-    atomic_fetch_add(&s_guards_acquired, 1);
+    atomic_fetch_add(&s_c_guards_acquired, 1);
     return 1;
 }
 static ABI void guard_release(uint64_t *p_guard) {
     atomic_store_explicit((_Atomic uint64_t *)p_guard, 1, memory_order_release);
-    atomic_fetch_add(&s_guards_released, 1);
+    atomic_fetch_add(&s_c_guards_released, 1);
 }
 static ABI void guard_abort(uint64_t *p_guard) {
     atomic_fetch_and_explicit((_Atomic uint64_t *)p_guard, UINT64_C(0xffffffff), memory_order_release);
@@ -207,22 +207,22 @@ static ABI __attribute__((noreturn)) void stack_fail(void) {
     runtime_stop(22);
 }
 static ABI void *guest_memset(void *p_dst, int value, size_t cb_fill) {
-    atomic_fetch_add_explicit(&s_memory_calls,1,memory_order_relaxed);
+    atomic_fetch_add_explicit(&s_c_memory_calls,1,memory_order_relaxed);
     runtime_memory_prepare_cpu_write((uintptr_t)p_dst, cb_fill);
     memset(p_dst, value, cb_fill); runtime_memory_note_cpu_write((uintptr_t)p_dst, cb_fill); return p_dst;
 }
 static ABI void *guest_memcpy(void *p_dst, const void *p_src, size_t cb_copy) {
-    atomic_fetch_add_explicit(&s_memory_calls,1,memory_order_relaxed);
+    atomic_fetch_add_explicit(&s_c_memory_calls,1,memory_order_relaxed);
     runtime_memory_prepare_cpu_write((uintptr_t)p_dst, cb_copy);
     memcpy(p_dst, p_src, cb_copy); runtime_memory_note_cpu_write((uintptr_t)p_dst, cb_copy); return p_dst;
 }
 static ABI void *guest_memmove(void *p_dst, const void *p_src, size_t cb_copy) {
-    atomic_fetch_add_explicit(&s_memory_calls,1,memory_order_relaxed);
+    atomic_fetch_add_explicit(&s_c_memory_calls,1,memory_order_relaxed);
     runtime_memory_prepare_cpu_write((uintptr_t)p_dst, cb_copy);
     memmove(p_dst, p_src, cb_copy); runtime_memory_note_cpu_write((uintptr_t)p_dst, cb_copy); return p_dst;
 }
 static ABI int guest_memcmp(const void *p_a, const void *p_b, size_t cb_compare) {
-    atomic_fetch_add_explicit(&s_memory_calls,1,memory_order_relaxed); return memcmp(p_a, p_b, cb_compare);
+    atomic_fetch_add_explicit(&s_c_memory_calls,1,memory_order_relaxed); return memcmp(p_a, p_b, cb_compare);
 }
 static ABI size_t guest_strlen(const char *sz_text) { return strlen(sz_text); }
 static ABI __attribute__((noreturn)) void guest_libc_exit(int status) {

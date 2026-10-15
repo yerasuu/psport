@@ -42,7 +42,7 @@ typedef struct { int used, host, is_dirty; Listing *p_dir; size_t position; char
 typedef struct { char guest[64]; char host[512]; } Mount;
 static File s_files[MAX_FILES];
 static Mount s_mounts[MAX_MOUNTS];
-static size_t s_c_mounts, s_opens, s_reads, s_writes, s_missing;
+static size_t s_c_mounts, s_c_opens, s_c_reads, s_c_writes, s_c_missing;
 static uint64_t s_cb_read;
 static pthread_mutex_t s_lock=PTHREAD_MUTEX_INITIALIZER;
 #define MAX_UNMOUNTED 32
@@ -345,7 +345,7 @@ static int64_t do_open(const char *sz_guest,int flags,int mode) {
         printf("Save trace: open(%s, flags 0x%x) -> host %d%s%s\n",sz_guest,flags,host,sz_temp ? ", copy " : "",sz_temp ? sz_temp : "");
     if (host<0) {
         e=errno;
-        if (e==ENOENT) { ++s_missing; printf("Runtime: open(%s) -> not found\n",sz_guest); }
+        if (e==ENOENT) { ++s_c_missing; printf("Runtime: open(%s) -> not found\n",sz_guest); }
         return -e;
     }
     struct stat s;
@@ -361,17 +361,17 @@ static int64_t do_open(const char *sz_guest,int flags,int mode) {
     }
     s_files[h_fd]=(File){.used=1,.host=host,.p_dir=p_dir,.sz_commit=sz_commit,.sz_temp=sz_temp};
     snprintf(s_files[h_fd].sz_path,sizeof(s_files[h_fd].sz_path),"%s",sz_guest);
-    ++s_opens;
+    ++s_c_opens;
     pthread_mutex_unlock(&s_lock);
     if (audio_trace() && strstr(sz_guest,"sound/")) printf("Audio trace: open(%s) -> fd %d, %lld bytes\n",sz_guest,h_fd,(long long)s.st_size);
     const char *sz_mod_trace=getenv("PS_MOD_TRACE"), *sz_mod_root=getenv("PS_MODS_DIR");
     if (sz_mod_trace && sz_mod_trace[0]=='1' && sz_mod_root) {
         char sz_actual[PATH_MAX],sz_root[PATH_MAX];
-        static unsigned s_traced;
+        static unsigned s_c_traced;
         if (realpath(sz_path,sz_actual) && realpath(sz_mod_root,sz_root)) {
             size_t cb_root=strlen(sz_root);
             if (!strncmp(sz_actual,sz_root,cb_root) && sz_actual[cb_root]=='/' &&
-                __atomic_fetch_add(&s_traced,1,__ATOMIC_RELAXED)<32)
+                __atomic_fetch_add(&s_c_traced,1,__ATOMIC_RELAXED)<32)
                 printf("Mods: open %s -> %s\n",sz_guest,sz_actual);
         }
     }
@@ -449,7 +449,7 @@ static int64_t do_read(int h_fd,void *p_buffer,uint64_t cb_buffer) {
     ssize_t cb_transferred=read_retrying(h,p_buffer,cb_buffer,0,0);
     if (cb_transferred<0) { if (audio_trace()) printf("Audio trace: read(fd %d, %llu) failed, errno %d\n",h_fd,(unsigned long long)cb_buffer,errno); return -errno; }
     if (cb_transferred>0) runtime_memory_note_write((uintptr_t)p_buffer,(uint64_t)cb_transferred); /* and once the data is there */
-    __atomic_add_fetch(&s_reads,1,__ATOMIC_RELAXED); __atomic_add_fetch(&s_cb_read,(uint64_t)cb_transferred,__ATOMIC_RELAXED);
+    __atomic_add_fetch(&s_c_reads,1,__ATOMIC_RELAXED); __atomic_add_fetch(&s_cb_read,(uint64_t)cb_transferred,__ATOMIC_RELAXED);
     return cb_transferred;
 }
 static int64_t do_pread(int h_fd,void *p_buffer,uint64_t cb_buffer,int64_t off_file) {
@@ -460,7 +460,7 @@ static int64_t do_pread(int h_fd,void *p_buffer,uint64_t cb_buffer,int64_t off_f
     ssize_t cb_transferred=read_retrying(h,p_buffer,cb_buffer,off_file,1);
     if (cb_transferred<0) { if (audio_trace()) printf("Audio trace: pread(fd %d, %llu @%lld) failed, errno %d\n",h_fd,(unsigned long long)cb_buffer,(long long)off_file,errno); return -errno; }
     if (cb_transferred>0) runtime_memory_note_write((uintptr_t)p_buffer,(uint64_t)cb_transferred); /* and once the data is there */
-    __atomic_add_fetch(&s_reads,1,__ATOMIC_RELAXED); __atomic_add_fetch(&s_cb_read,(uint64_t)cb_transferred,__ATOMIC_RELAXED);
+    __atomic_add_fetch(&s_c_reads,1,__ATOMIC_RELAXED); __atomic_add_fetch(&s_cb_read,(uint64_t)cb_transferred,__ATOMIC_RELAXED);
     return cb_transferred;
 }
 /* Pages the GPU side keeps without access (data newer in VRAM, runtime_memory_trap reasons from
@@ -478,7 +478,7 @@ static int64_t do_write(int h_fd,const void *p_buffer,uint64_t cb_buffer) {
     touch_for_read(p_buffer,cb_buffer);
     ssize_t cb_transferred=write(h,p_buffer,cb_buffer);
     if (cb_transferred<0) return -errno;
-    __atomic_add_fetch(&s_writes,1,__ATOMIC_RELAXED);
+    __atomic_add_fetch(&s_c_writes,1,__ATOMIC_RELAXED);
     return cb_transferred;
 }
 static int64_t do_pwrite(int h_fd,const void *p_buffer,uint64_t cb_buffer,int64_t off_file) {
@@ -741,7 +741,7 @@ int64_t runtime_file_getdents(int h_fd,char *sz_buffer,uint64_t cb_buffer,int64_
 int runtime_file_translate(const char *sz_guest,char *sz_out,size_t cb_out) { return translate(sz_guest,sz_out,cb_out); }
 void runtime_file_report(void) {
     printf("Runtime: files opened=%zu, reads=%zu (%llu bytes), writes=%zu, not found=%zu\n",
-           s_opens,s_reads,(unsigned long long)s_cb_read,s_writes,s_missing);
+           s_c_opens,s_c_reads,(unsigned long long)s_cb_read,s_c_writes,s_c_missing);
 }
 /* Part of the call report, which runs from the shutdown and fault handlers: no stdio, no lock. */
 void runtime_file_unmounted_report(void) {

@@ -51,7 +51,7 @@ _Static_assert(sizeof(PortState)==32,"AudioOut port state layout");
 static pthread_mutex_t s_table_lock=PTHREAD_MUTEX_INITIALIZER;
 static Port s_ports[PORTS];
 static int s_is_initialized, s_is_sdl_ready=-1;
-static size_t s_buffers_out, s_ports_opened;
+static size_t s_c_buffers_out, s_c_ports_opened;
 
 static uint64_t now_ns(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC,&t); return (uint64_t)t.tv_sec*1000000000u+(uint64_t)t.tv_nsec; }
 static void sleep_until(uint64_t deadline) {
@@ -125,7 +125,7 @@ static ABI int32_t audio_open(int32_t user, int32_t type, int32_t i_device, uint
         snprintf(sz_path,sizeof(sz_path),"%s.port%d.%dch.%s",sz_dump,id,p_port->channels,p_port->is_float ? "f32" : "s16");
         p_port->p_dump=fopen(sz_path,"wb");
     }
-    ++s_ports_opened;
+    ++s_c_ports_opened;
     pthread_mutex_unlock(&s_table_lock);
     printf("Runtime: audio port %d opened (type %d, %d ch, %s, %u frames)\n",id,type,p_port->channels,p_port->is_float ? "float" : "s16",length);
     return (type<<16) | id | 0x20000000;
@@ -217,7 +217,7 @@ static int32_t output_port(int32_t h_handle, const void *p_data, int pace) {
             p_port->next_deadline_ns+=(uint64_t)p_port->adjust_ns;
             SDL_PutAudioStreamData(p_port->p_stream,converted,(int)cb_data);
         }
-        ++s_buffers_out;
+        ++s_c_buffers_out;
     }
     p_port->last_output_us=now_ns()/1000;
     pthread_mutex_unlock(&p_port->lock);
@@ -304,4 +304,4 @@ int runtime_audio_device_channels(void) {
     return channels;
 }
 uintptr_t runtime_audio_resolve(const char *sz_name) { return RUNTIME_LOOKUP(s_exports,sz_name); }
-void runtime_audio_report(void) { printf("Runtime: audio ports opened=%zu, buffers output=%zu\n",s_ports_opened,s_buffers_out); }
+void runtime_audio_report(void) { printf("Runtime: audio ports opened=%zu, buffers output=%zu\n",s_c_ports_opened,s_c_buffers_out); }

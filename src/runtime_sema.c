@@ -31,7 +31,7 @@ typedef struct Sema {
 static pthread_mutex_t s_lock=PTHREAD_MUTEX_INITIALIZER;
 static Sema *s_p_registry;
 static uint32_t s_next_id=1;
-static size_t s_created, s_deleted, s_acquired, s_signaled, s_timed_out;
+static size_t s_c_created, s_c_deleted, s_c_acquired, s_c_signaled, s_c_timed_out;
 static Sema *find(uint32_t id) {
     for (Sema *p_sema=s_p_registry;p_sema;p_sema=p_sema->p_next) if (p_sema->id==id) return p_sema;
     return NULL;
@@ -54,7 +54,7 @@ static ABI int32_t sem_create(uint32_t *p_out,const char *sz_name,uint32_t attr,
     if (s_next_id==UINT32_MAX) { runtime_exception_unlock(&s_lock); free(p_sema); return ERR(28); }
     p_sema->id=s_next_id++; p_sema->attr=attr; p_sema->c_resources=p_sema->c_initial=initial; p_sema->c_maximum=maximum;
     uint32_t id=p_sema->id;
-    p_sema->p_next=s_p_registry; s_p_registry=p_sema; *p_out=id; ++s_created;
+    p_sema->p_next=s_p_registry; s_p_registry=p_sema; *p_out=id; ++s_c_created;
     runtime_exception_unlock(&s_lock);
     if (getenv("PS_TRACE_SEMA")) printf("Runtime: semaphore id=%u, attr=%u, initial=%d, max=%d\n",id,attr,initial,maximum);
     return 0;
@@ -65,9 +65,9 @@ static int32_t wait_count(uint32_t id,int32_t need,uint32_t *p_timeout,int block
     int32_t result=0;
     if (!p_sema) result=ERR(3);
     else if (need<=0 || need>p_sema->c_maximum) result=ERR(22);
-    else if (p_sema->c_resources>=need) { p_sema->c_resources-=need; ++s_acquired; }
+    else if (p_sema->c_resources>=need) { p_sema->c_resources-=need; ++s_c_acquired; }
     else if (!block) result=ERR(16);
-    else if (p_timeout && !*p_timeout) { result=ERR(60); ++s_timed_out; }
+    else if (p_timeout && !*p_timeout) { result=ERR(60); ++s_c_timed_out; }
     else {
         /* Priority-ordered semaphores (attr 2) are served FIFO: there is no
            PS4 priority scheduler, host threads run at equal priority. */
@@ -89,12 +89,12 @@ static int32_t wait_count(uint32_t id,int32_t need,uint32_t *p_timeout,int block
             if (e==ETIMEDOUT && !w.is_done) {
                 Waiter **pp_waiter=&p_sema->p_first;
                 while (*pp_waiter!=&w) pp_waiter=&(*pp_waiter)->p_next;
-                *pp_waiter=w.p_next; w.result=ERR(60); w.is_done=1; ++s_timed_out;
+                *pp_waiter=w.p_next; w.result=ERR(60); w.is_done=1; ++s_c_timed_out;
             } else if (e!=ETIMEDOUT) host_check(e);
         }
         runtime_wait_note(2,runtime_wait_clock()-wait_start);
         result=w.result;
-        if (!result) ++s_acquired;
+        if (!result) ++s_c_acquired;
         if (p_timeout) {
             uint64_t now=now_ns();
             *p_timeout=result ? 0 : (uint32_t)(now>=deadline ? 0 : (deadline-now)/1000);
@@ -114,7 +114,7 @@ static ABI int32_t sem_signal(uint32_t id,int32_t c_resources) {
     if (!p_sema) result=ERR(3);
     else if (c_resources<=0 || c_resources>p_sema->c_maximum-p_sema->c_resources) result=ERR(22);
     else {
-        p_sema->c_resources+=c_resources; ++s_signaled;
+        p_sema->c_resources+=c_resources; ++s_c_signaled;
         Waiter **pp_waiter=&p_sema->p_first;
         while (*pp_waiter) {
             Waiter *p_waiter=*pp_waiter;
@@ -154,7 +154,7 @@ static ABI int32_t sem_delete(uint32_t id) {
     Sema **pp_sema=&s_p_registry;
     while (*pp_sema && (*pp_sema)->id!=id) pp_sema=&(*pp_sema)->p_next;
     if (!*pp_sema) { runtime_exception_unlock(&s_lock); return ERR(3); }
-    Sema *p_sema=*pp_sema; *pp_sema=p_sema->p_next; p_sema->deleted=1; ++s_deleted;
+    Sema *p_sema=*pp_sema; *pp_sema=p_sema->p_next; p_sema->deleted=1; ++s_c_deleted;
     wake_all(p_sema,ERR(13));
     if (!p_sema->active) free(p_sema);
     runtime_exception_unlock(&s_lock);
@@ -356,7 +356,7 @@ uintptr_t runtime_sema_resolve(const char *sz_name) {
 void runtime_sema_report(void) {
     runtime_exception_lock(&s_lock);
     printf("Runtime: semaphores created=%zu, deleted=%zu, acquired=%zu, signals=%zu, timeouts=%zu\n",
-           s_created,s_deleted,s_acquired,s_signaled,s_timed_out);
+           s_c_created,s_c_deleted,s_c_acquired,s_c_signaled,s_c_timed_out);
     runtime_exception_unlock(&s_lock);
 }
 #else

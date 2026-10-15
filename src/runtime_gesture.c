@@ -16,7 +16,7 @@ typedef struct { int32_t pad_handle, report_count; const uint8_t *reports; } Tou
 
 static pthread_mutex_t s_lock=PTHREAD_MUTEX_INITIALIZER;
 static int s_opened[GESTURE_HANDLES];
-static uint64_t s_unrecognized_touches;
+static uint64_t s_c_unrecognized_touches;
 
 static int valid(int32_t h_handle) {
     pthread_mutex_lock(&s_lock);
@@ -44,9 +44,9 @@ static ABI int32_t primitive_update(int32_t h_handle,const TouchPadData *p_data)
     if (!valid(h_handle) || !p_data || (p_data->report_count>0 && !p_data->reports)) return GESTURE_INVALID_ARGUMENT;
     for (int32_t i=0;i<p_data->report_count;++i)
         if (p_data->reports[(size_t)i*PAD_DATA_SIZE+PAD_TOUCH_COUNT]) {
-            if (!__atomic_fetch_add(&s_unrecognized_touches,1,__ATOMIC_RELAXED)) {
+            if (!__atomic_fetch_add(&s_c_unrecognized_touches,1,__ATOMIC_RELAXED)) {
                 puts("Runtime: SystemGesture: the touch pad is touched, but no gesture is recognized yet");
-                runtime_calls_hle_stub("sceSystemGestureUpdatePrimitiveTouchRecognizer touch",&s_unrecognized_touches);
+                runtime_calls_hle_stub("sceSystemGestureUpdatePrimitiveTouchRecognizer touch",&s_c_unrecognized_touches);
             }
             break;
         }

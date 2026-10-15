@@ -28,7 +28,7 @@ typedef struct Flag {
 static pthread_mutex_t s_lock=PTHREAD_MUTEX_INITIALIZER;
 static Flag *s_p_registry;
 static uint64_t s_next_id=1;
-static size_t s_created, s_deleted, s_waits, s_timed_out;
+static size_t s_c_created, s_c_deleted, s_c_waits, s_c_timed_out;
 /* Some titles create event flags dozens of times a second: past these, creations are counted. */
 enum { LISTED_CREATIONS=8 };
 static int trace_eventflag(void) { static int s_is_enabled=-1; if (s_is_enabled<0) s_is_enabled=getenv("PS_TRACE_EVENTFLAG")!=NULL; return s_is_enabled; }
@@ -61,7 +61,7 @@ static ABI int32_t flag_create(uint64_t *p_out,const char *sz_name,uint32_t attr
     p_flag->id=s_next_id++; p_flag->attr=attr; p_flag->pattern=pattern;
     uint64_t id=p_flag->id;
     p_flag->p_next=s_p_registry; s_p_registry=p_flag; *p_out=id;
-    const size_t c_created=++s_created, c_deleted=s_deleted;
+    const size_t c_created=++s_c_created, c_deleted=s_c_deleted;
     runtime_exception_unlock(&s_lock);
     if (c_created<=LISTED_CREATIONS || trace_eventflag())
         printf("Runtime: event flag id=%llu '%s', attr=%#x, pattern=%#llx\n",
@@ -98,9 +98,9 @@ static int32_t wait_flag(uint64_t id,uint64_t bits,uint32_t mode,uint64_t *p_res
     if (!p_flag) status=ERR(3);
     else if (!bits || !valid_mode(mode)) status=ERR(22);
     else if (!(p_flag->attr&ATTR_MULTI) && p_flag->waiters) status=ERR(1);
-    else if (take(p_flag,bits,mode,p_result)) ++s_waits;
+    else if (take(p_flag,bits,mode,p_result)) ++s_c_waits;
     else if (!block) { status=ERR(16); if (p_result) *p_result=p_flag->pattern; }
-    else if (p_timeout && !*p_timeout) { status=ERR(60); if (p_result) *p_result=p_flag->pattern; ++s_timed_out; }
+    else if (p_timeout && !*p_timeout) { status=ERR(60); if (p_result) *p_result=p_flag->pattern; ++s_c_timed_out; }
     else {
         ++p_flag->waiters;
         const uint64_t cancels=p_flag->cancels, wait_start=runtime_wait_clock();
@@ -109,11 +109,11 @@ static int32_t wait_flag(uint64_t id,uint64_t bits,uint32_t mode,uint64_t *p_res
         for (;;) {
             if (p_flag->deleted) { status=ERR(13); break; }
             if (p_flag->cancels!=cancels) { status=ERR(85); if (p_result) *p_result=p_flag->pattern; break; }
-            if (take(p_flag,bits,mode,p_result)) { ++s_waits; break; }
+            if (take(p_flag,bits,mode,p_result)) { ++s_c_waits; break; }
             int e=runtime_exception_wait(&p_flag->changed,&s_lock,p_timeout ? &end : NULL);
             if (e==ETIMEDOUT) {
-                if (take(p_flag,bits,mode,p_result)) { ++s_waits; break; }
-                status=ERR(60); if (p_result) *p_result=p_flag->pattern; ++s_timed_out;
+                if (take(p_flag,bits,mode,p_result)) { ++s_c_waits; break; }
+                status=ERR(60); if (p_result) *p_result=p_flag->pattern; ++s_c_timed_out;
                 break;
             }
             host_check(e);
@@ -165,7 +165,7 @@ static ABI int32_t flag_delete(uint64_t id) {
     Flag **pp_flag=&s_p_registry;
     while (*pp_flag && (*pp_flag)->id!=id) pp_flag=&(*pp_flag)->p_next;
     if (!*pp_flag) { runtime_exception_unlock(&s_lock); return ERR(3); }
-    Flag *p_flag=*pp_flag; *pp_flag=p_flag->p_next; p_flag->deleted=1; ++s_deleted;
+    Flag *p_flag=*pp_flag; *pp_flag=p_flag->p_next; p_flag->deleted=1; ++s_c_deleted;
     if (p_flag->waiters) host_check(pthread_cond_broadcast(&p_flag->changed));
     else { host_check(pthread_cond_destroy(&p_flag->changed)); free(p_flag); }
     runtime_exception_unlock(&s_lock);
@@ -180,13 +180,13 @@ static const RuntimeExport s_exports[]={
 uintptr_t runtime_eventflag_resolve(const char *sz_name) { return RUNTIME_LOOKUP(s_exports,sz_name); }
 void runtime_eventflag_report(void) {
     runtime_exception_lock(&s_lock);
-    printf("Runtime: event flag waits=%zu, timeouts=%zu\n",s_waits,s_timed_out);
+    printf("Runtime: event flag waits=%zu, timeouts=%zu\n",s_c_waits,s_c_timed_out);
     runtime_exception_unlock(&s_lock);
 }
 void runtime_eventflag_created_report(void) {
     char sz_line[96];
     const int used=snprintf(sz_line,sizeof(sz_line),"Runtime: event flags created=%zu, deleted=%zu\n",
-                            __atomic_load_n(&s_created,__ATOMIC_RELAXED),__atomic_load_n(&s_deleted,__ATOMIC_RELAXED));
+                            __atomic_load_n(&s_c_created,__ATOMIC_RELAXED),__atomic_load_n(&s_c_deleted,__ATOMIC_RELAXED));
     if (used>0 && write(1,sz_line,(size_t)used)<0) return;
 }
 #else

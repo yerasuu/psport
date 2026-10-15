@@ -85,7 +85,7 @@ static struct { int used; int32_t user; TitleId title; DirName dir; uint64_t c_b
 static Event s_events[SLOTS];
 static size_t s_c_events;
 static struct { char sz_dir[640]; uint64_t cb_memory; } s_memories[SLOTS];
-static size_t s_mounts_done, s_memory_writes;
+static size_t s_c_mounts_done, s_c_memory_writes;
 
 void runtime_savedata_configure(const char *sz_title) {
     if (sz_title && *sz_title) snprintf(s_sz_title_id,sizeof(s_sz_title_id),"%s",sz_title);
@@ -177,7 +177,7 @@ static int32_t mount(int32_t user, const char *sz_title, const DirName *p_dir, u
     memcpy(p_result->point.data,sz_point,strlen(sz_point)+1);
     p_result->status=exists ? 0 : 1; /* CREATED */
     runtime_file_mount(p_result->point.data,sz_host);
-    ++s_mounts_done;
+    ++s_c_mounts_done;
     pthread_mutex_unlock(&s_lock);
     printf("Runtime: save data '%s' mounted at %s (%s%s)\n",p_dir->data,p_result->point.data,
            exists ? "existing" : "created",(mode & MODE_RDONLY) ? ", read-only" : "");
@@ -421,7 +421,7 @@ static int32_t memory_io(uint32_t slot, void *p_buffer, uint64_t cb_buffer, int6
     if (p_file && !fseek(p_file,off_memory,SEEK_SET) &&
         (write ? fwrite(p_buffer,1,cb_buffer,p_file) : fread(p_buffer,1,cb_buffer,p_file))==cb_buffer) r=0;
     if (p_file) fclose(p_file);
-    if (!r && write) ++s_memory_writes;
+    if (!r && write) ++s_c_memory_writes;
     return r;
 }
 static int32_t memory_meta(uint32_t slot, const Param *p_param, const Icon *p_icon) {
@@ -653,7 +653,7 @@ int runtime_savedata_param(int32_t user, const char *sz_title, const char *sz_di
     read_param(sz_path,p_param);
     return 0;
 }
-void runtime_savedata_report(void) { printf("Runtime: save data mounts=%zu, memory writes=%zu\n",s_mounts_done,s_memory_writes); }
+void runtime_savedata_report(void) { printf("Runtime: save data mounts=%zu, memory writes=%zu\n",s_c_mounts_done,s_c_memory_writes); }
 #else
 void runtime_savedata_configure(const char *title) { (void)title; }
 uintptr_t runtime_savedata_resolve(const char *name) { (void)name; return 0; }

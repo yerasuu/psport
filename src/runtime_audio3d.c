@@ -79,8 +79,8 @@ typedef struct {
 static pthread_mutex_t s_lock=PTHREAD_MUTEX_INITIALIZER;
 static int s_is_initialized;
 static Port s_ports[PORTS];
-static size_t s_ports_opened, s_frames_advanced, s_frames_pushed, s_audio_out_buffers, s_objects_reserved, s_orphan_attributes;
-static size_t s_object_frames_placed, s_object_frames_passed;
+static size_t s_c_ports_opened, s_c_frames_advanced, s_c_frames_pushed, s_c_audio_out_buffers, s_c_objects_reserved, s_c_orphan_attributes;
+static size_t s_c_object_frames_placed, s_c_object_frames_passed;
 static unsigned s_ignored_attributes, s_ignored_port_attributes;
 
 static void queue_push(Queue *p_queue, Frame f) { p_queue->frames[(p_queue->head+p_queue->c_frames++)%MAX_DEPTH]=f; }
@@ -161,7 +161,7 @@ static void mix_object(float *p_out, uint32_t frames, Object *p_object) {
         for (uint32_t c=0;c<SPEAKERS;++c) p_out[i*SPEAKERS+c]+=s*(p_object->rendered[c]+(target[c]-p_object->rendered[c])*t);
     }
     memcpy(p_object->rendered,target,sizeof(target));
-    ++*(p_object->passthrough!=PASSTHROUGH_NONE ? &s_object_frames_passed : &s_object_frames_placed);
+    ++*(p_object->passthrough!=PASSTHROUGH_NONE ? &s_c_object_frames_passed : &s_c_object_frames_placed);
     free(f.pcm);
 }
 static void fold_to_stereo(float *p_pcm, uint32_t frames) {
@@ -184,7 +184,7 @@ static int32_t mix(Port *p_port) {
     }
     if (p_port->channels==2) fold_to_stereo(p_out,frames);
     queue_push(&p_port->mixed,(Frame){p_out,p_port->channels,1});
-    ++s_frames_advanced;
+    ++s_c_frames_advanced;
     return 0;
 }
 
@@ -221,7 +221,7 @@ static int32_t push_mixed(uint32_t id) {
     int32_t r=runtime_audio_output(h_handle,f.pcm);
     free(f.pcm);
     pthread_mutex_lock(&s_lock);
-    if (r>=0) ++s_frames_pushed;
+    if (r>=0) ++s_c_frames_pushed;
     return r<0 ? r : 0;
 }
 
@@ -296,7 +296,7 @@ static ABI int32_t audio3d_port_open(int32_t user, const OpenParameters *p_param
         uint32_t channels=runtime_audio_device_channels()>=6 ? SPEAKERS : 2;
         s_ports[slot]=(Port){.used=1,.parameters=effective,.output=-1,.channels=channels,.p_objects=p_objects};
         *p_id=(uint32_t)slot;
-        ++s_ports_opened;
+        ++s_c_ports_opened;
         printf("Runtime: Audio3d port %d opened (granularity %u, queue depth %u, buffer mode %u, %u objects, %u ch out)\n",
                slot,effective.granularity,effective.queue_depth,effective.buffer_mode,effective.max_objects,channels);
     }
@@ -373,7 +373,7 @@ static ABI int32_t audio3d_object_reserve(uint32_t id, uint32_t *p_object) {
         p_port->serial=(p_port->serial+1) & 0x3fffff;
         p_port->p_objects[i]=(Object){.id=(p_port->serial<<10) | (i+1),.gain=1.0f};
         *p_object=p_port->p_objects[i].id;
-        ++s_objects_reserved;
+        ++s_c_objects_reserved;
         r=0;
     }
     pthread_mutex_unlock(&s_lock);
@@ -434,7 +434,7 @@ static ABI int32_t audio3d_object_attribute(uint32_t id, uint32_t object, uint32
     pthread_mutex_lock(&s_lock);
     Port *p_port=port_of(id);
     Object *p_object=p_port ? object_of(p_port,object) : NULL;
-    s_orphan_attributes+=p_port && !p_object;
+    s_c_orphan_attributes+=p_port && !p_object;
     int32_t r=!p_port ? ERR_INVALID_PORT : !p_object ? 0 : p_object->unreserved ? ERR_INVALID_OBJECT
               : !cb_value && attribute!=ATTRIBUTE_RESET_STATE ? ERR_INVALID_PARAMETER : set_attribute(p_port,p_object,attribute,p_value,cb_value);
     pthread_mutex_unlock(&s_lock);
@@ -446,7 +446,7 @@ static ABI int32_t audio3d_object_attributes(uint32_t id, uint32_t object, uint6
     Port *p_port=port_of(id);
     Object *p_object=p_port ? object_of(p_port,object) : NULL;
     int32_t r=!p_port ? ERR_INVALID_PORT : !c_attributes || !p_attributes ? ERR_INVALID_PARAMETER : !p_object ? 0 : p_object->unreserved ? ERR_INVALID_OBJECT : 0;
-    s_orphan_attributes+=!r && !p_object;
+    s_c_orphan_attributes+=!r && !p_object;
     for (uint64_t i=0;!r && p_object && i<c_attributes;++i)
         if (p_attributes[i].id==ATTRIBUTE_RESET_STATE) { set_attribute(p_port,p_object,ATTRIBUTE_RESET_STATE,NULL,0); break; }
     for (uint64_t i=0;!r && p_object && i<c_attributes;++i) {
@@ -536,7 +536,7 @@ static ABI int32_t audio3d_audio_out_output(int32_t h_handle, const void *p_data
     if (!r) {
         memcpy(p_copy,p_data,p_audio_out_port->cb_frame);
         queue_push(&p_audio_out_port->pending,(Frame){p_copy,0,p_audio_out_port->is_float});
-        ++s_audio_out_buffers;
+        ++s_c_audio_out_buffers;
         r=(int32_t)p_audio_out_port->samples;
     }
     pthread_mutex_unlock(&s_lock);
@@ -565,6 +565,6 @@ uintptr_t runtime_audio3d_resolve(const char *sz_name) { return RUNTIME_LOOKUP(s
 void runtime_audio3d_report(void) {
     printf("Runtime: Audio3d ports opened=%zu, frames advanced=%zu, pushed=%zu, objects reserved=%zu, object frames placed=%zu, "
            "passed through=%zu, AudioOut buffers=%zu, attributes on unreserved objects=%zu\n",
-           s_ports_opened,s_frames_advanced,s_frames_pushed,s_objects_reserved,s_object_frames_placed,s_object_frames_passed,
-           s_audio_out_buffers,s_orphan_attributes);
+           s_c_ports_opened,s_c_frames_advanced,s_c_frames_pushed,s_c_objects_reserved,s_c_object_frames_placed,s_c_object_frames_passed,
+           s_c_audio_out_buffers,s_c_orphan_attributes);
 }

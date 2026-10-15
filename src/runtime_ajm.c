@@ -87,7 +87,7 @@ typedef struct { int used, context, is_canceled; } Batch;
 static pthread_mutex_t s_lock=PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
 static Context *s_contexts[MAX_CONTEXTS+1];
 static Batch s_batches[MAX_BATCHES];
-static size_t s_jobs_run, s_frames_decoded, s_mp3_frames, s_aac_frames, s_batches_run, s_codec_errors;
+static size_t s_c_jobs_run, s_c_frames_decoded, s_c_mp3_frames, s_c_aac_frames, s_c_batches_run, s_c_codec_errors;
 
 /* PS_AUDIO_TRACE=1: instance configurations and jobs that return a non-zero result. */
 static int s_c_trace_left=-1;
@@ -226,7 +226,7 @@ static uint32_t at9_frame(Instance *p_instance, const unsigned char **pp_input, 
     int e=Atrac9Decode(p_instance->p_handle,*pp_input,(int)available,pcm,&used);
     if (e) { *p_internal=e; return RESULT_CODEC_ERROR|RESULT_FATAL; }
     *pp_input+=used; *p_input_size-=(uint64_t)used; p_instance->superframe_remain-=(uint32_t)used;
-    ++s_frames_decoded;
+    ++s_c_frames_decoded;
     uint32_t skip, samples=frame_window(p_instance,p_out,(uint32_t)frame,(uint32_t)channels,&skip);
     /* Convert (and optionally de-interleave) into the requested encoding. */
     unsigned char converted[256*8*4];
@@ -312,7 +312,7 @@ static uint32_t mpeg_frame(Instance *p_instance, const unsigned char **pp_input,
     if (e==1) return RESULT_PARTIAL_INPUT;
     if (e) { *p_internal=e; return RESULT_CODEC_ERROR|RESULT_FATAL; }
     *pp_input+=frame.consumed; *p_input_size-=frame.consumed;
-    ++*(p_instance->codec==CODEC_MP3 ? &s_mp3_frames : &s_aac_frames);
+    ++*(p_instance->codec==CODEC_MP3 ? &s_c_mp3_frames : &s_c_aac_frames);
     if (p_instance->codec==CODEC_MP3 && !(p_instance->codec_flags & MP3_IGNORE_OFL) && (frame.encoder_delay || frame.total_samples)) {
         p_instance->gapless_init=(SidebandGapless){frame.total_samples,(uint16_t)frame.encoder_delay,0};
         p_instance->gapless=p_instance->gapless_init;
@@ -460,7 +460,7 @@ static void write_codec_info(const Instance *p_instance, unsigned char *p_side, 
     }
 }
 static void run_job(Context *p_ctx, uint32_t id, Job *p_job) {
-    ++s_jobs_run;
+    ++s_c_jobs_run;
     unsigned char *p_side=p_job->output_control.size ? p_job->output_control.address : NULL;
     unsigned char *p_side_end=p_side ? p_side+p_job->output_control.size : NULL;
     SidebandResult *p_result=NULL;
@@ -474,7 +474,7 @@ static void run_job(Context *p_ctx, uint32_t id, Job *p_job) {
     Progress p={0};
     flags_result|=decode_input(p_instance,p_job,&out,&p);
     uint64_t written=p.out_start-output_room(&out);
-    if (flags_result & RESULT_CODEC_ERROR) ++s_codec_errors;
+    if (flags_result & RESULT_CODEC_ERROR) ++s_c_codec_errors;
     if (flags_result && ajm_trace())
         printf("Audio trace: Ajm job instance %u flags %#llx -> result %#x internal %d; input %llu/%llu used, output %llu/%llu written, frames %u\n",
                id,(unsigned long long)f,flags_result,p.internal,(unsigned long long)(p.in_start-p.in_left),(unsigned long long)p.in_start,
@@ -599,7 +599,7 @@ static ABI int32_t ajm_batch_start(uint32_t id, unsigned char *p_buffer, uint32_
         run_job(p_context,payload(chunk.word),&job);
     }
     s_batches[slot]=(Batch){1,(int)id,0};
-    ++s_batches_run;
+    ++s_c_batches_run;
     *p_out=(uint32_t)slot+1;
     pthread_mutex_unlock(&s_lock);
     return 0;
@@ -634,5 +634,5 @@ static const RuntimeExport s_exports[]={
 uintptr_t runtime_ajm_resolve(const char *sz_name) { return RUNTIME_LOOKUP(s_exports,sz_name); }
 void runtime_ajm_report(void) {
     printf("Runtime: Ajm batches=%zu, jobs=%zu, frames decoded: ATRAC9=%zu, MP3=%zu, AAC=%zu, jobs with a codec error=%zu\n",
-           s_batches_run,s_jobs_run,s_frames_decoded,s_mp3_frames,s_aac_frames,s_codec_errors);
+           s_c_batches_run,s_c_jobs_run,s_c_frames_decoded,s_c_mp3_frames,s_c_aac_frames,s_c_codec_errors);
 }

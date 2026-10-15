@@ -22,12 +22,12 @@
 #define NOT_FOUND ((int32_t)0x80d90005)
 #define MOUNT_FULL ((int32_t)0x80d90006)
 #define DRM_NO_ENTITLEMENT ((int32_t)0x80d90007)
-static unsigned s_refs, s_initialized, s_configured;
+static unsigned s_c_refs, s_c_initializations, s_configured;
 static char s_sz_title_id[16]="UNKNOWN";
 static uint32_t s_parameters[5];
-static unsigned s_queries, s_lists;
+static unsigned s_c_queries, s_c_lists;
 void runtime_content_configure(const uint32_t values[5]) {
-    if (s_refs || s_initialized || (values[0]!=1 && values[0]!=3)) {
+    if (s_c_refs || s_c_initializations || (values[0]!=1 && values[0]!=3)) {
         fputs("ERROR: invalid or late content profile\n",stderr); exit(1);
     }
     memcpy(s_parameters,values,sizeof(s_parameters)); s_configured=1;
@@ -41,43 +41,43 @@ static void require_provider(void) {
 /* System modules: every library this eboot imports is provided by the host
  * runtime, so loading one only tracks a reference count. AppContent (0xb4)
  * additionally requires the configured content profile. */
-static unsigned s_module_refs[0x10000];
+static unsigned s_c_module_refs[0x10000];
 static ABI int32_t module_load(uint16_t id) {
     if (!id) return INVALID_ID;
     if (id==0xb4) require_provider();
-    if (s_module_refs[id]==UINT32_MAX) { fputs("STOP: module reference overflow\n",stderr); runtime_stop(21); }
-    ++s_module_refs[id];
-    if (id==0xb4) { s_refs=s_module_refs[id]; printf("Runtime: AppContent host provider loaded; references=%u\n",s_refs); }
+    if (s_c_module_refs[id]==UINT32_MAX) { fputs("STOP: module reference overflow\n",stderr); runtime_stop(21); }
+    ++s_c_module_refs[id];
+    if (id==0xb4) { s_c_refs=s_c_module_refs[id]; printf("Runtime: AppContent host provider loaded; references=%u\n",s_c_refs); }
     else printf("Runtime: system module 0x%x loaded (host implementation)\n",id);
     return 0;
 }
 static ABI int32_t module_loaded(uint16_t id) {
     if (!id) return INVALID_ID;
-    return s_module_refs[id] ? 0 : NOT_LOADED;
+    return s_c_module_refs[id] ? 0 : NOT_LOADED;
 }
 static ABI int32_t module_unload(uint16_t id) {
     int32_t result=module_loaded(id);
     if (result) return result;
-    --s_module_refs[id];
-    if (id==0xb4) { s_refs=s_module_refs[id]; if (!s_refs) s_initialized=0; }
+    --s_c_module_refs[id];
+    if (id==0xb4) { s_c_refs=s_c_module_refs[id]; if (!s_c_refs) s_c_initializations=0; }
     return 0;
 }
 /* Internal ids (bit 31 set) name what the SDK's own libraries load; those are the host's too, so
  * loading one counts a reference and reports the start result of a module that has none: 0. */
-static unsigned s_internal_refs[0x10000];
+static unsigned s_c_internal_refs[0x10000];
 static ABI int32_t module_load_internal(uint32_t id,int32_t argc,const void *p_argv,uint64_t reserved,int32_t *p_result) {
     (void)argc; (void)p_argv;
     const uint32_t i_module=id&0x7fffffff;
     if (!i_module || i_module>=0x10000 || reserved) return INVALID_ID;
-    if (s_internal_refs[i_module]==UINT32_MAX) { fputs("STOP: module reference overflow\n",stderr); runtime_stop(21); }
-    ++s_internal_refs[i_module];
+    if (s_c_internal_refs[i_module]==UINT32_MAX) { fputs("STOP: module reference overflow\n",stderr); runtime_stop(21); }
+    ++s_c_internal_refs[i_module];
     if (p_result) *p_result=0;
     printf("Runtime: internal system module 0x%x loaded (host implementation)\n",id);
     return 0;
 }
 static void require_loaded(void) {
     require_provider();
-    if (!s_refs) { fputs("STOP: AppContent called before module load\n",stderr); runtime_stop(21); }
+    if (!s_c_refs) { fputs("STOP: AppContent called before module load\n",stderr); runtime_stop(21); }
 }
 static ABI int32_t content_init(const unsigned char *p_init,unsigned char *p_boot) {
     require_loaded();
@@ -87,18 +87,18 @@ static ABI int32_t content_init(const unsigned char *p_init,unsigned char *p_boo
     /* Every module of the process shares the library, and each initializes it: Unity's engine and
      * its libil2cpp both do, and the second one gives up on temporary data if refused. */
     memset(p_boot,0,40);
-    if (s_initialized++) { printf("Runtime: AppContent initialized again (%u calls)\n",s_initialized); return 0; }
+    if (s_c_initializations++) { printf("Runtime: AppContent initialized again (%u calls)\n",s_c_initializations); return 0; }
     puts("Runtime: AppContent initialized; offline base-game profile, no mounted add-ons");
     return 0;
 }
 static void require_initialized(void) {
     require_loaded();
-    if (!s_initialized) { fputs("STOP: AppContent query before initialization\n",stderr); runtime_stop(21); }
+    if (!s_c_initializations) { fputs("STOP: AppContent query before initialization\n",stderr); runtime_stop(21); }
 }
 static ABI int32_t param_int(uint32_t id,int32_t *p_out) {
     require_initialized();
     if (id>4 || !p_out) return PARAMETER;
-    memcpy(p_out,&s_parameters[id],4); ++s_queries;
+    memcpy(p_out,&s_parameters[id],4); ++s_c_queries;
     printf("Runtime: AppContent parameter %u = %d\n",id,*p_out);
     return 0;
 }
@@ -143,7 +143,7 @@ static ABI int32_t addon_list(uint32_t service,void *p_list,uint32_t c_capacity,
     if (p_titles) closedir(p_titles);
     if (p_hits) *p_hits=c_found;
     if (c_found) printf("Runtime: AppContent add-ons reported installed (%s): %u\n",sz_root,(unsigned)c_found);
-    ++s_lists; return 0;
+    ++s_c_lists; return 0;
 }
 /* SceNpUnifiedEntitlementLabel: 16 characters, NUL, padding. Finds the add-on's folder under any
  * title of <user>/addcont, the folders addon_list reports. */
@@ -229,7 +229,7 @@ static ABI int32_t download_space(const char *sz_mount,uint64_t *p_kb) {
 /* Temporary data is /temp0, backed by <user>/temp/<title id> so titles sharing a user folder don't
  * see each other's files. It survives the run until the title formats it. */
 #define TEMP_MOUNT "/temp0"
-static unsigned s_temp_mounted;
+static unsigned s_c_temp_mounts;
 static void temp_folder(char *sz_out,size_t cb_out) { snprintf(sz_out,cb_out,"%s/temp/%s",runtime_file_user_dir(),s_sz_title_id); }
 static int remove_entry(const char *sz_path,const struct stat *p_stat,int type,struct FTW *p_ftw) {
     (void)p_stat; (void)type;
@@ -257,21 +257,21 @@ static ABI int32_t temp_mount(uint32_t option,char *sz_mount) {
         return PARAMETER;
     }
     memset(sz_mount,0,16); memcpy(sz_mount,TEMP_MOUNT,sizeof(TEMP_MOUNT));
-    printf("Runtime: AppContent temporary data mounted at %s -> %s%s (mounts=%u)\n",TEMP_MOUNT,sz_host,option ? ", formatted" : "",++s_temp_mounted);
+    printf("Runtime: AppContent temporary data mounted at %s -> %s%s (mounts=%u)\n",TEMP_MOUNT,sz_host,option ? ", formatted" : "",++s_c_temp_mounts);
     return 0;
 }
 static ABI int32_t temp_unmount(const char *sz_mount) {
     require_initialized();
     if (!temp_point(sz_mount)) return PARAMETER;
-    if (!s_temp_mounted) return NOT_MOUNTED;
-    if (!--s_temp_mounted) runtime_file_unmount(TEMP_MOUNT);
-    printf("Runtime: AppContent temporary data unmounted (mounts=%u)\n",s_temp_mounted);
+    if (!s_c_temp_mounts) return NOT_MOUNTED;
+    if (!--s_c_temp_mounts) runtime_file_unmount(TEMP_MOUNT);
+    printf("Runtime: AppContent temporary data unmounted (mounts=%u)\n",s_c_temp_mounts);
     return 0;
 }
 static ABI int32_t temp_format_mounted(const char *sz_mount) {
     require_initialized();
     if (!temp_point(sz_mount)) return PARAMETER;
-    if (!s_temp_mounted) return NOT_MOUNTED;
+    if (!s_c_temp_mounts) return NOT_MOUNTED;
     if (temp_format()) { fprintf(stderr,"Runtime: AppContent temporary data format failed: %s\n",strerror(errno)); return PARAMETER; }
     puts("Runtime: AppContent temporary data formatted");
     return 0;
@@ -279,7 +279,7 @@ static ABI int32_t temp_format_mounted(const char *sz_mount) {
 static ABI int32_t temp_space(const char *sz_mount,uint64_t *p_kb) {
     require_initialized();
     if (!temp_point(sz_mount) || !p_kb) return PARAMETER;
-    if (!s_temp_mounted) return NOT_MOUNTED;
+    if (!s_c_temp_mounts) return NOT_MOUNTED;
     char sz_host[4096];
     struct statvfs fs;
     temp_folder(sz_host,sizeof(sz_host));
@@ -300,5 +300,5 @@ static const RuntimeExport s_exports[]={
 };
 uintptr_t runtime_content_resolve(const char *sz_name) { return RUNTIME_LOOKUP(s_exports,sz_name); }
 void runtime_content_report(void) {
-    printf("Runtime: AppContent references=%u, initialized=%u, parameter queries=%u, list queries=%u\n",s_refs,s_initialized,s_queries,s_lists);
+    printf("Runtime: AppContent references=%u, initialized=%u, parameter queries=%u, list queries=%u\n",s_c_refs,s_c_initializations,s_c_queries,s_c_lists);
 }

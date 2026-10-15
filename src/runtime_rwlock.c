@@ -25,7 +25,7 @@ enum { RWLOCK_NORMAL=1, RWLOCK_PREFER_READER=2 };
 typedef struct { int32_t type; } RwlockAttr;
 static pthread_mutex_t s_registry_lock = PTHREAD_MUTEX_INITIALIZER;
 static Rwlock *s_p_registry;
-static size_t s_created, s_reads, s_writes, s_unlocks;
+static size_t s_c_created, s_c_reads, s_c_writes, s_c_unlocks;
 static int32_t error(int e) {
     if (!e) return 0;
     unsigned code;
@@ -57,7 +57,7 @@ static int create_locked(Rwlock **pp_out, int32_t type) {
     if (!e) e=pthread_rwlock_init(&p_rwlock->native,&native_attr);
     pthread_rwlockattr_destroy(&native_attr);
     if (e) { free(p_rwlock); return e; }
-    p_rwlock->p_next=s_p_registry; s_p_registry=p_rwlock; *pp_out=p_rwlock; ++s_created; return 0;
+    p_rwlock->p_next=s_p_registry; s_p_registry=p_rwlock; *pp_out=p_rwlock; ++s_c_created; return 0;
 }
 static ABI int32_t attr_init(RwlockAttr **pp_out) {
     if (!pp_out) return error(EINVAL);
@@ -118,7 +118,7 @@ static int32_t acquire(Rwlock **pp_handle, enum Operation op, const GuestTime *p
     if (p_holder && p_holder->readers==UINT_MAX) { pthread_mutex_unlock(&s_registry_lock); return error(EAGAIN); }
     /* libthr lets a thread already reading take the lock again past waiting writers, so only its
        first read holds the native lock; otherwise writer preference would deadlock it. */
-    if (p_holder && p_holder->readers) { ++p_holder->readers; ++s_reads; pthread_mutex_unlock(&s_registry_lock); return 0; }
+    if (p_holder && p_holder->readers) { ++p_holder->readers; ++s_c_reads; pthread_mutex_unlock(&s_registry_lock); return 0; }
     if (!p_holder) {
         p_holder=calloc(1,sizeof(*p_holder));
         if (!p_holder) { pthread_mutex_unlock(&s_registry_lock); return error(ENOMEM); }
@@ -139,8 +139,8 @@ static int32_t acquire(Rwlock **pp_handle, enum Operation op, const GuestTime *p
     pthread_mutex_lock(&s_registry_lock);
     --p_rwlock->inflight; --p_holder->pending;
     if (!e) {
-        if (writer) { p_holder->writer=1; ++s_writes; }
-        else { ++p_holder->readers; ++s_reads; }
+        if (writer) { p_holder->writer=1; ++s_c_writes; }
+        else { ++p_holder->readers; ++s_c_reads; }
     }
     prune_locked(p_rwlock,p_holder);
     pthread_mutex_unlock(&s_registry_lock); return error(e);
@@ -160,7 +160,7 @@ static ABI int32_t rw_unlock(Rwlock **pp_handle) {
     while (p_holder && !pthread_equal(p_holder->thread,pthread_self())) p_holder=p_holder->p_next;
     if (!p_holder || (!p_holder->readers && !p_holder->writer)) { pthread_mutex_unlock(&s_registry_lock); return error(EPERM); }
     int e=p_holder->writer || p_holder->readers==1 ? pthread_rwlock_unlock(&p_rwlock->native) : 0;
-    if (!e) { if (p_holder->writer) p_holder->writer=0; else --p_holder->readers; ++s_unlocks; }
+    if (!e) { if (p_holder->writer) p_holder->writer=0; else --p_holder->readers; ++s_c_unlocks; }
     prune_locked(p_rwlock,p_holder);
     pthread_mutex_unlock(&s_registry_lock); return error(e);
 }
@@ -217,7 +217,7 @@ uintptr_t runtime_rwlock_resolve(const char *sz_name) {
 }
 void runtime_rwlock_report(void) {
     pthread_mutex_lock(&s_registry_lock);
-    printf("Runtime: rwlocks created=%zu, reads=%zu, writes=%zu, unlocks=%zu\n",s_created,s_reads,s_writes,s_unlocks);
+    printf("Runtime: rwlocks created=%zu, reads=%zu, writes=%zu, unlocks=%zu\n",s_c_created,s_c_reads,s_c_writes,s_c_unlocks);
     pthread_mutex_unlock(&s_registry_lock);
 }
 #else

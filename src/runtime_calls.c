@@ -13,7 +13,7 @@
 
 enum { FAILURE_SLOTS = 4096, HLE_STUB_SLOTS = 1024 };
 static const char (*s_p_import_names)[128];
-static uint64_t s_imports;
+static uint64_t s_c_imports;
 static uint64_t *s_p_unimplemented_calls, *s_p_stub_calls;
 static struct { uint64_t key, c_failures; } s_failures[FAILURE_SLOTS];
 static struct { const char *sz_function; const uint64_t *p_count; } s_hle_stubs[HLE_STUB_SLOTS];
@@ -24,7 +24,7 @@ static Entry *s_p_entries;
 
 void runtime_calls_configure(const char (*p_names)[128], uint64_t c_names) {
     s_p_import_names = p_names;
-    s_imports = c_names;
+    s_c_imports = c_names;
     s_p_unimplemented_calls = calloc(c_names ? c_names : 1, sizeof(*s_p_unimplemented_calls));
     s_p_stub_calls = calloc(c_names ? c_names : 1, sizeof(*s_p_stub_calls));
     s_p_entries = calloc(2 * c_names + FAILURE_SLOTS + HLE_STUB_SLOTS, sizeof(*s_p_entries));
@@ -48,11 +48,11 @@ static int list_arguments(char *sz_out, size_t cb_out, const uintptr_t *p_argume
 }
 
 void runtime_calls_unimplemented(uint32_t id) {
-    if (id < s_imports) __atomic_fetch_add(&s_p_unimplemented_calls[id], 1, __ATOMIC_RELAXED);
+    if (id < s_c_imports) __atomic_fetch_add(&s_p_unimplemented_calls[id], 1, __ATOMIC_RELAXED);
 }
 
 ABI int64_t runtime_calls_stub(uint32_t id, uintptr_t a0, uintptr_t a1, uintptr_t a2, uintptr_t a3, uintptr_t a4) {
-    if (id >= s_imports || __atomic_fetch_add(&s_p_stub_calls[id], 1, __ATOMIC_RELAXED)) return 0;
+    if (id >= s_c_imports || __atomic_fetch_add(&s_p_stub_calls[id], 1, __ATOMIC_RELAXED)) return 0;
     const uintptr_t arguments[5] = {a0, a1, a2, a3, a4};
     char sz_line[512];
     int used = snprintf(sz_line, sizeof(sz_line), "Calls: stub %s (%s) returns 0 without doing anything; arguments ",
@@ -73,7 +73,7 @@ ABI int64_t runtime_calls_failed(uint32_t id, const uintptr_t *p_arguments, int6
     if (kind == 2 || kind == 3) code = (uint32_t)*runtime_errno() & 0x7fffffffu;
     else if (low >> 28 == 8 && (kind == 1 || result < 0)) code = low;
     else return result;
-    if (id >= s_imports) return result;
+    if (id >= s_c_imports) return result;
     const uint64_t key = (uint64_t)(id + 1) << 32 | code;
     for (uint64_t i = 0, slot = key * 0x9E3779B97F4A7C15ull >> 52; i < FAILURE_SLOTS; ++i) {
         uint64_t *p_key = &s_failures[(slot + i) % FAILURE_SLOTS].key, expected = 0;
@@ -122,7 +122,7 @@ void runtime_calls_report(void) {
     static int s_has_reported;
     if (!s_p_entries || __atomic_exchange_n(&s_has_reported, 1, __ATOMIC_ACQ_REL)) return;
     size_t c_path = 0, totals[4] = {0};
-    for (uint64_t id = 0; id < s_imports; ++id) {
+    for (uint64_t id = 0; id < s_c_imports; ++id) {
         const uint64_t unimplemented = __atomic_load_n(&s_p_unimplemented_calls[id], __ATOMIC_RELAXED);
         const uint64_t stub = __atomic_load_n(&s_p_stub_calls[id], __ATOMIC_RELAXED);
         if (unimplemented) s_p_entries[c_path++] = (Entry){unimplemented, (uint32_t)id, 0, 0, NULL};
