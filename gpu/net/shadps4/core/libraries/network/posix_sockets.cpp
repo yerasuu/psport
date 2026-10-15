@@ -220,7 +220,7 @@ static int socket_is_ready(int sock, bool is_read = true) {
 }
 
 int PosixSocket::SendMessage(const OrbisNetMsghdr* msg, int flags) {
-    std::scoped_lock lock{m_mutex};
+    std::scoped_lock lock{m_send_mutex};
 
 #ifdef _WIN32
     int totalSent = 0;
@@ -288,7 +288,7 @@ int PosixSocket::SendMessage(const OrbisNetMsghdr* msg, int flags) {
 
 int PosixSocket::SendPacket(const void* msg, u32 len, int flags, const OrbisNetSockaddr* to,
                             u32 tolen) {
-    std::scoped_lock lock{m_mutex};
+    std::scoped_lock lock{m_send_mutex};
     int res = 0;
 #ifdef _WIN32
     if (flags & ORBIS_NET_MSG_DONTWAIT) {
@@ -406,7 +406,6 @@ int PosixSocket::ReceivePacket(void* buf, u32 len, int flags, OrbisNetSockaddr* 
 }
 
 SocketPtr PosixSocket::Accept(OrbisNetSockaddr* addr, u32* addrlen) {
-    std::scoped_lock lock{m_mutex};
     sockaddr addr2;
     socklen_t len = sizeof(addr2);
     net_socket new_socket = ::accept(sock, &addr2, &len);
@@ -426,7 +425,6 @@ SocketPtr PosixSocket::Accept(OrbisNetSockaddr* addr, u32* addrlen) {
 }
 
 int PosixSocket::Connect(const OrbisNetSockaddr* addr, u32 namelen) {
-    std::scoped_lock lock{m_mutex};
     sockaddr addr2;
     convertOrbisNetSockaddrToPosix(addr, &addr2);
     int result = ::connect(sock, &addr2, sizeof(sockaddr_in));

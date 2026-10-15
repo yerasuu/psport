@@ -184,7 +184,7 @@ int UnixSocket::Listen(int backlog) {
 }
 
 int UnixSocket::SendMessage(const OrbisNetMsghdr* msg, int flags) {
-    std::scoped_lock lock{m_mutex};
+    std::scoped_lock lock{m_send_mutex};
 #ifdef _WIN32
     DWORD bytesSent = 0;
     LPFN_WSASENDMSG wsasendmsg = nullptr;
@@ -211,7 +211,7 @@ int UnixSocket::SendMessage(const OrbisNetMsghdr* msg, int flags) {
 
 int UnixSocket::SendPacket(const void* msg, u32 len, int flags, const OrbisNetSockaddr* to,
                            u32 tolen) {
-    std::scoped_lock lock{m_mutex};
+    std::scoped_lock lock{m_send_mutex};
     LOG_ERROR(Lib_Net, "called");
     if (to != nullptr) {
         sockaddr_un addr;
@@ -263,7 +263,6 @@ int UnixSocket::ReceivePacket(void* buf, u32 len, int flags, OrbisNetSockaddr* f
 }
 
 SocketPtr UnixSocket::Accept(OrbisNetSockaddr* addr, u32* addrlen) {
-    std::scoped_lock lock{m_mutex};
     sockaddr_un addr2;
     socklen_t len = sizeof(addr2);
     net_socket new_socket = ::accept(sock, (sockaddr*)&addr2, &len);
@@ -283,7 +282,6 @@ SocketPtr UnixSocket::Accept(OrbisNetSockaddr* addr, u32* addrlen) {
 }
 
 int UnixSocket::Connect(const OrbisNetSockaddr* addr, u32 namelen) {
-    std::scoped_lock lock{m_mutex};
     sockaddr_un addr2;
     convertOrbisNetSockaddrToUnix(addr, &addr2);
     int result = 0;
