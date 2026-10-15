@@ -200,7 +200,10 @@ export PS_PREUPLOAD=${PS_PREUPLOAD:-1}
 # The game's GPU (vendor ID and name), for the choices below that depend on it.
 gpu_vendor= gpu_name=
 if [[ -z ${PS_PC_MODEL:-} || ( ${PS_AUTO_NOHIZ:-1} != 0 && -z ${RADV_DEBUG:-} ) ]]; then
-    IFS=$'\t' read -r gpu_vendor gpu_name < <("$caps" --device 2> /dev/null) || true
+    # A command substitution, not < <(...): the shell waits for it here, whereas a process
+    # substitution's child outlives the exec below and stays a zombie of the game for its whole run.
+    gpu_device=$("$caps" --device 2> /dev/null) || true
+    IFS=$'\t' read -r gpu_vendor gpu_name <<< "$gpu_device" || true
 fi
 # Memory model left to the port: the new one on AMD (0x1002), the 0.3 one elsewhere (NVIDIA's
 # path through the memory module is still being measured with testers).
