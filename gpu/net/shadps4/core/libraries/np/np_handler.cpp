@@ -1091,9 +1091,10 @@ s32 NpHandler::RecordScore(s32 user_id, s32 service_label, u32 boardId, s32 pcId
     payload.push_back(static_cast<u8>(sz >> 24));
     payload.insert(payload.end(), proto_bytes.begin(), proto_bytes.end());
 
-    const u64 pkt_id = client->SubmitRequest(ShadNet::CommandType::RecordScore, payload);
+    u64 pkt_id;
     {
         std::lock_guard lock(m_mutex_pending_score);
+        pkt_id = client->SubmitRequest(ShadNet::CommandType::RecordScore, payload);
         PendingScoreRequest pending;
         pending.req = std::move(req);
         pending.cmd = ShadNet::CommandType::RecordScore;
@@ -1151,9 +1152,10 @@ s32 NpHandler::RecordGameData(s32 user_id, s32 service_label, u32 boardId, s32 p
         payload.insert(payload.end(), data, data + size);
     }
 
-    const u64 pkt_id = client->SubmitRequest(ShadNet::CommandType::RecordScoreData, payload);
+    u64 pkt_id;
     {
         std::lock_guard lock(m_mutex_pending_score);
+        pkt_id = client->SubmitRequest(ShadNet::CommandType::RecordScoreData, payload);
         PendingScoreRequest pending;
         pending.req = std::move(req);
         pending.cmd = ShadNet::CommandType::RecordScoreData;
@@ -1207,9 +1209,10 @@ s32 NpHandler::GetGameData(s32 user_id, s32 service_label, u32 boardId, const st
     payload.push_back(static_cast<u8>(sz >> 24));
     payload.insert(payload.end(), proto_bytes.begin(), proto_bytes.end());
 
-    const u64 pkt_id = client->SubmitRequest(ShadNet::CommandType::GetScoreData, payload);
+    u64 pkt_id;
     {
         std::lock_guard lock(m_mutex_pending_score);
+        pkt_id = client->SubmitRequest(ShadNet::CommandType::GetScoreData, payload);
         PendingScoreRequest pending;
         pending.req = std::move(req);
         pending.cmd = ShadNet::CommandType::GetScoreData;
@@ -1266,10 +1269,10 @@ s32 NpHandler::GetGameDataByAccountId(s32 user_id, s32 service_label, u32 boardI
     payload.push_back(static_cast<u8>(sz >> 24));
     payload.insert(payload.end(), proto_bytes.begin(), proto_bytes.end());
 
-    const u64 pkt_id =
-        client->SubmitRequest(ShadNet::CommandType::GetScoreGameDataByAccId, payload);
+    u64 pkt_id;
     {
         std::lock_guard lock(m_mutex_pending_score);
+        pkt_id = client->SubmitRequest(ShadNet::CommandType::GetScoreGameDataByAccId, payload);
         PendingScoreRequest pending;
         pending.req = std::move(req);
         pending.cmd = ShadNet::CommandType::GetScoreGameDataByAccId;
@@ -1317,9 +1320,10 @@ s32 NpHandler::GetBoardInfo(s32 user_id, s32 service_label, u32 boardId,
     payload.push_back(static_cast<u8>(boardId >> 16));
     payload.push_back(static_cast<u8>(boardId >> 24));
 
-    const u64 pkt_id = client->SubmitRequest(ShadNet::CommandType::GetBoardInfos, payload);
+    u64 pkt_id;
     {
         std::lock_guard lock(m_mutex_pending_score);
+        pkt_id = client->SubmitRequest(ShadNet::CommandType::GetBoardInfos, payload);
         PendingScoreRequest pending;
         pending.req = std::move(req);
         pending.cmd = ShadNet::CommandType::GetBoardInfos;
@@ -1390,9 +1394,10 @@ s32 NpHandler::GetRankingByNpId(s32 user_id, s32 service_label, u32 boardId,
     payload.push_back(static_cast<u8>(sz >> 24));
     payload.insert(payload.end(), proto_bytes.begin(), proto_bytes.end());
 
-    const u64 pkt_id = client->SubmitRequest(ShadNet::CommandType::GetScoreNpid, payload);
+    u64 pkt_id;
     {
         std::lock_guard lock(m_mutex_pending_score);
+        pkt_id = client->SubmitRequest(ShadNet::CommandType::GetScoreNpid, payload);
         PendingScoreRequest pending;
         pending.req = std::move(req);
         pending.cmd = ShadNet::CommandType::GetScoreNpid;
@@ -1459,9 +1464,10 @@ s32 NpHandler::GetRankingByRange(s32 user_id, s32 service_label, u32 boardId, u3
     payload.push_back(static_cast<u8>(sz >> 24));
     payload.insert(payload.end(), proto_bytes.begin(), proto_bytes.end());
 
-    const u64 pkt_id = client->SubmitRequest(ShadNet::CommandType::GetScoreRange, payload);
+    u64 pkt_id;
     {
         std::lock_guard lock(m_mutex_pending_score);
+        pkt_id = client->SubmitRequest(ShadNet::CommandType::GetScoreRange, payload);
         PendingScoreRequest pending;
         pending.req = std::move(req);
         pending.cmd = ShadNet::CommandType::GetScoreRange;
@@ -1527,9 +1533,10 @@ s32 NpHandler::GetRankingByRangeA(s32 user_id, s32 service_label, u32 boardId, u
     payload.push_back(static_cast<u8>(sz >> 24));
     payload.insert(payload.end(), proto_bytes.begin(), proto_bytes.end());
 
-    const u64 pkt_id = client->SubmitRequest(ShadNet::CommandType::GetScoreRange, payload);
+    u64 pkt_id;
     {
         std::lock_guard lock(m_mutex_pending_score);
+        pkt_id = client->SubmitRequest(ShadNet::CommandType::GetScoreRange, payload);
         PendingScoreRequest pending;
         pending.req = std::move(req);
         pending.cmd = ShadNet::CommandType::GetScoreRange;
@@ -1603,9 +1610,10 @@ s32 NpHandler::GetRankingByAccountId(s32 user_id, s32 service_label, u32 boardId
     payload.push_back(static_cast<u8>(sz >> 24));
     payload.insert(payload.end(), proto_bytes.begin(), proto_bytes.end());
 
-    const u64 pkt_id = client->SubmitRequest(ShadNet::CommandType::GetScoreAccountId, payload);
+    u64 pkt_id;
     {
         std::lock_guard lock(m_mutex_pending_score);
+        pkt_id = client->SubmitRequest(ShadNet::CommandType::GetScoreAccountId, payload);
         PendingScoreRequest pending;
         pending.req = std::move(req);
         pending.cmd = ShadNet::CommandType::GetScoreAccountId;
@@ -1671,9 +1679,10 @@ s32 NpHandler::GetFriendsRanking(s32 user_id, s32 service_label, u32 boardId, bo
     payload.push_back(static_cast<u8>(sz >> 24));
     payload.insert(payload.end(), proto_bytes.begin(), proto_bytes.end());
 
-    const u64 pkt_id = client->SubmitRequest(ShadNet::CommandType::GetScoreFriends, payload);
+    u64 pkt_id;
     {
         std::lock_guard lock(m_mutex_pending_score);
+        pkt_id = client->SubmitRequest(ShadNet::CommandType::GetScoreFriends, payload);
         PendingScoreRequest pending;
         pending.req = std::move(req);
         pending.cmd = ShadNet::CommandType::GetScoreFriends;
@@ -1739,9 +1748,10 @@ s32 NpHandler::GetFriendsRankingA(s32 user_id, s32 service_label, u32 boardId, b
     payload.push_back(static_cast<u8>(sz >> 24));
     payload.insert(payload.end(), proto_bytes.begin(), proto_bytes.end());
 
-    const u64 pkt_id = client->SubmitRequest(ShadNet::CommandType::GetScoreFriends, payload);
+    u64 pkt_id;
     {
         std::lock_guard lock(m_mutex_pending_score);
+        pkt_id = client->SubmitRequest(ShadNet::CommandType::GetScoreFriends, payload);
         PendingScoreRequest pending;
         pending.req = std::move(req);
         pending.cmd = ShadNet::CommandType::GetScoreFriends;
