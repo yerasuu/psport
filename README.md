@@ -4,10 +4,12 @@
 
 psport is a PS4 compatibility layer for Linux. A PS4 title's original executable runs on an
 x86-64 Linux PC the way a Windows program runs under Wine: psport loads it, provides the system
-libraries it imports and translates its GPU work to Vulkan. It is not an emulator. psport started
-as decanter's fork of [bbport](https://github.com/deadinside28/bloodborne_pc), the native Linux
-port of Bloodborne, and is being generalised into a layer for any title; Bloodborne remains a
-supported title with its own profile.
+libraries it imports and translates its GPU work to Vulkan. It is not an emulator. psport is an
+independent project derived from [bbport](https://github.com/deadinside28/bloodborne_pc), the
+native Linux port of Bloodborne, and from [shadPS4](https://github.com/shadps4-emu/shadPS4), and
+is being generalised into a layer for any title; Bloodborne remains a supported title with its own
+profile. bbport and shadPS4 are reviewed from time to time, and the changes useful to psport are
+ported by hand and recorded in [FORK.md](FORK.md).
 
 - **CPU.** The PS4 CPU is x86-64, so the game's code runs on the PC's CPU as it is, with no
   emulation and no instruction translation. A C loader (`src/main/probe.c`, `src/loader/loader_*.c`) reads the
@@ -24,8 +26,8 @@ supported title with its own profile.
 - **Game profiles.** What is specific to one title (hooks and optimisations in its code) lives in
   its profile under `gpu/games/`; every title runs on the generic paths without one.
 
-How it fits together: [docs/en/ARCHITECTURE.md](docs/en/ARCHITECTURE.md). What the fork ports from
-other projects (source commit, license) and what it changes in inherited shadPS4 code:
+How it fits together: [docs/en/ARCHITECTURE.md](docs/en/ARCHITECTURE.md). What psport takes from
+other projects (source commit, license) and what it changes in inherited code:
 [FORK.md](FORK.md).
 
 > **No game files are included.** You need your own dumps of the games you own.
@@ -78,7 +80,7 @@ PS_GAME_DIR=/path/to/dump PS_PERMISSIVE=1 bash run.sh
 modules (`*.sprx`) where the port has no library yet; nothing from it is shipped. Saves and the
 shader cache go to `user/`, settings to `psport.ini`. The GTK4 launcher
 (`bash launcher/psport-launcher.sh`; `launcher/install-desktop.sh` adds it to the app menu) is
-upstream's and built around Bloodborne.
+inherited from bbport and built around Bloodborne.
 
 ## Requirements and building
 
@@ -142,7 +144,7 @@ hardware tests, when needed, are OpenOrbis homebrew); match the surrounding code
 | `src/` | Entry (`probe.c`), native loader (`loader_*.c`) and C runtime (`runtime_*.c`) |
 | `scripts/` | `online.py`, the online addresses `run.sh` writes with `PS_ONLINE=1` (the one launch step in Python), and `sce_file.py` for the Python tools |
 | `gpu/` | GPU library: shadPS4 video core with bbport's changes (`gpu/VENDOR.txt`), own PM4 decoder (`cp/`) and memory module (`layer/`), ported libraries (`ngs2/`, `audiodec/`, `fiber/`, `font/`, `pngenc/`, `pngdec/`), game profiles (`games/`), overlay and in-game menu (`port/`), DLSS bridge, online module |
-| `launcher/`, `packaging/` | Upstream's GTK4 launcher; Nix package and AppImage script |
+| `launcher/`, `packaging/` | bbport's GTK4 launcher; Nix package and AppImage script |
 | `patches/` | Community patches for Bloodborne |
 | `tools/` | Regression runs, GCN disassembler, FSR 4 tools and `fsr4cap`, scripted-run helpers |
 | `docs/` | One folder per language: `docs/en/` (architecture, bringing up a title, feature notes, bbport's history in English), `docs/ru/` (bbport's Russian originals, same file names) |
@@ -155,12 +157,13 @@ psport is licensed under the **GNU GPL v2 or later** ([LICENSE](LICENSE)).
 
 | Project | What it provides | License |
 |---|---|---|
-| [bbport](https://github.com/deadinside28/bloodborne_pc) by deadinside | the upstream: native loader, HLE runtime, Vulkan renderer, everything for Bloodborne | GPL-2.0-or-later |
+| [bbport](https://github.com/deadinside28/bloodborne_pc) by deadinside | psport's origin: native loader, HLE runtime, Vulkan renderer, everything for Bloodborne | GPL-2.0-or-later |
 | [shadPS4](https://github.com/shadps4-emu/shadPS4) | video core, shader recompiler, AvPlayer and other libraries carried by bbport; source of the libSceFiber and libSceFont ports | GPL-2.0-or-later |
 | [AnyPS5](https://github.com/boykopovar/AnyPS5) | source of the libSceNgs2 and libSceAudiodec ports | GPL-2.0 |
 
-psport itself is maintained by Yerasuu for [decanter](#using-it). What the fork changes in inherited
-code and what it ports (with source commits) is recorded in [FORK.md](FORK.md).
+psport itself is maintained by Yerasuu for [decanter](#using-it). What psport changes in inherited
+code and what it ports (with source commits), and the last reviewed points of bbport and shadPS4,
+are recorded in [FORK.md](FORK.md).
 
 ### Bundled third-party code
 

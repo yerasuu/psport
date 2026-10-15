@@ -1,18 +1,30 @@
-# psport: what this fork adds to bbport
+# psport: what it takes from other projects and what it changes
 
-psport is decanter's fork of [bbport](https://github.com/deadinside28/bloodborne_pc). Its goal is
-bbport's own idea taken past one game: PS4 titles run natively on Linux, their x86-64 code on the
-CPU as it is, with the system libraries provided by psport (a compatibility layer, as Wine is,
-not an emulator). Bloodborne keeps working, with its own game profile, patches and mods; other
+psport is an independent project derived from [bbport](https://github.com/deadinside28/bloodborne_pc)
+and [shadPS4](https://github.com/shadps4-emu/shadPS4). Its goal is bbport's own idea taken past one
+game: PS4 titles run natively on Linux, their x86-64 code on the CPU as it is, with the system
+libraries provided by psport (a compatibility layer, as Wine is, not an emulator). Bloodborne keeps working, with its own game profile, patches and mods; other
 titles start without a game check.
 
-This file is the reference of what the fork ports from other projects, what it changes in
-inherited shadPS4 code, and the variables and reports it adds. How the system fits together:
-[docs/en/ARCHITECTURE.md](docs/en/ARCHITECTURE.md); bringing up a new title:
+This file is the reference of what psport takes from other projects (bbport, shadPS4 and the
+rest), what it changes in inherited code, and the variables and reports it adds. How the system
+fits together: [docs/en/ARCHITECTURE.md](docs/en/ARCHITECTURE.md); bringing up a new title:
 [docs/en/ADDING_A_TITLE.md](docs/en/ADDING_A_TITLE.md); bbport's own notes and change logs:
 [docs/en/history/](docs/en/history/) (Russian originals in [docs/ru/](docs/ru/)).
 
-Upstream releases are merged in as they come; the changes below live on top.
+## Following bbport and shadPS4
+
+psport's history starts from bbport's and carries bbport's releases up to 0.51; since then nothing
+is merged wholesale. bbport and shadPS4 are reviewed from time to time, and the changes useful to
+psport are ported by hand, each recorded in this file as a row of the table it belongs to (with its
+source commit), as the rows below already are. Last reviewed points:
+
+- bbport: `3c57da4` (0.51, 2026-10-11), the last bbport release merged into psport's history
+  (merge `884d0ea`); `2d7361a` (FSR 4 v07 pass timing and statistics) was ported by hand after it.
+- shadPS4: `b4e7ae7` (2026-10-02), the vendored commit in `gpu/VENDOR.txt`, plus the recompiler
+  fixes backported after it that the same file lists. The code ported or written from shadPS4
+  outside `gpu/shadps4/` (libSceFiber, libSceFont, Videodec2, the per-NID tables, Audio3d, memory
+  pools) follows `3a9f572`, as its rows say.
 
 ## Names
 
@@ -25,7 +37,7 @@ its `PS_*` name when that one is unset, and say once which they copied:
 `psport: BB_* variables are deprecated, use PS_*: BB_A, BB_B` (on stdout; `psport` then starts
 itself again, so the GPU library's initializers see the copies too).
 
-Inside, the fork's own files swap bbport's `bb` for `ps` and keep the rest of the name:
+Inside, psport's own files swap bbport's `bb` for `ps` and keep the rest of the name:
 `gpu/port/`, `gpu/memory/` and `gpu/diag/psport_*` (bbport's `gpu/shim/bbport_*`),
 `gpu/layer/pslayer_*` (`bblayer_*`), and the GPU library's C interface `gpu/psport_gpu.h` with its
 `psport_gpu_*` calls (`bbgpu.h`, `bbgpu_*`). The prefix stays where the directory alone would say
@@ -34,7 +46,7 @@ shadPS4's own headers (`common/`, `core/`), so a bare `settings.h` would be foun
 `PsLayer`), the CMake target `psport-gpu`, the online module `gpu/net/` (`libpsport-net.so`,
 `psport_net_*`, `PsNet*`) and the DLSS bridge's interface `psport_dlss_bridge.h` (`PsDlss*`, entry
 point `PsDlssGetApi`; a bridge built before exports `BbDlssGetApi` and is reported unavailable until
-`build.sh` builds it again). The comments that mark the fork's lines in inherited code say
+`build.sh` builds it again). The comments that mark psport's lines in inherited code say
 `psport:` (bbport's `bbport:`), as do the Vulkan debug names of its buffers.
 
 The settings file is `psport.ini` and the GPU check `out/psport-gpu-capabilities` (bbport's
@@ -72,8 +84,8 @@ is the files as they were at the source; later commits adapt them.
 ## Changes to inherited shadPS4 code
 
 bbport carries part of shadPS4 (`gpu/shadps4/`: video core, shader recompiler, AvPlayer and other
-libraries) from its own first commit. Where the fork changes that code, the change is listed here, so
-an upstream sync knows what differs. Lines changed carry a `psport:` comment where the reason isn't
+libraries) from its own first commit. Where psport changes that code, the change is listed here, so
+a review of shadPS4 knows what differs. Lines changed carry a `psport:` comment where the reason isn't
 obvious.
 
 | Area | Files | Change | Also in upstream shadPS4 |
