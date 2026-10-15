@@ -80,12 +80,12 @@ if [[ ! -f $game/eboot.bin ]]; then
     echo "No eboot.bin in ${game:-a single folder next to this directory} (set PS_GAME_DIR)." >&2; exit 1
 fi
 # Loose-file mods (PS_MODS_ENABLED=0: none): psport loads the game through a private view under
-# out/ with the enabled mods linked in, removed when it ends (src/loader_mods.c, docs/en/MODS.md).
+# out/ with the enabled mods linked in, removed when it ends (src/loader/loader_mods.c, docs/en/MODS.md).
 mod_args=()
 if [[ ${PS_MODS_ENABLED:-1} != 0 ]]; then
     mod_args=(--mods "${PS_MODS_DIR:-$data/mods}" --mods-config "${PS_MODS_CONFIG:-$data/mods.json}" --out "$out")
 fi
-# psport loads and links the game from its folder (src/loader_*.c). PS_SYS_MODULES: a folder with
+# psport loads and links the game from its folder (src/loader/loader_*.c). PS_SYS_MODULES: a folder with
 # the user's own dump of the console's system modules (*.sprx), linked when the game needs their library; PS_HLE=libA,libB keeps those to the port instead, and
 # PS_LLE=libC links one the port implements itself, to compare them.
 link_args=()
@@ -185,7 +185,7 @@ elif [[ -n ${scaled_output:-} ]]; then
     export PS_DMEM_MB=${PS_DMEM_MB:-9152}
     echo "Output ${scaled_output}: scene ${scaled_render}, direct memory ${PS_DMEM_MB} MiB (live_resolution=1: live changes)"
 fi
-# Third-party shadPS4/GoldHEN XML patches for the game, selected in patches.json (src/loader_patches.c).
+# Third-party shadPS4/GoldHEN XML patches for the game, selected in patches.json (src/loader/loader_patches.c).
 patch_args=(--patches-dir "${PS_PATCHES_DIR:-$data/patches}" --patches-config "${PS_PATCHES_CONFIG:-$data/patches.json}")
 # Background upload of the game's GPU memory into VRAM ahead of use (BufferCache::Preupload):
 # 1 = only memory already in VRAM that the game rewrote (no new VRAM), 2 = all of it (~3 GB more

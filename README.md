@@ -10,10 +10,10 @@ port of Bloodborne, and is being generalised into a layer for any title; Bloodbo
 supported title with its own profile.
 
 - **CPU.** The PS4 CPU is x86-64, so the game's code runs on the PC's CPU as it is, with no
-  emulation and no instruction translation. A C loader (`src/probe.c`, `src/loader_*.c`) reads the
+  emulation and no instruction translation. A C loader (`src/main/probe.c`, `src/loader/loader_*.c`) reads the
   eboot and the modules it links (SELF or ELF) straight from the game's folder, relocates and binds
   them into one image and jumps into it.
-- **System libraries.** psport provides them itself: the C runtime in `src/runtime_*.c` (memory,
+- **System libraries.** psport provides them itself: the C runtime in `src/*/runtime_*.c` (memory,
   threads, synchronization, files, audio, pad, saves, exceptions, services, user-level threads,
   modules a game loads at run time) and the libraries in `gpu/` (GnmDriver, VideoOut, AvPlayer,
   Videodec2, Ngs2, Audiodec, Fiber, Font, PngEnc, PngDec). No tested title needs a dump of the console's

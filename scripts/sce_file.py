@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """PS4 file formats the Python tools read (tools/got_import.py, tools/re/): SELF/ELF and param.sfo.
-The game itself is loaded, checked and patched by psport (src/loader_*.c).
+The game itself is loaded, checked and patched by psport (src/loader/loader_*.c).
 
 No decryption and no Python dependencies. All offsets are checked before use.
 """

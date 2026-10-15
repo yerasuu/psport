@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Generates src/import_returns.inc: the PS4 exports whose result says whether they failed, from
+"""Generates src/runtime/imports/import_returns.inc: the PS4 exports whose result says whether they failed, from
 shadPS4's prototypes and their LIB_FUNCTION registrations.
 
-    python3 tools/import_returns.py <shadPS4 checkout> > src/import_returns.inc
+    python3 tools/import_returns.py <shadPS4 checkout> > src/runtime/imports/import_returns.inc
 
 probe.c wraps an import the runtime binds to its own or the GPU library's function in a thunk that
 records the calls that fail. Kinds: 1, an sce function returning a 32-bit result (a 0x8xxxxxxx
@@ -21,7 +21,7 @@ AGGREGATE = re.compile(r'(?<!enum )\b(?:struct|class|union)\s+(?:alignas\s*\([^)
 TYPEDEF_AGGREGATE = re.compile(r'\btypedef\s+(?:struct|union)\b[^;]*?\}\s*([A-Za-z_]\w*)\s*;', re.S)
 USING_AGGREGATE = re.compile(r'\busing\s+([A-Za-z_]\w*)\s*=\s*(?:struct|union|std::)')
 # POSIX and FreeBSD system call exports the runtime implements itself that shadPS4 registers
-# differently or not at all (the sockets of src/runtime_socket.c, fcntl, _umtx_op, the named
+# differently or not at all (the sockets of src/net/runtime_socket.c, fcntl, _umtx_op, the named
 # objects): NID -> kind, over whatever shadPS4's prototypes say.
 RUNTIME_POSIX = {
     'TU-d9PfIHPM': 2, 'fFxGkxF2bVo': 2, '6O8EwYOgH9Y': 2, 'XVL8So3QJUk': 2, 'KuOmgKoqCdY': 2,  # socket setsockopt getsockopt connect bind

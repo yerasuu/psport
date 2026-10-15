@@ -77,7 +77,7 @@ typedef struct {
  * them apply); NULL past the last one or for a title without a profile. */
 const char *psport_gpu_game_serial(const char *sz_serial, size_t i_serial);
 /* The index-th folder a loose-file mod may consist of without dvdroot_ps4 around them (the game's
- * own are added by src/loader_mods.c); NULL past the last one or for a title without a profile. */
+ * own are added by src/loader/loader_mods.c); NULL past the last one or for a title without a profile. */
 const char *psport_gpu_game_mod_folder(const char *sz_serial, size_t i_folder);
 /* The profile's own patch file (shadPS4 XML), relative to psport's folder (the one holding out/ or
  * bin/); NULL without one. External patch folders leave it out. */

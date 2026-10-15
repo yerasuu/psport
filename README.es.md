@@ -11,9 +11,9 @@ capa de compatibilidad, no un emulador.
 
 - **CPU.** La CPU de PS4 es x86-64, así que el código del juego se ejecuta tal cual en la CPU del
   PC, sin emulación ni traducción de instrucciones. El eboot se convierte de antemano (`scripts/`)
-  en una imagen de memoria plana con la libc del juego enlazada; un cargador en C (`src/probe.c`) la
+  en una imagen de memoria plana con la libc del juego enlazada; un cargador en C (`src/main/probe.c`) la
   mapea y salta a ella.
-- **Bibliotecas del sistema.** Las proporciona el propio port: el runtime de `src/runtime_*.c`
+- **Bibliotecas del sistema.** Las proporciona el propio port: el runtime de `src/*/runtime_*.c`
   (memoria, hilos, sincronización, archivos, audio, mando, partidas guardadas, excepciones, hilos de
   usuario, módulos que el juego carga mientras se ejecuta) y las bibliotecas de `gpu/` (libSceNgs2,
   libSceAudiodec, libSceFiber, libSceFont). Ningún juego probado necesita un volcado de los módulos

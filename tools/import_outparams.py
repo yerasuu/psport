@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Generates src/import_outparams.inc: the PS4 exports whose functions write through a pointer
+"""Generates src/runtime/imports/import_outparams.inc: the PS4 exports whose functions write through a pointer
 argument, from shadPS4's prototypes and their LIB_FUNCTION registrations.
 
-    python3 tools/import_outparams.py <shadPS4 checkout> > src/import_outparams.inc
+    python3 tools/import_outparams.py <shadPS4 checkout> > src/runtime/imports/import_outparams.inc
 
 PS_PERMISSIVE answers an import the port lacks with 0; for these the caller then reads an output
 that was never written, and faults far from the import. An argument counts as an output when it is

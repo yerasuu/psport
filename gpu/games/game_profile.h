@@ -135,7 +135,7 @@ struct Profile {
     /// The param.sfo TITLE_IDs it is for (one executable: patch files and mod folders named after
     /// any of them apply to all).
     std::span<const char* const> serials;
-    /// Folders a loose-file mod may consist of without dvdroot_ps4 around them (src/loader_mods.c
+    /// Folders a loose-file mod may consist of without dvdroot_ps4 around them (src/loader/loader_mods.c
     /// adds the game's own): those of the game's dvdroot_ps4 and the ones mods add to it.
     std::span<const char* const> mod_folders;
     /// Its own patch file (shadPS4 XML), relative to psport's folder; external patch folders leave

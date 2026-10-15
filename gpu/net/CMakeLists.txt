@@ -1,6 +1,6 @@
 # psport online module: libpsport-net.so, the PS4 network and PSN libraries with the shadNet client
 # (shadp2p, a shadPS4 fork, GPL-2.0), loaded by the runtime only for online play
-# (src/runtime_net.c). Its headers (include/) extend the port's shim for these libraries alone;
+# (src/net/runtime_net.c). Its headers (include/) extend the port's shim for these libraries alone;
 # everything in it is hidden and bound to itself (-Bsymbolic) except psport_net.h's two calls, so its
 # copies of shadPS4's kernel shims and symbol table never meet libpsport-gpu's.
 # Needs protobuf, nlohmann_json, OpenSSL, zlib and miniupnpc (shell.nix); without them the port

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// The runtime's write traps (src/runtime_memory.c, runtime_memory_trap): a guest page is
+// The runtime's write traps (src/kernel/runtime_memory.c, runtime_memory_trap): a guest page is
 // read-only for the game while any reason holds it, and each owner clears only its own. The
 // layer's VRAM copies and the texture cache trap the same pages; with one owner of the page
 // protections, one's unprotect cannot drop the other's trap. Same on every GPU: the traps are the
