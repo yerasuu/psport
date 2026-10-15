@@ -15,7 +15,7 @@ The model is Wine's, not an emulator's.
 | Import binding | `src/main/bind.c` | `out/psport` | traps, failure thunks, relocation walk, patch writes |
 | Signals | `src/main/signals.c` | `out/psport` | fault, watchdog, thread dump and termination handlers |
 | Native loader | `src/loader/loader.h`, `src/loader/loader_self.c`, `src/loader/loader_link.c` | `out/psport` | SELF/ELF parsing, module linking, relocations, TLS, bindings |
-| Launch data | `src/loader/loader_mods.c`, `src/loader/loader_patches.c`, `src/loader/loader_hash.c`, `src/loader/loader_json.c` | `out/psport` | loose-file mod view, shadPS4/GoldHEN XML patches, the eboot's identity (SHA-256), `mods.json`/`patches.json` |
+| Launch data | `src/loader/loader_mods.c`, `src/loader/loader_patches.c`, `src/loader/loader_xml.c`, `src/loader/loader_hash.c`, `src/loader/loader_json.c` | `out/psport` | loose-file mod view, shadPS4/GoldHEN XML patches, the eboot's identity (SHA-256), `mods.json`/`patches.json` |
 | C runtime | `src/*/runtime*.c`, `src/runtime/runtime.h`, `src/runtime/imports/import_*.inc` | `out/psport` | libkernel and the other system libraries, import resolution, the call report |
 | GPU library | `gpu/port/psport_gpu*.cpp`, `gpu/psport_gpu.h` | `out/gpu/libpsport-gpu.so` | C interface between `psport` and the C++ side |
 | Translator | `gpu/shadps4/` (inherited from shadPS4, `gpu/VENDOR.txt`), `gpu/cp/`, `gpu/layer/` | `libpsport-gpu.so` | GnmDriver, VideoOut, command processor, Vulkan rasterizer, caches, shader recompiler |
@@ -133,7 +133,7 @@ library.
   the game's executable (`psport_gpu_game_serial`), and a mod without `dvdroot_ps4` may consist of the
   folders of the game's own `dvdroot_ps4` and its profile's `mod_folders`. A process of its own
   (`mod-view-clean`) removes the view once `psport` ends, by any route.
-- Patches (`src/loader/loader_patches.c`): shadPS4/GoldHEN XML, `bytes`, `bytes16/32/64`, `float32/64`,
+- Patches (`src/loader/loader_patches.c`, read by `src/loader/loader_xml.c`): shadPS4/GoldHEN XML, `bytes`, `bytes16/32/64`, `float32/64`,
   `utf8` and `utf16` lines at the eboot's addresses (base `0x400000`). The profile's own patches
   come first (`psport_gpu_game_patches`, through `PsPatchServices`); then the files in `--patches-dir`
   whose `<ID>`s name one of the game's title IDs (or that have none), entries for its `APP_VER` and
