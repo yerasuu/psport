@@ -145,14 +145,18 @@ void VideoOutDriver::Close(s32 handle) {
     }
 
     // Clear events
-    for (auto event : main_port.flip_events) {
-        auto equeue = Kernel::GetEqueue(event);
-        if (equeue != nullptr) {
-            equeue->RemoveEvent(static_cast<u64>(OrbisVideoOutInternalEventId::Flip),
-                                Kernel::OrbisKernelEvent::Filter::VideoOut);
+    {
+        std::scoped_lock events_lock{main_port.port_mutex};
+        for (auto event : main_port.flip_events) {
+            auto equeue = Kernel::GetEqueue(event);
+            if (equeue != nullptr) {
+                equeue->RemoveEvent(static_cast<u64>(OrbisVideoOutInternalEventId::Flip),
+                                    Kernel::OrbisKernelEvent::Filter::VideoOut);
+            }
         }
+        main_port.flip_events.clear();
     }
-    main_port.flip_events.clear();
+    std::scoped_lock events_lock{main_port.vo_mutex};
     for (auto event : main_port.vblank_events) {
         auto equeue = Kernel::GetEqueue(event);
         if (equeue != nullptr) {
@@ -749,17 +753,17 @@ void VideoOutDriver::Flip(const Request& req) {
             --flip_status.gc_queue_num;
         }
         --flip_status.flip_pending_num;
-    }
 
-    // Trigger flip events for the port.
-    for (auto event : port->flip_events) {
-        auto equeue = Kernel::GetEqueue(event);
-        if (equeue != nullptr) {
-            equeue->TriggerEvent(
-                static_cast<u64>(OrbisVideoOutInternalEventId::Flip),
-                Kernel::OrbisKernelEvent::Filter::VideoOut,
-                reinterpret_cast<void*>(static_cast<u64>(OrbisVideoOutInternalEventId::Flip) |
-                                        (req.flip_arg << 16)));
+        // Trigger flip events for the port.
+        for (auto event : port->flip_events) {
+            auto equeue = Kernel::GetEqueue(event);
+            if (equeue != nullptr) {
+                equeue->TriggerEvent(
+                    static_cast<u64>(OrbisVideoOutInternalEventId::Flip),
+                    Kernel::OrbisKernelEvent::Filter::VideoOut,
+                    reinterpret_cast<void*>(static_cast<u64>(OrbisVideoOutInternalEventId::Flip) |
+                                            (req.flip_arg << 16)));
+            }
         }
     }
 
