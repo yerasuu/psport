@@ -1,0 +1,45 @@
+# With -u from a run of bo1.sched: Resume Game loads the bar checkpoint ("Escape the police"),
+# the pause menu lowers the difficulty to Recruit, the pad turns to the street door, walks out and
+# jumps the low wall where Carlos waits; then follow.py chases the objective marker along the
+# street, fighting, to the alley where "Get off the streets" and its checkpoint come up (80 to
+# over 120 s: Woods only moves on as the police fall) and on toward the car, and Save and Quit
+# (Recruit greys out Lower Difficulty: up from Resume Game) writes it for bo1-car.sched.
+60 shot
+68 press cross
+71 press options
+74 press cross
+78 press cross
+125 shot
+128 press options
+130 press down
+131 press down
+132 press cross
+134 press down
+135 press cross
+137 shot
+138 press cross
+139 hold rx=200 0.8
+140 hold ly=0 2
+142 release
+145 hold rx=200 0.6
+146 release
+148 hold ly=0 1
+149 hold ly=0+cross 0.3
+149 hold ly=0 1.5
+151 release
+153 hold rx=200 0.4
+153 hold ly=0 3.5
+157 release
+157 shot
+158 follow 160 --fight 4
+318 shot
+319 press options
+321 shot
+322 press up
+323 press cross
+325 shot
+326 press down
+327 press cross
+330 shot
+342 shot
+344 end

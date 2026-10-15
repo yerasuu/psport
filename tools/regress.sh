@@ -98,6 +98,8 @@ run_title() {
             press) read -r buttons hold <<< "$rest"; pad "${buttons//+/ }"; sleep "${hold:-0.3}"; pad '' ;;
             hold) read -r buttons hold <<< "$rest"; pad "${buttons//+/ }"; sleep "${hold:-0}" ;;
             release) pad '' ;;
+            # follow SECONDS [--fight N]: steers toward the objective marker, frame by frame.
+            follow) ${PYTHON:-python3} "$root/tools/regress/follow.py" "$dir" $rest < /dev/null 2>> "$dir/follow.log" ;;
             end) break ;;
         esac
     done < "$schedule"

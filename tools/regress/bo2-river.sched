@@ -1,0 +1,129 @@
+# With -u from a run of bo2-buffel.sched: the "Mount the Buffel" checkpoint (about 170 s); a turn
+# right, forward and square board the Buffel, which drives the final push on its own; Savimbi's and
+# Woods's cutscenes, the load of the river and the helicopter follow with no input until the jump
+# onto the barge (about 440 s). There forward is held while the barge's checkpoint comes up: the
+# tug's gunners kill the player again and again, which the checkpoint survives, and Save and Quit
+# at 640 s writes it ("Secure the barge and rescue Woods").
+60 shot
+110 shot
+112 press cross
+115 shot
+118 shot
+120 press cross
+123 shot
+126 shot
+128 press cross
+131 shot
+134 shot
+136 press cross
+139 shot
+142 shot
+144 press cross
+147 shot
+150 shot
+152 press cross
+155 shot
+158 shot
+160 press cross
+163 shot
+166 shot
+172 shot
+180 shot
+190 shot
+198 shot
+200 press rx=255 0.11
+201 shot
+202 press ly=0 2.0
+205 shot
+206 press square 0.15
+207 shot
+208 press ly=0 0.4
+209 press square 0.15
+210 shot
+211 press ly=0 0.4
+212 press square 0.15
+213 shot
+220 shot
+230 shot
+240 shot
+250 shot
+260 shot
+270 shot
+280 shot
+290 shot
+300 shot
+310 shot
+320 shot
+330 shot
+340 shot
+350 shot
+360 shot
+370 shot
+380 shot
+390 shot
+400 shot
+410 shot
+420 shot
+430 shot
+440 shot
+450 shot
+455 hold ly=0+lx=60
+456 shot
+460 shot
+464 shot
+468 shot
+472 shot
+476 shot
+480 shot
+484 shot
+488 shot
+492 shot
+496 shot
+500 shot
+504 shot
+508 shot
+512 shot
+516 shot
+520 shot
+524 shot
+528 shot
+532 shot
+536 shot
+540 shot
+544 shot
+548 shot
+552 shot
+556 shot
+560 shot
+564 shot
+568 shot
+572 shot
+576 shot
+580 shot
+584 shot
+588 shot
+592 shot
+596 shot
+600 shot
+601 release
+602 press circle 0.15
+603 shot
+610 shot
+620 shot
+630 shot
+638 shot
+640 press options
+642 shot
+643 press down
+644 press down
+645 press down
+646 press down
+647 press cross
+649 shot
+650 press down
+651 press cross
+654 shot
+660 shot
+670 shot
+680 shot
+690 end

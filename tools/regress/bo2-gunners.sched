@@ -1,0 +1,53 @@
+# With -u from a run of bo2-play.sched: Resume Story loads the mortar crews checkpoint (about 170 s,
+# as bo2-load.sched) and follow.py walks the "Follow" marker with the convoy, firing every 2 s,
+# through the mortars and the first wave of tanks (up on the d-pad calls their air support) toward
+# "Eliminate the mounted gunners" and its checkpoint, then on toward the gunners' "Target" markers
+# until 505 s. Save and Quit writes the last checkpoint for bo2-buffel.sched: the gunners' one
+# (b2s1g-1, b2s1g-2) or, when the convoy is slower, the first wave of tanks' one (b2s1g-3).
+60 shot
+110 shot
+112 press cross
+115 shot
+118 shot
+120 press cross
+123 shot
+126 shot
+128 press cross
+131 shot
+134 shot
+136 press cross
+139 shot
+142 shot
+144 press cross
+147 shot
+150 shot
+152 press cross
+155 shot
+158 shot
+160 press cross
+163 shot
+166 shot
+172 shot
+174 follow 330 --fight 2
+506 shot
+507 press up 0.2
+508 press up 0.2
+512 shot
+520 shot
+530 shot
+540 shot
+550 shot
+556 press options
+558 shot
+559 press down
+560 press down
+561 press down
+562 press down
+563 press cross
+565 shot
+566 press down
+567 press cross
+570 shot
+580 shot
+590 shot
+595 end
