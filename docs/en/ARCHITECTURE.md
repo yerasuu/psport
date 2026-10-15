@@ -14,7 +14,7 @@ The model is Wine's, not an emulator's.
 | Native loader | `src/loader/loader.h`, `src/loader/loader_self.c`, `src/loader/loader_link.c` | `out/psport` | SELF/ELF parsing, module linking, relocations, TLS, bindings |
 | Launch data | `src/loader/loader_mods.c`, `src/loader/loader_patches.c`, `src/loader/loader_hash.c`, `src/loader/loader_json.c` | `out/psport` | loose-file mod view, shadPS4/GoldHEN XML patches, the eboot's identity (SHA-256), `mods.json`/`patches.json` |
 | C runtime | `src/*/runtime*.c`, `src/runtime/runtime.h`, `src/runtime/imports/import_*.inc` | `out/psport` | libkernel and the other system libraries, import resolution, the call report |
-| GPU library | `gpu/port/psport_gpu.cpp`, `gpu/psport_gpu.h` | `out/gpu/libpsport-gpu.so` | C interface between `psport` and the C++ side |
+| GPU library | `gpu/port/psport_gpu*.cpp`, `gpu/psport_gpu.h` | `out/gpu/libpsport-gpu.so` | C interface between `psport` and the C++ side |
 | Translator | `gpu/shadps4/` (inherited from shadPS4, `gpu/VENDOR.txt`), `gpu/cp/`, `gpu/layer/` | `libpsport-gpu.so` | GnmDriver, VideoOut, command processor, Vulkan rasterizer, caches, shader recompiler |
 | Ported libraries | `gpu/ngs2/`, `gpu/audiodec/`, `gpu/fiber/`, `gpu/font/`, `gpu/pngenc/`, `gpu/pngdec/` | `libpsport-gpu.so` | libSceNgs2, libSceAudiodec, libSceFiber, libSceFont/FontFt, libScePngEnc, libScePngDec |
 | Port services | `gpu/port/`, `gpu/memory/`, `gpu/diag/` | `libpsport-gpu.so` | settings (`psport.ini`), overlay, submit guard, guest memory, diagnostics |
@@ -215,7 +215,10 @@ a file.
 
 ## GPU library
 
-`libpsport-gpu.so` holds the C++ side. `gpu/port/psport_gpu.cpp` is its C interface (`gpu/psport_gpu.h`):
+`libpsport-gpu.so` holds the C++ side. `gpu/port/psport_gpu.cpp` is its C interface (`gpu/psport_gpu.h`),
+with the window's input in `psport_gpu_input.cpp` and the game profile calls in
+`psport_gpu_games.cpp`; the shadPS4 parts the port replaces (memory manager, kernel services) are
+stood in for in `gpu/shim/psport_stand_ins.cpp`:
 
 - `psport_gpu_register_kernel` registers the kernel event queues and the libraries that do not need a
   window: AvPlayer, Ngs2, Fiber, Font, FontFt, Audiodec, Videodec2, PngEnc, PngDec.
@@ -225,7 +228,7 @@ a file.
   shadPS4's `LIB_FUNCTION(nid, library, version, module, function)` (`gpu/shim/core/libraries/libs.h`).
 - `psport_gpu_handle_fault` is the first stop of `psport`'s `SIGSEGV` handler: GPU page-tracking
   faults (write traps) are handled there.
-- `psport_gpu_patch_image` hands the writable image to the active profile.
+- `psport_gpu_patch_image` (`psport_gpu_games.cpp`) hands the writable image to the active profile.
 
 The translator, from the game's submission to the screen:
 
