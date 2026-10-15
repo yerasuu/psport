@@ -655,17 +655,18 @@ static ABI int32_t pad_vibration(int32_t h_handle, const uint8_t *p_param) {
     if (!p_param) return ERR_INVALID_ARG;
     pthread_mutex_lock(&s_lock);
     SDL_Gamepad *p_sdl_gamepad=current_gamepad();
-    if (p_sdl_gamepad) SDL_RumbleGamepad(p_sdl_gamepad,(uint16_t)(p_param[0]*257),(uint16_t)(p_param[1]*257),1000);
     pthread_mutex_unlock(&s_lock);
+    /* Not under the pad's lock: the report can be a synchronous HID write, and reads wait for the
+       lock. SDL checks the handle, so one closed meanwhile only fails. */
+    if (p_sdl_gamepad) SDL_RumbleGamepad(p_sdl_gamepad,(uint16_t)(p_param[0]*257),(uint16_t)(p_param[1]*257),1000);
     return 0;
 }
 /* ScePadLightBarParam: red, green, blue, reserved. Shown on the host pad when it has an LED. */
 static int set_host_light_bar(uint8_t red, uint8_t green, uint8_t blue) {
     pthread_mutex_lock(&s_lock);
     SDL_Gamepad *p_gamepad=current_gamepad();
-    const int is_shown=p_gamepad && SDL_SetGamepadLED(p_gamepad,red,green,blue);
     pthread_mutex_unlock(&s_lock);
-    return is_shown;
+    return p_gamepad && SDL_SetGamepadLED(p_gamepad,red,green,blue);
 }
 static ABI int32_t pad_set_light_bar(int32_t h_pad, const uint8_t *p_param) {
     if (h_pad!=PAD_HANDLE || !s_is_opened) return ERR_INVALID_HANDLE;
