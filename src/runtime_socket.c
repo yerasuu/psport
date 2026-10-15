@@ -48,11 +48,11 @@ typedef struct {
 _Static_assert(sizeof(GuestMsghdr)==48,"FreeBSD msghdr layout");
 typedef struct { int64_t sec, usec; } GuestTimeval;
 
-static int32_t net_errno;
+static int32_t s_net_errno;
 
-int32_t *runtime_net_errno(void) { return &net_errno; }
-static ABI int32_t *net_errno_loc(void) { return &net_errno; }
-static int32_t fail(int guest_errno) { net_errno=guest_errno; return NET_ERR(guest_errno); }
+int32_t *runtime_net_errno(void) { return &s_net_errno; }
+static ABI int32_t *net_errno_loc(void) { return &s_net_errno; }
+static int32_t fail(int guest_errno) { s_net_errno=guest_errno; return NET_ERR(guest_errno); }
 /* Every operation below returns >=0 or -(FreeBSD errno); libSceNet turns that into its codes and
  * sets sceNetErrnoLoc's value, the POSIX exports into -1 and errno. */
 static int64_t sce(int64_t result) { return result<0 ? fail((int)-result) : result; }
@@ -75,18 +75,18 @@ static int64_t adopt(int h_host) {
     return h_socket;
 }
 
-static int host_address(const GuestSockaddr *in, uint32_t len, struct sockaddr_in *out) {
-    if (!in || len<8 || in->family!=AF_INET) return 0;
-    *out=(struct sockaddr_in){.sin_family=AF_INET,.sin_port=in->port,.sin_addr.s_addr=in->addr};
+static int host_address(const GuestSockaddr *p_sockaddr, uint32_t len, struct sockaddr_in *p_out) {
+    if (!p_sockaddr || len<8 || p_sockaddr->family!=AF_INET) return 0;
+    *p_out=(struct sockaddr_in){.sin_family=AF_INET,.sin_port=p_sockaddr->port,.sin_addr.s_addr=p_sockaddr->addr};
     return 1;
 }
-static void guest_address(const struct sockaddr_in *in, GuestSockaddr *out, uint32_t *len) {
-    if (!out || !len) return;
-    GuestSockaddr g={.len=sizeof(g),.family=AF_INET,.port=in->sin_port,.addr=in->sin_addr.s_addr};
-    memcpy(out,&g,*len<sizeof(g) ? *len : sizeof(g));
-    *len=sizeof(g);
+static void guest_address(const struct sockaddr_in *p_address, GuestSockaddr *p_out, uint32_t *p_len) {
+    if (!p_out || !p_len) return;
+    GuestSockaddr g={.len=sizeof(g),.family=AF_INET,.port=p_address->sin_port,.addr=p_address->sin_addr.s_addr};
+    memcpy(p_out,&g,*p_len<sizeof(g) ? *p_len : sizeof(g));
+    *p_len=sizeof(g);
 }
-static int loopback(const struct sockaddr_in *a) { return (ntohl(a->sin_addr.s_addr)>>24)==127; }
+static int loopback(const struct sockaddr_in *p_address) { return (ntohl(p_address->sin_addr.s_addr)>>24)==127; }
 
 static int64_t do_socket(int family, int type, int protocol) {
     if (family!=AF_INET) return -GUEST_EAFNOSUPPORT;
@@ -108,20 +108,20 @@ static int64_t do_shutdown(int32_t s, int how) {
     return shutdown(h,how) ? host_failure() : 0;
 }
 /* A wildcard bind lands on loopback, the only interface an unplugged console has. */
-static int64_t do_bind(int32_t s, const GuestSockaddr *addr, uint32_t len) {
+static int64_t do_bind(int32_t s, const GuestSockaddr *p_addr, uint32_t len) {
     struct sockaddr_in a;
     int h=host_socket(s);
     if (h<0) return -GUEST_EBADF;
-    if (!host_address(addr,len,&a)) return -GUEST_EINVAL;
+    if (!host_address(p_addr,len,&a)) return -GUEST_EINVAL;
     if (a.sin_addr.s_addr==htonl(INADDR_ANY)) a.sin_addr.s_addr=htonl(INADDR_LOOPBACK);
     else if (!loopback(&a)) return -GUEST_EADDRNOTAVAIL;
     return bind(h,(struct sockaddr *)&a,sizeof(a)) ? host_failure() : 0;
 }
-static int64_t do_connect(int32_t s, const GuestSockaddr *addr, uint32_t len) {
+static int64_t do_connect(int32_t s, const GuestSockaddr *p_addr, uint32_t len) {
     struct sockaddr_in a;
     int h=host_socket(s);
     if (h<0) return -GUEST_EBADF;
-    if (!host_address(addr,len,&a)) return -GUEST_EINVAL;
+    if (!host_address(p_addr,len,&a)) return -GUEST_EINVAL;
     if (!loopback(&a)) return -GUEST_ENETUNREACH;
     return connect(h,(struct sockaddr *)&a,sizeof(a)) ? host_failure() : 0;
 }
@@ -130,22 +130,22 @@ static int64_t do_listen(int32_t s, int backlog) {
     if (h<0) return -GUEST_EBADF;
     return listen(h,backlog) ? host_failure() : 0;
 }
-static int64_t do_accept(int32_t s, GuestSockaddr *addr, uint32_t *len) {
+static int64_t do_accept(int32_t s, GuestSockaddr *p_addr, uint32_t *p_len) {
     struct sockaddr_in a;
-    socklen_t size=sizeof(a);
+    socklen_t cb_address=sizeof(a);
     int h=host_socket(s);
     if (h<0) return -GUEST_EBADF;
-    int64_t accepted=adopt(accept4(h,(struct sockaddr *)&a,&size,SOCK_CLOEXEC));
-    if (accepted>=0) guest_address(&a,addr,len);
+    int64_t accepted=adopt(accept4(h,(struct sockaddr *)&a,&cb_address,SOCK_CLOEXEC));
+    if (accepted>=0) guest_address(&a,p_addr,p_len);
     return accepted;
 }
-static int64_t do_getsockname(int32_t s, GuestSockaddr *addr, uint32_t *len) {
+static int64_t do_getsockname(int32_t s, GuestSockaddr *p_addr, uint32_t *p_len) {
     struct sockaddr_in a;
-    socklen_t size=sizeof(a);
+    socklen_t cb_address=sizeof(a);
     int h=host_socket(s);
     if (h<0) return -GUEST_EBADF;
-    if (getsockname(h,(struct sockaddr *)&a,&size)) return host_failure();
-    guest_address(&a,addr,len);
+    if (getsockname(h,(struct sockaddr *)&a,&cb_address)) return host_failure();
+    guest_address(&a,p_addr,p_len);
     return 0;
 }
 static int64_t do_getpeername(int32_t h_socket, GuestSockaddr *p_out_address, uint32_t *p_cb_address) {
@@ -161,24 +161,24 @@ static int64_t do_getpeername(int32_t h_socket, GuestSockaddr *p_out_address, ui
 static int host_flags(int flags) {
     return (flags&0x1 ? MSG_OOB : 0)|(flags&0x2 ? MSG_PEEK : 0)|(flags&0x40 ? MSG_WAITALL : 0)|(flags&0x80 ? MSG_DONTWAIT : 0);
 }
-static int64_t do_recvfrom(int32_t s, void *buf, uint64_t len, int flags, GuestSockaddr *from, uint32_t *fromlen) {
+static int64_t do_recvfrom(int32_t s, void *p_buf, uint64_t len, int flags, GuestSockaddr *p_from, uint32_t *p_fromlen) {
     struct sockaddr_in a={0};
-    socklen_t size=sizeof(a);
+    socklen_t cb_address=sizeof(a);
     int h=host_socket(s);
     if (h<0) return -GUEST_EBADF;
-    ssize_t n=recvfrom(h,buf,len,host_flags(flags)|MSG_NOSIGNAL,(struct sockaddr *)&a,&size);
-    if (n<0) return host_failure();
-    if (from && size) guest_address(&a,from,fromlen);
-    return n;
+    ssize_t cb_received=recvfrom(h,p_buf,len,host_flags(flags)|MSG_NOSIGNAL,(struct sockaddr *)&a,&cb_address);
+    if (cb_received<0) return host_failure();
+    if (p_from && cb_address) guest_address(&a,p_from,p_fromlen);
+    return cb_received;
 }
-static int64_t do_sendto(int32_t s, const void *buf, uint64_t len, int flags, const GuestSockaddr *to, uint32_t tolen) {
+static int64_t do_sendto(int32_t s, const void *p_buf, uint64_t len, int flags, const GuestSockaddr *p_sockaddr, uint32_t tolen) {
     struct sockaddr_in a;
     int h=host_socket(s);
     if (h<0) return -GUEST_EBADF;
-    if (to && !host_address(to,tolen,&a)) return -GUEST_EINVAL;
-    if (to && !loopback(&a)) return -GUEST_ENETUNREACH;
-    ssize_t n=sendto(h,buf,len,host_flags(flags)|MSG_NOSIGNAL,to ? (struct sockaddr *)&a : NULL,to ? sizeof(a) : 0);
-    return n<0 ? host_failure() : n;
+    if (p_sockaddr && !host_address(p_sockaddr,tolen,&a)) return -GUEST_EINVAL;
+    if (p_sockaddr && !loopback(&a)) return -GUEST_ENETUNREACH;
+    ssize_t cb_sent=sendto(h,p_buf,len,host_flags(flags)|MSG_NOSIGNAL,p_sockaddr ? (struct sockaddr *)&a : NULL,p_sockaddr ? sizeof(a) : 0);
+    return cb_sent<0 ? host_failure() : cb_sent;
 }
 /* Control messages (descriptor passing, credentials) have no use between the game's own loopback
  * sockets and FreeBSD lays them out differently, so a message carrying one is refused. */
@@ -215,8 +215,8 @@ static int64_t do_recvmsg(int32_t h_socket, GuestMsghdr *p_message, int flags) {
     return cb_received;
 }
 /* The console's option numbers (BSD, plus SO_NBIO) for the host's; 0 when there is none. */
-static int host_option(int level, int option, int *host_level) {
-    *host_level=level==0xffff ? SOL_SOCKET : level;
+static int host_option(int level, int option, int *p_host_level) {
+    *p_host_level=level==0xffff ? SOL_SOCKET : level;
     if (level==0xffff) switch (option) {
     case 0x4: return SO_REUSEADDR;
     case 0x8: return SO_KEEPALIVE;
@@ -239,13 +239,13 @@ static int host_option(int level, int option, int *host_level) {
     }
     return 0;
 }
-static int64_t do_setsockopt(int32_t s, int level, int option, const void *value, uint32_t len) {
+static int64_t do_setsockopt(int32_t s, int level, int option, const void *p_value, uint32_t len) {
     int h=host_socket(s);
     if (h<0) return -GUEST_EBADF;
     if (level==0xffff && option==0x1200) { /* SO_NBIO */
-        if (!value || len<4) return -GUEST_EINVAL;
+        if (!p_value || len<4) return -GUEST_EINVAL;
         int nbio;
-        memcpy(&nbio,value,sizeof(nbio));
+        memcpy(&nbio,p_value,sizeof(nbio));
         int f=fcntl(h,F_GETFL);
         return f<0 || fcntl(h,F_SETFL,nbio ? f|O_NONBLOCK : f&~O_NONBLOCK) ? host_failure() : 0;
     }
@@ -254,22 +254,22 @@ static int64_t do_setsockopt(int32_t s, int level, int option, const void *value
         fprintf(stderr,"Runtime: socket option %#x/%#x accepted without effect\n",level,option);
         return 0;
     }
-    return setsockopt(h,host_level,host,value,len) ? host_failure() : 0;
+    return setsockopt(h,host_level,host,p_value,len) ? host_failure() : 0;
 }
-static int64_t do_getsockopt(int32_t s, int level, int option, void *value, uint32_t *len) {
+static int64_t do_getsockopt(int32_t s, int level, int option, void *p_value, uint32_t *p_len) {
     int h=host_socket(s);
     if (h<0) return -GUEST_EBADF;
     int host_level, host=host_option(level,option,&host_level);
     if (!host) return -GUEST_ENOPROTOOPT;
-    socklen_t size=len ? *len : 0;
-    if (getsockopt(h,host_level,host,value,&size)) return host_failure();
-    if (host==SO_ERROR && host_level==SOL_SOCKET && value && size>=sizeof(int32_t)) {
+    socklen_t cb_value=p_len ? *p_len : 0;
+    if (getsockopt(h,host_level,host,p_value,&cb_value)) return host_failure();
+    if (host==SO_ERROR && host_level==SOL_SOCKET && p_value && cb_value>=sizeof(int32_t)) {
         int32_t e;
-        memcpy(&e,value,sizeof(e));
+        memcpy(&e,p_value,sizeof(e));
         e=runtime_guest_errno(e);
-        memcpy(value,&e,sizeof(e));
+        memcpy(p_value,&e,sizeof(e));
     }
-    if (len) *len=size;
+    if (p_len) *p_len=cb_value;
     return 0;
 }
 /* Over poll, so a host descriptor past the host's FD_SETSIZE still works; FreeBSD's fd_set is the
@@ -312,8 +312,8 @@ static int64_t do_select(int c_fds, uint64_t *p_read, uint64_t *p_write, uint64_
 }
 static int host_family(int family) { return family==AF_INET ? AF_INET : family==GUEST_AF_INET6 ? AF_INET6 : -1; }
 
-static ABI int32_t net_socket(const char *name, int family, int type, int protocol) {
-    (void)name;
+static ABI int32_t net_socket(const char *sz_name, int family, int type, int protocol) {
+    (void)sz_name;
     return (int32_t)sce(do_socket(family,type,protocol));
 }
 static ABI int32_t net_close(int32_t s) { return (int32_t)sce(do_close(s)); }
@@ -325,24 +325,24 @@ static ABI int32_t net_abort(int32_t s, int flags) {
     return 0;
 }
 static ABI int32_t net_shutdown(int32_t s, int how) { return (int32_t)sce(do_shutdown(s,how)); }
-static ABI int32_t net_bind(int32_t s, const GuestSockaddr *addr, uint32_t len) { return (int32_t)sce(do_bind(s,addr,len)); }
-static ABI int32_t net_connect(int32_t s, const GuestSockaddr *addr, uint32_t len) { return (int32_t)sce(do_connect(s,addr,len)); }
+static ABI int32_t net_bind(int32_t s, const GuestSockaddr *p_addr, uint32_t len) { return (int32_t)sce(do_bind(s,p_addr,len)); }
+static ABI int32_t net_connect(int32_t s, const GuestSockaddr *p_addr, uint32_t len) { return (int32_t)sce(do_connect(s,p_addr,len)); }
 static ABI int32_t net_listen(int32_t s, int backlog) { return (int32_t)sce(do_listen(s,backlog)); }
-static ABI int32_t net_accept(int32_t s, GuestSockaddr *addr, uint32_t *len) { return (int32_t)sce(do_accept(s,addr,len)); }
-static ABI int32_t net_getsockname(int32_t s, GuestSockaddr *addr, uint32_t *len) { return (int32_t)sce(do_getsockname(s,addr,len)); }
-static ABI int64_t net_recvfrom(int32_t s, void *buf, uint64_t len, int flags, GuestSockaddr *from, uint32_t *fromlen) {
-    return sce(do_recvfrom(s,buf,len,flags,from,fromlen));
+static ABI int32_t net_accept(int32_t s, GuestSockaddr *p_addr, uint32_t *p_len) { return (int32_t)sce(do_accept(s,p_addr,p_len)); }
+static ABI int32_t net_getsockname(int32_t s, GuestSockaddr *p_addr, uint32_t *p_len) { return (int32_t)sce(do_getsockname(s,p_addr,p_len)); }
+static ABI int64_t net_recvfrom(int32_t s, void *p_buf, uint64_t len, int flags, GuestSockaddr *p_from, uint32_t *p_fromlen) {
+    return sce(do_recvfrom(s,p_buf,len,flags,p_from,p_fromlen));
 }
-static ABI int64_t net_recv(int32_t s, void *buf, uint64_t len, int flags) { return sce(do_recvfrom(s,buf,len,flags,NULL,NULL)); }
-static ABI int64_t net_sendto(int32_t s, const void *buf, uint64_t len, int flags, const GuestSockaddr *to, uint32_t tolen) {
-    return sce(do_sendto(s,buf,len,flags,to,tolen));
+static ABI int64_t net_recv(int32_t s, void *p_buf, uint64_t len, int flags) { return sce(do_recvfrom(s,p_buf,len,flags,NULL,NULL)); }
+static ABI int64_t net_sendto(int32_t s, const void *p_buf, uint64_t len, int flags, const GuestSockaddr *p_sockaddr, uint32_t tolen) {
+    return sce(do_sendto(s,p_buf,len,flags,p_sockaddr,tolen));
 }
-static ABI int64_t net_send(int32_t s, const void *buf, uint64_t len, int flags) { return sce(do_sendto(s,buf,len,flags,NULL,0)); }
-static ABI int32_t net_setsockopt(int32_t s, int level, int option, const void *value, uint32_t len) {
-    return (int32_t)sce(do_setsockopt(s,level,option,value,len));
+static ABI int64_t net_send(int32_t s, const void *p_buf, uint64_t len, int flags) { return sce(do_sendto(s,p_buf,len,flags,NULL,0)); }
+static ABI int32_t net_setsockopt(int32_t s, int level, int option, const void *p_value, uint32_t len) {
+    return (int32_t)sce(do_setsockopt(s,level,option,p_value,len));
 }
-static ABI int32_t net_getsockopt(int32_t s, int level, int option, void *value, uint32_t *len) {
-    return (int32_t)sce(do_getsockopt(s,level,option,value,len));
+static ABI int32_t net_getsockopt(int32_t s, int level, int option, void *p_value, uint32_t *p_len) {
+    return (int32_t)sce(do_getsockopt(s,level,option,p_value,p_len));
 }
 /* The wired interface's address, which an unplugged console still reports: one in Sony's 00:D9:D1
  * block, the same for sceNetGetMacAddress and sceNetCtlGetInfo. */
@@ -475,7 +475,7 @@ static ABI const char *posix_inet_ntop(int family, const void *p_address, char *
     return sz_result;
 }
 
-static const RuntimeExport exports[]={
+static const RuntimeExport s_exports[]={
     {"sceNetErrnoLoc",net_errno_loc}, {"sceNetSocket",net_socket}, {"sceNetSocketClose",net_close},
     {"sceNetSocketAbort",net_abort}, {"sceNetShutdown",net_shutdown}, {"sceNetBind",net_bind},
     {"sceNetConnect",net_connect}, {"sceNetListen",net_listen}, {"sceNetAccept",net_accept}, {"sceNetGetsockname",net_getsockname}, {"sceNetRecvfrom",net_recvfrom},
@@ -488,7 +488,7 @@ static const RuntimeExport exports[]={
     {"sendmsg",posix_sendmsg}, {"recvmsg",posix_recvmsg}, {"setsockopt",posix_setsockopt}, {"getsockopt",posix_getsockopt},
     {"select",posix_select}, {"inet_pton",posix_inet_pton}, {"inet_ntop",posix_inet_ntop},
 };
-uintptr_t runtime_socket_resolve(const char *sz_name) { return RUNTIME_LOOKUP(exports,sz_name); }
+uintptr_t runtime_socket_resolve(const char *sz_name) { return RUNTIME_LOOKUP(s_exports,sz_name); }
 #else
 int32_t *runtime_net_errno(void) { static int32_t e; return &e; }
 uintptr_t runtime_socket_resolve(const char *name) { (void)name; return 0; }

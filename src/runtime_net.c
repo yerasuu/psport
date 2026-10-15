@@ -12,81 +12,81 @@
 #include <string.h>
 #include <unistd.h>
 
-static char game_folder[PATH_MAX], game_serial[16], game_title[128], game_version[16];
+static char s_sz_game_folder[PATH_MAX], s_sz_game_serial[16], s_sz_game_title[128], s_sz_game_version[16];
 
 void runtime_net_configure(const char *sz_app0, const char *sz_serial, const char *sz_title, const char *sz_version) {
-    snprintf(game_folder,sizeof(game_folder),"%s",sz_app0 ? sz_app0 : "");
-    snprintf(game_serial,sizeof(game_serial),"%s",sz_serial ? sz_serial : "");
-    snprintf(game_title,sizeof(game_title),"%s",sz_title ? sz_title : "");
-    snprintf(game_version,sizeof(game_version),"%s",sz_version ? sz_version : "");
+    snprintf(s_sz_game_folder,sizeof(s_sz_game_folder),"%s",sz_app0 ? sz_app0 : "");
+    snprintf(s_sz_game_serial,sizeof(s_sz_game_serial),"%s",sz_serial ? sz_serial : "");
+    snprintf(s_sz_game_title,sizeof(s_sz_game_title),"%s",sz_title ? sz_title : "");
+    snprintf(s_sz_game_version,sizeof(s_sz_game_version),"%s",sz_version ? sz_version : "");
 }
 
 int runtime_net_enabled(void) {
-    static int enabled=-1;
-    if (enabled<0) { const char *v=getenv("PS_ONLINE"); enabled=v && v[0]=='1'; }
-    return enabled;
+    static int s_is_enabled=-1;
+    if (s_is_enabled<0) { const char *sz_value=getenv("PS_ONLINE"); s_is_enabled=sz_value && sz_value[0]=='1'; }
+    return s_is_enabled;
 }
 
 /* Imports the module answers: network, HTTP/SSL and NP, except what stays in the runtime. */
 int runtime_net_symbol(const char *sz_symbol) {
-    static const char *const online[]={"sceNet","sceNp","sceHttp","sceSsl"};
-    static const char *const local[]={"sceNpTrophy","sceNpCommerce","sceNpProfileDialog"};
+    static const char *const s_online[]={"sceNet","sceNp","sceHttp","sceSsl"};
+    static const char *const s_local[]={"sceNpTrophy","sceNpCommerce","sceNpProfileDialog"};
     if (!sz_symbol) return 0;
     int match=0;
-    for (size_t i=0;i<sizeof(online)/sizeof(*online);++i)
-        if (!strncmp(sz_symbol,online[i],strlen(online[i]))) match=1;
-    for (size_t i=0;i<sizeof(local)/sizeof(*local);++i)
-        if (!strncmp(sz_symbol,local[i],strlen(local[i]))) match=0;
+    for (size_t i=0;i<sizeof(s_online)/sizeof(*s_online);++i)
+        if (!strncmp(sz_symbol,s_online[i],strlen(s_online[i]))) match=1;
+    for (size_t i=0;i<sizeof(s_local)/sizeof(*s_local);++i)
+        if (!strncmp(sz_symbol,s_local[i],strlen(s_local[i]))) match=0;
     return match;
 }
 
 /* The module: PS_NET_MODULE, else gpu/libpsport-net.so beside psport (where libpsport-gpu.so is). */
 static PsNetResolveFn module_resolve(void) {
-    static int tried;
-    static PsNetResolveFn resolve;
-    if (tried) return resolve;
-    tried=1;
-    char path[PATH_MAX];
-    const char *forced=getenv("PS_NET_MODULE");
-    if (forced && forced[0]) {
-        snprintf(path,sizeof(path),"%s",forced);
+    static int s_has_tried;
+    static PsNetResolveFn s_pfn_resolve;
+    if (s_has_tried) return s_pfn_resolve;
+    s_has_tried=1;
+    char sz_path[PATH_MAX];
+    const char *sz_forced=getenv("PS_NET_MODULE");
+    if (sz_forced && sz_forced[0]) {
+        snprintf(sz_path,sizeof(sz_path),"%s",sz_forced);
     } else {
-        char exe[PATH_MAX-32];
-        const ssize_t n=readlink("/proc/self/exe",exe,sizeof(exe)-1);
-        if (n<=0) return NULL;
-        exe[n]=0;
-        char *slash=strrchr(exe,'/');
-        if (slash) *slash=0;
-        snprintf(path,sizeof(path),"%s/gpu/libpsport-net.so",exe);
+        char sz_exe[PATH_MAX-32];
+        const ssize_t cb_path=readlink("/proc/self/exe",sz_exe,sizeof(sz_exe)-1);
+        if (cb_path<=0) return NULL;
+        sz_exe[cb_path]=0;
+        char *sz_slash=strrchr(sz_exe,'/');
+        if (sz_slash) *sz_slash=0;
+        snprintf(sz_path,sizeof(sz_path),"%s/gpu/libpsport-net.so",sz_exe);
     }
     /* RTLD_LOCAL: its C++ (network and NP libraries) stays out of the process's symbol scope. */
-    void *module=dlopen(path,RTLD_NOW|RTLD_LOCAL);
-    if (!module) {
+    void *p_module=dlopen(sz_path,RTLD_NOW|RTLD_LOCAL);
+    if (!p_module) {
         printf("Online: the online module is not available (%s): offline play\n",dlerror());
         return NULL;
     }
-    const PsNetInitFn init=(PsNetInitFn)dlsym(module,"psport_net_init");
-    const PsNetResolveFn found=(PsNetResolveFn)dlsym(module,"psport_net_resolve");
+    const PsNetInitFn pfn_init=(PsNetInitFn)dlsym(p_module,"psport_net_init");
+    const PsNetResolveFn pfn_found=(PsNetResolveFn)dlsym(p_module,"psport_net_resolve");
     const PsNetHost host={
-        .abi=PSPORT_NET_ABI_VERSION, .app0=game_folder, .serial=game_serial, .title=game_title,
-        .app_ver=game_version, .thread_spawn=runtime_thread_spawn,
+        .abi=PSPORT_NET_ABI_VERSION, .app0=s_sz_game_folder, .serial=s_sz_game_serial, .title=s_sz_game_title,
+        .app_ver=s_sz_game_version, .thread_spawn=runtime_thread_spawn,
         .thread_join=runtime_thread_join_spawned,
     };
-    if (!init || !found || init(&host)!=0) {
-        printf("Online: %s did not start: offline play\n",path);
+    if (!pfn_init || !pfn_found || pfn_init(&host)!=0) {
+        printf("Online: %s did not start: offline play\n",sz_path);
         return NULL;
     }
-    printf("Online: module %s\n",path);
-    resolve=found;
-    return resolve;
+    printf("Online: module %s\n",sz_path);
+    s_pfn_resolve=pfn_found;
+    return s_pfn_resolve;
 }
 
 uintptr_t runtime_net_resolve(const char *sz_name) {
     if (!runtime_net_enabled()) return 0;
-    const char *symbol=runtime_symbol(sz_name);
-    if (!runtime_net_symbol(symbol)) return 0;
-    const PsNetResolveFn resolve=module_resolve();
-    const uintptr_t address=resolve ? resolve(sz_name) : 0;
-    if (resolve && !address) printf("Online: %s has no online version; the offline one is used\n",symbol);
+    const char *sz_symbol=runtime_symbol(sz_name);
+    if (!runtime_net_symbol(sz_symbol)) return 0;
+    const PsNetResolveFn pfn_resolve=module_resolve();
+    const uintptr_t address=pfn_resolve ? pfn_resolve(sz_name) : 0;
+    if (pfn_resolve && !address) printf("Online: %s has no online version; the offline one is used\n",sz_symbol);
     return address;
 }
