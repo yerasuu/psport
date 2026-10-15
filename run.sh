@@ -215,36 +215,29 @@ export PS_PREUPLOAD=${PS_PREUPLOAD:-1}
 # PS_AS_0_3=1 (the launcher's developer switch "Synchronisation as in 0.3"): what changed since the
 # 0.3 release is reverted for comparisons: the 0.3 memory model, WRITE_DATA/DMA waiting for every
 # host copy, the scheduler's concurrent recording check.
-# The game's GPU (vendor ID and name), for the choices below that depend on it.
-gpu_vendor= gpu_name=
+# The game's GPU decides the memory model and driver workarounds: HOST quirks of the registry
+# (docs/en/QUIRKS.md), which psport-gpu-capabilities --host-env turns into settings with their message:
+# the new memory model on AMD (amd_pc_memory_model), the 0.3 one elsewhere (NVIDIA's path through the
+# memory module is still being measured with testers); RADV_DEBUG=nohiz on GCN 3-5 under RADV
+# (radv_gcn_nohiz, Polaris, Vega and their APUs: with HiZ, depth compression showed black halos and
+# missing geometry, issues #54, #99), unless RADV_DEBUG is the user's, PS_AUTO_NOHIZ=0: off.
 if [[ -z ${PS_PC_MODEL:-} || ( ${PS_AUTO_NOHIZ:-1} != 0 && -z ${RADV_DEBUG:-} ) ]]; then
     # A command substitution, not < <(...): the shell waits for it here, whereas a process
     # substitution's child outlives the exec below and stays a zombie of the game for its whole run.
-    gpu_device=$("$caps" --device 2> /dev/null) || true
-    IFS=$'\t' read -r gpu_vendor gpu_name <<< "$gpu_device" || true
+    host_env=$("$caps" --host-env 2> /dev/null) || host_env=
+    while IFS=$'\t' read -r setting message; do
+        case ${setting%%=*} in
+        PS_PC_MODEL) [[ -z ${PS_PC_MODEL:-} ]] || continue ;;
+        RADV_DEBUG) [[ ${PS_AUTO_NOHIZ:-1} != 0 && -z ${RADV_DEBUG:-} ]] || continue ;;
+        *) continue ;;
+        esac
+        export "$setting"
+        echo "$message"
+    done <<< "$host_env"
 fi
-# Memory model left to the port: the new one on AMD (0x1002), the 0.3 one elsewhere (NVIDIA's
-# path through the memory module is still being measured with testers).
 if [[ -z ${PS_PC_MODEL:-} ]]; then
-    if [[ $gpu_vendor == 0x1002 ]]; then
-        export PS_PC_MODEL=1
-        echo "Memory model: new (AMD GPU${gpu_name:+, $gpu_name}; PS_PC_MODEL=0: the 0.3 model)"
-    else
-        export PS_PC_MODEL=0
-        echo "Memory model: the 0.3 one (${gpu_name:-GPU unknown}; PS_PC_MODEL=1: the new one)"
-    fi
-fi
-# GCN 3-5 under RADV (Polaris, Vega and their APUs): with HiZ, depth compression showed black
-# halos and missing geometry (issues #54, #99); RADV_DEBUG=nohiz fixed it at some cost. Set
-# unless RADV_DEBUG is the user's, PS_AUTO_NOHIZ=0: off.
-if [[ ${PS_AUTO_NOHIZ:-1} != 0 && -z ${RADV_DEBUG:-} && $gpu_name == *"(RADV "* ]]; then
-    for chip in TONGA ICELAND CARRIZO FIJI STONEY POLARIS VEGA RAVEN RENOIR; do
-        if [[ $gpu_name == *"(RADV $chip"* ]]; then
-            export RADV_DEBUG=nohiz
-            echo "RADV: $gpu_name: RADV_DEBUG=nohiz (depth compression artifacts on GCN 3-5; PS_AUTO_NOHIZ=0: off)"
-            break
-        fi
-    done
+    export PS_PC_MODEL=0
+    echo "Memory model: the 0.3 one (GPU unknown; PS_PC_MODEL=1: the new one)"
 fi
 if [[ ${PS_AS_0_3:-0} == 1 ]]; then
     export PS_GUEST_IN_PLACE=0 PS_HOST_COPY_WAITS=all PS_PRODUCER_CHECK=1

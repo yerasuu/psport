@@ -54,6 +54,10 @@ void runtime_quirks_evaluate(const RuntimeQuirkLaunch *p_launch);
 /* The GPU library, once the Vulkan physical device is chosen and before the device is created, so
  * that HOST quirks can shape device creation. Later calls are ignored (and said). */
 void runtime_quirks_note_gpu(uint32_t vendor, uint32_t driver_id, const char *sz_name, uint32_t version);
+/* Whether a HOST quirk applies to that GPU under PS_QUIRKS, without logging or publishing anything:
+ * for psport-gpu-capabilities --host-env, which decides run.sh's settings before psport runs. */
+int runtime_quirk_applies_to_gpu(RuntimeQuirkId id, uint32_t vendor, uint32_t driver_id, const char *sz_name,
+                                 uint32_t version);
 /* psport --list-quirks: every entry as JSON on stdout; with p_launch (--game), the ones its title
  * data would apply and what the policy makes of each, without GPU facts. */
 void runtime_quirks_list(const RuntimeQuirkLaunch *p_launch);

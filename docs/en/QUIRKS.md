@@ -27,8 +27,23 @@ QUIRK_TRAITS(id, traits)
   reaches the C side as `PsTitleInfo` `p_quirks`/`c_quirks`.
 
 The list generates the ids (`RUNTIME_QUIRK_<id>`, `src/runtime/runtime_quirks.h`), the metadata
-table, the matchers and `psport --list-quirks`. The registry holds no entry yet: GPU and driver
-rules move into it as `HOST` quirks next.
+table, the matchers and `psport --list-quirks`.
+
+## Host entries
+
+| Id | Matches | Read by | Without it |
+|---|---|---|---|
+| `amd_pc_memory_model` | vendor `0x1002` | run.sh (`PS_PC_MODEL=1`), `PsGuestMemory::PcModelGpu` | the 0.3 model, unless the layer's memory module or `PS_PC_MODEL_ANY_GPU=1` carries the new one |
+| `amd_guest_sparse_arena` | vendor `0x1002` | `PsGuestMemory::PcModelGpu` (`LayerMemory`'s default) | the layer's memory module (`PS_LAYER_MEMORY=1/0` by hand) |
+| `amd_guest_dmabuf_first` | vendor `0x1002` | `PsGuestMemory::Usable` | host memory import first, dma-buf after (`PS_GUEST_MEMORY=host/dmabuf` by hand) |
+| `radv_gcn_nohiz` | vendor `0x1002`, device `(RADV TONGA`, `ICELAND`, `CARRIZO`, `FIJI`, `STONEY`, `POLARIS`, `VEGA`, `RAVEN`, `RENOIR` | run.sh (`RADV_DEBUG=nohiz` unless `RADV_DEBUG` is set or `PS_AUTO_NOHIZ=0`) | HiZ on |
+| `nvidia_slow_depth_copies` | vendor `0x10de` | `psport-gpu-capabilities --live-resolution`, with no `VK_KHR_fragment_shader_barycentric` | live resolution by size and type only |
+
+run.sh decides before psport runs (a driver reads `RADV_DEBUG` when it loads), so
+`psport-gpu-capabilities --host-env` evaluates the same entries for the device psport will take,
+with `PS_QUIRKS` applied (`runtime_quirk_applies_to_gpu`, which logs and publishes nothing), and
+prints `KEY=VALUE<tab>message` lines; run.sh takes each one the user has not set and prints its
+message. psport logs the same entries again when its Vulkan device is chosen.
 
 ## Kinds and policy
 
@@ -86,7 +101,7 @@ with its kind, reason, reference and matchers; with `--game`, the title found in
 `PS_GAME_PROFILE` give it. GPU and middleware matches are not evaluated there.
 
 ```
-{"quirks": [],
+{"quirks": [...],
   "game": {"serial": "CUSA03173", "title": "Bloodborne"},
   "applies": []}
 ```

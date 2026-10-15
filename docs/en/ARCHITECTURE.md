@@ -70,8 +70,8 @@ directory from `PS_DATA_DIR` (default the checkout: `out/`, `user/`, `psport.ini
 - for a `psport.ini` `output_res` other than 1080p, chooses between live resolution changes and a
   scene size patched in at start (`PS_RENDER_RES`, `PS_OUTPUT_RES`, `PS_DMEM_MB`): the output
   divided by the upscaler preset's ratio, rounded half to even to an even size;
-- chooses the memory model and other defaults from the GPU (`out/psport-gpu-capabilities --device`),
-  see [Memory model](#memory-model);
+- chooses the memory model and driver workarounds from the GPU's `HOST` quirks
+  (`out/psport-gpu-capabilities --host-env`, [QUIRKS.md](QUIRKS.md)), see [Memory model](#memory-model);
 - passes `PS_SYS_MODULES`, `PS_HLE` and `PS_LLE` as `--system-modules`, `--hle` and `--lle`.
 
 ### psport
@@ -267,7 +267,8 @@ TAA, DLSS): [upscaler.md](upscaler.md). Changes to inherited shadPS4 files:
 
 ### Memory model
 
-Two models coexist on master; `run.sh` picks one when `PS_PC_MODEL` is unset:
+Two models coexist on master; `run.sh` picks one when `PS_PC_MODEL` is unset, from the `HOST`
+quirk `amd_pc_memory_model` ([QUIRKS.md](QUIRKS.md)):
 
 | GPU | Default | What it does |
 |---|---|---|

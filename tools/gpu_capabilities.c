@@ -3,13 +3,14 @@
  * --gamepads: the connected gamepads, "GUID<tab>name" per line (the launcher's controller list,
  * PS_GAMEPAD). --displays: the monitors, "name<tab>WxH<tab>primary (1 or 0)" per line in SDL's
  * order (the launcher's monitor list, PS_DISPLAY; issue #69). --read-input: one key or button for the
- * launcher's controls (below). --device: "vendorID<tab>name" of the GPU the game takes (run.sh:
- * memory model and driver workarounds by vendor and chip). */
+ * launcher's controls (below). --device: "vendorID<tab>name" of the GPU the game takes.
+ * --host-env: run.sh's settings from the quirk registry's HOST quirks for that GPU (below). */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <vulkan/vulkan.h>
 #include <SDL3/SDL.h>
+#include "runtime_quirks.h"
 
 static VkDeviceSize largest_local_heap(VkPhysicalDevice h_device) {
     VkPhysicalDeviceMemoryProperties memory;
@@ -56,18 +57,44 @@ static int has_extension(VkPhysicalDevice h_device, const char *sz_name) {
     return is_found;
 }
 
+/* The facts vk_instance.cpp hands to runtime_quirks_note_gpu, so that a quirk applies here as it
+ * does in psport. */
+static int quirk_applies(VkPhysicalDevice h_device, RuntimeQuirkId id) {
+    VkPhysicalDeviceDriverProperties driver = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES};
+    VkPhysicalDeviceProperties2 props = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &driver};
+    vkGetPhysicalDeviceProperties2(h_device, &props);
+    return runtime_quirk_applies_to_gpu(id, props.properties.vendorID, (uint32_t)driver.driverID,
+                                        props.properties.deviceName, props.properties.driverVersion);
+}
+
 static int live_resolution_suits(VkPhysicalDevice h_device) {
     VkPhysicalDeviceProperties props;
     vkGetPhysicalDeviceProperties(h_device, &props);
     const int discrete = props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU;
     const VkDeviceSize memory = largest_local_heap(h_device);
-    const int old_nvidia = props.vendorID == 0x10de &&
+    const int old_nvidia = quirk_applies(h_device, RUNTIME_QUIRK_nvidia_slow_depth_copies) &&
                            !has_extension(h_device, "VK_KHR_fragment_shader_barycentric");
     const int suits = discrete && memory >= (VkDeviceSize)7680 << 20 && !old_nvidia;
     fprintf(stderr, "GPU: %s, %s, %llu MiB: live resolution changes %s\n", props.deviceName,
             discrete ? "discrete" : "integrated or other", (unsigned long long)(memory >> 20),
             suits ? "on" : "off (startup resolution patch)");
     return suits;
+}
+
+/* --host-env: "KEY=VALUE<tab>message" per line, the settings run.sh takes before psport runs (a
+ * driver reads its variables when it loads), with the line run.sh prints for each. run.sh keeps the
+ * user's own values and its PS_AUTO_NOHIZ switch; the memory model line is always there. */
+static void print_host_env(VkPhysicalDevice h_device) {
+    VkPhysicalDeviceProperties props;
+    vkGetPhysicalDeviceProperties(h_device, &props);
+    if (quirk_applies(h_device, RUNTIME_QUIRK_amd_pc_memory_model))
+        printf("PS_PC_MODEL=1\tMemory model: new (AMD GPU, %s; PS_PC_MODEL=0: the 0.3 model)\n", props.deviceName);
+    else
+        printf("PS_PC_MODEL=0\tMemory model: the 0.3 one (%s; PS_PC_MODEL=1: the new one)\n", props.deviceName);
+    if (quirk_applies(h_device, RUNTIME_QUIRK_radv_gcn_nohiz))
+        printf("RADV_DEBUG=nohiz\tRADV: %s: RADV_DEBUG=nohiz (depth compression artifacts on GCN 3-5; "
+               "PS_AUTO_NOHIZ=0: off)\n",
+               props.deviceName);
 }
 
 static int list_gamepads(void) {
@@ -215,6 +242,7 @@ int main(int argc, char **argv) {
     }
     const int live_mode = argc > 1 && !strcmp(argv[1], "--live-resolution");
     const int device_mode = argc > 1 && !strcmp(argv[1], "--device");
+    const int host_env_mode = argc > 1 && !strcmp(argv[1], "--host-env");
     const VkApplicationInfo app = {
         .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
         .pApplicationName = "psport scene scaling probe",
@@ -262,6 +290,12 @@ int main(int argc, char **argv) {
         VkPhysicalDeviceProperties props;
         vkGetPhysicalDeviceProperties(h_selected, &props);
         printf("%#06x\t%s\n", props.vendorID, props.deviceName);
+        free(p_devices);
+        vkDestroyInstance(h_instance, NULL);
+        return 0;
+    }
+    if (host_env_mode) {
+        print_host_env(h_selected);
         free(p_devices);
         vkDestroyInstance(h_instance, NULL);
         return 0;

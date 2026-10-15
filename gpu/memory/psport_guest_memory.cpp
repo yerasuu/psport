@@ -12,6 +12,7 @@
 #include <unistd.h>
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "pslayer_gpu_memory.h"
+#include "psport_quirks.h"
 
 extern "C" void runtime_memory_set_guest_chunk_allocator(int (*pfn_alloc)(uint64_t phys,
                                                                       uint64_t cb_range));
@@ -512,21 +513,23 @@ bool PcModelGpu(const Vulkan::Instance& instance) {
         // (NVIDIA developer forum, "Sparse texture binding is painfully slow"), and the arena has
         // gigabytes of 64 KiB pages bound. Without rebinding (PS_FIXED_ARENA=1, all in place) the
         // GPU reads the game's data over the bus: 48 FPS against 210 on an RX 7800 XT.
-        constexpr std::uint32_t AmdVendor = 0x1002, NvidiaVendor = 0x10de;
+        constexpr std::uint32_t NvidiaVendor = 0x10de;
         const std::uint32_t vendor = instance.GetVendorID();
         const char* sz_any = std::getenv("PS_PC_MODEL_ANY_GPU");
-        // AMD keeps the sparse arena, every other GPU gets the layer's memory module (no sparse
-        // binding of the game's memory, see LayerMemory); PS_LAYER_MEMORY=1/0 by hand. On an
-        // RX 7800 XT the module was on par with the arena on a route in Yharnam, but in the
-        // Hunter's Dream it kept ~1 GB of the area's data out of VRAM (ranges with a few
+        // The sparse arena where amd_guest_sparse_arena applies, the layer's memory module (no
+        // sparse binding of the game's memory, see LayerMemory) elsewhere; PS_LAYER_MEMORY=1/0 by
+        // hand. On an RX 7800 XT the module was on par with the arena on a route in Yharnam, but in
+        // the Hunter's Dream it kept ~1 GB of the area's data out of VRAM (ranges with a few
         // unannounced blocks stay in place without volatile blocks): 100 FPS against ~200.
-        s_layer_default.store(vendor == AmdVendor ? 0 : 1, std::memory_order_relaxed);
+        s_layer_default.store(PsQuirk::Active(RUNTIME_QUIRK_amd_guest_sparse_arena) ? 0 : 1,
+                              std::memory_order_relaxed);
         if (LayerMemory()) {
             std::printf("Guest memory: the new memory model through the layer's memory module on "
                         "this GPU (vendor 0x%04x): no sparse binding of the game's memory\n",
                         vendor);
         }
-        if (vendor == AmdVendor || LayerMemory() || (sz_any && sz_any[0] == '1')) {
+        if (PsQuirk::Active(RUNTIME_QUIRK_amd_pc_memory_model) || LayerMemory() ||
+            (sz_any && sz_any[0] == '1')) {
             return true;
         }
         std::printf("Guest memory: the new memory model is for AMD GPUs%s; this GPU (vendor "
@@ -703,14 +706,15 @@ bool Usable(const Vulkan::Instance& instance) {
         s_xfb_host =
             ExternalXfbUsage(instance, vk::ExternalMemoryHandleTypeFlagBits::eHostAllocationEXT);
         s_is_usable_checked = true;
-        // PS_GUEST_MEMORY=dmabuf|host chooses; else AMD uses dma-buf chunks (tested the most) and
-        // other GPUs host memory import first (NVIDIA: its dma-buf maps at offset 0 only, and
-        // CPU access through it may be slow).
+        // PS_GUEST_MEMORY=dmabuf|host chooses; else dma-buf chunks where amd_guest_dmabuf_first
+        // applies and host memory import first elsewhere (NVIDIA: its dma-buf maps at offset 0
+        // only, and CPU access through it may be slow).
         const char* sz_forced = std::getenv("PS_GUEST_MEMORY");
         const bool should_force_host = sz_forced && std::string_view{sz_forced} == "host";
         const bool should_force_dmabuf = sz_forced && std::string_view{sz_forced} == "dmabuf";
         const bool is_host_first =
-            should_force_host || (!should_force_dmabuf && instance.GetVendorID() != 0x1002);
+            should_force_host ||
+            (!should_force_dmabuf && !PsQuirk::Active(RUNTIME_QUIRK_amd_guest_dmabuf_first));
         const char* sz_why = "";
         if (is_host_first && HostImportWorks(instance, sz_why)) {
             s_mode = Mode::HostImport;

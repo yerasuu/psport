@@ -218,6 +218,13 @@ void runtime_quirks_evaluate(const RuntimeQuirkLaunch *p_launch) {
     if (!s_active[0] && !s_active[1]) puts("Quirks: none active");
 }
 
+static int is_gpu_match(size_t i_match, uint32_t vendor, uint32_t driver_id, const char *sz_name, uint32_t version) {
+    return (!s_gpu_matches[i_match].vendor || s_gpu_matches[i_match].vendor == vendor) &&
+           (!s_gpu_matches[i_match].driver_id || s_gpu_matches[i_match].driver_id == driver_id) &&
+           strstr(sz_name, s_gpu_matches[i_match].sz_device) && version >= s_gpu_matches[i_match].version_first &&
+           version <= s_gpu_matches[i_match].version_last;
+}
+
 void runtime_quirks_note_gpu(uint32_t vendor, uint32_t driver_id, const char *sz_name, uint32_t version) {
     if (__atomic_exchange_n(&s_has_noted_gpu, 1, __ATOMIC_ACQ_REL)) {
         printf("Quirks: GPU facts already noted, %s ignored\n", sz_name);
@@ -230,16 +237,23 @@ void runtime_quirks_note_gpu(uint32_t vendor, uint32_t driver_id, const char *sz
     QuirkSet before;
     memcpy(before, s_decided, sizeof(before));
     for (size_t i = 0; s_gpu_matches[i].sz_device; ++i)
-        if ((!s_gpu_matches[i].vendor || s_gpu_matches[i].vendor == vendor) &&
-            (!s_gpu_matches[i].driver_id || s_gpu_matches[i].driver_id == driver_id) &&
-            strstr(sz_name, s_gpu_matches[i].sz_device) && version >= s_gpu_matches[i].version_first &&
-            version <= s_gpu_matches[i].version_last)
-            consider(s_gpu_matches[i].id, sz_matched);
+        if (is_gpu_match(i, vendor, driver_id, sz_name, version)) consider(s_gpu_matches[i].id, sz_matched);
     if (!memcmp(before, s_decided, sizeof(before))) {
         if (s_gpu_matches[0].sz_device) printf("Quirks: none for %s\n", sz_matched);
         return;
     }
     publish();
+}
+
+int runtime_quirk_applies_to_gpu(RuntimeQuirkId id, uint32_t vendor, uint32_t driver_id, const char *sz_name,
+                                 uint32_t version) {
+    configure();
+    const Policy policy = decide(id);
+    if (policy == POLICY_FORCED) return 1;
+    if (policy != POLICY_ACTIVE) return 0;
+    for (size_t i = 0; s_gpu_matches[i].sz_device; ++i)
+        if (s_gpu_matches[i].id == id && is_gpu_match(i, vendor, driver_id, sz_name, version)) return 1;
+    return 0;
 }
 
 const char *runtime_quirks_summary(void) { return __atomic_load_n(&s_sz_summary, __ATOMIC_ACQUIRE); }
