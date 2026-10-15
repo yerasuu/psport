@@ -20,6 +20,8 @@ void runtime_restart_configure(int c_argv, char **pp_argv);
 typedef void (ABI *GuestCallback)(void);
 void runtime_start(uint64_t capabilities);
 uintptr_t runtime_resolve(const char *sz_name, int is_data);
+/* The libraries after the runtime's own exports (runtime_resolve.c), in a fixed order. */
+uintptr_t runtime_library_resolve(const char *sz_name);
 /* Equal NIDs whatever their "#<library>#<module>" scope: one title's scope letters are not another's. */
 int runtime_same_nid(const char *sz_a, const char *sz_b);
 /* Linked modules' dynamic TLS ids run from 2 (1 is the eboot's static TLS) below this. */
