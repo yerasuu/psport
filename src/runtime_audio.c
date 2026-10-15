@@ -195,10 +195,12 @@ static int32_t output_port(int32_t h_handle, const void *p_data, int pace) {
             }
         }
         if (pace) {
-            uint64_t now=now_ns();
-            if (!p_port->next_deadline_ns || now>p_port->next_deadline_ns+8*period) p_port->next_deadline_ns=now; /* start or stall: restart cadence */
-            else sleep_until(p_port->next_deadline_ns);
+            uint64_t now=now_ns(), deadline_ns=p_port->next_deadline_ns;
+            if (!deadline_ns || now>deadline_ns+8*period) { p_port->next_deadline_ns=now; deadline_ns=0; } /* start or stall: restart cadence */
             p_port->next_deadline_ns+=period;
+            /* Not under the port's lock: the thread that feeds the port takes it again right after
+               it returns, so a sceAudioOutSetVolume from another thread could wait for seconds. */
+            if (deadline_ns) { pthread_mutex_unlock(&p_port->lock); sleep_until(deadline_ns); pthread_mutex_lock(&p_port->lock); }
         }
         if (p_port->p_stream) {
             /* The device drains the queue in quanta (21 ms on PipeWire), so the level
