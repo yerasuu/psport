@@ -1457,8 +1457,11 @@ void InitEventDispatcher() {
 }
 
 void TermEventDispatcher() {
-    if (!g_state.dispatch_running.exchange(false)) {
-        return;
+    {
+        std::lock_guard lock(g_state.queue_mutex);
+        if (!g_state.dispatch_running.exchange(false)) {
+            return;
+        }
     }
     g_state.queue_cv.notify_all();
     if (g_state.dispatch_thread) {

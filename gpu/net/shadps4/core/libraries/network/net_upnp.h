@@ -47,6 +47,7 @@ private:
     UPnPClient& operator=(const UPnPClient&) = delete;
 
     void DiscoverThread();
+    void MarkDiscoveryDone();
 
     std::atomic<bool> m_started{false};
     std::atomic<bool> m_p2p_features_enabled{true};
