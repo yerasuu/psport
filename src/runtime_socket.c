@@ -14,6 +14,7 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/uio.h>
 
@@ -343,6 +344,76 @@ static ABI int32_t net_setsockopt(int32_t s, int level, int option, const void *
 static ABI int32_t net_getsockopt(int32_t s, int level, int option, void *value, uint32_t *len) {
     return (int32_t)sce(do_getsockopt(s,level,option,value,len));
 }
+/* The wired interface's address, which an unplugged console still reports: one in Sony's 00:D9:D1
+ * block, the same for sceNetGetMacAddress and sceNetCtlGetInfo. */
+void runtime_net_ether_address(uint8_t p_out_address[6]) {
+    static const uint8_t s_address[6]={0x00,0xd9,0xd1,0x50,0x53,0x34};
+    memcpy(p_out_address,s_address,sizeof(s_address));
+}
+static ABI int32_t net_get_mac_address(uint8_t *p_out_address, int flags) {
+    (void)flags;
+    if (!p_out_address) return fail(GUEST_EINVAL);
+    runtime_net_ether_address(p_out_address);
+    return 0;
+}
+/* SceNetSockInfo as the Vita's libnet lays it out, which the PS4's continues; the name a socket
+ * was created with is not kept, so it stays empty. */
+typedef struct {
+    char name[32];
+    int32_t pid, h_socket;
+    int8_t socket_type, policy;
+    int16_t reserved16;
+    int32_t cb_recv_queue, cb_send_queue;
+    uint32_t local_address, remote_address;
+    uint16_t local_port, remote_port, local_vport, remote_vport;
+    int32_t state, flags, reserved[8];
+} GuestSockInfo;
+_Static_assert(sizeof(GuestSockInfo)==108,"SceNetSockInfo layout");
+/* Linux's TCP states (1 ESTABLISHED .. 11 CLOSING) to FreeBSD's (0 CLOSED .. 10 TIME_WAIT). */
+static int32_t guest_tcp_state(uint8_t state) {
+    static const int8_t s_states[12]={0,4,2,3,6,9,10,0,5,8,1,7};
+    return state<12 ? s_states[state] : 0;
+}
+static int describe_socket(int32_t h_socket, GuestSockInfo *p_out_info) {
+    int h_host=host_socket(h_socket), type;
+    socklen_t cb_type=sizeof(type);
+    if (h_host<0 || getsockopt(h_host,SOL_SOCKET,SO_TYPE,&type,&cb_type)) return 0;
+    memset(p_out_info,0,sizeof(*p_out_info));
+    p_out_info->h_socket=h_socket;
+    p_out_info->socket_type=type==SOCK_STREAM ? 1 : 2;
+    int cb_queued=0;
+    if (!ioctl(h_host,FIONREAD,&cb_queued)) p_out_info->cb_recv_queue=cb_queued;
+    if (!ioctl(h_host,TIOCOUTQ,&cb_queued)) p_out_info->cb_send_queue=cb_queued;
+    struct sockaddr_in address;
+    socklen_t cb_address=sizeof(address);
+    if (!getsockname(h_host,(struct sockaddr *)&address,&cb_address)) {
+        p_out_info->local_address=address.sin_addr.s_addr;
+        p_out_info->local_port=address.sin_port;
+    }
+    cb_address=sizeof(address);
+    if (!getpeername(h_host,(struct sockaddr *)&address,&cb_address)) {
+        p_out_info->remote_address=address.sin_addr.s_addr;
+        p_out_info->remote_port=address.sin_port;
+    }
+    struct tcp_info tcp;
+    socklen_t cb_tcp=sizeof(tcp);
+    if (type==SOCK_STREAM && !getsockopt(h_host,IPPROTO_TCP,TCP_INFO,&tcp,&cb_tcp)) p_out_info->state=guest_tcp_state(tcp.tcpi_state);
+    return 1;
+}
+/* One socket, or every socket with h_socket -1; returns how many entries were written. */
+static ABI int32_t net_get_sock_info(int32_t h_socket, GuestSockInfo *p_out_info, int32_t c_info, int32_t flags) {
+    (void)flags;
+    if (c_info<0 || (c_info && !p_out_info)) return fail(GUEST_EINVAL);
+    if (h_socket!=-1) {
+        GuestSockInfo info;
+        if (!describe_socket(h_socket,&info)) return fail(GUEST_EBADF);
+        if (c_info) p_out_info[0]=info;
+        return c_info ? 1 : 0;
+    }
+    int32_t c_written=0;
+    for (int32_t h=3; h<GUEST_FD_SETSIZE && c_written<c_info; ++h) c_written+=describe_socket(h,&p_out_info[c_written]);
+    return c_written;
+}
 
 static ABI int32_t posix_socket(int family, int type, int protocol) { return (int32_t)posix(do_socket(family,type,protocol)); }
 static ABI int32_t posix_shutdown(int32_t h_socket, int how) { return (int32_t)posix(do_shutdown(h_socket,how)); }
@@ -410,6 +481,7 @@ static const RuntimeExport exports[]={
     {"sceNetConnect",net_connect}, {"sceNetListen",net_listen}, {"sceNetAccept",net_accept}, {"sceNetGetsockname",net_getsockname}, {"sceNetRecvfrom",net_recvfrom},
     {"sceNetRecv",net_recv}, {"sceNetSendto",net_sendto}, {"sceNetSend",net_send},
     {"sceNetSetsockopt",net_setsockopt}, {"sceNetGetsockopt",net_getsockopt},
+    {"sceNetGetMacAddress",net_get_mac_address}, {"sceNetGetSockInfo",net_get_sock_info},
     {"socket",posix_socket}, {"shutdown",posix_shutdown}, {"bind",posix_bind}, {"connect",posix_connect},
     {"listen",posix_listen}, {"accept",posix_accept}, {"getsockname",posix_getsockname}, {"getpeername",posix_getpeername},
     {"recvfrom",posix_recvfrom}, {"recv",posix_recv}, {"sendto",posix_sendto}, {"send",posix_send},

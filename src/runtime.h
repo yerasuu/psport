@@ -167,6 +167,8 @@ uintptr_t runtime_json_resolve(const char *sz_name);
 /* PSN libraries offline (runtime_np.c), consulted by runtime_services_resolve. */
 uintptr_t runtime_np_resolve(const char *sz_name);
 int32_t *runtime_net_errno(void);
+/* The console's wired MAC address (runtime_socket.c). */
+void runtime_net_ether_address(uint8_t p_out_address[6]);
 /* Online play (runtime_net.c, PS_ONLINE=1): the online module answers the network and PSN imports. */
 void runtime_net_configure(const char *app0, const char *serial, const char *title, const char *version);
 int runtime_net_enabled(void);

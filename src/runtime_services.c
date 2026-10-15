@@ -160,7 +160,14 @@ static ABI const char *net_ntop(int af,const void *src,char *dst,uint32_t size) 
     return inet_ntop(AF_INET,src,dst,size);
 }
 static ABI int32_t netctl_state(int32_t *state) { if (!state) return NET_CTL_INVALID_ADDR; *state=0; return 0; }
-static ABI int32_t netctl_info(int code,void *info) { (void)code; (void)info; return NET_CTL_NOT_CONNECTED; }
+/* The interface's own address does not need a connection; everything else does. */
+static ABI int32_t netctl_info(int code,void *info) {
+    if (code!=2) return NET_CTL_NOT_CONNECTED; /* SCE_NET_CTL_INFO_ETHER_ADDR */
+    if (!info) return NET_CTL_INVALID_ADDR;
+    runtime_net_ether_address(info);
+    return 0;
+}
+static ABI int32_t netctl_init(void) { note("NetCtl initialized (network cable unplugged)"); return 0; }
 static ABI int32_t netctl_register(void *cb,void *arg,int32_t *cid) { (void)arg; if (!cb || !cid) return NET_CTL_INVALID_ADDR; *cid=new_id(); return 0; }
 static ABI int32_t netctl_nat(uint32_t *info) {
     if (!info) return NET_CTL_INVALID_ADDR;
@@ -618,7 +625,7 @@ static const RuntimeExport exports[]={
     {"sceNetInetPton",net_pton}, {"sceNetInetNtop",net_ntop},
     {"sceNetEpollControl",net_unreachable}, {"sceNetEpollWait",net_unreachable}, {"sceNetEpollAbort",net_unreachable},
     {"sceNetResolverStartNtoa",net_unreachable}, {"sceNetResolverStartAton",net_unreachable},
-    {"sceNetCtlGetState",netctl_state}, {"sceNetCtlGetInfo",netctl_info},
+    {"sceNetCtlInit",netctl_init}, {"sceNetCtlGetState",netctl_state}, {"sceNetCtlGetInfo",netctl_info},
     {"sceNetCtlRegisterCallback",netctl_register}, {"sceNetCtlCheckCallback",nothing_due},
     {"sceNetCtlUnregisterCallback",runtime_stub}, {"sceNetCtlGetNatInfo",netctl_nat},
     {"sceNetCtlRegisterCallbackForNpToolkit",netctl_register}, {"sceNetCtlCheckCallbackForNpToolkit",nothing_due},
