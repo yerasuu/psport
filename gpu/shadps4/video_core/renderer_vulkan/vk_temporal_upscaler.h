@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// bbport: temporal upscaling of Bloodborne's HDR scene color (docs/en/upscaler.md). PS_UPSCALER=fsr3
+// bbport: temporal upscaling of the game's HDR scene color (docs/en/upscaler.md). PS_UPSCALER=fsr3
 // runs FSR 3.1 (FireBurn/FSR-Vulkan, native Vulkan) on the scene color right before the
 // post-processing combine pass, with the scene depth and camera motion vectors, and writes the
 // result back so the game's own post, tonemap and UI continue unchanged (Native AA preset).
@@ -45,8 +45,9 @@ void DumpFinalFrameIfDue(const Instance& instance, Scheduler& scheduler, vk::Com
                          vk::Image image, u32 width, u32 height, vk::Format format);
 
 /// The scene combine and UI shaders that place the upscaler in the frame: PS_UPSCALE_BEFORE_CS
-/// and PS_UI_TRIGGER_VS, else the game profile's (Game::Profile::upscaler).
-Game::UpscalerPlacement GetUpscalerPlacement();
+/// and PS_UI_TRIGGER_VS, else the game profile's (Game::Profile::upscaler), with the profile's
+/// UI shaders, camera constants and bone palettes.
+const Game::UpscalerPlacement& GetUpscalerPlacement();
 /// Unless PS_UPSCALER=none, the upscaler runs where its scene combine is known; the camera and
 /// object motion vectors and the scene jitter exist only for it.
 bool IsUpscalerAvailable();

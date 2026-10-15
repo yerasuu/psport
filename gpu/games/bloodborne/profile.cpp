@@ -80,6 +80,13 @@ void ReportStats() {
     }
 }
 
+/// Scaleform's draws, the first stencil and movie pass among them, and the title menu's while it
+/// animates its highlight: without those its frames were shown at the game's 1080p between
+/// output-size ones, a flicker (PS_UI_TRACE=1). A native-size viewport alone also matches every
+/// fullscreen post pass while the game's targets stay at 1080p.
+constexpr std::uint64_t UiMovieShaders[] = {0x34e8a281, 0x81d336ce, 0x09957251, 0x24042a9b, 0xa400228b,
+                                            0xbb4d5f8c, 0xe94b5b06, 0x9951d199, 0x44072322, 0xa334a845};
+
 /// PS_LABEL_TRAP=2: the small-object pool's release, and the branch of the GPU range collector
 /// (0x26aa860) taken for a block whose label reads 4 (done).
 constexpr LabelReleaseCode LabelRelease = {
@@ -108,8 +115,22 @@ extern const Profile BloodborneProfile = {
     // Its scene textures have little or no anisotropic filtering: behind the upscaler, surfaces
     // seen at a grazing angle (stairs, floors, walls along the view) stayed blurred.
     .anisotropy = 16,
-    // The post-processing combine, and the UI's first vertex shader.
-    .upscaler = {.scene_combine_shader = 0x9a9cf8a9, .ui_shader = 0x34e8a281},
+    // The post-processing combine, and the UI's first vertex shader. Characters' bone palettes
+    // are 656 bytes and up, weapons' and props' 2 to 8 bones.
+    .upscaler = {.scene_combine_shader = 0x9a9cf8a9,
+                 .ui_shader = 0x34e8a281,
+                 .ui_movie_shaders = UiMovieShaders,
+                 .camera = {.cb_constants = 864,
+                            .far_plane = 3000.0f,
+                            .off_dw_far = 0,
+                            .off_dw_render_size = 4,
+                            .off_dw_view = 8,
+                            .off_dw_inverse_view = 180,
+                            .off_dw_projection = 52},
+                 .bone_palettes = {.cb_bone = 48,
+                                   .cb_min_small_skeleton = 96,
+                                   .cb_min_skeleton = 640,
+                                   .cb_max_skeleton = 16384}},
     .report_stats = ReportStats,
     .before_present = BbGameMenu::Poll,
     .label_release = LabelRelease,

@@ -29,6 +29,7 @@
 #include "video_core/cache_storage.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
 #include "video_core/renderer_vulkan/motion_history.h"
+#include "video_core/renderer_vulkan/vk_temporal_upscaler.h"
 #include "video_core/renderer_vulkan/vk_draw_prep.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_pipeline_serialization.h"
@@ -828,7 +829,8 @@ bool PipelineCache::RefreshGraphicsKey(PipelineSelection& sel) {
                 if (resource.IsSpecial()) continue;
                 const auto buffer = resource.GetSharp(*vs);
                 if (buffer.Valid() && buffer.GetStride() == 16 &&
-                    Motion::ClassifyBuffer(buffer.GetSize()) != Motion::BufferRole::Other) {
+                    Motion::ClassifyBuffer(buffer.GetSize(), GetUpscalerPlacement()) !=
+                        Motion::BufferRole::Other) {
                     sel.motion = true;
                     break;
                 }

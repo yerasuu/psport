@@ -90,7 +90,8 @@ i.e. it was static for FSR.
 
 Changes:
 
-- `Motion::ClassifyBuffer` (`motion_history.h`): 864 — scene, ≥640 — character skeleton,
+- `Motion::ClassifyBuffer` (`motion_history.h`), with the sizes from Bloodborne's profile
+  (`Game::BonePalettes` in `upscaler.bone_palettes`): 864 — scene, ≥640 — character skeleton,
   96..639 multiple of 48 — small skeleton. Pipelines with any skeleton get the variant
   with vectors.
 - There are about a thousand small skeletons per frame, most of them static map parts.

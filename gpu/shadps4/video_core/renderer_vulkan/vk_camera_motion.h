@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "common/types.h"
+#include "game_profile.h"
 #include "video_core/renderer_vulkan/vk_common.h"
 #include "video_core/buffer_cache/buffer.h"
 #include "video_core/texture_cache/image.h"
@@ -71,7 +72,11 @@ public:
     /// layout) into `motion_view` (RG16F storage, General), pixels, previous minus current.
     void RecordMotion(vk::ImageView depth_view, vk::ImageView motion_view, u32 width, u32 height);
 
-    /// A bound constant buffer of 864 bytes: checks the scene constant signature.
+    /// Whether a constant buffer of this size may be the game profile's scene constants.
+    [[nodiscard]] bool IsSceneConstants(u32 cb_buffer) const noexcept {
+        return m_constants.cb_constants && cb_buffer == m_constants.cb_constants;
+    }
+    /// A bound constant buffer that IsSceneConstants: checks the scene constant signature.
     void OnConstants(const float* data);
 
     /// The G-buffer pass (5+ color targets): its depth is the scene depth.
@@ -105,6 +110,7 @@ private:
     vk::UniquePipeline motion_pipeline;
 
     ObjectMotion* object_motion = nullptr;
+    const Game::CameraConstants m_constants;
     Camera current, previous;
     bool frame_has_camera = false;
     /// bbport: the camera of the G-buffer pass in progress (OnConstants), committed as the frame's
