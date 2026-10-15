@@ -1,0 +1,66 @@
+# With -u from a run of bo2-play.sched: past the title (cross every 8 s), Campaign's Resume Story and
+# its Yes load the save; the briefing videos are skipped and Pyrrhic Victory resumes at its mortar
+# crews checkpoint at about 170 s. The player strafes left and right in turn while aiming and firing:
+# forward leaves the combat zone, and standing still is what the mortars hit.
+60 shot
+110 shot
+112 press cross
+115 shot
+118 shot
+120 press cross
+123 shot
+126 shot
+128 press cross
+131 shot
+134 shot
+136 press cross
+139 shot
+142 shot
+144 press cross
+147 shot
+150 shot
+152 press cross
+155 shot
+158 shot
+160 press cross
+163 shot
+166 shot
+172 shot
+174 press lx=0+l2 0.5
+175 press lx=0+l2+r2 1.5
+177 shot
+178 press lx=255+l2 0.5
+179 press lx=255+l2+r2 1.5
+181 shot
+182 press lx=0+l2 0.5
+183 press lx=0+l2+r2 1.5
+185 press square 0.15
+186 press lx=255+l2 0.5
+187 press lx=255+l2+r2 1.5
+189 shot
+190 press lx=0+l2 0.5
+191 press lx=0+l2+r2 1.5
+193 shot
+194 press lx=255+l2 0.5
+195 press lx=255+l2+r2 1.5
+197 press square 0.15
+198 press lx=0+l2 0.5
+199 press lx=0+l2+r2 1.5
+201 shot
+202 press lx=255+l2 0.5
+203 press lx=255+l2+r2 1.5
+205 shot
+206 press lx=0+l2 0.5
+207 press lx=0+l2+r2 1.5
+209 press square 0.15
+210 press lx=255+l2 0.5
+211 press lx=255+l2+r2 1.5
+213 shot
+214 press lx=0+l2 0.5
+215 press lx=0+l2+r2 1.5
+217 shot
+218 press lx=255+l2 0.5
+219 press lx=255+l2+r2 1.5
+221 press square 0.15
+224 shot
+226 end
