@@ -57,9 +57,9 @@ static char *buffer_take(Buffer *p_buffer) {
 static int xml_fail(XmlParser *p_parser, const char *p_at, const char *sz_reason) {
     if (p_parser->sz_error[0]) return 0;
     unsigned line = 1, column = 0;
-    for (const char *p = p_parser->p_start; p < p_at && p < p_parser->p_end; ++p) {
-        if (*p == '\n') ++line, column = 0;
-        else if (((unsigned char)*p & 0xc0) != 0x80) ++column;
+    for (const char *sz_cursor = p_parser->p_start; sz_cursor < p_at && sz_cursor < p_parser->p_end; ++sz_cursor) {
+        if (*sz_cursor == '\n') ++line, column = 0;
+        else if (((unsigned char)*sz_cursor & 0xc0) != 0x80) ++column;
     }
     snprintf(p_parser->sz_error, sizeof(p_parser->sz_error), "%s: line %u, column %u", sz_reason, line, column);
     return 0;
@@ -92,61 +92,61 @@ static int skip_past(XmlParser *p_parser, const char *sz_close, const char *p_fr
     return 1;
 }
 static void add_utf8(Buffer *p_buffer, uint32_t code_point) {
-    char bytes[4];
+    char sz_bytes[4];
     size_t cb_bytes;
-    if (code_point < 0x80) bytes[0] = (char)code_point, cb_bytes = 1;
+    if (code_point < 0x80) sz_bytes[0] = (char)code_point, cb_bytes = 1;
     else if (code_point < 0x800)
-        bytes[0] = (char)(0xc0 | code_point >> 6), bytes[1] = (char)(0x80 | (code_point & 0x3f)), cb_bytes = 2;
+        sz_bytes[0] = (char)(0xc0 | code_point >> 6), sz_bytes[1] = (char)(0x80 | (code_point & 0x3f)), cb_bytes = 2;
     else if (code_point < 0x10000)
-        bytes[0] = (char)(0xe0 | code_point >> 12), bytes[1] = (char)(0x80 | (code_point >> 6 & 0x3f)),
-        bytes[2] = (char)(0x80 | (code_point & 0x3f)), cb_bytes = 3;
+        sz_bytes[0] = (char)(0xe0 | code_point >> 12), sz_bytes[1] = (char)(0x80 | (code_point >> 6 & 0x3f)),
+        sz_bytes[2] = (char)(0x80 | (code_point & 0x3f)), cb_bytes = 3;
     else
-        bytes[0] = (char)(0xf0 | code_point >> 18), bytes[1] = (char)(0x80 | (code_point >> 12 & 0x3f)),
-        bytes[2] = (char)(0x80 | (code_point >> 6 & 0x3f)), bytes[3] = (char)(0x80 | (code_point & 0x3f)), cb_bytes = 4;
-    buffer_add(p_buffer, bytes, cb_bytes);
+        sz_bytes[0] = (char)(0xf0 | code_point >> 18), sz_bytes[1] = (char)(0x80 | (code_point >> 12 & 0x3f)),
+        sz_bytes[2] = (char)(0x80 | (code_point >> 6 & 0x3f)), sz_bytes[3] = (char)(0x80 | (code_point & 0x3f)), cb_bytes = 4;
+    buffer_add(p_buffer, sz_bytes, cb_bytes);
 }
 /* Character data up to '<' (text) or the closing quote (an attribute value, whose literal line
  * breaks and tabs become spaces, as XML normalizes them). Line breaks are \n either way. */
 static int parse_data(XmlParser *p_parser, char quote, Buffer *p_out) {
     while (!at_end(p_parser) && *p_parser->p_cursor != (quote ? quote : '<')) {
-        const char *p = p_parser->p_cursor;
-        if (quote && *p == '<') return xml_fail(p_parser, p, "not well-formed (invalid token)");
-        if (*p == '&') {
-            const char *p_semicolon = memchr(p, ';', (size_t)(p_parser->p_end - p));
-            if (!p_semicolon) return xml_fail(p_parser, p, "not well-formed (invalid token)");
-            size_t cb_entity = (size_t)(p_semicolon - p - 1);
+        const char *sz_cursor = p_parser->p_cursor;
+        if (quote && *sz_cursor == '<') return xml_fail(p_parser, sz_cursor, "not well-formed (invalid token)");
+        if (*sz_cursor == '&') {
+            const char *p_semicolon = memchr(sz_cursor, ';', (size_t)(p_parser->p_end - sz_cursor));
+            if (!p_semicolon) return xml_fail(p_parser, sz_cursor, "not well-formed (invalid token)");
+            size_t cb_entity = (size_t)(p_semicolon - sz_cursor - 1);
             static const char *const s_entities[][2] = {{"lt", "<"}, {"gt", ">"}, {"amp", "&"}, {"quot", "\""}, {"apos", "'"}};
             int is_known = 0;
             for (size_t i = 0; i < sizeof(s_entities) / sizeof(*s_entities) && !is_known; ++i)
-                if (strlen(s_entities[i][0]) == cb_entity && !memcmp(p + 1, s_entities[i][0], cb_entity))
+                if (strlen(s_entities[i][0]) == cb_entity && !memcmp(sz_cursor + 1, s_entities[i][0], cb_entity))
                     buffer_add(p_out, s_entities[i][1], 1), is_known = 1;
             if (!is_known) {
-                if (cb_entity < 2 || p[1] != '#') return xml_fail(p_parser, p, "undefined entity");
-                int is_hex = p[2] == 'x';
-                const char *p_digits = p + 2 + is_hex;
+                if (cb_entity < 2 || sz_cursor[1] != '#') return xml_fail(p_parser, sz_cursor, "undefined entity");
+                int is_hex = sz_cursor[2] == 'x';
+                const char *p_digits = sz_cursor + 2 + is_hex;
                 uint32_t code_point = 0;
-                if (p_digits == p_semicolon) return xml_fail(p_parser, p, "not well-formed (invalid token)");
-                for (const char *d = p_digits; d < p_semicolon; ++d) {
-                    unsigned digit = (unsigned)(*d - '0') < 10 ? (unsigned)(*d - '0')
-                                   : is_hex && (unsigned)((*d | 32) - 'a') < 6 ? (unsigned)((*d | 32) - 'a' + 10) : 99;
-                    if (digit == 99) return xml_fail(p_parser, p, "not well-formed (invalid token)");
+                if (p_digits == p_semicolon) return xml_fail(p_parser, sz_cursor, "not well-formed (invalid token)");
+                for (const char *sz_digit = p_digits; sz_digit < p_semicolon; ++sz_digit) {
+                    unsigned digit = (unsigned)(*sz_digit - '0') < 10 ? (unsigned)(*sz_digit - '0')
+                                   : is_hex && (unsigned)((*sz_digit | 32) - 'a') < 6 ? (unsigned)((*sz_digit | 32) - 'a' + 10) : 99;
+                    if (digit == 99) return xml_fail(p_parser, sz_cursor, "not well-formed (invalid token)");
                     code_point = code_point * (is_hex ? 16 : 10) + digit;
-                    if (code_point > 0x10ffff) return xml_fail(p_parser, p, "reference to invalid character number");
+                    if (code_point > 0x10ffff) return xml_fail(p_parser, sz_cursor, "reference to invalid character number");
                 }
                 if ((code_point < 0x20 && code_point != 9 && code_point != 10 && code_point != 13) ||
                     (code_point >= 0xd800 && code_point < 0xe000) || code_point == 0xfffe || code_point == 0xffff)
-                    return xml_fail(p_parser, p, "reference to invalid character number");
+                    return xml_fail(p_parser, sz_cursor, "reference to invalid character number");
                 add_utf8(p_out, code_point);
             }
             p_parser->p_cursor = p_semicolon + 1;
-        } else if (*p == '\r') {
+        } else if (*sz_cursor == '\r') {
             buffer_add(p_out, quote ? " " : "\n", 1);
-            p_parser->p_cursor += p + 1 < p_parser->p_end && p[1] == '\n' ? 2 : 1;
-        } else if (quote && (*p == '\n' || *p == '\t')) {
+            p_parser->p_cursor += sz_cursor + 1 < p_parser->p_end && sz_cursor[1] == '\n' ? 2 : 1;
+        } else if (quote && (*sz_cursor == '\n' || *sz_cursor == '\t')) {
             buffer_add(p_out, " ", 1);
             ++p_parser->p_cursor;
         } else {
-            buffer_add(p_out, p, 1);
+            buffer_add(p_out, sz_cursor, 1);
             ++p_parser->p_cursor;
         }
     }
@@ -343,17 +343,17 @@ static const char *attribute(const XmlNode *p_node, const char *sz_name) {
 }
 /* Every element named sz_name under p_node, in document order (p_node itself not included; see
  * find_from). */
-typedef struct { const XmlNode **pp_nodes; size_t count, capacity; } NodeList;
+typedef struct { const XmlNode **pp_nodes; size_t c_nodes, c_capacity; } NodeList;
 static void find_all(const XmlNode *p_node, const char *sz_name, NodeList *p_out) {
     for (size_t i = 0; i < p_node->c_children; ++i) {
         const XmlNode *p_child = p_node->pp_children[i];
         if (!strcmp(p_child->sz_name, sz_name)) {
-            if (p_out->count == p_out->capacity) {
-                p_out->capacity = p_out->capacity ? p_out->capacity * 2 : 16;
-                if (!(p_out->pp_nodes = realloc(p_out->pp_nodes, p_out->capacity * sizeof(*p_out->pp_nodes))))
+            if (p_out->c_nodes == p_out->c_capacity) {
+                p_out->c_capacity = p_out->c_capacity ? p_out->c_capacity * 2 : 16;
+                if (!(p_out->pp_nodes = realloc(p_out->pp_nodes, p_out->c_capacity * sizeof(*p_out->pp_nodes))))
                     loader_fail("allocation failed");
             }
-            p_out->pp_nodes[p_out->count++] = p_child;
+            p_out->pp_nodes[p_out->c_nodes++] = p_child;
         }
         find_all(p_child, sz_name, p_out);
     }
@@ -361,9 +361,9 @@ static void find_all(const XmlNode *p_node, const char *sz_name, NodeList *p_out
 /* p_root too, as ElementTree's iter() does. */
 static void find_from(const XmlNode *p_root, const char *sz_name, NodeList *p_out) {
     if (!strcmp(p_root->sz_name, sz_name)) {
-        if (!(p_out->pp_nodes = realloc(p_out->pp_nodes, sizeof(*p_out->pp_nodes) * (p_out->capacity = 16))))
+        if (!(p_out->pp_nodes = realloc(p_out->pp_nodes, sizeof(*p_out->pp_nodes) * (p_out->c_capacity = 16))))
             loader_fail("allocation failed");
-        p_out->pp_nodes[p_out->count++] = p_root;
+        p_out->pp_nodes[p_out->c_nodes++] = p_root;
     }
     find_all(p_root, sz_name, p_out);
 }
@@ -386,7 +386,7 @@ static XmlNode *read_xml(const char *sz_path, char *sz_out_error, size_t cb_erro
 
 /* ---- Lines ---- */
 
-typedef struct { unsigned char bytes[4096]; size_t count; } Bytes;
+typedef struct { unsigned char bytes[4096]; size_t cb_used; } Bytes;
 
 static int line_error(char *sz_out_error, size_t cb_error, const char *sz_format, ...) {
     va_list args;
@@ -396,10 +396,10 @@ static int line_error(char *sz_out_error, size_t cb_error, const char *sz_format
     return 0;
 }
 static int bytes_add(Bytes *p_out, const void *p_data, size_t cb_data, char *sz_out_error, size_t cb_error) {
-    if (p_out->count + cb_data > sizeof(p_out->bytes))
+    if (p_out->cb_used + cb_data > sizeof(p_out->bytes))
         return line_error(sz_out_error, cb_error, "a line writes more than 4096 bytes");
-    memcpy(p_out->bytes + p_out->count, p_data, cb_data);
-    p_out->count += cb_data;
+    memcpy(p_out->bytes + p_out->cb_used, p_data, cb_data);
+    p_out->cb_used += cb_data;
     return 1;
 }
 /* Python's int(text, 0), as the patch format's tools read numbers: 0x/0o/0b prefixes, underscores
@@ -407,27 +407,27 @@ static int bytes_add(Bytes *p_out, const void *p_data, size_t cb_data, char *sz_
  * 128 bits are refused as too large. */
 static int parse_integer(const char *sz_text, unsigned __int128 *p_out_value, int *p_out_is_negative, char *sz_out_error,
                          size_t cb_error) {
-    const char *p = sz_text, *p_end = sz_text + strlen(sz_text);
-    while (p < p_end && is_space(*p)) ++p;
-    while (p_end > p && is_space(p_end[-1])) --p_end;
-    *p_out_is_negative = p < p_end && *p == '-';
-    if (p < p_end && (*p == '-' || *p == '+')) ++p;
+    const char *sz_cursor = sz_text, *p_end = sz_text + strlen(sz_text);
+    while (sz_cursor < p_end && is_space(*sz_cursor)) ++sz_cursor;
+    while (p_end > sz_cursor && is_space(p_end[-1])) --p_end;
+    *p_out_is_negative = sz_cursor < p_end && *sz_cursor == '-';
+    if (sz_cursor < p_end && (*sz_cursor == '-' || *sz_cursor == '+')) ++sz_cursor;
     unsigned base = 10;
-    if (p_end - p >= 2 && p[0] == '0' && strchr("xXoObB", p[1])) {
-        base = (p[1] | 32) == 'x' ? 16 : (p[1] | 32) == 'o' ? 8 : 2;
-        p += 2;
-        if (p < p_end && *p == '_') ++p;
+    if (p_end - sz_cursor >= 2 && sz_cursor[0] == '0' && strchr("xXoObB", sz_cursor[1])) {
+        base = (sz_cursor[1] | 32) == 'x' ? 16 : (sz_cursor[1] | 32) == 'o' ? 8 : 2;
+        sz_cursor += 2;
+        if (sz_cursor < p_end && *sz_cursor == '_') ++sz_cursor;
     }
     unsigned __int128 value = 0;
     int c_digits = 0, is_previous_underscore = 0, is_too_large = 0, is_leading_zero = 0, has_nonzero = 0;
-    for (; p < p_end; ++p) {
-        if (*p == '_') {
+    for (; sz_cursor < p_end; ++sz_cursor) {
+        if (*sz_cursor == '_') {
             if (!c_digits || is_previous_underscore) break;
             is_previous_underscore = 1;
             continue;
         }
-        unsigned digit = (unsigned)(*p - '0') < 10          ? (unsigned)(*p - '0')
-                         : (unsigned)((*p | 32) - 'a') < 26 ? (unsigned)((*p | 32) - 'a' + 10)
+        unsigned digit = (unsigned)(*sz_cursor - '0') < 10          ? (unsigned)(*sz_cursor - '0')
+                         : (unsigned)((*sz_cursor | 32) - 'a') < 26 ? (unsigned)((*sz_cursor | 32) - 'a' + 10)
                                                             : 99;
         if (digit >= base) break;
         if (base == 10 && !c_digits && digit == 0) is_leading_zero = 1;
@@ -437,54 +437,54 @@ static int parse_integer(const char *sz_text, unsigned __int128 *p_out_value, in
         ++c_digits;
         is_previous_underscore = 0;
     }
-    if (p != p_end || !c_digits || is_previous_underscore || (is_leading_zero && has_nonzero))
+    if (sz_cursor != p_end || !c_digits || is_previous_underscore || (is_leading_zero && has_nonzero))
         return line_error(sz_out_error, cb_error, "invalid literal for int() with base 0: '%s'", sz_text);
     if (is_too_large) return line_error(sz_out_error, cb_error, "int too big to convert: '%s'", sz_text);
     *p_out_value = value;
     return 1;
 }
-static const char *skip_digits(const char *p, const char *p_end, char *sz_clean, size_t *p_cb_clean) {
-    if (p >= p_end || (unsigned)(*p - '0') >= 10) return NULL;
-    while (p < p_end) {
-        if ((unsigned)(*p - '0') < 10) sz_clean[(*p_cb_clean)++] = *p++;
-        else if (*p == '_' && p + 1 < p_end && (unsigned)(p[1] - '0') < 10) ++p;
+static const char *skip_digits(const char *sz_cursor, const char *p_end, char *sz_clean, size_t *p_cb_clean) {
+    if (sz_cursor >= p_end || (unsigned)(*sz_cursor - '0') >= 10) return NULL;
+    while (sz_cursor < p_end) {
+        if ((unsigned)(*sz_cursor - '0') < 10) sz_clean[(*p_cb_clean)++] = *sz_cursor++;
+        else if (*sz_cursor == '_' && sz_cursor + 1 < p_end && (unsigned)(sz_cursor[1] - '0') < 10) ++sz_cursor;
         else break;
     }
-    return p;
+    return sz_cursor;
 }
 /* Python's float(text): whitespace around, underscores between digits, inf/infinity/nan. */
 static int parse_float(const char *sz_text, double *p_out_value, char *sz_out_error, size_t cb_error) {
     char sz_clean[512];
     size_t cb_clean = 0;
-    const char *p = sz_text, *p_end = sz_text + strlen(sz_text);
-    while (p < p_end && is_space(*p)) ++p;
-    while (p_end > p && is_space(p_end[-1])) --p_end;
-    int is_valid = (size_t)(p_end - p) < sizeof(sz_clean) / 2;
-    if (is_valid && p < p_end && (*p == '-' || *p == '+')) sz_clean[cb_clean++] = *p++;
-    size_t cb_word = (size_t)(p_end - p);
-    if (is_valid && ((cb_word == 3 && (!strncasecmp(p, "inf", 3) || !strncasecmp(p, "nan", 3))) ||
-                     (cb_word == 8 && !strncasecmp(p, "infinity", 8)))) {
-        memcpy(sz_clean + cb_clean, p, cb_word);
+    const char *sz_cursor = sz_text, *p_end = sz_text + strlen(sz_text);
+    while (sz_cursor < p_end && is_space(*sz_cursor)) ++sz_cursor;
+    while (p_end > sz_cursor && is_space(p_end[-1])) --p_end;
+    int is_valid = (size_t)(p_end - sz_cursor) < sizeof(sz_clean) / 2;
+    if (is_valid && sz_cursor < p_end && (*sz_cursor == '-' || *sz_cursor == '+')) sz_clean[cb_clean++] = *sz_cursor++;
+    size_t cb_word = (size_t)(p_end - sz_cursor);
+    if (is_valid && ((cb_word == 3 && (!strncasecmp(sz_cursor, "inf", 3) || !strncasecmp(sz_cursor, "nan", 3))) ||
+                     (cb_word == 8 && !strncasecmp(sz_cursor, "infinity", 8)))) {
+        memcpy(sz_clean + cb_clean, sz_cursor, cb_word);
         cb_clean += cb_word;
-        p = p_end;
+        sz_cursor = p_end;
     } else if (is_valid) {
-        const char *p_after = skip_digits(p, p_end, sz_clean, &cb_clean);
-        if (p_after) p = p_after;
-        if (p < p_end && *p == '.') {
-            sz_clean[cb_clean++] = *p++;
-            const char *p_fraction = skip_digits(p, p_end, sz_clean, &cb_clean);
-            if (p_fraction) p = p_fraction;
+        const char *p_after = skip_digits(sz_cursor, p_end, sz_clean, &cb_clean);
+        if (p_after) sz_cursor = p_after;
+        if (sz_cursor < p_end && *sz_cursor == '.') {
+            sz_clean[cb_clean++] = *sz_cursor++;
+            const char *p_fraction = skip_digits(sz_cursor, p_end, sz_clean, &cb_clean);
+            if (p_fraction) sz_cursor = p_fraction;
             else if (!p_after) is_valid = 0;
         } else if (!p_after) {
             is_valid = 0;
         }
-        if (is_valid && p < p_end && (*p | 32) == 'e') {
-            sz_clean[cb_clean++] = *p++;
-            if (p < p_end && (*p == '-' || *p == '+')) sz_clean[cb_clean++] = *p++;
-            if (!(p = skip_digits(p, p_end, sz_clean, &cb_clean))) is_valid = 0;
+        if (is_valid && sz_cursor < p_end && (*sz_cursor | 32) == 'e') {
+            sz_clean[cb_clean++] = *sz_cursor++;
+            if (sz_cursor < p_end && (*sz_cursor == '-' || *sz_cursor == '+')) sz_clean[cb_clean++] = *sz_cursor++;
+            if (!(sz_cursor = skip_digits(sz_cursor, p_end, sz_clean, &cb_clean))) is_valid = 0;
         }
     }
-    if (!is_valid || p != p_end) return line_error(sz_out_error, cb_error, "could not convert string to float: '%s'", sz_text);
+    if (!is_valid || sz_cursor != p_end) return line_error(sz_out_error, cb_error, "could not convert string to float: '%s'", sz_text);
     sz_clean[cb_clean] = 0;
     *p_out_value = strtod(sz_clean, NULL);
     return 1;
@@ -495,7 +495,7 @@ static int hex_digit(char c) {
 /* A line's bytes, as shadPS4's patch compiler writes them. */
 static int encode_line(const XmlNode *p_line, Bytes *p_out, char *sz_out_error, size_t cb_error) {
     const char *sz_type = attribute(p_line, "Type"), *sz_value = attribute(p_line, "Value");
-    p_out->count = 0;
+    p_out->cb_used = 0;
     if (!sz_type) sz_type = "";
     static const char *const s_types[] = {"bytes", "bytes16", "bytes32", "bytes64", "float32", "float64", "utf8", "utf16"};
     int is_known = 0;
@@ -506,8 +506,8 @@ static int encode_line(const XmlNode *p_line, Bytes *p_out, char *sz_out_error, 
         /* bytes.fromhex() after the spaces are removed: other whitespace only between bytes. */
         char sz_digits[sizeof(p_out->bytes) * 4];
         size_t cb_digits = 0;
-        for (const char *p = sz_value; *p && cb_digits < sizeof(sz_digits) - 1; ++p)
-            if (*p != ' ') sz_digits[cb_digits++] = *p;
+        for (const char *sz_cursor = sz_value; *sz_cursor && cb_digits < sizeof(sz_digits) - 1; ++sz_cursor)
+            if (*sz_cursor != ' ') sz_digits[cb_digits++] = *sz_cursor;
         sz_digits[cb_digits] = 0;
         for (size_t i = 0; i < cb_digits;) {
             if (is_space(sz_digits[i]) || sz_digits[i] == '\f' || sz_digits[i] == '\v') {
@@ -535,7 +535,7 @@ static int encode_line(const XmlNode *p_line, Bytes *p_out, char *sz_out_error, 
         if (is_negative && value) return line_error(sz_out_error, cb_error, "can't convert negative int to unsigned");
         if (c_bytes < 16 && value >> (8 * c_bytes)) return line_error(sz_out_error, cb_error, "int too big to convert");
         for (unsigned i = 0; i < c_bytes; ++i) p_out->bytes[i] = (unsigned char)(value >> (8 * i));
-        p_out->count = c_bytes;
+        p_out->cb_used = c_bytes;
         return 1;
     }
     if (!strcmp(sz_type, "float32") || !strcmp(sz_type, "float64")) {
@@ -548,12 +548,12 @@ static int encode_line(const XmlNode *p_line, Bytes *p_out, char *sz_out_error, 
     }
     if (!strcmp(sz_type, "utf8")) return bytes_add(p_out, sz_value, strlen(sz_value) + 1, sz_out_error, cb_error);
     if (!strcmp(sz_type, "utf16")) {
-        for (const unsigned char *p = (const unsigned char *)sz_value; *p;) {
-            uint32_t code_point = *p;
+        for (const unsigned char *p_cursor = (const unsigned char *)sz_value; *p_cursor;) {
+            uint32_t code_point = *p_cursor;
             int c_continuation = code_point >= 0xf0 ? 3 : code_point >= 0xe0 ? 2 : code_point >= 0xc0 ? 1 : 0;
             code_point &= c_continuation ? 0x3fu >> c_continuation : 0x7fu;
-            ++p;
-            for (int i = 0; i < c_continuation && (*p & 0xc0) == 0x80; ++i) code_point = code_point << 6 | (*p++ & 0x3f);
+            ++p_cursor;
+            for (int i = 0; i < c_continuation && (*p_cursor & 0xc0) == 0x80; ++i) code_point = code_point << 6 | (*p_cursor++ & 0x3f);
             uint16_t units[2] = {(uint16_t)code_point, 0};
             size_t c_units = 1;
             if (code_point >= 0x10000) {
@@ -591,26 +591,26 @@ static int add_entry(PsPatchList *p_list, const XmlNode *p_entry, char *sz_out_e
     NodeList lines = {0};
     find_all(p_entry, "Line", &lines);
     int is_added = 1;
-    for (size_t i = 0; i < lines.count && is_added; ++i) {
+    for (size_t i = 0; i < lines.c_nodes && is_added; ++i) {
         const char *sz_address = attribute(lines.pp_nodes[i], "Address");
         unsigned __int128 address;
         int is_negative;
         Bytes data;
         is_added = parse_integer(sz_address ? sz_address : "", &address, &is_negative, sz_out_error, cb_error) &&
                    encode_line(lines.pp_nodes[i], &data, sz_out_error, cb_error);
-        if (is_added && !data.count) is_added = line_error(sz_out_error, cb_error, "a line writes no bytes");
+        if (is_added && !data.cb_used) is_added = line_error(sz_out_error, cb_error, "a line writes no bytes");
         if (!is_added) break;
         int is_inside = 0;
         for (size_t s = 0; s < p_list->c_loads && !is_negative && address >= EBOOT_BASE; ++s) {
             unsigned __int128 off_image = address - EBOOT_BASE;
             const LoaderSegment *p_load = &p_list->p_loads[s];
-            is_inside |= off_image >= p_load->address && off_image + data.count <= p_load->address + p_load->size;
+            is_inside |= off_image >= p_load->va_segment && off_image + data.cb_used <= p_load->va_segment + p_load->cb_segment;
         }
         if (!is_inside) {
             is_added = line_error(sz_out_error, cb_error, "address %s is outside the eboot", sz_address);
             break;
         }
-        add_write(p_list, (uint64_t)(address - EBOOT_BASE), data.bytes, data.count);
+        add_write(p_list, (uint64_t)(address - EBOOT_BASE), data.bytes, data.cb_used);
     }
     free(lines.pp_nodes);
     if (!is_added) truncate_list(p_list, c_before);
@@ -623,7 +623,7 @@ static int is_for(const XmlNode *p_entry, const char *sz_version) {
 /* The last entry of that name for the version, as a later definition replaces an earlier one. */
 static const XmlNode *find_entry(const NodeList *p_entries, const char *sz_name, const char *sz_version) {
     const XmlNode *p_found = NULL;
-    for (size_t i = 0; i < p_entries->count; ++i) {
+    for (size_t i = 0; i < p_entries->c_nodes; ++i) {
         const char *sz_entry = attribute(p_entries->pp_nodes[i], "Name");
         if (sz_entry && !strcmp(sz_entry, sz_name) && is_for(p_entries->pp_nodes[i], sz_version)) p_found = p_entries->pp_nodes[i];
     }
@@ -638,20 +638,20 @@ static int add_named(PsPatchList *p_list, const char *sz_file, const char *const
     find_from(p_root, "Metadata", &entries);
     size_t c_before = p_list->c_writes, c_missing = 0;
     char sz_missing[512] = "";
-    for (size_t n = 0; n < c_names; ++n) {
-        const XmlNode *p_found = find_entry(&entries, pp_names[n], sz_app_version);
+    for (size_t i_name = 0; i_name < c_names; ++i_name) {
+        const XmlNode *p_found = find_entry(&entries, pp_names[i_name], sz_app_version);
         if (!p_found) {
             size_t cb_used = strlen(sz_missing);
-            snprintf(sz_missing + cb_used, sizeof(sz_missing) - cb_used, "%s'%s'", c_missing++ ? ", " : "", pp_names[n]);
+            snprintf(sz_missing + cb_used, sizeof(sz_missing) - cb_used, "%s'%s'", c_missing++ ? ", " : "", pp_names[i_name]);
         }
     }
     int is_added = !c_missing;
     if (!is_added) line_error(sz_out_error, cb_error, "patches not found for app version %s: [%s]", sz_app_version, sz_missing);
-    for (size_t n = 0; n < c_names && is_added; ++n) {
-        const XmlNode *p_found = find_entry(&entries, pp_names[n], sz_app_version);
+    for (size_t i_name = 0; i_name < c_names && is_added; ++i_name) {
+        const XmlNode *p_found = find_entry(&entries, pp_names[i_name], sz_app_version);
         char sz_reason_line[256];
         if (!add_entry(p_list, p_found, sz_reason_line, sizeof(sz_reason_line)))
-            is_added = line_error(sz_out_error, cb_error, "%s: %s", pp_names[n], sz_reason_line);
+            is_added = line_error(sz_out_error, cb_error, "%s: %s", pp_names[i_name], sz_reason_line);
     }
     if (!is_added) truncate_list(p_list, c_before);
     free(entries.pp_nodes);
@@ -676,7 +676,7 @@ typedef struct {
     XmlNode *p_root;          /* owned by the first entry of its file */
     const XmlNode *p_entry;
 } External;
-typedef struct { External *p_items; size_t count, capacity; } Externals;
+typedef struct { External *p_items; size_t c_items, c_capacity; } Externals;
 
 static int compare_names(const void *p_a, const void *p_b) { return strcmp(*(char *const *)p_a, *(char *const *)p_b); }
 static int has_suffix(const char *sz_name, const char *sz_suffix) {
@@ -709,7 +709,7 @@ static void find_externals(const LoaderPatchFolder *p_folder, Externals *p_out) 
         NodeList ids = {0}, entries = {0};
         find_from(p_root, "ID", &ids);
         int c_ids = 0, is_ours = 0;
-        for (size_t i = 0; i < ids.count; ++i) {
+        for (size_t i = 0; i < ids.c_nodes; ++i) {
             const char *sz_text = ids.pp_nodes[i]->sz_text;
             if (!sz_text || !*sz_text) continue;
             ++c_ids;
@@ -726,14 +726,14 @@ static void find_externals(const LoaderPatchFolder *p_folder, Externals *p_out) 
         }
         find_from(p_root, "Metadata", &entries);
         int owns_root = 0;
-        for (size_t i = 0; i < entries.count; ++i) {
+        for (size_t i = 0; i < entries.c_nodes; ++i) {
             if (!is_for(entries.pp_nodes[i], p_folder->sz_version)) continue;
-            if (p_out->count == p_out->capacity) {
-                p_out->capacity = p_out->capacity ? p_out->capacity * 2 : 64;
-                p_out->p_items = realloc(p_out->p_items, p_out->capacity * sizeof(*p_out->p_items));
+            if (p_out->c_items == p_out->c_capacity) {
+                p_out->c_capacity = p_out->c_capacity ? p_out->c_capacity * 2 : 64;
+                p_out->p_items = realloc(p_out->p_items, p_out->c_capacity * sizeof(*p_out->p_items));
                 if (!p_out->p_items) loader_fail("allocation failed");
             }
-            External *p_external = &p_out->p_items[p_out->count++];
+            External *p_external = &p_out->p_items[p_out->c_items++];
             const char *sz_name = attribute(entries.pp_nodes[i], "Name");
             snprintf(p_external->sz_key, sizeof(p_external->sz_key), "%s/%s", pp_files[f], sz_name ? sz_name : "None");
             p_external->p_root = owns_root++ ? NULL : p_root;
@@ -746,7 +746,7 @@ static void find_externals(const LoaderPatchFolder *p_folder, Externals *p_out) 
     free(pp_files);
 }
 static void free_externals(Externals *p_externals) {
-    for (size_t i = 0; i < p_externals->count; ++i) free_node(p_externals->p_items[i].p_root);
+    for (size_t i = 0; i < p_externals->c_items; ++i) free_node(p_externals->p_items[i].p_root);
     free(p_externals->p_items);
 }
 static int is_enabled_by_default(const XmlNode *p_entry) {
@@ -762,7 +762,7 @@ void loader_patches_external(PsPatchList *p_list, const LoaderPatchFolder *p_fol
         fprintf(stderr, "ERROR: Patches: %s is not a JSON object\n", sz_config);
         exit(1);
     }
-    for (size_t i = 0; i < externals.count; ++i) {
+    for (size_t i = 0; i < externals.c_items; ++i) {
         const External *p_external = &externals.p_items[i];
         if (!loader_json_has(&settings[0], p_external->sz_key) &&
             (loader_json_has(&settings[1], p_external->sz_key) || !is_enabled_by_default(p_external->p_entry)))
@@ -781,11 +781,11 @@ void loader_patches_external(PsPatchList *p_list, const LoaderPatchFolder *p_fol
 
 static void print_json_string(const char *sz_text) {
     putchar('"');
-    for (const unsigned char *p = (const unsigned char *)sz_text; *p; ++p) {
-        if (*p == '"' || *p == '\\') printf("\\%c", *p);
-        else if (*p == '\n') fputs("\\n", stdout);
-        else if (*p < 0x20) printf("\\u%04x", *p);
-        else putchar(*p);
+    for (const unsigned char *p_cursor = (const unsigned char *)sz_text; *p_cursor; ++p_cursor) {
+        if (*p_cursor == '"' || *p_cursor == '\\') printf("\\%c", *p_cursor);
+        else if (*p_cursor == '\n') fputs("\\n", stdout);
+        else if (*p_cursor < 0x20) printf("\\u%04x", *p_cursor);
+        else putchar(*p_cursor);
     }
     putchar('"');
 }
@@ -793,15 +793,15 @@ void loader_patches_list(const LoaderPatchFolder *p_folder) {
     Externals externals = {0};
     find_externals(p_folder, &externals);
     putchar('[');
-    for (size_t i = 0; i < externals.count; ++i) {
+    for (size_t i = 0; i < externals.c_items; ++i) {
         const XmlNode *p_entry = externals.p_items[i].p_entry;
         const char *sz_name = attribute(p_entry, "Name"), *sz_author = attribute(p_entry, "Author");
         const char *sz_note = attribute(p_entry, "Note");
         /* Notes spell line breaks as \n. */
         Buffer note = {0};
-        for (const char *p = sz_note ? sz_note : ""; *p; ++p) {
-            if (p[0] == '\\' && p[1] == 'n') buffer_add(&note, "\n", 1), ++p;
-            else buffer_add(&note, p, 1);
+        for (const char *sz_cursor = sz_note ? sz_note : ""; *sz_cursor; ++sz_cursor) {
+            if (sz_cursor[0] == '\\' && sz_cursor[1] == 'n') buffer_add(&note, "\n", 1), ++sz_cursor;
+            else buffer_add(&note, sz_cursor, 1);
         }
         char *sz_text = buffer_take(&note);
         fputs(i ? ", {\"key\": " : "{\"key\": ", stdout);

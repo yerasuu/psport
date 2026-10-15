@@ -23,9 +23,9 @@
 #include <unistd.h>
 
 typedef struct { char **pp_items; size_t c_items, c_capacity; } Names;
-typedef struct { char relative[PATH_MAX], source[PATH_MAX]; } Replacement;
+typedef struct { char sz_relative[PATH_MAX], sz_source[PATH_MAX]; } Replacement;
 typedef struct {
-    const LoaderModOptions *options;
+    const LoaderModOptions *p_options;
     Replacement *p_replacements;
     size_t c_replacements, c_capacity;
     char sz_view[PATH_MAX];
@@ -218,8 +218,8 @@ static void selected(const LoaderModOptions *p_options, Names *p_out) {
     if (settings[0].is_present && !settings[0].is_list) mods_fail("Disabled mods must be a list of folder names");
     if (settings[1].is_present && !settings[1].is_list) mods_fail("Mod order must be a list of folder names");
     for (size_t pass = 0; pass < 2; ++pass) {
-        size_t count = pass ? available.c_items : settings[1].c_items;
-        for (size_t i = 0; i < count; ++i) {
+        size_t c_names = pass ? available.c_items : settings[1].c_items;
+        for (size_t i = 0; i < c_names; ++i) {
             const char *sz_name = pass ? available.pp_items[i] : settings[1].pp_items[i];
             if (names_has(&available, sz_name) && !loader_json_has(&settings[0], sz_name) && !names_has(p_out, sz_name))
                 names_add(p_out, sz_name);
@@ -236,8 +236,8 @@ static void add_replacement(Mods *p_mods, const char *sz_relative, const char *s
         if (!p_mods->p_replacements) mods_fail("out of memory");
     }
     Replacement *p_replacement = &p_mods->p_replacements[p_mods->c_replacements++];
-    snprintf(p_replacement->relative, sizeof(p_replacement->relative), "%s", sz_relative);
-    snprintf(p_replacement->source, sizeof(p_replacement->source), "%s", sz_source);
+    snprintf(p_replacement->sz_relative, sizeof(p_replacement->sz_relative), "%s", sz_relative);
+    snprintf(p_replacement->sz_source, sizeof(p_replacement->sz_source), "%s", sz_source);
 }
 static int is_first_part(const char *sz_relative, const char *sz_name) {
     size_t cb_name = strlen(sz_name);
@@ -292,13 +292,13 @@ static void walk(Mods *p_mods, const char *sz_directory, const char *sz_relative
 static void add_mod(Mods *p_mods, Names *p_owners, const char *sz_name, const char *sz_folder) {
     char sz_root[PATH_MAX], sz_real[PATH_MAX];
     const char *sz_prefix;
-    if (!content_root(p_mods->options, sz_folder, sz_root, &sz_prefix))
+    if (!content_root(p_mods->p_options, sz_folder, sz_root, &sz_prefix))
         mods_fail("%s: expected dvdroot_ps4 (or chr/, parts/, ...) inside the mod folder", sz_folder);
     if (!realpath(sz_root, sz_real)) mods_fail("%s: %s", sz_root, strerror(errno));
-    size_t first = p_mods->c_replacements, count = 0;
-    walk(p_mods, sz_real, sz_prefix, &count);
+    size_t first = p_mods->c_replacements, c_added = 0;
+    walk(p_mods, sz_real, sz_prefix, &c_added);
     for (size_t i = first; i < p_mods->c_replacements; ++i) {
-        const char *sz_relative = p_mods->p_replacements[i].relative;
+        const char *sz_relative = p_mods->p_replacements[i].sz_relative;
         for (size_t j = 0; j < p_owners->c_items; j += 2) {
             if (strcasecmp(p_owners->pp_items[j], sz_relative)) continue;
             fprintf(stderr, "Mods: %s: %s -> %s\n", sz_relative, p_owners->pp_items[j + 1], sz_name);
@@ -312,7 +312,7 @@ static void add_mod(Mods *p_mods, Names *p_owners, const char *sz_name, const ch
             names_add(p_owners, sz_name);
         }
     }
-    fprintf(stderr, "Mods: %s: %zu files\n", sz_name, count);
+    fprintf(stderr, "Mods: %s: %zu files\n", sz_name, c_added);
 }
 
 /* One directory level of the view made real, its entries links to where the link pointed: the
@@ -345,8 +345,8 @@ static int is_inside(const char *sz_path, const char *sz_folder) {
 static void build_view(Mods *p_mods, const char *sz_game, const char *sz_out_dir) {
     char sz_out[PATH_MAX];
     if ((size_t)snprintf(sz_out, sizeof(sz_out), "%s", sz_out_dir) >= sizeof(sz_out)) mods_fail("path too long: %s", sz_out_dir);
-    for (char *p = sz_out + 1; *p; ++p)
-        if (*p == '/') { *p = 0; mkdir(sz_out, 0777); *p = '/'; }
+    for (char *sz_cursor = sz_out + 1; *sz_cursor; ++sz_cursor)
+        if (*sz_cursor == '/') { *sz_cursor = 0; mkdir(sz_out, 0777); *sz_cursor = '/'; }
     if (mkdir(sz_out, 0777) && errno != EEXIST) mods_fail("%s: %s", sz_out, strerror(errno));
     char sz_template[PATH_MAX];
     if (!realpath(sz_out, sz_template)) mods_fail("%s: %s", sz_out, strerror(errno));
@@ -367,7 +367,7 @@ static void build_view(Mods *p_mods, const char *sz_game, const char *sz_out_dir
         const Replacement *p_replacement = &p_mods->p_replacements[i];
         char sz_parent[PATH_MAX], sz_part[PATH_MAX], sz_destination[PATH_MAX];
         snprintf(sz_parent, sizeof(sz_parent), "%s", p_mods->sz_view);
-        const char *sz_cursor = p_replacement->relative;
+        const char *sz_cursor = p_replacement->sz_relative;
         for (const char *sz_slash; (sz_slash = strchr(sz_cursor, '/')); sz_cursor = sz_slash + 1) {
             snprintf(sz_part, sizeof(sz_part), "%.*s", (int)(sz_slash - sz_cursor), sz_cursor);
             char sz_next[PATH_MAX];
@@ -381,11 +381,11 @@ static void build_view(Mods *p_mods, const char *sz_game, const char *sz_out_dir
             c_replaced += realpath(sz_destination, sz_target) && is_inside(sz_target, sz_game);
             if (unlink(sz_destination)) mods_fail("%s: %s", sz_destination, strerror(errno));
         } else if (exists(sz_destination)) {
-            mods_fail("File/directory conflict: %s", p_replacement->relative);
+            mods_fail("File/directory conflict: %s", p_replacement->sz_relative);
         } else {
             ++c_added;
         }
-        if (symlink(p_replacement->source, sz_destination)) mods_fail("%s: %s", sz_destination, strerror(errno));
+        if (symlink(p_replacement->sz_source, sz_destination)) mods_fail("%s: %s", sz_destination, strerror(errno));
     }
     fprintf(stderr, "Mods: %zu game files replaced, %zu added\n", c_replaced, c_added);
 }
@@ -456,7 +456,7 @@ char *loader_mods_view(const char *sz_game, const LoaderModOptions *p_options) {
     LoaderModOptions options = *p_options;
     char sz_mods_dir[PATH_MAX], sz_game_real[PATH_MAX], sz_legacy[PATH_MAX], sz_layer[PATH_MAX];
     trim_slashes(&options, sz_mods_dir);
-    Mods mods = {.options = &options};
+    Mods mods = {.p_options = &options};
     s_p_failing = &mods;
     if (!realpath(sz_game, sz_game_real)) mods_fail("%s: %s", sz_game, strerror(errno));
     find_game_folders(sz_game_real);
@@ -494,10 +494,10 @@ char *loader_mods_view(const char *sz_game, const LoaderModOptions *p_options) {
 
 static void print_json_string(const char *sz_text) {
     putchar('"');
-    for (const unsigned char *p = (const unsigned char *)sz_text; *p; ++p) {
-        if (*p == '"' || *p == '\\') printf("\\%c", *p);
-        else if (*p < 0x20) printf("\\u%04x", *p);
-        else putchar(*p);
+    for (const unsigned char *p_cursor = (const unsigned char *)sz_text; *p_cursor; ++p_cursor) {
+        if (*p_cursor == '"' || *p_cursor == '\\') printf("\\%c", *p_cursor);
+        else if (*p_cursor < 0x20) printf("\\u%04x", *p_cursor);
+        else putchar(*p_cursor);
     }
     putchar('"');
 }
