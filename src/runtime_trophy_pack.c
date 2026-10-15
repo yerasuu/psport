@@ -15,10 +15,10 @@
 #define C_TRP_ENTRIES_MAX 4096
 #define CB_SFM_MAX (16u << 20)
 
-static uint32_t read_be32(const unsigned char *p) {
-    return (uint32_t)p[0] << 24 | (uint32_t)p[1] << 16 | (uint32_t)p[2] << 8 | p[3];
+static uint32_t read_be32(const unsigned char *p_bytes) {
+    return (uint32_t)p_bytes[0] << 24 | (uint32_t)p_bytes[1] << 16 | (uint32_t)p_bytes[2] << 8 | p_bytes[3];
 }
-static uint64_t read_be64(const unsigned char *p) { return (uint64_t)read_be32(p) << 32 | read_be32(p + 4); }
+static uint64_t read_be64(const unsigned char *p_bytes) { return (uint64_t)read_be32(p_bytes) << 32 | read_be32(p_bytes + 4); }
 
 static const TrpEntry *find_entry(const TrophyPack *p_pack, const char *sz_name) {
     for (uint32_t i = 0; i < p_pack->c_entries; ++i)
@@ -135,23 +135,23 @@ bool trophy_npbind_comm_id(const char *sz_host_path, uint32_t label, char sz_out
     if (cb_data < 0x80 || read_be32(data) != 0xD294A018u) return false;
     const uint64_t cb_entry = read_be64(data + 0x10), c_entries = read_be64(data + 0x18);
     if (label >= c_entries || !cb_entry || cb_entry > cb_data || 0x80 + (label + 1) * cb_entry > cb_data) return false;
-    const unsigned char *p = data + 0x80 + label * cb_entry, *p_end = p + cb_entry;
-    while (p + 4 <= p_end) {
-        const unsigned type = (unsigned)p[0] << 8 | p[1], cb_value = (unsigned)p[2] << 8 | p[3];
-        if (p + 4 + cb_value > p_end) return false;
+    const unsigned char *p_entry = data + 0x80 + label * cb_entry, *p_end = p_entry + cb_entry;
+    while (p_entry + 4 <= p_end) {
+        const unsigned type = (unsigned)p_entry[0] << 8 | p_entry[1], cb_value = (unsigned)p_entry[2] << 8 | p_entry[3];
+        if (p_entry + 4 + cb_value > p_end) return false;
         if (type == 0x10) {
             static const char s_sz_shape[] = "AAAA99999_99";
             if (cb_value != 12) return false;
             for (size_t i = 0; i < 12; ++i) {
-                const char c = (char)p[4 + i], shape = s_sz_shape[i];
+                const char c = (char)p_entry[4 + i], shape = s_sz_shape[i];
                 if ((shape == 'A' && (c < 'A' || c > 'Z')) || (shape == '9' && (c < '0' || c > '9')) || (shape == '_' && c != '_'))
                     return false;
             }
-            memcpy(sz_out_id, p + 4, 12);
+            memcpy(sz_out_id, p_entry + 4, 12);
             sz_out_id[12] = 0;
             return true;
         }
-        p += 4 + cb_value;
+        p_entry += 4 + cb_value;
     }
     return false;
 }

@@ -29,8 +29,8 @@ _Static_assert(__builtin_offsetof(PadData,timestamp)==80,"OrbisPadData timestamp
 extern int runtime_pad_sdl_ready;
 /* PS_PAD_FILE's held buttons, sticks (-1: not overridden) and touchpad side (-1: none). */
 typedef struct { uint32_t buttons; int stick[4]; int touch_side; } PadInjected;
-extern PadInjected runtime_pad_injected;
+extern PadInjected g_runtime_pad_injected;
 void runtime_pad_read_inject(void);
-void runtime_pad_record_sample(const PadData *d);
-void runtime_pad_replay_sample(PadData *d);
+void runtime_pad_record_sample(const PadData *p_pad_data);
+void runtime_pad_replay_sample(PadData *p_pad_data);
 #endif

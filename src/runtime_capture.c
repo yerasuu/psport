@@ -58,7 +58,7 @@ static ABI int32_t coredump_debug_text_out(const char *p_text,int32_t length) {
     return 0;
 }
 
-static const RuntimeExport exports[]={
+static const RuntimeExport s_exports[]={
     {"sceRemoteplayInitialize",remoteplay_initialize}, {"sceRemoteplayTerminate",remoteplay_terminate},
     {"sceRemoteplayApprove",remoteplay_permission}, {"sceRemoteplayProhibit",remoteplay_permission},
     {"sceRemoteplayProhibitStreaming",remoteplay_prohibit_streaming},
@@ -74,7 +74,7 @@ static const RuntimeExport exports[]={
     {"sceCoredumpAttachMemoryRegionAsUserFile",coredump_attach_memory_region},
     {"sceCoredumpDebugTextOut",coredump_debug_text_out},
 };
-uintptr_t runtime_capture_resolve(const char *sz_name) { return RUNTIME_LOOKUP(exports,sz_name); }
+uintptr_t runtime_capture_resolve(const char *sz_name) { return RUNTIME_LOOKUP(s_exports,sz_name); }
 #else
 uintptr_t runtime_capture_resolve(const char *sz_name) { (void)sz_name; return 0; }
 #endif
