@@ -1,5 +1,8 @@
 # Black Ops: past the first prompts to Campaign, New Game and Regular, then the interrogation
-# intro plays out (about five minutes) into the first mission's load.
+# intro (about three minutes) into Operation 40; in the bar the pad walks, turns, aims down the
+# sight and fires through the fight and past its checkpoint, then the pause menu's Save and Quit
+# (down four times, cross, then down and cross past "Continue saving?") writes the checkpoint and
+# returns to the main menu, for bo1-load.sched.
 30 shot
 60 shot
 70 press cross
@@ -21,13 +24,131 @@
 210 shot
 240 shot
 270 shot
-300 shot
-330 shot
-360 shot
-390 shot
-420 shot
-450 shot
-480 shot
-510 shot
-540 shot
-560 end
+290 shot
+300 hold ly=0 2
+302 hold ly=0+rx=200 1
+303 release
+304 hold l2 1
+305 press l2+r2 0.3
+306 press l2+r2 0.3
+307 press l2+r2 0.3
+308 hold rx=60 1
+309 release
+309 shot
+310 hold ly=0 2
+312 hold ly=0+rx=200 1
+313 release
+314 hold l2 1
+315 press l2+r2 0.3
+316 press l2+r2 0.3
+317 press l2+r2 0.3
+318 hold rx=60 1
+319 release
+320 hold ly=0 2
+322 hold ly=0+rx=200 1
+323 release
+324 hold l2 1
+325 press l2+r2 0.3
+326 press l2+r2 0.3
+327 press l2+r2 0.3
+328 hold rx=60 1
+329 release
+329 shot
+330 hold ly=0 2
+332 hold ly=0+rx=200 1
+333 release
+334 hold l2 1
+335 press l2+r2 0.3
+336 press l2+r2 0.3
+337 press l2+r2 0.3
+338 hold rx=60 1
+339 release
+340 hold ly=0 2
+342 hold ly=0+rx=200 1
+343 release
+344 hold l2 1
+345 press l2+r2 0.3
+346 press l2+r2 0.3
+347 press l2+r2 0.3
+348 hold rx=60 1
+349 release
+349 shot
+350 hold ly=0 2
+352 hold ly=0+rx=200 1
+353 release
+354 hold l2 1
+355 press l2+r2 0.3
+356 press l2+r2 0.3
+357 press l2+r2 0.3
+358 hold rx=60 1
+359 release
+360 hold ly=0 2
+362 hold ly=0+rx=200 1
+363 release
+364 hold l2 1
+365 press l2+r2 0.3
+366 press l2+r2 0.3
+367 press l2+r2 0.3
+368 hold rx=60 1
+369 release
+369 shot
+370 hold ly=0 2
+372 hold ly=0+rx=200 1
+373 release
+374 hold l2 1
+375 press l2+r2 0.3
+376 press l2+r2 0.3
+377 press l2+r2 0.3
+378 hold rx=60 1
+379 release
+380 hold ly=0 2
+382 hold ly=0+rx=200 1
+383 release
+384 hold l2 1
+385 press l2+r2 0.3
+386 press l2+r2 0.3
+387 press l2+r2 0.3
+388 hold rx=60 1
+389 release
+389 shot
+390 hold ly=0 2
+392 hold ly=0+rx=200 1
+393 release
+394 hold l2 1
+395 press l2+r2 0.3
+396 press l2+r2 0.3
+397 press l2+r2 0.3
+398 hold rx=60 1
+399 release
+400 hold ly=0 2
+402 hold ly=0+rx=200 1
+403 release
+404 hold l2 1
+405 press l2+r2 0.3
+406 press l2+r2 0.3
+407 press l2+r2 0.3
+408 hold rx=60 1
+409 release
+409 shot
+410 hold ly=0 2
+412 hold ly=0+rx=200 1
+413 release
+414 hold l2 1
+415 press l2+r2 0.3
+416 press l2+r2 0.3
+417 press l2+r2 0.3
+418 hold rx=60 1
+419 release
+425 press options
+426 shot
+428 press down
+429 press down
+430 press down
+431 press down
+432 press cross
+434 shot
+435 press down
+436 press cross
+440 shot
+455 shot
+460 end

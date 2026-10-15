@@ -1,0 +1,103 @@
+# With -u from a run of bo1.sched: Campaign lists Resume Game first, its "Resume game?" prompt
+# answers Yes, and Operation 40 loads at the checkpoint saved there (in the bar after the fight,
+# M16 in hand, "Escape the police"); then the pad walks, turns, aims and fires for about a minute
+# and a half.
+60 shot
+70 press cross
+73 press options
+76 press cross
+78 shot
+80 press cross
+90 shot
+110 shot
+130 hold ly=0 2
+132 hold ly=0+rx=200 1
+133 release
+134 hold l2 1
+135 press l2+r2 0.3
+136 press l2+r2 0.3
+137 press l2+r2 0.3
+138 hold rx=60 1
+139 release
+139 shot
+140 hold ly=0 2
+142 hold ly=0+rx=200 1
+143 release
+144 hold l2 1
+145 press l2+r2 0.3
+146 press l2+r2 0.3
+147 press l2+r2 0.3
+148 hold rx=60 1
+149 release
+149 shot
+150 hold ly=0 2
+152 hold ly=0+rx=200 1
+153 release
+154 hold l2 1
+155 press l2+r2 0.3
+156 press l2+r2 0.3
+157 press l2+r2 0.3
+158 hold rx=60 1
+159 release
+159 shot
+160 hold ly=0 2
+162 hold ly=0+rx=200 1
+163 release
+164 hold l2 1
+165 press l2+r2 0.3
+166 press l2+r2 0.3
+167 press l2+r2 0.3
+168 hold rx=60 1
+169 release
+169 shot
+170 hold ly=0 2
+172 hold ly=0+rx=200 1
+173 release
+174 hold l2 1
+175 press l2+r2 0.3
+176 press l2+r2 0.3
+177 press l2+r2 0.3
+178 hold rx=60 1
+179 release
+179 shot
+180 hold ly=0 2
+182 hold ly=0+rx=200 1
+183 release
+184 hold l2 1
+185 press l2+r2 0.3
+186 press l2+r2 0.3
+187 press l2+r2 0.3
+188 hold rx=60 1
+189 release
+189 shot
+190 hold ly=0 2
+192 hold ly=0+rx=200 1
+193 release
+194 hold l2 1
+195 press l2+r2 0.3
+196 press l2+r2 0.3
+197 press l2+r2 0.3
+198 hold rx=60 1
+199 release
+199 shot
+200 hold ly=0 2
+202 hold ly=0+rx=200 1
+203 release
+204 hold l2 1
+205 press l2+r2 0.3
+206 press l2+r2 0.3
+207 press l2+r2 0.3
+208 hold rx=60 1
+209 release
+209 shot
+210 hold ly=0 2
+212 hold ly=0+rx=200 1
+213 release
+214 hold l2 1
+215 press l2+r2 0.3
+216 press l2+r2 0.3
+217 press l2+r2 0.3
+218 hold rx=60 1
+219 release
+219 shot
+230 end
