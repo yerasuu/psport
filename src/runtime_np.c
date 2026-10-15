@@ -1,5 +1,5 @@
 /* PSN libraries offline: NpWebApi and NpWebApi2, NpInGameMessage, the memory pool statistics of
- * Net/Ssl/Http/WebApi, NpGameIntent, the PS Store icon and the NpManager/NpAuth calls the
+ * Net/Ssl/Http/WebApi, libSceSsl's certificate calls, NpGameIntent, the PS Store icon and the NpManager/NpAuth calls the
  * toolkits make. Score, Tus/Tss, WordFilter, BandwidthTest and Matching2 are in
  * runtime_np_community.c. */
 #define _GNU_SOURCE
@@ -42,6 +42,7 @@
 #define GAME_INTENT_VALUE_NOT_FOUND ((int32_t)0x80553807)
 #define NET_EINVAL ((int32_t)0x80410116)
 #define HTTP_INVALID_VALUE ((int32_t)0x80431077)
+#define SSL_INVALID_CERT ((int32_t)0x8095F005)
 #define SSL_INVALID_VALUE ((int32_t)0x8095F007)
 
 /* ---- Object table ---- */
@@ -178,6 +179,55 @@ static ABI int32_t ssl_pool_stats(int32_t h_ssl, uint64_t *p_out_stats) {
     pool_stats(POOL_SSL, h_ssl, p_out_stats);
     return 0;
 }
+/* ---- libSceSsl certificates: offline no TLS connection is ever made, so the CA store handed to
+ * the game's own TLS code is empty and no peer certificate (SceSslCert) or name taken from one
+ * ever exists to ask about. With PS_ONLINE=1 the online module answers these instead. ---- */
+typedef struct SslCaCerts {
+    void *p_cert_data;
+    uint64_t c_cert_data;
+    void *p_pool;
+} SslCaCerts;
+static ABI int32_t ssl_get_ca_certs(int32_t h_ssl, SslCaCerts *p_out_certs) {
+    (void)h_ssl;
+    if (!p_out_certs) return SSL_INVALID_VALUE;
+    static int s_is_logged;
+    if (!__atomic_exchange_n(&s_is_logged, 1, __ATOMIC_RELAXED)) printf("Runtime: libSceSsl: no CA certificates offline\n");
+    *p_out_certs = (SslCaCerts){0};
+    return 0;
+}
+static ABI int32_t ssl_free_ca_certs(int32_t h_ssl, SslCaCerts *p_certs) {
+    (void)h_ssl;
+    if (!p_certs) return SSL_INVALID_VALUE;
+    *p_certs = (SslCaCerts){0};
+    return 0;
+}
+/* A NULL result is the failure, which the call report cannot see in a pointer: logged here. */
+static ABI void *ssl_get_cert_name(int32_t h_ssl, void *p_cert) {
+    (void)h_ssl;
+    static int s_is_logged;
+    if (!__atomic_exchange_n(&s_is_logged, 1, __ATOMIC_RELAXED))
+        printf("Runtime: libSceSsl: certificate name asked of %p, no certificate exists offline: NULL\n", p_cert);
+    return NULL;
+}
+static ABI int32_t ssl_no_cert_name(int32_t h_ssl, const void *p_name) {
+    (void)h_ssl; (void)p_name;
+    return SSL_INVALID_VALUE;
+}
+static ABI int32_t ssl_get_name_entry_info(int32_t h_ssl, const void *p_name, int32_t i_entry, char *sz_out_oid,
+                                           uint64_t cb_oid, uint8_t *p_out_value, uint64_t cb_value,
+                                           uint64_t *p_cb_out_value) {
+    (void)h_ssl; (void)p_name; (void)i_entry; (void)sz_out_oid; (void)cb_oid; (void)p_out_value; (void)cb_value;
+    if (p_cb_out_value) *p_cb_out_value = 0;
+    return SSL_INVALID_VALUE;
+}
+static ABI int32_t ssl_get_serial_number(int32_t h_ssl, const void *p_cert, const uint8_t **pp_out_data,
+                                         uint64_t *p_cb_out_data) {
+    (void)h_ssl; (void)p_cert;
+    if (pp_out_data) *pp_out_data = NULL;
+    if (p_cb_out_data) *p_cb_out_data = 0;
+    return SSL_INVALID_CERT;
+}
+
 static ABI int32_t http_init(int32_t h_net_pool, int32_t h_ssl, uint64_t cb_pool) {
     (void)h_net_pool; (void)h_ssl;
     return pool_create(POOL_HTTP, cb_pool);
@@ -471,6 +521,10 @@ static ABI int32_t callback_unregistered(void) { return 0; }
 static const RuntimeExport s_exports[] = {
     {"sceNetPoolCreate", net_pool_create}, {"sceNetGetMemoryPoolStats", net_pool_stats},
     {"sceSslInit", ssl_init}, {"sceSslGetMemoryPoolStats", ssl_pool_stats},
+    {"sceSslGetCaCerts", ssl_get_ca_certs}, {"sceSslFreeCaCerts", ssl_free_ca_certs},
+    {"sceSslGetSubjectName", ssl_get_cert_name}, {"sceSslGetIssuerName", ssl_get_cert_name},
+    {"sceSslGetNameEntryCount", ssl_no_cert_name}, {"sceSslFreeSslCertName", ssl_no_cert_name},
+    {"sceSslGetNameEntryInfo", ssl_get_name_entry_info}, {"sceSslGetSerialNumber", ssl_get_serial_number},
     {"sceHttpInit", http_init}, {"sceHttpGetMemoryPoolStats", http_pool_stats},
     {"sceNpWebApiInitialize", webapi_initialize}, {"sceNpWebApiTerminate", webapi_terminate},
     {"sceNpWebApiGetMemoryPoolStats", webapi_pool_stats},
