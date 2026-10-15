@@ -942,6 +942,10 @@ void Scheduler::SubmitExecution(SubmitInfo& info) {
         // Until the next submission's first timestamp: mostly the GPU waiting for it.
         profiler->Mark(0x5B317ull, [] { return std::string{"(between submissions: GPU idle)"}; });
     }
+    auto* p_busy = GpuBusySampler::Get();
+    if (p_busy && p_busy->Records(this)) {
+        p_busy->EndSubmission();
+    }
     SyncRecording();
     // Guest memory copies into staging read by this submission (copy threads).
     WaitHostCopies();
@@ -1004,6 +1008,9 @@ void Scheduler::SubmitExecution(SubmitInfo& info) {
     // psport: no semaphore query here (an ioctl per submission, ~3% of the recording thread):
     // PopPendingOperations asks when an operation waits, the GPU signal thread on every fence.
     AllocateWorkerCommandBuffers();
+    if (p_busy && p_busy->Records(this)) {
+        p_busy->BeginSubmission();
+    }
     CarryResume(false);
 
     // Apply pending operations
@@ -1019,6 +1026,10 @@ void Scheduler::SubmitAsync(SubmitInfo& info) {
     CarrySuspend(false);
     if (auto* profiler = GpuProfiler::Get(); profiler && profiler->Records(this)) {
         profiler->Mark(0x5B317ull, [] { return std::string{"(between submissions: GPU idle)"}; });
+    }
+    auto* p_busy = GpuBusySampler::Get();
+    if (p_busy && p_busy->Records(this)) {
+        p_busy->EndSubmission();
     }
     resume_rendering = false;
     // Every segment's command buffer is ended by its recording thread (the pool is its own);
@@ -1086,6 +1097,9 @@ void Scheduler::SubmitAsync(SubmitInfo& info) {
     });
     KickRecording(true);
     AllocateWorkerCommandBuffers();
+    if (p_busy && p_busy->Records(this)) {
+        p_busy->BeginSubmission();
+    }
     CarryResume(false);
     PopPendingOperations();
 }

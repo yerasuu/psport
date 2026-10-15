@@ -10,6 +10,7 @@
 #include <sys/resource.h>
 #include <cstring>
 #include <dirent.h>
+#include <x86intrin.h>
 #include <unistd.h>
 #include "common/assert.h"
 #include "psport_toggles.h"
@@ -386,6 +387,7 @@ void VideoOutDriver::Flip(const Request& req) {
     if (frame_stats) {
         using Clock = std::chrono::steady_clock;
         static Clock::time_point window_start = Clock::now(), last = window_start;
+        static u64 window_tsc = __rdtsc();
         static u32 frames;
         static double worst_ms;
         const auto now = Clock::now();
@@ -591,14 +593,43 @@ void VideoOutDriver::Flip(const Request& req) {
                                            ? double(gpu_us - window_gpu_us) / (all_draws - window_draws)
                                            : 0.0;
             const double draws_per_frame = frames ? double(all_draws - window_draws) / frames : 0.0;
+            const u64 window_draw_count = all_draws - window_draws;
             window_draws = all_draws;
             window_gpu_us = gpu_us;
+            char sz_appended[160];
+            int cb_appended = 0;
+            static u64 window_busy_cycles = 0;
+            const u64 tsc = __rdtsc();
+            if (const auto* p_busy = PsStats::g_p_stage_b_busy_cycles.load(std::memory_order_acquire)) {
+                const u64 busy_cycles = p_busy->load(std::memory_order_relaxed);
+                const double tsc_hz = double(tsc - window_tsc) / window;
+                cb_appended = std::snprintf(
+                    sz_appended, sizeof(sz_appended), "; stage B %.2f us/draw, busy %.1f%%",
+                    window_draw_count ? 1e6 * double(busy_cycles - window_busy_cycles) / tsc_hz / window_draw_count
+                                      : 0.0,
+                    tsc > window_tsc ? 100.0 * double(busy_cycles - window_busy_cycles) / double(tsc - window_tsc)
+                                     : 0.0);
+                window_busy_cycles = busy_cycles;
+            } else {
+                cb_appended = std::snprintf(sz_appended, sizeof(sz_appended), "; stage B off");
+            }
+            window_tsc = tsc;
+            if (PsStats::g_is_gpu_busy_sampled.load(std::memory_order_relaxed)) {
+                const u64 busy_frames = PsStats::g_c_gpu_busy_frames.exchange(0);
+                std::snprintf(sz_appended + cb_appended, sizeof(sz_appended) - cb_appended,
+                              "; GPU busy %.2f ms/frame (%llu frames sampled, %llu not ready)",
+                              busy_frames ? PsStats::g_gpu_busy_ns.exchange(0) / (1e6 * double(busy_frames)) : 0.0,
+                              static_cast<unsigned long long>(busy_frames),
+                              static_cast<unsigned long long>(PsStats::g_c_gpu_busy_unread.exchange(0)));
+            } else {
+                std::snprintf(sz_appended + cb_appended, sizeof(sz_appended) - cb_appended, "; GPU busy n/a");
+            }
             std::printf("Frame stats: %.1f FPS, worst frame %.1f ms (vblank %u Hz); "
                         "%u shader/pipeline compiles, %.1f ms; %llu recorder syncs; "
                         "%.0f write faults/s, %lld hot pages; GPU thread %.2f us/draw, "
                         "%.0f draws/frame, idle %.1f%%; blocked: recorder %.1f%%, host copies "
                         "%.1f%% (%.0f/frame, %.0f/frame not needed), copy threads %.1f%%, GPU ticks %.1f%%; "
-                        "reduced-size draws %.0f/frame of %.0f in the scene\n",
+                        "reduced-size draws %.0f/frame of %.0f in the scene%s\n",
                         frames / window, worst_ms, EmulatorSettings.GetVblankFrequency(), compiles,
                         compile_ns / 1e6, static_cast<unsigned long long>(direct),
                         faults / window, static_cast<long long>(PsStats::g_c_hot_pages.load()),
@@ -611,7 +642,8 @@ void VideoOutDriver::Flip(const Request& req) {
                         PsStats::g_copy_threads_wait_ns.exchange(0) / (window * 1e7),
                         PsStats::g_tick_wait_ns.exchange(0) / (window * 1e7),
                         frames ? double(PsStats::g_c_reduced_draws.exchange(0)) / frames : 0.0,
-                        frames ? double(PsStats::g_c_scene_draws.exchange(0)) / frames : 0.0);
+                        frames ? double(PsStats::g_c_scene_draws.exchange(0)) / frames : 0.0,
+                        sz_appended);
             VideoCore::PageManager::ReportFaultSites();
             if (const u64 notes = PsStats::g_c_cpu_write_notes.exchange(0)) {
                 std::printf("Write notices: %.0f/s, %.2f MB/s (libc copies over pages the GPU side "

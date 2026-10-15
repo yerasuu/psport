@@ -79,9 +79,11 @@ Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_, Runtime
     memory->SetRasterizer(this);
 
     GpuProfiler::Init(instance, scheduler);
+    GpuBusySampler::Init(instance, scheduler);
     if (DrawPipeWanted()) {
         constant_ring = std::make_unique<ConstantRing>(instance, scheduler);
         draw_pipe = std::make_unique<DrawPipe>(&RunDrawPacket, this);
+        PsStats::g_p_stage_b_busy_cycles.store(&draw_pipe->m_busy_cycles, std::memory_order_release);
     }
     // psport: this thread joins the texture binding helper before it changes image state.
     runtime.SetImageAccessHook(&JoinBindHelper, this);
@@ -91,7 +93,9 @@ Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_, Runtime
     });
 }
 
-Rasterizer::~Rasterizer() = default;
+Rasterizer::~Rasterizer() {
+    PsStats::g_p_stage_b_busy_cycles.store(nullptr, std::memory_order_release);
+}
 
 void Rasterizer::PublishSignals() {
     // Only the recording thread, or the GPU command thread while it is idle (drained), touches
@@ -1462,12 +1466,13 @@ void Rasterizer::PrintPipeStats() {
     const u64 tsc = __rdtsc();
     const double cycles = double(tsc - last_tsc);
     const u64 busy = draw_pipe->m_busy_cycles.load(std::memory_order_relaxed);
+    const u64 c_packets = draw_pipe->m_c_packets - last_packets;
     std::printf("Draw pipe: %.0f draws/s pipelined, %.0f drains/s that waited, stage A waited "
-                "%.1f%%, stage B busy %.1f%%\n",
-                (draw_pipe->m_c_packets - last_packets) / seconds,
-                (draw_pipe->m_c_drains - last_drains) / seconds,
+                "%.1f%%, stage B busy %.1f%%, stage B %.2f us/packet\n",
+                c_packets / seconds, (draw_pipe->m_c_drains - last_drains) / seconds,
                 100.0 * (draw_pipe->m_drain_cycles - last_drain_cycles) / cycles,
-                100.0 * (busy - last_busy) / cycles);
+                100.0 * (busy - last_busy) / cycles,
+                c_packets ? 1e6 * double(busy - last_busy) / (cycles / seconds) / c_packets : 0.0);
     std::printf("  drains by reason/s:");
     for (u32 r = 0; r < DrawPipe::NumReasons; ++r) {
         if (const u64 n = draw_pipe->m_c_drains_by_reason[r]) {

@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cstdlib>
 
+#include "core/emulator_settings.h"
+#include "psport_toggles.h"
 #include "video_core/renderer_vulkan/vk_gpu_profiler.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
@@ -111,6 +113,92 @@ void GpuProfiler::Print() {
     }
     m_totals.clear();
     m_c_frames = 0;
+}
+
+void GpuBusySampler::Init(const Instance& instance, Scheduler& scheduler) {
+    if (!EmulatorSettingsImpl::Flag("PS_FRAME_STATS", false) || m_p_instance) {
+        return;
+    }
+    const auto physical = instance.GetPhysicalDevice();
+    const auto families = physical.getQueueFamilyProperties();
+    const u32 family = instance.GetGraphicsQueueFamilyIndex();
+    const u32 valid_bits = family < families.size() ? families[family].timestampValidBits : 0;
+    const double period_ns = physical.getProperties().limits.timestampPeriod;
+    if (valid_bits == 0 || period_ns <= 0.0) {
+        std::printf("Frame stats: no timestamps on the graphics queue: GPU busy n/a\n");
+        return;
+    }
+    m_p_instance = new GpuBusySampler(instance, scheduler, valid_bits, period_ns);
+    PsStats::g_is_gpu_busy_sampled.store(true, std::memory_order_relaxed);
+}
+
+GpuBusySampler::GpuBusySampler(const Instance& instance, Scheduler& scheduler_, u32 valid_bits,
+                               double period_ns)
+    : m_device{instance.GetDevice()}, m_scheduler{scheduler_},
+      m_valid_mask{valid_bits >= 64 ? ~0ull : (1ull << valid_bits) - 1}, m_period_ns{period_ns} {
+    m_pool = Check<"create timestamp query pool">(m_device.createQueryPoolUnique({
+        .queryType = vk::QueryType::eTimestamp,
+        .queryCount = NumSlices * SliceQueries,
+    }));
+}
+
+void GpuBusySampler::WriteTimestamp(u32 query) {
+    m_scheduler.Record([pool = *m_pool, query](vk::CommandBuffer cmdbuf) {
+        cmdbuf.writeTimestamp2(vk::PipelineStageFlagBits2::eAllCommands, pool, query);
+    });
+}
+
+void GpuBusySampler::EndSubmission() {
+    if (!m_is_open) {
+        return;
+    }
+    WriteTimestamp(m_slice * SliceQueries + m_c_used[m_slice]++);
+    m_is_open = false;
+}
+
+void GpuBusySampler::BeginSubmission() {
+    const u32 frame = PsStats::g_frame_number.load(std::memory_order_relaxed);
+    if (m_is_sampling && frame != m_sampled_frame) {
+        m_is_pending[m_slice] = m_c_used[m_slice] != 0;
+        m_slice = (m_slice + 1) % NumSlices;
+        // The other slice's frame was sampled SampleEvery frames before this one.
+        if (m_is_pending[m_slice]) {
+            Collect(m_slice);
+        }
+        m_is_sampling = false;
+    }
+    if (!m_is_sampling && frame % SampleEvery == 0 && frame != m_sampled_frame) {
+        m_is_sampling = true;
+        m_sampled_frame = frame;
+        m_c_used[m_slice] = 0;
+        m_is_pending[m_slice] = false;
+        m_scheduler.Record([pool = *m_pool, first = m_slice * SliceQueries](vk::CommandBuffer cmdbuf) {
+            cmdbuf.resetQueryPool(pool, first, SliceQueries);
+        });
+    }
+    if (m_is_sampling && m_c_used[m_slice] + 2 <= SliceQueries) {
+        WriteTimestamp(m_slice * SliceQueries + m_c_used[m_slice]++);
+        m_is_open = true;
+    }
+}
+
+void GpuBusySampler::Collect(u32 slice) {
+    m_is_pending[slice] = false;
+    const u32 c_stamps = m_c_used[slice];
+    std::array<u64, SliceQueries> stamps;
+    const auto result = m_device.getQueryPoolResults(*m_pool, slice * SliceQueries, c_stamps,
+                                                     c_stamps * sizeof(u64), stamps.data(), sizeof(u64),
+                                                     vk::QueryResultFlagBits::e64);
+    if (result != vk::Result::eSuccess) {
+        PsStats::g_c_gpu_busy_unread.fetch_add(1, std::memory_order_relaxed);
+        return;
+    }
+    u64 ticks = 0;
+    for (u32 i = 0; i + 1 < c_stamps; i += 2) {
+        ticks += (stamps[i + 1] - stamps[i]) & m_valid_mask;
+    }
+    PsStats::g_gpu_busy_ns.fetch_add(u64(double(ticks) * m_period_ns), std::memory_order_relaxed);
+    PsStats::g_c_gpu_busy_frames.fetch_add(1, std::memory_order_relaxed);
 }
 
 } // namespace Vulkan

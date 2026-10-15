@@ -149,6 +149,12 @@ inline std::array<std::atomic<std::uint64_t>, 12> g_t_layer{};
 /// mirrors, copy command.
 inline std::atomic<std::uint64_t> g_layer_entries_written{0};
 inline std::atomic<std::uint64_t> g_c_layer_mprotects{0};
+/// PS_FRAME_STATS: GPU busy time of the sampled frames (Vulkan::GpuBusySampler), the frames read
+/// and those whose timestamps were not ready; false: no sampler (off, or no timestamps).
+inline std::atomic<bool> g_is_gpu_busy_sampled{false};
+inline std::atomic<std::uint64_t> g_gpu_busy_ns{0}, g_c_gpu_busy_frames{0}, g_c_gpu_busy_unread{0};
+/// The draw pipe's stage B busy cycles (TSC), null without the draw pipe.
+inline std::atomic<const std::atomic<std::uint64_t>*> g_p_stage_b_busy_cycles{nullptr};
 /// Diagnostics are collected only with PS_FRAME_STATS=1.
 inline const bool g_is_enabled = [] {
     const char* sz_env = std::getenv("PS_FRAME_STATS");

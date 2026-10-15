@@ -21,6 +21,7 @@
 #include "core/memory.h"
 #include "core/platform.h"
 #include "video_core/amdgpu/liverpool.h"
+#include "psport_cp_census.h"
 #include "psport_toggles.h"
 #include "psport_timeline.h"
 #include "psport_submit_guard.h"
@@ -519,6 +520,7 @@ int PS4_SYSV_ABI sceGnmDisableMipStatsReport() {
 
 s32 PS4_SYSV_ABI sceGnmDispatchDirect(u32* cmdbuf, u32 size, u32 threads_x, u32 threads_y,
                                       u32 threads_z, u32 flags) {
+    PsCpCensus::NoteDriverCall(__func__);
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (cmdbuf && (size == 9) && ((s32)(threads_x | threads_y | threads_z) > -1)) {
@@ -535,6 +537,7 @@ s32 PS4_SYSV_ABI sceGnmDispatchDirect(u32* cmdbuf, u32 size, u32 threads_x, u32 
 }
 
 s32 PS4_SYSV_ABI sceGnmDispatchIndirect(u32* cmdbuf, u32 size, u32 data_offset, u32 flags) {
+    PsCpCensus::NoteDriverCall(__func__);
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (cmdbuf && (size == 7)) {
@@ -551,6 +554,7 @@ s32 PS4_SYSV_ABI sceGnmDispatchIndirect(u32* cmdbuf, u32 size, u32 data_offset, 
 }
 
 s32 PS4_SYSV_ABI sceGnmDispatchIndirectOnMec(u32* cmdbuf, u32 size, VAddr args, u32 modifier) {
+    PsCpCensus::NoteDriverCall(__func__);
     if (cmdbuf != nullptr && size == 8 && args != 0 && ((args & 3u) == 0)) {
         cmdbuf[0] = 0xc0021602 | (modifier & 1u);
         *(VAddr*)(&cmdbuf[1]) = args;
@@ -563,6 +567,7 @@ s32 PS4_SYSV_ABI sceGnmDispatchIndirectOnMec(u32* cmdbuf, u32 size, VAddr args, 
 }
 
 u32 PS4_SYSV_ABI sceGnmDispatchInitDefaultHardwareState(u32* cmdbuf, u32 size) {
+    PsCpCensus::NoteDriverCall(__func__);
     DriverWrite driver_write{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
 
@@ -599,6 +604,7 @@ u32 PS4_SYSV_ABI sceGnmDispatchInitDefaultHardwareState(u32* cmdbuf, u32 size) {
 
 s32 PS4_SYSV_ABI sceGnmDrawIndex(u32* cmdbuf, u32 size, u32 index_count, uintptr_t index_addr,
                                  u32 flags, u32 type) {
+    PsCpCensus::NoteDriverCall(__func__);
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (cmdbuf && (size == 10) && (index_addr != 0) && (index_addr & 1) == 0 &&
@@ -619,6 +625,7 @@ s32 PS4_SYSV_ABI sceGnmDrawIndex(u32* cmdbuf, u32 size, u32 index_count, uintptr
 }
 
 s32 PS4_SYSV_ABI sceGnmDrawIndexAuto(u32* cmdbuf, u32 size, u32 index_count, u32 flags) {
+    PsCpCensus::NoteDriverCall(__func__);
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (cmdbuf && (size == 7) &&
@@ -635,6 +642,7 @@ s32 PS4_SYSV_ABI sceGnmDrawIndexAuto(u32* cmdbuf, u32 size, u32 index_count, u32
 s32 PS4_SYSV_ABI sceGnmDrawIndexIndirect(u32* cmdbuf, u32 size, u32 data_offset, u32 shader_stage,
                                          u32 vertex_sgpr_offset, u32 instance_sgpr_offset,
                                          u32 flags) {
+    PsCpCensus::NoteDriverCall(__func__);
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (cmdbuf && (size == 9) && (shader_stage < ShaderStages::Max) &&
@@ -662,6 +670,7 @@ s32 PS4_SYSV_ABI sceGnmDrawIndexIndirectCountMulti(u32* cmdbuf, u32 size, u32 da
                                                    u32 max_count, u64 count_addr, u32 shader_stage,
                                                    u32 vertex_sgpr_offset, u32 instance_sgpr_offset,
                                                    u32 flags) {
+    PsCpCensus::NoteDriverCall(__func__);
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if ((!sceKernelIsNeoMode() || !UseNeoCompatSequences) && cmdbuf && (size == 16) &&
@@ -698,6 +707,7 @@ s32 PS4_SYSV_ABI sceGnmDrawIndexIndirectCountMulti(u32* cmdbuf, u32 size, u32 da
 int PS4_SYSV_ABI sceGnmDrawIndexIndirectMulti(u32* cmdbuf, u32 size, u32 data_offset, u32 max_count,
                                               u32 shader_stage, u32 vertex_sgpr_offset,
                                               u32 instance_sgpr_offset, u32 flags) {
+    PsCpCensus::NoteDriverCall(__func__);
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (cmdbuf && (size == 11) && (vertex_sgpr_offset < 0x10u) && (instance_sgpr_offset < 0x10u) &&
@@ -725,6 +735,7 @@ int PS4_SYSV_ABI sceGnmDrawIndexIndirectMulti(u32* cmdbuf, u32 size, u32 data_of
 }
 
 int PS4_SYSV_ABI sceGnmDrawIndexMultiInstanced() {
+    PsCpCensus::NoteDriverCall(__func__);
     LOG_ERROR(Lib_GnmDriver, "(STUBBED) called");
     UNREACHABLE();
     return ORBIS_OK;
@@ -732,6 +743,7 @@ int PS4_SYSV_ABI sceGnmDrawIndexMultiInstanced() {
 
 s32 PS4_SYSV_ABI sceGnmDrawIndexOffset(u32* cmdbuf, u32 size, u32 index_offset, u32 index_count,
                                        u32 flags) {
+    PsCpCensus::NoteDriverCall(__func__);
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (cmdbuf && (size == 9)) {
@@ -749,6 +761,7 @@ s32 PS4_SYSV_ABI sceGnmDrawIndexOffset(u32* cmdbuf, u32 size, u32 index_offset, 
 
 s32 PS4_SYSV_ABI sceGnmDrawIndirect(u32* cmdbuf, u32 size, u32 data_offset, u32 shader_stage,
                                     u32 vertex_sgpr_offset, u32 instance_sgpr_offset, u32 flags) {
+    PsCpCensus::NoteDriverCall(__func__);
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (cmdbuf && (size == 9) && (shader_stage < ShaderStages::Max) &&
@@ -773,6 +786,7 @@ s32 PS4_SYSV_ABI sceGnmDrawIndirect(u32* cmdbuf, u32 size, u32 data_offset, u32 
 }
 
 int PS4_SYSV_ABI sceGnmDrawIndirectCountMulti() {
+    PsCpCensus::NoteDriverCall(__func__);
     LOG_ERROR(Lib_GnmDriver, "(STUBBED) called");
     UNREACHABLE();
     return ORBIS_OK;
@@ -781,6 +795,7 @@ int PS4_SYSV_ABI sceGnmDrawIndirectCountMulti() {
 s32 PS4_SYSV_ABI sceGnmDrawIndirectMulti(u32* cmdbuf, u32 size, u32 data_offset, u32 max_count,
                                          u32 shader_stage, u32 vertex_sgpr_offset,
                                          u32 instance_sgpr_offset, u32 flags) {
+    PsCpCensus::NoteDriverCall(__func__);
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (cmdbuf && size == 11 && shader_stage < ShaderStages::Max && vertex_sgpr_offset < 0x10 &&
@@ -805,6 +820,7 @@ s32 PS4_SYSV_ABI sceGnmDrawIndirectMulti(u32* cmdbuf, u32 size, u32 data_offset,
 }
 
 u32 PS4_SYSV_ABI sceGnmDrawInitDefaultHardwareState(u32* cmdbuf, u32 size) {
+    PsCpCensus::NoteDriverCall(__func__);
     DriverWrite driver_write{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
 
@@ -831,6 +847,7 @@ u32 PS4_SYSV_ABI sceGnmDrawInitDefaultHardwareState(u32* cmdbuf, u32 size) {
 }
 
 u32 PS4_SYSV_ABI sceGnmDrawInitDefaultHardwareState175(u32* cmdbuf, u32 size) {
+    PsCpCensus::NoteDriverCall(__func__);
     DriverWrite driver_write{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
 
@@ -850,6 +867,7 @@ u32 PS4_SYSV_ABI sceGnmDrawInitDefaultHardwareState175(u32* cmdbuf, u32 size) {
 }
 
 u32 PS4_SYSV_ABI sceGnmDrawInitDefaultHardwareState200(u32* cmdbuf, u32 size) {
+    PsCpCensus::NoteDriverCall(__func__);
     DriverWrite driver_write{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
 
@@ -887,6 +905,7 @@ u32 PS4_SYSV_ABI sceGnmDrawInitDefaultHardwareState200(u32* cmdbuf, u32 size) {
 }
 
 u32 PS4_SYSV_ABI sceGnmDrawInitDefaultHardwareState350(u32* cmdbuf, u32 size) {
+    PsCpCensus::NoteDriverCall(__func__);
     DriverWrite driver_write{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
 
@@ -924,6 +943,7 @@ u32 PS4_SYSV_ABI sceGnmDrawInitDefaultHardwareState350(u32* cmdbuf, u32 size) {
 }
 
 u32 PS4_SYSV_ABI sceGnmDrawInitToDefaultContextState(u32* cmdbuf, u32 size) {
+    PsCpCensus::NoteDriverCall(__func__);
     LOG_TRACE(Lib_GnmDriver, "called");
 
     constexpr auto CtxInitPacketSize = 0x20u;
@@ -940,6 +960,7 @@ u32 PS4_SYSV_ABI sceGnmDrawInitToDefaultContextState(u32* cmdbuf, u32 size) {
 }
 
 u32 PS4_SYSV_ABI sceGnmDrawInitToDefaultContextState400(u32* cmdbuf, u32 size) {
+    PsCpCensus::NoteDriverCall(__func__);
     LOG_TRACE(Lib_GnmDriver, "called");
 
     constexpr auto CtxInitPacketSize = 0x100u;
@@ -961,6 +982,7 @@ u32 PS4_SYSV_ABI sceGnmDrawInitToDefaultContextState400(u32* cmdbuf, u32 size) {
 }
 
 int PS4_SYSV_ABI sceGnmDrawOpaqueAuto() {
+    PsCpCensus::NoteDriverCall(__func__);
     LOG_ERROR(Lib_GnmDriver, "(STUBBED) called");
     return ORBIS_OK;
 }
@@ -3070,6 +3092,7 @@ int PS4_SYSV_ABI Func_C4C328B7CF3B4171() {
 }
 
 int PS4_SYSV_ABI sceGnmDrawInitToDefaultContextStateInternalCommand(u32* cmdbuf, u32 size) {
+    PsCpCensus::NoteDriverCall(__func__);
     LOG_TRACE(Lib_GnmDriver, "called");
     if (sdk_version >= Common::ElfInfo::FW_400) {
         return sceGnmDrawInitToDefaultContextState400(cmdbuf, size);
@@ -3078,6 +3101,7 @@ int PS4_SYSV_ABI sceGnmDrawInitToDefaultContextStateInternalCommand(u32* cmdbuf,
 }
 
 int PS4_SYSV_ABI sceGnmDrawInitToDefaultContextStateInternalSize() {
+    PsCpCensus::NoteDriverCall(__func__);
     LOG_TRACE(Lib_GnmDriver, "called");
     if (sdk_version >= Common::ElfInfo::FW_400) {
         return 0x100;

@@ -15,6 +15,7 @@
 #include <time.h>
 #include "psport_threads.h"
 #include "psport_ce_stats.h"
+#include "psport_cp_census.h"
 #include "psport_timeline.h"
 #include "psport_copy.h"
 #include "psport_toggles.h"
@@ -1640,6 +1641,9 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
     if (dcb_stats) {
         ScanDcb(dcb, dcb_depth);
     }
+    if (PsCpCensus::g_is_enabled) {
+        PsCpCensus::ScanGraphics(dcb, ccb, dcb_depth);
+    }
 
     cblock.Reset();
 
@@ -2661,6 +2665,9 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
 template <bool is_indirect>
 Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
     FIBER_ENTER(acb_task_name[vqid]);
+    if (PsCpCensus::g_is_enabled) {
+        PsCpCensus::ScanCompute(acb, is_indirect);
+    }
     auto& queue = asc_queues[{vqid}];
 
     struct IndirectPatch {

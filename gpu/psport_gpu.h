@@ -201,6 +201,9 @@ void psport_gpu_audio_decoder_reset(void *p_decoder);
 void psport_gpu_audio_decoder_destroy(void *p_decoder);
 /* Number of symbols registered by the vendored libraries (diagnostics). */
 unsigned psport_gpu_symbol_count(void);
+/* PS_CP_CENSUS=1: the command stream census, printed once after the call report (async-signal
+ * tolerant: write(2) only). */
+void psport_gpu_cp_census_report(void);
 #ifdef __cplusplus
 }
 #endif
