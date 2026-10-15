@@ -232,7 +232,7 @@ u64 PS4_SYSV_ABI sceKernelGetTscFrequency() { return runtime_tsc_frequency(); }
 u64 PS4_SYSV_ABI sceKernelReadTsc() { return Common::FencedRDTSC(); }
 u64 PS4_SYSV_ABI sceKernelGetProcessTime() { return runtime_process_time_us(); }
 u64 PS4_SYSV_ABI sceKernelGetProcessTimeCounter() { return runtime_process_time_counter(); }
-u64 PS4_SYSV_ABI sceKernelGetProcessTimeCounterFrequency() { return 1'000'000'000; }
+u64 PS4_SYSV_ABI sceKernelGetProcessTimeCounterFrequency() { return runtime_tsc_frequency(); }
 s32 PS4_SYSV_ABI sceKernelIsNeoMode() { return 0; } // base PS4
 s32 PS4_SYSV_ABI sceKernelGetCompiledSdkVersion(s32* p_ver) {
     if (!p_ver) return ORBIS_KERNEL_ERROR_EINVAL;
