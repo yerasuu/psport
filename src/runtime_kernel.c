@@ -112,7 +112,7 @@ static ABI uint64_t tsc_frequency(void) {
 uint64_t runtime_process_time_us(void) { return process_time(); }
 uint64_t runtime_process_time_counter(void) { return process_time_counter(); }
 uint64_t runtime_tsc_frequency(void) { return tsc_frequency(); }
-/* bbport (frame stats): how often and how long the game sleeps (it polls GPU labels that way). */
+/* psport (frame stats): how often and how long the game sleeps (it polls GPU labels that way). */
 static _Atomic uint64_t sleep_calls, sleep_total_ns;
 void runtime_sleep_stats(uint64_t *calls, uint64_t *ns) {
     *calls=atomic_exchange(&sleep_calls,0); *ns=atomic_exchange(&sleep_total_ns,0);
@@ -462,7 +462,7 @@ void runtime_thread_keys_cleanup(void) {}
 static void sample_start(void);
 static void sample_report(void);
 
-/* bbport (frame stats): time guest threads spend blocked in the runtime (condition variables,
+/* psport (frame stats): time guest threads spend blocked in the runtime (condition variables,
  * mutexes, semaphores, sleeps), by thread and guest call site: the first return address into the
  * game's code on the stack. Shows where the game waits for the GPU (labels, frame pacing). */
 typedef struct { _Atomic uint64_t key; uint64_t site, site2, site3; int tid, kind; char name[16]; _Atomic uint64_t count, ns; } WaitSite;
@@ -529,7 +529,7 @@ void runtime_wait_report(double frames) {
     printf("\n");
 }
 
-/* bbport PS_SAMPLE_THREAD=<name> (with frame stats): where that thread runs, sampled with SIGPROF
+/* psport PS_SAMPLE_THREAD=<name> (with frame stats): where that thread runs, sampled with SIGPROF
  * every 0.5 ms; reported with the wait profile. A thread that never blocks but waits for the GPU
  * shows up spinning in its polling loop. */
 static _Atomic uint64_t sample_keys[1024], sample_counts[1024];

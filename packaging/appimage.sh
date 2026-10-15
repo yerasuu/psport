@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Builds dist/Bloodborne-bbport-x86_64.AppImage: the port's current build (run build.sh first),
+# Builds dist/Bloodborne-psport-x86_64.AppImage: the port's current build (run build.sh first),
 # its scripts and the launcher, bundled with their Nix closure (nix-appimage: the AppImage mounts
 # its /nix/store with user namespaces, available on SteamOS and most desktops).
 # Running it opens the launcher; `--play` starts the game with the launcher's saved settings.
-# Data (generated files, saves, bbport.ini): ~/.local/share/bbport (PS_DATA_DIR).
+# Data (generated files, saves, psport.ini): ~/.local/share/psport (PS_DATA_DIR).
 set -euo pipefail
 cd -- "$(dirname -- "$0")/.."
 [[ -f out/psport && -f out/gpu/libpsport-gpu.so ]] || { echo 'Build first: bash build.sh' >&2; exit 1; }
@@ -24,7 +24,7 @@ needed_dirs() {
 }
 {
     echo '['
-    for elf in out/psport out/gpu/libpsport-gpu.so $(ls out/libpsport_dlss.so out/gpu/libbbnet.so 2>/dev/null); do
+    for elf in out/psport out/gpu/libpsport-gpu.so $(ls out/libpsport_dlss.so out/gpu/libpsport-net.so 2>/dev/null); do
         needed_dirs "$elf"
     done | grep -o '^/nix/store/[^/]*' | sort -u | grep -v -- '-nix-shell$' | sed 's/.*/  "&"/'
     echo ']'
@@ -34,9 +34,9 @@ trap 'rm -rf "$work"' EXIT
 (cd "$work" && nix bundle --impure --bundler github:ralismark/nix-appimage \
     --expr "import $root/packaging {}")
 mkdir -p dist
-install -m755 "$work/bbport.AppImage" dist/Bloodborne-bbport-x86_64.AppImage
+install -m755 "$work/psport.AppImage" dist/Bloodborne-psport-x86_64.AppImage
 # A GC root for the package: nix-collect-garbage keeps it, and with it the outputs built here from
 # source (the Vulkan-only Mesa, GTK 4 without GStreamer, libadwaita, SDL3), so the next AppImage
 # does not build them again (only a nixpkgs update does).
-nix-build --impure packaging -o out/nix-roots/bbport > /dev/null
-ls -lh dist/Bloodborne-bbport-x86_64.AppImage
+nix-build --impure packaging -o out/nix-roots/psport > /dev/null
+ls -lh dist/Bloodborne-psport-x86_64.AppImage

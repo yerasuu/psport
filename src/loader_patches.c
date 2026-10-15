@@ -571,7 +571,7 @@ static int encode_line(const XmlNode *p_line, Bytes *p_out, char *sz_out_error, 
 
 /* ---- Patch lists ---- */
 
-static void add_write(BbPatchList *p_list, uint64_t off_image, const unsigned char *p_data, size_t cb_data) {
+static void add_write(PsPatchList *p_list, uint64_t off_image, const unsigned char *p_data, size_t cb_data) {
     if (p_list->c_writes == p_list->c_capacity) {
         p_list->c_capacity = p_list->c_capacity ? p_list->c_capacity * 2 : 256;
         if (!(p_list->p_writes = realloc(p_list->p_writes, p_list->c_capacity * sizeof(*p_list->p_writes))))
@@ -582,11 +582,11 @@ static void add_write(BbPatchList *p_list, uint64_t off_image, const unsigned ch
     memcpy(p_copy, p_data, cb_data);
     p_list->p_writes[p_list->c_writes++] = (LoaderPatchWrite){off_image, cb_data, p_copy};
 }
-static void truncate_list(BbPatchList *p_list, size_t c_writes) {
+static void truncate_list(PsPatchList *p_list, size_t c_writes) {
     while (p_list->c_writes > c_writes) free(p_list->p_writes[--p_list->c_writes].p_data);
 }
 /* A metadata entry's lines appended, or none of them with the reason. */
-static int add_entry(BbPatchList *p_list, const XmlNode *p_entry, char *sz_out_error, size_t cb_error) {
+static int add_entry(PsPatchList *p_list, const XmlNode *p_entry, char *sz_out_error, size_t cb_error) {
     size_t c_before = p_list->c_writes;
     NodeList lines = {0};
     find_all(p_entry, "Line", &lines);
@@ -629,7 +629,7 @@ static const XmlNode *find_entry(const NodeList *p_entries, const char *sz_name,
     }
     return p_found;
 }
-static int add_named(BbPatchList *p_list, const char *sz_file, const char *const *pp_names, size_t c_names,
+static int add_named(PsPatchList *p_list, const char *sz_file, const char *const *pp_names, size_t c_names,
                      const char *sz_app_version, char *sz_out_error, size_t cb_error) {
     char sz_reason[256];
     XmlNode *p_root = read_xml(sz_file, sz_reason, sizeof(sz_reason));
@@ -658,15 +658,15 @@ static int add_named(BbPatchList *p_list, const char *sz_file, const char *const
     free_node(p_root);
     return is_added;
 }
-static size_t count_writes(const BbPatchList *p_list) { return p_list->c_writes; }
-static unsigned char *get_write(BbPatchList *p_list, size_t i_write, uint64_t *p_out_offset, uint64_t *p_out_length) {
+static size_t count_writes(const PsPatchList *p_list) { return p_list->c_writes; }
+static unsigned char *get_write(PsPatchList *p_list, size_t i_write, uint64_t *p_out_offset, uint64_t *p_out_length) {
     if (i_write >= p_list->c_writes) return NULL;
     *p_out_offset = p_list->p_writes[i_write].off_image;
     *p_out_length = p_list->p_writes[i_write].cb_data;
     return p_list->p_writes[i_write].p_data;
 }
-void loader_patch_services(BbPatchList *p_list, BbPatchServices *p_out) {
-    *p_out = (BbPatchServices){p_list, add_named, count_writes, get_write};
+void loader_patch_services(PsPatchList *p_list, PsPatchServices *p_out) {
+    *p_out = (PsPatchServices){p_list, add_named, count_writes, get_write};
 }
 
 /* ---- External patch folders ---- */
@@ -753,7 +753,7 @@ static int is_enabled_by_default(const XmlNode *p_entry) {
     const char *sz_enabled = attribute(p_entry, "isEnabled");
     return sz_enabled && !strcasecmp(sz_enabled, "true");
 }
-void loader_patches_external(BbPatchList *p_list, const LoaderPatchFolder *p_folder, const char *sz_config) {
+void loader_patches_external(PsPatchList *p_list, const LoaderPatchFolder *p_folder, const char *sz_config) {
     Externals externals = {0};
     find_externals(p_folder, &externals);
     LoaderJsonList settings[2] = {{.sz_key = "enabled"}, {.sz_key = "disabled"}};

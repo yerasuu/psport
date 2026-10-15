@@ -28,15 +28,15 @@ struct VmaAllocationInfo;
 namespace VideoCore {
 
 namespace Detail {
-/// bbport: GuestInPlace() and WriteTracking() once known (every buffer binding asks): 0 not yet,
+/// psport: GuestInPlace() and WriteTracking() once known (every buffer binding asks): 0 not yet,
 /// 1 on, 2 off.
 inline std::atomic<u8> guest_in_place{0}, write_tracking{0};
 bool ComputeGuestInPlace();
 bool ComputeWriteTracking();
 } // namespace Detail
 
-/// bbport PS_GUEST_IN_PLACE=1: the GPU uses the game's direct memory where it is (the arena is bound to
-/// the Vulkan chunks it lives in, gpu/shim/bbport_guest_memory.cpp) instead of copies in VRAM.
+/// psport PS_GUEST_IN_PLACE=1: the GPU uses the game's direct memory where it is (the arena is bound to
+/// the Vulkan chunks it lives in, gpu/shim/psport_guest_memory.cpp) instead of copies in VRAM.
 inline bool GuestInPlace() {
     const u8 state = Detail::guest_in_place.load(std::memory_order_relaxed);
     return state != 0 ? state == 1 : Detail::ComputeGuestInPlace();
@@ -54,7 +54,7 @@ inline bool WriteTracking() {
 /// well, so writes into them that nothing announced show up as write faults (their sites).
 bool WriteVerify();
 
-/// bbport PS_CONSTANTS_IN_PLACE=1 (with PS_GUEST_IN_PLACE): small read-only buffers (constants) are
+/// psport PS_CONSTANTS_IN_PLACE=1 (with PS_GUEST_IN_PLACE): small read-only buffers (constants) are
 /// read by the GPU where the game wrote them, when the draw executes, like everything else in
 /// place, instead of being copied when the draw is decoded (constant ring) or recorded (stream
 /// buffer). The copies kept a draw's values from command writes the CPU performed at decode time;
@@ -119,7 +119,7 @@ struct UniqueBuffer {
 struct Buffer {
     explicit Buffer(const Vulkan::Instance& instance, VAddr cpu_addr_, u64 size_bytes_,
                     MemoryType mem_type, std::string_view debug_name = "");
-    /// bbport PS_GUEST_IN_PLACE: a buffer over memory owned elsewhere (a guest memory chunk,
+    /// psport PS_GUEST_IN_PLACE: a buffer over memory owned elsewhere (a guest memory chunk,
     /// exported as a dma-buf): transfers and texel/storage reads, no device address.
     explicit Buffer(const Vulkan::Instance& instance, u64 size_bytes_, vk::DeviceMemory memory,
                     std::string_view debug_name);

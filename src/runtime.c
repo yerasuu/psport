@@ -1,7 +1,7 @@
 /* Narrow, explicit PS4 libc contracts. No automatic success stubs. */
 #define _CRT_RAND_S
 #include "runtime.h"
-#include "gpu/bbgpu.h"
+#include "gpu/psport_gpu.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -28,7 +28,7 @@ static _Thread_local unsigned char *tls_blocks[TLS_MODULES];
 static void *process_param;
 void runtime_set_procparam(void *param) {
     process_param=param;
-    /* bbport: the game's libc heap settings (SceProcParam +0x38: SceLibcParam; its +0x10.. pointers to
+    /* psport: the game's libc heap settings (SceProcParam +0x38: SceLibcParam; its +0x10.. pointers to
      * the heap size, delayed and extended allocation flags, initial size). +0x30 is the main thread's
      * stack size pointer, which newer SDKs fill, so reading the libc block from there faulted. */
     const uint64_t *p=(const uint64_t *)param;
@@ -332,7 +332,7 @@ uintptr_t runtime_resolve(const char *name, int is_data) {
     if (file) return file;
     uintptr_t aio = runtime_aio_resolve(name);
     if (aio) return aio;
-    return bbgpu_resolve(name);
+    return psport_gpu_resolve(name);
 }
 /* The NIDs before any "#<library>#<module>" scope are equal. */
 int runtime_same_nid(const char *a, const char *b) {

@@ -74,17 +74,17 @@ void PrepareSaves(const char* saves, const char* save_title) {
 
 void InstallHooks(const CoreServices& services) {
     // The resource loaders' copies, the GPU memory range allocator and the heap (guest_hooks).
-    BbGuestHooks::Install(services.fresh_range);
+    PsGuestHooks::Install(services.fresh_range);
 }
 
 void PatchImage(unsigned char* image, std::uint64_t size) {
-    BbGnmHooks::PatchImage(image, size);
-    BbGameMenu::PatchImage(image, size);
+    PsGnmHooks::PatchImage(image, size);
+    PsGameMenu::PatchImage(image, size);
 }
 
 void ReportStats() {
     if (static int heap_reports = 0; ++heap_reports % 6 == 1) {
-        BbHeapSites::Report();
+        PsHeapSites::Report();
     }
 }
 
@@ -107,11 +107,11 @@ extern const Profile BloodborneProfile = {
     .name = "Bloodborne",
     .serials = Serials,
     .mod_folders = ModFolders,
-    .patch_file = BbLaunch::PatchFile,
-    .prepare_environment = BbLaunch::PrepareEnvironment,
-    .check_files = BbLaunch::CheckFiles,
-    .add_patches = BbLaunch::AddPatches,
-    .effects = {.switches = BbEffects::Switches,
+    .patch_file = PsLaunch::PatchFile,
+    .prepare_environment = PsLaunch::PrepareEnvironment,
+    .check_files = PsLaunch::CheckFiles,
+    .add_patches = PsLaunch::AddPatches,
+    .effects = {.switches = PsEffects::Switches,
                 .has_model_detail = true,
                 .hint = {"Motion blur and shadows from dynamic lights place a significant load on the GPU.",
                          "Размытие в движении и тени от динамических источников заметно нагружают GPU.",
@@ -122,9 +122,9 @@ extern const Profile BloodborneProfile = {
     .prepare_saves = PrepareSaves,
     // The game's buffer-copy compute shader (not the export-stage copy shader).
     .buffer_copy_shader = 0xfefebf9f,
-    .driver_commands_written = BbGnmHooks::NoteDriverWrite,
-    .commands_submitted = BbGnmHooks::CheckSubmission,
-    .frame_overlap_unsafe = BbHeapSites::OverlapLeaks,
+    .driver_commands_written = PsGnmHooks::NoteDriverWrite,
+    .commands_submitted = PsGnmHooks::CheckSubmission,
+    .frame_overlap_unsafe = PsHeapSites::OverlapLeaks,
     // The game keeps two frame contexts and builds the next frame in the one of the frame before
     // the previous: its first two submissions are translated while the GPU finishes the previous
     // frame (1080p, Yahar'gul: 101 -> 154 FPS). With 8 or more, or no wait at all, its heap leaked
@@ -150,7 +150,7 @@ extern const Profile BloodborneProfile = {
                                    .cb_min_skeleton = 640,
                                    .cb_max_skeleton = 16384}},
     .report_stats = ReportStats,
-    .before_present = BbGameMenu::Poll,
+    .before_present = PsGameMenu::Poll,
     .label_release = LabelRelease,
     .small_object_pool = {.header_offset = 0xfc0, .block_size = 0x30},
 };

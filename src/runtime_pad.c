@@ -30,7 +30,7 @@
 #define _GNU_SOURCE
 #include "runtime.h"
 #include "runtime_pad.h"
-#include "gpu/bbgpu.h"
+#include "gpu/psport_gpu.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -247,7 +247,7 @@ static SDL_Gamepad *current_gamepad(void) {
     }
     return gamepad;
 }
-/* bbport (frame stats): the game's libc heap, read every 5 s from a game thread (it reads the pad)
+/* psport (frame stats): the game's libc heap, read every 5 s from a game thread (it reads the pad)
  * with libc.prx's malloc_stats (export stub at libc.prx+0x1f8c0; malloc_stats_fast returns 1 in this libc, the module at image +0x56e0000):
  * in use now and at most, and what it took from the system. A heap that keeps growing is a leak. */
 typedef struct { uint16_t size, version; uint32_t reserved; uint64_t max_system, system, max_in_use, in_use; } MallocManagedSize;
@@ -272,7 +272,7 @@ static void report_guest_heap(void) {
                m.in_use/1048576.0,m.max_in_use/1048576.0,m.system/1048576.0,m.max_system/1048576.0);
     }
 }
-/* Controls: what each PS4 input is bound to. Defaults below; bbport.ini (PS_CONFIG) lines
+/* Controls: what each PS4 input is bound to. Defaults below; psport.ini (PS_CONFIG) lines
  * key.<input>=<SDL key names> and pad.<input>=<SDL gamepad button names>, comma-separated,
  * replace an input's binding (empty: unbound). Inputs: the buttons (cross ... right, touchpad =
  * a left-side click, touchpad_right), and on the keyboard the sticks: move_* (left), look_*
@@ -356,7 +356,7 @@ static int key_from_name(const char *name) {
     const SDL_Scancode s=SDL_GetScancodeFromName(name);
     return s==SDL_SCANCODE_UNKNOWN ? -1 : (int)s;
 }
-/* Mouse look (bbport.ini): mouse_look=0 leaves the mouse alone; mouse_sensitivity (default 1:
+/* Mouse look (psport.ini): mouse_look=0 leaves the mouse alone; mouse_sensitivity (default 1:
  * ~1000 pixels/s turn the camera at full speed), mouse_invert_y=1. */
 static int mouse_look=1, mouse_invert_y;
 static float mouse_sensitivity=1.0f;
@@ -506,14 +506,14 @@ static void sample_host(PadData *d) {
     d->connected=1; d->connected_count=connected_count ? connected_count : 1;
     d->timestamp=now_us();
     SDL_Gamepad *g=current_gamepad();
-    if (!bindings_ready) { load_bindings(); bindings_ready=1; bbgpu_mouse_look_enable(mouse_look); }
+    if (!bindings_ready) { load_bindings(); bindings_ready=1; psport_gpu_mouse_look_enable(mouse_look); }
     /* The mouse's motion and wheel since the last sample (always taken: none of it piles up while
      * the menu is open); it counts while the window holds the mouse. */
     double mouse_dx=0, mouse_dy=0;
     int wheel_up=0, wheel_down=0;
-    bbgpu_mouse_take(&mouse_dx,&mouse_dy,&wheel_up,&wheel_down);
-    const int captured=bbgpu_mouse_captured();
-    if (bbgpu_overlay_captures_input()) { apply_mouse_look(d,0,0,d->timestamp,0); return; } /* menu open: neutral input */
+    psport_gpu_mouse_take(&mouse_dx,&mouse_dy,&wheel_up,&wheel_down);
+    const int captured=psport_gpu_mouse_captured();
+    if (psport_gpu_overlay_captures_input()) { apply_mouse_look(d,0,0,d->timestamp,0); return; } /* menu open: neutral input */
     const bool *k=SDL_WasInit(SDL_INIT_VIDEO) && !runtime_keyboard_taken() ? SDL_GetKeyboardState(NULL) : NULL;
     mouse_buttons=captured && SDL_WasInit(SDL_INIT_VIDEO) ? SDL_GetMouseState(NULL,NULL) : 0;
     mouse_wheel_step(d->timestamp,captured ? wheel_up : 0,captured ? wheel_down : 0);
@@ -572,7 +572,7 @@ static void touch_ids(PadData *d) {
 static void sample(PadData *d) {
     sample_host(d);
     runtime_pad_read_inject();
-    if (bbgpu_overlay_captures_input()) return;
+    if (psport_gpu_overlay_captures_input()) return;
     runtime_pad_record_sample(d);
     runtime_pad_replay_sample(d);
     d->buttons|=runtime_pad_injected.buttons;

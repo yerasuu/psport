@@ -10,19 +10,19 @@
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/host_shaders/buffer_multi_copy_comp.h"
 #include "game_profile.h"
-#include "bbport_toggles.h"
+#include "psport_toggles.h"
 #include "video_core/renderer_vulkan/vk_gpu_profiler.h"
 
 extern std::unique_ptr<AmdGpu::Liverpool> liverpool;
 
 namespace Vulkan {
 
-// bbport: the copy shader runs ~57 times per frame with ~1024 small ranges each. As one
+// psport: the copy shader runs ~57 times per frame with ~1024 small ranges each. As one
 // vkCmdCopyBuffer with that many regions it cost ~37 ns of GPU time per range (~2.1 ms per
 // frame) plus the recording; buffer_multi_copy.comp copies all ranges in one dispatch.
 static bool MultiCopy(Rasterizer& rasterizer, const VideoCore::Buffer* src,
                       const VideoCore::Buffer* dst, std::span<const vk::BufferCopy> copies) {
-    if (copies.size() < 8 || BbToggle::Disabled(BbToggle::MultiCopyShader)) {
+    if (copies.size() < 8 || PsToggle::Disabled(PsToggle::MultiCopyShader)) {
         return false;
     }
     u64 src_min = ~0ull, src_max = 0, dst_min = ~0ull, dst_max = 0;
@@ -158,7 +158,7 @@ static bool ExecuteCopyShaderHLE(const Shader::Info& info, const AmdGpu::Compute
     static std::vector<vk::BufferCopy> copies;
     copies.clear();
     copies.reserve(cs_program.dim_x);
-    // bbport PS_COPY_SHADER_TRACE=1 (diagnostics): the copy shader's buffers, every 2 s.
+    // psport PS_COPY_SHADER_TRACE=1 (diagnostics): the copy shader's buffers, every 2 s.
     static const bool trace = std::getenv("PS_COPY_SHADER_TRACE") != nullptr;
     if (trace) {
         static auto last = std::chrono::steady_clock::now();
@@ -197,7 +197,7 @@ static bool ExecuteCopyShaderHLE(const Shader::Info& info, const AmdGpu::Compute
         copies.emplace_back(local_src_offset, local_dst_offset, local_size);
     }
 
-    // bbport: 64 KiB instead of 64 MiB. The copies are a few KiB spread over up to 57 MiB, and
+    // psport: 64 KiB instead of 64 MiB. The copies are a few KiB spread over up to 57 MiB, and
     // each batch synchronizes (uploads, marks GPU-modified) its whole range: GPU time of the copy
     // shader 1.5 -> 0.6 ms/frame, GPU busy 85% -> 77%, frame rate no lower.
     // PS_COPY_MERGE_KB overrides it.
@@ -268,7 +268,7 @@ bool ExecuteShaderHLE(const Shader::Info& info, const AmdGpu::Regs& regs,
     // The game's buffer copy shader, from its profile (games/); nothing else is replaced.
     const u64 copy_shader = Game::BufferCopyShader();
     if (copy_shader != 0 && info.pgm_hash == copy_shader) {
-        // bbport: with the game's memory in place the game's shader runs (translated), reading its
+        // psport: with the game's memory in place the game's shader runs (translated), reading its
         // copy list when the GPU executes it. PS_COPY_SHADER_NATIVE=0: the list read on the CPU
         // when the dispatch is recorded, copies of our own (before). Experiment bit 2 inverts it
         // while the game runs. The layer's paged stores now write through to guest memory while
@@ -276,7 +276,7 @@ bool ExecuteShaderHLE(const Shader::Info& info, const AmdGpu::Regs& regs,
         static const bool native_env = [copy_shader] {
             const char* env = std::getenv("PS_COPY_SHADER_NATIVE");
             const bool native = !env || env[0] != '0';
-            const bool translated = VideoCore::GuestInPlace() && native != BbToggle::Experiment(2);
+            const bool translated = VideoCore::GuestInPlace() && native != PsToggle::Experiment(2);
             std::printf("GPU: buffer copy shader %llx: %s%s (PS_COPY_SHADER_NATIVE=0: HLE)\n",
                         (unsigned long long)copy_shader,
                         translated ? "original translated shader" : "HLE",
@@ -284,7 +284,7 @@ bool ExecuteShaderHLE(const Shader::Info& info, const AmdGpu::Regs& regs,
                             ? ", paged writes through to guest memory" : "");
             return native;
         }();
-        if (VideoCore::GuestInPlace() && native_env != BbToggle::Experiment(2)) {
+        if (VideoCore::GuestInPlace() && native_env != PsToggle::Experiment(2)) {
             return false;
         }
         // Its destinations stay in the game's memory, as when it runs as itself (see

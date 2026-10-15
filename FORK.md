@@ -23,8 +23,31 @@ bridge `libpsport_dlss.so`; every environment variable it reads is `PS_*`, and t
 names keep working, `run.sh`, `build.sh` and `psport` itself copy each `BB_*` variable that is set to
 its `PS_*` name when that one is unset, and say once which they copied:
 `psport: BB_* variables are deprecated, use PS_*: BB_A, BB_B` (on stdout; `psport` then starts
-itself again, so the GPU library's initializers see the copies too). Source files (`bbport_*`,
-`bblayer_*`), namespaces (`Bb*`) and the settings file `bbport.ini` keep bbport's names for now.
+itself again, so the GPU library's initializers see the copies too).
+
+Inside, the fork's own files swap bbport's `bb` for `ps` and keep the rest of the name:
+`gpu/shim/psport_*` (bbport's `bbport_*`), `gpu/layer/pslayer_*` (`bblayer_*`), and the GPU
+library's C interface `gpu/psport_gpu.h` with its `psport_gpu_*` calls (`bbgpu.h`, `bbgpu_*`). The
+prefix stays where the directory alone would say it: `gpu/shim/` also holds the stand-ins for
+shadPS4's own headers (`common/`, `core/`), and every directory there is on one include path, so a
+bare `settings.h` would be found by search order. Namespaces are `Ps*` (`PsStats`, `PsToggle`,
+`PsLayer`), the CMake target `psport-gpu`, the online module `gpu/net/` (`libpsport-net.so`,
+`psport_net_*`, `PsNet*`) and the DLSS bridge's interface `psport_dlss_bridge.h` (`PsDlss*`, entry
+point `PsDlssGetApi`; a bridge built before exports `BbDlssGetApi` and is reported unavailable until
+`build.sh` builds it again). The comments that mark the fork's lines in inherited code say
+`psport:` (bbport's `bbport:`), as do the Vulkan debug names of its buffers.
+
+The settings file is `psport.ini` and the GPU check `out/psport-gpu-capabilities` (bbport's
+`bbport.ini` and `out/bb-gpu-capabilities`). When `PS_CONFIG` is unset and the data directory has a
+`bbport.ini` but no `psport.ini`, `run.sh` copies it once (`psport: settings copied from bbport.ini
+to psport.ini`), and so does the launcher; `bbport.ini` itself is left for the older release.
+
+The inherited GTK launcher and the package are psport's too: `launcher/psport-launcher.sh` and
+`launcher/psport_*.py` (app id `io.github.psport.Launcher`, settings in
+`~/.config/psport-launcher/`, read from `~/.config/bbport-launcher/` until the first save), the
+Nix package `psport` with `bin/psport` and `bin/psport-game`, and the AppImage's data directory
+`~/.local/share/psport`. The package's wrappers move an existing `~/.local/share/bbport` there once,
+when `PS_DATA_DIR` is unset, and leave a link at the old path for an older AppImage.
 
 ## Ported components
 
@@ -50,7 +73,7 @@ is the files as they were at the source; later commits adapt them.
 
 bbport carries part of shadPS4 (`gpu/shadps4/`: video core, shader recompiler, AvPlayer and other
 libraries) from its own first commit. Where the fork changes that code, the change is listed here, so
-an upstream sync knows what differs. Lines changed carry a `bbport:` comment where the reason isn't
+an upstream sync knows what differs. Lines changed carry a `psport:` comment where the reason isn't
 obvious.
 
 | Area | Files | Change | Also in upstream shadPS4 |
@@ -63,7 +86,7 @@ obvious.
 | AvPlayer jumps | `core/libraries/avplayer/avplayer.cpp`, `avplayer_impl.*`, `avplayer_state.*`, `avplayer_source.*` | `sceAvPlayerJumpToTime` restarts the source at the requested time (paused if it was) and reports `WAR_JUMP_COMPLETE`; Unity's video player draws nothing until that warning arrives, so Symphonia's intro movies showed the previous movie's last frame | stubbed at `3a9f572` |
 | AvPlayer stopping | `core/libraries/avplayer/avplayer_source.cpp` | `Stop()` no longer rewinds the file streamer's position to 0: FFmpeg's byte stream kept its own position and buffer, so after a restart (`sceAvPlayerJumpToTime`, Unity's movies) its next refill read the file from the start as packet data (`Invalid NAL unit size`, `partial file`) and Symphonia hung at the end of its intro | bug present at `3a9f572` |
 | AvPlayer end of file | `core/libraries/avplayer/avplayer_source.cpp`, `avplayer_state.*` | the demuxer reports end of file only when the source ran out, not when `Stop()` ends it: every restart (`sceAvPlayerStart` while playing, `sceAvPlayerJumpToTime`, `sceAvPlayerStop`) put the state machine in `EndOfFile`, so after a jump `Pause()` did nothing and a buffering check racing a stop logged `EndOfFile -> Buffering` (Tales of Symphonia); the controller thread moves between `Play` and `Buffering` only from the state it checked, and `Stop()` holds the source mutex exclusively, so a stop no longer reads as a buffer underrun | bug present at `3a9f572` |
-| VideoOut cursor | `core/libraries/videoout/video_out.cpp`, `driver.h` | `sceVideoOutCursorEnable`/`Disable`/`SetPosition`/`SetHotSpot`/`Set2xMagnify` keep each port's cursor state (image, position, hot spot, magnification) and hand it to the overlay, which draws each enabled cursor's 64x64 image over the game frame, behind the menu (`gpu/shim/bbport_overlay.cpp`); the first enable is logged with how many of its pixels are visible | absent at `3a9f572` |
+| VideoOut cursor | `core/libraries/videoout/video_out.cpp`, `driver.h` | `sceVideoOutCursorEnable`/`Disable`/`SetPosition`/`SetHotSpot`/`Set2xMagnify` keep each port's cursor state (image, position, hot spot, magnification) and hand it to the overlay, which draws each enabled cursor's 64x64 image over the game frame, behind the menu (`gpu/shim/psport_overlay.cpp`); the first enable is logged with how many of its pixels are visible | absent at `3a9f572` |
 | VideoOut configure options | `core/libraries/videoout/video_out.cpp` | `sceVideoOutConfigureOptionsInitialize_` zero-fills the options block of the size the caller passes (no option set), as `sceVideoOutModeSetAny_` fills a mode | absent at `3a9f572` |
 | Custom border colour without a table | `video_core/texture_cache/sampler.cpp` | a sampler with a custom border colour while `TA_BC_BASE` is 0 samples transparent black (the hardware's fetch reads an unmapped page as zeros) instead of reading the table at guest address 0 (a segfault); logged with a count | bug present at `3a9f572` |
 | Synchronous image downloads | `video_core/texture_cache/texture_cache.cpp` | the buffer invalidation after a synchronous image download reads back GPU data in place (`assume_locks`) instead of queuing it to the GPU command thread: downloads run on that thread or the draw recording thread, and the queued readback never ran while the command thread drained the draw pipe (Onigiri hung after its first frame once it had a mouse) | no (bbport's draw recording thread) |
@@ -114,11 +137,11 @@ point at them.
 
 ## In-game overlay
 
-The overlay (Insert or L3+R3, `gpu/shim/bbport_overlay.cpp`) is drawn in English, Russian or Spanish:
+The overlay (Insert or L3+R3, `gpu/shim/psport_overlay.cpp`) is drawn in English, Russian or Spanish:
 
 | Source, first that is set | Values |
 |---|---|
-| `menu_language` in `bbport.ini` (written whenever the overlay saves a setting) | `en`, `ru`, `es` |
+| `menu_language` in `psport.ini` (written whenever the overlay saves a setting) | `en`, `ru`, `es` |
 | `PS_MENU_LANGUAGE` (decanter passes its own UI language) | a language code: `ru...` Russian, `es...` Spanish, anything else English |
 | `LC_ALL`, `LC_MESSAGES`, `LANG`, `LANGUAGE` | the same |
 
@@ -140,7 +163,7 @@ a pointer, so regression runs see a mouse that never moves or clicks). While
 the menu or the close prompt is open the game sees no motion and no buttons. While the game shows a
 VideoOut cursor, the window hides the system cursor over it and a click does not take the mouse for
 mouse look. The log says once whether the host mouse reaches the game (`Runtime: mouse: ...`).
-`game_mouse_sensitivity` in `bbport.ini` (0.05 to 20, default 1: the host's pixels as they are)
+`game_mouse_sensitivity` in `psport.ini` (0.05 to 20, default 1: the host's pixels as they are)
 scales the motion the game receives, keeping fractions for the next read; a value other than 1 is
 logged. Mouse look keeps its own `mouse_sensitivity`.
 
@@ -216,7 +239,7 @@ profile (or with `PS_GAME_PROFILE=none`) runs with the values in the first colum
 | Frame overlap, `PS_SUBMIT_AHEAD` | 0 (`Game::Profile::c_submits_ahead`) | the submission lock's contract: after `sceGnmSubmitDone` a submission waits for the previous frame, and a game may reuse what that frame used as soon as it returns (Gal Guardians 2 rebuilt its command buffers over the frame in flight) | 2: it builds each frame in the context of the frame before the previous; its heap leak check (`frame_overlap_unsafe`) and `PS_SUBMIT_GUARD` still turn it off |
 | Frames the GPU command thread runs ahead, `PS_FRAMES_AHEAD` | 1 | pacing only: flips come at the GPU's rate instead of in bursts when the GPU is the bottleneck | |
 | Forced anisotropic filtering, `PS_ANISO` | 0: the game's samplers (`Game::Profile::anisotropy`) | the image the game asks for: forced filtering also reaches textures that are not surfaces (Astrea's backgrounds came out brighter and browner with it) | 16: its scene textures have little or none, and behind the upscaler surfaces at a grazing angle stayed blurred |
-| Temporal upscaler (`upscaler` in `bbport.ini`, `PS_UPSCALER`) | FSR 3.1 at Native AA, where a profile places it (`Game::Profile::upscaler`); elsewhere off, with no scene jitter and no camera or object motion vectors (`Upscaler: off: no game profile places it`) | the upscaler has to know which pass combines the scene and where the UI starts; jittering a frame nothing then resolves would shake its image | its post-processing combine (compute shader `9a9cf8a9`) and its UI's first vertex shader (`34e8a281`), its UI's other shaders, the layout of its scene constants (the camera) and the sizes of its bone palettes (object motion); `PS_UPSCALE_BEFORE_CS` and `PS_UI_TRIGGER_VS` place it by hand in another game, without camera or object motion vectors |
+| Temporal upscaler (`upscaler` in `psport.ini`, `PS_UPSCALER`) | FSR 3.1 at Native AA, where a profile places it (`Game::Profile::upscaler`); elsewhere off, with no scene jitter and no camera or object motion vectors (`Upscaler: off: no game profile places it`) | the upscaler has to know which pass combines the scene and where the UI starts; jittering a frame nothing then resolves would shake its image | its post-processing combine (compute shader `9a9cf8a9`) and its UI's first vertex shader (`34e8a281`), its UI's other shaders, the layout of its scene constants (the camera) and the sizes of its bone palettes (object motion); `PS_UPSCALE_BEFORE_CS` and `PS_UI_TRIGGER_VS` place it by hand in another game, without camera or object motion vectors |
 | Object motion (`object_motion`, `PS_OBJECT_MOTION`) | on, while the upscaler is available | it only feeds the upscaler | |
 | Frame rate (`PS_FPS`) and vblank (`PS_VBLANK_HZ`) | a title without presets: unpatched, 60 Hz vblank (the console's) | the frame rate presets are patches to one executable, its profile's (`Game::Profile::add_patches`); at 480 Hz a title pacing itself by its flip rate ran 8 times too fast | `uncap` (delta-time patch, 480 Hz vblank, frames shown at once), 60 or 90 (`gpu/games/bloodborne/patches.cpp`, which sets `PS_VBLANK_HZ` for the preset) |
 | Scaled output (`output_res`) and `PS_DMEM_MB` 9152 | only for a title whose profile has presets (run.sh asks `psport --has-presets`); otherwise its own size and the console's 5056 MiB of direct memory | they are a patch to the same executable, and the larger direct memory exists for its larger targets | as `output_res` and `live_resolution` choose |
@@ -227,7 +250,7 @@ profile (or with `PS_GAME_PROFILE=none`) runs with the values in the first colum
 | `PS_PREUPLOAD` | 1 (run.sh; the 0.3 model only) | uploads only memory already in VRAM that the game rewrote: no new VRAM, it only moves an upload earlier | |
 | `PS_UFFD` | 0 | userfaultfd write tracking crashed the Steam Deck; mprotect is the safe path | |
 | Draw pipeline `PS_DRAW_PIPE`, recording threads `PS_VK_RECORD_THREADS`, `PS_ASYNC_SUBMIT`, copy threads `PS_COPY_THREADS` | by the host's hardware threads: the draw pipeline from 8, 1/2/3 recording threads from 1/8/12, submissions from the recording threads, a quarter of the threads (1 to 4) for copies | they decide which host thread does the work, not what the GPU or the game sees | |
-| Optimizations behind `PS_TOGGLE_FILE` (`gpu/shim/bbport_toggles.h`) | on (a set bit switches one off) | caches, memos and pipelining that keep every result the same; the TAA, FSR 4, camera and scene scaling bits act only where the upscaler runs; the optional TAA techniques are off | |
+| Optimizations behind `PS_TOGGLE_FILE` (`gpu/shim/psport_toggles.h`) | on (a set bit switches one off) | caches, memos and pipelining that keep every result the same; the TAA, FSR 4, camera and scene scaling bits act only where the upscaler runs; the optional TAA techniques are off | |
 | `RADV_DEBUG=nohiz` | on GCN 3-5 under RADV (run.sh, `PS_AUTO_NOHIZ=0`: off) | a driver bug: depth compression drew black halos and lost geometry on those chips | |
 
 ## Diagnostics
@@ -240,7 +263,7 @@ profile (or with `PS_GAME_PROFILE=none`) runs with the values in the first colum
 | (always) | before the game starts: every import without implementation or answered by a stub, and a summary |
 | (always) | calls that nothing answers for real or that fail, see [Call report](#call-report) |
 | `PS_CALL_REPORT=<file>` | the call report's summary lines, also written to that file when the process ends |
-| `PS_SUBMIT_GUARD=0` | frames overlap (`PS_SUBMIT_AHEAD`) unguarded: a submitted frame's command buffers are neither made read-only nor checksummed until the GPU retires the frame (`gpu/shim/bbport_submit_guard.h`), so a game that rewrites them in flight is not caught and the overlap stays on; `=trap` or `=hash` keeps one of the two watches |
+| `PS_SUBMIT_GUARD=0` | frames overlap (`PS_SUBMIT_AHEAD`) unguarded: a submitted frame's command buffers are neither made read-only nor checksummed until the GPU retires the frame (`gpu/shim/psport_submit_guard.h`), so a game that rewrites them in flight is not caught and the overlap stays on; `=trap` or `=hash` keeps one of the two watches |
 | `PS_AUDIO_STATS=1` | per audio port, every 5 s: cadence, peak and RMS in dBFS (sound or silence) |
 | `PS_NGS2_TRACE=1` | first calls of each Ngs2 function and the level of each render |
 | `PS_FIBER_TRACE=1` | first calls of each Fiber function with their arguments |
@@ -353,7 +376,7 @@ the tag the same way, publishes its closure with `tools/nix_cache.sh` as a flat 
 the assets of the release `nix-cache`, then creates or updates the GitHub Release of the tag with the
 tag's annotation as its notes, marked latest when the tag is the highest version published. Only that
 job has `contents: write`, with the workflow's `GITHUB_TOKEN`. The output is laid out as a checkout
-after `build.sh` (`run.sh`, `scripts/`, `patches/`, `out/psport`, `out/bb-gpu-capabilities`,
+after `build.sh` (`run.sh`, `scripts/`, `patches/`, `out/psport`, `out/psport-gpu-capabilities`,
 `out/gpu/`); the Vulkan drivers are not in it.
 
 The closure is made content-addressed before it is published (`nix store make-content-addressed`):

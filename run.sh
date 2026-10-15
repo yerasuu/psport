@@ -24,13 +24,18 @@ if [[ ${1:-} == --software ]]; then
 fi
 # PS_PREBUILT=1 (packaged builds, the AppImage): out/psport and its GPU library are installed
 # next to this script; nothing is built and no nix-shell is needed.
-# PS_DATA_DIR: writable directory for the generated files (out/), saves (user/) and bbport.ini;
+# PS_DATA_DIR: writable directory for the generated files (out/), saves (user/) and psport.ini;
 # by default this directory.
 data=${PS_DATA_DIR:-.}
 out=$data/out
 mkdir -p "$out"
-export PS_CONFIG=${PS_CONFIG:-$data/bbport.ini}
-# GPU paths are initialized when libpsport-gpu is loaded, before bbgpu_init receives --user.
+# psport.ini was bbport.ini before psport renamed it: a data directory an older release used keeps
+# its settings, copied once (bbport.ini stays as it was for that release).
+if [[ -z ${PS_CONFIG:-} && ! -e $data/psport.ini && -f $data/bbport.ini ]]; then
+    cp -- "$data/bbport.ini" "$data/psport.ini" && echo "psport: settings copied from bbport.ini to psport.ini"
+fi
+export PS_CONFIG=${PS_CONFIG:-$data/psport.ini}
+# GPU paths are initialized when libpsport-gpu is loaded, before psport_gpu_init receives --user.
 # Select the same user directory now, including for an AppImage or a separate save profile.
 export PS_GPU_USER_DIR=${PS_GPU_USER_DIR:-${PS_USER_DIR:-$data/user}}
 # The drivers' own shader caches keep compiled pipelines between sessions (the port's cache gives
@@ -100,19 +105,19 @@ fi
 # Bloodborne gpu/games/bloodborne/patches.cpp, asked of psport itself): another title runs unpatched
 # at its own size, on the console's 60 Hz vblank and with the console's direct memory, off the
 # scaled output path below.
-# bbport.ini output_res other than 1080p (720p for the Steam Deck, 1440p, 2160p): the whole game
+# psport.ini output_res other than 1080p (720p for the Steam Deck, 1440p, 2160p): the whole game
 # renders at the preset's size of the output (a patch), the upscaler fills the output, the UI is
 # drawn at the output size. Preset and output changes need a restart.
 # Live resolution changes keep the guest at 1920x1080 and scale host targets at run time instead
 # (output and presets change in the menu without a restart, but post-processing stays at 1080p
 # and scene targets are copied back: much slower on the Steam Deck and older GPUs). Chosen by
-# PS_LIVE_RES=0/1, else bbport.ini live_resolution=0/1/auto (auto: the GPU check, strong
+# PS_LIVE_RES=0/1, else psport.ini live_resolution=0/1/auto (auto: the GPU check, strong
 # discrete GPUs get them); off when unset. 1080p output and TAA always use the live path.
-# The GPU tools (bb-gpu-capabilities: the game's GPU, its live resolution support).
+# The GPU tools (psport-gpu-capabilities: the game's GPU, its live resolution support).
 if [[ -n ${PS_PROBE:-} ]]; then tools=$(dirname -- "$PS_PROBE")
 elif [[ -n ${PS_PREBUILT:-} ]]; then tools=bin
 else tools=out; fi
-caps=$tools/bb-gpu-capabilities
+caps=$tools/psport-gpu-capabilities
 has_presets=0
 "$tools/psport" --has-presets "$game" && has_presets=1
 # The scene's size for an output other than 1080p: the output divided by the upscaler preset's
@@ -252,7 +257,7 @@ export PS_COPY_GPU_BUFFERS=${PS_COPY_GPU_BUFFERS:-1}
 # A guest write next to small GPU outputs the GPU is still writing (counters, compute results,
 # up to PS_GPU_WRITE_TWINS_MAX bytes per page) does not wait for the GPU (BufferCache twins).
 export PS_GPU_WRITE_TWINS=${PS_GPU_WRITE_TWINS:-1} PS_GPU_WRITE_TWINS_MAX=${PS_GPU_WRITE_TWINS_MAX:-65536}
-# Online play (PS_ONLINE=1, launcher: Online; the online module gpu/bbnet): the game's own server
+# Online play (PS_ONLINE=1, launcher: Online; the online module gpu/net): the game's own server
 # goes to the community server, summon signs to the shadNet WebAPI (scripts/online.py, the one
 # step of a launch that still runs Python, and only for online play).
 if [[ ${PS_ONLINE:-0} == 1 && -f scripts/online.py ]]; then

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// bbport: FSR 4 (source-v07 INT8/DOT4 model, FSR-Vulkan provider) as an alternative to the
+// psport: FSR 4 (source-v07 INT8/DOT4 model, FSR-Vulkan provider) as an alternative to the
 // FSR 3.1 context of TemporalUpscaler. It consumes the same inputs: HDR scene color, depth,
 // motion vectors in render pixels (previous - current) and the jitter offset.
 //
@@ -34,7 +34,7 @@ public:
         vk::CommandBuffer cmdbuf;
         Image color, depth, motion, output;
         u32 render_width, render_height;
-        int preset; ///< BbSettings::Preset
+        int preset; ///< PsSettings::Preset
         std::array<float, 2> jitter;
         float frame_ms, near_plane, far_plane, vertical_fov;
         float sharpness;

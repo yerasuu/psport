@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// Bloodborne's effect switches (bbport.ini keys; the patches each one adds are in patches.cpp), for
+// Bloodborne's effect switches (psport.ini keys; the patches each one adds are in patches.cpp), for
 // the overlay menu, its own System menu pages (game_menu.cpp) and the launcher.
 #pragma once
 
 #include <iterator>
 #include "game_profile.h"
 
-namespace BbEffects {
+namespace PsEffects {
 inline constexpr Game::EffectSwitch Switches[] = {
     {"effect_chromatic_aberration", {"Chromatic aberration", "Хроматическая аберрация", "Aberración cromática"}, true},
     {"effect_dof", {"Depth of field (DoF)", "Глубина резкости (DoF)", "Profundidad de campo (DoF)"}, true},
@@ -38,4 +38,4 @@ inline constexpr Game::EffectSwitch Switches[] = {
       "del mod #253 de Nexus (las fuentes en adhoc/font)."}},
 };
 inline constexpr int SwitchCount = int(std::size(Switches));
-} // namespace BbEffects
+} // namespace PsEffects

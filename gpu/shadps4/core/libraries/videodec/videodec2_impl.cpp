@@ -18,7 +18,7 @@ VdecDecoder::VdecDecoder(const OrbisVideodec2DecoderConfigInfo& config_info,
     const AVCodec* codec = avcodec_find_decoder(
         config_info.codec_type == OrbisVideodec2CodecType::Avc ? AV_CODEC_ID_H264
                                                                : AV_CODEC_ID_HEVC);
-    // bbport: a decoder FFmpeg cannot open is reported by sceVideodec2CreateDecoder.
+    // psport: a decoder FFmpeg cannot open is reported by sceVideodec2CreateDecoder.
     if (!codec) {
         LOG_ERROR(Lib_Vdec2, "No FFmpeg decoder for codec type {}",
                   static_cast<u32>(config_info.codec_type));
@@ -78,7 +78,7 @@ s32 VdecDecoder::Decode(const OrbisVideodec2InputData& input_data,
         avcodec_flush_buffers(m_codec_context);
         ret = avcodec_send_packet(m_codec_context, packet);
     }
-    // bbport: one picture out per call, so the decoder can still hold one when the next access
+    // psport: one picture out per call, so the decoder can still hold one when the next access
     // unit comes; it is output now, then the access unit goes in.
     if (ret == AVERROR(EAGAIN)) {
         if (const s32 result = ReceiveFrame(frame_buffer, output_info); result != ORBIS_OK) {
@@ -159,7 +159,7 @@ s32 VdecDecoder::WriteFrame(AVFrame& decoded, OrbisVideodec2FrameBuffer& frame_b
     const auto height = Common::AlignUp<u32>(frame->height, 16);
     const u64 frame_size = (u64(pitch) * height * 3) / 2;
 
-    // bbport: the console's size error instead of asserting in CopyNV12Data.
+    // psport: the console's size error instead of asserting in CopyNV12Data.
     if (frame_buffer.frame_buffer_size < frame_size + info_size) {
         LOG_ERROR(Lib_Vdec2, "Frame buffer of {:#x} bytes for a {}x{} picture",
                   frame_buffer.frame_buffer_size, frame->width, frame->height);
@@ -203,7 +203,7 @@ s32 VdecDecoder::WriteFrame(AVFrame& decoded, OrbisVideodec2FrameBuffer& frame_b
     return ORBIS_OK;
 }
 
-// bbport: the sequence's parameters as the stream carries them (sizes in macroblocks, cropping in
+// psport: the sequence's parameters as the stream carries them (sizes in macroblocks, cropping in
 // chroma sample units) from what FFmpeg reports of it, rather than only the timestamps and pixels.
 void VdecDecoder::WriteAvcPictureInfo(const AVFrame& frame, u32 width, u32 height,
                                       OrbisVideodec2AvcPictureInfo& info) const {
@@ -308,7 +308,7 @@ AVFrame* VdecDecoder::ConvertNV12Frame(AVFrame& frame) {
     nv12_frame->width = frame.width;
     nv12_frame->height = frame.height;
 
-    // bbport: the context follows the stream when its size or pixel format changes.
+    // psport: the context follows the stream when its size or pixel format changes.
     m_sws_context = sws_getCachedContext(m_sws_context, frame.width, frame.height,
                                          AVPixelFormat(frame.format), nv12_frame->width,
                                          nv12_frame->height, AV_PIX_FMT_NV12, SWS_FAST_BILINEAR,

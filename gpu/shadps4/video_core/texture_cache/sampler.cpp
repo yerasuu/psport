@@ -24,7 +24,7 @@ Sampler::Sampler(const Vulkan::Instance& instance, const AmdGpu::Sampler& sample
         LOG_WARNING(Render_Vulkan, "Custom border color is not supported, falling back to black");
         border_color = vk::BorderColor::eFloatOpaqueBlack;
     }
-    // bbport: with TA_BC_BASE unprogrammed the hardware's table fetch hits an unmapped page and
+    // psport: with TA_BC_BASE unprogrammed the hardware's table fetch hits an unmapped page and
     // reads zeros; dereferencing guest address 0 here killed the process instead.
     if (border_color == vk::BorderColor::eFloatCustomEXT && border_color_base.base_addr == 0) {
         static std::atomic<u64> without_table{};

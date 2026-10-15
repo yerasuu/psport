@@ -6,7 +6,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "runtime.h"
-#include "gpu/bbgpu.h"
+#include "gpu/psport_gpu.h"
 
 typedef struct { uint64_t address, size, flags; } LoaderSegment;
 /* kind 0: value is an image offset; 1/2: value is the import index of a function/data import. */
@@ -63,17 +63,17 @@ typedef struct {
 int loader_json_lists(const char *sz_path, LoaderJsonList *p_lists, size_t c_lists);
 int loader_json_has(const LoaderJsonList *p_list, const char *sz_item);
 void loader_json_free(LoaderJsonList *p_lists, size_t c_lists);
-/* BbGameFiles.pfn_eboot_sha256 (loader_hash.c). */
+/* PsGameFiles.pfn_eboot_sha256 (loader_hash.c). */
 void loader_eboot_sha256(const char *sz_game, unsigned char *p_out_digest);
 /* shadPS4/GoldHEN XML patches (loader_patches.c). Their addresses are the eboot's at 0x400000. */
 typedef struct { uint64_t off_image, cb_data; unsigned char *p_data; } LoaderPatchWrite;
-struct BbPatchList {
+struct PsPatchList {
     LoaderPatchWrite *p_writes;
     size_t c_writes, c_capacity;
     const LoaderSegment *p_loads; /* the eboot's PT_LOAD segments: a write must fit in one */
     size_t c_loads;
 };
-void loader_patch_services(BbPatchList *list, BbPatchServices *out);
+void loader_patch_services(PsPatchList *list, PsPatchServices *out);
 /* The patches in the *.xml files of sz_dir for a game: files whose <ID>s name one of its serials (or none),
  * entries for its sz_version and eboot.bin; sz_excluded (a profile's own file) is left out. */
 typedef struct {
@@ -83,7 +83,7 @@ typedef struct {
 } LoaderPatchFolder;
 /* Appends the selected ones: patches.json's (sz_config) "enabled", else each entry's isEnabled
  * unless "disabled" names it. A patch with an unsupported line is skipped whole, and said. */
-void loader_patches_external(BbPatchList *list, const LoaderPatchFolder *folder, const char *sz_config);
+void loader_patches_external(PsPatchList *list, const LoaderPatchFolder *folder, const char *sz_config);
 /* --list-patches: what a launcher shows of them, as JSON. */
 void loader_patches_list(const LoaderPatchFolder *folder);
 

@@ -402,7 +402,7 @@ void EmitSetPatch(EmitContext& ctx, IR::Patch patch, Id value) {
     ctx.OpStore(pointer, value);
 }
 
-// bbport PS_LAYER_MEMORY: accesses of paged buffers (EmitContext::PagedPointer). `index` is in
+// psport PS_LAYER_MEMORY: accesses of paged buffers (EmitContext::PagedPointer). `index` is in
 // units of the access (as for the bound buffers); zero is read where the guard fails.
 static Id PagedLoad(EmitContext& ctx, const EmitContext::BufferDefinition& buffer, Id index,
                     u32 bytes, Id type, Id zero) {

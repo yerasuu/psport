@@ -13,7 +13,7 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
-namespace BbGnmHooks {
+namespace PsGnmHooks {
 namespace {
 using u8 = std::uint8_t;
 using u64 = std::uint64_t;
@@ -201,7 +201,7 @@ void Mark(std::uint32_t index, u64 before, u64 after, u64 cb = 0) {
     }
 }
 
-extern "C" void BbGnmEnter(std::uint32_t index, u64 cb, u64* slot) {
+extern "C" void PsGnmEnter(std::uint32_t index, u64 cb, u64* slot) {
     __atomic_fetch_add(CounterAt(index), 1, __ATOMIC_RELAXED);
     if (depth == MaxDepth) {
         overflow.fetch_add(1, std::memory_order_relaxed);
@@ -218,7 +218,7 @@ extern "C" void BbGnmEnter(std::uint32_t index, u64 cb, u64* slot) {
     *slot = reinterpret_cast<u64>(exit_thunk);
 }
 
-extern "C" u64 BbGnmLeave() {
+extern "C" u64 PsGnmLeave() {
     const Frame f = frames[--depth];
     const bool cb_method = Table[f.index].cb_method;
     if (f.index == trace_index && trace_left.fetch_sub(1, std::memory_order_relaxed) > 0) {
@@ -296,7 +296,7 @@ void WriteExitThunk(u8* at) {
     w.Put({0x48, 0x83, 0xec, 0x28}); // sub rsp, 0x28
     SaveXmm(w, 2, false);
     w.Put({0x48, 0xb8});
-    w.Imm64(reinterpret_cast<u64>(&BbGnmLeave)); // mov rax, BbGnmLeave
+    w.Imm64(reinterpret_cast<u64>(&PsGnmLeave)); // mov rax, PsGnmLeave
     w.Put({0xff, 0xd0});                          // call rax
     w.Put({0x48, 0x89, 0x44, 0x24, 0x38});        // mov [rsp+0x38], rax
     SaveXmm(w, 2, true);
@@ -318,7 +318,7 @@ u8* WriteObserveStub(u8* at, std::uint32_t index) {
     w.Put({0x48, 0x8d, 0x94, 0x24});
     w.Imm32(0xb8);                                             // lea rdx, [rsp+0xb8] (return slot)
     w.Put({0x48, 0xb8});
-    w.Imm64(reinterpret_cast<u64>(&BbGnmEnter));               // mov rax, BbGnmEnter
+    w.Imm64(reinterpret_cast<u64>(&PsGnmEnter));               // mov rax, PsGnmEnter
     w.Put({0xff, 0xd0});                                       // call rax
     SaveXmm(w, 8, true);
     w.Put({0x48, 0x81, 0xc4});
@@ -611,4 +611,4 @@ void NoteDriverWrite(std::uint32_t* commands, std::uint64_t dwords) {
     }
     Mark(std::uint32_t(Count), begin, end);
 }
-} // namespace BbGnmHooks
+} // namespace PsGnmHooks

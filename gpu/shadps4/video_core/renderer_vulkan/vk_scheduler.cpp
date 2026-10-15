@@ -14,24 +14,24 @@
 #include <unistd.h>
 #include <functional>
 
-#include "bbport_copy.h"
+#include "psport_copy.h"
 #include "video_core/renderer_vulkan/vk_gpu_profiler.h"
-#include "bbport_toggles.h"
-#include "bbport_wait_trace.h"
+#include "psport_toggles.h"
+#include "psport_wait_trace.h"
 #include "common/assert.h"
 #include "common/debug.h"
 #include "common/thread.h"
 #include "imgui/renderer/texture_manager.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
-#include "bbport_threads.h"
+#include "psport_threads.h"
 
 namespace Vulkan {
 
 std::mutex Scheduler::submit_mutex;
 
 namespace {
-// bbport: ProducerScope state of this thread: the producer function it is in (any scheduler).
+// psport: ProducerScope state of this thread: the producer function it is in (any scheduler).
 thread_local const char* producer_scope_where = nullptr;
 std::atomic<u32> producer_reports{0};
 
@@ -94,14 +94,14 @@ void Scheduler::ProducerScope::Leave() noexcept {
 
 namespace {
 
-/// bbport: Vulkan recording threads: PS_VK_RECORD_THREADS, else 2 from 8 hardware threads and 3
+/// psport: Vulkan recording threads: PS_VK_RECORD_THREADS, else 2 from 8 hardware threads and 3
 /// from 12. One thread records ~75% of a core at 200 FPS (4 cores / 8 threads); the segments
 /// let the stream use more than one.
 u32 RecordingThreadCount() {
     if (const char* env = std::getenv("PS_VK_RECORD_THREADS")) {
         return std::clamp(std::atoi(env), 1, 8);
     }
-    const unsigned available = BbThreads::Available();
+    const unsigned available = PsThreads::Available();
     return available >= 12 ? 3 : available >= 8 ? 2 : 1;
 }
 
@@ -117,7 +117,7 @@ Scheduler::Scheduler(const Instance& instance, bool threaded_recording)
     : instance{instance}, work_semaphore{instance}, command_pool{instance, &work_semaphore} {
     crumb_stream = Breadcrumbs::NewStream(
         instance, threaded_recording ? "draws: game and presenter" : "presentation");
-    // bbport: PS_VK_RECORD_THREAD=0 records on the calling thread.
+    // psport: PS_VK_RECORD_THREAD=0 records on the calling thread.
     const char* env = std::getenv("PS_VK_RECORD_THREAD");
     if (threaded_recording && !(env && env[0] == '0')) {
         record_chunk = AcquireChunk();
@@ -147,7 +147,7 @@ Scheduler::Scheduler(const Instance& instance, bool threaded_recording)
 #if TRACY_GPU_ENABLED
     profiler_scope = reinterpret_cast<tracy::VkCtxScope*>(std::malloc(sizeof(tracy::VkCtxScope)));
 #endif
-    // bbport PS_ASYNC_SUBMIT (default on; 0: off): submissions go out from the recording threads
+    // psport PS_ASYNC_SUBMIT (default on; 0: off): submissions go out from the recording threads
     // once their segments are recorded, instead of this thread waiting for them (~65 us each).
     if (!workers.empty()) {
         const char* async = std::getenv("PS_ASYNC_SUBMIT");
@@ -180,7 +180,7 @@ void Scheduler::BeginRendering(const RenderState& new_state) {
     if (is_rendering && render_state == new_state) {
         return;
     }
-    // bbport: a cut of the command stream (MaybeSplit) closed this render pass; it continues
+    // psport: a cut of the command stream (MaybeSplit) closed this render pass; it continues
     // in the next command buffer without clearing its attachments again.
     const bool resume = resume_rendering && !is_rendering && render_state == new_state;
     if (!is_rendering && render_state == new_state && pass_end_caller) {
@@ -369,10 +369,10 @@ void Scheduler::SignalAfterHostCopies(std::function<void()> signal) {
         signal();
         return;
     }
-    BbCopy::FlushBatch();
+    PsCopy::FlushBatch();
     deferred_signals_issued.fetch_add(1, std::memory_order_relaxed);
     RecordOrdered([signal = std::move(signal), done = deferred_signals_done]() mutable {
-        BbCopy::AfterCopies([signal = std::move(signal), done = std::move(done)] {
+        PsCopy::AfterCopies([signal = std::move(signal), done = std::move(done)] {
             signal();
             done->fetch_add(1, std::memory_order_release);
         });
@@ -383,14 +383,14 @@ void Scheduler::SignalAfterHostCopies(std::function<void()> signal) {
 void Scheduler::WaitDeferredSignals() {
     const u64 issued = deferred_signals_issued.load(std::memory_order_relaxed);
     if (deferred_signals_done->load(std::memory_order_acquire) >= issued ||
-        BbToggle::Disabled(BbToggle::OrderedGuestWrites)) {
+        PsToggle::Disabled(PsToggle::OrderedGuestWrites)) {
         return;
     }
-    BbStats::WaitTimer timer{BbStats::host_copies_wait_ns};
+    PsStats::WaitTimer timer{PsStats::host_copies_wait_ns};
     KickRecording(true);
     while (deferred_signals_done->load(std::memory_order_acquire) < issued) {
         // Helps the copy threads the signals wait for.
-        BbCopy::WaitAsync();
+        PsCopy::WaitAsync();
         std::this_thread::yield();
     }
 }
@@ -441,7 +441,7 @@ void Scheduler::WaitHostCopiesFor(u64 address, u64 size) {
                       (slot.granule == g || slot.granule == HostCopyWildcard);
         }
         if (!overlap) {
-            BbStats::host_copy_waits_skipped.fetch_add(1, std::memory_order_relaxed);
+            PsStats::host_copy_waits_skipped.fetch_add(1, std::memory_order_relaxed);
             return;
         }
     }
@@ -464,15 +464,15 @@ void Scheduler::WaitHostCopies() {
         }
     } forget{*this, sources_seen};
     if (host_copies_done.load(std::memory_order_acquire) < host_copies_issued) {
-        BbStats::WaitTimer timer{BbStats::host_copies_wait_ns};
-        BbStats::host_copy_waits.fetch_add(1, std::memory_order_relaxed);
+        PsStats::WaitTimer timer{PsStats::host_copies_wait_ns};
+        PsStats::host_copy_waits.fetch_add(1, std::memory_order_relaxed);
         KickRecording(true);
         while (host_copies_done.load(std::memory_order_acquire) < host_copies_issued) {
             std::this_thread::yield();
         }
     }
-    BbStats::WaitTimer timer{BbStats::copy_threads_wait_ns};
-    BbCopy::WaitAsync();
+    PsStats::WaitTimer timer{PsStats::copy_threads_wait_ns};
+    PsCopy::WaitAsync();
 }
 
 void Scheduler::KickRecording(bool force) {
@@ -497,7 +497,7 @@ void Scheduler::KickRecording(bool force) {
 
 void Scheduler::MaybeSplit() {
     if (workers.size() < 2 || current_segment + 1 >= MaxSegments || !IsRecordingDeferred() ||
-        BbToggle::Disabled(BbToggle::ParallelRecording)) {
+        PsToggle::Disabled(PsToggle::ParallelRecording)) {
         return;
     }
     // Cutting inside a render pass closes and reopens it: only after a longer stretch.
@@ -644,13 +644,13 @@ void Scheduler::SyncRecording() {
         return;
     }
     KickRecording(true);
-    BbStats::WaitTimer timer{BbStats::sync_recording_ns};
+    PsStats::WaitTimer timer{PsStats::sync_recording_ns};
     std::unique_lock lk{recorder_mutex};
     recorder_idle_cv.wait(lk, [this] { return RecordingIdle(); });
 }
 
 void Scheduler::EnterDirectMode() {
-    // bbport: with submissions going out from the recording threads, the commands recorded
+    // psport: with submissions going out from the recording threads, the commands recorded
     // here get a segment of their own, from this thread's pool, after the segments handed over:
     // the recording threads go on with those instead of this thread waiting for them (~90 us,
     // the upscaler's passes every frame). PS_DIRECT_SEGMENT=0: the wait.
@@ -659,7 +659,7 @@ void Scheduler::EnterDirectMode() {
         return !(env && env[0] == '0');
     }();
     if (own_segment && async_submit && current_segment + 2 < MaxSegments &&
-        !BbToggle::Disabled(BbToggle::ThreadedRecording)) {
+        !PsToggle::Disabled(PsToggle::ThreadedRecording)) {
         if (is_rendering) {
             CarrySuspend(true);
             Record([](vk::CommandBuffer cmdbuf) { cmdbuf.endRendering(); });
@@ -740,7 +740,7 @@ void Scheduler::RecorderThread(std::stop_token stoken, u32 index) {
         // take time from guest threads. The others sleep until a new segment reaches them.
         if (active_worker.load(std::memory_order_relaxed) == index) {
             static const auto spin_time =
-                std::chrono::microseconds(BbThreads::Available() >= 12 ? 200 : 20);
+                std::chrono::microseconds(PsThreads::Available() >= 12 ? 200 : 20);
             const auto spin_until = std::chrono::steady_clock::now() + spin_time;
             for (u32 spins = 1; worker.queued.load(std::memory_order_acquire) == 0 &&
                                 ordered_queued.load(std::memory_order_acquire) == 0;
@@ -835,8 +835,8 @@ void Scheduler::Wait(u64 tick) {
         SubmitInfo info{};
         Flush(info);
     }
-    BbWaitTrace::Scope trace;
-    BbStats::WaitTimer timer{BbStats::tick_wait_ns};
+    PsWaitTrace::Scope trace;
+    PsStats::WaitTimer timer{PsStats::tick_wait_ns};
     work_semaphore.Wait(tick);
 }
 
@@ -845,14 +845,14 @@ void Scheduler::PopPendingOperations() {
         return; // every draw comes here
     }
     std::unique_lock lk(pending_ops_mutex);
-    // bbport: this runs on every draw and dispatch. Querying the timeline semaphore is an
+    // psport: this runs on every draw and dispatch. Querying the timeline semaphore is an
     // ioctl, so it is skipped when nothing waits and done once per 32 calls (~0.3 ms; reading
     // the clock per draw instead was itself a hot spot).
     if (pending_ops.empty()) {
         return;
     }
     if (!work_semaphore.IsFree(pending_ops.front().gpu_tick)) {
-        if ((++pending_polls & 31) != 0 && !BbToggle::Disabled(BbToggle::PendingPollLimit)) {
+        if ((++pending_polls & 31) != 0 && !PsToggle::Disabled(PsToggle::PendingPollLimit)) {
             return;
         }
         work_semaphore.Refresh();
@@ -891,7 +891,7 @@ void Scheduler::AllocateWorkerCommandBuffers() {
         };
         current_cmdbuf = command_pool.Commit();
         Check(current_cmdbuf.begin(begin_info));
-        // bbport: the first segment (worker 0, whose pool this is) of the next submission.
+        // psport: the first segment (worker 0, whose pool this is) of the next submission.
         if (!batch) {
             batch = AcquireBatch();
         }
@@ -946,7 +946,7 @@ void Scheduler::SubmitExecution(SubmitInfo& info) {
     // Guest memory copies into staging read by this submission (copy threads).
     WaitHostCopies();
     resume_rendering = false;
-    // bbport: the segments' command buffers in stream order (the recording threads are idle).
+    // psport: the segments' command buffers in stream order (the recording threads are idle).
     std::array<vk::CommandBuffer, MaxSegments> cmdbufs;
     u32 num_cmdbufs = 0;
     if (workers.empty()) {
@@ -1002,7 +1002,7 @@ void Scheduler::SubmitExecution(SubmitInfo& info) {
     submitted_tick.store(signal_value, std::memory_order_release);
     submitted_tick.notify_all();
 
-    // bbport: no semaphore query here (an ioctl per submission, ~3% of the recording thread):
+    // psport: no semaphore query here (an ioctl per submission, ~3% of the recording thread):
     // PopPendingOperations asks when an operation waits, the GPU signal thread on every fence.
     AllocateWorkerCommandBuffers();
     CarryResume(false);
@@ -1033,12 +1033,12 @@ void Scheduler::SubmitAsync(SubmitInfo& info) {
         Record([](vk::CommandBuffer cmdbuf) { Check(cmdbuf.end()); });
     }
     // Guest memory copies into staging this submission reads: on the copy threads by then.
-    BbCopy::FlushBatch();
+    PsCopy::FlushBatch();
     info.AddSignal(work_semaphore.Handle(), signal_value);
     // Goes out once the commands handed over before it are recorded (an ordered task: in order
     // with the other submissions and after the copies and signals queued before it).
     RecordOrdered([this, submitted = batch, info = std::move(info), signal_value]() mutable {
-        BbCopy::WaitAsync();
+        PsCopy::WaitAsync();
         std::array<vk::CommandBuffer, MaxSegments> cmdbufs;
         u32 num_cmdbufs = 0;
         for (u32 i = 0; i < MaxSegments; ++i) {

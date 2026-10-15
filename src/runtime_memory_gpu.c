@@ -1,4 +1,4 @@
-/* GPU library interface (gpu/shim/bbgpu.cpp): GPU hooks, write watches and traps, backing view
+/* GPU library interface (gpu/shim/psport_gpu.cpp): GPU hooks, write watches and traps, backing view
  * reads and writes, and the region lookups of its per-draw queries. */
 #define _GNU_SOURCE
 #include "runtime_memory.h"
@@ -26,9 +26,9 @@
  * 262144 with PS_ASYNC_FENCES=1: wait for guest copies at fences again,
  * 524288 small guest copies batched for the copy threads instead of the recording thread,
  * 1073741824 the lock-free UpdateImage path for clean, tracked images. */
-/* Bits 32 and up: the draw pipeline and related GPU thread work (gpu/shim/bbport_toggles.h). */
+/* Bits 32 and up: the draw pipeline and related GPU thread work (gpu/shim/psport_toggles.h). */
 uint64_t runtime_disabled_optimizations;
-/* bbport: a second number in PS_TOGGLE_FILE: temporary experiment bits (BbToggle::Experiment). */
+/* psport: a second number in PS_TOGGLE_FILE: temporary experiment bits (PsToggle::Experiment). */
 uint64_t runtime_experiment_bits;
 /* Speculative readers of guest memory (GPU draw-preparation workers) register a recovery
  * point: a fault on that thread jumps back to it instead of terminating (probe.c). */
@@ -48,7 +48,7 @@ static void *toggle_watcher(void *path) {
     }
     return NULL;
 }
-static GpuRange hook_note_write; /* bbport: data written into GPU memory (runtime_memory_note_write) */
+static GpuRange hook_note_write; /* psport: data written into GPU memory (runtime_memory_note_write) */
 void runtime_memory_set_gpu_hooks(GpuRange map, GpuRange unmap, GpuRange invalidate) {
     const char *toggles=getenv("PS_TOGGLE_FILE");
     static pthread_t watcher;
@@ -59,7 +59,7 @@ void runtime_memory_set_gpu_hooks(GpuRange map, GpuRange unmap, GpuRange invalid
     write_unlock();
     flush_hooks();
 }
-/* bbport: the CPU is about to write [address, address+size) without the guest's code doing it
+/* psport: the CPU is about to write [address, address+size) without the guest's code doing it
  * (a file read into it): the GPU side is told first (Rasterizer::InvalidateMemory), for the parts
  * the GPU can access, as a driver is told of a resource update. Its write tracking then has
  * nothing to catch there. */
@@ -79,7 +79,7 @@ void runtime_memory_note_write(uintptr_t address, uint64_t size) {
     GpuRange hook=hook_note_write ? hook_note_write : hook_invalidate;
     for (int i=0;i<n;++i) hook(starts[i],ends[i]-starts[i]);
 }
-/* bbport PS_GUEST_IN_PLACE without page protection: pages whose CPU writes the GPU side must hear
+/* psport PS_GUEST_IN_PLACE without page protection: pages whose CPU writes the GPU side must hear
  * of (a VRAM copy of them, a texture made from them), one bit per 4 KiB page below 2^40. The GPU
  * side sets and clears them where it used to protect; the writers it cannot see coming (libc
  * imports, file reads, hooked game code) check them after writing and tell it, as a driver is
@@ -118,7 +118,7 @@ void runtime_memory_note_cpu_write(uintptr_t address, uint64_t size) {
         }
     }
 }
-/* bbport: write traps the GPU side keeps on guest pages, by reason (bits: a VRAM copy of the page,
+/* psport: write traps the GPU side keeps on guest pages, by reason (bits: a VRAM copy of the page,
  * an image made from it, a command buffer of a frame in flight, ...). A page with any reason is read-only for the game even where its
  * own protection allows writes; the fault goes to the GPU library's handlers, and each clears
  * only its own reason. One owner for these protections: the layer's VRAM copies and the texture
@@ -190,7 +190,7 @@ void runtime_memory_trap(uintptr_t address, uint64_t size, unsigned reason, int 
     pthread_mutex_unlock(&trap_mutex);
     read_unlock();
 }
-/* bbport: a libc write about to land on pages with write traps: the GPU side is told first and
+/* psport: a libc write about to land on pages with write traps: the GPU side is told first and
  * lifts its traps, instead of the write faulting (a fault handler waits for the draws the GPU
  * thread has queued; libc copies into small textures every frame made the game's frames late).
  * Its announcement after the write (runtime_memory_note_cpu_write) stays as it was. */
@@ -206,7 +206,7 @@ unsigned runtime_memory_trap_reasons(uintptr_t address) {
     const uint8_t *table=__atomic_load_n(&trap_reasons,__ATOMIC_ACQUIRE);
     return table && address<TRAP_LIMIT ? __atomic_load_n(&table[address>>12],__ATOMIC_ACQUIRE) : 0;
 }
-/* bbport: where direct memory at a guest address lives (PS_GUEST_IN_PLACE: the GPU uses the game's
+/* psport: where direct memory at a guest address lives (PS_GUEST_IN_PLACE: the GPU uses the game's
  * memory where it is): its offset in direct memory and the end of the mapping, which is contiguous
  * there. 0 for anything else (flexible memory, reserved or unmapped addresses). */
 int runtime_memory_direct_phys(uintptr_t address, uint64_t *phys, uintptr_t *end) {
@@ -220,7 +220,7 @@ int runtime_memory_direct_phys(uintptr_t address, uint64_t *phys, uintptr_t *end
     read_unlock();
     return ok;
 }
-/* bbport: protection and direct memory type of the mapping at address (type -1: not direct
+/* psport: protection and direct memory type of the mapping at address (type -1: not direct
  * memory); 0 when nothing is mapped there. */
 int runtime_memory_vma_info(uintptr_t address, int *prot, int *type, uintptr_t *end) {
     read_lock();

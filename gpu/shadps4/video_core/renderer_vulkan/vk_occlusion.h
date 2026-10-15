@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// bbport: the game's occlusion queries (ZPASS_DONE events) as Vulkan occlusion queries.
+// psport: the game's occlusion queries (ZPASS_DONE events) as Vulkan occlusion queries.
 //
 // On the PS4 every depth block keeps a running count of the samples that pass the depth test; a
 // ZPASS_DONE event has each block write its count, 16 bytes apart, with the valid bit (63). The

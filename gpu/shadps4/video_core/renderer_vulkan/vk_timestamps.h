@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// bbport: the command processor's GPU clock (end-of-pipe timestamps, COPY_DATA from the clock) as
+// psport: the command processor's GPU clock (end-of-pipe timestamps, COPY_DATA from the clock) as
 // Vulkan timestamps, written by the GPU in stream order.
 //
 // The PS4's GPU clock counts at 100 MHz. Here one time line serves the CPU and the GPU: the host's

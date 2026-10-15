@@ -9,7 +9,7 @@
 #include "video_core/host_shaders/depth_stencil_resample_frag.h"
 #include "video_core/host_shaders/depth_stencil_bits_frag.h"
 #include "video_core/host_shaders/fs_tri_vert.h"
-#include "bbport_toggles.h"
+#include "psport_toggles.h"
 #include <cstdio>
 #include <cstdlib>
 
@@ -73,7 +73,7 @@ bool SceneTargets::ShaderResampled(const VideoCore::Image& image) const {
 static u32 SizeDivisor(const VideoCore::ImageInfo& i, SceneResolution::Size scene) {
     if (i.size.width == 1920 && i.size.height == 1080) return 1;
     if (i.size.width == 960 && i.size.height == 540 && scene.width % 2 == 0 &&
-        scene.height % 2 == 0 && !BbToggle::Disabled(BbToggle::SceneHalfRes)) {
+        scene.height % 2 == 0 && !PsToggle::Disabled(PsToggle::SceneHalfRes)) {
         return 2;
     }
     return 0;

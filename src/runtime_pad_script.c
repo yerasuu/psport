@@ -2,7 +2,7 @@
 #define _GNU_SOURCE
 #include "runtime.h"
 #include "runtime_pad.h"
-#include "gpu/bbgpu.h"
+#include "gpu/psport_gpu.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -56,7 +56,7 @@ void runtime_pad_read_inject(void) {
         for (int i=0;i<4;++i) if (!strncmp(token,sticks[i],3)) { int v=atoi(token+3); runtime_pad_injected.stick[i]=v<0 ? 0 : v>255 ? 255 : v; }
     }
     fclose(f);
-    if (bbgpu_overlay_pad_file_press(guide,(runtime_pad_injected.buttons & BTN_CROSS)!=0,(runtime_pad_injected.buttons & BTN_CIRCLE)!=0))
+    if (psport_gpu_overlay_pad_file_press(guide,(runtime_pad_injected.buttons & BTN_CROSS)!=0,(runtime_pad_injected.buttons & BTN_CIRCLE)!=0))
         runtime_pad_injected.buttons&=~(uint32_t)(BTN_CROSS|BTN_CIRCLE);
     printf("Runtime: pad file: buttons 0x%x sticks %d %d %d %d\n",runtime_pad_injected.buttons,
            runtime_pad_injected.stick[0],runtime_pad_injected.stick[1],runtime_pad_injected.stick[2],runtime_pad_injected.stick[3]);

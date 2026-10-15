@@ -1,4 +1,4 @@
-// bbport: replaces shadPS4's spdlog-based logger with a small fmt sink.
+// psport: replaces shadPS4's spdlog-based logger with a small fmt sink.
 // Level from PS_GPU_LOG (trace|debug|info|warning|error; default warning).
 #pragma once
 #include <algorithm>
@@ -29,7 +29,7 @@ bool ShouldLog(Level level);
 void Write(std::string_view log_class, Level level, const char* file, int line, const char* function,
            std::string&& message);
 inline void Flush() {}
-// bbport: a "(STUBBED)" line names a function that answers without doing its work. It is shown on
+// psport: a "(STUBBED)" line names a function that answers without doing its work. It is shown on
 // the first call whatever PS_GPU_LOG says, and every call is counted for the call summary
 // (src/runtime_calls.c).
 template <class T>
@@ -46,11 +46,11 @@ void Stubbed(const char* function, const std::uint64_t* count);
 #define LOG_GENERIC(log_class, log_level, fmt_str, ...)                                             \
     do {                                                                                           \
         if constexpr (Common::Log::IsStubbed(fmt_str)) {                                           \
-            static std::uint64_t bbport_stub_calls;                                                \
-            if (__atomic_fetch_add(&bbport_stub_calls, 1, __ATOMIC_RELAXED)) {                     \
+            static std::uint64_t psport_stub_calls;                                                \
+            if (__atomic_fetch_add(&psport_stub_calls, 1, __ATOMIC_RELAXED)) {                     \
                 break;                                                                             \
             }                                                                                      \
-            Common::Log::Stubbed(__func__, &bbport_stub_calls);                                    \
+            Common::Log::Stubbed(__func__, &psport_stub_calls);                                    \
         } else if (!Common::Log::ShouldLog(log_level)) {                                           \
             break;                                                                                 \
         }                                                                                          \

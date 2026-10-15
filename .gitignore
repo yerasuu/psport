@@ -2,6 +2,7 @@ out/
 __pycache__/
 user/
 *.mp4
+psport.ini
 bbport.ini
 fsr4_shaders/
 pgo/

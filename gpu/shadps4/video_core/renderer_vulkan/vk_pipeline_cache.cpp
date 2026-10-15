@@ -37,10 +37,10 @@
 #include "video_core/renderer_vulkan/vk_shader_util.h"
 #include "video_core/buffer_cache/buffer.h"
 #include "video_core/buffer_cache/buffer_cache.h"
-#include "bbport_guest_memory.h"
-#include "bbport_settings.h"
+#include "psport_guest_memory.h"
+#include "psport_settings.h"
 #include "game_profile.h"
-#include "bbport_toggles.h"
+#include "psport_toggles.h"
 
 namespace Vulkan {
 
@@ -109,7 +109,7 @@ static u32 MapOutputs(std::span<Shader::OutputMap, 3> outputs, const AmdGpu::VsO
     return num_outputs;
 }
 
-// bbport: the stream-out setups transform feedback reproduces: stream 0 alone, also the
+// psport: the stream-out setups transform feedback reproduces: stream 0 alone, also the
 // rasterized one, written to buffer 0 alone by an off-chip GS's copy shader. Vulkan captures one
 // rasterization stream's outputs in emission order, which is the order the copy shader writes
 // records in; other streams, several buffers and on-chip GS have no such one-to-one mapping.
@@ -369,7 +369,7 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
         .supports_transform_feedback = instance_.IsTransformFeedbackSupported(),
         .needs_manual_interpolation = instance.IsFragmentShaderBarycentricSupported() &&
                                       instance.GetDriverID() == vk::DriverId::eNvidiaProprietary,
-        // bbport: older NVIDIA (Pascal) has no barycentrics; PS_INTERP_INT_FIX=0/1 overrides.
+        // psport: older NVIDIA (Pascal) has no barycentrics; PS_INTERP_INT_FIX=0/1 overrides.
         .needs_integer_interpolation_fix = [&] {
             if (const char* env = std::getenv("PS_INTERP_INT_FIX")) {
                 return env[0] == '1';
@@ -383,7 +383,7 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
         .needs_unorm_fixup = instance.GetDriverID() == vk::DriverId::eMesaKosmickrisp,
         .needs_clip_distance_emulation = instance.GetDriverID() == vk::DriverId::eNvidiaProprietary,
         .supports_shader_stencil_export = instance_.IsShaderStencilExportSupported(),
-        // bbport PS_LAYER_MEMORY: buffers over nearly all memory go through the page table.
+        // psport PS_LAYER_MEMORY: buffers over nearly all memory go through the page table.
         .paged_buffers = VideoCore::BufferCache::LayerPagedActive(),
         // The game's buffer copy shader, from its profile (games/).
         .buffer_copy_shader_hash = Game::BufferCopyShader(),
@@ -396,7 +396,7 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
     pipeline_cache = std::move(cache);
 }
 
-/// bbport PS_ASYNC_PIPELINES: worker threads creating graphics pipelines (the driver's compile,
+/// psport PS_ASYNC_PIPELINES: worker threads creating graphics pipelines (the driver's compile,
 /// vkCreateGraphicsPipelines, with its own VkPipelineCache synchronization). Jobs run in order.
 class PipelineCompiler {
 public:
@@ -457,7 +457,7 @@ struct PipelineCache::PendingPipeline {
 
 PipelineCache::~PipelineCache() = default;
 
-// bbport: shader/pipeline compile time on the GPU thread, reported by PS_FRAME_STATS.
+// psport: shader/pipeline compile time on the GPU thread, reported by PS_FRAME_STATS.
 std::atomic<u64> g_bb_compile_ns;
 std::atomic<u32> g_bb_compiles;
 namespace {
@@ -514,7 +514,7 @@ const GraphicsPipeline* PipelineCache::TryPreparedPipeline(const PreparedDraw& p
 }
 
 namespace {
-/// bbport PS_ASYNC_PIPELINES: per render target (its address), how many frames in a row draws
+/// psport PS_ASYNC_PIPELINES: per render target (its address), how many frames in a row draws
 /// went to it. Only the GPU thread (pipeline selection) touches it.
 struct TargetStreak {
     u32 last_frame = ~0u;
@@ -538,7 +538,7 @@ u64 DrawTarget(const AmdGpu::Regs& regs) {
 void NoteDrawTarget(const AmdGpu::Regs& regs) {
     static u64 last_target = 0;
     static u32 last_frame = ~0u;
-    const u32 frame = BbStats::frame_number.load(std::memory_order_relaxed);
+    const u32 frame = PsStats::frame_number.load(std::memory_order_relaxed);
     const u64 target = DrawTarget(regs);
     if (target == 0 || (target == last_target && frame == last_frame)) {
         return;
@@ -571,7 +571,7 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline(const DrawIndirectPar
     if (const auto found = graphics_pipelines.find(sel.graphics_key); found != graphics_pipelines.end()) {
         return found->second.get();
     }
-    // bbport PS_ASYNC_PIPELINES: being compiled on a worker, or to be.
+    // psport PS_ASYNC_PIPELINES: being compiled on a worker, or to be.
     const bool skippable = AsyncSkippable(sel, indirect);
     if (const auto pending = pending_graphics.find(sel.graphics_key); pending != pending_graphics.end()) {
         const std::shared_ptr<PendingPipeline> job = pending->second;
@@ -684,14 +684,14 @@ bool PipelineCache::AsyncSkippable(const PipelineSelection& selection, bool indi
     }
     static u32 frame_seen = ~0u;
     static u64 draws_at_start = 0, last_frame_draws = 0;
-    const u32 frame = BbStats::frame_number.load(std::memory_order_relaxed);
-    const u64 draws = BbStats::draws.load(std::memory_order_relaxed);
+    const u32 frame = PsStats::frame_number.load(std::memory_order_relaxed);
+    const u64 draws = PsStats::draws.load(std::memory_order_relaxed);
     if (frame != frame_seen) {
         last_frame_draws = draws - draws_at_start;
         draws_at_start = draws;
         frame_seen = frame;
         static u32 printed = 0;
-        const u32 second = BbStats::coarse_second.load(std::memory_order_relaxed);
+        const u32 second = PsStats::coarse_second.load(std::memory_order_relaxed);
         if (async_started != 0 && second - printed >= 5) {
             printed = second;
             std::printf("GPU: %llu pipelines compiled in the background, %llu draws went without "
@@ -928,7 +928,7 @@ bool PipelineCache::RefreshGraphicsKey(PipelineSelection& sel) {
     return true;
 }
 
-// bbport: which geometry-shader setups the translator still skips, and how often. Each distinct
+// psport: which geometry-shader setups the translator still skips, and how often. Each distinct
 // setup (stream-out streams and buffers, on-chip mode, GS program) is described once; the skipped
 // draws are counted, every 5000 reported. What to implement first is read off this. Stream-out
 // that transform feedback reproduces (StreamOutXfbStride) goes through.
@@ -1028,7 +1028,7 @@ bool PipelineCache::RefreshGraphicsStages(PipelineSelection& sel) {
         return true;
     };
 
-    // bbport: a stream-out GS whose module came out without transform feedback (the copy
+    // psport: a stream-out GS whose module came out without transform feedback (the copy
     // shader's stores didn't map onto it) must not draw: the vertices later draws read back would
     // not be written. The emitter logs why. Called right after the GS is bound, so
     // bound_xfb_stride is that permutation's.
@@ -1175,7 +1175,7 @@ PipelineCache::Result PipelineCache::GetProgram(PipelineSelection& sel, HwStage 
                                                 Shader::Backend::Bindings& binding) {
     auto runtime_info = BuildRuntimeInfo(sel, hw_stage, sw_stage);
     if (sel.worker) {
-        // bbport: draw-preparation worker: look up only, with the worker's own Info copy.
+        // psport: draw-preparation worker: look up only, with the worker's own Info copy.
         auto& worker = *sel.worker;
         std::shared_lock lk{programs_mutex};
         const auto found_program = program_cache.find(params.hash);
@@ -1253,7 +1253,7 @@ PipelineCache::Result PipelineCache::GetProgram(PipelineSelection& sel, HwStage 
 
     vk::ShaderModule module{};
 
-    // bbport: consecutive draws of a program almost always use the same permutation.
+    // psport: consecutive draws of a program almost always use the same permutation.
     auto it = program->last_used < program->modules.size() &&
                       program->modules[program->last_used].spec == spec
                   ? program->modules.begin() + program->last_used

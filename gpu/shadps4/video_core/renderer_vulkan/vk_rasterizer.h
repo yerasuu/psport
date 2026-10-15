@@ -62,7 +62,7 @@ public:
 
     void Draw(bool is_indexed, u32 index_offset = 0, const PreparedDraw* prepared = nullptr);
 
-    /// bbport: draw preparation workers (vk_draw_prep.h), fed and consumed by Liverpool.
+    /// psport: draw preparation workers (vk_draw_prep.h), fed and consumed by Liverpool.
     DrawPreparation& GetDrawPreparation() {
         return *draw_prep;
     }
@@ -101,35 +101,35 @@ public:
     /// offset changes.
     void StreamOutBufferUpdate(const StreamOutUpdate& update);
     void CopyBuffer(VAddr dst, VAddr src, u32 num_bytes, bool dst_gds, bool src_gds);
-    /// bbport: whether FillBuffer/CopyBuffer into guest memory at `dst` may write it on the CPU
+    /// psport: whether FillBuffer/CopyBuffer into guest memory at `dst` may write it on the CPU
     /// now (otherwise the GPU writes it, in stream order).
     [[nodiscard]] bool DmaMayWriteOnCpu(VAddr dst, u32 num_bytes);
     u32 ReadDataFromGds(u32 gsd_offset);
     bool InvalidateMemory(VAddr addr, u64 size, bool assume_locks = false);
-    /// bbport: data written into GPU memory by a path we hear of (file reads, the game's resource
+    /// psport: data written into GPU memory by a path we hear of (file reads, the game's resource
     /// loaders, DMA on the CPU): invalidated, and an asset for the buffer cache.
     void NoteAssetWrite(VAddr addr, u64 size);
-    /// bbport: the CPU has written [addr, addr + size): invalidated, its bytes kept over GPU data that
+    /// psport: the CPU has written [addr, addr + size): invalidated, its bytes kept over GPU data that
     /// is read back first.
     void InvalidateAfterWrite(VAddr addr, u64 size);
-    /// bbport (any thread): the command processor wrote these bytes outside the command stream
+    /// psport (any thread): the command processor wrote these bytes outside the command stream
     /// (labels, timestamps, occlusion results): VRAM copies of them get them too.
     void NoteLateCommandWrite(VAddr addr, const void* data, u64 size) {
         buffer_cache.NoteLateCommandWrite(addr, data, size);
     }
-    /// bbport: the command processor wrote `size` bytes of `data` at addr with the CPU in decode order
+    /// psport: the command processor wrote `size` bytes of `data` at addr with the CPU in decode order
     /// (WriteData, a constant RAM dump; the decoder reads them there). Where the GPU's own data there
     /// is in VRAM the bytes go into it in stream order, else the caches are invalidated (no write
     /// tracking). `recording_thread`: the draw recording thread, which owns the caches (no drain).
     void NoteCommandWrite(VAddr addr, const void* data, u64 size, bool recording_thread);
-    /// bbport (stage A, PS_CONSTRAM_PIPE, default on): before the command processor writes guest
+    /// psport (stage A, PS_CONSTRAM_PIPE, default on): before the command processor writes guest
     /// memory with the CPU (a constant RAM dump), waits until the recording thread has run the
     /// queued packets that read those bytes (their buffer bindings, DMA), not all of them.
     void WaitForPendingReads(VAddr address, u64 size);
     /// NoteCommandWrite for a write made on stage A: handed to the recording thread in order (a copy
     /// of the bytes) instead of draining it first.
     void NoteCommandWriteInOrder(VAddr addr, const void* data, u64 size);
-    /// bbport: a guest thread wrote [addr, addr + size) with a libc import (memcpy, memset, memmove)
+    /// psport: a guest thread wrote [addr, addr + size) with a libc import (memcpy, memset, memmove)
     /// over pages the caches watch (no write tracking): what a write fault did.
     void OnCpuWrite(VAddr addr, u64 size);
     /// GPU thread, before a write the guest can observe (see Scheduler::WaitHostCopies).
@@ -156,7 +156,7 @@ public:
         scheduler.NoteHostCopySource(address, size);
     }
 
-    /// bbport: GPU command thread: waits until the draw recording thread has recorded every
+    /// psport: GPU command thread: waits until the draw recording thread has recorded every
     /// draw handed to it (vk_draw_pipe.h); no-op on other threads.
     /// `line`/`function`: the caller, for the statistics of where stage A waits.
     void DrainDrawPipe(u32 reason = DrawPipe::ReasonRasterizer, u32 line = __builtin_LINE(),
@@ -168,7 +168,7 @@ public:
     /// `reads_guest_memory`: the task may read guest memory (a CPU write on stage A over memory
     /// waits for it, WaitForPendingReads); false for fences, flips and signals.
     bool RunInOrder(OrderedTask task, const void* data, u32 size,
-                    u64 toggle = BbToggle::PipelinedTasks, bool reads_guest_memory = true);
+                    u64 toggle = PsToggle::PipelinedTasks, bool reads_guest_memory = true);
     /// Stage A: the draw pipe position after the last handed-over packet, and whether the
     /// recording thread has run everything before a position.
     [[nodiscard]] u64 DrawPipeHead() const {
@@ -197,7 +197,7 @@ public:
     void SignalAfterHostCopies(std::function<void()> signal) {
         scheduler.SignalAfterHostCopies(std::move(signal));
     }
-    /// bbport PS_HONEST_LABELS=1: runs `signal` once the GPU has finished every command recorded
+    /// psport PS_HONEST_LABELS=1: runs `signal` once the GPU has finished every command recorded
     /// before this call (the submission of the current tick), in call order, on a thread that
     /// waits on the work semaphore: fences the guest sees when the work is done, not when it is
     /// recorded. `label` and `value`: the fence it writes (PendingSignalValue).
@@ -205,22 +205,22 @@ public:
     /// Whether signals wait for work not submitted yet (the GPU command thread submits it when
     /// it runs out of work, or the guest could wait for them forever).
     bool HasUnsubmittedSignals();
-    /// bbport PS_GUEST_IN_PLACE (draw recording thread): `data` written into the game's memory by the
+    /// psport PS_GUEST_IN_PLACE (draw recording thread): `data` written into the game's memory by the
     /// GPU in stream order, like the command processor's writes; false when the range is not
     /// bound in place (the caller writes it with the CPU).
     bool WriteGuestMemory(VAddr address, const void* data, u32 size);
-    /// bbport PS_GUEST_IN_PLACE (in stream order: the recording thread): a WRITE_DATA performed by
+    /// psport PS_GUEST_IN_PLACE (in stream order: the recording thread): a WRITE_DATA performed by
     /// the GPU, as the command processor does, instead of a CPU store now (ahead of the GPU work
     /// recorded before it). Values of up to 8 bytes are registered for WAIT_REG_MEM until the GPU
     /// has written them. False: not in place (or PS_GPU_COMMAND_WRITES=0), the caller stores it.
     bool WriteDataOnGpu(VAddr address, const void* data, u32 size);
-    /// bbport PS_GUEST_IN_PLACE (in stream order: the recording thread): an end-of-pipe label
+    /// psport PS_GUEST_IN_PLACE (in stream order: the recording thread): an end-of-pipe label
     /// (EVENT_WRITE_EOP/EOS) written by the GPU itself once the work recorded before it is done,
     /// as the command processor does: a buffer marker into the game's memory, where the CPU sees
     /// it. Registered for WAIT_REG_MEM like the CPU-written ones. False (the caller signals it
     /// from the CPU): not in GPU-visible guest memory, no VK_AMD_buffer_marker, PS_GPU_LABELS=0.
     bool WriteLabelOnGpu(VAddr address, u64 value, u32 num_bytes);
-    /// bbport: a ZPASS_DONE event (the game's occlusion query) at `address` for `pairs` depth
+    /// psport: a ZPASS_DONE event (the game's occlusion query) at `address` for `pairs` depth
     /// blocks, in stream order (vk_occlusion.h). False when it is left to the caller (the old
     /// memory model).
     bool OcclusionEvent(VAddr address, u32 pairs);
@@ -228,7 +228,7 @@ public:
     static bool OcclusionTranslated();
     /// ZPASS_DONE events translated so far.
     u64 OcclusionEvents() const;
-    /// bbport PS_GUEST_IN_PLACE (in stream order): the GPU clock (PS4: 100 MHz) written as 64 bits
+    /// psport PS_GUEST_IN_PLACE (in stream order): the GPU clock (PS4: 100 MHz) written as 64 bits
     /// at `address` by the GPU, at the end of the pipe or when it gets there (vk_timestamps.h).
     /// False (the caller writes it with the CPU): PS_GPU_TIMESTAMPS=0, no timestamps, the old model.
     bool WriteTimestampOnGpu(VAddr address, bool end_of_pipe);
@@ -242,7 +242,7 @@ public:
     /// the last submission is PS_HONEST_FLUSH_US (1000) old: the GPU starts on it as the hardware
     /// would, instead of at the end of the frame, and the guest's mid-frame waits end sooner.
     void SubmitForSignals();
-    /// bbport PS_PIPE_SIGNALS (default on with honest labels; 0: off): on the GPU command thread with
+    /// psport PS_PIPE_SIGNALS (default on with honest labels; 0: off): on the GPU command thread with
     /// the draw pipe, fences, the GPU idle and frame signals and the submissions for them are
     /// handed to the draw recording thread as ordered tasks instead of that thread being drained
     /// first (the GPU command thread waited for it ~15 times a frame and the GPU ran dry meanwhile).
@@ -299,7 +299,7 @@ private:
     void PrepareRenderState(const GraphicsPipeline* pipeline);
     RenderState BeginRendering(const GraphicsPipeline* pipeline);
     RenderState BeginRenderingFull(const GraphicsPipeline* pipeline);
-    /// bbport: a draw continuing the open render pass with the same inputs gets the same render
+    /// psport: a draw continuing the open render pass with the same inputs gets the same render
     /// state (RenderStateMemo); nothing can have broken the pass in between (barriers, copies and
     /// dispatches end it).
     struct BeginSignature {
@@ -415,7 +415,7 @@ private:
     void ForceAnisotropy(AmdGpu::Sampler& sharp, bool is_depth) const;
     void BindSamplers(const Shader::Info& stage, const PreparedStage* prepared,
                       Shader::Backend::Bindings& binding, u32& write_index);
-    /// bbport: a stage's resolved textures remembered by its prepared T# hashes
+    /// psport: a stage's resolved textures remembered by its prepared T# hashes
     /// (TextureSetMemo): a hit only redoes the per-draw effects (binding flags, transitions).
     struct TextureSetEntry {
         VideoCore::ImageId id{}; ///< after the depth redirect; null descriptor when invalid
@@ -451,7 +451,7 @@ private:
     static void RunTextureTask(void* rasterizer);
     static void JoinBindHelper(void* rasterizer);
 
-    /// Display pass: counts the frame (BbStats::gpu_frames) and, with PS_BUFFER_STATS, the lag.
+    /// Display pass: counts the frame (PsStats::gpu_frames) and, with PS_BUFFER_STATS, the lag.
     void NoteFrameStart();
     /// PS_GPU_PROFILE: a timestamp where a render pass starts (vk_gpu_profiler.h).
     void MarkPass(const GraphicsPipeline* pipeline, const RenderState& state);
@@ -461,7 +461,7 @@ private:
                                    const Shader::Gcn::FetchShaderData& fetch,
                                    const Shader::Info& vs) const;
     void BindIndexBuffer(u32 index_offset = 0);
-    /// bbport: BindVertexBuffers/BindIndexBuffer in two halves: obtaining the buffers
+    /// psport: BindVertexBuffers/BindIndexBuffer in two halves: obtaining the buffers
     /// (vertex_binds, index_bind) and recording the binds.
     void ResolveVertexBuffers(const GraphicsPipeline* pipeline, const PreparedDraw* prepared);
     void EmitVertexBuffers();
@@ -489,14 +489,14 @@ private:
     Common::SharedFirstMutex mapped_ranges_mutex;
     PipelineCache pipeline_cache;
     std::unique_ptr<DrawPreparation> draw_prep;
-    std::unique_ptr<CameraMotion> camera_motion; // bbport: motion vectors (docs/en/upscaler.md)
+    std::unique_ptr<CameraMotion> camera_motion; // psport: motion vectors (docs/en/upscaler.md)
     std::unique_ptr<SceneTargets> scene_targets;
     bool scene_started = false;
     std::unique_ptr<ObjectMotion> object_motion;
     bool motion_draw = false;
     u64 motion_geometry{};    ///< vertex-stream identity of the current direct draw
     bool gbuffer_draw = false;
-    std::unique_ptr<TemporalUpscaler> upscaler; // bbport: FSR (docs/en/upscaler.md)
+    std::unique_ptr<TemporalUpscaler> upscaler; // psport: FSR (docs/en/upscaler.md)
     std::array<float, 2> draw_jitter{};         ///< viewport offset of the current draw, pixels
     std::array<float, 2> target_scale{1.0f, 1.0f}; ///< pass drawn into the upscaler's output-size images
     const bool host_markers_enabled;
@@ -520,11 +520,11 @@ private:
     Pipeline::DescriptorWrites set_writes;
     Shader::PushData push_data;
 
-    // bbport: bindings point at their description instead of copying it (a hot spot): into
+    // psport: bindings point at their description instead of copying it (a hot spot): into
     // image_desc_cache for memoized lookups (pinned for the current BindTextures call), else
     // into image_desc_storage.
     using ImageBindingInfo = std::pair<VideoCore::ImageId, const VideoCore::TextureCache::ImageDesc*>;
-    // bbport: texture descriptions depend only on the T# and three resource flags; building
+    // psport: texture descriptions depend only on the T# and three resource flags; building
     // them (mip layout sizes) for every binding of every draw was a hot spot.
     struct ImageDescCacheEntry {
         std::array<u64, 4> sharp{};
@@ -547,7 +547,7 @@ private:
     boost::container::static_vector<VideoCore::TextureCache::ImageDesc, Shader::NUM_IMAGES * 2>
         image_desc_storage;
     u64 bind_epoch = 0;
-    // bbport: render/depth target lookups memoized by their raw register bytes while image
+    // psport: render/depth target lookups memoized by their raw register bytes while image
     // registrations are unchanged (the descriptions depend only on those registers).
     struct TargetMemo {
         std::array<u8, 256> key{};
@@ -557,7 +557,7 @@ private:
         VideoCore::TextureCache::ImageDesc desc;
     };
     std::array<TargetMemo, 64> target_memo{};
-    // bbport: consecutive draws mostly keep their targets; the slot's description (cb_descs,
+    // psport: consecutive draws mostly keep their targets; the slot's description (cb_descs,
     // db_desc) is then still the right one and is neither looked up nor copied.
     struct LastTarget {
         std::array<u8, 256> key{};
@@ -607,7 +607,7 @@ private:
         bool pending;
         bool resolved;
     } draw_inputs{};
-    // bbport: textures of a draw bound on the helper thread while this thread binds buffers.
+    // psport: textures of a draw bound on the helper thread while this thread binds buffers.
     static bool BindHelperWanted();
     BindHelper bind_helper{BindHelperWanted()};
     struct TextureTask {
@@ -629,7 +629,7 @@ private:
     bool fault_process_pending{};
     bool attachment_feedback_loop{};
     bool needs_barrier{};
-    // bbport: two-stage draw pipeline (stage B state; the thread is the last member so it
+    // psport: two-stage draw pipeline (stage B state; the thread is the last member so it
     // stops first).
     static inline thread_local const AmdGpu::Regs* stage_regs = nullptr;
     static inline thread_local const AmdGpu::ComputeProgram* stage_cs = nullptr;
@@ -682,10 +682,10 @@ private:
     u64 untracked_reads_packet = 0; ///< newest packet reading guest memory it does not list
     u64 constram_waits_skipped = 0; ///< statistics: CPU writes that did not have to wait
     u64 proxy_samples = 0; ///< texture bindings that read a scene proxy (statistics)
-    float sampler_lod_bias = 0.0f; ///< bbport: extra bias of this draw's samplers
-    bool pipeline_is_compute = false; ///< bbport: the bound pipeline of BindResources
+    float sampler_lod_bias = 0.0f; ///< psport: extra bias of this draw's samplers
+    bool pipeline_is_compute = false; ///< psport: the bound pipeline of BindResources
     bool scene_debug_frame = false; ///< PS_SCENE_DEBUG: this frame's passes are printed
-    u32 preupload_frame = ~0u; ///< bbport: frame of the last background pre-upload
+    u32 preupload_frame = ~0u; ///< psport: frame of the last background pre-upload
     bool PendingWriteOverlaps(VAddr address, u64 size);
     /// Stage B: the ring bindings of the stages of the packet being recorded.
     struct RingStage {
@@ -695,7 +695,7 @@ private:
     };
     std::array<RingStage, Shader::MaxStageTypes> ring_stages{};
     u32 num_ring_stages = 0;
-    /// bbport: the vertex stream V#s of the packet being recorded (stage B; empty elsewhere).
+    /// psport: the vertex stream V#s of the packet being recorded (stage B; empty elsewhere).
     std::span<const AmdGpu::Buffer> packet_vsharps;
     /// Stream-out buffer 0's V# read when the packet being recorded was posted (stage B).
     AmdGpu::Buffer packet_strmout{};
@@ -729,12 +729,12 @@ private:
         u64 value;
     };
     void GpuSignalLoop(std::stop_token token);
-    /// bbport: GpuSignalLoop has waited 10 s for `tick`: prints whether the GPU or the port is stuck.
+    /// psport: GpuSignalLoop has waited 10 s for `tick`: prints whether the GPU or the port is stuck.
     void GpuWatchdog(u64 tick);
     std::mutex gpu_signals_mutex;
     std::condition_variable_any gpu_signals_cv;
     std::deque<GpuSignal> gpu_signals;
-    /// bbport: signals registered on the draw recording thread since it last handed them over
+    /// psport: signals registered on the draw recording thread since it last handed them over
     /// (PublishSignals: at the end of each guest submission and at every flush), one lock per
     /// batch instead of per fence (~450 fences a frame).
     std::vector<GpuSignal> local_signals;

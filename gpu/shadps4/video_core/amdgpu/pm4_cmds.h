@@ -338,7 +338,7 @@ enum class InterruptSelect : u32 {
     IrqUndocumented = 3,
 };
 
-/// bbport: the GPU clock of end-of-pipe timestamps and COPY_DATA, as the CPU writes it: the PS4's
+/// psport: the GPU clock of end-of-pipe timestamps and COPY_DATA, as the CPU writes it: the PS4's
 /// counts at 100 MHz; here the host's monotonic clock in 10 ns ticks (the GPU's own timestamps are
 /// turned into the same time line, vk_timestamps.h). It was the wall clock in nanoseconds.
 static u64 GetGpuClock64() {
@@ -1197,7 +1197,7 @@ struct PM4CmdMemSemaphore {
         return sem_sel == Select::SignalSemaphore;
     }
 
-    // bbport: atomic (a signal in stream order comes from the thread that sees the GPU finish).
+    // psport: atomic (a signal in stream order comes from the thread that sees the GPU finish).
     [[nodiscard]] bool Signaled() const {
         return __atomic_load_n(Address<u64*>(), __ATOMIC_ACQUIRE) > 0;
     }
@@ -1221,7 +1221,7 @@ struct PM4CmdMemSemaphore {
     }
 };
 
-// bbport: SET_PREDICATION (CIK): draws and dispatches whose header has the predicate bit run
+// psport: SET_PREDICATION (CIK): draws and dispatches whose header has the predicate bit run
 // only if the predicate holds: the occlusion results at the address (ZPass: any samples passed,
 // summed over the depth blocks' begin/end pairs), or a 64- or 32-bit boolean there.
 struct PM4CmdSetPredication {

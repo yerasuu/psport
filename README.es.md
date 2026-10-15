@@ -68,7 +68,7 @@ PS_GAME_DIR=/ruta/al/volcado PS_SKIP_GAME_CHECK=1 PS_PERMISSIVE=1 bash run.sh
 faltan al port devuelvan 0 en lugar de detener el juego. `PS_SYS_MODULES=<carpeta>` enlaza, de forma
 opcional, tu propio volcado de módulos del sistema (`*.sprx`) donde el port aún no tiene la
 biblioteca; nada de ese volcado se distribuye. Las partidas guardadas y la caché de shaders van a
-`user/`, y los ajustes a `bbport.ini`. El lanzador GTK4 (`bash launcher/bb-launcher.sh`;
+`user/`, y los ajustes a `psport.ini`. El lanzador GTK4 (`bash launcher/psport-launcher.sh`;
 `launcher/install-desktop.sh` lo añade al menú de aplicaciones) es el de upstream y está pensado para
 Bloodborne.
 

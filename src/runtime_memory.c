@@ -49,7 +49,7 @@ void read_lock(void) { runtime_exception_hold(); if (!exclusive_depth) pthread_r
 void read_unlock(void) { if (!exclusive_depth) pthread_rwlock_unlock(&lock); runtime_exception_release(); }
 Vma *vmas; size_t vma_count; static size_t vma_capacity;
 static int pool_fd=-1;
-/* bbport: direct memory in GPU-visible system memory the GPU library allocates (dma-buf chunks,
+/* psport: direct memory in GPU-visible system memory the GPU library allocates (dma-buf chunks,
  * PS_GUEST_GPU_MEMORY=1): the GPU reads the game's data in place instead of the CPU copying it
  * into staging buffers first. Chunks are allocated when the game allocates direct memory in them;
  * a chunk the GPU library cannot provide stays in the memfd. */
@@ -93,7 +93,7 @@ static void add_region(uint64_t phys, uint64_t size) {
 }
 #define FLEX_SPAN (UINT64_C(1024) * 1024 * 1024)
 static uint64_t flex_bitmap[FLEX_SPAN/PAGE/64];
-/* GPU hooks (bbgpu): notified outside the lock, in order, after each operation. */
+/* GPU hooks (libpsport-gpu): notified outside the lock, in order, after each operation. */
 GpuRange hook_map, hook_unmap, hook_invalidate;
 typedef struct { int kind; uintptr_t address; uint64_t size; } PendingHook;
 static PendingHook pending[64]; size_t pending_count;
@@ -102,7 +102,7 @@ uint64_t flexible_bytes;
 /* Direct memory occupies [0,POOL_SIZE) of the memfd, flexible memory [POOL_SIZE,+FLEX_SPAN). */
 int pool(void) {
     if (pool_fd>=0) return 0;
-    pool_fd=memfd_create("bb-guest-memory", MFD_CLOEXEC);
+    pool_fd=memfd_create("psport-guest-memory", MFD_CLOEXEC);
     if (pool_fd<0 || ftruncate(pool_fd,(off_t)(POOL_SIZE+FLEX_SPAN))) return -1;
     void *view=mmap(NULL,POOL_SIZE+FLEX_SPAN,PROT_READ|PROT_WRITE,MAP_SHARED|MAP_NORESERVE,pool_fd,0);
     if (view==MAP_FAILED) return -1;
@@ -207,9 +207,9 @@ void zero_phys(uint64_t phys, uint64_t size) {
         done+=n;
     }
 }
-/* bbport: the GPU library provides direct memory chunks (see CHUNK). */
+/* psport: the GPU library provides direct memory chunks (see CHUNK). */
 void runtime_memory_set_guest_chunk_whole(int whole) { whole_chunks=whole; }
-/* bbport: the host address of direct memory phys in the backing view (host memory import). */
+/* psport: the host address of direct memory phys in the backing view (host memory import). */
 void *runtime_memory_backing_pointer(uint64_t phys) { return backing_base ? backing_base+phys : NULL; }
 void runtime_memory_set_guest_chunk_allocator(int (*alloc)(uint64_t phys, uint64_t size)) {
     write_lock();

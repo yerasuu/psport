@@ -1,4 +1,4 @@
-// bbport: host threads that may call guest code (AvPlayer allocator callbacks).
+// psport: host threads that may call guest code (AvPlayer allocator callbacks).
 // Each thread gets a guest TCB (GS base, TLS) from the C runtime before running.
 #pragma once
 #include <condition_variable>

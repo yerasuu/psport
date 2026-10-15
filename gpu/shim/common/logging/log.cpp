@@ -1,4 +1,4 @@
-// bbport: see log.h.
+// psport: see log.h.
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>

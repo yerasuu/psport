@@ -3,7 +3,7 @@
  * run synchronously at submission: decoding a batch takes well under a
  * millisecond, so waiting always finds it complete. ATRAC9 is decoded by
  * LibAtrac9 (MIT, third_party/LibAtrac9), MP3 and AAC by libSceAudiodec's FFmpeg decoders in the GPU
- * library (bbgpu_audio_decoder_*). */
+ * library (psport_gpu_audio_decoder_*). */
 #define _GNU_SOURCE
 #include "runtime.h"
 #include <stdio.h>
@@ -12,7 +12,7 @@
 #include <math.h>
 #include <pthread.h>
 #include "third_party/LibAtrac9/C/src/libatrac9.h"
-#include "gpu/bbgpu.h"
+#include "gpu/psport_gpu.h"
 
 #define ERR_INVALID_CONTEXT ((int32_t)0x80930002)
 #define ERR_INVALID_INSTANCE ((int32_t)0x80930003)
@@ -79,7 +79,7 @@ typedef struct {
     void *decoder;
     uint32_t aac_header_type, skip_frames;
     float *pcm;
-    BbAudioFrame frame;
+    PsAudioFrame frame;
 } Instance;
 typedef struct { int used, registered[24]; Instance instances[MAX_INSTANCES+1]; } Context;
 typedef struct { int used, context, canceled; } Batch;
@@ -279,16 +279,16 @@ static void parse_riff(Instance *in, const unsigned char **input, uint64_t *size
 /* ---- MP3 and AAC decoding ---- */
 /* AAC holds back its first two frames unless the instance asks for non-delayed output. */
 static void mpeg_reset(Instance *in) {
-    if (in->decoder) bbgpu_audio_decoder_reset(in->decoder);
+    if (in->decoder) psport_gpu_audio_decoder_reset(in->decoder);
     memset(&in->frame,0,sizeof(in->frame));
     in->skip_frames=in->codec==CODEC_AAC && !(in->codec_flags & AAC_NONDELAY_OUTPUT) ? 2 : 0;
 }
 /* AAC_ADTS or AAC_RAW with its sampling frequency index; ADTS until a control job initializes the instance. */
 static void aac_configure(Instance *in, uint32_t header_type, uint32_t frequency_index) {
-    if (in->decoder) bbgpu_audio_decoder_destroy(in->decoder);
+    if (in->decoder) psport_gpu_audio_decoder_destroy(in->decoder);
     uint32_t channels=in->channels_hint ? (uint32_t)in->channels_hint : 2;
     in->aac_header_type=header_type;
-    in->decoder=bbgpu_audio_decoder_create(1,header_type!=AAC_RAW,frequency_index,channels);
+    in->decoder=psport_gpu_audio_decoder_create(1,header_type!=AAC_RAW,frequency_index,channels);
     in->initialized=in->decoder!=NULL;
     mpeg_reset(in);
     if (ajm_trace())
@@ -307,8 +307,8 @@ static uint32_t mpeg_frame(Instance *in, const unsigned char **input, uint64_t *
                            uint32_t *samples_written, int32_t *internal) {
     uint64_t header=in->codec==CODEC_MP3 ? 4 : in->aac_header_type==AAC_RAW ? 1 : 7;
     if (*input_size<header) return RESULT_PARTIAL_INPUT;
-    BbAudioFrame frame;
-    int e=bbgpu_audio_decoder_decode(in->decoder,*input,*input_size,in->pcm,MPEG_PCM_SAMPLES*sizeof(float),&frame);
+    PsAudioFrame frame;
+    int e=psport_gpu_audio_decoder_decode(in->decoder,*input,*input_size,in->pcm,MPEG_PCM_SAMPLES*sizeof(float),&frame);
     if (e==1) return RESULT_PARTIAL_INPUT;
     if (e) { *internal=e; return RESULT_CODEC_ERROR|RESULT_FATAL; }
     *input+=frame.consumed; *input_size-=frame.consumed;
@@ -494,7 +494,7 @@ static void run_job(Context *ctx, uint32_t id, Job *job) {
 /* ---- API ---- */
 static void release_instance(Instance *in) {
     if (in->handle) Atrac9ReleaseHandle(in->handle);
-    if (in->decoder) bbgpu_audio_decoder_destroy(in->decoder);
+    if (in->decoder) psport_gpu_audio_decoder_destroy(in->decoder);
     free(in->pcm);
 }
 /* MP3 needs no configuration; AAC starts as ADTS until a control job initializes it. */
@@ -502,7 +502,7 @@ static int32_t open_mpeg(Instance *in) {
     in->pcm=malloc(MPEG_PCM_SAMPLES*sizeof(float));
     if (!in->pcm) return ERR_OUT_OF_RESOURCES;
     if (in->codec==CODEC_AAC) aac_configure(in,AAC_ADTS,0);
-    else { in->decoder=bbgpu_audio_decoder_create(0,0,0,0); in->initialized=in->decoder!=NULL; }
+    else { in->decoder=psport_gpu_audio_decoder_create(0,0,0,0); in->initialized=in->decoder!=NULL; }
     return in->initialized ? 0 : ERR_OUT_OF_RESOURCES;
 }
 static Context *context(uint32_t id) { return id && id<=MAX_CONTEXTS ? contexts[id] : NULL; }

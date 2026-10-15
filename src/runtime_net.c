@@ -1,10 +1,10 @@
 /* Online play (PS_ONLINE=1): the game's network and PSN imports go to the online module
- * (gpu/bbnet: libbbnet.so beside libpsport-gpu.so), loaded here on the first such import. Offline,
+ * (gpu/net: libpsport-net.so beside libpsport-gpu.so), loaded here on the first such import. Offline,
  * or when the module is missing or fails to start, they stay with the runtime's offline
  * versions (runtime_services.c). Trophies, voice and the store/profile dialogs always stay here. */
 #define _GNU_SOURCE
 #include "runtime.h"
-#include "gpu/bbnet/bbnet.h"
+#include "gpu/net/psport_net.h"
 #include <dlfcn.h>
 #include <limits.h>
 #include <stdio.h>
@@ -40,10 +40,10 @@ int runtime_net_symbol(const char *symbol) {
     return match;
 }
 
-/* The module: PS_NET_MODULE, else gpu/libbbnet.so beside psport (where libpsport-gpu.so is). */
-static BbNetResolveFn module_resolve(void) {
+/* The module: PS_NET_MODULE, else gpu/libpsport-net.so beside psport (where libpsport-gpu.so is). */
+static PsNetResolveFn module_resolve(void) {
     static int tried;
-    static BbNetResolveFn resolve;
+    static PsNetResolveFn resolve;
     if (tried) return resolve;
     tried=1;
     char path[PATH_MAX];
@@ -57,7 +57,7 @@ static BbNetResolveFn module_resolve(void) {
         exe[n]=0;
         char *slash=strrchr(exe,'/');
         if (slash) *slash=0;
-        snprintf(path,sizeof(path),"%s/gpu/libbbnet.so",exe);
+        snprintf(path,sizeof(path),"%s/gpu/libpsport-net.so",exe);
     }
     /* RTLD_LOCAL: its C++ (network and NP libraries) stays out of the process's symbol scope. */
     void *module=dlopen(path,RTLD_NOW|RTLD_LOCAL);
@@ -65,10 +65,10 @@ static BbNetResolveFn module_resolve(void) {
         printf("Online: the online module is not available (%s): offline play\n",dlerror());
         return NULL;
     }
-    const BbNetInitFn init=(BbNetInitFn)dlsym(module,"bbnet_init");
-    const BbNetResolveFn found=(BbNetResolveFn)dlsym(module,"bbnet_resolve");
-    const BbNetHost host={
-        .abi=BBNET_ABI_VERSION, .app0=game_folder, .serial=game_serial, .title=game_title,
+    const PsNetInitFn init=(PsNetInitFn)dlsym(module,"psport_net_init");
+    const PsNetResolveFn found=(PsNetResolveFn)dlsym(module,"psport_net_resolve");
+    const PsNetHost host={
+        .abi=PSPORT_NET_ABI_VERSION, .app0=game_folder, .serial=game_serial, .title=game_title,
         .app_ver=game_version, .thread_spawn=runtime_thread_spawn,
         .thread_join=runtime_thread_join_spawned,
     };
@@ -85,7 +85,7 @@ uintptr_t runtime_net_resolve(const char *name) {
     if (!runtime_net_enabled()) return 0;
     const char *symbol=runtime_symbol(name);
     if (!runtime_net_symbol(symbol)) return 0;
-    const BbNetResolveFn resolve=module_resolve();
+    const PsNetResolveFn resolve=module_resolve();
     const uintptr_t address=resolve ? resolve(name) : 0;
     if (resolve && !address) printf("Online: %s has no online version; the offline one is used\n",symbol);
     return address;

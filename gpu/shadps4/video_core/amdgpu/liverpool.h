@@ -37,10 +37,10 @@ namespace Libraries::GnmDriver {
 bool SubmitLockOnDecode(); // gnmdriver.cpp
 }
 
-namespace BbCp {
+namespace PsCp {
 class Decoder;
 class RegisterObserver;
-} // namespace BbCp
+} // namespace PsCp
 
 namespace AmdGpu {
 
@@ -78,10 +78,10 @@ struct Liverpool {
     Regs regs{};
     std::array<CbDbExtent, NUM_COLOR_BUFFERS> last_cb_extent{};
     CbDbExtent last_db_extent{};
-    /// bbport: register blocks written since the last draw handed to the draw recording thread
+    /// psport: register blocks written since the last draw handed to the draw recording thread
     /// (Rasterizer::PostDraw sends them along).
     RegDirty pipe_dirty;
-    /// bbport: fence writes handed to the draw recording thread and not yet done there: a
+    /// psport: fence writes handed to the draw recording thread and not yet done there: a
     /// WaitRegMem on one of them is met in stream order without waiting for that thread.
     struct PendingFence {
         VAddr address;
@@ -93,12 +93,12 @@ struct Liverpool {
     void NotePendingFences(const auto& event);
     bool PendingFenceValue(VAddr address, u32& value);
     void NotePendingWrite(const struct PM4CmdWriteData& write_data, u32 num_bytes);
-    /// bbport: running checksum of graphics-register packets (see ApplyGraphicsRegisterPacket).
+    /// psport: running checksum of graphics-register packets (see ApplyGraphicsRegisterPacket).
     u64 gfx_reg_checksum{};
-    /// bbport: the translator's own PM4 decoder (gpu/cp) over `regs`, and what it tells.
-    std::unique_ptr<BbCp::Decoder> cp_decoder;
-    std::unique_ptr<BbCp::RegisterObserver> cp_observer;
-    BbCp::Decoder& CpDecoder();
+    /// psport: the translator's own PM4 decoder (gpu/cp) over `regs`, and what it tells.
+    std::unique_ptr<PsCp::Decoder> cp_decoder;
+    std::unique_ptr<PsCp::RegisterObserver> cp_observer;
+    PsCp::Decoder& CpDecoder();
     /// Top-level graphics submissions, numbered for the draw preparation workers.
     static constexpr u64 NoSeq = ~0ull;
     u64 gfx_submit_seq{};
@@ -108,7 +108,7 @@ struct Liverpool {
                                             RegDirty* dirty = nullptr);
 
 public:
-    /// bbport PS_CP_DECODER=1 (opt-in; else shadPS4's packet walk): graphics command buffers
+    /// psport PS_CP_DECODER=1 (opt-in; else shadPS4's packet walk): graphics command buffers
     /// are decoded by the translator's own decoder (gpu/cp/cp_decoder.h).
     static bool CpDecoderEnabled();
 
@@ -138,7 +138,7 @@ public:
         submit_cv.wait(lk, [this] { return num_submits == 0; });
     }
 
-    /// bbport: also the draw recording thread and the fences it deferred are done (see
+    /// psport: also the draw recording thread and the fences it deferred are done (see
     /// work_retired). sceGnmSubmitDone does not block the guest when this is true.
     bool IsGpuIdle() const {
         static const bool use_retired = [] {
@@ -248,7 +248,7 @@ private:
 
     using CmdBuffer = std::pair<std::span<const u32>, std::span<const u32>>;
     CmdBuffer CopyCmdBuffers(std::span<const u32> dcb, std::span<const u32> ccb);
-    /// bbport: a submission's command buffers copied when the guest submits them
+    /// psport: a submission's command buffers copied when the guest submits them
     /// (PS_COPY_GPU_BUFFERS): the guest reused their memory before the GPU thread decoded
     /// them ("PM4 type 0" from zeros or the next frame's commands, while an area loads).
     struct SubmittedCopy {
@@ -286,7 +286,7 @@ private:
     u32 num_counter_pairs{};
     u64 pixel_counter{};
 
-    /// bbport: SET_PREDICATION. Draws and dispatches with the predicate bit in their header are
+    /// psport: SET_PREDICATION. Draws and dispatches with the predicate bit in their header are
     /// skipped while it fails; it is evaluated at the first such packet, once the GPU has done
     /// the work before it (the results are GPU-written).
     struct Predication {
@@ -303,7 +303,7 @@ private:
         u64 skipped = 0; ///< packets skipped so far (PS_PM4_SELFTEST)
     } predication;
     bool PredicationSkips(const PM4Header* header);
-    /// bbport: waits until the GPU has done the work recorded before this point and its writes
+    /// psport: waits until the GPU has done the work recorded before this point and its writes
     /// to [address, address + size) are in the game's memory (CP reads of GPU-written data:
     /// COND_EXEC, predication, COPY_DATA into a register).
     void SyncForCpuRead(VAddr address, u64 size);
@@ -343,11 +343,11 @@ private:
     /// PS_HONEST_LABELS: GPU idle once the GPU has finished the work up to `generation` and nothing
     /// was submitted since (the interrupt, work_retired).
     void SignalGpuIdle(u64 generation);
-    /// bbport: false from a submission until its draws and deferred fences are done (stage A
+    /// psport: false from a submission until its draws and deferred fences are done (stage A
     /// decrements num_submits once it has decoded a submission, before that). Under
     /// submit_mutex with num_submits.
     std::atomic<bool> work_retired{true};
-    /// bbport: submissions so far (submit_mutex): PS_HONEST_LABELS GPU idle checks none came since.
+    /// psport: submissions so far (submit_mutex): PS_HONEST_LABELS GPU idle checks none came since.
     u64 submissions_total = 0;
     std::atomic<u32> num_commands{};
     std::atomic<bool> submit_done{};

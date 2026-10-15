@@ -100,7 +100,7 @@ public:
     Frame* PrepareBlankFrame(bool present_thread);
 
     void Present(Frame* frame, bool is_reusing_frame = false, bool is_game_frame = true);
-    /// bbport: waits until the GPU has finished the commands that render `frame` (any thread).
+    /// psport: waits until the GPU has finished the commands that render `frame` (any thread).
     void WaitRendered(const Frame* frame);
     Frame* PrepareLastFrame();
 
@@ -122,10 +122,10 @@ private:
     HostPasses::FsrPass::Settings fsr_settings{};
     HostPasses::PostProcessingPass::Settings pp_settings{};
     HostPasses::PostProcessingPass pp_pass;
-    std::mutex passes_mutex; ///< bbport: the passes are recorded on the recording threads
+    std::mutex passes_mutex; ///< psport: the passes are recorded on the recording threads
     AmdGpu::Liverpool* liverpool;
     Scheduler draw_scheduler;
-    std::deque<u64> recent_frame_ticks; ///< bbport: PS_FRAMES_AHEAD bound (PrepareFrame)
+    std::deque<u64> recent_frame_ticks; ///< psport: PS_FRAMES_AHEAD bound (PrepareFrame)
     Scheduler present_scheduler;
     Scheduler flip_scheduler;
     Swapchain swapchain;

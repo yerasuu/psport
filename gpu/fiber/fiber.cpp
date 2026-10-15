@@ -550,7 +550,7 @@ s32 PS4_SYSV_ABI sceFiberSwitch(OrbisFiber* fiber, u64 arg_on_run_to, u64* arg_o
     return sceFiberSwitchImpl(fiber, nullptr, 0, arg_on_run_to, arg_on_run);
 }
 
-// bbport: every failure a function returns is logged (each function and code a few times), so a
+// psport: every failure a function returns is logged (each function and code a few times), so a
 // title the library rejects shows why instead of failing silently further on. The wrapper's frame
 // stays on the caller's stack, which a switch leaves and comes back to.
 template <auto F>

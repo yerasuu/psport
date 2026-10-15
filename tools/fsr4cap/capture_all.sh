@@ -51,7 +51,7 @@ if [[ ( -e /etc/NIXOS || -n ${PS_PREBUILT:-} ) && ${PS_FSR4CAP_RUNNER:-} != stea
         rm -rf "$host"
         mkdir -p "$host"
         cp -- "$(dirname -- "$0")/capture_all.sh" "$(dirname -- "$0")/proton.sh" "$host/"
-        unit=bbport-fsr4cap-$$
+        unit=psport-fsr4cap-$$
         settings=()
         for name in PROTONPATH FSR4CAP_VERSION PS_FSR4CAP_FP8 PS_FSR4CAP_SPOOF VKD3D_DISABLE_EXTENSIONS \
                     WINEDEBUG DXVK_CONFIG DISPLAY WAYLAND_DISPLAY XAUTHORITY; do

@@ -48,11 +48,11 @@ public:
     void FillBuffer(const VideoCore::Buffer* dst, u64 offset, u64 size, u32 value);
 
     void InlineData(VideoCore::Buffer* dst, u64 offset, u32 value);
-    /// bbport PS_GUEST_IN_PLACE: copies from the game's memory itself (a guest memory chunk's
+    /// psport PS_GUEST_IN_PLACE: copies from the game's memory itself (a guest memory chunk's
     /// buffer, host memory the CPU writes) into `dst`: uploads without a CPU copy.
     void CopyFromGuestChunk(vk::Buffer src, const VideoCore::Buffer* dst,
                             std::span<const vk::BufferCopy> copies);
-    /// bbport: `data` written into `dst` by the GPU in stream order (vkCmdUpdateBuffer pieces).
+    /// psport: `data` written into `dst` by the GPU in stream order (vkCmdUpdateBuffer pieces).
     void UpdateBuffer(const VideoCore::Buffer* dst, u64 offset, std::span<const u8> data);
 
     bool Transit(VideoCore::Image* image, vk::ImageLayout dst_layout,
@@ -101,13 +101,13 @@ public:
     bool IsBufferAccessed(const VideoCore::Buffer* handle, u64 offset, u64 size,
                           bool check_read_access = false);
 
-    /// bbport PS_LAYER_MEMORY: a shader reached memory through the page table (any buffer of the
+    /// psport PS_LAYER_MEMORY: a shader reached memory through the page table (any buffer of the
     /// game's memory). A write there makes every later access wait for a barrier.
     void AccessGlobal(vk::PipelineStageFlags2 src_stage, vk::AccessFlags2 src_access);
 
     void FlushBarriers();
 
-    /// bbport: runs before this thread changes image state (layouts, pending image
+    /// psport: runs before this thread changes image state (layouts, pending image
     /// barriers): the rasterizer joins its texture binding helper there (BindHelper).
     void SetImageAccessHook(void (*hook)(void*), void* context) {
         image_access_hook = hook;
@@ -129,8 +129,8 @@ private:
     BarrierTracker barrier_tracker;
     VideoCore::Image::Barriers image_barriers;
     vk::MemoryBarrier2 memory_barrier{};
-    bool global_write = false; ///< bbport: AccessGlobal wrote since the last FlushBarriers
-    // bbport: ranges inserted into barrier_tracker since its last Clear(); re-inserting a
+    bool global_write = false; ///< psport: AccessGlobal wrote since the last FlushBarriers
+    // psport: ranges inserted into barrier_tracker since its last Clear(); re-inserting a
     // contained range is a no-op, and draws re-bind the same ranges constantly.
     struct AccessMemo {
         u64 resource;

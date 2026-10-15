@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// bbport PS_HEAP_SITES=1 (diagnostics): the game's malloc replacement (the pointers libc.prx calls
+// psport PS_HEAP_SITES=1 (diagnostics): the game's malloc replacement (the pointers libc.prx calls
 // through, libc+0xba190: malloc, free, calloc, realloc, memalign, posix_memalign) is wrapped, and
 // the live allocations are counted per call site in the game (the first two return addresses into
 // its code on the stack). Report() prints the sites whose live bytes grew since the last report:
@@ -16,7 +16,7 @@
 
 extern "C" std::uint64_t runtime_heap_growths(void);
 
-namespace BbHeapSites {
+namespace PsHeapSites {
 namespace {
 using u32 = std::uint32_t;
 using u64 = std::uint64_t;
@@ -365,4 +365,4 @@ void Report() {
     }
     std::printf("\n");
 }
-} // namespace BbHeapSites
+} // namespace PsHeapSites

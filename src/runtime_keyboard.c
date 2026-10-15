@@ -8,7 +8,7 @@
  * keyboard plugged in does. */
 #define _GNU_SOURCE
 #include "runtime.h"
-#include "gpu/bbgpu.h"
+#include "gpu/psport_gpu.h"
 #include <stdio.h>
 #include <string.h>
 #include <pthread.h>
@@ -70,7 +70,7 @@ static uint32_t dropped;
 
 static int host_keyboard(void) {
     int keyboard=0;
-    bbgpu_game_keyboard_take(NULL,0,&keyboard,&dropped);
+    psport_gpu_game_keyboard_take(NULL,0,&keyboard,&dropped);
     return keyboard;
 }
 static void log_host(int keyboard) {
@@ -84,7 +84,7 @@ static void resource_ids(ResourceIds *ids, int32_t user, int connected) {
     ids->user=user;
     if (connected) ids->resource[0]=HOST_RESOURCE;
 }
-static uint32_t key_state(const BbKeyEvent *key) {
+static uint32_t key_state(const PsKeyEvent *key) {
     static const struct { uint16_t mod; uint32_t state; } mods[]={
         {SDL_KMOD_LCTRL,STATE_L_CTRL}, {SDL_KMOD_LSHIFT,STATE_L_SHIFT}, {SDL_KMOD_LALT,STATE_L_ALT},
         {SDL_KMOD_LGUI,STATE_L_GUI}, {SDL_KMOD_RCTRL,STATE_R_CTRL}, {SDL_KMOD_RSHIFT,STATE_R_SHIFT},
@@ -98,9 +98,9 @@ static uint32_t key_state(const BbKeyEvent *key) {
 }
 /* The events due since the last update, in order; called under lock. */
 static int collect(ImeEvent *events) {
-    BbKeyEvent keys[EVENTS_PER_UPDATE];
+    PsKeyEvent keys[EVENTS_PER_UPDATE];
     int keyboard=0, count=0;
-    const int taken_keys=bbgpu_game_keyboard_take(keys,EVENTS_PER_UPDATE-1,&keyboard,&dropped);
+    const int taken_keys=psport_gpu_game_keyboard_take(keys,EVENTS_PER_UPDATE-1,&keyboard,&dropped);
     log_host(keyboard);
     if (!kbd.opened_sent) {
         kbd.opened_sent=1; kbd.connected=keyboard;
@@ -112,7 +112,7 @@ static int collect(ImeEvent *events) {
         resource_ids(&events[count++].param.ids,kbd.user,1);
     }
     for (int i=0;i<taken_keys;++i) {
-        const BbKeyEvent *key=&keys[i];
+        const PsKeyEvent *key=&keys[i];
         if (key->scancode==0 || key->scancode>HID_LAST_KEY) { ++unmapped_keys; continue; }
         if (key->repeat && !(kbd.option & (OPTION_REPEAT|OPTION_REPEAT_EACH_KEY))) { ++repeats_dropped; continue; }
         ImeEvent *e=&events[count++];
@@ -138,7 +138,7 @@ static ABI int32_t keyboard_open(int32_t user, const KeyboardParam *param) {
     if (kbd.open) { pthread_mutex_unlock(&lock); return IME_BUSY; }
     kbd.open=1; kbd.opened_sent=0; kbd.user=user; kbd.option=param->option; kbd.arg=param->arg; kbd.handler=param->handler;
     __atomic_store_n(&taken,1,__ATOMIC_RELAXED);
-    bbgpu_game_keyboard_open(1);
+    psport_gpu_game_keyboard_open(1);
     log_host(host_keyboard());
     pthread_mutex_unlock(&lock);
     printf("Runtime: keyboard opened for user %d (option 0x%x)\n",user,param->option);
@@ -150,7 +150,7 @@ static ABI int32_t keyboard_close(int32_t user) {
     const int was_open=kbd.open;
     kbd.open=0;
     __atomic_store_n(&taken,0,__ATOMIC_RELAXED);
-    bbgpu_game_keyboard_open(0);
+    psport_gpu_game_keyboard_open(0);
     pthread_mutex_unlock(&lock);
     return was_open ? 0 : IME_NOT_OPENED;
 }

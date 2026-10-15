@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// shadPS4's core/tls.h as far as fiber.cpp uses it. bbport keeps the game's TCB in GS (link_modules
+// shadPS4's core/tls.h as far as fiber.cpp uses it. psport keeps the game's TCB in GS (link_modules
 // rewrites its fs: loads), laid out as the console's; +0x30 is free for the fiber context.
 #pragma once
 #include <cstddef>

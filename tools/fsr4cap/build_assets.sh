@@ -38,7 +38,7 @@ out=$(realpath -m "${PS_FSR411_OUT:-$root/fsr4_411}")
 tools=${PS_FSR4CAP_TOOLS:-}
 python=${PYTHON:-python3}
 
-# Before anything long: is it a DLL bbport can replay, and where is its loader? (Without Python
+# Before anything long: is it a DLL psport can replay, and where is its loader? (Without Python
 # yet, after nix-shell below.)
 check_dll() {
     local status=0 info
@@ -142,4 +142,4 @@ fi
 if [[ ${PS_FSR4CAP_CLEAN:-0} == 1 ]]; then
     rm -rf "$work"
 fi
-echo "FSR 4.1.1 assets in $out (bbport.ini: upscaler=fsr411)"
+echo "FSR 4.1.1 assets in $out (psport.ini: upscaler=fsr411)"

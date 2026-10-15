@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include "bbport_toggles.h"
+#include "psport_toggles.h"
 #include <ranges>
 #include "common/assert.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
@@ -87,14 +87,14 @@ static vk::FormatFeatureFlags2 FormatFeatureFlags(const vk::ImageUsageFlags usag
 
 UniqueImage::~UniqueImage() {
     if (image) {
-        BbStats::vk_image_bytes.fetch_sub(size_bytes, std::memory_order_relaxed);
+        PsStats::vk_image_bytes.fetch_sub(size_bytes, std::memory_order_relaxed);
         vmaDestroyImage(allocator, image, allocation);
     }
 }
 
 void UniqueImage::Destroy() {
     if (image) {
-        BbStats::vk_image_bytes.fetch_sub(size_bytes, std::memory_order_relaxed);
+        PsStats::vk_image_bytes.fetch_sub(size_bytes, std::memory_order_relaxed);
         vmaDestroyImage(allocator, image, allocation);
         image = vk::Image{};
         allocation = {};
@@ -104,7 +104,7 @@ void UniqueImage::Destroy() {
 void UniqueImage::Create(const vk::ImageCreateInfo& image_ci) {
     this->image_ci = image_ci;
     ASSERT(!image);
-    // bbport: images of PS_VMA_DEDICATED_MB (4) or more get memory of their own, given back to
+    // psport: images of PS_VMA_DEDICATED_MB (4) or more get memory of their own, given back to
     // the driver when they are freed. In shared VMA blocks the texture collector's evictions left
     // holes (~0.9 GB on an RX 7800 XT) that a block only returns once wholly empty.
     static const vk::DeviceSize dedicated_from = [] {
@@ -136,14 +136,14 @@ void UniqueImage::Create(const vk::ImageCreateInfo& image_ci) {
                vk::to_string(vk::Result{result}));
     image = vk::Image{unsafe_image};
     size_bytes = alloc_info.size;
-    BbStats::vk_image_bytes.fetch_add(size_bytes, std::memory_order_relaxed);
+    PsStats::vk_image_bytes.fetch_add(size_bytes, std::memory_order_relaxed);
 }
 
 Image::Image(const Vulkan::Instance& instance, Vulkan::Runtime& runtime_,
              Common::SlotVector<ImageView>& slot_image_views_, const ImageInfo& info_)
     : guest_begin{info_.guest_address}, guest_end{info_.guest_address + info_.guest_size},
       info{info_}, runtime{&runtime_}, slot_image_views{&slot_image_views_} {
-    BbStats::Timer timer{BbStats::t_image_create};
+    PsStats::Timer timer{PsStats::t_image_create};
     if (info.pixel_format == vk::Format::eUndefined) {
         return;
     }

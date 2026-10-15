@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// bbport: FSR 4 benchmark outside the game. Runs the v07 INT8 provider (the same assets and
+// psport: FSR 4 benchmark outside the game. Runs the v07 INT8 provider (the same assets and
 // provider as vk_fsr4.cpp) on synthetic inputs and prints GPU time per pass (PS_FSR4_PROFILE)
 // and, with --stats, the driver's statistics of every pass (PS_FSR4_STATS).
 //

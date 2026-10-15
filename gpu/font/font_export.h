@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// bbport: every libSceFont/libSceFontFt export is called through Guarded. The sources lean on
+// psport: every libSceFont/libSceFontFt export is called through Guarded. The sources lean on
 // std::filesystem, containers and fmt, which throw on failures the console's library reports as
 // codes; an exception must not unwind through the game's frames, so it becomes a logged
 // ORBIS_FONT_ERROR_FATAL (or a null/zero result for the functions returning something else).

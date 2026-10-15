@@ -1,4 +1,4 @@
-// bbport: SDL3 window for the Vulkan swapchain (X11 or Wayland).
+// psport: SDL3 window for the Vulkan swapchain (X11 or Wayland).
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -7,14 +7,14 @@
 #include "common/assert.h"
 #include "common/logging/log.h"
 #include "sdl_window.h"
-#include "bbport_overlay.h"
+#include "psport_overlay.h"
 
 namespace Frontend {
 
 namespace {
 
 // Issue #69: the monitor the window (and fullscreen) goes to. PS_DISPLAY: its number in SDL's
-// order (1, 2, ...; bb-gpu-capabilities --displays lists them) or a part of its name; without it
+// order (1, 2, ...; psport-gpu-capabilities --displays lists them) or a part of its name; without it
 // SDL's primary display. The monitors are logged so a report says which one was taken.
 SDL_DisplayID ChooseDisplay() {
     const SDL_DisplayID primary = SDL_GetPrimaryDisplay();
@@ -191,7 +191,7 @@ void WindowSDL::GameMouseEvent(const SDL_Event& event) {
     }
 }
 
-int WindowSDL::TakeGameKeys(BbKeyEvent* events, int max, bool& keyboard, u32& dropped) {
+int WindowSDL::TakeGameKeys(PsKeyEvent* events, int max, bool& keyboard, u32& dropped) {
     std::scoped_lock lock{key_mutex};
     SyncGameKeyboard();
     int count = 0;
@@ -234,7 +234,7 @@ void WindowSDL::GameKeyEvent(const SDL_Event& event) {
         game_keys.pop_front();
         ++game_keys_dropped;
     }
-    game_keys.push_back(BbKeyEvent{
+    game_keys.push_back(PsKeyEvent{
         .time_us = u64(std::chrono::duration_cast<std::chrono::microseconds>(now).count()),
         .character = key & SDLK_SCANCODE_MASK ? 0u : u32(key),
         .scancode = u16(scancode),
@@ -271,7 +271,7 @@ void WindowSDL::UpdateTextTitle() {
     const std::string title = text_active ? base_title + " \u2014 " + text_prompt + ": " + text + "_  (Enter = OK, Esc = cancel)"
                                           : base_title;
     SDL_SetWindowTitle(window, title.c_str());
-    BbOverlay::SetTextPrompt(text_active, text_prompt, text);
+    PsOverlay::SetTextPrompt(text_active, text_prompt, text);
 }
 
 bool WindowSDL::PollEvents() {
@@ -294,7 +294,7 @@ bool WindowSDL::PollEvents() {
         }
     }
     if (!text_active) {
-        BbOverlay::UpdateTextInput(window);
+        PsOverlay::UpdateTextInput(window);
     }
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
@@ -328,17 +328,17 @@ bool WindowSDL::PollEvents() {
             continue;
         }
         // A release always counts, so a button held while the menu opened is not left held.
-        if (!BbOverlay::CapturesInput() || event.type == SDL_EVENT_MOUSE_BUTTON_UP) {
+        if (!PsOverlay::CapturesInput() || event.type == SDL_EVENT_MOUSE_BUTTON_UP) {
             GameMouseEvent(event);
         }
-        if (BbOverlay::HandleEvent(event)) {
+        if (PsOverlay::HandleEvent(event)) {
             continue;
         }
         // Mouse look: a click in the game takes the mouse (that click is not passed on as a
         // button: runtime_pad.c reads the buttons only while it is held); F1 and leaving the
         // window let it go.
         if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && !mouse_captured.load(std::memory_order_relaxed) &&
-            mouse_look.load(std::memory_order_relaxed) && !BbOverlay::MenuOpen() && !BbOverlay::GameCursorShown()) {
+            mouse_look.load(std::memory_order_relaxed) && !PsOverlay::MenuOpen() && !PsOverlay::GameCursorShown()) {
             CaptureMouse(true);
             continue;
         }
@@ -387,7 +387,7 @@ bool WindowSDL::PollEvents() {
     }
     // The menu, the name dialog, the game's own cursor and mouse_look=0 want the mouse as a pointer.
     if (mouse_captured.load(std::memory_order_relaxed) &&
-        (BbOverlay::MenuOpen() || text_active || BbOverlay::GameCursorShown() ||
+        (PsOverlay::MenuOpen() || text_active || PsOverlay::GameCursorShown() ||
          !mouse_look.load(std::memory_order_relaxed))) {
         CaptureMouse(false);
     }
@@ -400,7 +400,7 @@ bool WindowSDL::PollEvents() {
 // while the settings menu is open.
 void WindowSDL::UpdateCursor() {
     const bool fullscreen = (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) != 0;
-    const bool hide = !BbOverlay::MenuOpen() && (fullscreen || BbOverlay::GameCursorShown() ||
+    const bool hide = !PsOverlay::MenuOpen() && (fullscreen || PsOverlay::GameCursorShown() ||
                                                  SDL_GetTicks() - last_mouse_motion_ms > 3000);
     if (hide != cursor_hidden) {
         cursor_hidden = hide;

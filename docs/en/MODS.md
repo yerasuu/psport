@@ -12,7 +12,7 @@ for the load order. Changes apply on the next launch. The lowest enabled mod has
 priority; when files collide, the log says which mod replaced the previous one.
 
 The default folder is `mods/` in the data directory (`PS_DATA_DIR`, the checkout by default); in
-the AppImage, `~/.local/share/bbport/mods/`. Unpack a downloaded mod like this:
+the AppImage, `~/.local/share/psport/mods/`. Unpack a downloaded mod like this:
 
 ```text
 mods/
@@ -82,7 +82,7 @@ come from a mod, for diagnostics.
 
 ## Third-party patches (shadPS4 XML)
 
-The `patches/` folder in the data directory (in the AppImage, `~/.local/share/bbport/patches/`;
+The `patches/` folder in the data directory (in the AppImage, `~/.local/share/psport/patches/`;
 in the launcher, the **Third-party patches** group, where another folder can be chosen). Patch XML
 files in the shadPS4/GoldHEN format are accepted for any title: `Metadata` for the game's `APP_VER`
 (`param.sfo`; Bloodborne's is `01.09`) and `eboot.bin` is used, files whose `TitleID` names only

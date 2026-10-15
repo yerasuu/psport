@@ -13,8 +13,8 @@
 #include "video_core/renderdoc.h"
 #include "video_core/renderer_vulkan/vk_platform.h"
 #include "game_profile.h"
-#include "bbport_overlay.h"
-#include "bbport_timeline.h"
+#include "psport_overlay.h"
+#include "psport_timeline.h"
 #include "video_core/renderer_vulkan/vk_temporal_upscaler.h"
 #include "video_core/renderer_vulkan/vk_presenter.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
@@ -124,7 +124,7 @@ static vk::Rect2D FitImage(s32 frame_width, s32 frame_height, s32 swapchain_widt
                          dst_rect.offset.x, dst_rect.offset.y);
 }
 
-// bbport: screenshot capture and ImGui overlays removed; the port presents directly.
+// psport: screenshot capture and ImGui overlays removed; the port presents directly.
 
 Presenter::Presenter(Frontend::WindowSDL& window_, AmdGpu::Liverpool* liverpool_)
     : window{window_}, liverpool{liverpool_},
@@ -155,7 +155,7 @@ Presenter::Presenter(Frontend::WindowSDL& window_, AmdGpu::Liverpool* liverpool_
 
     fsr_pass.Create(device, instance.GetAllocator(), num_images);
     pp_pass.Create(device, swapchain.GetSurfaceFormat().format);
-    BbOverlay::Init(instance, swapchain.GetSurfaceFormat().format, num_images);
+    PsOverlay::Init(instance, swapchain.GetSurfaceFormat().format, num_images);
 
 }
 
@@ -321,8 +321,8 @@ static vk::Format GetFrameViewFormat(const Libraries::VideoOut::PixelFormat form
 
 Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& attribute,
                                VAddr cpu_address) {
-    BbTimeline::Note(BbTimeline::PipeTask, 4, draw_scheduler.CurrentTick());
-    // bbport: scaled upscaler presets: the output-size display buffer drawn by the port.
+    PsTimeline::Note(PsTimeline::PipeTask, 4, draw_scheduler.CurrentTick());
+    // psport: scaled upscaler presets: the output-size display buffer drawn by the port.
     TemporalUpscaler::Display display{};
     const bool upscaled = rasterizer->GetUpscaler().DisplayOverride(cpu_address, display);
     VideoCore::ImageId image_id{};
@@ -342,7 +342,7 @@ Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& 
         .layerCount = VK_REMAINING_ARRAY_LAYERS,
     };
 
-    // bbport: recorded like draws, on the recording threads. CommandBuffer() would first wait
+    // psport: recorded like draws, on the recording threads. CommandBuffer() would first wait
     // for them to record everything handed over before (~90 us a frame of the draw recording
     // thread) and then submit from this thread.
     draw_scheduler.EndRendering();
@@ -383,7 +383,7 @@ Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& 
         auto& image = texture_cache.GetImage(image_id);
         image_view = *image.FindView(view_info).image_view;
         image_size = vk::Extent2D{image.info.size.width, image.info.size.height};
-        // bbport: PS_PRESENT_DUMP_TRIGGER for the game's own display buffer too.
+        // psport: PS_PRESENT_DUMP_TRIGGER for the game's own display buffer too.
         if (auto& upscaler = rasterizer->GetUpscaler(); upscaler.PresentDumpDue()) {
             runtime.Transit(&image, vk::ImageLayout::eGeneral, vk::PipelineStageFlagBits2::eTransfer,
                             vk::AccessFlagBits2::eTransferRead);
@@ -444,14 +444,14 @@ Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& 
     });
 
     // Flush frame creation commands.
-    BbStats::frame_number.fetch_add(1, std::memory_order_relaxed); // bbport: game frames shown
+    PsStats::frame_number.fetch_add(1, std::memory_order_relaxed); // psport: game frames shown
     frame->ready_semaphore = draw_scheduler.GetWorkSemaphore()->Handle();
     frame->ready_tick = draw_scheduler.CurrentTick();
     SubmitInfo info{};
     draw_scheduler.Flush(info);
-    BbTimeline::Note(BbTimeline::PipeTask, 5, frame->ready_tick);
+    PsTimeline::Note(PsTimeline::PipeTask, 5, frame->ready_tick);
 
-    // bbport: the GPU command thread runs at most PS_FRAMES_AHEAD (default 1) guest frames
+    // psport: the GPU command thread runs at most PS_FRAMES_AHEAD (default 1) guest frames
     // ahead of the GPU: it waits here for the frame that many flips back. When the GPU is the
     // bottleneck it finishes frames at an even rate; without this bound the command thread ran
     // ahead and then blocked wherever a resource ran out, so flips (and the guest's frame
@@ -466,7 +466,7 @@ Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& 
             const u64 tick = recent_frame_ticks.front();
             recent_frame_ticks.pop_front();
             if (recent_frame_ticks.size() == frames_ahead) {
-                BbStats::WaitTimer timer{BbStats::present_wait_ns};
+                PsStats::WaitTimer timer{PsStats::present_wait_ns};
                 draw_scheduler.Wait(tick);
             }
         }
@@ -572,7 +572,7 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
         }
     };
 
-    // bbport: nothing to present to while the window is minimised (a 0x0 surface, issue #31).
+    // psport: nothing to present to while the window is minimised (a 0x0 surface, issue #31).
     if (window.GetWidth() == 0 || window.GetHeight() == 0) {
         free_frame();
         return;
@@ -604,7 +604,7 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
     ASSERT_MSG(reset_result == vk::Result::eSuccess,
                "Unexpected error resetting present done fence: {}", vk::to_string(reset_result));
 
-    // bbport: the game frame is blitted (letterboxed) straight into the swapchain image.
+    // psport: the game frame is blitted (letterboxed) straight into the swapchain image.
     const vk::Image swapchain_image = swapchain.Image();
     auto& scheduler = present_scheduler;
     const auto cmdbuf = scheduler.CommandBuffer();
@@ -664,11 +664,11 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
                          vk::ImageLayout::eTransferDstOptimal,
                          MakeImageBlitFit(frame->width, frame->height, extent.width, extent.height),
                          vk::Filter::eLinear);
-        // bbport: the settings menu / FPS counter over the frame, at display resolution.
+        // psport: the settings menu / FPS counter over the frame, at display resolution.
         if (const Game::Profile* game = Game::Active(); game && game->before_present) {
             game->before_present();
         }
-        const bool overlay = BbOverlay::Visible();
+        const bool overlay = PsOverlay::Visible();
         const std::array post_barriers{
             vk::ImageMemoryBarrier{
                 .srcAccessMask = vk::AccessFlagBits::eTransferWrite,
@@ -698,7 +698,7 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
                                vk::PipelineStageFlagBits::eAllCommands,
                                vk::DependencyFlagBits::eByRegion, {}, {}, post_barriers);
         if (overlay) {
-            BbOverlay::Render(cmdbuf, swapchain.ImageView(), extent,
+            PsOverlay::Render(cmdbuf, swapchain.ImageView(), extent,
                               FitImage(frame->width, frame->height, extent.width, extent.height));
             const vk::ImageMemoryBarrier to_present{
                 .srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite,
@@ -721,7 +721,7 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
 
     // Flush vulkan commands.
 
-    // bbport: the frame's submission goes out from a recording thread (PS_ASYNC_SUBMIT); this
+    // psport: the frame's submission goes out from a recording thread (PS_ASYNC_SUBMIT); this
     // one, waiting for it on the same queue, must not get there first.
     if (frame->ready_semaphore == draw_scheduler.GetWorkSemaphore()->Handle()) {
         draw_scheduler.WaitSubmitted(frame->ready_tick);
@@ -745,7 +745,7 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
     free_frame();
     if (!is_reusing_frame && is_game_frame) {
         DebugState.IncFlipFrameNum();
-        // bbport: once, so that a log says whether the game ever got a frame on screen
+        // psport: once, so that a log says whether the game ever got a frame on screen
         // (tools/regress.sh reads it as the gpu milestone).
         static std::atomic<bool> first_shown{false};
         if (!first_shown.exchange(true, std::memory_order_relaxed)) {

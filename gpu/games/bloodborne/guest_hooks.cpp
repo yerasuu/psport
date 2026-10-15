@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "guest_hooks.h"
 #include "heap_sites.h"
-#include "bbport_toggles.h"
+#include "psport_toggles.h"
 
 #include <array>
 #include <atomic>
@@ -17,7 +17,7 @@
 
 extern "C" void runtime_memory_note_write(uintptr_t address, uint64_t size);
 
-namespace BbGuestHooks {
+namespace PsGuestHooks {
 namespace {
 using u64 = std::uint64_t;
 using u8 = std::uint8_t;
@@ -69,7 +69,7 @@ void* LoaderCopy(void* dst, const void* src, std::size_t size) {
     return dst;
 }
 
-/// bbport: native detours (default; PS_GUEST_HOOK_TRAPS=1: int3 traps). Each hooked site jumps to
+/// psport: native detours (default; PS_GUEST_HOOK_TRAPS=1: int3 traps). Each hooked site jumps to
 /// a stub next to the image that calls the handler and runs the instructions the jump covers;
 /// the copy call sites call LoaderCopy through a trampoline there. An int3 trap costs a signal
 /// (a few microseconds in the kernel) per call; a detour costs a call. The int3 written first
@@ -265,19 +265,19 @@ void OnTrap(int sig, siginfo_t* info, void* context) {
     }
     if (rip == ImageBase + ReleaseCheck) {
         const auto result = static_cast<std::int32_t>(g[REG_RAX] & 0xffffffff);
-        BbHeapSites::NoteReleaseCheck(std::uint32_t(result));
+        PsHeapSites::NoteReleaseCheck(std::uint32_t(result));
         g[REG_RIP] = greg_t(ImageBase + (result < 0 ? 0xbb5fc7 : ReleaseCheck + 2));
         return;
     }
     if (rip == ImageBase + CollectorEntry) {
         const u64 allocator = u64(g[REG_RDI]);
-        for (std::size_t i = 0; i < BbStats::range_allocators.size(); ++i) {
+        for (std::size_t i = 0; i < PsStats::range_allocators.size(); ++i) {
             u64 expected = 0;
-            if (BbStats::range_allocators[i].load(std::memory_order_relaxed) == allocator ||
-                BbStats::range_allocators[i].compare_exchange_strong(expected, allocator)) {
-                BbStats::range_live[i].store(*reinterpret_cast<const u64*>(allocator + 0xc8),
+            if (PsStats::range_allocators[i].load(std::memory_order_relaxed) == allocator ||
+                PsStats::range_allocators[i].compare_exchange_strong(expected, allocator)) {
+                PsStats::range_live[i].store(*reinterpret_cast<const u64*>(allocator + 0xc8),
                                              std::memory_order_relaxed);
-                BbStats::range_bytes[i].store(*reinterpret_cast<const u64*>(allocator + 0xd0),
+                PsStats::range_bytes[i].store(*reinterpret_cast<const u64*>(allocator + 0xd0),
                                               std::memory_order_relaxed);
                 break;
             }
@@ -381,7 +381,7 @@ void Install(RangeCallback on_gpu_range_allocated) {
     // PS_HEAP_HOOKS=0 (bisecting): the heap's ranges are not reported.
     const char* heap_env = std::getenv("PS_HEAP_HOOKS");
     const bool heap_hooks = !heap_env || heap_env[0] != '0';
-    if (BbStats::enabled) {
+    if (PsStats::enabled) {
         Patch(ImageBase + CollectorEntry, CollectorEntryCode, sizeof(CollectorEntryCode));
     }
     int heap_sites = 0;
@@ -412,9 +412,9 @@ void Install(RangeCallback on_gpu_range_allocated) {
         std::printf("Guest hooks: %d native detours (no traps; PS_GUEST_HOOK_TRAPS=1: int3)\n",
                     detours);
     }
-    BbHeapSites::Install();
+    PsHeapSites::Install();
     if (const char* env = std::getenv("PS_HEAP_SITES"); env && env[0] == '1') {
         Patch(ImageBase + ReleaseCheck, ReleaseCheckCode, sizeof(ReleaseCheckCode));
     }
 }
-} // namespace BbGuestHooks
+} // namespace PsGuestHooks
