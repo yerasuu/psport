@@ -1,7 +1,7 @@
 /* libSceHttp and libSceHttp2 on an unplugged console (decision #207): templates, connections and
  * requests are created and tracked so setup code proceeds; any transfer fails as unplugged, so no
  * response, header, redirect or TLS handshake ever arrives. The URI and header parsers work on the
- * game's own strings and behave as shadPS4's reverse-engineered ones (gpu/bbnet/shadps4/.../http.cpp). */
+ * game's own strings and behave as shadPS4's reverse-engineered ones (gpu/net/shadps4/.../http.cpp). */
 #define _GNU_SOURCE
 #include "runtime_np.h"
 #include <ctype.h>

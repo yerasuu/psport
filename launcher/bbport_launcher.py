@@ -144,7 +144,7 @@ DEFAULTS = {
     "gpu_profile": False,
     "vk_validation": False,
     "extra_env": "",
-    # Online play (Online page, the online module gpu/bbnet): off by default; shadPS4's public
+    # Online play (Online page, the online module gpu/net): off by default; shadPS4's public
     # shadNet server and The Hunter's Dream.
     "online": False,
     "online_community": online.COMMUNITY_SERVER,
@@ -281,8 +281,8 @@ def fsr411_build_command(upscaler, loader=None):
 
 
 def online_module():
-    """The online module beside the GPU library (gpu/bbnet; a build without its libraries has none)."""
-    return (PORT_DIR / ("bin" if PACKAGED else "out") / "gpu" / "libbbnet.so").is_file()
+    """The online module beside the GPU library (gpu/net; a build without its libraries has none)."""
+    return (PORT_DIR / ("bin" if PACKAGED else "out") / "gpu" / "libpsport-net.so").is_file()
 
 
 def game_environment(s):
@@ -1213,7 +1213,7 @@ class LauncherWindow(Adw.ApplicationWindow):
         play.add(self.online_row)
         if not online_module():
             self.online_row.set_sensitive(False)
-            self.online_row.set_subtitle(tr("Эта сборка без модуля онлайна (libbbnet.so): игра только офлайн"))
+            self.online_row.set_subtitle(tr("Эта сборка без модуля онлайна (libpsport-net.so): игра только офлайн"))
         page.add(play)
 
         game = Adw.PreferencesGroup(title=tr("Игровой сервер (сообщения, пятна крови, призраки)"))

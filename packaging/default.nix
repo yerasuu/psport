@@ -21,7 +21,7 @@ let
   # DLSS (a build with DLSS_SDK_ROOT): the bridge, NVIDIA's runtime library and its license, as
   # NVIDIA's RTX SDK license allows in an application. Without them the launcher lets the player
   # choose NVIDIA's library (the bridge is still needed).
-  dlssFiles = [ "out/libpsport_dlss.so" "out/NVIDIA-DLSS-LICENSE.txt" "out/gpu/libbbnet.so" ];
+  dlssFiles = [ "out/libpsport_dlss.so" "out/NVIDIA-DLSS-LICENSE.txt" "out/gpu/libpsport-net.so" ];
   isNgx = rel: lib.hasPrefix "out/libnvidia-ngx-dlss.so." rel;
   src = builtins.path {
     name = "bbport-src";
@@ -185,9 +185,9 @@ pkgs.stdenv.mkDerivation {
     # Their debug info names the build environment's headers (the full GCC, Vulkan headers): Nix
     # took those for dependencies, ~300 MB. Symbols stay (crash reports).
     ${pkgs.binutils-unwrapped}/bin/strip --strip-debug $d/bin/psport $d/bin/bb-gpu-capabilities
-    # The online module (gpu/bbnet), when the build has it.
-    if [ -f out/gpu/libbbnet.so ]; then
-      install -Dm755 out/gpu/libbbnet.so $d/bin/gpu/libbbnet.so
+    # The online module (gpu/net), when the build has it.
+    if [ -f out/gpu/libpsport-net.so ]; then
+      install -Dm755 out/gpu/libpsport-net.so $d/bin/gpu/libpsport-net.so
     fi
     if [ -f out/libpsport_dlss.so ]; then
       install -m755 out/libpsport_dlss.so $d/bin/libpsport_dlss.so

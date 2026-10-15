@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// bbport online module (libbbnet.so): what the network and NP libraries from shadp2p need
-// from the rest of shadPS4, on top of the bbport runtime (BbNetHost), their registration and the
-// module's C interface (bbnet.h). From the Linux co-op fork of bbport, which took it from the
+// psport online module (libpsport-net.so): what the network and NP libraries from shadp2p need
+// from the rest of shadPS4, on top of the psport runtime (PsNetHost), their registration and the
+// module's C interface (psport_net.h). From the Linux co-op fork of bbport, which took it from the
 // Windows port; the libraries are shadp2p's (a shadPS4 fork, GPL-2.0).
 
 #include <chrono>
@@ -61,30 +61,30 @@
 #include "core/libraries/np/np_web_api/np_web_api.h"
 #include "core/libraries/np/np_web_api2/np_web_api2.h"
 
-#include "bbnet.h"
+#include "psport_net.h"
 
 namespace {
-/// The runtime's side (bbnet_init).
-BbNetHost g_host{};
+/// The runtime's side (psport_net_init).
+PsNetHost g_host{};
 } // namespace
 
 // ---- Kernel ---------------------------------------------------------------------------------
 
 namespace Libraries::Kernel {
 
-struct BbNetMutex {
+struct PsNetMutex {
     std::recursive_mutex mutex;
     bool recursive{};
     int depth{};
 };
-struct BbNetMutexAttr {
+struct PsNetMutexAttr {
     PthreadMutexType type{PthreadMutexType::ErrorCheck};
 };
-struct BbNetCond {
+struct PsNetCond {
     std::condition_variable_any cond;
 };
-struct BbNetCondAttr {};
-struct BbNetThreadAttr {
+struct PsNetCondAttr {};
+struct PsNetThreadAttr {
     u64 stack{};
 };
 
@@ -142,7 +142,7 @@ s32 PS4_SYSV_ABI sceKernelMunmap(void* addr, u64) {
 
 int posix_pthread_mutexattr_init(PthreadMutexAttrT* attr) {
     if (!attr) return 22;
-    *attr = new BbNetMutexAttr;
+    *attr = new PsNetMutexAttr;
     return 0;
 }
 int posix_pthread_mutexattr_settype(PthreadMutexAttrT* attr, PthreadMutexType type) {
@@ -158,7 +158,7 @@ int posix_pthread_mutexattr_destroy(PthreadMutexAttrT* attr) {
 }
 int scePthreadMutexInit(PthreadMutexT* mutex, const PthreadMutexAttrT* attr, const char*) {
     if (!mutex) return 22;
-    *mutex = new BbNetMutex;
+    *mutex = new PsNetMutex;
     (*mutex)->recursive = attr && *attr && (*attr)->type == PthreadMutexType::Recursive;
     return 0;
 }
@@ -197,7 +197,7 @@ int posix_pthread_mutex_unlock(PthreadMutexT* mutex) {
 
 int posix_pthread_condattr_init(PthreadCondAttrT* attr) {
     if (!attr) return 22;
-    *attr = new BbNetCondAttr;
+    *attr = new PsNetCondAttr;
     return 0;
 }
 int posix_pthread_condattr_destroy(PthreadCondAttrT* attr) {
@@ -208,7 +208,7 @@ int posix_pthread_condattr_destroy(PthreadCondAttrT* attr) {
 }
 int scePthreadCondInit(PthreadCondT* cond, const PthreadCondAttrT*, const char*) {
     if (!cond) return 22;
-    *cond = new BbNetCond;
+    *cond = new PsNetCond;
     return 0;
 }
 int posix_pthread_cond_destroy(PthreadCondT* cond) {
@@ -225,7 +225,7 @@ int posix_pthread_cond_signal(PthreadCondT* cond) {
 namespace {
 // The caller holds the mutex once; the wait releases and retakes it like pthread_cond_wait.
 struct HeldMutex {
-    BbNetMutex* mutex;
+    PsNetMutex* mutex;
     void lock() {
         mutex->mutex.lock();
         ++mutex->depth;
@@ -251,7 +251,7 @@ int posix_pthread_cond_reltimedwait_np(PthreadCondT* cond, PthreadMutexT* mutex,
 
 int posix_pthread_attr_init(PthreadAttrT* attr) {
     if (!attr) return 22;
-    *attr = new BbNetThreadAttr;
+    *attr = new PsNetThreadAttr;
     return 0;
 }
 int posix_pthread_attr_destroy(PthreadAttrT* attr) {
@@ -473,7 +473,7 @@ void SymbolsResolver::AddSymbol(const char* nid, const char*, const char*, Symbo
 }
 } // namespace Core::Loader
 
-extern "C" __attribute__((visibility("default"))) uintptr_t bbnet_resolve(const char* scoped_nid) {
+extern "C" __attribute__((visibility("default"))) uintptr_t psport_net_resolve(const char* scoped_nid) {
     const char* hash = std::strchr(scoped_nid, '#');
     const size_t length = hash ? size_t(hash - scoped_nid) : std::strlen(scoped_nid);
     for (const auto& symbol : g_symbols) {
@@ -484,8 +484,8 @@ extern "C" __attribute__((visibility("default"))) uintptr_t bbnet_resolve(const 
     return 0;
 }
 
-extern "C" __attribute__((visibility("default"))) int bbnet_init(const BbNetHost* host) {
-    if (!host || host->abi != BBNET_ABI_VERSION || !host->thread_spawn || !host->thread_join) {
+extern "C" __attribute__((visibility("default"))) int psport_net_init(const PsNetHost* host) {
+    if (!host || host->abi != PSPORT_NET_ABI_VERSION || !host->thread_spawn || !host->thread_join) {
         std::printf("Online: the runtime and the online module are from different versions\n");
         return -1;
     }

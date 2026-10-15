@@ -252,7 +252,7 @@ export PS_COPY_GPU_BUFFERS=${PS_COPY_GPU_BUFFERS:-1}
 # A guest write next to small GPU outputs the GPU is still writing (counters, compute results,
 # up to PS_GPU_WRITE_TWINS_MAX bytes per page) does not wait for the GPU (BufferCache twins).
 export PS_GPU_WRITE_TWINS=${PS_GPU_WRITE_TWINS:-1} PS_GPU_WRITE_TWINS_MAX=${PS_GPU_WRITE_TWINS_MAX:-65536}
-# Online play (PS_ONLINE=1, launcher: Online; the online module gpu/bbnet): the game's own server
+# Online play (PS_ONLINE=1, launcher: Online; the online module gpu/net): the game's own server
 # goes to the community server, summon signs to the shadNet WebAPI (scripts/online.py, the one
 # step of a launch that still runs Python, and only for online play).
 if [[ ${PS_ONLINE:-0} == 1 && -f scripts/online.py ]]; then

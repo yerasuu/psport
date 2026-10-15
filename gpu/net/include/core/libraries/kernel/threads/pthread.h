@@ -7,18 +7,18 @@
 
 namespace Libraries::Kernel {
 
-struct BbNetMutex;
-struct BbNetMutexAttr;
-struct BbNetCond;
-struct BbNetCondAttr;
-struct BbNetThreadAttr;
+struct PsNetMutex;
+struct PsNetMutexAttr;
+struct PsNetCond;
+struct PsNetCondAttr;
+struct PsNetThreadAttr;
 
 using PthreadT = void*; // the runtime's guest thread handle
-using PthreadMutexT = BbNetMutex*;
-using PthreadMutexAttrT = BbNetMutexAttr*;
-using PthreadCondT = BbNetCond*;
-using PthreadCondAttrT = BbNetCondAttr*;
-using PthreadAttrT = BbNetThreadAttr*;
+using PthreadMutexT = PsNetMutex*;
+using PthreadMutexAttrT = PsNetMutexAttr*;
+using PthreadCondT = PsNetCond*;
+using PthreadCondAttrT = PsNetCondAttr*;
+using PthreadAttrT = PsNetThreadAttr*;
 using PthreadEntryFunc = void* PS4_SYSV_ABI (*)(void*);
 
 enum class PthreadMutexType : u32 { ErrorCheck = 1, Recursive = 2, Normal = 3, AdaptiveNp = 4 };

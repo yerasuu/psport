@@ -201,7 +201,7 @@ EN = {
     "Сглаживание в разрешении вывода без модели FSR": "Anti-aliasing at the output resolution, no FSR model",
     "DLSS найден (нужна видеокарта NVIDIA RTX)": "DLSS found (needs an NVIDIA RTX GPU)",
     # Online page (from the Linux co-op fork)
-    "Эта сборка без модуля онлайна (libbbnet.so): игра только офлайн": "This build has no online module (libbbnet.so): offline play only",
+    "Эта сборка без модуля онлайна (libpsport-net.so): игра только офлайн": "This build has no online module (libpsport-net.so): offline play only",
     'Online ID — это имя учётной записи (NPID), зарегистрированное на сервере, а не адрес email': 'The Online ID is the account name (NPID) you registered on the server, not your email address',
     'UPnP (открыть порт на роутере автоматически)': 'UPnP (open a port on the router automatically)',
     'srv.shadps4.net:31313 — публичный сервер shadPS4. Для частного сервера укажите host:port от его владельца. WebAPI: оставьте пустым, тогда берётся адрес сервера с портом 31315': "srv.shadps4.net:31313 is shadPS4's public server. For a private server, enter host:port from the person who runs it. WebAPI: leave it empty to use the server address with port 31315",

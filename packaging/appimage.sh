@@ -24,7 +24,7 @@ needed_dirs() {
 }
 {
     echo '['
-    for elf in out/psport out/gpu/libpsport-gpu.so $(ls out/libpsport_dlss.so out/gpu/libbbnet.so 2>/dev/null); do
+    for elf in out/psport out/gpu/libpsport-gpu.so $(ls out/libpsport_dlss.so out/gpu/libpsport-net.so 2>/dev/null); do
         needed_dirs "$elf"
     done | grep -o '^/nix/store/[^/]*' | sort -u | grep -v -- '-nix-shell$' | sed 's/.*/  "&"/'
     echo ']'

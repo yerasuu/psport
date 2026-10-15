@@ -25,7 +25,7 @@ pkgs.mkShell {
     ffmpeg-headless boost fmt magic-enum robin-map xxhash vulkan-memory-allocator glslang spirv-cross xbyak zydis spirv-headers miniz libx11 libxcb xorgproto wayland
     # libSceFont (gpu/font): glyphs rasterized by FreeType
     freetype
-    # Online module (gpu/bbnet): shadNet client, HTTPS, UPnP
+    # Online module (gpu/net): shadNet client, HTTPS, UPnP
     protobuf nlohmann_json openssl zlib miniupnpc
   ];
   # The port built here links Nix's Vulkan loader, which cannot load the host's Mesa drivers:

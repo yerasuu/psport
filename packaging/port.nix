@@ -41,7 +41,7 @@ pkgs.stdenv.mkDerivation {
     cp -r run.sh scripts patches $out/
     install -m755 out/psport out/bb-gpu-capabilities $out/out/
     install -m755 out/gpu/libpsport-gpu.so $out/out/gpu/
-    if [ -f out/gpu/libbbnet.so ]; then install -m755 out/gpu/libbbnet.so $out/out/gpu/; fi
+    if [ -f out/gpu/libpsport-net.so ]; then install -m755 out/gpu/libpsport-net.so $out/out/gpu/; fi
     runHook postInstall
   '';
   # Debug info names the build environment's headers, which Nix would keep as references.

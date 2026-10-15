@@ -19,7 +19,7 @@ The model is Wine's, not an emulator's.
 | Ported libraries | `gpu/ngs2/`, `gpu/audiodec/`, `gpu/fiber/`, `gpu/font/`, `gpu/pngenc/`, `gpu/pngdec/` | `libpsport-gpu.so` | libSceNgs2, libSceAudiodec, libSceFiber, libSceFont/FontFt, libScePngEnc, libScePngDec |
 | Port services | `gpu/shim/psport_*` | `libpsport-gpu.so` | settings (`bbport.ini`), overlay, submit guard, guest memory, diagnostics |
 | Game profiles | `gpu/games/` | `libpsport-gpu.so` | per-title optimisations (`Game::Profile`) |
-| Online module | `gpu/bbnet/` | `out/gpu/` (optional) | network and PSN imports with `PS_ONLINE=1` |
+| Online module | `gpu/net/` | `out/gpu/` (optional) | network and PSN imports with `PS_ONLINE=1` |
 | Online addresses | `scripts/online.py` | - | Python run by `run.sh` with `PS_ONLINE=1` only; see [Launch scripts](#launch-scripts) |
 | Regression runs | `tools/regress.sh`, `tools/regress/` | - | headless runs of every title |
 
