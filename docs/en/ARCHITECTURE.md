@@ -70,6 +70,12 @@ the game, binds its imports, installs the fault (`SIGSEGV`, `SIGILL`, `SIGBUS`, 
 heap objects handed to the guest stay below 1 TiB (`mallopt` keeps glibc in the non-PIE brk heap):
 PS4 code packs pointers into 40 bits. Guest memory is placed there too.
 
+`sceSystemServiceLoadExec` replaces the application the way the console does: `psport` starts
+again on its own command line (`src/runtime_restart.c`) with `--exec <guest path>` and one
+`--arg <value>` per argument, the loader takes that executable of the package instead of
+`eboot.bin`, the game's entry, `getargv` and `__progname` see the new command line, and
+`patches.bin` is applied only to `/app0/eboot.bin`.
+
 ### Native loader
 
 `loader_load_game` (`src/loader_link.c`) builds one image, the eboot at offset 0 and every module
