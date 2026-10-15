@@ -85,6 +85,13 @@ typedef struct {
     /* The index-th write so far: its bytes, which may be rewritten in place, and where they go. */
     unsigned char *(*pfn_write)(PsPatchList *p_list, size_t i_write, uint64_t *p_out_offset, uint64_t *p_out_length);
 } PsPatchServices;
+/* The servers of a title's online play (Game::OnlineServices): NULL and 0 for a title without any. */
+typedef struct {
+    const char *sz_game_server;
+    const char *sz_community_server;
+    uint16_t community_api_port;
+    const char *sz_summon_route;
+} PsTitleOnline;
 /* What the launch takes from the game's title (Game::Title), found by TITLE_ID whatever
  * PS_GAME_PROFILE says: it is part of running the game, not an optimisation of the translator.
  * All zero for a title psport has none for; each pointer may be NULL. */
@@ -121,6 +128,7 @@ typedef struct {
     /* Its quirks: RuntimeQuirkId values of src/runtime/runtime_quirks.inc. */
     const uint16_t *p_quirks;
     size_t c_quirks;
+    PsTitleOnline online;
 } PsTitleInfo;
 PsTitleInfo psport_gpu_title(const char *sz_serial);
 /* libSceAjm's MP3 and AAC decoders (runtime_ajm.c) over libSceAudiodec's FFmpeg codecs (audiodec/).

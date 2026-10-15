@@ -340,6 +340,9 @@ void ClearSeamlessHostPlacementHeader() {
     s_placement.reset();
 }
 void TraceMatching2LeaveRoom(std::uintptr_t, std::uint64_t) {}
+std::string_view TitleSummonRoute() {
+    return s_host.sz_summon_route ? s_host.sz_summon_route : "";
+}
 } // namespace Core::Bloodborne
 
 // ---- Notifications (log only for now) ------------------------------------------------------------
@@ -491,6 +494,12 @@ extern "C" __attribute__((visibility("default"))) int psport_net_init(const PsNe
     }
     s_host = *p_host;
     Configure(p_host->sz_app0, p_host->sz_serial, p_host->sz_title, p_host->sz_app_ver);
+    if (p_host->sz_summon_route) {
+        std::printf("Co-op: summon route %s (the title's)\n", p_host->sz_summon_route);
+    } else {
+        std::printf("Co-op: the title declares no summon route; the summon helpers stay off unless "
+                    "SHADPS4_BLOODBORNE_SEAMLESS_COOP or SHADPS4_CAPTURE_BLOODBORNE_SUMMON is set\n");
+    }
     Core::Loader::SymbolsResolver resolver;
     Core::Loader::SymbolsResolver* p_sym = &resolver;
     Libraries::Net::RegisterLib(p_sym);

@@ -90,6 +90,21 @@ int answer_query(int argc, char **argv) {
         runtime_quirks_list(&launch);
         return 0;
     }
+    /* key=value lines for scripts/online.py; none for a title without online servers. */
+    if (argc >= 2 && !strcmp(argv[1], "--online-overrides")) {
+        GameInfo info;
+        const char *sz_game_dir;
+        if (argc == 2 || !query_game(argc,argv,2,&info,&sz_game_dir)) {
+            fprintf(stderr, "Usage: %s --online-overrides (--game dir | --title TITLE_ID)\n", argv[0]);
+            return 1;
+        }
+        const PsTitleOnline *p_online=&info.title.online;
+        if (p_online->sz_game_server) printf("game_server=%s\n",p_online->sz_game_server);
+        if (p_online->sz_community_server) printf("community_server=%s\n",p_online->sz_community_server);
+        if (p_online->community_api_port) printf("community_api_port=%u\n",p_online->community_api_port);
+        if (p_online->sz_summon_route) printf("summon_route=%s\n",p_online->sz_summon_route);
+        return 0;
+    }
     const char *mod_folders[256];
     if (argc >= 3 && (!strcmp(argv[1], "--list-patches") || !strcmp(argv[1], "--list-mods"))) {
         GameInfo info;

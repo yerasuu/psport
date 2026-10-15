@@ -51,7 +51,7 @@ void mod_options(const GameInfo *p_info, LoaderModOptions *p_options, const char
 void accept_deprecated_names(char **pp_argv);
 #endif
 /* The options that answer a launcher's question and exit before any game is loaded (--check-game,
- * --has-presets, --list-patches, --list-mods, --list-quirks): their exit status, -1 when argv asks none of them. */
+ * --has-presets, --list-patches, --list-mods, --list-quirks, --online-overrides): their exit status, -1 when argv asks none of them. */
 int answer_query(int argc, char **argv);
 int mapped(Segment *p_segments, uint64_t c_segments, uint64_t va_range, uint64_t cb_range);
 void bind_imports(Segment *p_segments, uint64_t c_segments, Reloc *p_relocs, uint64_t c_relocs, int native_libc,

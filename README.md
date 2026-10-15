@@ -144,7 +144,7 @@ hardware tests, when needed, are OpenOrbis homebrew); match the surrounding code
 | Path | Contents |
 |---|---|
 | `src/` | Entry (`src/main/`), native loader (`loader_*.c`) and C runtime (`runtime_*.c`) |
-| `scripts/` | `online.py`, the online addresses `run.sh` writes with `PS_ONLINE=1` (the one launch step in Python), and `sce_file.py` for the Python tools |
+| `scripts/` | `online.py`, the online addresses `run.sh` writes with `PS_ONLINE=1` from the game's title ([online play](docs/en/ARCHITECTURE.md#online-play); the one launch step in Python), and `sce_file.py` for the Python tools |
 | `gpu/` | GPU library: shadPS4 video core with bbport's changes (`gpu/VENDOR.txt`), own PM4 decoder (`cp/`) and memory module (`layer/`), ported libraries (`ngs2/`, `audiodec/`, `fiber/`, `font/`, `pngenc/`, `pngdec/`), game profiles (`games/`), overlay and in-game menu (`port/`), DLSS bridge, online module |
 | `launcher/`, `packaging/` | bbport's GTK4 launcher; Nix package and AppImage script |
 | `patches/` | Community patches for Bloodborne |

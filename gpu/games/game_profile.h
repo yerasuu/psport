@@ -134,6 +134,22 @@ struct GameEffects {
     LocalizedText hint;
 };
 
+/// The servers the game's online play (PS_ONLINE=1) goes to, which run.sh's host overrides
+/// redirect (psport --online-overrides, scripts/online.py); all unset for a title without any.
+struct OnlineServices {
+    /// The game's own server as it addresses it (scheme://host:port); the community server answers
+    /// for it on the same port.
+    const char* sz_game_server = nullptr;
+    /// The community server, unless PS_COMMUNITY_SERVER names another.
+    const char* sz_community_server = nullptr;
+    /// The port the community server sends the game to for its API (summons among them).
+    std::uint16_t community_api_port = 0;
+    /// The path of its summon calls on that API, without a trailing slash: routed to the shadNet
+    /// WebAPI when that has the service, and the only path the online module's summon helpers
+    /// (host placement, SHADPS4_BLOODBORNE_SEAMLESS_COOP, SHADPS4_CAPTURE_BLOODBORNE_SUMMON) act on.
+    const char* sz_summon_route = nullptr;
+};
+
 /// The translator's knowledge of the game's code, gated by PS_GAME_PROFILE: it makes the game
 /// faster or easier to diagnose, never makes it work.
 struct Profile {
@@ -215,6 +231,7 @@ struct Title {
     /// Each presented frame, on the presenter thread before the overlay is drawn: what the
     /// player changed in the game's own menus is applied here.
     void (*pfn_before_present)() = nullptr;
+    OnlineServices online;
     /// Its entries of the quirk registry (src/runtime/runtime_quirks.inc): LAUNCH ones always
     /// apply, OPTIMIZATION ones not with PS_GAME_PROFILE=none (docs/en/QUIRKS.md).
     std::span<const RuntimeQuirkId> quirks;

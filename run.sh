@@ -271,9 +271,10 @@ export PS_COPY_GPU_BUFFERS=${PS_COPY_GPU_BUFFERS:-1}
 # A guest write next to small GPU outputs the GPU is still writing (counters, compute results,
 # up to PS_GPU_WRITE_TWINS_MAX bytes per page) does not wait for the GPU (BufferCache twins).
 export PS_GPU_WRITE_TWINS=${PS_GPU_WRITE_TWINS:-1} PS_GPU_WRITE_TWINS_MAX=${PS_GPU_WRITE_TWINS_MAX:-65536}
-# Online play (PS_ONLINE=1, launcher: Online; the online module gpu/net): the game's own server
-# goes to the community server, summon signs to the shadNet WebAPI (scripts/online.py, the one
-# step of a launch that still runs Python, and only for online play).
+# Online play (PS_ONLINE=1, launcher: Online; the online module gpu/net): the servers the game's
+# title names (psport --online-overrides) are redirected, its own server to the community server,
+# its summon signs to the shadNet WebAPI; a title without any gets no redirects (scripts/online.py,
+# the one step of a launch that still runs Python, and only for online play).
 if [[ ${PS_ONLINE:-0} == 1 && -f scripts/online.py ]]; then
     if [[ -z ${PYTHON:-} ]]; then
         PYTHON=$(command -v python3 || true)
@@ -293,7 +294,8 @@ if [[ ${PS_ONLINE:-0} == 1 && -f scripts/online.py ]]; then
         done
     fi
     [[ -n ${PS_SHADNET_WEBAPI:-} ]] || export PS_SHADNET_WEBAPI=http://${PS_SHADNET_SERVER%:*}:31315
-    SHADPS4_HTTP_HOST_OVERRIDES_JSON=$("$PYTHON" scripts/online.py overrides --user "${PS_USER_DIR:-$data/user}") || true
+    title_online=$("$tools/psport" --online-overrides --game "$game") || title_online=
+    SHADPS4_HTTP_HOST_OVERRIDES_JSON=$("$PYTHON" scripts/online.py overrides --user "${PS_USER_DIR:-$data/user}" --title-online "$title_online") || true
     export SHADPS4_HTTP_HOST_OVERRIDES_JSON
 fi
 probe_args=("${boot_args[@]}" "${patch_args[@]}" --app0 "$game" --user "${PS_USER_DIR:-$data/user}" --timeout "${PS_TIMEOUT:-0}" "$@")

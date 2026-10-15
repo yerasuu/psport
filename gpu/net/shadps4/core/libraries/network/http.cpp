@@ -679,22 +679,56 @@ bool EnvFlagEnabled(const char* name) {
     return enabled != nullptr && enabled[0] != '\0' && std::string_view{enabled} != "0";
 }
 
+// psport: the summon helpers act on the launched title's summon route only (its Game::Title, through
+// PsNetHost), so that another game's requests are never taken for Bloodborne's. For a title that
+// declares none, either SHADPS4_* switch still forces shadp2p's own route.
+constexpr std::string_view InheritedSummonRoute = "/summon_messenger";
+
+std::string SummonPathPrefix(std::string_view title_route, bool is_seamless_on, bool is_capture_on) {
+    if (title_route.empty() && !is_seamless_on && !is_capture_on) {
+        return {};
+    }
+    return std::string{title_route.empty() ? InheritedSummonRoute : title_route} + '/';
+}
+
+const std::string& SummonPrefix() {
+    static const std::string prefix = [] {
+        const std::string_view title_route = Core::Bloodborne::TitleSummonRoute();
+        std::string chosen =
+            SummonPathPrefix(title_route, EnvFlagEnabled("SHADPS4_BLOODBORNE_SEAMLESS_COOP"),
+                             EnvFlagEnabled("SHADPS4_CAPTURE_BLOODBORNE_SUMMON"));
+        if (title_route.empty() && !chosen.empty()) {
+            LOG_WARNING(Lib_Http,
+                        "Summon route {} forced by SHADPS4_BLOODBORNE_SEAMLESS_COOP or "
+                        "SHADPS4_CAPTURE_BLOODBORNE_SUMMON: the title declares none",
+                        chosen);
+        }
+        return chosen;
+    }();
+    return prefix;
+}
+
+bool IsSummonSubPath(std::string_view path, std::string_view sub_path) {
+    const std::string& prefix = SummonPrefix();
+    return !prefix.empty() && path.find(prefix + std::string{sub_path}) != std::string_view::npos;
+}
+
 bool IsBloodborneSummonPath(std::string_view path) {
-    return path.find("/summon_messenger/") != std::string_view::npos;
+    return IsSummonSubPath(path, "");
 }
 
 constexpr std::string_view BloodborneHostPlacementHeader = "X-ShadPS4-Bloodborne-Host-Placement";
 
 bool IsBloodborneSummonRequestPath(std::string_view path) {
-    return path.find("/summon_messenger/request") != std::string_view::npos;
+    return IsSummonSubPath(path, "request");
 }
 
 bool IsBloodborneSummonSearchPath(std::string_view path) {
-    return path.find("/summon_messenger/get") != std::string_view::npos;
+    return IsSummonSubPath(path, "get");
 }
 
 bool IsBloodborneSummonCreatePath(std::string_view path) {
-    return path.find("/summon_messenger/create") != std::string_view::npos;
+    return IsSummonSubPath(path, "create");
 }
 
 std::optional<std::string_view> FindResponseHeader(std::string_view headers,

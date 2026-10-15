@@ -6,10 +6,13 @@ From run.py and the launcher of the Windows port of bbport. Messages,
 bloodstains and ghosts come from the community game server (The Hunter's Dream by default);
 bells and summons go through a shadNet server (shadPS4's public one by default).
 
-`online.py overrides --user DIR` writes DIR/host_overrides.json for this launch (the game's
-server -> the community server; summon signs -> the shadNet WebAPI when it has the Bloodborne
-summon service) and prints its path for SHADPS4_HTTP_HOST_OVERRIDES_JSON. A player who needs
-other addresses puts them in DIR/host_overrides.custom.json, which is then used as it is.
+`online.py overrides --user DIR --title-online TEXT` writes DIR/host_overrides.json for this
+launch and prints its path for SHADPS4_HTTP_HOST_OVERRIDES_JSON. TEXT is what
+`psport --online-overrides --game <dir>` prints for the game (its title's servers, key=value
+lines): the game's server -> the community server; its summon route -> the shadNet WebAPI when
+that has the summon service. A title without servers gets an empty file, no overrides, so that a
+file left by another game's launch does not apply. A player who needs other addresses puts them
+in DIR/host_overrides.custom.json, which is then used as it is, for any game.
 """
 import argparse
 import json
@@ -20,17 +23,20 @@ import sys
 import urllib.error
 import urllib.request
 
+# The launcher's default (it is built around Bloodborne); a launch takes its title's
+# (psport --online-overrides).
 COMMUNITY_SERVER = 'https://thehuntersdream.com'
 SHADNET_SERVER = 'srv.shadps4.net:31313'
-# Bloodborne's own game server, answered by the community server on the same port.
-GAME_SERVER = 'https://ss4.scej-network.jp:20443'
-# The server's ss.info sends the game to this port for its API (summons among them).
-COMMUNITY_API_PORT = 18671
 
 
-def community_address(value):
+def title_online(text):
+    """psport --online-overrides' key=value lines as a dict; empty for a title without servers."""
+    return dict(line.split('=', 1) for line in str(text or '').splitlines() if '=' in line)
+
+
+def community_address(value, default=COMMUNITY_SERVER):
     """The game server as https://host (the game picks the ports), The Hunter's Dream by default."""
-    value = str(value or '').strip() or COMMUNITY_SERVER
+    value = str(value or '').strip() or default
     scheme, _sep, rest = value.rpartition('://')
     host = rest.split('/')[0].split(':')[0]
     return f'{scheme or "https"}://{host}'
@@ -53,10 +59,10 @@ def webapi_setting(webapi, server, community):
     return webapi or webapi_address(server)
 
 
-def summon_service(webapi):
-    """True when a shadNet WebAPI answers Bloodborne's summon calls: the route exists there
+def summon_service(webapi, route):
+    """True when a shadNet WebAPI answers the title's summon calls: the route exists there
     (an empty request is refused with 400), where other servers answer 404."""
-    request = urllib.request.Request(webapi.rstrip('/') + '/summon_messenger/create', data=b'',
+    request = urllib.request.Request(webapi.rstrip('/') + route + '/create', data=b'',
                                      method='POST')
     try:
         urllib.request.urlopen(request, timeout=4).close()
@@ -67,7 +73,7 @@ def summon_service(webapi):
         return False
 
 
-def write_overrides(user_dir, community, webapi):
+def write_overrides(user_dir, title, community, webapi):
     """The host overrides file for this launch; returns its path."""
     user_dir = Path(user_dir)
     user_dir.mkdir(parents=True, exist_ok=True)
@@ -75,16 +81,20 @@ def write_overrides(user_dir, community, webapi):
     if custom.exists():
         print(f'Co-op: addresses from {custom}', file=sys.stderr)
         return custom
-    community = community_address(community)
-    host = community.split('://', 1)[1]
-    overrides = {GAME_SERVER: community}
-    if summon_service(webapi):
-        overrides.update({f'{scheme}://{host}:{COMMUNITY_API_PORT}/summon_messenger': webapi
-                          for scheme in ('https', 'http')})
-        print(f'Co-op: summon signs through {webapi}', file=sys.stderr)
+    overrides = {}
+    if title.get('game_server'):
+        host = community.split('://', 1)[1]
+        overrides[title['game_server']] = community
+        route, port = title.get('summon_route'), title.get('community_api_port')
+        if route and port and summon_service(webapi, route):
+            overrides.update({f'{scheme}://{host}:{port}{route}': webapi
+                              for scheme in ('https', 'http')})
+            print(f'Co-op: summon signs through {webapi}', file=sys.stderr)
+        elif route and port:
+            print(f'Co-op: {webapi} has no summon service; summon signs through {community}',
+                  file=sys.stderr)
     else:
-        print(f'Co-op: {webapi} has no summon service; summon signs through {community}',
-              file=sys.stderr)
+        print('Online: the title names no servers of its own; no host overrides', file=sys.stderr)
     path = user_dir / 'host_overrides.json'
     path.write_text(json.dumps(overrides, indent=2) + '\n', encoding='utf-8')
     return path
@@ -119,13 +129,16 @@ def main():
     sub = parser.add_subparsers(dest='command', required=True)
     overrides = sub.add_parser('overrides')
     overrides.add_argument('--user', required=True)
+    overrides.add_argument('--title-online', default='')
     sub.add_parser('check')
     a = parser.parse_args()
     server = os.environ.get('PS_SHADNET_SERVER') or SHADNET_SERVER
-    community = community_address(os.environ.get('PS_COMMUNITY_SERVER'))
+    title = title_online(getattr(a, 'title_online', ''))
+    community = community_address(os.environ.get('PS_COMMUNITY_SERVER'),
+                                  title.get('community_server') or COMMUNITY_SERVER)
     webapi = webapi_setting(os.environ.get('PS_SHADNET_WEBAPI'), server, community)
     if a.command == 'overrides':
-        print(write_overrides(a.user, community, webapi))
+        print(write_overrides(a.user, title, community, webapi))
     else:
         for name, address, ok, detail in check(server, webapi, community):
             print(f'{name}: {address}: {"reachable" if ok else "not reachable"} {detail}'.rstrip())

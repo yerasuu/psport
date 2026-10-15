@@ -51,5 +51,7 @@ extern "C" PsTitleInfo psport_gpu_title(const char* sz_serial) {
         .pfn_patch_image = has_patch_image ? PatchImage : nullptr,
         .p_quirks = p_title->quirks.data(),
         .c_quirks = p_title->quirks.size(),
+        .online = {p_title->online.sz_game_server, p_title->online.sz_community_server,
+                   p_title->online.community_api_port, p_title->online.sz_summon_route},
     };
 }

@@ -79,6 +79,10 @@ extern const Title BloodborneTitle = {
     .pfn_prepare_saves = PrepareSaves,
     .pfn_patch_image = PsGameMenu::PatchImage,
     .pfn_before_present = PsGameMenu::Poll,
+    .online = {.sz_game_server = "https://ss4.scej-network.jp:20443",
+               .sz_community_server = "https://thehuntersdream.com",
+               .community_api_port = 18671,
+               .sz_summon_route = "/summon_messenger"},
     .p_profile = &BloodborneProfile,
 };
 

@@ -11,7 +11,7 @@ The model is Wine's, not an emulator's.
 |---|---|---|---|
 | Launch script | `run.sh` | - | environment and settings, then `psport` |
 | Entry | `src/main/main.c`, `src/main/main.h` | `out/psport` | launch sequence: arguments, image mapping, entering the game |
-| Launcher queries | `src/main/cli.c`, `src/main/game_info.c` | `out/psport` | `--check-game`, `--has-presets`, `--list-patches`, `--list-mods`, `--list-quirks`, `BB_*` names; `param.sfo` and the game's identity |
+| Launcher queries | `src/main/cli.c`, `src/main/game_info.c` | `out/psport` | `--check-game`, `--has-presets`, `--list-patches`, `--list-mods`, `--list-quirks`, `--online-overrides`, `BB_*` names; `param.sfo` and the game's identity |
 | Import binding | `src/main/bind.c` | `out/psport` | traps, failure thunks, relocation walk, patch writes |
 | Signals | `src/main/signals.c` | `out/psport` | fault, watchdog, thread dump and termination handlers |
 | Native loader | `src/loader/loader.h`, `src/loader/loader_self.c`, `src/loader/loader_link.c` | `out/psport` | SELF/ELF parsing, module linking, relocations, TLS, bindings |
@@ -306,6 +306,7 @@ A title may provide:
 | `effects` | the settings of `add_patches` the overlay menu's "Game effects" section offers: its `psport.ini` switches (key, label and hint in the menu's languages, default), the `model_lod` choice, a note; without them the section is not shown |
 | `prepare_saves` | changes to the user's saves the game needs before it runs (Bloodborne: the sound flag at `0x204E`) |
 | `patch_image`, `before_present` | the port's own pages in the game's menus: patched into its code after the profile's patches, and applied each presented frame |
+| `online` | the servers of its online play: its own game server, the community server that answers for it, the community API port and its summon route ([Online play](#online-play)) |
 | `quirks` | its entries of the quirk registry ([QUIRKS.md](QUIRKS.md)) |
 | `profile` | its `Game::Profile`, or none |
 
@@ -341,9 +342,39 @@ A launch runs no Python, except for online play:
 
 | Script | Use |
 |---|---|
-| `scripts/online.py` | addresses for `PS_ONLINE=1` (it probes the shadNet WebAPI for the summon service); the bundled launcher imports it too |
+| `scripts/online.py` | addresses for `PS_ONLINE=1` from the title's servers (`psport --online-overrides`; it probes the shadNet WebAPI for the summon service); the bundled launcher imports it too |
 | `scripts/sce_file.py` | `param.sfo` and SELF/ELF readers for the Python tools (`tools/got_import.py`, `tools/re/`) |
 | `tools/dcx_check.py` | every `.dcx` file of a Bloodborne folder checked (the launch checks the shaders only) |
+
+## Online play
+
+`PS_ONLINE=1` (launcher: *Online*) routes the game's network and PSN imports to the online module
+(`gpu/net/`, `libpsport-net.so`, loaded by `src/net/runtime_net.c` on the first such import). The
+servers a game talks to are its title's data (`Game::Title` `online`), never the core's:
+
+| Field | Bloodborne |
+|---|---|
+| `sz_game_server` (the game's own server, as it addresses it) | `https://ss4.scej-network.jp:20443` |
+| `sz_community_server` (answers for it on the same port; `PS_COMMUNITY_SERVER` names another) | `https://thehuntersdream.com` |
+| `community_api_port` (where the community server sends the game for its API) | `18671` |
+| `sz_summon_route` (the path of its summon calls on that API) | `/summon_messenger` |
+
+`psport --online-overrides (--game <dir> | --title <TITLE_ID>)` prints them as `key=value` lines
+(`game_server`, `community_server`, `community_api_port`, `summon_route`) and exits before any game
+is loaded; a title without online servers prints nothing. `run.sh` passes that to
+`scripts/online.py overrides --title-online`, which writes `user/host_overrides.json` for the launch
+(`SHADPS4_HTTP_HOST_OVERRIDES_JSON`): the game server to the community server, and the summon route
+on the community API port to the shadNet WebAPI (`PS_SHADNET_WEBAPI`) when that answers the summon
+probe. A title without servers gets an empty file, so a file another game's launch left is not
+used; `user/host_overrides.custom.json`, when present, is used as it is for any game.
+
+The module learns the summon route through `PsNetHost` `sz_summon_route` (`PSPORT_NET_ABI_VERSION`
+2; a runtime and a module of different versions refuse each other and the game stays offline). The
+summon helpers in `http.cpp` (the host placement header, the seamless route of
+`SHADPS4_BLOODBORNE_SEAMLESS_COOP=1`, the exchange capture of `SHADPS4_CAPTURE_BLOODBORNE_SUMMON=1`)
+act on that route only; for a title that declares none, either `SHADPS4_*` switch still forces
+shadp2p's `/summon_messenger`, with a warning. The module logs `Co-op: summon route ... (the
+title's)` or that the title declares none.
 
 ## Other parts
 
