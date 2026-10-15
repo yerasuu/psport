@@ -987,6 +987,16 @@ void Translator::SetDst(const InstOperand& operand, const IR::U32F32& value) {
         return ir.SetVccHi(result);
     case OperandField::M0:
         return ir.SetM0(result);
+    case OperandField::ExecLo:
+    case OperandField::ExecHi: {
+        // psport: a 32-bit write replaces its half of EXEC and keeps the other half's lanes
+        const IR::Value exec{ir.UnpackUint2x32(ir.Ballot(ir.GetExec()))};
+        const bool is_low = operand.field == OperandField::ExecLo;
+        const IR::U32 other{ir.CompositeExtract(exec, is_low ? 1 : 0)};
+        const IR::Value halves{is_low ? ir.CompositeConstruct(IR::U32{result}, other)
+                                      : ir.CompositeConstruct(other, IR::U32{result})};
+        return ir.SetExec(ir.InverseBallot(ir.PackUint2x32(halves)));
+    }
     default:
         UNREACHABLE_MSG("Unknown field {}", u32(operand.field));
     }

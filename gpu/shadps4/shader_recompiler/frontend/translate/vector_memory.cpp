@@ -199,6 +199,12 @@ void Translator::EmitVectorMemory(const GcnInst& inst) {
     case Opcode::IMAGE_GET_LOD:
         return IMAGE_GET_LOD(inst);
 
+        // psport: the L1 write-back and invalidation is there so that loads see what other
+        // waves wrote
+    case Opcode::BUFFER_WBINVL1:
+    case Opcode::BUFFER_WBINVL1_SC:
+        return ir.DeviceMemoryBarrier();
+
     default:
         LogMissingOpcode(inst);
     }
