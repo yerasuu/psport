@@ -406,8 +406,8 @@ Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& 
     // Numbered here, in command order; marked where the commands are recorded.
     const u32 stream = draw_scheduler.CrumbStream();
     const bool crumbs = Breadcrumbs::Enabled();
-    const u32 fsr_crumb = crumbs ? Breadcrumbs::Note(stream, {.name = "presenter FSR"}) : 0;
-    const u32 pp_crumb = crumbs ? Breadcrumbs::Note(stream, {.name = "presenter post process"}) : 0;
+    const u32 fsr_crumb = crumbs ? Breadcrumbs::Note(stream, {.sz_name = "presenter FSR"}) : 0;
+    const u32 pp_crumb = crumbs ? Breadcrumbs::Note(stream, {.sz_name = "presenter post process"}) : 0;
     draw_scheduler.Record([this, frame, image_view, image_size, frame_subresources, stream,
                            fsr_crumb, pp_crumb, fsr = fsr_settings,
                            pp = pp_settings](vk::CommandBuffer cmdbuf) {
@@ -444,7 +444,7 @@ Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& 
     });
 
     // Flush frame creation commands.
-    PsStats::frame_number.fetch_add(1, std::memory_order_relaxed); // psport: game frames shown
+    PsStats::g_frame_number.fetch_add(1, std::memory_order_relaxed); // psport: game frames shown
     frame->ready_semaphore = draw_scheduler.GetWorkSemaphore()->Handle();
     frame->ready_tick = draw_scheduler.CurrentTick();
     SubmitInfo info{};
@@ -466,7 +466,7 @@ Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& 
             const u64 tick = recent_frame_ticks.front();
             recent_frame_ticks.pop_front();
             if (recent_frame_ticks.size() == frames_ahead) {
-                PsStats::WaitTimer timer{PsStats::present_wait_ns};
+                PsStats::WaitTimer timer{PsStats::g_present_wait_ns};
                 draw_scheduler.Wait(tick);
             }
         }
@@ -665,8 +665,8 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
                          MakeImageBlitFit(frame->width, frame->height, extent.width, extent.height),
                          vk::Filter::eLinear);
         // psport: the settings menu / FPS counter over the frame, at display resolution.
-        if (const Game::Profile* game = Game::Active(); game && game->before_present) {
-            game->before_present();
+        if (const Game::Profile* game = Game::Active(); game && game->pfn_before_present) {
+            game->pfn_before_present();
         }
         const bool overlay = PsOverlay::Visible();
         const std::array post_barriers{

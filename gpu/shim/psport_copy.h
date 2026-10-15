@@ -9,7 +9,7 @@ namespace PsCopy {
 /// Runs `task(i)` for every i in [0, count) on the copy threads and the caller; returns when
 /// all are done. Runs inline when count is 1, the pool is disabled, or when called from a copy
 /// thread (no nesting).
-void ParallelFor(std::size_t count, const std::function<void(std::size_t)>& task);
+void ParallelFor(std::size_t c_tasks, const std::function<void(std::size_t)>& task);
 
 /// True when ParallelFor would split work (more than one thread available).
 bool Enabled();
@@ -18,11 +18,11 @@ bool Enabled();
 /// order and concurrently.
 void Async(std::function<void()> task);
 
-/// A small copy for QueueCopy(): `run(item)` does the work on a copy thread.
+/// A small copy for QueueCopy(): `pfn_run(item)` does the work on a copy thread.
 struct Item {
-    void (*run)(const Item&);
-    void* context;
-    unsigned long long source, destination, size, extra;
+    void (*pfn_run)(const Item&);
+    void* p_context;
+    unsigned long long source, destination, cb_copy, extra;
 };
 
 /// Queues a small copy in the calling thread's batch; the batch is started with Async() once it

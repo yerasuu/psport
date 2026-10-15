@@ -9,7 +9,7 @@ namespace Vulkan {
 /// End-of-pipe label using core Vulkan only. Must be recorded outside rendering. The caller
 /// supplies a coherent, GPU-visible guest buffer, a 4/8-byte aligned offset and size 4 or 8.
 /// Prior device writes become visible to host readers before the low (polled) word is written.
-void RecordPortableGpuLabel(vk::CommandBuffer command, vk::Buffer buffer, u64 offset,
-                            u64 value, u32 num_bytes);
+void RecordPortableGpuLabel(vk::CommandBuffer command, vk::Buffer buffer, u64 off_label,
+                            u64 value, u32 cb_label);
 
 } // namespace Vulkan

@@ -44,46 +44,46 @@ constexpr CodeRange DynamicWriters[] = {
 /// The "sound hack" (rainvmaker, from the Diegolix29 shadPS4 fork): the game data save carries a
 /// flag at 0x204E of SPRJ0005/userdata0010; with it clear, parts of the game's audio (e.g. the
 /// player's weapon sounds) never play. PS_SOUND_HACK=0 leaves saves untouched.
-void PrepareSaves(const char* saves, const char* save_title) {
-    if (const char* env = std::getenv("PS_SOUND_HACK"); env && env[0] == '0') {
+void PrepareSaves(const char* sz_saves, const char* sz_save_title) {
+    if (const char* sz_env = std::getenv("PS_SOUND_HACK"); sz_env && sz_env[0] == '0') {
         return;
     }
-    DIR* users = opendir(saves);
-    if (!users) {
+    DIR* p_users = opendir(sz_saves);
+    if (!p_users) {
         return;
     }
-    while (const dirent* user = readdir(users)) {
-        if (user->d_name[0] == '.') {
+    while (const dirent* p_user = readdir(p_users)) {
+        if (p_user->d_name[0] == '.') {
             continue;
         }
         const std::string path =
-            std::string(saves) + "/" + user->d_name + "/" + save_title + "/SPRJ0005/userdata0010";
-        std::FILE* file = std::fopen(path.c_str(), "r+b");
-        if (!file) {
+            std::string(sz_saves) + "/" + p_user->d_name + "/" + sz_save_title + "/SPRJ0005/userdata0010";
+        std::FILE* p_file = std::fopen(path.c_str(), "r+b");
+        if (!p_file) {
             continue;
         }
-        const int old = std::fseek(file, 0x204E, SEEK_SET) ? EOF : std::fgetc(file);
-        if (old != EOF && old != 1 && !std::fseek(file, 0x204E, SEEK_SET)) {
-            std::fputc(1, file);
+        const int old = std::fseek(p_file, 0x204E, SEEK_SET) ? EOF : std::fgetc(p_file);
+        if (old != EOF && old != 1 && !std::fseek(p_file, 0x204E, SEEK_SET)) {
+            std::fputc(1, p_file);
             std::printf("Game profile: Bloodborne sound flag set in %s (was %d)\n", path.c_str(), old);
         }
-        std::fclose(file);
+        std::fclose(p_file);
     }
-    closedir(users);
+    closedir(p_users);
 }
 
 void InstallHooks(const CoreServices& services) {
     // The resource loaders' copies, the GPU memory range allocator and the heap (guest_hooks).
-    PsGuestHooks::Install(services.fresh_range);
+    PsGuestHooks::Install(services.pfn_fresh_range);
 }
 
-void PatchImage(unsigned char* image, std::uint64_t size) {
-    PsGnmHooks::PatchImage(image, size);
-    PsGameMenu::PatchImage(image, size);
+void PatchImage(unsigned char* p_image, std::uint64_t cb_image) {
+    PsGnmHooks::PatchImage(p_image, cb_image);
+    PsGameMenu::PatchImage(p_image, cb_image);
 }
 
 void ReportStats() {
-    if (static int heap_reports = 0; ++heap_reports % 6 == 1) {
+    if (static int s_heap_reports = 0; ++s_heap_reports % 6 == 1) {
         PsHeapSites::Report();
     }
 }
@@ -104,27 +104,27 @@ constexpr LabelReleaseCode LabelRelease = {
 } // namespace
 
 extern const Profile BloodborneProfile = {
-    .name = "Bloodborne",
+    .sz_name = "Bloodborne",
     .serials = Serials,
     .mod_folders = ModFolders,
-    .patch_file = PsLaunch::PatchFile,
-    .prepare_environment = PsLaunch::PrepareEnvironment,
-    .check_files = PsLaunch::CheckFiles,
-    .add_patches = PsLaunch::AddPatches,
+    .sz_patch_file = PsLaunch::PatchFile,
+    .pfn_prepare_environment = PsLaunch::PrepareEnvironment,
+    .pfn_check_files = PsLaunch::CheckFiles,
+    .pfn_add_patches = PsLaunch::AddPatches,
     .effects = {.switches = PsEffects::Switches,
                 .has_model_detail = true,
                 .hint = {"Motion blur and shadows from dynamic lights place a significant load on the GPU.",
                          "Размытие в движении и тени от динамических источников заметно нагружают GPU.",
                          "El desenfoque de movimiento y las sombras de luces dinámicas cargan bastante la GPU."}},
-    .install_hooks = InstallHooks,
-    .patch_image = PatchImage,
+    .pfn_install_hooks = InstallHooks,
+    .pfn_patch_image = PatchImage,
     .dynamic_writers = DynamicWriters,
-    .prepare_saves = PrepareSaves,
+    .pfn_prepare_saves = PrepareSaves,
     // The game's buffer-copy compute shader (not the export-stage copy shader).
     .buffer_copy_shader = 0xfefebf9f,
-    .driver_commands_written = PsGnmHooks::NoteDriverWrite,
-    .commands_submitted = PsGnmHooks::CheckSubmission,
-    .frame_overlap_unsafe = PsHeapSites::OverlapLeaks,
+    .pfn_driver_commands_written = PsGnmHooks::NoteDriverWrite,
+    .pfn_commands_submitted = PsGnmHooks::CheckSubmission,
+    .pfn_frame_overlap_unsafe = PsHeapSites::OverlapLeaks,
     // The game keeps two frame contexts and builds the next frame in the one of the frame before
     // the previous: its first two submissions are translated while the GPU finishes the previous
     // frame (1080p, Yahar'gul: 101 -> 154 FPS). With 8 or more, or no wait at all, its heap leaked
@@ -149,10 +149,10 @@ extern const Profile BloodborneProfile = {
                                    .cb_min_small_skeleton = 96,
                                    .cb_min_skeleton = 640,
                                    .cb_max_skeleton = 16384}},
-    .report_stats = ReportStats,
-    .before_present = PsGameMenu::Poll,
+    .pfn_report_stats = ReportStats,
+    .pfn_before_present = PsGameMenu::Poll,
     .label_release = LabelRelease,
-    .small_object_pool = {.header_offset = 0xfc0, .block_size = 0x30},
+    .small_object_pool = {.off_header = 0xfc0, .cb_block = 0x30},
 };
 
 } // namespace Game

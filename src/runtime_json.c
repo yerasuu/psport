@@ -73,12 +73,12 @@ void json_free(void *p_memory) {
 }
 
 /* ---- String ---- */
-static const char s_empty_text[1];
+static const char s_sz_empty_text[1];
 static const JsonString s_empty_string;
 static const JsonValue s_null_value;
 
 static const char *json_string_text(const JsonString *p_string) {
-    return p_string && p_string->p_text ? p_string->p_text->text : s_empty_text;
+    return p_string && p_string->p_text ? p_string->p_text->text : s_sz_empty_text;
 }
 static uint64_t json_string_length(const JsonString *p_string) {
     return p_string && p_string->p_text ? p_string->p_text->cb_length : 0;
@@ -194,14 +194,14 @@ static ABI bool string_equals_text(const JsonString *p_self, const char *p_text)
 static ABI bool string_equals_string(const JsonString *p_self, const JsonString *p_other) { return !string_compare_string(p_self, p_other); }
 
 /* ---- Containers ---- */
-static bool grow_pointers(void ***ppp_items, uint64_t *p_capacity, uint64_t c_items) {
+static bool grow_pointers(void ***pp_ppp_items, uint64_t *p_capacity, uint64_t c_items) {
     if (c_items < *p_capacity) return true;
     const uint64_t c_grown = *p_capacity ? *p_capacity * 2 : 4;
     void **pp_grown = json_allocate(c_grown * sizeof(void *));
     if (!pp_grown) return false;
-    if (c_items) memcpy(pp_grown, *ppp_items, c_items * sizeof(void *));
-    json_free(*ppp_items);
-    *ppp_items = pp_grown;
+    if (c_items) memcpy(pp_grown, *pp_ppp_items, c_items * sizeof(void *));
+    json_free(*pp_ppp_items);
+    *pp_ppp_items = pp_grown;
     *p_capacity = c_grown;
     return true;
 }
@@ -350,9 +350,9 @@ static void value_init_type(JsonValue *p_self, uint32_t type) {
 
 static ABI void value_construct(JsonValue *p_self) { memset(p_self, 0, sizeof(*p_self)); }
 static ABI void value_construct_type(JsonValue *p_self, uint32_t type) { value_init_type(p_self, type); }
-static ABI void value_construct_boolean(JsonValue *p_self, bool boolean) {
+static ABI void value_construct_boolean(JsonValue *p_self, bool is_value) {
     value_init_type(p_self, JSON_TYPE_BOOLEAN);
-    p_self->boolean = boolean;
+    p_self->boolean = is_value;
 }
 static ABI void value_construct_integer(JsonValue *p_self, int64_t integer) {
     value_init_type(p_self, JSON_TYPE_INTEGER);
@@ -401,9 +401,9 @@ static ABI void value_set_type(JsonValue *p_self, uint32_t type) {
     value_init_type(&replacement, type);
     value_replace(p_self, &replacement);
 }
-static ABI void value_set_boolean(JsonValue *p_self, bool boolean) {
+static ABI void value_set_boolean(JsonValue *p_self, bool is_value) {
     JsonValue replacement;
-    value_construct_boolean(&replacement, boolean);
+    value_construct_boolean(&replacement, is_value);
     value_replace(p_self, &replacement);
 }
 static ABI void value_set_integer(JsonValue *p_self, int64_t integer) {

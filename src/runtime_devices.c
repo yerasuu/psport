@@ -94,7 +94,7 @@ static ABI int32_t camera_open(int32_t h_user,int32_t type,int32_t i_device,cons
 }
 static ABI int32_t camera_not_open(void) { return CAMERA_NOT_OPEN; }
 
-static const RuntimeExport exports[]={
+static const RuntimeExport s_exports[]={
     {"sceUsbdInit",usbd_init}, {"sceUsbdExit",usbd_exit},
     {"sceUsbdGetDeviceList",usbd_get_device_list}, {"sceUsbdFreeDeviceList",usbd_free_device_list},
     {"sceUsbdOpen",usbd_no_device}, {"sceUsbdClose",usbd_close},
@@ -117,7 +117,7 @@ static const RuntimeExport exports[]={
     {"sceCameraSetVideoSync",camera_not_open}, {"sceCameraGetFrameData",camera_not_open},
     {"sceCameraIsValidFrameData",camera_not_open},
 };
-uintptr_t runtime_devices_resolve(const char *sz_name) { return RUNTIME_LOOKUP(exports,sz_name); }
+uintptr_t runtime_devices_resolve(const char *sz_name) { return RUNTIME_LOOKUP(s_exports,sz_name); }
 #else
 uintptr_t runtime_devices_resolve(const char *sz_name) { (void)sz_name; return 0; }
 #endif

@@ -95,7 +95,7 @@ public:
         RegionBits& bits = GetRegionBits<type>();
         if constexpr (type == Type::CPU && enable) {
             CountWriteFaults(start_page, end_page);
-            last_cpu_write_frame = PsStats::frame_number.load(std::memory_order_relaxed);
+            last_cpu_write_frame = PsStats::g_frame_number.load(std::memory_order_relaxed);
             NotePreuploadChurn();
         }
         if constexpr (enable) {
@@ -282,7 +282,7 @@ private:
             if (writeable.Get(page)) {
                 continue; // not protected: no fault
             }
-            PsStats::tracker_faults.fetch_add(1, std::memory_order_relaxed);
+            PsStats::g_c_tracker_faults.fetch_add(1, std::memory_order_relaxed);
             if (!hot_enabled) {
                 continue;
             }
@@ -296,7 +296,7 @@ private:
                 }
                 hot.Set(page);
                 ++num_hot;
-                PsStats::hot_pages.fetch_add(1, std::memory_order_relaxed);
+                PsStats::g_c_hot_pages.fetch_add(1, std::memory_order_relaxed);
             }
         }
     }
@@ -308,7 +308,7 @@ private:
         if (!HotPagesEnabled() ||
             std::chrono::steady_clock::now() - hot_since > HotPeriod) {
             // Re-protect them (on this upload) and start counting again.
-            PsStats::hot_pages.fetch_sub(num_hot, std::memory_order_relaxed);
+            PsStats::g_c_hot_pages.fetch_sub(num_hot, std::memory_order_relaxed);
             hot.Clear();
             write_faults.fill(0);
             num_hot = 0;

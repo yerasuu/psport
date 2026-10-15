@@ -35,27 +35,27 @@ public:
 
     static bool Enabled();
 
-    /// Records the check of the arguments at `offset` in `args` (outside a render pass); returns
+    /// Records the check of the arguments at `off_args` in `args` (outside a render pass); returns
     /// the buffer and offset to dispatch from.
-    std::pair<vk::Buffer, u64> CheckArgs(const VideoCore::Buffer& args, u64 offset);
+    std::pair<vk::Buffer, u64> CheckArgs(const VideoCore::Buffer& args, u64 off_args);
 
 private:
     static constexpr u32 NumSlots = 1024;
 
     void Report();
 
-    const Instance& instance;
-    Scheduler& scheduler;
-    std::unique_ptr<VideoCore::Buffer> checked; ///< NumSlots x 16 bytes of group counts
-    std::unique_ptr<VideoCore::Buffer> skipped; ///< count and the last skipped counts (host)
-    vk::UniqueDescriptorSetLayout set_layout;
-    vk::UniquePipelineLayout pipeline_layout;
-    vk::UniquePipeline pipeline;
-    u32 max_count[3]{};
-    u32 max_total = 0;
-    std::atomic<u32> next_slot{0};
-    std::atomic<u32> reported{0};
-    std::atomic<s64> last_report_ns{0};
+    const Instance& m_instance;
+    Scheduler& m_scheduler;
+    std::unique_ptr<VideoCore::Buffer> m_checked; ///< NumSlots x 16 bytes of group counts
+    std::unique_ptr<VideoCore::Buffer> m_skipped; ///< count and the last skipped counts (host)
+    vk::UniqueDescriptorSetLayout m_set_layout;
+    vk::UniquePipelineLayout m_pipeline_layout;
+    vk::UniquePipeline m_pipeline;
+    u32 m_max_count[3]{};
+    u32 m_max_total = 0;
+    std::atomic<u32> m_next_slot{0};
+    std::atomic<u32> m_c_reported{0};
+    std::atomic<s64> m_last_report_ns{0};
 };
 
 } // namespace Vulkan

@@ -31,7 +31,7 @@ constexpr u64 PageSize = 0x1000;
 /// Blocks a page can have: the free bitmasks hold 128.
 constexpr u64 MaxPoolBlocks = 128;
 /// The game's small-object pool (Game::SmallObjectPool), set once by Enabled().
-u64 header_offset = 0, block_size = 0, max_blocks = 0;
+u64 s_off_header = 0, s_cb_block = 0, s_max_blocks = 0;
 
 const char* const SourceNames[] = {"EOP fence",  "EOS fence",   "EOS GDS store", "WriteData",
                                    "compute WriteData", "ReleaseMem", "DumpConstRam",
@@ -43,11 +43,11 @@ const char* Name(u32 source) {
 }
 
 struct Header {
-    u64 next, prev, head, count;
+    u64 next, prev, head, c_blocks;
 };
 
 bool IsBlock(u64 page, u64 p) {
-    return p >= page && p - page < header_offset && (p - page) % block_size == 0;
+    return p >= page && p - page < s_off_header && (p - page) % s_cb_block == 0;
 }
 
 bool Plausible(u64 page, const Header& h) {
@@ -56,101 +56,101 @@ bool Plausible(u64 page, const Header& h) {
     // release): its old header means nothing. The page list links point at other page
     // headers or at the pool's list heads; at least one of them is a header (pools of one
     // page are skipped: other data at a page end looked like headers).
-    if (!pointer(h.next) || !pointer(h.prev) || h.count >= max_blocks) {
+    if (!pointer(h.next) || !pointer(h.prev) || h.c_blocks >= s_max_blocks) {
         return false;
     }
-    if ((h.next & (PageSize - 1)) != header_offset && (h.prev & (PageSize - 1)) != header_offset) {
+    if ((h.next & (PageSize - 1)) != s_off_header && (h.prev & (PageSize - 1)) != s_off_header) {
         return false;
     }
-    return h.count == 0 ? h.head == 0 : IsBlock(page, h.head);
+    return h.c_blocks == 0 ? h.head == 0 : IsBlock(page, h.head);
 }
 
 struct WalkResult {
-    bool ok;
+    bool is_ok;
     u64 holder;   ///< where the bad pointer is stored (a free block, or the header's head)
     u64 value;    ///< the bad pointer
     u32 length;   ///< free blocks walked
     u64 free[2];  ///< bit per block index: free
 };
 
-bool IsFree(const u64 (&free)[2], u64 index) {
-    return (free[index / 64] >> (index % 64)) & 1;
+bool IsFree(const u64 (&free)[2], u64 i_block) {
+    return (free[i_block / 64] >> (i_block % 64)) & 1;
 }
 
 /// Walks the free list of `page`; `read(address)` returns the qword there.
 template <typename Read>
 WalkResult WalkFree(u64 page, const Header& h, Read&& read) {
-    WalkResult r{true, page + header_offset + 16, h.head, 0, {0, 0}};
+    WalkResult r{true, page + s_off_header + 16, h.head, 0, {0, 0}};
     u64 node = h.head;
     while (node != 0) {
-        if (!IsBlock(page, node) || r.length >= h.count) {
-            r.ok = false;
+        if (!IsBlock(page, node) || r.length >= h.c_blocks) {
+            r.is_ok = false;
             r.value = node;
             return r;
         }
-        const u64 index = (node - page) / block_size;
-        if (IsFree(r.free, index)) {
-            r.ok = false; // a loop
+        const u64 i_block = (node - page) / s_cb_block;
+        if (IsFree(r.free, i_block)) {
+            r.is_ok = false; // a loop
             r.value = node;
             return r;
         }
-        r.free[index / 64] |= 1ull << (index % 64);
+        r.free[i_block / 64] |= 1ull << (i_block % 64);
         ++r.length;
         r.holder = node;
         node = read(node);
     }
-    if (r.length != h.count) {
-        r.ok = false;
+    if (r.length != h.c_blocks) {
+        r.is_ok = false;
         r.value = 0;
     }
     return r;
 }
 
 u64 NowNs() {
-    static const auto start = std::chrono::steady_clock::now();
+    static const auto s_start = std::chrono::steady_clock::now();
     return u64(std::chrono::duration_cast<std::chrono::nanoseconds>(
-                   std::chrono::steady_clock::now() - start)
+                   std::chrono::steady_clock::now() - s_start)
                    .count());
 }
 
 u32 Tid() {
-    static thread_local const u32 tid = u32(gettid());
-    return tid;
+    static thread_local const u32 s_tid = u32(gettid());
+    return s_tid;
 }
 
 // Recent emulator writes into pool pages.
 struct Entry {
-    u64 address, size, value, ns, seq;
+    u64 va_range, cb_range, value, ns, seq;
     u32 source, tid;
 };
-std::array<Entry, 1 << 15> ring;
-std::atomic<u64> ring_head{0};
+std::array<Entry, 1 << 15> s_ring;
+std::atomic<u64> s_ring_head{0};
 
-void Record(u64 address, u64 size, u64 value, Source source, u64 seq) {
-    ring[ring_head.fetch_add(1, std::memory_order_relaxed) % ring.size()] =
-        Entry{address, size, value, NowNs(), seq, u32(source), Tid()};
+void Record(u64 va_range, u64 cb_range, u64 value, Source source, u64 seq) {
+    s_ring[s_ring_head.fetch_add(1, std::memory_order_relaxed) % s_ring.size()] =
+        Entry{va_range, cb_range, value, NowNs(), seq, u32(source), Tid()};
 }
 
 // Pool pages the watcher walks: an open-addressing set, insert-only.
-std::array<std::atomic<u64>, 1 << 14> pages{};
-std::atomic<u32> page_count{0};
+std::array<std::atomic<u64>, 1 << 14> s_pages{};
+std::atomic<u32> s_c_pages{0};
 
 void Watch(u64 page) {
-    static thread_local u64 last = 0;
-    if (page == last) {
+    static thread_local u64 s_last = 0;
+    if (page == s_last) {
         return;
     }
-    last = page;
+    s_last = page;
     u64 slot = (page >> 12) * 0x9E3779B97F4A7C15ull >> 50;
-    for (u32 probe = 0; probe < 64; ++probe, slot = (slot + 1) % pages.size()) {
-        u64 expected = pages[slot].load(std::memory_order_relaxed);
+    for (u32 probe = 0; probe < 64; ++probe, slot = (slot + 1) % s_pages.size()) {
+        u64 expected = s_pages[slot].load(std::memory_order_relaxed);
         if (expected == page) {
             return;
         }
         if (expected == 0) {
-            if (pages[slot].compare_exchange_strong(expected, page) || expected == page) {
+            if (s_pages[slot].compare_exchange_strong(expected, page) || expected == page) {
                 if (expected != page) {
-                    page_count.fetch_add(1, std::memory_order_relaxed);
+                    s_c_pages.fetch_add(1, std::memory_order_relaxed);
                 }
                 return;
             }
@@ -158,31 +158,31 @@ void Watch(u64 page) {
     }
 }
 
-std::atomic<u64> checked{0};
-std::atomic<u64> free_hits{0};
-std::atomic<u64> header_hits{0};
-std::atomic<u64> corruptions{0};
-std::atomic<u64> unordered{0};
-std::atomic<u64> next_seq{0};
-std::atomic<u64> max_written_seq{0};
+std::atomic<u64> s_checked{0};
+std::atomic<u64> s_c_free_hits{0};
+std::atomic<u64> s_c_header_hits{0};
+std::atomic<u64> s_c_corruptions{0};
+std::atomic<u64> s_unordered{0};
+std::atomic<u64> s_next_seq{0};
+std::atomic<u64> s_max_written_seq{0};
 
 // Fences as the GPU command thread decoded them, and the guest's graphics submissions.
 struct Decoded {
     u64 label, value, packet, buffer, submit, ns;
 };
-std::array<Decoded, 1 << 15> decoded;
-std::atomic<u64> decoded_head{0};
+std::array<Decoded, 1 << 15> s_decoded;
+std::atomic<u64> s_decoded_head{0};
 struct Submitted {
-    u64 submit, buffer, size, ns;
+    u64 submit, buffer, cb_range, ns;
 };
-std::array<Submitted, 1 << 12> submitted;
-std::atomic<u64> submitted_head{0};
+std::array<Submitted, 1 << 12> s_submitted;
+std::atomic<u64> s_submitted_head{0};
 
 /// When the guest submitted `submit` (0 when no longer in the log).
 u64 SubmitTime(u64 submit) {
-    const u64 n = submitted_head.load(std::memory_order_relaxed);
-    for (u64 i = n; i-- > (n > submitted.size() ? n - submitted.size() : 0);) {
-        const Submitted s = submitted[i % submitted.size()];
+    const u64 c_submitted = s_submitted_head.load(std::memory_order_relaxed);
+    for (u64 i = c_submitted; i-- > (c_submitted > s_submitted.size() ? c_submitted - s_submitted.size() : 0);) {
+        const Submitted s = s_submitted[i % s_submitted.size()];
         if (s.submit == submit) {
             return s.ns;
         }
@@ -192,10 +192,10 @@ u64 SubmitTime(u64 submit) {
 
 /// The decoded fences whose label lies in [begin, end), newest first.
 void PrintDecoded(u64 begin, u64 end, u64 now, u32 limit) {
-    const u64 n = decoded_head.load(std::memory_order_relaxed);
+    const u64 c_decoded = s_decoded_head.load(std::memory_order_relaxed);
     u32 shown = 0;
-    for (u64 i = n; i-- > (n > decoded.size() ? n - decoded.size() : 0) && shown < limit;) {
-        const Decoded d = decoded[i % decoded.size()];
+    for (u64 i = c_decoded; i-- > (c_decoded > s_decoded.size() ? c_decoded - s_decoded.size() : 0) && shown < limit;) {
+        const Decoded d = s_decoded[i % s_decoded.size()];
         if (d.label < begin || d.label >= end) {
             continue;
         }
@@ -216,41 +216,41 @@ void PrintDecoded(u64 begin, u64 end, u64 now, u32 limit) {
 
 /// Each kind of report has its own budget: a flood of one does not hide the others.
 struct Budget {
-    std::atomic<u32> used{0};
-    u32 limit;
+    std::atomic<u32> m_used{0};
+    u32 m_limit;
     bool Take() {
-        return used.fetch_add(1, std::memory_order_relaxed) < limit;
+        return m_used.fetch_add(1, std::memory_order_relaxed) < m_limit;
     }
 };
-Budget write_reports{.limit = 64};
-Budget corruption_reports{.limit = 64};
-Budget order_reports{.limit = 32};
-Budget latency_reports{.limit = 32};
-Budget duplicate_reports{.limit = 32};
+Budget s_write_reports{.m_limit = 64};
+Budget s_corruption_reports{.m_limit = 64};
+Budget s_order_reports{.m_limit = 32};
+Budget s_latency_reports{.m_limit = 32};
+Budget s_duplicate_reports{.m_limit = 32};
 
 // Fence latency and duplicates: when each fence reached the draw recording thread (NextFenceSeq)
 // and which sequence number each slot last wrote. A guest that waits for a label with a
 // timeout frees its object when the label is late; a fence written twice lands late too.
 constexpr u64 SeqSlots = 1 << 16;
-std::array<std::atomic<u64>, SeqSlots> seq_start_ns{};
-std::array<std::atomic<u64>, SeqSlots> seq_written{};
-std::atomic<u64> duplicates{0}, late_20ms{0}, late_50ms{0}, max_latency_ns{0};
+std::array<std::atomic<u64>, SeqSlots> s_seq_start_ns{};
+std::array<std::atomic<u64>, SeqSlots> s_seq_written{};
+std::atomic<u64> s_c_duplicates{0}, s_c_late_20ms{0}, s_c_late_50ms{0}, s_max_latency_ns{0};
 
 void PrintEntry(const Entry& e, u64 now) {
     std::fprintf(stderr,
                  "Free check:   %8.3f ms before: %s %#llx +%llu value %#llx seq %llu tid %u\n",
-                 double(now - e.ns) / 1e6, Name(e.source), (unsigned long long)e.address,
-                 (unsigned long long)e.size, (unsigned long long)e.value,
+                 double(now - e.ns) / 1e6, Name(e.source), (unsigned long long)e.va_range,
+                 (unsigned long long)e.cb_range, (unsigned long long)e.value,
                  (unsigned long long)e.seq, e.tid);
 }
 
 /// The logged writes overlapping [begin, end), newest first.
 void PrintRecent(u64 begin, u64 end, u64 now, u32 limit) {
-    const u64 n = ring_head.load(std::memory_order_relaxed);
+    const u64 c_recorded = s_ring_head.load(std::memory_order_relaxed);
     u32 shown = 0;
-    for (u64 i = n; i-- > (n > ring.size() ? n - ring.size() : 0) && shown < limit;) {
-        const Entry e = ring[i % ring.size()];
-        if (e.address + e.size <= begin || e.address >= end) {
+    for (u64 i = c_recorded; i-- > (c_recorded > s_ring.size() ? c_recorded - s_ring.size() : 0) && shown < limit;) {
+        const Entry e = s_ring[i % s_ring.size()];
+        if (e.va_range + e.cb_range <= begin || e.va_range >= end) {
             continue;
         }
         PrintEntry(e, now);
@@ -261,17 +261,17 @@ void PrintRecent(u64 begin, u64 end, u64 now, u32 limit) {
     }
 }
 
-void PrintBlock(const unsigned char* bytes, u64 page, u64 block) {
-    for (u64 at = block; at < block + block_size && at + 8 <= page + PageSize; at += 8) {
+void PrintBlock(const unsigned char* p_bytes, u64 page, u64 block) {
+    for (u64 at = block; at < block + s_cb_block && at + 8 <= page + PageSize; at += 8) {
         u64 v;
-        std::memcpy(&v, bytes + (at - page), 8);
+        std::memcpy(&v, p_bytes + (at - page), 8);
         std::fprintf(stderr, "Free check:   [%#llx] = %#llx\n", (unsigned long long)at,
                      (unsigned long long)v);
     }
 }
 
-bool ReadPage(u64 page, unsigned char* out) {
-    iovec local{out, PageSize};
+bool ReadPage(u64 page, unsigned char* p_out) {
+    iovec local{p_out, PageSize};
     iovec remote{reinterpret_cast<void*>(page), PageSize};
     return process_vm_readv(getpid(), &local, 1, &remote, 1, 0) == ssize_t(PageSize);
 }
@@ -279,7 +279,7 @@ bool ReadPage(u64 page, unsigned char* out) {
 /// What the watcher saw of a page's blocks: when each was last seen taken and released by the
 /// game (to ~1 ms).
 struct Track {
-    bool valid = false;
+    bool is_valid = false;
     u64 free[2]{};
     std::array<u64, MaxPoolBlocks> allocated_at{}, freed_at{};
 };
@@ -294,7 +294,7 @@ void Watcher() {
         if (!ReadPage(page, buf)) {
             return false;
         }
-        std::memcpy(&h, buf + header_offset, sizeof(h));
+        std::memcpy(&h, buf + s_off_header, sizeof(h));
         if (!Plausible(page, h)) {
             return false;
         }
@@ -307,23 +307,23 @@ void Watcher() {
     };
     for (;;) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        static u64 last_report = 0, last_l20 = 0, last_l50 = 0, last_dup = 0;
-        if (const u64 now = NowNs(); now - last_report > 10000000000ull) {
-            const u64 l20 = late_20ms.load(), l50 = late_50ms.load(), dup = duplicates.load();
-            if (last_report) {
+        static u64 s_last_report = 0, s_last_l20 = 0, s_last_l50 = 0, s_last_dup = 0;
+        if (const u64 now = NowNs(); now - s_last_report > 10000000000ull) {
+            const u64 l20 = s_c_late_20ms.load(), l50 = s_c_late_50ms.load(), dup = s_c_duplicates.load();
+            if (s_last_report) {
                 std::fprintf(stderr,
                              "Free check: fences in 10 s: %llu over 20 ms, %llu over 50 ms, %llu "
                              "written twice (max latency so far %.1f ms)\n",
-                             (unsigned long long)(l20 - last_l20),
-                             (unsigned long long)(l50 - last_l50),
-                             (unsigned long long)(dup - last_dup), max_latency_ns.load() / 1e6);
+                             (unsigned long long)(l20 - s_last_l20),
+                             (unsigned long long)(l50 - s_last_l50),
+                             (unsigned long long)(dup - s_last_dup), s_max_latency_ns.load() / 1e6);
             }
-            last_report = now;
-            last_l20 = l20;
-            last_l50 = l50;
-            last_dup = dup;
+            s_last_report = now;
+            s_last_l20 = l20;
+            s_last_l50 = l50;
+            s_last_dup = dup;
         }
-        for (auto& slot : pages) {
+        for (auto& slot : s_pages) {
             const u64 page = slot.load(std::memory_order_relaxed);
             if (page == 0) {
                 continue;
@@ -334,31 +334,31 @@ void Watcher() {
                 tracks.erase(page);
                 continue;
             }
-            if (r.ok) {
+            if (r.is_ok) {
                 const u64 now = NowNs();
                 Track& t = tracks[page];
-                for (u64 i = 0; i < max_blocks; ++i) {
-                    const bool was = IsFree(t.free, i), is = IsFree(r.free, i);
-                    if (t.valid && was != is) {
-                        (is ? t.freed_at : t.allocated_at)[i] = now;
+                for (u64 i = 0; i < s_max_blocks; ++i) {
+                    const bool is_previous_free = IsFree(t.free, i), is_now_free = IsFree(r.free, i);
+                    if (t.is_valid && is_previous_free != is_now_free) {
+                        (is_now_free ? t.freed_at : t.allocated_at)[i] = now;
                     }
                 }
                 t.free[0] = r.free[0];
                 t.free[1] = r.free[1];
-                t.valid = true;
+                t.is_valid = true;
                 continue;
             }
             // The game may be inside an allocation or release: the same damage three times
             // over ~1 ms is not a race with it.
-            bool persistent = true;
-            for (int again = 0; again < 3 && persistent; ++again) {
+            bool is_persistent = true;
+            for (int again = 0; again < 3 && is_persistent; ++again) {
                 std::this_thread::sleep_for(std::chrono::microseconds(300));
                 Header h2;
                 WalkResult r2;
-                persistent = walk_page(page, h2, r2) && !r2.ok && r2.holder == r.holder &&
+                is_persistent = walk_page(page, h2, r2) && !r2.is_ok && r2.holder == r.holder &&
                              r2.value == r.value;
             }
-            if (!persistent) {
+            if (!is_persistent) {
                 continue;
             }
             const u64 key = r.holder ^ (r.value * 0x9E3779B97F4A7C15ull);
@@ -366,8 +366,8 @@ void Watcher() {
                 continue;
             }
             reported[reported_next++ % reported.size()] = key;
-            corruptions.fetch_add(1, std::memory_order_relaxed);
-            if (!corruption_reports.Take()) {
+            s_c_corruptions.fetch_add(1, std::memory_order_relaxed);
+            if (!s_corruption_reports.Take()) {
                 continue;
             }
             const u64 now = NowNs();
@@ -377,12 +377,12 @@ void Watcher() {
                          "prev %#llx head %#llx count %llu)\n",
                          (unsigned long long)page, double(now) / 1e9,
                          (unsigned long long)r.holder, (unsigned long long)r.value, r.length,
-                         (unsigned long long)h.count, (unsigned long long)h.next,
+                         (unsigned long long)h.c_blocks, (unsigned long long)h.next,
                          (unsigned long long)h.prev, (unsigned long long)h.head,
-                         (unsigned long long)h.count);
-            if (r.holder < page + header_offset) {
+                         (unsigned long long)h.c_blocks);
+            if (r.holder < page + s_off_header) {
                 PrintBlock(buf, page, r.holder);
-                const u64 index = (r.holder - page) / block_size;
+                const u64 i_block = (r.holder - page) / s_cb_block;
                 if (const auto it = tracks.find(page); it != tracks.end()) {
                     const Track& t = it->second;
                     const auto ago = [&](u64 at) { return at ? double(now - at) / 1e6 : -1.0; };
@@ -390,47 +390,47 @@ void Watcher() {
                                  "Free check:   block %#llx: last taken %.3f ms ago, last "
                                  "released %.3f ms ago (-1: not seen), free in the last good "
                                  "walk: %s\n",
-                                 (unsigned long long)r.holder, ago(t.allocated_at[index]),
-                                 ago(t.freed_at[index]), IsFree(t.free, index) ? "yes" : "no");
+                                 (unsigned long long)r.holder, ago(t.allocated_at[i_block]),
+                                 ago(t.freed_at[i_block]), IsFree(t.free, i_block) ? "yes" : "no");
                 }
                 std::fprintf(stderr, "Free check:   emulator writes into this block:\n");
-                PrintRecent(r.holder, r.holder + block_size, now, 24);
+                PrintRecent(r.holder, r.holder + s_cb_block, now, 24);
                 std::fprintf(stderr, "Free check:   fences decoded for this block:\n");
-                PrintDecoded(r.holder, r.holder + block_size, now, 16);
+                PrintDecoded(r.holder, r.holder + s_cb_block, now, 16);
             }
             std::fprintf(stderr, "Free check:   emulator writes into the page:\n");
             PrintRecent(page, page + PageSize, now, 32);
             std::fprintf(stderr, "Free check:   fences written out of stream order so far: "
                                  "%llu\n",
-                         (unsigned long long)unordered.load());
+                         (unsigned long long)s_unordered.load());
         }
     }
 }
 
 void StartWatcher() {
-    static std::once_flag once;
-    std::call_once(once, [] {
+    static std::once_flag s_once;
+    std::call_once(s_once, [] {
         std::fprintf(stderr, "Free check: on (PS_FREE_CHECK=1): pool pages of %llu-byte "
                              "blocks, header at +%#llx\n",
-                     (unsigned long long)block_size, (unsigned long long)header_offset);
+                     (unsigned long long)s_cb_block, (unsigned long long)s_off_header);
         std::thread(Watcher).detach();
     });
 }
 
 /// One page of a write: report a write into a free block or the header.
-void CheckPage(u64 page, u64 begin, u64 end, u64 value, u64 size, Source source, u64 seq,
-               bool small) {
+void CheckPage(u64 page, u64 begin, u64 end, u64 value, u64 cb_range, Source source, u64 seq,
+               bool is_small) {
     Header h;
-    std::memcpy(&h, reinterpret_cast<const void*>(page + header_offset), sizeof(h));
+    std::memcpy(&h, reinterpret_cast<const void*>(page + s_off_header), sizeof(h));
     if (!Plausible(page, h)) {
         return;
     }
-    if (small) {
+    if (is_small) {
         Watch(page);
     }
     Record(begin, end - begin, value, source, seq);
-    const auto report = [&](const char* what, u64 block) {
-        if (!write_reports.Take()) {
+    const auto report = [&](const char* sz_what, u64 block) {
+        if (!s_write_reports.Take()) {
             return;
         }
         const u64 now = NowNs();
@@ -438,28 +438,28 @@ void CheckPage(u64 page, u64 begin, u64 end, u64 value, u64 size, Source source,
                      "Free check: %s write %#llx +%llu (of %llu) value %#llx seq %llu into %s "
                      "%#llx of pool page %#llx (free %llu), tid %u, at %.3f s\n",
                      Name(source), (unsigned long long)begin, (unsigned long long)(end - begin),
-                     (unsigned long long)size, (unsigned long long)value,
-                     (unsigned long long)seq, what, (unsigned long long)block,
-                     (unsigned long long)page, (unsigned long long)h.count, Tid(),
+                     (unsigned long long)cb_range, (unsigned long long)value,
+                     (unsigned long long)seq, sz_what, (unsigned long long)block,
+                     (unsigned long long)page, (unsigned long long)h.c_blocks, Tid(),
                      double(now) / 1e9);
-        if (block < page + header_offset) {
+        if (block < page + s_off_header) {
             PrintBlock(reinterpret_cast<const unsigned char*>(page), page, block);
-            PrintRecent(block, block + block_size, now, 16);
-            PrintDecoded(block, block + block_size, now, 8);
+            PrintRecent(block, block + s_cb_block, now, 16);
+            PrintDecoded(block, block + s_cb_block, now, 8);
         } else {
             PrintRecent(page, page + PageSize, now, 16);
         }
     };
-    if (end > page + header_offset) {
-        header_hits.fetch_add(1, std::memory_order_relaxed);
-        report("the HEADER", page + header_offset);
+    if (end > page + s_off_header) {
+        s_c_header_hits.fetch_add(1, std::memory_order_relaxed);
+        report("the HEADER", page + s_off_header);
         return;
     }
     // The game changes the list all the time (labels are taken and released in bursts): a
     // walk that met it halfway is repeated.
     WalkResult r{};
     for (int attempt = 0; attempt < 8; ++attempt) {
-        std::memcpy(&h, reinterpret_cast<const void*>(page + header_offset), sizeof(h));
+        std::memcpy(&h, reinterpret_cast<const void*>(page + s_off_header), sizeof(h));
         if (!Plausible(page, h)) {
             return;
         }
@@ -468,17 +468,17 @@ void CheckPage(u64 page, u64 begin, u64 end, u64 value, u64 size, Source source,
             std::memcpy(&v, reinterpret_cast<const void*>(at), 8);
             return v;
         });
-        if (r.ok) {
+        if (r.is_ok) {
             break;
         }
     }
-    if (!r.ok) {
+    if (!r.is_ok) {
         return; // still changing, or damaged: the watcher reports damage
     }
-    for (u64 block = page + (begin - page) / block_size * block_size; block < end;
-         block += block_size) {
-        if (IsFree(r.free, (block - page) / block_size)) {
-            free_hits.fetch_add(1, std::memory_order_relaxed);
+    for (u64 block = page + (begin - page) / s_cb_block * s_cb_block; block < end;
+         block += s_cb_block) {
+        if (IsFree(r.free, (block - page) / s_cb_block)) {
+            s_c_free_hits.fetch_add(1, std::memory_order_relaxed);
             report("FREE block", block);
             return;
         }
@@ -487,25 +487,25 @@ void CheckPage(u64 page, u64 begin, u64 end, u64 value, u64 size, Source source,
 } // namespace
 
 bool Enabled() {
-    static const bool enabled = [] {
-        const char* env = std::getenv("PS_FREE_CHECK");
-        if (!env || env[0] != '1') {
+    static const bool s_is_enabled = [] {
+        const char* sz_env = std::getenv("PS_FREE_CHECK");
+        if (!sz_env || sz_env[0] != '1') {
             return false;
         }
-        const Game::Profile* game = Game::Active();
-        const Game::SmallObjectPool pool = game ? game->small_object_pool : Game::SmallObjectPool{};
-        if (pool.block_size < 8 || pool.header_offset + sizeof(Header) > PageSize ||
-            pool.header_offset / pool.block_size > MaxPoolBlocks) {
+        const Game::Profile* p_game = Game::Active();
+        const Game::SmallObjectPool pool = p_game ? p_game->small_object_pool : Game::SmallObjectPool{};
+        if (pool.cb_block < 8 || pool.off_header + sizeof(Header) > PageSize ||
+            pool.off_header / pool.cb_block > MaxPoolBlocks) {
             std::fprintf(stderr, "Free check: PS_FREE_CHECK=1 needs the game's small-object pool "
                                  "(its profile): off\n");
             return false;
         }
-        header_offset = pool.header_offset;
-        block_size = pool.block_size;
-        max_blocks = header_offset / block_size;
+        s_off_header = pool.off_header;
+        s_cb_block = pool.cb_block;
+        s_max_blocks = s_off_header / s_cb_block;
         return true;
     }();
-    return enabled;
+    return s_is_enabled;
 }
 
 namespace {
@@ -515,105 +515,105 @@ void InstallStepTrap();
 bool InstallFreeHook();
 } // namespace
 
-void NoteFenceDecoded(u64 label, u64 value, const void* packet, const void* buffer, u64 submit) {
+void NoteFenceDecoded(u64 label, u64 value, const void* p_packet, const void* p_buffer, u64 submit) {
     if (!Enabled()) {
         return;
     }
-    decoded[decoded_head.fetch_add(1, std::memory_order_relaxed) % decoded.size()] =
-        Decoded{label, value, reinterpret_cast<u64>(packet), reinterpret_cast<u64>(buffer), submit,
+    s_decoded[s_decoded_head.fetch_add(1, std::memory_order_relaxed) % s_decoded.size()] =
+        Decoded{label, value, reinterpret_cast<u64>(p_packet), reinterpret_cast<u64>(p_buffer), submit,
                 NowNs()};
     if (TrapEnabled() && label != 0) {
         NoteTrapDecoded(label);
     }
 }
 
-void NoteSubmit(u64 submit, const void* buffer, u64 size) {
+void NoteSubmit(u64 submit, const void* p_buffer, u64 cb_range) {
     if (!Enabled()) {
         return;
     }
-    submitted[submitted_head.fetch_add(1, std::memory_order_relaxed) % submitted.size()] =
-        Submitted{submit, reinterpret_cast<u64>(buffer), size, NowNs()};
+    s_submitted[s_submitted_head.fetch_add(1, std::memory_order_relaxed) % s_submitted.size()] =
+        Submitted{submit, reinterpret_cast<u64>(p_buffer), cb_range, NowNs()};
 }
 
 u64 NextFenceSeq() {
     if (!Enabled()) {
         return 0;
     }
-    const u64 seq = next_seq.fetch_add(1, std::memory_order_relaxed) + 1;
-    seq_start_ns[seq % SeqSlots].store(NowNs(), std::memory_order_relaxed);
+    const u64 seq = s_next_seq.fetch_add(1, std::memory_order_relaxed) + 1;
+    s_seq_start_ns[seq % SeqSlots].store(NowNs(), std::memory_order_relaxed);
     return seq;
 }
 
-void Check(u64 address, u64 size, const void* data, Source source, u64 seq) {
-    if (!Enabled() || size == 0 || address == 0) {
+void Check(u64 va_range, u64 cb_range, const void* p_data, Source source, u64 seq) {
+    if (!Enabled() || cb_range == 0 || va_range == 0) {
         return;
     }
     StartWatcher();
-    checked.fetch_add(1, std::memory_order_relaxed);
+    s_checked.fetch_add(1, std::memory_order_relaxed);
     u64 value = 0;
-    if (data) {
-        std::memcpy(&value, data, size < 8 ? size : 8);
+    if (p_data) {
+        std::memcpy(&value, p_data, cb_range < 8 ? cb_range : 8);
     }
     if (seq != 0) {
         const u64 now = NowNs();
-        const u64 start = seq_start_ns[seq % SeqSlots].load(std::memory_order_relaxed);
+        const u64 start = s_seq_start_ns[seq % SeqSlots].load(std::memory_order_relaxed);
         const u64 latency = start && now > start ? now - start : 0;
-        u64 max_seen = max_latency_ns.load(std::memory_order_relaxed);
-        while (latency > max_seen && !max_latency_ns.compare_exchange_weak(max_seen, latency)) {
+        u64 max_seen = s_max_latency_ns.load(std::memory_order_relaxed);
+        while (latency > max_seen && !s_max_latency_ns.compare_exchange_weak(max_seen, latency)) {
         }
         if (latency > 20000000) {
-            late_20ms.fetch_add(1, std::memory_order_relaxed);
+            s_c_late_20ms.fetch_add(1, std::memory_order_relaxed);
         }
         // Honest labels (PS_GUEST_IN_PLACE, PS_HONEST_LABELS) are written once the GPU has done the
         // work: tens of ms after the recording thread are normal there; only stalls are reported.
-        static const u64 report_ns = [] {
-            const char* in_place = std::getenv("PS_GUEST_IN_PLACE");
-            const char* honest = std::getenv("PS_HONEST_LABELS");
-            return (in_place && in_place[0] == '1') || (honest && honest[0] == '1') ? 500000000ull
+        static const u64 s_report_ns = [] {
+            const char* sz_in_place = std::getenv("PS_GUEST_IN_PLACE");
+            const char* sz_honest = std::getenv("PS_HONEST_LABELS");
+            return (sz_in_place && sz_in_place[0] == '1') || (sz_honest && sz_honest[0] == '1') ? 500000000ull
                                                                                       : 50000000ull;
         }();
         if (latency > 50000000) {
-            late_50ms.fetch_add(1, std::memory_order_relaxed);
+            s_c_late_50ms.fetch_add(1, std::memory_order_relaxed);
         }
-        if (latency > report_ns) {
-            if (latency_reports.Take()) {
+        if (latency > s_report_ns) {
+            if (s_latency_reports.Take()) {
                 std::fprintf(stderr,
                              "Free check: LATE fence: %s seq %llu at %#llx written %.1f ms after "
                              "the draw recording thread reached it, tid %u, at %.3f s\n",
-                             Name(source), (unsigned long long)seq, (unsigned long long)address,
+                             Name(source), (unsigned long long)seq, (unsigned long long)va_range,
                              latency / 1e6, Tid(), now / 1e9);
             }
         }
-        if (seq_written[seq % SeqSlots].exchange(seq, std::memory_order_relaxed) == seq) {
-            duplicates.fetch_add(1, std::memory_order_relaxed);
-            if (duplicate_reports.Take()) {
+        if (s_seq_written[seq % SeqSlots].exchange(seq, std::memory_order_relaxed) == seq) {
+            s_c_duplicates.fetch_add(1, std::memory_order_relaxed);
+            if (s_duplicate_reports.Take()) {
                 std::fprintf(stderr,
                              "Free check: DUPLICATE fence: %s seq %llu at %#llx (value %#llx) "
                              "written again, tid %u, at %.3f s\n",
-                             Name(source), (unsigned long long)seq, (unsigned long long)address,
+                             Name(source), (unsigned long long)seq, (unsigned long long)va_range,
                              (unsigned long long)value, Tid(), now / 1e9);
             }
         }
-        u64 seen = max_written_seq.load(std::memory_order_relaxed);
-        while (seen < seq && !max_written_seq.compare_exchange_weak(seen, seq)) {
+        u64 seen = s_max_written_seq.load(std::memory_order_relaxed);
+        while (seen < seq && !s_max_written_seq.compare_exchange_weak(seen, seq)) {
         }
         if (seen > seq) {
-            unordered.fetch_add(1, std::memory_order_relaxed);
-            if (order_reports.Take()) {
+            s_unordered.fetch_add(1, std::memory_order_relaxed);
+            if (s_order_reports.Take()) {
                 std::fprintf(stderr,
                              "Free check: OUT OF ORDER: %s seq %llu at %#llx (value %#llx) "
                              "written after seq %llu, tid %u, at %.3f s\n",
                              Name(source), (unsigned long long)seq,
-                             (unsigned long long)address, (unsigned long long)value,
+                             (unsigned long long)va_range, (unsigned long long)value,
                              (unsigned long long)seen, Tid(), double(NowNs()) / 1e9);
             }
         }
     }
-    const bool small = size <= 64;
-    const u64 end = address + size;
-    for (u64 page = address & ~(PageSize - 1); page < end; page += PageSize) {
-        CheckPage(page, std::max(address, page), std::min(end, page + PageSize), value, size,
-                  source, seq, small);
+    const bool is_small = cb_range <= 64;
+    const u64 end = va_range + cb_range;
+    for (u64 page = va_range & ~(PageSize - 1); page < end; page += PageSize) {
+        CheckPage(page, std::max(va_range, page), std::min(end, page + PageSize), value, cb_range,
+                  source, seq, is_small);
     }
 }
 
@@ -625,14 +625,14 @@ void DumpAtFault(u64 rax, u64 r14) {
                  "Free check: %llu writes checked, %llu into free blocks, %llu into pool "
                  "headers, %llu corrupted lists seen, %llu fences out of order, %u pool pages "
                  "watched\n",
-                 (unsigned long long)checked.load(), (unsigned long long)free_hits.load(),
-                 (unsigned long long)header_hits.load(), (unsigned long long)corruptions.load(),
-                 (unsigned long long)unordered.load(), page_count.load());
+                 (unsigned long long)s_checked.load(), (unsigned long long)s_c_free_hits.load(),
+                 (unsigned long long)s_c_header_hits.load(), (unsigned long long)s_c_corruptions.load(),
+                 (unsigned long long)s_unordered.load(), s_c_pages.load());
     std::fprintf(stderr,
                  "Free check: fences: max latency %.1f ms, %llu over 20 ms, %llu over 50 ms, %llu "
                  "written twice\n",
-                 max_latency_ns.load() / 1e6, (unsigned long long)late_20ms.load(),
-                 (unsigned long long)late_50ms.load(), (unsigned long long)duplicates.load());
+                 s_max_latency_ns.load() / 1e6, (unsigned long long)s_c_late_20ms.load(),
+                 (unsigned long long)s_c_late_50ms.load(), (unsigned long long)s_c_duplicates.load());
     const u64 page = rax & ~(PageSize - 1);
     std::fprintf(stderr, "Free check: fault in pool page %#llx (r14 %#llx); writes into it:\n",
                  (unsigned long long)page, (unsigned long long)r14);
@@ -641,7 +641,7 @@ void DumpAtFault(u64 rax, u64 r14) {
 namespace {
 /// PS_LABEL_TRAP: fences decoded into pool pages (labels) until their write has landed.
 struct Pending {
-    u32 count = 0;
+    u32 c_pending = 0;
     u64 decoded_ns = 0;
     u64 writing_ns = 0; ///< when the newest write started (0: not started)
 };
@@ -660,21 +660,21 @@ struct LabelTrap {
     std::atomic<u64> faults{0}, hits{0};
 };
 LabelTrap& Trap() {
-    static LabelTrap trap;
-    return trap;
+    static LabelTrap s_trap;
+    return s_trap;
 }
 constexpr u64 ImageBase = 0x800000000ull, ImageEnd = 0x810000000ull;
 /// The game's label release code (Game::LabelReleaseCode), set while the breakpoints are in.
-u64 free_hook = 0, gc_hook = 0;
+u64 s_free_hook = 0, s_gc_hook = 0;
 
 /// PS_LABEL_TRAP: 1 pool pages with pending labels read-only (every guest write into them is
 /// single-stepped: slow, it hid the bug), 2 breakpoints on the guest allocator's release and on
 /// the collector's "done" branch: a label block released, or taken as done, before its fence
 /// landed is reported with the guest's view and call chain.
 int TrapMode() {
-    static const int mode = [] {
-        const char* env = std::getenv("PS_LABEL_TRAP");
-        const int m = Enabled() && env && (env[0] == '1' || env[0] == '2') ? env[0] - '0' : 0;
+    static const int s_mode = [] {
+        const char* sz_env = std::getenv("PS_LABEL_TRAP");
+        const int m = Enabled() && sz_env && (sz_env[0] == '1' || sz_env[0] == '2') ? sz_env[0] - '0' : 0;
         if (m != 0) {
             InstallStepTrap();
             if (m == 2 && !InstallFreeHook()) {
@@ -684,13 +684,13 @@ int TrapMode() {
         }
         return m;
     }();
-    return mode;
+    return s_mode;
 }
 bool TrapEnabled() {
     return TrapMode() != 0;
 }
-bool ReadQword(u64 address, u64& value) {
-    iovec local{&value, 8}, remote{reinterpret_cast<void*>(address), 8};
+bool ReadQword(u64 va_guest, u64& value) {
+    iovec local{&value, 8}, remote{reinterpret_cast<void*>(va_guest), 8};
     return process_vm_readv(getpid(), &local, 1, &remote, 1, 0) == 8;
 }
 u32 SignalTid() {
@@ -698,11 +698,11 @@ u32 SignalTid() {
 }
 void NoteTrapDecoded(u64 label) {
     const u64 page = label & ~(PageSize - 1);
-    if (label - page >= header_offset) {
+    if (label - page >= s_off_header) {
         return;
     }
     Header h;
-    iovec local{&h, sizeof(h)}, remote{reinterpret_cast<void*>(page + header_offset), sizeof(h)};
+    iovec local{&h, sizeof(h)}, remote{reinterpret_cast<void*>(page + s_off_header), sizeof(h)};
     if (process_vm_readv(getpid(), &local, 1, &remote, 1, 0) != ssize_t(sizeof(h)) ||
         !Plausible(page, h)) {
         return;
@@ -710,7 +710,7 @@ void NoteTrapDecoded(u64 label) {
     auto& t = Trap();
     std::scoped_lock lk{t.mutex};
     auto& p = t.pending[label & ~7ull];
-    if (p.count++ == 0) {
+    if (p.c_pending++ == 0) {
         ++t.page_pending[page];
     }
     p.decoded_ns = NowNs();
@@ -744,7 +744,7 @@ void NoteFenceWritten(u64 label, u64 write_ns) {
     }
     std::scoped_lock lk{t.mutex};
     const auto it = t.pending.find(label & ~7ull);
-    if (it == t.pending.end() || --it->second.count != 0) {
+    if (it == t.pending.end() || --it->second.c_pending != 0) {
         return;
     }
     t.pending.erase(it);
@@ -765,32 +765,32 @@ struct StepSlot {
     std::atomic<u32> tid{0};
     std::atomic<u64> page{0};
 };
-std::array<StepSlot, 256> step_slots;
-struct sigaction previous_trap_action {};
+std::array<StepSlot, 256> s_step_slots;
+struct sigaction s_previous_trap_action {};
 constexpr u64 TrapFlag = 0x100;
 
-void OnFreeHook(void* ucontext);
-void OnGcHook(void* ucontext);
+void OnFreeHook(void* p_ucontext);
+void OnGcHook(void* p_ucontext);
 
-void OnStepTrap(int sig, siginfo_t* info, void* ucontext) {
+void OnStepTrap(int sig, siginfo_t* p_info, void* p_ucontext) {
     // PS_LABEL_TRAP=2: the breakpoints (RIP is past the int3).
-    const u64 rip = u64(static_cast<ucontext_t*>(ucontext)->uc_mcontext.gregs[REG_RIP]);
-    if (free_hook && rip == free_hook + 1) {
-        OnFreeHook(ucontext);
+    const u64 rip = u64(static_cast<ucontext_t*>(p_ucontext)->uc_mcontext.gregs[REG_RIP]);
+    if (s_free_hook && rip == s_free_hook + 1) {
+        OnFreeHook(p_ucontext);
         return;
     }
-    if (gc_hook && rip == gc_hook + 1) {
-        OnGcHook(ucontext);
+    if (s_gc_hook && rip == s_gc_hook + 1) {
+        OnGcHook(p_ucontext);
         return;
     }
     const u32 tid = SignalTid();
-    for (auto& slot : step_slots) {
+    for (auto& slot : s_step_slots) {
         if (slot.tid.load(std::memory_order_acquire) != tid) {
             continue;
         }
         const u64 page = slot.page.exchange(0, std::memory_order_acq_rel);
         slot.tid.store(0, std::memory_order_release);
-        static_cast<ucontext_t*>(ucontext)->uc_mcontext.gregs[REG_EFL] &= ~TrapFlag;
+        static_cast<ucontext_t*>(p_ucontext)->uc_mcontext.gregs[REG_EFL] &= ~TrapFlag;
         auto& t = Trap();
         std::scoped_lock lk{t.mutex};
         if (page && t.read_only.count(page)) {
@@ -799,14 +799,14 @@ void OnStepTrap(int sig, siginfo_t* info, void* ucontext) {
         return;
     }
     // Not a step of ours.
-    if (previous_trap_action.sa_flags & SA_SIGINFO) {
-        if (previous_trap_action.sa_sigaction) {
-            previous_trap_action.sa_sigaction(sig, info, ucontext);
+    if (s_previous_trap_action.sa_flags & SA_SIGINFO) {
+        if (s_previous_trap_action.sa_sigaction) {
+            s_previous_trap_action.sa_sigaction(sig, p_info, p_ucontext);
             return;
         }
-    } else if (previous_trap_action.sa_handler != SIG_DFL &&
-               previous_trap_action.sa_handler != SIG_IGN && previous_trap_action.sa_handler) {
-        previous_trap_action.sa_handler(sig);
+    } else if (s_previous_trap_action.sa_handler != SIG_DFL &&
+               s_previous_trap_action.sa_handler != SIG_IGN && s_previous_trap_action.sa_handler) {
+        s_previous_trap_action.sa_handler(sig);
         return;
     }
     signal(SIGTRAP, SIG_DFL);
@@ -814,43 +814,43 @@ void OnStepTrap(int sig, siginfo_t* info, void* ucontext) {
 }
 
 /// int3 over the first byte of an instruction the hook then performs itself.
-bool PatchInt3(u64 address, std::initializer_list<unsigned char> expected) {
+bool PatchInt3(u64 va_range, std::initializer_list<unsigned char> expected) {
     unsigned char bytes[8]{};
-    iovec local{bytes, expected.size()}, remote{reinterpret_cast<void*>(address), expected.size()};
+    iovec local{bytes, expected.size()}, remote{reinterpret_cast<void*>(va_range), expected.size()};
     if (process_vm_readv(getpid(), &local, 1, &remote, 1, 0) != ssize_t(expected.size()) ||
         std::memcmp(bytes, expected.begin(), expected.size()) != 0) {
         std::fprintf(stderr, "Free check: hook skipped (unexpected code at +%#llx)\n",
-                     (unsigned long long)(address - ImageBase));
+                     (unsigned long long)(va_range - ImageBase));
         return false;
     }
-    void* page = reinterpret_cast<void*>(address & ~(PageSize - 1));
-    if (mprotect(page, PageSize, PROT_READ | PROT_WRITE | PROT_EXEC) != 0) {
+    void* p_page = reinterpret_cast<void*>(va_range & ~(PageSize - 1));
+    if (mprotect(p_page, PageSize, PROT_READ | PROT_WRITE | PROT_EXEC) != 0) {
         return false;
     }
-    __atomic_store_n(reinterpret_cast<unsigned char*>(address), static_cast<unsigned char>(0xcc),
+    __atomic_store_n(reinterpret_cast<unsigned char*>(va_range), static_cast<unsigned char>(0xcc),
                      __ATOMIC_SEQ_CST);
-    mprotect(page, PageSize, PROT_READ | PROT_EXEC);
+    mprotect(p_page, PageSize, PROT_READ | PROT_EXEC);
     return true;
 }
 
 /// The release starts with `mov rax, rsi` (48 89 f0), the collector's branch with
 /// `mov rcx, [rsp+0x28]` (48 8b 4c 24 28).
 bool InstallFreeHook() {
-    const Game::Profile* game = Game::Active();
-    if (!game || !game->label_release.release) {
+    const Game::Profile* p_game = Game::Active();
+    if (!p_game || !p_game->label_release.release) {
         std::fprintf(stderr, "Free check: PS_LABEL_TRAP=2 needs the game's label release code (its "
                              "profile): off\n");
         return false;
     }
     // Set before the int3 goes in, since another thread may reach it at once.
-    free_hook = game->label_release.release;
-    if (!PatchInt3(free_hook, {0x48, 0x89, 0xf0, 0x48, 0x85, 0xc0})) {
-        free_hook = 0;
+    s_free_hook = p_game->label_release.release;
+    if (!PatchInt3(s_free_hook, {0x48, 0x89, 0xf0, 0x48, 0x85, 0xc0})) {
+        s_free_hook = 0;
         return false;
     }
-    gc_hook = game->label_release.collector_done;
-    if (gc_hook && !PatchInt3(gc_hook, {0x48, 0x8b, 0x4c, 0x24, 0x28})) {
-        gc_hook = 0;
+    s_gc_hook = p_game->label_release.collector_done;
+    if (s_gc_hook && !PatchInt3(s_gc_hook, {0x48, 0x8b, 0x4c, 0x24, 0x28})) {
+        s_gc_hook = 0;
     }
     return true;
 }
@@ -860,17 +860,17 @@ void InstallStepTrap() {
     action.sa_sigaction = OnStepTrap;
     action.sa_flags = SA_SIGINFO | SA_NODEFER;
     sigemptyset(&action.sa_mask);
-    sigaction(SIGTRAP, &action, &previous_trap_action);
+    sigaction(SIGTRAP, &action, &s_previous_trap_action);
 }
 
-bool ArmStep(void* ucontext, u64 page) {
+bool ArmStep(void* p_ucontext, u64 page) {
     const u32 tid = SignalTid();
-    for (auto& slot : step_slots) {
+    for (auto& slot : s_step_slots) {
         u32 expected = 0;
         if (slot.tid.load(std::memory_order_acquire) == tid ||
             slot.tid.compare_exchange_strong(expected, tid, std::memory_order_acq_rel)) {
             slot.page.store(page, std::memory_order_release);
-            static_cast<ucontext_t*>(ucontext)->uc_mcontext.gregs[REG_EFL] |= TrapFlag;
+            static_cast<ucontext_t*>(p_ucontext)->uc_mcontext.gregs[REG_EFL] |= TrapFlag;
             return true;
         }
     }
@@ -882,75 +882,75 @@ bool IsGuest(u64 v) {
 }
 
 /// The newest decodes and writes of fences into the label qword at `label`, for a report.
-int AppendHistory(char* line, int n, int size, u64 label, const char* name) {
+int AppendHistory(char* sz_line, int cb_used, int cb_line, u64 label, const char* sz_name) {
     const u64 now = NowNs(), want = label & ~7ull;
-    n += std::snprintf(line + n, size - n, "\n  %s %#llx decoded:", name, (unsigned long long)want);
-    int shown = 0;
-    const u64 nd = decoded_head.load(std::memory_order_relaxed);
-    for (u64 i = nd; i-- > (nd > decoded.size() ? nd - decoded.size() : 0) && shown < 4 &&
-                     n < size - 80;) {
-        const Decoded& d = decoded[i % decoded.size()];
+    cb_used += std::snprintf(sz_line + cb_used, cb_line - cb_used, "\n  %s %#llx decoded:", sz_name, (unsigned long long)want);
+    int c_shown = 0;
+    const u64 nd = s_decoded_head.load(std::memory_order_relaxed);
+    for (u64 i = nd; i-- > (nd > s_decoded.size() ? nd - s_decoded.size() : 0) && c_shown < 4 &&
+                     cb_used < cb_line - 80;) {
+        const Decoded& d = s_decoded[i % s_decoded.size()];
         if ((d.label & ~7ull) == want) {
-            n += std::snprintf(line + n, size - n, " [%.3f ms ago, submission %llu, value %#llx]",
+            cb_used += std::snprintf(sz_line + cb_used, cb_line - cb_used, " [%.3f ms ago, submission %llu, value %#llx]",
                                (now - d.ns) / 1e6, (unsigned long long)d.submit,
                                (unsigned long long)d.value);
-            ++shown;
+            ++c_shown;
         }
     }
-    n += std::snprintf(line + n, size - n, "; written:");
-    shown = 0;
-    const u64 nr = ring_head.load(std::memory_order_relaxed);
-    for (u64 i = nr; i-- > (nr > ring.size() ? nr - ring.size() : 0) && shown < 4 && n < size - 80;) {
-        const Entry& e = ring[i % ring.size()];
-        if ((e.address & ~7ull) == want && e.source == u32(Eop)) {
-            n += std::snprintf(line + n, size - n, " [%.3f ms ago, seq %llu, value %#llx]",
+    cb_used += std::snprintf(sz_line + cb_used, cb_line - cb_used, "; written:");
+    c_shown = 0;
+    const u64 c_recorded = s_ring_head.load(std::memory_order_relaxed);
+    for (u64 i = c_recorded; i-- > (c_recorded > s_ring.size() ? c_recorded - s_ring.size() : 0) && c_shown < 4 && cb_used < cb_line - 80;) {
+        const Entry& e = s_ring[i % s_ring.size()];
+        if ((e.va_range & ~7ull) == want && e.source == u32(Eop)) {
+            cb_used += std::snprintf(sz_line + cb_used, cb_line - cb_used, " [%.3f ms ago, seq %llu, value %#llx]",
                                (now - e.ns) / 1e6, (unsigned long long)e.seq,
                                (unsigned long long)e.value);
-            ++shown;
+            ++c_shown;
         }
     }
-    return n;
+    return cb_used;
 }
 
 /// The guest call chain at a breakpoint or fault: [rsp] (a leaf's return address) and the
 /// rbp frames, as guest offsets.
-int AppendStack(char* line, int n, int size, const greg_t* g, bool leaf) {
-    if (leaf) {
+int AppendStack(char* sz_line, int cb_used, int cb_line, const greg_t* p_registers, bool is_leaf) {
+    if (is_leaf) {
         u64 ret = 0;
-        if (ReadQword(u64(g[REG_RSP]), ret)) {
-            n += std::snprintf(line + n, size - n, "\n  caller: %s%#llx", IsGuest(ret) ? "+" : "",
+        if (ReadQword(u64(p_registers[REG_RSP]), ret)) {
+            cb_used += std::snprintf(sz_line + cb_used, cb_line - cb_used, "\n  caller: %s%#llx", IsGuest(ret) ? "+" : "",
                                (unsigned long long)(IsGuest(ret) ? ret - ImageBase : ret));
         }
     }
-    n += std::snprintf(line + n, size - n, "\n  frames:");
-    u64 rbp = u64(g[REG_RBP]);
-    for (int i = 0; i < 16 && rbp && n < size - 24; ++i) {
+    cb_used += std::snprintf(sz_line + cb_used, cb_line - cb_used, "\n  frames:");
+    u64 rbp = u64(p_registers[REG_RBP]);
+    for (int i = 0; i < 16 && rbp && cb_used < cb_line - 24; ++i) {
         u64 saved = 0, ret = 0;
         if (!ReadQword(rbp, saved) || !ReadQword(rbp + 8, ret)) {
             break;
         }
-        n += std::snprintf(line + n, size - n, " %s%#llx", IsGuest(ret) ? "+" : "",
+        cb_used += std::snprintf(sz_line + cb_used, cb_line - cb_used, " %s%#llx", IsGuest(ret) ? "+" : "",
                            (unsigned long long)(IsGuest(ret) ? ret - ImageBase : ret));
         if (saved <= rbp) {
             break;
         }
         rbp = saved;
     }
-    return n;
+    return cb_used;
 }
 
 /// "not written" / "write started X ms ago": where the pending fence is.
-int AppendState(char* line, int n, int size, const Pending& p) {
+int AppendState(char* sz_line, int cb_used, int cb_line, const Pending& p) {
     const u64 now = NowNs();
-    n += std::snprintf(line + n, size - n, "%u fence(s) pending, decoded %.3f ms ago, ", p.count,
+    cb_used += std::snprintf(sz_line + cb_used, cb_line - cb_used, "%u fence(s) pending, decoded %.3f ms ago, ", p.c_pending,
                        (now - p.decoded_ns) / 1e6);
     if (p.writing_ns) {
-        n += std::snprintf(line + n, size - n, "write started %.3f ms ago",
+        cb_used += std::snprintf(sz_line + cb_used, cb_line - cb_used, "write started %.3f ms ago",
                            (now - p.writing_ns) / 1e6);
     } else {
-        n += std::snprintf(line + n, size - n, "write not started");
+        cb_used += std::snprintf(sz_line + cb_used, cb_line - cb_used, "write not started");
     }
-    return n;
+    return cb_used;
 }
 
 bool FindPending(u64 label, Pending& out) {
@@ -971,19 +971,19 @@ bool TakeReport(const Pending& p) {
                         : t.reports.fetch_add(1, std::memory_order_relaxed) < 32;
 }
 
-void Emit(char* line, int n, int size) {
-    n += std::snprintf(line + n, size - n, "\n");
-    const ssize_t written = write(2, line, std::min<std::size_t>(n, size - 1));
+void Emit(char* sz_line, int cb_used, int cb_line) {
+    cb_used += std::snprintf(sz_line + cb_used, cb_line - cb_used, "\n");
+    const ssize_t written = write(2, sz_line, std::min<std::size_t>(cb_used, cb_line - 1));
     (void)written;
 }
 
 /// The guest allocator's release (int3): performs the replaced `mov rax, rsi`; a label block
 /// whose fence has not landed is reported with the caller.
-void OnFreeHook(void* ucontext) {
-    auto* g = static_cast<ucontext_t*>(ucontext)->uc_mcontext.gregs;
-    g[REG_RAX] = g[REG_RSI];
-    g[REG_RIP] = greg_t(free_hook + 3);
-    const u64 block = u64(g[REG_RSI]);
+void OnFreeHook(void* p_ucontext) {
+    auto* p_registers = static_cast<ucontext_t*>(p_ucontext)->uc_mcontext.gregs;
+    p_registers[REG_RAX] = p_registers[REG_RSI];
+    p_registers[REG_RIP] = greg_t(s_free_hook + 3);
+    const u64 block = u64(p_registers[REG_RSI]);
     Pending p;
     if (!FindPending(block, p)) {
         return;
@@ -991,114 +991,114 @@ void OnFreeHook(void* ucontext) {
     if (!TakeReport(p)) {
         return;
     }
-    char line[3072];
-    int n = std::snprintf(line, sizeof(line),
+    char sz_line[3072];
+    int cb_used = std::snprintf(sz_line, sizeof(sz_line),
                           "Free check: RELEASED label block %#llx, tid %u, at %.3f s: ",
                           (unsigned long long)block, SignalTid(), NowNs() / 1e9);
-    n = AppendState(line, n, sizeof(line), p);
-    n = AppendStack(line, n, sizeof(line), g, true);
+    cb_used = AppendState(sz_line, cb_used, sizeof(sz_line), p);
+    cb_used = AppendStack(sz_line, cb_used, sizeof(sz_line), p_registers, true);
     u64 value = 0;
     ReadQword(block, value);
-    n += std::snprintf(line + n, sizeof(line) - n, "\n  value %#llx", (unsigned long long)value);
-    n = AppendHistory(line, n, sizeof(line), block, "this label");
-    Emit(line, n, sizeof(line));
+    cb_used += std::snprintf(sz_line + cb_used, sizeof(sz_line) - cb_used, "\n  value %#llx", (unsigned long long)value);
+    cb_used = AppendHistory(sz_line, cb_used, sizeof(sz_line), block, "this label");
+    Emit(sz_line, cb_used, sizeof(sz_line));
 }
 
 /// The collector's "done" branch (int3): performs the replaced `mov rcx, [rsp+0x28]`. r14 is the
 /// block taken as done, its first qword the label (or bit 0: a pointer to the batch's label),
 /// eax what the collector read there (4). Reported when that label's fence has not landed.
-void OnGcHook(void* ucontext) {
-    auto* g = static_cast<ucontext_t*>(ucontext)->uc_mcontext.gregs;
-    g[REG_RCX] = greg_t(*reinterpret_cast<const u64*>(u64(g[REG_RSP]) + 0x28));
-    g[REG_RIP] = greg_t(gc_hook + 5);
-    const u64 node = u64(g[REG_R14]);
+void OnGcHook(void* p_ucontext) {
+    auto* p_registers = static_cast<ucontext_t*>(p_ucontext)->uc_mcontext.gregs;
+    p_registers[REG_RCX] = greg_t(*reinterpret_cast<const u64*>(u64(p_registers[REG_RSP]) + 0x28));
+    p_registers[REG_RIP] = greg_t(s_gc_hook + 5);
+    const u64 node = u64(p_registers[REG_R14]);
     u64 raw = 0;
     ReadQword(node, raw);
     const u64 label = (raw & 1) ? raw & ~1ull : node;
     Pending p, own;
-    const bool label_pending = FindPending(label, p);
-    const bool node_pending = label != node && FindPending(node, own);
-    if (!label_pending && !node_pending) {
+    const bool is_label_pending = FindPending(label, p);
+    const bool is_node_pending = label != node && FindPending(node, own);
+    if (!is_label_pending && !is_node_pending) {
         return;
     }
-    if (!TakeReport(label_pending ? p : own)) {
+    if (!TakeReport(is_label_pending ? p : own)) {
         return;
     }
-    char line[3072];
-    int n = std::snprintf(line, sizeof(line),
+    char sz_line[3072];
+    int cb_used = std::snprintf(sz_line, sizeof(sz_line),
                           "Free check: TAKEN AS DONE block %#llx, tid %u, at %.3f s: first qword "
                           "%#llx, read %#x",
                           (unsigned long long)node, SignalTid(), NowNs() / 1e9,
-                          (unsigned long long)raw, unsigned(g[REG_RAX]));
-    if (label_pending) {
-        n += std::snprintf(line + n, sizeof(line) - n, "\n  label %#llx: ",
+                          (unsigned long long)raw, unsigned(p_registers[REG_RAX]));
+    if (is_label_pending) {
+        cb_used += std::snprintf(sz_line + cb_used, sizeof(sz_line) - cb_used, "\n  label %#llx: ",
                            (unsigned long long)label);
-        n = AppendState(line, n, sizeof(line), p);
+        cb_used = AppendState(sz_line, cb_used, sizeof(sz_line), p);
     }
-    if (node_pending) {
-        n += std::snprintf(line + n, sizeof(line) - n, "\n  block's own label: ");
-        n = AppendState(line, n, sizeof(line), own);
+    if (is_node_pending) {
+        cb_used += std::snprintf(sz_line + cb_used, sizeof(sz_line) - cb_used, "\n  block's own label: ");
+        cb_used = AppendState(sz_line, cb_used, sizeof(sz_line), own);
     }
-    n = AppendStack(line, n, sizeof(line), g, false);
-    n = AppendHistory(line, n, sizeof(line), label, "label");
+    cb_used = AppendStack(sz_line, cb_used, sizeof(sz_line), p_registers, false);
+    cb_used = AppendHistory(sz_line, cb_used, sizeof(sz_line), label, "label");
     if (label != node) {
-        n = AppendHistory(line, n, sizeof(line), node, "block");
+        cb_used = AppendHistory(sz_line, cb_used, sizeof(sz_line), node, "block");
     }
-    Emit(line, n, sizeof(line));
+    Emit(sz_line, cb_used, sizeof(sz_line));
 }
 } // namespace
 
-bool OnTrapFault(void* ucontext, u64 address) {
+bool OnTrapFault(void* p_ucontext, u64 va_guest) {
     if (TrapMode() != 1) {
         return false;
     }
-    const u64 page = address & ~(PageSize - 1);
+    const u64 page = va_guest & ~(PageSize - 1);
     auto& t = Trap();
     std::unique_lock lk{t.mutex};
     if (!t.read_only.count(page)) {
         return false;
     }
     t.faults.fetch_add(1, std::memory_order_relaxed);
-    const auto it = t.pending.find(address & ~7ull);
-    const bool hit = it != t.pending.end();
-    const Pending p = hit ? it->second : Pending{};
+    const auto it = t.pending.find(va_guest & ~7ull);
+    const bool is_hit = it != t.pending.end();
+    const Pending p = is_hit ? it->second : Pending{};
     // Writable for the faulting instruction only (single step), read-only again after it.
     mprotect(reinterpret_cast<void*>(page), PageSize, PROT_READ | PROT_WRITE);
-    if (!ArmStep(ucontext, page)) {
+    if (!ArmStep(p_ucontext, page)) {
         t.read_only.erase(page);
     }
     lk.unlock();
-    const auto* g = static_cast<const ucontext_t*>(ucontext)->uc_mcontext.gregs;
-    if (!hit || !IsGuest(u64(g[REG_RIP]))) {
+    const auto* p_registers = static_cast<const ucontext_t*>(p_ucontext)->uc_mcontext.gregs;
+    if (!is_hit || !IsGuest(u64(p_registers[REG_RIP]))) {
         return true;
     }
     t.hits.fetch_add(1, std::memory_order_relaxed);
     if (t.reports.fetch_add(1, std::memory_order_relaxed) >= 24) {
         return true;
     }
-    char line[3072];
-    int n = std::snprintf(line, sizeof(line),
+    char sz_line[3072];
+    int cb_used = std::snprintf(sz_line, sizeof(sz_line),
                           "Free check: TRAP guest write %#llx into a label block, tid %u, at %.3f "
                           "s: rip +%#llx rdi %#llx rsi %#llx rax %#llx rcx %#llx\n  ",
-                          (unsigned long long)address, SignalTid(), NowNs() / 1e9,
-                          (unsigned long long)(u64(g[REG_RIP]) - ImageBase),
-                          (unsigned long long)g[REG_RDI], (unsigned long long)g[REG_RSI],
-                          (unsigned long long)g[REG_RAX], (unsigned long long)g[REG_RCX]);
-    n = AppendState(line, n, sizeof(line), p);
-    n = AppendStack(line, n, sizeof(line), g, true);
+                          (unsigned long long)va_guest, SignalTid(), NowNs() / 1e9,
+                          (unsigned long long)(u64(p_registers[REG_RIP]) - ImageBase),
+                          (unsigned long long)p_registers[REG_RDI], (unsigned long long)p_registers[REG_RSI],
+                          (unsigned long long)p_registers[REG_RAX], (unsigned long long)p_registers[REG_RCX]);
+    cb_used = AppendState(sz_line, cb_used, sizeof(sz_line), p);
+    cb_used = AppendStack(sz_line, cb_used, sizeof(sz_line), p_registers, true);
     u64 old = 0;
-    ReadQword(address & ~7ull, old);
-    n += std::snprintf(line + n, sizeof(line) - n, "\n  old value %#llx", (unsigned long long)old);
-    n = AppendHistory(line, n, sizeof(line), address, "this label");
-    Emit(line, n, sizeof(line));
+    ReadQword(va_guest & ~7ull, old);
+    cb_used += std::snprintf(sz_line + cb_used, sizeof(sz_line) - cb_used, "\n  old value %#llx", (unsigned long long)old);
+    cb_used = AppendHistory(sz_line, cb_used, sizeof(sz_line), va_guest, "this label");
+    Emit(sz_line, cb_used, sizeof(sz_line));
     return true;
 }
 
-bool OnStaleTrapFault(u64 address) {
+bool OnStaleTrapFault(u64 va_guest) {
     if (TrapMode() != 1) {
         return false;
     }
-    const u64 page = address & ~(PageSize - 1);
+    const u64 page = va_guest & ~(PageSize - 1);
     auto& t = Trap();
     std::scoped_lock lk{t.mutex};
     if (!t.ever_trapped.count(page)) {

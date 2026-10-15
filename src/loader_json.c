@@ -38,10 +38,10 @@ static void add_utf8(char *sz_out, size_t *p_cb_out, uint32_t code_point) {
         sz_out[(*p_cb_out)++] = (char)(0x80 | (code_point & 0x3f));
     }
 }
-static int hex4(const char *p, uint32_t *p_out) {
+static int hex4(const char *sz_digits, uint32_t *p_out) {
     *p_out = 0;
     for (int i = 0; i < 4; ++i) {
-        char c = p[i];
+        char c = sz_digits[i];
         int digit = (unsigned)(c - '0') < 10 ? c - '0' : (unsigned)((c | 32) - 'a') < 6 ? (c | 32) - 'a' + 10 : -1;
         if (digit < 0) return 0;
         *p_out = *p_out << 4 | (uint32_t)digit;

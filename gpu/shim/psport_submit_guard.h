@@ -16,7 +16,7 @@
 namespace PsSubmitGuard {
 /// A command buffer handed to the GPU as part of frame `frame` (numbered by the sceGnmSubmitDone
 /// that closes it, from 1): watched until Retire(frame).
-void Arm(const void* address, std::uint64_t size, std::uint64_t frame);
+void Arm(const void* p_address, std::uint64_t cb_range, std::uint64_t frame);
 /// sceGnmSubmitDone closed frame `frame`: a write into its buffers from now on waits for the GPU.
 void Close(std::uint64_t frame);
 /// The GPU has finished every frame up to `frame`: their buffers are checked and the game's again.

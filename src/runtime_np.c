@@ -404,11 +404,11 @@ static void push_context_name(int64_t h_push_context, char *p_out_uuid) {
     snprintf(p_out_uuid, 37, "00000000-0000-4000-8000-%012llx", (unsigned long long)h_push_context & 0xFFFFFFFFFFFFull);
 }
 static int64_t find_push_context(const char *sz_uuid) {
-    char expected[37];
+    char sz_expected[37];
     if (!sz_uuid || strnlen(sz_uuid, 37) != 36) return 0;
     const int64_t h_push_context = (int64_t)strtoull(sz_uuid + 24, NULL, 16);
-    push_context_name(h_push_context, expected);
-    return memcmp(expected, sz_uuid, 36) ? 0 : h_push_context;
+    push_context_name(h_push_context, sz_expected);
+    return memcmp(sz_expected, sz_uuid, 36) ? 0 : h_push_context;
 }
 static ABI int32_t webapi2_create_push_context(int32_t h_context, char *p_out_uuid) {
     if (!p_out_uuid) return WEBAPI2_INVALID_ARGUMENT;

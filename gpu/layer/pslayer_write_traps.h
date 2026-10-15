@@ -7,9 +7,9 @@
 #pragma once
 #include <cstdint>
 
-extern "C" void runtime_memory_trap(std::uintptr_t address, std::uint64_t size, unsigned reason,
-                                    int on);
-extern "C" unsigned runtime_memory_trap_reasons(std::uintptr_t address);
+extern "C" void runtime_memory_trap(std::uintptr_t va_range, std::uint64_t cb_range, unsigned reason,
+                                    int is_on);
+extern "C" unsigned runtime_memory_trap_reasons(std::uintptr_t va_guest);
 
 namespace PsLayer::WriteTraps {
 
@@ -30,13 +30,13 @@ enum Reason : unsigned {
 inline constexpr unsigned NoAccess = 0xf0;
 
 /// [address, address + size) trapped for `reason` or no longer (page granular).
-inline void Set(std::uintptr_t address, std::uint64_t size, Reason reason, bool on) {
-    runtime_memory_trap(address, size, reason, on ? 1 : 0);
+inline void Set(std::uintptr_t va_range, std::uint64_t cb_range, Reason reason, bool is_on) {
+    runtime_memory_trap(va_range, cb_range, reason, is_on ? 1 : 0);
 }
 
-/// The reasons the page holding `address` is trapped for.
-inline unsigned Reasons(std::uintptr_t address) {
-    return runtime_memory_trap_reasons(address);
+/// The reasons the page holding `va_guest` is trapped for.
+inline unsigned Reasons(std::uintptr_t va_guest) {
+    return runtime_memory_trap_reasons(va_guest);
 }
 
 } // namespace PsLayer::WriteTraps

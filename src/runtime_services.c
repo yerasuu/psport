@@ -37,75 +37,75 @@
 #define MOVE_ALREADY_INIT ((int32_t)0x80EE0002)
 #define MOVE_INVALID_ARG ((int32_t)0x80EE0003)
 
-static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
-static int next_id=1;
-static int new_id(void) { pthread_mutex_lock(&lock); int id=next_id++; pthread_mutex_unlock(&lock); return id; }
-static void note(const char *what) { printf("Runtime: %s\n",what); }
+static pthread_mutex_t s_lock=PTHREAD_MUTEX_INITIALIZER;
+static int s_next_id=1;
+static int new_id(void) { pthread_mutex_lock(&s_lock); int id=s_next_id++; pthread_mutex_unlock(&s_lock); return id; }
+static void note(const char *sz_what) { printf("Runtime: %s\n",sz_what); }
 
 /* ---- UserService ---- */
-static int login_event_pending=1;
-static ABI int32_t user_initialize(const void *params) { (void)params; note("UserService initialized (user 1 logged in)"); return 0; }
-static ABI int32_t user_initial(int32_t *id) { if (!id) return USER_INVALID_ARGUMENT; *id=USER_ID; return 0; }
-static ABI int32_t user_list(int32_t *ids) {
-    if (!ids) return USER_INVALID_ARGUMENT;
-    ids[0]=USER_ID; ids[1]=ids[2]=ids[3]=-1; return 0;
+static int s_is_login_event_pending=1;
+static ABI int32_t user_initialize(const void *p_params) { (void)p_params; note("UserService initialized (user 1 logged in)"); return 0; }
+static ABI int32_t user_initial(int32_t *p_id) { if (!p_id) return USER_INVALID_ARGUMENT; *p_id=USER_ID; return 0; }
+static ABI int32_t user_list(int32_t *p_ids) {
+    if (!p_ids) return USER_INVALID_ARGUMENT;
+    p_ids[0]=USER_ID; p_ids[1]=p_ids[2]=p_ids[3]=-1; return 0;
 }
-static ABI int32_t user_name(int32_t id,char *name,uint64_t size) {
-    if (id!=USER_ID || !name) return USER_INVALID_ARGUMENT;
-    const char *value=getenv("PS_USER_NAME") ? getenv("PS_USER_NAME") : "Hunter";
-    if (strlen(value)+1>size) return (int32_t)0x8096000a; /* BUFFER_TOO_SHORT */
-    strcpy(name,value); return 0;
+static ABI int32_t user_name(int32_t id,char *sz_name,uint64_t cb_name) {
+    if (id!=USER_ID || !sz_name) return USER_INVALID_ARGUMENT;
+    const char *sz_value=getenv("PS_USER_NAME") ? getenv("PS_USER_NAME") : "Hunter";
+    if (strlen(sz_value)+1>cb_name) return (int32_t)0x8096000a; /* BUFFER_TOO_SHORT */
+    strcpy(sz_name,sz_value); return 0;
 }
-static ABI int32_t user_color(int32_t id,int32_t *color) {
-    if (id!=USER_ID || !color) return USER_INVALID_ARGUMENT;
-    *color=0; return 0;
+static ABI int32_t user_color(int32_t id,int32_t *p_color) {
+    if (id!=USER_ID || !p_color) return USER_INVALID_ARGUMENT;
+    *p_color=0; return 0;
 }
-static ABI int32_t user_event(int32_t *event) {
-    if (!event) return USER_INVALID_ARGUMENT;
-    pthread_mutex_lock(&lock);
-    int pending=login_event_pending; login_event_pending=0;
-    pthread_mutex_unlock(&lock);
-    if (!pending) return USER_NO_EVENT;
-    event[0]=0; event[1]=USER_ID; /* LOGIN */
+static ABI int32_t user_event(int32_t *p_event) {
+    if (!p_event) return USER_INVALID_ARGUMENT;
+    pthread_mutex_lock(&s_lock);
+    int is_pending=s_is_login_event_pending; s_is_login_event_pending=0;
+    pthread_mutex_unlock(&s_lock);
+    if (!is_pending) return USER_NO_EVENT;
+    p_event[0]=0; p_event[1]=USER_ID; /* LOGIN */
     return 0;
 }
 
 /* ---- SystemService ---- */
-int runtime_system_language(void) { const char *v=getenv("PS_LANGUAGE"); return v ? atoi(v) : 1; }
-static ABI int32_t system_param(int32_t id,int32_t *value) {
-    if (!value) return SYSTEM_PARAMETER;
+int runtime_system_language(void) { const char *sz_value=getenv("PS_LANGUAGE"); return sz_value ? atoi(sz_value) : 1; }
+static ABI int32_t system_param(int32_t id,int32_t *p_value) {
+    if (!p_value) return SYSTEM_PARAMETER;
     switch (id) {
-    case 1: *value=runtime_system_language(); break; /* language (1 = English US, 8 = Russian) */
-    case 2: *value=1; break;                    /* date format DD/MM/YYYY */
-    case 3: *value=1; break;                    /* 24-hour clock */
-    case 4: { time_t now=time(NULL); struct tm t; localtime_r(&now,&t); *value=(int32_t)(t.tm_gmtoff/60); break; }
-    case 5: *value=0; break;                    /* summer time */
-    case 7: *value=0; break;                    /* parental level off */
-    case 1000: *value=1; break;                 /* enter button = cross */
+    case 1: *p_value=runtime_system_language(); break; /* language (1 = English US, 8 = Russian) */
+    case 2: *p_value=1; break;                    /* date format DD/MM/YYYY */
+    case 3: *p_value=1; break;                    /* 24-hour clock */
+    case 4: { time_t now=time(NULL); struct tm t; localtime_r(&now,&t); *p_value=(int32_t)(t.tm_gmtoff/60); break; }
+    case 5: *p_value=0; break;                    /* summer time */
+    case 7: *p_value=0; break;                    /* parental level off */
+    case 1000: *p_value=1; break;                 /* enter button = cross */
     default: fprintf(stderr,"STOP: unsupported system parameter %d\n",id); runtime_stop(21);
     }
     return 0;
 }
 /* The only string parameter is the console's name (6, SYSTEM_NAME). */
-static ABI int32_t system_param_string(int32_t id,char *buffer,uint64_t size) {
-    static const char name[]="PS4";
-    if (id!=6 || !buffer || size<sizeof(name)) return SYSTEM_PARAMETER;
-    memcpy(buffer,name,sizeof(name));
+static ABI int32_t system_param_string(int32_t id,char *sz_buffer,uint64_t cb_buffer) {
+    static const char s_sz_name[]="PS4";
+    if (id!=6 || !sz_buffer || cb_buffer<sizeof(s_sz_name)) return SYSTEM_PARAMETER;
+    memcpy(sz_buffer,s_sz_name,sizeof(s_sz_name));
     return 0;
 }
 /* SceSystemServiceHdrToneMapLuminance in nits: max full frame, max, min. The console's HDR
  * adjustment is never run here, so a common HDR10 display's range stands in for it. */
-static ABI int32_t hdr_tone_map_luminance(float *luminance) {
-    if (!luminance) return SYSTEM_PARAMETER;
-    luminance[0]=1000.0f; luminance[1]=1000.0f; luminance[2]=0.01f;
+static ABI int32_t hdr_tone_map_luminance(float *p_luminance) {
+    if (!p_luminance) return SYSTEM_PARAMETER;
+    p_luminance[0]=1000.0f; p_luminance[1]=1000.0f; p_luminance[2]=0.01f;
     return 0;
 }
-static ABI int32_t system_status(unsigned char *status) {
-    if (!status) return SYSTEM_PARAMETER;
-    memset(status,0,12); /* event_num=0, no overlay, foreground, normal CPU mode */
+static ABI int32_t system_status(unsigned char *p_status) {
+    if (!p_status) return SYSTEM_PARAMETER;
+    memset(p_status,0,12); /* event_num=0, no overlay, foreground, normal CPU mode */
     return 0;
 }
-static ABI int32_t system_event(void *event) { (void)event; return SYSTEM_NO_EVENT; }
+static ABI int32_t system_event(void *p_event) { (void)p_event; return SYSTEM_NO_EVENT; }
 static ABI int32_t hide_splash(void) { note("SystemService: splash screen hidden"); return 0; }
 static ABI int32_t launch_browser(void) { note("SystemService: web browser request ignored (offline)"); return 0; }
 /* The system's controller settings screen, like the common dialogs, has no UI here: it closes at
@@ -117,9 +117,9 @@ static ABI int32_t show_controller_settings(int32_t h_user) {
 }
 /* The share of the screen the user's display settings leave for UI: all of it. A title that sizes
  * its render targets by it (Atelier Ryza) gets a 0x0 target and a null texture from 0. */
-static ABI int32_t display_safe_area(float *ratio) {
-    if (!ratio) return (int32_t)0x80A10003; /* SCE_SYSTEM_SERVICE_ERROR_PARAMETER */
-    *ratio=1.0f;
+static ABI int32_t display_safe_area(float *p_ratio) {
+    if (!p_ratio) return (int32_t)0x80A10003; /* SCE_SYSTEM_SERVICE_ERROR_PARAMETER */
+    *p_ratio=1.0f;
     return 0;
 }
 /* The console ends the application and starts another executable of its package; the port starts
@@ -139,92 +139,92 @@ static ABI int32_t load_exec(const char *sz_path, char *const *pp_arguments) {
 
 /* ---- NetCtl / Net / Ssl: no network ---- */
 static ABI int32_t net_unreachable(void) { *runtime_net_errno()=51; return NET_ENETUNREACH; }
-static ABI int32_t net_epoll_create(const char *name,int flags) { (void)name; (void)flags; return new_id(); }
-static ABI int32_t net_resolver_create(const char *name,int pool,int flags) { (void)name; (void)pool; (void)flags; return new_id(); }
+static ABI int32_t net_epoll_create(const char *sz_name,int flags) { (void)sz_name; (void)flags; return new_id(); }
+static ABI int32_t net_resolver_create(const char *sz_name,int pool,int flags) { (void)sz_name; (void)pool; (void)flags; return new_id(); }
 /* Every lookup fails at once offline (sceNetResolverStartNtoa/Aton), so none is left to abort. */
 static ABI int32_t net_resolver_abort(int32_t h_resolver, int32_t flags) { (void)h_resolver; (void)flags; return 0; }
 static ABI uint16_t net_htons(uint16_t v) { return htons(v); }
 static ABI uint16_t net_ntohs(uint16_t v) { return ntohs(v); }
 static ABI uint32_t net_htonl(uint32_t v) { return htonl(v); }
 static ABI uint32_t net_ntohl(uint32_t v) { return ntohl(v); }
-static ABI int32_t net_pton(int af,const char *src,void *dst) {
+static ABI int32_t net_pton(int af,const char *sz_src,void *p_dst) {
     if (af!=2) { *runtime_net_errno()=47; return NET_EINVAL; }
-    return inet_pton(AF_INET,src,dst);
+    return inet_pton(AF_INET,sz_src,p_dst);
 }
-static ABI const char *net_ntop(int af,const void *src,char *dst,uint32_t size) {
+static ABI const char *net_ntop(int af,const void *p_src,char *sz_dst,uint32_t cb_dst) {
     if (af!=2) { *runtime_net_errno()=47; return NULL; }
-    return inet_ntop(AF_INET,src,dst,size);
+    return inet_ntop(AF_INET,p_src,sz_dst,cb_dst);
 }
-static ABI int32_t netctl_state(int32_t *state) { if (!state) return NET_CTL_INVALID_ADDR; *state=0; return 0; }
+static ABI int32_t netctl_state(int32_t *p_state) { if (!p_state) return NET_CTL_INVALID_ADDR; *p_state=0; return 0; }
 /* The interface's own address does not need a connection; everything else does. */
-static ABI int32_t netctl_info(int code,void *info) {
+static ABI int32_t netctl_info(int code,void *p_info) {
     if (code!=2) return NET_CTL_NOT_CONNECTED; /* SCE_NET_CTL_INFO_ETHER_ADDR */
-    if (!info) return NET_CTL_INVALID_ADDR;
-    runtime_net_ether_address(info);
+    if (!p_info) return NET_CTL_INVALID_ADDR;
+    runtime_net_ether_address(p_info);
     return 0;
 }
 static ABI int32_t netctl_init(void) { note("NetCtl initialized (network cable unplugged)"); return 0; }
-static ABI int32_t netctl_register(void *cb,void *arg,int32_t *cid) { (void)arg; if (!cb || !cid) return NET_CTL_INVALID_ADDR; *cid=new_id(); return 0; }
-static ABI int32_t netctl_nat(uint32_t *info) {
-    if (!info) return NET_CTL_INVALID_ADDR;
-    info[1]=0; info[2]=3; info[3]=0; /* stun failed, NAT type 3, no mapped address */
+static ABI int32_t netctl_register(void *p_callback,void *p_arg,int32_t *p_cid) { (void)p_arg; if (!p_callback || !p_cid) return NET_CTL_INVALID_ADDR; *p_cid=new_id(); return 0; }
+static ABI int32_t netctl_nat(uint32_t *p_info) {
+    if (!p_info) return NET_CTL_INVALID_ADDR;
+    p_info[1]=0; p_info[2]=3; p_info[3]=0; /* stun failed, NAT type 3, no mapped address */
     return 0;
 }
 
 /* ---- NP (PSN): signed out ---- */
-static ABI int32_t np_state(int32_t user,int32_t *state) {
-    if (!state) return NP_INVALID_ARGUMENT;
-    (void)user; *state=1; /* SIGNED_OUT */
+static ABI int32_t np_state(int32_t user,int32_t *p_state) {
+    if (!p_state) return NP_INVALID_ARGUMENT;
+    (void)user; *p_state=1; /* SIGNED_OUT */
     return 0;
 }
 static ABI int32_t np_signed_out(void) { return NP_SIGNED_OUT; }
-static ABI int32_t np_account_id(int32_t user,uint64_t *id) {
-    if (!id) return NP_INVALID_ARGUMENT;
-    (void)user; *id=0; return NP_SIGNED_OUT;
+static ABI int32_t np_account_id(int32_t user,uint64_t *p_id) {
+    if (!p_id) return NP_INVALID_ARGUMENT;
+    (void)user; *p_id=0; return NP_SIGNED_OUT;
 }
-static ABI int32_t np_account_id_online(const void *online_id,uint64_t *id) {
-    if (!online_id || !id) return NP_INVALID_ARGUMENT;
-    *id=0; return NP_SIGNED_OUT;
+static ABI int32_t np_account_id_online(const void *p_online_id,uint64_t *p_id) {
+    if (!p_online_id || !p_id) return NP_INVALID_ARGUMENT;
+    *p_id=0; return NP_SIGNED_OUT;
 }
-static ABI int32_t np_account_info(const void *online_id,void *info) {
-    return online_id && info ? NP_SIGNED_OUT : NP_INVALID_ARGUMENT;
+static ABI int32_t np_account_info(const void *p_online_id,void *p_info) {
+    return p_online_id && p_info ? NP_SIGNED_OUT : NP_INVALID_ARGUMENT;
 }
-static ABI int32_t np_register(void *cb,void *arg) { (void)cb; (void)arg; return new_id(); }
+static ABI int32_t np_register(void *p_callback,void *p_arg) { (void)p_callback; (void)p_arg; return new_id(); }
 /* Unplugged and signed out, no state change, NetCtl event or request reply ever becomes due, so a
  * check of the registered callbacks or of request timeouts has nothing to run. */
 static ABI int32_t nothing_due(void) { return 0; }
-static ABI void np_register_void(void *cb,void *arg) { (void)cb; (void)arg; }
-static ABI int32_t np_register_toolkit(void *cb,void *arg) { (void)arg; return cb ? 0 : NP_INVALID_ARGUMENT; }
-static ABI int32_t np_request(const void *param) { (void)param; return new_id(); }
-static ABI int32_t np_request_ctx(int32_t ctx,const void *param) { (void)ctx; (void)param; return new_id(); }
-static ABI int32_t np_poll(int32_t request,int32_t *result) { (void)request; if (result) *result=NP_SIGNED_OUT; return 0; }
-static ABI int32_t np_compare(const void *a,const void *b) {
-    if (!a || !b) return NP_INVALID_ARGUMENT;
-    return memcmp(a,b,16) ? (int32_t)0x80550609 : 0; /* NP_UTIL NOT_MATCH */
+static ABI void np_register_void(void *p_callback,void *p_arg) { (void)p_callback; (void)p_arg; }
+static ABI int32_t np_register_toolkit(void *p_callback,void *p_arg) { (void)p_arg; return p_callback ? 0 : NP_INVALID_ARGUMENT; }
+static ABI int32_t np_request(const void *p_param) { (void)p_param; return new_id(); }
+static ABI int32_t np_request_ctx(int32_t ctx,const void *p_param) { (void)ctx; (void)p_param; return new_id(); }
+static ABI int32_t np_poll(int32_t request,int32_t *p_result) { (void)request; if (p_result) *p_result=NP_SIGNED_OUT; return 0; }
+static ABI int32_t np_compare(const void *p_a,const void *p_b) {
+    if (!p_a || !p_b) return NP_INVALID_ARGUMENT;
+    return memcmp(p_a,p_b,16) ? (int32_t)0x80550609 : 0; /* NP_UTIL NOT_MATCH */
 }
 
 /* ---- Common dialogs: nothing is displayed; an opened dialog finishes. ---- */
-typedef struct { const char *name; int initialized, status; } Dialog;
-static Dialog dialogs[]={{"CommonDialog",0,0},{"MsgDialog",0,0},{"SaveDataDialog",0,0},
+typedef struct { const char *sz_name; int is_initialized, status; } Dialog;
+static Dialog s_dialogs[]={{"CommonDialog",0,0},{"MsgDialog",0,0},{"SaveDataDialog",0,0},
                          {"NpProfileDialog",0,0},{"NpCommerceDialog",0,0},{"ImeDialog",0,0},
                          {"ErrorDialog",0,0},{"WebBrowserDialog",0,0},{"InvitationDialog",0,0},
                          {"SigninDialog",0,0},{"SocialScreenDialog",0,0},
                          {"HmdSetupDialog",0,0},{"PlayGoDialog",0,0}};
-static int common_initialized;
-static ABI int32_t common_init(void) { common_initialized=1; return 0; }
+static int s_is_common_initialized;
+static ABI int32_t common_init(void) { s_is_common_initialized=1; return 0; }
 static int32_t dialog_init(int i) {
-    if (dialogs[i].initialized) return (int32_t)0x80B80004;
-    dialogs[i].initialized=1; dialogs[i].status=1; return 0;
+    if (s_dialogs[i].is_initialized) return (int32_t)0x80B80004;
+    s_dialogs[i].is_initialized=1; s_dialogs[i].status=1; return 0;
 }
 static int32_t dialog_open(int i) {
-    if (!dialogs[i].initialized) return DIALOG_NOT_INITIALIZED;
-    printf("Runtime: %s opened; completed immediately (no dialog UI yet)\n",dialogs[i].name);
-    dialogs[i].status=3; return 0;
+    if (!s_dialogs[i].is_initialized) return DIALOG_NOT_INITIALIZED;
+    printf("Runtime: %s opened; completed immediately (no dialog UI yet)\n",s_dialogs[i].sz_name);
+    s_dialogs[i].status=3; return 0;
 }
-static int32_t dialog_status(int i) { return dialogs[i].status; }
+static int32_t dialog_status(int i) { return s_dialogs[i].status; }
 static int32_t dialog_term(int i) {
-    if (!dialogs[i].initialized) return DIALOG_NOT_INITIALIZED;
-    dialogs[i].initialized=0; dialogs[i].status=0; return 0;
+    if (!s_dialogs[i].is_initialized) return DIALOG_NOT_INITIALIZED;
+    s_dialogs[i].is_initialized=0; s_dialogs[i].status=0; return 0;
 }
 #define DIALOG(tag,i) \
     static ABI int32_t tag##_init(void) { return dialog_init(i); } \
@@ -233,7 +233,7 @@ static int32_t dialog_term(int i) {
     static ABI int32_t tag##_term(void) { return dialog_term(i); }
 DIALOG(msg,1) DIALOG(profile,3) DIALOG(commerce,4)
 DIALOG(web,7) DIALOG(invitation,8) DIALOG(signin,9) DIALOG(social,10) DIALOG(hmd_setup,11) DIALOG(playgo,12)
-static ABI int32_t profile_result(void *result) { if (result) memset(result,0,4); return 0; }
+static ABI int32_t profile_result(void *p_result) { if (p_result) memset(p_result,0,4); return 0; }
 /* OrbisNpCommerceDialogParam keeps userData at 0x58 and the result hands it back. Signed out, the
  * store cannot open, so the dialog ends as backed out of: USER_CANCELED, nothing authorized. */
 static void *s_p_commerce_user_data;
@@ -244,7 +244,7 @@ static ABI int32_t commerce_start(const uint8_t *p_param) {
 typedef struct { int32_t result; uint8_t is_authorized; uint8_t reserved_0[3]; void *p_user_data; uint8_t reserved[32]; } CommerceResult;
 static ABI int32_t commerce_result(CommerceResult *p_out_result) {
     if (!p_out_result) return (int32_t)0x80B8000D;           /* ARG_NULL */
-    if (dialogs[4].status!=3) return (int32_t)0x80B80005;   /* NOT_FINISHED */
+    if (s_dialogs[4].status!=3) return (int32_t)0x80B80005;   /* NOT_FINISHED */
     memset(p_out_result,0,sizeof(*p_out_result));
     p_out_result->result=1;
     p_out_result->p_user_data=s_p_commerce_user_data;
@@ -253,75 +253,75 @@ static ABI int32_t commerce_result(CommerceResult *p_out_result) {
 /* The user cannot sign in to PSN here, so the sign-in dialog always ends cancelled. */
 static ABI int32_t signin_result(int32_t *p_out_result) {
     if (!p_out_result) return (int32_t)0x80B8000D;           /* ARG_NULL */
-    if (dialogs[9].status!=3) return (int32_t)0x80B80005;   /* NOT_FINISHED */
+    if (s_dialogs[9].status!=3) return (int32_t)0x80B80005;   /* NOT_FINISHED */
     *p_out_result=1;
     return 0;
 }
 typedef struct {
     void *callback_arg; int32_t error_code, result; uint32_t *sent_count; uint8_t reserved[32];
 } InvitationResult;
-static void *invitation_callback_arg;
-static ABI int32_t invitation_start(const uint8_t *param) {
-    if (param) memcpy(&invitation_callback_arg,param+64,sizeof(invitation_callback_arg));
-    return invitation_open(param);
+static void *s_p_invitation_callback_arg;
+static ABI int32_t invitation_start(const uint8_t *p_param) {
+    if (p_param) memcpy(&s_p_invitation_callback_arg,p_param+64,sizeof(s_p_invitation_callback_arg));
+    return invitation_open(p_param);
 }
-static ABI int32_t invitation_result(InvitationResult *result) {
-    if (!dialogs[8].initialized) return DIALOG_NOT_INITIALIZED;
-    if (dialogs[8].status!=3) return (int32_t)0x80B80005;
-    if (!result) return (int32_t)0x80B8000D;
-    result->callback_arg=invitation_callback_arg; result->error_code=0; result->result=0;
-    if (result->sent_count) *result->sent_count=0;
+static ABI int32_t invitation_result(InvitationResult *p_result) {
+    if (!s_dialogs[8].is_initialized) return DIALOG_NOT_INITIALIZED;
+    if (s_dialogs[8].status!=3) return (int32_t)0x80B80005;
+    if (!p_result) return (int32_t)0x80B8000D;
+    p_result->callback_arg=s_p_invitation_callback_arg; p_result->error_code=0; p_result->result=0;
+    if (p_result->sent_count) *p_result->sent_count=0;
     return 0;
 }
 /* With nothing displayed, a dialog is ready to show whenever it is initialized (Atelier Ayesha
  * waited on these before opening its auto-load dialog; answered 0 they never turned true). */
-static ABI int32_t save_ready(void) { return dialogs[2].initialized; }
+static ABI int32_t save_ready(void) { return s_dialogs[2].is_initialized; }
 /* OrbisSaveDataDialogParam (0x98 bytes): common base 0x30, size, mode at 0x34, items at 0x48,
  * user message parameter at 0x50 (its buttonType first), userData at 0x70. */
-static struct { int32_t mode; void *user_data; char dir[32]; _Alignas(8) uint8_t param[0x530]; } save_dialog;
+static struct { int32_t mode; void *p_user_data; char sz_dir[32]; _Alignas(8) uint8_t param[0x530]; } s_save_dialog;
 /* OrbisSaveDataDialogItems: userId, titleId at 8, dirName array and its count at 0x10 and 0x18,
  * newItem at 0x20, focusPos at 0x28, focusPosDirName at 0x30. The list shows the saves that exist
  * and is accepted on the item it opens on; the new item, which heads the list, leaves dir empty. */
-static void save_list_focus(const uint8_t *items) {
-    memset(save_dialog.dir,0,sizeof(save_dialog.dir));
-    if (!items) return;
+static void save_list_focus(const uint8_t *p_items) {
+    memset(s_save_dialog.sz_dir,0,sizeof(s_save_dialog.sz_dir));
+    if (!p_items) return;
     int32_t user, focus;
-    uint32_t count;
-    const char *title, *dirs, *new_item, *focus_dir;
-    memcpy(&user,items,sizeof(user));
-    memcpy(&title,items+0x08,sizeof(title));
-    memcpy(&dirs,items+0x10,sizeof(dirs));
-    memcpy(&count,items+0x18,sizeof(count));
-    memcpy(&new_item,items+0x20,sizeof(new_item));
-    memcpy(&focus,items+0x28,sizeof(focus));
-    memcpy(&focus_dir,items+0x30,sizeof(focus_dir));
-    if (dirs && !(focus==0 && new_item)) {
-        _Alignas(8) uint8_t param[sizeof(save_dialog.param)];
+    uint32_t c_items;
+    const char *sz_title, *sz_dirs, *sz_new_item, *sz_focus_dir;
+    memcpy(&user,p_items,sizeof(user));
+    memcpy(&sz_title,p_items+0x08,sizeof(sz_title));
+    memcpy(&sz_dirs,p_items+0x10,sizeof(sz_dirs));
+    memcpy(&c_items,p_items+0x18,sizeof(c_items));
+    memcpy(&sz_new_item,p_items+0x20,sizeof(sz_new_item));
+    memcpy(&focus,p_items+0x28,sizeof(focus));
+    memcpy(&sz_focus_dir,p_items+0x30,sizeof(sz_focus_dir));
+    if (sz_dirs && !(focus==0 && sz_new_item)) {
+        _Alignas(8) uint8_t param[sizeof(s_save_dialog.param)];
         int64_t best=0;
-        for (uint32_t i=0;i<count;++i) {
-            const char *dir=dirs+32*i;
-            if (runtime_savedata_param(user,title,dir,param)) continue;
+        for (uint32_t i=0;i<c_items;++i) {
+            const char *sz_dir=sz_dirs+32*i;
+            if (runtime_savedata_param(user,sz_title,sz_dir,param)) continue;
             int64_t mtime;
             memcpy(&mtime,param+0x508,sizeof(mtime));
             int take;
             switch (focus) {
             case 1: case 3: take=1; break;                                     /* LISTTAIL, DATATAIL */
-            case 4: take=!save_dialog.dir[0] || mtime>best; break;             /* DATALATEST */
-            case 5: take=!save_dialog.dir[0] || mtime<best; break;             /* DATAOLDEST */
-            case 6: take=focus_dir && !strncmp(dir,focus_dir,32); break;       /* DIRNAME */
-            default: take=!save_dialog.dir[0]; break;                          /* LISTHEAD, DATAHEAD */
+            case 4: take=!s_save_dialog.sz_dir[0] || mtime>best; break;             /* DATALATEST */
+            case 5: take=!s_save_dialog.sz_dir[0] || mtime<best; break;             /* DATAOLDEST */
+            case 6: take=sz_focus_dir && !strncmp(sz_dir,sz_focus_dir,32); break;       /* DIRNAME */
+            default: take=!s_save_dialog.sz_dir[0]; break;                          /* LISTHEAD, DATAHEAD */
             }
             if (!take) continue;
             best=mtime;
-            memcpy(save_dialog.dir,dir,sizeof(save_dialog.dir));
-            memcpy(save_dialog.param,param,sizeof(param));
+            memcpy(s_save_dialog.sz_dir,sz_dir,sizeof(s_save_dialog.sz_dir));
+            memcpy(s_save_dialog.param,param,sizeof(param));
         }
     }
-    if (save_dialog.dir[0])
-        printf("Runtime: SaveDataDialog list (focus %d, %u items) answered with '%.32s'\n",focus,count,save_dialog.dir);
+    if (s_save_dialog.sz_dir[0])
+        printf("Runtime: SaveDataDialog list (focus %d, %u items) answered with '%.32s'\n",focus,c_items,s_save_dialog.sz_dir);
     else
-        printf("Runtime: SaveDataDialog list (focus %d, %u items) answered with %s\n",focus,count,
-               new_item ? "the new item" : "no save (none of its items exists)");
+        printf("Runtime: SaveDataDialog list (focus %d, %u items) answered with %s\n",focus,c_items,
+               sz_new_item ? "the new item" : "no save (none of its items exists)");
 }
 static ABI int32_t save_init(void) { return dialog_init(2); }
 static ABI int32_t save_status(void) { return dialog_status(2); }
@@ -329,23 +329,23 @@ static ABI int32_t save_term(void) { return dialog_term(2); }
 /* A progress bar or a user message without buttons has nothing for the user to answer: it stays
  * running until the game closes it (Atelier Ryza reopened a progress bar that ended by itself, in
  * a loop, and never wrote its save). */
-static ABI int32_t save_open(const uint8_t *param) {
-    if (!dialogs[2].initialized) return DIALOG_NOT_INITIALIZED;
-    if (!param) return (int32_t)0x80B8000D; /* SCE_COMMON_DIALOG_ERROR_ARG_NULL */
+static ABI int32_t save_open(const uint8_t *p_param) {
+    if (!s_dialogs[2].is_initialized) return DIALOG_NOT_INITIALIZED;
+    if (!p_param) return (int32_t)0x80B8000D; /* SCE_COMMON_DIALOG_ERROR_ARG_NULL */
     int32_t mode;
-    const int32_t *user_msg;
-    memcpy(&mode,param+0x34,sizeof(mode));
-    memcpy(&user_msg,param+0x50,sizeof(user_msg));
-    memcpy(&save_dialog.user_data,param+0x70,sizeof(save_dialog.user_data));
-    save_dialog.mode=mode;
+    const int32_t *p_user_msg;
+    memcpy(&mode,p_param+0x34,sizeof(mode));
+    memcpy(&p_user_msg,p_param+0x50,sizeof(p_user_msg));
+    memcpy(&s_save_dialog.p_user_data,p_param+0x70,sizeof(s_save_dialog.p_user_data));
+    s_save_dialog.mode=mode;
     if (mode==1) {
-        const uint8_t *items;
-        memcpy(&items,param+0x48,sizeof(items));
-        save_list_focus(items);
+        const uint8_t *p_items;
+        memcpy(&p_items,p_param+0x48,sizeof(p_items));
+        save_list_focus(p_items);
     }
-    if (mode==5 || (mode==2 && user_msg && user_msg[0]==2)) {
+    if (mode==5 || (mode==2 && p_user_msg && p_user_msg[0]==2)) {
         printf("Runtime: SaveDataDialog opened (mode %d); runs until the game closes it (no dialog UI yet)\n",mode);
-        dialogs[2].status=2;
+        s_dialogs[2].status=2;
         return 0;
     }
     return dialog_open(2);
@@ -356,83 +356,83 @@ static ABI int32_t save_open(const uint8_t *param) {
  * directory and its param in the caller's buffers (Atelier Ryza mounted the empty name it got and
  * failed to load). Answered by a stub, Atelier Ayesha read the result it never got
  * and faulted. */
-static ABI int32_t save_result(int32_t *result) {
-    if (!result) return (int32_t)0x80B8000D; /* SCE_COMMON_DIALOG_ERROR_ARG_NULL */
-    if (dialogs[2].status!=3) return (int32_t)0x80B80005; /* SCE_COMMON_DIALOG_ERROR_NOT_FINISHED */
-    result[0]=save_dialog.mode;
-    result[1]=0;
-    result[2]=1;
-    memcpy(result+8,&save_dialog.user_data,sizeof(save_dialog.user_data));
-    if (save_dialog.mode==1) {
-        char *dir;
-        void *param;
-        memcpy(&dir,result+4,sizeof(dir));
-        memcpy(&param,result+6,sizeof(param));
-        if (dir) memcpy(dir,save_dialog.dir,sizeof(save_dialog.dir));
-        if (param && save_dialog.dir[0] && save_dialog.param[0]) memcpy(param,save_dialog.param,sizeof(save_dialog.param));
+static ABI int32_t save_result(int32_t *p_result) {
+    if (!p_result) return (int32_t)0x80B8000D; /* SCE_COMMON_DIALOG_ERROR_ARG_NULL */
+    if (s_dialogs[2].status!=3) return (int32_t)0x80B80005; /* SCE_COMMON_DIALOG_ERROR_NOT_FINISHED */
+    p_result[0]=s_save_dialog.mode;
+    p_result[1]=0;
+    p_result[2]=1;
+    memcpy(p_result+8,&s_save_dialog.p_user_data,sizeof(s_save_dialog.p_user_data));
+    if (s_save_dialog.mode==1) {
+        char *sz_dir;
+        void *p_param;
+        memcpy(&sz_dir,p_result+4,sizeof(sz_dir));
+        memcpy(&p_param,p_result+6,sizeof(p_param));
+        if (sz_dir) memcpy(sz_dir,s_save_dialog.sz_dir,sizeof(s_save_dialog.sz_dir));
+        if (p_param && s_save_dialog.sz_dir[0] && s_save_dialog.param[0]) memcpy(p_param,s_save_dialog.param,sizeof(s_save_dialog.param));
     }
     return 0;
 }
-static ABI int32_t save_close(const void *param) { (void)param; dialogs[2].status=3; return 0; }
+static ABI int32_t save_close(const void *p_param) { (void)p_param; s_dialogs[2].status=3; return 0; }
 /* OrbisMsgDialogResult: mode, result, buttonId, reserved[32]; ends as accepted, like SaveDataDialog. */
-static ABI int32_t msg_result(int32_t *result) {
-    if (dialogs[1].status!=3) return (int32_t)0x80B80005; /* SCE_COMMON_DIALOG_ERROR_NOT_FINISHED */
-    if (!result) return (int32_t)0x80B8000D;              /* SCE_COMMON_DIALOG_ERROR_ARG_NULL */
-    memset(result,0,44);
-    result[2]=1;
+static ABI int32_t msg_result(int32_t *p_result) {
+    if (s_dialogs[1].status!=3) return (int32_t)0x80B80005; /* SCE_COMMON_DIALOG_ERROR_NOT_FINISHED */
+    if (!p_result) return (int32_t)0x80B8000D;              /* SCE_COMMON_DIALOG_ERROR_ARG_NULL */
+    memset(p_result,0,44);
+    p_result[2]=1;
     return 0;
 }
-static ABI int32_t msg_close(void) { dialogs[1].status=3; return 0; }
+static ABI int32_t msg_close(void) { s_dialogs[1].status=3; return 0; }
 typedef struct { int32_t size, error_code, user, reserved; } ErrorDialogParam;
 static ABI int32_t error_init(void) { return dialog_init(6); }
-static ABI int32_t error_open(const ErrorDialogParam *param) {
-    static uint32_t logged[32];
-    static int logged_count;
-    if (dialogs[6].status!=1 && dialogs[6].status!=3) return (int32_t)0x80B80006; /* INVALID_STATE */
-    if (!param) return (int32_t)0x80B8000D;                                         /* ARG_NULL */
-    const uint32_t code=(uint32_t)param->error_code;
-    int seen=0;
-    for (int k=0;k<logged_count;++k) seen|=logged[k]==code;
-    if (!seen && logged_count<32) {
-        logged[logged_count++]=code;
+static ABI int32_t error_open(const ErrorDialogParam *p_param) {
+    static uint32_t s_logged[32];
+    static int s_c_logged;
+    if (s_dialogs[6].status!=1 && s_dialogs[6].status!=3) return (int32_t)0x80B80006; /* INVALID_STATE */
+    if (!p_param) return (int32_t)0x80B8000D;                                         /* ARG_NULL */
+    const uint32_t code=(uint32_t)p_param->error_code;
+    int has_seen=0;
+    for (int k=0;k<s_c_logged;++k) has_seen|=s_logged[k]==code;
+    if (!has_seen && s_c_logged<32) {
+        s_logged[s_c_logged++]=code;
         printf("Runtime: ErrorDialog 0x%08X\n",code);
     }
-    dialogs[6].status=3; return 0;
+    s_dialogs[6].status=3; return 0;
 }
 static ABI int32_t error_status(void) { return dialog_status(6); }
 static ABI int32_t error_close(void) { return (int32_t)0x80B8000B; } /* NOT_RUNNING: an opened one has already finished */
 static ABI int32_t error_term(void) { return dialog_term(6); }
 /* OrbisHmdSetupDialogResult: result, reserved. With no headset to set up, the user can only
  * back out of the dialog: SCE_COMMON_DIALOG_RESULT_USER_CANCELED. */
-static ABI int32_t hmd_setup_result(int32_t *result) {
-    if (dialogs[11].status!=3) return (int32_t)0x80B80005; /* NOT_FINISHED */
-    if (!result) return (int32_t)0x80B8000D;               /* ARG_NULL */
-    result[0]=1;
+static ABI int32_t hmd_setup_result(int32_t *p_result) {
+    if (s_dialogs[11].status!=3) return (int32_t)0x80B80005; /* NOT_FINISHED */
+    if (!p_result) return (int32_t)0x80B8000D;               /* ARG_NULL */
+    p_result[0]=1;
     return 0;
 }
-static ABI int32_t hmd_setup_close(void) { dialogs[11].status=3; return 0; }
+static ABI int32_t hmd_setup_close(void) { s_dialogs[11].status=3; return 0; }
 /* SceSocialScreenDialogResult: result, reserved. Separate mode needs the PS VR processor unit, so
  * the user can only back out: SCE_COMMON_DIALOG_RESULT_USER_CANCELED. */
 static ABI int32_t social_result(int32_t *p_out_result) {
-    if (dialogs[10].status!=3) return (int32_t)0x80B80005; /* NOT_FINISHED */
+    if (s_dialogs[10].status!=3) return (int32_t)0x80B80005; /* NOT_FINISHED */
     if (!p_out_result) return (int32_t)0x80B8000D;         /* ARG_NULL */
     p_out_result[0]=1;
     return 0;
 }
-static ABI int32_t social_close(void) { dialogs[10].status=3; return 0; }
+static ABI int32_t social_close(void) { s_dialogs[10].status=3; return 0; }
 /* ScePlayGoDialogResult: result, reserved. Every chunk is installed, so the dialog has nothing to
  * wait for and ends as accepted: SCE_COMMON_DIALOG_RESULT_OK. */
 static ABI int32_t playgo_result(int32_t *p_out_result) {
-    if (dialogs[12].status!=3) return (int32_t)0x80B80005; /* NOT_FINISHED */
+    if (s_dialogs[12].status!=3) return (int32_t)0x80B80005; /* NOT_FINISHED */
     if (!p_out_result) return (int32_t)0x80B8000D;         /* ARG_NULL */
     p_out_result[0]=0;
     return 0;
 }
-static ABI int32_t playgo_close(void) { dialogs[12].status=3; return 0; }
+static ABI int32_t playgo_close(void) { s_dialogs[12].status=3; return 0; }
 /* SceWebBrowserDialogResult: result, then reserved. Offline, no page loads and the user can only
  * back out: SCE_COMMON_DIALOG_RESULT_USER_CANCELED. */
 static ABI int32_t web_result(int32_t *p_out_result) {
-    if (dialogs[7].status!=3) return (int32_t)0x80B80005; /* NOT_FINISHED */
+    if (s_dialogs[7].status!=3) return (int32_t)0x80B80005; /* NOT_FINISHED */
     if (!p_out_result) return (int32_t)0x80B8000D;         /* ARG_NULL */
     p_out_result[0]=1;
     return 0;
@@ -445,137 +445,137 @@ typedef struct {
     void *filter; uint32_t option, max_length; uint16_t *buffer;
     float x, y; uint32_t halign, valign; const uint16_t *placeholder, *title; int8_t reserved[16];
 } ImeParam;
-static struct { int running, finished, end_status; uint16_t *buffer; uint32_t max_length; } ime;
-size_t utf16_to_utf8(const uint16_t *in, size_t limit, char *out, size_t size) {
-    size_t n=0;
-    for (size_t i=0; in && i<limit && in[i] && n+4<size; ++i) {
-        uint32_t c=in[i];
-        if (c>=0xD800 && c<0xDC00 && i+1<limit && in[i+1]>=0xDC00 && in[i+1]<0xE000) { c=0x10000+((c-0xD800)<<10)+(in[i+1]-0xDC00); ++i; }
-        if (c<0x80) out[n++]=(char)c;
-        else if (c<0x800) { out[n++]=(char)(0xC0|c>>6); out[n++]=(char)(0x80|(c&63)); }
-        else if (c<0x10000) { out[n++]=(char)(0xE0|c>>12); out[n++]=(char)(0x80|((c>>6)&63)); out[n++]=(char)(0x80|(c&63)); }
-        else { out[n++]=(char)(0xF0|c>>18); out[n++]=(char)(0x80|((c>>12)&63)); out[n++]=(char)(0x80|((c>>6)&63)); out[n++]=(char)(0x80|(c&63)); }
+static struct { int is_running, has_finished, end_status; uint16_t *p_buffer; uint32_t max_length; } s_ime;
+size_t utf16_to_utf8(const uint16_t *p_in, size_t limit, char *sz_out, size_t cb_out) {
+    size_t cb_written=0;
+    for (size_t i=0; p_in && i<limit && p_in[i] && cb_written+4<cb_out; ++i) {
+        uint32_t c=p_in[i];
+        if (c>=0xD800 && c<0xDC00 && i+1<limit && p_in[i+1]>=0xDC00 && p_in[i+1]<0xE000) { c=0x10000+((c-0xD800)<<10)+(p_in[i+1]-0xDC00); ++i; }
+        if (c<0x80) sz_out[cb_written++]=(char)c;
+        else if (c<0x800) { sz_out[cb_written++]=(char)(0xC0|c>>6); sz_out[cb_written++]=(char)(0x80|(c&63)); }
+        else if (c<0x10000) { sz_out[cb_written++]=(char)(0xE0|c>>12); sz_out[cb_written++]=(char)(0x80|((c>>6)&63)); sz_out[cb_written++]=(char)(0x80|(c&63)); }
+        else { sz_out[cb_written++]=(char)(0xF0|c>>18); sz_out[cb_written++]=(char)(0x80|((c>>12)&63)); sz_out[cb_written++]=(char)(0x80|((c>>6)&63)); sz_out[cb_written++]=(char)(0x80|(c&63)); }
     }
-    out[n]=0; return n;
+    sz_out[cb_written]=0; return cb_written;
 }
-void utf8_to_utf16(const char *in, uint16_t *out, uint32_t max) {
-    uint32_t n=0;
-    for (const unsigned char *p=(const unsigned char *)in; *p && n<max;) {
+void utf8_to_utf16(const char *sz_in, uint16_t *p_out, uint32_t max) {
+    uint32_t c_units=0;
+    for (const unsigned char *p_cursor=(const unsigned char *)sz_in; *p_cursor && c_units<max;) {
         uint32_t c; int extra;
-        if (*p<0x80) { c=*p; extra=0; } else if ((*p&0xE0)==0xC0) { c=*p&31; extra=1; }
-        else if ((*p&0xF0)==0xE0) { c=*p&15; extra=2; } else { c=*p&7; extra=3; }
-        ++p;
-        for (int k=0;k<extra && (*p&0xC0)==0x80;++k) c=(c<<6)|(*p++&63);
-        if (c>=0x10000) { if (n+2>max) break; c-=0x10000; out[n++]=(uint16_t)(0xD800+(c>>10)); out[n++]=(uint16_t)(0xDC00+(c&1023)); }
-        else out[n++]=(uint16_t)c;
+        if (*p_cursor<0x80) { c=*p_cursor; extra=0; } else if ((*p_cursor&0xE0)==0xC0) { c=*p_cursor&31; extra=1; }
+        else if ((*p_cursor&0xF0)==0xE0) { c=*p_cursor&15; extra=2; } else { c=*p_cursor&7; extra=3; }
+        ++p_cursor;
+        for (int k=0;k<extra && (*p_cursor&0xC0)==0x80;++k) c=(c<<6)|(*p_cursor++&63);
+        if (c>=0x10000) { if (c_units+2>max) break; c-=0x10000; p_out[c_units++]=(uint16_t)(0xD800+(c>>10)); p_out[c_units++]=(uint16_t)(0xDC00+(c&1023)); }
+        else p_out[c_units++]=(uint16_t)c;
     }
-    out[n<max ? n : max]=0;
+    p_out[c_units<max ? c_units : max]=0;
 }
-static void ime_complete(int end_status, const char *text) {
-    if (!end_status && ime.buffer && ime.max_length) utf8_to_utf16(text,ime.buffer,ime.max_length);
-    ime.end_status=end_status; ime.finished=1; ime.running=0;
-    printf("Runtime: ImeDialog %s%s%s\n",end_status ? "cancelled" : "text: ",end_status ? "" : text,"");
+static void ime_complete(int end_status, const char *sz_text) {
+    if (!end_status && s_ime.p_buffer && s_ime.max_length) utf8_to_utf16(sz_text,s_ime.p_buffer,s_ime.max_length);
+    s_ime.end_status=end_status; s_ime.has_finished=1; s_ime.is_running=0;
+    printf("Runtime: ImeDialog %s%s%s\n",end_status ? "cancelled" : "text: ",end_status ? "" : sz_text,"");
 }
-static ABI int32_t ime_init(const ImeParam *param, const void *extended) {
-    (void)extended;
-    if (!param || !param->buffer || !param->max_length) return (int32_t)0x80BC0004; /* IME INVALID_ADDRESS */
-    if (ime.running) return (int32_t)0x80BC0003;                                  /* BUSY */
-    memset(&ime,0,sizeof(ime));
-    ime.buffer=param->buffer; ime.max_length=param->max_length; ime.running=1;
-    char initial[512], prompt[256];
-    utf16_to_utf8(param->buffer,param->max_length,initial,sizeof(initial));
-    utf16_to_utf8(param->title,128,prompt,sizeof(prompt));
-    const char *preset=getenv("PS_IME_TEXT");
-    if (preset) { ime_complete(0,preset); return 0; }
-    if (!psport_gpu_text_input_begin(initial,prompt[0] ? prompt : "Text")) {
-        const char *name=getenv("PS_USER_NAME");
-        ime_complete(0,name ? name : initial[0] ? initial : "Hunter");
+static ABI int32_t ime_init(const ImeParam *p_param, const void *p_extended) {
+    (void)p_extended;
+    if (!p_param || !p_param->buffer || !p_param->max_length) return (int32_t)0x80BC0004; /* IME INVALID_ADDRESS */
+    if (s_ime.is_running) return (int32_t)0x80BC0003;                                  /* BUSY */
+    memset(&s_ime,0,sizeof(s_ime));
+    s_ime.p_buffer=p_param->buffer; s_ime.max_length=p_param->max_length; s_ime.is_running=1;
+    char sz_initial[512], sz_prompt[256];
+    utf16_to_utf8(p_param->buffer,p_param->max_length,sz_initial,sizeof(sz_initial));
+    utf16_to_utf8(p_param->title,128,sz_prompt,sizeof(sz_prompt));
+    const char *sz_preset=getenv("PS_IME_TEXT");
+    if (sz_preset) { ime_complete(0,sz_preset); return 0; }
+    if (!psport_gpu_text_input_begin(sz_initial,sz_prompt[0] ? sz_prompt : "Text")) {
+        const char *sz_name=getenv("PS_USER_NAME");
+        ime_complete(0,sz_name ? sz_name : sz_initial[0] ? sz_initial : "Hunter");
     } else printf("Runtime: ImeDialog opened: type in the game window, Enter to confirm, Esc to cancel\n");
     return 0;
 }
 static ABI int32_t ime_status(void) {
-    if (ime.running) {
-        char text[512];
-        int state=psport_gpu_text_input_poll(text,sizeof(text));
-        if (state) ime_complete(state==1 ? 0 : 1,text);
+    if (s_ime.is_running) {
+        char sz_text[512];
+        int state=psport_gpu_text_input_poll(sz_text,sizeof(sz_text));
+        if (state) ime_complete(state==1 ? 0 : 1,sz_text);
     }
-    return ime.running ? 1 : ime.finished ? 2 : 0; /* Running / Finished / None */
+    return s_ime.is_running ? 1 : s_ime.has_finished ? 2 : 0; /* Running / Finished / None */
 }
-static ABI int32_t ime_result(uint32_t *result) {
-    if (!ime.finished) return (int32_t)0x80BC0101; /* DIALOG NOT_FINISHED */
-    if (result) *result=(uint32_t)ime.end_status;
+static ABI int32_t ime_result(uint32_t *p_result) {
+    if (!s_ime.has_finished) return (int32_t)0x80BC0101; /* DIALOG NOT_FINISHED */
+    if (p_result) *p_result=(uint32_t)s_ime.end_status;
     return 0;
 }
-static ABI int32_t ime_term(void) { memset(&ime,0,sizeof(ime)); return 0; }
+static ABI int32_t ime_term(void) { memset(&s_ime,0,sizeof(s_ime)); return 0; }
 /* The dialog's panel is the on-screen keyboard's (runtime_ime.c), whatever the extended parameters ask. */
-static ABI int32_t ime_panel_size_extended(const ImeParam *param, const void *extended, uint32_t *width, uint32_t *height) {
-    (void)extended;
-    if (!param || !width || !height) return (int32_t)0x80BC0031; /* IME INVALID_ADDRESS */
-    runtime_ime_panel_size(param->type,width,height);
+static ABI int32_t ime_panel_size_extended(const ImeParam *p_param, const void *p_extended, uint32_t *p_width, uint32_t *p_height) {
+    (void)p_extended;
+    if (!p_param || !p_width || !p_height) return (int32_t)0x80BC0031; /* IME INVALID_ADDRESS */
+    runtime_ime_panel_size(p_param->type,p_width,p_height);
     return 0;
 }
 /* A dialog is in use from its initialization until its termination, and the IME dialog while it runs. */
 static ABI int32_t common_is_used(void) {
-    for (size_t i=0;i<sizeof(dialogs)/sizeof(*dialogs);++i) if (dialogs[i].initialized) return 1;
-    return ime.running;
+    for (size_t i=0;i<sizeof(s_dialogs)/sizeof(*s_dialogs);++i) if (s_dialogs[i].is_initialized) return 1;
+    return s_ime.is_running;
 }
 
 /* ---- DiscMap: the game is fully installed, no disc bitmap exists ---- */
 #define DISC_MAP_NO_BITMAP ((int32_t)0x81100004)
 /* Every byte of an installed title is on the HDD; libSceFios2 takes a failure here for a request
  * off the disc. */
-static ABI int32_t discmap_on_hdd(const char *path,int64_t offset,int64_t size,int32_t *result) {
-    (void)path; (void)offset; (void)size;
-    if (!result) return (int32_t)0x81100001; /* INVALID_ARGUMENT */
-    *result=1;
+static ABI int32_t discmap_on_hdd(const char *sz_path,int64_t off_file,int64_t cb_range,int32_t *p_result) {
+    (void)sz_path; (void)off_file; (void)cb_range;
+    if (!p_result) return (int32_t)0x81100001; /* INVALID_ARGUMENT */
+    *p_result=1;
     return 0;
 }
 /* The one the games call at boot succeeds instead, as in shadPS4, with its three outputs zero:
  * they read them. */
-static ABI int32_t discmap_7c98(const char *path,int64_t offset,int64_t size,int32_t *flags,int32_t *r1,int32_t *r2) {
-    (void)path; (void)offset; (void)size;
-    if (!flags || !r1 || !r2) return (int32_t)0x81100001; /* INVALID_ARGUMENT */
-    *flags=0; *r1=0; *r2=0;
+static ABI int32_t discmap_7c98(const char *sz_path,int64_t off_file,int64_t cb_range,int32_t *p_flags,int32_t *p_result1,int32_t *p_result2) {
+    (void)sz_path; (void)off_file; (void)cb_range;
+    if (!p_flags || !p_result1 || !p_result2) return (int32_t)0x81100001; /* INVALID_ARGUMENT */
+    *p_flags=0; *p_result1=0; *p_result2=0;
     return 0;
 }
-static ABI int32_t discmap_8a82(const char *path,int64_t offset,int64_t size,int32_t *flags,int32_t *r1,int32_t *r2) {
-    (void)path; (void)offset; (void)size; (void)flags; (void)r1; (void)r2; return DISC_MAP_NO_BITMAP;
+static ABI int32_t discmap_8a82(const char *sz_path,int64_t off_file,int64_t cb_range,int32_t *p_flags,int32_t *p_result1,int32_t *p_result2) {
+    (void)sz_path; (void)off_file; (void)cb_range; (void)p_flags; (void)p_result1; (void)p_result2; return DISC_MAP_NO_BITMAP;
 }
 
 /* ---- Devices that are absent: microphone ---- */
 static ABI int32_t audio_in_open(void) { return AUDIO_IN_NOT_OPENED; }
 /* PlayStation Move: the library runs, no motion controller is ever connected. A handle is still
  * handed out per open, distinct from other devices' handles, as on the console. */
-static int move_initialized;
+static int s_is_move_initialized;
 static ABI int32_t move_init(void) {
-    if (move_initialized) return MOVE_ALREADY_INIT;
-    move_initialized=1; return 0;
+    if (s_is_move_initialized) return MOVE_ALREADY_INIT;
+    s_is_move_initialized=1; return 0;
 }
-static ABI int32_t move_open(int32_t user,int32_t type,int32_t index) {
-    (void)user; (void)type; (void)index;
-    static int32_t handle=0x30b0000;
-    if (!move_initialized) return MOVE_NOT_INIT;
-    return __atomic_add_fetch(&handle,0x100,__ATOMIC_RELAXED);
+static ABI int32_t move_open(int32_t user,int32_t type,int32_t i_device) {
+    (void)user; (void)type; (void)i_device;
+    static int32_t s_h_handle=0x30b0000;
+    if (!s_is_move_initialized) return MOVE_NOT_INIT;
+    return __atomic_add_fetch(&s_h_handle,0x100,__ATOMIC_RELAXED);
 }
 /* OrbisMoveDeviceInfo: sphere radius and accelerometer offset, four floats. */
-static ABI int32_t move_device_info(int32_t handle,float *info) {
-    (void)handle;
-    if (!move_initialized) return MOVE_NOT_INIT;
-    if (!info) return MOVE_INVALID_ARG;
-    memset(info,0,16);
+static ABI int32_t move_device_info(int32_t h_handle,float *p_info) {
+    (void)h_handle;
+    if (!s_is_move_initialized) return MOVE_NOT_INIT;
+    if (!p_info) return MOVE_INVALID_ARG;
+    memset(p_info,0,16);
     return MOVE_NO_CONTROLLER;
 }
-static ABI int32_t move_read_recent(int32_t handle,int64_t timestamp,void *data,int32_t *count) {
-    (void)handle;
-    if (!move_initialized) return MOVE_NOT_INIT;
-    if (timestamp<0 || !data || !count) return MOVE_INVALID_ARG;
-    *count=0;
+static ABI int32_t move_read_recent(int32_t h_handle,int64_t timestamp,void *p_data,int32_t *p_count) {
+    (void)h_handle;
+    if (!s_is_move_initialized) return MOVE_NOT_INIT;
+    if (timestamp<0 || !p_data || !p_count) return MOVE_INVALID_ARG;
+    *p_count=0;
     return MOVE_NO_CONTROLLER;
 }
-static ABI int32_t move_no_controller(int32_t handle) { (void)handle; return move_initialized ? MOVE_NO_CONTROLLER : MOVE_NOT_INIT; }
+static ABI int32_t move_no_controller(int32_t h_handle) { (void)h_handle; return s_is_move_initialized ? MOVE_NO_CONTROLLER : MOVE_NOT_INIT; }
 static ABI int32_t move_term(void) {
-    if (!move_initialized) return MOVE_NOT_INIT;
-    move_initialized=0; return 0;
+    if (!s_is_move_initialized) return MOVE_NOT_INIT;
+    s_is_move_initialized=0; return 0;
 }
 /* ---- RazorCpu ---- */
 /* The profiler's markers reach Razor only on a devkit capturing with it; a retail console, like
@@ -583,7 +583,7 @@ static ABI int32_t move_term(void) {
 static ABI int32_t razor_idle(void) { return 0; }
 
 
-static const RuntimeExport exports[]={
+static const RuntimeExport s_exports[]={
     {"sceUserServiceInitialize",user_initialize}, {"sceUserServiceTerminate",runtime_stub},
     {"sceUserServiceGetInitialUser",user_initial}, {"sceUserServiceGetLoginUserIdList",user_list},
     {"sceUserServiceGetUserName",user_name}, {"sceUserServiceGetEvent",user_event},
@@ -728,19 +728,19 @@ static const RuntimeExport exports[]={
     {"sceRazorCpuPlotValue",razor_idle}, {"sceRazorCpuWriteBookmark",razor_idle},
     {"sceRazorCpuIsCapturing",razor_idle},
 };
-uintptr_t runtime_services_resolve(const char *name) {
-    const uintptr_t online=runtime_net_resolve(name); /* PS_ONLINE=1: the online module first */
+uintptr_t runtime_services_resolve(const char *sz_name) {
+    const uintptr_t online=runtime_net_resolve(sz_name); /* PS_ONLINE=1: the online module first */
     if (online) return online;
-    const uintptr_t found=RUNTIME_LOOKUP(exports,name);
+    const uintptr_t found=RUNTIME_LOOKUP(s_exports,sz_name);
     if (found) return found;
-    const uintptr_t va_http=runtime_http_resolve(name);
+    const uintptr_t va_http=runtime_http_resolve(sz_name);
     if (va_http) return va_http;
-    const uintptr_t va_trophy=runtime_trophy_resolve(name);
+    const uintptr_t va_trophy=runtime_trophy_resolve(sz_name);
     if (va_trophy) return va_trophy;
-    const uintptr_t va_json=runtime_json_resolve(name);
+    const uintptr_t va_json=runtime_json_resolve(sz_name);
     if (va_json) return va_json;
-    const uintptr_t va_np=runtime_np_resolve(name);
-    return va_np ? va_np : runtime_socket_resolve(name);
+    const uintptr_t va_np=runtime_np_resolve(sz_name);
+    return va_np ? va_np : runtime_socket_resolve(sz_name);
 }
 #else
 uintptr_t runtime_services_resolve(const char *name) { (void)name; return 0; }

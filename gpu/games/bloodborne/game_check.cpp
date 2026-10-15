@@ -40,9 +40,9 @@ bool IsBrokenDcx(const std::string& path) {
         std::memcmp(data.data() + 0x28, "DFLT", 4)) {
         return false;
     }
-    const auto big_endian = [&](std::size_t off) {
-        return std::size_t(data[off]) << 24 | std::size_t(data[off + 1]) << 16 | std::size_t(data[off + 2]) << 8 |
-               data[off + 3];
+    const auto big_endian = [&](std::size_t off_read) {
+        return std::size_t(data[off_read]) << 24 | std::size_t(data[off_read + 1]) << 16 | std::size_t(data[off_read + 2]) << 8 |
+               data[off_read + 3];
     };
     const std::size_t cb_unpacked = big_endian(0x1c), cb_packed = big_endian(0x20);
     const std::size_t off_stream = std::min<std::size_t>(0x4c, data.size());

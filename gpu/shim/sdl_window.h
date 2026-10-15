@@ -25,13 +25,13 @@ struct WindowSystemInfo {
 
 class WindowSDL {
 public:
-    WindowSDL(s32 width, s32 height, const char* title, const char* icon_path);
+    WindowSDL(s32 width, s32 height, const char* sz_title, const char* sz_icon_path);
     ~WindowSDL();
-    s32 GetWidth() const { return width.load(std::memory_order_relaxed); }
-    s32 GetHeight() const { return height.load(std::memory_order_relaxed); }
-    SDL_Window* GetSDLWindow() const { return window; }
-    WindowSystemInfo GetWindowInfo() const { return window_info; }
-    bool IsOpen() const { return is_open.load(std::memory_order_relaxed); }
+    s32 GetWidth() const { return m_width.load(std::memory_order_relaxed); }
+    s32 GetHeight() const { return m_height.load(std::memory_order_relaxed); }
+    SDL_Window* GetSDLWindow() const { return m_p_window; }
+    WindowSystemInfo GetWindowInfo() const { return m_window_info; }
+    bool IsOpen() const { return m_is_open.load(std::memory_order_relaxed); }
     /// Processes pending window events. Returns false once the user closed the window.
     bool PollEvents();
     /// Keyboard text entry for the system IME dialog; typed text shows in the title bar.
@@ -43,50 +43,50 @@ public:
     /// Mouse look (psport_gpu_mouse_take): motion and wheel notches since the last call, reset.
     void TakeMouse(double& dx, double& dy, int& wheel_up, int& wheel_down);
     /// The window holds the mouse (relative mode) for looking around.
-    bool MouseCaptured() const { return mouse_captured.load(std::memory_order_relaxed); }
+    bool MouseCaptured() const { return m_is_mouse_captured.load(std::memory_order_relaxed); }
     /// mouse_look=0: a click does not take the mouse.
-    static void EnableMouseLook(bool enabled) { mouse_look.store(enabled, std::memory_order_relaxed); }
+    static void EnableMouseLook(bool is_enabled) { m_is_mouse_look.store(is_enabled, std::memory_order_relaxed); }
     /// libSceMouse (psport_gpu_game_mouse_take): the buttons held (SDL_BUTTON_MASK bits), and the motion,
     /// wheel and tilt since the last call, reset. False while the host has no mouse.
     bool TakeGameMouse(s32& dx, s32& dy, s32& wheel, s32& tilt, u32& buttons);
     /// libSceImeKeyboard (psport_gpu_game_keyboard_*): while open, the keys the port does not keep are
     /// queued for the game; take returns up to max of them. keyboard: the host has one.
-    static void OpenGameKeyboard(bool open) { game_keyboard_open.store(open, std::memory_order_relaxed); }
-    int TakeGameKeys(PsKeyEvent* events, int max, bool& keyboard, u32& dropped);
+    static void OpenGameKeyboard(bool is_open) { m_is_game_keyboard_open.store(is_open, std::memory_order_relaxed); }
+    int TakeGameKeys(PsKeyEvent* p_events, int max, bool& keyboard, u32& dropped);
 
 private:
-    std::atomic<s32> width, height;
-    std::atomic<bool> is_open{true};
-    std::mutex text_mutex;
-    bool text_requested{}, text_active{}, m_is_text_end_requested{};
-    int text_state{};
-    std::string text, text_prompt, base_title;
+    std::atomic<s32> m_width, m_height;
+    std::atomic<bool> m_is_open{true};
+    std::mutex m_text_mutex;
+    bool m_is_text_requested{}, m_is_text_active{}, m_is_text_end_requested{};
+    int m_text_state{};
+    std::string m_text, m_text_prompt, m_base_title;
     void UpdateTextTitle();
     void UpdateCursor();
-    u64 last_mouse_motion_ms{}; ///< SDL_GetTicks of the last mouse motion (UpdateCursor)
-    bool cursor_hidden{};
-    void CaptureMouse(bool capture);
+    u64 m_last_mouse_motion_ms{}; ///< SDL_GetTicks of the last mouse motion (UpdateCursor)
+    bool m_is_cursor_hidden{};
+    void CaptureMouse(bool should_capture);
     void GameMouseEvent(const SDL_Event& event);
-    std::mutex mouse_mutex;
-    double mouse_dx{}, mouse_dy{};
-    int wheel_up{}, wheel_down{};
-    std::atomic<bool> mouse_captured{false};
-    static inline std::atomic<bool> mouse_look{true};
-    double game_dx{}, game_dy{};
-    float game_wheel{}, game_tilt{};
-    u32 game_buttons{};
-    std::atomic<bool> host_mouse{false};
+    std::mutex m_mouse_mutex;
+    double m_mouse_dx{}, m_mouse_dy{};
+    int m_c_wheel_up{}, m_c_wheel_down{};
+    std::atomic<bool> m_is_mouse_captured{false};
+    static inline std::atomic<bool> m_is_mouse_look{true};
+    double m_game_dx{}, m_game_dy{};
+    float m_game_wheel{}, m_game_tilt{};
+    u32 m_game_buttons{};
+    std::atomic<bool> m_is_host_mouse{false};
     void GameKeyEvent(const SDL_Event& event);
     void SyncGameKeyboard();
-    std::mutex key_mutex;
-    std::deque<PsKeyEvent> game_keys;
-    std::bitset<512> game_keys_held; ///< by scancode: presses the game saw, so it gets their release
-    u32 game_keys_dropped{};
-    bool game_keyboard_synced{};
-    std::atomic<bool> host_keyboard{false};
-    static inline std::atomic<bool> game_keyboard_open{false};
-    SDL_Window* window{};
-    WindowSystemInfo window_info{};
+    std::mutex m_key_mutex;
+    std::deque<PsKeyEvent> m_game_keys;
+    std::bitset<512> m_game_keys_held; ///< by scancode: presses the game saw, so it gets their release
+    u32 m_game_keys_dropped{};
+    bool m_is_game_keyboard_synced{};
+    std::atomic<bool> m_is_host_keyboard{false};
+    static inline std::atomic<bool> m_is_game_keyboard_open{false};
+    SDL_Window* m_p_window{};
+    WindowSystemInfo m_window_info{};
 };
 
 } // namespace Frontend

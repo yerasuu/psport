@@ -29,7 +29,7 @@ struct Hooks {
     std::function<u64()> occlusion_events;
 };
 
-/// A top-level submission of `num_dwords` is about to be decoded (GPU command thread).
-Injection Next(u32 num_dwords, const Hooks& hooks);
+/// A top-level submission of `c_dwords` is about to be decoded (GPU command thread).
+Injection Next(u32 c_dwords, const Hooks& hooks);
 
 } // namespace AmdGpu::Pm4SelfTest

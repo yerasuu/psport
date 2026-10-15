@@ -23,17 +23,17 @@ typedef struct Flag {
     uint64_t cancels;
     int deleted;
     pthread_cond_t changed;
-    struct Flag *next;
+    struct Flag *p_next;
 } Flag;
-static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
-static Flag *registry;
-static uint64_t next_id=1;
-static size_t created, deleted, waits, timed_out;
+static pthread_mutex_t s_lock=PTHREAD_MUTEX_INITIALIZER;
+static Flag *s_p_registry;
+static uint64_t s_next_id=1;
+static size_t s_c_created, s_c_deleted, s_c_waits, s_c_timed_out;
 /* Some titles create event flags dozens of times a second: past these, creations are counted. */
 enum { LISTED_CREATIONS=8 };
-static int trace_eventflag(void) { static int v=-1; if (v<0) v=getenv("PS_TRACE_EVENTFLAG")!=NULL; return v; }
+static int trace_eventflag(void) { static int s_is_enabled=-1; if (s_is_enabled<0) s_is_enabled=getenv("PS_TRACE_EVENTFLAG")!=NULL; return s_is_enabled; }
 static Flag *find(uint64_t id) {
-    for (Flag *f=registry;f;f=f->next) if (f->id==id) return f;
+    for (Flag *p_flag=s_p_registry;p_flag;p_flag=p_flag->p_next) if (p_flag->id==id) return p_flag;
     return NULL;
 }
 static void host_check(int e) {
@@ -44,31 +44,31 @@ static uint64_t now_ns(void) {
     if (clock_gettime(CLOCK_MONOTONIC,&t)) { perror("clock_gettime"); exit(1); }
     return (uint64_t)t.tv_sec*1000000000+(uint64_t)t.tv_nsec;
 }
-static ABI int32_t flag_create(uint64_t *out,const char *name,uint32_t attr,uint64_t pattern,const void *options) {
-    (void)options; /* only a size field on the console; nothing in it changes behaviour here */
-    if (!out || !name || (attr & ~(uint32_t)(ATTR_FIFO|ATTR_PRIO|ATTR_SINGLE|ATTR_MULTI)) ||
+static ABI int32_t flag_create(uint64_t *p_out,const char *sz_name,uint32_t attr,uint64_t pattern,const void *p_options) {
+    (void)p_options; /* only a size field on the console; nothing in it changes behaviour here */
+    if (!p_out || !sz_name || (attr & ~(uint32_t)(ATTR_FIFO|ATTR_PRIO|ATTR_SINGLE|ATTR_MULTI)) ||
         (attr&(ATTR_FIFO|ATTR_PRIO))==(ATTR_FIFO|ATTR_PRIO) || (attr&(ATTR_SINGLE|ATTR_MULTI))==(ATTR_SINGLE|ATTR_MULTI))
         return ERR(22);
-    if (strlen(name)>31) return ERR(63);
-    Flag *f=calloc(1,sizeof(*f));
-    if (!f) return ERR(12);
+    if (strlen(sz_name)>31) return ERR(63);
+    Flag *p_flag=calloc(1,sizeof(*p_flag));
+    if (!p_flag) return ERR(12);
     pthread_condattr_t cattr;
     host_check(pthread_condattr_init(&cattr));
     host_check(pthread_condattr_setclock(&cattr,CLOCK_MONOTONIC));
-    host_check(pthread_cond_init(&f->changed,&cattr));
+    host_check(pthread_cond_init(&p_flag->changed,&cattr));
     host_check(pthread_condattr_destroy(&cattr));
-    runtime_exception_lock(&lock);
-    f->id=next_id++; f->attr=attr; f->pattern=pattern;
-    uint64_t id=f->id;
-    f->next=registry; registry=f; *out=id;
-    const size_t count=++created, gone=deleted;
-    runtime_exception_unlock(&lock);
-    if (count<=LISTED_CREATIONS || trace_eventflag())
+    runtime_exception_lock(&s_lock);
+    p_flag->id=s_next_id++; p_flag->attr=attr; p_flag->pattern=pattern;
+    uint64_t id=p_flag->id;
+    p_flag->p_next=s_p_registry; s_p_registry=p_flag; *p_out=id;
+    const size_t c_created=++s_c_created, c_deleted=s_c_deleted;
+    runtime_exception_unlock(&s_lock);
+    if (c_created<=LISTED_CREATIONS || trace_eventflag())
         printf("Runtime: event flag id=%llu '%s', attr=%#x, pattern=%#llx\n",
-               (unsigned long long)id,name,attr,(unsigned long long)pattern);
-    else if (!(count&(count-1)))
+               (unsigned long long)id,sz_name,attr,(unsigned long long)pattern);
+    else if (!(c_created&(c_created-1)))
         printf("Runtime: event flags created=%zu so far, deleted=%zu; only the first %d are listed (PS_TRACE_EVENTFLAG=1: each)\n",
-               count,gone,LISTED_CREATIONS);
+               c_created,c_deleted,LISTED_CREATIONS);
     return 0;
 }
 static int valid_mode(uint32_t mode) {
@@ -77,117 +77,117 @@ static int valid_mode(uint32_t mode) {
            (wait==WAIT_AND || wait==WAIT_OR) && clear!=(CLEAR_ALL|CLEAR_PAT);
 }
 /* Called with the lock held; clears what the mode asks once satisfied. */
-static int take(Flag *f,uint64_t bits,uint32_t mode,uint64_t *result) {
-    int met=(mode&WAIT_AND) ? (f->pattern&bits)==bits : (f->pattern&bits)!=0;
+static int take(Flag *p_flag,uint64_t bits,uint32_t mode,uint64_t *p_result) {
+    int met=(mode&WAIT_AND) ? (p_flag->pattern&bits)==bits : (p_flag->pattern&bits)!=0;
     if (!met) return 0;
-    if (result) *result=f->pattern;
-    if (mode&CLEAR_ALL) f->pattern=0;
-    else if (mode&CLEAR_PAT) f->pattern&=~bits;
+    if (p_result) *p_result=p_flag->pattern;
+    if (mode&CLEAR_ALL) p_flag->pattern=0;
+    else if (mode&CLEAR_PAT) p_flag->pattern&=~bits;
     return 1;
 }
-static void release(Flag *f) {
-    if (!--f->waiters && f->deleted) {
-        host_check(pthread_cond_destroy(&f->changed));
-        free(f);
+static void release(Flag *p_flag) {
+    if (!--p_flag->waiters && p_flag->deleted) {
+        host_check(pthread_cond_destroy(&p_flag->changed));
+        free(p_flag);
     }
 }
-static int32_t wait_flag(uint64_t id,uint64_t bits,uint32_t mode,uint64_t *result,uint32_t *timeout,int block) {
-    runtime_exception_lock(&lock);
-    Flag *f=find(id);
+static int32_t wait_flag(uint64_t id,uint64_t bits,uint32_t mode,uint64_t *p_result,uint32_t *p_timeout,int block) {
+    runtime_exception_lock(&s_lock);
+    Flag *p_flag=find(id);
     int32_t status=0;
-    if (!f) status=ERR(3);
+    if (!p_flag) status=ERR(3);
     else if (!bits || !valid_mode(mode)) status=ERR(22);
-    else if (!(f->attr&ATTR_MULTI) && f->waiters) status=ERR(1);
-    else if (take(f,bits,mode,result)) ++waits;
-    else if (!block) { status=ERR(16); if (result) *result=f->pattern; }
-    else if (timeout && !*timeout) { status=ERR(60); if (result) *result=f->pattern; ++timed_out; }
+    else if (!(p_flag->attr&ATTR_MULTI) && p_flag->waiters) status=ERR(1);
+    else if (take(p_flag,bits,mode,p_result)) ++s_c_waits;
+    else if (!block) { status=ERR(16); if (p_result) *p_result=p_flag->pattern; }
+    else if (p_timeout && !*p_timeout) { status=ERR(60); if (p_result) *p_result=p_flag->pattern; ++s_c_timed_out; }
     else {
-        ++f->waiters;
-        const uint64_t cancels=f->cancels, wait_start=runtime_wait_clock();
-        const uint64_t deadline=timeout ? now_ns()+(uint64_t)*timeout*1000 : 0;
+        ++p_flag->waiters;
+        const uint64_t cancels=p_flag->cancels, wait_start=runtime_wait_clock();
+        const uint64_t deadline=p_timeout ? now_ns()+(uint64_t)*p_timeout*1000 : 0;
         const struct timespec end={.tv_sec=(time_t)(deadline/1000000000),.tv_nsec=(long)(deadline%1000000000)};
         for (;;) {
-            if (f->deleted) { status=ERR(13); break; }
-            if (f->cancels!=cancels) { status=ERR(85); if (result) *result=f->pattern; break; }
-            if (take(f,bits,mode,result)) { ++waits; break; }
-            int e=runtime_exception_wait(&f->changed,&lock,timeout ? &end : NULL);
+            if (p_flag->deleted) { status=ERR(13); break; }
+            if (p_flag->cancels!=cancels) { status=ERR(85); if (p_result) *p_result=p_flag->pattern; break; }
+            if (take(p_flag,bits,mode,p_result)) { ++s_c_waits; break; }
+            int e=runtime_exception_wait(&p_flag->changed,&s_lock,p_timeout ? &end : NULL);
             if (e==ETIMEDOUT) {
-                if (take(f,bits,mode,result)) { ++waits; break; }
-                status=ERR(60); if (result) *result=f->pattern; ++timed_out;
+                if (take(p_flag,bits,mode,p_result)) { ++s_c_waits; break; }
+                status=ERR(60); if (p_result) *p_result=p_flag->pattern; ++s_c_timed_out;
                 break;
             }
             host_check(e);
         }
         runtime_wait_note(0,runtime_wait_clock()-wait_start);
-        if (timeout) {
+        if (p_timeout) {
             uint64_t now=now_ns();
-            *timeout=status ? 0 : (uint32_t)(now>=deadline ? 0 : (deadline-now)/1000);
+            *p_timeout=status ? 0 : (uint32_t)(now>=deadline ? 0 : (deadline-now)/1000);
         }
-        release(f);
+        release(p_flag);
     }
-    runtime_exception_unlock(&lock);
+    runtime_exception_unlock(&s_lock);
     return status;
 }
-static ABI int32_t flag_wait(uint64_t id,uint64_t bits,uint32_t mode,uint64_t *result,uint32_t *timeout) {
-    return wait_flag(id,bits,mode,result,timeout,1);
+static ABI int32_t flag_wait(uint64_t id,uint64_t bits,uint32_t mode,uint64_t *p_result,uint32_t *p_timeout) {
+    return wait_flag(id,bits,mode,p_result,p_timeout,1);
 }
-static ABI int32_t flag_poll(uint64_t id,uint64_t bits,uint32_t mode,uint64_t *result) {
-    return wait_flag(id,bits,mode,result,NULL,0);
+static ABI int32_t flag_poll(uint64_t id,uint64_t bits,uint32_t mode,uint64_t *p_result) {
+    return wait_flag(id,bits,mode,p_result,NULL,0);
 }
 static ABI int32_t flag_set(uint64_t id,uint64_t bits) {
-    runtime_exception_lock(&lock);
-    Flag *f=find(id);
-    if (f) { f->pattern|=bits; host_check(pthread_cond_broadcast(&f->changed)); }
-    runtime_exception_unlock(&lock);
-    return f ? 0 : ERR(3);
+    runtime_exception_lock(&s_lock);
+    Flag *p_flag=find(id);
+    if (p_flag) { p_flag->pattern|=bits; host_check(pthread_cond_broadcast(&p_flag->changed)); }
+    runtime_exception_unlock(&s_lock);
+    return p_flag ? 0 : ERR(3);
 }
 /* The console keeps the bits that are set in the argument: pattern &= bits. */
 static ABI int32_t flag_clear(uint64_t id,uint64_t bits) {
-    runtime_exception_lock(&lock);
-    Flag *f=find(id);
-    if (f) f->pattern&=bits;
-    runtime_exception_unlock(&lock);
-    return f ? 0 : ERR(3);
+    runtime_exception_lock(&s_lock);
+    Flag *p_flag=find(id);
+    if (p_flag) p_flag->pattern&=bits;
+    runtime_exception_unlock(&s_lock);
+    return p_flag ? 0 : ERR(3);
 }
-static ABI int32_t flag_cancel(uint64_t id,uint64_t pattern,int32_t *waiting) {
-    runtime_exception_lock(&lock);
-    Flag *f=find(id);
-    if (f) {
-        if (waiting) *waiting=(int32_t)f->waiters;
-        f->pattern=pattern; ++f->cancels;
-        host_check(pthread_cond_broadcast(&f->changed));
+static ABI int32_t flag_cancel(uint64_t id,uint64_t pattern,int32_t *p_waiting) {
+    runtime_exception_lock(&s_lock);
+    Flag *p_flag=find(id);
+    if (p_flag) {
+        if (p_waiting) *p_waiting=(int32_t)p_flag->waiters;
+        p_flag->pattern=pattern; ++p_flag->cancels;
+        host_check(pthread_cond_broadcast(&p_flag->changed));
     }
-    runtime_exception_unlock(&lock);
-    return f ? 0 : ERR(3);
+    runtime_exception_unlock(&s_lock);
+    return p_flag ? 0 : ERR(3);
 }
 static ABI int32_t flag_delete(uint64_t id) {
-    runtime_exception_lock(&lock);
-    Flag **p=&registry;
-    while (*p && (*p)->id!=id) p=&(*p)->next;
-    if (!*p) { runtime_exception_unlock(&lock); return ERR(3); }
-    Flag *f=*p; *p=f->next; f->deleted=1; ++deleted;
-    if (f->waiters) host_check(pthread_cond_broadcast(&f->changed));
-    else { host_check(pthread_cond_destroy(&f->changed)); free(f); }
-    runtime_exception_unlock(&lock);
+    runtime_exception_lock(&s_lock);
+    Flag **pp_flag=&s_p_registry;
+    while (*pp_flag && (*pp_flag)->id!=id) pp_flag=&(*pp_flag)->p_next;
+    if (!*pp_flag) { runtime_exception_unlock(&s_lock); return ERR(3); }
+    Flag *p_flag=*pp_flag; *pp_flag=p_flag->p_next; p_flag->deleted=1; ++s_c_deleted;
+    if (p_flag->waiters) host_check(pthread_cond_broadcast(&p_flag->changed));
+    else { host_check(pthread_cond_destroy(&p_flag->changed)); free(p_flag); }
+    runtime_exception_unlock(&s_lock);
     return 0;
 }
-static const RuntimeExport exports[]={
+static const RuntimeExport s_exports[]={
     {"sceKernelCreateEventFlag",flag_create}, {"sceKernelDeleteEventFlag",flag_delete},
     {"sceKernelWaitEventFlag",flag_wait}, {"sceKernelPollEventFlag",flag_poll},
     {"sceKernelSetEventFlag",flag_set}, {"sceKernelClearEventFlag",flag_clear},
     {"sceKernelCancelEventFlag",flag_cancel},
 };
-uintptr_t runtime_eventflag_resolve(const char *name) { return RUNTIME_LOOKUP(exports,name); }
+uintptr_t runtime_eventflag_resolve(const char *sz_name) { return RUNTIME_LOOKUP(s_exports,sz_name); }
 void runtime_eventflag_report(void) {
-    runtime_exception_lock(&lock);
-    printf("Runtime: event flag waits=%zu, timeouts=%zu\n",waits,timed_out);
-    runtime_exception_unlock(&lock);
+    runtime_exception_lock(&s_lock);
+    printf("Runtime: event flag waits=%zu, timeouts=%zu\n",s_c_waits,s_c_timed_out);
+    runtime_exception_unlock(&s_lock);
 }
 void runtime_eventflag_created_report(void) {
-    char line[96];
-    const int used=snprintf(line,sizeof(line),"Runtime: event flags created=%zu, deleted=%zu\n",
-                            __atomic_load_n(&created,__ATOMIC_RELAXED),__atomic_load_n(&deleted,__ATOMIC_RELAXED));
-    if (used>0 && write(1,line,(size_t)used)<0) return;
+    char sz_line[96];
+    const int used=snprintf(sz_line,sizeof(sz_line),"Runtime: event flags created=%zu, deleted=%zu\n",
+                            __atomic_load_n(&s_c_created,__ATOMIC_RELAXED),__atomic_load_n(&s_c_deleted,__ATOMIC_RELAXED));
+    if (used>0 && write(1,sz_line,(size_t)used)<0) return;
 }
 #else
 uintptr_t runtime_eventflag_resolve(const char *name) { (void)name; return 0; }

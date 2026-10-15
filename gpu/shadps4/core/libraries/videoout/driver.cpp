@@ -339,7 +339,7 @@ static void PrintMemory() {
         std::fclose(statm);
     }
     const u64 rss = u64(rss_pages) * u64(sysconf(_SC_PAGESIZE));
-    const u64 device = PsStats::device_alloc_bytes.load() - PsStats::device_free_bytes.load();
+    const u64 device = PsStats::g_cb_device_alloc.load() - PsStats::g_cb_device_free.load();
     u64 vma_blocks = 0, vma_used = 0;
     Vulkan::VmaDeviceUsage(vma_blocks, vma_used);
     std::printf("Memory: VRAM %llu MiB, GTT %llu MiB, RSS %llu MiB; Vulkan memory %llu MiB "
@@ -349,22 +349,22 @@ static void PrintMemory() {
                 (unsigned long long)(vram_kib >> 10), (unsigned long long)(gtt_kib >> 10),
                 (unsigned long long)(rss >> 20), (unsigned long long)(device >> 20),
                 (unsigned long long)(vma_blocks >> 20), (unsigned long long)(vma_used >> 20),
-                (unsigned long long)(PsStats::vk_image_bytes.load() >> 20),
-                (unsigned long long)(PsStats::live_image_bytes.load() >> 20),
-                (unsigned long long)PsStats::live_images.load(),
-                (unsigned long long)(PsStats::residency_alloc_bytes.load() >> 20),
-                (unsigned long long)(PsStats::residency_unused_bytes.load() >> 20),
-                (unsigned long long)(PsStats::vram_idle_bytes.exchange(0) >> 20),
-                (unsigned long long)(PsStats::vram_unmapped_bytes.exchange(0) >> 20),
-                (unsigned long long)(PsStats::vram_chunks_freed_bytes.exchange(0) >> 20),
-                (unsigned long long)PsStats::residency_chunk_count.load(),
-                (unsigned long long)PsStats::evacuations.exchange(0),
-                (unsigned long long)PsStats::evac_kept_gpu.exchange(0),
-                (unsigned long long)PsStats::evac_kept_other.exchange(0),
-                (unsigned long long)(PsStats::gc_used_bytes.load() >> 20),
-                (unsigned long long)(PsStats::gc_trigger_bytes.load() >> 20),
-                (unsigned long long)PsStats::gc_freed_images.exchange(0),
-                (unsigned long long)PsStats::gc_kept_images.exchange(0));
+                (unsigned long long)(PsStats::g_cb_vk_image.load() >> 20),
+                (unsigned long long)(PsStats::g_cb_live_image.load() >> 20),
+                (unsigned long long)PsStats::g_c_live_images.load(),
+                (unsigned long long)(PsStats::g_cb_residency_alloc.load() >> 20),
+                (unsigned long long)(PsStats::g_cb_residency_unused.load() >> 20),
+                (unsigned long long)(PsStats::g_cb_vram_idle.exchange(0) >> 20),
+                (unsigned long long)(PsStats::g_cb_vram_unmapped.exchange(0) >> 20),
+                (unsigned long long)(PsStats::g_cb_vram_chunks_freed.exchange(0) >> 20),
+                (unsigned long long)PsStats::g_c_residency_chunks.load(),
+                (unsigned long long)PsStats::g_c_evacuations.exchange(0),
+                (unsigned long long)PsStats::g_evac_kept_gpu.exchange(0),
+                (unsigned long long)PsStats::g_evac_kept_other.exchange(0),
+                (unsigned long long)(PsStats::g_cb_gc_used.load() >> 20),
+                (unsigned long long)(PsStats::g_cb_gc_trigger.load() >> 20),
+                (unsigned long long)PsStats::g_c_gc_freed_images.exchange(0),
+                (unsigned long long)PsStats::g_c_gc_kept_images.exchange(0));
 }
 
 void VideoOutDriver::Flip(const Request& req) {
@@ -392,15 +392,15 @@ void VideoOutDriver::Flip(const Request& req) {
         // Stall diagnostics: what happened during a long frame.
         static u64 last_gpu_ns, last_images, last_image_bytes, last_buffer_bytes;
         static u64 last_t[6], last_minflt, last_sigf, last_pc, last_pp, last_rc, last_rp;
-        const u64 pc = PsStats::protect_calls.load(), pp = PsStats::protect_pages.load(),
-                  rc = PsStats::protect_revoke_calls.load(), rp = PsStats::protect_revoke_pages.load();
-        const u64 minflt = PsStats::gpu_minor_faults.load(), sigf = PsStats::gpu_signal_faults.load();
+        const u64 pc = PsStats::g_c_protect_calls.load(), pp = PsStats::g_c_protect_pages.load(),
+                  rc = PsStats::g_c_protect_revoke_calls.load(), rp = PsStats::g_c_protect_revoke_pages.load();
+        const u64 minflt = PsStats::g_c_gpu_minor_faults.load(), sigf = PsStats::g_c_gpu_signal_faults.load();
         static u64 last_copy_cpu, last_copy_sys, last_copy_flt;
-        const u64 copy_cpu = PsStats::t_copy_cpu.load(), copy_sys = PsStats::copy_sys_us.load(),
-                  copy_flt = PsStats::copy_minflt.load();
+        const u64 copy_cpu = PsStats::g_t_copy_cpu.load(), copy_sys = PsStats::g_copy_sys_us.load(),
+                  copy_flt = PsStats::g_copy_minflt.load();
         static u64 last_proc_flt, last_copy_ns, last_copy_bytes, last_rf, last_trf, last_twf;
-        const u64 rf = PsStats::read_faults.load(), trf = PsStats::t_read_faults.load(),
-                  twf = PsStats::t_write_faults.load();
+        const u64 rf = PsStats::g_c_read_faults.load(), trf = PsStats::g_t_read_faults.load(),
+                  twf = PsStats::g_t_write_faults.load();
         if (frame_ms > 40.0 && last_gpu_ns != 0) {
             std::printf("       fault handlers: %llu read faults %.1f ms, write faults %.1f ms\n",
                         static_cast<unsigned long long>(rf - last_rf), (trf - last_trf) / 1e6,
@@ -409,28 +409,28 @@ void VideoOutDriver::Flip(const Request& req) {
         last_rf = rf;
         last_trf = trf;
         last_twf = twf;
-        const u64 copy_ns = PsStats::t_copy.load(), copy_bytes = PsStats::copy_bytes.load();
+        const u64 copy_ns = PsStats::g_t_copy.load(), copy_bytes = PsStats::g_cb_copy.load();
         u64 proc_flt = 0;
         if (rusage usage{}; getrusage(RUSAGE_SELF, &usage) == 0) {
             proc_flt = usage.ru_minflt;
         }
-        const u64 t_now[6] = {PsStats::t_resident.load(), PsStats::t_protect.load(),
-                              PsStats::t_image_create.load(), PsStats::t_refresh.load(),
-                              PsStats::t_staging.load(), PsStats::t_host_wait.load()};
+        const u64 t_now[6] = {PsStats::g_t_resident.load(), PsStats::g_t_protect.load(),
+                              PsStats::g_t_image_create.load(), PsStats::g_t_refresh.load(),
+                              PsStats::g_t_staging.load(), PsStats::g_t_host_wait.load()};
         static u64 last_draws, last_dispatches, last_subs, last_sys, last_user, last_invol, last_vol;
-        const u64 draws = PsStats::draws.load(), dispatches = PsStats::dispatches.load(),
-                  subs = PsStats::submissions.load(), sys_us = PsStats::gpu_sys_us.load(),
-                  user_us = PsStats::gpu_user_us.load(), invol = PsStats::gpu_invol_switches.load(),
-                  vol = PsStats::gpu_vol_switches.load();
+        const u64 draws = PsStats::g_c_draws.load(), dispatches = PsStats::g_c_dispatches.load(),
+                  subs = PsStats::g_c_submissions.load(), sys_us = PsStats::g_gpu_sys_us.load(),
+                  user_us = PsStats::g_gpu_user_us.load(), invol = PsStats::g_c_gpu_invol_switches.load(),
+                  vol = PsStats::g_c_gpu_vol_switches.load();
         u64 gpu_ns = 0;
-        if (const int clock = PsStats::gpu_thread_clock.load(); clock != -1) {
+        if (const int clock = PsStats::g_gpu_thread_clock.load(); clock != -1) {
             timespec ts{};
             clock_gettime(static_cast<clockid_t>(clock), &ts);
             gpu_ns = u64(ts.tv_sec) * 1000000000ull + u64(ts.tv_nsec);
         }
-        const u64 images = PsStats::images_registered.load();
-        const u64 image_bytes = PsStats::image_upload_bytes.load();
-        const u64 buffer_bytes = PsStats::buffer_upload_bytes.load();
+        const u64 images = PsStats::g_images_registered.load();
+        const u64 image_bytes = PsStats::g_cb_image_upload.load();
+        const u64 buffer_bytes = PsStats::g_cb_buffer_upload.load();
         if (frame_ms > 40.0 && last_gpu_ns != 0) {
             std::printf("Stall: %.1f ms frame; GPU thread on CPU %.1f ms; %llu images registered, "
                         "%.1f MB image uploads, %.1f MB buffer uploads\n",
@@ -457,10 +457,10 @@ void VideoOutDriver::Flip(const Request& req) {
         static u64 last_mprotects = 0, last_entries = 0;
         std::array<u64, 12> layer_now{};
         for (size_t i = 0; i < layer_now.size(); ++i) {
-            layer_now[i] = PsStats::t_layer[i].load(std::memory_order_relaxed);
+            layer_now[i] = PsStats::g_t_layer[i].load(std::memory_order_relaxed);
         }
-        const u64 mprotects = PsStats::layer_mprotects.load(std::memory_order_relaxed);
-        const u64 entries = PsStats::layer_entries_written.load(std::memory_order_relaxed);
+        const u64 mprotects = PsStats::g_c_layer_mprotects.load(std::memory_order_relaxed);
+        const u64 entries = PsStats::g_layer_entries_written.load(std::memory_order_relaxed);
         if (frame_ms > 40.0 && last_gpu_ns != 0 && layer_now != last_layer) {
             const auto ms = [&](size_t i) { return (layer_now[i] - last_layer[i]) / 1e6; };
             std::printf("       layer memory ms: traps set/cleared %.1f (%llu mprotect), "
@@ -517,9 +517,9 @@ void VideoOutDriver::Flip(const Request& req) {
             static const auto log_start = now;
             static u64 log_twf, log_tick, log_present, log_compiles, log_rf, log_preupload;
             static u64 log_alloc, log_free;
-            const u64 tick = PsStats::tick_wait_ns.load(), present = PsStats::present_wait_ns.load();
+            const u64 tick = PsStats::g_tick_wait_ns.load(), present = PsStats::g_present_wait_ns.load();
             const u64 compiles_now = Vulkan::g_bb_compiles.load();
-            // tick_wait_ns and the compile count are reset every stats window.
+            // g_tick_wait_ns and the compile count are reset every stats window.
             const auto delta = [](u64 now_value, u64& last_value) {
                 const u64 d = now_value >= last_value ? now_value - last_value : now_value;
                 last_value = now_value;
@@ -542,10 +542,10 @@ void VideoOutDriver::Flip(const Request& req) {
                          static_cast<unsigned long long>(dispatches - last_dispatches),
                          static_cast<unsigned long long>(subs - last_subs),
                          static_cast<unsigned long long>(delta(compiles_now, log_compiles)),
-                         delta(PsStats::preupload_bytes.load(), log_preupload) / 1e6,
+                         delta(PsStats::g_cb_preupload.load(), log_preupload) / 1e6,
                          last_gpu_ns ? (sys_us - last_sys) / 1e3 : 0.0,
-                         delta(PsStats::device_alloc_bytes.load(), log_alloc) / 1e6,
-                         delta(PsStats::device_free_bytes.load(), log_free) / 1e6);
+                         delta(PsStats::g_cb_device_alloc.load(), log_alloc) / 1e6,
+                         delta(PsStats::g_cb_device_free.load(), log_free) / 1e6);
             static u32 unflushed = 0;
             if (++unflushed >= 120) {
                 std::fflush(frame_log);
@@ -577,12 +577,12 @@ void VideoOutDriver::Flip(const Request& req) {
             const u32 compiles = Vulkan::g_bb_compiles.exchange(0);
             const u64 compile_ns = Vulkan::g_bb_compile_ns.exchange(0);
             const u64 direct = Vulkan::Scheduler::direct_recordings.exchange(0);
-            const u64 faults = PsStats::tracker_faults.exchange(0);
+            const u64 faults = PsStats::g_c_tracker_faults.exchange(0);
             // GPU command thread CPU time per draw: comparable between builds even when the scene
             // (and so the frame rate) differs a little.
             static u64 window_draws = 0, window_gpu_us = 0;
-            const u64 all_draws = PsStats::draws.load();
-            const u64 gpu_us = PsStats::gpu_user_us.load() + PsStats::gpu_sys_us.load();
+            const u64 all_draws = PsStats::g_c_draws.load();
+            const u64 gpu_us = PsStats::g_gpu_user_us.load() + PsStats::g_gpu_sys_us.load();
             const double us_per_draw = all_draws > window_draws
                                            ? double(gpu_us - window_gpu_us) / (all_draws - window_draws)
                                            : 0.0;
@@ -597,37 +597,37 @@ void VideoOutDriver::Flip(const Request& req) {
                         "reduced-size draws %.0f/frame of %.0f in the scene\n",
                         frames / window, worst_ms, EmulatorSettings.GetVblankFrequency(), compiles,
                         compile_ns / 1e6, static_cast<unsigned long long>(direct),
-                        faults / window, static_cast<long long>(PsStats::hot_pages.load()),
+                        faults / window, static_cast<long long>(PsStats::g_c_hot_pages.load()),
                         us_per_draw, draws_per_frame,
-                        PsStats::gpu_idle_ns.exchange(0) / (window * 1e7),
-                        PsStats::sync_recording_ns.exchange(0) / (window * 1e7),
-                        PsStats::host_copies_wait_ns.exchange(0) / (window * 1e7),
-                        frames ? double(PsStats::host_copy_waits.exchange(0)) / frames : 0.0,
-                        frames ? double(PsStats::host_copy_waits_skipped.exchange(0)) / frames : 0.0,
-                        PsStats::copy_threads_wait_ns.exchange(0) / (window * 1e7),
-                        PsStats::tick_wait_ns.exchange(0) / (window * 1e7),
-                        frames ? double(PsStats::reduced_draws.exchange(0)) / frames : 0.0,
-                        frames ? double(PsStats::scene_draws.exchange(0)) / frames : 0.0);
+                        PsStats::g_gpu_idle_ns.exchange(0) / (window * 1e7),
+                        PsStats::g_sync_recording_ns.exchange(0) / (window * 1e7),
+                        PsStats::g_host_copies_wait_ns.exchange(0) / (window * 1e7),
+                        frames ? double(PsStats::g_c_host_copy_waits.exchange(0)) / frames : 0.0,
+                        frames ? double(PsStats::g_host_copy_waits_skipped.exchange(0)) / frames : 0.0,
+                        PsStats::g_copy_threads_wait_ns.exchange(0) / (window * 1e7),
+                        PsStats::g_tick_wait_ns.exchange(0) / (window * 1e7),
+                        frames ? double(PsStats::g_c_reduced_draws.exchange(0)) / frames : 0.0,
+                        frames ? double(PsStats::g_c_scene_draws.exchange(0)) / frames : 0.0);
             VideoCore::PageManager::ReportFaultSites();
-            if (const u64 notes = PsStats::cpu_write_notes.exchange(0)) {
+            if (const u64 notes = PsStats::g_c_cpu_write_notes.exchange(0)) {
                 std::printf("Write notices: %.0f/s, %.2f MB/s (libc copies over pages the GPU side "
                             "watches)\n",
-                            notes / window, PsStats::cpu_write_note_bytes.exchange(0) / (window * 1e6));
+                            notes / window, PsStats::g_cb_cpu_write_note.exchange(0) / (window * 1e6));
             }
             Vulkan::Breadcrumbs::PrintProgress();
             PrintMemory();
-            if (const u64 in_place = PsStats::bound_in_place_bytes.exchange(0)) {
+            if (const u64 in_place = PsStats::g_cb_bound_in_place.exchange(0)) {
                 std::printf("Buffer bindings: %.1f MB/frame in place (%.1f GPU-written), %.1f MB/frame "
                             "VRAM copies\n",
                             in_place / (frames * 1e6),
-                            PsStats::bound_in_place_written_bytes.exchange(0) / (frames * 1e6),
-                            PsStats::bound_vram_bytes.exchange(0) / (frames * 1e6));
+                            PsStats::g_cb_bound_in_place_written.exchange(0) / (frames * 1e6),
+                            PsStats::g_cb_bound_vram.exchange(0) / (frames * 1e6));
             }
             {
-                const u64 updates = PsStats::gpu_data_updates.exchange(0);
-                const u64 copied_back = PsStats::copied_back_blocks.exchange(0);
-                const u64 readbacks = PsStats::readbacks.exchange(0);
-                const u64 late = PsStats::late_vram_writes.exchange(0);
+                const u64 updates = PsStats::g_c_gpu_data_updates.exchange(0);
+                const u64 copied_back = PsStats::g_c_copied_back_blocks.exchange(0);
+                const u64 readbacks = PsStats::g_c_readbacks.exchange(0);
+                const u64 late = PsStats::g_c_late_vram_writes.exchange(0);
                 if (updates + copied_back + readbacks + late != 0) {
                     std::printf("GPU data in VRAM: %.1f command writes/s put into it, %.1f exact writes/s "
                                 "(labels, CPU bytes beside GPU data), %.1f blocks/s copied back, "
@@ -637,40 +637,40 @@ void VideoOutDriver::Flip(const Request& req) {
                 }
             }
             Libraries::Kernel::ReportEqueueWaits(frames);
-            if (const Game::Profile* game = Game::Active(); game && game->report_stats) {
-                game->report_stats();
+            if (const Game::Profile* game = Game::Active(); game && game->pfn_report_stats) {
+                game->pfn_report_stats();
             }
             runtime_wait_report(frames);
-            for (std::size_t i = 0; i < PsStats::range_allocators.size(); ++i) {
-                if (const u64 a = PsStats::range_allocators[i].load()) {
+            for (std::size_t i = 0; i < PsStats::g_range_allocators.size(); ++i) {
+                if (const u64 a = PsStats::g_range_allocators[i].load()) {
                     std::printf("%s %#llx: %llu live, %.1f MB", i ? ";" : "GPU range allocators:",
-                                (unsigned long long)a, (unsigned long long)PsStats::range_live[i].load(),
-                                PsStats::range_bytes[i].load() / 1e6);
+                                (unsigned long long)a, (unsigned long long)PsStats::g_range_live[i].load(),
+                                PsStats::g_range_bytes[i].load() / 1e6);
                 }
             }
-            if (PsStats::range_allocators[0].load()) {
+            if (PsStats::g_range_allocators[0].load()) {
                 std::printf("\n");
             }
             std::printf("Gnm: %.1f sceGnmSubmitDone/frame, %.1f sceGnmAreSubmitsAllowed/frame, %.1f refused/frame; "
                         "guest waited for the previous frame %.1fx %.2f ms/frame; %.1f compute queue submissions/frame\n",
-                        PsStats::submit_done_calls.exchange(0) / double(frames),
-                        PsStats::submits_allowed_queries.exchange(0) / double(frames),
-                        PsStats::submits_refused.exchange(0) / double(frames),
-                        PsStats::gnm_frame_waits.exchange(0) / double(frames),
-                        PsStats::gnm_frame_wait_ns.exchange(0) / (1e6 * double(frames)),
-                        PsStats::asc_submits.exchange(0) / double(frames));
-            if (const u64 guarded = PsStats::submit_guard_bytes.exchange(0)) {
+                        PsStats::g_c_submit_done_calls.exchange(0) / double(frames),
+                        PsStats::g_c_submits_allowed_queries.exchange(0) / double(frames),
+                        PsStats::g_submits_refused.exchange(0) / double(frames),
+                        PsStats::g_c_gnm_frame_waits.exchange(0) / double(frames),
+                        PsStats::g_gnm_frame_wait_ns.exchange(0) / (1e6 * double(frames)),
+                        PsStats::g_c_asc_submits.exchange(0) / double(frames));
+            if (const u64 guarded = PsStats::g_cb_submit_guard.exchange(0)) {
                 std::printf("Gnm: overlap guard checksummed %.1f KB/frame in %.1f us/frame\n",
                             guarded / (1e3 * double(frames)),
-                            PsStats::submit_guard_ns.exchange(0) / (1e3 * double(frames)));
+                            PsStats::g_submit_guard_ns.exchange(0) / (1e3 * double(frames)));
             }
             std::printf("EOP fences: %llu decoded, %llu labels written, %lld pending; %.1f labels/frame "
                         "written by the GPU\n",
-                        (unsigned long long)PsStats::eop_decoded.load(),
-                        (unsigned long long)PsStats::eop_written.load(),
-                        (long long)(PsStats::eop_decoded.load() - PsStats::eop_written.load()),
-                        PsStats::gpu_labels.exchange(0) / double(frames));
-            if (const u64 early = PsStats::idle_flushes.exchange(0)) {
+                        (unsigned long long)PsStats::g_eop_decoded.load(),
+                        (unsigned long long)PsStats::g_eop_written.load(),
+                        (long long)(PsStats::g_eop_decoded.load() - PsStats::g_eop_written.load()),
+                        PsStats::g_c_gpu_labels.exchange(0) / double(frames));
+            if (const u64 early = PsStats::g_c_idle_flushes.exchange(0)) {
                 std::printf("Honest labels: %.1f submissions/frame sent early (GPU idle)\n",
                             early / double(frames));
             }
@@ -682,14 +682,14 @@ void VideoOutDriver::Flip(const Request& req) {
                                 sleep_ns / (frames * 1e6));
                 }
             }
-            if (const u64 copies = PsStats::shadow_copies.exchange(0)) {
+            if (const u64 copies = PsStats::g_c_shadow_copies.exchange(0)) {
                 std::printf("Shadow copies: %.0f/frame, %.1f MB/frame (in-place data the CPU writes, "
                             "copied into VRAM for reading)\n",
-                            copies / double(frames), PsStats::shadow_bytes.exchange(0) / (frames * 1e6));
+                            copies / double(frames), PsStats::g_cb_shadow.exchange(0) / (frames * 1e6));
             }
-            if (const u64 allocs = PsStats::gpu_range_allocs.exchange(0)) {
+            if (const u64 allocs = PsStats::g_c_gpu_range_allocs.exchange(0)) {
                 std::printf("Guest GPU memory: %.0f ranges/s handed out, %.2f MB/s\n", allocs / window,
-                            PsStats::gpu_range_alloc_bytes.exchange(0) / (window * 1e6));
+                            PsStats::g_cb_gpu_range_alloc.exchange(0) / (window * 1e6));
             }
             // psport: parallel Vulkan recording (vk_scheduler.h): command buffer segments.
             if (const u64 submits = Vulkan::Scheduler::recorded_submissions.exchange(0)) {

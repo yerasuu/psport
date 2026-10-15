@@ -65,7 +65,7 @@
 
 namespace {
 /// The runtime's side (psport_net_init).
-PsNetHost g_host{};
+PsNetHost s_host{};
 } // namespace
 
 // ---- Kernel ---------------------------------------------------------------------------------
@@ -74,7 +74,7 @@ namespace Libraries::Kernel {
 
 struct PsNetMutex {
     std::recursive_mutex mutex;
-    bool recursive{};
+    bool is_recursive{};
     int depth{};
 };
 struct PsNetMutexAttr {
@@ -92,18 +92,18 @@ s32 ErrnoToSceKernelError(s32 e) {
     return e > 0 && e <= 0xffff ? s32(0x80020000u | u32(e)) : e;
 }
 
-s32 PS4_SYSV_ABI sceKernelGetSystemSwVersion(SwVersionStruct* ret) {
-    if (!ret) {
+s32 PS4_SYSV_ABI sceKernelGetSystemSwVersion(SwVersionStruct* p_ret) {
+    if (!p_ret) {
         return ORBIS_KERNEL_ERROR_EINVAL;
     }
-    std::memset(ret->text_representation, 0, sizeof(ret->text_representation));
-    std::snprintf(ret->text_representation, sizeof(ret->text_representation), "%s", "11.000.000");
-    ret->hex_representation = 0x11000001;
+    std::memset(p_ret->text_representation, 0, sizeof(p_ret->text_representation));
+    std::snprintf(p_ret->text_representation, sizeof(p_ret->text_representation), "%s", "11.000.000");
+    p_ret->hex_representation = 0x11000001;
     return ORBIS_OK;
 }
 
-s32 PS4_SYSV_ABI sceKernelClockGettime(u32 clock_id, OrbisKernelTimespec* tp) {
-    if (!tp) {
+s32 PS4_SYSV_ABI sceKernelClockGettime(u32 clock_id, OrbisKernelTimespec* p_kernel_timespec) {
+    if (!p_kernel_timespec) {
         return ORBIS_KERNEL_ERROR_EFAULT;
     }
     s64 ns;
@@ -117,152 +117,152 @@ s32 PS4_SYSV_ABI sceKernelClockGettime(u32 clock_id, OrbisKernelTimespec* tp) {
                  std::chrono::steady_clock::now().time_since_epoch())
                  .count();
     }
-    tp->tv_sec = ns / 1000000000;
-    tp->tv_nsec = ns % 1000000000;
+    p_kernel_timespec->tv_sec = ns / 1000000000;
+    p_kernel_timespec->tv_nsec = ns % 1000000000;
     return ORBIS_OK;
 }
 
-s32 PS4_SYSV_ABI sceKernelMapNamedFlexibleMemory(void** addr_in_out, u64 len, s32, s32,
+s32 PS4_SYSV_ABI sceKernelMapNamedFlexibleMemory(void** pp_out_addr_in, u64 len, s32, s32,
                                                  const char*) {
-    if (!addr_in_out || !len) {
+    if (!pp_out_addr_in || !len) {
         return ORBIS_KERNEL_ERROR_EINVAL;
     }
-    void* memory = std::calloc(1, len);
-    if (!memory) {
+    void* p_memory = std::calloc(1, len);
+    if (!p_memory) {
         return ORBIS_KERNEL_ERROR_ENOMEM;
     }
-    *addr_in_out = memory;
+    *pp_out_addr_in = p_memory;
     return ORBIS_OK;
 }
 
-s32 PS4_SYSV_ABI sceKernelMunmap(void* addr, u64) {
-    std::free(addr);
+s32 PS4_SYSV_ABI sceKernelMunmap(void* p_addr, u64) {
+    std::free(p_addr);
     return ORBIS_OK;
 }
 
-int posix_pthread_mutexattr_init(PthreadMutexAttrT* attr) {
-    if (!attr) return 22;
-    *attr = new PsNetMutexAttr;
+int posix_pthread_mutexattr_init(PthreadMutexAttrT* pp_attr) {
+    if (!pp_attr) return 22;
+    *pp_attr = new PsNetMutexAttr;
     return 0;
 }
-int posix_pthread_mutexattr_settype(PthreadMutexAttrT* attr, PthreadMutexType type) {
-    if (!attr || !*attr) return 22;
-    (*attr)->type = type;
+int posix_pthread_mutexattr_settype(PthreadMutexAttrT* pp_attr, PthreadMutexType type) {
+    if (!pp_attr || !*pp_attr) return 22;
+    (*pp_attr)->type = type;
     return 0;
 }
-int posix_pthread_mutexattr_destroy(PthreadMutexAttrT* attr) {
-    if (!attr) return 22;
-    delete *attr;
-    *attr = nullptr;
+int posix_pthread_mutexattr_destroy(PthreadMutexAttrT* pp_attr) {
+    if (!pp_attr) return 22;
+    delete *pp_attr;
+    *pp_attr = nullptr;
     return 0;
 }
-int scePthreadMutexInit(PthreadMutexT* mutex, const PthreadMutexAttrT* attr, const char*) {
-    if (!mutex) return 22;
-    *mutex = new PsNetMutex;
-    (*mutex)->recursive = attr && *attr && (*attr)->type == PthreadMutexType::Recursive;
+int scePthreadMutexInit(PthreadMutexT* pp_mutex, const PthreadMutexAttrT* pp_attr, const char*) {
+    if (!pp_mutex) return 22;
+    *pp_mutex = new PsNetMutex;
+    (*pp_mutex)->is_recursive = pp_attr && *pp_attr && (*pp_attr)->type == PthreadMutexType::Recursive;
     return 0;
 }
-int posix_pthread_mutex_destroy(PthreadMutexT* mutex) {
-    if (!mutex || !*mutex) return 22;
-    delete *mutex;
-    *mutex = nullptr;
+int posix_pthread_mutex_destroy(PthreadMutexT* pp_mutex) {
+    if (!pp_mutex || !*pp_mutex) return 22;
+    delete *pp_mutex;
+    *pp_mutex = nullptr;
     return 0;
 }
-int posix_pthread_mutex_lock(PthreadMutexT* mutex) {
-    if (!mutex || !*mutex) return 22;
-    (*mutex)->mutex.lock();
-    if (++(*mutex)->depth > 1 && !(*mutex)->recursive) {
-        --(*mutex)->depth;
-        (*mutex)->mutex.unlock();
+int posix_pthread_mutex_lock(PthreadMutexT* pp_mutex) {
+    if (!pp_mutex || !*pp_mutex) return 22;
+    (*pp_mutex)->mutex.lock();
+    if (++(*pp_mutex)->depth > 1 && !(*pp_mutex)->is_recursive) {
+        --(*pp_mutex)->depth;
+        (*pp_mutex)->mutex.unlock();
         return 11; // EDEADLK
     }
     return 0;
 }
-int posix_pthread_mutex_trylock(PthreadMutexT* mutex) {
-    if (!mutex || !*mutex) return 22;
-    if (!(*mutex)->mutex.try_lock()) return 16; // EBUSY
-    if (++(*mutex)->depth > 1 && !(*mutex)->recursive) {
-        --(*mutex)->depth;
-        (*mutex)->mutex.unlock();
+int posix_pthread_mutex_trylock(PthreadMutexT* pp_mutex) {
+    if (!pp_mutex || !*pp_mutex) return 22;
+    if (!(*pp_mutex)->mutex.try_lock()) return 16; // EBUSY
+    if (++(*pp_mutex)->depth > 1 && !(*pp_mutex)->is_recursive) {
+        --(*pp_mutex)->depth;
+        (*pp_mutex)->mutex.unlock();
         return 16;
     }
     return 0;
 }
-int posix_pthread_mutex_unlock(PthreadMutexT* mutex) {
-    if (!mutex || !*mutex) return 22;
-    --(*mutex)->depth;
-    (*mutex)->mutex.unlock();
+int posix_pthread_mutex_unlock(PthreadMutexT* pp_mutex) {
+    if (!pp_mutex || !*pp_mutex) return 22;
+    --(*pp_mutex)->depth;
+    (*pp_mutex)->mutex.unlock();
     return 0;
 }
 
-int posix_pthread_condattr_init(PthreadCondAttrT* attr) {
-    if (!attr) return 22;
-    *attr = new PsNetCondAttr;
+int posix_pthread_condattr_init(PthreadCondAttrT* pp_attr) {
+    if (!pp_attr) return 22;
+    *pp_attr = new PsNetCondAttr;
     return 0;
 }
-int posix_pthread_condattr_destroy(PthreadCondAttrT* attr) {
-    if (!attr) return 22;
-    delete *attr;
-    *attr = nullptr;
+int posix_pthread_condattr_destroy(PthreadCondAttrT* pp_attr) {
+    if (!pp_attr) return 22;
+    delete *pp_attr;
+    *pp_attr = nullptr;
     return 0;
 }
-int scePthreadCondInit(PthreadCondT* cond, const PthreadCondAttrT*, const char*) {
-    if (!cond) return 22;
-    *cond = new PsNetCond;
+int scePthreadCondInit(PthreadCondT* pp_cond, const PthreadCondAttrT*, const char*) {
+    if (!pp_cond) return 22;
+    *pp_cond = new PsNetCond;
     return 0;
 }
-int posix_pthread_cond_destroy(PthreadCondT* cond) {
-    if (!cond || !*cond) return 22;
-    delete *cond;
-    *cond = nullptr;
+int posix_pthread_cond_destroy(PthreadCondT* pp_cond) {
+    if (!pp_cond || !*pp_cond) return 22;
+    delete *pp_cond;
+    *pp_cond = nullptr;
     return 0;
 }
-int posix_pthread_cond_signal(PthreadCondT* cond) {
-    if (!cond || !*cond) return 22;
-    (*cond)->cond.notify_one();
+int posix_pthread_cond_signal(PthreadCondT* pp_cond) {
+    if (!pp_cond || !*pp_cond) return 22;
+    (*pp_cond)->cond.notify_one();
     return 0;
 }
 namespace {
 // The caller holds the mutex once; the wait releases and retakes it like pthread_cond_wait.
 struct HeldMutex {
-    PsNetMutex* mutex;
+    PsNetMutex* m_p_mutex;
     void lock() {
-        mutex->mutex.lock();
-        ++mutex->depth;
+        m_p_mutex->mutex.lock();
+        ++m_p_mutex->depth;
     }
     void unlock() {
-        --mutex->depth;
-        mutex->mutex.unlock();
+        --m_p_mutex->depth;
+        m_p_mutex->mutex.unlock();
     }
 };
 } // namespace
-int posix_pthread_cond_wait(PthreadCondT* cond, PthreadMutexT* mutex) {
-    if (!cond || !*cond || !mutex || !*mutex) return 22;
-    HeldMutex held{*mutex};
-    (*cond)->cond.wait(held);
+int posix_pthread_cond_wait(PthreadCondT* pp_cond, PthreadMutexT* pp_mutex) {
+    if (!pp_cond || !*pp_cond || !pp_mutex || !*pp_mutex) return 22;
+    HeldMutex held{*pp_mutex};
+    (*pp_cond)->cond.wait(held);
     return 0;
 }
-int posix_pthread_cond_reltimedwait_np(PthreadCondT* cond, PthreadMutexT* mutex, u64 usec) {
-    if (!cond || !*cond || !mutex || !*mutex) return 22;
-    HeldMutex held{*mutex};
-    const auto status = (*cond)->cond.wait_for(held, std::chrono::microseconds(usec));
+int posix_pthread_cond_reltimedwait_np(PthreadCondT* pp_cond, PthreadMutexT* pp_mutex, u64 usec) {
+    if (!pp_cond || !*pp_cond || !pp_mutex || !*pp_mutex) return 22;
+    HeldMutex held{*pp_mutex};
+    const auto status = (*pp_cond)->cond.wait_for(held, std::chrono::microseconds(usec));
     return status == std::cv_status::timeout ? 60 : 0; // ETIMEDOUT
 }
 
-int posix_pthread_attr_init(PthreadAttrT* attr) {
-    if (!attr) return 22;
-    *attr = new PsNetThreadAttr;
+int posix_pthread_attr_init(PthreadAttrT* pp_attr) {
+    if (!pp_attr) return 22;
+    *pp_attr = new PsNetThreadAttr;
     return 0;
 }
-int posix_pthread_attr_destroy(PthreadAttrT* attr) {
-    if (!attr) return 22;
-    delete *attr;
-    *attr = nullptr;
+int posix_pthread_attr_destroy(PthreadAttrT* pp_attr) {
+    if (!pp_attr) return 22;
+    delete *pp_attr;
+    *pp_attr = nullptr;
     return 0;
 }
-int posix_pthread_attr_setstacksize(PthreadAttrT* attr, size_t stack_size) {
-    if (!attr || !*attr) return 22;
-    (*attr)->stack = stack_size;
+int posix_pthread_attr_setstacksize(PthreadAttrT* pp_attr, size_t cb_stack) {
+    if (!pp_attr || !*pp_attr) return 22;
+    (*pp_attr)->stack = cb_stack;
     return 0;
 }
 int posix_pthread_attr_setinheritsched(PthreadAttrT*, int) {
@@ -277,14 +277,14 @@ int posix_pthread_attr_setschedparam(PthreadAttrT*, const SchedParam*) {
 int scePthreadAttrSetaffinity(PthreadAttrT*, u64) {
     return 0;
 }
-int posix_pthread_create_name_np(PthreadT* thread, const PthreadAttrT* attr,
-                                 PthreadEntryFunc start, void* arg, const char* name) {
-    if (!thread || !start) return 22;
-    const u64 stack = attr && *attr ? (*attr)->stack : 0;
-    return g_host.thread_spawn(thread, start, arg, stack, name ? name : "np");
+int posix_pthread_create_name_np(PthreadT* pp_thread, const PthreadAttrT* pp_attr,
+                                 PthreadEntryFunc pfn_start, void* p_arg, const char* sz_name) {
+    if (!pp_thread || !pfn_start) return 22;
+    const u64 stack = pp_attr && *pp_attr ? (*pp_attr)->stack : 0;
+    return s_host.pfn_thread_spawn(pp_thread, pfn_start, p_arg, stack, sz_name ? sz_name : "np");
 }
-int posix_pthread_join(PthreadT thread, void** ret) {
-    return g_host.thread_join(thread, ret);
+int posix_pthread_join(PthreadT p_thread, void** pp_ret) {
+    return s_host.pfn_thread_join(p_thread, pp_ret);
 }
 
 } // namespace Libraries::Kernel
@@ -292,11 +292,11 @@ int posix_pthread_join(PthreadT thread, void** ret) {
 // ---- User and system service, debugger, Bloodborne helpers -------------------------------------
 
 namespace Libraries::UserService {
-s32 PS4_SYSV_ABI sceUserServiceGetInitialUser(int* user_id) {
-    if (!user_id) {
+s32 PS4_SYSV_ABI sceUserServiceGetInitialUser(int* p_user_id) {
+    if (!p_user_id) {
         return s32(0x80960009); // SCE_USER_SERVICE_ERROR_INVALID_ARGUMENT
     }
-    *user_id = UserManager::RuntimeUserId;
+    *p_user_id = UserManager::RuntimeUserId;
     return ORBIS_OK;
 }
 } // namespace Libraries::UserService
@@ -320,24 +320,24 @@ s32 GetCurrentPid() {
 
 namespace Core::Bloodborne {
 namespace {
-std::mutex placement_mutex;
-std::optional<std::string> placement;
+std::mutex s_placement_mutex;
+std::optional<std::string> s_placement;
 } // namespace
 std::optional<std::string> GetSeamlessHostPlacementHeader() {
-    std::scoped_lock lock{placement_mutex};
-    return placement;
+    std::scoped_lock lock{s_placement_mutex};
+    return s_placement;
 }
 bool SetSeamlessHostPlacementHeader(std::string_view value) {
     if (value.empty() || value.size() > 4096) {
         return false;
     }
-    std::scoped_lock lock{placement_mutex};
-    placement = std::string{value};
+    std::scoped_lock lock{s_placement_mutex};
+    s_placement = std::string{value};
     return true;
 }
 void ClearSeamlessHostPlacementHeader() {
-    std::scoped_lock lock{placement_mutex};
-    placement.reset();
+    std::scoped_lock lock{s_placement_mutex};
+    s_placement.reset();
 }
 void TraceMatching2LeaveRoom(std::uintptr_t, std::uint64_t) {}
 } // namespace Core::Bloodborne
@@ -346,9 +346,9 @@ void TraceMatching2LeaveRoom(std::uintptr_t, std::uint64_t) {}
 
 namespace ImGui::ShadNetNotify {
 namespace {
-std::mutex history_mutex;
-std::vector<HistoryEntry> history;
-std::size_t unread{};
+std::mutex s_history_mutex;
+std::vector<HistoryEntry> s_history;
+std::size_t s_unread{};
 } // namespace
 KindDisplay DisplayOf(Kind kind) {
     switch (kind) {
@@ -366,26 +366,26 @@ KindDisplay DisplayOf(Kind kind) {
 }
 void Push(Kind kind, std::string text) {
     std::printf("Co-op: %s: %s\n", DisplayOf(kind).tag, text.c_str());
-    std::scoped_lock lock{history_mutex};
-    history.push_back({kind, std::move(text), {}});
-    ++unread;
+    std::scoped_lock lock{s_history_mutex};
+    s_history.push_back({kind, std::move(text), {}});
+    ++s_unread;
 }
 std::vector<HistoryEntry> GetHistory() {
-    std::scoped_lock lock{history_mutex};
-    return history;
+    std::scoped_lock lock{s_history_mutex};
+    return s_history;
 }
 void ClearHistory() {
-    std::scoped_lock lock{history_mutex};
-    history.clear();
-    unread = 0;
+    std::scoped_lock lock{s_history_mutex};
+    s_history.clear();
+    s_unread = 0;
 }
 std::size_t UnreadCount() {
-    std::scoped_lock lock{history_mutex};
-    return unread;
+    std::scoped_lock lock{s_history_mutex};
+    return s_unread;
 }
 void MarkRead() {
-    std::scoped_lock lock{history_mutex};
-    unread = 0;
+    std::scoped_lock lock{s_history_mutex};
+    s_unread = 0;
 }
 void Register() {}
 void Unregister() {}
@@ -408,13 +408,13 @@ void Unregister() {}
 namespace Core {
 class Emulator {
 public:
-    static void SetGame(const char* app0, const char* serial, const char* title,
-                        const char* app_ver) {
+    static void SetGame(const char* sz_app0, const char* sz_serial, const char* sz_title,
+                        const char* sz_app_ver) {
         auto& info = Common::ElfInfo::Instance();
-        info.game_serial = serial ? serial : "";
-        info.title = title ? title : "";
-        info.app_ver = app_ver ? app_ver : "";
-        info.game_folder = app0 ? app0 : "";
+        info.game_serial = sz_serial ? sz_serial : "";
+        info.title = sz_title ? sz_title : "";
+        info.app_ver = sz_app_ver ? sz_app_ver : "";
+        info.game_folder = sz_app0 ? sz_app0 : "";
         info.initialized = true;
         info.npCommIds = ReadNpCommIds(info.game_folder / "sce_sys" / "npbind.dat");
     }
@@ -428,17 +428,17 @@ private:
         const std::vector<u8> data{std::istreambuf_iterator<char>(file), {}};
         for (size_t at = 0x80; at + 4 <= data.size();) {
             const u16 tag = u16(data[at] << 8 | data[at + 1]);
-            const u16 size = u16(data[at + 2] << 8 | data[at + 3]);
+            const u16 cb_entry = u16(data[at + 2] << 8 | data[at + 3]);
             at += 4;
-            if (at + size > data.size()) {
+            if (at + cb_entry > data.size()) {
                 break;
             }
-            if (tag == 0x10 && size) {
-                std::string id(reinterpret_cast<const char*>(&data[at]), size);
+            if (tag == 0x10 && cb_entry) {
+                std::string id(reinterpret_cast<const char*>(&data[at]), cb_entry);
                 id.resize(std::strlen(id.c_str()));
                 ids.push_back(id);
             }
-            at += size;
+            at += cb_entry;
         }
         return ids;
     }
@@ -446,10 +446,10 @@ private:
 } // namespace Core
 
 namespace {
-void Configure(const char* app0, const char* serial, const char* title, const char* app_ver) {
-    Core::Emulator::SetGame(app0, serial, title, app_ver);
+void Configure(const char* sz_app0, const char* sz_serial, const char* sz_title, const char* sz_app_ver) {
+    Core::Emulator::SetGame(sz_app0, sz_serial, sz_title, sz_app_ver);
     const auto& ids = Common::ElfInfo::Instance().GetNpCommIds();
-    std::printf("Co-op: %s, NP communication id %s%s\n", serial ? serial : "?",
+    std::printf("Co-op: %s, NP communication id %s%s\n", sz_serial ? sz_serial : "?",
                 ids.empty() ? "missing" : ids.front().c_str(),
                 EmulatorSettings.IsShadNetEnabled() ? "; online play on" : "");
 }
@@ -462,54 +462,54 @@ void Configure(const char* app0, const char* serial, const char* title, const ch
 namespace {
 struct Symbol {
     std::string nid;
-    u64 address;
+    u64 va_symbol;
 };
-std::vector<Symbol> g_symbols;
+std::vector<Symbol> s_symbols;
 } // namespace
 
 namespace Core::Loader {
-void SymbolsResolver::AddSymbol(const char* nid, const char*, const char*, SymbolType, u64 address) {
-    g_symbols.push_back({nid, address});
+void SymbolsResolver::AddSymbol(const char* sz_nid, const char*, const char*, SymbolType, u64 va_symbol) {
+    s_symbols.push_back({sz_nid, va_symbol});
 }
 } // namespace Core::Loader
 
-extern "C" __attribute__((visibility("default"))) uintptr_t psport_net_resolve(const char* scoped_nid) {
-    const char* hash = std::strchr(scoped_nid, '#');
-    const size_t length = hash ? size_t(hash - scoped_nid) : std::strlen(scoped_nid);
-    for (const auto& symbol : g_symbols) {
-        if (symbol.nid.size() == length && !std::memcmp(symbol.nid.data(), scoped_nid, length)) {
-            return uintptr_t(symbol.address);
+extern "C" __attribute__((visibility("default"))) uintptr_t psport_net_resolve(const char* sz_scoped_nid) {
+    const char* sz_hash = std::strchr(sz_scoped_nid, '#');
+    const size_t length = sz_hash ? size_t(sz_hash - sz_scoped_nid) : std::strlen(sz_scoped_nid);
+    for (const auto& symbol : s_symbols) {
+        if (symbol.nid.size() == length && !std::memcmp(symbol.nid.data(), sz_scoped_nid, length)) {
+            return uintptr_t(symbol.va_symbol);
         }
     }
     return 0;
 }
 
-extern "C" __attribute__((visibility("default"))) int psport_net_init(const PsNetHost* host) {
-    if (!host || host->abi != PSPORT_NET_ABI_VERSION || !host->thread_spawn || !host->thread_join) {
+extern "C" __attribute__((visibility("default"))) int psport_net_init(const PsNetHost* p_host) {
+    if (!p_host || p_host->abi != PSPORT_NET_ABI_VERSION || !p_host->pfn_thread_spawn || !p_host->pfn_thread_join) {
         std::printf("Online: the runtime and the online module are from different versions\n");
         return -1;
     }
-    g_host = *host;
-    Configure(host->app0, host->serial, host->title, host->app_ver);
+    s_host = *p_host;
+    Configure(p_host->sz_app0, p_host->sz_serial, p_host->sz_title, p_host->sz_app_ver);
     Core::Loader::SymbolsResolver resolver;
-    Core::Loader::SymbolsResolver* sym = &resolver;
-    Libraries::Net::RegisterLib(sym);
-    Libraries::NetCtl::RegisterLib(sym);
-    Libraries::Http::RegisterLib(sym);
-    Libraries::Http2::RegisterLib(sym);
-    Libraries::Ssl::RegisterLib(sym);
-    Libraries::Ssl2::RegisterLib(sym);
-    Libraries::Np::NpAuth::RegisterLib(sym);
-    Libraries::Np::NpCommon::RegisterLib(sym);
-    Libraries::Np::NpManager::RegisterLib(sym);
-    Libraries::Np::NpMatching2::RegisterLib(sym);
-    Libraries::Np::NpPartner::RegisterLib(sym);
-    Libraries::Np::NpParty::RegisterLib(sym);
-    Libraries::Np::NpScore::RegisterLib(sym);
-    Libraries::Np::NpSignaling::RegisterLib(sym);
-    Libraries::Np::NpTus::RegisterLib(sym);
-    Libraries::Np::NpWebApi::RegisterLib(sym);
-    Libraries::Np::NpWebApi2::RegisterLib(sym);
-    std::printf("Online: %zu network and PSN functions\n", g_symbols.size());
+    Core::Loader::SymbolsResolver* p_sym = &resolver;
+    Libraries::Net::RegisterLib(p_sym);
+    Libraries::NetCtl::RegisterLib(p_sym);
+    Libraries::Http::RegisterLib(p_sym);
+    Libraries::Http2::RegisterLib(p_sym);
+    Libraries::Ssl::RegisterLib(p_sym);
+    Libraries::Ssl2::RegisterLib(p_sym);
+    Libraries::Np::NpAuth::RegisterLib(p_sym);
+    Libraries::Np::NpCommon::RegisterLib(p_sym);
+    Libraries::Np::NpManager::RegisterLib(p_sym);
+    Libraries::Np::NpMatching2::RegisterLib(p_sym);
+    Libraries::Np::NpPartner::RegisterLib(p_sym);
+    Libraries::Np::NpParty::RegisterLib(p_sym);
+    Libraries::Np::NpScore::RegisterLib(p_sym);
+    Libraries::Np::NpSignaling::RegisterLib(p_sym);
+    Libraries::Np::NpTus::RegisterLib(p_sym);
+    Libraries::Np::NpWebApi::RegisterLib(p_sym);
+    Libraries::Np::NpWebApi2::RegisterLib(p_sym);
+    std::printf("Online: %zu network and PSN functions\n", s_symbols.size());
     return 0;
 }

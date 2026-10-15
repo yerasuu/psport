@@ -196,7 +196,7 @@ vk::Pipeline TileManager::GetTilingPipeline(const ImageInfo& info, bool is_tiler
 void TileManager::RecordTilingDispatch(vk::Pipeline pipeline, const vk::DescriptorBufferInfo& tiled,
                                        const vk::DescriptorBufferInfo& linear,
                                        const vk::DescriptorBufferInfo& params, u32 dim_x) {
-    scheduler.RecordCrumb({.name = "tiling"}, [pipeline, layout = *pl_layout, tiled, linear,
+    scheduler.RecordCrumb({.sz_name = "tiling"}, [pipeline, layout = *pl_layout, tiled, linear,
                                               params, dim_x](vk::CommandBuffer cmdbuf) {
         cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline);
         const std::array<vk::WriteDescriptorSet, 3> set_writes = {{

@@ -12,20 +12,20 @@
 typedef struct Holder {
     pthread_t thread;
     unsigned readers, writer, pending;
-    struct Holder *next;
+    struct Holder *p_next;
 } Holder;
 typedef struct Rwlock {
     pthread_rwlock_t native;
-    Holder *holders;
+    Holder *p_holders;
     unsigned inflight;
-    struct Rwlock *next;
+    struct Rwlock *p_next;
 } Rwlock;
 typedef struct { int64_t seconds, nanoseconds; } GuestTime;
 enum { RWLOCK_NORMAL=1, RWLOCK_PREFER_READER=2 };
 typedef struct { int32_t type; } RwlockAttr;
-static pthread_mutex_t registry_lock = PTHREAD_MUTEX_INITIALIZER;
-static Rwlock *registry;
-static size_t created, reads, writes, unlocks;
+static pthread_mutex_t s_registry_lock = PTHREAD_MUTEX_INITIALIZER;
+static Rwlock *s_p_registry;
+static size_t s_c_created, s_c_reads, s_c_writes, s_c_unlocks;
 static int32_t error(int e) {
     if (!e) return 0;
     unsigned code;
@@ -41,161 +41,161 @@ static int32_t error(int e) {
     }
     return (int32_t)(UINT32_C(0x80020000)|code);
 }
-/* All helpers ending in _locked require registry_lock. */
-static Rwlock *find_locked(Rwlock *handle) {
-    for (Rwlock *r=registry; r; r=r->next) if (r==handle) return r;
+/* All helpers ending in _locked require s_registry_lock. */
+static Rwlock *find_locked(Rwlock *p_handle) {
+    for (Rwlock *p_rwlock=s_p_registry; p_rwlock; p_rwlock=p_rwlock->p_next) if (p_rwlock==p_handle) return p_rwlock;
     return NULL;
 }
 /* libkernel's rwlocks block new readers while a writer waits unless the type prefers readers. */
-static int create_locked(Rwlock **out, int32_t type) {
-    Rwlock *r=calloc(1,sizeof(*r));
-    if (!r) return ENOMEM;
+static int create_locked(Rwlock **pp_out, int32_t type) {
+    Rwlock *p_rwlock=calloc(1,sizeof(*p_rwlock));
+    if (!p_rwlock) return ENOMEM;
     pthread_rwlockattr_t native_attr;
     int e=pthread_rwlockattr_init(&native_attr);
     if (!e) e=pthread_rwlockattr_setkind_np(&native_attr,type==RWLOCK_PREFER_READER ?
         PTHREAD_RWLOCK_PREFER_READER_NP : PTHREAD_RWLOCK_PREFER_WRITER_NONRECURSIVE_NP);
-    if (!e) e=pthread_rwlock_init(&r->native,&native_attr);
+    if (!e) e=pthread_rwlock_init(&p_rwlock->native,&native_attr);
     pthread_rwlockattr_destroy(&native_attr);
-    if (e) { free(r); return e; }
-    r->next=registry; registry=r; *out=r; ++created; return 0;
+    if (e) { free(p_rwlock); return e; }
+    p_rwlock->p_next=s_p_registry; s_p_registry=p_rwlock; *pp_out=p_rwlock; ++s_c_created; return 0;
 }
-static ABI int32_t attr_init(RwlockAttr **out) {
-    if (!out) return error(EINVAL);
-    RwlockAttr *attr=malloc(sizeof(*attr));
-    if (!attr) return error(ENOMEM);
-    attr->type=RWLOCK_NORMAL; *out=attr; return 0;
+static ABI int32_t attr_init(RwlockAttr **pp_out) {
+    if (!pp_out) return error(EINVAL);
+    RwlockAttr *p_attr=malloc(sizeof(*p_attr));
+    if (!p_attr) return error(ENOMEM);
+    p_attr->type=RWLOCK_NORMAL; *pp_out=p_attr; return 0;
 }
-static ABI int32_t attr_destroy(RwlockAttr **attr) {
-    if (!attr || !*attr) return error(EINVAL);
-    free(*attr); *attr=NULL; return 0;
+static ABI int32_t attr_destroy(RwlockAttr **pp_attr) {
+    if (!pp_attr || !*pp_attr) return error(EINVAL);
+    free(*pp_attr); *pp_attr=NULL; return 0;
 }
-static ABI int32_t attr_settype(RwlockAttr **attr, int32_t type) {
-    if (!attr || !*attr || (type!=RWLOCK_NORMAL && type!=RWLOCK_PREFER_READER)) return error(EINVAL);
-    (*attr)->type=type; return 0;
+static ABI int32_t attr_settype(RwlockAttr **pp_attr, int32_t type) {
+    if (!pp_attr || !*pp_attr || (type!=RWLOCK_NORMAL && type!=RWLOCK_PREFER_READER)) return error(EINVAL);
+    (*pp_attr)->type=type; return 0;
 }
-static ABI int32_t attr_gettype(RwlockAttr **attr, int32_t *type) {
-    if (!attr || !*attr || !type) return error(EINVAL);
-    *type=(*attr)->type; return 0;
+static ABI int32_t attr_gettype(RwlockAttr **pp_attr, int32_t *p_type) {
+    if (!pp_attr || !*pp_attr || !p_type) return error(EINVAL);
+    *p_type=(*pp_attr)->type; return 0;
 }
-static ABI int32_t attr_setpshared(RwlockAttr **attr, int32_t shared) {
-    if (!attr || !*attr || shared) return error(EINVAL);
+static ABI int32_t attr_setpshared(RwlockAttr **pp_attr, int32_t shared) {
+    if (!pp_attr || !*pp_attr || shared) return error(EINVAL);
     return 0;
 }
-static ABI int32_t attr_getpshared(RwlockAttr **attr, int32_t *shared) {
-    if (!attr || !*attr || !shared) return error(EINVAL);
-    *shared=0; return 0;
+static ABI int32_t attr_getpshared(RwlockAttr **pp_attr, int32_t *p_shared) {
+    if (!pp_attr || !*pp_attr || !p_shared) return error(EINVAL);
+    *p_shared=0; return 0;
 }
-static ABI int32_t rw_init(Rwlock **out, RwlockAttr *const *attr, const char *name) {
-    (void)name;
-    if (!out || (attr && !*attr)) return error(EINVAL);
-    pthread_mutex_lock(&registry_lock);
+static ABI int32_t rw_init(Rwlock **pp_out, RwlockAttr *const *pp_attr, const char *sz_name) {
+    (void)sz_name;
+    if (!pp_out || (pp_attr && !*pp_attr)) return error(EINVAL);
+    pthread_mutex_lock(&s_registry_lock);
     /* POSIX allows uninitialized storage, so never read *out during init. */
-    int e=create_locked(out,attr ? (*attr)->type : RWLOCK_NORMAL);
-    pthread_mutex_unlock(&registry_lock); return error(e);
+    int e=create_locked(pp_out,pp_attr ? (*pp_attr)->type : RWLOCK_NORMAL);
+    pthread_mutex_unlock(&s_registry_lock); return error(e);
 }
-static void prune_locked(Rwlock *r, Holder *h) {
-    if (h->readers || h->writer || h->pending) return;
-    Holder **link=&r->holders;
-    while (*link!=h) link=&(*link)->next;
-    *link=h->next; free(h);
+static void prune_locked(Rwlock *p_rwlock, Holder *p_holder) {
+    if (p_holder->readers || p_holder->writer || p_holder->pending) return;
+    Holder **pp_link=&p_rwlock->p_holders;
+    while (*pp_link!=p_holder) pp_link=&(*pp_link)->p_next;
+    *pp_link=p_holder->p_next; free(p_holder);
 }
 enum Operation { READ, WRITE, TRY_READ, TRY_WRITE, TIMED_READ, TIMED_WRITE };
-static int32_t acquire(Rwlock **handle, enum Operation op, const GuestTime *time) {
-    if (!handle) return error(EINVAL);
+static int32_t acquire(Rwlock **pp_handle, enum Operation op, const GuestTime *p_time) {
+    if (!pp_handle) return error(EINVAL);
     int writer=op==WRITE || op==TRY_WRITE || op==TIMED_WRITE;
     int attempt=op==TRY_READ || op==TRY_WRITE;
     int timed=op==TIMED_READ || op==TIMED_WRITE;
-    pthread_mutex_lock(&registry_lock);
+    pthread_mutex_lock(&s_registry_lock);
     int e=0;
-    if (!*handle) e=create_locked(handle,RWLOCK_NORMAL);
-    Rwlock *r=e ? NULL : find_locked(*handle);
-    if (!r) { pthread_mutex_unlock(&registry_lock); return error(e ? e : EINVAL); }
-    Holder *h=r->holders;
-    while (h && !pthread_equal(h->thread,pthread_self())) h=h->next;
-    if (h && (h->writer || (writer && h->readers))) {
-        pthread_mutex_unlock(&registry_lock); return error(attempt ? EBUSY : EDEADLK);
+    if (!*pp_handle) e=create_locked(pp_handle,RWLOCK_NORMAL);
+    Rwlock *p_rwlock=e ? NULL : find_locked(*pp_handle);
+    if (!p_rwlock) { pthread_mutex_unlock(&s_registry_lock); return error(e ? e : EINVAL); }
+    Holder *p_holder=p_rwlock->p_holders;
+    while (p_holder && !pthread_equal(p_holder->thread,pthread_self())) p_holder=p_holder->p_next;
+    if (p_holder && (p_holder->writer || (writer && p_holder->readers))) {
+        pthread_mutex_unlock(&s_registry_lock); return error(attempt ? EBUSY : EDEADLK);
     }
-    if (h && h->readers==UINT_MAX) { pthread_mutex_unlock(&registry_lock); return error(EAGAIN); }
+    if (p_holder && p_holder->readers==UINT_MAX) { pthread_mutex_unlock(&s_registry_lock); return error(EAGAIN); }
     /* libthr lets a thread already reading take the lock again past waiting writers, so only its
        first read holds the native lock; otherwise writer preference would deadlock it. */
-    if (h && h->readers) { ++h->readers; ++reads; pthread_mutex_unlock(&registry_lock); return 0; }
-    if (!h) {
-        h=calloc(1,sizeof(*h));
-        if (!h) { pthread_mutex_unlock(&registry_lock); return error(ENOMEM); }
-        h->thread=pthread_self(); h->next=r->holders; r->holders=h;
+    if (p_holder && p_holder->readers) { ++p_holder->readers; ++s_c_reads; pthread_mutex_unlock(&s_registry_lock); return 0; }
+    if (!p_holder) {
+        p_holder=calloc(1,sizeof(*p_holder));
+        if (!p_holder) { pthread_mutex_unlock(&s_registry_lock); return error(ENOMEM); }
+        p_holder->thread=pthread_self(); p_holder->p_next=p_rwlock->p_holders; p_rwlock->p_holders=p_holder;
     }
-    ++r->inflight; ++h->pending;
-    pthread_mutex_unlock(&registry_lock);
+    ++p_rwlock->inflight; ++p_holder->pending;
+    pthread_mutex_unlock(&s_registry_lock);
     /* Timed operations first try the lock, matching POSIX timeout validation. */
-    if (attempt || timed) e=writer ? pthread_rwlock_trywrlock(&r->native) : pthread_rwlock_tryrdlock(&r->native);
-    else e=writer ? pthread_rwlock_wrlock(&r->native) : pthread_rwlock_rdlock(&r->native);
+    if (attempt || timed) e=writer ? pthread_rwlock_trywrlock(&p_rwlock->native) : pthread_rwlock_tryrdlock(&p_rwlock->native);
+    else e=writer ? pthread_rwlock_wrlock(&p_rwlock->native) : pthread_rwlock_rdlock(&p_rwlock->native);
     if (timed && e==EBUSY) {
-        if (!time || time->nanoseconds<0 || time->nanoseconds>=1000000000) e=EINVAL;
+        if (!p_time || p_time->nanoseconds<0 || p_time->nanoseconds>=1000000000) e=EINVAL;
         else {
-            struct timespec deadline={.tv_sec=(time_t)time->seconds,.tv_nsec=(long)time->nanoseconds};
-            e=writer ? pthread_rwlock_timedwrlock(&r->native,&deadline) : pthread_rwlock_timedrdlock(&r->native,&deadline);
+            struct timespec deadline={.tv_sec=(time_t)p_time->seconds,.tv_nsec=(long)p_time->nanoseconds};
+            e=writer ? pthread_rwlock_timedwrlock(&p_rwlock->native,&deadline) : pthread_rwlock_timedrdlock(&p_rwlock->native,&deadline);
         }
     }
-    pthread_mutex_lock(&registry_lock);
-    --r->inflight; --h->pending;
+    pthread_mutex_lock(&s_registry_lock);
+    --p_rwlock->inflight; --p_holder->pending;
     if (!e) {
-        if (writer) { h->writer=1; ++writes; }
-        else { ++h->readers; ++reads; }
+        if (writer) { p_holder->writer=1; ++s_c_writes; }
+        else { ++p_holder->readers; ++s_c_reads; }
     }
-    prune_locked(r,h);
-    pthread_mutex_unlock(&registry_lock); return error(e);
+    prune_locked(p_rwlock,p_holder);
+    pthread_mutex_unlock(&s_registry_lock); return error(e);
 }
-static ABI int32_t rw_read(Rwlock **r) { return acquire(r,READ,NULL); }
-static ABI int32_t rw_write(Rwlock **r) { return acquire(r,WRITE,NULL); }
-static ABI int32_t rw_tryread(Rwlock **r) { return acquire(r,TRY_READ,NULL); }
-static ABI int32_t rw_trywrite(Rwlock **r) { return acquire(r,TRY_WRITE,NULL); }
-static ABI int32_t rw_timedread(Rwlock **r,const GuestTime *t) { return acquire(r,TIMED_READ,t); }
-static ABI int32_t rw_timedwrite(Rwlock **r,const GuestTime *t) { return acquire(r,TIMED_WRITE,t); }
-static ABI int32_t rw_unlock(Rwlock **handle) {
-    if (!handle) return error(EINVAL);
-    pthread_mutex_lock(&registry_lock);
-    Rwlock *r=find_locked(*handle);
-    if (!r) { pthread_mutex_unlock(&registry_lock); return error(EINVAL); }
-    Holder *h=r->holders;
-    while (h && !pthread_equal(h->thread,pthread_self())) h=h->next;
-    if (!h || (!h->readers && !h->writer)) { pthread_mutex_unlock(&registry_lock); return error(EPERM); }
-    int e=h->writer || h->readers==1 ? pthread_rwlock_unlock(&r->native) : 0;
-    if (!e) { if (h->writer) h->writer=0; else --h->readers; ++unlocks; }
-    prune_locked(r,h);
-    pthread_mutex_unlock(&registry_lock); return error(e);
+static ABI int32_t rw_read(Rwlock **pp_rwlock) { return acquire(pp_rwlock,READ,NULL); }
+static ABI int32_t rw_write(Rwlock **pp_rwlock) { return acquire(pp_rwlock,WRITE,NULL); }
+static ABI int32_t rw_tryread(Rwlock **pp_rwlock) { return acquire(pp_rwlock,TRY_READ,NULL); }
+static ABI int32_t rw_trywrite(Rwlock **pp_rwlock) { return acquire(pp_rwlock,TRY_WRITE,NULL); }
+static ABI int32_t rw_timedread(Rwlock **pp_rwlock,const GuestTime *p_time) { return acquire(pp_rwlock,TIMED_READ,p_time); }
+static ABI int32_t rw_timedwrite(Rwlock **pp_rwlock,const GuestTime *p_time) { return acquire(pp_rwlock,TIMED_WRITE,p_time); }
+static ABI int32_t rw_unlock(Rwlock **pp_handle) {
+    if (!pp_handle) return error(EINVAL);
+    pthread_mutex_lock(&s_registry_lock);
+    Rwlock *p_rwlock=find_locked(*pp_handle);
+    if (!p_rwlock) { pthread_mutex_unlock(&s_registry_lock); return error(EINVAL); }
+    Holder *p_holder=p_rwlock->p_holders;
+    while (p_holder && !pthread_equal(p_holder->thread,pthread_self())) p_holder=p_holder->p_next;
+    if (!p_holder || (!p_holder->readers && !p_holder->writer)) { pthread_mutex_unlock(&s_registry_lock); return error(EPERM); }
+    int e=p_holder->writer || p_holder->readers==1 ? pthread_rwlock_unlock(&p_rwlock->native) : 0;
+    if (!e) { if (p_holder->writer) p_holder->writer=0; else --p_holder->readers; ++s_c_unlocks; }
+    prune_locked(p_rwlock,p_holder);
+    pthread_mutex_unlock(&s_registry_lock); return error(e);
 }
-static ABI int32_t rw_destroy(Rwlock **handle) {
-    if (!handle) return error(EINVAL);
-    pthread_mutex_lock(&registry_lock);
-    if (!*handle) { pthread_mutex_unlock(&registry_lock); return 0; }
-    Rwlock *r=find_locked(*handle);
-    if (!r) { pthread_mutex_unlock(&registry_lock); return error(EINVAL); }
-    if (r->inflight || r->holders) { pthread_mutex_unlock(&registry_lock); return error(EBUSY); }
-    int e=pthread_rwlock_destroy(&r->native);
+static ABI int32_t rw_destroy(Rwlock **pp_handle) {
+    if (!pp_handle) return error(EINVAL);
+    pthread_mutex_lock(&s_registry_lock);
+    if (!*pp_handle) { pthread_mutex_unlock(&s_registry_lock); return 0; }
+    Rwlock *p_rwlock=find_locked(*pp_handle);
+    if (!p_rwlock) { pthread_mutex_unlock(&s_registry_lock); return error(EINVAL); }
+    if (p_rwlock->inflight || p_rwlock->p_holders) { pthread_mutex_unlock(&s_registry_lock); return error(EBUSY); }
+    int e=pthread_rwlock_destroy(&p_rwlock->native);
     if (!e) {
-        Rwlock **link=&registry;
-        while (*link!=r) link=&(*link)->next;
-        *link=r->next; free(r); *handle=(Rwlock *)(uintptr_t)1;
+        Rwlock **pp_link=&s_p_registry;
+        while (*pp_link!=p_rwlock) pp_link=&(*pp_link)->p_next;
+        *pp_link=p_rwlock->p_next; free(p_rwlock); *pp_handle=(Rwlock *)(uintptr_t)1;
     }
-    pthread_mutex_unlock(&registry_lock); return error(e);
+    pthread_mutex_unlock(&s_registry_lock); return error(e);
 }
 static int32_t posix_result(int32_t r) { return r ? (int32_t)((uint32_t)r&0xffff) : 0; }
-static ABI int32_t posix_attr_init(RwlockAttr **a) { return posix_result(attr_init(a)); }
-static ABI int32_t posix_attr_destroy(RwlockAttr **a) { return posix_result(attr_destroy(a)); }
-static ABI int32_t posix_attr_settype(RwlockAttr **a,int32_t t) { return posix_result(attr_settype(a,t)); }
-static ABI int32_t posix_attr_gettype(RwlockAttr **a,int32_t *t) { return posix_result(attr_gettype(a,t)); }
-static ABI int32_t posix_attr_setpshared(RwlockAttr **a,int32_t s) { return posix_result(attr_setpshared(a,s)); }
-static ABI int32_t posix_attr_getpshared(RwlockAttr **a,int32_t *s) { return posix_result(attr_getpshared(a,s)); }
-static ABI int32_t posix_init(Rwlock **out,RwlockAttr *const *attr) { return posix_result(rw_init(out,attr,NULL)); }
-static ABI int32_t posix_destroy(Rwlock **r) { return posix_result(rw_destroy(r)); }
-static ABI int32_t posix_read(Rwlock **r) { return posix_result(rw_read(r)); }
-static ABI int32_t posix_write(Rwlock **r) { return posix_result(rw_write(r)); }
-static ABI int32_t posix_tryread(Rwlock **r) { return posix_result(rw_tryread(r)); }
-static ABI int32_t posix_trywrite(Rwlock **r) { return posix_result(rw_trywrite(r)); }
-static ABI int32_t posix_timedread(Rwlock **r,const GuestTime *t) { return posix_result(rw_timedread(r,t)); }
-static ABI int32_t posix_timedwrite(Rwlock **r,const GuestTime *t) { return posix_result(rw_timedwrite(r,t)); }
-static ABI int32_t posix_unlock(Rwlock **r) { return posix_result(rw_unlock(r)); }
-static const RuntimeExport exports[]={
+static ABI int32_t posix_attr_init(RwlockAttr **pp_rwlock_attr) { return posix_result(attr_init(pp_rwlock_attr)); }
+static ABI int32_t posix_attr_destroy(RwlockAttr **pp_rwlock_attr) { return posix_result(attr_destroy(pp_rwlock_attr)); }
+static ABI int32_t posix_attr_settype(RwlockAttr **pp_rwlock_attr,int32_t t) { return posix_result(attr_settype(pp_rwlock_attr,t)); }
+static ABI int32_t posix_attr_gettype(RwlockAttr **pp_rwlock_attr,int32_t *p_type) { return posix_result(attr_gettype(pp_rwlock_attr,p_type)); }
+static ABI int32_t posix_attr_setpshared(RwlockAttr **pp_rwlock_attr,int32_t s) { return posix_result(attr_setpshared(pp_rwlock_attr,s)); }
+static ABI int32_t posix_attr_getpshared(RwlockAttr **pp_rwlock_attr,int32_t *p_shared) { return posix_result(attr_getpshared(pp_rwlock_attr,p_shared)); }
+static ABI int32_t posix_init(Rwlock **pp_out,RwlockAttr *const *pp_attr) { return posix_result(rw_init(pp_out,pp_attr,NULL)); }
+static ABI int32_t posix_destroy(Rwlock **pp_rwlock) { return posix_result(rw_destroy(pp_rwlock)); }
+static ABI int32_t posix_read(Rwlock **pp_rwlock) { return posix_result(rw_read(pp_rwlock)); }
+static ABI int32_t posix_write(Rwlock **pp_rwlock) { return posix_result(rw_write(pp_rwlock)); }
+static ABI int32_t posix_tryread(Rwlock **pp_rwlock) { return posix_result(rw_tryread(pp_rwlock)); }
+static ABI int32_t posix_trywrite(Rwlock **pp_rwlock) { return posix_result(rw_trywrite(pp_rwlock)); }
+static ABI int32_t posix_timedread(Rwlock **pp_rwlock,const GuestTime *p_time) { return posix_result(rw_timedread(pp_rwlock,p_time)); }
+static ABI int32_t posix_timedwrite(Rwlock **pp_rwlock,const GuestTime *p_time) { return posix_result(rw_timedwrite(pp_rwlock,p_time)); }
+static ABI int32_t posix_unlock(Rwlock **pp_rwlock) { return posix_result(rw_unlock(pp_rwlock)); }
+static const RuntimeExport s_exports[]={
     {"scePthreadRwlockInit",rw_init}, {"scePthreadRwlockDestroy",rw_destroy}, {"scePthreadRwlockRdlock",rw_read},
     {"scePthreadRwlockWrlock",rw_write}, {"scePthreadRwlockTryrdlock",rw_tryread},
     {"scePthreadRwlockTrywrlock",rw_trywrite}, {"scePthreadRwlockUnlock",rw_unlock},
@@ -212,13 +212,13 @@ static const RuntimeExport exports[]={
     {"pthread_rwlock_timedrdlock",posix_timedread}, {"pthread_rwlock_timedwrlock",posix_timedwrite},
     {"pthread_rwlock_unlock",posix_unlock},
 };
-uintptr_t runtime_rwlock_resolve(const char *name) {
-    return RUNTIME_LOOKUP(exports,name);
+uintptr_t runtime_rwlock_resolve(const char *sz_name) {
+    return RUNTIME_LOOKUP(s_exports,sz_name);
 }
 void runtime_rwlock_report(void) {
-    pthread_mutex_lock(&registry_lock);
-    printf("Runtime: rwlocks created=%zu, reads=%zu, writes=%zu, unlocks=%zu\n",created,reads,writes,unlocks);
-    pthread_mutex_unlock(&registry_lock);
+    pthread_mutex_lock(&s_registry_lock);
+    printf("Runtime: rwlocks created=%zu, reads=%zu, writes=%zu, unlocks=%zu\n",s_c_created,s_c_reads,s_c_writes,s_c_unlocks);
+    pthread_mutex_unlock(&s_registry_lock);
 }
 #else
 uintptr_t runtime_rwlock_resolve(const char *name) { (void)name; return 0; }

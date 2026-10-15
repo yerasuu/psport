@@ -18,55 +18,55 @@ namespace {
 // SDL's primary display. The monitors are logged so a report says which one was taken.
 SDL_DisplayID ChooseDisplay() {
     const SDL_DisplayID primary = SDL_GetPrimaryDisplay();
-    const char* wanted = std::getenv("PS_DISPLAY");
-    int count = 0;
-    SDL_DisplayID* ids = SDL_GetDisplays(&count);
+    const char* sz_wanted = std::getenv("PS_DISPLAY");
+    int c_displays = 0;
+    SDL_DisplayID* p_ids = SDL_GetDisplays(&c_displays);
     SDL_DisplayID chosen = 0;
-    if (wanted && *wanted) {
-        char* end = nullptr;
-        const long number = std::strtol(wanted, &end, 10);
-        if (end && *end == '\0') {
-            if (number >= 1 && number <= count) {
-                chosen = ids[number - 1];
+    if (sz_wanted && *sz_wanted) {
+        char* sz_end = nullptr;
+        const long number = std::strtol(sz_wanted, &sz_end, 10);
+        if (sz_end && *sz_end == '\0') {
+            if (number >= 1 && number <= c_displays) {
+                chosen = p_ids[number - 1];
             }
         } else {
-            for (int i = 0; i < count && !chosen; ++i) {
-                const char* name = SDL_GetDisplayName(ids[i]);
-                if (name && strcasestr(name, wanted)) {
-                    chosen = ids[i];
+            for (int i = 0; i < c_displays && !chosen; ++i) {
+                const char* sz_name = SDL_GetDisplayName(p_ids[i]);
+                if (sz_name && strcasestr(sz_name, sz_wanted)) {
+                    chosen = p_ids[i];
                 }
             }
         }
     }
     const SDL_DisplayID display = chosen ? chosen : primary;
-    for (int i = 0; i < count; ++i) {
-        const char* name = SDL_GetDisplayName(ids[i]);
-        const SDL_DisplayMode* mode = SDL_GetDesktopDisplayMode(ids[i]);
-        std::printf("Display %d: %s %dx%d%s%s\n", i + 1, name ? name : "?", mode ? mode->w : 0,
-                    mode ? mode->h : 0, ids[i] == primary ? " (primary)" : "",
-                    ids[i] == display ? " <- the game's (PS_DISPLAY)" : "");
+    for (int i = 0; i < c_displays; ++i) {
+        const char* sz_name = SDL_GetDisplayName(p_ids[i]);
+        const SDL_DisplayMode* p_mode = SDL_GetDesktopDisplayMode(p_ids[i]);
+        std::printf("Display %d: %s %dx%d%s%s\n", i + 1, sz_name ? sz_name : "?", p_mode ? p_mode->w : 0,
+                    p_mode ? p_mode->h : 0, p_ids[i] == primary ? " (primary)" : "",
+                    p_ids[i] == display ? " <- the game's (PS_DISPLAY)" : "");
     }
-    if (wanted && *wanted && !chosen) {
-        std::printf("Display: PS_DISPLAY=%s matches none, the primary one is used\n", wanted);
+    if (sz_wanted && *sz_wanted && !chosen) {
+        std::printf("Display: PS_DISPLAY=%s matches none, the primary one is used\n", sz_wanted);
     }
-    SDL_free(ids);
+    SDL_free(p_ids);
     return display;
 }
 
 } // namespace
 
-WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title, const char* icon_path)
-    : width{width_}, height{height_} {
+WindowSDL::WindowSDL(s32 width_, s32 height_, const char* sz_title, const char* sz_icon_path)
+    : m_width{width_}, m_height{height_} {
     // Gamepads are sampled by runtime_pad.c; their events are pumped here with the window's.
-    const char* host_pad = std::getenv("PS_PAD_HOST");
-    const SDL_InitFlags gamepad = host_pad && host_pad[0] == '0' ? 0 : SDL_INIT_GAMEPAD;
+    const char* sz_host_pad = std::getenv("PS_PAD_HOST");
+    const SDL_InitFlags gamepad = sz_host_pad && sz_host_pad[0] == '0' ? 0 : SDL_INIT_GAMEPAD;
     // SDL_APP_ID from the environment still takes precedence over this identifier.
     SDL_SetAppMetadata("psport", nullptr, "psport");
     if (!SDL_InitSubSystem(SDL_INIT_VIDEO | gamepad)) {
         UNREACHABLE_MSG("Failed to initialize SDL video: {}", SDL_GetError());
     }
     SDL_PropertiesID props = SDL_CreateProperties();
-    SDL_SetStringProperty(props, SDL_PROP_WINDOW_CREATE_TITLE_STRING, title);
+    SDL_SetStringProperty(props, SDL_PROP_WINDOW_CREATE_TITLE_STRING, sz_title);
     const SDL_DisplayID display = ChooseDisplay();
     SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_X_NUMBER, SDL_WINDOWPOS_CENTERED_DISPLAY(display));
     SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_Y_NUMBER, SDL_WINDOWPOS_CENTERED_DISPLAY(display));
@@ -74,236 +74,236 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* title, const char* ico
     SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, height_);
     SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_RESIZABLE_BOOLEAN, true);
     SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_VULKAN_BOOLEAN, true);
-    const char* fullscreen = std::getenv("PS_FULLSCREEN");
-    SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_FULLSCREEN_BOOLEAN, fullscreen && fullscreen[0] == '1');
-    base_title = title;
-    window = SDL_CreateWindowWithProperties(props);
+    const char* sz_fullscreen = std::getenv("PS_FULLSCREEN");
+    SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_FULLSCREEN_BOOLEAN, sz_fullscreen && sz_fullscreen[0] == '1');
+    m_base_title = sz_title;
+    m_p_window = SDL_CreateWindowWithProperties(props);
     SDL_DestroyProperties(props);
-    ASSERT_MSG(window, "Failed to create window: {}", SDL_GetError());
-    if (SDL_Surface* icon = SDL_LoadPNG(icon_path)) {
-        SDL_SetWindowIcon(window, icon);
-        std::printf("Window icon: %s (%dx%d)\n", icon_path, icon->w, icon->h);
-        SDL_DestroySurface(icon);
+    ASSERT_MSG(m_p_window, "Failed to create window: {}", SDL_GetError());
+    if (SDL_Surface* p_icon = SDL_LoadPNG(sz_icon_path)) {
+        SDL_SetWindowIcon(m_p_window, p_icon);
+        std::printf("Window icon: %s (%dx%d)\n", sz_icon_path, p_icon->w, p_icon->h);
+        SDL_DestroySurface(p_icon);
     } else {
-        std::printf("Window icon: %s: %s\n", icon_path, SDL_GetError());
+        std::printf("Window icon: %s: %s\n", sz_icon_path, SDL_GetError());
     }
 
-    const char* driver = SDL_GetCurrentVideoDriver();
-    const SDL_PropertiesID wp = SDL_GetWindowProperties(window);
-    if (driver && !std::strcmp(driver, "x11")) {
-        window_info.type = WindowSystemType::X11;
-        window_info.display_connection = SDL_GetPointerProperty(wp, SDL_PROP_WINDOW_X11_DISPLAY_POINTER, nullptr);
-        window_info.render_surface = reinterpret_cast<void*>(SDL_GetNumberProperty(wp, SDL_PROP_WINDOW_X11_WINDOW_NUMBER, 0));
-    } else if (driver && !std::strcmp(driver, "wayland")) {
-        window_info.type = WindowSystemType::Wayland;
-        window_info.display_connection = SDL_GetPointerProperty(wp, SDL_PROP_WINDOW_WAYLAND_DISPLAY_POINTER, nullptr);
-        window_info.render_surface = SDL_GetPointerProperty(wp, SDL_PROP_WINDOW_WAYLAND_SURFACE_POINTER, nullptr);
+    const char* sz_driver = SDL_GetCurrentVideoDriver();
+    const SDL_PropertiesID wp = SDL_GetWindowProperties(m_p_window);
+    if (sz_driver && !std::strcmp(sz_driver, "x11")) {
+        m_window_info.type = WindowSystemType::X11;
+        m_window_info.display_connection = SDL_GetPointerProperty(wp, SDL_PROP_WINDOW_X11_DISPLAY_POINTER, nullptr);
+        m_window_info.render_surface = reinterpret_cast<void*>(SDL_GetNumberProperty(wp, SDL_PROP_WINDOW_X11_WINDOW_NUMBER, 0));
+    } else if (sz_driver && !std::strcmp(sz_driver, "wayland")) {
+        m_window_info.type = WindowSystemType::Wayland;
+        m_window_info.display_connection = SDL_GetPointerProperty(wp, SDL_PROP_WINDOW_WAYLAND_DISPLAY_POINTER, nullptr);
+        m_window_info.render_surface = SDL_GetPointerProperty(wp, SDL_PROP_WINDOW_WAYLAND_SURFACE_POINTER, nullptr);
     } else {
-        UNREACHABLE_MSG("Unsupported SDL video driver {}", driver ? driver : "(none)");
+        UNREACHABLE_MSG("Unsupported SDL video driver {}", sz_driver ? sz_driver : "(none)");
     }
     int w = 0, h = 0;
-    SDL_GetWindowSizeInPixels(window, &w, &h);
-    width = w;
-    height = h;
-    LOG_INFO(Frontend, "Window {}x{} on {}", w, h, driver);
-    std::printf("Window: %s (app id %s)\n", title, SDL_GetAppMetadataProperty(SDL_PROP_APP_METADATA_IDENTIFIER_STRING));
-    host_mouse = SDL_HasMouse();
-    host_keyboard = SDL_HasKeyboard();
+    SDL_GetWindowSizeInPixels(m_p_window, &w, &h);
+    m_width = w;
+    m_height = h;
+    LOG_INFO(Frontend, "Window {}x{} on {}", w, h, sz_driver);
+    std::printf("Window: %s (app id %s)\n", sz_title, SDL_GetAppMetadataProperty(SDL_PROP_APP_METADATA_IDENTIFIER_STRING));
+    m_is_host_mouse = SDL_HasMouse();
+    m_is_host_keyboard = SDL_HasKeyboard();
 }
 
 WindowSDL::~WindowSDL() {
-    SDL_DestroyWindow(window);
+    SDL_DestroyWindow(m_p_window);
 }
 
 void WindowSDL::BeginTextInput(const std::string& initial, const std::string& prompt) {
-    std::scoped_lock lock{text_mutex};
-    text = initial;
-    text_prompt = prompt;
-    text_state = 0;
-    text_requested = true;
+    std::scoped_lock lock{m_text_mutex};
+    m_text = initial;
+    m_text_prompt = prompt;
+    m_text_state = 0;
+    m_is_text_requested = true;
 }
 
 void WindowSDL::EndTextInput() {
-    std::scoped_lock lock{text_mutex};
-    text_requested = false;
+    std::scoped_lock lock{m_text_mutex};
+    m_is_text_requested = false;
     m_is_text_end_requested = true;
 }
 
 int WindowSDL::PollTextInput(std::string& out) {
-    std::scoped_lock lock{text_mutex};
-    out = text;
-    return text_state;
+    std::scoped_lock lock{m_text_mutex};
+    out = m_text;
+    return m_text_state;
 }
 
 void WindowSDL::TakeMouse(double& dx, double& dy, int& up, int& down) {
-    std::scoped_lock lock{mouse_mutex};
-    dx = mouse_dx;
-    dy = mouse_dy;
-    up = wheel_up;
-    down = wheel_down;
-    mouse_dx = mouse_dy = 0;
-    wheel_up = wheel_down = 0;
+    std::scoped_lock lock{m_mouse_mutex};
+    dx = m_mouse_dx;
+    dy = m_mouse_dy;
+    up = m_c_wheel_up;
+    down = m_c_wheel_down;
+    m_mouse_dx = m_mouse_dy = 0;
+    m_c_wheel_up = m_c_wheel_down = 0;
 }
 
 bool WindowSDL::TakeGameMouse(s32& dx, s32& dy, s32& wheel, s32& tilt, u32& buttons) {
-    std::scoped_lock lock{mouse_mutex};
-    dx = s32(game_dx);
-    dy = s32(game_dy);
-    wheel = s32(game_wheel);
-    tilt = s32(game_tilt);
+    std::scoped_lock lock{m_mouse_mutex};
+    dx = s32(m_game_dx);
+    dy = s32(m_game_dy);
+    wheel = s32(m_game_wheel);
+    tilt = s32(m_game_tilt);
     // Fractions stay for the next call, so slow motion and smooth scrolling still add up.
-    game_dx -= dx;
-    game_dy -= dy;
-    game_wheel -= float(wheel);
-    game_tilt -= float(tilt);
-    buttons = game_buttons;
-    return host_mouse.load(std::memory_order_relaxed);
+    m_game_dx -= dx;
+    m_game_dy -= dy;
+    m_game_wheel -= float(wheel);
+    m_game_tilt -= float(tilt);
+    buttons = m_game_buttons;
+    return m_is_host_mouse.load(std::memory_order_relaxed);
 }
 
 void WindowSDL::GameMouseEvent(const SDL_Event& event) {
-    std::scoped_lock lock{mouse_mutex};
+    std::scoped_lock lock{m_mouse_mutex};
     switch (event.type) {
     case SDL_EVENT_MOUSE_MOTION:
-        game_dx += event.motion.xrel;
-        game_dy += event.motion.yrel;
+        m_game_dx += event.motion.xrel;
+        m_game_dy += event.motion.yrel;
         break;
     case SDL_EVENT_MOUSE_BUTTON_DOWN:
-        game_buttons |= SDL_BUTTON_MASK(event.button.button);
+        m_game_buttons |= SDL_BUTTON_MASK(event.button.button);
         break;
     case SDL_EVENT_MOUSE_BUTTON_UP:
-        game_buttons &= ~SDL_BUTTON_MASK(event.button.button);
+        m_game_buttons &= ~SDL_BUTTON_MASK(event.button.button);
         break;
     case SDL_EVENT_MOUSE_WHEEL: {
         const float flip = event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -1.0f : 1.0f;
-        game_wheel += event.wheel.y * flip;
-        game_tilt += event.wheel.x * flip;
+        m_game_wheel += event.wheel.y * flip;
+        m_game_tilt += event.wheel.x * flip;
         break;
     }
     case SDL_EVENT_WINDOW_FOCUS_LOST:
-        game_buttons = 0;
+        m_game_buttons = 0;
         break;
     case SDL_EVENT_MOUSE_ADDED:
     case SDL_EVENT_MOUSE_REMOVED:
-        host_mouse = SDL_HasMouse();
+        m_is_host_mouse = SDL_HasMouse();
         break;
     default:
         break;
     }
 }
 
-int WindowSDL::TakeGameKeys(PsKeyEvent* events, int max, bool& keyboard, u32& dropped) {
-    std::scoped_lock lock{key_mutex};
+int WindowSDL::TakeGameKeys(PsKeyEvent* p_events, int max, bool& keyboard, u32& dropped) {
+    std::scoped_lock lock{m_key_mutex};
     SyncGameKeyboard();
-    int count = 0;
-    for (; count < max && !game_keys.empty(); ++count) {
-        events[count] = game_keys.front();
-        game_keys.pop_front();
+    int c_keys = 0;
+    for (; c_keys < max && !m_game_keys.empty(); ++c_keys) {
+        p_events[c_keys] = m_game_keys.front();
+        m_game_keys.pop_front();
     }
-    keyboard = host_keyboard.load(std::memory_order_relaxed);
-    dropped = game_keys_dropped;
-    return count;
+    keyboard = m_is_host_keyboard.load(std::memory_order_relaxed);
+    dropped = m_game_keys_dropped;
+    return c_keys;
 }
 
 // Opening or closing the game's keyboard starts it afresh: nothing typed before reaches it, and
-// keys still held when it opened are not reported released. Called under key_mutex.
+// keys still held when it opened are not reported released. Called under m_key_mutex.
 void WindowSDL::SyncGameKeyboard() {
-    const bool open = game_keyboard_open.load(std::memory_order_relaxed);
-    if (open != game_keyboard_synced) {
-        game_keyboard_synced = open;
-        game_keys.clear();
-        game_keys_held.reset();
+    const bool is_open = m_is_game_keyboard_open.load(std::memory_order_relaxed);
+    if (is_open != m_is_game_keyboard_synced) {
+        m_is_game_keyboard_synced = is_open;
+        m_game_keys.clear();
+        m_game_keys_held.reset();
     }
 }
 
 void WindowSDL::GameKeyEvent(const SDL_Event& event) {
     constexpr size_t queue_limit = 256;
-    std::scoped_lock lock{key_mutex};
+    std::scoped_lock lock{m_key_mutex};
     SyncGameKeyboard();
     const SDL_Scancode scancode = event.key.scancode;
-    if (!game_keyboard_synced || size_t(scancode) >= game_keys_held.size()) {
+    if (!m_is_game_keyboard_synced || size_t(scancode) >= m_game_keys_held.size()) {
         return;
     }
-    const bool down = event.type == SDL_EVENT_KEY_DOWN;
-    if (!down && !game_keys_held.test(scancode)) {
+    const bool is_down = event.type == SDL_EVENT_KEY_DOWN;
+    if (!is_down && !m_game_keys_held.test(scancode)) {
         return;
     }
-    game_keys_held.set(scancode, down);
+    m_game_keys_held.set(scancode, is_down);
     const SDL_Keycode key = SDL_GetKeyFromScancode(scancode, event.key.mod, false);
     const auto now = std::chrono::system_clock::now().time_since_epoch();
-    if (game_keys.size() == queue_limit) {
-        game_keys.pop_front();
-        ++game_keys_dropped;
+    if (m_game_keys.size() == queue_limit) {
+        m_game_keys.pop_front();
+        ++m_game_keys_dropped;
     }
-    game_keys.push_back(PsKeyEvent{
+    m_game_keys.push_back(PsKeyEvent{
         .time_us = u64(std::chrono::duration_cast<std::chrono::microseconds>(now).count()),
         .character = key & SDLK_SCANCODE_MASK ? 0u : u32(key),
         .scancode = u16(scancode),
         .mod = u16(event.key.mod),
-        .down = u8(down),
+        .down = u8(is_down),
         .repeat = u8(event.key.repeat),
     });
 }
 
 // Mouse look: relative mode while the window holds the mouse (runtime_pad.c turns its motion into
 // the right stick). Motion from before is dropped, so taking the mouse does not turn the camera.
-void WindowSDL::CaptureMouse(bool capture) {
-    if (capture == mouse_captured.load(std::memory_order_relaxed)) {
+void WindowSDL::CaptureMouse(bool should_capture) {
+    if (should_capture == m_is_mouse_captured.load(std::memory_order_relaxed)) {
         return;
     }
-    if (!SDL_SetWindowRelativeMouseMode(window, capture) && capture) {
+    if (!SDL_SetWindowRelativeMouseMode(m_p_window, should_capture) && should_capture) {
         std::printf("Mouse look: relative mouse mode failed: %s\n", SDL_GetError());
         return;
     }
     {
-        std::scoped_lock lock{mouse_mutex};
-        mouse_dx = mouse_dy = 0;
-        wheel_up = wheel_down = 0;
+        std::scoped_lock lock{m_mouse_mutex};
+        m_mouse_dx = m_mouse_dy = 0;
+        m_c_wheel_up = m_c_wheel_down = 0;
     }
-    mouse_captured.store(capture, std::memory_order_relaxed);
-    static bool told;
-    if (capture && !told) {
-        told = true;
+    m_is_mouse_captured.store(should_capture, std::memory_order_relaxed);
+    static bool s_has_told;
+    if (should_capture && !s_has_told) {
+        s_has_told = true;
         std::printf("Mouse look: on (F1 releases the mouse, a click takes it again)\n");
     }
 }
 
 void WindowSDL::UpdateTextTitle() {
-    const std::string title = text_active ? base_title + " \u2014 " + text_prompt + ": " + text + "_  (Enter = OK, Esc = cancel)"
-                                          : base_title;
-    SDL_SetWindowTitle(window, title.c_str());
-    PsOverlay::SetTextPrompt(text_active, text_prompt, text);
+    const std::string title = m_is_text_active ? m_base_title + " \u2014 " + m_text_prompt + ": " + m_text + "_  (Enter = OK, Esc = cancel)"
+                                          : m_base_title;
+    SDL_SetWindowTitle(m_p_window, title.c_str());
+    PsOverlay::SetTextPrompt(m_is_text_active, m_text_prompt, m_text);
 }
 
 bool WindowSDL::PollEvents() {
     {
-        std::scoped_lock lock{text_mutex};
+        std::scoped_lock lock{m_text_mutex};
         if (m_is_text_end_requested) {
             m_is_text_end_requested = false;
-            if (text_active) {
-                text_active = false;
-                text_state = 2;
-                SDL_StopTextInput(window);
+            if (m_is_text_active) {
+                m_is_text_active = false;
+                m_text_state = 2;
+                SDL_StopTextInput(m_p_window);
                 UpdateTextTitle();
             }
         }
-        if (text_requested) { // SDL text input must be toggled from the window thread
-            text_requested = false;
-            text_active = true;
-            SDL_StartTextInput(window);
+        if (m_is_text_requested) { // SDL text input must be toggled from the window thread
+            m_is_text_requested = false;
+            m_is_text_active = true;
+            SDL_StartTextInput(m_p_window);
             UpdateTextTitle();
         }
     }
-    if (!text_active) {
-        PsOverlay::UpdateTextInput(window);
+    if (!m_is_text_active) {
+        PsOverlay::UpdateTextInput(m_p_window);
     }
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
         if (event.type == SDL_EVENT_MOUSE_MOTION) {
-            last_mouse_motion_ms = SDL_GetTicks();
-            if (mouse_captured.load(std::memory_order_relaxed)) {
-                std::scoped_lock lock{mouse_mutex};
-                mouse_dx += event.motion.xrel;
-                mouse_dy += event.motion.yrel;
+            m_last_mouse_motion_ms = SDL_GetTicks();
+            if (m_is_mouse_captured.load(std::memory_order_relaxed)) {
+                std::scoped_lock lock{m_mouse_mutex};
+                m_mouse_dx += event.motion.xrel;
+                m_mouse_dy += event.motion.yrel;
             }
         }
         // A release always reaches the game when it saw the press, so a key held while the menu or
@@ -311,18 +311,18 @@ bool WindowSDL::PollEvents() {
         if (event.type == SDL_EVENT_KEY_UP) {
             GameKeyEvent(event);
         }
-        if (text_active && (event.type == SDL_EVENT_TEXT_INPUT || event.type == SDL_EVENT_KEY_DOWN)) {
-            std::scoped_lock lock{text_mutex};
+        if (m_is_text_active && (event.type == SDL_EVENT_TEXT_INPUT || event.type == SDL_EVENT_KEY_DOWN)) {
+            std::scoped_lock lock{m_text_mutex};
             if (event.type == SDL_EVENT_TEXT_INPUT) {
-                text += event.text.text;
-            } else if (event.key.key == SDLK_BACKSPACE && !text.empty()) {
-                size_t cut = text.size() - 1; // drop one UTF-8 code point
-                while (cut > 0 && (static_cast<unsigned char>(text[cut]) & 0xC0) == 0x80) --cut;
-                text.erase(cut);
+                m_text += event.text.text;
+            } else if (event.key.key == SDLK_BACKSPACE && !m_text.empty()) {
+                size_t cut = m_text.size() - 1; // drop one UTF-8 code point
+                while (cut > 0 && (static_cast<unsigned char>(m_text[cut]) & 0xC0) == 0x80) --cut;
+                m_text.erase(cut);
             } else if (event.key.key == SDLK_RETURN || event.key.key == SDLK_KP_ENTER || event.key.key == SDLK_ESCAPE) {
-                text_state = event.key.key == SDLK_ESCAPE ? 2 : 1;
-                text_active = false;
-                SDL_StopTextInput(window);
+                m_text_state = event.key.key == SDLK_ESCAPE ? 2 : 1;
+                m_is_text_active = false;
+                SDL_StopTextInput(m_p_window);
             }
             UpdateTextTitle();
             continue;
@@ -337,23 +337,23 @@ bool WindowSDL::PollEvents() {
         // Mouse look: a click in the game takes the mouse (that click is not passed on as a
         // button: runtime_pad.c reads the buttons only while it is held); F1 and leaving the
         // window let it go.
-        if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && !mouse_captured.load(std::memory_order_relaxed) &&
-            mouse_look.load(std::memory_order_relaxed) && !PsOverlay::MenuOpen() && !PsOverlay::GameCursorShown()) {
+        if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && !m_is_mouse_captured.load(std::memory_order_relaxed) &&
+            m_is_mouse_look.load(std::memory_order_relaxed) && !PsOverlay::MenuOpen() && !PsOverlay::GameCursorShown()) {
             CaptureMouse(true);
             continue;
         }
         if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat && event.key.key == SDLK_F1 &&
-            mouse_captured.load(std::memory_order_relaxed)) {
+            m_is_mouse_captured.load(std::memory_order_relaxed)) {
             CaptureMouse(false);
             continue;
         }
         if (event.type == SDL_EVENT_KEY_DOWN) {
             GameKeyEvent(event);
         }
-        if (event.type == SDL_EVENT_MOUSE_WHEEL && mouse_captured.load(std::memory_order_relaxed)) {
+        if (event.type == SDL_EVENT_MOUSE_WHEEL && m_is_mouse_captured.load(std::memory_order_relaxed)) {
             const float notches = event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -event.wheel.y : event.wheel.y;
-            std::scoped_lock lock{mouse_mutex};
-            (notches > 0 ? wheel_up : wheel_down) += notches != 0 ? 1 : 0;
+            std::scoped_lock lock{m_mouse_mutex};
+            (notches > 0 ? m_c_wheel_up : m_c_wheel_down) += notches != 0 ? 1 : 0;
         }
         if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST) {
             CaptureMouse(false);
@@ -362,49 +362,49 @@ bool WindowSDL::PollEvents() {
         case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
         case SDL_EVENT_WINDOW_RESIZED: {
             int w = 0, h = 0;
-            SDL_GetWindowSizeInPixels(window, &w, &h);
-            width = w;
-            height = h;
+            SDL_GetWindowSizeInPixels(m_p_window, &w, &h);
+            m_width = w;
+            m_height = h;
             break;
         }
         case SDL_EVENT_KEYBOARD_ADDED:
         case SDL_EVENT_KEYBOARD_REMOVED:
-            host_keyboard = SDL_HasKeyboard();
+            m_is_host_keyboard = SDL_HasKeyboard();
             break;
         case SDL_EVENT_QUIT:
         case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
             // SDL turns SIGTERM and SIGINT into a quit event too, so a quit is not always the user's.
-            if (is_open) {
+            if (m_is_open) {
                 std::printf(event.type == SDL_EVENT_QUIT
                                 ? "Window: quit requested (in-game menu, SIGTERM or SIGINT), the game ends\n"
                                 : "Window: closed by the user, the game ends\n");
             }
-            is_open = false;
+            m_is_open = false;
             break;
         default:
             break;
         }
     }
     // The menu, the name dialog, the game's own cursor and mouse_look=0 want the mouse as a pointer.
-    if (mouse_captured.load(std::memory_order_relaxed) &&
-        (PsOverlay::MenuOpen() || text_active || PsOverlay::GameCursorShown() ||
-         !mouse_look.load(std::memory_order_relaxed))) {
+    if (m_is_mouse_captured.load(std::memory_order_relaxed) &&
+        (PsOverlay::MenuOpen() || m_is_text_active || PsOverlay::GameCursorShown() ||
+         !m_is_mouse_look.load(std::memory_order_relaxed))) {
         CaptureMouse(false);
     }
     UpdateCursor();
-    return is_open;
+    return m_is_open;
 }
 
 // Issue #3: the OS cursor over the game. Hidden in fullscreen, while the game draws its own
 // (VideoOut's hardware cursor), and in a window after 3 s without moving the mouse; always shown
 // while the settings menu is open.
 void WindowSDL::UpdateCursor() {
-    const bool fullscreen = (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) != 0;
-    const bool hide = !PsOverlay::MenuOpen() && (fullscreen || PsOverlay::GameCursorShown() ||
-                                                 SDL_GetTicks() - last_mouse_motion_ms > 3000);
-    if (hide != cursor_hidden) {
-        cursor_hidden = hide;
-        hide ? SDL_HideCursor() : SDL_ShowCursor();
+    const bool is_fullscreen = (SDL_GetWindowFlags(m_p_window) & SDL_WINDOW_FULLSCREEN) != 0;
+    const bool should_hide = !PsOverlay::MenuOpen() && (is_fullscreen || PsOverlay::GameCursorShown() ||
+                                                 SDL_GetTicks() - m_last_mouse_motion_ms > 3000);
+    if (should_hide != m_is_cursor_hidden) {
+        m_is_cursor_hidden = should_hide;
+        should_hide ? SDL_HideCursor() : SDL_ShowCursor();
     }
 }
 

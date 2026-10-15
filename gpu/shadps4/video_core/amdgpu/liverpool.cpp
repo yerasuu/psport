@@ -125,7 +125,7 @@ void Liverpool::ProcessCommands() {
 void Liverpool::Process(std::stop_token stoken) {
     Common::SetCurrentThreadName("shadPS4:GpuCommandProcessor");
     if (clockid_t clock; pthread_getcpuclockid(pthread_self(), &clock) == 0) {
-        PsStats::gpu_thread_clock.store(static_cast<int>(clock));
+        PsStats::g_gpu_thread_clock.store(static_cast<int>(clock));
     }
     gpu_id = std::this_thread::get_id();
 #ifdef __linux__
@@ -183,7 +183,7 @@ void Liverpool::Process(std::stop_token stoken) {
             std::unique_lock lk{submit_mutex};
             Common::CondvarWait(submit_cv, lk, stoken,
                                 [this] { return num_commands || num_submits || submit_done; });
-            PsStats::gpu_idle_ns.fetch_add(
+            PsStats::g_gpu_idle_ns.fetch_add(
                 std::chrono::duration_cast<std::chrono::nanoseconds>(
                     std::chrono::steady_clock::now() - idle_start).count(),
                 std::memory_order_relaxed);
@@ -420,7 +420,7 @@ void SignalEop(const PM4CmdEventWriteEop& eop, u64 seq) {
             if (!memory->TryWriteBacking(address, &data, num_bytes)) {
                 StoreLabel(address, data, num_bytes);
             }
-            PsStats::eop_written.fetch_add(1, std::memory_order_relaxed);
+            PsStats::g_eop_written.fetch_add(1, std::memory_order_relaxed);
             // psport: a VRAM copy of the label gets it too (the backing mapping is not watched).
             if (auto* rasterizer = memory->GetRasterizer()) {
                 rasterizer->NoteLateCommandWrite(reinterpret_cast<VAddr>(address), &data, num_bytes);
@@ -439,7 +439,7 @@ void SignalEop(const PM4CmdEventWriteEop& eop, u64 seq) {
 void RunEventWriteEop(Vulkan::Rasterizer& rasterizer, const u8* data) {
     const auto eop = *reinterpret_cast<const PM4CmdEventWriteEop*>(data);
     if (eop.data_sel.Value() != DataSelect::None) {
-        PsStats::eop_decoded.fetch_add(1, std::memory_order_relaxed);
+        PsStats::g_eop_decoded.fetch_add(1, std::memory_order_relaxed);
     }
     // PS_FREE_CHECK: the order of the fences in the command stream, checked where they land.
     const u64 seq = PsFreeCheck::NextFenceSeq();
@@ -450,7 +450,7 @@ void RunEventWriteEop(Vulkan::Rasterizer& rasterizer, const u8* data) {
     if (Vulkan::Rasterizer::HonestLabels() && eop.data_sel.Value() == DataSelect::GpuClock64 &&
         eop.int_sel.Value() == InterruptSelect::None &&
         rasterizer.WriteTimestampOnGpu(reinterpret_cast<VAddr>(eop.Address<u8>()), true)) {
-        PsStats::eop_written.fetch_add(1, std::memory_order_relaxed);
+        PsStats::g_eop_written.fetch_add(1, std::memory_order_relaxed);
         return;
     }
     if (Vulkan::Rasterizer::HonestLabels()) {
@@ -466,7 +466,7 @@ void RunEventWriteEop(Vulkan::Rasterizer& rasterizer, const u8* data) {
              eop.int_sel.Value() == InterruptSelect::IrqWhenWriteConfirm) &&
             rasterizer.WriteLabelOnGpu(reinterpret_cast<VAddr>(eop.Address<u8>()), value,
                                        eop.data_sel.Value() == DataSelect::Data32Low ? 4 : 8)) {
-            PsStats::eop_written.fetch_add(1, std::memory_order_relaxed);
+            PsStats::g_eop_written.fetch_add(1, std::memory_order_relaxed);
             if (eop.int_sel.Value() != InterruptSelect::None) {
                 rasterizer.SignalAfterGpu(
                     [] { Platform::IrqC::Instance()->Signal(Platform::InterruptId::GfxEop); });
@@ -891,7 +891,7 @@ PsCp::Decoder& Liverpool::CpDecoder() {
                 self->pipe_dirty.reset = true;
             }
             for (const auto& write : writes) {
-                self->pipe_dirty.Mark(write.index, write.count);
+                self->pipe_dirty.Mark(write.m_i_first, write.m_c_registers);
             }
             self->gfx_reg_checksum =
                 HashRegisterPacket(self->gfx_reg_checksum, words.data(), u32(words.size()));
@@ -901,7 +901,7 @@ PsCp::Decoder& Liverpool::CpDecoder() {
     observer->self = this;
     cp_decoder = std::make_unique<PsCp::Decoder>(
         std::span<u32, PsCp::Bank::End>{regs.reg_array.data(), PsCp::Bank::End},
-        PsCp::DecoderOptions{.compute_sh_to_owner = true,
+        PsCp::DecoderOptions{.is_compute_sh_to_owner = true,
                              .compute_words = sizeof(ComputeProgram) / 4});
     static Regs defaults;
     defaults.SetDefaults();
@@ -1463,7 +1463,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
             if (!packet) {
                 break;
             }
-            dcb = {packet->body.data() - 1, dcb_end}; // its packet first
+            dcb = {packet->m_body.data() - 1, dcb_end}; // its packet first
         } else if (dcb.empty()) {
             break;
         }
@@ -2345,16 +2345,16 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
     if (rasterizer && seq != NoSeq) {
         rasterizer->SubmitForSignals();
     }
-    if (seq != NoSeq && PsStats::enabled) {
-        PsStats::submissions.fetch_add(1, std::memory_order_relaxed);
+    if (seq != NoSeq && PsStats::g_is_enabled) {
+        PsStats::g_c_submissions.fetch_add(1, std::memory_order_relaxed);
         if (rusage usage{}; getrusage(RUSAGE_THREAD, &usage) == 0) {
-            PsStats::gpu_user_us.store(u64(usage.ru_utime.tv_sec) * 1000000 + usage.ru_utime.tv_usec,
+            PsStats::g_gpu_user_us.store(u64(usage.ru_utime.tv_sec) * 1000000 + usage.ru_utime.tv_usec,
                                        std::memory_order_relaxed);
-            PsStats::gpu_sys_us.store(u64(usage.ru_stime.tv_sec) * 1000000 + usage.ru_stime.tv_usec,
+            PsStats::g_gpu_sys_us.store(u64(usage.ru_stime.tv_sec) * 1000000 + usage.ru_stime.tv_usec,
                                       std::memory_order_relaxed);
-            PsStats::gpu_invol_switches.store(usage.ru_nivcsw, std::memory_order_relaxed);
-            PsStats::gpu_vol_switches.store(usage.ru_nvcsw, std::memory_order_relaxed);
-            PsStats::gpu_minor_faults.store(usage.ru_minflt, std::memory_order_relaxed);
+            PsStats::g_c_gpu_invol_switches.store(usage.ru_nivcsw, std::memory_order_relaxed);
+            PsStats::g_c_gpu_vol_switches.store(usage.ru_nvcsw, std::memory_order_relaxed);
+            PsStats::g_c_gpu_minor_faults.store(usage.ru_minflt, std::memory_order_relaxed);
         }
     }
 
@@ -2852,7 +2852,7 @@ void Liverpool::SignalGpuIdle(u64 generation) {
 
 void Liverpool::SubmitAsc(u32 gnm_vqid, std::span<const u32> acb) {
     ASSERT_MSG(gnm_vqid > 0 && gnm_vqid < NumTotalQueues, "Invalid virtual ASC queue index");
-    PsStats::asc_submits.fetch_add(1, std::memory_order_relaxed);
+    PsStats::g_c_asc_submits.fetch_add(1, std::memory_order_relaxed);
     auto& queue = mapped_queues[gnm_vqid];
 
     const auto vqid = gnm_vqid - 1;

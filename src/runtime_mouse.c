@@ -34,40 +34,40 @@ typedef struct {
 typedef struct { uint8_t behavior, reserve[7]; } MouseOpenParam;
 _Static_assert(sizeof(MouseData)==40,"OrbisMouseData layout");
 
-typedef struct { int open, host; int32_t user, index, x, y, wheel, tilt; } MousePort;
-static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
-static int initialized, host_connected=-1;
-static MousePort ports[MOUSE_HANDLES];
-static size_t reads;
-static float sensitivity=-1.0f, carry_x, carry_y;
+typedef struct { int is_open, host; int32_t user, i_device, x, y, wheel, tilt; } MousePort;
+static pthread_mutex_t s_lock=PTHREAD_MUTEX_INITIALIZER;
+static int s_is_initialized, s_is_host_connected=-1;
+static MousePort s_ports[MOUSE_HANDLES];
+static size_t s_c_reads;
+static float s_sensitivity=-1.0f, s_carry_x, s_carry_y;
 
 /* game_mouse_sensitivity in psport.ini (PS_CONFIG), beside mouse look's keys (runtime_pad.c):
  * scales the motion the game receives; 1 passes the host's pixels as they are. */
 static void load_sensitivity(void) {
-    sensitivity=1.0f;
-    const char *path=getenv("PS_CONFIG");
-    FILE *f=path ? fopen(path,"r") : NULL;
-    if (!f) return;
-    char line[512];
-    while (fgets(line,sizeof line,f))
-        if (!strncmp(line,"game_mouse_sensitivity=",23)) {
-            const float v=strtof(line+23,NULL);
-            if (v>=0.05f && v<=20.0f) sensitivity=v;
+    s_sensitivity=1.0f;
+    const char *sz_path=getenv("PS_CONFIG");
+    FILE *p_file=sz_path ? fopen(sz_path,"r") : NULL;
+    if (!p_file) return;
+    char sz_line[512];
+    while (fgets(sz_line,sizeof sz_line,p_file))
+        if (!strncmp(sz_line,"game_mouse_sensitivity=",23)) {
+            const float v=strtof(sz_line+23,NULL);
+            if (v>=0.05f && v<=20.0f) s_sensitivity=v;
             else printf("Runtime: mouse: game_mouse_sensitivity=%g is outside 0.05-20, 1 is used\n",v);
         }
-    fclose(f);
-    if (sensitivity!=1.0f) printf("Runtime: mouse: game_mouse_sensitivity=%.2f scales the motion games receive\n",sensitivity);
+    fclose(p_file);
+    if (s_sensitivity!=1.0f) printf("Runtime: mouse: game_mouse_sensitivity=%.2f scales the motion games receive\n",s_sensitivity);
 }
 /* Fractions stay for the next read, so slow motion still adds up at a low sensitivity. */
-static int32_t scaled(int32_t delta, float *carry) {
-    *carry+=(float)delta*sensitivity;
-    const int32_t whole=(int32_t)*carry;
-    *carry-=(float)whole;
+static int32_t scaled(int32_t delta, float *p_carry) {
+    *p_carry+=(float)delta*s_sensitivity;
+    const int32_t whole=(int32_t)*p_carry;
+    *p_carry-=(float)whole;
     return whole;
 }
 
 static uint64_t now_us(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC,&t); return (uint64_t)t.tv_sec*1000000u+(uint64_t)t.tv_nsec/1000u; }
-static MousePort *port_of(int32_t handle) { return handle>=1 && handle<=MOUSE_HANDLES && ports[handle-1].open ? &ports[handle-1] : NULL; }
+static MousePort *port_of(int32_t h_handle) { return h_handle>=1 && h_handle<=MOUSE_HANDLES && s_ports[h_handle-1].is_open ? &s_ports[h_handle-1] : NULL; }
 static uint32_t ps4_buttons(uint32_t sdl) {
     return (sdl & SDL_BUTTON_LMASK ? BTN_PRIMARY : 0) | (sdl & SDL_BUTTON_RMASK ? BTN_SECONDARY : 0) |
            (sdl & SDL_BUTTON_MMASK ? BTN_OPTIONAL : 0) | (sdl & SDL_BUTTON_X1MASK ? BTN_OPTIONAL2 : 0) |
@@ -75,73 +75,73 @@ static uint32_t ps4_buttons(uint32_t sdl) {
 }
 /* The host's motion since the last read of any handle goes to every handle on the host mouse, so
  * two of them (one per user) each see all of it. Called under lock. */
-static int collect(uint32_t *buttons) {
+static int collect(uint32_t *p_buttons) {
     int32_t dx, dy, wheel, tilt;
-    const int host=psport_gpu_game_mouse_take(&dx,&dy,&wheel,&tilt,buttons);
-    if (sensitivity<0) load_sensitivity();
-    dx=scaled(dx,&carry_x); dy=scaled(dy,&carry_y);
-    if (host!=host_connected) {
+    const int host=psport_gpu_game_mouse_take(&dx,&dy,&wheel,&tilt,p_buttons);
+    if (s_sensitivity<0) load_sensitivity();
+    dx=scaled(dx,&s_carry_x); dy=scaled(dy,&s_carry_y);
+    if (host!=s_is_host_connected) {
         printf("Runtime: mouse: %s\n",host ? "the host mouse reaches libSceMouse's port 0" : "no host mouse, port 0 reports none");
-        host_connected=host;
+        s_is_host_connected=host;
     }
     /* The settings menu or the close prompt holds the game's input neutral. */
-    if (!host || psport_gpu_overlay_captures_input()) { *buttons=0; return host; }
+    if (!host || psport_gpu_overlay_captures_input()) { *p_buttons=0; return host; }
     for (int i=0;i<MOUSE_HANDLES;++i)
-        if (ports[i].open && ports[i].host) {
-            ports[i].x+=dx; ports[i].y+=dy; ports[i].wheel+=wheel; ports[i].tilt+=tilt;
+        if (s_ports[i].is_open && s_ports[i].host) {
+            s_ports[i].x+=dx; s_ports[i].y+=dy; s_ports[i].wheel+=wheel; s_ports[i].tilt+=tilt;
         }
     return host;
 }
 
-static ABI int32_t mouse_init(void) { pthread_mutex_lock(&lock); initialized=1; pthread_mutex_unlock(&lock); return 0; }
-static ABI int32_t mouse_open(int32_t user, int32_t type, int32_t index, const MouseOpenParam *param) {
-    if (!initialized) return ERR_NOT_INITIALIZED;
-    if (type!=0 || index<0 || index>=MOUSE_PORT_INDICES) return ERR_INVALID_ARG;
-    const int merged=param && (param->behavior & MOUSE_MERGED);
-    pthread_mutex_lock(&lock);
-    int32_t handle=ERR_INVALID_ARG;
+static ABI int32_t mouse_init(void) { pthread_mutex_lock(&s_lock); s_is_initialized=1; pthread_mutex_unlock(&s_lock); return 0; }
+static ABI int32_t mouse_open(int32_t user, int32_t type, int32_t i_device, const MouseOpenParam *p_param) {
+    if (!s_is_initialized) return ERR_NOT_INITIALIZED;
+    if (type!=0 || i_device<0 || i_device>=MOUSE_PORT_INDICES) return ERR_INVALID_ARG;
+    const int merged=p_param && (p_param->behavior & MOUSE_MERGED);
+    pthread_mutex_lock(&s_lock);
+    int32_t h_handle=ERR_INVALID_ARG;
     for (int i=0;i<MOUSE_HANDLES;++i)
-        if (ports[i].open && ports[i].user==user && ports[i].index==index) { handle=ERR_ALREADY_OPENED; break; }
-    for (int i=0;i<MOUSE_HANDLES && handle==ERR_INVALID_ARG;++i)
-        if (!ports[i].open) {
-            ports[i]=(MousePort){.open=1,.host=index==0 || merged,.user=user,.index=index};
-            handle=i+1;
+        if (s_ports[i].is_open && s_ports[i].user==user && s_ports[i].i_device==i_device) { h_handle=ERR_ALREADY_OPENED; break; }
+    for (int i=0;i<MOUSE_HANDLES && h_handle==ERR_INVALID_ARG;++i)
+        if (!s_ports[i].is_open) {
+            s_ports[i]=(MousePort){.is_open=1,.host=i_device==0 || merged,.user=user,.i_device=i_device};
+            h_handle=i+1;
         }
-    pthread_mutex_unlock(&lock);
-    if (handle>0) printf("Runtime: mouse port %d opened for user %d (handle %d%s)\n",index,user,handle,index==0 || merged ? ", the host mouse" : ", no mouse");
-    return handle;
+    pthread_mutex_unlock(&s_lock);
+    if (h_handle>0) printf("Runtime: mouse port %d opened for user %d (handle %d%s)\n",i_device,user,h_handle,i_device==0 || merged ? ", the host mouse" : ", no mouse");
+    return h_handle;
 }
-static ABI int32_t mouse_close(int32_t handle) {
-    pthread_mutex_lock(&lock);
-    MousePort *p=port_of(handle);
-    if (p) p->open=0;
-    pthread_mutex_unlock(&lock);
-    return p ? 0 : ERR_INVALID_HANDLE;
+static ABI int32_t mouse_close(int32_t h_handle) {
+    pthread_mutex_lock(&s_lock);
+    MousePort *p_mouse_port=port_of(h_handle);
+    if (p_mouse_port) p_mouse_port->is_open=0;
+    pthread_mutex_unlock(&s_lock);
+    return p_mouse_port ? 0 : ERR_INVALID_HANDLE;
 }
-static ABI int32_t mouse_read(int32_t handle, MouseData *data, int32_t count) {
-    if (!data || count<1 || count>MOUSE_MAX_DATA) return ERR_INVALID_ARG;
-    pthread_mutex_lock(&lock);
-    MousePort *p=port_of(handle);
-    if (!p) { pthread_mutex_unlock(&lock); return ERR_INVALID_HANDLE; }
+static ABI int32_t mouse_read(int32_t h_handle, MouseData *p_data, int32_t c_data) {
+    if (!p_data || c_data<1 || c_data>MOUSE_MAX_DATA) return ERR_INVALID_ARG;
+    pthread_mutex_lock(&s_lock);
+    MousePort *p_mouse_port=port_of(h_handle);
+    if (!p_mouse_port) { pthread_mutex_unlock(&s_lock); return ERR_INVALID_HANDLE; }
     uint32_t buttons=0;
     const int host=collect(&buttons);
-    memset(data,0,sizeof(*data));
-    data->timestamp=now_us();
-    if (p->host && host) {
-        data->connected=1;
-        data->buttons=ps4_buttons(buttons);
-        data->x=p->x; data->y=p->y; data->wheel=p->wheel; data->tilt=p->tilt;
+    memset(p_data,0,sizeof(*p_data));
+    p_data->timestamp=now_us();
+    if (p_mouse_port->host && host) {
+        p_data->connected=1;
+        p_data->buttons=ps4_buttons(buttons);
+        p_data->x=p_mouse_port->x; p_data->y=p_mouse_port->y; p_data->wheel=p_mouse_port->wheel; p_data->tilt=p_mouse_port->tilt;
     }
-    p->x=p->y=p->wheel=p->tilt=0;
-    ++reads;
-    pthread_mutex_unlock(&lock);
+    p_mouse_port->x=p_mouse_port->y=p_mouse_port->wheel=p_mouse_port->tilt=0;
+    ++s_c_reads;
+    pthread_mutex_unlock(&s_lock);
     return 1;
 }
 
-static const RuntimeExport exports[]={
+static const RuntimeExport s_exports[]={
     {"sceMouseInit",mouse_init}, {"sceMouseOpen",mouse_open}, {"sceMouseRead",mouse_read}, {"sceMouseClose",mouse_close},
 };
-uintptr_t runtime_mouse_resolve(const char *name) { return RUNTIME_LOOKUP(exports,name); }
+uintptr_t runtime_mouse_resolve(const char *sz_name) { return RUNTIME_LOOKUP(s_exports,sz_name); }
 void runtime_mouse_report(void) {
-    if (reads) printf("Runtime: mouse reads=%zu, host mouse=%s\n",reads,host_connected>0 ? "yes" : "none");
+    if (s_c_reads) printf("Runtime: mouse reads=%zu, host mouse=%s\n",s_c_reads,s_is_host_connected>0 ? "yes" : "none");
 }

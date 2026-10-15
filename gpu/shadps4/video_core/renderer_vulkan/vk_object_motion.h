@@ -26,20 +26,20 @@ public:
     ~ObjectMotion();
 
     [[nodiscard]] bool Enabled() const noexcept {
-        return enabled;
+        return m_is_enabled;
     }
 
     using DrawInfo = Motion::Draw;
     u32 PrepareDraw(const DrawInfo& draw);
     /// Small skeletons: whether the bone palette changed (Motion::History::Moving).
     bool Moving(const Motion::History::GateKey& key, u64 palette) {
-        return history.Moving(key, palette);
+        return m_history.Moving(key, palette);
     }
     /// Index range and topology hash of an indexed draw, reused across frames.
     template <class Scan>
     Motion::IndexRangeCache::Result IndexRange(const Motion::IndexRangeCache::Key& key,
                                                Scan&& scan) {
-        return index_ranges.Get(key, frame, scan);
+        return m_index_ranges.Get(key, m_frame, scan);
     }
 
     /// Rendering of a motion pipeline: the motion attachment (render-target size).
@@ -47,18 +47,18 @@ public:
 
     /// Start of a frame (display pass).
     void OnFrameStart();
-    void InvalidateHistory() { history.NextFrame(); history.NextFrame(); }
+    void InvalidateHistory() { m_history.NextFrame(); m_history.NextFrame(); }
 
     /// The motion image for the compose pass (layout General after this call) and whether it
     /// holds this frame's vectors at `width` x `height`.
     vk::ImageView PrepareRead(u32 width, u32 height, bool& valid);
     /// The image of the last PrepareRead (layout General), or null.
     [[nodiscard]] vk::ImageView View() const noexcept {
-        return read_target && read_target->view ? *read_target->view : vk::ImageView{};
+        return m_p_read_target && m_p_read_target->view ? *m_p_read_target->view : vk::ImageView{};
     }
     [[nodiscard]] vk::Image Image(u32 width, u32 height) const noexcept {
-        const Target* target = Find(width, height);
-        return target && target->written ? vk::Image(target->image) : vk::Image{};
+        const Target* p_target = Find(width, height);
+        return p_target && p_target->is_written ? vk::Image(p_target->image) : vk::Image{};
     }
 
 private:
@@ -70,14 +70,14 @@ private:
         VideoCore::UniqueImage image;
         vk::UniqueImageView view;
         u32 width = 0, height = 0;
-        bool written = false; ///< this frame's vectors are in the image
+        bool is_written = false; ///< this frame's vectors are in the image
         vk::ImageLayout layout = vk::ImageLayout::eUndefined;
         u64 used_frame = 0;
     };
     static constexpr u32 MaxTargets = 4;
 
     [[nodiscard]] const Target* Find(u32 width, u32 height) const noexcept {
-        for (const auto& target : targets) {
+        for (const auto& target : m_targets) {
             if (target.image && target.width == width && target.height == height) {
                 return &target;
             }
@@ -88,9 +88,9 @@ private:
     /// destroyed once the GPU is done with it, without waiting).
     Target& GetTarget(u32 width, u32 height);
 
-    const Instance& instance;
-    Scheduler& scheduler;
-    bool enabled = false;
+    const Instance& m_instance;
+    Scheduler& m_scheduler;
+    bool m_is_enabled = false;
 
     // Parameter ring (host visible): FrameSlots frames of ParamsPerFrame entries (two u32x4),
     // element 0 all zero (motion off).
@@ -98,19 +98,19 @@ private:
     static constexpr u32 ParamsPerFrame = 8192;
     // Positions (device local): two halves (current/previous frame) of vec4; element 0 is reserved.
     static constexpr u32 PositionsPerFrame = 4u << 20;
-    Motion::History history{PositionsPerFrame};
-    Motion::IndexRangeCache index_ranges;
-    std::array<u64, FrameSlots> params_ticks{};
-    vk::Buffer params_buffer{};
-    VmaAllocation params_allocation{};
-    u32* params_mapped{};
-    vk::Buffer positions_buffer{};
-    VmaAllocation positions_allocation{};
+    Motion::History m_history{PositionsPerFrame};
+    Motion::IndexRangeCache m_index_ranges;
+    std::array<u64, FrameSlots> m_params_ticks{};
+    vk::Buffer m_params_buffer{};
+    VmaAllocation m_p_params_allocation{};
+    u32* m_p_params_mapped{};
+    vk::Buffer m_positions_buffer{};
+    VmaAllocation m_p_positions_allocation{};
 
-    u64 frame = 0;
-    u32 params_used = 0;
-    std::array<Target, MaxTargets> targets;
-    const Target* read_target = nullptr; ///< of the last PrepareRead
+    u64 m_frame = 0;
+    u32 m_c_params_used = 0;
+    std::array<Target, MaxTargets> m_targets;
+    const Target* m_p_read_target = nullptr; ///< of the last PrepareRead
 };
 
 } // namespace Vulkan

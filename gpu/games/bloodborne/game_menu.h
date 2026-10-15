@@ -10,7 +10,7 @@
 namespace PsGameMenu {
 /// Installs the hooks (the loader calls it once, before any game code runs, while the image is
 /// still writable). Each hooked function is checked byte for byte against the 1.09 eboot.
-void PatchImage(unsigned char* image, std::uint64_t size);
+void PatchImage(unsigned char* p_image, std::uint64_t cb_image);
 
 /// Applies what the player changed on the port's pages (each presented frame).
 void Poll();

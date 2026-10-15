@@ -89,12 +89,12 @@ void loader_eboot_sha256(const char *sz_game, unsigned char *p_out_digest) {
     size_t cb_file;
     unsigned char *p_file = loader_read_file(sz_path, &cb_file);
     LoaderModule eboot = {0};
-    loader_file = sz_path;
+    g_sz_loader_file = sz_path;
     loader_parse_self(p_file, cb_file, &eboot);
     free(p_file);
     uint64_t cb_image = 0;
     for (unsigned i = 0; i < eboot.phnum; ++i) {
-        const LoaderPh *p_ph = &eboot.ph[i];
+        const LoaderPh *p_ph = &eboot.p_ph[i];
         if ((p_ph->type == 1 || p_ph->type == PT_SCE_RELRO) && p_ph->vaddr + p_ph->memsz > cb_image)
             cb_image = p_ph->vaddr + p_ph->memsz;
     }
@@ -102,16 +102,16 @@ void loader_eboot_sha256(const char *sz_game, unsigned char *p_out_digest) {
     unsigned char *p_image = calloc(cb_image ? cb_image : 1, 1);
     if (!p_image) loader_fail("allocation failed");
     for (unsigned i = 0; i < eboot.phnum; ++i) {
-        const LoaderPh *p_ph = &eboot.ph[i];
+        const LoaderPh *p_ph = &eboot.p_ph[i];
         if ((p_ph->type != 1 && p_ph->type != PT_SCE_RELRO) || p_ph->filesz > p_ph->memsz) continue;
-        memcpy(p_image + p_ph->vaddr, loader_span(eboot.elf, eboot.elf_size, p_ph->offset, p_ph->filesz), p_ph->filesz);
+        memcpy(p_image + p_ph->vaddr, loader_span(eboot.p_elf, eboot.cb_elf, p_ph->offset, p_ph->filesz), p_ph->filesz);
     }
-    loader_file = NULL;
+    g_sz_loader_file = NULL;
     Sha256 sha = {.state = {0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
                             0x5be0cd19}};
     sha256_update(&sha, p_image, cb_image);
     sha256_finish(&sha, p_out_digest);
     free(p_image);
-    free(eboot.elf);
-    free(eboot.ph);
+    free(eboot.p_elf);
+    free(eboot.p_ph);
 }

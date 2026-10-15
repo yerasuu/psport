@@ -23,8 +23,8 @@ namespace Fsr411 {
 constexpr uint32_t kFramesInFlight = 8;
 
 struct Image {
-    VkImage image = VK_NULL_HANDLE;
-    VkImageView view = VK_NULL_HANDLE; ///< depth: a view of the depth aspect
+    VkImage h_image = VK_NULL_HANDLE;
+    VkImageView h_view = VK_NULL_HANDLE; ///< depth: a view of the depth aspect
     uint32_t width = 0, height = 0;
 };
 
@@ -32,24 +32,24 @@ struct Image {
 struct Features {
     /// VK_KHR_cooperative_matrix and VK_EXT_shader_float8 (shaderFloat8CooperativeMatrix), the
     /// Vulkan memory model, required subgroup size 32 with full subgroups: the FP8 variant.
-    bool fp8_matrices = false;
+    bool has_fp8_matrices = false;
     /// The same with FP16 instead of FP8 matrices: the FP8 variant emulated (fp8emu, testing only:
     /// PS_FSR411_VARIANT=fp8emu).
-    bool fp16_matrices = false;
+    bool has_fp16_matrices = false;
 };
 
 struct Frame {
-    VkCommandBuffer cmdbuf = VK_NULL_HANDLE;
+    VkCommandBuffer h_cmdbuf = VK_NULL_HANDLE;
     Image color, depth, motion, output; ///< color RGBA16F, depth D32, motion RG16F (render pixels)
     uint32_t render_width = 0, render_height = 0;
-    bool ultra_performance = false; ///< the second model (quality ratio 3)
+    bool is_ultra_performance = false; ///< the second model (quality ratio 3)
     float jitter[2] = {};           ///< render pixels, as for FSR 3/4
     float motion_scale[2] = {1.0f, 1.0f};
     float pre_exposure = 1.0f;
     float sharpness = 0.0f; ///< 0..1
-    bool sharpen = false;
-    bool reset = false;
-    bool auto_exposure = true;
+    bool should_sharpen = false;
+    bool should_reset = false;
+    bool has_auto_exposure = true;
 };
 
 class Upscaler {
@@ -57,7 +57,7 @@ public:
     /// `dir`: the asset sets (t1080_m0 ... t2160_m1, fp8/..., fp8emu/...). The FP8 variant when
     /// the device has FP8 matrices and its sets are there, else INT8; PS_FSR411_VARIANT=int8,
     /// fp8 or fp8emu picks one (when the device can run it).
-    Upscaler(VkPhysicalDevice physical, VkDevice device, std::string dir, Features features = {});
+    Upscaler(VkPhysicalDevice h_physical, VkDevice h_device, std::string dir, Features features = {});
     ~Upscaler();
 
     /// Records one upscale; false with Error() set when it cannot (assets, device, sizes).
@@ -68,7 +68,7 @@ public:
 
 private:
     struct Impl;
-    std::unique_ptr<Impl> impl;
+    std::unique_ptr<Impl> m_impl;
 };
 
 } // namespace Fsr411

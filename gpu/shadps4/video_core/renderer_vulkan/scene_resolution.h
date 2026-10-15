@@ -24,10 +24,10 @@ constexpr Size Unpack(uint32_t packed) {
 // A proxy and the guest-size image hold the same logical surface. Native shader reads
 // need a resolve after proxy writes; native writes invalidate the cached proxy.
 struct Coherence {
-    bool valid = false, dirty = false;
-    void ProxyWrite() { valid = dirty = true; }
-    void CopiedToProxy() { valid = true; dirty = false; }
-    void Resolved() { dirty = false; }
-    void NativeWrite() { valid = dirty = false; }
+    bool m_is_valid = false, m_is_dirty = false;
+    void ProxyWrite() { m_is_valid = m_is_dirty = true; }
+    void CopiedToProxy() { m_is_valid = true; m_is_dirty = false; }
+    void Resolved() { m_is_dirty = false; }
+    void NativeWrite() { m_is_valid = m_is_dirty = false; }
 };
 } // namespace Vulkan::SceneResolution

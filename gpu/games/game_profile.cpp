@@ -15,45 +15,45 @@ extern const Profile BloodborneProfile;
 
 namespace {
 constexpr std::array<const Profile*, 1> Profiles = {&BloodborneProfile};
-std::atomic<const Profile*> active{nullptr};
-std::atomic<const Profile*> launched{nullptr};
+std::atomic<const Profile*> s_p_active{nullptr};
+std::atomic<const Profile*> s_p_launched{nullptr};
 } // namespace
 
-const Profile* Find(const char* serial) {
-    for (const Profile* profile : Profiles) {
-        if (serial && std::ranges::any_of(profile->serials, [&](const char* s) { return std::strcmp(s, serial) == 0; })) {
-            return profile;
+const Profile* Find(const char* sz_serial) {
+    for (const Profile* p_profile : Profiles) {
+        if (sz_serial && std::ranges::any_of(p_profile->serials, [&](const char* sz_candidate) { return std::strcmp(sz_candidate, sz_serial) == 0; })) {
+            return p_profile;
         }
     }
     return nullptr;
 }
 
-void Select(const char* serial) {
-    launched.store(Find(serial), std::memory_order_release);
-    const char* env = std::getenv("PS_GAME_PROFILE");
-    if (env && std::strcmp(env, "none") == 0) {
+void Select(const char* sz_serial) {
+    s_p_launched.store(Find(sz_serial), std::memory_order_release);
+    const char* sz_env = std::getenv("PS_GAME_PROFILE");
+    if (sz_env && std::strcmp(sz_env, "none") == 0) {
         std::printf("Game profile: none (PS_GAME_PROFILE=none): the game runs as an unknown one\n");
         return;
     }
-    if (const Profile* profile = Find(serial)) {
-        active.store(profile, std::memory_order_release);
-        std::printf("Game profile: %s (%s)\n", profile->name, serial);
+    if (const Profile* p_profile = Find(sz_serial)) {
+        s_p_active.store(p_profile, std::memory_order_release);
+        std::printf("Game profile: %s (%s)\n", p_profile->sz_name, sz_serial);
         return;
     }
-    std::printf("Game profile: none for %s: the generic paths only\n", serial ? serial : "?");
+    std::printf("Game profile: none for %s: the generic paths only\n", sz_serial ? sz_serial : "?");
 }
 
 const Profile* Active() {
-    return active.load(std::memory_order_acquire);
+    return s_p_active.load(std::memory_order_acquire);
 }
 
 const Profile* Launched() {
-    return launched.load(std::memory_order_acquire);
+    return s_p_launched.load(std::memory_order_acquire);
 }
 
 bool IsDynamicWriter(std::uint64_t guest_rip) {
-    const Profile* profile = Active();
-    return profile && std::ranges::any_of(profile->dynamic_writers, [&](const CodeRange& r) {
+    const Profile* p_profile = Active();
+    return p_profile && std::ranges::any_of(p_profile->dynamic_writers, [&](const CodeRange& r) {
                return guest_rip >= r.begin && guest_rip < r.end;
            });
 }

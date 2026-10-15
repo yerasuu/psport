@@ -145,20 +145,20 @@ static void format_tick(uint64_t tick, char *sz_out, size_t cb_out) {
 }
 static bool parse_tick(const char *sz_time, uint64_t *p_out_tick) {
     struct tm utc = {0};
-    char *p = strptime(sz_time, "%Y-%m-%dT%H:%M:%S", &utc);
-    if (!p) return false;
+    char *sz_rest = strptime(sz_time, "%Y-%m-%dT%H:%M:%S", &utc);
+    if (!sz_rest) return false;
     unsigned long microseconds = 0;
-    if (*p == '.') microseconds = strtoul(p + 1, &p, 10);
+    if (*sz_rest == '.') microseconds = strtoul(sz_rest + 1, &sz_rest, 10);
     const time_t seconds = timegm(&utc);
-    if (*p != 'Z' || seconds < 0 || microseconds >= 1000000) return false;
+    if (*sz_rest != 'Z' || seconds < 0 || microseconds >= 1000000) return false;
     *p_out_tick = RTC_TICK_UNIX_EPOCH + (uint64_t)seconds * 1000000 + microseconds;
     return true;
 }
 
 static bool is_directory_name(const char *sz_name) {
     if (!*sz_name || strlen(sz_name) > 15) return false;
-    for (const char *p = sz_name; *p; ++p)
-        if (!((*p >= 'A' && *p <= 'Z') || (*p >= 'a' && *p <= 'z') || (*p >= '0' && *p <= '9') || *p == '_' || *p == '-'))
+    for (const char *sz_cursor = sz_name; *sz_cursor; ++sz_cursor)
+        if (!((*sz_cursor >= 'A' && *sz_cursor <= 'Z') || (*sz_cursor >= 'a' && *sz_cursor <= 'z') || (*sz_cursor >= '0' && *sz_cursor <= '9') || *sz_cursor == '_' || *sz_cursor == '-'))
             return false;
     return true;
 }
@@ -198,26 +198,26 @@ static uint32_t load_state(TrophyContext *p_context) {
     return c_unlocked;
 }
 static bool save_state(const TrophyContext *p_context) {
-    char sz_path[760], text[64 + TROPHY_NUM_MAX * 48];
+    char sz_path[760], sz_text[64 + TROPHY_NUM_MAX * 48];
     uint32_t c_listed = count_trophies(p_context);
     for (uint32_t i = c_listed; i < TROPHY_NUM_MAX; ++i)
         if (is_unlocked(p_context, (int32_t)i)) c_listed = i + 1;
-    size_t cb_text = (size_t)snprintf(text, sizeof(text), "# psport trophy unlocks 1: id, unlocked, unlock time (UTC)\n");
+    size_t cb_text = (size_t)snprintf(sz_text, sizeof(sz_text), "# psport trophy unlocks 1: id, unlocked, unlock time (UTC)\n");
     for (uint32_t i = 0; i < c_listed; ++i) {
         char sz_time[40] = "";
         if (is_unlocked(p_context, (int32_t)i) && p_context->unlock_ticks[i]) format_tick(p_context->unlock_ticks[i], sz_time, sizeof(sz_time));
-        cb_text += (size_t)snprintf(text + cb_text, sizeof(text) - cb_text, "%u\t%d\t%s\n", i, is_unlocked(p_context, (int32_t)i), sz_time);
+        cb_text += (size_t)snprintf(sz_text + cb_text, sizeof(sz_text) - cb_text, "%u\t%d\t%s\n", i, is_unlocked(p_context, (int32_t)i), sz_time);
     }
     state_path(p_context, sz_path, sizeof(sz_path));
-    return write_atomic(sz_path, text, cb_text);
+    return write_atomic(sz_path, sz_text, cb_text);
 }
 
 static void put_json_string(FILE *p_out, const char *sz_text) {
     fputc('"', p_out);
-    for (const unsigned char *p = (const unsigned char *)sz_text; *p; ++p)
-        if (*p == '"' || *p == '\\') fprintf(p_out, "\\%c", *p);
-        else if (*p < 0x20) fprintf(p_out, "\\u%04x", *p);
-        else fputc(*p, p_out);
+    for (const unsigned char *p_cursor = (const unsigned char *)sz_text; *p_cursor; ++p_cursor)
+        if (*p_cursor == '"' || *p_cursor == '\\') fprintf(p_out, "\\%c", *p_cursor);
+        else if (*p_cursor < 0x20) fprintf(p_out, "\\u%04x", *p_cursor);
+        else fputc(*p_cursor, p_out);
     fputc('"', p_out);
 }
 static void save_trophy_set(const TrophyContext *p_context, const char *sz_pack_guest, const char *sz_configuration) {
@@ -262,8 +262,8 @@ static void save_trophy_set(const TrophyContext *p_context, const char *sz_pack_
     free(p_text);
 }
 
-static ABI int32_t trophy_context(int32_t *ctx,int32_t user,uint32_t label,uint64_t options) {
-    if (!ctx || options) return TROPHY_INVALID;
+static ABI int32_t trophy_context(int32_t *p_ctx,int32_t user,uint32_t label,uint64_t options) {
+    if (!p_ctx || options) return TROPHY_INVALID;
     pthread_mutex_lock(&s_lock);
     int32_t result = 0;
     size_t i_free = C_CONTEXTS_MAX;
@@ -280,12 +280,12 @@ static ABI int32_t trophy_context(int32_t *ctx,int32_t user,uint32_t label,uint6
         p_context->user = user;
         p_context->label = label;
         s_p_contexts[i_free] = p_context;
-        *ctx = p_context->h_context;
+        *p_ctx = p_context->h_context;
     }
     pthread_mutex_unlock(&s_lock);
     return result;
 }
-static ABI int32_t trophy_handle(int32_t *handle) { if (!handle) return TROPHY_INVALID; return new_object(NP_TROPHY_HANDLE,handle); }
+static ABI int32_t trophy_handle(int32_t *p_handle) { if (!p_handle) return TROPHY_INVALID; return new_object(NP_TROPHY_HANDLE,p_handle); }
 static ABI int32_t trophy_destroy_context(int32_t h_context) {
     pthread_mutex_lock(&s_lock);
     TrophyContext **pp_context = find_context(h_context);
@@ -365,12 +365,12 @@ static ABI int32_t trophy_register(int32_t h_context, int32_t h_handle, uint64_t
     return result;
 }
 
-static ABI int32_t trophy_unlock(int32_t ctx,int32_t handle,int32_t id,int32_t *platinum) {
+static ABI int32_t trophy_unlock(int32_t ctx,int32_t h_handle,int32_t id,int32_t *p_platinum) {
     if (id < 0 || id >= TROPHY_NUM_MAX) return TROPHY_INVALID_TROPHY_ID;
-    if (!platinum) return TROPHY_INVALID;
+    if (!p_platinum) return TROPHY_INVALID;
     pthread_mutex_lock(&s_lock);
     TrophyContext *p_context = NULL;
-    int32_t result = find_registered(ctx, handle, &p_context);
+    int32_t result = find_registered(ctx, h_handle, &p_context);
     const TrophyPack *p_pack = p_context ? p_context->p_pack : NULL;
     const TrophyEntry *p_trophy = p_pack && p_pack->has_config ? &p_pack->trophies[id] : NULL;
     char sz_time[40] = "";
@@ -397,7 +397,7 @@ static ABI int32_t trophy_unlock(int32_t ctx,int32_t handle,int32_t id,int32_t *
                 p_context->unlock_ticks[id_platinum] = tick;
             }
         }
-        *platinum = id_platinum;
+        *p_platinum = id_platinum;
         format_tick(tick, sz_time, sizeof(sz_time));
         printf("Runtime: trophy %d unlocked at %s (%s%s%s)\n", id, sz_time, grade_name(p_trophy ? p_trophy->grade : TROPHY_GRADE_UNKNOWN),
                p_trophy && p_trophy->sz_name[0] ? ", " : "", p_trophy ? p_trophy->sz_name : "");
@@ -427,13 +427,13 @@ static Tally tally(const TrophyContext *p_context, bool is_group, int32_t group)
 }
 static uint32_t progress_of(const Tally *p_counts) { return p_counts->c_trophies ? p_counts->c_unlocked * 100 / p_counts->c_trophies : 0; }
 
-static ABI int32_t trophy_game_info(int32_t ctx,int32_t handle,void *details,void *data) {
-    GameDetails *p_details = details;
-    GameData *p_data = data;
+static ABI int32_t trophy_game_info(int32_t ctx,int32_t h_handle,void *p_out_details,void *p_out_data) {
+    GameDetails *p_details = p_out_details;
+    GameData *p_data = p_out_data;
     if (!p_details || !p_data || p_details->size != sizeof(GameDetails) || p_data->size != sizeof(GameData)) return TROPHY_INVALID;
     pthread_mutex_lock(&s_lock);
     TrophyContext *p_context = NULL;
-    const int32_t result = find_registered(ctx, handle, &p_context);
+    const int32_t result = find_registered(ctx, h_handle, &p_context);
     if (!result) {
         const Tally counts = tally(p_context, false, 0);
         const TrophyPack *p_pack = p_context->p_pack;
@@ -459,14 +459,14 @@ static ABI int32_t trophy_game_info(int32_t ctx,int32_t handle,void *details,voi
     pthread_mutex_unlock(&s_lock);
     return result;
 }
-static ABI int32_t trophy_info(int32_t ctx,int32_t handle,int32_t id,void *details,void *data) {
-    TrophyDetails *p_details = details;
-    TrophyData *p_data = data;
+static ABI int32_t trophy_info(int32_t ctx,int32_t h_handle,int32_t id,void *p_out_details,void *p_out_data) {
+    TrophyDetails *p_details = p_out_details;
+    TrophyData *p_data = p_out_data;
     if (id < 0 || id >= TROPHY_NUM_MAX) return TROPHY_INVALID_TROPHY_ID;
     if (!p_details || !p_data || p_details->size != sizeof(TrophyDetails) || p_data->size != sizeof(TrophyData)) return TROPHY_INVALID;
     pthread_mutex_lock(&s_lock);
     TrophyContext *p_context = NULL;
-    int32_t result = find_registered(ctx, handle, &p_context);
+    int32_t result = find_registered(ctx, h_handle, &p_context);
     if (!result && (uint32_t)id >= count_ids(p_context)) result = TROPHY_INVALID_TROPHY_ID;
     if (!result) {
         memset((char *)p_details + 8, 0, sizeof(*p_details) - 8);
@@ -487,14 +487,14 @@ static ABI int32_t trophy_info(int32_t ctx,int32_t handle,int32_t id,void *detai
     pthread_mutex_unlock(&s_lock);
     return result;
 }
-static ABI int32_t trophy_unlock_state(int32_t ctx,int32_t handle,uint32_t *flags,uint32_t *count) {
-    if (!flags || !count) return TROPHY_INVALID;
+static ABI int32_t trophy_unlock_state(int32_t ctx,int32_t h_handle,uint32_t *p_flags,uint32_t *p_count) {
+    if (!p_flags || !p_count) return TROPHY_INVALID;
     pthread_mutex_lock(&s_lock);
     TrophyContext *p_context = NULL;
-    const int32_t result = find_registered(ctx, handle, &p_context);
+    const int32_t result = find_registered(ctx, h_handle, &p_context);
     if (!result) {
-        memcpy(flags, p_context->unlocked, sizeof(p_context->unlocked));
-        *count = count_trophies(p_context);
+        memcpy(p_flags, p_context->unlocked, sizeof(p_context->unlocked));
+        *p_count = count_trophies(p_context);
     }
     pthread_mutex_unlock(&s_lock);
     return result;
@@ -619,7 +619,7 @@ static ABI int32_t trophy_capture_screenshot(int32_t h_handle, const void *p_tar
     return 0;
 }
 
-static const RuntimeExport exports[]={
+static const RuntimeExport s_exports[]={
     {"sceNpTrophyCreateContext",trophy_context}, {"sceNpTrophyCreateHandle",trophy_handle},
     {"sceNpTrophyRegisterContext",trophy_register}, {"sceNpTrophyUnlockTrophy",trophy_unlock},
     {"sceNpTrophyDestroyHandle",trophy_destroy_handle}, {"sceNpTrophyDestroyContext",trophy_destroy_context},
@@ -630,7 +630,7 @@ static const RuntimeExport exports[]={
     {"sceNpTrophyGetGameInfo",trophy_game_info}, {"sceNpTrophyGetTrophyInfo",trophy_info},
     {"sceNpTrophyGetTrophyUnlockState",trophy_unlock_state},
 };
-uintptr_t runtime_trophy_resolve(const char *name) { return RUNTIME_LOOKUP(exports,name); }
+uintptr_t runtime_trophy_resolve(const char *sz_name) { return RUNTIME_LOOKUP(s_exports,sz_name); }
 #else
 uintptr_t runtime_trophy_resolve(const char *name) { (void)name; return 0; }
 #endif

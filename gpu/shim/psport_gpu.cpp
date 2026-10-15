@@ -34,22 +34,22 @@
 
 extern "C" {
 // runtime_memory.c
-int runtime_memory_is_mapped(uintptr_t address, uint64_t size);
-int runtime_memory_write_backing(uintptr_t address, const void* data, uint64_t size);
-void runtime_memory_read_backing(uintptr_t address, void* data, uint64_t size);
-uint64_t runtime_memory_clamp(uintptr_t address, uint64_t size);
-int runtime_memory_region(uintptr_t address, uintptr_t* start, uintptr_t* end, int* mapped);
+int runtime_memory_is_mapped(uintptr_t va_range, uint64_t cb_range);
+int runtime_memory_write_backing(uintptr_t va_range, const void* p_data, uint64_t cb_range);
+void runtime_memory_read_backing(uintptr_t va_range, void* p_data, uint64_t cb_range);
+uint64_t runtime_memory_clamp(uintptr_t va_range, uint64_t cb_range);
+int runtime_memory_region(uintptr_t va_guest, uintptr_t* p_start, uintptr_t* p_end, int* p_mapped);
 const uint64_t* runtime_memory_generation(void);
-void runtime_memory_gpu_protect(uintptr_t address, uint64_t size, int read, int write);
-typedef void (*RuntimeGpuRange)(uintptr_t address, uint64_t size);
+void runtime_memory_gpu_protect(uintptr_t va_range, uint64_t cb_range, int read, int write);
+typedef void (*RuntimeGpuRange)(uintptr_t va_range, uint64_t cb_range);
 // runtime_kernel.c: one clock for guest and GPU timestamps
 uint64_t runtime_process_time_us(void);
 uint64_t runtime_process_time_counter(void);
 uint64_t runtime_tsc_frequency(void);
 int32_t* runtime_errno(void);
-void runtime_memory_set_gpu_hooks(RuntimeGpuRange map, RuntimeGpuRange unmap, RuntimeGpuRange invalidate);
-void runtime_memory_set_note_write_hook(RuntimeGpuRange note);
-void runtime_memory_set_cpu_write_hook(RuntimeGpuRange hook);
+void runtime_memory_set_gpu_hooks(RuntimeGpuRange pfn_map, RuntimeGpuRange pfn_unmap, RuntimeGpuRange pfn_invalidate);
+void runtime_memory_set_note_write_hook(RuntimeGpuRange pfn_note);
+void runtime_memory_set_cpu_write_hook(RuntimeGpuRange pfn_hook);
 // runtime_calls.c
 void runtime_calls_report(void);
 const char* runtime_file_user_dir(void);
@@ -58,32 +58,32 @@ const char* runtime_savedata_title(void);
 
 Frontend::WindowSDL* g_window = nullptr;
 
-namespace Libraries::GnmDriver { void RegisterLib(Core::Loader::SymbolsResolver* sym); }
-namespace Libraries::AvPlayer { void RegisterLib(Core::Loader::SymbolsResolver* sym); }
-namespace Libraries::VideoOut { void RegisterLib(Core::Loader::SymbolsResolver* sym); }
-namespace Libraries::Ngs2 { void RegisterLib(Core::Loader::SymbolsResolver* sym); }
-namespace Libraries::Fiber { void RegisterLib(Core::Loader::SymbolsResolver* sym); }
-namespace Libraries::Font { void RegisterLib(Core::Loader::SymbolsResolver* sym); }
-namespace Libraries::FontFt { void RegisterLib(Core::Loader::SymbolsResolver* sym); }
-namespace Libraries::Audiodec { void RegisterLib(Core::Loader::SymbolsResolver* sym); }
-namespace Libraries::Videodec2 { void RegisterLib(Core::Loader::SymbolsResolver* sym); }
-namespace Libraries::PngEnc { void RegisterLib(Core::Loader::SymbolsResolver* sym); }
-namespace Libraries::PngDec { void RegisterLib(Core::Loader::SymbolsResolver* sym); }
-namespace Libraries::Kernel { void RegisterEventQueue(Core::Loader::SymbolsResolver* sym); }
+namespace Libraries::GnmDriver { void RegisterLib(Core::Loader::SymbolsResolver* p_sym); }
+namespace Libraries::AvPlayer { void RegisterLib(Core::Loader::SymbolsResolver* p_sym); }
+namespace Libraries::VideoOut { void RegisterLib(Core::Loader::SymbolsResolver* p_sym); }
+namespace Libraries::Ngs2 { void RegisterLib(Core::Loader::SymbolsResolver* p_sym); }
+namespace Libraries::Fiber { void RegisterLib(Core::Loader::SymbolsResolver* p_sym); }
+namespace Libraries::Font { void RegisterLib(Core::Loader::SymbolsResolver* p_sym); }
+namespace Libraries::FontFt { void RegisterLib(Core::Loader::SymbolsResolver* p_sym); }
+namespace Libraries::Audiodec { void RegisterLib(Core::Loader::SymbolsResolver* p_sym); }
+namespace Libraries::Videodec2 { void RegisterLib(Core::Loader::SymbolsResolver* p_sym); }
+namespace Libraries::PngEnc { void RegisterLib(Core::Loader::SymbolsResolver* p_sym); }
+namespace Libraries::PngDec { void RegisterLib(Core::Loader::SymbolsResolver* p_sym); }
+namespace Libraries::Kernel { void RegisterEventQueue(Core::Loader::SymbolsResolver* p_sym); }
 
 namespace {
 struct Symbol {
     std::string nid, library, module;
-    u64 address;
+    u64 va_guest;
 };
-std::vector<Symbol> g_symbols;
-u32 g_sdk_version;
+std::vector<Symbol> s_symbols;
+u32 s_sdk_version;
 } // namespace
 
 namespace Core::Loader {
-void SymbolsResolver::AddSymbol(const char* nid, const char* library, const char* module, SymbolType,
-                                u64 address) {
-    g_symbols.push_back({nid, library, module, address});
+void SymbolsResolver::AddSymbol(const char* sz_nid, const char* sz_library, const char* sz_module, SymbolType,
+                                u64 va_guest) {
+    s_symbols.push_back({sz_nid, sz_library, sz_module, va_guest});
 }
 } // namespace Core::Loader
 
@@ -94,8 +94,8 @@ public:
     static void FillElfInfo(const PsGpuConfig& config) {
         auto& info = Common::ElfInfo::Instance();
         info.initialized = true;
-        info.game_serial = config.serial ? config.serial : "UNKNOWN";
-        info.title = config.title ? config.title : "";
+        info.game_serial = config.sz_serial ? config.sz_serial : "UNKNOWN";
+        info.title = config.sz_title ? config.sz_title : "";
         info.sdk_ver = config.sdk_version;
         info.psf_attributes.raw = config.psf_attributes;
     }
@@ -105,27 +105,27 @@ void MemoryManager::SetRasterizer(Vulkan::Rasterizer* rasterizer_) {
     rasterizer = rasterizer_;
     // Existing guest mappings are replayed by the runtime when hooks are installed.
     runtime_memory_set_gpu_hooks(
-        [](uintptr_t address, uint64_t size) {
-            auto* r = Memory::Instance()->GetRasterizer();
-            r->RegisterMemory(address, size);
-            r->MapMemory(address, size);
+        [](uintptr_t va_range, uint64_t cb_range) {
+            auto* p_rasterizer = Memory::Instance()->GetRasterizer();
+            p_rasterizer->RegisterMemory(va_range, cb_range);
+            p_rasterizer->MapMemory(va_range, cb_range);
         },
-        [](uintptr_t address, uint64_t size) { Memory::Instance()->GetRasterizer()->UnmapMemory(address, size); },
-        [](uintptr_t address, uint64_t size) {
-            Memory::Instance()->GetRasterizer()->InvalidateMemory(address, size);
+        [](uintptr_t va_range, uint64_t cb_range) { Memory::Instance()->GetRasterizer()->UnmapMemory(va_range, cb_range); },
+        [](uintptr_t va_range, uint64_t cb_range) {
+            Memory::Instance()->GetRasterizer()->InvalidateMemory(va_range, cb_range);
         });
     // psport: data written into GPU memory by a path the GPU side hears of (file reads, the game's
     // resource loaders): invalidated, and an asset (it may keep a VRAM copy).
-    runtime_memory_set_note_write_hook([](uintptr_t address, uint64_t size) {
-        Memory::Instance()->GetRasterizer()->NoteAssetWrite(address, size);
+    runtime_memory_set_note_write_hook([](uintptr_t va_range, uint64_t cb_range) {
+        Memory::Instance()->GetRasterizer()->NoteAssetWrite(va_range, cb_range);
     });
     // psport: the game's libc copies (memcpy, memset, memmove) over pages the caches watch.
-    runtime_memory_set_cpu_write_hook([](uintptr_t address, uint64_t size) {
-        Memory::Instance()->GetRasterizer()->OnCpuWrite(address, size);
+    runtime_memory_set_cpu_write_hook([](uintptr_t va_range, uint64_t cb_range) {
+        Memory::Instance()->GetRasterizer()->OnCpuWrite(va_range, cb_range);
     });
 }
-void MemoryManager::InvalidateMemory(VAddr address, u64 size) {
-    if (rasterizer) rasterizer->InvalidateMemory(address, size);
+void MemoryManager::InvalidateMemory(VAddr va_range, u64 cb_range) {
+    if (rasterizer) rasterizer->InvalidateMemory(va_range, cb_range);
 }
 namespace {
 // psport: the mapped region of the last lookup, per thread, valid for the mapping table generation
@@ -135,88 +135,88 @@ struct RegionCache {
     u64 generation = 1; // odd: invalid
     uintptr_t start = 0, end = 0;
 };
-thread_local RegionCache region_cache;
+thread_local RegionCache s_region_cache;
 
-bool CachedMapped(VAddr address, u64 size) {
-    static const uint64_t* const generation_ptr = runtime_memory_generation();
-    const u64 generation = __atomic_load_n(generation_ptr, __ATOMIC_ACQUIRE);
+bool CachedMapped(VAddr va_range, u64 cb_range) {
+    static const uint64_t* const s_p_generation_ptr = runtime_memory_generation();
+    const u64 generation = __atomic_load_n(s_p_generation_ptr, __ATOMIC_ACQUIRE);
     if (generation & 1) {
         return false; // being changed
     }
-    auto& cache = region_cache;
-    if (cache.generation == generation && address >= cache.start && address + size <= cache.end) {
+    auto& cache = s_region_cache;
+    if (cache.generation == generation && va_range >= cache.start && va_range + cb_range <= cache.end) {
         return true;
     }
     uintptr_t start = 0, end = 0;
     int mapped = 0;
-    if (!runtime_memory_region(address, &start, &end, &mapped) || !mapped) {
+    if (!runtime_memory_region(va_range, &start, &end, &mapped) || !mapped) {
         return false;
     }
     cache = {generation, start, end};
-    return address + size <= end;
+    return va_range + cb_range <= end;
 }
 } // namespace
 
-u64 MemoryManager::ClampRangeSize(VAddr virtual_addr, u64 size) {
-    if (size && CachedMapped(virtual_addr, size)) {
-        return size;
+u64 MemoryManager::ClampRangeSize(VAddr va_virtual, u64 cb_range) {
+    if (cb_range && CachedMapped(va_virtual, cb_range)) {
+        return cb_range;
     }
-    return runtime_memory_clamp(virtual_addr, size);
+    return runtime_memory_clamp(va_virtual, cb_range);
 }
-static void CopySparseSerial(VAddr source, u8* dest, u64 size) {
+static void CopySparseSerial(VAddr source, u8* p_dest, u64 cb_range) {
     // PS_READBACKS=2 protects GPU-written pages against reads: the copy threads and recorders
     // read through the backing view, as a read fault on them would wait for the GPU thread,
     // which waits for them.
-    static const bool precise =
+    static const bool s_is_precise =
         EmulatorSettings.GetReadbacksMode() == GpuReadbacksMode::Precise;
-    if (precise) {
-        runtime_memory_read_backing(source, dest, size);
+    if (s_is_precise) {
+        runtime_memory_read_backing(source, p_dest, cb_range);
         return;
     }
-    if (size && CachedMapped(source, size)) {
-        std::memcpy(dest, reinterpret_cast<const void*>(source), size);
+    if (cb_range && CachedMapped(source, cb_range)) {
+        std::memcpy(p_dest, reinterpret_cast<const void*>(source), cb_range);
         return;
     }
-    while (size) {
+    while (cb_range) {
         uintptr_t start = 0, end = 0;
         int mapped = 0;
         if (!runtime_memory_region(source, &start, &end, &mapped)) {
-            end = source + size;
+            end = source + cb_range;
         }
-        const u64 n = std::min<u64>(size, end - source);
-        if (mapped) std::memcpy(dest, reinterpret_cast<const void*>(source), n);
-        else std::memset(dest, 0, n);
-        source += n; dest += n; size -= n;
+        const u64 cb_chunk = std::min<u64>(cb_range, end - source);
+        if (mapped) std::memcpy(p_dest, reinterpret_cast<const void*>(source), cb_chunk);
+        else std::memset(p_dest, 0, cb_chunk);
+        source += cb_chunk; p_dest += cb_chunk; cb_range -= cb_chunk;
     }
 }
-void MemoryManager::CopySparseMemory(VAddr source, u8* dest, u64 size) {
+void MemoryManager::CopySparseMemory(VAddr source, u8* p_dest, u64 cb_range) {
     // psport: large uploads (streaming) are split across the copy threads.
     constexpr u64 Chunk = 512 * 1024;
-    if (size < 4 * Chunk || !PsCopy::Enabled()) {
-        return CopySparseSerial(source, dest, size);
+    if (cb_range < 4 * Chunk || !PsCopy::Enabled()) {
+        return CopySparseSerial(source, p_dest, cb_range);
     }
-    PsCopy::ParallelFor((size + Chunk - 1) / Chunk, [&](std::size_t i) {
-        const u64 offset = i * Chunk;
-        CopySparseSerial(source + offset, dest + offset, std::min(Chunk, size - offset));
+    PsCopy::ParallelFor((cb_range + Chunk - 1) / Chunk, [&](std::size_t i) {
+        const u64 off_chunk = i * Chunk;
+        CopySparseSerial(source + off_chunk, p_dest + off_chunk, std::min(Chunk, cb_range - off_chunk));
     });
 }
-void MemoryManager::ReadBacking(VAddr address, void* data, u64 size) {
-    runtime_memory_read_backing(address, data, size);
+void MemoryManager::ReadBacking(VAddr va_range, void* p_data, u64 cb_range) {
+    runtime_memory_read_backing(va_range, p_data, cb_range);
 }
-bool MemoryManager::TryWriteBacking(void* address, const void* data, u64 size) {
-    PsWriteLog::Note(reinterpret_cast<uintptr_t>(address), data, size, PsWriteLog::Backing);
-    return runtime_memory_write_backing(reinterpret_cast<uintptr_t>(address), data, size) != 0;
+bool MemoryManager::TryWriteBacking(void* p_address, const void* p_data, u64 cb_range) {
+    PsWriteLog::Note(reinterpret_cast<uintptr_t>(p_address), p_data, cb_range, PsWriteLog::Backing);
+    return runtime_memory_write_backing(reinterpret_cast<uintptr_t>(p_address), p_data, cb_range) != 0;
 }
-void AddressSpace::Protect(VAddr virtual_addr, u64 size, MemoryPermission perms) {
-    PsStats::Timer timer{PsStats::t_protect};
-    const u64 pages = (size + 4095) / 4096;
-    PsStats::protect_calls.fetch_add(1, std::memory_order_relaxed);
-    PsStats::protect_pages.fetch_add(pages, std::memory_order_relaxed);
+void AddressSpace::Protect(VAddr va_virtual, u64 cb_range, MemoryPermission perms) {
+    PsStats::Timer timer{PsStats::g_t_protect};
+    const u64 pages = (cb_range + 4095) / 4096;
+    PsStats::g_c_protect_calls.fetch_add(1, std::memory_order_relaxed);
+    PsStats::g_c_protect_pages.fetch_add(pages, std::memory_order_relaxed);
     if (!True(perms & MemoryPermission::Write)) {
-        PsStats::protect_revoke_calls.fetch_add(1, std::memory_order_relaxed);
-        PsStats::protect_revoke_pages.fetch_add(pages, std::memory_order_relaxed);
+        PsStats::g_c_protect_revoke_calls.fetch_add(1, std::memory_order_relaxed);
+        PsStats::g_c_protect_revoke_pages.fetch_add(pages, std::memory_order_relaxed);
     }
-    runtime_memory_gpu_protect(virtual_addr, size, True(perms & MemoryPermission::Read),
+    runtime_memory_gpu_protect(va_virtual, cb_range, True(perms & MemoryPermission::Read),
                                True(perms & MemoryPermission::Write));
 }
 boost::icl::interval_set<VAddr> AddressSpace::GetUsableRegions() {
@@ -234,9 +234,9 @@ u64 PS4_SYSV_ABI sceKernelGetProcessTime() { return runtime_process_time_us(); }
 u64 PS4_SYSV_ABI sceKernelGetProcessTimeCounter() { return runtime_process_time_counter(); }
 u64 PS4_SYSV_ABI sceKernelGetProcessTimeCounterFrequency() { return 1'000'000'000; }
 s32 PS4_SYSV_ABI sceKernelIsNeoMode() { return 0; } // base PS4
-s32 PS4_SYSV_ABI sceKernelGetCompiledSdkVersion(s32* ver) {
-    if (!ver) return ORBIS_KERNEL_ERROR_EINVAL;
-    *ver = s32(g_sdk_version);
+s32 PS4_SYSV_ABI sceKernelGetCompiledSdkVersion(s32* p_ver) {
+    if (!p_ver) return ORBIS_KERNEL_ERROR_EINVAL;
+    *p_ver = s32(s_sdk_version);
     return ORBIS_OK;
 }
 s32 PS4_SYSV_ABI sceKernelUsleep(u32 microseconds) {
@@ -247,10 +247,10 @@ s32 PS4_SYSV_ABI sceKernelUsleep(u32 microseconds) {
 
 namespace {
 // SDL video must be driven from one thread: the window lives on its own host thread.
-std::thread g_window_thread;
-std::mutex g_window_mutex;
-std::condition_variable g_window_cv;
-bool g_window_ready;
+std::thread s_window_thread;
+std::mutex s_window_mutex;
+std::condition_variable s_window_cv;
+bool s_is_window_ready;
 } // namespace
 
 #ifdef PS_PGO_GENERATE
@@ -272,45 +272,45 @@ static void StartProfileWriter() {
 }
 #endif
 
-extern "C" int psport_gpu_init(const PsGpuConfig* config) {
+extern "C" int psport_gpu_init(const PsGpuConfig* p_config) {
     // What the translator knows about this game (games/), before anything asks for it: the
     // settings among them, which keep its effect switches.
-    Game::Select(config->serial);
+    Game::Select(p_config->sz_serial);
     PsSettings::Load();
-    if (const Game::Profile* game = Game::Active(); game && game->prepare_saves) {
+    if (const Game::Profile* p_game = Game::Active(); p_game && p_game->pfn_prepare_saves) {
         const std::string saves = std::string(runtime_file_user_dir()) + "/savedata";
-        game->prepare_saves(saves.c_str(), runtime_savedata_title());
+        p_game->pfn_prepare_saves(saves.c_str(), runtime_savedata_title());
     }
 #ifdef PS_PGO_GENERATE
     StartProfileWriter();
 #endif
-    g_sdk_version = config->sdk_version;
-    if (config->user_dir) setenv("PS_GPU_USER_DIR", config->user_dir, 0);
-    Core::Emulator::FillElfInfo(*config);
-    const std::string title = config->title && *config->title ? config->title
-                                  : config->serial ? config->serial : "UNKNOWN";
-    const std::string icon = std::string(config->app0 ? config->app0 : ".") + "/sce_sys/icon0.png";
-    const s32 width = config->width, height = config->height;
-    g_window_thread = std::thread([title, icon, width, height] {
+    s_sdk_version = p_config->sdk_version;
+    if (p_config->sz_user_dir) setenv("PS_GPU_USER_DIR", p_config->sz_user_dir, 0);
+    Core::Emulator::FillElfInfo(*p_config);
+    const std::string title = p_config->sz_title && *p_config->sz_title ? p_config->sz_title
+                                  : p_config->sz_serial ? p_config->sz_serial : "UNKNOWN";
+    const std::string icon = std::string(p_config->sz_app0 ? p_config->sz_app0 : ".") + "/sce_sys/icon0.png";
+    const s32 width = p_config->width, height = p_config->height;
+    s_window_thread = std::thread([title, icon, width, height] {
         Common::SetCurrentThreadName("bb:window");
-        auto* window = new Frontend::WindowSDL(width, height, title.c_str(), icon.c_str());
+        auto* p_window = new Frontend::WindowSDL(width, height, title.c_str(), icon.c_str());
         {
-            std::scoped_lock lock{g_window_mutex};
-            g_window = window;
-            g_window_ready = true;
+            std::scoped_lock lock{s_window_mutex};
+            g_window = p_window;
+            s_is_window_ready = true;
         }
-        g_window_cv.notify_all();
-        while (window->PollEvents()) {
+        s_window_cv.notify_all();
+        while (p_window->PollEvents()) {
             SDL_Delay(2);
         }
         std::fflush(stdout);
         runtime_calls_report();
         std::_Exit(0);
     });
-    g_window_thread.detach();
+    s_window_thread.detach();
     {
-        std::unique_lock lock{g_window_mutex};
-        g_window_cv.wait(lock, [] { return g_window_ready; });
+        std::unique_lock lock{s_window_mutex};
+        s_window_cv.wait(lock, [] { return s_is_window_ready; });
     }
     Core::Loader::SymbolsResolver resolver;
     // GnmDriver creates the presenter that the VideoOut present thread uses.
@@ -335,62 +335,62 @@ extern "C" void psport_gpu_register_kernel(void) {
     Libraries::PngDec::RegisterLib(&resolver);
 }
 
-extern "C" uintptr_t psport_gpu_resolve(const char* scoped_nid) {
-    const char* hash = std::strchr(scoped_nid, '#');
-    const size_t length = hash ? size_t(hash - scoped_nid) : std::strlen(scoped_nid);
-    for (const auto& symbol : g_symbols) {
-        if (symbol.nid.size() == length && !std::memcmp(symbol.nid.data(), scoped_nid, length)) {
-            return uintptr_t(symbol.address);
+extern "C" uintptr_t psport_gpu_resolve(const char* sz_scoped_nid) {
+    const char* sz_hash = std::strchr(sz_scoped_nid, '#');
+    const size_t length = sz_hash ? size_t(sz_hash - sz_scoped_nid) : std::strlen(sz_scoped_nid);
+    for (const auto& symbol : s_symbols) {
+        if (symbol.nid.size() == length && !std::memcmp(symbol.nid.data(), sz_scoped_nid, length)) {
+            return uintptr_t(symbol.va_guest);
         }
     }
     return 0;
 }
 
-extern "C" int psport_gpu_handle_fault(void* ucontext, void* address) {
+extern "C" int psport_gpu_handle_fault(void* p_ucontext, void* p_address) {
     // PS_LABEL_TRAP (diagnostic): its read-only label pages first. Not passed on to GPU page
     // tracking (a write fault drains the draw pipe: thousands a second would change the timing
     // under test); label pages are not expected to be GPU-tracked.
-    if (PsFreeCheck::OnTrapFault(ucontext, reinterpret_cast<std::uint64_t>(address))) {
+    if (PsFreeCheck::OnTrapFault(p_ucontext, reinterpret_cast<std::uint64_t>(p_address))) {
         return 1;
     }
-    if (Core::Signals::Instance()->DispatchAccessViolation(ucontext, address)) {
+    if (Core::Signals::Instance()->DispatchAccessViolation(p_ucontext, p_address)) {
         return 1;
     }
-    return PsFreeCheck::OnStaleTrapFault(reinterpret_cast<std::uint64_t>(address)) ? 1 : 0;
+    return PsFreeCheck::OnStaleTrapFault(reinterpret_cast<std::uint64_t>(p_address)) ? 1 : 0;
 }
 
-extern "C" void psport_gpu_patch_image(unsigned char* image, uint64_t size) {
-    if (const Game::Profile* game = Game::Active(); game && game->patch_image) {
-        game->patch_image(image, size);
+extern "C" void psport_gpu_patch_image(unsigned char* p_image, uint64_t cb_image) {
+    if (const Game::Profile* p_game = Game::Active(); p_game && p_game->pfn_patch_image) {
+        p_game->pfn_patch_image(p_image, cb_image);
     }
 }
 
-extern "C" const char* psport_gpu_game_serial(const char* serial, size_t index) {
-    const Game::Profile* game = Game::Find(serial);
-    return game && index < game->serials.size() ? game->serials[index] : nullptr;
+extern "C" const char* psport_gpu_game_serial(const char* sz_serial, size_t i_serial) {
+    const Game::Profile* p_game = Game::Find(sz_serial);
+    return p_game && i_serial < p_game->serials.size() ? p_game->serials[i_serial] : nullptr;
 }
 
-extern "C" const char* psport_gpu_game_mod_folder(const char* serial, size_t index) {
-    const Game::Profile* game = Game::Find(serial);
-    return game && index < game->mod_folders.size() ? game->mod_folders[index] : nullptr;
+extern "C" const char* psport_gpu_game_mod_folder(const char* sz_serial, size_t i_folder) {
+    const Game::Profile* p_game = Game::Find(sz_serial);
+    return p_game && i_folder < p_game->mod_folders.size() ? p_game->mod_folders[i_folder] : nullptr;
 }
 
-extern "C" const char* psport_gpu_game_patch_file(const char* serial) {
-    const Game::Profile* game = Game::Find(serial);
-    return game ? game->patch_file : nullptr;
+extern "C" const char* psport_gpu_game_patch_file(const char* sz_serial) {
+    const Game::Profile* p_game = Game::Find(sz_serial);
+    return p_game ? p_game->sz_patch_file : nullptr;
 }
 
-extern "C" void psport_gpu_prepare_game(const PsGameFiles* files) {
-    if (const Game::Profile* game = Game::Find(files->sz_serial); game && game->prepare_environment) {
-        game->prepare_environment();
+extern "C" void psport_gpu_prepare_game(const PsGameFiles* p_files) {
+    if (const Game::Profile* p_game = Game::Find(p_files->sz_serial); p_game && p_game->pfn_prepare_environment) {
+        p_game->pfn_prepare_environment();
     }
 }
 
-extern "C" int psport_gpu_check_game(const PsGameFiles* files, char* sz_out_kind, size_t cb_kind, char* sz_out_advice,
+extern "C" int psport_gpu_check_game(const PsGameFiles* p_files, char* sz_out_kind, size_t cb_kind, char* sz_out_advice,
                                 size_t cb_advice) {
-    const Game::Profile* game = Game::Find(files->sz_serial);
+    const Game::Profile* p_game = Game::Find(p_files->sz_serial);
     std::string kind, advice;
-    if (!game || !game->check_files || game->check_files(*files, kind, advice)) {
+    if (!p_game || !p_game->pfn_check_files || p_game->pfn_check_files(*p_files, kind, advice)) {
         return 0;
     }
     std::snprintf(sz_out_kind, cb_kind, "%s", kind.c_str());
@@ -398,53 +398,53 @@ extern "C" int psport_gpu_check_game(const PsGameFiles* files, char* sz_out_kind
     return 1;
 }
 
-extern "C" int psport_gpu_game_has_presets(const char* serial) {
-    const Game::Profile* game = Game::Find(serial);
-    return game && game->add_patches ? 1 : 0;
+extern "C" int psport_gpu_game_has_presets(const char* sz_serial) {
+    const Game::Profile* p_game = Game::Find(sz_serial);
+    return p_game && p_game->pfn_add_patches ? 1 : 0;
 }
 
-extern "C" int psport_gpu_game_patches(const PsGameFiles* files, const PsPatchServices* services) {
-    const Game::Profile* game = Game::Find(files->sz_serial);
-    if (!game || !game->add_patches) {
+extern "C" int psport_gpu_game_patches(const PsGameFiles* p_files, const PsPatchServices* p_services) {
+    const Game::Profile* p_game = Game::Find(p_files->sz_serial);
+    if (!p_game || !p_game->pfn_add_patches) {
         return -1;
     }
-    return game->add_patches(*files, *services) ? 1 : 0;
+    return p_game->pfn_add_patches(*p_files, *p_services) ? 1 : 0;
 }
 
 extern "C" unsigned psport_gpu_symbol_count(void) {
-    return unsigned(g_symbols.size());
+    return unsigned(s_symbols.size());
 }
 
 // Kernel service thread: runs boost::asio timers for equeue timer events.
 namespace Libraries::Kernel {
 boost::asio::io_context io_context;
-static std::mutex m_asio_req;
-static std::condition_variable_any cv_asio_req;
-static std::atomic<u32> asio_requests;
-static std::jthread service_thread;
+static std::mutex s_asio_req;
+static std::condition_variable_any s_cv_asio_req;
+static std::atomic<u32> s_c_asio_requests;
+static std::jthread s_service_thread;
 
 void KernelSignalRequest() {
-    std::unique_lock lock{m_asio_req};
-    ++asio_requests;
-    cv_asio_req.notify_one();
+    std::unique_lock lock{s_asio_req};
+    ++s_c_asio_requests;
+    s_cv_asio_req.notify_one();
 }
 
 static void KernelServiceThread(std::stop_token stoken) {
     Common::SetCurrentThreadName("bb:kernel_service");
     while (!stoken.stop_requested()) {
         {
-            std::unique_lock lock{m_asio_req};
-            cv_asio_req.wait(lock, stoken, [] { return asio_requests != 0; });
+            std::unique_lock lock{s_asio_req};
+            s_cv_asio_req.wait(lock, stoken, [] { return s_c_asio_requests != 0; });
         }
         if (stoken.stop_requested()) break;
         io_context.run();
         io_context.restart();
-        asio_requests = 0;
+        s_c_asio_requests = 0;
     }
 }
 
 void StartKernelService() {
-    service_thread = std::jthread{KernelServiceThread};
+    s_service_thread = std::jthread{KernelServiceThread};
 }
 
 int* PS4_SYSV_ABI __Error() {
@@ -474,48 +474,48 @@ extern "C" int psport_gpu_overlay_pad_file_press(int guide, int cross, int circl
     return PsOverlay::PadFilePress(guide != 0, cross != 0, circle != 0) ? 1 : 0;
 }
 
-extern "C" void psport_gpu_mouse_take(double* dx, double* dy, int* wheel_up, int* wheel_down) {
+extern "C" void psport_gpu_mouse_take(double* p_dx, double* p_dy, int* p_wheel_up, int* p_wheel_down) {
     double x = 0, y = 0;
-    int up = 0, down = 0;
+    int is_up = 0, is_down = 0;
     if (g_window) {
-        g_window->TakeMouse(x, y, up, down);
+        g_window->TakeMouse(x, y, is_up, is_down);
     }
-    *dx = x;
-    *dy = y;
-    *wheel_up = up;
-    *wheel_down = down;
+    *p_dx = x;
+    *p_dy = y;
+    *p_wheel_up = is_up;
+    *p_wheel_down = is_down;
 }
 
 extern "C" int psport_gpu_mouse_captured(void) {
     return g_window && g_window->MouseCaptured() ? 1 : 0;
 }
 
-extern "C" int psport_gpu_game_mouse_take(int32_t* dx, int32_t* dy, int32_t* wheel, int32_t* tilt, uint32_t* buttons) {
-    *dx = *dy = *wheel = *tilt = 0;
-    *buttons = 0;
-    return g_window && g_window->TakeGameMouse(*dx, *dy, *wheel, *tilt, *buttons) ? 1 : 0;
+extern "C" int psport_gpu_game_mouse_take(int32_t* p_dx, int32_t* p_dy, int32_t* p_wheel, int32_t* p_tilt, uint32_t* p_buttons) {
+    *p_dx = *p_dy = *p_wheel = *p_tilt = 0;
+    *p_buttons = 0;
+    return g_window && g_window->TakeGameMouse(*p_dx, *p_dy, *p_wheel, *p_tilt, *p_buttons) ? 1 : 0;
 }
 
-extern "C" void psport_gpu_game_keyboard_open(int open) {
-    Frontend::WindowSDL::OpenGameKeyboard(open != 0);
+extern "C" void psport_gpu_game_keyboard_open(int is_open) {
+    Frontend::WindowSDL::OpenGameKeyboard(is_open != 0);
 }
 
-extern "C" int psport_gpu_game_keyboard_take(PsKeyEvent* events, int max, int* keyboard, uint32_t* dropped) {
-    bool host = false;
+extern "C" int psport_gpu_game_keyboard_take(PsKeyEvent* p_events, int max, int* p_keyboard, uint32_t* p_dropped) {
+    bool is_host = false;
     u32 lost = 0;
-    const int count = g_window ? g_window->TakeGameKeys(events, max, host, lost) : 0;
-    *keyboard = host ? 1 : 0;
-    *dropped = lost;
-    return count;
+    const int c_keys = g_window ? g_window->TakeGameKeys(p_events, max, is_host, lost) : 0;
+    *p_keyboard = is_host ? 1 : 0;
+    *p_dropped = lost;
+    return c_keys;
 }
 
-extern "C" void psport_gpu_mouse_look_enable(int enabled) {
-    Frontend::WindowSDL::EnableMouseLook(enabled != 0);
+extern "C" void psport_gpu_mouse_look_enable(int is_enabled) {
+    Frontend::WindowSDL::EnableMouseLook(is_enabled != 0);
 }
 
-extern "C" int psport_gpu_text_input_begin(const char* initial, const char* prompt) {
+extern "C" int psport_gpu_text_input_begin(const char* sz_initial, const char* sz_prompt) {
     if (!g_window) return 0;
-    g_window->BeginTextInput(initial ? initial : "", prompt ? prompt : "Text");
+    g_window->BeginTextInput(sz_initial ? sz_initial : "", sz_prompt ? sz_prompt : "Text");
     return 1;
 }
 
@@ -523,14 +523,14 @@ extern "C" void psport_gpu_text_input_end(void) {
     if (g_window) g_window->EndTextInput();
 }
 
-extern "C" int psport_gpu_text_input_poll(char* out, uint64_t size) {
+extern "C" int psport_gpu_text_input_poll(char* sz_out, uint64_t cb_out) {
     if (!g_window) return 2;
     std::string text;
     const int state = g_window->PollTextInput(text);
-    if (size) {
-        const size_t n = std::min<size_t>(text.size(), size - 1);
-        std::memcpy(out, text.data(), n);
-        out[n] = 0;
+    if (cb_out) {
+        const size_t cb_copy = std::min<size_t>(text.size(), cb_out - 1);
+        std::memcpy(sz_out, text.data(), cb_copy);
+        sz_out[cb_copy] = 0;
     }
     return state;
 }

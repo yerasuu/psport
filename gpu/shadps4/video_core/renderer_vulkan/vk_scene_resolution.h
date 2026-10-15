@@ -24,8 +24,8 @@ public:
     SceneTargets(const Instance&, Scheduler&, Runtime&, Lookup);
     ~SceneTargets();
     bool SetSize(SceneResolution::Size);
-    SceneResolution::Size Size() const { return size; }
-    bool Reduced() const { return size != SceneResolution::Size{}; }
+    SceneResolution::Size Size() const { return m_size; }
+    bool Reduced() const { return m_size != SceneResolution::Size{}; }
     /// A reduced proxy can stand in for the image: a 1920x1080 scene target or, scaled by
     /// the same factor, a half-resolution (960x540) one (toggle SceneHalfRes).
     bool Eligible(const VideoCore::Image&) const;
@@ -57,14 +57,14 @@ public:
     vk::ImageLayout PrepareSample(const VideoCore::Image& image, u32 level = 0);
     /// Changes when proxies and their views are destroyed (SetSize).
     [[nodiscard]] u64 Generation() const noexcept {
-        return generation;
+        return m_generation;
     }
     /// Whether NativeAccess has work for this image (a reduced-size proxy exists).
     [[nodiscard]] bool Tracks(u64 image_uid) const {
-        return !copying && tracked.contains(image_uid);
+        return !m_is_copying && m_tracked.contains(image_uid);
     }
     void ResolveAll();
-    bool debug = false; ///< PS_SCENE_DEBUG frame: print resolves and fills
+    bool m_is_debug = false; ///< PS_SCENE_DEBUG frame: print resolves and fills
 private:
     struct Entry {
         VideoCore::ImageId source{};
@@ -80,7 +80,7 @@ private:
     }
     Entry& Get(VideoCore::ImageId, u32 level = 0);
     vk::ImageView View(Entry&, const VideoCore::Image&, const VideoCore::ImageViewInfo&);
-    void Copy(Entry&, VideoCore::Image&, bool to_native);
+    void Copy(Entry&, VideoCore::Image&, bool is_to_native);
     // Depth/stencil formats without blit support (D32S8 on RADV) are resampled by a
     // fullscreen draw writing gl_FragDepth and, with stencil export, the stencil value.
     vk::FormatFeatureFlags Features(vk::Format) const;
@@ -88,28 +88,28 @@ private:
     bool ShaderResampled(const VideoCore::Image&) const;
     void Resample(vk::Image src, vk::Image dst, const VideoCore::Image& original,
                   vk::Extent2D dst_size);
-    vk::Pipeline ResamplePipeline(vk::Format, bool stencil);
+    vk::Pipeline ResamplePipeline(vk::Format, bool is_stencil);
     void CreateResampleResources();
     void Transition(Entry&, vk::ImageAspectFlags, vk::ImageLayout,
                     vk::PipelineStageFlags2, vk::AccessFlags2);
-    const Instance& instance;
-    Scheduler& scheduler;
-    Runtime& runtime;
-    Lookup lookup;
-    SceneResolution::Size size;
-    std::unordered_map<u64, std::unique_ptr<Entry>> entries; ///< by Key(uid, level)
-    std::unordered_set<u64> tracked; ///< uids with proxies
-    bool copying = false;
-    bool force_stencil_bits = false; ///< test the portable resampler on any driver
-    u64 generation = 0;
-    mutable std::unordered_map<vk::Format, vk::FormatFeatureFlags> format_features;
-    mutable std::array<vk::FormatFeatureFlags, 256> format_table{};
-    mutable std::array<bool, 256> format_known{};
-    std::array<std::pair<u64, Entry*>, 8> recent{}; ///< last entries by Key
-    u32 recent_next = 0;
-    vk::UniqueShaderModule fs_tri_vert, depth_frag, depth_stencil_frag, stencil_bits_frag;
-    vk::UniqueDescriptorSetLayout resample_set_layout;
-    vk::UniquePipelineLayout resample_layout;
-    std::vector<std::pair<std::pair<vk::Format, bool>, vk::UniquePipeline>> resample_pipelines;
+    const Instance& m_instance;
+    Scheduler& m_scheduler;
+    Runtime& m_runtime;
+    Lookup m_lookup;
+    SceneResolution::Size m_size;
+    std::unordered_map<u64, std::unique_ptr<Entry>> m_entries; ///< by Key(uid, level)
+    std::unordered_set<u64> m_tracked; ///< uids with proxies
+    bool m_is_copying = false;
+    bool m_should_force_stencil_bits = false; ///< test the portable resampler on any driver
+    u64 m_generation = 0;
+    mutable std::unordered_map<vk::Format, vk::FormatFeatureFlags> m_format_features;
+    mutable std::array<vk::FormatFeatureFlags, 256> m_format_table{};
+    mutable std::array<bool, 256> m_format_known{};
+    std::array<std::pair<u64, Entry*>, 8> m_recent{}; ///< last entries by Key
+    u32 m_recent_next = 0;
+    vk::UniqueShaderModule m_fs_tri_vert, m_depth_frag, m_depth_stencil_frag, m_stencil_bits_frag;
+    vk::UniqueDescriptorSetLayout m_resample_set_layout;
+    vk::UniquePipelineLayout m_resample_layout;
+    std::vector<std::pair<std::pair<vk::Format, bool>, vk::UniquePipeline>> m_resample_pipelines;
 };
 } // namespace Vulkan

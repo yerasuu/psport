@@ -218,18 +218,18 @@ void CheckDebugMenu(std::vector<std::string>& names, const std::string& game_dir
         }
         return;
     }
-    bool are_in_font = true;
+    bool is_in_font = true;
     std::string list;
     for (const std::string& font : missing) {
         list += (list.empty() ? "" : ", ") + font;
-        are_in_font = are_in_font && !FindIgnoringCase(dvdroot, "font/" + font.substr(font.rfind('/') + 1)).empty();
+        is_in_font = is_in_font && !FindIgnoringCase(dvdroot, "font/" + font.substr(font.rfind('/') + 1)).empty();
     }
     std::fprintf(stderr,
                  "Patches: debug menu off: the debug menu needs the font files from "
                  "https://www.nexusmods.com/bloodborne/mods/253 in dvdroot_ps4 of the game folder or of a mod: "
                  "missing %s%s\n",
                  list.c_str(),
-                 are_in_font ? " (they are in dvdroot_ps4/font: the game reads them from dvdroot_ps4/adhoc/font)" : "");
+                 is_in_font ? " (they are in dvdroot_ps4/font: the game reads them from dvdroot_ps4/adhoc/font)" : "");
     names.erase(std::remove(names.begin(), names.end(), DebugMenu), names.end());
 }
 

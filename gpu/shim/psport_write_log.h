@@ -10,12 +10,12 @@ namespace PsWriteLog {
 enum Source : std::uint32_t { Backing, WriteData, Fence, FenceIntent, WriteDataIntent, EosIntent, Dma };
 bool Enabled();
 /// PS_WRITE_LOG=1: at the write itself (changes the timing of those writes).
-void Note(std::uint64_t address, const void* data, std::uint64_t size, Source source);
+void Note(std::uint64_t va_range, const void* p_data, std::uint64_t cb_range, Source source);
 /// PS_WRITE_LOG=2: where the GPU command thread decodes a fence or WriteData, off the write
 /// path (the address and value it will write later).
-void NoteIntent(std::uint64_t address, const void* data, std::uint64_t size, Source source);
+void NoteIntent(std::uint64_t va_range, const void* p_data, std::uint64_t cb_range, Source source);
 /// Logged writes into [address, address + size), newest first (PS_WRITE_LOG=1 or 2).
-void DumpRange(std::uint64_t address, std::uint64_t size);
+void DumpRange(std::uint64_t va_range, std::uint64_t cb_range);
 }
 
-extern "C" void psport_gpu_dump_guest_writes(void* ucontext);
+extern "C" void psport_gpu_dump_guest_writes(void* p_ucontext);

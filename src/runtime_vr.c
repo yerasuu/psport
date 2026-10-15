@@ -24,8 +24,8 @@
 #define HMD_REPROJECTION_GARLIC_SIZE 0x100000
 #define HMD_REPROJECTION_GARLIC_ALIGN 0x100
 static atomic_int s_is_hmd_initialized, s_is_reprojection_initialized;
-static ABI int32_t hmd_init(const void *param) {
-    if (!param) return HMD_PARAMETER_NULL;
+static ABI int32_t hmd_init(const void *p_param) {
+    if (!p_param) return HMD_PARAMETER_NULL;
     int is_initialized=0;
     if (!atomic_compare_exchange_strong(&s_is_hmd_initialized,&is_initialized,1)) return HMD_ALREADY_INITIALIZED;
     puts("Runtime: Hmd initialized; no PlayStation VR headset is connected");
@@ -33,17 +33,17 @@ static ABI int32_t hmd_init(const void *param) {
 }
 static ABI int32_t hmd_term(void) { return atomic_exchange(&s_is_hmd_initialized,0) ? 0 : HMD_NOT_INITIALIZED; }
 /* OrbisHmdDeviceInformation (32 bytes): status, user, reserved, panel size, latencies, HMU mount. */
-static ABI int32_t hmd_device_info(int32_t *info) {
-    if (!info) return HMD_PARAMETER_NULL;
+static ABI int32_t hmd_device_info(int32_t *p_info) {
+    if (!p_info) return HMD_PARAMETER_NULL;
     if (!atomic_load(&s_is_hmd_initialized)) return HMD_NOT_INITIALIZED;
-    memset(info,0,32);
-    info[0]=HMD_DEVICE_STATUS_NOT_DETECTED;
-    info[1]=-1;
+    memset(p_info,0,32);
+    p_info[0]=HMD_DEVICE_STATUS_NOT_DETECTED;
+    p_info[1]=-1;
     return 0;
 }
 static ABI int32_t hmd_handle_invalid(void) { return HMD_HANDLE_INVALID; }
-static ABI int32_t hmd_open(int32_t h_user, int32_t type, int32_t index, const void *p_param) {
-    (void)h_user; (void)type; (void)index; (void)p_param;
+static ABI int32_t hmd_open(int32_t h_user, int32_t type, int32_t i_device, const void *p_param) {
+    (void)h_user; (void)type; (void)i_device; (void)p_param;
     return atomic_load(&s_is_hmd_initialized) ? HMD_DEVICE_DISCONNECTED : HMD_NOT_INITIALIZED;
 }
 static ABI int32_t hmd_close(int32_t h_hmd) {

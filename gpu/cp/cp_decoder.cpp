@@ -4,25 +4,25 @@
 namespace PsCp {
 
 bool Decoder::ApplyRegisters(const Packet& packet) {
-    const auto& body = packet.body;
+    const auto& body = packet.m_body;
     std::array<RegisterWrite, 5> writes;
-    u32 num_writes = 0;
-    const auto noted = [&](u32 index, u32 count) {
-        if (count != 0) {
-            writes[num_writes++] = {index, count};
+    u32 c_writes = 0;
+    const auto noted = [&](u32 i_register, u32 c_registers) {
+        if (c_registers != 0) {
+            writes[c_writes++] = {i_register, c_registers};
         }
     };
-    const auto write = [&](u32 index, u32 value) { noted(index, registers.Write(index, value)); };
+    const auto write = [&](u32 i_register, u32 value) { noted(i_register, m_registers.Write(i_register, value)); };
     const auto set = [&](u32 bank) {
         if (body.empty()) {
             return;
         }
-        const u32 index = bank + (body[0] & 0xFFFF);
-        noted(index, registers.Write(index, body.subspan(1)));
+        const u32 i_register = bank + (body[0] & 0xFFFF);
+        noted(i_register, m_registers.Write(i_register, body.subspan(1)));
     };
     switch (packet.Opcode()) {
     case Op::ClearState:
-        registers.ClearState();
+        m_registers.ClearState();
         break;
     case Op::SetConfigReg:
         set(Bank::Config);
@@ -31,10 +31,10 @@ bool Decoder::ApplyRegisters(const Packet& packet) {
         set(Bank::Context);
         break;
     case Op::SetShReg: {
-        const u32 offset = packet.Word(0) & 0xFFFF;
+        const u32 off_register = packet.Word(0) & 0xFFFF;
         const u32 first = ComputeShFirst - Bank::Sh;
-        if (!(options.compute_sh_to_owner && offset >= first &&
-              offset <= first + options.compute_words)) {
+        if (!(m_options.is_compute_sh_to_owner && off_register >= first &&
+              off_register <= first + m_options.compute_words)) {
             set(Bank::Sh);
         }
         break;
@@ -49,7 +49,7 @@ bool Decoder::ApplyRegisters(const Packet& packet) {
         // max size, base low, base high (8 bits), index count, draw initiator.
         write(Reg::VgtDmaMaxSize, packet.Word(0));
         write(Reg::VgtDmaBase, packet.Word(1));
-        noted(Reg::VgtDmaBaseHi, registers.WriteBits(Reg::VgtDmaBaseHi, packet.Word(2), 0xFF));
+        noted(Reg::VgtDmaBaseHi, m_registers.WriteBits(Reg::VgtDmaBaseHi, packet.Word(2), 0xFF));
         write(Reg::VgtNumIndices, packet.Word(3));
         write(Reg::VgtDrawInitiator, packet.Word(4));
         break;
@@ -68,7 +68,7 @@ bool Decoder::ApplyRegisters(const Packet& packet) {
         break;
     case Op::IndexBase:
         write(Reg::VgtDmaBase, packet.Word(0));
-        noted(Reg::VgtDmaBaseHi, registers.WriteBits(Reg::VgtDmaBaseHi, packet.Word(1), 0xFF));
+        noted(Reg::VgtDmaBaseHi, m_registers.WriteBits(Reg::VgtDmaBaseHi, packet.Word(1), 0xFF));
         break;
     case Op::IndexBufferSize:
         write(Reg::VgtNumIndices, packet.Word(0));
@@ -78,41 +78,41 @@ bool Decoder::ApplyRegisters(const Packet& packet) {
         if ((packet.Word(0) & 0x3F) != Event::SoVgtStreamoutFlush) {
             return false;
         }
-        noted(Reg::CpStrmoutCntl, registers.WriteBits(Reg::CpStrmoutCntl, 1, 1));
+        noted(Reg::CpStrmoutCntl, m_registers.WriteBits(Reg::CpStrmoutCntl, 1, 1));
         break;
     default:
         return false;
     }
-    if (observer) {
-        observer->OnRegisterPacket({packet.body.data() - 1, packet.body.size() + 1},
-                                   {writes.data(), num_writes}, packet.Opcode() == Op::ClearState);
+    if (m_p_observer) {
+        m_p_observer->OnRegisterPacket({packet.m_body.data() - 1, packet.m_body.size() + 1},
+                                   {writes.data(), c_writes}, packet.Opcode() == Op::ClearState);
     }
     return true;
 }
 
 Cursor::Cursor(Decoder& decoder_, std::span<const u32> buffer, Sink& sink_, int depth,
                bool descend_)
-    : decoder{decoder_}, sink{sink_}, descend{descend_} {
-    levels.push_back({buffer, depth});
+    : m_decoder{decoder_}, m_sink{sink_}, m_should_descend{descend_} {
+    m_levels.push_back({buffer, depth});
 }
 
 const Packet* Cursor::Next() {
-    auto& stats = decoder.stats;
-    if (pending) {
-        pending = false;
-        const int depth = levels.back().depth + 1;
+    auto& stats = m_decoder.m_stats;
+    if (m_is_pending) {
+        m_is_pending = false;
+        const int depth = m_levels.back().depth + 1;
         if (depth >= MaxDepth) {
             ++stats.bad;
-            sink.OnBadPacket({}, "indirect buffers nested too deep", depth);
-        } else if (const auto nested = sink.ResolveIndirectBuffer(pending_address, pending_dwords);
+            m_sink.OnBadPacket({}, "indirect buffers nested too deep", depth);
+        } else if (const auto nested = m_sink.ResolveIndirectBuffer(m_va_pending, m_pending_dwords);
                    !nested.empty()) {
-            levels.push_back({nested, depth});
+            m_levels.push_back({nested, depth});
         }
     }
-    while (!levels.empty()) {
-        auto& level = levels.back();
+    while (!m_levels.empty()) {
+        auto& level = m_levels.back();
         if (level.rest.empty()) {
-            levels.pop_back();
+            m_levels.pop_back();
             continue;
         }
         const Header header{level.rest[0]};
@@ -123,71 +123,71 @@ const Packet* Cursor::Next() {
         }
         if (header.Type() != 3) {
             ++stats.bad;
-            sink.OnBadPacket(level.rest, header.Type() == 0 ? "type-0 packet" : "type-1 packet",
+            m_sink.OnBadPacket(level.rest, header.Type() == 0 ? "type-0 packet" : "type-1 packet",
                              level.depth);
-            levels.clear();
+            m_levels.clear();
             return nullptr;
         }
         const u32 words = header.BodyWords();
         if (words + 1 > level.rest.size()) {
             ++stats.bad;
-            sink.OnBadPacket(level.rest, "packet past the end of its buffer", level.depth);
-            levels.clear();
+            m_sink.OnBadPacket(level.rest, "packet past the end of its buffer", level.depth);
+            m_levels.clear();
             return nullptr;
         }
-        current = {header, level.rest.subspan(1, words), level.depth};
-        const Packet& packet = current;
+        m_current = {header, level.rest.subspan(1, words), level.depth};
+        const Packet& packet = m_current;
         level.rest = level.rest.subspan(words + 1);
         ++stats.packets;
         ++stats.by_opcode[static_cast<u32>(packet.Opcode())];
-        if (decoder.ApplyRegisters(packet)) {
+        if (m_decoder.ApplyRegisters(packet)) {
             ++stats.register_packets;
         }
         if (packet.Opcode() == Op::IndirectBuffer) {
             ++stats.indirect_buffers;
-            if (descend) {
-                pending = true;
-                pending_address = packet.Word(0) | u64(packet.Word(1) & 0xFFFF) << 32;
-                pending_dwords = packet.Word(2) & 0xFFFFF;
+            if (m_should_descend) {
+                m_is_pending = true;
+                m_va_pending = packet.Word(0) | u64(packet.Word(1) & 0xFFFF) << 32;
+                m_pending_dwords = packet.Word(2) & 0xFFFFF;
             }
         }
-        return &current;
+        return &m_current;
     }
     return nullptr;
 }
 
 void Cursor::Skip(u32 dwords) {
-    if (levels.empty()) {
+    if (m_levels.empty()) {
         return;
     }
-    auto& rest = levels.back().rest;
+    auto& rest = m_levels.back().rest;
     rest = rest.subspan(std::min<size_t>(dwords, rest.size()));
 }
 
 void Decoder::Decode(std::span<const u32> buffer, Sink& sink, int depth) {
     Cursor cursor{*this, buffer, sink, depth, true};
-    while (const Packet* packet = cursor.Next()) {
-        sink.OnPacket(*packet);
-        switch (packet->Opcode()) {
+    while (const Packet* p_packet = cursor.Next()) {
+        sink.OnPacket(*p_packet);
+        switch (p_packet->Opcode()) {
         case Op::DrawIndex2:
-            ++stats.draws;
-            sink.OnDraw({DrawKind::Index2, packet->Word(3), 0, packet->Word(4), packet});
+            ++m_stats.draws;
+            sink.OnDraw({DrawKind::Index2, p_packet->Word(3), 0, p_packet->Word(4), p_packet});
             break;
         case Op::DrawIndexOffset2:
-            ++stats.draws;
-            sink.OnDraw({DrawKind::IndexOffset2, packet->Word(2), packet->Word(1),
-                         packet->Word(3), packet});
+            ++m_stats.draws;
+            sink.OnDraw({DrawKind::IndexOffset2, p_packet->Word(2), p_packet->Word(1),
+                         p_packet->Word(3), p_packet});
             break;
         case Op::DrawIndexAuto:
-            ++stats.draws;
-            sink.OnDraw({DrawKind::IndexAuto, packet->Word(0), 0, packet->Word(1), packet});
+            ++m_stats.draws;
+            sink.OnDraw({DrawKind::IndexAuto, p_packet->Word(0), 0, p_packet->Word(1), p_packet});
             break;
         case Op::DrawIndirect:
         case Op::DrawIndexIndirect:
         case Op::DrawIndirectMulti:
         case Op::DrawIndexIndirectMulti:
         case Op::DrawIndexIndirectCountMulti: {
-            static constexpr auto kind = [](Op op) {
+            static constexpr auto s_kind = [](Op op) {
                 switch (op) {
                 case Op::DrawIndirect:
                     return DrawKind::Indirect;
@@ -201,23 +201,23 @@ void Decoder::Decode(std::span<const u32> buffer, Sink& sink, int depth) {
                     return DrawKind::IndexIndirectCountMulti;
                 }
             };
-            ++stats.draws;
+            ++m_stats.draws;
             // The draw initiator is the last dword of each of these.
-            sink.OnDraw({kind(packet->Opcode()), 0, 0, packet->body.back(), packet});
+            sink.OnDraw({s_kind(p_packet->Opcode()), 0, 0, p_packet->m_body.back(), p_packet});
             break;
         }
         case Op::DispatchDirect:
-            ++stats.dispatches;
-            sink.OnDispatch({false, packet->Word(0), packet->Word(1), packet->Word(2), 0,
-                             packet->Word(3), packet});
+            ++m_stats.dispatches;
+            sink.OnDispatch({false, p_packet->Word(0), p_packet->Word(1), p_packet->Word(2), 0,
+                             p_packet->Word(3), p_packet});
             break;
         case Op::DispatchIndirect:
-            ++stats.dispatches;
-            sink.OnDispatch({true, 0, 0, 0, packet->Word(0), packet->Word(1), packet});
+            ++m_stats.dispatches;
+            sink.OnDispatch({true, 0, 0, 0, p_packet->Word(0), p_packet->Word(1), p_packet});
             break;
         case Op::CondExec: {
-            const u64 address = (packet->Word(0) & ~3u) | u64(packet->Word(1) & 0xFFFF) << 32;
-            cursor.Skip(sink.ConditionalSkip(address, packet->Word(2) & 0x3FFF, *packet));
+            const u64 address = (p_packet->Word(0) & ~3u) | u64(p_packet->Word(1) & 0xFFFF) << 32;
+            cursor.Skip(sink.ConditionalSkip(address, p_packet->Word(2) & 0x3FFF, *p_packet));
             break;
         }
         default:

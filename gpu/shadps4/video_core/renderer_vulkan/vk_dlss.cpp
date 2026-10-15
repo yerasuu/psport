@@ -78,24 +78,24 @@ bool HasNgx(const std::filesystem::path& directory) {
 }
 
 Module LoadModule(const std::filesystem::path& path) {
-    Module module = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
-    if (!module) {
+    Module p_module = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
+    if (!p_module) {
         std::printf("DLSS: %s\n", dlerror());
     }
-    return module;
+    return p_module;
 }
 
-void* FindSymbol(Module module, const char* name) {
-    return dlsym(module, name);
+void* FindSymbol(Module p_module, const char* sz_name) {
+    return dlsym(p_module, sz_name);
 }
 /// The player's DLSS folder (<user>/dlss, PS_GPU_USER_DIR; beside psport without it): NGX's
 /// logs, and NVIDIA's library when the player chose one in the launcher (newer than the package's,
 /// or the only one: the package may come without it).
 std::filesystem::path UserDlssDirectory() {
-    if (const char* user = std::getenv("PS_GPU_USER_DIR"); user && user[0]) {
+    if (const char* sz_user = std::getenv("PS_GPU_USER_DIR"); sz_user && sz_user[0]) {
         std::error_code error;
-        const auto absolute = std::filesystem::absolute(std::filesystem::path{user} / "dlss", error);
-        return error ? std::filesystem::path{user} / "dlss" : absolute;
+        const auto absolute = std::filesystem::absolute(std::filesystem::path{sz_user} / "dlss", error);
+        return error ? std::filesystem::path{sz_user} / "dlss" : absolute;
     }
     return ExecutableDirectory() / "dlss";
 }
@@ -123,16 +123,16 @@ std::filesystem::path BridgeDirectory() {
 }
 #endif
 
-void BridgeLog(int warning, const char* message) {
-    std::printf("DLSS: %s%s\n", warning ? "warning: " : "", message);
+void BridgeLog(int warning, const char* sz_message) {
+    std::printf("DLSS: %s%s\n", warning ? "warning: " : "", sz_message);
 }
 
-bool CollectExtensions(const VkExtensionProperties* required, u32 count,
+bool CollectExtensions(const VkExtensionProperties* p_required, u32 c_required,
                        const std::vector<vk::ExtensionProperties>& available,
                        std::vector<std::string>& storage, std::vector<const char*>& enabled) {
     storage.clear();
-    for (u32 i = 0; i < count; ++i) {
-        const auto& request = required[i];
+    for (u32 i = 0; i < c_required; ++i) {
+        const auto& request = p_required[i];
         const auto match = std::ranges::find_if(available, [&](const auto& extension) {
             return std::strcmp(extension.extensionName.data(), request.extensionName) == 0 &&
                    extension.specVersion >= request.specVersion;
@@ -144,7 +144,7 @@ bool CollectExtensions(const VkExtensionProperties* required, u32 count,
         storage.emplace_back(request.extensionName);
     }
     for (const auto& name : storage) {
-        if (std::ranges::none_of(enabled, [&](const char* current) { return name == current; })) {
+        if (std::ranges::none_of(enabled, [&](const char* sz_current) { return name == sz_current; })) {
             enabled.push_back(name.c_str());
         }
     }
@@ -153,54 +153,54 @@ bool CollectExtensions(const VkExtensionProperties* required, u32 count,
 } // namespace
 
 struct Dlss::Impl {
-    Module module{};
-    const PsDlssApi* api{};
-    std::vector<std::string> instance_extensions, device_extensions;
-    std::optional<FeatureDesc> feature;
-    std::string problem;
-    bool eligible{true}, instance_ready{}, device_ready{}, initialized{}, available{};
+    Module m_p_module{};
+    const PsDlssApi* m_p_api{};
+    std::vector<std::string> m_instance_extensions, m_device_extensions;
+    std::optional<FeatureDesc> m_feature;
+    std::string m_problem;
+    bool m_is_eligible{true}, m_is_instance_ready{}, m_is_device_ready{}, m_is_initialized{}, m_is_available{};
 
     void Disable(std::string_view reason) {
-        eligible = available = false;
-        problem = reason;
+        m_is_eligible = m_is_available = false;
+        m_problem = reason;
         std::printf("DLSS: unavailable (%.*s)\n", int(reason.size()), reason.data());
     }
 };
 
 Dlss* Dlss::Get() {
-    static Dlss* const dlss = []() -> Dlss* {
-        const char* setting = std::getenv("PS_DLSS");
-        if (setting && setting[0] == '0') {
+    static Dlss* const s_p_dlss = []() -> Dlss* {
+        const char* sz_setting = std::getenv("PS_DLSS");
+        if (sz_setting && sz_setting[0] == '0') {
             return nullptr;
         }
         if (BridgeDirectory().empty()) {
             return nullptr;
         }
-        auto* created = new Dlss;
+        auto* p_created = new Dlss;
         // The process may end through quick_exit/_exit paths: release NGX first when it can.
         std::atexit([] {
-            if (Dlss* live = Get()) {
-                live->Shutdown();
+            if (Dlss* p_live = Get()) {
+                p_live->Shutdown();
             }
         });
-        return created;
+        return p_created;
     }();
-    return dlss;
+    return s_p_dlss;
 }
 
-Dlss::Dlss() : impl{std::make_unique<Impl>()} {
-    impl->module = LoadModule(BridgeDirectory() / BridgeName);
-    const auto get_api =
-        impl->module ? reinterpret_cast<PsDlssGetApiFn>(FindSymbol(impl->module, "PsDlssGetApi"))
+Dlss::Dlss() : m_impl{std::make_unique<Impl>()} {
+    m_impl->m_p_module = LoadModule(BridgeDirectory() / BridgeName);
+    const auto pfn_get_api =
+        m_impl->m_p_module ? reinterpret_cast<PsDlssGetApiFn>(FindSymbol(m_impl->m_p_module, "PsDlssGetApi"))
                      : nullptr;
-    impl->api = get_api ? get_api() : nullptr;
-    if (!impl->api || impl->api->abi != PSPORT_DLSS_BRIDGE_ABI) {
-        impl->Disable("the DLSS bridge library is missing or from another version");
+    m_impl->m_p_api = pfn_get_api ? pfn_get_api() : nullptr;
+    if (!m_impl->m_p_api || m_impl->m_p_api->abi != PSPORT_DLSS_BRIDGE_ABI) {
+        m_impl->Disable("the DLSS bridge library is missing or from another version");
         return;
     }
     const auto ngx = NgxDirectory();
     if (ngx.empty()) {
-        impl->Disable("NVIDIA's DLSS library is missing: choose it in the launcher (Upscaler)");
+        m_impl->Disable("NVIDIA's DLSS library is missing: choose it in the launcher (Upscaler)");
         return;
     }
     // NGX writes its logs and model updates here: beside the saves and shader caches.
@@ -208,8 +208,8 @@ Dlss::Dlss() : impl{std::make_unique<Impl>()} {
     std::error_code error;
     std::filesystem::create_directories(data, error);
     std::printf("DLSS: NVIDIA's library from %s\n", ngx.string().c_str());
-    if (!impl->api->Configure(ngx.wstring().c_str(), data.wstring().c_str(), BridgeLog)) {
-        impl->Disable("bridge configuration failed");
+    if (!m_impl->m_p_api->Configure(ngx.wstring().c_str(), data.wstring().c_str(), BridgeLog)) {
+        m_impl->Disable("bridge configuration failed");
     }
 }
 
@@ -218,87 +218,87 @@ Dlss::~Dlss() {
 }
 
 void Dlss::AppendInstanceExtensions(std::vector<const char*>& enabled) {
-    if (!impl->eligible) {
+    if (!m_impl->m_is_eligible) {
         return;
     }
-    u32 count{};
-    const VkExtensionProperties* required{};
-    if (!impl->api->InstanceExtensions(&count, &required)) {
-        return impl->Disable("instance extension query failed");
+    u32 c_required{};
+    const VkExtensionProperties* p_required{};
+    if (!m_impl->m_p_api->InstanceExtensions(&c_required, &p_required)) {
+        return m_impl->Disable("instance extension query failed");
     }
     const auto [result, extensions] = vk::enumerateInstanceExtensionProperties();
     if (result != vk::Result::eSuccess ||
-        !CollectExtensions(required, count, extensions, impl->instance_extensions, enabled)) {
-        return impl->Disable("required Vulkan instance extensions are missing");
+        !CollectExtensions(p_required, c_required, extensions, m_impl->m_instance_extensions, enabled)) {
+        return m_impl->Disable("required Vulkan instance extensions are missing");
     }
-    impl->instance_ready = true;
+    m_impl->m_is_instance_ready = true;
 }
 
 void Dlss::AppendDeviceExtensions(vk::Instance instance, vk::PhysicalDevice physical,
                                   std::vector<const char*>& enabled) {
-    if (!impl->eligible || !impl->instance_ready) {
+    if (!m_impl->m_is_eligible || !m_impl->m_is_instance_ready) {
         return;
     }
     const auto properties = physical.getProperties();
     if (properties.vendorID != 0x10de) {
-        return impl->Disable("not an NVIDIA GPU");
+        return m_impl->Disable("not an NVIDIA GPU");
     }
-    u32 count{};
-    const VkExtensionProperties* required{};
-    if (!impl->api->DeviceExtensions(instance, physical, &count, &required)) {
-        return impl->Disable("this GPU or driver does not support DLSS (GeForce RTX needed)");
+    u32 c_required{};
+    const VkExtensionProperties* p_required{};
+    if (!m_impl->m_p_api->DeviceExtensions(instance, physical, &c_required, &p_required)) {
+        return m_impl->Disable("this GPU or driver does not support DLSS (GeForce RTX needed)");
     }
     const auto [result, extensions] = physical.enumerateDeviceExtensionProperties();
     if (result != vk::Result::eSuccess ||
-        !CollectExtensions(required, count, extensions, impl->device_extensions, enabled)) {
-        return impl->Disable("required Vulkan device extensions are missing");
+        !CollectExtensions(p_required, c_required, extensions, m_impl->m_device_extensions, enabled)) {
+        return m_impl->Disable("required Vulkan device extensions are missing");
     }
-    impl->device_ready = true;
+    m_impl->m_is_device_ready = true;
 }
 
 void Dlss::Initialize(vk::Instance instance, vk::PhysicalDevice physical, vk::Device device) {
-    if (!impl->eligible || !impl->device_ready || impl->initialized) {
+    if (!m_impl->m_is_eligible || !m_impl->m_is_device_ready || m_impl->m_is_initialized) {
         return;
     }
-    impl->initialized = true;
-    if (!impl->api->Initialize(instance, physical, device,
+    m_impl->m_is_initialized = true;
+    if (!m_impl->m_p_api->Initialize(instance, physical, device,
                                VULKAN_HPP_DEFAULT_DISPATCHER.vkGetInstanceProcAddr,
                                VULKAN_HPP_DEFAULT_DISPATCHER.vkGetDeviceProcAddr)) {
-        return impl->Disable("NVIDIA NGX initialization failed (update the GPU driver)");
+        return m_impl->Disable("NVIDIA NGX initialization failed (update the GPU driver)");
     }
-    impl->available = true;
+    m_impl->m_is_available = true;
     std::printf("DLSS: ready\n");
 }
 
 bool Dlss::Available() const {
-    return impl->available;
+    return m_impl->m_is_available;
 }
 
 std::string Dlss::Problem() const {
-    return impl->problem;
+    return m_impl->m_problem;
 }
 
 bool Dlss::HasFeature(const FeatureDesc& desc) const {
-    return impl->feature && *impl->feature == desc;
+    return m_impl->m_feature && *m_impl->m_feature == desc;
 }
 
 bool Dlss::CreateFeature(vk::CommandBuffer command, const FeatureDesc& desc) {
-    if (!impl->available) {
+    if (!m_impl->m_is_available) {
         return false;
     }
-    impl->feature.reset();
+    m_impl->m_feature.reset();
     const PsDlssFeature feature{desc.input_width,  desc.input_height, desc.output_width,
                                 desc.output_height, desc.quality,      0,
-                                0,                  desc.hdr ? 1 : 0};
-    if (!impl->api->CreateFeature(command, &feature)) {
+                                0,                  desc.is_hdr ? 1 : 0};
+    if (!m_impl->m_p_api->CreateFeature(command, &feature)) {
         return false;
     }
-    impl->feature = desc;
+    m_impl->m_feature = desc;
     return true;
 }
 
 bool Dlss::Evaluate(vk::CommandBuffer command, const Frame& frame) {
-    if (!impl->available || !impl->feature) {
+    if (!m_impl->m_is_available || !m_impl->m_feature) {
         return false;
     }
     const auto image = [](const Resource& r) {
@@ -312,23 +312,23 @@ bool Dlss::Evaluate(vk::CommandBuffer command, const Frame& frame) {
     };
     const PsDlssEvaluate parameters{image(frame.color),  image(frame.depth), image(frame.motion),
                                     image(frame.output), frame.jitter_x,     frame.jitter_y,
-                                    frame.reset ? 1 : 0, frame.frame_ms,     frame.sharpness};
-    return impl->api->Evaluate(command, &parameters) != 0;
+                                    frame.should_reset ? 1 : 0, frame.frame_ms,     frame.sharpness};
+    return m_impl->m_p_api->Evaluate(command, &parameters) != 0;
 }
 
 void Dlss::ReleaseFeature() {
-    impl->feature.reset();
-    if (impl->api) {
-        impl->api->ReleaseFeature();
+    m_impl->m_feature.reset();
+    if (m_impl->m_p_api) {
+        m_impl->m_p_api->ReleaseFeature();
     }
 }
 
 void Dlss::Shutdown() {
-    impl->available = false;
-    impl->feature.reset();
-    if (impl->api && impl->initialized) {
-        impl->api->Shutdown();
-        impl->initialized = false;
+    m_impl->m_is_available = false;
+    m_impl->m_feature.reset();
+    if (m_impl->m_p_api && m_impl->m_is_initialized) {
+        m_impl->m_p_api->Shutdown();
+        m_impl->m_is_initialized = false;
     }
 }
 

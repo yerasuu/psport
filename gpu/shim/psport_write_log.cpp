@@ -14,15 +14,15 @@
 namespace PsWriteLog {
 namespace {
 struct Entry {
-    std::uint64_t address, size, first, tsc;
+    std::uint64_t va_range, cb_range, first, tsc;
     std::uint32_t source, tid;
 };
 constexpr std::size_t Size = 1 << 20;
-std::array<Entry, Size> ring;
-std::atomic<std::uint64_t> head{0};
+std::array<Entry, Size> s_ring;
+std::atomic<std::uint64_t> s_head{0};
 // Writes that contained the suspicious qword (see Note), with the exact address.
-std::array<Entry, 256> hits;
-std::atomic<std::uint64_t> hits_head{0};
+std::array<Entry, 256> s_hits;
+std::atomic<std::uint64_t> s_hits_head{0};
 constexpr std::uint64_t Pattern = 0x0000005300000000ull;
 
 void Push(std::array<Entry, Size>& r, std::atomic<std::uint64_t>& h, const Entry& e) {
@@ -30,91 +30,91 @@ void Push(std::array<Entry, Size>& r, std::atomic<std::uint64_t>& h, const Entry
 }
 } // namespace
 
-void Record(std::uint64_t address, const void* data, std::uint64_t size, Source source);
+void Record(std::uint64_t va_range, const void* p_data, std::uint64_t cb_range, Source source);
 
 int Mode() {
-    static const int mode = [] {
-        const char* env = std::getenv("PS_WRITE_LOG");
-        return env ? std::atoi(env) : 0;
+    static const int s_mode = [] {
+        const char* sz_env = std::getenv("PS_WRITE_LOG");
+        return sz_env ? std::atoi(sz_env) : 0;
     }();
-    return mode;
+    return s_mode;
 }
 
 bool Enabled() {
     return Mode() == 1;
 }
 
-void NoteIntent(std::uint64_t address, const void* data, std::uint64_t size, Source source) {
+void NoteIntent(std::uint64_t va_range, const void* p_data, std::uint64_t cb_range, Source source) {
     if (Mode() == 2) {
-        Record(address, data, size, source);
+        Record(va_range, p_data, cb_range, source);
     }
 }
 
-void Note(std::uint64_t address, const void* data, std::uint64_t size, Source source) {
+void Note(std::uint64_t va_range, const void* p_data, std::uint64_t cb_range, Source source) {
     if (Enabled()) {
-        Record(address, data, size, source);
+        Record(va_range, p_data, cb_range, source);
     }
 }
 
-void Record(std::uint64_t address, const void* data, std::uint64_t size, Source source) {
-    static thread_local const std::uint32_t tid = static_cast<std::uint32_t>(gettid());
-    Entry e{address, size, 0, __rdtsc(), source, tid};
-    std::memcpy(&e.first, data, size < 8 ? size : 8);
-    Push(ring, head, e);
+void Record(std::uint64_t va_range, const void* p_data, std::uint64_t cb_range, Source source) {
+    static thread_local const std::uint32_t s_tid = static_cast<std::uint32_t>(gettid());
+    Entry e{va_range, cb_range, 0, __rdtsc(), source, s_tid};
+    std::memcpy(&e.first, p_data, cb_range < 8 ? cb_range : 8);
+    Push(s_ring, s_head, e);
     // Only small writes are scanned: scanning downloads of megabytes delays them enough to hide
     // the race this log is for.
-    if (size > 64) {
+    if (cb_range > 64) {
         return;
     }
-    const auto* bytes = static_cast<const unsigned char*>(data);
-    for (std::uint64_t at = (8 - (address & 7)) & 7; at + 8 <= size; at += 8) {
+    const auto* p_bytes = static_cast<const unsigned char*>(p_data);
+    for (std::uint64_t at = (8 - (va_range & 7)) & 7; at + 8 <= cb_range; at += 8) {
         std::uint64_t v;
-        std::memcpy(&v, bytes + at, 8);
+        std::memcpy(&v, p_bytes + at, 8);
         if (v == Pattern) {
             Entry hit = e;
-            hit.address = address + at;
+            hit.va_range = va_range + at;
             hit.first = v;
-            hits[hits_head.fetch_add(1, std::memory_order_relaxed) % hits.size()] = hit;
+            s_hits[s_hits_head.fetch_add(1, std::memory_order_relaxed) % s_hits.size()] = hit;
         }
     }
 }
-void DumpRange(std::uint64_t address, std::uint64_t size) {
+void DumpRange(std::uint64_t va_range, std::uint64_t cb_range) {
     if (Mode() == 0) {
         std::fprintf(stderr, "Write log: off (PS_WRITE_LOG=1 lists the writes into this range)\n");
         return;
     }
     const char* sources[] = {"backing",      "WriteData",           "fence",
                              "EOP (decoded)", "WriteData (decoded)", "EOS (decoded)", "DmaData"};
-    const std::uint64_t now = __rdtsc(), n = head.load();
-    int shown = 0;
-    for (std::uint64_t i = n; i-- > (n > Size ? n - Size : 0) && shown < 64;) {
-        const Entry& e = ring[i % Size];
-        if (e.address < address + size && address < e.address + e.size) {
+    const std::uint64_t now = __rdtsc(), c_entries = s_head.load();
+    int c_shown = 0;
+    for (std::uint64_t i = c_entries; i-- > (c_entries > Size ? c_entries - Size : 0) && c_shown < 64;) {
+        const Entry& e = s_ring[i % Size];
+        if (e.va_range < va_range + cb_range && va_range < e.va_range + e.cb_range) {
             std::fprintf(stderr,
                          "Write log: into range %s %#llx +%llu first %#llx tid %u, %.3f s before\n",
-                         e.source < 7 ? sources[e.source] : "?", (unsigned long long)e.address,
-                         (unsigned long long)e.size, (unsigned long long)e.first, e.tid,
+                         e.source < 7 ? sources[e.source] : "?", (unsigned long long)e.va_range,
+                         (unsigned long long)e.cb_range, (unsigned long long)e.first, e.tid,
                          double(now - e.tsc) / 3.0e9);
-            ++shown;
+            ++c_shown;
         }
     }
-    std::fprintf(stderr, "Write log: %d of %llu logged writes in %#llx +%llu\n", shown,
-                 (unsigned long long)n, (unsigned long long)address, (unsigned long long)size);
+    std::fprintf(stderr, "Write log: %d of %llu logged writes in %#llx +%llu\n", c_shown,
+                 (unsigned long long)c_entries, (unsigned long long)va_range, (unsigned long long)cb_range);
 }
 } // namespace PsWriteLog
 
-extern "C" void psport_gpu_dump_guest_writes(void* ucontext) {
+extern "C" void psport_gpu_dump_guest_writes(void* p_ucontext) {
     using namespace PsWriteLog;
-    const auto* uc = static_cast<const ucontext_t*>(ucontext);
-    const auto* g = uc->uc_mcontext.gregs;
-    PsFreeCheck::DumpAtFault(std::uint64_t(g[REG_RAX]), std::uint64_t(g[REG_R14]));
+    const auto* p_signal_context = static_cast<const ucontext_t*>(p_ucontext);
+    const auto* p_registers = p_signal_context->uc_mcontext.gregs;
+    PsFreeCheck::DumpAtFault(std::uint64_t(p_registers[REG_RAX]), std::uint64_t(p_registers[REG_R14]));
     if (Mode() == 0) {
         return;
     }
-    const std::uint64_t regs[] = {std::uint64_t(g[REG_RAX]), std::uint64_t(g[REG_RBX]),
-                                  std::uint64_t(g[REG_RCX]), std::uint64_t(g[REG_RDX]),
-                                  std::uint64_t(g[REG_RSI]), std::uint64_t(g[REG_RDI]),
-                                  std::uint64_t(g[REG_R14]), std::uint64_t(g[REG_R15])};
+    const std::uint64_t regs[] = {std::uint64_t(p_registers[REG_RAX]), std::uint64_t(p_registers[REG_RBX]),
+                                  std::uint64_t(p_registers[REG_RCX]), std::uint64_t(p_registers[REG_RDX]),
+                                  std::uint64_t(p_registers[REG_RSI]), std::uint64_t(p_registers[REG_RDI]),
+                                  std::uint64_t(p_registers[REG_R14]), std::uint64_t(p_registers[REG_R15])};
     const char* names[] = {"rax", "rbx", "rcx", "rdx", "rsi", "rdi", "r14", "r15"};
     for (int i = 0; i < 8; ++i) {
         std::fprintf(stderr, "Write log: %s=%#llx\n", names[i], (unsigned long long)regs[i]);
@@ -122,16 +122,16 @@ extern "C" void psport_gpu_dump_guest_writes(void* ucontext) {
     const char* sources[] = {"backing",      "WriteData",           "fence",
                              "EOP (decoded)", "WriteData (decoded)", "EOS (decoded)", "DmaData"};
     const std::uint64_t now = __rdtsc();
-    const auto print = [&](const Entry& e, const char* what) {
+    const auto print = [&](const Entry& e, const char* sz_what) {
         std::fprintf(stderr,
                      "Write log: %s %s %#llx +%llu first %#llx tid %u, %.3f s before the fault\n",
-                     what, e.source < 7 ? sources[e.source] : "?", (unsigned long long)e.address,
-                     (unsigned long long)e.size, (unsigned long long)e.first, e.tid,
+                     sz_what, e.source < 7 ? sources[e.source] : "?", (unsigned long long)e.va_range,
+                     (unsigned long long)e.cb_range, (unsigned long long)e.first, e.tid,
                      double(now - e.tsc) / 3.0e9);
     };
-    const std::uint64_t nh = hits_head.load();
-    for (std::uint64_t i = nh > hits.size() ? nh - hits.size() : 0; i < nh; ++i) {
-        print(hits[i % hits.size()], "pattern");
+    const std::uint64_t nh = s_hits_head.load();
+    for (std::uint64_t i = nh > s_hits.size() ? nh - s_hits.size() : 0; i < nh; ++i) {
+        print(s_hits[i % s_hits.size()], "pattern");
     }
     // The block the guest read (rax) and all logged writes into it or its neighbours.
     const std::uint64_t block = regs[0];
@@ -142,37 +142,37 @@ extern "C" void psport_gpu_dump_guest_writes(void* ucontext) {
                      (unsigned long long)value);
     }
     {
-        const std::uint64_t n = head.load();
-        int shown = 0;
-        for (std::uint64_t i = n; i-- > (n > Size ? n - Size : 0) && shown < 200;) {
-            const Entry& e = ring[i % Size];
-            if (e.address + e.size > block - 0x30 && e.address < block + 0x60) {
+        const std::uint64_t c_entries = s_head.load();
+        int c_shown = 0;
+        for (std::uint64_t i = c_entries; i-- > (c_entries > Size ? c_entries - Size : 0) && c_shown < 200;) {
+            const Entry& e = s_ring[i % Size];
+            if (e.va_range + e.cb_range > block - 0x30 && e.va_range < block + 0x60) {
                 print(e, "in block");
-                ++shown;
+                ++c_shown;
             }
         }
-        shown = 0;
-        for (std::uint64_t i = n; i-- > (n > Size ? n - Size : 0) && shown < 40;) {
-            const Entry& e = ring[i % Size];
+        c_shown = 0;
+        for (std::uint64_t i = c_entries; i-- > (c_entries > Size ? c_entries - Size : 0) && c_shown < 40;) {
+            const Entry& e = s_ring[i % Size];
             if ((e.first & 0xffffffffull) == 0x53 || (e.first >> 32) == 0x53) {
                 print(e, "value 0x53");
-                ++shown;
+                ++c_shown;
             }
         }
     }
     // Writes that cover the chunk header the guest read (rax..rax+0x40) or the registers.
-    const std::uint64_t n = head.load();
-    int shown = 0;
-    for (std::uint64_t i = n; i-- > (n > Size ? n - Size : 0) && shown < 64;) {
-        const Entry& e = ring[i % Size];
-        bool near = false;
+    const std::uint64_t c_entries = s_head.load();
+    int c_shown = 0;
+    for (std::uint64_t i = c_entries; i-- > (c_entries > Size ? c_entries - Size : 0) && c_shown < 64;) {
+        const Entry& e = s_ring[i % Size];
+        bool is_near = false;
         for (const auto r : regs) {
-            near |= r + 0x1000 > e.address && r < e.address + e.size + 0x1000;
+            is_near |= r + 0x1000 > e.va_range && r < e.va_range + e.cb_range + 0x1000;
         }
-        if (near) {
+        if (is_near) {
             print(e, "near");
-            ++shown;
+            ++c_shown;
         }
     }
-    std::fprintf(stderr, "Write log: %llu writes logged\n", (unsigned long long)n);
+    std::fprintf(stderr, "Write log: %llu writes logged\n", (unsigned long long)c_entries);
 }

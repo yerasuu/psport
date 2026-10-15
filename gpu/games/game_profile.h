@@ -33,12 +33,12 @@ struct LabelReleaseCode {
 };
 
 /// The game's small-object pool, for the free check (PS_FREE_CHECK, psport_free_check.h): 4 KiB
-/// pages, blocks of block_size from the page start, a header at page + header_offset (page list
+/// pages, blocks of cb_block from the page start, a header at page + off_header (page list
 /// next and prev, free list head and free count, a qword each), the free list linked through the
 /// first qword of each free block. A page has at most 128 blocks.
 struct SmallObjectPool {
-    std::uint64_t header_offset = 0;
-    std::uint64_t block_size = 0;
+    std::uint64_t off_header = 0;
+    std::uint64_t cb_block = 0;
 };
 
 /// The scene constants the camera motion vectors come from: a vertex shader constant buffer
@@ -93,7 +93,7 @@ struct UpscalerPlacement {
 /// What the core offers a profile's hooks.
 struct CoreServices {
     /// The game handed out GPU memory [address, address + size): what the GPU had there is dead.
-    void (*fresh_range)(std::uint64_t address, std::uint64_t size) = nullptr;
+    void (*pfn_fresh_range)(std::uint64_t va_range, std::uint64_t cb_range) = nullptr;
 };
 
 /// An overlay menu text in its languages (PsSettings::MenuText); all null for none.
@@ -104,7 +104,7 @@ struct LocalizedText {
 };
 
 /// A switch of the game's own patches: a psport.ini key (0 or 1) set in the overlay menu and the
-/// launcher, which add_patches reads at start, so a change applies after a restart.
+/// launcher, which pfn_add_patches reads at start, so a change applies after a restart.
 struct EffectSwitch {
     const char* sz_key = nullptr;
     LocalizedText label;
@@ -118,12 +118,12 @@ struct GameEffects {
     std::span<const EffectSwitch> switches;
     /// The model_lod choice of psport.ini (-2 highest .. 2 lowest, 0 the game's).
     bool has_model_detail = false;
-    /// After the section's note that the patches apply at start (from patch_file).
+    /// After the section's note that the patches apply at start (from sz_patch_file).
     LocalizedText hint;
 };
 
 struct Profile {
-    const char* name = nullptr;
+    const char* sz_name = nullptr;
     /// The param.sfo TITLE_IDs it is for (one executable: patch files and mod folders named after
     /// any of them apply to all).
     std::span<const char* const> serials;
@@ -132,44 +132,44 @@ struct Profile {
     std::span<const char* const> mod_folders;
     /// Its own patch file (shadPS4 XML), relative to psport's folder; external patch folders leave
     /// it out.
-    const char* patch_file = nullptr;
+    const char* sz_patch_file = nullptr;
     /// Before anything of the game runs, before psport_gpu_init: environment defaults it chooses.
-    void (*prepare_environment)() = nullptr;
+    void (*pfn_prepare_environment)() = nullptr;
     /// Checks the game's files before any of its code runs (PS_SKIP_GAME_CHECK=1 is its own to
     /// honour): false when they cannot work, with a short kind for launchers and what to do.
-    bool (*check_files)(const PsGameFiles& game, std::string& kind, std::string& advice) = nullptr;
+    bool (*pfn_check_files)(const PsGameFiles& game, std::string& kind, std::string& advice) = nullptr;
     /// Its own patches of the executable, chosen by the player's settings, appended through
     /// services before the external ones; false stops the launch (it printed why).
-    bool (*add_patches)(const PsGameFiles& game, const PsPatchServices& services) = nullptr;
-    /// The settings of add_patches the player changes in the overlay menu.
+    bool (*pfn_add_patches)(const PsGameFiles& game, const PsPatchServices& services) = nullptr;
+    /// The settings of pfn_add_patches the player changes in the overlay menu.
     GameEffects effects;
     /// Hooks in the game's code (each checks the bytes it replaces: another build of the game is
     /// left alone). They make the core learn of writes sooner; it does not depend on them for
     /// what it shows (write traps catch what nobody announces).
-    void (*install_hooks)(const CoreServices& services) = nullptr;
+    void (*pfn_install_hooks)(const CoreServices& services) = nullptr;
     /// Patches the game's code once, before any of it runs, while the image is still writable
     /// (each patch checks the bytes it replaces, as the hooks do).
-    void (*patch_image)(unsigned char* image, std::uint64_t size) = nullptr;
+    void (*pfn_patch_image)(unsigned char* p_image, std::uint64_t cb_range) = nullptr;
     /// Guest code known to write per-frame data into GPU memory: the blocks it writes stay in
     /// the game's memory from its first write instead of after a few frames.
     std::span<const CodeRange> dynamic_writers;
     /// Changes to the user's saves the game needs, made before any of its code runs. saves is the
-    /// folder holding one folder per user, each with the game's saves under save_title.
-    void (*prepare_saves)(const char* saves, const char* save_title) = nullptr;
+    /// folder holding one folder per user, each with the game's saves under sz_save_title.
+    void (*pfn_prepare_saves)(const char* sz_saves, const char* sz_save_title) = nullptr;
     /// A compute shader (GCN program hash) that only copies buffers, into memory the translator
     /// reads on the CPU: its stores go through to the game's memory; 0 = none known.
     std::uint64_t buffer_copy_shader = 0;
     /// The core's GnmDriver wrote packets into command buffer space the game reserved,
     /// [commands, commands + dwords) (the packets end at the first zero dword). Called on the
     /// game's thread after each such sceGnm call returns its packets; it must not write them.
-    void (*driver_commands_written)(std::uint32_t* commands, std::uint64_t dwords) = nullptr;
+    void (*pfn_driver_commands_written)(std::uint32_t* p_commands, std::uint64_t dwords) = nullptr;
     /// The game submitted [commands, commands + dwords) (each DCB and CCB of a submission, on the
     /// submitting thread, before the core translates it); it must not write them.
-    void (*commands_submitted)(const std::uint32_t* commands, std::uint64_t dwords) = nullptr;
+    void (*pfn_commands_submitted)(const std::uint32_t* p_commands, std::uint64_t dwords) = nullptr;
     /// Once a frame while frames overlap (PS_SUBMIT_AHEAD above 0), from sceGnmSubmitDone under
     /// the submission lock: true when the game shows it cannot take the overlap, with why in
     /// reason (a NUL-terminated phrase that fits in size); the core then stops it for the session.
-    bool (*frame_overlap_unsafe)(char* reason, std::size_t size) = nullptr;
+    bool (*pfn_frame_overlap_unsafe)(char* sz_reason, std::size_t cb_range) = nullptr;
     /// Submissions of a frame that go to the GPU before it has finished the frame before
     /// (PS_SUBMIT_AHEAD, which overrides it). Only for a game whose first c_submits_ahead
     /// submissions of a frame never touch what the previous frame's GPU work still uses; 0, the
@@ -183,10 +183,10 @@ struct Profile {
     UpscalerPlacement upscaler;
     /// With each frame statistics report (PS_FRAME_STATS, the video out thread): the profile's
     /// own diagnostics.
-    void (*report_stats)() = nullptr;
+    void (*pfn_report_stats)() = nullptr;
     /// Each presented frame, on the presenter thread before the overlay is drawn: what the
     /// player changed in the game's own menus is applied here.
-    void (*before_present)() = nullptr;
+    void (*pfn_before_present)() = nullptr;
     /// The game's label release code; zeros when unknown, and the free check's breakpoints stay
     /// off.
     LabelReleaseCode label_release;
@@ -196,11 +196,11 @@ struct Profile {
 
 /// The profile for a TITLE_ID, whatever PS_GAME_PROFILE says: what it adds to the launch (its
 /// file check, its patches, its mod folders) is part of running the game, not an optimisation of the translator.
-const Profile* Find(const char* serial);
+const Profile* Find(const char* sz_serial);
 
 /// Chooses the profile for the game by its TITLE_ID (psport_gpu_init). PS_GAME_PROFILE=none runs the
 /// game as an unknown one (no profile), for checking the generic paths.
-void Select(const char* serial);
+void Select(const char* sz_serial);
 
 /// The active profile, or nullptr (an unknown game, or PS_GAME_PROFILE=none).
 const Profile* Active();
@@ -211,32 +211,32 @@ const Profile* Launched();
 
 /// The running title's effects (Launched), or none.
 inline GameEffects Effects() {
-    const Profile* profile = Launched();
-    return profile ? profile->effects : GameEffects{};
+    const Profile* p_profile = Launched();
+    return p_profile ? p_profile->effects : GameEffects{};
 }
 
 /// The active profile's buffer copy shader, or 0.
 inline std::uint64_t BufferCopyShader() {
-    const Profile* profile = Active();
-    return profile ? profile->buffer_copy_shader : 0;
+    const Profile* p_profile = Active();
+    return p_profile ? p_profile->buffer_copy_shader : 0;
 }
 
 /// The active profile's frame overlap (Profile::c_submits_ahead), or 0.
 inline std::uint32_t SubmitsAhead() {
-    const Profile* profile = Active();
-    return profile ? profile->c_submits_ahead : 0;
+    const Profile* p_profile = Active();
+    return p_profile ? p_profile->c_submits_ahead : 0;
 }
 
 /// The active profile's forced anisotropy, or 0.
 inline std::uint32_t Anisotropy() {
-    const Profile* profile = Active();
-    return profile ? profile->anisotropy : 0;
+    const Profile* p_profile = Active();
+    return p_profile ? p_profile->anisotropy : 0;
 }
 
 /// The active profile's upscaler placement and motion data, or zeros.
 inline UpscalerPlacement Upscaler() {
-    const Profile* profile = Active();
-    return profile ? profile->upscaler : UpscalerPlacement{};
+    const Profile* p_profile = Active();
+    return p_profile ? p_profile->upscaler : UpscalerPlacement{};
 }
 
 /// Whether guest_rip is in code the active profile knows to write per-frame data.

@@ -42,9 +42,9 @@ public:
                      VideoCore::BufferCache& buffer_cache);
     ~OcclusionQueries();
 
-    /// A ZPASS_DONE event writing the counters of `pairs` depth blocks at `address` (recording
+    /// A ZPASS_DONE event writing the counters of `pairs` depth blocks at `va_guest` (recording
     /// thread, in stream order).
-    void Event(VAddr address, u32 pairs);
+    void Event(VAddr va_guest, u32 pairs);
 
     /// Before a label (an end-of-pipe write the CPU may poll): the events recorded before it are
     /// written first, as on the PS4, where the counters land in stream order ahead of later
@@ -54,26 +54,26 @@ public:
 
     /// Events so far (PS_PM4_SELFTEST and the frame stats).
     u64 Events() const noexcept {
-        return events;
+        return m_c_events;
     }
 
     /// PS_OCCLUSION_READ_TRACE=1 (diagnostics): a page with counters is no access after an event
     /// there until the game's first access, which comes here from the fault handler (any thread):
     /// whether the event's results were on the CPU by then. False: not such a page.
-    bool OnAccess(VAddr address, u64 rip, bool write, bool gpu_thread);
+    bool OnAccess(VAddr va_guest, u64 rip, bool is_write, bool is_gpu_thread);
 
-    void Suspend(bool inside_render_pass) override;
-    void Resume(bool inside_render_pass) override;
+    void Suspend(bool is_inside_render_pass) override;
+    void Resume(bool is_inside_render_pass) override;
 
 private:
     static constexpr u32 NumSlots = 4096;
     static constexpr u32 ResetBatch = 512;
 
     struct Pending {
-        u64 address; ///< device address of the first counter
+        u64 va_counter; ///< device address of the first counter
         u32 pairs;
         u64 upto; ///< segments ended before the event
-        VAddr guest_address = 0; ///< statistics (written_at)
+        VAddr va_guest = 0; ///< statistics (m_written_at)
         u64 id = 0;              ///< the event's number (PS_OCCLUSION_READ_TRACE)
     };
     /// An event on a page watched for the game's first access (PS_OCCLUSION_READ_TRACE).
@@ -83,50 +83,50 @@ private:
         std::chrono::steady_clock::time_point at;
     };
     static bool ReadTrace();
-    void WatchReads(VAddr address, u64 id);
-    void NoteResolved(VAddr address, u64 id, u64 tick);
+    void WatchReads(VAddr va_guest, u64 id);
+    void NoteResolved(VAddr va_guest, u64 id, u64 tick);
     void PrintReadTrace();
 
-    void BeginSegment(bool inside_render_pass);
+    void BeginSegment(bool is_inside_render_pass);
     void EndSegment();
     /// Outside a render pass: the ended segments added up, the pending events written.
     void Resolve();
     /// Outside a render pass: query slots reset ahead of the segments that will use them.
     void ResetAhead();
 
-    const Instance& instance;
-    Scheduler& scheduler;
-    VideoCore::BufferCache& buffer_cache;
-    std::recursive_mutex mutex;
-    vk::UniqueQueryPool pool;
-    std::unique_ptr<VideoCore::Buffer> results; ///< segment results copied for the resolve
-    std::unique_ptr<VideoCore::Buffer> total;   ///< the running sample count (64-bit)
-    vk::UniqueDescriptorSetLayout set_layout;
-    vk::UniquePipelineLayout pipeline_layout;
-    vk::UniquePipeline pipeline;
-    std::vector<Pending> pending;
-    u64 begun = 0;       ///< segments begun (the next one uses slot begun % NumSlots)
-    u64 resolved = 0;    ///< segments added to the total
-    u64 reset_until = 0; ///< slots below it (absolute) are reset and unused
-    bool active = false;
-    bool started = false; ///< the game has used occlusion queries
-    bool total_cleared = false;
-    u64 events = 0;
-    u64 starved = 0; ///< segments not begun in a render pass for want of a reset slot
-    u64 labels_ahead = 0, labels_ahead_in_pass = 0; ///< statistics (NoteLabel)
+    const Instance& m_instance;
+    Scheduler& m_scheduler;
+    VideoCore::BufferCache& m_buffer_cache;
+    std::recursive_mutex m_mutex;
+    vk::UniqueQueryPool m_pool;
+    std::unique_ptr<VideoCore::Buffer> m_results; ///< segment results copied for the resolve
+    std::unique_ptr<VideoCore::Buffer> m_total;   ///< the running sample count (64-bit)
+    vk::UniqueDescriptorSetLayout m_set_layout;
+    vk::UniquePipelineLayout m_pipeline_layout;
+    vk::UniquePipeline m_pipeline;
+    std::vector<Pending> m_pending;
+    u64 m_begun = 0;       ///< segments begun (the next one uses slot begun % NumSlots)
+    u64 m_resolved = 0;    ///< segments added to the total
+    u64 m_reset_until = 0; ///< slots below it (absolute) are reset and unused
+    bool m_is_active = false;
+    bool m_has_started = false; ///< the game has used occlusion queries
+    bool m_is_total_cleared = false;
+    u64 m_c_events = 0;
+    u64 m_c_starved = 0; ///< segments not begun in a render pass for want of a reset slot
+    u64 m_c_labels_ahead = 0, m_c_labels_ahead_in_pass = 0; ///< statistics (NoteLabel)
     /// Statistics: counters the game reused (a new event at the address) while the GPU had not yet
     /// written their previous results (the game saw them not ready), of all reuses.
-    std::unordered_map<u64, u64> written_at; ///< counter address -> tick of the resolve writing it
-    u64 reused = 0, reused_late = 0;
-    u64 queries_hidden = 0, queries_passed = 0, queries_invalid = 0; ///< statistics
+    std::unordered_map<u64, u64> m_written_at; ///< counter address -> tick of the resolve writing it
+    u64 m_c_reused = 0, m_c_reused_late = 0;
+    u64 m_c_queries_hidden = 0, m_c_queries_passed = 0, m_c_queries_invalid = 0; ///< statistics
     /// PS_OCCLUSION_READ_TRACE: watched pages (page -> events since its last access) and what the
     /// accesses found: results not recorded yet, recorded but the GPU not there, on the CPU.
-    std::mutex watch_mutex;
-    std::unordered_map<u64, std::vector<Watched>> watched;
-    std::array<u64, 3> access_state{};
-    std::array<u64, 5> access_age{}; ///< ms after the event: <2, <5, <10, <20, more
-    std::unordered_map<u64, u64> access_rips;
-    u64 accesses = 0, accesses_by_port = 0, access_writes = 0;
+    std::mutex m_watch_mutex;
+    std::unordered_map<u64, std::vector<Watched>> m_watched;
+    std::array<u64, 3> m_access_state{};
+    std::array<u64, 5> m_access_age{}; ///< ms after the event: <2, <5, <10, <20, more
+    std::unordered_map<u64, u64> m_access_rips;
+    u64 m_c_accesses = 0, m_c_accesses_by_port = 0, m_c_access_writes = 0;
 };
 
 } // namespace Vulkan

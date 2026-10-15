@@ -26,74 +26,74 @@ namespace PsCp {
 class RegisterFile {
 public:
     RegisterFile()
-        : storage{std::make_unique<std::array<u32, Bank::End>>()}, words{storage->data()} {
-        storage->fill(0);
+        : m_storage{std::make_unique<std::array<u32, Bank::End>>()}, m_p_words{m_storage->data()} {
+        m_storage->fill(0);
     }
-    explicit RegisterFile(std::span<u32, Bank::End> external) : words{external.data()} {}
+    explicit RegisterFile(std::span<u32, Bank::End> external) : m_p_words{external.data()} {}
 
-    u32 operator[](u32 index) const {
-        return index < Bank::End ? words[index] : 0;
+    u32 operator[](u32 i_register) const {
+        return i_register < Bank::End ? m_p_words[i_register] : 0;
     }
     std::span<const u32> Words() const {
-        return {words, Bank::End};
+        return {m_p_words, Bank::End};
     }
 
     /// `values` into [index, index + size), clipped to the file; the words written.
-    u32 Write(u32 index, std::span<const u32> values) {
-        if (index >= Bank::End) {
+    u32 Write(u32 i_register, std::span<const u32> values) {
+        if (i_register >= Bank::End) {
             return 0;
         }
-        const u32 count = static_cast<u32>(std::min<size_t>(values.size(), Bank::End - index));
-        std::memcpy(&words[index], values.data(), count * sizeof(u32));
-        return count;
+        const u32 c_values = static_cast<u32>(std::min<size_t>(values.size(), Bank::End - i_register));
+        std::memcpy(&m_p_words[i_register], values.data(), c_values * sizeof(u32));
+        return c_values;
     }
-    u32 Write(u32 index, u32 value) {
-        return Write(index, std::span{&value, 1});
+    u32 Write(u32 i_register, u32 value) {
+        return Write(i_register, std::span{&value, 1});
     }
     /// The bits of `mask` from `value`, the others kept.
-    u32 WriteBits(u32 index, u32 value, u32 mask) {
-        if (index >= Bank::End) {
+    u32 WriteBits(u32 i_register, u32 value, u32 mask) {
+        if (i_register >= Bank::End) {
             return 0;
         }
-        words[index] = (words[index] & ~mask) | (value & mask);
+        m_p_words[i_register] = (m_p_words[i_register] & ~mask) | (value & mask);
         return 1;
     }
 
     /// The state CLEAR_STATE restores (the hardware's defaults; set by the owner).
     void SetDefaults(std::span<const u32> values) {
-        if (!defaults) {
-            defaults = std::make_unique<std::array<u32, Bank::End>>();
-            defaults->fill(0);
+        if (!m_defaults) {
+            m_defaults = std::make_unique<std::array<u32, Bank::End>>();
+            m_defaults->fill(0);
         }
-        const size_t count = std::min<size_t>(values.size(), Bank::End);
-        std::memcpy(defaults->data(), values.data(), count * sizeof(u32));
+        const size_t c_values = std::min<size_t>(values.size(), Bank::End);
+        std::memcpy(m_defaults->data(), values.data(), c_values * sizeof(u32));
     }
     void ClearState() {
-        if (defaults) {
-            std::memcpy(words, defaults->data(), Bank::End * sizeof(u32));
+        if (m_defaults) {
+            std::memcpy(m_p_words, m_defaults->data(), Bank::End * sizeof(u32));
         } else {
-            std::memset(words, 0, Bank::End * sizeof(u32));
+            std::memset(m_p_words, 0, Bank::End * sizeof(u32));
         }
     }
 
 private:
-    std::unique_ptr<std::array<u32, Bank::End>> storage;
-    u32* words;
-    std::unique_ptr<std::array<u32, Bank::End>> defaults;
+    std::unique_ptr<std::array<u32, Bank::End>> m_storage;
+    u32* m_p_words;
+    std::unique_ptr<std::array<u32, Bank::End>> m_defaults;
 };
 
 /// A packet as decoded: its header and body (the dwords after the header).
 struct Packet {
-    Header header;
-    std::span<const u32> body;
-    int depth; ///< 0: the submitted buffer, 1: an indirect buffer in it, ...
+    Header m_header;
+    std::span<const u32> m_body;
+    int m_depth; ///< 0: the submitted buffer, 1: an indirect buffer in it, ...
 
     Op Opcode() const {
-        return header.Opcode();
+        return m_header.Opcode();
     }
     /// Dword `i` of the body, or 0 past its end.
     u32 Word(size_t i) const {
-        return i < body.size() ? body[i] : 0;
+        return i < m_body.size() ? m_body[i] : 0;
     }
 };
 
@@ -110,18 +110,18 @@ enum class DrawKind : std::uint8_t {
 
 struct Draw {
     DrawKind kind;
-    u32 index_count;    ///< direct draws
-    u32 index_offset;   ///< DRAW_INDEX_OFFSET_2
+    u32 c_indexes;    ///< direct draws
+    u32 off_index;   ///< DRAW_INDEX_OFFSET_2
     u32 draw_initiator; ///< VGT_DRAW_INITIATOR
-    const Packet* packet;
+    const Packet* p_packet;
 };
 
 struct Dispatch {
-    bool indirect;
+    bool is_indirect;
     u32 x, y, z;     ///< thread groups (direct)
-    u32 data_offset; ///< indirect: the arguments' offset from the base set by SET_BASE
+    u32 off_data; ///< indirect: the arguments' offset from the base set by SET_BASE
     u32 dispatch_initiator;
-    const Packet* packet;
+    const Packet* p_packet;
 };
 
 /// What the decoder found, in stream order.
@@ -160,7 +160,7 @@ inline constexpr u32 ComputeShFirst = Bank::Sh + 0x200;
 
 /// A range of registers a packet wrote.
 struct RegisterWrite {
-    u32 index, count;
+    u32 m_i_first, m_c_registers;
     bool operator==(const RegisterWrite&) const = default;
 };
 
@@ -169,16 +169,16 @@ struct RegisterWrite {
 class RegisterObserver {
 public:
     virtual ~RegisterObserver() = default;
-    /// The whole packet (header first) and the ranges it wrote; `clear_state`: CLEAR_STATE, the
+    /// The whole packet (header first) and the ranges it wrote; `is_clear_state`: CLEAR_STATE, the
     /// whole file restored.
     virtual void OnRegisterPacket(std::span<const u32> words, std::span<const RegisterWrite> writes,
-                                  bool clear_state) = 0;
+                                  bool is_clear_state) = 0;
 };
 
 struct DecoderOptions {
     /// SET_SH_REG packets starting in the compute program range (ComputeShFirst, `compute_words`
     /// on) are left to the owner (a per-queue compute state), not written to the file.
-    bool compute_sh_to_owner = false;
+    bool is_compute_sh_to_owner = false;
     u32 compute_words = 0;
 };
 
@@ -187,19 +187,19 @@ public:
     Decoder() = default;
     /// Registers in the owner's storage.
     explicit Decoder(std::span<u32, Bank::End> storage, DecoderOptions options_ = {})
-        : registers{storage}, options{options_} {}
+        : m_registers{storage}, m_options{options_} {}
 
     RegisterFile& Registers() {
-        return registers;
+        return m_registers;
     }
     const DecodeStats& Stats() const {
-        return stats;
+        return m_stats;
     }
     void ResetStats() {
-        stats = {};
+        m_stats = {};
     }
     void SetObserver(RegisterObserver* observer_) {
-        observer = observer_;
+        m_p_observer = observer_;
     }
 
     /// Decodes `buffer` (a graphics command buffer, or an indirect buffer at `depth` > 0).
@@ -210,20 +210,20 @@ private:
     /// The register writes of a packet; false when it writes none.
     bool ApplyRegisters(const Packet& packet);
 
-    RegisterFile registers;
-    DecoderOptions options;
-    RegisterObserver* observer = nullptr;
-    DecodeStats stats;
+    RegisterFile m_registers;
+    DecoderOptions m_options;
+    RegisterObserver* m_p_observer = nullptr;
+    DecodeStats m_stats;
 };
 
 /// The packets of a buffer one at a time, in stream order, each with its register writes
 /// applied: for a loop that has to stop between packets (a wait that yields to other queues).
 class Cursor {
 public:
-    /// `descend`: indirect buffers are decoded in place (the IB packet, then its packets);
+    /// `should_descend`: indirect buffers are decoded in place (the IB packet, then its packets);
     /// else the caller gets the IB packet and decodes the buffer itself.
     Cursor(Decoder& decoder, std::span<const u32> buffer, Sink& sink, int depth = 0,
-           bool descend = true);
+           bool should_descend = true);
 
     /// The next type-3 packet (fillers skipped), valid until the next call; null at the end, or
     /// after a packet that cannot be decoded (told to the sink).
@@ -239,14 +239,14 @@ private:
         std::span<const u32> rest;
         int depth;
     };
-    Decoder& decoder;
-    Sink& sink;
-    bool descend;
-    std::vector<Level> levels;
-    u64 pending_address = 0; ///< an indirect buffer to descend into on the next call
-    u32 pending_dwords = 0;
-    bool pending = false;
-    Packet current{};
+    Decoder& m_decoder;
+    Sink& m_sink;
+    bool m_should_descend;
+    std::vector<Level> m_levels;
+    u64 m_va_pending = 0; ///< an indirect buffer to descend into on the next call
+    u32 m_pending_dwords = 0;
+    bool m_is_pending = false;
+    Packet m_current{};
 };
 
 } // namespace PsCp

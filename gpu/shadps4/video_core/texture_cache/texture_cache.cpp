@@ -876,7 +876,7 @@ void TextureCache::RefreshImage(Image& image) {
     if (False(image.flags & ImageFlagBits::Dirty) || image.info.num_samples > 1) {
         return;
     }
-    PsStats::Timer timer{PsStats::t_refresh};
+    PsStats::Timer timer{PsStats::g_t_refresh};
 
     RENDERER_TRACE;
     TRACE_HINT(fmt::format("{:x}:{:x}", image.info.guest_address, image.info.guest_size));
@@ -949,7 +949,7 @@ void TextureCache::RefreshImage(Image& image) {
             window_start = now;
         }
     }
-    PsStats::image_upload_bytes.fetch_add(image.info.guest_size, std::memory_order_relaxed);
+    PsStats::g_cb_image_upload.fetch_add(image.info.guest_size, std::memory_order_relaxed);
     boost::container::small_vector<vk::BufferImageCopy, 14> image_copies;
     for (u32 m = 0; m < num_mips; m++) {
         const u32 width = std::max(image.info.size.width >> m, 1u);
@@ -1023,16 +1023,16 @@ vk::Sampler TextureCache::GetSampler(const AmdGpu::Sampler& sampler,
 }
 
 void TextureCache::RegisterImage(ImageId image_id) {
-    PsStats::images_registered.fetch_add(1, std::memory_order_relaxed);
+    PsStats::g_images_registered.fetch_add(1, std::memory_order_relaxed);
     Image& image = slot_images[image_id];
     ASSERT_MSG(False(image.flags & ImageFlagBits::Registered),
                "Trying to register an already registered image");
     image.flags |= ImageFlagBits::Registered;
     ++registry_generation;
     total_used_memory += Common::AlignUp(image.info.guest_size, 1024);
-    PsStats::live_image_bytes.fetch_add(Common::AlignUp(image.info.guest_size, 1024),
+    PsStats::g_cb_live_image.fetch_add(Common::AlignUp(image.info.guest_size, 1024),
                                         std::memory_order_relaxed);
-    PsStats::live_images.fetch_add(1, std::memory_order_relaxed);
+    PsStats::g_c_live_images.fetch_add(1, std::memory_order_relaxed);
     image.lru_id = lru_cache.Insert(image_id, gc_tick);
     image.lru_touched_tick = gc_tick;
     ForEachPage(image.info.guest_address, image.info.guest_size,
@@ -1047,9 +1047,9 @@ void TextureCache::UnregisterImage(ImageId image_id) {
     ++registry_generation;
     lru_cache.Free(image.lru_id);
     total_used_memory -= Common::AlignUp(image.info.guest_size, 1024);
-    PsStats::live_image_bytes.fetch_sub(Common::AlignUp(image.info.guest_size, 1024),
+    PsStats::g_cb_live_image.fetch_sub(Common::AlignUp(image.info.guest_size, 1024),
                                         std::memory_order_relaxed);
-    PsStats::live_images.fetch_sub(1, std::memory_order_relaxed);
+    PsStats::g_c_live_images.fetch_sub(1, std::memory_order_relaxed);
     ForEachPage(image.info.guest_address, image.info.guest_size, [this, image_id](u64 page) {
         const auto page_it = page_table.find(page);
         if (page_it == nullptr) {
@@ -1196,9 +1196,9 @@ void TextureCache::GarbageCollectImages() {
             }
         }
     }
-    PsStats::gc_used_bytes.store(total_used_memory, std::memory_order_relaxed);
-    PsStats::gc_trigger_bytes.store(trigger_gc_memory, std::memory_order_relaxed);
-    PsStats::gc_critical_bytes.store(critical_gc_memory, std::memory_order_relaxed);
+    PsStats::g_cb_gc_used.store(total_used_memory, std::memory_order_relaxed);
+    PsStats::g_cb_gc_trigger.store(trigger_gc_memory, std::memory_order_relaxed);
+    PsStats::g_cb_gc_critical.store(critical_gc_memory, std::memory_order_relaxed);
     // psport: gc_tick (one per guest submission, hundreds a second) at each of the last 64
     // seconds, for ages in seconds. The usage compared is all of our VRAM, not only images: on a
     // discrete GPU it stays over the trigger, where an age of 16 ticks (~3 frames) evicted every
@@ -1218,7 +1218,7 @@ void TextureCache::GarbageCollectImages() {
                 vram_short_until.store(second + 2, std::memory_order_relaxed);
             }
         }
-        PsStats::coarse_second.store(u32(second), std::memory_order_relaxed);
+        PsStats::g_coarse_second.store(u32(second), std::memory_order_relaxed);
         gc_tick_at_second[second % gc_tick_at_second.size()] = gc_tick;
     }
     if (PsToggle::Disabled(PsToggle::TextureCollector)) {
@@ -1281,7 +1281,7 @@ void TextureCache::GarbageCollectImages() {
         // VRAM grew with every area visited up to the pressure mark (~10 GB on 16 GB).
         if ((tiled && download) || (download && !pressured)) {
             lru_cache.Touch(image.lru_id, gc_tick);
-            PsStats::gc_kept_images.fetch_add(1, std::memory_order_relaxed);
+            PsStats::g_c_gc_kept_images.fetch_add(1, std::memory_order_relaxed);
             return false;
         }
         --num_deletions;
@@ -1293,7 +1293,7 @@ void TextureCache::GarbageCollectImages() {
             ++gc_downloads;
         }
         ++gc_evictions;
-        PsStats::gc_freed_images.fetch_add(1, std::memory_order_relaxed);
+        PsStats::g_c_gc_freed_images.fetch_add(1, std::memory_order_relaxed);
         FreeImage(image_id);
         if (total_used_memory < critical_gc_memory) {
             if (aggresive) {

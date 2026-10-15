@@ -348,7 +348,7 @@ bool Rasterizer::WriteLabelOnGpu(VAddr address, u64 value, u32 num_bytes) {
     }
     // A VRAM copy of these bytes gets them too, at its next binding (as for CPU-written labels).
     buffer_cache.NoteLateCommandWrite(address, &value, num_bytes);
-    PsStats::gpu_labels.fetch_add(1, std::memory_order_relaxed);
+    PsStats::g_c_gpu_labels.fetch_add(1, std::memory_order_relaxed);
     // In stream order for WAIT_REG_MEM, and the submission policy (HasUnsubmittedSignals).
     SignalAfterGpu([] {}, address, value);
     return true;
@@ -410,7 +410,7 @@ void Rasterizer::SubmitForSignalsNow() {
         return;
     }
     if (gpu_idle) {
-        PsStats::idle_flushes.fetch_add(1, std::memory_order_relaxed);
+        PsStats::g_c_idle_flushes.fetch_add(1, std::memory_order_relaxed);
     }
     Flush();
 }
@@ -842,9 +842,9 @@ void Rasterizer::DrainDrawPipe(u32 reason, u32 line, const char* function) {
         draw_pipe->Drain(reason);
         return;
     }
-    const u64 before = draw_pipe->drain_cycles;
+    const u64 before = draw_pipe->m_drain_cycles;
     draw_pipe->Drain(reason);
-    if (const u64 waited = draw_pipe->drain_cycles - before) {
+    if (const u64 waited = draw_pipe->m_drain_cycles - before) {
         drain_sites[function][line] += waited;
     }
 }
@@ -943,10 +943,10 @@ void Rasterizer::CollectRingBindings(const Shader::Info& stage, const PreparedDr
                            boost::container::static_vector<RingBinding, Shader::NUM_BUFFERS>& out) {
     const PreparedStage* prepared_stage = nullptr;
     if (prepared && !PsToggle::Disabled(PsToggle::PreparedResources)) {
-        for (u32 i = 0; i < prepared->num_stages; ++i) {
+        for (u32 i = 0; i < prepared->c_stages; ++i) {
             const auto& candidate = prepared->stages[i];
-            if (&candidate.program->info == &stage &&
-                candidate.num_buffers == stage.buffers.size()) {
+            if (&candidate.p_program->info == &stage &&
+                candidate.c_buffers == stage.buffers.size()) {
                 prepared_stage = &candidate;
                 break;
             }
@@ -985,7 +985,7 @@ void Rasterizer::CollectRingBindings(const Shader::Info& stage, const PreparedDr
             }
             continue;
         }
-        const auto vsharp = prepared_stage ? prepared_stage->buffer_sharps[index]
+        const auto vsharp = prepared_stage ? prepared_stage->p_buffer_sharps[index]
                                            : desc.GetSharp(stage);
         const VAddr address = vsharp.base_address;
         if (address == 0 || vsharp.GetSize() == 0) {
@@ -1187,7 +1187,7 @@ void Rasterizer::PostDraw(const Pipeline* pipeline, const PreparedDraw* used_pre
     }
     size += AlignPacket(u32(vsharps.size() * sizeof(AmdGpu::Buffer)));
     const u32 interval = VerifyInterval();
-    const bool verify = interval && (draw_pipe->packets % interval) == 0;
+    const bool verify = interval && (draw_pipe->m_c_packets % interval) == 0;
     if (verify) {
         size += sizeof(AmdGpu::Regs);
     }
@@ -1380,12 +1380,12 @@ void Rasterizer::RunDrawPacket(void* context, const u8* data, u32 size) {
             // Pointers in the tables may be stale by now: a fault only skips the check.
             sigjmp_buf recover;
             if (sigsetjmp(recover, 0)) {
-                runtime_fault_recover = nullptr;
+                g_p_runtime_fault_recover = nullptr;
                 continue;
             }
-            runtime_fault_recover = &recover;
+            g_p_runtime_fault_recover = &recover;
             srt.walker_func(snapshot.user_data, flat.data());
-            runtime_fault_recover = nullptr;
+            g_p_runtime_fault_recover = nullptr;
             if (std::memcmp(flat.data(), snapshot.flat, snapshot.flat_size * sizeof(u32)) != 0) {
                 u32 first = 0, count = 0;
                 for (u32 w = 0; w < snapshot.flat_size; ++w) {
@@ -1455,7 +1455,7 @@ void Rasterizer::RunDrawPacket(void* context, const u8* data, u32 size) {
 
 void Rasterizer::PrintPipeStats() {
     static const bool stats = std::getenv("PS_FRAME_STATS") != nullptr;
-    if (!stats || (draw_pipe->packets & 1023) != 0) {
+    if (!stats || (draw_pipe->m_c_packets & 1023) != 0) {
         return;
     }
     static auto window = std::chrono::steady_clock::now();
@@ -1468,20 +1468,20 @@ void Rasterizer::PrintPipeStats() {
     }
     const u64 tsc = __rdtsc();
     const double cycles = double(tsc - last_tsc);
-    const u64 busy = draw_pipe->busy_cycles.load(std::memory_order_relaxed);
+    const u64 busy = draw_pipe->m_busy_cycles.load(std::memory_order_relaxed);
     std::printf("Draw pipe: %.0f draws/s pipelined, %.0f drains/s that waited, stage A waited "
                 "%.1f%%, stage B busy %.1f%%\n",
-                (draw_pipe->packets - last_packets) / seconds,
-                (draw_pipe->drains - last_drains) / seconds,
-                100.0 * (draw_pipe->drain_cycles - last_drain_cycles) / cycles,
+                (draw_pipe->m_c_packets - last_packets) / seconds,
+                (draw_pipe->m_c_drains - last_drains) / seconds,
+                100.0 * (draw_pipe->m_drain_cycles - last_drain_cycles) / cycles,
                 100.0 * (busy - last_busy) / cycles);
     std::printf("  drains by reason/s:");
     for (u32 r = 0; r < DrawPipe::NumReasons; ++r) {
-        if (const u64 n = draw_pipe->drains_by_reason[r]) {
+        if (const u64 n = draw_pipe->m_c_drains_by_reason[r]) {
             static constexpr const char* names[] = {"ConstRam", "commands", "compute",
                                                     "submission end", "draw", "rasterizer"};
-            const double share = 100.0 * draw_pipe->cycles_by_reason[r] / cycles;
-            draw_pipe->cycles_by_reason[r] = 0;
+            const double share = 100.0 * draw_pipe->m_cycles_by_reason[r] / cycles;
+            draw_pipe->m_cycles_by_reason[r] = 0;
             if (r < 256) {
                 std::printf(" %s=%.0f (%.1f%%)",
                             magic_enum::enum_name(AmdGpu::PM4ItOpcode(r)).data(), n / seconds,
@@ -1497,11 +1497,11 @@ void Rasterizer::PrintPipeStats() {
     }
     if (PsSections::Enabled()) {
         static std::array<u64, PsSections::Count> last_sections{};
-        const double packets = double(draw_pipe->packets - last_packets);
+        const double packets = double(draw_pipe->m_c_packets - last_packets);
         const double tsc_hz = cycles / seconds;
         std::printf("\n  stage B us per packet:");
         for (u32 s = 0; s < PsSections::Count; ++s) {
-            const u64 now_cycles = PsSections::cycles[s].load(std::memory_order_relaxed);
+            const u64 now_cycles = PsSections::g_cycles[s].load(std::memory_order_relaxed);
             if (packets > 0) {
                 std::printf(" %s %.2f", PsSections::Names[s],
                             1e6 * double(now_cycles - last_sections[s]) / tsc_hz / packets);
@@ -1536,12 +1536,12 @@ void Rasterizer::PrintPipeStats() {
     }
     std::printf("\n");
     drain_sites.clear();
-    draw_pipe->drains_by_reason = {};
+    draw_pipe->m_c_drains_by_reason = {};
     window = now;
     last_tsc = tsc;
-    last_packets = draw_pipe->packets;
-    last_drains = draw_pipe->drains;
-    last_drain_cycles = draw_pipe->drain_cycles;
+    last_packets = draw_pipe->m_c_packets;
+    last_drains = draw_pipe->m_c_drains;
+    last_drain_cycles = draw_pipe->m_drain_cycles;
     last_busy = busy;
 }
 
@@ -1569,7 +1569,7 @@ bool Rasterizer::FilterDrawPasses() const {
 
 void Rasterizer::Draw(bool is_indexed, u32 index_offset, const PreparedDraw* prepared) {
     RENDERER_TRACE;
-    PsStats::draws.fetch_add(1, std::memory_order_relaxed);
+    PsStats::g_c_draws.fetch_add(1, std::memory_order_relaxed);
 
     // psport: with the draw pipeline this thread only selects the pipeline and hands the draw
     // to the recording thread (DrawRecord there); draws FilterDraw handles itself run here.
@@ -1778,7 +1778,7 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
     }
     // psport (PS_PREUPLOAD): once a frame, guest GPU memory the CPU wrote and then left alone is
     // uploaded ahead of its use, PS_PREUPLOAD_MB (16) at most per frame.
-    if (const u32 frame = PsStats::frame_number.load(std::memory_order_relaxed);
+    if (const u32 frame = PsStats::g_frame_number.load(std::memory_order_relaxed);
         frame != preupload_frame) {
         preupload_frame = frame;
         BB_SECTION(Preupload);
@@ -1804,7 +1804,7 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
         NoteFrameStart();
         static const char* scene_debug = std::getenv("PS_SCENE_DEBUG");
         scene_debug_frame = scene_debug && std::remove(scene_debug) == 0;
-        scene_targets->debug = scene_debug_frame;
+        scene_targets->m_is_debug = scene_debug_frame;
     }
     bind_prepared = used_prepared;
     motion_draw = pipeline->GetGraphicsKey().motion_vectors;
@@ -1896,7 +1896,7 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
         if (!gated || object_motion->Moving({.shader = vs.pgm_hash,
                                              .geometry = motion_geometry,
                                              .indices = index_address,
-                                             .index_count = regs.num_indices,
+                                             .c_indexes = regs.num_indices,
                                              .instances = regs.num_instances.NumInstances(),
                                              .first_instance = first_instance},
                                             palette)) {
@@ -1932,7 +1932,7 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
                 .geometry = motion_geometry,
                 .indices = index_address,
                 .topology = topology,
-                .index_count = regs.num_indices,
+                .c_indexes = regs.num_indices,
                 .instances = regs.num_instances.NumInstances(),
                 .first_instance = first_instance,
                 .vertices = range,
@@ -2125,7 +2125,7 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
         .hash = {vs_crumb ? vs_crumb->pgm_hash : 0, ps_crumb ? ps_crumb->pgm_hash : 0},
         .program = {vs_crumb ? vs_crumb->ProgramBase() : 0,
                     ps_crumb ? ps_crumb->ProgramBase() : 0},
-        .address = indirect.args,
+        .va_arguments = indirect.args,
         .count = {max_count, stride, 0},
     };
     const vk::Buffer xfb_buffer = strmout.buffer ? strmout.buffer->Handle() : vk::Buffer{};
@@ -2164,7 +2164,7 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
 
 void Rasterizer::DispatchDirect() {
     RENDERER_TRACE;
-    PsStats::dispatches.fetch_add(1, std::memory_order_relaxed);
+    PsStats::g_c_dispatches.fetch_add(1, std::memory_order_relaxed);
     // psport: like draws, handed to the draw recording thread after the pipeline selection.
     const bool pipelined = UseDrawPipe() && !PsToggle::Disabled(PsToggle::PipelinedDispatch);
     if (!pipelined) {
@@ -2313,7 +2313,7 @@ void Rasterizer::DispatchIndirectRecord(const ComputePipeline* pipeline, VAddr a
         .kind = Breadcrumbs::Kind::DispatchIndirect,
         .hash = {cs_crumb.pgm_hash, 0},
         .program = {cs_crumb.ProgramBase(), 0},
-        .address = address,
+        .va_arguments = address,
         .count = {buffer_cache.IsInPlace(address, size) ? 1u : 0u, 0, 0},
         .args_slot = args_slot,
     };
@@ -2363,12 +2363,12 @@ const PreparedStage* Rasterizer::FindPreparedStage(const Shader::Info& stage) co
     if (!bind_prepared || PsToggle::Disabled(PsToggle::PreparedResources)) {
         return nullptr;
     }
-    for (u32 i = 0; i < bind_prepared->num_stages; ++i) {
+    for (u32 i = 0; i < bind_prepared->c_stages; ++i) {
         const auto& candidate = bind_prepared->stages[i];
-        if (&candidate.program->info == &stage &&
-            candidate.num_images == stage.images.size() &&
-            candidate.num_samplers == stage.samplers.size() &&
-            candidate.num_buffers == stage.buffers.size()) {
+        if (&candidate.p_program->info == &stage &&
+            candidate.c_images == stage.images.size() &&
+            candidate.c_samplers == stage.samplers.size() &&
+            candidate.c_buffers == stage.buffers.size()) {
             return &candidate;
         }
     }
@@ -2421,7 +2421,7 @@ bool Rasterizer::TexturesBindableOnHelper(const Shader::Info& stage,
             return false;
         }
         const auto tsharp =
-            prepared ? prepared->image_sharps[image_index] : image_desc.GetSharp(stage);
+            prepared ? prepared->p_image_sharps[image_index] : image_desc.GetSharp(stage);
         const auto data_fmt = tsharp.GetDataFmt();
         const auto num_fmt = tsharp.GetNumberFmt();
         if (tsharp.Address() == 0 || data_fmt == AmdGpu::DataFormat::FormatInvalid ||
@@ -2430,7 +2430,7 @@ bool Rasterizer::TexturesBindableOnHelper(const Shader::Info& stage,
             continue; // null descriptor
         }
         const auto& entry =
-            prepared ? CachedImageDescEntry(tsharp, image_desc, prepared->image_hashes[image_index])
+            prepared ? CachedImageDescEntry(tsharp, image_desc, prepared->p_image_hashes[image_index])
                      : CachedImageDescEntry(tsharp, image_desc);
         if (entry.found_generation != generation) {
             return false;
@@ -2634,9 +2634,9 @@ bool Rasterizer::BindResources(const Pipeline* pipeline) {
                         static_cast<unsigned long long>(helper_full),
                         static_cast<unsigned long long>(helper_partial),
                         static_cast<unsigned long long>(helper_serial),
-                        bind_helper.task_cycles.exchange(0) / forks,
-                        bind_helper.wait_cycles / forks);
-            bind_helper.wait_cycles = 0;
+                        bind_helper.m_task_cycles.exchange(0) / forks,
+                        bind_helper.m_wait_cycles / forks);
+            bind_helper.m_wait_cycles = 0;
             helper_full = helper_partial = helper_serial = 0;
         }
     }
@@ -2730,9 +2730,9 @@ bool Rasterizer::BindResources(const Pipeline* pipeline) {
 bool Rasterizer::ArePreparedVsharpsCurrent(const PreparedVertexInputs& inputs,
                                            const Shader::Gcn::FetchShaderData& fetch,
                                            const Shader::Info& vs) const {
-    const std::span prepared_vsharps{inputs.buffers, inputs.count};
+    const std::span prepared_vsharps{inputs.p_buffers, inputs.c_streams};
     const bool is_current =
-        packet_vsharps.size() == inputs.count
+        packet_vsharps.size() == inputs.c_streams
             ? std::ranges::equal(prepared_vsharps, packet_vsharps)
             : std::ranges::equal(prepared_vsharps, fetch.attributes, {}, {},
                                  [&](const auto& attrib) { return attrib.GetSharp(vs); });
@@ -2810,8 +2810,8 @@ void Rasterizer::ResolveVertexBuffers(const GraphicsPipeline* pipeline,
     // Inputs a draw-preparation worker read from the same registers and (verified) user data.
     const auto& fetch = pipeline->GetFetchShader();
     const PreparedVertexInputs* ready =
-        prepared && prepared->vertex.valid && instance.IsVertexInputDynamicState() && fetch &&
-                fetch->attributes.size() == prepared->vertex.count && !FrameCapture::Active() &&
+        prepared && prepared->vertex.is_valid && instance.IsVertexInputDynamicState() && fetch &&
+                fetch->attributes.size() == prepared->vertex.c_streams && !FrameCapture::Active() &&
                 !PsToggle::Disabled(PsToggle::PreparedResources)
             ? &prepared->vertex
             : nullptr;
@@ -2823,9 +2823,9 @@ void Rasterizer::ResolveVertexBuffers(const GraphicsPipeline* pipeline,
         ready = nullptr;
     }
     if (ready) {
-        attributes.assign(ready->attributes, ready->attributes + ready->count);
-        bindings.assign(ready->bindings, ready->bindings + ready->count);
-        guest_buffers.assign(ready->buffers, ready->buffers + ready->count);
+        attributes.assign(ready->p_attributes, ready->p_attributes + ready->c_streams);
+        bindings.assign(ready->p_bindings, ready->p_bindings + ready->c_streams);
+        guest_buffers.assign(ready->p_buffers, ready->p_buffers + ready->c_streams);
     } else {
         pipeline->GetVertexInputs(attributes, bindings, divisors, guest_buffers,
                                   regs.vgt_instance_step_rate_0, regs.vgt_instance_step_rate_1,
@@ -2885,8 +2885,8 @@ void Rasterizer::ResolveVertexBuffers(const GraphicsPipeline* pipeline,
     VertexInputs<BufferRange> ranges{};
     VertexInputs<BufferRange> ranges_merged{};
     if (ready) {
-        for (u32 i = 0; i < ready->num_ranges; ++i) {
-            ranges_merged.emplace_back(ready->ranges[i].base, ready->ranges[i].end);
+        for (u32 i = 0; i < ready->c_ranges; ++i) {
+            ranges_merged.emplace_back(ready->p_ranges[i].base, ready->p_ranges[i].end);
         }
     } else {
         for (const auto& buffer : guest_buffers) {
@@ -2929,7 +2929,7 @@ void Rasterizer::ResolveVertexBuffers(const GraphicsPipeline* pipeline,
     for (const auto& buffer : guest_buffers) {
         if (buffer.base_address != 0 && buffer.GetSize() > 0) {
             const auto host_buffer_info =
-                ready ? ranges_merged.begin() + ready->range_index[stream_with_memory++]
+                ready ? ranges_merged.begin() + ready->p_range_index[stream_with_memory++]
                       : std::ranges::find_if(ranges_merged, [&](const BufferRange& range) {
                             return buffer.base_address >= range.base_address &&
                                    buffer.base_address < range.end_address;
@@ -3308,7 +3308,7 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, const PreparedStage* pre
             }
         } else {
             const auto vsharp =
-                prepared ? prepared->buffer_sharps[buffer_index] : desc.GetSharp(stage);
+                prepared ? prepared->p_buffer_sharps[buffer_index] : desc.GetSharp(stage);
             if (gbuffer_draw && camera_motion->IsSceneConstants(vsharp.GetSize()) &&
                 memory->IsValidGpuMapping(vsharp.base_address, 0)) {
                 camera_motion->OnConstants(reinterpret_cast<const float*>(vsharp.base_address));
@@ -3348,7 +3348,7 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, const PreparedStage* pre
                                       (vsharp.base_address << 1) | u64(desc.is_written)}];
                     ++c.first;
                     c.second = vsharp.GetSize();
-                    const u32 now = PsStats::coarse_second.load(std::memory_order_relaxed);
+                    const u32 now = PsStats::g_coarse_second.load(std::memory_order_relaxed);
                     if (now - printed >= 5) {
                         printed = now;
                         for (const auto& [key, value] : counts) {
@@ -3492,7 +3492,7 @@ void Rasterizer::BindTextures(const Shader::Info& stage, const PreparedStage* pr
     for (u32 image_index = 0; image_index < stage.images.size(); ++image_index) {
         const auto& image_desc = stage.images[image_index];
         const auto tsharp =
-            prepared ? prepared->image_sharps[image_index] : image_desc.GetSharp(stage);
+            prepared ? prepared->p_image_sharps[image_index] : image_desc.GetSharp(stage);
         // psport: a hash lookup per texture per draw for a diagnostic only.
         static const bool warn_meta = std::getenv("PS_WARN_META_TEXTURE") != nullptr;
         if (warn_meta && texture_cache.IsMeta(tsharp.Address())) {
@@ -3534,7 +3534,7 @@ void Rasterizer::BindTextures(const Shader::Info& stage, const PreparedStage* pr
                                      mip_fallback_mode == Shader::MipStorageFallbackMode::None;
 
         auto& desc_entry =
-            prepared ? CachedImageDescEntry(tsharp, image_desc, prepared->image_hashes[image_index])
+            prepared ? CachedImageDescEntry(tsharp, image_desc, prepared->p_image_hashes[image_index])
                      : CachedImageDescEntry(tsharp, image_desc);
         // PS_SCENE_DEBUG: proxied scene targets this binding reads at the native size, and why.
         const auto debug_native = [&](const VideoCore::Image& image) {
@@ -3778,7 +3778,7 @@ void Rasterizer::BindSamplers(const Shader::Info& stage, const PreparedStage* pr
     for (u32 sampler_index = 0; sampler_index < stage.samplers.size(); ++sampler_index) {
         const auto& sampler = stage.samplers[sampler_index];
         auto ssharp =
-            prepared ? prepared->sampler_sharps[sampler_index] : sampler.GetSharp(stage);
+            prepared ? prepared->p_sampler_sharps[sampler_index] : sampler.GetSharp(stage);
         ForceAnisotropy(ssharp, sampler.is_depth);
         const auto vk_sampler = texture_cache.GetSampler(
             ssharp, Regs().ta_bc_base, sampler.is_depth, sampler.is_depth ? 0.0f : sampler_lod_bias);
@@ -3834,7 +3834,7 @@ bool Rasterizer::BindTexturesFromSet(const Shader::Info& stage, const PreparedSt
             return false;
         }
     }
-    u64 key = XXH3_64bits_withSeed(prepared->image_hashes, count * sizeof(u64),
+    u64 key = XXH3_64bits_withSeed(prepared->p_image_hashes, count * sizeof(u64),
                                    reinterpret_cast<u64>(&stage));
     key |= 1; // 0 marks an empty slot
     auto& set = texture_sets[key % texture_sets.size()];
@@ -3844,7 +3844,7 @@ bool Rasterizer::BindTexturesFromSet(const Shader::Info& stage, const PreparedSt
                        set.generation == generation &&
                        set.scene_generation == scene_targets->Generation() &&
                        std::equal(set.hashes.begin(), set.hashes.begin() + count,
-                                  prepared->image_hashes);
+                                  prepared->p_image_hashes);
     if (!match) {
         ++texture_set_why[set.key != key ? 0 : set.generation != generation ? 1 : 3];
         ++texture_set_misses;
@@ -3852,7 +3852,7 @@ bool Rasterizer::BindTexturesFromSet(const Shader::Info& stage, const PreparedSt
         set.stage = &stage;
         set.count = 0;
         set.generation = ~0ull;
-        std::copy_n(prepared->image_hashes, count, set.hashes.begin());
+        std::copy_n(prepared->p_image_hashes, count, set.hashes.begin());
         return false;
     }
     // Every image still has the backing its view belongs to and needs no refresh.
@@ -3912,7 +3912,7 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
     BB_SECTION(BeginRendering);
     // psport: RenderStateMemo (see BeginMemo).
     const bool memo_on = !PsToggle::Disabled(PsToggle::RenderStateMemo) && !FrameCapture::Active();
-    if (PsStats::enabled && ((begin_memo_hits + begin_memo_misses) & 0x3FFFF) == 0x3FFFF) {
+    if (PsStats::g_is_enabled && ((begin_memo_hits + begin_memo_misses) & 0x3FFFF) == 0x3FFFF) {
         std::printf("Render state memo: %llu hits, %llu misses; texture sets: %llu hits, %llu "
                     "misses\n",
                     static_cast<unsigned long long>(begin_memo_hits),
@@ -4039,9 +4039,9 @@ RenderState Rasterizer::BeginRenderingFull(const GraphicsPipeline* pipeline) {
         std::printf("Scene pass: reduced %d %s\n", reduced, why.c_str());
     }
     push_data.scene_size = reduced ? SceneResolution::Pack(scene_targets->Size()) : 0;
-    if (PsStats::enabled) {
-        PsStats::reduced_draws.fetch_add(reduced, std::memory_order_relaxed);
-        PsStats::scene_draws.fetch_add(scene_started, std::memory_order_relaxed);
+    if (PsStats::g_is_enabled) {
+        PsStats::g_c_reduced_draws.fetch_add(reduced, std::memory_order_relaxed);
+        PsStats::g_c_scene_draws.fetch_add(scene_started, std::memory_order_relaxed);
     }
     RenderState state;
     state.width = instance.GetMaxFramebufferWidth();
@@ -4244,7 +4244,7 @@ RenderState Rasterizer::BeginRenderingFull(const GraphicsPipeline* pipeline) {
             // A native viewport (or native window-space UI vertices) must not be doubled
             // again. The final display copy still uses the guest render-size coordinates.
             const auto& viewport = regs.viewports[0];
-            const bool native_coordinates = redirect.native_ui &&
+            const bool native_coordinates = redirect.is_native_ui &&
                 (UiComposition::NativeViewport(viewport.xscale * 2, viewport.yscale * 2) ||
                  (regs.IsClipDisabled() && !regs.viewport_control.xscale_enable &&
                   !regs.viewport_control.yscale_enable));
@@ -4465,8 +4465,8 @@ void Rasterizer::NoteCommandWrite(VAddr addr, const void* data, u64 size, bool r
 }
 
 void Rasterizer::OnCpuWrite(VAddr addr, u64 size) {
-    PsStats::cpu_write_notes.fetch_add(1, std::memory_order_relaxed);
-    PsStats::cpu_write_note_bytes.fetch_add(size, std::memory_order_relaxed);
+    PsStats::g_c_cpu_write_notes.fetch_add(1, std::memory_order_relaxed);
+    PsStats::g_cb_cpu_write_note.fetch_add(size, std::memory_order_relaxed);
     if (IsMapped(addr, size)) {
         InvalidateAfterWrite(addr, size);
         buffer_cache.NoteCpuWriteRange(addr, size);
@@ -4934,7 +4934,7 @@ void Rasterizer::NoteFrameStart() {
     if (auto* profiler = GpuProfiler::Get()) {
         profiler->BeginFrame();
     }
-    const u64 frame = PsStats::gpu_frames.fetch_add(1, std::memory_order_relaxed) + 1;
+    const u64 frame = PsStats::g_c_gpu_frames.fetch_add(1, std::memory_order_relaxed) + 1;
     // PS_BUFFER_STATS=1: how many earlier frames the GPU has not finished when the GPU thread
     // starts a frame — the lag that decides whether guest memory can be read in place.
     static const bool stats = [] {

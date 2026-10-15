@@ -16,24 +16,24 @@
 #define ERR(n) ((int32_t)(UINT32_C(0x80020000)|(n)))
 typedef struct Waiter {
     int32_t need, result;
-    int done;
+    int is_done;
     pthread_cond_t event;
-    struct Waiter *next;
+    struct Waiter *p_next;
 } Waiter;
 typedef struct Sema {
     uint32_t id, attr;
-    int32_t count, initial, maximum;
+    int32_t c_resources, c_initial, c_maximum;
     unsigned active;
     int deleted;
-    Waiter *first;
-    struct Sema *next;
+    Waiter *p_first;
+    struct Sema *p_next;
 } Sema;
-static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
-static Sema *registry;
-static uint32_t next_id=1;
-static size_t created, deleted, acquired, signaled, timed_out;
+static pthread_mutex_t s_lock=PTHREAD_MUTEX_INITIALIZER;
+static Sema *s_p_registry;
+static uint32_t s_next_id=1;
+static size_t s_c_created, s_c_deleted, s_c_acquired, s_c_signaled, s_c_timed_out;
 static Sema *find(uint32_t id) {
-    for (Sema *s=registry;s;s=s->next) if (s->id==id) return s;
+    for (Sema *p_sema=s_p_registry;p_sema;p_sema=p_sema->p_next) if (p_sema->id==id) return p_sema;
     return NULL;
 }
 static void host_check(int e) {
@@ -44,150 +44,150 @@ static uint64_t now_ns(void) {
     if (clock_gettime(CLOCK_MONOTONIC,&t)) { perror("clock_gettime"); exit(1); }
     return (uint64_t)t.tv_sec*1000000000+(uint64_t)t.tv_nsec;
 }
-static ABI int32_t sem_create(uint32_t *out,const char *name,uint32_t attr,
-                              int32_t initial,int32_t maximum,const void *options) {
-    if (!out || !name || attr>2 || initial<0 || maximum<=0 || initial>maximum) return ERR(22);
-    if (options) { fputs("STOP: semaphore options are not implemented\n",stderr); runtime_stop(21); }
-    Sema *s=calloc(1,sizeof(*s));
-    if (!s) return ERR(12);
-    runtime_exception_lock(&lock);
-    if (next_id==UINT32_MAX) { runtime_exception_unlock(&lock); free(s); return ERR(28); }
-    s->id=next_id++; s->attr=attr; s->count=s->initial=initial; s->maximum=maximum;
-    uint32_t id=s->id;
-    s->next=registry; registry=s; *out=id; ++created;
-    runtime_exception_unlock(&lock);
+static ABI int32_t sem_create(uint32_t *p_out,const char *sz_name,uint32_t attr,
+                              int32_t initial,int32_t maximum,const void *p_options) {
+    if (!p_out || !sz_name || attr>2 || initial<0 || maximum<=0 || initial>maximum) return ERR(22);
+    if (p_options) { fputs("STOP: semaphore options are not implemented\n",stderr); runtime_stop(21); }
+    Sema *p_sema=calloc(1,sizeof(*p_sema));
+    if (!p_sema) return ERR(12);
+    runtime_exception_lock(&s_lock);
+    if (s_next_id==UINT32_MAX) { runtime_exception_unlock(&s_lock); free(p_sema); return ERR(28); }
+    p_sema->id=s_next_id++; p_sema->attr=attr; p_sema->c_resources=p_sema->c_initial=initial; p_sema->c_maximum=maximum;
+    uint32_t id=p_sema->id;
+    p_sema->p_next=s_p_registry; s_p_registry=p_sema; *p_out=id; ++s_c_created;
+    runtime_exception_unlock(&s_lock);
     if (getenv("PS_TRACE_SEMA")) printf("Runtime: semaphore id=%u, attr=%u, initial=%d, max=%d\n",id,attr,initial,maximum);
     return 0;
 }
-static int32_t wait_count(uint32_t id,int32_t need,uint32_t *timeout,int block) {
-    runtime_exception_lock(&lock);
-    Sema *s=find(id);
+static int32_t wait_count(uint32_t id,int32_t need,uint32_t *p_timeout,int block) {
+    runtime_exception_lock(&s_lock);
+    Sema *p_sema=find(id);
     int32_t result=0;
-    if (!s) result=ERR(3);
-    else if (need<=0 || need>s->maximum) result=ERR(22);
-    else if (s->count>=need) { s->count-=need; ++acquired; }
+    if (!p_sema) result=ERR(3);
+    else if (need<=0 || need>p_sema->c_maximum) result=ERR(22);
+    else if (p_sema->c_resources>=need) { p_sema->c_resources-=need; ++s_c_acquired; }
     else if (!block) result=ERR(16);
-    else if (timeout && !*timeout) { result=ERR(60); ++timed_out; }
+    else if (p_timeout && !*p_timeout) { result=ERR(60); ++s_c_timed_out; }
     else {
         /* Priority-ordered semaphores (attr 2) are served FIFO: there is no
            PS4 priority scheduler, host threads run at equal priority. */
-        if (getenv("PS_TRACE_SEMA")) fprintf(stderr,"Runtime: blocking wait on semaphore %u (need %d, count %d)\n",id,need,s->count); /* deadlock diagnosis */
+        if (getenv("PS_TRACE_SEMA")) fprintf(stderr,"Runtime: blocking wait on semaphore %u (need %d, count %d)\n",id,need,p_sema->c_resources); /* deadlock diagnosis */
         Waiter w={.need=need};
         pthread_condattr_t attr;
         host_check(pthread_condattr_init(&attr));
         host_check(pthread_condattr_setclock(&attr,CLOCK_MONOTONIC));
         host_check(pthread_cond_init(&w.event,&attr));
         host_check(pthread_condattr_destroy(&attr));
-        Waiter **tail=&s->first;
-        while (*tail) tail=&(*tail)->next;
-        *tail=&w; ++s->active;
+        Waiter **pp_tail=&p_sema->p_first;
+        while (*pp_tail) pp_tail=&(*pp_tail)->p_next;
+        *pp_tail=&w; ++p_sema->active;
         const uint64_t wait_start=runtime_wait_clock();
-        uint64_t deadline=timeout ? now_ns()+(uint64_t)*timeout*1000 : 0;
+        uint64_t deadline=p_timeout ? now_ns()+(uint64_t)*p_timeout*1000 : 0;
         struct timespec end={.tv_sec=(time_t)(deadline/1000000000),.tv_nsec=(long)(deadline%1000000000)};
-        while (!w.done) {
-            int e=runtime_exception_wait(&w.event,&lock,timeout ? &end : NULL);
-            if (e==ETIMEDOUT && !w.done) {
-                Waiter **p=&s->first;
-                while (*p!=&w) p=&(*p)->next;
-                *p=w.next; w.result=ERR(60); w.done=1; ++timed_out;
+        while (!w.is_done) {
+            int e=runtime_exception_wait(&w.event,&s_lock,p_timeout ? &end : NULL);
+            if (e==ETIMEDOUT && !w.is_done) {
+                Waiter **pp_waiter=&p_sema->p_first;
+                while (*pp_waiter!=&w) pp_waiter=&(*pp_waiter)->p_next;
+                *pp_waiter=w.p_next; w.result=ERR(60); w.is_done=1; ++s_c_timed_out;
             } else if (e!=ETIMEDOUT) host_check(e);
         }
         runtime_wait_note(2,runtime_wait_clock()-wait_start);
         result=w.result;
-        if (!result) ++acquired;
-        if (timeout) {
+        if (!result) ++s_c_acquired;
+        if (p_timeout) {
             uint64_t now=now_ns();
-            *timeout=result ? 0 : (uint32_t)(now>=deadline ? 0 : (deadline-now)/1000);
+            *p_timeout=result ? 0 : (uint32_t)(now>=deadline ? 0 : (deadline-now)/1000);
         }
         host_check(pthread_cond_destroy(&w.event));
-        if (!--s->active && s->deleted) free(s);
+        if (!--p_sema->active && p_sema->deleted) free(p_sema);
     }
-    runtime_exception_unlock(&lock);
+    runtime_exception_unlock(&s_lock);
     return result;
 }
-static ABI int32_t sem_wait(uint32_t id,int32_t need,uint32_t *timeout) { return wait_count(id,need,timeout,1); }
+static ABI int32_t sem_wait(uint32_t id,int32_t need,uint32_t *p_timeout) { return wait_count(id,need,p_timeout,1); }
 static ABI int32_t sem_poll(uint32_t id,int32_t need) { return wait_count(id,need,NULL,0); }
-static ABI int32_t sem_signal(uint32_t id,int32_t count) {
-    runtime_exception_lock(&lock);
-    Sema *s=find(id);
+static ABI int32_t sem_signal(uint32_t id,int32_t c_resources) {
+    runtime_exception_lock(&s_lock);
+    Sema *p_sema=find(id);
     int32_t result=0;
-    if (!s) result=ERR(3);
-    else if (count<=0 || count>s->maximum-s->count) result=ERR(22);
+    if (!p_sema) result=ERR(3);
+    else if (c_resources<=0 || c_resources>p_sema->c_maximum-p_sema->c_resources) result=ERR(22);
     else {
-        s->count+=count; ++signaled;
-        Waiter **p=&s->first;
-        while (*p) {
-            Waiter *w=*p;
-            if (w->need>s->count) { p=&w->next; continue; }
-            s->count-=w->need; *p=w->next; w->done=1;
-            host_check(pthread_cond_signal(&w->event));
+        p_sema->c_resources+=c_resources; ++s_c_signaled;
+        Waiter **pp_waiter=&p_sema->p_first;
+        while (*pp_waiter) {
+            Waiter *p_waiter=*pp_waiter;
+            if (p_waiter->need>p_sema->c_resources) { pp_waiter=&p_waiter->p_next; continue; }
+            p_sema->c_resources-=p_waiter->need; *pp_waiter=p_waiter->p_next; p_waiter->is_done=1;
+            host_check(pthread_cond_signal(&p_waiter->event));
         }
     }
-    runtime_exception_unlock(&lock);
+    runtime_exception_unlock(&s_lock);
     return result;
 }
-static int32_t wake_all(Sema *s,int32_t result) {
-    int32_t count=0;
-    while (s->first) {
-        Waiter *w=s->first; s->first=w->next;
-        w->result=result; w->done=1; ++count;
-        host_check(pthread_cond_signal(&w->event));
+static int32_t wake_all(Sema *p_sema,int32_t result) {
+    int32_t c_woken=0;
+    while (p_sema->p_first) {
+        Waiter *p_waiter=p_sema->p_first; p_sema->p_first=p_waiter->p_next;
+        p_waiter->result=result; p_waiter->is_done=1; ++c_woken;
+        host_check(pthread_cond_signal(&p_waiter->event));
     }
-    return count;
+    return c_woken;
 }
-static ABI int32_t sem_cancel(uint32_t id,int32_t count,int32_t *waiters) {
-    runtime_exception_lock(&lock);
-    Sema *s=find(id);
+static ABI int32_t sem_cancel(uint32_t id,int32_t c_resources,int32_t *p_waiters) {
+    runtime_exception_lock(&s_lock);
+    Sema *p_sema=find(id);
     int32_t result=0;
-    if (!s) result=ERR(3);
-    else if (count>s->maximum) result=ERR(22);
+    if (!p_sema) result=ERR(3);
+    else if (c_resources>p_sema->c_maximum) result=ERR(22);
     else {
-        int32_t n=wake_all(s,ERR(85));
-        if (waiters) *waiters=n;
-        s->count=count<0 ? s->initial : count;
+        int32_t c_woken=wake_all(p_sema,ERR(85));
+        if (p_waiters) *p_waiters=c_woken;
+        p_sema->c_resources=c_resources<0 ? p_sema->c_initial : c_resources;
     }
-    runtime_exception_unlock(&lock);
+    runtime_exception_unlock(&s_lock);
     return result;
 }
 static ABI int32_t sem_delete(uint32_t id) {
-    runtime_exception_lock(&lock);
-    Sema **p=&registry;
-    while (*p && (*p)->id!=id) p=&(*p)->next;
-    if (!*p) { runtime_exception_unlock(&lock); return ERR(3); }
-    Sema *s=*p; *p=s->next; s->deleted=1; ++deleted;
-    wake_all(s,ERR(13));
-    if (!s->active) free(s);
-    runtime_exception_unlock(&lock);
+    runtime_exception_lock(&s_lock);
+    Sema **pp_sema=&s_p_registry;
+    while (*pp_sema && (*pp_sema)->id!=id) pp_sema=&(*pp_sema)->p_next;
+    if (!*pp_sema) { runtime_exception_unlock(&s_lock); return ERR(3); }
+    Sema *p_sema=*pp_sema; *pp_sema=p_sema->p_next; p_sema->deleted=1; ++s_c_deleted;
+    wake_all(p_sema,ERR(13));
+    if (!p_sema->active) free(p_sema);
+    runtime_exception_unlock(&s_lock);
     return 0;
 }
 /* scePthreadSem*: POSIX-style semaphores whose handle the game keeps in its own 8 bytes; backed by a
  * kernel semaphore whose id lives in that handle. */
-static ABI int32_t psem_init(uint64_t *sem,int flag,uint32_t value,const char *name) {
+static ABI int32_t psem_init(uint64_t *p_sem,int flag,uint32_t value,const char *sz_name) {
     (void)flag;
-    if (!sem || value>INT32_MAX) return ERR(22);
+    if (!p_sem || value>INT32_MAX) return ERR(22);
     uint32_t id;
-    int32_t result=sem_create(&id,name ? name : "",1,(int32_t)value,INT32_MAX,NULL);
-    if (!result) *sem=id;
+    int32_t result=sem_create(&id,sz_name ? sz_name : "",1,(int32_t)value,INT32_MAX,NULL);
+    if (!result) *p_sem=id;
     return result;
 }
-static ABI int32_t psem_wait(uint64_t *sem) { return sem ? wait_count((uint32_t)*sem,1,NULL,1) : ERR(22); }
-static ABI int32_t psem_trywait(uint64_t *sem) {
-    if (!sem) return ERR(22);
-    int32_t result=wait_count((uint32_t)*sem,1,NULL,0);
+static ABI int32_t psem_wait(uint64_t *p_sem) { return p_sem ? wait_count((uint32_t)*p_sem,1,NULL,1) : ERR(22); }
+static ABI int32_t psem_trywait(uint64_t *p_sem) {
+    if (!p_sem) return ERR(22);
+    int32_t result=wait_count((uint32_t)*p_sem,1,NULL,0);
     return result==ERR(16) ? ERR(35) : result; /* POSIX trywait reports EAGAIN, the kernel call EBUSY */
 }
-static ABI int32_t psem_timedwait(uint64_t *sem,uint32_t usec) {
-    return sem ? wait_count((uint32_t)*sem,1,&usec,1) : ERR(22);
+static ABI int32_t psem_timedwait(uint64_t *p_sem,uint32_t usec) {
+    return p_sem ? wait_count((uint32_t)*p_sem,1,&usec,1) : ERR(22);
 }
-static ABI int32_t psem_post(uint64_t *sem) { return sem ? sem_signal((uint32_t)*sem,1) : ERR(22); }
-static ABI int32_t psem_destroy(uint64_t *sem) { return sem ? sem_delete((uint32_t)*sem) : ERR(22); }
-static ABI int32_t psem_getvalue(uint64_t *sem,int32_t *value) {
-    if (!sem || !value) return ERR(22);
-    runtime_exception_lock(&lock);
-    Sema *s=find((uint32_t)*sem);
-    if (s) *value=s->count;
-    runtime_exception_unlock(&lock);
-    return s ? 0 : ERR(22);
+static ABI int32_t psem_post(uint64_t *p_sem) { return p_sem ? sem_signal((uint32_t)*p_sem,1) : ERR(22); }
+static ABI int32_t psem_destroy(uint64_t *p_sem) { return p_sem ? sem_delete((uint32_t)*p_sem) : ERR(22); }
+static ABI int32_t psem_getvalue(uint64_t *p_sem,int32_t *p_value) {
+    if (!p_sem || !p_value) return ERR(22);
+    runtime_exception_lock(&s_lock);
+    Sema *p_sema=find((uint32_t)*p_sem);
+    if (p_sema) *p_value=p_sema->c_resources;
+    runtime_exception_unlock(&s_lock);
+    return p_sema ? 0 : ERR(22);
 }
 /* POSIX sem_t as the console's libkernel lays it out inline (FreeBSD's struct _usem behind a 16-bit magic
  * and the id of its named object), so a semaphore the game initializes itself works with these calls.
@@ -198,52 +198,52 @@ typedef struct {
     uint32_t flags;
 } GuestSem;
 enum { SEM_MAGIC=0x736d, SEM_NO_OBJECT=0xffff, SEM_SHARED=1, SEM_NAMED=2 };
-static int usem_init(GuestSem *s,int shared,uint32_t value) {
-    if (!s || value>INT32_MAX) return 22;
-    s->magic=SEM_MAGIC; s->object=SEM_NO_OBJECT; s->flags=shared ? SEM_SHARED : 0;
-    atomic_store(&s->has_waiters,0); atomic_store(&s->count,value);
+static int usem_init(GuestSem *p_sem,int shared,uint32_t value) {
+    if (!p_sem || value>INT32_MAX) return 22;
+    p_sem->magic=SEM_MAGIC; p_sem->object=SEM_NO_OBJECT; p_sem->flags=shared ? SEM_SHARED : 0;
+    atomic_store(&p_sem->has_waiters,0); atomic_store(&p_sem->count,value);
     return 0;
 }
-static int usem_valid(const GuestSem *s) { return s && s->magic==SEM_MAGIC; }
-static int usem_futex(GuestSem *s,int op) { return op|(s->flags&SEM_SHARED ? 0 : FUTEX_PRIVATE_FLAG); }
-static int usem_take(GuestSem *s) {
-    uint32_t count=atomic_load(&s->count);
-    while (count) if (atomic_compare_exchange_weak(&s->count,&count,count-1)) return 1;
+static int usem_valid(const GuestSem *p_sem) { return p_sem && p_sem->magic==SEM_MAGIC; }
+static int usem_futex(GuestSem *p_sem,int op) { return op|(p_sem->flags&SEM_SHARED ? 0 : FUTEX_PRIVATE_FLAG); }
+static int usem_take(GuestSem *p_sem) {
+    uint32_t c_resources=atomic_load(&p_sem->count);
+    while (c_resources) if (atomic_compare_exchange_weak(&p_sem->count,&c_resources,c_resources-1)) return 1;
     return 0;
 }
-static int usem_trywait(GuestSem *s) { return !usem_valid(s) ? 22 : usem_take(s) ? 0 : 35; }
+static int usem_trywait(GuestSem *p_sem) { return !usem_valid(p_sem) ? 22 : usem_take(p_sem) ? 0 : 35; }
 /* end: absolute time on `clock`, NULL to wait without a limit. */
-static int usem_wait(GuestSem *s,clockid_t clock,const struct timespec *end) {
-    if (!usem_valid(s)) return 22;
-    if (usem_take(s)) return 0;
-    if (end && (end->tv_nsec<0 || end->tv_nsec>=1000000000)) return 22;
-    const int op=usem_futex(s,FUTEX_WAIT_BITSET)|(clock==CLOCK_REALTIME ? FUTEX_CLOCK_REALTIME : 0);
+static int usem_wait(GuestSem *p_sem,clockid_t clock,const struct timespec *p_end) {
+    if (!usem_valid(p_sem)) return 22;
+    if (usem_take(p_sem)) return 0;
+    if (p_end && (p_end->tv_nsec<0 || p_end->tv_nsec>=1000000000)) return 22;
+    const int op=usem_futex(p_sem,FUTEX_WAIT_BITSET)|(clock==CLOCK_REALTIME ? FUTEX_CLOCK_REALTIME : 0);
     const uint64_t wait_start=runtime_wait_clock();
     int result=0;
-    while (!usem_take(s)) {
-        atomic_store(&s->has_waiters,1);
-        if (syscall(SYS_futex,&s->count,op,0,end,NULL,FUTEX_BITSET_MATCH_ANY) && errno==ETIMEDOUT) {
-            result=usem_take(s) ? 0 : 60;
+    while (!usem_take(p_sem)) {
+        atomic_store(&p_sem->has_waiters,1);
+        if (syscall(SYS_futex,&p_sem->count,op,0,p_end,NULL,FUTEX_BITSET_MATCH_ANY) && errno==ETIMEDOUT) {
+            result=usem_take(p_sem) ? 0 : 60;
             break;
         }
     }
     runtime_wait_note(2,runtime_wait_clock()-wait_start);
     return result;
 }
-static int usem_post(GuestSem *s) {
-    if (!usem_valid(s)) return 22;
-    atomic_fetch_add(&s->count,1);
-    if (atomic_load(&s->has_waiters)) syscall(SYS_futex,&s->count,usem_futex(s,FUTEX_WAKE),1,NULL,NULL,0);
+static int usem_post(GuestSem *p_sem) {
+    if (!usem_valid(p_sem)) return 22;
+    atomic_fetch_add(&p_sem->count,1);
+    if (atomic_load(&p_sem->has_waiters)) syscall(SYS_futex,&p_sem->count,usem_futex(p_sem,FUTEX_WAKE),1,NULL,NULL,0);
     return 0;
 }
-static int usem_destroy(GuestSem *s) {
-    if (!usem_valid(s) || s->flags&SEM_NAMED) return 22;
-    s->magic=0;
+static int usem_destroy(GuestSem *p_sem) {
+    if (!usem_valid(p_sem) || p_sem->flags&SEM_NAMED) return 22;
+    p_sem->magic=0;
     return 0;
 }
-static int usem_getvalue(GuestSem *s,int32_t *value) {
-    if (!usem_valid(s) || !value) return 22;
-    *value=(int32_t)atomic_load(&s->count);
+static int usem_getvalue(GuestSem *p_sem,int32_t *p_value) {
+    if (!usem_valid(p_sem) || !p_value) return 22;
+    *p_value=(int32_t)atomic_load(&p_sem->count);
     return 0;
 }
 static int32_t posix_result(int e) {
@@ -252,16 +252,16 @@ static int32_t posix_result(int e) {
     return -1;
 }
 typedef struct { int64_t seconds, nanoseconds; } GuestTime;
-static ABI int32_t posix_sem_init(GuestSem *sem,int shared,uint32_t value) { return posix_result(usem_init(sem,shared,value)); }
-static ABI int32_t posix_sem_destroy(GuestSem *sem) { return posix_result(usem_destroy(sem)); }
-static ABI int32_t posix_sem_wait(GuestSem *sem) { return posix_result(usem_wait(sem,CLOCK_MONOTONIC,NULL)); }
-static ABI int32_t posix_sem_trywait(GuestSem *sem) { return posix_result(usem_trywait(sem)); }
-static ABI int32_t posix_sem_post(GuestSem *sem) { return posix_result(usem_post(sem)); }
-static ABI int32_t posix_sem_getvalue(GuestSem *sem,int32_t *value) { return posix_result(usem_getvalue(sem,value)); }
-static ABI int32_t posix_sem_timedwait(GuestSem *sem,const GuestTime *end) {
-    if (!end) return posix_result(usem_wait(sem,CLOCK_REALTIME,NULL));
-    struct timespec t={.tv_sec=(time_t)end->seconds,.tv_nsec=(long)end->nanoseconds};
-    return posix_result(usem_wait(sem,CLOCK_REALTIME,&t));
+static ABI int32_t posix_sem_init(GuestSem *p_sem,int shared,uint32_t value) { return posix_result(usem_init(p_sem,shared,value)); }
+static ABI int32_t posix_sem_destroy(GuestSem *p_sem) { return posix_result(usem_destroy(p_sem)); }
+static ABI int32_t posix_sem_wait(GuestSem *p_sem) { return posix_result(usem_wait(p_sem,CLOCK_MONOTONIC,NULL)); }
+static ABI int32_t posix_sem_trywait(GuestSem *p_sem) { return posix_result(usem_trywait(p_sem)); }
+static ABI int32_t posix_sem_post(GuestSem *p_sem) { return posix_result(usem_post(p_sem)); }
+static ABI int32_t posix_sem_getvalue(GuestSem *p_sem,int32_t *p_value) { return posix_result(usem_getvalue(p_sem,p_value)); }
+static ABI int32_t posix_sem_timedwait(GuestSem *p_sem,const GuestTime *p_end) {
+    if (!p_end) return posix_result(usem_wait(p_sem,CLOCK_REALTIME,NULL));
+    struct timespec t={.tv_sec=(time_t)p_end->seconds,.tv_nsec=(long)p_end->nanoseconds};
+    return posix_result(usem_wait(p_sem,CLOCK_REALTIME,&t));
 }
 /* FreeBSD's _umtx_op for the ops libc's own primitives build on: plain waits and wakes on a word
  * (over futexes, private ones for the _PRIVATE ops as FreeBSD keys them apart) and the _usem
@@ -303,8 +303,8 @@ static int umtx_sleep(void *p_word, uint32_t expected, int is_private, const voi
     runtime_wait_note(2,runtime_wait_clock()-wait_start);
     return result && errno==ETIMEDOUT ? 60 : 0;
 }
-static void umtx_wake(void *p_word, uint64_t count, int is_private) {
-    syscall(SYS_futex,p_word,FUTEX_WAKE|(is_private ? FUTEX_PRIVATE_FLAG : 0),count>INT32_MAX ? INT32_MAX : (int)count,NULL,NULL,0);
+static void umtx_wake(void *p_word, uint64_t c_waiters, int is_private) {
+    syscall(SYS_futex,p_word,FUTEX_WAKE|(is_private ? FUTEX_PRIVATE_FLAG : 0),c_waiters>INT32_MAX ? INT32_MAX : (int)c_waiters,NULL,NULL,0);
 }
 static ABI int32_t posix_umtx_op(void *p_object, int op, uint64_t value, void *p_address, void *p_address2) {
     static _Atomic unsigned char s_is_op_reported[UMTX_OP_COUNT];
@@ -340,7 +340,7 @@ static ABI int32_t posix_umtx_op(void *p_object, int op, uint64_t value, void *p
         return posix_result(22);
     }
 }
-static const RuntimeExport exports[]={
+static const RuntimeExport s_exports[]={
     {"sceKernelCreateSema",sem_create}, {"sceKernelWaitSema",sem_wait}, {"sceKernelSignalSema",sem_signal},
     {"sceKernelPollSema",sem_poll}, {"sceKernelCancelSema",sem_cancel}, {"sceKernelDeleteSema",sem_delete},
     {"sem_init",posix_sem_init}, {"sem_destroy",posix_sem_destroy}, {"sem_wait",posix_sem_wait},
@@ -350,14 +350,14 @@ static const RuntimeExport exports[]={
     {"scePthreadSemTimedwait",psem_timedwait}, {"scePthreadSemPost",psem_post},
     {"scePthreadSemDestroy",psem_destroy}, {"scePthreadSemGetvalue",psem_getvalue},
 };
-uintptr_t runtime_sema_resolve(const char *name) {
-    return RUNTIME_LOOKUP(exports,name);
+uintptr_t runtime_sema_resolve(const char *sz_name) {
+    return RUNTIME_LOOKUP(s_exports,sz_name);
 }
 void runtime_sema_report(void) {
-    runtime_exception_lock(&lock);
+    runtime_exception_lock(&s_lock);
     printf("Runtime: semaphores created=%zu, deleted=%zu, acquired=%zu, signals=%zu, timeouts=%zu\n",
-           created,deleted,acquired,signaled,timed_out);
-    runtime_exception_unlock(&lock);
+           s_c_created,s_c_deleted,s_c_acquired,s_c_signaled,s_c_timed_out);
+    runtime_exception_unlock(&s_lock);
 }
 #else
 uintptr_t runtime_sema_resolve(const char *name) { (void)name; return 0; }

@@ -43,65 +43,65 @@ namespace PsOverlay {
 
 namespace {
 
-std::mutex imgui_mutex; // the ImGui context: window thread (input) and present thread
-bool initialized = false;
-std::atomic<bool> menu_open{false};
-bool l3_down = false, r3_down = false;
-bool dirty = false; // settings changed while open: saved on close
-float base_scale = 1.0f;
+std::mutex s_imgui_mutex; // the ImGui context: window thread (input) and present thread
+bool s_is_initialized = false;
+std::atomic<bool> s_is_menu_open{false};
+bool s_is_l3_down = false, s_is_r3_down = false;
+bool s_is_dirty = false; // settings changed while open: saved on close
+float s_base_scale = 1.0f;
 // The game's text dialog (ImeDialog, the character name), typed on the keyboard: drawn while it
 // is open. In fullscreen the window title that showed it is not visible (issues #17, #19).
-std::mutex prompt_mutex;
-std::atomic<bool> prompt_active{false};
-std::string prompt_title, prompt_text;
+std::mutex s_prompt_mutex;
+std::atomic<bool> s_is_prompt_active{false};
+std::string s_prompt_title, s_prompt_text;
 // Guide (or Home) asks whether to close the game, as the console's PS button leads there. The game
 // reads the pad's state rather than its events, so the key or button that cancelled stays away
 // from it until released.
-std::atomic<bool> close_prompt{false};
-std::atomic<bool> close_release{false};
-SDL_Keycode release_key = SDLK_UNKNOWN;
-int release_button = -1;
+std::atomic<bool> s_is_close_prompt_open{false};
+std::atomic<bool> s_is_release_pending{false};
+SDL_Keycode s_release_key = SDLK_UNKNOWN;
+int s_release_button = -1;
 
-std::mutex cursor_mutex;
-std::array<GameCursor, MaxGameCursors> game_cursors{};
-std::atomic<bool> game_cursor_shown{false};
+std::mutex s_cursor_mutex;
+std::array<GameCursor, MaxGameCursors> s_game_cursors{};
+std::atomic<bool> s_is_game_cursor_shown{false};
 
 // Present rate for the FPS counter.
-std::chrono::steady_clock::time_point last_present{};
-float frame_ms_avg = 0.0f;
+std::chrono::steady_clock::time_point s_last_present{};
+float s_frame_ms_avg = 0.0f;
 
 float PixelDensity(SDL_WindowID id);
 
-void SetOpen(bool value) {
-    if (menu_open.exchange(value) == value) {
+void SetOpen(bool is_open) {
+    if (s_is_menu_open.exchange(is_open) == is_open) {
         return;
     }
     // The system cursor shows over the menu (window.cpp); ImGui learns where it is now, not at
     // the next motion: mouse motion is not passed on while the menu is closed.
-    if (value) {
-        if (SDL_Window* window = SDL_GetMouseFocus()) {
+    if (is_open) {
+        if (SDL_Window* p_window = SDL_GetMouseFocus()) {
             float x = 0.0f, y = 0.0f;
             SDL_GetMouseState(&x, &y);
-            const float density = PixelDensity(SDL_GetWindowID(window));
+            const float density = PixelDensity(SDL_GetWindowID(p_window));
             ImGui::GetIO().AddMousePosEvent(x * density, y * density);
         }
     }
-    if (!value && dirty) {
-        dirty = false;
+    if (!is_open && s_is_dirty) {
+        s_is_dirty = false;
         PsSettings::Save();
     }
 }
 
 void OpenClosePrompt() {
     SetOpen(false);
-    close_prompt = true;
+    s_is_close_prompt_open = true;
     std::printf("Overlay: close prompt open\n");
 }
 
-void AnswerClosePrompt(bool quit) {
-    close_prompt = false;
-    std::printf("Overlay: close prompt %s\n", quit ? "confirmed, quitting" : "cancelled");
-    if (quit) {
+void AnswerClosePrompt(bool should_quit) {
+    s_is_close_prompt_open = false;
+    std::printf("Overlay: close prompt %s\n", should_quit ? "confirmed, quitting" : "cancelled");
+    if (should_quit) {
         SDL_Event event{};
         event.type = SDL_EVENT_QUIT;
         SDL_PushEvent(&event);
@@ -154,36 +154,36 @@ ImGuiKey KeyFromGamepad(u8 button) {
 }
 
 float PixelDensity(SDL_WindowID id) {
-    SDL_Window* window = SDL_GetWindowFromID(id);
-    const float density = window ? SDL_GetWindowPixelDensity(window) : 1.0f;
+    SDL_Window* p_window = SDL_GetWindowFromID(id);
+    const float density = p_window ? SDL_GetWindowPixelDensity(p_window) : 1.0f;
     return density > 0.0f ? density : 1.0f;
 }
 
 // Marks the settings dirty when a widget changed them.
 template <typename T>
-void Store(std::atomic<T>& target, T value, bool changed) {
-    if (changed) {
+void Store(std::atomic<T>& target, T value, bool is_changed) {
+    if (is_changed) {
         target = value;
-        dirty = true;
+        s_is_dirty = true;
     }
 }
 
-void Checkbox(const char* label, std::atomic<bool>& value) {
-    bool v = value;
-    Store(value, v, ImGui::Checkbox(label, &v));
+void Checkbox(const char* sz_label, std::atomic<bool>& value) {
+    bool is_checked = value;
+    Store(value, is_checked, ImGui::Checkbox(sz_label, &is_checked));
 }
 
-void Slider(const char* label, std::atomic<float>& value, float lo, float hi) {
+void Slider(const char* sz_label, std::atomic<float>& value, float lo, float hi) {
     float v = value;
-    Store(value, v, ImGui::SliderFloat(label, &v, lo, hi, "%.2f"));
+    Store(value, v, ImGui::SliderFloat(sz_label, &v, lo, hi, "%.2f"));
 }
 
-void Hint(const char* text) {
+void Hint(const char* sz_text) {
     ImGui::SameLine();
     ImGui::TextDisabled("(?)");
     if (ImGui::BeginItemTooltip()) {
         ImGui::PushTextWrapPos(ImGui::GetFontSize() * 30.0f);
-        ImGui::TextUnformatted(text);
+        ImGui::TextUnformatted(sz_text);
         ImGui::PopTextWrapPos();
         ImGui::EndTooltip();
     }
@@ -193,19 +193,19 @@ void Hint(const char* text) {
 // psport.ini), sections one under the other, ImGui's own widgets and keyboard/gamepad navigation.
 void Menu() {
     auto& s = PsSettings::Get();
-    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    const ImGuiViewport* p_viewport = ImGui::GetMainViewport();
     // Where it was moved last (psport.ini menu_pos, a fraction of the screen), kept on screen.
-    ImVec2 pos(viewport->WorkPos.x + 40.0f * base_scale, viewport->WorkPos.y + 40.0f * base_scale);
+    ImVec2 pos(p_viewport->WorkPos.x + 40.0f * s_base_scale, p_viewport->WorkPos.y + 40.0f * s_base_scale);
     if (s.menu_x >= 0.0f && s.menu_y >= 0.0f) {
-        const float margin = 80.0f * base_scale;
-        pos.x = viewport->WorkPos.x +
-                std::clamp(s.menu_x * viewport->WorkSize.x, 0.0f, std::max(viewport->WorkSize.x - margin, 0.0f));
-        pos.y = viewport->WorkPos.y +
-                std::clamp(s.menu_y * viewport->WorkSize.y, 0.0f, std::max(viewport->WorkSize.y - margin, 0.0f));
+        const float margin = 80.0f * s_base_scale;
+        pos.x = p_viewport->WorkPos.x +
+                std::clamp(s.menu_x * p_viewport->WorkSize.x, 0.0f, std::max(p_viewport->WorkSize.x - margin, 0.0f));
+        pos.y = p_viewport->WorkPos.y +
+                std::clamp(s.menu_y * p_viewport->WorkSize.y, 0.0f, std::max(p_viewport->WorkSize.y - margin, 0.0f));
     }
     ImGui::SetNextWindowPos(pos, ImGuiCond_Appearing);
-    ImGui::SetNextWindowSize(ImVec2(620.0f * base_scale, 0.0f), ImGuiCond_Appearing);
-    bool keep_open = true;
+    ImGui::SetNextWindowSize(ImVec2(620.0f * s_base_scale, 0.0f), ImGuiCond_Appearing);
+    bool should_keep_open = true;
     static const std::string s_game_title = [] {
         const std::string_view title = Common::ElfInfo::Instance().Title();
         return title.empty() ? std::string("psport") : std::string(title);
@@ -213,48 +213,48 @@ void Menu() {
     const std::string window_title = s_game_title +
                                      PsSettings::MenuText(" - Graphics", " — настройки", ": gráficos") +
                                      "  (Insert / L3+R3)###psport_settings";
-    if (!ImGui::Begin(window_title.c_str(), &keep_open, ImGuiWindowFlags_NoCollapse)) {
+    if (!ImGui::Begin(window_title.c_str(), &should_keep_open, ImGuiWindowFlags_NoCollapse)) {
         ImGui::End();
         return;
     }
     // Moved: remembered (saved with the settings when the menu closes).
-    if (!ImGui::IsWindowAppearing() && viewport->WorkSize.x > 0.0f && viewport->WorkSize.y > 0.0f) {
+    if (!ImGui::IsWindowAppearing() && p_viewport->WorkSize.x > 0.0f && p_viewport->WorkSize.y > 0.0f) {
         const ImVec2 at = ImGui::GetWindowPos();
-        const float fx = (at.x - viewport->WorkPos.x) / viewport->WorkSize.x;
-        const float fy = (at.y - viewport->WorkPos.y) / viewport->WorkSize.y;
+        const float fx = (at.x - p_viewport->WorkPos.x) / p_viewport->WorkSize.x;
+        const float fy = (at.y - p_viewport->WorkPos.y) / p_viewport->WorkSize.y;
         if (std::abs(at.x - pos.x) >= 1.0f || std::abs(at.y - pos.y) >= 1.0f) {
             s.menu_x = fx;
             s.menu_y = fy;
-            dirty = true;
+            s_is_dirty = true;
         }
     }
     // Issues #74, #116: leaving the game from the pad (this menu opens with L3+R3). A second
     // press confirms; the window thread then closes like the window's own close button.
-    static bool quit_armed;
-    if (ImGui::Button(quit_armed ? PsSettings::MenuText("Press again to quit###quit_game",
+    static bool s_is_quit_armed;
+    if (ImGui::Button(s_is_quit_armed ? PsSettings::MenuText("Press again to quit###quit_game",
                                                         "Нажмите ещё раз для выхода###quit_game",
                                                         "Pulsa otra vez para salir###quit_game")
                                  : PsSettings::MenuText("Quit game###quit_game", "Выйти из игры###quit_game",
                                                         "Salir del juego###quit_game"))) {
-        if (quit_armed) {
+        if (s_is_quit_armed) {
             SDL_Event quit{};
             quit.type = SDL_EVENT_QUIT;
             SDL_PushEvent(&quit);
         }
-        quit_armed = !quit_armed;
+        s_is_quit_armed = !s_is_quit_armed;
     }
-    if (quit_armed && !ImGui::IsItemFocused() && !ImGui::IsItemHovered()) {
-        quit_armed = false;
+    if (s_is_quit_armed && !ImGui::IsItemFocused() && !ImGui::IsItemHovered()) {
+        s_is_quit_armed = false;
     }
     // Always readable, whatever language the rest of the menu is in.
-    static const char* languages[] = {"English", "Русский", "Español"};
+    static const char* s_languages[] = {"English", "Русский", "Español"};
     int language = int(s.menu_language.load());
-    if (ImGui::Combo("Language", &language, languages, 3)) {
+    if (ImGui::Combo("Language", &language, s_languages, 3)) {
         s.menu_language = PsSettings::MenuLanguage(language);
         PsSettings::Save();
     }
     ImGui::Text(PsSettings::MenuText("%.0f FPS  (%.1f ms)", "%.0f FPS  (%.1f мс)", "%.0f FPS  (%.1f ms)"),
-                frame_ms_avg > 0.0f ? 1000.0f / frame_ms_avg : 0.0f, frame_ms_avg);
+                s_frame_ms_avg > 0.0f ? 1000.0f / s_frame_ms_avg : 0.0f, s_frame_ms_avg);
 
     ImGui::SeparatorText(PsSettings::MenuText("Temporal upscaler", "Временной апскейлер",
                                               "Escalado temporal"));
@@ -274,29 +274,29 @@ void Menu() {
                                  "TAA (antialiasing nativo)"),
             "DLSS (NVIDIA RTX)"};
         static_assert(sizeof(upscalers) / sizeof(upscalers[0]) == PsSettings::UpscalerCount);
-        static const char* later[] = {"XeSS"};
+        static const char* s_later[] = {"XeSS"};
         int upscaler = s.upscaler;
         if (ImGui::BeginCombo(PsSettings::MenuText("Upscaler", "Апскейлер", "Escalador"), upscalers[upscaler])) {
             for (int i = 0; i < PsSettings::UpscalerCount; ++i) {
-                const bool supported = i == PsSettings::UpscalerFsr4     ? s.fsr4_supported.load()
-                                       : i == PsSettings::UpscalerFsr411 ? s.fsr411_supported.load()
-                                       : i == PsSettings::UpscalerDlss   ? s.dlss_supported.load()
+                const bool is_supported = i == PsSettings::UpscalerFsr4     ? s.is_fsr4_supported.load()
+                                       : i == PsSettings::UpscalerFsr411 ? s.is_fsr411_supported.load()
+                                       : i == PsSettings::UpscalerDlss   ? s.is_dlss_supported.load()
                                                                          : true;
-                ImGui::BeginDisabled(!supported);
+                ImGui::BeginDisabled(!is_supported);
                 if (ImGui::Selectable(upscalers[i], i == upscaler)) {
                     Store(s.upscaler, i, true);
                 }
                 ImGui::EndDisabled();
-                if (!supported) {
+                if (!is_supported) {
                     ImGui::SameLine();
                     ImGui::TextDisabled("%s", PsSettings::MenuText("— not supported by this GPU",
                                                              "— не поддерживается видеокартой",
                                                              "— no compatible con esta GPU"));
                 }
             }
-            for (const char* name : later) {
+            for (const char* sz_name : s_later) {
                 ImGui::BeginDisabled();
-                ImGui::Selectable(name, false);
+                ImGui::Selectable(sz_name, false);
                 ImGui::EndDisabled();
                 ImGui::SameLine();
                 ImGui::TextDisabled("%s", PsSettings::MenuText("— in development", "— в работе",
@@ -313,22 +313,22 @@ void Menu() {
                 "NVIDIA DLSS Super Resolution (GPU RTX; Native AA es DLAA). Necesita el puente DLSS y la "
                 "biblioteca de NVIDIA junto al juego; si no, se usa FSR 3.1."));
         }
-        const auto problem_text = [](const char* text) {
+        const auto problem_text = [](const char* sz_text) {
             ImGui::PushTextWrapPos();
-            ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "%s", text);
+            ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "%s", sz_text);
             ImGui::PopTextWrapPos();
         };
-        if (const char* problem = s.dlss_problem.load(); problem && s.upscaler == PsSettings::UpscalerDlss) {
-            char line[192];
-            std::snprintf(line, sizeof(line), "DLSS: %s", problem);
-            problem_text(line);
+        if (const char* sz_problem = s.sz_dlss_problem.load(); sz_problem && s.upscaler == PsSettings::UpscalerDlss) {
+            char sz_line[192];
+            std::snprintf(sz_line, sizeof(sz_line), "DLSS: %s", sz_problem);
+            problem_text(sz_line);
         }
-        if (const char* problem = s.fsr4_problem.load()) {
-            char line[192];
-            std::snprintf(line, sizeof(line),
+        if (const char* sz_problem = s.sz_fsr4_problem.load()) {
+            char sz_line[192];
+            std::snprintf(sz_line, sizeof(sz_line),
                           PsSettings::MenuText("FSR 4 unavailable: %s", "FSR 4 недоступен: %s",
-                                               "FSR 4 no disponible: %s"), problem);
-            problem_text(line);
+                                               "FSR 4 no disponible: %s"), sz_problem);
+            problem_text(sz_line);
             if (!PsSettings::IsFsr4(s.upscaler)) {
                 ImGui::PushTextWrapPos();
                 ImGui::TextUnformatted(PsSettings::MenuText(
@@ -361,10 +361,10 @@ void Menu() {
             }
             Checkbox(PsSettings::MenuText("FSR 4: auto exposure", "FSR 4: авто-экспозиция",
                                           "FSR 4: exposición automática"),
-                     s.fsr4_auto_exposure);
+                     s.should_use_fsr4_auto_exposure);
             Checkbox(PsSettings::MenuText("FSR 4: invert jitter sign", "FSR 4: обратный знак jitter",
                                           "FSR 4: invertir el signo del jitter"),
-                     s.fsr4_invert_jitter);
+                     s.should_invert_fsr4_jitter);
             Hint(PsSettings::MenuText(
                 "For diagnosing ghosting: the FSR 4 network normalizes color by exposure and uses "
                 "it to decide when to discard previous frames. Changes apply immediately, without a "
@@ -374,34 +374,34 @@ void Menu() {
                 "Para diagnosticar el ghosting: la red de FSR 4 normaliza el color según la exposición y la usa "
                 "para decidir cuándo descartar los fotogramas anteriores. Se aplica al momento, sin reiniciar."));
         }
-        const bool upscaler_on = s.upscaler != PsSettings::UpscalerOff;
-        const bool taa = s.upscaler == PsSettings::UpscalerTaa;
-        ImGui::BeginDisabled(!upscaler_on);
-        ImGui::BeginDisabled(taa);
-        int preset = taa ? PsSettings::NativeAA : s.preset.load();
-        char preset_label[64];
-        std::snprintf(preset_label, sizeof(preset_label), "%s (x%.1f)", PsSettings::PresetName(preset),
+        const bool is_upscaler_on = s.upscaler != PsSettings::UpscalerOff;
+        const bool is_taa = s.upscaler == PsSettings::UpscalerTaa;
+        ImGui::BeginDisabled(!is_upscaler_on);
+        ImGui::BeginDisabled(is_taa);
+        int preset = is_taa ? PsSettings::NativeAA : s.preset.load();
+        char sz_preset_label[64];
+        std::snprintf(sz_preset_label, sizeof(sz_preset_label), "%s (x%.1f)", PsSettings::PresetName(preset),
                       PsSettings::PresetScale(preset));
-        if (ImGui::BeginCombo(PsSettings::MenuText("Preset", "Пресет", "Preajuste"), preset_label)) {
+        if (ImGui::BeginCombo(PsSettings::MenuText("Preset", "Пресет", "Preajuste"), sz_preset_label)) {
             for (int i = 0; i < PsSettings::PresetCount; ++i) {
-                char label[64];
+                char sz_label[64];
                 const float scale = PsSettings::PresetScale(i);
                 const int output = s.output_res;
                 std::snprintf(
-                    label, sizeof(label),
+                    sz_label, sizeof(sz_label),
                     PsSettings::MenuText("%s (x%.1f, render %dx%d)", "%s (x%.1f, рендер %dx%d)",
                                          "%s (x%.1f, render %dx%d)"),
                     PsSettings::PresetName(i), scale,
                     int(std::lround(PsSettings::OutputWidths[output] / scale / 2) * 2),
                     int(std::lround(PsSettings::OutputHeights[output] / scale / 2) * 2));
-                if (ImGui::Selectable(label, i == preset)) {
+                if (ImGui::Selectable(sz_label, i == preset)) {
                     Store(s.preset, i, true);
                 }
             }
             ImGui::EndCombo();
         }
         ImGui::EndDisabled();
-        if (taa) {
+        if (is_taa) {
             ImGui::TextWrapped("%s", PsSettings::MenuText(
                 "TAA anti-aliases the scene at output resolution, without an FSR model or upscaling. "
                 "Your saved FSR preset is restored when you select FSR.",
@@ -418,8 +418,8 @@ void Menu() {
             ImGui::Text(PsSettings::MenuText("Startup preset: %s", "Пресет при запуске: %s",
                                              "Preajuste al iniciar: %s"),
                         PsSettings::PresetName(s.startup_preset));
-            if (const char* automatic = std::getenv("PS_AUTO_RENDER_RES");
-                automatic && automatic[0] == '1') {
+            if (const char* sz_automatic = std::getenv("PS_AUTO_RENDER_RES");
+                sz_automatic && sz_automatic[0] == '1') {
                 Hint(PsSettings::MenuText(
                     "When output is not 1080p, the entire game renders at the preset resolution "
                     "(startup patch): this is fastest on Steam Deck and weaker GPUs. Preset or output "
@@ -455,8 +455,8 @@ void Menu() {
                 "escena respecto a la salida. La interfaz se dibuja a la resolución de salida. El preajuste se "
                 "aplica desde el siguiente fotograma sin reiniciar el juego."));
         }
-        Checkbox(PsSettings::MenuText("Sharpening (RCAS)", "Резкость (RCAS)", "Nitidez (RCAS)"), s.sharpen);
-        ImGui::BeginDisabled(!s.sharpen);
+        Checkbox(PsSettings::MenuText("Sharpening (RCAS)", "Резкость (RCAS)", "Nitidez (RCAS)"), s.should_sharpen);
+        ImGui::BeginDisabled(!s.should_sharpen);
         Slider(PsSettings::MenuText("Sharpness", "Сила резкости", "Intensidad de nitidez"), s.sharpness, 0.0f, 2.0f);
         Hint(PsSettings::MenuText(
             "Up to 1: the upscaler's own sharpening (RCAS). Above 1 adds another RCAS pass. "
@@ -467,7 +467,7 @@ void Menu() {
             "Ctrl+clic en el control para escribir un valor exacto."));
         ImGui::EndDisabled();
         Checkbox(PsSettings::MenuText("Subpixel jitter", "Субпиксельный сдвиг (jitter)",
-                                      "Desplazamiento subpíxel (jitter)"), s.jitter);
+                                      "Desplazamiento subpíxel (jitter)"), s.should_jitter);
         Hint(PsSettings::MenuText(
             "Each frame shifts the scene by a fraction of a pixel, letting the upscaler reconstruct "
             "more detail from multiple frames. Without it, only history-based anti-aliasing remains.",
@@ -477,8 +477,8 @@ void Menu() {
             "partir de varios fotogramas. Sin él solo queda el antialiasing por historial."));
 
         ImGui::SeparatorText(PsSettings::MenuText("Reactive mask", "Маска реактивности", "Máscara reactiva"));
-        ImGui::BeginDisabled(taa);
-        Checkbox(PsSettings::MenuText("Enable mask", "Включить маску", "Activar máscara"), s.reactive);
+        ImGui::BeginDisabled(is_taa);
+        Checkbox(PsSettings::MenuText("Enable mask", "Включить маску", "Activar máscara"), s.should_use_reactive);
         Hint(PsSettings::IsFsr4(s.upscaler)
                  ? PsSettings::MenuText(
                        "Marks transparent effects (haze, light, water, particles). FSR 4 takes no "
@@ -500,21 +500,21 @@ void Menu() {
                        "Marca los efectos transparentes (partículas, bruma) para que el escalador dependa menos "
                        "de los fotogramas anteriores. Menos estelas tras los efectos, pero bajo ellos vuelve el "
                        "parpadeo."));
-        ImGui::BeginDisabled(!s.reactive);
+        ImGui::BeginDisabled(!s.should_use_reactive);
         Slider(PsSettings::MenuText("Scale", "Масштаб", "Escala"), s.reactive_scale, 0.0f, 4.0f);
         Slider(PsSettings::MenuText("Threshold", "Порог", "Umbral"), s.reactive_threshold, 0.0f, 1.0f);
         Slider(PsSettings::MenuText("Maximum", "Максимум", "Máximo"), s.reactive_max, 0.0f, 1.0f);
-        bool show_mask = s.debug_view == PsSettings::DebugReactive;
+        bool should_show_mask = s.debug_view == PsSettings::DebugReactive;
         if (ImGui::Checkbox(PsSettings::MenuText("Show mask (debug)", "Показать маску (отладка)",
                                                  "Mostrar máscara (depuración)"),
-                            &show_mask)) {
-            s.debug_view = show_mask ? PsSettings::DebugReactive : PsSettings::DebugNone;
+                            &should_show_mask)) {
+            s.debug_view = should_show_mask ? PsSettings::DebugReactive : PsSettings::DebugNone;
         }
         ImGui::EndDisabled();
         ImGui::EndDisabled();
         Checkbox(PsSettings::MenuText("Character motion vectors", "Векторы движения персонажей",
                                       "Vectores de movimiento de personajes"),
-                 s.object_motion);
+                 s.should_use_object_motion);
         Hint(PsSettings::MenuText(
             "Accurate vectors for animated objects: clothing and weapons break up less "
             "during movement. The static scene does not get an additional pass. "
@@ -524,12 +524,12 @@ void Menu() {
             "Изменение применяется после перезапуска игры.",
             "Vectores exactos para los objetos animados: la ropa y las armas se deshacen menos en movimiento. La "
             "escena estática no recibe una pasada adicional. Se aplica tras reiniciar el juego."));
-        bool show_motion = s.debug_view == PsSettings::DebugMotion;
+        bool should_show_motion = s.debug_view == PsSettings::DebugMotion;
         if (ImGui::Checkbox(PsSettings::MenuText("Show motion vectors (debug)",
                                                  "Показать векторы движения (отладка)",
                                                  "Mostrar vectores de movimiento (depuración)"),
-                            &show_motion)) {
-            s.debug_view = show_motion ? PsSettings::DebugMotion : PsSettings::DebugNone;
+                            &should_show_motion)) {
+            s.debug_view = should_show_motion ? PsSettings::DebugMotion : PsSettings::DebugNone;
         }
         Hint(PsSettings::MenuText(
             "Red/green: horizontal/vertical motion (8 pixels = full brightness). "
@@ -548,13 +548,13 @@ void Menu() {
 
     ImGui::SeparatorText(PsSettings::MenuText("Output resolution", "Разрешение вывода",
                                               "Resolución de salida"));
-    static const char* outputs[] = {"1280 x 720", "1920 x 1080", "2560 x 1440", "3840 x 2160"};
+    static const char* s_outputs[] = {"1280 x 720", "1920 x 1080", "2560 x 1440", "3840 x 2160"};
     int output = s.output_res;
     if (ImGui::BeginCombo(PsSettings::MenuText("Output resolution", "Разрешение вывода",
                                                "Resolución de salida"),
-                          outputs[output])) {
+                          s_outputs[output])) {
         for (int i = 0; i < PsSettings::OutputCount; ++i) {
-            if (ImGui::Selectable(outputs[i], i == output)) {
+            if (ImGui::Selectable(s_outputs[i], i == output)) {
                 Store(s.output_res, i, true);
             }
         }
@@ -580,7 +580,7 @@ void Menu() {
             "fija el tamaño de la escena respecto a la salida: 4K Performance = 1920x1080. Cambiar el tamaño "
             "reinicia el historial del escalador y puede causar una pausa breve."));
     }
-    if (const Game::Profile* launched = Game::Launched(); launched && launched->add_patches) {
+    if (const Game::Profile* p_launched = Game::Launched(); p_launched && p_launched->pfn_add_patches) {
         const char* live_modes[] = {PsSettings::MenuText("Auto (based on GPU)", "Авто (по видеокарте)",
                                                          "Automático (según la GPU)"),
                                     PsSettings::MenuText("Off (faster)", "Выключена (быстрее)",
@@ -626,17 +626,17 @@ void Menu() {
                               PsSettings::MenuText("Game default", "Как в игре", "El del juego"),
                               PsSettings::MenuText("Lower (1)", "Ниже (1)", "Menor (1)"),
                               PsSettings::MenuText("Lowest (2)", "Минимальная (2)", "Mínimo (2)")};
-        static constexpr int lod_values[] = {-2, 0, 1, 2};
-        int lod_index = 1;
+        static constexpr int s_lod_values[] = {-2, 0, 1, 2};
+        int i_lod = 1;
         for (int i = 0; i < 4; ++i) {
-            if (lod_values[i] == s.model_lod) lod_index = i;
+            if (s_lod_values[i] == s.model_lod) i_lod = i;
         }
         if (ImGui::BeginCombo(PsSettings::MenuText("Model detail", "Детализация моделей",
                                                    "Detalle de los modelos"),
-                              lods[lod_index])) {
+                              lods[i_lod])) {
             for (int i = 0; i < 4; ++i) {
-                if (ImGui::Selectable(lods[i], i == lod_index)) {
-                    Store(s.model_lod, lod_values[i], true);
+                if (ImGui::Selectable(lods[i], i == i_lod)) {
+                    Store(s.model_lod, s_lod_values[i], true);
                 }
             }
             ImGui::EndCombo();
@@ -650,12 +650,12 @@ void Menu() {
         }
     }
     if (s.c_effects > 0) {
-        const Game::Profile* launched = Game::Launched();
+        const Game::Profile* p_launched = Game::Launched();
         std::string note = PsSettings::MenuText("Effects are enabled and disabled by game patches at startup",
                                                 "Эффекты включаются и выключаются патчами игры при запуске",
                                                 "Los efectos se activan y desactivan con parches del juego al iniciar");
-        if (launched->patch_file) {
-            note = note + " (" + launched->patch_file + ")";
+        if (p_launched->sz_patch_file) {
+            note = note + " (" + p_launched->sz_patch_file + ")";
         }
         note += ".";
         if (effects.hint.sz_english) {
@@ -664,13 +664,13 @@ void Menu() {
         Hint(note.c_str());
     }
 
-    bool restart =
-        s.object_motion != s.startup_object_motion || s.model_lod != s.startup_model_lod ||
+    bool should_restart =
+        s.should_use_object_motion != s.is_object_motion_at_startup || s.model_lod != s.startup_model_lod ||
         s.live_resolution != s.startup_live_resolution || PsSettings::ResolutionNeedsRestart();
     for (int e = 0; e < s.c_effects; ++e) {
-        restart |= s.effects[e] != s.startup_effects[e];
+        should_restart |= s.effects[e] != s.startup_effects[e];
     }
-    if (restart) {
+    if (should_restart) {
         ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "%s",
                            PsSettings::MenuText("Changes apply after restarting the game",
                                                 "Изменения применятся после перезапуска игры",
@@ -685,45 +685,45 @@ void Menu() {
 
     ImGui::SeparatorText(PsSettings::MenuText("Other", "Прочее", "Otros"));
     Checkbox(PsSettings::MenuText("FPS counter in corner", "Счётчик FPS в углу",
-                                  "Contador de FPS en la esquina"), s.show_fps);
+                                  "Contador de FPS en la esquina"), s.should_show_fps);
 
     ImGui::Spacing();
     if (ImGui::Button(PsSettings::MenuText("Close", "Закрыть", "Cerrar"))) {
-        keep_open = false;
+        should_keep_open = false;
     }
     ImGui::TextDisabled("%s", PsSettings::MenuText("Settings are saved to psport.ini",
                                              "Настройки сохраняются в psport.ini",
                                              "Los ajustes se guardan en psport.ini"));
     ImGui::End();
-    if (!keep_open) {
+    if (!should_keep_open) {
         SetOpen(false);
     }
 }
 
 // Drawn behind the menu's windows, so the menu stays readable over the cursor.
 void GameCursors(const vk::Rect2D& frame) {
-    std::scoped_lock lock{cursor_mutex};
-    ImDrawList* draw = ImGui::GetBackgroundDrawList();
-    for (const GameCursor& cursor : game_cursors) {
-        if (!cursor.enabled || !cursor.width || !cursor.height) {
+    std::scoped_lock lock{s_cursor_mutex};
+    ImDrawList* p_draw = ImGui::GetBackgroundDrawList();
+    for (const GameCursor& cursor : s_game_cursors) {
+        if (!cursor.is_enabled || !cursor.width || !cursor.height) {
             continue;
         }
         const float scale_x = float(frame.extent.width) / float(cursor.width);
         const float scale_y = float(frame.extent.height) / float(cursor.height);
-        const float sx = cursor.magnified ? scale_x * 2.0f : scale_x;
-        const float sy = cursor.magnified ? scale_y * 2.0f : scale_y;
+        const float sx = cursor.is_magnified ? scale_x * 2.0f : scale_x;
+        const float sy = cursor.is_magnified ? scale_y * 2.0f : scale_y;
         const float left = float(frame.offset.x) + float(cursor.x) * scale_x - float(cursor.hot_x) * sx;
         const float top = float(frame.offset.y) + float(cursor.y) * scale_y - float(cursor.hot_y) * sy;
         for (u32 row = 0; row < CursorImageSize; ++row) {
-            const u32* pixels = cursor.image + row * CursorImageSize;
+            const u32* p_pixels = cursor.p_image + row * CursorImageSize;
             for (u32 column = 0; column < CursorImageSize;) {
-                const u32 argb = pixels[column];
+                const u32 argb = p_pixels[column];
                 u32 end = column + 1;
-                while (end < CursorImageSize && pixels[end] == argb) {
+                while (end < CursorImageSize && p_pixels[end] == argb) {
                     ++end;
                 }
                 if (argb >> 24) {
-                    draw->AddRectFilled(ImVec2(left + float(column) * sx, top + float(row) * sy),
+                    p_draw->AddRectFilled(ImVec2(left + float(column) * sx, top + float(row) * sy),
                                         ImVec2(left + float(end) * sx, top + float(row + 1) * sy),
                                         IM_COL32((argb >> 16) & 0xff, (argb >> 8) & 0xff, argb & 0xff, argb >> 24));
                 }
@@ -734,10 +734,10 @@ void GameCursors(const vk::Rect2D& frame) {
 }
 
 void FpsCounter() {
-    const ImGuiViewport* viewport = ImGui::GetMainViewport();
-    const float pad = 12.0f * base_scale;
+    const ImGuiViewport* p_viewport = ImGui::GetMainViewport();
+    const float pad = 12.0f * s_base_scale;
     ImGui::SetNextWindowPos(
-        ImVec2(viewport->WorkPos.x + viewport->WorkSize.x - pad, viewport->WorkPos.y + pad),
+        ImVec2(p_viewport->WorkPos.x + p_viewport->WorkSize.x - pad, p_viewport->WorkPos.y + pad),
         ImGuiCond_Always, ImVec2(1.0f, 0.0f));
     ImGui::SetNextWindowBgAlpha(0.5f);
     ImGui::Begin("##fps", nullptr,
@@ -747,7 +747,7 @@ void FpsCounter() {
     const auto& s = PsSettings::Get();
     ImGui::Text(PsSettings::MenuText("%.0f FPS  %.1f ms  %s", "%.0f FPS  %.1f мс  %s",
                                      "%.0f FPS  %.1f ms  %s"),
-                frame_ms_avg > 0.0f ? 1000.0f / frame_ms_avg : 0.0f, frame_ms_avg,
+                s_frame_ms_avg > 0.0f ? 1000.0f / s_frame_ms_avg : 0.0f, s_frame_ms_avg,
                 s.upscaler == PsSettings::UpscalerFsr3     ? "FSR 3.1"
                 : s.upscaler == PsSettings::UpscalerFsr4   ? "FSR 4"
                 : s.upscaler == PsSettings::UpscalerFsr411 ? "FSR 4.1.1"
@@ -758,9 +758,9 @@ void FpsCounter() {
 }
 
 void ClosePrompt() {
-    const ImGuiViewport* viewport = ImGui::GetMainViewport();
-    ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x + viewport->WorkSize.x * 0.5f,
-                                   viewport->WorkPos.y + viewport->WorkSize.y * 0.5f),
+    const ImGuiViewport* p_viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(ImVec2(p_viewport->WorkPos.x + p_viewport->WorkSize.x * 0.5f,
+                                   p_viewport->WorkPos.y + p_viewport->WorkSize.y * 0.5f),
                             ImGuiCond_Always, ImVec2(0.5f, 0.5f));
     ImGui::SetNextWindowBgAlpha(0.9f);
     ImGui::Begin("##closeprompt", nullptr,
@@ -778,13 +778,13 @@ void ClosePrompt() {
 void TextPrompt() {
     std::string title, text;
     {
-        std::scoped_lock lock{prompt_mutex};
-        title = prompt_title;
-        text = prompt_text;
+        std::scoped_lock lock{s_prompt_mutex};
+        title = s_prompt_title;
+        text = s_prompt_text;
     }
-    const ImGuiViewport* viewport = ImGui::GetMainViewport();
-    ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x + viewport->WorkSize.x * 0.5f,
-                                   viewport->WorkPos.y + viewport->WorkSize.y * 0.5f),
+    const ImGuiViewport* p_viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(ImVec2(p_viewport->WorkPos.x + p_viewport->WorkSize.x * 0.5f,
+                                   p_viewport->WorkPos.y + p_viewport->WorkSize.y * 0.5f),
                             ImGuiCond_Always, ImVec2(0.5f, 0.5f));
     ImGui::SetNextWindowBgAlpha(0.9f);
     ImGui::Begin("##textprompt", nullptr,
@@ -804,42 +804,42 @@ void TextPrompt() {
 /// PS_MENU_KEYS_FILE=<file> (scripted tests): tokens toggle up down left right enter back l1 r1,
 /// consumed when the file appears (it is removed), one key press per frame.
 void ScriptedKeys() {
-    static const char* path = std::getenv("PS_MENU_KEYS_FILE");
-    static std::chrono::steady_clock::time_point last_check{};
-    static std::vector<std::string> queue;
-    static bool release = false;
-    static ImGuiKey held = ImGuiKey_None;
-    if (!path) {
+    static const char* s_sz_path = std::getenv("PS_MENU_KEYS_FILE");
+    static std::chrono::steady_clock::time_point s_last_check{};
+    static std::vector<std::string> s_queue;
+    static bool s_should_release = false;
+    static ImGuiKey s_held = ImGuiKey_None;
+    if (!s_sz_path) {
         return;
     }
     ImGuiIO& io = ImGui::GetIO();
-    if (release) {
-        io.AddKeyEvent(held, false);
-        release = false;
+    if (s_should_release) {
+        io.AddKeyEvent(s_held, false);
+        s_should_release = false;
         return;
     }
     const auto now = std::chrono::steady_clock::now();
-    if (queue.empty() && now - last_check > std::chrono::milliseconds(100)) {
-        last_check = now;
-        if (FILE* f = std::fopen(path, "r")) {
-            char token[32];
-            while (std::fscanf(f, "%31s", token) == 1) {
-                queue.emplace_back(token);
+    if (s_queue.empty() && now - s_last_check > std::chrono::milliseconds(100)) {
+        s_last_check = now;
+        if (FILE* p_file = std::fopen(s_sz_path, "r")) {
+            char sz_token[32];
+            while (std::fscanf(p_file, "%31s", sz_token) == 1) {
+                s_queue.emplace_back(sz_token);
             }
-            std::fclose(f);
-            std::remove(path);
+            std::fclose(p_file);
+            std::remove(s_sz_path);
         }
     }
-    if (queue.empty()) {
+    if (s_queue.empty()) {
         return;
     }
-    const std::string token = queue.front();
-    queue.erase(queue.begin());
+    const std::string token = s_queue.front();
+    s_queue.erase(s_queue.begin());
     if (token == "toggle") {
-        SetOpen(!menu_open);
+        SetOpen(!s_is_menu_open);
         return;
     }
-    held = token == "up" ? ImGuiKey_GamepadDpadUp : token == "down" ? ImGuiKey_GamepadDpadDown
+    s_held = token == "up" ? ImGuiKey_GamepadDpadUp : token == "down" ? ImGuiKey_GamepadDpadDown
          : token == "left" ? ImGuiKey_GamepadDpadLeft : token == "right" ? ImGuiKey_GamepadDpadRight
          : token == "enter" ? ImGuiKey_GamepadFaceDown : token == "l1" ? ImGuiKey_GamepadL1
          : token == "r1" ? ImGuiKey_GamepadR1 : token == "kdown" ? ImGuiKey_DownArrow
@@ -848,26 +848,26 @@ void ScriptedKeys() {
         SetOpen(false);
         return;
     }
-    if (held != ImGuiKey_None) {
-        io.AddKeyEvent(held, true);
-        release = true;
+    if (s_held != ImGuiKey_None) {
+        io.AddKeyEvent(s_held, true);
+        s_should_release = true;
     }
 }
 
 } // namespace
 
-void SetTextPrompt(bool active, const std::string& prompt, const std::string& text) {
+void SetTextPrompt(bool is_active, const std::string& prompt, const std::string& text) {
     {
-        std::scoped_lock lock{prompt_mutex};
-        prompt_title = prompt;
-        prompt_text = text;
+        std::scoped_lock lock{s_prompt_mutex};
+        s_prompt_title = prompt;
+        s_prompt_text = text;
     }
-    prompt_active = active;
+    s_is_prompt_active = is_active;
 }
 
-void Init(const Vulkan::Instance& instance, vk::Format format, u32 image_count) {
-    std::scoped_lock lock{imgui_mutex};
-    if (initialized) {
+void Init(const Vulkan::Instance& instance, vk::Format format, u32 c_images) {
+    std::scoped_lock lock{s_imgui_mutex};
+    if (s_is_initialized) {
         return;
     }
     IMGUI_CHECKVERSION();
@@ -893,9 +893,9 @@ void Init(const Vulkan::Instance& instance, vk::Format format, u32 image_count) 
     const vk::Instance vk_instance = instance.GetInstance();
     ImGui_ImplVulkan_LoadFunctions(
         instance.ApiVersion(),
-        [](const char* name, void* user) {
+        [](const char* sz_name, void* p_user) {
             return VULKAN_HPP_DEFAULT_DISPATCHER.vkGetInstanceProcAddr(
-                *static_cast<const vk::Instance*>(user), name);
+                *static_cast<const vk::Instance*>(p_user), sz_name);
         },
         const_cast<vk::Instance*>(&vk_instance));
 
@@ -908,8 +908,8 @@ void Init(const Vulkan::Instance& instance, vk::Format format, u32 image_count) 
     info.QueueFamily = instance.GetGraphicsQueueFamilyIndex();
     info.Queue = instance.GetGraphicsQueue();
     info.DescriptorPoolSize = 16;
-    info.MinImageCount = std::max(image_count, 2u);
-    info.ImageCount = std::max(image_count, 2u);
+    info.MinImageCount = std::max(c_images, 2u);
+    info.ImageCount = std::max(c_images, 2u);
     info.UseDynamicRendering = true;
     info.PipelineInfoMain.PipelineRenderingCreateInfo = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR,
@@ -921,57 +921,57 @@ void Init(const Vulkan::Instance& instance, vk::Format format, u32 image_count) 
         ImGui::DestroyContext();
         return;
     }
-    initialized = true;
+    s_is_initialized = true;
     std::printf("Overlay: menu ready (Insert or L3+R3)\n");
 }
 
-void UpdateTextInput(SDL_Window* window) {
-    bool want = false;
+void UpdateTextInput(SDL_Window* p_window) {
+    bool is_wanted = false;
     {
-        std::scoped_lock lock{imgui_mutex};
-        want = initialized && menu_open && ImGui::GetIO().WantTextInput;
+        std::scoped_lock lock{s_imgui_mutex};
+        is_wanted = s_is_initialized && s_is_menu_open && ImGui::GetIO().WantTextInput;
     }
-    if (want != SDL_TextInputActive(window)) {
-        if (want) {
-            SDL_StartTextInput(window);
+    if (is_wanted != SDL_TextInputActive(p_window)) {
+        if (is_wanted) {
+            SDL_StartTextInput(p_window);
         } else {
-            SDL_StopTextInput(window);
+            SDL_StopTextInput(p_window);
         }
     }
 }
 
 bool HandleEvent(const SDL_Event& event) {
-    std::scoped_lock lock{imgui_mutex};
-    if (!initialized) {
+    std::scoped_lock lock{s_imgui_mutex};
+    if (!s_is_initialized) {
         return false;
     }
     ImGuiIO& io = ImGui::GetIO();
-    const bool is_open = menu_open;
+    const bool is_open = s_is_menu_open;
     switch (event.type) {
     case SDL_EVENT_KEY_DOWN:
     case SDL_EVENT_KEY_UP: {
-        const bool down = event.type == SDL_EVENT_KEY_DOWN;
-        if (!down && close_release && event.key.key == release_key) {
-            close_release = false;
+        const bool is_down = event.type == SDL_EVENT_KEY_DOWN;
+        if (!is_down && s_is_release_pending && event.key.key == s_release_key) {
+            s_is_release_pending = false;
             return true;
         }
-        if (close_prompt) {
-            if (down && !event.key.repeat) {
+        if (s_is_close_prompt_open) {
+            if (is_down && !event.key.repeat) {
                 if (event.key.key == SDLK_RETURN || event.key.key == SDLK_KP_ENTER) {
                     AnswerClosePrompt(true);
                 } else if (event.key.key == SDLK_ESCAPE || event.key.key == SDLK_HOME) {
                     AnswerClosePrompt(false);
-                    release_key = event.key.key;
-                    close_release = true;
+                    s_release_key = event.key.key;
+                    s_is_release_pending = true;
                 }
             }
             return true;
         }
-        if (down && !event.key.repeat && !is_open && event.key.key == SDLK_HOME) {
+        if (is_down && !event.key.repeat && !is_open && event.key.key == SDLK_HOME) {
             OpenClosePrompt();
             return true;
         }
-        if (down && !event.key.repeat &&
+        if (is_down && !event.key.repeat &&
             (event.key.key == SDLK_INSERT || (is_open && event.key.key == SDLK_ESCAPE))) {
             SetOpen(event.key.key == SDLK_INSERT ? !is_open : false);
             return true;
@@ -983,38 +983,38 @@ bool HandleEvent(const SDL_Event& event) {
         io.AddKeyEvent(ImGuiMod_Shift, (event.key.mod & SDL_KMOD_SHIFT) != 0);
         io.AddKeyEvent(ImGuiMod_Alt, (event.key.mod & SDL_KMOD_ALT) != 0);
         if (const ImGuiKey key = KeyFromSdl(event.key.key); key != ImGuiKey_None) {
-            io.AddKeyEvent(key, down);
+            io.AddKeyEvent(key, is_down);
         }
         return true;
     }
     case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
     case SDL_EVENT_GAMEPAD_BUTTON_UP: {
-        const bool down = event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN;
+        const bool is_down = event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN;
         const u8 button = event.gbutton.button;
         if (button == SDL_GAMEPAD_BUTTON_LEFT_STICK) {
-            l3_down = down;
+            s_is_l3_down = is_down;
         } else if (button == SDL_GAMEPAD_BUTTON_RIGHT_STICK) {
-            r3_down = down;
+            s_is_r3_down = is_down;
         }
-        if (!down && close_release && button == release_button) {
-            close_release = false;
+        if (!is_down && s_is_release_pending && button == s_release_button) {
+            s_is_release_pending = false;
             return true;
         }
-        if (close_prompt) {
-            if (down && button == SDL_GAMEPAD_BUTTON_SOUTH) {
+        if (s_is_close_prompt_open) {
+            if (is_down && button == SDL_GAMEPAD_BUTTON_SOUTH) {
                 AnswerClosePrompt(true);
-            } else if (down && (button == SDL_GAMEPAD_BUTTON_EAST || button == SDL_GAMEPAD_BUTTON_GUIDE)) {
+            } else if (is_down && (button == SDL_GAMEPAD_BUTTON_EAST || button == SDL_GAMEPAD_BUTTON_GUIDE)) {
                 AnswerClosePrompt(false);
-                release_button = button;
-                close_release = true;
+                s_release_button = button;
+                s_is_release_pending = true;
             }
             return true;
         }
-        if (down && button == SDL_GAMEPAD_BUTTON_GUIDE) {
+        if (is_down && button == SDL_GAMEPAD_BUTTON_GUIDE) {
             OpenClosePrompt();
             return true;
         }
-        if (down && l3_down && r3_down) {
+        if (is_down && s_is_l3_down && s_is_r3_down) {
             SetOpen(!is_open);
             return true;
         }
@@ -1022,7 +1022,7 @@ bool HandleEvent(const SDL_Event& event) {
             return false;
         }
         if (const ImGuiKey key = KeyFromGamepad(button); key != ImGuiKey_None) {
-            io.AddKeyEvent(key, down);
+            io.AddKeyEvent(key, is_down);
         }
         return true;
     }
@@ -1069,43 +1069,43 @@ bool HandleEvent(const SDL_Event& event) {
 }
 
 bool Visible() {
-    return initialized &&
-           (menu_open || prompt_active || close_prompt || game_cursor_shown || PsSettings::Get().show_fps);
+    return s_is_initialized &&
+           (s_is_menu_open || s_is_prompt_active || s_is_close_prompt_open || s_is_game_cursor_shown || PsSettings::Get().should_show_fps);
 }
 
-void SetGameCursor(u32 index, const GameCursor& cursor) {
-    std::scoped_lock lock{cursor_mutex};
-    game_cursors[index] = cursor;
-    game_cursor_shown = std::any_of(game_cursors.begin(), game_cursors.end(),
-                                    [](const GameCursor& c) { return c.enabled; });
+void SetGameCursor(u32 i_cursor, const GameCursor& cursor) {
+    std::scoped_lock lock{s_cursor_mutex};
+    s_game_cursors[i_cursor] = cursor;
+    s_is_game_cursor_shown = std::any_of(s_game_cursors.begin(), s_game_cursors.end(),
+                                    [](const GameCursor& c) { return c.is_enabled; });
 }
 
 bool GameCursorShown() {
-    return game_cursor_shown;
+    return s_is_game_cursor_shown;
 }
 
 bool MenuOpen() {
-    return menu_open;
+    return s_is_menu_open;
 }
 
 bool CapturesInput() {
     // The text dialog too: keys typed into it (Backspace is the touchpad) stay out of the game.
-    return menu_open || prompt_active || close_prompt || close_release;
+    return s_is_menu_open || s_is_prompt_active || s_is_close_prompt_open || s_is_release_pending;
 }
 
-bool PadFilePress(bool guide, bool cross, bool circle) {
-    std::scoped_lock lock{imgui_mutex};
-    if (!initialized) {
+bool PadFilePress(bool is_guide_pressed, bool is_cross_pressed, bool is_circle_pressed) {
+    std::scoped_lock lock{s_imgui_mutex};
+    if (!s_is_initialized) {
         return false;
     }
-    if (!close_prompt) {
-        if (guide) {
+    if (!s_is_close_prompt_open) {
+        if (is_guide_pressed) {
             OpenClosePrompt();
         }
-        return guide;
+        return is_guide_pressed;
     }
-    if (guide || cross || circle) {
-        AnswerClosePrompt(cross);
+    if (is_guide_pressed || is_cross_pressed || is_circle_pressed) {
+        AnswerClosePrompt(is_cross_pressed);
     }
     return true;
 }
@@ -1114,44 +1114,44 @@ void Render(vk::CommandBuffer cmdbuf, vk::ImageView view, vk::Extent2D extent, v
 
     // Present interval for the FPS readout (measured also while nothing is drawn).
     const auto now = std::chrono::steady_clock::now();
-    const float ms = std::chrono::duration<float, std::milli>(now - last_present).count();
-    last_present = now;
+    const float ms = std::chrono::duration<float, std::milli>(now - s_last_present).count();
+    s_last_present = now;
     if (ms > 0.0f && ms < 1000.0f) {
-        frame_ms_avg = frame_ms_avg == 0.0f ? ms : frame_ms_avg * 0.95f + ms * 0.05f;
+        s_frame_ms_avg = s_frame_ms_avg == 0.0f ? ms : s_frame_ms_avg * 0.95f + ms * 0.05f;
     }
-    if (std::getenv("PS_MENU_KEYS_FILE") && initialized) {
-        std::scoped_lock lock{imgui_mutex};
+    if (std::getenv("PS_MENU_KEYS_FILE") && s_is_initialized) {
+        std::scoped_lock lock{s_imgui_mutex};
         ScriptedKeys();
     }
     if (!Visible()) {
         return;
     }
-    std::scoped_lock lock{imgui_mutex};
+    std::scoped_lock lock{s_imgui_mutex};
     ImGuiIO& io = ImGui::GetIO();
     io.DisplaySize = ImVec2(float(extent.width), float(extent.height));
     io.DeltaTime = ms > 0.0f && ms < 1000.0f ? ms / 1000.0f : 1.0f / 60.0f;
     // UI scale follows the display height (1080p = 1).
     const float scale = std::max(float(extent.height) / 1080.0f, 0.75f);
-    if (std::abs(scale - base_scale) > 0.01f) {
+    if (std::abs(scale - s_base_scale) > 0.01f) {
         ImGuiStyle& style = ImGui::GetStyle();
-        style.ScaleAllSizes(scale / base_scale);
+        style.ScaleAllSizes(scale / s_base_scale);
         style.FontScaleMain = scale;
-        base_scale = scale;
+        s_base_scale = scale;
     }
 
     ImGui_ImplVulkan_NewFrame();
     ImGui::NewFrame();
     GameCursors(frame);
-    if (menu_open) {
+    if (s_is_menu_open) {
         Menu();
     }
-    if (PsSettings::Get().show_fps && !menu_open) {
+    if (PsSettings::Get().should_show_fps && !s_is_menu_open) {
         FpsCounter();
     }
-    if (prompt_active && !menu_open) {
+    if (s_is_prompt_active && !s_is_menu_open) {
         TextPrompt();
     }
-    if (close_prompt) {
+    if (s_is_close_prompt_open) {
         ClosePrompt();
     }
     ImGui::Render();

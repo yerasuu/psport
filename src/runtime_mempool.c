@@ -15,124 +15,124 @@
 #define RESERVE_ALIGN UINT64_C(0x200000)
 #define PROT_CPU_EXEC 4
 #define MAX_EXTENTS 1024
-typedef struct { uint64_t phys, size; } Extent;
-static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
-static Extent extents[MAX_EXTENTS]; /* free pool memory, sorted by phys, never adjacent */
-static size_t extent_count;
-static uint64_t expanded_bytes, free_bytes;
-static size_t expands, reserves, commits, decommits;
+typedef struct { uint64_t phys, cb_range; } Extent;
+static pthread_mutex_t s_lock=PTHREAD_MUTEX_INITIALIZER;
+static Extent s_extents[MAX_EXTENTS]; /* free pool memory, sorted by phys, never adjacent */
+static size_t s_c_extents;
+static uint64_t s_cb_expanded, s_cb_free;
+static size_t s_c_expands, s_c_reserves, s_c_commits, s_c_decommits;
 
 /* Lock held; 0 when the free list is full. */
-static int give_back(uint64_t phys, uint64_t size) {
+static int give_back(uint64_t phys, uint64_t cb_range) {
     size_t i=0;
-    while (i<extent_count && extents[i].phys<phys) ++i;
-    const int joins_left=i>0 && extents[i-1].phys+extents[i-1].size==phys;
-    const int joins_right=i<extent_count && phys+size==extents[i].phys;
+    while (i<s_c_extents && s_extents[i].phys<phys) ++i;
+    const int joins_left=i>0 && s_extents[i-1].phys+s_extents[i-1].cb_range==phys;
+    const int joins_right=i<s_c_extents && phys+cb_range==s_extents[i].phys;
     if (joins_left && joins_right) {
-        extents[i-1].size+=size+extents[i].size;
-        for (size_t j=i;j+1<extent_count;++j) extents[j]=extents[j+1];
-        --extent_count;
+        s_extents[i-1].cb_range+=cb_range+s_extents[i].cb_range;
+        for (size_t j=i;j+1<s_c_extents;++j) s_extents[j]=s_extents[j+1];
+        --s_c_extents;
     } else if (joins_left) {
-        extents[i-1].size+=size;
+        s_extents[i-1].cb_range+=cb_range;
     } else if (joins_right) {
-        extents[i].phys=phys; extents[i].size+=size;
+        s_extents[i].phys=phys; s_extents[i].cb_range+=cb_range;
     } else {
-        if (extent_count==MAX_EXTENTS) return 0;
-        for (size_t j=extent_count;j>i;--j) extents[j]=extents[j-1];
-        extents[i]=(Extent){phys,size};
-        ++extent_count;
+        if (s_c_extents==MAX_EXTENTS) return 0;
+        for (size_t j=s_c_extents;j>i;--j) s_extents[j]=s_extents[j-1];
+        s_extents[i]=(Extent){phys,cb_range};
+        ++s_c_extents;
     }
-    free_bytes+=size;
+    s_cb_free+=cb_range;
     return 1;
 }
-static void released(uint64_t phys, uint64_t size) {
-    if (!give_back(phys,size))
-        fprintf(stderr,"Runtime: memory pool free list full: %#" PRIx64 "+%#" PRIx64 " is lost to the pool\n",phys,size);
+static void released(uint64_t phys, uint64_t cb_range) {
+    if (!give_back(phys,cb_range))
+        fprintf(stderr,"Runtime: memory pool free list full: %#" PRIx64 "+%#" PRIx64 " is lost to the pool\n",phys,cb_range);
 }
-static void take(uint64_t size) {
-    extents[0].phys+=size; extents[0].size-=size; free_bytes-=size;
-    if (!extents[0].size) {
-        for (size_t j=0;j+1<extent_count;++j) extents[j]=extents[j+1];
-        --extent_count;
+static void take(uint64_t cb_range) {
+    s_extents[0].phys+=cb_range; s_extents[0].cb_range-=cb_range; s_cb_free-=cb_range;
+    if (!s_extents[0].cb_range) {
+        for (size_t j=0;j+1<s_c_extents;++j) s_extents[j]=s_extents[j+1];
+        --s_c_extents;
     }
 }
 
-static ABI int32_t pool_expand(uint64_t low, uint64_t high, uint64_t size, uint64_t alignment, uint64_t *out) {
-    if (high<=low || !size || size%BLOCK || alignment%BLOCK || !out) return INVALID;
-    if (high-low<size) return NO_MEMORY;
+static ABI int32_t pool_expand(uint64_t low, uint64_t high, uint64_t cb_range, uint64_t alignment, uint64_t *p_out) {
+    if (high<=low || !cb_range || cb_range%BLOCK || alignment%BLOCK || !p_out) return INVALID;
+    if (high-low<cb_range) return NO_MEMORY;
     int64_t phys;
-    pthread_mutex_lock(&lock);
-    int32_t result=extent_count==MAX_EXTENTS ? NO_MEMORY
-                                             : runtime_memory_pool_expand(low,high,size,alignment ? alignment : BLOCK,&phys);
-    if (!result) { give_back((uint64_t)phys,size); expanded_bytes+=size; ++expands; }
-    pthread_mutex_unlock(&lock);
+    pthread_mutex_lock(&s_lock);
+    int32_t result=s_c_extents==MAX_EXTENTS ? NO_MEMORY
+                                             : runtime_memory_pool_expand(low,high,cb_range,alignment ? alignment : BLOCK,&phys);
+    if (!result) { give_back((uint64_t)phys,cb_range); s_cb_expanded+=cb_range; ++s_c_expands; }
+    pthread_mutex_unlock(&s_lock);
     if (result) {
         printf("Runtime: memory pool expand by %#" PRIx64 " in [%#" PRIx64 ", %#" PRIx64 ") failed (error %#x)\n",
-               size,low,high,(unsigned)result);
+               cb_range,low,high,(unsigned)result);
         return NO_MEMORY;
     }
-    *out=(uint64_t)phys;
-    printf("Runtime: memory pool expanded by %#" PRIx64 " bytes at direct memory %#" PRIx64 "\n",size,(uint64_t)phys);
+    *p_out=(uint64_t)phys;
+    printf("Runtime: memory pool expanded by %#" PRIx64 " bytes at direct memory %#" PRIx64 "\n",cb_range,(uint64_t)phys);
     return 0;
 }
-static ABI int32_t pool_reserve(void *address, uint64_t size, uint64_t alignment, int flags, void **out) {
-    if (!out || !size || size%RESERVE_ALIGN || (alignment & (alignment-1))) return INVALID;
-    void *at=address;
-    const int32_t result=runtime_memory_pool_reserve(&at,size,flags,alignment ? alignment : RESERVE_ALIGN);
+static ABI int32_t pool_reserve(void *p_address, uint64_t cb_range, uint64_t alignment, int flags, void **pp_out) {
+    if (!pp_out || !cb_range || cb_range%RESERVE_ALIGN || (alignment & (alignment-1))) return INVALID;
+    void *p_at=p_address;
+    const int32_t result=runtime_memory_pool_reserve(&p_at,cb_range,flags,alignment ? alignment : RESERVE_ALIGN);
     if (result) {
-        printf("Runtime: memory pool reserve of %#" PRIx64 " bytes at %p failed (error %#x)\n",size,address,(unsigned)result);
+        printf("Runtime: memory pool reserve of %#" PRIx64 " bytes at %p failed (error %#x)\n",cb_range,p_address,(unsigned)result);
         return result;
     }
-    __atomic_add_fetch(&reserves,1,__ATOMIC_RELAXED);
-    *out=at;
-    printf("Runtime: memory pool reserved %p, size=%#" PRIx64 "\n",at,size);
+    __atomic_add_fetch(&s_c_reserves,1,__ATOMIC_RELAXED);
+    *pp_out=p_at;
+    printf("Runtime: memory pool reserved %p, size=%#" PRIx64 "\n",p_at,cb_range);
     return 0;
 }
-static ABI int32_t pool_commit(void *address, uint64_t size, int type, int prot, int flags) {
+static ABI int32_t pool_commit(void *p_address, uint64_t cb_range, int type, int prot, int flags) {
     (void)flags;
-    if (!address || !size || size%BLOCK || (prot & PROT_CPU_EXEC) || (prot & ~0x37) ||
+    if (!p_address || !cb_range || cb_range%BLOCK || (prot & PROT_CPU_EXEC) || (prot & ~0x37) ||
         type<0 || type>10)
         return INVALID;
-    const uintptr_t start=(uintptr_t)address;
-    pthread_mutex_lock(&lock);
-    int32_t result=free_bytes<size ? NO_MEMORY : 0;
+    const uintptr_t start=(uintptr_t)p_address;
+    pthread_mutex_lock(&s_lock);
+    int32_t result=s_cb_free<cb_range ? NO_MEMORY : 0;
     uint64_t done=0;
-    while (!result && done<size) {
-        const uint64_t piece=extents[0].size<size-done ? extents[0].size : size-done;
-        result=runtime_memory_pool_commit(start+done,piece,prot,type,extents[0].phys);
+    while (!result && done<cb_range) {
+        const uint64_t piece=s_extents[0].cb_range<cb_range-done ? s_extents[0].cb_range : cb_range-done;
+        result=runtime_memory_pool_commit(start+done,piece,prot,type,s_extents[0].phys);
         if (!result) { take(piece); done+=piece; }
     }
     if (result && done) runtime_memory_pool_decommit(start,done,released);
-    if (!result) ++commits;
-    const uint64_t pool_free=free_bytes;
-    pthread_mutex_unlock(&lock);
+    if (!result) ++s_c_commits;
+    const uint64_t pool_free=s_cb_free;
+    pthread_mutex_unlock(&s_lock);
     if (result)
         printf("Runtime: memory pool commit of %#" PRIx64 " bytes at %p failed (error %#x), pool free=%#" PRIx64 "\n",
-               size,address,(unsigned)result,pool_free);
+               cb_range,p_address,(unsigned)result,pool_free);
     return result;
 }
-static ABI int32_t pool_decommit(void *address, uint64_t size, int flags) {
+static ABI int32_t pool_decommit(void *p_address, uint64_t cb_range, int flags) {
     (void)flags;
-    if (!address || !size || size%BLOCK) return INVALID;
-    pthread_mutex_lock(&lock);
-    const int32_t result=runtime_memory_pool_decommit((uintptr_t)address,size,released);
-    if (!result) ++decommits;
-    pthread_mutex_unlock(&lock);
-    if (result) printf("Runtime: memory pool decommit of %#" PRIx64 " bytes at %p failed (error %#x)\n",size,address,(unsigned)result);
+    if (!p_address || !cb_range || cb_range%BLOCK) return INVALID;
+    pthread_mutex_lock(&s_lock);
+    const int32_t result=runtime_memory_pool_decommit((uintptr_t)p_address,cb_range,released);
+    if (!result) ++s_c_decommits;
+    pthread_mutex_unlock(&s_lock);
+    if (result) printf("Runtime: memory pool decommit of %#" PRIx64 " bytes at %p failed (error %#x)\n",cb_range,p_address,(unsigned)result);
     return result;
 }
 
-static const RuntimeExport exports[]={
+static const RuntimeExport s_exports[]={
     {"sceKernelMemoryPoolExpand",pool_expand}, {"sceKernelMemoryPoolReserve",pool_reserve},
     {"sceKernelMemoryPoolCommit",pool_commit}, {"sceKernelMemoryPoolDecommit",pool_decommit},
 };
-uintptr_t runtime_mempool_resolve(const char *name) { return RUNTIME_LOOKUP(exports,name); }
+uintptr_t runtime_mempool_resolve(const char *sz_name) { return RUNTIME_LOOKUP(s_exports,sz_name); }
 void runtime_mempool_report(void) {
-    pthread_mutex_lock(&lock);
+    pthread_mutex_lock(&s_lock);
     printf("Runtime: memory pool expands=%zu (%#" PRIx64 " bytes), reserves=%zu, commits=%zu, decommits=%zu, "
            "committed=%#" PRIx64 "\n",
-           expands,expanded_bytes,reserves,commits,decommits,expanded_bytes-free_bytes);
-    pthread_mutex_unlock(&lock);
+           s_c_expands,s_cb_expanded,s_c_reserves,s_c_commits,s_c_decommits,s_cb_expanded-s_cb_free);
+    pthread_mutex_unlock(&s_lock);
 }
 #else
 uintptr_t runtime_mempool_resolve(const char *name) { (void)name; return 0; }

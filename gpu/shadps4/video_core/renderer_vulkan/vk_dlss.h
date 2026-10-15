@@ -47,13 +47,13 @@ public:
     struct FeatureDesc {
         u32 input_width, input_height, output_width, output_height;
         int quality;
-        bool hdr;
+        bool is_hdr;
         bool operator==(const FeatureDesc&) const = default;
     };
     struct Frame {
         Resource color, depth, motion, output;
         float jitter_x, jitter_y;
-        bool reset;
+        bool should_reset;
         float frame_ms;
         float sharpness;
     };
@@ -69,7 +69,7 @@ public:
 private:
     Dlss();
     struct Impl;
-    std::unique_ptr<Impl> impl;
+    std::unique_ptr<Impl> m_impl;
 };
 
 } // namespace Vulkan

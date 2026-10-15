@@ -15,7 +15,7 @@
 #include <ucontext.h>
 #include <unistd.h>
 
-extern "C" void runtime_memory_note_write(uintptr_t address, uint64_t size);
+extern "C" void runtime_memory_note_write(uintptr_t va_range, uint64_t cb_range);
 
 namespace PsGuestHooks {
 namespace {
@@ -28,7 +28,7 @@ constexpr u64 ImageBase = 0x800000000ull;
 /// node's start): `add rsp, 0x18` in its epilogue, reached by its own branches only.
 constexpr u64 AllocReturn = 0x26aa255;
 constexpr unsigned char AllocReturnCode[4] = {0x48, 0x83, 0xc4, 0x18};
-RangeCallback on_range_allocated = nullptr;
+RangeCallback s_pfn_on_range_allocated = nullptr;
 
 /// The game's other GPU memory heap (TLSF-like, headers in the memory: free at 0x20858a0, alloc at
 /// 0x2085a60), reached through a pointer at 0x54b9f38 set at startup. Its only three callers
@@ -51,22 +51,22 @@ constexpr unsigned char ReleaseCheckCode[2] = {0x78, 0x15};
 /// 0x216d420 and 0x2171d60 copy texture and buffer data into GPU memory (most of the write
 /// faults while areas stream in).
 struct CallSite {
-    u64 offset;
+    u64 off_code;
     unsigned char code[5];
 };
 constexpr std::array<CallSite, 2> MemcpySites = {{
     {0x216d5ea, {0xe8, 0xc1, 0xcb, 0x4a, 0x00}},
     {0x2171fea, {0xe8, 0xc1, 0x81, 0x4a, 0x00}},
 }};
-std::array<std::atomic<u64>, MemcpySites.size()> hits{};
+std::array<std::atomic<u64>, MemcpySites.size()> s_hits{};
 
 /// The game's memcpy at those sites: the GPU side is told before (its write traps lift: no fault
 /// per page) and after the copy (the data now there), as for file reads.
-void* LoaderCopy(void* dst, const void* src, std::size_t size) {
-    runtime_memory_note_write(reinterpret_cast<u64>(dst), size);
-    std::memcpy(dst, src, size);
-    runtime_memory_note_write(reinterpret_cast<u64>(dst), size);
-    return dst;
+void* LoaderCopy(void* p_dst, const void* p_src, std::size_t cb_copy) {
+    runtime_memory_note_write(reinterpret_cast<u64>(p_dst), cb_copy);
+    std::memcpy(p_dst, p_src, cb_copy);
+    runtime_memory_note_write(reinterpret_cast<u64>(p_dst), cb_copy);
+    return p_dst;
 }
 
 /// psport: native detours (default; PS_GUEST_HOOK_TRAPS=1: int3 traps). Each hooked site jumps to
@@ -75,43 +75,43 @@ void* LoaderCopy(void* dst, const void* src, std::size_t size) {
 /// (a few microseconds in the kernel) per call; a detour costs a call. The int3 written first
 /// stays the fallback while the jump's bytes go in: OnTrap sends a thread that meets it to the stub.
 struct NativeSite {
-    u64 offset;
+    u64 off_code;
     std::atomic<u64> stub{0};
 };
-std::array<NativeSite, 4> native_sites{{{AllocReturn}, {HeapAllocReturns[0]}, {HeapAllocReturns[1]},
+std::array<NativeSite, 4> s_native_sites{{{AllocReturn}, {HeapAllocReturns[0]}, {HeapAllocReturns[1]},
                                         {HeapAllocReturns[2]}}};
-u8* stub_page = nullptr;
-std::size_t stub_used = 0;
+u8* s_p_stub_page = nullptr;
+std::size_t s_stub_used = 0;
 constexpr std::size_t StubPageSize = 4096;
 
 /// A page within +-2 GiB of the image (below its base: the image grows upwards).
 u8* MapStubPage() {
     for (u64 k = 1; k <= 64; ++k) {
         const u64 hint = ImageBase - k * (16ull << 20);
-        void* p = mmap(reinterpret_cast<void*>(hint), StubPageSize, PROT_READ | PROT_WRITE | PROT_EXEC,
+        void* p_mapping = mmap(reinterpret_cast<void*>(hint), StubPageSize, PROT_READ | PROT_WRITE | PROT_EXEC,
                        MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
-        if (p != MAP_FAILED) {
-            return static_cast<u8*>(p);
+        if (p_mapping != MAP_FAILED) {
+            return static_cast<u8*>(p_mapping);
         }
     }
     return nullptr;
 }
 
 struct Emitter {
-    std::array<u8, 256> code{};
-    std::size_t size = 0;
+    std::array<u8, 256> m_code{};
+    std::size_t m_cb_code = 0;
     void Bytes(std::initializer_list<u8> bytes) {
         for (const u8 b : bytes) {
-            code[size++] = b;
+            m_code[m_cb_code++] = b;
         }
     }
     void U32(std::uint32_t v) {
-        std::memcpy(&code[size], &v, 4);
-        size += 4;
+        std::memcpy(&m_code[m_cb_code], &v, 4);
+        m_cb_code += 4;
     }
     void U64(u64 v) {
-        std::memcpy(&code[size], &v, 8);
-        size += 8;
+        std::memcpy(&m_code[m_cb_code], &v, 8);
+        m_cb_code += 8;
     }
     /// Saves the caller-saved registers (the handler may change them), aligns the stack.
     void SaveVolatile() {
@@ -120,9 +120,9 @@ struct Emitter {
         Bytes({0x49, 0x89, 0xe4});       // mov r12, rsp
         Bytes({0x48, 0x83, 0xe4, 0xf0}); // and rsp, -16
     }
-    void CallAbs(const void* fn) {
+    void CallAbs(const void* p_function) {
         Bytes({0x48, 0xb8}); // movabs rax, fn
-        U64(reinterpret_cast<u64>(fn));
+        U64(reinterpret_cast<u64>(p_function));
         Bytes({0xff, 0xd0}); // call rax
     }
     void RestoreVolatile() {
@@ -134,13 +134,13 @@ struct Emitter {
 
 /// Copies `e` into the stub page; returns its address there, or 0.
 u64 PlaceStub(const Emitter& e) {
-    if (!stub_page || stub_used + e.size > StubPageSize) {
+    if (!s_p_stub_page || s_stub_used + e.m_cb_code > StubPageSize) {
         return 0;
     }
-    u8* at = stub_page + stub_used;
-    std::memcpy(at, e.code.data(), e.size);
-    stub_used += (e.size + 15) & ~std::size_t(15);
-    return reinterpret_cast<u64>(at);
+    u8* p_at = s_p_stub_page + s_stub_used;
+    std::memcpy(p_at, e.m_code.data(), e.m_cb_code);
+    s_stub_used += (e.m_cb_code + 15) & ~std::size_t(15);
+    return reinterpret_cast<u64>(p_at);
 }
 
 bool Rel32To(u64 from_next, u64 to, std::uint32_t& rel) {
@@ -152,18 +152,18 @@ bool Rel32To(u64 from_next, u64 to, std::uint32_t& rel) {
     return true;
 }
 
-/// Replaces bytes [1, 5) at `address` (byte 0 is the trap already there), then byte 0.
-void WriteJumpOverTrap(u64 address, u8 opcode, std::uint32_t rel) {
-    const long page_size = sysconf(_SC_PAGESIZE);
-    void* page = reinterpret_cast<void*>(address & ~u64(page_size - 1));
-    const std::size_t span = (address + 5) - reinterpret_cast<u64>(page);
-    mprotect(page, span, PROT_READ | PROT_WRITE | PROT_EXEC);
-    auto* p = reinterpret_cast<u8*>(address);
+/// Replaces bytes [1, 5) at `va_guest` (byte 0 is the trap already there), then byte 0.
+void WriteJumpOverTrap(u64 va_guest, u8 opcode, std::uint32_t rel) {
+    const long cb_page = sysconf(_SC_PAGESIZE);
+    void* p_page = reinterpret_cast<void*>(va_guest & ~u64(cb_page - 1));
+    const std::size_t span = (va_guest + 5) - reinterpret_cast<u64>(p_page);
+    mprotect(p_page, span, PROT_READ | PROT_WRITE | PROT_EXEC);
+    auto* p_code = reinterpret_cast<u8*>(va_guest);
     for (int i = 0; i < 4; ++i) {
-        __atomic_store_n(p + 1 + i, u8(rel >> (8 * i)), __ATOMIC_SEQ_CST);
+        __atomic_store_n(p_code + 1 + i, u8(rel >> (8 * i)), __ATOMIC_SEQ_CST);
     }
-    __atomic_store_n(p, opcode, __ATOMIC_SEQ_CST);
-    mprotect(page, span, PROT_READ | PROT_EXEC);
+    __atomic_store_n(p_code, opcode, __ATOMIC_SEQ_CST);
+    mprotect(p_page, span, PROT_READ | PROT_EXEC);
 }
 
 void AllocHook(u64 node) {
@@ -174,22 +174,22 @@ void AllocHook(u64 node) {
     const u64 next = *reinterpret_cast<const u64*>(node + 0x18);
     const u64 end = next ? *reinterpret_cast<const u64*>(next + 8) : start;
     if (end > start && end - start < (u64(1) << 32)) {
-        on_range_allocated(start, end - start);
+        s_pfn_on_range_allocated(start, end - start);
     }
 }
 
-void HeapHook(u64 address, u64 size) {
-    if (address != 0 && size != 0 && size < (u64(1) << 32)) {
-        on_range_allocated(address, size);
+void HeapHook(u64 va_range, u64 cb_range) {
+    if (va_range != 0 && cb_range != 0 && cb_range < (u64(1) << 32)) {
+        s_pfn_on_range_allocated(va_range, cb_range);
     }
 }
 
 /// The detour of a site whose int3 is in place (Patch). False: left as a trap.
 bool InstallDetour(NativeSite& site) {
-    const u64 address = ImageBase + site.offset;
+    const u64 address = ImageBase + site.off_code;
     Emitter e;
     u64 back = 0;
-    if (site.offset == AllocReturn) {
+    if (site.off_code == AllocReturn) {
         // `add rsp, 0x18; pop rbx` (5 bytes) in the allocator's epilogue; rax: the node.
         if (reinterpret_cast<const u8*>(address)[4] != 0x5b) {
             return false;
@@ -203,8 +203,8 @@ bool InstallDetour(NativeSite& site) {
         back = address + 5;
     } else {
         // `mov rbx, rax; test rbx, rbx` (6 bytes) after the heap call; [rbp - 0x50]: the size.
-        const auto* code = reinterpret_cast<const u8*>(address);
-        if (code[3] != 0x48 || code[4] != 0x85 || code[5] != 0xdb) {
+        const auto* p_code = reinterpret_cast<const u8*>(address);
+        if (p_code[3] != 0x48 || p_code[4] != 0x85 || p_code[5] != 0xdb) {
             return false;
         }
         e.Bytes({0x48, 0x89, 0xc3});                               // mov rbx, rax
@@ -219,7 +219,7 @@ bool InstallDetour(NativeSite& site) {
         back = address + 6;
     }
     // jmp back
-    const u64 jmp_at = reinterpret_cast<u64>(stub_page + stub_used) + e.size;
+    const u64 jmp_at = reinterpret_cast<u64>(s_p_stub_page + s_stub_used) + e.m_cb_code;
     std::uint32_t rel_back = 0;
     if (!Rel32To(jmp_at + 5, back, rel_back)) {
         return false;
@@ -237,12 +237,12 @@ bool InstallDetour(NativeSite& site) {
 }
 
 /// The copy call sites: the call's target becomes a trampoline to LoaderCopy.
-bool InstallCallDetour(u64 offset) {
+bool InstallCallDetour(u64 off_code) {
     Emitter e;
     e.Bytes({0xff, 0x25, 0x00, 0x00, 0x00, 0x00}); // jmp [rip]
     e.U64(reinterpret_cast<u64>(&LoaderCopy));
     const u64 stub = PlaceStub(e);
-    const u64 address = ImageBase + offset;
+    const u64 address = ImageBase + off_code;
     std::uint32_t rel = 0;
     if (!stub || !Rel32To(address + 5, stub, rel)) {
         return false;
@@ -250,170 +250,170 @@ bool InstallCallDetour(u64 offset) {
     WriteJumpOverTrap(address, 0xe8, rel);
     return true;
 }
-struct sigaction previous_action {};
+struct sigaction s_previous_action {};
 
-void OnTrap(int sig, siginfo_t* info, void* context) {
-    auto* g = static_cast<ucontext_t*>(context)->uc_mcontext.gregs;
-    const u64 rip = u64(g[REG_RIP]) - 1; // past the int3
-    for (const auto& site : native_sites) {
-        if (rip == ImageBase + site.offset) {
+void OnTrap(int sig, siginfo_t* p_info, void* p_context) {
+    auto* p_registers = static_cast<ucontext_t*>(p_context)->uc_mcontext.gregs;
+    const u64 rip = u64(p_registers[REG_RIP]) - 1; // past the int3
+    for (const auto& site : s_native_sites) {
+        if (rip == ImageBase + site.off_code) {
             if (const u64 stub = site.stub.load(std::memory_order_acquire)) {
-                g[REG_RIP] = greg_t(stub); // the detour is going in: its stub runs the site
+                p_registers[REG_RIP] = greg_t(stub); // the detour is going in: its stub runs the site
                 return;
             }
         }
     }
     if (rip == ImageBase + ReleaseCheck) {
-        const auto result = static_cast<std::int32_t>(g[REG_RAX] & 0xffffffff);
+        const auto result = static_cast<std::int32_t>(p_registers[REG_RAX] & 0xffffffff);
         PsHeapSites::NoteReleaseCheck(std::uint32_t(result));
-        g[REG_RIP] = greg_t(ImageBase + (result < 0 ? 0xbb5fc7 : ReleaseCheck + 2));
+        p_registers[REG_RIP] = greg_t(ImageBase + (result < 0 ? 0xbb5fc7 : ReleaseCheck + 2));
         return;
     }
     if (rip == ImageBase + CollectorEntry) {
-        const u64 allocator = u64(g[REG_RDI]);
-        for (std::size_t i = 0; i < PsStats::range_allocators.size(); ++i) {
+        const u64 allocator = u64(p_registers[REG_RDI]);
+        for (std::size_t i = 0; i < PsStats::g_range_allocators.size(); ++i) {
             u64 expected = 0;
-            if (PsStats::range_allocators[i].load(std::memory_order_relaxed) == allocator ||
-                PsStats::range_allocators[i].compare_exchange_strong(expected, allocator)) {
-                PsStats::range_live[i].store(*reinterpret_cast<const u64*>(allocator + 0xc8),
+            if (PsStats::g_range_allocators[i].load(std::memory_order_relaxed) == allocator ||
+                PsStats::g_range_allocators[i].compare_exchange_strong(expected, allocator)) {
+                PsStats::g_range_live[i].store(*reinterpret_cast<const u64*>(allocator + 0xc8),
                                              std::memory_order_relaxed);
-                PsStats::range_bytes[i].store(*reinterpret_cast<const u64*>(allocator + 0xd0),
+                PsStats::g_range_bytes[i].store(*reinterpret_cast<const u64*>(allocator + 0xd0),
                                               std::memory_order_relaxed);
                 break;
             }
         }
-        g[REG_RSP] -= 8; // push rbp
-        *reinterpret_cast<u64*>(g[REG_RSP]) = u64(g[REG_RBP]);
-        g[REG_RIP] = greg_t(ImageBase + CollectorEntry + 1);
+        p_registers[REG_RSP] -= 8; // push rbp
+        *reinterpret_cast<u64*>(p_registers[REG_RSP]) = u64(p_registers[REG_RBP]);
+        p_registers[REG_RIP] = greg_t(ImageBase + CollectorEntry + 1);
         return;
     }
     for (const u64 site : HeapAllocReturns) {
         if (rip != ImageBase + site) {
             continue;
         }
-        const u64 address = u64(g[REG_RAX]);
-        const u64 size = *reinterpret_cast<const u64*>(u64(g[REG_RBP]) - 0x50);
-        if (address != 0 && size != 0 && size < (u64(1) << 32)) {
-            on_range_allocated(address, size);
+        const u64 address = u64(p_registers[REG_RAX]);
+        const u64 cb_copy = *reinterpret_cast<const u64*>(u64(p_registers[REG_RBP]) - 0x50);
+        if (address != 0 && cb_copy != 0 && cb_copy < (u64(1) << 32)) {
+            s_pfn_on_range_allocated(address, cb_copy);
         }
-        g[REG_RBX] = g[REG_RAX];
-        g[REG_RIP] = greg_t(ImageBase + site + sizeof(HeapAllocReturnCode));
+        p_registers[REG_RBX] = p_registers[REG_RAX];
+        p_registers[REG_RIP] = greg_t(ImageBase + site + sizeof(HeapAllocReturnCode));
         return;
     }
     if (rip == ImageBase + AllocReturn) {
-        if (const u64 node = u64(g[REG_RAX])) {
+        if (const u64 node = u64(p_registers[REG_RAX])) {
             const u64 start = *reinterpret_cast<const u64*>(node + 8);
             const u64 next = *reinterpret_cast<const u64*>(node + 0x18);
             const u64 end = next ? *reinterpret_cast<const u64*>(next + 8) : start;
             if (end > start && end - start < (u64(1) << 32)) {
-                on_range_allocated(start, end - start);
+                s_pfn_on_range_allocated(start, end - start);
             }
         }
-        g[REG_RSP] += 0x18;
-        g[REG_RIP] = greg_t(ImageBase + AllocReturn + sizeof(AllocReturnCode));
+        p_registers[REG_RSP] += 0x18;
+        p_registers[REG_RIP] = greg_t(ImageBase + AllocReturn + sizeof(AllocReturnCode));
         return;
     }
     for (std::size_t i = 0; i < MemcpySites.size(); ++i) {
         const auto& site = MemcpySites[i];
-        if (rip != ImageBase + site.offset) {
+        if (rip != ImageBase + site.off_code) {
             continue;
         }
-        hits[i].fetch_add(1, std::memory_order_relaxed);
+        s_hits[i].fetch_add(1, std::memory_order_relaxed);
         // The call, to LoaderCopy instead of the game's memcpy: push the return address, jump.
-        const u64 ret = ImageBase + site.offset + 5;
-        g[REG_RSP] -= 8;
-        *reinterpret_cast<u64*>(g[REG_RSP]) = ret;
-        g[REG_RIP] = greg_t(reinterpret_cast<u64>(&LoaderCopy));
+        const u64 ret = ImageBase + site.off_code + 5;
+        p_registers[REG_RSP] -= 8;
+        *reinterpret_cast<u64*>(p_registers[REG_RSP]) = ret;
+        p_registers[REG_RIP] = greg_t(reinterpret_cast<u64>(&LoaderCopy));
         return;
     }
-    if (previous_action.sa_flags & SA_SIGINFO) {
-        if (previous_action.sa_sigaction) {
-            previous_action.sa_sigaction(sig, info, context);
+    if (s_previous_action.sa_flags & SA_SIGINFO) {
+        if (s_previous_action.sa_sigaction) {
+            s_previous_action.sa_sigaction(sig, p_info, p_context);
             return;
         }
-    } else if (previous_action.sa_handler != SIG_DFL && previous_action.sa_handler != SIG_IGN &&
-               previous_action.sa_handler) {
-        previous_action.sa_handler(sig);
+    } else if (s_previous_action.sa_handler != SIG_DFL && s_previous_action.sa_handler != SIG_IGN &&
+               s_previous_action.sa_handler) {
+        s_previous_action.sa_handler(sig);
         return;
     }
     signal(SIGTRAP, SIG_DFL);
     raise(SIGTRAP);
 }
 
-bool Patch(u64 address, const unsigned char* expected, std::size_t size) {
+bool Patch(u64 va_range, const unsigned char* p_expected, std::size_t cb_expected) {
     unsigned char bytes[16]{};
-    iovec local{bytes, size}, remote{reinterpret_cast<void*>(address), size};
-    if (process_vm_readv(getpid(), &local, 1, &remote, 1, 0) != ssize_t(size) ||
-        std::memcmp(bytes, expected, size) != 0) {
+    iovec local{bytes, cb_expected}, remote{reinterpret_cast<void*>(va_range), cb_expected};
+    if (process_vm_readv(getpid(), &local, 1, &remote, 1, 0) != ssize_t(cb_expected) ||
+        std::memcmp(bytes, p_expected, cb_expected) != 0) {
         return false;
     }
-    const long page_size = sysconf(_SC_PAGESIZE);
-    void* page = reinterpret_cast<void*>(address & ~u64(page_size - 1));
-    const std::size_t span = (address + size) - reinterpret_cast<u64>(page);
-    if (mprotect(page, span, PROT_READ | PROT_WRITE | PROT_EXEC) != 0) {
+    const long cb_page = sysconf(_SC_PAGESIZE);
+    void* p_page = reinterpret_cast<void*>(va_range & ~u64(cb_page - 1));
+    const std::size_t span = (va_range + cb_expected) - reinterpret_cast<u64>(p_page);
+    if (mprotect(p_page, span, PROT_READ | PROT_WRITE | PROT_EXEC) != 0) {
         return false;
     }
-    __atomic_store_n(reinterpret_cast<unsigned char*>(address), static_cast<unsigned char>(0xcc),
+    __atomic_store_n(reinterpret_cast<unsigned char*>(va_range), static_cast<unsigned char>(0xcc),
                      __ATOMIC_SEQ_CST);
-    mprotect(page, span, PROT_READ | PROT_EXEC);
+    mprotect(p_page, span, PROT_READ | PROT_EXEC);
     return true;
 }
 } // namespace
 
-void Install(RangeCallback on_gpu_range_allocated) {
-    static std::atomic<bool> installed{false};
-    if (installed.exchange(true)) {
+void Install(RangeCallback pfn_on_gpu_range_allocated) {
+    static std::atomic<bool> s_is_installed{false};
+    if (s_is_installed.exchange(true)) {
         return;
     }
     struct sigaction action {};
     action.sa_sigaction = OnTrap;
     action.sa_flags = SA_SIGINFO | SA_NODEFER;
     sigemptyset(&action.sa_mask);
-    sigaction(SIGTRAP, &action, &previous_action);
-    int patched = 0;
+    sigaction(SIGTRAP, &action, &s_previous_action);
+    int c_patched = 0;
     for (const auto& site : MemcpySites) {
-        patched += Patch(ImageBase + site.offset, site.code, sizeof(site.code));
+        c_patched += Patch(ImageBase + site.off_code, site.code, sizeof(site.code));
     }
     std::printf("Guest hooks: %d of %zu resource copy sites tell the GPU side of their writes\n",
-                patched, MemcpySites.size());
-    on_range_allocated = on_gpu_range_allocated;
-    const bool allocator = Patch(ImageBase + AllocReturn, AllocReturnCode, sizeof(AllocReturnCode));
+                c_patched, MemcpySites.size());
+    s_pfn_on_range_allocated = pfn_on_gpu_range_allocated;
+    const bool has_allocator_hook = Patch(ImageBase + AllocReturn, AllocReturnCode, sizeof(AllocReturnCode));
     // PS_HEAP_HOOKS=0 (bisecting): the heap's ranges are not reported.
-    const char* heap_env = std::getenv("PS_HEAP_HOOKS");
-    const bool heap_hooks = !heap_env || heap_env[0] != '0';
-    if (PsStats::enabled) {
+    const char* sz_heap_env = std::getenv("PS_HEAP_HOOKS");
+    const bool should_hook_heap = !sz_heap_env || sz_heap_env[0] != '0';
+    if (PsStats::g_is_enabled) {
         Patch(ImageBase + CollectorEntry, CollectorEntryCode, sizeof(CollectorEntryCode));
     }
     int heap_sites = 0;
     for (const u64 site : HeapAllocReturns) {
-        if (!heap_hooks) {
+        if (!should_hook_heap) {
             break;
         }
         heap_sites += Patch(ImageBase + site, HeapAllocReturnCode, sizeof(HeapAllocReturnCode));
     }
     std::printf("Guest hooks: GPU heap allocations seen at %d of %zu call sites\n", heap_sites,
                 HeapAllocReturns.size());
-    std::printf("Guest hooks: GPU memory allocator %s\n", allocator ? "tells the GPU side of new ranges" : "not found");
+    std::printf("Guest hooks: GPU memory allocator %s\n", has_allocator_hook ? "tells the GPU side of new ranges" : "not found");
     // Native detours over the traps just placed (PS_GUEST_HOOK_TRAPS=1 keeps the traps).
-    const char* traps_env = std::getenv("PS_GUEST_HOOK_TRAPS");
-    if (!(traps_env && traps_env[0] == '1') && (stub_page = MapStubPage()) != nullptr) {
+    const char* sz_traps_env = std::getenv("PS_GUEST_HOOK_TRAPS");
+    if (!(sz_traps_env && sz_traps_env[0] == '1') && (s_p_stub_page = MapStubPage()) != nullptr) {
         int detours = 0;
         for (const auto& site : MemcpySites) {
-            if (reinterpret_cast<const u8*>(ImageBase + site.offset)[0] == 0xcc) {
-                detours += InstallCallDetour(site.offset);
+            if (reinterpret_cast<const u8*>(ImageBase + site.off_code)[0] == 0xcc) {
+                detours += InstallCallDetour(site.off_code);
             }
         }
-        for (auto& site : native_sites) {
-            if (reinterpret_cast<const u8*>(ImageBase + site.offset)[0] == 0xcc) {
+        for (auto& site : s_native_sites) {
+            if (reinterpret_cast<const u8*>(ImageBase + site.off_code)[0] == 0xcc) {
                 detours += InstallDetour(site);
             }
         }
-        mprotect(stub_page, StubPageSize, PROT_READ | PROT_EXEC);
+        mprotect(s_p_stub_page, StubPageSize, PROT_READ | PROT_EXEC);
         std::printf("Guest hooks: %d native detours (no traps; PS_GUEST_HOOK_TRAPS=1: int3)\n",
                     detours);
     }
     PsHeapSites::Install();
-    if (const char* env = std::getenv("PS_HEAP_SITES"); env && env[0] == '1') {
+    if (const char* sz_env = std::getenv("PS_HEAP_SITES"); sz_env && sz_env[0] == '1') {
         Patch(ImageBase + ReleaseCheck, ReleaseCheckCode, sizeof(ReleaseCheckCode));
     }
 }

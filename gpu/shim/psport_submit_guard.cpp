@@ -32,7 +32,7 @@ constexpr auto Reason = PsLayer::WriteTraps::FrameCommands;
 constexpr auto WaitLimit = std::chrono::seconds{5};
 
 struct Hole {
-    std::uint64_t offset, size;
+    std::uint64_t off_hole, cb_hole;
 };
 
 struct Range {
@@ -41,20 +41,20 @@ struct Range {
     std::uint64_t frame;
     std::vector<Hole> holes; // what the GPU itself writes inside it (labels), left out of the hash
     std::uint64_t hash;
-    bool hashed, trapped;
+    bool is_hashed, is_trapped;
 };
 
-std::mutex mutex;
-std::condition_variable retired_cv;
-std::vector<Range> armed;
-std::uint64_t closed = 0, retired = 0;
-std::atomic<bool> tripped{false};
+std::mutex s_mutex;
+std::condition_variable s_retired_cv;
+std::vector<Range> s_armed;
+std::uint64_t s_closed = 0, s_retired = 0;
+std::atomic<bool> s_is_tripped{false};
 
 enum Mode : unsigned { Off = 0, Traps = 1, Hashes = 2 };
 unsigned Modes() {
-    static const unsigned modes = [] {
-        const char* env = std::getenv("PS_SUBMIT_GUARD");
-        const std::string_view value = env ? env : "1";
+    static const unsigned s_modes = [] {
+        const char* sz_env = std::getenv("PS_SUBMIT_GUARD");
+        const std::string_view value = sz_env ? sz_env : "1";
         if (value == "0") {
             return unsigned(Off);
         }
@@ -66,12 +66,12 @@ unsigned Modes() {
         }
         return unsigned(Traps | Hashes);
     }();
-    return modes;
+    return s_modes;
 }
 
 bool GpuSideThread() {
-    auto* rasterizer = Core::Memory::Instance()->GetRasterizer();
-    return rasterizer && rasterizer->IsGpuSideThread();
+    auto* p_rasterizer = Core::Memory::Instance()->GetRasterizer();
+    return p_rasterizer && p_rasterizer->IsGpuSideThread();
 }
 
 std::uint32_t PacketDwords(std::uint32_t header) {
@@ -91,117 +91,117 @@ std::uint32_t PacketDwords(std::uint32_t header) {
 std::vector<Hole> GpuWrittenHoles(const Range& range) {
     using namespace AmdGpu;
     std::vector<Hole> holes;
-    const auto add = [&](std::uintptr_t address, std::uint64_t size) {
-        if (address >= range.begin && address < range.end) {
-            holes.push_back({address - range.begin, std::min<std::uint64_t>(size, range.end - address)});
+    const auto add = [&](std::uintptr_t va_range, std::uint64_t cb_range) {
+        if (va_range >= range.begin && va_range < range.end) {
+            holes.push_back({va_range - range.begin, std::min<std::uint64_t>(cb_range, range.end - va_range)});
         }
     };
-    const auto* commands = reinterpret_cast<const std::uint32_t*>(range.begin);
+    const auto* p_commands = reinterpret_cast<const std::uint32_t*>(range.begin);
     const std::uint64_t dwords = (range.end - range.begin) / 4;
     for (std::uint64_t at = 0; at < dwords;) {
-        const auto* header = reinterpret_cast<const PM4Type3Header*>(commands + at);
-        std::uint32_t n = PacketDwords(header->raw);
-        if (n == 0 || at + n > dwords) {
-            n = 1;
-        } else if (header->type == 3) {
-            switch (header->opcode) {
+        const auto* p_header = reinterpret_cast<const PM4Type3Header*>(p_commands + at);
+        std::uint32_t c_dwords = PacketDwords(p_header->raw);
+        if (c_dwords == 0 || at + c_dwords > dwords) {
+            c_dwords = 1;
+        } else if (p_header->type == 3) {
+            switch (p_header->opcode) {
             case PM4ItOpcode::WriteData: {
-                const auto* packet = reinterpret_cast<const PM4CmdWriteData*>(header);
-                add(packet->Address<std::uintptr_t>(), packet->Size());
+                const auto* p_packet = reinterpret_cast<const PM4CmdWriteData*>(p_header);
+                add(p_packet->Address<std::uintptr_t>(), p_packet->Size());
                 break;
             }
             case PM4ItOpcode::EventWriteEop:
                 add(reinterpret_cast<std::uintptr_t>(
-                        reinterpret_cast<const PM4CmdEventWriteEop*>(header)->Address<unsigned char>()),
+                        reinterpret_cast<const PM4CmdEventWriteEop*>(p_header)->Address<unsigned char>()),
                     8);
                 break;
             case PM4ItOpcode::EventWriteEos:
-                add(reinterpret_cast<const PM4CmdEventWriteEos*>(header)->Address<std::uintptr_t>(), 4);
+                add(reinterpret_cast<const PM4CmdEventWriteEos*>(p_header)->Address<std::uintptr_t>(), 4);
                 break;
             case PM4ItOpcode::ReleaseMem:
-                add(reinterpret_cast<const PM4CmdReleaseMem*>(header)->Address<std::uintptr_t>(), 8);
+                add(reinterpret_cast<const PM4CmdReleaseMem*>(p_header)->Address<std::uintptr_t>(), 8);
                 break;
             default:
                 break;
             }
         }
-        at += n;
+        at += c_dwords;
     }
-    std::sort(holes.begin(), holes.end(), [](const Hole& a, const Hole& b) { return a.offset < b.offset; });
+    std::sort(holes.begin(), holes.end(), [](const Hole& a, const Hole& b) { return a.off_hole < b.off_hole; });
     return holes;
 }
 
 // Empty when the buffer cannot be read any more (the game unmapped it): nothing to compare.
 std::optional<std::uint64_t> Hash(const Range& range) {
     const auto start = std::chrono::steady_clock::now();
-    const auto* bytes = reinterpret_cast<const unsigned char*>(range.begin);
-    const std::uint64_t size = range.end - range.begin;
+    const auto* p_bytes = reinterpret_cast<const unsigned char*>(range.begin);
+    const std::uint64_t cb_range = range.end - range.begin;
     std::uint64_t hash = 0, at = 0;
     sigjmp_buf recover;
     if (sigsetjmp(recover, 0)) {
-        runtime_fault_recover = nullptr;
+        g_p_runtime_fault_recover = nullptr;
         return std::nullopt;
     }
-    runtime_fault_recover = &recover;
+    g_p_runtime_fault_recover = &recover;
     for (const Hole& hole : range.holes) {
-        if (hole.offset > at) {
-            hash = XXH3_64bits_withSeed(bytes + at, hole.offset - at, hash);
+        if (hole.off_hole > at) {
+            hash = XXH3_64bits_withSeed(p_bytes + at, hole.off_hole - at, hash);
         }
-        at = std::max(at, hole.offset + hole.size);
+        at = std::max(at, hole.off_hole + hole.cb_hole);
     }
-    if (at < size) {
-        hash = XXH3_64bits_withSeed(bytes + at, size - at, hash);
+    if (at < cb_range) {
+        hash = XXH3_64bits_withSeed(p_bytes + at, cb_range - at, hash);
     }
-    runtime_fault_recover = nullptr;
-    PsStats::submit_guard_ns.fetch_add(
+    g_p_runtime_fault_recover = nullptr;
+    PsStats::g_submit_guard_ns.fetch_add(
         std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start).count(),
         std::memory_order_relaxed);
-    PsStats::submit_guard_bytes.fetch_add(size, std::memory_order_relaxed);
+    PsStats::g_cb_submit_guard.fetch_add(cb_range, std::memory_order_relaxed);
     return hash;
 }
 
-void Trip(const char* what, const Range& range, std::uintptr_t address, const char* detail) {
-    if (tripped.exchange(true)) {
+void Trip(const char* sz_what, const Range& range, std::uintptr_t va_guest, const char* sz_detail) {
+    if (s_is_tripped.exchange(true)) {
         return;
     }
     std::printf("Gnm: %s the commands of frame %llu at %#llx%s while the GPU ran them: frames no "
                 "longer overlap (PS_SUBMIT_AHEAD 0)\n",
-                what, (unsigned long long)range.frame, (unsigned long long)address, detail);
+                sz_what, (unsigned long long)range.frame, (unsigned long long)va_guest, sz_detail);
 }
 
-void Trap(std::uintptr_t begin, std::uintptr_t end, bool on) {
-    PsLayer::WriteTraps::Set(begin, end - begin, Reason, on);
+void Trap(std::uintptr_t begin, std::uintptr_t end, bool is_on) {
+    PsLayer::WriteTraps::Set(begin, end - begin, Reason, is_on);
 }
 
 // The reason bit is one per page: lifting a range re-arms what later frames still hold there.
 void Lift(std::vector<Range>::iterator it) {
     const Range range = std::move(*it);
-    armed.erase(it);
-    if (!range.trapped) {
+    s_armed.erase(it);
+    if (!range.is_trapped) {
         return;
     }
     Trap(range.page_begin, range.page_end, false);
-    for (const auto& other : armed) {
-        if (other.trapped && other.page_begin < range.page_end && range.page_begin < other.page_end) {
+    for (const auto& other : s_armed) {
+        if (other.is_trapped && other.page_begin < range.page_end && range.page_begin < other.page_end) {
             Trap(std::max(other.page_begin, range.page_begin), std::min(other.page_end, range.page_end), true);
         }
     }
 }
 
-std::vector<Range>::iterator FindTrapped(std::uintptr_t address) {
-    return std::find_if(armed.begin(), armed.end(), [address](const Range& range) {
-        return range.trapped && range.page_begin <= address && address < range.page_end;
+std::vector<Range>::iterator FindTrapped(std::uintptr_t va_guest) {
+    return std::find_if(s_armed.begin(), s_armed.end(), [va_guest](const Range& range) {
+        return range.is_trapped && range.page_begin <= va_guest && va_guest < range.page_end;
     });
 }
 
-bool OnFault(void* context, void* fault_address) {
-    const auto address = reinterpret_cast<std::uintptr_t>(fault_address);
-    if (!Common::IsWriteError(context) || !(PsLayer::WriteTraps::Reasons(address) & Reason)) {
+bool OnFault(void* p_context, void* p_fault_address) {
+    const auto address = reinterpret_cast<std::uintptr_t>(p_fault_address);
+    if (!Common::IsWriteError(p_context) || !(PsLayer::WriteTraps::Reasons(address) & Reason)) {
         return false;
     }
-    std::unique_lock lock{mutex};
+    std::unique_lock lock{s_mutex};
     auto it = FindTrapped(address);
-    if (it == armed.end()) {
+    if (it == s_armed.end()) {
         return true; // lifted meanwhile: the write runs again
     }
     if (GpuSideThread()) {
@@ -209,89 +209,89 @@ bool OnFault(void* context, void* fault_address) {
         return true;
     }
     const std::uint64_t frame = it->frame;
-    char detail[64];
-    std::snprintf(detail, sizeof(detail), " (tid %ld, rip %#llx)", (long)syscall(SYS_gettid),
-                  (unsigned long long)static_cast<const ucontext_t*>(context)->uc_mcontext.gregs[REG_RIP]);
-    Trip("the game writes into", *it, address, detail);
-    if (frame <= closed) {
-        if (!retired_cv.wait_for(lock, WaitLimit, [&] { return retired >= frame; })) {
+    char sz_detail[64];
+    std::snprintf(sz_detail, sizeof(sz_detail), " (tid %ld, rip %#llx)", (long)syscall(SYS_gettid),
+                  (unsigned long long)static_cast<const ucontext_t*>(p_context)->uc_mcontext.gregs[REG_RIP]);
+    Trip("the game writes into", *it, address, sz_detail);
+    if (frame <= s_closed) {
+        if (!s_retired_cv.wait_for(lock, WaitLimit, [&] { return s_retired >= frame; })) {
             std::printf("Gnm: frame %llu not retired after %lld s: its commands are the game's again\n",
                         (unsigned long long)frame, (long long)WaitLimit.count());
         }
     }
     it = FindTrapped(address);
-    if (it != armed.end()) {
+    if (it != s_armed.end()) {
         Lift(it);
     }
     return true;
 }
 } // namespace
 
-void Arm(const void* address, std::uint64_t size, std::uint64_t frame) {
+void Arm(const void* p_address, std::uint64_t cb_range, std::uint64_t frame) {
     const unsigned modes = Modes();
-    if (modes == Off || size == 0 || tripped.load(std::memory_order_relaxed)) {
+    if (modes == Off || cb_range == 0 || s_is_tripped.load(std::memory_order_relaxed)) {
         return;
     }
-    const auto start = reinterpret_cast<std::uintptr_t>(address);
+    const auto start = reinterpret_cast<std::uintptr_t>(p_address);
     Range range{start,
-                start + size,
+                start + cb_range,
                 (start + PageSize - 1) & ~(PageSize - 1),
-                (start + size) & ~(PageSize - 1),
+                (start + cb_range) & ~(PageSize - 1),
                 frame,
                 {},
                 0,
                 false,
                 false};
-    range.trapped = (modes & Traps) && range.page_end > range.page_begin;
+    range.is_trapped = (modes & Traps) && range.page_end > range.page_begin;
     if (modes & Hashes) {
         range.holes = GpuWrittenHoles(range);
         if (const auto hash = Hash(range)) {
             range.hash = *hash;
-            range.hashed = true;
+            range.is_hashed = true;
         }
     }
-    if (!range.trapped && !range.hashed) {
+    if (!range.is_trapped && !range.is_hashed) {
         return;
     }
-    if (range.trapped) {
-        static const bool registered = [] {
+    if (range.is_trapped) {
+        static const bool s_is_registered = [] {
             Core::Signals::Instance()->RegisterAccessViolationHandler(OnFault, 0);
             return true;
         }();
-        (void)registered;
+        (void)s_is_registered;
     }
-    std::scoped_lock lock{mutex};
-    if (range.trapped) {
+    std::scoped_lock lock{s_mutex};
+    if (range.is_trapped) {
         Trap(range.page_begin, range.page_end, true);
     }
-    armed.push_back(std::move(range));
+    s_armed.push_back(std::move(range));
 }
 
 void Close(std::uint64_t frame) {
-    std::scoped_lock lock{mutex};
-    closed = std::max(closed, frame);
+    std::scoped_lock lock{s_mutex};
+    s_closed = std::max(s_closed, frame);
 }
 
 void Retire(std::uint64_t frame) {
-    std::scoped_lock lock{mutex};
-    retired = std::max(retired, frame);
-    for (auto it = armed.begin(); it != armed.end();) {
-        if (it->frame > retired) {
+    std::scoped_lock lock{s_mutex};
+    s_retired = std::max(s_retired, frame);
+    for (auto it = s_armed.begin(); it != s_armed.end();) {
+        if (it->frame > s_retired) {
             ++it;
             continue;
         }
-        if (it->hashed) {
+        if (it->is_hashed) {
             if (const auto hash = Hash(*it); hash && *hash != it->hash) {
                 Trip("something rewrote", *it, it->begin, " (checksum)");
             }
         }
         Lift(it);
-        it = armed.begin();
+        it = s_armed.begin();
     }
-    retired_cv.notify_all();
+    s_retired_cv.notify_all();
 }
 
 bool Tripped() {
-    return tripped.load(std::memory_order_relaxed);
+    return s_is_tripped.load(std::memory_order_relaxed);
 }
 } // namespace PsSubmitGuard

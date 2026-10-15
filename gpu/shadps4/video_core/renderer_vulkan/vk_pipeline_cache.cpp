@@ -489,7 +489,7 @@ const GraphicsPipeline* PipelineCache::TryPreparedPipeline(const PreparedDraw& p
     // everything read from guest memory for the specialization) must match as well. This is
     // the per-stage work GetProgram does on the regular path.
     const auto& regs = liverpool->regs;
-    for (u32 i = 0; i < prepared.num_stages; ++i) {
+    for (u32 i = 0; i < prepared.c_stages; ++i) {
         const auto& stage = prepared.stages[i];
         const auto* pgm = regs.ProgramForStage(static_cast<u32>(stage.hw_stage));
         if (!pgm || !pgm->Address<u32*>()) {
@@ -499,13 +499,13 @@ const GraphicsPipeline* PipelineCache::TryPreparedPipeline(const PreparedDraw& p
         if (params.hash != stage.hash) {
             return nullptr;
         }
-        auto& info = const_cast<Program*>(stage.program)->info;
+        auto& info = const_cast<Program*>(stage.p_program)->info;
         info.pgm_base = params.Base();
         info.user_data = params.user_data;
         info.RefreshFlatBuf();
-        if (info.pgm_base != stage.pgm_base || info.flattened_ud_buf.size() != stage.flat_size ||
-            std::memcmp(info.flattened_ud_buf.data(), stage.flat,
-                        stage.flat_size * sizeof(u32)) != 0) {
+        if (info.pgm_base != stage.pgm_base || info.flattened_ud_buf.size() != stage.c_flat ||
+            std::memcmp(info.flattened_ud_buf.data(), stage.p_flat,
+                        stage.c_flat * sizeof(u32)) != 0) {
             return nullptr;
         }
     }
@@ -538,7 +538,7 @@ u64 DrawTarget(const AmdGpu::Regs& regs) {
 void NoteDrawTarget(const AmdGpu::Regs& regs) {
     static u64 last_target = 0;
     static u32 last_frame = ~0u;
-    const u32 frame = PsStats::frame_number.load(std::memory_order_relaxed);
+    const u32 frame = PsStats::g_frame_number.load(std::memory_order_relaxed);
     const u64 target = DrawTarget(regs);
     if (target == 0 || (target == last_target && frame == last_frame)) {
         return;
@@ -684,14 +684,14 @@ bool PipelineCache::AsyncSkippable(const PipelineSelection& selection, bool indi
     }
     static u32 frame_seen = ~0u;
     static u64 draws_at_start = 0, last_frame_draws = 0;
-    const u32 frame = PsStats::frame_number.load(std::memory_order_relaxed);
-    const u64 draws = PsStats::draws.load(std::memory_order_relaxed);
+    const u32 frame = PsStats::g_frame_number.load(std::memory_order_relaxed);
+    const u64 draws = PsStats::g_c_draws.load(std::memory_order_relaxed);
     if (frame != frame_seen) {
         last_frame_draws = draws - draws_at_start;
         draws_at_start = draws;
         frame_seen = frame;
         static u32 printed = 0;
-        const u32 second = PsStats::coarse_second.load(std::memory_order_relaxed);
+        const u32 second = PsStats::g_coarse_second.load(std::memory_order_relaxed);
         if (async_started != 0 && second - printed >= 5) {
             printed = second;
             std::printf("GPU: %llu pipelines compiled in the background, %llu draws went without "
@@ -1189,18 +1189,18 @@ PipelineCache::Result PipelineCache::GetProgram(PipelineSelection& sel, HwStage 
         info.pgm_base = params.Base();
         info.user_data = params.user_data;
         // The walk of resource tables and the fetch shader parse read guest memory through
-        // pointers in the registers; ahead of the GPU thread that memory may already be
-        // reused. A fault returns here (runtime_fault_recover) and the draw is left to the GPU
-        // thread. A jump out of the specialization leaks its partial allocations (rare).
+        // pointers in the registers; ahead of the GPU thread that memory may already be reused. A
+        // fault returns here (g_p_runtime_fault_recover) and the draw is left to the GPU thread. A
+        // jump out of the specialization leaks its partial allocations (rare).
         sigjmp_buf recover;
         if (sigsetjmp(recover, 0)) {
             worker.failed = true;
             return {};
         }
-        runtime_fault_recover = &recover;
+        g_p_runtime_fault_recover = &recover;
         info.RefreshFlatBuf();
         auto spec = Shader::StageSpecialization(info, runtime_info, profile, binding);
-        runtime_fault_recover = nullptr;
+        g_p_runtime_fault_recover = nullptr;
         const auto it = std::ranges::find(program->modules, spec, &Program::Module::spec);
         if (it == program->modules.end()) {
             worker.failed = true;

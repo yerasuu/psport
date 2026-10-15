@@ -19,55 +19,55 @@
 namespace PsCopy {
 namespace {
 
-thread_local bool in_copy_thread = false;
+thread_local bool s_is_in_copy_thread = false;
 
 class Pool {
 public:
     Pool() {
         // Copies are on the critical path (fences wait for them): normal priority, a quarter
         // of the hardware threads available to the process (Steam Deck 2).
-        unsigned count = std::clamp(PsThreads::Available() / 4, 1u, 4u);
-        if (const char* env = std::getenv("PS_COPY_THREADS")) {
-            count = static_cast<unsigned>(std::clamp(std::atoi(env), 0, 16));
+        unsigned c_threads = std::clamp(PsThreads::Available() / 4, 1u, 4u);
+        if (const char* sz_env = std::getenv("PS_COPY_THREADS")) {
+            c_threads = static_cast<unsigned>(std::clamp(std::atoi(sz_env), 0, 16));
         }
-        epochs.emplace_back();
-        for (unsigned i = 0; i < count; ++i) {
-            threads.emplace_back([this, i] { Loop(i); });
+        m_epochs.emplace_back();
+        for (unsigned i = 0; i < c_threads; ++i) {
+            m_threads.emplace_back([this, i] { Loop(i); });
         }
     }
     ~Pool() {
         {
-            std::scoped_lock lk{mutex};
-            stop = true;
+            std::scoped_lock lk{m_mutex};
+            m_should_stop = true;
         }
-        cv.notify_all();
-        for (auto& thread : threads) {
+        m_cv.notify_all();
+        for (auto& thread : m_threads) {
             thread.join();
         }
     }
 
     bool Enabled() const {
-        return !threads.empty();
+        return !m_threads.empty();
     }
 
     void Async(std::function<void()> task) {
         {
-            std::scoped_lock lk{mutex};
-            const u64 epoch = epoch_base + epochs.size() - 1;
-            ++epochs.back().pending;
-            ++pending;
-            async_tasks.push_back({std::move(task), epoch});
+            std::scoped_lock lk{m_mutex};
+            const u64 epoch = m_epoch_base + m_epochs.size() - 1;
+            ++m_epochs.back().pending;
+            ++m_pending;
+            m_async_tasks.push_back({std::move(task), epoch});
         }
-        cv.notify_one();
+        m_cv.notify_one();
     }
 
     void AfterCopies(std::function<void()> callback) {
         {
-            std::unique_lock lk{mutex};
-            if (epochs.size() > 1 || epochs.back().pending != 0 || draining) {
+            std::unique_lock lk{m_mutex};
+            if (m_epochs.size() > 1 || m_epochs.back().pending != 0 || m_is_draining) {
                 // Runs once every copy issued so far is done, in order with earlier ones.
-                epochs.back().callbacks.push_back(std::move(callback));
-                epochs.emplace_back();
+                m_epochs.back().callbacks.push_back(std::move(callback));
+                m_epochs.emplace_back();
                 return;
             }
         }
@@ -79,13 +79,13 @@ public:
         while (true) {
             Task task;
             {
-                std::scoped_lock lk{mutex};
-                if (pending == 0 && epochs.size() == 1 && !draining) {
+                std::scoped_lock lk{m_mutex};
+                if (m_pending == 0 && m_epochs.size() == 1 && !m_is_draining) {
                     return;
                 }
-                if (!async_tasks.empty()) {
-                    task = std::move(async_tasks.front());
-                    async_tasks.pop_front();
+                if (!m_async_tasks.empty()) {
+                    task = std::move(m_async_tasks.front());
+                    m_async_tasks.pop_front();
                 }
             }
             if (task.run) {
@@ -96,24 +96,24 @@ public:
         }
     }
 
-    void Run(std::size_t count, const std::function<void(std::size_t)>& task) {
+    void Run(std::size_t c_tasks, const std::function<void(std::size_t)>& task) {
         auto job = std::make_shared<Job>();
-        job->task = &task;
-        job->count = count;
+        job->p_task = &task;
+        job->c_tasks = c_tasks;
         {
-            std::scoped_lock lk{mutex};
-            current = job;
-            ++generation;
+            std::scoped_lock lk{m_mutex};
+            m_current = job;
+            ++m_generation;
         }
-        cv.notify_all();
+        m_cv.notify_all();
         Work(*job);
         // Workers only call the task for indices below count, all done before this returns.
-        while (job->done.load(std::memory_order_acquire) < count) {
+        while (job->done.load(std::memory_order_acquire) < c_tasks) {
             std::this_thread::yield();
         }
-        std::scoped_lock lk{mutex};
-        if (current == job) {
-            current.reset();
+        std::scoped_lock lk{m_mutex};
+        if (m_current == job) {
+            m_current.reset();
         }
     }
 
@@ -129,38 +129,38 @@ private:
         std::vector<std::function<void()>> callbacks;
     };
     struct Job {
-        const std::function<void(std::size_t)>* task{};
-        std::size_t count{};
+        const std::function<void(std::size_t)>* p_task{};
+        std::size_t c_tasks{};
         std::atomic<std::size_t> next{0};
         std::atomic<std::size_t> done{0};
     };
 
     void RunAsync(Task& task) {
-        const bool was = in_copy_thread;
-        in_copy_thread = true;
+        const bool is_previous_copy_thread = s_is_in_copy_thread;
+        s_is_in_copy_thread = true;
         task.run();
-        in_copy_thread = was;
+        s_is_in_copy_thread = is_previous_copy_thread;
         Complete(task.epoch);
     }
 
     /// Retires a task and runs the callbacks of epochs with nothing left, oldest first. One
     /// thread drains at a time so the callbacks keep their order.
     void Complete(u64 epoch) {
-        std::unique_lock lk{mutex};
-        --epochs[epoch - epoch_base].pending;
-        --pending;
-        if (draining) {
+        std::unique_lock lk{m_mutex};
+        --m_epochs[epoch - m_epoch_base].pending;
+        --m_pending;
+        if (m_is_draining) {
             return;
         }
-        draining = true;
+        m_is_draining = true;
         while (true) {
             std::vector<std::function<void()>> ready;
-            while (epochs.size() > 1 && epochs.front().pending == 0) {
-                for (auto& callback : epochs.front().callbacks) {
+            while (m_epochs.size() > 1 && m_epochs.front().pending == 0) {
+                for (auto& callback : m_epochs.front().callbacks) {
                     ready.push_back(std::move(callback));
                 }
-                epochs.pop_front();
-                ++epoch_base;
+                m_epochs.pop_front();
+                ++m_epoch_base;
             }
             if (ready.empty()) {
                 break;
@@ -171,69 +171,69 @@ private:
             }
             lk.lock();
         }
-        draining = false;
+        m_is_draining = false;
     }
 
     static void Work(Job& job) {
-        const bool was = in_copy_thread;
-        in_copy_thread = true;
-        for (std::size_t i; (i = job.next.fetch_add(1, std::memory_order_relaxed)) < job.count;) {
-            (*job.task)(i);
+        const bool is_previous_copy_thread = s_is_in_copy_thread;
+        s_is_in_copy_thread = true;
+        for (std::size_t i; (i = job.next.fetch_add(1, std::memory_order_relaxed)) < job.c_tasks;) {
+            (*job.p_task)(i);
             job.done.fetch_add(1, std::memory_order_release);
         }
-        in_copy_thread = was;
+        s_is_in_copy_thread = is_previous_copy_thread;
     }
 
-    void Loop(unsigned index) {
-        Common::SetCurrentThreadName(("bb:Copy" + std::to_string(index)).c_str());
+    void Loop(unsigned i_thread) {
+        Common::SetCurrentThreadName(("bb:Copy" + std::to_string(i_thread)).c_str());
         u64 seen = 0;
-        std::unique_lock lk{mutex};
+        std::unique_lock lk{m_mutex};
         while (true) {
-            cv.wait(lk, [&] {
-                return stop || !async_tasks.empty() || (generation != seen && current);
+            m_cv.wait(lk, [&] {
+                return m_should_stop || !m_async_tasks.empty() || (m_generation != seen && m_current);
             });
-            if (stop) {
+            if (m_should_stop) {
                 return;
             }
-            if (!async_tasks.empty()) {
-                Task task = std::move(async_tasks.front());
-                async_tasks.pop_front();
+            if (!m_async_tasks.empty()) {
+                Task task = std::move(m_async_tasks.front());
+                m_async_tasks.pop_front();
                 lk.unlock();
                 RunAsync(task);
                 lk.lock();
                 continue;
             }
-            seen = generation;
-            const auto job = current;
+            seen = m_generation;
+            const auto job = m_current;
             lk.unlock();
             Work(*job);
             lk.lock();
         }
     }
 
-    std::vector<std::thread> threads;
-    std::mutex mutex;
-    std::condition_variable cv;
-    std::shared_ptr<Job> current;
-    u64 generation = 0;
-    bool stop = false;
-    std::deque<Task> async_tasks;
-    std::deque<Epoch> epochs; ///< back() is open for new copies
-    u64 epoch_base = 0;       ///< epoch number of epochs.front()
-    std::size_t pending = 0;
-    bool draining = false;
+    std::vector<std::thread> m_threads;
+    std::mutex m_mutex;
+    std::condition_variable m_cv;
+    std::shared_ptr<Job> m_current;
+    u64 m_generation = 0;
+    bool m_should_stop = false;
+    std::deque<Task> m_async_tasks;
+    std::deque<Epoch> m_epochs; ///< back() is open for new copies
+    u64 m_epoch_base = 0;       ///< epoch number of epochs.front()
+    std::size_t m_pending = 0;
+    bool m_is_draining = false;
 };
 
 Pool& GetPool() {
-    static Pool pool;
-    return pool;
+    static Pool s_pool;
+    return s_pool;
 }
 
 struct Batch {
     std::vector<Item> items;
-    unsigned long long bytes = 0;
+    unsigned long long cb_batch = 0;
 };
-thread_local Batch batch;
+thread_local Batch s_batch;
 
 } // namespace
 
@@ -250,29 +250,29 @@ void Async(std::function<void()> task) {
 }
 
 void FlushBatch() {
-    if (batch.items.empty()) {
+    if (s_batch.items.empty()) {
         return;
     }
-    auto items = std::make_shared<std::vector<Item>>(std::move(batch.items));
-    batch.items = {};
-    batch.items.reserve(256);
-    batch.bytes = 0;
+    auto items = std::make_shared<std::vector<Item>>(std::move(s_batch.items));
+    s_batch.items = {};
+    s_batch.items.reserve(256);
+    s_batch.cb_batch = 0;
     Async([items] {
         for (const auto& item : *items) {
-            item.run(item);
+            item.pfn_run(item);
         }
     });
 }
 
 void QueueCopy(const Item& item) {
     if (!Enabled()) {
-        item.run(item);
+        item.pfn_run(item);
         return;
     }
     // Smaller batches (32 items / 64 KiB, done before the next fence) measured slower.
-    batch.items.push_back(item);
-    batch.bytes += item.size;
-    if (batch.bytes >= 512 * 1024 || batch.items.size() >= 256) {
+    s_batch.items.push_back(item);
+    s_batch.cb_batch += item.cb_copy;
+    if (s_batch.cb_batch >= 512 * 1024 || s_batch.items.size() >= 256) {
         FlushBatch();
     }
 }
@@ -284,24 +284,24 @@ void AfterCopies(std::function<void()> callback) {
 
 void WaitAsync() {
     // The caller's own batch runs here: handing it over only to wait for it costs a wakeup.
-    if (!batch.items.empty()) {
-        for (const auto& item : batch.items) {
-            item.run(item);
+    if (!s_batch.items.empty()) {
+        for (const auto& item : s_batch.items) {
+            item.pfn_run(item);
         }
-        batch.items.clear();
-        batch.bytes = 0;
+        s_batch.items.clear();
+        s_batch.cb_batch = 0;
     }
     GetPool().WaitAll();
 }
 
-void ParallelFor(std::size_t count, const std::function<void(std::size_t)>& task) {
-    if (count <= 1 || in_copy_thread || !Enabled()) {
-        for (std::size_t i = 0; i < count; ++i) {
+void ParallelFor(std::size_t c_tasks, const std::function<void(std::size_t)>& task) {
+    if (c_tasks <= 1 || s_is_in_copy_thread || !Enabled()) {
+        for (std::size_t i = 0; i < c_tasks; ++i) {
             task(i);
         }
         return;
     }
-    GetPool().Run(count, task);
+    GetPool().Run(c_tasks, task);
 }
 
 } // namespace PsCopy

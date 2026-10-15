@@ -47,24 +47,24 @@ void FullBarrier(vk::CommandBuffer cmdbuf) {
 
 GpuTimestamps::GpuTimestamps(const Instance& instance_, Scheduler& scheduler_,
                              VideoCore::BufferCache& buffer_cache_)
-    : instance{instance_}, scheduler{scheduler_}, buffer_cache{buffer_cache_} {
-    const auto physical = instance.GetPhysicalDevice();
+    : m_instance{instance_}, m_scheduler{scheduler_}, m_buffer_cache{buffer_cache_} {
+    const auto physical = m_instance.GetPhysicalDevice();
     const auto families = physical.getQueueFamilyProperties();
-    const u32 family = instance.GetGraphicsQueueFamilyIndex();
-    valid_bits = family < families.size() ? families[family].timestampValidBits : 0;
-    period_ns = physical.getProperties().limits.timestampPeriod;
-    if (valid_bits == 0 || period_ns <= 0.0) {
-        valid_bits = 0;
+    const u32 family = m_instance.GetGraphicsQueueFamilyIndex();
+    m_valid_bits = family < families.size() ? families[family].timestampValidBits : 0;
+    m_period_ns = physical.getProperties().limits.timestampPeriod;
+    if (m_valid_bits == 0 || m_period_ns <= 0.0) {
+        m_valid_bits = 0;
         std::printf("GPU: no timestamps on the graphics queue: the GPU clock is written by the "
                     "CPU after the GPU\n");
         return;
     }
-    const auto device = instance.GetDevice();
-    pool = Check(device.createQueryPoolUnique({
+    const auto device = m_instance.GetDevice();
+    m_pool = Check(device.createQueryPoolUnique({
         .queryType = vk::QueryType::eTimestamp,
         .queryCount = NumSlots,
     }));
-    results = std::make_unique<VideoCore::Buffer>(instance, 0, NumSlots * sizeof(u64),
+    m_results = std::make_unique<VideoCore::Buffer>(m_instance, 0, NumSlots * sizeof(u64),
                                                   VideoCore::MemoryType::DeviceLocal,
                                                   "GPU timestamps");
     const vk::DescriptorSetLayoutBinding binding{
@@ -73,7 +73,7 @@ GpuTimestamps::GpuTimestamps(const Instance& instance_, Scheduler& scheduler_,
         .descriptorCount = 1,
         .stageFlags = vk::ShaderStageFlagBits::eCompute,
     };
-    set_layout = Check(device.createDescriptorSetLayoutUnique({
+    m_set_layout = Check(device.createDescriptorSetLayoutUnique({
         .flags = vk::DescriptorSetLayoutCreateFlagBits::ePushDescriptorKHR,
         .bindingCount = 1,
         .pBindings = &binding,
@@ -81,19 +81,19 @@ GpuTimestamps::GpuTimestamps(const Instance& instance_, Scheduler& scheduler_,
     const vk::PushConstantRange range{.stageFlags = vk::ShaderStageFlagBits::eCompute,
                                       .offset = 0,
                                       .size = sizeof(Push)};
-    pipeline_layout = Check(device.createPipelineLayoutUnique({
+    m_pipeline_layout = Check(device.createPipelineLayoutUnique({
         .setLayoutCount = 1,
-        .pSetLayouts = &*set_layout,
+        .pSetLayouts = &*m_set_layout,
         .pushConstantRangeCount = 1,
         .pPushConstantRanges = &range,
     }));
     const auto module = CompileSPV(GPU_TIMESTAMP_COMP, device);
-    pipeline = Check(device.createComputePipelineUnique(
+    m_pipeline = Check(device.createComputePipelineUnique(
         {}, vk::ComputePipelineCreateInfo{
                 .stage = {.stage = vk::ShaderStageFlagBits::eCompute,
                           .module = module,
                           .pName = "main"},
-                .layout = *pipeline_layout,
+                .layout = *m_pipeline_layout,
             }));
     device.destroyShaderModule(module);
 }
@@ -101,81 +101,81 @@ GpuTimestamps::GpuTimestamps(const Instance& instance_, Scheduler& scheduler_,
 GpuTimestamps::~GpuTimestamps() = default;
 
 void GpuTimestamps::Calibrate() {
-    calibrated = true;
+    m_is_calibrated = true;
     // A timestamp taken while the GPU has nothing else to do, between two host clock readings.
-    scheduler.EndRendering();
-    scheduler.Finish();
-    scheduler.Record([pool = *pool](vk::CommandBuffer cmdbuf) {
+    m_scheduler.EndRendering();
+    m_scheduler.Finish();
+    m_scheduler.Record([pool = *m_pool](vk::CommandBuffer cmdbuf) {
         cmdbuf.resetQueryPool(pool, 0, 1);
         cmdbuf.writeTimestamp2(vk::PipelineStageFlagBits2::eAllCommands, pool, 0);
     });
     const u64 before = AmdGpu::GetGpuClock64();
-    scheduler.Finish();
+    m_scheduler.Finish();
     const u64 after = AmdGpu::GetGpuClock64();
     u64 ticks = 0;
     const auto result =
-        instance.GetDevice().getQueryPoolResults(*pool, 0, 1, sizeof(ticks), &ticks, sizeof(ticks),
+        m_instance.GetDevice().getQueryPoolResults(*m_pool, 0, 1, sizeof(ticks), &ticks, sizeof(ticks),
                                                  vk::QueryResultFlagBits::e64);
     if (result != vk::Result::eSuccess) {
-        valid_bits = 0;
+        m_valid_bits = 0;
         std::printf("GPU: the calibration timestamp was not available (%s): the GPU clock is "
                     "written by the CPU after the GPU\n",
                     vk::to_string(result).c_str());
         return;
     }
-    base_ticks = ticks;
-    base_clock = before + (after - before) / 2;
-    ratio = static_cast<u32>(std::llround(period_ns / 10.0 * double(1u << 24)));
+    m_base_ticks = ticks;
+    m_base_clock = before + (after - before) / 2;
+    m_ratio = static_cast<u32>(std::llround(m_period_ns / 10.0 * double(1u << 24)));
     std::printf("GPU: the GPU clock (100 MHz) from Vulkan timestamps: %.3f ns a tick, %u valid "
                 "bits, tied to the host clock within %.0f us\n",
-                period_ns, valid_bits, double(after - before) * 10.0 / 1000.0 / 2.0);
+                m_period_ns, m_valid_bits, double(after - before) * 10.0 / 1000.0 / 2.0);
 }
 
-bool GpuTimestamps::Write(VAddr address, bool end_of_pipe) {
-    std::scoped_lock lk{mutex};
-    if (!calibrated && Supported()) {
+bool GpuTimestamps::Write(VAddr va_guest, bool is_end_of_pipe) {
+    std::scoped_lock lk{m_mutex};
+    if (!m_is_calibrated && Supported()) {
         Calibrate();
     }
     if (!Supported()) {
         return false;
     }
-    scheduler.EndRendering(); // the copy and the dispatch are outside render passes
+    m_scheduler.EndRendering(); // the copy and the dispatch are outside render passes
     // The value is read by the CPU: in place (a VRAM copy would show it a stale one).
-    buffer_cache.force_writes_in_place = true;
-    const auto [buffer, offset] = buffer_cache.ObtainBuffer(address, sizeof(u64), true);
-    buffer_cache.force_writes_in_place = false;
-    const u32 slot = next_slot;
-    next_slot = next_slot + 1 == NumSlots ? 1 : next_slot + 1;
+    m_buffer_cache.force_writes_in_place = true;
+    const auto [buffer, offset] = m_buffer_cache.ObtainBuffer(va_guest, sizeof(u64), true);
+    m_buffer_cache.force_writes_in_place = false;
+    const u32 slot = m_next_slot;
+    m_next_slot = m_next_slot + 1 == NumSlots ? 1 : m_next_slot + 1;
     Push push{};
     Split(buffer->BufferDeviceAddress() + offset, push.address);
-    Split(base_ticks, push.base_ticks);
-    Split(base_clock, push.base_clock);
-    Split(valid_bits >= 64 ? ~0ull : (1ull << valid_bits) - 1, push.mask);
-    push.ratio = ratio;
+    Split(m_base_ticks, push.base_ticks);
+    Split(m_base_clock, push.base_clock);
+    Split(m_valid_bits >= 64 ? ~0ull : (1ull << m_valid_bits) - 1, push.mask);
+    push.ratio = m_ratio;
     push.slot = slot;
-    scheduler.Record([this, slot, end_of_pipe, push](vk::CommandBuffer cmdbuf) {
-        cmdbuf.resetQueryPool(*pool, slot, 1);
+    m_scheduler.Record([this, slot, is_end_of_pipe, push](vk::CommandBuffer cmdbuf) {
+        cmdbuf.resetQueryPool(*m_pool, slot, 1);
         // The end of the pipe: after all the work before it; else when the GPU gets here.
-        cmdbuf.writeTimestamp2(end_of_pipe ? vk::PipelineStageFlagBits2::eAllCommands
+        cmdbuf.writeTimestamp2(is_end_of_pipe ? vk::PipelineStageFlagBits2::eAllCommands
                                            : vk::PipelineStageFlagBits2::eNone,
-                               *pool, slot);
-        cmdbuf.copyQueryPoolResults(*pool, slot, 1, results->Handle(), slot * sizeof(u64),
+                               *m_pool, slot);
+        cmdbuf.copyQueryPoolResults(*m_pool, slot, 1, m_results->Handle(), slot * sizeof(u64),
                                     sizeof(u64),
                                     vk::QueryResultFlagBits::e64 | vk::QueryResultFlagBits::eWait);
         FullBarrier(cmdbuf);
-        const vk::DescriptorBufferInfo info{results->Handle(), 0, NumSlots * sizeof(u64)};
+        const vk::DescriptorBufferInfo info{m_results->Handle(), 0, NumSlots * sizeof(u64)};
         const vk::WriteDescriptorSet write{.dstBinding = 0,
                                            .descriptorCount = 1,
                                            .descriptorType = vk::DescriptorType::eStorageBuffer,
                                            .pBufferInfo = &info};
-        cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, *pipeline);
-        cmdbuf.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute, *pipeline_layout, 0, write);
-        cmdbuf.pushConstants(*pipeline_layout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(push),
+        cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, *m_pipeline);
+        cmdbuf.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute, *m_pipeline_layout, 0, write);
+        cmdbuf.pushConstants(*m_pipeline_layout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(push),
                              &push);
         cmdbuf.dispatch(1, 1, 1);
         FullBarrier(cmdbuf);
     });
-    ++written;
+    ++m_c_written;
     return true;
 }
 

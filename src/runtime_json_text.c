@@ -66,28 +66,28 @@ static bool parse_quad_hex(JsonParser *p_parser, uint32_t *p_out_code_unit) {
 }
 
 static bool append_code_point(JsonString *p_string, uint32_t code_point) {
-    char encoded[4];
+    char sz_encoded[4];
     uint64_t cb_length;
     if (code_point < 0x80) {
-        encoded[0] = (char)code_point;
+        sz_encoded[0] = (char)code_point;
         cb_length = 1;
     } else if (code_point < 0x800) {
-        encoded[0] = (char)(0xC0 | code_point >> 6);
-        encoded[1] = (char)(0x80 | (code_point & 63));
+        sz_encoded[0] = (char)(0xC0 | code_point >> 6);
+        sz_encoded[1] = (char)(0x80 | (code_point & 63));
         cb_length = 2;
     } else if (code_point < 0x10000) {
-        encoded[0] = (char)(0xE0 | code_point >> 12);
-        encoded[1] = (char)(0x80 | ((code_point >> 6) & 63));
-        encoded[2] = (char)(0x80 | (code_point & 63));
+        sz_encoded[0] = (char)(0xE0 | code_point >> 12);
+        sz_encoded[1] = (char)(0x80 | ((code_point >> 6) & 63));
+        sz_encoded[2] = (char)(0x80 | (code_point & 63));
         cb_length = 3;
     } else {
-        encoded[0] = (char)(0xF0 | code_point >> 18);
-        encoded[1] = (char)(0x80 | ((code_point >> 12) & 63));
-        encoded[2] = (char)(0x80 | ((code_point >> 6) & 63));
-        encoded[3] = (char)(0x80 | (code_point & 63));
+        sz_encoded[0] = (char)(0xF0 | code_point >> 18);
+        sz_encoded[1] = (char)(0x80 | ((code_point >> 12) & 63));
+        sz_encoded[2] = (char)(0x80 | ((code_point >> 6) & 63));
+        sz_encoded[3] = (char)(0x80 | (code_point & 63));
         cb_length = 4;
     }
-    return json_string_append(p_string, encoded, cb_length);
+    return json_string_append(p_string, sz_encoded, cb_length);
 }
 
 /* The cursor is on the opening quote. */
@@ -108,10 +108,10 @@ static bool parse_string(JsonParser *p_parser, JsonString *p_out_string) {
         if (character != '\\') return parse_fail(p_parser, "control character in string");
         if (p_parser->p_cursor >= p_parser->p_end) return parse_fail(p_parser, "unterminated escape");
         const char escape = *p_parser->p_cursor++;
-        static const char s_escapes[] = "\"\\/bfnrt", s_decoded[] = "\"\\/\b\f\n\r\t";
-        const char *p_known = escape ? strchr(s_escapes, escape) : NULL;
+        static const char s_sz_escapes[] = "\"\\/bfnrt", s_sz_decoded[] = "\"\\/\b\f\n\r\t";
+        const char *p_known = escape ? strchr(s_sz_escapes, escape) : NULL;
         if (p_known) {
-            if (!json_string_append(p_out_string, &s_decoded[p_known - s_escapes], 1)) return parse_no_memory(p_parser);
+            if (!json_string_append(p_out_string, &s_sz_decoded[p_known - s_sz_escapes], 1)) return parse_no_memory(p_parser);
             continue;
         }
         if (escape != 'u') return parse_fail(p_parser, "unknown escape");
@@ -180,13 +180,13 @@ static bool parse_number(JsonParser *p_parser, JsonValue *p_out_value) {
             return true;
         }
     }
-    char digits[128];
+    char sz_digits[128];
     const size_t cb_length = (size_t)(p_parser->p_cursor - p_number_start);
-    if (cb_length >= sizeof(digits)) return parse_fail(p_parser, "number too long");
-    memcpy(digits, p_number_start, cb_length);
-    digits[cb_length] = 0;
+    if (cb_length >= sizeof(sz_digits)) return parse_fail(p_parser, "number too long");
+    memcpy(sz_digits, p_number_start, cb_length);
+    sz_digits[cb_length] = 0;
     p_out_value->type = JSON_TYPE_REAL;
-    p_out_value->real = strtod(digits, NULL);
+    p_out_value->real = strtod(sz_digits, NULL);
     return true;
 }
 
@@ -318,18 +318,18 @@ static bool serialize_string(JsonString *p_out_text, const char *p_text, uint64_
         const unsigned char character = (unsigned char)p_text[i];
         if (character >= 0x20 && character != '"' && character != '\\') continue;
         if (!json_string_append(p_out_text, p_text + i_run_start, i - i_run_start)) return false;
-        char escaped[8];
+        char sz_escaped[8];
         switch (character) {
-        case '"': strcpy(escaped, "\\\""); break;
-        case '\\': strcpy(escaped, "\\\\"); break;
-        case '\b': strcpy(escaped, "\\b"); break;
-        case '\f': strcpy(escaped, "\\f"); break;
-        case '\n': strcpy(escaped, "\\n"); break;
-        case '\r': strcpy(escaped, "\\r"); break;
-        case '\t': strcpy(escaped, "\\t"); break;
-        default: snprintf(escaped, sizeof(escaped), "\\u%04x", character); break;
+        case '"': strcpy(sz_escaped, "\\\""); break;
+        case '\\': strcpy(sz_escaped, "\\\\"); break;
+        case '\b': strcpy(sz_escaped, "\\b"); break;
+        case '\f': strcpy(sz_escaped, "\\f"); break;
+        case '\n': strcpy(sz_escaped, "\\n"); break;
+        case '\r': strcpy(sz_escaped, "\\r"); break;
+        case '\t': strcpy(sz_escaped, "\\t"); break;
+        default: snprintf(sz_escaped, sizeof(sz_escaped), "\\u%04x", character); break;
         }
-        if (!json_string_append(p_out_text, escaped, strlen(escaped))) return false;
+        if (!json_string_append(p_out_text, sz_escaped, strlen(sz_escaped))) return false;
         i_run_start = i + 1;
     }
     return json_string_append(p_out_text, p_text + i_run_start, cb_length - i_run_start) &&
@@ -340,26 +340,26 @@ static bool serialize_string(JsonString *p_out_text, const char *p_text, uint64_
  * parses back as a real; JSON has no NaN or infinity, which become null. */
 static bool serialize_real(JsonString *p_out_text, double real) {
     if (!isfinite(real)) return json_string_append(p_out_text, "null", 4);
-    char digits[40];
+    char sz_digits[40];
     for (int precision = 15; precision <= 17; ++precision) {
-        snprintf(digits, sizeof(digits), "%.*g", precision, real);
-        if (strtod(digits, NULL) == real) break;
+        snprintf(sz_digits, sizeof(sz_digits), "%.*g", precision, real);
+        if (strtod(sz_digits, NULL) == real) break;
     }
-    if (!strpbrk(digits, ".eE")) strcat(digits, ".0");
-    return json_string_append(p_out_text, digits, strlen(digits));
+    if (!strpbrk(sz_digits, ".eE")) strcat(sz_digits, ".0");
+    return json_string_append(p_out_text, sz_digits, strlen(sz_digits));
 }
 
 static bool serialize_value(JsonString *p_out_text, const JsonValue *p_value) {
-    char digits[32];
+    char sz_digits[32];
     switch (p_value->type) {
     case JSON_TYPE_BOOLEAN:
         return p_value->boolean ? json_string_append(p_out_text, "true", 4) : json_string_append(p_out_text, "false", 5);
     case JSON_TYPE_INTEGER:
-        snprintf(digits, sizeof(digits), "%lld", (long long)p_value->integer);
-        return json_string_append(p_out_text, digits, strlen(digits));
+        snprintf(sz_digits, sizeof(sz_digits), "%lld", (long long)p_value->integer);
+        return json_string_append(p_out_text, sz_digits, strlen(sz_digits));
     case JSON_TYPE_UINTEGER:
-        snprintf(digits, sizeof(digits), "%llu", (unsigned long long)p_value->uinteger);
-        return json_string_append(p_out_text, digits, strlen(digits));
+        snprintf(sz_digits, sizeof(sz_digits), "%llu", (unsigned long long)p_value->uinteger);
+        return json_string_append(p_out_text, sz_digits, strlen(sz_digits));
     case JSON_TYPE_REAL: return serialize_real(p_out_text, p_value->real);
     case JSON_TYPE_STRING:
         return serialize_string(p_out_text, p_value->string.p_text ? p_value->string.p_text->text : "",

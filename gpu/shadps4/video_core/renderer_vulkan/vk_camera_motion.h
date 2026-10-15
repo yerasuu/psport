@@ -30,34 +30,34 @@ public:
     CameraMotion(const Instance& instance, Scheduler& scheduler,
                  VideoCore::TextureCache& texture_cache, Runtime& runtime);
     ~CameraMotion();
-    void InvalidateHistory() { current.valid = previous.valid = false; }
-    void SetObjectMotion(ObjectMotion* motion) noexcept {
-        object_motion = motion;
+    void InvalidateHistory() { m_current.is_valid = m_previous.is_valid = false; }
+    void SetObjectMotion(ObjectMotion* p_motion) noexcept {
+        m_p_object_motion = p_motion;
     }
     /// This frame's object motion image (after RecordMotion), for the debug view; or null.
     vk::ImageView ObjectMotionView() const noexcept;
     vk::Image ObjectMotionImage(u32 width, u32 height) const noexcept;
 
     void SetJitter(std::array<float, 2> value) noexcept {
-        previous_jitter = jitter;
-        jitter = value;
+        m_previous_jitter = m_jitter;
+        m_jitter = value;
     }
 
     [[nodiscard]] bool Enabled() const noexcept {
-        return debug_overlay || for_upscaler;
+        return m_has_debug_overlay || m_is_for_upscaler;
     }
 
     /// Both cameras and the scene depth of the current frame are known.
     [[nodiscard]] bool Ready() const noexcept {
-        return current.valid && previous.valid && depth_id;
+        return m_current.is_valid && m_previous.is_valid && m_depth_id;
     }
     [[nodiscard]] VideoCore::ImageId Depth() const noexcept {
-        return depth_id;
+        return m_depth_id;
     }
     /// The render size in the scene constants (the game's viewport; its targets may be
     /// allocated larger, e.g. 1916x1080 for a 1916x1078 scene), or zero before the first camera.
     [[nodiscard]] std::array<u32, 2> RenderSize() const noexcept {
-        return render_size;
+        return m_render_size;
     }
     /// Vertical field of view and near/far planes of the current camera.
     [[nodiscard]] float VerticalFov() const noexcept;
@@ -77,7 +77,7 @@ public:
         return m_constants.cb_constants && cb_buffer == m_constants.cb_constants;
     }
     /// A bound constant buffer that IsSceneConstants: checks the scene constant signature.
-    void OnConstants(const float* data);
+    void OnConstants(const float* p_data);
 
     /// The G-buffer pass (5+ color targets): its depth is the scene depth.
     /// `x_sign`/`y_sign`: signs of the G-buffer pass's viewport x/y scale (window = ndc * scale +
@@ -94,45 +94,45 @@ private:
         std::array<float, 12> view{};     ///< world to view, 3x4 rows
         std::array<float, 12> inv_view{}; ///< view to world, 3x4 rows
         std::array<float, 4> proj{};      ///< x scale, y scale, z scale, z offset
-        bool valid = false;
+        bool is_valid = false;
     };
 
     void Overlay(VideoCore::ImageId frame);
 
-    const Instance& instance;
-    Scheduler& scheduler;
-    VideoCore::TextureCache& texture_cache;
-    Runtime& runtime;
-    bool debug_overlay = false;
-    bool for_upscaler = false;
-    vk::UniqueDescriptorSetLayout motion_desc_layout;
-    vk::UniquePipelineLayout motion_pipeline_layout;
-    vk::UniquePipeline motion_pipeline;
+    const Instance& m_instance;
+    Scheduler& m_scheduler;
+    VideoCore::TextureCache& m_texture_cache;
+    Runtime& m_runtime;
+    bool m_has_debug_overlay = false;
+    bool m_is_for_upscaler = false;
+    vk::UniqueDescriptorSetLayout m_motion_desc_layout;
+    vk::UniquePipelineLayout m_motion_pipeline_layout;
+    vk::UniquePipeline m_motion_pipeline;
 
-    ObjectMotion* object_motion = nullptr;
+    ObjectMotion* m_p_object_motion = nullptr;
     const Game::CameraConstants m_constants;
-    Camera current, previous;
-    bool frame_has_camera = false;
+    Camera m_current, m_previous;
+    bool m_has_frame_camera = false;
     /// psport: the camera of the G-buffer pass in progress (OnConstants), committed as the frame's
     /// camera once per frame (CommitFrameCamera: the motion pass or the display pass).
-    Camera pass_camera;
-    bool pass_has_camera = false;
-    bool committed = false;
-    u32 frame_gbuffer_passes = 0;
-    std::array<std::array<float, 3>, 4> pass_positions{};
+    Camera m_pass_camera;
+    bool m_has_pass_camera = false;
+    bool m_has_committed = false;
+    u32 m_c_frame_gbuffer_passes = 0;
+    std::array<std::array<float, 3>, 4> m_pass_positions{};
     void CommitFrameCamera();
-    std::array<float, 2> jitter{}, previous_jitter{};
-    std::array<u32, 2> render_size{};
-    VideoCore::ImageId depth_id{};
-    float gbuffer_x_sign = 1.0f; ///< psport: signs of the G-buffer viewport scales (OnGBufferPass)
-    float gbuffer_y_sign = 1.0f;
+    std::array<float, 2> m_jitter{}, m_previous_jitter{};
+    std::array<u32, 2> m_render_size{};
+    VideoCore::ImageId m_depth_id{};
+    float m_gbuffer_x_sign = 1.0f; ///< psport: signs of the G-buffer viewport scales (OnGBufferPass)
+    float m_gbuffer_y_sign = 1.0f;
 
-    vk::UniqueDescriptorSetLayout desc_layout;
-    vk::UniquePipelineLayout pipeline_layout;
-    vk::UniquePipeline overlay_pipeline;
+    vk::UniqueDescriptorSetLayout m_desc_layout;
+    vk::UniquePipelineLayout m_pipeline_layout;
+    vk::UniquePipeline m_overlay_pipeline;
     /// Debug: the last two finished frames (RGBA8 packed), for the reprojection check.
-    std::unique_ptr<VideoCore::Buffer> frames[2];
-    u32 frame_index = 0;
+    std::unique_ptr<VideoCore::Buffer> m_frames[2];
+    u32 m_i_frame = 0;
 };
 
 } // namespace Vulkan

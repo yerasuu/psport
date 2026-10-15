@@ -573,10 +573,10 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
     // game the port knows nothing about.
     const char* hooks_env = std::getenv("PS_GUEST_HOOKS");
     const Game::Profile* game = Game::Active();
-    if (GuestInPlace() && game && game->install_hooks && !(hooks_env && hooks_env[0] == '0')) {
+    if (GuestInPlace() && game && game->pfn_install_hooks && !(hooks_env && hooks_env[0] == '0')) {
         static BufferCache* hooked_cache = this;
-        game->install_hooks(Game::CoreServices{
-            .fresh_range = [](u64 address, u64 size) { hooked_cache->NoteFreshRange(address, size); },
+        game->pfn_install_hooks(Game::CoreServices{
+            .pfn_fresh_range = [](u64 address, u64 size) { hooked_cache->NoteFreshRange(address, size); },
         });
     } else if (GuestInPlace() && game) {
         std::printf("Guest hooks: off (PS_GUEST_HOOKS=0): nothing in the game's own code is hooked\n");
@@ -659,11 +659,11 @@ void BufferCache::InvalidateMemory(VAddr device_addr, u64 size, bool assume_lock
 // Item: context = BufferCache, source = guest address, destination = host pointer, size,
 // extra = the Buffer whose mapping holds the destination (flushed after the copy).
 void BufferCache::RunGuestCopy(const PsCopy::Item& item) {
-    auto* cache = static_cast<BufferCache*>(item.context);
+    auto* cache = static_cast<BufferCache*>(item.p_context);
     auto* dst = reinterpret_cast<u8*>(item.destination);
-    cache->memory->CopySparseMemory(item.source, dst, item.size);
+    cache->memory->CopySparseMemory(item.source, dst, item.cb_copy);
     auto* buffer = reinterpret_cast<Buffer*>(item.extra);
-    buffer->Flush(dst - buffer->mapped_data.data(), item.size);
+    buffer->Flush(dst - buffer->mapped_data.data(), item.cb_copy);
 }
 
 // Small guest copies run on the recording thread (it spins for work: no wakeup, and it is
@@ -677,13 +677,13 @@ void BufferCache::SmallGuestCopy(const PsCopy::Item& item) {
         // earliest, possibly after a WRITE_DATA had changed its source (that wait runs only the
         // GpuComm thread's own batch). Suspected in the vertex explosions with
         // PS_VK_RECORD_THREAD=0 (issue #39).
-        item.run(item);
+        item.pfn_run(item);
     } else if (!PsToggle::Disabled(PsToggle::PoolSmallCopies)) {
-        scheduler.RecordHostCopy([item] { item.run(item); });
+        scheduler.RecordHostCopy([item] { item.pfn_run(item); });
     } else {
         PsCopy::QueueCopy(item);
     }
-    scheduler.NoteHostCopySource(item.source, item.size);
+    scheduler.NoteHostCopySource(item.source, item.cb_copy);
 }
 
 void BufferCache::ExtendWriteFault(VAddr device_addr, u64 guest_rip) {
@@ -702,7 +702,7 @@ void BufferCache::ExtendWriteFault(VAddr device_addr, u64 guest_rip) {
 }
 
 void BufferCache::ReadMemory(VAddr device_addr, u64 size, bool is_write, bool assume_locks) {
-    PsStats::readbacks.fetch_add(1, std::memory_order_relaxed);
+    PsStats::g_c_readbacks.fetch_add(1, std::memory_order_relaxed);
     std::array<char, 16> requester{};
     if (Readbacks()) {
         pthread_getname_np(pthread_self(), requester.data(), requester.size());
@@ -810,7 +810,7 @@ void BufferCache::LayerCopyBackForCpu(VAddr address) {
     const Buffer* mirror_buffer = nullptr;
     u64 total = 0, tick = 0;
     if (const auto mirror = PsLayer::GpuMemory::Get().MirrorAt(from)) {
-        mirror_buffer = static_cast<const Buffer*>(mirror->owner);
+        mirror_buffer = static_cast<const Buffer*>(mirror->p_owner);
         gpu_modified_ranges.ForEachInRange(from, block_size, [&](VAddr start, VAddr end) {
             copies.push_back({mirror_buffer->Offset(start), total, end - start});
             guests.push_back(start);
@@ -1004,7 +1004,7 @@ void NoteHotUse(VAddr address, u32 size) {
         return;
     }
     auto& st = Stats();
-    const u64 frame = PsStats::gpu_frames.load(std::memory_order_relaxed);
+    const u64 frame = PsStats::g_c_gpu_frames.load(std::memory_order_relaxed);
     for (u64 block = address >> 16; block <= (address + size - 1) >> 16; ++block) {
         auto [it, inserted] = st.last_use.try_emplace(block, frame);
         if (!inserted && it->second != frame) {
@@ -1108,7 +1108,7 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
     if (memo_candidate && read_memo.first == memo_first && read_memo.last == memo_last &&
         read_memo.generation == ResidencyGeneration()) {
         NoteUse(memo_first << block_shift, (memo_last - memo_first + 1) << block_shift);
-        PsStats::bound_in_place_bytes.fetch_add(size, std::memory_order_relaxed);
+        PsStats::g_cb_bound_in_place.fetch_add(size, std::memory_order_relaxed);
         return {read_memo.arena, read_memo.arena->Offset(device_addr)};
     }
     if (GuestInPlace() && (is_written || size > STREAM_THRESHOLD || ConstantsInPlace() ||
@@ -1133,16 +1133,16 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
         if (MixStats()) {
             NoteResidencyMix(first_block, last_block, size, is_written);
         }
-        if (is_written && size > 64_KB && PsStats::enabled) {
+        if (is_written && size > 64_KB && PsStats::g_is_enabled) {
             NoteLargeGpuWrite(device_addr, size);
         }
         if (IsInPlace(device_addr, size)) {
             if (is_written) {
                 WriteTicks().Note(device_addr, size, scheduler.CurrentTick());
             }
-            PsStats::bound_in_place_bytes.fetch_add(size, std::memory_order_relaxed);
+            PsStats::g_cb_bound_in_place.fetch_add(size, std::memory_order_relaxed);
             if (is_written) {
-                PsStats::bound_in_place_written_bytes.fetch_add(size, std::memory_order_relaxed);
+                PsStats::g_cb_bound_in_place_written.fetch_add(size, std::memory_order_relaxed);
             }
             if (is_texel_buffer && !is_written) {
                 SynchronizeMemoryFromImage(arena, arena->Offset(device_addr), device_addr, size);
@@ -1173,11 +1173,11 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
             !PsToggle::Disabled(PsToggle::DeferredStreamCopies)) {
             if (const auto offset = stream_buffer.Reserve(size, instance.UniformMinAlignment())) {
                 SmallGuestCopy({
-                    .run = &RunGuestCopy,
-                    .context = this,
+                    .pfn_run = &RunGuestCopy,
+                    .p_context = this,
                     .source = device_addr,
                     .destination = reinterpret_cast<u64>(stream_buffer.mapped_data.data() + *offset),
-                    .size = size,
+                    .cb_copy = size,
                     .extra = reinterpret_cast<u64>(static_cast<Buffer*>(&stream_buffer)),
                 });
                 TraceBinding(device_addr, size, false, 3);
@@ -1197,9 +1197,9 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
     BB_SECTION(ObtainVram);
     if (!is_written) {
     }
-    const u64 uploaded_before = PsStats::buffer_upload_bytes.load(std::memory_order_relaxed);
+    const u64 uploaded_before = PsStats::g_cb_buffer_upload.load(std::memory_order_relaxed);
     if (GuestInPlace()) {
-        PsStats::bound_vram_bytes.fetch_add(size, std::memory_order_relaxed);
+        PsStats::g_cb_bound_vram.fetch_add(size, std::memory_order_relaxed);
     }
     SynchronizeMemory(arena, device_addr, size, is_written, is_texel_buffer);
     if (stats) {
@@ -1207,7 +1207,7 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
         ++region.arena_count;
         region.arena_bytes += size;
         region.upload_bytes +=
-            PsStats::buffer_upload_bytes.load(std::memory_order_relaxed) - uploaded_before;
+            PsStats::g_cb_buffer_upload.load(std::memory_order_relaxed) - uploaded_before;
     }
     if (is_written) {
         gpu_modified_ranges.Add(device_addr, size);
@@ -1236,7 +1236,7 @@ std::optional<std::pair<const Buffer*, u64>> BufferCache::CommandWriteMirror(VAd
     if (layer_volatile.Overlaps(first, end) || gpu_modified_ranges.Intersects(device_addr, size)) {
         return std::nullopt;
     }
-    auto* mirror = static_cast<Buffer*>(resolution.span.source->owner);
+    auto* mirror = static_cast<Buffer*>(resolution.span.p_source->p_owner);
     return std::pair<const Buffer*, u64>{mirror, mirror->Offset(device_addr)};
 }
 
@@ -1336,18 +1336,18 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBufferForImage(VAddr device_add
         constexpr u64 Chunk = 1_MB;
         for (u64 offset = 0; offset < staging.size; offset += Chunk) {
             const PsCopy::Item item{
-                .run = &RunGuestCopy,
-                .context = this,
+                .pfn_run = &RunGuestCopy,
+                .p_context = this,
                 .source = device_addr + offset,
                 .destination = reinterpret_cast<u64>(staging.mapped + offset),
-                .size = std::min(Chunk, staging.size - offset),
+                .cb_copy = std::min(Chunk, staging.size - offset),
                 .extra = reinterpret_cast<u64>(staging.buffer),
             };
             if (staging.size < Chunk) {
                 SmallGuestCopy(item);
             } else {
-                PsCopy::Async([item] { item.run(item); });
-                scheduler.NoteHostCopySource(item.source, item.size);
+                PsCopy::Async([item] { item.pfn_run(item); });
+                scheduler.NoteHostCopySource(item.source, item.cb_copy);
             }
         }
         return {staging.buffer, staging.offset};
@@ -1484,7 +1484,7 @@ void BufferCache::EnsureResident(const Buffer* arena, u64 first_block, u64 last_
         memo = {first_block, last_block, ResidencyGeneration()};
         return;
     }
-    PsStats::Timer timer{PsStats::t_resident};
+    PsStats::Timer timer{PsStats::g_t_resident};
 
     // psport PS_GUEST_IN_PLACE: blocks of the game's direct memory are bound to the memory it
     // lives in; the rest (and everything without it) gets VRAM as before.
@@ -1609,8 +1609,8 @@ std::pair<vk::DeviceMemory, u64> BufferCache::AllocateResidency(u64 bytes) {
         if (FixedArena() && arena_fallback_type_index) {
             memory = Vulkan::Check(device.allocateMemory(
                 {.allocationSize = size, .memoryTypeIndex = *arena_fallback_type_index}));
-            PsStats::device_alloc_bytes.fetch_add(size, std::memory_order_relaxed);
-            PsStats::residency_alloc_bytes.fetch_add(size, std::memory_order_relaxed);
+            PsStats::g_cb_device_alloc.fetch_add(size, std::memory_order_relaxed);
+            PsStats::g_cb_residency_alloc.fetch_add(size, std::memory_order_relaxed);
             return memory;
         }
         if (!test_limit || vram_bytes.load(std::memory_order_relaxed) + size <= test_limit) {
@@ -1637,8 +1637,8 @@ std::pair<vk::DeviceMemory, u64> BufferCache::AllocateResidency(u64 bytes) {
             // AllocateResidency tries a smaller block and the other memory types.
             return vk::DeviceMemory{};
         }
-        PsStats::device_alloc_bytes.fetch_add(size, std::memory_order_relaxed);
-        PsStats::residency_alloc_bytes.fetch_add(size, std::memory_order_relaxed);
+        PsStats::g_cb_device_alloc.fetch_add(size, std::memory_order_relaxed);
+        PsStats::g_cb_residency_alloc.fetch_add(size, std::memory_order_relaxed);
         return memory;
     };
     if (residency_used + bytes > residency_size) {
@@ -1668,8 +1668,8 @@ std::pair<vk::DeviceMemory, u64> BufferCache::AllocateResidency(u64 bytes) {
                 auto other = instance.GetDevice().allocateMemory({.allocationSize = size, .memoryTypeIndex = i});
                 if (other.result == vk::Result::eSuccess) {
                     memory = other.value;
-                    PsStats::device_alloc_bytes.fetch_add(size, std::memory_order_relaxed);
-                    PsStats::residency_alloc_bytes.fetch_add(size, std::memory_order_relaxed);
+                    PsStats::g_cb_device_alloc.fetch_add(size, std::memory_order_relaxed);
+                    PsStats::g_cb_residency_alloc.fetch_add(size, std::memory_order_relaxed);
                 }
             }
         }
@@ -1692,8 +1692,8 @@ std::pair<vk::DeviceMemory, u64> BufferCache::AllocateResidency(u64 bytes) {
 void BufferCache::NoteResidencyUnused() {
     const u64 unused = free_slot_count * block_size + (residency_size - residency_used) +
                        (spare_residency.valid() ? 64_MB : 0);
-    PsStats::residency_unused_bytes.store(unused, std::memory_order_relaxed);
-    PsStats::residency_chunk_count.store(residency_chunks.size(), std::memory_order_relaxed);
+    PsStats::g_cb_residency_unused.store(unused, std::memory_order_relaxed);
+    PsStats::g_c_residency_chunks.store(residency_chunks.size(), std::memory_order_relaxed);
 }
 
 u32 BufferCache::VramIdleSeconds() {
@@ -1740,7 +1740,7 @@ void BufferCache::NoteResidencyMix(u64 first_block, u64 last_block, u64 size, bo
             }
         }
     }
-    const u32 now = PsStats::coarse_second.load(std::memory_order_relaxed);
+    const u32 now = PsStats::g_coarse_second.load(std::memory_order_relaxed);
     if (now - printed_second.load(std::memory_order_relaxed) >= 2) {
         printed_second.store(now, std::memory_order_relaxed);
         const auto take = [](std::atomic<u64>& v) { return (unsigned long long)v.exchange(0); };
@@ -1776,7 +1776,7 @@ void BufferCache::NoteResidencyMix(u64 first_block, u64 last_block, u64 size, bo
 }
 
 void BufferCache::NoteUse(VAddr address, u64 size) {
-    const u32 now = PsStats::coarse_second.load(std::memory_order_relaxed);
+    const u32 now = PsStats::g_coarse_second.load(std::memory_order_relaxed);
     const u64 last = std::min<u64>((address + size - 1) >> USE_GROUP_BITS, group_use.size() - 1);
     for (u64 group = address >> USE_GROUP_BITS; group <= last; ++group) {
         if (group_use[group] != now) {
@@ -1801,7 +1801,7 @@ void BufferCache::ReleaseResidencySlot(vk::DeviceMemory memory, u64 offset) {
         ++free_slot_count;
         it->second.used -= block_size;
         if (it->second.used == 0) {
-            it->second.empty_second = PsStats::coarse_second.load(std::memory_order_relaxed);
+            it->second.empty_second = PsStats::g_coarse_second.load(std::memory_order_relaxed);
             it->second.empty_tick = scheduler.CurrentTick();
         }
     }
@@ -1834,11 +1834,11 @@ void BufferCache::EvictVramBlock(u64 block) {
     ReleaseResidencySlot(memory, offset);
     // After the work submitted so far: it may still read the block.
     bind_wait_tick = std::max(bind_wait_tick, scheduler.CurrentTick() - 1);
-    PsStats::vram_unmapped_bytes.fetch_add(block_size, std::memory_order_relaxed);
+    PsStats::g_cb_vram_unmapped.fetch_add(block_size, std::memory_order_relaxed);
 }
 
 void BufferCache::ProcessIdleBlocks() {
-    const u32 now = PsStats::coarse_second.load(std::memory_order_relaxed);
+    const u32 now = PsStats::g_coarse_second.load(std::memory_order_relaxed);
     if (now == idle_scan_second || !GuestInPlace() || VramIdleSeconds() == 0) {
         return;
     }
@@ -1885,7 +1885,7 @@ void BufferCache::ProcessIdleBlocks() {
         if (sparsest != residency_chunks.end() && sparsest->second.used <= free_elsewhere) {
             sparsest->second.evacuated_second = now;
             last_evacuation = now;
-            PsStats::evacuations.fetch_add(1, std::memory_order_relaxed);
+            PsStats::g_c_evacuations.fetch_add(1, std::memory_order_relaxed);
             for (const auto& range : resident_ranges) {
                 if (static_cast<VkDeviceMemory>(range.memory) != sparsest->first) {
                     continue;
@@ -1908,9 +1908,9 @@ void BufferCache::ProcessIdleBlocks() {
         }
         free_slot_count -= chunk.free_offsets.size();
         instance.GetDevice().freeMemory(vk::DeviceMemory{memory});
-        PsStats::residency_alloc_bytes.fetch_sub(chunk.size, std::memory_order_relaxed);
-        PsStats::device_free_bytes.fetch_add(chunk.size, std::memory_order_relaxed);
-        PsStats::vram_chunks_freed_bytes.fetch_add(chunk.size, std::memory_order_relaxed);
+        PsStats::g_cb_residency_alloc.fetch_sub(chunk.size, std::memory_order_relaxed);
+        PsStats::g_cb_device_free.fetch_add(chunk.size, std::memory_order_relaxed);
+        PsStats::g_cb_vram_chunks_freed.fetch_add(chunk.size, std::memory_order_relaxed);
         it = residency_chunks.erase(it);
         NoteResidencyUnused();
     }
@@ -1970,7 +1970,7 @@ void BufferCache::BindInPlace(u64 start, u64 end, std::vector<ResidentBind>& out
         if (!garlic && !LayerMode() && runtime_memory_direct_phys(address, &phys, &mapping_end) &&
             (phys & (block_size - 1)) == 0 && (chunk = PsGuestMemory::Find(phys)) != nullptr) {
             // Whole blocks within the mapping, the chunk and the range.
-            const u64 bytes = std::min<u64>({mapping_end - address, chunk->phys + chunk->size - phys,
+            const u64 bytes = std::min<u64>({mapping_end - address, chunk->phys + chunk->cb_chunk - phys,
                                              (end - block) << block_shift});
             run = bytes >> block_shift;
             // The run ends where data may keep a VRAM copy (with write tracking: Garlic, and blocks of
@@ -2013,7 +2013,7 @@ void BufferCache::NoteCpuWrite(VAddr address, u64 guest_rip) {
     // heap at its first write (others after Frames writes in Window frames).
     const bool dynamic_writer = Game::IsDynamicWriter(guest_rip);
     const u64 block = address >> block_shift;
-    const u32 frame = static_cast<u32>(PsStats::frame_number.load(std::memory_order_relaxed));
+    const u32 frame = static_cast<u32>(PsStats::g_frame_number.load(std::memory_order_relaxed));
     std::scoped_lock lk{dynamic_mutex};
     auto& [last, frames] = cpu_write_frames[block];
     if (dynamic_writer && frames < Frames) {
@@ -2081,7 +2081,7 @@ void BufferCache::ProcessDemotions() {
         }
         if (idle) {
             if (!force &&
-                PsStats::coarse_second.load(std::memory_order_relaxed) -
+                PsStats::g_coarse_second.load(std::memory_order_relaxed) -
                         group_use[address >> USE_GROUP_BITS] <
                     VramIdleSeconds()) {
                 return true; // bound again since
@@ -2094,7 +2094,7 @@ void BufferCache::ProcessDemotions() {
             gpu_modified_ranges.Intersects(address, block_size)) {
             kept.fetch_add(1, std::memory_order_relaxed);
             if (force) {
-                PsStats::evac_kept_gpu.fetch_add(1, std::memory_order_relaxed);
+                PsStats::g_evac_kept_gpu.fetch_add(1, std::memory_order_relaxed);
             }
             return true;
         }
@@ -2105,7 +2105,7 @@ void BufferCache::ProcessDemotions() {
             (phys & (block_size - 1)) != 0 || mapping_end - address < block_size ||
             (chunk = PsGuestMemory::Find(phys)) == nullptr) {
             if (force) {
-                PsStats::evac_kept_other.fetch_add(1, std::memory_order_relaxed);
+                PsStats::g_evac_kept_other.fetch_add(1, std::memory_order_relaxed);
             }
             return true;
         }
@@ -2141,7 +2141,7 @@ void BufferCache::ProcessDemotions() {
         // Never uploaded or protected again: writes go to the memory the GPU reads.
         memory_tracker->MarkRegionAsCpuModified(address, block_size);
         if (idle) {
-            PsStats::vram_idle_bytes.fetch_add(block_size, std::memory_order_relaxed);
+            PsStats::g_cb_vram_idle.fetch_add(block_size, std::memory_order_relaxed);
             idle_demoted.Add({block, block + 1});
             group_demoted[address >> USE_GROUP_BITS] = 1;
         }
@@ -2161,12 +2161,12 @@ std::optional<std::pair<const Buffer*, u64>> BufferCache::GuestChunkSource(VAddr
     const PsGuestMemory::Chunk* chunk = nullptr;
     if (size == 0 || !runtime_memory_direct_phys(address, &phys, &mapping_end) ||
         address + size > mapping_end || (chunk = PsGuestMemory::Find(phys)) == nullptr ||
-        phys + size > chunk->phys + chunk->size) {
+        phys + size > chunk->phys + chunk->cb_chunk) {
         return std::nullopt;
     }
-    auto& buffer = chunk_buffers[chunk->index % chunk_buffers.size()];
+    auto& buffer = chunk_buffers[chunk->i_creation % chunk_buffers.size()];
     if (!buffer) {
-        buffer = std::make_unique<Buffer>(instance, chunk->size, chunk->memory,
+        buffer = std::make_unique<Buffer>(instance, chunk->cb_chunk, chunk->memory,
                                           fmt::format("psport guest memory {:#x}", chunk->phys));
     }
     return std::pair<const Buffer*, u64>{buffer.get(), phys - chunk->phys};
@@ -2178,7 +2178,7 @@ std::optional<std::pair<const Buffer*, u64>> BufferCache::LayerInPlace(VAddr add
     if (!span) {
         return std::nullopt;
     }
-    if (span->size != size) {
+    if (span->cb_span != size) {
         // Shaders given (nearly) all memory as one buffer: the part the module has whole. Until
         // the paged path (MEMORY_MODULE_PLAN step 3) a range across chunks is not one buffer.
         if (!clamp_huge || size < 64_MB) {
@@ -2189,16 +2189,16 @@ std::optional<std::pair<const Buffer*, u64>> BufferCache::LayerInPlace(VAddr add
             std::printf("Layer memory: binding %#llx+%#llx cut to %#llx (the rest is in another "
                         "chunk)\n",
                         (unsigned long long)address, (unsigned long long)size,
-                        (unsigned long long)span->size);
+                        (unsigned long long)span->cb_span);
         }
     }
-    const auto* chunk = static_cast<const PsGuestMemory::Chunk*>(span->source->owner);
-    auto& buffer = chunk_buffers[chunk->index % chunk_buffers.size()];
+    const auto* chunk = static_cast<const PsGuestMemory::Chunk*>(span->p_source->p_owner);
+    auto& buffer = chunk_buffers[chunk->i_creation % chunk_buffers.size()];
     if (!buffer) {
-        buffer = std::make_unique<Buffer>(instance, chunk->size, chunk->memory,
+        buffer = std::make_unique<Buffer>(instance, chunk->cb_chunk, chunk->memory,
                                           fmt::format("psport guest memory {:#x}", chunk->phys));
     }
-    return std::pair<const Buffer*, u64>{buffer.get(), span->offset};
+    return std::pair<const Buffer*, u64>{buffer.get(), span->off_source};
 }
 
 void BufferCache::NoteLayerMiss(VAddr address, u64 size, bool is_written) {
@@ -2216,7 +2216,7 @@ void BufferCache::NoteLayerMiss(VAddr address, u64 size, bool is_written) {
                     (unsigned long long)address, (unsigned long long)size,
                     is_written ? " (written)" : "");
     }
-    const u32 now = PsStats::coarse_second.load(std::memory_order_relaxed);
+    const u32 now = PsStats::g_coarse_second.load(std::memory_order_relaxed);
     if (now - printed_second.load(std::memory_order_relaxed) >= 2) {
         printed_second.store(now, std::memory_order_relaxed);
         std::printf("Layer memory (2 s): %llu bindings, %llu MiB not whole in one guest chunk "
@@ -2236,8 +2236,8 @@ void BufferCache::NoteAssetWrite(VAddr addr, u64 size) {
 }
 
 void BufferCache::NoteFreshRange(VAddr addr, u64 size) {
-    PsStats::gpu_range_allocs.fetch_add(1, std::memory_order_relaxed);
-    PsStats::gpu_range_alloc_bytes.fetch_add(size, std::memory_order_relaxed);
+    PsStats::g_c_gpu_range_allocs.fetch_add(1, std::memory_order_relaxed);
+    PsStats::g_cb_gpu_range_alloc.fetch_add(size, std::memory_order_relaxed);
     if (!GuestInPlace() || WriteTracking()) {
         return; // every write is caught, or nothing is bound in place
     }
@@ -2460,7 +2460,7 @@ void BufferCache::ProcessLateWrites() {
         }
         const auto* arena = GetArena(first, last);
         runtime.UpdateBuffer(arena, arena->Offset(addr), bytes);
-        PsStats::late_vram_writes.fetch_add(1, std::memory_order_relaxed);
+        PsStats::g_c_late_vram_writes.fetch_add(1, std::memory_order_relaxed);
     }
     // CPU bytes next to GPU data in VRAM: copied by the GPU from the game's memory, block by
     // block (a VRAM block's guest memory is one contiguous run of a chunk).
@@ -2475,11 +2475,11 @@ void BufferCache::ProcessLateWrites() {
             if (resident_ranges.Contains(block) && !in_place_blocks.Contains(block) &&
                 runtime_memory_direct_phys(at, &phys, &mapping_end) && to <= mapping_end &&
                 (chunk = PsGuestMemory::Find(phys)) != nullptr &&
-                phys + (to - at) <= chunk->phys + chunk->size) {
+                phys + (to - at) <= chunk->phys + chunk->cb_chunk) {
                 const auto* arena = GetArena(block, block);
                 const vk::BufferCopy copy{phys - chunk->phys, at - arena->cpu_addr, to - at};
                 runtime.CopyFromGuestChunk(chunk->buffer, arena, std::span{&copy, 1});
-                PsStats::late_vram_writes.fetch_add(1, std::memory_order_relaxed);
+                PsStats::g_c_late_vram_writes.fetch_add(1, std::memory_order_relaxed);
             }
             at = to;
         }
@@ -2522,8 +2522,8 @@ std::optional<std::pair<const Buffer*, u64>> BufferCache::ShadowCopy(VAddr addr,
     const vk::BufferCopy copy{source->second, *offset, size};
     runtime.CopyBuffer(source->first, shadow_buffer.get(), std::span{&copy, 1});
     shadows.push_back({addr, size, *offset});
-    PsStats::shadow_copies.fetch_add(1, std::memory_order_relaxed);
-    PsStats::shadow_bytes.fetch_add(size, std::memory_order_relaxed);
+    PsStats::g_c_shadow_copies.fetch_add(1, std::memory_order_relaxed);
+    PsStats::g_cb_shadow.fetch_add(size, std::memory_order_relaxed);
     return std::pair<const Buffer*, u64>{shadow_buffer.get(), *offset};
 }
 
@@ -2545,7 +2545,7 @@ bool BufferCache::UpdateGpuWritten(VAddr addr, std::span<const u8> data) {
     }
     const auto* arena = GetArena(first, last);
     runtime.UpdateBuffer(arena, arena->Offset(addr), data);
-    PsStats::gpu_data_updates.fetch_add(1, std::memory_order_relaxed);
+    PsStats::g_c_gpu_data_updates.fetch_add(1, std::memory_order_relaxed);
     return true;
 }
 
@@ -2558,7 +2558,7 @@ void BufferCache::NoteGpuWrite(VAddr addr, u64 size) {
     // (0x104ff30000, 192 KiB, written by the GPU every few seconds: in VRAM the picture smeared
     // while moving).
     constexpr u32 Frames = 3, Window = 60;
-    const u32 frame = static_cast<u32>(PsStats::frame_number.load(std::memory_order_relaxed));
+    const u32 frame = static_cast<u32>(PsStats::g_frame_number.load(std::memory_order_relaxed));
     auto& [last, frames] = gpu_write_frames[addr ^ (size << 40)];
     if (last != frame || frames == 0) {
         frames = frame - last > Window ? 1 : frames + 1;
@@ -2658,7 +2658,7 @@ void BufferCache::QueueCopyBacks(u64 submitted) {
         memory_tracker->UnmarkRegionAsGpuModified(address, block_size);
         gpu_modified_ranges.Subtract(address, block_size);
         memory_tracker->MarkRegionAsCpuModified(address, block_size);
-        PsStats::copied_back_blocks.fetch_add(1, std::memory_order_relaxed);
+        PsStats::g_c_copied_back_blocks.fetch_add(1, std::memory_order_relaxed);
         moved = true;
     }
     if (moved) {
@@ -2816,7 +2816,7 @@ void BufferCache::ReportInPlaceBlocks() {
     // in place that were used in the last seconds, and why they have no VRAM copy.
     static const char* const trigger = std::getenv("PS_RESIDENCY_REPORT");
     static s64 checked = -1;
-    const s64 now = PsStats::coarse_second.load(std::memory_order_relaxed);
+    const s64 now = PsStats::g_coarse_second.load(std::memory_order_relaxed);
     if (!trigger || now == checked) {
         return;
     }
@@ -3145,7 +3145,7 @@ bool BufferCache::SynchronizeMemory(const Buffer* arena, VAddr device_addr, u32 
                     if (runtime_memory_direct_phys(address, &phys, &mapping_end) &&
                         address + copy.size <= mapping_end &&
                         (chunk = PsGuestMemory::Find(phys)) != nullptr &&
-                        phys + copy.size <= chunk->phys + chunk->size) {
+                        phys + copy.size <= chunk->phys + chunk->cb_chunk) {
                         chunk_copies.push_back({chunk->buffer,
                                                 {phys - chunk->phys, address - arena->cpu_addr,
                                                  copy.size}});
@@ -3164,7 +3164,7 @@ bool BufferCache::SynchronizeMemory(const Buffer* arena, VAddr device_addr, u32 
         runtime.CopyBuffer(src_buffer, arena, copies);
     }
     for (const auto& [chunk_buffer, copy] : chunk_copies) {
-        PsStats::buffer_upload_bytes.fetch_add(copy.size, std::memory_order_relaxed);
+        PsStats::g_cb_buffer_upload.fetch_add(copy.size, std::memory_order_relaxed);
         // psport PS_LAYER_MEMORY: the GPU writes the game's memory too (through the chunk's
         // buffer wrapper): a copy from it waits for those writes like any buffer copy.
         if (LayerMode()) {
@@ -3188,7 +3188,7 @@ const Buffer* BufferCache::UploadCopies(const Buffer* arena, std::span<vk::Buffe
     if (copies.empty()) {
         return nullptr;
     }
-    PsStats::buffer_upload_bytes.fetch_add(total_size_bytes, std::memory_order_relaxed);
+    PsStats::g_cb_buffer_upload.fetch_add(total_size_bytes, std::memory_order_relaxed);
     const auto staging = staging_pool.Request(total_size_bytes, MemoryType::HostUncached);
     // psport: the guest memory is copied into staging on the copy threads, started now in
     // groups of about 1 MiB; submission and guest-visible fences wait for them
@@ -3197,11 +3197,11 @@ const Buffer* BufferCache::UploadCopies(const Buffer* arena, std::span<vk::Buffe
         // Small uploads join the calling thread's batch.
         for (auto& copy : copies) {
             SmallGuestCopy({
-                .run = &RunGuestCopy,
-                .context = this,
+                .pfn_run = &RunGuestCopy,
+                .p_context = this,
                 .source = copy.dstOffset,
                 .destination = reinterpret_cast<u64>(staging.mapped + copy.srcOffset),
-                .size = copy.size,
+                .cb_copy = copy.size,
                 .extra = reinterpret_cast<u64>(staging.buffer),
             });
             copy.srcOffset += staging.offset;
@@ -3403,8 +3403,8 @@ void BufferCache::Preupload(u64 budget) {
     // PS_FRAME_STATS: what the pre-upload put into the arena: regions for the first time, or again
     // (rewritten by the game since).
     static u32 report_frame = 0;
-    if (PsStats::enabled && PsStats::frame_number.load(std::memory_order_relaxed) - report_frame >= 600) {
-        report_frame = PsStats::frame_number.load(std::memory_order_relaxed);
+    if (PsStats::g_is_enabled && PsStats::g_frame_number.load(std::memory_order_relaxed) - report_frame >= 600) {
+        report_frame = PsStats::g_frame_number.load(std::memory_order_relaxed);
         std::printf("Pre-upload: %.1f MB first, %.1f MB again in 600 frames; GPU write twins: %llu "
                     "writes without waiting, %.1f KB kept for the GPU, %.1f KB written by the game\n",
                     preupload_first_bytes / 1e6, preupload_again_bytes / 1e6,
@@ -3424,9 +3424,9 @@ void BufferCache::Preupload(u64 budget) {
     if (ranges.empty()) {
         return;
     }
-    const u32 frame = PsStats::frame_number.load(std::memory_order_relaxed);
+    const u32 frame = PsStats::g_frame_number.load(std::memory_order_relaxed);
     const u32 quiet_since = frame > QuietFrames ? frame - QuietFrames : 0;
-    const u64 uploaded_before = PsStats::buffer_upload_bytes.load(std::memory_order_relaxed);
+    const u64 uploaded_before = PsStats::g_cb_buffer_upload.load(std::memory_order_relaxed);
     // Start at the range holding the cursor (or the next one), wrap around once.
     std::size_t first = 0;
     while (first < ranges.size() && ranges[first].second <= preupload_cursor) {
@@ -3452,7 +3452,7 @@ void BufferCache::Preupload(u64 budget) {
                 const u64 last_block = (stop - 1) >> block_shift;
                 const auto* arena = GetArena(first_block, last_block);
                 const u64 region_before =
-                    PsStats::buffer_upload_bytes.load(std::memory_order_relaxed);
+                    PsStats::g_cb_buffer_upload.load(std::memory_order_relaxed);
                 if (full) {
                     EnsureResident(arena, first_block, last_block);
                     SynchronizeMemory(arena, at, static_cast<u32>(stop - at), false, false);
@@ -3475,24 +3475,24 @@ void BufferCache::Preupload(u64 budget) {
                     sync(cursor, last_block + 1);
                 }
                 const u64 region_bytes =
-                    PsStats::buffer_upload_bytes.load(std::memory_order_relaxed) - region_before;
+                    PsStats::g_cb_buffer_upload.load(std::memory_order_relaxed) - region_before;
                 if (memory_tracker->NotePreuploaded(region, frame) > 0) {
                     preupload_again_bytes += region_bytes;
                 } else {
                     preupload_first_bytes += region_bytes;
                 }
                 const u64 uploaded =
-                    PsStats::buffer_upload_bytes.load(std::memory_order_relaxed) - uploaded_before;
+                    PsStats::g_cb_buffer_upload.load(std::memory_order_relaxed) - uploaded_before;
                 if (uploaded >= budget) {
-                    PsStats::preupload_bytes.fetch_add(uploaded, std::memory_order_relaxed);
+                    PsStats::g_cb_preupload.fetch_add(uploaded, std::memory_order_relaxed);
                     return;
                 }
             }
             at = stop;
         }
     }
-    PsStats::preupload_bytes.fetch_add(
-        PsStats::buffer_upload_bytes.load(std::memory_order_relaxed) - uploaded_before,
+    PsStats::g_cb_preupload.fetch_add(
+        PsStats::g_cb_buffer_upload.load(std::memory_order_relaxed) - uploaded_before,
         std::memory_order_relaxed);
 }
 
@@ -3620,7 +3620,7 @@ bool BufferCache::VramPromotionsPaused() {
     }();
     static s64 checked_second = -1;
     static bool full = false;
-    const s64 second = PsStats::coarse_second.load(std::memory_order_relaxed);
+    const s64 second = PsStats::g_coarse_second.load(std::memory_order_relaxed);
     if (second != checked_second) {
         checked_second = second;
         const u64 usage = instance.GetDeviceMemoryUsage();
@@ -3631,7 +3631,7 @@ bool BufferCache::VramPromotionsPaused() {
         // Not below the mirrors' own share (LayerMirrorFloor), though: on a 4 GB card images and
         // the rest already held the usage past that point, no copy was made again once the old
         // ones went idle, and everything was read over the bus (5 FPS after 4 minutes).
-        const u64 critical = PsStats::gc_critical_bytes.load(std::memory_order_relaxed);
+        const u64 critical = PsStats::g_cb_gc_critical.load(std::memory_order_relaxed);
         const bool under_floor = LayerMode() && PsLayer::GpuMemory::Get().ValidBytes() <
                                                     LayerMirrorFloor(budget);
         const bool near_critical =

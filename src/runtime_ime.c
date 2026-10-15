@@ -210,9 +210,9 @@ int runtime_ime_update(void *pfn_handler) {
     return 1;
 }
 
-static const RuntimeExport exports[]={
+static const RuntimeExport s_exports[]={
     {"sceImeParamInit",ime_param_init}, {"sceImeGetPanelSize",ime_panel_size}, {"sceImeOpen",ime_open},
     {"sceImeClose",ime_close}, {"sceImeSetText",ime_set_text}, {"sceImeSetCaret",ime_set_caret},
     {"sceImeSetTextGeometry",ime_set_text_geometry},
 };
-uintptr_t runtime_ime_resolve(const char *name) { return RUNTIME_LOOKUP(exports,name); }
+uintptr_t runtime_ime_resolve(const char *sz_name) { return RUNTIME_LOOKUP(s_exports,sz_name); }

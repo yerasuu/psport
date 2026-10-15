@@ -386,7 +386,7 @@ void Scheduler::WaitDeferredSignals() {
         PsToggle::Disabled(PsToggle::OrderedGuestWrites)) {
         return;
     }
-    PsStats::WaitTimer timer{PsStats::host_copies_wait_ns};
+    PsStats::WaitTimer timer{PsStats::g_host_copies_wait_ns};
     KickRecording(true);
     while (deferred_signals_done->load(std::memory_order_acquire) < issued) {
         // Helps the copy threads the signals wait for.
@@ -441,7 +441,7 @@ void Scheduler::WaitHostCopiesFor(u64 address, u64 size) {
                       (slot.granule == g || slot.granule == HostCopyWildcard);
         }
         if (!overlap) {
-            PsStats::host_copy_waits_skipped.fetch_add(1, std::memory_order_relaxed);
+            PsStats::g_host_copy_waits_skipped.fetch_add(1, std::memory_order_relaxed);
             return;
         }
     }
@@ -464,14 +464,14 @@ void Scheduler::WaitHostCopies() {
         }
     } forget{*this, sources_seen};
     if (host_copies_done.load(std::memory_order_acquire) < host_copies_issued) {
-        PsStats::WaitTimer timer{PsStats::host_copies_wait_ns};
-        PsStats::host_copy_waits.fetch_add(1, std::memory_order_relaxed);
+        PsStats::WaitTimer timer{PsStats::g_host_copies_wait_ns};
+        PsStats::g_c_host_copy_waits.fetch_add(1, std::memory_order_relaxed);
         KickRecording(true);
         while (host_copies_done.load(std::memory_order_acquire) < host_copies_issued) {
             std::this_thread::yield();
         }
     }
-    PsStats::WaitTimer timer{PsStats::copy_threads_wait_ns};
+    PsStats::WaitTimer timer{PsStats::g_copy_threads_wait_ns};
     PsCopy::WaitAsync();
 }
 
@@ -644,7 +644,7 @@ void Scheduler::SyncRecording() {
         return;
     }
     KickRecording(true);
-    PsStats::WaitTimer timer{PsStats::sync_recording_ns};
+    PsStats::WaitTimer timer{PsStats::g_sync_recording_ns};
     std::unique_lock lk{recorder_mutex};
     recorder_idle_cv.wait(lk, [this] { return RecordingIdle(); });
 }
@@ -836,7 +836,7 @@ void Scheduler::Wait(u64 tick) {
         Flush(info);
     }
     PsWaitTrace::Scope trace;
-    PsStats::WaitTimer timer{PsStats::tick_wait_ns};
+    PsStats::WaitTimer timer{PsStats::g_tick_wait_ns};
     work_semaphore.Wait(tick);
 }
 

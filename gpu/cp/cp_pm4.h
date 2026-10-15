@@ -81,29 +81,29 @@ enum class Op : std::uint8_t {
 
 /// The first dword of a packet.
 struct Header {
-    u32 raw;
+    u32 m_raw;
 
     constexpr u32 Type() const {
-        return raw >> 30;
+        return m_raw >> 30;
     }
     /// Type 3: dwords after the header.
     constexpr u32 BodyWords() const {
-        return ((raw >> 16) & 0x3FFF) + 1;
+        return ((m_raw >> 16) & 0x3FFF) + 1;
     }
     constexpr Op Opcode() const {
-        return static_cast<Op>((raw >> 8) & 0xFF);
+        return static_cast<Op>((m_raw >> 8) & 0xFF);
     }
     /// Type 3: runs only while the predicate holds (SET_PREDICATION).
     constexpr bool Predicated() const {
-        return raw & 1;
+        return m_raw & 1;
     }
     /// Type 3: for the compute pipe (1) or graphics (0).
     constexpr bool ComputeShaderType() const {
-        return (raw >> 1) & 1;
+        return (m_raw >> 1) & 1;
     }
     /// Type 0: the first register written, and how many.
     constexpr u32 Type0Base() const {
-        return raw & 0xFFFF;
+        return m_raw & 0xFFFF;
     }
 };
 

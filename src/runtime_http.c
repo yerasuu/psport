@@ -30,19 +30,19 @@ typedef struct {
 } HttpUriElement;
 _Static_assert(sizeof(HttpUriElement)==80,"OrbisHttpUriElement layout");
 
-static int next_id=1;
-static int new_id(void) { return __atomic_fetch_add(&next_id,1,__ATOMIC_RELAXED); }
+static int s_next_id=1;
+static int new_id(void) { return __atomic_fetch_add(&s_next_id,1,__ATOMIC_RELAXED); }
 
 static ABI int32_t lib_init_id(void) { return new_id(); }
 static ABI int32_t http_fail(void) { return HTTP_NETWORK; }
 static ABI int32_t http_object(void) { return new_id(); }
-static ABI int32_t http_epoll(int32_t ctx,void **handle) {
+static ABI int32_t http_epoll(int32_t ctx,void **pp_handle) {
     (void)ctx;
-    if (!handle) return HTTP_INVALID_VALUE;
-    *handle=(void *)(uintptr_t)(0x100+new_id()); return 0;
+    if (!pp_handle) return HTTP_INVALID_VALUE;
+    *pp_handle=(void *)(uintptr_t)(0x100+new_id()); return 0;
 }
-static ABI int32_t http_wait(void *handle,void *events,int32_t max,int64_t timeout) {
-    (void)handle; (void)events; (void)max;
+static ABI int32_t http_wait(void *p_handle,void *p_events,int32_t max,int64_t timeout) {
+    (void)p_handle; (void)p_events; (void)max;
     if (timeout>0) { struct timespec t={timeout/1000000,(timeout%1000000)*1000}; nanosleep(&t,NULL); }
     return 0; /* no events: nothing is in flight */
 }
@@ -155,10 +155,10 @@ static ABI int32_t http_parse_response_header(const char *p_header, uint64_t cb_
     const uint64_t cb_field=strnlen(sz_field,0xfff);
     uint64_t off_value=0;
     bool is_found=false, is_line_start=true;
-    for (uint64_t off=0; off<cb_header; is_line_start=p_header[off]=='\n', ++off)
-        if (is_line_start && !is_space((unsigned char)p_header[off]) && cb_field<cb_header-off &&
-            !strncasecmp(sz_field,p_header+off,cb_field) && p_header[off+cb_field]==':') {
-            off_value=off+cb_field+1;
+    for (uint64_t off_header=0; off_header<cb_header; is_line_start=p_header[off_header]=='\n', ++off_header)
+        if (is_line_start && !is_space((unsigned char)p_header[off_header]) && cb_field<cb_header-off_header &&
+            !strncasecmp(sz_field,p_header+off_header,cb_field) && p_header[off_header+cb_field]==':') {
+            off_value=off_header+cb_field+1;
             is_found=true;
             break;
         }
@@ -167,11 +167,11 @@ static ABI int32_t http_parse_response_header(const char *p_header, uint64_t cb_
         if (p_header[off_value++]=='\n') break;
     const uint64_t off_start=off_value;
     uint64_t off_line_end=cb_header, off_value_end=cb_header;
-    for (uint64_t off=off_value; off<cb_header; ++off) {
-        if (p_header[off]!='\n') continue;
-        if (off+1<cb_header && (p_header[off+1]==' ' || p_header[off+1]=='\t')) continue;
-        off_line_end=off+1;
-        off_value_end=off>off_start && p_header[off-1]=='\r' ? off-1 : off;
+    for (uint64_t off_header=off_value; off_header<cb_header; ++off_header) {
+        if (p_header[off_header]!='\n') continue;
+        if (off_header+1<cb_header && (p_header[off_header+1]==' ' || p_header[off_header+1]=='\t')) continue;
+        off_line_end=off_header+1;
+        off_value_end=off_header>off_start && p_header[off_header-1]=='\r' ? off_header-1 : off_header;
         break;
     }
     if (off_value_end<=off_start) {
@@ -188,14 +188,14 @@ static bool is_unreserved(unsigned char c) { return isalnum(c) || c=='-' || c=='
 static ABI int32_t http_uri_escape(char *sz_out, uint64_t *p_out_cb_required, uint64_t cb_out, const char *sz_in) {
     if (!sz_in) return HTTP_INVALID_VALUE;
     uint64_t cb_required=1;
-    for (const unsigned char *p=(const unsigned char *)sz_in; *p; ++p) cb_required+=is_unreserved(*p) ? 1 : 3;
+    for (const unsigned char *p_cursor=(const unsigned char *)sz_in; *p_cursor; ++p_cursor) cb_required+=is_unreserved(*p_cursor) ? 1 : 3;
     if (p_out_cb_required) *p_out_cb_required=cb_required;
     if (!sz_out) return 0;
     if (cb_out<cb_required) return HTTP_OUT_OF_MEMORY;
-    static const char hex[]="0123456789ABCDEF";
-    for (const unsigned char *p=(const unsigned char *)sz_in; *p; ++p)
-        if (is_unreserved(*p)) *sz_out++=(char)*p;
-        else { *sz_out++='%'; *sz_out++=hex[*p>>4]; *sz_out++=hex[*p&15]; }
+    static const char s_sz_hex[]="0123456789ABCDEF";
+    for (const unsigned char *p_cursor=(const unsigned char *)sz_in; *p_cursor; ++p_cursor)
+        if (is_unreserved(*p_cursor)) *sz_out++=(char)*p_cursor;
+        else { *sz_out++='%'; *sz_out++=s_sz_hex[*p_cursor>>4]; *sz_out++=s_sz_hex[*p_cursor&15]; }
     *sz_out=0;
     return 0;
 }
@@ -252,13 +252,13 @@ static ABI int32_t http_uri_parse(HttpUriElement *p_out, const char *sz_uri, voi
     const bool has_scheme=cb_scheme && sz_uri[cb_scheme]==':' && isalpha((unsigned char)sz_uri[0]);
     if (!has_scheme) cb_scheme=0;
     if (!pool_put(&pool,sz_uri,cb_scheme,&element.sz_scheme)) return HTTP_OUT_OF_MEMORY;
-    const char *p=sz_uri+(has_scheme ? cb_scheme+1 : 0);
-    if (p[0]=='/' && p[1]=='/') p+=2;
+    const char *sz_cursor=sz_uri+(has_scheme ? cb_scheme+1 : 0);
+    if (sz_cursor[0]=='/' && sz_cursor[1]=='/') sz_cursor+=2;
     else element.is_opaque=true;
     uint64_t cb_authority=0, off_colon=0;
     bool has_colon=false, has_at=false;
     for (;; ++cb_authority) {
-        const unsigned char c=(unsigned char)p[cb_authority];
+        const unsigned char c=(unsigned char)sz_cursor[cb_authority];
         if (!c) break;
         if (c=='@') { has_at=true; break; }
         if (c==':' && !has_colon) { has_colon=true; off_colon=cb_authority; }
@@ -266,51 +266,51 @@ static ABI int32_t http_uri_parse(HttpUriElement *p_out, const char *sz_uri, voi
     }
     if (has_at) {
         const uint64_t cb_user=has_colon ? off_colon : cb_authority;
-        const char *p_password=has_colon ? p+off_colon+1 : p+cb_authority;
-        if (!pool_put(&pool,p,cb_user,&element.sz_username) ||
-            !pool_put(&pool,p_password,(uint64_t)(p+cb_authority-p_password),&element.sz_password))
+        const char *p_password=has_colon ? sz_cursor+off_colon+1 : sz_cursor+cb_authority;
+        if (!pool_put(&pool,sz_cursor,cb_user,&element.sz_username) ||
+            !pool_put(&pool,p_password,(uint64_t)(sz_cursor+cb_authority-p_password),&element.sz_password))
             return HTTP_OUT_OF_MEMORY;
-        p+=cb_authority+1;
-    } else if (!pool_put(&pool,p,0,&element.sz_username) || !pool_put(&pool,p,0,&element.sz_password))
+        sz_cursor+=cb_authority+1;
+    } else if (!pool_put(&pool,sz_cursor,0,&element.sz_username) || !pool_put(&pool,sz_cursor,0,&element.sz_password))
         return HTTP_OUT_OF_MEMORY;
-    const bool is_ipv6=p[0]=='[';
-    const char *p_host=p+is_ipv6;
+    const bool is_ipv6=sz_cursor[0]=='[';
+    const char *p_host=sz_cursor+is_ipv6;
     uint64_t cb_host=0;
-    if (p[0]!='.')
+    if (sz_cursor[0]!='.')
         while (p_host[cb_host] && is_host((unsigned char)p_host[cb_host],is_ipv6))
             if (++cb_host>=(is_ipv6 ? 0xfeu : 0xffu)) return HTTP_INVALID_URL;
     if (is_ipv6 && p_host[cb_host]!=']') return HTTP_INVALID_URL;
     if (!pool_put(&pool,p_host,cb_host,&element.sz_hostname)) return HTTP_OUT_OF_MEMORY;
-    p=p_host+cb_host+is_ipv6;
+    sz_cursor=p_host+cb_host+is_ipv6;
     bool has_port=false;
-    if (*p==':') {
+    if (*sz_cursor==':') {
         uint32_t port=0;
         int c_digits=0;
-        for (++p; c_digits<5 && isdigit((unsigned char)*p); ++p, ++c_digits) port=port*10+(uint32_t)(*p-'0');
-        if (port>0x10000 || (*p && *p!='/')) return HTTP_INVALID_URL;
+        for (++sz_cursor; c_digits<5 && isdigit((unsigned char)*sz_cursor); ++sz_cursor, ++c_digits) port=port*10+(uint32_t)(*sz_cursor-'0');
+        if (port>0x10000 || (*sz_cursor && *sz_cursor!='/')) return HTTP_INVALID_URL;
         has_port=c_digits>0;
         element.port=(uint16_t)port;
     }
     if (!has_port && has_scheme)
         element.port=!strncasecmp(sz_uri,"https",5) ? 443 : !strncasecmp(sz_uri,"http",4) ? 80 : 0;
-    const uint64_t cb_path=strcspn(p,"?#");
+    const uint64_t cb_path=strcspn(sz_cursor,"?#");
     if (cb_path>URI_PART_MAX) return HTTP_INVALID_URL;
-    if (!pool_put(&pool,p,cb_path,&element.sz_path)) return HTTP_OUT_OF_MEMORY;
+    if (!pool_put(&pool,sz_cursor,cb_path,&element.sz_path)) return HTTP_OUT_OF_MEMORY;
     if (pool.should_write) sweep_path(element.sz_path);
-    p+=cb_path;
-    const uint64_t cb_query=*p=='?' ? strcspn(p,"#") : 0;
+    sz_cursor+=cb_path;
+    const uint64_t cb_query=*sz_cursor=='?' ? strcspn(sz_cursor,"#") : 0;
     if (cb_query>URI_PART_MAX) return HTTP_INVALID_URL;
-    if (!pool_put(&pool,p,cb_query,&element.sz_query)) return HTTP_OUT_OF_MEMORY;
-    p+=cb_query;
-    const uint64_t cb_fragment=*p=='#' ? strlen(p) : 0;
+    if (!pool_put(&pool,sz_cursor,cb_query,&element.sz_query)) return HTTP_OUT_OF_MEMORY;
+    sz_cursor+=cb_query;
+    const uint64_t cb_fragment=*sz_cursor=='#' ? strlen(sz_cursor) : 0;
     if (cb_fragment>URI_PART_MAX) return HTTP_INVALID_URL;
-    if (!pool_put(&pool,p,cb_fragment,&element.sz_fragment)) return HTTP_OUT_OF_MEMORY;
+    if (!pool_put(&pool,sz_cursor,cb_fragment,&element.sz_fragment)) return HTTP_OUT_OF_MEMORY;
     if (pool.should_write) *p_out=element;
     if (p_out_cb_required) *p_out_cb_required=pool.cb_used;
     return 0;
 }
 
-static const RuntimeExport exports[]={
+static const RuntimeExport s_exports[]={
     {"sceHttpTerm",runtime_stub},
     {"sceHttpCreateTemplate",http_create_template}, {"sceHttpDeleteTemplate",http_delete_template},
     {"sceHttpCreateConnectionWithURL",http_create_connection_url}, {"sceHttpCreateRequestWithURL",http_create_request_url},
@@ -334,7 +334,7 @@ static const RuntimeExport exports[]={
     {"sceHttp2Init",lib_init_id}, {"sceHttp2Term",runtime_stub},
     {"sceHttp2CreateTemplate",http_object}, {"sceHttp2DeleteTemplate",runtime_stub},
 };
-uintptr_t runtime_http_resolve(const char *name) { return RUNTIME_LOOKUP(exports,name); }
+uintptr_t runtime_http_resolve(const char *sz_name) { return RUNTIME_LOOKUP(s_exports,sz_name); }
 #else
 uintptr_t runtime_http_resolve(const char *name) { (void)name; return 0; }
 #endif
