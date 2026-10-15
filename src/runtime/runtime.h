@@ -5,11 +5,11 @@
 #include <stddef.h>
 #ifndef _WIN32
 #include <setjmp.h>
-/* Recovery point for speculative guest memory reads on this thread (probe.c fault handler). */
+/* Recovery point for speculative guest memory reads on this thread (signals.c fault handler). */
 extern __thread sigjmp_buf *g_p_runtime_fault_recover;
 /* Restarts the game (in-game settings menu, render resolution change). */
 void runtime_restart(void);
-/* sceSystemServiceLoadExec (probe.c): psport starts again on its own command line with sz_path, a
+/* sceSystemServiceLoadExec (main.c): psport starts again on its own command line with sz_path, a
  * guest path of the package, as the main executable and pp_arguments (NULL-terminated, may be NULL)
  * after it; returns only when the exec failed. */
 void runtime_load_exec(const char *sz_path, char *const *pp_arguments);
@@ -108,7 +108,7 @@ void runtime_exception_report(void);
 #ifndef _WIN32
 #include <pthread.h>
 /* The host signal a guest exception raise arrives on. SIGUSR1 stays free for host libraries;
- * SIGUSR2, SIGALRM and SIGPROF are probe.c's thread dumps, watchdog and the wait sampler. */
+ * SIGUSR2, SIGALRM and SIGPROF are the thread dumps and watchdog (signals.c) and the wait sampler. */
 #define RUNTIME_EXCEPTION_SIGNAL (SIGRTMIN+3)
 /* For runtime locks a guest exception handler takes again (kernel semaphores, event flags): a raise
  * that lands on the lock's holder is delivered once it lets go, or the handler would wait on its

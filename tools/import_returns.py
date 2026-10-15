@@ -4,7 +4,7 @@ shadPS4's prototypes and their LIB_FUNCTION registrations.
 
     python3 tools/import_returns.py <shadPS4 checkout> > src/runtime/imports/import_returns.inc
 
-probe.c wraps an import the runtime binds to its own or the GPU library's function in a thunk that
+src/main/bind.c wraps an import the runtime binds to its own or the GPU library's function in a thunk that
 records the calls that fail. Kinds: 1, an sce function returning a 32-bit result (a 0x8xxxxxxx
 SCE error code on failure); 2 and 3, a POSIX function returning -1 with errno, as a 32-bit or a
 64-bit result; 4, an sce function returning a 64-bit result (the SCE code sign-extended). A POSIX

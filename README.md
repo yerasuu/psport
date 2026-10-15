@@ -12,7 +12,7 @@ profile. bbport and shadPS4 are reviewed from time to time, and the changes usef
 ported by hand and recorded in [FORK.md](FORK.md).
 
 - **CPU.** The PS4 CPU is x86-64, so the game's code runs on the PC's CPU as it is, with no
-  emulation and no instruction translation. A C loader (`src/main/probe.c`, `src/loader/loader_*.c`) reads the
+  emulation and no instruction translation. A C loader (`src/main/main.c`, `src/loader/loader_*.c`) reads the
   eboot and the modules it links (SELF or ELF) straight from the game's folder, relocates and binds
   them into one image and jumps into it.
 - **System libraries.** psport provides them itself: the C runtime in `src/*/runtime_*.c` (memory,
@@ -142,7 +142,7 @@ hardware tests, when needed, are OpenOrbis homebrew); match the surrounding code
 
 | Path | Contents |
 |---|---|
-| `src/` | Entry (`probe.c`), native loader (`loader_*.c`) and C runtime (`runtime_*.c`) |
+| `src/` | Entry (`src/main/`), native loader (`loader_*.c`) and C runtime (`runtime_*.c`) |
 | `scripts/` | `online.py`, the online addresses `run.sh` writes with `PS_ONLINE=1` (the one launch step in Python), and `sce_file.py` for the Python tools |
 | `gpu/` | GPU library: shadPS4 video core with bbport's changes (`gpu/VENDOR.txt`), own PM4 decoder (`cp/`) and memory module (`layer/`), ported libraries (`ngs2/`, `audiodec/`, `fiber/`, `font/`, `pngenc/`, `pngdec/`), game profiles (`games/`), overlay and in-game menu (`port/`), DLSS bridge, online module |
 | `launcher/`, `packaging/` | bbport's GTK4 launcher; Nix package and AppImage script |

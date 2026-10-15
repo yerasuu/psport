@@ -1,5 +1,5 @@
 /* Game loading: the eboot and every module it links, placed in one image at offsets from 0 the way
- * probe.c maps it. loader_load_game reads the game's folder (loader_self.c parses the SELF/ELF
+ * main.c maps it. loader_load_game reads the game's folder (loader_self.c parses the SELF/ELF
  * files, loader_link.c lays them out and binds them). */
 #ifndef LOADER_H
 #define LOADER_H

@@ -39,7 +39,7 @@ Milestones, in order:
 | `Runtime: guest thread '...' created` | the game initialised |
 | `Presenter: first game frame presented` | the GPU path works end to end |
 
-Loader errors (`ERROR: ...` from `src/loader/loader_*.c` or `src/main/probe.c`) stop before the game runs and
+Loader errors (`ERROR: ...` from `src/loader/loader_*.c` or `src/main/*.c`) stop before the game runs and
 name the file and the limit or structure they rejected.
 
 ### The call report

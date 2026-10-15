@@ -10,7 +10,10 @@ The model is Wine's, not an emulator's.
 | Component | Path | Built into | Role |
 |---|---|---|---|
 | Launch script | `run.sh` | - | environment and settings, then `psport` |
-| Entry | `src/main/probe.c` | `out/psport` | arguments, image mapping, import binding, signals, entering the game |
+| Entry | `src/main/main.c`, `src/main/main.h` | `out/psport` | launch sequence: arguments, image mapping, entering the game |
+| Launcher queries | `src/main/cli.c`, `src/main/game_info.c` | `out/psport` | `--check-game`, `--has-presets`, `--list-patches`, `--list-mods`, `BB_*` names; `param.sfo` and the game's identity |
+| Import binding | `src/main/bind.c` | `out/psport` | traps, failure thunks, relocation walk, patch writes |
+| Signals | `src/main/signals.c` | `out/psport` | fault, watchdog, thread dump and termination handlers |
 | Native loader | `src/loader/loader.h`, `src/loader/loader_self.c`, `src/loader/loader_link.c` | `out/psport` | SELF/ELF parsing, module linking, relocations, TLS, bindings |
 | Launch data | `src/loader/loader_mods.c`, `src/loader/loader_patches.c`, `src/loader/loader_hash.c`, `src/loader/loader_json.c` | `out/psport` | loose-file mod view, shadPS4/GoldHEN XML patches, the eboot's identity (SHA-256), `mods.json`/`patches.json` |
 | C runtime | `src/*/runtime*.c`, `src/runtime/runtime.h`, `src/runtime/imports/import_*.inc` | `out/psport` | libkernel and the other system libraries, import resolution, the call report |
@@ -23,7 +26,7 @@ The model is Wine's, not an emulator's.
 | Online addresses | `scripts/online.py` | - | Python run by `run.sh` with `PS_ONLINE=1` only; see [Launch scripts](#launch-scripts) |
 | Regression runs | `tools/regress.sh`, `tools/regress/` | - | headless runs of every title |
 
-`build.sh` builds `libpsport-gpu.so` with CMake/Ninja, then compiles `src/main/probe.c`, `src/loader/loader*.c` and
+`build.sh` builds `libpsport-gpu.so` with CMake/Ninja, then compiles `src/main/*.c`, `src/loader/loader*.c` and
 `src/*/runtime*.c` with `-Werror` into `out/psport`, linked against `libpsport-gpu.so`.
 
 ## Launch flow
@@ -70,7 +73,7 @@ directory from `PS_DATA_DIR` (default the checkout: `out/`, `user/`, `psport.ini
 
 ### psport
 
-`src/main/probe.c` checks the CPU, builds the mods' view of the game folder when `--mods` is given,
+`src/main/main.c` checks the CPU, builds the mods' view of the game folder when `--mods` is given,
 reads `param.sfo` (title, title ID, save directory, SDK version, attributes, the AppContent user
 parameters; `PS_CONTENT_SKU=full` or `trial` sets the SKU), configures the file mounts (`/app0` is
 the game folder, saves under `user/`), loads the game, lets its profile check the game's files and
@@ -147,7 +150,7 @@ library.
 
 ### Import binding
 
-`psport` walks the relocations. For each import (`src/main/probe.c`):
+`psport` walks the relocations. For each import (`src/main/bind.c`):
 
 1. a binding of kind 3-6 (a system module, or a module the game loads) wins;
 2. otherwise `runtime_resolve(name)` (C runtime, then the GPU library);

@@ -233,7 +233,7 @@ static ABI __attribute__((noreturn)) void guest_libc_exit(int status) {
 /* Imports the runtime answers itself ahead of the libraries (the game's libc wrappers, TLS, its
  * process parameters), whichever library the executable names for them. */
 static int32_t need_libc_internal = 1; /* SDK marker variable referenced by Fios2 */
-/* The command line the eboot's entry receives (probe.c): its path alone, as the console starts an
+/* The command line the eboot's entry receives (main.c): its path alone, as the console starts an
  * application, or the executable and arguments sceSystemServiceLoadExec named; __progname is its
  * last component, as FreeBSD's crt sets it. */
 static char *s_default_arguments[] = {"/app0/eboot.bin", NULL};

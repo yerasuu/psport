@@ -31,7 +31,7 @@ uint64_t g_runtime_disabled_optimizations;
 /* psport: a second number in PS_TOGGLE_FILE: temporary experiment bits (PsToggle::Experiment). */
 uint64_t g_runtime_experiment_bits;
 /* Speculative readers of guest memory (GPU draw-preparation workers) register a recovery
- * point: a fault on that thread jumps back to it instead of terminating (probe.c). */
+ * point: a fault on that thread jumps back to it instead of terminating (signals.c). */
 __thread sigjmp_buf *g_p_runtime_fault_recover;
 static void *toggle_watcher(void *p_path) {
     for (unsigned long long last=ULLONG_MAX;;) {

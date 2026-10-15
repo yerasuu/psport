@@ -12,7 +12,7 @@ capa de compatibilidad, no un emulador.
 
 - **CPU.** La CPU de PS4 es x86-64, así que el código del juego se ejecuta tal cual en la CPU del
   PC, sin emulación ni traducción de instrucciones. El eboot se convierte de antemano (`scripts/`)
-  en una imagen de memoria plana con la libc del juego enlazada; un cargador en C (`src/main/probe.c`) la
+  en una imagen de memoria plana con la libc del juego enlazada; un cargador en C (`src/main/main.c`) la
   mapea y salta a ella.
 - **Bibliotecas del sistema.** Las proporciona el propio port: el runtime de `src/*/runtime_*.c`
   (memoria, hilos, sincronización, archivos, audio, mando, partidas guardadas, excepciones, hilos de
@@ -124,7 +124,7 @@ seguir las convenciones del código que rodea al cambio.
 
 | Ruta | Contenido |
 |---|---|
-| `src/` | Cargador (`probe.c`) y runtime (`runtime_*.c`) |
+| `src/` | Cargador (`src/main/`) y runtime (`runtime_*.c`) |
 | `scripts/` | `online.py`, las direcciones del juego en línea que `run.sh` escribe con `PS_ONLINE=1` (el único paso del arranque en Python), y `sce_file.py` para las herramientas en Python |
 | `gpu/` | Biblioteca del renderizador: núcleo de vídeo de shadPS4 con los cambios de bbport (`gpu/VENDOR.txt`), bibliotecas portadas (`ngs2/`, `audiodec/`, `fiber/`, `font/`), overlay y menú del juego (`port/`), puente de DLSS, módulo en línea |
 | `launcher/`, `packaging/` | El lanzador GTK4 de bbport; paquete de Nix y script de AppImage |

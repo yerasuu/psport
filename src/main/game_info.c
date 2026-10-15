@@ -1,0 +1,102 @@
+/* What psport knows of the game from its folder or its title: param.sfo, its profile's patch file,
+ * its external patch folder and its mods' rules. */
+#define _GNU_SOURCE
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include "main.h"
+
+/* param.sfo lookup: string or integer value of key; the entry's format (0x0404 an integer), 0 when absent. */
+int sfo_value(const char *sz_path, const char *sz_key, char *sz_text, size_t cb_text, uint32_t *p_number) {
+    FILE *p_file=fopen(sz_path,"rb");
+    if (!p_file) return 0;
+    unsigned char data[65536];
+    size_t cb_read=fread(data,1,sizeof(data),p_file); fclose(p_file);
+    if (cb_read<20 || memcmp(data,"\0PSF",4)) return 0;
+    uint32_t keys, values, c_entries;
+    memcpy(&keys,data+8,4); memcpy(&values,data+12,4); memcpy(&c_entries,data+16,4);
+    for (uint32_t i=0;i<c_entries && 20+i*16+16<=cb_read;++i) {
+        const unsigned char *p_entry=data+20+i*16;
+        uint16_t off_key, format; uint32_t length, off_data;
+        memcpy(&off_key,p_entry,2); memcpy(&format,p_entry+2,2); memcpy(&length,p_entry+4,4); memcpy(&off_data,p_entry+12,4);
+        if (keys+off_key>=cb_read || values+off_data+length>cb_read || strcmp((const char *)data+keys+off_key,sz_key)) continue;
+        if (format==0x0404 && p_number && length>=4) { memcpy(p_number,data+values+off_data,4); return format; }
+        if (sz_text && cb_text) {
+            size_t copy=length<cb_text-1 ? length : cb_text-1;
+            memcpy(sz_text,data+values+off_data,copy); sz_text[copy]=0;
+        }
+        return format ? format : 1;
+    }
+    return 0;
+}
+/* AppContent's base-game profile: param.sfo's user-defined parameters; the SKU is a launch setting
+ * (PS_CONTENT_SKU=full or trial), not a license check. */
+void configure_content(const char *sz_sfo) {
+    const char *sz_sku=getenv("PS_CONTENT_SKU");
+    if (!sz_sku || !*sz_sku) sz_sku="full";
+    uint32_t values[5]={0};
+    if (!strcmp(sz_sku,"full")) values[0]=3;
+    else if (!strcmp(sz_sku,"trial")) values[0]=1;
+    else fail("PS_CONTENT_SKU must be full or trial");
+    FILE *p_file=fopen(sz_sfo,"rb");
+    if (!p_file) { fprintf(stderr,"ERROR: cannot read %s\n",sz_sfo); exit(1); }
+    fclose(p_file);
+    for (unsigned i=0;i<4;++i) {
+        char sz_key[32];
+        snprintf(sz_key,sizeof(sz_key),"USER_DEFINED_PARAM_%u",i+1);
+        int format=sfo_value(sz_sfo,sz_key,NULL,0,&values[1+i]);
+        if (format && format!=0x0404) fail("invalid user-defined parameter in param.sfo");
+    }
+    runtime_content_configure(values);
+    printf("AppContent profile: SKU=%s (probe setting), user params=[%u, %u, %u, %u], mounted add-ons=0\n",
+           sz_sku,values[1],values[2],values[3],values[4]);
+}
+/* A path under psport's own folder, the one holding out/ or bin/ (a checkout or a package). */
+static void install_path(const char *sz_relative, char *sz_out, size_t cb_out) {
+    char sz_exe[4096];
+    ssize_t cb_exe=readlink("/proc/self/exe",sz_exe,sizeof(sz_exe)-1);
+    sz_exe[cb_exe>0 ? cb_exe : 0]=0;
+    for (int up=0; up<2; ++up) { char *p_slash=strrchr(sz_exe,'/'); if (p_slash) *p_slash=0; }
+    if ((size_t)snprintf(sz_out,cb_out,"%s/%s",sz_exe[0] ? sz_exe : ".",sz_relative)>=cb_out) fail("install path too long");
+}
+/* sz_game_dir may be NULL: a launcher asking about a title by its TITLE_ID and APP_VER. */
+void game_info_of(const char *sz_game_dir, const char *sz_serial, const char *sz_version, GameInfo *p_out_info) {
+    memset(p_out_info,0,sizeof(*p_out_info));
+    snprintf(p_out_info->sz_serial,sizeof(p_out_info->sz_serial),"%s",sz_serial);
+    snprintf(p_out_info->sz_version,sizeof(p_out_info->sz_version),"%s",sz_version);
+    if (p_out_info->sz_serial[0]) p_out_info->serials[p_out_info->c_serials++]=p_out_info->sz_serial;
+    for (size_t i=0; p_out_info->c_serials<64; ++i) {
+        const char *sz_same=psport_gpu_game_serial(p_out_info->sz_serial,i);
+        if (!sz_same) break;
+        p_out_info->serials[p_out_info->c_serials++]=sz_same;
+    }
+    const char *sz_patch_file=psport_gpu_game_patch_file(p_out_info->sz_serial);
+    if (sz_patch_file) install_path(sz_patch_file,p_out_info->sz_patch_file,sizeof(p_out_info->sz_patch_file));
+    p_out_info->files=(PsGameFiles){sz_game_dir,p_out_info->sz_serial,p_out_info->sz_version,
+                                    sz_patch_file ? p_out_info->sz_patch_file : NULL,loader_eboot_sha256};
+}
+void game_info(const char *sz_game_dir, GameInfo *p_out_info) {
+    char sz_sfo[4096], sz_serial[16]="", sz_version[16]="";
+    snprintf(sz_sfo,sizeof(sz_sfo),"%s/sce_sys/param.sfo",sz_game_dir);
+    sfo_value(sz_sfo,"TITLE_ID",sz_serial,sizeof(sz_serial),NULL);
+    sfo_value(sz_sfo,"APP_VER",sz_version,sizeof(sz_version),NULL);
+    game_info_of(sz_game_dir,sz_serial,sz_version,p_out_info);
+}
+/* The game's external patch folder for loader_patches.c: its profile's own file left out. */
+LoaderPatchFolder patch_folder(const char *sz_dir, const GameInfo *p_info) {
+    return (LoaderPatchFolder){sz_dir,p_info->sz_patch_file[0] ? p_info->sz_patch_file : NULL,p_info->sz_version,
+                               p_info->serials,p_info->c_serials};
+}
+/* The mods rules' game data: wrapper folders named after any TITLE_ID of the game's executable,
+ * the folders of dvdroot_ps4 its profile knows. */
+void mod_options(const GameInfo *p_info, LoaderModOptions *p_options, const char **pp_folders, size_t c_capacity) {
+    p_options->pp_serials=p_info->serials;
+    p_options->c_serials=p_info->c_serials;
+    p_options->pp_folders=pp_folders;
+    for (p_options->c_folders=0; p_options->c_folders<c_capacity; ++p_options->c_folders) {
+        pp_folders[p_options->c_folders]=psport_gpu_game_mod_folder(p_info->sz_serial,p_options->c_folders);
+        if (!pp_folders[p_options->c_folders]) break;
+    }
+}
