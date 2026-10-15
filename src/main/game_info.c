@@ -1,4 +1,4 @@
-/* What psport knows of the game from its folder or its title: param.sfo, its profile's patch file,
+/* What psport knows of the game from its folder or its title: param.sfo, its title's patch file,
  * its external patch folder and its mods' rules. */
 #define _GNU_SOURCE
 #include <stdint.h>
@@ -66,13 +66,11 @@ void game_info_of(const char *sz_game_dir, const char *sz_serial, const char *sz
     memset(p_out_info,0,sizeof(*p_out_info));
     snprintf(p_out_info->sz_serial,sizeof(p_out_info->sz_serial),"%s",sz_serial);
     snprintf(p_out_info->sz_version,sizeof(p_out_info->sz_version),"%s",sz_version);
+    p_out_info->title=psport_gpu_title(p_out_info->sz_serial);
     if (p_out_info->sz_serial[0]) p_out_info->serials[p_out_info->c_serials++]=p_out_info->sz_serial;
-    for (size_t i=0; p_out_info->c_serials<64; ++i) {
-        const char *sz_same=psport_gpu_game_serial(p_out_info->sz_serial,i);
-        if (!sz_same) break;
-        p_out_info->serials[p_out_info->c_serials++]=sz_same;
-    }
-    const char *sz_patch_file=psport_gpu_game_patch_file(p_out_info->sz_serial);
+    for (size_t i=0; i<p_out_info->title.c_serials && p_out_info->c_serials<64; ++i)
+        p_out_info->serials[p_out_info->c_serials++]=p_out_info->title.pp_serials[i];
+    const char *sz_patch_file=p_out_info->title.sz_patch_file;
     if (sz_patch_file) install_path(sz_patch_file,p_out_info->sz_patch_file,sizeof(p_out_info->sz_patch_file));
     p_out_info->files=(PsGameFiles){sz_game_dir,p_out_info->sz_serial,p_out_info->sz_version,
                                     sz_patch_file ? p_out_info->sz_patch_file : NULL,loader_eboot_sha256};
@@ -84,19 +82,17 @@ void game_info(const char *sz_game_dir, GameInfo *p_out_info) {
     sfo_value(sz_sfo,"APP_VER",sz_version,sizeof(sz_version),NULL);
     game_info_of(sz_game_dir,sz_serial,sz_version,p_out_info);
 }
-/* The game's external patch folder for loader_patches.c: its profile's own file left out. */
+/* The game's external patch folder for loader_patches.c: its title's own file left out. */
 LoaderPatchFolder patch_folder(const char *sz_dir, const GameInfo *p_info) {
     return (LoaderPatchFolder){sz_dir,p_info->sz_patch_file[0] ? p_info->sz_patch_file : NULL,p_info->sz_version,
                                p_info->serials,p_info->c_serials};
 }
 /* The mods rules' game data: wrapper folders named after any TITLE_ID of the game's executable,
- * the folders of dvdroot_ps4 its profile knows. */
+ * the folders of dvdroot_ps4 its title knows. */
 void mod_options(const GameInfo *p_info, LoaderModOptions *p_options, const char **pp_folders, size_t c_capacity) {
     p_options->pp_serials=p_info->serials;
     p_options->c_serials=p_info->c_serials;
     p_options->pp_folders=pp_folders;
-    for (p_options->c_folders=0; p_options->c_folders<c_capacity; ++p_options->c_folders) {
-        pp_folders[p_options->c_folders]=psport_gpu_game_mod_folder(p_info->sz_serial,p_options->c_folders);
-        if (!pp_folders[p_options->c_folders]) break;
-    }
+    for (p_options->c_folders=0; p_options->c_folders<c_capacity && p_options->c_folders<p_info->title.c_mod_folders; ++p_options->c_folders)
+        pp_folders[p_options->c_folders]=p_info->title.pp_mod_folders[p_options->c_folders];
 }

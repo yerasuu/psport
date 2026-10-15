@@ -193,13 +193,13 @@ int main(int argc, char **argv) {
 #endif
     LoaderImage boot_image;
     loader_load_game(&game,&boot_image);
-    /* The game's profile and its files, then the patches, all before any of its code runs or a
+    /* The game's title and its files, then the patches, all before any of its code runs or a
      * window opens: a launch that cannot work stops here, with why. */
     GameInfo info;
     game_info(game.sz_game,&info);
-    psport_gpu_prepare_game(&info.files);
+    if (info.title.pfn_prepare_environment) info.title.pfn_prepare_environment();
     char sz_problem[64], sz_advice[2048];
-    if (psport_gpu_check_game(&info.files,sz_problem,sizeof(sz_problem),sz_advice,sizeof(sz_advice))) {
+    if (info.title.pfn_check_files && info.title.pfn_check_files(&info.files,sz_problem,sizeof(sz_problem),sz_advice,sizeof(sz_advice))) {
         fprintf(stderr,"ERROR: Unsupported game files: %s Set PS_SKIP_GAME_CHECK=1 to start anyway.\n",sz_advice);
         exit(2);
     }
@@ -210,7 +210,7 @@ int main(int argc, char **argv) {
     if (is_eboot) {
         PsPatchServices patch_services;
         loader_patch_services(&patches,&patch_services);
-        int own_patches=psport_gpu_game_patches(&info.files,&patch_services);
+        int own_patches=info.title.pfn_add_patches ? info.title.pfn_add_patches(&info.files,&patch_services) : -1;
         if (!own_patches) exit(1);
         if (sz_patches_dir) {
             LoaderPatchFolder folder=patch_folder(sz_patches_dir,&info);
@@ -218,7 +218,7 @@ int main(int argc, char **argv) {
         }
         if (own_patches<0 && !patches.c_writes)
             printf("Patches: none for %s\n",info.sz_serial[0] ? info.sz_serial : "an unknown title");
-    } else if (sz_patches_dir || psport_gpu_game_has_presets(info.sz_serial)) {
+    } else if (sz_patches_dir || info.title.has_presets) {
         printf("Patches: not applied: they are for /app0/eboot.bin, the application is %s\n", pp_guest_arguments[0]);
     }
     uint64_t cb_image = boot_image.cb_image, entry = boot_image.entry, c_segments = boot_image.c_segments, c_relocs = boot_image.c_relocs;
@@ -327,7 +327,7 @@ int main(int argc, char **argv) {
     unsigned char *p_traps, *p_thunks;
     bind_imports(p_segments, c_segments, p_relocs, c_relocs, native_libc, p_bindings, p_binding_kinds, &p_traps, &p_thunks);
     if (is_eboot) apply_patches(&patches, p_segments, c_segments, p_relocs, c_relocs);
-    if (!cpu_only) psport_gpu_patch_image(g_p_image, cb_image);
+    if (!cpu_only && info.title.pfn_patch_image) info.title.pfn_patch_image(g_p_image, cb_image);
     protect(p_traps, round_page((g_c_imports + 1) * 32), 5);
     protect(p_thunks, round_page((g_c_imports + 1) * THUNK_SIZE), 5);
     protect(g_p_image, round_page(cb_image), 0);

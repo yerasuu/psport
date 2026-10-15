@@ -119,7 +119,7 @@ and binds them), with `--system-modules`, `--hle` and `--lle` as `PS_SYS_MODULES
 modules set high bits there. The rest of the launch is in `psport` too, and no Python runs for it
 (only `scripts/online.py`, with `PS_ONLINE=1`): the loose-file mods' view (`src/loader/loader_mods.c`), the
 AppContent profile from `param.sfo`, shadPS4/GoldHEN XML patches (`src/loader/loader_patches.c`), and
-through the game's profile its own file check and patches (`Game::Profile` `check_files` and
+through the game's title its own file check and patches (`Game::Title` `check_files` and
 `add_patches`; Bloodborne's check of the 1.09 executable and intact shaders and its frame rate,
 resolution and effect presets live in `gpu/games/bloodborne/`).
 
@@ -258,8 +258,8 @@ profile (or with `PS_GAME_PROFILE=none`) runs with the values in the first colum
 | Temporal upscaler (`upscaler` in `psport.ini`, `PS_UPSCALER`) | FSR 3.1 at Native AA, where a profile places it (`Game::Profile::upscaler`); elsewhere off, with no scene jitter and no camera or object motion vectors (`Upscaler: off: no game profile places it`) | the upscaler has to know which pass combines the scene and where the UI starts; jittering a frame nothing then resolves would shake its image | its post-processing combine (compute shader `9a9cf8a9`) and its UI's first vertex shader (`34e8a281`), its UI's other shaders, the layout of its scene constants (the camera) and the sizes of its bone palettes (object motion); `PS_UPSCALE_BEFORE_CS` and `PS_UI_TRIGGER_VS` place it by hand in another game, without camera or object motion vectors |
 | Scene scaling sizes (`Game::UpscalerPlacement` `scene_width`, `scene_height`, `post_divisor`) | 1920x1080 scene targets and post-processing targets at half that size: the ones scene scaling replaces with proxies | the console's 1080p frame; scene scaling also runs without a profile when the output is not 1080p | the same, set in its profile: its scene at 1920x1080 and its post-processing chain at 960x540 |
 | Object motion (`object_motion`, `PS_OBJECT_MOTION`) | on, while the upscaler is available | it only feeds the upscaler | |
-| Frame rate (`PS_FPS`) and vblank (`PS_VBLANK_HZ`) | a title without presets: unpatched, 60 Hz vblank (the console's) | the frame rate presets are patches to one executable, its profile's (`Game::Profile::add_patches`); at 480 Hz a title pacing itself by its flip rate ran 8 times too fast | `uncap` (delta-time patch, 480 Hz vblank, frames shown at once), 60 or 90 (`gpu/games/bloodborne/patches.cpp`, which sets `PS_VBLANK_HZ` for the preset) |
-| Scaled output (`output_res`) and `PS_DMEM_MB` 9152 | only for a title whose profile has presets (run.sh asks `psport --has-presets`); otherwise its own size and the console's 5056 MiB of direct memory | they are a patch to the same executable, and the larger direct memory exists for its larger targets | as `output_res` and `live_resolution` choose |
+| Frame rate (`PS_FPS`) and vblank (`PS_VBLANK_HZ`) | a title without presets: unpatched, 60 Hz vblank (the console's) | the frame rate presets are patches to one executable, its title's (`Game::Title::add_patches`); at 480 Hz a title pacing itself by its flip rate ran 8 times too fast | `uncap` (delta-time patch, 480 Hz vblank, frames shown at once), 60 or 90 (`gpu/games/bloodborne/patches.cpp`, which sets `PS_VBLANK_HZ` for the preset) |
+| Scaled output (`output_res`) and `PS_DMEM_MB` 9152 | only for a title with presets (run.sh asks `psport --has-presets`); otherwise its own size and the console's 5056 MiB of direct memory | they are a patch to the same executable, and the larger direct memory exists for its larger targets | as `output_res` and `live_resolution` choose |
 | Memory model, `PS_PC_MODEL` | run.sh: the new one on AMD GPUs, the 0.3 one on the others | a property of the driver, not of the game: sparse binding of the game's memory works on RADV and stalls NVIDIA's GPU for seconds; the 0.3 model is being retired | |
 | `PS_COPY_GPU_BUFFERS` | 1 (run.sh) | the GPU thread decodes a submission after the game's call returns, later than the console's command processor reads it; the copy keeps a game that refills that memory from changing what the GPU gets | |
 | `PS_READBACKS` | 1 (relaxed) | the console's memory is shared: the CPU reads what the GPU wrote (vertices, compute results), and relaxed readbacks are the cheapest mode that gives it that | |
@@ -275,7 +275,7 @@ profile (or with `PS_GAME_PROFILE=none`) runs with the values in the first colum
 | Variable | What it shows |
 |---|---|
 | `PS_PERMISSIVE=1` | imports the port lacks return 0 instead of stopping, each logged once |
-| `PS_GAME_PROFILE=none` | the game runs without its game profile (`gpu/games/`), on the generic paths only |
+| `PS_GAME_PROFILE=none` | the game runs without its translator profile (`gpu/games/`, `Game::Profile`), on the generic paths only; its title (`Game::Title`: launch, patches, saves, menu pages) still applies |
 | `PS_PERMISSIVE_OUT=error` | with `PS_PERMISSIVE=1`, those of them that write through a pointer argument (`src/runtime/imports/import_outparams.inc`) return `0x80020016` instead of 0, so the game takes its error path rather than reading an output nothing wrote; either way their log line names the output arguments left unwritten and the pointers passed |
 | (always) | before the game starts: every import without implementation or answered by a stub, and a summary |
 | (always) | calls that nothing answers for real or that fail, see [Call report](#call-report) |

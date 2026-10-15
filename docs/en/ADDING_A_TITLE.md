@@ -21,7 +21,7 @@ PS_GAME_DIR=/path/to/dump PS_PERMISSIVE=1 PS_SAVE_LOG=1 bash run.sh
   argument return `0x80020016`, so the game takes its error path instead of reading memory nothing
   wrote.
 - `PS_SAVE_LOG=1`: the output also goes to `<data>/logs/<time>.log`.
-- `PS_GAME_PROFILE=none`: run a title that has a profile without it.
+- `PS_GAME_PROFILE=none`: run a title that has a profile without it (its title data still applies).
 - `PS_SYS_MODULES=<folder>`: the user's own dump of system modules, for comparison only (see
   [Missing system libraries](#missing-system-libraries)).
 
@@ -118,12 +118,14 @@ From [CLAUDE.md](../../CLAUDE.md):
 - Fix the underlying behaviour. No game-specific or shader-specific hacks in `src/`, `gpu/shim/`,
   `gpu/port/`, `gpu/memory/`, `gpu/diag/`, `gpu/shadps4/`, `run.sh` or `build.sh`: no title IDs,
   no eboot addresses, no shader hashes.
+- What running one title takes goes in its title (`gpu/games/<game>/title.cpp`, a `Game::Title`
+  listed in `gpu/games/game_profile.cpp`): its serials, mod folders, file check, own patches and
+  their settings, the changes its saves need. It always applies, even with `PS_GAME_PROFILE=none`.
 - Optimisations that only make sense for one title go in that title's profile
-  (`gpu/games/<game>.cpp` or `gpu/games/<game>/profile.cpp`, a `Game::Profile` listed in
-  `gpu/games/game_profile.cpp`): hooks in its code, code ranges that write per-frame data, known
-  copy shaders, overlap checks. The core keeps only the generic mechanism and must behave the same
-  without a profile. A profile speeds a title up; it never makes it work. Check with
-  `PS_GAME_PROFILE=none`.
+  (`gpu/games/<game>/profile.cpp`, a `Game::Profile` its title points to): hooks in its code, code
+  ranges that write per-frame data, known copy shaders, overlap checks. The core keeps only the
+  generic mechanism and must behave the same without a profile. A profile speeds a title up; it
+  never makes it work. Check with `PS_GAME_PROFILE=none`.
 - No tests in the repository. When a change rests on how the console behaves and the behaviour is
   not documented, confirm it on hardware with an OpenOrbis homebrew test and share it with the
   change.

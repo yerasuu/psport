@@ -29,13 +29,14 @@ size_t round_page(size_t cb_page);
 void *allocate(size_t cb_allocation);
 void protect(void *p_range, size_t cb_range, unsigned flags);
 
-/* What psport knows of the game for its profile and the external patches: param.sfo's TITLE_ID
+/* What psport knows of the game for its title and the external patches: param.sfo's TITLE_ID
  * and APP_VER, and the TITLE_IDs of the same executable. */
 typedef struct {
     char sz_serial[16], sz_version[16], sz_patch_file[4096];
     const char *serials[64];
     size_t c_serials;
     PsGameFiles files;
+    PsTitleInfo title;
 } GameInfo;
 void game_info_of(const char *sz_game_dir, const char *sz_serial, const char *sz_version, GameInfo *p_out_info);
 void game_info(const char *sz_game_dir, GameInfo *p_out_info);

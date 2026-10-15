@@ -67,7 +67,8 @@ int answer_query(int argc, char **argv) {
         GameInfo info;
         char sz_kind[64], sz_advice[2048];
         game_info(argv[2],&info);
-        if (!psport_gpu_check_game(&info.files,sz_kind,sizeof(sz_kind),sz_advice,sizeof(sz_advice))) return 0;
+        if (!info.title.pfn_check_files || !info.title.pfn_check_files(&info.files,sz_kind,sizeof(sz_kind),sz_advice,sizeof(sz_advice)))
+            return 0;
         printf("%s\t%s\t%s\n",sz_kind,info.sz_serial[0] ? info.sz_serial : "?",info.sz_version[0] ? info.sz_version : "?");
         fprintf(stderr,"%s\n",sz_advice);
         return 2;
@@ -75,7 +76,7 @@ int answer_query(int argc, char **argv) {
     if (argc == 3 && !strcmp(argv[1], "--has-presets")) {
         GameInfo info;
         game_info(argv[2],&info);
-        return psport_gpu_game_has_presets(info.sz_serial) ? 0 : 1;
+        return info.title.has_presets ? 0 : 1;
     }
     const char *mod_folders[256];
     if (argc >= 3 && (!strcmp(argv[1], "--list-patches") || !strcmp(argv[1], "--list-mods"))) {

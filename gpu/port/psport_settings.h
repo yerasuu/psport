@@ -19,7 +19,7 @@ enum Preset : int { NativeAA = 0, Quality, Balanced, Performance, UltraPerforman
 enum DebugView : int { DebugNone = 0, DebugReactive = 1, DebugMotion = 2, DebugViewCount };
 enum class MenuLanguage { English, Russian, Spanish };
 
-/// The most effect switches a game profile offers (Game::GameEffects) the settings keep.
+/// The most effect switches a game title offers (Game::GameEffects) the settings keep.
 inline constexpr int MaxEffects = 16;
 /// Live output resolutions: the upscaler's output and the UI host targets.
 inline constexpr int OutputWidths[] = {1280, 1920, 2560, 3840};
@@ -47,7 +47,7 @@ struct Values {
     std::atomic<bool> should_use_fsr4_auto_exposure{true};
     std::atomic<bool> should_invert_fsr4_jitter{false};
     std::atomic<int> active_render_width{1920}, active_render_height{1080};
-    /// Applied at start (the game profile's patches), in the order of Game::Effects()'s switches,
+    /// Applied at start (the game title's patches), in the order of Game::Effects()'s switches,
     /// c_effects of them; the menu shows when a restart is needed.
     std::atomic<bool> effects[MaxEffects]{};
     int c_effects = 0;

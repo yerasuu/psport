@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// Bloodborne's part of the launch (Game::Profile): its frame rate presets and the community
+// Bloodborne's part of the launch (Game::Title): its frame rate presets and the community
 // patches the player's settings choose (patches/Bloodborne.xml, app version 01.09), and the check
 // that the game folder holds the one executable they and the profile's hooks are written for.
 #pragma once

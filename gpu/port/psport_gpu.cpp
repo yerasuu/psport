@@ -109,13 +109,13 @@ static void StartProfileWriter() {
 #endif
 
 extern "C" int psport_gpu_init(const PsGpuConfig* p_config) {
-    // What the translator knows about this game (games/), before anything asks for it: the
-    // settings among them, which keep its effect switches.
+    // What psport knows about this game (games/), before anything asks for it: the settings
+    // among them, which keep its title's effect switches.
     Game::Select(p_config->sz_serial);
     PsSettings::Load();
-    if (const Game::Profile* p_game = Game::Active(); p_game && p_game->pfn_prepare_saves) {
+    if (const Game::Title* p_title = Game::Launched(); p_title && p_title->pfn_prepare_saves) {
         const std::string saves = std::string(runtime_file_user_dir()) + "/savedata";
-        p_game->pfn_prepare_saves(saves.c_str(), runtime_savedata_title());
+        p_title->pfn_prepare_saves(saves.c_str(), runtime_savedata_title());
     }
 #ifdef PS_PGO_GENERATE
     StartProfileWriter();

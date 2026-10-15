@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// Game profiles: what the translator knows about one game, kept out of its core. The core (the
-// command processor, the caches, the shader recompiler) runs any game on its generic paths and
-// asks the active profile only for the rest: hooks in the game's own code that announce its
-// writes earlier than a write trap would, guest code known to write per-frame data, shaders with
-// a known purpose, diagnostics that need to know its code. A game without a profile runs on the
-// generic paths alone. One file per game (games/<game>.cpp, or games/<game>/profile.cpp beside the
-// code it hooks in) defines its profile; game_profile.cpp lists them.
+// What psport knows about one game, kept out of its core, in two parts. Its Title is part of
+// running the game and always applies, found by TITLE_ID whatever PS_GAME_PROFILE says: the launch
+// (serials, mod folders, its file check, its patches and their settings), the changes its saves
+// need, and the port's settings pages in its own menu. Its Profile is what the translator knows
+// about its code, and PS_GAME_PROFILE=none turns it off to check the generic paths: hooks in the
+// game's own code that announce its writes earlier than a write trap would, guest code known to
+// write per-frame data, shaders with a known purpose, where the upscaler goes, diagnostics that
+// need to know its code. A game without either runs on the generic paths alone. One folder per
+// game (games/<game>/: title.cpp, profile.cpp beside the code they hook in) defines them;
+// game_profile.cpp lists the titles.
 #pragma once
 #include <cstddef>
 #include <cstdint>
@@ -130,27 +133,9 @@ struct GameEffects {
     LocalizedText hint;
 };
 
+/// The translator's knowledge of the game's code, gated by PS_GAME_PROFILE: it makes the game
+/// faster or easier to diagnose, never makes it work.
 struct Profile {
-    const char* sz_name = nullptr;
-    /// The param.sfo TITLE_IDs it is for (one executable: patch files and mod folders named after
-    /// any of them apply to all).
-    std::span<const char* const> serials;
-    /// Folders a loose-file mod may consist of without dvdroot_ps4 around them (src/loader/loader_mods.c
-    /// adds the game's own): those of the game's dvdroot_ps4 and the ones mods add to it.
-    std::span<const char* const> mod_folders;
-    /// Its own patch file (shadPS4 XML), relative to psport's folder; external patch folders leave
-    /// it out.
-    const char* sz_patch_file = nullptr;
-    /// Before anything of the game runs, before psport_gpu_init: environment defaults it chooses.
-    void (*pfn_prepare_environment)() = nullptr;
-    /// Checks the game's files before any of its code runs (PS_SKIP_GAME_CHECK=1 is its own to
-    /// honour): false when they cannot work, with a short kind for launchers and what to do.
-    bool (*pfn_check_files)(const PsGameFiles& game, std::string& kind, std::string& advice) = nullptr;
-    /// Its own patches of the executable, chosen by the player's settings, appended through
-    /// services before the external ones; false stops the launch (it printed why).
-    bool (*pfn_add_patches)(const PsGameFiles& game, const PsPatchServices& services) = nullptr;
-    /// The settings of pfn_add_patches the player changes in the overlay menu.
-    GameEffects effects;
     /// Hooks in the game's code (each checks the bytes it replaces: another build of the game is
     /// left alone). They make the core learn of writes sooner; it does not depend on them for
     /// what it shows (write traps catch what nobody announces).
@@ -161,9 +146,6 @@ struct Profile {
     /// Guest code known to write per-frame data into GPU memory: the blocks it writes stay in
     /// the game's memory from its first write instead of after a few frames.
     std::span<const CodeRange> dynamic_writers;
-    /// Changes to the user's saves the game needs, made before any of its code runs. saves is the
-    /// folder holding one folder per user, each with the game's saves under sz_save_title.
-    void (*pfn_prepare_saves)(const char* sz_saves, const char* sz_save_title) = nullptr;
     /// A compute shader (GCN program hash) that only copies buffers, into memory the translator
     /// reads on the CPU: its stores go through to the game's memory; 0 = none known.
     std::uint64_t buffer_copy_shader = 0;
@@ -192,9 +174,6 @@ struct Profile {
     /// With each frame statistics report (PS_FRAME_STATS, the video out thread): the profile's
     /// own diagnostics.
     void (*pfn_report_stats)() = nullptr;
-    /// Each presented frame, on the presenter thread before the overlay is drawn: what the
-    /// player changed in the game's own menus is applied here.
-    void (*pfn_before_present)() = nullptr;
     /// The game's label release code; zeros when unknown, and the free check's breakpoints stay
     /// off.
     LabelReleaseCode label_release;
@@ -202,25 +181,61 @@ struct Profile {
     SmallObjectPool small_object_pool;
 };
 
-/// The profile for a TITLE_ID, whatever PS_GAME_PROFILE says: what it adds to the launch (its
-/// file check, its patches, its mod folders) is part of running the game, not an optimisation of the translator.
-const Profile* Find(const char* sz_serial);
+/// The game as psport runs it, whatever PS_GAME_PROFILE says.
+struct Title {
+    const char* sz_name = nullptr;
+    /// The param.sfo TITLE_IDs it is for (one executable: patch files and mod folders named after
+    /// any of them apply to all).
+    std::span<const char* const> serials;
+    /// Folders a loose-file mod may consist of without dvdroot_ps4 around them (src/loader/loader_mods.c
+    /// adds the game's own): those of the game's dvdroot_ps4 and the ones mods add to it.
+    std::span<const char* const> mod_folders;
+    /// Its own patch file (shadPS4 XML), relative to psport's folder; external patch folders leave
+    /// it out.
+    const char* sz_patch_file = nullptr;
+    /// Before anything of the game runs, before psport_gpu_init: environment defaults it chooses.
+    void (*pfn_prepare_environment)() = nullptr;
+    /// Checks the game's files before any of its code runs (PS_SKIP_GAME_CHECK=1 is its own to
+    /// honour): false when they cannot work, with a short kind for launchers and what to do.
+    bool (*pfn_check_files)(const PsGameFiles& game, std::string& kind, std::string& advice) = nullptr;
+    /// Its own patches of the executable, chosen by the player's settings, appended through
+    /// services before the external ones; false stops the launch (it printed why). A title with
+    /// them has frame rate and resolution presets (psport --has-presets).
+    bool (*pfn_add_patches)(const PsGameFiles& game, const PsPatchServices& services) = nullptr;
+    /// The settings of pfn_add_patches the player changes in the overlay menu.
+    GameEffects effects;
+    /// Changes to the user's saves the game needs, made before any of its code runs. saves is the
+    /// folder holding one folder per user, each with the game's saves under sz_save_title.
+    void (*pfn_prepare_saves)(const char* sz_saves, const char* sz_save_title) = nullptr;
+    /// Patches the game's code once, before any of it runs, while the image is still writable,
+    /// after the profile's (each patch checks the bytes it replaces): the port's own pages in the
+    /// game's menus.
+    void (*pfn_patch_image)(unsigned char* p_image, std::uint64_t cb_range) = nullptr;
+    /// Each presented frame, on the presenter thread before the overlay is drawn: what the
+    /// player changed in the game's own menus is applied here.
+    void (*pfn_before_present)() = nullptr;
+    /// Its translator profile; nullptr for a title without one.
+    const Profile* p_profile = nullptr;
+};
 
-/// Chooses the profile for the game by its TITLE_ID (psport_gpu_init). PS_GAME_PROFILE=none runs the
-/// game as an unknown one (no profile), for checking the generic paths.
+/// The title for a TITLE_ID, whatever PS_GAME_PROFILE says.
+const Title* Find(const char* sz_serial);
+
+/// Chooses the game's title by its TITLE_ID, and with it the active profile (psport_gpu_init).
+/// PS_GAME_PROFILE=none leaves the profile off (the generic paths only); the title still applies.
 void Select(const char* sz_serial);
 
-/// The active profile, or nullptr (an unknown game, or PS_GAME_PROFILE=none).
-const Profile* Active();
+/// The title of the running game (Find at Select), or nullptr.
+const Title* Launched();
 
-/// The profile of the running title (Find at Select), whatever PS_GAME_PROFILE says: the one that
-/// patched its launch, and so the one whose effects the overlay menu offers.
-const Profile* Launched();
+/// The active profile: the running title's, or nullptr (an unknown game, a title without a
+/// profile, or PS_GAME_PROFILE=none).
+const Profile* Active();
 
 /// The running title's effects (Launched), or none.
 inline GameEffects Effects() {
-    const Profile* p_profile = Launched();
-    return p_profile ? p_profile->effects : GameEffects{};
+    const Title* p_title = Launched();
+    return p_title ? p_title->effects : GameEffects{};
 }
 
 /// The active profile's buffer copy shader, or 0.

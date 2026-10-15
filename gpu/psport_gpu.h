@@ -61,35 +61,18 @@ typedef struct {
 } PsKeyEvent;
 void psport_gpu_game_keyboard_open(int is_open);
 int psport_gpu_game_keyboard_take(PsKeyEvent *p_events, int max, int *p_keyboard, uint32_t *p_dropped);
-/* The game as psport's launch found it, for its profile (gpu/games/game_profile.h), which is found
- * by TITLE_ID whatever PS_GAME_PROFILE says: what it adds to the launch is part of running the
- * game, not an optimisation of the translator. */
+/* The game as psport's launch found it, for its title (gpu/games/game_profile.h). */
 typedef struct {
     const char *sz_game_dir;   /* the folder loaded (the mods' view when mods are on) */
     const char *sz_serial;     /* param.sfo TITLE_ID and APP_VER, "" when absent */
     const char *sz_version;
-    const char *sz_patch_file; /* the profile's own patch file, resolved; NULL without one */
+    const char *sz_patch_file; /* the title's own patch file, resolved; NULL without one */
     /* The SHA-256 of eboot.bin's loadable segments at their addresses, the same whatever tool
      * dumped the game; read from the folder on each call. */
     void (*pfn_eboot_sha256)(const char *sz_game_dir, unsigned char *p_out_digest);
 } PsGameFiles;
-/* The index-th TITLE_ID of the game's executable (patch files and mod folders named after any of
- * them apply); NULL past the last one or for a title without a profile. */
-const char *psport_gpu_game_serial(const char *sz_serial, size_t i_serial);
-/* The index-th folder a loose-file mod may consist of without dvdroot_ps4 around them (the game's
- * own are added by src/loader/loader_mods.c); NULL past the last one or for a title without a profile. */
-const char *psport_gpu_game_mod_folder(const char *sz_serial, size_t i_folder);
-/* The profile's own patch file (shadPS4 XML), relative to psport's folder (the one holding out/ or
- * bin/); NULL without one. External patch folders leave it out. */
-const char *psport_gpu_game_patch_file(const char *sz_serial);
-/* Before anything of the game runs, before psport_gpu_init: the environment defaults its profile
- * chooses (PS_VBLANK_HZ for its frame rate presets). */
-void psport_gpu_prepare_game(const PsGameFiles *p_game);
-/* The profile's check of the game's files (PS_SKIP_GAME_CHECK=1 skips it): 0 when they can run,
- * else 1 with a short kind for launchers ("missing_update", ...) and what to do, in English. */
-int psport_gpu_check_game(const PsGameFiles *p_game, char *sz_out_kind, size_t cb_kind, char *sz_out_advice, size_t cb_advice);
 /* Patch writes for the eboot at image offsets (the eboot's vaddr 0 at offset 0), owned by psport,
- * which applies them after relocation and before psport_gpu_patch_image. */
+ * which applies them after relocation and before PsTitleInfo's pfn_patch_image. */
 typedef struct PsPatchList PsPatchList;
 typedef struct {
     PsPatchList *p_list;
@@ -102,15 +85,41 @@ typedef struct {
     /* The index-th write so far: its bytes, which may be rewritten in place, and where they go. */
     unsigned char *(*pfn_write)(PsPatchList *p_list, size_t i_write, uint64_t *p_out_offset, uint64_t *p_out_length);
 } PsPatchServices;
-/* 1 when the title's profile has its own frame rate and resolution presets (psport_gpu_game_patches):
- * only such a title takes run.sh's scaled output path and its larger direct memory. */
-int psport_gpu_game_has_presets(const char *sz_serial);
-/* The profile's own patches of the executable, chosen by the player's settings, before the
- * external XML patches (which win over them): -1 when the title has none, 0 when the launch must
- * stop (the profile printed why), else 1. */
-int psport_gpu_game_patches(const PsGameFiles *p_game, const PsPatchServices *p_services);
-/* Patches the loaded image before the game runs (image still writable): libGnm entry hooks. */
-void psport_gpu_patch_image(unsigned char *p_image, uint64_t cb_image);
+/* What the launch takes from the game's title (Game::Title), found by TITLE_ID whatever
+ * PS_GAME_PROFILE says: it is part of running the game, not an optimisation of the translator.
+ * All zero for a title psport has none for; each pointer may be NULL. */
+typedef struct {
+    const char *sz_name;
+    /* The TITLE_IDs of the game's executable (patch files and mod folders named after any of them
+     * apply). */
+    const char *const *pp_serials;
+    size_t c_serials;
+    /* Folders a loose-file mod may consist of without dvdroot_ps4 around them (the game's own are
+     * added by src/loader/loader_mods.c). */
+    const char *const *pp_mod_folders;
+    size_t c_mod_folders;
+    /* Its own patch file (shadPS4 XML), relative to psport's folder (the one holding out/ or bin/).
+     * External patch folders leave it out. */
+    const char *sz_patch_file;
+    /* 1 when it has its own frame rate and resolution presets (pfn_add_patches): only such a title
+     * takes run.sh's scaled output path and its larger direct memory. */
+    int has_presets;
+    /* Before anything of the game runs, before psport_gpu_init: the environment defaults it
+     * chooses (PS_VBLANK_HZ for its frame rate presets). */
+    void (*pfn_prepare_environment)(void);
+    /* Its check of the game's files (PS_SKIP_GAME_CHECK=1 skips it): 0 when they can run, else 1
+     * with a short kind for launchers ("missing_update", ...) and what to do, in English. */
+    int (*pfn_check_files)(const PsGameFiles *p_game, char *sz_out_kind, size_t cb_kind, char *sz_out_advice,
+                           size_t cb_advice);
+    /* Its own patches of the executable, chosen by the player's settings, before the external XML
+     * patches (which win over them): 0 when the launch must stop (it printed why), else 1. */
+    int (*pfn_add_patches)(const PsGameFiles *p_game, const PsPatchServices *p_services);
+    /* Patches the loaded image before the game runs (image still writable), after psport_gpu_init
+     * chose the running title: its translator profile's patches unless PS_GAME_PROFILE=none, then
+     * its own. */
+    void (*pfn_patch_image)(unsigned char *p_image, uint64_t cb_image);
+} PsTitleInfo;
+PsTitleInfo psport_gpu_title(const char *sz_serial);
 /* libSceAjm's MP3 and AAC decoders (runtime_ajm.c) over libSceAudiodec's FFmpeg codecs (audiodec/).
  * create returns NULL when FFmpeg cannot open the decoder. decode takes the frame at the start of data
  * and writes it to pcm as interleaved float: 0 decoded, 1 the frame is longer than size, 2 not a frame

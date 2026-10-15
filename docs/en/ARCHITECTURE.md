@@ -21,7 +21,7 @@ The model is Wine's, not an emulator's.
 | Translator | `gpu/shadps4/` (inherited from shadPS4, `gpu/VENDOR.txt`), `gpu/cp/`, `gpu/layer/` | `libpsport-gpu.so` | GnmDriver, VideoOut, command processor, Vulkan rasterizer, caches, shader recompiler |
 | Ported libraries | `gpu/ngs2/`, `gpu/audiodec/`, `gpu/fiber/`, `gpu/font/`, `gpu/pngenc/`, `gpu/pngdec/` | `libpsport-gpu.so` | libSceNgs2, libSceAudiodec, libSceFiber, libSceFont/FontFt, libScePngEnc, libScePngDec |
 | Port services | `gpu/port/`, `gpu/memory/`, `gpu/diag/` | `libpsport-gpu.so` | settings (`psport.ini`), overlay, submit guard, guest memory, diagnostics |
-| Game profiles | `gpu/games/` | `libpsport-gpu.so` | per-title optimisations (`Game::Profile`) |
+| Game profiles | `gpu/games/` | `libpsport-gpu.so` | per-title launch and game data (`Game::Title`) and translator optimisations (`Game::Profile`) |
 | Online module | `gpu/net/` | `out/gpu/` (optional) | network and PSN imports with `PS_ONLINE=1` |
 | Online addresses | `scripts/online.py` | - | Python run by `run.sh` with `PS_ONLINE=1` only; see [Launch scripts](#launch-scripts) |
 | Regression runs | `tools/regress.sh`, `tools/regress/` | - | headless runs of every title |
@@ -43,13 +43,14 @@ run.sh
     AppContent profile                param.sfo's user parameters, PS_CONTENT_SKU
     psport_gpu_register_kernel()           event queues and the ported libraries register their exports
     loader_load_game()                eboot + modules -> one LoaderImage
-    psport_gpu_prepare_game()              the profile's environment defaults (PS_VBLANK_HZ)
-    psport_gpu_check_game()                the profile's check of the game's files (exit 2)
-    psport_gpu_game_patches()              the profile's own patches, then the external XML patches
+    psport_gpu_title()                     the title's launch data (PsTitleInfo), whatever PS_GAME_PROFILE says
+    pfn_prepare_environment                the title's environment defaults (PS_VBLANK_HZ)
+    pfn_check_files                        the title's check of the game's files (exit 2)
+    pfn_add_patches                        the title's own patches, then the external XML patches
     runtime_start()
-    psport_gpu_init()                      settings, game profile, window thread, GnmDriver, VideoOut
+    psport_gpu_init()                      game title and profile, settings, saves, window thread, GnmDriver, VideoOut
     bind every import                 native binding or runtime_resolve() or trap
-    apply the patches, psport_gpu_patch_image()
+    apply the patches, PsTitleInfo's pfn_patch_image
     protect segments, set TLS, start linked modules in link order
     enter the eboot's entry on an 8 MiB stack below 1 TiB
 ```
@@ -76,7 +77,7 @@ directory from `PS_DATA_DIR` (default the checkout: `out/`, `user/`, `psport.ini
 `src/main/main.c` checks the CPU, builds the mods' view of the game folder when `--mods` is given,
 reads `param.sfo` (title, title ID, save directory, SDK version, attributes, the AppContent user
 parameters; `PS_CONTENT_SKU=full` or `trial` sets the SKU), configures the file mounts (`/app0` is
-the game folder, saves under `user/`), loads the game, lets its profile check the game's files and
+the game folder, saves under `user/`), loads the game, lets its title check the game's files and
 choose its patches, reads the external patches, binds its imports, installs the fault (`SIGSEGV`, `SIGILL`, `SIGBUS`, `SIGFPE`), dump
 (`SIGUSR2`) and watchdog (`SIGALRM`, `--timeout`) handlers and jumps to the eboot's entry. Host
 heap objects handed to the guest stay below 1 TiB (`mallopt` keeps glibc in the non-PIE brk heap):
@@ -86,7 +87,7 @@ PS4 code packs pointers into 40 bits. Guest memory is placed there too.
 again on its own command line (`src/runtime/runtime_restart.c`) with `--exec <guest path>` and one
 `--arg <value>` per argument, the loader takes that executable of the package instead of
 `eboot.bin`, the game's entry, `getargv` and `__progname` see the new command line, and the
-patches (the profile's and the external XML ones) are applied only to `/app0/eboot.bin`. The
+patches (the title's and the external XML ones) are applied only to `/app0/eboot.bin`. The
 command line keeps `--mods`, so the new process builds its own mods' view; the old one's goes
 with the exec (its cleaner's pipe is close-on-exec).
 
@@ -130,22 +131,22 @@ library.
 - Mods (`src/loader/loader_mods.c`, [MODS.md](MODS.md)): with `--mods`, the enabled mods' files are linked
   over links to the game's entries in a private folder under `--out` (`mod-game-*`), which becomes
   `/app0` and the folder the loader reads. A mod's wrapper folder may be named after any title ID of
-  the game's executable (`psport_gpu_game_serial`), and a mod without `dvdroot_ps4` may consist of the
-  folders of the game's own `dvdroot_ps4` and its profile's `mod_folders`. A process of its own
+  the game's executable (`PsTitleInfo` `pp_serials`), and a mod without `dvdroot_ps4` may consist of the
+  folders of the game's own `dvdroot_ps4` and its title's `mod_folders`. A process of its own
   (`mod-view-clean`) removes the view once `psport` ends, by any route.
 - Patches (`src/loader/loader_patches.c`, read by `src/loader/loader_xml.c`): shadPS4/GoldHEN XML, `bytes`, `bytes16/32/64`, `float32/64`,
-  `utf8` and `utf16` lines at the eboot's addresses (base `0x400000`). The profile's own patches
-  come first (`psport_gpu_game_patches`, through `PsPatchServices`); then the files in `--patches-dir`
+  `utf8` and `utf16` lines at the eboot's addresses (base `0x400000`). The title's own patches
+  come first (`PsTitleInfo` `pfn_add_patches`, through `PsPatchServices`); then the files in `--patches-dir`
   whose `<ID>`s name one of the game's title IDs (or that have none), entries for its `APP_VER` and
   `eboot.bin`, selected by `patches.json` or their `isEnabled`. A patch with an unsupported line or
-  an address outside the eboot's `PT_LOAD` segments is skipped whole, and said; the profile's own
+  an address outside the eboot's `PT_LOAD` segments is skipped whole, and said; the title's own
   file is left out of the folder.
 - The eboot's identity (`src/loader/loader_hash.c`): the SHA-256 of its loadable segments at their
-  addresses, the same whatever tool dumped the game; computed when a profile's check asks for it.
+  addresses, the same whatever tool dumped the game; computed when a title's check asks for it.
 - For launchers, without starting the game: `psport --list-mods <dir> [--game <dir>]` and
   `psport --list-patches <dir> --game <dir>` print JSON (instead of `--game`, `--title <TITLE_ID>
   [--version <APP_VER>]` names a title whose folder the launcher does not have at hand) (mod folder names; key, name, author, note,
-  default of each external patch); `psport --check-game <dir>` runs the profile's file check and
+  default of each external patch); `psport --check-game <dir>` runs the title's file check and
   prints `kind<TAB>title<TAB>version` with exit status 2 when the files cannot work.
 
 ### Import binding
@@ -166,7 +167,7 @@ game, `psport` prints every stub and every import without implementation, then o
 without implementation N`.
 
 After binding: the patches are applied (pointer writes into relocated slots are rebased), the
-profile's `patch_image` runs, segments get their protections, TLS is set up, linked modules start
+profile's and the title's `patch_image` run, segments get their protections, TLS is set up, linked modules start
 in link order (libc first) and the eboot's entry runs with `argv[0] = /app0/eboot.bin`.
 
 ## C runtime
@@ -223,19 +224,22 @@ a file.
 ## GPU library
 
 `libpsport-gpu.so` holds the C++ side. `gpu/port/psport_gpu.cpp` is its C interface (`gpu/psport_gpu.h`),
-with the window's input in `psport_gpu_input.cpp` and the game profile calls in
-`psport_gpu_games.cpp`; the shadPS4 parts the port replaces (memory manager, kernel services) are
+with the window's input in `psport_gpu_input.cpp` and the game title's C view (`psport_gpu_title`)
+in `psport_gpu_games.cpp`; the shadPS4 parts the port replaces (memory manager, kernel services) are
 stood in for in `gpu/shim/psport_stand_ins.cpp`:
 
 - `psport_gpu_register_kernel` registers the kernel event queues and the libraries that do not need a
   window: AvPlayer, Ngs2, Fiber, Font, FontFt, Audiodec, Videodec2, PngEnc, PngDec.
-- `psport_gpu_init` loads `psport.ini`, selects the game profile, prepares saves through it, starts the
-  SDL window on its own thread and registers GnmDriver and VideoOut.
+- `psport_gpu_init` selects the game's title and profile, loads `psport.ini`, prepares saves through
+  the title, starts the SDL window on its own thread and registers GnmDriver and VideoOut.
 - `psport_gpu_resolve` returns the function registered for an import's NID. Libraries register with
   shadPS4's `LIB_FUNCTION(nid, library, version, module, function)` (`gpu/shim/core/libraries/libs.h`).
 - `psport_gpu_handle_fault` is the first stop of `psport`'s `SIGSEGV` handler: GPU page-tracking
   faults (write traps) are handled there.
-- `psport_gpu_patch_image` (`psport_gpu_games.cpp`) hands the writable image to the active profile.
+- `psport_gpu_title` (`psport_gpu_games.cpp`) returns what the launch takes from the title
+  (`PsTitleInfo`): its serials, mod folders, patch file and presets, and its environment, file check,
+  patch and image patch calls; the last hands the writable image to the active profile, then to the
+  title.
 
 The translator, from the game's submission to the screen:
 
@@ -274,11 +278,16 @@ targets. Write traps on guest pages are shared by the runtime and the GPU librar
 
 ## Game profiles
 
-`gpu/games/game_profile.h` defines `Game::Profile`: what the translator knows about one title,
-kept out of the core. `Game::Select` picks a profile by `param.sfo` `TITLE_ID` in `psport_gpu_init`;
-`PS_GAME_PROFILE=none` runs any title without one. What a profile adds to the launch (its file
-check, its own patches, its environment defaults, its mod folders) is found by `Game::Find` before
-`psport_gpu_init`, whatever `PS_GAME_PROFILE` says. A profile may provide:
+`gpu/games/game_profile.h` defines what psport knows about one title, kept out of the core, in two
+parts. `Game::Find` finds a title's `Game::Title` by `param.sfo` `TITLE_ID`, and `Game::Select`
+records the running one in `psport_gpu_init`. The title is part of running the game and always
+applies, whatever `PS_GAME_PROFILE` says; its `Game::Profile` is what the translator knows about the
+game's code, and `PS_GAME_PROFILE=none` turns it off (`Game::Active` returns none). The log says
+which: `Game profile: Bloodborne (CUSA03173): title data applied, translator profile active` (or
+`off (PS_GAME_PROFILE=none)`). The C side reads the title through `psport_gpu_title` before
+`psport_gpu_init`.
+
+A title may provide:
 
 | Field | Use |
 |---|---|
@@ -287,29 +296,37 @@ check, its own patches, its environment defaults, its mod folders) is found by `
 | `patch_file` | its own shadPS4 XML, relative to psport's folder; left out of external patch folders |
 | `prepare_environment` | environment defaults before `psport_gpu_init` (Bloodborne: `PS_VBLANK_HZ` for its `PS_FPS` preset) |
 | `check_files` | the check of the game's files before its code runs (`PS_SKIP_GAME_CHECK=1` skips it) |
-| `add_patches` | its own patches of the executable, chosen by the player's settings |
+| `add_patches` | its own patches of the executable, chosen by the player's settings; a title with them has presets (`--has-presets`) |
 | `effects` | the settings of `add_patches` the overlay menu's "Game effects" section offers: its `psport.ini` switches (key, label and hint in the menu's languages, default), the `model_lod` choice, a note; without them the section is not shown |
+| `prepare_saves` | changes to the user's saves the game needs before it runs (Bloodborne: the sound flag at `0x204E`) |
+| `patch_image`, `before_present` | the port's own pages in the game's menus: patched into its code after the profile's patches, and applied each presented frame |
+| `profile` | its `Game::Profile`, or none |
+
+A profile may provide:
+
+| Field | Use |
+|---|---|
 | `install_hooks`, `patch_image` | hooks and patches in the game's code, each checking the bytes it replaces |
 | `dynamic_writers` | guest code ranges known to write per-frame data into GPU memory |
-| `prepare_saves` | changes to the user's saves before the game runs |
 | `buffer_copy_shader` | hash of a compute shader that only copies buffers |
 | `driver_commands_written`, `commands_submitted` | observe the game's command buffers |
 | `frame_overlap_unsafe` | tells the core to stop `PS_SUBMIT_AHEAD` overlap for the session |
 | `c_submits_ahead` | the frame overlap the game takes when `PS_SUBMIT_AHEAD` is unset |
 | `anisotropy` | anisotropic filtering forced on its textures when `PS_ANISO` is unset |
 | `upscaler` | where the temporal upscaler goes in its frame (scene combine and UI shaders), its scene constants (camera) and bone palettes (object motion); without it the upscaler stays off |
-| `report_stats`, `before_present` | profile diagnostics; per-frame work on the presenter thread |
+| `report_stats` | profile diagnostics with each frame statistics report |
 | `label_release` | the game's label release code, for the free check's `PS_LABEL_TRAP=2` |
 | `small_object_pool` | the layout of the pool holding its GPU labels, for the free check (`PS_FREE_CHECK`) |
 
 A profile makes a title faster or easier to diagnose; it never makes it work. The core must run
-every title correctly on its generic paths, which `PS_GAME_PROFILE=none` checks. The only profile
-today is Bloodborne's (`gpu/games/bloodborne/`: `profile.cpp`, Gnm entry hooks with
-`gnm_table.inc`, guest hooks, heap sites, the in-game menu patch, and for the launch `patches.cpp`:
-the `PS_FPS` presets 30/60/90/uncap, `PS_PATCHES`, the effect switches and `model_lod` of
-`psport.ini`, the `PS_RENDER_RES` scene size, the Intel tone mapping and online-choice fixes, all from
-`patches/Bloodborne.xml`; `game_check.cpp`: the 1.09 executable and intact shaders), listed in
-`gpu/games/game_profile.cpp`. Another title runs unpatched, on the console's 60 Hz vblank.
+every title correctly on its generic paths, which `PS_GAME_PROFILE=none` checks. The only title
+today is Bloodborne (`gpu/games/bloodborne/`: `title.cpp` and, for the launch, `patches.cpp`: the
+`PS_FPS` presets 30/60/90/uncap, `PS_PATCHES`, the effect switches and `model_lod` of `psport.ini`,
+the `PS_RENDER_RES` scene size, the Intel tone mapping and online-choice fixes, all from
+`patches/Bloodborne.xml`; `game_check.cpp`: the 1.09 executable and intact shaders; the in-game menu
+pages, `game_menu.cpp`; its profile in `profile.cpp`, with Gnm entry hooks and `gnm_table.inc`,
+guest hooks and heap sites), listed in `gpu/games/game_profile.cpp`. Another title runs unpatched,
+on the console's 60 Hz vblank.
 
 ## Launch scripts
 
