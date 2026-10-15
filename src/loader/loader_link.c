@@ -12,6 +12,7 @@
  * win too (kinds 5 and 6), as the PS4 linker rebinds imports once one is loaded. */
 #define _GNU_SOURCE
 #include "loader.h"
+#include "loader_traits.h"
 #include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -696,6 +697,7 @@ void loader_load_game(const LoaderOptions *p_options, LoaderImage *p_out) {
                p_table[i].deferred ? " (loaded by the game)" : "");
     printf("; %llu native bindings, %zu imports left to the host runtime, fs->gs patched=%llu\n",
            (unsigned long long)p_out->c_bindings, unresolved, (unsigned long long)fs_patched);
+    loader_record_game_traits(l.sz_game, &l.main);
     for (size_t i = 0; i < c_linked; ++i) free_module(&p_linked[i]);
     free_module(&l.main);
     free(p_linked); free(p_table); free(l.p_imports); free(l.p_exports); free(l.p_nids);

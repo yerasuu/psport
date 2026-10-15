@@ -11,10 +11,10 @@ The model is Wine's, not an emulator's.
 |---|---|---|---|
 | Launch script | `run.sh` | - | environment and settings, then `psport` |
 | Entry | `src/main/main.c`, `src/main/main.h` | `out/psport` | launch sequence: arguments, image mapping, entering the game |
-| Launcher queries | `src/main/cli.c`, `src/main/game_info.c` | `out/psport` | `--check-game`, `--has-presets`, `--list-patches`, `--list-mods`, `--list-quirks`, `--online-overrides`, `BB_*` names; `param.sfo` and the game's identity |
+| Launcher queries | `src/main/cli.c`, `src/main/game_info.c` | `out/psport` | `--check-game`, `--has-presets`, `--list-patches`, `--list-mods`, `--list-quirks`, `--list-traits`, `--online-overrides`, `BB_*` names; `param.sfo` and the game's identity |
 | Import binding | `src/main/bind.c` | `out/psport` | traps, failure thunks, relocation walk, patch writes |
 | Signals | `src/main/signals.c` | `out/psport` | fault, watchdog, thread dump and termination handlers |
-| Native loader | `src/loader/loader.h`, `src/loader/loader_self.c`, `src/loader/loader_link.c` | `out/psport` | SELF/ELF parsing, module linking, relocations, TLS, bindings |
+| Native loader | `src/loader/loader.h`, `src/loader/loader_self.c`, `src/loader/loader_link.c`, `src/loader/loader_traits.c` | `out/psport` | SELF/ELF parsing, module linking, relocations, TLS, bindings; middleware traits (`Middleware:` line) |
 | Launch data | `src/loader/loader_mods.c`, `src/loader/loader_patches.c`, `src/loader/loader_xml.c`, `src/loader/loader_hash.c`, `src/loader/loader_json.c` | `out/psport` | loose-file mod view, shadPS4/GoldHEN XML patches, the eboot's identity (SHA-256), `mods.json`/`patches.json` |
 | Quirk registry | `src/runtime/runtime_quirks.inc`, `runtime_quirks.h`, `runtime_quirks.c`, `gpu/port/psport_quirks.h` | `out/psport` | fixes for one title, host or middleware, decided once and read at setup ([QUIRKS.md](QUIRKS.md)) |
 | C runtime | `src/*/runtime*.c`, `src/runtime/runtime.h`, `src/runtime/imports/import_*.inc` | `out/psport` | libkernel and the other system libraries, import resolution, the call report |
@@ -149,7 +149,15 @@ library.
   `psport --list-patches <dir> --game <dir>` print JSON (instead of `--game`, `--title <TITLE_ID>
   [--version <APP_VER>]` names a title whose folder the launcher does not have at hand) (mod folder names; key, name, author, note,
   default of each external patch); `psport --check-game <dir>` runs the title's file check and
-  prints `kind<TAB>title<TAB>version` with exit status 2 when the files cannot work.
+  prints `kind<TAB>title<TAB>version` with exit status 2 when the files cannot work;
+  `psport --list-traits --game <dir>` prints the game's middleware traits as JSON (`id`, `name`).
+- Middleware traits (`src/loader/loader_traits.c`): read once at load from the eboot's module and
+  library names (`PS4Player*`, `Il2CppUserAssemblies`, `libkernel_unity`, `<Project>-PS4-Shipping`,
+  `libfmod*`), Havok's class names in the eboot, and the game's file names (`PS4Util.prx`,
+  `*eeaot*.prx`, `Media/Managed/mscorlib.dll`, `uecommandline.txt`, `Paks/*.pak`, CRI
+  `.acb/.awb/.hca/.adx`, `.usm`, `.cpk`, FMOD `.fev/.fsb/*.strings.bank`, Wwise `Init.bnk`,
+  `.hkx`), logged as `Middleware: <names>` (or `none detected`) and kept for `loader_game_traits()`.
+  Informational: nothing changes behaviour by them yet.
 
 ### Import binding
 

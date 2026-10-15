@@ -6,6 +6,7 @@
 #include <string.h>
 #include <unistd.h>
 #include "main.h"
+#include "loader_traits.h"
 
 /* A launcher's question names the game by its folder (--game dir) or, without one, by its title
  * (--title TITLE_ID [--version APP_VER]); the arguments from argv[first] on. 0 when they are
@@ -103,6 +104,17 @@ int answer_query(int argc, char **argv) {
         if (p_online->sz_community_server) printf("community_server=%s\n",p_online->sz_community_server);
         if (p_online->community_api_port) printf("community_api_port=%u\n",p_online->community_api_port);
         if (p_online->sz_summon_route) printf("summon_route=%s\n",p_online->sz_summon_route);
+        return 0;
+    }
+    if (argc >= 2 && !strcmp(argv[1], "--list-traits")) {
+        if (argc != 4 || strcmp(argv[2],"--game")) { fprintf(stderr, "Usage: %s --list-traits --game dir\n", argv[0]); return 1; }
+        char sz_eboot[4096];
+        snprintf(sz_eboot,sizeof(sz_eboot),"%s/eboot.bin",argv[3]);
+        LoaderModule eboot;
+        g_sz_loader_file=sz_eboot;
+        loader_module(sz_eboot,&eboot);
+        g_sz_loader_file=NULL;
+        loader_traits_list(loader_detect_traits(argv[3],&eboot));
         return 0;
     }
     const char *mod_folders[256];
