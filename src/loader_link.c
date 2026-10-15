@@ -314,6 +314,11 @@ static void prepare(Linker *l) {
         if (p->filesz > p->memsz) loader_fail("segment file size exceeds memory size");
         memcpy(out->image + p->vaddr, loader_span(m->elf, m->elf_size, p->offset, p->filesz), p->filesz);
         add_segment(l, p->vaddr, p->memsz, p->flags);
+        if (p->type == 1) {
+            out->eboot_loads = realloc(out->eboot_loads, (out->eboot_load_count + 1) * sizeof(*out->eboot_loads));
+            if (!out->eboot_loads) loader_fail("allocation failed");
+            out->eboot_loads[out->eboot_load_count++] = (LoaderSegment){p->vaddr, p->memsz, protection(p->flags)};
+        }
     }
     int64_t *import_of = malloc((m->symbol_count ? m->symbol_count : 1) * sizeof(*import_of));
     if (!import_of) loader_fail("allocation failed");
@@ -377,7 +382,7 @@ static void glob_directory(const char *directory, const char *suffix, List *name
 }
 /* Modules the game loads by path (any *.prx or *.sprx outside sce_module and sce_sys, such as
  * Unity's Media/Modules and Media/Plugins), relative to /app0. Linked directories are entered too:
- * mods.py builds a modded game's folder out of links. depth bounds a link loop. */
+ * loader_mods.c builds a modded game's folder out of links. depth bounds a link loop. */
 static void find_loadable(const char *root, const char *relative, List *found, int depth) {
     if (depth > 32) return;
     char path[4096];

@@ -19,28 +19,8 @@ enum Preset : int { NativeAA = 0, Quality, Balanced, Performance, UltraPerforman
 enum DebugView : int { DebugNone = 0, DebugReactive = 1, DebugMotion = 2, DebugViewCount };
 enum class MenuLanguage { English, Russian, Spanish };
 
-/// Game effects switched by the community patches at start (patches.py EFFECTS): ini key,
-/// menu label, default (the game's own behaviour).
-struct Effect {
-    const char* key;
-    const char* label;
-    const char* label_ru;
-    const char* label_es;
-    bool default_on;
-};
-inline constexpr Effect Effects[] = {
-    {"effect_chromatic_aberration", "Chromatic aberration", "Хроматическая аберрация", "Aberración cromática", true},
-    {"effect_dof", "Depth of field (DoF)", "Глубина резкости (DoF)", "Profundidad de campo (DoF)", true},
-    {"effect_motion_blur", "Motion blur", "Размытие в движении", "Desenfoque de movimiento", true},
-    {"effect_ssao", "Ambient occlusion (SSAO)", "Затенение SSAO", "Oclusión ambiental (SSAO)", true},
-    {"effect_game_aa", "Game's own anti-aliasing", "Собственное сглаживание игры", "Antialiasing propio del juego", true},
-    {"effect_dynamic_shadows", "Shadows from dynamic lights", "Тени от динамических источников", "Sombras de luces dinámicas", true},
-    {"effect_ssr", "Screen-space reflections (not in original game)", "Отражения SSR (не было в игре)", "Reflejos en espacio de pantalla (no estaban en el juego)", false},
-    {"skip_intro", "Skip startup intros", "Пропуск заставок при запуске", "Saltar las intros al iniciar", false},
-    {"debug_camera", "Free camera (Cross + L3)", "Свободная камера (Cross + L3)", "Cámara libre (X + L3)", false},
-    {"debug_menu", "Debug menu (requires font files)", "Debug menu (нужны файлы шрифтов)", "Menú de depuración (necesita archivos de fuentes)", false},
-};
-inline constexpr int EffectCount = int(sizeof(Effects) / sizeof(Effects[0]));
+/// The most effect switches a game profile offers (Game::GameEffects) the settings keep.
+inline constexpr int MaxEffects = 16;
 /// Live output resolutions: the upscaler's output and the UI host targets.
 inline constexpr int OutputWidths[] = {1280, 1920, 2560, 3840};
 inline constexpr int OutputHeights[] = {720, 1080, 1440, 2160};
@@ -67,8 +47,10 @@ struct Values {
     std::atomic<bool> fsr4_auto_exposure{true};
     std::atomic<bool> fsr4_invert_jitter{false};
     std::atomic<int> active_render_width{1920}, active_render_height{1080};
-    /// Applied at start (patches.py); the menu shows when a restart is needed.
-    std::atomic<bool> effects[EffectCount]{};
+    /// Applied at start (the game profile's patches), in the order of Game::Effects()'s switches,
+    /// c_effects of them; the menu shows when a restart is needed.
+    std::atomic<bool> effects[MaxEffects]{};
+    int c_effects = 0;
     std::atomic<int> model_lod{0}; ///< -2 highest .. 2 lowest, 0 the game's
     std::atomic<int> output_res{OutputDefault}; ///< index into OutputWidths
     /// Live resolution and preset changes (run.sh): 0 off by default (startup patch, fastest
@@ -85,7 +67,7 @@ struct Values {
     int startup_preset = NativeAA;
     int startup_upscaler = UpscalerFsr3;
     bool startup_object_motion = true;
-    bool startup_effects[EffectCount]{};
+    bool startup_effects[MaxEffects]{};
     int startup_model_lod = 0;
     int startup_output_res = OutputDefault;
     int startup_live_resolution = 0;
@@ -95,7 +77,8 @@ Values& Get();
 /// Localized overlay text; the Language selector itself stays in English.
 const char* MenuText(const char* english, const char* russian, const char* spanish);
 
-/// Reads the file, then the environment overrides. Called once at start.
+/// Reads the file, then the environment overrides. Called once at start, after Game::Select (the
+/// running title's effect switches).
 void Load();
 /// Checks the loaded choice before the first frame; unsupported FSR 4 uses FSR 3.1.
 void ConfigureUpscalerSupport(bool fsr4, bool fsr411);

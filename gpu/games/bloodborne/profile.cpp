@@ -1,22 +1,24 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Bloodborne (update 1.09): what the translator knows about its code. Addresses are those of the
-// 1.09 executable (game_check.py makes sure that is the one running); every retail release runs
-// the same one.
+// 1.09 executable (CheckFiles, game_check.cpp, makes sure that is the one running); every retail
+// release runs the same one.
 #include "game_profile.h"
 #include <cstdio>
 #include <cstdlib>
 #include <dirent.h>
 #include <string>
+#include "effects.h"
 #include "game_menu.h"
 #include "gnm_hooks.h"
 #include "guest_hooks.h"
 #include "heap_sites.h"
+#include "launch.h"
 
 namespace Game {
 namespace {
 constexpr std::uint64_t ImageBase = 0x800000000ull;
 
-/// The retail releases (scripts/game_check.py SUPPORTED_TITLES): Bloodborne in the US, EU, UK, JP
+/// The retail releases (the content IDs from PR #117): Bloodborne in the US, EU, UK, JP
 /// and Asia, then the editions with The Old Hunters (US, EU, JP, Asia). Without its serial here a
 /// region ran on the generic paths alone, and the new memory model crashed on entering the world
 /// (issue #119, the US release: a null read in the allocator, 0x2085xxx). Its bookkeeping is in
@@ -24,6 +26,12 @@ constexpr std::uint64_t ImageBase = 0x800000000ull;
 /// alone do not matter for it: PS_GUEST_HOOKS=0 runs; PS_GAME_PROFILE=none crashes).
 constexpr const char* Serials[] = {"CUSA00900", "CUSA00207", "CUSA00208", "CUSA00299", "CUSA01363",
                                    "CUSA03179", "CUSA03173", "CUSA03014", "CUSA03023"};
+
+/// The top-level folders of the game's dvdroot_ps4, with adhoc and font, which mods add: the debug
+/// menu's fonts, which the retail game does not ship.
+constexpr const char* ModFolders[] = {"action", "adhoc",    "chr",   "event", "facegen", "font",   "map",
+                                      "menu",   "movie",    "msg",   "mtd",   "obj",     "other",  "param",
+                                      "paramdef", "parts",  "remo",  "script", "sfx",    "shader", "sound"};
 
 /// Reverse engineering: 0x2ab7350 computes vertices on the CPU (cloth) into a ~128 MiB ring, each
 /// block written now and then; 0x20858a0 is the game's allocator, its bookkeeping in GPU-mapped
@@ -98,6 +106,16 @@ constexpr LabelReleaseCode LabelRelease = {
 extern const Profile BloodborneProfile = {
     .name = "Bloodborne",
     .serials = Serials,
+    .mod_folders = ModFolders,
+    .patch_file = BbLaunch::PatchFile,
+    .prepare_environment = BbLaunch::PrepareEnvironment,
+    .check_files = BbLaunch::CheckFiles,
+    .add_patches = BbLaunch::AddPatches,
+    .effects = {.switches = BbEffects::Switches,
+                .has_model_detail = true,
+                .hint = {"Motion blur and shadows from dynamic lights place a significant load on the GPU.",
+                         "Размытие в движении и тени от динамических источников заметно нагружают GPU.",
+                         "El desenfoque de movimiento y las sombras de luces dinámicas cargan bastante la GPU."}},
     .install_hooks = InstallHooks,
     .patch_image = PatchImage,
     .dynamic_writers = DynamicWriters,

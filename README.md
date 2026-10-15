@@ -83,7 +83,8 @@ upstream's and built around Bloodborne.
 ## Requirements and building
 
 - Linux x86-64 and a Vulkan 1.3 GPU.
-- GCC (or another compiler through `CC`), CMake, Ninja, pkg-config, Python 3 and the packages in
+- GCC (or another compiler through `CC`), CMake, Ninja, pkg-config, Python 3 (for online play,
+  the bundled launcher and tools; a launch does not need it otherwise) and the packages in
   `shell.nix`: Vulkan, SDL3, FreeType, FFmpeg, Boost, glslang and the rest of shadPS4's video core
   dependencies, plus protobuf, nlohmann_json, OpenSSL, zlib and miniupnpc for the optional online
   module. When these are missing and [Nix](https://nixos.org) is installed, `build.sh` and
@@ -139,7 +140,7 @@ hardware tests, when needed, are OpenOrbis homebrew); match the surrounding code
 | Path | Contents |
 |---|---|
 | `src/` | Entry (`probe.c`), native loader (`loader_*.c`) and C runtime (`runtime_*.c`) |
-| `scripts/` | Launch helpers run by `run.sh`: mods, AppContent profile, Bloodborne's patch compiler and game check, online addresses |
+| `scripts/` | `online.py`, the online addresses `run.sh` writes with `PS_ONLINE=1` (the one launch step in Python), and `sce_file.py` for the Python tools |
 | `gpu/` | GPU library: shadPS4 video core with bbport's changes (`gpu/VENDOR.txt`), own PM4 decoder (`cp/`) and memory module (`layer/`), ported libraries (`ngs2/`, `audiodec/`, `fiber/`, `font/`, `pngenc/`, `pngdec/`), game profiles (`games/`), overlay and in-game menu (`shim/`), DLSS bridge, online module |
 | `launcher/`, `packaging/` | Upstream's GTK4 launcher; Nix package and AppImage script |
 | `patches/` | Community patches for Bloodborne |

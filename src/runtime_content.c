@@ -36,7 +36,7 @@ void runtime_content_title(const char *title) {
     if (title && *title) snprintf(title_id,sizeof(title_id),"%s",title);
 }
 static void require_provider(void) {
-    if (!configured) { fputs("STOP: AppContent needs --content-profile\n",stderr); runtime_stop(21); }
+    if (!configured) { fputs("STOP: AppContent needs --app0 (its param.sfo)\n",stderr); runtime_stop(21); }
 }
 /* System modules: every library this eboot imports is provided by the host
  * runtime, so loading one only tracks a reference count. AppContent (0xb4)

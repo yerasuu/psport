@@ -30,12 +30,10 @@ from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
 
 PORT_DIR = Path(__file__).resolve().parent.parent  # native_probe (or the package's copy)
 sys.path.insert(0, str(PORT_DIR / 'scripts'))
-from mods import discover as discover_mods  # noqa: E402
-import game_check  # noqa: E402
 import online  # noqa: E402  (the online module: addresses and the connection test)
-from patches import external_patches  # noqa: E402
 # Packaged (AppImage): generated files, saves and bbport.ini live in PS_DATA_DIR.
 PACKAGED = bool(os.environ.get("PS_PREBUILT"))
+PSPORT = PORT_DIR / ("bin" if PACKAGED else "out") / "psport"
 DATA_DIR = Path(os.environ.get("PS_DATA_DIR", PORT_DIR))
 CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "bbport-launcher"
 CONFIG_FILE = CONFIG_DIR / "settings.json"
@@ -427,6 +425,16 @@ CONTROLS = [
     ("look_left", "Камера влево", "Left", None),
     ("look_right", "Камера вправо", "Right", None),
 ]
+
+
+def psport_answer(*args):
+    """(exit status, output) of psport for a question about the game's files (--check-game,
+    --list-patches, --list-mods); (None, "") when it cannot run (not built yet)."""
+    try:
+        run = subprocess.run([str(PSPORT), *args], capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return None, ""
+    return run.returncode, run.stdout
 
 
 def connected_gamepads():
@@ -899,8 +907,8 @@ class LauncherWindow(Adw.ApplicationWindow):
         self.upscaler_row.set_subtitle(hint or "")
 
     def game_problem(self, path):
-        """game_check.problem for the folder, kept until its eboot.bin or param.sfo changes (the
-        image hash reads ~90 MB)."""
+        """(kind, title, version) of psport --check-game for the folder, or None; kept until its
+        eboot.bin or param.sfo changes (the image hash reads ~90 MB)."""
         try:
             key = (str(path),) + tuple(
                 (f.stat().st_size, f.stat().st_mtime_ns) for f in (path / "eboot.bin", path / "sce_sys/param.sfo"))
@@ -908,7 +916,10 @@ class LauncherWindow(Adw.ApplicationWindow):
             key = (str(path),)
         if getattr(self, "_game_problem_key", None) != key:
             self._game_problem_key = key
-            self._game_problem = game_check.problem(path)
+            status, output = psport_answer("--check-game", str(path))
+            fields = output.strip().split("\t")
+            self._game_problem = (tuple(fields) if status == 2 and len(fields) == 3
+                                  else ("unreadable", "?", "?") if status == 1 else None)
         return self._game_problem
 
     def update_game_status(self):
@@ -1087,7 +1098,11 @@ class LauncherWindow(Adw.ApplicationWindow):
             profile = json.loads((DATA_DIR / "mods.json").read_text(encoding='utf-8'))
         except (OSError, ValueError):
             profile = {}
-        available = discover_mods(self.mods_dir())
+        status, output = psport_answer("--list-mods", str(self.mods_dir()), "--game", str(self.game_dir()))
+        try:
+            available = json.loads(output) if status == 0 else []
+        except ValueError:
+            available = []
         order = list(dict.fromkeys(n for n in [*profile.get("order", []), *available] if n in available))
         for name in order:
             row = Adw.SwitchRow(title=name, active=name not in profile.get("disabled", []))
@@ -1148,17 +1163,21 @@ class LauncherWindow(Adw.ApplicationWindow):
             profile = json.loads((DATA_DIR / "patches.json").read_text(encoding='utf-8'))
         except (OSError, ValueError):
             profile = {}
-        found = external_patches(directory)
-        for key, _path, meta in found:
-            default = meta.get("isEnabled", "false").lower() == "true"
+        status, output = psport_answer("--list-patches", str(directory), "--game", str(self.game_dir()))
+        try:
+            found = json.loads(output) if status == 0 else []
+        except ValueError:
+            found = []
+        for patch in found:
+            key, default = patch["key"], patch["default"]
             active = key in profile.get("enabled", []) or (default and key not in profile.get("disabled", []))
             subtitle = key.split("/", 1)[0]
-            if meta.get("Author"):
-                subtitle += " · " + tr("Автор: {}").format(meta.get("Author"))
-            row = Adw.SwitchRow(title=GLib.markup_escape_text(meta.get("Name") or key),
+            if patch["author"]:
+                subtitle += " · " + tr("Автор: {}").format(patch["author"])
+            row = Adw.SwitchRow(title=GLib.markup_escape_text(patch["name"]),
                                 subtitle=GLib.markup_escape_text(subtitle), active=active)
-            if meta.get("Note"):
-                row.set_tooltip_text(meta.get("Note").replace("\\n", "\n"))
+            if patch["note"]:
+                row.set_tooltip_text(patch["note"])
             row.default = default
             self.patch_list.add(key, row)
         self.patches_folder_row.set_subtitle(

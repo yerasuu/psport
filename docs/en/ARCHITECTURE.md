@@ -9,9 +9,10 @@ The model is Wine's, not an emulator's.
 
 | Component | Path | Built into | Role |
 |---|---|---|---|
-| Launch script | `run.sh` | - | environment, settings, mods and patches, then `psport` |
+| Launch script | `run.sh` | - | environment and settings, then `psport` |
 | Entry | `src/probe.c` | `out/psport` | arguments, image mapping, import binding, signals, entering the game |
 | Native loader | `src/loader.h`, `src/loader_self.c`, `src/loader_link.c` | `out/psport` | SELF/ELF parsing, module linking, relocations, TLS, bindings |
+| Launch data | `src/loader_mods.c`, `src/loader_patches.c`, `src/loader_hash.c`, `src/loader_json.c` | `out/psport` | loose-file mod view, shadPS4/GoldHEN XML patches, the eboot's identity (SHA-256), `mods.json`/`patches.json` |
 | C runtime | `src/runtime*.c`, `src/runtime.h`, `src/import_*.inc` | `out/psport` | libkernel and the other system libraries, import resolution, the call report |
 | GPU library | `gpu/shim/bbgpu.cpp`, `gpu/bbgpu.h` | `out/gpu/libpsport-gpu.so` | C interface between `psport` and the C++ side |
 | Translator | `gpu/shadps4/` (inherited from shadPS4, `gpu/VENDOR.txt`), `gpu/cp/`, `gpu/layer/` | `libpsport-gpu.so` | GnmDriver, VideoOut, command processor, Vulkan rasterizer, caches, shader recompiler |
@@ -19,7 +20,7 @@ The model is Wine's, not an emulator's.
 | Port services | `gpu/shim/bbport_*` | `libpsport-gpu.so` | settings (`bbport.ini`), overlay, submit guard, guest memory, diagnostics |
 | Game profiles | `gpu/games/` | `libpsport-gpu.so` | per-title optimisations (`Game::Profile`) |
 | Online module | `gpu/bbnet/` | `out/gpu/` (optional) | network and PSN imports with `PS_ONLINE=1` |
-| Launch helpers | `scripts/` | - | Python run by `run.sh`; see [Launch scripts](#launch-scripts) |
+| Online addresses | `scripts/online.py` | - | Python run by `run.sh` with `PS_ONLINE=1` only; see [Launch scripts](#launch-scripts) |
 | Regression runs | `tools/regress.sh`, `tools/regress/` | - | headless runs of every title |
 
 `build.sh` builds `libpsport-gpu.so` with CMake/Ninja, then compiles `src/probe.c`, `src/loader*.c` and
@@ -29,17 +30,23 @@ The model is Wine's, not an emulator's.
 
 ```
 run.sh
-  scripts/mods.py, scripts/game_check.py, scripts/content_profile.py, scripts/patches.py
-  environment: memory model, PS_VBLANK_HZ, driver caches, ...
+  environment: memory model, scene size for the output, driver caches, ...
   bash build.sh (unless PS_PREBUILT=1)
+  scripts/online.py (PS_ONLINE=1 only)
   psport --game <dir> [--system-modules <dir> --hle <libs> --lle <libs>]
-           --content-profile out/content.bin --patches out/patches.bin --app0 <dir> --user <dir>
+           [--mods <dir> --mods-config <file> --out <dir>]
+           --patches-dir <dir> --patches-config <file> --app0 <dir> --user <dir>
+    loader_mods_view()                the game folder, or a view of it with the mods linked in
+    AppContent profile                param.sfo's user parameters, PS_CONTENT_SKU
     bbgpu_register_kernel()           event queues and the ported libraries register their exports
     loader_load_game()                eboot + modules -> one LoaderImage
+    bbgpu_prepare_game()              the profile's environment defaults (PS_VBLANK_HZ)
+    bbgpu_check_game()                the profile's check of the game's files (exit 2)
+    bbgpu_game_patches()              the profile's own patches, then the external XML patches
     runtime_start()
     bbgpu_init()                      settings, game profile, window thread, GnmDriver, VideoOut
     bind every import                 native binding or runtime_resolve() or trap
-    apply patches.bin, bbgpu_patch_image()
+    apply the patches, bbgpu_patch_image()
     protect segments, set TLS, start linked modules in link order
     enter the eboot's entry on an 8 MiB stack below 1 TiB
 ```
@@ -51,21 +58,23 @@ directory from `PS_DATA_DIR` (default the checkout: `out/`, `user/`, `bbport.ini
 `shell.nix` when the build dependencies are missing and Nix is installed, and builds with
 `build.sh` unless `PS_PREBUILT=1`. Before starting `psport` it:
 
-- merges loose-file mods into a link tree (`scripts/mods.py`, [MODS.md](MODS.md));
-- runs Bloodborne's file check (`scripts/game_check.py --launch`; other titles pass unchecked);
-- writes `out/content.bin`, the AppContent parameters from `param.sfo`
-  (`scripts/content_profile.py`);
-- writes `out/patches.bin` (`scripts/patches.py`): Bloodborne's built-in and third-party patches
-  for its 1.09 executable, an empty file for every other title;
+- passes the mods folder and `mods.json` (`PS_MODS_DIR`, `PS_MODS_CONFIG`; none with
+  `PS_MODS_ENABLED=0`) and the external patch folder and `patches.json` (`PS_PATCHES_DIR`,
+  `PS_PATCHES_CONFIG`), by default in the data directory;
+- for a `bbport.ini` `output_res` other than 1080p, chooses between live resolution changes and a
+  scene size patched in at start (`PS_RENDER_RES`, `PS_OUTPUT_RES`, `PS_DMEM_MB`): the output
+  divided by the upscaler preset's ratio, rounded half to even to an even size;
 - chooses the memory model and other defaults from the GPU (`out/bb-gpu-capabilities --device`),
   see [Memory model](#memory-model);
 - passes `PS_SYS_MODULES`, `PS_HLE` and `PS_LLE` as `--system-modules`, `--hle` and `--lle`.
 
 ### psport
 
-`src/probe.c` checks the CPU, reads `param.sfo` (title, title ID, save directory, SDK version,
-attributes), configures the file mounts (`/app0` is the game folder, saves under `user/`), loads
-the game, binds its imports, installs the fault (`SIGSEGV`, `SIGILL`, `SIGBUS`, `SIGFPE`), dump
+`src/probe.c` checks the CPU, builds the mods' view of the game folder when `--mods` is given,
+reads `param.sfo` (title, title ID, save directory, SDK version, attributes, the AppContent user
+parameters; `PS_CONTENT_SKU=full` or `trial` sets the SKU), configures the file mounts (`/app0` is
+the game folder, saves under `user/`), loads the game, lets its profile check the game's files and
+choose its patches, reads the external patches, binds its imports, installs the fault (`SIGSEGV`, `SIGILL`, `SIGBUS`, `SIGFPE`), dump
 (`SIGUSR2`) and watchdog (`SIGALRM`, `--timeout`) handlers and jumps to the eboot's entry. Host
 heap objects handed to the guest stay below 1 TiB (`mallopt` keeps glibc in the non-PIE brk heap):
 PS4 code packs pointers into 40 bits. Guest memory is placed there too.
@@ -73,8 +82,10 @@ PS4 code packs pointers into 40 bits. Guest memory is placed there too.
 `sceSystemServiceLoadExec` replaces the application the way the console does: `psport` starts
 again on its own command line (`src/runtime_restart.c`) with `--exec <guest path>` and one
 `--arg <value>` per argument, the loader takes that executable of the package instead of
-`eboot.bin`, the game's entry, `getargv` and `__progname` see the new command line, and
-`patches.bin` is applied only to `/app0/eboot.bin`.
+`eboot.bin`, the game's entry, `getargv` and `__progname` see the new command line, and the
+patches (the profile's and the external XML ones) are applied only to `/app0/eboot.bin`. The
+command line keeps `--mods`, so the new process builds its own mods' view; the old one's goes
+with the exec (its cleaner's pipe is close-on-exec).
 
 ### Native loader
 
@@ -111,6 +122,29 @@ System modules are the user's own dump; nothing from them is in the repository o
 title in `tools/regress/titles.txt` needs them; they are a stopgap until psport implements the
 library.
 
+### Launch data
+
+- Mods (`src/loader_mods.c`, [MODS.md](MODS.md)): with `--mods`, the enabled mods' files are linked
+  over links to the game's entries in a private folder under `--out` (`mod-game-*`), which becomes
+  `/app0` and the folder the loader reads. A mod's wrapper folder may be named after any title ID of
+  the game's executable (`bbgpu_game_serial`), and a mod without `dvdroot_ps4` may consist of the
+  folders of the game's own `dvdroot_ps4` and its profile's `mod_folders`. A process of its own
+  (`mod-view-clean`) removes the view once `psport` ends, by any route.
+- Patches (`src/loader_patches.c`): shadPS4/GoldHEN XML, `bytes`, `bytes16/32/64`, `float32/64`,
+  `utf8` and `utf16` lines at the eboot's addresses (base `0x400000`). The profile's own patches
+  come first (`bbgpu_game_patches`, through `BbPatchServices`); then the files in `--patches-dir`
+  whose `<ID>`s name one of the game's title IDs (or that have none), entries for its `APP_VER` and
+  `eboot.bin`, selected by `patches.json` or their `isEnabled`. A patch with an unsupported line or
+  an address outside the eboot's `PT_LOAD` segments is skipped whole, and said; the profile's own
+  file is left out of the folder.
+- The eboot's identity (`src/loader_hash.c`): the SHA-256 of its loadable segments at their
+  addresses, the same whatever tool dumped the game; computed when a profile's check asks for it.
+- For launchers, without starting the game: `psport --list-mods <dir> [--game <dir>]` and
+  `psport --list-patches <dir> --game <dir>` print JSON (instead of `--game`, `--title <TITLE_ID>
+  [--version <APP_VER>]` names a title whose folder the launcher does not have at hand) (mod folder names; key, name, author, note,
+  default of each external patch); `psport --check-game <dir>` runs the profile's file check and
+  prints `kind<TAB>title<TAB>version` with exit status 2 when the files cannot work.
+
 ### Import binding
 
 `psport` walks the relocations. For each import (`src/probe.c`):
@@ -128,7 +162,7 @@ game, `psport` prints every stub and every import without implementation, then o
 `Runtime: imports N: host N, game modules N, system modules N, modules the game loads N, stubs N,
 without implementation N`.
 
-After binding: `patches.bin` is applied (pointer writes into relocated slots are rebased), the
+After binding: the patches are applied (pointer writes into relocated slots are rebased), the
 profile's `patch_image` runs, segments get their protections, TLS is set up, linked modules start
 in link order (libc first) and the eboot's entry runs with `argv[0] = /app0/eboot.bin`.
 
@@ -232,11 +266,19 @@ targets. Write traps on guest pages are shared by the runtime and the GPU librar
 
 `gpu/games/game_profile.h` defines `Game::Profile`: what the translator knows about one title,
 kept out of the core. `Game::Select` picks a profile by `param.sfo` `TITLE_ID` in `bbgpu_init`;
-`PS_GAME_PROFILE=none` runs any title without one. A profile may provide:
+`PS_GAME_PROFILE=none` runs any title without one. What a profile adds to the launch (its file
+check, its own patches, its environment defaults, its mod folders) is found by `Game::Find` before
+`bbgpu_init`, whatever `PS_GAME_PROFILE` says. A profile may provide:
 
 | Field | Use |
 |---|---|
-| `serials` | the title IDs it applies to |
+| `serials` | the title IDs it applies to (one executable: patch files and mod folders named after any apply) |
+| `mod_folders` | folders a mod may consist of without `dvdroot_ps4` around them |
+| `patch_file` | its own shadPS4 XML, relative to psport's folder; left out of external patch folders |
+| `prepare_environment` | environment defaults before `bbgpu_init` (Bloodborne: `PS_VBLANK_HZ` for its `PS_FPS` preset) |
+| `check_files` | the check of the game's files before its code runs (`PS_SKIP_GAME_CHECK=1` skips it) |
+| `add_patches` | its own patches of the executable, chosen by the player's settings |
+| `effects` | the settings of `add_patches` the overlay menu's "Game effects" section offers: its `bbport.ini` switches (key, label and hint in the menu's languages, default), the `model_lod` choice, a note; without them the section is not shown |
 | `install_hooks`, `patch_image` | hooks and patches in the game's code, each checking the bytes it replaces |
 | `dynamic_writers` | guest code ranges known to write per-frame data into GPU memory |
 | `prepare_saves` | changes to the user's saves before the game runs |
@@ -253,21 +295,21 @@ kept out of the core. `Game::Select` picks a profile by `param.sfo` `TITLE_ID` i
 A profile makes a title faster or easier to diagnose; it never makes it work. The core must run
 every title correctly on its generic paths, which `PS_GAME_PROFILE=none` checks. The only profile
 today is Bloodborne's (`gpu/games/bloodborne/`: `profile.cpp`, Gnm entry hooks with
-`gnm_table.inc`, guest hooks, heap sites, the in-game menu patch), listed in
-`gpu/games/game_profile.cpp`.
+`gnm_table.inc`, guest hooks, heap sites, the in-game menu patch, and for the launch `patches.cpp`:
+the `PS_FPS` presets 30/60/90/uncap, `PS_PATCHES`, the effect switches and `model_lod` of
+`bbport.ini`, the `PS_RENDER_RES` scene size, the Intel tone mapping and online-choice fixes, all from
+`patches/Bloodborne.xml`; `game_check.cpp`: the 1.09 executable and intact shaders), listed in
+`gpu/games/game_profile.cpp`. Another title runs unpatched, on the console's 60 Hz vblank.
 
 ## Launch scripts
 
-What Python remains is run by `run.sh`, not by the loader:
+A launch runs no Python, except for online play:
 
 | Script | Use |
 |---|---|
-| `scripts/mods.py` | loose-file mod overlay ([MODS.md](MODS.md)) |
-| `scripts/content_profile.py` | `out/content.bin` (AppContent SKU and user parameters) |
-| `scripts/patches.py` | `out/patches.bin`: Bloodborne's built-in, preset and third-party patches; upscaler preset sizes for `run.sh` |
-| `scripts/game_check.py` | Bloodborne's check of its files (1.09 executable, intact extraction) |
-| `scripts/online.py` | addresses for `PS_ONLINE=1` |
-| `scripts/sce_file.py` | `param.sfo` and SELF/ELF readers shared by the scripts |
+| `scripts/online.py` | addresses for `PS_ONLINE=1` (it probes the shadNet WebAPI for the summon service); the bundled launcher imports it too |
+| `scripts/sce_file.py` | `param.sfo` and SELF/ELF readers for the Python tools (`tools/got_import.py`, `tools/re/`) |
+| `tools/dcx_check.py` | every `.dcx` file of a Bloodborne folder checked (the launch checks the shaders only) |
 
 ## Other parts
 

@@ -273,9 +273,10 @@ static void StartProfileWriter() {
 #endif
 
 extern "C" int bbgpu_init(const BbGpuConfig* config) {
-    BbSettings::Load();
-    // What the translator knows about this game (games/), before anything asks for it.
+    // What the translator knows about this game (games/), before anything asks for it: the
+    // settings among them, which keep its effect switches.
     Game::Select(config->serial);
+    BbSettings::Load();
     if (const Game::Profile* game = Game::Active(); game && game->prepare_saves) {
         const std::string saves = std::string(runtime_file_user_dir()) + "/savedata";
         game->prepare_saves(saves.c_str(), runtime_savedata_title());
@@ -362,6 +363,52 @@ extern "C" void bbgpu_patch_image(unsigned char* image, uint64_t size) {
     if (const Game::Profile* game = Game::Active(); game && game->patch_image) {
         game->patch_image(image, size);
     }
+}
+
+extern "C" const char* bbgpu_game_serial(const char* serial, size_t index) {
+    const Game::Profile* game = Game::Find(serial);
+    return game && index < game->serials.size() ? game->serials[index] : nullptr;
+}
+
+extern "C" const char* bbgpu_game_mod_folder(const char* serial, size_t index) {
+    const Game::Profile* game = Game::Find(serial);
+    return game && index < game->mod_folders.size() ? game->mod_folders[index] : nullptr;
+}
+
+extern "C" const char* bbgpu_game_patch_file(const char* serial) {
+    const Game::Profile* game = Game::Find(serial);
+    return game ? game->patch_file : nullptr;
+}
+
+extern "C" void bbgpu_prepare_game(const BbGameFiles* files) {
+    if (const Game::Profile* game = Game::Find(files->sz_serial); game && game->prepare_environment) {
+        game->prepare_environment();
+    }
+}
+
+extern "C" int bbgpu_check_game(const BbGameFiles* files, char* sz_out_kind, size_t cb_kind, char* sz_out_advice,
+                                size_t cb_advice) {
+    const Game::Profile* game = Game::Find(files->sz_serial);
+    std::string kind, advice;
+    if (!game || !game->check_files || game->check_files(*files, kind, advice)) {
+        return 0;
+    }
+    std::snprintf(sz_out_kind, cb_kind, "%s", kind.c_str());
+    std::snprintf(sz_out_advice, cb_advice, "%s", advice.c_str());
+    return 1;
+}
+
+extern "C" int bbgpu_game_has_presets(const char* serial) {
+    const Game::Profile* game = Game::Find(serial);
+    return game && game->add_patches ? 1 : 0;
+}
+
+extern "C" int bbgpu_game_patches(const BbGameFiles* files, const BbPatchServices* services) {
+    const Game::Profile* game = Game::Find(files->sz_serial);
+    if (!game || !game->add_patches) {
+        return -1;
+    }
+    return game->add_patches(*files, *services) ? 1 : 0;
 }
 
 extern "C" unsigned bbgpu_symbol_count(void) {

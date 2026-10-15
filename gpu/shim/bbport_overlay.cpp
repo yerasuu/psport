@@ -16,6 +16,7 @@
 #include <SDL3/SDL.h>
 #include "bbport_settings.h"
 #include "common/elf_info.h"
+#include "game_profile.h"
 #include "imgui.h"
 #include "imgui_impl_vulkan.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
@@ -567,87 +568,94 @@ void Menu() {
             "fija el tamaño de la escena respecto a la salida: 4K Performance = 1920x1080. Cambiar el tamaño "
             "reinicia el historial del escalador y puede causar una pausa breve."));
     }
-    const char* live_modes[] = {BbSettings::MenuText("Auto (based on GPU)", "Авто (по видеокарте)",
-                                                     "Automático (según la GPU)"),
-                                BbSettings::MenuText("Off (faster)", "Выключена (быстрее)",
-                                                     "Desactivado (más rápido)"),
-                                BbSettings::MenuText("On", "Включена", "Activado")};
-    int live = s.live_resolution + 1;
-    if (ImGui::BeginCombo(
-            BbSettings::MenuText("Live resolution changes", "Смена разрешения на лету",
-                                 "Cambio de resolución en vivo"),
-            live_modes[live])) {
-        for (int i = 0; i < 3; ++i) {
-            if (ImGui::Selectable(live_modes[i], i == live)) {
-                Store(s.live_resolution, i - 1, true);
+    if (const Game::Profile* launched = Game::Launched(); launched && launched->add_patches) {
+        const char* live_modes[] = {BbSettings::MenuText("Auto (based on GPU)", "Авто (по видеокарте)",
+                                                         "Automático (según la GPU)"),
+                                    BbSettings::MenuText("Off (faster)", "Выключена (быстрее)",
+                                                         "Desactivado (más rápido)"),
+                                    BbSettings::MenuText("On", "Включена", "Activado")};
+        int live = s.live_resolution + 1;
+        if (ImGui::BeginCombo(
+                BbSettings::MenuText("Live resolution changes", "Смена разрешения на лету",
+                                     "Cambio de resolución en vivo"),
+                live_modes[live])) {
+            for (int i = 0; i < 3; ++i) {
+                if (ImGui::Selectable(live_modes[i], i == live)) {
+                    Store(s.live_resolution, i - 1, true);
+                }
             }
+            ImGui::EndCombo();
         }
-        ImGui::EndCombo();
+        Hint(BbSettings::MenuText(
+            "On: output resolution and preset change without restarting, but game post-processing "
+            "stays at 1080p, which is noticeably slower on Steam Deck and older GPUs. "
+            "Off: everything renders at the preset resolution, and changes require a restart. Auto "
+            "enables this on powerful discrete GPUs. Applies after restarting the game.",
+            "Включена: разрешение вывода и пресет меняются без перезапуска, но постобработка игры "
+            "остаётся в 1080p — на Steam Deck и старых видеокартах это заметно медленнее. "
+            "Выключена: всё рисуется в разрешении пресета, смена — через перезапуск. Авто включает "
+            "её на мощных дискретных видеокартах. Применяется после перезапуска игры.",
+            "Activado: la resolución de salida y el preajuste cambian sin reiniciar, pero el posprocesado del "
+            "juego se queda en 1080p, bastante más lento en Steam Deck y GPU antiguas. Desactivado: todo se "
+            "dibuja a la resolución del preajuste y los cambios requieren reiniciar. Automático lo activa en GPU "
+            "dedicadas potentes. Se aplica tras reiniciar el juego."));
     }
-    Hint(BbSettings::MenuText(
-        "On: output resolution and preset change without restarting, but game post-processing "
-        "stays at 1080p, which is noticeably slower on Steam Deck and older GPUs. "
-        "Off: everything renders at the preset resolution, and changes require a restart. Auto "
-        "enables this on powerful discrete GPUs. Applies after restarting the game.",
-        "Включена: разрешение вывода и пресет меняются без перезапуска, но постобработка игры "
-        "остаётся в 1080p — на Steam Deck и старых видеокартах это заметно медленнее. "
-        "Выключена: всё рисуется в разрешении пресета, смена — через перезапуск. Авто включает "
-        "её на мощных дискретных видеокартах. Применяется после перезапуска игры.",
-        "Activado: la resolución de salida y el preajuste cambian sin reiniciar, pero el posprocesado del "
-        "juego se queda en 1080p, bastante más lento en Steam Deck y GPU antiguas. Desactivado: todo se "
-        "dibuja a la resolución del preajuste y los cambios requieren reiniciar. Automático lo activa en GPU "
-        "dedicadas potentes. Se aplica tras reiniciar el juego."));
-    ImGui::SeparatorText(BbSettings::MenuText("Game effects (restart required)",
-                                              "Эффекты игры (после перезапуска)",
-                                              "Efectos del juego (requiere reiniciar)"));
-    const char* lods[] = {BbSettings::MenuText("Highest (-2)", "Максимальная (-2)", "Máximo (-2)"),
-                          BbSettings::MenuText("Game default", "Как в игре", "El del juego"),
-                          BbSettings::MenuText("Lower (1)", "Ниже (1)", "Menor (1)"),
-                          BbSettings::MenuText("Lowest (2)", "Минимальная (2)", "Mínimo (2)")};
-    static constexpr int lod_values[] = {-2, 0, 1, 2};
-    int lod_index = 1;
-    for (int i = 0; i < 4; ++i) {
-        if (lod_values[i] == s.model_lod) lod_index = i;
+    const auto localized = [](const Game::LocalizedText& text) {
+        return BbSettings::MenuText(text.sz_english, text.sz_russian, text.sz_spanish);
+    };
+    const Game::GameEffects effects = Game::Effects();
+    if (s.c_effects > 0 || effects.has_model_detail) {
+        ImGui::SeparatorText(BbSettings::MenuText("Game effects (restart required)",
+                                                  "Эффекты игры (после перезапуска)",
+                                                  "Efectos del juego (requiere reiniciar)"));
     }
-    if (ImGui::BeginCombo(BbSettings::MenuText("Model detail", "Детализация моделей",
-                                               "Detalle de los modelos"),
-                          lods[lod_index])) {
+    if (effects.has_model_detail) {
+        const char* lods[] = {BbSettings::MenuText("Highest (-2)", "Максимальная (-2)", "Máximo (-2)"),
+                              BbSettings::MenuText("Game default", "Как в игре", "El del juego"),
+                              BbSettings::MenuText("Lower (1)", "Ниже (1)", "Menor (1)"),
+                              BbSettings::MenuText("Lowest (2)", "Минимальная (2)", "Mínimo (2)")};
+        static constexpr int lod_values[] = {-2, 0, 1, 2};
+        int lod_index = 1;
         for (int i = 0; i < 4; ++i) {
-            if (ImGui::Selectable(lods[i], i == lod_index)) {
-                Store(s.model_lod, lod_values[i], true);
+            if (lod_values[i] == s.model_lod) lod_index = i;
+        }
+        if (ImGui::BeginCombo(BbSettings::MenuText("Model detail", "Детализация моделей",
+                                                   "Detalle de los modelos"),
+                              lods[lod_index])) {
+            for (int i = 0; i < 4; ++i) {
+                if (ImGui::Selectable(lods[i], i == lod_index)) {
+                    Store(s.model_lod, lod_values[i], true);
+                }
             }
-        }
-        ImGui::EndCombo();
-    }
-    for (int e = 0; e < BbSettings::EffectCount; ++e) {
-        const auto& effect = BbSettings::Effects[e];
-        Checkbox(BbSettings::MenuText(effect.label, effect.label_ru, effect.label_es), s.effects[e]);
-        if (std::string_view(effect.key) == "debug_camera") {
-            Hint(BbSettings::MenuText("Hold Cross and press L3 (keyboard: Space + Z).",
-                                      "Удерживайте Cross и нажмите L3 (клавиатура: Space + Z).",
-                                      "Mantén X y pulsa L3 (teclado: Espacio + Z)."));
-        } else if (std::string_view(effect.key) == "debug_menu") {
-            Hint(BbSettings::MenuText(
-                "Left side of the touchpad (Tab); right side: Backspace. Needs the adhoc folder "
-                "from Nexus mod #253 (the fonts in adhoc/font).",
-                "Левая сторона тачпада (Tab), правая — Backspace. Нужна папка adhoc из мода "
-                "Nexus #253 (шрифты в adhoc/font).",
-                "Lado izquierdo del panel táctil (Tab); lado derecho: Retroceso. Necesita la carpeta adhoc "
-                "del mod #253 de Nexus (las fuentes en adhoc/font)."));
+            ImGui::EndCombo();
         }
     }
-    Hint(BbSettings::MenuText(
-        "Effects are enabled and disabled by game patches at startup (patches/Bloodborne.xml). "
-        "Motion blur and shadows from dynamic lights place a significant load on the GPU.",
-        "Эффекты включаются и выключаются патчами игры при запуске (patches/Bloodborne.xml). "
-        "Размытие в движении и тени от динамических источников заметно нагружают GPU.",
-        "Los efectos se activan y desactivan con parches del juego al iniciar (patches/Bloodborne.xml). El "
-        "desenfoque de movimiento y las sombras de luces dinámicas cargan bastante la GPU."));
+    for (int e = 0; e < s.c_effects; ++e) {
+        const Game::EffectSwitch& effect = effects.switches[e];
+        Checkbox(localized(effect.label), s.effects[e]);
+        if (effect.hint.sz_english) {
+            Hint(localized(effect.hint));
+        }
+    }
+    if (s.c_effects > 0) {
+        const Game::Profile* launched = Game::Launched();
+        std::string note = BbSettings::MenuText("Effects are enabled and disabled by game patches at startup",
+                                                "Эффекты включаются и выключаются патчами игры при запуске",
+                                                "Los efectos se activan y desactivan con parches del juego al iniciar");
+        if (launched->patch_file) {
+            note = note + " (" + launched->patch_file + ")";
+        }
+        note += ".";
+        if (effects.hint.sz_english) {
+            note = note + " " + localized(effects.hint);
+        }
+        Hint(note.c_str());
+    }
 
     bool restart =
         s.object_motion != s.startup_object_motion || s.model_lod != s.startup_model_lod ||
         s.live_resolution != s.startup_live_resolution || BbSettings::ResolutionNeedsRestart();
-    for (int e = 0; e < BbSettings::EffectCount; ++e) {
+    for (int e = 0; e < s.c_effects; ++e) {
         restart |= s.effects[e] != s.startup_effects[e];
     }
     if (restart) {

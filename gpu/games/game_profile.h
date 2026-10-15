@@ -10,6 +10,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <string>
+#include "../bbgpu.h"
 
 namespace Game {
 
@@ -94,10 +96,53 @@ struct CoreServices {
     void (*fresh_range)(std::uint64_t address, std::uint64_t size) = nullptr;
 };
 
+/// An overlay menu text in its languages (BbSettings::MenuText); all null for none.
+struct LocalizedText {
+    const char* sz_english = nullptr;
+    const char* sz_russian = nullptr;
+    const char* sz_spanish = nullptr;
+};
+
+/// A switch of the game's own patches: a bbport.ini key (0 or 1) set in the overlay menu and the
+/// launcher, which add_patches reads at start, so a change applies after a restart.
+struct EffectSwitch {
+    const char* sz_key = nullptr;
+    LocalizedText label;
+    /// The game's own behaviour, unpatched.
+    bool is_default_on = false;
+    LocalizedText hint;
+};
+
+/// What the overlay's "Game effects" section offers; with neither, the section is not shown.
+struct GameEffects {
+    std::span<const EffectSwitch> switches;
+    /// The model_lod choice of bbport.ini (-2 highest .. 2 lowest, 0 the game's).
+    bool has_model_detail = false;
+    /// After the section's note that the patches apply at start (from patch_file).
+    LocalizedText hint;
+};
+
 struct Profile {
     const char* name = nullptr;
-    /// The param.sfo TITLE_IDs it is for.
+    /// The param.sfo TITLE_IDs it is for (one executable: patch files and mod folders named after
+    /// any of them apply to all).
     std::span<const char* const> serials;
+    /// Folders a loose-file mod may consist of without dvdroot_ps4 around them (src/loader_mods.c
+    /// adds the game's own): those of the game's dvdroot_ps4 and the ones mods add to it.
+    std::span<const char* const> mod_folders;
+    /// Its own patch file (shadPS4 XML), relative to psport's folder; external patch folders leave
+    /// it out.
+    const char* patch_file = nullptr;
+    /// Before anything of the game runs, before bbgpu_init: environment defaults it chooses.
+    void (*prepare_environment)() = nullptr;
+    /// Checks the game's files before any of its code runs (PS_SKIP_GAME_CHECK=1 is its own to
+    /// honour): false when they cannot work, with a short kind for launchers and what to do.
+    bool (*check_files)(const BbGameFiles& game, std::string& kind, std::string& advice) = nullptr;
+    /// Its own patches of the executable, chosen by the player's settings, appended through
+    /// services before the external ones; false stops the launch (it printed why).
+    bool (*add_patches)(const BbGameFiles& game, const BbPatchServices& services) = nullptr;
+    /// The settings of add_patches the player changes in the overlay menu.
+    GameEffects effects;
     /// Hooks in the game's code (each checks the bytes it replaces: another build of the game is
     /// left alone). They make the core learn of writes sooner; it does not depend on them for
     /// what it shows (write traps catch what nobody announces).
@@ -149,12 +194,26 @@ struct Profile {
     SmallObjectPool small_object_pool;
 };
 
+/// The profile for a TITLE_ID, whatever PS_GAME_PROFILE says: what it adds to the launch (its
+/// file check, its patches, its mod folders) is part of running the game, not an optimisation of the translator.
+const Profile* Find(const char* serial);
+
 /// Chooses the profile for the game by its TITLE_ID (bbgpu_init). PS_GAME_PROFILE=none runs the
 /// game as an unknown one (no profile), for checking the generic paths.
 void Select(const char* serial);
 
 /// The active profile, or nullptr (an unknown game, or PS_GAME_PROFILE=none).
 const Profile* Active();
+
+/// The profile of the running title (Find at Select), whatever PS_GAME_PROFILE says: the one that
+/// patched its launch, and so the one whose effects the overlay menu offers.
+const Profile* Launched();
+
+/// The running title's effects (Launched), or none.
+inline GameEffects Effects() {
+    const Profile* profile = Launched();
+    return profile ? profile->effects : GameEffects{};
+}
 
 /// The active profile's buffer copy shader, or 0.
 inline std::uint64_t BufferCopyShader() {
