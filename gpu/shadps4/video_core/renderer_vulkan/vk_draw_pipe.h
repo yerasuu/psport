@@ -56,7 +56,7 @@ public:
         return m_stage_b_tid.load(std::memory_order_acquire);
     }
 
-    /// Stage A: space for a packet of `size` bytes (8-byte aligned), valid until Commit().
+    /// Stage A: space for a packet of `cb_payload` bytes (8-byte aligned), valid until Commit().
     u8* Begin(u32 cb_payload) {
         cb_payload = Align(cb_payload + sizeof(Header));
         ASSERT(cb_payload <= Capacity / 4);

@@ -34,7 +34,7 @@ inline void Set(std::uintptr_t va_range, std::uint64_t cb_range, Reason reason, 
     runtime_memory_trap(va_range, cb_range, reason, is_on ? 1 : 0);
 }
 
-/// The reasons the page holding `address` is trapped for.
+/// The reasons the page holding `va_guest` is trapped for.
 inline unsigned Reasons(std::uintptr_t va_guest) {
     return runtime_memory_trap_reasons(va_guest);
 }

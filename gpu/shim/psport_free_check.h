@@ -30,7 +30,8 @@ enum Source : std::uint32_t {
     ImageDownload,
 };
 bool Enabled();
-/// Before a write of `size` bytes at `address`; `data` (may be null) is what will be written.
+/// Before a write of `cb_range` bytes at `va_range`; `p_data` (may be null) is what will be
+/// written.
 /// `seq`: the fence's place in the graphics command stream (NextFenceSeq), 0 for none: a
 /// fence written after one that follows it in the stream is reported.
 void Check(std::uint64_t va_range, std::uint64_t cb_range, const void* p_data, Source source,

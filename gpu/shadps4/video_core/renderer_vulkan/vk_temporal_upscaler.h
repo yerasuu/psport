@@ -185,16 +185,16 @@ private:
     [[nodiscard]] bool UseFsr4() const;
     /// psport: DLSS selected and the bridge is ready (NVIDIA RTX, gpu/dlss_bridge).
     [[nodiscard]] bool UseDlss() const;
-    /// Records DLSS into `cmdbuf` (output in General). `hdr`: linear scene color input.
+    /// Records DLSS into `cmdbuf` (output in General). `is_hdr`: linear scene color input.
     bool RecordDlss(vk::CommandBuffer cmdbuf, const Dlss::Resource& color,
                     const Dlss::Resource& depth, u32 w, u32 h, u32 ow, u32 oh, float frame_ms,
                     bool is_hdr);
-    /// Records FSR 4 into output_image; on a permanent failure FSR 3 takes over.
+    /// Records FSR 4 into m_output_image; on a permanent failure FSR 3 takes over.
     bool RecordFsr4(vk::CommandBuffer cmdbuf, Fsr4Upscaler::Image color, Fsr4Upscaler::Image depth,
                     u32 w, u32 h, u32 ow, u32 oh, float frame_ms);
     void RecordTaa(vk::CommandBuffer cmdbuf, vk::ImageView color, vk::ImageView depth);
     /// Sharpness above 1 for FSR 3/4 (their RCAS stops at 1): one more RCAS pass over the target
-    /// (output_image, or the 8-bit UI image with ldr) in General layout after the upscaler.
+    /// (m_output_image, or the 8-bit UI image with ldr) in General layout after the upscaler.
     void ExtraSharpen(vk::Image target, bool is_ldr, u32 w, u32 h);
 
     const Instance& m_instance;
@@ -211,7 +211,7 @@ private:
 
     bool m_is_enabled = false;
     bool m_has_failed = false;
-    /// An FSR 3 dispatch recorded on a recording thread failed; `failed` at the next frame.
+    /// An FSR 3 dispatch recorded on a recording thread failed; `m_has_failed` at the next frame.
     std::atomic<bool> m_has_dispatch_failed{false};
     u64 m_trigger_hash = 0;
     VideoCore::ImageId m_scene_color{};

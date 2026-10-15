@@ -140,7 +140,7 @@ uintptr_t runtime_content_resolve(const char *sz_name);
 void runtime_content_report(void);
 typedef struct { const char *sz_name; void *p_function; } RuntimeExport;
 /* What an export table lists for a function the runtime does not implement but answers with
- * success: runtime_lookup reports each import resolved to it (runtime_last_stub). */
+ * success: runtime_lookup reports each import resolved to it (g_runtime_last_stub). */
 ABI int32_t runtime_stub(void);
 extern int g_runtime_last_stub;
 #define RUNTIME_LOOKUP(table, nid) runtime_lookup(table, sizeof(table)/sizeof(*(table)), nid)

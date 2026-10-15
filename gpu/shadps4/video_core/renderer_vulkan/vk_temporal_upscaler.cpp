@@ -2074,7 +2074,7 @@ void TemporalUpscaler::RunScaled() {
         m_has_failed = true;
     } else {
         // The context is only used here and destroyed after scheduler.Finish(); a dispatch
-        // that fails sets `failed` at the next frame (the UI then draws over this one).
+        // that fails sets `m_has_failed` at the next frame (the UI then draws over this one).
         m_scheduler.Record([this, ctx = m_p_context, info](vk::CommandBuffer cmdbuf) mutable {
             info.commandBuffer = cmdbuf;
             if (ffxVkPortableUpscaleContextRecordDispatch(ctx, &info) != FFX_VK_PORTABLE_OK) {

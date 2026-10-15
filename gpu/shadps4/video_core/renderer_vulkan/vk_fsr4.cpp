@@ -80,7 +80,7 @@ struct Fsr4Upscaler::Impl {
         Destroy();
     }
 
-    /// `recording`: called from Record(), inside the upscaler's pass on the command buffer it
+    /// `is_recording`: called from Record(), inside the upscaler's pass on the command buffer it
     /// records into: the earlier frames' dispatches are in earlier submissions (each frame ends
     /// with one), so only those are waited for. Finish() would send the command buffer.
     void Destroy(bool is_recording = false) {

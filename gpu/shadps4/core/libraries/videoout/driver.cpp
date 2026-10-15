@@ -519,7 +519,7 @@ void VideoOutDriver::Flip(const Request& req) {
             static u64 log_alloc, log_free;
             const u64 tick = PsStats::g_tick_wait_ns.load(), present = PsStats::g_present_wait_ns.load();
             const u64 compiles_now = Vulkan::g_bb_compiles.load();
-            // tick_wait_ns and the compile count are reset every stats window.
+            // g_tick_wait_ns and the compile count are reset every stats window.
             const auto delta = [](u64 now_value, u64& last_value) {
                 const u64 d = now_value >= last_value ? now_value - last_value : now_value;
                 last_value = now_value;

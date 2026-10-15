@@ -205,7 +205,7 @@ int WindowSDL::TakeGameKeys(PsKeyEvent* p_events, int max, bool& keyboard, u32& 
 }
 
 // Opening or closing the game's keyboard starts it afresh: nothing typed before reaches it, and
-// keys still held when it opened are not reported released. Called under key_mutex.
+// keys still held when it opened are not reported released. Called under m_key_mutex.
 void WindowSDL::SyncGameKeyboard() {
     const bool is_open = m_is_game_keyboard_open.load(std::memory_order_relaxed);
     if (is_open != m_is_game_keyboard_synced) {

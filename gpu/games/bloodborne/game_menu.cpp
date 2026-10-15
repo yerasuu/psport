@@ -310,7 +310,7 @@ void DestroyTexts(u8* p_pair) {
     DestroyText(p_pair);
     DestroyText(p_pair + TextSize);
 }
-/// A value list's entries (count at `count_offset`), after the row has copied them.
+/// A value list's entries (count at `c_offsets`), after the row has copied them.
 void DestroyValues(u8* p_list, std::size_t c_offsets) {
     const u64 c_values = *reinterpret_cast<u64*>(p_list + c_offsets);
     for (u64 i = 0; i < c_values; ++i) {

@@ -408,7 +408,7 @@ void DrawPreparation::WorkerLoop(std::stop_token stop, u32 i_worker) {
         std::shared_ptr<Submission> target;
         {
             std::unique_lock lk{m_mutex};
-            // gpu_seq moves without the lock: keep the candidate the predicate found.
+            // m_gpu_seq moves without the lock: keep the candidate the predicate found.
             m_cv.wait(lk, stop, [&] {
                 target = m_is_baseline_ready ? claimable() : nullptr;
                 return target != nullptr;

@@ -94,7 +94,7 @@ void RegisterChunk(Chunk* p_chunk) {
                                              p_chunk);
 }
 
-/// The runtime's chunk allocator: a dma-buf fd of `size` bytes of GPU-visible memory, or -1.
+/// The runtime's chunk allocator: a dma-buf fd of `cb_range` bytes of GPU-visible memory, or -1.
 int AllocChunk(u64 phys, u64 cb_range) {
     {
         std::scoped_lock lk{s_mutex};

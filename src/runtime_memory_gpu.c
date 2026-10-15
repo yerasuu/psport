@@ -124,7 +124,7 @@ void runtime_memory_note_cpu_write(uintptr_t va_range, uint64_t cb_range) {
  * only its own reason. One owner for these protections: the layer's VRAM copies and the texture
  * cache trap the same pages, and one's unprotect must not drop the other's trap. Reasons from 16 up
  * trap reads too (no access: the page's data is newer elsewhere, a VRAM copy). Lock order: the
- * runtime's lock, then trap_mutex (as kernel_mprotect, which keeps the traps). */
+ * runtime's lock, then s_trap_mutex (as kernel_mprotect, which keeps the traps). */
 #define TRAP_LIMIT (1ull<<40)
 #define TRAP_NO_ACCESS 0xf0u
 static uint8_t *s_p_trap_reasons; /* one byte per 4 KiB page below TRAP_LIMIT (reserved, not committed) */

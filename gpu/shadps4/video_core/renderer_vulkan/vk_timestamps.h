@@ -40,8 +40,8 @@ public:
         return m_valid_bits != 0;
     }
 
-    /// The GPU clock written as a 64-bit value at `address` by the GPU in stream order: once the
-    /// work before it is done (`end_of_pipe`), else when the GPU gets to it (recording thread).
+    /// The GPU clock written as a 64-bit value at `va_guest` by the GPU in stream order: once the
+    /// work before it is done (`is_end_of_pipe`), else when the GPU gets to it (recording thread).
     /// False: no timestamps here (the caller writes it with the CPU).
     bool Write(VAddr va_guest, bool is_end_of_pipe);
 

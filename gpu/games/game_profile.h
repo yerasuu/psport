@@ -33,7 +33,7 @@ struct LabelReleaseCode {
 };
 
 /// The game's small-object pool, for the free check (PS_FREE_CHECK, psport_free_check.h): 4 KiB
-/// pages, blocks of block_size from the page start, a header at page + header_offset (page list
+/// pages, blocks of cb_block from the page start, a header at page + off_header (page list
 /// next and prev, free list head and free count, a qword each), the free list linked through the
 /// first qword of each free block. A page has at most 128 blocks.
 struct SmallObjectPool {
@@ -104,7 +104,7 @@ struct LocalizedText {
 };
 
 /// A switch of the game's own patches: a psport.ini key (0 or 1) set in the overlay menu and the
-/// launcher, which add_patches reads at start, so a change applies after a restart.
+/// launcher, which pfn_add_patches reads at start, so a change applies after a restart.
 struct EffectSwitch {
     const char* sz_key = nullptr;
     LocalizedText label;
@@ -118,7 +118,7 @@ struct GameEffects {
     std::span<const EffectSwitch> switches;
     /// The model_lod choice of psport.ini (-2 highest .. 2 lowest, 0 the game's).
     bool has_model_detail = false;
-    /// After the section's note that the patches apply at start (from patch_file).
+    /// After the section's note that the patches apply at start (from sz_patch_file).
     LocalizedText hint;
 };
 
@@ -141,7 +141,7 @@ struct Profile {
     /// Its own patches of the executable, chosen by the player's settings, appended through
     /// services before the external ones; false stops the launch (it printed why).
     bool (*pfn_add_patches)(const PsGameFiles& game, const PsPatchServices& services) = nullptr;
-    /// The settings of add_patches the player changes in the overlay menu.
+    /// The settings of pfn_add_patches the player changes in the overlay menu.
     GameEffects effects;
     /// Hooks in the game's code (each checks the bytes it replaces: another build of the game is
     /// left alone). They make the core learn of writes sooner; it does not depend on them for
@@ -154,7 +154,7 @@ struct Profile {
     /// the game's memory from its first write instead of after a few frames.
     std::span<const CodeRange> dynamic_writers;
     /// Changes to the user's saves the game needs, made before any of its code runs. saves is the
-    /// folder holding one folder per user, each with the game's saves under save_title.
+    /// folder holding one folder per user, each with the game's saves under sz_save_title.
     void (*pfn_prepare_saves)(const char* sz_saves, const char* sz_save_title) = nullptr;
     /// A compute shader (GCN program hash) that only copies buffers, into memory the translator
     /// reads on the CPU: its stores go through to the game's memory; 0 = none known.

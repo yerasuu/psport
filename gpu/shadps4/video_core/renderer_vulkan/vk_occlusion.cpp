@@ -123,7 +123,7 @@ void OcclusionQueries::EndSegment() {
 }
 
 void OcclusionQueries::ResetAhead() {
-    // Slots from `resolved` on hold results not copied yet; those below `begun` were used.
+    // Slots from `m_resolved` on hold results not copied yet; those below `m_begun` were used.
     m_reset_until = std::max(m_reset_until, m_begun);
     const u64 target = std::min<u64>(m_begun + ResetBatch, m_resolved + NumSlots);
     if (target <= m_reset_until || m_reset_until - m_begun >= ResetBatch / 2) {

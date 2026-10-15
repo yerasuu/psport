@@ -14,7 +14,7 @@ typedef struct { uint64_t target, kind, value, addend; } LoaderReloc;
 typedef struct { uint64_t i_binding, va_binding, kind; } LoaderBinding;
 typedef struct {
     uint64_t cb_image, entry, capabilities, procparam, main_tls[4];
-    /* all_modules[0] is the eboot; module_count counts the modules after it. */
+    /* p_all_modules[0] is the eboot; c_modules counts the modules after it. */
     RuntimeModule *p_all_modules;
     uint64_t c_modules;
     LoaderSegment *p_segments;

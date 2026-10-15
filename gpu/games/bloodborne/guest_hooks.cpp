@@ -152,7 +152,7 @@ bool Rel32To(u64 from_next, u64 to, std::uint32_t& rel) {
     return true;
 }
 
-/// Replaces bytes [1, 5) at `address` (byte 0 is the trap already there), then byte 0.
+/// Replaces bytes [1, 5) at `va_guest` (byte 0 is the trap already there), then byte 0.
 void WriteJumpOverTrap(u64 va_guest, u8 opcode, std::uint32_t rel) {
     const long cb_page = sysconf(_SC_PAGESIZE);
     void* p_page = reinterpret_cast<void*>(va_guest & ~u64(cb_page - 1));

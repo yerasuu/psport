@@ -231,7 +231,7 @@ std::optional<std::pair<const Buffer*, u64>> BufferCache::LayerBind(VAddr va_ran
     const bool is_vram_allowed =
         !(is_written && (force_writes_in_place || !LayerGpuWriteToVram(va_range, cb_range))) &&
                               !PsToggle::Experiment(8);
-    // Not for image uploads (may_promote false): the image is the GPU's copy of that data, read
+    // Not for image uploads (can_promote false): the image is the GPU's copy of that data, read
     // once per upload, and the arena did not move it either. (Loaded data mostly gets its mirror
     // when loaded, ProcessPendingAssets: this alone did not shrink the mirrors.)
     if (resolution.kind != Kind::Mirror && is_vram_allowed && can_promote && GarlicInVramForLayer() &&
@@ -979,7 +979,7 @@ void BufferCache::LayerWriteEntries(u64 first, u64 end) {
     if (first >= end) {
         return;
     }
-    // Diagnostics (PS_FRAME_STATS): where the time goes (t_layer 8-11).
+    // Diagnostics (PS_FRAME_STATS): where the time goes (g_t_layer 8-11).
     auto mark = std::chrono::steady_clock::now();
     const auto lap = [&](size_t kind) {
         if (!PsStats::g_is_enabled) {

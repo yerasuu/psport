@@ -47,7 +47,7 @@ public:
         WriteTimestamp(key);
     }
 
-    /// Whether `other` is the scheduler it records into (the presenter has its own).
+    /// Whether `p_other` is the scheduler it records into (the presenter has its own).
     [[nodiscard]] bool Records(const Scheduler* p_other) const noexcept {
         return p_other == &m_scheduler;
     }

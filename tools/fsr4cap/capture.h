@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <d3d12.h>
 
-/// Hooks the vtables of `device` and `list` (all objects of their classes); writes to `directory`.
+/// Hooks the vtables of `p_device` and `p_list` (all objects of their classes); writes to `sz_directory`.
 void CaptureInstall(ID3D12Device* p_device, ID3D12GraphicsCommandList* p_list, const char* sz_directory);
 /// A line in the trace (frame boundaries).
 void CaptureMark(const char* sz_text);

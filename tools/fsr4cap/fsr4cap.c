@@ -118,7 +118,7 @@ static ID3D12Resource* Buffer(D3D12_HEAP_TYPE type, UINT64 cb_buffer) {
     return p_resource;
 }
 
-// Fills `tex` (w x h, bpp bytes per texel) row by row from `fill`, through an upload buffer.
+// Fills `p_tex` (w x h, bpp bytes per texel) row by row from `pfn_fill`, through an upload buffer.
 static void Upload(ID3D12Resource* p_tex, UINT w, UINT h, UINT bpp, void (*pfn_fill)(uint8_t* p_row, UINT w)) {
     const UINT pitch = (w * bpp + 255) & ~255u;
     ID3D12Resource* p_upload = Buffer(D3D12_HEAP_TYPE_UPLOAD, (UINT64)pitch * h);

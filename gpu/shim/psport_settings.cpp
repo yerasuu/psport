@@ -254,7 +254,7 @@ void Save() {
     put("show_fps", flag(v.should_show_fps));
     put("fsr4_auto_exposure", flag(v.should_use_fsr4_auto_exposure));
     put("fsr4_invert_jitter", flag(v.should_invert_fsr4_jitter));
-    // Read by the game profile at start (its add_patches).
+    // Read by the game profile at start (its pfn_add_patches).
     const Game::GameEffects effects = Game::Effects();
     for (int e = 0; e < v.c_effects; ++e) {
         put(effects.switches[e].sz_key, flag(v.effects[e]));

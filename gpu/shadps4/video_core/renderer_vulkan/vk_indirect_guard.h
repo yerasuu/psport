@@ -35,7 +35,7 @@ public:
 
     static bool Enabled();
 
-    /// Records the check of the arguments at `offset` in `args` (outside a render pass); returns
+    /// Records the check of the arguments at `off_args` in `args` (outside a render pass); returns
     /// the buffer and offset to dispatch from.
     std::pair<vk::Buffer, u64> CheckArgs(const VideoCore::Buffer& args, u64 off_args);
 

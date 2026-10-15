@@ -169,7 +169,7 @@ struct RegisterWrite {
 class RegisterObserver {
 public:
     virtual ~RegisterObserver() = default;
-    /// The whole packet (header first) and the ranges it wrote; `clear_state`: CLEAR_STATE, the
+    /// The whole packet (header first) and the ranges it wrote; `is_clear_state`: CLEAR_STATE, the
     /// whole file restored.
     virtual void OnRegisterPacket(std::span<const u32> words, std::span<const RegisterWrite> writes,
                                   bool is_clear_state) = 0;
@@ -220,7 +220,7 @@ private:
 /// applied: for a loop that has to stop between packets (a wait that yields to other queues).
 class Cursor {
 public:
-    /// `descend`: indirect buffers are decoded in place (the IB packet, then its packets);
+    /// `should_descend`: indirect buffers are decoded in place (the IB packet, then its packets);
     /// else the caller gets the IB packet and decodes the buffer itself.
     Cursor(Decoder& decoder, std::span<const u32> buffer, Sink& sink, int depth = 0,
            bool should_descend = true);

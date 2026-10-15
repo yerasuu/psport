@@ -31,8 +31,8 @@ public:
         return m_buffer.Handle();
     }
 
-    /// Stage A: `size` bytes at `alignment`; returns the ring offset, or nullopt when the ring is
-    /// still in use by the GPU (the caller leaves the binding to stage B).
+    /// Stage A: `cb_data` bytes at `alignment`; returns the ring offset, or nullopt when the ring
+    /// is still in use by the GPU (the caller leaves the binding to stage B).
     std::optional<u64> Allocate(u64 cb_data, u64 alignment) {
         u64 at = (m_position + alignment - 1) & ~(alignment - 1);
         if (at % Capacity + cb_data > Capacity) {

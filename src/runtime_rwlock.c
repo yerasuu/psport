@@ -41,7 +41,7 @@ static int32_t error(int e) {
     }
     return (int32_t)(UINT32_C(0x80020000)|code);
 }
-/* All helpers ending in _locked require registry_lock. */
+/* All helpers ending in _locked require s_registry_lock. */
 static Rwlock *find_locked(Rwlock *p_handle) {
     for (Rwlock *p_rwlock=s_p_registry; p_rwlock; p_rwlock=p_rwlock->p_next) if (p_rwlock==p_handle) return p_rwlock;
     return NULL;

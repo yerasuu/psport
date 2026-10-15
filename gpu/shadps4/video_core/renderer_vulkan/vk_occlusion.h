@@ -42,7 +42,7 @@ public:
                      VideoCore::BufferCache& buffer_cache);
     ~OcclusionQueries();
 
-    /// A ZPASS_DONE event writing the counters of `pairs` depth blocks at `address` (recording
+    /// A ZPASS_DONE event writing the counters of `pairs` depth blocks at `va_guest` (recording
     /// thread, in stream order).
     void Event(VAddr va_guest, u32 pairs);
 
@@ -73,7 +73,7 @@ private:
         u64 va_counter; ///< device address of the first counter
         u32 pairs;
         u64 upto; ///< segments ended before the event
-        VAddr va_guest = 0; ///< statistics (written_at)
+        VAddr va_guest = 0; ///< statistics (m_written_at)
         u64 id = 0;              ///< the event's number (PS_OCCLUSION_READ_TRACE)
     };
     /// An event on a page watched for the game's first access (PS_OCCLUSION_READ_TRACE).

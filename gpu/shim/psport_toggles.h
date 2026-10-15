@@ -147,8 +147,8 @@ inline std::atomic<std::uint64_t> g_t_resident{0}, g_t_protect{0}, g_t_image_cre
 /// traps, 1 promotions, 2 demotions, 3 trap processing, 4 yielding VRAM, 5 volatile refreshes,
 /// 6 republishing paged entries, 7 paged uploads; and the mprotect calls.
 inline std::array<std::atomic<std::uint64_t>, 12> g_t_layer{};
-/// Page table entries written (blocks); 8-11 of t_layer: their staging request, guest view, mirrors,
-/// copy command.
+/// Page table entries written (blocks); 8-11 of g_t_layer: their staging request, guest view,
+/// mirrors, copy command.
 inline std::atomic<std::uint64_t> g_layer_entries_written{0};
 inline std::atomic<std::uint64_t> g_c_layer_mprotects{0};
 /// Diagnostics are collected only with PS_FRAME_STATS=1.

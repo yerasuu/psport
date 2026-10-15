@@ -28,12 +28,12 @@ struct Crumb {
     u32 args_slot = ~0u;        ///< indirect dispatches: where the GPU copies its arguments
 };
 
-/// A stream for a new scheduler (`name` a string literal); the first call creates the buffer.
+/// A stream for a new scheduler (`sz_name` a string literal); the first call creates the buffer.
 u32 NewStream(const Instance& instance, const char* sz_name);
 [[nodiscard]] bool Enabled() noexcept;
 /// Recording side, in command order: numbers the next command of `stream`.
 u32 Note(u32 stream, const Crumb& crumb);
-/// Recorded right before (`after` false) and right after the command numbered `id`.
+/// Recorded right before (`is_after` false) and right after the command numbered `id`.
 void Mark(vk::CommandBuffer cmdbuf, u32 stream, u32 id, bool is_after);
 /// Indirect dispatches: a slot of a host-visible buffer for the arguments the GPU reads (the
 /// report and the statistics show them), ~0u when off. CopyArgs is recorded before the dispatch.

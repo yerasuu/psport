@@ -73,7 +73,7 @@ static ResInfo* ResByVa(D3D12_GPU_VIRTUAL_ADDRESS va_gpu, uint64_t* p_out_offset
     return NULL;
 }
 
-// Reads `size` bytes of an upload/readback buffer at `offset` (CPU visible), or null.
+// Reads `cb_data` bytes of an upload/readback buffer at `off_data` (CPU visible), or null.
 static const void* MapRead(ResInfo* p_info, uint64_t off_data, uint64_t cb_data) {
     if (!p_info || (p_info->heap != D3D12_HEAP_TYPE_UPLOAD && p_info->heap != D3D12_HEAP_TYPE_READBACK)) return NULL;
     if (off_data >= p_info->desc.Width) return NULL;

@@ -38,7 +38,8 @@ struct MemorySource {
     void* p_owner = nullptr;              ///< the caller's object for this source (its buffer wrapper)
 };
 
-/// Part of a guest range in one source: [va, va + size) is at `offset` in `source`.
+/// Part of a guest range in one source: [va_guest, va_guest + cb_span) is at `off_source` in
+/// `p_source`.
 struct Span {
     const MemorySource* p_source = nullptr;
     std::uint64_t off_source = 0;
@@ -73,7 +74,7 @@ public:
         return m_block_shift;
     }
 
-    /// A chunk of direct memory [phys, phys + size) the GPU uses in place through `buffer`.
+    /// A chunk of direct memory [phys, phys + cb_range) the GPU uses in place through `h_buffer`.
     /// Chunks never overlap and stay for the whole run.
     void AddGuestSource(std::uint64_t phys, std::uint64_t cb_range, VkBuffer h_buffer,
                         VkDeviceAddress va_device, void* p_owner);

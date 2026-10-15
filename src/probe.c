@@ -34,7 +34,7 @@ static char (*s_p_names)[128];
 static uint64_t s_c_imports;
 static unsigned char *s_p_image;
 static size_t s_cb_page;
-/* all_modules[0] describes the eboot; modules are the linked ones after it. */
+/* s_p_all_modules[0] describes the eboot; modules are the linked ones after it. */
 static RuntimeModule *s_p_all_modules, *s_p_modules;
 static uint64_t s_c_modules;
 static int s_has_entered_game;
@@ -162,7 +162,7 @@ static ABI __attribute__((noreturn)) void unresolved(uint32_t id, uintptr_t argu
     _exit(20); /* no destructors: GPU, audio and guest threads are still running */
 }
 #ifndef _WIN32
-/* enter_on_stack(entry, arg0, arg1, stack_top): call entry(arg0,arg1) on a new stack. */
+/* enter_on_stack(p_entry, p_arg0, p_arg1, p_top): call p_entry(p_arg0,p_arg1) on a new stack. */
 void enter_on_stack(void *p_entry, void *p_arg0, void *p_arg1, void *p_top);
 __asm__(".text\n.globl enter_on_stack\nenter_on_stack:\n"
         " push %rbp\n mov %rsp,%rbp\n and $-16,%rcx\n mov %rcx,%rsp\n"

@@ -37,9 +37,9 @@ struct PreparedStage {
     VAddr pgm_base;
     const u32* p_flat; ///< flattened user data the worker computed, owned by the submission
     u32 c_flat;
-    // Resource sharps read from `flat` in the order of the program's resource lists, and the
+    // Resource sharps read from `p_flat` in the order of the program's resource lists, and the
     // texture description hash of each image (docs/en/parallel_gpu.md, step 2). Valid for the
-    // GPU thread exactly when `flat` matched: sharps depend on nothing else.
+    // GPU thread exactly when `p_flat` matched: sharps depend on nothing else.
     const AmdGpu::Image* p_image_sharps;
     const u64* p_image_hashes;
     const AmdGpu::Sampler* p_sampler_sharps;
@@ -69,10 +69,10 @@ struct PreparedVertexInputs {
     const vk::VertexInputAttributeDescription2EXT* p_attributes;
     const vk::VertexInputBindingDescription2EXT* p_bindings;
     const AmdGpu::Buffer* p_buffers;
-    const u8* p_range_index; ///< per stream with memory: its entry in `ranges`
+    const u8* p_range_index; ///< per stream with memory: its entry in `p_ranges`
     const Range* p_ranges;
     u32 c_streams, c_ranges;
-    u64 buffers_hash; ///< XXH3 of `buffers` (object motion stream identity)
+    u64 buffers_hash; ///< XXH3 of `p_buffers` (object motion stream identity)
     bool is_valid;
 };
 
@@ -135,16 +135,16 @@ private:
     void Collect();
 
     PipelineCache& m_pipeline_cache;
-    std::unique_ptr<AmdGpu::Regs> m_initial_regs; ///< state at the start of `baseline_seq`
+    std::unique_ptr<AmdGpu::Regs> m_initial_regs; ///< state at the start of `m_baseline_seq`
     u64 m_initial_checksum{};
     u64 m_baseline_seq{};
-    /// State at the start of the oldest queued buffer (`tail_seq`): a worker whose position
-    /// was collected restarts from here. Guarded by `mutex`.
+    /// State at the start of the oldest queued buffer (`m_tail_seq`): a worker whose position
+    /// was collected restarts from here. Guarded by `m_mutex`.
     std::unique_ptr<AmdGpu::Regs> m_tail_regs;
     u64 m_tail_seq{};
     u64 m_tail_checksum{};
     u64 m_c_rebases = 0; ///< scanner restarts from the GPU thread state (PS_FRAME_STATS)
-    bool m_is_baseline_ready{}; ///< guarded by `mutex`
+    bool m_is_baseline_ready{}; ///< guarded by `m_mutex`
     std::mutex m_mutex;
     std::condition_variable_any m_cv;
     std::deque<std::shared_ptr<Submission>> m_submissions; ///< ordered by seq

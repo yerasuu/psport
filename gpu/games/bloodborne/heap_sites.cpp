@@ -80,7 +80,7 @@ u64 Hash(u64 v, u64 bits) {
     return (v * 0x9E3779B97F4A7C15ull) >> (64 - bits);
 }
 
-/// The first return addresses into the game's code above `frame` (up to `count`).
+/// The first return addresses into the game's code above `p_frame` (up to `c_frames`).
 void CallChain(const u64* p_frame, u64* p_out, int c_frames) {
     int c_frames_found = 0;
     for (int i = 0; i < 160 && c_frames_found < c_frames; ++i) {

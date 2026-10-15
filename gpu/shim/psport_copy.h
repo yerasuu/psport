@@ -18,7 +18,7 @@ bool Enabled();
 /// order and concurrently.
 void Async(std::function<void()> task);
 
-/// A small copy for QueueCopy(): `run(item)` does the work on a copy thread.
+/// A small copy for QueueCopy(): `pfn_run(item)` does the work on a copy thread.
 struct Item {
     void (*pfn_run)(const Item&);
     void* p_context;

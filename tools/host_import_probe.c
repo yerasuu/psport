@@ -192,7 +192,7 @@ static int import_buffer(void* p_host, VkDeviceSize cb_buffer, Buffer* p_out_buf
     return 1;
 }
 
-/* Records `copies` copies of `size` bytes src -> dst, submits, waits; returns wall ms. */
+/* Records `copies` copies of `cb_copy` bytes src -> dst, submits, waits; returns wall ms. */
 static double gpu_copy(VkBuffer h_src, VkDeviceSize off_src, VkBuffer h_dst, VkDeviceSize cb_copy) {
     const VkCommandBufferBeginInfo begin = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
                                             .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT};

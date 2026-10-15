@@ -149,8 +149,8 @@ static void WaitPreviousFrame();
 // it. Unset, K is the game profile's (Game::Profile::c_submits_ahead), else 0: the submission
 // lock's contract, since a game may reuse what the previous frame used as soon as the first
 // submission of the next one returns (Gal Guardians 2 rewrote its command buffers). Should the
-// game's profile see that it cannot take the overlap (Game::Profile::frame_overlap_unsafe), or the
-// game write into a frame the GPU still runs (PsSubmitGuard), K becomes 0 for the session.
+// game's profile see that it cannot take the overlap (Game::Profile::pfn_frame_overlap_unsafe), or
+// the game write into a frame the GPU still runs (PsSubmitGuard), K becomes 0 for the session.
 static u32 submits_this_frame = 0;
 static bool overlap_off = false;
 static u32 SubmitsAhead() {

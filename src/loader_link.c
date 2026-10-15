@@ -124,7 +124,7 @@ static int same_identity(const LoaderIdentity *p_a, const LoaderIdentity *p_b) {
            p_a->p_library->version == p_b->p_library->version && !strcmp(p_a->p_library->sz_name, p_b->p_library->sz_name) &&
            p_a->p_module->version == p_b->p_module->version && !strcmp(p_a->p_module->sz_name, p_b->p_module->sz_name);
 }
-/* Open addressing over indices into the caller's array; equal() compares an entry with the key. */
+/* Open addressing over indices into the caller's array; pfn_equal() compares an entry with the key. */
 typedef int (*MapEqual)(const void *p_array, uint32_t i_entry, const void *p_key);
 static uint32_t map_find(const Map *p_map, uint64_t hash, MapEqual pfn_equal, const void *p_array, const void *p_key) {
     if (!p_map->c_capacity) return UINT32_MAX;
