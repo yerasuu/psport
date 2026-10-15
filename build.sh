@@ -93,4 +93,4 @@ fi
 "$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -pthread -no-pie "${includes[@]}" -I. "${areas[@]/#/-Isrc/}" src/main/main.c src/main/cli.c src/main/game_info.c src/main/bind.c src/main/signals.c src/loader/loader*.c "${runtime[@]}" src/main/vulkan_smoke.c out/libatrac9.a -lm "${gpu[@]}" "${libraries[@]}" -o out/psport
 echo "Built $PWD/out/psport"
 # GPU check for run.sh (--host-env, live_resolution=auto) and the launcher's gamepad list (--gamepads).
-"$CC" -std=c11 -O2 -Wall -Wextra -Werror "${includes[@]}" -Isrc/runtime tools/gpu_capabilities.c src/runtime/runtime_quirks.c "${libraries[@]}" -o out/psport-gpu-capabilities
+"$CC" -std=c11 -O2 -Wall -Wextra -Werror "${includes[@]}" -Isrc/runtime tools/gpu_capabilities.c src/runtime/runtime_quirks.c src/runtime/runtime_json_print.c "${libraries[@]}" -o out/psport-gpu-capabilities

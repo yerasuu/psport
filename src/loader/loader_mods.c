@@ -5,6 +5,7 @@
  * wins over an earlier one's. The view lives under --out for this process only: a watcher process
  * removes it once psport ends, by any route (an in-game restart starts a new one). */
 #define _GNU_SOURCE
+#include "runtime_json_print.h"
 #include "loader.h"
 #include <dirent.h>
 #include <errno.h>
@@ -492,15 +493,6 @@ char *loader_mods_view(const char *sz_game, const LoaderModOptions *p_options) {
     return sz_result;
 }
 
-static void print_json_string(const char *sz_text) {
-    putchar('"');
-    for (const unsigned char *p_cursor = (const unsigned char *)sz_text; *p_cursor; ++p_cursor) {
-        if (*p_cursor == '"' || *p_cursor == '\\') printf("\\%c", *p_cursor);
-        else if (*p_cursor < 0x20) printf("\\u%04x", *p_cursor);
-        else putchar(*p_cursor);
-    }
-    putchar('"');
-}
 void loader_mods_list(const char *sz_game, const LoaderModOptions *p_options) {
     LoaderModOptions options = *p_options;
     char sz_mods_dir[PATH_MAX];
@@ -511,7 +503,7 @@ void loader_mods_list(const char *sz_game, const LoaderModOptions *p_options) {
     putchar('[');
     for (size_t i = 0; i < names.c_items; ++i) {
         if (i) fputs(", ", stdout);
-        print_json_string(names.pp_items[i]);
+        runtime_json_print_string(names.pp_items[i]);
     }
     puts("]");
     names_free(&names);

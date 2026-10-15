@@ -2,6 +2,7 @@
  * lines, the published bitset, the exit summary and psport --list-quirks. */
 #define _GNU_SOURCE
 #include "runtime_quirks.h"
+#include "runtime_json_print.h"
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -284,26 +285,17 @@ int runtime_quirk_applies_to_gpu(RuntimeQuirkId id, uint32_t vendor, uint32_t dr
 
 const char *runtime_quirks_summary(void) { return __atomic_load_n(&s_sz_summary, __ATOMIC_ACQUIRE); }
 
-static void print_json_string(const char *sz_text) {
-    putchar('"');
-    for (const unsigned char *p_char = (const unsigned char *)sz_text; *p_char; ++p_char)
-        if (*p_char == '"' || *p_char == '\\') printf("\\%c", *p_char);
-        else if (*p_char < 0x20) printf("\\u%04x", *p_char);
-        else putchar(*p_char);
-    putchar('"');
-}
-
 static void list_applying(RuntimeQuirkId id, const char *sz_matched, int *p_is_first) {
     if (has(s_decided, id)) return;
     put_in(s_decided, id);
     char sz_policy[256];
     describe_policy(sz_policy, sizeof(sz_policy), id, decide(id));
     printf("%s\n    {\"id\": ", *p_is_first ? "" : ",");
-    print_json_string(s_quirks[id].sz_id);
+    runtime_json_print_string(s_quirks[id].sz_id);
     printf(", \"matched\": ");
-    print_json_string(sz_matched);
+    runtime_json_print_string(sz_matched);
     printf(", \"state\": ");
-    print_json_string(sz_policy);
+    runtime_json_print_string(sz_policy);
     putchar('}');
     *p_is_first = 0;
 }
@@ -314,18 +306,18 @@ void runtime_quirks_list(const RuntimeQuirkLaunch *p_launch) {
     for (const Quirk *p_quirk = s_quirks; p_quirk->sz_id; ++p_quirk) {
         const RuntimeQuirkId id = (RuntimeQuirkId)(p_quirk - s_quirks);
         printf("%s\n    {\"id\": ", p_quirk == s_quirks ? "" : ",");
-        print_json_string(p_quirk->sz_id);
+        runtime_json_print_string(p_quirk->sz_id);
         printf(", \"kind\": \"%s\", \"reason\": ", s_kind_names[p_quirk->kind]);
-        print_json_string(p_quirk->sz_reason);
+        runtime_json_print_string(p_quirk->sz_reason);
         printf(", \"reference\": ");
-        print_json_string(p_quirk->sz_reference);
+        runtime_json_print_string(p_quirk->sz_reference);
         printf(", \"gpu\": [");
         const char *sz_separator = "";
         for (size_t i = 0; s_gpu_matches[i].sz_device; ++i) {
             if (s_gpu_matches[i].id != id) continue;
             printf("%s{\"vendor\": %u, \"driver_id\": %u, \"device\": ", sz_separator, s_gpu_matches[i].vendor,
                    s_gpu_matches[i].driver_id);
-            print_json_string(s_gpu_matches[i].sz_device);
+            runtime_json_print_string(s_gpu_matches[i].sz_device);
             printf(", \"version_first\": %u, \"version_last\": %u}", s_gpu_matches[i].version_first,
                    s_gpu_matches[i].version_last);
             sz_separator = ", ";
@@ -342,9 +334,9 @@ void runtime_quirks_list(const RuntimeQuirkLaunch *p_launch) {
     printf("%s]", s_quirks[0].sz_id ? "\n  " : "");
     if (p_launch) {
         printf(",\n  \"game\": {\"serial\": ");
-        print_json_string(p_launch->sz_serial ? p_launch->sz_serial : "");
+        runtime_json_print_string(p_launch->sz_serial ? p_launch->sz_serial : "");
         printf(", \"title\": ");
-        if (p_launch->sz_name) print_json_string(p_launch->sz_name);
+        if (p_launch->sz_name) runtime_json_print_string(p_launch->sz_name);
         else printf("null");
         printf("},\n  \"applies\": [");
         char sz_matched[256];

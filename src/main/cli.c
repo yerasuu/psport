@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include "runtime_json_print.h"
 #include "main.h"
 #include "loader_traits.h"
 
@@ -25,16 +26,6 @@ static int query_game(int argc, char **pp_argv, int first, GameInfo *p_out_info,
     return 1;
 }
 
-static void print_json_string(const char *sz_text) {
-    putchar('"');
-    for (const unsigned char *p_cursor = (const unsigned char *)sz_text; *p_cursor; ++p_cursor) {
-        if (*p_cursor == '"' || *p_cursor == '\\') printf("\\%c", *p_cursor);
-        else if (*p_cursor < 0x20) printf("\\u%04x", *p_cursor);
-        else putchar(*p_cursor);
-    }
-    putchar('"');
-}
-
 /* {"en": ..., "ru": ..., "es": ...} with the languages the text has. */
 static void print_localized(const PsLocalizedText *p_text) {
     const char *const psz_languages[]={"en","ru","es"};
@@ -44,7 +35,7 @@ static void print_localized(const PsLocalizedText *p_text) {
     for (size_t i=0; i<3; ++i) {
         if (!psz_texts[i]) continue;
         printf(c_printed++ ? ", \"%s\": " : "\"%s\": ",psz_languages[i]);
-        print_json_string(psz_texts[i]);
+        runtime_json_print_string(psz_texts[i]);
     }
     putchar('}');
 }
@@ -60,7 +51,7 @@ static void print_effects(const char *sz_serial) {
     PsEffectSwitch effect;
     for (size_t i=0; psport_gpu_title_effect_switch(sz_serial,i,&effect); ++i) {
         fputs(i ? ", {\"key\": " : "{\"key\": ",stdout);
-        print_json_string(effect.sz_key);
+        runtime_json_print_string(effect.sz_key);
         printf(", \"default\": %s, \"name\": ",effect.is_default_on ? "true" : "false");
         print_localized(&effect.label);
         if (effect.hint.sz_english) { fputs(", \"description\": ",stdout); print_localized(&effect.hint); }

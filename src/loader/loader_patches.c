@@ -4,6 +4,7 @@
  * ("mask") lines are refused. They are applied after relocation (bind.c), the external ones after
  * the profile's own, so an external patch of the same bytes wins. */
 #define _GNU_SOURCE
+#include "runtime_json_print.h"
 #include "loader.h"
 #include "loader_xml.h"
 #include <dirent.h>
@@ -413,16 +414,6 @@ void loader_patches_external(PsPatchList *p_list, const LoaderPatchFolder *p_fol
     free_externals(&externals);
 }
 
-static void print_json_string(const char *sz_text) {
-    putchar('"');
-    for (const unsigned char *p_cursor = (const unsigned char *)sz_text; *p_cursor; ++p_cursor) {
-        if (*p_cursor == '"' || *p_cursor == '\\') printf("\\%c", *p_cursor);
-        else if (*p_cursor == '\n') fputs("\\n", stdout);
-        else if (*p_cursor < 0x20) printf("\\u%04x", *p_cursor);
-        else putchar(*p_cursor);
-    }
-    putchar('"');
-}
 void loader_patches_list(const LoaderPatchFolder *p_folder) {
     Externals externals = {0};
     find_externals(p_folder, &externals);
@@ -439,13 +430,13 @@ void loader_patches_list(const LoaderPatchFolder *p_folder) {
         }
         char *sz_text = buffer_take(&note);
         fputs(i ? ", {\"key\": " : "{\"key\": ", stdout);
-        print_json_string(externals.p_items[i].sz_key);
+        runtime_json_print_string(externals.p_items[i].sz_key);
         fputs(", \"name\": ", stdout);
-        print_json_string(sz_name && *sz_name ? sz_name : externals.p_items[i].sz_key);
+        runtime_json_print_string(sz_name && *sz_name ? sz_name : externals.p_items[i].sz_key);
         fputs(", \"author\": ", stdout);
-        print_json_string(sz_author ? sz_author : "");
+        runtime_json_print_string(sz_author ? sz_author : "");
         fputs(", \"note\": ", stdout);
-        print_json_string(sz_text);
+        runtime_json_print_string(sz_text);
         printf(", \"default\": %s}", is_enabled_by_default(p_entry) ? "true" : "false");
         free(sz_text);
     }
