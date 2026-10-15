@@ -25,6 +25,50 @@ static int query_game(int argc, char **pp_argv, int first, GameInfo *p_out_info,
     return 1;
 }
 
+static void print_json_string(const char *sz_text) {
+    putchar('"');
+    for (const unsigned char *p_cursor = (const unsigned char *)sz_text; *p_cursor; ++p_cursor) {
+        if (*p_cursor == '"' || *p_cursor == '\\') printf("\\%c", *p_cursor);
+        else if (*p_cursor < 0x20) printf("\\u%04x", *p_cursor);
+        else putchar(*p_cursor);
+    }
+    putchar('"');
+}
+
+/* {"en": ..., "ru": ..., "es": ...} with the languages the text has. */
+static void print_localized(const PsLocalizedText *p_text) {
+    const char *const psz_languages[]={"en","ru","es"};
+    const char *const psz_texts[]={p_text->sz_english,p_text->sz_russian,p_text->sz_spanish};
+    int c_printed=0;
+    putchar('{');
+    for (size_t i=0; i<3; ++i) {
+        if (!psz_texts[i]) continue;
+        printf(c_printed++ ? ", \"%s\": " : "\"%s\": ",psz_languages[i]);
+        print_json_string(psz_texts[i]);
+    }
+    putchar('}');
+}
+
+/* The overlay's sections of the title's own effects, in its order, as JSON for launchers: [] for a
+ * title without any. */
+static void print_effects(const char *sz_serial) {
+    const PsTitleEffects effects=psport_gpu_title_effects(sz_serial);
+    if (!effects.c_switches && !effects.has_model_detail) { puts("[]"); return; }
+    printf("[{\"section\": \"game_effects\", \"model_detail\": %s", effects.has_model_detail ? "true" : "false");
+    if (effects.hint.sz_english) { fputs(", \"hint\": ",stdout); print_localized(&effects.hint); }
+    fputs(", \"effects\": [",stdout);
+    PsEffectSwitch effect;
+    for (size_t i=0; psport_gpu_title_effect_switch(sz_serial,i,&effect); ++i) {
+        fputs(i ? ", {\"key\": " : "{\"key\": ",stdout);
+        print_json_string(effect.sz_key);
+        printf(", \"default\": %s, \"name\": ",effect.is_default_on ? "true" : "false");
+        print_localized(&effect.label);
+        if (effect.hint.sz_english) { fputs(", \"description\": ",stdout); print_localized(&effect.hint); }
+        putchar('}');
+    }
+    puts("]}]");
+}
+
 #ifndef _WIN32
 extern char **environ;
 /* bbport, and psport releases before the rename, read BB_* names: launchers written for them keep
@@ -110,6 +154,16 @@ int answer_query(int argc, char **argv) {
         if (p_online->sz_community_server) printf("community_server=%s\n",p_online->sz_community_server);
         if (p_online->community_api_port) printf("community_api_port=%u\n",p_online->community_api_port);
         if (p_online->sz_summon_route) printf("summon_route=%s\n",p_online->sz_summon_route);
+        return 0;
+    }
+    if (argc >= 2 && !strcmp(argv[1], "--list-effects")) {
+        GameInfo info;
+        const char *sz_game_dir;
+        if (argc == 2 || !query_game(argc,argv,2,&info,&sz_game_dir)) {
+            fprintf(stderr, "Usage: %s --list-effects (--game dir | --title TITLE_ID)\n", argv[0]);
+            return 1;
+        }
+        print_effects(info.sz_serial);
         return 0;
     }
     if (argc >= 2 && !strcmp(argv[1], "--list-traits")) {

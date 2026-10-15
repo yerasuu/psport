@@ -131,6 +131,28 @@ typedef struct {
     PsTitleOnline online;
 } PsTitleInfo;
 PsTitleInfo psport_gpu_title(const char *sz_serial);
+/* A text in the overlay's languages (Game::LocalizedText); NULL where it has none. */
+typedef struct {
+    const char *sz_english, *sz_russian, *sz_spanish;
+} PsLocalizedText;
+/* A switch of a title's own patches (Game::EffectSwitch): a psport.ini key, 0 or 1, read at start;
+ * is_default_on is the game's unpatched behaviour. */
+typedef struct {
+    const char *sz_key;
+    int is_default_on;
+    PsLocalizedText label, hint;
+} PsEffectSwitch;
+/* The overlay's "Game effects" section of a title (Game::GameEffects), for launchers: model_lod
+ * first when has_model_detail, then c_switches switches in the overlay's order, then the section's
+ * hint. All zero for a title without the section. */
+typedef struct {
+    size_t c_switches;
+    int has_model_detail;
+    PsLocalizedText hint;
+} PsTitleEffects;
+PsTitleEffects psport_gpu_title_effects(const char *sz_serial);
+/* The i_switch-th switch of psport_gpu_title_effects: 0 past c_switches, *p_out_switch untouched. */
+int psport_gpu_title_effect_switch(const char *sz_serial, size_t i_switch, PsEffectSwitch *p_out_switch);
 /* libSceAjm's MP3 and AAC decoders (runtime_ajm.c) over libSceAudiodec's FFmpeg codecs (audiodec/).
  * create returns NULL when FFmpeg cannot open the decoder. decode takes the frame at the start of data
  * and writes it to pcm as interleaved float: 0 decoded, 1 the frame is longer than size, 2 not a frame

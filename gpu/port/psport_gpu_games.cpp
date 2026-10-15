@@ -1,4 +1,4 @@
-// psport: the C side's view of the game titles (games/): launch files, mods, patches and checks.
+// psport: the C side's view of the game titles (games/): launch files, mods, patches, checks and effects.
 #include <cstdio>
 #include <string>
 #include "../psport_gpu.h"
@@ -19,6 +19,10 @@ int CheckFiles(const PsGameFiles* p_files, char* sz_out_kind, size_t cb_kind, ch
 int AddPatches(const PsGameFiles* p_files, const PsPatchServices* p_services) {
     const Game::Title* p_title = Game::Find(p_files->sz_serial);
     return p_title && p_title->pfn_add_patches(*p_files, *p_services) ? 1 : 0;
+}
+
+PsLocalizedText Localized(const Game::LocalizedText& text) {
+    return {text.sz_english, text.sz_russian, text.sz_spanish};
 }
 
 void PatchImage(unsigned char* p_image, uint64_t cb_image) {
@@ -54,4 +58,23 @@ extern "C" PsTitleInfo psport_gpu_title(const char* sz_serial) {
         .online = {p_title->online.sz_game_server, p_title->online.sz_community_server,
                    p_title->online.community_api_port, p_title->online.sz_summon_route},
     };
+}
+
+extern "C" PsTitleEffects psport_gpu_title_effects(const char* sz_serial) {
+    const Game::Title* p_title = Game::Find(sz_serial);
+    if (!p_title) {
+        return {};
+    }
+    const Game::GameEffects& effects = p_title->effects;
+    return {effects.switches.size(), effects.has_model_detail ? 1 : 0, Localized(effects.hint)};
+}
+
+extern "C" int psport_gpu_title_effect_switch(const char* sz_serial, size_t i_switch, PsEffectSwitch* p_out_switch) {
+    const Game::Title* p_title = Game::Find(sz_serial);
+    if (!p_title || i_switch >= p_title->effects.switches.size()) {
+        return 0;
+    }
+    const Game::EffectSwitch& effect = p_title->effects.switches[i_switch];
+    *p_out_switch = {effect.sz_key, effect.is_default_on ? 1 : 0, Localized(effect.label), Localized(effect.hint)};
+    return 1;
 }

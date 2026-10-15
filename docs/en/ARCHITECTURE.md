@@ -11,7 +11,7 @@ The model is Wine's, not an emulator's.
 |---|---|---|---|
 | Launch script | `run.sh` | - | environment and settings, then `psport` |
 | Entry | `src/main/main.c`, `src/main/main.h` | `out/psport` | launch sequence: arguments, image mapping, entering the game |
-| Launcher queries | `src/main/cli.c`, `src/main/game_info.c` | `out/psport` | `--check-game`, `--has-presets`, `--list-patches`, `--list-mods`, `--list-quirks`, `--list-traits`, `--online-overrides`, `BB_*` names; `param.sfo` and the game's identity |
+| Launcher queries | `src/main/cli.c`, `src/main/game_info.c` | `out/psport` | `--check-game`, `--has-presets`, `--list-patches`, `--list-mods`, `--list-quirks`, `--list-traits`, `--list-effects`, `--online-overrides`, `BB_*` names; `param.sfo` and the game's identity |
 | Import binding | `src/main/bind.c` | `out/psport` | traps, failure thunks, relocation walk, patch writes |
 | Signals | `src/main/signals.c` | `out/psport` | fault, watchdog, thread dump and termination handlers |
 | Native loader | `src/loader/loader.h`, `src/loader/loader_self.c`, `src/loader/loader_link.c`, `src/loader/loader_traits.c` | `out/psport` | SELF/ELF parsing, module linking, relocations, TLS, bindings; middleware traits (`Middleware:` line) |
@@ -150,7 +150,13 @@ library.
   [--version <APP_VER>]` names a title whose folder the launcher does not have at hand) (mod folder names; key, name, author, note,
   default of each external patch); `psport --check-game <dir>` runs the title's file check and
   prints `kind<TAB>title<TAB>version` with exit status 2 when the files cannot work;
-  `psport --list-traits --game <dir>` prints the game's middleware traits as JSON (`id`, `name`).
+  `psport --list-traits --game <dir>` prints the game's middleware traits as JSON (`id`, `name`);
+  `psport --list-effects (--game <dir> | --title <TITLE_ID>)` prints the overlay's sections of the
+  title's own effects as JSON, `[]` for a title without any (`psport_gpu_title_effects`): each
+  section (`"section": "game_effects"`) has `model_detail` (the `model_lod` choice comes first),
+  an optional `hint`, and `effects` in the overlay's order, each with its `psport.ini` `key`, its
+  `default` (the game's unpatched behaviour), a `name` and an optional `description`; texts are
+  objects by language (`en`, `ru`, `es`, those the title has).
 - Middleware traits (`src/loader/loader_traits.c`): read once at load from the eboot's module and
   library names (`PS4Player*`, `Il2CppUserAssemblies`, `libkernel_unity`, `<Project>-PS4-Shipping`,
   `libfmod*`), Havok's class names in the eboot, and the game's file names (`PS4Util.prx`,
