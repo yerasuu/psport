@@ -50,7 +50,7 @@ The state is how far a title has been seen to get; "regress" rows are what its s
 | Gal Guardians: Demon Purge | CUSA41240 | regress: frames drawn, sound |
 | Gal Guardians: Servants of the Dark (JP) | CUSA52187 | regress: frames drawn, sound |
 | Call of Duty: Black Ops | CUSA57547 | regress: frames drawn, sound |
-| Call of Duty: Black Ops II | CUSA57548 | regress: frames drawn, sound |
+| Call of Duty: Black Ops II | CUSA57548 | first mission (Pyrrhic Victory) to its second checkpoint, Save and Quit, Resume Story, videos, sound, pad |
 | Blood Omen 2 | CUSA49769 | regress: frames drawn, no sound |
 | Onigiri | CUSA01458 | regress: first GPU frame and sound, no lit frame in its schedule |
 | OCTOPATH TRAVELER 0 (JP) | CUSA53477 | loads a saved game, then the GPU faults; left out of routine runs |
