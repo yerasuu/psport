@@ -10,21 +10,21 @@ The model is Wine's, not an emulator's.
 | Component | Path | Built into | Role |
 |---|---|---|---|
 | Launch script | `run.sh` | - | environment and settings, then `psport` |
-| Entry | `src/probe.c` | `out/psport` | arguments, image mapping, import binding, signals, entering the game |
-| Native loader | `src/loader.h`, `src/loader_self.c`, `src/loader_link.c` | `out/psport` | SELF/ELF parsing, module linking, relocations, TLS, bindings |
-| Launch data | `src/loader_mods.c`, `src/loader_patches.c`, `src/loader_hash.c`, `src/loader_json.c` | `out/psport` | loose-file mod view, shadPS4/GoldHEN XML patches, the eboot's identity (SHA-256), `mods.json`/`patches.json` |
-| C runtime | `src/runtime*.c`, `src/runtime.h`, `src/import_*.inc` | `out/psport` | libkernel and the other system libraries, import resolution, the call report |
-| GPU library | `gpu/shim/psport_gpu.cpp`, `gpu/psport_gpu.h` | `out/gpu/libpsport-gpu.so` | C interface between `psport` and the C++ side |
+| Entry | `src/main/probe.c` | `out/psport` | arguments, image mapping, import binding, signals, entering the game |
+| Native loader | `src/loader/loader.h`, `src/loader/loader_self.c`, `src/loader/loader_link.c` | `out/psport` | SELF/ELF parsing, module linking, relocations, TLS, bindings |
+| Launch data | `src/loader/loader_mods.c`, `src/loader/loader_patches.c`, `src/loader/loader_hash.c`, `src/loader/loader_json.c` | `out/psport` | loose-file mod view, shadPS4/GoldHEN XML patches, the eboot's identity (SHA-256), `mods.json`/`patches.json` |
+| C runtime | `src/*/runtime*.c`, `src/runtime/runtime.h`, `src/runtime/imports/import_*.inc` | `out/psport` | libkernel and the other system libraries, import resolution, the call report |
+| GPU library | `gpu/port/psport_gpu.cpp`, `gpu/psport_gpu.h` | `out/gpu/libpsport-gpu.so` | C interface between `psport` and the C++ side |
 | Translator | `gpu/shadps4/` (inherited from shadPS4, `gpu/VENDOR.txt`), `gpu/cp/`, `gpu/layer/` | `libpsport-gpu.so` | GnmDriver, VideoOut, command processor, Vulkan rasterizer, caches, shader recompiler |
 | Ported libraries | `gpu/ngs2/`, `gpu/audiodec/`, `gpu/fiber/`, `gpu/font/`, `gpu/pngenc/`, `gpu/pngdec/` | `libpsport-gpu.so` | libSceNgs2, libSceAudiodec, libSceFiber, libSceFont/FontFt, libScePngEnc, libScePngDec |
-| Port services | `gpu/shim/psport_*` | `libpsport-gpu.so` | settings (`psport.ini`), overlay, submit guard, guest memory, diagnostics |
+| Port services | `gpu/port/`, `gpu/memory/`, `gpu/diag/` | `libpsport-gpu.so` | settings (`psport.ini`), overlay, submit guard, guest memory, diagnostics |
 | Game profiles | `gpu/games/` | `libpsport-gpu.so` | per-title optimisations (`Game::Profile`) |
 | Online module | `gpu/net/` | `out/gpu/` (optional) | network and PSN imports with `PS_ONLINE=1` |
 | Online addresses | `scripts/online.py` | - | Python run by `run.sh` with `PS_ONLINE=1` only; see [Launch scripts](#launch-scripts) |
 | Regression runs | `tools/regress.sh`, `tools/regress/` | - | headless runs of every title |
 
-`build.sh` builds `libpsport-gpu.so` with CMake/Ninja, then compiles `src/probe.c`, `src/loader*.c` and
-`src/runtime*.c` with `-Werror` into `out/psport`, linked against `libpsport-gpu.so`.
+`build.sh` builds `libpsport-gpu.so` with CMake/Ninja, then compiles `src/main/probe.c`, `src/loader/loader*.c` and
+`src/*/runtime*.c` with `-Werror` into `out/psport`, linked against `libpsport-gpu.so`.
 
 ## Launch flow
 
@@ -70,7 +70,7 @@ directory from `PS_DATA_DIR` (default the checkout: `out/`, `user/`, `psport.ini
 
 ### psport
 
-`src/probe.c` checks the CPU, builds the mods' view of the game folder when `--mods` is given,
+`src/main/probe.c` checks the CPU, builds the mods' view of the game folder when `--mods` is given,
 reads `param.sfo` (title, title ID, save directory, SDK version, attributes, the AppContent user
 parameters; `PS_CONTENT_SKU=full` or `trial` sets the SKU), configures the file mounts (`/app0` is
 the game folder, saves under `user/`), loads the game, lets its profile check the game's files and
@@ -80,7 +80,7 @@ heap objects handed to the guest stay below 1 TiB (`mallopt` keeps glibc in the 
 PS4 code packs pointers into 40 bits. Guest memory is placed there too.
 
 `sceSystemServiceLoadExec` replaces the application the way the console does: `psport` starts
-again on its own command line (`src/runtime_restart.c`) with `--exec <guest path>` and one
+again on its own command line (`src/runtime/runtime_restart.c`) with `--exec <guest path>` and one
 `--arg <value>` per argument, the loader takes that executable of the package instead of
 `eboot.bin`, the game's entry, `getargv` and `__progname` see the new command line, and the
 patches (the profile's and the external XML ones) are applied only to `/app0/eboot.bin`. The
@@ -89,10 +89,10 @@ with the exec (its cleaner's pipe is close-on-exec).
 
 ### Native loader
 
-`loader_load_game` (`src/loader_link.c`) builds one image, the eboot at offset 0 and every module
+`loader_load_game` (`src/loader/loader_link.c`) builds one image, the eboot at offset 0 and every module
 at the next 64 KiB boundary after the previous one, as one table of imports:
 
-- `src/loader_self.c` reads SELF and plain ELF files: program headers, dynamic section, the
+- `src/loader/loader_self.c` reads SELF and plain ELF files: program headers, dynamic section, the
   module and library tables, symbols (NID, library, module) and relocations. Only a segment's
   permission bits become its protection (some system modules set high bits in `p_flags`).
 - Modules linked: the game's `sce_module/libc.prx` and `libSceFios2.prx` always; the other
@@ -100,16 +100,16 @@ at the next 64 KiB boundary after the previous one, as one table of imports:
   (`--system-modules`, `*.sprx`) the same way; and every `*.prx`/`*.sprx` outside `sce_module`
   and `sce_sys`, which the game loads itself with `sceKernelLoadStartModule`. Those are linked,
   relocated and bound at start but left unstarted; loading the path later runs their initializer
-  once (`src/runtime_module.c`).
+  once (`src/kernel/runtime_module.c`).
 - Exports are matched by (NID, library, module). Imports of `libSceLibcInternal` are served by
   `libc.prx`'s exports with the same NID.
 - Initial-exec TLS loads `mov rax, fs:[0]` are rewritten to GS, because glibc owns FS on Linux.
   The eboot's `PT_TLS` and each module's TLS block get module IDs for `__tls_get_addr`.
-- The result (`LoaderImage`, `src/loader.h`): segments, relocations (to an image offset, or to an
+- The result (`LoaderImage`, `src/loader/loader.h`): segments, relocations (to an image offset, or to an
   import index for functions and data), import names `NID#library#module`, native bindings with
   a kind, the module table (`RuntimeModule`: init, TLS, `.eh_frame`, exports) and procparam.
 
-System module rules, from `src/loader_link.c`:
+System module rules, from `src/loader/loader_link.c`:
 
 | Library | Rule |
 |---|---|
@@ -124,20 +124,20 @@ library.
 
 ### Launch data
 
-- Mods (`src/loader_mods.c`, [MODS.md](MODS.md)): with `--mods`, the enabled mods' files are linked
+- Mods (`src/loader/loader_mods.c`, [MODS.md](MODS.md)): with `--mods`, the enabled mods' files are linked
   over links to the game's entries in a private folder under `--out` (`mod-game-*`), which becomes
   `/app0` and the folder the loader reads. A mod's wrapper folder may be named after any title ID of
   the game's executable (`psport_gpu_game_serial`), and a mod without `dvdroot_ps4` may consist of the
   folders of the game's own `dvdroot_ps4` and its profile's `mod_folders`. A process of its own
   (`mod-view-clean`) removes the view once `psport` ends, by any route.
-- Patches (`src/loader_patches.c`): shadPS4/GoldHEN XML, `bytes`, `bytes16/32/64`, `float32/64`,
+- Patches (`src/loader/loader_patches.c`): shadPS4/GoldHEN XML, `bytes`, `bytes16/32/64`, `float32/64`,
   `utf8` and `utf16` lines at the eboot's addresses (base `0x400000`). The profile's own patches
   come first (`psport_gpu_game_patches`, through `PsPatchServices`); then the files in `--patches-dir`
   whose `<ID>`s name one of the game's title IDs (or that have none), entries for its `APP_VER` and
   `eboot.bin`, selected by `patches.json` or their `isEnabled`. A patch with an unsupported line or
   an address outside the eboot's `PT_LOAD` segments is skipped whole, and said; the profile's own
   file is left out of the folder.
-- The eboot's identity (`src/loader_hash.c`): the SHA-256 of its loadable segments at their
+- The eboot's identity (`src/loader/loader_hash.c`): the SHA-256 of its loadable segments at their
   addresses, the same whatever tool dumped the game; computed when a profile's check asks for it.
 - For launchers, without starting the game: `psport --list-mods <dir> [--game <dir>]` and
   `psport --list-patches <dir> --game <dir>` print JSON (instead of `--game`, `--title <TITLE_ID>
@@ -147,7 +147,7 @@ library.
 
 ### Import binding
 
-`psport` walks the relocations. For each import (`src/probe.c`):
+`psport` walks the relocations. For each import (`src/main/probe.c`):
 
 1. a binding of kind 3-6 (a system module, or a module the game loads) wins;
 2. otherwise `runtime_resolve(name)` (C runtime, then the GPU library);
@@ -157,7 +157,7 @@ library.
 
 Data imports nothing provides point at a page that faults on access. Imports resolved to
 `runtime_stub` go through a trap that logs them as stubs; imports whose result can report a
-failure (`src/import_returns.inc`) go through a thunk that logs failures. Before entering the
+failure (`src/runtime/imports/import_returns.inc`) go through a thunk that logs failures. Before entering the
 game, `psport` prints every stub and every import without implementation, then one summary line:
 `Runtime: imports N: host N, game modules N, system modules N, modules the game loads N, stubs N,
 without implementation N`.
@@ -168,7 +168,7 @@ in link order (libc first) and the eboot's entry runs with `argv[0] = /app0/eboo
 
 ## C runtime
 
-`src/runtime*.c` implements the system libraries in C, one file per area:
+`src/*/runtime*.c` implements the system libraries in C, one file per area:
 
 | Area | Files |
 |---|---|
@@ -190,10 +190,10 @@ in link order (libc first) and the eboot's entry runs with `argv[0] = /app0/eboo
 
 Each file keeps a table of `RuntimeExport {symbol name, function}` and a `runtime_<area>_resolve`
 that looks the import up with `RUNTIME_LOOKUP`. Imports arrive as `NID#library#module`;
-`runtime_lookup` turns the NID into a symbol name (`src/import_names_all.inc`, generated from
+`runtime_lookup` turns the NID into a symbol name (`src/runtime/imports/import_names_all.inc`, generated from
 shadPS4's aerolib list, plus a few extra NIDs in `runtime_symbol`) and compares names, so the same
 function serves the NID whichever library the executable names (`libkernel` or `libScePosix`).
-`runtime_resolve` (`src/runtime.c`) asks the tables in a fixed chain: the runtime's own libc,
+`runtime_resolve` (`src/runtime/runtime.c`) asks the tables in a fixed chain: the runtime's own libc,
 TLS and procparam entries, then mutex, thread, sched, content, time, sema, eventflag, ulobjmgr,
 ult, rwlock, barrier, memory, mempool, exception, kernel, module, playgo, voice, services, ajm, audio,
 audio3d, pad, gesture, devices, capture, vr, rtc, savedata, file, aio, and last `psport_gpu_resolve`. The first table that
@@ -206,16 +206,16 @@ with PS4 stacks below 1 TiB.
 
 ### Call report
 
-`src/runtime_calls.c` logs, once per import (and error code), every call that gets no real work
+`src/runtime/runtime_calls.c` logs, once per import (and error code), every call that gets no real work
 done: imports without implementation, stubs, GPU library functions marked `(STUBBED)`, failures
-(SCE error codes, `-1` with errno) and polled states (`src/import_statuses.inc`). Counts are summed
+(SCE error codes, `-1` with errno) and polled states (`src/runtime/imports/import_statuses.inc`). Counts are summed
 when the process ends, by any route (guest exit, window close, signal, fault, watchdog, `STOP:`).
 Line formats: [FORK.md](../../FORK.md#call-report). `PS_CALL_REPORT=<file>` also writes the summary to
 a file.
 
 ## GPU library
 
-`libpsport-gpu.so` holds the C++ side. `gpu/shim/psport_gpu.cpp` is its C interface (`gpu/psport_gpu.h`):
+`libpsport-gpu.so` holds the C++ side. `gpu/port/psport_gpu.cpp` is its C interface (`gpu/psport_gpu.h`):
 
 - `psport_gpu_register_kernel` registers the kernel event queues and the libraries that do not need a
   window: AvPlayer, Ngs2, Fiber, Font, FontFt, Audiodec, Videodec2, PngEnc, PngDec.
@@ -240,7 +240,7 @@ The translator, from the game's submission to the screen:
 | GPU memory without sparse binding (memory module) | `gpu/layer/` |
 
 `PS_SUBMIT_AHEAD` (else the game profile's `c_submits_ahead`, else 0) lets a frame's first
-submissions run without waiting for the previous frame; the submit guard (`gpu/shim/psport_submit_guard.*`) stops the overlap for the
+submissions run without waiting for the previous frame; the submit guard (`gpu/memory/psport_submit_guard.*`) stops the overlap for the
 session when a game rewrites command buffers in flight. Multithreaded draw preparation and the
 two-stage draw pipeline: [parallel_gpu.md](parallel_gpu.md). Temporal upscaling (FSR 3.1, FSR 4,
 TAA, DLSS): [upscaler.md](upscaler.md). Changes to inherited shadPS4 files:
@@ -317,6 +317,6 @@ A launch runs no Python, except for online play:
 - `packaging/`: `port.nix` (build in Nix's sandbox) and the AppImage script.
 - `patches/Bloodborne.xml`: community patches for Bloodborne.
 - `tools/`: regression runs, GCN disassembler (`gcn_dis.sh`), FSR 4 asset tools, scripted-run
-  helpers, `import_outparams.py` and `import_returns.py` (generate `src/import_*.inc`).
+  helpers, `import_outparams.py` and `import_returns.py` (generate `src/runtime/imports/import_*.inc`).
 - [history/](history/): bbport's design notes, plans, measurements and change logs in English; the
   Russian originals, under the same names, are in [docs/ru/](../ru/).

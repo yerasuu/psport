@@ -1,8 +1,8 @@
 # File mods, third-party patches and TAA sharpening
 
 These features come from bbport and were built around Bloodborne: mods replace files under the
-game's `dvdroot_ps4` folder. `psport` builds the mods' view (`src/loader_mods.c`) and reads the
-patches (`src/loader_patches.c`) for any title; Bloodborne's profile adds its retail title IDs and
+game's `dvdroot_ps4` folder. `psport` builds the mods' view (`src/loader/loader_mods.c`) and reads the
+patches (`src/loader/loader_patches.c`) for any title; Bloodborne's profile adds its retail title IDs and
 the folders its mods use.
 
 ## File mods

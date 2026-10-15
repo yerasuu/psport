@@ -1,4 +1,4 @@
-/* libkernel module services over what the loader prelinked (src/loader_link.c). Modules the game loads by path
+/* libkernel module services over what the loader prelinked (src/loader/loader_link.c). Modules the game loads by path
  * (Unity's Media/Modules, Media/Plugins) are already in the image, relocated and bound; loading
  * one runs its initializer once, as the PS4 linker's module_start. Handles are table indices
  * (0 the eboot), as shadPS4 numbers its modules. */

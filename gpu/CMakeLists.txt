@@ -121,7 +121,11 @@ set(COMMON
     shim/common/logging/log.cpp)
 file(GLOB AVPLAYER CONFIGURE_DEPENDS shadps4/core/libraries/avplayer/*.cpp)
 pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET libavformat libavcodec libavutil libswscale libswresample)
+# Stand-ins for the shadPS4 parts the port replaces: shim/.
 file(GLOB SHIM_SOURCES CONFIGURE_DEPENDS shim/*.cpp shim/*/*.cpp)
+# The port's services: its C interface, settings and overlay (port/), guest memory and copies
+# (memory/), diagnostics (diag/).
+file(GLOB PORT_SOURCES CONFIGURE_DEPENDS port/*.cpp memory/*.cpp diag/*.cpp)
 # The layer's own modules (independent of the shadPS4 code): layer/.
 file(GLOB LAYER_SOURCES CONFIGURE_DEPENDS layer/*.cpp)
 # Game profiles (what the translator knows about one game, out of its core): games/.
@@ -142,7 +146,7 @@ file(GLOB PNGENC_SOURCES CONFIGURE_DEPENDS pngenc/*.cpp)
 file(GLOB PNGDEC_SOURCES CONFIGURE_DEPENDS pngdec/*.cpp)
 pkg_check_modules(FREETYPE REQUIRED IMPORTED_TARGET freetype2)
 file(GLOB ATRAC9_SOURCES CONFIGURE_DEPENDS ../third_party/LibAtrac9/C/src/*.c)
-add_library(psport-gpu SHARED ${VIDEO_CORE} ${RECOMPILER} ${COMMON} ${SHIM_SOURCES} ${LAYER_SOURCES} ${GAME_SOURCES} ${CP_SOURCES}
+add_library(psport-gpu SHARED ${VIDEO_CORE} ${RECOMPILER} ${COMMON} ${SHIM_SOURCES} ${PORT_SOURCES} ${LAYER_SOURCES} ${GAME_SOURCES} ${CP_SOURCES}
     ${NGS2_SOURCES} ${FIBER_SOURCES} ${FONT_SOURCES} ${AUDIODEC_SOURCES} ${PNGENC_SOURCES} ${PNGDEC_SOURCES} ${ATRAC9_SOURCES}
     shadps4/core/libraries/gnmdriver/gnmdriver.cpp
     shadps4/core/libraries/videoout/driver.cpp shadps4/core/libraries/videoout/video_out.cpp
@@ -167,9 +171,9 @@ set_source_files_properties(third_party/imgui/imgui.cpp third_party/imgui/imgui_
     COMPILE_OPTIONS "-fvisibility=hidden;-fvisibility-inlines-hidden")
 target_compile_definitions(psport-gpu PRIVATE IMGUI_IMPL_VULKAN_NO_PROTOTYPES
     PS_FONT_PATH="${CMAKE_CURRENT_SOURCE_DIR}/third_party/fonts/DejaVuSans.ttf")
-set_source_files_properties(shim/psport_overlay.cpp PROPERTIES
+set_source_files_properties(port/psport_overlay.cpp PROPERTIES
     OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/fonts/DejaVuSans.ttf")
-target_include_directories(psport-gpu PRIVATE shim layer games cp shadps4 ${SHADER_INCLUDE} third_party/gcn/include third_party/half/include
+target_include_directories(psport-gpu PRIVATE shim port memory diag layer games cp shadps4 ${SHADER_INCLUDE} third_party/gcn/include third_party/half/include
     ../third_party/LibAtrac9/C/src)
 # Third-party C, built as its upstream ships it (build.sh builds the runtime's copy with -w too).
 set_source_files_properties(${ATRAC9_SOURCES} PROPERTIES COMPILE_OPTIONS -w)

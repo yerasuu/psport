@@ -11,9 +11,9 @@ capa de compatibilidad, no un emulador.
 
 - **CPU.** La CPU de PS4 es x86-64, así que el código del juego se ejecuta tal cual en la CPU del
   PC, sin emulación ni traducción de instrucciones. El eboot se convierte de antemano (`scripts/`)
-  en una imagen de memoria plana con la libc del juego enlazada; un cargador en C (`src/probe.c`) la
+  en una imagen de memoria plana con la libc del juego enlazada; un cargador en C (`src/main/probe.c`) la
   mapea y salta a ella.
-- **Bibliotecas del sistema.** Las proporciona el propio port: el runtime de `src/runtime_*.c`
+- **Bibliotecas del sistema.** Las proporciona el propio port: el runtime de `src/*/runtime_*.c`
   (memoria, hilos, sincronización, archivos, audio, mando, partidas guardadas, excepciones, hilos de
   usuario, módulos que el juego carga mientras se ejecuta) y las bibliotecas de `gpu/` (libSceNgs2,
   libSceAudiodec, libSceFiber, libSceFont). Ningún juego probado necesita un volcado de los módulos
@@ -123,7 +123,7 @@ seguir las convenciones del código que rodea al cambio.
 |---|---|
 | `src/` | Cargador (`probe.c`) y runtime (`runtime_*.c`) |
 | `scripts/` | `online.py`, las direcciones del juego en línea que `run.sh` escribe con `PS_ONLINE=1` (el único paso del arranque en Python), y `sce_file.py` para las herramientas en Python |
-| `gpu/` | Biblioteca del renderizador: núcleo de vídeo de shadPS4 con los cambios de bbport (`gpu/VENDOR.txt`), bibliotecas portadas (`ngs2/`, `audiodec/`, `fiber/`, `font/`), overlay y menú del juego (`shim/`), puente de DLSS, módulo en línea |
+| `gpu/` | Biblioteca del renderizador: núcleo de vídeo de shadPS4 con los cambios de bbport (`gpu/VENDOR.txt`), bibliotecas portadas (`ngs2/`, `audiodec/`, `fiber/`, `font/`), overlay y menú del juego (`port/`), puente de DLSS, módulo en línea |
 | `launcher/`, `packaging/` | El lanzador GTK4 de upstream; paquete de Nix y script de AppImage |
 | `patches/` | Parches de la comunidad para Bloodborne |
 | `tools/` | Ejecuciones de regresión, desensamblador GCN, herramientas de FSR 4 y `fsr4cap`, utilidades para ejecuciones guionizadas |

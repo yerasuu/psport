@@ -33,7 +33,7 @@ for offset_tag, size_tag in ((0x61000029, 0x6100002d), (0x6100002f, 0x61000031))
         kind, sym = info & 0xffffffff, info >> 32
         if kind in (1, 6, 7) and not sections[sym]:
             slots[target] = names[sym]
-symbols = dict(re.findall(r'\{"([^"]+)","([^"]+)"\}', (here / 'src/import_names_all.inc').read_text()))
+symbols = dict(re.findall(r'\{"([^"]+)","([^"]+)"\}', (here / 'src/runtime/imports/import_names_all.inc').read_text()))
 for arg in sys.argv[2:]:
     name = slots.get(int(arg, 16))
     print(arg, name, symbols.get(name.split('#')[0]) if name else '')

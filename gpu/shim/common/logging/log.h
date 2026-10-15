@@ -31,7 +31,7 @@ void Write(std::string_view log_class, Level level, const char* file, int line, 
 inline void Flush() {}
 // psport: a "(STUBBED)" line names a function that answers without doing its work. It is shown on
 // the first call whatever PS_GPU_LOG says, and every call is counted for the call summary
-// (src/runtime_calls.c).
+// (src/runtime/runtime_calls.c).
 template <class T>
 constexpr bool IsStubbed(const T& format) {
     if constexpr (std::is_convertible_v<const T&, std::string_view>) {

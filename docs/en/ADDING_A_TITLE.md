@@ -39,12 +39,12 @@ Milestones, in order:
 | `Runtime: guest thread '...' created` | the game initialised |
 | `Presenter: first game frame presented` | the GPU path works end to end |
 
-Loader errors (`ERROR: ...` from `src/loader_*.c` or `src/probe.c`) stop before the game runs and
+Loader errors (`ERROR: ...` from `src/loader/loader_*.c` or `src/main/probe.c`) stop before the game runs and
 name the file and the limit or structure they rejected.
 
 ### The call report
 
-While the game runs, `src/runtime_calls.c` logs the first call of every import that does no real
+While the game runs, `src/runtime/runtime_calls.c` logs the first call of every import that does no real
 work, and when the process ends prints a summary sorted by call count:
 
 ```
@@ -82,22 +82,22 @@ Pick the layer that owns the library:
 
 | Library | Where | How |
 |---|---|---|
-| libkernel, libc hooks, threads, memory, files, saves, pad, audio out, system and user services, NP offline, PlayGo, AppContent, Ajm, Audio3d, ... | `src/runtime_<area>.c` | add an `ABI` function and an entry `{"<symbol name>", function}` to the file's `RuntimeExport` table; `runtime_<area>_resolve` finds it with `RUNTIME_LOOKUP` |
-| a library with no file yet | new `src/runtime_<area>.c` | a table and `runtime_<area>_resolve`, declared in `src/runtime.h` and added to the chain in `runtime_resolve` (`src/runtime.c`); `build.sh` compiles every `src/runtime*.c` |
+| libkernel, libc hooks, threads, memory, files, saves, pad, audio out, system and user services, NP offline, PlayGo, AppContent, Ajm, Audio3d, ... | `src/*/runtime_<area>.c` | add an `ABI` function and an entry `{"<symbol name>", function}` to the file's `RuntimeExport` table; `runtime_<area>_resolve` finds it with `RUNTIME_LOOKUP` |
+| a library with no file yet | new `src/<kernel|system|audio|input|net>/runtime_<area>.c` | a table and `runtime_<area>_resolve`, declared in `src/runtime/runtime.h` and added to the chain in `runtime_resolve` (`src/runtime/runtime.c`); `build.sh` compiles every `src/*/runtime*.c` |
 | GnmDriver, VideoOut, AvPlayer, Videodec2 (inherited shadPS4 code) | `gpu/shadps4/core/libraries/` | register with `LIB_FUNCTION`; list the change in [FORK.md](../../FORK.md#changes-to-inherited-shadps4-code) |
-| Ngs2, Audiodec, Fiber, Font/FontFt, PngEnc, PngDec, or a new C++ library | `gpu/<library>/` | a `RegisterLib` with `LIB_FUNCTION(nid, library, version, module, function)`, called from `psport_gpu_register_kernel` (`gpu/shim/psport_gpu.cpp`), the sources added to `gpu/CMakeLists.txt`; ported code is listed in [FORK.md](../../FORK.md#ported-components) |
+| Ngs2, Audiodec, Fiber, Font/FontFt, PngEnc, PngDec, or a new C++ library | `gpu/<library>/` | a `RegisterLib` with `LIB_FUNCTION(nid, library, version, module, function)`, called from `psport_gpu_register_kernel` (`gpu/port/psport_gpu.cpp`), the sources added to `gpu/CMakeLists.txt`; ported code is listed in [FORK.md](../../FORK.md#ported-components) |
 
 Notes:
 
-- The C runtime matches by symbol name: the NID must be in `src/import_names_all.inc` (or in the
+- The C runtime matches by symbol name: the NID must be in `src/runtime/imports/import_names_all.inc` (or in the
   `extra` list in `runtime_symbol`), otherwise `runtime_lookup` cannot name it. The GPU library
   matches by NID.
 - The C tables are asked before the GPU library, in the order of `runtime_resolve`; the first
   table with the symbol wins.
 - Return SCE error codes (`0x8002xxxx` for libkernel) or `-1` with a FreeBSD errno for POSIX
   functions, as the console does: the call report watches results through
-  `src/import_returns.inc`. A result that is a polled state rather than a failure (no event,
-  timed out, busy) goes in `src/import_statuses.inc`.
+  `src/runtime/imports/import_returns.inc`. A result that is a polled state rather than a failure (no event,
+  timed out, busy) goes in `src/runtime/imports/import_statuses.inc`.
 - Write every output argument the function documents.
 - `runtime_stub` answers success without doing anything; use it only where success with no effect
   is the console's behaviour for this setup (no PSN connection, for instance), since every call to
@@ -116,7 +116,8 @@ needs gets its own implementation.
 From [CLAUDE.md](../../CLAUDE.md):
 
 - Fix the underlying behaviour. No game-specific or shader-specific hacks in `src/`, `gpu/shim/`,
-  `gpu/shadps4/`, `run.sh` or `build.sh`: no title IDs, no eboot addresses, no shader hashes.
+  `gpu/port/`, `gpu/memory/`, `gpu/diag/`, `gpu/shadps4/`, `run.sh` or `build.sh`: no title IDs,
+  no eboot addresses, no shader hashes.
 - Optimisations that only make sense for one title go in that title's profile
   (`gpu/games/<game>.cpp` or `gpu/games/<game>/profile.cpp`, a `Game::Profile` listed in
   `gpu/games/game_profile.cpp`): hooks in its code, code ranges that write per-frame data, known

@@ -1,7 +1,7 @@
 /* Probe for the PC memory model: guest memory the GPU uses in place, through the sparse arena.
  *
  * Guest direct memory is allocated as host-visible Vulkan memory, exported as a dma-buf and
- * mapped by the runtime (gpu/shim/psport_guest_memory.cpp). This checks, on the running GPU,
+ * mapped by the runtime (gpu/memory/psport_guest_memory.cpp). This checks, on the running GPU,
  * whether such memory can back a sparse buffer (the arena) at an arbitrary block, whether CPU
  * writes through the dma-buf mapping are seen by the GPU and GPU writes by the CPU without extra
  * steps, and how fast the GPU reads it compared with device-local memory.

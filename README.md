@@ -10,10 +10,10 @@ port of Bloodborne, and is being generalised into a layer for any title; Bloodbo
 supported title with its own profile.
 
 - **CPU.** The PS4 CPU is x86-64, so the game's code runs on the PC's CPU as it is, with no
-  emulation and no instruction translation. A C loader (`src/probe.c`, `src/loader_*.c`) reads the
+  emulation and no instruction translation. A C loader (`src/main/probe.c`, `src/loader/loader_*.c`) reads the
   eboot and the modules it links (SELF or ELF) straight from the game's folder, relocates and binds
   them into one image and jumps into it.
-- **System libraries.** psport provides them itself: the C runtime in `src/runtime_*.c` (memory,
+- **System libraries.** psport provides them itself: the C runtime in `src/*/runtime_*.c` (memory,
   threads, synchronization, files, audio, pad, saves, exceptions, services, user-level threads,
   modules a game loads at run time) and the libraries in `gpu/` (GnmDriver, VideoOut, AvPlayer,
   Videodec2, Ngs2, Audiodec, Fiber, Font, PngEnc, PngDec). No tested title needs a dump of the console's
@@ -141,7 +141,7 @@ hardware tests, when needed, are OpenOrbis homebrew); match the surrounding code
 |---|---|
 | `src/` | Entry (`probe.c`), native loader (`loader_*.c`) and C runtime (`runtime_*.c`) |
 | `scripts/` | `online.py`, the online addresses `run.sh` writes with `PS_ONLINE=1` (the one launch step in Python), and `sce_file.py` for the Python tools |
-| `gpu/` | GPU library: shadPS4 video core with bbport's changes (`gpu/VENDOR.txt`), own PM4 decoder (`cp/`) and memory module (`layer/`), ported libraries (`ngs2/`, `audiodec/`, `fiber/`, `font/`, `pngenc/`, `pngdec/`), game profiles (`games/`), overlay and in-game menu (`shim/`), DLSS bridge, online module |
+| `gpu/` | GPU library: shadPS4 video core with bbport's changes (`gpu/VENDOR.txt`), own PM4 decoder (`cp/`) and memory module (`layer/`), ported libraries (`ngs2/`, `audiodec/`, `fiber/`, `font/`, `pngenc/`, `pngdec/`), game profiles (`games/`), overlay and in-game menu (`port/`), DLSS bridge, online module |
 | `launcher/`, `packaging/` | Upstream's GTK4 launcher; Nix package and AppImage script |
 | `patches/` | Community patches for Bloodborne |
 | `tools/` | Regression runs, GCN disassembler, FSR 4 tools and `fsr4cap`, scripted-run helpers |
