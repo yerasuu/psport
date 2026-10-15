@@ -580,7 +580,7 @@ void Menu() {
             "fija el tamaño de la escena respecto a la salida: 4K Performance = 1920x1080. Cambiar el tamaño "
             "reinicia el historial del escalador y puede causar una pausa breve."));
     }
-    if (const Game::Profile* p_launched = Game::Launched(); p_launched && p_launched->add_patches) {
+    if (const Game::Profile* p_launched = Game::Launched(); p_launched && p_launched->pfn_add_patches) {
         const char* live_modes[] = {PsSettings::MenuText("Auto (based on GPU)", "Авто (по видеокарте)",
                                                          "Automático (según la GPU)"),
                                     PsSettings::MenuText("Off (faster)", "Выключена (быстрее)",
@@ -654,8 +654,8 @@ void Menu() {
         std::string note = PsSettings::MenuText("Effects are enabled and disabled by game patches at startup",
                                                 "Эффекты включаются и выключаются патчами игры при запуске",
                                                 "Los efectos se activan y desactivan con parches del juego al iniciar");
-        if (p_launched->patch_file) {
-            note = note + " (" + p_launched->patch_file + ")";
+        if (p_launched->sz_patch_file) {
+            note = note + " (" + p_launched->sz_patch_file + ")";
         }
         note += ".";
         if (effects.hint.sz_english) {

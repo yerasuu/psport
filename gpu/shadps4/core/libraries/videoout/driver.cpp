@@ -637,8 +637,8 @@ void VideoOutDriver::Flip(const Request& req) {
                 }
             }
             Libraries::Kernel::ReportEqueueWaits(frames);
-            if (const Game::Profile* game = Game::Active(); game && game->report_stats) {
-                game->report_stats();
+            if (const Game::Profile* game = Game::Active(); game && game->pfn_report_stats) {
+                game->pfn_report_stats();
             }
             runtime_wait_report(frames);
             for (std::size_t i = 0; i < PsStats::g_range_allocators.size(); ++i) {

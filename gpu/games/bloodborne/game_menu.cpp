@@ -47,10 +47,10 @@ constexpr std::size_t RowsPerPage = 6;          // ControllSetting's rows
 const u8 MsgLookupPrologue[] = {0x89, 0xf0, 0x48, 0x8b, 0x77, 0x08, 0x48, 0x8b, 0x34, 0xc6};
 const u8 AddPageItemPrologue[] = {0x55, 0x48, 0x89, 0xe5, 0x41, 0x57};
 
-u64 image_base = 0;
+u64 s_image_base = 0;
 template <typename F>
-F Game(u64 va) {
-    return reinterpret_cast<F>(image_base + va);
+F Game(u64 va_guest) {
+    return reinterpret_cast<F>(s_image_base + va_guest);
 }
 
 // ---- Texts: ids from IdBase up, looked up by the game like its own messages. ----
@@ -58,21 +58,21 @@ constexpr u32 IdBase = 0x7f0000;
 struct Text {
     std::u16string english, russian;
 };
-std::vector<Text> texts;
+std::vector<Text> s_texts;
 
-std::u16string Utf16(const char* utf8) {
+std::u16string Utf16(const char* sz_utf8) {
     std::u16string out;
-    for (const unsigned char* p = reinterpret_cast<const unsigned char*>(utf8); *p;) {
-        u32 c = *p++;
+    for (const unsigned char* p_cursor = reinterpret_cast<const unsigned char*>(sz_utf8); *p_cursor;) {
+        u32 c = *p_cursor++;
         if (c >= 0xf0) {
-            c = (c & 7) << 18 | (p[0] & 0x3f) << 12 | (p[1] & 0x3f) << 6 | (p[2] & 0x3f);
-            p += 3;
+            c = (c & 7) << 18 | (p_cursor[0] & 0x3f) << 12 | (p_cursor[1] & 0x3f) << 6 | (p_cursor[2] & 0x3f);
+            p_cursor += 3;
         } else if (c >= 0xe0) {
-            c = (c & 15) << 12 | (p[0] & 0x3f) << 6 | (p[1] & 0x3f);
-            p += 2;
+            c = (c & 15) << 12 | (p_cursor[0] & 0x3f) << 6 | (p_cursor[1] & 0x3f);
+            p_cursor += 2;
         } else if (c >= 0xc0) {
-            c = (c & 31) << 6 | (p[0] & 0x3f);
-            p += 1;
+            c = (c & 31) << 6 | (p_cursor[0] & 0x3f);
+            p_cursor += 1;
         }
         if (c >= 0x10000) {
             c -= 0x10000;
@@ -84,22 +84,22 @@ std::u16string Utf16(const char* utf8) {
     }
     return out;
 }
-u32 AddText(const char* english, const char* russian) {
-    texts.push_back({Utf16(english), Utf16(russian)});
-    return IdBase + u32(texts.size() - 1);
+u32 AddText(const char* sz_english, const char* sz_russian) {
+    s_texts.push_back({Utf16(sz_english), Utf16(sz_russian)});
+    return IdBase + u32(s_texts.size() - 1);
 }
 /// The game's own language decides (its "Screen/Sound" text in Cyrillic: Russian, else English);
 /// the port's menu language until the game has looked that text up.
 enum class GameLanguage { Unknown, English, Russian };
-std::atomic<GameLanguage> game_language{GameLanguage::Unknown};
+std::atomic<GameLanguage> s_game_language{GameLanguage::Unknown};
 
 const char16_t* TextOf(u32 id) {
-    const Text& t = texts[id - IdBase];
-    const GameLanguage game = game_language.load();
-    const bool russian = game == GameLanguage::Unknown
+    const Text& t = s_texts[id - IdBase];
+    const GameLanguage game = s_game_language.load();
+    const bool is_russian = game == GameLanguage::Unknown
                              ? PsSettings::Get().menu_language == PsSettings::MenuLanguage::Russian
                              : game == GameLanguage::Russian;
-    return russian ? t.russian.c_str() : t.english.c_str();
+    return is_russian ? t.russian.c_str() : t.english.c_str();
 }
 
 // ---- The port's values the game's rows edit (ints: the list rows bind ints). ----
@@ -108,13 +108,13 @@ enum Field : int {
     ModelLod, FirstEffect, FieldCount = FirstEffect + PsEffects::SwitchCount
 };
 static_assert(PsEffects::SwitchCount <= PsSettings::MaxEffects);
-int values[FieldCount];  // what the game's rows show and change (list rows bind ints)
-u8 bytes[FieldCount];    // the same for toggle and slider rows (they bind bytes)
-bool byte_field[FieldCount]; // fields shown by toggle or slider rows
-int default_values[FieldCount]; // the port's defaults: what the page's "Default" sets
-u8 default_bytes[FieldCount];
-int applied[FieldCount]; // what Poll applied last
-std::atomic<bool> values_valid{false};
+int s_values[FieldCount];  // what the game's rows show and change (list rows bind ints)
+u8 s_bytes[FieldCount];    // the same for toggle and slider rows (they bind bytes)
+bool s_byte_field[FieldCount]; // fields shown by toggle or slider rows
+int s_default_values[FieldCount]; // the port's defaults: what the page's "Default" sets
+u8 s_default_bytes[FieldCount];
+int s_applied[FieldCount]; // what Poll applied last
+std::atomic<bool> s_has_values{false};
 constexpr float SharpnessStep = 0.2f; // the game's slider: 0..10 -> 0.0 .. 2.0
 constexpr int SharpnessSteps = 11;
 constexpr int LodValues[] = {-2, 0, 1, 2};
@@ -123,41 +123,41 @@ constexpr int LodValues[] = {-2, 0, 1, 2};
 /// is a list. The game keeps its own copy of a slider's value while the page is open, so every
 /// position stands for a choice (ranges, as the row's help says), and a choice is shown at
 /// ChoicePosition.
-int steps_count[FieldCount]; ///< choices of a slider-with-choices row, else 0
+int s_steps_count[FieldCount]; ///< choices of a slider-with-choices row, else 0
 
-int ChoiceFromPosition(u8 position, int count) {
-    return std::clamp((int(position) * (count - 1) + 5) / 10, 0, count - 1);
+int ChoiceFromPosition(u8 position, int c_choices) {
+    return std::clamp((int(position) * (c_choices - 1) + 5) / 10, 0, c_choices - 1);
 }
 
-u8 ChoicePosition(int choice, int count) {
-    return u8((std::clamp(choice, 0, count - 1) * 10 * 2 + (count - 1)) / (2 * (count - 1)));
+u8 ChoicePosition(int choice, int c_choices) {
+    return u8((std::clamp(choice, 0, c_choices - 1) * 10 * 2 + (c_choices - 1)) / (2 * (c_choices - 1)));
 }
 
 /// The rows' values of settings `s`.
-void Fill(const PsSettings::Values& s, int* values) {
-    values[OutputRes] = s.output_res;
-    values[Upscaler] = s.upscaler;
-    values[Preset] = s.preset;
+void Fill(const PsSettings::Values& s, int* p_values) {
+    p_values[OutputRes] = s.output_res;
+    p_values[Upscaler] = s.upscaler;
+    p_values[Preset] = s.preset;
     // One slider for both: 0 is sharpening off.
-    values[Sharpness] =
+    p_values[Sharpness] =
         s.should_sharpen ? std::clamp(int(std::lround(s.sharpness / SharpnessStep)), 1, SharpnessSteps - 1) : 0;
-    values[ShowFps] = s.should_show_fps;
-    values[ModelLod] = 1;
+    p_values[ShowFps] = s.should_show_fps;
+    p_values[ModelLod] = 1;
     for (int i = 0; i < 4; ++i) {
-        if (LodValues[i] == s.model_lod) values[ModelLod] = i;
+        if (LodValues[i] == s.model_lod) p_values[ModelLod] = i;
     }
     for (int e = 0; e < PsEffects::SwitchCount; ++e) {
-        values[FirstEffect + e] = s.effects[e];
+        p_values[FirstEffect + e] = s.effects[e];
     }
 }
 
 void LoadValues() {
-    Fill(PsSettings::Get(), values);
+    Fill(PsSettings::Get(), s_values);
     for (int f = 0; f < FieldCount; ++f) {
-        bytes[f] = steps_count[f] ? ChoicePosition(values[f], steps_count[f]) : u8(values[f]);
+        s_bytes[f] = s_steps_count[f] ? ChoicePosition(s_values[f], s_steps_count[f]) : u8(s_values[f]);
     }
-    std::memcpy(applied, values, sizeof(values));
-    values_valid = true;
+    std::memcpy(s_applied, s_values, sizeof(s_values));
+    s_has_values = true;
 }
 
 // ---- Pages and rows ----
@@ -172,22 +172,22 @@ struct Page {
     u32 name, help;
     std::vector<Row> rows; ///< at most RowsPerPage (the layout's)
 };
-std::vector<Page> pages;
+std::vector<Page> s_pages;
 
 void DefineTexts() {
-    const u32 off = AddText("Off", "Выкл"), on = AddText("On", "Вкл");
-    const std::vector<u32> toggle = {off, on};
-    const auto page = [](const char* en, const char* ru, const char* help_en, const char* help_ru) {
-        const u32 name = AddText(en, ru);
-        pages.push_back({name, AddText(help_en, help_ru), {}});
+    const u32 i_text_off = AddText("Off", "Выкл"), i_text_on = AddText("On", "Вкл");
+    const std::vector<u32> toggle = {i_text_off, i_text_on};
+    const auto page = [](const char* sz_en, const char* sz_ru, const char* sz_help_en, const char* sz_help_ru) {
+        const u32 name = AddText(sz_en, sz_ru);
+        s_pages.push_back({name, AddText(sz_help_en, sz_help_ru), {}});
     };
-    const auto row = [](Field f, const char* en, const char* ru, const char* help_en,
-                        const char* help_ru, std::vector<u32> choices, Kind kind = Kind::List) {
+    const auto row = [](Field f, const char* sz_en, const char* sz_ru, const char* sz_help_en,
+                        const char* sz_help_ru, std::vector<u32> choices, Kind kind = Kind::List) {
         if (kind == Kind::List && choices.size() == 2) {
             kind = Kind::Toggle; // left/right in place, as the game's own on/off rows
         }
-        pages.back().rows.push_back(
-            {f, AddText(en, ru), AddText(help_en, help_ru), std::move(choices), kind});
+        s_pages.back().rows.push_back(
+            {f, AddText(sz_en, sz_ru), AddText(sz_help_en, sz_help_ru), std::move(choices), kind});
     };
 
     // Two pages of the ControllSetting layout's six rows (the game's other layouts are fixed
@@ -222,7 +222,7 @@ void DefineTexts() {
     // The page's only pop-up list, last: it opens below itself.
     row(Upscaler, "Upscaler", "Апскейлер", "Temporal upscaler and anti-aliasing",
         "Временной апскейлер и сглаживание",
-        {off, AddText("FSR 3.1", "FSR 3.1"), AddText("FSR 4", "FSR 4"), AddText("FSR 4.1.1", "FSR 4.1.1"),
+        {i_text_off, AddText("FSR 3.1", "FSR 3.1"), AddText("FSR 4", "FSR 4"), AddText("FSR 4.1.1", "FSR 4.1.1"),
          AddText("TAA", "TAA"), AddText("DLSS", "DLSS")});
 
     page("Effects", "Эффекты", "The game's effects (psport; after a restart)",
@@ -231,10 +231,10 @@ void DefineTexts() {
     // Short names for the game's narrow name column (PsEffects::Switches order); the help line
     // has the details.
     struct Short {
-        const char *key, *en, *ru, *help_en, *help_ru;
-        bool graphics = true;
+        const char *sz_key, *sz_en, *sz_ru, *sz_help_en, *sz_help_ru;
+        bool is_graphics = true;
     };
-    static const Short shorts[] = {
+    static const Short s_shorts[] = {
         {"effect_chromatic_aberration", "Chromatic aberration", "Хром. аберрация",
          "Colour fringes at the frame edges", "Цветные каймы по краям кадра"},
         {"effect_dof", "Depth of field", "Глубина резкости", "Blur of distant and near objects (DoF)",
@@ -258,20 +258,20 @@ void DefineTexts() {
     };
     for (int e = 0; e < PsEffects::SwitchCount; ++e) {
         const auto& effect = PsEffects::Switches[e];
-        const Short* name = nullptr;
-        for (const Short& s : shorts) {
-            if (std::strcmp(s.key, effect.sz_key) == 0) name = &s;
+        const Short* p_name = nullptr;
+        for (const Short& s : s_shorts) {
+            if (std::strcmp(s.sz_key, effect.sz_key) == 0) p_name = &s;
         }
-        if ((name && !name->graphics) || pages.back().rows.size() == RowsPerPage) {
+        if ((p_name && !p_name->is_graphics) || s_pages.back().rows.size() == RowsPerPage) {
             continue; // the overlay menu and the launcher have it
         }
         // A new effect without a short name: its full label.
         const std::string help_en =
-            std::string(name ? name->help_en : effect.label.sz_english) + " (after a restart)";
+            std::string(p_name ? p_name->sz_help_en : effect.label.sz_english) + " (after a restart)";
         const std::string help_ru =
-            std::string(name ? name->help_ru : effect.label.sz_russian) + " (после перезапуска)";
-        row(Field(FirstEffect + e), name ? name->en : effect.label.sz_english,
-            name ? name->ru : effect.label.sz_russian, help_en.c_str(), help_ru.c_str(), toggle);
+            std::string(p_name ? p_name->sz_help_ru : effect.label.sz_russian) + " (после перезапуска)";
+        row(Field(FirstEffect + e), p_name ? p_name->sz_en : effect.label.sz_english,
+            p_name ? p_name->sz_ru : effect.label.sz_russian, help_en.c_str(), help_ru.c_str(), toggle);
     }
 }
 
@@ -284,44 +284,44 @@ constexpr std::size_t ListCountOffset = 0x908, PairCountOffset = 0x98;
 constexpr std::size_t FunctionSize = 0x28; // std::function: 32-byte buffer, __f_ at +0x20
 
 /// Destroys a std::function the way the game's code does (its __f_ at +0x20).
-void DestroyFunction(u8* f) {
-    void* impl = *reinterpret_cast<void**>(f + 0x20);
-    if (!impl) {
+void DestroyFunction(u8* p_function) {
+    void* p_impl = *reinterpret_cast<void**>(p_function + 0x20);
+    if (!p_impl) {
         return;
     }
     using Destroy = void (*)(void*, int);
-    Destroy destroy = (*reinterpret_cast<Destroy**>(impl))[4];
-    destroy(impl, impl != f);
-    *reinterpret_cast<void**>(f + 0x20) = nullptr;
+    Destroy pfn_destroy = (*reinterpret_cast<Destroy**>(p_impl))[4];
+    pfn_destroy(p_impl, p_impl != p_function);
+    *reinterpret_cast<void**>(p_function + 0x20) = nullptr;
 }
 
 /// Frees a text entry's string the way the game's code does (heap buffer once capacity >= 8).
-void DestroyText(u8* text) {
-    if (*reinterpret_cast<u64*>(text + 0x28) >= 8) {
-        void* allocator = *reinterpret_cast<void**>(text + 0x30);
+void DestroyText(u8* p_text) {
+    if (*reinterpret_cast<u64*>(p_text + 0x28) >= 8) {
+        void* p_allocator = *reinterpret_cast<void**>(p_text + 0x30);
         using Free = void (*)(void*, void*);
-        (*reinterpret_cast<Free**>(allocator))[0x70 / 8](allocator, *reinterpret_cast<void**>(text + 0x10));
+        (*reinterpret_cast<Free**>(p_allocator))[0x70 / 8](p_allocator, *reinterpret_cast<void**>(p_text + 0x10));
     }
-    *reinterpret_cast<u64*>(text + 0x28) = 7;
-    *reinterpret_cast<u64*>(text + 0x20) = 0;
-    *reinterpret_cast<char16_t*>(text + 0x10) = 0;
+    *reinterpret_cast<u64*>(p_text + 0x28) = 7;
+    *reinterpret_cast<u64*>(p_text + 0x20) = 0;
+    *reinterpret_cast<char16_t*>(p_text + 0x10) = 0;
 }
-void DestroyTexts(u8* pair) {
-    DestroyText(pair);
-    DestroyText(pair + TextSize);
+void DestroyTexts(u8* p_pair) {
+    DestroyText(p_pair);
+    DestroyText(p_pair + TextSize);
 }
 /// A value list's entries (count at `count_offset`), after the row has copied them.
-void DestroyValues(u8* list, std::size_t count_offset) {
-    const u64 count = *reinterpret_cast<u64*>(list + count_offset);
-    for (u64 i = 0; i < count; ++i) {
-        DestroyText(list + i * ValueSize + 8);
+void DestroyValues(u8* p_list, std::size_t c_offsets) {
+    const u64 c_values = *reinterpret_cast<u64*>(p_list + c_offsets);
+    for (u64 i = 0; i < c_values; ++i) {
+        DestroyText(p_list + i * ValueSize + 8);
     }
 }
 
-void MakeTexts(u8* pair, u32 name, u32 help) {
+void MakeTexts(u8* p_pair, u32 name, u32 help) {
     using Make = void* (*)(void*, u32, u32);
-    Game<Make>(MakeText)(pair, TextName, name);
-    Game<Make>(MakeText)(pair + TextSize, TextHelp, help);
+    Game<Make>(MakeText)(p_pair, TextName, name);
+    Game<Make>(MakeText)(p_pair + TextSize, TextHelp, help);
 }
 
 /// Upscalers this GPU and build can run (known once the device exists, before any menu).
@@ -333,7 +333,7 @@ bool UpscalerAvailable(int i) {
                                              : true;
 }
 
-void AddRows(void* page, const std::vector<Row>& rows) {
+void AddRows(void* p_page, const std::vector<Row>& rows) {
     using Push = void (*)(void*, void*);
     using AddRow = void (*)(void*, void*, int*, void*, const int*);
     using Make = void* (*)(void*, u32, u32);
@@ -342,29 +342,29 @@ void AddRows(void* page, const std::vector<Row>& rows) {
         MakeTexts(pair, row.name, row.help);
         if (row.kind == Kind::Slider || row.kind == Kind::Steps) {
             using Slider = void (*)(void*, void*, u8*, const u8*);
-            Game<Slider>(SliderRow)(page, pair, &bytes[row.field], &default_bytes[row.field]);
+            Game<Slider>(SliderRow)(p_page, pair, &s_bytes[row.field], &s_default_bytes[row.field]);
             DestroyTexts(pair);
             continue;
         }
         if (row.kind == Kind::Toggle) {
             using PairRowFn = void (*)(void*, void*, u8*, void*, const u8*);
-            u8* two = static_cast<u8*>(std::aligned_alloc(16, PairListSize));
-            std::memset(two, 0, PairListSize);
+            u8* p_two = static_cast<u8*>(std::aligned_alloc(16, PairListSize));
+            std::memset(p_two, 0, PairListSize);
             for (std::size_t i = 0; i < 2; ++i) {
                 alignas(16) u8 value[ValueSize] = {};
                 value[0] = u8(i);
                 Game<Make>(MakeText)(value + 8, TextName, row.choices[i]);
-                Game<Push>(PairPush)(two, value);
+                Game<Push>(PairPush)(p_two, value);
                 DestroyText(value + 8);
             }
-            Game<PairRowFn>(PairRow)(page, pair, &bytes[row.field], two, &default_bytes[row.field]);
-            DestroyValues(two, PairCountOffset);
-            std::free(two);
+            Game<PairRowFn>(PairRow)(p_page, pair, &s_bytes[row.field], p_two, &s_default_bytes[row.field]);
+            DestroyValues(p_two, PairCountOffset);
+            std::free(p_two);
             DestroyTexts(pair);
             continue;
         }
-        u8* list = static_cast<u8*>(std::aligned_alloc(16, ListSize));
-        std::memset(list, 0, ListSize);
+        u8* p_list = static_cast<u8*>(std::aligned_alloc(16, ListSize));
+        std::memset(p_list, 0, ListSize);
         for (std::size_t i = 0; i < row.choices.size(); ++i) {
             if (row.field == Upscaler && !UpscalerAvailable(int(i))) {
                 continue; // the list's values are the upscaler numbers, not positions
@@ -372,49 +372,49 @@ void AddRows(void* page, const std::vector<Row>& rows) {
             alignas(16) u8 value[ValueSize] = {};
             *reinterpret_cast<u32*>(value) = u32(i);
             Game<Make>(MakeText)(value + 8, TextName, row.choices[i]);
-            Game<Push>(ListPush)(list, value);
+            Game<Push>(ListPush)(p_list, value);
             DestroyText(value + 8);
         }
-        Game<AddRow>(ListRow)(page, pair, &values[row.field], list, &default_values[row.field]);
-        DestroyValues(list, ListCountOffset);
-        std::free(list);
+        Game<AddRow>(ListRow)(p_page, pair, &s_values[row.field], p_list, &s_default_values[row.field]);
+        DestroyValues(p_list, ListCountOffset);
+        std::free(p_list);
         DestroyTexts(pair);
     }
 }
 
-std::atomic<const char16_t*> title_override{nullptr}; // while the game builds one of our pages (its menu thread)
+std::atomic<const char16_t*> s_p_title_override{nullptr}; // while the game builds one of our pages (its menu thread)
 // Called by the game's menu code (guest threads, System V ABI like the game), one set per page.
 template <int P>
-void Rows(void* page, void*) {
+void Rows(void* p_page, void*) {
     LoadValues();
-    AddRows(page, pages[P].rows);
+    AddRows(p_page, s_pages[P].rows);
 }
 template <int P>
-void* Content(void* a, void* b) {
+void* Content(void* p_a, void* p_b) {
     using Open = void* (*)(void*, void*, const char*, void*, u64, u64);
-    title_override = nullptr; // the title was looked up just before
-    return Game<Open>(OpenPage)(a, b, Game<const char*>(ControlsLayout),
+    s_p_title_override = nullptr; // the title was looked up just before
+    return Game<Open>(OpenPage)(p_a, p_b, Game<const char*>(ControlsLayout),
                                 reinterpret_cast<void*>(&Rows<P>), 0, 0);
 }
-void* Factory(void* out, void* arg, void* content, const char16_t* title) {
+void* Factory(void* p_out, void* p_arg, void* p_content, const char16_t* p_title) {
     using Create = void* (*)(void*, void*, void*);
     alignas(16) u8 function[FunctionSize] = {};
-    *reinterpret_cast<u64*>(function) = image_base + ContentVtable;
-    *reinterpret_cast<void**>(function + 8) = content;
+    *reinterpret_cast<u64*>(function) = s_image_base + ContentVtable;
+    *reinterpret_cast<void**>(function + 8) = p_content;
     *reinterpret_cast<void**>(function + 0x20) = function;
     // The page is built later (the game's menu task): its layout title is looked up right before
     // the content function runs, which takes the override back.
-    title_override = title;
-    Game<Create>(CreatePage)(out, arg, function);
+    s_p_title_override = p_title;
+    Game<Create>(CreatePage)(p_out, p_arg, function);
     DestroyFunction(function);
-    return out;
+    return p_out;
 }
 template <int P>
-void* PageFactory(void* out, void* arg) {
-    return Factory(out, arg, reinterpret_cast<void*>(&Content<P>), TextOf(pages[P].name));
+void* PageFactory(void* p_out, void* p_arg) {
+    return Factory(p_out, p_arg, reinterpret_cast<void*>(&Content<P>), TextOf(s_pages[P].name));
 }
 constexpr std::size_t MaxPages = 6;
-void* const factories[MaxPages] = {
+void* const s_factories[MaxPages] = {
     reinterpret_cast<void*>(&PageFactory<0>), reinterpret_cast<void*>(&PageFactory<1>),
     reinterpret_cast<void*>(&PageFactory<2>), reinterpret_cast<void*>(&PageFactory<3>),
     reinterpret_cast<void*>(&PageFactory<4>), reinterpret_cast<void*>(&PageFactory<5>)};
@@ -422,127 +422,127 @@ void* const factories[MaxPages] = {
 // ---- Hooks ----
 using LookupFn = const char16_t* (*)(void*, u32, u32, u32);
 using AddFn = void* (*)(void*, void*, void*, void*);
-LookupFn lookup_original = nullptr;
-AddFn add_original = nullptr;
-std::atomic<const void*> screen_sound_text{nullptr};
+LookupFn s_pfn_lookup_original = nullptr;
+AddFn s_pfn_add_original = nullptr;
+std::atomic<const void*> s_p_screen_sound_text{nullptr};
 
-const char16_t* LookupHook(void* repository, u32 table, u32 category, u32 id) {
-    if (id >= IdBase && id < IdBase + texts.size()) {
+const char16_t* LookupHook(void* p_repository, u32 table, u32 category, u32 id) {
+    if (id >= IdBase && id < IdBase + s_texts.size()) {
         // PS_GAME_MENU_TRACE=1: how often the game asks for our texts (per 2 s).
-        static const bool count = [] {
-            const char* env = std::getenv("PS_GAME_MENU_TRACE");
-            return env && env[0] == '1';
+        static const bool s_should_count = [] {
+            const char* sz_env = std::getenv("PS_GAME_MENU_TRACE");
+            return sz_env && sz_env[0] == '1';
         }();
-        if (count) {
-            static std::atomic<u64> lookups{0};
-            static std::atomic<long long> printed{0};
-            ++lookups;
+        if (s_should_count) {
+            static std::atomic<u64> s_c_lookups{0};
+            static std::atomic<long long> s_printed{0};
+            ++s_c_lookups;
             const long long now = std::chrono::duration_cast<std::chrono::seconds>(
                                       std::chrono::steady_clock::now().time_since_epoch())
                                       .count();
-            if (now - printed.load() >= 2) {
-                printed = now;
+            if (now - s_printed.load() >= 2) {
+                s_printed = now;
                 std::printf("Game menu: %llu lookups of the port's texts in 2 s (last id %u)\n",
-                            (unsigned long long)lookups.exchange(0), id - IdBase);
+                            (unsigned long long)s_c_lookups.exchange(0), id - IdBase);
             }
         }
         return TextOf(id);
     }
-    if (title_override && category == TextName && id == ControlsTitle) {
-        return title_override;
+    if (s_p_title_override && category == TextName && id == ControlsTitle) {
+        return s_p_title_override;
     }
-    const char16_t* text = lookup_original(repository, table, category, id);
-    static const bool trace = [] {
-        const char* env = std::getenv("PS_GAME_MENU_TRACE");
-        return env && env[0] == '1';
+    const char16_t* p_text = s_pfn_lookup_original(p_repository, table, category, id);
+    static const bool s_should_trace = [] {
+        const char* sz_env = std::getenv("PS_GAME_MENU_TRACE");
+        return sz_env && sz_env[0] == '1';
     }();
-    if (trace && id >= 110000 && id < 120000) {
-        std::printf("Game menu: text %#x/%u%s from %#llx\n", category, id, title_override ? " (our page)" : "",
-                    (unsigned long long)(reinterpret_cast<u64>(__builtin_return_address(0)) - image_base));
+    if (s_should_trace && id >= 110000 && id < 120000) {
+        std::printf("Game menu: text %#x/%u%s from %#llx\n", category, id, s_p_title_override ? " (our page)" : "",
+                    (unsigned long long)(reinterpret_cast<u64>(__builtin_return_address(0)) - s_image_base));
     }
-    if (category == TextName && id == ScreenSoundItem && text) {
-        screen_sound_text = text;
-        bool cyrillic = false;
-        for (const char16_t* c = text; *c; ++c) {
-            cyrillic = cyrillic || (*c >= 0x400 && *c < 0x500);
+    if (category == TextName && id == ScreenSoundItem && p_text) {
+        s_p_screen_sound_text = p_text;
+        bool is_cyrillic = false;
+        for (const char16_t* p_char = p_text; *p_char; ++p_char) {
+            is_cyrillic = is_cyrillic || (*p_char >= 0x400 && *p_char < 0x500);
         }
-        game_language = cyrillic ? GameLanguage::Russian : GameLanguage::English;
+        s_game_language = is_cyrillic ? GameLanguage::Russian : GameLanguage::English;
     }
-    return text;
+    return p_text;
 }
 
-void AddItem(void* menu, u32 name, u32 help, void* factory) {
+void AddItem(void* p_menu, u32 name, u32 help, void* p_factory) {
     using ToFunction = void* (*)(void*, void*);
     alignas(16) u8 pair[2 * TextSize] = {};
     MakeTexts(pair, name, help);
     alignas(16) u8 source[FunctionSize] = {};
-    *reinterpret_cast<u64*>(source) = image_base + FactoryVtable;
-    *reinterpret_cast<void**>(source + 8) = factory;
+    *reinterpret_cast<u64*>(source) = s_image_base + FactoryVtable;
+    *reinterpret_cast<void**>(source + 8) = p_factory;
     *reinterpret_cast<void**>(source + 0x20) = source;
     alignas(16) u8 function[FunctionSize] = {};
     *reinterpret_cast<void**>(function + 0x20) = Game<ToFunction>(FactoryToFunction)(source, function);
     alignas(16) u8 out[16] = {};
-    add_original(menu, pair, function, out);
+    s_pfn_add_original(p_menu, pair, function, out);
     DestroyFunction(function);
     DestroyTexts(pair);
 }
 
-void* AddHook(void* menu, void* pair, void* function, void* out) {
-    void* result = add_original(menu, pair, function, out);
-    const void* screen_sound = screen_sound_text.load();
-    if (screen_sound && *reinterpret_cast<const void* const*>(pair) == screen_sound) {
-        for (std::size_t i = 0; i < pages.size() && i < MaxPages; ++i) {
-            AddItem(menu, pages[i].name, pages[i].help, factories[i]);
+void* AddHook(void* p_menu, void* p_pair, void* p_function, void* p_out) {
+    void* p_result = s_pfn_add_original(p_menu, p_pair, p_function, p_out);
+    const void* p_screen_sound = s_p_screen_sound_text.load();
+    if (p_screen_sound && *reinterpret_cast<const void* const*>(p_pair) == p_screen_sound) {
+        for (std::size_t i = 0; i < s_pages.size() && i < MaxPages; ++i) {
+            AddItem(p_menu, s_pages[i].name, s_pages[i].help, s_factories[i]);
         }
     }
-    return result;
+    return p_result;
 }
 
 /// `jmp hook` at the function (via a near thunk); its moved prologue + `jmp` back is the original.
-bool Detour(unsigned char* image, u64 va, const u8* prologue, std::size_t length, void* hook,
-            void** original, u8*& cursor) {
-    u8* site = image + va;
-    if (std::memcmp(site, prologue, length) != 0) {
-        std::printf("Game menu: unexpected code at %#llx, not hooked\n", (unsigned long long)va);
+bool Detour(unsigned char* p_image, u64 va_target, const u8* p_prologue, std::size_t length, void* p_hook,
+            void** pp_original, u8*& cursor) {
+    u8* p_site = p_image + va_target;
+    if (std::memcmp(p_site, p_prologue, length) != 0) {
+        std::printf("Game menu: unexpected code at %#llx, not hooked\n", (unsigned long long)va_target);
         return false;
     }
-    u8* trampoline = cursor;
-    std::memcpy(trampoline, prologue, length);
-    trampoline[length] = 0xe9;
-    const std::int64_t back = std::int64_t(site + length) - std::int64_t(trampoline + length + 5);
+    u8* p_trampoline = cursor;
+    std::memcpy(p_trampoline, p_prologue, length);
+    p_trampoline[length] = 0xe9;
+    const std::int64_t back = std::int64_t(p_site + length) - std::int64_t(p_trampoline + length + 5);
     const std::int32_t back32 = std::int32_t(back);
-    std::memcpy(trampoline + length + 1, &back32, 4);
-    u8* thunk = trampoline + 32;
-    thunk[0] = 0x48;
-    thunk[1] = 0xb8; // movabs rax, hook
-    std::memcpy(thunk + 2, &hook, 8);
-    thunk[10] = 0xff;
-    thunk[11] = 0xe0; // jmp rax
-    const std::int64_t to = std::int64_t(thunk) - std::int64_t(site + 5);
+    std::memcpy(p_trampoline + length + 1, &back32, 4);
+    u8* p_thunk = p_trampoline + 32;
+    p_thunk[0] = 0x48;
+    p_thunk[1] = 0xb8; // movabs rax, hook
+    std::memcpy(p_thunk + 2, &p_hook, 8);
+    p_thunk[10] = 0xff;
+    p_thunk[11] = 0xe0; // jmp rax
+    const std::int64_t to = std::int64_t(p_thunk) - std::int64_t(p_site + 5);
     if (back != back32 || to != std::int32_t(to)) {
         std::printf("Game menu: stubs out of jump range, not hooked\n");
         return false;
     }
     const std::int32_t to32 = std::int32_t(to);
-    site[0] = 0xe9;
-    std::memcpy(site + 1, &to32, 4);
+    p_site[0] = 0xe9;
+    std::memcpy(p_site + 1, &to32, 4);
     for (std::size_t i = 5; i < length; ++i) {
-        site[i] = 0xcc;
+        p_site[i] = 0xcc;
     }
-    *original = trampoline;
+    *pp_original = p_trampoline;
     cursor += 64;
     return true;
 }
 
 /// A mapping within +-2 GiB of the image, for rel32 jumps both ways.
-u8* MapNear(unsigned char* image, u64 image_size, std::size_t size) {
-    const u64 base = reinterpret_cast<u64>(image);
+u8* MapNear(unsigned char* p_image, u64 cb_image, std::size_t cb_range) {
+    const u64 base = reinterpret_cast<u64>(p_image);
     for (u64 k = 1; k <= 64; ++k) {
-        for (const u64 hint : {base - k * (24ull << 20), base + image_size + k * (24ull << 20)}) {
-            void* p = mmap(reinterpret_cast<void*>(hint), size, PROT_READ | PROT_WRITE,
+        for (const u64 hint : {base - k * (24ull << 20), base + cb_image + k * (24ull << 20)}) {
+            void* p_mapping = mmap(reinterpret_cast<void*>(hint), cb_range, PROT_READ | PROT_WRITE,
                            MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
-            if (p != MAP_FAILED) {
-                return static_cast<u8*>(p);
+            if (p_mapping != MAP_FAILED) {
+                return static_cast<u8*>(p_mapping);
             }
         }
     }
@@ -551,90 +551,90 @@ u8* MapNear(unsigned char* image, u64 image_size, std::size_t size) {
 
 } // namespace
 
-void PatchImage(unsigned char* image, std::uint64_t size) {
-    if (const char* env = std::getenv("PS_GAME_MENU"); env && env[0] == '0') {
+void PatchImage(unsigned char* p_image, std::uint64_t cb_image) {
+    if (const char* sz_env = std::getenv("PS_GAME_MENU"); sz_env && sz_env[0] == '0') {
         return;
     }
-    image_base = reinterpret_cast<u64>(image);
+    s_image_base = reinterpret_cast<u64>(p_image);
     const std::size_t page = std::size_t(sysconf(_SC_PAGESIZE));
-    u8* stubs = MapNear(image, size, page);
-    if (!stubs) {
+    u8* p_stubs = MapNear(p_image, cb_image, page);
+    if (!p_stubs) {
         std::printf("Game menu: no memory near the image, the port's pages are off\n");
         return;
     }
     DefineTexts();
-    for (const Page& p : pages) {
+    for (const Page& p : s_pages) {
         for (const Row& r : p.rows) {
-            byte_field[r.field] = r.kind != Kind::List;
-            steps_count[r.field] = r.kind == Kind::Steps ? int(r.choices.size()) : 0;
+            s_byte_field[r.field] = r.kind != Kind::List;
+            s_steps_count[r.field] = r.kind == Kind::Steps ? int(r.choices.size()) : 0;
         }
     }
-    static const PsSettings::Values defaults;
-    Fill(defaults, default_values);
+    static const PsSettings::Values s_defaults;
+    Fill(s_defaults, s_default_values);
     for (int e = 0; e < PsEffects::SwitchCount; ++e) {
-        default_values[FirstEffect + e] = PsEffects::Switches[e].is_default_on;
+        s_default_values[FirstEffect + e] = PsEffects::Switches[e].is_default_on;
     }
     for (int f = 0; f < FieldCount; ++f) {
-        default_bytes[f] =
-            steps_count[f] ? ChoicePosition(default_values[f], steps_count[f]) : u8(default_values[f]);
+        s_default_bytes[f] =
+            s_steps_count[f] ? ChoicePosition(s_default_values[f], s_steps_count[f]) : u8(s_default_values[f]);
     }
-    u8* cursor = stubs;
+    u8* p_cursor = p_stubs;
     // The lookup first: the menu hook only acts once it has seen the Screen/Sound text.
-    const bool ok =
-        Detour(image, MsgLookup, MsgLookupPrologue, sizeof(MsgLookupPrologue),
-               reinterpret_cast<void*>(&LookupHook), reinterpret_cast<void**>(&lookup_original), cursor) &&
-        Detour(image, AddPageItem, AddPageItemPrologue, sizeof(AddPageItemPrologue),
-               reinterpret_cast<void*>(&AddHook), reinterpret_cast<void**>(&add_original), cursor);
-    mprotect(stubs, page, PROT_READ | PROT_EXEC);
-    std::printf("Game menu: %s (%zu pages in System)\n", ok ? "the port's pages are in" : "hooks failed, off",
-                pages.size());
+    const bool is_ok =
+        Detour(p_image, MsgLookup, MsgLookupPrologue, sizeof(MsgLookupPrologue),
+               reinterpret_cast<void*>(&LookupHook), reinterpret_cast<void**>(&s_pfn_lookup_original), p_cursor) &&
+        Detour(p_image, AddPageItem, AddPageItemPrologue, sizeof(AddPageItemPrologue),
+               reinterpret_cast<void*>(&AddHook), reinterpret_cast<void**>(&s_pfn_add_original), p_cursor);
+    mprotect(p_stubs, page, PROT_READ | PROT_EXEC);
+    std::printf("Game menu: %s (%zu pages in System)\n", is_ok ? "the port's pages are in" : "hooks failed, off",
+                s_pages.size());
 }
 
 
 void Poll() {
-    if (!values_valid) {
+    if (!s_has_values) {
         return;
     }
     for (int f = 0; f < FieldCount; ++f) {
-        if (byte_field[f]) {
+        if (s_byte_field[f]) {
             // A slider with choices: its position, not the choice's number.
-            values[f] = steps_count[f] ? ChoiceFromPosition(bytes[f], steps_count[f]) : bytes[f];
+            s_values[f] = s_steps_count[f] ? ChoiceFromPosition(s_bytes[f], s_steps_count[f]) : s_bytes[f];
         }
     }
     // The output resolution and the preset re-create the scene targets and the upscaler (a few
     // grey frames): a slider walking through its steps did that at each one. Applied once they
     // rest for 0.4 s; the other rows at once.
     using Clock = std::chrono::steady_clock;
-    static int resting[2] = {-1, -1};
-    static Clock::time_point rested_since{};
+    static int s_resting[2] = {-1, -1};
+    static Clock::time_point s_rested_since{};
     const auto now = Clock::now();
-    if (resting[0] != values[OutputRes] || resting[1] != values[Preset]) {
-        resting[0] = values[OutputRes];
-        resting[1] = values[Preset];
-        rested_since = now;
+    if (s_resting[0] != s_values[OutputRes] || s_resting[1] != s_values[Preset]) {
+        s_resting[0] = s_values[OutputRes];
+        s_resting[1] = s_values[Preset];
+        s_rested_since = now;
     }
-    if (now - rested_since < std::chrono::milliseconds(400)) {
-        values[OutputRes] = applied[OutputRes];
-        values[Preset] = applied[Preset];
+    if (now - s_rested_since < std::chrono::milliseconds(400)) {
+        s_values[OutputRes] = s_applied[OutputRes];
+        s_values[Preset] = s_applied[Preset];
     }
-    if (std::memcmp(values, applied, sizeof(values)) == 0) {
+    if (std::memcmp(s_values, s_applied, sizeof(s_values)) == 0) {
         return;
     }
     auto& s = PsSettings::Get();
-    s.output_res = std::clamp(values[OutputRes], 0, PsSettings::OutputCount - 1);
-    const int upscaler = std::clamp(values[Upscaler], 0, PsSettings::UpscalerCount - 1);
+    s.output_res = std::clamp(s_values[OutputRes], 0, PsSettings::OutputCount - 1);
+    const int upscaler = std::clamp(s_values[Upscaler], 0, PsSettings::UpscalerCount - 1);
     s.upscaler = UpscalerAvailable(upscaler) ? upscaler : int(PsSettings::UpscalerFsr3);
-    s.preset = std::clamp(values[Preset], 0, PsSettings::PresetCount - 1);
-    s.should_sharpen = values[Sharpness] != 0;
-    if (values[Sharpness] != 0) {
-        s.sharpness = std::clamp(values[Sharpness], 0, SharpnessSteps - 1) * SharpnessStep;
+    s.preset = std::clamp(s_values[Preset], 0, PsSettings::PresetCount - 1);
+    s.should_sharpen = s_values[Sharpness] != 0;
+    if (s_values[Sharpness] != 0) {
+        s.sharpness = std::clamp(s_values[Sharpness], 0, SharpnessSteps - 1) * SharpnessStep;
     }
-    s.should_show_fps = values[ShowFps] != 0;
-    s.model_lod = LodValues[std::clamp(values[ModelLod], 0, 3)];
+    s.should_show_fps = s_values[ShowFps] != 0;
+    s.model_lod = LodValues[std::clamp(s_values[ModelLod], 0, 3)];
     for (int e = 0; e < PsEffects::SwitchCount; ++e) {
-        s.effects[e] = values[FirstEffect + e] != 0;
+        s.effects[e] = s_values[FirstEffect + e] != 0;
     }
-    std::memcpy(applied, values, sizeof(values));
+    std::memcpy(s_applied, s_values, sizeof(s_values));
     PsSettings::Save();
 }
 

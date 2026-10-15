@@ -665,8 +665,8 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
                          MakeImageBlitFit(frame->width, frame->height, extent.width, extent.height),
                          vk::Filter::eLinear);
         // psport: the settings menu / FPS counter over the frame, at display resolution.
-        if (const Game::Profile* game = Game::Active(); game && game->before_present) {
-            game->before_present();
+        if (const Game::Profile* game = Game::Active(); game && game->pfn_before_present) {
+            game->pfn_before_present();
         }
         const bool overlay = PsOverlay::Visible();
         const std::array post_barriers{

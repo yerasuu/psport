@@ -494,14 +494,14 @@ bool Enabled() {
         }
         const Game::Profile* p_game = Game::Active();
         const Game::SmallObjectPool pool = p_game ? p_game->small_object_pool : Game::SmallObjectPool{};
-        if (pool.block_size < 8 || pool.header_offset + sizeof(Header) > PageSize ||
-            pool.header_offset / pool.block_size > MaxPoolBlocks) {
+        if (pool.cb_block < 8 || pool.off_header + sizeof(Header) > PageSize ||
+            pool.off_header / pool.cb_block > MaxPoolBlocks) {
             std::fprintf(stderr, "Free check: PS_FREE_CHECK=1 needs the game's small-object pool "
                                  "(its profile): off\n");
             return false;
         }
-        s_off_header = pool.header_offset;
-        s_cb_block = pool.block_size;
+        s_off_header = pool.off_header;
+        s_cb_block = pool.cb_block;
         s_max_blocks = s_off_header / s_cb_block;
         return true;
     }();

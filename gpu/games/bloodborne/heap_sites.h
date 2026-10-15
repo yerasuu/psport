@@ -13,5 +13,5 @@ void Report();
 void NoteReleaseCheck(unsigned result);
 /// Once a frame while frames overlap (Game::Profile::frame_overlap_unsafe): with deep overlap the
 /// game's heap leaked (~2 resource objects a frame, out of memory after minutes).
-bool OverlapLeaks(char* reason, std::size_t size);
+bool OverlapLeaks(char* sz_reason, std::size_t cb_reason);
 } // namespace PsHeapSites

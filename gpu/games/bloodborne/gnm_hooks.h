@@ -10,13 +10,13 @@
 namespace PsGnmHooks {
 /// Patches the image (the loader calls it once, before any game code runs, while the image is
 /// still writable). Each entry is checked byte for byte against the 1.09 eboot.
-void PatchImage(unsigned char* image, std::uint64_t size);
+void PatchImage(unsigned char* p_image, std::uint64_t cb_image);
 
 /// PS_GNM_OBSERVE=1: checks a submitted command buffer against the packets the hooked API calls
 /// wrote (the submitting thread; statistics in the census report).
-void CheckSubmission(const std::uint32_t* commands, std::uint64_t dwords);
+void CheckSubmission(const std::uint32_t* p_commands, std::uint64_t dwords);
 
 /// PS_GNM_OBSERVE: packets our GnmDriver wrote into space the game reserved ([commands,
 /// commands + dwords)).
-void NoteDriverWrite(std::uint32_t* commands, std::uint64_t dwords);
+void NoteDriverWrite(std::uint32_t* p_commands, std::uint64_t dwords);
 } // namespace PsGnmHooks

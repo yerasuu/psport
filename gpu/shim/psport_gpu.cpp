@@ -277,9 +277,9 @@ extern "C" int psport_gpu_init(const PsGpuConfig* p_config) {
     // settings among them, which keep its effect switches.
     Game::Select(p_config->sz_serial);
     PsSettings::Load();
-    if (const Game::Profile* p_game = Game::Active(); p_game && p_game->prepare_saves) {
+    if (const Game::Profile* p_game = Game::Active(); p_game && p_game->pfn_prepare_saves) {
         const std::string saves = std::string(runtime_file_user_dir()) + "/savedata";
-        p_game->prepare_saves(saves.c_str(), runtime_savedata_title());
+        p_game->pfn_prepare_saves(saves.c_str(), runtime_savedata_title());
     }
 #ifdef PS_PGO_GENERATE
     StartProfileWriter();
@@ -360,8 +360,8 @@ extern "C" int psport_gpu_handle_fault(void* p_ucontext, void* p_address) {
 }
 
 extern "C" void psport_gpu_patch_image(unsigned char* p_image, uint64_t cb_image) {
-    if (const Game::Profile* p_game = Game::Active(); p_game && p_game->patch_image) {
-        p_game->patch_image(p_image, cb_image);
+    if (const Game::Profile* p_game = Game::Active(); p_game && p_game->pfn_patch_image) {
+        p_game->pfn_patch_image(p_image, cb_image);
     }
 }
 
@@ -377,12 +377,12 @@ extern "C" const char* psport_gpu_game_mod_folder(const char* sz_serial, size_t 
 
 extern "C" const char* psport_gpu_game_patch_file(const char* sz_serial) {
     const Game::Profile* p_game = Game::Find(sz_serial);
-    return p_game ? p_game->patch_file : nullptr;
+    return p_game ? p_game->sz_patch_file : nullptr;
 }
 
 extern "C" void psport_gpu_prepare_game(const PsGameFiles* p_files) {
-    if (const Game::Profile* p_game = Game::Find(p_files->sz_serial); p_game && p_game->prepare_environment) {
-        p_game->prepare_environment();
+    if (const Game::Profile* p_game = Game::Find(p_files->sz_serial); p_game && p_game->pfn_prepare_environment) {
+        p_game->pfn_prepare_environment();
     }
 }
 
@@ -390,7 +390,7 @@ extern "C" int psport_gpu_check_game(const PsGameFiles* p_files, char* sz_out_ki
                                 size_t cb_advice) {
     const Game::Profile* p_game = Game::Find(p_files->sz_serial);
     std::string kind, advice;
-    if (!p_game || !p_game->check_files || p_game->check_files(*p_files, kind, advice)) {
+    if (!p_game || !p_game->pfn_check_files || p_game->pfn_check_files(*p_files, kind, advice)) {
         return 0;
     }
     std::snprintf(sz_out_kind, cb_kind, "%s", kind.c_str());
@@ -400,15 +400,15 @@ extern "C" int psport_gpu_check_game(const PsGameFiles* p_files, char* sz_out_ki
 
 extern "C" int psport_gpu_game_has_presets(const char* sz_serial) {
     const Game::Profile* p_game = Game::Find(sz_serial);
-    return p_game && p_game->add_patches ? 1 : 0;
+    return p_game && p_game->pfn_add_patches ? 1 : 0;
 }
 
 extern "C" int psport_gpu_game_patches(const PsGameFiles* p_files, const PsPatchServices* p_services) {
     const Game::Profile* p_game = Game::Find(p_files->sz_serial);
-    if (!p_game || !p_game->add_patches) {
+    if (!p_game || !p_game->pfn_add_patches) {
         return -1;
     }
-    return p_game->add_patches(*p_files, *p_services) ? 1 : 0;
+    return p_game->pfn_add_patches(*p_files, *p_services) ? 1 : 0;
 }
 
 extern "C" unsigned psport_gpu_symbol_count(void) {

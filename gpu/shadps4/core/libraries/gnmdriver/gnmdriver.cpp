@@ -43,8 +43,8 @@ struct DriverWrite {
     u32* commands;
     u64 dwords;
     ~DriverWrite() {
-        if (const Game::Profile* game = Game::Active(); game && game->driver_commands_written) {
-            game->driver_commands_written(commands, dwords);
+        if (const Game::Profile* game = Game::Active(); game && game->pfn_driver_commands_written) {
+            game->pfn_driver_commands_written(commands, dwords);
         }
     }
 };
@@ -172,7 +172,7 @@ static void WatchOverlap() {
     }
     const Game::Profile* game = Game::Active();
     char reason[160];
-    if (game && game->frame_overlap_unsafe && game->frame_overlap_unsafe(reason, sizeof(reason))) {
+    if (game && game->pfn_frame_overlap_unsafe && game->pfn_frame_overlap_unsafe(reason, sizeof(reason))) {
         overlap_off = true;
         std::printf("Gnm: %s: frames no longer overlap (PS_SUBMIT_AHEAD 0)\n", reason);
     }
@@ -2400,9 +2400,9 @@ static inline s32 PerformSubmit(u32 count, const u32* dcb_gpu_addrs[], u32* dcb_
                 .base_addr = reinterpret_cast<uintptr_t>(ccb),
             });
         }
-        if (const Game::Profile* game = Game::Active(); game && game->commands_submitted) {
-            game->commands_submitted(dcb_span.data(), dcb_span.size());
-            game->commands_submitted(ccb_span.data(), ccb_span.size());
+        if (const Game::Profile* game = Game::Active(); game && game->pfn_commands_submitted) {
+            game->pfn_commands_submitted(dcb_span.data(), dcb_span.size());
+            game->pfn_commands_submitted(ccb_span.data(), ccb_span.size());
         }
         if (SubmitLockOnDecode() && SubmitsAhead() > 0) {
             PsSubmitGuard::Arm(dcb_span.data(), dcb_span.size_bytes(), u64(frames_submitted) + 1);
