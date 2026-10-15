@@ -173,6 +173,7 @@ in link order (libc first) and the eboot's entry runs with `argv[0] = /app0/eboo
 | Area | Files |
 |---|---|
 | process, libc hooks, TLS, procparam, `runtime_resolve` | `runtime.c`, `runtime.h` |
+| the libraries' resolver table, NID names, stubs | `runtime_resolve.c` |
 | restarts: the settings menu's, `sceSystemServiceLoadExec` | `runtime_restart.c` |
 | kernel misc, process, time | `runtime_kernel.c`, `runtime_rtc.c` |
 | memory: direct, flexible, mappings, pools, write traps, GPU interface | `runtime_memory.c`, `runtime_memory_kernel.c`, `runtime_memory_gpu.c`, `runtime_mempool.c` |
@@ -193,11 +194,14 @@ that looks the import up with `RUNTIME_LOOKUP`. Imports arrive as `NID#library#m
 `runtime_lookup` turns the NID into a symbol name (`src/runtime/imports/import_names_all.inc`, generated from
 shadPS4's aerolib list, plus a few extra NIDs in `runtime_symbol`) and compares names, so the same
 function serves the NID whichever library the executable names (`libkernel` or `libScePosix`).
-`runtime_resolve` (`src/runtime/runtime.c`) asks the tables in a fixed chain: the runtime's own libc,
-TLS and procparam entries, then mutex, thread, sched, content, time, sema, eventflag, ulobjmgr,
-ult, rwlock, barrier, memory, mempool, exception, kernel, module, playgo, voice, services, ajm, audio,
-audio3d, pad, gesture, devices, capture, vr, rtc, savedata, file, aio, and last `psport_gpu_resolve`. The first table that
-has the symbol wins.
+`runtime_resolve` (`src/runtime/runtime.c`) answers the runtime's own libc, TLS and procparam entries,
+then `runtime_library_resolve` (`src/runtime/runtime_resolve.c`) asks the tables in a fixed order:
+mutex, thread, sched, content, sema, eventflag, ulobjmgr, ult, rwlock, barrier, memory, mempool,
+exception, kernel, module, playgo, voice, services, ajm, audio, audio3d, pad, gesture, devices,
+capture, vr, mouse, keyboard, rtc, savedata, file, aio, and last `psport_gpu_resolve`. The first
+table that has the symbol wins. services asks the online module first (`runtime_net_resolve`, with
+`PS_ONLINE=1`), then its own table, http, trophy, json, np (and np's community table) and socket;
+keyboard asks ime after its own table.
 
 Guest-visible errno values are FreeBSD's (`runtime_guest_errno`). Sockets, libSceNet's and POSIX's,
 take their descriptors from the file table (`runtime_file.c`), as kernel descriptors do on the console,
