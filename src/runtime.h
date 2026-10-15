@@ -31,29 +31,29 @@ __attribute__((noreturn)) void runtime_stop(int status);
 void runtime_finalize(void *dso);
 uintptr_t runtime_mutex_resolve(const char *name);
 void runtime_mutex_report(void);
-uintptr_t runtime_memory_resolve(const char *name);
+uintptr_t runtime_memory_resolve(const char *sz_name);
 void runtime_memory_report(void);
 /* Printed by runtime_calls_report on every exit, the fault handler and std::_Exit included, so they
  * take no locks and write to stdout directly. */
 void runtime_memory_flexible_report(void);
-int runtime_memory_is_mapped(uintptr_t address, uint64_t size);
+int runtime_memory_is_mapped(uintptr_t va_range, uint64_t cb_range);
 /* The CPU is about to write the range outside guest code (a file read): tells the GPU side. */
-void runtime_memory_note_write(uintptr_t address, uint64_t size);
-void runtime_memory_note_cpu_write(uintptr_t address, uint64_t size);
-void runtime_memory_prepare_cpu_write(uintptr_t address, uint64_t size);
+void runtime_memory_note_write(uintptr_t va_range, uint64_t cb_range);
+void runtime_memory_note_cpu_write(uintptr_t va_range, uint64_t cb_range);
+void runtime_memory_prepare_cpu_write(uintptr_t va_range, uint64_t cb_range);
 /* libkernel memory pools (runtime_mempool.c) over the runtime's direct memory and mapping table. */
-uintptr_t runtime_mempool_resolve(const char *name);
+uintptr_t runtime_mempool_resolve(const char *sz_name);
 void runtime_mempool_report(void);
 /* libkernel asynchronous file I/O (runtime_aio.c) on worker threads over the runtime's file layer. */
 uintptr_t runtime_aio_resolve(const char *name);
 void runtime_aio_report(void);
-int32_t runtime_memory_pool_expand(uint64_t low, uint64_t high, uint64_t size, uint64_t alignment, int64_t *phys);
-int32_t runtime_memory_pool_reserve(void **inout, uint64_t size, int flags, uint64_t alignment);
+int32_t runtime_memory_pool_expand(uint64_t low, uint64_t high, uint64_t cb_range, uint64_t alignment, int64_t *p_phys);
+int32_t runtime_memory_pool_reserve(void **pp_inout, uint64_t cb_range, int flags, uint64_t alignment);
 /* Maps [phys, phys+size) of direct memory over a pool reservation; EINVAL unless all of the range is one. */
-int32_t runtime_memory_pool_commit(uintptr_t address, uint64_t size, int prot, int type, uint64_t phys);
+int32_t runtime_memory_pool_commit(uintptr_t va_range, uint64_t cb_range, int prot, int type, uint64_t phys);
 /* Turns committed or reserved pool range back into a pool reservation; release receives each piece of
  * direct memory that was committed there, under the runtime's lock. */
-int32_t runtime_memory_pool_decommit(uintptr_t address, uint64_t size, void (*release)(uint64_t phys, uint64_t size));
+int32_t runtime_memory_pool_decommit(uintptr_t va_range, uint64_t cb_range, void (*pfn_release)(uint64_t phys, uint64_t cb_range));
 /* psport (frame stats): a guest thread was blocked `ns` in the runtime (0 cond, 1 mutex, 2 sema, 3 sleep). */
 void runtime_wait_note(int kind, uint64_t ns);
 void runtime_wait_report(double frames);
@@ -206,7 +206,7 @@ int64_t runtime_file_getdents(int fd, char *buffer, uint64_t size, int64_t *base
 void runtime_thread_keys_cleanup(void);
 /* Guest-visible errno values are FreeBSD's. */
 int32_t runtime_guest_errno(int host_errno);
-void *runtime_low_map(size_t size, int prot);
+void *runtime_low_map(size_t cb_range, int prot);
 uintptr_t runtime_ajm_resolve(const char *name);
 void runtime_ajm_report(void);
 uintptr_t runtime_audio_resolve(const char *name);

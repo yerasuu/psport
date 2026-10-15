@@ -18,14 +18,14 @@
 /* sceKernelGetDirectMemorySize on retail PS4: 5056 MiB. PS_DMEM_MB raises it (the resolution
  * patches above 1080p need about 4 GiB more; run.sh sets it). */
 uint64_t pool_size_bytes(void) {
-    static uint64_t size;
-    if (!size) {
-        const char *env = getenv("PS_DMEM_MB");
-        uint64_t mb = env ? strtoull(env, NULL, 10) : 0;
+    static uint64_t s_cb_pool;
+    if (!s_cb_pool) {
+        const char *sz_env = getenv("PS_DMEM_MB");
+        uint64_t mb = sz_env ? strtoull(sz_env, NULL, 10) : 0;
         if (mb < 5056 || mb > 16384) mb = 5056;
-        size = mb * 1024 * 1024;
+        s_cb_pool = mb * 1024 * 1024;
     }
-    return size;
+    return s_cb_pool;
 }
 
 /* Region table lock. Lookups (GPU per-draw queries, VirtualQuery, GPU page
@@ -33,30 +33,30 @@ uint64_t pool_size_bytes(void) {
  * under the lock may write guest memory, and a GPU-tracked page then faults into
  * runtime_memory_gpu_protect on the same thread. Readers nest because glibc's
  * default rwlock prefers readers; a thread holding it exclusively skips relocking. */
-static pthread_rwlock_t lock=PTHREAD_RWLOCK_INITIALIZER;
-static __thread unsigned exclusive_depth;
+static pthread_rwlock_t s_lock=PTHREAD_RWLOCK_INITIALIZER;
+static __thread unsigned s_exclusive_depth;
 /* Odd while a writer holds the lock; readers' region caches are valid for one even value. */
-uint64_t table_generation;
+uint64_t g_table_generation;
 void write_lock(void) {
     runtime_exception_hold();
-    if (!exclusive_depth++) { pthread_rwlock_wrlock(&lock); __atomic_add_fetch(&table_generation,1,__ATOMIC_ACQ_REL); }
+    if (!s_exclusive_depth++) { pthread_rwlock_wrlock(&s_lock); __atomic_add_fetch(&g_table_generation,1,__ATOMIC_ACQ_REL); }
 }
 void write_unlock(void) {
-    if (!--exclusive_depth) { __atomic_add_fetch(&table_generation,1,__ATOMIC_RELEASE); pthread_rwlock_unlock(&lock); }
+    if (!--s_exclusive_depth) { __atomic_add_fetch(&g_table_generation,1,__ATOMIC_RELEASE); pthread_rwlock_unlock(&s_lock); }
     runtime_exception_release();
 }
-void read_lock(void) { runtime_exception_hold(); if (!exclusive_depth) pthread_rwlock_rdlock(&lock); }
-void read_unlock(void) { if (!exclusive_depth) pthread_rwlock_unlock(&lock); runtime_exception_release(); }
-Vma *vmas; size_t vma_count; static size_t vma_capacity;
-static int pool_fd=-1;
+void read_lock(void) { runtime_exception_hold(); if (!s_exclusive_depth) pthread_rwlock_rdlock(&s_lock); }
+void read_unlock(void) { if (!s_exclusive_depth) pthread_rwlock_unlock(&s_lock); runtime_exception_release(); }
+Vma *g_p_vmas; size_t g_c_vmas; static size_t s_c_vma_capacity;
+static int s_h_pool=-1;
 /* psport: direct memory in GPU-visible system memory the GPU library allocates (dma-buf chunks,
  * PS_GUEST_GPU_MEMORY=1): the GPU reads the game's data in place instead of the CPU copying it
  * into staging buffers first. Chunks are allocated when the game allocates direct memory in them;
  * a chunk the GPU library cannot provide stays in the memfd. */
 #define CHUNK (UINT64_C(256) << 20)
-typedef int (*GuestChunkAlloc)(uint64_t phys, uint64_t size);
-static GuestChunkAlloc chunk_alloc;
-static int *chunk_fds; /* per CHUNK of direct memory: -1 not decided, -2 memfd, -3 memfd the GPU
+typedef int (*GuestChunkAlloc)(uint64_t phys, uint64_t cb_range);
+static GuestChunkAlloc s_pfn_chunk_alloc;
+static int *s_p_chunk_fds; /* per CHUNK of direct memory: -1 not decided, -2 memfd, -3 memfd the GPU
                         * imported (host memory: VK_EXT_external_memory_host), else a dma-buf fd */
 #define CHUNK_IMPORTED (-3)
 /* Released memory in a chunk the GPU uses is cleared, not punched out: the GPU holds those pages. */
@@ -64,52 +64,52 @@ static int *chunk_fds; /* per CHUNK of direct memory: -1 not decided, -2 memfd, 
 /* Drivers whose dma-buf maps at offset 0 only (NVIDIA): a chunk per direct allocation instead of
  * the CHUNK grid. The game maps each of its allocations once, whole, so its mappings and the
  * backing view start at offset 0 of their chunk. */
-unsigned char *backing_base; /* second view of the pool: host writes bypass guest/GPU page protection */
-static int whole_chunks;
-typedef struct { uint64_t phys, size; int fd; } Region;
+unsigned char *g_p_backing_base; /* second view of the pool: host writes bypass guest/GPU page protection */
+static int s_has_whole_chunks;
+typedef struct { uint64_t phys, cb_range; int h_fd; } Region;
 #define MAX_REGIONS 256
-static Region regions[MAX_REGIONS];
-static size_t region_count;
+static Region s_regions[MAX_REGIONS];
+static size_t s_c_regions;
 /* The region holding phys (sorted by phys), or NULL; *next: start of the next region above. */
-static const Region *region_at(uint64_t phys, uint64_t *next) {
-    *next=POOL_SIZE;
-    for (size_t i=0;i<region_count;++i) {
-        if (phys<regions[i].phys) { *next=regions[i].phys; return NULL; }
-        if (phys<regions[i].phys+regions[i].size) return &regions[i];
+static const Region *region_at(uint64_t phys, uint64_t *p_next) {
+    *p_next=POOL_SIZE;
+    for (size_t i=0;i<s_c_regions;++i) {
+        if (phys<s_regions[i].phys) { *p_next=s_regions[i].phys; return NULL; }
+        if (phys<s_regions[i].phys+s_regions[i].cb_range) return &s_regions[i];
     }
     return NULL;
 }
-static void add_region(uint64_t phys, uint64_t size) {
-    if (region_count==MAX_REGIONS) return;
-    int fd=chunk_alloc(phys,size);
-    if (fd>=0 && mmap(backing_base+phys,size,PROT_READ|PROT_WRITE,MAP_SHARED|MAP_FIXED,fd,0)==MAP_FAILED) {
-        close(fd);
-        fd=-1;
+static void add_region(uint64_t phys, uint64_t cb_range) {
+    if (s_c_regions==MAX_REGIONS) return;
+    int h_fd=s_pfn_chunk_alloc(phys,cb_range);
+    if (h_fd>=0 && mmap(g_p_backing_base+phys,cb_range,PROT_READ|PROT_WRITE,MAP_SHARED|MAP_FIXED,h_fd,0)==MAP_FAILED) {
+        close(h_fd);
+        h_fd=-1;
     }
-    size_t i=region_count;
-    while (i>0 && regions[i-1].phys>phys) { regions[i]=regions[i-1]; --i; }
-    regions[i]=(Region){phys,size,fd>=0 || fd==CHUNK_IMPORTED ? fd : -2};
-    ++region_count;
+    size_t i=s_c_regions;
+    while (i>0 && s_regions[i-1].phys>phys) { s_regions[i]=s_regions[i-1]; --i; }
+    s_regions[i]=(Region){phys,cb_range,h_fd>=0 || h_fd==CHUNK_IMPORTED ? h_fd : -2};
+    ++s_c_regions;
 }
 #define FLEX_SPAN (UINT64_C(1024) * 1024 * 1024)
-static uint64_t flex_bitmap[FLEX_SPAN/PAGE/64];
+static uint64_t s_flex_bitmap[FLEX_SPAN/PAGE/64];
 /* GPU hooks (libpsport-gpu): notified outside the lock, in order, after each operation. */
-GpuRange hook_map, hook_unmap, hook_invalidate;
-typedef struct { int kind; uintptr_t address; uint64_t size; } PendingHook;
-static PendingHook pending[64]; size_t pending_count;
-uint64_t flexible_bytes;
+GpuRange g_pfn_hook_map, g_pfn_hook_unmap, g_pfn_hook_invalidate;
+typedef struct { int kind; uintptr_t va_range; uint64_t cb_range; } PendingHook;
+static PendingHook s_pending[64]; size_t g_c_pending_hooks;
+uint64_t g_cb_flexible;
 
 /* Direct memory occupies [0,POOL_SIZE) of the memfd, flexible memory [POOL_SIZE,+FLEX_SPAN). */
 int pool(void) {
-    if (pool_fd>=0) return 0;
-    pool_fd=memfd_create("psport-guest-memory", MFD_CLOEXEC);
-    if (pool_fd<0 || ftruncate(pool_fd,(off_t)(POOL_SIZE+FLEX_SPAN))) return -1;
-    void *view=mmap(NULL,POOL_SIZE+FLEX_SPAN,PROT_READ|PROT_WRITE,MAP_SHARED|MAP_NORESERVE,pool_fd,0);
-    if (view==MAP_FAILED) return -1;
-    backing_base=view;
-    chunk_fds=malloc((POOL_SIZE/CHUNK+1)*sizeof(int));
-    if (!chunk_fds) return -1;
-    for (uint64_t c=0;c<=POOL_SIZE/CHUNK;++c) chunk_fds[c]=-1;
+    if (s_h_pool>=0) return 0;
+    s_h_pool=memfd_create("psport-guest-memory", MFD_CLOEXEC);
+    if (s_h_pool<0 || ftruncate(s_h_pool,(off_t)(POOL_SIZE+FLEX_SPAN))) return -1;
+    void *p_view=mmap(NULL,POOL_SIZE+FLEX_SPAN,PROT_READ|PROT_WRITE,MAP_SHARED|MAP_NORESERVE,s_h_pool,0);
+    if (p_view==MAP_FAILED) return -1;
+    g_p_backing_base=p_view;
+    s_p_chunk_fds=malloc((POOL_SIZE/CHUNK+1)*sizeof(int));
+    if (!s_p_chunk_fds) return -1;
+    for (uint64_t c=0;c<=POOL_SIZE/CHUNK;++c) s_p_chunk_fds[c]=-1;
     return 0;
 }
 /* Size of direct memory chunk c (the last one may be shorter). */
@@ -118,264 +118,264 @@ static uint64_t chunk_size(uint64_t c) {
     return POOL_SIZE-start<CHUNK ? POOL_SIZE-start : CHUNK;
 }
 /* Decides where the chunks of [phys, phys+size) of direct memory live (lock held). */
-void ensure_chunks(uint64_t phys, uint64_t size) {
-    if (!chunk_fds || phys>=POOL_SIZE) return;
-    if (whole_chunks) {
-        if (!chunk_alloc) return;
-        const uint64_t end=phys+size<POOL_SIZE ? phys+size : POOL_SIZE;
+void ensure_chunks(uint64_t phys, uint64_t cb_range) {
+    if (!s_p_chunk_fds || phys>=POOL_SIZE) return;
+    if (s_has_whole_chunks) {
+        if (!s_pfn_chunk_alloc) return;
+        const uint64_t end=phys+cb_range<POOL_SIZE ? phys+cb_range : POOL_SIZE;
         for (uint64_t at=phys;at<end;) {
             uint64_t next;
-            const Region *r=region_at(at,&next);
-            if (r) { at=r->phys+r->size; continue; }
+            const Region *p_region=region_at(at,&next);
+            if (p_region) { at=p_region->phys+p_region->cb_range; continue; }
             const uint64_t gap_end=next<end ? next : end;
             add_region(at,gap_end-at);
             at=gap_end;
         }
         return;
     }
-    const uint64_t last=(phys+size-1<POOL_SIZE ? phys+size-1 : POOL_SIZE-1)/CHUNK;
+    const uint64_t last=(phys+cb_range-1<POOL_SIZE ? phys+cb_range-1 : POOL_SIZE-1)/CHUNK;
     for (uint64_t c=phys/CHUNK;c<=last;++c) {
-        if (chunk_fds[c]!=-1) continue;
-        int fd=chunk_alloc ? chunk_alloc(c*CHUNK,chunk_size(c)) : -1;
-        if (fd>=0 && mmap(backing_base+c*CHUNK,chunk_size(c),PROT_READ|PROT_WRITE,MAP_SHARED|MAP_FIXED,fd,0)==MAP_FAILED) {
-            close(fd);
-            fd=-1;
+        if (s_p_chunk_fds[c]!=-1) continue;
+        int h_fd=s_pfn_chunk_alloc ? s_pfn_chunk_alloc(c*CHUNK,chunk_size(c)) : -1;
+        if (h_fd>=0 && mmap(g_p_backing_base+c*CHUNK,chunk_size(c),PROT_READ|PROT_WRITE,MAP_SHARED|MAP_FIXED,h_fd,0)==MAP_FAILED) {
+            close(h_fd);
+            h_fd=-1;
         }
-        chunk_fds[c]=fd>=0 || fd==CHUNK_IMPORTED ? fd : -2;
+        s_p_chunk_fds[c]=h_fd>=0 || h_fd==CHUNK_IMPORTED ? h_fd : -2;
     }
 }
 /* mmap of direct or flexible memory at phys, split where it crosses chunks. */
-static void *map_phys(uintptr_t address, uint64_t size, int prot, uint64_t phys) {
-    if (!chunk_fds || phys>=POOL_SIZE)
-        return mmap((void *)address,size,prot,MAP_SHARED|MAP_FIXED,pool_fd,(off_t)phys);
-    ensure_chunks(phys,size);
-    for (uint64_t done=0;whole_chunks && done<size;) {
+static void *map_phys(uintptr_t va_range, uint64_t cb_range, int prot, uint64_t phys) {
+    if (!s_p_chunk_fds || phys>=POOL_SIZE)
+        return mmap((void *)va_range,cb_range,prot,MAP_SHARED|MAP_FIXED,s_h_pool,(off_t)phys);
+    ensure_chunks(phys,cb_range);
+    for (uint64_t done=0;s_has_whole_chunks && done<cb_range;) {
         const uint64_t at=phys+done;
         uint64_t next;
-        const Region *r=region_at(at,&next);
-        const uint64_t room=r ? r->phys+r->size-at : next-at, n=size-done<room ? size-done : room;
-        void *p = r && r->fd>=0
-            ? mmap((void *)(address+done),n,prot,MAP_SHARED|MAP_FIXED,r->fd,(off_t)(at-r->phys))
-            : mmap((void *)(address+done),n,prot,MAP_SHARED|MAP_FIXED,pool_fd,(off_t)at);
-        if (p==MAP_FAILED) {
-            static int reported;
-            if (reported++ < 4)
+        const Region *p_region=region_at(at,&next);
+        const uint64_t room=p_region ? p_region->phys+p_region->cb_range-at : next-at, cb_chunk=cb_range-done<room ? cb_range-done : room;
+        void *p_mapping = p_region && p_region->h_fd>=0
+            ? mmap((void *)(va_range+done),cb_chunk,prot,MAP_SHARED|MAP_FIXED,p_region->h_fd,(off_t)(at-p_region->phys))
+            : mmap((void *)(va_range+done),cb_chunk,prot,MAP_SHARED|MAP_FIXED,s_h_pool,(off_t)at);
+        if (p_mapping==MAP_FAILED) {
+            static int s_has_reported;
+            if (s_has_reported++ < 4)
                 fprintf(stderr,"Runtime: mapping direct memory %#" PRIx64 "+%#" PRIx64 " from %s failed: %s\n",
-                        at,n,r && r->fd>=0 ? "a GPU-visible dma-buf (whole-allocation chunk)" : "the memfd",strerror(errno));
+                        at,cb_chunk,p_region && p_region->h_fd>=0 ? "a GPU-visible dma-buf (whole-allocation chunk)" : "the memfd",strerror(errno));
             return MAP_FAILED;
         }
-        done+=n;
-        if (done==size) return (void *)address;
+        done+=cb_chunk;
+        if (done==cb_range) return (void *)va_range;
     }
-    for (uint64_t done=0;done<size;) {
+    for (uint64_t done=0;done<cb_range;) {
         const uint64_t at=phys+done, c=at/CHUNK;
-        const uint64_t room=c*CHUNK+chunk_size(c)-at, n=size-done<room ? size-done : room;
-        void *p = chunk_fds[c]>=0
-            ? mmap((void *)(address+done),n,prot,MAP_SHARED|MAP_FIXED,chunk_fds[c],(off_t)(at-c*CHUNK))
-            : mmap((void *)(address+done),n,prot,MAP_SHARED|MAP_FIXED,pool_fd,(off_t)at);
-        if (p==MAP_FAILED) {
-            static int reported;
-            if (reported++ < 4)
+        const uint64_t room=c*CHUNK+chunk_size(c)-at, cb_chunk=cb_range-done<room ? cb_range-done : room;
+        void *p_mapping = s_p_chunk_fds[c]>=0
+            ? mmap((void *)(va_range+done),cb_chunk,prot,MAP_SHARED|MAP_FIXED,s_p_chunk_fds[c],(off_t)(at-c*CHUNK))
+            : mmap((void *)(va_range+done),cb_chunk,prot,MAP_SHARED|MAP_FIXED,s_h_pool,(off_t)at);
+        if (p_mapping==MAP_FAILED) {
+            static int s_has_reported;
+            if (s_has_reported++ < 4)
                 fprintf(stderr,"Runtime: mapping direct memory %#" PRIx64 "+%#" PRIx64 " from %s failed: %s\n",
-                        at,n,chunk_fds[c]>=0 ? "a GPU-visible dma-buf chunk" : "the memfd",strerror(errno));
+                        at,cb_chunk,s_p_chunk_fds[c]>=0 ? "a GPU-visible dma-buf chunk" : "the memfd",strerror(errno));
             return MAP_FAILED;
         }
-        done+=n;
+        done+=cb_chunk;
     }
-    return (void *)address;
+    return (void *)va_range;
 }
 /* Returns released physical memory to zero: hole punching in the memfd, a clear in a chunk. */
-void zero_phys(uint64_t phys, uint64_t size) {
-    for (uint64_t done=0;done<size;) {
+void zero_phys(uint64_t phys, uint64_t cb_range) {
+    for (uint64_t done=0;done<cb_range;) {
         const uint64_t at=phys+done;
-        if (!chunk_fds || at>=POOL_SIZE) {
-            fallocate(pool_fd,FALLOC_FL_PUNCH_HOLE|FALLOC_FL_KEEP_SIZE,(off_t)at,(off_t)(size-done));
+        if (!s_p_chunk_fds || at>=POOL_SIZE) {
+            fallocate(s_h_pool,FALLOC_FL_PUNCH_HOLE|FALLOC_FL_KEEP_SIZE,(off_t)at,(off_t)(cb_range-done));
             return;
         }
-        if (whole_chunks) {
+        if (s_has_whole_chunks) {
             uint64_t next;
-            const Region *r=region_at(at,&next);
-            const uint64_t room=r ? r->phys+r->size-at : next-at, n=size-done<room ? size-done : room;
-            if (r && GPU_CHUNK(r->fd)) memset(backing_base+at,0,n);
-            else fallocate(pool_fd,FALLOC_FL_PUNCH_HOLE|FALLOC_FL_KEEP_SIZE,(off_t)at,(off_t)n);
-            done+=n;
+            const Region *p_region=region_at(at,&next);
+            const uint64_t room=p_region ? p_region->phys+p_region->cb_range-at : next-at, cb_chunk=cb_range-done<room ? cb_range-done : room;
+            if (p_region && GPU_CHUNK(p_region->h_fd)) memset(g_p_backing_base+at,0,cb_chunk);
+            else fallocate(s_h_pool,FALLOC_FL_PUNCH_HOLE|FALLOC_FL_KEEP_SIZE,(off_t)at,(off_t)cb_chunk);
+            done+=cb_chunk;
             continue;
         }
-        const uint64_t c=at/CHUNK, room=c*CHUNK+chunk_size(c)-at, n=size-done<room ? size-done : room;
-        if (GPU_CHUNK(chunk_fds[c])) memset(backing_base+at,0,n);
-        else fallocate(pool_fd,FALLOC_FL_PUNCH_HOLE|FALLOC_FL_KEEP_SIZE,(off_t)at,(off_t)n);
-        done+=n;
+        const uint64_t c=at/CHUNK, room=c*CHUNK+chunk_size(c)-at, cb_chunk=cb_range-done<room ? cb_range-done : room;
+        if (GPU_CHUNK(s_p_chunk_fds[c])) memset(g_p_backing_base+at,0,cb_chunk);
+        else fallocate(s_h_pool,FALLOC_FL_PUNCH_HOLE|FALLOC_FL_KEEP_SIZE,(off_t)at,(off_t)cb_chunk);
+        done+=cb_chunk;
     }
 }
 /* psport: the GPU library provides direct memory chunks (see CHUNK). */
-void runtime_memory_set_guest_chunk_whole(int whole) { whole_chunks=whole; }
+void runtime_memory_set_guest_chunk_whole(int whole) { s_has_whole_chunks=whole; }
 /* psport: the host address of direct memory phys in the backing view (host memory import). */
-void *runtime_memory_backing_pointer(uint64_t phys) { return backing_base ? backing_base+phys : NULL; }
-void runtime_memory_set_guest_chunk_allocator(int (*alloc)(uint64_t phys, uint64_t size)) {
+void *runtime_memory_backing_pointer(uint64_t phys) { return g_p_backing_base ? g_p_backing_base+phys : NULL; }
+void runtime_memory_set_guest_chunk_allocator(int (*pfn_alloc)(uint64_t phys, uint64_t cb_range)) {
     write_lock();
-    chunk_alloc=alloc;
+    s_pfn_chunk_alloc=pfn_alloc;
     write_unlock();
 }
-void queue_hook(int kind, uintptr_t address, uint64_t size) {
-    GpuRange hook = kind==HOOK_MAP ? hook_map : kind==HOOK_UNMAP ? hook_unmap : hook_invalidate;
-    if (!hook) return;
-    if (pending_count==sizeof(pending)/sizeof(*pending)) { fputs("STOP: GPU hook queue overflow\n",stderr); runtime_stop(21); }
-    pending[pending_count++]=(PendingHook){kind,address,size};
+void queue_hook(int kind, uintptr_t va_range, uint64_t cb_range) {
+    GpuRange pfn_hook = kind==HOOK_MAP ? g_pfn_hook_map : kind==HOOK_UNMAP ? g_pfn_hook_unmap : g_pfn_hook_invalidate;
+    if (!pfn_hook) return;
+    if (g_c_pending_hooks==sizeof(s_pending)/sizeof(*s_pending)) { fputs("STOP: GPU hook queue overflow\n",stderr); runtime_stop(21); }
+    s_pending[g_c_pending_hooks++]=(PendingHook){kind,va_range,cb_range};
 }
 /* Runs queued GPU notifications; callers invoke it after dropping the lock. */
 void flush_hooks(void) {
     for (;;) {
         write_lock();
-        if (!pending_count) { write_unlock(); return; }
-        PendingHook h=pending[0];
-        memmove(pending,pending+1,--pending_count*sizeof(*pending));
-        GpuRange hook = h.kind==HOOK_MAP ? hook_map : h.kind==HOOK_UNMAP ? hook_unmap : hook_invalidate;
+        if (!g_c_pending_hooks) { write_unlock(); return; }
+        PendingHook h=s_pending[0];
+        memmove(s_pending,s_pending+1,--g_c_pending_hooks*sizeof(*s_pending));
+        GpuRange pfn_hook = h.kind==HOOK_MAP ? g_pfn_hook_map : h.kind==HOOK_UNMAP ? g_pfn_hook_unmap : g_pfn_hook_invalidate;
         write_unlock();
-        if (hook) hook(h.address,h.size);
+        if (pfn_hook) pfn_hook(h.va_range,h.cb_range);
     }
 }
-static int flex_test(uint64_t page) { return (int)((flex_bitmap[page/64]>>(page%64))&1); }
-static void flex_set(uint64_t first, uint64_t count, int used) {
-    for (uint64_t p=first;p<first+count;++p) {
-        if (used) flex_bitmap[p/64]|=UINT64_C(1)<<(p%64); else flex_bitmap[p/64]&=~(UINT64_C(1)<<(p%64));
+static int flex_test(uint64_t page) { return (int)((s_flex_bitmap[page/64]>>(page%64))&1); }
+static void flex_set(uint64_t first, uint64_t c_pages, int used) {
+    for (uint64_t p=first;p<first+c_pages;++p) {
+        if (used) s_flex_bitmap[p/64]|=UINT64_C(1)<<(p%64); else s_flex_bitmap[p/64]&=~(UINT64_C(1)<<(p%64));
     }
 }
-uint64_t flex_alloc(uint64_t size) {
-    uint64_t pages=size/PAGE, total=FLEX_SPAN/PAGE, run=0;
-    for (uint64_t p=0;p<total;++p) {
+uint64_t flex_alloc(uint64_t cb_range) {
+    uint64_t pages=cb_range/PAGE, c_span_pages=FLEX_SPAN/PAGE, run=0;
+    for (uint64_t p=0;p<c_span_pages;++p) {
         run = flex_test(p) ? 0 : run+1;
         if (run==pages) { flex_set(p+1-pages,pages,1); return POOL_SIZE+(p+1-pages)*PAGE; }
     }
     return UINT64_MAX;
 }
-void flex_free(uint64_t phys, uint64_t size) {
-    flex_set((phys-POOL_SIZE)/PAGE,size/PAGE,0);
-    fallocate(pool_fd,FALLOC_FL_PUNCH_HOLE|FALLOC_FL_KEEP_SIZE,(off_t)phys,(off_t)size);
+void flex_free(uint64_t phys, uint64_t cb_range) {
+    flex_set((phys-POOL_SIZE)/PAGE,cb_range/PAGE,0);
+    fallocate(s_h_pool,FALLOC_FL_PUNCH_HOLE|FALLOC_FL_KEEP_SIZE,(off_t)phys,(off_t)cb_range);
 }
 size_t vma_index(uintptr_t a) { /* first VMA with end > a */
-    size_t lo=0, hi=vma_count;
-    while (lo<hi) { size_t mid=(lo+hi)/2; if (vmas[mid].end<=a) lo=mid+1; else hi=mid; }
+    size_t lo=0, hi=g_c_vmas;
+    while (lo<hi) { size_t mid=(lo+hi)/2; if (g_p_vmas[mid].end<=a) lo=mid+1; else hi=mid; }
     return lo;
 }
 static int vma_insert(size_t at, Vma v) {
-    if (vma_count==vma_capacity) {
-        size_t capacity=vma_capacity ? vma_capacity*2 : 256;
-        Vma *next=realloc(vmas,capacity*sizeof(*vmas));
-        if (!next) return -1;
-        vmas=next; vma_capacity=capacity;
+    if (g_c_vmas==s_c_vma_capacity) {
+        size_t c_capacity=s_c_vma_capacity ? s_c_vma_capacity*2 : 256;
+        Vma *p_next=realloc(g_p_vmas,c_capacity*sizeof(*g_p_vmas));
+        if (!p_next) return -1;
+        g_p_vmas=p_next; s_c_vma_capacity=c_capacity;
     }
-    memmove(vmas+at+1,vmas+at,(vma_count-at)*sizeof(*vmas));
-    vmas[at]=v; ++vma_count; return 0;
+    memmove(g_p_vmas+at+1,g_p_vmas+at,(g_c_vmas-at)*sizeof(*g_p_vmas));
+    g_p_vmas[at]=v; ++g_c_vmas; return 0;
 }
-static void vma_erase(size_t at, size_t n) {
-    memmove(vmas+at,vmas+at+n,(vma_count-at-n)*sizeof(*vmas)); vma_count-=n;
+static void vma_erase(size_t at, size_t c_vmas) {
+    memmove(g_p_vmas+at,g_p_vmas+at+c_vmas,(g_c_vmas-at-c_vmas)*sizeof(*g_p_vmas)); g_c_vmas-=c_vmas;
 }
 static int split_at(uintptr_t a) {
     size_t i=vma_index(a);
-    if (i==vma_count || vmas[i].start>=a) return 0;
-    Vma right=vmas[i];
+    if (i==g_c_vmas || g_p_vmas[i].start>=a) return 0;
+    Vma right=g_p_vmas[i];
     right.start=a;
-    if (right.kind==KIND_DIRECT || right.kind==KIND_FILE) right.phys+=a-vmas[i].start;
-    if (right.view) right.view+=a-vmas[i].start;
-    vmas[i].end=a;
+    if (right.kind==KIND_DIRECT || right.kind==KIND_FILE) right.phys+=a-g_p_vmas[i].start;
+    if (right.p_view) right.p_view+=a-g_p_vmas[i].start;
+    g_p_vmas[i].end=a;
     return vma_insert(i+1,right);
 }
 /* Range [start,end) split on its edges; returns the first index inside it. */
-size_t carve(uintptr_t start, uintptr_t end, int *error) {
-    *error = split_at(start) || split_at(end);
+size_t carve(uintptr_t start, uintptr_t end, int *p_error) {
+    *p_error = split_at(start) || split_at(end);
     return vma_index(start);
 }
-int covered(uintptr_t start, uintptr_t end, int allow_reserved) {
+int covered(uintptr_t start, uintptr_t end, int should_allow_reserved) {
     size_t i=vma_index(start); uintptr_t at=start;
     for (; at<end; ++i) {
-        if (i==vma_count || vmas[i].start>at || (!allow_reserved && vmas[i].kind==KIND_RESERVED)) return 0;
-        at=vmas[i].end;
+        if (i==g_c_vmas || g_p_vmas[i].start>at || (!should_allow_reserved && g_p_vmas[i].kind==KIND_RESERVED)) return 0;
+        at=g_p_vmas[i].end;
     }
     return 1;
 }
 static int overlaps(uintptr_t start, uintptr_t end, int ignore_reserved) {
-    for (size_t i=vma_index(start); i<vma_count && vmas[i].start<end; ++i)
-        if (!ignore_reserved || vmas[i].kind!=KIND_RESERVED) return 1;
+    for (size_t i=vma_index(start); i<g_c_vmas && g_p_vmas[i].start<end; ++i)
+        if (!ignore_reserved || g_p_vmas[i].kind!=KIND_RESERVED) return 1;
     return 0;
 }
 /* First-fit search in the PS4 user range, starting from the hint. */
-static uintptr_t find_free(uintptr_t hint, uint64_t size, uint64_t alignment) {
+static uintptr_t find_free(uintptr_t hint, uint64_t cb_range, uint64_t alignment) {
     uintptr_t at=align_up(hint<USER_MIN ? USER_MIN : hint, alignment);
-    for (size_t i=vma_index(at); at+size<=USER_MAX; ++i) {
-        if (i==vma_count || vmas[i].start>=at+size) return at;
-        at=align_up(vmas[i].end,alignment);
+    for (size_t i=vma_index(at); at+cb_range<=USER_MAX; ++i) {
+        if (i==g_c_vmas || g_p_vmas[i].start>=at+cb_range) return at;
+        at=align_up(g_p_vmas[i].end,alignment);
     }
     return 0;
 }
 void drop_range(uintptr_t start, uintptr_t end) {
-    int error; size_t i=carve(start,end,&error), n=0;
-    while (i+n<vma_count && vmas[i+n].end<=end && vmas[i+n].start>=start) {
-        if (vmas[i+n].kind==KIND_FLEXIBLE) {
-            flexible_bytes-=vmas[i+n].end-vmas[i+n].start;
-            flex_free(vmas[i+n].phys,vmas[i+n].end-vmas[i+n].start);
+    int error; size_t i=carve(start,end,&error), c_dropped=0;
+    while (i+c_dropped<g_c_vmas && g_p_vmas[i+c_dropped].end<=end && g_p_vmas[i+c_dropped].start>=start) {
+        if (g_p_vmas[i+c_dropped].kind==KIND_FLEXIBLE) {
+            g_cb_flexible-=g_p_vmas[i+c_dropped].end-g_p_vmas[i+c_dropped].start;
+            flex_free(g_p_vmas[i+c_dropped].phys,g_p_vmas[i+c_dropped].end-g_p_vmas[i+c_dropped].start);
         }
-        if (vmas[i+n].view) munmap(vmas[i+n].view,vmas[i+n].end-vmas[i+n].start);
-        ++n;
+        if (g_p_vmas[i+c_dropped].p_view) munmap(g_p_vmas[i+c_dropped].p_view,g_p_vmas[i+c_dropped].end-g_p_vmas[i+c_dropped].start);
+        ++c_dropped;
     }
-    vma_erase(i,n);
+    vma_erase(i,c_dropped);
 }
-static int32_t place_backed(void **inout, uint64_t size, int prot, int flags, uint64_t alignment,
+static int32_t place_backed(void **pp_inout, uint64_t cb_range, int prot, int flags, uint64_t alignment,
                             int kind, int type, uint64_t phys, int file) {
-    uintptr_t address=(uintptr_t)*inout;
+    uintptr_t va_range=(uintptr_t)*pp_inout;
     if (flags & MAP_FIXED_FLAG) {
-        if (!address || address%PAGE) return INVALID;
-        if ((flags & MAP_NO_OVERWRITE) && overlaps(address,address+size,1)) return NO_MEMORY;
+        if (!va_range || va_range%PAGE) return INVALID;
+        if ((flags & MAP_NO_OVERWRITE) && overlaps(va_range,va_range+cb_range,1)) return NO_MEMORY;
     } else {
-        address=find_free(address,size,alignment);
-        if (!address) return NO_MEMORY;
+        va_range=find_free(va_range,cb_range,alignment);
+        if (!va_range) return NO_MEMORY;
     }
-    void *mapped = kind==KIND_RESERVED
-        ? mmap((void *)address,size,PROT_NONE,MAP_PRIVATE|MAP_ANONYMOUS|MAP_NORESERVE|MAP_FIXED,-1,0)
-        : kind==KIND_FILE ? mmap((void *)address,size,host_prot(prot),MAP_SHARED|MAP_FIXED,file,(off_t)phys)
-        : map_phys(address,size,host_prot(prot),phys);
-    if (mapped==MAP_FAILED) return kind==KIND_FILE && errno==EACCES ? ACCESS : NO_MEMORY;
-    unsigned char *view=NULL;
+    void *p_mapped = kind==KIND_RESERVED
+        ? mmap((void *)va_range,cb_range,PROT_NONE,MAP_PRIVATE|MAP_ANONYMOUS|MAP_NORESERVE|MAP_FIXED,-1,0)
+        : kind==KIND_FILE ? mmap((void *)va_range,cb_range,host_prot(prot),MAP_SHARED|MAP_FIXED,file,(off_t)phys)
+        : map_phys(va_range,cb_range,host_prot(prot),phys);
+    if (p_mapped==MAP_FAILED) return kind==KIND_FILE && errno==EACCES ? ACCESS : NO_MEMORY;
+    unsigned char *p_view=NULL;
     if (kind==KIND_FILE) {
-        view=mmap(NULL,size,PROT_READ|PROT_WRITE,MAP_SHARED,file,(off_t)phys);
-        if (view==MAP_FAILED) {
-            view=NULL;
+        p_view=mmap(NULL,cb_range,PROT_READ|PROT_WRITE,MAP_SHARED,file,(off_t)phys);
+        if (p_view==MAP_FAILED) {
+            p_view=NULL;
             printf("Runtime: file mapping %p+%#" PRIx64 " has no host view (%s): the GPU's writes to it are dropped\n",
-                   mapped,size,strerror(errno));
+                   p_mapped,cb_range,strerror(errno));
         }
     }
-    drop_range(address,address+size);
-    trap_forget(address,address+size); /* a new mapping starts without traps */
-    if (vma_insert(vma_index(address),(Vma){address,address+size,kind,prot,type,phys,0,view})) return NO_MEMORY;
-    if (kind==KIND_FLEXIBLE) flexible_bytes+=size;
-    if (kind!=KIND_RESERVED) queue_hook(HOOK_MAP,address,size);
-    *inout=mapped;
+    drop_range(va_range,va_range+cb_range);
+    trap_forget(va_range,va_range+cb_range); /* a new mapping starts without traps */
+    if (vma_insert(vma_index(va_range),(Vma){va_range,va_range+cb_range,kind,prot,type,phys,0,p_view})) return NO_MEMORY;
+    if (kind==KIND_FLEXIBLE) g_cb_flexible+=cb_range;
+    if (kind!=KIND_RESERVED) queue_hook(HOOK_MAP,va_range,cb_range);
+    *pp_inout=p_mapped;
     return 0;
 }
 /* Places a host mapping; with MAP_FIXED it replaces what the guest had there. */
-int32_t place(void **inout, uint64_t size, int prot, int flags, uint64_t alignment,
+int32_t place(void **pp_inout, uint64_t cb_range, int prot, int flags, uint64_t alignment,
               int kind, int type, uint64_t phys) {
-    return place_backed(inout,size,prot,flags,alignment,kind,type,phys,-1);
+    return place_backed(pp_inout,cb_range,prot,flags,alignment,kind,type,phys,-1);
 }
 /* A shared mapping of a host file at offset: every mapping of the same file aliases it, and
  * writes reach the file. */
-int32_t place_file(void **inout, uint64_t size, int prot, int flags, int file, uint64_t offset) {
-    return place_backed(inout,size,prot,flags,PAGE,KIND_FILE,0,offset,file);
+int32_t place_file(void **pp_inout, uint64_t cb_range, int prot, int flags, int file, uint64_t off_file) {
+    return place_backed(pp_inout,cb_range,prot,flags,PAGE,KIND_FILE,0,off_file,file);
 }
 /* Host-owned memory the guest can see (image, stacks, trampolines) lives in
  * [LOW_MIN, USER_MIN): PS4 code packs pointers into 40-bit fields. */
 #define LOW_MIN UINT64_C(0x0800000000)
-static uintptr_t low_next=LOW_MIN;
-void *runtime_low_map(size_t size, int prot) {
-    size=align_up(size,PAGE);
+static uintptr_t s_low_next=LOW_MIN;
+void *runtime_low_map(size_t cb_range, int prot) {
+    cb_range=align_up(cb_range,PAGE);
     write_lock();
-    void *p=MAP_FAILED;
-    while (low_next+size<=USER_MIN) {
-        p=mmap((void *)low_next,size,prot,MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED_NOREPLACE,-1,0);
-        low_next+=size+PAGE; /* unmapped gap catches overruns */
-        if (p!=MAP_FAILED) break;
+    void *p_mapping=MAP_FAILED;
+    while (s_low_next+cb_range<=USER_MIN) {
+        p_mapping=mmap((void *)s_low_next,cb_range,prot,MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED_NOREPLACE,-1,0);
+        s_low_next+=cb_range+PAGE; /* unmapped gap catches overruns */
+        if (p_mapping!=MAP_FAILED) break;
     }
     write_unlock();
-    return p==MAP_FAILED ? NULL : p;
+    return p_mapping==MAP_FAILED ? NULL : p_mapping;
 }
 #else
 void *runtime_low_map(size_t size, int prot) { (void)size; (void)prot; return NULL; }
