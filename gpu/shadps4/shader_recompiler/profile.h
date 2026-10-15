@@ -62,6 +62,10 @@ struct Profile {
     /// psport: the game's buffer copy compute shader (its GCN program hash, from the game's profile;
     /// 0 = none): its paged stores go through to the game's memory as well.
     u64 buffer_copy_shader_hash{};
+    /// psport: the game's scene size (Game::UpscalerPlacement), the logical space reduced scene
+    /// targets' FragCoord is converted back to.
+    u32 scene_width{1920};
+    u32 scene_height{1080};
 
     bool operator==(const Profile&) const = default;
 };

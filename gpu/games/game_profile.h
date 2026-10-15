@@ -86,6 +86,14 @@ struct UpscalerPlacement {
     /// Vertex shaders of the UI's draws (ui_shader is one even when not listed): when the scene is
     /// rendered below the output size, their draws go to the output-size UI instead.
     std::span<const std::uint64_t> ui_movie_shaders;
+    /// The size of the game's scene targets, which scene scaling (presets, outputs other than
+    /// 1080p) replaces with proxies, and the divisor of its post-processing targets
+    /// (scene_width / post_divisor wide), scaled by the same factor; post_divisor 1 when it has
+    /// none smaller. The defaults hold without a profile too: the scene scaling runs for any game
+    /// whose output is not 1080p.
+    std::uint32_t scene_width = 1920;
+    std::uint32_t scene_height = 1080;
+    std::uint32_t post_divisor = 2;
     CameraConstants camera;
     BonePalettes bone_palettes;
 };

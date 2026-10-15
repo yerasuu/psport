@@ -25,11 +25,14 @@ public:
     ~SceneTargets();
     bool SetSize(SceneResolution::Size);
     SceneResolution::Size Size() const { return m_size; }
-    bool Reduced() const { return m_size != SceneResolution::Size{}; }
-    /// A reduced proxy can stand in for the image: a 1920x1080 scene target or, scaled by
-    /// the same factor, a half-resolution (960x540) one (toggle SceneHalfRes).
+    /// The game's scene size (Game::UpscalerPlacement::scene_width), which Size() replaces.
+    SceneResolution::Size NativeSize() const { return m_native_size; }
+    bool Reduced() const { return m_size != m_native_size; }
+    /// A reduced proxy can stand in for the image: a scene target of the native size or, scaled
+    /// by the same factor, a post-processing one (native size / post divisor; toggle
+    /// SceneHalfRes).
     bool Eligible(const VideoCore::Image&) const;
-    /// Eligible at the full scene size (1920x1080): the upscaler's inputs, the scene start.
+    /// Eligible at the native scene size: the upscaler's inputs, the scene start.
     bool EligibleScene(const VideoCore::Image&) const;
     /// The proxy size of an eligible image: the scene size divided like the native size.
     SceneResolution::Size ProxySize(const VideoCore::Image&, u32 level = 0) const;
@@ -86,6 +89,7 @@ private:
     vk::FormatFeatureFlags Features(vk::Format) const;
     bool Blittable(vk::Format) const;
     bool ShaderResampled(const VideoCore::Image&) const;
+    u32 SizeDivisor(const VideoCore::ImageInfo&) const;
     void Resample(vk::Image src, vk::Image dst, const VideoCore::Image& original,
                   vk::Extent2D dst_size);
     vk::Pipeline ResamplePipeline(vk::Format, bool is_stencil);
@@ -96,6 +100,8 @@ private:
     Scheduler& m_scheduler;
     Runtime& m_runtime;
     Lookup m_lookup;
+    SceneResolution::Size m_native_size;
+    u32 m_post_divisor = 1;
     SceneResolution::Size m_size;
     std::unordered_map<u64, std::unique_ptr<Entry>> m_entries; ///< by Key(uid, level)
     std::unordered_set<u64> m_tracked; ///< uids with proxies

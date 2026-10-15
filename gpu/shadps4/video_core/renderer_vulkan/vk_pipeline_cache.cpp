@@ -387,6 +387,8 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
         .paged_buffers = VideoCore::BufferCache::LayerPagedActive(),
         // The game's buffer copy shader, from its profile (games/).
         .buffer_copy_shader_hash = Game::BufferCopyShader(),
+        .scene_width = GetUpscalerPlacement().scene_width,
+        .scene_height = GetUpscalerPlacement().scene_height,
     };
     WarmUp();
 
