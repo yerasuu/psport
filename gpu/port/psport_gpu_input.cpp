@@ -1,0 +1,78 @@
+// psport: the game window's input for the C runtime: overlay, mouse, keyboard and text input.
+#include <algorithm>
+#include <cstring>
+#include <string>
+#include "../psport_gpu.h"
+#include "psport_overlay.h"
+#include "sdl_window.h"
+
+extern Frontend::WindowSDL* g_window;
+
+extern "C" int psport_gpu_overlay_captures_input(void) {
+    return PsOverlay::CapturesInput() ? 1 : 0;
+}
+
+extern "C" int psport_gpu_overlay_pad_file_press(int guide, int cross, int circle) {
+    return PsOverlay::PadFilePress(guide != 0, cross != 0, circle != 0) ? 1 : 0;
+}
+
+extern "C" void psport_gpu_mouse_take(double* p_dx, double* p_dy, int* p_wheel_up, int* p_wheel_down) {
+    double x = 0, y = 0;
+    int is_up = 0, is_down = 0;
+    if (g_window) {
+        g_window->TakeMouse(x, y, is_up, is_down);
+    }
+    *p_dx = x;
+    *p_dy = y;
+    *p_wheel_up = is_up;
+    *p_wheel_down = is_down;
+}
+
+extern "C" int psport_gpu_mouse_captured(void) {
+    return g_window && g_window->MouseCaptured() ? 1 : 0;
+}
+
+extern "C" int psport_gpu_game_mouse_take(int32_t* p_dx, int32_t* p_dy, int32_t* p_wheel, int32_t* p_tilt, uint32_t* p_buttons) {
+    *p_dx = *p_dy = *p_wheel = *p_tilt = 0;
+    *p_buttons = 0;
+    return g_window && g_window->TakeGameMouse(*p_dx, *p_dy, *p_wheel, *p_tilt, *p_buttons) ? 1 : 0;
+}
+
+extern "C" void psport_gpu_game_keyboard_open(int is_open) {
+    Frontend::WindowSDL::OpenGameKeyboard(is_open != 0);
+}
+
+extern "C" int psport_gpu_game_keyboard_take(PsKeyEvent* p_events, int max, int* p_keyboard, uint32_t* p_dropped) {
+    bool is_host = false;
+    u32 lost = 0;
+    const int c_keys = g_window ? g_window->TakeGameKeys(p_events, max, is_host, lost) : 0;
+    *p_keyboard = is_host ? 1 : 0;
+    *p_dropped = lost;
+    return c_keys;
+}
+
+extern "C" void psport_gpu_mouse_look_enable(int is_enabled) {
+    Frontend::WindowSDL::EnableMouseLook(is_enabled != 0);
+}
+
+extern "C" int psport_gpu_text_input_begin(const char* sz_initial, const char* sz_prompt) {
+    if (!g_window) return 0;
+    g_window->BeginTextInput(sz_initial ? sz_initial : "", sz_prompt ? sz_prompt : "Text");
+    return 1;
+}
+
+extern "C" void psport_gpu_text_input_end(void) {
+    if (g_window) g_window->EndTextInput();
+}
+
+extern "C" int psport_gpu_text_input_poll(char* sz_out, uint64_t cb_out) {
+    if (!g_window) return 2;
+    std::string text;
+    const int state = g_window->PollTextInput(text);
+    if (cb_out) {
+        const size_t cb_copy = std::min<size_t>(text.size(), cb_out - 1);
+        std::memcpy(sz_out, text.data(), cb_copy);
+        sz_out[cb_copy] = 0;
+    }
+    return state;
+}
