@@ -3,7 +3,7 @@
  *   - network cable unplugged: NetCtl disconnected, sockets on loopback only (runtime_socket.c),
  *     no HTTP transfer (runtime_http.c);
  *   - common dialogs complete immediately (no UI is drawn yet);
- *   - no PlayStation VR headset is connected.
+ *   - no PlayStation VR headset is connected (runtime_vr.c).
  * Every entry here is an explicit contract; unknown functions still stop. */
 #define _GNU_SOURCE
 #include "runtime.h"
@@ -32,10 +32,6 @@
 #define NET_EINVAL ((int32_t)0x80410116)
 #define DIALOG_NOT_INITIALIZED ((int32_t)0x80B80003)
 #define AUDIO_IN_NOT_OPENED ((int32_t)0x80260109)
-#define HMD_ALREADY_INITIALIZED ((int32_t)0x81110001)
-#define HMD_NOT_INITIALIZED ((int32_t)0x81110002)
-#define HMD_HANDLE_INVALID ((int32_t)0x81110003)
-#define HMD_PARAMETER_NULL ((int32_t)0x81110008)
 #define MOVE_NO_CONTROLLER 1
 #define MOVE_NOT_INIT ((int32_t)0x80EE0001)
 #define MOVE_ALREADY_INIT ((int32_t)0x80EE0002)
@@ -415,6 +411,15 @@ static ABI int32_t hmd_setup_result(int32_t *result) {
     return 0;
 }
 static ABI int32_t hmd_setup_close(void) { dialogs[11].status=3; return 0; }
+/* SceSocialScreenDialogResult: result, reserved. Separate mode needs the PS VR processor unit, so
+ * the user can only back out: SCE_COMMON_DIALOG_RESULT_USER_CANCELED. */
+static ABI int32_t social_result(int32_t *p_out_result) {
+    if (dialogs[10].status!=3) return (int32_t)0x80B80005; /* NOT_FINISHED */
+    if (!p_out_result) return (int32_t)0x80B8000D;         /* ARG_NULL */
+    p_out_result[0]=1;
+    return 0;
+}
+static ABI int32_t social_close(void) { dialogs[10].status=3; return 0; }
 /* ScePlayGoDialogResult: result, reserved. Every chunk is installed, so the dialog has nothing to
  * wait for and ends as accepted: SCE_COMMON_DIALOG_RESULT_OK. */
 static ABI int32_t playgo_result(int32_t *p_out_result) {
@@ -514,28 +519,6 @@ static ABI int32_t common_is_used(void) {
     for (size_t i=0;i<sizeof(dialogs)/sizeof(*dialogs);++i) if (dialogs[i].initialized) return 1;
     return ime.running;
 }
-
-/* ---- PlayStation VR: the library runs, no headset is detected ---- */
-static int hmd_initialized;
-static ABI int32_t hmd_init(const void *param) {
-    if (hmd_initialized) return HMD_ALREADY_INITIALIZED;
-    if (!param) return HMD_PARAMETER_NULL;
-    hmd_initialized=1; return 0;
-}
-static ABI int32_t hmd_term(void) {
-    if (!hmd_initialized) return HMD_NOT_INITIALIZED;
-    hmd_initialized=0; return 0;
-}
-/* OrbisHmdDeviceInformation (32 bytes): status, user, reserved, panel size, latencies, HMU mount. */
-static ABI int32_t hmd_device_info(int32_t *info) {
-    if (!info) return HMD_PARAMETER_NULL;
-    if (!hmd_initialized) return HMD_NOT_INITIALIZED;
-    memset(info,0,32);
-    info[0]=2; /* SCE_HMD_DEVICE_STATUS_NOT_DETECTED */
-    info[1]=-1;
-    return 0;
-}
-static ABI int32_t hmd_handle_invalid(void) { return HMD_HANDLE_INVALID; }
 
 /* ---- DiscMap: the game is fully installed, no disc bitmap exists ---- */
 #define DISC_MAP_NO_BITMAP ((int32_t)0x81100004)
@@ -716,7 +699,8 @@ static const RuntimeExport exports[]={
     {"sceSigninDialogTerminate",signin_term}, {"sceSigninDialogGetResult",signin_result},
     {"sceSocialScreenDialogInitialize",social_init}, {"sceSocialScreenDialogOpen",social_open},
     {"sceSocialScreenDialogUpdateStatus",social_status}, {"sceSocialScreenDialogGetStatus",social_status},
-    {"sceSocialScreenDialogTerminate",social_term},
+    {"sceSocialScreenDialogTerminate",social_term}, {"sceSocialScreenDialogGetResult",social_result},
+    {"sceSocialScreenDialogClose",social_close},
     {"sceErrorDialogInitialize",error_init}, {"sceErrorDialogOpen",error_open},
     {"sceErrorDialogUpdateStatus",error_status}, {"sceErrorDialogGetStatus",error_status},
     {"sceErrorDialogClose",error_close}, {"sceErrorDialogTerminate",error_term},
@@ -728,9 +712,6 @@ static const RuntimeExport exports[]={
     {"scePlayGoDialogUpdateStatus",playgo_status}, {"scePlayGoDialogGetStatus",playgo_status},
     {"scePlayGoDialogGetResult",playgo_result}, {"scePlayGoDialogClose",playgo_close},
     {"scePlayGoDialogTerminate",playgo_term}, {"sceCommonDialogIsUsed",common_is_used},
-    {"sceHmdInitialize",hmd_init}, {"sceHmdInitialize315",hmd_init}, {"sceHmdTerminate",hmd_term},
-    {"sceHmdGetDeviceInformation",hmd_device_info},
-    {"sceHmdGetDeviceInformationByHandle",hmd_handle_invalid}, {"sceHmdGetFieldOfView",hmd_handle_invalid},
     {"sceAudioInOpen",audio_in_open}, {"sceAudioInHqOpen",audio_in_open}, {"sceAudioInGetSilentState",audio_in_open},
     {"sceMoveInit",move_init}, {"sceMoveOpen",move_open}, {"sceMoveGetDeviceInfo",move_device_info},
     {"sceMoveReadStateRecent",move_read_recent}, {"sceMoveSetLightSphere",move_no_controller},

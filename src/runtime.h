@@ -155,6 +155,8 @@ uintptr_t runtime_playgo_resolve(const char *name);
 uintptr_t runtime_devices_resolve(const char *sz_name);
 /* Remote Play, Share Play, video recording and core dumps, none of them running (runtime_capture.c). */
 uintptr_t runtime_capture_resolve(const char *sz_name);
+/* PlayStation VR with no headset connected: Hmd, VrTracker, SocialScreen (runtime_vr.c). */
+uintptr_t runtime_vr_resolve(const char *sz_name);
 uintptr_t runtime_voice_resolve(const char *name);
 /* Offline libSceNet sockets (runtime_socket.c), consulted by runtime_services_resolve. */
 uintptr_t runtime_socket_resolve(const char *name);

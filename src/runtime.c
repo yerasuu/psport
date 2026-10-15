@@ -318,6 +318,8 @@ uintptr_t runtime_resolve(const char *name, int is_data) {
     if (va_devices) return va_devices;
     uintptr_t va_capture = runtime_capture_resolve(name);
     if (va_capture) return va_capture;
+    uintptr_t va_vr = runtime_vr_resolve(name);
+    if (va_vr) return va_vr;
     uintptr_t mouse = runtime_mouse_resolve(name);
     if (mouse) return mouse;
     uintptr_t keyboard = runtime_keyboard_resolve(name);
