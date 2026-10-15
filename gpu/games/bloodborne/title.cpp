@@ -30,10 +30,16 @@ constexpr const char* ModFolders[] = {"action", "adhoc",    "chr",   "event", "f
                                       "menu",   "movie",    "msg",   "mtd",   "obj",     "other",  "param",
                                       "paramdef", "parts",  "remo",  "script", "sfx",    "shader", "sound"};
 
+constexpr RuntimeQuirkId Quirks[] = {RUNTIME_QUIRK_bloodborne_save_sound_flag};
+
 /// The "sound hack" (rainvmaker, from the Diegolix29 shadPS4 fork): the game data save carries a
 /// flag at 0x204E of SPRJ0005/userdata0010; with it clear, parts of the game's audio (e.g. the
-/// player's weapon sounds) never play. PS_SOUND_HACK=0 leaves saves untouched.
+/// player's weapon sounds) never play. A WORKAROUND quirk until #348 finds the general fix:
+/// PS_QUIRKS=-bloodborne_save_sound_flag, or the older PS_SOUND_HACK=0, leaves saves untouched.
 void PrepareSaves(const char* sz_saves, const char* sz_save_title) {
+    if (!PsQuirk::Active(RUNTIME_QUIRK_bloodborne_save_sound_flag)) {
+        return;
+    }
     if (const char* sz_env = std::getenv("PS_SOUND_HACK"); sz_env && sz_env[0] == '0') {
         return;
     }
@@ -83,6 +89,7 @@ extern const Title BloodborneTitle = {
                .sz_community_server = "https://thehuntersdream.com",
                .community_api_port = 18671,
                .sz_summon_route = "/summon_messenger"},
+    .quirks = Quirks,
     .p_profile = &BloodborneProfile,
 };
 

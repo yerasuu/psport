@@ -12,9 +12,14 @@
     _Static_assert(sizeof("" sz_reference) > 1, "quirk " #id ": the reference must be a non-empty string literal"); \
     enum { KIND_OF_##id = (int)RUNTIME_QUIRK_KIND_##kind };
 #define QUIRK_GPU(id, vendor, driver_id, sz_device, version_first, version_last)                               \
+    _Static_assert((int)KIND_OF_##id != (int)RUNTIME_QUIRK_KIND_WORKAROUND,                                     \
+                   "quirk " #id ": a WORKAROUND applies only to the titles that declare it, never to a GPU");     \
     _Static_assert((int)KIND_OF_##id == (int)RUNTIME_QUIRK_KIND_HOST, "quirk " #id ": only HOST quirks match on the GPU"); \
     _Static_assert(sizeof("" sz_device) > 0, "quirk " #id ": the device is a string literal");
-#define QUIRK_TRAITS(id, traits) _Static_assert((traits) != 0, "quirk " #id ": an empty trait mask matches nothing");
+#define QUIRK_TRAITS(id, traits)                                                                                   \
+    _Static_assert((int)KIND_OF_##id != (int)RUNTIME_QUIRK_KIND_WORKAROUND,                                     \
+                   "quirk " #id ": a WORKAROUND applies only to the titles that declare it, never to middleware"); \
+    _Static_assert((traits) != 0, "quirk " #id ": an empty trait mask matches nothing");
 #include "runtime_quirks.inc"
 #undef QUIRK
 #undef QUIRK_GPU
@@ -75,7 +80,7 @@ static int s_is_none, s_is_profile_off, s_has_configured, s_has_noted_gpu;
 static char s_summaries[2][4096];
 static const char *s_sz_summary = "Quirks: 0 active\n";
 
-typedef enum { POLICY_ACTIVE, POLICY_FORCED, POLICY_PENDING, POLICY_USER, POLICY_NONE, POLICY_PROFILE_OFF } Policy;
+typedef enum { POLICY_ACTIVE, POLICY_FORCED, POLICY_USER, POLICY_NONE, POLICY_PROFILE_OFF } Policy;
 
 static int has(const QuirkSet set, RuntimeQuirkId id) { return (int)((set[id / 64] >> (id % 64)) & 1); }
 static void put_in(QuirkSet set, RuntimeQuirkId id) { set[id / 64] |= UINT64_C(1) << (id % 64); }
@@ -97,7 +102,7 @@ static int find(const char *sz_id, RuntimeQuirkId *p_out_id) {
 }
 
 /* PS_QUIRKS, read once: comma-separated, left to right; "none" turns off every quirk but LAUNCH,
- * "-id" one quirk and "+id" forces one on. */
+ * "-id" one quirk and "+id" forces one on (a WORKAROUND only for the titles that declare it). */
 static void configure(void) {
     if (s_has_configured) return;
     s_has_configured = 1;
@@ -128,11 +133,10 @@ static void configure(void) {
     free(sz_copy);
 }
 
-/* WORKAROUND stays off whatever PS_QUIRKS says until decision #331 sets the policy for
- * title-specific fixes of the emulation. */
+/* A WORKAROUND makes its title work (decision #331), so PS_GAME_PROFILE=none keeps it as it keeps
+ * LAUNCH; PS_QUIRKS=none turns it off with the other corrections. */
 static Policy decide(RuntimeQuirkId id) {
     const RuntimeQuirkKind kind = s_quirks[id].kind;
-    if (kind == RUNTIME_QUIRK_KIND_WORKAROUND) return POLICY_PENDING;
     if (has(s_forced, id)) return POLICY_FORCED;
     if (has(s_disabled, id)) return POLICY_USER;
     if (s_is_none && kind != RUNTIME_QUIRK_KIND_LAUNCH) return POLICY_NONE;
@@ -144,7 +148,6 @@ static int describe_policy(char *sz_out, size_t cb_out, RuntimeQuirkId id, Polic
     switch (policy) {
     case POLICY_ACTIVE: return snprintf(sz_out, cb_out, "active");
     case POLICY_FORCED: return snprintf(sz_out, cb_out, "forced by PS_QUIRKS=+%s", s_quirks[id].sz_id);
-    case POLICY_PENDING: return snprintf(sz_out, cb_out, "disabled: policy pending (#331)");
     case POLICY_USER: return snprintf(sz_out, cb_out, "disabled by PS_QUIRKS=-%s", s_quirks[id].sz_id);
     case POLICY_NONE: return snprintf(sz_out, cb_out, "disabled by PS_QUIRKS=none");
     case POLICY_PROFILE_OFF: return snprintf(sz_out, cb_out, "disabled by PS_GAME_PROFILE=none");
@@ -152,21 +155,44 @@ static int describe_policy(char *sz_out, size_t cb_out, RuntimeQuirkId id, Polic
     return snprintf(sz_out, cb_out, "?");
 }
 
+/* A WORKAROUND's line names the task its removal waits for: the first "#<number>" of its reference. */
+static void describe_kind(char *sz_out, size_t cb_out, const Quirk *p_quirk) {
+    if (p_quirk->kind != RUNTIME_QUIRK_KIND_WORKAROUND) {
+        snprintf(sz_out, cb_out, "%s", s_kind_names[p_quirk->kind]);
+        return;
+    }
+    const char *sz_task = p_quirk->sz_reference;
+    while (*sz_task && !(sz_task[0] == '#' && sz_task[1] >= '0' && sz_task[1] <= '9')) ++sz_task;
+    const int cb_task = *sz_task ? 1 + (int)strspn(sz_task + 1, "0123456789") : 0;
+    snprintf(sz_out, cb_out, "WORKAROUND, temporary until %.*s", cb_task, sz_task);
+}
+
 static void consider(RuntimeQuirkId id, const char *sz_matched) {
     if (has(s_decided, id)) return;
     put_in(s_decided, id);
     const Quirk *p_quirk = &s_quirks[id];
     const Policy policy = decide(id);
+    char sz_kind[64];
+    describe_kind(sz_kind, sizeof(sz_kind), p_quirk);
     if (policy == POLICY_ACTIVE || policy == POLICY_FORCED) put_in(s_active, id);
     if (policy == POLICY_ACTIVE) {
-        printf("Quirk: %s (%s) for %s: %s [PS_QUIRKS=-%s disables]\n", p_quirk->sz_id, s_kind_names[p_quirk->kind],
-               sz_matched, p_quirk->sz_reason, p_quirk->sz_id);
+        printf("Quirk: %s (%s) for %s: %s [PS_QUIRKS=-%s disables]\n", p_quirk->sz_id, sz_kind, sz_matched,
+               p_quirk->sz_reason, p_quirk->sz_id);
         return;
     }
     char sz_policy[256];
     describe_policy(sz_policy, sizeof(sz_policy), id, policy);
-    printf("Quirk: %s (%s) for %s: %s: %s\n", p_quirk->sz_id, s_kind_names[p_quirk->kind], sz_matched, sz_policy,
-           p_quirk->sz_reason);
+    printf("Quirk: %s (%s) for %s: %s: %s\n", p_quirk->sz_id, sz_kind, sz_matched, sz_policy, p_quirk->sz_reason);
+}
+
+/* PS_QUIRKS=+id of a WORKAROUND the launched title does not declare: never applied to every game. */
+static int is_forced_for_every_game(RuntimeQuirkId id) {
+    if (!has(s_forced, id)) return 0;
+    if (s_quirks[id].kind != RUNTIME_QUIRK_KIND_WORKAROUND) return 1;
+    if (!has(s_decided, id))
+        fprintf(stderr, "ERROR: Quirks: PS_QUIRKS=+%s ignored: a WORKAROUND applies only to the titles that declare it\n",
+                s_quirks[id].sz_id);
+    return 0;
 }
 
 /* The bitset first, then the summary the call report prints; each written by one thread, before
@@ -213,7 +239,7 @@ void runtime_quirks_evaluate(const RuntimeQuirkLaunch *p_launch) {
             consider(s_trait_matches[i].id, sz_matched);
         }
     for (RuntimeQuirkId id = 0; s_quirks[id].sz_id; ++id)
-        if (has(s_forced, id)) consider(id, "every game");
+        if (is_forced_for_every_game(id)) consider(id, "every game");
     publish();
     if (!s_active[0] && !s_active[1]) puts("Quirks: none active");
 }
@@ -327,7 +353,7 @@ void runtime_quirks_list(const RuntimeQuirkLaunch *p_launch) {
         for (size_t i = 0; i < p_launch->c_title_quirks; ++i)
             if (is_known(p_launch->p_title_quirks[i])) list_applying(p_launch->p_title_quirks[i], sz_matched, &is_first);
         for (RuntimeQuirkId id = 0; s_quirks[id].sz_id; ++id)
-            if (has(s_forced, id)) list_applying(id, "every game", &is_first);
+            if (is_forced_for_every_game(id)) list_applying(id, "every game", &is_first);
         printf("%s]", is_first ? "" : "\n  ");
     }
     printf("}\n");

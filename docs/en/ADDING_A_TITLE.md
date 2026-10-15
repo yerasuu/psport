@@ -115,9 +115,9 @@ needs gets its own implementation.
 
 From [CLAUDE.md](../../CLAUDE.md):
 
-- Fix the underlying behaviour. No game-specific or shader-specific hacks in `src/`, `gpu/shim/`,
-  `gpu/port/`, `gpu/memory/`, `gpu/diag/`, `gpu/shadps4/`, `run.sh` or `build.sh`: no title IDs,
-  no eboot addresses, no shader hashes.
+- Fix the underlying behaviour. The core stays generic: nothing game-specific or shader-specific
+  in `src/`, `gpu/shim/`, `gpu/port/`, `gpu/memory/`, `gpu/diag/`, `gpu/shadps4/`, `run.sh` or
+  `build.sh`: no title IDs, no eboot addresses, no shader hashes.
 - What running one title takes goes in its title (`gpu/games/<game>/title.cpp`, a `Game::Title`
   listed in `gpu/games/game_profile.cpp`): its serials, mod folders, file check, own patches and
   their settings, the changes its saves need. It always applies, even with `PS_GAME_PROFILE=none`.
@@ -128,9 +128,14 @@ From [CLAUDE.md](../../CLAUDE.md):
   never makes it work. Check with `PS_GAME_PROFILE=none`.
 - A fix that cannot be general (a GPU or driver defect, a speed-up for one title or middleware,
   data a title needs) goes in the quirk registry, declared with its kind, reason and tracking
-  task, logged when active and removable with `PS_QUIRKS=-<id>`: [QUIRKS.md](QUIRKS.md). A
-  title-specific correction of the emulation (`WORKAROUND`) stays off until decision #331 is
-  accepted.
+  task, logged when active and removable with `PS_QUIRKS=-<id>`: [QUIRKS.md](QUIRKS.md).
+- A correction one title needs before the general fix exists is allowed only as a temporary
+  `WORKAROUND` quirk (decision #331): declared in the registry with a reason that says what general
+  fix it stands in for and a reference to the kb task seeking it (`#<number>`), activated only by
+  that title's `Game::Title` `quirks`, its code in `gpu/games/<game>/` and gated by
+  `PsQuirk::Active`, logged as `(WORKAROUND, temporary until #<task>)`, off with
+  `PS_QUIRKS=-<id>`, and removed with its code when the general fix lands
+  ([QUIRKS.md](QUIRKS.md#workarounds)). Never in the core.
 - No tests in the repository. When a change rests on how the console behaves and the behaviour is
   not documented, confirm it on hardware with an OpenOrbis homebrew test and share it with the
   change.

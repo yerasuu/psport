@@ -233,7 +233,9 @@ struct Title {
     void (*pfn_before_present)() = nullptr;
     OnlineServices online;
     /// Its entries of the quirk registry (src/runtime/runtime_quirks.inc): LAUNCH ones always
-    /// apply, OPTIMIZATION ones not with PS_GAME_PROFILE=none (docs/en/QUIRKS.md).
+    /// apply, WORKAROUND ones also with PS_GAME_PROFILE=none, OPTIMIZATION ones not then
+    /// (docs/en/QUIRKS.md). Only this list activates a WORKAROUND, whose code lives in the title's
+    /// folder.
     std::span<const RuntimeQuirkId> quirks;
     /// Its translator profile; nullptr for a title without one.
     const Profile* p_profile = nullptr;

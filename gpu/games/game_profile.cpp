@@ -14,6 +14,25 @@ namespace Game {
 extern const Title BloodborneTitle;
 
 namespace {
+constexpr bool NamesTask(const char* sz_reference) {
+    for (; *sz_reference; ++sz_reference) {
+        if (sz_reference[0] == '#' && sz_reference[1] >= '0' && sz_reference[1] <= '9') {
+            return true;
+        }
+    }
+    return false;
+}
+// Here rather than in runtime_quirks.c because C cannot read a string literal at compile time.
+#define QUIRK(id, kind, sz_reason, sz_reference)                                                                   \
+    static_assert(RUNTIME_QUIRK_KIND_##kind != RUNTIME_QUIRK_KIND_WORKAROUND || NamesTask(sz_reference),          \
+                  "quirk " #id ": a WORKAROUND's reference must name the kb task seeking the general fix (#<number>)");
+#define QUIRK_GPU(id, vendor, driver_id, sz_device, version_first, version_last)
+#define QUIRK_TRAITS(id, traits)
+#include "../../src/runtime/runtime_quirks.inc"
+#undef QUIRK
+#undef QUIRK_GPU
+#undef QUIRK_TRAITS
+
 constexpr std::array<const Title*, 1> Titles = {&BloodborneTitle};
 std::atomic<const Title*> s_p_launched{nullptr};
 std::atomic<const Profile*> s_p_active{nullptr};

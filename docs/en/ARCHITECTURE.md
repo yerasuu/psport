@@ -313,7 +313,7 @@ A title may provide:
 | `check_files` | the check of the game's files before its code runs (`PS_SKIP_GAME_CHECK=1` skips it) |
 | `add_patches` | its own patches of the executable, chosen by the player's settings; a title with them has presets (`--has-presets`) |
 | `effects` | the settings of `add_patches` the overlay menu's "Game effects" section offers: its `psport.ini` switches (key, label and hint in the menu's languages, default), the `model_lod` choice, a note; without them the section is not shown |
-| `prepare_saves` | changes to the user's saves the game needs before it runs (Bloodborne: the sound flag at `0x204E`) |
+| `prepare_saves` | changes to the user's saves the game needs before it runs (Bloodborne: the sound flag at `0x204E`, gated by its `WORKAROUND` quirk `bloodborne_save_sound_flag`) |
 | `patch_image`, `before_present` | the port's own pages in the game's menus: patched into its code after the profile's patches, and applied each presented frame |
 | `online` | the servers of its online play: its own game server, the community server that answers for it, the community API port and its summon route ([Online play](#online-play)) |
 | `quirks` | its entries of the quirk registry ([QUIRKS.md](QUIRKS.md)) |

@@ -22,7 +22,7 @@ QUIRK_TRAITS(id, traits)
 - `QUIRK_GPU` matches a `HOST` quirk on the Vulkan device: PCI vendor id and `VkDriverId` (0: any),
   a substring of the device name (`""`: any) and an inclusive `driverVersion` range. Only `HOST`
   quirks may have one (checked at build time); several lines for one id match on any of them.
-- `QUIRK_TRAITS` matches on the loader's middleware traits (`LOADER_TRAIT_*` in `src/loader/loader_traits.h`; the first such entry adds that include to `runtime_quirks.c`): every bit of the mask present. `--list-quirks --game` uses the same traits, read from the dump.
+- `QUIRK_TRAITS` matches on the loader's middleware traits (`LOADER_TRAIT_*` in `src/loader/loader_traits.h`; the first such entry adds that include to `runtime_quirks.c`): every bit of the mask present. `--list-quirks --game` uses the same traits, read from the dump. Never on a `WORKAROUND` (checked at build time).
 - A title names its quirks in its `Game::Title` (`quirks`, `gpu/games/game_profile.h`), which
   reaches the C side as `PsTitleInfo` `p_quirks`/`c_quirks`.
 
@@ -52,7 +52,7 @@ message. psport logs the same entries again when its Vulkan device is chosen.
 | `LAUNCH` | what a title needs to start or keep its data (decision #298) | yes | on | on |
 | `OPTIMIZATION` | a speed-up valid for one title or middleware only (decision #265) | yes | off | off |
 | `HOST` | a GPU or driver defect worked around: it corrects the host, not the emulation | yes | on | off |
-| `WORKAROUND` | a title-specific correction of the emulation | never (see below) | off | off |
+| `WORKAROUND` | a temporary correction for one title, until the general fix lands (decision #331, below) | yes, for the titles that declare it | on | off |
 
 `PS_QUIRKS` is read once at launch, comma-separated, left to right:
 
@@ -60,14 +60,34 @@ message. psport logs the same entries again when its Vulkan device is chosen.
 |---|---|
 | `none` | every quirk off except `LAUNCH` |
 | `-<id>` | that quirk off, `LAUNCH` included |
-| `+<id>` | that quirk on even where nothing matched, logged as forced (not `WORKAROUND`) |
+| `+<id>` | that quirk on even where nothing matched, logged as forced; a `WORKAROUND` only for the titles that declare it (otherwise `ERROR: Quirks: PS_QUIRKS=+<id> ignored`) |
 
 An unknown id or a malformed entry is logged as `ERROR: Quirks: ...` and ignored.
 
-`WORKAROUND` is compiled in but never activated, `+<id>` included, until decision #331 (whether a
-title may carry its own correction, and on which terms: declared, with a task seeking the general
-fix, removable with `PS_QUIRKS`, temporary, never in the core) is accepted. One that would match
-is logged as `disabled: policy pending (#331)`.
+## Workarounds
+
+The rule is still to fix the general behaviour. A `WORKAROUND` lets one title work in the meantime,
+visibly and for a limited time (decision #331), on these terms:
+
+- Declared: a `QUIRK(<game>_<what>, WORKAROUND, reason, "#<task>")` entry whose reason says what
+  is wrong and what general fix it stands in for, and whose reference names the kb task that seeks
+  that fix (`#<number>`; the build fails otherwise, checked in `gpu/games/game_profile.cpp`
+  because C cannot read a string literal at compile time).
+- Title-scoped: only the title's `Game::Title` `quirks` activate it. A `QUIRK_GPU` or
+  `QUIRK_TRAITS` on it fails the build, and `PS_QUIRKS=+<id>` never applies it to another game.
+- In the game's folder: the code it gates lives in `gpu/games/<game>/`, never in `src/`,
+  `gpu/shim/`, `gpu/port/`, `gpu/memory/`, `gpu/diag/` or `gpu/shadps4/`, and reads
+  `PsQuirk::Active(RUNTIME_QUIRK_<id>)` before acting.
+- Logged and removable: its launch line says `(WORKAROUND, temporary until #<task>)`, and
+  `PS_QUIRKS=-<id>` or `PS_QUIRKS=none` turns it off. It makes the game work, so
+  `PS_GAME_PROFILE=none` (which checks the translator's generic paths) leaves it on, as it does
+  `LAUNCH`.
+- Temporary: when the general fix lands, the entry, its id in the title and the code it gates are
+  removed in the same change, and the task is closed.
+
+| Id | Title | Code | Stands in for |
+|---|---|---|---|
+| `bloodborne_save_sound_flag` | Bloodborne | `gpu/games/bloodborne/title.cpp` `PrepareSaves` (`Title::pfn_prepare_saves`): byte `0x204E` of `SPRJ0005/userdata0010` set to 1 in the user's saves before the game runs | #348: find what the game decides that byte from (an audio output or system state answer that differs from the console's) and fix that library |
 
 ## Evaluation and readers
 
@@ -88,7 +108,8 @@ in the GPU library (`gpu/port/psport_quirks.h`), a relaxed load and a bit test.
 |---|---|
 | `Quirk: <id> (<kind>) for <what matched>: <reason> [PS_QUIRKS=-<id> disables]` | a quirk activated (the title, `GPU <name> (vendor, driver, version)`, `middleware traits 0x..`) |
 | `Quirk: <id> (<kind>) for <what matched>: forced by PS_QUIRKS=+<id>: <reason>` | a quirk forced on |
-| `Quirk: <id> (<kind>) for <what matched>: disabled by PS_QUIRKS=-<id>: <reason>` | matched but turned off; also `by PS_QUIRKS=none`, `by PS_GAME_PROFILE=none`, `: policy pending (#331)` |
+| `Quirk: <id> (<kind>) for <what matched>: disabled by PS_QUIRKS=-<id>: <reason>` | matched but turned off; also `by PS_QUIRKS=none`, `by PS_GAME_PROFILE=none` |
+| `Quirk: <id> (WORKAROUND, temporary until #<task>) for ...` | a `WORKAROUND`'s lines, with the task its removal waits for in place of the kind |
 | `Quirks: none active` | at launch, when nothing is on |
 | `Quirks: none for GPU ...` | at device creation, when the registry has GPU matchers and none applies |
 | `Quirks: <n> active: <id>, <id>` | when the process ends, after the call report's summary |
@@ -103,12 +124,15 @@ with its kind, reason, reference and matchers; with `--game`, the title found in
 ```
 {"quirks": [...],
   "game": {"serial": "CUSA03173", "title": "Bloodborne"},
-  "applies": []}
+  "applies": [
+    {"id": "bloodborne_save_sound_flag", "matched": "Bloodborne (CUSA03173)", "state": "active"}
+  ]}
 ```
 
 ## Adding a quirk
 
-1. Fix the general behaviour if it can be fixed; a quirk is for what cannot.
+1. Fix the general behaviour if it can be fixed; a quirk is for what cannot (yet: a
+   `WORKAROUND` follows the terms above).
 2. Add a `QUIRK` line with the right kind, the reason and the task that tracks it; for `HOST`,
    one or more `QUIRK_GPU` lines.
 3. A title's quirk: add the id to its `Game::Title` `quirks`.

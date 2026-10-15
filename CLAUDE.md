@@ -2,7 +2,7 @@
 
 ## Code rules
 
-- Do not include any game-specific or shader-specific hacks. Fixes must address the underlying emulation behavior, not special-case individual titles or individual shaders.
+- Fixes address the underlying emulation behavior. The core (`src/`, `gpu/shim/`, `gpu/port/`, `gpu/memory/`, `gpu/diag/`, `gpu/shadps4/`, `run.sh`, `build.sh`) stays generic: no special cases for individual titles or individual shaders. Optimisations that only help one game go in that game's profile (`gpu/games/<game>/`). A correction one title needs before the general fix exists is allowed only as a temporary `WORKAROUND` quirk (decision #331, `docs/en/QUIRKS.md`): declared in the registry with its reason and a reference to the kb task seeking the general fix, activated only by that title's `Game::Title`, its code in `gpu/games/<game>/`, logged and disableable with `PS_QUIRKS`, and removed with its code when the general fix lands.
 - Do not include tests. If emulation behaviour is changed, write and share hardware tests in the form of OpenOrbis homebrew.
 - Do not comment code unless absolutely necessary, and never comment code that is already self-explanatory. Express intent through clear naming and structure instead.
 - Maintain code conventions existing elsewhere in the project. Match the surrounding code's naming, formatting, file layout, error handling, and use of existing helpers and utilities. Follow the repository's `.clang-format` configuration.
@@ -18,7 +18,8 @@
   of guessing from shadPS4 or raw `objdump`. Its findings become kb notes or tasks.
 - Optimisations that only help one game live in that game's profile (`gpu/games/<game>/`,
   `Game::Profile`); the core keeps the generic mechanism and runs every game correctly without a
-  profile (`PS_GAME_PROFILE=none`). A profile may speed a game up, never make it work.
+  profile (`PS_GAME_PROFILE=none`). A profile may speed a game up, never make it work; what makes
+  one game work before the general fix is a `WORKAROUND` quirk in its folder (see Code rules).
 - Nothing silent: an unimplemented, stubbed or failing call stays visible in the log and in the
   call report with its count. Logs are technical English.
 

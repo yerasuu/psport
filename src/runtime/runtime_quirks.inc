@@ -11,7 +11,11 @@
  *   QUIRK_TRAITS(id, traits)
  *       a match on the loader's middleware traits: every bit of the mask present.
  *
- * A title names its LAUNCH, OPTIMIZATION and WORKAROUND quirks in its Game::Title (quirks). */
+ * A title names its LAUNCH, OPTIMIZATION and WORKAROUND quirks in its Game::Title (quirks). A
+ * WORKAROUND is a temporary correction for one title: only its title's quirks activate it (no
+ * QUIRK_GPU or QUIRK_TRAITS, checked at compile time), its reference names the kb task seeking the
+ * general fix ("#<number>", checked by gpu/games/game_profile.cpp) and its code lives in
+ * gpu/games/<game>/. */
 
 QUIRK(amd_pc_memory_model, HOST,
       "the PC memory model (the GPU uses the game's memory in place) is measured on AMD GPUs only; the others keep "
@@ -47,3 +51,11 @@ QUIRK(nvidia_slow_depth_copies, HOST,
       "live resolution changes ran at 7-8 FPS on a GTX 1060, so live_resolution=auto keeps the startup patch there",
       "#337")
 QUIRK_GPU(nvidia_slow_depth_copies, 0x10de, 0, "", 0, 0xffffffff)
+QUIRK(bloodborne_save_sound_flag, WORKAROUND,
+      "Bloodborne's game data save (SPRJ0005/userdata0010) keeps a byte at 0x204E that, left at 0, silences part of "
+      "the game's audio (the player's weapon sounds among them): the title sets it to 1 in the user's saves before "
+      "the game runs (rainvmaker's fix from the Diegolix29 shadPS4 fork; a save the game creates is fixed at the next "
+      "launch). The cause is unknown: the sounds play on a PS4, so under psport something the game decides that byte "
+      "from answers differently from the console, most likely an audio output or system state query (AudioOut, "
+      "Audio3d, Ngs2, SystemService); the general fix finds what writes or clears the byte and corrects that library",
+      "#348")
