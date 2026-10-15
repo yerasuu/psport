@@ -53,7 +53,8 @@ static int32_t fail_posix(int e) { *runtime_errno()=runtime_guest_errno(e); retu
 
 /* ---- clocks and sleeping ---- */
 static struct timespec s_process_start;
-__attribute__((constructor)) static void remember_start(void) { clock_gettime(CLOCK_MONOTONIC,&s_process_start); }
+static uint64_t s_process_start_tsc;
+__attribute__((constructor)) static void remember_start(void) { clock_gettime(CLOCK_MONOTONIC,&s_process_start); s_process_start_tsc=__rdtsc(); }
 static int host_clock(uint32_t id,clockid_t *p_out) {
     switch (id) {
     case 0: case 9: case 10: *p_out=CLOCK_REALTIME; return 1;            /* REALTIME(_PRECISE/_FAST) */
@@ -90,11 +91,9 @@ static ABI uint64_t process_time(void) {
     struct timespec t; clock_gettime(CLOCK_MONOTONIC,&t);
     return (uint64_t)(t.tv_sec-s_process_start.tv_sec)*1000000+(uint64_t)((t.tv_nsec-s_process_start.tv_nsec)/1000);
 }
-static ABI uint64_t process_time_counter(void) {
-    struct timespec t; clock_gettime(CLOCK_MONOTONIC,&t);
-    return (uint64_t)(t.tv_sec-s_process_start.tv_sec)*1000000000+(uint64_t)(t.tv_nsec-s_process_start.tv_nsec);
-}
-static ABI uint64_t process_time_frequency(void) { return 1000000000; }
+/* The console's process time counter is the TSC since the process started, and games mix it with
+ * sceKernelGetTscFrequency to convert it, so both tick at the TSC rate. */
+static ABI uint64_t process_time_counter(void) { return __rdtsc()-s_process_start_tsc; }
 static ABI uint64_t read_tsc(void) { return __rdtsc(); }
 static uint64_t s_tsc_hz;
 static ABI uint64_t tsc_frequency(void) {
@@ -108,6 +107,7 @@ static ABI uint64_t tsc_frequency(void) {
     }
     return s_tsc_hz;
 }
+static ABI uint64_t process_time_frequency(void) { return tsc_frequency(); }
 /* Shared with the GPU library so flip/label timestamps use the guest's clock. */
 uint64_t runtime_process_time_us(void) { return process_time(); }
 uint64_t runtime_process_time_counter(void) { return process_time_counter(); }
