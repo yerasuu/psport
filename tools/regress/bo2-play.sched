@@ -1,0 +1,122 @@
+# Black Ops II, Pyrrhic Victory to its second checkpoint and a save: the first-run settings, Campaign,
+# New Story and Recruit (up from Regular), the briefing and cutscenes skipped by a cross every 8 s;
+# the mission's first checkpoint comes at about 315 s with no input. Then forward with the convoy
+# (its "Follow" marker is ahead: turning or standing still abandons it), aiming and firing, which
+# reaches "Eliminate the mortar crews" and its checkpoint at about 355-370 s; options, Save and Quit
+# and its confirmation save it and go back to the Campaign menu, now with Resume Story
+# (bo2-load.sched with -u from this run).
+60 shot
+110 shot
+112 press cross
+118 shot
+120 press cross
+126 shot
+128 press cross
+134 shot
+136 press cross
+142 shot
+144 press cross
+150 shot
+152 press cross
+158 shot
+160 press cross
+166 shot
+168 press cross
+174 shot
+176 press cross
+182 shot
+183 press up
+184 press cross
+190 shot
+192 press cross
+198 shot
+200 press cross
+206 shot
+208 press cross
+214 shot
+216 press cross
+222 shot
+224 press cross
+230 shot
+232 press cross
+250 shot
+270 shot
+290 shot
+300 shot
+310 shot
+316 press ly=0 0.8
+317 press ly=0+l2 0.5
+318 press ly=0+l2+r2 1.2
+319 shot
+320 press ly=0 0.8
+321 press ly=0+l2 0.5
+322 press ly=0+l2+r2 1.2
+323 shot
+324 press ly=0 0.8
+325 press ly=0+l2 0.5
+326 press ly=0+l2+r2 1.2
+327 press square 0.3
+328 press ly=0 0.8
+329 press ly=0+l2 0.5
+330 press ly=0+l2+r2 1.2
+331 shot
+332 press ly=0 0.8
+333 press ly=0+l2 0.5
+334 press ly=0+l2+r2 1.2
+335 shot
+336 press ly=0 0.8
+337 press ly=0+l2 0.5
+338 press ly=0+l2+r2 1.2
+339 press square 0.3
+340 press ly=0 0.8
+341 press ly=0+l2 0.5
+342 press ly=0+l2+r2 1.2
+343 shot
+344 press ly=0 0.8
+345 press ly=0+l2 0.5
+346 press ly=0+l2+r2 1.2
+347 shot
+348 press ly=0 0.8
+349 press ly=0+l2 0.5
+350 press ly=0+l2+r2 1.2
+351 press square 0.3
+352 press ly=0 0.8
+353 press ly=0+l2 0.5
+354 press ly=0+l2+r2 1.2
+355 shot
+356 press ly=0 0.8
+357 press ly=0+l2 0.5
+358 press ly=0+l2+r2 1.2
+359 shot
+360 press ly=0 0.8
+361 press ly=0+l2 0.5
+362 press ly=0+l2+r2 1.2
+363 press square 0.3
+364 press ly=0 0.8
+365 press ly=0+l2 0.5
+366 press ly=0+l2+r2 1.2
+367 shot
+368 press ly=0 0.8
+369 press ly=0+l2 0.5
+370 press ly=0+l2+r2 1.2
+371 shot
+373 shot
+374 press options
+376 shot
+377 press down
+378 press down
+379 press down
+380 press down
+381 press cross
+383 shot
+384 press down
+385 press cross
+388 shot
+392 shot
+396 shot
+400 shot
+404 shot
+408 shot
+412 shot
+416 shot
+420 end
