@@ -69,9 +69,16 @@ if [[ ${PS_SAVE_LOG:-} == 1 ]]; then
     # Bash builtins only (the AppImage's PATH has no tee).
     exec > >(while IFS= read -r line || [[ -n $line ]]; do printf '%s\n' "$line"; printf '%s\n' "$line" >&3; done) 2>&1
 fi
-# PS_GAME_DIR: the game's folder (eboot.bin, sce_module, ...); default next to this directory.
-game=${PS_GAME_DIR:-../CUSA03173}
-if [[ ! -f $game/eboot.bin ]]; then echo "No eboot.bin in $game (set PS_GAME_DIR)." >&2; exit 1; fi
+# PS_GAME_DIR: the game's folder (eboot.bin, sce_module, ...); unset, the only dump next to this
+# directory (bbport's layout, ../<title id>).
+game=${PS_GAME_DIR:-}
+if [[ -z $game ]]; then
+    dumps=(../*/eboot.bin)
+    if [[ ${#dumps[@]} == 1 && -f ${dumps[0]} ]]; then game=${dumps[0]%/eboot.bin}; fi
+fi
+if [[ ! -f $game/eboot.bin ]]; then
+    echo "No eboot.bin in ${game:-a single folder next to this directory} (set PS_GAME_DIR)." >&2; exit 1
+fi
 # Loose-file mods (PS_MODS_ENABLED=0: none): psport loads the game through a private view under
 # out/ with the enabled mods linked in, removed when it ends (src/loader_mods.c, docs/en/MODS.md).
 mod_args=()

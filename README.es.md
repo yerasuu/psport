@@ -64,8 +64,8 @@ PS_GAME_DIR=/ruta/a/CUSA03173 bash run.sh       # Bloodborne
 PS_GAME_DIR=/ruta/al/volcado PS_SKIP_GAME_CHECK=1 PS_PERMISSIVE=1 bash run.sh
 ```
 
-`PS_GAME_DIR` vale `../CUSA03173` por defecto. `PS_PERMISSIVE=1` hace que las importaciones que le
-faltan al port devuelvan 0 en lugar de detener el juego. `PS_SYS_MODULES=<carpeta>` enlaza, de forma
+`PS_GAME_DIR` vale por defecto el único volcado junto al checkout (`../CUSA03173`, por
+ejemplo). `PS_PERMISSIVE=1` hace que las importaciones que le faltan al port devuelvan 0 en lugar de detener el juego. `PS_SYS_MODULES=<carpeta>` enlaza, de forma
 opcional, tu propio volcado de módulos del sistema (`*.sprx`) donde el port aún no tiene la
 biblioteca; nada de ese volcado se distribuye. Las partidas guardadas y la caché de shaders van a
 `user/`, y los ajustes a `psport.ini`. El lanzador GTK4 (`bash launcher/psport-launcher.sh`;

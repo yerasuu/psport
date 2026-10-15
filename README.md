@@ -73,8 +73,8 @@ PS_GAME_DIR=/path/to/CUSA03173 bash run.sh      # Bloodborne
 PS_GAME_DIR=/path/to/dump PS_PERMISSIVE=1 bash run.sh
 ```
 
-`PS_GAME_DIR` defaults to `../CUSA03173`. `PS_PERMISSIVE=1` makes imports psport lacks return 0
-instead of stopping. `PS_SYS_MODULES=<folder>` optionally links the user's own dump of system
+`PS_GAME_DIR` defaults to the only dump next to the checkout (`../CUSA03173`, say).
+`PS_PERMISSIVE=1` makes imports psport lacks return 0 instead of stopping. `PS_SYS_MODULES=<folder>` optionally links the user's own dump of system
 modules (`*.sprx`) where the port has no library yet; nothing from it is shipped. Saves and the
 shader cache go to `user/`, settings to `psport.ini`. The GTK4 launcher
 (`bash launcher/psport-launcher.sh`; `launcher/install-desktop.sh` adds it to the app menu) is
