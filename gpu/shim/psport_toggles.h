@@ -54,7 +54,7 @@ enum : std::uint64_t {
     SceneAttachmentsOnly = 1ull << 47,
     SampleSceneProxies = 1ull << 48,
     OrderedGuestWrites = 1ull << 49,
-    SceneHalfRes = 1ull << 50, ///< live scaling also reduces the 960x540 post targets
+    SceneHalfRes = 1ull << 50, ///< live scaling also reduces the post-processing targets
     UpdateImageFastPath = 1u << 30,
     /// Bit set: the texture collector frees nothing (A/B of its evictions while the game runs).
     TextureCollector = 1ull << 31,

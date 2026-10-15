@@ -245,8 +245,8 @@ TemporalUpscaler::TemporalUpscaler(const Instance& instance_, Scheduler& schedul
     // Explicit resolution overrides retain the old compatibility path. Normal presets
     // keep guest allocations/UI native and change only host raster targets at frame boundaries.
     m_is_scaled_session = std::getenv("PS_RENDER_RES") && std::getenv("PS_RENDER_RES")[0];
-    m_render_width = 1920;
-    m_render_height = 1080;
+    m_render_width = m_scene_targets.NativeSize().width;
+    m_render_height = m_scene_targets.NativeSize().height;
     if (const char* sz_res = std::getenv("PS_RENDER_RES")) {
         u32 w = 0, h = 0;
         if (std::sscanf(sz_res, "%ux%u", &w, &h) == 2 && w && h) {
@@ -349,6 +349,12 @@ float Halton(u32 i_sample, u32 base) {
     return result;
 }
 } // namespace
+
+bool TemporalUpscaler::RenderTarget(u32 w, u32 h) const {
+    if (!m_is_scaled_session) return SceneResolution::Size{w, h} == m_scene_targets.NativeSize();
+    return w >= m_render_width && h >= m_render_height && w < m_render_width + 8 &&
+           h < m_render_height + 8;
+}
 
 bool TemporalUpscaler::ReducedScene(const VideoCore::Image& color) const {
     return !m_is_scaled_session && m_scene_targets.Reduced() && m_scene_targets.EligibleScene(color);

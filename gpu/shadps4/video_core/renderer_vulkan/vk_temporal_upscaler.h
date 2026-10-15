@@ -4,7 +4,8 @@
 // post-processing combine pass, with the scene depth and camera motion vectors, and writes the
 // result back so the game's own post, tonemap and UI continue unchanged (Native AA preset).
 //
-// Guest targets stay at 1920x1080. Host scene targets use output/preset dimensions,
+// Guest targets stay at the game's scene size (Game::UpscalerPlacement::scene_width, 1920x1080
+// by default). Host scene targets use output/preset dimensions,
 // resized at frame boundaries. At 1080p HDR reconstruction precedes post; other outputs
 // reconstruct tonemapped scene proxies before output-size UI/display composition.
 // PS_RENDER_RES retains the older startup-patched guest-resolution path.
@@ -165,11 +166,7 @@ private:
     [[nodiscard]] bool Scaled() const;
     /// A target of the patched render size: the game allocates it with aligned dimensions
     /// (a 1916x1078 scene in 1916x1080 targets).
-    [[nodiscard]] bool RenderTarget(u32 w, u32 h) const {
-        if (!m_is_scaled_session) return w == 1920 && h == 1080;
-        return w >= m_render_width && h >= m_render_height && w < m_render_width + 8 &&
-               h < m_render_height + 8;
-    }
+    [[nodiscard]] bool RenderTarget(u32 w, u32 h) const;
     /// The scene's size inside a `w` x `h` render target: the game's viewport.
     [[nodiscard]] std::array<u32, 2> SceneSize(u32 w, u32 h) const;
     // The scene color is drawn into a reduced SceneTargets proxy (live presets).

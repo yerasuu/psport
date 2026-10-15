@@ -4,6 +4,7 @@
 #include "video_core/renderer_vulkan/vk_runtime.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_shader_util.h"
+#include "video_core/renderer_vulkan/vk_temporal_upscaler.h"
 #include "video_core/texture_cache/texture_cache.h"
 #include "video_core/host_shaders/depth_resample_frag.h"
 #include "video_core/host_shaders/depth_stencil_resample_frag.h"
@@ -24,6 +25,10 @@ SceneTargets::SceneTargets(const Instance& i, Scheduler& s, Runtime& r, Lookup g
     m_runtime.scene_targets = this;
     const char* sz_force = std::getenv("PS_SCENE_STENCIL_BITS");
     m_should_force_stencil_bits = sz_force && sz_force[0] == '1';
+    const auto& placement = GetUpscalerPlacement();
+    m_native_size = {placement.scene_width, placement.scene_height};
+    m_post_divisor = std::max(1u, placement.post_divisor);
+    m_size = m_native_size;
     CreateResampleResources();
 }
 SceneTargets::~SceneTargets() {
@@ -67,36 +72,39 @@ bool SceneTargets::ShaderResampled(const VideoCore::Image& image) const {
            (!(image.aspect_mask & vk::ImageAspectFlagBits::eStencil) ||
             m_instance.IsShaderStencilExportSupported() || m_should_force_stencil_bits);
 }
-// 1 for the scene size, 2 for half resolution (the game's post-processing chain), else 0.
-// Half resolution needs a scene size that halves exactly: the proxy keeps the scene's factor,
-// so the shaders' FragCoord conversion (1920 / scene width) stays correct for it.
-static u32 SizeDivisor(const VideoCore::ImageInfo& i, SceneResolution::Size scene) {
-    if (i.size.width == 1920 && i.size.height == 1080) return 1;
-    if (i.size.width == 960 && i.size.height == 540 && scene.width % 2 == 0 &&
-        scene.height % 2 == 0 && !PsToggle::Disabled(PsToggle::SceneHalfRes)) {
-        return 2;
+// 1 for the native scene size, the post divisor for the game's post-processing chain, else 0.
+// Post targets need a scene size that divides exactly: the proxy keeps the scene's factor, so
+// the shaders' FragCoord conversion (native / scene width) stays correct for it.
+u32 SceneTargets::SizeDivisor(const VideoCore::ImageInfo& i) const {
+    if (i.size.width == m_native_size.width && i.size.height == m_native_size.height) return 1;
+    if (m_post_divisor > 1 && i.size.width == m_native_size.width / m_post_divisor &&
+        i.size.height == m_native_size.height / m_post_divisor &&
+        m_size.width % m_post_divisor == 0 && m_size.height % m_post_divisor == 0 &&
+        !PsToggle::Disabled(PsToggle::SceneHalfRes)) {
+        return m_post_divisor;
     }
     return 0;
 }
 bool SceneTargets::Eligible(const VideoCore::Image& image) const {
     const auto& i = image.info;
-    const u32 div = SizeDivisor(i, m_size);
+    const u32 div = SizeDivisor(i);
     if (!div || i.size.depth != 1 || i.resources.layers != 1 || i.num_samples != 1 ||
         i.props.is_block || !image.backing || image.backing->num_samples != 1) {
         return false;
     }
     if (i.resources.levels != 1) {
         // Mip chains (the bloom pyramid at half resolution): one blitted proxy per level.
-        return div == 2 && i.resources.levels <= 16 && !i.props.is_depth &&
+        return div > 1 && i.resources.levels <= 16 && !i.props.is_depth &&
                Blittable(image.backing->image.image_ci.format);
     }
     return Blittable(image.backing->image.image_ci.format) || ShaderResampled(image);
 }
 bool SceneTargets::EligibleScene(const VideoCore::Image& image) const {
-    return image.info.size.width == 1920 && image.info.size.height == 1080 && Eligible(image);
+    return image.info.size.width == m_native_size.width &&
+           image.info.size.height == m_native_size.height && Eligible(image);
 }
 SceneResolution::Size SceneTargets::ProxySize(const VideoCore::Image& image, u32 level) const {
-    const u32 div = std::max(1u, SizeDivisor(image.info, m_size));
+    const u32 div = std::max(1u, SizeDivisor(image.info));
     return {std::max(1u, m_size.width / div >> level), std::max(1u, m_size.height / div >> level)};
 }
 bool SceneTargets::SetSize(SceneResolution::Size next) {
@@ -108,8 +116,9 @@ bool SceneTargets::SetSize(SceneResolution::Size next) {
     ++m_generation;
     m_recent = {};
     m_size = next;
-    std::printf("Scene resolution: raster %ux%u, half-resolution targets %ux%u, UI 1920x1080 "
-                "(live)\n", m_size.width, m_size.height, m_size.width / 2, m_size.height / 2);
+    std::printf("Scene resolution: raster %ux%u, half-resolution targets %ux%u, UI %ux%u (live)\n",
+                m_size.width, m_size.height, m_size.width / m_post_divisor,
+                m_size.height / m_post_divisor, m_native_size.width, m_native_size.height);
     return true;
 }
 void SceneTargets::ResolveAll() {
