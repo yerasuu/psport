@@ -69,9 +69,16 @@ if [[ ${PS_SAVE_LOG:-} == 1 ]]; then
     # Bash builtins only (the AppImage's PATH has no tee).
     exec > >(while IFS= read -r line || [[ -n $line ]]; do printf '%s\n' "$line"; printf '%s\n' "$line" >&3; done) 2>&1
 fi
-# PS_GAME_DIR: the game's folder (eboot.bin, sce_module, ...); default next to this directory.
-game=${PS_GAME_DIR:-../CUSA03173}
-if [[ ! -f $game/eboot.bin ]]; then echo "No eboot.bin in $game (set PS_GAME_DIR)." >&2; exit 1; fi
+# PS_GAME_DIR: the game's folder (eboot.bin, sce_module, ...); unset, the only dump next to this
+# directory (bbport's layout, ../<title id>).
+game=${PS_GAME_DIR:-}
+if [[ -z $game ]]; then
+    dumps=(../*/eboot.bin)
+    if [[ ${#dumps[@]} == 1 && -f ${dumps[0]} ]]; then game=${dumps[0]%/eboot.bin}; fi
+fi
+if [[ ! -f $game/eboot.bin ]]; then
+    echo "No eboot.bin in ${game:-a single folder next to this directory} (set PS_GAME_DIR)." >&2; exit 1
+fi
 # Loose-file mods (PS_MODS_ENABLED=0: none): psport loads the game through a private view under
 # out/ with the enabled mods linked in, removed when it ends (src/loader_mods.c, docs/en/MODS.md).
 mod_args=()
@@ -101,10 +108,10 @@ if [[ ${PS_AUTO_RENDER_RES:-} == 1 ]]; then
     unset PS_RENDER_RES PS_OUTPUT_RES PS_AUTO_RENDER_RES
 fi
 # PS_RENDER_RES=WxH explicitly sets the game's render resolution (a patch at start). The frame
-# rate presets (PS_FPS), PS_PATCHES and the render resolution patch are a game profile's (for
-# Bloodborne gpu/games/bloodborne/patches.cpp, asked of psport itself): another title runs unpatched
-# at its own size, on the console's 60 Hz vblank and with the console's direct memory, off the
-# scaled output path below.
+# rate presets (PS_FPS), PS_PATCHES and the render resolution patch are a game profile's
+# (gpu/games/<game>/, asked of psport itself): a title without one runs unpatched at its own size,
+# on the console's 60 Hz vblank and with the console's direct memory, off the scaled output path
+# below.
 # psport.ini output_res other than 1080p (720p for the Steam Deck, 1440p, 2160p): the whole game
 # renders at the preset's size of the output (a patch), the upscaler fills the output, the UI is
 # drawn at the output size. Preset and output changes need a restart.

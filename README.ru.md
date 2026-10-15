@@ -64,8 +64,8 @@ PS_GAME_DIR=/путь/к/CUSA03173 bash run.sh       # Bloodborne
 PS_GAME_DIR=/путь/к/дампу PS_SKIP_GAME_CHECK=1 PS_PERMISSIVE=1 bash run.sh
 ```
 
-По умолчанию `PS_GAME_DIR` — `../CUSA03173`. С `PS_PERMISSIVE=1` импорты, которых нет в порте,
-возвращают 0, а не останавливают игру. `PS_SYS_MODULES=<папка>` по желанию подключает
+По умолчанию `PS_GAME_DIR` — единственный дамп рядом с checkout (например,
+`../CUSA03173`). С `PS_PERMISSIVE=1` импорты, которых нет в порте, возвращают 0, а не останавливают игру. `PS_SYS_MODULES=<папка>` по желанию подключает
 собственный дамп системных модулей (`*.sprx`) там, где у порта ещё нет своей библиотеки; из него
 ничего не распространяется. Сохранения и кэш шейдеров лежат в `user/`, настройки — в `psport.ini`.
 Лаунчер на GTK4 (`bash launcher/psport-launcher.sh`; `launcher/install-desktop.sh` добавляет его в меню

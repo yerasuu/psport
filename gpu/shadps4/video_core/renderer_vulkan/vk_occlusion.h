@@ -4,7 +4,7 @@
 // On the PS4 every depth block keeps a running count of the samples that pass the depth test; a
 // ZPASS_DONE event has each block write its count, 16 bytes apart, with the valid bit (63). The
 // game issues one event before the draws it measures and one after, and takes the difference
-// (Bloodborne: ~60 events a frame).
+// (dozens of events a frame).
 //
 // Here the samples are counted by a chain of Vulkan occlusion query segments: one is active at
 // all times once the game has used them, and a segment ends at every event and at every boundary
