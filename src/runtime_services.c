@@ -15,6 +15,7 @@
 #include <pthread.h>
 #include <time.h>
 #include <arpa/inet.h>
+#include <sys/stat.h>
 
 #define USER_ID 1
 #define ORBIS_OK 0
@@ -22,6 +23,7 @@
 #define USER_NO_EVENT ((int32_t)0x80960007)
 #define SYSTEM_NO_EVENT ((int32_t)0x80A10004)
 #define SYSTEM_PARAMETER ((int32_t)0x80A10003)
+#define SYSTEM_INTERNAL ((int32_t)0x80A10001)
 #define NET_CTL_NOT_CONNECTED ((int32_t)0x80412108)
 #define NET_CTL_INVALID_ADDR ((int32_t)0x80412107)
 #define NP_SIGNED_OUT ((int32_t)0x80550006)
@@ -123,6 +125,20 @@ static ABI int32_t display_safe_area(float *ratio) {
     if (!ratio) return (int32_t)0x80A10003; /* SCE_SYSTEM_SERVICE_ERROR_PARAMETER */
     *ratio=1.0f;
     return 0;
+}
+/* The console ends the application and starts another executable of its package; the port starts
+ * itself again on it (runtime_load_exec), so this returns only when that failed. */
+static ABI int32_t load_exec(const char *sz_path, char *const *pp_arguments) {
+    char sz_guest[1024], sz_host[4096];
+    struct stat info;
+    if (sz_path) snprintf(sz_guest,sizeof(sz_guest),sz_path[0]=='/' ? "%s" : "/app0/%s",sz_path);
+    if (!sz_path || strncmp(sz_guest,"/app0/",6) || runtime_file_translate(sz_guest,sz_host,sizeof(sz_host)) ||
+        stat(sz_host,&info) || !S_ISREG(info.st_mode)) {
+        printf("Runtime: sceSystemServiceLoadExec: %s is no executable of the package\n",sz_path ? sz_path : "(null)");
+        return SYSTEM_PARAMETER;
+    }
+    runtime_load_exec(sz_guest,pp_arguments);
+    return SYSTEM_INTERNAL;
 }
 
 /* ---- NetCtl / Net / Ssl: no network ---- */
@@ -593,7 +609,7 @@ static const RuntimeExport exports[]={
     {"sceSystemServiceReceiveEvent",system_event}, {"sceSystemServiceHideSplashScreen",hide_splash},
     {"sceSystemServiceLaunchWebBrowser",launch_browser},
     {"sceSystemServiceShowControllerSettings",show_controller_settings},
-    {"sceSystemServiceGetDisplaySafeAreaInfo",display_safe_area},
+    {"sceSystemServiceGetDisplaySafeAreaInfo",display_safe_area}, {"sceSystemServiceLoadExec",load_exec},
     {"sceNetInit",runtime_stub}, {"sceNetTerm",runtime_stub}, {"sceNetPoolDestroy",runtime_stub},
     {"sceNetEpollCreate",net_epoll_create}, {"sceNetEpollDestroy",runtime_stub},
     {"sceNetResolverCreate",net_resolver_create}, {"sceNetResolverDestroy",runtime_stub},

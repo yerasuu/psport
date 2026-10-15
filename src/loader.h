@@ -26,8 +26,9 @@ typedef struct {
     uint64_t binding_count;
     unsigned char *image; /* malloc'd, size bytes */
 } LoaderImage;
-/* hle and lle: comma-separated library names, as run.sh passes PS_HLE and PS_LLE. */
-typedef struct { const char *game, *system_modules, *hle, *lle; } LoaderOptions;
+/* hle and lle: comma-separated library names, as run.sh passes PS_HLE and PS_LLE. sz_executable:
+ * the host path of the main executable when it is not the game's eboot.bin (sceSystemServiceLoadExec). */
+typedef struct { const char *game, *system_modules, *hle, *lle, *sz_executable; } LoaderOptions;
 
 void loader_load_game(const LoaderOptions *options, LoaderImage *out);
 

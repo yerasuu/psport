@@ -9,6 +9,10 @@
 extern __thread sigjmp_buf *runtime_fault_recover;
 /* Restarts the game (in-game settings menu, render resolution change). */
 void runtime_restart(void);
+/* sceSystemServiceLoadExec (probe.c): psport starts again on its own command line with sz_path, a
+ * guest path of the package, as the main executable and pp_arguments (NULL-terminated, may be NULL)
+ * after it; returns only when the exec failed. */
+void runtime_load_exec(const char *sz_path, char *const *pp_arguments);
 #endif
 #define ABI __attribute__((sysv_abi))
 typedef void (ABI *GuestCallback)(void);
@@ -83,6 +87,8 @@ uintptr_t runtime_barrier_resolve(const char *sz_name);
 void runtime_barrier_report(void);
 void runtime_set_module_tls(uint64_t module, const void *data, uint64_t filesz, uint64_t memsz);
 void runtime_set_procparam(void *param);
+/* The guest's command line: pp_arguments[0] is the executable's guest path; NULL-terminated, kept. */
+void runtime_set_arguments(char **pp_arguments, int c_arguments);
 uintptr_t runtime_thread_resolve(const char *name);
 uintptr_t runtime_sched_resolve(const char *name);
 void runtime_thread_report(void);

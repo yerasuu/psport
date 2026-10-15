@@ -235,11 +235,20 @@ static ABI __attribute__((noreturn)) void guest_libc_exit(int status) {
  * process parameters), whichever library the executable names for them. */
 static int32_t need_libc_internal = 1; /* SDK marker variable referenced by Fios2 */
 /* The command line the eboot's entry receives (probe.c): its path alone, as the console starts an
- * application; __progname is its last component, as FreeBSD's crt sets it. */
-static char *s_arguments[] = {"/app0/eboot.bin", NULL};
+ * application, or the executable and arguments sceSystemServiceLoadExec named; __progname is its
+ * last component, as FreeBSD's crt sets it. */
+static char *s_default_arguments[] = {"/app0/eboot.bin", NULL};
+static char **s_pp_arguments = s_default_arguments;
+static int s_c_arguments = 1;
 static const char *s_sz_progname = "eboot.bin";
-static ABI int32_t guest_getargc(void) { return 1; }
-static ABI char **guest_getargv(void) { return s_arguments; }
+void runtime_set_arguments(char **pp_arguments, int c_arguments) {
+    s_pp_arguments = pp_arguments;
+    s_c_arguments = c_arguments;
+    const char *sz_slash = strrchr(pp_arguments[0], '/');
+    s_sz_progname = sz_slash ? sz_slash + 1 : pp_arguments[0];
+}
+static ABI int32_t guest_getargc(void) { return s_c_arguments; }
+static ABI char **guest_getargv(void) { return s_pp_arguments; }
 static const RuntimeExport own_data[]={
     {"__stack_chk_guard",&stack_canary}, {"Need_sceLibcInternal",&need_libc_internal},
     {"__progname",&s_sz_progname},

@@ -429,6 +429,44 @@ void runtime_restart(void) {
     _exit(1);
 #endif
 }
+static char **s_pp_argv;
+static int s_c_argv;
+/* Descriptors are only marked close-on-exec, unlike a restart, so that a failed exec leaves the
+ * application running; the old GPU device is released all the same before the new image starts. */
+void runtime_load_exec(const char *sz_path, char *const *pp_arguments) {
+#ifndef _WIN32
+    size_t c_arguments = 0;
+    while (pp_arguments && pp_arguments[c_arguments]) ++c_arguments;
+    char **pp_argv = calloc((size_t)s_c_argv + 2 * c_arguments + 3, sizeof(*pp_argv));
+    if (!pp_argv) return;
+    size_t c_argv = 0;
+    for (int i = 0; i < s_c_argv; ++i) {
+        if (i && i + 1 < s_c_argv && (!strcmp(s_pp_argv[i], "--exec") || !strcmp(s_pp_argv[i], "--arg"))) { ++i; continue; }
+        pp_argv[c_argv++] = s_pp_argv[i];
+    }
+    pp_argv[c_argv++] = "--exec";
+    pp_argv[c_argv++] = (char *)sz_path;
+    for (size_t i = 0; i < c_arguments; ++i) {
+        pp_argv[c_argv++] = "--arg";
+        pp_argv[c_argv++] = pp_arguments[i];
+    }
+    printf("Runtime: sceSystemServiceLoadExec: replacing the application with %s and %zu arguments\n", sz_path, c_arguments);
+    for (size_t i = 0; i < c_arguments; ++i) printf("Runtime: sceSystemServiceLoadExec argument %zu: %s\n", i + 1, pp_arguments[i]);
+    runtime_calls_report();
+    fflush(NULL);
+    /* The calling thread's signal mask outlives the exec and would be the new main thread's. */
+    sigset_t none, previous;
+    sigemptyset(&none);
+    pthread_sigmask(SIG_SETMASK, &none, &previous);
+    close_range(3u, ~0u, CLOSE_RANGE_CLOEXEC);
+    execv("/proc/self/exe", pp_argv);
+    perror("runtime_load_exec: exec");
+    pthread_sigmask(SIG_SETMASK, &previous, NULL);
+    free(pp_argv);
+#else
+    (void)sz_path; (void)pp_arguments;
+#endif
+}
 
 #ifndef _WIN32
 extern char **environ;
@@ -470,6 +508,8 @@ static void accept_deprecated_names(char **argv) {
 
 int main(int argc, char **argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
+    s_pp_argv = argv;
+    s_c_argv = argc;
 #ifndef _WIN32
     accept_deprecated_names(argv);
     /* Keep host heap objects handed to the guest (thread handles, TLS) in the
@@ -481,8 +521,13 @@ int main(int argc, char **argv) {
     check_cpu();
     int cpu_only = 0, strict_imports = 0;
     unsigned timeout_seconds = 10;
-    const char *content_profile=NULL, *app0=NULL, *user_dir=NULL, *patch_file=NULL;
+    const char *content_profile=NULL, *app0=NULL, *user_dir=NULL, *patch_file=NULL, *sz_exec=NULL;
     LoaderOptions game={0};
+    /* The guest's command line: the executable's guest path, the --arg values, NULL. Copied to the
+     * heap, below 1 TiB, since the host stack holding argv is above it. */
+    char **pp_guest_arguments = calloc((size_t)argc + 2, sizeof(*pp_guest_arguments));
+    int c_guest_arguments = 1;
+    if (!pp_guest_arguments) fail("allocation failed");
     for (int i = 1; i < argc; ++i) {
         if (!strcmp(argv[i], "--game") && i+1<argc) game.game=argv[++i];
         else if (!strcmp(argv[i], "--system-modules") && i+1<argc) game.system_modules=argv[++i];
@@ -495,10 +540,12 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--user") && i+1<argc) user_dir=argv[++i];
         else if (!strcmp(argv[i], "--patches") && i+1<argc) patch_file=argv[++i];
         else if (!strcmp(argv[i], "--timeout") && i+1<argc) timeout_seconds=(unsigned)strtoul(argv[++i],NULL,10);
+        else if (!strcmp(argv[i], "--exec") && i+1<argc) sz_exec=strdup(argv[++i]);
+        else if (!strcmp(argv[i], "--arg") && i+1<argc) pp_guest_arguments[c_guest_arguments++]=strdup(argv[++i]);
         else { fprintf(stderr, "Unknown option: %s\n", argv[i]); return 1; }
     }
     if (!game.game) {
-        fprintf(stderr, "Usage: %s --game dir [--system-modules dir] [--hle libs] [--lle libs] [--cpu-only] [--strict-imports] [--content-profile file] [--app0 dir] [--user dir] [--patches file] [--timeout seconds] | --vulkan-only\n", argv[0]);
+        fprintf(stderr, "Usage: %s --game dir [--system-modules dir] [--hle libs] [--lle libs] [--cpu-only] [--strict-imports] [--content-profile file] [--app0 dir] [--user dir] [--patches file] [--timeout seconds] [--exec guest-path [--arg value]...] | --vulkan-only\n", argv[0]);
         return 1;
     }
     if (content_profile) {
@@ -527,6 +574,14 @@ int main(int argc, char **argv) {
         runtime_net_configure(app0,serial,title,version);
         runtime_content_title(serial);
     }
+    pp_guest_arguments[0] = (char *)(sz_exec ? sz_exec : "/app0/eboot.bin");
+    char sz_executable[4096];
+    if (sz_exec) {
+        if (!app0 || runtime_file_translate(sz_exec, sz_executable, sizeof(sz_executable))) fail("--exec names no file of the package");
+        game.sz_executable = sz_executable;
+        printf("Runtime: main executable %s (sceSystemServiceLoadExec), %d arguments\n", sz_exec, c_guest_arguments - 1);
+    }
+    runtime_set_arguments(pp_guest_arguments, c_guest_arguments);
     bbgpu_register_kernel();
 #ifdef _WIN32
     SYSTEM_INFO system_info; GetSystemInfo(&system_info); page_size = system_info.dwPageSize;
@@ -738,7 +793,10 @@ int main(int argc, char **argv) {
     printf("Runtime: imports %llu: host %u, game modules %u, system modules %u, modules the game loads %u, stubs %u, without implementation %u\n",
            (unsigned long long)import_count, counts[1], counts[2], counts[5], counts[6], counts[3], counts[4]);
     free(import_state);
-    if (patch_file) apply_patches(patch_file, segments, ns, relocs, nr);
+    /* patches.bin's offsets are into eboot.bin. */
+    const int is_eboot = !strcmp(pp_guest_arguments[0], "/app0/eboot.bin");
+    if (patch_file && is_eboot) apply_patches(patch_file, segments, ns, relocs, nr);
+    else if (patch_file) printf("Patches: not applied: they are for /app0/eboot.bin, the application is %s\n", pp_guest_arguments[0]);
     if (!cpu_only) bbgpu_patch_image(image, size);
     protect(traps, round_page((import_count + 1) * 32), 5);
     protect(thunks, round_page((import_count + 1) * THUNK_SIZE), 5);
@@ -778,17 +836,21 @@ int main(int argc, char **argv) {
     }
     printf("Entering original x86-64 code at guest offset 0x%" PRIx64 "\n", entry);
     entered_game=1;
-    struct { uint64_t argc; const char *argv[2]; } params = {1, {"/app0/eboot.bin", NULL}};
+    /* The entry's argument block: argc, then argv inline, NULL-terminated. */
+    uint64_t *params = calloc((size_t)c_guest_arguments + 2, sizeof(*params));
+    if (!params) fail("allocation failed");
+    params[0] = (uint64_t)c_guest_arguments;
+    for (int i = 0; i < c_guest_arguments; ++i) params[i + 1] = (uint64_t)(uintptr_t)pp_guest_arguments[i];
 #ifdef _WIN32
     typedef void (ABI *Entry)(void *, void (ABI *)(void));
-    ((Entry)(image + entry))(&params, guest_exit);
+    ((Entry)(image + entry))(params, guest_exit);
 #else
     /* The guest main thread runs on a stack below 1 TiB like PS4 stacks. */
     enum { MAIN_STACK=8*1024*1024 };
     unsigned char *stack=runtime_low_map(MAIN_STACK,PROT_READ|PROT_WRITE);
     if (!stack) fail("cannot allocate guest main stack");
     if (native_libc) runtime_thread_set_stack(stack,MAIN_STACK);
-    enter_on_stack(image+entry,&params,(void *)guest_exit,stack+MAIN_STACK-64);
+    enter_on_stack(image+entry,params,(void *)guest_exit,stack+MAIN_STACK-64);
 #endif
     fail("entry unexpectedly returned");
 }
