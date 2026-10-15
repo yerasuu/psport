@@ -23,8 +23,8 @@ namespace Common::Log {
 bool ShouldLog(Level) {
     return true;
 }
-void Write(std::string_view log_class, Level, const char*, int line, const char* function, std::string&& message) {
-    std::fprintf(stderr, "%.*s %s:%d %s\n", int(log_class.size()), log_class.data(), function, line, message.c_str());
+void Write(std::string_view log_class, Level, const char*, int line, const char* sz_function, std::string&& message) {
+    std::fprintf(stderr, "%.*s %s:%d %s\n", int(log_class.size()), log_class.data(), sz_function, line, message.c_str());
 }
 } // namespace Common::Log
 void assert_fail_impl() {

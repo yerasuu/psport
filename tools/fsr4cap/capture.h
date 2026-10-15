@@ -5,10 +5,10 @@
 #include <d3d12.h>
 
 /// Hooks the vtables of `device` and `list` (all objects of their classes); writes to `directory`.
-void CaptureInstall(ID3D12Device* device, ID3D12GraphicsCommandList* list, const char* directory);
+void CaptureInstall(ID3D12Device* p_device, ID3D12GraphicsCommandList* p_list, const char* sz_directory);
 /// A line in the trace (frame boundaries).
-void CaptureMark(const char* text);
+void CaptureMark(const char* sz_text);
 /// Names a resource in the trace (the inputs and output of the test).
-void CaptureNoteResource(ID3D12Resource* resource, const char* name);
+void CaptureNoteResource(ID3D12Resource* p_resource, const char* sz_name);
 /// Writes the parameters of a serialized root signature.
-void CaptureDescribeRootSignature(FILE* out, const void* blob, size_t size);
+void CaptureDescribeRootSignature(FILE* p_out, const void* p_blob, size_t cb_blob);

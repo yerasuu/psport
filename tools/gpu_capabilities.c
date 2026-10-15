@@ -11,9 +11,9 @@
 #include <vulkan/vulkan.h>
 #include <SDL3/SDL.h>
 
-static VkDeviceSize largest_local_heap(VkPhysicalDevice device) {
+static VkDeviceSize largest_local_heap(VkPhysicalDevice h_device) {
     VkPhysicalDeviceMemoryProperties memory;
-    vkGetPhysicalDeviceMemoryProperties(device, &memory);
+    vkGetPhysicalDeviceMemoryProperties(h_device, &memory);
     VkDeviceSize largest = 0;
     for (uint32_t i = 0; i < memory.memoryHeapCount; ++i) {
         if ((memory.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) &&
@@ -24,10 +24,10 @@ static VkDeviceSize largest_local_heap(VkPhysicalDevice device) {
     return largest;
 }
 
-static int better_device(VkPhysicalDevice candidate, VkPhysicalDevice current) {
+static int better_device(VkPhysicalDevice h_candidate, VkPhysicalDevice h_current) {
     VkPhysicalDeviceProperties next, old;
-    vkGetPhysicalDeviceProperties(candidate, &next);
-    vkGetPhysicalDeviceProperties(current, &old);
+    vkGetPhysicalDeviceProperties(h_candidate, &next);
+    vkGetPhysicalDeviceProperties(h_current, &old);
     const int next_api = next.apiVersion >= VK_API_VERSION_1_3;
     const int old_api = old.apiVersion >= VK_API_VERSION_1_3;
     if (next_api != old_api) return next_api;
@@ -37,7 +37,7 @@ static int better_device(VkPhysicalDevice candidate, VkPhysicalDevice current) {
     const int next_cpu = next.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU;
     const int old_cpu = old.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU;
     if (next_cpu != old_cpu) return !next_cpu;
-    return largest_local_heap(candidate) > largest_local_heap(current);
+    return largest_local_heap(h_candidate) > largest_local_heap(h_current);
 }
 
 /* --live-resolution: prints 1 when live resolution changes suit the GPU (run.sh, setting
@@ -45,24 +45,24 @@ static int better_device(VkPhysicalDevice candidate, VkPhysicalDevice current) {
  * copies scene targets every frame: fine on a strong discrete GPU, 7-8 FPS on the Steam Deck
  * and a GTX 1060. Rule: discrete, at least 8 GB of device memory, and not an NVIDIA GPU older
  * than Turing (no fragment shader barycentrics; its depth/stencil copies take nine draws). */
-static int has_extension(VkPhysicalDevice device, const char *name) {
-    uint32_t count = 0;
-    if (vkEnumerateDeviceExtensionProperties(device, NULL, &count, NULL) != VK_SUCCESS) return 0;
-    VkExtensionProperties *list = calloc(count ? count : 1, sizeof(*list));
-    int found = 0;
-    if (list && vkEnumerateDeviceExtensionProperties(device, NULL, &count, list) == VK_SUCCESS)
-        for (uint32_t i = 0; i < count && !found; ++i) found = !strcmp(list[i].extensionName, name);
-    free(list);
-    return found;
+static int has_extension(VkPhysicalDevice h_device, const char *sz_name) {
+    uint32_t c_extensions = 0;
+    if (vkEnumerateDeviceExtensionProperties(h_device, NULL, &c_extensions, NULL) != VK_SUCCESS) return 0;
+    VkExtensionProperties *p_list = calloc(c_extensions ? c_extensions : 1, sizeof(*p_list));
+    int is_found = 0;
+    if (p_list && vkEnumerateDeviceExtensionProperties(h_device, NULL, &c_extensions, p_list) == VK_SUCCESS)
+        for (uint32_t i = 0; i < c_extensions && !is_found; ++i) is_found = !strcmp(p_list[i].extensionName, sz_name);
+    free(p_list);
+    return is_found;
 }
 
-static int live_resolution_suits(VkPhysicalDevice device) {
+static int live_resolution_suits(VkPhysicalDevice h_device) {
     VkPhysicalDeviceProperties props;
-    vkGetPhysicalDeviceProperties(device, &props);
+    vkGetPhysicalDeviceProperties(h_device, &props);
     const int discrete = props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU;
-    const VkDeviceSize memory = largest_local_heap(device);
+    const VkDeviceSize memory = largest_local_heap(h_device);
     const int old_nvidia = props.vendorID == 0x10de &&
-                           !has_extension(device, "VK_KHR_fragment_shader_barycentric");
+                           !has_extension(h_device, "VK_KHR_fragment_shader_barycentric");
     const int suits = discrete && memory >= (VkDeviceSize)7680 << 20 && !old_nvidia;
     fprintf(stderr, "GPU: %s, %s, %llu MiB: live resolution changes %s\n", props.deviceName,
             discrete ? "discrete" : "integrated or other", (unsigned long long)(memory >> 20),
@@ -80,15 +80,15 @@ static int list_gamepads(void) {
         SDL_PumpEvents();
         SDL_Delay(40);
     }
-    int count = 0;
-    SDL_JoystickID *ids = SDL_GetGamepads(&count);
-    for (int i = 0; ids && i < count; ++i) {
-        char guid[33];
-        SDL_GUIDToString(SDL_GetGamepadGUIDForID(ids[i]), guid, sizeof guid);
-        const char *name = SDL_GetGamepadNameForID(ids[i]);
-        printf("%s\t%s\n", guid, name ? name : "?");
+    int c_gamepads = 0;
+    SDL_JoystickID *p_ids = SDL_GetGamepads(&c_gamepads);
+    for (int i = 0; p_ids && i < c_gamepads; ++i) {
+        char sz_guid[33];
+        SDL_GUIDToString(SDL_GetGamepadGUIDForID(p_ids[i]), sz_guid, sizeof sz_guid);
+        const char *sz_name = SDL_GetGamepadNameForID(p_ids[i]);
+        printf("%s\t%s\n", sz_guid, sz_name ? sz_name : "?");
     }
-    SDL_free(ids);
+    SDL_free(p_ids);
     SDL_Quit();
     return 0;
 }
@@ -99,15 +99,15 @@ static int list_displays(void) {
         return 1;
     }
     const SDL_DisplayID primary = SDL_GetPrimaryDisplay();
-    int count = 0;
-    SDL_DisplayID *ids = SDL_GetDisplays(&count);
-    for (int i = 0; ids && i < count; ++i) {
-        const char *name = SDL_GetDisplayName(ids[i]);
-        const SDL_DisplayMode *mode = SDL_GetDesktopDisplayMode(ids[i]);
-        printf("%s\t%dx%d\t%d\n", name && *name ? name : "?", mode ? mode->w : 0,
-               mode ? mode->h : 0, ids[i] == primary);
+    int c_displays = 0;
+    SDL_DisplayID *p_ids = SDL_GetDisplays(&c_displays);
+    for (int i = 0; p_ids && i < c_displays; ++i) {
+        const char *sz_name = SDL_GetDisplayName(p_ids[i]);
+        const SDL_DisplayMode *p_mode = SDL_GetDesktopDisplayMode(p_ids[i]);
+        printf("%s\t%dx%d\t%d\n", sz_name && *sz_name ? sz_name : "?", p_mode ? p_mode->w : 0,
+               p_mode ? p_mode->h : 0, p_ids[i] == primary);
     }
-    SDL_free(ids);
+    SDL_free(p_ids);
     SDL_Quit();
     return 0;
 }
@@ -116,79 +116,79 @@ static int list_displays(void) {
  * for the mouse) or "pad <SDL button name>"|pad: a small window; prints "key <SDL key name>" or "pad <SDL button name>"
  * (lefttrigger/righttrigger for the triggers) for the first key or gamepad button pressed, the
  * names psport.ini's key.* and pad.* lines take. Escape, closing it or 15 s: nothing. */
-static int read_input(const char *kind) {
-    const int want_key = strcmp(kind, "pad") != 0, want_pad = strcmp(kind, "key") != 0;
+static int read_input(const char *sz_kind) {
+    const int should_read_key = strcmp(sz_kind, "pad") != 0, should_read_pad = strcmp(sz_kind, "key") != 0;
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
         fprintf(stderr, "read-input: %s\n", SDL_GetError());
         return 1;
     }
-    SDL_Window *window = NULL;
-    SDL_Renderer *renderer = NULL;
-    const char *prompt = want_key && want_pad ? "Press a key, a mouse button or a gamepad button"
-                         : want_key           ? "Press a key or a mouse button"
+    SDL_Window *p_window = NULL;
+    SDL_Renderer *p_renderer = NULL;
+    const char *sz_prompt = should_read_key && should_read_pad ? "Press a key, a mouse button or a gamepad button"
+                         : should_read_key           ? "Press a key or a mouse button"
                                               : "Press a gamepad button";
-    if (!SDL_CreateWindowAndRenderer("psport", 520, 90, 0, &window, &renderer)) {
+    if (!SDL_CreateWindowAndRenderer("psport", 520, 90, 0, &p_window, &p_renderer)) {
         fprintf(stderr, "read-input: %s\n", SDL_GetError());
         SDL_Quit();
         return 1;
     }
-    int count = 0;
-    SDL_JoystickID *ids = SDL_GetGamepads(&count);
-    for (int i = 0; ids && i < count; ++i) SDL_OpenGamepad(ids[i]);
-    SDL_free(ids);
+    int c_gamepads = 0;
+    SDL_JoystickID *p_ids = SDL_GetGamepads(&c_gamepads);
+    for (int i = 0; p_ids && i < c_gamepads; ++i) SDL_OpenGamepad(p_ids[i]);
+    SDL_free(p_ids);
     const Uint64 end = SDL_GetTicks() + 15000;
-    int done = 0;
-    while (!done && SDL_GetTicks() < end) {
-        SDL_SetRenderDrawColor(renderer, 24, 24, 28, 255);
-        SDL_RenderClear(renderer);
-        SDL_SetRenderDrawColor(renderer, 230, 230, 230, 255);
-        SDL_RenderDebugText(renderer, 16, 30, prompt);
-        SDL_RenderDebugText(renderer, 16, 50, "Escape: cancel");
-        SDL_RenderPresent(renderer);
+    int is_done = 0;
+    while (!is_done && SDL_GetTicks() < end) {
+        SDL_SetRenderDrawColor(p_renderer, 24, 24, 28, 255);
+        SDL_RenderClear(p_renderer);
+        SDL_SetRenderDrawColor(p_renderer, 230, 230, 230, 255);
+        SDL_RenderDebugText(p_renderer, 16, 30, sz_prompt);
+        SDL_RenderDebugText(p_renderer, 16, 50, "Escape: cancel");
+        SDL_RenderPresent(p_renderer);
         SDL_Event e;
-        while (!done && SDL_WaitEventTimeout(&e, 50)) {
+        while (!is_done && SDL_WaitEventTimeout(&e, 50)) {
             switch (e.type) {
             case SDL_EVENT_QUIT:
             case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
-                done = 1;
+                is_done = 1;
                 break;
             case SDL_EVENT_GAMEPAD_ADDED:
                 SDL_OpenGamepad(e.gdevice.which);
                 break;
             case SDL_EVENT_KEY_DOWN:
                 if (e.key.scancode == SDL_SCANCODE_ESCAPE) {
-                    done = 1;
-                } else if (want_key) {
+                    is_done = 1;
+                } else if (should_read_key) {
                     printf("key %s\n", SDL_GetScancodeName(e.key.scancode));
-                    done = 1;
+                    is_done = 1;
                 }
                 break;
             case SDL_EVENT_MOUSE_BUTTON_DOWN: /* the names runtime_pad.c's key.* lines take */
-                if (want_key && e.button.button >= SDL_BUTTON_LEFT && e.button.button <= SDL_BUTTON_X2) {
-                    static const char *const names[] = {"", "Mouse Left", "Mouse Middle", "Mouse Right",
+                if (should_read_key && e.button.button >= SDL_BUTTON_LEFT && e.button.button <= SDL_BUTTON_X2) {
+                    static const char *const s_names[] = {"", "Mouse Left", "Mouse Middle", "Mouse Right",
                                                         "Mouse X1", "Mouse X2"};
-                    printf("key %s\n", names[e.button.button]);
-                    done = 1;
+                    printf("key %s\n", s_names[e.button.button]);
+                    is_done = 1;
                 }
                 break;
             case SDL_EVENT_MOUSE_WHEEL:
-                if (want_key && e.wheel.y != 0) {
+                if (should_read_key && e.wheel.y != 0) {
                     const float y = e.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -e.wheel.y : e.wheel.y;
                     printf("key %s\n", y > 0 ? "Wheel Up" : "Wheel Down");
-                    done = 1;
+                    is_done = 1;
                 }
                 break;
             case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
-                if (want_pad) {
+                if (should_read_pad) {
                     printf("pad %s\n", SDL_GetGamepadStringForButton((SDL_GamepadButton)e.gbutton.button));
-                    done = 1;
+                    is_done = 1;
                 }
                 break;
             case SDL_EVENT_GAMEPAD_AXIS_MOTION:
-                if (want_pad && e.gaxis.value > 16000 &&
+                if (should_read_pad && e.gaxis.value > 16000 &&
                     (e.gaxis.axis == SDL_GAMEPAD_AXIS_LEFT_TRIGGER || e.gaxis.axis == SDL_GAMEPAD_AXIS_RIGHT_TRIGGER)) {
                     printf("pad %s\n", e.gaxis.axis == SDL_GAMEPAD_AXIS_LEFT_TRIGGER ? "lefttrigger" : "righttrigger");
-                    done = 1;
+                    is_done = 1;
                 }
                 break;
             default:
@@ -197,8 +197,8 @@ static int read_input(const char *kind) {
         }
     }
     fflush(stdout);
-    SDL_DestroyRenderer(renderer);
-    SDL_DestroyWindow(window);
+    SDL_DestroyRenderer(p_renderer);
+    SDL_DestroyWindow(p_window);
     SDL_Quit();
     return 0;
 }
@@ -224,77 +224,77 @@ int main(int argc, char **argv) {
         .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
         .pApplicationInfo = &app,
     };
-    VkInstance instance = VK_NULL_HANDLE;
-    if (vkCreateInstance(&create, NULL, &instance) != VK_SUCCESS) {
+    VkInstance h_instance = VK_NULL_HANDLE;
+    if (vkCreateInstance(&create, NULL, &h_instance) != VK_SUCCESS) {
         fputs("GPU scene scaling: cannot create Vulkan instance\n", stderr);
         return 1;
     }
-    uint32_t count = 0;
-    if (vkEnumeratePhysicalDevices(instance, &count, NULL) != VK_SUCCESS || !count) {
+    uint32_t c_devices = 0;
+    if (vkEnumeratePhysicalDevices(h_instance, &c_devices, NULL) != VK_SUCCESS || !c_devices) {
         fputs("GPU scene scaling: no Vulkan device\n", stderr);
-        vkDestroyInstance(instance, NULL);
+        vkDestroyInstance(h_instance, NULL);
         return 1;
     }
-    VkPhysicalDevice *devices = calloc(count, sizeof(*devices));
-    if (!devices || vkEnumeratePhysicalDevices(instance, &count, devices) != VK_SUCCESS) {
+    VkPhysicalDevice *p_devices = calloc(c_devices, sizeof(*p_devices));
+    if (!p_devices || vkEnumeratePhysicalDevices(h_instance, &c_devices, p_devices) != VK_SUCCESS) {
         fputs("GPU scene scaling: cannot enumerate Vulkan devices\n", stderr);
-        free(devices);
-        vkDestroyInstance(instance, NULL);
+        free(p_devices);
+        vkDestroyInstance(h_instance, NULL);
         return 1;
     }
     /* Match vk_instance.cpp's default ranking or its explicit PS_GPU_ID index. */
-    VkPhysicalDevice selected = devices[0];
-    const char *gpu_id = getenv("PS_GPU_ID");
-    if (gpu_id && atoi(gpu_id) >= 0) {
-        const unsigned long index = strtoul(gpu_id, NULL, 10);
-        if (index >= count) {
+    VkPhysicalDevice h_selected = p_devices[0];
+    const char *sz_gpu_id = getenv("PS_GPU_ID");
+    if (sz_gpu_id && atoi(sz_gpu_id) >= 0) {
+        const unsigned long i_gpu = strtoul(sz_gpu_id, NULL, 10);
+        if (i_gpu >= c_devices) {
             fputs("GPU scene scaling: PS_GPU_ID is outside the device list\n", stderr);
-            free(devices);
-            vkDestroyInstance(instance, NULL);
+            free(p_devices);
+            vkDestroyInstance(h_instance, NULL);
             return 1;
         }
-        selected = devices[index];
+        h_selected = p_devices[i_gpu];
     } else {
-        for (uint32_t i = 1; i < count; ++i)
-            if (better_device(devices[i], selected)) selected = devices[i];
+        for (uint32_t i = 1; i < c_devices; ++i)
+            if (better_device(p_devices[i], h_selected)) h_selected = p_devices[i];
     }
     if (device_mode) {
         VkPhysicalDeviceProperties props;
-        vkGetPhysicalDeviceProperties(selected, &props);
+        vkGetPhysicalDeviceProperties(h_selected, &props);
         printf("%#06x\t%s\n", props.vendorID, props.deviceName);
-        free(devices);
-        vkDestroyInstance(instance, NULL);
+        free(p_devices);
+        vkDestroyInstance(h_instance, NULL);
         return 0;
     }
     if (live_mode) {
-        printf("%d\n", live_resolution_suits(selected));
-        free(devices);
-        vkDestroyInstance(instance, NULL);
+        printf("%d\n", live_resolution_suits(h_selected));
+        free(p_devices);
+        vkDestroyInstance(h_instance, NULL);
         return 0;
     }
     VkPhysicalDeviceProperties props;
-    vkGetPhysicalDeviceProperties(selected, &props);
-    const struct { VkFormat format; const char *name; } formats[] = {
+    vkGetPhysicalDeviceProperties(h_selected, &props);
+    const struct { VkFormat format; const char *sz_name; } formats[] = {
         {VK_FORMAT_R8G8B8A8_UNORM, "RGBA8"},
         {VK_FORMAT_R8G8B8A8_SRGB, "RGBA8 sRGB"},
         {VK_FORMAT_B10G11R11_UFLOAT_PACK32, "B10G11R11"},
         {VK_FORMAT_R16G16B16A16_SFLOAT, "RGBA16F"},
         {VK_FORMAT_D32_SFLOAT_S8_UINT, "D32S8"},
     };
-    int supported = 1;
+    int is_supported = 1;
     for (size_t i = 0; i < sizeof(formats) / sizeof(formats[0]); ++i) {
         VkFormatProperties features;
-        vkGetPhysicalDeviceFormatProperties(selected, formats[i].format, &features);
+        vkGetPhysicalDeviceFormatProperties(h_selected, formats[i].format, &features);
         const VkFormatFeatureFlags required = VK_FORMAT_FEATURE_BLIT_SRC_BIT |
                                               VK_FORMAT_FEATURE_BLIT_DST_BIT;
         if ((features.optimalTilingFeatures & required) != required) {
             fprintf(stderr, "GPU scene scaling: %s lacks blit support for %s\n",
-                    props.deviceName, formats[i].name);
-            supported = 0;
+                    props.deviceName, formats[i].sz_name);
+            is_supported = 0;
         }
     }
-    if (supported) fprintf(stderr, "GPU scene scaling: %s supports live presets\n", props.deviceName);
-    free(devices);
-    vkDestroyInstance(instance, NULL);
-    return supported ? 0 : 1;
+    if (is_supported) fprintf(stderr, "GPU scene scaling: %s supports live presets\n", props.deviceName);
+    free(p_devices);
+    vkDestroyInstance(h_instance, NULL);
+    return is_supported ? 0 : 1;
 }

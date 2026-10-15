@@ -15,27 +15,27 @@
 #error "TARGET: the wrapper to run"
 #endif
 
-static void drop(const char* name) {
-    const char* value = getenv(name);
-    if (!value || !*value) {
-        unsetenv(name);
+static void drop(const char* sz_name) {
+    const char* sz_value = getenv(sz_name);
+    if (!sz_value || !*sz_value) {
+        unsetenv(sz_name);
         return;
     }
     // Kept for diagnostics (the launcher's log shows the environment problems).
-    char saved[128];
-    snprintf(saved, sizeof saved, "PS_HOST_%s", name);
-    setenv(saved, value, 1);
-    unsetenv(name);
+    char sz_saved[128];
+    snprintf(sz_saved, sizeof sz_saved, "PS_HOST_%s", sz_name);
+    setenv(sz_saved, sz_value, 1);
+    unsetenv(sz_name);
 }
 
 int main(int argc, char** argv) {
     (void)argc;
-    static const char* const host_only[] = {
+    static const char* const s_host_only[] = {
         "LD_PRELOAD", "LD_LIBRARY_PATH", "LD_AUDIT", "GTK_PATH", "GTK_MODULES", "GTK_EXE_PREFIX",
         "GIO_EXTRA_MODULES", "GDK_PIXBUF_MODULEDIR", "PYTHONHOME", "PYTHONPATH",
     };
-    for (size_t i = 0; i < sizeof host_only / sizeof host_only[0]; ++i) {
-        drop(host_only[i]);
+    for (size_t i = 0; i < sizeof s_host_only / sizeof s_host_only[0]; ++i) {
+        drop(s_host_only[i]);
     }
     setenv("DISABLE_VK_LAYER_VALVE_steam_overlay_1", "1", 1);
     setenv("DISABLE_VK_LAYER_VALVE_steam_fossilize_1", "1", 1);

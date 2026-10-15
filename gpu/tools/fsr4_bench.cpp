@@ -49,10 +49,10 @@ bool ReadFile(const std::string& path, std::vector<unsigned char>& data) {
 }
 
 struct Gpu {
-    VkInstance instance{};
-    VkPhysicalDevice physical{};
-    VkDevice device{};
-    VkQueue queue{};
+    VkInstance h_instance{};
+    VkPhysicalDevice h_physical{};
+    VkDevice h_device{};
+    VkQueue h_queue{};
     uint32_t family = 0;
     VkPhysicalDeviceMemoryProperties memory{};
     Fsr411::Features fsr411; ///< what the device was created with for FSR 4.1.1's variants
@@ -68,36 +68,36 @@ uint32_t MemoryType(const Gpu& gpu, uint32_t bits, VkMemoryPropertyFlags flags) 
     std::exit(1);
 }
 
-Gpu CreateGpu(bool stats) {
+Gpu CreateGpu(bool should_report_stats) {
     Gpu gpu;
     VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
     app.pApplicationName = "fsr4-bench";
     app.apiVersion = VK_API_VERSION_1_3;
     VkInstanceCreateInfo ici{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
     ici.pApplicationInfo = &app;
-    CHECK(vkCreateInstance(&ici, nullptr, &gpu.instance));
-    uint32_t count = 0;
-    CHECK(vkEnumeratePhysicalDevices(gpu.instance, &count, nullptr));
-    std::vector<VkPhysicalDevice> devices(count);
-    CHECK(vkEnumeratePhysicalDevices(gpu.instance, &count, devices.data()));
-    gpu.physical = devices.at(0);
-    for (const auto device : devices) {
+    CHECK(vkCreateInstance(&ici, nullptr, &gpu.h_instance));
+    uint32_t c_devices = 0;
+    CHECK(vkEnumeratePhysicalDevices(gpu.h_instance, &c_devices, nullptr));
+    std::vector<VkPhysicalDevice> devices(c_devices);
+    CHECK(vkEnumeratePhysicalDevices(gpu.h_instance, &c_devices, devices.data()));
+    gpu.h_physical = devices.at(0);
+    for (const auto h_device : devices) {
         VkPhysicalDeviceProperties props;
-        vkGetPhysicalDeviceProperties(device, &props);
+        vkGetPhysicalDeviceProperties(h_device, &props);
         if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
-            gpu.physical = device;
+            gpu.h_physical = h_device;
             break;
         }
     }
     VkPhysicalDeviceProperties props;
-    vkGetPhysicalDeviceProperties(gpu.physical, &props);
+    vkGetPhysicalDeviceProperties(gpu.h_physical, &props);
     std::printf("GPU: %s\n", props.deviceName);
-    vkGetPhysicalDeviceMemoryProperties(gpu.physical, &gpu.memory);
+    vkGetPhysicalDeviceMemoryProperties(gpu.h_physical, &gpu.memory);
 
     uint32_t families = 0;
-    vkGetPhysicalDeviceQueueFamilyProperties(gpu.physical, &families, nullptr);
+    vkGetPhysicalDeviceQueueFamilyProperties(gpu.h_physical, &families, nullptr);
     std::vector<VkQueueFamilyProperties> family_props(families);
-    vkGetPhysicalDeviceQueueFamilyProperties(gpu.physical, &families, family_props.data());
+    vkGetPhysicalDeviceQueueFamilyProperties(gpu.h_physical, &families, family_props.data());
     while (gpu.family < families && !(family_props[gpu.family].queueFlags & VK_QUEUE_COMPUTE_BIT)) {
         ++gpu.family;
     }
@@ -126,10 +126,10 @@ Gpu CreateGpu(bool stats) {
     derivatives.pNext = &coopmat;
     coopmat.pNext = &float8;
     float8.pNext = &mixed_dot;
-    if (stats) {
+    if (should_report_stats) {
         mixed_dot.pNext = &executable;
     }
-    vkGetPhysicalDeviceFeatures2(gpu.physical, &features);
+    vkGetPhysicalDeviceFeatures2(gpu.h_physical, &features);
     features.features.robustBufferAccess = VK_FALSE; // as the game: no robustness cost
     f13.robustImageAccess = VK_FALSE;
     std::vector<const char*> extensions{VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME};
@@ -141,10 +141,10 @@ Gpu CreateGpu(bool stats) {
         extensions.push_back(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME);
     }
     // RADV fills the FP8 features in also where it does not offer the extension (RDNA3).
-    uint32_t available_count = 0;
-    vkEnumerateDeviceExtensionProperties(gpu.physical, nullptr, &available_count, nullptr);
-    std::vector<VkExtensionProperties> available(available_count);
-    vkEnumerateDeviceExtensionProperties(gpu.physical, nullptr, &available_count, available.data());
+    uint32_t c_available = 0;
+    vkEnumerateDeviceExtensionProperties(gpu.h_physical, nullptr, &c_available, nullptr);
+    std::vector<VkExtensionProperties> available(c_available);
+    vkEnumerateDeviceExtensionProperties(gpu.h_physical, nullptr, &c_available, available.data());
     const bool has_float8 = std::any_of(available.begin(), available.end(), [](const auto& e) {
         return std::strcmp(e.extensionName, VK_EXT_SHADER_FLOAT8_EXTENSION_NAME) == 0;
     });
@@ -157,11 +157,11 @@ Gpu CreateGpu(bool stats) {
         coopmat.pNext = float8.pNext;
     }
     // The matrix passes run as wave32 in full subgroups, with the Vulkan memory model.
-    const bool matrices = coopmat.cooperativeMatrix && f12.vulkanMemoryModel && f13.subgroupSizeControl &&
+    const bool has_matrices = coopmat.cooperativeMatrix && f12.vulkanMemoryModel && f13.subgroupSizeControl &&
                           f13.computeFullSubgroups;
-    gpu.fsr411.has_fp8_matrices = matrices && float8.shaderFloat8CooperativeMatrix;
-    gpu.fsr411.has_fp16_matrices = matrices && f12.shaderFloat16;
-    if (stats) {
+    gpu.fsr411.has_fp8_matrices = has_matrices && float8.shaderFloat8CooperativeMatrix;
+    gpu.fsr411.has_fp16_matrices = has_matrices && f12.shaderFloat16;
+    if (should_report_stats) {
         extensions.push_back(VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME);
     }
     const float priority = 1.0f;
@@ -175,33 +175,33 @@ Gpu CreateGpu(bool stats) {
     dci.pQueueCreateInfos = &qci;
     dci.enabledExtensionCount = uint32_t(extensions.size());
     dci.ppEnabledExtensionNames = extensions.data();
-    CHECK(vkCreateDevice(gpu.physical, &dci, nullptr, &gpu.device));
-    vkGetDeviceQueue(gpu.device, gpu.family, 0, &gpu.queue);
+    CHECK(vkCreateDevice(gpu.h_physical, &dci, nullptr, &gpu.h_device));
+    vkGetDeviceQueue(gpu.h_device, gpu.family, 0, &gpu.h_queue);
     return gpu;
 }
 
 struct Buffer {
-    VkBuffer buffer{};
-    VkDeviceMemory memory{};
-    void* data = nullptr;
+    VkBuffer h_buffer{};
+    VkDeviceMemory h_memory{};
+    void* p_data = nullptr;
 };
 
-Buffer CreateHostBuffer(const Gpu& gpu, VkDeviceSize size, VkBufferUsageFlags usage) {
+Buffer CreateHostBuffer(const Gpu& gpu, VkDeviceSize cb_buffer, VkBufferUsageFlags usage) {
     Buffer b;
     VkBufferCreateInfo ci{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
-    ci.size = size;
+    ci.size = cb_buffer;
     ci.usage = usage;
-    CHECK(vkCreateBuffer(gpu.device, &ci, nullptr, &b.buffer));
+    CHECK(vkCreateBuffer(gpu.h_device, &ci, nullptr, &b.h_buffer));
     VkMemoryRequirements req;
-    vkGetBufferMemoryRequirements(gpu.device, b.buffer, &req);
+    vkGetBufferMemoryRequirements(gpu.h_device, b.h_buffer, &req);
     VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
     ai.allocationSize = req.size;
     ai.memoryTypeIndex = MemoryType(gpu, req.memoryTypeBits,
                                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                                         VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-    CHECK(vkAllocateMemory(gpu.device, &ai, nullptr, &b.memory));
-    CHECK(vkBindBufferMemory(gpu.device, b.buffer, b.memory, 0));
-    CHECK(vkMapMemory(gpu.device, b.memory, 0, VK_WHOLE_SIZE, 0, &b.data));
+    CHECK(vkAllocateMemory(gpu.h_device, &ai, nullptr, &b.h_memory));
+    CHECK(vkBindBufferMemory(gpu.h_device, b.h_buffer, b.h_memory, 0));
+    CHECK(vkMapMemory(gpu.h_device, b.h_memory, 0, VK_WHOLE_SIZE, 0, &b.p_data));
     return b;
 }
 
@@ -218,9 +218,9 @@ uint16_t Half(float f) {
 }
 
 struct Image {
-    VkImage image{};
-    VkImageView view{};
-    VkDeviceMemory memory{};
+    VkImage h_image{};
+    VkImageView h_view{};
+    VkDeviceMemory h_memory{};
     uint32_t width = 0, height = 0;
 };
 
@@ -238,20 +238,20 @@ Image CreateImage(const Gpu& gpu, VkFormat format, uint32_t w, uint32_t h, VkIma
     ci.samples = VK_SAMPLE_COUNT_1_BIT;
     ci.tiling = VK_IMAGE_TILING_OPTIMAL;
     ci.usage = usage;
-    CHECK(vkCreateImage(gpu.device, &ci, nullptr, &image.image));
+    CHECK(vkCreateImage(gpu.h_device, &ci, nullptr, &image.h_image));
     VkMemoryRequirements req;
-    vkGetImageMemoryRequirements(gpu.device, image.image, &req);
+    vkGetImageMemoryRequirements(gpu.h_device, image.h_image, &req);
     VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
     ai.allocationSize = req.size;
     ai.memoryTypeIndex = MemoryType(gpu, req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    CHECK(vkAllocateMemory(gpu.device, &ai, nullptr, &image.memory));
-    CHECK(vkBindImageMemory(gpu.device, image.image, image.memory, 0));
+    CHECK(vkAllocateMemory(gpu.h_device, &ai, nullptr, &image.h_memory));
+    CHECK(vkBindImageMemory(gpu.h_device, image.h_image, image.h_memory, 0));
     VkImageViewCreateInfo vi{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
-    vi.image = image.image;
+    vi.image = image.h_image;
     vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
     vi.format = format;
     vi.subresourceRange = {aspect, 0, 1, 0, 1};
-    CHECK(vkCreateImageView(gpu.device, &vi, nullptr, &image.view));
+    CHECK(vkCreateImageView(gpu.h_device, &vi, nullptr, &image.h_view));
     return image;
 }
 
@@ -275,16 +275,16 @@ FfxFsr4ModelPreset ModelPreset(int preset) {
 int main(int argc, char** argv) {
     uint32_t rw = 2260, rh = 1272, ow = 3840, oh = 2160;
     int preset = 2, frames = 900;
-    bool stats = false;
-    bool fsr411 = false;
+    bool should_report_stats = false;
+    bool should_use_fsr411 = false;
     int positional = 0;
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--fsr411") == 0) {
-            fsr411 = true;
+            should_use_fsr411 = true;
             continue;
         }
         if (std::strcmp(argv[i], "--stats") == 0) {
-            stats = true;
+            should_report_stats = true;
             continue;
         }
         switch (positional++) {
@@ -303,36 +303,36 @@ int main(int argc, char** argv) {
         }
     }
     setenv("PS_FSR4_PROFILE", "1", 0);
-    if (stats) {
+    if (should_report_stats) {
         setenv("PS_FSR4_STATS", "1", 1);
     }
-    const Gpu gpu = CreateGpu(stats);
+    const Gpu gpu = CreateGpu(should_report_stats);
 
     FfxInterface backend{};
-    ffxContext context{};
+    ffxContext p_context{};
     std::vector<unsigned char> scratch;
-    if (!fsr411) {
+    if (!should_use_fsr411) {
     // Assets, as vk_fsr4.cpp loads them.
     FfxFsr4V07AssetSet assets{};
     if (!ffxFsr4V07BuildAssetSet(ModelPreset(preset), ow, oh, &assets)) {
         std::fprintf(stderr, "unsupported output size\n");
         return 1;
     }
-    const char* dir_env = std::getenv("PS_FSR4_DIR");
-    const std::string dir = std::string{dir_env && dir_env[0] ? dir_env : "fsr4_shaders"} + "/";
+    const char* sz_dir_env = std::getenv("PS_FSR4_DIR");
+    const std::string dir = std::string{sz_dir_env && sz_dir_env[0] ? sz_dir_env : "fsr4_shaders"} + "/";
     std::array<std::vector<unsigned char>, FFX_FSR4_VK_PASS_COUNT> code;
     std::vector<unsigned char> initializer, weights;
     // As vk_fsr4.cpp: passes from opt/ (tools/fsr4_optimize.sh) unless PS_FSR4_OPT=0.
-    const char* opt_env = std::getenv("PS_FSR4_OPT");
-    const bool use_opt = !(opt_env && opt_env[0] == '0');
+    const char* sz_opt_env = std::getenv("PS_FSR4_OPT");
+    const bool should_use_opt = !(sz_opt_env && sz_opt_env[0] == '0');
     int optimized = 0;
-    const auto load = [&](const char* name, std::vector<unsigned char>& data) {
-        if (use_opt && ReadFile(dir + "opt/" + name, data)) {
+    const auto load = [&](const char* sz_name, std::vector<unsigned char>& data) {
+        if (should_use_opt && ReadFile(dir + "opt/" + sz_name, data)) {
             ++optimized;
             return;
         }
-        if (!ReadFile(dir + name, data)) {
-            std::fprintf(stderr, "missing %s%s\n", dir.c_str(), name);
+        if (!ReadFile(dir + sz_name, data)) {
+            std::fprintf(stderr, "missing %s%s\n", dir.c_str(), sz_name);
             std::exit(1);
         }
     };
@@ -352,8 +352,8 @@ int main(int argc, char** argv) {
         entries[pass] = "fsr4_model_v07_i8_pass" + std::to_string(pass);
     }
     FfxFsr4VkCreateInfo ci{};
-    ci.device = gpu.device;
-    ci.physicalDevice = gpu.physical;
+    ci.device = gpu.h_device;
+    ci.physicalDevice = gpu.h_physical;
     for (uint32_t i = 0; i < FFX_FSR4_VK_PASS_COUNT; ++i) {
         ci.shaders[i] = {reinterpret_cast<const uint32_t*>(code[i].data()), code[i].size(),
                          entries[i].c_str()};
@@ -373,7 +373,7 @@ int main(int argc, char** argv) {
     desc.maxRenderSize = {(ow + 7) & ~7u, (oh + 7) & ~7u};
     desc.maxUpscaleSize = {(ow + 7) & ~7u, (oh + 7) & ~7u};
     ffxFsr4V07SetBackendInterface(&backend);
-    if (ffxFsr4V07CreateContext(&context, &desc.header, nullptr) != FFX_API_RETURN_OK) {
+    if (ffxFsr4V07CreateContext(&p_context, &desc.header, nullptr) != FFX_API_RETURN_OK) {
         std::fprintf(stderr, "provider context creation failed\n");
         return 1;
     }
@@ -397,40 +397,40 @@ int main(int argc, char** argv) {
     VkCommandPoolCreateInfo pci{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
     pci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
     pci.queueFamilyIndex = gpu.family;
-    VkCommandPool pool;
-    CHECK(vkCreateCommandPool(gpu.device, &pci, nullptr, &pool));
+    VkCommandPool h_pool;
+    CHECK(vkCreateCommandPool(gpu.h_device, &pci, nullptr, &h_pool));
     VkCommandBufferAllocateInfo cai{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
-    cai.commandPool = pool;
+    cai.commandPool = h_pool;
     cai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     cai.commandBufferCount = 1;
-    VkCommandBuffer cmd;
-    CHECK(vkAllocateCommandBuffers(gpu.device, &cai, &cmd));
+    VkCommandBuffer h_cmd;
+    CHECK(vkAllocateCommandBuffers(gpu.h_device, &cai, &h_cmd));
     VkFenceCreateInfo fci{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
-    VkFence fence;
-    CHECK(vkCreateFence(gpu.device, &fci, nullptr, &fence));
+    VkFence h_fence;
+    CHECK(vkCreateFence(gpu.h_device, &fci, nullptr, &h_fence));
 
     const auto submit = [&] {
-        CHECK(vkEndCommandBuffer(cmd));
+        CHECK(vkEndCommandBuffer(h_cmd));
         VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
         si.commandBufferCount = 1;
-        si.pCommandBuffers = &cmd;
-        CHECK(vkQueueSubmit(gpu.queue, 1, &si, fence));
-        CHECK(vkWaitForFences(gpu.device, 1, &fence, VK_TRUE, UINT64_MAX));
-        CHECK(vkResetFences(gpu.device, 1, &fence));
+        si.pCommandBuffers = &h_cmd;
+        CHECK(vkQueueSubmit(gpu.h_queue, 1, &si, h_fence));
+        CHECK(vkWaitForFences(gpu.h_device, 1, &h_fence, VK_TRUE, UINT64_MAX));
+        CHECK(vkResetFences(gpu.h_device, 1, &h_fence));
     };
     const VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
 
     // Inputs: a mid-grey frame, far depth, small motion; all in General.
-    CHECK(vkBeginCommandBuffer(cmd, &begin));
+    CHECK(vkBeginCommandBuffer(h_cmd, &begin));
     const auto to_general = [&](const Image& image, VkImageAspectFlags aspect) {
         VkImageMemoryBarrier b{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
         b.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
         b.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         b.newLayout = VK_IMAGE_LAYOUT_GENERAL;
         b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        b.image = image.image;
+        b.image = image.h_image;
         b.subresourceRange = {aspect, 0, 1, 0, 1};
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        vkCmdPipelineBarrier(h_cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                              VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &b);
     };
     to_general(color, VK_IMAGE_ASPECT_COLOR_BIT);
@@ -439,58 +439,58 @@ int main(int argc, char** argv) {
     to_general(output, VK_IMAGE_ASPECT_COLOR_BIT);
     const VkImageSubresourceRange color_range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
     const VkClearColorValue grey{{0.4f, 0.35f, 0.3f, 1.0f}}, mv{{0.25f, -0.5f, 0.0f, 0.0f}};
-    vkCmdClearColorImage(cmd, color.image, VK_IMAGE_LAYOUT_GENERAL, &grey, 1, &color_range);
-    vkCmdClearColorImage(cmd, motion.image, VK_IMAGE_LAYOUT_GENERAL, &mv, 1, &color_range);
+    vkCmdClearColorImage(h_cmd, color.h_image, VK_IMAGE_LAYOUT_GENERAL, &grey, 1, &color_range);
+    vkCmdClearColorImage(h_cmd, motion.h_image, VK_IMAGE_LAYOUT_GENERAL, &mv, 1, &color_range);
     const VkClearDepthStencilValue far{0.5f, 0};
     const VkImageSubresourceRange depth_range{VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1};
-    vkCmdClearDepthStencilImage(cmd, depth.image, VK_IMAGE_LAYOUT_GENERAL, &far, 1, &depth_range);
+    vkCmdClearDepthStencilImage(h_cmd, depth.h_image, VK_IMAGE_LAYOUT_GENERAL, &far, 1, &depth_range);
     VkMemoryBarrier mb{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
     mb.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
     mb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+    vkCmdPipelineBarrier(h_cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                          0, 1, &mb, 0, nullptr, 0, nullptr);
     submit();
 
-    const char* noise_env = std::getenv("BENCH_NOISE");
-    if (noise_env && noise_env[0] == '1') {
+    const char* sz_noise_env = std::getenv("BENCH_NOISE");
+    if (sz_noise_env && sz_noise_env[0] == '1') {
         // Pseudo-random color, motion within +-2 pixels, depth; one upload.
-        const VkDeviceSize color_bytes = VkDeviceSize(rw) * rh * 8, motion_bytes = VkDeviceSize(rw) * rh * 4,
-                           depth_bytes = VkDeviceSize(rw) * rh * 4;
-        Buffer staging = CreateHostBuffer(gpu, color_bytes + motion_bytes + depth_bytes,
+        const VkDeviceSize cb_color = VkDeviceSize(rw) * rh * 8, cb_motion = VkDeviceSize(rw) * rh * 4,
+                           cb_depth = VkDeviceSize(rw) * rh * 4;
+        Buffer staging = CreateHostBuffer(gpu, cb_color + cb_motion + cb_depth,
                                           VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
         uint32_t seed = 12345u;
         const auto next = [&] {
             seed = seed * 1664525u + 1013904223u;
             return float(seed >> 8) / float(1u << 24);
         };
-        auto* bytes = static_cast<unsigned char*>(staging.data);
-        auto* c16 = reinterpret_cast<uint16_t*>(bytes);
+        auto* p_staging = static_cast<unsigned char*>(staging.p_data);
+        auto* p_color = reinterpret_cast<uint16_t*>(p_staging);
         for (VkDeviceSize i = 0; i < VkDeviceSize(rw) * rh; ++i) {
-            c16[i * 4 + 0] = Half(next() * 1.5f);
-            c16[i * 4 + 1] = Half(next() * 1.5f);
-            c16[i * 4 + 2] = Half(next() * 1.5f);
-            c16[i * 4 + 3] = Half(1.0f);
+            p_color[i * 4 + 0] = Half(next() * 1.5f);
+            p_color[i * 4 + 1] = Half(next() * 1.5f);
+            p_color[i * 4 + 2] = Half(next() * 1.5f);
+            p_color[i * 4 + 3] = Half(1.0f);
         }
-        auto* m16 = reinterpret_cast<uint16_t*>(bytes + color_bytes);
+        auto* p_motion = reinterpret_cast<uint16_t*>(p_staging + cb_color);
         for (VkDeviceSize i = 0; i < VkDeviceSize(rw) * rh * 2; ++i) {
             const float v = next() * 4.0f - 2.0f;
-            m16[i] = Half(v);
+            p_motion[i] = Half(v);
         }
-        auto* d32 = reinterpret_cast<float*>(bytes + color_bytes + motion_bytes);
+        auto* p_depth = reinterpret_cast<float*>(p_staging + cb_color + cb_motion);
         for (VkDeviceSize i = 0; i < VkDeviceSize(rw) * rh; ++i) {
-            d32[i] = 0.9f + next() * 0.1f;
+            p_depth[i] = 0.9f + next() * 0.1f;
         }
-        CHECK(vkBeginCommandBuffer(cmd, &begin));
+        CHECK(vkBeginCommandBuffer(h_cmd, &begin));
         VkBufferImageCopy region{};
         region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
         region.imageExtent = {rw, rh, 1};
-        vkCmdCopyBufferToImage(cmd, staging.buffer, color.image, VK_IMAGE_LAYOUT_GENERAL, 1, &region);
-        region.bufferOffset = color_bytes;
-        vkCmdCopyBufferToImage(cmd, staging.buffer, motion.image, VK_IMAGE_LAYOUT_GENERAL, 1, &region);
-        region.bufferOffset = color_bytes + motion_bytes;
+        vkCmdCopyBufferToImage(h_cmd, staging.h_buffer, color.h_image, VK_IMAGE_LAYOUT_GENERAL, 1, &region);
+        region.bufferOffset = cb_color;
+        vkCmdCopyBufferToImage(h_cmd, staging.h_buffer, motion.h_image, VK_IMAGE_LAYOUT_GENERAL, 1, &region);
+        region.bufferOffset = cb_color + cb_motion;
         region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-        vkCmdCopyBufferToImage(cmd, staging.buffer, depth.image, VK_IMAGE_LAYOUT_GENERAL, 1, &region);
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+        vkCmdCopyBufferToImage(h_cmd, staging.h_buffer, depth.h_image, VK_IMAGE_LAYOUT_GENERAL, 1, &region);
+        vkCmdPipelineBarrier(h_cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
                              VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &mb, 0, nullptr, 0,
                              nullptr);
         submit();
@@ -498,7 +498,7 @@ int main(int argc, char** argv) {
 
     const auto resource = [](const Image& image, uint32_t format, uint32_t state) {
         FfxApiResource r{};
-        r.resource = reinterpret_cast<void*>(image.view);
+        r.resource = reinterpret_cast<void*>(image.h_view);
         r.description.type = FFX_RESOURCE_TYPE_TEXTURE2D;
         r.description.format = format;
         r.description.width = image.width;
@@ -510,38 +510,38 @@ int main(int argc, char** argv) {
     };
     const auto register_image = [&](const Image& image, VkAccessFlags access) {
         const FfxFsr4VkExternalImageState state{
-            sizeof(FfxFsr4VkExternalImageState), image.image, image.view,
+            sizeof(FfxFsr4VkExternalImageState), image.h_image, image.h_view,
             VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, access,
             VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, access};
         CHECK(ffxFsr4VkSetExternalImageState(&backend, &state));
     };
     std::unique_ptr<Fsr411::Upscaler> upscaler411;
-    VkQueryPool timestamps = VK_NULL_HANDLE;
+    VkQueryPool h_timestamps = VK_NULL_HANDLE;
     double gpu_ms = 0.0;
     float period_ns = 1.0f;
-    if (fsr411) {
-        const char* dir411 = std::getenv("PS_FSR411_DIR");
-        upscaler411 = std::make_unique<Fsr411::Upscaler>(gpu.physical, gpu.device,
-                                                         dir411 && dir411[0] ? dir411 : "fsr4_411", gpu.fsr411);
+    if (should_use_fsr411) {
+        const char* sz_dir411 = std::getenv("PS_FSR411_DIR");
+        upscaler411 = std::make_unique<Fsr411::Upscaler>(gpu.h_physical, gpu.h_device,
+                                                         sz_dir411 && sz_dir411[0] ? sz_dir411 : "fsr4_411", gpu.fsr411);
         VkQueryPoolCreateInfo qci{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
         qci.queryType = VK_QUERY_TYPE_TIMESTAMP;
         qci.queryCount = 2;
-        CHECK(vkCreateQueryPool(gpu.device, &qci, nullptr, &timestamps));
+        CHECK(vkCreateQueryPool(gpu.h_device, &qci, nullptr, &h_timestamps));
         VkPhysicalDeviceProperties props;
-        vkGetPhysicalDeviceProperties(gpu.physical, &props);
+        vkGetPhysicalDeviceProperties(gpu.h_physical, &props);
         period_ns = props.limits.timestampPeriod;
         std::printf("FSR 4.1.1 replay %ux%u -> %ux%u, %d frames\n", rw, rh, ow, oh, frames);
     }
-    for (int frame = 1; fsr411 && frame <= frames; ++frame) {
-        CHECK(vkBeginCommandBuffer(cmd, &begin));
-        vkCmdResetQueryPool(cmd, timestamps, 0, 2);
-        vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, timestamps, 0);
+    for (int frame = 1; should_use_fsr411 && frame <= frames; ++frame) {
+        CHECK(vkBeginCommandBuffer(h_cmd, &begin));
+        vkCmdResetQueryPool(h_cmd, h_timestamps, 0, 2);
+        vkCmdWriteTimestamp(h_cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, h_timestamps, 0);
         Fsr411::Frame f;
-        f.h_cmdbuf = cmd;
-        f.color = {color.image, color.view, rw, rh};
-        f.depth = {depth.image, depth.view, rw, rh};
-        f.motion = {motion.image, motion.view, rw, rh};
-        f.output = {output.image, output.view, ow, oh};
+        f.h_cmdbuf = h_cmd;
+        f.color = {color.h_image, color.h_view, rw, rh};
+        f.depth = {depth.h_image, depth.h_view, rw, rh};
+        f.motion = {motion.h_image, motion.h_view, rw, rh};
+        f.output = {output.h_image, output.h_view, ow, oh};
         f.render_width = rw;
         f.render_height = rh;
         f.is_ultra_performance = preset >= 4;
@@ -558,26 +558,26 @@ int main(int argc, char** argv) {
         if (frame == 1) {
             std::printf("FSR 4.1.1: %s\n", upscaler411->Describe().c_str());
         }
-        vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestamps, 1);
+        vkCmdWriteTimestamp(h_cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, h_timestamps, 1);
         submit();
         uint64_t ts[2];
-        CHECK(vkGetQueryPoolResults(gpu.device, timestamps, 0, 2, sizeof(ts), ts, 8, VK_QUERY_RESULT_64_BIT));
+        CHECK(vkGetQueryPoolResults(gpu.h_device, h_timestamps, 0, 2, sizeof(ts), ts, 8, VK_QUERY_RESULT_64_BIT));
         gpu_ms += double(ts[1] - ts[0]) * period_ns * 1e-6;
         if (frame % 300 == 0) {
             std::printf("FSR 4.1.1 replay: %.3f ms/frame (%s)\n", gpu_ms / 300.0, upscaler411->Describe().c_str());
             gpu_ms = 0.0;
         }
     }
-    for (int frame = 1; !fsr411 && frame <= frames; ++frame) {
+    for (int frame = 1; !should_use_fsr411 && frame <= frames; ++frame) {
         CHECK(ffxFsr4VkBeginFrame(&backend, uint64_t(frame)));
-        CHECK(vkBeginCommandBuffer(cmd, &begin));
+        CHECK(vkBeginCommandBuffer(h_cmd, &begin));
         register_image(color, VK_ACCESS_SHADER_READ_BIT);
         register_image(depth, VK_ACCESS_SHADER_READ_BIT);
         register_image(motion, VK_ACCESS_SHADER_READ_BIT);
         register_image(output, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
         ffxDispatchDescUpscale d{};
         d.header.type = FFX_API_DISPATCH_DESC_TYPE_UPSCALE;
-        d.commandList = cmd;
+        d.commandList = h_cmd;
         d.color = resource(color, FFX_SURFACE_FORMAT_R16G16B16A16_FLOAT,
                            FFX_API_RESOURCE_STATE_COMPUTE_READ);
         d.depth = resource(depth, FFX_SURFACE_FORMAT_R32_FLOAT, FFX_API_RESOURCE_STATE_COMPUTE_READ);
@@ -599,37 +599,37 @@ int main(int argc, char** argv) {
         d.cameraFar = 3000.0f;
         d.cameraFovAngleVertical = 0.75f;
         d.viewSpaceToMetersFactor = 1.0f;
-        if (ffxFsr4V07Dispatch(&context, &d.header) != FFX_API_RETURN_OK) {
+        if (ffxFsr4V07Dispatch(&p_context, &d.header) != FFX_API_RETURN_OK) {
             std::fprintf(stderr, "dispatch failed\n");
             return 1;
         }
         submit();
         CHECK(ffxFsr4VkRetireFrame(&backend, uint64_t(frame)));
     }
-    CHECK(vkDeviceWaitIdle(gpu.device));
-    if (const char* dump = std::getenv("BENCH_DUMP")) {
-        const VkDeviceSize bytes = VkDeviceSize(ow) * oh * 8;
-        Buffer readback = CreateHostBuffer(gpu, bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT);
-        CHECK(vkBeginCommandBuffer(cmd, &begin));
+    CHECK(vkDeviceWaitIdle(gpu.h_device));
+    if (const char* sz_dump = std::getenv("BENCH_DUMP")) {
+        const VkDeviceSize cb_dump = VkDeviceSize(ow) * oh * 8;
+        Buffer readback = CreateHostBuffer(gpu, cb_dump, VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+        CHECK(vkBeginCommandBuffer(h_cmd, &begin));
         VkMemoryBarrier rb{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
         rb.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
         rb.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+        vkCmdPipelineBarrier(h_cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                              VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 1, &rb, 0, nullptr, 0, nullptr);
         VkBufferImageCopy region{};
         region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
         region.imageExtent = {ow, oh, 1};
-        vkCmdCopyImageToBuffer(cmd, output.image, VK_IMAGE_LAYOUT_GENERAL, readback.buffer, 1,
+        vkCmdCopyImageToBuffer(h_cmd, output.h_image, VK_IMAGE_LAYOUT_GENERAL, readback.h_buffer, 1,
                                &region);
         submit();
-        if (FILE* f = std::fopen(dump, "wb")) {
-            std::fwrite(readback.data, 1, size_t(bytes), f);
-            std::fclose(f);
+        if (FILE* p_file = std::fopen(sz_dump, "wb")) {
+            std::fwrite(readback.p_data, 1, size_t(cb_dump), p_file);
+            std::fclose(p_file);
         }
     }
     upscaler411.reset();
-    if (!fsr411) {
-        ffxFsr4V07DestroyContext(&context, nullptr);
+    if (!should_use_fsr411) {
+        ffxFsr4V07DestroyContext(&p_context, nullptr);
         ffxFsr4VkDestroyContext(reinterpret_cast<FfxFsr4VkContext*>(scratch.data()));
     }
     return 0;
