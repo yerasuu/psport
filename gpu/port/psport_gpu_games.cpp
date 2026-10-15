@@ -49,5 +49,7 @@ extern "C" PsTitleInfo psport_gpu_title(const char* sz_serial) {
         .pfn_check_files = p_title->pfn_check_files ? CheckFiles : nullptr,
         .pfn_add_patches = p_title->pfn_add_patches ? AddPatches : nullptr,
         .pfn_patch_image = has_patch_image ? PatchImage : nullptr,
+        .p_quirks = p_title->quirks.data(),
+        .c_quirks = p_title->quirks.size(),
     };
 }

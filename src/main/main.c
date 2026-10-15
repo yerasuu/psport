@@ -149,7 +149,7 @@ int main(int argc, char **argv) {
         else { fprintf(stderr, "Unknown option: %s\n", argv[i]); return 1; }
     }
     if (!game.sz_game) {
-        fprintf(stderr, "Usage: %s --game dir [--system-modules dir] [--hle libs] [--lle libs] [--cpu-only] [--strict-imports] [--app0 dir] [--user dir] [--patches-dir dir [--patches-config file]] [--mods dir [--mods-config file]] [--out dir] [--timeout seconds] [--exec guest-path [--arg value]...] | --check-game dir | --has-presets dir | --list-patches dir (--game dir | --title id [--version v]) | --list-mods dir [--game dir | --title id] | --vulkan-only\n", argv[0]);
+        fprintf(stderr, "Usage: %s --game dir [--system-modules dir] [--hle libs] [--lle libs] [--cpu-only] [--strict-imports] [--app0 dir] [--user dir] [--patches-dir dir [--patches-config file]] [--mods dir [--mods-config file]] [--out dir] [--timeout seconds] [--exec guest-path [--arg value]...] | --check-game dir | --has-presets dir | --list-patches dir (--game dir | --title id [--version v]) | --list-mods dir [--game dir | --title id] | --list-quirks [--game dir] | --vulkan-only\n", argv[0]);
         return 1;
     }
     const char *mod_folders[256];
@@ -197,6 +197,9 @@ int main(int argc, char **argv) {
      * window opens: a launch that cannot work stops here, with why. */
     GameInfo info;
     game_info(game.sz_game,&info);
+    /* TODO: loader_game_traits() for QUIRK_TRAITS once the loader detects middleware (reorg phase 7). */
+    RuntimeQuirkLaunch quirks=quirk_launch(&info,0);
+    runtime_quirks_evaluate(&quirks);
     if (info.title.pfn_prepare_environment) info.title.pfn_prepare_environment();
     char sz_problem[64], sz_advice[2048];
     if (info.title.pfn_check_files && info.title.pfn_check_files(&info.files,sz_problem,sizeof(sz_problem),sz_advice,sizeof(sz_advice))) {

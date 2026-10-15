@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "runtime.h"
+#include "runtime_quirks.h"
 #include "loader.h"
 #include "gpu/psport_gpu.h"
 
@@ -43,12 +44,14 @@ void game_info(const char *sz_game_dir, GameInfo *p_out_info);
 int sfo_value(const char *sz_path, const char *sz_key, char *sz_text, size_t cb_text, uint32_t *p_number);
 void configure_content(const char *sz_sfo);
 LoaderPatchFolder patch_folder(const char *sz_dir, const GameInfo *p_info);
+/* What the quirk registry decides on from the game's title; traits are the caller's. */
+RuntimeQuirkLaunch quirk_launch(const GameInfo *p_info, uint64_t traits);
 void mod_options(const GameInfo *p_info, LoaderModOptions *p_options, const char **pp_folders, size_t c_capacity);
 #ifndef _WIN32
 void accept_deprecated_names(char **pp_argv);
 #endif
 /* The options that answer a launcher's question and exit before any game is loaded (--check-game,
- * --has-presets, --list-patches, --list-mods): their exit status, -1 when argv asks none of them. */
+ * --has-presets, --list-patches, --list-mods, --list-quirks): their exit status, -1 when argv asks none of them. */
 int answer_query(int argc, char **argv);
 int mapped(Segment *p_segments, uint64_t c_segments, uint64_t va_range, uint64_t cb_range);
 void bind_imports(Segment *p_segments, uint64_t c_segments, Reloc *p_relocs, uint64_t c_relocs, int native_libc,

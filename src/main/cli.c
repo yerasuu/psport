@@ -78,6 +78,18 @@ int answer_query(int argc, char **argv) {
         game_info(argv[2],&info);
         return info.title.has_presets ? 0 : 1;
     }
+    if (argc >= 2 && !strcmp(argv[1], "--list-quirks")) {
+        if (argc != 2 && (argc != 4 || strcmp(argv[2], "--game"))) {
+            fprintf(stderr, "Usage: %s --list-quirks [--game dir]\n", argv[0]);
+            return 1;
+        }
+        if (argc == 2) { runtime_quirks_list(NULL); return 0; }
+        GameInfo info;
+        game_info(argv[3],&info);
+        RuntimeQuirkLaunch launch=quirk_launch(&info,0);
+        runtime_quirks_list(&launch);
+        return 0;
+    }
     const char *mod_folders[256];
     if (argc >= 3 && (!strcmp(argv[1], "--list-patches") || !strcmp(argv[1], "--list-mods"))) {
         GameInfo info;

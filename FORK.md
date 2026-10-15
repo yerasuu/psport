@@ -105,6 +105,7 @@ obvious.
 | Synchronous image downloads | `video_core/texture_cache/texture_cache.cpp` | the buffer invalidation after a synchronous image download reads back GPU data in place (`assume_locks`) instead of queuing it to the GPU command thread: downloads run on that thread or the draw recording thread, and the queued readback never ran while the command thread drained the draw pipe (Onigiri hung after its first frame once it had a mouse) | no (bbport's draw recording thread) |
 | Command buffer pool growth | `video_core/renderer_vulkan/vk_resource_pool.cpp` | `CommitResource` searches again with the GPU tick it has just refreshed: the search lambda had captured the tick before the refresh, so every pass through the pool overflowed and added four command buffers, and the driver's buffers behind them (~384 KiB of VRAM each time, ~2.5 MiB a minute in play, never freed) | bug present at `3a9f572` |
 | Presenter | `video_core/renderer_vulkan/vk_presenter.cpp` | logs the first presented game frame once (`tools/regress.sh` reads it) | no |
+| Quirk registry | `video_core/renderer_vulkan/vk_instance.cpp` | the chosen physical device's vendor, driver id, name and driver version go to `runtime_quirks_note_gpu` before `CreateDevice` (`HOST` quirks, [docs/en/QUIRKS.md](docs/en/QUIRKS.md)) | no |
 | Prepared vertex streams | `video_core/renderer_vulkan/vk_rasterizer.cpp`, `vk_rasterizer.h` | a draw-preparation worker's vertex inputs are used only while its V#s equal the ones read in order for the draw (`ArePreparedVsharpsCurrent`): the worker reads the V# tables ahead of the constant engine dumps that rewrite them, and the user data it verifies holds only the tables' address (Onigiri's login screen and PSN notice drew with another draw's vertices) | no (bbport's draw preparation) |
 | AvPlayer queues | `core/libraries/avplayer/avplayer_common.h` | `AvPlayerQueue::Size()` and `Front()` take the queue's mutex, and `Pop()` checks for an empty queue under it: the decoder threads push while the game thread reads, and an unlocked `size()` or `front()` raced the push | bug present at `3a9f572` |
 | AvPlayer start without a source | `core/libraries/avplayer/avplayer_state.cpp` | `Start()` fails when the source is gone instead of calling through a null `m_up_source`: `sceAvPlayerClose` resets the source before it stops the controller thread, and an AutoPlay `StateReady` handled on that thread in between still called `Start()` in the `Ready` state | bug present at `3a9f572` |
@@ -275,6 +276,7 @@ profile (or with `PS_GAME_PROFILE=none`) runs with the values in the first colum
 | Variable | What it shows |
 |---|---|
 | `PS_PERMISSIVE=1` | imports the port lacks return 0 instead of stopping, each logged once |
+| `PS_QUIRKS=none,-<id>,+<id>` | quirks of the registry turned off (all but `LAUNCH`, one) or forced on, each logged; `psport --list-quirks [--game <dir>]` lists them ([docs/en/QUIRKS.md](docs/en/QUIRKS.md)) |
 | `PS_GAME_PROFILE=none` | the game runs without its translator profile (`gpu/games/`, `Game::Profile`), on the generic paths only; its title (`Game::Title`: launch, patches, saves, menu pages) still applies |
 | `PS_PERMISSIVE_OUT=error` | with `PS_PERMISSIVE=1`, those of them that write through a pointer argument (`src/runtime/imports/import_outparams.inc`) return `0x80020016` instead of 0, so the game takes its error path rather than reading an output nothing wrote; either way their log line names the output arguments left unwritten and the pointers passed |
 | (always) | before the game starts: every import without implementation or answered by a stub, and a summary |
@@ -325,6 +327,8 @@ Calls: summary failed <calls> <NID> (<name>) -> -1, errno <n>
 Calls: summary status <calls> <NID> (<name>) -> 0x8xxxxxxx
 Calls: summary status <calls> <NID> (<name>) -> -1, errno <n>
 ```
+
+Then `Quirks: <n> active: <id>, ...` (the quirk registry, [docs/en/QUIRKS.md](docs/en/QUIRKS.md)).
 
 The `status` count is appended to the first line and its entries carry a list name of their own,
 so a parser that knows only `unimplemented`, `stub` and `failed` still reads those as before, skips

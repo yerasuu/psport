@@ -11,11 +11,12 @@ The model is Wine's, not an emulator's.
 |---|---|---|---|
 | Launch script | `run.sh` | - | environment and settings, then `psport` |
 | Entry | `src/main/main.c`, `src/main/main.h` | `out/psport` | launch sequence: arguments, image mapping, entering the game |
-| Launcher queries | `src/main/cli.c`, `src/main/game_info.c` | `out/psport` | `--check-game`, `--has-presets`, `--list-patches`, `--list-mods`, `BB_*` names; `param.sfo` and the game's identity |
+| Launcher queries | `src/main/cli.c`, `src/main/game_info.c` | `out/psport` | `--check-game`, `--has-presets`, `--list-patches`, `--list-mods`, `--list-quirks`, `BB_*` names; `param.sfo` and the game's identity |
 | Import binding | `src/main/bind.c` | `out/psport` | traps, failure thunks, relocation walk, patch writes |
 | Signals | `src/main/signals.c` | `out/psport` | fault, watchdog, thread dump and termination handlers |
 | Native loader | `src/loader/loader.h`, `src/loader/loader_self.c`, `src/loader/loader_link.c` | `out/psport` | SELF/ELF parsing, module linking, relocations, TLS, bindings |
 | Launch data | `src/loader/loader_mods.c`, `src/loader/loader_patches.c`, `src/loader/loader_xml.c`, `src/loader/loader_hash.c`, `src/loader/loader_json.c` | `out/psport` | loose-file mod view, shadPS4/GoldHEN XML patches, the eboot's identity (SHA-256), `mods.json`/`patches.json` |
+| Quirk registry | `src/runtime/runtime_quirks.inc`, `runtime_quirks.h`, `runtime_quirks.c`, `gpu/port/psport_quirks.h` | `out/psport` | fixes for one title, host or middleware, decided once and read at setup ([QUIRKS.md](QUIRKS.md)) |
 | C runtime | `src/*/runtime*.c`, `src/runtime/runtime.h`, `src/runtime/imports/import_*.inc` | `out/psport` | libkernel and the other system libraries, import resolution, the call report |
 | GPU library | `gpu/port/psport_gpu*.cpp`, `gpu/psport_gpu.h` | `out/gpu/libpsport-gpu.so` | C interface between `psport` and the C++ side |
 | Translator | `gpu/shadps4/` (inherited from shadPS4, `gpu/VENDOR.txt`), `gpu/cp/`, `gpu/layer/` | `libpsport-gpu.so` | GnmDriver, VideoOut, command processor, Vulkan rasterizer, caches, shader recompiler |
@@ -44,6 +45,7 @@ run.sh
     psport_gpu_register_kernel()           event queues and the ported libraries register their exports
     loader_load_game()                eboot + modules -> one LoaderImage
     psport_gpu_title()                     the title's launch data (PsTitleInfo), whatever PS_GAME_PROFILE says
+    runtime_quirks_evaluate()              PS_QUIRKS, the title's quirks, published (QUIRKS.md)
     pfn_prepare_environment                the title's environment defaults (PS_VBLANK_HZ)
     pfn_check_files                        the title's check of the game's files (exit 2)
     pfn_add_patches                        the title's own patches, then the external XML patches
@@ -192,6 +194,7 @@ in link order (libc first) and the eboot's entry runs with `argv[0] = /app0/eboo
 | PlayStation VR with no headset connected: Hmd, VrTracker, SocialScreen | `runtime_vr.c` |
 | input | `runtime_pad.c`, `runtime_pad_script.c` (scripted input for automated runs), `runtime_gesture.c` |
 | call report | `runtime_calls.c` |
+| quirk registry: evaluation, `PS_QUIRKS`, `--list-quirks` | `runtime_quirks.c`, `runtime_quirks.inc` |
 
 Each file keeps a table of `RuntimeExport {symbol name, function}` and a `runtime_<area>_resolve`
 that looks the import up with `RUNTIME_LOOKUP`. Imports arrive as `NID#library#module`;
@@ -231,7 +234,9 @@ stood in for in `gpu/shim/psport_stand_ins.cpp`:
 - `psport_gpu_register_kernel` registers the kernel event queues and the libraries that do not need a
   window: AvPlayer, Ngs2, Fiber, Font, FontFt, Audiodec, Videodec2, PngEnc, PngDec.
 - `psport_gpu_init` selects the game's title and profile, loads `psport.ini`, prepares saves through
-  the title, starts the SDL window on its own thread and registers GnmDriver and VideoOut.
+  the title, starts the SDL window on its own thread and registers GnmDriver and VideoOut. The
+  Vulkan instance hands the chosen device's facts to `runtime_quirks_note_gpu` before creating the
+  device (`HOST` quirks, [QUIRKS.md](QUIRKS.md)).
 - `psport_gpu_resolve` returns the function registered for an import's NID. Libraries register with
   shadPS4's `LIB_FUNCTION(nid, library, version, module, function)` (`gpu/shim/core/libraries/libs.h`).
 - `psport_gpu_handle_fault` is the first stop of `psport`'s `SIGSEGV` handler: GPU page-tracking
@@ -300,6 +305,7 @@ A title may provide:
 | `effects` | the settings of `add_patches` the overlay menu's "Game effects" section offers: its `psport.ini` switches (key, label and hint in the menu's languages, default), the `model_lod` choice, a note; without them the section is not shown |
 | `prepare_saves` | changes to the user's saves the game needs before it runs (Bloodborne: the sound flag at `0x204E`) |
 | `patch_image`, `before_present` | the port's own pages in the game's menus: patched into its code after the profile's patches, and applied each presented frame |
+| `quirks` | its entries of the quirk registry ([QUIRKS.md](QUIRKS.md)) |
 | `profile` | its `Game::Profile`, or none |
 
 A profile may provide:

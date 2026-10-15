@@ -118,6 +118,9 @@ typedef struct {
      * chose the running title: its translator profile's patches unless PS_GAME_PROFILE=none, then
      * its own. */
     void (*pfn_patch_image)(unsigned char *p_image, uint64_t cb_image);
+    /* Its quirks: RuntimeQuirkId values of src/runtime/runtime_quirks.inc. */
+    const uint16_t *p_quirks;
+    size_t c_quirks;
 } PsTitleInfo;
 PsTitleInfo psport_gpu_title(const char *sz_serial);
 /* libSceAjm's MP3 and AAC decoders (runtime_ajm.c) over libSceAudiodec's FFmpeg codecs (audiodec/).

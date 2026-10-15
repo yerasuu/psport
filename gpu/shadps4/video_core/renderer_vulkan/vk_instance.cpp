@@ -13,6 +13,7 @@
 #include "sdl_window.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
 #include "psport_toggles.h"
+#include "psport_quirks.h"
 #include "video_core/renderer_vulkan/vk_dlss.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_platform.h"
@@ -193,6 +194,9 @@ Instance::Instance(const Frontend::WindowSystemInfo& window_info, s32 physical_d
                VK_VERSION_MAJOR(TargetVulkanApiVersion), VK_VERSION_MINOR(TargetVulkanApiVersion),
                VK_VERSION_MAJOR(properties.apiVersion), VK_VERSION_MINOR(properties.apiVersion));
 
+    // psport: before the device exists, so that HOST quirks can shape its creation.
+    runtime_quirks_note_gpu(properties.vendorID, static_cast<u32>(driver_id), properties.deviceName.data(),
+                            properties.driverVersion);
     CreateDevice();
     CollectPhysicalMemoryInfo();
     CollectImageFormatInfo();

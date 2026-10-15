@@ -87,6 +87,9 @@ LoaderPatchFolder patch_folder(const char *sz_dir, const GameInfo *p_info) {
     return (LoaderPatchFolder){sz_dir,p_info->sz_patch_file[0] ? p_info->sz_patch_file : NULL,p_info->sz_version,
                                p_info->serials,p_info->c_serials};
 }
+RuntimeQuirkLaunch quirk_launch(const GameInfo *p_info, uint64_t traits) {
+    return (RuntimeQuirkLaunch){p_info->title.sz_name,p_info->sz_serial,p_info->title.p_quirks,p_info->title.c_quirks,traits};
+}
 /* The mods rules' game data: wrapper folders named after any TITLE_ID of the game's executable,
  * the folders of dvdroot_ps4 its title knows. */
 void mod_options(const GameInfo *p_info, LoaderModOptions *p_options, const char **pp_folders, size_t c_capacity) {

@@ -15,6 +15,7 @@
 #include <span>
 #include <string>
 #include "../psport_gpu.h"
+#include "psport_quirks.h"
 
 namespace Game {
 
@@ -214,6 +215,9 @@ struct Title {
     /// Each presented frame, on the presenter thread before the overlay is drawn: what the
     /// player changed in the game's own menus is applied here.
     void (*pfn_before_present)() = nullptr;
+    /// Its entries of the quirk registry (src/runtime/runtime_quirks.inc): LAUNCH ones always
+    /// apply, OPTIMIZATION ones not with PS_GAME_PROFILE=none (docs/en/QUIRKS.md).
+    std::span<const RuntimeQuirkId> quirks;
     /// Its translator profile; nullptr for a title without one.
     const Profile* p_profile = nullptr;
 };

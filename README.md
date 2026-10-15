@@ -132,6 +132,7 @@ hardware tests, when needed, are OpenOrbis homebrew); match the surrounding code
 
 - [docs/en/ARCHITECTURE.md](docs/en/ARCHITECTURE.md): components and the launch flow.
 - [docs/en/ADDING_A_TITLE.md](docs/en/ADDING_A_TITLE.md): bringing up a new dump.
+- [docs/en/QUIRKS.md](docs/en/QUIRKS.md): the registry of fixes for one title, host or middleware.
 - [FORK.md](FORK.md): ported components, changes to inherited code, variables, call report,
   regression runs, CI.
 - Feature notes: [upscaler](docs/en/upscaler.md), [parallel GPU work](docs/en/parallel_gpu.md),

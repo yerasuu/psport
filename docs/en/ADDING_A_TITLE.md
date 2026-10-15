@@ -126,6 +126,11 @@ From [CLAUDE.md](../../CLAUDE.md):
   ranges that write per-frame data, known copy shaders, overlap checks. The core keeps only the
   generic mechanism and must behave the same without a profile. A profile speeds a title up; it
   never makes it work. Check with `PS_GAME_PROFILE=none`.
+- A fix that cannot be general (a GPU or driver defect, a speed-up for one title or middleware,
+  data a title needs) goes in the quirk registry, declared with its kind, reason and tracking
+  task, logged when active and removable with `PS_QUIRKS=-<id>`: [QUIRKS.md](QUIRKS.md). A
+  title-specific correction of the emulation (`WORKAROUND`) stays off until decision #331 is
+  accepted.
 - No tests in the repository. When a change rests on how the console behaves and the behaviour is
   not documented, confirm it on hardware with an OpenOrbis homebrew test and share it with the
   change.

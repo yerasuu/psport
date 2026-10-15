@@ -3,6 +3,7 @@
  * counts summed up when the process ends. Writes go straight to the descriptors so the report can
  * run from the fault and watchdog handlers. */
 #include "runtime.h"
+#include "runtime_quirks.h"
 #include <inttypes.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -157,6 +158,7 @@ void runtime_calls_report(void) {
         if (file >= 0) put(file, sz_line);
     }
     if (file >= 0) close(file);
+    put(1, runtime_quirks_summary());
     runtime_eventflag_created_report();
     runtime_memory_flexible_report();
     runtime_file_unmounted_report();
