@@ -59,7 +59,15 @@ typedef struct {
     int32_t device_class;
     uint8_t reserved[4], class_data[12];
 } DeviceClassInfo;
+/* ScePadDeviceClassData: the class, whether the data is valid, then the class's own fields
+ * (wheel, guitar, drum, or others: length and raw bytes). */
+typedef struct {
+    int32_t device_class;
+    uint8_t is_data_valid, reserved[3];
+    uint8_t class_data[16];
+} DeviceClassData;
 _Static_assert(sizeof(ControllerInfo)==28,"OrbisPadControllerInformation layout");
+_Static_assert(sizeof(DeviceClassData)==24,"ScePadDeviceClassData layout");
 
 static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
 static int initialized, opened;
@@ -633,6 +641,15 @@ static ABI int32_t pad_class_info(int32_t handle, DeviceClassInfo *info) {
     memset(info,0,sizeof(*info));
     return 0;
 }
+/* The pad is a standard controller (class 0), which has no class fields to parse out of a state's
+ * device unique data: only whether that state came from a connected pad. */
+static ABI int32_t pad_class_parse(int32_t h_pad, const PadData *p_data, DeviceClassData *p_out_class_data) {
+    if (h_pad!=PAD_HANDLE || !opened) return ERR_INVALID_HANDLE;
+    if (!p_data || !p_out_class_data) return ERR_INVALID_ARG;
+    memset(p_out_class_data,0,sizeof(*p_out_class_data));
+    p_out_class_data->is_data_valid=p_data->connected!=0;
+    return 0;
+}
 static ABI int32_t pad_vibration(int32_t handle, const uint8_t *param) {
     if (handle!=PAD_HANDLE || !opened) return ERR_INVALID_HANDLE;
     if (!param) return ERR_INVALID_ARG;
@@ -682,7 +699,7 @@ static const RuntimeExport exports[]={
     {"scePadInit",pad_init}, {"scePadOpen",pad_open}, {"scePadGetHandle",pad_get_handle}, {"scePadClose",pad_close},
     {"scePadReadState",pad_read_state}, {"scePadRead",pad_read},
     {"scePadGetControllerInformation",pad_info}, {"scePadIsRemoteController",pad_is_remote},
-    {"scePadDeviceClassGetExtendedInformation",pad_class_info}, {"scePadSetVibration",pad_vibration},
+    {"scePadDeviceClassGetExtendedInformation",pad_class_info}, {"scePadDeviceClassParseData",pad_class_parse}, {"scePadSetVibration",pad_vibration},
     {"scePadSetLightBar",pad_set_light_bar}, {"scePadResetLightBar",pad_reset_light_bar},
     {"scePadResetOrientation",pad_ok_handle},
     {"scePadSetAngularVelocityDeadbandState",pad_ok_handle_flag}, {"scePadSetTiltCorrectionState",pad_ok_handle_flag},

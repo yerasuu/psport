@@ -9,6 +9,12 @@
 extern __thread sigjmp_buf *runtime_fault_recover;
 /* Restarts the game (in-game settings menu, render resolution change). */
 void runtime_restart(void);
+/* sceSystemServiceLoadExec (probe.c): psport starts again on its own command line with sz_path, a
+ * guest path of the package, as the main executable and pp_arguments (NULL-terminated, may be NULL)
+ * after it; returns only when the exec failed. */
+void runtime_load_exec(const char *sz_path, char *const *pp_arguments);
+/* psport's own command line, which runtime_load_exec starts again from; kept. */
+void runtime_restart_configure(int c_argv, char **pp_argv);
 #endif
 #define ABI __attribute__((sysv_abi))
 typedef void (ABI *GuestCallback)(void);
@@ -83,6 +89,8 @@ uintptr_t runtime_barrier_resolve(const char *sz_name);
 void runtime_barrier_report(void);
 void runtime_set_module_tls(uint64_t module, const void *data, uint64_t filesz, uint64_t memsz);
 void runtime_set_procparam(void *param);
+/* The guest's command line: pp_arguments[0] is the executable's guest path; NULL-terminated, kept. */
+void runtime_set_arguments(char **pp_arguments, int c_arguments);
 uintptr_t runtime_thread_resolve(const char *name);
 uintptr_t runtime_sched_resolve(const char *name);
 void runtime_thread_report(void);
@@ -91,6 +99,8 @@ void runtime_thread_attach_main(void);
 /* Sends a host signal to a guest thread (ScePthread handle): 0, or 0x80020003 when the handle names
  * no live thread. */
 int32_t runtime_thread_kill(void *thread, int host_signal);
+/* The guest's sigprocmask bookkeeping for the calling thread (sigreturn's uc_sigmask). */
+void runtime_kernel_set_signal_mask(const uint32_t bits[4]);
 uintptr_t runtime_exception_resolve(const char *name);
 void runtime_exception_report(void);
 #ifndef _WIN32
@@ -147,6 +157,8 @@ uintptr_t runtime_playgo_resolve(const char *name);
 uintptr_t runtime_devices_resolve(const char *sz_name);
 /* Remote Play, Share Play, video recording and core dumps, none of them running (runtime_capture.c). */
 uintptr_t runtime_capture_resolve(const char *sz_name);
+/* PlayStation VR with no headset connected: Hmd, VrTracker, SocialScreen (runtime_vr.c). */
+uintptr_t runtime_vr_resolve(const char *sz_name);
 uintptr_t runtime_voice_resolve(const char *name);
 /* Offline libSceNet sockets (runtime_socket.c), consulted by runtime_services_resolve. */
 uintptr_t runtime_socket_resolve(const char *name);
@@ -159,6 +171,8 @@ uintptr_t runtime_json_resolve(const char *sz_name);
 /* PSN libraries offline (runtime_np.c), consulted by runtime_services_resolve. */
 uintptr_t runtime_np_resolve(const char *sz_name);
 int32_t *runtime_net_errno(void);
+/* The console's wired MAC address (runtime_socket.c). */
+void runtime_net_ether_address(uint8_t p_out_address[6]);
 /* Online play (runtime_net.c, PS_ONLINE=1): the online module answers the network and PSN imports. */
 void runtime_net_configure(const char *app0, const char *serial, const char *title, const char *version);
 int runtime_net_enabled(void);

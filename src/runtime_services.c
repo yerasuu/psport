@@ -3,7 +3,7 @@
  *   - network cable unplugged: NetCtl disconnected, sockets on loopback only (runtime_socket.c),
  *     no HTTP transfer (runtime_http.c);
  *   - common dialogs complete immediately (no UI is drawn yet);
- *   - no PlayStation VR headset is connected.
+ *   - no PlayStation VR headset is connected (runtime_vr.c).
  * Every entry here is an explicit contract; unknown functions still stop. */
 #define _GNU_SOURCE
 #include "runtime.h"
@@ -15,6 +15,7 @@
 #include <pthread.h>
 #include <time.h>
 #include <arpa/inet.h>
+#include <sys/stat.h>
 
 #define USER_ID 1
 #define ORBIS_OK 0
@@ -22,6 +23,7 @@
 #define USER_NO_EVENT ((int32_t)0x80960007)
 #define SYSTEM_NO_EVENT ((int32_t)0x80A10004)
 #define SYSTEM_PARAMETER ((int32_t)0x80A10003)
+#define SYSTEM_INTERNAL ((int32_t)0x80A10001)
 #define NET_CTL_NOT_CONNECTED ((int32_t)0x80412108)
 #define NET_CTL_INVALID_ADDR ((int32_t)0x80412107)
 #define NP_SIGNED_OUT ((int32_t)0x80550006)
@@ -30,10 +32,6 @@
 #define NET_EINVAL ((int32_t)0x80410116)
 #define DIALOG_NOT_INITIALIZED ((int32_t)0x80B80003)
 #define AUDIO_IN_NOT_OPENED ((int32_t)0x80260109)
-#define HMD_ALREADY_INITIALIZED ((int32_t)0x81110001)
-#define HMD_NOT_INITIALIZED ((int32_t)0x81110002)
-#define HMD_HANDLE_INVALID ((int32_t)0x81110003)
-#define HMD_PARAMETER_NULL ((int32_t)0x81110008)
 #define MOVE_NO_CONTROLLER 1
 #define MOVE_NOT_INIT ((int32_t)0x80EE0001)
 #define MOVE_ALREADY_INIT ((int32_t)0x80EE0002)
@@ -124,6 +122,20 @@ static ABI int32_t display_safe_area(float *ratio) {
     *ratio=1.0f;
     return 0;
 }
+/* The console ends the application and starts another executable of its package; the port starts
+ * itself again on it (runtime_load_exec), so this returns only when that failed. */
+static ABI int32_t load_exec(const char *sz_path, char *const *pp_arguments) {
+    char sz_guest[1024], sz_host[4096];
+    struct stat info;
+    if (sz_path) snprintf(sz_guest,sizeof(sz_guest),sz_path[0]=='/' ? "%s" : "/app0/%s",sz_path);
+    if (!sz_path || strncmp(sz_guest,"/app0/",6) || runtime_file_translate(sz_guest,sz_host,sizeof(sz_host)) ||
+        stat(sz_host,&info) || !S_ISREG(info.st_mode)) {
+        printf("Runtime: sceSystemServiceLoadExec: %s is no executable of the package\n",sz_path ? sz_path : "(null)");
+        return SYSTEM_PARAMETER;
+    }
+    runtime_load_exec(sz_guest,pp_arguments);
+    return SYSTEM_INTERNAL;
+}
 
 /* ---- NetCtl / Net / Ssl: no network ---- */
 static ABI int32_t net_unreachable(void) { *runtime_net_errno()=51; return NET_ENETUNREACH; }
@@ -144,7 +156,14 @@ static ABI const char *net_ntop(int af,const void *src,char *dst,uint32_t size) 
     return inet_ntop(AF_INET,src,dst,size);
 }
 static ABI int32_t netctl_state(int32_t *state) { if (!state) return NET_CTL_INVALID_ADDR; *state=0; return 0; }
-static ABI int32_t netctl_info(int code,void *info) { (void)code; (void)info; return NET_CTL_NOT_CONNECTED; }
+/* The interface's own address does not need a connection; everything else does. */
+static ABI int32_t netctl_info(int code,void *info) {
+    if (code!=2) return NET_CTL_NOT_CONNECTED; /* SCE_NET_CTL_INFO_ETHER_ADDR */
+    if (!info) return NET_CTL_INVALID_ADDR;
+    runtime_net_ether_address(info);
+    return 0;
+}
+static ABI int32_t netctl_init(void) { note("NetCtl initialized (network cable unplugged)"); return 0; }
 static ABI int32_t netctl_register(void *cb,void *arg,int32_t *cid) { (void)arg; if (!cb || !cid) return NET_CTL_INVALID_ADDR; *cid=new_id(); return 0; }
 static ABI int32_t netctl_nat(uint32_t *info) {
     if (!info) return NET_CTL_INVALID_ADDR;
@@ -392,6 +411,15 @@ static ABI int32_t hmd_setup_result(int32_t *result) {
     return 0;
 }
 static ABI int32_t hmd_setup_close(void) { dialogs[11].status=3; return 0; }
+/* SceSocialScreenDialogResult: result, reserved. Separate mode needs the PS VR processor unit, so
+ * the user can only back out: SCE_COMMON_DIALOG_RESULT_USER_CANCELED. */
+static ABI int32_t social_result(int32_t *p_out_result) {
+    if (dialogs[10].status!=3) return (int32_t)0x80B80005; /* NOT_FINISHED */
+    if (!p_out_result) return (int32_t)0x80B8000D;         /* ARG_NULL */
+    p_out_result[0]=1;
+    return 0;
+}
+static ABI int32_t social_close(void) { dialogs[10].status=3; return 0; }
 /* ScePlayGoDialogResult: result, reserved. Every chunk is installed, so the dialog has nothing to
  * wait for and ends as accepted: SCE_COMMON_DIALOG_RESULT_OK. */
 static ABI int32_t playgo_result(int32_t *p_out_result) {
@@ -492,28 +520,6 @@ static ABI int32_t common_is_used(void) {
     return ime.running;
 }
 
-/* ---- PlayStation VR: the library runs, no headset is detected ---- */
-static int hmd_initialized;
-static ABI int32_t hmd_init(const void *param) {
-    if (hmd_initialized) return HMD_ALREADY_INITIALIZED;
-    if (!param) return HMD_PARAMETER_NULL;
-    hmd_initialized=1; return 0;
-}
-static ABI int32_t hmd_term(void) {
-    if (!hmd_initialized) return HMD_NOT_INITIALIZED;
-    hmd_initialized=0; return 0;
-}
-/* OrbisHmdDeviceInformation (32 bytes): status, user, reserved, panel size, latencies, HMU mount. */
-static ABI int32_t hmd_device_info(int32_t *info) {
-    if (!info) return HMD_PARAMETER_NULL;
-    if (!hmd_initialized) return HMD_NOT_INITIALIZED;
-    memset(info,0,32);
-    info[0]=2; /* SCE_HMD_DEVICE_STATUS_NOT_DETECTED */
-    info[1]=-1;
-    return 0;
-}
-static ABI int32_t hmd_handle_invalid(void) { return HMD_HANDLE_INVALID; }
-
 /* ---- DiscMap: the game is fully installed, no disc bitmap exists ---- */
 #define DISC_MAP_NO_BITMAP ((int32_t)0x81100004)
 /* Every byte of an installed title is on the HDD; libSceFios2 takes a failure here for a request
@@ -593,7 +599,7 @@ static const RuntimeExport exports[]={
     {"sceSystemServiceReceiveEvent",system_event}, {"sceSystemServiceHideSplashScreen",hide_splash},
     {"sceSystemServiceLaunchWebBrowser",launch_browser},
     {"sceSystemServiceShowControllerSettings",show_controller_settings},
-    {"sceSystemServiceGetDisplaySafeAreaInfo",display_safe_area},
+    {"sceSystemServiceGetDisplaySafeAreaInfo",display_safe_area}, {"sceSystemServiceLoadExec",load_exec},
     {"sceNetInit",runtime_stub}, {"sceNetTerm",runtime_stub}, {"sceNetPoolDestroy",runtime_stub},
     {"sceNetEpollCreate",net_epoll_create}, {"sceNetEpollDestroy",runtime_stub},
     {"sceNetResolverCreate",net_resolver_create}, {"sceNetResolverDestroy",runtime_stub},
@@ -602,7 +608,7 @@ static const RuntimeExport exports[]={
     {"sceNetInetPton",net_pton}, {"sceNetInetNtop",net_ntop},
     {"sceNetEpollControl",net_unreachable}, {"sceNetEpollWait",net_unreachable}, {"sceNetEpollAbort",net_unreachable},
     {"sceNetResolverStartNtoa",net_unreachable}, {"sceNetResolverStartAton",net_unreachable},
-    {"sceNetCtlGetState",netctl_state}, {"sceNetCtlGetInfo",netctl_info},
+    {"sceNetCtlInit",netctl_init}, {"sceNetCtlGetState",netctl_state}, {"sceNetCtlGetInfo",netctl_info},
     {"sceNetCtlRegisterCallback",netctl_register}, {"sceNetCtlCheckCallback",nothing_due},
     {"sceNetCtlUnregisterCallback",runtime_stub}, {"sceNetCtlGetNatInfo",netctl_nat},
     {"sceNetCtlRegisterCallbackForNpToolkit",netctl_register}, {"sceNetCtlCheckCallbackForNpToolkit",nothing_due},
@@ -693,7 +699,8 @@ static const RuntimeExport exports[]={
     {"sceSigninDialogTerminate",signin_term}, {"sceSigninDialogGetResult",signin_result},
     {"sceSocialScreenDialogInitialize",social_init}, {"sceSocialScreenDialogOpen",social_open},
     {"sceSocialScreenDialogUpdateStatus",social_status}, {"sceSocialScreenDialogGetStatus",social_status},
-    {"sceSocialScreenDialogTerminate",social_term},
+    {"sceSocialScreenDialogTerminate",social_term}, {"sceSocialScreenDialogGetResult",social_result},
+    {"sceSocialScreenDialogClose",social_close},
     {"sceErrorDialogInitialize",error_init}, {"sceErrorDialogOpen",error_open},
     {"sceErrorDialogUpdateStatus",error_status}, {"sceErrorDialogGetStatus",error_status},
     {"sceErrorDialogClose",error_close}, {"sceErrorDialogTerminate",error_term},
@@ -705,9 +712,6 @@ static const RuntimeExport exports[]={
     {"scePlayGoDialogUpdateStatus",playgo_status}, {"scePlayGoDialogGetStatus",playgo_status},
     {"scePlayGoDialogGetResult",playgo_result}, {"scePlayGoDialogClose",playgo_close},
     {"scePlayGoDialogTerminate",playgo_term}, {"sceCommonDialogIsUsed",common_is_used},
-    {"sceHmdInitialize",hmd_init}, {"sceHmdInitialize315",hmd_init}, {"sceHmdTerminate",hmd_term},
-    {"sceHmdGetDeviceInformation",hmd_device_info},
-    {"sceHmdGetDeviceInformationByHandle",hmd_handle_invalid}, {"sceHmdGetFieldOfView",hmd_handle_invalid},
     {"sceAudioInOpen",audio_in_open}, {"sceAudioInHqOpen",audio_in_open}, {"sceAudioInGetSilentState",audio_in_open},
     {"sceMoveInit",move_init}, {"sceMoveOpen",move_open}, {"sceMoveGetDeviceInfo",move_device_info},
     {"sceMoveReadStateRecent",move_read_recent}, {"sceMoveSetLightSphere",move_no_controller},

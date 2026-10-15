@@ -586,7 +586,8 @@ void loader_load_game(const LoaderOptions *options, LoaderImage *out) {
     Linker l = {.game = options->game, .out = out, .none_index = -1};
     char path[4096];
     memset(out, 0, sizeof(*out));
-    join(path, sizeof(path), l.game, "eboot.bin");
+    if (options->sz_executable) snprintf(path, sizeof(path), "%s", options->sz_executable);
+    else join(path, sizeof(path), l.game, "eboot.bin");
     loader_file = path;
     loader_module(path, &l.main);
     prepare(&l);

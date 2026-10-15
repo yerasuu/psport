@@ -526,6 +526,13 @@ void PS4_SYSV_ABI sceVideoOutModeSetAny_(Mode* mode, u32 size) {
     mode->size = size;
 }
 
+// psport: no option is set by default, and sceVideoOutConfigureOutputMode_ reads none.
+void PS4_SYSV_ABI sceVideoOutConfigureOptionsInitialize_(void* options, u32 size) {
+    if (options) {
+        std::memset(options, 0, size);
+    }
+}
+
 s32 PS4_SYSV_ABI sceVideoOutConfigureOutputMode_(s32 handle, u32 reserved, const Mode* mode,
                                                  const void* options, u32 size_mode,
                                                  u32 size_options) {
@@ -609,6 +616,8 @@ void RegisterLib(Core::Loader::SymbolsResolver* sym) {
     LIB_FUNCTION("oNOQn3knW6s", "libSceVideoOut", 1, "libSceVideoOut",
                  sceVideoOutDeleteVblankEvent);
     LIB_FUNCTION("pjkDsgxli6c", "libSceVideoOut", 1, "libSceVideoOut", sceVideoOutModeSetAny_);
+    LIB_FUNCTION("ktP9j1fN-zE", "libSceVideoOut", 1, "libSceVideoOut",
+                 sceVideoOutConfigureOptionsInitialize_);
     LIB_FUNCTION("N1bEoJ4SRw4", "libSceVideoOut", 1, "libSceVideoOut",
                  sceVideoOutConfigureOutputMode_);
     LIB_FUNCTION("MTxxrOCeSig", "libSceVideoOut", 1, "libSceVideoOut",

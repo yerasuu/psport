@@ -70,6 +70,12 @@ the game, binds its imports, installs the fault (`SIGSEGV`, `SIGILL`, `SIGBUS`, 
 heap objects handed to the guest stay below 1 TiB (`mallopt` keeps glibc in the non-PIE brk heap):
 PS4 code packs pointers into 40 bits. Guest memory is placed there too.
 
+`sceSystemServiceLoadExec` replaces the application the way the console does: `psport` starts
+again on its own command line (`src/runtime_restart.c`) with `--exec <guest path>` and one
+`--arg <value>` per argument, the loader takes that executable of the package instead of
+`eboot.bin`, the game's entry, `getargv` and `__progname` see the new command line, and
+`patches.bin` is applied only to `/app0/eboot.bin`.
+
 ### Native loader
 
 `loader_load_game` (`src/loader_link.c`) builds one image, the eboot at offset 0 and every module
@@ -133,6 +139,7 @@ in link order (libc first) and the eboot's entry runs with `argv[0] = /app0/eboo
 | Area | Files |
 |---|---|
 | process, libc hooks, TLS, procparam, `runtime_resolve` | `runtime.c`, `runtime.h` |
+| restarts: the settings menu's, `sceSystemServiceLoadExec` | `runtime_restart.c` |
 | kernel misc, process, time | `runtime_kernel.c`, `runtime_rtc.c` |
 | memory: direct, flexible, mappings, pools, write traps, GPU interface | `runtime_memory.c`, `runtime_memory_kernel.c`, `runtime_memory_gpu.c`, `runtime_mempool.c` |
 | threads and synchronisation | `runtime_thread.c`, `runtime_sched.c`, `runtime_mutex.c`, `runtime_rwlock.c`, `runtime_sema.c`, `runtime_eventflag.c`, `runtime_barrier.c`, `runtime_ult.c`, `runtime_ulobjmgr.c` |
@@ -143,6 +150,7 @@ in link order (libc first) and the eboot's entry runs with `argv[0] = /app0/eboo
 | audio | `runtime_audio.c` (AudioOut), `runtime_audio3d.c`, `runtime_ajm.c` |
 | absent peripherals: USB devices (libSceUsbd), PlayStation Camera | `runtime_devices.c` |
 | Remote Play, Share Play, video recording, core dumps (none running) | `runtime_capture.c` |
+| PlayStation VR with no headset connected: Hmd, VrTracker, SocialScreen | `runtime_vr.c` |
 | input | `runtime_pad.c`, `runtime_pad_script.c` (scripted input for automated runs), `runtime_gesture.c` |
 | call report | `runtime_calls.c` |
 
@@ -154,7 +162,7 @@ function serves the NID whichever library the executable names (`libkernel` or `
 `runtime_resolve` (`src/runtime.c`) asks the tables in a fixed chain: the runtime's own libc,
 TLS and procparam entries, then mutex, thread, sched, content, time, sema, eventflag, ulobjmgr,
 ult, rwlock, barrier, memory, mempool, exception, kernel, module, playgo, voice, services, ajm, audio,
-audio3d, pad, gesture, devices, capture, rtc, savedata, file, aio, and last `bbgpu_resolve`. The first table that
+audio3d, pad, gesture, devices, capture, vr, rtc, savedata, file, aio, and last `bbgpu_resolve`. The first table that
 has the symbol wins.
 
 Guest-visible errno values are FreeBSD's (`runtime_guest_errno`). Sockets, libSceNet's and POSIX's,
