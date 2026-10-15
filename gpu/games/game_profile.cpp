@@ -16,6 +16,7 @@ extern const Profile BloodborneProfile;
 namespace {
 constexpr std::array<const Profile*, 1> Profiles = {&BloodborneProfile};
 std::atomic<const Profile*> active{nullptr};
+std::atomic<const Profile*> launched{nullptr};
 } // namespace
 
 const Profile* Find(const char* serial) {
@@ -28,6 +29,7 @@ const Profile* Find(const char* serial) {
 }
 
 void Select(const char* serial) {
+    launched.store(Find(serial), std::memory_order_release);
     const char* env = std::getenv("PS_GAME_PROFILE");
     if (env && std::strcmp(env, "none") == 0) {
         std::printf("Game profile: none (PS_GAME_PROFILE=none): the game runs as an unknown one\n");
@@ -43,6 +45,10 @@ void Select(const char* serial) {
 
 const Profile* Active() {
     return active.load(std::memory_order_acquire);
+}
+
+const Profile* Launched() {
+    return launched.load(std::memory_order_acquire);
 }
 
 bool IsDynamicWriter(std::uint64_t guest_rip) {

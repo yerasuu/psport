@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "bbport_settings.h"
+#include "effects.h"
 
 namespace BbGameMenu {
 namespace {
@@ -104,8 +105,9 @@ const char16_t* TextOf(u32 id) {
 // ---- The port's values the game's rows edit (ints: the list rows bind ints). ----
 enum Field : int {
     OutputRes, Upscaler, Preset, Sharpness, ShowFps,
-    ModelLod, FirstEffect, FieldCount = FirstEffect + BbSettings::EffectCount
+    ModelLod, FirstEffect, FieldCount = FirstEffect + BbEffects::SwitchCount
 };
+static_assert(BbEffects::SwitchCount <= BbSettings::MaxEffects);
 int values[FieldCount];  // what the game's rows show and change (list rows bind ints)
 u8 bytes[FieldCount];    // the same for toggle and slider rows (they bind bytes)
 bool byte_field[FieldCount]; // fields shown by toggle or slider rows
@@ -144,7 +146,7 @@ void Fill(const BbSettings::Values& s, int* values) {
     for (int i = 0; i < 4; ++i) {
         if (LodValues[i] == s.model_lod) values[ModelLod] = i;
     }
-    for (int e = 0; e < BbSettings::EffectCount; ++e) {
+    for (int e = 0; e < BbEffects::SwitchCount; ++e) {
         values[FirstEffect + e] = s.effects[e];
     }
 }
@@ -226,7 +228,7 @@ void DefineTexts() {
     page("Effects", "Эффекты", "The game's effects (psport; after a restart)",
          "Эффекты игры (psport; после перезапуска)");
 
-    // Short names for the game's narrow name column (BbSettings::Effects order); the help line
+    // Short names for the game's narrow name column (BbEffects::Switches order); the help line
     // has the details.
     struct Short {
         const char *key, *en, *ru, *help_en, *help_ru;
@@ -254,21 +256,22 @@ void DefineTexts() {
         {"debug_menu", "Debug menu", "Debug menu", "The game's debug menu (requires font files)",
          "Отладочное меню игры (нужны файлы шрифтов)", false},
     };
-    for (int e = 0; e < BbSettings::EffectCount; ++e) {
-        const auto& effect = BbSettings::Effects[e];
+    for (int e = 0; e < BbEffects::SwitchCount; ++e) {
+        const auto& effect = BbEffects::Switches[e];
         const Short* name = nullptr;
         for (const Short& s : shorts) {
-            if (std::strcmp(s.key, effect.key) == 0) name = &s;
+            if (std::strcmp(s.key, effect.sz_key) == 0) name = &s;
         }
         if ((name && !name->graphics) || pages.back().rows.size() == RowsPerPage) {
             continue; // the overlay menu and the launcher have it
         }
         // A new effect without a short name: its full label.
-        const std::string help_en = std::string(name ? name->help_en : effect.label) + " (after a restart)";
+        const std::string help_en =
+            std::string(name ? name->help_en : effect.label.sz_english) + " (after a restart)";
         const std::string help_ru =
-            std::string(name ? name->help_ru : effect.label_ru) + " (после перезапуска)";
-        row(Field(FirstEffect + e), name ? name->en : effect.label, name ? name->ru : effect.label_ru,
-            help_en.c_str(), help_ru.c_str(), toggle);
+            std::string(name ? name->help_ru : effect.label.sz_russian) + " (после перезапуска)";
+        row(Field(FirstEffect + e), name ? name->en : effect.label.sz_english,
+            name ? name->ru : effect.label.sz_russian, help_en.c_str(), help_ru.c_str(), toggle);
     }
 }
 
@@ -568,8 +571,8 @@ void PatchImage(unsigned char* image, std::uint64_t size) {
     }
     static const BbSettings::Values defaults;
     Fill(defaults, default_values);
-    for (int e = 0; e < BbSettings::EffectCount; ++e) {
-        default_values[FirstEffect + e] = BbSettings::Effects[e].default_on;
+    for (int e = 0; e < BbEffects::SwitchCount; ++e) {
+        default_values[FirstEffect + e] = BbEffects::Switches[e].is_default_on;
     }
     for (int f = 0; f < FieldCount; ++f) {
         default_bytes[f] =
@@ -628,7 +631,7 @@ void Poll() {
     }
     s.show_fps = values[ShowFps] != 0;
     s.model_lod = LodValues[std::clamp(values[ModelLod], 0, 3)];
-    for (int e = 0; e < BbSettings::EffectCount; ++e) {
+    for (int e = 0; e < BbEffects::SwitchCount; ++e) {
         s.effects[e] = values[FirstEffect + e] != 0;
     }
     std::memcpy(applied, values, sizeof(values));

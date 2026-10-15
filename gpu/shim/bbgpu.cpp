@@ -273,9 +273,10 @@ static void StartProfileWriter() {
 #endif
 
 extern "C" int bbgpu_init(const BbGpuConfig* config) {
-    BbSettings::Load();
-    // What the translator knows about this game (games/), before anything asks for it.
+    // What the translator knows about this game (games/), before anything asks for it: the
+    // settings among them, which keep its effect switches.
     Game::Select(config->serial);
+    BbSettings::Load();
     if (const Game::Profile* game = Game::Active(); game && game->prepare_saves) {
         const std::string saves = std::string(runtime_file_user_dir()) + "/savedata";
         game->prepare_saves(saves.c_str(), runtime_savedata_title());

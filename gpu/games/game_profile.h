@@ -96,6 +96,32 @@ struct CoreServices {
     void (*fresh_range)(std::uint64_t address, std::uint64_t size) = nullptr;
 };
 
+/// An overlay menu text in its languages (BbSettings::MenuText); all null for none.
+struct LocalizedText {
+    const char* sz_english = nullptr;
+    const char* sz_russian = nullptr;
+    const char* sz_spanish = nullptr;
+};
+
+/// A switch of the game's own patches: a bbport.ini key (0 or 1) set in the overlay menu and the
+/// launcher, which add_patches reads at start, so a change applies after a restart.
+struct EffectSwitch {
+    const char* sz_key = nullptr;
+    LocalizedText label;
+    /// The game's own behaviour, unpatched.
+    bool is_default_on = false;
+    LocalizedText hint;
+};
+
+/// What the overlay's "Game effects" section offers; with neither, the section is not shown.
+struct GameEffects {
+    std::span<const EffectSwitch> switches;
+    /// The model_lod choice of bbport.ini (-2 highest .. 2 lowest, 0 the game's).
+    bool has_model_detail = false;
+    /// After the section's note that the patches apply at start (from patch_file).
+    LocalizedText hint;
+};
+
 struct Profile {
     const char* name = nullptr;
     /// The param.sfo TITLE_IDs it is for (one executable: patch files and mod folders named after
@@ -115,6 +141,8 @@ struct Profile {
     /// Its own patches of the executable, chosen by the player's settings, appended through
     /// services before the external ones; false stops the launch (it printed why).
     bool (*add_patches)(const BbGameFiles& game, const BbPatchServices& services) = nullptr;
+    /// The settings of add_patches the player changes in the overlay menu.
+    GameEffects effects;
     /// Hooks in the game's code (each checks the bytes it replaces: another build of the game is
     /// left alone). They make the core learn of writes sooner; it does not depend on them for
     /// what it shows (write traps catch what nobody announces).
@@ -176,6 +204,16 @@ void Select(const char* serial);
 
 /// The active profile, or nullptr (an unknown game, or PS_GAME_PROFILE=none).
 const Profile* Active();
+
+/// The profile of the running title (Find at Select), whatever PS_GAME_PROFILE says: the one that
+/// patched its launch, and so the one whose effects the overlay menu offers.
+const Profile* Launched();
+
+/// The running title's effects (Launched), or none.
+inline GameEffects Effects() {
+    const Profile* profile = Launched();
+    return profile ? profile->effects : GameEffects{};
+}
 
 /// The active profile's buffer copy shader, or 0.
 inline std::uint64_t BufferCopyShader() {

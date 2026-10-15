@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <dirent.h>
 #include <string>
+#include "effects.h"
 #include "game_menu.h"
 #include "gnm_hooks.h"
 #include "guest_hooks.h"
@@ -110,6 +111,11 @@ extern const Profile BloodborneProfile = {
     .prepare_environment = BbLaunch::PrepareEnvironment,
     .check_files = BbLaunch::CheckFiles,
     .add_patches = BbLaunch::AddPatches,
+    .effects = {.switches = BbEffects::Switches,
+                .has_model_detail = true,
+                .hint = {"Motion blur and shadows from dynamic lights place a significant load on the GPU.",
+                         "Размытие в движении и тени от динамических источников заметно нагружают GPU.",
+                         "El desenfoque de movimiento y las sombras de luces dinámicas cargan bastante la GPU."}},
     .install_hooks = InstallHooks,
     .patch_image = PatchImage,
     .dynamic_writers = DynamicWriters,

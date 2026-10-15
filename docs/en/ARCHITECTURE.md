@@ -278,6 +278,7 @@ check, its own patches, its environment defaults, its mod folders) is found by `
 | `prepare_environment` | environment defaults before `bbgpu_init` (Bloodborne: `PS_VBLANK_HZ` for its `PS_FPS` preset) |
 | `check_files` | the check of the game's files before its code runs (`PS_SKIP_GAME_CHECK=1` skips it) |
 | `add_patches` | its own patches of the executable, chosen by the player's settings |
+| `effects` | the settings of `add_patches` the overlay menu's "Game effects" section offers: its `bbport.ini` switches (key, label and hint in the menu's languages, default), the `model_lod` choice, a note; without them the section is not shown |
 | `install_hooks`, `patch_image` | hooks and patches in the game's code, each checking the bytes it replaces |
 | `dynamic_writers` | guest code ranges known to write per-frame data into GPU memory |
 | `prepare_saves` | changes to the user's saves before the game runs |
