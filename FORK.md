@@ -93,6 +93,7 @@ obvious.
 | Command buffer pool growth | `video_core/renderer_vulkan/vk_resource_pool.cpp` | `CommitResource` searches again with the GPU tick it has just refreshed: the search lambda had captured the tick before the refresh, so every pass through the pool overflowed and added four command buffers, and the driver's buffers behind them (~384 KiB of VRAM each time, ~2.5 MiB a minute in play, never freed) | bug present at `3a9f572` |
 | Presenter | `video_core/renderer_vulkan/vk_presenter.cpp` | logs the first presented game frame once (`tools/regress.sh` reads it) | no |
 | Prepared vertex streams | `video_core/renderer_vulkan/vk_rasterizer.cpp`, `vk_rasterizer.h` | a draw-preparation worker's vertex inputs are used only while its V#s equal the ones read in order for the draw (`ArePreparedVsharpsCurrent`): the worker reads the V# tables ahead of the constant engine dumps that rewrite them, and the user data it verifies holds only the tables' address (Onigiri's login screen and PSN notice drew with another draw's vertices) | no (bbport's draw preparation) |
+| AvPlayer queues | `core/libraries/avplayer/avplayer_common.h` | `AvPlayerQueue::Size()` and `Front()` take the queue's mutex, and `Pop()` checks for an empty queue under it: the decoder threads push while the game thread reads, and an unlocked `size()` or `front()` raced the push | bug present at `3a9f572` |
 
 ## Loading the game
 
