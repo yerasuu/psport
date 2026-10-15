@@ -630,7 +630,7 @@ static const RuntimeExport exports[]={
     {"sceNpTrophyGetGameInfo",trophy_game_info}, {"sceNpTrophyGetTrophyInfo",trophy_info},
     {"sceNpTrophyGetTrophyUnlockState",trophy_unlock_state},
 };
-uintptr_t runtime_trophy_resolve(const char *name) { return RUNTIME_LOOKUP(exports,name); }
+uintptr_t runtime_trophy_resolve(const char *sz_name) { return RUNTIME_LOOKUP(exports,sz_name); }
 #else
 uintptr_t runtime_trophy_resolve(const char *name) { (void)name; return 0; }
 #endif

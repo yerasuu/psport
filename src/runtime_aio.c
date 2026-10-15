@@ -293,7 +293,7 @@ static const RuntimeExport exports[]={
     {"sceKernelAioCancelRequest",cancel_request}, {"sceKernelAioCancelRequests",cancel_requests},
     {"sceKernelAioDeleteRequest",delete_request}, {"sceKernelAioDeleteRequests",delete_requests},
 };
-uintptr_t runtime_aio_resolve(const char *name) { return RUNTIME_LOOKUP(exports,name); }
+uintptr_t runtime_aio_resolve(const char *sz_name) { return RUNTIME_LOOKUP(exports,sz_name); }
 void runtime_aio_report(void) {
     pthread_mutex_lock(&lock);
     printf("Runtime: aio submissions=%zu, commands=%zu (failed %zu), read=%" PRIu64 " bytes, written=%" PRIu64

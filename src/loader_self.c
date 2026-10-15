@@ -319,11 +319,11 @@ int loader_init_env_is_ret(const char *sz_libc_path) {
 /* PT_GNU_EH_FRAME and the .eh_frame it points at, for sceKernelGetModuleInfoForUnwind. */
 void loader_eh_frame(const LoaderModule *p_module, uint64_t base, RuntimeModule *p_out) {
     const LoaderPh *p_hdr = loader_find_ph(p_module, PT_GNU_EH_FRAME);
-    p_out->eh_frame_hdr = p_out->eh_frame_hdr_size = p_out->eh_frame = p_out->eh_frame_size = 0;
+    p_out->eh_frame_hdr = p_out->cb_eh_frame_hdr = p_out->eh_frame = p_out->cb_eh_frame = 0;
     if (!p_hdr || p_hdr->filesz < 8) return;
     const unsigned char *p_data = loader_span(p_module->p_elf, p_module->cb_elf, p_hdr->offset, 8);
     p_out->eh_frame_hdr = base + p_hdr->vaddr;
-    p_out->eh_frame_hdr_size = p_hdr->memsz;
+    p_out->cb_eh_frame_hdr = p_hdr->memsz;
     if (p_data[0] != 1 || p_data[1] != 0x1b) return; /* version 1, eh_frame_ptr DW_EH_PE_pcrel|sdata4 */
     int64_t frame = (int64_t)p_hdr->vaddr + 4 + (int32_t)rd32(p_data + 4);
     int64_t end = 0;
@@ -333,5 +333,5 @@ void loader_eh_frame(const LoaderModule *p_module, uint64_t base, RuntimeModule 
     int64_t length = (int64_t)p_hdr->vaddr > frame ? (int64_t)p_hdr->vaddr - frame : end - frame;
     if ((int64_t)base + frame < 0) loader_fail("eh_frame before the image");
     p_out->eh_frame = base + (uint64_t)frame;
-    p_out->eh_frame_size = length > 0 ? (uint64_t)length : 0;
+    p_out->cb_eh_frame = length > 0 ? (uint64_t)length : 0;
 }

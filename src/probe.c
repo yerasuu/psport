@@ -153,8 +153,8 @@ static ABI __attribute__((noreturn)) void unresolved(uint32_t id, uintptr_t argu
            (uintptr_t)__builtin_return_address(0) - (uintptr_t)s_p_image, argument);
     uintptr_t caller=(uintptr_t)__builtin_return_address(0)-(uintptr_t)s_p_image;
     for (uint64_t m=0;m<s_c_modules;++m)
-        if (caller>=s_p_modules[m].base && caller-s_p_modules[m].base<s_p_modules[m].size)
-            printf("Caller in linked module %" PRIu64 " (%s): +0x%" PRIxPTR "\n",m,s_p_modules[m].name,caller-s_p_modules[m].base);
+        if (caller>=s_p_modules[m].base && caller-s_p_modules[m].base<s_p_modules[m].cb_module)
+            printf("Caller in linked module %" PRIu64 " (%s): +0x%" PRIxPTR "\n",m,s_p_modules[m].sz_name,caller-s_p_modules[m].base);
     runtime_report();
     puts(s_has_entered_game ? "Original guest entry instructions executed; game initialization is incomplete." :
                         "Native libc initialization is incomplete; game entry has not run.");
@@ -706,15 +706,15 @@ int main(int argc, char **argv) {
         s_p_modules=s_p_all_modules+1;
         if (!s_c_modules || s_c_modules>1024) fail("invalid module count");
         for (uint64_t m=0;m<s_c_modules;++m)
-            for (uint64_t e=0;e<s_p_modules[m].export_count;++e)
-                if (s_p_modules[m].exports[e].address-s_p_modules[m].base>=s_p_modules[m].size) fail("module export outside its module");
+            for (uint64_t e=0;e<s_p_modules[m].c_exports;++e)
+                if (s_p_modules[m].p_exports[e].va_export-s_p_modules[m].base>=s_p_modules[m].cb_module) fail("module export outside its module");
         if (p_main_tls[1]>p_main_tls[2] || p_main_tls[2]>1024*1024 || p_main_tls[0]>cb_image ||
             p_main_tls[1]>cb_image-p_main_tls[0] || (p_main_tls[3] & (p_main_tls[3]-1)) || p_main_tls[3]>4096)
             fail("invalid eboot TLS metadata");
         for (uint64_t m=0;m<s_c_modules;++m) {
             RuntimeModule *p_module=&s_p_modules[m];
-            if (p_module->base>=cb_image || !p_module->size || p_module->size>cb_image-p_module->base || p_module->init<p_module->base || p_module->init-p_module->base>=p_module->size ||
-                (p_module->tls_module && (p_module->tls_address>=cb_image || p_module->tls_memsz>cb_image-p_module->tls_address || p_module->tls_memsz>1024*1024 ||
+            if (p_module->base>=cb_image || !p_module->cb_module || p_module->cb_module>cb_image-p_module->base || p_module->init<p_module->base || p_module->init-p_module->base>=p_module->cb_module ||
+                (p_module->tls_module && (p_module->va_tls>=cb_image || p_module->tls_memsz>cb_image-p_module->va_tls || p_module->tls_memsz>1024*1024 ||
                                    p_module->tls_filesz>p_module->tls_memsz || p_module->tls_module<2 || p_module->tls_module>=RUNTIME_TLS_MODULES)))
                 fail("invalid linked module metadata");
         }
@@ -723,7 +723,7 @@ int main(int argc, char **argv) {
             uint64_t i_import=boot_image.p_bindings[i].i_binding,va_target=boot_image.p_bindings[i].va_binding,kind=boot_image.p_bindings[i].kind;
             int inside=0;
             for (uint64_t m=0;m<s_c_modules;++m)
-                if (va_target>=s_p_modules[m].base && va_target-s_p_modules[m].base<s_p_modules[m].size) inside=1;
+                if (va_target>=s_p_modules[m].base && va_target-s_p_modules[m].base<s_p_modules[m].cb_module) inside=1;
             if (i_import>=s_c_imports || !inside || kind<1 || kind>6 || p_bindings[i_import]) fail("invalid native binding");
             p_bindings[i_import]=va_target; p_binding_kinds[i_import]=kind;
         }
@@ -742,7 +742,7 @@ int main(int argc, char **argv) {
             (p_relocs[i].kind && p_relocs[i].value >= s_c_imports) ||
             (p_relocs[i].kind != 2 && p_relocs[i].addend) || p_relocs[i].addend >= s_cb_page) fail("bad relocation");
     for (uint64_t m=0;m<s_c_modules;++m)
-        if (!mapped(p_segments,c_segments,s_p_modules[m].init,1) || (s_p_modules[m].tls_module && !mapped(p_segments,c_segments,s_p_modules[m].tls_address,s_p_modules[m].tls_memsz)))
+        if (!mapped(p_segments,c_segments,s_p_modules[m].init,1) || (s_p_modules[m].tls_module && !mapped(p_segments,c_segments,s_p_modules[m].va_tls,s_p_modules[m].tls_memsz)))
             fail("unmapped module metadata");
     if (s_c_modules && !mapped(p_segments,c_segments,procparam,64)) fail("unmapped procparam");
     for (uint64_t i=0;i<s_c_imports;++i) {
@@ -760,13 +760,13 @@ int main(int argc, char **argv) {
     memcpy(s_p_image, boot_image.p_image, cb_image);
     free(boot_image.p_image);
     if (s_p_all_modules) {
-        for (uint64_t i=0;i<s_p_all_modules[0].segment_count;++i) {
+        for (uint64_t i=0;i<s_p_all_modules[0].c_segments;++i) {
             const RuntimeModuleSegment *p_segment=&s_p_all_modules[0].segments[i];
-            if (p_segment->address+p_segment->size>s_p_all_modules[0].size) s_p_all_modules[0].size=p_segment->address+p_segment->size;
+            if (p_segment->va_module_segment+p_segment->cb_module_segment>s_p_all_modules[0].cb_module) s_p_all_modules[0].cb_module=p_segment->va_module_segment+p_segment->cb_module_segment;
         }
-        if (!s_p_all_modules[0].size) s_p_all_modules[0].size=s_p_modules[0].base;
-        for (uint64_t e=0;e<s_p_all_modules[0].export_count;++e)
-            if (s_p_all_modules[0].exports[e].address>=s_p_all_modules[0].size) fail("eboot export outside the eboot");
+        if (!s_p_all_modules[0].cb_module) s_p_all_modules[0].cb_module=s_p_modules[0].base;
+        for (uint64_t e=0;e<s_p_all_modules[0].c_exports;++e)
+            if (s_p_all_modules[0].p_exports[e].va_export>=s_p_all_modules[0].cb_module) fail("eboot export outside the eboot");
         unsigned char *p_started=calloc(s_c_modules+1,1);
         if (!p_started) fail("allocation failed");
         runtime_modules_configure(s_p_image,s_p_all_modules,s_c_modules+1,p_started);
@@ -838,14 +838,14 @@ int main(int argc, char **argv) {
                         : p_relocs[i].kind == 1 ? (uintptr_t)(p_traps + 32 * p_relocs[i].value)
                         : (uintptr_t)s_p_image + p_relocs[i].value;
         if (p_relocs[i].kind) {
-            runtime_last_stub = 0;
+            g_runtime_last_stub = 0;
             const uint64_t bound_kind = native_libc ? p_binding_kinds[p_relocs[i].value] : 0;
             uintptr_t resolved = bound_kind > 2 ? 0 : runtime_resolve(s_p_names[p_relocs[i].value], p_relocs[i].kind == 2);
             if (resolved) {
                 value = resolved + p_relocs[i].addend;
-                p_import_state[p_relocs[i].value] = runtime_last_stub ? 3 : 1;
+                p_import_state[p_relocs[i].value] = g_runtime_last_stub ? 3 : 1;
                 const unsigned failure = p_relocs[i].kind == 1 ? runtime_import_failure(s_p_names[p_relocs[i].value]) : 0;
-                if (p_relocs[i].kind == 1 && runtime_last_stub) {
+                if (p_relocs[i].kind == 1 && g_runtime_last_stub) {
                     const uintptr_t handler = (uintptr_t)runtime_calls_stub;
                     memcpy(p_traps + 32 * p_relocs[i].value + 22, &handler, 8);
                     value = (uintptr_t)(p_traps + 32 * p_relocs[i].value);
@@ -900,7 +900,7 @@ int main(int argc, char **argv) {
                 if ((p_segments[i].flags&1) && s_p_modules[m].init>=p_segments[i].va_segment && s_p_modules[m].init-p_segments[i].va_segment<p_segments[i].cb_segment) init_executable=1;
             if (!init_executable) fail("module init is not executable");
             if (s_p_modules[m].tls_module)
-                runtime_set_module_tls(s_p_modules[m].tls_module,s_p_image+s_p_modules[m].tls_address,s_p_modules[m].tls_filesz,s_p_modules[m].tls_memsz);
+                runtime_set_module_tls(s_p_modules[m].tls_module,s_p_image+s_p_modules[m].va_tls,s_p_modules[m].tls_filesz,s_p_modules[m].tls_memsz);
         }
         runtime_set_main_tls(s_p_image+p_main_tls[0],p_main_tls[1],p_main_tls[2],p_main_tls[3]);
         runtime_thread_attach_main();
@@ -908,7 +908,7 @@ int main(int argc, char **argv) {
         /* Dependencies start in link order (libc first), as the PS4 dynamic linker does. */
         for (uint64_t m=0;m<s_c_modules;++m) {
             if (s_p_modules[m].deferred) {
-                printf("Linked module %" PRIu64 " (%s) waits for the game to load it\n",m,s_p_modules[m].name);
+                printf("Linked module %" PRIu64 " (%s) waits for the game to load it\n",m,s_p_modules[m].sz_name);
                 continue;
             }
             printf("Starting linked module %" PRIu64 " at image offset 0x%" PRIx64 "; native bindings=%" PRIu64 "\n",m,s_p_modules[m].init,nb);

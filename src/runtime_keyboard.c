@@ -194,9 +194,9 @@ static const RuntimeExport exports[]={
     {"sceImeKeyboardOpen",keyboard_open}, {"sceImeKeyboardGetResourceId",keyboard_resource_id},
     {"sceImeKeyboardGetInfo",keyboard_info}, {"sceImeKeyboardClose",keyboard_close}, {"sceImeUpdate",ime_update},
 };
-uintptr_t runtime_keyboard_resolve(const char *name) {
-    const uintptr_t va_found=RUNTIME_LOOKUP(exports,name);
-    return va_found ? va_found : runtime_ime_resolve(name);
+uintptr_t runtime_keyboard_resolve(const char *sz_name) {
+    const uintptr_t va_found=RUNTIME_LOOKUP(exports,sz_name);
+    return va_found ? va_found : runtime_ime_resolve(sz_name);
 }
 int runtime_keyboard_taken(void) { return __atomic_load_n(&taken,__ATOMIC_RELAXED); }
 void runtime_keyboard_report(void) {

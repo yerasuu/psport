@@ -121,7 +121,7 @@ static ABI int32_t posix_barrier_set_name(Barrier **pp_handle,const char *sz_nam
     runtime_exception_unlock(&s_lock);
     return is_found ? 0 : EINVAL;
 }
-static const RuntimeExport exports[]={
+static const RuntimeExport s_exports[]={
     {"scePthreadBarrierInit",barrier_init}, {"scePthreadBarrierDestroy",barrier_destroy},
     {"scePthreadBarrierWait",barrier_wait},
     {"scePthreadBarrierattrInit",attributes_init}, {"scePthreadBarrierattrDestroy",attributes_destroy},
@@ -132,7 +132,7 @@ static const RuntimeExport exports[]={
     {"pthread_barrierattr_setpshared",posix_attributes_set_pshared},
     {"pthread_barrierattr_getpshared",posix_attributes_get_pshared},
 };
-uintptr_t runtime_barrier_resolve(const char *sz_name) { return RUNTIME_LOOKUP(exports,sz_name); }
+uintptr_t runtime_barrier_resolve(const char *sz_name) { return RUNTIME_LOOKUP(s_exports,sz_name); }
 void runtime_barrier_report(void) {
     runtime_exception_lock(&s_lock);
     if (s_c_created) printf("Runtime: barriers created=%zu, waits=%zu, releases=%zu\n",s_c_created,s_c_waits,s_c_releases);

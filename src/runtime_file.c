@@ -71,41 +71,41 @@ static void remove_stale_temps(const char *dir,int depth) {
     closedir(d);
 }
 
-int runtime_file_mount(const char *guest,const char *host) {
+int runtime_file_mount(const char *sz_guest,const char *sz_host) {
     pthread_mutex_lock(&lock);
-    for (size_t i=0;i<mount_count;++i) if (!strcmp(mounts[i].guest,guest)) {
-        snprintf(mounts[i].host,sizeof(mounts[i].host),"%s",host);
+    for (size_t i=0;i<mount_count;++i) if (!strcmp(mounts[i].guest,sz_guest)) {
+        snprintf(mounts[i].host,sizeof(mounts[i].host),"%s",sz_host);
         pthread_mutex_unlock(&lock); return 0;
     }
-    if (mount_count==MAX_MOUNTS || strlen(guest)>=64 || strlen(host)>=512) { pthread_mutex_unlock(&lock); return -1; }
-    snprintf(mounts[mount_count].guest,64,"%s",guest);
-    snprintf(mounts[mount_count].host,512,"%s",host);
+    if (mount_count==MAX_MOUNTS || strlen(sz_guest)>=64 || strlen(sz_host)>=512) { pthread_mutex_unlock(&lock); return -1; }
+    snprintf(mounts[mount_count].guest,64,"%s",sz_guest);
+    snprintf(mounts[mount_count].host,512,"%s",sz_host);
     ++mount_count;
-    if (save_path(guest)) remove_stale_temps(host,0);
+    if (save_path(sz_guest)) remove_stale_temps(sz_host,0);
     pthread_mutex_unlock(&lock);
     return 0;
 }
-void runtime_file_unmount(const char *guest) {
+void runtime_file_unmount(const char *sz_guest) {
     pthread_mutex_lock(&lock);
-    for (size_t i=0;i<mount_count;++i) if (!strcmp(mounts[i].guest,guest)) {
+    for (size_t i=0;i<mount_count;++i) if (!strcmp(mounts[i].guest,sz_guest)) {
         mounts[i]=mounts[--mount_count]; break;
     }
     pthread_mutex_unlock(&lock);
 }
 static char user_root[512]="user";
 const char *runtime_file_user_dir(void) { return user_root; }
-void runtime_file_configure(const char *app0,const char *user) {
+void runtime_file_configure(const char *sz_app0,const char *sz_user) {
     char path[600];
-    snprintf(user_root,sizeof(user_root),"%s",user);
-    runtime_file_mount("/app0",app0);
-    runtime_file_mount("/hostapp",app0);
+    snprintf(user_root,sizeof(user_root),"%s",sz_user);
+    runtime_file_mount("/app0",sz_app0);
+    runtime_file_mount("/hostapp",sz_app0);
     /* Games seed their RNGs from the console's random devices; the host's give the same stream. */
     runtime_file_mount("/dev/urandom","/dev/urandom");
     runtime_file_mount("/dev/random","/dev/random");
     const char *writable[]={"temp0","download0","data"};
-    mkdir(user,0755);
+    mkdir(sz_user,0755);
     for (int i=0;i<3;++i) {
-        snprintf(path,sizeof(path),"%s/%s",user,writable[i]);
+        snprintf(path,sizeof(path),"%s/%s",sz_user,writable[i]);
         mkdir(path,0755);
         char guest[32]; snprintf(guest,sizeof(guest),"/%s",writable[i]);
         runtime_file_mount(guest,path);
@@ -724,21 +724,21 @@ static const RuntimeExport exports[]={
     {"sceKernelRmdir",sce_rmdir}, {"rmdir",posix_rmdir},
     {"sceKernelUnlink",sce_unlink}, {"unlink",posix_unlink},
 };
-uintptr_t runtime_file_resolve(const char *name) { return RUNTIME_LOOKUP(exports,name); }
+uintptr_t runtime_file_resolve(const char *sz_name) { return RUNTIME_LOOKUP(exports,sz_name); }
 /* Host-side helpers for other modules (e.g. SaveData, Fios). */
 int64_t runtime_file_open(const char *p,int f,int m) { return do_open(p,f,m); }
-int64_t runtime_file_close(int fd) { return do_close(fd); }
-int64_t runtime_file_read(int fd,void *b,uint64_t n) { return do_read(fd,b,n); }
-int64_t runtime_file_pread(int fd,void *b,uint64_t n,int64_t o) { return do_pread(fd,b,n,o); }
+int64_t runtime_file_close(int h_fd) { return do_close(h_fd); }
+int64_t runtime_file_read(int h_fd,void *b,uint64_t n) { return do_read(h_fd,b,n); }
+int64_t runtime_file_pread(int h_fd,void *b,uint64_t n,int64_t o) { return do_pread(h_fd,b,n,o); }
 /* A shared mapping may write the file at any time, so it counts as written from the start. */
-int runtime_file_shared_host(int fd) { return host_fd_written(fd); }
-int64_t runtime_file_write(int fd,const void *b,uint64_t n) { return do_write(fd,b,n); }
-int64_t runtime_file_pwrite(int fd,const void *b,uint64_t n,int64_t o) { return do_pwrite(fd,b,n,o); }
-int64_t runtime_file_lseek(int fd,int64_t o,int w) { return do_lseek(fd,o,w); }
+int runtime_file_shared_host(int h_fd) { return host_fd_written(h_fd); }
+int64_t runtime_file_write(int h_fd,const void *b,uint64_t n) { return do_write(h_fd,b,n); }
+int64_t runtime_file_pwrite(int h_fd,const void *b,uint64_t n,int64_t o) { return do_pwrite(h_fd,b,n,o); }
+int64_t runtime_file_lseek(int h_fd,int64_t o,int w) { return do_lseek(h_fd,o,w); }
 int64_t runtime_file_stat(const char *p,void *s) { return do_stat(p,s); }
-int64_t runtime_file_fstat(int fd,void *s) { return do_fstat(fd,s); }
-int64_t runtime_file_getdents(int fd,char *b,uint64_t n,int64_t *base) { return do_getdents(fd,b,n,base); }
-int runtime_file_translate(const char *guest,char *out,size_t size) { return translate(guest,out,size); }
+int64_t runtime_file_fstat(int h_fd,void *s) { return do_fstat(h_fd,s); }
+int64_t runtime_file_getdents(int h_fd,char *b,uint64_t n,int64_t *p_base) { return do_getdents(h_fd,b,n,p_base); }
+int runtime_file_translate(const char *sz_guest,char *sz_out,size_t cb_out) { return translate(sz_guest,sz_out,cb_out); }
 void runtime_file_report(void) {
     printf("Runtime: files opened=%zu, reads=%zu (%llu bytes), writes=%zu, not found=%zu\n",
            opens,reads,(unsigned long long)bytes_read,writes,missing);

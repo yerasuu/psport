@@ -211,4 +211,4 @@ static const RuntimeExport exports[]={
     {"sceVoiceGetPortInfo",voice_port_info}, {"sceVoiceGetPortAttr",voice_port_attr},
     {"sceVoiceReadFromOPort",voice_read}, {"sceVoiceWriteToIPort",voice_write},
 };
-uintptr_t runtime_voice_resolve(const char *name) { return RUNTIME_LOOKUP(exports,name); }
+uintptr_t runtime_voice_resolve(const char *sz_name) { return RUNTIME_LOOKUP(exports,sz_name); }

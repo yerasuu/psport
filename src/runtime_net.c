@@ -14,11 +14,11 @@
 
 static char game_folder[PATH_MAX], game_serial[16], game_title[128], game_version[16];
 
-void runtime_net_configure(const char *app0, const char *serial, const char *title, const char *version) {
-    snprintf(game_folder,sizeof(game_folder),"%s",app0 ? app0 : "");
-    snprintf(game_serial,sizeof(game_serial),"%s",serial ? serial : "");
-    snprintf(game_title,sizeof(game_title),"%s",title ? title : "");
-    snprintf(game_version,sizeof(game_version),"%s",version ? version : "");
+void runtime_net_configure(const char *sz_app0, const char *sz_serial, const char *sz_title, const char *sz_version) {
+    snprintf(game_folder,sizeof(game_folder),"%s",sz_app0 ? sz_app0 : "");
+    snprintf(game_serial,sizeof(game_serial),"%s",sz_serial ? sz_serial : "");
+    snprintf(game_title,sizeof(game_title),"%s",sz_title ? sz_title : "");
+    snprintf(game_version,sizeof(game_version),"%s",sz_version ? sz_version : "");
 }
 
 int runtime_net_enabled(void) {
@@ -28,15 +28,15 @@ int runtime_net_enabled(void) {
 }
 
 /* Imports the module answers: network, HTTP/SSL and NP, except what stays in the runtime. */
-int runtime_net_symbol(const char *symbol) {
+int runtime_net_symbol(const char *sz_symbol) {
     static const char *const online[]={"sceNet","sceNp","sceHttp","sceSsl"};
     static const char *const local[]={"sceNpTrophy","sceNpCommerce","sceNpProfileDialog"};
-    if (!symbol) return 0;
+    if (!sz_symbol) return 0;
     int match=0;
     for (size_t i=0;i<sizeof(online)/sizeof(*online);++i)
-        if (!strncmp(symbol,online[i],strlen(online[i]))) match=1;
+        if (!strncmp(sz_symbol,online[i],strlen(online[i]))) match=1;
     for (size_t i=0;i<sizeof(local)/sizeof(*local);++i)
-        if (!strncmp(symbol,local[i],strlen(local[i]))) match=0;
+        if (!strncmp(sz_symbol,local[i],strlen(local[i]))) match=0;
     return match;
 }
 
@@ -81,12 +81,12 @@ static PsNetResolveFn module_resolve(void) {
     return resolve;
 }
 
-uintptr_t runtime_net_resolve(const char *name) {
+uintptr_t runtime_net_resolve(const char *sz_name) {
     if (!runtime_net_enabled()) return 0;
-    const char *symbol=runtime_symbol(name);
+    const char *symbol=runtime_symbol(sz_name);
     if (!runtime_net_symbol(symbol)) return 0;
     const PsNetResolveFn resolve=module_resolve();
-    const uintptr_t address=resolve ? resolve(name) : 0;
+    const uintptr_t address=resolve ? resolve(sz_name) : 0;
     if (resolve && !address) printf("Online: %s has no online version; the offline one is used\n",symbol);
     return address;
 }

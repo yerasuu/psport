@@ -141,7 +141,7 @@ static ABI int32_t mouse_read(int32_t handle, MouseData *data, int32_t count) {
 static const RuntimeExport exports[]={
     {"sceMouseInit",mouse_init}, {"sceMouseOpen",mouse_open}, {"sceMouseRead",mouse_read}, {"sceMouseClose",mouse_close},
 };
-uintptr_t runtime_mouse_resolve(const char *name) { return RUNTIME_LOOKUP(exports,name); }
+uintptr_t runtime_mouse_resolve(const char *sz_name) { return RUNTIME_LOOKUP(exports,sz_name); }
 void runtime_mouse_report(void) {
     if (reads) printf("Runtime: mouse reads=%zu, host mouse=%s\n",reads,host_connected>0 ? "yes" : "none");
 }

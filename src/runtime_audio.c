@@ -291,11 +291,11 @@ static const RuntimeExport exports[]={
     {"sceAudioOutGetLastOutputTime",audio_last_time},
 };
 int32_t runtime_audio_init(void) { return audio_init(); }
-int32_t runtime_audio_open(int32_t user, int32_t type, int32_t index, uint32_t length, uint32_t freq, uint32_t param) {
-    return audio_open(user,type,index,length,freq,param);
+int32_t runtime_audio_open(int32_t user, int32_t type, int32_t i_port, uint32_t length, uint32_t freq, uint32_t param) {
+    return audio_open(user,type,i_port,length,freq,param);
 }
-int32_t runtime_audio_output(int32_t handle, const void *data) { return audio_output(handle,data); }
-int32_t runtime_audio_close(int32_t handle) { return audio_close(handle); }
+int32_t runtime_audio_output(int32_t h_handle, const void *p_data) { return audio_output(h_handle,p_data); }
+int32_t runtime_audio_close(int32_t h_handle) { return audio_close(h_handle); }
 int runtime_audio_device_channels(void) {
     pthread_mutex_lock(&table_lock);
     SDL_AudioSpec spec;
@@ -303,5 +303,5 @@ int runtime_audio_device_channels(void) {
     pthread_mutex_unlock(&table_lock);
     return channels;
 }
-uintptr_t runtime_audio_resolve(const char *name) { return RUNTIME_LOOKUP(exports,name); }
+uintptr_t runtime_audio_resolve(const char *sz_name) { return RUNTIME_LOOKUP(exports,sz_name); }
 void runtime_audio_report(void) { printf("Runtime: audio ports opened=%zu, buffers output=%zu\n",ports_opened,buffers_out); }

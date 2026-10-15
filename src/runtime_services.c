@@ -446,30 +446,30 @@ typedef struct {
     float x, y; uint32_t halign, valign; const uint16_t *placeholder, *title; int8_t reserved[16];
 } ImeParam;
 static struct { int running, finished, end_status; uint16_t *buffer; uint32_t max_length; } ime;
-size_t utf16_to_utf8(const uint16_t *in, size_t limit, char *out, size_t size) {
+size_t utf16_to_utf8(const uint16_t *p_in, size_t limit, char *sz_out, size_t cb_out) {
     size_t n=0;
-    for (size_t i=0; in && i<limit && in[i] && n+4<size; ++i) {
-        uint32_t c=in[i];
-        if (c>=0xD800 && c<0xDC00 && i+1<limit && in[i+1]>=0xDC00 && in[i+1]<0xE000) { c=0x10000+((c-0xD800)<<10)+(in[i+1]-0xDC00); ++i; }
-        if (c<0x80) out[n++]=(char)c;
-        else if (c<0x800) { out[n++]=(char)(0xC0|c>>6); out[n++]=(char)(0x80|(c&63)); }
-        else if (c<0x10000) { out[n++]=(char)(0xE0|c>>12); out[n++]=(char)(0x80|((c>>6)&63)); out[n++]=(char)(0x80|(c&63)); }
-        else { out[n++]=(char)(0xF0|c>>18); out[n++]=(char)(0x80|((c>>12)&63)); out[n++]=(char)(0x80|((c>>6)&63)); out[n++]=(char)(0x80|(c&63)); }
+    for (size_t i=0; p_in && i<limit && p_in[i] && n+4<cb_out; ++i) {
+        uint32_t c=p_in[i];
+        if (c>=0xD800 && c<0xDC00 && i+1<limit && p_in[i+1]>=0xDC00 && p_in[i+1]<0xE000) { c=0x10000+((c-0xD800)<<10)+(p_in[i+1]-0xDC00); ++i; }
+        if (c<0x80) sz_out[n++]=(char)c;
+        else if (c<0x800) { sz_out[n++]=(char)(0xC0|c>>6); sz_out[n++]=(char)(0x80|(c&63)); }
+        else if (c<0x10000) { sz_out[n++]=(char)(0xE0|c>>12); sz_out[n++]=(char)(0x80|((c>>6)&63)); sz_out[n++]=(char)(0x80|(c&63)); }
+        else { sz_out[n++]=(char)(0xF0|c>>18); sz_out[n++]=(char)(0x80|((c>>12)&63)); sz_out[n++]=(char)(0x80|((c>>6)&63)); sz_out[n++]=(char)(0x80|(c&63)); }
     }
-    out[n]=0; return n;
+    sz_out[n]=0; return n;
 }
-void utf8_to_utf16(const char *in, uint16_t *out, uint32_t max) {
+void utf8_to_utf16(const char *sz_in, uint16_t *p_out, uint32_t max) {
     uint32_t n=0;
-    for (const unsigned char *p=(const unsigned char *)in; *p && n<max;) {
+    for (const unsigned char *p=(const unsigned char *)sz_in; *p && n<max;) {
         uint32_t c; int extra;
         if (*p<0x80) { c=*p; extra=0; } else if ((*p&0xE0)==0xC0) { c=*p&31; extra=1; }
         else if ((*p&0xF0)==0xE0) { c=*p&15; extra=2; } else { c=*p&7; extra=3; }
         ++p;
         for (int k=0;k<extra && (*p&0xC0)==0x80;++k) c=(c<<6)|(*p++&63);
-        if (c>=0x10000) { if (n+2>max) break; c-=0x10000; out[n++]=(uint16_t)(0xD800+(c>>10)); out[n++]=(uint16_t)(0xDC00+(c&1023)); }
-        else out[n++]=(uint16_t)c;
+        if (c>=0x10000) { if (n+2>max) break; c-=0x10000; p_out[n++]=(uint16_t)(0xD800+(c>>10)); p_out[n++]=(uint16_t)(0xDC00+(c&1023)); }
+        else p_out[n++]=(uint16_t)c;
     }
-    out[n<max ? n : max]=0;
+    p_out[n<max ? n : max]=0;
 }
 static void ime_complete(int end_status, const char *text) {
     if (!end_status && ime.buffer && ime.max_length) utf8_to_utf16(text,ime.buffer,ime.max_length);
@@ -728,19 +728,19 @@ static const RuntimeExport exports[]={
     {"sceRazorCpuPlotValue",razor_idle}, {"sceRazorCpuWriteBookmark",razor_idle},
     {"sceRazorCpuIsCapturing",razor_idle},
 };
-uintptr_t runtime_services_resolve(const char *name) {
-    const uintptr_t online=runtime_net_resolve(name); /* PS_ONLINE=1: the online module first */
+uintptr_t runtime_services_resolve(const char *sz_name) {
+    const uintptr_t online=runtime_net_resolve(sz_name); /* PS_ONLINE=1: the online module first */
     if (online) return online;
-    const uintptr_t found=RUNTIME_LOOKUP(exports,name);
+    const uintptr_t found=RUNTIME_LOOKUP(exports,sz_name);
     if (found) return found;
-    const uintptr_t va_http=runtime_http_resolve(name);
+    const uintptr_t va_http=runtime_http_resolve(sz_name);
     if (va_http) return va_http;
-    const uintptr_t va_trophy=runtime_trophy_resolve(name);
+    const uintptr_t va_trophy=runtime_trophy_resolve(sz_name);
     if (va_trophy) return va_trophy;
-    const uintptr_t va_json=runtime_json_resolve(name);
+    const uintptr_t va_json=runtime_json_resolve(sz_name);
     if (va_json) return va_json;
-    const uintptr_t va_np=runtime_np_resolve(name);
-    return va_np ? va_np : runtime_socket_resolve(name);
+    const uintptr_t va_np=runtime_np_resolve(sz_name);
+    return va_np ? va_np : runtime_socket_resolve(sz_name);
 }
 #else
 uintptr_t runtime_services_resolve(const char *name) { (void)name; return 0; }

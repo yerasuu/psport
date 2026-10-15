@@ -334,7 +334,7 @@ static const RuntimeExport exports[]={
     {"sceHttp2Init",lib_init_id}, {"sceHttp2Term",runtime_stub},
     {"sceHttp2CreateTemplate",http_object}, {"sceHttp2DeleteTemplate",runtime_stub},
 };
-uintptr_t runtime_http_resolve(const char *name) { return RUNTIME_LOOKUP(exports,name); }
+uintptr_t runtime_http_resolve(const char *sz_name) { return RUNTIME_LOOKUP(exports,sz_name); }
 #else
 uintptr_t runtime_http_resolve(const char *name) { (void)name; return 0; }
 #endif

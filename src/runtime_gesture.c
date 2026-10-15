@@ -82,7 +82,7 @@ static const RuntimeExport exports[]={
     {"sceSystemGestureGetTouchEventsCount",recognizer_events},
     {"sceSystemGestureGetTouchEventByIndex",recognizer_event_by_index},
 };
-uintptr_t runtime_gesture_resolve(const char *name) { return RUNTIME_LOOKUP(exports,name); }
+uintptr_t runtime_gesture_resolve(const char *sz_name) { return RUNTIME_LOOKUP(exports,sz_name); }
 #else
 uintptr_t runtime_gesture_resolve(const char *name) { (void)name; return 0; }
 #endif

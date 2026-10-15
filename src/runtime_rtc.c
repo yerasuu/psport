@@ -271,4 +271,4 @@ static const RuntimeExport exports[]={
     {"sceRtcParseDateTime",rtc_parse_date_time}, {"sceRtcParseRFC3339",rtc_parse_rfc3339},
     {"sceRtcFormatRFC3339",rtc_format_rfc3339}, {"sceRtcTickAddYears",rtc_add_tick_years},
 };
-uintptr_t runtime_rtc_resolve(const char *name) { return RUNTIME_LOOKUP(exports,name); }
+uintptr_t runtime_rtc_resolve(const char *sz_name) { return RUNTIME_LOOKUP(exports,sz_name); }

@@ -28,12 +28,12 @@
 typedef void *(ABI *GuestEntry)(void *);
 typedef struct ThreadAttr {
     uint32_t magic;
-    int detached, policy, prio, inherit;
+    int is_detached, policy, prio, inherit;
     uint64_t stack, guard, affinity;
     /* Lowest address of the stack: the game's own (scePthreadAttrSetstack) or, once the
      * thread runs, the one it got. libSceUlt builds fibers on it. */
-    void *stack_addr;
-    struct ThreadAttr *next;
+    void *p_stack_addr;
+    struct ThreadAttr *p_next;
 } ThreadAttr;
 typedef struct GuestThread {
     /* Guest-visible TCB is allocated separately; this is the ScePthread handle. */
@@ -51,257 +51,257 @@ typedef struct GuestThread {
     struct GuestThread *next;
 } GuestThread;
 
-static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
-static ThreadAttr *attributes;
-static GuestThread *threads;
-static _Thread_local GuestThread *current;
-static _Thread_local int32_t guest_errno;
-static const unsigned char *tls_template;
-static uint64_t tls_filesz, tls_memsz, tls_align=16;
-static size_t created, joined_count, exited;
+static pthread_mutex_t s_lock=PTHREAD_MUTEX_INITIALIZER;
+static ThreadAttr *s_p_attributes;
+static GuestThread *s_p_threads;
+static _Thread_local GuestThread *s_p_current;
+static _Thread_local int32_t s_guest_errno;
+static const unsigned char *s_p_tls_template;
+static uint64_t s_tls_filesz, s_tls_memsz, s_tls_align=16;
+static size_t s_created, s_c_joineds, s_exited;
 static size_t s_c_cancel_requests, s_c_cancels_taken;
 
-void runtime_set_main_tls(const void *data,uint64_t filesz,uint64_t memsz,uint64_t align) {
-    tls_template=data; tls_filesz=filesz; tls_memsz=memsz; tls_align=align ? align : 16;
+void runtime_set_main_tls(const void *p_data,uint64_t filesz,uint64_t memsz,uint64_t align) {
+    s_p_tls_template=p_data; s_tls_filesz=filesz; s_tls_memsz=memsz; s_tls_align=align ? align : 16;
 }
-static uint64_t tls_offset(void) { return (tls_memsz+tls_align-1)&~(tls_align-1); }
-static void set_gs(void *base) {
-    if (syscall(SYS_arch_prctl,ARCH_SET_GS,(unsigned long)base)) { perror("STOP: arch_prctl(ARCH_SET_GS)"); runtime_stop(21); }
+static uint64_t tls_offset(void) { return (s_tls_memsz+s_tls_align-1)&~(s_tls_align-1); }
+static void set_gs(void *p_base) {
+    if (syscall(SYS_arch_prctl,ARCH_SET_GS,(unsigned long)p_base)) { perror("STOP: arch_prctl(ARCH_SET_GS)"); runtime_stop(21); }
 }
 /* Build TCB/static TLS for the calling host thread and point GS at it. */
 /* The stack this host thread runs on, kept in the attributes scePthreadAttrGet copies. */
-static void record_stack(GuestThread *t) {
-    if (t->attr.stack_addr) return;
+static void record_stack(GuestThread *p_thread) {
+    if (p_thread->attr.p_stack_addr) return;
     pthread_attr_t self;
-    void *addr=NULL; size_t size=0;
+    void *p_addr=NULL; size_t cb_stack=0;
     if (pthread_getattr_np(pthread_self(),&self)) return;
-    if (!pthread_attr_getstack(&self,&addr,&size)) { t->attr.stack_addr=addr; t->attr.stack=size; }
+    if (!pthread_attr_getstack(&self,&p_addr,&cb_stack)) { p_thread->attr.p_stack_addr=p_addr; p_thread->attr.stack=cb_stack; }
     pthread_attr_destroy(&self);
 }
-static void attach(GuestThread *t) {
-    uint64_t offset=tls_offset();
-    size_t total=offset+256;
-    unsigned char *block=aligned_alloc(64,(total+63)&~(size_t)63);
-    if (!block) { fputs("Cannot allocate guest TLS\n",stderr); exit(1); }
-    memset(block,0,total);
-    if (tls_filesz) memcpy(block,tls_template,tls_filesz);
-    uint64_t *tcb=(uint64_t *)(block+offset);
-    static uint64_t dtv[3];
-    tcb[0]=(uint64_t)(uintptr_t)tcb;         /* tcb_self */
-    tcb[1]=(uint64_t)(uintptr_t)dtv;         /* tcb_dtv (static module only) */
-    tcb[2]=(uint64_t)(uintptr_t)t;           /* tcb_thread */
-    t->tls_block=block; t->tcb=tcb;
-    set_gs(tcb);
-    current=t;
+static void attach(GuestThread *p_thread) {
+    uint64_t off_tls=tls_offset();
+    size_t cb_block=off_tls+256;
+    unsigned char *p_block=aligned_alloc(64,(cb_block+63)&~(size_t)63);
+    if (!p_block) { fputs("Cannot allocate guest TLS\n",stderr); exit(1); }
+    memset(p_block,0,cb_block);
+    if (s_tls_filesz) memcpy(p_block,s_p_tls_template,s_tls_filesz);
+    uint64_t *p_tcb=(uint64_t *)(p_block+off_tls);
+    static uint64_t s_dtv[3];
+    p_tcb[0]=(uint64_t)(uintptr_t)p_tcb;         /* tcb_self */
+    p_tcb[1]=(uint64_t)(uintptr_t)s_dtv;         /* tcb_dtv (static module only) */
+    p_tcb[2]=(uint64_t)(uintptr_t)p_thread;           /* tcb_thread */
+    p_thread->tls_block=p_block; p_thread->tcb=p_tcb;
+    set_gs(p_tcb);
+    s_p_current=p_thread;
 }
 static GuestThread *new_thread(void) {
-    GuestThread *t=calloc(1,sizeof(*t));
-    if (!t) return NULL;
-    t->attr=(ThreadAttr){.magic=ATTR_MAGIC,.policy=1,.prio=DEFAULT_PRIO,.stack=DEFAULT_STACK,.guard=DEFAULT_GUARD,.affinity=0x7f};
-    return t;
+    GuestThread *p_thread=calloc(1,sizeof(*p_thread));
+    if (!p_thread) return NULL;
+    p_thread->attr=(ThreadAttr){.magic=ATTR_MAGIC,.policy=1,.prio=DEFAULT_PRIO,.stack=DEFAULT_STACK,.guard=DEFAULT_GUARD,.affinity=0x7f};
+    return p_thread;
 }
-static void publish(GuestThread *t) {
-    runtime_exception_lock(&lock); t->next=threads; threads=t; runtime_exception_unlock(&lock);
+static void publish(GuestThread *p_thread) {
+    runtime_exception_lock(&s_lock); p_thread->next=s_p_threads; s_p_threads=p_thread; runtime_exception_unlock(&s_lock);
 }
 /* Host threads that call into guest code without being created by the guest
  * (the main thread, test threads) get a record on first use. */
 GuestThread *runtime_thread_current(void) {
-    if (current) return current;
-    GuestThread *t=new_thread();
-    if (!t) { fputs("Cannot allocate guest thread\n",stderr); exit(1); }
-    t->host=pthread_self(); t->host_owned=1;
-    snprintf(t->name,sizeof(t->name),"host");
-    attach(t); record_stack(t); publish(t);
-    return t;
+    if (s_p_current) return s_p_current;
+    GuestThread *p_thread=new_thread();
+    if (!p_thread) { fputs("Cannot allocate guest thread\n",stderr); exit(1); }
+    p_thread->host=pthread_self(); p_thread->host_owned=1;
+    snprintf(p_thread->name,sizeof(p_thread->name),"host");
+    attach(p_thread); record_stack(p_thread); publish(p_thread);
+    return p_thread;
 }
 /* Host threads that call guest code (HLE decoders invoking guest callbacks) need
  * a TCB/TLS like guest threads; the record lives until process exit. */
-void runtime_thread_attach_host(const char *name) {
-    GuestThread *t=runtime_thread_current();
-    snprintf(t->name,sizeof(t->name),"%s",name ? name : "host");
+void runtime_thread_attach_host(const char *sz_name) {
+    GuestThread *p_thread=runtime_thread_current();
+    snprintf(p_thread->name,sizeof(p_thread->name),"%s",sz_name ? sz_name : "host");
 }
 void runtime_thread_attach_main(void) {
-    GuestThread *t=runtime_thread_current();
-    snprintf(t->name,sizeof(t->name),"main");
+    GuestThread *p_thread=runtime_thread_current();
+    snprintf(p_thread->name,sizeof(p_thread->name),"main");
 }
-void runtime_thread_set_stack(void *addr, uint64_t size) {
-    GuestThread *t=runtime_thread_current();
-    t->attr.stack_addr=addr; t->attr.stack=size;
+void runtime_thread_set_stack(void *p_addr, uint64_t cb_stack) {
+    GuestThread *p_thread=runtime_thread_current();
+    p_thread->attr.p_stack_addr=p_addr; p_thread->attr.stack=cb_stack;
 }
-static GuestThread *find_thread(void *handle) {
-    GuestThread *found=NULL;
-    runtime_exception_lock(&lock);
-    for (GuestThread *t=threads;t;t=t->next) if (t==handle) { found=t; break; }
-    runtime_exception_unlock(&lock);
-    return found;
+static GuestThread *find_thread(void *p_handle) {
+    GuestThread *p_found=NULL;
+    runtime_exception_lock(&s_lock);
+    for (GuestThread *p_thread=s_p_threads;p_thread;p_thread=p_thread->next) if (p_thread==p_handle) { p_found=p_thread; break; }
+    runtime_exception_unlock(&s_lock);
+    return p_found;
 }
 /* Under the table's lock, so the host thread cannot be joined and its pthread_t reused between
  * the lookup and the kill. */
-int32_t runtime_thread_kill(void *handle, int host_signal) {
+int32_t runtime_thread_kill(void *p_handle, int host_signal) {
     int e=ESRCH;
-    runtime_exception_lock(&lock);
-    for (GuestThread *t=threads;t;t=t->next)
-        if (t==handle) { if (!t->finished && t->host) e=pthread_kill(t->host,host_signal); break; }
-    runtime_exception_unlock(&lock);
+    runtime_exception_lock(&s_lock);
+    for (GuestThread *p_thread=s_p_threads;p_thread;p_thread=p_thread->next)
+        if (p_thread==p_handle) { if (!p_thread->finished && p_thread->host) e=pthread_kill(p_thread->host,host_signal); break; }
+    runtime_exception_unlock(&s_lock);
     return e==ESRCH ? ERR(3) : e ? ERR(22) : 0;
 }
-static ThreadAttr *find_attr(ThreadAttr **slot) {
-    if (!slot || !*slot) return NULL;
-    ThreadAttr *found=NULL;
-    runtime_exception_lock(&lock);
-    for (ThreadAttr *a=attributes;a;a=a->next) if (a==*slot && a->magic==ATTR_MAGIC) { found=a; break; }
-    runtime_exception_unlock(&lock);
-    return found;
+static ThreadAttr *find_attr(ThreadAttr **pp_slot) {
+    if (!pp_slot || !*pp_slot) return NULL;
+    ThreadAttr *p_found=NULL;
+    runtime_exception_lock(&s_lock);
+    for (ThreadAttr *p_thread_attr=s_p_attributes;p_thread_attr;p_thread_attr=p_thread_attr->p_next) if (p_thread_attr==*pp_slot && p_thread_attr->magic==ATTR_MAGIC) { p_found=p_thread_attr; break; }
+    runtime_exception_unlock(&s_lock);
+    return p_found;
 }
 
 static ABI void *thread_self(void) { return runtime_thread_current(); }
-static ABI int32_t *guest_error(void) { return &guest_errno; }
-int32_t *runtime_errno(void) { return &guest_errno; }
+static ABI int32_t *guest_error(void) { return &s_guest_errno; }
+int32_t *runtime_errno(void) { return &s_guest_errno; }
 
-static ABI int32_t attr_init(ThreadAttr **out) {
-    if (!out) return ERR(22);
-    ThreadAttr *a=calloc(1,sizeof(*a));
-    if (!a) return ERR(12);
-    *a=(ThreadAttr){.magic=ATTR_MAGIC,.policy=1,.prio=DEFAULT_PRIO,.inherit=4,.stack=DEFAULT_STACK,.guard=DEFAULT_GUARD,.affinity=0x7f};
-    runtime_exception_lock(&lock); a->next=attributes; attributes=a; runtime_exception_unlock(&lock);
-    *out=a; return 0;
+static ABI int32_t attr_init(ThreadAttr **pp_out) {
+    if (!pp_out) return ERR(22);
+    ThreadAttr *p_thread_attr=calloc(1,sizeof(*p_thread_attr));
+    if (!p_thread_attr) return ERR(12);
+    *p_thread_attr=(ThreadAttr){.magic=ATTR_MAGIC,.policy=1,.prio=DEFAULT_PRIO,.inherit=4,.stack=DEFAULT_STACK,.guard=DEFAULT_GUARD,.affinity=0x7f};
+    runtime_exception_lock(&s_lock); p_thread_attr->p_next=s_p_attributes; s_p_attributes=p_thread_attr; runtime_exception_unlock(&s_lock);
+    *pp_out=p_thread_attr; return 0;
 }
-static ABI int32_t attr_destroy(ThreadAttr **slot) {
-    ThreadAttr *a=find_attr(slot);
-    if (!a) return ERR(22);
-    runtime_exception_lock(&lock);
-    ThreadAttr **link=&attributes;
-    while (*link!=a) link=&(*link)->next;
-    *link=a->next; a->magic=0;
-    runtime_exception_unlock(&lock);
-    free(a); *slot=NULL; return 0;
+static ABI int32_t attr_destroy(ThreadAttr **pp_slot) {
+    ThreadAttr *p_thread_attr=find_attr(pp_slot);
+    if (!p_thread_attr) return ERR(22);
+    runtime_exception_lock(&s_lock);
+    ThreadAttr **pp_link=&s_p_attributes;
+    while (*pp_link!=p_thread_attr) pp_link=&(*pp_link)->p_next;
+    *pp_link=p_thread_attr->p_next; p_thread_attr->magic=0;
+    runtime_exception_unlock(&s_lock);
+    free(p_thread_attr); *pp_slot=NULL; return 0;
 }
-static ABI int32_t attr_get(void *thread,ThreadAttr **out) {
-    ThreadAttr *a=find_attr(out);
-    if (!a || !thread) return ERR(22);
-    GuestThread *t=find_thread(thread);
-    if (!t) return ERR(3);
-    ThreadAttr *next=a->next;
-    *a=t->attr; a->magic=ATTR_MAGIC; a->next=next;
-    a->detached=t->detached;
+static ABI int32_t attr_get(void *h_thread,ThreadAttr **pp_out) {
+    ThreadAttr *p_thread_attr=find_attr(pp_out);
+    if (!p_thread_attr || !h_thread) return ERR(22);
+    GuestThread *p_thread=find_thread(h_thread);
+    if (!p_thread) return ERR(3);
+    ThreadAttr *p_next=p_thread_attr->p_next;
+    *p_thread_attr=p_thread->attr; p_thread_attr->magic=ATTR_MAGIC; p_thread_attr->p_next=p_next;
+    p_thread_attr->is_detached=p_thread->detached;
     return 0;
 }
-static ABI int32_t attr_set_stack(ThreadAttr **slot,uint64_t size) {
-    ThreadAttr *a=find_attr(slot);
-    if (!a || size<16384) return ERR(22);
-    a->stack=size; return 0;
+static ABI int32_t attr_set_stack(ThreadAttr **pp_slot,uint64_t cb_stack) {
+    ThreadAttr *p_thread_attr=find_attr(pp_slot);
+    if (!p_thread_attr || cb_stack<16384) return ERR(22);
+    p_thread_attr->stack=cb_stack; return 0;
 }
-static ABI int32_t attr_set_stack_region(ThreadAttr **slot,void *addr,uint64_t size) {
-    ThreadAttr *a=find_attr(slot);
-    if (!a || !addr || size<16384) return ERR(22);
-    a->stack_addr=addr; a->stack=size; return 0;
+static ABI int32_t attr_set_stack_region(ThreadAttr **pp_slot,void *p_addr,uint64_t cb_stack) {
+    ThreadAttr *p_thread_attr=find_attr(pp_slot);
+    if (!p_thread_attr || !p_addr || cb_stack<16384) return ERR(22);
+    p_thread_attr->p_stack_addr=p_addr; p_thread_attr->stack=cb_stack; return 0;
 }
-static ABI int32_t attr_get_stack_region(ThreadAttr **slot,void **addr,uint64_t *size) {
-    ThreadAttr *a=find_attr(slot);
-    if (!a || !addr || !size) return ERR(22);
-    *addr=a->stack_addr; *size=a->stack; return 0;
+static ABI int32_t attr_get_stack_region(ThreadAttr **pp_slot,void **pp_addr,uint64_t *p_size) {
+    ThreadAttr *p_thread_attr=find_attr(pp_slot);
+    if (!p_thread_attr || !pp_addr || !p_size) return ERR(22);
+    *pp_addr=p_thread_attr->p_stack_addr; *p_size=p_thread_attr->stack; return 0;
 }
-static ABI int32_t attr_get_stack_addr(ThreadAttr **slot,void **addr) {
-    ThreadAttr *a=find_attr(slot);
-    if (!a || !addr) return ERR(22);
-    *addr=a->stack_addr; return 0;
+static ABI int32_t attr_get_stack_addr(ThreadAttr **pp_slot,void **pp_addr) {
+    ThreadAttr *p_thread_attr=find_attr(pp_slot);
+    if (!p_thread_attr || !pp_addr) return ERR(22);
+    *pp_addr=p_thread_attr->p_stack_addr; return 0;
 }
 /* libSceFiber checks a fiber's bounds against its thread's stack: the lowest address and size,
  * as pthread_attr_getstack gives them. */
-static ABI int32_t thread_get_stack(void *thread,void **addr,uint64_t *size) {
-    GuestThread *t=thread ? find_thread(thread) : runtime_thread_current();
-    if (!t || !addr || !size) return 22;
-    *addr=t->attr.stack_addr; *size=t->attr.stack;
+static ABI int32_t thread_get_stack(void *h_thread,void **pp_addr,uint64_t *p_size) {
+    GuestThread *p_thread=h_thread ? find_thread(h_thread) : runtime_thread_current();
+    if (!p_thread || !pp_addr || !p_size) return 22;
+    *pp_addr=p_thread->attr.p_stack_addr; *p_size=p_thread->attr.stack;
     return 0;
 }
-static ABI int32_t attr_get_stack(ThreadAttr **slot,uint64_t *size) {
-    ThreadAttr *a=find_attr(slot);
-    if (!a || !size) return ERR(22);
-    *size=a->stack; return 0;
+static ABI int32_t attr_get_stack(ThreadAttr **pp_slot,uint64_t *p_size) {
+    ThreadAttr *p_thread_attr=find_attr(pp_slot);
+    if (!p_thread_attr || !p_size) return ERR(22);
+    *p_size=p_thread_attr->stack; return 0;
 }
-static ABI int32_t attr_set_detach(ThreadAttr **slot,int state) {
-    ThreadAttr *a=find_attr(slot);
-    if (!a || (state!=0 && state!=1)) return ERR(22);
-    a->detached=state; return 0;
+static ABI int32_t attr_set_detach(ThreadAttr **pp_slot,int state) {
+    ThreadAttr *p_thread_attr=find_attr(pp_slot);
+    if (!p_thread_attr || (state!=0 && state!=1)) return ERR(22);
+    p_thread_attr->is_detached=state; return 0;
 }
-static ABI int32_t attr_get_detach(ThreadAttr **slot,int *state) {
-    ThreadAttr *a=find_attr(slot);
-    if (!a || !state) return ERR(22);
-    *state=a->detached; return 0;
+static ABI int32_t attr_get_detach(ThreadAttr **pp_slot,int *p_state) {
+    ThreadAttr *p_thread_attr=find_attr(pp_slot);
+    if (!p_thread_attr || !p_state) return ERR(22);
+    *p_state=p_thread_attr->is_detached; return 0;
 }
-static ABI int32_t attr_set_policy(ThreadAttr **slot,int policy) {
-    ThreadAttr *a=find_attr(slot);
-    if (!a || policy<1 || policy>3) return ERR(22);
-    a->policy=policy; return 0;
+static ABI int32_t attr_set_policy(ThreadAttr **pp_slot,int policy) {
+    ThreadAttr *p_thread_attr=find_attr(pp_slot);
+    if (!p_thread_attr || policy<1 || policy>3) return ERR(22);
+    p_thread_attr->policy=policy; return 0;
 }
-static ABI int32_t attr_set_inherit(ThreadAttr **slot,int inherit) {
-    ThreadAttr *a=find_attr(slot);
-    if (!a || (inherit!=0 && inherit!=4)) return ERR(22);
-    a->inherit=inherit; return 0;
+static ABI int32_t attr_set_inherit(ThreadAttr **pp_slot,int inherit) {
+    ThreadAttr *p_thread_attr=find_attr(pp_slot);
+    if (!p_thread_attr || (inherit!=0 && inherit!=4)) return ERR(22);
+    p_thread_attr->inherit=inherit; return 0;
 }
-static ABI int32_t attr_set_param(ThreadAttr **slot,const int *param) {
-    ThreadAttr *a=find_attr(slot);
-    if (!a || !param) return ERR(22);
-    a->prio=*param; return 0;
+static ABI int32_t attr_set_param(ThreadAttr **pp_slot,const int *p_param) {
+    ThreadAttr *p_thread_attr=find_attr(pp_slot);
+    if (!p_thread_attr || !p_param) return ERR(22);
+    p_thread_attr->prio=*p_param; return 0;
 }
-static ABI int32_t attr_get_param(ThreadAttr **slot,int *param) {
-    ThreadAttr *a=find_attr(slot);
-    if (!a || !param) return ERR(22);
-    *param=a->prio; return 0;
+static ABI int32_t attr_get_param(ThreadAttr **pp_slot,int *p_param) {
+    ThreadAttr *p_thread_attr=find_attr(pp_slot);
+    if (!p_thread_attr || !p_param) return ERR(22);
+    *p_param=p_thread_attr->prio; return 0;
 }
-static ABI int32_t attr_set_affinity(ThreadAttr **slot,uint64_t mask) {
-    ThreadAttr *a=find_attr(slot);
-    if (!a) return ERR(22);
-    a->affinity=mask; return 0;
+static ABI int32_t attr_set_affinity(ThreadAttr **pp_slot,uint64_t mask) {
+    ThreadAttr *p_thread_attr=find_attr(pp_slot);
+    if (!p_thread_attr) return ERR(22);
+    p_thread_attr->affinity=mask; return 0;
 }
-static ABI int32_t attr_affinity(ThreadAttr **slot,uint64_t *mask) {
-    ThreadAttr *a=find_attr(slot);
-    if (!a || !mask) return ERR(22);
-    *mask=a->affinity; return 0;
+static ABI int32_t attr_affinity(ThreadAttr **pp_slot,uint64_t *p_mask) {
+    ThreadAttr *p_thread_attr=find_attr(pp_slot);
+    if (!p_thread_attr || !p_mask) return ERR(22);
+    *p_mask=p_thread_attr->affinity; return 0;
 }
-static ABI int32_t attr_set_guard(ThreadAttr **slot,uint64_t size) {
-    ThreadAttr *a=find_attr(slot);
-    if (!a) return ERR(22);
-    a->guard=size; return 0;
+static ABI int32_t attr_set_guard(ThreadAttr **pp_slot,uint64_t cb_guard) {
+    ThreadAttr *p_thread_attr=find_attr(pp_slot);
+    if (!p_thread_attr) return ERR(22);
+    p_thread_attr->guard=cb_guard; return 0;
 }
-static ABI int32_t attr_get_guard(ThreadAttr **slot,uint64_t *size) {
-    ThreadAttr *a=find_attr(slot);
-    if (!a || !size) return ERR(22);
-    *size=a->guard; return 0;
+static ABI int32_t attr_get_guard(ThreadAttr **pp_slot,uint64_t *p_size) {
+    ThreadAttr *p_thread_attr=find_attr(pp_slot);
+    if (!p_thread_attr || !p_size) return ERR(22);
+    *p_size=p_thread_attr->guard; return 0;
 }
 
 /* Linux thread names hold 15 characters; longer ones would be rejected. */
-static void set_host_name(const char *name) {
-    char host[16]={0};
-    memcpy(host,name,strnlen(name,sizeof(host)-1));
-    pthread_setname_np(pthread_self(),host);
+static void set_host_name(const char *sz_name) {
+    char sz_host[16]={0};
+    memcpy(sz_host,sz_name,strnlen(sz_name,sizeof(sz_host)-1));
+    pthread_setname_np(pthread_self(),sz_host);
 }
-static void *host_start(void *p) {
-    GuestThread *t=p;
-    attach(t);
-    pthread_sigmask(SIG_SETMASK,&t->start_mask,NULL);
-    record_stack(t);
-    set_host_name(t->name);
-    if (!setjmp(t->exit_jump)) t->result=t->entry(t->argument);
+static void *host_start(void *p_argument) {
+    GuestThread *p_thread=p_argument;
+    attach(p_thread);
+    pthread_sigmask(SIG_SETMASK,&p_thread->start_mask,NULL);
+    record_stack(p_thread);
+    set_host_name(p_thread->name);
+    if (!setjmp(p_thread->exit_jump)) p_thread->result=p_thread->entry(p_thread->argument);
     runtime_thread_keys_cleanup();
-    runtime_exception_lock(&lock); t->finished=1; ++exited; runtime_exception_unlock(&lock);
-    return t->result;
+    runtime_exception_lock(&s_lock); p_thread->finished=1; ++s_exited; runtime_exception_unlock(&s_lock);
+    return p_thread->result;
 }
-static int32_t create(GuestThread **out,ThreadAttr **attr_slot,GuestEntry entry,void *argument,const char *name) {
-    if (!out || !entry) return ERR(22);
-    ThreadAttr *a=NULL;
-    if (attr_slot && !(a=find_attr(attr_slot))) return ERR(22);
-    GuestThread *t=new_thread();
-    if (!t) return ERR(12);
-    if (a) { t->attr=*a; t->attr.next=NULL; }
-    t->entry=entry; t->argument=argument; t->detached=t->attr.detached;
-    snprintf(t->name,sizeof(t->name),"%s",name ? name : "guest");
+static int32_t create(GuestThread **pp_out,ThreadAttr **pp_attr_slot,GuestEntry pfn_entry,void *p_argument,const char *sz_name) {
+    if (!pp_out || !pfn_entry) return ERR(22);
+    ThreadAttr *p_thread_attr=NULL;
+    if (pp_attr_slot && !(p_thread_attr=find_attr(pp_attr_slot))) return ERR(22);
+    GuestThread *p_thread=new_thread();
+    if (!p_thread) return ERR(12);
+    if (p_thread_attr) { p_thread->attr=*p_thread_attr; p_thread->attr.p_next=NULL; }
+    p_thread->entry=pfn_entry; p_thread->argument=p_argument; p_thread->detached=p_thread->attr.is_detached;
+    snprintf(p_thread->name,sizeof(p_thread->name),"%s",sz_name ? sz_name : "guest");
     pthread_attr_t host;
     pthread_attr_init(&host);
-    uint64_t stack=t->attr.stack<MIN_STACK ? MIN_STACK : t->attr.stack;
-    publish(t);
+    uint64_t stack=p_thread->attr.stack<MIN_STACK ? MIN_STACK : p_thread->attr.stack;
+    publish(p_thread);
     /* Publish the handle before the thread can run and inspect itself. */
-    *out=t;
+    *pp_out=p_thread;
     /* Blocked until host_start has set GS: a signal handler that runs guest code on the thread
      * before then would find no TCB. */
     /* Faults stay open: one taken while blocked kills the process instead of reaching the GPU's
@@ -310,179 +310,179 @@ static int32_t create(GuestThread **out,ThreadAttr **attr_slot,GuestEntry entry,
     sigfillset(&all);
     sigdelset(&all,SIGSEGV); sigdelset(&all,SIGBUS); sigdelset(&all,SIGILL); sigdelset(&all,SIGFPE);
     sigdelset(&all,SIGTRAP);
-    pthread_sigmask(SIG_SETMASK,&all,&t->start_mask);
+    pthread_sigmask(SIG_SETMASK,&all,&p_thread->start_mask);
     int e=EINVAL;
-    if (t->attr.stack_addr) {
+    if (p_thread->attr.p_stack_addr) {
         /* The game's own memory, as the console runs it. glibc keeps its thread record and the
          * process's static TLS at its top and refuses a stack too small for them. */
-        pthread_attr_setstack(&host,t->attr.stack_addr,t->attr.stack);
-        e=pthread_create(&t->host,&host,host_start,t);
+        pthread_attr_setstack(&host,p_thread->attr.p_stack_addr,p_thread->attr.stack);
+        e=pthread_create(&p_thread->host,&host,host_start,p_thread);
         if (e==EINVAL) {
             printf("Runtime: guest thread '%s': its own %llu-byte stack is too small for the host; "
-                   "it runs on one of the runtime's\n",t->name,(unsigned long long)t->attr.stack);
+                   "it runs on one of the runtime's\n",p_thread->name,(unsigned long long)p_thread->attr.stack);
             /* The attributes then name the stack it really runs on (record_stack). */
-            t->attr.stack_addr=NULL;
+            p_thread->attr.p_stack_addr=NULL;
             pthread_attr_destroy(&host);
             pthread_attr_init(&host);
         }
     }
-    if (e==EINVAL && !t->attr.stack_addr) {
+    if (e==EINVAL && !p_thread->attr.p_stack_addr) {
         /* Stacks below 1 TiB as on PS4; guest code may pack stack addresses. */
-        size_t stack_bytes=(size_t)stack+STACK_MARGIN;
-        void *stack_memory=runtime_low_map(stack_bytes,PROT_READ|PROT_WRITE);
-        if (stack_memory) {
-            pthread_attr_setstack(&host,stack_memory,stack_bytes);
+        size_t cb_stack=(size_t)stack+STACK_MARGIN;
+        void *p_stack_memory=runtime_low_map(cb_stack,PROT_READ|PROT_WRITE);
+        if (p_stack_memory) {
+            pthread_attr_setstack(&host,p_stack_memory,cb_stack);
             /* Known before the thread runs: libSceUlt reads it (scePthreadAttrGet) right after
              * creating its workers, and builds their fibers' contexts on it. */
-            t->attr.stack_addr=stack_memory; t->attr.stack=stack_bytes;
-        } else pthread_attr_setstacksize(&host,stack_bytes);
-        e=pthread_create(&t->host,&host,host_start,t);
+            p_thread->attr.p_stack_addr=p_stack_memory; p_thread->attr.stack=cb_stack;
+        } else pthread_attr_setstacksize(&host,cb_stack);
+        e=pthread_create(&p_thread->host,&host,host_start,p_thread);
     }
     pthread_attr_destroy(&host);
-    pthread_sigmask(SIG_SETMASK,&t->start_mask,NULL);
+    pthread_sigmask(SIG_SETMASK,&p_thread->start_mask,NULL);
     if (e) { fprintf(stderr,"STOP: host pthread_create failed: %d\n",e); runtime_stop(21); }
-    if (t->detached) pthread_detach(t->host);
-    runtime_exception_lock(&lock); ++created; runtime_exception_unlock(&lock);
-    printf("Runtime: guest thread '%s' created (stack=%llu, prio=%d)\n",t->name,(unsigned long long)stack,t->attr.prio);
+    if (p_thread->detached) pthread_detach(p_thread->host);
+    runtime_exception_lock(&s_lock); ++s_created; runtime_exception_unlock(&s_lock);
+    printf("Runtime: guest thread '%s' created (stack=%llu, prio=%d)\n",p_thread->name,(unsigned long long)stack,p_thread->attr.prio);
     return 0;
 }
-static ABI int32_t thread_create(GuestThread **out,ThreadAttr **attr,GuestEntry entry,void *argument,const char *name) {
-    return create(out,attr,entry,argument,name);
+static ABI int32_t thread_create(GuestThread **pp_out,ThreadAttr **pp_attr,GuestEntry pfn_entry,void *p_argument,const char *sz_name) {
+    return create(pp_out,pp_attr,pfn_entry,p_argument,sz_name);
 }
-static ABI int32_t thread_join(GuestThread *t,void **result) {
-    if (!find_thread(t) || t->host_owned) return ERR(3);
-    if (t==current) return ERR(11);
-    if (t->detached || t->joined) return ERR(22);
-    t->joined=1;
-    void *value=NULL;
-    int e=pthread_join(t->host,&value);
+static ABI int32_t thread_join(GuestThread *p_thread,void **pp_result) {
+    if (!find_thread(p_thread) || p_thread->host_owned) return ERR(3);
+    if (p_thread==s_p_current) return ERR(11);
+    if (p_thread->detached || p_thread->joined) return ERR(22);
+    p_thread->joined=1;
+    void *p_value=NULL;
+    int e=pthread_join(p_thread->host,&p_value);
     if (e) { fprintf(stderr,"STOP: host pthread_join failed: %d\n",e); runtime_stop(21); }
-    if (result) *result=t->result;
-    runtime_exception_lock(&lock); ++joined_count; runtime_exception_unlock(&lock);
+    if (pp_result) *pp_result=p_thread->result;
+    runtime_exception_lock(&s_lock); ++s_c_joineds; runtime_exception_unlock(&s_lock);
     return 0;
 }
-static ABI int32_t thread_detach(GuestThread *t) {
-    if (!find_thread(t)) return ERR(3);
-    if (t->detached) return ERR(22);
-    t->detached=1;
-    if (!t->host_owned) pthread_detach(t->host);
+static ABI int32_t thread_detach(GuestThread *p_thread) {
+    if (!find_thread(p_thread)) return ERR(3);
+    if (p_thread->detached) return ERR(22);
+    p_thread->detached=1;
+    if (!p_thread->host_owned) pthread_detach(p_thread->host);
     return 0;
 }
 /* FreeBSD's struct pthread_cleanup, laid over the _pthread_cleanup_info the guest's
  * pthread_cleanup_push macro keeps on its stack. */
 typedef struct CleanupHandler {
-    struct CleanupHandler *prev;
-    void (ABI *routine)(void *);
-    void *routine_arg;
+    struct CleanupHandler *p_prev;
+    void (ABI *pfn_routine)(void *);
+    void *p_routine_arg;
     int32_t onheap;
 } CleanupHandler;
 static _Thread_local CleanupHandler *s_p_cleanup_handlers;
 static ABI void push_cleanup_handler(void (ABI *pfn_routine)(void *),void *p_argument,CleanupHandler *p_handler) {
-    p_handler->routine=pfn_routine; p_handler->routine_arg=p_argument; p_handler->onheap=0;
-    p_handler->prev=s_p_cleanup_handlers; s_p_cleanup_handlers=p_handler;
+    p_handler->pfn_routine=pfn_routine; p_handler->p_routine_arg=p_argument; p_handler->onheap=0;
+    p_handler->p_prev=s_p_cleanup_handlers; s_p_cleanup_handlers=p_handler;
 }
 static ABI void pop_cleanup_handler(int32_t should_execute) {
     CleanupHandler *p_top=s_p_cleanup_handlers;
     if (!p_top) return;
-    s_p_cleanup_handlers=p_top->prev;
-    if (should_execute) p_top->routine(p_top->routine_arg);
+    s_p_cleanup_handlers=p_top->p_prev;
+    if (should_execute) p_top->pfn_routine(p_top->p_routine_arg);
 }
-static ABI __attribute__((noreturn)) void thread_exit(void *value) {
-    GuestThread *t=runtime_thread_current();
-    if (t->host_owned) { fputs("STOP: pthread_exit on host-owned/main thread\n",stderr); runtime_stop(21); }
+static ABI __attribute__((noreturn)) void thread_exit(void *p_value) {
+    GuestThread *p_thread=runtime_thread_current();
+    if (p_thread->host_owned) { fputs("STOP: pthread_exit on host-owned/main thread\n",stderr); runtime_stop(21); }
     while (s_p_cleanup_handlers) pop_cleanup_handler(1);
-    t->result=value;
+    p_thread->result=p_value;
     /* No host unwinder: guest frames have no registered FDEs. */
-    longjmp(t->exit_jump,1);
+    longjmp(p_thread->exit_jump,1);
 }
 static ABI int32_t thread_yield(void) { sched_yield(); return 0; }
-static ABI int32_t thread_get_prio(GuestThread *t,int *prio) {
-    if (!find_thread(t)) return ERR(3);
-    if (!prio) return ERR(22);
-    *prio=t->attr.prio; return 0;
+static ABI int32_t thread_get_prio(GuestThread *p_thread,int *p_prio) {
+    if (!find_thread(p_thread)) return ERR(3);
+    if (!p_prio) return ERR(22);
+    *p_prio=p_thread->attr.prio; return 0;
 }
-static ABI int32_t thread_set_prio(GuestThread *t,int prio) {
-    if (!find_thread(t)) return ERR(3);
-    t->attr.prio=prio; return 0;
+static ABI int32_t thread_set_prio(GuestThread *p_thread,int prio) {
+    if (!find_thread(p_thread)) return ERR(3);
+    p_thread->attr.prio=prio; return 0;
 }
-static ABI int32_t thread_set_affinity(GuestThread *t,uint64_t mask) {
-    if (!find_thread(t)) return ERR(3);
-    t->attr.affinity=mask; return 0;
+static ABI int32_t thread_set_affinity(GuestThread *p_thread,uint64_t mask) {
+    if (!find_thread(p_thread)) return ERR(3);
+    p_thread->attr.affinity=mask; return 0;
 }
-static ABI int32_t thread_get_affinity(GuestThread *t,uint64_t *mask) {
-    if (!find_thread(t)) return ERR(3);
-    if (!mask) return ERR(22);
-    *mask=t->attr.affinity; return 0;
+static ABI int32_t thread_get_affinity(GuestThread *p_thread,uint64_t *p_mask) {
+    if (!find_thread(p_thread)) return ERR(3);
+    if (!p_mask) return ERR(22);
+    *p_mask=p_thread->attr.affinity; return 0;
 }
-static ABI int32_t thread_rename(GuestThread *t,const char *name) {
-    if (!find_thread(t)) return ERR(3);
-    if (!name) return ERR(22);
-    snprintf(t->name,sizeof(t->name),"%s",name);
-    if (t==current) set_host_name(t->name);
+static ABI int32_t thread_rename(GuestThread *p_thread,const char *sz_name) {
+    if (!find_thread(p_thread)) return ERR(3);
+    if (!sz_name) return ERR(22);
+    snprintf(p_thread->name,sizeof(p_thread->name),"%s",sz_name);
+    if (p_thread==s_p_current) set_host_name(p_thread->name);
     return 0;
 }
-static ABI int32_t thread_equal(GuestThread *a,GuestThread *b) { return a==b; }
+static ABI int32_t thread_equal(GuestThread *p_a,GuestThread *p_b) { return p_a==p_b; }
 static ABI int32_t thread_get_id(void) { return (int32_t)gettid(); }
 
 /* POSIX (libScePosix) variants return positive errno values. */
 static int32_t posix(int32_t r) { return r ? (int32_t)((uint32_t)r&0xffff) : 0; }
-static ABI int32_t posix_attr_init(ThreadAttr **a) { return posix(attr_init(a)); }
-static ABI int32_t posix_attr_destroy(ThreadAttr **a) { return posix(attr_destroy(a)); }
-static ABI int32_t posix_attr_set_detach(ThreadAttr **a,int s) { return posix(attr_set_detach(a,s)); }
-static ABI int32_t posix_attr_set_stack(ThreadAttr **a,uint64_t s) { return posix(attr_set_stack(a,s)); }
-static ABI int32_t posix_attr_set_param(ThreadAttr **a,const int *p) { return posix(attr_set_param(a,p)); }
-static ABI int32_t posix_attr_set_policy(ThreadAttr **a,int p) { return posix(attr_set_policy(a,p)); }
-static ABI int32_t posix_create(GuestThread **t,ThreadAttr **a,GuestEntry e,void *arg) { return posix(create(t,a,e,arg,"posix")); }
-static ABI int32_t posix_create_name(GuestThread **t,ThreadAttr **a,GuestEntry e,void *arg,const char *name) { return posix(create(t,a,e,arg,name)); }
-static ABI int32_t posix_join(GuestThread *t,void **r) { return posix(thread_join(t,r)); }
-static ABI int32_t posix_detach(GuestThread *t) { return posix(thread_detach(t)); }
-static _Thread_local int cancel_state, cancel_type;
-static ABI int32_t posix_set_cancel_state(int state,int *old) {
+static ABI int32_t posix_attr_init(ThreadAttr **pp_thread_attr) { return posix(attr_init(pp_thread_attr)); }
+static ABI int32_t posix_attr_destroy(ThreadAttr **pp_thread_attr) { return posix(attr_destroy(pp_thread_attr)); }
+static ABI int32_t posix_attr_set_detach(ThreadAttr **pp_thread_attr,int s) { return posix(attr_set_detach(pp_thread_attr,s)); }
+static ABI int32_t posix_attr_set_stack(ThreadAttr **pp_thread_attr,uint64_t s) { return posix(attr_set_stack(pp_thread_attr,s)); }
+static ABI int32_t posix_attr_set_param(ThreadAttr **pp_thread_attr,const int *p_param) { return posix(attr_set_param(pp_thread_attr,p_param)); }
+static ABI int32_t posix_attr_set_policy(ThreadAttr **pp_thread_attr,int p) { return posix(attr_set_policy(pp_thread_attr,p)); }
+static ABI int32_t posix_create(GuestThread **pp_thread,ThreadAttr **pp_thread_attr,GuestEntry pfn_entry,void *p_arg) { return posix(create(pp_thread,pp_thread_attr,pfn_entry,p_arg,"posix")); }
+static ABI int32_t posix_create_name(GuestThread **pp_thread,ThreadAttr **pp_thread_attr,GuestEntry pfn_entry,void *p_arg,const char *sz_name) { return posix(create(pp_thread,pp_thread_attr,pfn_entry,p_arg,sz_name)); }
+static ABI int32_t posix_join(GuestThread *p_thread,void **pp_result) { return posix(thread_join(p_thread,pp_result)); }
+static ABI int32_t posix_detach(GuestThread *p_thread) { return posix(thread_detach(p_thread)); }
+static _Thread_local int s_cancel_state, s_cancel_type;
+static ABI int32_t posix_set_cancel_state(int state,int *p_old) {
     if (state!=0 && state!=1) return 22;
-    if (old) *old=cancel_state;
-    cancel_state=state; return 0;
+    if (p_old) *p_old=s_cancel_state;
+    s_cancel_state=state; return 0;
 }
-static ABI int32_t posix_set_cancel_type(int type,int *old) {
+static ABI int32_t posix_set_cancel_type(int type,int *p_old) {
     if (type!=0 && type!=2) return 22;
-    if (old) *old=cancel_type;
-    cancel_type=type; return 0;
+    if (p_old) *p_old=s_cancel_type;
+    s_cancel_type=type; return 0;
 }
 /* Deferred cancellation: a request is taken when the target reaches pthread_testcancel. The
  * blocking calls that are cancellation points on FreeBSD (waits, sleeps, I/O) do not take it, and
  * asynchronous cancellation is held to the next pthread_testcancel too; the report counts both. */
 static ABI int32_t thread_cancel(GuestThread *p_thread) {
     if (!find_thread(p_thread) || p_thread->host_owned) return ERR(3);
-    runtime_exception_lock(&lock);
+    runtime_exception_lock(&s_lock);
     const int is_first_request=!s_c_cancel_requests && !p_thread->is_cancel_requested;
     if (!p_thread->is_cancel_requested) ++s_c_cancel_requests;
     p_thread->is_cancel_requested=1;
-    runtime_exception_unlock(&lock);
+    runtime_exception_unlock(&s_lock);
     if (is_first_request)
         printf("Runtime: guest thread '%s' asked to cancel; it ends at its next pthread_testcancel\n",p_thread->name);
     return 0;
 }
 static ABI int32_t posix_cancel(GuestThread *p_thread) { return posix(thread_cancel(p_thread)); }
 static ABI void thread_test_cancel(void) {
-    GuestThread *p_thread=current;
-    if (!p_thread || p_thread->host_owned || !p_thread->is_cancel_requested || cancel_state) return;
-    runtime_exception_lock(&lock); ++s_c_cancels_taken; runtime_exception_unlock(&lock);
+    GuestThread *p_thread=s_p_current;
+    if (!p_thread || p_thread->host_owned || !p_thread->is_cancel_requested || s_cancel_state) return;
+    runtime_exception_lock(&s_lock); ++s_c_cancels_taken; runtime_exception_unlock(&s_lock);
     thread_exit((void *)1); /* PTHREAD_CANCELED */
 }
 
-int32_t runtime_thread_spawn(void **out,void *(ABI *entry)(void *),void *argument,uint64_t stack,const char *name) {
-    ThreadAttr *attr=NULL;
-    int32_t r=attr_init(&attr);
-    if (!r && stack) r=attr_set_stack(&attr,stack);
-    if (!r) r=create((GuestThread **)out,&attr,entry,argument,name);
-    if (attr) attr_destroy(&attr);
+int32_t runtime_thread_spawn(void **pp_out,void *(ABI *pfn_entry)(void *),void *p_argument,uint64_t stack,const char *sz_name) {
+    ThreadAttr *p_attr=NULL;
+    int32_t r=attr_init(&p_attr);
+    if (!r && stack) r=attr_set_stack(&p_attr,stack);
+    if (!r) r=create((GuestThread **)pp_out,&p_attr,pfn_entry,p_argument,sz_name);
+    if (p_attr) attr_destroy(&p_attr);
     return posix(r);
 }
-int32_t runtime_thread_join_spawned(void *thread,void **result) {
-    return posix(thread_join((GuestThread *)thread,result));
+int32_t runtime_thread_join_spawned(void *p_thread,void **pp_result) {
+    return posix(thread_join((GuestThread *)p_thread,pp_result));
 }
 
-uintptr_t runtime_thread_resolve(const char *name) {
-    static const struct { const char *nid; void *fn; } table[]={
+uintptr_t runtime_thread_resolve(const char *sz_name) {
+    static const struct { const char *sz_nid; void *p_function; } s_table[]={
         {"aI+OeCz8xrQ",thread_self}, {"EotR8a3ASf4",thread_self},
         {"9BcDykPmo1I",guest_error},
         {"nsYoNRywwNg",attr_init}, {"62KCwEMmzcM",attr_destroy},
@@ -511,18 +511,18 @@ uintptr_t runtime_thread_resolve(const char *name) {
         {"LapIb799SSE",thread_test_cancel}, {"nYBrkGDqxh8",thread_test_cancel},
         {"1xvtUVx1-Sg",push_cleanup_handler}, {"iWsFlYMf3Kw",pop_cleanup_handler},
     };
-    for (size_t i=0;i<sizeof(table)/sizeof(*table);++i)
-        if (runtime_same_nid(name,table[i].nid)) return (uintptr_t)table[i].fn;
+    for (size_t i=0;i<sizeof(s_table)/sizeof(*s_table);++i)
+        if (runtime_same_nid(sz_name,s_table[i].sz_nid)) return (uintptr_t)s_table[i].p_function;
     return 0;
 }
 void runtime_thread_report(void) {
-    runtime_exception_lock(&lock);
-    printf("Runtime: guest threads created=%zu, exited=%zu, joined=%zu\n",created,exited,joined_count);
+    runtime_exception_lock(&s_lock);
+    printf("Runtime: guest threads created=%zu, exited=%zu, joined=%zu\n",s_created,s_exited,s_c_joineds);
     if (s_c_cancel_requests)
         printf("Runtime: thread cancellation: %zu requested, %zu taken at pthread_testcancel (blocking "
                "cancellation points and asynchronous cancellation are not honoured)\n",s_c_cancel_requests,
                s_c_cancels_taken);
-    runtime_exception_unlock(&lock);
+    runtime_exception_unlock(&s_lock);
 }
 #else
 uintptr_t runtime_thread_resolve(const char *name) { (void)name; return 0; }

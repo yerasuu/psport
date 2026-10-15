@@ -59,12 +59,12 @@ _Static_assert(sizeof(GuestUcontext)==0x500,"PS4 ucontext_t size");
 /* PS4Util.prx hands this field to IL2CPP's suspend callback as the thread's stack pointer. */
 _Static_assert(offsetof(GuestUcontext,mcontext.rsp)==0xf8,"ucontext rsp offset");
 
-static _Atomic(GuestHandler) handlers[GUEST_SIGNALS];
+static _Atomic(GuestHandler) s_handlers[GUEST_SIGNALS];
 /* Runtime locks this thread holds, is taking or sleeps on in runtime_exception_wait, and a raise
  * held back until it lets go. */
-static _Thread_local unsigned held;
-static _Thread_local volatile sig_atomic_t deferred;
-static _Atomic unsigned raised, delivered;
+static _Thread_local unsigned s_held;
+static _Thread_local volatile sig_atomic_t s_is_deferred;
+static _Atomic unsigned s_raised, s_delivered;
 /* The errnos deliver puts back when the guest's handler returns, for a handler that leaves by
  * sigreturn instead. */
 typedef struct { int is_active, host_errno; int32_t guest_errno; } Delivery;
@@ -74,88 +74,88 @@ static _Thread_local Delivery s_delivery;
 static int allowed(int sig) { return sig==1 || sig==4 || sig==8 || sig==10 || sig==11 || sig==GUEST_SIGUSR1; }
 
 void runtime_exception_hold(void) {
-    ++held;
+    ++s_held;
     atomic_signal_fence(memory_order_seq_cst);
 }
 void runtime_exception_release(void) {
     atomic_signal_fence(memory_order_seq_cst);
-    --held;
+    --s_held;
     atomic_signal_fence(memory_order_seq_cst);
-    if (!held && deferred) pthread_kill(pthread_self(),RUNTIME_EXCEPTION_SIGNAL);
+    if (!s_held && s_is_deferred) pthread_kill(pthread_self(),RUNTIME_EXCEPTION_SIGNAL);
 }
-void runtime_exception_lock(pthread_mutex_t *lock) {
+void runtime_exception_lock(pthread_mutex_t *p_lock) {
     runtime_exception_hold();
-    pthread_mutex_lock(lock);
+    pthread_mutex_lock(p_lock);
 }
-void runtime_exception_unlock(pthread_mutex_t *lock) {
-    pthread_mutex_unlock(lock);
+void runtime_exception_unlock(pthread_mutex_t *p_lock) {
+    pthread_mutex_unlock(p_lock);
     runtime_exception_release();
 }
-int runtime_exception_wait(pthread_cond_t *cond, pthread_mutex_t *lock, const struct timespec *end) {
-    if (deferred && held==1) { runtime_exception_unlock(lock); runtime_exception_lock(lock); return 0; }
+int runtime_exception_wait(pthread_cond_t *p_cond, pthread_mutex_t *p_lock, const struct timespec *p_end) {
+    if (s_is_deferred && s_held==1) { runtime_exception_unlock(p_lock); runtime_exception_lock(p_lock); return 0; }
     struct timespec slice;
     clock_gettime(CLOCK_MONOTONIC,&slice);
-    slice.tv_nsec+=atomic_load(&handlers[GUEST_SIGUSR1]) ? RAISE_SLICE_NS : IDLE_SLICE_NS;
+    slice.tv_nsec+=atomic_load(&s_handlers[GUEST_SIGUSR1]) ? RAISE_SLICE_NS : IDLE_SLICE_NS;
     slice.tv_sec+=slice.tv_nsec/1000000000; slice.tv_nsec%=1000000000;
-    int last=end && (end->tv_sec<slice.tv_sec || (end->tv_sec==slice.tv_sec && end->tv_nsec<=slice.tv_nsec));
-    int e=pthread_cond_clockwait(cond,lock,CLOCK_MONOTONIC,last ? end : &slice);
+    int last=p_end && (p_end->tv_sec<slice.tv_sec || (p_end->tv_sec==slice.tv_sec && p_end->tv_nsec<=slice.tv_nsec));
+    int e=pthread_cond_clockwait(p_cond,p_lock,CLOCK_MONOTONIC,last ? p_end : &slice);
     return e==ETIMEDOUT && !last ? 0 : e;
 }
 
-static void deliver(int sig, siginfo_t *info, void *raw) {
-    (void)sig; (void)info;
-    GuestHandler handler=atomic_load(&handlers[GUEST_SIGUSR1]);
-    if (!handler) { deferred=0; return; }
-    if (held) { deferred=1; return; }
-    deferred=0;
-    ucontext_t *host=raw;
-    greg_t *r=host->uc_mcontext.gregs;
+static void deliver(int sig, siginfo_t *p_info, void *p_raw) {
+    (void)sig; (void)p_info;
+    GuestHandler pfn_handler=atomic_load(&s_handlers[GUEST_SIGUSR1]);
+    if (!pfn_handler) { s_is_deferred=0; return; }
+    if (s_held) { s_is_deferred=1; return; }
+    s_is_deferred=0;
+    ucontext_t *p_host=p_raw;
+    greg_t *p_registers=p_host->uc_mcontext.gregs;
     /* The handler may call back into the runtime, which sets both errnos. */
     int host_errno=errno;
     int32_t guest_errno=*runtime_errno();
     GuestUcontext context;
     memset(&context,0,sizeof(context));
-    GuestMcontext *m=&context.mcontext;
-    m->rdi=(uint64_t)r[REG_RDI]; m->rsi=(uint64_t)r[REG_RSI]; m->rdx=(uint64_t)r[REG_RDX]; m->rcx=(uint64_t)r[REG_RCX];
-    m->r8=(uint64_t)r[REG_R8]; m->r9=(uint64_t)r[REG_R9]; m->rax=(uint64_t)r[REG_RAX]; m->rbx=(uint64_t)r[REG_RBX];
-    m->rbp=(uint64_t)r[REG_RBP]; m->r10=(uint64_t)r[REG_R10]; m->r11=(uint64_t)r[REG_R11]; m->r12=(uint64_t)r[REG_R12];
-    m->r13=(uint64_t)r[REG_R13]; m->r14=(uint64_t)r[REG_R14]; m->r15=(uint64_t)r[REG_R15];
-    m->rip=(uint64_t)r[REG_RIP]; m->rsp=(uint64_t)r[REG_RSP]; m->rflags=(uint64_t)r[REG_EFL];
-    m->cs=(uint64_t)r[REG_CSGSFS]&0xffff;
-    m->trapno=(uint32_t)r[REG_TRAPNO]; m->err=(uint64_t)r[REG_ERR];
-    m->len=sizeof(*m);
+    GuestMcontext *p_mcontext=&context.mcontext;
+    p_mcontext->rdi=(uint64_t)p_registers[REG_RDI]; p_mcontext->rsi=(uint64_t)p_registers[REG_RSI]; p_mcontext->rdx=(uint64_t)p_registers[REG_RDX]; p_mcontext->rcx=(uint64_t)p_registers[REG_RCX];
+    p_mcontext->r8=(uint64_t)p_registers[REG_R8]; p_mcontext->r9=(uint64_t)p_registers[REG_R9]; p_mcontext->rax=(uint64_t)p_registers[REG_RAX]; p_mcontext->rbx=(uint64_t)p_registers[REG_RBX];
+    p_mcontext->rbp=(uint64_t)p_registers[REG_RBP]; p_mcontext->r10=(uint64_t)p_registers[REG_R10]; p_mcontext->r11=(uint64_t)p_registers[REG_R11]; p_mcontext->r12=(uint64_t)p_registers[REG_R12];
+    p_mcontext->r13=(uint64_t)p_registers[REG_R13]; p_mcontext->r14=(uint64_t)p_registers[REG_R14]; p_mcontext->r15=(uint64_t)p_registers[REG_R15];
+    p_mcontext->rip=(uint64_t)p_registers[REG_RIP]; p_mcontext->rsp=(uint64_t)p_registers[REG_RSP]; p_mcontext->rflags=(uint64_t)p_registers[REG_EFL];
+    p_mcontext->cs=(uint64_t)p_registers[REG_CSGSFS]&0xffff;
+    p_mcontext->trapno=(uint32_t)p_registers[REG_TRAPNO]; p_mcontext->err=(uint64_t)p_registers[REG_ERR];
+    p_mcontext->len=sizeof(*p_mcontext);
     /* fxsave layout as FreeBSD's savefpu begins: a collector may find pointers spilled to xmm. */
-    if (host->uc_mcontext.fpregs) {
-        memcpy(m->fpstate,host->uc_mcontext.fpregs,512);
-        m->fpformat=0x10002; /* _MC_FPFMT_XMM */
-        m->ownedfp=0x20001;  /* _MC_FPOWNED_FPU */
+    if (p_host->uc_mcontext.fpregs) {
+        memcpy(p_mcontext->fpstate,p_host->uc_mcontext.fpregs,512);
+        p_mcontext->fpformat=0x10002; /* _MC_FPFMT_XMM */
+        p_mcontext->ownedfp=0x20001;  /* _MC_FPOWNED_FPU */
     }
     /* The guest's FS base is its TCB, which the runtime keeps in GS. */
     unsigned long tcb=0;
-    if (!syscall(SYS_arch_prctl,ARCH_GET_GS,&tcb)) { m->fsbase=tcb; m->flags=0x2; /* _MC_HASBASES */ }
-    if (!atomic_fetch_add(&delivered,1)) {
-        static const char first[]="Runtime: first guest exception delivered to its handler\n";
+    if (!syscall(SYS_arch_prctl,ARCH_GET_GS,&tcb)) { p_mcontext->fsbase=tcb; p_mcontext->flags=0x2; /* _MC_HASBASES */ }
+    if (!atomic_fetch_add(&s_delivered,1)) {
+        static const char s_sz_first[]="Runtime: first guest exception delivered to its handler\n";
         /* write, not stdio: this runs in a signal handler. */
-        ssize_t written=write(2,first,sizeof(first)-1); (void)written;
+        ssize_t written=write(2,s_sz_first,sizeof(s_sz_first)-1); (void)written;
     }
     s_delivery=(Delivery){1,host_errno,guest_errno};
-    handler(GUEST_SIGUSR1,&context);
+    pfn_handler(GUEST_SIGUSR1,&context);
     s_delivery.is_active=0;
     /* As on the console, register changes the handler makes take effect on return. The FPU area
      * is a copy for the handler to read and is not restored. */
-    r[REG_RDI]=(greg_t)m->rdi; r[REG_RSI]=(greg_t)m->rsi; r[REG_RDX]=(greg_t)m->rdx; r[REG_RCX]=(greg_t)m->rcx;
-    r[REG_R8]=(greg_t)m->r8; r[REG_R9]=(greg_t)m->r9; r[REG_RAX]=(greg_t)m->rax; r[REG_RBX]=(greg_t)m->rbx;
-    r[REG_RBP]=(greg_t)m->rbp; r[REG_R10]=(greg_t)m->r10; r[REG_R11]=(greg_t)m->r11; r[REG_R12]=(greg_t)m->r12;
-    r[REG_R13]=(greg_t)m->r13; r[REG_R14]=(greg_t)m->r14; r[REG_R15]=(greg_t)m->r15;
-    r[REG_RIP]=(greg_t)m->rip; r[REG_RSP]=(greg_t)m->rsp; r[REG_EFL]=(greg_t)m->rflags;
+    p_registers[REG_RDI]=(greg_t)p_mcontext->rdi; p_registers[REG_RSI]=(greg_t)p_mcontext->rsi; p_registers[REG_RDX]=(greg_t)p_mcontext->rdx; p_registers[REG_RCX]=(greg_t)p_mcontext->rcx;
+    p_registers[REG_R8]=(greg_t)p_mcontext->r8; p_registers[REG_R9]=(greg_t)p_mcontext->r9; p_registers[REG_RAX]=(greg_t)p_mcontext->rax; p_registers[REG_RBX]=(greg_t)p_mcontext->rbx;
+    p_registers[REG_RBP]=(greg_t)p_mcontext->rbp; p_registers[REG_R10]=(greg_t)p_mcontext->r10; p_registers[REG_R11]=(greg_t)p_mcontext->r11; p_registers[REG_R12]=(greg_t)p_mcontext->r12;
+    p_registers[REG_R13]=(greg_t)p_mcontext->r13; p_registers[REG_R14]=(greg_t)p_mcontext->r14; p_registers[REG_R15]=(greg_t)p_mcontext->r15;
+    p_registers[REG_RIP]=(greg_t)p_mcontext->rip; p_registers[REG_RSP]=(greg_t)p_mcontext->rsp; p_registers[REG_EFL]=(greg_t)p_mcontext->rflags;
     *runtime_errno()=guest_errno;
     errno=host_errno;
 }
 
-static ABI int32_t install_handler(int sig, GuestHandler handler) {
+static ABI int32_t install_handler(int sig, GuestHandler pfn_handler) {
     if (!allowed(sig)) return ERR(22);
-    GuestHandler none=NULL;
-    if (!atomic_compare_exchange_strong(&handlers[sig],&none,handler)) return ERR(35);
+    GuestHandler pfn_none=NULL;
+    if (!atomic_compare_exchange_strong(&s_handlers[sig],&pfn_none,pfn_handler)) return ERR(35);
     if (sig==GUEST_SIGUSR1) {
         /* SA_RESTART so that file reads and futex waits the signal interrupts resume by themselves;
          * the runtime's sleeps retry on EINTR. Not SA_ONSTACK: the collector scans the stack the
@@ -164,25 +164,25 @@ static ABI int32_t install_handler(int sig, GuestHandler handler) {
         action.sa_sigaction=deliver;
         action.sa_flags=SA_SIGINFO|SA_RESTART;
         sigemptyset(&action.sa_mask);
-        if (sigaction(RUNTIME_EXCEPTION_SIGNAL,&action,NULL)) { atomic_store(&handlers[sig],NULL); return ERR(runtime_guest_errno(errno)); }
+        if (sigaction(RUNTIME_EXCEPTION_SIGNAL,&action,NULL)) { atomic_store(&s_handlers[sig],NULL); return ERR(runtime_guest_errno(errno)); }
     }
-    printf("Runtime: guest exception handler for signal %d installed at %p%s\n",sig,(void *)handler,
+    printf("Runtime: guest exception handler for signal %d installed at %p%s\n",sig,(void *)pfn_handler,
            sig==GUEST_SIGUSR1 ? "" : " (host faults are not forwarded to it)");
     return 0;
 }
 static ABI int32_t remove_handler(int sig) {
     if (!allowed(sig)) return ERR(22);
-    atomic_store(&handlers[sig],NULL);
+    atomic_store(&s_handlers[sig],NULL);
     return 0;
 }
-static ABI int32_t raise_exception(void *thread, int sig) {
+static ABI int32_t raise_exception(void *p_thread, int sig) {
     if (sig!=GUEST_SIGUSR1) return ERR(22);
-    int32_t result=runtime_thread_kill(thread,RUNTIME_EXCEPTION_SIGNAL);
-    if (!result && !atomic_fetch_add(&raised,1)) {
+    int32_t result=runtime_thread_kill(p_thread,RUNTIME_EXCEPTION_SIGNAL);
+    if (!result && !atomic_fetch_add(&s_raised,1)) {
         /* write, not stdio: the thread may stop in the handler while it holds stdout's lock. */
-        char line[96];
-        int n=snprintf(line,sizeof(line),"Runtime: first guest exception raised (signal %d) to thread %p\n",sig,thread);
-        ssize_t written=write(2,line,(size_t)n); (void)written;
+        char sz_line[96];
+        int cb_line=snprintf(sz_line,sizeof(sz_line),"Runtime: first guest exception raised (signal %d) to thread %p\n",sig,p_thread);
+        ssize_t written=write(2,sz_line,(size_t)cb_line); (void)written;
     }
     return result;
 }
@@ -285,16 +285,16 @@ static ABI __attribute__((noreturn)) void unwind_setcontext(const GuestUcontext 
     __builtin_unreachable();
 }
 
-static const RuntimeExport exports[]={
+static const RuntimeExport s_exports[]={
     {"sceKernelInstallExceptionHandler",install_handler},
     {"sceKernelRemoveExceptionHandler",remove_handler},
     {"sceKernelRaiseException",raise_exception},
     {"sigreturn",guest_sigreturn}, {"__Ux86_64_setcontext",unwind_setcontext},
 };
-uintptr_t runtime_exception_resolve(const char *name) { return RUNTIME_LOOKUP(exports,name); }
+uintptr_t runtime_exception_resolve(const char *sz_name) { return RUNTIME_LOOKUP(s_exports,sz_name); }
 void runtime_exception_report(void) {
-    unsigned r=atomic_load(&raised);
-    if (r) printf("Runtime: exceptions raised=%u, delivered=%u\n",r,atomic_load(&delivered));
+    unsigned r=atomic_load(&s_raised);
+    if (r) printf("Runtime: exceptions raised=%u, delivered=%u\n",r,atomic_load(&s_delivered));
 }
 #else
 uintptr_t runtime_exception_resolve(const char *name) { (void)name; return 0; }

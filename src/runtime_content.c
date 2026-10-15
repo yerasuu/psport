@@ -32,8 +32,8 @@ void runtime_content_configure(const uint32_t values[5]) {
     }
     memcpy(parameters,values,sizeof(parameters)); configured=1;
 }
-void runtime_content_title(const char *title) {
-    if (title && *title) snprintf(title_id,sizeof(title_id),"%s",title);
+void runtime_content_title(const char *sz_title) {
+    if (sz_title && *sz_title) snprintf(title_id,sizeof(title_id),"%s",sz_title);
 }
 static void require_provider(void) {
     if (!configured) { fputs("STOP: AppContent needs --app0 (its param.sfo)\n",stderr); runtime_stop(21); }
@@ -298,7 +298,7 @@ static const RuntimeExport exports[]={
     {"sceAppContentTemporaryDataMount2",temp_mount}, {"sceAppContentTemporaryDataUnmount",temp_unmount},
     {"sceAppContentTemporaryDataFormat",temp_format_mounted}, {"sceAppContentTemporaryDataGetAvailableSpaceKb",temp_space},
 };
-uintptr_t runtime_content_resolve(const char *name) { return RUNTIME_LOOKUP(exports,name); }
+uintptr_t runtime_content_resolve(const char *sz_name) { return RUNTIME_LOOKUP(exports,sz_name); }
 void runtime_content_report(void) {
     printf("Runtime: AppContent references=%u, initialized=%u, parameter queries=%u, list queries=%u\n",refs,initialized,queries,lists);
 }

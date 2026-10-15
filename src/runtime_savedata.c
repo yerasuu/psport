@@ -87,8 +87,8 @@ static size_t event_count;
 static struct { char dir[640]; uint64_t size; } memories[SLOTS];
 static size_t mounts_done, memory_writes;
 
-void runtime_savedata_configure(const char *title) {
-    if (title && *title) snprintf(title_id,sizeof(title_id),"%s",title);
+void runtime_savedata_configure(const char *sz_title) {
+    if (sz_title && *sz_title) snprintf(title_id,sizeof(title_id),"%s",sz_title);
 }
 const char *runtime_savedata_title(void) { return title_id; }
 
@@ -641,16 +641,16 @@ static const RuntimeExport exports[]={
     {"sceSaveDataRestoreBackupData",save_restore_backup}, {"sceSaveDataGetProgress",save_progress},
     {"sceSaveDataLoadIcon",save_load_icon}, {"sceSaveDataSyncSaveDataMemory",memory_sync},
 };
-uintptr_t runtime_savedata_resolve(const char *name) { return RUNTIME_LOOKUP(exports,name); }
-int runtime_savedata_param(int32_t user, const char *title, const char *dir, void *param) {
+uintptr_t runtime_savedata_resolve(const char *sz_name) { return RUNTIME_LOOKUP(exports,sz_name); }
+int runtime_savedata_param(int32_t user, const char *sz_title, const char *sz_dir, void *p_param) {
     char base[600], path[680];
     struct stat st;
-    if (!valid_name(dir,32)) return -1;
-    root(user,title,base,sizeof(base));
-    snprintf(path,sizeof(path),"%s/%s",base,dir);
+    if (!valid_name(sz_dir,32)) return -1;
+    root(user,sz_title,base,sizeof(base));
+    snprintf(path,sizeof(path),"%s/%s",base,sz_dir);
     if (stat(path,&st) || !S_ISDIR(st.st_mode)) return -1;
-    snprintf(path,sizeof(path),"%s/%s.sce_sys",base,dir);
-    read_param(path,param);
+    snprintf(path,sizeof(path),"%s/%s.sce_sys",base,sz_dir);
+    read_param(path,p_param);
     return 0;
 }
 void runtime_savedata_report(void) { printf("Runtime: save data mounts=%zu, memory writes=%zu\n",mounts_done,memory_writes); }

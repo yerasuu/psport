@@ -17,14 +17,14 @@ static ABI int32_t register_object(uint64_t object, int32_t kind, uint32_t *id) 
 static ABI int32_t unregister_object(uint32_t id) { return id>=MAX_ID ? ERR_INVALID : 0; }
 static ABI int32_t check_object(uint64_t object) { return object ? 0 : ERR_INVALID; }
 
-uintptr_t runtime_ulobjmgr_resolve(const char *name) {
+uintptr_t runtime_ulobjmgr_resolve(const char *sz_name) {
     static const struct { const char *nid; void *fn; } table[]={
         {"BG26hBGiNlw",register_object}, {"Smf+fUNblPc",unregister_object},
         {"HZ9Q2c+4BU4",runtime_stub}, {"SweJO7t3pkk",check_object},
     };
     for (size_t i=0;i<sizeof(table)/sizeof(*table);++i)
-        if (runtime_same_nid(name,table[i].nid)) {
-            runtime_last_stub=table[i].fn==(void *)runtime_stub;
+        if (runtime_same_nid(sz_name,table[i].nid)) {
+            g_runtime_last_stub=table[i].fn==(void *)runtime_stub;
             return (uintptr_t)table[i].fn;
         }
     return 0;

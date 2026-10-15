@@ -631,7 +631,7 @@ static const RuntimeExport exports[]={
     {"sceAjmBatchCancel",ajm_batch_cancel}, {"sceAjmBatchErrorDump",runtime_stub},
     {"sceAjmMemoryRegister",ajm_memory_register},
 };
-uintptr_t runtime_ajm_resolve(const char *name) { return RUNTIME_LOOKUP(exports,name); }
+uintptr_t runtime_ajm_resolve(const char *sz_name) { return RUNTIME_LOOKUP(exports,sz_name); }
 void runtime_ajm_report(void) {
     printf("Runtime: Ajm batches=%zu, jobs=%zu, frames decoded: ATRAC9=%zu, MP3=%zu, AAC=%zu, jobs with a codec error=%zu\n",
            batches_run,jobs_run,frames_decoded,mp3_frames,aac_frames,codec_errors);

@@ -211,4 +211,4 @@ static const RuntimeExport exports[]={
     {"scePlayGoGetInstallSpeed",playgo_get_speed}, {"scePlayGoSetInstallSpeed",playgo_set_speed},
     {"scePlayGoGetLanguageMask",playgo_get_language_mask}, {"scePlayGoSetLanguageMask",playgo_set_language_mask},
 };
-uintptr_t runtime_playgo_resolve(const char *name) { return RUNTIME_LOOKUP(exports,name); }
+uintptr_t runtime_playgo_resolve(const char *sz_name) { return RUNTIME_LOOKUP(exports,sz_name); }

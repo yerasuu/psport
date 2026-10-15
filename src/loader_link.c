@@ -226,20 +226,20 @@ static uint64_t load_size(const LoaderModule *p_module) {
     return cb_load;
 }
 static void module_segments(const LoaderModule *p_module, uint64_t base, RuntimeModule *p_out) {
-    p_out->segment_count = 0;
-    for (unsigned i = 0; i < p_module->phnum && p_out->segment_count < 4; ++i)
+    p_out->c_segments = 0;
+    for (unsigned i = 0; i < p_module->phnum && p_out->c_segments < 4; ++i)
         if (is_load(&p_module->p_ph[i]))
-            p_out->segments[p_out->segment_count++] = (RuntimeModuleSegment){base + p_module->p_ph[i].vaddr, p_module->p_ph[i].memsz, protection(p_module->p_ph[i].flags)};
+            p_out->segments[p_out->c_segments++] = (RuntimeModuleSegment){base + p_module->p_ph[i].vaddr, p_module->p_ph[i].memsz, protection(p_module->p_ph[i].flags)};
 }
 static int exported(const LoaderSymbol *p_symbol) {
     return p_symbol->section && (p_symbol->binding == 1 || p_symbol->binding == 2) && p_symbol->identity.is_valid && (p_symbol->type == 1 || p_symbol->type == 2);
 }
 static void add_export_entry(RuntimeModule *p_module, size_t *p_capacity, const LoaderSymbol *p_symbol, uint64_t va_export) {
-    p_module->exports = grow(p_module->exports, p_capacity, p_module->export_count, sizeof(*p_module->exports));
-    RuntimeModuleExport *p_module_export = &p_module->exports[p_module->export_count++];
-    memset(p_module_export->nid, 0, sizeof(p_module_export->nid));
-    memcpy(p_module_export->nid, p_symbol->identity.sz_nid, p_symbol->identity.nid_length < 16 ? p_symbol->identity.nid_length : 16);
-    p_module_export->address = va_export;
+    p_module->p_exports = grow(p_module->p_exports, p_capacity, p_module->c_exports, sizeof(*p_module->p_exports));
+    RuntimeModuleExport *p_module_export = &p_module->p_exports[p_module->c_exports++];
+    memset(p_module_export->sz_nid, 0, sizeof(p_module_export->sz_nid));
+    memcpy(p_module_export->sz_nid, p_symbol->identity.sz_nid, p_symbol->identity.nid_length < 16 ? p_symbol->identity.nid_length : 16);
+    p_module_export->va_export = va_export;
 }
 
 /* Rewrites initial-exec `mov rax, fs:[0]` to GS: glibc owns FS on Linux. */
@@ -573,11 +573,11 @@ static void link_module(Linker *p_linker, const char *sz_filename, LoaderModule 
     }
     *p_fs_patched += patch_fs_loads(p_image, p_module, base);
     if (strlen(sz_filename) >= 128) loader_fail("path too long");
-    strcpy(p_runtime_module->name, sz_filename);
+    strcpy(p_runtime_module->sz_name, sz_filename);
     uint64_t init = 0;
     loader_tag(p_module, 12, &init);
-    p_runtime_module->base = base; p_runtime_module->size = cb_load; p_runtime_module->init = base + init;
-    p_runtime_module->tls_address = p_tls ? base + p_tls->vaddr : 0;
+    p_runtime_module->base = base; p_runtime_module->cb_module = cb_load; p_runtime_module->init = base + init;
+    p_runtime_module->va_tls = p_tls ? base + p_tls->vaddr : 0;
     p_runtime_module->tls_memsz = p_tls ? p_tls->memsz : 0;
     p_runtime_module->tls_filesz = p_tls ? p_tls->filesz : 0;
     p_runtime_module->tls_module = module_id;
@@ -641,7 +641,7 @@ void loader_load_game(const LoaderOptions *p_options, LoaderImage *p_out) {
         p_table = grow(p_table, &c_table_capacity, c_linked, sizeof(*p_table));
         memset(&p_table[c_linked], 0, sizeof(*p_table));
         link_module(&l, l.module_names.pp_items[i_name], &p_linked[c_linked], &p_table[c_linked], base, &tls_module, &fs_patched);
-        base = (base + p_table[c_linked].size + 65535) & ~(uint64_t)65535;
+        base = (base + p_table[c_linked].cb_module + 65535) & ~(uint64_t)65535;
         ++c_linked;
         /* Linking a module can import a library only another bundled or system module provides. */
         link_wanted(&l);
@@ -680,7 +680,7 @@ void loader_load_game(const LoaderOptions *p_options, LoaderImage *p_out) {
     p_out->procparam = p_procparam->vaddr;
     if (!(p_out->p_all_modules = calloc(c_linked + 1, sizeof(*p_out->p_all_modules)))) loader_fail("allocation failed");
     RuntimeModule *p_eboot = &p_out->p_all_modules[0];
-    strcpy(p_eboot->name, "eboot.bin");
+    strcpy(p_eboot->sz_name, "eboot.bin");
     loader_eh_frame(&l.main, 0, p_eboot);
     module_segments(&l.main, 0, p_eboot);
     size_t c_export_capacity = 0;
@@ -692,7 +692,7 @@ void loader_load_game(const LoaderOptions *p_options, LoaderImage *p_out) {
 
     printf("Linked modules:");
     for (size_t i = 0; i < c_linked; ++i)
-        printf("%s %s@%#llx%s", i ? "," : "", p_table[i].name, (unsigned long long)p_table[i].base,
+        printf("%s %s@%#llx%s", i ? "," : "", p_table[i].sz_name, (unsigned long long)p_table[i].base,
                p_table[i].deferred ? " (loaded by the game)" : "");
     printf("; %llu native bindings, %zu imports left to the host runtime, fs->gs patched=%llu\n",
            (unsigned long long)p_out->c_bindings, unresolved, (unsigned long long)fs_patched);

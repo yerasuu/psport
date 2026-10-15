@@ -561,7 +561,7 @@ static const RuntimeExport exports[]={
     {"sceAudio3dAudioOutOpen",audio3d_audio_out_open}, {"sceAudio3dAudioOutClose",audio3d_audio_out_close},
     {"sceAudio3dAudioOutOutput",audio3d_audio_out_output}, {"sceAudio3dAudioOutOutputs",audio3d_audio_out_outputs},
 };
-uintptr_t runtime_audio3d_resolve(const char *name) { return RUNTIME_LOOKUP(exports,name); }
+uintptr_t runtime_audio3d_resolve(const char *sz_name) { return RUNTIME_LOOKUP(exports,sz_name); }
 void runtime_audio3d_report(void) {
     printf("Runtime: Audio3d ports opened=%zu, frames advanced=%zu, pushed=%zu, objects reserved=%zu, object frames placed=%zu, "
            "passed through=%zu, AudioOut buffers=%zu, attributes on unreserved objects=%zu\n",

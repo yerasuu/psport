@@ -488,7 +488,7 @@ static const RuntimeExport exports[]={
     {"sendmsg",posix_sendmsg}, {"recvmsg",posix_recvmsg}, {"setsockopt",posix_setsockopt}, {"getsockopt",posix_getsockopt},
     {"select",posix_select}, {"inet_pton",posix_inet_pton}, {"inet_ntop",posix_inet_ntop},
 };
-uintptr_t runtime_socket_resolve(const char *name) { return RUNTIME_LOOKUP(exports,name); }
+uintptr_t runtime_socket_resolve(const char *sz_name) { return RUNTIME_LOOKUP(exports,sz_name); }
 #else
 int32_t *runtime_net_errno(void) { static int32_t e; return &e; }
 uintptr_t runtime_socket_resolve(const char *name) { (void)name; return 0; }
