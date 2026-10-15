@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Steers a regress run toward the game's objective marker for a while: closed-loop pad input.
 
-    python3 tools/regress/follow.py RUNDIR SECONDS [--fight SECONDS] [--keep N]
+    python3 tools/regress/follow.py RUNDIR SECONDS [--fight SECONDS] [--shoot PIXELS] [--keep N]
 
 tools/regress.sh runs it for a schedule's `follow SECONDS [options]` line, with the run's folder.
 A fixed schedule replays a route by the clock, and a route through a level drifts off it within a
@@ -21,7 +21,13 @@ those turns away and walks off to find another way round.
 
 --fight N: every N seconds the pad aims (L2: the aim assist turns to the nearest enemy) and fires
 a burst, and every second time taps square to reload; right after holding square at an obstacle
-it aims and fires eight times, for the slowed time of a breached door. --keep N keeps every Nth
+it aims and fires eight times, for the slowed time of a breached door. --shoot PIXELS is for an
+objective drawn over an enemy ("Target" on a gunner the aim assist does not turn to): with the
+marker on screen the pad aims down the sights at PIXELS (of 1080 lines) below the marker nearest
+the crosshair, in pulses of the right stick sized to the distance, and fires once it is there
+instead of walking to it, tapping square every fourth shot to reload; the marker shows through
+rocks and wrecks, so after six shots that did not clear it the pad walks toward it for three
+seconds to see it from closer. --keep N keeps every Nth
 dump (default 10) as a record of the route; the others are deleted once read. Python's standard
 library only.
 """
@@ -114,17 +120,41 @@ def steer(points, width, height):
     return f'ly=0 rx={round(128 + (50 + abs(dx) * 22) * (1 if dx > 0 else -1))}', True
 
 
+def aim_at_marker(points, width, height, below):
+    """(dx, dy) in pixels from the crosshair to the spot `below` lines under the marker nearest
+    to it, or None without one on screen; the other markers' pixels are left out."""
+    if len(points) < ARROW_PIXELS:
+        return None
+    cx, cy = width / 2, height / 2
+    target_y = cy - below * height / 1080
+    nx, ny = min(points, key=lambda p: (p[0] - cx) ** 2 + (p[1] - target_y) ** 2)
+    radius = 80 * height / 1080
+    near = [p for p in points if abs(p[0] - nx) < radius and abs(p[1] - ny) < radius]
+    x, y = sum(p[0] for p in near) / len(near), sum(p[1] for p in near) / len(near)
+    return x - cx, y + below * height / 1080 - cy
+
+
+def pulse(run, held, stick, pixels, height):
+    # About 0.9 ms of full stick per pixel down the sights: shorter overshoots less than it falls
+    # short, and the next frame corrects it.
+    run.pad(f'{held} {stick}')
+    time.sleep(min(0.4, max(0.03, abs(pixels) * 1080 / height * 0.0009)))
+    run.pad(held)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split('\n', 1)[0])
     parser.add_argument('run')
     parser.add_argument('seconds', type=float)
     parser.add_argument('--fight', type=float, default=0)
+    parser.add_argument('--shoot', type=int, default=None, metavar='PIXELS')
     parser.add_argument('--keep', type=int, default=10)
     args = parser.parse_args()
     run = Run(args.run, max(1, args.keep))
     end = time.monotonic() + args.seconds
     last_fight = time.monotonic()
-    c_bursts = c_still = c_unstick = c_round = 0
+    c_bursts = c_still = c_unstick = c_round = c_shots = 0
+    walk_until = 0.0
     last_block = 0.0
     previous = None
     while time.monotonic() < end:
@@ -150,7 +180,33 @@ def main():
         if previous:
             change = sum(abs(a - b) for a, b in zip(current, previous)) / len(current)
         previous = current
-        tokens, walks = steer(list(marker_pixels(data, width)), width, height)
+        points = list(marker_pixels(data, width))
+        if args.shoot is not None and time.monotonic() >= walk_until:
+            offset = aim_at_marker(points, width, height, args.shoot)
+            if not offset:
+                c_shots = 0
+            elif c_shots >= 6:
+                c_shots, walk_until = 0, time.monotonic() + 3
+            else:
+                dx, dy = offset
+                if abs(dx) < 25 * height / 1080 and abs(dy) < 35 * height / 1080:
+                    run.pad('l2 r2')
+                    time.sleep(0.4)
+                    c_bursts += 1
+                    c_shots += 1
+                    run.pad('l2')
+                    if c_bursts % 4 == 0:
+                        run.pad('square')
+                        time.sleep(0.1)
+                        run.pad('l2')
+                elif abs(dx) >= 25 * height / 1080:
+                    pulse(run, 'l2', 'rx=255' if dx > 0 else 'rx=0', dx, height)
+                else:
+                    pulse(run, 'l2', 'ry=255' if dy > 0 else 'ry=0', dy * 1.3, height)
+                time.sleep(0.1)
+                previous = None
+                continue
+        tokens, walks = steer(points, width, height)
         c_still = c_still + 1 if walks and change < STILL else 0
         if c_still >= STILL_STEPS:
             c_still, previous = 0, None
