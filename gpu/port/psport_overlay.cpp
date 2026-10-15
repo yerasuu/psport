@@ -37,7 +37,7 @@ asm(".section .rodata\n"
 extern "C" const unsigned char psport_font_ttf[];
 extern "C" const unsigned char psport_font_ttf_end[];
 
-extern "C" void runtime_restart(void); // psport (probe.c)
+extern "C" void runtime_restart(void); // psport (src/runtime/runtime_restart.c)
 
 namespace PsOverlay {
 
