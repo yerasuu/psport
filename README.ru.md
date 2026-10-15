@@ -117,7 +117,7 @@ PS_GAME_DIR=/путь/к/дампу PS_SKIP_GAME_CHECK=1 PS_PERMISSIVE=1 bash ru
 | Путь | Содержимое |
 |---|---|
 | `src/` | Загрузчик (`probe.c`) и рантайм (`runtime_*.c`) |
-| `scripts/` | Подготовка образа игры, линковка модулей, проверка игры, компилятор патчей, моды |
+| `scripts/` | `online.py` — адреса для игры по сети, которые `run.sh` записывает при `PS_ONLINE=1` (единственный шаг запуска на Python), и `sce_file.py` для инструментов на Python |
 | `gpu/` | Библиотека рендера: видеоядро shadPS4 с изменениями bbport (`gpu/VENDOR.txt`), перенесённые библиотеки (`ngs2/`, `audiodec/`, `fiber/`, `font/`), оверлей и меню в игре (`shim/`), мост DLSS, сетевой модуль |
 | `launcher/`, `packaging/` | Лаунчер на GTK4 из апстрима; пакет Nix и скрипт AppImage |
 | `patches/` | Патчи сообщества для Bloodborne |
