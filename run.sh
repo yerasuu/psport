@@ -64,15 +64,6 @@ if [[ ${PS_SAVE_LOG:-} == 1 ]]; then
     # Bash builtins only (the AppImage's PATH has no tee).
     exec > >(while IFS= read -r line || [[ -n $line ]]; do printf '%s\n' "$line"; printf '%s\n' "$line" >&3; done) 2>&1
 fi
-if [[ -z ${PYTHON:-} ]]; then
-    PYTHON=$(command -v python3 || true)
-    if [[ -z $PYTHON ]]; then
-        for candidate in /nix/store/*-python3-*/bin/python3; do
-            if [[ -x $candidate ]]; then PYTHON=$candidate; break; fi
-        done
-    fi
-fi
-if [[ -z ${PYTHON:-} ]]; then echo 'Install Python 3 or set PYTHON.' >&2; exit 1; fi
 # PS_GAME_DIR: the game's folder (eboot.bin, sce_module, ...); default next to this directory.
 game=${PS_GAME_DIR:-../CUSA03173}
 if [[ ! -f $game/eboot.bin ]]; then echo "No eboot.bin in $game (set PS_GAME_DIR)." >&2; exit 1; fi
@@ -262,8 +253,18 @@ export PS_COPY_GPU_BUFFERS=${PS_COPY_GPU_BUFFERS:-1}
 # up to PS_GPU_WRITE_TWINS_MAX bytes per page) does not wait for the GPU (BufferCache twins).
 export PS_GPU_WRITE_TWINS=${PS_GPU_WRITE_TWINS:-1} PS_GPU_WRITE_TWINS_MAX=${PS_GPU_WRITE_TWINS_MAX:-65536}
 # Online play (PS_ONLINE=1, launcher: Online; the online module gpu/bbnet): the game's own server
-# goes to the community server, summon signs to the shadNet WebAPI (scripts/online.py).
+# goes to the community server, summon signs to the shadNet WebAPI (scripts/online.py, the one
+# step of a launch that still runs Python, and only for online play).
 if [[ ${PS_ONLINE:-0} == 1 && -f scripts/online.py ]]; then
+    if [[ -z ${PYTHON:-} ]]; then
+        PYTHON=$(command -v python3 || true)
+        if [[ -z $PYTHON ]]; then
+            for candidate in /nix/store/*-python3-*/bin/python3; do
+                if [[ -x $candidate ]]; then PYTHON=$candidate; break; fi
+            done
+        fi
+    fi
+    if [[ -z ${PYTHON:-} ]]; then echo 'Online play (PS_ONLINE=1) needs Python 3: install it or set PYTHON.' >&2; exit 1; fi
     export PS_SHADNET_SERVER=${PS_SHADNET_SERVER:-srv.shadps4.net:31313}
     # HTTPS needs CA certificates: OpenSSL from Nix looks only in its own store path (the
     # packaged wrapper brings a bundle; from source the system's is taken).
