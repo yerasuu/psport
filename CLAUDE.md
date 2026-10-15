@@ -22,6 +22,12 @@
   one game work before the general fix is a `WORKAROUND` quirk in its folder (see Code rules).
 - Nothing silent: an unimplemented, stubbed or failing call stays visible in the log and in the
   call report with its count. Logs are technical English.
+- The GPU path is cross-vendor Vulkan: the same code runs on AMD, NVIDIA and Intel (decision #361,
+  baseline Vulkan 1.3 with descriptor indexing and buffer device address). Use core Vulkan, KHR
+  extensions and EXT extensions the three vendors ship; choose by reported capability (limits,
+  memory types, ReBAR size, optional features), never by vendor id. A vendor or driver check is
+  allowed only as a `HOST` quirk for a driver defect, with its reason and reference; an
+  optimisation that needs an optional feature keeps a working path without it.
 
 ## Naming (C and C++)
 
