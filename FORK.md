@@ -38,6 +38,13 @@ The settings file is `psport.ini` and the GPU check `out/psport-gpu-capabilities
 `bbport.ini` but no `psport.ini`, `run.sh` copies it once (`psport: settings copied from bbport.ini
 to psport.ini`), and so does the launcher; `bbport.ini` itself is left for the older release.
 
+The inherited GTK launcher and the package are psport's too: `launcher/psport-launcher.sh` and
+`launcher/psport_*.py` (app id `io.github.psport.Launcher`, settings in
+`~/.config/psport-launcher/`, read from `~/.config/bbport-launcher/` until the first save), the
+Nix package `psport` with `bin/psport` and `bin/psport-game`, and the AppImage's data directory
+`~/.local/share/psport`. The package's wrappers move an existing `~/.local/share/bbport` there once,
+when `PS_DATA_DIR` is unset, and leave a link at the old path for an older AppImage.
+
 ## Ported components
 
 Code taken from other projects to move forward, each in its own directory. The first commit of each

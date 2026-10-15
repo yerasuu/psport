@@ -68,7 +68,7 @@ PS_GAME_DIR=/путь/к/дампу PS_SKIP_GAME_CHECK=1 PS_PERMISSIVE=1 bash ru
 возвращают 0, а не останавливают игру. `PS_SYS_MODULES=<папка>` по желанию подключает
 собственный дамп системных модулей (`*.sprx`) там, где у порта ещё нет своей библиотеки; из него
 ничего не распространяется. Сохранения и кэш шейдеров лежат в `user/`, настройки — в `psport.ini`.
-Лаунчер на GTK4 (`bash launcher/bb-launcher.sh`; `launcher/install-desktop.sh` добавляет его в меню
+Лаунчер на GTK4 (`bash launcher/psport-launcher.sh`; `launcher/install-desktop.sh` добавляет его в меню
 приложений) взят из апстрима и рассчитан на Bloodborne.
 
 ## Требования и сборка

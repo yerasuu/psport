@@ -4,8 +4,8 @@
 
 Picks the game folder, edits the port's settings (psport.ini: upscaler, preset, ...) and the
 start-up tweaks passed as environment variables to run.sh, starts and stops the game and shows
-its output. Launcher settings live in ~/.config/bbport-launcher/settings.json.
-Russian, English, Brazilian Portuguese and Simplified Chinese (bbport_i18n: the Russian
+its output. Launcher settings live in ~/.config/psport-launcher/settings.json.
+Russian, English, Brazilian Portuguese and Simplified Chinese (psport_i18n: the Russian
 text is the key).
 """
 
@@ -19,8 +19,8 @@ import threading
 import sys
 import time
 from pathlib import Path
-from bbport_assets import fsr411_problem
-from bbport_i18n import language, set_language, tr
+from psport_assets import fsr411_problem
+from psport_i18n import language, set_language, tr
 
 import gi
 
@@ -35,8 +35,10 @@ import online  # noqa: E402  (the online module: addresses and the connection te
 PACKAGED = bool(os.environ.get("PS_PREBUILT"))
 PSPORT = PORT_DIR / ("bin" if PACKAGED else "out") / "psport"
 DATA_DIR = Path(os.environ.get("PS_DATA_DIR", PORT_DIR))
-CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "bbport-launcher"
+CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "psport-launcher"
 CONFIG_FILE = CONFIG_DIR / "settings.json"
+# Before psport renamed it; read until the first save writes CONFIG_FILE.
+OLD_CONFIG_FILE = CONFIG_DIR.parent / "bbport-launcher" / "settings.json"
 MAX_LOG_LINES = 5000
 # The memory model (run.sh: PS_PC_MODEL): "auto" leaves it to the GPU (the new one on AMD, the
 # 0.3 one elsewhere), or either by hand. The new one goes through the layer's memory module on
@@ -68,7 +70,7 @@ FSR411_BUILD_ERRORS = {
         "GE-Proton 10+, Proton Experimental, Proton-CachyOS 11), либо DLL не включает FSR 4.1 на "
         "этой видеокарте (Steam Deck?): тогда соберите на ПК с Radeon RX 7000/9000 и скопируйте "
         "папку fsr4_411. Подробности в журнале"),
-    6: ("Записанные проходы не совпали с тем, что повторяет bbport (другая версия DLL или "
+    6: ("Записанные проходы не совпали с тем, что повторяет psport (другая версия DLL или "
         "новая видеокарта?): подробности в журнале"),
     7: "Не найден загрузчик FidelityFX 2.x",
     8: ("На NixOS запись идёт на самой системе (systemd --user) через umu-launcher из nix-shell, "
@@ -176,7 +178,8 @@ INI_DEFAULTS = {
 def load_settings():
     settings = dict(DEFAULTS)
     try:
-        settings.update(json.loads(CONFIG_FILE.read_text(encoding='utf-8')))
+        source = CONFIG_FILE if CONFIG_FILE.exists() else OLD_CONFIG_FILE
+        settings.update(json.loads(source.read_text(encoding='utf-8')))
     except (OSError, ValueError):
         pass
     return settings
@@ -193,7 +196,7 @@ def ini_path():
     if "PS_CONFIG" in os.environ:
         return Path(os.environ["PS_CONFIG"])
     path, older = DATA_DIR / "psport.ini", DATA_DIR / "bbport.ini"
-    # Settings an older release kept in psport.ini, copied once as run.sh does.
+    # Settings an older release kept in bbport.ini, copied once as run.sh does.
     if not path.exists() and older.is_file():
         shutil.copyfile(older, path)
     return path
@@ -1339,7 +1342,7 @@ class LauncherWindow(Adw.ApplicationWindow):
     def on_export_log(self, _button):
         text = self.log_text()
         dialog = Gtk.FileDialog(title=tr("Экспорт журнала"))
-        dialog.set_initial_name(f"bbport-{time.strftime('%Y%m%d_%H%M%S')}.log")
+        dialog.set_initial_name(f"psport-{time.strftime('%Y%m%d_%H%M%S')}.log")
 
         def finish(dialog, result):
             try:
@@ -1496,7 +1499,7 @@ class LauncherWindow(Adw.ApplicationWindow):
         else:
             text = tr("Нет: выберите libnvidia-ngx-dlss.so.* из DLSS SDK NVIDIA ({})").format(DLSS_SDK_URL)
         if not bridge:
-            text += "\n" + tr("Эта сборка без моста DLSS (libbbport_dlss.so): DLSS работать не будет")
+            text += "\n" + tr("Эта сборка без моста DLSS (libpsport_dlss.so): DLSS работать не будет")
         self.dlss_row.set_subtitle(text)
         self.dlss_reset_button.set_sensitive(bool(own))
         if hasattr(self, "sharpness_row"):  # built after this row
@@ -1608,7 +1611,7 @@ class LauncherWindow(Adw.ApplicationWindow):
             else:
                 models = ", ".join(details.get("models", [])) or tr("нет")
                 body = tr(
-                    "{}: версия {}, модели FSR 4: {}.\n\nbbport повторяет только официальную FSR 4.1.x "
+                    "{}: версия {}, модели FSR 4: {}.\n\npsport повторяет только официальную FSR 4.1.x "
                     "от AMD (модель v07_fp8_no_scale): например, FSR4_LATEST из OptiScaler или "
                     "amd_fidelityfx_upscaler_dx12.dll из игры с FSR 4.1. Сборки сообщества (4.0.2b и "
                     "подобные) устроены иначе и пока не поддерживаются.").format(
@@ -1709,7 +1712,7 @@ class LauncherWindow(Adw.ApplicationWindow):
 
 class LauncherApp(Adw.Application):
     def __init__(self):
-        super().__init__(application_id="io.github.bbport.Launcher",
+        super().__init__(application_id="io.github.psport.Launcher",
                          flags=Gio.ApplicationFlags.DEFAULT_FLAGS)
 
     def do_activate(self):
@@ -1721,7 +1724,7 @@ def play():
     """--play: the game with the saved settings, no window (Steam Deck game mode)."""
     settings = load_settings()
     if not (Path(settings["game_dir"]).expanduser() / "eboot.bin").is_file():
-        print("bbport: choose the game folder in the launcher first", file=sys.stderr)
+        print("psport: choose the game folder in the launcher first", file=sys.stderr)
         return 1
     os.chdir(PORT_DIR)
     os.execvpe("bash", ["bash", str(PORT_DIR / "run.sh")], game_environment(settings))

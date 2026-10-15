@@ -77,7 +77,7 @@ PS_GAME_DIR=/path/to/dump PS_PERMISSIVE=1 bash run.sh
 instead of stopping. `PS_SYS_MODULES=<folder>` optionally links the user's own dump of system
 modules (`*.sprx`) where the port has no library yet; nothing from it is shipped. Saves and the
 shader cache go to `user/`, settings to `psport.ini`. The GTK4 launcher
-(`bash launcher/bb-launcher.sh`; `launcher/install-desktop.sh` adds it to the app menu) is
+(`bash launcher/psport-launcher.sh`; `launcher/install-desktop.sh` adds it to the app menu) is
 upstream's and built around Bloodborne.
 
 ## Requirements and building

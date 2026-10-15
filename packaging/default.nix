@@ -1,6 +1,6 @@
 # Packaged port: the prebuilt game binaries (build.sh first), the start-up scripts and the GTK4
 # launcher, with their whole Nix closure and Mesa's Vulkan drivers. `bash packaging/appimage.sh`
-# turns it into an AppImage (Steam Deck); `nix-build packaging` alone gives result/bin/bbport.
+# turns it into an AppImage (Steam Deck); `nix-build packaging` alone gives result/bin/psport.
 { pkgs ? import <nixpkgs> { }
   # Store paths the prebuilt binaries load libraries from (their RUNPATHs), written by
   # appimage.sh. Nix only finds references to its inputs, and the binaries were built outside.
@@ -24,7 +24,7 @@ let
   dlssFiles = [ "out/libpsport_dlss.so" "out/NVIDIA-DLSS-LICENSE.txt" "out/gpu/libpsport-net.so" ];
   isNgx = rel: lib.hasPrefix "out/libnvidia-ngx-dlss.so." rel;
   src = builtins.path {
-    name = "bbport-src";
+    name = "psport-src";
     path = root;
     filter = path: type:
       let rel = lib.removePrefix (toString root + "/") (toString path);
@@ -57,7 +57,7 @@ let
     x86_64-w64-mingw32-gcc -std=c11 -O1 -Wall -I$f/ffx/api/include -I$f/ffx/upscalers/include \
       $f/fsr4cap.c $f/capture.c $f/rootsig.c -o $out -ld3d12 -ldxguid -static
   '';
-  # Mesa's Vulkan drivers come with the package (RADV and ANV); bbport_vulkan.py adds the host
+  # Mesa's Vulkan drivers come with the package (RADV and ANV); psport_vulkan.py adds the host
   # NVIDIA ICD and only its vendor libraries (matching the host's kernel module). Only the two
   # drivers, not the whole Mesa: its OpenGL drivers and LLVM were ~800 MB of the package. RADV
   # without LLVM (it compiles with ACO; LLVM was only an optional backend); the drivers' one
@@ -70,7 +70,7 @@ let
   }).overrideAttrs (old: {
     mesonFlags = old.mesonFlags ++ [ "-Damd-use-llvm=false" ];
   });
-  vulkanDrivers = pkgs.runCommand "bbport-vulkan-drivers" {
+  vulkanDrivers = pkgs.runCommand "psport-vulkan-drivers" {
     nativeBuildInputs = [ pkgs.removeReferencesTo pkgs.jq ];
   } ''
     mkdir -p $out/lib $out/share/vulkan/icd.d
@@ -109,7 +109,7 @@ let
   # Fonts: bundled DejaVu and Adwaita plus the host's usual font directories, but not the host's
   # /etc/fonts: on NixOS it names fonts in the host's /nix/store, which the AppImage hides behind
   # its own store in some environments (Steam's FHS sandbox), and the launcher showed boxes.
-  fontsConf = pkgs.writeText "bbport-fonts.conf" ''
+  fontsConf = pkgs.writeText "psport-fonts.conf" ''
     <?xml version="1.0"?>
     <!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">
     <fontconfig>
@@ -118,10 +118,13 @@ let
       <dir>/usr/share/fonts</dir>
       <dir>/usr/local/share/fonts</dir>
       <dir prefix="xdg">fonts</dir>
-      <cachedir prefix="xdg">bbport/fontconfig</cachedir>
+      <cachedir prefix="xdg">psport/fontconfig</cachedir>
       <include ignore_missing="yes">${pkgs.fontconfig.out}/etc/fonts/conf.d</include>
     </fontconfig>
   '';
+  # The data directory, ~/.local/share/bbport before psport renamed it: moved once, with a link
+  # left at the old path so an older AppImage still finds its saves and settings.
+  dataDir = "share=\${XDG_DATA_HOME:-$HOME/.local/share}; if [ -z \"\${PS_DATA_DIR:-}\" ] && [ ! -e \"$share/psport\" ] && [ -d \"$share/bbport\" ] && [ ! -L \"$share/bbport\" ]; then mv \"$share/bbport\" \"$share/psport\" && ln -s psport \"$share/bbport\" && echo \"psport: data moved from $share/bbport to $share/psport\"; fi; export PS_DATA_DIR=\${PS_DATA_DIR:-$share/psport}; mkdir -p \"$PS_DATA_DIR\"";
   # Environment the closure needs on any host: icon themes, SVG icon loader, fonts (above) and
   # a UTF-8 locale built into glibc.
   common = ''
@@ -135,7 +138,7 @@ let
   '';
 in
 pkgs.stdenv.mkDerivation {
-  pname = "bbport";
+  pname = "psport";
   version = "0.1";
   inherit src;
   # The hook adds its GTK to the wrapper (typelibs, schemas): ours, not nixpkgs' with GStreamer.
@@ -146,14 +149,14 @@ pkgs.stdenv.mkDerivation {
   dontConfigure = true;
   # The binaries live under share/ (next to the scripts run.sh expects): strip them too, which
   # also drops the compiler and header paths their debug info would keep in the closure.
-  stripDebugList = [ "share/bbport/bin/gpu" ];
+  stripDebugList = [ "share/psport/bin/gpu" ];
   # patchelf (RPATH shrinking) corrupts the non-PIE game binary's symbol versions; it finds
   # its library through $ORIGIN/gpu and its other libraries through the build's RUNPATH.
   dontPatchELF = true;
   dontWrapGApps = true; # wrapped once below, together with the launcher's own variables
   installPhase = ''
     runHook preInstall
-    d=$out/share/bbport
+    d=$out/share/psport
     mkdir -p $d/bin $out/bin
     cp run.sh $d/
     cp -r scripts patches fsr4_shaders launcher $d/
@@ -164,13 +167,13 @@ pkgs.stdenv.mkDerivation {
     ln -s ${dxilSpirv}/bin/dxil-spirv $d/tools/fsr4cap/bin/dxil-spirv
     install -m644 ${fsr4capExe} $d/tools/fsr4cap/bin/fsr4cap.exe
     # FSR 4.1.1 models only with PS_PACKAGE_FSR411=1 (see above); otherwise run.sh finds them in
-    # the data directory (~/.local/share/bbport/fsr4_411).
+    # the data directory (~/.local/share/psport/fsr4_411).
     if [ -d fsr4_411 ]; then
       ${pkgs.python3}/bin/python3 - <<'PY'
     import sys
     from pathlib import Path
     sys.path.insert(0, 'launcher')
-    from bbport_assets import fsr411_problem
+    from psport_assets import fsr411_problem
     for output in ('1920x1080', '3840x2160'):
         for preset in (0, 4):
             problem = fsr411_problem(Path('fsr4_411'), output, preset)
@@ -199,29 +202,29 @@ pkgs.stdenv.mkDerivation {
     runHook postInstall
   '';
   postFixup = ''
-    # bin/bbport is a static program (bbport-entry.c) that clears the host's LD_PRELOAD (Steam's
+    # bin/psport is a static program (psport-entry.c) that clears the host's LD_PRELOAD (Steam's
     # overlay) and similar before the wrapper's own dynamic programs start.
     mkdir -p $out/libexec
-    gcc -O2 -Wall -Werror -static -L${pkgs.glibc.static}/lib -DTARGET="\"$out/libexec/bbport\"" \
-      ${./bbport-entry.c} -o $out/bin/bbport
-    makeShellWrapper ${python}/bin/python3 $out/libexec/bbport \
+    gcc -O2 -Wall -Werror -static -L${pkgs.glibc.static}/lib -DTARGET="\"$out/libexec/psport\"" \
+      ${./psport-entry.c} -o $out/bin/psport
+    makeShellWrapper ${python}/bin/python3 $out/libexec/psport \
       "''${gappsWrapperArgs[@]}" \
-      ${common}      --add-flags "$out/share/bbport/launcher/bbport_vulkan.py ${python}/bin/python3 $out/share/bbport/launcher/bbport_launcher.py" \
+      ${common}      --add-flags "$out/share/psport/launcher/psport_vulkan.py ${python}/bin/python3 $out/share/psport/launcher/psport_launcher.py" \
       --set PS_PREBUILT 1 \
       --set PYTHON ${pkgs.python3}/bin/python3 \
       --set PS_BUNDLED_VK_DRIVER_FILES ${icds} \
       --prefix PATH : ${lib.makeBinPath [ pkgs.bash pkgs.coreutils pkgs.util-linux pkgs.procps
                                           pkgs.gawk pkgs.gnused pkgs.gnugrep pkgs.spirv-tools
                                           pkgs.systemdMinimal ]} \
-      --run 'export PS_DATA_DIR=''${PS_DATA_DIR:-''${XDG_DATA_HOME:-$HOME/.local/share}/bbport}; mkdir -p "$PS_DATA_DIR"'
+      --run '${dataDir}'
     # The game alone, without the launcher (settings from the data directory's psport.ini).
-    makeShellWrapper ${pkgs.python3}/bin/python3 $out/bin/bbport-game \
-      ${common}      --add-flags "$out/share/bbport/launcher/bbport_vulkan.py ${pkgs.bash}/bin/bash $out/share/bbport/run.sh" \
+    makeShellWrapper ${pkgs.python3}/bin/python3 $out/bin/psport-game \
+      ${common}      --add-flags "$out/share/psport/launcher/psport_vulkan.py ${pkgs.bash}/bin/bash $out/share/psport/run.sh" \
       --set PS_PREBUILT 1 \
       --set PYTHON ${pkgs.python3}/bin/python3 \
       --set PS_BUNDLED_VK_DRIVER_FILES ${icds} \
       --prefix PATH : ${lib.makeBinPath [ pkgs.bash pkgs.coreutils pkgs.procps ]} \
-      --run 'export PS_DATA_DIR=''${PS_DATA_DIR:-''${XDG_DATA_HOME:-$HOME/.local/share}/bbport}; mkdir -p "$PS_DATA_DIR"'
+      --run '${dataDir}'
   '';
-  meta.mainProgram = "bbport";
+  meta.mainProgram = "psport";
 }

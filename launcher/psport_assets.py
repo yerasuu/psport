@@ -1,6 +1,6 @@
 """Availability of the FSR 4.1.1 model required by a selected output/preset."""
 from pathlib import Path
-from bbport_i18n import tr
+from psport_i18n import tr
 
 
 def fsr411_problem(directory: Path, output: str, preset: int) -> str | None:
