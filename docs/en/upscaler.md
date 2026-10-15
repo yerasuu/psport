@@ -109,7 +109,8 @@ Signature: `[0]=3000 (far) [1]=1/3000 [4]=1920 [5]=1080 [6]=1/1920 [7]=1/1080`.
 | 112–175 | shadow cascade matrices |
 | 180–191 | inverse view (camera to world), 3x4 (176–179: 2, 8, 15, 0) |
 
-The previous frame's matrices are not there; the port keeps them itself.
+The previous frame's matrices are not there; the port keeps them itself. Bloodborne's profile hands
+this layout to the core (`Game::CameraConstants` in `upscaler.camera`); a game without it has no camera.
 
 ## Plan
 

@@ -245,7 +245,7 @@ kept out of the core. `Game::Select` picks a profile by `param.sfo` `TITLE_ID` i
 | `frame_overlap_unsafe` | tells the core to stop `PS_SUBMIT_AHEAD` overlap for the session |
 | `c_submits_ahead` | the frame overlap the game takes when `PS_SUBMIT_AHEAD` is unset |
 | `anisotropy` | anisotropic filtering forced on its textures when `PS_ANISO` is unset |
-| `upscaler` | where the temporal upscaler goes in its frame (scene combine and UI shaders); without it the upscaler stays off |
+| `upscaler` | where the temporal upscaler goes in its frame (scene combine and UI shaders), its scene constants (camera) and bone palettes (object motion); without it the upscaler stays off |
 | `report_stats`, `before_present` | profile diagnostics; per-frame work on the presenter thread |
 | `label_release` | the game's label release code, for the free check's `PS_LABEL_TRAP=2` |
 | `small_object_pool` | the layout of the pool holding its GPU labels, for the free check (`PS_FREE_CHECK`) |

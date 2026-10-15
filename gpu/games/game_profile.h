@@ -39,6 +39,41 @@ struct SmallObjectPool {
     std::uint64_t block_size = 0;
 };
 
+/// The scene constants the camera motion vectors come from: a vertex shader constant buffer
+/// (stride 16) of the G-buffer draws, told apart from the game's other buffers of its size by the
+/// far plane and its reciprocal. Offsets are in floats from the buffer's start; every value read
+/// must lie inside cb_constants. Zeros when unknown: the upscaler never has a camera and passes
+/// the scene through at its own resolution.
+struct CameraConstants {
+    std::uint32_t cb_constants = 0;
+    /// The far plane at off_dw_far, its reciprocal in the next float.
+    float far_plane = 0;
+    std::uint32_t off_dw_far = 0;
+    /// The scene's render width and height, two floats.
+    std::uint32_t off_dw_render_size = 0;
+    /// World to view, 3x4 rows.
+    std::uint32_t off_dw_view = 0;
+    /// The inverse of the view, 3x4 rows (PS_CAMERA_INVERSE=own computes it instead).
+    std::uint32_t off_dw_inverse_view = 0;
+    /// The projection, 4x4 rows: x scale at +0, y scale at +5, z scale at +10 and z offset at +11
+    /// (depth = z scale + z offset / view z).
+    std::uint32_t off_dw_projection = 0;
+};
+
+/// The vertex shader constant buffers (stride 16) holding bone palettes of 3x4 matrices, cb_bone
+/// bytes each, which give a draw object motion vectors. A buffer from cb_min_skeleton to
+/// cb_max_skeleton bytes is a character's skeleton: its draws always keep a vertex history. A
+/// multiple of cb_bone from cb_min_small_skeleton up to cb_min_skeleton is a small one (weapons
+/// and props, but also static pieces): its draws keep one only while the palette changes. The
+/// camera constants' size is never a palette. Zeros when unknown: no draw gets object motion, and
+/// the upscaler has the camera's alone.
+struct BonePalettes {
+    std::uint32_t cb_bone = 0;
+    std::uint32_t cb_min_small_skeleton = 0;
+    std::uint32_t cb_min_skeleton = 0;
+    std::uint32_t cb_max_skeleton = 0;
+};
+
 /// Where the temporal upscaler goes in the game's frame (docs/en/upscaler.md): it upscales the
 /// scene color right before the first dispatch of scene_combine_shader, and the frame's UI starts
 /// with the first draw of ui_shader (GCN program hashes). The upscaler, its jitter and the camera
@@ -46,6 +81,11 @@ struct SmallObjectPool {
 struct UpscalerPlacement {
     std::uint64_t scene_combine_shader = 0;
     std::uint64_t ui_shader = 0;
+    /// Vertex shaders of the UI's draws (ui_shader is one even when not listed): when the scene is
+    /// rendered below the output size, their draws go to the output-size UI instead.
+    std::span<const std::uint64_t> ui_movie_shaders;
+    CameraConstants camera;
+    BonePalettes bone_palettes;
 };
 
 /// What the core offers a profile's hooks.
@@ -134,7 +174,7 @@ inline std::uint32_t Anisotropy() {
     return profile ? profile->anisotropy : 0;
 }
 
-/// The active profile's upscaler placement, or zeros.
+/// The active profile's upscaler placement and motion data, or zeros.
 inline UpscalerPlacement Upscaler() {
     const Profile* profile = Active();
     return profile ? profile->upscaler : UpscalerPlacement{};

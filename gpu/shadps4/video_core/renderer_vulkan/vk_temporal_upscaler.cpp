@@ -185,7 +185,7 @@ void DumpFinalFrameIfDue(const Instance& instance, Scheduler& scheduler, vk::Com
                {{image, width, height, 4, "final", ColorDumpLayout(format)}});
 }
 
-Game::UpscalerPlacement GetUpscalerPlacement() {
+const Game::UpscalerPlacement& GetUpscalerPlacement() {
     static const Game::UpscalerPlacement placement = [] {
         Game::UpscalerPlacement found = Game::Upscaler();
         if (const char* hash = std::getenv("PS_UPSCALE_BEFORE_CS")) {
@@ -1524,7 +1524,9 @@ void TemporalUpscaler::OnDraw(u64 vs_hash, VideoCore::ImageId color,
         return;
     }
     const auto& image = texture_cache.GetImage(color);
-    const bool movie = vs_hash == ui_trigger_vs || UiComposition::MovieShader(vs_hash) ||
+    const auto& movie_shaders = GetUpscalerPlacement().ui_movie_shaders;
+    const bool movie = vs_hash == ui_trigger_vs ||
+                       std::ranges::find(movie_shaders, vs_hash) != movie_shaders.end() ||
                        (scaled_session && native_viewport);
     if (ui_trace_on && ui_trace.size() < 1500) {
         ui_trace += fmt::format(" [vs {:x} {}x{} fmt {} movie {} display {}]", vs_hash,

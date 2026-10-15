@@ -10,6 +10,8 @@
 #include <utility>
 #include <vector>
 
+#include "game_profile.h"
+
 namespace Vulkan::Motion {
 
 struct VertexRange {
@@ -36,18 +38,20 @@ VertexRange IndexedRange(std::span<const Index, Extent> indices, int32_t base_ve
     return {uint32_t(int64_t(lo) + base_vertex), hi - lo + 1};
 }
 
-// Vertex shader constant buffers (stride 16) of Bloodborne's G-buffer shaders: the 864-byte
-// scene constants (camera), 416-byte model constants and palettes of 3x4 bone matrices
-// (48 bytes per bone). Characters have 656+ bytes; weapons and props 2-8 bones (96-384).
+// A vertex shader constant buffer (stride 16) of a G-buffer draw by its size, as the game
+// profile describes its bone palettes (Game::BonePalettes).
 enum class BufferRole { Other, Skeleton, SmallSkeleton };
-inline BufferRole ClassifyBuffer(uint32_t size) {
-    if (size == 864 || size > 16384) {
+inline BufferRole ClassifyBuffer(uint32_t size, const Game::UpscalerPlacement& placement) {
+    const auto& palettes = placement.bone_palettes;
+    if (!palettes.cb_bone || size == placement.camera.cb_constants ||
+        size > palettes.cb_max_skeleton) {
         return BufferRole::Other;
     }
-    if (size >= 640) {
+    if (size >= palettes.cb_min_skeleton) {
         return BufferRole::Skeleton;
     }
-    return size >= 96 && size % 48 == 0 ? BufferRole::SmallSkeleton : BufferRole::Other;
+    return size >= palettes.cb_min_small_skeleton && size % palettes.cb_bone == 0
+        ? BufferRole::SmallSkeleton : BufferRole::Other;
 }
 
 // Scanning and hashing the index list of every stored draw each frame took ~10% of the GPU

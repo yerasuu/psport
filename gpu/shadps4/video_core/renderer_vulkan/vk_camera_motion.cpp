@@ -74,7 +74,8 @@ std::array<float, 12> InverseAffine(const std::array<float, 12>& m) {
 
 CameraMotion::CameraMotion(const Instance& instance_, Scheduler& scheduler_,
                            VideoCore::TextureCache& texture_cache_, Runtime& runtime_)
-    : instance{instance_}, scheduler{scheduler_}, texture_cache{texture_cache_}, runtime{runtime_} {
+    : instance{instance_}, scheduler{scheduler_}, texture_cache{texture_cache_}, runtime{runtime_},
+      m_constants{GetUpscalerPlacement().camera} {
     const char* env = std::getenv("PS_DEBUG_MOTION");
     debug_overlay = env && env[0] == '1';
     // The upscaler can be switched on from the menu at any time: the camera is always tracked
@@ -264,9 +265,10 @@ void CameraMotion::RecordMotion(vk::ImageView depth_view, vk::ImageView motion_v
 }
 
 void CameraMotion::OnConstants(const float* data) {
-    // Scene constants: far plane 3000, 1/far, and the render size.
-    if (data[0] != 3000.0f || data[4] < 64.0f || data[5] < 64.0f ||
-        std::abs(data[1] * data[0] - 1.0f) > 1e-3f) {
+    const float* p_far = data + m_constants.off_dw_far;
+    const float* p_render_size = data + m_constants.off_dw_render_size;
+    if (p_far[0] != m_constants.far_plane || p_render_size[0] < 64.0f || p_render_size[1] < 64.0f ||
+        std::abs(p_far[1] * p_far[0] - 1.0f) > 1e-3f) {
         return;
     }
     // bbport: the first constants of each G-buffer pass are its camera. A frame may have more
@@ -275,8 +277,8 @@ void CameraMotion::OnConstants(const float* data) {
     if (pass_has_camera) {
         return;
     }
-    std::memcpy(pass_camera.view.data(), data + 8, 12 * sizeof(float));
-    std::memcpy(pass_camera.inv_view.data(), data + 180, 12 * sizeof(float));
+    std::memcpy(pass_camera.view.data(), data + m_constants.off_dw_view, 12 * sizeof(float));
+    std::memcpy(pass_camera.inv_view.data(), data + m_constants.off_dw_inverse_view, 12 * sizeof(float));
     // bbport: PS_CAMERA_INVERSE=own: the inverse of the view matrix itself instead of the one the
     // game stores beside it (A/B; they agree to float precision). PS_CAMERA_LOG prints the gap.
     static const bool own_inverse = [] {
@@ -317,24 +319,25 @@ void CameraMotion::OnConstants(const float* data) {
     }();
     const float y_sign = (forced_y != 0.0f ? forced_y : gbuffer_y_sign) *
                          (BbToggle::Disabled(BbToggle::CameraYFlip) ? -1.0f : 1.0f);
-    pass_camera.proj = {data[52] * gbuffer_x_sign, data[57] * y_sign,
-                    data[62], data[63]};
+    const float* p_projection = data + m_constants.off_dw_projection;
+    pass_camera.proj = {p_projection[0] * gbuffer_x_sign, p_projection[5] * y_sign, p_projection[10],
+                        p_projection[11]};
     {
         // bbport: the projection's y scale sign, printed when it changes (see the G-buffer
         // viewport line): which way view +y goes on the screen.
         static int last_sign = 0;
-        const int sign = (data[57] < 0.0f ? -2 : 2) + (gbuffer_y_sign < 0.0f ? -1 : 1);
+        const int sign = (p_projection[5] < 0.0f ? -2 : 2) + (gbuffer_y_sign < 0.0f ? -1 : 1);
         if (sign != last_sign) {
             last_sign = sign;
             std::printf("Camera motion: projection x %.4f y %.4f z %.6f %.6f, G-buffer viewport y "
                         "%s: screen y follows view %s\n",
-                        data[52], data[57], data[62], data[63],
+                        p_projection[0], p_projection[5], p_projection[10], p_projection[11],
                         gbuffer_y_sign < 0.0f ? "flipped" : "not flipped",
                         pass_camera.proj[1] < 0.0f ? "-y" : "+y");
         }
     }
     pass_camera.valid = pass_camera.proj[0] != 0.0f && pass_camera.proj[1] != 0.0f;
-    const std::array<u32, 2> size{u32(data[4]), u32(data[5])};
+    const std::array<u32, 2> size{u32(p_render_size[0]), u32(p_render_size[1])};
     if (size != render_size) {
         std::printf("Camera motion: scene render size %ux%u\n", size[0], size[1]);
         render_size = size;
