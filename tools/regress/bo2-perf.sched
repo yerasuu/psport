@@ -1,0 +1,47 @@
+# Black Ops II frame rate in play, with -u from a run of bo2-play.sched (its save at Pyrrhic Victory's
+# mortar crews checkpoint) and PS_FRAME_STATS=1: bo2-load.sched's way in (past the title, Resume Story
+# and Yes, the briefing videos skipped by a cross every 8 s; play resumes at about 170 s), then 60 s of
+# the same strafing left and right while aiming, without firing so that the scene stays alike from run
+# to run. The frame rate is the mean of the last 10 'Frame stats' lines (182-232 s, all in play).
+60 shot
+110 shot
+112 press cross
+120 press cross
+128 press cross
+136 press cross
+144 press cross
+152 press cross
+160 press cross
+166 shot
+172 shot
+174 press lx=0+l2 1.5
+176 press lx=255+l2 1.5
+178 press lx=0+l2 1.5
+180 press lx=255+l2 1.5
+180 shot
+182 press lx=0+l2 1.5
+184 press lx=255+l2 1.5
+186 press lx=0+l2 1.5
+188 press lx=255+l2 1.5
+190 press lx=0+l2 1.5
+192 press lx=255+l2 1.5
+194 press lx=0+l2 1.5
+196 press lx=255+l2 1.5
+198 press lx=0+l2 1.5
+200 press lx=255+l2 1.5
+202 press lx=0+l2 1.5
+204 press lx=255+l2 1.5
+206 press lx=0+l2 1.5
+208 press lx=255+l2 1.5
+210 press lx=0+l2 1.5
+212 press lx=255+l2 1.5
+214 press lx=0+l2 1.5
+216 press lx=255+l2 1.5
+218 press lx=0+l2 1.5
+220 press lx=255+l2 1.5
+222 press lx=0+l2 1.5
+224 press lx=255+l2 1.5
+226 press lx=0+l2 1.5
+228 press lx=255+l2 1.5
+230 shot
+232 end

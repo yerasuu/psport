@@ -1,2 +1,12 @@
 # tools/regress.sh titles (format of titles.txt) whose schedules measure the frame rate in play.
+# Each runs with -u from a seed folder and PS_FRAME_STATS=1; one folder can hold every title's seed,
+# and a title without one in it starts from a fresh user folder:
+#   bloodborne  <folder>/bloodborne/user: a copy of a Bloodborne save (bloodborne-perf.sched)
+#   bo2         <folder>/bo2/user: the user folder of a bo2-play.sched run, saved at the mortar crews
+#               checkpoint (bo2-perf.sched)
+#   ryza        none: ryza-perf.sched plays from New Game
+# Run alone on the machine: tools/regress.sh -j 1 -t tools/regress/perf.txt -u <folder> <games root>
+# (tools/regress/night.sh does it, base and branch in turn).
 bloodborne  CUSA03173  CUSA03173_UNIFIED                         bloodborne-perf.sched  -
+bo2         CUSA57548  UP0002-CUSA57548_00-CODBO2GAME000001      bo2-perf.sched         PS_PERMISSIVE=1 PS_SYS_MODULES=$SYS_MODULES
+ryza        CUSA16458  UP4108-CUSA16458_00-RYZA000000MASTER      ryza-perf.sched        PS_PERMISSIVE=1 PS_SYS_MODULES=$SYS_MODULES

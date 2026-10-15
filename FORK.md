@@ -493,7 +493,9 @@ so a count that keeps growing means the game is stalled on the GPU. The table go
 (`tools/regress/report.py <folder>` classifies a folder again). With `-u`, each title's user folder
 (saves and settings) starts as a copy of its own in that earlier output folder, so a run can load
 what an earlier one saved. `-t tools/regress/perf.txt` runs the titles whose schedules measure the
-frame rate in play (`bloodborne-perf.sched`, from a save given with `-u`; run alone on the machine).
+frame rate in play (`bloodborne-perf.sched` from a save, `bo2-perf.sched` from a `bo2-play.sched`
+run's user folder, both given with `-u`, and `ryza-perf.sched` from New Game; perf.txt says what each
+seed is; run alone on the machine, `-j 1`).
 With `-c`, a milestone lost or a crash signature that is new or different is a regression: it is
 listed and the exit status is 1. The `no impl` and `forced` columns show their change against the
 earlier run without counting it as a regression (blank in an earlier file that predates `forced` or
@@ -503,6 +505,21 @@ earlier run without counting it as a regression (blank in an earlier file that p
 with perf (flame graph, functions by self time, Tracy zones with `-z`); `tools/profile/compare.sh`
 does it for two builds and reports what moved. Both run games, so they belong to the night session:
 [docs/en/PROFILING.md](docs/en/PROFILING.md).
+
+`report.py` also keeps, per title, `perf` (the means of the last 10 `Frame stats` lines: FPS, stage B
+us/draw and busy share, GPU busy ms/frame) and `census` (the `CP census:` block), with a table of each
+when a run printed them; both are null for older runs. `--compare-shots <base folder>` compares each
+present dump with the base run's dump taken for the same schedule second (found from the dump's time
+since the run started; by order when the schedule is gone): PSNR over RGB and the largest channel
+difference, 99 dB for identical dumps, into `shots_compare.tsv` and `shots_vs_base` in results.json;
+those under `--psnr-min` (default 25 dB) are listed as `SHOT` lines but are no regression, since
+animation and timing alone move a frame between two runs of the same build (13 titles: about 15 s).
+
+`tools/regress/night.sh [-r <base regress folder>] [-u <perf seed folder>] <base checkout> <branch
+checkout> <games root>` is the night order for a branch: regress of every title but octopath0 with
+`PS_CP_CENSUS=1` against the base, then perf.txt with `PS_FRAME_STATS=1` on base and branch in turn,
+twice, then the shot comparison, and a summary table in `summary.txt` (regressions and shots per
+title; FPS of each perf run, the branch against the base, stage B and GPU busy).
 
 ## CI and binary cache
 
