@@ -15,17 +15,17 @@
 namespace Vulkan::Motion {
 
 struct VertexRange {
-    uint32_t first{}, count{};
+    uint32_t i_first{}, c_vertices{};
     bool operator==(const VertexRange&) const = default;
 };
 
 // Reserve only the vertices referenced by this draw, not the whole shared vertex buffer.
 // Primitive restart markers are not vertex shader invocations. Reject signed overflow.
 template <class Index, size_t Extent>
-VertexRange IndexedRange(std::span<const Index, Extent> indices, int32_t base_vertex, bool restart) {
+VertexRange IndexedRange(std::span<const Index, Extent> indices, int32_t base_vertex, bool is_restart_enabled) {
     uint32_t lo = UINT32_MAX, hi = 0;
     for (const auto index : indices) {
-        if (restart && index == std::numeric_limits<Index>::max()) {
+        if (is_restart_enabled && index == std::numeric_limits<Index>::max()) {
             continue;
         }
         lo = std::min(lo, uint32_t(index));
@@ -41,16 +41,16 @@ VertexRange IndexedRange(std::span<const Index, Extent> indices, int32_t base_ve
 // A vertex shader constant buffer (stride 16) of a G-buffer draw by its size, as the game
 // profile describes its bone palettes (Game::BonePalettes).
 enum class BufferRole { Other, Skeleton, SmallSkeleton };
-inline BufferRole ClassifyBuffer(uint32_t size, const Game::UpscalerPlacement& placement) {
+inline BufferRole ClassifyBuffer(uint32_t cb_buffer, const Game::UpscalerPlacement& placement) {
     const auto& palettes = placement.bone_palettes;
-    if (!palettes.cb_bone || size == placement.camera.cb_constants ||
-        size > palettes.cb_max_skeleton) {
+    if (!palettes.cb_bone || cb_buffer == placement.camera.cb_constants ||
+        cb_buffer > palettes.cb_max_skeleton) {
         return BufferRole::Other;
     }
-    if (size >= palettes.cb_min_skeleton) {
+    if (cb_buffer >= palettes.cb_min_skeleton) {
         return BufferRole::Skeleton;
     }
-    return size >= palettes.cb_min_small_skeleton && size % palettes.cb_bone == 0
+    return cb_buffer >= palettes.cb_min_small_skeleton && cb_buffer % palettes.cb_bone == 0
         ? BufferRole::SmallSkeleton : BufferRole::Other;
 }
 
@@ -62,10 +62,10 @@ class IndexRangeCache {
 public:
     static constexpr uint64_t Revalidate = 32, Unused = 600;
     struct Key {
-        uint64_t address{};
-        uint32_t count{}, index_size{};
+        uint64_t va_indices{};
+        uint32_t c_indices{}, cb_index{};
         int32_t base_vertex{};
-        bool restart{};
+        bool is_restart_enabled{};
         bool operator==(const Key&) const = default;
     };
     struct Result {
@@ -74,47 +74,47 @@ public:
     };
     struct Stats {
         uint64_t hits{}, scans{}, stale{};
-    } stats;
+    } m_stats;
 
     template <class Scan>
     Result Get(const Key& key, uint64_t frame, Scan&& scan) {
-        auto& entry = entries[key];
+        auto& entry = m_entries[key];
         entry.last_use = frame;
-        if (entry.valid && frame - entry.verified < Revalidate) {
-            ++stats.hits;
+        if (entry.is_valid && frame - entry.verified < Revalidate) {
+            ++m_stats.hits;
             return entry.result;
         }
-        ++stats.scans;
+        ++m_stats.scans;
         const Result fresh = scan();
-        if (entry.valid && (fresh.topology != entry.result.topology ||
+        if (entry.is_valid && (fresh.topology != entry.result.topology ||
                             !(fresh.range == entry.result.range))) {
-            ++stats.stale; // the cached result was wrong for up to Revalidate frames
+            ++m_stats.stale; // the cached result was wrong for up to Revalidate frames
         }
         entry.result = fresh;
         entry.verified = frame;
-        entry.valid = true;
+        entry.is_valid = true;
         return entry.result;
     }
     void Trim(uint64_t frame) {
-        std::erase_if(entries, [frame](const auto& e) { return frame - e.second.last_use > Unused; });
+        std::erase_if(m_entries, [frame](const auto& e) { return frame - e.second.last_use > Unused; });
     }
-    size_t Size() const { return entries.size(); }
+    size_t Size() const { return m_entries.size(); }
 
 private:
     struct Entry {
         Result result;
         uint64_t verified{}, last_use{};
-        bool valid{};
+        bool is_valid{};
     };
     struct KeyHash {
         size_t operator()(const Key& k) const {
-            uint64_t h = k.address * 0x9e3779b97f4a7c15ULL;
-            h ^= (uint64_t(k.count) << 32 | uint32_t(k.base_vertex)) + (h << 6) + (h >> 2);
-            h ^= uint64_t(k.index_size << 1 | uint32_t(k.restart)) + (h << 6) + (h >> 2);
+            uint64_t h = k.va_indices * 0x9e3779b97f4a7c15ULL;
+            h ^= (uint64_t(k.c_indices) << 32 | uint32_t(k.base_vertex)) + (h << 6) + (h >> 2);
+            h ^= uint64_t(k.cb_index << 1 | uint32_t(k.is_restart_enabled)) + (h << 6) + (h >> 2);
             return size_t(h);
         }
     };
-    std::unordered_map<Key, Entry, KeyHash> entries;
+    std::unordered_map<Key, Entry, KeyHash> m_entries;
 };
 
 // Open-addressing map for the per-frame tables of History: entries are keyed per draw and
@@ -123,7 +123,7 @@ private:
 template <class Key, class Value, class Hash>
 class FlatMap {
 public:
-    FlatMap() : slots(64) {}
+    FlatMap() : m_slots(64) {}
 
     Value& operator[](const Key& key) {
         return Insert(key).first->value;
@@ -136,10 +136,10 @@ public:
         }
     }
     const Value* find(const Key& key) const {
-        const size_t mask = slots.size() - 1;
+        const size_t mask = m_slots.size() - 1;
         for (size_t i = Start(key) & mask;; i = (i + 1) & mask) {
-            const Slot& slot = slots[i];
-            if (slot.generation != generation) {
+            const Slot& slot = m_slots[i];
+            if (slot.generation != m_generation) {
                 return nullptr;
             }
             if (slot.key == key) {
@@ -148,18 +148,18 @@ public:
         }
     }
     void clear() {
-        size = 0;
-        if (++generation == 0) { // wrapped: stale slots could look current
-            for (auto& slot : slots) {
+        m_c_entries = 0;
+        if (++m_generation == 0) { // wrapped: stale slots could look current
+            for (auto& slot : m_slots) {
                 slot.generation = 0;
             }
-            generation = 1;
+            m_generation = 1;
         }
     }
     void swap(FlatMap& other) noexcept {
-        slots.swap(other.slots);
-        std::swap(size, other.size);
-        std::swap(generation, other.generation);
+        m_slots.swap(other.m_slots);
+        std::swap(m_c_entries, other.m_c_entries);
+        std::swap(m_generation, other.m_generation);
     }
 
 private:
@@ -173,15 +173,15 @@ private:
         return size_t(h ^ (h >> 29));
     }
     std::pair<Slot*, bool> Insert(const Key& key) {
-        if ((size + 1) * 2 > slots.size()) {
+        if ((m_c_entries + 1) * 2 > m_slots.size()) {
             Grow();
         }
-        const size_t mask = slots.size() - 1;
+        const size_t mask = m_slots.size() - 1;
         for (size_t i = Start(key) & mask;; i = (i + 1) & mask) {
-            Slot& slot = slots[i];
-            if (slot.generation != generation) {
-                slot = {key, Value{}, generation};
-                ++size;
+            Slot& slot = m_slots[i];
+            if (slot.generation != m_generation) {
+                slot = {key, Value{}, m_generation};
+                ++m_c_entries;
                 return {&slot, true};
             }
             if (slot.key == key) {
@@ -190,21 +190,21 @@ private:
         }
     }
     void Grow() {
-        std::vector<Slot> old(slots.size() * 2);
-        old.swap(slots);
-        const uint32_t live = generation;
-        generation = 1;
-        size = 0;
+        std::vector<Slot> old(m_slots.size() * 2);
+        old.swap(m_slots);
+        const uint32_t live = m_generation;
+        m_generation = 1;
+        m_c_entries = 0;
         for (const auto& slot : old) {
             if (slot.generation == live) {
-                *Insert(slot.key).first = {slot.key, slot.value, generation};
+                *Insert(slot.key).first = {slot.key, slot.value, m_generation};
             }
         }
     }
 
-    std::vector<Slot> slots;
-    size_t size = 0;
-    uint32_t generation = 1;
+    std::vector<Slot> m_slots;
+    size_t m_c_entries = 0;
+    uint32_t m_generation = 1;
 };
 
 inline uint32_t JitterPhases(uint32_t render_width, uint32_t output_width) {
@@ -217,7 +217,7 @@ inline uint32_t JitterPhases(uint32_t render_width, uint32_t output_width) {
 
 struct Draw {
     uint64_t shader{}, geometry{}, indices{}, topology{};
-    uint32_t index_count{}, instances{}, first_instance{};
+    uint32_t c_indexes{}, instances{}, first_instance{};
     VertexRange vertices;
     bool operator==(const Draw& rhs) const = default;
 };
@@ -226,14 +226,14 @@ struct Draw {
 // offsets: a reused index buffer or another submesh must never read uninitialised history.
 class History {
 public:
-    explicit History(uint32_t capacity) : capacity{capacity} {}
+    explicit History(uint32_t c_capacity) : m_c_capacity{c_capacity} {}
 
     struct Allocation {
         uint32_t store{}, load{}, vertices{}, instances{}, first_vertex{}, first_instance{};
     };
     struct Stats {
         uint64_t draws{}, stored{}, loaded{}, unmatched{}, exhausted{}, invalid{}, still{};
-    } stats;
+    } m_stats;
 
     // A small skeleton (weapon, prop; most are static world pieces) only needs history
     // while its bone palette changes: with last frame's bones its motion is the camera's.
@@ -241,61 +241,61 @@ public:
     // of a change stores positions (nothing to load yet), the next one loads them.
     struct GateKey {
         uint64_t shader{}, geometry{}, indices{};
-        uint32_t index_count{}, instances{}, first_instance{}, occurrence{};
+        uint32_t c_indexes{}, instances{}, first_instance{}, occurrence{};
         bool operator==(const GateKey&) const = default;
     };
     bool Moving(GateKey key, uint64_t palette) {
         key.occurrence = 0;
-        key.occurrence = gate_occurrences[key]++;
-        const auto* prev = gate_previous.find(key);
-        const bool moving = prev && *prev != palette;
-        gate_current.emplace(key, palette);
-        stats.still += moving ? 0 : 1;
-        return moving;
+        key.occurrence = m_gate_occurrences[key]++;
+        const auto* p_prev = m_gate_previous.find(key);
+        const bool is_moving = p_prev && *p_prev != palette;
+        m_gate_current.emplace(key, palette);
+        m_stats.still += is_moving ? 0 : 1;
+        return is_moving;
     }
 
     void NextFrame() {
-        previous.swap(current);
-        current.clear();
-        occurrences.clear();
-        gate_previous.swap(gate_current);
-        gate_current.clear();
-        gate_occurrences.clear();
-        ++frame;
-        used = 0;
+        m_previous.swap(m_current);
+        m_current.clear();
+        m_occurrences.clear();
+        m_gate_previous.swap(m_gate_current);
+        m_gate_current.clear();
+        m_gate_occurrences.clear();
+        ++m_frame;
+        m_c_used = 0;
     }
 
     Allocation Prepare(const Draw& draw) {
-        ++stats.draws;
+        ++m_stats.draws;
         Key key{draw, 0};
-        key.occurrence = occurrences[key]++;
-        const uint64_t count = uint64_t(draw.vertices.count) * draw.instances;
-        if (!count || uint64_t(draw.vertices.first) + draw.vertices.count - 1 > INT32_MAX ||
+        key.occurrence = m_occurrences[key]++;
+        const uint64_t c_positions = uint64_t(draw.vertices.c_vertices) * draw.instances;
+        if (!c_positions || uint64_t(draw.vertices.i_first) + draw.vertices.c_vertices - 1 > INT32_MAX ||
             uint64_t(draw.first_instance) + draw.instances > UINT32_MAX) {
-            ++stats.invalid;
+            ++m_stats.invalid;
             return {};
         }
-        const auto* prev = previous.find(key);
-        Allocation result{0, 0, draw.vertices.count, draw.instances,
-                          draw.vertices.first, draw.first_instance};
-        if (prev) {
-            result.load = *prev;
-            ++stats.loaded;
+        const auto* p_prev = m_previous.find(key);
+        Allocation result{0, 0, draw.vertices.c_vertices, draw.instances,
+                          draw.vertices.i_first, draw.first_instance};
+        if (p_prev) {
+            result.load = *p_prev;
+            ++m_stats.loaded;
         } else {
-            ++stats.unmatched;
+            ++m_stats.unmatched;
         }
-        if (count <= capacity - used) {
-            result.store = 1 + uint32_t(frame & 1) * capacity + used;
-            used += uint32_t(count);
-            current.emplace(key, result.store);
-            ++stats.stored;
+        if (c_positions <= m_c_capacity - m_c_used) {
+            result.store = 1 + uint32_t(m_frame & 1) * m_c_capacity + m_c_used;
+            m_c_used += uint32_t(c_positions);
+            m_current.emplace(key, result.store);
+            ++m_stats.stored;
         } else {
-            ++stats.exhausted;
+            ++m_stats.exhausted;
         }
         return result;
     }
 
-    uint32_t Used() const { return used; }
+    uint32_t Used() const { return m_c_used; }
 
 private:
     struct Key {
@@ -309,25 +309,25 @@ private:
             const auto mix = [&](uint64_t v) { h ^= v + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2); };
             const auto& d = key.draw;
             mix(d.shader); mix(d.geometry); mix(d.indices); mix(d.topology);
-            mix(d.index_count); mix(d.instances); mix(d.first_instance);
-            mix(d.vertices.first); mix(d.vertices.count); mix(key.occurrence);
+            mix(d.c_indexes); mix(d.instances); mix(d.first_instance);
+            mix(d.vertices.i_first); mix(d.vertices.c_vertices); mix(key.occurrence);
             return size_t(h);
         }
     };
-    uint32_t capacity{}, used{};
-    uint64_t frame{};
-    FlatMap<Key, uint32_t, Hash> previous, current, occurrences;
+    uint32_t m_c_capacity{}, m_c_used{};
+    uint64_t m_frame{};
+    FlatMap<Key, uint32_t, Hash> m_previous, m_current, m_occurrences;
     struct GateHash {
         size_t operator()(const GateKey& key) const {
             uint64_t h = 0;
             const auto mix = [&](uint64_t v) { h ^= v + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2); };
-            mix(key.shader); mix(key.geometry); mix(key.indices); mix(key.index_count);
+            mix(key.shader); mix(key.geometry); mix(key.indices); mix(key.c_indexes);
             mix(key.instances); mix(key.first_instance); mix(key.occurrence);
             return size_t(h);
         }
     };
-    FlatMap<GateKey, uint64_t, GateHash> gate_previous, gate_current;
-    FlatMap<GateKey, uint32_t, GateHash> gate_occurrences;
+    FlatMap<GateKey, uint64_t, GateHash> m_gate_previous, m_gate_current;
+    FlatMap<GateKey, uint32_t, GateHash> m_gate_occurrences;
 };
 
 } // namespace Vulkan::Motion

@@ -489,7 +489,7 @@ const GraphicsPipeline* PipelineCache::TryPreparedPipeline(const PreparedDraw& p
     // everything read from guest memory for the specialization) must match as well. This is
     // the per-stage work GetProgram does on the regular path.
     const auto& regs = liverpool->regs;
-    for (u32 i = 0; i < prepared.num_stages; ++i) {
+    for (u32 i = 0; i < prepared.c_stages; ++i) {
         const auto& stage = prepared.stages[i];
         const auto* pgm = regs.ProgramForStage(static_cast<u32>(stage.hw_stage));
         if (!pgm || !pgm->Address<u32*>()) {
@@ -499,13 +499,13 @@ const GraphicsPipeline* PipelineCache::TryPreparedPipeline(const PreparedDraw& p
         if (params.hash != stage.hash) {
             return nullptr;
         }
-        auto& info = const_cast<Program*>(stage.program)->info;
+        auto& info = const_cast<Program*>(stage.p_program)->info;
         info.pgm_base = params.Base();
         info.user_data = params.user_data;
         info.RefreshFlatBuf();
-        if (info.pgm_base != stage.pgm_base || info.flattened_ud_buf.size() != stage.flat_size ||
-            std::memcmp(info.flattened_ud_buf.data(), stage.flat,
-                        stage.flat_size * sizeof(u32)) != 0) {
+        if (info.pgm_base != stage.pgm_base || info.flattened_ud_buf.size() != stage.c_flat ||
+            std::memcmp(info.flattened_ud_buf.data(), stage.p_flat,
+                        stage.c_flat * sizeof(u32)) != 0) {
             return nullptr;
         }
     }

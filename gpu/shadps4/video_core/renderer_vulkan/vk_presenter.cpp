@@ -406,8 +406,8 @@ Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& 
     // Numbered here, in command order; marked where the commands are recorded.
     const u32 stream = draw_scheduler.CrumbStream();
     const bool crumbs = Breadcrumbs::Enabled();
-    const u32 fsr_crumb = crumbs ? Breadcrumbs::Note(stream, {.name = "presenter FSR"}) : 0;
-    const u32 pp_crumb = crumbs ? Breadcrumbs::Note(stream, {.name = "presenter post process"}) : 0;
+    const u32 fsr_crumb = crumbs ? Breadcrumbs::Note(stream, {.sz_name = "presenter FSR"}) : 0;
+    const u32 pp_crumb = crumbs ? Breadcrumbs::Note(stream, {.sz_name = "presenter post process"}) : 0;
     draw_scheduler.Record([this, frame, image_view, image_size, frame_subresources, stream,
                            fsr_crumb, pp_crumb, fsr = fsr_settings,
                            pp = pp_settings](vk::CommandBuffer cmdbuf) {

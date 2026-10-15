@@ -31,20 +31,20 @@
 namespace Vulkan {
 
 struct PreparedStage {
-    const Program* program;
+    const Program* p_program;
     u64 hash;
     Shader::HwStage hw_stage;
     VAddr pgm_base;
-    const u32* flat; ///< flattened user data the worker computed, owned by the submission
-    u32 flat_size;
+    const u32* p_flat; ///< flattened user data the worker computed, owned by the submission
+    u32 c_flat;
     // Resource sharps read from `flat` in the order of the program's resource lists, and the
     // texture description hash of each image (docs/en/parallel_gpu.md, step 2). Valid for the
     // GPU thread exactly when `flat` matched: sharps depend on nothing else.
-    const AmdGpu::Image* image_sharps;
-    const u64* image_hashes;
-    const AmdGpu::Sampler* sampler_sharps;
-    const AmdGpu::Buffer* buffer_sharps;
-    u32 num_images, num_samplers, num_buffers;
+    const AmdGpu::Image* p_image_sharps;
+    const u64* p_image_hashes;
+    const AmdGpu::Sampler* p_sampler_sharps;
+    const AmdGpu::Buffer* p_buffer_sharps;
+    u32 c_images, c_samplers, c_buffers;
 };
 
 /// Key of Rasterizer's texture description cache for a T# bound through `res`.
@@ -66,14 +66,14 @@ struct PreparedVertexInputs {
     struct Range {
         VAddr base, end;
     };
-    const vk::VertexInputAttributeDescription2EXT* attributes;
-    const vk::VertexInputBindingDescription2EXT* bindings;
-    const AmdGpu::Buffer* buffers;
-    const u8* range_index; ///< per stream with memory: its entry in `ranges`
-    const Range* ranges;
-    u32 count, num_ranges;
+    const vk::VertexInputAttributeDescription2EXT* p_attributes;
+    const vk::VertexInputBindingDescription2EXT* p_bindings;
+    const AmdGpu::Buffer* p_buffers;
+    const u8* p_range_index; ///< per stream with memory: its entry in `ranges`
+    const Range* p_ranges;
+    u32 c_streams, c_ranges;
     u64 buffers_hash; ///< XXH3 of `buffers` (object motion stream identity)
-    bool valid;
+    bool is_valid;
 };
 
 struct PreparedDraw {
@@ -81,7 +81,7 @@ struct PreparedDraw {
     std::atomic<u32> state{Pending};
     u64 reg_checksum{};
     GraphicsPipelineKey key{};
-    u32 num_stages{};
+    u32 c_stages{};
     std::array<PreparedStage, MaxShaderStages> stages{};
     PreparedVertexInputs vertex{};
 };
@@ -95,7 +95,7 @@ public:
     DrawPreparation& operator=(const DrawPreparation&) = delete;
 
     [[nodiscard]] bool Enabled() const noexcept {
-        return worker_count != 0;
+        return m_c_workers != 0;
     }
 
     struct Submission;
@@ -114,56 +114,56 @@ public:
     const PreparedDraw* NextDraw();
 
     /// GPU thread: counts whether a prepared draw was used; prints every 5 s (PS_FRAME_STATS).
-    void Count(bool used);
+    void Count(bool is_used);
 
     struct Submission {
         u64 seq{};
         std::vector<u32> commands;
         std::unique_ptr<PreparedDraw[]> draws;
-        u32 num_draws{};
+        u32 c_draws{};
         std::vector<std::unique_ptr<u32[]>> flat_chunks; ///< from the claiming worker
         u64 start_checksum{}, end_checksum{}; ///< set by the scanner
         AmdGpu::RegDelta delta;                ///< registers written, values at the end
-        std::atomic<bool> scanned{false};
-        std::atomic<bool> claimed{false};
-        std::atomic<bool> gpu_done{false};
+        std::atomic<bool> is_scanned{false};
+        std::atomic<bool> is_claimed{false};
+        std::atomic<bool> is_gpu_done{false};
     };
 
 private:
     void ScannerLoop(std::stop_token stop);
-    void WorkerLoop(std::stop_token stop, u32 index);
+    void WorkerLoop(std::stop_token stop, u32 i_worker);
     void Collect();
 
-    PipelineCache& pipeline_cache;
-    std::unique_ptr<AmdGpu::Regs> initial_regs; ///< state at the start of `baseline_seq`
-    u64 initial_checksum{};
-    u64 baseline_seq{};
+    PipelineCache& m_pipeline_cache;
+    std::unique_ptr<AmdGpu::Regs> m_initial_regs; ///< state at the start of `baseline_seq`
+    u64 m_initial_checksum{};
+    u64 m_baseline_seq{};
     /// State at the start of the oldest queued buffer (`tail_seq`): a worker whose position
     /// was collected restarts from here. Guarded by `mutex`.
-    std::unique_ptr<AmdGpu::Regs> tail_regs;
-    u64 tail_seq{};
-    u64 tail_checksum{};
-    u64 rebases = 0; ///< scanner restarts from the GPU thread state (PS_FRAME_STATS)
-    bool baseline_ready{}; ///< guarded by `mutex`
-    std::mutex mutex;
-    std::condition_variable_any cv;
-    std::deque<std::shared_ptr<Submission>> submissions; ///< ordered by seq
-    std::atomic<u64> gpu_seq{0};
-    std::shared_ptr<Submission> current;
+    std::unique_ptr<AmdGpu::Regs> m_tail_regs;
+    u64 m_tail_seq{};
+    u64 m_tail_checksum{};
+    u64 m_c_rebases = 0; ///< scanner restarts from the GPU thread state (PS_FRAME_STATS)
+    bool m_is_baseline_ready{}; ///< guarded by `mutex`
+    std::mutex m_mutex;
+    std::condition_variable_any m_cv;
+    std::deque<std::shared_ptr<Submission>> m_submissions; ///< ordered by seq
+    std::atomic<u64> m_gpu_seq{0};
+    std::shared_ptr<Submission> m_current;
 
 public:
     /// psport: the current submission (prepared draws), for the draw recording thread to keep
     /// it alive while it still records its draws.
     [[nodiscard]] std::shared_ptr<const void> KeepCurrent() const {
-        return current;
+        return m_current;
     }
 
 private:
-    u32 current_draw = 0;
-    u64 used = 0, unused = 0;
-    u32 worker_count = 0; ///< fixed before the worker threads start
-    std::jthread scanner;
-    std::vector<std::jthread> workers;
+    u32 m_current_draw = 0;
+    u64 m_c_used = 0, m_c_unused = 0;
+    u32 m_c_workers = 0; ///< fixed before the worker threads start
+    std::jthread m_scanner;
+    std::vector<std::jthread> m_workers;
 };
 
 } // namespace Vulkan

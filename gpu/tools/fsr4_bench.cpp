@@ -159,8 +159,8 @@ Gpu CreateGpu(bool stats) {
     // The matrix passes run as wave32 in full subgroups, with the Vulkan memory model.
     const bool matrices = coopmat.cooperativeMatrix && f12.vulkanMemoryModel && f13.subgroupSizeControl &&
                           f13.computeFullSubgroups;
-    gpu.fsr411.fp8_matrices = matrices && float8.shaderFloat8CooperativeMatrix;
-    gpu.fsr411.fp16_matrices = matrices && f12.shaderFloat16;
+    gpu.fsr411.has_fp8_matrices = matrices && float8.shaderFloat8CooperativeMatrix;
+    gpu.fsr411.has_fp16_matrices = matrices && f12.shaderFloat16;
     if (stats) {
         extensions.push_back(VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME);
     }
@@ -537,20 +537,20 @@ int main(int argc, char** argv) {
         vkCmdResetQueryPool(cmd, timestamps, 0, 2);
         vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, timestamps, 0);
         Fsr411::Frame f;
-        f.cmdbuf = cmd;
+        f.h_cmdbuf = cmd;
         f.color = {color.image, color.view, rw, rh};
         f.depth = {depth.image, depth.view, rw, rh};
         f.motion = {motion.image, motion.view, rw, rh};
         f.output = {output.image, output.view, ow, oh};
         f.render_width = rw;
         f.render_height = rh;
-        f.ultra_performance = preset >= 4;
+        f.is_ultra_performance = preset >= 4;
         f.jitter[0] = 0.25f * float((frame - 1) % 4) - 0.375f; // as fsr4cap
         f.jitter[1] = 0.125f;
-        f.sharpen = true;
+        f.should_sharpen = true;
         f.sharpness = 0.5f;
-        f.reset = frame == 1;
-        f.auto_exposure = true;
+        f.should_reset = frame == 1;
+        f.has_auto_exposure = true;
         if (!upscaler411->Record(f)) {
             std::fprintf(stderr, "FSR 4.1.1: %s\n", upscaler411->Error().c_str());
             return 1;

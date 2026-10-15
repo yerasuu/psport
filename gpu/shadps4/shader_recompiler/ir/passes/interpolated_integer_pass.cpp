@@ -32,22 +32,22 @@ bool IsInterpolatedParam(const IR::Value& value) {
     if (value.IsImmediate()) {
         return false;
     }
-    const IR::Inst* inst = value.TryInst();
-    if (!inst) {
+    const IR::Inst* p_inst = value.TryInst();
+    if (!p_inst) {
         return false;
     }
-    return inst->GetOpcode() == IR::Opcode::GetAttribute && IR::IsParam(inst->Arg(0).Attribute());
+    return p_inst->GetOpcode() == IR::Opcode::GetAttribute && IR::IsParam(p_inst->Arg(0).Attribute());
 }
 } // namespace
 
 void InterpolatedIntegerPass(IR::Program& program) {
     u32 patched = 0;
-    for (IR::Block* const block : program.blocks) {
-        for (IR::Inst& inst : block->Instructions()) {
+    for (IR::Block* const p_block : program.blocks) {
+        for (IR::Inst& inst : p_block->Instructions()) {
             if (!IsTruncation(inst.GetOpcode()) || !IsInterpolatedParam(inst.Arg(0))) {
                 continue;
             }
-            IR::IREmitter ir{*block, IR::Block::InstructionList::s_iterator_to(inst)};
+            IR::IREmitter ir{*p_block, IR::Block::InstructionList::s_iterator_to(inst)};
             const IR::F32 value{inst.Arg(0)};
             // value * (1 + 2^-16): away from zero, so truncation of either sign lands on the
             // integer the vertices held.
@@ -57,8 +57,8 @@ void InterpolatedIntegerPass(IR::Program& program) {
         }
     }
     if (patched) {
-        static u32 logged = 0;
-        if (logged++ < 32) {
+        static u32 s_c_logged = 0;
+        if (s_c_logged++ < 32) {
             std::printf("Shader: interpolated integer fix, %u truncations in %016llx\n", patched,
                         static_cast<unsigned long long>(program.info.pgm_hash));
         }

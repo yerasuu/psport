@@ -38,7 +38,7 @@ public:
         std::array<float, 2> jitter;
         float frame_ms, near_plane, far_plane, vertical_fov;
         float sharpness;
-        bool sharpen, reset, auto_exposure;
+        bool should_sharpen, should_reset, has_auto_exposure;
     };
 
     /// Records FSR 4 into `frame.cmdbuf`; the output stays in General. False when FSR 4
@@ -52,7 +52,7 @@ public:
 
 private:
     struct Impl;
-    std::unique_ptr<Impl> impl;
+    std::unique_ptr<Impl> m_impl;
 };
 
 } // namespace Vulkan

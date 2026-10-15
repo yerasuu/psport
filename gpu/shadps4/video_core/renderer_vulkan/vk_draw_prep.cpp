@@ -30,26 +30,26 @@ bool IsDirectDraw(AmdGpu::PM4ItOpcode opcode) {
 template <typename Func>
 void ForEachPacket(std::span<const u32> commands, Func&& func) {
     for (size_t at = 0; at < commands.size();) {
-        const auto* header = reinterpret_cast<const AmdGpu::PM4Header*>(commands.data() + at);
-        if (header->type == 2) {
+        const auto* p_header = reinterpret_cast<const AmdGpu::PM4Header*>(commands.data() + at);
+        if (p_header->type == 2) {
             ++at;
             continue;
         }
-        if (header->type != 3) {
+        if (p_header->type != 3) {
             return;
         }
-        const size_t words = header->type3.NumWords() + 1;
+        const size_t words = p_header->type3.NumWords() + 1;
         if (at + words > commands.size()) {
             return;
         }
-        func(header);
+        func(p_header);
         at += words;
     }
 }
 
 u32 DefaultWorkerCount() {
-    if (const char* env = std::getenv("PS_PREP_WORKERS")) {
-        return static_cast<u32>(std::clamp(std::atoi(env), 0, 16));
+    if (const char* sz_env = std::getenv("PS_PREP_WORKERS")) {
+        return static_cast<u32>(std::clamp(std::atoi(sz_env), 0, 16));
     }
     // Workers are SCHED_IDLE and claim whole buffers, so more of them only use more idle
     // cores: half the hardware threads (Steam Deck 4, 16-thread desktop 8).
@@ -60,8 +60,8 @@ u32 DefaultWorkerCount() {
 /// prepared draw's data while the worker keeps appending.
 struct FlatArena {
     static constexpr size_t ChunkWords = 16 * 1024;
-    std::vector<std::unique_ptr<u32[]>> chunks;
-    size_t used = ChunkWords;
+    std::vector<std::unique_ptr<u32[]>> m_chunks;
+    size_t m_c_words_used = ChunkWords;
 
     const u32* Append(const std::vector<u32>& data) {
         return AppendArray(data.data(), data.size());
@@ -69,20 +69,20 @@ struct FlatArena {
 
     /// Trivially copyable elements, 8-byte aligned (sharps hold u64 bit fields).
     template <typename T>
-    const T* AppendArray(const T* data, size_t count) {
+    const T* AppendArray(const T* p_data, size_t c_elements) {
         static_assert(std::is_trivially_copyable_v<T> && alignof(T) <= 8);
-        const size_t words = (count * sizeof(T) + sizeof(u32) - 1) / sizeof(u32);
-        used = (used + 1) & ~size_t(1);
-        if (chunks.empty() || words > ChunkWords - std::min(used, ChunkWords)) {
-            chunks.push_back(std::make_unique<u32[]>(std::max(ChunkWords, words)));
-            used = 0;
+        const size_t words = (c_elements * sizeof(T) + sizeof(u32) - 1) / sizeof(u32);
+        m_c_words_used = (m_c_words_used + 1) & ~size_t(1);
+        if (m_chunks.empty() || words > ChunkWords - std::min(m_c_words_used, ChunkWords)) {
+            m_chunks.push_back(std::make_unique<u32[]>(std::max(ChunkWords, words)));
+            m_c_words_used = 0;
         }
-        u32* dst = chunks.back().get() + used;
-        if (count) {
-            std::memcpy(dst, data, count * sizeof(T));
+        u32* p_dst = m_chunks.back().get() + m_c_words_used;
+        if (c_elements) {
+            std::memcpy(p_dst, p_data, c_elements * sizeof(T));
         }
-        used += words;
-        return reinterpret_cast<const T*>(dst);
+        m_c_words_used += words;
+        return reinterpret_cast<const T*>(p_dst);
     }
 };
 
@@ -107,13 +107,13 @@ void PrepareResources(const Shader::Info& info, PreparedStage& stage, FlatArena&
     for (const auto& res : info.buffers) {
         buffers.push_back(res.IsSpecial() ? AmdGpu::Buffer::Null() : res.GetSharp(info));
     }
-    stage.image_sharps = arena.AppendArray(images.data(), images.size());
-    stage.image_hashes = arena.AppendArray(hashes.data(), hashes.size());
-    stage.sampler_sharps = arena.AppendArray(samplers.data(), samplers.size());
-    stage.buffer_sharps = arena.AppendArray(buffers.data(), buffers.size());
-    stage.num_images = static_cast<u32>(images.size());
-    stage.num_samplers = static_cast<u32>(samplers.size());
-    stage.num_buffers = static_cast<u32>(buffers.size());
+    stage.p_image_sharps = arena.AppendArray(images.data(), images.size());
+    stage.p_image_hashes = arena.AppendArray(hashes.data(), hashes.size());
+    stage.p_sampler_sharps = arena.AppendArray(samplers.data(), samplers.size());
+    stage.p_buffer_sharps = arena.AppendArray(buffers.data(), buffers.size());
+    stage.c_images = static_cast<u32>(images.size());
+    stage.c_samplers = static_cast<u32>(samplers.size());
+    stage.c_buffers = static_cast<u32>(buffers.size());
 }
 
 /// Rasterizer::BindVertexBuffers' pure part (GraphicsPipeline::GetVertexInputs for the dynamic
@@ -142,7 +142,7 @@ void PrepareVertexInputs(const Shader::Info& vs, const Shader::Gcn::FetchShaderD
             LiverpoolToVK::TrySurfaceFormat(buffer.GetDataFmt(), buffer.GetNumberFmt());
         if (format == vk::Format::eUndefined &&
             buffer.GetDataFmt() != AmdGpu::DataFormat::FormatInvalid) {
-            out.valid = false;
+            out.is_valid = false;
             return;
         }
         attributes.push_back({
@@ -182,43 +182,43 @@ void PrepareVertexInputs(const Shader::Info& vs, const Shader::Gcn::FetchShaderD
             range_index.push_back(static_cast<u8>(it - merged.begin()));
         }
     }
-    out.attributes = arena.AppendArray(attributes.data(), attributes.size());
-    out.bindings = arena.AppendArray(bindings.data(), bindings.size());
-    out.buffers = arena.AppendArray(buffers.data(), buffers.size());
-    out.range_index = arena.AppendArray(range_index.data(), range_index.size());
-    out.ranges = arena.AppendArray(merged.data(), merged.size());
-    out.count = static_cast<u32>(attributes.size());
-    out.num_ranges = static_cast<u32>(merged.size());
+    out.p_attributes = arena.AppendArray(attributes.data(), attributes.size());
+    out.p_bindings = arena.AppendArray(bindings.data(), bindings.size());
+    out.p_buffers = arena.AppendArray(buffers.data(), buffers.size());
+    out.p_range_index = arena.AppendArray(range_index.data(), range_index.size());
+    out.p_ranges = arena.AppendArray(merged.data(), merged.size());
+    out.c_streams = static_cast<u32>(attributes.size());
+    out.c_ranges = static_cast<u32>(merged.size());
     out.buffers_hash =
         buffers.empty() ? 0 : XXH3_64bits(buffers.data(), buffers.size() * sizeof(AmdGpu::Buffer));
-    out.valid = true;
+    out.is_valid = true;
 }
 
 } // namespace
 
 DrawPreparation::DrawPreparation(PipelineCache& pipeline_cache_)
-    : pipeline_cache{pipeline_cache_} {
-    worker_count = DefaultWorkerCount();
-    if (worker_count) {
-        scanner = std::jthread([this](std::stop_token stop) { ScannerLoop(stop); });
+    : m_pipeline_cache{pipeline_cache_} {
+    m_c_workers = DefaultWorkerCount();
+    if (m_c_workers) {
+        m_scanner = std::jthread([this](std::stop_token stop) { ScannerLoop(stop); });
     }
-    for (u32 i = 0; i < worker_count; ++i) {
-        workers.emplace_back([this, i](std::stop_token stop) { WorkerLoop(stop, i); });
+    for (u32 i = 0; i < m_c_workers; ++i) {
+        m_workers.emplace_back([this, i](std::stop_token stop) { WorkerLoop(stop, i); });
     }
     std::printf("GPU: draw preparation workers: %u (+1 scanner, %u hardware threads)\n",
-                worker_count, PsThreads::Available());
+                m_c_workers, PsThreads::Available());
 }
 
 DrawPreparation::~DrawPreparation() {
-    for (auto& worker : workers) {
+    for (auto& worker : m_workers) {
         worker.request_stop();
     }
-    if (scanner.joinable()) {
-        scanner.request_stop();
+    if (m_scanner.joinable()) {
+        m_scanner.request_stop();
     }
-    cv.notify_all();
-    workers.clear();
-    scanner = {};
+    m_cv.notify_all();
+    m_workers.clear();
+    m_scanner = {};
 }
 
 std::shared_ptr<DrawPreparation::Submission> DrawPreparation::Build(
@@ -228,10 +228,10 @@ std::shared_ptr<DrawPreparation::Submission> DrawPreparation::Build(
     }
     auto submission = std::make_shared<Submission>();
     submission->commands.assign(commands.begin(), commands.end());
-    ForEachPacket(submission->commands, [&](const AmdGpu::PM4Header* header) {
-        submission->num_draws += IsDirectDraw(header->type3.opcode);
+    ForEachPacket(submission->commands, [&](const AmdGpu::PM4Header* p_header) {
+        submission->c_draws += IsDirectDraw(p_header->type3.opcode);
     });
-    submission->draws = std::make_unique<PreparedDraw[]>(submission->num_draws);
+    submission->draws = std::make_unique<PreparedDraw[]>(submission->c_draws);
     return submission;
 }
 
@@ -241,52 +241,52 @@ void DrawPreparation::Enqueue(u64 seq, std::shared_ptr<Submission> submission) {
     }
     submission->seq = seq;
     {
-        std::scoped_lock lk{mutex};
-        submissions.push_back(std::move(submission));
+        std::scoped_lock lk{m_mutex};
+        m_submissions.push_back(std::move(submission));
     }
-    cv.notify_all();
+    m_cv.notify_all();
 }
 
 void DrawPreparation::BeginSubmission(u64 seq, const AmdGpu::Regs& regs, u64 reg_checksum) {
-    current_draw = 0;
-    current.reset();
+    m_current_draw = 0;
+    m_current.reset();
     if (!Enabled()) {
         return;
     }
-    gpu_seq.store(seq, std::memory_order_release);
-    std::scoped_lock lk{mutex};
-    if (!baseline_ready) {
-        initial_regs = std::make_unique<AmdGpu::Regs>(regs);
-        tail_regs = std::make_unique<AmdGpu::Regs>(regs);
-        initial_checksum = tail_checksum = reg_checksum;
-        baseline_seq = tail_seq = seq;
-        baseline_ready = true;
-        cv.notify_all();
+    m_gpu_seq.store(seq, std::memory_order_release);
+    std::scoped_lock lk{m_mutex};
+    if (!m_is_baseline_ready) {
+        m_initial_regs = std::make_unique<AmdGpu::Regs>(regs);
+        m_tail_regs = std::make_unique<AmdGpu::Regs>(regs);
+        m_initial_checksum = m_tail_checksum = reg_checksum;
+        m_baseline_seq = m_tail_seq = seq;
+        m_is_baseline_ready = true;
+        m_cv.notify_all();
     }
     // Idle helpers can starve on a busy CPU. Rather than queueing without bound, restart
     // them from the GPU thread's own state (one register copy) once the scanner lags.
     constexpr u64 MaxScanLag = 64;
-    if (!submissions.empty() && seq > tail_seq + MaxScanLag &&
-        submissions.front()->seq < seq && !submissions.front()->scanned.load()) {
-        *tail_regs = regs;
-        tail_seq = seq;
-        tail_checksum = reg_checksum;
-        while (!submissions.empty() && submissions.front()->seq < seq) {
-            submissions.pop_front();
+    if (!m_submissions.empty() && seq > m_tail_seq + MaxScanLag &&
+        m_submissions.front()->seq < seq && !m_submissions.front()->is_scanned.load()) {
+        *m_tail_regs = regs;
+        m_tail_seq = seq;
+        m_tail_checksum = reg_checksum;
+        while (!m_submissions.empty() && m_submissions.front()->seq < seq) {
+            m_submissions.pop_front();
         }
-        ++rebases;
-        cv.notify_all();
+        ++m_c_rebases;
+        m_cv.notify_all();
     }
-    if (!submissions.empty() && seq >= submissions.front()->seq &&
-        seq - submissions.front()->seq < submissions.size()) {
-        current = submissions[seq - submissions.front()->seq];
+    if (!m_submissions.empty() && seq >= m_submissions.front()->seq &&
+        seq - m_submissions.front()->seq < m_submissions.size()) {
+        m_current = m_submissions[seq - m_submissions.front()->seq];
     }
 }
 
 void DrawPreparation::EndSubmission() {
-    if (current) {
-        current->gpu_done.store(true, std::memory_order_release);
-        current.reset();
+    if (m_current) {
+        m_current->is_gpu_done.store(true, std::memory_order_release);
+        m_current.reset();
     }
     if (Enabled()) {
         Collect();
@@ -294,33 +294,33 @@ void DrawPreparation::EndSubmission() {
 }
 
 const PreparedDraw* DrawPreparation::NextDraw() {
-    if (!current || current_draw >= current->num_draws) {
+    if (!m_current || m_current_draw >= m_current->c_draws) {
         return nullptr;
     }
-    const PreparedDraw* draw = &current->draws[current_draw++];
+    const PreparedDraw* p_draw = &m_current->draws[m_current_draw++];
     if (PsToggle::Disabled(PsToggle::DrawPreparation)) {
         return nullptr;
     }
-    return draw;
+    return p_draw;
 }
 
 void DrawPreparation::Collect() {
-    std::scoped_lock lk{mutex};
-    while (!submissions.empty()) {
-        const auto& front = submissions.front();
-        if (!baseline_ready || !front->gpu_done.load(std::memory_order_acquire)) {
+    std::scoped_lock lk{m_mutex};
+    while (!m_submissions.empty()) {
+        const auto& front = m_submissions.front();
+        if (!m_is_baseline_ready || !front->is_gpu_done.load(std::memory_order_acquire)) {
             break;
         }
-        if (front->seq >= baseline_seq) {
+        if (front->seq >= m_baseline_seq) {
             // Its delta moves the restart state to the start of the next buffer.
-            if (!front->scanned.load(std::memory_order_acquire)) {
+            if (!front->is_scanned.load(std::memory_order_acquire)) {
                 break;
             }
-            front->delta.Apply(*tail_regs);
-            tail_seq = front->seq + 1;
-            tail_checksum = front->end_checksum;
+            front->delta.Apply(*m_tail_regs);
+            m_tail_seq = front->seq + 1;
+            m_tail_checksum = front->end_checksum;
         }
-        submissions.pop_front();
+        m_submissions.pop_front();
     }
 }
 
@@ -331,55 +331,55 @@ void DrawPreparation::ScannerLoop(std::stop_token stop) {
     u64 checksum = 0;
     u64 next_seq = 0;
     {
-        std::unique_lock lk{mutex};
-        cv.wait(lk, stop, [&] { return baseline_ready; });
+        std::unique_lock lk{m_mutex};
+        m_cv.wait(lk, stop, [&] { return m_is_baseline_ready; });
         if (stop.stop_requested()) {
             return;
         }
-        regs = std::make_unique<AmdGpu::Regs>(*initial_regs);
-        checksum = initial_checksum;
-        next_seq = baseline_seq;
+        regs = std::make_unique<AmdGpu::Regs>(*m_initial_regs);
+        checksum = m_initial_checksum;
+        next_seq = m_baseline_seq;
     }
     AmdGpu::RegDirty dirty;
     while (!stop.stop_requested()) {
         std::shared_ptr<Submission> submission;
         {
-            std::unique_lock lk{mutex};
-            cv.wait(lk, stop, [&] {
-                return next_seq < tail_seq ||
-                       (!submissions.empty() && submissions.back()->seq >= next_seq);
+            std::unique_lock lk{m_mutex};
+            m_cv.wait(lk, stop, [&] {
+                return next_seq < m_tail_seq ||
+                       (!m_submissions.empty() && m_submissions.back()->seq >= next_seq);
             });
             if (stop.stop_requested()) {
                 return;
             }
-            if (next_seq < tail_seq) {
+            if (next_seq < m_tail_seq) {
                 // Rebased by the GPU thread: continue from its state.
-                *regs = *tail_regs;
-                checksum = tail_checksum;
-                next_seq = tail_seq;
+                *regs = *m_tail_regs;
+                checksum = m_tail_checksum;
+                next_seq = m_tail_seq;
                 continue;
             }
             // Unscanned buffers are only collected by a rebase, so `next_seq` is still queued.
-            submission = submissions[next_seq - submissions.front()->seq];
+            submission = m_submissions[next_seq - m_submissions.front()->seq];
         }
         submission->start_checksum = checksum;
         dirty.Clear();
-        ForEachPacket(submission->commands, [&](const AmdGpu::PM4Header* header) {
-            AmdGpu::Liverpool::ApplyGraphicsRegisterPacket(*regs, header, checksum, &dirty);
+        ForEachPacket(submission->commands, [&](const AmdGpu::PM4Header* p_header) {
+            AmdGpu::Liverpool::ApplyGraphicsRegisterPacket(*regs, p_header, checksum, &dirty);
         });
         submission->delta.Capture(*regs, dirty);
         submission->end_checksum = checksum;
         {
-            std::scoped_lock lk{mutex};
-            submission->scanned.store(true, std::memory_order_release);
+            std::scoped_lock lk{m_mutex};
+            submission->is_scanned.store(true, std::memory_order_release);
         }
         ++next_seq;
-        cv.notify_all();
+        m_cv.notify_all();
     }
 }
 
-void DrawPreparation::WorkerLoop(std::stop_token stop, u32 index) {
-    Common::SetCurrentThreadName(("bb:DrawPrep" + std::to_string(index)).c_str());
+void DrawPreparation::WorkerLoop(std::stop_token stop, u32 i_worker) {
+    Common::SetCurrentThreadName(("bb:DrawPrep" + std::to_string(i_worker)).c_str());
     PsThreads::MakeBackground();
     auto regs = std::make_unique<AmdGpu::Regs>();
     constexpr u64 NoPosition = ~0ull;
@@ -393,11 +393,11 @@ void DrawPreparation::WorkerLoop(std::stop_token stop, u32 index) {
 
     // The nearest scanned buffer the GPU thread has not reached and no worker has claimed.
     const auto claimable = [&]() -> std::shared_ptr<Submission> {
-        const u64 gpu = gpu_seq.load(std::memory_order_acquire);
-        for (const auto& submission : submissions) {
-            if (submission->seq >= gpu && submission->seq >= tail_seq &&
-                submission->scanned.load(std::memory_order_acquire) &&
-                !submission->claimed.load(std::memory_order_relaxed)) {
+        const u64 gpu = m_gpu_seq.load(std::memory_order_acquire);
+        for (const auto& submission : m_submissions) {
+            if (submission->seq >= gpu && submission->seq >= m_tail_seq &&
+                submission->is_scanned.load(std::memory_order_acquire) &&
+                !submission->is_claimed.load(std::memory_order_relaxed)) {
                 return submission;
             }
         }
@@ -407,26 +407,26 @@ void DrawPreparation::WorkerLoop(std::stop_token stop, u32 index) {
     while (!stop.stop_requested()) {
         std::shared_ptr<Submission> target;
         {
-            std::unique_lock lk{mutex};
+            std::unique_lock lk{m_mutex};
             // gpu_seq moves without the lock: keep the candidate the predicate found.
-            cv.wait(lk, stop, [&] {
-                target = baseline_ready ? claimable() : nullptr;
+            m_cv.wait(lk, stop, [&] {
+                target = m_is_baseline_ready ? claimable() : nullptr;
                 return target != nullptr;
             });
             if (stop.stop_requested() || !target) {
                 return;
             }
-            target->claimed.store(true, std::memory_order_relaxed);
+            target->is_claimed.store(true, std::memory_order_relaxed);
             // Buffers between this worker's state and the target: their deltas. A position
             // already collected (or past the target) restarts from the queue's tail state.
-            if (position == NoPosition || position < tail_seq || position > target->seq) {
-                *regs = *tail_regs;
-                position = tail_seq;
+            if (position == NoPosition || position < m_tail_seq || position > target->seq) {
+                *regs = *m_tail_regs;
+                position = m_tail_seq;
             }
-            const u64 front = submissions.front()->seq;
+            const u64 front = m_submissions.front()->seq;
             path.clear();
             for (u64 seq = position; seq < target->seq; ++seq) {
-                path.push_back(submissions[seq - front]);
+                path.push_back(m_submissions[seq - front]);
             }
         }
         for (const auto& step : path) {
@@ -436,39 +436,39 @@ void DrawPreparation::WorkerLoop(std::stop_token stop, u32 index) {
         u64 checksum = target->start_checksum;
         u32 ordinal = 0;
         arena = FlatArena{};
-        ForEachPacket(target->commands, [&](const AmdGpu::PM4Header* header) {
-            AmdGpu::Liverpool::ApplyGraphicsRegisterPacket(*regs, header, checksum);
-            if (!IsDirectDraw(header->type3.opcode)) {
+        ForEachPacket(target->commands, [&](const AmdGpu::PM4Header* p_header) {
+            AmdGpu::Liverpool::ApplyGraphicsRegisterPacket(*regs, p_header, checksum);
+            if (!IsDirectDraw(p_header->type3.opcode)) {
                 return;
             }
             // Past the GPU thread the draws are no longer worth preparing.
-            if (ordinal < target->num_draws &&
-                target->seq >= gpu_seq.load(std::memory_order_acquire)) {
+            if (ordinal < target->c_draws &&
+                target->seq >= m_gpu_seq.load(std::memory_order_acquire)) {
                 auto& draw = target->draws[ordinal];
                 prep_worker.stages.clear();
                 prep_worker.failed = false;
                 sel.draw_indirect_params = {};
-                if (pipeline_cache.PrepareGraphicsPipeline(sel)) {
+                if (m_pipeline_cache.PrepareGraphicsPipeline(sel)) {
                     draw.reg_checksum = checksum;
                     draw.key = sel.graphics_key;
-                    draw.num_stages = static_cast<u32>(prep_worker.stages.size());
-                    for (u32 i = 0; i < draw.num_stages; ++i) {
+                    draw.c_stages = static_cast<u32>(prep_worker.stages.size());
+                    for (u32 i = 0; i < draw.c_stages; ++i) {
                         const auto& stage = prep_worker.stages[i];
                         draw.stages[i] = {
-                            .program = stage.program,
+                            .p_program = stage.program,
                             .hash = stage.hash,
                             .hw_stage = stage.hw_stage,
                             .pgm_base = stage.pgm_base,
-                            .flat = arena.Append(*stage.flat),
-                            .flat_size = static_cast<u32>(stage.flat->size()),
+                            .p_flat = arena.Append(*stage.flat),
+                            .c_flat = static_cast<u32>(stage.flat->size()),
                         };
                         PrepareResources(prep_worker.infos.at(stage.program), draw.stages[i],
                                          arena);
                     }
-                    draw.vertex.valid = false;
-                    const auto* vs = sel.infos[static_cast<u32>(Shader::SwStage::Vertex)];
-                    if (vs && sel.fetch_shader) {
-                        PrepareVertexInputs(*vs, *sel.fetch_shader, *regs, draw.vertex, arena);
+                    draw.vertex.is_valid = false;
+                    const auto* p_vs = sel.infos[static_cast<u32>(Shader::SwStage::Vertex)];
+                    if (p_vs && sel.fetch_shader) {
+                        PrepareVertexInputs(*p_vs, *sel.fetch_shader, *regs, draw.vertex, arena);
                     }
                     draw.state.store(PreparedDraw::Ready, std::memory_order_release);
                 } else {
@@ -478,29 +478,29 @@ void DrawPreparation::WorkerLoop(std::stop_token stop, u32 index) {
             ++ordinal;
         });
         // The arena's chunks live as long as the submission.
-        target->flat_chunks = std::move(arena.chunks);
+        target->flat_chunks = std::move(arena.m_chunks);
         position = target->seq + 1;
     }
 }
 
 void DrawPreparation::Count(bool was_used) {
-    ++(was_used ? used : unused);
-    static const bool stats = std::getenv("PS_FRAME_STATS") != nullptr;
+    ++(was_used ? m_c_used : m_c_unused);
+    static const bool s_should_count = std::getenv("PS_FRAME_STATS") != nullptr;
     // The clock is read every 1024 draws: per draw it was 8% of the GPU thread.
-    if (!stats || ((used + unused) & 1023) != 0) {
+    if (!s_should_count || ((m_c_used + m_c_unused) & 1023) != 0) {
         return;
     }
-    static auto window = std::chrono::steady_clock::now();
+    static auto s_window = std::chrono::steady_clock::now();
     const auto now = std::chrono::steady_clock::now();
-    if (now - window < std::chrono::seconds(5)) {
+    if (now - s_window < std::chrono::seconds(5)) {
         return;
     }
-    window = now;
+    s_window = now;
     std::printf("Draw preparation: %llu prepared pipelines used, %llu not (%u workers, "
                 "%llu scanner rebases)\n",
-                static_cast<unsigned long long>(used), static_cast<unsigned long long>(unused),
-                worker_count, static_cast<unsigned long long>(rebases));
-    used = unused = 0;
+                static_cast<unsigned long long>(m_c_used), static_cast<unsigned long long>(m_c_unused),
+                m_c_workers, static_cast<unsigned long long>(m_c_rebases));
+    m_c_used = m_c_unused = 0;
 }
 
 } // namespace Vulkan

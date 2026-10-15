@@ -30,6 +30,6 @@ struct Hooks {
 };
 
 /// A top-level submission of `num_dwords` is about to be decoded (GPU command thread).
-Injection Next(u32 num_dwords, const Hooks& hooks);
+Injection Next(u32 c_dwords, const Hooks& hooks);
 
 } // namespace AmdGpu::Pm4SelfTest

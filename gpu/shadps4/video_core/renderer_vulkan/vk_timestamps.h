@@ -37,17 +37,17 @@ public:
 
     /// Whether the device has timestamps on the graphics queue.
     bool Supported() const noexcept {
-        return valid_bits != 0;
+        return m_valid_bits != 0;
     }
 
     /// The GPU clock written as a 64-bit value at `address` by the GPU in stream order: once the
     /// work before it is done (`end_of_pipe`), else when the GPU gets to it (recording thread).
     /// False: no timestamps here (the caller writes it with the CPU).
-    bool Write(VAddr address, bool end_of_pipe);
+    bool Write(VAddr va_guest, bool is_end_of_pipe);
 
     /// Timestamps written so far (PS_PM4_SELFTEST, statistics).
     u64 Written() const noexcept {
-        return written;
+        return m_c_written;
     }
 
 private:
@@ -55,22 +55,22 @@ private:
 
     void Calibrate();
 
-    const Instance& instance;
-    Scheduler& scheduler;
-    VideoCore::BufferCache& buffer_cache;
-    vk::UniqueQueryPool pool;
-    std::unique_ptr<VideoCore::Buffer> results;
-    vk::UniqueDescriptorSetLayout set_layout;
-    vk::UniquePipelineLayout pipeline_layout;
-    vk::UniquePipeline pipeline;
-    u32 valid_bits = 0;
-    double period_ns = 1.0;
-    bool calibrated = false;
-    u64 base_ticks = 0, base_clock = 0;
-    u32 ratio = 0; ///< 8.24 fixed point: GPU clock ticks (10 ns) per device tick
-    u32 next_slot = 1; ///< slot 0: the calibration
-    u64 written = 0;
-    std::mutex mutex; ///< the GPU command thread (compute queues) and the draw recording thread
+    const Instance& m_instance;
+    Scheduler& m_scheduler;
+    VideoCore::BufferCache& m_buffer_cache;
+    vk::UniqueQueryPool m_pool;
+    std::unique_ptr<VideoCore::Buffer> m_results;
+    vk::UniqueDescriptorSetLayout m_set_layout;
+    vk::UniquePipelineLayout m_pipeline_layout;
+    vk::UniquePipeline m_pipeline;
+    u32 m_valid_bits = 0;
+    double m_period_ns = 1.0;
+    bool m_is_calibrated = false;
+    u64 m_base_ticks = 0, m_base_clock = 0;
+    u32 m_ratio = 0; ///< 8.24 fixed point: GPU clock ticks (10 ns) per device tick
+    u32 m_next_slot = 1; ///< slot 0: the calibration
+    u64 m_c_written = 0;
+    std::mutex m_mutex; ///< the GPU command thread (compute queues) and the draw recording thread
 };
 
 } // namespace Vulkan

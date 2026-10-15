@@ -3,8 +3,8 @@
 
 namespace Vulkan {
 
-void RecordPortableGpuLabel(vk::CommandBuffer command, vk::Buffer buffer, u64 offset,
-                            u64 value, u32 num_bytes) {
+void RecordPortableGpuLabel(vk::CommandBuffer command, vk::Buffer buffer, u64 off_label,
+                            u64 value, u32 cb_label) {
     const auto barrier = [&](vk::PipelineStageFlags2 source, vk::AccessFlags2 source_access,
                              vk::PipelineStageFlags2 dest, vk::AccessFlags2 dest_access) {
         const vk::MemoryBarrier2 memory{.srcStageMask = source, .srcAccessMask = source_access,
@@ -18,16 +18,16 @@ void RecordPortableGpuLabel(vk::CommandBuffer command, vk::Buffer buffer, u64 of
             vk::AccessFlagBits2::eMemoryRead | vk::AccessFlagBits2::eMemoryWrite,
             vk::PipelineStageFlagBits2::eTransfer | vk::PipelineStageFlagBits2::eHost,
             vk::AccessFlagBits2::eTransferWrite | vk::AccessFlagBits2::eHostRead);
-    if (num_bytes == 8) {
+    if (cb_label == 8) {
         const u32 high = u32(value >> 32);
-        command.updateBuffer(buffer, offset + 4, sizeof(high), &high);
+        command.updateBuffer(buffer, off_label + 4, sizeof(high), &high);
         // A CPU polling the low word must never see its new value with the old high word.
         barrier(vk::PipelineStageFlagBits2::eTransfer, vk::AccessFlagBits2::eTransferWrite,
                 vk::PipelineStageFlagBits2::eTransfer | vk::PipelineStageFlagBits2::eHost,
                 vk::AccessFlagBits2::eTransferWrite | vk::AccessFlagBits2::eHostRead);
     }
     const u32 low = u32(value);
-    command.updateBuffer(buffer, offset, sizeof(low), &low);
+    command.updateBuffer(buffer, off_label, sizeof(low), &low);
     // Subsequent GPU consumers and coherent host polling both see the label.
     barrier(vk::PipelineStageFlagBits2::eTransfer, vk::AccessFlagBits2::eTransferWrite,
             vk::PipelineStageFlagBits2::eAllCommands | vk::PipelineStageFlagBits2::eHost,
