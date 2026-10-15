@@ -1022,18 +1022,21 @@ s32 deleteRequest(s64 requestId) {
     lockContext(context);
     OrbisNpWebApiUserContext* user_context = findUserContext(context, requestId >> 0x20);
     if (user_context == nullptr) {
+        unlockContext(context);
         releaseContext(context);
         return ORBIS_NP_WEBAPI_ERROR_USER_CONTEXT_NOT_FOUND;
     }
 
     OrbisNpWebApiRequest* request = findRequestAndMarkBusy(user_context, requestId);
     if (request == nullptr) {
+        unlockContext(context);
         releaseUserContext(user_context);
         releaseContext(context);
         return ORBIS_NP_WEBAPI_ERROR_REQUEST_NOT_FOUND;
     }
 
     if (g_sdk_ver < Common::ElfInfo::FW_400 && isRequestBusy(request)) {
+        unlockContext(context);
         releaseRequest(request);
         releaseUserContext(user_context);
         releaseContext(context);
@@ -1187,6 +1190,7 @@ s32 abortHandle(s32 libCtxId, s32 handleId) {
 s32 deleteHandleInternal(OrbisNpWebApiContext* context, s32 handleId) {
     lockContext(context);
     if (!context->handles.contains(handleId)) {
+        unlockContext(context);
         return ORBIS_NP_WEBAPI_ERROR_HANDLE_NOT_FOUND;
     }
 
