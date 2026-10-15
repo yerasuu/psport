@@ -114,6 +114,7 @@ obvious.
 | Online module: socket locks | `gpu/net/shadps4/core/libraries/network/posix_sockets.cpp`, `unix_sockets.cpp`, `sockets.h`, `net_util.cpp` | accept, connect and send run without the lock close and setsockopt take; the local address is found without the network utility lock held across its TCP connect | not checked (shadp2p) |
 | Online module: NP request locks | `gpu/net/shadps4/core/libraries/np/np_handler.cpp`, `np_matching2/np_matching2_mm.cpp`, `np_matching2/np_matching2_internal.cpp`, `np_web_api/np_web_api_internal.cpp`, `network/net_upnp.*` | Score and Matching2 requests are submitted under the pending reply lock; the Matching2 dispatcher and UPnP discovery stop flags are set under their waiters' mutex; the WebApi context lock is released on error returns and push event callbacks run after the global and context locks are released | not checked (shadp2p) |
 | Online module: summon route | `gpu/net/shadps4/core/libraries/network/http.cpp`, `gpu/net/include/core/bloodborne_re.h` | the summon helpers (host placement header, `SHADPS4_BLOODBORNE_SEAMLESS_COOP` route, `SHADPS4_CAPTURE_BLOODBORNE_SUMMON` capture) act on the launched title's summon route (`Game::Title` `online`, `PsNetHost` `sz_summon_route`), never on another game's requests; for a title without one, either `SHADPS4_*` switch still forces shadp2p's `/summon_messenger` (logged) | no (shadp2p matches the path for any title) |
+| One memory model | `video_core/buffer_cache/` (`buffer.*`, `buffer_cache.*`, `memory_tracker.h`, `region_manager.h`), `page_manager.*`, `texture_cache/texture_cache.cpp`, `renderer_vulkan/vk_rasterizer.*`, `vk_shader_hle.cpp`, `amdgpu/liverpool.*`, `core/libraries/gnmdriver/gnmdriver.cpp`, `videoout/driver.cpp` | bbport's 0.3 memory model is gone: the GPU always uses the game's memory in place (`GuestInPlace()`, `WriteTracking()`, `Rasterizer::HonestLabels()` and their other branches removed), labels are always written once the GPU is done, the background pre-upload (`BufferCache::Preupload`, `preupload_mb` in `PS_FRAME_LOG`) and the userfaultfd page tracker (`UffdImpl`, `PS_UFFD`) are removed; a driver that cannot share the game's memory stops the launch instead of falling back | no (bbport's in-place memory) |
 
 ## Loading the game
 
@@ -127,6 +128,19 @@ AppContent profile from `param.sfo`, shadPS4/GoldHEN XML patches (`src/loader/lo
 through the game's title its own file check and patches (`Game::Title` `check_files` and
 `add_patches`; Bloodborne's check of the 1.09 executable and intact shaders and its frame rate,
 resolution and effect presets live in `gpu/games/bloodborne/`).
+
+## Memory model
+
+The GPU uses the game's memory where it is, on every GPU, as a PC release would: AMD binds it into a
+sparse arena (`HOST` quirk `amd_guest_sparse_arena`), other GPUs through the layer's memory module
+(`gpu/layer/`, no sparse binding; NVIDIA's stalls the GPU for seconds), `PS_LAYER_MEMORY=1/0` to
+choose by hand. The chunks are dma-buf memory on AMD (`amd_guest_dmabuf_first`) and host memory the
+GPU imports (`VK_EXT_external_memory_host`) elsewhere, `PS_GUEST_MEMORY=host` or `dmabuf` to choose
+(`gpu/memory/psport_guest_memory.cpp`). bbport's 0.3 model (VRAM copies of the game's memory kept by
+page protection, readbacks, labels written ahead of the GPU) is removed; when the driver can do
+neither, the launch stops with a `Guest memory:` line saying so. `PS_PC_MODEL`, `PS_AS_0_3`,
+`PS_GUEST_IN_PLACE`, `PS_PREUPLOAD` and `PS_UFFD` from an older launcher are ignored (`run.sh` logs
+one line). Testing it on NVIDIA: [docs/en/NVIDIA_TEST.md](docs/en/NVIDIA_TEST.md).
 
 ## System modules
 
@@ -265,12 +279,10 @@ profile (or with `PS_GAME_PROFILE=none`) runs with the values in the first colum
 | Object motion (`object_motion`, `PS_OBJECT_MOTION`) | on, while the upscaler is available | it only feeds the upscaler | |
 | Frame rate (`PS_FPS`) and vblank (`PS_VBLANK_HZ`) | a title without presets: unpatched, 60 Hz vblank (the console's) | the frame rate presets are patches to one executable, its title's (`Game::Title::add_patches`); at 480 Hz a title pacing itself by its flip rate ran 8 times too fast | `uncap` (delta-time patch, 480 Hz vblank, frames shown at once), 60 or 90 (`gpu/games/bloodborne/patches.cpp`, which sets `PS_VBLANK_HZ` for the preset) |
 | Scaled output (`output_res`) and `PS_DMEM_MB` 9152 | only for a title with presets (run.sh asks `psport --has-presets`); otherwise its own size and the console's 5056 MiB of direct memory | they are a patch to the same executable, and the larger direct memory exists for its larger targets | as `output_res` and `live_resolution` choose |
-| Memory model, `PS_PC_MODEL` | run.sh: the new one on AMD GPUs, the 0.3 one on the others (`HOST` quirk `amd_pc_memory_model`, through `psport-gpu-capabilities --host-env`) | a property of the driver, not of the game: sparse binding of the game's memory works on RADV and stalls NVIDIA's GPU for seconds; the 0.3 model is being retired | |
+| Memory model | the PC one on every GPU, the only one (`PS_PC_MODEL`, `PS_AS_0_3`, `PS_GUEST_IN_PLACE`, `PS_PREUPLOAD` and `PS_UFFD` are ignored with one line from run.sh); AMD binds the game's memory into a sparse arena (`HOST` quirk `amd_guest_sparse_arena`), other GPUs go through the layer's memory module (`PS_LAYER_MEMORY`) | a property of the driver, not of the game: sparse binding of the game's memory works on RADV and stalls NVIDIA's GPU for seconds | |
 | `PS_COPY_GPU_BUFFERS` | 1 (run.sh) | the GPU thread decodes a submission after the game's call returns, later than the console's command processor reads it; the copy keeps a game that refills that memory from changing what the GPU gets | |
 | `PS_READBACKS` | 1 (relaxed) | the console's memory is shared: the CPU reads what the GPU wrote (vertices, compute results), and relaxed readbacks are the cheapest mode that gives it that | |
 | `PS_GPU_WRITE_TWINS`, `PS_GPU_WRITE_TWINS_MAX` | 1, 65536 bytes (run.sh) | a CPU write next to small GPU outputs keeps the GPU's bytes and the CPU's apart instead of waiting for the GPU; the result is the same | |
-| `PS_PREUPLOAD` | 1 (run.sh; the 0.3 model only) | uploads only memory already in VRAM that the game rewrote: no new VRAM, it only moves an upload earlier | |
-| `PS_UFFD` | 0 | userfaultfd write tracking crashed the Steam Deck; mprotect is the safe path | |
 | Draw pipeline `PS_DRAW_PIPE`, recording threads `PS_VK_RECORD_THREADS`, `PS_ASYNC_SUBMIT`, copy threads `PS_COPY_THREADS` | by the host's hardware threads: the draw pipeline from 8, 1/2/3 recording threads from 1/8/12, submissions from the recording threads, a quarter of the threads (1 to 4) for copies | they decide which host thread does the work, not what the GPU or the game sees | |
 | Optimizations behind `PS_TOGGLE_FILE` (`gpu/port/psport_toggles.h`) | on (a set bit switches one off) | caches, memos and pipelining that keep every result the same; the TAA, FSR 4, camera and scene scaling bits act only where the upscaler runs; the optional TAA techniques are off | |
 | `RADV_DEBUG=nohiz` | on GCN 3-5 under RADV (run.sh, `HOST` quirk `radv_gcn_nohiz`; `PS_AUTO_NOHIZ=0`: off) | a driver bug: depth compression drew black halos and lost geometry on those chips | |

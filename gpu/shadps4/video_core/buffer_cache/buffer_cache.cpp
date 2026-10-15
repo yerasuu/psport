@@ -282,7 +282,7 @@ private:
     u64 capacity = 0;
 };
 std::mutex fast_readback_mutex;
-/// One readback queue user for the old model's downloads and the module's read traps.
+/// One readback queue user for the buffer cache's downloads and the module's read traps.
 FastReadback& SharedReadback(const Vulkan::Instance& instance) {
     static FastReadback readback{instance};
     return readback;
@@ -383,30 +383,12 @@ void EraseTwins(VAddr begin, VAddr end) {
     }
 }
 
-/// psport: PS_PREUPLOAD — background upload of the game's GPU memory into the arena ahead of use.
-/// 1 (run.sh default): only memory already resident in the arena that the game rewrote, and
-/// textures from the arena only where it is resident: no new VRAM. 2: all of the game's GPU
-/// memory, textures always from the arena (~3 GB more VRAM, the shared memory on a Steam Deck).
-/// 0: off.
-int PreuploadMode() {
-    static const int mode = [] {
-        const char* env = std::getenv("PS_PREUPLOAD");
-        if (GuestInPlace()) {
-            return 0; // the GPU reads the game's memory itself: nothing to upload
-        }
-        return env && (env[0] == '1' || env[0] == '2') ? env[0] - '0' : 0;
-    }();
-    return mode;
-}
-bool PreuploadEnabled() {
-    return PreuploadMode() != 0;
-}
 } // namespace
 
 /// On an integrated GPU (Steam Deck) VRAM is the same memory: everything stays in place there.
 bool integrated_gpu = false;
-/// psport PS_GUEST_IN_PLACE: Garlic memory (type 3) is cached in VRAM, Onion in place.
-/// psport PS_GUEST_IN_PLACE optimizations, for A/B: VRAM copies uploaded by GPU copies from the
+/// psport: Garlic memory (type 3) is cached in VRAM, Onion in place.
+/// psport optimizations, for A/B: VRAM copies uploaded by GPU copies from the
 /// guest chunks (PS_CHUNK_UPLOADS=0: CPU staging), texture data bound in place whatever its type
 /// (PS_INPLACE_TEXTURES=1; off: by type).
 bool ChunkUploads() {
@@ -447,13 +429,13 @@ bool FixedArena() {
     static const bool on = [] {
         const char* env = std::getenv("PS_FIXED_ARENA");
         const bool fixed = env && *env ? env[0] != '0' : PsGuestMemory::HostImported();
-        if (fixed && GuestInPlace()) {
+        if (fixed) {
             std::printf("Guest memory: the arena keeps its first bindings (game data read in place, "
                         "no copies in VRAM)\n");
         }
         return fixed;
     }();
-    return on && GuestInPlace();
+    return on;
 }
 
 bool MixStats() {
@@ -468,7 +450,7 @@ bool MixStats() {
 /// range in place is a range of its chunk's buffer, with separate VRAM mirrors and no sparse
 /// arena. FixedArena must not prohibit those mirrors.
 bool LayerMode() {
-    return GuestInPlace() && PsGuestMemory::LayerMemory();
+    return PsGuestMemory::LayerMemory();
 }
 
 bool GarlicInVram() {
@@ -479,27 +461,12 @@ bool GarlicInVram() {
     return on && !FixedArena();
 }
 
-void DisableGuestInPlace() {
-    Detail::guest_in_place.store(2, std::memory_order_relaxed);
-    Detail::write_tracking.store(0, std::memory_order_relaxed); // recomputed: now on
-}
-
-bool Detail::ComputeWriteTracking() {
-    static const bool forced = [] {
-        const char* env = std::getenv("PS_WRITE_TRACKING");
-        return env && env[0] == '1';
-    }();
-    const bool on = forced || !GuestInPlace();
-    write_tracking.store(on ? 1 : 2, std::memory_order_relaxed);
-    return on;
-}
-
 bool WriteVerify() {
     static const bool on = [] {
         const char* env = std::getenv("PS_WRITE_VERIFY");
         return env && env[0] == '1';
     }();
-    return on && !WriteTracking();
+    return on;
 }
 
 bool ConstantsInPlace() {
@@ -507,23 +474,7 @@ bool ConstantsInPlace() {
         const char* env = std::getenv("PS_CONSTANTS_IN_PLACE");
         return env && env[0] == '1';
     }();
-    return GuestInPlace() && on != PsToggle::Experiment(1);
-}
-
-bool Detail::ComputeGuestInPlace() {
-    static const bool on = [] {
-        const char* env = std::getenv("PS_GUEST_IN_PLACE");
-        const bool enabled = env && env[0] == '1';
-        if (enabled) {
-            std::printf("Guest memory: the GPU uses the game's direct memory in place "
-                        "(PS_GUEST_IN_PLACE=1)\n");
-        }
-        return enabled;
-    }();
-    // DisableGuestInPlace may have run first: it stays off then.
-    u8 expected = 0;
-    guest_in_place.compare_exchange_strong(expected, on ? 1 : 2, std::memory_order_relaxed);
-    return guest_in_place.load(std::memory_order_relaxed) == 1;
+    return on != PsToggle::Experiment(1);
 }
 
 static constexpr size_t GDS_BUFFER_SIZE = 64_KB;
@@ -560,25 +511,21 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
       gds_buffer{instance, 0, GDS_BUFFER_SIZE, MemoryType::Stream, "GDS Buffer"},
       memory_semaphore{instance} {
     integrated_gpu = instance.IsIntegrated();
-    // psport: the PC memory model needs the game's direct memory in dma-buf chunks the runtime can
-    // map at any offset (PsGuestMemory::Usable), and an AMD GPU for now (PcModelGpu). Without
-    // them it is off, as PS_GUEST_IN_PLACE=0.
-    if (GuestInPlace() &&
-        (!PsGuestMemory::PcModelGpu(instance) || !PsGuestMemory::Usable(instance))) {
-        DisableGuestInPlace();
-        std::printf("Guest memory: the PC memory model is off with this driver; the GPU uses copies "
-                    "in VRAM (as PS_GUEST_IN_PLACE=0)\n");
+    // psport: the GPU uses the game's direct memory in place, in chunks the runtime maps
+    // (PsGuestMemory::Usable). Asked first: it also settles LayerMode for this GPU.
+    if (!PsGuestMemory::Usable(instance)) {
+        PsGuestMemory::Unsupported("direct memory cannot be shared with this driver");
     }
     // Hooks in the game's own code, from its profile (games/). PS_GUEST_HOOKS=0: none, as for a
     // game the port knows nothing about.
     const char* hooks_env = std::getenv("PS_GUEST_HOOKS");
     const Game::Profile* game = Game::Active();
-    if (GuestInPlace() && game && game->pfn_install_hooks && !(hooks_env && hooks_env[0] == '0')) {
+    if (game && game->pfn_install_hooks && !(hooks_env && hooks_env[0] == '0')) {
         static BufferCache* hooked_cache = this;
         game->pfn_install_hooks(Game::CoreServices{
             .pfn_fresh_range = [](u64 address, u64 size) { hooked_cache->NoteFreshRange(address, size); },
         });
-    } else if (GuestInPlace() && game) {
+    } else if (game) {
         std::printf("Guest hooks: off (PS_GUEST_HOOKS=0): nothing in the game's own code is hooked\n");
     }
     if (LayerMode()) {
@@ -593,8 +540,7 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
         .flags =
             vk::BufferCreateFlagBits::eSparseBinding | vk::BufferCreateFlagBits::eSparseResidency,
         .size = ARENA_PAGE_SIZE,
-        .usage = ARENA_USAGE | (GuestInPlace() ? PsGuestMemory::TransformFeedbackUsage(instance)
-                                               : instance.GetTransformFeedbackBufferUsage()),
+        .usage = ARENA_USAGE | PsGuestMemory::TransformFeedbackUsage(instance),
         .sharingMode = shared ? vk::SharingMode::eConcurrent : vk::SharingMode::eExclusive,
         .queueFamilyIndexCount = shared ? 2u : 0u,
         .pQueueFamilyIndices = shared ? families.data() : nullptr,
@@ -687,9 +633,7 @@ void BufferCache::SmallGuestCopy(const PsCopy::Item& item) {
 }
 
 void BufferCache::ExtendWriteFault(VAddr device_addr, u64 guest_rip) {
-    if (GuestInPlace()) {
-        NoteCpuWrite(device_addr, guest_rip);
-    }
+    NoteCpuWrite(device_addr, guest_rip);
     static const u64 window = [] {
         const char* env = std::getenv("PS_FAULT_WINDOW");
         const u64 kib = env ? std::strtoull(env, nullptr, 10) : 256;
@@ -1071,7 +1015,7 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
         PrintBufferStats();
         NoteHotUse(device_addr, size);
     }
-    // psport PS_GUEST_IN_PLACE: buffers in the game's direct memory are used where they are. Small
+    // psport: buffers in the game's direct memory are used where they are. Small
     // read-only ones (constants) are still copied when bound (the stream path below): commands
     // decoded later (WriteData, constant RAM dumps) change them on the CPU in decode order, and
     // a draw decoded before must keep its values (buffer renaming). GPU writes are noted for
@@ -1099,8 +1043,7 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
     const u64 memo_first = device_addr >> block_shift;
     const u64 memo_last = (device_addr + size - 1) >> block_shift;
     auto& read_memo = in_place_reads[memo_first & (in_place_reads.size() - 1)];
-    const bool memo_candidate = GuestInPlace() && !LayerMode() && !is_written &&
-                                !is_texel_buffer && !stats &&
+    const bool memo_candidate = !LayerMode() && !is_written && !is_texel_buffer && !stats &&
                                 (size > STREAM_THRESHOLD || ConstantsInPlace());
     if (memo_candidate && maintained_epoch != packet_epoch) {
         Maintain(); // what EnsureResident does first: residency changes queued since
@@ -1111,21 +1054,20 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
         PsStats::g_cb_bound_in_place.fetch_add(size, std::memory_order_relaxed);
         return {read_memo.arena, read_memo.arena->Offset(device_addr)};
     }
-    if (GuestInPlace() && (is_written || size > STREAM_THRESHOLD || ConstantsInPlace() ||
-                           IsRegionGpuModified(device_addr, size))) {
+    if (is_written || size > STREAM_THRESHOLD || ConstantsInPlace() ||
+        IsRegionGpuModified(device_addr, size)) {
         const u64 first_block = device_addr >> block_shift;
         const u64 last_block = (device_addr + size - 1) >> block_shift;
         const auto* arena = GetArena(first_block, last_block);
-        // GPU-written buffers: in place with write tracking (CPU reads of them stay coherent, as
-        // before). Without it the GPU is a writer we hear of, like the loaders: VRAM wherever whole
-        // blocks are known data, as a default heap. The CPU does not read what the GPU wrote there
-        // (no readbacks: PS_READBACKS was relaxed before too); PS_GPU_WRITES_IN_PLACE=1 keeps them
-        // in place (PCIe, ~9 ms a frame on an RX 7800 XT).
+        // GPU-written buffers: the GPU is a writer we hear of, like the loaders: VRAM wherever
+        // whole blocks are known data, as a default heap. The CPU does not read what the GPU wrote
+        // there (no readbacks: PS_READBACKS was relaxed before too); PS_GPU_WRITES_IN_PLACE=1 keeps
+        // them in place (PCIe, ~9 ms a frame on an RX 7800 XT).
         static const bool writes_in_place_forced = [] {
             const char* env = std::getenv("PS_GPU_WRITES_IN_PLACE");
             return env && env[0] == '1';
         }();
-        const bool writes_in_place = WriteTracking() || writes_in_place_forced || force_writes_in_place;
+        const bool writes_in_place = writes_in_place_forced || force_writes_in_place;
         if (is_written && !writes_in_place) {
             NoteGpuWrite(device_addr, size);
         }
@@ -1198,9 +1140,7 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
     if (!is_written) {
     }
     const u64 uploaded_before = PsStats::g_cb_buffer_upload.load(std::memory_order_relaxed);
-    if (GuestInPlace()) {
-        PsStats::g_cb_bound_vram.fetch_add(size, std::memory_order_relaxed);
-    }
+    PsStats::g_cb_bound_vram.fetch_add(size, std::memory_order_relaxed);
     SynchronizeMemory(arena, device_addr, size, is_written, is_texel_buffer);
     if (stats) {
         auto& region = Stats().regions[RegionKey(device_addr)];
@@ -1242,7 +1182,7 @@ std::optional<std::pair<const Buffer*, u64>> BufferCache::CommandWriteMirror(VAd
 
 std::optional<std::pair<const Buffer*, u64>> BufferCache::CommandWriteTarget(VAddr device_addr,
                                                                            u32 size) {
-    if (!GuestInPlace() || size == 0) {
+    if (size == 0) {
         return std::nullopt;
     }
     if (LayerMode()) {
@@ -1272,7 +1212,7 @@ std::optional<std::pair<const Buffer*, u64>> BufferCache::CommandWriteTarget(VAd
 }
 
 std::pair<const Buffer*, u64> BufferCache::ObtainBufferForImage(VAddr device_addr, u32 size) {
-    // psport PS_GUEST_IN_PLACE: texture data is read by the GPU from the game's memory itself:
+    // psport: texture data is read by the GPU from the game's memory itself:
     // through the arena where it is bound in place, else (PS_CHUNK_TEXTURES) from its guest
     // memory chunk.
     if (LayerMode()) {
@@ -1284,7 +1224,7 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBufferForImage(VAddr device_add
             return *source;
         }
         NoteLayerMiss(device_addr, size, false);
-    } else if (GuestInPlace()) {
+    } else {
         const u64 first_block = device_addr >> block_shift;
         const u64 last_block = (device_addr + size - 1) >> block_shift;
         if (InPlaceTextures()) {
@@ -1305,27 +1245,6 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBufferForImage(VAddr device_add
     if (IsRegionGpuModified(device_addr, size)) {
         TraceBinding(device_addr, size, false, 7);
         return ObtainBuffer(device_addr, size, false);
-    }
-    // psport: PS_PREUPLOAD — texture data comes from the arena (device-local): only the pages
-    // the CPU changed since are uploaded into it, and the background pre-upload keeps it
-    // current, so a streaming burst detiles from VRAM instead of copying everything through
-    // the CPU and the PCIe bus in that frame.
-    if (PreuploadEnabled()) {
-        const u64 first_block = device_addr >> block_shift;
-        const u64 last_block = (device_addr + size - 1) >> block_shift;
-        // Mode 1 (no new VRAM): only where the arena already holds the range.
-        bool resident = true;
-        if (PreuploadMode() != 2) {
-            resident_ranges.ForEachGap(first_block, last_block + 1,
-                                       [&](u64, u64) { resident = false; });
-        }
-        if (resident) {
-            const auto* arena = GetArena(first_block, last_block);
-            EnsureResident(arena, first_block, last_block);
-            SynchronizeMemory(arena, device_addr, size, false, false);
-            TraceBinding(device_addr, size, false, 8);
-            return {arena, arena->Offset(device_addr)};
-        }
     }
     TraceBinding(device_addr, size, false, 9);
     const auto staging = staging_pool.Request(size, VideoCore::MemoryType::HostUncached,
@@ -1365,34 +1284,31 @@ bool BufferCache::IsRegionGpuModified(VAddr addr, size_t size) {
     if (memory_tracker->IsRegionGpuModified(addr, size)) {
         return true;
     }
-    // psport PS_GUEST_IN_PLACE: GPU writes are not tracked per page; one not done yet counts.
+    // psport: GPU writes are not tracked per page; one not done yet counts.
     // So does what the GPU wrote into a VRAM copy (NoteGpuWrite: its data, as a default heap):
     // the game's memory under it is older (issue #122). PS_GPU_DATA_CHECK=0: not counted.
     static const bool gpu_data_check = [] {
         const char* env = std::getenv("PS_GPU_DATA_CHECK");
         return !(env && env[0] == '0');
     }();
-    if (gpu_data_check && GuestInPlace() && !LayerMode() && gpu_written_bytes.Overlaps(addr, addr + size) &&
+    if (gpu_data_check && !LayerMode() && gpu_written_bytes.Overlaps(addr, addr + size) &&
         !IsInPlace(addr, size)) {
         return true;
     }
-    if (GuestInPlace()) {
-        const u64 tick = WriteTicks().Newest(addr, size);
-        if (tick == 0 || scheduler.GetWorkSemaphore()->IsFree(tick)) {
-            return false;
-        }
-        // Asking the driver is a system call, and the GPU command thread asks for thousands of
-        // constant bindings a frame: at most every ~250 us per thread (until then the write
-        // counts as not done, which only takes the slower, always correct path; the GPU signal
-        // thread refreshes the known tick on every fence anyway).
-        thread_local u64 last_refresh = 0;
-        if (const u64 now = __rdtsc(); now - last_refresh > 800000) {
-            last_refresh = now;
-            scheduler.GetWorkSemaphore()->Refresh();
-        }
-        return !scheduler.GetWorkSemaphore()->IsFree(tick);
+    const u64 tick = WriteTicks().Newest(addr, size);
+    if (tick == 0 || scheduler.GetWorkSemaphore()->IsFree(tick)) {
+        return false;
     }
-    return false;
+    // Asking the driver is a system call, and the GPU command thread asks for thousands of
+    // constant bindings a frame: at most every ~250 us per thread (until then the write
+    // counts as not done, which only takes the slower, always correct path; the GPU signal
+    // thread refreshes the known tick on every fence anyway).
+    thread_local u64 last_refresh = 0;
+    if (const u64 now = __rdtsc(); now - last_refresh > 800000) {
+        last_refresh = now;
+        scheduler.GetWorkSemaphore()->Refresh();
+    }
+    return !scheduler.GetWorkSemaphore()->IsFree(tick);
 }
 
 void BufferCache::ProcessFaultBuffer() {
@@ -1486,10 +1402,10 @@ void BufferCache::EnsureResident(const Buffer* arena, u64 first_block, u64 last_
     }
     PsStats::Timer timer{PsStats::g_t_resident};
 
-    // psport PS_GUEST_IN_PLACE: blocks of the game's direct memory are bound to the memory it
-    // lives in; the rest (and everything without it) gets VRAM as before.
+    // psport: blocks of the game's direct memory are bound to the memory it lives in; the rest
+    // gets VRAM.
     std::vector<ResidentBind> binds;
-    if (GuestInPlace()) {
+    {
         IntervalList rest;
         for (const auto& range : bind_ranges) {
             BindInPlace(range.start, range.end, binds, rest, in_place);
@@ -1839,7 +1755,7 @@ void BufferCache::EvictVramBlock(u64 block) {
 
 void BufferCache::ProcessIdleBlocks() {
     const u32 now = PsStats::g_coarse_second.load(std::memory_order_relaxed);
-    if (now == idle_scan_second || !GuestInPlace() || VramIdleSeconds() == 0) {
+    if (now == idle_scan_second || VramIdleSeconds() == 0) {
         return;
     }
     idle_scan_second = now;
@@ -1916,7 +1832,7 @@ void BufferCache::ProcessIdleBlocks() {
     }
 }
 
-bool BufferCache::VramEligible(u64 block, bool garlic_known) {
+bool BufferCache::VramEligible(u64 block) {
     if (!GarlicInVram() || dynamic_blocks.Contains(block)) {
         return false;
     }
@@ -1934,21 +1850,15 @@ bool BufferCache::VramEligible(u64 block, bool garlic_known) {
     if (LayerMode()) {
         return LayerEligible(block);
     }
-    if (!WriteTracking()) {
-        // Every byte last written by a loader or by the GPU.
-        bool known = true;
-        asset_bytes.ForEachGap(block << block_shift, (block + 1) << block_shift,
-                               [&](u64 start, u64 end) {
-                                   known = known && gpu_written_bytes.Contains(start, end);
-                               });
-        // Any memory type: what decides is that every write there is one we hear of (Onion data
-        // the CPU keeps writing is written by code we do not hear of, so it is not known data).
-        return known;
-    }
-    int prot = 0, type = -1;
-    uintptr_t vma_end = 0;
-    return garlic_known ||
-           (runtime_memory_vma_info(block << block_shift, &prot, &type, &vma_end) && type == 3);
+    // Every byte last written by a loader or by the GPU.
+    bool known = true;
+    asset_bytes.ForEachGap(block << block_shift, (block + 1) << block_shift,
+                           [&](u64 start, u64 end) {
+                               known = known && gpu_written_bytes.Contains(start, end);
+                           });
+    // Any memory type: what decides is that every write there is one we hear of (Onion data
+    // the CPU keeps writing is written by code we do not hear of, so it is not known data).
+    return known;
 }
 
 void BufferCache::BindInPlace(u64 start, u64 end, std::vector<ResidentBind>& out,
@@ -1973,15 +1883,10 @@ void BufferCache::BindInPlace(u64 start, u64 end, std::vector<ResidentBind>& out
             const u64 bytes = std::min<u64>({mapping_end - address, chunk->phys + chunk->cb_chunk - phys,
                                              (end - block) << block_shift});
             run = bytes >> block_shift;
-            // The run ends where data may keep a VRAM copy (with write tracking: Garlic, and blocks of
-            // one mapping share its type).
-            int prot = 0, type = -1;
-            uintptr_t vma_end = 0;
-            if (!any_type && GarlicInVram() &&
-                (!WriteTracking() ||
-                 (runtime_memory_vma_info(address, &prot, &type, &vma_end) && type == 3))) {
+            // The run ends where data may keep a VRAM copy.
+            if (!any_type && GarlicInVram()) {
                 for (u64 i = 1; i < run; ++i) {
-                    if (VramEligible(block + i, true)) {
+                    if (VramEligible(block + i)) {
                         run = i;
                         break;
                     }
@@ -2227,7 +2132,7 @@ void BufferCache::NoteLayerMiss(VAddr address, u64 size, bool is_written) {
 }
 
 void BufferCache::NoteAssetWrite(VAddr addr, u64 size) {
-    if (!GuestInPlace() || WriteTracking() || size == 0) {
+    if (size == 0) {
         return;
     }
     std::scoped_lock lk{pending_assets_mutex};
@@ -2238,9 +2143,6 @@ void BufferCache::NoteAssetWrite(VAddr addr, u64 size) {
 void BufferCache::NoteFreshRange(VAddr addr, u64 size) {
     PsStats::g_c_gpu_range_allocs.fetch_add(1, std::memory_order_relaxed);
     PsStats::g_cb_gpu_range_alloc.fetch_add(size, std::memory_order_relaxed);
-    if (!GuestInPlace() || WriteTracking()) {
-        return; // every write is caught, or nothing is bound in place
-    }
     // The GPU's old data there is dead: whole pages inside stop being GPU-modified now, so the
     // writes that follow (announced after the fact) read none of it back over themselves.
     const VAddr pages_start = Common::AlignUp(addr, u64(4096));
@@ -2254,7 +2156,7 @@ void BufferCache::NoteFreshRange(VAddr addr, u64 size) {
 }
 
 void BufferCache::NoteCpuWriteRange(VAddr addr, u64 size) {
-    if (!GuestInPlace() || size == 0) {
+    if (size == 0) {
         return;
     }
     for (VAddr block = addr >> block_shift; block <= (addr + size - 1) >> block_shift; ++block) {
@@ -2333,7 +2235,7 @@ void BufferCache::ProcessPendingAssets() {
 }
 
 void BufferCache::NoteLateCommandWrite(VAddr addr, const void* data, u64 size) {
-    if (!GuestInPlace() || WriteTracking() || size == 0) {
+    if (size == 0) {
         return;
     }
     const auto* bytes = static_cast<const u8*>(data);
@@ -2385,14 +2287,14 @@ void BufferCache::TraceBinding(VAddr addr, u64 size, bool is_written, int kind) 
     trace_report = now;
     std::printf("Trace %#llx-byte GPU buffers (%zu, 5 s): write in place %llu, write VRAM %llu; read "
                 "in place %llu, snapshot %llu, VRAM %llu (sizes %llu-%llu); image source: in place "
-                "%llu, chunk %llu, GPU data %llu, preupload %llu, staging %llu\n",
+                "%llu, chunk %llu, GPU data %llu, staging %llu\n",
                 (unsigned long long)trace_size, traced_ranges.size(),
                 (unsigned long long)trace_counts[0], (unsigned long long)trace_counts[1],
                 (unsigned long long)trace_counts[2], (unsigned long long)trace_counts[3],
                 (unsigned long long)trace_counts[4], (unsigned long long)(trace_max ? trace_min : 0),
                 (unsigned long long)trace_max, (unsigned long long)trace_counts[5],
                 (unsigned long long)trace_counts[6], (unsigned long long)trace_counts[7],
-                (unsigned long long)trace_counts[8], (unsigned long long)trace_counts[9]);
+                (unsigned long long)trace_counts[9]);
     trace_counts = {};
     trace_min = ~0ull;
     trace_max = 0;
@@ -2428,7 +2330,7 @@ void BufferCache::NoteLargeGpuWrite(VAddr addr, u64 size) {
 }
 
 void BufferCache::NotePreciseUpload(VAddr addr, u64 size) {
-    if (!GuestInPlace() || WriteTracking() || size == 0) {
+    if (size == 0) {
         return;
     }
     if (LayerMode()) {
@@ -2494,8 +2396,7 @@ std::optional<std::pair<const Buffer*, u64>> BufferCache::ShadowCopy(VAddr addr,
     constexpr u64 MaxShadow = 4_MB, ShadowRing = 128_MB;
     // A GPU write there not done yet: the copy (through the chunk's own buffer) would not wait
     // for it; the arena is read instead.
-    if (!enabled || !GarlicInVram() || WriteTracking() || size > MaxShadow ||
-        IsRegionGpuModified(addr, size)) {
+    if (!enabled || !GarlicInVram() || size > MaxShadow || IsRegionGpuModified(addr, size)) {
         return std::nullopt;
     }
     if (const u64 tick = scheduler.CurrentTick(); tick != shadow_tick) {
@@ -2535,8 +2436,8 @@ void BufferCache::DropShadows(VAddr addr, u64 size) {
 
 bool BufferCache::UpdateGpuWritten(VAddr addr, std::span<const u8> data) {
     const u64 size = data.size();
-    if (!GuestInPlace() || WriteTracking() || size == 0 || ((addr | size) & 3) != 0 ||
-        IsAnyInPlace(addr, size) || !memory_tracker->IsRegionGpuModified(addr, size)) {
+    if (size == 0 || ((addr | size) & 3) != 0 || IsAnyInPlace(addr, size) ||
+        !memory_tracker->IsRegionGpuModified(addr, size)) {
         return false;
     }
     const u64 first = addr >> block_shift, last = (addr + size - 1) >> block_shift;
@@ -2966,7 +2867,7 @@ void BufferCache::QueuePromotions(u64 submitted) {
 }
 
 void BufferCache::UnmapInPlace(VAddr addr, u64 size) {
-    if (!GuestInPlace() || size == 0) {
+    if (size == 0) {
         return;
     }
     std::scoped_lock lk{pending_unmaps_mutex};
@@ -3045,7 +2946,7 @@ void BufferCache::ProcessPendingUnmaps() {
 }
 
 bool BufferCache::IsInPlace(VAddr addr, u64 size) const {
-    if (!GuestInPlace() || size == 0) {
+    if (size == 0) {
         return false;
     }
     if (LayerMode()) {
@@ -3066,7 +2967,7 @@ bool BufferCache::IsInPlace(VAddr addr, u64 size) const {
 bool BufferCache::SynchronizeMemory(const Buffer* arena, VAddr device_addr, u32 size,
                                     bool is_written, bool is_texel_buffer) {
     boost::container::small_vector<std::pair<vk::Buffer, vk::BufferCopy>, 4> chunk_copies;
-    // psport PS_GUEST_IN_PLACE: the arena is the game's memory there: nothing to upload, no
+    // psport: the arena is the game's memory there: nothing to upload, no
     // write tracking, and GPU writes need no readback. Images aliasing it still sync.
     if (!LayerMode() && IsInPlace(device_addr, size)) {
         return is_texel_buffer && !is_written &&
@@ -3074,8 +2975,8 @@ bool BufferCache::SynchronizeMemory(const Buffer* arena, VAddr device_addr, u32 
     }
     // Partly in place: only the parts in VRAM are synced. An upload over a block in place would
     // write an older copy of the game's memory back into it after the game wrote it again.
-    if (GuestInPlace() && in_place_blocks.Overlaps(device_addr >> block_shift,
-                                                  ((device_addr + size - 1) >> block_shift) + 1)) {
+    if (in_place_blocks.Overlaps(device_addr >> block_shift,
+                                 ((device_addr + size - 1) >> block_shift) + 1)) {
         const VAddr end = device_addr + size;
         bool image = false;
         in_place_blocks.ForEachGap(
@@ -3132,9 +3033,9 @@ bool BufferCache::SynchronizeMemory(const Buffer* arena, VAddr device_addr, u32 
                     total_size_bytes = offset;
                 }
             }
-            // psport PS_GUEST_IN_PLACE: what lies in a guest memory chunk is copied by the GPU
+            // psport: what lies in a guest memory chunk is copied by the GPU
             // straight from it (no CPU copy into staging); the rest goes through staging.
-            if (GuestInPlace() && ChunkUploads() && !copies.empty()) {
+            if (ChunkUploads() && !copies.empty()) {
                 boost::container::small_vector<vk::BufferCopy, 4> staged;
                 u64 staged_bytes = 0;
                 for (const auto& copy : copies) {
@@ -3343,49 +3244,8 @@ bool BufferCache::SynchronizeMemoryFromImage(const Buffer* arena, u64 arena_offs
     DropShadows(device_addr, size);
     // A GPU write like any other: what the GPU copies there each frame (a render target read as a
     // texel buffer) goes to VRAM instead of crossing PCIe twice (written there, read back).
-    if (GuestInPlace() && !WriteTracking()) {
-        NoteGpuWrite(device_addr, size);
-    }
+    NoteGpuWrite(device_addr, size);
     return true;
-}
-
-
-void BufferCache::NotePreuploadMapping(VAddr addr, u64 size, bool mapped) {
-    if (!PreuploadEnabled() || size == 0) {
-        return;
-    }
-    if (mapped) {
-        // Only the game's GPU memory: direct memory of type 3 (write-combined "garlic") that the
-        // GPU may access. Other memory is the CPU's; pre-uploading it would only cost VRAM.
-        int prot = 0, type = -1;
-        uintptr_t end = 0;
-        if (!runtime_memory_vma_info(addr, &prot, &type, &end) || type != 3 || !(prot & 0x30)) {
-            return;
-        }
-    }
-    std::scoped_lock lk{preupload_mutex};
-    const VAddr end = addr + size;
-    // Remove what overlaps [addr, end), keeping the parts outside it.
-    for (auto it = preupload_ranges.lower_bound(addr) == preupload_ranges.begin()
-                       ? preupload_ranges.begin()
-                       : std::prev(preupload_ranges.lower_bound(addr));
-         it != preupload_ranges.end() && it->first < end;) {
-        const VAddr start = it->first, stop = it->second;
-        if (stop <= addr) {
-            ++it;
-            continue;
-        }
-        it = preupload_ranges.erase(it);
-        if (start < addr) {
-            preupload_ranges[start] = addr;
-        }
-        if (stop > end) {
-            preupload_ranges[end] = stop;
-        }
-    }
-    if (mapped) {
-        preupload_ranges[addr] = end;
-    }
 }
 
 void BufferCache::DropTwins(VAddr addr, u64 size) {
@@ -3393,107 +3253,6 @@ void BufferCache::DropTwins(VAddr addr, u64 size) {
         std::scoped_lock lk{twins_mutex};
         EraseTwins(addr, addr + size);
     }
-}
-
-void BufferCache::Preupload(u64 budget) {
-    if (!PreuploadEnabled()) {
-        return;
-    }
-    const bool full = PreuploadMode() == 2;
-    // PS_FRAME_STATS: what the pre-upload put into the arena: regions for the first time, or again
-    // (rewritten by the game since).
-    static u32 report_frame = 0;
-    if (PsStats::g_is_enabled && PsStats::g_frame_number.load(std::memory_order_relaxed) - report_frame >= 600) {
-        report_frame = PsStats::g_frame_number.load(std::memory_order_relaxed);
-        std::printf("Pre-upload: %.1f MB first, %.1f MB again in 600 frames; GPU write twins: %llu "
-                    "writes without waiting, %.1f KB kept for the GPU, %.1f KB written by the game\n",
-                    preupload_first_bytes / 1e6, preupload_again_bytes / 1e6,
-                    (unsigned long long)twin_faults.exchange(0), twin_kept_bytes.exchange(0) / 1e3,
-                    twin_guest_bytes.exchange(0) / 1e3);
-        preupload_first_bytes = preupload_again_bytes = 0;
-    }
-    // Regions written within these frames are left alone: the game is still filling them.
-    constexpr u32 QuietFrames = 10;
-    // Regions looked at per call (CPU time bound): 256 x 4 MiB.
-    constexpr u32 MaxRegions = 256;
-    std::vector<std::pair<VAddr, VAddr>> ranges;
-    {
-        std::scoped_lock lk{preupload_mutex};
-        ranges.assign(preupload_ranges.begin(), preupload_ranges.end());
-    }
-    if (ranges.empty()) {
-        return;
-    }
-    const u32 frame = PsStats::g_frame_number.load(std::memory_order_relaxed);
-    const u32 quiet_since = frame > QuietFrames ? frame - QuietFrames : 0;
-    const u64 uploaded_before = PsStats::g_cb_buffer_upload.load(std::memory_order_relaxed);
-    // Start at the range holding the cursor (or the next one), wrap around once.
-    std::size_t first = 0;
-    while (first < ranges.size() && ranges[first].second <= preupload_cursor) {
-        ++first;
-    }
-    if (first == ranges.size()) {
-        first = 0;
-    }
-    u32 visited = 0;
-    for (std::size_t n = 0; n < ranges.size() && visited < MaxRegions; ++n) {
-        const auto [start, end] = ranges[(first + n) % ranges.size()];
-        VAddr at = n == 0 ? std::max(start, preupload_cursor) : start;
-        if (at >= end) {
-            at = start;
-        }
-        while (at < end && visited < MaxRegions) {
-            const VAddr region = at & ~(TRACKER_HIGHER_PAGE_SIZE - 1);
-            const VAddr stop = std::min(end, region + TRACKER_HIGHER_PAGE_SIZE);
-            ++visited;
-            preupload_cursor = stop;
-            if (memory_tracker->PreuploadCandidate(region, quiet_since, !full)) {
-                const u64 first_block = at >> block_shift;
-                const u64 last_block = (stop - 1) >> block_shift;
-                const auto* arena = GetArena(first_block, last_block);
-                const u64 region_before =
-                    PsStats::g_cb_buffer_upload.load(std::memory_order_relaxed);
-                if (full) {
-                    EnsureResident(arena, first_block, last_block);
-                    SynchronizeMemory(arena, at, static_cast<u32>(stop - at), false, false);
-                } else {
-                    // Mode 1: only the parts already resident in the arena (no new VRAM).
-                    const auto sync = [&](u64 block_begin, u64 block_end) {
-                        const VAddr from = std::max<VAddr>(at, block_begin << block_shift);
-                        const VAddr to = std::min<VAddr>(stop, block_end << block_shift);
-                        if (from < to) {
-                            SynchronizeMemory(arena, from, static_cast<u32>(to - from), false,
-                                              false);
-                        }
-                    };
-                    u64 cursor = first_block;
-                    resident_ranges.ForEachGap(first_block, last_block + 1,
-                                               [&](u64 gap_begin, u64 gap_end) {
-                                                   sync(cursor, gap_begin);
-                                                   cursor = gap_end;
-                                               });
-                    sync(cursor, last_block + 1);
-                }
-                const u64 region_bytes =
-                    PsStats::g_cb_buffer_upload.load(std::memory_order_relaxed) - region_before;
-                if (memory_tracker->NotePreuploaded(region, frame) > 0) {
-                    preupload_again_bytes += region_bytes;
-                } else {
-                    preupload_first_bytes += region_bytes;
-                }
-                const u64 uploaded =
-                    PsStats::g_cb_buffer_upload.load(std::memory_order_relaxed) - uploaded_before;
-                if (uploaded >= budget) {
-                    PsStats::g_cb_preupload.fetch_add(uploaded, std::memory_order_relaxed);
-                    return;
-                }
-            }
-            at = stop;
-        }
-    }
-    PsStats::g_cb_preupload.fetch_add(
-        PsStats::g_cb_buffer_upload.load(std::memory_order_relaxed) - uploaded_before,
-        std::memory_order_relaxed);
 }
 
 void BufferCache::SubmitPendingArenaBinds(Vulkan::SubmitInfo& info) {
@@ -3505,7 +3264,7 @@ void BufferCache::SubmitPendingArenaBinds(Vulkan::SubmitInfo& info) {
         return;
     }
 
-    // psport PS_GUEST_IN_PLACE: blocks moved in place wait for the submission that may still
+    // psport: blocks moved in place wait for the submission that may still
     // upload into their VRAM copy (ProcessDemotions).
     const u64 wait_tick = bind_wait_tick;
     const auto wait_sema = scheduler.GetWorkSemaphore()->Handle();

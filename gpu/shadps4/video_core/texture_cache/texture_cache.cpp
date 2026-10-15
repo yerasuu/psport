@@ -122,13 +122,13 @@ void TextureCache::DownloadImageMemory(ImageId image_id, bool sync) {
         .imageOffset = {0, 0, 0},
         .imageExtent = {image.info.size.width, image.info.size.height, image.info.size.depth},
     };
-    // psport PS_GUEST_IN_PLACE: the GPU copies the image into the game's memory itself, in stream
+    // psport: the GPU copies the image into the game's memory itself, in stream
     // order: before the fences that follow, no wait here and no CPU copy afterwards.
     // Where the memory has a VRAM copy the GPU copies into that copy as well: buffers bound over
     // it read the image's data in stream order (issue #122: motion blur read a render target as a
     // buffer, 0x104ff00000, from a VRAM copy refreshed only once the CPU copy below landed, frames
     // later: the frame smeared while the camera turned). The game's memory still gets it below.
-    if (GuestInPlace() && image.info.guest_address != 0) {
+    if (image.info.guest_address != 0) {
         const auto [arena, offset] =
             buffer_cache.ObtainBuffer(image.info.guest_address, download_size, true);
         image_copy.bufferOffset = offset;
@@ -164,9 +164,7 @@ void TextureCache::DownloadImageMemory(ImageId image_id, bool sync) {
                                                   download.mapped, download_size);
         // psport: synchronous downloads run on the GPU command thread or the draw recording
         // thread; a readback queued to the command thread from either never ran (deadlock).
-        if (!WriteTracking()) {
-            buffer_cache.InvalidateMemory(image.info.guest_address, download_size, true);
-        }
+        buffer_cache.InvalidateMemory(image.info.guest_address, download_size, true);
     } else {
         scheduler.DeferPriorityOperation(
             [this, device_addr = image.info.guest_address, download, download_size] {
@@ -175,9 +173,7 @@ void TextureCache::DownloadImageMemory(ImageId image_id, bool sync) {
                                    PsFreeCheck::ImageDownload);
                 Core::Memory::Instance()->TryWriteBacking(std::bit_cast<u8*>(device_addr),
                                                           download.mapped, download_size);
-                if (!WriteTracking()) {
-                    buffer_cache.InvalidateMemory(device_addr, download_size);
-                }
+                buffer_cache.InvalidateMemory(device_addr, download_size);
                 runtime.GetStagingPool().FreeDeferred(download);
             });
     }

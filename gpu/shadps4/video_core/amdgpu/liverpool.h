@@ -340,14 +340,14 @@ private:
     /// Frames whose graphics submissions are all decoded are reported finished once the GPU has
     /// executed the work recorded so far (GPU command thread).
     void SignalDecodedFrames();
-    /// PS_HONEST_LABELS: GPU idle once the GPU has finished the work up to `generation` and nothing
+    /// GPU idle once the GPU has finished the work up to `generation` and nothing
     /// was submitted since (the interrupt, work_retired).
     void SignalGpuIdle(u64 generation);
     /// psport: false from a submission until its draws and deferred fences are done (stage A
     /// decrements num_submits once it has decoded a submission, before that). Under
     /// submit_mutex with num_submits.
     std::atomic<bool> work_retired{true};
-    /// psport: submissions so far (submit_mutex): PS_HONEST_LABELS GPU idle checks none came since.
+    /// psport: submissions so far (submit_mutex): GPU idle checks none came since.
     u64 submissions_total = 0;
     std::atomic<u32> num_commands{};
     std::atomic<bool> submit_done{};

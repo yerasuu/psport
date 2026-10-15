@@ -17,11 +17,6 @@
  * general fix ("#<number>", checked by gpu/games/game_profile.cpp) and its code lives in
  * gpu/games/<game>/. */
 
-QUIRK(amd_pc_memory_model, HOST,
-      "the PC memory model (the GPU uses the game's memory in place) is measured on AMD GPUs only; the others keep "
-      "the 0.3 model (run.sh, PS_PC_MODEL) unless the layer's memory module or PS_PC_MODEL_ANY_GPU=1 carries it",
-      "#261")
-QUIRK_GPU(amd_pc_memory_model, 0x1002, 0, "", 0, 0xffffffff)
 QUIRK(amd_guest_sparse_arena, HOST,
       "the game's memory in a sparse arena on AMD GPUs, the layer's memory module elsewhere (PS_LAYER_MEMORY): "
       "each rebinding held NVIDIA's GPU for 10 s and more (GTX 1660 Ti, 615.71), while on an RX 7800 XT the module "

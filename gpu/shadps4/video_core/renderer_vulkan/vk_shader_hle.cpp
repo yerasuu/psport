@@ -268,7 +268,7 @@ bool ExecuteShaderHLE(const Shader::Info& info, const AmdGpu::Regs& regs,
     // The game's buffer copy shader, from its profile (games/); nothing else is replaced.
     const u64 copy_shader = Game::BufferCopyShader();
     if (copy_shader != 0 && info.pgm_hash == copy_shader) {
-        // psport: with the game's memory in place the game's shader runs (translated), reading its
+        // psport: the game's shader runs (translated), reading its
         // copy list when the GPU executes it. PS_COPY_SHADER_NATIVE=0: the list read on the CPU
         // when the dispatch is recorded, copies of our own (before). Experiment bit 2 inverts it
         // while the game runs. The layer's paged stores now write through to guest memory while
@@ -276,7 +276,7 @@ bool ExecuteShaderHLE(const Shader::Info& info, const AmdGpu::Regs& regs,
         static const bool native_env = [copy_shader] {
             const char* env = std::getenv("PS_COPY_SHADER_NATIVE");
             const bool native = !env || env[0] != '0';
-            const bool translated = VideoCore::GuestInPlace() && native != PsToggle::Experiment(2);
+            const bool translated = native != PsToggle::Experiment(2);
             std::printf("GPU: buffer copy shader %llx: %s%s (PS_COPY_SHADER_NATIVE=0: HLE)\n",
                         (unsigned long long)copy_shader,
                         translated ? "original translated shader" : "HLE",
@@ -284,7 +284,7 @@ bool ExecuteShaderHLE(const Shader::Info& info, const AmdGpu::Regs& regs,
                             ? ", paged writes through to guest memory" : "");
             return native;
         }();
-        if (VideoCore::GuestInPlace() && native_env != PsToggle::Experiment(2)) {
+        if (native_env != PsToggle::Experiment(2)) {
             return false;
         }
         // Its destinations stay in the game's memory, as when it runs as itself (see

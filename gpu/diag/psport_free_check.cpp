@@ -564,18 +564,13 @@ void Check(u64 va_range, u64 cb_range, const void* p_data, Source source, u64 se
         if (latency > 20000000) {
             s_c_late_20ms.fetch_add(1, std::memory_order_relaxed);
         }
-        // Honest labels (PS_GUEST_IN_PLACE, PS_HONEST_LABELS) are written once the GPU has done the
-        // work: tens of ms after the recording thread are normal there; only stalls are reported.
-        static const u64 s_report_ns = [] {
-            const char* sz_in_place = std::getenv("PS_GUEST_IN_PLACE");
-            const char* sz_honest = std::getenv("PS_HONEST_LABELS");
-            return (sz_in_place && sz_in_place[0] == '1') || (sz_honest && sz_honest[0] == '1') ? 500000000ull
-                                                                                      : 50000000ull;
-        }();
+        // Labels are written once the GPU has done the work: tens of ms after the recording thread
+        // are normal; only stalls are reported.
+        constexpr u64 ReportNs = 500000000;
         if (latency > 50000000) {
             s_c_late_50ms.fetch_add(1, std::memory_order_relaxed);
         }
-        if (latency > s_report_ns) {
+        if (latency > ReportNs) {
             if (s_latency_reports.Take()) {
                 std::fprintf(stderr,
                              "Free check: LATE fence: %s seq %llu at %#llx written %.1f ms after "

@@ -70,7 +70,7 @@ directory from `PS_DATA_DIR` (default the checkout: `out/`, `user/`, `psport.ini
 - for a `psport.ini` `output_res` other than 1080p, chooses between live resolution changes and a
   scene size patched in at start (`PS_RENDER_RES`, `PS_OUTPUT_RES`, `PS_DMEM_MB`): the output
   divided by the upscaler preset's ratio, rounded half to even to an even size;
-- chooses the memory model and driver workarounds from the GPU's `HOST` quirks
+- chooses driver workarounds from the GPU's `HOST` quirks
   (`out/psport-gpu-capabilities --host-env`, [QUIRKS.md](QUIRKS.md)), see [Memory model](#memory-model);
 - passes `PS_SYS_MODULES`, `PS_HLE` and `PS_LLE` as `--system-modules`, `--hle` and `--lle`.
 
@@ -282,19 +282,15 @@ TAA, DLSS): [upscaler.md](upscaler.md). Changes to inherited shadPS4 files:
 
 ### Memory model
 
-Two models coexist on master; `run.sh` picks one when `PS_PC_MODEL` is unset, from the `HOST`
-quirk `amd_pc_memory_model` ([QUIRKS.md](QUIRKS.md)):
-
-| GPU | Default | What it does |
-|---|---|---|
-| AMD (vendor `0x1002`) | `PS_PC_MODEL=1` | the GPU uses the game's memory where it is (GPU-visible system memory, `PS_GUEST_IN_PLACE=1`), keeps often-read data in VRAM, and the command processor's work is translated; AMD keeps the game's memory in a sparse arena |
-| others | `PS_PC_MODEL=0` | bbport 0.3's model: VRAM copies of the game's memory kept current by write tracking |
-
-With `PS_PC_MODEL=1` off AMD, or `PS_LAYER_MEMORY=1`, the memory module in `gpu/layer/` binds the
-game's memory in place and keeps VRAM copies without sparse binding. `PS_GUEST_IN_PLACE` set by
-hand overrides the choice; `PS_AS_0_3=1` reverts to the 0.3 behaviour for comparisons. The 0.3
-model and the emulation paths around it are being retired; the in-place model is the one new work
-targets. Write traps on guest pages are shared by the runtime and the GPU library
+One model on every GPU: the GPU uses the game's memory where it is (GPU-visible system memory),
+keeps often-read data in VRAM, and the command processor's work is translated. AMD keeps the game's
+memory in a sparse arena (`HOST` quirk `amd_guest_sparse_arena`, [QUIRKS.md](QUIRKS.md)); other GPUs
+(and `PS_LAYER_MEMORY=1`) go through the memory module in `gpu/layer/`, which binds the game's
+memory in place without sparse binding, from imported host memory or dma-buf chunks
+(`gpu/memory/psport_guest_memory.cpp`). A driver that can do neither stops the launch with a `Guest
+memory:` line. bbport 0.3's model (VRAM copies kept current by write tracking) is gone;
+`PS_PC_MODEL`, `PS_AS_0_3` and the other switches of the old launcher are ignored with one log line.
+Write traps on guest pages are shared by the runtime and the GPU library
 (`gpu/layer/pslayer_write_traps.h`, `runtime_memory_trap`).
 
 ## Game profiles

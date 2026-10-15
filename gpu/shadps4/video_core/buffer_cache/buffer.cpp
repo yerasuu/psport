@@ -108,43 +108,29 @@ void UniqueBuffer::Create(vk::BufferCreateInfo& buffer_ci, MemoryType mem_type,
     } else {
         buffer_ci.flags |=
             vk::BufferCreateFlagBits::eSparseBinding | vk::BufferCreateFlagBits::eSparseResidency;
-        // Bound to exported guest memory chunks (PS_GUEST_IN_PLACE) as well as VRAM blocks.
+        // Bound to exported guest memory chunks as well as VRAM blocks.
         const vk::ExternalMemoryBufferCreateInfo external{
             .handleTypes = PsGuestMemory::HandleType(),
         };
-        if (GuestInPlace()) {
-            buffer_ci.pNext = &external;
-            if (const auto [result, created] = device.createBuffer(buffer_ci);
-                result == vk::Result::eSuccess) {
-                buffer = created;
-                // psport: VRAM blocks are bound into it too: the external memory type must not
-                // keep device-local memory out (a driver may restrict it).
-                const auto reqs = device.getBufferMemoryRequirements(created);
-                const VkPhysicalDeviceMemoryProperties* props = nullptr;
-                vmaGetMemoryProperties(allocator, &props);
-                bool vram = false;
-                for (u32 i = 0; i < props->memoryTypeCount; ++i) {
-                    vram |= (reqs.memoryTypeBits & (1u << i)) &&
-                            (props->memoryTypes[i].propertyFlags &
-                             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-                }
-                if (!vram) {
-                    std::printf("Guest memory: the arena for guest memory cannot take VRAM; the GPU "
-                                "uses copies in VRAM as before\n");
-                    device.destroyBuffer(created);
-                    buffer = vk::Buffer{};
-                    DisableGuestInPlace();
-                }
-            } else {
-                std::printf("Guest memory: the arena cannot take exported memory (%s); the GPU "
-                            "uses copies in VRAM as before\n",
-                            vk::to_string(result).c_str());
-                DisableGuestInPlace();
-            }
-            buffer_ci.pNext = nullptr;
+        buffer_ci.pNext = &external;
+        const auto [result, created] = device.createBuffer(buffer_ci);
+        if (result != vk::Result::eSuccess) {
+            PsGuestMemory::Unsupported("the arena cannot take exported memory (" +
+                                       vk::to_string(result) + ")");
         }
-        if (!buffer) {
-            buffer = Vulkan::Check(device.createBuffer(buffer_ci));
+        buffer = created;
+        // psport: VRAM blocks are bound into it too: the external memory type must not keep
+        // device-local memory out (a driver may restrict it).
+        const auto reqs = device.getBufferMemoryRequirements(created);
+        const VkPhysicalDeviceMemoryProperties* props = nullptr;
+        vmaGetMemoryProperties(allocator, &props);
+        bool vram = false;
+        for (u32 i = 0; i < props->memoryTypeCount; ++i) {
+            vram |= (reqs.memoryTypeBits & (1u << i)) &&
+                    (props->memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        }
+        if (!vram) {
+            PsGuestMemory::Unsupported("the arena for guest memory cannot take VRAM");
         }
     }
 
@@ -202,7 +188,7 @@ Buffer::Buffer(const Vulkan::Instance& instance, VAddr cpu_addr_, u64 size_bytes
       buffer{instance.GetDevice(), instance.GetAllocator()} {
 
     // An in-place arena is bound to external memory, which may not take stream-out usage.
-    const vk::BufferUsageFlags xfb_usage = mem_type == MemoryType::Sparse && GuestInPlace()
+    const vk::BufferUsageFlags xfb_usage = mem_type == MemoryType::Sparse
                                                ? PsGuestMemory::TransformFeedbackUsage(instance)
                                                : instance.GetTransformFeedbackBufferUsage();
     vk::BufferCreateInfo buffer_ci = {

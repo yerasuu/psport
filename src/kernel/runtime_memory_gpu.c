@@ -79,7 +79,7 @@ void runtime_memory_note_write(uintptr_t va_range, uint64_t cb_range) {
     GpuRange pfn_hook=s_pfn_hook_note_write ? s_pfn_hook_note_write : g_pfn_hook_invalidate;
     for (int i=0;i<c_ranges;++i) pfn_hook(starts[i],ends[i]-starts[i]);
 }
-/* psport PS_GUEST_IN_PLACE without page protection: pages whose CPU writes the GPU side must hear
+/* psport, without page protection: pages whose CPU writes the GPU side must hear
  * of (a VRAM copy of them, a texture made from them), one bit per 4 KiB page below 2^40. The GPU
  * side sets and clears them where it used to protect; the writers it cannot see coming (libc
  * imports, file reads, hooked game code) check them after writing and tell it, as a driver is
@@ -206,7 +206,7 @@ unsigned runtime_memory_trap_reasons(uintptr_t va_guest) {
     const uint8_t *p_table=__atomic_load_n(&s_p_trap_reasons,__ATOMIC_ACQUIRE);
     return p_table && va_guest<TRAP_LIMIT ? __atomic_load_n(&p_table[va_guest>>12],__ATOMIC_ACQUIRE) : 0;
 }
-/* psport: where direct memory at a guest address lives (PS_GUEST_IN_PLACE: the GPU uses the game's
+/* psport: where direct memory at a guest address lives (the GPU uses the game's
  * memory where it is): its offset in direct memory and the end of the mapping, which is contiguous
  * there. 0 for anything else (flexible memory, reserved or unmapped addresses). */
 int runtime_memory_direct_phys(uintptr_t va_guest, uint64_t *p_phys, uintptr_t *p_end) {

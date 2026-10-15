@@ -512,14 +512,14 @@ void VideoOutDriver::Flip(const Request& req) {
                 std::fprintf(file, "t_s,frame_ms,present_wait_ms,tick_wait_ms,stage_a_cpu_ms,"
                                    "images,image_mb,buffer_mb,protect_ms,resident_ms,create_ms,"
                                    "refresh_ms,write_fault_ms,read_faults,guest_copy_mb,draws,"
-                                   "dispatches,submissions,compiles,preupload_mb,kernel_ms,alloc_mb,"
+                                   "dispatches,submissions,compiles,kernel_ms,alloc_mb,"
                                    "free_mb\n");
             }
             return file;
         }();
         if (frame_log) {
             static const auto log_start = now;
-            static u64 log_twf, log_tick, log_present, log_compiles, log_rf, log_preupload;
+            static u64 log_twf, log_tick, log_present, log_compiles, log_rf;
             static u64 log_alloc, log_free;
             const u64 tick = PsStats::g_tick_wait_ns.load(), present = PsStats::g_present_wait_ns.load();
             const u64 compiles_now = Vulkan::g_bb_compiles.load();
@@ -531,7 +531,7 @@ void VideoOutDriver::Flip(const Request& req) {
             };
             std::fprintf(frame_log,
                          "%.4f,%.2f,%.2f,%.2f,%.2f,%llu,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%llu,"
-                         "%.2f,%llu,%llu,%llu,%llu,%.2f,%.2f,%.1f,%.1f\n",
+                         "%.2f,%llu,%llu,%llu,%llu,%.2f,%.1f,%.1f\n",
                          std::chrono::duration<double>(now - log_start).count(), frame_ms,
                          delta(present, log_present) / 1e6, delta(tick, log_tick) / 1e6,
                          last_gpu_ns ? (gpu_ns - last_gpu_ns) / 1e6 : 0.0,
@@ -546,7 +546,6 @@ void VideoOutDriver::Flip(const Request& req) {
                          static_cast<unsigned long long>(dispatches - last_dispatches),
                          static_cast<unsigned long long>(subs - last_subs),
                          static_cast<unsigned long long>(delta(compiles_now, log_compiles)),
-                         delta(PsStats::g_cb_preupload.load(), log_preupload) / 1e6,
                          last_gpu_ns ? (sys_us - last_sys) / 1e3 : 0.0,
                          delta(PsStats::g_cb_device_alloc.load(), log_alloc) / 1e6,
                          delta(PsStats::g_cb_device_free.load(), log_free) / 1e6);

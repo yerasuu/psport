@@ -500,46 +500,35 @@ double MappedReadSpeed(const volatile std::uint64_t* p_words, u64 cb_range) {
 namespace {
 /// The GPU's choice of LayerMemory without PS_LAYER_MEMORY: -1 not known yet, 0 or 1.
 std::atomic<int> s_layer_default{-1};
+
+/// The sparse arena (PS_LAYER_MEMORY=0) where amd_guest_sparse_arena applies, the layer's memory
+/// module everywhere else. On NVIDIA its host memory import works, but each rebinding of the
+/// game's memory in the arena (vkQueueBindSparse, blocks moved to and from VRAM) held the GPU for
+/// 10 s and more, the desktop frozen with it (GTX 1660 Ti, driver 615.71): the Linux driver's
+/// sparse binding has slowed down since 555, the time growing with the pages already bound (NVIDIA
+/// developer forum, "Sparse texture binding is painfully slow"). On an RX 7800 XT the module was on
+/// par with the arena on a route in Yharnam, but in the Hunter's Dream it kept ~1 GB of the area's
+/// data out of VRAM (ranges with a few unannounced blocks stay in place without volatile blocks):
+/// 100 FPS against ~200.
+void ChooseLayerDefault(const Vulkan::Instance& instance) {
+    const std::uint32_t vendor = instance.GetVendorID();
+    s_layer_default.store(PsQuirk::Active(RUNTIME_QUIRK_amd_guest_sparse_arena) ? 0 : 1,
+                          std::memory_order_relaxed);
+    std::printf("Guest memory: the game's memory in place on this GPU (vendor 0x%04x), %s\n",
+                vendor,
+                LayerMemory() ? "through the layer's memory module (no sparse binding)"
+                              : "in a sparse arena (PS_LAYER_MEMORY=1: the layer's memory module)");
+}
 } // namespace
 
-bool PcModelGpu(const Vulkan::Instance& instance) {
-    static const bool s_is_ok = [&] {
-        // The layer's memory module on every GPU; the startup checks in Usable() decide whether
-        // the driver can do it. The sparse arena (PS_LAYER_MEMORY=0) is for AMD; not on NVIDIA
-        // (only with PS_PC_MODEL_ANY_GPU=1):
-        // its host memory import passes those checks, but each rebinding of the game's memory (vkQueueBindSparse, blocks moved to and from VRAM) held the GPU for 10 s
-        // and more, the desktop frozen with it (GTX 1660 Ti, driver 615.71). The Linux driver's
-        // sparse binding has slowed down since 555: the time grows with the pages already bound
-        // (NVIDIA developer forum, "Sparse texture binding is painfully slow"), and the arena has
-        // gigabytes of 64 KiB pages bound. Without rebinding (PS_FIXED_ARENA=1, all in place) the
-        // GPU reads the game's data over the bus: 48 FPS against 210 on an RX 7800 XT.
-        constexpr std::uint32_t NvidiaVendor = 0x10de;
-        const std::uint32_t vendor = instance.GetVendorID();
-        const char* sz_any = std::getenv("PS_PC_MODEL_ANY_GPU");
-        // The sparse arena where amd_guest_sparse_arena applies, the layer's memory module (no
-        // sparse binding of the game's memory, see LayerMemory) elsewhere; PS_LAYER_MEMORY=1/0 by
-        // hand. On an RX 7800 XT the module was on par with the arena on a route in Yharnam, but in
-        // the Hunter's Dream it kept ~1 GB of the area's data out of VRAM (ranges with a few
-        // unannounced blocks stay in place without volatile blocks): 100 FPS against ~200.
-        s_layer_default.store(PsQuirk::Active(RUNTIME_QUIRK_amd_guest_sparse_arena) ? 0 : 1,
-                              std::memory_order_relaxed);
-        if (LayerMemory()) {
-            std::printf("Guest memory: the new memory model through the layer's memory module on "
-                        "this GPU (vendor 0x%04x): no sparse binding of the game's memory\n",
-                        vendor);
-        }
-        if (PsQuirk::Active(RUNTIME_QUIRK_amd_pc_memory_model) || LayerMemory() ||
-            (sz_any && sz_any[0] == '1')) {
-            return true;
-        }
-        std::printf("Guest memory: the new memory model is for AMD GPUs%s; this GPU (vendor "
-                    "0x%04x) uses the model of 0.3 (PS_PC_MODEL_ANY_GPU=1: try it)\n",
-                    vendor == NvidiaVendor ? " (NVIDIA: rebinding memory holds the GPU for seconds)"
-                                           : "",
-                    vendor);
-        return false;
-    }();
-    return s_is_ok;
+void Unsupported(const std::string& why) {
+    std::printf("Guest memory: %s. The port needs the GPU to use the game's memory in place: a "
+                "driver that imports host memory (VK_EXT_external_memory_host) or exports "
+                "mappable dma-buf memory\n",
+                why.c_str());
+    std::fflush(stdout);
+    std::fflush(stderr);
+    std::_Exit(1);
 }
 
 bool HostImported() {
@@ -547,8 +536,7 @@ bool HostImported() {
 }
 
 bool LayerMemory() {
-    // PS_LAYER_MEMORY=1/0 chooses; else PcModelGpu (which asks first) sets the module for every GPU
-    // (PS_LAYER_MEMORY=0: the sparse arena; NVIDIA's sparse binding stalls for seconds).
+    // PS_LAYER_MEMORY=1/0 chooses; else Usable (which asks first) sets it by GPU.
     static const bool s_is_on = [] {
         const char* sz_env = std::getenv("PS_LAYER_MEMORY");
         if (sz_env && *sz_env) {
@@ -700,6 +688,7 @@ vk::BufferUsageFlags ExternalXfbUsage(const Vulkan::Instance& instance,
 
 bool Usable(const Vulkan::Instance& instance) {
     static const bool s_is_usable = [&] {
+        ChooseLayerDefault(instance);
         s_device = instance.GetDevice();
         s_memory_properties = instance.GetPhysicalDevice().getMemoryProperties();
         s_xfb_dmabuf = ExternalXfbUsage(instance, vk::ExternalMemoryHandleTypeFlagBits::eDmaBufEXT);
@@ -748,22 +737,15 @@ vk::BufferUsageFlags TransformFeedbackUsage(const Vulkan::Instance& instance) {
 }
 
 void Install(const Vulkan::Instance& instance) {
-    // PS_GUEST_IN_PLACE (the GPU uses this memory in place) needs it too.
-    const char* sz_env = std::getenv("PS_GUEST_GPU_MEMORY");
-    const char* sz_in_place = std::getenv("PS_GUEST_IN_PLACE");
-    if (!(sz_env && sz_env[0] == '1') && !(sz_in_place && sz_in_place[0] == '1' && PcModelGpu(instance))) {
-        return;
-    }
     if (!Usable(instance)) {
-        std::printf("Guest memory: direct memory stays in the memfd\n");
-        return;
+        Unsupported("direct memory cannot be shared with this driver");
     }
     const bool is_host = s_mode == Mode::HostImport;
     // One chunk per direct allocation where the dma-buf maps at offset 0 only, and with the
     // layer's memory module (a mapping then lies whole in one chunk buffer).
     runtime_memory_set_guest_chunk_whole(LayerMemory() || (!is_host && s_is_whole_only) ? 1 : 0);
     runtime_memory_set_guest_chunk_allocator(is_host ? &AllocImported : &AllocChunk);
-    std::printf("Guest memory: direct memory chunks come from Vulkan (PS_GUEST_GPU_MEMORY=1)\n");
+    std::printf("Guest memory: direct memory chunks come from Vulkan\n");
 }
 
 const Chunk* Find(std::uint64_t phys) {

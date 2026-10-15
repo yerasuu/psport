@@ -34,7 +34,6 @@ enum : std::uint64_t {
     HotPages = 32768,
     FaultWindow = 65536,
     ParallelCopies = 131072,
-    AsyncFences = 262144,
     PoolSmallCopies = 524288,
     RecordPrefetch = 1ull << 32,
     TextureViewMemo = 1ull << 33,
@@ -45,7 +44,6 @@ enum : std::uint64_t {
     PipelinedTasks = 1ull << 38,
     PendingFenceWaits = 1ull << 39,
     PipelinedDispatch = 1ull << 40,
-    RecorderFences = 1ull << 41,
     PipelinedMemoryWrites = 1ull << 42,
     MultiCopyShader = 1ull << 43,
     RenderStateMemo = 1ull << 44,
@@ -104,9 +102,9 @@ namespace PsStats {
 inline std::atomic<std::uint64_t> g_c_tracker_faults{0};
 /// Writes the GPU side heard of from the writers (libc copies over watched pages, no write tracking).
 inline std::atomic<std::uint64_t> g_c_cpu_write_notes{0}, g_cb_cpu_write_note{0};
-/// Ranges the game's GPU memory allocator handed out (guest hook, PS_GUEST_IN_PLACE).
+/// Ranges the game's GPU memory allocator handed out (guest hook).
 inline std::atomic<std::uint64_t> g_c_gpu_range_allocs{0}, g_cb_gpu_range_alloc{0};
-/// Buffer bindings (PS_GUEST_IN_PLACE): bytes bound where the game's memory is (read over PCIe on a
+/// Buffer bindings: bytes bound where the game's memory is (read over PCIe on a
 /// discrete GPU) and bytes bound to VRAM copies.
 inline std::atomic<std::uint64_t> g_cb_bound_in_place{0}, g_cb_bound_vram{0};
 inline std::atomic<std::uint64_t> g_cb_bound_in_place_written{0};
@@ -114,9 +112,9 @@ inline std::atomic<std::uint64_t> g_cb_bound_in_place_written{0};
 /// back to the game's memory before moving in place; downloads of GPU data (readbacks).
 inline std::atomic<std::uint64_t> g_c_gpu_data_updates{0}, g_c_copied_back_blocks{0}, g_c_readbacks{0};
 inline std::atomic<std::uint64_t> g_c_late_vram_writes{0}; ///< labels and the like put into VRAM copies
-/// PS_GUEST_IN_PLACE: copies of in-place data the CPU writes into VRAM for reading (ShadowCopy).
+/// Copies of in-place data the CPU writes into VRAM for reading (ShadowCopy).
 inline std::atomic<std::uint64_t> g_c_shadow_copies{0}, g_cb_shadow{0};
-/// PS_HONEST_LABELS: submissions sent early because the GPU had finished everything before them.
+/// Submissions sent early because the GPU had finished everything before them.
 inline std::atomic<std::uint64_t> g_c_idle_flushes{0};
 /// EOP fences with data: decoded, and their labels written (a growing gap: lost fences, guest leaks).
 inline std::atomic<std::uint64_t> g_eop_decoded{0}, g_eop_written{0}, g_c_gpu_labels{0};
@@ -181,9 +179,8 @@ inline std::atomic<std::uint64_t> g_sync_recording_ns{0}, g_host_copies_wait_ns{
 /// Wall time the frame preparation waited for the GPU to finish an earlier frame (PS_FRAMES_AHEAD):
 /// how GPU-bound the frames are (PS_FRAME_LOG).
 inline std::atomic<std::uint64_t> g_present_wait_ns{0};
-/// Frames shown (Presenter::PrepareFrame), and bytes the background pre-upload put into the arena.
+/// Frames shown (Presenter::PrepareFrame).
 inline std::atomic<std::uint32_t> g_frame_number{0};
-inline std::atomic<std::uint64_t> g_cb_preupload{0};
 /// Device memory allocated (VMA blocks, arena residency) and freed, bytes.
 inline std::atomic<std::uint64_t> g_cb_device_alloc{0}, g_cb_device_free{0};
 /// Memory statistics: registered images (their guest size) and how many; the buffer cache's VRAM

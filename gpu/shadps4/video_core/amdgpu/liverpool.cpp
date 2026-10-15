@@ -133,11 +133,10 @@ void Liverpool::Process(std::stop_token stoken) {
 #endif
 
     while (!stoken.stop_requested()) {
-        // PS_HONEST_LABELS: fences (and GPU idle) wait for work not submitted yet. Submitted once
-        // this thread has had nothing to do for 0.2 ms: the guest may be waiting for them.
+        // Fences (and GPU idle) wait for work not submitted yet. Submitted once this thread has
+        // had nothing to do for 0.2 ms: the guest may be waiting for them.
         // PS_PIPE_SIGNALS: signals may still be on their way to the recording thread (tasks).
-        if (rasterizer && Vulkan::Rasterizer::HonestLabels() &&
-            (rasterizer->HasUnsubmittedSignals() || !rasterizer->DrawPipeIdle())) {
+        if (rasterizer && (rasterizer->HasUnsubmittedSignals() || !rasterizer->DrawPipeIdle())) {
             std::unique_lock lk{submit_mutex};
             static const auto idle_wait = std::chrono::microseconds([] {
                 const char* env = std::getenv("PS_HONEST_IDLE_US");
@@ -266,9 +265,9 @@ void Liverpool::Process(std::stop_token stoken) {
 
         // psport: the guest takes GPU idle (sceGnmSubmitDone) as its work being done and frees
         // the objects that hold its fence labels. The labels must be written before: the draw
-        // recording thread and the fences it deferred to the Vulkan recording thread
-        // (RecorderFences). Else a late fence write lands in freed memory (a corrupted guest
-        // heap free list after minutes of play).
+        // recording thread and the fences it deferred to the Vulkan recording thread. Else a late
+        // fence write lands in freed memory (a corrupted guest heap free list after minutes of
+        // play).
         // The same holds when sceGnmSubmitDone finds the GPU idle and does not block at all:
         // decoded (num_submits 0) is not done until then (work_retired).
         // PS_PIPE_SIGNALS: the recording thread does both in order (a task below) instead.
@@ -283,9 +282,9 @@ void Liverpool::Process(std::stop_token stoken) {
         // that frame's labels and command buffers: late fences in its heap (a guest fault in its
         // allocator) and reused command buffers decoded as garbage ("PM4 type 0"). The loop
         // runs again for the new submissions and signals once they are done.
-        // PS_HONEST_LABELS: idle once the GPU has finished what was recorded (its fences written)
-        // and nothing was submitted since; the work is submitted below if this thread stays idle.
-        if (rasterizer && Vulkan::Rasterizer::HonestLabels()) {
+        // Idle once the GPU has finished what was recorded (its fences written) and nothing was
+        // submitted since; the work is submitted below if this thread stays idle.
+        if (rasterizer) {
             u64 generation;
             {
                 std::scoped_lock lk{submit_mutex};
@@ -444,63 +443,40 @@ void RunEventWriteEop(Vulkan::Rasterizer& rasterizer, const u8* data) {
     // PS_FREE_CHECK: the order of the fences in the command stream, checked where they land.
     const u64 seq = PsFreeCheck::NextFenceSeq();
     rasterizer.ProcessDownloadImages();
-    // PS_HONEST_LABELS: written once the GPU has finished the work before it, as the hardware
-    // does (an end-of-pipe event), instead of when that work is recorded.
+    // Written once the GPU has finished the work before it, as the hardware does (an
+    // end-of-pipe event), instead of when that work is recorded.
     // psport: a timestamp without an interrupt: the GPU's own clock at the end of the pipe.
-    if (Vulkan::Rasterizer::HonestLabels() && eop.data_sel.Value() == DataSelect::GpuClock64 &&
+    if (eop.data_sel.Value() == DataSelect::GpuClock64 &&
         eop.int_sel.Value() == InterruptSelect::None &&
         rasterizer.WriteTimestampOnGpu(reinterpret_cast<VAddr>(eop.Address<u8>()), true)) {
         PsStats::g_eop_written.fetch_add(1, std::memory_order_relaxed);
         return;
     }
-    if (Vulkan::Rasterizer::HonestLabels()) {
-        const bool writes = eop.data_sel.Value() != DataSelect::None;
-        const u64 value = eop.data_sel.Value() == DataSelect::Data32Low ? eop.DataDWord()
-                                                                        : eop.DataQWord();
-        // psport: the GPU writes the label at the end of the pipe, as the command processor does,
-        // also when an interrupt follows (the CPU raises it once the GPU is done): written by the
-        // CPU then, it landed after the GPU's later labels to the same address and set it back.
-        if ((eop.data_sel.Value() == DataSelect::Data32Low ||
-             eop.data_sel.Value() == DataSelect::Data64) &&
-            (eop.int_sel.Value() == InterruptSelect::None ||
-             eop.int_sel.Value() == InterruptSelect::IrqWhenWriteConfirm) &&
-            rasterizer.WriteLabelOnGpu(reinterpret_cast<VAddr>(eop.Address<u8>()), value,
-                                       eop.data_sel.Value() == DataSelect::Data32Low ? 4 : 8)) {
-            PsStats::g_eop_written.fetch_add(1, std::memory_order_relaxed);
-            if (eop.int_sel.Value() != InterruptSelect::None) {
-                rasterizer.SignalAfterGpu(
-                    [] { Platform::IrqC::Instance()->Signal(Platform::InterruptId::GfxEop); });
-            }
-            return;
+    const bool writes = eop.data_sel.Value() != DataSelect::None;
+    const u64 value =
+        eop.data_sel.Value() == DataSelect::Data32Low ? eop.DataDWord() : eop.DataQWord();
+    // psport: the GPU writes the label at the end of the pipe, as the command processor does,
+    // also when an interrupt follows (the CPU raises it once the GPU is done): written by the
+    // CPU then, it landed after the GPU's later labels to the same address and set it back.
+    if ((eop.data_sel.Value() == DataSelect::Data32Low ||
+         eop.data_sel.Value() == DataSelect::Data64) &&
+        (eop.int_sel.Value() == InterruptSelect::None ||
+         eop.int_sel.Value() == InterruptSelect::IrqWhenWriteConfirm) &&
+        rasterizer.WriteLabelOnGpu(reinterpret_cast<VAddr>(eop.Address<u8>()), value,
+                                   eop.data_sel.Value() == DataSelect::Data32Low ? 4 : 8)) {
+        PsStats::g_eop_written.fetch_add(1, std::memory_order_relaxed);
+        if (eop.int_sel.Value() != InterruptSelect::None) {
+            rasterizer.SignalAfterGpu(
+                [] { Platform::IrqC::Instance()->Signal(Platform::InterruptId::GfxEop); });
         }
-        rasterizer.SignalAfterGpu([eop, seq] { SignalEop(eop, seq); },
-                                  writes ? reinterpret_cast<VAddr>(eop.Address<u8>()) : 0, value);
         return;
     }
-    // Guest memory copies on the copy threads precede the fence the guest sees.
-    // PS_ASYNC_FENCES=1 writes it once they are done instead of waiting for them; measured
-    // slower (79 vs 83 FPS): the guest waits on these fences, and later fences stall it more
-    // than the wait costs.
-    static const bool async_fences = [] {
-        const char* env = std::getenv("PS_ASYNC_FENCES");
-        return env && env[0] == '1';
-    }();
-    if (async_fences && !PsToggle::Disabled(PsToggle::AsyncFences)) {
-        PsCopy::AfterCopies([eop, seq] { SignalEop(eop, seq); });
-    } else if (Vulkan::DrawPipe::OnStageB() && !PsToggle::Disabled(PsToggle::RecorderFences)) {
-        // The draw recording thread does not wait: the Vulkan recording thread signals the
-        // fence after the copies queued before it.
-        rasterizer.SignalAfterHostCopies([eop, seq] { SignalEop(eop, seq); });
-    } else {
-        // Labels are written in order: not before the ones deferred to the recording thread.
-        rasterizer.WaitHostCopies();
-        rasterizer.WaitDeferredSignals();
-        SignalEop(eop, seq);
-    }
+    rasterizer.SignalAfterGpu([eop, seq] { SignalEop(eop, seq); },
+                              writes ? reinterpret_cast<VAddr>(eop.Address<u8>()) : 0, value);
 }
 
-// psport: a MEM_SEMAPHORE signal once the GPU has finished the work before it, in stream order
-// (PS_HONEST_LABELS), as the command processor gives it when it gets there: signalled when decoded
+// psport: a MEM_SEMAPHORE signal once the GPU has finished the work before it, in stream order,
+// as the command processor gives it when it gets there: signalled when decoded
 // (a frame ahead of the GPU), a queue waiting on it would read what that work had not written
 // yet. PS_MEM_SEMAPHORE_ORDER=0: when decoded (as before).
 bool MemSemaphoreInOrder() {
@@ -508,7 +484,7 @@ bool MemSemaphoreInOrder() {
         const char* env = std::getenv("PS_MEM_SEMAPHORE_ORDER");
         return !(env && env[0] == '0');
     }();
-    return on && Vulkan::Rasterizer::HonestLabels();
+    return on;
 }
 
 void RunMemSemaphoreSignal(Vulkan::Rasterizer& rasterizer, const u8* data) {
@@ -631,7 +607,7 @@ void RunGpuClockCopy(Vulkan::Rasterizer& rasterizer, const u8* data) {
 void RunWriteData(Vulkan::Rasterizer& rasterizer, const u8* data) {
     const auto* header = reinterpret_cast<const PM4Header*>(data);
     const auto* write_data = reinterpret_cast<const PM4CmdWriteData*>(data);
-    // psport PS_GUEST_IN_PLACE: the GPU writes it in stream order, as the command processor
+    // psport: the GPU writes it in stream order, as the command processor
     // does. A CPU store here lands before the GPU has run the work recorded before it, which may
     // still read the old value (the game orders such writes after its own fences and
     // WAIT_REG_MEMs, which this thread takes as met in stream order).
@@ -641,7 +617,7 @@ void RunWriteData(Vulkan::Rasterizer& rasterizer, const u8* data) {
     }
     // Copies deferred to the recording thread that read this range precede the write (the
     // command processor's writes do not wait for earlier draws: the game cannot take one for
-    // a sign that the GPU is past them); fences deferred to it (RecorderFences) precede writes
+    // a sign that the GPU is past them); fences deferred to it precede writes
     // the guest sees.
     rasterizer.WaitHostCopiesFor(write_data->Address<VAddr>(),
                                  (header->type3.count.Value() - 2) * sizeof(u32));
@@ -673,9 +649,8 @@ void WriteEosLabel(void* address, u64 value, u32 num_bytes) {
 
 void RunEventWriteEos(Vulkan::Rasterizer& rasterizer, const u8* data) {
     const auto& event_eos = *reinterpret_cast<const PM4CmdEventWriteEos*>(data);
-    // PS_HONEST_LABELS: end of shader work, so written once the GPU has finished it.
-    if (Vulkan::Rasterizer::HonestLabels() &&
-        event_eos.command == PM4CmdEventWriteEos::Command::SignalFence) {
+    // End of shader work, so written once the GPU has finished it.
+    if (event_eos.command == PM4CmdEventWriteEos::Command::SignalFence) {
         rasterizer.ProcessDownloadImages();
         if (rasterizer.WriteLabelOnGpu(reinterpret_cast<VAddr>(event_eos.Address()),
                                        event_eos.DataDWord(), sizeof(u32))) {
@@ -693,20 +668,10 @@ void RunEventWriteEos(Vulkan::Rasterizer& rasterizer, const u8* data) {
     event_eos.SignalFence(&WriteEosLabel);
     if (event_eos.command == PM4CmdEventWriteEos::Command::GdsStore) {
         ASSERT(event_eos.size == 1);
-        // psport PS_GUEST_IN_PLACE: a GPU copy from GDS in stream order, as the command processor
-        // stores it, instead of waiting for the whole GPU and storing on the CPU.
-        if (VideoCore::GuestInPlace()) {
-            rasterizer.CopyBuffer(reinterpret_cast<VAddr>(event_eos.Address()),
-                                  event_eos.gds_index * sizeof(u32), sizeof(u32), false, true);
-            return;
-        }
-        rasterizer.Finish();
-        const u32 value = rasterizer.ReadDataFromGds(event_eos.gds_index);
-        PsFreeCheck::Check(reinterpret_cast<u64>(event_eos.Address()), sizeof(u32), &value,
-                           PsFreeCheck::EosGds);
-        PsFreeCheck::NoteFenceWriting(reinterpret_cast<u64>(event_eos.Address()));
-        *event_eos.Address() = value;
-        PsFreeCheck::NoteFenceWritten(reinterpret_cast<u64>(event_eos.Address()));
+        // psport: a GPU copy from GDS in stream order, as the command processor stores it,
+        // instead of waiting for the whole GPU and storing on the CPU.
+        rasterizer.CopyBuffer(reinterpret_cast<VAddr>(event_eos.Address()),
+                              event_eos.gds_index * sizeof(u32), sizeof(u32), false, true);
     }
 }
 } // namespace
@@ -752,9 +717,9 @@ bool Liverpool::PendingFenceValue(VAddr address, u32& value) {
             return true;
         }
     }
-    // PS_HONEST_LABELS: past the recording thread, a fence waits for the GPU to finish the work
-    // before it; in stream order it is met already.
-    if (Vulkan::Rasterizer::HonestLabels() && rasterizer) {
+    // Past the recording thread, a fence waits for the GPU to finish the work before it; in
+    // stream order it is met already.
+    if (rasterizer) {
         u64 data = 0;
         if (rasterizer->PendingSignalValue(address, data)) {
             value = static_cast<u32>(data);
@@ -809,9 +774,9 @@ Liverpool::Task Liverpool::ProcessCeUpdate(std::span<const u32> ccb) {
                                PsFreeCheck::ConstRam);
             memcpy(dump_const->Address<void*>(),
                    cblock.constants_heap.data() + dump_const->Offset(), dump_const->Size());
-            // psport: no write tracking (PS_GUEST_IN_PLACE): the caches hear of it (in order, on the
-            // recording thread).
-            if (rasterizer && !VideoCore::WriteTracking()) {
+            // psport: no write tracking: the caches hear of it (in order, on the recording
+            // thread).
+            if (rasterizer) {
                 rasterizer->NoteCommandWriteInOrder(dump_const->Address<VAddr>(),
                                                     cblock.constants_heap.data() + dump_const->Offset(),
                                                     dump_const->Size());
@@ -2041,8 +2006,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                 default:
                     break;
                 }
-                if (src == CopyDataSrc::GpuClock && rasterizer && to_memory && num_bytes == 8 &&
-                    Vulkan::Rasterizer::HonestLabels()) {
+                if (src == CopyDataSrc::GpuClock && rasterizer && to_memory && num_bytes == 8) {
                     const VAddr target = copy_data->DstAddress<VAddr>();
                     if (rasterizer->RunInOrder(&RunGpuClockCopy, &target, sizeof(target),
                                                PsToggle::PipelinedMemoryWrites, false)) {
@@ -2182,8 +2146,8 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                         rasterizer->DrainDrawPipe(static_cast<u32>(opcode));
                         continue;
                     }
-                    // PS_HONEST_LABELS: a fence from another queue may wait for work not
-                    // submitted yet; this thread would spin on it forever.
+                    // A fence from another queue may wait for work not submitted yet; this
+                    // thread would spin on it forever.
                     if (rasterizer && rasterizer->HasUnsubmittedSignals()) {
                         rasterizer->Flush();
                     }
@@ -2287,7 +2251,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                 // psport: the condition as the command processor reads it when it gets here: a
                 // fence the recording thread has yet to write (in stream order), else once the
                 // GPU has done the work before this packet (this thread decodes ahead of it).
-                if (rasterizer && VideoCore::GuestInPlace()) {
+                if (rasterizer) {
                     const VAddr address = reinterpret_cast<VAddr>(cond_exec->Address());
                     u32 value = 0;
                     if (!PendingFenceValue(address, value)) {
@@ -2622,8 +2586,8 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
             const auto* wait_reg_mem = reinterpret_cast<const PM4CmdWaitRegMem*>(header);
             ASSERT(wait_reg_mem->engine.Value() == PM4CmdWaitRegMem::Engine::Me);
             while (!wait_reg_mem->Test(regs.reg_array)) {
-                // PS_HONEST_LABELS: the value may come from a fence waiting for work not
-                // submitted yet; this thread would spin on it forever.
+                // The value may come from a fence waiting for work not submitted yet; this thread
+                // would spin on it forever.
                 if (rasterizer && rasterizer->HasUnsubmittedSignals()) {
                     rasterizer->Flush();
                 }
@@ -2632,11 +2596,10 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
             break;
         }
         case PM4ItOpcode::ReleaseMem: {
-            // PS_HONEST_LABELS: written once the GPU has finished the work before it (not a GDS store,
-            // which needs the GPU copy recorded here).
+            // Written once the GPU has finished the work before it (not a GDS store, which needs
+            // the GPU copy recorded here).
             if (const auto* rm = reinterpret_cast<const PM4CmdReleaseMem*>(header);
-                rasterizer && Vulkan::Rasterizer::HonestLabels() &&
-                rm->data_sel.Value() != DataSelect::GdsMemStore) {
+                rasterizer && rm->data_sel.Value() != DataSelect::GdsMemStore) {
                 rasterizer->ProcessDownloadImages();
                 if (rm->data_sel.Value() == DataSelect::GpuClock64 &&
                     rm->int_sel.Value() == InterruptSelect::None &&
@@ -2880,7 +2843,7 @@ void Liverpool::CheckSubmittedCopy(const SubmittedCopy& copy, u64 seq) {
             const std::size_t n = std::min(buf.size(), dwords - at);
             iovec local{buf.data(), n * 4}, remote{const_cast<u32*>(guest + at), n * 4};
             if (process_vm_readv(getpid(), &local, 1, &remote, 1, 0) != ssize_t(n * 4)) {
-                // psport PS_GUEST_IN_PLACE: dma-buf guest memory is not readable that way; still
+                // psport: dma-buf guest memory is not readable that way; still
                 // mapped, it is read directly.
                 int prot = 0, type = -1;
                 uintptr_t end = 0;

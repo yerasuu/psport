@@ -15,7 +15,6 @@ class Rasterizer;
 
 namespace VideoCore {
 
-struct UffdImpl;
 struct SignalImpl;
 
 class PageManager {
@@ -36,7 +35,7 @@ public:
     /// stats): which game functions write GPU memory, to replace tracking by explicit hooks.
     static void ReportFaultSites();
     /// psport: the write fault being handled on this thread hit an image (diagnostics: which guest
-    /// code writes textures, PS_WRITE_TRACKING=1).
+    /// code writes textures, PS_WRITE_VERIFY=1).
     static void NoteImageFault(VAddr image_address, u64 image_size, u32 width, u32 height,
                                u32 format, u32 tiling);
 
@@ -65,7 +64,6 @@ public:
     }
 
 private:
-    friend struct UffdImpl;
     friend struct SignalImpl;
     struct Impl;
     std::unique_ptr<Impl> impl;

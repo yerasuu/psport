@@ -292,25 +292,6 @@ EN = {
     "Стабильнее, но медленнее": "More stable, but slower",
     "Чтение данных GPU процессором": "GPU data readbacks by the CPU",
     "По умолчанию": "Default",
-    "Фоновая загрузка в видеопамять": "Background pre-upload into VRAM",
-    "Меньше рывков при подгрузке зон": "Fewer hitches when areas stream in",
-    "Обычная": "Normal",
-    "Без лишней видеопамяти": "No extra VRAM",
-    "Полная": "Full",
-    "Около 3 ГБ видеопамяти сверху": "About 3 GB more VRAM",
-    # Mode
-    "Режим работы": "Mode",
-    "Новая модель памяти и трансляции": "New memory and translation model",
-    "Новая: видеокарта работает с памятью игры напрямую, как в игре для ПК, а команды графики переводятся, а не эмулируются. Старая — модель памяти 0.3 со всеми исправлениями. Если драйвер не проходит проверку при запуске — старая":
-        "The new one: the GPU works with the game's memory directly, as in a PC game, and graphics commands are translated rather than emulated. The old one: the memory model of 0.3 with all the fixes. If the driver fails the startup check, the old one",
-    "Модель памяти и трансляции": "Memory and translation model",
-    "Авто: новая на AMD, старая на других": "Auto: new on AMD, old on others",
-    "Новая": "New",
-    "Старая (как в 0.3)": "Old (as in 0.3)",
-    "Синхронизация как в 0.3": "Synchronisation as in 0.3",
-    "Для поиска регрессий: старая модель памяти и ожидания копий как в релизе 0.3":
-        "For finding regressions: the old memory model and copy waits as released in 0.3",
-    "Выключена": "Off",
     "Выключены": "Off",
     # Developer
     "Для разработчика": "Developer",
@@ -520,17 +501,6 @@ PT_BR = {
     "Выключены": "Desativado",
     # Developer
     "Для разработчика": "Desenvolvedor",
-    "Режим работы": "Modo",
-    "Новая модель памяти и трансляции": "Novo modelo de memória e tradução",
-    "Новая: видеокарта работает с памятью игры напрямую, как в игре для ПК, а команды графики переводятся, а не эмулируются. Старая — модель памяти 0.3 со всеми исправлениями. Если драйвер не проходит проверку при запуске — старая":
-        "O novo: a GPU usa a memória do jogo diretamente, como em um jogo de PC, e os comandos gráficos são traduzidos em vez de emulados. O antigo: o modelo de memória da 0.3 com todas as correções. Se o driver falhar na verificação inicial, o antigo",
-    "Модель памяти и трансляции": "Modelo de memória e tradução",
-    "Авто: новая на AMD, старая на других": "Automático: novo na AMD, antigo nas outras",
-    "Новая": "Novo",
-    "Старая (как в 0.3)": "Antigo (como na 0.3)",
-    "Синхронизация как в 0.3": "Sincronização como na 0.3",
-    "Для поиска регрессий: старая модель памяти и ожидания копий как в релизе 0.3":
-        "Para encontrar regressões: o modelo de memória antigo e as esperas de cópias como na versão 0.3",
     "Статистика кадров в журнале": "Estatísticas de quadros no log",
     "Профиль GPU в журнале": "Perfil da GPU no log",
     "Слои валидации Vulkan": "Camadas de validação do Vulkan",
@@ -784,25 +754,6 @@ ZH_CN = {
     "Стабильнее, но медленнее": "更稳定，但速度更慢",
     "Чтение данных GPU процессором": "由 CPU 读取 GPU 数据（readback）",
     "По умолчанию": "默认",
-    "Фоновая загрузка в видеопамять": "后台预加载至显存",
-    "Меньше рывков при подгрузке зон": "区域加载时卡顿更少",
-    "Обычная": "普通",
-    "Без лишней видеопамяти": "不占用额外显存",
-    "Полная": "完整",
-    "Около 3 ГБ видеопамяти сверху": "额外占用约 3 GB 显存",
-    # Mode
-    "Режим работы": "工作模式",
-    "Новая модель памяти и трансляции": "新内存与指令转译模型",
-    "Новая: видеокарта работает с памятью игры напрямую, как в игре для ПК, а команды графики переводятся, а не эмулируются. Старая — модель памяти 0.3 со всеми исправлениями. Если драйвер не проходит проверку при запуске — старая":
-        "新模型：显卡像 PC 游戏那样直接读写游戏内存，图形指令被转译而非模拟。旧模型：0.3 版的内存模型，包含所有修复。如果驱动未通过启动检查，则使用旧模型",
-    "Модель памяти и трансляции": "内存与指令转译模型",
-    "Авто: новая на AMD, старая на других": "自动：AMD 用新模型，其他显卡用旧模型",
-    "Новая": "新模型",
-    "Старая (как в 0.3)": "旧模型（与 0.3 版相同）",
-    "Синхронизация как в 0.3": "与 0.3 版相同的同步方式",
-    "Для поиска регрессий: старая модель памяти и ожидания копий как в релизе 0.3":
-        "用于排查回归问题：采用与 0.3 版发布时相同的旧内存模型与复制等待方式",
-    "Выключена": "关闭",
     "Выключены": "关闭",
     # Developer
     "Для разработчика": "开发者选项",

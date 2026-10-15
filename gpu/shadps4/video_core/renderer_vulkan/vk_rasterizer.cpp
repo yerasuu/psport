@@ -93,19 +93,6 @@ Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_, Runtime
 
 Rasterizer::~Rasterizer() = default;
 
-bool Rasterizer::HonestLabels() {
-    static const bool on = [] {
-        const char* env = std::getenv("PS_HONEST_LABELS");
-        const bool enabled = (env && env[0] == '1') || VideoCore::GuestInPlace();
-        if (enabled) {
-            std::printf("GPU: fences written when the GPU has finished the work before them "
-                        "(PS_HONEST_LABELS=1)\n");
-        }
-        return enabled;
-    }();
-    return on;
-}
-
 void Rasterizer::PublishSignals() {
     // Only the recording thread, or the GPU command thread while it is idle (drained), touches
     // them; other threads (a guest thread reading back) leave them to those.
@@ -183,8 +170,7 @@ void Rasterizer::RequestSignalFlush() {
 }
 
 bool Rasterizer::SignalsPublished(u64 position) const {
-    return !draw_pipe || !HonestLabels() ||
-           signals_published_upto.load(std::memory_order_acquire) >= position;
+    return !draw_pipe || signals_published_upto.load(std::memory_order_acquire) >= position;
 }
 
 bool Rasterizer::HasUnsubmittedSignals() {
@@ -196,7 +182,7 @@ bool Rasterizer::HasUnsubmittedSignals() {
 }
 
 bool Rasterizer::WriteGuestMemory(VAddr address, const void* data, u32 size) {
-    if (!VideoCore::GuestInPlace() || size == 0 || (address | size) % 4 != 0) {
+    if (size == 0 || (address | size) % 4 != 0) {
         return false;
     }
     const auto [buffer, offset] = buffer_cache.ObtainBuffer(address, size, true);
@@ -212,7 +198,7 @@ bool Rasterizer::WriteDataOnGpu(VAddr address, const void* data, u32 size) {
         const char* env = std::getenv("PS_GPU_COMMAND_WRITES");
         return !env || env[0] != '0';
     }();
-    if (!enabled || !VideoCore::GuestInPlace() || size == 0 || (address | size) % 4 != 0) {
+    if (!enabled || size == 0 || (address | size) % 4 != 0) {
         return false;
     }
     // psport PS_LAYER_MEMORY: a range whole in a mirror is written there too (asked first: the
@@ -226,7 +212,7 @@ bool Rasterizer::WriteDataOnGpu(VAddr address, const void* data, u32 size) {
         runtime.UpdateBuffer(mirror->first, mirror->second, {static_cast<const u8*>(data), size});
     }
     runtime.UpdateBuffer(target->first, target->second, {static_cast<const u8*>(data), size});
-    if (size <= sizeof(u64) && HonestLabels()) {
+    if (size <= sizeof(u64)) {
         u64 value = 0;
         std::memcpy(&value, data, size);
         SignalAfterGpu([] {}, address, value);
@@ -236,7 +222,7 @@ bool Rasterizer::WriteDataOnGpu(VAddr address, const void* data, u32 size) {
 
 bool Rasterizer::OcclusionTranslated() {
     // PS_OCCLUSION_QUERIES=1 (opt-in): Vulkan occlusion queries. Else the counters stay the fixed
-    // sequence written when decoded (everything visible, as in the 0.3 model). With an upscaler
+    // sequence written when decoded (everything visible). With an upscaler
     // the scene is drawn smaller and jittered: a light's sub-pixel test shape passed samples in
     // one frame and none in the next, and its glow flashed grey over the whole frame (a lamp in
     // the cathedral at 640x360). Counting has to become stable against that first.
@@ -247,7 +233,7 @@ bool Rasterizer::OcclusionTranslated() {
         return (env && env[0] == '1') || (selftest && selftest[0] == '1');
     }();
     // Experiment bit 4 of PS_TOGGLE_FILE: the fixed sequence while the game runs (A/B).
-    return enabled && VideoCore::GuestInPlace() && !PsToggle::Experiment(4);
+    return enabled && !PsToggle::Experiment(4);
 }
 
 bool Rasterizer::OcclusionEvent(VAddr address, u32 pairs) {
@@ -282,7 +268,7 @@ bool Rasterizer::WriteTimestampOnGpu(VAddr address, bool end_of_pipe) {
         const char* env = std::getenv("PS_GPU_TIMESTAMPS");
         return !(env && env[0] == '0');
     }();
-    if (!enabled || !VideoCore::GuestInPlace() || address % 8 != 0) {
+    if (!enabled || address % 8 != 0) {
         return false;
     }
     if (!timestamps) {
@@ -296,8 +282,7 @@ bool Rasterizer::WriteLabelOnGpu(VAddr address, u64 value, u32 num_bytes) {
         const char* env = std::getenv("PS_GPU_LABELS");
         return !env || env[0] != '0';
     }();
-    if (!enabled || !VideoCore::GuestInPlace() || !HonestLabels() ||
-        PsFreeCheck::Enabled() || (num_bytes != 4 && num_bytes != 8) ||
+    if (!enabled || PsFreeCheck::Enabled() || (num_bytes != 4 && num_bytes != 8) ||
         address % num_bytes != 0) {
         return false;
     }
@@ -359,13 +344,10 @@ bool Rasterizer::PipeSignals() const {
         const char* env = std::getenv("PS_PIPE_SIGNALS");
         return !env || env[0] != '0';
     }();
-    return enabled && HonestLabels() && UseDrawPipe() && OnStageA();
+    return enabled && UseDrawPipe() && OnStageA();
 }
 
 void Rasterizer::SubmitForSignals() {
-    if (!HonestLabels()) {
-        return;
-    }
     if (PipeSignals()) {
         // Decided (and submitted) on the recording thread after this submission's draws and
         // fences: here they may not even be recorded yet.
@@ -904,7 +886,7 @@ void Rasterizer::NoteCommandWriteInOrder(VAddr addr, const void* data, u64 size)
         const char* env = std::getenv("PS_CONSTRAM_PIPE");
         return !env || env[0] != '0';
     }();
-    if (VideoCore::WriteTracking() || !IsMapped(addr, size)) {
+    if (!IsMapped(addr, size)) {
         return;
     }
     if (!enabled || !UseDrawPipe() || !OnStageA() || size > 1_MB) {
@@ -1680,7 +1662,7 @@ bool Rasterizer::ObtainStreamOut(const GraphicsPipeline* pipeline, StreamOutBind
         }
     }
     // An in-place arena or chunk buffer over guest memory may lack transform feedback usage.
-    if (VideoCore::GuestInPlace() && !PsGuestMemory::TransformFeedbackUsage(instance)) {
+    if (!PsGuestMemory::TransformFeedbackUsage(instance)) {
         return skip("guest memory buffers have no transform feedback usage on this driver");
     }
     const auto sharp = DrawPipe::OnStageB() ? packet_strmout : ReadStreamOutSharp(*gs, regs);
@@ -1775,18 +1757,6 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
     if (DrawPipe::OnStageB()) {
         FrameCapture::Poll();
         scheduler.PopPendingOperations();
-    }
-    // psport (PS_PREUPLOAD): once a frame, guest GPU memory the CPU wrote and then left alone is
-    // uploaded ahead of its use, PS_PREUPLOAD_MB (16) at most per frame.
-    if (const u32 frame = PsStats::g_frame_number.load(std::memory_order_relaxed);
-        frame != preupload_frame) {
-        preupload_frame = frame;
-        BB_SECTION(Preupload);
-        static const u64 budget = [] {
-            const char* env = std::getenv("PS_PREUPLOAD_MB");
-            return (env ? std::strtoull(env, nullptr, 10) : 16ull) << 20;
-        }();
-        buffer_cache.Preupload(budget);
     }
     const auto& regs = Regs();
     // psport: the pass copying a finished frame to a display buffer; the previous draw's
@@ -4335,10 +4305,10 @@ void Rasterizer::FillBuffer(VAddr address, u32 num_bytes, u32 value, bool is_gds
                "FillBuffer address and size must be a multiple of 4 bytes");
     if (!is_gds) {
         texture_cache.ClearMeta(address);
-        // psport PS_GUEST_IN_PLACE: memory the GPU uses in place is filled by the GPU in stream order
-        // (a fill on the CPU now would land before earlier draws read the old data). Elsewhere
-        // (VRAM copies, unbound memory: shader code, descriptors this thread reads) on the CPU in
-        // decode order, as before; the VRAM copy follows through write tracking.
+        // psport: memory the GPU uses in place is filled by the GPU in stream order (a fill on the
+        // CPU now would land before earlier draws read the old data). Elsewhere (unbound memory:
+        // shader code, descriptors this thread reads) on the CPU in decode order, announced as an
+        // asset write.
         if (!buffer_cache.IsAnyInPlace(address, num_bytes) &&
             !buffer_cache.IsRegionGpuModified(address, num_bytes) &&
             !VideoCore::BufferCache::LayerMirrored(address, num_bytes)) {
@@ -4346,9 +4316,7 @@ void Rasterizer::FillBuffer(VAddr address, u32 num_bytes, u32 value, bool is_gds
             u32* buffer = std::bit_cast<u32*>(address);
             std::fill(buffer, buffer + (num_bytes / sizeof(u32)), value);
             PsWriteLog::Note(address, buffer, num_bytes, PsWriteLog::Dma);
-            if (!VideoCore::WriteTracking()) {
-                NoteAssetWrite(address, num_bytes);
-            }
+            NoteAssetWrite(address, num_bytes);
             return;
         }
     }
@@ -4362,11 +4330,7 @@ void Rasterizer::FillBuffer(VAddr address, u32 num_bytes, u32 value, bool is_gds
 }
 
 bool Rasterizer::DmaMayWriteOnCpu(VAddr dst, u32 num_bytes) {
-    // The first condition of both: false only where they record a GPU fill or copy. The model
-    // of 0.3 keeps its waits (the new memory and translation model only).
-    if (!VideoCore::GuestInPlace()) {
-        return true;
-    }
+    // The first condition of both: false only where they record a GPU fill or copy.
     return !buffer_cache.IsAnyInPlace(dst, num_bytes) &&
            !buffer_cache.IsRegionGpuModified(dst, num_bytes) &&
            !VideoCore::BufferCache::LayerMirrored(dst, num_bytes);
@@ -4374,7 +4338,7 @@ bool Rasterizer::DmaMayWriteOnCpu(VAddr dst, u32 num_bytes) {
 
 void Rasterizer::CopyBuffer(VAddr dst, VAddr src, u32 num_bytes, bool dst_gds, bool src_gds) {
     DrainDrawPipe();
-    // psport PS_GUEST_IN_PLACE: see FillBuffer (in place: the GPU, in stream order).
+    // psport: see FillBuffer (in place: the GPU, in stream order).
     if (!dst_gds && !buffer_cache.IsAnyInPlace(dst, num_bytes) &&
         !buffer_cache.IsRegionGpuModified(dst, num_bytes) &&
         !VideoCore::BufferCache::LayerMirrored(dst, num_bytes)) {
@@ -4386,9 +4350,7 @@ void Rasterizer::CopyBuffer(VAddr dst, VAddr src, u32 num_bytes, bool dst_gds, b
             PsFreeCheck::Check(dst, num_bytes, std::bit_cast<const void*>(src), PsFreeCheck::DmaCopy);
             std::memcpy(std::bit_cast<void*>(dst), std::bit_cast<void*>(src), num_bytes);
             PsWriteLog::Note(dst, std::bit_cast<const void*>(dst), num_bytes, PsWriteLog::Dma);
-            if (!VideoCore::WriteTracking()) {
-                NoteAssetWrite(dst, num_bytes);
-            }
+            NoteAssetWrite(dst, num_bytes);
             return;
         }
     }
@@ -4439,7 +4401,7 @@ void Rasterizer::NoteAssetWrite(VAddr addr, u64 size) {
 }
 
 void Rasterizer::InvalidateAfterWrite(VAddr addr, u64 size) {
-    if (VideoCore::WriteTracking() || !buffer_cache.IsRegionGpuModified(addr, size)) {
+    if (!buffer_cache.IsRegionGpuModified(addr, size)) {
         InvalidateMemory(addr, size);
         return;
     }
@@ -4452,8 +4414,8 @@ void Rasterizer::InvalidateAfterWrite(VAddr addr, u64 size) {
 }
 
 void Rasterizer::NoteCommandWrite(VAddr addr, const void* data, u64 size, bool recording_thread) {
-    if (VideoCore::WriteTracking() || !IsMapped(addr, size)) {
-        return; // tracking catches it, or the GPU does not use it
+    if (!IsMapped(addr, size)) {
+        return; // the GPU does not use it
     }
     if (!recording_thread) {
         DrainDrawPipe();
@@ -4519,7 +4481,6 @@ void Rasterizer::MapMemory(VAddr addr, u64 size) {
         std::scoped_lock lock{mapped_ranges_mutex};
         mapped_ranges += decltype(mapped_ranges)::interval_type::right_open(addr, addr + size);
     }
-    buffer_cache.NotePreuploadMapping(addr, size, true);
 }
 
 void Rasterizer::RegisterMemory(VAddr addr, u64 size) {
@@ -4527,7 +4488,6 @@ void Rasterizer::RegisterMemory(VAddr addr, u64 size) {
 }
 
 void Rasterizer::UnmapMemory(VAddr addr, u64 size) {
-    buffer_cache.NotePreuploadMapping(addr, size, false);
     buffer_cache.UnmapInPlace(addr, size);
     buffer_cache.DropTwins(addr, size);
     DrainDrawPipe();

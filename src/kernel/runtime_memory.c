@@ -50,7 +50,7 @@ void read_unlock(void) { if (!s_exclusive_depth) pthread_rwlock_unlock(&s_lock);
 Vma *g_p_vmas; size_t g_c_vmas; static size_t s_c_vma_capacity;
 static int s_h_pool=-1;
 /* psport: direct memory in GPU-visible system memory the GPU library allocates (dma-buf chunks,
- * PS_GUEST_GPU_MEMORY=1): the GPU reads the game's data in place instead of the CPU copying it
+ * or imported host memory): the GPU reads the game's data in place instead of the CPU copying it
  * into staging buffers first. Chunks are allocated when the game allocates direct memory in them;
  * a chunk the GPU library cannot provide stays in the memfd. */
 #define CHUNK (UINT64_C(256) << 20)

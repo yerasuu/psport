@@ -38,15 +38,12 @@
 #ifdef __linux__
 #include <thread>
 #include <fcntl.h>
-#include <linux/userfaultfd.h>
-#include <poll.h>
 #include <unordered_set>
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
 #include <mutex>
 #include <unistd.h>
-#include <sys/ioctl.h>
 #include <sys/syscall.h>
 #else
 #include "common/spin_lock.h"
@@ -224,7 +221,7 @@ void PageManager::ReportFaultSites() {
     std::printf("\n");
 }
 
-// psport: with the game's memory in place (no write tracking), the pages under images are
+// psport: with the game's memory in place, the pages under images are
 // trapped for writes (PsLayer::WriteTraps::Image): a write nobody announced (the game's own copy
 // loops, its heap over an old texture) still reaches the texture cache, on any game and GPU,
 // without hooks in the game's code; the hooks and the libc wrappers only make it sooner.
@@ -233,8 +230,7 @@ void PageManager::ReportFaultSites() {
 static bool ImageTraps() {
     static const bool on = [] {
         const char* env = std::getenv("PS_IMAGE_TRAPS");
-        const bool enabled = !(env && env[0] == '0') && VideoCore::GuestInPlace() &&
-                             !VideoCore::WriteTracking() && !VideoCore::WriteVerify();
+        const bool enabled = !(env && env[0] == '0') && !VideoCore::WriteVerify();
         if (enabled) {
             std::printf("Guest memory: writes under images are trapped (PS_IMAGE_TRAPS=0: "
                         "announced writes only)\n");
@@ -580,153 +576,6 @@ struct PageManager::Impl {
     std::array<LockType, NUM_ADDRESS_LOCKS> locks{};
 };
 
-#ifdef __linux__
-// psport: write tracking with userfaultfd write-protection instead of mprotect. mprotect takes
-// the address space lock for writing and splits mappings; while guest threads fault on
-// per-frame buffers and the GPU thread re-protects uploaded pages, every page fault in the
-// process (copy threads included) waits for it. UFFDIO_WRITEPROTECT changes page table bits
-// under the lock for reading. Read protection (readbacks) still uses mprotect: userfaultfd
-// write-protection cannot deny reads. PS_UFFD=1.
-struct UffdImpl : public PageManager::Impl {
-private:
-    std::jthread ufd_thread;
-    int uffd;
-    std::mutex read_revoked_mutex;
-    std::unordered_set<u64> read_revoked_pages; ///< 4 KiB pages denied reads with mprotect
-    std::atomic<size_t> num_read_revoked{0};
-
-public:
-    UffdImpl(Vulkan::Rasterizer* rasterizer_) : Impl() {
-        rasterizer = rasterizer_;
-        uffd = syscall(SYS_userfaultfd, O_CLOEXEC | O_NONBLOCK | UFFD_USER_MODE_ONLY);
-        if (uffd == -1) {
-            LOG_ERROR(Common_Memory,
-                      "userfaultfd syscall failed: {}, falling back to signal implementation",
-                      Common::GetLastErrorMsg());
-            throw std::runtime_error("userfaultfd");
-        }
-
-        // Guest memory is a shared memfd mapping: write-protection there needs the shmem
-        // feature, and unpopulated pages must be protectable too.
-        uffdio_api api{};
-        api.api = UFFD_API;
-        api.features =
-            UFFD_FEATURE_THREAD_ID | UFFD_FEATURE_WP_HUGETLBFS_SHMEM | UFFD_FEATURE_WP_UNPOPULATED;
-        if (ioctl(uffd, UFFDIO_API, &api) != 0) {
-            LOG_ERROR(Common_Memory,
-                      "uffdio_api call failed: {}, falling back to signal implementation",
-                      Common::GetLastErrorMsg());
-            close(uffd);
-            throw std::runtime_error("uffdio_api");
-        }
-
-        // Read faults (readbacks) still arrive as signals.
-        Core::Signals::Instance()->RegisterAccessViolationHandler(
-            GuestFaultSignalHandler, 1u);
-
-        ufd_thread = std::jthread([this](std::stop_token token) { UffdHandler(token); });
-        std::printf("GPU: memory tracking with userfaultfd write-protection\n");
-    }
-
-    ~UffdImpl() = default;
-
-    void OnMap(VAddr address, size_t size) override {
-        uffdio_register reg{};
-        reg.range.start = address;
-        reg.range.len = size;
-        reg.mode = UFFDIO_REGISTER_MODE_WP;
-        if (ioctl(uffd, UFFDIO_REGISTER, &reg) == -1) {
-            LOG_ERROR(Common_Memory, "Uffdio register {:#x}+{:#x} failed: {}", address, size,
-                      Common::GetLastErrorMsg());
-        }
-    }
-
-    void OnUnmap(VAddr address, size_t size) override {
-        uffdio_range range{};
-        range.start = address;
-        range.len = size;
-        ioctl(uffd, UFFDIO_UNREGISTER, &range);
-    }
-
-    void Protect(VAddr address, size_t size, Core::MemoryPermission perms) override {
-        auto& address_space = Core::Memory::Instance()->GetAddressSpace();
-        const bool allow_read = True(perms & Core::MemoryPermission::Read);
-        const bool allow_write = True(perms & Core::MemoryPermission::Write);
-        const u64 first = address >> 12, last = (address + size + 4095) >> 12;
-        if (!allow_read) {
-            // Readbacks: deny all access with mprotect.
-            address_space.Protect(address, size, Core::MemoryPermission::None);
-            std::scoped_lock lk{read_revoked_mutex};
-            for (u64 page = first; page < last; ++page) {
-                read_revoked_pages.insert(page);
-            }
-            num_read_revoked.store(read_revoked_pages.size(), std::memory_order_release);
-            return;
-        }
-        if (num_read_revoked.load(std::memory_order_acquire) != 0) {
-            std::scoped_lock lk{read_revoked_mutex};
-            bool restore = false;
-            for (u64 page = first; page < last; ++page) {
-                restore |= read_revoked_pages.erase(page) != 0;
-            }
-            num_read_revoked.store(read_revoked_pages.size(), std::memory_order_release);
-            if (restore) {
-                address_space.Protect(address, size, Core::MemoryPermission::ReadWrite);
-            }
-        }
-        // Counted like AddressSpace::Protect (PS_FRAME_LOG protect_ms).
-        PsStats::Timer timer{PsStats::g_t_protect};
-        PsStats::g_c_protect_calls.fetch_add(1, std::memory_order_relaxed);
-        PsStats::g_c_protect_pages.fetch_add(last - first, std::memory_order_relaxed);
-        if (!allow_write) {
-            PsStats::g_c_protect_revoke_calls.fetch_add(1, std::memory_order_relaxed);
-            PsStats::g_c_protect_revoke_pages.fetch_add(last - first, std::memory_order_relaxed);
-        }
-        uffdio_writeprotect wp{};
-        wp.range.start = address;
-        wp.range.len = size;
-        wp.mode = allow_write ? UFFDIO_WRITEPROTECT_MODE_DONTWAKE : UFFDIO_WRITEPROTECT_MODE_WP;
-        if (ioctl(uffd, UFFDIO_WRITEPROTECT, &wp) == -1) {
-            LOG_ERROR(Common_Memory, "Uffdio writeprotect {:#x}+{:#x} failed: {}", address, size,
-                      Common::GetLastErrorMsg());
-        }
-    }
-
-    void UffdHandler(std::stop_token token) {
-        Common::SetCurrentThreadName("bb:Uffd");
-        while (!token.stop_requested()) {
-            pollfd pollfd{};
-            pollfd.fd = uffd;
-            pollfd.events = POLLIN;
-            // Short timeout so the stop request is seen.
-            const int pollres = poll(&pollfd, 1, 100);
-            if (pollres <= 0 || !(pollfd.revents & POLLIN)) {
-                continue;
-            }
-            uffd_msg msg;
-            const int readret = read(uffd, &msg, sizeof(msg));
-            if (readret != sizeof(msg)) {
-                continue;
-            }
-            if (msg.event != UFFD_EVENT_PAGEFAULT) {
-                continue;
-            }
-            const VAddr addr = msg.arg.pagefault.address;
-            const auto ptid = msg.arg.pagefault.feat.ptid;
-            {
-                PsStats::Timer timer{PsStats::g_t_write_faults};
-                rasterizer->OnWriteFault(addr, rasterizer->IsGpuSideThreadId(ptid));
-            }
-            // Protect() clears with DONTWAKE (it may run for pages nobody waits on).
-            uffdio_range wake{};
-            wake.start = addr & ~u64(PM_PAGE_SIZE - 1);
-            wake.len = PM_PAGE_SIZE;
-            ioctl(uffd, UFFDIO_WAKE, &wake);
-        }
-    }
-};
-#endif // __linux__
-
 struct SignalImpl : public PageManager::Impl {
     SignalImpl(Vulkan::Rasterizer* rasterizer_) : Impl() {
         rasterizer = rasterizer_;
@@ -739,13 +588,11 @@ struct SignalImpl : public PageManager::Impl {
 
     void Protect(VAddr address, size_t size, Core::MemoryPermission perms) override {
         RENDERER_TRACE;
-        // psport PS_GUEST_IN_PLACE: no page protection; the pages are marked in the runtime's write
-        // watch instead, and the writers that check it tell the GPU side (WriteTracking).
-        if (!VideoCore::WriteTracking()) {
-            runtime_memory_set_write_watch(address, size, !True(perms & Core::MemoryPermission::Write));
-            if (!VideoCore::WriteVerify()) {
-                return;
-            }
+        // psport: no page protection; the pages are marked in the runtime's write watch instead,
+        // and the writers that check it tell the GPU side.
+        runtime_memory_set_write_watch(address, size, !True(perms & Core::MemoryPermission::Write));
+        if (!VideoCore::WriteVerify()) {
+            return;
         }
         auto* memory = Core::Memory::Instance();
         auto& impl = memory->GetAddressSpace();
@@ -757,24 +604,6 @@ struct SignalImpl : public PageManager::Impl {
 };
 
 PageManager::PageManager(Vulkan::Rasterizer* rasterizer_) {
-#ifdef __linux__
-    // psport: dma-buf guest memory (PS_GUEST_GPU_MEMORY=1) cannot be write-protected by userfaultfd
-    // (anonymous and shmem only): its registration would fail and writes go unseen.
-    const char* guest_gpu_memory = std::getenv("PS_GUEST_GPU_MEMORY");
-    const bool dma_buf_guest = guest_gpu_memory && guest_gpu_memory[0] == '1';
-    if (std::getenv("PS_UFFD") && std::getenv("PS_UFFD")[0] == '1' && dma_buf_guest) {
-        std::printf("GPU: userfaultfd off with PS_GUEST_GPU_MEMORY=1 (dma-buf memory)\n");
-    } else if (std::getenv("PS_UFFD") && std::getenv("PS_UFFD")[0] == '1') {
-        try {
-            impl = std::make_unique<UffdImpl>(rasterizer_);
-            LOG_INFO(Config, "Memory tracking method: userfaultfd");
-            return;
-        } catch (const std::runtime_error& e) {
-            // if uffd is unsupported, falls back to SignalImpl
-        }
-    }
-    LOG_INFO(Config, "Memory tracking method: signals");
-#endif
     impl = std::make_unique<SignalImpl>(rasterizer_);
 }
 

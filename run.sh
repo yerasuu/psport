@@ -202,51 +202,38 @@ elif [[ -n ${scaled_output:-} ]]; then
 fi
 # Third-party shadPS4/GoldHEN XML patches for the game, selected in patches.json (src/loader/loader_patches.c).
 patch_args=(--patches-dir "${PS_PATCHES_DIR:-$data/patches}" --patches-config "${PS_PATCHES_CONFIG:-$data/patches.json}")
-# Background upload of the game's GPU memory into VRAM ahead of use (BufferCache::Preupload):
-# 1 = only memory already in VRAM that the game rewrote (no new VRAM), 2 = all of it (~3 GB more
-# VRAM), 0 = off. PS_GUEST_GPU_MEMORY=1 puts guest direct memory in GPU-visible dma-buf chunks
-# (PS_GUEST_IN_PLACE below implies it: it commits all allocated memory up front and rules out PS_UFFD).
-export PS_PREUPLOAD=${PS_PREUPLOAD:-1}
-# Memory model and translation. PS_PC_MODEL=1 (the launcher's "Memory model": "Auto" gives it to
-# AMD GPUs, the 0.3 model to the others; PS_PC_MODEL=1/0 by hand) selects how a PC release would
-# work: the GPU uses the game's memory where it is (GPU-visible system memory) and keeps the data
-# it reads often in VRAM, the command processor's work is translated rather than emulated
-# (PS_GUEST_IN_PLACE=1 and what depends on it). AMD keeps the game's memory in a sparse arena;
-# other GPUs get the layer's memory module, which binds it in place and keeps VRAM copies without
-# sparse binding (NVIDIA's sparse binding stalls the GPU for seconds); PS_LAYER_MEMORY=1/0 by hand.
-# 0 (the default off AMD): the model of 0.3 (VRAM copies of the game's memory, write tracking),
-# with the fixes made since. PS_GUEST_IN_PLACE set by hand overrides it.
-# PS_AS_0_3=1 (the launcher's developer switch "Synchronisation as in 0.3"): what changed since the
-# 0.3 release is reverted for comparisons: the 0.3 memory model, WRITE_DATA/DMA waiting for every
-# host copy, the scheduler's concurrent recording check.
-# The game's GPU decides the memory model and driver workarounds: HOST quirks of the registry
-# (docs/en/QUIRKS.md), which psport-gpu-capabilities --host-env turns into settings with their message:
-# the new memory model on AMD (amd_pc_memory_model), the 0.3 one elsewhere (NVIDIA's path through the
-# memory module is still being measured with testers); RADV_DEBUG=nohiz on GCN 3-5 under RADV
-# (radv_gcn_nohiz, Polaris, Vega and their APUs: with HiZ, depth compression showed black halos and
-# missing geometry, issues #54, #99), unless RADV_DEBUG is the user's, PS_AUTO_NOHIZ=0: off.
-if [[ -z ${PS_PC_MODEL:-} || ( ${PS_AUTO_NOHIZ:-1} != 0 && -z ${RADV_DEBUG:-} ) ]]; then
+# The GPU uses the game's memory where it is (GPU-visible system memory) and keeps the data it reads
+# often in VRAM, as a PC release would; the command processor's work is translated rather than
+# emulated. AMD keeps the game's memory in a sparse arena (amd_guest_sparse_arena); other GPUs get
+# the layer's memory module, which binds it in place and keeps VRAM copies without sparse binding
+# (NVIDIA's sparse binding stalls the GPU for seconds); PS_LAYER_MEMORY=1/0 by hand. The memory
+# model of 0.3 (VRAM copies of the game's memory, write tracking) is gone: an older launcher's
+# PS_PC_MODEL, PS_AS_0_3, PS_GUEST_IN_PLACE, PS_PREUPLOAD or PS_UFFD does nothing.
+ignored=()
+for name in PS_PC_MODEL PS_AS_0_3 PS_GUEST_IN_PLACE PS_PREUPLOAD PS_UFFD; do
+    if [[ -n ${!name:-} ]]; then
+        ignored+=("$name=${!name}")
+        unset "$name"
+    fi
+done
+if (( ${#ignored[@]} )); then
+    echo "Memory model: the PC one, the only one now; ignored: ${ignored[*]}"
+fi
+# The game's GPU decides driver workarounds: HOST quirks of the registry (docs/en/QUIRKS.md), which
+# psport-gpu-capabilities --host-env turns into settings with their message: RADV_DEBUG=nohiz on
+# GCN 3-5 under RADV (radv_gcn_nohiz, Polaris, Vega and their APUs: with HiZ, depth compression
+# showed black halos and missing geometry, issues #54, #99), unless RADV_DEBUG is the user's,
+# PS_AUTO_NOHIZ=0: off.
+if [[ ${PS_AUTO_NOHIZ:-1} != 0 && -z ${RADV_DEBUG:-} ]]; then
     # A command substitution, not < <(...): the shell waits for it here, whereas a process
     # substitution's child outlives the exec below and stays a zombie of the game for its whole run.
     host_env=$("$caps" --host-env 2> /dev/null) || host_env=
     while IFS=$'\t' read -r setting message; do
-        case ${setting%%=*} in
-        PS_PC_MODEL) [[ -z ${PS_PC_MODEL:-} ]] || continue ;;
-        RADV_DEBUG) [[ ${PS_AUTO_NOHIZ:-1} != 0 && -z ${RADV_DEBUG:-} ]] || continue ;;
-        *) continue ;;
-        esac
+        [[ ${setting%%=*} == RADV_DEBUG ]] || continue
         export "$setting"
         echo "$message"
     done <<< "$host_env"
 fi
-if [[ -z ${PS_PC_MODEL:-} ]]; then
-    export PS_PC_MODEL=0
-    echo "Memory model: the 0.3 one (GPU unknown; PS_PC_MODEL=1: the new one)"
-fi
-if [[ ${PS_AS_0_3:-0} == 1 ]]; then
-    export PS_GUEST_IN_PLACE=0 PS_HOST_COPY_WAITS=all PS_PRODUCER_CHECK=1
-fi
-export PS_GUEST_IN_PLACE=${PS_GUEST_IN_PLACE:-${PS_PC_MODEL:-0}}
 # MangoHud (launcher switch: MANGOHUD=1) must be drawn once. Two overlays on top of each other
 # showed doubled, offset text: the Steam Deck's performance overlay (mangoapp, game mode) plus the
 # in-game layer, or the AppImage's bundled layer plus a system MangoHud (the layer names differ,
@@ -263,11 +250,6 @@ if [[ ${MANGOHUD:-0} == 1 ]]; then
         export VK_LOADER_LAYERS_DISABLE=${VK_LOADER_LAYERS_DISABLE:+$VK_LOADER_LAYERS_DISABLE,}VK_LAYER_MANGOHUD_overlay_64_x86_64
     fi
 fi
-# Write tracking with userfaultfd write-protection instead of mprotect (no address-space write lock:
-# a streaming burst re-protected thousands of pages, ~10-20 ms); falls back to mprotect when the
-# kernel lacks it. Off by default for now: the Steam Deck crashed 4 times in 9 minutes with it
-# (2026-10-04, PM4 type 0 = zeroed command buffers, heap corruption); 1 turns it on.
-export PS_UFFD=${PS_UFFD:-0}
 # The command buffers of each submission are copied when the game submits them and decoded from
 # the copy: while an area loads the game reused that memory before the GPU thread got to it
 # ("Unimplemented PM4 type 0" a few seconds after loading a save). 0 decodes guest memory.

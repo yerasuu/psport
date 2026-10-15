@@ -40,14 +40,6 @@ CONFIG_FILE = CONFIG_DIR / "settings.json"
 # Before psport renamed it; read until the first save writes CONFIG_FILE.
 OLD_CONFIG_FILE = CONFIG_DIR.parent / "bbport-launcher" / "settings.json"
 MAX_LOG_LINES = 5000
-# The memory model (run.sh: PS_PC_MODEL): "auto" leaves it to the GPU (the new one on AMD, the
-# 0.3 one elsewhere), or either by hand. The new one goes through the layer's memory module on
-# every GPU (no sparse binding of the game's memory; PS_LAYER_MEMORY=0: AMD's sparse arena).
-PC_MODEL_SUBTITLE = ("Новая: видеокарта работает с памятью игры напрямую, как в игре для ПК, а команды "
-                     "графики переводятся, а не эмулируются. Старая — модель памяти 0.3 со всеми "
-                     "исправлениями. Если драйвер не проходит проверку при запуске — старая")
-MEMORY_MODELS = [("Авто: новая на AMD, старая на других", "auto"), ("Новая", "new"),
-                 ("Старая (как в 0.3)", "old")]
 # FSR 4.1.1 assets built from the user's AMD DLL (tools/fsr4cap, also in the package).
 FSR4CAP_DIR = PORT_DIR / "tools" / "fsr4cap"
 sys.path.insert(0, str(FSR4CAP_DIR))
@@ -113,9 +105,6 @@ LANGUAGES = [("Английский", "1"), ("Русский", "8"), ("Япон�
              ("Испанский", "3"), ("Немецкий", "4"), ("Итальянский", "5")]
 LIVE_RESOLUTION = [("Авто (по видеокарте)", "auto"), ("Выключена (быстрее)", "0"), ("Включена", "1")]
 READBACKS = [("Relaxed", "", "По умолчанию"), ("Выключены", "0"), ("Precise", "2")]
-# Background pre-upload of the game's GPU memory into VRAM (PS_PREUPLOAD): auto = on with a discrete GPU.
-PREUPLOAD = [("Обычная", "", "Без лишней видеопамяти"), ("Полная", "2", "Около 3 ГБ видеопамяти сверху"),
-             ("Выключена", "0")]
 
 DEFAULTS = {
     "ui_language": "",
@@ -136,13 +125,10 @@ DEFAULTS = {
     "fps_limit": 0,
     "draw_pipe": "",
     "readbacks": "",
-    "preupload": "",
     "mangohud": False,
     "frame_stats": False,
     "save_log": False,
     "crash_diag": False,
-    "memory_model": "auto",
-    "as_0_3": False,
     "gpu_profile": False,
     "vk_validation": False,
     "extra_env": "",
@@ -324,24 +310,12 @@ def game_environment(s):
         env["PS_DRAW_PIPE"] = s["draw_pipe"]
     if s["readbacks"]:
         env["PS_READBACKS"] = s["readbacks"]
-    if s.get("preupload"):
-        env["PS_PREUPLOAD"] = s["preupload"]
     if s["mangohud"]:
         env["MANGOHUD"] = "1"
     if s["frame_stats"]:
         env["PS_FRAME_STATS"] = "1"
     if s.get("save_log"):
         env["PS_SAVE_LOG"] = "1"
-    # The memory model: "auto" is run.sh's choice by GPU (the new one on AMD, the 0.3 one
-    # elsewhere). "pc_model", "pc_memory", "old_memory_model", "new_memory_model" and
-    # "legacy_memory_model" of older settings are ignored (0.5: auto for everyone).
-    # PS_PC_MODEL from the shell (or the extra variables) still wins over "auto".
-    model = s.get("memory_model", "auto")
-    if model in ("new", "old"):
-        env["PS_PC_MODEL"] = "1" if model == "new" else "0"
-    # Synchronisation and memory as released in 0.3 (run.sh: PS_AS_0_3), for comparisons.
-    if s.get("as_0_3"):
-        env["PS_AS_0_3"] = "1"
     if s.get("crash_diag"):
         env["PS_FREE_CHECK"] = "1"
         env["PS_WRITE_LOG"] = "1"
@@ -581,13 +555,6 @@ class LauncherWindow(Adw.ApplicationWindow):
         game.add(self.language_row)
         page.add(game)
 
-        # Auto: the new memory model on AMD, the 0.3 one elsewhere; or either by hand.
-        mode = Adw.PreferencesGroup(title=tr("Режим работы"))
-        self.memory_model_row = combo_row(tr("Модель памяти и трансляции"), tr(PC_MODEL_SUBTITLE),
-                                          MEMORY_MODELS, self.settings.get("memory_model", "auto"))
-        mode.add(self.memory_model_row)
-        page.add(mode)
-
         self.mods_group = Adw.PreferencesGroup(
             title=tr("Моды"), description=tr(
                 "Распакуйте каждый мод в отдельную папку (с dvdroot_ps4 или сразу с chr/, parts/ и т. п.). "
@@ -785,11 +752,6 @@ class LauncherWindow(Adw.ApplicationWindow):
         self.readbacks_row = combo_row(tr("Чтение данных GPU процессором"), None, READBACKS,
                                        self.settings["readbacks"])
         perf.add(self.readbacks_row)
-        self.preupload_row = combo_row(
-            tr("Фоновая загрузка в видеопамять"),
-            tr("Меньше рывков при подгрузке зон"), PREUPLOAD,
-            self.settings.get("preupload", ""))
-        perf.add(self.preupload_row)
         page.add(perf)
 
         dev = Adw.PreferencesGroup(title=tr("Для разработчика"))
@@ -805,11 +767,6 @@ class LauncherWindow(Adw.ApplicationWindow):
             subtitle=tr("Проверяет кучу игры и записывает записи в её память; немного медленнее"),
             active=self.settings.get("crash_diag", False))
         dev.add(self.crash_diag_row)
-        self.as_0_3_row = Adw.SwitchRow(
-            title=tr("Синхронизация как в 0.3"),
-            subtitle=tr("Для поиска регрессий: старая модель памяти и ожидания копий как в релизе 0.3"),
-            active=self.settings.get("as_0_3", False))
-        dev.add(self.as_0_3_row)
         self.stats_row = Adw.SwitchRow(title=tr("Статистика кадров в журнале"),
                                        subtitle="PS_FRAME_STATS",
                                        active=self.settings["frame_stats"])
@@ -1046,13 +1003,10 @@ class LauncherWindow(Adw.ApplicationWindow):
         s["fps_limit"] = int(self.limit_row.get_value())
         s["draw_pipe"] = combo_value(self.pipe_row)
         s["readbacks"] = combo_value(self.readbacks_row)
-        s["preupload"] = combo_value(self.preupload_row)
         s["mangohud"] = self.mangohud_row.get_active()
         s["frame_stats"] = self.stats_row.get_active()
         s["save_log"] = self.save_log_row.get_active()
         s["crash_diag"] = self.crash_diag_row.get_active()
-        s["memory_model"] = combo_value(self.memory_model_row)
-        s["as_0_3"] = self.as_0_3_row.get_active()
         s["gpu_profile"] = self.profile_row.get_active()
         s["vk_validation"] = self.validation_row.get_active()
         s["extra_env"] = self.extra_row.get_text().strip()

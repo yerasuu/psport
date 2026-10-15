@@ -48,7 +48,7 @@ public:
     void FillBuffer(const VideoCore::Buffer* dst, u64 offset, u64 size, u32 value);
 
     void InlineData(VideoCore::Buffer* dst, u64 offset, u32 value);
-    /// psport PS_GUEST_IN_PLACE: copies from the game's memory itself (a guest memory chunk's
+    /// psport: copies from the game's memory itself (a guest memory chunk's
     /// buffer, host memory the CPU writes) into `dst`: uploads without a CPU copy.
     void CopyFromGuestChunk(vk::Buffer src, const VideoCore::Buffer* dst,
                             std::span<const vk::BufferCopy> copies);

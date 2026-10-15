@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// psport: guest direct memory in GPU-visible system memory (PS_GUEST_GPU_MEMORY=1).
+// psport: guest direct memory in GPU-visible system memory.
 //
 // The runtime asks for direct memory in chunks (runtime_memory.c, CHUNK); each chunk is a
 // Vulkan allocation of cached system memory, exported as a dma-buf that the runtime maps at the
-// game's addresses and in its backing view. The GPU can then read the game's data in place: no
-// CPU copy into staging buffers before an upload. A chunk that cannot be made stays in the
-// runtime's memfd, as before.
+// game's addresses and in its backing view, or the runtime's own memfd imported by the GPU. The
+// GPU reads the game's data in place: no CPU copy into staging buffers before an upload. A chunk
+// that cannot be made stays in the runtime's memfd.
 #pragma once
 
 #include <cstdint>
+#include <string>
 #include "video_core/renderer_vulkan/vk_common.h"
 
 namespace Vulkan {
@@ -24,18 +25,18 @@ struct Chunk {
     std::uint32_t i_creation = 0; ///< creation order (stable key)
 };
 
-/// Whether the runtime can use such chunks: dma-buf export and mmap of the dma-buf. Checked once
-/// with a small chunk. A driver that maps at page offsets gets 256 MiB chunks (the game's mappings
+/// Whether the runtime can use such chunks: host memory the GPU imports, or dma-buf export and mmap
+/// of the dma-buf, checked once with a small chunk. Asked first: it also settles LayerMemory() for
+/// this GPU. A driver that maps at page offsets gets 256 MiB chunks (the game's mappings
 /// start inside them); NVIDIA's dma-buf maps at offset 0 only (the grid made every mapping after
 /// the first fail and the game panic at startup), so there each direct allocation is its own chunk:
 /// the game maps its allocations whole, at offset 0.
 bool Usable(const Vulkan::Instance& instance);
-/// Whether the PC memory model (PS_GUEST_IN_PLACE, the launcher's new memory and translation
-/// model) may run on this GPU: tested on AMD only. Elsewhere it stays off (the 0.3 model) unless
-/// PS_PC_MODEL_ANY_GPU=1.
-bool PcModelGpu(const Vulkan::Instance& instance);
-/// Whether the chunks are imported host memory (NVIDIA with PS_PC_MODEL_ANY_GPU=1). Valid after
-/// Usable(). The arena then keeps the first binding of every block (BufferCache FixedArena).
+/// Ends the process with `why`: the GPU cannot use the game's memory in place, and the port has no
+/// other memory model.
+[[noreturn]] void Unsupported(const std::string& why);
+/// Whether the chunks are imported host memory (without amd_guest_dmabuf_first). Valid after
+/// Usable(). The sparse arena then keeps the first binding of every block (BufferCache FixedArena).
 bool HostImported();
 /// psport PS_LAYER_MEMORY=1: the layer's memory module (gpu/layer/pslayer_gpu_memory.h) gives the
 /// GPU the game's memory through the chunk buffers instead of a sparse arena. Chunks are then one
@@ -49,7 +50,7 @@ vk::ExternalMemoryHandleTypeFlagBits HandleType();
 /// the driver reports that the chunks' external memory type loses a feature with it (the arena and
 /// chunk buffers then go without, as before). Stream-out must check it before writing to them.
 vk::BufferUsageFlags TransformFeedbackUsage(const Vulkan::Instance& instance);
-/// Hands the runtime direct memory chunks from now on (when enabled and supported).
+/// Hands the runtime direct memory chunks from now on.
 void Install(const Vulkan::Instance& instance);
 /// The chunk holding direct memory address `phys`, or null.
 const Chunk* Find(std::uint64_t phys);

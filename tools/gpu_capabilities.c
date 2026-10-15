@@ -83,14 +83,10 @@ static int live_resolution_suits(VkPhysicalDevice h_device) {
 
 /* --host-env: "KEY=VALUE<tab>message" per line, the settings run.sh takes before psport runs (a
  * driver reads its variables when it loads), with the line run.sh prints for each. run.sh keeps the
- * user's own values and its PS_AUTO_NOHIZ switch; the memory model line is always there. */
+ * user's own values and its PS_AUTO_NOHIZ switch. */
 static void print_host_env(VkPhysicalDevice h_device) {
     VkPhysicalDeviceProperties props;
     vkGetPhysicalDeviceProperties(h_device, &props);
-    if (quirk_applies(h_device, RUNTIME_QUIRK_amd_pc_memory_model))
-        printf("PS_PC_MODEL=1\tMemory model: new (AMD GPU, %s; PS_PC_MODEL=0: the 0.3 model)\n", props.deviceName);
-    else
-        printf("PS_PC_MODEL=0\tMemory model: the 0.3 one (%s; PS_PC_MODEL=1: the new one)\n", props.deviceName);
     if (quirk_applies(h_device, RUNTIME_QUIRK_radv_gcn_nohiz))
         printf("RADV_DEBUG=nohiz\tRADV: %s: RADV_DEBUG=nohiz (depth compression artifacts on GCN 3-5; "
                "PS_AUTO_NOHIZ=0: off)\n",

@@ -102,13 +102,11 @@ static void ResetSubmissionLock(Platform::InterruptId irq) {
 }
 
 bool SubmitLockOnDecode() {
-    // Only with honest labels: without them the GPU idle interrupt comes at decode anyway, and
-    // IsGpuIdle keeps waiting for the deferred fences (PS_WORK_RETIRED, Steam Deck crashes).
     static const bool on = [] {
         const char* env = std::getenv("PS_SUBMIT_LOCK");
         return !(env && std::string_view{env} == "gpu");
     }();
-    return on && Vulkan::Rasterizer::HonestLabels();
+    return on;
 }
 
 void ReleaseSubmissionLock() {

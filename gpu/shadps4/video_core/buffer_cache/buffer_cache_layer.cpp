@@ -1191,7 +1191,7 @@ std::pair<const Buffer*, u64> BufferCache::LayerPagedRecord(VAddr va_range, u64 
 }
 
 bool BufferCache::LayerActive() {
-    return GuestInPlace() && PsGuestMemory::LayerMemory();
+    return PsGuestMemory::LayerMemory();
 }
 
 } // namespace VideoCore

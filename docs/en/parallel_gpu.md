@@ -94,7 +94,8 @@ Findings, in the order they were fixed:
 3. Write faults: a 256 KiB unprotect window (`PS_FAULT_WINDOW`) halves them again.
    `PS_UFFD=1` tracks writes with userfaultfd write-protection instead of mprotect (no
    address-space write lock, no mapping splits); read protection for readbacks still uses
-   mprotect. It removes the mprotect time but did not change the stalls measurably; opt-in.
+   mprotect. It removes the mprotect time but did not change the stalls measurably; opt-in, then
+   removed with the 0.3 memory model.
 4. File reads into write-protected guest pages failed with EFAULT (kernel copies do not reach
    the fault handler); reads now touch each destination page first.
 
