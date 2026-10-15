@@ -17,10 +17,10 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
-#include "../../../dlss_bridge/bbport_dlss_bridge.h"
+#include "../../../dlss_bridge/psport_dlss_bridge.h"
 #elif defined(__linux__)
 #include <dlfcn.h>
-#include "../../../dlss_bridge/bbport_dlss_bridge.h"
+#include "../../../dlss_bridge/psport_dlss_bridge.h"
 #endif
 
 namespace Vulkan {
@@ -154,7 +154,7 @@ bool CollectExtensions(const VkExtensionProperties* required, u32 count,
 
 struct Dlss::Impl {
     Module module{};
-    const BbDlssApi* api{};
+    const PsDlssApi* api{};
     std::vector<std::string> instance_extensions, device_extensions;
     std::optional<FeatureDesc> feature;
     std::string problem;
@@ -191,10 +191,10 @@ Dlss* Dlss::Get() {
 Dlss::Dlss() : impl{std::make_unique<Impl>()} {
     impl->module = LoadModule(BridgeDirectory() / BridgeName);
     const auto get_api =
-        impl->module ? reinterpret_cast<BbDlssGetApiFn>(FindSymbol(impl->module, "BbDlssGetApi"))
+        impl->module ? reinterpret_cast<PsDlssGetApiFn>(FindSymbol(impl->module, "PsDlssGetApi"))
                      : nullptr;
     impl->api = get_api ? get_api() : nullptr;
-    if (!impl->api || impl->api->abi != BBPORT_DLSS_BRIDGE_ABI) {
+    if (!impl->api || impl->api->abi != PSPORT_DLSS_BRIDGE_ABI) {
         impl->Disable("the DLSS bridge library is missing or from another version");
         return;
     }
@@ -287,7 +287,7 @@ bool Dlss::CreateFeature(vk::CommandBuffer command, const FeatureDesc& desc) {
         return false;
     }
     impl->feature.reset();
-    const BbDlssFeature feature{desc.input_width,  desc.input_height, desc.output_width,
+    const PsDlssFeature feature{desc.input_width,  desc.input_height, desc.output_width,
                                 desc.output_height, desc.quality,      0,
                                 0,                  desc.hdr ? 1 : 0};
     if (!impl->api->CreateFeature(command, &feature)) {
@@ -303,14 +303,14 @@ bool Dlss::Evaluate(vk::CommandBuffer command, const Frame& frame) {
     }
     const auto image = [](const Resource& r) {
         const vk::ImageSubresourceRange range{r.aspect, 0, 1, 0, 1};
-        return BbDlssImage{r.image,
+        return PsDlssImage{r.image,
                            r.view,
                            static_cast<VkImageSubresourceRange>(range),
                            static_cast<VkFormat>(r.format),
                            r.width,
                            r.height};
     };
-    const BbDlssEvaluate parameters{image(frame.color),  image(frame.depth), image(frame.motion),
+    const PsDlssEvaluate parameters{image(frame.color),  image(frame.depth), image(frame.motion),
                                     image(frame.output), frame.jitter_x,     frame.jitter_y,
                                     frame.reset ? 1 : 0, frame.frame_ms,     frame.sharpness};
     return impl->api->Evaluate(command, &parameters) != 0;

@@ -11,7 +11,7 @@
 #include <cstdio>
 #include <string>
 
-#include "bbport_dlss_bridge.h" // Vulkan first: the NGX headers expect its types
+#include "psport_dlss_bridge.h" // Vulkan first: the NGX headers expect its types
 
 #include <nvsdk_ngx_helpers.h>
 #include <nvsdk_ngx_vk.h>
@@ -27,7 +27,7 @@ constexpr char EngineVersion[] = "psport-linux";
 #endif
 
 struct State {
-    BbDlssLogFn log{};
+    PsDlssLogFn log{};
     std::wstring dll_directory;
     std::wstring data_directory;
     const wchar_t* dll_path{};
@@ -36,7 +36,7 @@ struct State {
     NVSDK_NGX_Parameter* capabilities{};
     NVSDK_NGX_Parameter* parameters{};
     NVSDK_NGX_Handle* feature{};
-    BbDlssFeature feature_desc{};
+    PsDlssFeature feature_desc{};
     VkDevice device{};
     bool configured{};
     bool initialized{};
@@ -67,7 +67,7 @@ void NVSDK_CONV NgxLog(const char* message, NVSDK_NGX_Logging_Level, NVSDK_NGX_F
     Log(0, "NGX: %s", message ? message : "");
 }
 
-int32_t Configure(const wchar_t* dll_directory, const wchar_t* data_directory, BbDlssLogFn log) {
+int32_t Configure(const wchar_t* dll_directory, const wchar_t* data_directory, PsDlssLogFn log) {
     state.log = log;
     state.dll_directory = dll_directory ? dll_directory : L".";
     state.data_directory = data_directory ? data_directory : L".";
@@ -161,7 +161,7 @@ void ReleaseFeature() {
     }
 }
 
-int32_t CreateFeature(VkCommandBuffer command, const BbDlssFeature* desc) {
+int32_t CreateFeature(VkCommandBuffer command, const PsDlssFeature* desc) {
     if (!state.initialized || !state.capabilities || !desc)
         return 0;
     ReleaseFeature();
@@ -202,13 +202,13 @@ int32_t CreateFeature(VkCommandBuffer command, const BbDlssFeature* desc) {
     return 1;
 }
 
-NVSDK_NGX_Resource_VK Wrap(const BbDlssImage& image, bool writable) {
+NVSDK_NGX_Resource_VK Wrap(const PsDlssImage& image, bool writable) {
     return NVSDK_NGX_Create_ImageView_Resource_VK(image.view, image.image, image.range,
                                                   image.format, image.width, image.height,
                                                   writable);
 }
 
-int32_t Evaluate(VkCommandBuffer command, const BbDlssEvaluate* evaluate) {
+int32_t Evaluate(VkCommandBuffer command, const PsDlssEvaluate* evaluate) {
     if (!state.feature || !state.parameters || !evaluate)
         return 0;
     auto color = Wrap(evaluate->color, false);
@@ -248,18 +248,18 @@ void Shutdown() {
     }
 }
 
-const BbDlssApi api{BBPORT_DLSS_BRIDGE_ABI, Configure,      InstanceExtensions, DeviceExtensions,
+const PsDlssApi api{PSPORT_DLSS_BRIDGE_ABI, Configure,      InstanceExtensions, DeviceExtensions,
                     Initialize,             CreateFeature,  Evaluate,           ReleaseFeature,
                     Shutdown};
 
 } // namespace
 
 #ifdef _WIN32
-#define BBPORT_DLSS_EXPORT __declspec(dllexport)
+#define PSPORT_DLSS_EXPORT __declspec(dllexport)
 #else
-#define BBPORT_DLSS_EXPORT __attribute__((visibility("default")))
+#define PSPORT_DLSS_EXPORT __attribute__((visibility("default")))
 #endif
 
-extern "C" BBPORT_DLSS_EXPORT const BbDlssApi* BbDlssGetApi() {
+extern "C" PSPORT_DLSS_EXPORT const PsDlssApi* PsDlssGetApi() {
     return &api;
 }
