@@ -140,7 +140,8 @@ library.
 - The eboot's identity (`src/loader_hash.c`): the SHA-256 of its loadable segments at their
   addresses, the same whatever tool dumped the game; computed when a profile's check asks for it.
 - For launchers, without starting the game: `psport --list-mods <dir> [--game <dir>]` and
-  `psport --list-patches <dir> --game <dir>` print JSON (mod folder names; key, name, author, note,
+  `psport --list-patches <dir> --game <dir>` print JSON (instead of `--game`, `--title <TITLE_ID>
+  [--version <APP_VER>]` names a title whose folder the launcher does not have at hand) (mod folder names; key, name, author, note,
   default of each external patch); `psport --check-game <dir>` runs the profile's file check and
   prints `kind<TAB>title<TAB>version` with exit status 2 when the files cannot work.
 

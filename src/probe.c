@@ -437,22 +437,44 @@ typedef struct {
     size_t c_serials;
     BbGameFiles files;
 } GameInfo;
-static void game_info(const char *sz_game_dir, GameInfo *p_out_info) {
-    char sz_sfo[4096];
+/* sz_game_dir may be NULL: a launcher asking about a title by its TITLE_ID and APP_VER. */
+static void game_info_of(const char *sz_game_dir, const char *sz_serial, const char *sz_version, GameInfo *p_out_info) {
     memset(p_out_info,0,sizeof(*p_out_info));
-    snprintf(sz_sfo,sizeof(sz_sfo),"%s/sce_sys/param.sfo",sz_game_dir);
-    sfo_value(sz_sfo,"TITLE_ID",p_out_info->sz_serial,sizeof(p_out_info->sz_serial),NULL);
-    sfo_value(sz_sfo,"APP_VER",p_out_info->sz_version,sizeof(p_out_info->sz_version),NULL);
+    snprintf(p_out_info->sz_serial,sizeof(p_out_info->sz_serial),"%s",sz_serial);
+    snprintf(p_out_info->sz_version,sizeof(p_out_info->sz_version),"%s",sz_version);
     if (p_out_info->sz_serial[0]) p_out_info->serials[p_out_info->c_serials++]=p_out_info->sz_serial;
     for (size_t i=0; p_out_info->c_serials<64; ++i) {
-        const char *sz_serial=bbgpu_game_serial(p_out_info->sz_serial,i);
-        if (!sz_serial) break;
-        p_out_info->serials[p_out_info->c_serials++]=sz_serial;
+        const char *sz_same=bbgpu_game_serial(p_out_info->sz_serial,i);
+        if (!sz_same) break;
+        p_out_info->serials[p_out_info->c_serials++]=sz_same;
     }
     const char *sz_patch_file=bbgpu_game_patch_file(p_out_info->sz_serial);
     if (sz_patch_file) install_path(sz_patch_file,p_out_info->sz_patch_file,sizeof(p_out_info->sz_patch_file));
     p_out_info->files=(BbGameFiles){sz_game_dir,p_out_info->sz_serial,p_out_info->sz_version,
                                     sz_patch_file ? p_out_info->sz_patch_file : NULL,loader_eboot_sha256};
+}
+static void game_info(const char *sz_game_dir, GameInfo *p_out_info) {
+    char sz_sfo[4096], sz_serial[16]="", sz_version[16]="";
+    snprintf(sz_sfo,sizeof(sz_sfo),"%s/sce_sys/param.sfo",sz_game_dir);
+    sfo_value(sz_sfo,"TITLE_ID",sz_serial,sizeof(sz_serial),NULL);
+    sfo_value(sz_sfo,"APP_VER",sz_version,sizeof(sz_version),NULL);
+    game_info_of(sz_game_dir,sz_serial,sz_version,p_out_info);
+}
+/* A launcher's question names the game by its folder (--game dir) or, without one, by its title
+ * (--title TITLE_ID [--version APP_VER]); the arguments from argv[first] on. 0 when they are
+ * neither. *psz_out_game_dir is NULL for a title. */
+static int query_game(int argc, char **argv, int first, GameInfo *p_out_info, const char **psz_out_game_dir) {
+    *psz_out_game_dir=NULL;
+    if (argc == first) { game_info_of(NULL,"","",p_out_info); return 1; }
+    if (argc == first+2 && !strcmp(argv[first],"--game")) {
+        *psz_out_game_dir=argv[first+1];
+        game_info(argv[first+1],p_out_info);
+        return 1;
+    }
+    if (strcmp(argv[first],"--title") || (argc != first+2 && (argc != first+4 || strcmp(argv[first+2],"--version"))))
+        return 0;
+    game_info_of(NULL,argv[first+1],argc == first+4 ? argv[first+3] : "",p_out_info);
+    return 1;
 }
 /* The game's external patch folder for loader_patches.c: its profile's own file left out. */
 static LoaderPatchFolder patch_folder(const char *sz_dir, const GameInfo *p_info) {
@@ -534,20 +556,24 @@ int main(int argc, char **argv) {
         game_info(argv[2],&info);
         return bbgpu_game_has_presets(info.sz_serial) ? 0 : 1;
     }
-    if (argc == 5 && !strcmp(argv[1], "--list-patches") && !strcmp(argv[3], "--game")) {
-        GameInfo info;
-        game_info(argv[4],&info);
-        LoaderPatchFolder folder=patch_folder(argv[2],&info);
-        loader_patches_list(&folder);
-        return 0;
-    }
     const char *mod_folders[256];
-    if ((argc == 3 || argc == 5) && !strcmp(argv[1], "--list-mods") && (argc == 3 || !strcmp(argv[3], "--game"))) {
-        GameInfo info={0};
-        if (argc == 5) game_info(argv[4],&info);
-        LoaderModOptions mods={.sz_mods_dir=argv[2]};
-        mod_options(&info,&mods,mod_folders,256);
-        loader_mods_list(argc == 5 ? argv[4] : NULL,&mods);
+    if (argc >= 3 && (!strcmp(argv[1], "--list-patches") || !strcmp(argv[1], "--list-mods"))) {
+        GameInfo info;
+        const char *sz_game_dir;
+        int is_patches=!strcmp(argv[1], "--list-patches");
+        if (!query_game(argc,argv,3,&info,&sz_game_dir) || (is_patches && argc == 3)) {
+            fprintf(stderr, "Usage: %s %s dir %s(--game dir | --title TITLE_ID [--version APP_VER])%s\n", argv[0], argv[1],
+                    is_patches ? "" : "[", is_patches ? "" : "]");
+            return 1;
+        }
+        if (is_patches) {
+            LoaderPatchFolder folder=patch_folder(argv[2],&info);
+            loader_patches_list(&folder);
+        } else {
+            LoaderModOptions mods={.sz_mods_dir=argv[2]};
+            mod_options(&info,&mods,mod_folders,256);
+            loader_mods_list(sz_game_dir,&mods);
+        }
         return 0;
     }
     check_cpu();
@@ -581,7 +607,7 @@ int main(int argc, char **argv) {
         else { fprintf(stderr, "Unknown option: %s\n", argv[i]); return 1; }
     }
     if (!game.game) {
-        fprintf(stderr, "Usage: %s --game dir [--system-modules dir] [--hle libs] [--lle libs] [--cpu-only] [--strict-imports] [--app0 dir] [--user dir] [--patches-dir dir [--patches-config file]] [--mods dir [--mods-config file]] [--out dir] [--timeout seconds] [--exec guest-path [--arg value]...] | --check-game dir | --has-presets dir | --list-patches dir --game dir | --list-mods dir [--game dir] | --vulkan-only\n", argv[0]);
+        fprintf(stderr, "Usage: %s --game dir [--system-modules dir] [--hle libs] [--lle libs] [--cpu-only] [--strict-imports] [--app0 dir] [--user dir] [--patches-dir dir [--patches-config file]] [--mods dir [--mods-config file]] [--out dir] [--timeout seconds] [--exec guest-path [--arg value]...] | --check-game dir | --has-presets dir | --list-patches dir (--game dir | --title id [--version v]) | --list-mods dir [--game dir | --title id] | --vulkan-only\n", argv[0]);
         return 1;
     }
     if (mods_dir) {
