@@ -85,7 +85,6 @@ if [[ $game != "$(realpath "$original_game")" ]]; then
     mod_game=$game
     trap '"$PYTHON" -c '\''import shutil,sys; shutil.rmtree(sys.argv[1])'\'' "$mod_game"' EXIT
 fi
-"$PYTHON" scripts/game_check.py --launch "$game"
 # psport loads and links the game from its folder (src/loader_*.c). PS_SYS_MODULES: a folder with
 # the user's own dump of the console's system modules (*.sprx), linked when the game needs their library; PS_HLE=libA,libB keeps those to the port instead, and
 # PS_LLE=libC links one the port implements itself, to compare them.
@@ -94,19 +93,25 @@ if [[ -n ${PS_SYS_MODULES:-} ]]; then
     link_args+=(--system-modules "$PS_SYS_MODULES" --hle "${PS_HLE:-}" --lle "${PS_LLE:-}")
 fi
 boot_args=(--game "$game" "${link_args[@]}")
+# FSR 4: faster post passes next to the downloaded ones (incremental; tools/fsr4_optimize.sh).
+if [[ -z ${PS_PREBUILT:-} && -d fsr4_shaders ]] && command -v spirv-cross >/dev/null; then
+    bash tools/fsr4_optimize.sh || echo 'FSR 4: optimized post passes not built' >&2
+fi
+if [[ -n ${PS_PREBUILT:-} ]]; then
+    probe=${PS_PROBE:-bin/psport}
+else
+    bash build.sh
+    probe=${PS_PROBE:-out/psport}  # PS_PROBE: a wrapper (gdb) around it
+fi
 # Sizes chosen below for the previous launch are recomputed after an in-game restart.
 if [[ ${PS_AUTO_RENDER_RES:-} == 1 ]]; then
     unset PS_RENDER_RES PS_OUTPUT_RES PS_AUTO_RENDER_RES
 fi
-# PS_RENDER_RES=WxH explicitly sets the game's render resolution (a patch at start).
-# Frame rate: PS_FPS=uncap (default; delta-time patch, vblank 480 Hz, frames shown at once),
-# 60/90 (fixed-timestep patches) or 30 (unpatched). PS_PATCHES adds patch names ("a;b").
-fps=${PS_FPS:-uncap}
-# The frame rate and resolution presets are patches to one title's executable (patches/): another
-# title runs unpatched at its own size, on the console's 60 Hz vblank (at 480 Hz a title asking for
-# 30 FPS through its flip rate got 240) and with the console's direct memory.
-has_presets=1
-if ! "$PYTHON" scripts/patches.py --game-dir "$game" --has-presets; then fps=30 has_presets=0; fi
+# PS_RENDER_RES=WxH explicitly sets the game's render resolution (a patch at start). The frame
+# rate presets (PS_FPS), PS_PATCHES and the render resolution patch are a game profile's (for
+# Bloodborne gpu/games/bloodborne/patches.cpp, asked of psport itself): another title runs unpatched
+# at its own size, on the console's 60 Hz vblank and with the console's direct memory, off the
+# scaled output path below.
 # bbport.ini output_res other than 1080p (720p for the Steam Deck, 1440p, 2160p): the whole game
 # renders at the preset's size of the output (a patch), the upscaler fills the output, the UI is
 # drawn at the output size. Preset and output changes need a restart.
@@ -116,11 +121,47 @@ if ! "$PYTHON" scripts/patches.py --game-dir "$game" --has-presets; then fps=30 
 # PS_LIVE_RES=0/1, else bbport.ini live_resolution=0/1/auto (auto: the GPU check, strong
 # discrete GPUs get them); off when unset. 1080p output and TAA always use the live path.
 # The GPU tools (bb-gpu-capabilities: the game's GPU, its live resolution support).
-if [[ -n ${PS_PROBE:-} ]]; then caps=$(dirname -- "$PS_PROBE")/bb-gpu-capabilities
-elif [[ -n ${PS_PREBUILT:-} ]]; then caps=bin/bb-gpu-capabilities
-else caps=out/bb-gpu-capabilities; fi
-if [[ -z ${PS_RENDER_RES:-} && $has_presets == 1 ]]; then
-    read -r scaled_render scaled_output < <("$PYTHON" scripts/patches.py --print-scaled --settings "$PS_CONFIG") || true
+if [[ -n ${PS_PROBE:-} ]]; then tools=$(dirname -- "$PS_PROBE")
+elif [[ -n ${PS_PREBUILT:-} ]]; then tools=bin
+else tools=out; fi
+caps=$tools/bb-gpu-capabilities
+has_presets=0
+"$tools/psport" --has-presets "$game" && has_presets=1
+# The scene's size for an output other than 1080p: the output divided by the upscaler preset's
+# ratio (1, 1.5, 1.7, 2, 3; 1 without upscaler), rounded half to even to an even size (the game has
+# half-resolution buffers). A scene of exactly 1920x1080 (4K Performance) is indistinguishable from
+# the game's UI coordinate space, which the port's UI composition recognizes by that size: 1916x1078.
+if [[ -z ${PS_RENDER_RES:-} && $has_presets == 1 && -f $PS_CONFIG ]]; then
+    output_res= upscaler=fsr3 preset=0
+    while IFS= read -r line || [[ -n $line ]]; do
+        [[ $line == \#* || $line != *=* ]] && continue
+        key=${line%%=*} value=${line#*=}
+        key=${key#"${key%%[![:space:]]*}"} key=${key%"${key##*[![:space:]]}"}
+        value=${value#"${value%%[![:space:]]*}"} value=${value%"${value##*[![:space:]]}"}
+        case $key in output_res) output_res=$value ;; upscaler) upscaler=$value ;; preset) preset=$value ;; esac
+    done < "$PS_CONFIG"
+    width=1920 height=1080
+    if [[ ${output_res,,} =~ ^\ *\+?([0-9]+)\ *x\ *\+?([0-9]+)\ *$ ]] && (( 10#${BASH_REMATCH[1]} && 10#${BASH_REMATCH[2]} )); then
+        width=$((10#${BASH_REMATCH[1]})) height=$((10#${BASH_REMATCH[2]}))
+    fi
+    ratio=1/1
+    if [[ $upscaler != off && ${preset:-0} =~ ^\ *([-+]?)([0-9]+)\ *$ ]]; then
+        ratios=(1/1 3/2 17/10 2/1 3/1)
+        preset=${BASH_REMATCH[1]}$((10#${BASH_REMATCH[2]}))
+        ratio=${ratios[preset < 0 ? 0 : preset > 4 ? 4 : preset]}
+    elif [[ $upscaler != off ]]; then
+        ratio=
+    fi
+    if [[ -n $ratio && $upscaler != taa && ${width}x$height != 1920x1080 ]]; then
+        sizes=()
+        for size in "$width" "$height"; do
+            (( divisor = 2 * ${ratio%/*}, half = size * ${ratio#*/} / divisor, rest = size * ${ratio#*/} % divisor ))
+            (( 2 * rest > divisor || (2 * rest == divisor && half % 2) )) && (( half += 1 ))
+            sizes+=($(( half * 2 > 2 ? half * 2 : 2 )))
+        done
+        scaled_render=${sizes[0]}x${sizes[1]} scaled_output=${width}x$height
+        [[ $scaled_render == 1920x1080 ]] && scaled_render=1916x1078
+    fi
 fi
 live=0
 if [[ -n ${scaled_output:-} ]]; then
@@ -144,8 +185,8 @@ elif [[ -n ${scaled_output:-} ]]; then
     export PS_DMEM_MB=${PS_DMEM_MB:-9152}
     echo "Output ${scaled_output}: scene ${scaled_render}, direct memory ${PS_DMEM_MB} MiB (live_resolution=1: live changes)"
 fi
-"$PYTHON" scripts/patches.py --out "$out" --fps "$fps" --extra "${PS_PATCHES:-}" --settings "$PS_CONFIG" --game-dir "$game" --render-res "${PS_RENDER_RES:-}" --output-res "${PS_OUTPUT_RES:-}" \
-    --patches-dir "${PS_PATCHES_DIR:-$data/patches}" --patches-config "${PS_PATCHES_CONFIG:-$data/patches.json}"
+# Third-party shadPS4/GoldHEN XML patches for the game, selected in patches.json (src/loader_patches.c).
+patch_args=(--patches-dir "${PS_PATCHES_DIR:-$data/patches}" --patches-config "${PS_PATCHES_CONFIG:-$data/patches.json}")
 # Background upload of the game's GPU memory into VRAM ahead of use (BufferCache::Preupload):
 # 1 = only memory already in VRAM that the game rewrote (no new VRAM), 2 = all of it (~3 GB more
 # VRAM), 0 = off. PS_GUEST_GPU_MEMORY=1 puts guest direct memory in GPU-visible dma-buf chunks
@@ -223,19 +264,6 @@ export PS_COPY_GPU_BUFFERS=${PS_COPY_GPU_BUFFERS:-1}
 # A guest write next to small GPU outputs the GPU is still writing (counters, compute results,
 # up to PS_GPU_WRITE_TWINS_MAX bytes per page) does not wait for the GPU (BufferCache twins).
 export PS_GPU_WRITE_TWINS=${PS_GPU_WRITE_TWINS:-1} PS_GPU_WRITE_TWINS_MAX=${PS_GPU_WRITE_TWINS_MAX:-65536}
-if [[ -z ${PS_VBLANK_HZ:-} ]]; then
-    case $fps in uncap) export PS_VBLANK_HZ=480 ;; 90) export PS_VBLANK_HZ=90 ;; *) export PS_VBLANK_HZ=60 ;; esac
-fi
-# FSR 4: faster post passes next to the downloaded ones (incremental; tools/fsr4_optimize.sh).
-if [[ -z ${PS_PREBUILT:-} && -d fsr4_shaders ]] && command -v spirv-cross >/dev/null; then
-    bash tools/fsr4_optimize.sh || echo 'FSR 4: optimized post passes not built' >&2
-fi
-if [[ -n ${PS_PREBUILT:-} ]]; then
-    probe=${PS_PROBE:-bin/psport}
-else
-    bash build.sh
-    probe=${PS_PROBE:-out/psport}  # PS_PROBE: a wrapper (gdb) around it
-fi
 # Online play (PS_ONLINE=1, launcher: Online; the online module gpu/bbnet): the game's own server
 # goes to the community server, summon signs to the shadNet WebAPI (scripts/online.py).
 if [[ ${PS_ONLINE:-0} == 1 && -f scripts/online.py ]]; then
@@ -251,7 +279,7 @@ if [[ ${PS_ONLINE:-0} == 1 && -f scripts/online.py ]]; then
     SHADPS4_HTTP_HOST_OVERRIDES_JSON=$("$PYTHON" scripts/online.py overrides --user "${PS_USER_DIR:-$data/user}") || true
     export SHADPS4_HTTP_HOST_OVERRIDES_JSON
 fi
-probe_args=("${boot_args[@]}" --patches "$out/patches.bin" --app0 "$game" --user "${PS_USER_DIR:-$data/user}" --timeout "${PS_TIMEOUT:-0}" "$@")
+probe_args=("${boot_args[@]}" "${patch_args[@]}" --app0 "$game" --user "${PS_USER_DIR:-$data/user}" --timeout "${PS_TIMEOUT:-0}" "$@")
 if [[ -n ${mod_game:-} ]]; then
     "$probe" "${probe_args[@]}" &
     mod_pid=$!

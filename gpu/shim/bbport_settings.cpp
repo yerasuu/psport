@@ -245,7 +245,7 @@ void Save() {
     put("show_fps", flag(v.show_fps));
     put("fsr4_auto_exposure", flag(v.fsr4_auto_exposure));
     put("fsr4_invert_jitter", flag(v.fsr4_invert_jitter));
-    // Read by patches.py at start.
+    // Read by the game profile at start (gpu/games/bloodborne/patches.cpp).
     for (int e = 0; e < EffectCount; ++e) {
         put(Effects[e].key, flag(v.effects[e]));
     }

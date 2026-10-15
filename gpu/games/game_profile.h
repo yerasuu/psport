@@ -10,6 +10,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <string>
+#include "../bbgpu.h"
 
 namespace Game {
 
@@ -96,8 +98,20 @@ struct CoreServices {
 
 struct Profile {
     const char* name = nullptr;
-    /// The param.sfo TITLE_IDs it is for.
+    /// The param.sfo TITLE_IDs it is for (one executable: patch files named after any of them
+    /// apply to all).
     std::span<const char* const> serials;
+    /// Its own patch file (shadPS4 XML), relative to psport's folder; external patch folders leave
+    /// it out.
+    const char* patch_file = nullptr;
+    /// Before anything of the game runs, before bbgpu_init: environment defaults it chooses.
+    void (*prepare_environment)() = nullptr;
+    /// Checks the game's files before any of its code runs (PS_SKIP_GAME_CHECK=1 is its own to
+    /// honour): false when they cannot work, with a short kind for launchers and what to do.
+    bool (*check_files)(const BbGameFiles& game, std::string& kind, std::string& advice) = nullptr;
+    /// Its own patches of the executable, chosen by the player's settings, appended through
+    /// services before the external ones; false stops the launch (it printed why).
+    bool (*add_patches)(const BbGameFiles& game, const BbPatchServices& services) = nullptr;
     /// Hooks in the game's code (each checks the bytes it replaces: another build of the game is
     /// left alone). They make the core learn of writes sooner; it does not depend on them for
     /// what it shows (write traps catch what nobody announces).
@@ -148,6 +162,10 @@ struct Profile {
     /// The pool holding the game's GPU labels; zeros when unknown, and the free check stays off.
     SmallObjectPool small_object_pool;
 };
+
+/// The profile for a TITLE_ID, whatever PS_GAME_PROFILE says: what it adds to the launch (its
+/// file check, its patches) is part of running the game, not an optimisation of the translator.
+const Profile* Find(const char* serial);
 
 /// Chooses the profile for the game by its TITLE_ID (bbgpu_init). PS_GAME_PROFILE=none runs the
 /// game as an unknown one (no profile), for checking the generic paths.

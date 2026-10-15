@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Bloodborne (update 1.09): what the translator knows about its code. Addresses are those of the
-// 1.09 executable (game_check.py makes sure that is the one running); every retail release runs
-// the same one.
+// 1.09 executable (CheckFiles, game_check.cpp, makes sure that is the one running); every retail
+// release runs the same one.
 #include "game_profile.h"
 #include <cstdio>
 #include <cstdlib>
@@ -11,12 +11,13 @@
 #include "gnm_hooks.h"
 #include "guest_hooks.h"
 #include "heap_sites.h"
+#include "launch.h"
 
 namespace Game {
 namespace {
 constexpr std::uint64_t ImageBase = 0x800000000ull;
 
-/// The retail releases (scripts/game_check.py SUPPORTED_TITLES): Bloodborne in the US, EU, UK, JP
+/// The retail releases (the content IDs from PR #117): Bloodborne in the US, EU, UK, JP
 /// and Asia, then the editions with The Old Hunters (US, EU, JP, Asia). Without its serial here a
 /// region ran on the generic paths alone, and the new memory model crashed on entering the world
 /// (issue #119, the US release: a null read in the allocator, 0x2085xxx). Its bookkeeping is in
@@ -98,6 +99,10 @@ constexpr LabelReleaseCode LabelRelease = {
 extern const Profile BloodborneProfile = {
     .name = "Bloodborne",
     .serials = Serials,
+    .patch_file = BbLaunch::PatchFile,
+    .prepare_environment = BbLaunch::PrepareEnvironment,
+    .check_files = BbLaunch::CheckFiles,
+    .add_patches = BbLaunch::AddPatches,
     .install_hooks = InstallHooks,
     .patch_image = PatchImage,
     .dynamic_writers = DynamicWriters,

@@ -78,13 +78,6 @@ static void check_cpu(void) {
             "newer, or an AMD Ryzen. PS_SKIP_CPU_CHECK=1 starts anyway.\n", missing);
     exit(1);
 }
-static uint64_t read64(FILE *f) {
-    unsigned char b[8];
-    if (fread(b, 1, 8, f) != 8) fail("truncated boot file");
-    uint64_t n = 0;
-    for (int i = 7; i >= 0; --i) n = (n << 8) | b[i];
-    return n;
-}
 static size_t round_page(size_t size) { return (size + page_size - 1) & ~(page_size - 1); }
 static void *allocate(size_t size) {
 #ifndef _WIN32
@@ -371,25 +364,25 @@ static int sfo_value(const char *path, const char *key, char *text, size_t text_
 }
 /* AppContent's base-game profile: param.sfo's user-defined parameters; the SKU is a launch setting
  * (PS_CONTENT_SKU=full or trial), not a license check. */
-static void configure_content(const char *sfo) {
-    const char *sku=getenv("PS_CONTENT_SKU");
-    if (!sku || !*sku) sku="full";
+static void configure_content(const char *sz_sfo) {
+    const char *sz_sku=getenv("PS_CONTENT_SKU");
+    if (!sz_sku || !*sz_sku) sz_sku="full";
     uint32_t values[5]={0};
-    if (!strcmp(sku,"full")) values[0]=3;
-    else if (!strcmp(sku,"trial")) values[0]=1;
+    if (!strcmp(sz_sku,"full")) values[0]=3;
+    else if (!strcmp(sz_sku,"trial")) values[0]=1;
     else fail("PS_CONTENT_SKU must be full or trial");
-    FILE *f=fopen(sfo,"rb");
-    if (!f) { fprintf(stderr,"ERROR: cannot read %s\n",sfo); exit(1); }
-    fclose(f);
+    FILE *p_file=fopen(sz_sfo,"rb");
+    if (!p_file) { fprintf(stderr,"ERROR: cannot read %s\n",sz_sfo); exit(1); }
+    fclose(p_file);
     for (unsigned i=0;i<4;++i) {
-        char key[32];
-        snprintf(key,sizeof(key),"USER_DEFINED_PARAM_%u",i+1);
-        int format=sfo_value(sfo,key,NULL,0,&values[1+i]);
+        char sz_key[32];
+        snprintf(sz_key,sizeof(sz_key),"USER_DEFINED_PARAM_%u",i+1);
+        int format=sfo_value(sz_sfo,sz_key,NULL,0,&values[1+i]);
         if (format && format!=0x0404) fail("invalid user-defined parameter in param.sfo");
     }
     runtime_content_configure(values);
     printf("AppContent profile: SKU=%s (probe setting), user params=[%u, %u, %u, %u], mounted add-ons=0\n",
-           sku,values[1],values[2],values[3],values[4]);
+           sz_sku,values[1],values[2],values[3],values[4]);
 }
 static int mapped(Segment *segments, uint64_t count, uint64_t address, uint64_t bytes) {
     for (uint64_t i = 0; i < count; ++i)
@@ -397,20 +390,17 @@ static int mapped(Segment *segments, uint64_t count, uint64_t address, uint64_t 
             address - segments[i].address <= segments[i].size - bytes) return 1;
     return 0;
 }
-/* BBPATCH2 (patches.py): the patches' image base, then byte writes at image offsets, applied
- * after relocation. A write may replace a whole base-relative pointer slot (60/90 FPS++ swap
- * function pointers): the patch holds the address at the patches' base, rebased here. */
-static void apply_patches(const char *path, Segment *segments, uint64_t ns, const Reloc *relocs, uint64_t nr) {
-    FILE *f=fopen(path,"rb");
-    char magic[8];
-    if (!f || fread(magic,1,8,f)!=8 || memcmp(magic,"BBPATCH2",8)) fail("invalid patch file");
-    uint64_t base=read64(f), count=read64(f), bytes=0, rebased=0;
-    unsigned char data[4096];
-    for (uint64_t i=0;i<count;++i) {
-        uint64_t offset=read64(f), length=read64(f);
-        if (!length || length>sizeof(data) || !mapped(segments,ns,offset,length) || fread(data,1,length,f)!=length)
-            fail("bad patch entry");
-        uint64_t slots[sizeof(data)/8]; size_t nslots=0;
+/* The patches' writes at image offsets, after relocation. A write may replace a whole
+ * base-relative pointer slot (60/90 FPS++ swap function pointers): the patch holds the address at
+ * the eboot's patch base, 0x400000, rebased here. */
+static void apply_patches(const BbPatchList *patches, Segment *segments, uint64_t ns, const Reloc *relocs, uint64_t nr) {
+    const uint64_t base=0x400000;
+    uint64_t bytes=0, rebased=0;
+    for (size_t i=0;i<patches->c_writes;++i) {
+        uint64_t offset=patches->p_writes[i].off_image, length=patches->p_writes[i].cb_data;
+        const unsigned char *data=patches->p_writes[i].p_data;
+        if (!length || length>4096 || !mapped(segments,ns,offset,length)) fail("bad patch entry");
+        uint64_t slots[4096/8]; size_t nslots=0;
         for (uint64_t r=0;r<nr;++r) {
             if (!(relocs[r].target<offset+length && offset<relocs[r].target+8)) continue;
             uint64_t target=relocs[r].target, value;
@@ -429,9 +419,45 @@ static void apply_patches(const char *path, Segment *segments, uint64_t ns, cons
         rebased+=nslots;
         bytes+=length;
     }
-    if (fgetc(f)!=EOF) fail("trailing data in patch file");
-    fclose(f);
-    printf("Patches: %" PRIu64 " writes, %" PRIu64 " bytes applied, %" PRIu64 " pointers rebased\n",count,bytes,rebased);
+    printf("Patches: %zu writes, %" PRIu64 " bytes applied, %" PRIu64 " pointers rebased\n",patches->c_writes,bytes,rebased);
+}
+/* A path under psport's own folder, the one holding out/ or bin/ (a checkout or a package). */
+static void install_path(const char *sz_relative, char *sz_out, size_t cb_out) {
+    char sz_exe[4096];
+    ssize_t cb_exe=readlink("/proc/self/exe",sz_exe,sizeof(sz_exe)-1);
+    sz_exe[cb_exe>0 ? cb_exe : 0]=0;
+    for (int up=0; up<2; ++up) { char *p_slash=strrchr(sz_exe,'/'); if (p_slash) *p_slash=0; }
+    if ((size_t)snprintf(sz_out,cb_out,"%s/%s",sz_exe[0] ? sz_exe : ".",sz_relative)>=cb_out) fail("install path too long");
+}
+/* What psport knows of the game for its profile and the external patches: param.sfo's TITLE_ID
+ * and APP_VER, and the TITLE_IDs of the same executable. */
+typedef struct {
+    char sz_serial[16], sz_version[16], sz_patch_file[4096];
+    const char *serials[64];
+    size_t c_serials;
+    BbGameFiles files;
+} GameInfo;
+static void game_info(const char *sz_game_dir, GameInfo *p_out_info) {
+    char sz_sfo[4096];
+    memset(p_out_info,0,sizeof(*p_out_info));
+    snprintf(sz_sfo,sizeof(sz_sfo),"%s/sce_sys/param.sfo",sz_game_dir);
+    sfo_value(sz_sfo,"TITLE_ID",p_out_info->sz_serial,sizeof(p_out_info->sz_serial),NULL);
+    sfo_value(sz_sfo,"APP_VER",p_out_info->sz_version,sizeof(p_out_info->sz_version),NULL);
+    if (p_out_info->sz_serial[0]) p_out_info->serials[p_out_info->c_serials++]=p_out_info->sz_serial;
+    for (size_t i=0; p_out_info->c_serials<64; ++i) {
+        const char *sz_serial=bbgpu_game_serial(p_out_info->sz_serial,i);
+        if (!sz_serial) break;
+        p_out_info->serials[p_out_info->c_serials++]=sz_serial;
+    }
+    const char *sz_patch_file=bbgpu_game_patch_file(p_out_info->sz_serial);
+    if (sz_patch_file) install_path(sz_patch_file,p_out_info->sz_patch_file,sizeof(p_out_info->sz_patch_file));
+    p_out_info->files=(BbGameFiles){sz_game_dir,p_out_info->sz_serial,p_out_info->sz_version,
+                                    sz_patch_file ? p_out_info->sz_patch_file : NULL,loader_eboot_sha256};
+}
+/* The game's external patch folder for loader_patches.c: its profile's own file left out. */
+static LoaderPatchFolder patch_folder(const char *sz_dir, const GameInfo *p_info) {
+    return (LoaderPatchFolder){sz_dir,p_info->sz_patch_file[0] ? p_info->sz_patch_file : NULL,p_info->sz_version,
+                               p_info->serials,p_info->c_serials};
 }
 
 #ifndef _WIN32
@@ -483,10 +509,31 @@ int main(int argc, char **argv) {
     mallopt(M_MMAP_THRESHOLD,32*1024*1024);
 #endif
     if (argc == 2 && !strcmp(argv[1], "--vulkan-only")) return vulkan_smoke();
+    if (argc == 3 && !strcmp(argv[1], "--check-game")) {
+        GameInfo info;
+        char sz_kind[64], sz_advice[2048];
+        game_info(argv[2],&info);
+        if (!bbgpu_check_game(&info.files,sz_kind,sizeof(sz_kind),sz_advice,sizeof(sz_advice))) return 0;
+        printf("%s\t%s\t%s\n",sz_kind,info.sz_serial[0] ? info.sz_serial : "?",info.sz_version[0] ? info.sz_version : "?");
+        fprintf(stderr,"%s\n",sz_advice);
+        return 2;
+    }
+    if (argc == 3 && !strcmp(argv[1], "--has-presets")) {
+        GameInfo info;
+        game_info(argv[2],&info);
+        return bbgpu_game_has_presets(info.sz_serial) ? 0 : 1;
+    }
+    if (argc == 5 && !strcmp(argv[1], "--list-patches") && !strcmp(argv[3], "--game")) {
+        GameInfo info;
+        game_info(argv[4],&info);
+        LoaderPatchFolder folder=patch_folder(argv[2],&info);
+        loader_patches_list(&folder);
+        return 0;
+    }
     check_cpu();
     int cpu_only = 0, strict_imports = 0;
     unsigned timeout_seconds = 10;
-    const char *app0=NULL, *user_dir=NULL, *patch_file=NULL, *sz_exec=NULL;
+    const char *app0=NULL, *user_dir=NULL, *patches_dir=NULL, *patches_config=NULL, *sz_exec=NULL;
     LoaderOptions game={0};
     /* The guest's command line: the executable's guest path, the --arg values, NULL. Copied to the
      * heap, below 1 TiB, since the host stack holding argv is above it. */
@@ -502,14 +549,15 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--strict-imports")) strict_imports = 1;
         else if (!strcmp(argv[i], "--app0") && i+1<argc) app0=argv[++i];
         else if (!strcmp(argv[i], "--user") && i+1<argc) user_dir=argv[++i];
-        else if (!strcmp(argv[i], "--patches") && i+1<argc) patch_file=argv[++i];
+        else if (!strcmp(argv[i], "--patches-dir") && i+1<argc) patches_dir=argv[++i];
+        else if (!strcmp(argv[i], "--patches-config") && i+1<argc) patches_config=argv[++i];
         else if (!strcmp(argv[i], "--timeout") && i+1<argc) timeout_seconds=(unsigned)strtoul(argv[++i],NULL,10);
         else if (!strcmp(argv[i], "--exec") && i+1<argc) sz_exec=strdup(argv[++i]);
         else if (!strcmp(argv[i], "--arg") && i+1<argc) pp_guest_arguments[c_guest_arguments++]=strdup(argv[++i]);
         else { fprintf(stderr, "Unknown option: %s\n", argv[i]); return 1; }
     }
     if (!game.game) {
-        fprintf(stderr, "Usage: %s --game dir [--system-modules dir] [--hle libs] [--lle libs] [--cpu-only] [--strict-imports] [--app0 dir] [--user dir] [--patches file] [--timeout seconds] [--exec guest-path [--arg value]...] | --vulkan-only\n", argv[0]);
+        fprintf(stderr, "Usage: %s --game dir [--system-modules dir] [--hle libs] [--lle libs] [--cpu-only] [--strict-imports] [--app0 dir] [--user dir] [--patches-dir dir [--patches-config file]] [--timeout seconds] [--exec guest-path [--arg value]...] | --check-game dir | --has-presets dir | --list-patches dir --game dir | --vulkan-only\n", argv[0]);
         return 1;
     }
     if (app0) {
@@ -552,6 +600,34 @@ int main(int argc, char **argv) {
 #endif
     LoaderImage boot_image;
     loader_load_game(&game,&boot_image);
+    /* The game's profile and its files, then the patches, all before any of its code runs or a
+     * window opens: a launch that cannot work stops here, with why. */
+    GameInfo info;
+    game_info(game.game,&info);
+    bbgpu_prepare_game(&info.files);
+    char sz_problem[64], sz_advice[2048];
+    if (bbgpu_check_game(&info.files,sz_problem,sizeof(sz_problem),sz_advice,sizeof(sz_advice))) {
+        fprintf(stderr,"ERROR: Unsupported game files: %s Set PS_SKIP_GAME_CHECK=1 to start anyway.\n",sz_advice);
+        exit(2);
+    }
+    /* The patches' addresses are eboot.bin's: an executable sceSystemServiceLoadExec started gets
+     * none of them. */
+    const int is_eboot = !strcmp(pp_guest_arguments[0], "/app0/eboot.bin");
+    BbPatchList patches={.p_loads=boot_image.eboot_loads,.c_loads=boot_image.eboot_load_count};
+    if (is_eboot) {
+        BbPatchServices patch_services;
+        loader_patch_services(&patches,&patch_services);
+        int own_patches=bbgpu_game_patches(&info.files,&patch_services);
+        if (!own_patches) exit(1);
+        if (patches_dir) {
+            LoaderPatchFolder folder=patch_folder(patches_dir,&info);
+            loader_patches_external(&patches,&folder,patches_config);
+        }
+        if (own_patches<0 && !patches.c_writes)
+            printf("Patches: none for %s\n",info.sz_serial[0] ? info.sz_serial : "an unknown title");
+    } else if (patches_dir || bbgpu_game_has_presets(info.sz_serial)) {
+        printf("Patches: not applied: they are for /app0/eboot.bin, the application is %s\n", pp_guest_arguments[0]);
+    }
     uint64_t size = boot_image.size, entry = boot_image.entry, ns = boot_image.segment_count, nr = boot_image.reloc_count;
     import_count = boot_image.name_count;
     uint64_t capabilities = boot_image.capabilities;
@@ -745,10 +821,7 @@ int main(int argc, char **argv) {
     printf("Runtime: imports %llu: host %u, game modules %u, system modules %u, modules the game loads %u, stubs %u, without implementation %u\n",
            (unsigned long long)import_count, counts[1], counts[2], counts[5], counts[6], counts[3], counts[4]);
     free(import_state);
-    /* patches.bin's offsets are into eboot.bin. */
-    const int is_eboot = !strcmp(pp_guest_arguments[0], "/app0/eboot.bin");
-    if (patch_file && is_eboot) apply_patches(patch_file, segments, ns, relocs, nr);
-    else if (patch_file) printf("Patches: not applied: they are for /app0/eboot.bin, the application is %s\n", pp_guest_arguments[0]);
+    if (is_eboot) apply_patches(&patches, segments, ns, relocs, nr);
     if (!cpu_only) bbgpu_patch_image(image, size);
     protect(traps, round_page((import_count + 1) * 32), 5);
     protect(thunks, round_page((import_count + 1) * THUNK_SIZE), 5);

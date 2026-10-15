@@ -19,8 +19,8 @@ enum Preset : int { NativeAA = 0, Quality, Balanced, Performance, UltraPerforman
 enum DebugView : int { DebugNone = 0, DebugReactive = 1, DebugMotion = 2, DebugViewCount };
 enum class MenuLanguage { English, Russian, Spanish };
 
-/// Game effects switched by the community patches at start (patches.py EFFECTS): ini key,
-/// menu label, default (the game's own behaviour).
+/// Game effects switched by the community patches at start (Effects in
+/// gpu/games/bloodborne/patches.cpp): ini key, menu label, default (the game's own behaviour).
 struct Effect {
     const char* key;
     const char* label;
@@ -67,7 +67,7 @@ struct Values {
     std::atomic<bool> fsr4_auto_exposure{true};
     std::atomic<bool> fsr4_invert_jitter{false};
     std::atomic<int> active_render_width{1920}, active_render_height{1080};
-    /// Applied at start (patches.py); the menu shows when a restart is needed.
+    /// Applied at start (the game profile's patches); the menu shows when a restart is needed.
     std::atomic<bool> effects[EffectCount]{};
     std::atomic<int> model_lod{0}; ///< -2 highest .. 2 lowest, 0 the game's
     std::atomic<int> output_res{OutputDefault}; ///< index into OutputWidths
