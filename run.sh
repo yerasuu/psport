@@ -180,7 +180,11 @@ if [[ -n ${scaled_output:-} ]]; then
     # Bash builtins only: the AppImage's PATH has no sed/grep (a missing one ended run.sh silently).
     if [[ -z $live && -f $PS_CONFIG ]]; then
         while IFS= read -r line || [[ -n $line ]]; do
-            [[ $line =~ ^live_resolution=([01]|auto)$ ]] && live=${BASH_REMATCH[1]}
+            [[ $line == \#* || $line != *=* ]] && continue
+            key=${line%%=*} value=${line#*=}
+            key=${key#"${key%%[![:space:]]*}"} key=${key%"${key##*[![:space:]]}"}
+            value=${value#"${value%%[![:space:]]*}"} value=${value%"${value##*[![:space:]]}"}
+            [[ $key == live_resolution && $value =~ ^([01]|auto)$ ]] && live=$value
         done < "$PS_CONFIG"
     fi
     if [[ $live == auto ]]; then
