@@ -21,13 +21,13 @@
 ## Naming (C and C++)
 
 Role prefixes (the original "Apps Hungarian": what a value means, not its type) and scope
-prefixes, in all of psport's own code (`src/`, `gpu/shim/`, `gpu/layer/`, `gpu/games/`,
-`gpu/pngenc/` and the other `gpu/` libraries the fork adds). No type-width prefixes (`u32`, `i64`,
-`f32`, `n`, `st`...): the compiler already knows the type, and the name would lie once it changes
-(C++ Core Guidelines NL.5). The inherited shadPS4 tree (`gpu/shadps4/`) keeps its names, except
-the lines psport adds. SDK/ABI names (exports, structures the game reads, C++ classes it links
-against) stay as defined. Existing code is converted area by area in its own commits; new and
-touched code follows this now.
+prefixes, in all of psport's own code (`src/`, `gpu/shim/`, `gpu/port/`, `gpu/memory/`,
+`gpu/diag/`, `gpu/layer/`, `gpu/games/`, `gpu/pngenc/` and the other `gpu/` libraries the fork
+adds). No type-width prefixes (`u32`, `i64`, `f32`, `n`, `st`...): the compiler already knows the
+type, and the name would lie once it changes (C++ Core Guidelines NL.5). The inherited shadPS4
+tree (`gpu/shadps4/`) keeps its names, except the lines psport adds. SDK/ABI names (exports,
+structures the game reads, C++ classes it links against) stay as defined. Existing code is
+converted area by area in its own commits; new and touched code follows this now.
 
 - Case as the surrounding code: `snake_case` for variables, parameters and members in C and in
   psport's C++ (as shadPS4 does); functions start with a verb (predicates read as questions),

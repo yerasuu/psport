@@ -36,7 +36,7 @@ bool ComputeWriteTracking();
 } // namespace Detail
 
 /// psport PS_GUEST_IN_PLACE=1: the GPU uses the game's direct memory where it is (the arena is bound to
-/// the Vulkan chunks it lives in, gpu/shim/psport_guest_memory.cpp) instead of copies in VRAM.
+/// the Vulkan chunks it lives in, gpu/memory/psport_guest_memory.cpp) instead of copies in VRAM.
 inline bool GuestInPlace() {
     const u8 state = Detail::guest_in_place.load(std::memory_order_relaxed);
     return state != 0 ? state == 1 : Detail::ComputeGuestInPlace();

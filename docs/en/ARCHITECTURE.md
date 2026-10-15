@@ -14,10 +14,10 @@ The model is Wine's, not an emulator's.
 | Native loader | `src/loader/loader.h`, `src/loader/loader_self.c`, `src/loader/loader_link.c` | `out/psport` | SELF/ELF parsing, module linking, relocations, TLS, bindings |
 | Launch data | `src/loader/loader_mods.c`, `src/loader/loader_patches.c`, `src/loader/loader_hash.c`, `src/loader/loader_json.c` | `out/psport` | loose-file mod view, shadPS4/GoldHEN XML patches, the eboot's identity (SHA-256), `mods.json`/`patches.json` |
 | C runtime | `src/*/runtime*.c`, `src/runtime/runtime.h`, `src/runtime/imports/import_*.inc` | `out/psport` | libkernel and the other system libraries, import resolution, the call report |
-| GPU library | `gpu/shim/psport_gpu.cpp`, `gpu/psport_gpu.h` | `out/gpu/libpsport-gpu.so` | C interface between `psport` and the C++ side |
+| GPU library | `gpu/port/psport_gpu.cpp`, `gpu/psport_gpu.h` | `out/gpu/libpsport-gpu.so` | C interface between `psport` and the C++ side |
 | Translator | `gpu/shadps4/` (inherited from shadPS4, `gpu/VENDOR.txt`), `gpu/cp/`, `gpu/layer/` | `libpsport-gpu.so` | GnmDriver, VideoOut, command processor, Vulkan rasterizer, caches, shader recompiler |
 | Ported libraries | `gpu/ngs2/`, `gpu/audiodec/`, `gpu/fiber/`, `gpu/font/`, `gpu/pngenc/`, `gpu/pngdec/` | `libpsport-gpu.so` | libSceNgs2, libSceAudiodec, libSceFiber, libSceFont/FontFt, libScePngEnc, libScePngDec |
-| Port services | `gpu/shim/psport_*` | `libpsport-gpu.so` | settings (`psport.ini`), overlay, submit guard, guest memory, diagnostics |
+| Port services | `gpu/port/`, `gpu/memory/`, `gpu/diag/` | `libpsport-gpu.so` | settings (`psport.ini`), overlay, submit guard, guest memory, diagnostics |
 | Game profiles | `gpu/games/` | `libpsport-gpu.so` | per-title optimisations (`Game::Profile`) |
 | Online module | `gpu/net/` | `out/gpu/` (optional) | network and PSN imports with `PS_ONLINE=1` |
 | Online addresses | `scripts/online.py` | - | Python run by `run.sh` with `PS_ONLINE=1` only; see [Launch scripts](#launch-scripts) |
@@ -215,7 +215,7 @@ a file.
 
 ## GPU library
 
-`libpsport-gpu.so` holds the C++ side. `gpu/shim/psport_gpu.cpp` is its C interface (`gpu/psport_gpu.h`):
+`libpsport-gpu.so` holds the C++ side. `gpu/port/psport_gpu.cpp` is its C interface (`gpu/psport_gpu.h`):
 
 - `psport_gpu_register_kernel` registers the kernel event queues and the libraries that do not need a
   window: AvPlayer, Ngs2, Fiber, Font, FontFt, Audiodec, Videodec2, PngEnc, PngDec.
@@ -240,7 +240,7 @@ The translator, from the game's submission to the screen:
 | GPU memory without sparse binding (memory module) | `gpu/layer/` |
 
 `PS_SUBMIT_AHEAD` (else the game profile's `c_submits_ahead`, else 0) lets a frame's first
-submissions run without waiting for the previous frame; the submit guard (`gpu/shim/psport_submit_guard.*`) stops the overlap for the
+submissions run without waiting for the previous frame; the submit guard (`gpu/memory/psport_submit_guard.*`) stops the overlap for the
 session when a game rewrites command buffers in flight. Multithreaded draw preparation and the
 two-stage draw pipeline: [parallel_gpu.md](parallel_gpu.md). Temporal upscaling (FSR 3.1, FSR 4,
 TAA, DLSS): [upscaler.md](upscaler.md). Changes to inherited shadPS4 files:

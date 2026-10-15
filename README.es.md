@@ -123,7 +123,7 @@ seguir las convenciones del código que rodea al cambio.
 |---|---|
 | `src/` | Cargador (`probe.c`) y runtime (`runtime_*.c`) |
 | `scripts/` | `online.py`, las direcciones del juego en línea que `run.sh` escribe con `PS_ONLINE=1` (el único paso del arranque en Python), y `sce_file.py` para las herramientas en Python |
-| `gpu/` | Biblioteca del renderizador: núcleo de vídeo de shadPS4 con los cambios de bbport (`gpu/VENDOR.txt`), bibliotecas portadas (`ngs2/`, `audiodec/`, `fiber/`, `font/`), overlay y menú del juego (`shim/`), puente de DLSS, módulo en línea |
+| `gpu/` | Biblioteca del renderizador: núcleo de vídeo de shadPS4 con los cambios de bbport (`gpu/VENDOR.txt`), bibliotecas portadas (`ngs2/`, `audiodec/`, `fiber/`, `font/`), overlay y menú del juego (`port/`), puente de DLSS, módulo en línea |
 | `launcher/`, `packaging/` | El lanzador GTK4 de upstream; paquete de Nix y script de AppImage |
 | `patches/` | Parches de la comunidad para Bloodborne |
 | `tools/` | Ejecuciones de regresión, desensamblador GCN, herramientas de FSR 4 y `fsr4cap`, utilidades para ejecuciones guionizadas |

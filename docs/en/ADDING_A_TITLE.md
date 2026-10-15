@@ -85,7 +85,7 @@ Pick the layer that owns the library:
 | libkernel, libc hooks, threads, memory, files, saves, pad, audio out, system and user services, NP offline, PlayGo, AppContent, Ajm, Audio3d, ... | `src/*/runtime_<area>.c` | add an `ABI` function and an entry `{"<symbol name>", function}` to the file's `RuntimeExport` table; `runtime_<area>_resolve` finds it with `RUNTIME_LOOKUP` |
 | a library with no file yet | new `src/<kernel|system|audio|input|net>/runtime_<area>.c` | a table and `runtime_<area>_resolve`, declared in `src/runtime/runtime.h` and added to the chain in `runtime_resolve` (`src/runtime/runtime.c`); `build.sh` compiles every `src/*/runtime*.c` |
 | GnmDriver, VideoOut, AvPlayer, Videodec2 (inherited shadPS4 code) | `gpu/shadps4/core/libraries/` | register with `LIB_FUNCTION`; list the change in [FORK.md](../../FORK.md#changes-to-inherited-shadps4-code) |
-| Ngs2, Audiodec, Fiber, Font/FontFt, PngEnc, PngDec, or a new C++ library | `gpu/<library>/` | a `RegisterLib` with `LIB_FUNCTION(nid, library, version, module, function)`, called from `psport_gpu_register_kernel` (`gpu/shim/psport_gpu.cpp`), the sources added to `gpu/CMakeLists.txt`; ported code is listed in [FORK.md](../../FORK.md#ported-components) |
+| Ngs2, Audiodec, Fiber, Font/FontFt, PngEnc, PngDec, or a new C++ library | `gpu/<library>/` | a `RegisterLib` with `LIB_FUNCTION(nid, library, version, module, function)`, called from `psport_gpu_register_kernel` (`gpu/port/psport_gpu.cpp`), the sources added to `gpu/CMakeLists.txt`; ported code is listed in [FORK.md](../../FORK.md#ported-components) |
 
 Notes:
 
@@ -116,7 +116,8 @@ needs gets its own implementation.
 From [CLAUDE.md](../../CLAUDE.md):
 
 - Fix the underlying behaviour. No game-specific or shader-specific hacks in `src/`, `gpu/shim/`,
-  `gpu/shadps4/`, `run.sh` or `build.sh`: no title IDs, no eboot addresses, no shader hashes.
+  `gpu/port/`, `gpu/memory/`, `gpu/diag/`, `gpu/shadps4/`, `run.sh` or `build.sh`: no title IDs,
+  no eboot addresses, no shader hashes.
 - Optimisations that only make sense for one title go in that title's profile
   (`gpu/games/<game>.cpp` or `gpu/games/<game>/profile.cpp`, a `Game::Profile` listed in
   `gpu/games/game_profile.cpp`): hooks in its code, code ranges that write per-frame data, known

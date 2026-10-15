@@ -16,7 +16,7 @@
 
 // psport: the runtime's mounts (runtime_file.c) map guest paths to the host.
 extern "C" int runtime_file_translate(const char* guest, char* out, size_t size);
-// DejaVu Sans, embedded for the overlay (shim/psport_overlay.cpp).
+// DejaVu Sans, embedded for the overlay (port/psport_overlay.cpp).
 extern "C" const unsigned char psport_font_ttf[];
 extern "C" const unsigned char psport_font_ttf_end[];
 
