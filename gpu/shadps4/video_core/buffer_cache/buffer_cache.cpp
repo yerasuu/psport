@@ -810,7 +810,7 @@ void BufferCache::LayerCopyBackForCpu(VAddr address) {
     const Buffer* mirror_buffer = nullptr;
     u64 total = 0, tick = 0;
     if (const auto mirror = PsLayer::GpuMemory::Get().MirrorAt(from)) {
-        mirror_buffer = static_cast<const Buffer*>(mirror->owner);
+        mirror_buffer = static_cast<const Buffer*>(mirror->p_owner);
         gpu_modified_ranges.ForEachInRange(from, block_size, [&](VAddr start, VAddr end) {
             copies.push_back({mirror_buffer->Offset(start), total, end - start});
             guests.push_back(start);
@@ -1236,7 +1236,7 @@ std::optional<std::pair<const Buffer*, u64>> BufferCache::CommandWriteMirror(VAd
     if (layer_volatile.Overlaps(first, end) || gpu_modified_ranges.Intersects(device_addr, size)) {
         return std::nullopt;
     }
-    auto* mirror = static_cast<Buffer*>(resolution.span.source->owner);
+    auto* mirror = static_cast<Buffer*>(resolution.span.p_source->p_owner);
     return std::pair<const Buffer*, u64>{mirror, mirror->Offset(device_addr)};
 }
 
@@ -2178,7 +2178,7 @@ std::optional<std::pair<const Buffer*, u64>> BufferCache::LayerInPlace(VAddr add
     if (!span) {
         return std::nullopt;
     }
-    if (span->size != size) {
+    if (span->cb_span != size) {
         // Shaders given (nearly) all memory as one buffer: the part the module has whole. Until
         // the paged path (MEMORY_MODULE_PLAN step 3) a range across chunks is not one buffer.
         if (!clamp_huge || size < 64_MB) {
@@ -2189,16 +2189,16 @@ std::optional<std::pair<const Buffer*, u64>> BufferCache::LayerInPlace(VAddr add
             std::printf("Layer memory: binding %#llx+%#llx cut to %#llx (the rest is in another "
                         "chunk)\n",
                         (unsigned long long)address, (unsigned long long)size,
-                        (unsigned long long)span->size);
+                        (unsigned long long)span->cb_span);
         }
     }
-    const auto* chunk = static_cast<const PsGuestMemory::Chunk*>(span->source->owner);
+    const auto* chunk = static_cast<const PsGuestMemory::Chunk*>(span->p_source->p_owner);
     auto& buffer = chunk_buffers[chunk->i_creation % chunk_buffers.size()];
     if (!buffer) {
         buffer = std::make_unique<Buffer>(instance, chunk->cb_chunk, chunk->memory,
                                           fmt::format("psport guest memory {:#x}", chunk->phys));
     }
-    return std::pair<const Buffer*, u64>{buffer.get(), span->offset};
+    return std::pair<const Buffer*, u64>{buffer.get(), span->off_source};
 }
 
 void BufferCache::NoteLayerMiss(VAddr address, u64 size, bool is_written) {

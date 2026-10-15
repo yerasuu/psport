@@ -68,9 +68,9 @@ static PsNetResolveFn module_resolve(void) {
     const PsNetInitFn pfn_init=(PsNetInitFn)dlsym(p_module,"psport_net_init");
     const PsNetResolveFn pfn_found=(PsNetResolveFn)dlsym(p_module,"psport_net_resolve");
     const PsNetHost host={
-        .abi=PSPORT_NET_ABI_VERSION, .app0=s_sz_game_folder, .serial=s_sz_game_serial, .title=s_sz_game_title,
-        .app_ver=s_sz_game_version, .thread_spawn=runtime_thread_spawn,
-        .thread_join=runtime_thread_join_spawned,
+        .abi=PSPORT_NET_ABI_VERSION, .sz_app0=s_sz_game_folder, .sz_serial=s_sz_game_serial, .sz_title=s_sz_game_title,
+        .sz_app_ver=s_sz_game_version, .pfn_thread_spawn=runtime_thread_spawn,
+        .pfn_thread_join=runtime_thread_join_spawned,
     };
     if (!pfn_init || !pfn_found || pfn_init(&host)!=0) {
         printf("Online: %s did not start: offline play\n",sz_path);

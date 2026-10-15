@@ -39,78 +39,78 @@ struct Encoder {
 enum PixelFormat : u16 { R8G8B8A8 = 0, B8G8R8A8 = 1 };
 enum ColorSpace : u16 { Grayscale = 2, Rgb = 3, GrayscaleAlpha = 18, Rgba = 19 };
 
-static bool ValidCreateParam(const CreateParam* param) {
-    return param->this_size == sizeof(CreateParam) && param->max_image_width > 0;
+static bool ValidCreateParam(const CreateParam* p_param) {
+    return p_param->this_size == sizeof(CreateParam) && p_param->max_image_width > 0;
 }
 
-s32 PS4_SYSV_ABI scePngEncQueryMemorySize(const CreateParam* param) {
-    if (!param) return ORBIS_PNG_ENC_ERROR_INVALID_ADDR;
-    if (!ValidCreateParam(param)) return ORBIS_PNG_ENC_ERROR_INVALID_PARAM;
+s32 PS4_SYSV_ABI scePngEncQueryMemorySize(const CreateParam* p_param) {
+    if (!p_param) return ORBIS_PNG_ENC_ERROR_INVALID_ADDR;
+    if (!ValidCreateParam(p_param)) return ORBIS_PNG_ENC_ERROR_INVALID_PARAM;
     return sizeof(Encoder);
 }
 
-s32 PS4_SYSV_ABI scePngEncCreate(const CreateParam* param, void* memory, u32 size, Encoder** handle) {
-    if (!param || !memory || !handle) return ORBIS_PNG_ENC_ERROR_INVALID_ADDR;
-    if (!ValidCreateParam(param)) return ORBIS_PNG_ENC_ERROR_INVALID_PARAM;
-    if (size < sizeof(Encoder)) return ORBIS_PNG_ENC_ERROR_INVALID_SIZE;
-    auto* encoder = static_cast<Encoder*>(memory);
-    *encoder = {kEncoderMagic, param->max_image_width};
-    *handle = encoder;
+s32 PS4_SYSV_ABI scePngEncCreate(const CreateParam* p_param, void* p_memory, u32 cb_memory, Encoder** pp_handle) {
+    if (!p_param || !p_memory || !pp_handle) return ORBIS_PNG_ENC_ERROR_INVALID_ADDR;
+    if (!ValidCreateParam(p_param)) return ORBIS_PNG_ENC_ERROR_INVALID_PARAM;
+    if (cb_memory < sizeof(Encoder)) return ORBIS_PNG_ENC_ERROR_INVALID_SIZE;
+    auto* p_encoder = static_cast<Encoder*>(p_memory);
+    *p_encoder = {kEncoderMagic, p_param->max_image_width};
+    *pp_handle = p_encoder;
     return 0;
 }
 
-s32 PS4_SYSV_ABI scePngEncDelete(Encoder* handle) {
-    if (!handle || handle->magic != kEncoderMagic) return ORBIS_PNG_ENC_ERROR_INVALID_HANDLE;
-    handle->magic = 0;
+s32 PS4_SYSV_ABI scePngEncDelete(Encoder* p_handle) {
+    if (!p_handle || p_handle->magic != kEncoderMagic) return ORBIS_PNG_ENC_ERROR_INVALID_HANDLE;
+    p_handle->magic = 0;
     return 0;
 }
 
-s32 PS4_SYSV_ABI scePngEncEncode(Encoder* handle, const EncodeParam* param, OutputInfo* info) {
-    if (!handle || handle->magic != kEncoderMagic) return ORBIS_PNG_ENC_ERROR_INVALID_HANDLE;
-    if (!param || !param->image_addr || !param->png_addr) return ORBIS_PNG_ENC_ERROR_INVALID_ADDR;
-    const u32 width = param->image_width, height = param->image_height;
+s32 PS4_SYSV_ABI scePngEncEncode(Encoder* p_handle, const EncodeParam* p_param, OutputInfo* p_info) {
+    if (!p_handle || p_handle->magic != kEncoderMagic) return ORBIS_PNG_ENC_ERROR_INVALID_HANDLE;
+    if (!p_param || !p_param->image_addr || !p_param->png_addr) return ORBIS_PNG_ENC_ERROR_INVALID_ADDR;
+    const u32 width = p_param->image_width, height = p_param->image_height;
     int channels;
-    switch (param->color_space) {
+    switch (p_param->color_space) {
     case Grayscale: channels = 1; break;
     case GrayscaleAlpha: channels = 2; break;
     case Rgb: channels = 3; break;
     case Rgba: channels = 4; break;
     default: return ORBIS_PNG_ENC_ERROR_INVALID_PARAM;
     }
-    if (!width || !height || width > handle->max_image_width || param->bit_depth != 8 ||
-        (param->pixel_format != R8G8B8A8 && param->pixel_format != B8G8R8A8) || param->compression_level > 9 ||
-        param->image_pitch < width * 4)
+    if (!width || !height || width > p_handle->max_image_width || p_param->bit_depth != 8 ||
+        (p_param->pixel_format != R8G8B8A8 && p_param->pixel_format != B8G8R8A8) || p_param->compression_level > 9 ||
+        p_param->image_pitch < width * 4)
         return ORBIS_PNG_ENC_ERROR_INVALID_PARAM;
-    if (u64(param->image_pitch) * (height - 1) + u64(width) * 4 > param->image_size)
+    if (u64(p_param->image_pitch) * (height - 1) + u64(width) * 4 > p_param->image_size)
         return ORBIS_PNG_ENC_ERROR_INVALID_SIZE;
 
-    const int red = param->pixel_format == B8G8R8A8 ? 2 : 0, blue = 2 - red;
+    const int red = p_param->pixel_format == B8G8R8A8 ? 2 : 0, blue = 2 - red;
     std::vector<u8> pixels(size_t(width) * height * channels);
-    u8* out = pixels.data();
+    u8* p_out = pixels.data();
     for (u32 y = 0; y < height; ++y) {
-        const u8* row = param->image_addr + size_t(param->image_pitch) * y;
-        for (u32 x = 0; x < width; ++x, row += 4) {
+        const u8* p_row = p_param->image_addr + size_t(p_param->image_pitch) * y;
+        for (u32 x = 0; x < width; ++x, p_row += 4) {
             if (channels >= 3) {
-                *out++ = row[red];
-                *out++ = row[1];
-                *out++ = row[blue];
+                *p_out++ = p_row[red];
+                *p_out++ = p_row[1];
+                *p_out++ = p_row[blue];
             } else {
-                *out++ = row[red];
+                *p_out++ = p_row[red];
             }
-            if (channels == 2 || channels == 4) *out++ = row[3];
+            if (channels == 2 || channels == 4) *p_out++ = p_row[3];
         }
     }
     size_t length = 0;
-    void* png = tdefl_write_image_to_png_file_in_memory_ex(pixels.data(), int(width), int(height), channels,
-                                                           &length, param->compression_level, MZ_FALSE);
-    if (!png) return ORBIS_PNG_ENC_ERROR_INVALID_PARAM;
+    void* p_png = tdefl_write_image_to_png_file_in_memory_ex(pixels.data(), int(width), int(height), channels,
+                                                           &length, p_param->compression_level, MZ_FALSE);
+    if (!p_png) return ORBIS_PNG_ENC_ERROR_INVALID_PARAM;
     s32 result = ORBIS_PNG_ENC_ERROR_DATA_OVERFLOW;
-    if (length <= param->png_mem_size) {
-        std::memcpy(param->png_addr, png, length);
+    if (length <= p_param->png_mem_size) {
+        std::memcpy(p_param->png_addr, p_png, length);
         result = s32(length);
     }
-    mz_free(png);
-    if (info) *info = {result < 0 ? 0 : u32(length), result < 0 ? 0 : height};
+    mz_free(p_png);
+    if (p_info) *p_info = {result < 0 ? 0 : u32(length), result < 0 ? 0 : height};
     return result;
 }
 

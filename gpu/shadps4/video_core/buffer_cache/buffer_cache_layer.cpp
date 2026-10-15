@@ -320,7 +320,7 @@ std::optional<std::pair<const Buffer*, u64>> BufferCache::LayerBind(VAddr addres
         }
     }
     if (resolution.kind == Kind::Mirror && vram_allowed) {
-        auto* mirror = static_cast<Buffer*>(resolution.span.source->owner);
+        auto* mirror = static_cast<Buffer*>(resolution.span.p_source->p_owner);
         PsStats::g_cb_bound_vram.fetch_add(size, std::memory_order_relaxed);
         NoteDirectUse(address, size); // stale copies yield first (LayerYieldToImages)
         if (layer_volatile.Overlaps(first, end)) {
@@ -527,7 +527,7 @@ u64 BufferCache::LayerPromoteRun(u64 first, u64 end) {
         touching = Layer().MirrorsIn((lo - 1) << block_shift, (hi + 1) << block_shift);
         for (const auto& mirror : touching) {
             const u64 m_lo = mirror.base >> block_shift;
-            const u64 m_hi = (mirror.base + mirror.size) >> block_shift;
+            const u64 m_hi = (mirror.base + mirror.cb_source) >> block_shift;
             if (m_lo < lo || m_hi > hi) {
                 lo = std::min(lo, m_lo);
                 hi = std::max(hi, m_hi);
@@ -539,8 +539,8 @@ u64 BufferCache::LayerPromoteRun(u64 first, u64 end) {
     std::vector<std::pair<u64, u64>> moved;
     Buffer* target = nullptr;
     if (touching.size() == 1 && touching[0].base == (lo << block_shift) &&
-        touching[0].size == ((hi - lo) << block_shift)) {
-        target = static_cast<Buffer*>(touching[0].owner);
+        touching[0].cb_source == ((hi - lo) << block_shift)) {
+        target = static_cast<Buffer*>(touching[0].p_owner);
     } else {
         // A new mirror over all of it; the old ones' valid blocks are copied into it and they
         // go once the GPU is past the commands recorded so far. One that grows (it takes in a
@@ -551,7 +551,7 @@ u64 BufferCache::LayerPromoteRun(u64 first, u64 end) {
         // Growth at the top only: a run that fills a gap between mirrors is not a file coming in.
         u64 top = 0;
         for (const auto& mirror : touching) {
-            top = std::max<u64>(top, (mirror.base + mirror.size) >> block_shift);
+            top = std::max<u64>(top, (mirror.base + mirror.cb_source) >> block_shift);
         }
         if (!touching.empty() && end >= top) {
             hi = LayerGrowthEnd(lo, hi);
@@ -562,10 +562,10 @@ u64 BufferCache::LayerPromoteRun(u64 first, u64 end) {
                                                fmt::format("psport mirror {:#x}+{:#x}", start, bytes));
         target = mirror.get();
         for (const auto& old : touching) {
-            auto* old_buffer = static_cast<Buffer*>(old.owner);
-            moved.emplace_back(old.base >> block_shift, (old.base + old.size) >> block_shift);
+            auto* old_buffer = static_cast<Buffer*>(old.p_owner);
+            moved.emplace_back(old.base >> block_shift, (old.base + old.cb_source) >> block_shift);
             boost::container::small_vector<vk::BufferCopy, 8> copies;
-            Layer().ForEachValid(old.base >> block_shift, (old.base + old.size) >> block_shift,
+            Layer().ForEachValid(old.base >> block_shift, (old.base + old.cb_source) >> block_shift,
                                  [&](u64 v_first, u64 v_end) {
                                      const VAddr from = v_first << block_shift;
                                      copies.push_back({old_buffer->Offset(from),
@@ -630,7 +630,7 @@ u64 BufferCache::LayerGrowthEnd(u64 lo, u64 hi) {
     if (!prefix) {
         return hi;
     }
-    return std::min(end, hi + (prefix->size >> block_shift));
+    return std::min(end, hi + (prefix->cb_span >> block_shift));
 }
 
 static std::array<std::atomic<u64>, 7> layer_demoted_bytes{};
@@ -650,7 +650,7 @@ void BufferCache::LayerDemote(u64 first, u64 end, bool copy_back, int reason) {
             // What the GPU wrote in VRAM goes back into the game's memory first.
             const auto mirror = Layer().MirrorAt(from);
             if (mirror) {
-                auto* buffer = static_cast<Buffer*>(mirror->owner);
+                auto* buffer = static_cast<Buffer*>(mirror->p_owner);
                 gpu_modified_ranges.ForEachInRange(from, bytes, [&](VAddr w_from, VAddr w_to) {
                     if (const auto target = LayerInPlace(w_from, w_to - w_from)) {
                         const vk::BufferCopy copy{buffer->Offset(w_from), target->second,
@@ -687,13 +687,13 @@ void BufferCache::LayerDemote(u64 first, u64 end, bool copy_back, int reason) {
     }
     // Mirrors left without valid blocks go once the GPU is past the commands recorded so far.
     for (const auto& mirror : Layer().MirrorsIn(first << block_shift, end << block_shift)) {
-        if (Layer().AnyValid(mirror.base >> block_shift, (mirror.base + mirror.size) >> block_shift)) {
+        if (Layer().AnyValid(mirror.base >> block_shift, (mirror.base + mirror.cb_source) >> block_shift)) {
             continue;
         }
         Layer().RemoveMirror(mirror.base);
         auto node = layer_mirrors.extract(mirror.base);
         if (!node.empty()) {
-            PsStats::g_cb_residency_alloc.fetch_sub(mirror.size, std::memory_order_relaxed);
+            PsStats::g_cb_residency_alloc.fetch_sub(mirror.cb_source, std::memory_order_relaxed);
             layer_retired.push_back({std::move(node.mapped()), scheduler.CurrentTick()});
         }
     }
@@ -965,14 +965,14 @@ u64 BufferCache::LayerEntry(u64 block) {
     const VAddr va = block << block_shift;
     if (Layer().AnyValid(block, block + 1) && !layer_volatile.Contains(block, block + 1)) {
         if (const auto mirror = Layer().MirrorAt(va)) {
-            return mirror->device_address + (va - mirror->base);
+            return mirror->va_device + (va - mirror->base);
         }
     }
     const auto span = Layer().ResolveInPlace(va, block_size);
-    if (!span || span->source->device_address == 0) {
+    if (!span || span->p_source->va_device == 0) {
         return 0;
     }
-    return span->source->device_address + span->offset;
+    return span->p_source->va_device + span->off_source;
 }
 
 void BufferCache::LayerWriteEntries(u64 first, u64 end) {
@@ -1005,14 +1005,14 @@ void BufferCache::LayerWriteEntries(u64 first, u64 end) {
     // frame on the thousands a large promotion made.
     for (u64 block = first; block < end;) {
         const auto span = Layer().ResolvePrefix(block << block_shift, (end - block) << block_shift);
-        const u64 whole = span ? span->size >> block_shift : 0;
+        const u64 whole = span ? span->cb_span >> block_shift : 0;
         if (whole == 0) {
             guest_entries[block - first] = 0;
             ++block;
             continue;
         }
         const vk::DeviceAddress base =
-            span->source->device_address ? span->source->device_address + span->offset : 0;
+            span->p_source->va_device ? span->p_source->va_device + span->off_source : 0;
         for (u64 i = 0; i < whole; ++i) {
             guest_entries[block - first + i] = base ? base + (i << block_shift) : 0;
         }
@@ -1031,11 +1031,11 @@ void BufferCache::LayerWriteEntries(u64 first, u64 end) {
             if (any_volatile && layer_volatile.Contains(block, block + 1)) {
                 continue;
             }
-            if (!mirror || va < mirror->base || va >= mirror->base + mirror->size) {
+            if (!mirror || va < mirror->base || va >= mirror->base + mirror->cb_source) {
                 mirror = Layer().MirrorAt(va);
             }
             if (mirror) {
-                entries[block - first] = mirror->device_address + (va - mirror->base);
+                entries[block - first] = mirror->va_device + (va - mirror->base);
             }
         }
     }
@@ -1128,7 +1128,7 @@ void BufferCache::LayerFlushUploads() {
             }
             const VAddr from = std::max<VAddr>(address, a << block_shift);
             const VAddr to = std::min<VAddr>(address + size, b << block_shift);
-            SynchronizeMemory(static_cast<Buffer*>(mirror->owner), from, static_cast<u32>(to - from),
+            SynchronizeMemory(static_cast<Buffer*>(mirror->p_owner), from, static_cast<u32>(to - from),
                               false, false);
         }
     }
@@ -1268,7 +1268,7 @@ void BufferCache::LayerCopyBack(u64 first, u64 end) {
         if (!mirror) {
             continue;
         }
-        auto* buffer = static_cast<Buffer*>(mirror->owner);
+        auto* buffer = static_cast<Buffer*>(mirror->p_owner);
         gpu_modified_ranges.ForEachInRange(from, bytes, [&](VAddr w_from, VAddr w_to) {
             if (const auto target = LayerInPlace(w_from, w_to - w_from)) {
                 const vk::BufferCopy copy{buffer->Offset(w_from), target->second, w_to - w_from};

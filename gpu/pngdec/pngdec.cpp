@@ -88,8 +88,8 @@ static bool IsValidDepth(u8 color_type, u8 bit_depth) {
 
 // Reads the chunks up to IEND; with should_stop_at_data, stops at the first IDAT once IHDR is known.
 static s32 ParseChunks(const u8* p_data, u32 cb_data, PngImage& image, bool should_stop_at_data) {
-    static constexpr u8 signature[8] = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'};
-    if (cb_data < 8 + 25 || std::memcmp(p_data, signature, 8)) return ORBIS_PNG_DEC_ERROR_INVALID_DATA;
+    static constexpr u8 s_signature[8] = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'};
+    if (cb_data < 8 + 25 || std::memcmp(p_data, s_signature, 8)) return ORBIS_PNG_DEC_ERROR_INVALID_DATA;
     bool has_header = false;
     for (u64 off_chunk = 8; off_chunk + 12 <= cb_data;) {
         const u32 cb_chunk = ReadBe32(p_data + off_chunk);
@@ -131,10 +131,10 @@ static s32 ParseChunks(const u8* p_data, u32 cb_data, PngImage& image, bool shou
 }
 
 static void DescribeImage(const PngImage& image, ImageInfo* p_out_info) {
-    static constexpr u16 color_spaces[7] = {Grayscale, 0, Rgb, Clut, GrayscaleAlpha, 0, Rgba};
+    static constexpr u16 s_color_spaces[7] = {Grayscale, 0, Rgb, Clut, GrayscaleAlpha, 0, Rgba};
     p_out_info->image_width = image.width;
     p_out_info->image_height = image.height;
-    p_out_info->color_space = color_spaces[image.color_type];
+    p_out_info->color_space = s_color_spaces[image.color_type];
     p_out_info->bit_depth = image.bit_depth;
     p_out_info->image_flag =
         (image.interlace_method ? u32(Adam7Interlace) : 0u) | (image.p_transparency ? u32(TrnsChunkExist) : 0u);
@@ -311,10 +311,10 @@ s32 PS4_SYSV_ABI scePngDecDecode(Decoder* p_handle, const DecodeParam* p_param, 
     const OutputImage output{p_param->image_mem_addr, u32(cb_pitch), is_wide, p_param->pixel_format == B8G8R8A8,
                                0xffff, missing_alpha};
     // x start, y start, x step, y step of each pass.
-    static constexpr u8 adam7_passes[7][4] = {{0, 0, 8, 8}, {4, 0, 8, 8}, {0, 4, 4, 8}, {2, 0, 4, 4},
+    static constexpr u8 s_adam7_passes[7][4] = {{0, 0, 8, 8}, {4, 0, 8, 8}, {0, 4, 4, 8}, {2, 0, 4, 4},
                                                  {0, 2, 2, 4}, {1, 0, 2, 2}, {0, 1, 1, 2}};
-    static constexpr u8 single_pass[1][4] = {{0, 0, 1, 1}};
-    const auto* p_passes = image.interlace_method ? adam7_passes : single_pass;
+    static constexpr u8 s_single_pass[1][4] = {{0, 0, 1, 1}};
+    const auto* p_passes = image.interlace_method ? s_adam7_passes : s_single_pass;
     const int c_passes = image.interlace_method ? 7 : 1;
     size_t off_pass = 0;
     for (int i_pass = 0; i_pass < c_passes && !result; ++i_pass) {

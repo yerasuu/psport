@@ -891,7 +891,7 @@ PsCp::Decoder& Liverpool::CpDecoder() {
                 self->pipe_dirty.reset = true;
             }
             for (const auto& write : writes) {
-                self->pipe_dirty.Mark(write.index, write.count);
+                self->pipe_dirty.Mark(write.m_i_first, write.m_c_registers);
             }
             self->gfx_reg_checksum =
                 HashRegisterPacket(self->gfx_reg_checksum, words.data(), u32(words.size()));
@@ -901,7 +901,7 @@ PsCp::Decoder& Liverpool::CpDecoder() {
     observer->self = this;
     cp_decoder = std::make_unique<PsCp::Decoder>(
         std::span<u32, PsCp::Bank::End>{regs.reg_array.data(), PsCp::Bank::End},
-        PsCp::DecoderOptions{.compute_sh_to_owner = true,
+        PsCp::DecoderOptions{.is_compute_sh_to_owner = true,
                              .compute_words = sizeof(ComputeProgram) / 4});
     static Regs defaults;
     defaults.SetDefaults();
@@ -1463,7 +1463,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
             if (!packet) {
                 break;
             }
-            dcb = {packet->body.data() - 1, dcb_end}; // its packet first
+            dcb = {packet->m_body.data() - 1, dcb_end}; // its packet first
         } else if (dcb.empty()) {
             break;
         }
