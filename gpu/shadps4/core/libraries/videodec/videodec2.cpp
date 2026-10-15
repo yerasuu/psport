@@ -175,7 +175,7 @@ s32 PS4_SYSV_ABI sceVideodec2CreateDecoder(const OrbisVideodec2DecoderConfigInfo
         return ORBIS_VIDEODEC2_ERROR_CODEC_TYPE;
     }
 
-    // bbport: FFmpeg's decoder failing to open is reported instead of decoding with it closed.
+    // psport: FFmpeg's decoder failing to open is reported instead of decoding with it closed.
     auto* instance = new VdecDecoder(*decoder_cfg_info, *decoder_mem_info);
     if (!instance->IsOpen()) {
         delete instance;
@@ -279,7 +279,7 @@ s32 PS4_SYSV_ABI sceVideodec2GetPictureInfo(const OrbisVideodec2OutputInfo* outp
         return ORBIS_OK;
     }
 
-    // bbport: no more than the decoder wrote is copied when the caller's structure is larger.
+    // psport: no more than the decoder wrote is copied when the caller's structure is larger.
     if (p_1st_picture_info) {
         auto* pictureInfo = (u8*)output_info->frame_buffer + output_info->frame_buffer_size;
         const u64 size = std::min(*reinterpret_cast<u64*>(p_1st_picture_info),

@@ -415,7 +415,7 @@ s32 PS4_SYSV_ABI sceVideoOutAdjustColor(s32 handle, const SceVideoOutColorSettin
     return ORBIS_OK;
 }
 
-// bbport: the cursor's state is kept per port as the game sets it; the presenter draws it over the
+// psport: the cursor's state is kept per port as the game sets it; the presenter draws it over the
 // game frame (PsOverlay::SetGameCursor).
 static s32 GetCursor(s32 handle, u32 index, VideoOutCursor** cursor) {
     auto* port = driver->GetPort(handle);

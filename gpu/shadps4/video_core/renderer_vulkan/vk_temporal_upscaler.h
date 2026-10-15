@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// bbport: temporal upscaling of the game's HDR scene color (docs/en/upscaler.md). PS_UPSCALER=fsr3
+// psport: temporal upscaling of the game's HDR scene color (docs/en/upscaler.md). PS_UPSCALER=fsr3
 // runs FSR 3.1 (FireBurn/FSR-Vulkan, native Vulkan) on the scene color right before the
 // post-processing combine pass, with the scene depth and camera motion vectors, and writes the
 // result back so the game's own post, tonemap and UI continue unchanged (Native AA preset).
@@ -39,7 +39,7 @@ class Runtime;
 class CameraMotion;
 class SceneTargets;
 
-/// bbport PS_FINAL_DUMP_TRIGGER: the frame as presented (after FSR and post processing) is saved
+/// psport PS_FINAL_DUMP_TRIGGER: the frame as presented (after FSR and post processing) is saved
 /// as final_<w>x<h> in PS_DUMP_DIR when the trigger file exists (consumed). `image` in General.
 void DumpFinalFrameIfDue(const Instance& instance, Scheduler& scheduler, vk::CommandBuffer cmdbuf,
                          vk::Image image, u32 width, u32 height, vk::Format format);
@@ -80,10 +80,10 @@ public:
     /// Start of a frame in the command stream (display pass).
     bool OnFrameStart();
     bool RasterScaling() const;
-    /// bbport: LOD bias for scene materials, log2(render / output) while a reduced scene is
+    /// psport: LOD bias for scene materials, log2(render / output) while a reduced scene is
     /// upscaled (0 at native size, for TAA and without an upscaler).
     [[nodiscard]] float SceneMipBias() const;
-    /// bbport: the state RedirectColor/RedirectDepth/RasterScaling depend on, for memoizing a
+    /// psport: the state RedirectColor/RedirectDepth/RasterScaling depend on, for memoizing a
     /// draw's render state (Rasterizer::BeginRendering).
     [[nodiscard]] u64 RedirectState() const noexcept {
         return u64(ui_phase) | u64(display_redirect) << 1 | u64(done_this_frame) << 2 |
@@ -141,7 +141,7 @@ public:
     void DumpPresented(vk::Image image, u32 width, u32 height, vk::Format format);
 
 private:
-    /// bbport: views of guest images the upscaler reads, kept across frames: FSR 4 registers
+    /// psport: views of guest images the upscaler reads, kept across frames: FSR 4 registers
     /// images by view in a registry of eight (a new view per frame filled it at Native AA).
     vk::ImageView CachedView(const VideoCore::Image& image, vk::Format format,
                              vk::ImageAspectFlags aspect);
@@ -183,7 +183,7 @@ private:
     bool RecordReactive(vk::ImageView color_view);
     /// FSR 4 is selected, possible in this session (not PS_RENDER_RES) and has not failed.
     [[nodiscard]] bool UseFsr4() const;
-    /// bbport: DLSS selected and the bridge is ready (NVIDIA RTX, gpu/dlss_bridge).
+    /// psport: DLSS selected and the bridge is ready (NVIDIA RTX, gpu/dlss_bridge).
     [[nodiscard]] bool UseDlss() const;
     /// Records DLSS into `cmdbuf` (output in General). `hdr`: linear scene color input.
     bool RecordDlss(vk::CommandBuffer cmdbuf, const Dlss::Resource& color,
@@ -300,7 +300,7 @@ private:
     vk::UniquePipelineLayout taa_sharpen_pipeline_layout;
     vk::UniquePipeline taa_sharpen_pipeline;
     vk::UniquePipeline taa_sharpen_ldr_pipeline;
-    // bbport: FSR 4 in linear light on the scaled presets (fsr4_color.comp): the decoded input
+    // psport: FSR 4 in linear light on the scaled presets (fsr4_color.comp): the decoded input
     // and the passes that decode it and encode the output again.
     VideoCore::UniqueImage fsr4_linear_image;
     bool fsr4_linear_frame = false; ///< this frame's FSR 4 input was decoded (and the output encoded)
@@ -315,7 +315,7 @@ private:
     vk::UniqueDescriptorSetLayout fsr4_reactive_desc_layout;
     vk::UniquePipelineLayout fsr4_reactive_pipeline_layout;
     vk::UniquePipeline fsr4_reactive_pipeline;
-    /// bbport: FSR 4 takes no reactive mask: its output is blended with `color` (the frame it
+    /// psport: FSR 4 takes no reactive mask: its output is blended with `color` (the frame it
     /// upscaled, render size, General layout, same colour space as the output) where the mask
     /// marks blended effects (fsr4_reactive.comp). Recorded after FSR 4 into `cmdbuf`.
     void RecordFsr4Reactive(vk::CommandBuffer cmdbuf, vk::ImageView color, u32 w, u32 h, u32 ow,

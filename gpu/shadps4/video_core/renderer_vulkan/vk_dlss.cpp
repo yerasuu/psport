@@ -57,7 +57,7 @@ void* FindSymbol(Module module, const char* name) {
     return reinterpret_cast<void*>(GetProcAddress(module, name));
 }
 #else
-// bbport (Linux): libpsport_dlss.so (gpu/dlss_bridge) and NVIDIA's libnvidia-ngx-dlss.so.<version>
+// psport (Linux): libpsport_dlss.so (gpu/dlss_bridge) and NVIDIA's libnvidia-ngx-dlss.so.<version>
 // next to psport; NGX finds the latter through the bridge's path list.
 constexpr char BridgeName[] = "libpsport_dlss.so";
 using Module = void*;

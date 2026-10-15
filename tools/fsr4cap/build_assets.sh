@@ -38,7 +38,7 @@ out=$(realpath -m "${PS_FSR411_OUT:-$root/fsr4_411}")
 tools=${PS_FSR4CAP_TOOLS:-}
 python=${PYTHON:-python3}
 
-# Before anything long: is it a DLL bbport can replay, and where is its loader? (Without Python
+# Before anything long: is it a DLL psport can replay, and where is its loader? (Without Python
 # yet, after nix-shell below.)
 check_dll() {
     local status=0 info

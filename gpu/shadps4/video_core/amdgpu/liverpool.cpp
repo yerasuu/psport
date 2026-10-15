@@ -103,7 +103,7 @@ Liverpool::~Liverpool() {
 void Liverpool::ProcessCommands() {
     // Process incoming commands with high priority
     while (num_commands) {
-        // bbport: commands touch the caches and record into the scheduler (readbacks:
+        // psport: commands touch the caches and record into the scheduler (readbacks:
         // DownloadMemory copies and Finish()es), so the draw recording thread must be idle.
         // Drained per command: draining only when the first check saw one let a command that
         // arrived between the two checks run beside the recording thread — two threads in the
@@ -160,7 +160,7 @@ void Liverpool::Process(std::stop_token stoken) {
         {
             const auto idle_start = std::chrono::steady_clock::now();
             PsTimeline::Note(PsTimeline::DecoderIdleBegin);
-            // bbport: the game submits a frame in ~20 parts: waking from the condition variable for
+            // psport: the game submits a frame in ~20 parts: waking from the condition variable for
             // each took tens of microseconds on the way to the GPU. Spins first, with cores to spare
             // (PS_GPU_SPIN_US, default 200 with 12+ hardware threads, else 0).
             static const auto spin_time = std::chrono::microseconds([] {
@@ -264,7 +264,7 @@ void Liverpool::Process(std::stop_token stoken) {
         // PS_SUBMIT_LOCK=decode: a frame ended after its submissions were all decoded.
         SignalDecodedFrames();
 
-        // bbport: the guest takes GPU idle (sceGnmSubmitDone) as its work being done and frees
+        // psport: the guest takes GPU idle (sceGnmSubmitDone) as its work being done and frees
         // the objects that hold its fence labels. The labels must be written before: the draw
         // recording thread and the fences it deferred to the Vulkan recording thread
         // (RecorderFences). Else a late fence write lands in freed memory (a corrupted guest
@@ -337,7 +337,7 @@ void Liverpool::Process(std::stop_token stoken) {
 }
 
 namespace {
-/// bbport: packets the GPU command thread handles while the draw recording thread may still
+/// psport: packets the GPU command thread handles while the draw recording thread may still
 /// work on earlier draws (register state, draws it hands over, nested buffers). Every other
 /// packet first waits for that thread to run dry (Rasterizer::DrainDrawPipe).
 bool PipelinedOpcode(PM4ItOpcode opcode) {
@@ -383,7 +383,7 @@ bool PipelinedOpcode(PM4ItOpcode opcode) {
 } // namespace
 
 namespace {
-// bbport: a label written straight into guest memory (no backing view): one store. A memcpy of a
+// psport: a label written straight into guest memory (no backing view): one store. A memcpy of a
 // variable 4 or 8 bytes is two overlapping stores in glibc; a thread preempted between them
 // wrote the label again after the guest had freed its block (runtime_memory_write_backing).
 void StoreLabel(void* address, u64 value, u32 num_bytes) {
@@ -403,7 +403,7 @@ void SignalEop(const PM4CmdEventWriteEop& eop, u64 seq) {
     eop.SignalFence(
         [seq](void* address, u64 data, u32 num_bytes) {
             auto* memory = Core::Memory::Instance();
-            // bbport: PS_FENCE_DELAY_TEST=1 (experiment) holds every 200th fence back 80 ms: if
+            // psport: PS_FENCE_DELAY_TEST=1 (experiment) holds every 200th fence back 80 ms: if
             // the guest frees label objects after a timeout, late labels corrupt its heap.
             static const bool delay_test = [] {
                 const char* env = std::getenv("PS_FENCE_DELAY_TEST");
@@ -421,7 +421,7 @@ void SignalEop(const PM4CmdEventWriteEop& eop, u64 seq) {
                 StoreLabel(address, data, num_bytes);
             }
             PsStats::eop_written.fetch_add(1, std::memory_order_relaxed);
-            // bbport: a VRAM copy of the label gets it too (the backing mapping is not watched).
+            // psport: a VRAM copy of the label gets it too (the backing mapping is not watched).
             if (auto* rasterizer = memory->GetRasterizer()) {
                 rasterizer->NoteLateCommandWrite(reinterpret_cast<VAddr>(address), &data, num_bytes);
             }
@@ -434,7 +434,7 @@ void SignalEop(const PM4CmdEventWriteEop& eop, u64 seq) {
         [] { Platform::IrqC::Instance()->Signal(Platform::InterruptId::GfxEop); });
 }
 
-// bbport: end-of-pipe/-shader events run in order with the draws (Rasterizer::RunInOrder: on
+// psport: end-of-pipe/-shader events run in order with the draws (Rasterizer::RunInOrder: on
 // the draw recording thread when the draw pipeline is in use).
 void RunEventWriteEop(Vulkan::Rasterizer& rasterizer, const u8* data) {
     const auto eop = *reinterpret_cast<const PM4CmdEventWriteEop*>(data);
@@ -446,7 +446,7 @@ void RunEventWriteEop(Vulkan::Rasterizer& rasterizer, const u8* data) {
     rasterizer.ProcessDownloadImages();
     // PS_HONEST_LABELS: written once the GPU has finished the work before it, as the hardware
     // does (an end-of-pipe event), instead of when that work is recorded.
-    // bbport: a timestamp without an interrupt: the GPU's own clock at the end of the pipe.
+    // psport: a timestamp without an interrupt: the GPU's own clock at the end of the pipe.
     if (Vulkan::Rasterizer::HonestLabels() && eop.data_sel.Value() == DataSelect::GpuClock64 &&
         eop.int_sel.Value() == InterruptSelect::None &&
         rasterizer.WriteTimestampOnGpu(reinterpret_cast<VAddr>(eop.Address<u8>()), true)) {
@@ -457,7 +457,7 @@ void RunEventWriteEop(Vulkan::Rasterizer& rasterizer, const u8* data) {
         const bool writes = eop.data_sel.Value() != DataSelect::None;
         const u64 value = eop.data_sel.Value() == DataSelect::Data32Low ? eop.DataDWord()
                                                                         : eop.DataQWord();
-        // bbport: the GPU writes the label at the end of the pipe, as the command processor does,
+        // psport: the GPU writes the label at the end of the pipe, as the command processor does,
         // also when an interrupt follows (the CPU raises it once the GPU is done): written by the
         // CPU then, it landed after the GPU's later labels to the same address and set it back.
         if ((eop.data_sel.Value() == DataSelect::Data32Low ||
@@ -499,7 +499,7 @@ void RunEventWriteEop(Vulkan::Rasterizer& rasterizer, const u8* data) {
     }
 }
 
-// bbport: a MEM_SEMAPHORE signal once the GPU has finished the work before it, in stream order
+// psport: a MEM_SEMAPHORE signal once the GPU has finished the work before it, in stream order
 // (PS_HONEST_LABELS), as the command processor gives it when it gets there: signalled when decoded
 // (a frame ahead of the GPU), a queue waiting on it would read what that work had not written
 // yet. PS_MEM_SEMAPHORE_ORDER=0: when decoded (as before).
@@ -519,7 +519,7 @@ void RunMemSemaphoreSignal(Vulkan::Rasterizer& rasterizer, const u8* data) {
 void RunDmaData(Vulkan::Rasterizer& rasterizer, const u8* data) {
     const auto* dma_data = reinterpret_cast<const PM4DmaData*>(data);
     ASSERT(dma_data->command.das == 0);
-    // bbport: a DMA into guest memory is written by this thread (FillBuffer/CopyBuffer) when the
+    // psport: a DMA into guest memory is written by this thread (FillBuffer/CopyBuffer) when the
     // GPU has not modified the range. Like WriteData, it must not overtake the copies and the
     // fences deferred to the recording thread: the guest, seeing it, frees objects whose labels
     // an earlier fence still writes (a corrupted guest heap free list).
@@ -562,7 +562,7 @@ void RunDmaData(Vulkan::Rasterizer& rasterizer, const u8* data) {
     }
 }
 
-// bbport: a ZPASS_DONE event (the game's occlusion query) for the recording thread.
+// psport: a ZPASS_DONE event (the game's occlusion query) for the recording thread.
 struct ZpassEvent {
     VAddr address;
     u32 pairs;
@@ -574,7 +574,7 @@ void RunZpassDone(Vulkan::Rasterizer& rasterizer, const u8* data) {
     rasterizer.OcclusionEvent(event.address, event.pairs);
 }
 
-// bbport: COPY_DATA from memory or GDS, or of a value into GDS, on the recording thread in stream
+// psport: COPY_DATA from memory or GDS, or of a value into GDS, on the recording thread in stream
 // order, as DMA_DATA (RunDmaData).
 struct CopyDataTask {
     VAddr dst;
@@ -614,7 +614,7 @@ void SignalFlip(Vulkan::Rasterizer& rasterizer, const u8*) {
     Platform::IrqC::Instance()->Signal(Platform::InterruptId::GfxFlip);
 }
 
-// bbport: COPY_DATA of the GPU clock (64-bit, to memory) in stream order: the GPU's own clock when
+// psport: COPY_DATA of the GPU clock (64-bit, to memory) in stream order: the GPU's own clock when
 // it gets there (vk_timestamps.h); else the CPU's, when this runs.
 void RunGpuClockCopy(Vulkan::Rasterizer& rasterizer, const u8* data) {
     VAddr target;
@@ -631,7 +631,7 @@ void RunGpuClockCopy(Vulkan::Rasterizer& rasterizer, const u8* data) {
 void RunWriteData(Vulkan::Rasterizer& rasterizer, const u8* data) {
     const auto* header = reinterpret_cast<const PM4Header*>(data);
     const auto* write_data = reinterpret_cast<const PM4CmdWriteData*>(data);
-    // bbport PS_GUEST_IN_PLACE: the GPU writes it in stream order, as the command processor
+    // psport PS_GUEST_IN_PLACE: the GPU writes it in stream order, as the command processor
     // does. A CPU store here lands before the GPU has run the work recorded before it, which may
     // still read the old value (the game orders such writes after its own fences and
     // WAIT_REG_MEMs, which this thread takes as met in stream order).
@@ -664,7 +664,7 @@ void WriteEosLabel(void* address, u64 value, u32 num_bytes) {
     if (!memory->TryWriteBacking(address, &value, num_bytes)) {
         StoreLabel(address, value, num_bytes);
     }
-    // bbport: a VRAM copy of the label gets it too (the backing mapping is not watched).
+    // psport: a VRAM copy of the label gets it too (the backing mapping is not watched).
     if (auto* rasterizer = memory->GetRasterizer()) {
         rasterizer->NoteLateCommandWrite(reinterpret_cast<VAddr>(address), &value, num_bytes);
     }
@@ -693,7 +693,7 @@ void RunEventWriteEos(Vulkan::Rasterizer& rasterizer, const u8* data) {
     event_eos.SignalFence(&WriteEosLabel);
     if (event_eos.command == PM4CmdEventWriteEos::Command::GdsStore) {
         ASSERT(event_eos.size == 1);
-        // bbport PS_GUEST_IN_PLACE: a GPU copy from GDS in stream order, as the command processor
+        // psport PS_GUEST_IN_PLACE: a GPU copy from GDS in stream order, as the command processor
         // stores it, instead of waiting for the whole GPU and storing on the CPU.
         if (VideoCore::GuestInPlace()) {
             rasterizer.CopyBuffer(reinterpret_cast<VAddr>(event_eos.Address()),
@@ -799,7 +799,7 @@ Liverpool::Task Liverpool::ProcessCeUpdate(std::span<const u32> ccb) {
             if (PsCeStats::Enabled()) {
                 PsCeStats::NoteDump(dump_const->Address<VAddr>(), dump_const->Size());
             }
-            // bbport: earlier draws on the recording thread may still read constants here: only
+            // psport: earlier draws on the recording thread may still read constants here: only
             // those that read these bytes are waited for, not all of them.
             if (rasterizer) {
                 rasterizer->WaitForPendingReads(dump_const->Address<VAddr>(), dump_const->Size());
@@ -809,7 +809,7 @@ Liverpool::Task Liverpool::ProcessCeUpdate(std::span<const u32> ccb) {
                                PsFreeCheck::ConstRam);
             memcpy(dump_const->Address<void*>(),
                    cblock.constants_heap.data() + dump_const->Offset(), dump_const->Size());
-            // bbport: no write tracking (PS_GUEST_IN_PLACE): the caches hear of it (in order, on the
+            // psport: no write tracking (PS_GUEST_IN_PLACE): the caches hear of it (in order, on the
             // recording thread).
             if (rasterizer && !VideoCore::WriteTracking()) {
                 rasterizer->NoteCommandWriteInOrder(dump_const->Address<VAddr>(),
@@ -852,7 +852,7 @@ Liverpool::Task Liverpool::ProcessCeUpdate(std::span<const u32> ccb) {
     FIBER_EXIT;
 }
 
-// bbport: graphics-register effects of a type-3 packet. The GPU thread and the draw-preparation
+// psport: graphics-register effects of a type-3 packet. The GPU thread and the draw-preparation
 // workers both go through this function, and both fold every register-writing packet into a
 // running checksum: equal checksums at a draw mean equal register files.
 u64 Liverpool::HashRegisterPacket(u64 checksum, const u32* words, u32 count) {
@@ -1032,7 +1032,7 @@ void Liverpool::ApplyGraphicsRegisterPacket(Regs& regs, const PM4Header* header,
     checksum = HashRegisterPacket(checksum, reinterpret_cast<const u32*>(header), count + 1);
 }
 
-// bbport: PS_DCB_STATS=1 — structure of graphics command buffers (read-only scan, printed every
+// psport: PS_DCB_STATS=1 — structure of graphics command buffers (read-only scan, printed every
 // 5 s): how many buffers, draws per buffer, state set before the first draw. Input for
 // processing command buffers on several threads.
 namespace {
@@ -1067,7 +1067,7 @@ bool IsDrawOpcode(PM4ItOpcode op) {
     }
 }
 
-// bbport PS_CP_SHADOW=1: the translator's own decoder (gpu/cp, step 2 of
+// psport PS_CP_SHADOW=1: the translator's own decoder (gpu/cp, step 2 of
 // docs/en/history/TRANSLATOR_ARCHITECTURE.md) decodes every top-level graphics buffer as well, from the
 // same state. Once this decoder is done with the buffer both register files must be equal (the
 // compute program's SH range aside: this one keeps it per queue); the first differences are
@@ -1291,7 +1291,7 @@ void ScanDcb(std::span<const u32> dcb, int depth) {
         st = DcbStats{};
     }
 }
-// bbport: an invalid packet header (Steam Deck: "PM4 type 0" with dword 0, 8 or 0x10, mid-game): where
+// psport: an invalid packet header (Steam Deck: "PM4 type 0" with dword 0, 8 or 0x10, mid-game): where
 // in which buffer, what surrounds it, and which logged writes of ours landed in the buffer.
 void ReportBadPacket(uintptr_t base, std::size_t dwords, const u32* at, u64 seq, int depth) {
     const uintptr_t address = reinterpret_cast<uintptr_t>(at);
@@ -1409,7 +1409,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
         RESUME_GFX(ce_task);
     }
 
-    // bbport PS_PM4_SELFTEST: test packets decoded before and after this submission, as a
+    // psport PS_PM4_SELFTEST: test packets decoded before and after this submission, as a
     // nested indirect buffer would be (pm4_selftest.h).
     Pm4SelfTest::Injection selftest{};
     if (seq != NoSeq && Pm4SelfTest::Enabled()) {
@@ -1435,7 +1435,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
     }
     const auto base_addr = reinterpret_cast<uintptr_t>(dcb.data());
     const std::size_t dcb_dwords = dcb.size();
-    // bbport PS_CP_DECODER=1: packets and their register writes come from the
+    // psport PS_CP_DECODER=1: packets and their register writes come from the
     // translator's own decoder (gpu/cp); what each packet does stays below.
     const u32* const dcb_end = dcb.data() + dcb.size();
     struct CpSink final : PsCp::Sink {
@@ -1510,7 +1510,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                 case PM4CmdNop::PayloadType::PatchedFlip: {
                     // There is no evidence that GPU CP drives flip events by parsing
                     // special NOP packets. For convenience lets assume that it does.
-                    // bbport: after the writes before it (the buffer label: WriteData, which
+                    // psport: after the writes before it (the buffer label: WriteData, which
                     // may still be queued on the draw recording thread).
                     if (rasterizer) {
                         rasterizer->RunInOrder(&SignalFlip, header, sizeof(u32),
@@ -1646,7 +1646,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                 break; // registers: ApplyGraphicsRegisterPacket
             }
             case PM4ItOpcode::SetPredication: {
-                // bbport: evaluated at the first predicated draw or dispatch (PredicationSkips).
+                // psport: evaluated at the first predicated draw or dispatch (PredicationSkips).
                 const auto* set = reinterpret_cast<const PM4CmdSetPredication*>(header);
                 if (set->op == PM4CmdSetPredication::Op::Clear) {
                     predication.active = false;
@@ -1900,7 +1900,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                 } else if (event->event_index.Value() == EventIndex::ZpassDone) {
                     if (event->event_type.Value() == EventType::PixelPipeStatDump ||
                         event->event_type.Value() == EventType::ZpassDone) {
-                        // bbport: the samples that passed, counted by Vulkan occlusion queries
+                        // psport: the samples that passed, counted by Vulkan occlusion queries
                         // and written by the GPU in stream order (vk_occlusion.h).
                         if (rasterizer && Vulkan::Rasterizer::OcclusionTranslated()) {
                             const ZpassEvent zpass{event->Address<VAddr>(), u32(num_counter_pairs)};
@@ -1960,7 +1960,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                 if (dma_data->dst_addr_lo == 0x3022C || !rasterizer) {
                     break;
                 }
-                // bbport: what the copy reads on the recording thread is known here: a later
+                // psport: what the copy reads on the recording thread is known here: a later
                 // DumpConstRam waits only if it overlaps it (unlisted, every dump waited for the
                 // copy; ~150 of those waits a second).
                 const bool reads_memory = dma_data->src_sel == DmaDataSrc::Memory ||
@@ -2010,7 +2010,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                 break;
             }
             case PM4ItOpcode::CopyData: {
-                // bbport: the command processor's copy, translated: values known when it is
+                // psport: the command processor's copy, translated: values known when it is
                 // decoded (immediates, registers, the clock) are written by the GPU in stream
                 // order like WRITE_DATA; copies from memory or GDS are GPU copies in stream order
                 // like DMA_DATA.
@@ -2161,7 +2161,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                     vo_port->WaitVoLabel([&] { return wait_reg_mem->Test(regs.reg_array); });
                     break;
                 }
-                // bbport: a fence handed to the draw recording thread counts as written: that
+                // psport: a fence handed to the draw recording thread counts as written: that
                 // thread runs everything in stream order.
                 if (u32 value; wait_reg_mem->mem_space.Value() ==
                                    PM4CmdWaitRegMem::MemSpace::Memory &&
@@ -2284,7 +2284,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                     LOG_WARNING(Render, "IT_COND_EXEC used a reserved command");
                 }
                 bool skip = *cond_exec->Address() == false;
-                // bbport: the condition as the command processor reads it when it gets here: a
+                // psport: the condition as the command processor reads it when it gets here: a
                 // fence the recording thread has yet to write (in stream order), else once the
                 // GPU has done the work before this packet (this thread decodes ahead of it).
                 if (rasterizer && VideoCore::GuestInPlace()) {
@@ -2381,7 +2381,7 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
     while (!acb.empty()) {
         ProcessCommands();
         if (rasterizer) {
-            rasterizer->DrainDrawPipe(Vulkan::DrawPipe::ReasonCompute); // bbport: compute work uses the caches
+            rasterizer->DrainDrawPipe(Vulkan::DrawPipe::ReasonCompute); // psport: compute work uses the caches
         }
 
         auto* header = reinterpret_cast<const PM4Header*>(acb.data());
@@ -2515,7 +2515,7 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
             } else {
                 std::memcpy(&regs.reg_array[Regs::ShRegWordOffset + set_data->reg_offset],
                             header + 2, set_size);
-                // bbport: interleaves with the graphics stream at an unpredictable point, so
+                // psport: interleaves with the graphics stream at an unpredictable point, so
                 // draw-preparation workers cannot reproduce it: make their checksums differ.
                 gfx_reg_checksum = HashRegisterPacket(gfx_reg_checksum ^ 0xA5C0A5C0A5C0ull,
                                                       reinterpret_cast<const u32*>(header),
@@ -2575,7 +2575,7 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
             break;
         }
         case PM4ItOpcode::WriteData: {
-            // bbport: copies deferred to the recording thread precede writes the guest sees, and
+            // psport: copies deferred to the recording thread precede writes the guest sees, and
             // so do graphics fences deferred to it (the pipe was drained before this packet).
             if (rasterizer) {
                 rasterizer->WaitHostCopies();
@@ -2643,7 +2643,7 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
                     rasterizer->WriteTimestampOnGpu(rm->Address<VAddr>(), true)) {
                     break;
                 }
-                // bbport: the label is written by the GPU (end of pipe), in stream order with the
+                // psport: the label is written by the GPU (end of pipe), in stream order with the
                 // queue's other labels, also before an interrupt (raised once the GPU is done).
                 if ((rm->data_sel.Value() == DataSelect::Data32Low ||
                      rm->data_sel.Value() == DataSelect::Data64) &&
@@ -2676,7 +2676,7 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
                     writes ? release.Address<VAddr>() : 0, release.DataQWord());
                 break;
             }
-            // bbport: copies deferred to the recording thread precede writes the guest sees, and
+            // psport: copies deferred to the recording thread precede writes the guest sees, and
             // so do graphics fences deferred to it (the pipe was drained before this packet).
             if (rasterizer) {
                 rasterizer->WaitHostCopies();
@@ -2758,7 +2758,7 @@ Liverpool::CmdBuffer Liverpool::CopyCmdBuffers(std::span<const u32> dcb, std::sp
 void Liverpool::SubmitGfx(std::span<const u32> dcb, std::span<const u32> ccb) {
     auto& queue = mapped_queues[GfxQueueId];
 
-    // bbport: one copy per submission, alive until it is decoded (CopyCmdBuffers' shared buffer
+    // psport: one copy per submission, alive until it is decoded (CopyCmdBuffers' shared buffer
     // is reset at sceGnmSubmitDone, while this thread may still be decoding earlier frames).
     std::shared_ptr<SubmittedCopy> copy;
     if (EmulatorSettings.IsCopyGpuBuffers()) {
@@ -2880,7 +2880,7 @@ void Liverpool::CheckSubmittedCopy(const SubmittedCopy& copy, u64 seq) {
             const std::size_t n = std::min(buf.size(), dwords - at);
             iovec local{buf.data(), n * 4}, remote{const_cast<u32*>(guest + at), n * 4};
             if (process_vm_readv(getpid(), &local, 1, &remote, 1, 0) != ssize_t(n * 4)) {
-                // bbport PS_GUEST_IN_PLACE: dma-buf guest memory is not readable that way; still
+                // psport PS_GUEST_IN_PLACE: dma-buf guest memory is not readable that way; still
                 // mapped, it is read directly.
                 int prot = 0, type = -1;
                 uintptr_t end = 0;

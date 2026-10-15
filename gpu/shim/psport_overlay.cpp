@@ -26,16 +26,16 @@
 // DejaVu Sans (Cyrillic), embedded (third_party/fonts, Bitstream Vera license).
 asm(".section .rodata\n"
     ".balign 16\n"
-    ".hidden bb_font_ttf\n"
-    ".global bb_font_ttf\n"
-    "bb_font_ttf:\n"
+    ".hidden psport_font_ttf\n"
+    ".global psport_font_ttf\n"
+    "psport_font_ttf:\n"
     ".incbin \"" PS_FONT_PATH "\"\n"
-    ".hidden bb_font_ttf_end\n"
-    ".global bb_font_ttf_end\n"
-    "bb_font_ttf_end:\n"
+    ".hidden psport_font_ttf_end\n"
+    ".global psport_font_ttf_end\n"
+    "psport_font_ttf_end:\n"
     ".previous\n");
-extern "C" const unsigned char bb_font_ttf[];
-extern "C" const unsigned char bb_font_ttf_end[];
+extern "C" const unsigned char psport_font_ttf[];
+extern "C" const unsigned char psport_font_ttf_end[];
 
 extern "C" void runtime_restart(void); // psport (probe.c)
 
@@ -887,8 +887,8 @@ void Init(const Vulkan::Instance& instance, vk::Format format, u32 image_count) 
 
     ImFontConfig font_config;
     font_config.FontDataOwnedByAtlas = false;
-    io.Fonts->AddFontFromMemoryTTF(const_cast<unsigned char*>(bb_font_ttf),
-                                   int(bb_font_ttf_end - bb_font_ttf), 18.0f, &font_config);
+    io.Fonts->AddFontFromMemoryTTF(const_cast<unsigned char*>(psport_font_ttf),
+                                   int(psport_font_ttf_end - psport_font_ttf), 18.0f, &font_config);
 
     const vk::Instance vk_instance = instance.GetInstance();
     ImGui_ImplVulkan_LoadFunctions(

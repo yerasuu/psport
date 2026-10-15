@@ -55,7 +55,7 @@ int covered(uintptr_t start, uintptr_t end, int allow_reserved);
 void drop_range(uintptr_t start, uintptr_t end);
 int32_t place(void **inout, uint64_t size, int prot, int flags, uint64_t alignment, int kind, int type, uint64_t phys);
 int32_t place_file(void **inout, uint64_t size, int prot, int flags, int file, uint64_t offset);
-/* bbport: write traps (runtime_memory_trap, runtime_memory_gpu.c), kept across the game's own changes. */
+/* psport: write traps (runtime_memory_trap, runtime_memory_gpu.c), kept across the game's own changes. */
 void trap_reapply(uintptr_t start, uintptr_t end);
 void trap_forget(uintptr_t start, uintptr_t end);
 #pragma GCC visibility pop

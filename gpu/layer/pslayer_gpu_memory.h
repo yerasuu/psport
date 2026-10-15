@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// bbport layer: the PS4 GPU's view of memory on a PC GPU, without sparse resources.
+// psport layer: the PS4 GPU's view of memory on a PC GPU, without sparse resources.
 //
 // The PS4 GPU addresses the one shared memory through its own virtual memory: every V#, T# and
 // pointer a shader gets is a guest virtual address. Here the GPU reaches that memory through

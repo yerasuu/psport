@@ -1,4 +1,4 @@
-// bbport co-op: shadPS4's user list, reduced to the one user the runtime logs in (id 1).
+// psport co-op: shadPS4's user list, reduced to the one user the runtime logs in (id 1).
 // The shadNet account comes from the launcher through PS_SHADNET_NPID / PS_SHADNET_PASSWORD.
 #pragma once
 #include <array>

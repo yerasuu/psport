@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2026 IFreemz, bbport contributors
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// bbport: NVIDIA DLSS Super Resolution through the optional bridge (gpu/dlss_bridge, MIT;
+// psport: NVIDIA DLSS Super Resolution through the optional bridge (gpu/dlss_bridge, MIT;
 // libpsport_dlss.so / psport_dlss.dll), loaded at run time from next to psport together with
 // NVIDIA's libnvidia-ngx-dlss.so.<version> / nvngx_dlss.dll. The port itself contains no NVIDIA
 // code; without the libraries, on other GPUs or

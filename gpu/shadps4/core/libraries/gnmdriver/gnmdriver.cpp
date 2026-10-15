@@ -117,7 +117,7 @@ void ReleaseSubmissionLock() {
     cv_lock.notify_all();
 }
 
-// bbport PS_SUBMIT_LOCK=decode: frames (sceGnmSubmitDone calls) the GPU has finished.
+// psport PS_SUBMIT_LOCK=decode: frames (sceGnmSubmitDone calls) the GPU has finished.
 static u64 frames_retired{};
 
 void NoteFramesRetired(u64 frames) {
@@ -287,7 +287,7 @@ s32 PS4_SYSV_ABI sceGnmAddEqEvent(OrbisKernelEqueue eq, u64 id, void* udata) {
 
 int PS4_SYSV_ABI sceGnmAreSubmitsAllowed() {
     LOG_TRACE(Lib_GnmDriver, "called");
-    // bbport (frame stats): how often the guest asks, and how often it hears no.
+    // psport (frame stats): how often the guest asks, and how often it hears no.
     const bool allowed = submission_lock == 0;
     PsStats::submits_allowed_queries.fetch_add(1, std::memory_order_relaxed);
     if (!allowed) {
@@ -558,7 +558,7 @@ s32 PS4_SYSV_ABI sceGnmDispatchIndirectOnMec(u32* cmdbuf, u32 size, VAddr args, 
 }
 
 u32 PS4_SYSV_ABI sceGnmDispatchInitDefaultHardwareState(u32* cmdbuf, u32 size) {
-    DriverWrite bb_observe{cmdbuf, size};
+    DriverWrite driver_write{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (size < HwInitPacketSize) {
@@ -800,7 +800,7 @@ s32 PS4_SYSV_ABI sceGnmDrawIndirectMulti(u32* cmdbuf, u32 size, u32 data_offset,
 }
 
 u32 PS4_SYSV_ABI sceGnmDrawInitDefaultHardwareState(u32* cmdbuf, u32 size) {
-    DriverWrite bb_observe{cmdbuf, size};
+    DriverWrite driver_write{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (size < HwInitPacketSize) {
@@ -826,7 +826,7 @@ u32 PS4_SYSV_ABI sceGnmDrawInitDefaultHardwareState(u32* cmdbuf, u32 size) {
 }
 
 u32 PS4_SYSV_ABI sceGnmDrawInitDefaultHardwareState175(u32* cmdbuf, u32 size) {
-    DriverWrite bb_observe{cmdbuf, size};
+    DriverWrite driver_write{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (size < HwInitPacketSize) {
@@ -845,7 +845,7 @@ u32 PS4_SYSV_ABI sceGnmDrawInitDefaultHardwareState175(u32* cmdbuf, u32 size) {
 }
 
 u32 PS4_SYSV_ABI sceGnmDrawInitDefaultHardwareState200(u32* cmdbuf, u32 size) {
-    DriverWrite bb_observe{cmdbuf, size};
+    DriverWrite driver_write{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (size < HwInitPacketSize) {
@@ -882,7 +882,7 @@ u32 PS4_SYSV_ABI sceGnmDrawInitDefaultHardwareState200(u32* cmdbuf, u32 size) {
 }
 
 u32 PS4_SYSV_ABI sceGnmDrawInitDefaultHardwareState350(u32* cmdbuf, u32 size) {
-    DriverWrite bb_observe{cmdbuf, size};
+    DriverWrite driver_write{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (size < HwInitPacketSize) {
@@ -1196,7 +1196,7 @@ void PS4_SYSV_ABI sceGnmGpuPaDebugLeave() {
 }
 
 s32 PS4_SYSV_ABI sceGnmInsertDingDongMarker(u32* cmdbuf, u32 size) {
-    DriverWrite bb_observe{cmdbuf, size};
+    DriverWrite driver_write{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (cmdbuf == nullptr || size != 4) {
@@ -1207,7 +1207,7 @@ s32 PS4_SYSV_ABI sceGnmInsertDingDongMarker(u32* cmdbuf, u32 size) {
 }
 
 s32 PS4_SYSV_ABI sceGnmInsertPopMarker(u32* cmdbuf, u32 size) {
-    DriverWrite bb_observe{cmdbuf, size};
+    DriverWrite driver_write{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (cmdbuf && (size == 6)) {
@@ -1220,7 +1220,7 @@ s32 PS4_SYSV_ABI sceGnmInsertPopMarker(u32* cmdbuf, u32 size) {
 }
 
 s32 PS4_SYSV_ABI sceGnmInsertPushColorMarker(u32* cmdbuf, u32 size, const char* marker, u32 color) {
-    DriverWrite bb_observe{cmdbuf, size};
+    DriverWrite driver_write{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (cmdbuf && marker) {
@@ -1244,7 +1244,7 @@ s32 PS4_SYSV_ABI sceGnmInsertPushColorMarker(u32* cmdbuf, u32 size, const char* 
 }
 
 s32 PS4_SYSV_ABI sceGnmInsertPushMarker(u32* cmdbuf, u32 size, const char* marker) {
-    DriverWrite bb_observe{cmdbuf, size};
+    DriverWrite driver_write{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (cmdbuf && marker) {
@@ -1271,7 +1271,7 @@ int PS4_SYSV_ABI sceGnmInsertSetColorMarker() {
 }
 
 s32 PS4_SYSV_ABI sceGnmInsertSetMarker(u32* cmdbuf, u32 size, const char* marker) {
-    DriverWrite bb_observe{cmdbuf, size};
+    DriverWrite driver_write{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (cmdbuf && marker) {
@@ -1299,7 +1299,7 @@ int PS4_SYSV_ABI sceGnmInsertThreadTraceMarker() {
 }
 
 s32 PS4_SYSV_ABI sceGnmInsertWaitFlipDone(u32* cmdbuf, u32 size, s32 vo_handle, u32 buf_idx) {
-    DriverWrite bb_observe{cmdbuf, size};
+    DriverWrite driver_write{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (size != 7) {
@@ -1530,7 +1530,7 @@ int PS4_SYSV_ABI sceGnmSdmaOpen() {
 }
 
 s32 PS4_SYSV_ABI sceGnmSetCsShader(u32* cmdbuf, u32 size, const u32* cs_regs) {
-    DriverWrite bb_observe{cmdbuf, size};
+    DriverWrite driver_write{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (!cmdbuf || size <= 0x18) {
@@ -1559,7 +1559,7 @@ s32 PS4_SYSV_ABI sceGnmSetCsShader(u32* cmdbuf, u32 size, const u32* cs_regs) {
 
 s32 PS4_SYSV_ABI sceGnmSetCsShaderWithModifier(u32* cmdbuf, u32 size, const u32* cs_regs,
                                                u32 modifier) {
-    DriverWrite bb_observe{cmdbuf, size};
+    DriverWrite driver_write{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (!cmdbuf || size <= 0x18) {
@@ -1713,7 +1713,7 @@ s32 PS4_SYSV_ABI sceGnmSetEmbeddedVsShader(u32* cmdbuf, u32 size, u32 shader_id,
 }
 
 s32 PS4_SYSV_ABI sceGnmSetEsShader(u32* cmdbuf, u32 size, const u32* es_regs, u32 shader_modifier) {
-    DriverWrite bb_observe{cmdbuf, size};
+    DriverWrite driver_write{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (!cmdbuf || size < 0x14) {
@@ -1750,7 +1750,7 @@ int PS4_SYSV_ABI sceGnmSetGsRingSizes() {
 }
 
 s32 PS4_SYSV_ABI sceGnmSetGsShader(u32* cmdbuf, u32 size, const u32* gs_regs) {
-    DriverWrite bb_observe{cmdbuf, size};
+    DriverWrite driver_write{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (!cmdbuf || size < 0x1d) {
@@ -1779,7 +1779,7 @@ s32 PS4_SYSV_ABI sceGnmSetGsShader(u32* cmdbuf, u32 size, const u32* gs_regs) {
 }
 
 s32 PS4_SYSV_ABI sceGnmSetHsShader(u32* cmdbuf, u32 size, const u32* hs_regs, u32 param4) {
-    DriverWrite bb_observe{cmdbuf, size};
+    DriverWrite driver_write{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
     if (!cmdbuf || size < 0x1E) {
         return -1;
@@ -1810,7 +1810,7 @@ s32 PS4_SYSV_ABI sceGnmSetHsShader(u32* cmdbuf, u32 size, const u32* hs_regs, u3
 }
 
 s32 PS4_SYSV_ABI sceGnmSetLsShader(u32* cmdbuf, u32 size, const u32* ls_regs, u32 shader_modifier) {
-    DriverWrite bb_observe{cmdbuf, size};
+    DriverWrite driver_write{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (!cmdbuf || size < 0x17) {
@@ -1844,7 +1844,7 @@ s32 PS4_SYSV_ABI sceGnmSetLsShader(u32* cmdbuf, u32 size, const u32* ls_regs, u3
 }
 
 s32 PS4_SYSV_ABI sceGnmSetPsShader(u32* cmdbuf, u32 size, const u32* ps_regs) {
-    DriverWrite bb_observe{cmdbuf, size};
+    DriverWrite driver_write{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (!cmdbuf || size <= 0x27) {
@@ -1882,7 +1882,7 @@ s32 PS4_SYSV_ABI sceGnmSetPsShader(u32* cmdbuf, u32 size, const u32* ps_regs) {
 }
 
 s32 PS4_SYSV_ABI sceGnmSetPsShader350(u32* cmdbuf, u32 size, const u32* ps_regs) {
-    DriverWrite bb_observe{cmdbuf, size};
+    DriverWrite driver_write{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (!cmdbuf || size <= 0x27) {
@@ -1981,7 +1981,7 @@ s32 PS4_SYSV_ABI sceGnmSetVgtControl(u32* cmdbuf, u32 size, u32 prim_group_sz_mi
 }
 
 s32 PS4_SYSV_ABI sceGnmSetVsShader(u32* cmdbuf, u32 size, const u32* vs_regs, u32 shader_modifier) {
-    DriverWrite bb_observe{cmdbuf, size};
+    DriverWrite driver_write{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (!cmdbuf || size <= 0x1c) {
@@ -2582,7 +2582,7 @@ int PS4_SYSV_ABI sceGnmUnregisterResource() {
 }
 
 s32 PS4_SYSV_ABI sceGnmUpdateGsShader(u32* cmdbuf, u32 size, const u32* gs_regs) {
-    DriverWrite bb_observe{cmdbuf, size};
+    DriverWrite driver_write{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (!cmdbuf || size < 0x1d) {
@@ -2647,7 +2647,7 @@ int PS4_SYSV_ABI sceGnmUpdateHsShader(u32* cmdbuf, u32 size, const u32* hs_regs,
 }
 
 s32 PS4_SYSV_ABI sceGnmUpdatePsShader(u32* cmdbuf, u32 size, const u32* ps_regs) {
-    DriverWrite bb_observe{cmdbuf, size};
+    DriverWrite driver_write{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (!cmdbuf || size <= 0x27) {
@@ -2691,7 +2691,7 @@ s32 PS4_SYSV_ABI sceGnmUpdatePsShader(u32* cmdbuf, u32 size, const u32* ps_regs)
 }
 
 s32 PS4_SYSV_ABI sceGnmUpdatePsShader350(u32* cmdbuf, u32 size, const u32* ps_regs) {
-    DriverWrite bb_observe{cmdbuf, size};
+    DriverWrite driver_write{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (!cmdbuf || size <= 0x27) {
@@ -2738,7 +2738,7 @@ s32 PS4_SYSV_ABI sceGnmUpdatePsShader350(u32* cmdbuf, u32 size, const u32* ps_re
 
 s32 PS4_SYSV_ABI sceGnmUpdateVsShader(u32* cmdbuf, u32 size, const u32* vs_regs,
                                       u32 shader_modifier) {
-    DriverWrite bb_observe{cmdbuf, size};
+    DriverWrite driver_write{cmdbuf, size};
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (!cmdbuf || size <= 0x1c) {

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// bbport cp: the PM4 packet format of the PS4's command processor (GCN, CIK generation), as the
+// psport cp: the PM4 packet format of the PS4's command processor (GCN, CIK generation), as the
 // translator's own code: headers, opcodes, register banks. Only hardware facts live here; what a
 // packet does to the translator is the decoder's (cp_decoder.h).
 #pragma once

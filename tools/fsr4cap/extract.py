@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# bbport: builds the FSR 4.1.1 asset set for vk_fsr411.cpp from fsr4cap captures
+# psport: builds the FSR 4.1.1 asset set for vk_fsr411.cpp from fsr4cap captures
 # (capture_<render>_<output> directories written by capture_all.sh; fp8/capture_* for the DLL's
 # FP8 matrix variant).
 #

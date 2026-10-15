@@ -180,7 +180,7 @@ void ImageInfo::UpdateSize() {
         } else {
             // Every tiled array mode (1D/2D/3D, thin/thick/xthick, PRT or not) groups
             // GetMicroTileThickness() consecutive depth slices per tile; the slice count (depth x
-            // layers) is padded to it once, below. bbport (upstream #5196): a mip smaller than a
+            // layers) is padded to it once, below. psport (upstream #5196): a mip smaller than a
             // macro tile is stored 1D (micro tiled, at most 4 thick), as the hardware does.
             const u32 thickness = AmdGpu::GetMicroTileThickness(array_mode);
             const bool macro = AmdGpu::IsMacroTiled(array_mode);

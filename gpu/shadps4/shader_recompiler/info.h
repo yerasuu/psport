@@ -126,7 +126,7 @@ struct Info : InfoPersistent {
 
     ReadConstType readconst_types{};
     CopyShaderData gs_copy_data;
-    /// bbport: stride in bytes of transform feedback buffer 0 the GS module just translated
+    /// psport: stride in bytes of transform feedback buffer 0 the GS module just translated
     /// captures stream-out with, 0 when it has no transform feedback outputs. Only the translation
     /// this Info was passed to sets it, and a program keeps the Info of its first permutation, so
     /// the pipeline cache reads it per permutation from StageSpecialization::xfb_stride.
@@ -143,7 +143,7 @@ struct Info : InfoPersistent {
     bool uses_image_atomic_float_min_max{};
     bool uses_lane_id{};
     bool uses_shader_clock{};
-    /// bbport PS_LAYER_MEMORY: some guest buffer goes through the page table (IsPagedBuffer).
+    /// psport PS_LAYER_MEMORY: some guest buffer goes through the page table (IsPagedBuffer).
     bool uses_paged_buffers{};
     bool uses_group_quad{};
     bool uses_group_shuffle{};
@@ -166,7 +166,7 @@ struct Info : InfoPersistent {
         : InfoPersistent(stage_, l_stage_, params.hash), pgm_base{params.Base()},
           user_data{params.user_data} {}
 
-    /// bbport: user data of this stage as a draw saw it. The GPU command thread refreshes
+    /// psport: user data of this stage as a draw saw it. The GPU command thread refreshes
     /// user_data/flattened_ud_buf for every draw it decodes, while the draw recording thread
     /// (vk_draw_pipe.h) may still work on an earlier draw: that thread installs snapshots here.
     struct UdSnapshot {

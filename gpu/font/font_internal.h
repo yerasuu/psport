@@ -915,7 +915,7 @@ bool AddSystemFallbackFace(FontState& st, const std::filesystem::path& path, u32
 void AddBuiltinFallbackFaces(FontState& st, u32 font_set_type, u32 subfont_index,
                              std::string* preferred_latin_name_lower);
 void NotifyBuiltinFontFallbackOnce();
-// bbport: names, once per font set, the host file its primary font was read from.
+// psport: names, once per font set, the host file its primary font was read from.
 void LogFontSetFileOnce(u32 font_set_type, const std::filesystem::path& path);
 bool AttachSystemFont(FontState& st, Libraries::Font::OrbisFontHandle handle);
 std::string ReportSystemFaceRequest(FontState& st, Libraries::Font::OrbisFontHandle handle,

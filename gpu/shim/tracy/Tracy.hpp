@@ -1,4 +1,4 @@
-// bbport: profiler disabled; Tracy macros compile to nothing.
+// psport: profiler disabled; Tracy macros compile to nothing.
 #pragma once
 #include <cstddef>
 #include <cstdint>

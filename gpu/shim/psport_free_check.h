@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// bbport: PS_FREE_CHECK=1 — a diagnostic for a guest heap corruption (a crash in the game's
+// psport: PS_FREE_CHECK=1 — a diagnostic for a guest heap corruption (a crash in the game's
 // small-object allocator). The game keeps its GPU label objects in a small-object pool its
 // profile describes (Game::SmallObjectPool); without one the check stays off. The crash is a free
 // list whose head became 0x0000005300000000: something wrote into a freed block.

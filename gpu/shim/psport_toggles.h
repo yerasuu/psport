@@ -1,4 +1,4 @@
-// bbport: optimizations that can be switched off while the game runs (PS_TOGGLE_FILE,
+// psport: optimizations that can be switched off while the game runs (PS_TOGGLE_FILE,
 // see runtime_memory.c), to find which one changes rendering without restarting.
 #pragma once
 #include <array>

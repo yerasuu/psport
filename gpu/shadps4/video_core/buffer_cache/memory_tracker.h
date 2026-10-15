@@ -35,7 +35,7 @@ public:
             });
     }
 
-    /// bbport (pre-upload): whether the 4 MiB region at `region_addr` holds CPU-modified pages
+    /// psport (pre-upload): whether the 4 MiB region at `region_addr` holds CPU-modified pages
     /// that are not GPU-modified, with no guest write seen since frame `quiet_since`.
     /// `rewritten`: only regions the guest wrote after the GPU had used them (write faults).
     bool PreuploadCandidate(VAddr region_addr, u32 quiet_since, bool rewritten) noexcept {
@@ -50,7 +50,7 @@ public:
         return manager->last_cpu_write_frame < quiet_since &&
                manager->preupload_backoff_until <= quiet_since && manager->HasCpuOnlyPages();
     }
-    /// bbport (pre-upload): notes that the region was pre-uploaded at `frame`.
+    /// psport (pre-upload): notes that the region was pre-uploaded at `frame`.
     /// Returns how many times it was pre-uploaded before.
     u32 NotePreuploaded(VAddr region_addr, u32 frame) noexcept {
         if (auto* manager = top_tier[region_addr >> TRACKER_HIGHER_PAGE_BITS]) {
@@ -79,7 +79,7 @@ public:
                             });
     }
 
-    /// bbport: see RegionManager::ExtendWriteFault.
+    /// psport: see RegionManager::ExtendWriteFault.
     void ExtendWriteFault(VAddr window_addr, u64 size) {
         IteratePages<false>(window_addr, size,
                             [](RegionManager* manager, u64 offset, size_t size) {
@@ -125,7 +125,7 @@ public:
     /// Call 'func' for each CPU modified range and unmark those pages as CPU modified
     void ForEachUploadRange(VAddr query_cpu_range, u64 query_size, bool is_written, auto&& func,
                             auto&& on_upload) {
-        // bbport: a write binding over pages the CPU did not change and the GPU already owns
+        // psport: a write binding over pages the CPU did not change and the GPU already owns
         // needs neither an upload nor a state change (it ran under the region lock for every
         // GPU write binding, twice per page). Racing guest writes are as in the read path.
         if (is_written && !PsToggle::Disabled(PsToggle::LockFreeUploadCheck)) {
@@ -143,7 +143,7 @@ public:
         }
         IteratePages<true>(query_cpu_range, query_size,
                            [&func, is_written](RegionManager* manager, u64 offset, size_t size) {
-                               // bbport: read-only bindings skip the region lock when no page
+                               // psport: read-only bindings skip the region lock when no page
                                // in range is CPU-modified. A guest write sets its bit in the
                                // fault handler before the store, and the draw that uses the
                                // data reaches this thread through the submission queue lock.

@@ -29,7 +29,7 @@ struct BufferSpecialization {
     u32 num_format : 4;
     u32 index_stride : 2;
     u32 element_size : 2;
-    u32 paged : 1; ///< bbport PS_LAYER_MEMORY: through the page table (IsPagedBuffer)
+    u32 paged : 1; ///< psport PS_LAYER_MEMORY: through the page table (IsPagedBuffer)
     AmdGpu::CompMapping dst_select{};
     AmdGpu::NumberConversion num_conversion{};
 
@@ -92,7 +92,7 @@ struct StageSpecialization {
     boost::container::small_vector<FMaskSpecialization, 8> fmasks;
     boost::container::small_vector<SamplerSpecialization, 16> samplers;
     Backend::Bindings start{};
-    /// bbport: Info::xfb_stride of this permutation's translation. A result of the translation
+    /// psport: Info::xfb_stride of this permutation's translation. A result of the translation
     /// rather than an input that selects it, so operator== leaves it out.
     u32 xfb_stride{};
 

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// bbport PS_LAYER_MEMORY: the BufferCache side of the layer's memory module
+// psport PS_LAYER_MEMORY: the BufferCache side of the layer's memory module
 // (gpu/layer/pslayer_gpu_memory.h, docs/en/history/MEMORY_MODULE_PLAN.md). The game's memory is bound in
 // place through its chunk buffers; blocks of known data (what loaders wrote) get VRAM copies in
 // mirrors: one buffer per run of such blocks, runs that meet merged into a new mirror. No sparse
@@ -559,7 +559,7 @@ u64 BufferCache::LayerPromoteRun(u64 first, u64 end) {
         const VAddr start = lo << block_shift;
         const u64 bytes = (hi - lo) << block_shift;
         auto mirror = std::make_unique<Buffer>(instance, start, bytes, MemoryType::DeviceLocal,
-                                               fmt::format("bbport mirror {:#x}+{:#x}", start, bytes));
+                                               fmt::format("psport mirror {:#x}+{:#x}", start, bytes));
         target = mirror.get();
         for (const auto& old : touching) {
             auto* old_buffer = static_cast<Buffer*>(old.owner);
@@ -855,7 +855,7 @@ u64 BufferCache::LayerCompactMirrors(u64 wanted) {
             const VAddr base = a << block_shift;
             const u64 size = (b - a) << block_shift;
             auto mirror = std::make_unique<Buffer>(instance, base, size, MemoryType::DeviceLocal,
-                                                   fmt::format("bbport mirror {:#x}+{:#x}", base, size));
+                                                   fmt::format("psport mirror {:#x}+{:#x}", base, size));
             boost::container::small_vector<vk::BufferCopy, 8> copies;
             Layer().ForEachValid(a, b, [&](u64 v_first, u64 v_end) {
                 const VAddr from = v_first << block_shift;
@@ -1173,7 +1173,7 @@ std::pair<const Buffer*, u64> BufferCache::LayerPagedRecord(VAddr address, u64 s
     }
     if (!layer_trash) {
         layer_trash = std::make_unique<Buffer>(instance, 0, 64_KB, MemoryType::DeviceLocal,
-                                               "bbport paged trash");
+                                               "psport paged trash");
     }
     const vk::DeviceAddress trash = layer_trash->BufferDeviceAddress();
     const u32 record[8] = {static_cast<u32>(address),
@@ -1383,7 +1383,7 @@ void BufferCache::LayerRefreshVolatile(VAddr address, u64 size) {
 }
 } // namespace VideoCore
 
-// bbport PS_LAYER_MEMORY: blocks with a VRAM copy are write-protected (PS_LAYER_WRITE_TRAPS=0:
+// psport PS_LAYER_MEMORY: blocks with a VRAM copy are write-protected (PS_LAYER_WRITE_TRAPS=0:
 // off). The game's own code writes some of them without telling us (its heap's headers, parts of
 // its resource loaders), and a stale copy then gives exploding vertices and garbage textures. A
 // write there is let through at once; the block goes back in place before the next binding (the

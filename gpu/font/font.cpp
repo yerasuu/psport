@@ -921,7 +921,7 @@ s32 PS4_SYSV_ABI sceFontClearDeviceCache(OrbisFontLib library) {
     return rc;
 }
 
-// bbport: a stub in shadPS4. Atelier Ayesha DX opens its font from memory for every text object
+// psport: a stub in shadPS4. Atelier Ayesha DX opens its font from memory for every text object
 // and closes it in the object's destructor, and each open copies the whole font file into the
 // handle's state, so without a close the process grew by the font's size for every text drawn.
 s32 PS4_SYSV_ABI sceFontCloseFont(OrbisFontHandle fontHandle) {
@@ -1730,7 +1730,7 @@ s32 PS4_SYSV_ABI sceFontGenerateCharGlyph(OrbisFontHandle glyph_handle, u32 code
         return ORBIS_FONT_ERROR_INVALID_FONT_HANDLE;
     }
 
-    // bbport: Atelier Ayesha DX passes a zero-filled parameter block (id 0) and draws its text on
+    // psport: Atelier Ayesha DX passes a zero-filled parameter block (id 0) and draws its text on
     // the console, so id 0 means the defaults rather than the INVALID_PARAMETER shadPS4 returns.
     if (gen_params && gen_params->id == 0) {
         gen_params = nullptr;
@@ -1772,7 +1772,7 @@ s32 PS4_SYSV_ABI sceFontGenerateCharGlyph(OrbisFontHandle glyph_handle, u32 code
     boxed->glyph.flags = form_options;
     boxed->glyph.glyph_form = glyph_form;
     boxed->glyph.metrics_form = metrics_form;
-    // bbport: the glyph keeps the pixel scale its metrics were taken at. FontState's scale_w/h
+    // psport: the glyph keeps the pixel scale its metrics were taken at. FontState's scale_w/h
     // only follow sceFontSetScalePixel, so a title setting points (Atelier Ayesha DX) got its
     // glyphs rendered at the 16 px default; the font's style state converts points by its DPI.
     float scale_w = st->scale_w;
@@ -2479,7 +2479,7 @@ OrbisFontGlyphOutline* PS4_SYSV_ABI sceFontGlyphRefersOutline(OrbisFontGlyph gly
     return &boxed->outline;
 }
 
-// bbport: the glyph counterparts of sceFontRenderCharGlyphImage{,Horizontal,Vertical}, on
+// psport: the glyph counterparts of sceFontRenderCharGlyphImage{,Horizontal,Vertical}, on
 // RenderGlyphImageCore. Mode 0 places the glyph as sceFontRenderCharGlyphImage places a character:
 // (x, y) is the top of the line (the left of the column for a vertical font), so the line's
 // baseline (column offset) at the scale the glyph is drawn at is added here; the core's own mode 0

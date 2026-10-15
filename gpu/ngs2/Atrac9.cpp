@@ -15,7 +15,7 @@
 #include "ngs2_compat.hpp"
 #include "Ngs2Internal.hpp"
 
-// bbport's LibAtrac9 is upstream's, which decodes to 16-bit PCM only; AnyPS5 builds shadPS4's
+// psport's LibAtrac9 is upstream's, which decodes to 16-bit PCM only; AnyPS5 builds shadPS4's
 // fork with a float decoder. Same frame, scaled to [-1, 1).
 static int Atrac9DecodeF32(void* handle, const unsigned char* input, int input_size, float* output, int* used,
                            int nointerleave) {

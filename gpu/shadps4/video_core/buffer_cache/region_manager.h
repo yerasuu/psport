@@ -110,7 +110,7 @@ public:
         }
     }
 
-    /// bbport: after a guest write fault, also unprotects the other pages of the window that
+    /// psport: after a guest write fault, also unprotects the other pages of the window that
     /// are protected for CPU writes and hold no GPU-modified data (see MarkFaultWindow).
     void ExtendWriteFault(VAddr window_addr, u64 size) {
         const size_t offset = window_addr - cpu_addr;
@@ -148,7 +148,7 @@ public:
         }
 
         RegionBits& bits = GetRegionBits<type>();
-        // bbport: nothing modified in the range means nothing to clear or re-protect (CPU bits
+        // psport: nothing modified in the range means nothing to clear or re-protect (CPU bits
         // always match `writeable` after a change); this runs for every buffer binding, so
         // it is checked before building the range mask.
         if (type == Type::CPU && !bits.AnyInRange(start_page, end_page) &&
@@ -178,7 +178,7 @@ public:
      * @param offset Offset in bytes from the start of the buffer
      * @param size   Size in bytes of the region to query for modifications
      */
-    /// bbport: every page of the region modified.
+    /// psport: every page of the region modified.
     template <Type type>
     [[nodiscard]] bool IsRegionFullyModified(u64 offset, u64 size) noexcept {
         const size_t start_page = SanitizeAddress(offset) / TRACKER_BYTES_PER_PAGE;
@@ -204,13 +204,13 @@ public:
         return bits.AnyInRange(start_page, end_page);
     }
 
-    /// bbport (pre-upload): whether some page is CPU-modified but not GPU-modified.
+    /// psport (pre-upload): whether some page is CPU-modified but not GPU-modified.
     [[nodiscard]] bool HasCpuOnlyPages() const noexcept {
         return (cpu & ~gpu).Any();
     }
-    /// bbport (pre-upload): the frame of the newest guest write seen in this region.
+    /// psport (pre-upload): the frame of the newest guest write seen in this region.
     u32 last_cpu_write_frame = 0;
-    /// bbport (pre-upload): when it was last pre-uploaded, and no pre-upload before this frame:
+    /// psport (pre-upload): when it was last pre-uploaded, and no pre-upload before this frame:
     /// a region the game writes again soon after a pre-upload backs off, longer each time.
     u32 preupload_frame = 0;
     u32 preupload_backoff_until = 0;
@@ -257,7 +257,7 @@ private:
         tracker->UpdatePageWatchersForRegion<track, is_read>(cpu_addr, mask);
     }
 
-    // bbport: pages the guest writes again and again (per-frame constants, skinning output)
+    // psport: pages the guest writes again and again (per-frame constants, skinning output)
     // cost a protection fault in the writing thread plus an mprotect with TLB shootdowns on
     // every upload. After HotFaults faults a page stays writable and counts as always CPU
     // modified, so it is uploaded on every use instead. The set is rebuilt every HotPeriod.

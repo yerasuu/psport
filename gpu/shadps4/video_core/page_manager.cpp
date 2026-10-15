@@ -61,7 +61,7 @@ constexpr size_t PM_PAGE_SIZE = 4_KB;
 constexpr size_t PM_PAGE_BITS = 12;
 
 namespace {
-/// bbport: write fault sites (guest code), an open-addressing table keyed by the instruction.
+/// psport: write fault sites (guest code), an open-addressing table keyed by the instruction.
 struct FaultSite {
     std::atomic<u64> rip{0};
     std::atomic<u64> caller{0};
@@ -224,7 +224,7 @@ void PageManager::ReportFaultSites() {
     std::printf("\n");
 }
 
-// bbport: with the game's memory in place (no write tracking), the pages under images are
+// psport: with the game's memory in place (no write tracking), the pages under images are
 // trapped for writes (PsLayer::WriteTraps::Image): a write nobody announced (the game's own copy
 // loops, its heap over an old texture) still reaches the texture cache, on any game and GPU,
 // without hooks in the game's code; the hooks and the libc wrappers only make it sooner.
@@ -244,7 +244,7 @@ static bool ImageTraps() {
     return on;
 }
 
-// bbport: as ImageTraps for the pages the buffer cache watches (VRAM copies in its arena): a write
+// psport: as ImageTraps for the pages the buffer cache watches (VRAM copies in its arena): a write
 // nobody announced reaches the copy instead of the GPU reading the older data uploaded there.
 static bool BufferTraps() {
     static const bool on = ImageTraps() && !PsGuestMemory::LayerMemory();
@@ -317,7 +317,7 @@ struct PageManager::Impl {
     static bool GuestFaultSignalHandler(void* context, void* fault_address) {
         const auto addr = reinterpret_cast<VAddr>(fault_address);
         NoteFaultSite(context, addr);
-        // bbport: the draw recording thread handles its faults inline too (vk_draw_pipe.h).
+        // psport: the draw recording thread handles its faults inline too (vk_draw_pipe.h).
         const auto is_gpu_thread = rasterizer->IsGpuSideThread();
         if (is_gpu_thread) {
             PsStats::gpu_signal_faults.fetch_add(1, std::memory_order_relaxed);
@@ -491,7 +491,7 @@ struct PageManager::Impl {
         release_pending();
     }
 
-    /// bbport: the owners over each page for one trap reason; a page is trapped while one is there.
+    /// psport: the owners over each page for one trap reason; a page is trapped while one is there.
     /// Not the page states: they count images and buffer watches together, so one's last watch
     /// going would lift or leave the other's trap (left, the write faults again forever).
     struct TrapOwners {
@@ -540,7 +540,7 @@ struct PageManager::Impl {
         flush();
     }
 
-    /// bbport ImageTraps: the images over each page.
+    /// psport ImageTraps: the images over each page.
     template <bool track>
     void UpdateImageTraps(VAddr addr, u64 size) {
         size_t page = addr >> PM_PAGE_BITS;
@@ -555,7 +555,7 @@ struct PageManager::Impl {
         });
     }
 
-    /// bbport BufferTraps: the buffer cache's watches (writes and readbacks) over each page.
+    /// psport BufferTraps: the buffer cache's watches (writes and readbacks) over each page.
     template <bool track>
     void UpdateBufferTraps(VAddr base_addr, RegionBits& mask) {
         const size_t base_page = base_addr >> PM_PAGE_BITS;
@@ -581,7 +581,7 @@ struct PageManager::Impl {
 };
 
 #ifdef __linux__
-// bbport: write tracking with userfaultfd write-protection instead of mprotect. mprotect takes
+// psport: write tracking with userfaultfd write-protection instead of mprotect. mprotect takes
 // the address space lock for writing and splits mappings; while guest threads fault on
 // per-frame buffers and the GPU thread re-protects uploaded pages, every page fault in the
 // process (copy threads included) waits for it. UFFDIO_WRITEPROTECT changes page table bits
@@ -731,7 +731,7 @@ struct SignalImpl : public PageManager::Impl {
     SignalImpl(Vulkan::Rasterizer* rasterizer_) : Impl() {
         rasterizer = rasterizer_;
 
-        // Should be called first (bbport: after PS_VRAM_ACCESS_TRAP, priority 0, diagnostics only).
+        // Should be called first (psport: after PS_VRAM_ACCESS_TRAP, priority 0, diagnostics only).
         constexpr u32 priority = 1;
         Core::Signals::Instance()->RegisterAccessViolationHandler(GuestFaultSignalHandler,
                                                                   priority);
@@ -739,7 +739,7 @@ struct SignalImpl : public PageManager::Impl {
 
     void Protect(VAddr address, size_t size, Core::MemoryPermission perms) override {
         RENDERER_TRACE;
-        // bbport PS_GUEST_IN_PLACE: no page protection; the pages are marked in the runtime's write
+        // psport PS_GUEST_IN_PLACE: no page protection; the pages are marked in the runtime's write
         // watch instead, and the writers that check it tell the GPU side (WriteTracking).
         if (!VideoCore::WriteTracking()) {
             runtime_memory_set_write_watch(address, size, !True(perms & Core::MemoryPermission::Write));
@@ -758,7 +758,7 @@ struct SignalImpl : public PageManager::Impl {
 
 PageManager::PageManager(Vulkan::Rasterizer* rasterizer_) {
 #ifdef __linux__
-    // bbport: dma-buf guest memory (PS_GUEST_GPU_MEMORY=1) cannot be write-protected by userfaultfd
+    // psport: dma-buf guest memory (PS_GUEST_GPU_MEMORY=1) cannot be write-protected by userfaultfd
     // (anonymous and shmem only): its registration would fail and writes go unseen.
     const char* guest_gpu_memory = std::getenv("PS_GUEST_GPU_MEMORY");
     const bool dma_buf_guest = guest_gpu_memory && guest_gpu_memory[0] == '1';
@@ -791,7 +791,7 @@ void PageManager::OnGpuUnmap(VAddr address, size_t size) {
 template <bool track>
 void PageManager::UpdatePageWatchers(VAddr addr, u64 size) const {
     impl->UpdatePageWatchers<track, false>(addr, size);
-    // bbport: only the texture cache comes here (the buffer cache: UpdatePageWatchersForRegion).
+    // psport: only the texture cache comes here (the buffer cache: UpdatePageWatchersForRegion).
     if (ImageTraps()) {
         impl->UpdateImageTraps<track>(addr, size);
     }

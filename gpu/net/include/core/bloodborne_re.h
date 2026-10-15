@@ -1,4 +1,4 @@
-// bbport co-op: the Bloodborne summon helpers from shadp2p's bloodborne_re.h. Seamless
+// psport co-op: the Bloodborne summon helpers from shadp2p's bloodborne_re.h. Seamless
 // co-op (host placement) is not ported yet; these keep the header value between requests.
 #pragma once
 #include <cstdint>

@@ -116,7 +116,7 @@ void Load() {
     for (int e = 0; e < v.c_effects; ++e) {
         v.effects[e] = switches[e].is_default_on;
     }
-    // bbport: the menu's language until one is chosen in it (menu_language in psport.ini): the
+    // psport: the menu's language until one is chosen in it (menu_language in psport.ini): the
     // launcher's (PS_MENU_LANGUAGE), else the system's, as the launcher picks its own.
     {
         const char* lang = std::getenv("PS_MENU_LANGUAGE");

@@ -184,7 +184,7 @@ struct FfxFsr4VkContext {
     VkBool32  dotProductSupported;
     VkBool32  computeDerivativesSupported;
 
-    /* bbport: PS_FSR4_PROFILE=1 — GPU time per pass (timestamps around each
+    /* psport: PS_FSR4_PROFILE=1 — GPU time per pass (timestamps around each
      * dispatch, read back when the frame retires, printed every 300 frames). */
     VkQueryPool profPool;
     float       profPeriodNs;
@@ -636,7 +636,7 @@ static VkFormat toVkFmt(FfxSurfaceFormat f)
 
 // ── pipeline creation ─────────────────────────────────────────────────────────
 
-/* bbport: PS_FSR4_STATS=1 prints the driver's per-pass statistics (registers, spills,
+/* psport: PS_FSR4_STATS=1 prints the driver's per-pass statistics (registers, spills,
  * instruction counts) when the executable-statistics extension is enabled. */
 static void printPipelineStats(FfxFsr4VkContext* c, uint32_t passIdx, VkPipeline pipeline)
 {
@@ -758,7 +758,7 @@ static VkResult mkPipeline(FfxFsr4VkContext* c, uint32_t passIdx, VkPipe* out)
     if (stats) cpci.flags |= VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR;
     r = vkCreateComputePipelines(c->dev, VK_NULL_HANDLE, 1, &cpci, c->alloc, &out->pipeline);
     if (r != VK_SUCCESS && stats) {
-        /* bbport: the capture flag needs VK_EXT_pipeline_executable_statistics enabled on
+        /* psport: the capture flag needs VK_EXT_pipeline_executable_statistics enabled on
          * the device; without it creation can fail and take FSR4 down with it. Retry
          * without the flag so the diagnostic never breaks the upscaler. */
         cpci.flags &= ~(VkPipelineCreateFlags)VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR;

@@ -37,7 +37,7 @@ vk::BufferUsageFlags xfb_dmabuf;
 vk::BufferUsageFlags xfb_host;
 
 bool GuestInVram() {
-    // bbport PS_GUEST_VRAM=1 (experiment): the game's direct memory in VRAM the CPU maps through
+    // psport PS_GUEST_VRAM=1 (experiment): the game's direct memory in VRAM the CPU maps through
     // the PCI BAR (Resizable BAR), as GDDR is the PS4's one memory: no VRAM copies.
     static const bool on = [] {
         const char* env = std::getenv("PS_GUEST_VRAM");
@@ -362,7 +362,7 @@ bool HostImportWorks(const Vulkan::Instance& instance, const char*& why) {
         why = "import alignment above 4 MiB";
         return false;
     }
-    const int fd = memfd_create("bb-guest-memory-probe", MFD_CLOEXEC);
+    const int fd = memfd_create("psport-guest-memory-probe", MFD_CLOEXEC);
     if (fd < 0 || ftruncate(fd, Size) != 0) {
         why = "memfd";
         if (fd >= 0) {

@@ -60,7 +60,7 @@ static bool LayerTranslate(uint64_t va, uint64_t* phys, uint64_t* end) {
 namespace VideoCore {
 
 namespace {
-// bbport: the tick of the newest GPU write per 64 KiB of guest memory, per 1 MiB for writes over
+// psport: the tick of the newest GPU write per 64 KiB of guest memory, per 1 MiB for writes over
 // 16 MiB (ObtainBuffer with is_written: the only place ranges become GPU-modified). A readback
 // waits for that submission only and copies on the readback queue, not behind the queued
 // frames; a coarser grain let a buffer the GPU writes every frame hold up its neighbours.
@@ -127,7 +127,7 @@ GpuWriteTicks& WriteTicks() {
     return write_ticks;
 }
 
-// bbport (PS_READBACK_LOG): the newest GPU-written bindings, to show which writes a readback that
+// psport (PS_READBACK_LOG): the newest GPU-written bindings, to show which writes a readback that
 // waited for the GPU overlapped (a binding wider than what the shader writes would show here).
 struct WrittenBinding {
     u64 address, size, tick;
@@ -135,7 +135,7 @@ struct WrittenBinding {
 std::array<WrittenBinding, 4096> written_bindings;
 std::atomic<u64> written_head{0};
 
-// bbport: PS_READBACK_LOG=path — every download of GPU-written buffer memory back to guest
+// psport: PS_READBACK_LOG=path — every download of GPU-written buffer memory back to guest
 // memory (a CPU write to a range the GPU wrote): who asked, where, how much, how long it took,
 // how old the GPU's newest write there was, and whether the readback queue served it.
 struct ReadbackLog {
@@ -164,7 +164,7 @@ ReadbackLog* Readbacks() {
 thread_local const char* readback_requester = "";
 thread_local bool readback_is_write = false;
 
-/// bbport: copies finished GPU data out of an arena on the readback queue (Instance), waiting
+/// psport: copies finished GPU data out of an arena on the readback queue (Instance), waiting
 /// only for those writes (the timeline semaphore at their tick), not for the queued frames.
 class FastReadback {
 public:
@@ -288,7 +288,7 @@ FastReadback& SharedReadback(const Vulkan::Instance& instance) {
     return readback;
 }
 
-// bbport: PS_GPU_WRITE_TWINS=1 — a guest write into a page that holds bytes the GPU is still
+// psport: PS_GPU_WRITE_TWINS=1 — a guest write into a page that holds bytes the GPU is still
 // writing (counters, small compute outputs rewritten every frame) does not wait for the GPU: the
 // guest's copy of those bytes is kept as a "twin" and the page becomes CPU-modified at once.
 // Uploads leave the GPU's bytes in the arena while the guest bytes still match their twin (the
@@ -335,7 +335,7 @@ void ForEachTwinRun(VAddr begin, VAddr end, Func&& func) {
         if (cursor < from) {
             func(cursor, from, TwinRun::None);
         }
-        // bbport: through the backing view: with PS_READBACKS=2 the page is read-protected, and a
+        // psport: through the backing view: with PS_READBACKS=2 the page is read-protected, and a
         // fault here (GPU thread, twins_mutex held) waited for a readback needing twins_mutex:
         // the game froze at the first cutscene (a movie frame written into GPU-written memory).
         thread_local std::vector<u8> guest_bytes;
@@ -383,7 +383,7 @@ void EraseTwins(VAddr begin, VAddr end) {
     }
 }
 
-/// bbport: PS_PREUPLOAD — background upload of the game's GPU memory into the arena ahead of use.
+/// psport: PS_PREUPLOAD — background upload of the game's GPU memory into the arena ahead of use.
 /// 1 (run.sh default): only memory already resident in the arena that the game rewrote, and
 /// textures from the arena only where it is resident: no new VRAM. 2: all of the game's GPU
 /// memory, textures always from the arena (~3 GB more VRAM, the shared memory on a Steam Deck).
@@ -405,8 +405,8 @@ bool PreuploadEnabled() {
 
 /// On an integrated GPU (Steam Deck) VRAM is the same memory: everything stays in place there.
 bool integrated_gpu = false;
-/// bbport PS_GUEST_IN_PLACE: Garlic memory (type 3) is cached in VRAM, Onion in place.
-/// bbport PS_GUEST_IN_PLACE optimizations, for A/B: VRAM copies uploaded by GPU copies from the
+/// psport PS_GUEST_IN_PLACE: Garlic memory (type 3) is cached in VRAM, Onion in place.
+/// psport PS_GUEST_IN_PLACE optimizations, for A/B: VRAM copies uploaded by GPU copies from the
 /// guest chunks (PS_CHUNK_UPLOADS=0: CPU staging), texture data bound in place whatever its type
 /// (PS_INPLACE_TEXTURES=1; off: by type).
 bool ChunkUploads() {
@@ -432,7 +432,7 @@ bool InPlaceTextures() {
     return on;
 }
 
-/// bbport: the arena keeps the first binding of every block while the game runs (imported host
+/// psport: the arena keeps the first binding of every block while the game runs (imported host
 /// memory, NVIDIA): game data is read in place over the bus, never moved to VRAM and back, and
 /// the few blocks outside the guest chunks get system memory, not VRAM. On NVIDIA (GTX 1660 Ti,
 /// 615.71) the first blocks moved to VRAM held the GPU for 10 s and more, the desktop with it.
@@ -464,7 +464,7 @@ bool MixStats() {
     return on;
 }
 
-/// bbport PS_LAYER_MEMORY=1: the layer's memory module (gpu/layer) binds the game's memory: a
+/// psport PS_LAYER_MEMORY=1: the layer's memory module (gpu/layer) binds the game's memory: a
 /// range in place is a range of its chunk's buffer, with separate VRAM mirrors and no sparse
 /// arena. FixedArena must not prohibit those mirrors.
 bool LayerMode() {
@@ -560,7 +560,7 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
       gds_buffer{instance, 0, GDS_BUFFER_SIZE, MemoryType::Stream, "GDS Buffer"},
       memory_semaphore{instance} {
     integrated_gpu = instance.IsIntegrated();
-    // bbport: the PC memory model needs the game's direct memory in dma-buf chunks the runtime can
+    // psport: the PC memory model needs the game's direct memory in dma-buf chunks the runtime can
     // map at any offset (PsGuestMemory::Usable), and an AMD GPU for now (PcModelGpu). Without
     // them it is off, as PS_GUEST_IN_PLACE=0.
     if (GuestInPlace() &&
@@ -652,7 +652,7 @@ void BufferCache::InvalidateMemory(VAddr device_addr, u64 size, bool assume_lock
     });
 }
 
-// bbport: the game fills its per-frame buffers (constants, skinning output) sequentially and
+// psport: the game fills its per-frame buffers (constants, skinning output) sequentially and
 // every 4 KiB page cost a protection fault (~110k/s in Hunter's Nightmare, a fifth of each
 // render worker's time in the kernel). A fault unprotects the aligned window around it instead;
 // pages marked CPU-modified without being written only cost an upload when bound.
@@ -671,7 +671,7 @@ void BufferCache::RunGuestCopy(const PsCopy::Item& item) {
 // Each source is noted once the copy is queued (a WaitHostCopies started after the note covers it).
 void BufferCache::SmallGuestCopy(const PsCopy::Item& item) {
     if (!scheduler.IsRecordingDeferred()) {
-        // bbport: commands recorded on this thread (direct mode: the draw or dispatch after the
+        // psport: commands recorded on this thread (direct mode: the draw or dispatch after the
         // upscaler's passes; or PS_VK_RECORD_THREAD=0): the copy runs now, before the commands
         // that read it. In this thread's copy batch it ran at the next submission at the
         // earliest, possibly after a WRITE_DATA had changed its source (that wait runs only the
@@ -722,7 +722,7 @@ void BufferCache::ReadMemory(VAddr device_addr, u64 size, bool is_write, bool as
             std::max<VAddr>(Common::AlignDown(device_addr, WindowSize), arena->cpu_addr);
         const VAddr window_end = std::min<VAddr>(
             std::max<VAddr>(window_start + WindowSize, device_addr + size), arena_end);
-        // bbport (PS_GPU_WRITE_TWINS): bytes the GPU is still writing on the faulting page are
+        // psport (PS_GPU_WRITE_TWINS): bytes the GPU is still writing on the faulting page are
         // twinned instead of waited for (see TwinsEnabled).
         if (is_write && TwinsEnabled()) {
             const VAddr page_begin = Common::AlignDown(device_addr, TRACKER_BYTES_PER_PAGE);
@@ -758,7 +758,7 @@ void BufferCache::ReadMemory(VAddr device_addr, u64 size, bool is_write, bool as
                 return;
             }
         }
-        // bbport (PS_GPU_WRITE_TWINS): the window around the fault is downloaded only when the GPU has
+        // psport (PS_GPU_WRITE_TWINS): the window around the fault is downloaded only when the GPU has
         // done its writes there; else just the faulting page (the other pages stay GPU-modified
         // and protected), instead of waiting for GPU writes that have nothing to do with it.
         VAddr download_start = window_start, download_end = window_end;
@@ -891,7 +891,7 @@ void BufferCache::DownloadMemory(const Buffer* arena, VAddr device_addr, u64 siz
                 write_range(guest, src, copy.size);
                 continue;
             }
-            // bbport (PS_GPU_WRITE_TWINS): guest bytes written since their twin was made stay;
+            // psport (PS_GPU_WRITE_TWINS): guest bytes written since their twin was made stay;
             // the page is CPU-modified, so its next upload carries them to the arena.
             ForEachTwinRun(guest, guest + copy.size, [&](VAddr from, VAddr to, TwinRun run) {
                 if (run != TwinRun::Changed) {
@@ -903,7 +903,7 @@ void BufferCache::DownloadMemory(const Buffer* arena, VAddr device_addr, u64 siz
     };
     const auto wait_start = std::chrono::steady_clock::now();
     const u64 tick_before = scheduler.CurrentTick();
-    // bbport: the readback queue copies the data once the GPU has done the newest write into
+    // psport: the readback queue copies the data once the GPU has done the newest write into
     // it (waiting for that submission only when it is still queued); the graphics queue would
     // first run all queued work (~a frame: 20-30 ms stutters whenever the game wrote into
     // memory a GPU pass had written).
@@ -982,7 +982,7 @@ void BufferCache::DownloadMemory(const Buffer* arena, VAddr device_addr, u64 siz
 }
 
 namespace {
-// bbport: PS_BUFFER_STATS=1 — how buffer bindings reach the GPU, by guest region (256 MiB),
+// psport: PS_BUFFER_STATS=1 — how buffer bindings reach the GPU, by guest region (256 MiB),
 // printed every 5 s: small read-only copies into the stream buffer, arena bindings, and the
 // bytes those re-upload after CPU writes. Input for engine-level short paths.
 struct BufferStats {
@@ -1071,7 +1071,7 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
         PrintBufferStats();
         NoteHotUse(device_addr, size);
     }
-    // bbport PS_GUEST_IN_PLACE: buffers in the game's direct memory are used where they are. Small
+    // psport PS_GUEST_IN_PLACE: buffers in the game's direct memory are used where they are. Small
     // read-only ones (constants) are still copied when bound (the stream path below): commands
     // decoded later (WriteData, constant RAM dumps) change them on the CPU in decode order, and
     // a draw decoded before must keep its values (buffer renaming). GPU writes are noted for
@@ -1079,14 +1079,14 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
     if (is_written && !shadows.empty()) {
         DropShadows(device_addr, size);
     }
-    // bbport: a read-only binding of blocks that were resident and in place the last time, with
+    // psport: a read-only binding of blocks that were resident and in place the last time, with
     // the residency unchanged since (most bindings in place, constants with
     // PS_CONSTANTS_IN_PLACE): the arena where it is, without the residency walk.
     struct InPlaceMemo {
         u64 first = ~0ULL, last = 0, generation = 0;
         const Buffer* arena = nullptr;
     };
-    // bbport PS_LAYER_MEMORY: the game's memory in place through its chunk buffer (the module
+    // psport PS_LAYER_MEMORY: the game's memory in place through its chunk buffer (the module
     // says which); what is not whole in one chunk takes the paths below (VRAM copies).
     if (LayerMode() && (is_written || size > STREAM_THRESHOLD || ConstantsInPlace() ||
                         IsRegionGpuModified(device_addr, size) || LayerMirrored(device_addr, size))) {
@@ -1167,7 +1167,7 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
             ++region.stream_count;
             region.stream_bytes += size;
         }
-        // bbport: the guest data is copied on a copy thread, started now; submission and
+        // psport: the guest data is copied on a copy thread, started now; submission and
         // guest-visible fences wait for it (Scheduler::WaitHostCopies).
         if (!stream_buffer.mapped_data.empty() &&
             !PsToggle::Disabled(PsToggle::DeferredStreamCopies)) {
@@ -1272,7 +1272,7 @@ std::optional<std::pair<const Buffer*, u64>> BufferCache::CommandWriteTarget(VAd
 }
 
 std::pair<const Buffer*, u64> BufferCache::ObtainBufferForImage(VAddr device_addr, u32 size) {
-    // bbport PS_GUEST_IN_PLACE: texture data is read by the GPU from the game's memory itself:
+    // psport PS_GUEST_IN_PLACE: texture data is read by the GPU from the game's memory itself:
     // through the arena where it is bound in place, else (PS_CHUNK_TEXTURES) from its guest
     // memory chunk.
     if (LayerMode()) {
@@ -1306,7 +1306,7 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBufferForImage(VAddr device_add
         TraceBinding(device_addr, size, false, 7);
         return ObtainBuffer(device_addr, size, false);
     }
-    // bbport: PS_PREUPLOAD — texture data comes from the arena (device-local): only the pages
+    // psport: PS_PREUPLOAD — texture data comes from the arena (device-local): only the pages
     // the CPU changed since are uploaded into it, and the background pre-upload keeps it
     // current, so a streaming burst detiles from VRAM instead of copying everything through
     // the CPU and the PCIe bus in that frame.
@@ -1331,7 +1331,7 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBufferForImage(VAddr device_add
     const auto staging = staging_pool.Request(size, VideoCore::MemoryType::HostUncached,
                                               instance.StorageMinAlignment());
     if (!PsToggle::Disabled(PsToggle::DeferredUploads)) {
-        // bbport: texture data is copied on the copy threads (streaming: 100+ MB per frame);
+        // psport: texture data is copied on the copy threads (streaming: 100+ MB per frame);
         // the upload reads the staging only after submission, which waits for the copies.
         constexpr u64 Chunk = 1_MB;
         for (u64 offset = 0; offset < staging.size; offset += Chunk) {
@@ -1365,7 +1365,7 @@ bool BufferCache::IsRegionGpuModified(VAddr addr, size_t size) {
     if (memory_tracker->IsRegionGpuModified(addr, size)) {
         return true;
     }
-    // bbport PS_GUEST_IN_PLACE: GPU writes are not tracked per page; one not done yet counts.
+    // psport PS_GUEST_IN_PLACE: GPU writes are not tracked per page; one not done yet counts.
     // So does what the GPU wrote into a VRAM copy (NoteGpuWrite: its data, as a default heap):
     // the game's memory under it is older (issue #122). PS_GPU_DATA_CHECK=0: not counted.
     static const bool gpu_data_check = [] {
@@ -1469,7 +1469,7 @@ void BufferCache::EnsureResident(const Buffer* arena, u64 first_block, u64 last_
     if (maintained_epoch != packet_epoch) {
         Maintain();
     }
-    // bbport: the blocks were all resident the last time and nothing changed since: no interval
+    // psport: the blocks were all resident the last time and nothing changed since: no interval
     // lookup (it ran for every buffer binding).
     thread_local std::array<ResidencyMemo, 256> resident_memo{};
     auto& memo = resident_memo[first_block & (resident_memo.size() - 1)];
@@ -1486,7 +1486,7 @@ void BufferCache::EnsureResident(const Buffer* arena, u64 first_block, u64 last_
     }
     PsStats::Timer timer{PsStats::t_resident};
 
-    // bbport PS_GUEST_IN_PLACE: blocks of the game's direct memory are bound to the memory it
+    // psport PS_GUEST_IN_PLACE: blocks of the game's direct memory are bound to the memory it
     // lives in; the rest (and everything without it) gets VRAM as before.
     std::vector<ResidentBind> binds;
     if (GuestInPlace()) {
@@ -1502,7 +1502,7 @@ void BufferCache::EnsureResident(const Buffer* arena, u64 first_block, u64 last_
     }
 
     if (vram_blocks != 0) {
-        // bbport: the slots of blocks that left VRAM first, block by block. A request of several
+        // psport: the slots of blocks that left VRAM first, block by block. A request of several
         // blocks only ever took new space, and the free slots piled up while new 64 MiB chunks
         // were allocated.
         IntervalList rest_ranges;
@@ -1570,7 +1570,7 @@ void BufferCache::EnsureResident(const Buffer* arena, u64 first_block, u64 last_
 
 std::pair<vk::DeviceMemory, u64> BufferCache::AllocateResidency(u64 bytes) {
     if (bytes == block_size && free_slot_count != 0) {
-        // bbport: a slot of the fullest chunk: the emptier ones drain and go back to the driver.
+        // psport: a slot of the fullest chunk: the emptier ones drain and go back to the driver.
         auto best = residency_chunks.end();
         for (auto it = residency_chunks.begin(); it != residency_chunks.end(); ++it) {
             if (!it->second.free_offsets.empty() &&
@@ -1587,13 +1587,13 @@ std::pair<vk::DeviceMemory, u64> BufferCache::AllocateResidency(u64 bytes) {
             return {vk::DeviceMemory{best->first}, offset};
         }
     }
-    // bbport: residency comes out of 64 MiB blocks (a larger request gets its own): a streaming
+    // psport: residency comes out of 64 MiB blocks (a larger request gets its own): a streaming
     // burst bound hundreds of small ranges, each its own vkAllocateMemory (~8 ms a burst). At most
     // one block is partly unused. The next block is allocated in the background once half of the
     // current one is used: the kernel clears new memory, on a Steam Deck with the CPU (16-22 ms a
     // burst). At most one spare block.
     constexpr u64 ResidencyBlock = 64_MB;
-    // bbport: VRAM full (a 4 GB card: "ErrorOutOfDeviceMemory", the game stopped): the block
+    // psport: VRAM full (a 4 GB card: "ErrorOutOfDeviceMemory", the game stopped): the block
     // comes from system memory the GPU reads over the bus, as a PC game's data spills there.
     // Slower, not fatal. PS_RESIDENCY_VRAM_LIMIT_MB=N (tests): VRAM "full" after N MiB of blocks.
     const auto allocate = [this](u64 size) {
@@ -1645,7 +1645,7 @@ std::pair<vk::DeviceMemory, u64> BufferCache::AllocateResidency(u64 bytes) {
         u64 size = std::max(bytes, ResidencyBlock);
         vk::DeviceMemory memory =
             size == ResidencyBlock && spare_residency.valid() ? spare_residency.get() : vk::DeviceMemory{};
-        // bbport: VRAM full and no system memory to spill to (NVIDIA's sparse buffers take VRAM
+        // psport: VRAM full and no system memory to spill to (NVIDIA's sparse buffers take VRAM
         // only; RTX 3050 4 GB: "Failed to allocate 64 MiB for guest memory copies", the game
         // stopped): the texture collector evicts by submissions again for a while, and this
         // request gets just its size, then any other memory type the arena can be bound to.
@@ -2035,7 +2035,7 @@ void BufferCache::NoteCpuWrite(VAddr address, u64 guest_rip) {
 }
 
 void BufferCache::ProcessDemotions() {
-    // bbport: the waiting requests become ready only once their tick is submitted: rescanned
+    // psport: the waiting requests become ready only once their tick is submitted: rescanned
     // when a new tick began or a request came (it ran for every draw and dispatch).
     const bool requested = demotes_requested.load(std::memory_order_acquire);
     if (!requested && demotions_scanned_tick == scheduler.CurrentTick()) {
@@ -2167,7 +2167,7 @@ std::optional<std::pair<const Buffer*, u64>> BufferCache::GuestChunkSource(VAddr
     auto& buffer = chunk_buffers[chunk->index % chunk_buffers.size()];
     if (!buffer) {
         buffer = std::make_unique<Buffer>(instance, chunk->size, chunk->memory,
-                                          fmt::format("bbport guest memory {:#x}", chunk->phys));
+                                          fmt::format("psport guest memory {:#x}", chunk->phys));
     }
     return std::pair<const Buffer*, u64>{buffer.get(), phys - chunk->phys};
 }
@@ -2196,7 +2196,7 @@ std::optional<std::pair<const Buffer*, u64>> BufferCache::LayerInPlace(VAddr add
     auto& buffer = chunk_buffers[chunk->index % chunk_buffers.size()];
     if (!buffer) {
         buffer = std::make_unique<Buffer>(instance, chunk->size, chunk->memory,
-                                          fmt::format("bbport guest memory {:#x}", chunk->phys));
+                                          fmt::format("psport guest memory {:#x}", chunk->phys));
     }
     return std::pair<const Buffer*, u64>{buffer.get(), span->offset};
 }
@@ -2667,7 +2667,7 @@ void BufferCache::QueueCopyBacks(u64 submitted) {
 }
 
 namespace {
-// bbport PS_VRAM_ACCESS_TRAP=1 (diagnostics): blocks moved to VRAM are closed to the CPU
+// psport PS_VRAM_ACCESS_TRAP=1 (diagnostics): blocks moved to VRAM are closed to the CPU
 // (PROT_NONE); the first CPU access to each is recorded (code site, read or write) and the block
 // opened again. Finds CPU readers of data the GPU writes in VRAM, where the CPU sees a stale copy.
 struct VramTrap {
@@ -2881,7 +2881,7 @@ void BufferCache::QueuePromotions(u64 submitted) {
     if (VramTrapsEnabled()) {
         ReportVramTraps();
     }
-    // bbport PS_LAYER_MEMORY: mirrors replaced by bigger ones go as soon as the GPU is past them,
+    // psport PS_LAYER_MEMORY: mirrors replaced by bigger ones go as soon as the GPU is past them,
     // not once a second (LayerMaintain): loading a level replaced hundreds within a second.
     if (LayerMode() && !layer_retired.empty()) {
         std::erase_if(layer_retired, [&](const auto& retired) {
@@ -3035,7 +3035,7 @@ void BufferCache::ProcessPendingUnmaps() {
             gpu_written_bytes.Subtract(range.start << block_shift, range.end << block_shift);
             promote_candidates.Subtract(range.start, range.end);
         }
-        // bbport: blocks wholly unmapped that have a VRAM copy leave VRAM too (their slots go
+        // psport: blocks wholly unmapped that have a VRAM copy leave VRAM too (their slots go
         // to the next blocks moved there; uploaded again if mapped and used).
         for (u64 block = (addr + block_size - 1) >> block_shift; block < (addr + size) >> block_shift;
              ++block) {
@@ -3053,7 +3053,7 @@ bool BufferCache::IsInPlace(VAddr addr, u64 size) const {
                PsLayer::Resolution::Kind::InPlace;
     }
     const u64 first = addr >> block_shift, last = (addr + size - 1) >> block_shift;
-    // bbport: asked for every binding; the answer holds while the residency is unchanged.
+    // psport: asked for every binding; the answer holds while the residency is unchanged.
     thread_local std::array<ResidencyMemo, 256> in_place_memo{};
     auto& memo = in_place_memo[first & (in_place_memo.size() - 1)];
     const u64 generation = ResidencyGeneration();
@@ -3066,7 +3066,7 @@ bool BufferCache::IsInPlace(VAddr addr, u64 size) const {
 bool BufferCache::SynchronizeMemory(const Buffer* arena, VAddr device_addr, u32 size,
                                     bool is_written, bool is_texel_buffer) {
     boost::container::small_vector<std::pair<vk::Buffer, vk::BufferCopy>, 4> chunk_copies;
-    // bbport PS_GUEST_IN_PLACE: the arena is the game's memory there: nothing to upload, no
+    // psport PS_GUEST_IN_PLACE: the arena is the game's memory there: nothing to upload, no
     // write tracking, and GPU writes need no readback. Images aliasing it still sync.
     if (!LayerMode() && IsInPlace(device_addr, size)) {
         return is_texel_buffer && !is_written &&
@@ -3099,7 +3099,7 @@ bool BufferCache::SynchronizeMemory(const Buffer* arena, VAddr device_addr, u32 
             total_size_bytes += size;
         },
         [&] {
-            // bbport (PS_GPU_WRITE_TWINS): bytes whose guest copy still matches its twin keep the
+            // psport (PS_GPU_WRITE_TWINS): bytes whose guest copy still matches its twin keep the
             // GPU's data in the arena; twin bytes the guest wrote since are uploaded and no
             // longer GPU-modified.
             if (TwinsEnabled() && !copies.empty()) {
@@ -3132,7 +3132,7 @@ bool BufferCache::SynchronizeMemory(const Buffer* arena, VAddr device_addr, u32 
                     total_size_bytes = offset;
                 }
             }
-            // bbport PS_GUEST_IN_PLACE: what lies in a guest memory chunk is copied by the GPU
+            // psport PS_GUEST_IN_PLACE: what lies in a guest memory chunk is copied by the GPU
             // straight from it (no CPU copy into staging); the rest goes through staging.
             if (GuestInPlace() && ChunkUploads() && !copies.empty()) {
                 boost::container::small_vector<vk::BufferCopy, 4> staged;
@@ -3165,7 +3165,7 @@ bool BufferCache::SynchronizeMemory(const Buffer* arena, VAddr device_addr, u32 
     }
     for (const auto& [chunk_buffer, copy] : chunk_copies) {
         PsStats::buffer_upload_bytes.fetch_add(copy.size, std::memory_order_relaxed);
-        // bbport PS_LAYER_MEMORY: the GPU writes the game's memory too (through the chunk's
+        // psport PS_LAYER_MEMORY: the GPU writes the game's memory too (through the chunk's
         // buffer wrapper): a copy from it waits for those writes like any buffer copy.
         if (LayerMode()) {
             const VAddr address = arena->cpu_addr + copy.dstOffset;
@@ -3190,7 +3190,7 @@ const Buffer* BufferCache::UploadCopies(const Buffer* arena, std::span<vk::Buffe
     }
     PsStats::buffer_upload_bytes.fetch_add(total_size_bytes, std::memory_order_relaxed);
     const auto staging = staging_pool.Request(total_size_bytes, MemoryType::HostUncached);
-    // bbport: the guest memory is copied into staging on the copy threads, started now in
+    // psport: the guest memory is copied into staging on the copy threads, started now in
     // groups of about 1 MiB; submission and guest-visible fences wait for them
     // (Scheduler::WaitHostCopies).
     if (!PsToggle::Disabled(PsToggle::DeferredUploads) && total_size_bytes < 1_MB) {
@@ -3275,7 +3275,7 @@ bool BufferCache::SynchronizeMemoryFromImage(const Buffer* arena, u64 arena_offs
             LOG_WARNING(Render_Vulkan, "Unhandled metadata type {}", magic_enum::enum_name(*type));
         }
     }
-    // bbport: most texel buffers alias no image; remember misses until images change.
+    // psport: most texel buffers alias no image; remember misses until images change.
     const u64 generation = texture_cache.RegistryGeneration();
     auto& miss = image_miss_cache[((device_addr >> 6) ^ size * 0x9E3779B1u) % image_miss_cache.size()];
     if (miss.address == device_addr && miss.size == size && miss.generation == generation &&
@@ -3287,7 +3287,7 @@ bool BufferCache::SynchronizeMemoryFromImage(const Buffer* arena, u64 arena_offs
         miss = {device_addr, size, generation};
         return false;
     }
-    // bbport: the lookups above only read what the texture binding helper leaves alone; the
+    // psport: the lookups above only read what the texture binding helper leaves alone; the
     // copy below changes image state, so the helper finishes first.
     runtime.BeforeImageAccess();
     Image& image = texture_cache.GetImage(image_id);
@@ -3320,7 +3320,7 @@ bool BufferCache::SynchronizeMemoryFromImage(const Buffer* arena, u64 arena_offs
     if (buffer_copies.empty()) {
         return false;
     }
-    // bbport PS_TILE_BACK_LOG=1 (diagnostics): each image written back into the game's memory
+    // psport PS_TILE_BACK_LOG=1 (diagnostics): each image written back into the game's memory
     // because a texel buffer reads it, with the age of its last GPU write in submissions.
     static const bool tile_back_log = std::getenv("PS_TILE_BACK_LOG") != nullptr;
     if (tile_back_log) {
@@ -3505,7 +3505,7 @@ void BufferCache::SubmitPendingArenaBinds(Vulkan::SubmitInfo& info) {
         return;
     }
 
-    // bbport PS_GUEST_IN_PLACE: blocks moved in place wait for the submission that may still
+    // psport PS_GUEST_IN_PLACE: blocks moved in place wait for the submission that may still
     // upload into their VRAM copy (ProcessDemotions).
     const u64 wait_tick = bind_wait_tick;
     const auto wait_sema = scheduler.GetWorkSemaphore()->Handle();

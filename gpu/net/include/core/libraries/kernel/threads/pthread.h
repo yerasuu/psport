@@ -1,4 +1,4 @@
-// bbport co-op: the pthread calls the NP libraries make (NpCommon threads, mutexes and
+// psport co-op: the pthread calls the NP libraries make (NpCommon threads, mutexes and
 // condition variables). Threads are real guest threads from the C runtime, because the
 // matching and signaling threads call the game's callbacks; mutexes and condition variables
 // are only used by the host code here, so they are plain host objects.

@@ -1,4 +1,4 @@
-// bbport: SDL3 window for the Vulkan swapchain (X11 or Wayland).
+// psport: SDL3 window for the Vulkan swapchain (X11 or Wayland).
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>

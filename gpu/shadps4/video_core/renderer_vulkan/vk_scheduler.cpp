@@ -31,7 +31,7 @@ namespace Vulkan {
 std::mutex Scheduler::submit_mutex;
 
 namespace {
-// bbport: ProducerScope state of this thread: the producer function it is in (any scheduler).
+// psport: ProducerScope state of this thread: the producer function it is in (any scheduler).
 thread_local const char* producer_scope_where = nullptr;
 std::atomic<u32> producer_reports{0};
 
@@ -94,7 +94,7 @@ void Scheduler::ProducerScope::Leave() noexcept {
 
 namespace {
 
-/// bbport: Vulkan recording threads: PS_VK_RECORD_THREADS, else 2 from 8 hardware threads and 3
+/// psport: Vulkan recording threads: PS_VK_RECORD_THREADS, else 2 from 8 hardware threads and 3
 /// from 12. One thread records ~75% of a core at 200 FPS (4 cores / 8 threads); the segments
 /// let the stream use more than one.
 u32 RecordingThreadCount() {
@@ -117,7 +117,7 @@ Scheduler::Scheduler(const Instance& instance, bool threaded_recording)
     : instance{instance}, work_semaphore{instance}, command_pool{instance, &work_semaphore} {
     crumb_stream = Breadcrumbs::NewStream(
         instance, threaded_recording ? "draws: game and presenter" : "presentation");
-    // bbport: PS_VK_RECORD_THREAD=0 records on the calling thread.
+    // psport: PS_VK_RECORD_THREAD=0 records on the calling thread.
     const char* env = std::getenv("PS_VK_RECORD_THREAD");
     if (threaded_recording && !(env && env[0] == '0')) {
         record_chunk = AcquireChunk();
@@ -147,7 +147,7 @@ Scheduler::Scheduler(const Instance& instance, bool threaded_recording)
 #if TRACY_GPU_ENABLED
     profiler_scope = reinterpret_cast<tracy::VkCtxScope*>(std::malloc(sizeof(tracy::VkCtxScope)));
 #endif
-    // bbport PS_ASYNC_SUBMIT (default on; 0: off): submissions go out from the recording threads
+    // psport PS_ASYNC_SUBMIT (default on; 0: off): submissions go out from the recording threads
     // once their segments are recorded, instead of this thread waiting for them (~65 us each).
     if (!workers.empty()) {
         const char* async = std::getenv("PS_ASYNC_SUBMIT");
@@ -180,7 +180,7 @@ void Scheduler::BeginRendering(const RenderState& new_state) {
     if (is_rendering && render_state == new_state) {
         return;
     }
-    // bbport: a cut of the command stream (MaybeSplit) closed this render pass; it continues
+    // psport: a cut of the command stream (MaybeSplit) closed this render pass; it continues
     // in the next command buffer without clearing its attachments again.
     const bool resume = resume_rendering && !is_rendering && render_state == new_state;
     if (!is_rendering && render_state == new_state && pass_end_caller) {
@@ -650,7 +650,7 @@ void Scheduler::SyncRecording() {
 }
 
 void Scheduler::EnterDirectMode() {
-    // bbport: with submissions going out from the recording threads, the commands recorded
+    // psport: with submissions going out from the recording threads, the commands recorded
     // here get a segment of their own, from this thread's pool, after the segments handed over:
     // the recording threads go on with those instead of this thread waiting for them (~90 us,
     // the upscaler's passes every frame). PS_DIRECT_SEGMENT=0: the wait.
@@ -845,7 +845,7 @@ void Scheduler::PopPendingOperations() {
         return; // every draw comes here
     }
     std::unique_lock lk(pending_ops_mutex);
-    // bbport: this runs on every draw and dispatch. Querying the timeline semaphore is an
+    // psport: this runs on every draw and dispatch. Querying the timeline semaphore is an
     // ioctl, so it is skipped when nothing waits and done once per 32 calls (~0.3 ms; reading
     // the clock per draw instead was itself a hot spot).
     if (pending_ops.empty()) {
@@ -891,7 +891,7 @@ void Scheduler::AllocateWorkerCommandBuffers() {
         };
         current_cmdbuf = command_pool.Commit();
         Check(current_cmdbuf.begin(begin_info));
-        // bbport: the first segment (worker 0, whose pool this is) of the next submission.
+        // psport: the first segment (worker 0, whose pool this is) of the next submission.
         if (!batch) {
             batch = AcquireBatch();
         }
@@ -946,7 +946,7 @@ void Scheduler::SubmitExecution(SubmitInfo& info) {
     // Guest memory copies into staging read by this submission (copy threads).
     WaitHostCopies();
     resume_rendering = false;
-    // bbport: the segments' command buffers in stream order (the recording threads are idle).
+    // psport: the segments' command buffers in stream order (the recording threads are idle).
     std::array<vk::CommandBuffer, MaxSegments> cmdbufs;
     u32 num_cmdbufs = 0;
     if (workers.empty()) {
@@ -1002,7 +1002,7 @@ void Scheduler::SubmitExecution(SubmitInfo& info) {
     submitted_tick.store(signal_value, std::memory_order_release);
     submitted_tick.notify_all();
 
-    // bbport: no semaphore query here (an ioctl per submission, ~3% of the recording thread):
+    // psport: no semaphore query here (an ioctl per submission, ~3% of the recording thread):
     // PopPendingOperations asks when an operation waits, the GPU signal thread on every fence.
     AllocateWorkerCommandBuffers();
     CarryResume(false);

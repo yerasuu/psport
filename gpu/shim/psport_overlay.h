@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// bbport: in-game settings menu (Dear ImGui), drawn by the presenter into the swapchain image
+// psport: in-game settings menu (Dear ImGui), drawn by the presenter into the swapchain image
 // after the game frame, at display resolution. Insert (keyboard) or L3+R3 (gamepad) opens it;
 // Guide (gamepad) or Home (keyboard) asks whether to close the game. While either is open the
 // game gets no pad/keyboard input. Settings live in psport_settings.h.

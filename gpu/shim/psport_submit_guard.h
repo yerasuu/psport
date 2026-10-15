@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// bbport: frames overlap (PS_SUBMIT_AHEAD) only while the game leaves a submitted frame's command
+// psport: frames overlap (PS_SUBMIT_AHEAD) only while the game leaves a submitted frame's command
 // buffers alone until the GPU has retired it. Two watches on every submitted DCB and CCB: its
 // whole pages are read-only for the game until its frame retires (runtime_memory_trap,
 // FrameCommands), and its bytes are checksummed at submit and again at retire. A game that builds

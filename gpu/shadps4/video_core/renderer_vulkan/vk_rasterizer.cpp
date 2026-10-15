@@ -75,7 +75,7 @@ Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_, Runtime
     if (!EmulatorSettings.IsNullGPU()) {
         liverpool->BindRasterizer(this);
     }
-    PsGuestMemory::Install(instance); // bbport: before the runtime maps direct memory
+    PsGuestMemory::Install(instance); // psport: before the runtime maps direct memory
     memory->SetRasterizer(this);
 
     GpuProfiler::Init(instance, scheduler);
@@ -83,7 +83,7 @@ Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_, Runtime
         constant_ring = std::make_unique<ConstantRing>(instance, scheduler);
         draw_pipe = std::make_unique<DrawPipe>(&RunDrawPacket, this);
     }
-    // bbport: this thread joins the texture binding helper before it changes image state.
+    // psport: this thread joins the texture binding helper before it changes image state.
     runtime.SetImageAccessHook(&JoinBindHelper, this);
     scheduler.SetSubmitCallback([this](Vulkan::SubmitInfo& info) {
         runtime.FlushBarriers();
@@ -215,7 +215,7 @@ bool Rasterizer::WriteDataOnGpu(VAddr address, const void* data, u32 size) {
     if (!enabled || !VideoCore::GuestInPlace() || size == 0 || (address | size) % 4 != 0) {
         return false;
     }
-    // bbport PS_LAYER_MEMORY: a range whole in a mirror is written there too (asked first: the
+    // psport PS_LAYER_MEMORY: a range whole in a mirror is written there too (asked first: the
     // target demotes it otherwise).
     const auto mirror = buffer_cache.CommandWriteMirror(address, size);
     const auto target = buffer_cache.CommandWriteTarget(address, size);
@@ -446,7 +446,7 @@ void Rasterizer::GpuSignalLoop(std::stop_token token) {
             .pSemaphores = &handle,
             .pValues = &tick,
         };
-        // bbport: a lost device ends the wait with a report (it spun here forever: the game froze
+        // psport: a lost device ends the wait with a report (it spun here forever: the game froze
         // with its sound playing, Steam Deck); 10 s without progress prints what is stuck once.
         const auto wait_start = std::chrono::steady_clock::now();
         bool watched = false;
@@ -689,7 +689,7 @@ void Rasterizer::PrepareRenderState(const GraphicsPipeline* pipeline) {
     } else {
         db_desc.first = {};
     }
-    // bbport: the G-buffer pass (5+ color targets) holds the scene depth, and its constants the
+    // psport: the G-buffer pass (5+ color targets) holds the scene depth, and its constants the
     // main camera (shadow passes bind the same layout with the light's camera).
     gbuffer_draw = camera_motion->Enabled() && std::popcount(key.mrt_mask) >= 5 && db_desc.first;
     if (gbuffer_draw) {
@@ -700,7 +700,7 @@ void Rasterizer::PrepareRenderState(const GraphicsPipeline* pipeline) {
     if (upscaler->Enabled() && cb_descs[0].first) {
         upscaler->OnColorTarget(cb_descs[0].first);
     }
-    // bbport: scene color: a full-size RGBA16F target drawn with the scene depth.
+    // psport: scene color: a full-size RGBA16F target drawn with the scene depth.
     if (upscaler->Enabled() && db_desc.first && db_desc.first == camera_motion->Depth() &&
         cb_descs[0].first && std::popcount(key.mrt_mask) <= 2) {
         const auto& color = texture_cache.GetImage(cb_descs[0].first);
@@ -763,7 +763,7 @@ void Rasterizer::EliminateFastClear() {
     ScopeMarkerEnd();
 }
 
-// bbport: two-stage draw pipeline (vk_draw_pipe.h). Packet layout, 8-byte aligned parts:
+// psport: two-stage draw pipeline (vk_draw_pipe.h). Packet layout, 8-byte aligned parts:
 // DrawPacket, u16 block indices, u32 block words (RegDirty::BlockWords each), then per stage a
 // PacketStage with its user data and flattened user data, then (verification) the full file.
 namespace {
@@ -1054,7 +1054,7 @@ void Rasterizer::PostDraw(const Pipeline* pipeline, const PreparedDraw* used_pre
                 PsCeStats::Get().checks[PsCeStats::DmaStage]++;
                 PsCeStats::Get().hits[0][PsCeStats::DmaStage] += stage->uses_dma ? 1 : 0;
             }
-            // bbport PS_WATCH=addr,size (diagnostics): what the translator reads from that range on
+            // psport PS_WATCH=addr,size (diagnostics): what the translator reads from that range on
             // the CPU: user data pointing into it, constants copied from it; printed every 2 s.
             static const std::pair<u64, u64> watch = [] {
                 const char* env = std::getenv("PS_WATCH");
@@ -1137,7 +1137,7 @@ void Rasterizer::PostDraw(const Pipeline* pipeline, const PreparedDraw* used_pre
             NotePendingRead(indirect->count, sizeof(u32));
         }
     }
-    // bbport: the V#s of the vertex streams, read here from the tables the user data points to:
+    // psport: the V#s of the vertex streams, read here from the tables the user data points to:
     // those tables are what the game's constant engine dumps (a ring of ~25 pages rewritten
     // ~14000 times a second). Read on the recording thread instead, a later dump had often
     // replaced them by then: depth of field drew its passes with another draw's vertices (a
@@ -1571,7 +1571,7 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset, const PreparedDraw* pre
     RENDERER_TRACE;
     PsStats::draws.fetch_add(1, std::memory_order_relaxed);
 
-    // bbport: with the draw pipeline this thread only selects the pipeline and hands the draw
+    // psport: with the draw pipeline this thread only selects the pipeline and hands the draw
     // to the recording thread (DrawRecord there); draws FilterDraw handles itself run here.
     const bool pipelined = UseDrawPipe();
     if (pipelined && !FilterDrawPasses() &&
@@ -1776,7 +1776,7 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
         FrameCapture::Poll();
         scheduler.PopPendingOperations();
     }
-    // bbport (PS_PREUPLOAD): once a frame, guest GPU memory the CPU wrote and then left alone is
+    // psport (PS_PREUPLOAD): once a frame, guest GPU memory the CPU wrote and then left alone is
     // uploaded ahead of its use, PS_PREUPLOAD_MB (16) at most per frame.
     if (const u32 frame = PsStats::frame_number.load(std::memory_order_relaxed);
         frame != preupload_frame) {
@@ -1789,7 +1789,7 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
         buffer_cache.Preupload(budget);
     }
     const auto& regs = Regs();
-    // bbport: the pass copying a finished frame to a display buffer; the previous draw's
+    // psport: the pass copying a finished frame to a display buffer; the previous draw's
     // target is that frame.
     if (camera_motion->Enabled() && regs.color_buffers[0] &&
         FrameCapture::IsDisplayBuffer(regs.color_buffers[0].Address())) {
@@ -1823,7 +1823,7 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
         bind_prepared = nullptr;
         return;
     }
-    // bbport: vertex and index buffers are resolved while the helper binds textures (their
+    // psport: vertex and index buffers are resolved while the helper binds textures (their
     // commands are recorded after BeginRendering, as before).
     draw_inputs = {pipeline, draw_prepared, index_offset, is_indexed, true, false};
     const bool bound = BindResources(pipeline);
@@ -1851,7 +1851,7 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
         runtime.FlushBarriers();
     }
 
-    // bbport: screen-space (clip disabled) draws into the upscaler's output-size images.
+    // psport: screen-space (clip disabled) draws into the upscaler's output-size images.
     push_data.xscale *= target_scale[0];
     push_data.xoffset *= target_scale[0];
     push_data.yscale *= target_scale[1];
@@ -1944,7 +1944,7 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
         pipeline->BindResources(set_writes, push_data, {image_infos.data(), image_infos.size()},
                                 {buffer_infos.data(), buffer_infos.size()});
     }
-    // bbport: jitter geometry drawn with the scene depth, not full-screen passes (a shifted
+    // psport: jitter geometry drawn with the scene depth, not full-screen passes (a shifted
     // full-screen quad leaves an edge column unwritten).
     draw_jitter = {};
     if (upscaler->Enabled() && db_desc.first && db_desc.first == camera_motion->Depth() &&
@@ -2017,7 +2017,7 @@ void Rasterizer::DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u3
                               u32 max_count, VAddr count_address, u16 vertex_sgpr_offset,
                               u16 instance_sgpr_offset) {
     RENDERER_TRACE;
-    // bbport: like direct draws, handed to the recording thread after the pipeline selection
+    // psport: like direct draws, handed to the recording thread after the pipeline selection
     // (else the GPU thread waited here for a whole frame of queued draws).
     const bool pipelined = UseDrawPipe() && FilterDrawPasses() &&
                            !PsToggle::Disabled(PsToggle::PipelinedIndirectDraws);
@@ -2096,7 +2096,7 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
         runtime.FlushBarriers();
     }
 
-    // bbport: screen-space (clip disabled) draws into the upscaler's output-size images.
+    // psport: screen-space (clip disabled) draws into the upscaler's output-size images.
     push_data.xscale *= target_scale[0];
     push_data.xoffset *= target_scale[0];
     push_data.yscale *= target_scale[1];
@@ -2165,7 +2165,7 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
 void Rasterizer::DispatchDirect() {
     RENDERER_TRACE;
     PsStats::dispatches.fetch_add(1, std::memory_order_relaxed);
-    // bbport: like draws, handed to the draw recording thread after the pipeline selection.
+    // psport: like draws, handed to the draw recording thread after the pipeline selection.
     const bool pipelined = UseDrawPipe() && !PsToggle::Disabled(PsToggle::PipelinedDispatch);
     if (!pipelined) {
         DrainDrawPipe();
@@ -2212,7 +2212,7 @@ void Rasterizer::DispatchRecord(const ComputePipeline* pipeline) {
     if (hle) {
         return;
     }
-    // bbport: the game's copy shader running as itself (PS_COPY_SHADER_NATIVE): its destinations stay in
+    // psport: the game's copy shader running as itself (PS_COPY_SHADER_NATIVE): its destinations stay in
     // the game's memory. They hold data our translator reads on the CPU (next to shader code the
     // game uploads this way); a VRAM copy of them showed it a stale copy (a black scene). The
     // copy list read on the CPU (vk_shader_hle.cpp) kept them in place too.
@@ -2256,7 +2256,7 @@ void Rasterizer::DispatchRecord(const ComputePipeline* pipeline) {
 
 void Rasterizer::DispatchIndirect(VAddr address, u32 offset, u32 size) {
     RENDERER_TRACE;
-    // bbport: handed to the recording thread like direct dispatches.
+    // psport: handed to the recording thread like direct dispatches.
     const bool pipelined = UseDrawPipe() && !PsToggle::Disabled(PsToggle::PipelinedIndirectDraws);
     if (!pipelined) {
         DrainDrawPipe();
@@ -2472,7 +2472,7 @@ void Rasterizer::JoinBindHelper(void* context) {
 }
 
 namespace {
-// bbport: PS_RES_STATS=1 (diagnostics) — what the bound shaders read their resource descriptors
+// psport: PS_RES_STATS=1 (diagnostics) — what the bound shaders read their resource descriptors
 // from: user data registers (state the API call set) or tables in memory (SRT walker), by kind,
 // per draw and dispatch; printed every 5 s. Measures the step "descriptors read by the GPU"
 // (docs/en/history/EMULATION_REMOVAL_PLAN.md).
@@ -2566,7 +2566,7 @@ bool Rasterizer::BindResources(const Pipeline* pipeline) {
     BB_SECTION(BindResources);
     NoteResStats(pipeline);
     {
-        // bbport PS_HLE_STATS=1 (diagnostics): how often the compute shader substitutions fire.
+        // psport PS_HLE_STATS=1 (diagnostics): how often the compute shader substitutions fire.
         static const bool hle_stats = std::getenv("PS_HLE_STATS") != nullptr;
         // PS_HLE_OFF=mask (experiment): 1 image copy, 2 metadata clear, 4 image clear run as the
         // game's shaders.
@@ -2604,7 +2604,7 @@ bool Rasterizer::BindResources(const Pipeline* pipeline) {
     set_writes.clear();
     buffer_infos.clear();
     image_infos.clear();
-    // bbport: G-buffer passes sample material textures for a scene rendered below the output
+    // psport: G-buffer passes sample material textures for a scene rendered below the output
     // size; the temporal upscaler restores the detail of the output's mip level (FSR guide:
     // log2(render / output)). Shadows, post-processing and UI keep the guest's bias.
     sampler_lod_bias = 0.0f;
@@ -2659,7 +2659,7 @@ bool Rasterizer::BindResources(const Pipeline* pipeline) {
             uses_dma |= stage->uses_dma;
         }
     } else {
-        // bbport: textures on the helper, buffers here. Without mip arrays every stage's
+        // psport: textures on the helper, buffers here. Without mip arrays every stage's
         // descriptors are [buffers][images][samplers], one each, so both sides know their
         // binding numbers and descriptor write slots up front.
         struct BufferStage {
@@ -2756,7 +2756,7 @@ void Rasterizer::BindVertexBuffers(const GraphicsPipeline* pipeline, const Prepa
 
 void Rasterizer::EmitVertexBuffers() {
     BB_SECTION(EmitVertexBuffers);
-    // bbport: only the used entries go into the recording chunk (the static vectors hold 32 of
+    // psport: only the used entries go into the recording chunk (the static vectors hold 32 of
     // each: ~3 KiB copied per draw).
     auto& v = vertex_binds;
     const bool dynamic_input = instance.IsVertexInputDynamicState();
@@ -2993,7 +2993,7 @@ void Rasterizer::ResetBindings(bool is_compute) {
         const auto write_flag =
             is_written ? vk::AccessFlagBits2::eShaderWrite : vk::AccessFlagBits2::eNone;
         if (!buffer) {
-            // bbport PS_LAYER_MEMORY: a paged binding (any buffer of the game's memory).
+            // psport PS_LAYER_MEMORY: a paged binding (any buffer of the game's memory).
             runtime.AccessGlobal(dst_stage, vk::AccessFlagBits2::eShaderRead | write_flag);
             continue;
         }
@@ -3006,7 +3006,7 @@ void Rasterizer::ResetBindings(bool is_compute) {
 }
 
 namespace {
-// bbport PS_LAYER_MEMORY: the page table the info collection pass appends to every shader with
+// psport PS_LAYER_MEMORY: the page table the info collection pass appends to every shader with
 // guest buffers is not one of the shader's own (the HLE patterns below count those).
 size_t ShaderBufferCount(const Shader::Info& info) {
     size_t count = info.buffers.size();
@@ -3104,7 +3104,7 @@ bool Rasterizer::IsComputeImageCopy(const Pipeline* pipeline, bool dry_run) {
     // Perform image copy
     VideoCore::Image& src_image = desc0.is_written ? image1 : image0;
     VideoCore::Image& dst_image = desc0.is_written ? image0 : image1;
-    // bbport PS_IMAGE_COPY_LOG=1 (diagnostics): the copies this recognizes.
+    // psport PS_IMAGE_COPY_LOG=1 (diagnostics): the copies this recognizes.
     static const bool copy_log = std::getenv("PS_IMAGE_COPY_LOG") != nullptr;
     if (copy_log) {
         static std::atomic<u32> printed{0};
@@ -3185,7 +3185,7 @@ bool Rasterizer::IsComputeImageClear(const Pipeline* pipeline) {
 }
 
 namespace {
-// bbport: PS_TRACE_SHADER=hash[,hash...] (diagnostics) — the buffers those shaders bind: address,
+// psport: PS_TRACE_SHADER=hash[,hash...] (diagnostics) — the buffers those shaders bind: address,
 // size, written or read, where the data is (in place: the game's memory over PCIe on a discrete
 // GPU; VRAM; partly), how often; printed every 5 s.
 void TraceShaderBinding(const Shader::Info& stage, VAddr addr, u64 size, bool written,
@@ -3334,7 +3334,7 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, const PreparedStage* pre
             if (vsharp.base_address == 0 || vsharp.GetSize() == 0) {
                 buffer_infos.emplace_back(VK_NULL_HANDLE, 0, VK_WHOLE_SIZE);
             } else if (Shader::IsPagedBuffer(VideoCore::BufferCache::LayerPagedActive(), vsharp)) {
-                // bbport PS_LAYER_MEMORY: nearly all memory as one buffer: the shader reaches it
+                // psport PS_LAYER_MEMORY: nearly all memory as one buffer: the shader reaches it
                 // through the page table; the descriptor holds its record. It may touch any
                 // buffer of the game's memory: barriers before it, and after it if it writes.
                 const auto [record, record_offset] = buffer_cache.LayerPagedRecord(
@@ -3388,7 +3388,7 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, const PreparedStage* pre
                                 stage.pgm_hash);
                 }
                 push_data.AddOffset(binding.buffer, adjust);
-                // bbport PS_LAYER_MEMORY: a huge binding may come back cut at the end of its
+                // psport PS_LAYER_MEMORY: a huge binding may come back cut at the end of its
                 // guest chunk's buffer.
                 buffer_infos.emplace_back(
                     buffer->Handle(), offset_aligned,
@@ -3493,7 +3493,7 @@ void Rasterizer::BindTextures(const Shader::Info& stage, const PreparedStage* pr
         const auto& image_desc = stage.images[image_index];
         const auto tsharp =
             prepared ? prepared->image_sharps[image_index] : image_desc.GetSharp(stage);
-        // bbport: a hash lookup per texture per draw for a diagnostic only.
+        // psport: a hash lookup per texture per draw for a diagnostic only.
         static const bool warn_meta = std::getenv("PS_WARN_META_TEXTURE") != nullptr;
         if (warn_meta && texture_cache.IsMeta(tsharp.Address())) {
             LOG_WARNING(Render_Vulkan, "Unexpected metadata read by a shader (texture)");
@@ -3548,7 +3548,7 @@ void Rasterizer::BindTextures(const Shader::Info& stage, const PreparedStage* pr
                         int(image_desc.is_written), num_bindings, int(mip_fallback_mode));
         };
         for (auto i = 0; i < num_bindings; i++) {
-            // bbport: a plain binding (no mip override) of the same T# resolves to the same image
+            // psport: a plain binding (no mip override) of the same T# resolves to the same image
             // while no image was registered or unregistered.
             if (mip_fallback_mode == Shader::MipStorageFallbackMode::None &&
                 desc_entry.found_generation == texture_cache.RegistryGeneration() &&
@@ -3640,7 +3640,7 @@ void Rasterizer::BindTextures(const Shader::Info& stage, const PreparedStage* pr
                 image_id, desc, memo_entry ? &memo_entry->view_memo : nullptr, !on_helper);
             const auto binding = image.binding;
 
-            // bbport: a proxied scene image sampled with normalized coordinates reads the proxy:
+            // psport: a proxied scene image sampled with normalized coordinates reads the proxy:
             // no resample to the native size (the native image is not touched).
             if (binding_proxy_ok[binding_index] && !is_storage && !binding.force_general &&
                 !binding.is_target &&
@@ -3693,7 +3693,7 @@ void Rasterizer::BindTextures(const Shader::Info& stage, const PreparedStage* pr
             vk::ImageView view = *image_view.image_view;
             vk::ImageLayout layout = image.backing->state.layout;
             if (upscaler->Enabled()) {
-                // bbport: the display pass reads the upscaled frame (scaled presets).
+                // psport: the display pass reads the upscaled frame (scaled presets).
                 upscaler->RedirectSampled(image_id, image_view.info, view, layout);
             }
             image_infos.emplace_back(VK_NULL_HANDLE, view, layout);
@@ -3736,7 +3736,7 @@ void Rasterizer::BindTextures(const Shader::Info& stage, const PreparedStage* pr
     BindSamplers(stage, prepared, binding, write_index);
 }
 
-// bbport: mipmapped linear samplers of graphics draws get PS_ANISO times anisotropic filtering,
+// psport: mipmapped linear samplers of graphics draws get PS_ANISO times anisotropic filtering,
 // else the game profile's (Game::Profile::anisotropy); 0 keeps the game's own samplers.
 void Rasterizer::ForceAnisotropy(AmdGpu::Sampler& sharp, bool is_depth) const {
     static const int forced = [] {
@@ -3910,7 +3910,7 @@ bool Rasterizer::BindTexturesFromSet(const Shader::Info& stage, const PreparedSt
 
 RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
     BB_SECTION(BeginRendering);
-    // bbport: RenderStateMemo (see BeginMemo).
+    // psport: RenderStateMemo (see BeginMemo).
     const bool memo_on = !PsToggle::Disabled(PsToggle::RenderStateMemo) && !FrameCapture::Active();
     if (PsStats::enabled && ((begin_memo_hits + begin_memo_misses) & 0x3FFFF) == 0x3FFFF) {
         std::printf("Render state memo: %llu hits, %llu misses; texture sets: %llu hits, %llu "
@@ -4199,7 +4199,7 @@ RenderState Rasterizer::BeginRenderingFull(const GraphicsPipeline* pipeline) {
         state.depth_stencil_attachment = {};
     }
 
-    // bbport: a pass drawn into the upscaler's output-size images (UI, display pass): every
+    // psport: a pass drawn into the upscaler's output-size images (UI, display pass): every
     // attachment must be redirected, viewports and scissors are scaled.
     target_scale = {1.0f, 1.0f};
     if (color_redirected || depth_redirected) {
@@ -4277,7 +4277,7 @@ RenderState Rasterizer::BeginRenderingFull(const GraphicsPipeline* pipeline) {
             db_desc.first ? &texture_cache.GetImage(db_desc.first).info : nullptr;
         FrameCapture::BeginPass(colors.data(), state.num_color_attachments, depth);
     }
-    // bbport: object motion vector attachment of G-buffer pipelines.
+    // psport: object motion vector attachment of G-buffer pipelines.
     if (key.motion_vectors) {
         object_motion->Attach(state, state.width, state.height);
     }
@@ -4333,7 +4333,7 @@ void Rasterizer::FillBuffer(VAddr address, u32 num_bytes, u32 value, bool is_gds
                "FillBuffer address and size must be a multiple of 4 bytes");
     if (!is_gds) {
         texture_cache.ClearMeta(address);
-        // bbport PS_GUEST_IN_PLACE: memory the GPU uses in place is filled by the GPU in stream order
+        // psport PS_GUEST_IN_PLACE: memory the GPU uses in place is filled by the GPU in stream order
         // (a fill on the CPU now would land before earlier draws read the old data). Elsewhere
         // (VRAM copies, unbound memory: shader code, descriptors this thread reads) on the CPU in
         // decode order, as before; the VRAM copy follows through write tracking.
@@ -4372,11 +4372,11 @@ bool Rasterizer::DmaMayWriteOnCpu(VAddr dst, u32 num_bytes) {
 
 void Rasterizer::CopyBuffer(VAddr dst, VAddr src, u32 num_bytes, bool dst_gds, bool src_gds) {
     DrainDrawPipe();
-    // bbport PS_GUEST_IN_PLACE: see FillBuffer (in place: the GPU, in stream order).
+    // psport PS_GUEST_IN_PLACE: see FillBuffer (in place: the GPU, in stream order).
     if (!dst_gds && !buffer_cache.IsAnyInPlace(dst, num_bytes) &&
         !buffer_cache.IsRegionGpuModified(dst, num_bytes) &&
         !VideoCore::BufferCache::LayerMirrored(dst, num_bytes)) {
-        // bbport PS_LAYER_MEMORY: a VRAM copy of the source may hold newer data than the game's memory.
+        // psport PS_LAYER_MEMORY: a VRAM copy of the source may hold newer data than the game's memory.
         if (!src_gds && !buffer_cache.IsRegionGpuModified(src, num_bytes) &&
             !VideoCore::BufferCache::LayerMirrored(src, num_bytes) &&
             !texture_cache.FindImageFromRange(src, num_bytes)) {
@@ -4635,7 +4635,7 @@ void Rasterizer::UpdateViewportScissorState() const {
             const auto yoffset = vp_ctl.yoffset_enable ? vp.yoffset : 0.f;
             const auto yscale = vp_ctl.yscale_enable ? vp.yscale : 1.f;
 
-            // bbport: sub-pixel jitter of scene geometry for the temporal upscaler; the same
+            // psport: sub-pixel jitter of scene geometry for the temporal upscaler; the same
             // shift as jittering the projection.
             viewport.x = (xoffset - xscale) * target_scale[0] + draw_jitter[0];
             viewport.y = (yoffset - yscale) * target_scale[1] + draw_jitter[1];

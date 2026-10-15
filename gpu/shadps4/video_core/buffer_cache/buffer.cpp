@@ -117,7 +117,7 @@ void UniqueBuffer::Create(vk::BufferCreateInfo& buffer_ci, MemoryType mem_type,
             if (const auto [result, created] = device.createBuffer(buffer_ci);
                 result == vk::Result::eSuccess) {
                 buffer = created;
-                // bbport: VRAM blocks are bound into it too: the external memory type must not
+                // psport: VRAM blocks are bound into it too: the external memory type must not
                 // keep device-local memory out (a driver may restrict it).
                 const auto reqs = device.getBufferMemoryRequirements(created);
                 const VkPhysicalDeviceMemoryProperties* props = nullptr;
@@ -165,7 +165,7 @@ Buffer::Buffer(const Vulkan::Instance& instance, u64 size_bytes_, vk::DeviceMemo
     const vk::ExternalMemoryBufferCreateInfo external{
         .handleTypes = PsGuestMemory::HandleType(),
     };
-    // bbport PS_LAYER_MEMORY: what the GPU binds for the game's memory in place (no arena):
+    // psport PS_LAYER_MEMORY: what the GPU binds for the game's memory in place (no arena):
     // vertex, index and indirect data and device addresses too (the memory has them).
     const bool layer = PsGuestMemory::LayerMemory();
     vk::BufferUsageFlags usage =
@@ -210,7 +210,7 @@ Buffer::Buffer(const Vulkan::Instance& instance, VAddr cpu_addr_, u64 size_bytes
         .usage = AllFlags | xfb_usage,
         .sharingMode = vk::SharingMode::eExclusive,
     };
-    // bbport: arenas are also read by the readback queue (BufferCache::DownloadMemory).
+    // psport: arenas are also read by the readback queue (BufferCache::DownloadMemory).
     const std::array<u32, 2> families = {instance.GetGraphicsQueueFamilyIndex(),
                                          instance.GetReadbackQueueFamilyIndex()};
     if (mem_type == MemoryType::Sparse && instance.GetReadbackQueue()) {

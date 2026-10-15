@@ -31,7 +31,11 @@ library's C interface `gpu/psport_gpu.h` with its `psport_gpu_*` calls (`bbgpu.h
 prefix stays where the directory alone would say it: `gpu/shim/` also holds the stand-ins for
 shadPS4's own headers (`common/`, `core/`), and every directory there is on one include path, so a
 bare `settings.h` would be found by search order. Namespaces are `Ps*` (`PsStats`, `PsToggle`,
-`PsLayer`), the CMake target `psport-gpu`.
+`PsLayer`), the CMake target `psport-gpu`, the online module `gpu/net/` (`libpsport-net.so`,
+`psport_net_*`, `PsNet*`) and the DLSS bridge's interface `psport_dlss_bridge.h` (`PsDlss*`, entry
+point `PsDlssGetApi`; a bridge built before exports `BbDlssGetApi` and is reported unavailable until
+`build.sh` builds it again). The comments that mark the fork's lines in inherited code say
+`psport:` (bbport's `bbport:`), as do the Vulkan debug names of its buffers.
 
 The settings file is `psport.ini` and the GPU check `out/psport-gpu-capabilities` (bbport's
 `bbport.ini` and `out/bb-gpu-capabilities`). When `PS_CONFIG` is unset and the data directory has a
@@ -69,7 +73,7 @@ is the files as they were at the source; later commits adapt them.
 
 bbport carries part of shadPS4 (`gpu/shadps4/`: video core, shader recompiler, AvPlayer and other
 libraries) from its own first commit. Where the fork changes that code, the change is listed here, so
-an upstream sync knows what differs. Lines changed carry a `bbport:` comment where the reason isn't
+an upstream sync knows what differs. Lines changed carry a `psport:` comment where the reason isn't
 obvious.
 
 | Area | Files | Change | Also in upstream shadPS4 |

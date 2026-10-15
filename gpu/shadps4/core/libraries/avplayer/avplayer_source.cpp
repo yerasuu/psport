@@ -81,7 +81,7 @@ bool AvPlayerSource::Init(const AvPlayerInitData& init_data, std::string_view pa
             return false;
         }
     } else {
-        // bbport: guest paths are translated by the port's file system (runtime_file.c).
+        // psport: guest paths are translated by the port's file system (runtime_file.c).
         char host[1024];
         if (runtime_file_translate(std::string(path).c_str(), host, sizeof(host)) != 0) {
             LOG_ERROR(Lib_AvPlayer, "Cannot translate guest path {}", path);
@@ -566,14 +566,14 @@ void AvPlayerSource::DemuxerThread(std::stop_token stop) {
         const auto res = av_read_frame(m_avformat_context.get(), up_packet.get());
         if (res < 0) {
             if (res == AVERROR_EOF) {
-                // bbport: a loop that yields no packet, or a seek that fails, would otherwise spin
+                // psport: a loop that yields no packet, or a seek that fails, would otherwise spin
                 // this thread at full CPU forever; end the source as if it did not loop.
                 if (m_is_looping && read_since_loop) {
                     LOG_INFO(Lib_AvPlayer, "EOF reached in demuxer. Looping the source...");
                     read_since_loop = false;
                     bool seeked = true;
                     m_state.OnWarning(ORBIS_AVPLAYER_ERROR_WAR_LOOPING_BACK);
-                    // bbport: no raw avio_seek to byte 0 first: the mov demuxer then reads the
+                    // psport: no raw avio_seek to byte 0 first: the mov demuxer then reads the
                     // moov atom again as a new root, drops it as a duplicate and returns EOF
                     // forever, so a looping movie froze on its last frame (Atelier Ayesha).
                     if (m_video_stream_index.has_value()) {

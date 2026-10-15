@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// bbport: guest direct memory in GPU-visible system memory (PS_GUEST_GPU_MEMORY=1).
+// psport: guest direct memory in GPU-visible system memory (PS_GUEST_GPU_MEMORY=1).
 //
 // The runtime asks for direct memory in chunks (runtime_memory.c, CHUNK); each chunk is a
 // Vulkan allocation of cached system memory, exported as a dma-buf that the runtime maps at the
@@ -37,7 +37,7 @@ bool PcModelGpu(const Vulkan::Instance& instance);
 /// Whether the chunks are imported host memory (NVIDIA with PS_PC_MODEL_ANY_GPU=1). Valid after
 /// Usable(). The arena then keeps the first binding of every block (BufferCache FixedArena).
 bool HostImported();
-/// bbport PS_LAYER_MEMORY=1: the layer's memory module (gpu/layer/pslayer_gpu_memory.h) gives the
+/// psport PS_LAYER_MEMORY=1: the layer's memory module (gpu/layer/pslayer_gpu_memory.h) gives the
 /// GPU the game's memory through the chunk buffers instead of a sparse arena. Chunks are then one
 /// per direct memory allocation (a mapping lies whole in one chunk), their buffers take every use
 /// (vertex, index, indirect, texel, device address) and are registered with the module.

@@ -232,7 +232,7 @@ void CameraMotion::RecordMotion(vk::ImageView depth_view, vk::ImageView motion_v
         .previous_jitter = previous_jitter,
         .mode = object_valid ? 1u : 0u,
     };
-    // bbport: everything the pass reads is captured: it may be recorded on a recording thread
+    // psport: everything the pass reads is captured: it may be recorded on a recording thread
     // while this thread goes on with the next frame's camera.
     scheduler.RecordCrumb({.name = "camera motion"}, [push, depth_view, motion_view, object_view, width, height,
                       pipeline = *motion_pipeline,
@@ -271,7 +271,7 @@ void CameraMotion::OnConstants(const float* data) {
         std::abs(p_far[1] * p_far[0] - 1.0f) > 1e-3f) {
         return;
     }
-    // bbport: the first constants of each G-buffer pass are its camera. A frame may have more
+    // psport: the first constants of each G-buffer pass are its camera. A frame may have more
     // than one such pass (another camera before the main scene): the camera goes with the pass
     // whose depth the motion vectors use (CommitFrameCamera), not with the frame's first pass.
     if (pass_has_camera) {
@@ -279,7 +279,7 @@ void CameraMotion::OnConstants(const float* data) {
     }
     std::memcpy(pass_camera.view.data(), data + m_constants.off_dw_view, 12 * sizeof(float));
     std::memcpy(pass_camera.inv_view.data(), data + m_constants.off_dw_inverse_view, 12 * sizeof(float));
-    // bbport: PS_CAMERA_INVERSE=own: the inverse of the view matrix itself instead of the one the
+    // psport: PS_CAMERA_INVERSE=own: the inverse of the view matrix itself instead of the one the
     // game stores beside it (A/B; they agree to float precision). PS_CAMERA_LOG prints the gap.
     static const bool own_inverse = [] {
         const char* env = std::getenv("PS_CAMERA_INVERSE");
@@ -294,7 +294,7 @@ void CameraMotion::OnConstants(const float* data) {
     if (own_inverse != PsToggle::Disabled(PsToggle::CameraOwnInverse)) {
         pass_camera.inv_view = computed_inverse;
     }
-    // bbport: PS_CAMERA_LOG=1 prints the camera position every 100 ms (scripted tests of how far
+    // psport: PS_CAMERA_LOG=1 prints the camera position every 100 ms (scripted tests of how far
     // the player moves in a given time at different frame rates).
     static const bool camera_log = std::getenv("PS_CAMERA_LOG") != nullptr;
     if (camera_log) {
@@ -310,7 +310,7 @@ void CameraMotion::OnConstants(const float* data) {
                         computed_inverse[11], inverse_gap);
         }
     }
-    // bbport: the projection as the motion shaders use it: ndc +y down the screen. 0.2 assumed the
+    // psport: the projection as the motion shaders use it: ndc +y down the screen. 0.2 assumed the
     // viewport flips y (ndc +y up, as at Yahar'gul: yscale -540), 0.3 that it does not; the
     // viewport of the frame's G-buffer pass decides (PS_CAMERA_Y=up/down forces one, for tests).
     static const float forced_y = [] {
@@ -323,7 +323,7 @@ void CameraMotion::OnConstants(const float* data) {
     pass_camera.proj = {p_projection[0] * gbuffer_x_sign, p_projection[5] * y_sign, p_projection[10],
                         p_projection[11]};
     {
-        // bbport: the projection's y scale sign, printed when it changes (see the G-buffer
+        // psport: the projection's y scale sign, printed when it changes (see the G-buffer
         // viewport line): which way view +y goes on the screen.
         static int last_sign = 0;
         const int sign = (p_projection[5] < 0.0f ? -2 : 2) + (gbuffer_y_sign < 0.0f ? -1 : 1);

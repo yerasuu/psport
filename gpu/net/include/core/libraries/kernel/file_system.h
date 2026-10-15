@@ -1,4 +1,4 @@
-// bbport co-op: the stat structure from shadPS4's file_system.h (network sockets fill it).
+// psport co-op: the stat structure from shadPS4's file_system.h (network sockets fill it).
 #pragma once
 #include "common/types.h"
 #include "core/libraries/kernel/time.h"

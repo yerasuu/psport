@@ -14,11 +14,11 @@
 #include "fontft_internal.h"
 #include "core/libraries/kernel/time.h"
 
-// bbport: the runtime's mounts (runtime_file.c) map guest paths to the host.
+// psport: the runtime's mounts (runtime_file.c) map guest paths to the host.
 extern "C" int runtime_file_translate(const char* guest, char* out, size_t size);
 // DejaVu Sans, embedded for the overlay (shim/psport_overlay.cpp).
-extern "C" const unsigned char bb_font_ttf[];
-extern "C" const unsigned char bb_font_ttf_end[];
+extern "C" const unsigned char psport_font_ttf[];
+extern "C" const unsigned char psport_font_ttf_end[];
 
 namespace Libraries::Font::Internal {
 
@@ -1674,7 +1674,7 @@ s32 ComputeSysfontShiftValue(FT_Face face) {
 
 namespace {
 
-// bbport: shadPS4 bundles these Noto fonts with its ImGui; here they are the host's (SteamOS and
+// psport: shadPS4 bundles these Noto fonts with its ImGui; here they are the host's (SteamOS and
 // most distributions ship them), looked up by file name in PS_FALLBACK_FONTS (folders separated
 // by ':') and then the usual font folders. The Latin one falls back to the overlay's embedded
 // DejaVu Sans, so a title gets glyphs on any host.
@@ -1774,7 +1774,7 @@ std::shared_ptr<std::vector<unsigned char>> LoadBuiltinFontBytesShared(
         !host_path.empty() && LoadGuestFileBytes(host_path, file_bytes) && !file_bytes.empty()) {
         bytes = std::make_shared<std::vector<unsigned char>>(std::move(file_bytes));
     } else if (font->virtual_path == kBuiltinFontLatin) {
-        bytes = std::make_shared<std::vector<unsigned char>>(bb_font_ttf, bb_font_ttf_end);
+        bytes = std::make_shared<std::vector<unsigned char>>(psport_font_ttf, psport_font_ttf_end);
     } else {
         return {};
     }
@@ -1932,7 +1932,7 @@ static bool DirectoryContainsAnyFontFiles(const std::filesystem::path& dir) {
 static std::filesystem::path GetSysFontBaseDirImpl(bool log_errors) {
     std::filesystem::path base = EmulatorSettings.GetFontsDir();
     std::error_code ec;
-    // bbport: unset is the usual case (no dump of the console's fonts); the fallback notice says
+    // psport: unset is the usual case (no dump of the console's fonts); the fallback notice says
     // so once instead of an error on every font set opened.
     if (base.empty()) {
         return {};

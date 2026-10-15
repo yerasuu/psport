@@ -247,7 +247,7 @@ static SDL_Gamepad *current_gamepad(void) {
     }
     return gamepad;
 }
-/* bbport (frame stats): the game's libc heap, read every 5 s from a game thread (it reads the pad)
+/* psport (frame stats): the game's libc heap, read every 5 s from a game thread (it reads the pad)
  * with libc.prx's malloc_stats (export stub at libc.prx+0x1f8c0; malloc_stats_fast returns 1 in this libc, the module at image +0x56e0000):
  * in use now and at most, and what it took from the system. A heap that keeps growing is a leak. */
 typedef struct { uint16_t size, version; uint32_t reserved; uint64_t max_system, system, max_in_use, in_use; } MallocManagedSize;

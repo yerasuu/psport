@@ -1,4 +1,4 @@
-// bbport co-op: the process id helper the HTTP capture code uses.
+// psport co-op: the process id helper the HTTP capture code uses.
 #pragma once
 #include "common/types.h"
 

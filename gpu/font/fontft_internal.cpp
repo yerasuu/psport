@@ -2990,7 +2990,7 @@ s32 PS4_SYSV_ABI LibraryOpenFontMemoryStub(void* library, u32 mode, const void* 
         }
 
         open_path = path;
-        // bbport: the callers (sceFontOpenFontFile, the font sets) already resolved the guest
+        // psport: the callers (sceFontOpenFontFile, the font sets) already resolved the guest
         // path through the runtime's mounts, and there are no package archives to read from.
         if (path[0] == '/') {
             host_path_fs = path;

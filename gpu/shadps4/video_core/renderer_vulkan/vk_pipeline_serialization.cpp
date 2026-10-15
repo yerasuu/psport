@@ -14,9 +14,9 @@
 
 namespace Serialization {
 /* You should increment versions below once corresponding serialization scheme is changed. */
-static constexpr u32 ShaderBinaryVersion = 10u; // bbport: point-list GS output mode (OutputPoints)
-static constexpr u32 ShaderMetaVersion = 10u; // bbport: StageSpecialization::xfb_stride
-static constexpr u32 PipelineKeyVersion = 6u; // bbport: SerializationSupport::xfb_stride
+static constexpr u32 ShaderBinaryVersion = 10u; // psport: point-list GS output mode (OutputPoints)
+static constexpr u32 ShaderMetaVersion = 10u; // psport: StageSpecialization::xfb_stride
+static constexpr u32 PipelineKeyVersion = 6u; // psport: SerializationSupport::xfb_stride
 } // namespace Serialization
 
 namespace Vulkan {
@@ -167,7 +167,7 @@ bool PipelineCache::LoadComputePipeline(Serialization::Archive& ar) {
         return false;
     }
 
-    // bbport: built before it is inserted: a pipeline the driver rejects while preloading throws
+    // psport: built before it is inserted: a pipeline the driver rejects while preloading throws
     // (Serialization::CorruptData) and leaves no empty entry behind.
     auto pipeline =
         std::make_unique<ComputePipeline>(instance, scheduler, desc_heap, profile, *pipeline_cache,
@@ -273,7 +273,7 @@ bool PipelineCache::LoadPipelineStage(Serialization::Archive& ar, size_t stage) 
     Storage::DataBase::Instance().Load(Storage::BlobType::ShaderBinary,
                                        fmt::format("{:#018x}_{}", program->info.pgm_hash, perm_idx),
                                        spv);
-    // bbport: a SPIR-V binary starts with its magic number and a 5-word header; anything else is
+    // psport: a SPIR-V binary starts with its magic number and a 5-word header; anything else is
     // a damaged file (crash or power loss while it was written) the driver must not see.
     if (spv.size() < 5 || spv[0] != 0x07230203u) {
         if (!spv.empty()) {
@@ -286,7 +286,7 @@ bool PipelineCache::LoadPipelineStage(Serialization::Archive& ar, size_t stage) 
     // at the exact position rather than append
 
     vk::ShaderModule module{};
-    // bbport: a module the driver rejects is a damaged entry (WarmUp rebuilds the cache), not a
+    // psport: a module the driver rejects is a damaged entry (WarmUp rebuilds the cache), not a
     // fatal error as in CompileSPV.
     const auto compile = [&] {
         auto [result, created] = instance.GetDevice().createShaderModule(
@@ -367,7 +367,7 @@ void PipelineCache::WarmUp() {
         std::memcpy(&cached_profile, profile_data.data() + header_size, sizeof(cached_profile));
     }
     if (!versions_match || cached_profile != profile) {
-        // bbport: upstream closed the cache for the session here, so it was never rewritten
+        // psport: upstream closed the cache for the session here, so it was never rewritten
         // and every later session compiled every shader again (stutters on each new area).
         // Start a fresh cache for this build and GPU instead.
         LOG_WARNING(Render, "Pipeline cache isn't compatible with current compiler/system: rebuilding it");
@@ -384,7 +384,7 @@ void PipelineCache::WarmUp() {
     Storage::DataBase::Instance().ForEachBlob(
         Storage::BlobType::PipelineKey, [&](std::vector<u8>&& data) {
             ++num_total_pipelines;
-            // bbport: a damaged entry (cut short by a crash or a power loss, or rejected by the
+            // psport: a damaged entry (cut short by a crash or a power loss, or rejected by the
             // driver) used to stop the game at every start until the cache was deleted by hand
             // (issues #28, #38, #39). It is counted here and the cache is rebuilt below.
             try {
@@ -517,7 +517,7 @@ bool PersistentSrtInfo::Deserialize(Serialization::Archive& ar) {
     srt.Read(this, sizeof(*this));
 
     if (walker_func_size) {
-        // bbport: the size is checked before the code is registered (it becomes executable):
+        // psport: the size is checked before the code is registered (it becomes executable):
         // a cut-short file must not have bytes past its end run as the walker.
         const auto code = ar.CurrPtr();
         ar.Advance(walker_func_size);

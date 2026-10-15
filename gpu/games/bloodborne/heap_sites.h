@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// bbport PS_HEAP_SITES=1: live allocations of the game's heap per call site (diagnostics).
+// psport PS_HEAP_SITES=1: live allocations of the game's heap per call site (diagnostics).
 #pragma once
 
 #include <cstddef>

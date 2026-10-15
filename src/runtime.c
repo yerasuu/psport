@@ -28,7 +28,7 @@ static _Thread_local unsigned char *tls_blocks[TLS_MODULES];
 static void *process_param;
 void runtime_set_procparam(void *param) {
     process_param=param;
-    /* bbport: the game's libc heap settings (SceProcParam +0x38: SceLibcParam; its +0x10.. pointers to
+    /* psport: the game's libc heap settings (SceProcParam +0x38: SceLibcParam; its +0x10.. pointers to
      * the heap size, delayed and extended allocation flags, initial size). +0x30 is the main thread's
      * stack size pointer, which newer SDKs fill, so reading the libc block from there faulted. */
     const uint64_t *p=(const uint64_t *)param;

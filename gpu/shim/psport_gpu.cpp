@@ -1,5 +1,5 @@
 #include "psport_write_log.h"
-// bbport: glue between the C loader and the vendored shadPS4 video core.
+// psport: glue between the C loader and the vendored shadPS4 video core.
 #include "psport_overlay.h"
 #include "psport_settings.h"
 #include "game_profile.h"
@@ -114,12 +114,12 @@ void MemoryManager::SetRasterizer(Vulkan::Rasterizer* rasterizer_) {
         [](uintptr_t address, uint64_t size) {
             Memory::Instance()->GetRasterizer()->InvalidateMemory(address, size);
         });
-    // bbport: data written into GPU memory by a path the GPU side hears of (file reads, the game's
+    // psport: data written into GPU memory by a path the GPU side hears of (file reads, the game's
     // resource loaders): invalidated, and an asset (it may keep a VRAM copy).
     runtime_memory_set_note_write_hook([](uintptr_t address, uint64_t size) {
         Memory::Instance()->GetRasterizer()->NoteAssetWrite(address, size);
     });
-    // bbport: the game's libc copies (memcpy, memset, memmove) over pages the caches watch.
+    // psport: the game's libc copies (memcpy, memset, memmove) over pages the caches watch.
     runtime_memory_set_cpu_write_hook([](uintptr_t address, uint64_t size) {
         Memory::Instance()->GetRasterizer()->OnCpuWrite(address, size);
     });
@@ -128,7 +128,7 @@ void MemoryManager::InvalidateMemory(VAddr address, u64 size) {
     if (rasterizer) rasterizer->InvalidateMemory(address, size);
 }
 namespace {
-// bbport: the mapped region of the last lookup, per thread, valid for the mapping table generation
+// psport: the mapped region of the last lookup, per thread, valid for the mapping table generation
 // it was read at. The GPU command thread clamps and copies thousands of constant ranges a frame,
 // nearly all within the region of the one before: two calls into the runtime each (~5% of it).
 struct RegionCache {
@@ -190,7 +190,7 @@ static void CopySparseSerial(VAddr source, u8* dest, u64 size) {
     }
 }
 void MemoryManager::CopySparseMemory(VAddr source, u8* dest, u64 size) {
-    // bbport: large uploads (streaming) are split across the copy threads.
+    // psport: large uploads (streaming) are split across the copy threads.
     constexpr u64 Chunk = 512 * 1024;
     if (size < 4 * Chunk || !PsCopy::Enabled()) {
         return CopySparseSerial(source, dest, size);

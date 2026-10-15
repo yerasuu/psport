@@ -1,4 +1,4 @@
-// bbport co-op: the memory calls NpSignaling makes for its private heap (host memory here).
+// psport co-op: the memory calls NpSignaling makes for its private heap (host memory here).
 #pragma once
 #include "common/types.h"
 

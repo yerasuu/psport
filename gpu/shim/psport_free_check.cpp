@@ -285,7 +285,7 @@ struct Track {
 };
 
 void Watcher() {
-    pthread_setname_np(pthread_self(), "bbFreeCheck");
+    pthread_setname_np(pthread_self(), "psFreeCheck");
     std::array<u64, 256> reported{};
     u32 reported_next = 0;
     std::unordered_map<u64, Track> tracks;

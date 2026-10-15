@@ -252,7 +252,7 @@ public:
     Id vertex_index{};
     Id instance_id{};
     Id push_data_block{};
-    // bbport: object motion vectors (runtime_info.h, MotionVectors).
+    // psport: object motion vectors (runtime_info.h, MotionVectors).
     Id motion_out_cur{};
     Id motion_out_prev{};
     Id motion_in_cur{};
@@ -265,7 +265,7 @@ public:
     [[nodiscard]] bool FragmentMotion() const {
         return sw_stage == SwStage::Fragment && runtime_info.hw.fs.motion_vectors;
     }
-    // bbport: GS stream-out (DefineXfbOutputs). Each output holds num_comps components of param
+    // psport: GS stream-out (DefineXfbOutputs). Each output holds num_comps components of param
     // output_params[param] from first_comp on, copied there before every emitted vertex.
     struct XfbOutput {
         Id id;
@@ -359,7 +359,7 @@ public:
         BufferType buffer_type;
         std::array<Id, u32(PointerSize::NumClass)> offsets;
         std::array<BufferSpv, u32(PointerType::NumAlias)> aliases;
-        /// bbport PS_LAYER_MEMORY: reached through the page table (IsPagedBuffer); the descriptor
+        /// psport PS_LAYER_MEMORY: reached through the page table (IsPagedBuffer); the descriptor
         /// holds {guest address lo, hi, size, write-through, trash address lo, hi} (PagedPointer).
         bool paged = false;
 
@@ -373,7 +373,7 @@ public:
             return self.offsets[u32(size)];
         }
     };
-    /// bbport PS_LAYER_MEMORY: an access of `access_bytes` at `byte_offset` of a paged buffer:
+    /// psport PS_LAYER_MEMORY: an access of `access_bytes` at `byte_offset` of a paged buffer:
     /// the guest address translated through the page table. `guard` is false out of the
     /// buffer's range or on an unmapped page; the pointer then goes to a trash area (loads
     /// select zero with the guard, stores and atomics land there).

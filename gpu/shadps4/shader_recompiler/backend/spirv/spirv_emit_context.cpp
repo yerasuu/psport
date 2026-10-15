@@ -774,7 +774,7 @@ void EmitContext::DefineOutputs() {
     }
 }
 
-// bbport: GS stream-out (HwGeometryRuntimeInfo::xfb_stride). The copy shader's stores into buffer
+// psport: GS stream-out (HwGeometryRuntimeInfo::xfb_stride). The copy shader's stores into buffer
 // 0 become transform feedback outputs of their own, located past the param outputs so that no
 // location the fragment shader reads changes meaning. Each output is a run of stores that are
 // consecutive both in the vertex record and in the components of one param. Stores the copy
@@ -972,7 +972,7 @@ void EmitContext::DefineBuffers() {
 
         // Define aliases depending on the shader usage.
         auto& spv_buffer = buffers.emplace_back(binding.buffer++, desc.buffer_type);
-        // bbport PS_LAYER_MEMORY: its descriptor holds the page table record (read as U32).
+        // psport PS_LAYER_MEMORY: its descriptor holds the page table record (read as U32).
         spv_buffer.paged = desc.buffer_type == BufferType::Guest &&
                            IsPagedBuffer(profile.paged_buffers, buf_sharp);
         if (spv_buffer.paged) {

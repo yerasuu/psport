@@ -69,7 +69,7 @@ void* LoaderCopy(void* dst, const void* src, std::size_t size) {
     return dst;
 }
 
-/// bbport: native detours (default; PS_GUEST_HOOK_TRAPS=1: int3 traps). Each hooked site jumps to
+/// psport: native detours (default; PS_GUEST_HOOK_TRAPS=1: int3 traps). Each hooked site jumps to
 /// a stub next to the image that calls the handler and runs the instructions the jump covers;
 /// the copy call sites call LoaderCopy through a trampoline there. An int3 trap costs a signal
 /// (a few microseconds in the kernel) per call; a detour costs a call. The int3 written first

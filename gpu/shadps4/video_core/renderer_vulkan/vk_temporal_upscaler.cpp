@@ -53,7 +53,7 @@ FfxVkPortableImage Describe(vk::Image image, vk::Format format, u32 width, u32 h
     return out;
 }
 
-/// bbport: PS_DUMP_TRIGGER=<file> PS_DUMP_DIR=<dir> (default out/dump): creating the file dumps
+/// psport: PS_DUMP_TRIGGER=<file> PS_DUMP_DIR=<dir> (default out/dump): creating the file dumps
 /// the upscaler's images of the next PS_DUMP_FRAMES (8) frames as raw files
 /// <dir>/fNNN_<name>_<w>x<h>_<format>.raw, for checking temporal stability offline.
 /// Returns the frame number to dump, or -1.
@@ -359,7 +359,7 @@ bool TemporalUpscaler::RasterScaling() const {
 }
 
 bool TemporalUpscaler::OnFrameStart() {
-    // bbport: PS_PRESET_FILE=<file> holding a preset number, read about once a second: switches
+    // psport: PS_PRESET_FILE=<file> holding a preset number, read about once a second: switches
     // the preset like the menu does (scripted tests of live preset changes).
     static const char* preset_file = std::getenv("PS_PRESET_FILE");
     if (preset_file && ++preset_file_frames % 64 == 0) {
@@ -928,7 +928,7 @@ void TemporalUpscaler::ExtraSharpen(vk::Image target, bool ldr, u32 w, u32 h) {
         }
         target_view = *ui_storage_view;
     }
-    // bbport: the commands are recorded through the scheduler (a recording thread for FSR 3).
+    // psport: the commands are recorded through the scheduler (a recording thread for FSR 3).
     scheduler.RecordCrumb({.name = "TAA extra sharpen"}, [target, copy = vk::Image(extra_sharpen_image),
                       copy_view = *extra_sharpen_view, target_view, extra, w, h,
                       pipeline = ldr ? *taa_sharpen_ldr_pipeline : *taa_sharpen_pipeline,
@@ -1338,7 +1338,7 @@ void TemporalUpscaler::Run() {
         if (PsSettings::Get().upscaler != PsSettings::UpscalerTaa) {
             ExtraSharpen(vk::Image(output_image), false, ow, oh);
         }
-        // bbport: PS_DUMP_TRIGGER on this (HDR scene color) path too: the upscaler's inputs and
+        // psport: PS_DUMP_TRIGGER on this (HDR scene color) path too: the upscaler's inputs and
         // its result, for ghosting and history checks (tools/dump_view.py).
         if (const int dump = DumpFrame(); dump >= 0) {
             camera_motion.PrintState(dump);
@@ -1494,7 +1494,7 @@ void TemporalUpscaler::OnColorTarget(VideoCore::ImageId color) {
 void TemporalUpscaler::OnDraw(u64 vs_hash, VideoCore::ImageId color,
                               VideoCore::ImageId depth, bool native_viewport) {
     if (!Scaled() && vs_hash == ui_trigger_vs) done_this_frame = true;
-    // bbport (issue #67, patch by bmy): a UI draw without a color target (a Scaleform mask, color
+    // psport (issue #67, patch by bmy): a UI draw without a color target (a Scaleform mask, color
     // writes off) writes the stencil the UI's next draws test, so it must go into the UI's
     // output-size depth like them. Left in the guest depth, the mask was lost when the next UI
     // draw switched to the UI depth (PrepareUiDepth clears its stencil): masked images (the
@@ -1644,7 +1644,7 @@ void TemporalUpscaler::PrepareUiDepth(VideoCore::ImageId depth_id) {
                 vk::Offset3D{s32(ui_width), s32(ui_height), 1}},
         };
     }
-    // bbport: recorded on the recording thread (direct recording here waited for it to finish
+    // psport: recorded on the recording thread (direct recording here waited for it to finish
     // everything queued, every frame).
     scheduler.Record([depth = vk::Image(ui_depth_image), range, source,
                       region](vk::CommandBuffer cmd) {
@@ -1798,7 +1798,7 @@ void TemporalUpscaler::RunScaled() {
     }
 
     scheduler.EndRendering();
-    // bbport: the motion pass and FSR 3 are recorded through the scheduler, on a recording
+    // psport: the motion pass and FSR 3 are recorded through the scheduler, on a recording
     // thread (recording them here cost the draw recording thread ~5% of its time, plus a wait
     // for the recording thread every frame). FSR 4 and TAA keep their frame bookkeeping on
     // this thread and record directly below.
@@ -1842,7 +1842,7 @@ void TemporalUpscaler::RunScaled() {
     }
     last_frame = now;
 
-    // bbport: FSR 4 writes its HDR-format output, copied into the output-size UI image.
+    // psport: FSR 4 writes its HDR-format output, copied into the output-size UI image.
     if (UseFsr4() || UseDlss() || PsSettings::Get().upscaler == PsSettings::UpscalerTaa) {
         const auto cmdbuf = scheduler.CommandBuffer(); // after the commands recorded above
         barrier(vk::Image(output_image), vk::ImageAspectFlagBits::eColor,
@@ -1860,7 +1860,7 @@ void TemporalUpscaler::RunScaled() {
                               source_width, source_height},
                              w, h, ow, oh, frame_ms, false);
         } else {
-            // bbport: FSR 4 treats its colour as linear light; this frame is the game's
+            // psport: FSR 4 treats its colour as linear light; this frame is the game's
             // tonemapped, sRGB-encoded one. Decoded first, the output encoded again below.
             // PS_FSR4_LINEAR=0 or toggle bit 63: the encoded frame as before (A/B).
             static const bool linear_env = [] {
