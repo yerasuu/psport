@@ -28,6 +28,9 @@
   memory types, ReBAR size, optional features), never by vendor id. A vendor or driver check is
   allowed only as a `HOST` quirk for a driver defect, with its reason and reference; an
   optimisation that needs an optional feature keeps a working path without it.
+- Whatever cannot be done the same way on all three vendors is written down before any
+  vendor-specific code: a kb note tagged `gpu` and `vendor` with what differs, measured where
+  possible, and the options; the user decides whether a vendor-specific part is worth it.
 
 ## Naming (C and C++)
 
