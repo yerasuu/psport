@@ -22,7 +22,7 @@ QUIRK_TRAITS(id, traits)
 - `QUIRK_GPU` matches a `HOST` quirk on the Vulkan device: PCI vendor id and `VkDriverId` (0: any),
   a substring of the device name (`""`: any) and an inclusive `driverVersion` range. Only `HOST`
   quirks may have one (checked at build time); several lines for one id match on any of them.
-- `QUIRK_TRAITS` matches on the loader's middleware traits: every bit of the mask present.
+- `QUIRK_TRAITS` matches on the loader's middleware traits (`LOADER_TRAIT_*` in `src/loader/loader_traits.h`; the first such entry adds that include to `runtime_quirks.c`): every bit of the mask present. `--list-quirks --game` uses the same traits, read from the dump.
 - A title names its quirks in its `Game::Title` (`quirks`, `gpu/games/game_profile.h`), which
   reaches the C side as `PsTitleInfo` `p_quirks`/`c_quirks`.
 

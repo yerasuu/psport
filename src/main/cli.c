@@ -87,7 +87,13 @@ int answer_query(int argc, char **argv) {
         if (argc == 2) { runtime_quirks_list(NULL); return 0; }
         GameInfo info;
         game_info(argv[3],&info);
-        RuntimeQuirkLaunch launch=quirk_launch(&info,0);
+        char sz_eboot[4096];
+        snprintf(sz_eboot,sizeof(sz_eboot),"%s/eboot.bin",argv[3]);
+        LoaderModule eboot;
+        g_sz_loader_file=sz_eboot;
+        loader_module(sz_eboot,&eboot);
+        g_sz_loader_file=NULL;
+        RuntimeQuirkLaunch launch=quirk_launch(&info,loader_detect_traits(argv[3],&eboot));
         runtime_quirks_list(&launch);
         return 0;
     }
