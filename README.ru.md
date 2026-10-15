@@ -4,8 +4,9 @@
 
 [English](README.md) · **Русский** · [Español](README.es.md)
 
-psport — форк [bbport](https://github.com/deadinside28/bloodborne_pc), нативного порта Bloodborne
-для Linux, сделанный для decanter и рассчитанный не на одну игру. Оригинальный исполняемый файл
+psport — независимый проект, выросший из [bbport](https://github.com/deadinside28/bloodborne_pc),
+нативного порта Bloodborne для Linux, и из [shadPS4](https://github.com/shadps4-emu/shadPS4);
+он сделан для decanter и рассчитан не на одну игру. Оригинальный исполняемый файл
 игры PS4 запускается на ПК с Linux x86-64 так же, как программа для Windows под Wine: это слой
 совместимости, а не эмулятор.
 
@@ -22,10 +23,11 @@ psport — форк [bbport](https://github.com/deadinside28/bloodborne_pc), н�
   видеоядра и рекомпилятора шейдеров [shadPS4](https://github.com/shadps4-emu/shadPS4)
   (`gpu/shadps4/`) в том виде, как его доработал bbport.
 
-Bloodborne работает так же, как в апстриме, с его патчами, апскейлерами и настройками. Остальные
-игры запускаются с `PS_SKIP_GAME_CHECK=1`. Что форк добавляет к bbport, что переносит из других
-проектов (коммит источника, лицензия) и что меняет в унаследованном коде shadPS4:
-[FORK.md](FORK.md). Релизы апстрима вливаются по мере выхода.
+Bloodborne работает так же, как в bbport, с его патчами, апскейлерами и настройками. Остальные
+игры запускаются с `PS_SKIP_GAME_CHECK=1`. Что psport берёт из других
+проектов (коммит источника, лицензия) и что меняет в унаследованном коде: [FORK.md](FORK.md).
+bbport и shadPS4 время от времени просматриваются; полезные для psport изменения переносятся
+вручную и записываются в [FORK.md](FORK.md), релизы целиком не вливаются.
 
 > **Файлов игр в репозитории нет.** Нужны собственные дампы своих игр.
 > Проект не связан с Sony Interactive Entertainment, FromSoftware, AMD и издателями перечисленных
@@ -69,7 +71,7 @@ PS_GAME_DIR=/путь/к/дампу PS_SKIP_GAME_CHECK=1 PS_PERMISSIVE=1 bash ru
 собственный дамп системных модулей (`*.sprx`) там, где у порта ещё нет своей библиотеки; из него
 ничего не распространяется. Сохранения и кэш шейдеров лежат в `user/`, настройки — в `psport.ini`.
 Лаунчер на GTK4 (`bash launcher/psport-launcher.sh`; `launcher/install-desktop.sh` добавляет его в меню
-приложений) взят из апстрима и рассчитан на Bloodborne.
+приложений) взят из bbport и рассчитан на Bloodborne.
 
 ## Требования и сборка
 
@@ -119,7 +121,7 @@ PS_GAME_DIR=/путь/к/дампу PS_SKIP_GAME_CHECK=1 PS_PERMISSIVE=1 bash ru
 | `src/` | Загрузчик (`probe.c`) и рантайм (`runtime_*.c`) |
 | `scripts/` | `online.py` — адреса для игры по сети, которые `run.sh` записывает при `PS_ONLINE=1` (единственный шаг запуска на Python), и `sce_file.py` для инструментов на Python |
 | `gpu/` | Библиотека рендера: видеоядро shadPS4 с изменениями bbport (`gpu/VENDOR.txt`), перенесённые библиотеки (`ngs2/`, `audiodec/`, `fiber/`, `font/`), оверлей и меню в игре (`port/`), мост DLSS, сетевой модуль |
-| `launcher/`, `packaging/` | Лаунчер на GTK4 из апстрима; пакет Nix и скрипт AppImage |
+| `launcher/`, `packaging/` | Лаунчер на GTK4 из bbport; пакет Nix и скрипт AppImage |
 | `patches/` | Патчи сообщества для Bloodborne |
 | `tools/` | Регрессионные прогоны, дизассемблер GCN, инструменты FSR 4 и `fsr4cap`, помощники для скриптовых запусков |
 | `docs/` | По папке на язык: `docs/en/` (архитектура, [добавление игры](docs/en/ADDING_A_TITLE.md), описания функций, история bbport на английском) и `docs/ru/` (русские оригиналы bbport с теми же именами) |
@@ -132,12 +134,13 @@ psport распространяется под лицензией **GNU GPL v2 �
 
 | Проект | Что даёт | Лицензия |
 |---|---|---|
-| [bbport](https://github.com/deadinside28/bloodborne_pc) от deadinside | апстрим: нативный загрузчик, HLE-рантайм, рендерер на Vulkan, всё для Bloodborne | GPL-2.0-or-later |
+| [bbport](https://github.com/deadinside28/bloodborne_pc) от deadinside | основа psport: нативный загрузчик, HLE-рантайм, рендерер на Vulkan, всё для Bloodborne | GPL-2.0-or-later |
 | [shadPS4](https://github.com/shadps4-emu/shadPS4) | видеоядро, рекомпилятор шейдеров, AvPlayer и другие библиотеки, которые несёт bbport; источник переноса libSceFiber и libSceFont | GPL-2.0-or-later |
 | [AnyPS5](https://github.com/boykopovar/AnyPS5) | источник переноса libSceNgs2 и libSceAudiodec | GPL-2.0 |
 
-Сам psport поддерживает Yerasuu для [decanter](#использование). Что форк меняет в унаследованном
-коде и что переносит (с коммитами источников), записано в [FORK.md](FORK.md).
+Сам psport поддерживает Yerasuu для [decanter](#использование). Что psport меняет в унаследованном
+коде и что переносит (с коммитами источников), а также последние просмотренные точки bbport и
+shadPS4 записаны в [FORK.md](FORK.md).
 
 ### Встроенный сторонний код
 

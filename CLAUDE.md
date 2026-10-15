@@ -22,7 +22,7 @@
 
 Role prefixes (the original "Apps Hungarian": what a value means, not its type) and scope
 prefixes, in all of psport's own code (`src/`, `gpu/shim/`, `gpu/port/`, `gpu/memory/`,
-`gpu/diag/`, `gpu/layer/`, `gpu/games/`, `gpu/pngenc/` and the other `gpu/` libraries the fork
+`gpu/diag/`, `gpu/layer/`, `gpu/games/`, `gpu/pngenc/` and the other `gpu/` libraries psport
 adds). No type-width prefixes (`u32`, `i64`, `f32`, `n`, `st`...): the compiler already knows the
 type, and the name would lie once it changes (C++ Core Guidelines NL.5). The inherited shadPS4
 tree (`gpu/shadps4/`) keeps its names, except the lines psport adds. SDK/ABI names (exports,
@@ -59,6 +59,10 @@ converted area by area in its own commits; new and touched code follows this now
 ## Git workflow
 
 - Never merge main into local feature branches, always rebase.
+- psport is an independent project, not a fork: never merge bbport or shadPS4 wholesale. Review
+  them from time to time and port selected changes by hand, each recorded in `FORK.md` with its
+  source commit; keep `FORK.md`'s last reviewed points and `gpu/VENDOR.txt` current. No upstream
+  PRs.
 
 ## General expectations
 
