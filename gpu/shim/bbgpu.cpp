@@ -369,6 +369,11 @@ extern "C" const char* bbgpu_game_serial(const char* serial, size_t index) {
     return game && index < game->serials.size() ? game->serials[index] : nullptr;
 }
 
+extern "C" const char* bbgpu_game_mod_folder(const char* serial, size_t index) {
+    const Game::Profile* game = Game::Find(serial);
+    return game && index < game->mod_folders.size() ? game->mod_folders[index] : nullptr;
+}
+
 extern "C" const char* bbgpu_game_patch_file(const char* serial) {
     const Game::Profile* game = Game::Find(serial);
     return game ? game->patch_file : nullptr;

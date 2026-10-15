@@ -98,9 +98,12 @@ struct CoreServices {
 
 struct Profile {
     const char* name = nullptr;
-    /// The param.sfo TITLE_IDs it is for (one executable: patch files named after any of them
-    /// apply to all).
+    /// The param.sfo TITLE_IDs it is for (one executable: patch files and mod folders named after
+    /// any of them apply to all).
     std::span<const char* const> serials;
+    /// Folders a loose-file mod may consist of without dvdroot_ps4 around them (src/loader_mods.c
+    /// adds the game's own): those of the game's dvdroot_ps4 and the ones mods add to it.
+    std::span<const char* const> mod_folders;
     /// Its own patch file (shadPS4 XML), relative to psport's folder; external patch folders leave
     /// it out.
     const char* patch_file = nullptr;
@@ -164,7 +167,7 @@ struct Profile {
 };
 
 /// The profile for a TITLE_ID, whatever PS_GAME_PROFILE says: what it adds to the launch (its
-/// file check, its patches) is part of running the game, not an optimisation of the translator.
+/// file check, its patches, its mod folders) is part of running the game, not an optimisation of the translator.
 const Profile* Find(const char* serial);
 
 /// Chooses the profile for the game by its TITLE_ID (bbgpu_init). PS_GAME_PROFILE=none runs the

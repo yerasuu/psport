@@ -76,14 +76,11 @@ if [[ -z ${PYTHON:-} ]]; then echo 'Install Python 3 or set PYTHON.' >&2; exit 1
 # PS_GAME_DIR: the game's folder (eboot.bin, sce_module, ...); default next to this directory.
 game=${PS_GAME_DIR:-../CUSA03173}
 if [[ ! -f $game/eboot.bin ]]; then echo "No eboot.bin in $game (set PS_GAME_DIR)." >&2; exit 1; fi
-original_game=$game
-game=$("$PYTHON" scripts/mods.py "$game" --out "$out" \
-    --mods-dir "${PS_MODS_DIR:-$data/mods}" --config "${PS_MODS_CONFIG:-$data/mods.json}" \
-    --enabled "${PS_MODS_ENABLED:-1}")
-# A private merged view lasts for this launch, including restarts. Cleanup only our own view.
-if [[ $game != "$(realpath "$original_game")" ]]; then
-    mod_game=$game
-    trap '"$PYTHON" -c '\''import shutil,sys; shutil.rmtree(sys.argv[1])'\'' "$mod_game"' EXIT
+# Loose-file mods (PS_MODS_ENABLED=0: none): psport loads the game through a private view under
+# out/ with the enabled mods linked in, removed when it ends (src/loader_mods.c, docs/en/MODS.md).
+mod_args=()
+if [[ ${PS_MODS_ENABLED:-1} != 0 ]]; then
+    mod_args=(--mods "${PS_MODS_DIR:-$data/mods}" --mods-config "${PS_MODS_CONFIG:-$data/mods.json}" --out "$out")
 fi
 # psport loads and links the game from its folder (src/loader_*.c). PS_SYS_MODULES: a folder with
 # the user's own dump of the console's system modules (*.sprx), linked when the game needs their library; PS_HLE=libA,libB keeps those to the port instead, and
@@ -92,7 +89,7 @@ link_args=()
 if [[ -n ${PS_SYS_MODULES:-} ]]; then
     link_args+=(--system-modules "$PS_SYS_MODULES" --hle "${PS_HLE:-}" --lle "${PS_LLE:-}")
 fi
-boot_args=(--game "$game" "${link_args[@]}")
+boot_args=(--game "$game" "${link_args[@]}" "${mod_args[@]}")
 # FSR 4: faster post passes next to the downloaded ones (incremental; tools/fsr4_optimize.sh).
 if [[ -z ${PS_PREBUILT:-} && -d fsr4_shaders ]] && command -v spirv-cross >/dev/null; then
     bash tools/fsr4_optimize.sh || echo 'FSR 4: optimized post passes not built' >&2
@@ -280,14 +277,4 @@ if [[ ${PS_ONLINE:-0} == 1 && -f scripts/online.py ]]; then
     export SHADPS4_HTTP_HOST_OVERRIDES_JSON
 fi
 probe_args=("${boot_args[@]}" "${patch_args[@]}" --app0 "$game" --user "${PS_USER_DIR:-$data/user}" --timeout "${PS_TIMEOUT:-0}" "$@")
-if [[ -n ${mod_game:-} ]]; then
-    "$probe" "${probe_args[@]}" &
-    mod_pid=$!
-    trap 'kill -TERM "$mod_pid" 2>/dev/null || true' TERM INT
-    mod_status=0
-    wait "$mod_pid" || mod_status=$?
-    # An interrupted wait must finish the child before removing its mounted view.
-    if kill -0 "$mod_pid" 2>/dev/null; then wait "$mod_pid" || mod_status=$?; fi
-    exit "$mod_status"
-fi
 exec "$probe" "${probe_args[@]}"

@@ -35,6 +35,22 @@ typedef struct {
 typedef struct { const char *game, *system_modules, *hle, *lle, *sz_executable; } LoaderOptions;
 
 void loader_load_game(const LoaderOptions *options, LoaderImage *out);
+/* Loose-file mods (loader_mods.c). pp_serials: the TITLE_IDs a mod's wrapper folder may be named
+ * after; pp_folders: the top-level folders of dvdroot_ps4 a mod may consist of without it. */
+typedef struct {
+    const char *sz_mods_dir, *sz_config, *sz_out_dir;
+    const char *const *pp_serials;
+    size_t c_serials;
+    const char *const *pp_folders;
+    size_t c_folders;
+} LoaderModOptions;
+/* The folder to load, malloc'd: a view of the game with the enabled mods linked in, made under
+ * sz_out_dir and removed once psport ends, or the game's real path when no mod has a file for it.
+ * An error ends the process. */
+char *loader_mods_view(const char *game, const LoaderModOptions *options);
+/* --list-mods: the mod folders under sz_mods_dir, as a JSON array of names. game may be NULL: then
+ * only layouts with dvdroot_ps4 (directly, under app0 or a wrapper folder) are known. */
+void loader_mods_list(const char *game, const LoaderModOptions *options);
 /* mods.json and patches.json (loader_json.c): the string arrays of the named members of a JSON
  * object. is_list stays 0 for a member whose value is not an array of strings only. */
 typedef struct {

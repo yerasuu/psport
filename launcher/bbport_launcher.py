@@ -30,7 +30,6 @@ from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
 
 PORT_DIR = Path(__file__).resolve().parent.parent  # native_probe (or the package's copy)
 sys.path.insert(0, str(PORT_DIR / 'scripts'))
-from mods import discover as discover_mods  # noqa: E402
 import online  # noqa: E402  (the online module: addresses and the connection test)
 # Packaged (AppImage): generated files, saves and bbport.ini live in PS_DATA_DIR.
 PACKAGED = bool(os.environ.get("PS_PREBUILT"))
@@ -430,7 +429,7 @@ CONTROLS = [
 
 def psport_answer(*args):
     """(exit status, output) of psport for a question about the game's files (--check-game,
-    --list-patches); (None, "") when it cannot run (not built yet)."""
+    --list-patches, --list-mods); (None, "") when it cannot run (not built yet)."""
     try:
         run = subprocess.run([str(PSPORT), *args], capture_output=True, text=True, timeout=60)
     except (OSError, subprocess.SubprocessError):
@@ -1099,7 +1098,11 @@ class LauncherWindow(Adw.ApplicationWindow):
             profile = json.loads((DATA_DIR / "mods.json").read_text(encoding='utf-8'))
         except (OSError, ValueError):
             profile = {}
-        available = discover_mods(self.mods_dir())
+        status, output = psport_answer("--list-mods", str(self.mods_dir()), "--game", str(self.game_dir()))
+        try:
+            available = json.loads(output) if status == 0 else []
+        except ValueError:
+            available = []
         order = list(dict.fromkeys(n for n in [*profile.get("order", []), *available] if n in available))
         for name in order:
             row = Adw.SwitchRow(title=name, active=name not in profile.get("disabled", []))

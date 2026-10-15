@@ -459,6 +459,17 @@ static LoaderPatchFolder patch_folder(const char *sz_dir, const GameInfo *p_info
     return (LoaderPatchFolder){sz_dir,p_info->sz_patch_file[0] ? p_info->sz_patch_file : NULL,p_info->sz_version,
                                p_info->serials,p_info->c_serials};
 }
+/* The mods rules' game data: wrapper folders named after any TITLE_ID of the game's executable,
+ * the folders of dvdroot_ps4 its profile knows. */
+static void mod_options(const GameInfo *p_info, LoaderModOptions *p_options, const char **pp_folders, size_t c_capacity) {
+    p_options->pp_serials=p_info->serials;
+    p_options->c_serials=p_info->c_serials;
+    p_options->pp_folders=pp_folders;
+    for (p_options->c_folders=0; p_options->c_folders<c_capacity; ++p_options->c_folders) {
+        pp_folders[p_options->c_folders]=bbgpu_game_mod_folder(p_info->sz_serial,p_options->c_folders);
+        if (!pp_folders[p_options->c_folders]) break;
+    }
+}
 
 #ifndef _WIN32
 extern char **environ;
@@ -530,10 +541,20 @@ int main(int argc, char **argv) {
         loader_patches_list(&folder);
         return 0;
     }
+    const char *mod_folders[256];
+    if ((argc == 3 || argc == 5) && !strcmp(argv[1], "--list-mods") && (argc == 3 || !strcmp(argv[3], "--game"))) {
+        GameInfo info={0};
+        if (argc == 5) game_info(argv[4],&info);
+        LoaderModOptions mods={.sz_mods_dir=argv[2]};
+        mod_options(&info,&mods,mod_folders,256);
+        loader_mods_list(argc == 5 ? argv[4] : NULL,&mods);
+        return 0;
+    }
     check_cpu();
     int cpu_only = 0, strict_imports = 0;
     unsigned timeout_seconds = 10;
-    const char *app0=NULL, *user_dir=NULL, *patches_dir=NULL, *patches_config=NULL, *sz_exec=NULL;
+    const char *app0=NULL, *user_dir=NULL, *patches_dir=NULL, *patches_config=NULL, *sz_exec=NULL, *mods_dir=NULL;
+    const char *mods_config=NULL, *out_dir="out";
     LoaderOptions game={0};
     /* The guest's command line: the executable's guest path, the --arg values, NULL. Copied to the
      * heap, below 1 TiB, since the host stack holding argv is above it. */
@@ -551,14 +572,26 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--user") && i+1<argc) user_dir=argv[++i];
         else if (!strcmp(argv[i], "--patches-dir") && i+1<argc) patches_dir=argv[++i];
         else if (!strcmp(argv[i], "--patches-config") && i+1<argc) patches_config=argv[++i];
+        else if (!strcmp(argv[i], "--mods") && i+1<argc) mods_dir=argv[++i];
+        else if (!strcmp(argv[i], "--mods-config") && i+1<argc) mods_config=argv[++i];
+        else if (!strcmp(argv[i], "--out") && i+1<argc) out_dir=argv[++i];
         else if (!strcmp(argv[i], "--timeout") && i+1<argc) timeout_seconds=(unsigned)strtoul(argv[++i],NULL,10);
         else if (!strcmp(argv[i], "--exec") && i+1<argc) sz_exec=strdup(argv[++i]);
         else if (!strcmp(argv[i], "--arg") && i+1<argc) pp_guest_arguments[c_guest_arguments++]=strdup(argv[++i]);
         else { fprintf(stderr, "Unknown option: %s\n", argv[i]); return 1; }
     }
     if (!game.game) {
-        fprintf(stderr, "Usage: %s --game dir [--system-modules dir] [--hle libs] [--lle libs] [--cpu-only] [--strict-imports] [--app0 dir] [--user dir] [--patches-dir dir [--patches-config file]] [--timeout seconds] [--exec guest-path [--arg value]...] | --check-game dir | --has-presets dir | --list-patches dir --game dir | --vulkan-only\n", argv[0]);
+        fprintf(stderr, "Usage: %s --game dir [--system-modules dir] [--hle libs] [--lle libs] [--cpu-only] [--strict-imports] [--app0 dir] [--user dir] [--patches-dir dir [--patches-config file]] [--mods dir [--mods-config file]] [--out dir] [--timeout seconds] [--exec guest-path [--arg value]...] | --check-game dir | --has-presets dir | --list-patches dir --game dir | --list-mods dir [--game dir] | --vulkan-only\n", argv[0]);
         return 1;
+    }
+    if (mods_dir) {
+        GameInfo original;
+        game_info(game.game,&original);
+        LoaderModOptions mods={.sz_mods_dir=mods_dir,.sz_config=mods_config,.sz_out_dir=out_dir};
+        mod_options(&original,&mods,mod_folders,256);
+        char *sz_view=loader_mods_view(game.game,&mods);
+        if (app0 && !strcmp(app0,game.game)) app0=sz_view;
+        game.game=sz_view;
     }
     if (app0) {
         runtime_file_configure(app0, user_dir ? user_dir : "user");

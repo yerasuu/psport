@@ -382,7 +382,7 @@ static void glob_directory(const char *directory, const char *suffix, List *name
 }
 /* Modules the game loads by path (any *.prx or *.sprx outside sce_module and sce_sys, such as
  * Unity's Media/Modules and Media/Plugins), relative to /app0. Linked directories are entered too:
- * mods.py builds a modded game's folder out of links. depth bounds a link loop. */
+ * loader_mods.c builds a modded game's folder out of links. depth bounds a link loop. */
 static void find_loadable(const char *root, const char *relative, List *found, int depth) {
     if (depth > 32) return;
     char path[4096];

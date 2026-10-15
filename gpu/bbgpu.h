@@ -76,6 +76,9 @@ typedef struct {
 /* The index-th TITLE_ID of the game's executable (patch files and mod folders named after any of
  * them apply); NULL past the last one or for a title without a profile. */
 const char *bbgpu_game_serial(const char *serial, size_t index);
+/* The index-th folder a loose-file mod may consist of without dvdroot_ps4 around them (the game's
+ * own are added by src/loader_mods.c); NULL past the last one or for a title without a profile. */
+const char *bbgpu_game_mod_folder(const char *serial, size_t index);
 /* The profile's own patch file (shadPS4 XML), relative to psport's folder (the one holding out/ or
  * bin/); NULL without one. External patch folders leave it out. */
 const char *bbgpu_game_patch_file(const char *serial);

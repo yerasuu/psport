@@ -26,6 +26,12 @@ constexpr std::uint64_t ImageBase = 0x800000000ull;
 constexpr const char* Serials[] = {"CUSA00900", "CUSA00207", "CUSA00208", "CUSA00299", "CUSA01363",
                                    "CUSA03179", "CUSA03173", "CUSA03014", "CUSA03023"};
 
+/// The top-level folders of the game's dvdroot_ps4, with adhoc and font, which mods add: the debug
+/// menu's fonts, which the retail game does not ship.
+constexpr const char* ModFolders[] = {"action", "adhoc",    "chr",   "event", "facegen", "font",   "map",
+                                      "menu",   "movie",    "msg",   "mtd",   "obj",     "other",  "param",
+                                      "paramdef", "parts",  "remo",  "script", "sfx",    "shader", "sound"};
+
 /// Reverse engineering: 0x2ab7350 computes vertices on the CPU (cloth) into a ~128 MiB ring, each
 /// block written now and then; 0x20858a0 is the game's allocator, its bookkeeping in GPU-mapped
 /// pages.
@@ -99,6 +105,7 @@ constexpr LabelReleaseCode LabelRelease = {
 extern const Profile BloodborneProfile = {
     .name = "Bloodborne",
     .serials = Serials,
+    .mod_folders = ModFolders,
     .patch_file = BbLaunch::PatchFile,
     .prepare_environment = BbLaunch::PrepareEnvironment,
     .check_files = BbLaunch::CheckFiles,
