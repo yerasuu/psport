@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// Bloodborne's effect switches (bbport.ini keys; the patches each one adds are in patches.cpp), for
+// Bloodborne's effect switches (psport.ini keys; the patches each one adds are in patches.cpp), for
 // the overlay menu, its own System menu pages (game_menu.cpp) and the launcher.
 #pragma once
 

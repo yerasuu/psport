@@ -14,7 +14,7 @@ inline constexpr const char* PatchFile = "patches/Bloodborne.xml";
 void PrepareEnvironment();
 /// The 1.09 executable, its shaders intact.
 bool CheckFiles(const PsGameFiles& game, std::string& kind, std::string& advice);
-/// The PS_FPS preset, PS_PATCHES, the effect switches of bbport.ini, PS_RENDER_RES and the
+/// The PS_FPS preset, PS_PATCHES, the effect switches of psport.ini, PS_RENDER_RES and the
 /// Intel and online-choice fixes.
 bool AddPatches(const PsGameFiles& game, const PsPatchServices& services);
 } // namespace PsLaunch

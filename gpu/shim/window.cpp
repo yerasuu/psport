@@ -14,7 +14,7 @@ namespace Frontend {
 namespace {
 
 // Issue #69: the monitor the window (and fullscreen) goes to. PS_DISPLAY: its number in SDL's
-// order (1, 2, ...; bb-gpu-capabilities --displays lists them) or a part of its name; without it
+// order (1, 2, ...; psport-gpu-capabilities --displays lists them) or a part of its name; without it
 // SDL's primary display. The monitors are logged so a report says which one was taken.
 SDL_DisplayID ChooseDisplay() {
     const SDL_DisplayID primary = SDL_GetPrimaryDisplay();

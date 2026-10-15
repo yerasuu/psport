@@ -103,7 +103,7 @@ struct LocalizedText {
     const char* sz_spanish = nullptr;
 };
 
-/// A switch of the game's own patches: a bbport.ini key (0 or 1) set in the overlay menu and the
+/// A switch of the game's own patches: a psport.ini key (0 or 1) set in the overlay menu and the
 /// launcher, which add_patches reads at start, so a change applies after a restart.
 struct EffectSwitch {
     const char* sz_key = nullptr;
@@ -116,7 +116,7 @@ struct EffectSwitch {
 /// What the overlay's "Game effects" section offers; with neither, the section is not shown.
 struct GameEffects {
     std::span<const EffectSwitch> switches;
-    /// The model_lod choice of bbport.ini (-2 highest .. 2 lowest, 0 the game's).
+    /// The model_lod choice of psport.ini (-2 highest .. 2 lowest, 0 the game's).
     bool has_model_detail = false;
     /// After the section's note that the patches apply at start (from patch_file).
     LocalizedText hint;

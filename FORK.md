@@ -31,8 +31,12 @@ library's C interface `gpu/psport_gpu.h` with its `psport_gpu_*` calls (`bbgpu.h
 prefix stays where the directory alone would say it: `gpu/shim/` also holds the stand-ins for
 shadPS4's own headers (`common/`, `core/`), and every directory there is on one include path, so a
 bare `settings.h` would be found by search order. Namespaces are `Ps*` (`PsStats`, `PsToggle`,
-`PsLayer`), the CMake target `psport-gpu`; the settings file `bbport.ini` keeps bbport's name for
-now.
+`PsLayer`), the CMake target `psport-gpu`.
+
+The settings file is `psport.ini` and the GPU check `out/psport-gpu-capabilities` (bbport's
+`bbport.ini` and `out/bb-gpu-capabilities`). When `PS_CONFIG` is unset and the data directory has a
+`bbport.ini` but no `psport.ini`, `run.sh` copies it once (`psport: settings copied from bbport.ini
+to psport.ini`), and so does the launcher; `bbport.ini` itself is left for the older release.
 
 ## Ported components
 
@@ -126,7 +130,7 @@ The overlay (Insert or L3+R3, `gpu/shim/psport_overlay.cpp`) is drawn in English
 
 | Source, first that is set | Values |
 |---|---|
-| `menu_language` in `bbport.ini` (written whenever the overlay saves a setting) | `en`, `ru`, `es` |
+| `menu_language` in `psport.ini` (written whenever the overlay saves a setting) | `en`, `ru`, `es` |
 | `PS_MENU_LANGUAGE` (decanter passes its own UI language) | a language code: `ru...` Russian, `es...` Spanish, anything else English |
 | `LC_ALL`, `LC_MESSAGES`, `LANG`, `LANGUAGE` | the same |
 
@@ -148,7 +152,7 @@ a pointer, so regression runs see a mouse that never moves or clicks). While
 the menu or the close prompt is open the game sees no motion and no buttons. While the game shows a
 VideoOut cursor, the window hides the system cursor over it and a click does not take the mouse for
 mouse look. The log says once whether the host mouse reaches the game (`Runtime: mouse: ...`).
-`game_mouse_sensitivity` in `bbport.ini` (0.05 to 20, default 1: the host's pixels as they are)
+`game_mouse_sensitivity` in `psport.ini` (0.05 to 20, default 1: the host's pixels as they are)
 scales the motion the game receives, keeping fractions for the next read; a value other than 1 is
 logged. Mouse look keeps its own `mouse_sensitivity`.
 
@@ -224,7 +228,7 @@ profile (or with `PS_GAME_PROFILE=none`) runs with the values in the first colum
 | Frame overlap, `PS_SUBMIT_AHEAD` | 0 (`Game::Profile::c_submits_ahead`) | the submission lock's contract: after `sceGnmSubmitDone` a submission waits for the previous frame, and a game may reuse what that frame used as soon as it returns (Gal Guardians 2 rebuilt its command buffers over the frame in flight) | 2: it builds each frame in the context of the frame before the previous; its heap leak check (`frame_overlap_unsafe`) and `PS_SUBMIT_GUARD` still turn it off |
 | Frames the GPU command thread runs ahead, `PS_FRAMES_AHEAD` | 1 | pacing only: flips come at the GPU's rate instead of in bursts when the GPU is the bottleneck | |
 | Forced anisotropic filtering, `PS_ANISO` | 0: the game's samplers (`Game::Profile::anisotropy`) | the image the game asks for: forced filtering also reaches textures that are not surfaces (Astrea's backgrounds came out brighter and browner with it) | 16: its scene textures have little or none, and behind the upscaler surfaces at a grazing angle stayed blurred |
-| Temporal upscaler (`upscaler` in `bbport.ini`, `PS_UPSCALER`) | FSR 3.1 at Native AA, where a profile places it (`Game::Profile::upscaler`); elsewhere off, with no scene jitter and no camera or object motion vectors (`Upscaler: off: no game profile places it`) | the upscaler has to know which pass combines the scene and where the UI starts; jittering a frame nothing then resolves would shake its image | its post-processing combine (compute shader `9a9cf8a9`) and its UI's first vertex shader (`34e8a281`), its UI's other shaders, the layout of its scene constants (the camera) and the sizes of its bone palettes (object motion); `PS_UPSCALE_BEFORE_CS` and `PS_UI_TRIGGER_VS` place it by hand in another game, without camera or object motion vectors |
+| Temporal upscaler (`upscaler` in `psport.ini`, `PS_UPSCALER`) | FSR 3.1 at Native AA, where a profile places it (`Game::Profile::upscaler`); elsewhere off, with no scene jitter and no camera or object motion vectors (`Upscaler: off: no game profile places it`) | the upscaler has to know which pass combines the scene and where the UI starts; jittering a frame nothing then resolves would shake its image | its post-processing combine (compute shader `9a9cf8a9`) and its UI's first vertex shader (`34e8a281`), its UI's other shaders, the layout of its scene constants (the camera) and the sizes of its bone palettes (object motion); `PS_UPSCALE_BEFORE_CS` and `PS_UI_TRIGGER_VS` place it by hand in another game, without camera or object motion vectors |
 | Object motion (`object_motion`, `PS_OBJECT_MOTION`) | on, while the upscaler is available | it only feeds the upscaler | |
 | Frame rate (`PS_FPS`) and vblank (`PS_VBLANK_HZ`) | a title without presets: unpatched, 60 Hz vblank (the console's) | the frame rate presets are patches to one executable, its profile's (`Game::Profile::add_patches`); at 480 Hz a title pacing itself by its flip rate ran 8 times too fast | `uncap` (delta-time patch, 480 Hz vblank, frames shown at once), 60 or 90 (`gpu/games/bloodborne/patches.cpp`, which sets `PS_VBLANK_HZ` for the preset) |
 | Scaled output (`output_res`) and `PS_DMEM_MB` 9152 | only for a title whose profile has presets (run.sh asks `psport --has-presets`); otherwise its own size and the console's 5056 MiB of direct memory | they are a patch to the same executable, and the larger direct memory exists for its larger targets | as `output_res` and `live_resolution` choose |
@@ -361,7 +365,7 @@ the tag the same way, publishes its closure with `tools/nix_cache.sh` as a flat 
 the assets of the release `nix-cache`, then creates or updates the GitHub Release of the tag with the
 tag's annotation as its notes, marked latest when the tag is the highest version published. Only that
 job has `contents: write`, with the workflow's `GITHUB_TOKEN`. The output is laid out as a checkout
-after `build.sh` (`run.sh`, `scripts/`, `patches/`, `out/psport`, `out/bb-gpu-capabilities`,
+after `build.sh` (`run.sh`, `scripts/`, `patches/`, `out/psport`, `out/psport-gpu-capabilities`,
 `out/gpu/`); the Vulkan drivers are not in it.
 
 The closure is made content-addressed before it is published (`nix store make-content-addressed`):

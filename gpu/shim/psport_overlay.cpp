@@ -190,11 +190,11 @@ void Hint(const char* text) {
 }
 
 // The settings menu as in 0.3 and 0.4: one window (moved with the mouse, its place kept in
-// bbport.ini), sections one under the other, ImGui's own widgets and keyboard/gamepad navigation.
+// psport.ini), sections one under the other, ImGui's own widgets and keyboard/gamepad navigation.
 void Menu() {
     auto& s = PsSettings::Get();
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
-    // Where it was moved last (bbport.ini menu_pos, a fraction of the screen), kept on screen.
+    // Where it was moved last (psport.ini menu_pos, a fraction of the screen), kept on screen.
     ImVec2 pos(viewport->WorkPos.x + 40.0f * base_scale, viewport->WorkPos.y + 40.0f * base_scale);
     if (s.menu_x >= 0.0f && s.menu_y >= 0.0f) {
         const float margin = 80.0f * base_scale;
@@ -691,9 +691,9 @@ void Menu() {
     if (ImGui::Button(PsSettings::MenuText("Close", "Закрыть", "Cerrar"))) {
         keep_open = false;
     }
-    ImGui::TextDisabled("%s", PsSettings::MenuText("Settings are saved to bbport.ini",
-                                             "Настройки сохраняются в bbport.ini",
-                                             "Los ajustes se guardan en bbport.ini"));
+    ImGui::TextDisabled("%s", PsSettings::MenuText("Settings are saved to psport.ini",
+                                             "Настройки сохраняются в psport.ini",
+                                             "Los ajustes se guardan en psport.ini"));
     ImGui::End();
     if (!keep_open) {
         SetOpen(false);

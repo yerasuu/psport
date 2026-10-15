@@ -40,7 +40,7 @@ int psport_gpu_overlay_pad_file_press(int guide, int cross, int circle);
 /* Mouse look (runtime_pad.c): the window takes the mouse when it is clicked (relative mode) and
  * lets it go on F1, losing focus or the menu opening. take: motion (pixels) and wheel notches
  * since the last call, reset; captured: 1 while the window holds it; enable: mouse_look=0 in
- * bbport.ini keeps the window from taking it. */
+ * psport.ini keeps the window from taking it. */
 void psport_gpu_mouse_take(double *dx, double *dy, int *wheel_up, int *wheel_down);
 int psport_gpu_mouse_captured(void);
 void psport_gpu_mouse_look_enable(int enabled);

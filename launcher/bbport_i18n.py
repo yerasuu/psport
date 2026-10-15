@@ -138,8 +138,8 @@ EN = {
     "Разрешить HDR": "Allow HDR",
     # Upscaler
     "Апскейлер": "Upscaler",
-    "Хранится в bbport.ini; в игре меняется через меню (Insert или L3+R3)":
-        "Stored in bbport.ini; in game, change it in the menu (Insert or L3+R3)",
+    "Хранится в psport.ini; в игре меняется через меню (Insert или L3+R3)":
+        "Stored in psport.ini; in game, change it in the menu (Insert or L3+R3)",
     "TAA (нативное сглаживание)": "TAA (native anti-aliasing)",
     "Выключен": "Off",
     "Пресет": "Preset",
@@ -411,8 +411,8 @@ PT_BR = {
     "Разрешить HDR": "Permitir HDR",
     # Upscaler
     "Апскейлер": "Upscaler",
-    "Хранится в bbport.ini; в игре меняется через меню (Insert или L3+R3)":
-        "Armazenado em bbport.ini; no jogo, altere pelo menu (Insert ou L3+R3)",
+    "Хранится в psport.ini; в игре меняется через меню (Insert или L3+R3)":
+        "Armazenado em psport.ini; no jogo, altere pelo menu (Insert ou L3+R3)",
     "TAA (нативное сглаживание)": "TAA (antisserrilhamento nativo)",
     "Выключен": "Desativado",
     "Пресет": "Predefinição",
@@ -659,8 +659,8 @@ ZH_CN = {
     "Разрешить HDR": "允许 HDR",
     # Upscaler
     "Апскейлер": "超分辨率",
-    "Хранится в bbport.ini; в игре меняется через меню (Insert или L3+R3)":
-        "保存在 bbport.ini 中；游戏内可通过菜单切换（Insert 或 L3+R3）",
+    "Хранится в psport.ini; в игре меняется через меню (Insert или L3+R3)":
+        "保存在 psport.ini 中；游戏内可通过菜单切换（Insert 或 L3+R3）",
     "TAA (нативное сглаживание)": "TAA（原生抗锯齿）",
     "Выключен": "关闭",
     "Пресет": "预设",

@@ -17,7 +17,7 @@ The model is Wine's, not an emulator's.
 | GPU library | `gpu/shim/psport_gpu.cpp`, `gpu/psport_gpu.h` | `out/gpu/libpsport-gpu.so` | C interface between `psport` and the C++ side |
 | Translator | `gpu/shadps4/` (inherited from shadPS4, `gpu/VENDOR.txt`), `gpu/cp/`, `gpu/layer/` | `libpsport-gpu.so` | GnmDriver, VideoOut, command processor, Vulkan rasterizer, caches, shader recompiler |
 | Ported libraries | `gpu/ngs2/`, `gpu/audiodec/`, `gpu/fiber/`, `gpu/font/`, `gpu/pngenc/`, `gpu/pngdec/` | `libpsport-gpu.so` | libSceNgs2, libSceAudiodec, libSceFiber, libSceFont/FontFt, libScePngEnc, libScePngDec |
-| Port services | `gpu/shim/psport_*` | `libpsport-gpu.so` | settings (`bbport.ini`), overlay, submit guard, guest memory, diagnostics |
+| Port services | `gpu/shim/psport_*` | `libpsport-gpu.so` | settings (`psport.ini`), overlay, submit guard, guest memory, diagnostics |
 | Game profiles | `gpu/games/` | `libpsport-gpu.so` | per-title optimisations (`Game::Profile`) |
 | Online module | `gpu/net/` | `out/gpu/` (optional) | network and PSN imports with `PS_ONLINE=1` |
 | Online addresses | `scripts/online.py` | - | Python run by `run.sh` with `PS_ONLINE=1` only; see [Launch scripts](#launch-scripts) |
@@ -54,17 +54,17 @@ run.sh
 ### run.sh
 
 `run.sh` takes the game folder from `PS_GAME_DIR` (default `../CUSA03173`) and a writable data
-directory from `PS_DATA_DIR` (default the checkout: `out/`, `user/`, `bbport.ini`). It re-enters
+directory from `PS_DATA_DIR` (default the checkout: `out/`, `user/`, `psport.ini`). It re-enters
 `shell.nix` when the build dependencies are missing and Nix is installed, and builds with
 `build.sh` unless `PS_PREBUILT=1`. Before starting `psport` it:
 
 - passes the mods folder and `mods.json` (`PS_MODS_DIR`, `PS_MODS_CONFIG`; none with
   `PS_MODS_ENABLED=0`) and the external patch folder and `patches.json` (`PS_PATCHES_DIR`,
   `PS_PATCHES_CONFIG`), by default in the data directory;
-- for a `bbport.ini` `output_res` other than 1080p, chooses between live resolution changes and a
+- for a `psport.ini` `output_res` other than 1080p, chooses between live resolution changes and a
   scene size patched in at start (`PS_RENDER_RES`, `PS_OUTPUT_RES`, `PS_DMEM_MB`): the output
   divided by the upscaler preset's ratio, rounded half to even to an even size;
-- chooses the memory model and other defaults from the GPU (`out/bb-gpu-capabilities --device`),
+- chooses the memory model and other defaults from the GPU (`out/psport-gpu-capabilities --device`),
   see [Memory model](#memory-model);
 - passes `PS_SYS_MODULES`, `PS_HLE` and `PS_LLE` as `--system-modules`, `--hle` and `--lle`.
 
@@ -219,7 +219,7 @@ a file.
 
 - `psport_gpu_register_kernel` registers the kernel event queues and the libraries that do not need a
   window: AvPlayer, Ngs2, Fiber, Font, FontFt, Audiodec, Videodec2, PngEnc, PngDec.
-- `psport_gpu_init` loads `bbport.ini`, selects the game profile, prepares saves through it, starts the
+- `psport_gpu_init` loads `psport.ini`, selects the game profile, prepares saves through it, starts the
   SDL window on its own thread and registers GnmDriver and VideoOut.
 - `psport_gpu_resolve` returns the function registered for an import's NID. Libraries register with
   shadPS4's `LIB_FUNCTION(nid, library, version, module, function)` (`gpu/shim/core/libraries/libs.h`).
@@ -278,7 +278,7 @@ check, its own patches, its environment defaults, its mod folders) is found by `
 | `prepare_environment` | environment defaults before `psport_gpu_init` (Bloodborne: `PS_VBLANK_HZ` for its `PS_FPS` preset) |
 | `check_files` | the check of the game's files before its code runs (`PS_SKIP_GAME_CHECK=1` skips it) |
 | `add_patches` | its own patches of the executable, chosen by the player's settings |
-| `effects` | the settings of `add_patches` the overlay menu's "Game effects" section offers: its `bbport.ini` switches (key, label and hint in the menu's languages, default), the `model_lod` choice, a note; without them the section is not shown |
+| `effects` | the settings of `add_patches` the overlay menu's "Game effects" section offers: its `psport.ini` switches (key, label and hint in the menu's languages, default), the `model_lod` choice, a note; without them the section is not shown |
 | `install_hooks`, `patch_image` | hooks and patches in the game's code, each checking the bytes it replaces |
 | `dynamic_writers` | guest code ranges known to write per-frame data into GPU memory |
 | `prepare_saves` | changes to the user's saves before the game runs |
@@ -297,7 +297,7 @@ every title correctly on its generic paths, which `PS_GAME_PROFILE=none` checks.
 today is Bloodborne's (`gpu/games/bloodborne/`: `profile.cpp`, Gnm entry hooks with
 `gnm_table.inc`, guest hooks, heap sites, the in-game menu patch, and for the launch `patches.cpp`:
 the `PS_FPS` presets 30/60/90/uncap, `PS_PATCHES`, the effect switches and `model_lod` of
-`bbport.ini`, the `PS_RENDER_RES` scene size, the Intel tone mapping and online-choice fixes, all from
+`psport.ini`, the `PS_RENDER_RES` scene size, the Intel tone mapping and online-choice fixes, all from
 `patches/Bloodborne.xml`; `game_check.cpp`: the 1.09 executable and intact shaders), listed in
 `gpu/games/game_profile.cpp`. Another title runs unpatched, on the console's 60 Hz vblank.
 

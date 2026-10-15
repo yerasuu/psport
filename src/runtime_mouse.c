@@ -41,7 +41,7 @@ static MousePort ports[MOUSE_HANDLES];
 static size_t reads;
 static float sensitivity=-1.0f, carry_x, carry_y;
 
-/* game_mouse_sensitivity in bbport.ini (PS_CONFIG), beside mouse look's keys (runtime_pad.c):
+/* game_mouse_sensitivity in psport.ini (PS_CONFIG), beside mouse look's keys (runtime_pad.c):
  * scales the motion the game receives; 1 passes the host's pixels as they are. */
 static void load_sensitivity(void) {
     sensitivity=1.0f;

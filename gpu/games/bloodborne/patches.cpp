@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Bloodborne's built-in patches, from the community's patches/Bloodborne.xml: the PS_FPS presets,
-// the effect switches and model detail of bbport.ini (the in-game menu, the launcher), PS_PATCHES
+// the effect switches and model detail of psport.ini (the in-game menu, the launcher), PS_PATCHES
 // names, the render resolution for PS_RENDER_RES, and two fixes on by default. The game reads all
 // of them at start; a change applies after a restart.
 #include "launch.h"
@@ -39,7 +39,7 @@ const FpsPreset FpsPresets[] = {
     {"uncap", {"Uncap FPS++", "Sprint Fix (High FPS)"}, "480"},
 };
 
-/// bbport.ini key -> patch when it is 0, patch when it is 1.
+/// psport.ini key -> patch when it is 0, patch when it is 1.
 struct Effect {
     const char* sz_key;
     const char* sz_off;
@@ -125,10 +125,10 @@ std::string Strip(const std::string& text) {
     return it_begin < it_end ? std::string(it_begin, it_end) : std::string();
 }
 
-/// bbport.ini as key=value lines; # starts a comment line.
+/// psport.ini as key=value lines; # starts a comment line.
 std::map<std::string, std::string> ReadSettings() {
     std::map<std::string, std::string> settings;
-    std::ifstream file(Env("PS_CONFIG", "bbport.ini"));
+    std::ifstream file(Env("PS_CONFIG", "psport.ini"));
     for (std::string line; std::getline(file, line);) {
         const std::size_t off_equals = line.find('=');
         if (off_equals != std::string::npos && line[0] != '#') {

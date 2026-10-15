@@ -142,4 +142,4 @@ fi
 if [[ ${PS_FSR4CAP_CLEAN:-0} == 1 ]]; then
     rm -rf "$work"
 fi
-echo "FSR 4.1.1 assets in $out (bbport.ini: upscaler=fsr411)"
+echo "FSR 4.1.1 assets in $out (psport.ini: upscaler=fsr411)"

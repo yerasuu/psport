@@ -16,7 +16,7 @@ let
     ++ lib.optional fsr411 "fsr4_411";
   # Only what the package needs (the tree also holds builds, profiles and captures).
   wanted = [
-    "run.sh" "out" "out/psport" "out/bb-gpu-capabilities" "out/gpu" "out/gpu/libpsport-gpu.so" "tools"
+    "run.sh" "out" "out/psport" "out/psport-gpu-capabilities" "out/gpu" "out/gpu/libpsport-gpu.so" "tools"
   ] ++ assetDirs;
   # DLSS (a build with DLSS_SDK_ROOT): the bridge, NVIDIA's runtime library and its license, as
   # NVIDIA's RTX SDK license allows in an application. Without them the launcher lets the player
@@ -180,11 +180,11 @@ pkgs.stdenv.mkDerivation {
       cp -r fsr4_411 $d/
     fi
     install -m755 out/psport $d/bin/psport
-    install -m755 out/bb-gpu-capabilities $d/bin/bb-gpu-capabilities
+    install -m755 out/psport-gpu-capabilities $d/bin/psport-gpu-capabilities
     install -Dm755 out/gpu/libpsport-gpu.so $d/bin/gpu/libpsport-gpu.so
     # Their debug info names the build environment's headers (the full GCC, Vulkan headers): Nix
     # took those for dependencies, ~300 MB. Symbols stay (crash reports).
-    ${pkgs.binutils-unwrapped}/bin/strip --strip-debug $d/bin/psport $d/bin/bb-gpu-capabilities
+    ${pkgs.binutils-unwrapped}/bin/strip --strip-debug $d/bin/psport $d/bin/psport-gpu-capabilities
     # The online module (gpu/net), when the build has it.
     if [ -f out/gpu/libpsport-net.so ]; then
       install -Dm755 out/gpu/libpsport-net.so $d/bin/gpu/libpsport-net.so
@@ -214,7 +214,7 @@ pkgs.stdenv.mkDerivation {
                                           pkgs.gawk pkgs.gnused pkgs.gnugrep pkgs.spirv-tools
                                           pkgs.systemdMinimal ]} \
       --run 'export PS_DATA_DIR=''${PS_DATA_DIR:-''${XDG_DATA_HOME:-$HOME/.local/share}/bbport}; mkdir -p "$PS_DATA_DIR"'
-    # The game alone, without the launcher (settings from the data directory's bbport.ini).
+    # The game alone, without the launcher (settings from the data directory's psport.ini).
     makeShellWrapper ${pkgs.python3}/bin/python3 $out/bin/bbport-game \
       ${common}      --add-flags "$out/share/bbport/launcher/bbport_vulkan.py ${pkgs.bash}/bin/bash $out/share/bbport/run.sh" \
       --set PS_PREBUILT 1 \

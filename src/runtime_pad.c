@@ -272,7 +272,7 @@ static void report_guest_heap(void) {
                m.in_use/1048576.0,m.max_in_use/1048576.0,m.system/1048576.0,m.max_system/1048576.0);
     }
 }
-/* Controls: what each PS4 input is bound to. Defaults below; bbport.ini (PS_CONFIG) lines
+/* Controls: what each PS4 input is bound to. Defaults below; psport.ini (PS_CONFIG) lines
  * key.<input>=<SDL key names> and pad.<input>=<SDL gamepad button names>, comma-separated,
  * replace an input's binding (empty: unbound). Inputs: the buttons (cross ... right, touchpad =
  * a left-side click, touchpad_right), and on the keyboard the sticks: move_* (left), look_*
@@ -356,7 +356,7 @@ static int key_from_name(const char *name) {
     const SDL_Scancode s=SDL_GetScancodeFromName(name);
     return s==SDL_SCANCODE_UNKNOWN ? -1 : (int)s;
 }
-/* Mouse look (bbport.ini): mouse_look=0 leaves the mouse alone; mouse_sensitivity (default 1:
+/* Mouse look (psport.ini): mouse_look=0 leaves the mouse alone; mouse_sensitivity (default 1:
  * ~1000 pixels/s turn the camera at full speed), mouse_invert_y=1. */
 static int mouse_look=1, mouse_invert_y;
 static float mouse_sensitivity=1.0f;

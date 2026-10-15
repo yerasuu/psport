@@ -1,6 +1,6 @@
 # The port built from source in Nix's sandbox by build.sh, with shell.nix's dependencies: its output
 # is laid out as a checkout after build.sh (run.sh, scripts/, patches/, out/psport,
-# out/bb-gpu-capabilities, out/gpu/), so run.sh runs from it with PS_PREBUILT=1 and
+# out/psport-gpu-capabilities, out/gpu/), so run.sh runs from it with PS_PREBUILT=1 and
 # PS_PROBE=<output>/out/psport. CI publishes it to the binary cache (tools/nix_cache.sh).
 # `nix-build packaging/port.nix`
 { pkgs ? import ./nixpkgs.nix }:
@@ -39,7 +39,7 @@ pkgs.stdenv.mkDerivation {
     runHook preInstall
     mkdir -p $out/out/gpu
     cp -r run.sh scripts patches $out/
-    install -m755 out/psport out/bb-gpu-capabilities $out/out/
+    install -m755 out/psport out/psport-gpu-capabilities $out/out/
     install -m755 out/gpu/libpsport-gpu.so $out/out/gpu/
     if [ -f out/gpu/libpsport-net.so ]; then install -m755 out/gpu/libpsport-net.so $out/out/gpu/; fi
     runHook postInstall

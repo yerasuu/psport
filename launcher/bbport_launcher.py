@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 """Bloodborne launcher for the native port (GTK4 / libadwaita).
 
-Picks the game folder, edits the port's settings (bbport.ini: upscaler, preset, ...) and the
+Picks the game folder, edits the port's settings (psport.ini: upscaler, preset, ...) and the
 start-up tweaks passed as environment variables to run.sh, starts and stops the game and shows
 its output. Launcher settings live in ~/.config/bbport-launcher/settings.json.
 Russian, English, Brazilian Portuguese and Simplified Chinese (bbport_i18n: the Russian
@@ -31,7 +31,7 @@ from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
 PORT_DIR = Path(__file__).resolve().parent.parent  # native_probe (or the package's copy)
 sys.path.insert(0, str(PORT_DIR / 'scripts'))
 import online  # noqa: E402  (the online module: addresses and the connection test)
-# Packaged (AppImage): generated files, saves and bbport.ini live in PS_DATA_DIR.
+# Packaged (AppImage): generated files, saves and psport.ini live in PS_DATA_DIR.
 PACKAGED = bool(os.environ.get("PS_PREBUILT"))
 PSPORT = PORT_DIR / ("bin" if PACKAGED else "out") / "psport"
 DATA_DIR = Path(os.environ.get("PS_DATA_DIR", PORT_DIR))
@@ -84,7 +84,7 @@ UPSCALERS = [("FSR 4", "fsr4"), ("FSR 4.1.1", "fsr411"), ("FSR 3", "fsr3"),
 PRESETS = [("Native AA", 0), ("Quality (x1.5)", 1), ("Balanced (x1.7)", 2),
            ("Performance (x2)", 3), ("Ultra Performance (x3)", 4)]
 OUTPUT_RES = [("1280×720 (Steam Deck)", "1280x720"), ("1920×1080", "1920x1080"), ("2560×1440", "2560x1440"), ("3840×2160", "3840x2160")]
-# Game effects (patches applied at start): bbport.ini key, title, default.
+# Game effects (patches applied at start): psport.ini key, title, default.
 EFFECTS = [
     ("effect_chromatic_aberration", "Хроматическая аберрация", True),
     ("effect_dof", "Глубина резкости (DoF)", True),
@@ -155,7 +155,7 @@ DEFAULTS = {
     "online_upnp": True,
 }
 
-# bbport.ini keys the launcher edits; the rest of the file is kept.
+# psport.ini keys the launcher edits; the rest of the file is kept.
 INI_DEFAULTS = {
     "upscaler": "fsr4",
     "preset": "4",
@@ -190,7 +190,13 @@ def save_settings(settings):
 
 
 def ini_path():
-    return Path(os.environ.get("PS_CONFIG", DATA_DIR / "bbport.ini"))
+    if "PS_CONFIG" in os.environ:
+        return Path(os.environ["PS_CONFIG"])
+    path, older = DATA_DIR / "psport.ini", DATA_DIR / "bbport.ini"
+    # Settings an older release kept in psport.ini, copied once as run.sh does.
+    if not path.exists() and older.is_file():
+        shutil.copyfile(older, path)
+    return path
 
 
 def load_ini():
@@ -396,7 +402,7 @@ def combo_value(row):
 
 
 # Controls (runtime_pad.c): input, label, default keyboard keys, default gamepad buttons (SDL names).
-# bbport.ini key.<input>= / pad.<input>= replace a default; no line keeps it. Mouse buttons and the
+# psport.ini key.<input>= / pad.<input>= replace a default; no line keeps it. Mouse buttons and the
 # wheel are keys ("Mouse Left", "Wheel Down"); they act while the game holds the mouse.
 CONTROLS = [
     ("cross", "Крест", "Space", "a"),
@@ -438,8 +444,8 @@ def psport_answer(*args):
 
 
 def connected_gamepads():
-    """(GUID, name) of the connected gamepads (bb-gpu-capabilities --gamepads), [] if unknown."""
-    tool = PORT_DIR / ("bin" if PACKAGED else "out") / "bb-gpu-capabilities"
+    """(GUID, name) of the connected gamepads (psport-gpu-capabilities --gamepads), [] if unknown."""
+    tool = PORT_DIR / ("bin" if PACKAGED else "out") / "psport-gpu-capabilities"
     try:
         run = subprocess.run([str(tool), "--gamepads"], capture_output=True, text=True, timeout=5)
     except (OSError, subprocess.SubprocessError):
@@ -448,9 +454,9 @@ def connected_gamepads():
 
 
 def connected_displays():
-    """(PS_DISPLAY value, label) of the monitors (bb-gpu-capabilities --displays), [] if unknown.
+    """(PS_DISPLAY value, label) of the monitors (psport-gpu-capabilities --displays), [] if unknown.
     The value is the monitor's name, or its number when two monitors share a name."""
-    tool = PORT_DIR / ("bin" if PACKAGED else "out") / "bb-gpu-capabilities"
+    tool = PORT_DIR / ("bin" if PACKAGED else "out") / "psport-gpu-capabilities"
     try:
         run = subprocess.run([str(tool), "--displays"], capture_output=True, text=True, timeout=5)
     except (OSError, subprocess.SubprocessError):
@@ -649,7 +655,7 @@ class LauncherWindow(Adw.ApplicationWindow):
                                                 lambda _button: self.fill_gamepads()))
         self.fill_gamepads()
         controls.add(self.gamepad_row)
-        # Bindings: "Assign" waits for a key or button (bb-gpu-capabilities --read-input).
+        # Bindings: "Assign" waits for a key or button (psport-gpu-capabilities --read-input).
         self.control_rows = {}
         for kind, title, icon in (("key", tr("Клавиатура и мышь"), "input-keyboard-symbolic"),
                                   ("pad", tr("Геймпад"), "input-gaming-symbolic")):
@@ -691,7 +697,7 @@ class LauncherWindow(Adw.ApplicationWindow):
 
         upscaler = Adw.PreferencesGroup(
             title=tr("Апскейлер"),
-            description=tr("Хранится в bbport.ini; в игре меняется через меню (Insert или L3+R3)"))
+            description=tr("Хранится в psport.ini; в игре меняется через меню (Insert или L3+R3)"))
         self.upscaler_row = combo_row(tr("Апскейлер"), None, UPSCALERS, self.ini["upscaler"])
         self.upscaler_row.connect("notify::selected", lambda *_: self.update_upscaler_status())
         upscaler.add(self.upscaler_row)
@@ -969,7 +975,7 @@ class LauncherWindow(Adw.ApplicationWindow):
         self.store()
 
     def assign_control(self, kind, name):
-        tool = PORT_DIR / ("bin" if PACKAGED else "out") / "bb-gpu-capabilities"
+        tool = PORT_DIR / ("bin" if PACKAGED else "out") / "psport-gpu-capabilities"
         try:
             process = Gio.Subprocess.new([str(tool), "--read-input", kind],
                                          Gio.SubprocessFlags.STDOUT_PIPE)
