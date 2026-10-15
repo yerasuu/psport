@@ -1022,18 +1022,21 @@ s32 deleteRequest(s64 requestId) {
     lockContext(context);
     OrbisNpWebApiUserContext* user_context = findUserContext(context, requestId >> 0x20);
     if (user_context == nullptr) {
+        unlockContext(context);
         releaseContext(context);
         return ORBIS_NP_WEBAPI_ERROR_USER_CONTEXT_NOT_FOUND;
     }
 
     OrbisNpWebApiRequest* request = findRequestAndMarkBusy(user_context, requestId);
     if (request == nullptr) {
+        unlockContext(context);
         releaseUserContext(user_context);
         releaseContext(context);
         return ORBIS_NP_WEBAPI_ERROR_REQUEST_NOT_FOUND;
     }
 
     if (g_sdk_ver < Common::ElfInfo::FW_400 && isRequestBusy(request)) {
+        unlockContext(context);
         releaseRequest(request);
         releaseUserContext(user_context);
         releaseContext(context);
@@ -1187,6 +1190,7 @@ s32 abortHandle(s32 libCtxId, s32 handleId) {
 s32 deleteHandleInternal(OrbisNpWebApiContext* context, s32 handleId) {
     lockContext(context);
     if (!context->handles.contains(handleId)) {
+        unlockContext(context);
         return ORBIS_NP_WEBAPI_ERROR_HANDLE_NOT_FOUND;
     }
 
@@ -2111,7 +2115,54 @@ void EnqueuePushEvent(const PushEventInput& ev) {
     g_push_queue.push_back(ev);
 }
 
-// Runs on the game thread from sceNpCheckCallback
+enum class PushCallbackKind { Extended, Service, Basic };
+
+struct PushCallbackCall {
+    PushCallbackKind kind;
+    s32 h_lib_ctx;
+    s32 h_title_user_ctx;
+    s32 h_callback;
+    const void* p_registration;
+    void (*pfn_callback)();
+    void* p_user_arg;
+    std::string service_name;
+    OrbisNpServiceLabel service_label;
+};
+
+// The callback may have unregistered another one, or deleted its context, while the locks were
+// released to call it.
+bool isPushCallbackRegistered(const PushCallbackCall& call) {
+    std::scoped_lock gl{g_global_mutex};
+    const auto context_it = g_contexts.find(call.h_lib_ctx);
+    if (context_it == g_contexts.end() || context_it->second == nullptr) {
+        return false;
+    }
+    OrbisNpWebApiContext* context = context_it->second;
+    std::scoped_lock cl{context->contextLock};
+    const auto uc_it = context->userContexts.find(call.h_title_user_ctx);
+    if (uc_it == context->userContexts.end() || uc_it->second == nullptr) {
+        return false;
+    }
+    const OrbisNpWebApiUserContext* uc = uc_it->second;
+    const auto is_in = [&call](const auto& callbacks) {
+        const auto it = callbacks.find(call.h_callback);
+        return it != callbacks.end() && it->second == call.p_registration &&
+               it->second->pUserArg == call.p_user_arg;
+    };
+    switch (call.kind) {
+    case PushCallbackKind::Extended:
+        return is_in(uc->extendedPushEventCallbacks);
+    case PushCallbackKind::Service:
+        return is_in(uc->servicePushEventCallbacks);
+    case PushCallbackKind::Basic:
+        return is_in(uc->pushEventCallbacks);
+    }
+    return false;
+}
+
+// Runs on the game thread from sceNpCheckCallback. The game's callbacks run after
+// g_global_mutex and contextLock are released, so that a callback waiting on another thread's
+// WebApi call does not deadlock.
 void DrainPushEvents() {
     std::deque<PushEventInput> local;
     {
@@ -2129,137 +2180,150 @@ void DrainPushEvents() {
         const OrbisNpOnlineId* from_p = ev.hasFrom ? &ev.fromOnlineId : nullptr;
         const OrbisNpOnlineId* to_p = ev.hasTo ? &ev.toOnlineId : nullptr;
 
-        std::scoped_lock gl{g_global_mutex};
-        for (auto& [libId, context] : g_contexts) {
-            if (context == nullptr) {
-                continue;
-            }
-            std::scoped_lock cl{context->contextLock};
-            for (auto& [ucKey, uc] : context->userContexts) {
-                if (uc == nullptr) {
+        std::vector<PushCallbackCall> calls;
+        {
+            std::scoped_lock gl{g_global_mutex};
+            for (auto& [libId, context] : g_contexts) {
+                if (context == nullptr) {
                     continue;
                 }
-                if (uc->userId != ev.targetUserId) {
-                    continue;
-                }
-                const s32 title_user_ctx_id = ucKey;
+                std::scoped_lock cl{context->contextLock};
+                for (auto& [ucKey, uc] : context->userContexts) {
+                    if (uc == nullptr) {
+                        continue;
+                    }
+                    if (uc->userId != ev.targetUserId) {
+                        continue;
+                    }
+                    const s32 title_user_ctx_id = ucKey;
 
-                for (auto& [cbId, cb] : uc->extendedPushEventCallbacks) {
-                    if (cb == nullptr) {
-                        continue;
+                    for (auto& [cbId, cb] : uc->extendedPushEventCallbacks) {
+                        if (cb == nullptr) {
+                            continue;
+                        }
+                        void (*raw)() = cb->cbFuncA  ? reinterpret_cast<void (*)()>(cb->cbFuncA)
+                                        : cb->cbFunc ? reinterpret_cast<void (*)()>(cb->cbFunc)
+                                                     : nullptr;
+                        if (raw == nullptr) {
+                            continue;
+                        }
+                        auto fit = context->extendedPushEventFilters.find(cb->filterId);
+                        if (fit == context->extendedPushEventFilters.end()) {
+                            continue;
+                        }
+                        const OrbisNpWebApiExtendedPushEventFilter* flt = fit->second;
+                        if (!filterMatches(flt, ev.npServiceName, ev_has_service, ev.dataType)) {
+                            continue;
+                        }
+                        // Service name/label come from the FILTER
+                        calls.push_back({PushCallbackKind::Extended, libId, title_user_ctx_id, cbId,
+                                         cb, raw, cb->pUserArg, flt->npServiceName,
+                                         flt->npServiceLabel});
                     }
-                    void (*raw)() = cb->cbFuncA  ? reinterpret_cast<void (*)()>(cb->cbFuncA)
-                                    : cb->cbFunc ? reinterpret_cast<void (*)()>(cb->cbFunc)
-                                                 : nullptr;
-                    if (raw == nullptr) {
-                        continue;
-                    }
-                    auto fit = context->extendedPushEventFilters.find(cb->filterId);
-                    if (fit == context->extendedPushEventFilters.end()) {
-                        continue;
-                    }
-                    const OrbisNpWebApiExtendedPushEventFilter* flt = fit->second;
-                    if (!filterMatches(flt, ev.npServiceName, ev_has_service, ev.dataType)) {
-                        continue;
-                    }
-                    std::vector<OrbisNpWebApiExtdPushEventExtdData> exarr;
-                    exarr.reserve(ev.extdData.size());
-                    for (auto& [k, v] : ev.extdData) {
-                        OrbisNpWebApiExtdPushEventExtdData e{};
-                        std::snprintf(e.extdDataKey.val, sizeof(e.extdDataKey.val), "%s",
-                                      k.c_str());
-                        e.pData = const_cast<char*>(v.data());
-                        e.dataLen = v.size();
-                        exarr.push_back(e);
-                    }
-                    // Service name/label come from the FILTER
-                    const char* svc =
-                        flt->npServiceName.empty() ? nullptr : flt->npServiceName.c_str();
-                    // pData/pExtdData are NULL (and the counts 0) when the event
-                    // carries no payload / no matching extended data.
-                    const char* ext_data = ev.data.empty() ? nullptr : ev.data.data();
-                    const OrbisNpWebApiExtdPushEventExtdData* ext_arr =
-                        exarr.empty() ? nullptr : exarr.data();
 
-                    LOG_INFO(
-                        Lib_NpWebApi, "invoking extd cb ctx={:#x} cbId={} dataType='{}'",
-                        title_user_ctx_id, cbId,
-                        ev.dataType); // debug confirm the listener callback fires. to be removed
-                    reinterpret_cast<ExtdCbA>(raw)(
-                        title_user_ctx_id, cbId, svc, flt->npServiceLabel, nullptr, to_p, nullptr,
-                        from_p, &dt, ext_data, ev.data.size(), ext_arr, exarr.size(), cb->pUserArg);
-                }
-
-                // Service push
-                for (auto& [cbId, cb] : uc->servicePushEventCallbacks) {
-                    if (cb == nullptr || cb->cbFunc == nullptr) {
-                        continue;
-                    }
-                    auto fit = context->servicePushEventFilters.find(cb->filterId);
-                    if (fit == context->servicePushEventFilters.end()) {
-                        continue;
-                    }
-                    const OrbisNpWebApiServicePushEventFilter* flt = fit->second;
-                    if (!filterMatches(flt, ev.npServiceName, ev_has_service, ev.dataType)) {
-                        continue;
-                    }
-                    const char* svc =
-                        flt->npServiceName.empty() ? nullptr : flt->npServiceName.c_str();
-                    const char* svc_data = ev.data.empty() ? nullptr : ev.data.data();
-                    PushPeerAddress to_peer{};   // notified user (self)
-                    PushPeerAddress from_peer{}; // user that caused the event
-                    if (ev.hasTo) {
-                        to_peer.onlineId = ev.toOnlineId;
-                    }
-                    if (ev.hasFrom) {
-                        from_peer.onlineId = ev.fromOnlineId;
-                    }
-                    reinterpret_cast<ServiceCb>(reinterpret_cast<void (*)()>(cb->cbFunc))(
-                        title_user_ctx_id, cbId, svc, flt->npServiceLabel, &to_peer, &from_peer,
-                        &dt, svc_data, ev.data.size(), cb->pUserArg);
-                }
-
-                // Basic push
-                if (!ev_has_service) {
-                    for (auto& [cbId, cb] : uc->pushEventCallbacks) {
+                    // Service push
+                    for (auto& [cbId, cb] : uc->servicePushEventCallbacks) {
                         if (cb == nullptr || cb->cbFunc == nullptr) {
                             continue;
                         }
-                        auto fit = context->pushEventFilters.find(cb->filterId);
-                        if (fit == context->pushEventFilters.end()) {
+                        auto fit = context->servicePushEventFilters.find(cb->filterId);
+                        if (fit == context->servicePushEventFilters.end()) {
                             continue;
                         }
-                        const OrbisNpWebApiPushEventFilter* flt = fit->second;
-                        bool matched = false;
-                        for (const auto& p : flt->filterParams) {
-                            if (ev.dataType == p.dataType.val) {
-                                matched = true;
-                                break;
+                        const OrbisNpWebApiServicePushEventFilter* flt = fit->second;
+                        if (!filterMatches(flt, ev.npServiceName, ev_has_service, ev.dataType)) {
+                            continue;
+                        }
+                        calls.push_back({PushCallbackKind::Service, libId, title_user_ctx_id, cbId,
+                                         cb, reinterpret_cast<void (*)()>(cb->cbFunc), cb->pUserArg,
+                                         flt->npServiceName, flt->npServiceLabel});
+                    }
+
+                    // Basic push
+                    if (!ev_has_service) {
+                        for (auto& [cbId, cb] : uc->pushEventCallbacks) {
+                            if (cb == nullptr || cb->cbFunc == nullptr) {
+                                continue;
                             }
+                            auto fit = context->pushEventFilters.find(cb->filterId);
+                            if (fit == context->pushEventFilters.end()) {
+                                continue;
+                            }
+                            const OrbisNpWebApiPushEventFilter* flt = fit->second;
+                            bool matched = false;
+                            for (const auto& p : flt->filterParams) {
+                                if (ev.dataType == p.dataType.val) {
+                                    matched = true;
+                                    break;
+                                }
+                            }
+                            if (!matched) {
+                                continue;
+                            }
+                            calls.push_back({PushCallbackKind::Basic, libId, title_user_ctx_id,
+                                             cbId, cb, reinterpret_cast<void (*)()>(cb->cbFunc),
+                                             cb->pUserArg, {}, {}});
                         }
-                        if (!matched) {
-                            continue;
-                        }
-                        LOG_INFO(Lib_NpWebApi,
-                                 "invoking basic cb ctx={:#x} cbId={} "
-                                 "dataType='{}'",
-                                 title_user_ctx_id, cbId,
-                                 ev.dataType); // debug confirm the listener callback fires. to be
-                                               // removed
-                        PushPeerAddress to_peer{};   // notified user (self)
-                        PushPeerAddress from_peer{}; // user that caused the event
-                        if (ev.hasTo) {
-                            to_peer.onlineId = ev.toOnlineId;
-                        }
-                        if (ev.hasFrom) {
-                            from_peer.onlineId = ev.fromOnlineId;
-                        }
-                        const char* p_data = ev.data.empty() ? nullptr : ev.data.data();
-                        reinterpret_cast<BasicCb>(reinterpret_cast<void (*)()>(cb->cbFunc))(
-                            title_user_ctx_id, cbId, &to_peer, &from_peer, &dt, p_data,
-                            ev.data.size(), cb->pUserArg);
                     }
                 }
+            }
+        }
+
+        for (const PushCallbackCall& call : calls) {
+            if (!isPushCallbackRegistered(call)) {
+                continue;
+            }
+            const char* svc = call.service_name.empty() ? nullptr : call.service_name.c_str();
+            // pData/pExtdData are NULL (and the counts 0) when the event
+            // carries no payload / no matching extended data.
+            const char* p_data = ev.data.empty() ? nullptr : ev.data.data();
+            PushPeerAddress to_peer{};   // notified user (self)
+            PushPeerAddress from_peer{}; // user that caused the event
+            if (ev.hasTo) {
+                to_peer.onlineId = ev.toOnlineId;
+            }
+            if (ev.hasFrom) {
+                from_peer.onlineId = ev.fromOnlineId;
+            }
+            switch (call.kind) {
+            case PushCallbackKind::Extended: {
+                std::vector<OrbisNpWebApiExtdPushEventExtdData> exarr;
+                exarr.reserve(ev.extdData.size());
+                for (auto& [k, v] : ev.extdData) {
+                    OrbisNpWebApiExtdPushEventExtdData e{};
+                    std::snprintf(e.extdDataKey.val, sizeof(e.extdDataKey.val), "%s", k.c_str());
+                    e.pData = const_cast<char*>(v.data());
+                    e.dataLen = v.size();
+                    exarr.push_back(e);
+                }
+                const OrbisNpWebApiExtdPushEventExtdData* ext_arr =
+                    exarr.empty() ? nullptr : exarr.data();
+
+                LOG_INFO(Lib_NpWebApi, "invoking extd cb ctx={:#x} cbId={} dataType='{}'",
+                         call.h_title_user_ctx, call.h_callback,
+                         ev.dataType); // debug confirm the listener callback fires. to be removed
+                reinterpret_cast<ExtdCbA>(call.pfn_callback)(
+                    call.h_title_user_ctx, call.h_callback, svc, call.service_label, nullptr, to_p,
+                    nullptr, from_p, &dt, p_data, ev.data.size(), ext_arr, exarr.size(),
+                    call.p_user_arg);
+                break;
+            }
+            case PushCallbackKind::Service:
+                reinterpret_cast<ServiceCb>(call.pfn_callback)(
+                    call.h_title_user_ctx, call.h_callback, svc, call.service_label, &to_peer,
+                    &from_peer, &dt, p_data, ev.data.size(), call.p_user_arg);
+                break;
+            case PushCallbackKind::Basic:
+                LOG_INFO(Lib_NpWebApi,
+                         "invoking basic cb ctx={:#x} cbId={} "
+                         "dataType='{}'",
+                         call.h_title_user_ctx, call.h_callback,
+                         ev.dataType); // debug confirm the listener callback fires. to be
+                                       // removed
+                reinterpret_cast<BasicCb>(call.pfn_callback)(call.h_title_user_ctx, call.h_callback,
+                                                             &to_peer, &from_peer, &dt, p_data,
+                                                             ev.data.size(), call.p_user_arg);
+                break;
             }
         }
     }

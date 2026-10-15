@@ -347,8 +347,7 @@ u32 NetUtilInternal::GetNatType() const {
 }
 
 bool NetUtilInternal::RetrieveIp() {
-    std::scoped_lock lock{m_mutex};
-
+    // psport: the connect can take until the TCP timeout offline, so only the store is under the lock.
     auto sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd == -1) {
         return false;
@@ -376,7 +375,10 @@ bool NetUtilInternal::RetrieveIp() {
 
     char netmaskStr[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, &sa.sin_addr, netmaskStr, INET_ADDRSTRLEN);
-    ip = netmaskStr;
+    {
+        std::scoped_lock lock{m_mutex};
+        ip = netmaskStr;
+    }
 
     close(sockfd);
 

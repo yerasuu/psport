@@ -74,8 +74,7 @@ void UPnPClient::DiscoverThread() {
 
     if (!devlist) {
         LOG_INFO(Lib_Net, "UPNP: no IGD found (error={})", error);
-        m_done = true;
-        m_cv.notify_all();
+        MarkDiscoveryDone();
         return;
     }
 
@@ -86,8 +85,7 @@ void UPnPClient::DiscoverThread() {
 
     if (ret != 1) {
         LOG_INFO(Lib_Net, "UPNP: no valid IGD (ret={})", ret);
-        m_done = true;
-        m_cv.notify_all();
+        MarkDiscoveryDone();
         return;
     }
 
@@ -96,8 +94,7 @@ void UPnPClient::DiscoverThread() {
         UPNPCOMMAND_SUCCESS) {
         LOG_WARNING(Lib_Net, "UPNP: IGD found but failed to get external IP");
         FreeUPNPUrls(&m_urls);
-        m_done = true;
-        m_cv.notify_all();
+        MarkDiscoveryDone();
         return;
     }
 
@@ -110,7 +107,14 @@ void UPnPClient::DiscoverThread() {
     LOG_INFO(Lib_Net, "UPNP: IGD found - external IP={} lan={} (port mapping available)",
              external_ip, m_lan_addr);
 
-    m_done = true;
+    MarkDiscoveryDone();
+}
+
+void UPnPClient::MarkDiscoveryDone() {
+    {
+        std::lock_guard lock(m_mutex);
+        m_done = true;
+    }
     m_cv.notify_all();
 }
 

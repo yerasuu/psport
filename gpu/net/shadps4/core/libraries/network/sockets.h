@@ -89,6 +89,9 @@ struct Socket {
     virtual std::optional<net_socket> Native() = 0;
     std::mutex m_mutex;
     std::mutex receive_mutex;
+    // psport: accept, connect and send block, and Close or setsockopt from another thread must not
+    // wait behind them: sends serialize on their own lock, accept and connect take none.
+    std::mutex m_send_mutex;
     int socket_type;
 };
 

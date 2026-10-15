@@ -57,6 +57,7 @@ template <class T>
 class AvPlayerQueue {
 public:
     size_t Size() {
+        std::lock_guard guard(m_mutex);
         return m_queue.size();
     }
 
@@ -66,14 +67,15 @@ public:
     }
 
     T& Front() {
+        std::lock_guard guard(m_mutex);
         return m_queue.front();
     }
 
     std::optional<T> Pop() {
-        if (Size() == 0) {
+        std::lock_guard guard(m_mutex);
+        if (m_queue.empty()) {
             return std::nullopt;
         }
-        std::lock_guard guard(m_mutex);
         auto result = std::move(m_queue.front());
         m_queue.pop();
         return result;
