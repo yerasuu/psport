@@ -31,7 +31,7 @@
 #define VOLUME_0DB 32768
 
 typedef struct {
-    int used, type, channels, is_float, frames, cb_sample, std_layout;
+    int used, is_opening, type, channels, is_float, frames, cb_sample, std_layout;
     int32_t volume[8];
     SDL_AudioStream *p_stream;
     uint64_t next_deadline_ns; /* next return of sceAudioOutOutput */
@@ -104,15 +104,19 @@ static ABI int32_t audio_open(int32_t user, int32_t type, int32_t i_device, uint
     static const int s_channels[8]={1,2,8,1,2,8,8,8};
     pthread_mutex_lock(&s_table_lock);
     int id=-1;
-    for (int i=first;i<=last;++i) if (!s_ports[i].used) { id=i; break; }
+    for (int i=first;i<=last;++i) if (!s_ports[i].used && !s_ports[i].is_opening) { id=i; break; }
     if (id<0) { pthread_mutex_unlock(&s_table_lock); return ERR_PORT_FULL; }
     Port *p_port=&s_ports[id];
     memset(p_port,0,sizeof(*p_port));
     pthread_mutex_init(&p_port->lock,NULL);
-    p_port->used=1; p_port->type=type; p_port->channels=s_channels[format]; p_port->is_float=format>=3 && format!=6;
+    p_port->is_opening=1; p_port->type=type; p_port->channels=s_channels[format]; p_port->is_float=format>=3 && format!=6;
     p_port->cb_sample=p_port->is_float ? 4 : 2; p_port->frames=(int)length; p_port->std_layout=format>=6;
     for (int c=0;c<8;++c) p_port->volume[c]=VOLUME_0DB;
-    if (sdl_audio()) {
+    const int is_sdl_ready=sdl_audio();
+    /* Opening the device takes tens of milliseconds, and every other port's output looks its
+       handle up under the table's lock. The slot stays reserved and unopened meanwhile. */
+    pthread_mutex_unlock(&s_table_lock);
+    if (is_sdl_ready) {
         SDL_AudioSpec spec={p_port->is_float ? SDL_AUDIO_F32 : SDL_AUDIO_S16, p_port->channels, 48000};
         p_port->p_stream=SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,&spec,NULL,NULL);
         if (p_port->p_stream) SDL_ResumeAudioStreamDevice(p_port->p_stream);
@@ -125,6 +129,8 @@ static ABI int32_t audio_open(int32_t user, int32_t type, int32_t i_device, uint
         snprintf(sz_path,sizeof(sz_path),"%s.port%d.%dch.%s",sz_dump,id,p_port->channels,p_port->is_float ? "f32" : "s16");
         p_port->p_dump=fopen(sz_path,"wb");
     }
+    pthread_mutex_lock(&s_table_lock);
+    p_port->is_opening=0; p_port->used=1;
     ++s_c_ports_opened;
     pthread_mutex_unlock(&s_table_lock);
     printf("Runtime: audio port %d opened (type %d, %d ch, %s, %u frames)\n",id,type,p_port->channels,p_port->is_float ? "float" : "s16",length);
@@ -134,15 +140,19 @@ static ABI int32_t audio_close(int32_t h_handle) {
     pthread_mutex_lock(&s_table_lock);
     int32_t error=0;
     Port *p_port=port_of(h_handle,&error);
+    SDL_AudioStream *p_stream=NULL;
+    FILE *p_dump=NULL;
     if (p_port) {
         pthread_mutex_lock(&p_port->lock);
-        if (p_port->p_stream) SDL_DestroyAudioStream(p_port->p_stream);
-        if (p_port->p_dump) fclose(p_port->p_dump);
+        p_stream=p_port->p_stream; p_dump=p_port->p_dump;
         p_port->p_dump=NULL;
         p_port->p_stream=NULL; p_port->used=0;
         pthread_mutex_unlock(&p_port->lock);
     }
     pthread_mutex_unlock(&s_table_lock);
+    /* Closing the device waits for its audio thread: not under the table's lock either. */
+    if (p_stream) SDL_DestroyAudioStream(p_stream);
+    if (p_dump) fclose(p_dump);
     return p_port ? 0 : error;
 }
 /* `pace`: wait for this port's next period. sceAudioOutOutputs waits once for all its ports. */
