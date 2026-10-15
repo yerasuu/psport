@@ -13,6 +13,8 @@ void runtime_restart(void);
  * guest path of the package, as the main executable and pp_arguments (NULL-terminated, may be NULL)
  * after it; returns only when the exec failed. */
 void runtime_load_exec(const char *sz_path, char *const *pp_arguments);
+/* psport's own command line, which runtime_load_exec starts again from; kept. */
+void runtime_restart_configure(int c_argv, char **pp_argv);
 #endif
 #define ABI __attribute__((sysv_abi))
 typedef void (ABI *GuestCallback)(void);
