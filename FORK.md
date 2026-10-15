@@ -165,6 +165,45 @@ change of the text (also written to the game's buffer) and Enter or Esc as the p
 button; the caret stays at the end of the text and no input method composes. Without a window the
 panel is entered at once with `PS_IME_TEXT` or the text the game opened it with.
 
+## Trophies
+
+libSceNpTrophy (`src/runtime_trophy.c`) serves the game's trophy pack and keeps each user's unlocks
+across runs. Registering a context reads `/app0/sce_sys/trophy/trophy<label>.trp` (the context's
+service label, two digits): a TRP container (`src/runtime_trophy_pack.c`; big-endian header 0x60
+bytes: magic `0xDCA24D00`, version, file size, entry count, entry size 0x40; each entry a 32-byte
+name, offset, size and flags) holding `ICON0.PNG` (and `ICON0_<language>.PNG`), `GR<group>.PNG`,
+`TROP<id>.PNG` and the configuration, `TROPCONF.SFM` with the names in `TROP.SFM` and
+`TROP_<language>.SFM` (`PS_LANGUAGE`, the system language, two digits), XML that
+`src/runtime_trophy_sfm.c` reads. In retail packs, every dump checked so far, the SFM files are
+`.ESFM`: encrypted with the console's trophy key, which the port does not have. Then the trophies are
+the pack's `TROP<id>.PNG` icons and the groups its `GR<group>.PNG` icons, with no names, grades,
+hidden flags, group membership or platinum (every trophy is in the base game's group), the
+registration says so in the log and the call report counts it as a stub. Without a pack the set is
+empty, as on a console without the title's trophy data, and unlocks of any id below 128 are kept.
+
+The registration logs one line with what it read
+(`Runtime: NpTrophy: context <n> (user <n>, service label <n>) registered: NP communication id ...,
+<n> trophies, <n> groups, <what the configuration gave>; <n> unlocked (<state folder>)`), each unlock
+one (`Runtime: trophy <id> unlocked at <UTC time> (<grade>[, <name>])`, and the platinum the unlock
+completes in a second one) and each unlock of a trophy already unlocked one
+(`Runtime: trophy <id> already unlocked at <UTC time>`; the call fails with `0x8055160C`).
+
+The state lives in the user folder (`--user`, `PS_USER_DIR`), under the NP communication id that
+`sce_sys/npbind.dat` binds to the service label (else the configuration's `npcommid`, else the
+title id):
+
+| File | Contents |
+|---|---|
+| `trophy/<NP comm id>/unlocks_<user id>.tsv` | a `#` comment line, then one line per trophy: id, `1` unlocked or `0`, unlock time in UTC (ISO 8601 with microseconds, `2026-10-15T09:41:07.123456Z`; empty while locked), tab-separated; rewritten whole (temporary file and rename) at every unlock |
+| `trophy/<NP comm id>/trophyset.json` | the pack as the port read it, rewritten at every registration: `format` (1), `np_comm_id`, `pack` (guest path), `configuration` (`plain`, `encrypted`, `invalid` or `missing`), `language`, `names` (the SFM the names came from), `title`, `detail`, `groups` (`id`, `icon`, `name`, `detail`) and `trophies` (`id`, `icon` (the entry in the pack), `grade`: `platinum`, `gold`, `silver`, `bronze` or `unknown`, `hidden`, `group` (-1 the base game), `platinum` (the platinum it counts for, -1 none), `name`, `detail`) |
+
+The user id is the one `sceUserServiceGetInitialUser` reports (1). A trophy whose configuration names
+a platinum (`pid`) unlocks that platinum with it once every trophy counting for it is unlocked, and
+`sceNpTrophyUnlockTrophy` returns its id. Icon calls follow the size query: without a buffer they
+give the icon's size; with one, they copy the icon when the size passed holds it
+(`0x80551605` otherwise); a hidden trophy's icon waits for its unlock (`0x8055161A`).
+`sceNpTrophyShowTrophyList` only logs, as there is no system UI.
+
 ## Defaults
 
 Every default is chosen for any game: what the console does, or what changes only how fast the host
