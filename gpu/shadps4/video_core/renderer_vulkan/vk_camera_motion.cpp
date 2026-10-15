@@ -7,7 +7,7 @@
 #include <cstdlib>
 #include <cstring>
 
-#include "bbport_toggles.h"
+#include "psport_toggles.h"
 
 #include "video_core/host_shaders/camera_motion_comp.h"
 #include "video_core/host_shaders/camera_motion_debug_comp.h"
@@ -291,7 +291,7 @@ void CameraMotion::OnConstants(const float* data) {
         inverse_gap = std::max(inverse_gap, std::abs(computed_inverse[i] - pass_camera.inv_view[i]));
     }
     const auto game_inverse = pass_camera.inv_view;
-    if (own_inverse != BbToggle::Disabled(BbToggle::CameraOwnInverse)) {
+    if (own_inverse != PsToggle::Disabled(PsToggle::CameraOwnInverse)) {
         pass_camera.inv_view = computed_inverse;
     }
     // bbport: PS_CAMERA_LOG=1 prints the camera position every 100 ms (scripted tests of how far
@@ -318,7 +318,7 @@ void CameraMotion::OnConstants(const float* data) {
         return !env ? 0.0f : std::strcmp(env, "up") == 0 ? -1.0f : std::strcmp(env, "down") == 0 ? 1.0f : 0.0f;
     }();
     const float y_sign = (forced_y != 0.0f ? forced_y : gbuffer_y_sign) *
-                         (BbToggle::Disabled(BbToggle::CameraYFlip) ? -1.0f : 1.0f);
+                         (PsToggle::Disabled(PsToggle::CameraYFlip) ? -1.0f : 1.0f);
     const float* p_projection = data + m_constants.off_dw_projection;
     pass_camera.proj = {p_projection[0] * gbuffer_x_sign, p_projection[5] * y_sign, p_projection[10],
                         p_projection[11]};
@@ -446,10 +446,10 @@ void CameraMotion::Overlay(VideoCore::ImageId frame) {
         .size = {float(color.info.size.width), float(color.info.size.height)},
         .jitter = jitter,
         .previous_jitter = previous_jitter,
-        .mode = BbToggle::Disabled(1u << 20)   ? 1u
-                : BbToggle::Disabled(1u << 21) ? 2u
-                : BbToggle::Disabled(1u << 22) ? 3u
-                : BbToggle::Disabled(1u << 23) ? 4u
+        .mode = PsToggle::Disabled(1u << 20)   ? 1u
+                : PsToggle::Disabled(1u << 21) ? 2u
+                : PsToggle::Disabled(1u << 22) ? 3u
+                : PsToggle::Disabled(1u << 23) ? 4u
                                                : 0u,
     };
     static u32 log_counter = 0;

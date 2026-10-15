@@ -1,7 +1,7 @@
 # bbport GPU library: shadPS4 video core + shader recompiler + Gnm/VideoOut
 # drivers, adapted to the native_probe runtime through shims in shim/.
 cmake_minimum_required(VERSION 3.24)
-project(bbgpu LANGUAGES C CXX)
+project(psport-gpu LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -13,9 +13,9 @@ add_compile_options(-fno-omit-frame-pointer)
 
 # bbport: link-time optimization (PS_LTO, default on) and profile-guided optimization
 # (PS_PGO: off, generate = instrumented build writing into PS_PGO_DIR, use = build with that
-# profile). Covers bbgpu and the static libraries linked into it. No -march: the same build
+# profile). Covers psport-gpu and the static libraries linked into it. No -march: the same build
 # runs on the Steam Deck.
-option(PS_LTO "Link-time optimization of bbgpu" ON)
+option(PS_LTO "Link-time optimization of psport-gpu" ON)
 set(PS_PGO "off" CACHE STRING "Profile-guided optimization: off, generate, use")
 set(PS_PGO_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../pgo" CACHE PATH "Profile directory")
 if (PS_LTO)
@@ -35,7 +35,7 @@ if (PS_PGO STREQUAL "generate")
 elseif (PS_PGO STREQUAL "use")
     # Partial training keeps unprofiled code optimized normally; counters from concurrent
     # threads can be slightly inconsistent (correction). Functions changed since the profile
-    # (or built differently for it, bbgpu_init) are compiled without it.
+    # (or built differently for it, psport_gpu_init) are compiled without it.
     add_compile_options(-fprofile-use=${PS_PGO_DIR} -fprofile-partial-training
                         -fprofile-correction -Wno-missing-profile -Wno-coverage-mismatch)
 endif()
@@ -143,21 +143,21 @@ file(GLOB PNGENC_SOURCES CONFIGURE_DEPENDS pngenc/*.cpp)
 file(GLOB PNGDEC_SOURCES CONFIGURE_DEPENDS pngdec/*.cpp)
 pkg_check_modules(FREETYPE REQUIRED IMPORTED_TARGET freetype2)
 file(GLOB ATRAC9_SOURCES CONFIGURE_DEPENDS ../third_party/LibAtrac9/C/src/*.c)
-add_library(bbgpu SHARED ${VIDEO_CORE} ${RECOMPILER} ${COMMON} ${SHIM_SOURCES} ${LAYER_SOURCES} ${GAME_SOURCES} ${CP_SOURCES}
+add_library(psport-gpu SHARED ${VIDEO_CORE} ${RECOMPILER} ${COMMON} ${SHIM_SOURCES} ${LAYER_SOURCES} ${GAME_SOURCES} ${CP_SOURCES}
     ${NGS2_SOURCES} ${FIBER_SOURCES} ${FONT_SOURCES} ${AUDIODEC_SOURCES} ${PNGENC_SOURCES} ${PNGDEC_SOURCES} ${ATRAC9_SOURCES}
     shadps4/core/libraries/gnmdriver/gnmdriver.cpp
     shadps4/core/libraries/videoout/driver.cpp shadps4/core/libraries/videoout/video_out.cpp
     shadps4/core/libraries/kernel/equeue.cpp ${AVPLAYER}
     shadps4/core/libraries/videodec/video_utils.cpp shadps4/core/libraries/videodec/videodec2.cpp
     shadps4/core/libraries/videodec/videodec2_impl.cpp)
-set_target_properties(bbgpu PROPERTIES OUTPUT_NAME psport-gpu)
-add_dependencies(bbgpu host_shaders)
+set_target_properties(psport-gpu PROPERTIES OUTPUT_NAME psport-gpu)
+add_dependencies(psport-gpu host_shaders)
 # In-game settings menu: Dear ImGui (third_party/imgui, MIT) with its Vulkan backend, and an
 # embedded Cyrillic font (third_party/fonts).
-target_sources(bbgpu PRIVATE third_party/imgui/imgui.cpp third_party/imgui/imgui_draw.cpp
+target_sources(psport-gpu PRIVATE third_party/imgui/imgui.cpp third_party/imgui/imgui_draw.cpp
     third_party/imgui/imgui_tables.cpp third_party/imgui/imgui_widgets.cpp
     third_party/imgui/backends/imgui_impl_vulkan.cpp)
-target_include_directories(bbgpu PRIVATE third_party/imgui third_party/imgui/backends)
+target_include_directories(psport-gpu PRIVATE third_party/imgui third_party/imgui/backends)
 # Dear ImGui stays private to libpsport-gpu.so. The library is linked into psport, so its exports are
 # in the global symbol scope; a Vulkan layer carrying its own Dear ImGui without -Bsymbolic
 # (vkShade 0.1) had its ImGui_ImplVulkan_Init bound to this copy, which called the Vulkan loader
@@ -166,23 +166,23 @@ set_source_files_properties(third_party/imgui/imgui.cpp third_party/imgui/imgui_
     third_party/imgui/imgui_tables.cpp third_party/imgui/imgui_widgets.cpp
     third_party/imgui/backends/imgui_impl_vulkan.cpp PROPERTIES
     COMPILE_OPTIONS "-fvisibility=hidden;-fvisibility-inlines-hidden")
-target_compile_definitions(bbgpu PRIVATE IMGUI_IMPL_VULKAN_NO_PROTOTYPES
+target_compile_definitions(psport-gpu PRIVATE IMGUI_IMPL_VULKAN_NO_PROTOTYPES
     PS_FONT_PATH="${CMAKE_CURRENT_SOURCE_DIR}/third_party/fonts/DejaVuSans.ttf")
-set_source_files_properties(shim/bbport_overlay.cpp PROPERTIES
+set_source_files_properties(shim/psport_overlay.cpp PROPERTIES
     OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/fonts/DejaVuSans.ttf")
-target_include_directories(bbgpu PRIVATE shim layer games cp shadps4 ${SHADER_INCLUDE} third_party/gcn/include third_party/half/include
+target_include_directories(psport-gpu PRIVATE shim layer games cp shadps4 ${SHADER_INCLUDE} third_party/gcn/include third_party/half/include
     ../third_party/LibAtrac9/C/src)
 # Third-party C, built as its upstream ships it (build.sh builds the runtime's copy with -w too).
 set_source_files_properties(${ATRAC9_SOURCES} PROPERTIES COMPILE_OPTIONS -w)
-target_compile_definitions(bbgpu PRIVATE BOOST_ASIO_STANDALONE NDEBUG)
-target_compile_options(bbgpu PRIVATE -Wno-deprecated-declarations -Wno-missing-field-initializers)
+target_compile_definitions(psport-gpu PRIVATE BOOST_ASIO_STANDALONE NDEBUG)
+target_compile_options(psport-gpu PRIVATE -Wno-deprecated-declarations -Wno-missing-field-initializers)
 # Loaded with psport at startup (DT_NEEDED, never dlopen): thread_local access without a
 # TLS descriptor call (_dl_tlsdesc_return was ~2% of the draw recording thread).
-target_compile_options(bbgpu PRIVATE -ftls-model=initial-exec)
+target_compile_options(psport-gpu PRIVATE -ftls-model=initial-exec)
 # Runtime symbols (runtime_memory_*, runtime_process_*) resolve against psport.
-target_link_options(bbgpu PRIVATE -Wl,--allow-shlib-undefined)
-target_link_libraries(bbgpu PRIVATE ffx-vulkan::portable ffx-vulkan::fsr4-v07-vulkan)
-target_link_libraries(bbgpu PUBLIC Vulkan::Headers fmt::fmt Boost::headers magic_enum::magic_enum
+target_link_options(psport-gpu PRIVATE -Wl,--allow-shlib-undefined)
+target_link_libraries(psport-gpu PRIVATE ffx-vulkan::portable ffx-vulkan::fsr4-v07-vulkan)
+target_link_libraries(psport-gpu PUBLIC Vulkan::Headers fmt::fmt Boost::headers magic_enum::magic_enum
     tsl::robin_map GPUOpen::VulkanMemoryAllocator PkgConfig::XXHASH PkgConfig::SDL3 PkgConfig::X11 PkgConfig::FFMPEG PkgConfig::FREETYPE miniz::miniz Zydis::Zydis sirit)
 
 # bbport: FSR 4 benchmark outside the game (tools/fsr4_bench.cpp): ninja -C out/gpu fsr4-bench.

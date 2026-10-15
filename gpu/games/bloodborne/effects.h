@@ -6,7 +6,7 @@
 #include <iterator>
 #include "game_profile.h"
 
-namespace BbEffects {
+namespace PsEffects {
 inline constexpr Game::EffectSwitch Switches[] = {
     {"effect_chromatic_aberration", {"Chromatic aberration", "Хроматическая аберрация", "Aberración cromática"}, true},
     {"effect_dof", {"Depth of field (DoF)", "Глубина резкости (DoF)", "Profundidad de campo (DoF)"}, true},
@@ -38,4 +38,4 @@ inline constexpr Game::EffectSwitch Switches[] = {
       "del mod #253 de Nexus (las fuentes en adhoc/font)."}},
 };
 inline constexpr int SwitchCount = int(std::size(Switches));
-} // namespace BbEffects
+} // namespace PsEffects

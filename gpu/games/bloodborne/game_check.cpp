@@ -20,7 +20,7 @@
 #include <sys/stat.h>
 #include <vector>
 
-namespace BbLaunch {
+namespace PsLaunch {
 namespace {
 constexpr const char* SupportedVersion = "01.09";
 constexpr const char* SupportedImage = "071df19c8880086d97182dbc057bc8cb37badaca57d9112683836b24a0444c0a";
@@ -82,7 +82,7 @@ bool HasBrokenDcx(const std::string& folder) {
 }
 } // namespace
 
-bool CheckFiles(const BbGameFiles& game, std::string& kind, std::string& advice) {
+bool CheckFiles(const PsGameFiles& game, std::string& kind, std::string& advice) {
     if (const char* sz_skip = std::getenv("PS_SKIP_GAME_CHECK"); sz_skip && !std::strcmp(sz_skip, "1")) {
         return true;
     }
@@ -120,4 +120,4 @@ bool CheckFiles(const BbGameFiles& game, std::string& kind, std::string& advice)
     }
     return false;
 }
-} // namespace BbLaunch
+} // namespace PsLaunch

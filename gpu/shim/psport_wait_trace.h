@@ -7,7 +7,7 @@
 #include <chrono>
 #include <cstdint>
 
-namespace BbWaitTrace {
+namespace PsWaitTrace {
 bool Enabled();
 
 /// Measures one wait and attributes it to the calling stack (when enabled).
@@ -24,4 +24,4 @@ private:
 
 /// Prints the stacks that waited longest since the last report, as a share of `window_s`.
 void Report(double window_s);
-} // namespace BbWaitTrace
+} // namespace PsWaitTrace

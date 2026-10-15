@@ -11,7 +11,7 @@
 #include <cstdint>
 #include <span>
 #include <string>
-#include "../bbgpu.h"
+#include "../psport_gpu.h"
 
 namespace Game {
 
@@ -21,7 +21,7 @@ struct CodeRange {
 };
 
 /// Guest code that frees the game's GPU label blocks (the fence targets of its command buffers),
-/// for the free check's PS_LABEL_TRAP=2 breakpoints (bbport_free_check.h).
+/// for the free check's PS_LABEL_TRAP=2 breakpoints (psport_free_check.h).
 struct LabelReleaseCode {
     /// The allocator's release: its first instruction must be `mov rax, rsi` followed by
     /// `test rax, rax`, rsi the block released.
@@ -32,7 +32,7 @@ struct LabelReleaseCode {
     std::uint64_t collector_done = 0;
 };
 
-/// The game's small-object pool, for the free check (PS_FREE_CHECK, bbport_free_check.h): 4 KiB
+/// The game's small-object pool, for the free check (PS_FREE_CHECK, psport_free_check.h): 4 KiB
 /// pages, blocks of block_size from the page start, a header at page + header_offset (page list
 /// next and prev, free list head and free count, a qword each), the free list linked through the
 /// first qword of each free block. A page has at most 128 blocks.
@@ -96,7 +96,7 @@ struct CoreServices {
     void (*fresh_range)(std::uint64_t address, std::uint64_t size) = nullptr;
 };
 
-/// An overlay menu text in its languages (BbSettings::MenuText); all null for none.
+/// An overlay menu text in its languages (PsSettings::MenuText); all null for none.
 struct LocalizedText {
     const char* sz_english = nullptr;
     const char* sz_russian = nullptr;
@@ -133,14 +133,14 @@ struct Profile {
     /// Its own patch file (shadPS4 XML), relative to psport's folder; external patch folders leave
     /// it out.
     const char* patch_file = nullptr;
-    /// Before anything of the game runs, before bbgpu_init: environment defaults it chooses.
+    /// Before anything of the game runs, before psport_gpu_init: environment defaults it chooses.
     void (*prepare_environment)() = nullptr;
     /// Checks the game's files before any of its code runs (PS_SKIP_GAME_CHECK=1 is its own to
     /// honour): false when they cannot work, with a short kind for launchers and what to do.
-    bool (*check_files)(const BbGameFiles& game, std::string& kind, std::string& advice) = nullptr;
+    bool (*check_files)(const PsGameFiles& game, std::string& kind, std::string& advice) = nullptr;
     /// Its own patches of the executable, chosen by the player's settings, appended through
     /// services before the external ones; false stops the launch (it printed why).
-    bool (*add_patches)(const BbGameFiles& game, const BbPatchServices& services) = nullptr;
+    bool (*add_patches)(const PsGameFiles& game, const PsPatchServices& services) = nullptr;
     /// The settings of add_patches the player changes in the overlay menu.
     GameEffects effects;
     /// Hooks in the game's code (each checks the bytes it replaces: another build of the game is
@@ -198,7 +198,7 @@ struct Profile {
 /// file check, its patches, its mod folders) is part of running the game, not an optimisation of the translator.
 const Profile* Find(const char* serial);
 
-/// Chooses the profile for the game by its TITLE_ID (bbgpu_init). PS_GAME_PROFILE=none runs the
+/// Chooses the profile for the game by its TITLE_ID (psport_gpu_init). PS_GAME_PROFILE=none runs the
 /// game as an unknown one (no profile), for checking the generic paths.
 void Select(const char* serial);
 

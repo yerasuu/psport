@@ -6,7 +6,7 @@
 #include <deque>
 #include <mutex>
 #include <string>
-#include "../bbgpu.h"
+#include "../psport_gpu.h"
 #include "common/types.h"
 
 struct SDL_Window;
@@ -40,19 +40,19 @@ public:
     int PollTextInput(std::string& text);
     /// Ends an entry the game took back (libSceIme closed) as cancelled, without waiting for a key.
     void EndTextInput();
-    /// Mouse look (bbgpu_mouse_take): motion and wheel notches since the last call, reset.
+    /// Mouse look (psport_gpu_mouse_take): motion and wheel notches since the last call, reset.
     void TakeMouse(double& dx, double& dy, int& wheel_up, int& wheel_down);
     /// The window holds the mouse (relative mode) for looking around.
     bool MouseCaptured() const { return mouse_captured.load(std::memory_order_relaxed); }
     /// mouse_look=0: a click does not take the mouse.
     static void EnableMouseLook(bool enabled) { mouse_look.store(enabled, std::memory_order_relaxed); }
-    /// libSceMouse (bbgpu_game_mouse_take): the buttons held (SDL_BUTTON_MASK bits), and the motion,
+    /// libSceMouse (psport_gpu_game_mouse_take): the buttons held (SDL_BUTTON_MASK bits), and the motion,
     /// wheel and tilt since the last call, reset. False while the host has no mouse.
     bool TakeGameMouse(s32& dx, s32& dy, s32& wheel, s32& tilt, u32& buttons);
-    /// libSceImeKeyboard (bbgpu_game_keyboard_*): while open, the keys the port does not keep are
+    /// libSceImeKeyboard (psport_gpu_game_keyboard_*): while open, the keys the port does not keep are
     /// queued for the game; take returns up to max of them. keyboard: the host has one.
     static void OpenGameKeyboard(bool open) { game_keyboard_open.store(open, std::memory_order_relaxed); }
-    int TakeGameKeys(BbKeyEvent* events, int max, bool& keyboard, u32& dropped);
+    int TakeGameKeys(PsKeyEvent* events, int max, bool& keyboard, u32& dropped);
 
 private:
     std::atomic<s32> width, height;
@@ -79,7 +79,7 @@ private:
     void GameKeyEvent(const SDL_Event& event);
     void SyncGameKeyboard();
     std::mutex key_mutex;
-    std::deque<BbKeyEvent> game_keys;
+    std::deque<PsKeyEvent> game_keys;
     std::bitset<512> game_keys_held; ///< by scancode: presses the game saw, so it gets their release
     u32 game_keys_dropped{};
     bool game_keyboard_synced{};

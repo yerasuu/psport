@@ -10,7 +10,7 @@
 #include <cstdlib>
 #include <unordered_map>
 
-namespace BbCeStats {
+namespace PsCeStats {
 
 enum Kind : unsigned {
     UserDataPointer, ///< a 64-bit user data value pointing into dumped pages (SRT/descriptor tables)
@@ -118,4 +118,4 @@ inline void Check(Kind kind, std::uint64_t address, std::uint64_t size) {
     }
 }
 
-} // namespace BbCeStats
+} // namespace PsCeStats

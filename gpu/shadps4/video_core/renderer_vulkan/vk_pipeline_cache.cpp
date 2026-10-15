@@ -37,10 +37,10 @@
 #include "video_core/renderer_vulkan/vk_shader_util.h"
 #include "video_core/buffer_cache/buffer.h"
 #include "video_core/buffer_cache/buffer_cache.h"
-#include "bbport_guest_memory.h"
-#include "bbport_settings.h"
+#include "psport_guest_memory.h"
+#include "psport_settings.h"
 #include "game_profile.h"
-#include "bbport_toggles.h"
+#include "psport_toggles.h"
 
 namespace Vulkan {
 
@@ -538,7 +538,7 @@ u64 DrawTarget(const AmdGpu::Regs& regs) {
 void NoteDrawTarget(const AmdGpu::Regs& regs) {
     static u64 last_target = 0;
     static u32 last_frame = ~0u;
-    const u32 frame = BbStats::frame_number.load(std::memory_order_relaxed);
+    const u32 frame = PsStats::frame_number.load(std::memory_order_relaxed);
     const u64 target = DrawTarget(regs);
     if (target == 0 || (target == last_target && frame == last_frame)) {
         return;
@@ -684,14 +684,14 @@ bool PipelineCache::AsyncSkippable(const PipelineSelection& selection, bool indi
     }
     static u32 frame_seen = ~0u;
     static u64 draws_at_start = 0, last_frame_draws = 0;
-    const u32 frame = BbStats::frame_number.load(std::memory_order_relaxed);
-    const u64 draws = BbStats::draws.load(std::memory_order_relaxed);
+    const u32 frame = PsStats::frame_number.load(std::memory_order_relaxed);
+    const u64 draws = PsStats::draws.load(std::memory_order_relaxed);
     if (frame != frame_seen) {
         last_frame_draws = draws - draws_at_start;
         draws_at_start = draws;
         frame_seen = frame;
         static u32 printed = 0;
-        const u32 second = BbStats::coarse_second.load(std::memory_order_relaxed);
+        const u32 second = PsStats::coarse_second.load(std::memory_order_relaxed);
         if (async_started != 0 && second - printed >= 5) {
             printed = second;
             std::printf("GPU: %llu pipelines compiled in the background, %llu draws went without "

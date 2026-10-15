@@ -1,4 +1,4 @@
-/* GPU library interface (gpu/shim/bbgpu.cpp): GPU hooks, write watches and traps, backing view
+/* GPU library interface (gpu/shim/psport_gpu.cpp): GPU hooks, write watches and traps, backing view
  * reads and writes, and the region lookups of its per-draw queries. */
 #define _GNU_SOURCE
 #include "runtime_memory.h"
@@ -26,9 +26,9 @@
  * 262144 with PS_ASYNC_FENCES=1: wait for guest copies at fences again,
  * 524288 small guest copies batched for the copy threads instead of the recording thread,
  * 1073741824 the lock-free UpdateImage path for clean, tracked images. */
-/* Bits 32 and up: the draw pipeline and related GPU thread work (gpu/shim/bbport_toggles.h). */
+/* Bits 32 and up: the draw pipeline and related GPU thread work (gpu/shim/psport_toggles.h). */
 uint64_t runtime_disabled_optimizations;
-/* bbport: a second number in PS_TOGGLE_FILE: temporary experiment bits (BbToggle::Experiment). */
+/* bbport: a second number in PS_TOGGLE_FILE: temporary experiment bits (PsToggle::Experiment). */
 uint64_t runtime_experiment_bits;
 /* Speculative readers of guest memory (GPU draw-preparation workers) register a recovery
  * point: a fault on that thread jumps back to it instead of terminating (probe.c). */

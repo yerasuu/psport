@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "bbport_copy.h"
+#include "psport_copy.h"
 
 #include <atomic>
 #include <deque>
@@ -345,7 +345,7 @@ private:
     void ReportInPlaceBlocks(); ///< bbport PS_RESIDENCY_REPORT (diagnostics)
     /// Arena residency memory from the 64 MiB blocks: the memory and the byte offset in it.
     std::pair<vk::DeviceMemory, u64> AllocateResidency(u64 bytes);
-    /// bbport: BbStats::residency_unused_bytes after the free list or the current block changed.
+    /// bbport: PsStats::residency_unused_bytes after the free list or the current block changed.
     void NoteResidencyUnused();
     /// bbport: idle VRAM blocks (see group_use).
     void NoteUse(VAddr address, u64 size);
@@ -362,9 +362,9 @@ private:
     bool SynchronizeMemory(const Buffer* arena, VAddr device_addr, u32 size, bool is_written,
                            bool is_texel_buffer);
 
-    /// bbport: batched small copies on the copy threads (BbCopy::QueueCopy).
-    static void RunGuestCopy(const BbCopy::Item& item);
-    void SmallGuestCopy(const BbCopy::Item& item);
+    /// bbport: batched small copies on the copy threads (PsCopy::QueueCopy).
+    static void RunGuestCopy(const PsCopy::Item& item);
+    void SmallGuestCopy(const PsCopy::Item& item);
 
     const Buffer* UploadCopies(const Buffer* arena, std::span<vk::BufferCopy> copies,
                                size_t total_size_bytes);
@@ -598,7 +598,7 @@ private:
     u64 residency_size = 0, residency_used = 0;
     std::future<vk::DeviceMemory> spare_residency; ///< the next block, allocated in the background
     /// bbport: VRAM blocks no longer needed. Per 2 MiB of guest addresses, the second
-    /// (BbStats::coarse_second) it was last bound: blocks in VRAM unused for PS_VRAM_IDLE_SECONDS
+    /// (PsStats::coarse_second) it was last bound: blocks in VRAM unused for PS_VRAM_IDLE_SECONDS
     /// (60, 0: never) go back to the game's memory, and residency chunks left without blocks
     /// go back to the driver (ProcessIdleBlocks). Blocks of unmapped memory leave VRAM too.
     static constexpr u64 USE_GROUP_BITS = 21;

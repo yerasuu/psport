@@ -12,7 +12,7 @@
 #include <cstdlib>
 #include <memory>
 
-namespace BbTimeline {
+namespace PsTimeline {
 
 enum Event : std::uint32_t {
     GuestSubmit,       ///< arg: queue (0 graphics), arg2: submission number
@@ -97,4 +97,4 @@ inline void Note(Event event, std::uint64_t arg = 0, std::uint64_t arg2 = 0) {
     }
 }
 
-} // namespace BbTimeline
+} // namespace PsTimeline

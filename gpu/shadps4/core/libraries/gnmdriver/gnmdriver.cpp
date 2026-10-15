@@ -21,9 +21,9 @@
 #include "core/memory.h"
 #include "core/platform.h"
 #include "video_core/amdgpu/liverpool.h"
-#include "bbport_toggles.h"
-#include "bbport_timeline.h"
-#include "bbport_submit_guard.h"
+#include "psport_toggles.h"
+#include "psport_timeline.h"
+#include "psport_submit_guard.h"
 #include "game_profile.h"
 #include "video_core/amdgpu/pm4_cmds.h"
 #include "video_core/renderer_vulkan/vk_presenter.h"
@@ -121,8 +121,8 @@ void ReleaseSubmissionLock() {
 static u64 frames_retired{};
 
 void NoteFramesRetired(u64 frames) {
-    BbTimeline::Note(BbTimeline::FrameRetired, frames);
-    BbSubmitGuard::Retire(frames); // checksums the frame's command buffers: outside the lock
+    PsTimeline::Note(PsTimeline::FrameRetired, frames);
+    PsSubmitGuard::Retire(frames); // checksums the frame's command buffers: outside the lock
     std::unique_lock lock{m_wait_idle};
     frames_retired = std::max(frames_retired, frames);
     cv_lock.notify_all();
@@ -150,7 +150,7 @@ static void WaitPreviousFrame();
 // lock's contract, since a game may reuse what the previous frame used as soon as the first
 // submission of the next one returns (Gal Guardians 2 rewrote its command buffers). Should the
 // game's profile see that it cannot take the overlap (Game::Profile::frame_overlap_unsafe), or the
-// game write into a frame the GPU still runs (BbSubmitGuard), K becomes 0 for the session.
+// game write into a frame the GPU still runs (PsSubmitGuard), K becomes 0 for the session.
 static u32 submits_this_frame = 0;
 static bool overlap_off = false;
 static u32 SubmitsAhead() {
@@ -163,7 +163,7 @@ static u32 SubmitsAhead() {
         }
         return c_submits;
     }();
-    return overlap_off || BbSubmitGuard::Tripped() ? 0u : ahead;
+    return overlap_off || PsSubmitGuard::Tripped() ? 0u : ahead;
 }
 // decanter matches this line in the run log to start the title's next runs without the overlap.
 static void WatchOverlap() {
@@ -189,15 +189,15 @@ static void WaitPreviousFrame() {
     if (frames_retired >= u64(frames_submitted)) {
         return;
     }
-    BbTimeline::Note(BbTimeline::GuestWaitBegin, u64(frames_submitted));
+    PsTimeline::Note(PsTimeline::GuestWaitBegin, u64(frames_submitted));
     const auto start = std::chrono::steady_clock::now();
     cv_lock.wait(lock, [] { return frames_retired >= u64(frames_submitted); });
-    BbStats::gnm_frame_waits.fetch_add(1, std::memory_order_relaxed);
-    BbStats::gnm_frame_wait_ns.fetch_add(
+    PsStats::gnm_frame_waits.fetch_add(1, std::memory_order_relaxed);
+    PsStats::gnm_frame_wait_ns.fetch_add(
         std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start)
             .count(),
         std::memory_order_relaxed);
-    BbTimeline::Note(BbTimeline::GuestWaitEnd, u64(frames_submitted));
+    PsTimeline::Note(PsTimeline::GuestWaitEnd, u64(frames_submitted));
 }
 
 static void WaitGpuIdle() {
@@ -208,8 +208,8 @@ static void WaitGpuIdle() {
     }
     const auto start = std::chrono::steady_clock::now();
     cv_lock.wait(lock, [] { return submission_lock == 0; });
-    BbStats::gnm_frame_waits.fetch_add(1, std::memory_order_relaxed);
-    BbStats::gnm_frame_wait_ns.fetch_add(
+    PsStats::gnm_frame_waits.fetch_add(1, std::memory_order_relaxed);
+    PsStats::gnm_frame_wait_ns.fetch_add(
         std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start)
             .count(),
         std::memory_order_relaxed);
@@ -289,9 +289,9 @@ int PS4_SYSV_ABI sceGnmAreSubmitsAllowed() {
     LOG_TRACE(Lib_GnmDriver, "called");
     // bbport (frame stats): how often the guest asks, and how often it hears no.
     const bool allowed = submission_lock == 0;
-    BbStats::submits_allowed_queries.fetch_add(1, std::memory_order_relaxed);
+    PsStats::submits_allowed_queries.fetch_add(1, std::memory_order_relaxed);
     if (!allowed) {
-        BbStats::submits_refused.fetch_add(1, std::memory_order_relaxed);
+        PsStats::submits_refused.fetch_add(1, std::memory_order_relaxed);
     }
     return allowed;
 }
@@ -2405,8 +2405,8 @@ static inline s32 PerformSubmit(u32 count, const u32* dcb_gpu_addrs[], u32* dcb_
             game->commands_submitted(ccb_span.data(), ccb_span.size());
         }
         if (SubmitLockOnDecode() && SubmitsAhead() > 0) {
-            BbSubmitGuard::Arm(dcb_span.data(), dcb_span.size_bytes(), u64(frames_submitted) + 1);
-            BbSubmitGuard::Arm(ccb_span.data(), ccb_span.size_bytes(), u64(frames_submitted) + 1);
+            PsSubmitGuard::Arm(dcb_span.data(), dcb_span.size_bytes(), u64(frames_submitted) + 1);
+            PsSubmitGuard::Arm(ccb_span.data(), ccb_span.size_bytes(), u64(frames_submitted) + 1);
         }
         liverpool->SubmitGfx(dcb_span, ccb_span);
     }
@@ -2533,8 +2533,8 @@ s32 PS4_SYSV_ABI sceGnmSubmitCommandBuffers(u32 count, const u32* dcb_gpu_addrs[
 
 s32 PS4_SYSV_ABI sceGnmSubmitDone() {
     HLE_TRACE;
-    BbStats::submit_done_calls.fetch_add(1, std::memory_order_relaxed);
-    BbTimeline::Note(BbTimeline::GuestSubmitDone, u64(frames_submitted) + 1);
+    PsStats::submit_done_calls.fetch_add(1, std::memory_order_relaxed);
+    PsTimeline::Note(PsTimeline::GuestSubmitDone, u64(frames_submitted) + 1);
     LOG_DEBUG(Lib_GnmDriver, "called");
     std::scoped_lock lk{m_submit_lock};
     if (SubmitLockOnDecode()) {
@@ -2543,7 +2543,7 @@ s32 PS4_SYSV_ABI sceGnmSubmitDone() {
         submits_this_frame = 0;
         WatchOverlap();
         ++frames_submitted;
-        BbSubmitGuard::Close(u64(frames_submitted));
+        PsSubmitGuard::Close(u64(frames_submitted));
         liverpool->SubmitDone(u64(frames_submitted));
     } else {
         WaitGpuIdle();

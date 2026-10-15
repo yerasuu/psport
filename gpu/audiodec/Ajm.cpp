@@ -5,7 +5,7 @@
 #include <cstdio>
 #include <cstring>
 #include <exception>
-#include "../bbgpu.h"
+#include "../psport_gpu.h"
 #include "Codecs.hpp"
 
 namespace {
@@ -101,7 +101,7 @@ void ReadOfl(const std::uint8_t* frame, std::size_t size, const Audiodec::Mp3Hea
 
 }
 
-extern "C" void* bbgpu_audio_decoder_create(int aac, int adts, uint32_t frequency_index, uint32_t channels) {
+extern "C" void* psport_gpu_audio_decoder_create(int aac, int adts, uint32_t frequency_index, uint32_t channels) {
     try {
         auto decoder = aac ? Audiodec::CreateAac(Audiodec::WORD_SIZE_FLOAT, adts != 0, frequency_index, channels) : Audiodec::CreateMp3(Audiodec::WORD_SIZE_FLOAT);
         return decoder.release();
@@ -111,7 +111,7 @@ extern "C" void* bbgpu_audio_decoder_create(int aac, int adts, uint32_t frequenc
     }
 }
 
-extern "C" int bbgpu_audio_decoder_decode(void* decoder, const uint8_t* data, uint64_t size, float* pcm, uint64_t pcm_size, BbAudioFrame* frame) {
+extern "C" int psport_gpu_audio_decoder_decode(void* decoder, const uint8_t* data, uint64_t size, float* pcm, uint64_t pcm_size, PsAudioFrame* frame) {
     try {
         const Audiodec::DecodeResult decoded = static_cast<Audiodec::Decoder*>(decoder)->Decode(data, size, reinterpret_cast<std::uint8_t*>(pcm), pcm_size);
         switch (decoded.status) {
@@ -132,10 +132,10 @@ extern "C" int bbgpu_audio_decoder_decode(void* decoder, const uint8_t* data, ui
     }
 }
 
-extern "C" void bbgpu_audio_decoder_reset(void* decoder) {
+extern "C" void psport_gpu_audio_decoder_reset(void* decoder) {
     static_cast<Audiodec::Decoder*>(decoder)->Reset();
 }
 
-extern "C" void bbgpu_audio_decoder_destroy(void* decoder) {
+extern "C" void psport_gpu_audio_decoder_destroy(void* decoder) {
     delete static_cast<Audiodec::Decoder*>(decoder);
 }

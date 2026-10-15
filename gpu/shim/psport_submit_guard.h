@@ -13,7 +13,7 @@
 #pragma once
 #include <cstdint>
 
-namespace BbSubmitGuard {
+namespace PsSubmitGuard {
 /// A command buffer handed to the GPU as part of frame `frame` (numbered by the sceGnmSubmitDone
 /// that closes it, from 1): watched until Retire(frame).
 void Arm(const void* address, std::uint64_t size, std::uint64_t frame);
@@ -23,4 +23,4 @@ void Close(std::uint64_t frame);
 void Retire(std::uint64_t frame);
 /// The game wrote into a frame in flight: no overlap for the rest of the session.
 bool Tripped();
-} // namespace BbSubmitGuard
+} // namespace PsSubmitGuard

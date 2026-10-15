@@ -19,7 +19,7 @@
 
 #include "cp_pm4.h"
 
-namespace BbCp {
+namespace PsCp {
 
 /// The command processor's registers, by word index (register byte address / 4): its own
 /// storage, or the owner's (an array of Bank::End words laid out the same way).
@@ -249,4 +249,4 @@ private:
     Packet current{};
 };
 
-} // namespace BbCp
+} // namespace PsCp

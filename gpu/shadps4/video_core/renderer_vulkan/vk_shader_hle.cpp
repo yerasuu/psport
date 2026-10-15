@@ -10,7 +10,7 @@
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/host_shaders/buffer_multi_copy_comp.h"
 #include "game_profile.h"
-#include "bbport_toggles.h"
+#include "psport_toggles.h"
 #include "video_core/renderer_vulkan/vk_gpu_profiler.h"
 
 extern std::unique_ptr<AmdGpu::Liverpool> liverpool;
@@ -22,7 +22,7 @@ namespace Vulkan {
 // frame) plus the recording; buffer_multi_copy.comp copies all ranges in one dispatch.
 static bool MultiCopy(Rasterizer& rasterizer, const VideoCore::Buffer* src,
                       const VideoCore::Buffer* dst, std::span<const vk::BufferCopy> copies) {
-    if (copies.size() < 8 || BbToggle::Disabled(BbToggle::MultiCopyShader)) {
+    if (copies.size() < 8 || PsToggle::Disabled(PsToggle::MultiCopyShader)) {
         return false;
     }
     u64 src_min = ~0ull, src_max = 0, dst_min = ~0ull, dst_max = 0;
@@ -276,7 +276,7 @@ bool ExecuteShaderHLE(const Shader::Info& info, const AmdGpu::Regs& regs,
         static const bool native_env = [copy_shader] {
             const char* env = std::getenv("PS_COPY_SHADER_NATIVE");
             const bool native = !env || env[0] != '0';
-            const bool translated = VideoCore::GuestInPlace() && native != BbToggle::Experiment(2);
+            const bool translated = VideoCore::GuestInPlace() && native != PsToggle::Experiment(2);
             std::printf("GPU: buffer copy shader %llx: %s%s (PS_COPY_SHADER_NATIVE=0: HLE)\n",
                         (unsigned long long)copy_shader,
                         translated ? "original translated shader" : "HLE",
@@ -284,7 +284,7 @@ bool ExecuteShaderHLE(const Shader::Info& info, const AmdGpu::Regs& regs,
                             ? ", paged writes through to guest memory" : "");
             return native;
         }();
-        if (VideoCore::GuestInPlace() && native_env != BbToggle::Experiment(2)) {
+        if (VideoCore::GuestInPlace() && native_env != PsToggle::Experiment(2)) {
             return false;
         }
         // Its destinations stay in the game's memory, as when it runs as itself (see

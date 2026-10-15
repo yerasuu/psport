@@ -7,11 +7,11 @@
 
 #include <cstdint>
 
-namespace BbGuestHooks {
+namespace PsGuestHooks {
 /// [address, address + size) of GPU memory the game has just handed out again: its old contents
 /// are dead and whatever writes it next may be code the GPU side does not hear of.
 using RangeCallback = void (*)(std::uint64_t address, std::uint64_t size);
 
 /// Installs the hooks once (GPU side, after the game is loaded).
 void Install(RangeCallback on_gpu_range_allocated);
-} // namespace BbGuestHooks
+} // namespace PsGuestHooks

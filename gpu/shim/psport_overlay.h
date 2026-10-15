@@ -2,7 +2,7 @@
 // bbport: in-game settings menu (Dear ImGui), drawn by the presenter into the swapchain image
 // after the game frame, at display resolution. Insert (keyboard) or L3+R3 (gamepad) opens it;
 // Guide (gamepad) or Home (keyboard) asks whether to close the game. While either is open the
-// game gets no pad/keyboard input. Settings live in bbport_settings.h.
+// game gets no pad/keyboard input. Settings live in psport_settings.h.
 
 #pragma once
 
@@ -17,7 +17,7 @@ namespace Vulkan {
 class Instance;
 }
 
-namespace BbOverlay {
+namespace PsOverlay {
 
 /// Present thread, once: the ImGui context and its Vulkan backend.
 void Init(const Vulkan::Instance& instance, vk::Format format, u32 image_count);
@@ -62,4 +62,4 @@ bool MenuOpen();
 /// Window thread: the game's text dialog (ImeDialog) state, drawn as a box over the frame.
 void SetTextPrompt(bool active, const std::string& prompt, const std::string& text);
 
-} // namespace BbOverlay
+} // namespace PsOverlay

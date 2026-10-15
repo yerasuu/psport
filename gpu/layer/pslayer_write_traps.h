@@ -11,13 +11,13 @@ extern "C" void runtime_memory_trap(std::uintptr_t address, std::uint64_t size, 
                                     int on);
 extern "C" unsigned runtime_memory_trap_reasons(std::uintptr_t address);
 
-namespace BbLayer::WriteTraps {
+namespace PsLayer::WriteTraps {
 
 enum Reason : unsigned {
     Mirror = 1, ///< a VRAM copy of the page (the layer's memory module)
     Image = 2,  ///< an image made from the page (the texture cache)
     Buffer = 4, ///< a VRAM copy of the page in the buffer cache's arena (PS_GUEST_IN_PLACE)
-    /// A command buffer of a frame the GPU has not retired (BbSubmitGuard, PS_SUBMIT_AHEAD).
+    /// A command buffer of a frame the GPU has not retired (PsSubmitGuard, PS_SUBMIT_AHEAD).
     FrameCommands = 8,
     /// Reads too: occlusion counters, until the game's first access after an event there
     /// (PS_OCCLUSION_READ_TRACE, diagnostics).
@@ -39,4 +39,4 @@ inline unsigned Reasons(std::uintptr_t address) {
     return runtime_memory_trap_reasons(address);
 }
 
-} // namespace BbLayer::WriteTraps
+} // namespace PsLayer::WriteTraps

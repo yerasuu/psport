@@ -58,7 +58,7 @@ cmake -S gpu -B out/gpu -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DPS_PGO="$pg
     ${PS_ORIGIN_RPATH_ONLY:+-DCMAKE_BUILD_RPATH_USE_ORIGIN=ON} >/dev/null
 echo "GPU library: PGO $pgo, LTO ${PS_LTO:-ON}"
 # A failed GPU build must stop here: an older libpsport-gpu.so would otherwise be used silently.
-if ! ninja -C out/gpu bbgpu $(grep -q "^build bbnet:" out/gpu/build.ninja && echo bbnet) > out/gpu-build.log 2>&1; then
+if ! ninja -C out/gpu psport-gpu $(grep -q "^build bbnet:" out/gpu/build.ninja && echo bbnet) > out/gpu-build.log 2>&1; then
     grep -v '^\[' out/gpu-build.log | tail -40 >&2
     echo 'GPU library build failed (full log: out/gpu-build.log)' >&2; exit 1
 fi

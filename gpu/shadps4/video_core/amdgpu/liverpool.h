@@ -37,10 +37,10 @@ namespace Libraries::GnmDriver {
 bool SubmitLockOnDecode(); // gnmdriver.cpp
 }
 
-namespace BbCp {
+namespace PsCp {
 class Decoder;
 class RegisterObserver;
-} // namespace BbCp
+} // namespace PsCp
 
 namespace AmdGpu {
 
@@ -96,9 +96,9 @@ struct Liverpool {
     /// bbport: running checksum of graphics-register packets (see ApplyGraphicsRegisterPacket).
     u64 gfx_reg_checksum{};
     /// bbport: the translator's own PM4 decoder (gpu/cp) over `regs`, and what it tells.
-    std::unique_ptr<BbCp::Decoder> cp_decoder;
-    std::unique_ptr<BbCp::RegisterObserver> cp_observer;
-    BbCp::Decoder& CpDecoder();
+    std::unique_ptr<PsCp::Decoder> cp_decoder;
+    std::unique_ptr<PsCp::RegisterObserver> cp_observer;
+    PsCp::Decoder& CpDecoder();
     /// Top-level graphics submissions, numbered for the draw preparation workers.
     static constexpr u64 NoSeq = ~0ull;
     u64 gfx_submit_seq{};

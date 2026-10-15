@@ -8,7 +8,7 @@
 #include <cpuid.h>
 #include "runtime.h"
 #include "loader.h"
-#include "gpu/bbgpu.h"
+#include "gpu/psport_gpu.h"
 #if !defined(__x86_64__) || !defined(__GNUC__)
 #error This prototype requires x86-64 GCC or Clang (including MinGW).
 #endif
@@ -219,7 +219,7 @@ static void shutdown_signal(int sig) {
 static void dump_frames(ucontext_t *uc);
 static void fault(int sig, siginfo_t *info, void *context) {
     /* GPU page tracking (write-protected guest pages) is resolved first. */
-    if (gpu_enabled && sig == SIGSEGV && bbgpu_handle_fault(context, info->si_addr)) return;
+    if (gpu_enabled && sig == SIGSEGV && psport_gpu_handle_fault(context, info->si_addr)) return;
     /* A speculative guest memory read (runtime_memory.c) failed: resume its recovery point. */
     if ((sig == SIGSEGV || sig == SIGBUS) && runtime_fault_recover) {
         sigjmp_buf *recover = runtime_fault_recover;
@@ -241,7 +241,7 @@ static void fault(int sig, siginfo_t *info, void *context) {
     else
         snprintf(line, sizeof(line), "Fault (signal %d) at RIP %p, address %p\n", sig, (void *)rip, info->si_addr);
     { ssize_t written_=write(2, line, strlen(line)); (void)written_; }
-    if (gpu_enabled) bbgpu_dump_guest_writes(context);
+    if (gpu_enabled) psport_gpu_dump_guest_writes(context);
     /* Guest code keeps frame pointers: its call chain says which caller handed over the bad
      * value, where the host backtrace below stops at the first guest frame. */
     if (rip - (uintptr_t)image < 0x10000000) dump_frames(uc);
@@ -393,7 +393,7 @@ static int mapped(Segment *segments, uint64_t count, uint64_t address, uint64_t 
 /* The patches' writes at image offsets, after relocation. A write may replace a whole
  * base-relative pointer slot (60/90 FPS++ swap function pointers): the patch holds the address at
  * the eboot's patch base, 0x400000, rebased here. */
-static void apply_patches(const BbPatchList *patches, Segment *segments, uint64_t ns, const Reloc *relocs, uint64_t nr) {
+static void apply_patches(const PsPatchList *patches, Segment *segments, uint64_t ns, const Reloc *relocs, uint64_t nr) {
     const uint64_t base=0x400000;
     uint64_t bytes=0, rebased=0;
     for (size_t i=0;i<patches->c_writes;++i) {
@@ -435,7 +435,7 @@ typedef struct {
     char sz_serial[16], sz_version[16], sz_patch_file[4096];
     const char *serials[64];
     size_t c_serials;
-    BbGameFiles files;
+    PsGameFiles files;
 } GameInfo;
 /* sz_game_dir may be NULL: a launcher asking about a title by its TITLE_ID and APP_VER. */
 static void game_info_of(const char *sz_game_dir, const char *sz_serial, const char *sz_version, GameInfo *p_out_info) {
@@ -444,13 +444,13 @@ static void game_info_of(const char *sz_game_dir, const char *sz_serial, const c
     snprintf(p_out_info->sz_version,sizeof(p_out_info->sz_version),"%s",sz_version);
     if (p_out_info->sz_serial[0]) p_out_info->serials[p_out_info->c_serials++]=p_out_info->sz_serial;
     for (size_t i=0; p_out_info->c_serials<64; ++i) {
-        const char *sz_same=bbgpu_game_serial(p_out_info->sz_serial,i);
+        const char *sz_same=psport_gpu_game_serial(p_out_info->sz_serial,i);
         if (!sz_same) break;
         p_out_info->serials[p_out_info->c_serials++]=sz_same;
     }
-    const char *sz_patch_file=bbgpu_game_patch_file(p_out_info->sz_serial);
+    const char *sz_patch_file=psport_gpu_game_patch_file(p_out_info->sz_serial);
     if (sz_patch_file) install_path(sz_patch_file,p_out_info->sz_patch_file,sizeof(p_out_info->sz_patch_file));
-    p_out_info->files=(BbGameFiles){sz_game_dir,p_out_info->sz_serial,p_out_info->sz_version,
+    p_out_info->files=(PsGameFiles){sz_game_dir,p_out_info->sz_serial,p_out_info->sz_version,
                                     sz_patch_file ? p_out_info->sz_patch_file : NULL,loader_eboot_sha256};
 }
 static void game_info(const char *sz_game_dir, GameInfo *p_out_info) {
@@ -488,7 +488,7 @@ static void mod_options(const GameInfo *p_info, LoaderModOptions *p_options, con
     p_options->c_serials=p_info->c_serials;
     p_options->pp_folders=pp_folders;
     for (p_options->c_folders=0; p_options->c_folders<c_capacity; ++p_options->c_folders) {
-        pp_folders[p_options->c_folders]=bbgpu_game_mod_folder(p_info->sz_serial,p_options->c_folders);
+        pp_folders[p_options->c_folders]=psport_gpu_game_mod_folder(p_info->sz_serial,p_options->c_folders);
         if (!pp_folders[p_options->c_folders]) break;
     }
 }
@@ -546,7 +546,7 @@ int main(int argc, char **argv) {
         GameInfo info;
         char sz_kind[64], sz_advice[2048];
         game_info(argv[2],&info);
-        if (!bbgpu_check_game(&info.files,sz_kind,sizeof(sz_kind),sz_advice,sizeof(sz_advice))) return 0;
+        if (!psport_gpu_check_game(&info.files,sz_kind,sizeof(sz_kind),sz_advice,sizeof(sz_advice))) return 0;
         printf("%s\t%s\t%s\n",sz_kind,info.sz_serial[0] ? info.sz_serial : "?",info.sz_version[0] ? info.sz_version : "?");
         fprintf(stderr,"%s\n",sz_advice);
         return 2;
@@ -554,7 +554,7 @@ int main(int argc, char **argv) {
     if (argc == 3 && !strcmp(argv[1], "--has-presets")) {
         GameInfo info;
         game_info(argv[2],&info);
-        return bbgpu_game_has_presets(info.sz_serial) ? 0 : 1;
+        return psport_gpu_game_has_presets(info.sz_serial) ? 0 : 1;
     }
     const char *mod_folders[256];
     if (argc >= 3 && (!strcmp(argv[1], "--list-patches") || !strcmp(argv[1], "--list-mods"))) {
@@ -641,7 +641,7 @@ int main(int argc, char **argv) {
         printf("Runtime: main executable %s (sceSystemServiceLoadExec), %d arguments\n", sz_exec, c_guest_arguments - 1);
     }
     runtime_set_arguments(pp_guest_arguments, c_guest_arguments);
-    bbgpu_register_kernel();
+    psport_gpu_register_kernel();
 #ifdef _WIN32
     SYSTEM_INFO system_info; GetSystemInfo(&system_info); page_size = system_info.dwPageSize;
 #else
@@ -663,20 +663,20 @@ int main(int argc, char **argv) {
      * window opens: a launch that cannot work stops here, with why. */
     GameInfo info;
     game_info(game.game,&info);
-    bbgpu_prepare_game(&info.files);
+    psport_gpu_prepare_game(&info.files);
     char sz_problem[64], sz_advice[2048];
-    if (bbgpu_check_game(&info.files,sz_problem,sizeof(sz_problem),sz_advice,sizeof(sz_advice))) {
+    if (psport_gpu_check_game(&info.files,sz_problem,sizeof(sz_problem),sz_advice,sizeof(sz_advice))) {
         fprintf(stderr,"ERROR: Unsupported game files: %s Set PS_SKIP_GAME_CHECK=1 to start anyway.\n",sz_advice);
         exit(2);
     }
     /* The patches' addresses are eboot.bin's: an executable sceSystemServiceLoadExec started gets
      * none of them. */
     const int is_eboot = !strcmp(pp_guest_arguments[0], "/app0/eboot.bin");
-    BbPatchList patches={.p_loads=boot_image.eboot_loads,.c_loads=boot_image.eboot_load_count};
+    PsPatchList patches={.p_loads=boot_image.eboot_loads,.c_loads=boot_image.eboot_load_count};
     if (is_eboot) {
-        BbPatchServices patch_services;
+        PsPatchServices patch_services;
         loader_patch_services(&patches,&patch_services);
-        int own_patches=bbgpu_game_patches(&info.files,&patch_services);
+        int own_patches=psport_gpu_game_patches(&info.files,&patch_services);
         if (!own_patches) exit(1);
         if (patches_dir) {
             LoaderPatchFolder folder=patch_folder(patches_dir,&info);
@@ -684,7 +684,7 @@ int main(int argc, char **argv) {
         }
         if (own_patches<0 && !patches.c_writes)
             printf("Patches: none for %s\n",info.sz_serial[0] ? info.sz_serial : "an unknown title");
-    } else if (patches_dir || bbgpu_game_has_presets(info.sz_serial)) {
+    } else if (patches_dir || psport_gpu_game_has_presets(info.sz_serial)) {
         printf("Patches: not applied: they are for /app0/eboot.bin, the application is %s\n", pp_guest_arguments[0]);
     }
     uint64_t size = boot_image.size, entry = boot_image.entry, ns = boot_image.segment_count, nr = boot_image.reloc_count;
@@ -782,10 +782,10 @@ int main(int argc, char **argv) {
         char title[128]="", serial[16]="UNKNOWN";
         sfo_value(sfo,"TITLE",title,sizeof(title),NULL);
         sfo_value(sfo,"TITLE_ID",serial,sizeof(serial),NULL);
-        BbGpuConfig gpu={title,serial,user_dir ? user_dir : "user",(uint32_t)sdk,attributes,1920,1080,app0 ? app0 : "."};
+        PsGpuConfig gpu={title,serial,user_dir ? user_dir : "user",(uint32_t)sdk,attributes,1920,1080,app0 ? app0 : "."};
         gpu_enabled=1; /* page tracking starts while the rasterizer registers guest memory */
-        if (bbgpu_init(&gpu)) fail("GPU initialization failed");
-        printf("GPU: window and Vulkan presenter ready; SDK 0x%08x, %u HLE symbols\n",(unsigned)sdk,bbgpu_symbol_count());
+        if (psport_gpu_init(&gpu)) fail("GPU initialization failed");
+        printf("GPU: window and Vulkan presenter ready; SDK 0x%08x, %u HLE symbols\n",(unsigned)sdk,psport_gpu_symbol_count());
     }
 #ifndef _WIN32
     static const int shutdown_signals[] = {SIGTERM, SIGINT, SIGHUP};
@@ -881,7 +881,7 @@ int main(int argc, char **argv) {
            (unsigned long long)import_count, counts[1], counts[2], counts[5], counts[6], counts[3], counts[4]);
     free(import_state);
     if (is_eboot) apply_patches(&patches, segments, ns, relocs, nr);
-    if (!cpu_only) bbgpu_patch_image(image, size);
+    if (!cpu_only) psport_gpu_patch_image(image, size);
     protect(traps, round_page((import_count + 1) * 32), 5);
     protect(thunks, round_page((import_count + 1) * THUNK_SIZE), 5);
     protect(image, round_page(size), 0);

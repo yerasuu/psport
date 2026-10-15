@@ -6,7 +6,7 @@
  * console with no mouse plugged in does. */
 #define _GNU_SOURCE
 #include "runtime.h"
-#include "gpu/bbgpu.h"
+#include "gpu/psport_gpu.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -77,7 +77,7 @@ static uint32_t ps4_buttons(uint32_t sdl) {
  * two of them (one per user) each see all of it. Called under lock. */
 static int collect(uint32_t *buttons) {
     int32_t dx, dy, wheel, tilt;
-    const int host=bbgpu_game_mouse_take(&dx,&dy,&wheel,&tilt,buttons);
+    const int host=psport_gpu_game_mouse_take(&dx,&dy,&wheel,&tilt,buttons);
     if (sensitivity<0) load_sensitivity();
     dx=scaled(dx,&carry_x); dy=scaled(dy,&carry_y);
     if (host!=host_connected) {
@@ -85,7 +85,7 @@ static int collect(uint32_t *buttons) {
         host_connected=host;
     }
     /* The settings menu or the close prompt holds the game's input neutral. */
-    if (!host || bbgpu_overlay_captures_input()) { *buttons=0; return host; }
+    if (!host || psport_gpu_overlay_captures_input()) { *buttons=0; return host; }
     for (int i=0;i<MOUSE_HANDLES;++i)
         if (ports[i].open && ports[i].host) {
             ports[i].x+=dx; ports[i].y+=dy; ports[i].wheel+=wheel; ports[i].tilt+=tilt;

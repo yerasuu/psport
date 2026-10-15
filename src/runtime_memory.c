@@ -93,7 +93,7 @@ static void add_region(uint64_t phys, uint64_t size) {
 }
 #define FLEX_SPAN (UINT64_C(1024) * 1024 * 1024)
 static uint64_t flex_bitmap[FLEX_SPAN/PAGE/64];
-/* GPU hooks (bbgpu): notified outside the lock, in order, after each operation. */
+/* GPU hooks (libpsport-gpu): notified outside the lock, in order, after each operation. */
 GpuRange hook_map, hook_unmap, hook_invalidate;
 typedef struct { int kind; uintptr_t address; uint64_t size; } PendingHook;
 static PendingHook pending[64]; size_t pending_count;

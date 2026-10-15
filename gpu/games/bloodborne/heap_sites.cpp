@@ -16,7 +16,7 @@
 
 extern "C" std::uint64_t runtime_heap_growths(void);
 
-namespace BbHeapSites {
+namespace PsHeapSites {
 namespace {
 using u32 = std::uint32_t;
 using u64 = std::uint64_t;
@@ -365,4 +365,4 @@ void Report() {
     }
     std::printf("\n");
 }
-} // namespace BbHeapSites
+} // namespace PsHeapSites

@@ -7,7 +7,7 @@
 #include <chrono>
 #include <cstdlib>
 
-#include "bbport_toggles.h"
+#include "psport_toggles.h"
 #include "common/div_ceil.h"
 #include "common/logging/log.h"
 #include "core/emulator_settings.h"
@@ -95,7 +95,7 @@ public:
         RegionBits& bits = GetRegionBits<type>();
         if constexpr (type == Type::CPU && enable) {
             CountWriteFaults(start_page, end_page);
-            last_cpu_write_frame = BbStats::frame_number.load(std::memory_order_relaxed);
+            last_cpu_write_frame = PsStats::frame_number.load(std::memory_order_relaxed);
             NotePreuploadChurn();
         }
         if constexpr (enable) {
@@ -152,7 +152,7 @@ public:
         // always match `writeable` after a change); this runs for every buffer binding, so
         // it is checked before building the range mask.
         if (type == Type::CPU && !bits.AnyInRange(start_page, end_page) &&
-            !BbToggle::Disabled(BbToggle::PageTrackingEarlyExit)) {
+            !PsToggle::Disabled(PsToggle::PageTrackingEarlyExit)) {
             return;
         }
         RegionBits mask(bits, start_page, end_page);
@@ -269,7 +269,7 @@ private:
             const char* env = std::getenv("PS_HOT_PAGES");
             return env && env[0] == '1';
         }();
-        return enabled && !BbToggle::Disabled(BbToggle::HotPages);
+        return enabled && !PsToggle::Disabled(PsToggle::HotPages);
     }
     // A short period re-protects thousands of pages at once and each faults again before it is
     // hot, a fault storm (a 2 s period gave ~20k faults/s and frame spikes).
@@ -282,7 +282,7 @@ private:
             if (writeable.Get(page)) {
                 continue; // not protected: no fault
             }
-            BbStats::tracker_faults.fetch_add(1, std::memory_order_relaxed);
+            PsStats::tracker_faults.fetch_add(1, std::memory_order_relaxed);
             if (!hot_enabled) {
                 continue;
             }
@@ -296,7 +296,7 @@ private:
                 }
                 hot.Set(page);
                 ++num_hot;
-                BbStats::hot_pages.fetch_add(1, std::memory_order_relaxed);
+                PsStats::hot_pages.fetch_add(1, std::memory_order_relaxed);
             }
         }
     }
@@ -308,7 +308,7 @@ private:
         if (!HotPagesEnabled() ||
             std::chrono::steady_clock::now() - hot_since > HotPeriod) {
             // Re-protect them (on this upload) and start counting again.
-            BbStats::hot_pages.fetch_sub(num_hot, std::memory_order_relaxed);
+            PsStats::hot_pages.fetch_sub(num_hot, std::memory_order_relaxed);
             hot.Clear();
             write_faults.fill(0);
             num_hot = 0;

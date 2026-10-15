@@ -14,7 +14,7 @@ extern "C" std::uint64_t runtime_experiment_bits;
 /// Recovery point for speculative guest memory reads on this thread (runtime_memory.c).
 extern "C" __thread sigjmp_buf* runtime_fault_recover;
 
-namespace BbToggle {
+namespace PsToggle {
 enum : std::uint64_t {
     RegionCache = 1,
     FetchShaderCache = 2,
@@ -97,9 +97,9 @@ inline bool Disabled(std::uint64_t bit) {
 inline bool Experiment(std::uint64_t bit) {
     return (__atomic_load_n(&runtime_experiment_bits, __ATOMIC_RELAXED) & bit) != 0;
 }
-} // namespace BbToggle
+} // namespace PsToggle
 
-namespace BbStats {
+namespace PsStats {
 /// Guest writes caught by page protection, and pages currently left unprotected as hot.
 inline std::atomic<std::uint64_t> tracker_faults{0};
 /// Writes the GPU side heard of from the writers (libc copies over watched pages, no write tracking).
@@ -124,7 +124,7 @@ inline std::atomic<std::uint64_t> eop_decoded{0}, eop_written{0}, gpu_labels{0};
 inline std::atomic<std::uint64_t> submits_allowed_queries{0}, submits_refused{0}, submit_done_calls{0};
 /// Guest time blocked in Gnm submissions on the previous frame (submission lock or PS_SUBMIT_LOCK=frame).
 inline std::atomic<std::uint64_t> gnm_frame_waits{0}, gnm_frame_wait_ns{0};
-/// Command buffers checksummed by the frame overlap guard (BbSubmitGuard): time (ns) and bytes.
+/// Command buffers checksummed by the frame overlap guard (PsSubmitGuard): time (ns) and bytes.
 inline std::atomic<std::uint64_t> submit_guard_ns{0}, submit_guard_bytes{0};
 /// Submissions to the compute queues (sceGnmDingDong).
 inline std::atomic<std::uint64_t> asc_submits{0};
@@ -224,4 +224,4 @@ inline std::atomic<std::uint64_t> gpu_signal_faults{0};
 /// Protection changes: calls and pages, those removing write access (TLB shootdowns) apart.
 inline std::atomic<std::uint64_t> protect_calls{0}, protect_pages{0}, protect_revoke_calls{0},
     protect_revoke_pages{0};
-} // namespace BbStats
+} // namespace PsStats

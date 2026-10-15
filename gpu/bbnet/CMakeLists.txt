@@ -32,7 +32,7 @@ target_link_options(bbnet PRIVATE -Wl,-Bsymbolic -Wl,--exclude-libs,ALL)
 # libpsport-gpu (already in the process) provides shadPS4's common code: logging, threads' names.
 set_target_properties(bbnet PROPERTIES BUILD_RPATH "\$ORIGIN" INSTALL_RPATH "\$ORIGIN"
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}") # beside libpsport-gpu.so, where the runtime looks
-target_link_libraries(bbnet PRIVATE bbgpu nlohmann_json::nlohmann_json protobuf::libprotobuf
+target_link_libraries(bbnet PRIVATE psport-gpu nlohmann_json::nlohmann_json protobuf::libprotobuf
     OpenSSL::SSL OpenSSL::Crypto ZLIB::ZLIB "${MINIUPNPC_LIBRARY}" Vulkan::Headers fmt::fmt
     Boost::headers magic_enum::magic_enum)
 target_include_directories(bbnet PRIVATE "${MINIUPNPC_INCLUDE}")

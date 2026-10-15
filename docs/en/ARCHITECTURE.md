@@ -14,10 +14,10 @@ The model is Wine's, not an emulator's.
 | Native loader | `src/loader.h`, `src/loader_self.c`, `src/loader_link.c` | `out/psport` | SELF/ELF parsing, module linking, relocations, TLS, bindings |
 | Launch data | `src/loader_mods.c`, `src/loader_patches.c`, `src/loader_hash.c`, `src/loader_json.c` | `out/psport` | loose-file mod view, shadPS4/GoldHEN XML patches, the eboot's identity (SHA-256), `mods.json`/`patches.json` |
 | C runtime | `src/runtime*.c`, `src/runtime.h`, `src/import_*.inc` | `out/psport` | libkernel and the other system libraries, import resolution, the call report |
-| GPU library | `gpu/shim/bbgpu.cpp`, `gpu/bbgpu.h` | `out/gpu/libpsport-gpu.so` | C interface between `psport` and the C++ side |
+| GPU library | `gpu/shim/psport_gpu.cpp`, `gpu/psport_gpu.h` | `out/gpu/libpsport-gpu.so` | C interface between `psport` and the C++ side |
 | Translator | `gpu/shadps4/` (inherited from shadPS4, `gpu/VENDOR.txt`), `gpu/cp/`, `gpu/layer/` | `libpsport-gpu.so` | GnmDriver, VideoOut, command processor, Vulkan rasterizer, caches, shader recompiler |
 | Ported libraries | `gpu/ngs2/`, `gpu/audiodec/`, `gpu/fiber/`, `gpu/font/`, `gpu/pngenc/`, `gpu/pngdec/` | `libpsport-gpu.so` | libSceNgs2, libSceAudiodec, libSceFiber, libSceFont/FontFt, libScePngEnc, libScePngDec |
-| Port services | `gpu/shim/bbport_*` | `libpsport-gpu.so` | settings (`bbport.ini`), overlay, submit guard, guest memory, diagnostics |
+| Port services | `gpu/shim/psport_*` | `libpsport-gpu.so` | settings (`bbport.ini`), overlay, submit guard, guest memory, diagnostics |
 | Game profiles | `gpu/games/` | `libpsport-gpu.so` | per-title optimisations (`Game::Profile`) |
 | Online module | `gpu/bbnet/` | `out/gpu/` (optional) | network and PSN imports with `PS_ONLINE=1` |
 | Online addresses | `scripts/online.py` | - | Python run by `run.sh` with `PS_ONLINE=1` only; see [Launch scripts](#launch-scripts) |
@@ -38,15 +38,15 @@ run.sh
            --patches-dir <dir> --patches-config <file> --app0 <dir> --user <dir>
     loader_mods_view()                the game folder, or a view of it with the mods linked in
     AppContent profile                param.sfo's user parameters, PS_CONTENT_SKU
-    bbgpu_register_kernel()           event queues and the ported libraries register their exports
+    psport_gpu_register_kernel()           event queues and the ported libraries register their exports
     loader_load_game()                eboot + modules -> one LoaderImage
-    bbgpu_prepare_game()              the profile's environment defaults (PS_VBLANK_HZ)
-    bbgpu_check_game()                the profile's check of the game's files (exit 2)
-    bbgpu_game_patches()              the profile's own patches, then the external XML patches
+    psport_gpu_prepare_game()              the profile's environment defaults (PS_VBLANK_HZ)
+    psport_gpu_check_game()                the profile's check of the game's files (exit 2)
+    psport_gpu_game_patches()              the profile's own patches, then the external XML patches
     runtime_start()
-    bbgpu_init()                      settings, game profile, window thread, GnmDriver, VideoOut
+    psport_gpu_init()                      settings, game profile, window thread, GnmDriver, VideoOut
     bind every import                 native binding or runtime_resolve() or trap
-    apply the patches, bbgpu_patch_image()
+    apply the patches, psport_gpu_patch_image()
     protect segments, set TLS, start linked modules in link order
     enter the eboot's entry on an 8 MiB stack below 1 TiB
 ```
@@ -127,12 +127,12 @@ library.
 - Mods (`src/loader_mods.c`, [MODS.md](MODS.md)): with `--mods`, the enabled mods' files are linked
   over links to the game's entries in a private folder under `--out` (`mod-game-*`), which becomes
   `/app0` and the folder the loader reads. A mod's wrapper folder may be named after any title ID of
-  the game's executable (`bbgpu_game_serial`), and a mod without `dvdroot_ps4` may consist of the
+  the game's executable (`psport_gpu_game_serial`), and a mod without `dvdroot_ps4` may consist of the
   folders of the game's own `dvdroot_ps4` and its profile's `mod_folders`. A process of its own
   (`mod-view-clean`) removes the view once `psport` ends, by any route.
 - Patches (`src/loader_patches.c`): shadPS4/GoldHEN XML, `bytes`, `bytes16/32/64`, `float32/64`,
   `utf8` and `utf16` lines at the eboot's addresses (base `0x400000`). The profile's own patches
-  come first (`bbgpu_game_patches`, through `BbPatchServices`); then the files in `--patches-dir`
+  come first (`psport_gpu_game_patches`, through `PsPatchServices`); then the files in `--patches-dir`
   whose `<ID>`s name one of the game's title IDs (or that have none), entries for its `APP_VER` and
   `eboot.bin`, selected by `patches.json` or their `isEnabled`. A patch with an unsupported line or
   an address outside the eboot's `PT_LOAD` segments is skipped whole, and said; the profile's own
@@ -196,7 +196,7 @@ function serves the NID whichever library the executable names (`libkernel` or `
 `runtime_resolve` (`src/runtime.c`) asks the tables in a fixed chain: the runtime's own libc,
 TLS and procparam entries, then mutex, thread, sched, content, time, sema, eventflag, ulobjmgr,
 ult, rwlock, barrier, memory, mempool, exception, kernel, module, playgo, voice, services, ajm, audio,
-audio3d, pad, gesture, devices, capture, vr, rtc, savedata, file, aio, and last `bbgpu_resolve`. The first table that
+audio3d, pad, gesture, devices, capture, vr, rtc, savedata, file, aio, and last `psport_gpu_resolve`. The first table that
 has the symbol wins.
 
 Guest-visible errno values are FreeBSD's (`runtime_guest_errno`). Sockets, libSceNet's and POSIX's,
@@ -215,17 +215,17 @@ a file.
 
 ## GPU library
 
-`libpsport-gpu.so` holds the C++ side. `gpu/shim/bbgpu.cpp` is its C interface (`gpu/bbgpu.h`):
+`libpsport-gpu.so` holds the C++ side. `gpu/shim/psport_gpu.cpp` is its C interface (`gpu/psport_gpu.h`):
 
-- `bbgpu_register_kernel` registers the kernel event queues and the libraries that do not need a
+- `psport_gpu_register_kernel` registers the kernel event queues and the libraries that do not need a
   window: AvPlayer, Ngs2, Fiber, Font, FontFt, Audiodec, Videodec2, PngEnc, PngDec.
-- `bbgpu_init` loads `bbport.ini`, selects the game profile, prepares saves through it, starts the
+- `psport_gpu_init` loads `bbport.ini`, selects the game profile, prepares saves through it, starts the
   SDL window on its own thread and registers GnmDriver and VideoOut.
-- `bbgpu_resolve` returns the function registered for an import's NID. Libraries register with
+- `psport_gpu_resolve` returns the function registered for an import's NID. Libraries register with
   shadPS4's `LIB_FUNCTION(nid, library, version, module, function)` (`gpu/shim/core/libraries/libs.h`).
-- `bbgpu_handle_fault` is the first stop of `psport`'s `SIGSEGV` handler: GPU page-tracking
+- `psport_gpu_handle_fault` is the first stop of `psport`'s `SIGSEGV` handler: GPU page-tracking
   faults (write traps) are handled there.
-- `bbgpu_patch_image` hands the writable image to the active profile.
+- `psport_gpu_patch_image` hands the writable image to the active profile.
 
 The translator, from the game's submission to the screen:
 
@@ -240,7 +240,7 @@ The translator, from the game's submission to the screen:
 | GPU memory without sparse binding (memory module) | `gpu/layer/` |
 
 `PS_SUBMIT_AHEAD` (else the game profile's `c_submits_ahead`, else 0) lets a frame's first
-submissions run without waiting for the previous frame; the submit guard (`gpu/shim/bbport_submit_guard.*`) stops the overlap for the
+submissions run without waiting for the previous frame; the submit guard (`gpu/shim/psport_submit_guard.*`) stops the overlap for the
 session when a game rewrites command buffers in flight. Multithreaded draw preparation and the
 two-stage draw pipeline: [parallel_gpu.md](parallel_gpu.md). Temporal upscaling (FSR 3.1, FSR 4,
 TAA, DLSS): [upscaler.md](upscaler.md). Changes to inherited shadPS4 files:
@@ -260,22 +260,22 @@ game's memory in place and keeps VRAM copies without sparse binding. `PS_GUEST_I
 hand overrides the choice; `PS_AS_0_3=1` reverts to the 0.3 behaviour for comparisons. The 0.3
 model and the emulation paths around it are being retired; the in-place model is the one new work
 targets. Write traps on guest pages are shared by the runtime and the GPU library
-(`gpu/layer/bblayer_write_traps.h`, `runtime_memory_trap`).
+(`gpu/layer/pslayer_write_traps.h`, `runtime_memory_trap`).
 
 ## Game profiles
 
 `gpu/games/game_profile.h` defines `Game::Profile`: what the translator knows about one title,
-kept out of the core. `Game::Select` picks a profile by `param.sfo` `TITLE_ID` in `bbgpu_init`;
+kept out of the core. `Game::Select` picks a profile by `param.sfo` `TITLE_ID` in `psport_gpu_init`;
 `PS_GAME_PROFILE=none` runs any title without one. What a profile adds to the launch (its file
 check, its own patches, its environment defaults, its mod folders) is found by `Game::Find` before
-`bbgpu_init`, whatever `PS_GAME_PROFILE` says. A profile may provide:
+`psport_gpu_init`, whatever `PS_GAME_PROFILE` says. A profile may provide:
 
 | Field | Use |
 |---|---|
 | `serials` | the title IDs it applies to (one executable: patch files and mod folders named after any apply) |
 | `mod_folders` | folders a mod may consist of without `dvdroot_ps4` around them |
 | `patch_file` | its own shadPS4 XML, relative to psport's folder; left out of external patch folders |
-| `prepare_environment` | environment defaults before `bbgpu_init` (Bloodborne: `PS_VBLANK_HZ` for its `PS_FPS` preset) |
+| `prepare_environment` | environment defaults before `psport_gpu_init` (Bloodborne: `PS_VBLANK_HZ` for its `PS_FPS` preset) |
 | `check_files` | the check of the game's files before its code runs (`PS_SKIP_GAME_CHECK=1` skips it) |
 | `add_patches` | its own patches of the executable, chosen by the player's settings |
 | `effects` | the settings of `add_patches` the overlay menu's "Game effects" section offers: its `bbport.ini` switches (key, label and hint in the menu's languages, default), the `model_lod` choice, a note; without them the section is not shown |

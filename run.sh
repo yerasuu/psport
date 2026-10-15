@@ -30,7 +30,7 @@ data=${PS_DATA_DIR:-.}
 out=$data/out
 mkdir -p "$out"
 export PS_CONFIG=${PS_CONFIG:-$data/bbport.ini}
-# GPU paths are initialized when libpsport-gpu is loaded, before bbgpu_init receives --user.
+# GPU paths are initialized when libpsport-gpu is loaded, before psport_gpu_init receives --user.
 # Select the same user directory now, including for an AppImage or a separate save profile.
 export PS_GPU_USER_DIR=${PS_GPU_USER_DIR:-${PS_USER_DIR:-$data/user}}
 # The drivers' own shader caches keep compiled pipelines between sessions (the port's cache gives

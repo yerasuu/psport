@@ -7,7 +7,7 @@
  * input method composes. */
 #define _GNU_SOURCE
 #include "runtime.h"
-#include "gpu/bbgpu.h"
+#include "gpu/psport_gpu.h"
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -98,7 +98,7 @@ static ABI int32_t ime_open(const ImeParam *p_param, const void *p_extended) {
     s_panel.param=*p_param;
     utf16_to_utf8(p_param->p_text,p_param->max_text_length,s_panel.sz_delivered,sizeof(s_panel.sz_delivered));
     const char *sz_preset=getenv("PS_IME_TEXT");
-    s_panel.is_typing=!sz_preset && bbgpu_text_input_begin(s_panel.sz_delivered,"Text");
+    s_panel.is_typing=!sz_preset && psport_gpu_text_input_begin(s_panel.sz_delivered,"Text");
     if (!s_panel.is_typing) {
         snprintf(s_panel.sz_entry,sizeof(s_panel.sz_entry),"%s",sz_preset ? sz_preset : s_panel.sz_delivered);
         s_panel.entry=ENTRY_ENTERED;
@@ -116,7 +116,7 @@ static ABI int32_t ime_close(void) {
     s_panel.is_typing=false;
     pthread_mutex_unlock(&s_lock);
     if (!was_open) return IME_NOT_OPENED;
-    if (was_typing) bbgpu_text_input_end();
+    if (was_typing) psport_gpu_text_input_end();
     return 0;
 }
 /* The game's own text replaces the panel's; it is not echoed back as an update. */
@@ -131,7 +131,7 @@ static ABI int32_t ime_set_text(const uint16_t *p_text, uint32_t length) {
     utf16_to_utf8(p_text,c_units,s_panel.sz_delivered,sizeof(s_panel.sz_delivered));
     snprintf(s_panel.sz_entry,sizeof(s_panel.sz_entry),"%s",s_panel.sz_delivered);
     utf8_to_utf16(s_panel.sz_delivered,s_panel.param.p_text,s_panel.param.max_text_length);
-    if (s_panel.is_typing) bbgpu_text_input_begin(s_panel.sz_delivered,"Text");
+    if (s_panel.is_typing) psport_gpu_text_input_begin(s_panel.sz_delivered,"Text");
     pthread_mutex_unlock(&s_lock);
     return 0;
 }
@@ -176,7 +176,7 @@ static int collect(ImeEvent *p_events) {
         runtime_ime_panel_size(s_panel.param.type,&p_event->param.rect.width,&p_event->param.rect.height);
     }
     if (s_panel.is_typing) {
-        const int state=bbgpu_text_input_poll(s_panel.sz_entry,sizeof(s_panel.sz_entry));
+        const int state=psport_gpu_text_input_poll(s_panel.sz_entry,sizeof(s_panel.sz_entry));
         if (state) {
             s_panel.is_typing=false;
             s_panel.entry=state==1 ? ENTRY_ENTERED : ENTRY_CLOSED;

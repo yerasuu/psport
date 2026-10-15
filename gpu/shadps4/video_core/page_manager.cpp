@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <boost/container/small_vector.hpp>
-#include "bbport_toggles.h"
-#include "bblayer_write_traps.h"
-#include "bbport_guest_memory.h"
+#include "psport_toggles.h"
+#include "pslayer_write_traps.h"
+#include "psport_guest_memory.h"
 #include "common/assert.h"
 #include "common/debug.h"
 #include "common/div_ceil.h"
@@ -225,7 +225,7 @@ void PageManager::ReportFaultSites() {
 }
 
 // bbport: with the game's memory in place (no write tracking), the pages under images are
-// trapped for writes (BbLayer::WriteTraps::Image): a write nobody announced (the game's own copy
+// trapped for writes (PsLayer::WriteTraps::Image): a write nobody announced (the game's own copy
 // loops, its heap over an old texture) still reaches the texture cache, on any game and GPU,
 // without hooks in the game's code; the hooks and the libc wrappers only make it sooner.
 // PS_IMAGE_TRAPS=0: announced writes only, as before. Latched at the first use: the counts must
@@ -247,7 +247,7 @@ static bool ImageTraps() {
 // bbport: as ImageTraps for the pages the buffer cache watches (VRAM copies in its arena): a write
 // nobody announced reaches the copy instead of the GPU reading the older data uploaded there.
 static bool BufferTraps() {
-    static const bool on = ImageTraps() && !BbGuestMemory::LayerMemory();
+    static const bool on = ImageTraps() && !PsGuestMemory::LayerMemory();
     return on;
 }
 
@@ -320,35 +320,35 @@ struct PageManager::Impl {
         // bbport: the draw recording thread handles its faults inline too (vk_draw_pipe.h).
         const auto is_gpu_thread = rasterizer->IsGpuSideThread();
         if (is_gpu_thread) {
-            BbStats::gpu_signal_faults.fetch_add(1, std::memory_order_relaxed);
+            PsStats::gpu_signal_faults.fetch_add(1, std::memory_order_relaxed);
         }
-        // Traps on reads too (no access, BbLayer::WriteTraps::NoAccess): their owner first.
-        if (BbLayer::WriteTraps::Reasons(addr) & BbLayer::WriteTraps::VramData) {
+        // Traps on reads too (no access, PsLayer::WriteTraps::NoAccess): their owner first.
+        if (PsLayer::WriteTraps::Reasons(addr) & PsLayer::WriteTraps::VramData) {
             return rasterizer->OnVramDataAccess(addr, is_gpu_thread);
         }
-        if (BbLayer::WriteTraps::Reasons(addr) & BbLayer::WriteTraps::QueryReads) {
+        if (PsLayer::WriteTraps::Reasons(addr) & PsLayer::WriteTraps::QueryReads) {
             return rasterizer->OnOcclusionPageAccess(
                 addr, u64(static_cast<const ucontext_t*>(context)->uc_mcontext.gregs[REG_RIP]),
                 Common::IsWriteError(context), is_gpu_thread);
         }
         if (Common::IsWriteError(context)) {
-            if (ImageTraps() && !(BbLayer::WriteTraps::Reasons(addr) &
-                                  (BbLayer::WriteTraps::Image | BbLayer::WriteTraps::Buffer))) {
+            if (ImageTraps() && !(PsLayer::WriteTraps::Reasons(addr) &
+                                  (PsLayer::WriteTraps::Image | PsLayer::WriteTraps::Buffer))) {
                 // Not an image's trap: another owner's being lifted by another thread, or one
                 // lifted meanwhile (the write runs again), or a write the game may not do.
                 int prot = 0, type = -1;
                 uintptr_t end = 0;
                 return runtime_memory_vma_info(addr, &prot, &type, &end) && (prot & 0x2);
             }
-            BbStats::Timer timer{BbStats::t_write_faults};
+            PsStats::Timer timer{PsStats::t_write_faults};
             const bool handled = rasterizer->OnWriteFault(
                 addr, is_gpu_thread,
                 u64(static_cast<const ucontext_t*>(context)->uc_mcontext.gregs[REG_RIP]));
             current_fault_rip = 0;
             return handled;
         } else {
-            BbStats::read_faults.fetch_add(1, std::memory_order_relaxed);
-            BbStats::Timer timer{BbStats::t_read_faults};
+            PsStats::read_faults.fetch_add(1, std::memory_order_relaxed);
+            PsStats::Timer timer{PsStats::t_read_faults};
             return rasterizer->ReadMemory(addr, 8, is_gpu_thread);
         }
         return false;
@@ -500,7 +500,7 @@ struct PageManager::Impl {
     };
 
     template <bool track, typename ForEachPage>
-    static void UpdateTraps(TrapOwners& owners, BbLayer::WriteTraps::Reason reason,
+    static void UpdateTraps(TrapOwners& owners, PsLayer::WriteTraps::Reason reason,
                             ForEachPage&& for_each_page) {
         std::call_once(owners.once, [&owners] {
             void* mem = mmap(nullptr, NUM_ADDRESS_PAGES * sizeof(u16), PROT_READ | PROT_WRITE,
@@ -512,7 +512,7 @@ struct PageManager::Impl {
         u64 run_begin = 0, run_pages = 0;
         const auto flush = [&] {
             if (run_pages != 0) {
-                BbLayer::WriteTraps::Set(run_begin << PM_PAGE_BITS, run_pages << PM_PAGE_BITS,
+                PsLayer::WriteTraps::Set(run_begin << PM_PAGE_BITS, run_pages << PM_PAGE_BITS,
                                          reason, track);
                 run_pages = 0;
             }
@@ -548,7 +548,7 @@ struct PageManager::Impl {
         const auto lock_start = locks.begin() + (page / PAGES_PER_LOCK);
         const auto lock_end = locks.begin() + Common::DivCeil(page_end, PAGES_PER_LOCK);
         Common::RangeLockGuard lk(lock_start, lock_end);
-        UpdateTraps<track>(image_owners, BbLayer::WriteTraps::Image, [&](auto&& visit) {
+        UpdateTraps<track>(image_owners, PsLayer::WriteTraps::Image, [&](auto&& visit) {
             for (; page != page_end; ++page) {
                 visit(page);
             }
@@ -560,7 +560,7 @@ struct PageManager::Impl {
     void UpdateBufferTraps(VAddr base_addr, RegionBits& mask) {
         const size_t base_page = base_addr >> PM_PAGE_BITS;
         std::scoped_lock lk(locks[base_page / PAGES_PER_LOCK]);
-        UpdateTraps<track>(buffer_owners, BbLayer::WriteTraps::Buffer, [&](auto&& visit) {
+        UpdateTraps<track>(buffer_owners, PsLayer::WriteTraps::Buffer, [&](auto&& visit) {
             for (size_t page = mask.FirstRange().first; page < mask.LastRange().second; ++page) {
                 if (mask.Get(page)) {
                     visit(base_page + page);
@@ -675,12 +675,12 @@ public:
             }
         }
         // Counted like AddressSpace::Protect (PS_FRAME_LOG protect_ms).
-        BbStats::Timer timer{BbStats::t_protect};
-        BbStats::protect_calls.fetch_add(1, std::memory_order_relaxed);
-        BbStats::protect_pages.fetch_add(last - first, std::memory_order_relaxed);
+        PsStats::Timer timer{PsStats::t_protect};
+        PsStats::protect_calls.fetch_add(1, std::memory_order_relaxed);
+        PsStats::protect_pages.fetch_add(last - first, std::memory_order_relaxed);
         if (!allow_write) {
-            BbStats::protect_revoke_calls.fetch_add(1, std::memory_order_relaxed);
-            BbStats::protect_revoke_pages.fetch_add(last - first, std::memory_order_relaxed);
+            PsStats::protect_revoke_calls.fetch_add(1, std::memory_order_relaxed);
+            PsStats::protect_revoke_pages.fetch_add(last - first, std::memory_order_relaxed);
         }
         uffdio_writeprotect wp{};
         wp.range.start = address;
@@ -714,7 +714,7 @@ public:
             const VAddr addr = msg.arg.pagefault.address;
             const auto ptid = msg.arg.pagefault.feat.ptid;
             {
-                BbStats::Timer timer{BbStats::t_write_faults};
+                PsStats::Timer timer{PsStats::t_write_faults};
                 rasterizer->OnWriteFault(addr, rasterizer->IsGpuSideThreadId(ptid));
             }
             // Protect() clears with DONTWAKE (it may run for pages nobody waits on).

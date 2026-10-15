@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "video_core/renderer_vulkan/vk_fsr4.h"
-#include "bbport_toggles.h"
+#include "psport_toggles.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -13,7 +13,7 @@
 
 #include "ffx_vk_fsr4_v07.h"
 #include "ffx_vk_fsr4_v07_assets.h"
-#include "bbport_settings.h"
+#include "psport_settings.h"
 #include "video_core/renderer_vulkan/fsr411/fsr411.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
@@ -261,7 +261,7 @@ struct Fsr4Upscaler::Impl {
         g.ultra_performance = f.preset >= 4;
         g.jitter[0] = f.jitter[0];
         g.jitter[1] = f.jitter[1];
-        g.motion_scale[1] = BbToggle::Disabled(BbToggle::Fsr4MotionYFlip) ? -1.0f : 1.0f;
+        g.motion_scale[1] = PsToggle::Disabled(PsToggle::Fsr4MotionYFlip) ? -1.0f : 1.0f;
         g.sharpness = f.sharpness;
         g.sharpen = f.sharpen && f.sharpness > 0.0f;
         g.reset = f.reset;
@@ -281,7 +281,7 @@ struct Fsr4Upscaler::Impl {
     }
 
     bool Record(const Frame& f) {
-        if (BbSettings::Get().upscaler == BbSettings::UpscalerFsr411) {
+        if (PsSettings::Get().upscaler == PsSettings::UpscalerFsr411) {
             return Record411(f);
         }
         if (fatal) {
@@ -359,7 +359,7 @@ struct Fsr4Upscaler::Impl {
         d.jitterOffset = {f.jitter[0], f.jitter[1]};
         // Vectors are in render pixels; the provider divides by the render size.
         d.motionVectorScale = {1.0f,
-                               BbToggle::Disabled(BbToggle::Fsr4MotionYFlip) ? -1.0f : 1.0f};
+                               PsToggle::Disabled(PsToggle::Fsr4MotionYFlip) ? -1.0f : 1.0f};
         d.renderSize = {f.render_width, f.render_height};
         d.upscaleSize = {f.output.width, f.output.height};
         d.enableSharpening = f.sharpen && f.sharpness > 0.0f;

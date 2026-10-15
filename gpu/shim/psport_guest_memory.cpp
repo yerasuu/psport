@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-#include "bbport_guest_memory.h"
+#include "psport_guest_memory.h"
 
 #include <array>
 #include <chrono>
@@ -11,14 +11,14 @@
 #include <sys/mman.h>
 #include <unistd.h>
 #include "video_core/renderer_vulkan/vk_instance.h"
-#include "bblayer_gpu_memory.h"
+#include "pslayer_gpu_memory.h"
 
 extern "C" void runtime_memory_set_guest_chunk_allocator(int (*alloc)(uint64_t phys,
                                                                       uint64_t size));
 extern "C" void runtime_memory_set_guest_chunk_whole(int whole);
 extern "C" void* runtime_memory_backing_pointer(uint64_t phys);
 
-namespace BbGuestMemory {
+namespace PsGuestMemory {
 namespace {
 using u64 = std::uint64_t;
 constexpr std::size_t MaxChunks = 256;
@@ -90,7 +90,7 @@ void RegisterChunk(Chunk* chunk) {
         return;
     }
     const vk::DeviceAddress address = device.getBufferAddress({.buffer = chunk->buffer});
-    BbLayer::GpuMemory::Get().AddGuestSource(chunk->phys, chunk->size, chunk->buffer, address,
+    PsLayer::GpuMemory::Get().AddGuestSource(chunk->phys, chunk->size, chunk->buffer, address,
                                              chunk);
 }
 
@@ -780,4 +780,4 @@ const Chunk* Find(std::uint64_t phys) {
     const Chunk* c = chunks[lo - 1];
     return phys < c->phys + c->size ? c : nullptr;
 }
-} // namespace BbGuestMemory
+} // namespace PsGuestMemory

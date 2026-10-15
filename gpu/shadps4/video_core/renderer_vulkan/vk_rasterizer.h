@@ -168,7 +168,7 @@ public:
     /// `reads_guest_memory`: the task may read guest memory (a CPU write on stage A over memory
     /// waits for it, WaitForPendingReads); false for fences, flips and signals.
     bool RunInOrder(OrderedTask task, const void* data, u32 size,
-                    u64 toggle = BbToggle::PipelinedTasks, bool reads_guest_memory = true);
+                    u64 toggle = PsToggle::PipelinedTasks, bool reads_guest_memory = true);
     /// Stage A: the draw pipe position after the last handed-over packet, and whether the
     /// recording thread has run everything before a position.
     [[nodiscard]] u64 DrawPipeHead() const {
@@ -451,7 +451,7 @@ private:
     static void RunTextureTask(void* rasterizer);
     static void JoinBindHelper(void* rasterizer);
 
-    /// Display pass: counts the frame (BbStats::gpu_frames) and, with PS_BUFFER_STATS, the lag.
+    /// Display pass: counts the frame (PsStats::gpu_frames) and, with PS_BUFFER_STATS, the lag.
     void NoteFrameStart();
     /// PS_GPU_PROFILE: a timestamp where a render pass starts (vk_gpu_profiler.h).
     void MarkPass(const GraphicsPipeline* pipeline, const RenderState& state);

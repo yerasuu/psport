@@ -19,7 +19,7 @@
 #include <thread>
 #include <queue>
 
-#include "bbport_toggles.h"
+#include "psport_toggles.h"
 #include "common/assert.h"
 #include "common/interval_set.h"
 #include "common/unique_function.h"
@@ -671,7 +671,7 @@ private:
     /// it back from that core. Requesting ownership a few lines ahead overlaps those
     /// transfers instead of stalling on each (RecordPrefetch).
     void PrefetchAhead() const {
-        if (!BbToggle::Disabled(BbToggle::RecordPrefetch)) {
+        if (!PsToggle::Disabled(PsToggle::RecordPrefetch)) {
             __builtin_prefetch(storage + used + 384, 1, 3);
             __builtin_prefetch(storage + used + 448, 1, 3);
         }
@@ -818,7 +818,7 @@ public:
             func(current_cmdbuf);
             return;
         }
-        if (BbToggle::Disabled(BbToggle::ThreadedRecording)) {
+        if (PsToggle::Disabled(PsToggle::ThreadedRecording)) {
             EnterDirectMode();
             func(current_cmdbuf);
             return;
@@ -867,7 +867,7 @@ public:
     /// True when Record() defers commands (and RecordData() copies into chunks).
     [[nodiscard]] bool IsRecordingDeferred() const noexcept {
         return !workers.empty() && !direct_mode &&
-               !BbToggle::Disabled(BbToggle::ThreadedRecording);
+               !PsToggle::Disabled(PsToggle::ThreadedRecording);
     }
 
     /// Makes room for `bytes` of RecordData() plus the command that uses them in the current
@@ -931,7 +931,7 @@ public:
     void SyncRecording();
 
     /// bbport: guest memory copies on the recording thread (small ones, RecordHostCopy) or the
-    /// copy threads (BbCopy::Async) must be done before the guest learns the GPU is past them
+    /// copy threads (PsCopy::Async) must be done before the guest learns the GPU is past them
     /// (it may then rewrite the memory, e.g. UI vertices: flickering) and before the
     /// submission that reads them. Waits for all.
     void WaitHostCopies();
@@ -958,7 +958,7 @@ public:
 
     /// bbport: runs `signal` once the guest memory copies issued so far are done, without
     /// waiting here: the recording thread reaches it after the copies queued before it and hands
-    /// it to the copy threads' completion (BbCopy::AfterCopies).
+    /// it to the copy threads' completion (PsCopy::AfterCopies).
     void SignalAfterHostCopies(std::function<void()> signal);
 
     /// bbport: before a guest-visible write that is not deferred (WriteData, end-of-shader
@@ -1112,7 +1112,7 @@ private:
             func();
             return;
         }
-        if (BbToggle::Disabled(BbToggle::ThreadedRecording)) {
+        if (PsToggle::Disabled(PsToggle::ThreadedRecording)) {
             EnterDirectMode();
             func();
             return;

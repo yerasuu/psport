@@ -3,8 +3,8 @@
 
 #include <xxhash.h>
 
-#include "bbport_toggles.h"
-#include "bbport_free_check.h"
+#include "psport_toggles.h"
+#include "psport_free_check.h"
 #include "common/assert.h"
 #include "common/debug.h"
 #include "common/div_ceil.h"
@@ -158,8 +158,8 @@ void TextureCache::DownloadImageMemory(ImageId image_id, bool sync) {
     if (sync) {
         scheduler.Finish();
         download.Invalidate();
-        BbFreeCheck::Check(image.info.guest_address, download_size, download.mapped,
-                           BbFreeCheck::ImageDownload);
+        PsFreeCheck::Check(image.info.guest_address, download_size, download.mapped,
+                           PsFreeCheck::ImageDownload);
         Core::Memory::Instance()->TryWriteBacking(std::bit_cast<u8*>(image.info.guest_address),
                                                   download.mapped, download_size);
         // bbport: synchronous downloads run on the GPU command thread or the draw recording
@@ -171,8 +171,8 @@ void TextureCache::DownloadImageMemory(ImageId image_id, bool sync) {
         scheduler.DeferPriorityOperation(
             [this, device_addr = image.info.guest_address, download, download_size] {
                 download.Invalidate();
-                BbFreeCheck::Check(device_addr, download_size, download.mapped,
-                                   BbFreeCheck::ImageDownload);
+                PsFreeCheck::Check(device_addr, download_size, download.mapped,
+                                   PsFreeCheck::ImageDownload);
                 Core::Memory::Instance()->TryWriteBacking(std::bit_cast<u8*>(device_addr),
                                                           download.mapped, download_size);
                 if (!WriteTracking()) {
@@ -630,7 +630,7 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
         cached.format == info.pixel_format && cached.type == info.type &&
         cached.exact_fmt == exact_fmt && cached.binding == desc.type &&
         cached.levels == info.resources.levels && cached.layers == info.resources.layers &&
-        !BbToggle::Disabled(BbToggle::FindImageCache)) {
+        !PsToggle::Disabled(PsToggle::FindImageCache)) {
         Image& image = slot_images[cached.image_id];
         image.tick_accessed_last = scheduler.CurrentTick();
         TouchImage(image);
@@ -785,7 +785,7 @@ ImageView& TextureCache::FindTexture(ImageId image_id, const ImageDesc& desc, Vi
     if (refresh) {
         UpdateImage(image_id);
     }
-    if (memo && !BbToggle::Disabled(BbToggle::TextureViewMemo)) {
+    if (memo && !PsToggle::Disabled(PsToggle::TextureViewMemo)) {
         if (memo->image_id == image_id && memo->backing == image.backing && memo->view_id) {
             return slot_image_views[memo->view_id];
         }
@@ -876,7 +876,7 @@ void TextureCache::RefreshImage(Image& image) {
     if (False(image.flags & ImageFlagBits::Dirty) || image.info.num_samples > 1) {
         return;
     }
-    BbStats::Timer timer{BbStats::t_refresh};
+    PsStats::Timer timer{PsStats::t_refresh};
 
     RENDERER_TRACE;
     TRACE_HINT(fmt::format("{:x}:{:x}", image.info.guest_address, image.info.guest_size));
@@ -949,7 +949,7 @@ void TextureCache::RefreshImage(Image& image) {
             window_start = now;
         }
     }
-    BbStats::image_upload_bytes.fetch_add(image.info.guest_size, std::memory_order_relaxed);
+    PsStats::image_upload_bytes.fetch_add(image.info.guest_size, std::memory_order_relaxed);
     boost::container::small_vector<vk::BufferImageCopy, 14> image_copies;
     for (u32 m = 0; m < num_mips; m++) {
         const u32 width = std::max(image.info.size.width >> m, 1u);
@@ -1023,16 +1023,16 @@ vk::Sampler TextureCache::GetSampler(const AmdGpu::Sampler& sampler,
 }
 
 void TextureCache::RegisterImage(ImageId image_id) {
-    BbStats::images_registered.fetch_add(1, std::memory_order_relaxed);
+    PsStats::images_registered.fetch_add(1, std::memory_order_relaxed);
     Image& image = slot_images[image_id];
     ASSERT_MSG(False(image.flags & ImageFlagBits::Registered),
                "Trying to register an already registered image");
     image.flags |= ImageFlagBits::Registered;
     ++registry_generation;
     total_used_memory += Common::AlignUp(image.info.guest_size, 1024);
-    BbStats::live_image_bytes.fetch_add(Common::AlignUp(image.info.guest_size, 1024),
+    PsStats::live_image_bytes.fetch_add(Common::AlignUp(image.info.guest_size, 1024),
                                         std::memory_order_relaxed);
-    BbStats::live_images.fetch_add(1, std::memory_order_relaxed);
+    PsStats::live_images.fetch_add(1, std::memory_order_relaxed);
     image.lru_id = lru_cache.Insert(image_id, gc_tick);
     image.lru_touched_tick = gc_tick;
     ForEachPage(image.info.guest_address, image.info.guest_size,
@@ -1047,9 +1047,9 @@ void TextureCache::UnregisterImage(ImageId image_id) {
     ++registry_generation;
     lru_cache.Free(image.lru_id);
     total_used_memory -= Common::AlignUp(image.info.guest_size, 1024);
-    BbStats::live_image_bytes.fetch_sub(Common::AlignUp(image.info.guest_size, 1024),
+    PsStats::live_image_bytes.fetch_sub(Common::AlignUp(image.info.guest_size, 1024),
                                         std::memory_order_relaxed);
-    BbStats::live_images.fetch_sub(1, std::memory_order_relaxed);
+    PsStats::live_images.fetch_sub(1, std::memory_order_relaxed);
     ForEachPage(image.info.guest_address, image.info.guest_size, [this, image_id](u64 page) {
         const auto page_it = page_table.find(page);
         if (page_it == nullptr) {
@@ -1196,9 +1196,9 @@ void TextureCache::GarbageCollectImages() {
             }
         }
     }
-    BbStats::gc_used_bytes.store(total_used_memory, std::memory_order_relaxed);
-    BbStats::gc_trigger_bytes.store(trigger_gc_memory, std::memory_order_relaxed);
-    BbStats::gc_critical_bytes.store(critical_gc_memory, std::memory_order_relaxed);
+    PsStats::gc_used_bytes.store(total_used_memory, std::memory_order_relaxed);
+    PsStats::gc_trigger_bytes.store(trigger_gc_memory, std::memory_order_relaxed);
+    PsStats::gc_critical_bytes.store(critical_gc_memory, std::memory_order_relaxed);
     // bbport: gc_tick (one per guest submission, hundreds a second) at each of the last 64
     // seconds, for ages in seconds. The usage compared is all of our VRAM, not only images: on a
     // discrete GPU it stays over the trigger, where an age of 16 ticks (~3 frames) evicted every
@@ -1218,10 +1218,10 @@ void TextureCache::GarbageCollectImages() {
                 vram_short_until.store(second + 2, std::memory_order_relaxed);
             }
         }
-        BbStats::coarse_second.store(u32(second), std::memory_order_relaxed);
+        PsStats::coarse_second.store(u32(second), std::memory_order_relaxed);
         gc_tick_at_second[second % gc_tick_at_second.size()] = gc_tick;
     }
-    if (BbToggle::Disabled(BbToggle::TextureCollector)) {
+    if (PsToggle::Disabled(PsToggle::TextureCollector)) {
         return;
     }
     if (total_used_memory < trigger_gc_memory) {
@@ -1281,7 +1281,7 @@ void TextureCache::GarbageCollectImages() {
         // VRAM grew with every area visited up to the pressure mark (~10 GB on 16 GB).
         if ((tiled && download) || (download && !pressured)) {
             lru_cache.Touch(image.lru_id, gc_tick);
-            BbStats::gc_kept_images.fetch_add(1, std::memory_order_relaxed);
+            PsStats::gc_kept_images.fetch_add(1, std::memory_order_relaxed);
             return false;
         }
         --num_deletions;
@@ -1293,7 +1293,7 @@ void TextureCache::GarbageCollectImages() {
             ++gc_downloads;
         }
         ++gc_evictions;
-        BbStats::gc_freed_images.fetch_add(1, std::memory_order_relaxed);
+        PsStats::gc_freed_images.fetch_add(1, std::memory_order_relaxed);
         FreeImage(image_id);
         if (total_used_memory < critical_gc_memory) {
             if (aggresive) {

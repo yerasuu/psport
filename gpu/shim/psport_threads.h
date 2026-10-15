@@ -11,7 +11,7 @@
 #include <thread>
 #include <unistd.h>
 
-namespace BbThreads {
+namespace PsThreads {
 
 /// Hardware threads available to the process.
 inline unsigned Available() {
@@ -31,4 +31,4 @@ inline void MakeBackground() {
     }
 }
 
-} // namespace BbThreads
+} // namespace PsThreads

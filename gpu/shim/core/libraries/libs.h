@@ -1,6 +1,6 @@
 // bbport: shadPS4 registers HLE functions with LIB_FUNCTION(nid, library,
 // version, module, fn). Here the registrations fill a table that the C
-// loader queries by NID (see bbgpu.cpp: bbgpu_resolve).
+// loader queries by NID (see psport_gpu.cpp: psport_gpu_resolve).
 #pragma once
 #include <string>
 #include "common/types.h"

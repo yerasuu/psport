@@ -7,7 +7,7 @@
 
 #include <cstdint>
 
-namespace BbGnmHooks {
+namespace PsGnmHooks {
 /// Patches the image (the loader calls it once, before any game code runs, while the image is
 /// still writable). Each entry is checked byte for byte against the 1.09 eboot.
 void PatchImage(unsigned char* image, std::uint64_t size);
@@ -19,4 +19,4 @@ void CheckSubmission(const std::uint32_t* commands, std::uint64_t dwords);
 /// PS_GNM_OBSERVE: packets our GnmDriver wrote into space the game reserved ([commands,
 /// commands + dwords)).
 void NoteDriverWrite(std::uint32_t* commands, std::uint64_t dwords);
-} // namespace BbGnmHooks
+} // namespace PsGnmHooks

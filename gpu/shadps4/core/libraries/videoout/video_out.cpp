@@ -12,7 +12,7 @@
 #include "core/libraries/videoout/videoout_error.h"
 #include "core/platform.h"
 #include "video_core/renderer_vulkan/vk_presenter.h"
-#include "bbport_overlay.h"
+#include "psport_overlay.h"
 
 extern std::unique_ptr<Vulkan::Presenter> presenter;
 
@@ -416,7 +416,7 @@ s32 PS4_SYSV_ABI sceVideoOutAdjustColor(s32 handle, const SceVideoOutColorSettin
 }
 
 // bbport: the cursor's state is kept per port as the game sets it; the presenter draws it over the
-// game frame (BbOverlay::SetGameCursor).
+// game frame (PsOverlay::SetGameCursor).
 static s32 GetCursor(s32 handle, u32 index, VideoOutCursor** cursor) {
     auto* port = driver->GetPort(handle);
     if (!port) {
@@ -432,7 +432,7 @@ static s32 GetCursor(s32 handle, u32 index, VideoOutCursor** cursor) {
 static void ShowCursor(s32 handle, u32 index) {
     const auto* port = driver->GetPort(handle);
     const VideoOutCursor& cursor = port->cursors[index];
-    BbOverlay::SetGameCursor(index, BbOverlay::GameCursor{
+    PsOverlay::SetGameCursor(index, PsOverlay::GameCursor{
                                         .image = static_cast<const u32*>(cursor.image),
                                         .x = cursor.x,
                                         .y = cursor.y,
@@ -454,13 +454,13 @@ s32 PS4_SYSV_ABI sceVideoOutCursorEnable(s32 handle, u32 index, const void* imag
         return ORBIS_VIDEO_OUT_ERROR_INVALID_ADDRESS;
     }
     const auto* pixels = static_cast<const u32*>(image);
-    const auto visible = std::count_if(pixels, pixels + BbOverlay::CursorImageSize * BbOverlay::CursorImageSize,
+    const auto visible = std::count_if(pixels, pixels + PsOverlay::CursorImageSize * PsOverlay::CursorImageSize,
                                        [](u32 argb) { return (argb >> 24) != 0; });
     // Once, so that a log says whether a game drew a hardware cursor and whether its image was set.
     static std::atomic<bool> told{false};
     if (!told.exchange(true, std::memory_order_relaxed)) {
         std::printf("VideoOut: cursor %u enabled at %d,%d, %td of its %ux%u pixels visible\n", index, cursor->x,
-                    cursor->y, visible, BbOverlay::CursorImageSize, BbOverlay::CursorImageSize);
+                    cursor->y, visible, PsOverlay::CursorImageSize, PsOverlay::CursorImageSize);
     }
     cursor->image = image;
     cursor->enabled = true;

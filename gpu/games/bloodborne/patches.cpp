@@ -19,7 +19,7 @@
 #include <sys/stat.h>
 #include <vector>
 
-namespace BbLaunch {
+namespace PsLaunch {
 namespace {
 constexpr const char* AppVersion = "01.09";
 constexpr std::uint64_t EbootBase = 0x400000;
@@ -233,7 +233,7 @@ void CheckDebugMenu(std::vector<std::string>& names, const std::string& game_dir
     names.erase(std::remove(names.begin(), names.end(), DebugMenu), names.end());
 }
 
-bool Add(const BbPatchServices& services, const std::string& file, const std::vector<std::string>& names) {
+bool Add(const PsPatchServices& services, const std::string& file, const std::vector<std::string>& names) {
     std::vector<const char*> pointers;
     pointers.reserve(names.size());
     for (const std::string& name : names) {
@@ -249,7 +249,7 @@ bool Add(const BbPatchServices& services, const std::string& file, const std::ve
 }
 
 /// The template's writes, its four size operands set to the scene's and the UI's sizes.
-bool AddResolution(const BbPatchServices& services, const std::string& file, int width, int height) {
+bool AddResolution(const PsPatchServices& services, const std::string& file, int width, int height) {
     const std::size_t i_first = services.pfn_count(services.p_list);
     if (!Add(services, file, {ResolutionTemplate})) {
         return false;
@@ -316,7 +316,7 @@ void PrepareEnvironment() {
     setenv("PS_VBLANK_HZ", p_preset ? p_preset->sz_vblank_hz : "60", 1);
 }
 
-bool AddPatches(const BbGameFiles& game, const BbPatchServices& services) {
+bool AddPatches(const PsGameFiles& game, const PsPatchServices& services) {
     const std::string fps = FpsPresetName();
     const FpsPreset* p_preset = FindPreset(fps);
     if (!p_preset) {
@@ -392,4 +392,4 @@ bool AddPatches(const BbGameFiles& game, const BbPatchServices& services) {
                 names.empty() ? "none" : ("[" + list + "]").c_str());
     return true;
 }
-} // namespace BbLaunch
+} // namespace PsLaunch

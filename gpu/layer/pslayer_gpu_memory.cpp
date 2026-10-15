@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-#include "bblayer_gpu_memory.h"
+#include "pslayer_gpu_memory.h"
 
 #include <algorithm>
 
-namespace BbLayer {
+namespace PsLayer {
 
 GpuMemory& GpuMemory::Get() {
     static GpuMemory instance;
@@ -231,4 +231,4 @@ std::uint64_t GpuMemory::ValidBytes() const {
     return valid_blocks << block_shift;
 }
 
-} // namespace BbLayer
+} // namespace PsLayer

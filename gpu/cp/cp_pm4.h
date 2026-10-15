@@ -6,7 +6,7 @@
 
 #include <cstdint>
 
-namespace BbCp {
+namespace PsCp {
 
 using u32 = std::uint32_t;
 using u64 = std::uint64_t;
@@ -133,4 +133,4 @@ namespace Event {
 inline constexpr u32 SoVgtStreamoutFlush = 0x1F;
 } // namespace Event
 
-} // namespace BbCp
+} // namespace PsCp

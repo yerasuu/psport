@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-#include "bbport_submit_guard.h"
+#include "psport_submit_guard.h"
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -15,18 +15,18 @@
 #include <ucontext.h>
 #include <unistd.h>
 #include <xxhash.h>
-#include "bblayer_write_traps.h"
-#include "bbport_toggles.h"
+#include "pslayer_write_traps.h"
+#include "psport_toggles.h"
 #include "common/signal_context.h"
 #include "core/memory.h"
 #include "core/signals.h"
 #include "video_core/amdgpu/pm4_cmds.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
 
-namespace BbSubmitGuard {
+namespace PsSubmitGuard {
 namespace {
 constexpr std::uintptr_t PageSize = 4096;
-constexpr auto Reason = BbLayer::WriteTraps::FrameCommands;
+constexpr auto Reason = PsLayer::WriteTraps::FrameCommands;
 // A GPU that waits for a label the CPU writes into these pages would never retire the frame while
 // the writer waits here: the write goes through after this.
 constexpr auto WaitLimit = std::chrono::seconds{5};
@@ -153,10 +153,10 @@ std::optional<std::uint64_t> Hash(const Range& range) {
         hash = XXH3_64bits_withSeed(bytes + at, size - at, hash);
     }
     runtime_fault_recover = nullptr;
-    BbStats::submit_guard_ns.fetch_add(
+    PsStats::submit_guard_ns.fetch_add(
         std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start).count(),
         std::memory_order_relaxed);
-    BbStats::submit_guard_bytes.fetch_add(size, std::memory_order_relaxed);
+    PsStats::submit_guard_bytes.fetch_add(size, std::memory_order_relaxed);
     return hash;
 }
 
@@ -170,7 +170,7 @@ void Trip(const char* what, const Range& range, std::uintptr_t address, const ch
 }
 
 void Trap(std::uintptr_t begin, std::uintptr_t end, bool on) {
-    BbLayer::WriteTraps::Set(begin, end - begin, Reason, on);
+    PsLayer::WriteTraps::Set(begin, end - begin, Reason, on);
 }
 
 // The reason bit is one per page: lifting a range re-arms what later frames still hold there.
@@ -196,7 +196,7 @@ std::vector<Range>::iterator FindTrapped(std::uintptr_t address) {
 
 bool OnFault(void* context, void* fault_address) {
     const auto address = reinterpret_cast<std::uintptr_t>(fault_address);
-    if (!Common::IsWriteError(context) || !(BbLayer::WriteTraps::Reasons(address) & Reason)) {
+    if (!Common::IsWriteError(context) || !(PsLayer::WriteTraps::Reasons(address) & Reason)) {
         return false;
     }
     std::unique_lock lock{mutex};
@@ -294,4 +294,4 @@ void Retire(std::uint64_t frame) {
 bool Tripped() {
     return tripped.load(std::memory_order_relaxed);
 }
-} // namespace BbSubmitGuard
+} // namespace PsSubmitGuard

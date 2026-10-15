@@ -6,7 +6,7 @@
 
 #include <cstdint>
 
-namespace BbWriteLog {
+namespace PsWriteLog {
 enum Source : std::uint32_t { Backing, WriteData, Fence, FenceIntent, WriteDataIntent, EosIntent, Dma };
 bool Enabled();
 /// PS_WRITE_LOG=1: at the write itself (changes the timing of those writes).
@@ -18,4 +18,4 @@ void NoteIntent(std::uint64_t address, const void* data, std::uint64_t size, Sou
 void DumpRange(std::uint64_t address, std::uint64_t size);
 }
 
-extern "C" void bbgpu_dump_guest_writes(void* ucontext);
+extern "C" void psport_gpu_dump_guest_writes(void* ucontext);

@@ -22,7 +22,7 @@
 #include <vector>
 #include <vulkan/vulkan_core.h>
 
-namespace BbLayer {
+namespace PsLayer {
 
 /// A Vulkan buffer over memory the GPU reads guest data from.
 struct MemorySource {
@@ -176,4 +176,4 @@ private:
     std::uint64_t valid_blocks = 0;
 };
 
-} // namespace BbLayer
+} // namespace PsLayer

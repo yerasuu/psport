@@ -1,7 +1,7 @@
 /* Narrow, explicit PS4 libc contracts. No automatic success stubs. */
 #define _CRT_RAND_S
 #include "runtime.h"
-#include "gpu/bbgpu.h"
+#include "gpu/psport_gpu.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -332,7 +332,7 @@ uintptr_t runtime_resolve(const char *name, int is_data) {
     if (file) return file;
     uintptr_t aio = runtime_aio_resolve(name);
     if (aio) return aio;
-    return bbgpu_resolve(name);
+    return psport_gpu_resolve(name);
 }
 /* The NIDs before any "#<library>#<module>" scope are equal. */
 int runtime_same_nid(const char *a, const char *b) {

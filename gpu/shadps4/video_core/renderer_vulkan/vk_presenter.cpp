@@ -13,8 +13,8 @@
 #include "video_core/renderdoc.h"
 #include "video_core/renderer_vulkan/vk_platform.h"
 #include "game_profile.h"
-#include "bbport_overlay.h"
-#include "bbport_timeline.h"
+#include "psport_overlay.h"
+#include "psport_timeline.h"
 #include "video_core/renderer_vulkan/vk_temporal_upscaler.h"
 #include "video_core/renderer_vulkan/vk_presenter.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
@@ -155,7 +155,7 @@ Presenter::Presenter(Frontend::WindowSDL& window_, AmdGpu::Liverpool* liverpool_
 
     fsr_pass.Create(device, instance.GetAllocator(), num_images);
     pp_pass.Create(device, swapchain.GetSurfaceFormat().format);
-    BbOverlay::Init(instance, swapchain.GetSurfaceFormat().format, num_images);
+    PsOverlay::Init(instance, swapchain.GetSurfaceFormat().format, num_images);
 
 }
 
@@ -321,7 +321,7 @@ static vk::Format GetFrameViewFormat(const Libraries::VideoOut::PixelFormat form
 
 Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& attribute,
                                VAddr cpu_address) {
-    BbTimeline::Note(BbTimeline::PipeTask, 4, draw_scheduler.CurrentTick());
+    PsTimeline::Note(PsTimeline::PipeTask, 4, draw_scheduler.CurrentTick());
     // bbport: scaled upscaler presets: the output-size display buffer drawn by the port.
     TemporalUpscaler::Display display{};
     const bool upscaled = rasterizer->GetUpscaler().DisplayOverride(cpu_address, display);
@@ -444,12 +444,12 @@ Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& 
     });
 
     // Flush frame creation commands.
-    BbStats::frame_number.fetch_add(1, std::memory_order_relaxed); // bbport: game frames shown
+    PsStats::frame_number.fetch_add(1, std::memory_order_relaxed); // bbport: game frames shown
     frame->ready_semaphore = draw_scheduler.GetWorkSemaphore()->Handle();
     frame->ready_tick = draw_scheduler.CurrentTick();
     SubmitInfo info{};
     draw_scheduler.Flush(info);
-    BbTimeline::Note(BbTimeline::PipeTask, 5, frame->ready_tick);
+    PsTimeline::Note(PsTimeline::PipeTask, 5, frame->ready_tick);
 
     // bbport: the GPU command thread runs at most PS_FRAMES_AHEAD (default 1) guest frames
     // ahead of the GPU: it waits here for the frame that many flips back. When the GPU is the
@@ -466,7 +466,7 @@ Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& 
             const u64 tick = recent_frame_ticks.front();
             recent_frame_ticks.pop_front();
             if (recent_frame_ticks.size() == frames_ahead) {
-                BbStats::WaitTimer timer{BbStats::present_wait_ns};
+                PsStats::WaitTimer timer{PsStats::present_wait_ns};
                 draw_scheduler.Wait(tick);
             }
         }
@@ -668,7 +668,7 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
         if (const Game::Profile* game = Game::Active(); game && game->before_present) {
             game->before_present();
         }
-        const bool overlay = BbOverlay::Visible();
+        const bool overlay = PsOverlay::Visible();
         const std::array post_barriers{
             vk::ImageMemoryBarrier{
                 .srcAccessMask = vk::AccessFlagBits::eTransferWrite,
@@ -698,7 +698,7 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
                                vk::PipelineStageFlagBits::eAllCommands,
                                vk::DependencyFlagBits::eByRegion, {}, {}, post_barriers);
         if (overlay) {
-            BbOverlay::Render(cmdbuf, swapchain.ImageView(), extent,
+            PsOverlay::Render(cmdbuf, swapchain.ImageView(), extent,
                               FitImage(frame->width, frame->height, extent.width, extent.height));
             const vk::ImageMemoryBarrier to_present{
                 .srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite,

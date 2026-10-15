@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-#include "bbport_overlay.h"
+#include "psport_overlay.h"
 
 #include <algorithm>
 #include <array>
@@ -14,7 +14,7 @@
 #include <vector>
 
 #include <SDL3/SDL.h>
-#include "bbport_settings.h"
+#include "psport_settings.h"
 #include "common/elf_info.h"
 #include "game_profile.h"
 #include "imgui.h"
@@ -39,7 +39,7 @@ extern "C" const unsigned char bb_font_ttf_end[];
 
 extern "C" void runtime_restart(void); // psport (probe.c)
 
-namespace BbOverlay {
+namespace PsOverlay {
 
 namespace {
 
@@ -88,7 +88,7 @@ void SetOpen(bool value) {
     }
     if (!value && dirty) {
         dirty = false;
-        BbSettings::Save();
+        PsSettings::Save();
     }
 }
 
@@ -192,7 +192,7 @@ void Hint(const char* text) {
 // The settings menu as in 0.3 and 0.4: one window (moved with the mouse, its place kept in
 // bbport.ini), sections one under the other, ImGui's own widgets and keyboard/gamepad navigation.
 void Menu() {
-    auto& s = BbSettings::Get();
+    auto& s = PsSettings::Get();
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     // Where it was moved last (bbport.ini menu_pos, a fraction of the screen), kept on screen.
     ImVec2 pos(viewport->WorkPos.x + 40.0f * base_scale, viewport->WorkPos.y + 40.0f * base_scale);
@@ -211,8 +211,8 @@ void Menu() {
         return title.empty() ? std::string("psport") : std::string(title);
     }();
     const std::string window_title = s_game_title +
-                                     BbSettings::MenuText(" - Graphics", " — настройки", ": gráficos") +
-                                     "  (Insert / L3+R3)###bbport_settings";
+                                     PsSettings::MenuText(" - Graphics", " — настройки", ": gráficos") +
+                                     "  (Insert / L3+R3)###psport_settings";
     if (!ImGui::Begin(window_title.c_str(), &keep_open, ImGuiWindowFlags_NoCollapse)) {
         ImGui::End();
         return;
@@ -231,10 +231,10 @@ void Menu() {
     // Issues #74, #116: leaving the game from the pad (this menu opens with L3+R3). A second
     // press confirms; the window thread then closes like the window's own close button.
     static bool quit_armed;
-    if (ImGui::Button(quit_armed ? BbSettings::MenuText("Press again to quit###quit_game",
+    if (ImGui::Button(quit_armed ? PsSettings::MenuText("Press again to quit###quit_game",
                                                         "Нажмите ещё раз для выхода###quit_game",
                                                         "Pulsa otra vez para salir###quit_game")
-                                 : BbSettings::MenuText("Quit game###quit_game", "Выйти из игры###quit_game",
+                                 : PsSettings::MenuText("Quit game###quit_game", "Выйти из игры###quit_game",
                                                         "Salir del juego###quit_game"))) {
         if (quit_armed) {
             SDL_Event quit{};
@@ -250,17 +250,17 @@ void Menu() {
     static const char* languages[] = {"English", "Русский", "Español"};
     int language = int(s.menu_language.load());
     if (ImGui::Combo("Language", &language, languages, 3)) {
-        s.menu_language = BbSettings::MenuLanguage(language);
-        BbSettings::Save();
+        s.menu_language = PsSettings::MenuLanguage(language);
+        PsSettings::Save();
     }
-    ImGui::Text(BbSettings::MenuText("%.0f FPS  (%.1f ms)", "%.0f FPS  (%.1f мс)", "%.0f FPS  (%.1f ms)"),
+    ImGui::Text(PsSettings::MenuText("%.0f FPS  (%.1f ms)", "%.0f FPS  (%.1f мс)", "%.0f FPS  (%.1f ms)"),
                 frame_ms_avg > 0.0f ? 1000.0f / frame_ms_avg : 0.0f, frame_ms_avg);
 
-    ImGui::SeparatorText(BbSettings::MenuText("Temporal upscaler", "Временной апскейлер",
+    ImGui::SeparatorText(PsSettings::MenuText("Temporal upscaler", "Временной апскейлер",
                                               "Escalado temporal"));
     if (Vulkan::GetUpscalerPlacement().scene_combine_shader == 0) {
         ImGui::PushTextWrapPos();
-        ImGui::TextUnformatted(BbSettings::MenuText(
+        ImGui::TextUnformatted(PsSettings::MenuText(
             "No game profile places the upscaler in this title's frame, so it stays off.",
             "Ни один игровой профиль не размещает апскейлер в кадре этой игры, "
             "поэтому он выключен.",
@@ -269,18 +269,18 @@ void Menu() {
         ImGui::PopTextWrapPos();
     } else {
         const char* upscalers[] = {
-            BbSettings::MenuText("Off", "Выкл", "Desactivado"), "FSR 3.1", "FSR 4 (INT8)", "FSR 4.1.1",
-            BbSettings::MenuText("TAA (native anti-aliasing)", "TAA (нативное сглаживание)",
+            PsSettings::MenuText("Off", "Выкл", "Desactivado"), "FSR 3.1", "FSR 4 (INT8)", "FSR 4.1.1",
+            PsSettings::MenuText("TAA (native anti-aliasing)", "TAA (нативное сглаживание)",
                                  "TAA (antialiasing nativo)"),
             "DLSS (NVIDIA RTX)"};
-        static_assert(sizeof(upscalers) / sizeof(upscalers[0]) == BbSettings::UpscalerCount);
+        static_assert(sizeof(upscalers) / sizeof(upscalers[0]) == PsSettings::UpscalerCount);
         static const char* later[] = {"XeSS"};
         int upscaler = s.upscaler;
-        if (ImGui::BeginCombo(BbSettings::MenuText("Upscaler", "Апскейлер", "Escalador"), upscalers[upscaler])) {
-            for (int i = 0; i < BbSettings::UpscalerCount; ++i) {
-                const bool supported = i == BbSettings::UpscalerFsr4     ? s.fsr4_supported.load()
-                                       : i == BbSettings::UpscalerFsr411 ? s.fsr411_supported.load()
-                                       : i == BbSettings::UpscalerDlss   ? s.dlss_supported.load()
+        if (ImGui::BeginCombo(PsSettings::MenuText("Upscaler", "Апскейлер", "Escalador"), upscalers[upscaler])) {
+            for (int i = 0; i < PsSettings::UpscalerCount; ++i) {
+                const bool supported = i == PsSettings::UpscalerFsr4     ? s.fsr4_supported.load()
+                                       : i == PsSettings::UpscalerFsr411 ? s.fsr411_supported.load()
+                                       : i == PsSettings::UpscalerDlss   ? s.dlss_supported.load()
                                                                          : true;
                 ImGui::BeginDisabled(!supported);
                 if (ImGui::Selectable(upscalers[i], i == upscaler)) {
@@ -289,7 +289,7 @@ void Menu() {
                 ImGui::EndDisabled();
                 if (!supported) {
                     ImGui::SameLine();
-                    ImGui::TextDisabled("%s", BbSettings::MenuText("— not supported by this GPU",
+                    ImGui::TextDisabled("%s", PsSettings::MenuText("— not supported by this GPU",
                                                              "— не поддерживается видеокартой",
                                                              "— no compatible con esta GPU"));
                 }
@@ -299,13 +299,13 @@ void Menu() {
                 ImGui::Selectable(name, false);
                 ImGui::EndDisabled();
                 ImGui::SameLine();
-                ImGui::TextDisabled("%s", BbSettings::MenuText("— in development", "— в работе",
+                ImGui::TextDisabled("%s", PsSettings::MenuText("— in development", "— в работе",
                                                                "— en desarrollo"));
             }
             ImGui::EndCombo();
         }
-        if (s.upscaler == BbSettings::UpscalerDlss) {
-            Hint(BbSettings::MenuText(
+        if (s.upscaler == PsSettings::UpscalerDlss) {
+            Hint(PsSettings::MenuText(
                 "NVIDIA DLSS Super Resolution (RTX GPUs; Native AA is DLAA). Needs the DLSS bridge "
                 "and NVIDIA's library next to the game; otherwise FSR 3.1 is used.",
                 "NVIDIA DLSS Super Resolution (видеокарты RTX; Native AA — это DLAA). Нужны мост DLSS "
@@ -318,7 +318,7 @@ void Menu() {
             ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "%s", text);
             ImGui::PopTextWrapPos();
         };
-        if (const char* problem = s.dlss_problem.load(); problem && s.upscaler == BbSettings::UpscalerDlss) {
+        if (const char* problem = s.dlss_problem.load(); problem && s.upscaler == PsSettings::UpscalerDlss) {
             char line[192];
             std::snprintf(line, sizeof(line), "DLSS: %s", problem);
             problem_text(line);
@@ -326,21 +326,21 @@ void Menu() {
         if (const char* problem = s.fsr4_problem.load()) {
             char line[192];
             std::snprintf(line, sizeof(line),
-                          BbSettings::MenuText("FSR 4 unavailable: %s", "FSR 4 недоступен: %s",
+                          PsSettings::MenuText("FSR 4 unavailable: %s", "FSR 4 недоступен: %s",
                                                "FSR 4 no disponible: %s"), problem);
             problem_text(line);
-            if (!BbSettings::IsFsr4(s.upscaler)) {
+            if (!PsSettings::IsFsr4(s.upscaler)) {
                 ImGui::PushTextWrapPos();
-                ImGui::TextUnformatted(BbSettings::MenuText(
+                ImGui::TextUnformatted(PsSettings::MenuText(
                     "The mode selected above is active. You can select FSR 4 again.",
                     "Активен режим, выбранный выше. FSR 4 можно выбрать снова.",
                     "Está activo el modo elegido arriba. Puedes volver a elegir FSR 4."));
                 ImGui::PopTextWrapPos();
             }
         }
-        if (BbSettings::IsFsr4(s.upscaler)) {
-            if (s.upscaler == BbSettings::UpscalerFsr411) {
-                Hint(BbSettings::MenuText(
+        if (PsSettings::IsFsr4(s.upscaler)) {
+            if (s.upscaler == PsSettings::UpscalerFsr411) {
+                Hint(PsSettings::MenuText(
                     "FSR 4.1.1: the model from AMD's 4.1.1 DLL, reproduced in Vulkan (output matches "
                     "the DLL). Assets are built from your DLL in the launcher.",
                     "FSR 4.1.1: модель из DLL AMD 4.1.1, воспроизведённая в Vulkan (результат совпадает "
@@ -348,7 +348,7 @@ void Menu() {
                     "FSR 4.1.1: el modelo de la DLL 4.1.1 de AMD, reproducido en Vulkan (el resultado coincide "
                     "con la DLL). Los recursos se generan a partir de tu DLL en el lanzador."));
             } else {
-                Hint(BbSettings::MenuText(
+                Hint(PsSettings::MenuText(
                     "FSR 4 in INT8 mode (v07 model from AMD FidelityFX SDK sources). Higher quality "
                     "than FSR 3.1, but the pass is more demanding. Changing the preset rebuilds the "
                     "model (a brief pause).",
@@ -359,13 +359,13 @@ void Menu() {
                     "3.1, pero la pasada es más exigente. Cambiar el preajuste reconstruye el modelo (una pausa "
                     "breve)."));
             }
-            Checkbox(BbSettings::MenuText("FSR 4: auto exposure", "FSR 4: авто-экспозиция",
+            Checkbox(PsSettings::MenuText("FSR 4: auto exposure", "FSR 4: авто-экспозиция",
                                           "FSR 4: exposición automática"),
                      s.fsr4_auto_exposure);
-            Checkbox(BbSettings::MenuText("FSR 4: invert jitter sign", "FSR 4: обратный знак jitter",
+            Checkbox(PsSettings::MenuText("FSR 4: invert jitter sign", "FSR 4: обратный знак jitter",
                                           "FSR 4: invertir el signo del jitter"),
                      s.fsr4_invert_jitter);
-            Hint(BbSettings::MenuText(
+            Hint(PsSettings::MenuText(
                 "For diagnosing ghosting: the FSR 4 network normalizes color by exposure and uses "
                 "it to decide when to discard previous frames. Changes apply immediately, without a "
                 "restart.",
@@ -374,26 +374,26 @@ void Menu() {
                 "Para diagnosticar el ghosting: la red de FSR 4 normaliza el color según la exposición y la usa "
                 "para decidir cuándo descartar los fotogramas anteriores. Se aplica al momento, sin reiniciar."));
         }
-        const bool upscaler_on = s.upscaler != BbSettings::UpscalerOff;
-        const bool taa = s.upscaler == BbSettings::UpscalerTaa;
+        const bool upscaler_on = s.upscaler != PsSettings::UpscalerOff;
+        const bool taa = s.upscaler == PsSettings::UpscalerTaa;
         ImGui::BeginDisabled(!upscaler_on);
         ImGui::BeginDisabled(taa);
-        int preset = taa ? BbSettings::NativeAA : s.preset.load();
+        int preset = taa ? PsSettings::NativeAA : s.preset.load();
         char preset_label[64];
-        std::snprintf(preset_label, sizeof(preset_label), "%s (x%.1f)", BbSettings::PresetName(preset),
-                      BbSettings::PresetScale(preset));
-        if (ImGui::BeginCombo(BbSettings::MenuText("Preset", "Пресет", "Preajuste"), preset_label)) {
-            for (int i = 0; i < BbSettings::PresetCount; ++i) {
+        std::snprintf(preset_label, sizeof(preset_label), "%s (x%.1f)", PsSettings::PresetName(preset),
+                      PsSettings::PresetScale(preset));
+        if (ImGui::BeginCombo(PsSettings::MenuText("Preset", "Пресет", "Preajuste"), preset_label)) {
+            for (int i = 0; i < PsSettings::PresetCount; ++i) {
                 char label[64];
-                const float scale = BbSettings::PresetScale(i);
+                const float scale = PsSettings::PresetScale(i);
                 const int output = s.output_res;
                 std::snprintf(
                     label, sizeof(label),
-                    BbSettings::MenuText("%s (x%.1f, render %dx%d)", "%s (x%.1f, рендер %dx%d)",
+                    PsSettings::MenuText("%s (x%.1f, render %dx%d)", "%s (x%.1f, рендер %dx%d)",
                                          "%s (x%.1f, render %dx%d)"),
-                    BbSettings::PresetName(i), scale,
-                    int(std::lround(BbSettings::OutputWidths[output] / scale / 2) * 2),
-                    int(std::lround(BbSettings::OutputHeights[output] / scale / 2) * 2));
+                    PsSettings::PresetName(i), scale,
+                    int(std::lround(PsSettings::OutputWidths[output] / scale / 2) * 2),
+                    int(std::lround(PsSettings::OutputHeights[output] / scale / 2) * 2));
                 if (ImGui::Selectable(label, i == preset)) {
                     Store(s.preset, i, true);
                 }
@@ -402,7 +402,7 @@ void Menu() {
         }
         ImGui::EndDisabled();
         if (taa) {
-            ImGui::TextWrapped("%s", BbSettings::MenuText(
+            ImGui::TextWrapped("%s", PsSettings::MenuText(
                 "TAA anti-aliases the scene at output resolution, without an FSR model or upscaling. "
                 "Your saved FSR preset is restored when you select FSR.",
                 "TAA сглаживает сцену в разрешении вывода, без модели FSR и апскейлинга. "
@@ -411,16 +411,16 @@ void Menu() {
                 "guardado vuelve cuando eliges FSR."));
         }
         ImGui::Text(
-            BbSettings::MenuText("Active scene render: %d x %d", "Активный рендер сцены: %d x %d",
+            PsSettings::MenuText("Active scene render: %d x %d", "Активный рендер сцены: %d x %d",
                                  "Render de la escena actual: %d x %d"),
             s.active_render_width.load(), s.active_render_height.load());
-        if (BbSettings::FixedRenderSession()) {
-            ImGui::Text(BbSettings::MenuText("Startup preset: %s", "Пресет при запуске: %s",
+        if (PsSettings::FixedRenderSession()) {
+            ImGui::Text(PsSettings::MenuText("Startup preset: %s", "Пресет при запуске: %s",
                                              "Preajuste al iniciar: %s"),
-                        BbSettings::PresetName(s.startup_preset));
+                        PsSettings::PresetName(s.startup_preset));
             if (const char* automatic = std::getenv("PS_AUTO_RENDER_RES");
                 automatic && automatic[0] == '1') {
-                Hint(BbSettings::MenuText(
+                Hint(PsSettings::MenuText(
                     "When output is not 1080p, the entire game renders at the preset resolution "
                     "(startup patch): this is fastest on Steam Deck and weaker GPUs. Preset or output "
                     "resolution changes require a restart. Enable Live resolution changes below to "
@@ -435,7 +435,7 @@ void Menu() {
                     "resolución de salida requiere reiniciar. Activa abajo «Cambio de resolución en vivo» para "
                     "cambiarlos sin reiniciar (el posprocesado se queda entonces en 1080p, más lento)."));
             } else {
-                Hint(BbSettings::MenuText(
+                Hint(PsSettings::MenuText(
                     "PS_RENDER_RES fixes the scene size at startup. Remove this explicit environment "
                     "variable to change resolution and presets without restarting the game.",
                     "PS_RENDER_RES фиксирует размер сцены при запуске. Уберите эту явную переменную "
@@ -444,7 +444,7 @@ void Menu() {
                     "cambiar la resolución y los preajustes sin reiniciar el juego."));
             }
         } else {
-            Hint(BbSettings::MenuText(
+            Hint(PsSettings::MenuText(
                 "Native AA: the upscaler acts as anti-aliasing. Other presets reduce the scene render "
                 "resolution relative to the output. The UI renders at output resolution. "
                 "The preset applies from the next frame without restarting the game.",
@@ -455,10 +455,10 @@ void Menu() {
                 "escena respecto a la salida. La interfaz se dibuja a la resolución de salida. El preajuste se "
                 "aplica desde el siguiente fotograma sin reiniciar el juego."));
         }
-        Checkbox(BbSettings::MenuText("Sharpening (RCAS)", "Резкость (RCAS)", "Nitidez (RCAS)"), s.sharpen);
+        Checkbox(PsSettings::MenuText("Sharpening (RCAS)", "Резкость (RCAS)", "Nitidez (RCAS)"), s.sharpen);
         ImGui::BeginDisabled(!s.sharpen);
-        Slider(BbSettings::MenuText("Sharpness", "Сила резкости", "Intensidad de nitidez"), s.sharpness, 0.0f, 2.0f);
-        Hint(BbSettings::MenuText(
+        Slider(PsSettings::MenuText("Sharpness", "Сила резкости", "Intensidad de nitidez"), s.sharpness, 0.0f, 2.0f);
+        Hint(PsSettings::MenuText(
             "Up to 1: the upscaler's own sharpening (RCAS). Above 1 adds another RCAS pass. "
             "Ctrl+click the slider to enter an exact value.",
             "До 1 — резкость самого апскейлера (RCAS). Выше 1 добавляется ещё один проход RCAS. "
@@ -466,9 +466,9 @@ void Menu() {
             "Hasta 1: la nitidez del propio escalador (RCAS). Por encima de 1 se añade otra pasada RCAS. "
             "Ctrl+clic en el control para escribir un valor exacto."));
         ImGui::EndDisabled();
-        Checkbox(BbSettings::MenuText("Subpixel jitter", "Субпиксельный сдвиг (jitter)",
+        Checkbox(PsSettings::MenuText("Subpixel jitter", "Субпиксельный сдвиг (jitter)",
                                       "Desplazamiento subpíxel (jitter)"), s.jitter);
-        Hint(BbSettings::MenuText(
+        Hint(PsSettings::MenuText(
             "Each frame shifts the scene by a fraction of a pixel, letting the upscaler reconstruct "
             "more detail from multiple frames. Without it, only history-based anti-aliasing remains.",
             "Каждый кадр сцена сдвигается на долю пикселя, и апскейлер собирает из нескольких "
@@ -476,11 +476,11 @@ void Menu() {
             "Cada fotograma desplaza la escena una fracción de píxel, y el escalador reconstruye más detalle a "
             "partir de varios fotogramas. Sin él solo queda el antialiasing por historial."));
 
-        ImGui::SeparatorText(BbSettings::MenuText("Reactive mask", "Маска реактивности", "Máscara reactiva"));
+        ImGui::SeparatorText(PsSettings::MenuText("Reactive mask", "Маска реактивности", "Máscara reactiva"));
         ImGui::BeginDisabled(taa);
-        Checkbox(BbSettings::MenuText("Enable mask", "Включить маску", "Activar máscara"), s.reactive);
-        Hint(BbSettings::IsFsr4(s.upscaler)
-                 ? BbSettings::MenuText(
+        Checkbox(PsSettings::MenuText("Enable mask", "Включить маску", "Activar máscara"), s.reactive);
+        Hint(PsSettings::IsFsr4(s.upscaler)
+                 ? PsSettings::MenuText(
                        "Marks transparent effects (haze, light, water, particles). FSR 4 takes no "
                        "mask itself: its output is blended with the current frame there, so the "
                        "effects do not drag previous frames along.",
@@ -490,7 +490,7 @@ void Menu() {
                        "Marca los efectos transparentes (bruma, luz, agua, partículas). FSR 4 no acepta máscara: "
                        "ahí su resultado se mezcla con el fotograma actual, y los efectos no arrastran fotogramas "
                        "anteriores.")
-                 : BbSettings::MenuText(
+                 : PsSettings::MenuText(
                        "Marks transparent effects (particles, haze) so the upscaler relies less on "
                        "previous frames. Reduces trails behind effects, but shimmering returns "
                        "underneath them.",
@@ -501,21 +501,21 @@ void Menu() {
                        "de los fotogramas anteriores. Menos estelas tras los efectos, pero bajo ellos vuelve el "
                        "parpadeo."));
         ImGui::BeginDisabled(!s.reactive);
-        Slider(BbSettings::MenuText("Scale", "Масштаб", "Escala"), s.reactive_scale, 0.0f, 4.0f);
-        Slider(BbSettings::MenuText("Threshold", "Порог", "Umbral"), s.reactive_threshold, 0.0f, 1.0f);
-        Slider(BbSettings::MenuText("Maximum", "Максимум", "Máximo"), s.reactive_max, 0.0f, 1.0f);
-        bool show_mask = s.debug_view == BbSettings::DebugReactive;
-        if (ImGui::Checkbox(BbSettings::MenuText("Show mask (debug)", "Показать маску (отладка)",
+        Slider(PsSettings::MenuText("Scale", "Масштаб", "Escala"), s.reactive_scale, 0.0f, 4.0f);
+        Slider(PsSettings::MenuText("Threshold", "Порог", "Umbral"), s.reactive_threshold, 0.0f, 1.0f);
+        Slider(PsSettings::MenuText("Maximum", "Максимум", "Máximo"), s.reactive_max, 0.0f, 1.0f);
+        bool show_mask = s.debug_view == PsSettings::DebugReactive;
+        if (ImGui::Checkbox(PsSettings::MenuText("Show mask (debug)", "Показать маску (отладка)",
                                                  "Mostrar máscara (depuración)"),
                             &show_mask)) {
-            s.debug_view = show_mask ? BbSettings::DebugReactive : BbSettings::DebugNone;
+            s.debug_view = show_mask ? PsSettings::DebugReactive : PsSettings::DebugNone;
         }
         ImGui::EndDisabled();
         ImGui::EndDisabled();
-        Checkbox(BbSettings::MenuText("Character motion vectors", "Векторы движения персонажей",
+        Checkbox(PsSettings::MenuText("Character motion vectors", "Векторы движения персонажей",
                                       "Vectores de movimiento de personajes"),
                  s.object_motion);
-        Hint(BbSettings::MenuText(
+        Hint(PsSettings::MenuText(
             "Accurate vectors for animated objects: clothing and weapons break up less "
             "during movement. The static scene does not get an additional pass. "
             "Changes apply after restarting the game.",
@@ -524,14 +524,14 @@ void Menu() {
             "Изменение применяется после перезапуска игры.",
             "Vectores exactos para los objetos animados: la ropa y las armas se deshacen menos en movimiento. La "
             "escena estática no recibe una pasada adicional. Se aplica tras reiniciar el juego."));
-        bool show_motion = s.debug_view == BbSettings::DebugMotion;
-        if (ImGui::Checkbox(BbSettings::MenuText("Show motion vectors (debug)",
+        bool show_motion = s.debug_view == PsSettings::DebugMotion;
+        if (ImGui::Checkbox(PsSettings::MenuText("Show motion vectors (debug)",
                                                  "Показать векторы движения (отладка)",
                                                  "Mostrar vectores de movimiento (depuración)"),
                             &show_motion)) {
-            s.debug_view = show_motion ? BbSettings::DebugMotion : BbSettings::DebugNone;
+            s.debug_view = show_motion ? PsSettings::DebugMotion : PsSettings::DebugNone;
         }
-        Hint(BbSettings::MenuText(
+        Hint(PsSettings::MenuText(
             "Red/green: horizontal/vertical motion (8 pixels = full brightness). "
             "Blue: the pixel received an accurate object vector, not just camera motion. "
             "The upscaler treats a moving object with no blue or red/green as "
@@ -546,22 +546,22 @@ void Menu() {
         ImGui::EndDisabled(); // upscaler off
     }
 
-    ImGui::SeparatorText(BbSettings::MenuText("Output resolution", "Разрешение вывода",
+    ImGui::SeparatorText(PsSettings::MenuText("Output resolution", "Разрешение вывода",
                                               "Resolución de salida"));
     static const char* outputs[] = {"1280 x 720", "1920 x 1080", "2560 x 1440", "3840 x 2160"};
     int output = s.output_res;
-    if (ImGui::BeginCombo(BbSettings::MenuText("Output resolution", "Разрешение вывода",
+    if (ImGui::BeginCombo(PsSettings::MenuText("Output resolution", "Разрешение вывода",
                                                "Resolución de salida"),
                           outputs[output])) {
-        for (int i = 0; i < BbSettings::OutputCount; ++i) {
+        for (int i = 0; i < PsSettings::OutputCount; ++i) {
             if (ImGui::Selectable(outputs[i], i == output)) {
                 Store(s.output_res, i, true);
             }
         }
         ImGui::EndCombo();
     }
-    if (BbSettings::FixedRenderSession()) {
-        Hint(BbSettings::MenuText(
+    if (PsSettings::FixedRenderSession()) {
+        Hint(PsSettings::MenuText(
             "Size of the final frame and UI. The preset sets the scene size relative to "
             "the output: 4K Performance = 1920x1080. Applies after restarting the game.",
             "Размер готового кадра и интерфейса. Пресет задаёт размер сцены относительно "
@@ -569,7 +569,7 @@ void Menu() {
             "Tamaño del fotograma final y de la interfaz. El preajuste fija el tamaño de la escena respecto a "
             "la salida: 4K Performance = 1920x1080. Se aplica tras reiniciar el juego."));
     } else {
-        Hint(BbSettings::MenuText(
+        Hint(PsSettings::MenuText(
             "The final frame and UI size changes at the next frame boundary. "
             "The preset sets the scene size relative to the output: 4K Performance = 1920x1080. "
             "Changing the size resets the upscaler's history and may cause a brief pause.",
@@ -581,14 +581,14 @@ void Menu() {
             "reinicia el historial del escalador y puede causar una pausa breve."));
     }
     if (const Game::Profile* launched = Game::Launched(); launched && launched->add_patches) {
-        const char* live_modes[] = {BbSettings::MenuText("Auto (based on GPU)", "Авто (по видеокарте)",
+        const char* live_modes[] = {PsSettings::MenuText("Auto (based on GPU)", "Авто (по видеокарте)",
                                                          "Automático (según la GPU)"),
-                                    BbSettings::MenuText("Off (faster)", "Выключена (быстрее)",
+                                    PsSettings::MenuText("Off (faster)", "Выключена (быстрее)",
                                                          "Desactivado (más rápido)"),
-                                    BbSettings::MenuText("On", "Включена", "Activado")};
+                                    PsSettings::MenuText("On", "Включена", "Activado")};
         int live = s.live_resolution + 1;
         if (ImGui::BeginCombo(
-                BbSettings::MenuText("Live resolution changes", "Смена разрешения на лету",
+                PsSettings::MenuText("Live resolution changes", "Смена разрешения на лету",
                                      "Cambio de resolución en vivo"),
                 live_modes[live])) {
             for (int i = 0; i < 3; ++i) {
@@ -598,7 +598,7 @@ void Menu() {
             }
             ImGui::EndCombo();
         }
-        Hint(BbSettings::MenuText(
+        Hint(PsSettings::MenuText(
             "On: output resolution and preset change without restarting, but game post-processing "
             "stays at 1080p, which is noticeably slower on Steam Deck and older GPUs. "
             "Off: everything renders at the preset resolution, and changes require a restart. Auto "
@@ -613,25 +613,25 @@ void Menu() {
             "dedicadas potentes. Se aplica tras reiniciar el juego."));
     }
     const auto localized = [](const Game::LocalizedText& text) {
-        return BbSettings::MenuText(text.sz_english, text.sz_russian, text.sz_spanish);
+        return PsSettings::MenuText(text.sz_english, text.sz_russian, text.sz_spanish);
     };
     const Game::GameEffects effects = Game::Effects();
     if (s.c_effects > 0 || effects.has_model_detail) {
-        ImGui::SeparatorText(BbSettings::MenuText("Game effects (restart required)",
+        ImGui::SeparatorText(PsSettings::MenuText("Game effects (restart required)",
                                                   "Эффекты игры (после перезапуска)",
                                                   "Efectos del juego (requiere reiniciar)"));
     }
     if (effects.has_model_detail) {
-        const char* lods[] = {BbSettings::MenuText("Highest (-2)", "Максимальная (-2)", "Máximo (-2)"),
-                              BbSettings::MenuText("Game default", "Как в игре", "El del juego"),
-                              BbSettings::MenuText("Lower (1)", "Ниже (1)", "Menor (1)"),
-                              BbSettings::MenuText("Lowest (2)", "Минимальная (2)", "Mínimo (2)")};
+        const char* lods[] = {PsSettings::MenuText("Highest (-2)", "Максимальная (-2)", "Máximo (-2)"),
+                              PsSettings::MenuText("Game default", "Как в игре", "El del juego"),
+                              PsSettings::MenuText("Lower (1)", "Ниже (1)", "Menor (1)"),
+                              PsSettings::MenuText("Lowest (2)", "Минимальная (2)", "Mínimo (2)")};
         static constexpr int lod_values[] = {-2, 0, 1, 2};
         int lod_index = 1;
         for (int i = 0; i < 4; ++i) {
             if (lod_values[i] == s.model_lod) lod_index = i;
         }
-        if (ImGui::BeginCombo(BbSettings::MenuText("Model detail", "Детализация моделей",
+        if (ImGui::BeginCombo(PsSettings::MenuText("Model detail", "Детализация моделей",
                                                    "Detalle de los modelos"),
                               lods[lod_index])) {
             for (int i = 0; i < 4; ++i) {
@@ -651,7 +651,7 @@ void Menu() {
     }
     if (s.c_effects > 0) {
         const Game::Profile* launched = Game::Launched();
-        std::string note = BbSettings::MenuText("Effects are enabled and disabled by game patches at startup",
+        std::string note = PsSettings::MenuText("Effects are enabled and disabled by game patches at startup",
                                                 "Эффекты включаются и выключаются патчами игры при запуске",
                                                 "Los efectos se activan y desactivan con parches del juego al iniciar");
         if (launched->patch_file) {
@@ -666,32 +666,32 @@ void Menu() {
 
     bool restart =
         s.object_motion != s.startup_object_motion || s.model_lod != s.startup_model_lod ||
-        s.live_resolution != s.startup_live_resolution || BbSettings::ResolutionNeedsRestart();
+        s.live_resolution != s.startup_live_resolution || PsSettings::ResolutionNeedsRestart();
     for (int e = 0; e < s.c_effects; ++e) {
         restart |= s.effects[e] != s.startup_effects[e];
     }
     if (restart) {
         ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "%s",
-                           BbSettings::MenuText("Changes apply after restarting the game",
+                           PsSettings::MenuText("Changes apply after restarting the game",
                                                 "Изменения применятся после перезапуска игры",
                                                 "Los cambios se aplicarán tras reiniciar el juego"));
         if (ImGui::Button(
-                BbSettings::MenuText("Apply and restart game", "Применить и перезапустить игру",
+                PsSettings::MenuText("Apply and restart game", "Применить и перезапустить игру",
                                      "Aplicar y reiniciar el juego"))) {
-            BbSettings::Save();
+            PsSettings::Save();
             runtime_restart();
         }
     }
 
-    ImGui::SeparatorText(BbSettings::MenuText("Other", "Прочее", "Otros"));
-    Checkbox(BbSettings::MenuText("FPS counter in corner", "Счётчик FPS в углу",
+    ImGui::SeparatorText(PsSettings::MenuText("Other", "Прочее", "Otros"));
+    Checkbox(PsSettings::MenuText("FPS counter in corner", "Счётчик FPS в углу",
                                   "Contador de FPS en la esquina"), s.show_fps);
 
     ImGui::Spacing();
-    if (ImGui::Button(BbSettings::MenuText("Close", "Закрыть", "Cerrar"))) {
+    if (ImGui::Button(PsSettings::MenuText("Close", "Закрыть", "Cerrar"))) {
         keep_open = false;
     }
-    ImGui::TextDisabled("%s", BbSettings::MenuText("Settings are saved to bbport.ini",
+    ImGui::TextDisabled("%s", PsSettings::MenuText("Settings are saved to bbport.ini",
                                              "Настройки сохраняются в bbport.ini",
                                              "Los ajustes se guardan en bbport.ini"));
     ImGui::End();
@@ -744,15 +744,15 @@ void FpsCounter() {
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
                      ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoNav |
                      ImGuiWindowFlags_NoFocusOnAppearing);
-    const auto& s = BbSettings::Get();
-    ImGui::Text(BbSettings::MenuText("%.0f FPS  %.1f ms  %s", "%.0f FPS  %.1f мс  %s",
+    const auto& s = PsSettings::Get();
+    ImGui::Text(PsSettings::MenuText("%.0f FPS  %.1f ms  %s", "%.0f FPS  %.1f мс  %s",
                                      "%.0f FPS  %.1f ms  %s"),
                 frame_ms_avg > 0.0f ? 1000.0f / frame_ms_avg : 0.0f, frame_ms_avg,
-                s.upscaler == BbSettings::UpscalerFsr3     ? "FSR 3.1"
-                : s.upscaler == BbSettings::UpscalerFsr4   ? "FSR 4"
-                : s.upscaler == BbSettings::UpscalerFsr411 ? "FSR 4.1.1"
-                : s.upscaler == BbSettings::UpscalerTaa    ? "TAA"
-                : s.upscaler == BbSettings::UpscalerDlss   ? "DLSS"
+                s.upscaler == PsSettings::UpscalerFsr3     ? "FSR 3.1"
+                : s.upscaler == PsSettings::UpscalerFsr4   ? "FSR 4"
+                : s.upscaler == PsSettings::UpscalerFsr411 ? "FSR 4.1.1"
+                : s.upscaler == PsSettings::UpscalerTaa    ? "TAA"
+                : s.upscaler == PsSettings::UpscalerDlss   ? "DLSS"
                                                            : "");
     ImGui::End();
 }
@@ -767,9 +767,9 @@ void ClosePrompt() {
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
                      ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoNav |
                      ImGuiWindowFlags_NoFocusOnAppearing);
-    ImGui::TextUnformatted(BbSettings::MenuText("Close the game?", "Закрыть игру?", "¿Cerrar el juego?"));
+    ImGui::TextUnformatted(PsSettings::MenuText("Close the game?", "Закрыть игру?", "¿Cerrar el juego?"));
     ImGui::Separator();
-    ImGui::TextUnformatted(BbSettings::MenuText("Cross / Enter: close     Circle / Esc: cancel",
+    ImGui::TextUnformatted(PsSettings::MenuText("Cross / Enter: close     Circle / Esc: cancel",
                                                 "Крест / Enter — закрыть     Круг / Esc — отмена",
                                                 "X / Intro: cerrar     Círculo / Esc: cancelar"));
     ImGui::End();
@@ -795,7 +795,7 @@ void TextPrompt() {
     ImGui::Separator();
     ImGui::Text("%s_", text.c_str());
     ImGui::Separator();
-    ImGui::TextUnformatted(BbSettings::MenuText("Keyboard: type, Backspace = delete, Enter = OK, Esc = cancel",
+    ImGui::TextUnformatted(PsSettings::MenuText("Keyboard: type, Backspace = delete, Enter = OK, Esc = cancel",
                                                 "Клавиатура: ввод, Backspace — удалить, Enter — OK, Esc — отмена",
                                                 "Teclado: escribe, Retroceso = borrar, Intro = aceptar, Esc = cancelar"));
     ImGui::End();
@@ -1070,7 +1070,7 @@ bool HandleEvent(const SDL_Event& event) {
 
 bool Visible() {
     return initialized &&
-           (menu_open || prompt_active || close_prompt || game_cursor_shown || BbSettings::Get().show_fps);
+           (menu_open || prompt_active || close_prompt || game_cursor_shown || PsSettings::Get().show_fps);
 }
 
 void SetGameCursor(u32 index, const GameCursor& cursor) {
@@ -1145,7 +1145,7 @@ void Render(vk::CommandBuffer cmdbuf, vk::ImageView view, vk::Extent2D extent, v
     if (menu_open) {
         Menu();
     }
-    if (BbSettings::Get().show_fps && !menu_open) {
+    if (PsSettings::Get().show_fps && !menu_open) {
         FpsCounter();
     }
     if (prompt_active && !menu_open) {
@@ -1176,4 +1176,4 @@ void Render(vk::CommandBuffer cmdbuf, vk::ImageView view, vk::Extent2D extent, v
     cmdbuf.endRendering();
 }
 
-} // namespace BbOverlay
+} // namespace PsOverlay

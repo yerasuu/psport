@@ -7,11 +7,11 @@
 
 #include <cstdint>
 
-namespace BbGameMenu {
+namespace PsGameMenu {
 /// Installs the hooks (the loader calls it once, before any game code runs, while the image is
 /// still writable). Each hooked function is checked byte for byte against the 1.09 eboot.
 void PatchImage(unsigned char* image, std::uint64_t size);
 
 /// Applies what the player changed on the port's pages (each presented frame).
 void Poll();
-} // namespace BbGameMenu
+} // namespace PsGameMenu

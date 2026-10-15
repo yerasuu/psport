@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include "bbport_toggles.h"
+#include "psport_toggles.h"
 #include <algorithm>
 #include <bit>
 #include <cstdlib>

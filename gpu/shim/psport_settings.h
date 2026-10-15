@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// bbport: user settings changed at run time from the in-game menu (bbport_overlay.h) and kept
+// bbport: user settings changed at run time from the in-game menu (psport_overlay.h) and kept
 // in bbport.ini (PS_CONFIG overrides the path). Environment variables override the file at
 // start. Readers load the atomics every frame; writers are the menu and Load().
 
@@ -7,7 +7,7 @@
 
 #include <atomic>
 
-namespace BbSettings {
+namespace PsSettings {
 
 enum Upscaler : int { UpscalerOff = 0, UpscalerFsr3 = 1, UpscalerFsr4 = 2, UpscalerFsr411 = 3,
                       UpscalerTaa = 4, UpscalerDlss = 5, UpscalerCount };
@@ -96,4 +96,4 @@ float PresetScale(int preset);
 const char* PresetName(int preset);
 const char* UpscalerName(int upscaler);
 
-} // namespace BbSettings
+} // namespace PsSettings

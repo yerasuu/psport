@@ -14,10 +14,10 @@
 #include <string>
 #include <vector>
 
-#include "bbport_settings.h"
+#include "psport_settings.h"
 #include "effects.h"
 
-namespace BbGameMenu {
+namespace PsGameMenu {
 namespace {
 
 using u8 = std::uint8_t;
@@ -97,7 +97,7 @@ const char16_t* TextOf(u32 id) {
     const Text& t = texts[id - IdBase];
     const GameLanguage game = game_language.load();
     const bool russian = game == GameLanguage::Unknown
-                             ? BbSettings::Get().menu_language == BbSettings::MenuLanguage::Russian
+                             ? PsSettings::Get().menu_language == PsSettings::MenuLanguage::Russian
                              : game == GameLanguage::Russian;
     return russian ? t.russian.c_str() : t.english.c_str();
 }
@@ -105,9 +105,9 @@ const char16_t* TextOf(u32 id) {
 // ---- The port's values the game's rows edit (ints: the list rows bind ints). ----
 enum Field : int {
     OutputRes, Upscaler, Preset, Sharpness, ShowFps,
-    ModelLod, FirstEffect, FieldCount = FirstEffect + BbEffects::SwitchCount
+    ModelLod, FirstEffect, FieldCount = FirstEffect + PsEffects::SwitchCount
 };
-static_assert(BbEffects::SwitchCount <= BbSettings::MaxEffects);
+static_assert(PsEffects::SwitchCount <= PsSettings::MaxEffects);
 int values[FieldCount];  // what the game's rows show and change (list rows bind ints)
 u8 bytes[FieldCount];    // the same for toggle and slider rows (they bind bytes)
 bool byte_field[FieldCount]; // fields shown by toggle or slider rows
@@ -134,7 +134,7 @@ u8 ChoicePosition(int choice, int count) {
 }
 
 /// The rows' values of settings `s`.
-void Fill(const BbSettings::Values& s, int* values) {
+void Fill(const PsSettings::Values& s, int* values) {
     values[OutputRes] = s.output_res;
     values[Upscaler] = s.upscaler;
     values[Preset] = s.preset;
@@ -146,13 +146,13 @@ void Fill(const BbSettings::Values& s, int* values) {
     for (int i = 0; i < 4; ++i) {
         if (LodValues[i] == s.model_lod) values[ModelLod] = i;
     }
-    for (int e = 0; e < BbEffects::SwitchCount; ++e) {
+    for (int e = 0; e < PsEffects::SwitchCount; ++e) {
         values[FirstEffect + e] = s.effects[e];
     }
 }
 
 void LoadValues() {
-    Fill(BbSettings::Get(), values);
+    Fill(PsSettings::Get(), values);
     for (int f = 0; f < FieldCount; ++f) {
         bytes[f] = steps_count[f] ? ChoicePosition(values[f], steps_count[f]) : u8(values[f]);
     }
@@ -228,7 +228,7 @@ void DefineTexts() {
     page("Effects", "Эффекты", "The game's effects (psport; after a restart)",
          "Эффекты игры (psport; после перезапуска)");
 
-    // Short names for the game's narrow name column (BbEffects::Switches order); the help line
+    // Short names for the game's narrow name column (PsEffects::Switches order); the help line
     // has the details.
     struct Short {
         const char *key, *en, *ru, *help_en, *help_ru;
@@ -256,8 +256,8 @@ void DefineTexts() {
         {"debug_menu", "Debug menu", "Debug menu", "The game's debug menu (requires font files)",
          "Отладочное меню игры (нужны файлы шрифтов)", false},
     };
-    for (int e = 0; e < BbEffects::SwitchCount; ++e) {
-        const auto& effect = BbEffects::Switches[e];
+    for (int e = 0; e < PsEffects::SwitchCount; ++e) {
+        const auto& effect = PsEffects::Switches[e];
         const Short* name = nullptr;
         for (const Short& s : shorts) {
             if (std::strcmp(s.key, effect.sz_key) == 0) name = &s;
@@ -326,10 +326,10 @@ void MakeTexts(u8* pair, u32 name, u32 help) {
 
 /// Upscalers this GPU and build can run (known once the device exists, before any menu).
 bool UpscalerAvailable(int i) {
-    const auto& s = BbSettings::Get();
-    return i == BbSettings::UpscalerFsr4     ? s.fsr4_supported.load()
-           : i == BbSettings::UpscalerFsr411 ? s.fsr411_supported.load()
-           : i == BbSettings::UpscalerDlss   ? s.dlss_supported.load()
+    const auto& s = PsSettings::Get();
+    return i == PsSettings::UpscalerFsr4     ? s.fsr4_supported.load()
+           : i == PsSettings::UpscalerFsr411 ? s.fsr411_supported.load()
+           : i == PsSettings::UpscalerDlss   ? s.dlss_supported.load()
                                              : true;
 }
 
@@ -569,10 +569,10 @@ void PatchImage(unsigned char* image, std::uint64_t size) {
             steps_count[r.field] = r.kind == Kind::Steps ? int(r.choices.size()) : 0;
         }
     }
-    static const BbSettings::Values defaults;
+    static const PsSettings::Values defaults;
     Fill(defaults, default_values);
-    for (int e = 0; e < BbEffects::SwitchCount; ++e) {
-        default_values[FirstEffect + e] = BbEffects::Switches[e].is_default_on;
+    for (int e = 0; e < PsEffects::SwitchCount; ++e) {
+        default_values[FirstEffect + e] = PsEffects::Switches[e].is_default_on;
     }
     for (int f = 0; f < FieldCount; ++f) {
         default_bytes[f] =
@@ -620,22 +620,22 @@ void Poll() {
     if (std::memcmp(values, applied, sizeof(values)) == 0) {
         return;
     }
-    auto& s = BbSettings::Get();
-    s.output_res = std::clamp(values[OutputRes], 0, BbSettings::OutputCount - 1);
-    const int upscaler = std::clamp(values[Upscaler], 0, BbSettings::UpscalerCount - 1);
-    s.upscaler = UpscalerAvailable(upscaler) ? upscaler : int(BbSettings::UpscalerFsr3);
-    s.preset = std::clamp(values[Preset], 0, BbSettings::PresetCount - 1);
+    auto& s = PsSettings::Get();
+    s.output_res = std::clamp(values[OutputRes], 0, PsSettings::OutputCount - 1);
+    const int upscaler = std::clamp(values[Upscaler], 0, PsSettings::UpscalerCount - 1);
+    s.upscaler = UpscalerAvailable(upscaler) ? upscaler : int(PsSettings::UpscalerFsr3);
+    s.preset = std::clamp(values[Preset], 0, PsSettings::PresetCount - 1);
     s.sharpen = values[Sharpness] != 0;
     if (values[Sharpness] != 0) {
         s.sharpness = std::clamp(values[Sharpness], 0, SharpnessSteps - 1) * SharpnessStep;
     }
     s.show_fps = values[ShowFps] != 0;
     s.model_lod = LodValues[std::clamp(values[ModelLod], 0, 3)];
-    for (int e = 0; e < BbEffects::SwitchCount; ++e) {
+    for (int e = 0; e < PsEffects::SwitchCount; ++e) {
         s.effects[e] = values[FirstEffect + e] != 0;
     }
     std::memcpy(applied, values, sizeof(values));
-    BbSettings::Save();
+    PsSettings::Save();
 }
 
-} // namespace BbGameMenu
+} // namespace PsGameMenu

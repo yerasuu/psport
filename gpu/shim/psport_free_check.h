@@ -15,7 +15,7 @@
 
 #include <cstdint>
 
-namespace BbFreeCheck {
+namespace PsFreeCheck {
 enum Source : std::uint32_t {
     Eop,
     Eos,
@@ -57,4 +57,4 @@ bool OnStaleTrapFault(std::uint64_t address);
 void NoteSubmit(std::uint64_t submit, const void* buffer, std::uint64_t size);
 /// At a guest fault: the free check's view of the page the guest was in (`rax`, `r14`).
 void DumpAtFault(std::uint64_t rax, std::uint64_t r14);
-} // namespace BbFreeCheck
+} // namespace PsFreeCheck

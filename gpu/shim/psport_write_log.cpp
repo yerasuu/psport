@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-#include "bbport_write_log.h"
-#include "bbport_free_check.h"
+#include "psport_write_log.h"
+#include "psport_free_check.h"
 
 #include <array>
 #include <atomic>
@@ -11,7 +11,7 @@
 #include <unistd.h>
 #include <x86intrin.h>
 
-namespace BbWriteLog {
+namespace PsWriteLog {
 namespace {
 struct Entry {
     std::uint64_t address, size, first, tsc;
@@ -101,13 +101,13 @@ void DumpRange(std::uint64_t address, std::uint64_t size) {
     std::fprintf(stderr, "Write log: %d of %llu logged writes in %#llx +%llu\n", shown,
                  (unsigned long long)n, (unsigned long long)address, (unsigned long long)size);
 }
-} // namespace BbWriteLog
+} // namespace PsWriteLog
 
-extern "C" void bbgpu_dump_guest_writes(void* ucontext) {
-    using namespace BbWriteLog;
+extern "C" void psport_gpu_dump_guest_writes(void* ucontext) {
+    using namespace PsWriteLog;
     const auto* uc = static_cast<const ucontext_t*>(ucontext);
     const auto* g = uc->uc_mcontext.gregs;
-    BbFreeCheck::DumpAtFault(std::uint64_t(g[REG_RAX]), std::uint64_t(g[REG_R14]));
+    PsFreeCheck::DumpAtFault(std::uint64_t(g[REG_RAX]), std::uint64_t(g[REG_R14]));
     if (Mode() == 0) {
         return;
     }

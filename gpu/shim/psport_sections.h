@@ -9,7 +9,7 @@
 #include <cstdlib>
 #include <x86intrin.h>
 
-namespace BbSections {
+namespace PsSections {
 enum Id : std::uint32_t {
     Packet,          ///< a whole packet of the draw pipe
     Task,            ///< ordered tasks (fences, signals, DMA, flips)
@@ -66,8 +66,8 @@ struct Scope {
     Id id;
     std::uint64_t start;
 };
-} // namespace BbSections
+} // namespace PsSections
 
 #define BB_SECTION_JOIN2(a, b) a##b
 #define BB_SECTION_JOIN(a, b) BB_SECTION_JOIN2(a, b)
-#define BB_SECTION(id) BbSections::Scope BB_SECTION_JOIN(bb_section_scope_, __LINE__){BbSections::id}
+#define BB_SECTION(id) PsSections::Scope BB_SECTION_JOIN(bb_section_scope_, __LINE__){PsSections::id}

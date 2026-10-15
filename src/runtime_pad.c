@@ -30,7 +30,7 @@
 #define _GNU_SOURCE
 #include "runtime.h"
 #include "runtime_pad.h"
-#include "gpu/bbgpu.h"
+#include "gpu/psport_gpu.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -506,14 +506,14 @@ static void sample_host(PadData *d) {
     d->connected=1; d->connected_count=connected_count ? connected_count : 1;
     d->timestamp=now_us();
     SDL_Gamepad *g=current_gamepad();
-    if (!bindings_ready) { load_bindings(); bindings_ready=1; bbgpu_mouse_look_enable(mouse_look); }
+    if (!bindings_ready) { load_bindings(); bindings_ready=1; psport_gpu_mouse_look_enable(mouse_look); }
     /* The mouse's motion and wheel since the last sample (always taken: none of it piles up while
      * the menu is open); it counts while the window holds the mouse. */
     double mouse_dx=0, mouse_dy=0;
     int wheel_up=0, wheel_down=0;
-    bbgpu_mouse_take(&mouse_dx,&mouse_dy,&wheel_up,&wheel_down);
-    const int captured=bbgpu_mouse_captured();
-    if (bbgpu_overlay_captures_input()) { apply_mouse_look(d,0,0,d->timestamp,0); return; } /* menu open: neutral input */
+    psport_gpu_mouse_take(&mouse_dx,&mouse_dy,&wheel_up,&wheel_down);
+    const int captured=psport_gpu_mouse_captured();
+    if (psport_gpu_overlay_captures_input()) { apply_mouse_look(d,0,0,d->timestamp,0); return; } /* menu open: neutral input */
     const bool *k=SDL_WasInit(SDL_INIT_VIDEO) && !runtime_keyboard_taken() ? SDL_GetKeyboardState(NULL) : NULL;
     mouse_buttons=captured && SDL_WasInit(SDL_INIT_VIDEO) ? SDL_GetMouseState(NULL,NULL) : 0;
     mouse_wheel_step(d->timestamp,captured ? wheel_up : 0,captured ? wheel_down : 0);
@@ -572,7 +572,7 @@ static void touch_ids(PadData *d) {
 static void sample(PadData *d) {
     sample_host(d);
     runtime_pad_read_inject();
-    if (bbgpu_overlay_captures_input()) return;
+    if (psport_gpu_overlay_captures_input()) return;
     runtime_pad_record_sample(d);
     runtime_pad_replay_sample(d);
     d->buttons|=runtime_pad_injected.buttons;

@@ -23,8 +23,16 @@ bridge `libpsport_dlss.so`; every environment variable it reads is `PS_*`, and t
 names keep working, `run.sh`, `build.sh` and `psport` itself copy each `BB_*` variable that is set to
 its `PS_*` name when that one is unset, and say once which they copied:
 `psport: BB_* variables are deprecated, use PS_*: BB_A, BB_B` (on stdout; `psport` then starts
-itself again, so the GPU library's initializers see the copies too). Source files (`bbport_*`,
-`bblayer_*`), namespaces (`Bb*`) and the settings file `bbport.ini` keep bbport's names for now.
+itself again, so the GPU library's initializers see the copies too).
+
+Inside, the fork's own files swap bbport's `bb` for `ps` and keep the rest of the name:
+`gpu/shim/psport_*` (bbport's `bbport_*`), `gpu/layer/pslayer_*` (`bblayer_*`), and the GPU
+library's C interface `gpu/psport_gpu.h` with its `psport_gpu_*` calls (`bbgpu.h`, `bbgpu_*`). The
+prefix stays where the directory alone would say it: `gpu/shim/` also holds the stand-ins for
+shadPS4's own headers (`common/`, `core/`), and every directory there is on one include path, so a
+bare `settings.h` would be found by search order. Namespaces are `Ps*` (`PsStats`, `PsToggle`,
+`PsLayer`), the CMake target `psport-gpu`; the settings file `bbport.ini` keeps bbport's name for
+now.
 
 ## Ported components
 
@@ -63,7 +71,7 @@ obvious.
 | AvPlayer jumps | `core/libraries/avplayer/avplayer.cpp`, `avplayer_impl.*`, `avplayer_state.*`, `avplayer_source.*` | `sceAvPlayerJumpToTime` restarts the source at the requested time (paused if it was) and reports `WAR_JUMP_COMPLETE`; Unity's video player draws nothing until that warning arrives, so Symphonia's intro movies showed the previous movie's last frame | stubbed at `3a9f572` |
 | AvPlayer stopping | `core/libraries/avplayer/avplayer_source.cpp` | `Stop()` no longer rewinds the file streamer's position to 0: FFmpeg's byte stream kept its own position and buffer, so after a restart (`sceAvPlayerJumpToTime`, Unity's movies) its next refill read the file from the start as packet data (`Invalid NAL unit size`, `partial file`) and Symphonia hung at the end of its intro | bug present at `3a9f572` |
 | AvPlayer end of file | `core/libraries/avplayer/avplayer_source.cpp`, `avplayer_state.*` | the demuxer reports end of file only when the source ran out, not when `Stop()` ends it: every restart (`sceAvPlayerStart` while playing, `sceAvPlayerJumpToTime`, `sceAvPlayerStop`) put the state machine in `EndOfFile`, so after a jump `Pause()` did nothing and a buffering check racing a stop logged `EndOfFile -> Buffering` (Tales of Symphonia); the controller thread moves between `Play` and `Buffering` only from the state it checked, and `Stop()` holds the source mutex exclusively, so a stop no longer reads as a buffer underrun | bug present at `3a9f572` |
-| VideoOut cursor | `core/libraries/videoout/video_out.cpp`, `driver.h` | `sceVideoOutCursorEnable`/`Disable`/`SetPosition`/`SetHotSpot`/`Set2xMagnify` keep each port's cursor state (image, position, hot spot, magnification) and hand it to the overlay, which draws each enabled cursor's 64x64 image over the game frame, behind the menu (`gpu/shim/bbport_overlay.cpp`); the first enable is logged with how many of its pixels are visible | absent at `3a9f572` |
+| VideoOut cursor | `core/libraries/videoout/video_out.cpp`, `driver.h` | `sceVideoOutCursorEnable`/`Disable`/`SetPosition`/`SetHotSpot`/`Set2xMagnify` keep each port's cursor state (image, position, hot spot, magnification) and hand it to the overlay, which draws each enabled cursor's 64x64 image over the game frame, behind the menu (`gpu/shim/psport_overlay.cpp`); the first enable is logged with how many of its pixels are visible | absent at `3a9f572` |
 | VideoOut configure options | `core/libraries/videoout/video_out.cpp` | `sceVideoOutConfigureOptionsInitialize_` zero-fills the options block of the size the caller passes (no option set), as `sceVideoOutModeSetAny_` fills a mode | absent at `3a9f572` |
 | Custom border colour without a table | `video_core/texture_cache/sampler.cpp` | a sampler with a custom border colour while `TA_BC_BASE` is 0 samples transparent black (the hardware's fetch reads an unmapped page as zeros) instead of reading the table at guest address 0 (a segfault); logged with a count | bug present at `3a9f572` |
 | Synchronous image downloads | `video_core/texture_cache/texture_cache.cpp` | the buffer invalidation after a synchronous image download reads back GPU data in place (`assume_locks`) instead of queuing it to the GPU command thread: downloads run on that thread or the draw recording thread, and the queued readback never ran while the command thread drained the draw pipe (Onigiri hung after its first frame once it had a mouse) | no (bbport's draw recording thread) |
@@ -114,7 +122,7 @@ point at them.
 
 ## In-game overlay
 
-The overlay (Insert or L3+R3, `gpu/shim/bbport_overlay.cpp`) is drawn in English, Russian or Spanish:
+The overlay (Insert or L3+R3, `gpu/shim/psport_overlay.cpp`) is drawn in English, Russian or Spanish:
 
 | Source, first that is set | Values |
 |---|---|
@@ -227,7 +235,7 @@ profile (or with `PS_GAME_PROFILE=none`) runs with the values in the first colum
 | `PS_PREUPLOAD` | 1 (run.sh; the 0.3 model only) | uploads only memory already in VRAM that the game rewrote: no new VRAM, it only moves an upload earlier | |
 | `PS_UFFD` | 0 | userfaultfd write tracking crashed the Steam Deck; mprotect is the safe path | |
 | Draw pipeline `PS_DRAW_PIPE`, recording threads `PS_VK_RECORD_THREADS`, `PS_ASYNC_SUBMIT`, copy threads `PS_COPY_THREADS` | by the host's hardware threads: the draw pipeline from 8, 1/2/3 recording threads from 1/8/12, submissions from the recording threads, a quarter of the threads (1 to 4) for copies | they decide which host thread does the work, not what the GPU or the game sees | |
-| Optimizations behind `PS_TOGGLE_FILE` (`gpu/shim/bbport_toggles.h`) | on (a set bit switches one off) | caches, memos and pipelining that keep every result the same; the TAA, FSR 4, camera and scene scaling bits act only where the upscaler runs; the optional TAA techniques are off | |
+| Optimizations behind `PS_TOGGLE_FILE` (`gpu/shim/psport_toggles.h`) | on (a set bit switches one off) | caches, memos and pipelining that keep every result the same; the TAA, FSR 4, camera and scene scaling bits act only where the upscaler runs; the optional TAA techniques are off | |
 | `RADV_DEBUG=nohiz` | on GCN 3-5 under RADV (run.sh, `PS_AUTO_NOHIZ=0`: off) | a driver bug: depth compression drew black halos and lost geometry on those chips | |
 
 ## Diagnostics
@@ -240,7 +248,7 @@ profile (or with `PS_GAME_PROFILE=none`) runs with the values in the first colum
 | (always) | before the game starts: every import without implementation or answered by a stub, and a summary |
 | (always) | calls that nothing answers for real or that fail, see [Call report](#call-report) |
 | `PS_CALL_REPORT=<file>` | the call report's summary lines, also written to that file when the process ends |
-| `PS_SUBMIT_GUARD=0` | frames overlap (`PS_SUBMIT_AHEAD`) unguarded: a submitted frame's command buffers are neither made read-only nor checksummed until the GPU retires the frame (`gpu/shim/bbport_submit_guard.h`), so a game that rewrites them in flight is not caught and the overlap stays on; `=trap` or `=hash` keeps one of the two watches |
+| `PS_SUBMIT_GUARD=0` | frames overlap (`PS_SUBMIT_AHEAD`) unguarded: a submitted frame's command buffers are neither made read-only nor checksummed until the GPU retires the frame (`gpu/shim/psport_submit_guard.h`), so a game that rewrites them in flight is not caught and the overlap stays on; `=trap` or `=hash` keeps one of the two watches |
 | `PS_AUDIO_STATS=1` | per audio port, every 5 s: cadence, peak and RMS in dBFS (sound or silence) |
 | `PS_NGS2_TRACE=1` | first calls of each Ngs2 function and the level of each render |
 | `PS_FIBER_TRACE=1` | first calls of each Fiber function with their arguments |

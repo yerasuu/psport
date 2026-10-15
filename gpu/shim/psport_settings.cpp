@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-#include "bbport_settings.h"
+#include "psport_settings.h"
 
 #include <algorithm>
 #include <cctype>
@@ -13,7 +13,7 @@
 
 #include "game_profile.h"
 
-namespace BbSettings {
+namespace PsSettings {
 
 namespace {
 
@@ -330,4 +330,4 @@ const char* UpscalerName(int upscaler) {
     return names[std::clamp(upscaler, 0, UpscalerCount - 1)];
 }
 
-} // namespace BbSettings
+} // namespace PsSettings

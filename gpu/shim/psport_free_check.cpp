@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-#include "bbport_free_check.h"
+#include "psport_free_check.h"
 #include "game_profile.h"
 
 #include <algorithm>
@@ -22,7 +22,7 @@
 #include <sys/uio.h>
 #include <unistd.h>
 
-namespace BbFreeCheck {
+namespace PsFreeCheck {
 namespace {
 using u64 = std::uint64_t;
 using u32 = std::uint32_t;
@@ -1112,4 +1112,4 @@ bool OnStaleTrapFault(u64 address) {
     }
     return true;
 }
-} // namespace BbFreeCheck
+} // namespace PsFreeCheck

@@ -9,7 +9,7 @@
 #include <type_traits>
 #include <vector>
 
-#include "bbport_toggles.h"
+#include "psport_toggles.h"
 #include "common/debug.h"
 #include "common/types.h"
 #include "core/emulator_settings.h"
@@ -128,7 +128,7 @@ public:
         // bbport: a write binding over pages the CPU did not change and the GPU already owns
         // needs neither an upload nor a state change (it ran under the region lock for every
         // GPU write binding, twice per page). Racing guest writes are as in the read path.
-        if (is_written && !BbToggle::Disabled(BbToggle::LockFreeUploadCheck)) {
+        if (is_written && !PsToggle::Disabled(PsToggle::LockFreeUploadCheck)) {
             bool settled = true;
             IteratePages<true>(query_cpu_range, query_size,
                                [&settled](RegionManager* manager, u64 offset, size_t size) {
@@ -148,7 +148,7 @@ public:
                                // fault handler before the store, and the draw that uses the
                                // data reaches this thread through the submission queue lock.
                                if (!is_written &&
-                                   !BbToggle::Disabled(BbToggle::LockFreeUploadCheck) &&
+                                   !PsToggle::Disabled(PsToggle::LockFreeUploadCheck) &&
                                    !manager->template IsRegionModified<Type::CPU>(offset, size)) {
                                    return;
                                }

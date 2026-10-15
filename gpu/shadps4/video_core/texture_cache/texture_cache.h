@@ -6,7 +6,7 @@
 #include <string>
 #include <atomic>
 #include <chrono>
-#include "bbport_toggles.h"
+#include "psport_toggles.h"
 
 #include <condition_variable>
 #include <mutex>
@@ -163,7 +163,7 @@ public:
         // Every texture binding comes here; the mutex (shared with the fault handlers of the
         // guest threads) was ~3% of the GPU thread. Flags are read atomically: an invalidation
         // racing with this check races the same way with the locked path.
-        if (!BbToggle::Disabled(BbToggle::UpdateImageFastPath)) {
+        if (!PsToggle::Disabled(PsToggle::UpdateImageFastPath)) {
             const Image& image = slot_images[image_id];
             const u32 flags = std::atomic_ref<const u32>(reinterpret_cast<const u32&>(image.flags))
                                   .load(std::memory_order_acquire);

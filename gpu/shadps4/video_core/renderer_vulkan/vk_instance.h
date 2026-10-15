@@ -96,11 +96,11 @@ public:
     u32 GetReadbackQueueFamilyIndex() const {
         return readback_family_index;
     }
-    /// bbport: memory can be exported as a dma-buf (guest memory, BbGuestMemory).
+    /// bbport: memory can be exported as a dma-buf (guest memory, PsGuestMemory).
     bool IsGuestMemoryExportSupported() const {
         return guest_memory_export;
     }
-    /// bbport: host memory can be imported (VK_EXT_external_memory_host; BbGuestMemory).
+    /// bbport: host memory can be imported (VK_EXT_external_memory_host; PsGuestMemory).
     bool IsHostMemoryImportSupported() const {
         return host_memory_import;
     }

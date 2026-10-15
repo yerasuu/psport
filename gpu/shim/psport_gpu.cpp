@@ -1,12 +1,12 @@
-#include "bbport_write_log.h"
+#include "psport_write_log.h"
 // bbport: glue between the C loader and the vendored shadPS4 video core.
-#include "bbport_overlay.h"
-#include "bbport_settings.h"
+#include "psport_overlay.h"
+#include "psport_settings.h"
 #include "game_profile.h"
-#include "bbport_copy.h"
+#include "psport_copy.h"
 #include <sys/resource.h>
-#include "bbport_free_check.h"
-#include "bbport_toggles.h"
+#include "psport_free_check.h"
+#include "psport_toggles.h"
 #include <algorithm>
 #include <atomic>
 #include <condition_variable>
@@ -20,7 +20,7 @@
 #include <thread>
 #include <vector>
 #include <SDL3/SDL.h>
-#include "../bbgpu.h"
+#include "../psport_gpu.h"
 #include "common/elf_info.h"
 #include "common/logging/log.h"
 #include "common/rdtsc.h"
@@ -91,7 +91,7 @@ void SymbolsResolver::AddSymbol(const char* nid, const char* library, const char
 namespace Core {
 class Emulator {
 public:
-    static void FillElfInfo(const BbGpuConfig& config) {
+    static void FillElfInfo(const PsGpuConfig& config) {
         auto& info = Common::ElfInfo::Instance();
         info.initialized = true;
         info.game_serial = config.serial ? config.serial : "UNKNOWN";
@@ -192,10 +192,10 @@ static void CopySparseSerial(VAddr source, u8* dest, u64 size) {
 void MemoryManager::CopySparseMemory(VAddr source, u8* dest, u64 size) {
     // bbport: large uploads (streaming) are split across the copy threads.
     constexpr u64 Chunk = 512 * 1024;
-    if (size < 4 * Chunk || !BbCopy::Enabled()) {
+    if (size < 4 * Chunk || !PsCopy::Enabled()) {
         return CopySparseSerial(source, dest, size);
     }
-    BbCopy::ParallelFor((size + Chunk - 1) / Chunk, [&](std::size_t i) {
+    PsCopy::ParallelFor((size + Chunk - 1) / Chunk, [&](std::size_t i) {
         const u64 offset = i * Chunk;
         CopySparseSerial(source + offset, dest + offset, std::min(Chunk, size - offset));
     });
@@ -204,17 +204,17 @@ void MemoryManager::ReadBacking(VAddr address, void* data, u64 size) {
     runtime_memory_read_backing(address, data, size);
 }
 bool MemoryManager::TryWriteBacking(void* address, const void* data, u64 size) {
-    BbWriteLog::Note(reinterpret_cast<uintptr_t>(address), data, size, BbWriteLog::Backing);
+    PsWriteLog::Note(reinterpret_cast<uintptr_t>(address), data, size, PsWriteLog::Backing);
     return runtime_memory_write_backing(reinterpret_cast<uintptr_t>(address), data, size) != 0;
 }
 void AddressSpace::Protect(VAddr virtual_addr, u64 size, MemoryPermission perms) {
-    BbStats::Timer timer{BbStats::t_protect};
+    PsStats::Timer timer{PsStats::t_protect};
     const u64 pages = (size + 4095) / 4096;
-    BbStats::protect_calls.fetch_add(1, std::memory_order_relaxed);
-    BbStats::protect_pages.fetch_add(pages, std::memory_order_relaxed);
+    PsStats::protect_calls.fetch_add(1, std::memory_order_relaxed);
+    PsStats::protect_pages.fetch_add(pages, std::memory_order_relaxed);
     if (!True(perms & MemoryPermission::Write)) {
-        BbStats::protect_revoke_calls.fetch_add(1, std::memory_order_relaxed);
-        BbStats::protect_revoke_pages.fetch_add(pages, std::memory_order_relaxed);
+        PsStats::protect_revoke_calls.fetch_add(1, std::memory_order_relaxed);
+        PsStats::protect_revoke_pages.fetch_add(pages, std::memory_order_relaxed);
     }
     runtime_memory_gpu_protect(virtual_addr, size, True(perms & MemoryPermission::Read),
                                True(perms & MemoryPermission::Write));
@@ -272,11 +272,11 @@ static void StartProfileWriter() {
 }
 #endif
 
-extern "C" int bbgpu_init(const BbGpuConfig* config) {
+extern "C" int psport_gpu_init(const PsGpuConfig* config) {
     // What the translator knows about this game (games/), before anything asks for it: the
     // settings among them, which keep its effect switches.
     Game::Select(config->serial);
-    BbSettings::Load();
+    PsSettings::Load();
     if (const Game::Profile* game = Game::Active(); game && game->prepare_saves) {
         const std::string saves = std::string(runtime_file_user_dir()) + "/savedata";
         game->prepare_saves(saves.c_str(), runtime_savedata_title());
@@ -320,7 +320,7 @@ extern "C" int bbgpu_init(const BbGpuConfig* config) {
 }
 
 namespace Libraries::Kernel { void StartKernelService(); }
-extern "C" void bbgpu_register_kernel(void) {
+extern "C" void psport_gpu_register_kernel(void) {
     Libraries::Kernel::StartKernelService();
     Core::Loader::SymbolsResolver resolver;
     Libraries::Kernel::RegisterEventQueue(&resolver);
@@ -335,7 +335,7 @@ extern "C" void bbgpu_register_kernel(void) {
     Libraries::PngDec::RegisterLib(&resolver);
 }
 
-extern "C" uintptr_t bbgpu_resolve(const char* scoped_nid) {
+extern "C" uintptr_t psport_gpu_resolve(const char* scoped_nid) {
     const char* hash = std::strchr(scoped_nid, '#');
     const size_t length = hash ? size_t(hash - scoped_nid) : std::strlen(scoped_nid);
     for (const auto& symbol : g_symbols) {
@@ -346,47 +346,47 @@ extern "C" uintptr_t bbgpu_resolve(const char* scoped_nid) {
     return 0;
 }
 
-extern "C" int bbgpu_handle_fault(void* ucontext, void* address) {
+extern "C" int psport_gpu_handle_fault(void* ucontext, void* address) {
     // PS_LABEL_TRAP (diagnostic): its read-only label pages first. Not passed on to GPU page
     // tracking (a write fault drains the draw pipe: thousands a second would change the timing
     // under test); label pages are not expected to be GPU-tracked.
-    if (BbFreeCheck::OnTrapFault(ucontext, reinterpret_cast<std::uint64_t>(address))) {
+    if (PsFreeCheck::OnTrapFault(ucontext, reinterpret_cast<std::uint64_t>(address))) {
         return 1;
     }
     if (Core::Signals::Instance()->DispatchAccessViolation(ucontext, address)) {
         return 1;
     }
-    return BbFreeCheck::OnStaleTrapFault(reinterpret_cast<std::uint64_t>(address)) ? 1 : 0;
+    return PsFreeCheck::OnStaleTrapFault(reinterpret_cast<std::uint64_t>(address)) ? 1 : 0;
 }
 
-extern "C" void bbgpu_patch_image(unsigned char* image, uint64_t size) {
+extern "C" void psport_gpu_patch_image(unsigned char* image, uint64_t size) {
     if (const Game::Profile* game = Game::Active(); game && game->patch_image) {
         game->patch_image(image, size);
     }
 }
 
-extern "C" const char* bbgpu_game_serial(const char* serial, size_t index) {
+extern "C" const char* psport_gpu_game_serial(const char* serial, size_t index) {
     const Game::Profile* game = Game::Find(serial);
     return game && index < game->serials.size() ? game->serials[index] : nullptr;
 }
 
-extern "C" const char* bbgpu_game_mod_folder(const char* serial, size_t index) {
+extern "C" const char* psport_gpu_game_mod_folder(const char* serial, size_t index) {
     const Game::Profile* game = Game::Find(serial);
     return game && index < game->mod_folders.size() ? game->mod_folders[index] : nullptr;
 }
 
-extern "C" const char* bbgpu_game_patch_file(const char* serial) {
+extern "C" const char* psport_gpu_game_patch_file(const char* serial) {
     const Game::Profile* game = Game::Find(serial);
     return game ? game->patch_file : nullptr;
 }
 
-extern "C" void bbgpu_prepare_game(const BbGameFiles* files) {
+extern "C" void psport_gpu_prepare_game(const PsGameFiles* files) {
     if (const Game::Profile* game = Game::Find(files->sz_serial); game && game->prepare_environment) {
         game->prepare_environment();
     }
 }
 
-extern "C" int bbgpu_check_game(const BbGameFiles* files, char* sz_out_kind, size_t cb_kind, char* sz_out_advice,
+extern "C" int psport_gpu_check_game(const PsGameFiles* files, char* sz_out_kind, size_t cb_kind, char* sz_out_advice,
                                 size_t cb_advice) {
     const Game::Profile* game = Game::Find(files->sz_serial);
     std::string kind, advice;
@@ -398,12 +398,12 @@ extern "C" int bbgpu_check_game(const BbGameFiles* files, char* sz_out_kind, siz
     return 1;
 }
 
-extern "C" int bbgpu_game_has_presets(const char* serial) {
+extern "C" int psport_gpu_game_has_presets(const char* serial) {
     const Game::Profile* game = Game::Find(serial);
     return game && game->add_patches ? 1 : 0;
 }
 
-extern "C" int bbgpu_game_patches(const BbGameFiles* files, const BbPatchServices* services) {
+extern "C" int psport_gpu_game_patches(const PsGameFiles* files, const PsPatchServices* services) {
     const Game::Profile* game = Game::Find(files->sz_serial);
     if (!game || !game->add_patches) {
         return -1;
@@ -411,7 +411,7 @@ extern "C" int bbgpu_game_patches(const BbGameFiles* files, const BbPatchService
     return game->add_patches(*files, *services) ? 1 : 0;
 }
 
-extern "C" unsigned bbgpu_symbol_count(void) {
+extern "C" unsigned psport_gpu_symbol_count(void) {
     return unsigned(g_symbols.size());
 }
 
@@ -466,15 +466,15 @@ u32 ConsumeWithOverlaysScreenshotRequests() { return 0; }
 ScreenshotRequests ConsumeScreenshotRequests() { return {}; }
 } // namespace VideoCore
 
-extern "C" int bbgpu_overlay_captures_input(void) {
-    return BbOverlay::CapturesInput() ? 1 : 0;
+extern "C" int psport_gpu_overlay_captures_input(void) {
+    return PsOverlay::CapturesInput() ? 1 : 0;
 }
 
-extern "C" int bbgpu_overlay_pad_file_press(int guide, int cross, int circle) {
-    return BbOverlay::PadFilePress(guide != 0, cross != 0, circle != 0) ? 1 : 0;
+extern "C" int psport_gpu_overlay_pad_file_press(int guide, int cross, int circle) {
+    return PsOverlay::PadFilePress(guide != 0, cross != 0, circle != 0) ? 1 : 0;
 }
 
-extern "C" void bbgpu_mouse_take(double* dx, double* dy, int* wheel_up, int* wheel_down) {
+extern "C" void psport_gpu_mouse_take(double* dx, double* dy, int* wheel_up, int* wheel_down) {
     double x = 0, y = 0;
     int up = 0, down = 0;
     if (g_window) {
@@ -486,21 +486,21 @@ extern "C" void bbgpu_mouse_take(double* dx, double* dy, int* wheel_up, int* whe
     *wheel_down = down;
 }
 
-extern "C" int bbgpu_mouse_captured(void) {
+extern "C" int psport_gpu_mouse_captured(void) {
     return g_window && g_window->MouseCaptured() ? 1 : 0;
 }
 
-extern "C" int bbgpu_game_mouse_take(int32_t* dx, int32_t* dy, int32_t* wheel, int32_t* tilt, uint32_t* buttons) {
+extern "C" int psport_gpu_game_mouse_take(int32_t* dx, int32_t* dy, int32_t* wheel, int32_t* tilt, uint32_t* buttons) {
     *dx = *dy = *wheel = *tilt = 0;
     *buttons = 0;
     return g_window && g_window->TakeGameMouse(*dx, *dy, *wheel, *tilt, *buttons) ? 1 : 0;
 }
 
-extern "C" void bbgpu_game_keyboard_open(int open) {
+extern "C" void psport_gpu_game_keyboard_open(int open) {
     Frontend::WindowSDL::OpenGameKeyboard(open != 0);
 }
 
-extern "C" int bbgpu_game_keyboard_take(BbKeyEvent* events, int max, int* keyboard, uint32_t* dropped) {
+extern "C" int psport_gpu_game_keyboard_take(PsKeyEvent* events, int max, int* keyboard, uint32_t* dropped) {
     bool host = false;
     u32 lost = 0;
     const int count = g_window ? g_window->TakeGameKeys(events, max, host, lost) : 0;
@@ -509,21 +509,21 @@ extern "C" int bbgpu_game_keyboard_take(BbKeyEvent* events, int max, int* keyboa
     return count;
 }
 
-extern "C" void bbgpu_mouse_look_enable(int enabled) {
+extern "C" void psport_gpu_mouse_look_enable(int enabled) {
     Frontend::WindowSDL::EnableMouseLook(enabled != 0);
 }
 
-extern "C" int bbgpu_text_input_begin(const char* initial, const char* prompt) {
+extern "C" int psport_gpu_text_input_begin(const char* initial, const char* prompt) {
     if (!g_window) return 0;
     g_window->BeginTextInput(initial ? initial : "", prompt ? prompt : "Text");
     return 1;
 }
 
-extern "C" void bbgpu_text_input_end(void) {
+extern "C" void psport_gpu_text_input_end(void) {
     if (g_window) g_window->EndTextInput();
 }
 
-extern "C" int bbgpu_text_input_poll(char* out, uint64_t size) {
+extern "C" int psport_gpu_text_input_poll(char* out, uint64_t size) {
     if (!g_window) return 2;
     std::string text;
     const int state = g_window->PollTextInput(text);

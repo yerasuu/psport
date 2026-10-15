@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-#include "bbport_wait_trace.h"
+#include "psport_wait_trace.h"
 
 #include <algorithm>
 #include <array>
@@ -14,7 +14,7 @@
 #include <execinfo.h>
 #include <pthread.h>
 
-namespace BbWaitTrace {
+namespace PsWaitTrace {
 namespace {
 constexpr int Skip = 1; // Scope::Scope itself
 constexpr int Kept = 6; // frames that identify a stack
@@ -122,4 +122,4 @@ void Report(double window_s) {
         std::printf("\n");
     }
 }
-} // namespace BbWaitTrace
+} // namespace PsWaitTrace
