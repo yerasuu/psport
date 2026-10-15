@@ -13,13 +13,20 @@
 
 #include "game_profile.h"
 
+extern "C" {
+// runtime_config.c
+const char* runtime_config_path(void);
+int runtime_config_is_read(void);
+int runtime_config_entry(std::size_t i_entry, const char** pp_out_key, const char** pp_out_value);
+const char* runtime_env(const char* sz_name, const char* sz_default);
+}
+
 namespace PsSettings {
 
 namespace {
 
 const char* Path() {
-    const char* sz_env = std::getenv("PS_CONFIG");
-    return sz_env && sz_env[0] ? sz_env : "psport.ini";
+    return runtime_config_path();
 }
 
 float Clamp(float v, float lo, float hi) {
@@ -119,10 +126,10 @@ void Load() {
     // psport: the menu's language until one is chosen in it (menu_language in psport.ini): the
     // launcher's (PS_MENU_LANGUAGE), else the system's, as the launcher picks its own.
     {
-        const char* sz_lang = std::getenv("PS_MENU_LANGUAGE");
+        const char* sz_lang = runtime_env("PS_MENU_LANGUAGE", nullptr);
         if (!sz_lang || !*sz_lang) {
             for (const char* sz_key : {"LC_ALL", "LC_MESSAGES", "LANG", "LANGUAGE"}) {
-                if (const char* sz_value = std::getenv(sz_key); sz_value && *sz_value) {
+                if (const char* sz_value = runtime_env(sz_key, nullptr); sz_value && *sz_value) {
                     sz_lang = sz_value;
                     break;
                 }
@@ -135,22 +142,15 @@ void Load() {
                           : is('e', 's') ? MenuLanguage::Spanish
                                          : MenuLanguage::English;
     }
-    if (FILE* p_file = std::fopen(Path(), "r")) {
-        char sz_line[256];
-        while (std::fgets(sz_line, sizeof(sz_line), p_file)) {
-            std::string text{sz_line};
-            text.erase(text.find_last_not_of(" \t\r\n") + 1);
-            const auto eq = text.find('=');
-            if (text.empty() || text[0] == '#' || eq == std::string::npos) {
-                continue;
-            }
-            Set(v, text.substr(0, eq), text.substr(eq + 1));
-        }
-        std::fclose(p_file);
+    const char *sz_key, *sz_value;
+    for (std::size_t i_entry = 0; runtime_config_entry(i_entry, &sz_key, &sz_value); ++i_entry) {
+        Set(v, sz_key, sz_value);
+    }
+    if (runtime_config_is_read()) {
         std::printf("Settings: %s\n", Path());
     }
     // Environment overrides (scripts, A/B tests).
-    if (const char* sz_env = std::getenv("PS_UPSCALER")) {
+    if (const char* sz_env = runtime_env("PS_UPSCALER", nullptr)) {
         v.upscaler = UpscalerOff;
         for (int u = 0; u < UpscalerCount; ++u) {
             if (std::strcmp(sz_env, UpscalerName(u)) == 0) v.upscaler = u;
@@ -163,7 +163,7 @@ void Load() {
         {"PS_UPSCALE_PRESET", "preset"},            {"PS_OBJECT_MOTION", "object_motion"},
     };
     for (const auto& [env, key] : env_keys) {
-        if (const char* sz_value = std::getenv(env)) {
+        if (const char* sz_value = runtime_env(env, nullptr)) {
             Set(v, key, sz_value);
         }
     }
@@ -206,8 +206,7 @@ void ConfigureDlssSupport(bool is_available, const char* sz_problem) {
 }
 
 bool FixedRenderSession() {
-    const char* sz_size = std::getenv("PS_RENDER_RES");
-    return sz_size && sz_size[0];
+    return runtime_env("PS_RENDER_RES", "")[0] != '\0';
 }
 
 int RenderPreset() {

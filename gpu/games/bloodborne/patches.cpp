@@ -19,6 +19,12 @@
 #include <sys/stat.h>
 #include <vector>
 
+extern "C" {
+// runtime_config.c
+const char* runtime_config_get(const char* sz_key);
+const char* runtime_env(const char* sz_name, const char* sz_default);
+}
+
 namespace PsLaunch {
 namespace {
 constexpr const char* AppVersion = "01.09";
@@ -98,14 +104,9 @@ const Operand ResolutionOperands[] = {
     {0x0235855D - EbootBase, 0xB9, 0x2D0, false, false},
 };
 
-std::string Env(const char* sz_name, const char* sz_default) {
-    const char* sz_value = std::getenv(sz_name);
-    return sz_value ? sz_value : sz_default;
-}
-
 /// PS_FPS, uncap when unset or empty.
 std::string FpsPresetName() {
-    const std::string name = Env("PS_FPS", "");
+    const std::string name = runtime_env("PS_FPS", "");
     return name.empty() ? "uncap" : name;
 }
 
@@ -123,19 +124,6 @@ std::string Strip(const std::string& text) {
     const auto it_begin = std::find_if_not(text.begin(), text.end(), is_space);
     const auto it_end = std::find_if_not(text.rbegin(), text.rend(), is_space).base();
     return it_begin < it_end ? std::string(it_begin, it_end) : std::string();
-}
-
-/// psport.ini as key=value lines; # starts a comment line.
-std::map<std::string, std::string> ReadSettings() {
-    std::map<std::string, std::string> settings;
-    std::ifstream file(Env("PS_CONFIG", "psport.ini"));
-    for (std::string line; std::getline(file, line);) {
-        const std::size_t off_equals = line.find('=');
-        if (off_equals != std::string::npos && line[0] != '#') {
-            settings[Strip(line.substr(0, off_equals))] = Strip(line.substr(off_equals + 1));
-        }
-    }
-    return settings;
 }
 
 bool IsIntelCpu() {
@@ -308,8 +296,7 @@ bool ParseSize(const std::string& text, int& out_width, int& out_height) {
 } // namespace
 
 void PrepareEnvironment() {
-    const char* sz_vblank = std::getenv("PS_VBLANK_HZ");
-    if (sz_vblank && *sz_vblank) {
+    if (*runtime_env("PS_VBLANK_HZ", "")) {
         return;
     }
     const FpsPreset* p_preset = FindPreset(FpsPresetName());
@@ -324,7 +311,7 @@ bool AddPatches(const PsGameFiles& game, const PsPatchServices& services) {
         return false;
     }
     std::vector<std::string> names(p_preset->patches.begin(), p_preset->patches.end());
-    const std::string extra = Env("PS_PATCHES", "");
+    const std::string extra = runtime_env("PS_PATCHES", "");
     for (std::size_t off_name = 0; off_name <= extra.size();) {
         std::size_t off_end = extra.find(';', off_name);
         if (off_end == std::string::npos) {
@@ -336,25 +323,24 @@ bool AddPatches(const PsGameFiles& game, const PsPatchServices& services) {
         }
         off_name = off_end + 1;
     }
-    const std::map<std::string, std::string> settings = ReadSettings();
     for (const Effect& effect : Effects) {
-        const auto it = settings.find(effect.sz_key);
-        if (it == settings.end()) {
+        const char* sz_value = runtime_config_get(effect.sz_key);
+        if (!sz_value) {
             continue;
         }
-        if (const char* sz_name = it->second == "1" ? effect.sz_on : effect.sz_off) {
+        if (const char* sz_name = std::strcmp(sz_value, "1") == 0 ? effect.sz_on : effect.sz_off) {
             AddOnce(names, sz_name);
         }
     }
-    const auto it_lod = settings.find("model_lod");
-    if (const auto it = ModelLod.find(it_lod == settings.end() ? "0" : it_lod->second); it != ModelLod.end()) {
+    const char* sz_lod = runtime_config_get("model_lod");
+    if (const auto it = ModelLod.find(sz_lod ? sz_lod : "0"); it != ModelLod.end()) {
         AddOnce(names, it->second);
     }
-    const std::string intel = Env("PS_INTEL_TONEMAP_FIX", "");
+    const std::string intel = runtime_env("PS_INTEL_TONEMAP_FIX", "");
     if (intel == "1" || (intel != "0" && IsIntelCpu())) {
         AddOnce(names, IntelTonemap);
     }
-    if (Env("PS_SKIP_NETWORK_CHOICE", "1") != "0") {
+    if (std::strcmp(runtime_env("PS_SKIP_NETWORK_CHOICE", "1"), "0") != 0) {
         AddOnce(names, SkipNetworkChoice);
     }
     if (std::find(names.begin(), names.end(), "Restore Debug Camera") != names.end() &&
@@ -367,7 +353,7 @@ bool AddPatches(const PsGameFiles& game, const PsPatchServices& services) {
     if (!Add(services, file, names)) {
         return false;
     }
-    if (const std::string size = Env("PS_RENDER_RES", ""); !size.empty()) {
+    if (const std::string size = runtime_env("PS_RENDER_RES", ""); !size.empty()) {
         int width, height;
         if (!ParseSize(size, width, height)) {
             std::fprintf(stderr, "ERROR: Patches: PS_RENDER_RES=%s: expected WIDTHxHEIGHT\n", size.c_str());

@@ -269,4 +269,18 @@ void runtime_modules_configure(unsigned char *p_image, RuntimeModule *p_modules,
 /* 1 when this call ran the initializer (its value in *result), 0 when it had run already. */
 int runtime_module_start(size_t h_handle, uint64_t args, const void *p_argp, int32_t *p_result);
 uintptr_t runtime_module_resolve(const char *sz_name);
+/* psport.ini (runtime_config.c), read once on first use from PS_CONFIG, else psport.ini in the
+ * working directory; the C++ side declares what it uses itself. Keys and values are trimmed, #
+ * starts a comment line. The strings stay valid for the process. */
+const char *runtime_config_path(void);
+int runtime_config_is_read(void);
+/* The key's last value in the file, or NULL. */
+const char *runtime_config_get(const char *sz_key);
+/* The file's lines in order, duplicates included; 0 past the last. */
+int runtime_config_entry(size_t i_entry, const char **pp_out_key, const char **pp_out_value);
+/* The environment: runtime_env is getenv with a default for an unset name; the typed ones take an
+ * empty value as unset too, and a flag is off when it starts with 0. */
+const char *runtime_env(const char *sz_name, const char *sz_default);
+int runtime_env_int(const char *sz_name, int fallback);
+int runtime_env_flag(const char *sz_name, int fallback);
 #endif

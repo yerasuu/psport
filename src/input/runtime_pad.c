@@ -97,15 +97,15 @@ static void cal_load(void) {
     static int s_is_loaded;
     if (s_is_loaded) return;
     s_is_loaded=1;
-    const char *sz_value=getenv("PS_PAD_CENTER_CAL"); s_is_cal_enabled=!(sz_value && *sz_value=='0');
+    s_is_cal_enabled=runtime_env_flag("PS_PAD_CENTER_CAL",1);
     /* Inner/outer dead zone, as shadPS4's analog_deadzone: [inner, outer] maps linearly to the
      * full deflection, so an axis with a reduced travel (outer below 127) reaches full. */
-    sz_value=getenv("PS_PAD_DEADZONE"); s_pad_deadzone=sz_value && *sz_value ? atoi(sz_value) : 5;
+    s_pad_deadzone=runtime_env_int("PS_PAD_DEADZONE",5);
     if (s_pad_deadzone<0) s_pad_deadzone=0; else if (s_pad_deadzone>126) s_pad_deadzone=126;
-    sz_value=getenv("PS_PAD_DEADZONE_OUTER"); s_pad_deadzone_outer=sz_value && *sz_value ? atoi(sz_value) : 127;
+    s_pad_deadzone_outer=runtime_env_int("PS_PAD_DEADZONE_OUTER",127);
     if (s_pad_deadzone_outer<=s_pad_deadzone) s_pad_deadzone_outer=s_pad_deadzone<127 ? s_pad_deadzone+1 : 127;
-    sz_value=getenv("PS_PAD_CENTER");
-    if (sz_value && *sz_value && sscanf(sz_value,"%d,%d,%d,%d",&s_cal_manual_center[0],&s_cal_manual_center[1],
+    const char *sz_value=runtime_env("PS_PAD_CENTER","");
+    if (*sz_value && sscanf(sz_value,"%d,%d,%d,%d",&s_cal_manual_center[0],&s_cal_manual_center[1],
                           &s_cal_manual_center[2],&s_cal_manual_center[3])==4) {
         s_cal_manual=1;
         printf("Runtime: pad center (PS_PAD_CENTER): lx=%d ly=%d rx=%d ry=%d\n",
@@ -205,7 +205,7 @@ static void touch_click(PadData *p_pad_data, int right) {
  * wheels and other controllers connected for good came first. */
 static const char *preferred_gamepad(void) {
     static const char *s_sz_want; static int s_read;
-    if (!s_read) { s_sz_want=getenv("PS_GAMEPAD"); if (s_sz_want && !*s_sz_want) s_sz_want=NULL; s_read=1; }
+    if (!s_read) { s_sz_want=runtime_env("PS_GAMEPAD",""); if (!*s_sz_want) s_sz_want=NULL; s_read=1; }
     return s_sz_want;
 }
 static int is_preferred(SDL_JoystickID id, const char *sz_want) {
@@ -219,8 +219,7 @@ static int is_preferred(SDL_JoystickID id, const char *sz_want) {
 static SDL_Gamepad *current_gamepad(void) {
     static int s_is_on_preferred; static uint64_t s_last_scan;
     if (!g_runtime_pad_sdl_ready) {
-        const char *sz_host=getenv("PS_PAD_HOST");
-        g_runtime_pad_sdl_ready = sz_host && *sz_host=='0' ? -1 : SDL_WasInit(SDL_INIT_GAMEPAD) ? 1 : SDL_InitSubSystem(SDL_INIT_GAMEPAD) ? 1 : -1;
+        g_runtime_pad_sdl_ready = !runtime_env_flag("PS_PAD_HOST",1) ? -1 : SDL_WasInit(SDL_INIT_GAMEPAD) ? 1 : SDL_InitSubSystem(SDL_INIT_GAMEPAD) ? 1 : -1;
     }
     if (g_runtime_pad_sdl_ready<0) return NULL;
     if (s_p_gamepad && !SDL_GamepadConnected(s_p_gamepad)) { SDL_CloseGamepad(s_p_gamepad); s_p_gamepad=NULL; }
@@ -253,7 +252,7 @@ static SDL_Gamepad *current_gamepad(void) {
 typedef struct { uint16_t size, version; uint32_t reserved; uint64_t max_system, system, max_in_use, in_use; } MallocManagedSize;
 static void report_guest_heap(void) {
     static int s_is_enabled=-1; static uint64_t s_last;
-    if (s_is_enabled<0) s_is_enabled=getenv("PS_FRAME_STATS")!=NULL;
+    if (s_is_enabled<0) s_is_enabled=runtime_env("PS_FRAME_STATS",NULL)!=NULL;
     const uint64_t now=now_us();
     if (!s_is_enabled || now-s_last<5000000) return;
     s_last=now;
@@ -364,46 +363,40 @@ static float s_mouse_sensitivity=1.0f;
 static void load_bindings(void) {
     bind_defaults();
     s_mouse_look=1; s_mouse_invert_y=0; s_mouse_sensitivity=1.0f;
-    const char *sz_path=getenv("PS_CONFIG");
-    FILE *p_file=sz_path ? fopen(sz_path,"r") : NULL;
-    if (!p_file) return;
-    char sz_line[512];
-    while (fgets(sz_line,sizeof sz_line,p_file)) {
-        const int keyboard=!strncmp(sz_line,"key.",4), pad=!strncmp(sz_line,"pad.",4);
-        char *sz_equals=strchr(sz_line,'=');
-        if (sz_equals && !keyboard && !pad) {
-            const char *sz_value=sz_equals+1;
-            if (!strncmp(sz_line,"mouse_look=",11)) s_mouse_look=atoi(sz_value)!=0;
-            else if (!strncmp(sz_line,"mouse_invert_y=",15)) s_mouse_invert_y=atoi(sz_value)!=0;
-            else if (!strncmp(sz_line,"mouse_sensitivity=",18)) {
+    const char *sz_key, *sz_value;
+    for (size_t i_entry=0; runtime_config_entry(i_entry,&sz_key,&sz_value); ++i_entry) {
+        const int keyboard=!strncmp(sz_key,"key.",4), pad=!strncmp(sz_key,"pad.",4);
+        if (!keyboard && !pad) {
+            if (!strcmp(sz_key,"mouse_look")) s_mouse_look=atoi(sz_value)!=0;
+            else if (!strcmp(sz_key,"mouse_invert_y")) s_mouse_invert_y=atoi(sz_value)!=0;
+            else if (!strcmp(sz_key,"mouse_sensitivity")) {
                 const float v=strtof(sz_value,NULL);
                 if (v>=0.05f && v<=20.0f) s_mouse_sensitivity=v;
             }
             continue;
         }
-        if ((!keyboard && !pad) || !sz_equals) continue;
-        *sz_equals=0;
         int input=-1;
-        for (int i=0;i<IN_COUNT;++i) if (!strcmp(sz_line+4,s_input_names[i])) input=i;
-        if (input<0 || (pad && input>=IN_MOVE_UP)) { printf("Runtime: controls: unknown input %s\n",sz_line); continue; }
+        for (int i=0;i<IN_COUNT;++i) if (!strcmp(sz_key+4,s_input_names[i])) input=i;
+        if (input<0 || (pad && input>=IN_MOVE_UP)) { printf("Runtime: controls: unknown input %s\n",sz_key); continue; }
         Binding *p_binding=&s_bindings[input];
         if (keyboard) p_binding->c_keys=0; else p_binding->c_pads=0;
-        for (char *sz_name=strtok(sz_equals+1,",\r\n"); sz_name; sz_name=strtok(NULL,",\r\n")) {
+        char sz_names[512];
+        snprintf(sz_names,sizeof sz_names,"%s",sz_value);
+        for (char *sz_name=strtok(sz_names,","); sz_name; sz_name=strtok(NULL,",")) {
             while (*sz_name==' ') ++sz_name;
             for (char *sz_end=sz_name+strlen(sz_name); sz_end>sz_name && sz_end[-1]==' ';) *--sz_end=0;
             if (!*sz_name) continue;
             if (keyboard) {
                 const int s=key_from_name(sz_name);
-                if (s<0) printf("Runtime: controls: unknown key \"%s\" for %s\n",sz_name,sz_line+4);
+                if (s<0) printf("Runtime: controls: unknown key \"%s\" for %s\n",sz_name,sz_key+4);
                 else if (p_binding->c_keys<MAX_BIND) p_binding->keys[p_binding->c_keys++]=s;
             } else {
                 const int button=pad_button_from_name(sz_name);
-                if (button<0) printf("Runtime: controls: unknown gamepad button \"%s\" for %s\n",sz_name,sz_line+4);
+                if (button<0) printf("Runtime: controls: unknown gamepad button \"%s\" for %s\n",sz_name,sz_key+4);
                 else if (p_binding->c_pads<MAX_BIND) p_binding->pad[p_binding->c_pads++]=button;
             }
         }
     }
-    fclose(p_file);
 }
 /* The mouse while the window holds it: buttons, and the wheel as short presses (one per notch,
  * each held and released for a few frames so the game sees it). */
@@ -485,8 +478,7 @@ static void apply_mouse_look(PadData *p_pad_data, double dx, double dy, uint64_t
     if (dt>LOOK_TAU_US) dt=LOOK_TAU_US;
     static int s_deadzone=-1;
     if (s_deadzone<0) {
-        const char *sz_env=getenv("PS_MOUSE_DEADZONE");
-        s_deadzone=sz_env && *sz_env ? atoi(sz_env) : 16;
+        s_deadzone=runtime_env_int("PS_MOUSE_DEADZONE",16);
         if (s_deadzone<0 || s_deadzone>100) s_deadzone=16;
     }
     const float gain=127.0f/(1000.0f*LOOK_TAU_US/1e6f)*s_mouse_sensitivity, decay=1.0f-dt/LOOK_TAU_US;

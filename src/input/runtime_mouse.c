@@ -45,17 +45,13 @@ static float s_sensitivity=-1.0f, s_carry_x, s_carry_y;
  * scales the motion the game receives; 1 passes the host's pixels as they are. */
 static void load_sensitivity(void) {
     s_sensitivity=1.0f;
-    const char *sz_path=getenv("PS_CONFIG");
-    FILE *p_file=sz_path ? fopen(sz_path,"r") : NULL;
-    if (!p_file) return;
-    char sz_line[512];
-    while (fgets(sz_line,sizeof sz_line,p_file))
-        if (!strncmp(sz_line,"game_mouse_sensitivity=",23)) {
-            const float v=strtof(sz_line+23,NULL);
+    const char *sz_key, *sz_value;
+    for (size_t i_entry=0; runtime_config_entry(i_entry,&sz_key,&sz_value); ++i_entry)
+        if (!strcmp(sz_key,"game_mouse_sensitivity")) {
+            const float v=strtof(sz_value,NULL);
             if (v>=0.05f && v<=20.0f) s_sensitivity=v;
             else printf("Runtime: mouse: game_mouse_sensitivity=%g is outside 0.05-20, 1 is used\n",v);
         }
-    fclose(p_file);
     if (s_sensitivity!=1.0f) printf("Runtime: mouse: game_mouse_sensitivity=%.2f scales the motion games receive\n",s_sensitivity);
 }
 /* Fractions stay for the next read, so slow motion still adds up at a low sensitivity. */
