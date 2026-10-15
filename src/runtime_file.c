@@ -64,8 +64,11 @@ static void remove_stale_temps(const char *sz_dir,int depth) {
         if ((size_t)snprintf(sz_path,sizeof(sz_path),"%s/%s",sz_dir,p_entry->d_name)>=sizeof(sz_path)) continue;
         if (temp_name(p_entry->d_name)) {
             int is_open_now=0;
+            pthread_mutex_lock(&s_lock);
             for (int i=3;i<MAX_FILES;++i) if (s_files[i].used && s_files[i].sz_temp && !strcmp(s_files[i].sz_temp,sz_path)) is_open_now=1;
-            if (!is_open_now && !unlink(sz_path)) printf("Runtime: removed %s (a save interrupted earlier; the file it would have replaced is intact)\n",sz_path);
+            const int is_removed=!is_open_now && !unlink(sz_path);
+            pthread_mutex_unlock(&s_lock);
+            if (is_removed) printf("Runtime: removed %s (a save interrupted earlier; the file it would have replaced is intact)\n",sz_path);
         } else if (depth<4 && p_entry->d_type==DT_DIR) remove_stale_temps(sz_path,depth+1);
     }
     closedir(p___dirstream);
@@ -81,8 +84,9 @@ int runtime_file_mount(const char *sz_guest,const char *sz_host) {
     snprintf(s_mounts[s_c_mounts].guest,64,"%s",sz_guest);
     snprintf(s_mounts[s_c_mounts].host,512,"%s",sz_host);
     ++s_c_mounts;
-    if (save_path(sz_guest)) remove_stale_temps(sz_host,0);
     pthread_mutex_unlock(&s_lock);
+    /* The walk is not under the file table's lock, which every open and close of the game takes. */
+    if (save_path(sz_guest)) remove_stale_temps(sz_host,0);
     return 0;
 }
 void runtime_file_unmount(const char *sz_guest) {
