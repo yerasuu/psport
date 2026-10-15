@@ -15,6 +15,7 @@
 
 #include <SDL3/SDL.h>
 #include "bbport_settings.h"
+#include "common/elf_info.h"
 #include "imgui.h"
 #include "imgui_impl_vulkan.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
@@ -203,11 +204,14 @@ void Menu() {
     ImGui::SetNextWindowPos(pos, ImGuiCond_Appearing);
     ImGui::SetNextWindowSize(ImVec2(620.0f * base_scale, 0.0f), ImGuiCond_Appearing);
     bool keep_open = true;
-    if (!ImGui::Begin(
-            BbSettings::MenuText("Bloodborne - Graphics  (Insert / L3+R3)###bbport_settings",
-                                 "Bloodborne — настройки  (Insert / L3+R3)###bbport_settings",
-                                 "Bloodborne: gráficos  (Insert / L3+R3)###bbport_settings"),
-            &keep_open, ImGuiWindowFlags_NoCollapse)) {
+    static const std::string s_game_title = [] {
+        const std::string_view title = Common::ElfInfo::Instance().Title();
+        return title.empty() ? std::string("psport") : std::string(title);
+    }();
+    const std::string window_title = s_game_title +
+                                     BbSettings::MenuText(" - Graphics", " — настройки", ": gráficos") +
+                                     "  (Insert / L3+R3)###bbport_settings";
+    if (!ImGui::Begin(window_title.c_str(), &keep_open, ImGuiWindowFlags_NoCollapse)) {
         ImGui::End();
         return;
     }
