@@ -145,6 +145,9 @@ public:
     void S_BARRIER();
     void S_SENDMSG(const GcnInst& inst);
 
+    // SOPK
+    void S_GETREG_B32(const GcnInst& inst);
+
     // Scalar Memory
     // SMRD
     void S_LOAD_DWORD(int num_dwords, const GcnInst& inst);

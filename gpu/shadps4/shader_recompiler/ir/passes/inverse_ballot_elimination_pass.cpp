@@ -85,10 +85,9 @@ void InverseBallotEliminationPass(IR::Program& program) {
                 inst->ReplaceUsesWithAndRemove(IR::Value{false});
             } else if (value.U64() == std::numeric_limits<u64>::max()) {
                 inst->ReplaceUsesWithAndRemove(IR::Value{true});
-            } else {
-                UNREACHABLE_MSG("Unexpected immediate argument for InverseBallot {:#x}",
-                                value.U64());
             }
+            // psport: any other mask differs per lane and stays an InverseBallot for the
+            // backend, as constant propagation leaves it.
             continue;
         }
 
