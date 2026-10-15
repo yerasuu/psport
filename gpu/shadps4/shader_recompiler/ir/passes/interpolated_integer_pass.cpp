@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// psport: integer attributes passed as smooth float varyings (Bloodborne's instanced objects pass
-// the instance index this way, then truncate it with v_cvt_u32_f32). AMD hardware interpolates
+// psport: integer attributes passed as smooth float varyings (instanced objects that pass the
+// instance index this way, then truncate it with v_cvt_u32_f32). AMD hardware interpolates
 // three equal values exactly; NVIDIA does not, and a value such as 0.99999994 truncates to 0 on
-// part of the triangle: the object flickers with noise (coffins on the bridge, shadPS4 PR 1644).
+// part of the triangle: the object flickers with noise (shadPS4 PR 1644).
 // Turing and newer interpolate manually with VK_KHR_fragment_shader_barycentric; older GPUs
 // (Pascal) lack it. There a truncation of an interpolated value is scaled by 1 + 2^-16 first: it
 // restores the exact integer, and moves other values by far less than a pixel's gradient.

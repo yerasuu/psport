@@ -101,10 +101,10 @@ if [[ ${PS_AUTO_RENDER_RES:-} == 1 ]]; then
     unset PS_RENDER_RES PS_OUTPUT_RES PS_AUTO_RENDER_RES
 fi
 # PS_RENDER_RES=WxH explicitly sets the game's render resolution (a patch at start). The frame
-# rate presets (PS_FPS), PS_PATCHES and the render resolution patch are a game profile's (for
-# Bloodborne gpu/games/bloodborne/patches.cpp, asked of psport itself): another title runs unpatched
-# at its own size, on the console's 60 Hz vblank and with the console's direct memory, off the
-# scaled output path below.
+# rate presets (PS_FPS), PS_PATCHES and the render resolution patch are a game profile's
+# (gpu/games/<game>/, asked of psport itself): a title without one runs unpatched at its own size,
+# on the console's 60 Hz vblank and with the console's direct memory, off the scaled output path
+# below.
 # psport.ini output_res other than 1080p (720p for the Steam Deck, 1440p, 2160p): the whole game
 # renders at the preset's size of the output (a patch), the upscaler fills the output, the UI is
 # drawn at the output size. Preset and output changes need a restart.

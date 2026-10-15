@@ -4,7 +4,7 @@
 // The game's indirect dispatches take their group counts from memory a shader wrote. Twice
 // (issues #34 and #32, the PC memory model) those counts were garbage — 1.2 and 3.8 billion
 // groups of the particle simulations — and the GPU, still running them after the kernel's
-// timeout, was reset: device lost, the game gone. Bloodborne's real counts are at most a few
+// timeout, was reset: device lost, the game gone. Real counts seen in games are at most a few
 // hundred. Before each indirect dispatch a one-thread shader (indirect_guard.comp) copies the
 // counts to a slot of our own, zero if they are implausible (past the device's limits or
 // PS_INDIRECT_GUARD_MAX groups in all, default 4M), and the dispatch reads that slot. Skipped

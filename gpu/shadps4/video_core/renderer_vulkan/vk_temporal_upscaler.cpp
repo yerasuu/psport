@@ -983,7 +983,7 @@ void TemporalUpscaler::ExtraSharpen(vk::Image target, bool is_ldr, u32 w, u32 h)
 }
 
 void TemporalUpscaler::OnBlendedSceneDraw() {
-    // The mask is opt-in (menu, PS_REACTIVE=1): on Bloodborne's thin mist it trades trails for
+    // The mask is opt-in (menu, PS_REACTIVE=1): on thin mist it trades trails for
     // jitter shimmer, which looked worse. Toggle 1 << 27 switches it off.
     if (m_is_snapshot_taken || !m_scene_color || !Active() || !ReactiveOn()) {
         return;
