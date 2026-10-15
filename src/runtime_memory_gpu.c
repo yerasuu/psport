@@ -32,7 +32,7 @@ uint64_t g_runtime_disabled_optimizations;
 uint64_t g_runtime_experiment_bits;
 /* Speculative readers of guest memory (GPU draw-preparation workers) register a recovery
  * point: a fault on that thread jumps back to it instead of terminating (probe.c). */
-__thread sigjmp_buf *runtime_fault_recover;
+__thread sigjmp_buf *g_p_runtime_fault_recover;
 static void *toggle_watcher(void *p_path) {
     for (unsigned long long last=ULLONG_MAX;;) {
         FILE *p_file=fopen(p_path,"r");

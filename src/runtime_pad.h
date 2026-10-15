@@ -26,7 +26,7 @@ _Static_assert(sizeof(PadTouch)==8,"OrbisPadTouch layout");
 _Static_assert(__builtin_offsetof(PadData,touches)==60,"OrbisPadData touch offset");
 _Static_assert(__builtin_offsetof(PadData,timestamp)==80,"OrbisPadData timestamp offset");
 /* 1 once SDL's gamepad subsystem is up, -1 when it is not used. */
-extern int runtime_pad_sdl_ready;
+extern int g_runtime_pad_sdl_ready;
 /* PS_PAD_FILE's held buttons, sticks (-1: not overridden) and touchpad side (-1: none). */
 typedef struct { uint32_t buttons; int stick[4]; int touch_side; } PadInjected;
 extern PadInjected g_runtime_pad_injected;

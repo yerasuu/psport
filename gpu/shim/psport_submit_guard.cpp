@@ -139,10 +139,10 @@ std::optional<std::uint64_t> Hash(const Range& range) {
     std::uint64_t hash = 0, at = 0;
     sigjmp_buf recover;
     if (sigsetjmp(recover, 0)) {
-        runtime_fault_recover = nullptr;
+        g_p_runtime_fault_recover = nullptr;
         return std::nullopt;
     }
-    runtime_fault_recover = &recover;
+    g_p_runtime_fault_recover = &recover;
     for (const Hole& hole : range.holes) {
         if (hole.off_hole > at) {
             hash = XXH3_64bits_withSeed(p_bytes + at, hole.off_hole - at, hash);
@@ -152,7 +152,7 @@ std::optional<std::uint64_t> Hash(const Range& range) {
     if (at < cb_range) {
         hash = XXH3_64bits_withSeed(p_bytes + at, cb_range - at, hash);
     }
-    runtime_fault_recover = nullptr;
+    g_p_runtime_fault_recover = nullptr;
     PsStats::g_submit_guard_ns.fetch_add(
         std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start).count(),
         std::memory_order_relaxed);

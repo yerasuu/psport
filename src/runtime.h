@@ -6,7 +6,7 @@
 #ifndef _WIN32
 #include <setjmp.h>
 /* Recovery point for speculative guest memory reads on this thread (probe.c fault handler). */
-extern __thread sigjmp_buf *runtime_fault_recover;
+extern __thread sigjmp_buf *g_p_runtime_fault_recover;
 /* Restarts the game (in-game settings menu, render resolution change). */
 void runtime_restart(void);
 /* sceSystemServiceLoadExec (probe.c): psport starts again on its own command line with sz_path, a

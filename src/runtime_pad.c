@@ -71,7 +71,7 @@ _Static_assert(sizeof(DeviceClassData)==24,"ScePadDeviceClassData layout");
 
 static pthread_mutex_t s_lock=PTHREAD_MUTEX_INITIALIZER;
 static int s_is_initialized, s_is_opened;
-int runtime_pad_sdl_ready;
+int g_runtime_pad_sdl_ready;
 static SDL_Gamepad *s_p_gamepad;
 static size_t s_c_reads;
 static uint8_t s_c_connecteds;
@@ -218,11 +218,11 @@ static int is_preferred(SDL_JoystickID id, const char *sz_want) {
  * is taken as soon as it connects); called under lock. PS_PAD_HOST=0 (scripted runs) opens none. */
 static SDL_Gamepad *current_gamepad(void) {
     static int s_is_on_preferred; static uint64_t s_last_scan;
-    if (!runtime_pad_sdl_ready) {
+    if (!g_runtime_pad_sdl_ready) {
         const char *sz_host=getenv("PS_PAD_HOST");
-        runtime_pad_sdl_ready = sz_host && *sz_host=='0' ? -1 : SDL_WasInit(SDL_INIT_GAMEPAD) ? 1 : SDL_InitSubSystem(SDL_INIT_GAMEPAD) ? 1 : -1;
+        g_runtime_pad_sdl_ready = sz_host && *sz_host=='0' ? -1 : SDL_WasInit(SDL_INIT_GAMEPAD) ? 1 : SDL_InitSubSystem(SDL_INIT_GAMEPAD) ? 1 : -1;
     }
-    if (runtime_pad_sdl_ready<0) return NULL;
+    if (g_runtime_pad_sdl_ready<0) return NULL;
     if (s_p_gamepad && !SDL_GamepadConnected(s_p_gamepad)) { SDL_CloseGamepad(s_p_gamepad); s_p_gamepad=NULL; }
     const char *sz_want=preferred_gamepad();
     const uint64_t now=now_us();

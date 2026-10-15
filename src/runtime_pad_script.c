@@ -72,7 +72,7 @@ static PadSample s_record_last;
 void runtime_pad_record_sample(const PadData *p_pad_data) {
     static const char *s_sz_path; static int s_checked, s_is_f9_held;
     if (!s_checked) { s_sz_path=getenv("PS_PAD_RECORD"); s_checked=1; }
-    if (!s_sz_path || !*s_sz_path || !runtime_pad_sdl_ready) return;
+    if (!s_sz_path || !*s_sz_path || !g_runtime_pad_sdl_ready) return;
     const bool *p__bool=SDL_GetKeyboardState(NULL);
     const int f9=p__bool && p__bool[SDL_SCANCODE_F9];
     if (f9 && !s_is_f9_held) {

@@ -221,9 +221,9 @@ static void fault(int sig, siginfo_t *p_info, void *p_context) {
     /* GPU page tracking (write-protected guest pages) is resolved first. */
     if (s_is_gpu_enabled && sig == SIGSEGV && psport_gpu_handle_fault(p_context, p_info->si_addr)) return;
     /* A speculative guest memory read (runtime_memory.c) failed: resume its recovery point. */
-    if ((sig == SIGSEGV || sig == SIGBUS) && runtime_fault_recover) {
-        sigjmp_buf *p_recover = runtime_fault_recover;
-        runtime_fault_recover = NULL;
+    if ((sig == SIGSEGV || sig == SIGBUS) && g_p_runtime_fault_recover) {
+        sigjmp_buf *p_recover = g_p_runtime_fault_recover;
+        g_p_runtime_fault_recover = NULL;
         pthread_sigmask(SIG_SETMASK, &((ucontext_t *)p_context)->uc_sigmask, NULL);
         siglongjmp(*p_recover, 1);
     }
