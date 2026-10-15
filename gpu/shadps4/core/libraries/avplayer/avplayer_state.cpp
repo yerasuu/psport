@@ -176,6 +176,10 @@ bool AvPlayerState::GetStreamInfo(u32 stream_index, AvPlayerStreamInfo& info) {
 // Called inside GAME thread
 bool AvPlayerState::Start() {
     std::unique_lock lock(m_source_mutex);
+    if (m_up_source == nullptr) {
+        LOG_ERROR(Lib_AvPlayer, "Could not start playback: no source.");
+        return false;
+    }
     if (m_current_state != AvState::Ready && m_current_state != AvState::Stop && !StopLocked()) {
         LOG_ERROR(Lib_AvPlayer, "Could not start playback.");
         return false;
