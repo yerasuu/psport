@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Enable with: git config core.hooksPath .githooks
+
+types='feat|fix|perf|refactor|style|docs|test|build|ci|chore'
+subject_re="^(${types})(\([a-z0-9-]+\))?!?: .+"
+ai_re='co-authored-by|generated with|claude|anthropic|chatgpt|openai|copilot|ai assistant'
+
+reject() {
+    printf 'commit-msg: %s\n' "$1" >&2
+    exit 1
+}
+
+lines=()
+while IFS= read -r line || [ -n "$line" ]; do
+    case $line in
+        '# ------------------------ >8 ------------------------'*) break ;;
+        '#'*) continue ;;
+    esac
+    lines+=("${line%$'\r'}")
+done < "$1"
+while [ ${#lines[@]} -gt 0 ] && [ -z "${lines[-1]//[[:space:]]/}" ]; do
+    unset 'lines[-1]'
+done
+[ ${#lines[@]} -eq 0 ] && exit 0
+
+for line in "${lines[@]}"; do
+    # CLAUDE.md and .claude/ are file names in the tree, not attribution.
+    if printf '%s\n' "${line//CLAUDE.md/}" | sed 's#\.claude/##g' | grep -Eiq -- "$ai_re"; then
+        reject "no AI attribution or Co-Authored-By lines: '$line'"
+    fi
+done
+
+subject=${lines[0]}
+case $subject in
+    'Merge '* | 'Revert "'* | 'fixup! '* | 'squash! '* | 'amend! '*) exit 0 ;;
+esac
+
+printf '%s\n' "$subject" | grep -Eq -- "$subject_re" ||
+    reject "subject must be 'type(area): subject' with type one of ${types//|/, }"
+[ ${#subject} -le 72 ] || reject "subject is ${#subject} characters, at most 72"
+if [ ${#lines[@]} -gt 1 ]; then
+    [ -z "${lines[1]}" ] || reject "leave the second line empty before the body"
+    for line in "${lines[@]:2}"; do
+        [ ${#line} -le 100 ] || reject "body line is ${#line} characters, at most 100: '${line:0:40}...'"
+    done
+fi
+exit 0
