@@ -207,7 +207,7 @@ const Shader::RuntimeInfo& PipelineCache::BuildRuntimeInfo(PipelineSelection& se
             !instance.IsDepthClipControlSupported() &&
             regs.clipper_control.clip_space == AmdGpu::ClipSpace::MinusWToW;
         info.hw.vs.clip_disable = regs.IsClipDisabled();
-        info.hw.vs.motion_vectors = sel.motion;
+        info.hw.vs.motion_location = sel.motion ? sel.motion_location : 0;
         break;
     }
     case HwStage::Fragment: {
@@ -221,7 +221,7 @@ const Shader::RuntimeInfo& PipelineCache::BuildRuntimeInfo(PipelineSelection& se
                 ? regs.aa_config.NumSamples()
                 : 1;
         info.hw.fs.z_export_format = regs.z_export_format;
-        info.hw.fs.motion_vectors = sel.motion;
+        info.hw.fs.motion_location = sel.motion ? sel.motion_location : 0;
         u8 stencil_ref_export_enable = regs.depth_shader_control.stencil_op_val_export_enable |
                                        regs.depth_shader_control.stencil_test_val_export_enable;
         info.hw.fs.mrtz_mask = regs.depth_shader_control.z_export_enable |
@@ -789,6 +789,16 @@ bool PipelineCache::RefreshGraphicsKey(PipelineSelection& sel) {
                           regs.depth_buffer.DepthValid() &&
                           regs.depth_buffer.NumSamples() == 1 && !regs.IsClipDisabled() &&
                           regs.stage_enable.raw == AmdGpu::ShaderStageEnable::VgtStages::Vs;
+        // One location more than the parameters in case clip distances are emulated, which shifts
+        // them all by one.
+        u32 num_params = regs.vs_output_config.NumExports();
+        for (u32 i = 0; i < regs.num_interp; ++i) {
+            if (!regs.ps_inputs[i].use_default) {
+                num_params = std::max<u32>(num_params, regs.ps_inputs[i].input_offset + 1);
+            }
+        }
+        sel.motion_location = u8(num_params + 1);
+        motion_possible &= sel.motion_location <= Shader::MotionVectors::MaxLocation;
     }
     sel.motion = false;
 
@@ -907,6 +917,11 @@ bool PipelineCache::RefreshGraphicsKey(PipelineSelection& sel) {
         constexpr u32 mv = Shader::MotionVectors::Output;
         key.motion_vectors = 1;
         key.mrt_mask |= 1u << mv;
+        // Slots between the shader's targets and the motion target get no view when rendering,
+        // so their formats must be undefined too, even where the registers bind a buffer.
+        for (u32 cb = key.num_color_attachments; cb < mv; ++cb) {
+            std::memset(&key.color_buffers[cb], 0, sizeof(Shader::PsColorBuffer));
+        }
         key.num_color_attachments = mv + 1;
         auto& color_buffer = key.color_buffers[mv];
         color_buffer.data_format = AmdGpu::DataFormat::Format32_32_32_32;

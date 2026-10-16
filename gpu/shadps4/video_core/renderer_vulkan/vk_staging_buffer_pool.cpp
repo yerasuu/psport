@@ -63,7 +63,10 @@ StagingBufferRef StagingBufferPool::Request(u64 size, MemoryType type, u64 align
     if (deferred || size > BLOCK_SIZE) {
         return RequestLarge(size, type, deferred);
     }
-    return RequestFromRing(ring, size, alignment, type);
+    // Staging feeds buffer-image copies, whose bufferOffset must be a multiple of the texel block
+    // (up to 16 bytes for R32G32B32A32 and BC formats); packed requests left it 8-aligned.
+    constexpr u64 CopyAlignment = 16;
+    return RequestFromRing(ring, size, std::max(alignment, CopyAlignment), type);
 }
 
 StagingBufferRef StagingBufferPool::RequestFromRing(Ring& ring, u64 size, u64 alignment,

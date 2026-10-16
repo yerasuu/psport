@@ -260,10 +260,10 @@ public:
     Id motion_frag_out{};
     [[nodiscard]] bool VertexMotion() const {
         return sw_stage == SwStage::Vertex && hw_stage == HwStage::Vertex &&
-               runtime_info.hw.vs.motion_vectors && MotionVectors::positions_address != 0;
+               runtime_info.hw.vs.motion_location != 0 && MotionVectors::positions_address != 0;
     }
     [[nodiscard]] bool FragmentMotion() const {
-        return sw_stage == SwStage::Fragment && runtime_info.hw.fs.motion_vectors;
+        return sw_stage == SwStage::Fragment && runtime_info.hw.fs.motion_location != 0;
     }
     // psport: GS stream-out (DefineXfbOutputs). Each output holds num_comps components of param
     // output_params[param] from first_comp on, copied there before every emitted vertex.

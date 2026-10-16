@@ -81,10 +81,14 @@ struct SwVertexRuntimeInfo {
 /// psport: object motion vectors for temporal upscaling. G-buffer vertex shaders store their
 /// clip-space positions per referenced vertex and read the previous frame's; the
 /// fragment shader writes the screen-space difference to an extra color attachment.
+/// The two varyings (current clip position, then previous with z = valid) sit right after the
+/// draw's own parameters, at the pipeline's motion_location: fixed locations 30 and 31 overran the
+/// 128 fragment input components together with the built-ins.
 struct MotionVectors {
-    static constexpr u32 CurrentLocation = 30;  ///< varying: current clip position
-    static constexpr u32 PreviousLocation = 31; ///< varying: previous clip position, z = valid
-    static constexpr u32 Output = 7;            ///< color attachment index
+    static constexpr u32 Output = 7; ///< color attachment index
+    /// Highest motion_location that leaves the two varyings plus the fragment built-ins within
+    /// maxFragmentInputComponents (128, two locations kept for the built-ins).
+    static constexpr u32 MaxLocation = 28;
     /// Per-draw parameters (u32x4: store base, load base, vertices per instance, flags) and
     /// the position array (vec4 per vertex; element 0 is scratch), fixed for the session.
     static inline u64 params_address = 0;
@@ -111,8 +115,8 @@ struct HwVertexRuntimeInfo {
     bool emulate_depth_negative_one_to_one{};
     bool clip_disable{};
     u32 user_clip_plane_mask{};
-    /// psport: object motion vectors (G-buffer draws), see MotionVectors below.
-    bool motion_vectors{};
+    /// psport: object motion vectors (G-buffer draws), see MotionVectors below; 0 when off.
+    u8 motion_location{};
 
     bool operator==(const HwVertexRuntimeInfo& other) const noexcept = default;
 };
@@ -233,8 +237,8 @@ struct HwFragmentRuntimeInfo {
     bool front_face_all_bits{false};
     bool dual_source_blending{false};
     bool clip_distance_emulation{false};
-    /// psport: writes the object motion vector to MotionVectors::Output.
-    bool motion_vectors{false};
+    /// psport: writes the object motion vector to MotionVectors::Output; 0 when off.
+    u8 motion_location{};
 
     bool operator==(const HwFragmentRuntimeInfo& other) const noexcept {
         return std::ranges::equal(color_buffers, other.color_buffers) &&
@@ -244,7 +248,7 @@ struct HwFragmentRuntimeInfo {
                front_face_all_bits == other.front_face_all_bits &&
                dual_source_blending == other.dual_source_blending &&
                clip_distance_emulation == other.clip_distance_emulation &&
-               motion_vectors == other.motion_vectors &&
+               motion_location == other.motion_location &&
                std::ranges::equal(inputs.begin(), inputs.begin() + num_inputs, other.inputs.begin(),
                                   other.inputs.begin() + num_inputs);
     }

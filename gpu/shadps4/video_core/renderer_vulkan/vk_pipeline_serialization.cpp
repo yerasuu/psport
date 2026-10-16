@@ -15,7 +15,7 @@
 namespace Serialization {
 /* You should increment versions below once corresponding serialization scheme is changed. */
 static constexpr u32 ShaderBinaryVersion = 10u; // psport: point-list GS output mode (OutputPoints)
-static constexpr u32 ShaderMetaVersion = 10u; // psport: StageSpecialization::xfb_stride
+static constexpr u32 ShaderMetaVersion = 11u; // psport: motion_location in place of motion_vectors
 static constexpr u32 PipelineKeyVersion = 6u; // psport: SerializationSupport::xfb_stride
 } // namespace Serialization
 
@@ -119,7 +119,7 @@ bool LoadShaderMeta(Serialization::Archive& ar, Shader::Info& info,
 
     // Motion vertex shaders embed session-local buffer device addresses. They must be
     // recompiled for the current allocation, never loaded from a previous process.
-    if (info.hw_stage == Shader::HwStage::Vertex && spec.runtime_info.hw.vs.motion_vectors) {
+    if (info.hw_stage == Shader::HwStage::Vertex && spec.runtime_info.hw.vs.motion_location != 0) {
         return false;
     }
 

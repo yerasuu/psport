@@ -646,8 +646,9 @@ void EmitContext::DefineOutputs() {
             }
 
             if (VertexMotion()) {
-                motion_out_cur = DefineOutput(F32[4], MotionVectors::CurrentLocation);
-                motion_out_prev = DefineOutput(F32[4], MotionVectors::PreviousLocation);
+                const u32 location = runtime_info.hw.vs.motion_location;
+                motion_out_cur = DefineOutput(F32[4], location);
+                motion_out_prev = DefineOutput(F32[4], location + 1);
                 Name(motion_out_cur, "motion_cur");
                 Name(motion_out_prev, "motion_prev");
             }
@@ -746,8 +747,9 @@ void EmitContext::DefineOutputs() {
         }
         if (FragmentMotion() && !Sirit::ValidId(frag_outputs[MotionVectors::Output].id)) {
             motion_frag_out = DefineOutput(F32[4], MotionVectors::Output);
-            motion_in_cur = DefineInput(F32[4], MotionVectors::CurrentLocation);
-            motion_in_prev = DefineInput(F32[4], MotionVectors::PreviousLocation);
+            const u32 location = runtime_info.hw.fs.motion_location;
+            motion_in_cur = DefineInput(F32[4], location);
+            motion_in_prev = DefineInput(F32[4], location + 1);
             Name(motion_frag_out, "motion_vector");
         }
         // Dual source blending allows at most 2 render targets, one for each source.
@@ -838,11 +840,9 @@ void EmitContext::DefineXfbOutputs() {
         runs.push_back({store.byte_offset, param, store.comp, 1});
     }
 
-    // Locations 30 and 31 carry motion vectors into fragment shaders that use them.
     const u32 num_locations = copy.num_attrs + static_cast<u32>(runs.size());
     const u32 vertex_components = num_locations * 4 + 4;
-    if (num_locations > MotionVectors::CurrentLocation ||
-        num_locations * 4 > profile.max_geometry_output_components ||
+    if (num_locations * 4 > profile.max_geometry_output_components ||
         vertex_components * runtime_info.hw.gs.output_vertices >
             profile.max_geometry_total_output_components) {
         reject(fmt::format("{} output locations exceed the device's", num_locations));
