@@ -130,6 +130,15 @@ extern "C" int psport_gpu_init(const PsGpuConfig* p_config) {
     s_window_thread = std::thread([title, icon, width, height] {
         Common::SetCurrentThreadName("bb:window");
         auto* p_window = new Frontend::WindowSDL(width, height, title.c_str(), icon.c_str());
+        if (!p_window->IsCreated()) {
+            delete p_window;
+            {
+                std::scoped_lock lock{s_window_mutex};
+                s_is_window_ready = true;
+            }
+            s_window_cv.notify_all();
+            return;
+        }
         {
             std::scoped_lock lock{s_window_mutex};
             g_window = p_window;
@@ -147,6 +156,7 @@ extern "C" int psport_gpu_init(const PsGpuConfig* p_config) {
     {
         std::unique_lock lock{s_window_mutex};
         s_window_cv.wait(lock, [] { return s_is_window_ready; });
+        if (!g_window) return -1;
     }
     Core::Loader::SymbolsResolver resolver;
     // GnmDriver creates the presenter that the VideoOut present thread uses.

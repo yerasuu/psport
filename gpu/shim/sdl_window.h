@@ -29,6 +29,8 @@ public:
     ~WindowSDL();
     s32 GetWidth() const { return m_width.load(std::memory_order_relaxed); }
     s32 GetHeight() const { return m_height.load(std::memory_order_relaxed); }
+    /// False when SDL video, the window or its video driver failed; the reason is in the log.
+    bool IsCreated() const { return m_p_window != nullptr; }
     SDL_Window* GetSDLWindow() const { return m_p_window; }
     WindowSystemInfo GetWindowInfo() const { return m_window_info; }
     bool IsOpen() const { return m_is_open.load(std::memory_order_relaxed); }

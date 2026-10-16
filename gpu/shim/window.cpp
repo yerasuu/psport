@@ -4,7 +4,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <SDL3/SDL.h>
-#include "common/assert.h"
 #include "common/logging/log.h"
 #include "sdl_window.h"
 #include "psport_overlay.h"
@@ -63,7 +62,8 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* sz_title, const char* 
     // SDL_APP_ID from the environment still takes precedence over this identifier.
     SDL_SetAppMetadata("psport", nullptr, "psport");
     if (!SDL_InitSubSystem(SDL_INIT_VIDEO | gamepad)) {
-        UNREACHABLE_MSG("Failed to initialize SDL video: {}", SDL_GetError());
+        LOG_ERROR(Frontend, "Failed to initialize SDL video: {}", SDL_GetError());
+        return;
     }
     SDL_PropertiesID props = SDL_CreateProperties();
     SDL_SetStringProperty(props, SDL_PROP_WINDOW_CREATE_TITLE_STRING, sz_title);
@@ -79,7 +79,10 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* sz_title, const char* 
     m_base_title = sz_title;
     m_p_window = SDL_CreateWindowWithProperties(props);
     SDL_DestroyProperties(props);
-    ASSERT_MSG(m_p_window, "Failed to create window: {}", SDL_GetError());
+    if (!m_p_window) {
+        LOG_ERROR(Frontend, "Failed to create window: {}", SDL_GetError());
+        return;
+    }
     if (SDL_Surface* p_icon = SDL_LoadPNG(sz_icon_path)) {
         SDL_SetWindowIcon(m_p_window, p_icon);
         std::printf("Window icon: %s (%dx%d)\n", sz_icon_path, p_icon->w, p_icon->h);
@@ -99,7 +102,10 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* sz_title, const char* 
         m_window_info.display_connection = SDL_GetPointerProperty(wp, SDL_PROP_WINDOW_WAYLAND_DISPLAY_POINTER, nullptr);
         m_window_info.render_surface = SDL_GetPointerProperty(wp, SDL_PROP_WINDOW_WAYLAND_SURFACE_POINTER, nullptr);
     } else {
-        UNREACHABLE_MSG("Unsupported SDL video driver {}", sz_driver ? sz_driver : "(none)");
+        LOG_ERROR(Frontend, "Unsupported SDL video driver {}", sz_driver ? sz_driver : "(none)");
+        SDL_DestroyWindow(m_p_window);
+        m_p_window = nullptr;
+        return;
     }
     int w = 0, h = 0;
     SDL_GetWindowSizeInPixels(m_p_window, &w, &h);
