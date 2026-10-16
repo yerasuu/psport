@@ -1,0 +1,11 @@
+# With -u from a run of ayesha-play.sched: cross skips the intro movie and the title's Press Any
+# button, and opens LoadGame, where the title menu starts, which loads the file at the workshop's
+# journal (about 20 s); there the journal's Save writes it again.
+12 press cross
+15 press cross
+18 press cross
+21 shot
+23 press cross
+25 press cross
+29 shot
+30 end
