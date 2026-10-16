@@ -12,6 +12,10 @@
 - The goal is every system library implemented natively in the port (HLE). The user's dumped
   system modules may be used to test, to detect how a library behaves, or as a temporary patch
   while the native version is missing (`PS_LLE`), but never as the solution.
+- To learn how the firmware or a game really does something (parameter layouts, defaults, error
+  codes), read the original code with the `rea` subagent (REA over Ghidra, user-level agent that
+  starts its MCP server only while it runs; needs `ghidra` and `jdk21` in the nix profile) instead
+  of guessing from shadPS4 or raw `objdump`. Its findings become kb notes or tasks.
 - Optimisations that only help one game live in that game's profile (`gpu/games/<game>/`,
   `Game::Profile`); the core keeps the generic mechanism and runs every game correctly without a
   profile (`PS_GAME_PROFILE=none`). A profile may speed a game up, never make it work.
