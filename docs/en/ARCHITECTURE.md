@@ -280,6 +280,21 @@ two-stage draw pipeline: [parallel_gpu.md](parallel_gpu.md). Temporal upscaling 
 TAA, DLSS): [upscaler.md](upscaler.md). Changes to inherited shadPS4 files:
 [FORK.md](../../FORK.md#changes-to-inherited-shadps4-code).
 
+### Errors
+
+The GPU library does not stop the game for what the game, the host or the environment can cause.
+A host failure while the GPU starts (SDL video, the window, its video driver) makes
+`psport_gpu_init` return -1, and the loader exits with `GPU initialization failed`. A value from
+the game that the translator cannot map (a data or number format, tile mode, macro tile mode,
+array mode, sample count, primitive type, blend, stencil or sampler enum) takes a fallback: a
+compatible format (the same data format with another number format, D32 for depth), linear
+tiling (no detiling), a 2D view, the neutral state (`One`, `Add`, `Copy`, `Keep`, `Always`, no
+culling), or the image operation is skipped (a download larger than the image's memory, a blit or
+tiling pass whose views or pipeline failed). Each fallback is logged with `LOG_ERROR_COUNTED`
+(`gpu/shim/common/logging/log.h`): on its 1st, 2nd, 4th, 8th... occurrence, with the running count.
+Assertions remain for the library's own invariants (texture cache registration and page tracking)
+and for callers' contracts (`FindImage` with address 0, which the rasterizer filters out).
+
 ### Memory model
 
 One model on every GPU: the GPU uses the game's memory where it is (GPU-visible system memory),

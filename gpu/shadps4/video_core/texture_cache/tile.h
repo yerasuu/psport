@@ -291,7 +291,10 @@ constexpr auto hw_pipe_interleave = 256u;
 
 constexpr std::pair<u32, u32> GetMacroTileExtents(AmdGpu::TileMode tile_mode, u32 bpp,
                                                   u32 num_samples, bool alt) {
-    ASSERT(num_samples <= 8);
+    if (num_samples == 0 || num_samples > 8 || bpp < 8 || bpp > 128 ||
+        u32(tile_mode) * 5 >= macro_tile_extents_x1.size()) {
+        return {0, 0};
+    }
     const auto samples_log = static_cast<u32>(std::log2(num_samples));
     const auto row = u32(tile_mode) * 5;
     const auto column = std::bit_width(bpp) - 4; // bpps are 8, 16, 32, 64, 128
@@ -338,7 +341,15 @@ constexpr std::tuple<u32, u32, size_t> ImageSizeMacroTiled(u32 pitch, u32 height
                                                            u32 num_samples,
                                                            AmdGpu::TileMode tile_mode, bool alt) {
     const auto [pitch_align, height_align] = GetMacroTileExtents(tile_mode, bpp, num_samples, alt);
-    ASSERT(pitch_align != 0 && height_align != 0);
+    if (pitch_align == 0 || height_align == 0) {
+        LOG_ERROR_COUNTED(Render_Vulkan,
+                          "No macro tile extents for tile mode {}, bpp {}, {} samples; sized as "
+                          "micro tiled",
+                          u32(tile_mode), bpp, num_samples);
+        const auto [pitch_aligned, height_aligned, size] =
+            ImageSizeMicroTiled(pitch, height, 1, bpp, num_samples);
+        return {pitch_aligned, height_aligned, size};
+    }
     const auto pitch_aligned = (pitch + pitch_align - 1) & ~(pitch_align - 1);
     const auto height_aligned = (height + height_align - 1) & ~(height_align - 1);
     const auto log_sz = pitch_aligned * height_aligned * num_samples;

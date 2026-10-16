@@ -96,6 +96,11 @@ vk::Pipeline TileManager::GetTilingPipeline(const ImageInfo& info, bool is_tiler
     if (const auto it = tiling_pipelines.find(key); it != tiling_pipelines.end()) {
         return *it->second;
     }
+    // An unknown tile mode was already reported and handled as linear: nothing to detile.
+    if (info.array_mode == AmdGpu::ArrayMode::ArrayLinearAligned ||
+        info.array_mode == AmdGpu::ArrayMode::ArrayLinearGeneral) {
+        return {};
+    }
 
     const auto device = instance.GetDevice();
     const auto micro_tile_mode = AmdGpu::GetMicroTileMode(info.tile_mode);
@@ -147,7 +152,10 @@ vk::Pipeline TileManager::GetTilingPipeline(const ImageInfo& info, bool is_tiler
                         : std::span<const u32>{TILING_MICRO_128_COMP};
         break;
     default:
-        UNREACHABLE_MSG("Unsupported tiling pixel width {}", info.num_bits);
+        LOG_ERROR_COUNTED(Render_Vulkan, "Unsupported tiling pixel width {}, image left as is",
+                          info.num_bits);
+        tiling_pipelines.emplace(key, vk::UniquePipeline{});
+        return {};
     }
 
     const auto module = Vulkan::CompileSPV(code, device);
@@ -185,11 +193,15 @@ vk::Pipeline TileManager::GetTilingPipeline(const ImageInfo& info, bool is_tiler
 
     auto [result, pipeline] =
         device.createComputePipelineUnique(VK_NULL_HANDLE, compute_pipeline_ci);
-    ASSERT_MSG(result == vk::Result::eSuccess, "Detiler pipeline creation failed {}",
-               vk::to_string(result));
+    device.destroyShaderModule(module);
+    if (result != vk::Result::eSuccess) {
+        LOG_ERROR_COUNTED(Render_Vulkan, "Tiling pipeline {} creation failed, image left as is: {}",
+                          module_name, vk::to_string(result));
+        tiling_pipelines.emplace(key, vk::UniquePipeline{});
+        return {};
+    }
     const auto handle = *pipeline;
     tiling_pipelines.emplace(key, std::move(pipeline));
-    device.destroyShaderModule(module);
     return handle;
 }
 
@@ -229,6 +241,10 @@ std::pair<const Buffer*, u64> TileManager::DetileImage(const VideoCore::Buffer* 
     if (!info.props.is_tiled) {
         return {in_buffer, in_offset};
     }
+    const vk::Pipeline pipeline = GetTilingPipeline(info, false);
+    if (!pipeline) {
+        return {in_buffer, in_offset};
+    }
 
     TilingInfo params{};
     params.bank_swizzle = info.bank_swizzle;
@@ -266,7 +282,7 @@ std::pair<const Buffer*, u64> TileManager::DetileImage(const VideoCore::Buffer* 
     };
     const auto dim_x = static_cast<u32>((info.guest_size / (info.num_bits / 8)) / 64);
     // psport: recorded with copies of the descriptor infos (threaded recording).
-    RecordTilingDispatch(GetTilingPipeline(info, false), tiled_buffer_info, linear_buffer_info,
+    RecordTilingDispatch(pipeline, tiled_buffer_info, linear_buffer_info,
                          params_buffer_info, dim_x);
     // psport: the source may be the arena, which later uploads write: a copy into
     // it must wait for this read.
@@ -289,6 +305,10 @@ void TileManager::TileImage(Image& in_image, std::span<vk::BufferImageCopy> buff
             copy.bufferOffset += out_offset;
         }
         runtime.DownloadImage(&in_image, out_buffer, buffer_copies);
+        return;
+    }
+    const vk::Pipeline pipeline = GetTilingPipeline(info, true);
+    if (!pipeline) {
         return;
     }
 
@@ -331,7 +351,7 @@ void TileManager::TileImage(Image& in_image, std::span<vk::BufferImageCopy> buff
     };
     const auto dim_x = static_cast<u32>((info.guest_size / (info.num_bits / 8)) / 64);
     // psport: recorded with copies of the descriptor infos (threaded recording).
-    RecordTilingDispatch(GetTilingPipeline(info, true), tiled_buffer_info, linear_buffer_info,
+    RecordTilingDispatch(pipeline, tiled_buffer_info, linear_buffer_info,
                          params_buffer_info, dim_x);
 
     runtime.AccessBuffer(out_buffer, out_offset, info.guest_size,

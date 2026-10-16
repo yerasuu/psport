@@ -59,7 +59,8 @@ static vk::ImageType ConvertImageType(AmdGpu::ImageType type) noexcept {
     case AmdGpu::ImageType::Color3D:
         return vk::ImageType::e3D;
     default:
-        UNREACHABLE();
+        LOG_ERROR_COUNTED(Render_Vulkan, "Unsupported image type {}, using 2D", u32(type));
+        return vk::ImageType::e2D;
     }
 }
 

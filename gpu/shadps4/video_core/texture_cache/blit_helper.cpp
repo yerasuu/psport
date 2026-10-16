@@ -27,7 +27,8 @@ static vk::SampleCountFlagBits ToSampleCount(u32 num_samples) {
     case 16:
         return vk::SampleCountFlagBits::e16;
     default:
-        UNREACHABLE_MSG("Unknown samples count = {}", num_samples);
+        LOG_ERROR_COUNTED(Render_Vulkan, "Unknown sample count {}, using 1", num_samples);
+        return vk::SampleCountFlagBits::e1;
     }
 }
 
@@ -64,8 +65,6 @@ void BlitHelper::ReinterpretColorAsMsDepth(u32 width, u32 height, u32 num_sample
     };
     const auto [color_view_result, color_view] =
         instance.GetDevice().createImageView(color_view_ci);
-    ASSERT_MSG(color_view_result == vk::Result::eSuccess, "Failed to create image view: {}",
-               vk::to_string(color_view_result));
     const vk::ImageViewUsageCreateInfo depth_usage_ci{
         .usage = vk::ImageUsageFlagBits::eDepthStencilAttachment};
     const vk::ImageViewCreateInfo depth_view_ci = {
@@ -83,8 +82,20 @@ void BlitHelper::ReinterpretColorAsMsDepth(u32 width, u32 height, u32 num_sample
     };
     const auto [depth_view_result, depth_view] =
         instance.GetDevice().createImageView(depth_view_ci);
-    ASSERT_MSG(depth_view_result == vk::Result::eSuccess, "Failed to create image view: {}",
-               vk::to_string(depth_view_result));
+    const MsPipelineKey key{num_samples, dst_pixel_format, false};
+    auto it = std::ranges::find(color_to_ms_depth_pl, key, &MsPipeline::first);
+    if (color_view_result != vk::Result::eSuccess || depth_view_result != vk::Result::eSuccess ||
+        (it == color_to_ms_depth_pl.end() && !CreateColorToMSDepthPipeline(key))) {
+        LOG_ERROR_COUNTED(Render_Vulkan,
+                          "Color to MS depth blit skipped: image views {}, {}",
+                          vk::to_string(color_view_result), vk::to_string(depth_view_result));
+        instance.GetDevice().destroyImageView(color_view);
+        instance.GetDevice().destroyImageView(depth_view);
+        return;
+    }
+    if (it == color_to_ms_depth_pl.end()) {
+        it = --color_to_ms_depth_pl.end();
+    }
     scheduler.DeferOperation([device = instance.GetDevice(), color_view, depth_view] {
         device.destroyImageView(color_view);
         device.destroyImageView(depth_view);
@@ -118,12 +129,6 @@ void BlitHelper::ReinterpretColorAsMsDepth(u32 width, u32 height, u32 num_sample
     cmdbuf.pushDescriptorSetKHR(vk::PipelineBindPoint::eGraphics, *single_texture_pl_layout, 0U,
                                 texture_write);
 
-    const MsPipelineKey key{num_samples, dst_pixel_format, false};
-    auto it = std::ranges::find(color_to_ms_depth_pl, key, &MsPipeline::first);
-    if (it == color_to_ms_depth_pl.end()) {
-        CreateColorToMSDepthPipeline(key);
-        it = --color_to_ms_depth_pl.end();
-    }
     cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, *it->second);
 
     const vk::Viewport viewport = {
@@ -166,8 +171,6 @@ void BlitHelper::CopyBetweenMsImages(u32 width, u32 height, u32 num_samples,
         },
     };
     const auto [src_view_result, src_view] = instance.GetDevice().createImageView(src_view_ci);
-    ASSERT_MSG(src_view_result == vk::Result::eSuccess, "Failed to create image view: {}",
-               vk::to_string(src_view_result));
 
     const vk::ImageViewUsageCreateInfo dst_usage_ci{.usage =
                                                         vk::ImageUsageFlagBits::eColorAttachment};
@@ -185,8 +188,19 @@ void BlitHelper::CopyBetweenMsImages(u32 width, u32 height, u32 num_samples,
         },
     };
     const auto [dst_view_result, dst_view] = instance.GetDevice().createImageView(dst_view_ci);
-    ASSERT_MSG(dst_view_result == vk::Result::eSuccess, "Failed to create image view: {}",
-               vk::to_string(dst_view_result));
+    const MsPipelineKey key{num_samples, pixel_format, src_msaa};
+    auto it = std::ranges::find(ms_image_copy_pl, key, &MsPipeline::first);
+    if (src_view_result != vk::Result::eSuccess || dst_view_result != vk::Result::eSuccess ||
+        (it == ms_image_copy_pl.end() && !CreateMsCopyPipeline(key))) {
+        LOG_ERROR_COUNTED(Render_Vulkan, "MS image copy skipped: image views {}, {}",
+                          vk::to_string(src_view_result), vk::to_string(dst_view_result));
+        instance.GetDevice().destroyImageView(src_view);
+        instance.GetDevice().destroyImageView(dst_view);
+        return;
+    }
+    if (it == ms_image_copy_pl.end()) {
+        it = --ms_image_copy_pl.end();
+    }
     scheduler.DeferOperation([device = instance.GetDevice(), src_view, dst_view] {
         device.destroyImageView(src_view);
         device.destroyImageView(dst_view);
@@ -220,12 +234,6 @@ void BlitHelper::CopyBetweenMsImages(u32 width, u32 height, u32 num_samples,
     cmdbuf.pushDescriptorSetKHR(vk::PipelineBindPoint::eGraphics, *single_texture_pl_layout, 0U,
                                 texture_write);
 
-    const MsPipelineKey key{num_samples, pixel_format, src_msaa};
-    auto it = std::ranges::find(ms_image_copy_pl, key, &MsPipeline::first);
-    if (it == ms_image_copy_pl.end()) {
-        CreateMsCopyPipeline(key);
-        it = --ms_image_copy_pl.end();
-    }
     cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, *it->second);
 
     const vk::Viewport viewport = {
@@ -288,7 +296,7 @@ void BlitHelper::CreatePipelineLayouts() {
     single_texture_pl_layout = std::move(pipeline_layout);
 }
 
-void BlitHelper::CreateColorToMSDepthPipeline(const MsPipelineKey& key) {
+bool BlitHelper::CreateColorToMSDepthPipeline(const MsPipelineKey& key) {
     const vk::PipelineInputAssemblyStateCreateInfo input_assembly = {
         .topology = vk::PrimitiveTopology::eTriangleList,
     };
@@ -348,14 +356,18 @@ void BlitHelper::CreateColorToMSDepthPipeline(const MsPipelineKey& key) {
 
     auto [pipeline_result, pipeline] =
         instance.GetDevice().createGraphicsPipelineUnique(VK_NULL_HANDLE, pipeline_info);
-    ASSERT_MSG(pipeline_result == vk::Result::eSuccess, "Failed to create graphics pipeline: {}",
-               vk::to_string(pipeline_result));
+    if (pipeline_result != vk::Result::eSuccess) {
+        LOG_ERROR_COUNTED(Render_Vulkan, "Failed to create the color to MS depth pipeline: {}",
+                          vk::to_string(pipeline_result));
+        return false;
+    }
     Vulkan::SetObjectName(instance.GetDevice(), *pipeline, "Color to MS Depth {}", key.num_samples);
 
     color_to_ms_depth_pl.emplace_back(key, std::move(pipeline));
+    return true;
 }
 
-void BlitHelper::CreateMsCopyPipeline(const MsPipelineKey& key) {
+bool BlitHelper::CreateMsCopyPipeline(const MsPipelineKey& key) {
     const vk::PipelineInputAssemblyStateCreateInfo input_assembly = {
         .topology = vk::PrimitiveTopology::eTriangleList,
     };
@@ -426,12 +438,16 @@ void BlitHelper::CreateMsCopyPipeline(const MsPipelineKey& key) {
 
     auto [pipeline_result, pipeline] =
         instance.GetDevice().createGraphicsPipelineUnique(VK_NULL_HANDLE, pipeline_info);
-    ASSERT_MSG(pipeline_result == vk::Result::eSuccess, "Failed to create graphics pipeline: {}",
-               vk::to_string(pipeline_result));
+    if (pipeline_result != vk::Result::eSuccess) {
+        LOG_ERROR_COUNTED(Render_Vulkan, "Failed to create the MS image copy pipeline: {}",
+                          vk::to_string(pipeline_result));
+        return false;
+    }
     Vulkan::SetObjectName(instance.GetDevice(), *pipeline, "Non MS Image to MS Image {}",
                           key.num_samples);
 
     ms_image_copy_pl.emplace_back(key, std::move(pipeline));
+    return true;
 }
 
 } // namespace VideoCore

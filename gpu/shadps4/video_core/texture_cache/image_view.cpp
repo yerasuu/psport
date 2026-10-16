@@ -26,7 +26,8 @@ vk::ImageViewType ConvertImageViewType(AmdGpu::ImageType type) {
     case AmdGpu::ImageType::Color3D:
         return vk::ImageViewType::e3D;
     default:
-        UNREACHABLE();
+        LOG_ERROR_COUNTED(Render_Vulkan, "Unsupported image view type {}, using 2D", u32(type));
+        return vk::ImageViewType::e2D;
     }
 }
 
@@ -43,7 +44,7 @@ bool IsViewTypeCompatible(AmdGpu::ImageType view_type, AmdGpu::ImageType image_t
     case AmdGpu::ImageType::Color3D:
         return image_type == AmdGpu::ImageType::Color3D;
     default:
-        UNREACHABLE();
+        return false;
     }
 }
 
@@ -137,8 +138,10 @@ ImageView::ImageView(const Vulkan::Instance& instance, const ImageViewInfo& info
     }
 
     auto [view_result, view] = instance.GetDevice().createImageViewUnique(image_view_ci);
-    ASSERT_MSG(view_result == vk::Result::eSuccess, "Failed to create image view: {}",
-               vk::to_string(view_result));
+    if (view_result != vk::Result::eSuccess) {
+        LOG_ERROR_COUNTED(Render_Vulkan, "Failed to create image view, bound as a null view: {}",
+                          vk::to_string(view_result));
+    }
     image_view = std::move(view);
 
     const auto view_aspect = aspect & vk::ImageAspectFlagBits::eDepth     ? "Depth"

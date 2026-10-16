@@ -115,7 +115,8 @@ static inline vk::Format PromoteFormatToDepth(vk::Format fmt) {
     } else if (fmt == vk::Format::eR16Unorm) {
         return vk::Format::eD16Unorm;
     }
-    UNREACHABLE_MSG("Unexpected depth format {}", vk::to_string(fmt));
+    LOG_ERROR_COUNTED(Render_Vulkan, "Unexpected depth format {}, using D32", vk::to_string(fmt));
+    return vk::Format::eD32Sfloat;
 }
 
 } // namespace Vulkan::LiverpoolToVK

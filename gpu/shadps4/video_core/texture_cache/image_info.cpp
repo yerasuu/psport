@@ -30,8 +30,9 @@ static vk::Format ConvertPixelFormat(const VideoOutFormat format) {
     default:
         break;
     }
-    UNREACHABLE_MSG("Unknown format={}", static_cast<u32>(format));
-    return {};
+    LOG_ERROR_COUNTED(Render_Vulkan, "Unknown video out format {}, using RGBA8 sRGB",
+                      static_cast<u32>(format));
+    return vk::Format::eR8G8B8A8Srgb;
 }
 
 ImageInfo::ImageInfo(const Libraries::VideoOut::BufferAttributeGroup& group,
@@ -46,8 +47,7 @@ ImageInfo::ImageInfo(const Libraries::VideoOut::BufferAttributeGroup& group,
     size.width = attrib.width;
     size.height = attrib.height;
     pitch = attrib.tiling_mode == TilingMode::Linear ? size.width : (size.width + 127) & (~127);
-    num_bits = attrib.pixel_format != VideoOutFormat::A16R16G16B16Float ? 32 : 64;
-    ASSERT(num_bits == 32);
+    num_bits = 32;
 
     guest_address = cpu_address;
     UpdateSize();
@@ -176,7 +176,10 @@ void ImageInfo::UpdateSize() {
             std::tie(mip_info.pitch, mip_info.height, mip_info.size) =
                 ImageSizeLinearAligned(mip_w, mip_h, num_bits, num_samples);
         } else if (array_mode == AmdGpu::ArrayMode::ArrayLinearGeneral) {
-            UNREACHABLE_MSG("Unhandled array mode: ArrayLinearGeneral");
+            LOG_ERROR_COUNTED(Render_Vulkan,
+                              "Unhandled array mode LinearGeneral, sized as linear aligned");
+            std::tie(mip_info.pitch, mip_info.height, mip_info.size) =
+                ImageSizeLinearAligned(mip_w, mip_h, num_bits, num_samples);
         } else {
             // Every tiled array mode (1D/2D/3D, thin/thick/xthick, PRT or not) groups
             // GetMicroTileThickness() consecutive depth slices per tile; the slice count (depth x

@@ -42,8 +42,8 @@ private:
 
         auto operator<=>(const MsPipelineKey&) const noexcept = default;
     };
-    void CreateColorToMSDepthPipeline(const MsPipelineKey& key);
-    void CreateMsCopyPipeline(const MsPipelineKey& key);
+    bool CreateColorToMSDepthPipeline(const MsPipelineKey& key);
+    bool CreateMsCopyPipeline(const MsPipelineKey& key);
 
 private:
     const Vulkan::Instance& instance;

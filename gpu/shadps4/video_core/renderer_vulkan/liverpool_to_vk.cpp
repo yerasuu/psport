@@ -50,7 +50,7 @@ vk::StencilOp StencilOp(AmdGpu::StencilFunc op) {
                     static_cast<u32>(op));
         return vk::StencilOp::eKeep;
     default:
-        UNREACHABLE();
+        LOG_ERROR_COUNTED(Render_Vulkan, "Unknown stencil op {}, using Keep", static_cast<u32>(op));
         return vk::StencilOp::eKeep;
     }
 }
@@ -74,7 +74,8 @@ vk::CompareOp CompareOp(AmdGpu::CompareFunc func) {
     case AmdGpu::CompareFunc::Never:
         return vk::CompareOp::eNever;
     default:
-        UNREACHABLE();
+        LOG_ERROR_COUNTED(Render_Vulkan, "Unknown compare func {}, using Always",
+                          static_cast<u32>(func));
         return vk::CompareOp::eAlways;
     }
 }
@@ -101,7 +102,8 @@ bool IsPrimitiveCulled(AmdGpu::PrimitiveType type) {
     case AmdGpu::PrimitiveType::LineLoop:
         return false;
     default:
-        UNREACHABLE();
+        LOG_ERROR_COUNTED(Render_Vulkan, "Unknown primitive type {}, culled as a triangle",
+                          static_cast<u32>(type));
         return true;
     }
 }
@@ -138,7 +140,8 @@ vk::PrimitiveTopology PrimitiveType(AmdGpu::PrimitiveType type) {
     case AmdGpu::PrimitiveType::RectList:
         return vk::PrimitiveTopology::ePatchList;
     default:
-        UNREACHABLE_MSG("Unimplemented primitive type: {}", static_cast<u32>(type));
+        LOG_ERROR_COUNTED(Render_Vulkan, "Unimplemented primitive type {}, using a triangle list",
+                          static_cast<u32>(type));
         return vk::PrimitiveTopology::eTriangleList;
     }
 }
@@ -152,7 +155,8 @@ vk::PolygonMode PolygonMode(AmdGpu::PolygonMode mode) {
     case AmdGpu::PolygonMode::Fill:
         return vk::PolygonMode::eFill;
     default:
-        UNREACHABLE();
+        LOG_ERROR_COUNTED(Render_Vulkan, "Unknown polygon mode {}, using Fill",
+                          static_cast<u32>(mode));
         return vk::PolygonMode::eFill;
     }
 }
@@ -168,7 +172,8 @@ vk::CullModeFlags CullMode(AmdGpu::CullMode mode) {
     case AmdGpu::CullMode::FrontAndBack:
         return vk::CullModeFlagBits::eFrontAndBack;
     default:
-        UNREACHABLE();
+        LOG_ERROR_COUNTED(Render_Vulkan, "Unknown cull mode {}, culling nothing",
+                          static_cast<u32>(mode));
         return vk::CullModeFlagBits::eNone;
     }
 }
@@ -180,7 +185,8 @@ vk::FrontFace FrontFace(AmdGpu::FrontFace face) {
     case AmdGpu::FrontFace::CounterClockwise:
         return vk::FrontFace::eCounterClockwise;
     default:
-        UNREACHABLE();
+        LOG_ERROR_COUNTED(Render_Vulkan, "Unknown front face {}, using Clockwise",
+                          static_cast<u32>(face));
         return vk::FrontFace::eClockwise;
     }
 }
@@ -227,7 +233,9 @@ vk::BlendFactor BlendFactor(AmdGpu::BlendControl::BlendFactor factor) {
     case BlendFactor::OneMinusConstantAlpha:
         return vk::BlendFactor::eOneMinusConstantAlpha;
     default:
-        UNREACHABLE_MSG("Unknown blend factor: {}", static_cast<u32>(factor));
+        LOG_ERROR_COUNTED(Render_Vulkan, "Unknown blend factor {}, using One",
+                          static_cast<u32>(factor));
+        return vk::BlendFactor::eOne;
     }
 }
 
@@ -258,7 +266,8 @@ vk::BlendOp BlendOp(AmdGpu::BlendControl::BlendFunc func) {
     case BlendFunc::ReverseSubtract:
         return vk::BlendOp::eReverseSubtract;
     default:
-        UNREACHABLE_MSG("Unknown blend op: {}", static_cast<u32>(func));
+        LOG_ERROR_COUNTED(Render_Vulkan, "Unknown blend op {}, using Add", static_cast<u32>(func));
+        return vk::BlendOp::eAdd;
     }
 }
 
@@ -302,7 +311,8 @@ vk::LogicOp LogicOp(AmdGpu::ColorControl::LogicOp logic_op) {
     case LogicOp::Set:
         return vk::LogicOp::eSet;
     default:
-        UNREACHABLE_MSG("Unknown logic op {}", u32(logic_op));
+        LOG_ERROR_COUNTED(Render_Vulkan, "Unknown logic op {}, using Copy", u32(logic_op));
+        return vk::LogicOp::eCopy;
     }
 }
 
@@ -329,7 +339,9 @@ vk::SamplerAddressMode ClampMode(AmdGpu::ClampMode mode) {
     case AmdGpu::ClampMode::ClampBorder:
         return vk::SamplerAddressMode::eClampToBorder;
     default:
-        UNREACHABLE();
+        LOG_ERROR_COUNTED(Render_Vulkan, "Unknown clamp mode {}, using Repeat",
+                          static_cast<u32>(mode));
+        return vk::SamplerAddressMode::eRepeat;
     }
 }
 
@@ -352,7 +364,9 @@ vk::CompareOp DepthCompare(AmdGpu::DepthCompare comp) {
     case AmdGpu::DepthCompare::Always:
         return vk::CompareOp::eAlways;
     default:
-        UNREACHABLE();
+        LOG_ERROR_COUNTED(Render_Vulkan, "Unknown depth compare {}, using Always",
+                          static_cast<u32>(comp));
+        return vk::CompareOp::eAlways;
     }
 }
 
@@ -365,7 +379,9 @@ vk::Filter Filter(AmdGpu::Filter filter) {
     case AmdGpu::Filter::AnisoLinear:
         return vk::Filter::eLinear;
     default:
-        UNREACHABLE();
+        LOG_ERROR_COUNTED(Render_Vulkan, "Unknown filter {}, using Nearest",
+                          static_cast<u32>(filter));
+        return vk::Filter::eNearest;
     }
 }
 
@@ -378,7 +394,9 @@ vk::SamplerReductionMode FilterMode(AmdGpu::FilterMode mode) {
     case AmdGpu::FilterMode::Max:
         return vk::SamplerReductionMode::eMax;
     default:
-        UNREACHABLE();
+        LOG_ERROR_COUNTED(Render_Vulkan, "Unknown filter mode {}, using a weighted average",
+                          static_cast<u32>(mode));
+        return vk::SamplerReductionMode::eWeightedAverage;
     }
 }
 
@@ -391,7 +409,9 @@ vk::SamplerMipmapMode MipFilter(AmdGpu::MipFilter filter) {
     case AmdGpu::MipFilter::None:
         return vk::SamplerMipmapMode::eNearest;
     default:
-        UNREACHABLE();
+        LOG_ERROR_COUNTED(Render_Vulkan, "Unknown mip filter {}, using Nearest",
+                          static_cast<u32>(filter));
+        return vk::SamplerMipmapMode::eNearest;
     }
 }
 
@@ -406,7 +426,9 @@ vk::BorderColor BorderColor(AmdGpu::BorderColor color) {
     case AmdGpu::BorderColor::Custom:
         return vk::BorderColor::eFloatCustomEXT;
     default:
-        UNREACHABLE();
+        LOG_ERROR_COUNTED(Render_Vulkan, "Unknown border color {}, using transparent black",
+                          static_cast<u32>(color));
+        return vk::BorderColor::eFloatTransparentBlack;
     }
 }
 
@@ -425,7 +447,9 @@ vk::ComponentSwizzle ComponentSwizzle(AmdGpu::CompSwizzle comp_swizzle) {
     case AmdGpu::CompSwizzle::Alpha:
         return vk::ComponentSwizzle::eA;
     default:
-        UNREACHABLE();
+        LOG_ERROR_COUNTED(Render_Vulkan, "Unknown component swizzle {}, using identity",
+                          static_cast<u32>(comp_swizzle));
+        return vk::ComponentSwizzle::eIdentity;
     }
 }
 
@@ -788,8 +812,18 @@ vk::Format SurfaceFormat(AmdGpu::DataFormat data_format, AmdGpu::NumberFormat nu
     vk::Format result = surface_format_table[GetSurfaceFormatTableIndex(data_format, num_format)];
     bool found =
         result != vk::Format::eUndefined || data_format == AmdGpu::DataFormat::FormatInvalid;
-    ASSERT_MSG(found, "Unknown data_format={} and num_format={}", static_cast<u32>(data_format),
-               static_cast<u32>(num_format));
+    if (!found) {
+        for (u32 i_num_format = 0; result == vk::Format::eUndefined &&
+                                   i_num_format < (1U << amd_gpu_number_format_bit_size);
+             ++i_num_format) {
+            result = surface_format_table[GetSurfaceFormatTableIndex(
+                data_format, static_cast<AmdGpu::NumberFormat>(i_num_format))];
+        }
+        LOG_ERROR_COUNTED(Render_Vulkan,
+                          "Unknown data_format={} and num_format={}, using {}",
+                          static_cast<u32>(data_format), static_cast<u32>(num_format),
+                          vk::to_string(result));
+    }
     return result;
 }
 
@@ -829,8 +863,12 @@ vk::Format DepthFormat(DepthBuffer::ZFormat z_format, DepthBuffer::StencilFormat
         std::find_if(formats.begin(), formats.end(), [&](const DepthFormatInfo& format_info) {
             return format_info.z_format == z_format && format_info.stencil_format == stencil_format;
         });
-    ASSERT_MSG(format != formats.end(), "Unknown z_format={} and stencil_format={}",
-               static_cast<u32>(z_format), static_cast<u32>(stencil_format));
+    if (format == formats.end()) {
+        LOG_ERROR_COUNTED(Render_Vulkan, "Unknown z_format={} and stencil_format={}, using D32",
+                          static_cast<u32>(z_format), static_cast<u32>(stencil_format));
+        return stencil_format == DepthBuffer::StencilFormat::Invalid ? vk::Format::eD32Sfloat
+                                                                     : vk::Format::eD32SfloatS8Uint;
+    }
     return format->vk_format;
 }
 
@@ -1178,7 +1216,8 @@ vk::SampleCountFlagBits RawNumSamples(u32 num_samples) {
     case 16:
         return vk::SampleCountFlagBits::e16;
     default:
-        UNREACHABLE();
+        LOG_ERROR_COUNTED(Render_Vulkan, "Unsupported sample count {}, using 1", num_samples);
+        return vk::SampleCountFlagBits::e1;
     }
 }
 

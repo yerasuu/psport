@@ -106,7 +106,13 @@ void TextureCache::DownloadImageMemory(ImageId image_id, bool sync) {
     }
     const u32 download_size = image.info.pitch * image.info.size.height * image.info.size.depth *
                               image.info.resources.layers * (image.info.num_bits / 8);
-    ASSERT(download_size <= image.info.guest_size);
+    if (download_size > image.info.guest_size) {
+        LOG_ERROR_COUNTED(Render_Vulkan,
+                          "Image download of {:#x} bytes exceeds its guest size {:#x} at {:#x}, "
+                          "skipped",
+                          download_size, image.info.guest_size, image.info.guest_address);
+        return;
+    }
     vk::BufferImageCopy image_copy = {
         .bufferOffset = 0,
         .bufferRowLength = image.info.pitch,
@@ -420,8 +426,9 @@ std::tuple<ImageId, int, int> TextureCache::ResolveOverlap(const ImageInfo& imag
         u64 expected_size =
             (static_cast<u64>(image_info.size.width) * static_cast<u64>(image_info.size.height) *
              static_cast<u64>(image_info.size.depth) * static_cast<u64>(image_info.num_bits) / 8);
-        LOG_ERROR(Render_Vulkan,
-                  "Unresolvable image overlap with equal memory address:\n"
+        LOG_ERROR_COUNTED(Render_Vulkan,
+                  "Unresolvable image overlap with equal memory address, a new image replaces "
+                  "the cached one:\n"
                   "=== OLD IMAGE (cached) ===\n"
                   "  Address:        {:#x}\n"
                   "  Size:           {:#x} bytes\n"
@@ -530,7 +537,10 @@ std::tuple<ImageId, int, int> TextureCache::ResolveOverlap(const ImageInfo& imag
                   merged_image_id.index, static_cast<int>(binding), scheduler.CurrentTick(),
                   scheduler.CurrentTick() - cache_image.tick_accessed_last);
 
-        UNREACHABLE_MSG("Encountered unresolvable image overlap with equal memory address.");
+        if (safe_to_delete) {
+            FreeImage(cache_image_id);
+        }
+        return {merged_image_id, -1, -1};
     }
 
     // Right overlap, the image requested is a possible subresource of the image from cache.

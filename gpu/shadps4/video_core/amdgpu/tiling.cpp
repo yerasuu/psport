@@ -62,7 +62,9 @@ ArrayMode GetArrayMode(TileMode tile_mode) {
     case TileMode::DisplayLinearGeneral:
         return ArrayMode::ArrayLinearGeneral;
     default:
-        UNREACHABLE_MSG("Unknown tile mode = {}", u32(tile_mode));
+        LOG_ERROR_COUNTED(Render, "Unknown tile mode {}, handled as linear general",
+                          u32(tile_mode));
+        return GetArrayMode(TileMode::DisplayLinearGeneral);
     }
 }
 
@@ -101,7 +103,9 @@ MicroTileMode GetMicroTileMode(TileMode tile_mode) {
     case TileMode::Thick3DXThick:
         return MicroTileMode::Thick;
     default:
-        UNREACHABLE_MSG("Unknown tile mode = {}", u32(tile_mode));
+        LOG_ERROR_COUNTED(Render, "Unknown tile mode {}, handled as linear general",
+                          u32(tile_mode));
+        return GetMicroTileMode(TileMode::DisplayLinearGeneral);
     }
 }
 
@@ -139,7 +143,9 @@ PipeConfig GetPipeConfig(TileMode tile_mode) {
     case TileMode::DisplayLinearGeneral:
         return PipeConfig::P2;
     default:
-        UNREACHABLE_MSG("Unknown tile mode = {}", u32(tile_mode));
+        LOG_ERROR_COUNTED(Render, "Unknown tile mode {}, handled as linear general",
+                          u32(tile_mode));
+        return GetPipeConfig(TileMode::DisplayLinearGeneral);
     }
 }
 
@@ -176,7 +182,9 @@ PipeConfig GetAltPipeConfig(TileMode tile_mode) {
     case TileMode::DisplayLinearGeneral:
         return PipeConfig::P2;
     default:
-        UNREACHABLE_MSG("Unknown tile mode = {}", u32(tile_mode));
+        LOG_ERROR_COUNTED(Render, "Unknown tile mode {}, handled as linear general",
+                          u32(tile_mode));
+        return GetAltPipeConfig(TileMode::DisplayLinearGeneral);
     }
 }
 
@@ -213,7 +221,9 @@ u32 GetSampleSplit(TileMode tile_mode) {
     case TileMode::Thin3DThinPrt:
         return 2;
     default:
-        UNREACHABLE_MSG("Unknown tile mode = {}", u32(tile_mode));
+        LOG_ERROR_COUNTED(Render, "Unknown tile mode {}, handled as linear general",
+                          u32(tile_mode));
+        return GetSampleSplit(TileMode::DisplayLinearGeneral);
     }
 }
 
@@ -253,7 +263,9 @@ u32 GetTileSplitHw(TileMode tile_mode) {
     case TileMode::Depth2DThinPrt1K:
         return 1024;
     default:
-        UNREACHABLE_MSG("Unknown tile mode = {}", u32(tile_mode));
+        LOG_ERROR_COUNTED(Render, "Unknown tile mode {}, handled as linear general",
+                          u32(tile_mode));
+        return GetTileSplitHw(TileMode::DisplayLinearGeneral);
     }
 }
 
@@ -277,7 +289,8 @@ u32 GetBankWidth(MacroTileMode mode) {
     case MacroTileMode::Mode_1x1_2_Dup3:
         return 1;
     default:
-        UNREACHABLE_MSG("Unknown macro tile mode = {}", u32(mode));
+        LOG_ERROR_COUNTED(Render, "Unknown macro tile mode {}, handled as 1x4_16", u32(mode));
+        return GetBankWidth(MacroTileMode::Mode_1x4_16);
     }
 }
 
@@ -304,7 +317,8 @@ u32 GetBankHeight(MacroTileMode mode) {
     case MacroTileMode::Mode_1x8_16:
         return 8;
     default:
-        UNREACHABLE_MSG("Unknown macro tile mode = {}", u32(mode));
+        LOG_ERROR_COUNTED(Render, "Unknown macro tile mode {}, handled as 1x4_16", u32(mode));
+        return GetBankHeight(MacroTileMode::Mode_1x4_16);
     }
 }
 
@@ -331,7 +345,8 @@ u32 GetNumBanks(MacroTileMode mode) {
     case MacroTileMode::Mode_1x1_16_Dup2:
         return 16;
     default:
-        UNREACHABLE_MSG("Unknown macro tile mode = {}", u32(mode));
+        LOG_ERROR_COUNTED(Render, "Unknown macro tile mode {}, handled as 1x4_16", u32(mode));
+        return GetNumBanks(MacroTileMode::Mode_1x4_16);
     }
 }
 
@@ -357,7 +372,8 @@ u32 GetMacrotileAspect(MacroTileMode mode) {
     case MacroTileMode::Mode_1x4_16_Dup:
         return 4;
     default:
-        UNREACHABLE_MSG("Unknown macro tile mode = {}", u32(mode));
+        LOG_ERROR_COUNTED(Render, "Unknown macro tile mode {}, handled as 1x4_16", u32(mode));
+        return GetMacrotileAspect(MacroTileMode::Mode_1x4_16);
     }
 }
 
@@ -383,7 +399,8 @@ u32 GetAltBankHeight(MacroTileMode mode) {
     case MacroTileMode::Mode_1x4_16_Dup:
         return 4;
     default:
-        UNREACHABLE_MSG("Unknown macro tile mode = {}", u32(mode));
+        LOG_ERROR_COUNTED(Render, "Unknown macro tile mode {}, handled as 1x4_16", u32(mode));
+        return GetAltBankHeight(MacroTileMode::Mode_1x4_16);
     }
 }
 
@@ -410,7 +427,8 @@ u32 GetAltNumBanks(MacroTileMode mode) {
     case MacroTileMode::Mode_1x8_16:
         return 16;
     default:
-        UNREACHABLE_MSG("Unknown macro tile mode = {}", u32(mode));
+        LOG_ERROR_COUNTED(Render, "Unknown macro tile mode {}, handled as 1x4_16", u32(mode));
+        return GetAltNumBanks(MacroTileMode::Mode_1x4_16);
     }
 }
 
@@ -435,7 +453,8 @@ u32 GetAltMacrotileAspect(MacroTileMode mode) {
     case MacroTileMode::Mode_1x4_16_Dup:
         return 2;
     default:
-        UNREACHABLE_MSG("Unknown macro tile mode = {}", u32(mode));
+        LOG_ERROR_COUNTED(Render, "Unknown macro tile mode {}, handled as 1x4_16", u32(mode));
+        return GetAltMacrotileAspect(MacroTileMode::Mode_1x4_16);
     }
 }
 
@@ -460,7 +479,9 @@ bool IsMacroTiled(ArrayMode array_mode) {
     case ArrayMode::ArrayPrt3DTiledThick:
         return true;
     default:
-        UNREACHABLE_MSG("Unknown array mode = {}", u32(array_mode));
+        LOG_ERROR_COUNTED(Render, "Unknown array mode {}, handled as linear general",
+                          u32(array_mode));
+        return IsMacroTiled(ArrayMode::ArrayLinearGeneral);
     }
 }
 
@@ -485,7 +506,9 @@ bool IsPrt(ArrayMode array_mode) {
     case ArrayMode::Array3DTiledXThick:
         return false;
     default:
-        UNREACHABLE_MSG("Unknown array mode = {}", u32(array_mode));
+        LOG_ERROR_COUNTED(Render, "Unknown array mode {}, handled as linear general",
+                          u32(array_mode));
+        return IsPrt(ArrayMode::ArrayLinearGeneral);
     }
 }
 
@@ -511,7 +534,9 @@ u32 GetMicroTileThickness(ArrayMode array_mode) {
     case ArrayMode::Array3DTiledXThick:
         return 8;
     default:
-        UNREACHABLE_MSG("Unknown array mode = {}", u32(array_mode));
+        LOG_ERROR_COUNTED(Render, "Unknown array mode {}, handled as linear general",
+                          u32(array_mode));
+        return GetMicroTileThickness(ArrayMode::ArrayLinearGeneral);
     }
 }
 
@@ -525,7 +550,8 @@ u32 GetPipeCount(PipeConfig pipe_cfg) {
     case PipeConfig::P16_32x32_8x16:
         return 16;
     default:
-        UNREACHABLE_MSG("Unknown pipe config = {}", u32(pipe_cfg));
+        LOG_ERROR_COUNTED(Render, "Unknown pipe config {}, handled as P2", u32(pipe_cfg));
+        return GetPipeCount(PipeConfig::P2);
     }
 }
 
@@ -542,12 +568,13 @@ u32 CalculateTileSplit(TileMode tile_mode, ArrayMode array_mode, MicroTileMode m
 }
 
 MacroTileMode CalculateMacrotileMode(TileMode tile_mode, u32 bpp, u32 num_samples) {
-    ASSERT_MSG(std::has_single_bit(num_samples) && num_samples <= 16, "Invalid sample count {}",
-               num_samples);
-    ASSERT_MSG(bpp >= 1 && bpp <= 128, "Invalid bpp {}", bpp);
-
     const ArrayMode array_mode = GetArrayMode(tile_mode);
-    ASSERT_MSG(IsMacroTiled(array_mode), "Tile mode not macro tiled");
+    if (!std::has_single_bit(num_samples) || num_samples > 16 || bpp < 1 || bpp > 128 ||
+        !IsMacroTiled(array_mode)) {
+        LOG_ERROR_COUNTED(Render, "Invalid macro tiling: tile mode {}, bpp {}, {} samples; 1x4_16",
+                          u32(tile_mode), bpp, num_samples);
+        return MacroTileMode::Mode_1x4_16;
+    }
 
     const MicroTileMode micro_tile_mode = GetMicroTileMode(tile_mode);
     const u32 tile_thickness = GetMicroTileThickness(array_mode);
