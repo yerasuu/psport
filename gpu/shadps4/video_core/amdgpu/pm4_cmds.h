@@ -276,13 +276,11 @@ struct PM4CmdStrmoutBufferUpdate {
 
     template <typename T = u64>
     T DstAddress() const {
-        ASSERT(update_memory.Value() == 1);
         return reinterpret_cast<T>(dst_address_lo.Value() | u64(dst_address_hi & 0xFFFF) << 32);
     }
 
     template <typename T = u64>
     T SrcAddress() const {
-        ASSERT(source_select.Value() == SourceSelect::SrcAddress);
         return reinterpret_cast<T>(src_address_lo.Value() | u64(src_address_hi & 0xFFFF) << 32);
     }
 };
@@ -429,10 +427,9 @@ struct PM4CmdEventWrite {
     };
     u32 address[];
 
+    /// Only event indexes ZpassDone to SampleStreamoutStatSx carry an address.
     template <typename T>
     T Address() const {
-        ASSERT(event_index.Value() >= EventIndex::ZpassDone &&
-               event_index.Value() <= EventIndex::SampleStreamoutStatSx);
         return std::bit_cast<T>((u64(address[1]) << 32u) | u64(address[0]));
     }
 };
@@ -490,7 +487,7 @@ struct PM4CmdEventWriteEop {
             break;
         }
         default: {
-            UNREACHABLE();
+            break; // psport: nothing written; Liverpool counts it where it decodes the packet
         }
         }
 
@@ -500,14 +497,10 @@ struct PM4CmdEventWriteEop {
             break;
         }
         case InterruptSelect::IrqOnly:
-            ASSERT(data_sel == DataSelect::None);
-            [[fallthrough]];
-        case InterruptSelect::IrqWhenWriteConfirm: {
+        case InterruptSelect::IrqWhenWriteConfirm:
+        case InterruptSelect::IrqUndocumented: {
             signal_irq();
             break;
-        }
-        default: {
-            UNREACHABLE();
         }
         }
     }
@@ -699,6 +692,9 @@ struct PM4CmdWaitRegMem {
     }
 
     bool Test(std::span<const u32> regs) const {
+        if (mem_space.Value() == MemSpace::Register && Reg() >= regs.size()) {
+            return true; // psport: no such register; Liverpool counts it and goes on
+        }
         return TestValue(mem_space.Value() == MemSpace::Memory ? *Address() : regs[Reg()]);
     }
 
@@ -728,7 +724,7 @@ struct PM4CmdWaitRegMem {
         case Function::Reserved:
             [[fallthrough]];
         default: {
-            UNREACHABLE();
+            return true; // psport: the reserved function; Liverpool counts it and goes on
         }
         }
     }
@@ -812,7 +808,7 @@ struct PM4CmdEventWriteEos {
             break;
         }
         default: {
-            UNREACHABLE_MSG("Unknown command {}", u32(cmd));
+            break; // psport: nothing written; Liverpool counts it where it decodes the packet
         }
         }
     }
@@ -956,6 +952,9 @@ struct PM4CmdReleaseMem {
 
     void SignalFence(auto&& signal_irq, auto&& gds_to_mem) const {
         switch (data_sel.Value()) {
+        case DataSelect::None: {
+            break;
+        }
         case DataSelect::Data32Low: {
             *Address<u32*>() = DataDWord();
             break;
@@ -977,7 +976,7 @@ struct PM4CmdReleaseMem {
             break;
         }
         default: {
-            UNREACHABLE();
+            break; // psport: nothing written; Liverpool counts it where it decodes the packet
         }
         }
 
@@ -986,14 +985,11 @@ struct PM4CmdReleaseMem {
             // No interrupt
             break;
         }
+        case InterruptSelect::IrqOnly:
         case InterruptSelect::IrqUndocumented:
-            [[fallthrough]];
         case InterruptSelect::IrqWhenWriteConfirm: {
             signal_irq();
             break;
-        }
-        default: {
-            UNREACHABLE();
         }
         }
     }
@@ -1015,10 +1011,9 @@ struct PM4CmdSetBase {
     u32 address0;
     u32 address1;
 
+    /// Only the patch table base indexes carry an address.
     template <typename T>
     T Address() const {
-        ASSERT(base_index == BaseIndex::DisplayListPatchTable ||
-               base_index == BaseIndex::DrawIndexIndirPatchTable);
         return reinterpret_cast<T>(address0 | (u64(address1 & 0xffff) << 32u));
     }
 };
@@ -1215,8 +1210,6 @@ struct PM4CmdMemSemaphore {
         case SignalType::Write:
             __atomic_store_n(ptr, 1, __ATOMIC_RELEASE);
             break;
-        default:
-            UNREACHABLE_MSG("Unknown signal type {}", static_cast<u32>(signal_type.Value()));
         }
     }
 };

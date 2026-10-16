@@ -8,6 +8,7 @@
 #include <sys/uio.h>
 #include <unistd.h>
 #include <array>
+#include <bit>
 #include <optional>
 #include <unordered_set>
 #include <utility>
@@ -35,6 +36,7 @@
 #include "psport_write_log.h"
 #include "psport_free_check.h"
 #include "video_core/amdgpu/pm4_cmds.h"
+#include "video_core/amdgpu/pm4_faults.h"
 #include "video_core/amdgpu/pm4_selftest.h"
 #include "cp_decoder.h"
 #include "cp_stream.h"
@@ -79,17 +81,85 @@ std::array<u8, 48_KB> Liverpool::ConstantEngine::constants_heap;
 
 static std::span<const u32> NextPacket(std::span<const u32> span, size_t offset) {
     if (offset > span.size()) {
-        LOG_ERROR(
-            Lib_GnmDriver,
-            ": packet length exceeds remaining submission size. Packet dword count={}, remaining "
-            "submission dwords={}",
-            offset, span.size());
-        // Return empty subspan so check for next packet bails out
+        Pm4Faults::Note(Pm4Faults::Kind::Ended, span.empty() ? 0 : span.front() >> 8,
+                        "%zu dwords to skip, %zu left in the buffer", offset, span.size());
         return {};
     }
 
     return span.subspan(offset);
 }
+
+namespace {
+// psport: the body dwords a packet's fields take: one that declares fewer is malformed and
+// skipped, so that no handler reads past it (and past its buffer).
+template <typename Packet>
+constexpr u8 BodyWords() {
+    return (sizeof(Packet) - sizeof(PM4Type3Header)) / sizeof(u32);
+}
+
+constexpr auto s_min_body_words = [] {
+    std::array<u8, 256> words{};
+    const auto set = [&](PM4ItOpcode opcode, u8 c_words) {
+        words[static_cast<u32>(opcode)] = c_words;
+    };
+    for (const auto opcode : {PM4ItOpcode::SetConfigReg, PM4ItOpcode::SetContextReg,
+                              PM4ItOpcode::SetShReg, PM4ItOpcode::SetUconfigReg}) {
+        set(opcode, BodyWords<PM4CmdSetData>());
+    }
+    set(PM4ItOpcode::SetQueueReg, BodyWords<PM4CmdSetQueueReg>());
+    set(PM4ItOpcode::IndexType, BodyWords<PM4CmdDrawIndexType>());
+    set(PM4ItOpcode::IndexBase, BodyWords<PM4CmdDrawIndexBase>());
+    set(PM4ItOpcode::IndexBufferSize, BodyWords<PM4CmdDrawIndexBufferSize>());
+    set(PM4ItOpcode::NumInstances, BodyWords<PM4CmdDrawNumInstances>());
+    set(PM4ItOpcode::DrawIndex2, BodyWords<PM4CmdDrawIndex2>());
+    set(PM4ItOpcode::DrawIndexOffset2, BodyWords<PM4CmdDrawIndexOffset2>());
+    set(PM4ItOpcode::DrawIndexAuto, BodyWords<PM4CmdDrawIndexAuto>());
+    set(PM4ItOpcode::DrawIndirect, BodyWords<PM4CmdDrawIndirect>());
+    set(PM4ItOpcode::DrawIndexIndirect, BodyWords<PM4CmdDrawIndexIndirect>());
+    set(PM4ItOpcode::DrawIndirectMulti, BodyWords<PM4CmdDrawIndirectMulti>());
+    set(PM4ItOpcode::DrawIndexIndirectMulti, BodyWords<PM4CmdDrawIndexIndirectMulti>());
+    set(PM4ItOpcode::DrawIndexIndirectCountMulti, BodyWords<PM4CmdDrawIndexIndirectCountMulti>());
+    set(PM4ItOpcode::DispatchDirect, BodyWords<PM4CmdDispatchDirect>());
+    set(PM4ItOpcode::DispatchIndirect, BodyWords<PM4CmdDispatchIndirect>());
+    set(PM4ItOpcode::SetBase, BodyWords<PM4CmdSetBase>());
+    set(PM4ItOpcode::SetPredication, BodyWords<PM4CmdSetPredication>());
+    set(PM4ItOpcode::CondExec, BodyWords<PM4CmdCondExec>());
+    set(PM4ItOpcode::EventWrite, BodyWords<PM4CmdEventWrite>());
+    set(PM4ItOpcode::EventWriteEop, BodyWords<PM4CmdEventWriteEop>());
+    set(PM4ItOpcode::EventWriteEos, BodyWords<PM4CmdEventWriteEos>());
+    set(PM4ItOpcode::ReleaseMem, BodyWords<PM4CmdReleaseMem>());
+    set(PM4ItOpcode::DmaData, BodyWords<PM4DmaData>());
+    set(PM4ItOpcode::WriteData, BodyWords<PM4CmdWriteData>());
+    set(PM4ItOpcode::CopyData, BodyWords<PM4CmdCopyData>());
+    set(PM4ItOpcode::MemSemaphore, BodyWords<PM4CmdMemSemaphore>());
+    set(PM4ItOpcode::WaitRegMem, BodyWords<PM4CmdWaitRegMem>());
+    set(PM4ItOpcode::Rewind, BodyWords<PM4CmdRewind>());
+    set(PM4ItOpcode::IndirectBuffer, BodyWords<PM4CmdIndirectBuffer>());
+    set(PM4ItOpcode::IndirectBufferConst, BodyWords<PM4CmdIndirectBuffer>());
+    set(PM4ItOpcode::StrmoutBufferUpdate, BodyWords<PM4CmdStrmoutBufferUpdate>());
+    set(PM4ItOpcode::WriteConstRam, BodyWords<PM4WriteConstRam>());
+    set(PM4ItOpcode::DumpConstRam, BodyWords<PM4DumpConstRam>());
+    set(PM4ItOpcode::WaitOnDeCounterDiff, 1);
+    return words;
+}();
+
+u32 MinBodyWords(PM4ItOpcode opcode, bool is_compute) {
+    if (is_compute && opcode == PM4ItOpcode::DispatchIndirect) {
+        return BodyWords<PM4CmdDispatchIndirectMec>();
+    }
+    return s_min_body_words[static_cast<u32>(opcode) & 0xFF];
+}
+
+bool IsBodyShort(PM4ItOpcode opcode, u32 c_body_words, bool is_compute) {
+    const u32 c_min_words = MinBodyWords(opcode, is_compute);
+    if (c_body_words >= c_min_words) [[likely]] {
+        return false;
+    }
+    Pm4Faults::Note(Pm4Faults::Kind::Skipped, static_cast<u32>(opcode),
+                    "%u body dwords where its fields take %u", c_body_words, c_min_words);
+    return true;
+}
+} // namespace
 
 Liverpool::Liverpool() : guest_markers_enabled{EmulatorSettings.IsVkGuestMarkersEnabled()} {
     num_counter_pairs = Libraries::Kernel::sceKernelIsNeoMode() ? 16 : 8;
@@ -493,9 +563,119 @@ void RunMemSemaphoreSignal(Vulkan::Rasterizer& rasterizer, const u8* data) {
     rasterizer.SignalAfterGpu([semaphore] { semaphore.Signal(); });
 }
 
+// psport: the DMA_DATA forms RunDmaData and ProcessCompute run; the others (a register
+// destination, the reserved dst_sel 2, GDS to GDS) are skipped.
+bool IsDmaDataSupported(const PM4DmaData& dma_data) {
+    if (dma_data.command.das == 0 &&
+        (dma_data.dst_sel == DmaDataDst::Memory || dma_data.dst_sel == DmaDataDst::MemoryUsingL2 ||
+         (dma_data.dst_sel == DmaDataDst::Gds && dma_data.src_sel != DmaDataSrc::Gds))) {
+        return true;
+    }
+    Pm4Faults::Note(Pm4Faults::Kind::Unsupported, u32(PM4ItOpcode::DmaData),
+                    "src_sel %u, dst_sel %u, das %u: not run", u32(dma_data.src_sel),
+                    u32(dma_data.dst_sel), u32(dma_data.command.das));
+    return false;
+}
+
+// psport: fence fields shadPS4 asserted on, counted here where the packet is decoded. SignalFence
+// writes nothing for them and raises the interrupt for any int_sel that asks for one.
+void CheckEop(const PM4CmdEventWriteEop& eop) {
+    const auto data_sel = eop.data_sel.Value();
+    const auto int_sel = eop.int_sel.Value();
+    if (data_sel > DataSelect::PerfCounter || int_sel == InterruptSelect::IrqUndocumented ||
+        (int_sel == InterruptSelect::IrqOnly && data_sel != DataSelect::None)) [[unlikely]] {
+        Pm4Faults::Note(Pm4Faults::Kind::Unsupported, u32(PM4ItOpcode::EventWriteEop),
+                        "data_sel %u, int_sel %u: data_sel above 4 writes nothing, int_sel 1 to 3 "
+                        "raise the interrupt",
+                        u32(data_sel), u32(int_sel));
+    }
+}
+
+void CheckReleaseMem(const PM4CmdReleaseMem& release) {
+    const auto data_sel = release.data_sel.Value();
+    const auto int_sel = release.int_sel.Value();
+    if (data_sel == DataSelect::None || data_sel > DataSelect::GdsMemStore ||
+        int_sel == InterruptSelect::IrqOnly ||
+        int_sel > InterruptSelect::IrqUndocumented) [[unlikely]] {
+        Pm4Faults::Note(Pm4Faults::Kind::Unsupported, u32(PM4ItOpcode::ReleaseMem),
+                        "data_sel %u, int_sel %u: data_sel 0 or above 5 writes nothing, int_sel 1 "
+                        "to 3 raise the interrupt, above 3 none",
+                        u32(data_sel), u32(int_sel));
+    }
+}
+
+void CheckEos(const PM4CmdEventWriteEos& eos) {
+    const auto command = eos.command.Value();
+    if ((command != PM4CmdEventWriteEos::Command::SignalFence &&
+         command != PM4CmdEventWriteEos::Command::GdsStore) ||
+        (command == PM4CmdEventWriteEos::Command::GdsStore && eos.size != 1)) [[unlikely]] {
+        Pm4Faults::Note(Pm4Faults::Kind::Unsupported, u32(PM4ItOpcode::EventWriteEos),
+                        "command %u, %u GDS dwords: an unknown command writes nothing, a GDS store "
+                        "copies its first dword",
+                        u32(command), u32(eos.size));
+    }
+}
+
+void CheckWaitRegMem(const PM4CmdWaitRegMem& wait, bool is_compute) {
+    const bool is_reserved = wait.function.Value() == PM4CmdWaitRegMem::Function::Reserved;
+    const bool is_register_unknown =
+        wait.mem_space.Value() == PM4CmdWaitRegMem::MemSpace::Register &&
+        wait.Reg() >= Regs::NumRegs;
+    const bool is_pfp = is_compute && wait.engine.Value() == PM4CmdWaitRegMem::Engine::Pfp;
+    if (is_reserved || is_register_unknown || is_pfp) [[unlikely]] {
+        Pm4Faults::Note(Pm4Faults::Kind::Unsupported, u32(PM4ItOpcode::WaitRegMem),
+                        "function %u, register %#x, engine %u%s: the reserved function or a "
+                        "register past the file is taken as met, the PFP waits as the ME",
+                        u32(wait.function.Value()), wait.Reg(), u32(wait.engine.Value()),
+                        is_compute ? " (compute)" : "");
+    }
+}
+
+// psport: WRITE_DATA to memory (dst_sel 2 or 5) at consecutive addresses is all that runs.
+bool IsWriteDataSupported(const PM4CmdWriteData& write_data) {
+    if ((write_data.dst_sel.Value() == 2 || write_data.dst_sel.Value() == 5) &&
+        !write_data.wr_one_addr.Value()) [[likely]] {
+        return true;
+    }
+    Pm4Faults::Note(Pm4Faults::Kind::Unsupported, u32(PM4ItOpcode::WriteData),
+                    "dst_sel %u, wr_one_addr %u: not run", write_data.dst_sel.Value(),
+                    write_data.wr_one_addr.Value());
+    return false;
+}
+
+// psport: the dwords of a register write from `i_first` that fit in the register file.
+u32 ClipToRegisterFile(u32 i_first, u32 c_words) {
+    return i_first >= Regs::NumRegs ? 0 : std::min(c_words, Regs::NumRegs - i_first);
+}
+
+// psport: the bytes of a SET_SH_REG at `reg_offset`, in the compute program's range, that fit in
+// ComputeProgram; the rest is dropped.
+std::size_t ClipToComputeProgram(u32 reg_offset, std::size_t cb_set) {
+    const std::size_t cb_room = sizeof(ComputeProgram) - (reg_offset - 0x200) * sizeof(u32);
+    if (cb_set <= cb_room) [[likely]] {
+        return cb_set;
+    }
+    Pm4Faults::Note(Pm4Faults::Kind::Unsupported, u32(PM4ItOpcode::SetShReg),
+                    "%zu bytes from register %#x, %zu past the compute program: dropped", cb_set,
+                    reg_offset, cb_set - cb_room);
+    return cb_room;
+}
+
+// psport: the NOP after a CB or DB setup sequence that carries the surface's size (see
+// SetContextReg), dword `i_nop` of `packets`.
+std::optional<u32> ReadSizeHint(std::span<const u32> packets, std::size_t i_nop) {
+    if (i_nop + 1 < packets.size() && packets[i_nop] == 0xc0001000) [[likely]] {
+        return packets[i_nop + 1];
+    }
+    Pm4Faults::Note(Pm4Faults::Kind::Unsupported, u32(PM4ItOpcode::SetContextReg),
+                    "no NOP size hint %zu dwords after a CB or DB setup: the size comes from the "
+                    "registers",
+                    i_nop);
+    return std::nullopt;
+}
+
 void RunDmaData(Vulkan::Rasterizer& rasterizer, const u8* data) {
     const auto* dma_data = reinterpret_cast<const PM4DmaData*>(data);
-    ASSERT(dma_data->command.das == 0);
     // psport: a DMA into guest memory is written by this thread (FillBuffer/CopyBuffer) when the
     // GPU has not modified the range. Like WriteData, it must not overtake the copies and the
     // fences deferred to the recording thread: the guest, seeing it, frees objects whose labels
@@ -526,16 +706,10 @@ void RunDmaData(Vulkan::Rasterizer& rasterizer, const u8* data) {
                 dma_data->dst_sel == DmaDataDst::MemoryUsingL2)) {
         rasterizer.CopyBuffer(dma_data->DstAddress<VAddr>(), dma_data->src_addr_lo,
                                dma_data->NumBytes(), false, true);
-    } else if ((dma_data->src_sel == DmaDataSrc::Memory ||
-                dma_data->src_sel == DmaDataSrc::MemoryUsingL2) &&
-               (dma_data->dst_sel == DmaDataDst::Memory ||
-                dma_data->dst_sel == DmaDataDst::MemoryUsingL2)) {
+    } else { // memory to memory: the rest of IsDmaDataSupported
         rasterizer.CopyBuffer(dma_data->DstAddress<VAddr>(),
                                dma_data->SrcAddress<VAddr>(), dma_data->NumBytes(),
                                false, false);
-    } else {
-        UNREACHABLE_MSG("WriteData src_sel = {}, dst_sel = {}", u32(dma_data->src_sel),
-                        u32(dma_data->dst_sel));
     }
 }
 
@@ -668,7 +842,6 @@ void RunEventWriteEos(Vulkan::Rasterizer& rasterizer, const u8* data) {
     rasterizer.ProcessDownloadImages();
     event_eos.SignalFence(&WriteEosLabel);
     if (event_eos.command == PM4CmdEventWriteEos::Command::GdsStore) {
-        ASSERT(event_eos.size == 1);
         // psport: a GPU copy from GDS in stream order, as the command processor stores it,
         // instead of waiting for the whole GPU and storing on the CPU.
         rasterizer.CopyBuffer(reinterpret_cast<VAddr>(event_eos.Address()),
@@ -742,12 +915,24 @@ Liverpool::Task Liverpool::ProcessCeUpdate(std::span<const u32> ccb) {
 
         const auto* header = reinterpret_cast<const PM4Header*>(ccb.data());
         const u32 type = header->type;
-        if (type != 3) {
-            // No other types of packets were spotted so far
-            UNREACHABLE_MSG("Invalid PM4 type {}", type);
+        if (type == 2) {
+            ccb = NextPacket(ccb, 1);
+            continue;
+        }
+        // psport: as in ProcessGraphics, a type-0 or type-1 packet or one past the buffer's end
+        // leaves no packet size to trust.
+        if (type != 3 || header->type3.NumWords() + 1 > ccb.size()) [[unlikely]] {
+            Pm4Faults::Note(Pm4Faults::Kind::Ended, ccb.front() >> 8,
+                            "constant engine: header %#x (type %u), %zu dwords left in the buffer",
+                            ccb.front(), type, ccb.size());
+            break;
         }
 
         const PM4ItOpcode opcode = header->type3.opcode;
+        if (IsBodyShort(opcode, header->type3.NumWords(), false)) {
+            ccb = NextPacket(ccb, header->type3.NumWords() + 1);
+            continue;
+        }
         const auto* it_body = reinterpret_cast<const u32*>(header) + 1;
         switch (opcode) {
         case PM4ItOpcode::Nop: {
@@ -756,12 +941,26 @@ Liverpool::Task Liverpool::ProcessCeUpdate(std::span<const u32> ccb) {
         }
         case PM4ItOpcode::WriteConstRam: {
             const auto* write_const = reinterpret_cast<const PM4WriteConstRam*>(header);
+            if (u64(write_const->Offset()) + write_const->Size() > cblock.constants_heap.size()) {
+                Pm4Faults::Note(Pm4Faults::Kind::Skipped, u32(opcode),
+                                "%u bytes at %#x, past the %zu-byte constant RAM",
+                                write_const->Size(), write_const->Offset(),
+                                cblock.constants_heap.size());
+                break;
+            }
             memcpy(cblock.constants_heap.data() + write_const->Offset(), &write_const->data,
                    write_const->Size());
             break;
         }
         case PM4ItOpcode::DumpConstRam: {
             const auto* dump_const = reinterpret_cast<const PM4DumpConstRam*>(header);
+            if (u64(dump_const->Offset()) + dump_const->Size() > cblock.constants_heap.size()) {
+                Pm4Faults::Note(Pm4Faults::Kind::Skipped, u32(opcode),
+                                "%u bytes at %#x, past the %zu-byte constant RAM",
+                                dump_const->Size(), dump_const->Offset(),
+                                cblock.constants_heap.size());
+                break;
+            }
             if (PsCeStats::Enabled()) {
                 PsCeStats::NoteDump(dump_const->Address<VAddr>(), dump_const->Size());
             }
@@ -808,9 +1007,10 @@ Liverpool::Task Liverpool::ProcessCeUpdate(std::span<const u32> ccb) {
             break;
         }
         default:
-            const u32 count = header->type3.NumWords();
-            UNREACHABLE_MSG("Unknown PM4 type 3 opcode {:#x} with count {}",
-                            static_cast<u32>(opcode), count);
+            Pm4Faults::Note(Pm4Faults::Kind::Skipped, u32(opcode),
+                            "constant engine: unknown opcode, %u body dwords",
+                            header->type3.NumWords());
+            break;
         }
         ccb = NextPacket(ccb, header->type3.NumWords() + 1);
     }
@@ -877,13 +1077,23 @@ PsCp::Decoder& Liverpool::CpDecoder() {
     return *cp_decoder;
 }
 
-void Liverpool::ApplyGraphicsRegisterPacket(Regs& regs, const PM4Header* header, u64& checksum,
+bool Liverpool::ApplyGraphicsRegisterPacket(Regs& regs, const PM4Header* header, u64& checksum,
                                              RegDirty* dirty) {
     const u32 count = header->type3.NumWords();
     const auto* payload = reinterpret_cast<const u32*>(header + 2);
     const auto mark = [&](u32 word, u32 words) {
         if (dirty) {
             dirty->Mark(word, words);
+        }
+    };
+    bool is_clipped = false;
+    const auto write_registers = [&](u32 i_first) {
+        const u32 c_words = count == 0 ? 0 : count - 1;
+        const u32 c_written = ClipToRegisterFile(i_first, c_words);
+        is_clipped = c_written != c_words;
+        if (c_written != 0) {
+            std::memcpy(regs.reg_array.data() + i_first, payload, c_written * sizeof(u32));
+            mark(i_first, c_written);
         }
     };
     const auto mark_field = [&](const auto& field) {
@@ -900,17 +1110,13 @@ void Liverpool::ApplyGraphicsRegisterPacket(Regs& regs, const PM4Header* header,
         }
         break;
     case PM4ItOpcode::SetConfigReg: {
-        const auto* set_data = reinterpret_cast<const PM4CmdSetData*>(header);
-        std::memcpy(&regs.reg_array[Regs::ConfigRegWordOffset + set_data->reg_offset], payload,
-                    (count - 1) * sizeof(u32));
-        mark(Regs::ConfigRegWordOffset + set_data->reg_offset, count - 1);
+        write_registers(Regs::ConfigRegWordOffset +
+                        reinterpret_cast<const PM4CmdSetData*>(header)->reg_offset);
         break;
     }
     case PM4ItOpcode::SetContextReg: {
-        const auto* set_data = reinterpret_cast<const PM4CmdSetData*>(header);
-        std::memcpy(&regs.reg_array[Regs::ContextRegWordOffset + set_data->reg_offset], payload,
-                    (count - 1) * sizeof(u32));
-        mark(Regs::ContextRegWordOffset + set_data->reg_offset, count - 1);
+        write_registers(Regs::ContextRegWordOffset +
+                        reinterpret_cast<const PM4CmdSetData*>(header)->reg_offset);
         break;
     }
     case PM4ItOpcode::SetShReg: {
@@ -918,17 +1124,13 @@ void Liverpool::ApplyGraphicsRegisterPacket(Regs& regs, const PM4Header* header,
         // The compute program range goes to the queue's cs_state, not to regs.
         if (!(set_data->reg_offset >= 0x200 &&
               set_data->reg_offset <= (0x200 + sizeof(ComputeProgram) / 4))) {
-            std::memcpy(&regs.reg_array[Regs::ShRegWordOffset + set_data->reg_offset], payload,
-                        (count - 1) * sizeof(u32));
-            mark(Regs::ShRegWordOffset + set_data->reg_offset, count - 1);
+            write_registers(Regs::ShRegWordOffset + set_data->reg_offset);
         }
         break;
     }
     case PM4ItOpcode::SetUconfigReg: {
-        const auto* set_data = reinterpret_cast<const PM4CmdSetData*>(header);
-        std::memcpy(&regs.reg_array[Regs::UconfigRegWordOffset + set_data->reg_offset], payload,
-                    (count - 1) * sizeof(u32));
-        mark(Regs::UconfigRegWordOffset + set_data->reg_offset, count - 1);
+        write_registers(Regs::UconfigRegWordOffset +
+                        reinterpret_cast<const PM4CmdSetData*>(header)->reg_offset);
         break;
     }
     case PM4ItOpcode::IndexType:
@@ -985,7 +1187,7 @@ void Liverpool::ApplyGraphicsRegisterPacket(Regs& regs, const PM4Header* header,
     case PM4ItOpcode::EventWrite: {
         const auto* event = reinterpret_cast<const PM4CmdEventWrite*>(header);
         if (event->event_type.Value() != EventType::SoVgtStreamoutFlush) {
-            return;
+            return false;
         }
         // TODO: handle proper synchronization, for now signal that update is done immediately
         regs.cp_strmout_cntl.offset_update_done = 1;
@@ -993,9 +1195,10 @@ void Liverpool::ApplyGraphicsRegisterPacket(Regs& regs, const PM4Header* header,
         break;
     }
     default:
-        return;
+        return false;
     }
     checksum = HashRegisterPacket(checksum, reinterpret_cast<const u32*>(header), count + 1);
+    return is_clipped;
 }
 
 // psport: PS_DCB_STATS=1 — structure of graphics command buffers (read-only scan, printed every
@@ -1484,8 +1687,11 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
         u64 seq;
         int depth;
         void OnBadPacket(std::span<const u32> rest, const char* what, int) override {
-            ReportBadPacket(base, dwords, rest.data(), seq, depth);
-            UNREACHABLE_MSG("PM4: {}", what);
+            if (Pm4Faults::Note(Pm4Faults::Kind::Ended, rest.empty() ? 0 : rest.front() >> 8,
+                                "%s (IB depth %d)", what, depth) &&
+                !rest.empty()) {
+                ReportBadPacket(base, dwords, rest.data(), seq, depth);
+            }
         }
     } cp_sink;
     cp_sink.base = base_addr;
@@ -1513,14 +1719,18 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
 
         switch (type) {
         default:
-            ReportBadPacket(base_addr, dcb_dwords, dcb.data(), seq, dcb_depth);
-            UNREACHABLE_MSG("Wrong PM4 type {}", type);
-            break;
-        case 0:
-            ReportBadPacket(base_addr, dcb_dwords, dcb.data(), seq, dcb_depth);
-            UNREACHABLE_MSG("Unimplemented PM4 type 0, base reg: {}, size: {}",
-                            header->type0.base.Value(), header->type0.NumWords());
-            break;
+            // psport: the PS4's drivers build no type-0 or type-1 packets: one here is a buffer
+            // overwritten or read at the wrong place, where no packet size can be trusted.
+            if (Pm4Faults::Note(Pm4Faults::Kind::Ended, dcb.front() >> 8,
+                                "type-%u header %#x at dword %zu of %zu (IB depth %d)", type,
+                                dcb.front(),
+                                (reinterpret_cast<uintptr_t>(dcb.data()) - base_addr) / 4,
+                                dcb_dwords, dcb_depth)) {
+                ReportBadPacket(base_addr, dcb_dwords, dcb.data(), seq, dcb_depth);
+            }
+            cp_cursor.reset();
+            dcb = {};
+            continue;
         case 2:
             // Type-2 packet are used for padding purposes
             dcb = NextPacket(dcb, 1);
@@ -1528,8 +1738,26 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
         case 3:
             const u32 count = header->type3.NumWords();
             const PM4ItOpcode opcode = header->type3.opcode;
-            if (!cp_cursor) {
-                ApplyGraphicsRegisterPacket(regs, header, gfx_reg_checksum, &pipe_dirty);
+            if (count + 1 > dcb.size()) [[unlikely]] {
+                if (Pm4Faults::Note(Pm4Faults::Kind::Ended, u32(opcode),
+                                    "%u dwords declared, %zu left in the buffer (IB depth %d)",
+                                    count + 1, dcb.size(), dcb_depth)) {
+                    ReportBadPacket(base_addr, dcb_dwords, dcb.data(), seq, dcb_depth);
+                }
+                cp_cursor.reset();
+                dcb = {};
+                continue;
+            }
+            if (IsBodyShort(opcode, count, false)) {
+                dcb = NextPacket(dcb, count + 1);
+                continue;
+            }
+            if (!cp_cursor &&
+                ApplyGraphicsRegisterPacket(regs, header, gfx_reg_checksum, &pipe_dirty)) {
+                Pm4Faults::Note(
+                    Pm4Faults::Kind::Unsupported, u32(opcode),
+                    "%u registers from offset %#x reach past the register file: clipped", count - 1,
+                    reinterpret_cast<const PM4CmdSetData*>(header)->reg_offset.Value());
             }
             if (is_translating) {
                 Translator().check.OnExecuted({dcb.data(), count + 1}, dcb_depth, regs.reg_array,
@@ -1605,7 +1833,6 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
             case PM4ItOpcode::SetContextReg: {
                 const auto* set_data = reinterpret_cast<const PM4CmdSetData*>(header);
                 const auto reg_addr = Regs::ContextRegWordOffset + set_data->reg_offset;
-                const auto* payload = reinterpret_cast<const u32*>(header + 2);
 
                 // In the case of HW, render target memory has alignment as color block operates on
                 // tiles. There is no information of actual resource extents stored in CB context
@@ -1629,9 +1856,8 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
 
                     const auto nop_offset = header->type3.count;
                     if (nop_offset == 0x0e || nop_offset == 0x0d || nop_offset == 0x0b) {
-                        ASSERT_MSG(payload[nop_offset] == 0xc0001000,
-                                   "NOP hint is missing in CB setup sequence");
-                        last_cb_extent[col_buf_id].raw = payload[nop_offset + 1];
+                        last_cb_extent[col_buf_id].raw =
+                            ReadSizeHint(dcb, nop_offset + 2).value_or(0);
                     } else {
                         last_cb_extent[col_buf_id].raw = 0;
                     }
@@ -1652,17 +1878,15 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
 
                     const auto nop_offset = header->type3.count;
                     if (nop_offset == 0x04) {
-                        ASSERT_MSG(payload[nop_offset] == 0xc0001000,
-                                   "NOP hint is missing in CB setup sequence");
-                        last_cb_extent[col_buf_id].raw = payload[nop_offset + 1];
+                        if (const auto hint = ReadSizeHint(dcb, nop_offset + 2)) {
+                            last_cb_extent[col_buf_id].raw = *hint;
+                        }
                     }
                     break;
                 }
                 case ContextRegs::DbZInfo: {
                     if (header->type3.count == 8) {
-                        ASSERT_MSG(payload[20] == 0xc0001000,
-                                   "NOP hint is missing in DB setup sequence");
-                        last_db_extent.raw = payload[21];
+                        last_db_extent.raw = ReadSizeHint(dcb, 22).value_or(0);
                     } else {
                         last_db_extent.raw = 0;
                     }
@@ -1679,10 +1903,10 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
 
                 if (set_data->reg_offset >= 0x200 &&
                     set_data->reg_offset <= (0x200 + sizeof(ComputeProgram) / 4)) {
-                    ASSERT(set_size <= sizeof(ComputeProgram));
                     auto* addr = reinterpret_cast<u32*>(&mapped_queues[GfxQueueId].cs_state) +
                                  (set_data->reg_offset - 0x200);
-                    std::memcpy(addr, header + 2, set_size);
+                    std::memcpy(addr, header + 2,
+                                ClipToComputeProgram(set_data->reg_offset, set_size));
                 } // other SH registers: ApplyGraphicsRegisterPacket
                 break;
             }
@@ -1930,7 +2154,11 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
             }
             case PM4ItOpcode::SetBase: {
                 const auto* set_base = reinterpret_cast<const PM4CmdSetBase*>(header);
-                ASSERT(set_base->base_index == PM4CmdSetBase::BaseIndex::DrawIndexIndirPatchTable);
+                if (set_base->base_index != PM4CmdSetBase::BaseIndex::DrawIndexIndirPatchTable) {
+                    Pm4Faults::Note(Pm4Faults::Kind::Unsupported, u32(opcode),
+                                    "base_index %u: ignored", u32(set_base->base_index.Value()));
+                    break;
+                }
                 indirect_args_addr = set_base->Address<u64>();
                 break;
             }
@@ -1942,6 +2170,12 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                 if (event->event_type.Value() == EventType::SoVgtStreamoutFlush) {
                     // registers: ApplyGraphicsRegisterPacket
                 } else if (event->event_index.Value() == EventIndex::ZpassDone) {
+                    if (count < 3) {
+                        Pm4Faults::Note(Pm4Faults::Kind::Skipped, u32(opcode),
+                                        "ZPASS_DONE with %u body dwords, its address takes 3",
+                                        count);
+                        break;
+                    }
                     if (event->event_type.Value() == EventType::PixelPipeStatDump ||
                         event->event_type.Value() == EventType::ZpassDone) {
                         // psport: the samples that passed, counted by Vulkan occlusion queries
@@ -1969,6 +2203,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
             }
             case PM4ItOpcode::EventWriteEos: {
                 const auto* event_eos = reinterpret_cast<const PM4CmdEventWriteEos*>(header);
+                CheckEos(*event_eos);
                 if (PsFreeCheck::Enabled()) {
                     PsFreeCheck::NoteFenceDecoded(reinterpret_cast<u64>(event_eos->Address()),
                                                   event_eos->DataDWord(), header, dcb.data(), seq);
@@ -1982,6 +2217,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
             }
             case PM4ItOpcode::EventWriteEop: {
                 const auto* event_eop = reinterpret_cast<const PM4CmdEventWriteEop*>(header);
+                CheckEop(*event_eop);
                 if (PsFreeCheck::Enabled()) {
                     PsFreeCheck::NoteFenceDecoded(
                         reinterpret_cast<u64>(event_eop->Address<u8>()),
@@ -2001,7 +2237,8 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
             }
             case PM4ItOpcode::DmaData: {
                 const auto* dma_data = reinterpret_cast<const PM4DmaData*>(header);
-                if (dma_data->dst_addr_lo == 0x3022C || !rasterizer) {
+                if (dma_data->dst_addr_lo == 0x3022C || !rasterizer ||
+                    !IsDmaDataSupported(*dma_data)) {
                     break;
                 }
                 // psport: what the copy reads on the recording thread is known here: a later
@@ -2029,8 +2266,9 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
             }
             case PM4ItOpcode::WriteData: {
                 const auto* write_data = reinterpret_cast<const PM4CmdWriteData*>(header);
-                ASSERT(write_data->dst_sel.Value() == 2 || write_data->dst_sel.Value() == 5);
-                ASSERT(!write_data->wr_one_addr.Value());
+                if (!IsWriteDataSupported(*write_data)) {
+                    break;
+                }
                 if (rasterizer) {
                     // In order with the draws (on the draw recording thread when in use).
                     if (PsCeStats::Enabled()) {
@@ -2187,6 +2425,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
             }
             case PM4ItOpcode::WaitRegMem: {
                 const auto* wait_reg_mem = reinterpret_cast<const PM4CmdWaitRegMem*>(header);
+                CheckWaitRegMem(*wait_reg_mem, false);
                 // ASSERT(wait_reg_mem->engine.Value() == PM4CmdWaitRegMem::Engine::Me);
                 // Optimization: VO label waits are special because the emulator
                 // will write to the label when presentation is finished. So if
@@ -2353,8 +2592,9 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                 break;
             }
             default:
-                UNREACHABLE_MSG("Unknown PM4 type 3 opcode {:#x} with count {}",
-                                static_cast<u32>(opcode), count);
+                Pm4Faults::Note(Pm4Faults::Kind::Skipped, u32(opcode),
+                                "unknown opcode, %u body dwords (IB depth %d)", count, dcb_depth);
+                break;
             }
             dcb = NextPacket(dcb, header->type3.NumWords() + 1);
             break;
@@ -2434,12 +2674,29 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
         }
 
         auto* header = reinterpret_cast<const PM4Header*>(acb.data());
-        u32 next_dw_off = header->type3.NumWords() + 1;
+        u32 header_dword = header->raw;
+        u32 next_dw_off = header->type == 2 ? 1 : header->type3.NumWords() + 1;
+        // psport: the rest of the buffer, when no packet size in it can be trusted.
+        const auto end_buffer = [&](const char* sz_what) {
+            Pm4Faults::Note(Pm4Faults::Kind::Ended, header_dword >> 8,
+                            "compute queue %u: %s (header %#x, %zu dwords left in the buffer)",
+                            vqid, sz_what, header_dword, acb.size());
+            if constexpr (!is_indirect) {
+                *queue.read_addr += acb.size();
+                *queue.read_addr %= queue.ring_size_dw;
+            }
+        };
 
         // If we have a buffered packet, use it.
         if (queue.tmp_dwords > 0) [[unlikely]] {
             header = reinterpret_cast<const PM4Header*>(queue.tmp_packet.data());
+            header_dword = header->raw;
             next_dw_off = header->type3.NumWords() + 1 - queue.tmp_dwords;
+            if (next_dw_off > acb.size()) {
+                queue.tmp_dwords = 0;
+                end_buffer("a packet split at the ring's end goes past the next submission");
+                break;
+            }
             std::memcpy(queue.tmp_packet.data() + queue.tmp_dwords, acb.data(),
                         next_dw_off * sizeof(u32));
             queue.tmp_dwords = 0;
@@ -2447,6 +2704,10 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
 
         // If the packet is split across ring boundary, buffer until next submission
         if (next_dw_off > acb.size()) [[unlikely]] {
+            if (is_indirect || header->type != 3 || next_dw_off > queue.tmp_packet.size()) {
+                end_buffer("a packet past the end of its buffer");
+                break;
+            }
             std::memcpy(queue.tmp_packet.data(), acb.data(), acb.size_bytes());
             queue.tmp_dwords = acb.size();
             if constexpr (!is_indirect) {
@@ -2468,11 +2729,19 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
         }
 
         if (header->type != 3) {
-            // No other types of packets were spotted so far
-            UNREACHABLE_MSG("Invalid PM4 type {}", header->type.Value());
+            end_buffer("a type-0 or type-1 packet");
+            break;
         }
 
         const PM4ItOpcode opcode = header->type3.opcode;
+        if (IsBodyShort(opcode, header->type3.NumWords(), true)) {
+            acb = NextPacket(acb, next_dw_off);
+            if constexpr (!is_indirect) {
+                *queue.read_addr += next_dw_off;
+                *queue.read_addr %= queue.ring_size_dw;
+            }
+            continue;
+        }
 
         const auto* it_body = reinterpret_cast<const u32*>(header) + 1;
         switch (opcode) {
@@ -2494,10 +2763,9 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
         }
         case PM4ItOpcode::DmaData: {
             const auto* dma_data = reinterpret_cast<const PM4DmaData*>(header);
-            if (dma_data->dst_addr_lo == 0x3022C || !rasterizer) {
+            if (dma_data->dst_addr_lo == 0x3022C || !rasterizer || !IsDmaDataSupported(*dma_data)) {
                 break;
             }
-            ASSERT(dma_data->command.das == 0);
             if (dma_data->src_sel == DmaDataSrc::Data && dma_data->dst_sel == DmaDataDst::Gds) {
                 rasterizer->FillBuffer(dma_data->dst_addr_lo, dma_data->NumBytes(), dma_data->data,
                                        true);
@@ -2516,10 +2784,7 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
                         dma_data->dst_sel == DmaDataDst::MemoryUsingL2)) {
                 rasterizer->CopyBuffer(dma_data->DstAddress<VAddr>(), dma_data->src_addr_lo,
                                        dma_data->NumBytes(), false, true);
-            } else if ((dma_data->src_sel == DmaDataSrc::Memory ||
-                        dma_data->src_sel == DmaDataSrc::MemoryUsingL2) &&
-                       (dma_data->dst_sel == DmaDataDst::Memory ||
-                        dma_data->dst_sel == DmaDataDst::MemoryUsingL2)) {
+            } else { // memory to memory: the rest of IsDmaDataSupported
                 const u32 num_bytes = dma_data->NumBytes();
                 const VAddr src_addr = dma_data->SrcAddress<VAddr>();
                 const VAddr dst_addr = dma_data->DstAddress<VAddr>();
@@ -2532,9 +2797,6 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
                 } else {
                     rasterizer->CopyBuffer(dst_addr, src_addr, num_bytes, false, false);
                 }
-            } else {
-                UNREACHABLE_MSG("WriteData src_sel = {}, dst_sel = {}", u32(dma_data->src_sel),
-                                u32(dma_data->dst_sel));
             }
             break;
         }
@@ -2557,13 +2819,21 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
 
             if (set_data->reg_offset >= 0x200 &&
                 set_data->reg_offset <= (0x200 + sizeof(ComputeProgram) / 4)) {
-                ASSERT(set_size <= sizeof(ComputeProgram));
                 auto* addr = reinterpret_cast<u32*>(&mapped_queues[vqid + 1].cs_state) +
                              (set_data->reg_offset - 0x200);
-                std::memcpy(addr, header + 2, set_size);
+                std::memcpy(addr, header + 2, ClipToComputeProgram(set_data->reg_offset, set_size));
             } else {
-                std::memcpy(&regs.reg_array[Regs::ShRegWordOffset + set_data->reg_offset],
-                            header + 2, set_size);
+                const u32 i_first = Regs::ShRegWordOffset + set_data->reg_offset;
+                const u32 c_words =
+                    ClipToRegisterFile(i_first, static_cast<u32>(set_size / sizeof(u32)));
+                if (c_words != set_size / sizeof(u32)) {
+                    Pm4Faults::Note(Pm4Faults::Kind::Unsupported, u32(opcode),
+                                    "compute queue %u: %zu registers from %#x, past the register "
+                                    "file: clipped to %u",
+                                    vqid, set_size / sizeof(u32), i_first, c_words);
+                }
+                std::memcpy(regs.reg_array.data() + std::min(i_first, Regs::NumRegs), header + 2,
+                            c_words * sizeof(u32));
                 // psport: interleaves with the graphics stream at an unpredictable point, so
                 // draw-preparation workers cannot reproduce it: make their checksums differ.
                 gfx_reg_checksum = HashRegisterPacket(gfx_reg_checksum ^ 0xA5C0A5C0A5C0ull,
@@ -2631,18 +2901,16 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
                 rasterizer->WaitDeferredSignals();
             }
             const auto* write_data = reinterpret_cast<const PM4CmdWriteData*>(header);
-            ASSERT(write_data->dst_sel.Value() == 2 || write_data->dst_sel.Value() == 5);
+            if (!IsWriteDataSupported(*write_data)) {
+                break;
+            }
             const u32 data_size = (header->type3.count.Value() - 2) * 4;
-            if (!write_data->wr_one_addr.Value()) {
-                PsFreeCheck::Check(write_data->Address<u64>(), data_size, write_data->data,
-                                   PsFreeCheck::ComputeWriteData);
-                std::memcpy(write_data->Address<void*>(), write_data->data, data_size);
-                if (rasterizer) {
-                    rasterizer->NoteCommandWrite(write_data->Address<VAddr>(), write_data->data,
-                                                 data_size, true);
-                }
-            } else {
-                UNREACHABLE();
+            PsFreeCheck::Check(write_data->Address<u64>(), data_size, write_data->data,
+                               PsFreeCheck::ComputeWriteData);
+            std::memcpy(write_data->Address<void*>(), write_data->data, data_size);
+            if (rasterizer) {
+                rasterizer->NoteCommandWrite(write_data->Address<VAddr>(), write_data->data,
+                                             data_size, true);
             }
             break;
         }
@@ -2669,7 +2937,7 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
         }
         case PM4ItOpcode::WaitRegMem: {
             const auto* wait_reg_mem = reinterpret_cast<const PM4CmdWaitRegMem*>(header);
-            ASSERT(wait_reg_mem->engine.Value() == PM4CmdWaitRegMem::Engine::Me);
+            CheckWaitRegMem(*wait_reg_mem, true);
             while (!wait_reg_mem->Test(regs.reg_array)) {
                 // The value may come from a fence waiting for work not submitted yet; this thread
                 // would spin on it forever.
@@ -2683,6 +2951,7 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
         case PM4ItOpcode::ReleaseMem: {
             // Written once the GPU has finished the work before it (not a GDS store, which needs
             // the GPU copy recorded here).
+            CheckReleaseMem(*reinterpret_cast<const PM4CmdReleaseMem*>(header));
             if (const auto* rm = reinterpret_cast<const PM4CmdReleaseMem*>(header);
                 rasterizer && rm->data_sel.Value() != DataSelect::GdsMemStore) {
                 rasterizer->ProcessDownloadImages();
@@ -2755,8 +3024,10 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
             break;
         }
         default:
-            UNREACHABLE_MSG("Unknown PM4 type 3 opcode {:#x} with count {}",
-                            static_cast<u32>(opcode), header->type3.NumWords());
+            Pm4Faults::Note(Pm4Faults::Kind::Skipped, u32(opcode),
+                            "compute queue %u: unknown opcode, %u body dwords", vqid,
+                            header->type3.NumWords());
+            break;
         }
 
         acb = NextPacket(acb, next_dw_off);
@@ -2772,10 +3043,19 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
 
 Liverpool::CmdBuffer Liverpool::CopyCmdBuffers(std::span<const u32> dcb, std::span<const u32> ccb) {
     auto& queue = mapped_queues[GfxQueueId];
-    ASSERT_MSG(queue.dcb_buffer.capacity() >= queue.dcb_buffer_offset + dcb.size(),
-               "dcb copy buffer out of reserved space");
-    ASSERT_MSG(queue.ccb_buffer.capacity() >= queue.ccb_buffer_offset + ccb.size(),
-               "ccb copy buffer out of reserved space");
+    // psport: past the reserved space the buffers would move under the spans handed out before:
+    // the guest's own are run instead.
+    if (queue.dcb_buffer.capacity() < queue.dcb_buffer_offset + dcb.size() ||
+        queue.ccb_buffer.capacity() < queue.ccb_buffer_offset + ccb.size()) {
+        static std::atomic<u64> s_c_uncopied{0};
+        if (const u64 c_uncopied = s_c_uncopied.fetch_add(1, std::memory_order_relaxed) + 1;
+            std::has_single_bit(c_uncopied)) {
+            std::printf("Command buffers: %zu + %zu dwords past the copy buffers' reserved space: "
+                        "run from the guest's memory (%llu so far)\n",
+                        dcb.size(), ccb.size(), static_cast<unsigned long long>(c_uncopied));
+        }
+        return std::make_pair(dcb, ccb);
+    }
 
     queue.dcb_buffer.resize(
         std::max(queue.dcb_buffer.size(), queue.dcb_buffer_offset + dcb.size()));
@@ -2899,7 +3179,15 @@ void Liverpool::SignalGpuIdle(u64 generation) {
 }
 
 void Liverpool::SubmitAsc(u32 gnm_vqid, std::span<const u32> acb) {
-    ASSERT_MSG(gnm_vqid > 0 && gnm_vqid < NumTotalQueues, "Invalid virtual ASC queue index");
+    if (gnm_vqid == 0 || gnm_vqid >= NumTotalQueues) {
+        static std::atomic<u64> s_c_invalid{0};
+        if (const u64 c_invalid = s_c_invalid.fetch_add(1, std::memory_order_relaxed) + 1;
+            std::has_single_bit(c_invalid)) {
+            std::printf("ASC: submission to queue %u, outside 1..%u: not run (%llu so far)\n",
+                        gnm_vqid, NumTotalQueues - 1, static_cast<unsigned long long>(c_invalid));
+        }
+        return;
+    }
     PsStats::g_c_asc_submits.fetch_add(1, std::memory_order_relaxed);
     auto& queue = mapped_queues[gnm_vqid];
 
