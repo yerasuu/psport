@@ -78,7 +78,7 @@ Id EmitReadConstBuffer(EmitContext& ctx, u32 handle, Id index) {
     if (const Id offset = buffer.Offset(PointerSize::B32); Sirit::ValidId(offset)) {
         index = ctx.OpIAdd(ctx.U32[1], index, offset);
     }
-    if (Sirit::ValidId(buffer.dynamic_sharp)) {
+    if (buffer.paged) {
         return PagedLoad(ctx, buffer, index, 4, ctx.U32[1], ctx.u32_zero_value);
     }
     const auto [id, pointer_type] = buffer.Alias(PointerType::U32);

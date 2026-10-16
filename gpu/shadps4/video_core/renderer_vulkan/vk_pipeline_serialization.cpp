@@ -14,7 +14,7 @@
 
 namespace Serialization {
 /* You should increment versions below once corresponding serialization scheme is changed. */
-static constexpr u32 ShaderBinaryVersion = 10u; // psport: point-list GS output mode (OutputPoints)
+static constexpr u32 ShaderBinaryVersion = 11u; // psport: ReadConstBuffer of paged buffers
 static constexpr u32 ShaderMetaVersion = 12u; // psport: BufferResource::dynamic
 static constexpr u32 PipelineKeyVersion = 6u; // psport: SerializationSupport::xfb_stride
 } // namespace Serialization
