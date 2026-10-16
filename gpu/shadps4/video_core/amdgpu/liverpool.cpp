@@ -142,16 +142,18 @@ constexpr auto s_min_body_words = [] {
     set(PM4ItOpcode::WaitOnDeCounterDiff, 1);
     return words;
 }();
+} // namespace
 
-u32 MinBodyWords(PM4ItOpcode opcode, bool is_compute) {
+u32 Liverpool::MinBodyWords(PM4ItOpcode opcode, bool is_compute) {
     if (is_compute && opcode == PM4ItOpcode::DispatchIndirect) {
         return BodyWords<PM4CmdDispatchIndirectMec>();
     }
     return s_min_body_words[static_cast<u32>(opcode) & 0xFF];
 }
 
+namespace {
 bool IsBodyShort(PM4ItOpcode opcode, u32 c_body_words, bool is_compute) {
-    const u32 c_min_words = MinBodyWords(opcode, is_compute);
+    const u32 c_min_words = Liverpool::MinBodyWords(opcode, is_compute);
     if (c_body_words >= c_min_words) [[likely]] {
         return false;
     }
@@ -2269,25 +2271,24 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                 if (!IsWriteDataSupported(*write_data)) {
                     break;
                 }
+                const u32 cb_data = write_data->Size();
                 if (rasterizer) {
                     // In order with the draws (on the draw recording thread when in use).
                     if (PsCeStats::Enabled()) {
                         PsCeStats::NoteWrite(PsCeStats::WriteData, write_data->Address<VAddr>(),
-                                             (count - 2) * sizeof(u32));
+                                             cb_data);
                     }
-                    PsWriteLog::NoteIntent(write_data->Address<u64>(), write_data->data,
-                                           (count - 2) * sizeof(u32),
+                    PsWriteLog::NoteIntent(write_data->Address<u64>(), write_data->data, cb_data,
                                            PsWriteLog::WriteDataIntent);
                     if (rasterizer->RunInOrder(&RunWriteData, header, (count + 1) * sizeof(u32),
                                                PsToggle::PipelinedMemoryWrites, false)) {
-                        NotePendingWrite(*write_data, (count - 2) * sizeof(u32));
-                        rasterizer->NotePendingGpuWrite(write_data->Address<VAddr>(),
-                                                        (count - 2) * sizeof(u32));
+                        NotePendingWrite(*write_data, cb_data);
+                        rasterizer->NotePendingGpuWrite(write_data->Address<VAddr>(), cb_data);
                     }
                 } else {
-                    PsFreeCheck::Check(write_data->Address<u64>(), (count - 2) * 4, write_data->data,
+                    PsFreeCheck::Check(write_data->Address<u64>(), cb_data, write_data->data,
                                        PsFreeCheck::WriteData);
-                    std::memcpy(write_data->Address<u64*>(), write_data->data, (count - 2) * 4);
+                    std::memcpy(write_data->Address<u64*>(), write_data->data, cb_data);
                 }
                 break;
             }

@@ -423,7 +423,14 @@ void PS4_SYSV_ABI sceGnmDingDong(u32 gnm_vqid, u32 next_offs_dw) {
     HLE_TRACE;
     LOG_DEBUG(Lib_GnmDriver, "vqid {}, offset_dw {}", gnm_vqid, next_offs_dw);
 
-    if (gnm_vqid == 0) {
+    if (gnm_vqid == 0 || gnm_vqid > Liverpool::NumComputeRings ||
+        !liverpool->asc_queues.is_allocated({gnm_vqid - 1})) {
+        static std::atomic<u64> s_c_invalid{0};
+        if (const u64 c_invalid = s_c_invalid.fetch_add(1, std::memory_order_relaxed) + 1;
+            std::has_single_bit(c_invalid)) {
+            LOG_ERROR(Lib_GnmDriver, "vqid {} is not a mapped compute queue: not run ({} so far)",
+                      gnm_vqid, c_invalid);
+        }
         return;
     }
 
@@ -2557,6 +2564,17 @@ s32 PS4_SYSV_ABI sceGnmSubmitDone() {
 }
 
 int PS4_SYSV_ABI sceGnmUnmapComputeQueue(u32 vqid) {
+    if (vqid == 0 || vqid > Liverpool::NumComputeRings ||
+        !liverpool->asc_queues.is_allocated({vqid - 1})) {
+        static std::atomic<u64> s_c_invalid{0};
+        if (const u64 c_invalid = s_c_invalid.fetch_add(1, std::memory_order_relaxed) + 1;
+            std::has_single_bit(c_invalid)) {
+            LOG_ERROR(Lib_GnmDriver,
+                      "vqid {} is not a mapped compute queue: not unmapped ({} so far)", vqid,
+                      c_invalid);
+        }
+        return ORBIS_OK;
+    }
     liverpool->asc_queues.erase(Common::SlotId{vqid - 1});
     return ORBIS_OK;
 }

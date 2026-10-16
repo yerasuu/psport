@@ -26,7 +26,9 @@ bool IsDirectDraw(AmdGpu::PM4ItOpcode opcode) {
            opcode == PM4ItOpcode::DrawIndexAuto;
 }
 
-/// Walks the type-3 packets of a command buffer (type-2 padding skipped).
+/// Walks the type-3 packets of a command buffer (type-2 padding skipped) as the GPU thread does:
+/// packets shorter than their fields are skipped, which the GPU thread counts, so that the
+/// register checksums and the draw ordinals stay equal to its own.
 template <typename Func>
 void ForEachPacket(std::span<const u32> commands, Func&& func) {
     for (size_t at = 0; at < commands.size();) {
@@ -38,11 +40,14 @@ void ForEachPacket(std::span<const u32> commands, Func&& func) {
         if (p_header->type != 3) {
             return;
         }
-        const size_t words = p_header->type3.NumWords() + 1;
+        const u32 c_body_words = p_header->type3.NumWords();
+        const size_t words = c_body_words + 1;
         if (at + words > commands.size()) {
             return;
         }
-        func(p_header);
+        if (c_body_words >= AmdGpu::Liverpool::MinBodyWords(p_header->type3.opcode, false)) {
+            func(p_header);
+        }
         at += words;
     }
 }
