@@ -2,10 +2,24 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <array>
+#include <atomic>
+#include <bit>
 #include "common/assert.h"
 #include "video_core/amdgpu/pixel_format.h"
 
 namespace AmdGpu {
+
+// psport: sharps are game data (#306: SnormNz with data format 15), so a pair without a
+// conversion is read without one instead of stopping the port.
+void LogUnmappedNumberConversion(NumberFormat num_fmt, DataFormat data_fmt) {
+    static std::atomic<u32> s_c_unmapped;
+    const u32 c_unmapped = s_c_unmapped.fetch_add(1, std::memory_order_relaxed) + 1;
+    if (std::has_single_bit(c_unmapped)) {
+        LOG_ERROR(Render_Vulkan,
+                  "No number conversion for {} with data format {}, none used ({} so far)",
+                  NameOf(num_fmt), u32(data_fmt), c_unmapped);
+    }
+}
 
 std::string_view NameOf(DataFormat fmt) {
     switch (fmt) {

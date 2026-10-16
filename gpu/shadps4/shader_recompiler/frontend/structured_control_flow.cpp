@@ -14,6 +14,7 @@
 #include "shader_recompiler/frontend/translate/translate.h"
 #include "shader_recompiler/ir/ir_emitter.h"
 #include "shader_recompiler/recompiler.h"
+#include "shader_recompiler/translation_error.h"
 
 namespace Shader::Gcn {
 
@@ -185,7 +186,7 @@ std::string DumpExpr(const Statement* stmt) {
         case StatementType::Not:
         case StatementType::Or:
         case StatementType::Variable:
-            UNREACHABLE_MSG("Statement can't be printed");
+            SHADER_UNREACHABLE_MSG("Statement can't be printed");
         }
     }
     return ret;
@@ -193,7 +194,7 @@ std::string DumpExpr(const Statement* stmt) {
 
 void SanitizeNoBreaks(const Tree& tree) {
     if (std::ranges::find(tree, StatementType::Break, &Statement::type) != tree.end()) {
-        UNREACHABLE_MSG("Capturing statement with break nodes");
+        SHADER_UNREACHABLE_MSG("Capturing statement with break nodes");
     }
 }
 
@@ -333,7 +334,7 @@ private:
         }
         // Expensive operation:
         // if (!AreSiblings(goto_stmt, label_stmt)) {
-        //    UNREACHABLE_MSG("Goto is not a sibling with the label");
+        //    SHADER_UNREACHABLE_MSG("Goto is not a sibling with the label");
         //}
         // goto_stmt and label_stmt are guaranteed to be siblings, eliminate
         if (std::next(goto_stmt) == label_stmt) {
@@ -396,7 +397,7 @@ private:
                         ip, *pool.Create(Goto{}, always_cond, false_label, &root_stmt)));
                 } else {
                     const IR::Value value = block.ir_block->branch_cond;
-                    ASSERT(!value.IsEmpty());
+                    SHADER_ASSERT(!value.IsEmpty());
                     IR::Inst* cond_ref = value.Inst();
                     const Node true_label{local_labels.at(block.branch_true)};
                     const Node false_label{local_labels.at(block.branch_false)};
@@ -452,7 +453,7 @@ private:
         case StatementType::Loop:
             return MoveOutwardLoop(goto_stmt);
         default:
-            UNREACHABLE_MSG("Invalid outward movement");
+            SHADER_UNREACHABLE_MSG("Invalid outward movement");
         }
     }
 
@@ -487,7 +488,7 @@ private:
         case StatementType::Loop:
             break;
         default:
-            UNREACHABLE_MSG("Invalid inward movement");
+            SHADER_UNREACHABLE_MSG("Invalid inward movement");
         }
         Tree& nested_tree{label_nested_stmt->children};
         Statement* const new_goto{pool.Create(Goto{}, variable, label, &*label_nested_stmt)};
@@ -589,7 +590,7 @@ private:
     case StatementType::Variable:
         return ir.GetGotoVariable(stmt.id);
     default:
-        UNREACHABLE_MSG("Statement type {}", u32(stmt.type));
+        SHADER_UNREACHABLE_MSG("Statement type {}", u32(stmt.type));
     }
 }
 
@@ -632,7 +633,7 @@ private:
                 insert_point = current_block->end();
                 for (auto& node : syntax_list) {
                     if (node.type == IR::AbstractSyntaxNode::Type::Block) {
-                        ASSERT(node.data.block != current_block);
+                        SHADER_ASSERT(node.data.block != current_block);
                     }
                 }
                 auto& node{syntax_list.emplace_back()};
@@ -763,7 +764,7 @@ private:
                 break;
             }
             default:
-                UNREACHABLE_MSG("Statement type {}", u32(stmt.type));
+                SHADER_UNREACHABLE_MSG("Statement type {}", u32(stmt.type));
             }
         }
         if (current_block) {

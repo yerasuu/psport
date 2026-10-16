@@ -22,6 +22,7 @@
 #include "shader_recompiler/ir/reg.h"
 #include "shader_recompiler/ir/srt_gvn_table.h"
 #include "shader_recompiler/ir/value.h"
+#include "shader_recompiler/translation_error.h"
 
 #ifdef ARCH_X86_64
 
@@ -83,9 +84,9 @@ static bool SrtWalkerSignalHandler(void* context, void* fault_address) {
     ZyanStatus status = Common::Decoder::Instance()->decodeInstruction(instruction, operands,
                                                                        const_cast<void*>(code), 15);
 
-    ASSERT(ZYAN_SUCCESS(status) && instruction.mnemonic == ZYDIS_MNEMONIC_MOV &&
-           operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER &&
-           operands[1].type == ZYDIS_OPERAND_TYPE_MEMORY);
+    SHADER_ASSERT(ZYAN_SUCCESS(status) && instruction.mnemonic == ZYDIS_MNEMONIC_MOV &&
+                  operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER &&
+                  operands[1].type == ZYDIS_OPERAND_TYPE_MEMORY);
 
     size_t len = instruction.length;
     const size_t patch_size = 3;
@@ -107,7 +108,7 @@ static bool SrtWalkerSignalHandler(void* context, void* fault_address) {
         code_patch[2] = 0xD2;
         break;
     default:
-        UNREACHABLE_MSG("Unsupported register for SRT walker patch");
+        SHADER_UNREACHABLE_MSG("Unsupported register for SRT walker patch");
         return false;
     }
 
@@ -200,7 +201,7 @@ static inline u16 GetFlatbufOffset(const IR::Inst* inst) {
     if (inst->GetOpcode() == IR::Opcode::ReadConst) {
         return inst->Flags<u16>();
     }
-    UNREACHABLE_MSG("Instruction not supported");
+    SHADER_UNREACHABLE_MSG("Instruction not supported");
 }
 
 static inline void SetFlatbufOffset(IR::Inst* inst, u16 offset) {
@@ -214,7 +215,7 @@ static inline void SetFlatbufOffset(IR::Inst* inst, u16 offset) {
         inst->SetFlags(offset);
         return;
     }
-    UNREACHABLE_MSG("Instruction not supported");
+    SHADER_UNREACHABLE_MSG("Instruction not supported");
 }
 
 static bool ComputeOffset(Xbyak::CodeGenerator& c, Xbyak::Reg32 reg, PassInfo& pass_info,
@@ -233,7 +234,7 @@ static bool ComputeOffset(Xbyak::CodeGenerator& c, Xbyak::Reg32 reg, PassInfo& p
 
 static bool EmitComputeOffsetIAdd32(Xbyak::CodeGenerator& c, Xbyak::Reg32 reg, PassInfo& pass_info,
                                     IR::Inst* inst) {
-    ASSERT(!inst->AreAllArgsImmediates());
+    SHADER_ASSERT(!inst->AreAllArgsImmediates());
     if (inst->Arg(0).IsImmediate()) {
         ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(1)));
         c.add(reg, inst->Arg(0).U32());
@@ -252,7 +253,7 @@ static bool EmitComputeOffsetIAdd32(Xbyak::CodeGenerator& c, Xbyak::Reg32 reg, P
 
 static bool EmitComputeOffsetISub32(Xbyak::CodeGenerator& c, Xbyak::Reg32 reg, PassInfo& pass_info,
                                     IR::Inst* inst) {
-    ASSERT(!inst->AreAllArgsImmediates());
+    SHADER_ASSERT(!inst->AreAllArgsImmediates());
     if (inst->Arg(0).IsImmediate()) {
         ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(1)));
         c.neg(reg);
@@ -273,7 +274,7 @@ static bool EmitComputeOffsetISub32(Xbyak::CodeGenerator& c, Xbyak::Reg32 reg, P
 
 static bool EmitComputeOffsetIMul32(Xbyak::CodeGenerator& c, Xbyak::Reg32 reg, PassInfo& pass_info,
                                     IR::Inst* inst) {
-    ASSERT(!inst->AreAllArgsImmediates());
+    SHADER_ASSERT(!inst->AreAllArgsImmediates());
     if (inst->Arg(0).IsImmediate()) {
         ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(1)));
         c.imul(reg, reg, inst->Arg(0).U32());
@@ -292,7 +293,7 @@ static bool EmitComputeOffsetIMul32(Xbyak::CodeGenerator& c, Xbyak::Reg32 reg, P
 
 static bool EmitComputeOffsetShiftLeftLogical32(Xbyak::CodeGenerator& c, Xbyak::Reg32 reg,
                                                 PassInfo& pass_info, IR::Inst* inst) {
-    ASSERT(!inst->AreAllArgsImmediates());
+    SHADER_ASSERT(!inst->AreAllArgsImmediates());
     if (inst->Arg(0).IsImmediate()) {
         ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(1)));
         c.shl(reg, inst->Arg(0).U32());
@@ -314,7 +315,7 @@ static bool EmitComputeOffsetShiftLeftLogical32(Xbyak::CodeGenerator& c, Xbyak::
 
 static bool EmitComputeOffsetShiftRightLogical32(Xbyak::CodeGenerator& c, Xbyak::Reg32 reg,
                                                  PassInfo& pass_info, IR::Inst* inst) {
-    ASSERT(!inst->AreAllArgsImmediates());
+    SHADER_ASSERT(!inst->AreAllArgsImmediates());
     if (inst->Arg(0).IsImmediate()) {
         ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(1)));
         c.mov(ecx, reg);
@@ -335,7 +336,7 @@ static bool EmitComputeOffsetShiftRightLogical32(Xbyak::CodeGenerator& c, Xbyak:
 
 static bool EmitComputeOffsetBitwiseAnd32(Xbyak::CodeGenerator& c, Xbyak::Reg32 reg,
                                           PassInfo& pass_info, IR::Inst* inst) {
-    ASSERT(!inst->AreAllArgsImmediates());
+    SHADER_ASSERT(!inst->AreAllArgsImmediates());
     if (inst->Arg(0).IsImmediate()) {
         ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(1)));
         c.and_(reg, inst->Arg(0).U32());
@@ -354,7 +355,7 @@ static bool EmitComputeOffsetBitwiseAnd32(Xbyak::CodeGenerator& c, Xbyak::Reg32 
 
 static bool EmitComputeOffsetBitwiseOr32(Xbyak::CodeGenerator& c, Xbyak::Reg32 reg,
                                          PassInfo& pass_info, IR::Inst* inst) {
-    ASSERT(!inst->AreAllArgsImmediates());
+    SHADER_ASSERT(!inst->AreAllArgsImmediates());
     if (inst->Arg(0).IsImmediate()) {
         ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(1)));
         c.or_(reg, inst->Arg(0).U32());
@@ -373,7 +374,7 @@ static bool EmitComputeOffsetBitwiseOr32(Xbyak::CodeGenerator& c, Xbyak::Reg32 r
 
 static bool EmitComputeOffsetBitwiseXor32(Xbyak::CodeGenerator& c, Xbyak::Reg32 reg,
                                           PassInfo& pass_info, IR::Inst* inst) {
-    ASSERT(!inst->AreAllArgsImmediates());
+    SHADER_ASSERT(!inst->AreAllArgsImmediates());
     if (inst->Arg(0).IsImmediate()) {
         ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(1)));
         c.xor_(reg, inst->Arg(0).U32());
@@ -392,7 +393,7 @@ static bool EmitComputeOffsetBitwiseXor32(Xbyak::CodeGenerator& c, Xbyak::Reg32 
 
 static bool EmitComputeOffsetBitwiseNot32(Xbyak::CodeGenerator& c, Xbyak::Reg32 reg,
                                           PassInfo& pass_info, IR::Inst* inst) {
-    ASSERT(!inst->AreAllArgsImmediates());
+    SHADER_ASSERT(!inst->AreAllArgsImmediates());
     ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(0)));
     c.not_(reg);
     return true;
@@ -400,7 +401,7 @@ static bool EmitComputeOffsetBitwiseNot32(Xbyak::CodeGenerator& c, Xbyak::Reg32 
 
 static bool EmitComputeOffsetUMin32(Xbyak::CodeGenerator& c, Xbyak::Reg32 reg, PassInfo& pass_info,
                                     IR::Inst* inst) {
-    ASSERT(!inst->AreAllArgsImmediates());
+    SHADER_ASSERT(!inst->AreAllArgsImmediates());
     if (inst->Arg(0).IsImmediate()) {
         ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(1)));
         c.mov(ecx, inst->Arg(0).U32());
@@ -424,7 +425,7 @@ static bool EmitComputeOffsetUMin32(Xbyak::CodeGenerator& c, Xbyak::Reg32 reg, P
 
 static bool EmitComputeOffsetUMax32(Xbyak::CodeGenerator& c, Xbyak::Reg32 reg, PassInfo& pass_info,
                                     IR::Inst* inst) {
-    ASSERT(!inst->AreAllArgsImmediates());
+    SHADER_ASSERT(!inst->AreAllArgsImmediates());
     if (inst->Arg(0).IsImmediate()) {
         ABORT_ON_FAILURE(ComputeOffset(c, reg, pass_info, inst->Arg(1)));
         c.mov(ecx, inst->Arg(0).U32());
@@ -449,7 +450,7 @@ static bool EmitComputeOffsetUMax32(Xbyak::CodeGenerator& c, Xbyak::Reg32 reg, P
 static bool EmitComputeOffsetBitFieldUExtract(Xbyak::CodeGenerator& c, Xbyak::Reg32 reg,
                                               PassInfo& pass_info, IR::Inst* inst) {
     // We asume that the count is always less than 32, Is this correct?
-    ASSERT(!inst->AreAllArgsImmediates());
+    SHADER_ASSERT(!inst->AreAllArgsImmediates());
     if (inst->Arg(0).IsImmediate()) {
         c.mov(reg, inst->Arg(0).U32());
     } else {
@@ -510,7 +511,7 @@ static bool IsAllowedOffsetInstruction(const IR::Inst* inst) {
 
 static bool ComputeOffset(Xbyak::CodeGenerator& c, Xbyak::Reg32 reg, PassInfo& pass_info,
                           const IR::Value& off_dw) {
-    ASSERT(reg != ecx && reg != edx);
+    SHADER_ASSERT(reg != ecx && reg != edx);
     auto inst = off_dw.Inst();
     switch (inst->GetOpcode()) {
     case IR::Opcode::GetUserData:
@@ -598,7 +599,7 @@ static void VisitPointer(const IR::Value& off_dw, IR::Inst* subtree, PassInfo& p
         return;
     }
     PassInfo::PtrUserList* use_list = pass_info.GetUsesAsPointer(subtree);
-    ASSERT(use_list);
+    SHADER_ASSERT(use_list);
 
     // First copy all the src data from this tree level
     // That way, all data that was contiguous in the guest SRT is also contiguous in the
@@ -651,7 +652,7 @@ static void GenerateSrtProgram(Info& info, PassInfo& pass_info) {
 
     info.srt_info.walker_func = c.getCurr<PFN_SrtWalker>();
     pass_info.dst_off_dw = NUM_USER_DATA_REGS;
-    ASSERT(pass_info.dst_off_dw == info.srt_info.flattened_bufsize_dw);
+    SHADER_ASSERT(pass_info.dst_off_dw == info.srt_info.flattened_bufsize_dw);
 
     for (const auto& [sgpr_base, root] : pass_info.srt_roots) {
         VisitPointer(IR::Value(static_cast<u32>(sgpr_base)), root, pass_info, c);
@@ -726,7 +727,7 @@ void SimplifyReadConstAddressAdd(IR::Inst& inst) {
     addr->SetArg(0, base);
     addr->SetArg(1, hi->Arg(0));
     for (auto [user, operand] : addr->Uses()) {
-        ASSERT(user->GetOpcode() == IR::Opcode::ReadConst && operand == 0);
+        SHADER_ASSERT(user->GetOpcode() == IR::Opcode::ReadConst && operand == 0);
         IR::IREmitter ir{*user->GetParent(), IR::Block::InstructionList::s_iterator_to(*user)};
         IR::U32 offset = IR::U32{user->Arg(1)};
         IR::U32 dw_add_offset =
@@ -829,8 +830,10 @@ void FlattenExtendedUserdataPass(IR::Program& program) {
             inst && inst->GetOpcode() == IR::Opcode::ReadFirstLane) {
             continue;
         }
-        ASSERT_MSG(IsReadConstSource(base->Arg(0)), "ReadConst base low not from constant memory");
-        ASSERT_MSG(IsReadConstSource(base->Arg(1)), "ReadConst base high not from constant memory");
+        SHADER_ASSERT_MSG(IsReadConstSource(base->Arg(0)),
+                          "ReadConst base low not from constant memory");
+        SHADER_ASSERT_MSG(IsReadConstSource(base->Arg(1)),
+                          "ReadConst base high not from constant memory");
 
         IR::Inst* ptr_lo = base->Arg(0).Inst();
         ptr_lo = pass_info.DeduplicateInstruction(ptr_lo);
@@ -850,7 +853,7 @@ void FlattenExtendedUserdataPass(IR::Program& program) {
 
     // Assign offsets to duplicate readconsts
     for (IR::Inst* readconst : all_readconsts) {
-        ASSERT(pass_info.vn_to_inst.contains(pass_info.gvn_table.GetValueNumber(readconst)));
+        SHADER_ASSERT(pass_info.vn_to_inst.contains(pass_info.gvn_table.GetValueNumber(readconst)));
         IR::Inst* original = pass_info.DeduplicateInstruction(readconst);
         SetFlatbufOffset(readconst, GetFlatbufOffset(original));
     }
@@ -865,13 +868,13 @@ void FlattenExtendedUserdataPass(IR::Program& program) {
 namespace Shader {
 
 PFN_SrtWalker RegisterWalkerCode(const u8* ptr, size_t size) {
-    UNREACHABLE_MSG("RegisterWalkerCode unimplemented for target architecture.");
+    SHADER_UNREACHABLE_MSG("RegisterWalkerCode unimplemented for target architecture.");
 }
 
 namespace Optimization {
 
 void FlattenExtendedUserdataPass(IR::Program& program) {
-    UNREACHABLE_MSG("FlattenExtendedUserdataPass unimplemented for target architecture.");
+    SHADER_UNREACHABLE_MSG("FlattenExtendedUserdataPass unimplemented for target architecture.");
 }
 
 } // namespace Optimization

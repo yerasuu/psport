@@ -3,11 +3,11 @@
 
 #include <unordered_map>
 #include <boost/container/small_vector.hpp>
-#include "common/assert.h"
 #include "common/hash.h"
 #include "shader_recompiler/ir/microinstruction.h"
 #include "shader_recompiler/ir/opcodes.h"
 #include "shader_recompiler/ir/value.h"
+#include "shader_recompiler/translation_error.h"
 
 namespace Shader::Optimization {
 
@@ -55,7 +55,7 @@ private:
         case IR::Opcode::UMin32:
         case IR::Opcode::UMax32:
         case IR::Opcode::BitFieldUExtract:
-            ASSERT(!inst->MayHaveSideEffects());
+            SHADER_ASSERT(!inst->MayHaveSideEffects());
             return true;
         default:
             return false;
@@ -64,7 +64,7 @@ private:
 
     u32 ComputeInstValueNumber(IR::Inst* inst) {
         // Should always be checking before calling this functio
-        ASSERT(!value_numbers.contains(IR::Value(inst)));
+        SHADER_ASSERT(!value_numbers.contains(IR::Value(inst)));
         u32 vn;
         if (IsArgHashInst(inst)) {
             InstVector iv = MakeInstVector(inst);

@@ -18,6 +18,7 @@
 #include "shader_recompiler/params.h"
 #include "shader_recompiler/resource.h"
 #include "shader_recompiler/runtime_info.h"
+#include "shader_recompiler/translation_error.h"
 
 namespace Serialization {
 struct Archive;
@@ -232,7 +233,12 @@ struct Info : InfoPersistent {
         u32 mask = ud_mask.mask;
         while (mask) {
             const u32 index = std::countr_zero(mask);
-            ASSERT(bnd.user_data < NUM_USER_DATA_REGS && index < NUM_USER_DATA_REGS);
+            if (bnd.user_data >= NUM_USER_DATA_REGS || index >= NUM_USER_DATA_REGS) {
+                SHADER_LOG_FALLBACK("Shader {:#x}: user data register {} does not fit push slot "
+                                    "{}, the rest are not pushed",
+                                    pgm_hash, index, bnd.user_data);
+                return;
+            }
             mask &= ~(1U << index);
             push.ud_regs[bnd.user_data++] = ud[index];
         }
@@ -246,15 +252,24 @@ struct Info : InfoPersistent {
 
     void RefreshFlatBuf() {
         flattened_ud_buf.resize(srt_info.flattened_bufsize_dw);
-        ASSERT(user_data.size() <= NUM_USER_DATA_REGS);
-        std::memcpy(flattened_ud_buf.data(), user_data.data(), user_data.size_bytes());
+        auto ud = user_data;
+        if (ud.size() > NUM_USER_DATA_REGS || ud.size() > flattened_ud_buf.size()) {
+            SHADER_LOG_FALLBACK("Shader {:#x}: {} user data registers, {} flattened, truncated",
+                                pgm_hash, ud.size(), flattened_ud_buf.size());
+            ud = ud.first(std::min<size_t>(NUM_USER_DATA_REGS, flattened_ud_buf.size()));
+        }
+        std::memcpy(flattened_ud_buf.data(), ud.data(), ud.size_bytes());
         if (srt_info.walker_func) {
             srt_info.walker_func(user_data.data(), flattened_ud_buf.data());
         }
     }
 
     void ReadTessConstantBuffer(TessellationDataConstantBuffer& tess_constants) const {
-        ASSERT(tess_consts_dword_offset >= 0); // We've already tracked the V# UD
+        if (tess_consts_dword_offset < 0) {
+            SHADER_LOG_FALLBACK("Shader {:#x}: tessellation constants V# not tracked, read as zero",
+                                pgm_hash);
+            return;
+        }
         auto buf = ReadUdReg<AmdGpu::Buffer>(static_cast<u32>(tess_consts_ptr_base),
                                              static_cast<u32>(tess_consts_dword_offset));
         VAddr tess_constants_addr = buf.base_address;

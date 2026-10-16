@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <unordered_map>
-#include "common/assert.h"
 #include "shader_recompiler/info.h"
 #include "shader_recompiler/ir/attribute.h"
 #include "shader_recompiler/ir/breadth_first_search.h"
@@ -13,6 +12,7 @@
 #include "shader_recompiler/ir/pattern_matching.h"
 #include "shader_recompiler/ir/program.h"
 #include "shader_recompiler/runtime_info.h"
+#include "shader_recompiler/translation_error.h"
 
 namespace Shader::Optimization {
 
@@ -211,7 +211,7 @@ public:
             inc = 2;
             break;
         default:
-            UNREACHABLE();
+            SHADER_UNREACHABLE();
         }
 
         for (IR::Use use : read_const_buffer->Uses()) {
@@ -239,8 +239,9 @@ private:
             if (is_addr_operand) {
                 u32 counter = inst->Flags<u32>();
                 inst->SetFlags<u32>(counter + inc);
-                ASSERT_MSG(!propagateError, "LDS instruction {} accesses ambiguous attribute type",
-                           fmt::ptr(use.user));
+                SHADER_ASSERT_MSG(!propagateError,
+                                  "LDS instruction {} accesses ambiguous attribute type",
+                                  fmt::ptr(use.user));
                 // Stop here
                 return;
             }
@@ -263,7 +264,7 @@ private:
                     propagateError = true;
                 }
             } else {
-                ASSERT(it->second.seq_num == seq_num);
+                SHADER_ASSERT(it->second.seq_num == seq_num);
                 // there's a cycle, and we've already been here on this walk
                 return;
             }
@@ -291,10 +292,10 @@ static AttributeRegion GetAttributeRegionKind(IR::Inst* ring_access, const Shade
         return AttributeRegion::InputCP;
     } else if (info.sw_stage == SwStage::TessellationControl &&
                runtime_info.sw.tcs.IsPassthrough()) {
-        ASSERT(count <= 1);
+        SHADER_ASSERT(count <= 1);
         return AttributeRegion::PatchConst;
     } else {
-        ASSERT(count <= 2);
+        SHADER_ASSERT(count <= 2);
         return AttributeRegion(count);
     }
 }
@@ -392,7 +393,7 @@ void HullShaderTransform(IR::Program& program, const RuntimeInfo& runtime_info) 
                 bool success =
                     M_COMPOSITECONSTRUCTU32X3(MatchU32(0), MatchImm(voffset), MatchIgnore())
                         .Match(inst.Arg(IR::StoreBufferArgs::Address));
-                ASSERT_MSG(success, "unhandled pattern in tess factor store");
+                SHADER_ASSERT_MSG(success, "unhandled pattern in tess factor store");
 
                 const u32 gcn_factor_idx = (info.inst_offset.Value() + voffset.U32()) >> 2;
                 const IR::Value data = inst.Arg(IR::StoreBufferArgs::Data);
@@ -418,19 +419,19 @@ void HullShaderTransform(IR::Program& program, const RuntimeInfo& runtime_info) 
                     // The layout seems to be implied by the type of the abstract domain.
                     switch (runtime_info.sw.tcs.tess_type) {
                     case AmdGpu::TessellationType::Isoline:
-                        ASSERT(gcn_factor_idx < 2);
+                        SHADER_ASSERT(gcn_factor_idx < 2);
                         return IR::PatchFactor(gcn_factor_idx);
                     case AmdGpu::TessellationType::Triangle:
-                        ASSERT(gcn_factor_idx < 4);
+                        SHADER_ASSERT(gcn_factor_idx < 4);
                         if (gcn_factor_idx == 3) {
                             return IR::Patch::TessellationLodInteriorU;
                         }
                         return IR::PatchFactor(gcn_factor_idx);
                     case AmdGpu::TessellationType::Quad:
-                        ASSERT(gcn_factor_idx < 6);
+                        SHADER_ASSERT(gcn_factor_idx < 6);
                         return IR::PatchFactor(gcn_factor_idx);
                     default:
-                        UNREACHABLE();
+                        SHADER_UNREACHABLE();
                     }
                 };
 
@@ -440,7 +441,7 @@ void HullShaderTransform(IR::Program& program, const RuntimeInfo& runtime_info) 
                     break;
                 }
                 auto* inst = data.TryInst();
-                ASSERT(inst && (inst->GetOpcode() == IR::Opcode::CompositeConstructU32x2 ||
+                SHADER_ASSERT(inst && (inst->GetOpcode() == IR::Opcode::CompositeConstructU32x2 ||
                                 inst->GetOpcode() == IR::Opcode::CompositeConstructU32x3 ||
                                 inst->GetOpcode() == IR::Opcode::CompositeConstructU32x4));
                 for (s32 i = 0; i < num_dwords; i++) {
@@ -474,9 +475,9 @@ void HullShaderTransform(IR::Program& program, const RuntimeInfo& runtime_info) 
                             ir.BitwiseAnd(offset, ir.Imm32(0xFU)), ir.Imm32(2u));
                         ir.SetTcsGenericAttribute(data_component, attr_index, comp_index);
                     } else {
-                        ASSERT(output_kind == AttributeRegion::PatchConst);
-                        ASSERT_MSG(addr.IsImmediate(), "patch addr non imm, inst {}",
-                                   fmt::ptr(addr.Inst()));
+                        SHADER_ASSERT(output_kind == AttributeRegion::PatchConst);
+                        SHADER_ASSERT_MSG(addr.IsImmediate(), "patch addr non imm, inst {}",
+                                          fmt::ptr(addr.Inst()));
                         ir.SetPatch(IR::PatchGeneric((addr.U32() >> 2) + off_dw), data_component);
                     }
                 };
@@ -499,9 +500,9 @@ void HullShaderTransform(IR::Program& program, const RuntimeInfo& runtime_info) 
                 const IR::U32 addr{inst.Arg(0)};
                 const AttributeRegion region = GetAttributeRegionKind(&inst, info, runtime_info);
                 const u32 num_dwords = opcode == IR::Opcode::LoadSharedU32 ? 1 : 2;
-                ASSERT_MSG(region == AttributeRegion::InputCP ||
+                SHADER_ASSERT_MSG(region == AttributeRegion::InputCP ||
                                region == AttributeRegion::OutputCP,
-                           "Unhandled read of patchconst attribute in hull shader");
+                                  "Unhandled read of patchconst attribute in hull shader");
                 const bool is_tcs_output_read = region == AttributeRegion::OutputCP;
                 const u32 stride = is_tcs_output_read ? runtime_info.sw.tcs.hs_output_cp_stride
                                                       : runtime_info.sw.tcs.ls_stride;
@@ -535,9 +536,9 @@ void HullShaderTransform(IR::Program& program, const RuntimeInfo& runtime_info) 
         auto it = std::ranges::find_if(entry_block->Instructions(), [](IR::Inst& inst) {
             return inst.GetOpcode() == IR::Opcode::Prologue;
         });
-        ASSERT(it != entry_block->end());
+        SHADER_ASSERT(it != entry_block->end());
         ++it;
-        ASSERT(it != entry_block->end());
+        SHADER_ASSERT(it != entry_block->end());
         ++it;
         // Prologue
         // SetExec #true
@@ -582,7 +583,7 @@ void DomainShaderTransform(const IR::Program& program, const RuntimeInfo& runtim
                         return ReadTessControlPointAttribute(
                             addr, runtime_info.sw.tcs.hs_output_cp_stride, ir, off_dw, false);
                     } else {
-                        ASSERT(region == AttributeRegion::PatchConst);
+                        SHADER_ASSERT(region == AttributeRegion::PatchConst);
                         return ir.GetPatch(IR::PatchGeneric((addr.U32() >> 2) + off_dw));
                     }
                 };
@@ -635,18 +636,18 @@ void TessellationPreprocess(IR::Program& program, RuntimeInfo& runtime_info) {
                                 // Its possible theres a readconstbuffer that contributes to an
                                 // LDS address and isnt a TessConstant V# read. Could improve on
                                 // this somehow
-                                ASSERT_MSG(static_cast<s32>(sharp_location->dword_off) ==
+                                SHADER_ASSERT_MSG(static_cast<s32>(sharp_location->dword_off) ==
                                                    info.tess_consts_dword_offset &&
                                                sharp_location->ptr_base ==
                                                    info.tess_consts_ptr_base,
-                                           "TessConstants V# is ambiguous");
+                                                  "TessConstants V# is ambiguous");
                             }
                             InitTessConstants(sharp_location->ptr_base,
                                               static_cast<s32>(sharp_location->dword_off), info,
                                               runtime_info, tess_constants);
                             return true;
                         }
-                        UNREACHABLE_MSG("Failed to match tess constant sharp");
+                        SHADER_UNREACHABLE_MSG("Failed to match tess constant sharp");
                     }
                     return false;
                 }
@@ -661,7 +662,7 @@ void TessellationPreprocess(IR::Program& program, RuntimeInfo& runtime_info) {
         }
     }
 
-    ASSERT(info.tess_consts_dword_offset >= 0);
+    SHADER_ASSERT(info.tess_consts_dword_offset >= 0);
 
     TessConstantUseWalker walker;
 
@@ -674,17 +675,17 @@ void TessellationPreprocess(IR::Program& program, RuntimeInfo& runtime_info) {
                     // The shader is reading from the TessConstants V#
                     IR::Value index = inst.Arg(1);
 
-                    ASSERT_MSG(index.IsImmediate(),
-                               "Tessellation constant read with dynamic index");
+                    SHADER_ASSERT_MSG(index.IsImmediate(),
+                                      "Tessellation constant read with dynamic index");
                     u32 off_dw = index.U32();
-                    ASSERT(off_dw <=
-                           static_cast<u32>(TessConstantAttribute::FirstEdgeTessFactorIndex));
+                    SHADER_ASSERT(off_dw <= static_cast<u32>(
+                                                TessConstantAttribute::FirstEdgeTessFactorIndex));
 
                     auto tess_const_attr = static_cast<TessConstantAttribute>(off_dw);
                     switch (tess_const_attr) {
                     case TessConstantAttribute::LsStride:
                         // If not, we may need to make this runtime state for TES
-                        ASSERT(info.sw_stage == SwStage::TessellationControl);
+                        SHADER_ASSERT(info.sw_stage == SwStage::TessellationControl);
                         inst.ReplaceUsesWithAndRemove(IR::Value(tess_constants.ls_stride));
                         break;
                     case TessConstantAttribute::HsCpStride:
@@ -708,7 +709,7 @@ void TessellationPreprocess(IR::Program& program, RuntimeInfo& runtime_info) {
                         // May need to replace PatchConstSize and PatchOutputSize with 0
                         break;
                     default:
-                        UNREACHABLE_MSG("Read past end of TessConstantsBuffer");
+                        SHADER_UNREACHABLE_MSG("Read past end of TessConstantsBuffer");
                     }
                 }
             }

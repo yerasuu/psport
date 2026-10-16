@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include "common/assert.h"
 #include "shader_recompiler/ir/ir_emitter.h"
 #include "shader_recompiler/ir/opcodes.h"
 #include "shader_recompiler/ir/operand_helper.h"
@@ -10,6 +9,7 @@
 #include "shader_recompiler/ir/reg.h"
 #include "shader_recompiler/recompiler.h"
 #include "shader_recompiler/runtime_info.h"
+#include "shader_recompiler/translation_error.h"
 
 namespace Shader::Optimization {
 
@@ -35,7 +35,7 @@ void RingAccessElimination(const IR::Program& program, const RuntimeInfo& runtim
                 bool is_composite = opcode == IR::Opcode::WriteSharedU64;
                 u32 num_components = opcode == IR::Opcode::WriteSharedU32 ? 1 : 2;
 
-                ASSERT(inst.Arg(0).IsImmediate());
+                SHADER_ASSERT(inst.Arg(0).IsImmediate());
 
                 u32 offset = inst.Arg(0).U32();
                 IR::Value data =
@@ -68,7 +68,7 @@ void RingAccessElimination(const IR::Program& program, const RuntimeInfo& runtim
                 }
 
                 const auto offset = inst.Flags<IR::BufferInstInfo>().inst_offset.Value();
-                ASSERT(offset < runtime_info.hw.es.vertex_data_size * 4);
+                SHADER_ASSERT(offset < runtime_info.hw.es.vertex_data_size * 4);
                 const auto data = ir.BitCast<IR::F32>(IR::U32{inst.Arg(2)});
                 const auto attrib =
                     IR::Value{offset < 16 ? IR::Attribute::Position0
@@ -138,7 +138,7 @@ void RingAccessElimination(const IR::Program& program, const RuntimeInfo& runtim
 
                 const auto vc_read_ofs = (((offset / comp_ofs) * comp_ofs) % output_size) * 16u;
                 const auto& it = info.gs_copy_data.attr_map.find(vc_read_ofs);
-                ASSERT(it != info.gs_copy_data.attr_map.cend());
+                SHADER_ASSERT(it != info.gs_copy_data.attr_map.cend());
                 const auto& [attr, comp] = it->second;
 
                 inst.Invalidate();

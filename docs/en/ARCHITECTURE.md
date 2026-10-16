@@ -389,6 +389,32 @@ invalidated, the conservative rule paged bindings follow (`LayerPagedRecord` in 
 bindings do. A value the CPU cannot read (unbounded) reaches only memory other bindings already
 made resident, and its writes are not tracked; the shader's log line says when it has one.
 
+### Shaders the recompiler cannot translate
+
+A shader is game data: an instruction, operand, format, resource or control flow the recompiler
+does not handle, or IR it cannot follow, fails that shader's translation and never stops the port.
+The recompiler's checks (`SHADER_ASSERT`, `SHADER_ASSERT_MSG`, `SHADER_UNREACHABLE`,
+`SHADER_UNREACHABLE_MSG`, `shader_recompiler/translation_error.h`) throw `Shader::TranslationError`
+(reason, file and line). Only its two entry points catch it, `Shader::TranslateProgram` (frontend
+and IR passes) and `Shader::Backend::SPIRV::EmitSPIRV`, and return it in a `std::expected`, so no
+exception leaves the recompiler and a shader that translates costs nothing more. The pipeline cache
+(`PipelineCache::CompileModule`) logs `Shader 0x<hash>: not translated: <reason> (<stage> stage,
+permutation <n>, <file>:<line>; <n> so far)` once per program permutation and remembers the failure
+(`m_untranslated_programs`, `Program::untranslated_specs`), so the shader is not translated again;
+the draws and dispatches that need it get no pipeline and are skipped. Both counts are in the call
+summary: `GPU shader not translated by the recompiler` and `GPU draw or dispatch skipped: shader not
+translated`. Unknown opcodes are still logged one by one as the frontend meets them, and fail the
+translation when it ends.
+
+Rule for `shader_recompiler/`: a condition a game, the host or the environment can cause is checked
+with `SHADER_ASSERT*`/`SHADER_UNREACHABLE*`, never `ASSERT`/`UNREACHABLE`, and no function on that
+path is `noexcept` (GCC's `-Wterminate` flags a direct throw in one). Code that runs outside the two
+entry points must not throw: `Info` and `PushData` at bind time, the fetch shader parse that keys
+pipelines (`Gcn::ParseFetchShader`, which catches its decoder's errors), the auxiliary tessellation
+and discard shaders. It logs with `SHADER_LOG_FALLBACK` (the first time and at each power of two,
+with the count) and takes a defined fallback. Only `DEBUG_ASSERT`s remain, compiled out of release
+builds.
+
 ## Game profiles
 
 `gpu/games/game_profile.h` defines what psport knows about one title, kept out of the core, in two

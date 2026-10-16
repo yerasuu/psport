@@ -3,6 +3,7 @@
 
 #include "shader_recompiler/backend/spirv/emit_spirv_instructions.h"
 #include "shader_recompiler/backend/spirv/spirv_emit_context.h"
+#include "shader_recompiler/translation_error.h"
 
 namespace Shader::Backend::SPIRV {
 namespace {
@@ -443,7 +444,7 @@ Id EmitUGreaterThanEqual64(EmitContext& ctx, Id lhs, Id rhs) {
 }
 
 Id EmitMaskedBitCount32(EmitContext& ctx, Id value, Id addend, bool hi) {
-    UNREACHABLE_MSG("Unreachable instruction");
+    SHADER_UNREACHABLE_MSG("Unreachable instruction");
 }
 
 } // namespace Shader::Backend::SPIRV

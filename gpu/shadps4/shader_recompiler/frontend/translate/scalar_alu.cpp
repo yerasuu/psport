@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <magic_enum/magic_enum.hpp>
-#include "common/assert.h"
 #include "shader_recompiler/frontend/translate/translate.h"
+#include "shader_recompiler/translation_error.h"
 
 namespace Shader::Gcn {
 
@@ -497,7 +497,7 @@ void Translator::S_CMPK(ConditionOp cond, bool is_signed, const GcnInst& inst) {
         case ConditionOp::LE:
             return ir.ILessThanEqual(lhs, rhs, is_signed);
         default:
-            UNREACHABLE();
+            SHADER_UNREACHABLE();
         }
     }();
     ir.SetScc(result);
@@ -647,7 +647,7 @@ void Translator::S_CMP(ConditionOp cond, bool is_signed, const GcnInst& inst) {
         case ConditionOp::LE:
             return ir.ILessThanEqual(lhs, rhs, is_signed);
         default:
-            UNREACHABLE();
+            SHADER_UNREACHABLE();
         }
     }();
     ir.SetScc(result);
@@ -666,7 +666,7 @@ void Translator::S_BITCMP(bool compare_mode, u32 bits, const GcnInst& inst) {
                 return ir.UConvert(32, bit);
             }
             if (bits != 32) {
-                UNREACHABLE();
+                SHADER_UNREACHABLE();
             }
             const IR::U32 src0 = GetSrc(inst.src[0]);
             return ir.BitwiseAnd(ir.ShiftRightLogical(src0, bitpos), ir.Imm32(1));

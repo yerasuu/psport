@@ -4,6 +4,7 @@
 #include "shader_recompiler/frontend/translate/translate.h"
 #include "shader_recompiler/ir/reg.h"
 #include "shader_recompiler/runtime_info.h"
+#include "shader_recompiler/translation_error.h"
 
 namespace Shader::Gcn {
 
@@ -103,7 +104,7 @@ void Translator::V_READFIRSTLANE_B32(const GcnInst& inst) {
 }
 
 void Translator::V_READLANE_B32(const GcnInst& inst) {
-    ASSERT(inst.src[0].field == OperandField::VectorGPR);
+    SHADER_ASSERT(inst.src[0].field == OperandField::VectorGPR);
     const IR::U32 value{GetSrc(inst.src[0])};
     const IR::U32 lane{GetSrc(inst.src[1])};
     SetDst(inst.dst[0], ir.ReadLane(value, lane));
@@ -161,7 +162,7 @@ void Translator::DS_OP(const GcnInst& inst, AtomicOp op, bool rtn) {
         case AtomicOp::Dec:
             return ir.SharedAtomicDec<T>(addr_offset, is_gds);
         default:
-            UNREACHABLE();
+            SHADER_UNREACHABLE();
         }
     }();
     if (rtn) {
@@ -206,8 +207,8 @@ void Translator::DS_WRITE(int bit_size, bool is_signed, bool is_pair, bool strid
     const IR::VectorReg data1{inst.src[2].code};
     const u32 offset = (inst.control.ds.offset1 << 8u) + inst.control.ds.offset0;
     if (info.hw_stage == HwStage::Fragment) {
-        ASSERT_MSG(!is_pair && bit_size == 32 && offset % 256 == 0,
-                   "Unexpected shared memory offset alignment: {}", offset);
+        SHADER_ASSERT_MSG(!is_pair && bit_size == 32 && offset % 256 == 0,
+                          "Unexpected shared memory offset alignment: {}", offset);
         ir.SetVectorReg(GetScratchVgpr(offset), ir.GetVectorReg(data0));
         return;
     }
@@ -256,8 +257,8 @@ void Translator::DS_READ(int bit_size, bool is_signed, bool is_pair, bool stride
     IR::VectorReg dst_reg{inst.dst[0].code};
     const u32 offset = (inst.control.ds.offset1 << 8u) + inst.control.ds.offset0;
     if (info.hw_stage == HwStage::Fragment) {
-        ASSERT_MSG(!is_pair && bit_size == 32 && offset % 256 == 0,
-                   "Unexpected shared memory offset alignment: {}", offset);
+        SHADER_ASSERT_MSG(!is_pair && bit_size == 32 && offset % 256 == 0,
+                          "Unexpected shared memory offset alignment: {}", offset);
         ir.SetVectorReg(dst_reg, ir.GetVectorReg(GetScratchVgpr(offset)));
         return;
     }

@@ -6,6 +6,7 @@
 #include "shader_recompiler/ir/ir_emitter.h"
 #include "shader_recompiler/ir/program.h"
 #include "shader_recompiler/ir/reinterpret.h"
+#include "shader_recompiler/translation_error.h"
 #include "video_core/amdgpu/resource.h"
 
 namespace Shader::Optimization {
@@ -79,14 +80,14 @@ static IR::Value LoadBufferFormat(IR::IREmitter& ir, const IR::Value handle, con
     case AmdGpu::DataFormat::Format32_32:
     case AmdGpu::DataFormat::Format32_32_32:
     case AmdGpu::DataFormat::Format32_32_32_32: {
-        ASSERT(format_info.num_format == AmdGpu::NumberFormat::Uint ||
-               format_info.num_format == AmdGpu::NumberFormat::Sint ||
-               format_info.num_format == AmdGpu::NumberFormat::Float);
+        SHADER_ASSERT(format_info.num_format == AmdGpu::NumberFormat::Uint ||
+                      format_info.num_format == AmdGpu::NumberFormat::Sint ||
+                      format_info.num_format == AmdGpu::NumberFormat::Float);
         interpreted = ir.LoadBufferF32(format_info.num_components, handle, address, info);
         break;
     }
     default:
-        UNREACHABLE_MSG("Unsupported buffer data format: {}", format_info.data_format);
+        SHADER_UNREACHABLE_MSG("Unsupported buffer data format: {}", format_info.data_format);
     }
 
     // Pad to 4 components and apply additional modifications.
@@ -178,14 +179,14 @@ static void StoreBufferFormat(IR::IREmitter& ir, const IR::Value handle, const I
     case AmdGpu::DataFormat::Format32_32:
     case AmdGpu::DataFormat::Format32_32_32:
     case AmdGpu::DataFormat::Format32_32_32_32: {
-        ASSERT(format_info.num_format == AmdGpu::NumberFormat::Uint ||
-               format_info.num_format == AmdGpu::NumberFormat::Sint ||
-               format_info.num_format == AmdGpu::NumberFormat::Float);
+        SHADER_ASSERT(format_info.num_format == AmdGpu::NumberFormat::Uint ||
+                      format_info.num_format == AmdGpu::NumberFormat::Sint ||
+                      format_info.num_format == AmdGpu::NumberFormat::Float);
         ir.StoreBufferF32(format_info.num_components, handle, address, real_value, info);
         break;
     }
     default:
-        UNREACHABLE_MSG("Unsupported buffer data format: {}", format_info.data_format);
+        SHADER_UNREACHABLE_MSG("Unsupported buffer data format: {}", format_info.data_format);
     }
 }
 

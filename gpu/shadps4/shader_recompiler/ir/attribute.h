@@ -4,8 +4,8 @@
 #pragma once
 
 #include <fmt/format.h>
-#include "common/assert.h"
 #include "common/types.h"
+#include "shader_recompiler/translation_error.h"
 
 namespace Shader::IR {
 
@@ -129,10 +129,10 @@ constexpr bool IsBarycentricCoord(Attribute attribute) noexcept {
 [[nodiscard]] constexpr Attribute operator+(Attribute attr, int num) {
     const int result{static_cast<int>(attr) + num};
     if (result > static_cast<int>(Attribute::Param31)) {
-        UNREACHABLE_MSG("Overflow on register arithmetic");
+        SHADER_UNREACHABLE_MSG("Overflow on register arithmetic");
     }
     if (result < static_cast<int>(Attribute::RenderTarget0)) {
-        UNREACHABLE_MSG("Underflow on register arithmetic");
+        SHADER_UNREACHABLE_MSG("Underflow on register arithmetic");
     }
     return static_cast<Attribute>(result);
 }

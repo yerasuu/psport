@@ -460,6 +460,34 @@ struct PipelineCache::PendingPipeline {
 
 PipelineCache::~PipelineCache() = default;
 
+namespace {
+// psport: shaders the recompiler could not translate and the draws and dispatches skipped for
+// them, in the call summary.
+u64 s_c_untranslated_shaders;
+u64 s_c_untranslated_skips;
+
+void ReportUntranslated(const Shader::Info& info, size_t perm_idx,
+                        const Shader::TranslationError& error) {
+    const u64 c_shaders = __atomic_add_fetch(&s_c_untranslated_shaders, 1, __ATOMIC_RELAXED);
+    if (c_shaders == 1) {
+        Common::Log::Stubbed("GPU shader not translated by the recompiler",
+                             &s_c_untranslated_shaders);
+    }
+    LOG_ERROR(Render_Vulkan,
+              "Shader {:#x}: not translated: {} ({} stage, permutation {}, {}:{}; {} so far), "
+              "its draws and dispatches are skipped",
+              info.pgm_hash, error.reason, info.hw_stage, perm_idx, error.sz_file, error.line,
+              c_shaders);
+}
+
+void CountUntranslatedSkip() {
+    if (__atomic_fetch_add(&s_c_untranslated_skips, 1, __ATOMIC_RELAXED) == 0) {
+        Common::Log::Stubbed("GPU draw or dispatch skipped: shader not translated",
+                             &s_c_untranslated_skips);
+    }
+}
+} // namespace
+
 // psport: shader/pipeline compile time on the GPU thread, reported by PS_FRAME_STATS.
 std::atomic<u64> g_bb_compile_ns;
 std::atomic<u32> g_bb_compiles;
@@ -1019,6 +1047,7 @@ bool PipelineCache::RefreshGraphicsStages(PipelineSelection& sel) {
 
     Shader::Backend::Bindings binding{};
     u32 bound_xfb_stride{};
+    bool has_untranslated_stage = false;
     const auto bind_stage = [&](HwStage stage_in, SwStage stage_out) -> bool {
         const auto stage_in_idx = static_cast<u32>(stage_in);
         const auto stage_out_idx = static_cast<u32>(stage_out);
@@ -1040,6 +1069,13 @@ bool PipelineCache::RefreshGraphicsStages(PipelineSelection& sel) {
         std::tie(sel.infos[stage_out_idx], sel.modules[stage_out_idx], fetch_shader_,
                  key.stage_hashes[stage_out_idx], bound_xfb_stride) =
             GetProgram(sel, stage_in, stage_out, params, binding);
+        if (!sel.modules[stage_out_idx]) {
+            if (!has_untranslated_stage && !sel.worker) {
+                CountUntranslatedSkip();
+            }
+            has_untranslated_stage = true;
+            return false;
+        }
         if (fetch_shader_) {
             sel.fetch_shader = fetch_shader_;
         }
@@ -1125,6 +1161,9 @@ bool PipelineCache::RefreshGraphicsStages(PipelineSelection& sel) {
         LOG_WARNING(Render_Vulkan, "unimplemented shader stage {}", (u32)regs.stage_enable.raw);
         return false;
     }
+    if (has_untranslated_stage) {
+        return false;
+    }
 
     const auto* vs_info = sel.infos[static_cast<u32>(SwStage::Vertex)];
     if (vs_info && sel.fetch_shader && !instance.IsVertexInputDynamicState()) {
@@ -1150,6 +1189,10 @@ bool PipelineCache::RefreshComputeKey() {
     const auto cs_params = AmdGpu::GetParams(cs_pgm);
     std::tie(sel.infos[0], sel.modules[0], sel.fetch_shader, compute_key.value, std::ignore) =
         GetProgram(sel, HwStage::Compute, SwStage::Compute, cs_params, binding);
+    if (!sel.modules[0]) {
+        CountUntranslatedSkip();
+        return false;
+    }
     return true;
 }
 
@@ -1162,8 +1205,16 @@ vk::ShaderModule PipelineCache::CompileModule(Shader::Info& info, Shader::Runtim
     CompileTimer timer;
 
     const auto ir_program = Shader::TranslateProgram(code, pools, info, runtime_info, profile);
-    auto spv = Shader::Backend::SPIRV::EmitSPIRV(profile, runtime_info, ir_program, binding);
-    DumpShader(spv, info.pgm_hash, info.hw_stage, perm_idx, "spv");
+    if (!ir_program) {
+        ReportUntranslated(info, perm_idx, ir_program.error());
+        return {};
+    }
+    auto spv = Shader::Backend::SPIRV::EmitSPIRV(profile, runtime_info, *ir_program, binding);
+    if (!spv) {
+        ReportUntranslated(info, perm_idx, spv.error());
+        return {};
+    }
+    DumpShader(*spv, info.pgm_hash, info.hw_stage, perm_idx, "spv");
 
     vk::ShaderModule module;
 
@@ -1173,15 +1224,15 @@ vk::ShaderModule PipelineCache::CompileModule(Shader::Info& info, Shader::Runtim
         LOG_INFO(Loader, "Loaded patch for {} shader {:#x}", info.hw_stage, info.pgm_hash);
         module = CompileSPV(*patch, instance.GetDevice());
     } else {
-        module = CompileSPV(spv, instance.GetDevice());
+        module = CompileSPV(*spv, instance.GetDevice());
     }
 
-    RegisterShaderBinary(std::move(spv), info.pgm_hash, perm_idx);
+    RegisterShaderBinary(std::move(*spv), info.pgm_hash, perm_idx);
 
     const auto name = GetShaderName(info.hw_stage, info.pgm_hash, perm_idx);
     Vulkan::SetObjectName(instance.GetDevice(), module, name);
     if (EmulatorSettings.IsShaderCollect()) {
-        DebugState.CollectShader(name, info.sw_stage, module, spv, code,
+        DebugState.CollectShader(name, info.sw_stage, module, *spv, code,
                                  patch ? *patch : std::span<const u32>{}, is_patched);
     }
     return module;
@@ -1234,10 +1285,17 @@ PipelineCache::Result PipelineCache::GetProgram(PipelineSelection& sel, HwStage 
 
     auto it_pgm = program_cache.find(params.hash); // this thread is the only writer
     if (it_pgm == program_cache.end()) {
+        if (m_untranslated_programs.contains(params.hash)) {
+            return {};
+        }
         auto new_program = std::make_unique<Program>(hw_stage, sw_stage, params);
         auto start = binding;
         const auto module =
             CompileModule(new_program->info, runtime_info, params.code, 0, binding);
+        if (!module) {
+            m_untranslated_programs.insert(params.hash);
+            return {};
+        }
         auto spec = Shader::StageSpecialization(new_program->info, runtime_info, profile, start);
         spec.xfb_stride = new_program->info.xfb_stride;
         const auto perm_hash = HashCombine(params.hash, 0);
@@ -1280,8 +1338,16 @@ PipelineCache::Result PipelineCache::GetProgram(PipelineSelection& sel, HwStage 
         program->last_used = std::distance(program->modules.begin(), it);
     }
     if (it == program->modules.end()) {
+        if (std::ranges::find(program->untranslated_specs, spec) !=
+            program->untranslated_specs.end()) {
+            return {};
+        }
         auto new_info = Shader::Info(hw_stage, sw_stage, params);
         module = CompileModule(new_info, runtime_info, params.code, perm_idx, binding);
+        if (!module) {
+            program->untranslated_specs.push_back(std::move(spec));
+            return {};
+        }
         spec.xfb_stride = new_info.xfb_stride;
 
         RegisterShaderMeta(info, spec.fetch_shader_data, spec, perm_hash, perm_idx);

@@ -5,6 +5,7 @@
 // Just a start, not widely used
 
 #include "shader_recompiler/ir/value.h"
+#include "shader_recompiler/translation_error.h"
 
 namespace Shader::IR {
 
@@ -29,7 +30,7 @@ static_assert(LoadBufferArgs::Address == StoreBufferArgs::Address);
 // We keep components separate as u32x3, before combining after sharp tracking
 static inline IR::U32 GetBufferAddressComponent(const Inst* buffer_inst, u32 comp) {
     Inst* address = buffer_inst->Arg(1).Inst();
-    ASSERT(address->GetOpcode() == IR::Opcode::CompositeConstructU32x3);
+    SHADER_ASSERT(address->GetOpcode() == IR::Opcode::CompositeConstructU32x3);
     return IR::U32{address->Arg(comp)};
 }
 

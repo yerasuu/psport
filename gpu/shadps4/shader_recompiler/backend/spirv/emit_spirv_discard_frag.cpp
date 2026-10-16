@@ -51,8 +51,6 @@ struct DiscardShaderEmitter : public Sirit::Module {
             locations.insert(loc);
         }
 
-        ASSERT_MSG(locations.size() <= 2, "more than 2 clip planes locations");
-
         AddCapability(spv::Capability::Shader);
         AddExtension("SPV_EXT_demote_to_helper_invocation");
         AddCapability(spv::Capability::DemoteToHelperInvocation);
@@ -62,7 +60,7 @@ struct DiscardShaderEmitter : public Sirit::Module {
 
         auto ptr_id = TypePointer(spv::StorageClass::Input, vec4_id);
 
-        std::array<Id, 2> locations_id = {0};
+        std::array<Id, 3> locations_id = {0};
         std::vector<u8> locations_v(locations.begin(), locations.end());
         std::map<u8, Id> loc_vec_id;
         auto locations_id_len = 0;

@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include "common/assert.h"
 #include "shader_recompiler/frontend/opcodes.h"
+#include "shader_recompiler/translation_error.h"
 
 namespace Shader::Gcn {
 
@@ -158,7 +158,7 @@ struct InstControlVOP3P {
         case 2:
             return (op_sel_hi_2 & 1) == 1;
         default:
-            UNREACHABLE_MSG("get_op_sel_hi: {}", idx);
+            SHADER_UNREACHABLE_MSG("get_op_sel_hi: {}", idx);
         }
     }
 };
@@ -333,7 +333,7 @@ struct Dpp {
         } else if (dpp_ctrl == u32(DppCtrl::DppRowHalfMirror)) {
             return {DppCtrl::DppRowHalfMirror, 0, bool(bc), u8(row_mask), u8(bank_mask)};
         } else {
-            UNREACHABLE_MSG("malformed dpp_ctrl");
+            SHADER_UNREACHABLE_MSG("malformed dpp_ctrl");
         }
     }
 };

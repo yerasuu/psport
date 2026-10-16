@@ -5,6 +5,7 @@
 #include "shader_recompiler/backend/spirv/spirv_emit_context.h"
 #include "shader_recompiler/ir/debug_print.h"
 #include "shader_recompiler/ir/microinstruction.h"
+#include "shader_recompiler/translation_error.h"
 
 namespace Shader::Backend::SPIRV {
 
@@ -29,8 +30,8 @@ void ConvertDepthMode(EmitContext& ctx) {
 }
 
 void ConvertPositionToClipSpace(EmitContext& ctx) {
-    ASSERT_MSG(!ctx.info.stores.GetAny(IR::Attribute::ViewportIndex),
-               "Multi-viewport with shader clip space conversion not yet implemented.");
+    SHADER_ASSERT_MSG(!ctx.info.stores.GetAny(IR::Attribute::ViewportIndex),
+                      "Multi-viewport with shader clip space conversion not yet implemented.");
 
     const Id type{ctx.F32[1]};
     Id position{ctx.OpLoad(ctx.F32[4], ctx.output_position)};
@@ -242,11 +243,11 @@ void EmitEmitPrimitive(EmitContext& ctx) {
 }
 
 void EmitEmitVertex(EmitContext& ctx, const IR::Value& stream) {
-    UNREACHABLE_MSG("Geometry streams");
+    SHADER_UNREACHABLE_MSG("Geometry streams");
 }
 
 void EmitEndPrimitive(EmitContext& ctx, const IR::Value& stream) {
-    UNREACHABLE_MSG("Geometry streams");
+    SHADER_UNREACHABLE_MSG("Geometry streams");
 }
 
 void EmitDebugPrint(EmitContext& ctx, IR::Inst* inst, Id fmt, Id arg0, Id arg1, Id arg2, Id arg3) {

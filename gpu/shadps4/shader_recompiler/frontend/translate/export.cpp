@@ -6,6 +6,7 @@
 #include "shader_recompiler/ir/reinterpret.h"
 #include "shader_recompiler/profile.h"
 #include "shader_recompiler/runtime_info.h"
+#include "shader_recompiler/translation_error.h"
 
 namespace Shader::Gcn {
 
@@ -22,8 +23,8 @@ static AmdGpu::NumberFormat NumberFormatCompressed(AmdGpu::ShaderExportFormat ex
     case AmdGpu::ShaderExportFormat::ABGR_SINT16:
         return AmdGpu::NumberFormat::Sint;
     default:
-        UNREACHABLE_MSG("Unimplemented compressed export format {}",
-                        static_cast<u32>(export_format));
+        SHADER_UNREACHABLE_MSG("Unimplemented compressed export format {}",
+                               static_cast<u32>(export_format));
     }
 }
 
@@ -42,8 +43,8 @@ static u32 MaskFromExportFormat(u8 mask, AmdGpu::ShaderExportFormat export_forma
         // All components
         return mask;
     default:
-        UNREACHABLE_MSG("Unimplemented uncompressed export format {}",
-                        static_cast<u32>(export_format));
+        SHADER_UNREACHABLE_MSG("Unimplemented uncompressed export format {}",
+                               static_cast<u32>(export_format));
     }
 }
 
@@ -178,7 +179,8 @@ void Translator::EmitExport(const GcnInst& inst) {
         return ExportDepth(inst);
     }
 
-    ASSERT_MSG(!inst.control.exp.compr, "Compressed exports only supported for render targets");
+    SHADER_ASSERT_MSG(!inst.control.exp.compr,
+                      "Compressed exports only supported for render targets");
 
     const bool tess_emulated_primitive =
         info.sw_stage == SwStage::Vertex && runtime_info.sw.vs.tess_emulated_primitive;

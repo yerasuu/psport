@@ -7,6 +7,7 @@
 #include "common/logging/log.h"
 #include "shader_recompiler/ir/ir_emitter.h"
 #include "shader_recompiler/runtime_info.h"
+#include "shader_recompiler/translation_error.h"
 
 namespace Shader::IR {
 
@@ -78,7 +79,8 @@ inline void ExportPosition(IREmitter& ir, const StageRuntimeInfo& stage,
                     "xyzw"[comp], NameOf(attribute));
         break;
     default:
-        UNREACHABLE_MSG("Unhandled output {} on attribute {}", u32(output), NameOf(attribute));
+        SHADER_UNREACHABLE_MSG("Unhandled output {} on attribute {}", u32(output),
+                               NameOf(attribute));
     }
 }
 

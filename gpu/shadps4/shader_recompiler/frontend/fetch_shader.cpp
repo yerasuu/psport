@@ -5,9 +5,9 @@
 #include <unordered_map>
 #include <vector>
 #include "psport_toggles.h"
-#include "common/assert.h"
 #include "shader_recompiler/frontend/decode.h"
 #include "shader_recompiler/frontend/fetch_shader.h"
+#include "shader_recompiler/translation_error.h"
 
 namespace Shader::Gcn {
 
@@ -81,50 +81,60 @@ std::optional<FetchShaderData> ParseFetchShader(const Shader::Info& info) {
     std::array<VsharpLoad, 104> loads{};
 
     u32 semantic_index = 0;
-    while (!code_slice.atEnd()) {
-        const auto inst = decoder.decodeInstruction(code_slice);
-        data.size += inst.length;
+    // The fetch shader is parsed for the pipeline key too, outside the recompiler's entry points,
+    // so its decode errors stop here.
+    try {
+        while (!code_slice.atEnd()) {
+            const auto inst = decoder.decodeInstruction(code_slice);
+            data.size += inst.length;
 
-        if (inst.opcode == Opcode::S_SETPC_B64) {
-            break;
-        }
-
-        if (inst.inst_class == InstClass::ScalarMemRd) {
-            loads[inst.dst[0].code] = VsharpLoad{inst.control.smrd.offset, inst.src[0].code * 2};
-            continue;
-        }
-
-        if (inst.opcode == Opcode::V_ADD_I32) {
-            const auto vgpr = inst.dst[0].code;
-            const auto sgpr = s8(inst.src[0].code);
-            switch (vgpr) {
-            case 0: // V0 is always the vertex offset
-                data.vertex_offset_sgpr = sgpr;
+            if (inst.opcode == Opcode::S_SETPC_B64) {
                 break;
-            case 3: // V3 is always the instance offset
-                data.instance_offset_sgpr = sgpr;
-                break;
-            default:
-                UNREACHABLE();
+            }
+
+            if (inst.inst_class == InstClass::ScalarMemRd) {
+                loads[inst.dst[0].code] =
+                    VsharpLoad{inst.control.smrd.offset, inst.src[0].code * 2};
+                continue;
+            }
+
+            if (inst.opcode == Opcode::V_ADD_I32) {
+                const auto vgpr = inst.dst[0].code;
+                const auto sgpr = s8(inst.src[0].code);
+                switch (vgpr) {
+                case 0: // V0 is always the vertex offset
+                    data.vertex_offset_sgpr = sgpr;
+                    break;
+                case 3: // V3 is always the instance offset
+                    data.instance_offset_sgpr = sgpr;
+                    break;
+                default:
+                    SHADER_UNREACHABLE_MSG("V_ADD_I32 to v{}, not a vertex or instance offset",
+                                           vgpr);
+                }
+            }
+
+            if (inst.inst_class == InstClass::VectorMemBufFmt) {
+                // SRSRC is in units of 4 SPGRs while SBASE is in pairs of SGPRs
+                const u32 base_sgpr = inst.src[2].code * 4;
+                auto& attrib = data.attributes.emplace_back();
+                attrib.semantic = semantic_index++;
+                attrib.dest_vgpr = inst.src[1].code;
+                attrib.num_elements = inst.control.mubuf.count;
+                attrib.sgpr_base = loads[base_sgpr].base_sgpr;
+                attrib.dword_offset = loads[base_sgpr].dword_offset;
+                attrib.inst_offset = inst.control.mtbuf.offset;
+                attrib.instance_data = inst.src[0].code;
+                if (IsTypedBufferLoad(inst)) {
+                    attrib.data_format = inst.control.mtbuf.dfmt;
+                    attrib.num_format = inst.control.mtbuf.nfmt;
+                }
             }
         }
-
-        if (inst.inst_class == InstClass::VectorMemBufFmt) {
-            // SRSRC is in units of 4 SPGRs while SBASE is in pairs of SGPRs
-            const u32 base_sgpr = inst.src[2].code * 4;
-            auto& attrib = data.attributes.emplace_back();
-            attrib.semantic = semantic_index++;
-            attrib.dest_vgpr = inst.src[1].code;
-            attrib.num_elements = inst.control.mubuf.count;
-            attrib.sgpr_base = loads[base_sgpr].base_sgpr;
-            attrib.dword_offset = loads[base_sgpr].dword_offset;
-            attrib.inst_offset = inst.control.mtbuf.offset;
-            attrib.instance_data = inst.src[0].code;
-            if (IsTypedBufferLoad(inst)) {
-                attrib.data_format = inst.control.mtbuf.dfmt;
-                attrib.num_format = inst.control.mtbuf.nfmt;
-            }
-        }
+    } catch (const TranslationError& error) {
+        SHADER_LOG_FALLBACK("Fetch shader at {}: not parsed: {} ({}:{})", fmt::ptr(code),
+                            error.reason, error.sz_file, error.line);
+        return std::nullopt;
     }
 
     if (cache.size() >= 4096) {

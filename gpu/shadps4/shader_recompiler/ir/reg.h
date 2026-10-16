@@ -3,11 +3,11 @@
 
 #pragma once
 
-#include "common/assert.h"
 #include "common/bit_field.h"
 #include "common/enum.h"
 #include "common/types.h"
 #include "shader_recompiler/ir/type.h"
+#include "shader_recompiler/translation_error.h"
 #include "video_core/amdgpu/pixel_format.h"
 
 namespace Shader::IR {
@@ -437,7 +437,7 @@ static constexpr size_t NumVectorRegs = static_cast<size_t>(VectorReg::Max);
 struct VirtualReg {
     explicit VirtualReg() = default;
     explicit VirtualReg(u32 index_, Type type_) : index{index_}, type{type_} {
-        ASSERT(type != IR::Type::Opaque);
+        SHADER_ASSERT(type != IR::Type::Opaque);
     }
 
     auto operator<=>(const VirtualReg&) const noexcept = default;
@@ -458,10 +458,10 @@ template <RegT Reg>
 [[nodiscard]] constexpr Reg operator+(Reg reg, int num) {
     const int result{static_cast<int>(reg) + num};
     if (result >= static_cast<int>(Reg::Max)) {
-        UNREACHABLE_MSG("Overflow on register arithmetic");
+        SHADER_UNREACHABLE_MSG("Overflow on register arithmetic");
     }
     if (result < 0) {
-        UNREACHABLE_MSG("Underflow on register arithmetic");
+        SHADER_UNREACHABLE_MSG("Underflow on register arithmetic");
     }
     return static_cast<Reg>(result);
 }

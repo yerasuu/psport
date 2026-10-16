@@ -1,12 +1,12 @@
 // SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include "common/assert.h"
 #include "shader_recompiler/ir/passes/ir_passes.h"
 #include "shader_recompiler/ir/passes/resource_pass.h"
 #include "shader_recompiler/ir/program.h"
 #include "shader_recompiler/profile.h"
 #include "shader_recompiler/resource.h"
+#include "shader_recompiler/translation_error.h"
 
 #include <algorithm>
 
@@ -163,7 +163,7 @@ AnisoLod0Result CheckDisableAnisoLod0Pattern(IR::Value value) {
     }
 
     auto* prod0_arg0 = prod0->Arg(0).Inst();
-    ASSERT(prod0_arg0->GetOpcode() != IR::Opcode::Phi);
+    SHADER_ASSERT(prod0_arg0->GetOpcode() != IR::Opcode::Phi);
 
     // The bits range is for lods (note that constants are changed after constant propagation pass)
     if (prod0_arg0->GetOpcode() != IR::Opcode::BitFieldUExtract ||
@@ -180,7 +180,7 @@ AnisoLod0Result CheckDisableAnisoLod0Pattern(IR::Value value) {
 
     // We're working on the first dword of S#
     auto* prod2 = inst->Arg(2).Inst();
-    ASSERT(prod2->GetOpcode() != IR::Opcode::Phi);
+    SHADER_ASSERT(prod2->GetOpcode() != IR::Opcode::Phi);
     return {inst->Arg(2), prod0_arg0->Arg(0), true};
 }
 
@@ -247,7 +247,7 @@ SamplerPatchResult CheckClearAnisoRatioAndThresholdPattern(IR::Value value) {
 }
 
 IR::Inst* FindSharpSource(IR::Inst* handle) {
-    ASSERT(IsSharpSource(handle));
+    SHADER_ASSERT(IsSharpSource(handle));
     return handle;
 }
 
@@ -368,7 +368,7 @@ void DiscoverBufferSharp(IR::Block& block, IR::Inst& inst, ResourceDiscoveryList
 
 void DiscoverImageSharp(IR::Block& block, IR::Inst& inst, ResourceDiscoveryList& resources) {
     IR::Inst* image_handle = inst.Arg(0).Inst();
-    ASSERT(image_handle->GetOpcode() == IR::Opcode::ImageHandle);
+    SHADER_ASSERT(image_handle->GetOpcode() == IR::Opcode::ImageHandle);
     auto& resource = resources.emplace_back(&inst);
     auto& tsharp = resource.sharps[0];
 

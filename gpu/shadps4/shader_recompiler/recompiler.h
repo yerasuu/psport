@@ -3,9 +3,11 @@
 
 #pragma once
 
+#include <expected>
 #include "common/object_pool.h"
 #include "shader_recompiler/ir/basic_block.h"
 #include "shader_recompiler/ir/program.h"
+#include "shader_recompiler/translation_error.h"
 
 namespace Shader {
 
@@ -27,8 +29,11 @@ struct Pools {
     }
 };
 
-[[nodiscard]] IR::Program TranslateProgram(const std::span<const u32>& code, Pools& pools,
-                                           Info& info, RuntimeInfo& runtime_info,
-                                           const Profile& profile);
+/// Runs the frontend and the IR passes. A shader it cannot translate comes back as the error,
+/// with info and pools left partly written: the caller drops info, and the next call releases
+/// the pools.
+[[nodiscard]] std::expected<IR::Program, TranslationError> TranslateProgram(
+    const std::span<const u32>& code, Pools& pools, Info& info, RuntimeInfo& runtime_info,
+    const Profile& profile);
 
 } // namespace Shader

@@ -26,6 +26,7 @@
 #include "shader_recompiler/ir/passes/expression_elimination.h"
 #include "shader_recompiler/ir/program.h"
 #include "shader_recompiler/ir/ssa.h"
+#include "shader_recompiler/translation_error.h"
 
 namespace Shader::Optimization {
 
@@ -57,7 +58,7 @@ struct PhiScc {
     u64 hash{};
     InstList phis;
 
-    bool HasCommonOp(CommonOp& out) const noexcept {
+    bool HasCommonOp(CommonOp& out) const {
         out = {};
         for (const IR::Inst* phi : phis) {
             for (size_t i = 0; i < phi->NumArgs(); ++i) {
@@ -85,7 +86,7 @@ struct PhiScc {
                 }
             }
         }
-        ASSERT(out.op != IR::Opcode::Void);
+        SHADER_ASSERT(out.op != IR::Opcode::Void);
         return true;
     }
 
@@ -101,7 +102,7 @@ struct PhiScc {
         return uses;
     }
 
-    void FoldCommonOp(CommonOp& common_op) noexcept {
+    void FoldCommonOp(CommonOp& common_op) {
         const IR::Type new_type{IR::ArgTypeOf(common_op.op, 0)};
         for (IR::Inst* phi : phis) {
             IR::Block* block = phi->GetParent();
@@ -140,7 +141,7 @@ struct PhiScc {
         }
     }
 
-    void ComputeStructureHash() noexcept {
+    void ComputeStructureHash() {
         hash = HashCombine(0ull, phis.size());
         for (const IR::Inst* phi : phis) {
             hash = HashCombine(hash, reinterpret_cast<u64>(phi->GetParent()));
@@ -162,7 +163,7 @@ struct PhiScc {
         }
     }
 
-    bool IsSameAs(const PhiScc& other) const noexcept {
+    bool IsSameAs(const PhiScc& other) const {
         if (phis.size() != other.phis.size()) {
             return false;
         }

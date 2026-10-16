@@ -6,6 +6,7 @@
 #include "shader_recompiler/frontend/copy_shader.h"
 #include "shader_recompiler/frontend/decode.h"
 #include "shader_recompiler/ir/attribute.h"
+#include "shader_recompiler/translation_error.h"
 
 namespace Shader {
 
@@ -27,7 +28,8 @@ CopyShaderData ParseCopyShader(std::span<const u32> code) {
     Gcn::GcnDecodeContext decoder;
 
     constexpr u32 token_mov_vcchi = 0xBEEB03FF;
-    ASSERT_MSG(code[0] == token_mov_vcchi, "First instruction is not s_mov_b32 vcc_hi, #imm");
+    SHADER_ASSERT_MSG(code[0] == token_mov_vcchi,
+                      "First instruction is not s_mov_b32 vcc_hi, #imm");
 
     std::array<s32, 64> offsets{};
     offsets.fill(-1);
@@ -92,8 +94,8 @@ CopyShaderData ParseCopyShader(std::span<const u32> code) {
             break;
         }
         case Gcn::Opcode::S_BFM_B32: {
-            ASSERT(inst.src[0].field == Gcn::OperandField::SignedConstIntPos &&
-                   inst.src[1].field == Gcn::OperandField::SignedConstIntPos);
+            SHADER_ASSERT(inst.src[0].field == Gcn::OperandField::SignedConstIntPos &&
+                          inst.src[1].field == Gcn::OperandField::SignedConstIntPos);
             const auto src0 = inst.src[0].code - Gcn::OperandFieldRange::SignedConstIntPosMin + 1;
             const auto src1 = inst.src[1].code - Gcn::OperandFieldRange::SignedConstIntPosMin + 1;
             sources[inst.dst[0].code] = ((1 << src0) - 1) << src1;
@@ -117,12 +119,12 @@ CopyShaderData ParseCopyShader(std::span<const u32> code) {
             break;
         }
         case Gcn::Opcode::BUFFER_LOAD_DWORD: {
-            ASSERT_MSG(inst.src[1].code < offsets.size(),
-                       "offsets array for geometry shaders is too short");
+            SHADER_ASSERT_MSG(inst.src[1].code < offsets.size(),
+                              "offsets array for geometry shaders is too short");
             offsets[inst.src[1].code] = inst.control.mubuf.offset;
             if (inst.src[3].field != Gcn::OperandField::ConstZero) {
                 const u32 index = inst.src[3].code;
-                ASSERT(sources[index] != -1);
+                SHADER_ASSERT(sources[index] != -1);
                 offsets[inst.src[1].code] += sources[index];
             }
             data.num_comps++;

@@ -3,6 +3,7 @@
 
 #include "shader_recompiler/backend/spirv/emit_spirv_instructions.h"
 #include "shader_recompiler/backend/spirv/spirv_emit_context.h"
+#include "shader_recompiler/translation_error.h"
 
 namespace Shader::Backend::SPIRV {
 
@@ -11,7 +12,7 @@ Id SubgroupScope(EmitContext& ctx) {
 }
 
 Id EmitWarpId(EmitContext& ctx) {
-    UNREACHABLE();
+    SHADER_UNREACHABLE();
 }
 
 Id EmitLaneId(EmitContext& ctx) {

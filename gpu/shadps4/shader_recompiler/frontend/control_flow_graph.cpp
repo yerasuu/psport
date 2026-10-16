@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
-#include "common/assert.h"
 #include "common/logging/log.h"
 #include "shader_recompiler/frontend/control_flow_graph.h"
 #include "shader_recompiler/ir/condition.h"
+#include "shader_recompiler/translation_error.h"
 
 namespace Shader::Gcn {
 
@@ -129,7 +129,7 @@ void CFG::EmitLabels() {
                 if (auto t = ResolveSetPcTarget(inst_list, i, index_to_pc)) {
                     target = *t;
                 } else {
-                    ASSERT_MSG(
+                    SHADER_ASSERT_MSG(
                         false,
                         "S_SETPC_B64 without a resolvable offset at PC {:#x} (Index {}): Involved "
                         "instructions not recognized or invalid pattern",
@@ -248,7 +248,7 @@ void CFG::SplitDivergenceScopes() {
                         // No epilogue block is needed since the divergence block
                         // also ends the parent block. Inherit the end condition.
                         auto& parent_blk = *blk;
-                        ASSERT(blk->cond == IR::Condition::True && blk->branch_true);
+                        SHADER_ASSERT(blk->cond == IR::Condition::True && blk->branch_true);
                         block->cond = IR::Condition::True;
                         block->branch_true = blk->branch_true;
                         block->branch_false = nullptr;
@@ -311,7 +311,8 @@ void CFG::EmitBlocks() {
 void CFG::LinkBlocks() {
     const auto get_block = [this](u32 address) {
         auto it = blocks.find(address, Compare{});
-        ASSERT_MSG(it != blocks.cend() && it->begin == address);
+        SHADER_ASSERT_MSG(it != blocks.cend() && it->begin == address, "no block at {:#x}",
+                          address);
         return &*it;
     };
 
@@ -335,10 +336,10 @@ void CFG::LinkBlocks() {
         u32 target_pc = 0;
         if (end_inst.opcode == Opcode::S_SETPC_B64) {
             auto tgt = ResolveSetPcTarget(inst_list, block.end_index, index_to_pc);
-            ASSERT_MSG(tgt,
-                       "S_SETPC_B64 without a resolvable offset at PC {:#x} (Index {}): Involved "
-                       "instructions not recognized or invalid pattern",
-                       branch_pc, block.end_index);
+            SHADER_ASSERT_MSG(tgt,
+                              "S_SETPC_B64 without a resolvable offset at PC {:#x} (Index {}): "
+                              "Involved instructions not recognized or invalid pattern",
+                              branch_pc, block.end_index);
             target_pc = *tgt;
         } else {
             target_pc = end_inst.BranchTarget(branch_pc);
@@ -365,7 +366,7 @@ void CFG::LinkBlocks() {
         } else if (end_inst.opcode == Opcode::S_ENDPGM) {
             block.end_class = EndClass::Exit;
         } else {
-            UNREACHABLE();
+            SHADER_UNREACHABLE();
         }
     }
 }

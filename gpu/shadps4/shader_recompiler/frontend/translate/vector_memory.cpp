@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "shader_recompiler/frontend/translate/translate.h"
+#include "shader_recompiler/translation_error.h"
 
 namespace Shader::Gcn {
 
@@ -265,7 +266,7 @@ void Translator::BUFFER_LOAD(u32 num_dwords, bool is_inst_typed, bool is_buffer_
             break;
 
         default:
-            UNREACHABLE();
+            SHADER_UNREACHABLE();
         }
 
         if (num_dwords == 1) {
@@ -341,7 +342,7 @@ void Translator::BUFFER_STORE(u32 num_dwords, bool is_inst_typed, bool is_buffer
             ir.StoreBufferU32(num_dwords, handle, address, value, buffer_info);
             break;
         default:
-            UNREACHABLE();
+            SHADER_UNREACHABLE();
         }
     }
 }
@@ -420,13 +421,13 @@ void Translator::BUFFER_ATOMIC(AtomicOp op, const GcnInst& inst) {
         case AtomicOp::Fmax:
             return ir.BufferAtomicFMax(handle, address, vdata_val, buffer_info);
         default:
-            UNREACHABLE();
+            SHADER_UNREACHABLE();
         }
     }();
 
     if (mubuf.glc) {
         if constexpr (std::is_same_v<T, IR::U64>) {
-            UNREACHABLE();
+            SHADER_UNREACHABLE();
         } else {
             ir.SetVectorReg(vdata, T{original_val});
         }
@@ -602,7 +603,7 @@ void Translator::IMAGE_ATOMIC(AtomicOp op, const GcnInst& inst) {
         case AtomicOp::Dec:
             return ir.ImageAtomicDec(handle, body, value, info);
         default:
-            UNREACHABLE();
+            SHADER_UNREACHABLE();
         }
     }();
     if (mimg.glc) {
@@ -728,9 +729,9 @@ void Translator::IMAGE_GATHER(const GcnInst& inst) {
 
     // For gather4 instructions dmask selects which component to read and must have
     // only one bit set to 1
-    ASSERT_MSG(std::popcount(mimg.dmask) == 1, "Unexpected bits in gather dmask");
+    SHADER_ASSERT_MSG(std::popcount(mimg.dmask) == 1, "Unexpected bits in gather dmask");
     // should be always 1st (R) component for depth
-    ASSERT(!flags.test(MimgModifier::Pcf) || mimg.dmask & 1);
+    SHADER_ASSERT(!flags.test(MimgModifier::Pcf) || mimg.dmask & 1);
 
     const IR::Value texel = EmitImageSample(ir, inst, tsharp_reg, sampler_reg, addr_reg, true, pc);
     for (u32 i = 0; i < 4; i++) {

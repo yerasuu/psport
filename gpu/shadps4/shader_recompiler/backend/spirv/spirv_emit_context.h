@@ -11,6 +11,7 @@
 #include "shader_recompiler/info.h"
 #include "shader_recompiler/ir/value.h"
 #include "shader_recompiler/profile.h"
+#include "shader_recompiler/translation_error.h"
 
 namespace Shader::Backend::SPIRV {
 
@@ -182,7 +183,8 @@ public:
 
     Id EmitFlatbufferLoad(Id flatbuf_offset) {
         const auto& flatbuf_buffer{buffers[flatbuf_index]};
-        ASSERT(flatbuf_buffer.binding >= 0 && flatbuf_buffer.buffer_type == BufferType::Flatbuf);
+        SHADER_ASSERT(flatbuf_buffer.binding >= 0 &&
+                      flatbuf_buffer.buffer_type == BufferType::Flatbuf);
         const auto [flatbuf_buffer_id, flatbuf_pointer_type] =
             flatbuf_buffer.aliases[u32(PointerType::U32)];
         const auto ptr{

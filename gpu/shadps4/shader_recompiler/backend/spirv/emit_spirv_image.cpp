@@ -5,6 +5,7 @@
 #include "shader_recompiler/backend/spirv/emit_spirv_instructions.h"
 #include "shader_recompiler/backend/spirv/spirv_emit_context.h"
 #include "shader_recompiler/ir/microinstruction.h"
+#include "shader_recompiler/translation_error.h"
 
 namespace Shader::Backend::SPIRV {
 
@@ -72,12 +73,12 @@ struct ImageOperands {
 };
 
 Id EmitImageHandle(EmitContext& ctx, Id, Id) {
-    UNREACHABLE_MSG("Unreachable instruction");
+    SHADER_UNREACHABLE_MSG("Unreachable instruction");
 }
 
 Id EmitImageSampleRaw(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address1, Id address2,
                       Id address3, Id address4) {
-    UNREACHABLE_MSG("Unreachable instruction");
+    SHADER_UNREACHABLE_MSG("Unreachable instruction");
 }
 
 Id EmitImageSampleImplicitLod(EmitContext& ctx, IR::Inst* inst, u32 handle, Id coords, Id bias,
@@ -195,7 +196,7 @@ Id EmitImageQueryDimensions(EmitContext& ctx, IR::Inst* inst, u32 handle, Id lod
     case AmdGpu::ImageType::Color3D:
         return ctx.OpCompositeConstruct(ctx.U32[4], query(ctx.U32[3]), mips());
     default:
-        UNREACHABLE_MSG("SPIR-V Instruction");
+        SHADER_UNREACHABLE_MSG("SPIR-V Instruction");
     }
 }
 
@@ -254,10 +255,10 @@ Id EmitImageRead(EmitContext& ctx, IR::Inst* inst, u32 handle, Id coords, Id lod
             // It's confusing what interactions will cause this code path so leave it as
             // unreachable until a case is found.
             // Normally IMAGE_LOAD_MIP should translate -> OpImageFetch
-            UNREACHABLE_MSG("Unsupported ImageRead with Lod");
+            SHADER_UNREACHABLE_MSG("Unsupported ImageRead with Lod");
 #else
             LOG_WARNING(Render, "Fallback for ImageRead with LOD");
-            ASSERT(texture.mip_fallback_mode == MipStorageFallbackMode::DynamicIndex);
+            SHADER_ASSERT(texture.mip_fallback_mode == MipStorageFallbackMode::DynamicIndex);
             const Id single_image_ptr_type =
                 ctx.TypePointer(spv::StorageClass::UniformConstant, texture.image_type);
             image_ptr = ctx.OpAccessChain(single_image_ptr_type, image_ptr, std::array{lod});
@@ -280,7 +281,7 @@ void EmitImageWrite(EmitContext& ctx, IR::Inst* inst, u32 handle, Id coords, Id 
         operands.Add(spv::ImageOperandsMask::Lod, lod);
     } else if (Sirit::ValidId(lod)) {
         LOG_WARNING(Render, "Fallback for ImageWrite with LOD");
-        ASSERT(texture.mip_fallback_mode == MipStorageFallbackMode::DynamicIndex);
+        SHADER_ASSERT(texture.mip_fallback_mode == MipStorageFallbackMode::DynamicIndex);
         const Id single_image_ptr_type =
             ctx.TypePointer(spv::StorageClass::UniformConstant, texture.image_type);
         image_ptr = ctx.OpAccessChain(single_image_ptr_type, image_ptr, std::array{lod});
@@ -294,7 +295,7 @@ Id EmitCubeFaceIndex(EmitContext& ctx, IR::Inst* inst, Id cube_coords) {
     if (ctx.profile.supports_native_cube_calc) {
         return ctx.OpCubeFaceIndexAMD(ctx.F32[1], cube_coords);
     } else {
-        UNREACHABLE_MSG("SPIR-V Instruction");
+        SHADER_UNREACHABLE_MSG("SPIR-V Instruction");
     }
 }
 

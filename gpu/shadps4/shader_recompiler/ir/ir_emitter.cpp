@@ -4,11 +4,11 @@
 #include <array>
 #include <source_location>
 #include <boost/container/small_vector.hpp>
-#include "common/assert.h"
 #include "shader_recompiler/ir/debug_print.h"
 #include "shader_recompiler/ir/ir_emitter.h"
 #include "shader_recompiler/ir/opcodes.h"
 #include "shader_recompiler/ir/value.h"
+#include "shader_recompiler/translation_error.h"
 
 namespace Shader::IR {
 namespace {
@@ -16,8 +16,9 @@ namespace {
                                    std::source_location loc = std::source_location::current()) {
     const std::string functionName = loc.function_name();
     const int lineNumber = loc.line();
-    UNREACHABLE_MSG("Invalid type = {}, functionName = {}, line = {}", u32(type), functionName,
-                    lineNumber);
+    SHADER_UNREACHABLE_MSG("Invalid type = {}, functionName = {}, line = {}", u32(type),
+                           functionName,
+                           lineNumber);
 }
 } // Anonymous namespace
 
@@ -115,13 +116,13 @@ void IREmitter::DeviceMemoryBarrier() {
 }
 
 U32 IREmitter::GetUserData(IR::ScalarReg reg) {
-    ASSERT(static_cast<u32>(reg) < IR::NumScalarRegs);
+    SHADER_ASSERT(static_cast<u32>(reg) < IR::NumScalarRegs);
     return Inst<U32>(Opcode::GetUserData, reg);
 }
 
 template <>
 U32 IREmitter::GetScalarReg(IR::ScalarReg reg) {
-    ASSERT(static_cast<u32>(reg) < IR::NumScalarRegs);
+    SHADER_ASSERT(static_cast<u32>(reg) < IR::NumScalarRegs);
     return Inst<U32>(Opcode::GetScalarRegister, reg);
 }
 
@@ -132,7 +133,7 @@ F32 IREmitter::GetScalarReg(IR::ScalarReg reg) {
 
 template <>
 U32 IREmitter::GetVectorReg(IR::VectorReg reg) {
-    ASSERT(static_cast<u32>(reg) < IR::NumVectorRegs);
+    SHADER_ASSERT(static_cast<u32>(reg) < IR::NumVectorRegs);
     return Inst<U32>(Opcode::GetVectorRegister, reg);
 }
 
@@ -142,13 +143,13 @@ F32 IREmitter::GetVectorReg(IR::VectorReg reg) {
 }
 
 void IREmitter::SetScalarReg(IR::ScalarReg reg, const U32F32& value) {
-    ASSERT(reg < IR::ScalarReg::Max);
+    SHADER_ASSERT(reg < IR::ScalarReg::Max);
     const U32 value_typed = value.Type() == Type::F32 ? BitCast<U32>(F32{value}) : U32{value};
     Inst(Opcode::SetScalarRegister, reg, value_typed);
 }
 
 void IREmitter::SetVectorReg(IR::VectorReg reg, const U32F32& value) {
-    ASSERT(reg < IR::VectorReg::Max);
+    SHADER_ASSERT(reg < IR::VectorReg::Max);
     const U32 value_typed = value.Type() == Type::F32 ? BitCast<U32>(F32{value}) : U32{value};
     Inst(Opcode::SetVectorRegister, reg, value_typed);
 }
@@ -184,7 +185,7 @@ U1 IREmitter::Condition(IR::Condition cond) {
     case IR::Condition::Execnz:
         return GetExec();
     default:
-        UNREACHABLE_MSG("");
+        SHADER_UNREACHABLE_MSG("");
     }
 }
 
@@ -285,7 +286,7 @@ Value IREmitter::LoadShared(int bit_size, bool is_signed, const U32& offset, boo
     case 64:
         return Inst<U64>(Opcode::LoadSharedU64, Flags{is_gds}, offset);
     default:
-        UNREACHABLE_MSG("Invalid bit size {}", bit_size);
+        SHADER_UNREACHABLE_MSG("Invalid bit size {}", bit_size);
     }
 }
 
@@ -301,7 +302,7 @@ void IREmitter::WriteShared(int bit_size, const Value& value, const U32& offset,
         Inst(Opcode::WriteSharedU64, Flags{is_gds}, offset, value);
         break;
     default:
-        UNREACHABLE_MSG("Invalid bit size {}", bit_size);
+        SHADER_UNREACHABLE_MSG("Invalid bit size {}", bit_size);
     }
 }
 
@@ -452,7 +453,7 @@ Value IREmitter::LoadBufferU32(int num_dwords, const Value& handle, const Value&
     case 4:
         return Inst(Opcode::LoadBufferU32x4, Flags{info}, handle, address);
     default:
-        UNREACHABLE_MSG("Invalid number of dwords {}", num_dwords);
+        SHADER_UNREACHABLE_MSG("Invalid number of dwords {}", num_dwords);
     }
 }
 
@@ -472,7 +473,7 @@ Value IREmitter::LoadBufferF32(int num_dwords, const Value& handle, const Value&
     case 4:
         return Inst(Opcode::LoadBufferF32x4, Flags{info}, handle, address);
     default:
-        UNREACHABLE_MSG("Invalid number of dwords {}", num_dwords);
+        SHADER_UNREACHABLE_MSG("Invalid number of dwords {}", num_dwords);
     }
 }
 
@@ -506,7 +507,7 @@ void IREmitter::StoreBufferU32(int num_dwords, const Value& handle, const Value&
         Inst(Opcode::StoreBufferU32x4, Flags{info}, handle, address, data);
         break;
     default:
-        UNREACHABLE_MSG("Invalid number of dwords {}", num_dwords);
+        SHADER_UNREACHABLE_MSG("Invalid number of dwords {}", num_dwords);
     }
 }
 
@@ -531,7 +532,7 @@ void IREmitter::StoreBufferF32(int num_dwords, const Value& handle, const Value&
         Inst(Opcode::StoreBufferF32x4, Flags{info}, handle, address, data);
         break;
     default:
-        UNREACHABLE_MSG("Invalid number of dwords {}", num_dwords);
+        SHADER_UNREACHABLE_MSG("Invalid number of dwords {}", num_dwords);
     }
 }
 
@@ -691,7 +692,7 @@ U1 IREmitter::GroupAny(const U1& bit) {
 
 F32F64 IREmitter::FPAdd(const F32F64& a, const F32F64& b) {
     if (a.Type() != b.Type()) {
-        UNREACHABLE_MSG("Mismatching types {} and {}", a.Type(), b.Type());
+        SHADER_UNREACHABLE_MSG("Mismatching types {} and {}", a.Type(), b.Type());
     }
     switch (a.Type()) {
     case Type::F32:
@@ -705,7 +706,7 @@ F32F64 IREmitter::FPAdd(const F32F64& a, const F32F64& b) {
 
 F32F64 IREmitter::FPSub(const F32F64& a, const F32F64& b) {
     if (a.Type() != b.Type()) {
-        UNREACHABLE_MSG("Mismatching types {} and {}", a.Type(), b.Type());
+        SHADER_UNREACHABLE_MSG("Mismatching types {} and {}", a.Type(), b.Type());
     }
     switch (a.Type()) {
     case Type::F32:
@@ -717,7 +718,7 @@ F32F64 IREmitter::FPSub(const F32F64& a, const F32F64& b) {
 
 Value IREmitter::CompositeConstruct(const Value& e1, const Value& e2) {
     if (e1.Type() != e2.Type()) {
-        UNREACHABLE_MSG("Mismatching types {} and {}", e1.Type(), e2.Type());
+        SHADER_UNREACHABLE_MSG("Mismatching types {} and {}", e1.Type(), e2.Type());
     }
     switch (e1.Type()) {
     case Type::U32:
@@ -735,7 +736,7 @@ Value IREmitter::CompositeConstruct(const Value& e1, const Value& e2) {
 
 Value IREmitter::CompositeConstruct(const Value& e1, const Value& e2, const Value& e3) {
     if (e1.Type() != e2.Type() || e1.Type() != e3.Type()) {
-        UNREACHABLE_MSG("Mismatching types {}, {}, and {}", e1.Type(), e2.Type(), e3.Type());
+        SHADER_UNREACHABLE_MSG("Mismatching types {}, {}, and {}", e1.Type(), e2.Type(), e3.Type());
     }
     switch (e1.Type()) {
     case Type::U32:
@@ -750,8 +751,9 @@ Value IREmitter::CompositeConstruct(const Value& e1, const Value& e2, const Valu
 Value IREmitter::CompositeConstruct(const Value& e1, const Value& e2, const Value& e3,
                                     const Value& e4) {
     if (e1.Type() != e2.Type() || e1.Type() != e3.Type() || e1.Type() != e4.Type()) {
-        UNREACHABLE_MSG("Mismatching types {}, {}, {}, and {}", e1.Type(), e2.Type(), e3.Type(),
-                        e4.Type());
+        SHADER_UNREACHABLE_MSG("Mismatching types {}, {}, {}, and {}", e1.Type(), e2.Type(),
+                               e3.Type(),
+                               e4.Type());
     }
     switch (e1.Type()) {
     case Type::U32:
@@ -772,15 +774,15 @@ Value IREmitter::CompositeConstruct(std::span<const Value> elements) {
     case 4:
         return CompositeConstruct(elements[0], elements[1], elements[2], elements[3]);
     default:
-        UNREACHABLE_MSG("Composite construct with {} elements, only 2-4 are supported",
-                        elements.size());
+        SHADER_UNREACHABLE_MSG("Composite construct with {} elements, only 2-4 are supported",
+                               elements.size());
     }
 }
 
 Value IREmitter::CompositeExtract(const Value& vector, size_t element) {
     const auto read{[&](Opcode opcode, size_t limit) -> Value {
         if (element >= limit) {
-            UNREACHABLE_MSG("Out of bounds element {}", element);
+            SHADER_UNREACHABLE_MSG("Out of bounds element {}", element);
         }
         return Inst(opcode, vector, Value{static_cast<u32>(element)});
     }};
@@ -805,7 +807,7 @@ Value IREmitter::CompositeExtract(const Value& vector, size_t element) {
 Value IREmitter::CompositeInsert(const Value& vector, const Value& object, size_t element) {
     const auto insert{[&](Opcode opcode, size_t limit) {
         if (element >= limit) {
-            UNREACHABLE_MSG("Out of bounds element {}", element);
+            SHADER_UNREACHABLE_MSG("Out of bounds element {}", element);
         }
         return Inst(opcode, vector, object, Value{static_cast<u32>(element)});
     }};
@@ -830,10 +832,10 @@ Value IREmitter::CompositeInsert(const Value& vector, const Value& object, size_
 Value IREmitter::CompositeShuffle(const Value& vector1, const Value& vector2, size_t comp0,
                                   size_t comp1) {
     if (vector1.Type() != vector2.Type()) {
-        UNREACHABLE_MSG("Mismatching types {} and {}", vector1.Type(), vector2.Type());
+        SHADER_UNREACHABLE_MSG("Mismatching types {} and {}", vector1.Type(), vector2.Type());
     }
     if (comp0 >= 4 || comp1 >= 4) {
-        UNREACHABLE_MSG("One or more out of bounds elements {}, {}", comp0, comp1);
+        SHADER_UNREACHABLE_MSG("One or more out of bounds elements {}, {}", comp0, comp1);
     }
     const auto shuffle{[&](Opcode opcode) -> Value {
         return Inst(opcode, vector1, vector2, Value{static_cast<u32>(comp0)},
@@ -852,10 +854,11 @@ Value IREmitter::CompositeShuffle(const Value& vector1, const Value& vector2, si
 Value IREmitter::CompositeShuffle(const Value& vector1, const Value& vector2, size_t comp0,
                                   size_t comp1, size_t comp2) {
     if (vector1.Type() != vector2.Type()) {
-        UNREACHABLE_MSG("Mismatching types {} and {}", vector1.Type(), vector2.Type());
+        SHADER_UNREACHABLE_MSG("Mismatching types {} and {}", vector1.Type(), vector2.Type());
     }
     if (comp0 >= 6 || comp1 >= 6 || comp2 >= 6) {
-        UNREACHABLE_MSG("One or more out of bounds elements {}, {}, {}", comp0, comp1, comp2);
+        SHADER_UNREACHABLE_MSG("One or more out of bounds elements {}, {}, {}", comp0, comp1,
+                               comp2);
     }
     const auto shuffle{[&](Opcode opcode) -> Value {
         return Inst(opcode, vector1, vector2, Value{static_cast<u32>(comp0)},
@@ -874,11 +877,12 @@ Value IREmitter::CompositeShuffle(const Value& vector1, const Value& vector2, si
 Value IREmitter::CompositeShuffle(const Value& vector1, const Value& vector2, size_t comp0,
                                   size_t comp1, size_t comp2, size_t comp3) {
     if (vector1.Type() != vector2.Type()) {
-        UNREACHABLE_MSG("Mismatching types {} and {}", vector1.Type(), vector2.Type());
+        SHADER_UNREACHABLE_MSG("Mismatching types {} and {}", vector1.Type(), vector2.Type());
     }
     if (comp0 >= 8 || comp1 >= 8 || comp2 >= 8 || comp3 >= 8) {
-        UNREACHABLE_MSG("One or more out of bounds elements {}, {}, {}, {}", comp0, comp1, comp2,
-                        comp3);
+        SHADER_UNREACHABLE_MSG("One or more out of bounds elements {}, {}, {}, {}", comp0, comp1,
+                               comp2,
+                               comp3);
     }
     const auto shuffle{[&](Opcode opcode) -> Value {
         return Inst(opcode, vector1, vector2, Value{static_cast<u32>(comp0)},
@@ -897,7 +901,8 @@ Value IREmitter::CompositeShuffle(const Value& vector1, const Value& vector2, si
 
 Value IREmitter::Select(const U1& condition, const Value& true_value, const Value& false_value) {
     if (true_value.Type() != false_value.Type()) {
-        UNREACHABLE_MSG("Mismatching types {} and {}", true_value.Type(), false_value.Type());
+        SHADER_UNREACHABLE_MSG("Mismatching types {} and {}", true_value.Type(),
+                               false_value.Type());
     }
     switch (true_value.Type()) {
     case Type::U1:
@@ -909,7 +914,7 @@ Value IREmitter::Select(const U1& condition, const Value& true_value, const Valu
     case Type::U64:
         return Inst(Opcode::SelectU64, condition, true_value, false_value);
     default:
-        UNREACHABLE_MSG("Invalid type {}", true_value.Type());
+        SHADER_UNREACHABLE_MSG("Invalid type {}", true_value.Type());
     }
 }
 
@@ -942,7 +947,7 @@ U32 IREmitter::Pack2x16(const AmdGpu::NumberFormat number_format, const Value& v
     case AmdGpu::NumberFormat::Float:
         return Inst<U32>(Opcode::PackHalf2x16, vector);
     default:
-        UNREACHABLE_MSG("Unsupported 2x16 number format: {}", number_format);
+        SHADER_UNREACHABLE_MSG("Unsupported 2x16 number format: {}", number_format);
     }
 }
 
@@ -959,7 +964,7 @@ Value IREmitter::Unpack2x16(const AmdGpu::NumberFormat number_format, const U32&
     case AmdGpu::NumberFormat::Float:
         return Inst(Opcode::UnpackHalf2x16, value);
     default:
-        UNREACHABLE_MSG("Unsupported 2x16 number format: {}", number_format);
+        SHADER_UNREACHABLE_MSG("Unsupported 2x16 number format: {}", number_format);
     }
 }
 
@@ -974,7 +979,7 @@ U32 IREmitter::Pack4x8(const AmdGpu::NumberFormat number_format, const Value& ve
     case AmdGpu::NumberFormat::Sint:
         return Inst<U32>(Opcode::PackSint4x8, vector);
     default:
-        UNREACHABLE_MSG("Unsupported 4x8 number format: {}", number_format);
+        SHADER_UNREACHABLE_MSG("Unsupported 4x8 number format: {}", number_format);
     }
 }
 
@@ -989,7 +994,7 @@ Value IREmitter::Unpack4x8(const AmdGpu::NumberFormat number_format, const U32& 
     case AmdGpu::NumberFormat::Sint:
         return Inst(Opcode::UnpackSint4x8, value);
     default:
-        UNREACHABLE_MSG("Unsupported 4x8 number format: {}", number_format);
+        SHADER_UNREACHABLE_MSG("Unsupported 4x8 number format: {}", number_format);
     }
 }
 
@@ -998,7 +1003,7 @@ U32 IREmitter::Pack10_11_11(const AmdGpu::NumberFormat number_format, const Valu
     case AmdGpu::NumberFormat::Float:
         return Inst<U32>(Opcode::PackUfloat10_11_11, vector);
     default:
-        UNREACHABLE_MSG("Unsupported 10_11_11 number format: {}", number_format);
+        SHADER_UNREACHABLE_MSG("Unsupported 10_11_11 number format: {}", number_format);
     }
 }
 
@@ -1013,7 +1018,7 @@ U32 IREmitter::Pack2_10_10_10(const AmdGpu::NumberFormat number_format, const Va
     case AmdGpu::NumberFormat::Sint:
         return Inst<U32>(Opcode::PackSint2_10_10_10, vector);
     default:
-        UNREACHABLE_MSG("Unsupported 2_10_10_10 number format: {}", number_format);
+        SHADER_UNREACHABLE_MSG("Unsupported 2_10_10_10 number format: {}", number_format);
     }
 }
 
@@ -1028,7 +1033,7 @@ Value IREmitter::Unpack2_10_10_10(const AmdGpu::NumberFormat number_format, cons
     case AmdGpu::NumberFormat::Sint:
         return Inst(Opcode::UnpackSint2_10_10_10, value);
     default:
-        UNREACHABLE_MSG("Unsupported 2_10_10_10 number format: {}", number_format);
+        SHADER_UNREACHABLE_MSG("Unsupported 2_10_10_10 number format: {}", number_format);
     }
 }
 
@@ -1037,13 +1042,13 @@ Value IREmitter::Unpack10_11_11(const AmdGpu::NumberFormat number_format, const 
     case AmdGpu::NumberFormat::Float:
         return Inst(Opcode::UnpackUfloat10_11_11, value);
     default:
-        UNREACHABLE_MSG("Unsupported 10_11_11 number format: {}", number_format);
+        SHADER_UNREACHABLE_MSG("Unsupported 10_11_11 number format: {}", number_format);
     }
 }
 
 F32F64 IREmitter::FPMul(const F32F64& a, const F32F64& b) {
     if (a.Type() != b.Type()) {
-        UNREACHABLE_MSG("Mismatching types {} and {}", a.Type(), b.Type());
+        SHADER_UNREACHABLE_MSG("Mismatching types {} and {}", a.Type(), b.Type());
     }
     switch (a.Type()) {
     case Type::F32:
@@ -1057,7 +1062,7 @@ F32F64 IREmitter::FPMul(const F32F64& a, const F32F64& b) {
 
 F32F64 IREmitter::FPDiv(const F32F64& a, const F32F64& b) {
     if (a.Type() != b.Type()) {
-        UNREACHABLE_MSG("Mismatching types {} and {}", a.Type(), b.Type());
+        SHADER_UNREACHABLE_MSG("Mismatching types {} and {}", a.Type(), b.Type());
     }
     switch (a.Type()) {
     case Type::F32:
@@ -1071,7 +1076,7 @@ F32F64 IREmitter::FPDiv(const F32F64& a, const F32F64& b) {
 
 F32F64 IREmitter::FPFma(const F32F64& a, const F32F64& b, const F32F64& c) {
     if (a.Type() != b.Type() || a.Type() != c.Type()) {
-        UNREACHABLE_MSG("Mismatching types {}, {}, and {}", a.Type(), b.Type(), c.Type());
+        SHADER_UNREACHABLE_MSG("Mismatching types {}, {}, and {}", a.Type(), b.Type(), c.Type());
     }
     switch (a.Type()) {
     case Type::F32:
@@ -1179,8 +1184,8 @@ F32F64 IREmitter::FPSaturate(const F32F64& value) {
 
 F32F64 IREmitter::FPClamp(const F32F64& value, const F32F64& min_value, const F32F64& max_value) {
     if (value.Type() != min_value.Type() || value.Type() != max_value.Type()) {
-        UNREACHABLE_MSG("Mismatching types {}, {}, and {}", value.Type(), min_value.Type(),
-                        max_value.Type());
+        SHADER_UNREACHABLE_MSG("Mismatching types {}, {}, and {}", value.Type(), min_value.Type(),
+                               max_value.Type());
     }
     switch (value.Type()) {
     case Type::F32:
@@ -1271,7 +1276,7 @@ U32 IREmitter::FPFrexpExp(const F32F64& value) {
 
 U1 IREmitter::FPEqual(const F32F64& lhs, const F32F64& rhs, bool ordered) {
     if (lhs.Type() != rhs.Type()) {
-        UNREACHABLE_MSG("Mismatching types {} and {}", lhs.Type(), rhs.Type());
+        SHADER_UNREACHABLE_MSG("Mismatching types {} and {}", lhs.Type(), rhs.Type());
     }
     switch (lhs.Type()) {
     case Type::F32:
@@ -1285,7 +1290,7 @@ U1 IREmitter::FPEqual(const F32F64& lhs, const F32F64& rhs, bool ordered) {
 
 U1 IREmitter::FPNotEqual(const F32F64& lhs, const F32F64& rhs, bool ordered) {
     if (lhs.Type() != rhs.Type()) {
-        UNREACHABLE_MSG("Mismatching types {} and {}", lhs.Type(), rhs.Type());
+        SHADER_UNREACHABLE_MSG("Mismatching types {} and {}", lhs.Type(), rhs.Type());
     }
     switch (lhs.Type()) {
     case Type::F32:
@@ -1299,7 +1304,7 @@ U1 IREmitter::FPNotEqual(const F32F64& lhs, const F32F64& rhs, bool ordered) {
 
 U1 IREmitter::FPLessThan(const F32F64& lhs, const F32F64& rhs, bool ordered) {
     if (lhs.Type() != rhs.Type()) {
-        UNREACHABLE_MSG("Mismatching types {} and {}", lhs.Type(), rhs.Type());
+        SHADER_UNREACHABLE_MSG("Mismatching types {} and {}", lhs.Type(), rhs.Type());
     }
     switch (lhs.Type()) {
     case Type::F32:
@@ -1313,7 +1318,7 @@ U1 IREmitter::FPLessThan(const F32F64& lhs, const F32F64& rhs, bool ordered) {
 
 U1 IREmitter::FPGreaterThan(const F32F64& lhs, const F32F64& rhs, bool ordered) {
     if (lhs.Type() != rhs.Type()) {
-        UNREACHABLE_MSG("Mismatching types {} and {}", lhs.Type(), rhs.Type());
+        SHADER_UNREACHABLE_MSG("Mismatching types {} and {}", lhs.Type(), rhs.Type());
     }
     switch (lhs.Type()) {
     case Type::F32:
@@ -1329,7 +1334,7 @@ U1 IREmitter::FPGreaterThan(const F32F64& lhs, const F32F64& rhs, bool ordered) 
 
 U1 IREmitter::FPLessThanEqual(const F32F64& lhs, const F32F64& rhs, bool ordered) {
     if (lhs.Type() != rhs.Type()) {
-        UNREACHABLE_MSG("Mismatching types {} and {}", lhs.Type(), rhs.Type());
+        SHADER_UNREACHABLE_MSG("Mismatching types {} and {}", lhs.Type(), rhs.Type());
     }
     switch (lhs.Type()) {
     case Type::F32:
@@ -1345,7 +1350,7 @@ U1 IREmitter::FPLessThanEqual(const F32F64& lhs, const F32F64& rhs, bool ordered
 
 U1 IREmitter::FPGreaterThanEqual(const F32F64& lhs, const F32F64& rhs, bool ordered) {
     if (lhs.Type() != rhs.Type()) {
-        UNREACHABLE_MSG("Mismatching types {} and {}", lhs.Type(), rhs.Type());
+        SHADER_UNREACHABLE_MSG("Mismatching types {} and {}", lhs.Type(), rhs.Type());
     }
     switch (lhs.Type()) {
     case Type::F32:
@@ -1389,21 +1394,21 @@ U1 IREmitter::FPCmpClass32(const F32& value, const U32& op) {
 
 U1 IREmitter::FPOrdered(const F32F64& lhs, const F32F64& rhs) {
     if (lhs.Type() != rhs.Type()) {
-        UNREACHABLE_MSG("Mismatching types {} and {}", lhs.Type(), rhs.Type());
+        SHADER_UNREACHABLE_MSG("Mismatching types {} and {}", lhs.Type(), rhs.Type());
     }
     return LogicalAnd(LogicalNot(FPIsNan(lhs)), LogicalNot(FPIsNan(rhs)));
 }
 
 U1 IREmitter::FPUnordered(const F32F64& lhs, const F32F64& rhs) {
     if (lhs.Type() != rhs.Type()) {
-        UNREACHABLE_MSG("Mismatching types {} and {}", lhs.Type(), rhs.Type());
+        SHADER_UNREACHABLE_MSG("Mismatching types {} and {}", lhs.Type(), rhs.Type());
     }
     return LogicalOr(FPIsNan(lhs), FPIsNan(rhs));
 }
 
 F32F64 IREmitter::FPMax(const F32F64& lhs, const F32F64& rhs) {
     if (lhs.Type() != rhs.Type()) {
-        UNREACHABLE_MSG("Mismatching types {} and {}", lhs.Type(), rhs.Type());
+        SHADER_UNREACHABLE_MSG("Mismatching types {} and {}", lhs.Type(), rhs.Type());
     }
 
     switch (lhs.Type()) {
@@ -1418,7 +1423,7 @@ F32F64 IREmitter::FPMax(const F32F64& lhs, const F32F64& rhs) {
 
 F32F64 IREmitter::FPMin(const F32F64& lhs, const F32F64& rhs) {
     if (lhs.Type() != rhs.Type()) {
-        UNREACHABLE_MSG("Mismatching types {} and {}", lhs.Type(), rhs.Type());
+        SHADER_UNREACHABLE_MSG("Mismatching types {} and {}", lhs.Type(), rhs.Type());
     }
     switch (lhs.Type()) {
     case Type::F32:
@@ -1444,7 +1449,7 @@ F32F64 IREmitter::FPMedTri(const F32F64& a, const F32F64& b, const F32F64& c) {
 
 U32U64 IREmitter::IAdd(const U32U64& a, const U32U64& b) {
     if (a.Type() != b.Type()) {
-        UNREACHABLE_MSG("Mismatching types {} and {}", a.Type(), b.Type());
+        SHADER_UNREACHABLE_MSG("Mismatching types {} and {}", a.Type(), b.Type());
     }
     switch (a.Type()) {
     case Type::U32:
@@ -1458,7 +1463,7 @@ U32U64 IREmitter::IAdd(const U32U64& a, const U32U64& b) {
 
 Value IREmitter::IAddCarry(const U32& a, const U32& b) {
     if (a.Type() != b.Type()) {
-        UNREACHABLE_MSG("Mismatching types {} and {}", a.Type(), b.Type());
+        SHADER_UNREACHABLE_MSG("Mismatching types {} and {}", a.Type(), b.Type());
     }
     switch (a.Type()) {
     case Type::U32:
@@ -1470,7 +1475,7 @@ Value IREmitter::IAddCarry(const U32& a, const U32& b) {
 
 U32U64 IREmitter::ISub(const U32U64& a, const U32U64& b) {
     if (a.Type() != b.Type()) {
-        UNREACHABLE_MSG("Mismatching types {} and {}", a.Type(), b.Type());
+        SHADER_UNREACHABLE_MSG("Mismatching types {} and {}", a.Type(), b.Type());
     }
     switch (a.Type()) {
     case Type::U32:
@@ -1488,7 +1493,7 @@ U32 IREmitter::IMulHi(const U32& a, const U32& b, bool is_signed) {
 
 U32U64 IREmitter::IMul(const U32U64& a, const U32U64& b) {
     if (a.Type() != b.Type()) {
-        UNREACHABLE_MSG("Mismatching types {} and {}", a.Type(), b.Type());
+        SHADER_UNREACHABLE_MSG("Mismatching types {} and {}", a.Type(), b.Type());
     }
     switch (a.Type()) {
     case Type::U32:
@@ -1570,7 +1575,7 @@ U32U64 IREmitter::ShiftRightArithmetic(const U32U64& base, const U32& shift) {
 
 U32U64 IREmitter::BitwiseAnd(const U32U64& a, const U32U64& b) {
     if (a.Type() != b.Type()) {
-        UNREACHABLE_MSG("Mismatching types {} and {}", a.Type(), b.Type());
+        SHADER_UNREACHABLE_MSG("Mismatching types {} and {}", a.Type(), b.Type());
     }
     switch (a.Type()) {
     case Type::U32:
@@ -1584,7 +1589,7 @@ U32U64 IREmitter::BitwiseAnd(const U32U64& a, const U32U64& b) {
 
 U32U64 IREmitter::BitwiseOr(const U32U64& a, const U32U64& b) {
     if (a.Type() != b.Type()) {
-        UNREACHABLE_MSG("Mismatching types {} and {}", a.Type(), b.Type());
+        SHADER_UNREACHABLE_MSG("Mismatching types {} and {}", a.Type(), b.Type());
     }
     switch (a.Type()) {
     case Type::U32:
@@ -1598,7 +1603,7 @@ U32U64 IREmitter::BitwiseOr(const U32U64& a, const U32U64& b) {
 
 U32U64 IREmitter::BitwiseXor(const U32U64& a, const U32U64& b) {
     if (a.Type() != b.Type()) {
-        UNREACHABLE_MSG("Mismatching types {} and {}", a.Type(), b.Type());
+        SHADER_UNREACHABLE_MSG("Mismatching types {} and {}", a.Type(), b.Type());
     }
     switch (a.Type()) {
     case Type::U32:
@@ -1613,7 +1618,7 @@ U32U64 IREmitter::BitwiseXor(const U32U64& a, const U32U64& b) {
 U32U64 IREmitter::BitFieldInsert(const U32U64& base, const U32U64& insert, const U32& offset,
                                  const U32& count) {
     if (base.Type() != insert.Type()) {
-        UNREACHABLE_MSG("Mismatching types {} and {}", base.Type(), insert.Type());
+        SHADER_UNREACHABLE_MSG("Mismatching types {} and {}", base.Type(), insert.Type());
     }
     switch (base.Type()) {
     case Type::U32:
@@ -1757,7 +1762,7 @@ U32 IREmitter::UClamp(const U32& value, const U32& min, const U32& max) {
 
 U1 IREmitter::ILessThan(const U32U64& lhs, const U32U64& rhs, bool is_signed) {
     if (lhs.Type() != rhs.Type()) {
-        UNREACHABLE_MSG("Mismatching types {} and {}", lhs.Type(), rhs.Type());
+        SHADER_UNREACHABLE_MSG("Mismatching types {} and {}", lhs.Type(), rhs.Type());
     }
     switch (lhs.Type()) {
     case Type::U32:
@@ -1771,7 +1776,7 @@ U1 IREmitter::ILessThan(const U32U64& lhs, const U32U64& rhs, bool is_signed) {
 
 U1 IREmitter::IEqual(const U32U64& lhs, const U32U64& rhs) {
     if (lhs.Type() != rhs.Type()) {
-        UNREACHABLE_MSG("Mismatching types {} and {}", lhs.Type(), rhs.Type());
+        SHADER_UNREACHABLE_MSG("Mismatching types {} and {}", lhs.Type(), rhs.Type());
     }
     switch (lhs.Type()) {
     case Type::U32:
@@ -1785,7 +1790,7 @@ U1 IREmitter::IEqual(const U32U64& lhs, const U32U64& rhs) {
 
 U1 IREmitter::ILessThanEqual(const U32U64& lhs, const U32U64& rhs, bool is_signed) {
     if (lhs.Type() != rhs.Type()) {
-        UNREACHABLE_MSG("Mismatching types {} and {}", lhs.Type(), rhs.Type());
+        SHADER_UNREACHABLE_MSG("Mismatching types {} and {}", lhs.Type(), rhs.Type());
     }
     switch (lhs.Type()) {
     case Type::U32:
@@ -1799,7 +1804,7 @@ U1 IREmitter::ILessThanEqual(const U32U64& lhs, const U32U64& rhs, bool is_signe
 
 U1 IREmitter::IGreaterThan(const U32U64& lhs, const U32U64& rhs, bool is_signed) {
     if (lhs.Type() != rhs.Type()) {
-        UNREACHABLE_MSG("Mismatching types {} and {}", lhs.Type(), rhs.Type());
+        SHADER_UNREACHABLE_MSG("Mismatching types {} and {}", lhs.Type(), rhs.Type());
     }
     switch (lhs.Type()) {
     case Type::U32:
@@ -1813,7 +1818,7 @@ U1 IREmitter::IGreaterThan(const U32U64& lhs, const U32U64& rhs, bool is_signed)
 
 U1 IREmitter::INotEqual(const U32U64& lhs, const U32U64& rhs) {
     if (lhs.Type() != rhs.Type()) {
-        UNREACHABLE_MSG("Mismatching types {} and {}", lhs.Type(), rhs.Type());
+        SHADER_UNREACHABLE_MSG("Mismatching types {} and {}", lhs.Type(), rhs.Type());
     }
     switch (lhs.Type()) {
     case Type::U32:
@@ -1827,7 +1832,7 @@ U1 IREmitter::INotEqual(const U32U64& lhs, const U32U64& rhs) {
 
 U1 IREmitter::IGreaterThanEqual(const U32U64& lhs, const U32U64& rhs, bool is_signed) {
     if (lhs.Type() != rhs.Type()) {
-        UNREACHABLE_MSG("Mismatching types {} and {}", lhs.Type(), rhs.Type());
+        SHADER_UNREACHABLE_MSG("Mismatching types {} and {}", lhs.Type(), rhs.Type());
     }
     switch (lhs.Type()) {
     case Type::U32:
@@ -1871,7 +1876,7 @@ U32U64 IREmitter::ConvertFToS(size_t bitsize, const F32F64& value) {
     default:
         break;
     }
-    UNREACHABLE_MSG("Invalid destination bitsize {}", bitsize);
+    SHADER_UNREACHABLE_MSG("Invalid destination bitsize {}", bitsize);
 }
 
 U32U64 IREmitter::ConvertFToU(size_t bitsize, const F32F64& value) {
@@ -1884,7 +1889,7 @@ U32U64 IREmitter::ConvertFToU(size_t bitsize, const F32F64& value) {
             ThrowInvalidType(value.Type());
         }
     default:
-        UNREACHABLE_MSG("Invalid destination bitsize {}", bitsize);
+        SHADER_UNREACHABLE_MSG("Invalid destination bitsize {}", bitsize);
     }
 }
 
@@ -1911,7 +1916,7 @@ F32F64 IREmitter::ConvertSToF(size_t dest_bitsize, size_t src_bitsize, const Val
     default:
         break;
     }
-    UNREACHABLE_MSG("Invalid bit size combination dst={} src={}", dest_bitsize, src_bitsize);
+    SHADER_UNREACHABLE_MSG("Invalid bit size combination dst={} src={}", dest_bitsize, src_bitsize);
 }
 
 F32F64 IREmitter::ConvertUToF(size_t dest_bitsize, size_t src_bitsize, const Value& value) {
@@ -1935,7 +1940,7 @@ F32F64 IREmitter::ConvertUToF(size_t dest_bitsize, size_t src_bitsize, const Val
     default:
         break;
     }
-    UNREACHABLE_MSG("Invalid bit size combination dst={} src={}", dest_bitsize, src_bitsize);
+    SHADER_UNREACHABLE_MSG("Invalid bit size combination dst={} src={}", dest_bitsize, src_bitsize);
 }
 
 F32F64 IREmitter::ConvertIToF(size_t dest_bitsize, size_t src_bitsize, bool is_signed,
@@ -1979,7 +1984,7 @@ U8U16U32U64 IREmitter::UConvert(size_t result_bitsize, const U8U16U32U64& value)
     default:
         break;
     }
-    UNREACHABLE_MSG("Conversion from {} to {} bits", value.Type(), result_bitsize);
+    SHADER_UNREACHABLE_MSG("Conversion from {} to {} bits", value.Type(), result_bitsize);
 }
 
 U8U16U32U64 IR::IREmitter::SConvert(size_t result_bitsize, const U8U16U32U64& value) {
@@ -1996,7 +2001,7 @@ U8U16U32U64 IR::IREmitter::SConvert(size_t result_bitsize, const U8U16U32U64& va
     default:
         break;
     }
-    UNREACHABLE_MSG("Signed Conversion from {} to {} bits", value.Type(), result_bitsize);
+    SHADER_UNREACHABLE_MSG("Signed Conversion from {} to {} bits", value.Type(), result_bitsize);
 }
 
 F16F32F64 IREmitter::FPConvert(size_t result_bitsize, const F16F32F64& value) {
@@ -2027,7 +2032,7 @@ F16F32F64 IREmitter::FPConvert(size_t result_bitsize, const F16F32F64& value) {
     default:
         break;
     }
-    UNREACHABLE_MSG("Conversion from {} to {} bits", value.Type(), result_bitsize);
+    SHADER_UNREACHABLE_MSG("Conversion from {} to {} bits", value.Type(), result_bitsize);
 }
 
 Value IREmitter::ImageAtomicIAdd(const Value& handle, const Value& coords, const Value& value,
@@ -2200,8 +2205,8 @@ void IREmitter::ImageWrite(const Value& handle, const Value& coords, const U32& 
 void IREmitter::DebugPrint(const char* fmt, boost::container::small_vector<Value, 5> format_args) {
     std::array<Value, DEBUGPRINT_NUM_FORMAT_ARGS> args;
 
-    ASSERT_MSG(format_args.size() < DEBUGPRINT_NUM_FORMAT_ARGS,
-               "DebugPrint only supports up to {} format args", DEBUGPRINT_NUM_FORMAT_ARGS);
+    SHADER_ASSERT_MSG(format_args.size() < DEBUGPRINT_NUM_FORMAT_ARGS,
+                      "DebugPrint only supports up to {} format args", DEBUGPRINT_NUM_FORMAT_ARGS);
 
     for (int i = 0; i < format_args.size(); i++) {
         args[i] = format_args[i];

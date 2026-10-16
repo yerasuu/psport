@@ -3,11 +3,12 @@
 
 #include "shader_recompiler/ir/ir_emitter.h"
 #include "shader_recompiler/ir/program.h"
+#include "shader_recompiler/translation_error.h"
 
 namespace Shader::Optimization {
 
 static void LowerCmpClass(IR::Block& block, IR::Inst& inst) {
-    ASSERT_MSG(inst.Arg(1).IsImmediate(), "Unable to resolve compare operation");
+    SHADER_ASSERT_MSG(inst.Arg(1).IsImmediate(), "Unable to resolve compare operation");
     const auto class_mask = static_cast<IR::FloatClassFunc>(inst.Arg(1).U32());
     if ((class_mask & IR::FloatClassFunc::NaN) == IR::FloatClassFunc::NaN) {
         inst.ReplaceOpcode(IR::Opcode::FPIsNan32);
@@ -19,7 +20,7 @@ static void LowerCmpClass(IR::Block& block, IR::Inst& inst) {
         inst.ReplaceUsesWithAndRemove(
             ir.LogicalNot(ir.LogicalOr(ir.FPIsNan(value), ir.FPIsInf(value))));
     } else {
-        UNREACHABLE();
+        SHADER_UNREACHABLE();
     }
 }
 
@@ -52,8 +53,9 @@ static void LowerPackedAncillary(IR::Block& block, IR::Inst& inst) {
                 ir.BitFieldExtract(mrt_index, ir.Imm32(offset - 16), ir.Imm32(bits)));
         }
     } else {
-        UNREACHABLE_MSG("Unhandled bitfield extract from ancillary VGPR offset={}, bits={}", offset,
-                        bits);
+        SHADER_UNREACHABLE_MSG("Unhandled bitfield extract from ancillary VGPR offset={}, bits={}",
+                               offset,
+                               bits);
     }
     value->ReplaceUsesWithAndRemove(ir.Imm32(0U));
 }

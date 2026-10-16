@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include <queue>
 #include "shader_recompiler/ir/program.h"
+#include "shader_recompiler/translation_error.h"
 
 namespace Shader::Optimization {
 
@@ -95,7 +96,7 @@ static IR::Value GetRealValue(PhiMap& phi_map, IR::Inst* inst, u32 lane) {
     if (inst->GetOpcode() == IR::Opcode::UndefU32) {
         return IR::Value{inst};
     }
-    UNREACHABLE();
+    SHADER_UNREACHABLE();
 }
 
 void ReadLaneEliminationPass(IR::Program& program) {
@@ -165,7 +166,7 @@ void ReadLaneEliminationPass(IR::Program& program) {
         }
 
         IR::Block* block = phi->GetParent();
-        ASSERT(!same.IsEmpty());
+        SHADER_ASSERT(!same.IsEmpty());
 
         // Add phi users to worklist since they may have become trivial
         for (const auto& [user, operand] : phi->Uses()) {

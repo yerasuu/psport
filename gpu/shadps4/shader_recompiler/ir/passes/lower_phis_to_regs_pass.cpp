@@ -7,6 +7,7 @@
 #include "shader_recompiler/ir/program.h"
 #include "shader_recompiler/ir/reg.h"
 #include "shader_recompiler/ir/value.h"
+#include "shader_recompiler/translation_error.h"
 
 namespace Shader::Optimization {
 
@@ -29,7 +30,7 @@ static IR::Value LoadForRegType(IR::IREmitter& ir, IR::RegTag tag) {
     case IR::RegType::VirtualReg:
         return ir.GetVirtualReg(tag.reg);
     default:
-        UNREACHABLE_MSG("Unknown reg type {}", u32(tag.type));
+        SHADER_UNREACHABLE_MSG("Unknown reg type {}", u32(tag.type));
     }
 }
 

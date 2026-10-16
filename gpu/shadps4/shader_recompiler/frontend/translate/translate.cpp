@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <numbers>
 #include <magic_enum/magic_enum.hpp>
+#include "shader_recompiler/translation_error.h"
 
 namespace Shader::Gcn {
 
@@ -66,7 +67,7 @@ static s8 UdRegFromShOffset(u16 sgpr_offset, HwStage hw_stage) {
     static constexpr std::array indirect_sgpr_offsets{0u, 0x4cu, 0u, 0xccu, 0u, 0x14cu};
     if (sgpr_offset) {
         const u32 ud_reg = sgpr_offset - indirect_sgpr_offsets[u32(hw_stage)];
-        ASSERT_MSG(ud_reg < 16, "Out of bounds indirect SGPR copy");
+        SHADER_ASSERT_MSG(ud_reg < 16, "Out of bounds indirect SGPR copy");
         return ud_reg;
     }
     return -1;
@@ -115,8 +116,8 @@ void Translator::EmitPrologue(IR::Block* first_block) {
             if (!fetch_data || fetch_data->vertex_offset_sgpr == -1) {
                 vertex_id = ir.ISub(vertex_id, ir.GetAttributeU32(IR::Attribute::BaseVertex));
             } else {
-                ASSERT_MSG(fetch_data->vertex_offset_sgpr == base_vertex_sgpr,
-                           "Fetch shader in indirect draw uses wrong base vertex");
+                SHADER_ASSERT_MSG(fetch_data->vertex_offset_sgpr == base_vertex_sgpr,
+                                  "Fetch shader in indirect draw uses wrong base vertex");
             }
         }
         ir.SetVectorReg(dst_vreg++, vertex_id);
@@ -161,8 +162,8 @@ void Translator::EmitPrologue(IR::Block* first_block) {
                     instance_id =
                         ir.ISub(instance_id, ir.GetAttributeU32(IR::Attribute::BaseInstance));
                 } else {
-                    ASSERT_MSG(fetch_data->instance_offset_sgpr == base_instance_sgpr,
-                               "Fetch shader in indirect draw uses wrong base instance");
+                    SHADER_ASSERT_MSG(fetch_data->instance_offset_sgpr == base_instance_sgpr,
+                                      "Fetch shader in indirect draw uses wrong base instance");
                 }
             }
             ir.SetVectorReg(dst_vreg++, instance_id);
@@ -322,14 +323,14 @@ void Translator::EmitPrologue(IR::Block* first_block) {
         ir.SetVectorReg(IR::VectorReg::V2, ir.GetAttributeU32(IR::Attribute::PrimitiveId));
         break;
     default:
-        UNREACHABLE_MSG("Unknown shader stage");
+        SHADER_UNREACHABLE_MSG("Unknown shader stage");
     }
 }
 
 IR::VectorReg Translator::GetScratchVgpr(u32 offset) {
     const auto [it, is_new] = vgpr_map.try_emplace(offset);
     if (is_new) {
-        ASSERT_MSG(next_vgpr_num < 256, "Out of VGPRs");
+        SHADER_ASSERT_MSG(next_vgpr_num < 256, "Out of VGPRs");
         const auto new_vgpr = static_cast<IR::VectorReg>(next_vgpr_num++);
         it->second = new_vgpr;
     }
@@ -396,9 +397,9 @@ T Translator::GetSrc(const InstOperand& operand) {
         value = get_imm(static_cast<float>(1.0f / (2.0f * std::numbers::pi)));
         break;
     case OperandField::Sdwa:
-        UNREACHABLE_MSG("unhandled SDWA");
+        SHADER_UNREACHABLE_MSG("unhandled SDWA");
     case OperandField::Dpp:
-        UNREACHABLE_MSG("unhandled DPP");
+        SHADER_UNREACHABLE_MSG("unhandled DPP");
     case OperandField::VccLo:
         if constexpr (is_float) {
             value = ir.BitCast<IR::F32>(ir.GetVccLo());
@@ -422,7 +423,7 @@ T Translator::GetSrc(const InstOperand& operand) {
         break;
     case OperandField::Scc:
         if constexpr (is_float) {
-            UNREACHABLE();
+            SHADER_UNREACHABLE();
         } else {
             value = IR::U32{ir.Select(ir.GetScc(), ir.Imm32(1u), ir.Imm32(0u))};
         }
@@ -444,7 +445,7 @@ T Translator::GetSrc(const InstOperand& operand) {
         }
         break;
     default:
-        UNREACHABLE_MSG("Unexpected operand: {}", std::to_underlying(operand.field));
+        SHADER_UNREACHABLE_MSG("Unexpected operand: {}", std::to_underlying(operand.field));
     }
 
     if constexpr (is_float) {
@@ -578,7 +579,7 @@ T Translator::GetSrc16(const InstOperand& operand) {
         }
         break;
     default:
-        UNREACHABLE_MSG("Unexpected operand: {}", std::to_underlying(operand.field));
+        SHADER_UNREACHABLE_MSG("Unexpected operand: {}", std::to_underlying(operand.field));
     }
 
     if constexpr (is_float) {
@@ -688,19 +689,19 @@ IR::F32 Translator::GetSrcMix(const InstOperand& operand) {
         break;
     }
     case OperandField::VccHi:
-        UNREACHABLE();
+        SHADER_UNREACHABLE();
         break;
     case OperandField::M0:
-        UNREACHABLE();
+        SHADER_UNREACHABLE();
         break;
     case OperandField::Scc:
-        UNREACHABLE();
+        SHADER_UNREACHABLE();
         break;
     case OperandField::Inv2Pi:
         value = get_imm(static_cast<float>(1.0f / (2.0f * std::numbers::pi)));
         break;
     default:
-        UNREACHABLE_MSG("Unexpected operand: {}", std::to_underlying(operand.field));
+        SHADER_UNREACHABLE_MSG("Unexpected operand: {}", std::to_underlying(operand.field));
     }
 
     if (operand.input_modifier.neg_hi) {
@@ -795,13 +796,13 @@ T Translator::GetSrc64(const InstOperand& operand) {
         break;
     case OperandField::ExecLo:
         if constexpr (is_float) {
-            UNREACHABLE();
+            SHADER_UNREACHABLE();
         } else {
             value = ir.Ballot(ir.GetExec());
         }
         break;
     default:
-        UNREACHABLE_MSG("Unexpected operand: {}", std::to_underlying(operand.field));
+        SHADER_UNREACHABLE_MSG("Unexpected operand: {}", std::to_underlying(operand.field));
     }
 
     if constexpr (is_float) {
@@ -940,7 +941,7 @@ pk_type<T> Translator::GetSrcPk(const InstOperand& operand) {
         value = extract(ir.GetVccLo());
         break;
     default:
-        UNREACHABLE_MSG("Unexpected operand: {}", std::to_underlying(operand.field));
+        SHADER_UNREACHABLE_MSG("Unexpected operand: {}", std::to_underlying(operand.field));
     }
 
     if constexpr (is_float) {
@@ -998,7 +999,7 @@ void Translator::SetDst(const InstOperand& operand, const IR::U32F32& value) {
         return ir.SetExec(ir.InverseBallot(ir.PackUint2x32(halves)));
     }
     default:
-        UNREACHABLE_MSG("Unknown field {}", u32(operand.field));
+        SHADER_UNREACHABLE_MSG("Unknown field {}", u32(operand.field));
     }
 }
 
@@ -1028,7 +1029,7 @@ void Translator::SetDst16(const InstOperand& operand, const IR::U32F32& value) {
         } else if (value.Type() == IR::Type::U32) {
             return value;
         } else {
-            UNREACHABLE();
+            SHADER_UNREACHABLE();
         }
     };
 
@@ -1050,7 +1051,7 @@ void Translator::SetDst16(const InstOperand& operand, const IR::U32F32& value) {
         return ir.SetVectorReg(IR::VectorReg(operand.code), new_dst);
     }
     default:
-        UNREACHABLE_MSG("Unexpected operand: {}", std::to_underlying(operand.field));
+        SHADER_UNREACHABLE_MSG("Unexpected operand: {}", std::to_underlying(operand.field));
     }
 }
 
@@ -1101,7 +1102,7 @@ void Translator::SetDst64(const InstOperand& operand, const IR::U64F64& value_ra
         ir.SetExec(ir.InverseBallot(value_untyped));
         break;
     default:
-        UNREACHABLE_MSG("Unexpected operand: {}", std::to_underlying(operand.field));
+        SHADER_UNREACHABLE_MSG("Unexpected operand: {}", std::to_underlying(operand.field));
     }
 }
 
@@ -1170,7 +1171,7 @@ void Translator::EmitFetch(const GcnInst& inst) {
     info.fetch_shader_sgpr_base = code_sgpr_base;
 
     fetch_data = ParseFetchShader(info);
-    ASSERT(fetch_data.has_value());
+    SHADER_ASSERT(fetch_data.has_value());
 
     if (EmulatorSettings.IsDumpShaders()) {
         using namespace Common::FS;
@@ -1221,8 +1222,8 @@ void Translator::Translate(IR::Block* block, u32 start_pc, IR::Condition cond,
 
         // Special case for emitting fetch shader.
         if (inst.opcode == Opcode::S_SWAPPC_B64) {
-            ASSERT(info.hw_stage == HwStage::Vertex || info.hw_stage == HwStage::Export ||
-                   info.hw_stage == HwStage::Local);
+            SHADER_ASSERT(info.hw_stage == HwStage::Vertex || info.hw_stage == HwStage::Export ||
+                          info.hw_stage == HwStage::Local);
             EmitFetch(inst);
             continue;
         }
@@ -1264,7 +1265,7 @@ void Translator::TranslateInstruction(const GcnInst& inst) {
     case InstCategory::DebugProfile:
         break;
     default:
-        UNREACHABLE();
+        SHADER_UNREACHABLE();
     }
 }
 

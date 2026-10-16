@@ -7,7 +7,6 @@
 #include <vector>
 #include <magic_enum/magic_enum.hpp>
 
-#include "common/assert.h"
 #include "common/func_traits.h"
 #include "shader_recompiler/backend/spirv/emit_spirv.h"
 #include "shader_recompiler/backend/spirv/emit_spirv_instructions.h"
@@ -16,6 +15,7 @@
 #include "shader_recompiler/ir/basic_block.h"
 #include "shader_recompiler/ir/program.h"
 #include "shader_recompiler/runtime_info.h"
+#include "shader_recompiler/translation_error.h"
 
 namespace Shader::Backend::SPIRV {
 namespace {
@@ -36,7 +36,7 @@ static constexpr spv::ExecutionMode GetInputPrimitiveType(AmdGpu::PrimitiveType 
     case AmdGpu::PrimitiveType::AdjLineList:
         return spv::ExecutionMode::InputLinesAdjacency;
     default:
-        UNREACHABLE_MSG("Unknown input primitive type {}", u32(type));
+        SHADER_UNREACHABLE_MSG("Unknown input primitive type {}", u32(type));
     }
 }
 
@@ -49,7 +49,7 @@ static constexpr spv::ExecutionMode GetOutputPrimitiveType(AmdGpu::GsOutputPrimi
     case AmdGpu::GsOutputPrimitiveType::TriangleStrip:
         return spv::ExecutionMode::OutputTriangleStrip;
     default:
-        UNREACHABLE_MSG("Unknown output primitive type {}", u32(type));
+        SHADER_UNREACHABLE_MSG("Unknown output primitive type {}", u32(type));
     }
 }
 
@@ -81,7 +81,7 @@ ArgType Arg(EmitContext& ctx, const IR::Value& arg) {
     } else if constexpr (std::is_same_v<ArgType, IR::Patch>) {
         return arg.Patch();
     }
-    UNREACHABLE();
+    SHADER_UNREACHABLE();
 }
 
 template <auto func, bool is_first_arg_inst, size_t... I>
@@ -127,7 +127,7 @@ void EmitInst(EmitContext& ctx, IR::Inst* inst) {
 #include "shader_recompiler/ir/opcodes.inc"
 #undef OPCODE
     }
-    UNREACHABLE_MSG("Invalid opcode {}", inst->GetOpcode());
+    SHADER_UNREACHABLE_MSG("Invalid opcode {}", inst->GetOpcode());
 }
 
 Id TypeId(const EmitContext& ctx, IR::Type type) {
@@ -147,7 +147,7 @@ Id TypeId(const EmitContext& ctx, IR::Type type) {
     case IR::Type::U64:
         return ctx.U64;
     default:
-        UNREACHABLE_MSG("Phi node type {}", type);
+        SHADER_UNREACHABLE_MSG("Phi node type {}", type);
     }
 }
 
@@ -235,7 +235,7 @@ spv::ExecutionMode ExecutionMode(AmdGpu::TessellationType primitive) {
     case AmdGpu::TessellationType::Quad:
         return spv::ExecutionMode::Quads;
     }
-    UNREACHABLE_MSG("Tessellation primitive {}", magic_enum::enum_name(primitive));
+    SHADER_UNREACHABLE_MSG("Tessellation primitive {}", magic_enum::enum_name(primitive));
 }
 
 spv::ExecutionMode ExecutionMode(AmdGpu::TessellationPartitioning spacing) {
@@ -255,7 +255,7 @@ spv::ExecutionMode ExecutionMode(AmdGpu::TessellationPartitioning spacing) {
     default:
         break;
     }
-    UNREACHABLE_MSG("Tessellation spacing {}", magic_enum::enum_name(spacing));
+    SHADER_UNREACHABLE_MSG("Tessellation spacing {}", magic_enum::enum_name(spacing));
 }
 
 void SetupCapabilities(const Info& info, const Profile& profile, const RuntimeInfo& runtime_info,
@@ -377,14 +377,14 @@ void SetupCapabilities(const Info& info, const Profile& profile, const RuntimeIn
     }
     if (info.uses_buffer_int64_atomics || info.uses_shared_int64_atomics) {
         if (info.uses_buffer_int64_atomics) {
-            ASSERT_MSG(ctx.profile.supports_buffer_int64_atomics,
-                       "Shader requires support for atomic Int64 buffer operations that your "
-                       "Vulkan instance does not advertise");
+            SHADER_ASSERT_MSG(ctx.profile.supports_buffer_int64_atomics,
+                              "Shader requires support for atomic Int64 buffer operations that "
+                              "your Vulkan instance does not advertise");
         }
         if (info.uses_shared_int64_atomics) {
-            ASSERT_MSG(ctx.profile.supports_shared_int64_atomics,
-                       "Shader requires support for atomic Int64 shared memory operations that "
-                       "your Vulkan instance does not advertise");
+            SHADER_ASSERT_MSG(ctx.profile.supports_shared_int64_atomics,
+                              "Shader requires support for atomic Int64 shared memory operations "
+                              "that your Vulkan instance does not advertise");
         }
         ctx.AddCapability(spv::Capability::Int64Atomics);
     }
@@ -447,7 +447,7 @@ void DefineEntryPoint(const Info& info, EmitContext& ctx, Id main) {
         }
         break;
     default:
-        UNREACHABLE_MSG("Stage {}", u32(info.hw_stage));
+        SHADER_UNREACHABLE_MSG("Stage {}", u32(info.hw_stage));
     }
     ctx.AddEntryPoint(execution_model, main, "main", interfaces);
 }
@@ -652,7 +652,7 @@ void PatchPhiNodes(const IR::Program& program, EmitContext& ctx) {
                 inst = program.blocks[block_index]->begin();
             }
         }
-        ASSERT(inst != program.blocks[block_index]->end());
+        SHADER_ASSERT(inst != program.blocks[block_index]->end());
         const Id arg = ctx.Def(inst->Arg(phi_arg));
         const Id parent = ctx.first_to_last_label_map[first_parent.value];
         return std::make_pair(arg, parent);
@@ -660,16 +660,22 @@ void PatchPhiNodes(const IR::Program& program, EmitContext& ctx) {
 }
 } // Anonymous namespace
 
-std::vector<u32> EmitSPIRV(const Profile& profile, const RuntimeInfo& runtime_info,
-                           const IR::Program& program, Bindings& binding) {
-    EmitContext ctx{profile, runtime_info, program.info, binding};
-    const Id main{DefineMain(ctx, program)};
-    DefineEntryPoint(program.info, ctx, main);
-    SetupCapabilities(program.info, profile, runtime_info, ctx);
-    SetupFloatMode(ctx, profile, runtime_info, main);
-    PatchPhiNodes(program, ctx);
-    binding.user_data += program.info.ud_mask.NumRegs();
-    return ctx.Assemble();
+std::expected<std::vector<u32>, TranslationError> EmitSPIRV(const Profile& profile,
+                                                            const RuntimeInfo& runtime_info,
+                                                            const IR::Program& program,
+                                                            Bindings& binding) {
+    try {
+        EmitContext ctx{profile, runtime_info, program.info, binding};
+        const Id main{DefineMain(ctx, program)};
+        DefineEntryPoint(program.info, ctx, main);
+        SetupCapabilities(program.info, profile, runtime_info, ctx);
+        SetupFloatMode(ctx, profile, runtime_info, main);
+        PatchPhiNodes(program, ctx);
+        binding.user_data += program.info.ud_mask.NumRegs();
+        return ctx.Assemble();
+    } catch (TranslationError& error) {
+        return std::unexpected(std::move(error));
+    }
 }
 
 Id EmitPhi(EmitContext& ctx, IR::Inst* inst) {
@@ -688,62 +694,62 @@ void EmitVoid(EmitContext&) {}
 
 Id EmitConditionRef(EmitContext& ctx, const IR::Value& value) {
     const Id id{ctx.Def(value)};
-    ASSERT_MSG(Sirit::ValidId(id), "Forward identity declaration");
+    SHADER_ASSERT_MSG(Sirit::ValidId(id), "Forward identity declaration");
     return id;
 }
 
 Id EmitGetPcLo(EmitContext& ctx, const IR::Value& value) {
     const Id id{ctx.Def(value)};
-    ASSERT_MSG(Sirit::ValidId(id), "Forward identity declaration");
+    SHADER_ASSERT_MSG(Sirit::ValidId(id), "Forward identity declaration");
     return id;
 }
 
 void EmitGetScc(EmitContext& ctx) {
-    UNREACHABLE_MSG("Unreachable instruction");
+    SHADER_UNREACHABLE_MSG("Unreachable instruction");
 }
 
 void EmitGetExec(EmitContext& ctx) {
-    UNREACHABLE_MSG("Unreachable instruction");
+    SHADER_UNREACHABLE_MSG("Unreachable instruction");
 }
 
 void EmitGetVcc(EmitContext& ctx) {
-    UNREACHABLE_MSG("Unreachable instruction");
+    SHADER_UNREACHABLE_MSG("Unreachable instruction");
 }
 
 void EmitGetVccLo(EmitContext& ctx) {
-    UNREACHABLE_MSG("Unreachable instruction");
+    SHADER_UNREACHABLE_MSG("Unreachable instruction");
 }
 
 void EmitGetVccHi(EmitContext& ctx) {
-    UNREACHABLE_MSG("Unreachable instruction");
+    SHADER_UNREACHABLE_MSG("Unreachable instruction");
 }
 
 void EmitGetM0(EmitContext& ctx) {
-    UNREACHABLE_MSG("Unreachable instruction");
+    SHADER_UNREACHABLE_MSG("Unreachable instruction");
 }
 
 void EmitSetScc(EmitContext& ctx) {
-    UNREACHABLE_MSG("Unreachable instruction");
+    SHADER_UNREACHABLE_MSG("Unreachable instruction");
 }
 
 void EmitSetExec(EmitContext& ctx) {
-    UNREACHABLE_MSG("Unreachable instruction");
+    SHADER_UNREACHABLE_MSG("Unreachable instruction");
 }
 
 void EmitSetVcc(EmitContext& ctx) {
-    UNREACHABLE_MSG("Unreachable instruction");
+    SHADER_UNREACHABLE_MSG("Unreachable instruction");
 }
 
 void EmitSetVccLo(EmitContext& ctx) {
-    UNREACHABLE_MSG("Unreachable instruction");
+    SHADER_UNREACHABLE_MSG("Unreachable instruction");
 }
 
 void EmitSetVccHi(EmitContext& ctx) {
-    UNREACHABLE_MSG("Unreachable instruction");
+    SHADER_UNREACHABLE_MSG("Unreachable instruction");
 }
 
 void EmitSetM0(EmitContext& ctx) {
-    UNREACHABLE_MSG("Unreachable instruction");
+    SHADER_UNREACHABLE_MSG("Unreachable instruction");
 }
 
 } // namespace Shader::Backend::SPIRV

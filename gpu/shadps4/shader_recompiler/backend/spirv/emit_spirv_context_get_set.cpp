@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <bit>
-#include "common/assert.h"
 #include "core/emulator_settings.h"
 #include "shader_recompiler/backend/spirv/emit_spirv_instructions.h"
 #include "shader_recompiler/backend/spirv/spirv_emit_context.h"
@@ -10,6 +9,7 @@
 #include "shader_recompiler/ir/microinstruction.h"
 #include "shader_recompiler/ir/patch.h"
 #include "shader_recompiler/runtime_info.h"
+#include "shader_recompiler/translation_error.h"
 
 #include <magic_enum/magic_enum.hpp>
 
@@ -43,7 +43,7 @@ static std::pair<Id, bool> OutputAttrComponentType(EmitContext& ctx, IR::Attribu
     case IR::Attribute::StencilRef:
         return {ctx.S32[1], true};
     default:
-        UNREACHABLE_MSG("Write attribute {}", attr);
+        SHADER_UNREACHABLE_MSG("Write attribute {}", attr);
     }
 }
 
@@ -93,7 +93,7 @@ Id EmitGetAttribute(EmitContext& ctx, IR::Attribute attr, u32 comp, u32 index) {
         const auto& param{ctx.input_params.at(param_index)};
         const Id value = [&] {
             if (param.is_array) {
-                ASSERT(param.num_components > 1);
+                SHADER_ASSERT(param.num_components > 1);
                 if (param.is_loaded) {
                     return ctx.OpCompositeExtract(param.component_type, param.id_array[index],
                                                   comp);
@@ -103,7 +103,7 @@ Id EmitGetAttribute(EmitContext& ctx, IR::Attribute attr, u32 comp, u32 index) {
                                                         ctx.ConstU32(index), ctx.ConstU32(comp)));
                 }
             } else {
-                ASSERT(!param.is_loaded);
+                SHADER_ASSERT(!param.is_loaded);
                 if (param.num_components > 1) {
                     return ctx.OpLoad(
                         param.component_type,
@@ -121,7 +121,7 @@ Id EmitGetAttribute(EmitContext& ctx, IR::Attribute attr, u32 comp, u32 index) {
     }
     switch (attr) {
     case IR::Attribute::Position0:
-        ASSERT(ctx.sw_stage == SwStage::Geometry);
+        SHADER_ASSERT(ctx.sw_stage == SwStage::Geometry);
         return ctx.OpLoad(ctx.F32[1],
                           ctx.OpAccessChain(ctx.input_f32, ctx.gl_in, ctx.ConstU32(index),
                                             ctx.ConstU32(0U), ctx.ConstU32(comp)));
@@ -186,7 +186,7 @@ Id EmitGetAttribute(EmitContext& ctx, IR::Attribute attr, u32 comp, u32 index) {
             ctx.F32[1],
             ctx.OpAccessChain(ctx.input_f32, ctx.bary_coord_nopersp_sample, ctx.ConstU32(comp)));
     case IR::Attribute::BaryCoordPullModel: {
-        ASSERT_MSG(comp < 3, "Invalid BaryCoordPullModel component {}", comp);
+        SHADER_ASSERT_MSG(comp < 3, "Invalid BaryCoordPullModel component {}", comp);
 
         if (ctx.profile.supports_amd_shader_explicit_vertex_parameter) {
             return ctx.OpLoad(
@@ -207,19 +207,19 @@ Id EmitGetAttribute(EmitContext& ctx, IR::Attribute attr, u32 comp, u32 index) {
         return ctx.OpFMul(ctx.F32[1], ij, inv_w);
     }
     default:
-        UNREACHABLE_MSG("Read attribute {}", attr);
+        SHADER_UNREACHABLE_MSG("Read attribute {}", attr);
     }
 }
 
 Id EmitGetAttributeU1(EmitContext& ctx, IR::Attribute attr, u32 comp) {
-    ASSERT(comp == 0);
+    SHADER_ASSERT(comp == 0);
     switch (attr) {
     case IR::Attribute::IsFrontFace:
         return ctx.OpLoad(ctx.U1[1], ctx.front_facing);
     case IR::Attribute::IsHelperInvocation:
         return ctx.OpLoad(ctx.U1[1], ctx.helper_invocation);
     default:
-        UNREACHABLE_MSG("Unsupported U1 attribute {}", attr);
+        SHADER_UNREACHABLE_MSG("Unsupported U1 attribute {}", attr);
     }
 }
 
@@ -252,17 +252,17 @@ Id EmitGetAttributeU32(EmitContext& ctx, IR::Attribute attr, u32 comp) {
     case IR::Attribute::PrimitiveId:
         return ctx.OpLoad(ctx.U32[1], ctx.primitive_id);
     case IR::Attribute::InvocationId:
-        ASSERT(ctx.info.sw_stage == SwStage::Geometry ||
-               ctx.info.sw_stage == SwStage::TessellationControl);
+        SHADER_ASSERT(ctx.info.sw_stage == SwStage::Geometry ||
+                      ctx.info.sw_stage == SwStage::TessellationControl);
         return ctx.OpLoad(ctx.U32[1], ctx.invocation_id);
     case IR::Attribute::SubgroupLtMask:
         return ctx.OpLoad(
             ctx.U32[1], ctx.OpAccessChain(ctx.input_u32, ctx.subgroup_lt_mask, ctx.ConstU32(comp)));
     case IR::Attribute::PatchVertices:
-        ASSERT(ctx.info.sw_stage == SwStage::TessellationControl);
+        SHADER_ASSERT(ctx.info.sw_stage == SwStage::TessellationControl);
         return ctx.OpLoad(ctx.U32[1], ctx.patch_vertices);
     case IR::Attribute::PackedHullInvocationInfo: {
-        ASSERT(ctx.info.sw_stage == SwStage::TessellationControl);
+        SHADER_ASSERT(ctx.info.sw_stage == SwStage::TessellationControl);
         // [0:8]: patch id within VGT
         // [8:12]: output control point id
         // But 0:8 should be treated as 0 for attribute addressing purposes
@@ -278,7 +278,7 @@ Id EmitGetAttributeU32(EmitContext& ctx, IR::Attribute attr, u32 comp) {
         }
     }
     default:
-        UNREACHABLE_MSG("Read U32 attribute {}", attr);
+        SHADER_UNREACHABLE_MSG("Read U32 attribute {}", attr);
     }
 }
 
@@ -299,7 +299,7 @@ void EmitSetAttribute(EmitContext& ctx, IR::Attribute attr, Id value, u32 elemen
                                               ctx.ConstU32(attr_index), ctx.ConstU32(element)));
         } else {
             const auto& info{ctx.output_params.at(attr_index)};
-            ASSERT(info.num_components > 0);
+            SHADER_ASSERT(info.num_components > 0);
             if (info.num_components == 1) {
                 return op_store(info.id);
             } else {
@@ -347,7 +347,7 @@ void EmitSetAttribute(EmitContext& ctx, IR::Attribute attr, Id value, u32 elemen
         }
         return;
     default:
-        UNREACHABLE_MSG("Write attribute {}", attr);
+        SHADER_UNREACHABLE_MSG("Write attribute {}", attr);
     }
 }
 
@@ -403,7 +403,7 @@ void EmitSetPatch(EmitContext& ctx, IR::Patch patch, Id value) {
         case IR::Patch::TessellationLodInteriorV:
             return ctx.OpAccessChain(ctx.output_f32, ctx.output_tess_level_inner, ctx.ConstU32(1u));
         default:
-            UNREACHABLE_MSG("Patch {}", u32(patch));
+            SHADER_UNREACHABLE_MSG("Patch {}", u32(patch));
         }
     }()};
     ctx.OpStore(pointer, value);
@@ -537,7 +537,7 @@ Id EmitLoadBufferF32x4(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address)
 }
 
 Id EmitLoadBufferFormatF32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address) {
-    UNREACHABLE_MSG("SPIR-V instruction");
+    SHADER_UNREACHABLE_MSG("SPIR-V instruction");
 }
 
 template <u32 N, PointerType alias>
@@ -637,7 +637,7 @@ void EmitStoreBufferF32x4(EmitContext& ctx, IR::Inst* inst, u32 handle, Id addre
 }
 
 void EmitStoreBufferFormatF32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address, Id value) {
-    UNREACHABLE_MSG("SPIR-V instruction");
+    SHADER_UNREACHABLE_MSG("SPIR-V instruction");
 }
 
 void EmitSetDynamicBufferSharp(EmitContext& ctx, u32 handle, Id sharp) {
@@ -645,35 +645,35 @@ void EmitSetDynamicBufferSharp(EmitContext& ctx, u32 handle, Id sharp) {
 }
 
 void EmitGetScalarRegister(EmitContext&) {
-    UNREACHABLE_MSG("Unreachable instruction");
+    SHADER_UNREACHABLE_MSG("Unreachable instruction");
 }
 
 void EmitSetScalarRegister(EmitContext&) {
-    UNREACHABLE_MSG("Unreachable instruction");
+    SHADER_UNREACHABLE_MSG("Unreachable instruction");
 }
 
 void EmitGetVectorRegister(EmitContext& ctx) {
-    UNREACHABLE_MSG("Unreachable instruction");
+    SHADER_UNREACHABLE_MSG("Unreachable instruction");
 }
 
 void EmitSetVectorRegister(EmitContext& ctx) {
-    UNREACHABLE_MSG("Unreachable instruction");
+    SHADER_UNREACHABLE_MSG("Unreachable instruction");
 }
 
 void EmitSetVirtualRegister(EmitContext& ctx) {
-    UNREACHABLE_MSG("Unreachable instruction");
+    SHADER_UNREACHABLE_MSG("Unreachable instruction");
 }
 
 void EmitGetVirtualRegister(EmitContext& ctx) {
-    UNREACHABLE_MSG("Unreachable instruction");
+    SHADER_UNREACHABLE_MSG("Unreachable instruction");
 }
 
 void EmitSetGotoVariable(EmitContext&) {
-    UNREACHABLE_MSG("Unreachable instruction");
+    SHADER_UNREACHABLE_MSG("Unreachable instruction");
 }
 
 void EmitGetGotoVariable(EmitContext&) {
-    UNREACHABLE_MSG("Unreachable instruction");
+    SHADER_UNREACHABLE_MSG("Unreachable instruction");
 }
 
 } // namespace Shader::Backend::SPIRV

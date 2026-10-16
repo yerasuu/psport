@@ -6,6 +6,7 @@
 #include <map>
 #include "shader_recompiler/ir/basic_block.h"
 #include "shader_recompiler/ir/value.h"
+#include "shader_recompiler/translation_error.h"
 
 namespace Shader::IR {
 
@@ -30,7 +31,7 @@ Block::iterator Block::PrependNewInst(iterator insertion_point, Opcode op,
     const auto result_it{instructions.insert(insertion_point, *inst)};
 
     if (inst->NumArgs() != args.size()) {
-        UNREACHABLE_MSG("Invalid number of arguments {} in {}", args.size(), op);
+        SHADER_UNREACHABLE_MSG("Invalid number of arguments {} in {}", args.size(), op);
     }
     std::ranges::for_each(args, [inst, index = size_t{0}](const Value& arg) mutable {
         inst->SetArg(index, arg);
@@ -41,10 +42,10 @@ Block::iterator Block::PrependNewInst(iterator insertion_point, Opcode op,
 
 void Block::AddBranch(Block* block) {
     if (std::ranges::find(imm_successors, block) != imm_successors.end()) {
-        UNREACHABLE_MSG("Successor already inserted");
+        SHADER_UNREACHABLE_MSG("Successor already inserted");
     }
     if (std::ranges::find(block->imm_predecessors, this) != block->imm_predecessors.end()) {
-        UNREACHABLE_MSG("Predecessor already inserted");
+        SHADER_UNREACHABLE_MSG("Predecessor already inserted");
     }
     imm_successors.push_back(block);
     block->imm_predecessors.push_back(this);
@@ -124,7 +125,7 @@ static std::string RegTagInfo(const RegTag tag) {
     case RegType::M0:
         return "M0";
     default:
-        UNREACHABLE();
+        SHADER_UNREACHABLE();
     }
 }
 
@@ -143,7 +144,7 @@ std::string DumpBlock(const Block& block, const std::map<const Block*, size_t>& 
     ret += " predecessors [";
     for (auto* block : block.ImmPredecessors()) {
         const auto it{block_to_index.find(block)};
-        ASSERT(it != block_to_index.end());
+        SHADER_ASSERT(it != block_to_index.end());
         ret += fmt::format("${}, ", it->second);
     }
     if (!block.ImmPredecessors().empty()) {

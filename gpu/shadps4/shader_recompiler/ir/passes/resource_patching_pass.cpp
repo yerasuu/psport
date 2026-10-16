@@ -14,6 +14,7 @@
 #include "shader_recompiler/ir/program.h"
 #include "shader_recompiler/ir/reinterpret.h"
 #include "shader_recompiler/profile.h"
+#include "shader_recompiler/translation_error.h"
 #include "video_core/amdgpu/resource.h"
 
 namespace Shader::Optimization {
@@ -365,7 +366,7 @@ void PatchImageSharp(const ResourceDiscovery& resource, Info& info, Descriptors&
     };
 
     auto image = image_res.GetSharp(info);
-    ASSERT(image.GetType() != AmdGpu::ImageType::Invalid);
+    SHADER_ASSERT(image.GetType() != AmdGpu::ImageType::Invalid);
 
     if (needs_mip_storage_fallback) {
         // If the mip level to IMAGE_(LOAD/STORE)_MIP is a constant, set up ImageResource
@@ -387,7 +388,7 @@ void PatchImageSharp(const ResourceDiscovery& resource, Info& info, Descriptors&
             case AmdGpu::ImageType::Color2DMsaa:
             case AmdGpu::ImageType::Color2DMsaaArray:
             default:
-                UNREACHABLE_MSG("Invalid image type {}", view_type);
+                SHADER_UNREACHABLE_MSG("Invalid image type {}", view_type);
             }
         }();
 
@@ -401,7 +402,7 @@ void PatchImageSharp(const ResourceDiscovery& resource, Info& info, Descriptors&
 
     // Patch image instruction if image is FMask.
     if (AmdGpu::IsFmask(image.GetDataFmt())) {
-        ASSERT_MSG(!is_written, "FMask storage instructions are not supported");
+        SHADER_ASSERT_MSG(!is_written, "FMask storage instructions are not supported");
 
         IR::IREmitter ir{*inst.GetParent(), IR::Block::InstructionList::s_iterator_to(inst)};
         switch (inst.GetOpcode()) {
@@ -428,7 +429,7 @@ void PatchImageSharp(const ResourceDiscovery& resource, Info& info, Descriptors&
             return;
         }
         default:
-            UNREACHABLE_MSG("Can't patch fmask instruction {}", inst.GetOpcode());
+            SHADER_UNREACHABLE_MSG("Can't patch fmask instruction {}", inst.GetOpcode());
         }
     }
 
@@ -480,11 +481,11 @@ static IR::Use FindUniqueUser(IR::Inst* inst, auto&& pred) {
     IR::Use picked{};
     for (auto& use : inst->Uses()) {
         if (pred(use.user)) {
-            ASSERT(!picked.user);
+            SHADER_ASSERT(!picked.user);
             picked = use;
         }
     }
-    ASSERT(picked.user);
+    SHADER_ASSERT(picked.user);
     return picked;
 }
 
@@ -519,15 +520,15 @@ static void RemoveAppendBufferLaneOffset(IR::Inst& vx) {
         const auto& [user, operand] = use;
         if (user->GetOpcode() == IR::Opcode::MaskedBitCount32) {
             // First pattern
-            ASSERT(vx.GetOpcode() == IR::Opcode::DataAppend);
+            SHADER_ASSERT(vx.GetOpcode() == IR::Opcode::DataAppend);
             IR::Inst* vy = user;
             auto vx_2 = IsMbcntWithExec(IR::Value{vy}, true, exec);
-            ASSERT(!vx_2.IsEmpty() && vx_2 == IR::Value{&vx});
+            SHADER_ASSERT(!vx_2.IsEmpty() && vx_2 == IR::Value{&vx});
             const auto [idx, operand] = FindUniqueUser(vy, [](const IR::Inst* inst) {
                 return inst->GetOpcode() == IR::Opcode::MaskedBitCount32;
             });
             auto vy_2 = IsMbcntWithExec(IR::Value{idx}, false, exec);
-            ASSERT(!vy_2.IsEmpty() && vy_2 == IR::Value{vy});
+            SHADER_ASSERT(!vy_2.IsEmpty() && vy_2 == IR::Value{vy});
             idx->ReplaceUsesWithAndRemove(IR::Value{&vx});
             continue;
         }
@@ -536,9 +537,9 @@ static void RemoveAppendBufferLaneOffset(IR::Inst& vx) {
         }
         const auto other = user->Arg(1 - operand);
         if (other.IsImmediate()) {
-            ASSERT_MSG(other.U32() == 1u || other.U32() == std::numeric_limits<u32>::max() &&
+            SHADER_ASSERT_MSG(other.U32() == 1u || other.U32() == std::numeric_limits<u32>::max() &&
                                                 vx.GetOpcode() == IR::Opcode::DataConsume,
-                       "Unexpected constant offset {} to DataConsume result", other.U32());
+                              "Unexpected constant offset {} to DataConsume result", other.U32());
             use = FindUniqueUser(user, [](const IR::Inst* inst) {
                 return inst->GetOpcode() == IR::Opcode::IAdd32 ||
                        inst->GetOpcode() == IR::Opcode::ISub32;
@@ -548,9 +549,9 @@ static void RemoveAppendBufferLaneOffset(IR::Inst& vx) {
         // Other patterns
         auto vz = user->Arg(1 - operand);
         auto vy = IsMbcntWithExec(vz, false, exec);
-        ASSERT(!vy.IsEmpty() && !vy.IsImmediate());
+        SHADER_ASSERT(!vy.IsEmpty() && !vy.IsImmediate());
         auto zero_const = IsMbcntWithExec(vy, true, exec);
-        ASSERT(!zero_const.IsEmpty() && zero_const.IsImmediate() && zero_const.U32() == 0u);
+        SHADER_ASSERT(!zero_const.IsEmpty() && zero_const.IsImmediate() && zero_const.U32() == 0u);
         vz.Inst()->ReplaceUsesWithAndRemove(IR::Value{u32{0u}});
     }
 }
@@ -656,7 +657,7 @@ void PatchGlobalDataShareAccess(IR::Inst& inst, Info& info, Descriptors& descrip
         break;
     }
     default:
-        UNREACHABLE_MSG("Unexpected opcode {}", inst.GetOpcode());
+        SHADER_UNREACHABLE_MSG("Unexpected opcode {}", inst.GetOpcode());
     }
 }
 
@@ -693,8 +694,8 @@ IR::U32 CalculateBufferAddress(IR::IREmitter& ir, const IR::Inst& inst, const In
         index = ir.IAdd(index, vgpr_index);
     }
     if (buffer.add_tid_enable) {
-        ASSERT_MSG(info.sw_stage == SwStage::Compute,
-                   "Thread ID buffer addressing is not supported outside of compute.");
+        SHADER_ASSERT_MSG(info.sw_stage == SwStage::Compute,
+                          "Thread ID buffer addressing is not supported outside of compute.");
         const IR::U32 thread_id{ir.LaneId()};
         index = ir.IAdd(index, thread_id);
     }
@@ -795,7 +796,7 @@ void PatchImageSampleArgs(IR::Inst& inst, Info& info, const ImageResource& image
         if (index == 12) {
             return body4;
         }
-        UNREACHABLE();
+        SHADER_UNREACHABLE();
     };
     u32 addr_reg = 0;
 
@@ -809,7 +810,7 @@ void PatchImageSampleArgs(IR::Inst& inst, Info& info, const ImageResource& image
         // The offsets are six-bit signed integers: X=[5:0], Y=[13:8], and Z=[21:16].
         IR::Value arg = get_addr_reg(addr_reg++);
         if (const IR::Inst* offset_inst = arg.TryInst()) {
-            ASSERT(offset_inst->GetOpcode() == IR::Opcode::BitCastF32U32);
+            SHADER_ASSERT(offset_inst->GetOpcode() == IR::Opcode::BitCastF32U32);
             arg = offset_inst->Arg(0);
         }
 
@@ -834,7 +835,7 @@ void PatchImageSampleArgs(IR::Inst& inst, Info& info, const ImageResource& image
         case AmdGpu::ImageType::Color3D:
             return ir.CompositeConstruct(read(0), read(8), read(16));
         default:
-            UNREACHABLE();
+            SHADER_UNREACHABLE();
         }
     }();
     const IR::F32 bias = inst_info.has_bias ? get_addr_reg(addr_reg++) : IR::F32{};
@@ -864,7 +865,7 @@ void PatchImageSampleArgs(IR::Inst& inst, Info& info, const ImageResource& image
                     ir.CompositeConstruct(get_addr_reg(addr_reg - 3), get_addr_reg(addr_reg - 2),
                                           get_addr_reg(addr_reg - 1))};
         default:
-            UNREACHABLE();
+            SHADER_UNREACHABLE();
         }
     }();
 
@@ -917,11 +918,11 @@ void PatchImageSampleArgs(IR::Inst& inst, Info& info, const ImageResource& image
             return ir.CompositeConstruct(get_coord(addr_reg - 3, 0), get_coord(addr_reg - 2, 1),
                                          get_coord(addr_reg - 1, 2));
         default:
-            UNREACHABLE();
+            SHADER_UNREACHABLE();
         }
     }();
 
-    ASSERT(!inst_info.has_lod || !inst_info.has_lod_clamp);
+    SHADER_ASSERT(!inst_info.has_lod || !inst_info.has_lod_clamp);
     const bool explicit_lod = inst_info.has_lod || inst_info.force_level0;
     const IR::F32 lod = inst_info.has_lod        ? get_addr_reg(addr_reg++)
                         : inst_info.force_level0 ? ir.Imm32(0.0f)
@@ -1003,7 +1004,7 @@ void PatchImageArgs(IR::Inst& inst, Info& info) {
                     inst_info.has_lod.Assign(false);
                     skip_lod = true;
                 } else {
-                    UNREACHABLE_MSG(
+                    SHADER_UNREACHABLE_MSG(
                         "Encountered a _mip instruction with MSAA image, and mipid is non-zero");
                 }
             }
@@ -1015,13 +1016,13 @@ void PatchImageArgs(IR::Inst& inst, Info& info) {
         case AmdGpu::ImageType::Color3D:          // x, y, z, [lod]
             return {ir.CompositeConstruct(body->Arg(0), body->Arg(1), body->Arg(2)), body->Arg(3)};
         default:
-            UNREACHABLE_MSG("Unknown image type {}", view_type);
+            SHADER_UNREACHABLE_MSG("Unknown image type {}", view_type);
         }
     }();
 
     const auto has_ms = view_type == AmdGpu::ImageType::Color2DMsaa ||
                         view_type == AmdGpu::ImageType::Color2DMsaaArray;
-    ASSERT(!inst_info.has_lod || !has_ms);
+    SHADER_ASSERT(!inst_info.has_lod || !has_ms);
     // If we are binding a single mip level as fallback, drop the argument
     const auto lod =
         (inst_info.has_lod && image_res.mip_fallback_mode != MipStorageFallbackMode::ConstantIndex)

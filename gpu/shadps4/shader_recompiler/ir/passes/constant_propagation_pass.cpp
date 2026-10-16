@@ -9,6 +9,7 @@
 #include "shader_recompiler/ir/basic_block.h"
 #include "shader_recompiler/ir/ir_emitter.h"
 #include "shader_recompiler/ir/opcodes.h"
+#include "shader_recompiler/translation_error.h"
 
 namespace Shader::Optimization {
 
@@ -323,13 +324,13 @@ void ConstantPropagation(IR::Block& block, IR::Inst& inst) {
         return;
     case IR::Opcode::UDiv32:
         FoldWhenAllImmediates(inst, [](u32 a, u32 b) {
-            ASSERT_MSG(b != 0, "Folding UDiv32 with divisor 0");
+            SHADER_ASSERT_MSG(b != 0, "Folding UDiv32 with divisor 0");
             return a / b;
         });
         return;
     case IR::Opcode::UMod32:
         FoldWhenAllImmediates(inst, [](u32 a, u32 b) {
-            ASSERT_MSG(b != 0, "Folding UMod32 with modulo 0");
+            SHADER_ASSERT_MSG(b != 0, "Folding UMod32 with modulo 0");
             return a % b;
         });
         return;
@@ -531,8 +532,9 @@ void ConstantPropagation(IR::Block& block, IR::Inst& inst) {
     case IR::Opcode::BitFieldUExtract:
         FoldWhenAllImmediates(inst, [](u32 base, u32 shift, u32 count) {
             if (static_cast<size_t>(shift) + static_cast<size_t>(count) > 32) {
-                UNREACHABLE_MSG("Undefined result in {}({}, {}, {})", IR::Opcode::BitFieldUExtract,
-                                base, shift, count);
+                SHADER_UNREACHABLE_MSG("Undefined result in {}({}, {}, {})",
+                                       IR::Opcode::BitFieldUExtract,
+                                       base, shift, count);
             }
             return (base >> shift) & ((1U << count) - 1);
         });
@@ -543,8 +545,9 @@ void ConstantPropagation(IR::Block& block, IR::Inst& inst) {
             const size_t left_shift{32 - back_shift};
             const size_t right_shift{static_cast<size_t>(32 - count)};
             if (back_shift > 32 || left_shift >= 32 || right_shift >= 32) {
-                UNREACHABLE_MSG("Undefined result in {}({}, {}, {})", IR::Opcode::BitFieldSExtract,
-                                base, shift, count);
+                SHADER_UNREACHABLE_MSG("Undefined result in {}({}, {}, {})",
+                                       IR::Opcode::BitFieldSExtract,
+                                       base, shift, count);
             }
             return static_cast<u32>((base << left_shift) >> right_shift);
         });
@@ -552,8 +555,8 @@ void ConstantPropagation(IR::Block& block, IR::Inst& inst) {
     case IR::Opcode::BitFieldInsert32:
         FoldWhenAllImmediates(inst, [](u32 base, u32 insert, u32 offset, u32 bits) {
             if (bits >= 32 || offset >= 32) {
-                UNREACHABLE_MSG("Undefined result in {}({}, {}, {}, {})",
-                                IR::Opcode::BitFieldInsert32, base, insert, offset, bits);
+                SHADER_UNREACHABLE_MSG("Undefined result in {}({}, {}, {}, {})",
+                                       IR::Opcode::BitFieldInsert32, base, insert, offset, bits);
             }
             return (base & ~(~(~0u << bits) << offset)) | (insert << offset);
         });
@@ -561,8 +564,8 @@ void ConstantPropagation(IR::Block& block, IR::Inst& inst) {
     case IR::Opcode::BitFieldInsert64:
         FoldWhenAllImmediates(inst, [](u64 base, u64 insert, u32 offset, u32 bits) {
             if (bits >= 64 || offset >= 64) {
-                UNREACHABLE_MSG("Undefined result in {}({}, {}, {}, {})",
-                                IR::Opcode::BitFieldInsert64, base, insert, offset, bits);
+                SHADER_UNREACHABLE_MSG("Undefined result in {}({}, {}, {}, {})",
+                                       IR::Opcode::BitFieldInsert64, base, insert, offset, bits);
             }
             return (base & ~(~(~u64{0} << bits) << offset)) | (insert << offset);
         });

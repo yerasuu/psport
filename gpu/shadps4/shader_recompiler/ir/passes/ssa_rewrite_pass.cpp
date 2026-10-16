@@ -19,6 +19,7 @@
 #include "shader_recompiler/ir/program.h"
 #include "shader_recompiler/ir/reg.h"
 #include "shader_recompiler/ir/value.h"
+#include "shader_recompiler/translation_error.h"
 
 namespace Shader::Optimization {
 namespace {
@@ -37,7 +38,7 @@ struct DefTable {
         case RegType::VirtualReg:
             return reg_vars[tag.reg.Key()][block];
         default:
-            UNREACHABLE();
+            SHADER_UNREACHABLE();
         }
     }
     void SetDef(IR::Block* block, IR::RegTag tag, const IR::Value& value) {
@@ -53,7 +54,7 @@ struct DefTable {
             reg_vars[tag.reg.Key()].insert_or_assign(block, value);
             return;
         default:
-            UNREACHABLE();
+            SHADER_UNREACHABLE();
         }
     }
 
@@ -61,7 +62,7 @@ struct DefTable {
     std::unordered_map<u64, ValueMap> reg_vars;
 };
 
-constexpr IR::Type TypeOf(IR::RegTag tag) noexcept {
+constexpr IR::Type TypeOf(IR::RegTag tag) {
     switch (tag.type) {
     case RegType::ScalarReg:
     case RegType::VectorReg:
@@ -76,11 +77,11 @@ constexpr IR::Type TypeOf(IR::RegTag tag) noexcept {
     case RegType::VirtualReg:
         return tag.reg.type;
     default:
-        UNREACHABLE();
+        SHADER_UNREACHABLE();
     }
 }
 
-constexpr IR::Opcode UndefOpcode(IR::RegTag tag) noexcept {
+constexpr IR::Opcode UndefOpcode(IR::RegTag tag) {
     switch (tag.type) {
     case RegType::ScalarReg:
     case RegType::VectorReg:
@@ -109,10 +110,10 @@ constexpr IR::Opcode UndefOpcode(IR::RegTag tag) noexcept {
         case IR::Type::U1:
             return IR::Opcode::UndefU1;
         default:
-            UNREACHABLE_MSG("Unknown virtual reg type {}", tag.reg.type);
+            SHADER_UNREACHABLE_MSG("Unknown virtual reg type {}", tag.reg.type);
         }
     default:
-        UNREACHABLE_MSG("Unknown reg type {}", magic_enum::enum_name(tag.type));
+        SHADER_UNREACHABLE_MSG("Unknown reg type {}", magic_enum::enum_name(tag.type));
     }
 }
 

@@ -8,6 +8,7 @@
 #include "shader_recompiler/ir/ir_emitter.h"
 #include "shader_recompiler/ir/program.h"
 #include "shader_recompiler/profile.h"
+#include "shader_recompiler/translation_error.h"
 
 namespace Shader::Optimization {
 
@@ -56,7 +57,8 @@ static std::vector<IR::Block*> FindUniformBlocks(const IR::Program& program) {
             break;
         }
         case Type::EndIf:
-            ASSERT(!conditionals.empty() && conditionals.back().merge == node.data.end_if.merge);
+            SHADER_ASSERT(!conditionals.empty() &&
+                          conditionals.back().merge == node.data.end_if.merge);
             divergence_depth -= static_cast<u32>(conditionals.back().divergent);
             conditionals.pop_back();
             break;

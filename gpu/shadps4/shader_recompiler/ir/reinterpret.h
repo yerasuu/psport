@@ -4,6 +4,7 @@
 #pragma once
 
 #include "shader_recompiler/ir/ir_emitter.h"
+#include "shader_recompiler/translation_error.h"
 #include "video_core/amdgpu/pixel_format.h"
 
 namespace Shader::IR {
@@ -74,7 +75,7 @@ inline F32 ApplyReadNumberConversion(IREmitter& ir, const F32& value,
         return ApplyGammaToLinear(ir, value);
     }
     default:
-        UNREACHABLE();
+        SHADER_UNREACHABLE();
     }
 }
 
@@ -126,7 +127,7 @@ inline F32 ApplyWriteNumberConversion(IREmitter& ir, const F32& value,
         return ir.BitCast<F32>(U32{ir.ConvertFToU(32, unnormalized)});
     }
     default:
-        UNREACHABLE();
+        SHADER_UNREACHABLE();
     }
 }
 

@@ -5,6 +5,7 @@
 
 #include <fmt/format.h>
 #include "common/types.h"
+#include "shader_recompiler/translation_error.h"
 
 namespace Shader::IR {
 
@@ -38,7 +39,7 @@ constexpr std::string_view NameOf(Condition condition) {
     case Condition::Execnz:
         return "Execnz";
     default:
-        UNREACHABLE();
+        SHADER_UNREACHABLE();
     }
 }
 

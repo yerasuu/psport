@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "abstract_syntax_list.h"
+#include "shader_recompiler/translation_error.h"
 
 namespace Shader::IR {
 
@@ -38,7 +39,7 @@ std::string DumpASLNode(const AbstractSyntaxNode& node,
     case AbstractSyntaxNode::Type::Unreachable:
         return "Unreachable";
     };
-    UNREACHABLE();
+    SHADER_UNREACHABLE();
 }
 
 } // namespace Shader::IR

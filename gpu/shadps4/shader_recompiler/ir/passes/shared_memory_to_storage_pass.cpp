@@ -4,6 +4,7 @@
 #include "shader_recompiler/ir/ir_emitter.h"
 #include "shader_recompiler/ir/program.h"
 #include "shader_recompiler/profile.h"
+#include "shader_recompiler/translation_error.h"
 
 namespace Shader::Optimization {
 
@@ -211,7 +212,7 @@ void SharedMemoryToStoragePass(IR::Program& program, const RuntimeInfo& runtime_
                 inst.Invalidate();
                 break;
             default:
-                UNREACHABLE();
+                SHADER_UNREACHABLE();
             }
         }
     }

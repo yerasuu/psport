@@ -5,6 +5,7 @@
 #include "shader_recompiler/frontend/translate/translate.h"
 #include "shader_recompiler/ir/attribute.h"
 #include "shader_recompiler/profile.h"
+#include "shader_recompiler/translation_error.h"
 
 namespace Shader::Gcn {
 
@@ -974,7 +975,7 @@ void Translator::V_CVT_FLR_I32_F32(const GcnInst& inst) {
 
 void Translator::V_CVT_OFF_F32_I4(const GcnInst& inst) {
     const IR::U32 src0{GetSrc(inst.src[0])};
-    ASSERT(src0.IsImmediate());
+    SHADER_ASSERT(src0.IsImmediate());
     static constexpr std::array IntToFloat = {
         0.0f,     0.0625f,  0.1250f,  0.1875f,  0.2500f,  0.3125f,  0.3750f,  0.4375f,
         -0.5000f, -0.4375f, -0.3750f, -0.3125f, -0.2500f, -0.1875f, -0.1250f, -0.0625f};
@@ -1194,7 +1195,7 @@ void Translator::V_CMP_F32(ConditionOp op, bool set_exec, const GcnInst& inst) {
         case ConditionOp::U:
             return ir.LogicalOr(ir.FPIsNan(src0), ir.FPIsNan(src1));
         default:
-            UNREACHABLE();
+            SHADER_UNREACHABLE();
         }
     }();
     if (set_exec) {
@@ -1230,7 +1231,7 @@ void Translator::V_CMP_F64(ConditionOp op, bool set_exec, const GcnInst& inst) {
         case ConditionOp::U:
             return ir.LogicalOr(ir.FPIsNan(src0), ir.FPIsNan(src1));
         default:
-            UNREACHABLE();
+            SHADER_UNREACHABLE();
         }
     }();
     if (set_exec) {
@@ -1265,7 +1266,7 @@ void Translator::V_CMP_U32(ConditionOp op, bool is_signed, bool set_exec, const 
         case ConditionOp::GE:
             return ir.IGreaterThanEqual(src0, src1, is_signed);
         default:
-            UNREACHABLE();
+            SHADER_UNREACHABLE();
         }
     }();
     if (set_exec) {
@@ -1300,7 +1301,7 @@ void Translator::V_CMP_U64(ConditionOp op, bool is_signed, bool set_exec, const 
         case ConditionOp::GE:
             return ir.IGreaterThanEqual(src0, src1, is_signed);
         default:
-            UNREACHABLE();
+            SHADER_UNREACHABLE();
         }
     }();
     if (set_exec) {
@@ -1326,7 +1327,8 @@ void Translator::V_CMP_CLASS_F32(const GcnInst& inst) {
         } else if ((class_mask & IR::FloatClassFunc::Negative) == IR::FloatClassFunc::Negative) {
             value = ir.FPLessThanEqual(src0, ir.Imm32(-0.f));
         } else {
-            UNREACHABLE_MSG("Unsupported float class mask: {:#x}", static_cast<u32>(class_mask));
+            SHADER_UNREACHABLE_MSG("Unsupported float class mask: {:#x}",
+                                   static_cast<u32>(class_mask));
         }
     } else {
         // We don't know the type yet, delay its resolution.

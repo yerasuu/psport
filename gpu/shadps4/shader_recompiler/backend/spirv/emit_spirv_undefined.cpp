@@ -3,6 +3,7 @@
 
 #include "shader_recompiler/backend/spirv/emit_spirv_instructions.h"
 #include "shader_recompiler/backend/spirv/spirv_emit_context.h"
+#include "shader_recompiler/translation_error.h"
 
 namespace Shader::Backend::SPIRV {
 
@@ -11,11 +12,11 @@ Id EmitUndefU1(EmitContext& ctx) {
 }
 
 Id EmitUndefU8(EmitContext&) {
-    UNREACHABLE_MSG("SPIR-V Instruction");
+    SHADER_UNREACHABLE_MSG("SPIR-V Instruction");
 }
 
 Id EmitUndefU16(EmitContext&) {
-    UNREACHABLE_MSG("SPIR-V Instruction");
+    SHADER_UNREACHABLE_MSG("SPIR-V Instruction");
 }
 
 Id EmitUndefU32(EmitContext& ctx) {
@@ -39,7 +40,7 @@ Id EmitUndefF32(EmitContext& ctx) {
 }
 
 Id EmitUndefU64(EmitContext&) {
-    UNREACHABLE_MSG("SPIR-V Instruction");
+    SHADER_UNREACHABLE_MSG("SPIR-V Instruction");
 }
 
 } // namespace Shader::Backend::SPIRV

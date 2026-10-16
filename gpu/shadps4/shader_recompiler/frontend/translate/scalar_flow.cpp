@@ -3,6 +3,7 @@
 
 #include "shader_recompiler/frontend/opcodes.h"
 #include "shader_recompiler/frontend/translate/translate.h"
+#include "shader_recompiler/translation_error.h"
 
 namespace Shader::Gcn {
 
@@ -40,8 +41,8 @@ void Translator::EmitFlowControl(const GcnInst& inst) {
         S_SENDMSG(inst);
         return;
     default:
-        UNREACHABLE_MSG("Unhandled scalar flow control opcode {}",
-                        magic_enum::enum_name(inst.opcode));
+        SHADER_UNREACHABLE_MSG("Unhandled scalar flow control opcode {}",
+                               magic_enum::enum_name(inst.opcode));
     }
 }
 
@@ -58,7 +59,8 @@ void Translator::S_GETPC_B64(const GcnInst& inst) {
 void Translator::S_GETREG_B32(const GcnInst& inst) {
     constexpr u32 HW_REG_HW_ID = 4;
     const u32 hw_reg = u16(inst.control.sopk.simm) & 0x3f;
-    ASSERT_MSG(hw_reg == HW_REG_HW_ID, "S_GETREG_B32 of unhandled hardware register {}", hw_reg);
+    SHADER_ASSERT_MSG(hw_reg == HW_REG_HW_ID, "S_GETREG_B32 of unhandled hardware register {}",
+                      hw_reg);
     // psport: Vulkan exposes no wave placement, so every field reads 0; for the CU, SH and SE
     // ids that is a placement the hardware can also give (a dispatch may be limited to one unit).
     SetDst(inst.dst[0], ir.Imm32(0U));
@@ -78,7 +80,7 @@ void Translator::S_SENDMSG(const GcnInst& inst) {
             ir.EmitVertex();
             break;
         default:
-            UNREACHABLE();
+            SHADER_UNREACHABLE();
         }
         break;
     }
@@ -86,7 +88,7 @@ void Translator::S_SENDMSG(const GcnInst& inst) {
         break;
     }
     default:
-        UNREACHABLE();
+        SHADER_UNREACHABLE();
     }
 }
 

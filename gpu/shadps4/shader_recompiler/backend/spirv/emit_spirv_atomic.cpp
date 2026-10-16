@@ -4,6 +4,7 @@
 #include <bit>
 #include "shader_recompiler/backend/spirv/emit_spirv_instructions.h"
 #include "shader_recompiler/backend/spirv/spirv_emit_context.h"
+#include "shader_recompiler/translation_error.h"
 
 namespace Shader::Backend::SPIRV {
 
@@ -460,11 +461,11 @@ Id EmitImageAtomicFMin32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id coords
 }
 
 Id EmitImageAtomicInc32(EmitContext&, IR::Inst*, u32, Id, Id) {
-    UNREACHABLE_MSG("SPIR-V Instruction");
+    SHADER_UNREACHABLE_MSG("SPIR-V Instruction");
 }
 
 Id EmitImageAtomicDec32(EmitContext&, IR::Inst*, u32, Id, Id) {
-    UNREACHABLE_MSG("SPIR-V Instruction");
+    SHADER_UNREACHABLE_MSG("SPIR-V Instruction");
 }
 
 Id EmitImageAtomicAnd32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id coords, Id value) {
@@ -490,11 +491,11 @@ Id EmitImageAtomicCmpSwap32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id coo
 }
 
 Id EmitDataAppend(EmitContext& ctx, Id gds_dw_offset, Id exec) {
-    UNREACHABLE_MSG("SPIR-V Instruction");
+    SHADER_UNREACHABLE_MSG("SPIR-V Instruction");
 }
 
 Id EmitDataConsume(EmitContext& ctx, Id gds_dw_offset, Id exec) {
-    UNREACHABLE_MSG("SPIR-V Instruction");
+    SHADER_UNREACHABLE_MSG("SPIR-V Instruction");
 }
 
 } // namespace Shader::Backend::SPIRV

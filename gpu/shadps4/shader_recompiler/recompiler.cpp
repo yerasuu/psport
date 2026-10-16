@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <cstring>
 #include "common/logging/classes.h"
 #include "shader_recompiler/frontend/control_flow_graph.h"
 #include "shader_recompiler/frontend/decode.h"
@@ -11,8 +12,14 @@
 #include "shader_recompiler/ir/program.h"
 #include "shader_recompiler/profile.h"
 #include "shader_recompiler/recompiler.h"
+#include "shader_recompiler/translation_error.h"
 
 namespace Shader {
+
+TranslationError MakeTranslationError(const char* sz_file, u32 line, std::string reason) {
+    const char* sz_relative = std::strstr(sz_file, "shader_recompiler/");
+    return {std::move(reason), sz_relative ? sz_relative : sz_file, line};
+}
 
 IR::BlockList GenerateBlocks(const IR::AbstractSyntaxList& syntax_list) {
     size_t num_syntax_blocks{};
@@ -45,7 +52,7 @@ void EmitControlFlowGraph(IR::Program& program, Pools& pools, Gcn::CFG& cfg,
         program.blocks.push_back(ir_block);
     }
     translator.EmitPrologue(program.blocks.front());
-    ASSERT_MSG(!program.info.translation_failed, "Shader translation has failed");
+    SHADER_ASSERT_MSG(!program.info.translation_failed, "unknown opcodes (logged above)");
     for (auto& block : cfg) {
         auto* ir_block = block.ir_block;
         if (block.branch_true) {
@@ -60,7 +67,7 @@ void EmitControlFlowGraph(IR::Program& program, Pools& pools, Gcn::CFG& cfg,
     program.post_order_blocks = Shader::IR::PostOrder(program.blocks.front());
 }
 
-IR::Program TranslateProgram(const std::span<const u32>& code, Pools& pools, Info& info,
+static IR::Program Translate(const std::span<const u32>& code, Pools& pools, Info& info,
                              RuntimeInfo& runtime_info, const Profile& profile) {
     // Ensure first instruction is expected.
     constexpr u32 token_mov_vcchi = 0xBEEB03FF;
@@ -147,6 +154,17 @@ IR::Program TranslateProgram(const std::span<const u32>& code, Pools& pools, Inf
     Shader::IR::DumpProgram(program, info);
 
     return program;
+}
+
+std::expected<IR::Program, TranslationError> TranslateProgram(const std::span<const u32>& code,
+                                                              Pools& pools, Info& info,
+                                                              RuntimeInfo& runtime_info,
+                                                              const Profile& profile) {
+    try {
+        return Translate(code, pools, info, runtime_info, profile);
+    } catch (TranslationError& error) {
+        return std::unexpected(std::move(error));
+    }
 }
 
 } // namespace Shader

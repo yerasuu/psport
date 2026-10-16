@@ -11,6 +11,7 @@
 #include "shader_recompiler/ir/patch.h"
 #include "shader_recompiler/ir/reg.h"
 #include "shader_recompiler/ir/type.h"
+#include "shader_recompiler/translation_error.h"
 
 namespace Shader::IR {
 
@@ -39,7 +40,7 @@ public:
 
     bool IsPhi() const noexcept;
     IR::Type Type() const noexcept;
-    u64 Hash() const noexcept;
+    u64 Hash() const;
 
     inline bool IsEmpty() const noexcept {
         return type == Type::Void;
@@ -160,8 +161,9 @@ public:
     TypedValue(const TypedValue<other_type>& value) : Value(value) {}
 
     explicit TypedValue(const Value& value) : Value(value) {
-        ASSERT_MSG((value.Type() & type_) != IR::Type::Void, "Incompatible types {} and {}", type_,
-                   value.Type());
+        SHADER_ASSERT_MSG((value.Type() & type_) != IR::Type::Void, "Incompatible types {} and {}",
+                          type_,
+                          value.Type());
     }
 
     explicit TypedValue(IR::Inst* inst_) : TypedValue(Value(inst_)) {}

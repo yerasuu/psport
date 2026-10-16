@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include "common/assert.h"
 #include "shader_recompiler/frontend/decode.h"
+#include "shader_recompiler/translation_error.h"
 
 namespace Shader::Gcn {
 
@@ -4406,7 +4406,7 @@ InstFormat InstructionFormat(InstEncoding encoding, uint32_t opcode) {
     case InstEncoding::VOP2:
         return InstructionFormatVOP2[opcode];
     default:
-        UNREACHABLE();
+        SHADER_UNREACHABLE();
     }
     return {};
 }

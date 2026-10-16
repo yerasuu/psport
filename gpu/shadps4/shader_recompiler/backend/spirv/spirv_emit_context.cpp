@@ -1,13 +1,13 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include "common/assert.h"
 #include "common/div_ceil.h"
 #include "shader_recompiler/backend/spirv/spirv_emit_context.h"
 #include "shader_recompiler/frontend/fetch_shader.h"
 #include "shader_recompiler/ir/attribute.h"
 #include "shader_recompiler/ir/microinstruction.h"
 #include "shader_recompiler/runtime_info.h"
+#include "shader_recompiler/translation_error.h"
 
 #include <boost/container/static_vector.hpp>
 #include <fmt/format.h>
@@ -37,7 +37,7 @@ std::string_view StageName(HwStage stage) {
     case HwStage::Compute:
         return "cs";
     }
-    UNREACHABLE_MSG("Invalid hw stage {}", u32(stage));
+    SHADER_UNREACHABLE_MSG("Invalid hw stage {}", u32(stage));
 }
 
 static constexpr u32 NumVertices(AmdGpu::PrimitiveType type) {
@@ -56,7 +56,7 @@ static constexpr u32 NumVertices(AmdGpu::PrimitiveType type) {
     case AmdGpu::PrimitiveType::AdjLineList:
         return 4u;
     default:
-        UNREACHABLE();
+        SHADER_UNREACHABLE();
     }
 }
 
@@ -111,7 +111,7 @@ Id EmitContext::Def(const IR::Value& value) {
     case IR::Type::StringLiteral:
         return String(value.StringLiteral());
     default:
-        UNREACHABLE_MSG("Immediate type {}", value.Type());
+        SHADER_UNREACHABLE_MSG("Immediate type {}", value.Type());
     }
 }
 
@@ -195,7 +195,7 @@ const VectorIds& GetAttributeType(EmitContext& ctx, AmdGpu::NumberFormat fmt) {
     default:
         break;
     }
-    UNREACHABLE_MSG("Invalid attribute type {}", fmt);
+    SHADER_UNREACHABLE_MSG("Invalid attribute type {}", fmt);
 }
 
 EmitContext::SpirvAttribute EmitContext::GetAttributeInfo(AmdGpu::NumberFormat fmt, Id id,
@@ -211,13 +211,13 @@ EmitContext::SpirvAttribute EmitContext::GetAttributeInfo(AmdGpu::NumberFormat f
     default:
         break;
     }
-    UNREACHABLE_MSG("Invalid attribute type {}", fmt);
+    SHADER_UNREACHABLE_MSG("Invalid attribute type {}", fmt);
 }
 
 Id EmitContext::GetBufferSize(const u32 sharp_idx) {
     // Can this be done with memory access? Like we do now with ReadConst
     const auto& srt_flatbuf = buffers[flatbuf_index];
-    ASSERT(srt_flatbuf.buffer_type == BufferType::Flatbuf);
+    SHADER_ASSERT(srt_flatbuf.buffer_type == BufferType::Flatbuf);
     const auto [id, pointer_type] = srt_flatbuf.Alias(PointerType::U32);
 
     const auto rsrc1{
@@ -338,7 +338,7 @@ void EmitContext::DefineInputs() {
             break;
         }
         for (const auto& attrib : fetch_shader->attributes) {
-            ASSERT(attrib.semantic < IR::NumParams);
+            SHADER_ASSERT(attrib.semantic < IR::NumParams);
             const auto sharp = attrib.GetSharp(info);
             const Id type{GetAttributeType(*this, sharp.GetNumberFmt())[4]};
             Id id{DefineInput(type, attrib.semantic)};
@@ -755,8 +755,8 @@ void EmitContext::DefineOutputs() {
         // Dual source blending allows at most 2 render targets, one for each source.
         // Fewer targets are allowed but the missing blending source values will be
         // undefined.
-        ASSERT_MSG(!runtime_info.hw.fs.dual_source_blending || num_render_targets <= 2,
-                   "Dual source blending enabled, there must be at most two MRT exports");
+        SHADER_ASSERT_MSG(!runtime_info.hw.fs.dual_source_blending || num_render_targets <= 2,
+                          "Dual source blending enabled, there must be at most two MRT exports");
         break;
     }
     case SwStage::Geometry: {
@@ -772,7 +772,7 @@ void EmitContext::DefineOutputs() {
     case SwStage::Compute:
         break;
     default:
-        UNREACHABLE();
+        SHADER_UNREACHABLE();
     }
 }
 
@@ -1086,8 +1086,9 @@ spv::ImageFormat GetFormat(const AmdGpu::Image& image) {
         image.GetNumberFmt() == AmdGpu::NumberFormat::Float) {
         return spv::ImageFormat::Rgba32f;
     }
-    UNREACHABLE_MSG("Unknown storage format data_format={}, num_format={}", image.GetDataFmt(),
-                    image.GetNumberFmt());
+    SHADER_UNREACHABLE_MSG("Unknown storage format data_format={}, num_format={}",
+                           image.GetDataFmt(),
+                           image.GetNumberFmt());
 }
 
 Id ImageType(EmitContext& ctx, const ImageResource& desc, Id sampled_type) {
@@ -1111,7 +1112,7 @@ Id ImageType(EmitContext& ctx, const ImageResource& desc, Id sampled_type) {
     default:
         break;
     }
-    UNREACHABLE_MSG("Invalid texture type {}", type);
+    SHADER_UNREACHABLE_MSG("Invalid texture type {}", type);
 }
 
 void EmitContext::DefineImagesAndSamplers() {
@@ -1174,7 +1175,7 @@ void EmitContext::DefineSharedMemory() {
     if (num_types == 0) {
         return;
     }
-    ASSERT(info.hw_stage == HwStage::Compute);
+    SHADER_ASSERT(info.hw_stage == HwStage::Compute);
     const u32 shared_memory_size =
         runtime_info.hw.cs.shared_memory_size + info.shared_memory_scratch_size;
 

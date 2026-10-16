@@ -6,6 +6,7 @@
 #include "shader_recompiler/ir/ir_emitter.h"
 #include "shader_recompiler/ir/program.h"
 #include "shader_recompiler/profile.h"
+#include "shader_recompiler/translation_error.h"
 
 namespace Shader::Optimization {
 
@@ -149,7 +150,7 @@ void SharedMemoryBarrierPass(IR::Program& program, const RuntimeInfo& runtime_in
             continue;
         }
         if (node.type == Type::Repeat && divergent_loops.contains(node.data.repeat.merge)) {
-            ASSERT(divergence_depth > 0);
+            SHADER_ASSERT(divergence_depth > 0);
             --divergence_depth;
             if (divergence_depth == 0) {
                 EmitBarrierAtBlockStart(node.data.repeat.merge);

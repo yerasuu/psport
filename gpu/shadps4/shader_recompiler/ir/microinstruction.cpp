@@ -7,6 +7,7 @@
 #include "shader_recompiler/ir/basic_block.h"
 #include "shader_recompiler/ir/type.h"
 #include "shader_recompiler/ir/value.h"
+#include "shader_recompiler/translation_error.h"
 
 namespace Shader::IR {
 
@@ -19,7 +20,7 @@ Inst::Inst(IR::Opcode op_, u32 flags_) noexcept : op{op_}, flags{flags_} {
 }
 
 Inst::Inst(const Inst& base) : op{base.op}, flags{base.flags} {
-    ASSERT_MSG(base.op != Opcode::Phi, "Copying phi node");
+    SHADER_ASSERT_MSG(base.op != Opcode::Phi, "Copying phi node");
     std::construct_at(&args);
     const size_t num_args{base.NumArgs()};
     for (size_t index = 0; index < num_args; ++index) {
@@ -135,7 +136,7 @@ bool Inst::MayHaveSideEffects() const noexcept {
 
 bool Inst::AreAllArgsImmediates() const {
     if (op == Opcode::Phi) {
-        UNREACHABLE_MSG("Testing for all arguments are immediates on phi instruction");
+        SHADER_UNREACHABLE_MSG("Testing for all arguments are immediates on phi instruction");
     }
     return std::all_of(args.begin(), args.begin() + NumArgs(),
                        [](const IR::Value& value) { return value.IsImmediate(); });
@@ -155,7 +156,7 @@ IR::Type Inst::Type() const {
 
 void Inst::SetArg(size_t index, Value value) {
     if (index >= NumArgs()) {
-        UNREACHABLE_MSG("Out of bounds argument index {} in opcode {}", index, op);
+        SHADER_UNREACHABLE_MSG("Out of bounds argument index {} in opcode {}", index, op);
     }
     const IR::Value arg{Arg(index)};
     if (auto* inst = arg.TryInst()) {
@@ -173,10 +174,10 @@ void Inst::SetArg(size_t index, Value value) {
 
 Block* Inst::PhiBlock(size_t index) const {
     if (op != Opcode::Phi) {
-        UNREACHABLE_MSG("{} is not a Phi instruction", op);
+        SHADER_UNREACHABLE_MSG("{} is not a Phi instruction", op);
     }
     if (index >= phi_args.size()) {
-        UNREACHABLE_MSG("Out of bounds argument index {} in phi instruction", index);
+        SHADER_UNREACHABLE_MSG("Out of bounds argument index {} in phi instruction", index);
     }
     return phi_args[index].first;
 }
@@ -228,7 +229,7 @@ void Inst::ReplaceUsesWith(Value replacement, bool preserve) {
 
 void Inst::ReplaceOpcode(IR::Opcode opcode) {
     if (opcode == IR::Opcode::Phi) {
-        UNREACHABLE_MSG("Cannot transition into Phi");
+        SHADER_UNREACHABLE_MSG("Cannot transition into Phi");
     }
     if (op == Opcode::Phi) {
         // Transition out of phi arguments into non-phi

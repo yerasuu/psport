@@ -314,6 +314,8 @@ constexpr CompMapping RemapSwizzle(const DataFormat format, const CompMapping sw
     }
 }
 
+void LogUnmappedNumberConversion(NumberFormat num_fmt, DataFormat data_fmt);
+
 constexpr NumberConversion MapNumberConversion(const NumberFormat num_fmt,
                                                const DataFormat data_fmt) {
     switch (num_fmt) {
@@ -356,7 +358,8 @@ constexpr NumberConversion MapNumberConversion(const NumberFormat num_fmt,
         case DataFormat::Format16_16_16_16:
             return NumberConversion::Sint16ToSnormNz;
         default:
-            UNREACHABLE_MSG("data_fmt = {}", u32(data_fmt));
+            LogUnmappedNumberConversion(num_fmt, data_fmt);
+            return NumberConversion::None;
         }
     }
     default:

@@ -5,6 +5,7 @@
 
 #include "common/types.h"
 #include "shader_recompiler/ir/type.h"
+#include "shader_recompiler/translation_error.h"
 #include "video_core/amdgpu/resource.h"
 
 #include <algorithm>
@@ -317,7 +318,12 @@ struct PushData {
     u32 scene_size; ///< reduced width | height << 16; zero means native pixel coordinates
 
     void AddOffset(u32 binding, u32 offset) {
-        ASSERT(offset < 256 && binding < buf_offsets.size());
+        if (offset >= 256 || binding >= buf_offsets.size()) {
+            SHADER_LOG_FALLBACK("Buffer binding {} offset {} does not fit the push constants, "
+                                "left at 0",
+                                binding, offset);
+            return;
+        }
         buf_offsets[binding] = offset;
     }
 };

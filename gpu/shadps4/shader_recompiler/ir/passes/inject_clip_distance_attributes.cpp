@@ -5,6 +5,7 @@
 #include "shader_recompiler/ir/basic_block.h"
 #include "shader_recompiler/ir/ir_emitter.h"
 #include "shader_recompiler/ir/program.h"
+#include "shader_recompiler/translation_error.h"
 
 namespace Shader {
 
@@ -19,9 +20,9 @@ void InjectClipDistanceAttributes(IR::Program& program, RuntimeInfo& runtime_inf
     auto it = std::ranges::find_if(first_block->Instructions(), [](const IR::Inst& inst) {
         return inst.GetOpcode() == IR::Opcode::Prologue;
     });
-    ASSERT(it != first_block->end());
+    SHADER_ASSERT(it != first_block->end());
     ++it;
-    ASSERT(it != first_block->end());
+    SHADER_ASSERT(it != first_block->end());
     ++it;
 
     IR::IREmitter ir{*first_block, it};

@@ -9,11 +9,11 @@
 #include <boost/container/small_vector.hpp>
 #include <boost/intrusive/set.hpp>
 
-#include "common/assert.h"
 #include "common/object_pool.h"
 #include "common/types.h"
 #include "shader_recompiler/frontend/instruction.h"
 #include "shader_recompiler/ir/condition.h"
+#include "shader_recompiler/translation_error.h"
 
 namespace Shader::IR {
 class Block;
@@ -87,7 +87,7 @@ private:
             return 0ULL;
         }
         const auto it_index = std::ranges::lower_bound(index_to_pc, label);
-        ASSERT(it_index != index_to_pc.end() || label > index_to_pc.back());
+        SHADER_ASSERT(it_index != index_to_pc.end() || label > index_to_pc.back());
         return std::distance(index_to_pc.begin(), it_index);
     }
 

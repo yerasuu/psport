@@ -5,6 +5,7 @@
 #include "common/hash.h"
 #include "shader_recompiler/ir/microinstruction.h"
 #include "shader_recompiler/ir/value.h"
+#include "shader_recompiler/translation_error.h"
 
 namespace Shader::IR {
 
@@ -19,7 +20,7 @@ IR::Type Value::Type() const noexcept {
     return type;
 }
 
-u64 Value::Hash() const noexcept {
+u64 Value::Hash() const {
     const u64 h = HashCombine(static_cast<u64>(type), 0ULL);
     switch (type) {
     case Type::Void:
@@ -60,7 +61,7 @@ u64 Value::Hash() const noexcept {
     default:
         break;
     }
-    UNREACHABLE_MSG("Invalid type {}", type);
+    SHADER_UNREACHABLE_MSG("Invalid type {}", type);
 }
 
 bool Value::operator==(const Value& other) const {
@@ -108,7 +109,7 @@ bool Value::operator==(const Value& other) const {
     default:
         break;
     }
-    UNREACHABLE_MSG("Invalid type {}", type);
+    SHADER_UNREACHABLE_MSG("Invalid type {}", type);
 }
 
 bool Value::operator!=(const Value& other) const {

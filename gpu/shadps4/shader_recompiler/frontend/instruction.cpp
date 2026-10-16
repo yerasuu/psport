@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include "common/assert.h"
 #include "shader_recompiler/frontend/instruction.h"
+#include "shader_recompiler/translation_error.h"
 
 namespace Shader::Gcn {
 
@@ -39,7 +39,7 @@ bool GcnInst::IsConditionalBranch() const {
     case Opcode::S_CBRANCH_CDBGUSER:
     case Opcode::S_CBRANCH_CDBGSYS_OR_USER:
     case Opcode::S_CBRANCH_CDBGSYS_AND_USER:
-        UNIMPLEMENTED();
+        SHADER_UNREACHABLE_MSG("unimplemented");
         return true;
     default:
         break;

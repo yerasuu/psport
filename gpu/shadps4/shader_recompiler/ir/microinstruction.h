@@ -11,10 +11,10 @@
 #include <boost/container/small_vector.hpp>
 #include <boost/intrusive/list.hpp>
 
-#include "common/assert.h"
 #include "shader_recompiler/ir/opcodes.h"
 #include "shader_recompiler/ir/ssa.h"
 #include "shader_recompiler/ir/value.h"
+#include "shader_recompiler/translation_error.h"
 
 namespace Shader::IR {
 
@@ -40,7 +40,7 @@ public:
     Inst(Inst&&) = delete;
 
     IR::Block* GetParent() const {
-        ASSERT(parent);
+        SHADER_ASSERT(parent);
         return parent;
     }
     void SetParent(IR::Block* block) {
