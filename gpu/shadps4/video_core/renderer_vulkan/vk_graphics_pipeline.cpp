@@ -7,6 +7,7 @@
 
 #include "common/serdes.h"
 #include "common/assert.h"
+#include "common/debug.h"
 #include "shader_recompiler/backend/spirv/emit_spirv_discard_frag.h"
 #include "shader_recompiler/backend/spirv/emit_spirv_quad_rect.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
@@ -37,6 +38,7 @@ GraphicsPipeline::GraphicsPipeline(
     std::span<const vk::ShaderModule> modules, SerializationSupport& sdata, bool preloading)
     : Pipeline{instance, scheduler, desc_heap, profile, pipeline_cache}, key{key_},
       fetch_shader{std::move(fetch_shader_)} {
+    ZoneScopedNC("Graphics pipeline", RendererMarkerColor);
     const vk::Device device = instance.GetDevice();
     std::ranges::copy(infos, stages.begin());
     // Stage selection drops a stream-out draw whose GS module doesn't capture at the runtime stride

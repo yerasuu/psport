@@ -9,6 +9,7 @@
 
 #include "psport_threads.h"
 #include "psport_toggles.h"
+#include "common/debug.h"
 #include "common/thread.h"
 #include "video_core/amdgpu/liverpool.h"
 #include "video_core/amdgpu/pm4_cmds.h"
@@ -367,6 +368,7 @@ void DrawPreparation::ScannerLoop(std::stop_token stop) {
             // Unscanned buffers are only collected by a rebase, so `next_seq` is still queued.
             submission = m_submissions[next_seq - m_submissions.front()->seq];
         }
+        ZoneScopedNC("Draw scan", RendererMarkerColor);
         submission->start_checksum = checksum;
         dirty.Clear();
         ForEachPacket(submission->commands, [&](const AmdGpu::PM4Header* p_header) {
@@ -434,6 +436,7 @@ void DrawPreparation::WorkerLoop(std::stop_token stop, u32 i_worker) {
                 path.push_back(m_submissions[seq - front]);
             }
         }
+        ZoneScopedNC("Draw prep", RendererMarkerColor);
         for (const auto& step : path) {
             step->delta.Apply(*regs);
         }

@@ -1,3 +1,8 @@
 [submodule "gpu/third_party/imgui"]
 	path = gpu/third_party/imgui
 	url = https://github.com/ocornut/imgui.git
+[submodule "gpu/third_party/tracy"]
+	path = gpu/third_party/tracy
+	url = https://github.com/wolfpld/tracy.git
+	shallow = true
+	update = none

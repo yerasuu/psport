@@ -15,6 +15,7 @@
 #include "game_profile.h"
 #include "psport_overlay.h"
 #include "psport_settings.h"
+#include "psport_renderdoc.h"
 #include "psport_timeline.h"
 #include "video_core/renderer_vulkan/vk_temporal_upscaler.h"
 #include "video_core/renderer_vulkan/vk_presenter.h"
@@ -601,6 +602,7 @@ void Presenter::WaitRendered(const Frame* frame) {
 }
 
 void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame) {
+    ZoneScopedNC("Present", RendererMarkerColor);
     // Free the frame for reuse
     const auto free_frame = [&] {
         if (!is_reusing_frame) {
@@ -795,6 +797,7 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
         if (!first_shown.exchange(true, std::memory_order_relaxed)) {
             std::printf("Presenter: first game frame presented (%ux%u)\n", width, height);
         }
+        PsRenderDoc::OnPresent();
     }
 }
 

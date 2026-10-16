@@ -88,7 +88,9 @@ static ABI int32_t mutex_lock(GuestMutex **pp_mutex) {
     int r = pthread_mutex_trylock(&(*pp_mutex)->native);
     if (r == EBUSY) { /* contended: timed for the wait profile */
         const uint64_t start = runtime_wait_clock();
+        RUNTIME_ZONE(zone, "mutex wait");
         r = pthread_mutex_lock(&(*pp_mutex)->native);
+        RUNTIME_ZONE_END(zone);
         runtime_wait_note(1, runtime_wait_clock() - start);
     }
     e = orbis_error(r);
@@ -204,7 +206,9 @@ static ABI int32_t cond_wait(GuestCond **pp_cond, GuestMutex **pp_mutex) {
     if (!pp_mutex || (uintptr_t)*pp_mutex < 3) return orbis_error(EINVAL);
     ++s_c_waits;
     const uint64_t start = runtime_wait_clock();
+    RUNTIME_ZONE(zone, "cond wait");
     const int e2 = pthread_cond_wait(&(*pp_cond)->native, &(*pp_mutex)->native);
+    RUNTIME_ZONE_END(zone);
     runtime_wait_note(0, runtime_wait_clock() - start);
     return orbis_error(e2);
 }
@@ -214,7 +218,9 @@ static int32_t cond_wait_until(GuestCond **pp_cond, GuestMutex **pp_mutex, const
     if (!pp_mutex || (uintptr_t)*pp_mutex < 3 || !p_end) return orbis_error(EINVAL);
     ++s_c_waits;
     const uint64_t start = runtime_wait_clock();
+    RUNTIME_ZONE(zone, "cond wait");
     const int e2 = pthread_cond_timedwait(&(*pp_cond)->native, &(*pp_mutex)->native, p_end);
+    RUNTIME_ZONE_END(zone);
     runtime_wait_note(0, runtime_wait_clock() - start);
     return timed_error(e2);
 }

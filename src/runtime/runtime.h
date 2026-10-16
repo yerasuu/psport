@@ -62,6 +62,16 @@ void runtime_wait_report(double frames);
 void runtime_guest_call_sites(uint64_t out[3]);
 /* psport: times the game's heap asked for more memory (posix_mmap): a sign it leaks. */
 uint64_t runtime_heap_growths(void);
+/* psport: Tracy zones around the runtime's blocking waits with PS_TRACY=ON (build.sh); nothing
+ * otherwise. */
+#ifdef TRACY_ENABLE
+#include "tracy/TracyC.h"
+#define RUNTIME_ZONE(zone, sz_name) TracyCZoneN(zone, sz_name, 1)
+#define RUNTIME_ZONE_END(zone) TracyCZoneEnd(zone)
+#else
+#define RUNTIME_ZONE(zone, sz_name)
+#define RUNTIME_ZONE_END(zone)
+#endif
 static inline uint64_t runtime_wait_clock(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC,&t); return (uint64_t)t.tv_sec*1000000000+(uint64_t)t.tv_nsec; }
 const char *runtime_import_name(const char *sz_name);
 /* Arguments (bit N: argument N) the export writes through a pointer, per shadPS4's prototypes; 0

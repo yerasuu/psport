@@ -3,6 +3,7 @@
 
 #include <boost/container/small_vector.hpp>
 
+#include "common/debug.h"
 #include "common/serdes.h"
 #include "shader_recompiler/info.h"
 #include "video_core/renderer_vulkan/vk_compute_pipeline.h"
@@ -18,6 +19,7 @@ ComputePipeline::ComputePipeline(const Instance& instance, Scheduler& scheduler,
                                  SerializationSupport& sdata, bool preloading /*=false*/)
     : Pipeline{instance, scheduler, desc_heap, profile, pipeline_cache, true},
       compute_key{compute_key_} {
+    ZoneScopedNC("Compute pipeline", RendererMarkerColor);
     auto& info = stages[int(Shader::SwStage::Compute)];
     info = &info_;
     const auto debug_str = GetDebugString();

@@ -1,5 +1,8 @@
-// psport: shadPS4 debug/profiler helpers without Tracy.
+// psport: shadPS4 debug/profiler helpers: its own over Tracy with PS_TRACY=ON, else without it.
 #pragma once
+#ifdef TRACY_ENABLE
+#include "../../shadps4/common/debug.h"
+#else
 #include <tracy/Tracy.hpp>
 #define BREAKPOINT __builtin_trap
 static inline bool IsProfilerConnected() { return false; }
@@ -26,3 +29,4 @@ enum MarkersPalette : int {
 #define FRAME_END
 #define FIBER_ENTER(name)
 #define FIBER_EXIT
+#endif

@@ -106,6 +106,7 @@ static int32_t wait_flag(uint64_t id,uint64_t bits,uint32_t mode,uint64_t *p_res
         const uint64_t cancels=p_flag->cancels, wait_start=runtime_wait_clock();
         const uint64_t deadline=p_timeout ? now_ns()+(uint64_t)*p_timeout*1000 : 0;
         const struct timespec end={.tv_sec=(time_t)(deadline/1000000000),.tv_nsec=(long)(deadline%1000000000)};
+        RUNTIME_ZONE(zone,"event flag wait");
         for (;;) {
             if (p_flag->deleted) { status=ERR(13); break; }
             if (p_flag->cancels!=cancels) { status=ERR(85); if (p_result) *p_result=p_flag->pattern; break; }
@@ -118,6 +119,7 @@ static int32_t wait_flag(uint64_t id,uint64_t bits,uint32_t mode,uint64_t *p_res
             }
             host_check(e);
         }
+        RUNTIME_ZONE_END(zone);
         runtime_wait_note(0,runtime_wait_clock()-wait_start);
         if (p_timeout) {
             uint64_t now=now_ns();

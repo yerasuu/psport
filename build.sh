@@ -44,6 +44,18 @@ mkdir -p pgo
 if [[ ! -f gpu/third_party/imgui/imgui.h ]]; then
     git submodule update --init --recursive
 fi
+# PS_TRACY=ON: Tracy profiler zones in the port and its GPU library (docs/en/PROFILING.md); its client
+# is a submodule left out of a plain checkout, fetched here the first time. PS_PROFILE=1: frame
+# pointers in out/psport too (the GPU library always has them), for perf's call graphs.
+tracy=${PS_TRACY:-OFF}
+profile=()
+if [[ $tracy == ON ]]; then
+    if [[ ! -f gpu/third_party/tracy/public/TracyClient.cpp ]]; then
+        git -c submodule.gpu/third_party/tracy.update=checkout submodule update --init --depth 1 gpu/third_party/tracy
+    fi
+    profile+=(-DTRACY_ENABLE -Igpu/third_party/tracy/public)
+fi
+[[ ${PS_PROFILE:-} == 1 ]] && profile+=(-fno-omit-frame-pointer)
 # ccache when installed, one cache for every checkout and worktree: paths under each one's root
 # are hashed relative to it. Empty otherwise, so a launcher cached by an earlier configure goes.
 launcher=
@@ -53,10 +65,10 @@ if command -v ccache >/dev/null; then
     export CCACHE_BASEDIR=${CCACHE_BASEDIR:-$PWD} CCACHE_NOHASHDIR=${CCACHE_NOHASHDIR:-1}
 fi
 cmake -S gpu -B out/gpu -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DPS_PGO="$pgo" \
-    -DPS_LTO="${PS_LTO:-ON}" -DPS_PGO_DIR="$PWD/pgo" \
+    -DPS_LTO="${PS_LTO:-ON}" -DPS_PGO_DIR="$PWD/pgo" -DPS_TRACY="$tracy" \
     -DCMAKE_C_COMPILER_LAUNCHER="$launcher" -DCMAKE_CXX_COMPILER_LAUNCHER="$launcher" \
     ${PS_ORIGIN_RPATH_ONLY:+-DCMAKE_BUILD_RPATH_USE_ORIGIN=ON} >/dev/null
-echo "GPU library: PGO $pgo, LTO ${PS_LTO:-ON}"
+echo "GPU library: PGO $pgo, LTO ${PS_LTO:-ON}, Tracy $tracy"
 # A failed GPU build must stop here: an older libpsport-gpu.so would otherwise be used silently.
 if ! ninja -C out/gpu psport-gpu $(grep -q "^build psport-net:" out/gpu/build.ninja && echo psport-net) > out/gpu-build.log 2>&1; then
     grep -v '^\[' out/gpu-build.log | tail -40 >&2
@@ -90,7 +102,7 @@ if [[ ! -f out/libatrac9.a || -n $(find third_party/LibAtrac9/C/src -newer out/l
     for source in "${atrac9[@]}"; do "$CC" -std=c99 -O2 -g -w -c "$source" -o "out/atrac9/$(basename "${source%.c}").o"; done
     ar rcs out/libatrac9.a out/atrac9/*.o
 fi
-"$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -pthread -no-pie "${includes[@]}" -I. "${areas[@]/#/-Isrc/}" src/main/main.c src/main/cli.c src/main/game_info.c src/main/bind.c src/main/signals.c src/loader/loader*.c "${runtime[@]}" src/main/vulkan_smoke.c out/libatrac9.a -lm "${gpu[@]}" "${libraries[@]}" -o out/psport
+"$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -pthread -no-pie "${profile[@]}" "${includes[@]}" -I. "${areas[@]/#/-Isrc/}" src/main/main.c src/main/cli.c src/main/game_info.c src/main/bind.c src/main/signals.c src/loader/loader*.c "${runtime[@]}" src/main/vulkan_smoke.c out/libatrac9.a -lm "${gpu[@]}" "${libraries[@]}" -o out/psport
 echo "Built $PWD/out/psport"
 # GPU check for run.sh (--host-env, live_resolution=auto) and the launcher's gamepad list (--gamepads).
 "$CC" -std=c11 -O2 -Wall -Wextra -Werror "${includes[@]}" -Isrc/runtime tools/gpu_capabilities.c src/runtime/runtime_quirks.c src/runtime/runtime_json_print.c "${libraries[@]}" -o out/psport-gpu-capabilities

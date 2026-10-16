@@ -1,5 +1,9 @@
-// psport: profiler disabled; Tracy macros compile to nothing.
+// psport: Tracy's client (third_party/tracy) with PS_TRACY=ON; otherwise its macros compile to
+// nothing.
 #pragma once
+#ifdef TRACY_ENABLE
+#include "../../third_party/tracy/public/tracy/Tracy.hpp"
+#else
 #include <cstddef>
 #include <cstdint>
 #define TracyFile __FILE__
@@ -27,3 +31,4 @@ struct LockableCtx { explicit LockableCtx(const SourceLocationData*) {} void Bef
 struct Profiler { bool IsConnected() const { return false; } };
 inline Profiler& GetProfiler() { static Profiler p; return p; }
 } // namespace tracy
+#endif

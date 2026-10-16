@@ -24,6 +24,7 @@
 #include <x86intrin.h>
 
 #include "common/assert.h"
+#include "common/debug.h"
 #include "common/thread.h"
 #include "common/types.h"
 
@@ -238,7 +239,11 @@ private:
                 continue;
             }
             const u64 start = __rdtsc();
-            m_pfn_handler(m_p_context, reinterpret_cast<const u8*>(p_header + 1), p_header->payload);
+            {
+                ZoneScopedNC("Stage B packet", RendererMarkerColor);
+                m_pfn_handler(m_p_context, reinterpret_cast<const u8*>(p_header + 1),
+                              p_header->payload);
+            }
             m_busy_cycles.fetch_add(__rdtsc() - start, std::memory_order_relaxed);
             at += p_header->cb_packet;
             m_c_consumed_packets.fetch_add(1, std::memory_order_release);

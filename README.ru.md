@@ -235,7 +235,8 @@ gamescope без окна, без звука и без контроллеров 
   вызовах, регрессионные прогоны, CI.
 - Заметки о возможностях: [апскейлер](docs/en/upscaler.md),
   [параллельная работа видеочипа](docs/en/parallel_gpu.md),
-  [векторы движения](docs/en/motion_vectors.md), [моды и патчи](docs/en/MODS.md).
+  [векторы движения](docs/en/motion_vectors.md), [моды и патчи](docs/en/MODS.md),
+  [профилирование](docs/en/PROFILING.md).
 - [docs/en/history/](docs/en/history/): проектные заметки, планы и журналы изменений bbport
   (русские оригиналы — в [docs/ru/](docs/ru/)).
 

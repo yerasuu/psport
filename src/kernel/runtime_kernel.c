@@ -122,7 +122,9 @@ static int sleep_ns(uint64_t ns) {
     struct timespec t={.tv_sec=(time_t)(ns/1000000000),.tv_nsec=(long)(ns%1000000000)}, a, b;
     clock_gettime(CLOCK_MONOTONIC,&a);
     int result=0;
+    RUNTIME_ZONE(zone,"sleep");
     while (nanosleep(&t,&t)) if (errno!=EINTR) { result=errno; break; }
+    RUNTIME_ZONE_END(zone);
     clock_gettime(CLOCK_MONOTONIC,&b);
     atomic_fetch_add(&s_c_sleep_calls,1);
     atomic_fetch_add(&s_sleep_total_ns,(uint64_t)((b.tv_sec-a.tv_sec)*1000000000+(b.tv_nsec-a.tv_nsec)));

@@ -84,6 +84,7 @@ static int32_t wait_count(uint32_t id,int32_t need,uint32_t *p_timeout,int block
         const uint64_t wait_start=runtime_wait_clock();
         uint64_t deadline=p_timeout ? now_ns()+(uint64_t)*p_timeout*1000 : 0;
         struct timespec end={.tv_sec=(time_t)(deadline/1000000000),.tv_nsec=(long)(deadline%1000000000)};
+        RUNTIME_ZONE(zone,"sema wait");
         while (!w.is_done) {
             int e=runtime_exception_wait(&w.event,&s_lock,p_timeout ? &end : NULL);
             if (e==ETIMEDOUT && !w.is_done) {
@@ -92,6 +93,7 @@ static int32_t wait_count(uint32_t id,int32_t need,uint32_t *p_timeout,int block
                 *pp_waiter=w.p_next; w.result=ERR(60); w.is_done=1; ++s_c_timed_out;
             } else if (e!=ETIMEDOUT) host_check(e);
         }
+        RUNTIME_ZONE_END(zone);
         runtime_wait_note(2,runtime_wait_clock()-wait_start);
         result=w.result;
         if (!result) ++s_c_acquired;

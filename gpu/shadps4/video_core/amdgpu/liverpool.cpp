@@ -288,7 +288,10 @@ void Liverpool::Process(std::stop_token stoken) {
                 last_decoded = task.address();
                 PsTimeline::Note(PsTimeline::DecodeBegin, curr_qid, decoded_total);
             }
-            task.resume();
+            {
+                ZoneScopedNC("Stage A decode", RendererMarkerColor);
+                task.resume();
+            }
 
             if (task.done()) {
                 task.destroy();

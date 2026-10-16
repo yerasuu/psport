@@ -228,7 +228,8 @@ its log and call report, implementing what is missing and checking the result.
 - [FORK.md](FORK.md): ported components, changes to inherited code, variables, call report,
   regression runs, CI.
 - Feature notes: [upscaler](docs/en/upscaler.md), [parallel GPU work](docs/en/parallel_gpu.md),
-  [motion vectors](docs/en/motion_vectors.md), [mods and patches](docs/en/MODS.md).
+  [motion vectors](docs/en/motion_vectors.md), [mods and patches](docs/en/MODS.md),
+  [profiling](docs/en/PROFILING.md).
 - [docs/en/history/](docs/en/history/): bbport's design notes, plans and change logs
   (Russian originals in [docs/ru/](docs/ru/)).
 
@@ -258,6 +259,8 @@ Source commits and changes to inherited code are recorded in [FORK.md](FORK.md) 
 | [FSR-Vulkan](https://github.com/FireBurn/FSR-Vulkan) by FireBurn, AMD FidelityFX SDK | FSR 3.1 | MIT |
 | [LibAtrac9](https://github.com/Thealexbarney/LibAtrac9) | ATRAC9 audio decoding | MIT |
 | [Dear ImGui](https://github.com/ocornut/imgui) | overlay and in-game menus | MIT |
+| [Tracy](https://github.com/wolfpld/tracy) (submodule, fetched only for `PS_TRACY=ON`) | profiling builds | BSD-3-Clause |
+| RenderDoc's in-application API header (`gpu/third_party/renderdoc`) | one-frame captures | MIT |
 | [cpp-httplib](https://github.com/yhirose/cpp-httplib) | online module | MIT |
 | DLSS bridge (`gpu/dlss_bridge`) from [Supermedo's Windows port](https://github.com/Supermedo/bloodborne_pc), adapted from [IFreemz/shadPS4-Bloodborne-DLSS-FSR](https://github.com/IFreemz/shadPS4-Bloodborne-DLSS-FSR) | DLSS | MIT |
 | [DejaVu fonts](https://dejavu-fonts.github.io/) | overlay text, fallback for libSceFont | Bitstream Vera (DejaVu changes public domain) |

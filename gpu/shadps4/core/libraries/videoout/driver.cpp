@@ -109,6 +109,7 @@ void VideoOutDriver::SwapThread(std::stop_token token) {
             swap_queue.pop_front();
             swap_busy = true;
         }
+        ZoneScopedNC("Swap", RendererMarkerColor);
         work();
     }
 }

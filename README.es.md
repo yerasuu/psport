@@ -241,7 +241,8 @@ su registro y su informe de llamadas, implementar lo que falta y comprobar el re
   llamadas, ejecuciones de regresión, CI.
 - Notas de funciones: [reescalador](docs/en/upscaler.md),
   [trabajo de GPU en paralelo](docs/en/parallel_gpu.md),
-  [vectores de movimiento](docs/en/motion_vectors.md), [mods y parches](docs/en/MODS.md).
+  [vectores de movimiento](docs/en/motion_vectors.md), [mods y parches](docs/en/MODS.md),
+  [perfilado](docs/en/PROFILING.md).
 - [docs/en/history/](docs/en/history/): notas de diseño, planes y registros de cambios de bbport
   (los originales en ruso están en [docs/ru/](docs/ru/)).
 

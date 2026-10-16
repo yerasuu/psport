@@ -182,7 +182,7 @@ target_compile_definitions(psport-gpu PRIVATE IMGUI_IMPL_VULKAN_NO_PROTOTYPES
     PS_FONT_PATH="${CMAKE_CURRENT_SOURCE_DIR}/third_party/fonts/DejaVuSans.ttf")
 set_source_files_properties(port/psport_overlay.cpp PROPERTIES
     OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/fonts/DejaVuSans.ttf")
-target_include_directories(psport-gpu PRIVATE shim port memory diag layer games cp shadps4 ${SHADER_INCLUDE} third_party/gcn/include third_party/half/include
+target_include_directories(psport-gpu PRIVATE shim port memory diag layer games cp shadps4 ${SHADER_INCLUDE} third_party/gcn/include third_party/half/include third_party/renderdoc
     ../third_party/LibAtrac9/C/src)
 # Third-party C, built as its upstream ships it (build.sh builds the runtime's copy with -w too).
 set_source_files_properties(${ATRAC9_SOURCES} PROPERTIES COMPILE_OPTIONS -w)
@@ -194,6 +194,18 @@ target_compile_options(psport-gpu PRIVATE -ftls-model=initial-exec)
 # Runtime symbols (runtime_memory_*, runtime_process_*) resolve against psport.
 target_link_options(psport-gpu PRIVATE -Wl,--allow-shlib-undefined)
 target_link_libraries(psport-gpu PRIVATE ffx-vulkan::portable ffx-vulkan::fsr4-v07-vulkan)
+# psport: Tracy profiler zones (PS_TRACY, off by default, docs/en/PROFILING.md). Off, the shim's Tracy
+# macros compile to nothing and third_party/tracy need not be checked out. On demand: nothing is
+# collected until a profiler connects, and only from this machine, without announcing itself on the
+# network. Tracy's crash handler would take the signals the port's write traps and fault reports
+# rely on.
+option(PS_TRACY "Tracy profiler client in psport-gpu" OFF)
+if (PS_TRACY)
+    target_sources(psport-gpu PRIVATE third_party/tracy/public/TracyClient.cpp)
+    set_source_files_properties(third_party/tracy/public/TracyClient.cpp PROPERTIES COMPILE_OPTIONS -w)
+    target_compile_definitions(psport-gpu PRIVATE TRACY_ENABLE TRACY_ON_DEMAND TRACY_ONLY_LOCALHOST
+        TRACY_NO_BROADCAST TRACY_NO_CRASH_HANDLER)
+endif()
 target_link_libraries(psport-gpu PUBLIC Vulkan::Headers fmt::fmt Boost::headers magic_enum::magic_enum
     tsl::robin_map GPUOpen::VulkanMemoryAllocator PkgConfig::XXHASH PkgConfig::SDL3 PkgConfig::X11 PkgConfig::FFMPEG PkgConfig::FREETYPE miniz::miniz Zydis::Zydis sirit)
 
