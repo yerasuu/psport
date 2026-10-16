@@ -156,7 +156,10 @@ void StagingBufferPool::FreeDeferred(const StagingBufferRef& ref) {
     auto& cache = large_caches[u32(ref.type)];
     const auto it = std::ranges::find_if(
         cache, [&](const LargeBuffer& entry) { return entry.buffer.get() == ref.buffer; });
-    ASSERT_MSG(it != cache.end() && it->held, "FreeDeferred on an allocation that is not held");
+    if (it == cache.end() || !it->held) {
+        LOG_ERROR_COUNTED(Render_Vulkan, "FreeDeferred on an allocation that is not held, ignored");
+        return;
+    }
     it->held = false;
     it->tick = scheduler.CurrentTick();
     it->last_used_frame = frame;

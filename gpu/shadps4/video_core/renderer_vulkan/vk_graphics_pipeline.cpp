@@ -64,11 +64,13 @@ GraphicsPipeline::GraphicsPipeline(
         .pushConstantRangeCount = 1,
         .pPushConstantRanges = &push_constants,
     };
-    auto [layout_result, layout] = instance.GetDevice().createPipelineLayoutUnique(layout_info);
-    ASSERT_MSG(layout_result == vk::Result::eSuccess,
-               "Failed to create graphics pipeline layout: {}", vk::to_string(layout_result));
-    pipeline_layout = std::move(layout);
-    SetObjectName(device, *pipeline_layout, "Graphics PipelineLayout {}", debug_str);
+    if (desc_layout) {
+        pipeline_layout = Check<"create a graphics pipeline layout">(
+            instance.GetDevice().createPipelineLayoutUnique(layout_info));
+    }
+    if (pipeline_layout) {
+        SetObjectName(device, *pipeline_layout, "Graphics PipelineLayout {}", debug_str);
+    }
 
     if (!preloading) {
         VertexInputs<AmdGpu::Buffer> guest_buffers;
@@ -430,17 +432,26 @@ GraphicsPipeline::GraphicsPipeline(
         .layout = *pipeline_layout,
     };
 
-    auto [pipeline_result, pipe] =
-        device.createGraphicsPipelineUnique(pipeline_cache, pipeline_info);
+    // psport: a layout or shader module that could not be created leaves the pipeline null.
+    vk::Result pipeline_result = vk::Result::eErrorInitializationFailed;
+    if (pipeline_layout && std::ranges::all_of(shader_stages, [](const auto& shader_stage) {
+            return bool(shader_stage.module);
+        })) {
+        auto [result, pipe] = device.createGraphicsPipelineUnique(pipeline_cache, pipeline_info);
+        pipeline_result = result;
+        pipeline = std::move(pipe);
+    }
     if (preloading && pipeline_result != vk::Result::eSuccess) {
         // psport: a pipeline from the cache the driver rejects is a damaged cache entry: the
         // cache is rebuilt (PipelineCache::WarmUp) instead of stopping the game at every start.
         throw Serialization::CorruptData{"cached graphics pipeline rejected by the driver: " +
                                          vk::to_string(pipeline_result)};
     }
-    ASSERT_MSG(pipeline_result == vk::Result::eSuccess, "Failed to create graphics pipeline: {}",
-               vk::to_string(pipeline_result));
-    pipeline = std::move(pipe);
+    if (pipeline_result != vk::Result::eSuccess) {
+        LOG_ERROR_COUNTED(Render_Vulkan, "Failed to create graphics pipeline {}, left null: {}",
+                          debug_str, vk::to_string(pipeline_result));
+        return;
+    }
     SetObjectName(device, *pipeline, "Graphics Pipeline {}", debug_str);
 }
 
@@ -552,11 +563,8 @@ void GraphicsPipeline::BuildDescSetLayout(bool preloading) {
         .bindingCount = static_cast<u32>(bindings.size()),
         .pBindings = bindings.data(),
     };
-    auto [layout_result, layout] =
-        instance.GetDevice().createDescriptorSetLayoutUnique(desc_layout_ci);
-    ASSERT_MSG(layout_result == vk::Result::eSuccess,
-               "Failed to create graphics descriptor set layout: {}", vk::to_string(layout_result));
-    desc_layout = std::move(layout);
+    desc_layout = Check<"create a graphics descriptor set layout">(
+        instance.GetDevice().createDescriptorSetLayoutUnique(desc_layout_ci));
 }
 
 } // namespace Vulkan

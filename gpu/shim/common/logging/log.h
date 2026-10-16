@@ -42,6 +42,8 @@ constexpr bool IsStubbed(const T& format) {
     }
 }
 void Stubbed(const char* function, const std::uint64_t* count);
+// psport: LOG_ERROR_COUNTED's first occurrence, so that the call summary lists it with its count.
+void Fallback(const char* function, const char* message, const std::uint64_t* count);
 } // namespace Common::Log
 
 #define LOG_GENERIC(log_class, log_level, fmt_str, ...)                                             \
@@ -66,11 +68,14 @@ void Stubbed(const char* function, const std::uint64_t* count);
 #define LOG_CRITICAL(log_class, ...) LOG_GENERIC(Common::Log::Class::log_class, spdlog::level::critical, __VA_ARGS__)
 // psport: an error the caller survives with a fallback, which a game may hit every draw or frame;
 // logged on its 1st, 2nd, 4th, 8th... occurrence with the running count, so it stays visible
-// without flooding the log.
+// without flooding the log, and listed with its total in the call summary at exit.
 #define LOG_ERROR_COUNTED(log_class, fmt_str, ...)                                                  \
     do {                                                                                            \
         static std::uint64_t psport_c_hits;                                                         \
         const std::uint64_t psport_c_hit = __atomic_add_fetch(&psport_c_hits, 1, __ATOMIC_RELAXED); \
+        if (psport_c_hit == 1) {                                                                    \
+            Common::Log::Fallback(__func__, fmt_str, &psport_c_hits);                               \
+        }                                                                                           \
         if ((psport_c_hit & (psport_c_hit - 1)) == 0) {                                             \
             LOG_ERROR(log_class, fmt_str " ({} so far)" __VA_OPT__(, ) __VA_ARGS__, psport_c_hit);  \
         }                                                                                           \

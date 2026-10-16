@@ -1,11 +1,13 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <algorithm>
 #include <cstddef>
 #include <optional>
 
 #include "common/assert.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
+#include "video_core/renderer_vulkan/vk_platform.h"
 #include "video_core/renderer_vulkan/vk_resource_pool.h"
 #include "video_core/renderer_vulkan/vk_semaphore.h"
 
@@ -54,8 +56,13 @@ std::size_t ResourcePool::CommitResource() {
 
 std::size_t ResourcePool::ManageOverflow() {
     const std::size_t old_capacity = ticks.size();
+    if (!Allocate(old_capacity, old_capacity + grow_step) && old_capacity != 0) {
+        // psport: no more resources: the oldest one is reused once the GPU is done with it.
+        const auto it_oldest = std::ranges::min_element(ticks);
+        work_semaphore->Wait(*it_oldest);
+        return static_cast<std::size_t>(it_oldest - ticks.begin());
+    }
     ticks.resize(old_capacity + grow_step);
-    Allocate(old_capacity, old_capacity + grow_step);
     return old_capacity;
 }
 
@@ -69,16 +76,17 @@ CommandPool::CommandPool(const Instance& instance, Semaphore* work_semaphore)
         .queueFamilyIndex = instance.GetGraphicsQueueFamilyIndex(),
     };
     const vk::Device device = instance.GetDevice();
-    auto [pool_result, pool] = device.createCommandPoolUnique(pool_create_info);
-    ASSERT_MSG(pool_result == vk::Result::eSuccess, "Failed to create command pool: {}",
-               vk::to_string(pool_result));
-    cmd_pool = std::move(pool);
+    cmd_pool = Check<"create a command pool">(device.createCommandPoolUnique(pool_create_info));
+    if (!cmd_pool) {
+        ReportInitFailure();
+        return;
+    }
     SetObjectName(device, *cmd_pool, "CommandPool");
 }
 
 CommandPool::~CommandPool() = default;
 
-void CommandPool::Allocate(std::size_t begin, std::size_t end) {
+bool CommandPool::Allocate(std::size_t begin, std::size_t end) {
     cmd_buffers.resize(end);
 
     const vk::CommandBufferAllocateInfo buffer_alloc_info = {
@@ -88,13 +96,20 @@ void CommandPool::Allocate(std::size_t begin, std::size_t end) {
     };
 
     const vk::Device device = instance.GetDevice();
-    const auto result =
-        device.allocateCommandBuffers(&buffer_alloc_info, cmd_buffers.data() + begin);
-    ASSERT(result == vk::Result::eSuccess);
+    if (!cmd_pool || !Check<"allocate command buffers">(device.allocateCommandBuffers(
+                         &buffer_alloc_info, cmd_buffers.data() + begin))) {
+        if (begin == 0) {
+            ReportInitFailure();
+        } else {
+            cmd_buffers.resize(begin);
+        }
+        return false;
+    }
 
     for (std::size_t i = begin; i < end; ++i) {
         SetObjectName(device, cmd_buffers[i], "CommandPool: Command Buffer {}", i);
     }
+    return true;
 }
 
 vk::CommandBuffer CommandPool::Commit() {
@@ -149,26 +164,32 @@ vk::DescriptorSet DescriptorHeap::Commit(vk::DescriptorSetLayout set_layout) {
     }
 
     // The pool has run out. Record current tick and place it in pending list.
-    ASSERT_MSG(result == vk::Result::eErrorOutOfPoolMemory ||
-                   result == vk::Result::eErrorFragmentedPool,
-               "Unexpected error during descriptor set allocation: {}", vk::to_string(result));
-    pending_pools.emplace_back(curr_pool, work_semaphore->CurrentTick());
-    if (const auto [pool, tick] = pending_pools.front(); work_semaphore->IsFree(tick)) {
-        curr_pool = pool;
+    // psport: any other error is memory exhaustion: a fresh pool is tried all the same, and a set
+    // that still cannot be had is null (the caller skips binding it).
+    if (result != vk::Result::eErrorOutOfPoolMemory && result != vk::Result::eErrorFragmentedPool) {
+        Check<"allocate descriptor sets">(result);
+    }
+    if (curr_pool) {
+        pending_pools.emplace_back(curr_pool, work_semaphore->CurrentTick());
+    }
+    if (!pending_pools.empty() && work_semaphore->IsFree(pending_pools.front().second)) {
+        curr_pool = pending_pools.front().first;
         pending_pools.pop_front();
-
-        const auto reset_result = device.resetDescriptorPool(curr_pool);
-        ASSERT_MSG(reset_result == vk::Result::eSuccess,
-                   "Unexpected error resetting descriptor pool: {}", vk::to_string(reset_result));
+        if (!Check<"reset a descriptor pool">(device.resetDescriptorPool(curr_pool))) {
+            pending_pools.emplace_back(curr_pool, work_semaphore->CurrentTick());
+            CreateDescriptorPool();
+        }
     } else {
         CreateDescriptorPool();
     }
 
     // Attempt to allocate again with fresh pool.
     alloc_info.descriptorPool = curr_pool;
-    result = device.allocateDescriptorSets(&alloc_info, desc_sets.data());
-    ASSERT_MSG(result == vk::Result::eSuccess,
-               "Unexpected error during descriptor set allocation {}", vk::to_string(result));
+    result = curr_pool ? device.allocateDescriptorSets(&alloc_info, desc_sets.data())
+                       : vk::Result::eErrorOutOfDeviceMemory;
+    if (!Check<"allocate descriptor sets from a fresh pool">(result)) {
+        return {};
+    }
 
     // We've changed pool so also reset descriptor batch cache.
     descriptor_sets.clear();
@@ -185,10 +206,7 @@ void DescriptorHeap::CreateDescriptorPool() {
         .poolSizeCount = static_cast<u32>(pool_sizes.size()),
         .pPoolSizes = pool_sizes.data(),
     };
-    auto [pool_result, pool] = device.createDescriptorPool(pool_info);
-    ASSERT_MSG(pool_result == vk::Result::eSuccess, "Failed to create descriptor pool: {}",
-               vk::to_string(pool_result));
-    curr_pool = pool;
+    curr_pool = Check<"create a descriptor pool">(device.createDescriptorPool(pool_info));
 }
 
 } // namespace Vulkan

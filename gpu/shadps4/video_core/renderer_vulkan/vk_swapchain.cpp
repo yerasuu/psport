@@ -9,6 +9,7 @@
 #include "imgui/renderer/imgui_core.h"
 #include "sdl_window.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
+#include "video_core/renderer_vulkan/vk_platform.h"
 #include "video_core/renderer_vulkan/vk_swapchain.h"
 
 namespace Vulkan {
@@ -20,10 +21,17 @@ static constexpr vk::SurfaceFormatKHR SURFACE_FORMAT_HDR = {
 
 Swapchain::Swapchain(const Instance& instance_, const Frontend::WindowSDL& window_)
     : instance{instance_}, window{window_}, surface{CreateSurface(instance.GetInstance(), window)} {
-    FindPresentFormat();
+    if (!surface || !FindPresentFormat()) {
+        ReportInitFailure();
+        return;
+    }
     FindPresentMode();
 
     Create(window.GetWidth(), window.GetHeight());
+    if (!zero_extent && !swapchain) {
+        ReportInitFailure();
+        return;
+    }
     ImGui::Core::Initialize(instance, window, image_count, surface_format.format);
 }
 
@@ -38,8 +46,12 @@ void Swapchain::Create(u32 width_, u32 height_) {
     needs_recreation = false;
 
     // psport: a minimised window has a 0x0 surface (issue #31); no swapchain can have that extent.
-    // The old one stays (presents are skipped) until the window is back.
-    SetSurfaceProperties();
+    // The old one stays (presents are skipped) until the window is back, as when the surface
+    // cannot be queried.
+    if (!SetSurfaceProperties()) {
+        needs_recreation = true;
+        return;
+    }
     if (extent.width == 0 || extent.height == 0) {
         zero_extent = true;
         needs_recreation = true;
@@ -84,15 +96,29 @@ void Swapchain::Create(u32 width_, u32 height_) {
     };
 
     auto [swapchain_result, chain] = instance.GetDevice().createSwapchainKHR(swapchain_info);
-    ASSERT_MSG(swapchain_result == vk::Result::eSuccess, "Failed to create swapchain: {}",
-               vk::to_string(swapchain_result));
-    swapchain = chain;
+    // The old swapchain is retired even when the new one fails.
     if (old_swapchain) {
         instance.GetDevice().destroySwapchainKHR(old_swapchain);
     }
+    if (swapchain_result == vk::Result::eErrorDeviceLost) {
+        StopOnDeviceLost("creating the swapchain");
+    }
+    if (swapchain_result != vk::Result::eSuccess) {
+        // psport: presents are skipped and the next one tries again (IsPresentable).
+        LOG_ERROR_COUNTED(Render_Vulkan, "Failed to create swapchain, frames not shown: {}",
+                          vk::to_string(swapchain_result));
+        images.clear();
+        needs_recreation = true;
+        return;
+    }
+    swapchain = chain;
 
-    SetupImages();
-    RefreshSemaphores();
+    if (!SetupImages() || !RefreshSemaphores()) {
+        Destroy();
+        swapchain = nullptr;
+        images.clear();
+        needs_recreation = true;
+    }
 }
 
 void Swapchain::Recreate(u32 width_, u32 height_) {
@@ -133,10 +159,12 @@ bool Swapchain::AcquireNextImage() {
     case vk::Result::eErrorUnknown:
         needs_recreation = true;
         break;
+    case vk::Result::eErrorDeviceLost:
+        StopOnDeviceLost("acquiring a swapchain image");
     default:
-        LOG_CRITICAL(Render_Vulkan, "Swapchain acquire returned unknown result {}",
-                     vk::to_string(result));
-        UNREACHABLE();
+        LOG_ERROR_COUNTED(Render_Vulkan, "Swapchain acquire failed, frame skipped: {}",
+                          vk::to_string(result));
+        needs_recreation = true;
         break;
     }
 
@@ -153,11 +181,15 @@ bool Swapchain::Present() {
     };
 
     auto result = instance.GetPresentQueue().presentKHR(present_info);
-    if (result == vk::Result::eErrorOutOfDateKHR || result == vk::Result::eSuboptimalKHR) {
+    if (result == vk::Result::eErrorOutOfDateKHR || result == vk::Result::eSuboptimalKHR ||
+        result == vk::Result::eErrorSurfaceLostKHR) {
         needs_recreation = true;
-    } else {
-        ASSERT_MSG(result == vk::Result::eSuccess, "Swapchain presentation failed: {}",
-                   vk::to_string(result));
+    } else if (result == vk::Result::eErrorDeviceLost) {
+        StopOnDeviceLost("presenting");
+    } else if (result != vk::Result::eSuccess) {
+        LOG_ERROR_COUNTED(Render_Vulkan, "Swapchain presentation failed, swapchain recreated: {}",
+                          vk::to_string(result));
+        needs_recreation = true;
     }
 
     frame_index = (frame_index + 1) % image_count;
@@ -165,11 +197,14 @@ bool Swapchain::Present() {
     return !needs_recreation;
 }
 
-void Swapchain::FindPresentFormat() {
+bool Swapchain::FindPresentFormat() {
     const auto [formats_result, formats] =
         instance.GetPhysicalDevice().getSurfaceFormatsKHR(surface);
-    ASSERT_MSG(formats_result == vk::Result::eSuccess, "Failed to query surface formats: {}",
-               vk::to_string(formats_result));
+    if (formats_result != vk::Result::eSuccess || formats.empty()) {
+        LOG_CRITICAL(Render_Vulkan, "Failed to query surface formats: {}",
+                     vk::to_string(formats_result));
+        return false;
+    }
 
     // Check if the device supports HDR formats. Here we care of Rec.2020 PQ only as it is expected
     // game output. Other variants as e.g. linear Rec.2020 will require additional color space
@@ -186,7 +221,7 @@ void Swapchain::FindPresentFormat() {
     if (formats[0].format == vk::Format::eUndefined) {
         surface_format.format = vk::Format::eR8G8B8A8Unorm;
         surface_format.colorSpace = vk::ColorSpaceKHR::eSrgbNonlinear;
-        return;
+        return true;
     }
 
     // Try to find a suitable format.
@@ -198,10 +233,11 @@ void Swapchain::FindPresentFormat() {
 
         surface_format.format = format;
         surface_format.colorSpace = sformat.colorSpace;
-        return;
+        return true;
     }
 
-    UNREACHABLE_MSG("Unable to find required swapchain format!");
+    LOG_CRITICAL(Render_Vulkan, "Unable to find required swapchain format!");
+    return false;
 }
 
 void Swapchain::FindPresentMode() {
@@ -236,11 +272,14 @@ void Swapchain::FindPresentMode() {
     }
 }
 
-void Swapchain::SetSurfaceProperties() {
+bool Swapchain::SetSurfaceProperties() {
     const auto [capabilities_result, capabilities] =
         instance.GetPhysicalDevice().getSurfaceCapabilitiesKHR(surface);
-    ASSERT_MSG(capabilities_result == vk::Result::eSuccess,
-               "Failed to query surface capabilities: {}", vk::to_string(capabilities_result));
+    if (capabilities_result != vk::Result::eSuccess) {
+        LOG_ERROR_COUNTED(Render_Vulkan, "Failed to query surface capabilities, frames not shown: {}",
+                          vk::to_string(capabilities_result));
+        return false;
+    }
 
     extent = capabilities.currentExtent;
     if (capabilities.currentExtent.width == std::numeric_limits<u32>::max()) {
@@ -267,6 +306,7 @@ void Swapchain::SetSurfaceProperties() {
     if (!(capabilities.supportedCompositeAlpha & vk::CompositeAlphaFlagBitsKHR::eOpaque)) {
         composite_alpha = vk::CompositeAlphaFlagBitsKHR::eInherit;
     }
+    return true;
 }
 
 void Swapchain::Destroy() {
@@ -297,36 +337,37 @@ void Swapchain::Destroy() {
     present_ready.clear();
 }
 
-void Swapchain::RefreshSemaphores() {
+bool Swapchain::RefreshSemaphores() {
     const vk::Device device = instance.GetDevice();
     image_acquired.resize(image_count);
     present_ready.resize(image_count);
 
     for (vk::Semaphore& semaphore : image_acquired) {
-        auto [semaphore_result, sem] = device.createSemaphore({});
-        ASSERT_MSG(semaphore_result == vk::Result::eSuccess,
-                   "Failed to create image acquired semaphore: {}",
-                   vk::to_string(semaphore_result));
-        semaphore = sem;
+        semaphore = Check<"create image acquired semaphore">(device.createSemaphore({}));
+        if (!semaphore) {
+            return false;
+        }
     }
     for (vk::Semaphore& semaphore : present_ready) {
-        auto [semaphore_result, sem] = device.createSemaphore({});
-        ASSERT_MSG(semaphore_result == vk::Result::eSuccess,
-                   "Failed to create present ready semaphore: {}", vk::to_string(semaphore_result));
-        semaphore = sem;
+        semaphore = Check<"create present ready semaphore">(device.createSemaphore({}));
+        if (!semaphore) {
+            return false;
+        }
     }
 
     for (u32 i = 0; i < image_count; ++i) {
         SetObjectName(device, image_acquired[i], "Swapchain Semaphore: image_acquired {}", i);
         SetObjectName(device, present_ready[i], "Swapchain Semaphore: present_ready {}", i);
     }
+    return true;
 }
 
-void Swapchain::SetupImages() {
+bool Swapchain::SetupImages() {
     vk::Device device = instance.GetDevice();
     auto [images_result, imgs] = device.getSwapchainImagesKHR(swapchain);
-    ASSERT_MSG(images_result == vk::Result::eSuccess, "Failed to create swapchain images: {}",
-               vk::to_string(images_result));
+    if (!Check<"get the swapchain images">(images_result)) {
+        return false;
+    }
     images = std::move(imgs);
     image_count = static_cast<u32>(images.size());
     images_view.resize(image_count);
@@ -345,15 +386,17 @@ void Swapchain::SetupImages() {
                     .layerCount = 1,
                 },
         });
-        ASSERT_MSG(im_view_result == vk::Result::eSuccess, "Failed to create image view: {}",
-                   vk::to_string(im_view_result));
         images_view[i] = im_view;
+        if (!Check<"create a swapchain image view">(im_view_result)) {
+            return false;
+        }
     }
 
     for (u32 i = 0; i < image_count; ++i) {
         SetObjectName(device, images[i], "Swapchain Image {}", i);
         SetObjectName(device, images_view[i], "Swapchain ImageView {}", i);
     }
+    return true;
 }
 
 } // namespace Vulkan

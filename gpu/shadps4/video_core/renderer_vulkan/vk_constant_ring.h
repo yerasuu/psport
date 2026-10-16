@@ -24,7 +24,9 @@ public:
     ConstantRing(const Instance& instance, Scheduler& scheduler_)
         : m_scheduler{scheduler_},
           m_buffer{instance, 0, Capacity, VideoCore::MemoryType::Stream, "psport constant ring"} {
-        ASSERT(!m_buffer.mapped_data.empty());
+        if (m_buffer.mapped_data.empty()) {
+            LOG_ERROR(Render_Vulkan, "Constant ring not mapped, its bindings are left to stage B");
+        }
     }
 
     [[nodiscard]] vk::Buffer Handle() const noexcept {
@@ -34,6 +36,9 @@ public:
     /// Stage A: `cb_data` bytes at `alignment`; returns the ring offset, or nullopt when the ring
     /// is still in use by the GPU (the caller leaves the binding to stage B).
     std::optional<u64> Allocate(u64 cb_data, u64 alignment) {
+        if (m_buffer.mapped_data.empty()) {
+            return std::nullopt;
+        }
         u64 at = (m_position + alignment - 1) & ~(alignment - 1);
         if (at % Capacity + cb_data > Capacity) {
             at += Capacity - at % Capacity; // wrap to the ring start

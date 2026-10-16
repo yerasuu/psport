@@ -20,7 +20,7 @@ public:
         u32 srgb_input = 0;
     };
 
-    void Create(vk::Device device, vk::Format surface_format);
+    [[nodiscard]] bool Create(vk::Device device, vk::Format surface_format);
 
     void Render(vk::CommandBuffer cmdbuf, vk::ImageView input, vk::Extent2D input_size,
                 Frame& output, Settings settings);

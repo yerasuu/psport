@@ -41,9 +41,15 @@ u64 VramLimit() {
 }
 
 std::vector<vk::PhysicalDevice> EnumeratePhysicalDevices(vk::UniqueInstance& instance) {
+    if (!instance) {
+        return {};
+    }
     auto [devices_result, devices] = instance->enumeratePhysicalDevices();
-    ASSERT_MSG(devices_result == vk::Result::eSuccess, "Failed to enumerate physical devices: {}",
-               vk::to_string(devices_result));
+    if (devices_result != vk::Result::eSuccess) {
+        LOG_CRITICAL(Render_Vulkan, "Failed to enumerate physical devices: {}",
+                     vk::to_string(devices_result));
+        return {};
+    }
     return std::move(devices);
 }
 
@@ -121,12 +127,25 @@ Instance::Instance(const Frontend::WindowSystemInfo& window_info, s32 physical_d
                    bool enable_validation, bool enable_crash_diagnostic)
     : instance{CreateInstance(window_info.type, enable_validation, enable_crash_diagnostic)},
       physical_devices{EnumeratePhysicalDevices(instance)} {
+    if (!instance) {
+        return;
+    }
     if (enable_validation) {
         debug_callback = CreateDebugCallback(*instance);
     }
     const std::size_t num_physical_devices = static_cast<u16>(physical_devices.size());
-    ASSERT_MSG(num_physical_devices > 0, "No physical devices found");
+    if (num_physical_devices == 0) {
+        LOG_CRITICAL(Render_Vulkan, "No physical devices found");
+        return;
+    }
     LOG_INFO(Render_Vulkan, "Found {} physical devices", num_physical_devices);
+    if (physical_device_index >= 0 && std::size_t(physical_device_index) >= num_physical_devices) {
+        LOG_ERROR(Render_Vulkan,
+                  "Invalid physical device index {} provided when only {} devices exist, the best "
+                  "one is used instead",
+                  physical_device_index, num_physical_devices);
+        physical_device_index = -1;
+    }
 
     if (physical_device_index < 0) {
         std::vector<
@@ -177,10 +196,6 @@ Instance::Instance(const Frontend::WindowSystemInfo& window_info, s32 physical_d
         });
         physical_device = physical_devices[std::get<0>(properties2[0])];
     } else {
-        ASSERT_MSG(physical_device_index < num_physical_devices,
-                   "Invalid physical device index {} provided when only {} devices exist",
-                   physical_device_index, num_physical_devices);
-
         physical_device = physical_devices[physical_device_index];
     }
 
@@ -189,18 +204,23 @@ Instance::Instance(const Frontend::WindowSystemInfo& window_info, s32 physical_d
     properties = physical_device.getProperties();
     memory_properties = physical_device.getMemoryProperties();
     CollectDeviceParameters();
-    ASSERT_MSG(properties.apiVersion >= TargetVulkanApiVersion,
-               "Vulkan {}.{} is required, but only {}.{} is supported by device!",
-               VK_VERSION_MAJOR(TargetVulkanApiVersion), VK_VERSION_MINOR(TargetVulkanApiVersion),
-               VK_VERSION_MAJOR(properties.apiVersion), VK_VERSION_MINOR(properties.apiVersion));
+    if (properties.apiVersion < TargetVulkanApiVersion) {
+        LOG_CRITICAL(Render_Vulkan, "Vulkan {}.{} is required, but only {}.{} is supported by device!",
+                     VK_VERSION_MAJOR(TargetVulkanApiVersion), VK_VERSION_MINOR(TargetVulkanApiVersion),
+                     VK_VERSION_MAJOR(properties.apiVersion), VK_VERSION_MINOR(properties.apiVersion));
+        return;
+    }
 
     // psport: before the device exists, so that HOST quirks can shape its creation.
     runtime_quirks_note_gpu(properties.vendorID, static_cast<u32>(driver_id), properties.deviceName.data(),
                             properties.driverVersion);
-    CreateDevice();
+    if (!CreateDevice()) {
+        return;
+    }
     CollectPhysicalMemoryInfo();
     CollectImageFormatInfo();
     CollectToolingInfo();
+    m_is_created = true;
 }
 
 Instance::~Instance() {
@@ -278,23 +298,26 @@ bool Instance::CreateDevice() {
     };
 
     // Required
-    ASSERT_MSG(add_extension(VK_KHR_SWAPCHAIN_EXTENSION_NAME),
-               "Required Vulkan extension unavailable: {}", VK_KHR_SWAPCHAIN_EXTENSION_NAME);
-    ASSERT_MSG(add_extension(VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME),
-               "Required Vulkan extension unavailable: {}", VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
-    ASSERT_MSG(add_extension(VK_EXT_VERTEX_ATTRIBUTE_DIVISOR_EXTENSION_NAME),
-               "Required Vulkan extension unavailable: {}",
-               VK_EXT_VERTEX_ATTRIBUTE_DIVISOR_EXTENSION_NAME);
-    ASSERT_MSG(add_extension(VK_EXT_ROBUSTNESS_2_EXTENSION_NAME),
-               "Required Vulkan extension unavailable: {}", VK_EXT_ROBUSTNESS_2_EXTENSION_NAME);
+    for (const char* sz_extension :
+         {VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME,
+          VK_EXT_VERTEX_ATTRIBUTE_DIVISOR_EXTENSION_NAME, VK_EXT_ROBUSTNESS_2_EXTENSION_NAME}) {
+        if (!add_extension(sz_extension)) {
+            LOG_CRITICAL(Render_Vulkan, "Required Vulkan extension unavailable: {}", sz_extension);
+            return false;
+        }
+    }
 
+    // psport: nullDescriptor also stands in for images whose memory could not be allocated.
     const auto robustness2_features = feature_chain.get<vk::PhysicalDeviceRobustness2FeaturesEXT>();
-    ASSERT_MSG(robustness2_features.robustBufferAccess2,
-               "Required Vulkan feature unavailable: robustBufferAccess2");
-    ASSERT_MSG(robustness2_features.robustImageAccess2,
-               "Required Vulkan feature unavailable: robustImageAccess2");
-    ASSERT_MSG(robustness2_features.nullDescriptor,
-               "Required Vulkan feature unavailable: nullDescriptor");
+    for (const auto& [is_supported, sz_feature] :
+         {std::pair{bool(robustness2_features.robustBufferAccess2), "robustBufferAccess2"},
+          std::pair{bool(robustness2_features.robustImageAccess2), "robustImageAccess2"},
+          std::pair{bool(robustness2_features.nullDescriptor), "nullDescriptor"}}) {
+        if (!is_supported) {
+            LOG_CRITICAL(Render_Vulkan, "Required Vulkan feature unavailable: {}", sz_feature);
+            return false;
+        }
+    }
 
     // Optional
     maintenance_5 = add_extension(VK_KHR_MAINTENANCE_5_EXTENSION_NAME);
@@ -778,8 +801,7 @@ bool Instance::CreateDevice() {
         }
     }
 
-    CreateAllocator();
-    return true;
+    return CreateAllocator();
 }
 
 namespace {
@@ -802,7 +824,7 @@ void VmaDeviceUsage(u64& block_bytes, u64& allocation_bytes) {
     }
 }
 
-void Instance::CreateAllocator() {
+bool Instance::CreateAllocator() {
     const VmaVulkanFunctions functions = {
         .vkGetInstanceProcAddr = VULKAN_HPP_DEFAULT_DISPATCHER.vkGetInstanceProcAddr,
         .vkGetDeviceProcAddr = VULKAN_HPP_DEFAULT_DISPATCHER.vkGetDeviceProcAddr,
@@ -836,11 +858,14 @@ void Instance::CreateAllocator() {
     };
 
     const VkResult result = vmaCreateAllocator(&allocator_info, &allocator);
-    stats_instance = this;
     if (result != VK_SUCCESS) {
-        UNREACHABLE_MSG("Failed to initialize VMA with error {}",
-                        vk::to_string(vk::Result{result}));
+        LOG_CRITICAL(Render_Vulkan, "Failed to initialize VMA with error {}",
+                     vk::to_string(vk::Result{result}));
+        allocator = {};
+        return false;
     }
+    stats_instance = this;
+    return true;
 }
 
 void Instance::CollectDeviceParameters() {
@@ -1012,7 +1037,9 @@ u64 Instance::GetDeviceMemoryBudgetNow() const {
 vk::FormatFeatureFlags2 Instance::GetFormatFeatureFlags(vk::Format format) const {
     const auto it = format_properties.find(format);
     if (it == format_properties.end()) {
-        UNIMPLEMENTED_MSG("Properties of format {} have not been queried.", vk::to_string(format));
+        LOG_ERROR_COUNTED(Render_Vulkan, "Properties of format {} have not been queried, taken as unsupported",
+                          vk::to_string(format));
+        return {};
     }
 
     return it->second.optimalTilingFeatures | it->second.bufferFeatures;

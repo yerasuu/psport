@@ -84,6 +84,9 @@ ABI int64_t runtime_calls_stub(uint32_t id, uintptr_t a0, uintptr_t a1, uintptr_
 ABI int64_t runtime_calls_failed(uint32_t id, const uintptr_t *p_arguments, int64_t result, uint32_t kind);
 /* An HLE function logging "(STUBBED)" was called the first time; *count keeps counting its calls. */
 void runtime_calls_hle_stub(const char *sz_function, const uint64_t *p_count);
+/* A GPU library error with a fallback (LOG_ERROR_COUNTED) happened the first time; *p_count keeps
+ * counting it. sz_detail is the log message's format, kept for the summary. */
+void runtime_calls_fallback(const char *sz_function, const char *sz_detail, const uint64_t *p_count);
 /* A line (newline included) runtime_calls_report prints after its own, for a diagnostic that must
  * be summed up on every exit: it may run from the fault and watchdog handlers, so it takes no locks
  * and reads only counters. */

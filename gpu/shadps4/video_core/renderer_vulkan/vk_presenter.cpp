@@ -126,11 +126,27 @@ static vk::Rect2D FitImage(s32 frame_width, s32 frame_height, s32 swapchain_widt
 
 // psport: screenshot capture and ImGui overlays removed; the port presents directly.
 
-Presenter::Presenter(Frontend::WindowSDL& window_, AmdGpu::Liverpool* liverpool_)
-    : window{window_}, liverpool{liverpool_},
-      instance{window, EmulatorSettings.GetGpuId(), EmulatorSettings.IsVkValidationEnabled(),
-               EmulatorSettings.IsVkCrashDiagnosticEnabled()},
-      draw_scheduler{instance, true}, present_scheduler{instance}, flip_scheduler{instance},
+std::unique_ptr<Presenter> Presenter::Create(Frontend::WindowSDL& window,
+                                             AmdGpu::Liverpool* liverpool) {
+    auto p_instance = std::make_unique<Instance>(window, EmulatorSettings.GetGpuId(),
+                                                 EmulatorSettings.IsVkValidationEnabled(),
+                                                 EmulatorSettings.IsVkCrashDiagnosticEnabled());
+    if (!p_instance->IsCreated()) {
+        return nullptr;
+    }
+    auto p_presenter = std::make_unique<Presenter>(window, liverpool, std::move(p_instance));
+    if (HasInitFailed()) {
+        // Not destroyed: its teardown would use the objects that failed, and the process exits.
+        static_cast<void>(p_presenter.release());
+        return nullptr;
+    }
+    return p_presenter;
+}
+
+Presenter::Presenter(Frontend::WindowSDL& window_, AmdGpu::Liverpool* liverpool_,
+                     std::unique_ptr<Instance> p_instance)
+    : window{window_}, m_p_instance{std::move(p_instance)}, instance{*m_p_instance},
+      liverpool{liverpool_}, draw_scheduler{instance, true}, present_scheduler{instance}, flip_scheduler{instance},
       swapchain{instance, window}, runtime{instance, draw_scheduler},
       rasterizer{std::make_unique<Rasterizer>(instance, draw_scheduler, runtime, liverpool)},
       texture_cache{rasterizer->GetTextureCache()} {
@@ -146,6 +162,12 @@ Presenter::Presenter(Frontend::WindowSDL& window_, AmdGpu::Liverpool* liverpool_
             device.createFence({.flags = vk::FenceCreateFlagBits::eSignaled}));
         frame.present_done = fence;
         free_queue.push(&frame);
+        // psport: frame images are made here rather than at the first frame, so that a failure
+        // fails the start instead of leaving a frame without an image.
+        if (!fence || (!HasInitFailed() &&
+                       !RecreateFrame(&frame, expected_frame_width, expected_frame_height))) {
+            ReportInitFailure();
+        }
     }
 
     fsr_settings.enable = EmulatorSettings.IsFsrEnabled();
@@ -153,8 +175,10 @@ Presenter::Presenter(Frontend::WindowSDL& window_, AmdGpu::Liverpool* liverpool_
     fsr_settings.rcas_attenuation =
         static_cast<float>(EmulatorSettings.GetRcasAttenuation() / 1000.f);
 
-    fsr_pass.Create(device, instance.GetAllocator(), num_images);
-    pp_pass.Create(device, swapchain.GetSurfaceFormat().format);
+    if (!fsr_pass.Create(device, instance.GetAllocator(), num_images) ||
+        !pp_pass.Create(device, swapchain.GetSurfaceFormat().format)) {
+        ReportInitFailure();
+    }
     PsOverlay::Init(instance, swapchain.GetSurfaceFormat().format, num_images);
 
 }
@@ -180,15 +204,8 @@ bool Presenter::IsVideoOutSurface(const AmdGpu::ColorBuffer& color_buffer) const
     return std::ranges::find(vo_buffers_addr, color_buffer.Address()) != vo_buffers_addr.cend();
 }
 
-void Presenter::RecreateFrame(Frame* frame, u32 width, u32 height) {
+bool Presenter::RecreateFrame(Frame* frame, u32 width, u32 height) {
     const vk::Device device = instance.GetDevice();
-    if (frame->image_view) {
-        device.destroyImageView(frame->image_view);
-    }
-    if (frame->image) {
-        vmaDestroyImage(instance.GetAllocator(), frame->image, frame->allocation);
-    }
-
     const vk::Format format = swapchain.GetSurfaceFormat().format;
     const vk::ImageCreateInfo image_info = {
         .flags = vk::ImageCreateFlagBits::eMutableFormat,
@@ -202,7 +219,7 @@ void Presenter::RecreateFrame(Frame* frame, u32 width, u32 height) {
                  vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eSampled,
     };
 
-    const VmaAllocationCreateInfo alloc_info = {
+    VmaAllocationCreateInfo alloc_info = {
         .flags = VMA_ALLOCATION_CREATE_WITHIN_BUDGET_BIT,
         .usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,
         .requiredFlags = 0,
@@ -212,20 +229,27 @@ void Presenter::RecreateFrame(Frame* frame, u32 width, u32 height) {
     };
 
     VkImage unsafe_image{};
+    VmaAllocation allocation{};
     VkImageCreateInfo unsafe_image_info = static_cast<VkImageCreateInfo>(image_info);
 
     VkResult result = vmaCreateImage(instance.GetAllocator(), &unsafe_image_info, &alloc_info,
-                                     &unsafe_image, &frame->allocation, nullptr);
-    if (result != VK_SUCCESS) [[unlikely]] {
-        LOG_CRITICAL(Render_Vulkan, "Failed allocating texture with error {}",
-                     vk::to_string(vk::Result{result}));
-        UNREACHABLE();
+                                     &unsafe_image, &allocation, nullptr);
+    if (result != VK_SUCCESS) {
+        // psport: over the budget rather than without a frame to present.
+        alloc_info.flags &= ~VMA_ALLOCATION_CREATE_WITHIN_BUDGET_BIT;
+        result = vmaCreateImage(instance.GetAllocator(), &unsafe_image_info, &alloc_info,
+                                &unsafe_image, &allocation, nullptr);
     }
-    frame->image = vk::Image{unsafe_image};
-    SetObjectName(device, frame->image, "Frame image #{}", frame->id);
+    if (result != VK_SUCCESS) [[unlikely]] {
+        LOG_ERROR_COUNTED(Render_Vulkan, "Failed allocating a {}x{} frame image, the frame keeps "
+                                         "its previous one: {}",
+                          width, height, vk::to_string(vk::Result{result}));
+        return false;
+    }
+    const vk::Image image{unsafe_image};
 
     const vk::ImageViewCreateInfo view_info = {
-        .image = frame->image,
+        .image = image,
         .viewType = vk::ImageViewType::e2D,
         .format = format,
         .subresourceRange{
@@ -236,12 +260,27 @@ void Presenter::RecreateFrame(Frame* frame, u32 width, u32 height) {
             .layerCount = 1,
         },
     };
-    auto view = Check<"create frame image view">(device.createImageView(view_info));
+    const vk::ImageView view = Check<"create frame image view">(device.createImageView(view_info));
+    if (!view) {
+        vmaDestroyImage(instance.GetAllocator(), image, allocation);
+        return false;
+    }
+
+    if (frame->image_view) {
+        device.destroyImageView(frame->image_view);
+    }
+    if (frame->image) {
+        vmaDestroyImage(instance.GetAllocator(), frame->image, frame->allocation);
+    }
+    frame->image = image;
+    frame->allocation = allocation;
+    SetObjectName(device, frame->image, "Frame image #{}", frame->id);
     frame->image_view = view;
     frame->width = width;
     frame->height = height;
 
     frame->is_hdr = swapchain.GetHDR();
+    return true;
 }
 
 Frame* Presenter::PrepareLastFrame() {
@@ -261,10 +300,8 @@ Frame* Presenter::PrepareLastFrame() {
             continue;
         }
         if (result == vk::Result::eErrorDeviceLost) {
-            Breadcrumbs::ReportDeviceLost("waiting for a frame");
+            StopOnDeviceLost("waiting for a frame");
         }
-        ASSERT_MSG(result != vk::Result::eErrorDeviceLost,
-                   "Device lost during waiting for a frame");
     }
 
     auto& scheduler = flip_scheduler;
@@ -315,8 +352,9 @@ static vk::Format GetFrameViewFormat(const Libraries::VideoOut::PixelFormat form
     default:
         break;
     }
-    UNREACHABLE_MSG("Unknown format={}", static_cast<u32>(format));
-    return {};
+    LOG_ERROR_COUNTED(Render_Vulkan, "Unknown display buffer format {:#x}, shown as B8G8R8A8 sRGB",
+                      static_cast<u32>(format));
+    return vk::Format::eB8G8R8A8Srgb;
 }
 
 Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& attribute,
@@ -600,9 +638,12 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
     // Reset fence for queue submission. Do it here instead of GetRenderFrame() because we may
     // skip frame because of slow swapchain recreation. If a frame skip occurs, we skip signal
     // the frame's present fence and future GetRenderFrame() call will hang waiting for this frame.
-    const auto reset_result = instance.GetDevice().resetFences(frame->present_done);
-    ASSERT_MSG(reset_result == vk::Result::eSuccess,
-               "Unexpected error resetting present done fence: {}", vk::to_string(reset_result));
+    if (!Check<"reset a present done fence">(instance.GetDevice().resetFences(frame->present_done))) {
+        // The acquired image is given back by recreating the swapchain; the frame is not shown.
+        swapchain.Recreate(window.GetWidth(), window.GetHeight());
+        free_frame();
+        return;
+    }
 
     // psport: the game frame is blitted (letterboxed) straight into the swapchain image.
     const vk::Image swapchain_image = swapchain.Image();
@@ -778,10 +819,8 @@ Frame* Presenter::GetRenderFrame() {
     // Wait for the presentation to be finished so all frame resources are free
     while (wait() != vk::Result::eSuccess) {
         if (result == vk::Result::eErrorDeviceLost) {
-            Breadcrumbs::ReportDeviceLost("waiting for a frame");
+            StopOnDeviceLost("waiting for a frame");
         }
-        ASSERT_MSG(result != vk::Result::eErrorDeviceLost,
-                   "Device lost during waiting for a frame");
         // Retry if the waiting times out
         if (result == vk::Result::eTimeout) {
             continue;

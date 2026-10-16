@@ -996,9 +996,8 @@ void Scheduler::SubmitExecution(SubmitInfo& info) {
     ImGui::Core::TextureManager::Submit();
     auto submit_result = instance.GetGraphicsQueue().submit(submit_info, info.fence);
     if (submit_result == vk::Result::eErrorDeviceLost) {
-        Breadcrumbs::ReportDeviceLost("submit");
+        StopOnDeviceLost("submit");
     }
-    ASSERT_MSG(submit_result != vk::Result::eErrorDeviceLost, "Device lost during submit");
     submitted_tick.store(signal_value, std::memory_order_release);
     submitted_tick.notify_all();
 
@@ -1077,9 +1076,8 @@ void Scheduler::SubmitAsync(SubmitInfo& info) {
             }
             const auto result = instance.GetGraphicsQueue().submit(submit_info, info.fence);
             if (result == vk::Result::eErrorDeviceLost) {
-                Breadcrumbs::ReportDeviceLost("submit");
+                StopOnDeviceLost("submit");
             }
-            ASSERT_MSG(result != vk::Result::eErrorDeviceLost, "Device lost during submit");
         }
         submitted_tick.store(signal_value, std::memory_order_release);
         submitted_tick.notify_all();

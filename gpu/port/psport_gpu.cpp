@@ -29,7 +29,7 @@ const char* runtime_savedata_title(void);
 
 Frontend::WindowSDL* g_window = nullptr;
 
-namespace Libraries::GnmDriver { void RegisterLib(Core::Loader::SymbolsResolver* p_sym); }
+namespace Libraries::GnmDriver { bool RegisterLib(Core::Loader::SymbolsResolver* p_sym); }
 namespace Libraries::AvPlayer { void RegisterLib(Core::Loader::SymbolsResolver* p_sym); }
 namespace Libraries::VideoOut { void RegisterLib(Core::Loader::SymbolsResolver* p_sym); }
 namespace Libraries::Ngs2 { void RegisterLib(Core::Loader::SymbolsResolver* p_sym); }
@@ -160,7 +160,9 @@ extern "C" int psport_gpu_init(const PsGpuConfig* p_config) {
     }
     Core::Loader::SymbolsResolver resolver;
     // GnmDriver creates the presenter that the VideoOut present thread uses.
-    Libraries::GnmDriver::RegisterLib(&resolver);
+    if (!Libraries::GnmDriver::RegisterLib(&resolver)) {
+        return -1;
+    }
     Libraries::VideoOut::RegisterLib(&resolver);
     return 0;
 }

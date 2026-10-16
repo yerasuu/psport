@@ -26,7 +26,7 @@ struct FSRConstants {
 
 namespace Vulkan::HostPasses {
 
-void FsrPass::Create(vk::Device device, VmaAllocator allocator, u32 num_images) {
+bool FsrPass::Create(vk::Device device, VmaAllocator allocator, u32 num_images) {
     this->device = device;
     this->num_images = num_images;
 
@@ -41,6 +41,9 @@ void FsrPass::Create(vk::Device device, VmaAllocator allocator, u32 num_images) 
         .minLod = -1000.0f,
         .maxLod = 1000.0f,
     }));
+    if (!sampler) {
+        return false;
+    }
 
     std::array<vk::DescriptorSetLayoutBinding, 3> layoutBindings{{
         {
@@ -70,6 +73,9 @@ void FsrPass::Create(vk::Device device, VmaAllocator allocator, u32 num_images) 
             .bindingCount = layoutBindings.size(),
             .pBindings = layoutBindings.data(),
         }));
+    if (!descriptor_set_layout) {
+        return false;
+    }
 
     const vk::PushConstantRange push_constants{
         .stageFlags = vk::ShaderStageFlagBits::eCompute,
@@ -78,11 +84,13 @@ void FsrPass::Create(vk::Device device, VmaAllocator allocator, u32 num_images) 
     };
 
     const auto& cs_easu_module = CompileSPV(FSR_EASU_COMP, device);
-    ASSERT(cs_easu_module);
-    SetObjectName(device, cs_easu_module, "fsr.comp [EASU]");
-
     const auto& cs_rcas_module = CompileSPV(FSR_RCAS_COMP, device);
-    ASSERT(cs_rcas_module);
+    if (!cs_easu_module || !cs_rcas_module) {
+        device.destroyShaderModule(cs_easu_module);
+        device.destroyShaderModule(cs_rcas_module);
+        return false;
+    }
+    SetObjectName(device, cs_easu_module, "fsr.comp [EASU]");
     SetObjectName(device, cs_rcas_module, "fsr.comp [RCAS]");
 
     pipeline_layout = Check<"fsp pipeline layout">(device.createPipelineLayoutUnique({
@@ -91,6 +99,11 @@ void FsrPass::Create(vk::Device device, VmaAllocator allocator, u32 num_images) 
         .pushConstantRangeCount = 1,
         .pPushConstantRanges = &push_constants,
     }));
+    if (!pipeline_layout) {
+        device.destroyShaderModule(cs_easu_module);
+        device.destroyShaderModule(cs_rcas_module);
+        return false;
+    }
     SetObjectName(device, pipeline_layout.get(), "fsr pipeline layout");
 
     const vk::ComputePipelineCreateInfo easu_pinfo{
@@ -127,6 +140,7 @@ void FsrPass::Create(vk::Device device, VmaAllocator allocator, u32 num_images) 
         img.intermediary_image = VideoCore::UniqueImage(device, allocator);
         img.output_image = VideoCore::UniqueImage(device, allocator);
     }
+    return easu_pipeline && rcas_pipeline;
 }
 
 vk::ImageView FsrPass::Render(vk::CommandBuffer cmdbuf, vk::ImageView input,

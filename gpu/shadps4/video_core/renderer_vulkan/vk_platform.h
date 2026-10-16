@@ -28,6 +28,17 @@ vk::UniqueInstance CreateInstance(Frontend::WindowSystemType window_type, bool e
 
 vk::UniqueDebugUtilsMessengerEXT CreateDebugCallback(vk::Instance instance);
 
+/// psport: an object the GPU library needs from the start (device, swapchain, built-in layouts
+/// and pipelines) could not be created. Its creator logs why, leaves it null and goes on; the
+/// presenter's creation then fails, so that psport_gpu_init returns -1 instead of the game
+/// running without it.
+void ReportInitFailure();
+[[nodiscard]] bool HasInitFailed();
+
+/// psport: a lost device cannot be recovered from: reports the breadcrumbs, prints a STOP line and
+/// the call summary, and ends the process with exit code 24.
+[[noreturn]] void StopOnDeviceLost(const char* sz_where);
+
 template <typename T>
 concept VulkanHandleType = vk::isVulkanHandleType<T>::value;
 
@@ -51,30 +62,27 @@ void SetObjectName(vk::Device device, const HandleType& handle, const char* form
     SetObjectName(device, handle, debug_name);
 }
 
+// psport: a failed call is an error value: logged with a count, its result left null for the
+// caller to check (true on success). A lost device stops the port.
 template <StringLiteral msg = "">
-static void Check(vk::Result r) {
+static bool Check(vk::Result r) {
+    if (r == vk::Result::eSuccess) {
+        return true;
+    }
     if (r == vk::Result::eErrorDeviceLost) {
-        Breadcrumbs::ReportDeviceLost("a Vulkan call");
+        StopOnDeviceLost("a Vulkan call");
     }
     if constexpr (msg.len <= 1) {
-        ASSERT_MSG(r == vk::Result::eSuccess, "vk::Result={}", vk::to_string(r));
+        LOG_ERROR_COUNTED(Render_Vulkan, "Vulkan call failed: {}", vk::to_string(r));
     } else {
-        ASSERT_MSG(r == vk::Result::eSuccess, "Failed to {}: vk::Result={}", msg.value,
-                   vk::to_string(r));
+        LOG_ERROR_COUNTED(Render_Vulkan, "Failed to {}: {}", msg.value, vk::to_string(r));
     }
+    return false;
 }
 
 template <StringLiteral msg = "", typename T>
 static T Check(vk::ResultValue<T> r) {
-    if (r.result == vk::Result::eErrorDeviceLost) {
-        Breadcrumbs::ReportDeviceLost("a Vulkan call");
-    }
-    if constexpr (msg.len <= 1) {
-        ASSERT_MSG(r.result == vk::Result::eSuccess, "vk::Result={}", vk::to_string(r.result));
-    } else {
-        ASSERT_MSG(r.result == vk::Result::eSuccess, "Failed to {}: vk::Result={}", msg.value,
-                   vk::to_string(r.result));
-    }
+    Check<msg>(r.result);
     return std::move(r.value);
 }
 

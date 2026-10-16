@@ -284,16 +284,32 @@ TAA, DLSS): [upscaler.md](upscaler.md). Changes to inherited shadPS4 files:
 
 The GPU library does not stop the game for what the game, the host or the environment can cause.
 A host failure while the GPU starts (SDL video, the window, its video driver) makes
-`psport_gpu_init` return -1, and the loader exits with `GPU initialization failed`. A value from
+`psport_gpu_init` return -1, and the loader exits with `GPU initialization failed`; so does a
+Vulkan failure at that point (no loader or instance, no device with Vulkan 1.3 and the required
+swapchain, push descriptor, vertex attribute divisor and robustness2 extensions with
+`robustBufferAccess2`, `robustImageAccess2` and `nullDescriptor`, no surface, swapchain or
+allocator, or a layout, pipeline, frame image or command pool the library builds at start): the
+object is left null, `Vulkan::ReportInitFailure` notes it and `Presenter::Create` returns null.
+While the game runs, a swapchain that is out of date or suboptimal, or whose surface was lost or
+could not be recreated, is recreated at the next present and the frame is skipped; a pipeline the
+driver rejects is left null; a descriptor set that cannot be had from a fresh pool is not bound;
+a command pool that cannot grow reuses its oldest buffer once the GPU is done with it.
+`Vulkan::Check` (`vk_platform.h`) logs a failed call and leaves its result null for the caller to
+check. A lost device cannot be recovered from: `Vulkan::StopOnDeviceLost` prints the breadcrumbs,
+`STOP: GPU device lost (<where>)` and the call summary, and exits with code 24. A value from
 the game that the translator cannot map (a data or number format, tile mode, macro tile mode,
 array mode, sample count, primitive type, blend, stencil or sampler enum) takes a fallback: a
 compatible format (the same data format with another number format, D32 for depth), linear
 tiling (no detiling), a 2D view, the neutral state (`One`, `Add`, `Copy`, `Keep`, `Always`, no
 culling), or the image operation is skipped (a download larger than the image's memory, a blit or
 tiling pass whose views or pipeline failed). Each fallback is logged with `LOG_ERROR_COUNTED`
-(`gpu/shim/common/logging/log.h`): on its 1st, 2nd, 4th, 8th... occurrence, with the running count.
-Assertions remain for the library's own invariants (texture cache registration and page tracking)
-and for callers' contracts (`FindImage` with address 0, which the rasterizer filters out).
+(`gpu/shim/common/logging/log.h`): on its 1st, 2nd, 4th, 8th... occurrence, with the running count,
+and listed with its total in the call summary at exit (`Calls: summary fallback`, FORK.md).
+Assertions remain for the library's own invariants (texture cache registration and page tracking,
+the draw pipeline's packet size bound in `DrawPipe::Begin`) and for callers' contracts
+(`FindImage` with address 0, which the rasterizer filters out). A pipeline the driver rejects while
+the pipeline cache is preloaded still throws `Serialization::CorruptData`, which
+`PipelineCache::WarmUp` catches to rebuild the cache.
 
 ### Memory model
 

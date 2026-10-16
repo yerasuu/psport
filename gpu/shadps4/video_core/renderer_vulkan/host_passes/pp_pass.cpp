@@ -15,7 +15,7 @@
 
 namespace Vulkan::HostPasses {
 
-void PostProcessingPass::Create(vk::Device device, const vk::Format surface_format) {
+bool PostProcessingPass::Create(vk::Device device, const vk::Format surface_format) {
     boost::container::static_vector<vk::DescriptorSetLayoutBinding, 2> bindings{
         {
             .binding = 0,
@@ -33,6 +33,9 @@ void PostProcessingPass::Create(vk::Device device, const vk::Format surface_form
 
     desc_set_layout = Check<"create pp descriptor set layout">(
         device.createDescriptorSetLayoutUnique(desc_layout_ci));
+    if (!desc_set_layout) {
+        return false;
+    }
 
     const vk::PushConstantRange push_constants{
         .stageFlags = vk::ShaderStageFlagBits::eFragment,
@@ -41,11 +44,13 @@ void PostProcessingPass::Create(vk::Device device, const vk::Format surface_form
     };
 
     const auto& vs_module = CompileSPV(FS_TRI_VERT, device);
-    ASSERT(vs_module);
-    SetObjectName(device, vs_module, "fs_tri.vert");
-
     const auto& fs_module = CompileSPV(POST_PROCESS_FRAG, device);
-    ASSERT(fs_module);
+    if (!vs_module || !fs_module) {
+        device.destroyShaderModule(vs_module);
+        device.destroyShaderModule(fs_module);
+        return false;
+    }
+    SetObjectName(device, vs_module, "fs_tri.vert");
     SetObjectName(device, fs_module, "post_process.frag");
 
     const std::array shaders_ci{
@@ -70,6 +75,11 @@ void PostProcessingPass::Create(vk::Device device, const vk::Format surface_form
 
     pipeline_layout =
         Check<"create pp pipeline layout">(device.createPipelineLayoutUnique(layout_info));
+    if (!pipeline_layout) {
+        device.destroyShaderModule(vs_module);
+        device.destroyShaderModule(fs_module);
+        return false;
+    }
 
     const std::array pp_color_formats{
         surface_format,
@@ -179,6 +189,7 @@ void PostProcessingPass::Create(vk::Device device, const vk::Format surface_form
         .addressModeV = vk::SamplerAddressMode::eClampToEdge,
     };
     sampler = Check<"create pp sampler">(device.createSamplerUnique(sampler_ci));
+    return pipeline && sampler;
 }
 
 void PostProcessingPass::Render(vk::CommandBuffer cmdbuf, vk::ImageView input,

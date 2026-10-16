@@ -117,6 +117,7 @@ obvious.
 | Online module: NP request locks | `gpu/net/shadps4/core/libraries/np/np_handler.cpp`, `np_matching2/np_matching2_mm.cpp`, `np_matching2/np_matching2_internal.cpp`, `np_web_api/np_web_api_internal.cpp`, `network/net_upnp.*` | Score and Matching2 requests are submitted under the pending reply lock; the Matching2 dispatcher and UPnP discovery stop flags are set under their waiters' mutex; the WebApi context lock is released on error returns and push event callbacks run after the global and context locks are released | not checked (shadp2p) |
 | Online module: summon route | `gpu/net/shadps4/core/libraries/network/http.cpp`, `gpu/net/include/core/bloodborne_re.h` | the summon helpers (host placement header, `SHADPS4_BLOODBORNE_SEAMLESS_COOP` route, `SHADPS4_CAPTURE_BLOODBORNE_SUMMON` capture) act on the launched title's summon route (`Game::Title` `online`, `PsNetHost` `sz_summon_route`), never on another game's requests; for a title without one, either `SHADPS4_*` switch still forces shadp2p's `/summon_messenger` (logged) | no (shadp2p matches the path for any title) |
 | One memory model | `video_core/buffer_cache/` (`buffer.*`, `buffer_cache.*`, `memory_tracker.h`, `region_manager.h`), `page_manager.*`, `texture_cache/texture_cache.cpp`, `renderer_vulkan/vk_rasterizer.*`, `vk_shader_hle.cpp`, `amdgpu/liverpool.*`, `core/libraries/gnmdriver/gnmdriver.cpp`, `videoout/driver.cpp` | bbport's 0.3 memory model is gone: the GPU always uses the game's memory in place (`GuestInPlace()`, `WriteTracking()`, `Rasterizer::HonestLabels()` and their other branches removed), labels are always written once the GPU is done, the background pre-upload (`BufferCache::Preupload`, `preupload_mb` in `PS_FRAME_LOG`) and the userfaultfd page tracker (`UffdImpl`, `PS_UFFD`) are removed; a driver that cannot share the game's memory stops the launch instead of falling back | no (bbport's in-place memory) |
+| Vulkan start, presentation and pipeline errors that asserted | `video_core/renderer_vulkan/vk_instance.*`, `vk_platform.*`, `vk_swapchain.*`, `vk_presenter.*`, `vk_scheduler.*`, `vk_semaphore.cpp`, `vk_resource_pool.*`, `vk_runtime.cpp`, `vk_compute_pipeline.cpp`, `vk_graphics_pipeline.cpp`, `vk_pipeline_common.cpp`, `vk_pipeline_serialization.cpp`, `vk_shader_hle.cpp`, `vk_shader_util.*`, `vk_staging_buffer_pool.cpp`, `vk_constant_ring.h`, `host_passes/fsr_pass.*`, `pp_pass.*`, `texture_cache/tile_manager.cpp`, `blit_helper.cpp`, `core/libraries/gnmdriver/gnmdriver.*` | a failure to create the instance, device (missing extension or feature), allocator, surface, swapchain, frame images, command pools, master semaphores or the layouts and pipelines built at start makes `Presenter::Create` return null and `psport_gpu_init` fail; a physical device index out of range picks the best device; at run time a failed acquire or present recreates the swapchain and skips the frame, a pipeline the driver rejects is left null, a descriptor set that cannot be allocated is not bound, a command pool that cannot grow reuses its oldest buffer, a copy shader with unexpected strides runs as a shader, mismatched image copies and sample count changes are skipped, a pipeline listed twice in the cache keeps the first; `Check` logs and returns a null result; a lost device ends the port with `STOP: GPU device lost` and exit code 24 | not checked; all asserted in the inherited tree |
 | Guest values and texture operations that asserted | `video_core/renderer_vulkan/liverpool_to_vk.cpp`, `liverpool_to_vk.h`, `amdgpu/tiling.cpp`, `texture_cache/blit_helper.*`, `image.cpp`, `image_info.cpp`, `image_view.cpp`, `texture_cache.cpp`, `tile.h`, `tile_manager.cpp` | an unknown format, tile, macro tile, array or pipe mode, sample count, image type or render-state enum from the game takes a fallback (the same data format with another number format, D32 for depth, linear general tiling and no detiling, 1x4_16 macro tiling, `e1`, `e2D`, the neutral blend, stencil, compare and sampler states) logged by `LOG_ERROR_COUNTED` (1st, 2nd, 4th... occurrence with its count); `ArrayLinearGeneral` textures are sized as linear aligned; a download larger than the image's guest memory and a blit or tiling pass whose views or pipeline failed are skipped, and an unresolvable overlap at one address gets a new image (as a tile mode change does), instead of stopping the game; an image view that fails is bound as a null view (`nullDescriptor` is required) | not checked; all asserted in the inherited tree |
 
 ## Loading the game
@@ -341,7 +342,7 @@ which Unreal Engine's critical sections take for a recursive lock) are no failur
 SIGINT or SIGHUP, a fault, the watchdog, a `STOP:`), a summary follows, most calls first:
 
 ```
-Calls: summary: <n> unimplemented, <n> stub, <n> failed, <n> status (import and error code)
+Calls: summary: <n> unimplemented, <n> stub, <n> failed, <n> status (import and error code), <n> fallback (GPU)
 Calls: summary unimplemented <calls> <NID> (<name>)
 Calls: summary stub <calls> <NID> (<name>)
 Calls: summary stub <calls> <function> (HLE)
@@ -349,7 +350,12 @@ Calls: summary failed <calls> <NID> (<name>) -> 0x8xxxxxxx
 Calls: summary failed <calls> <NID> (<name>) -> -1, errno <n>
 Calls: summary status <calls> <NID> (<name>) -> 0x8xxxxxxx
 Calls: summary status <calls> <NID> (<name>) -> -1, errno <n>
+Calls: summary fallback <times> <function> (GPU): <message format>
 ```
+
+`fallback` lists the GPU library's errors that took a fallback (`LOG_ERROR_COUNTED`: an unknown
+format, a pipeline the driver rejected, a skipped present...), by the function that logged them,
+with how many times each happened.
 
 Then `Quirks: <n> active: <id>, ...` (the quirk registry, [docs/en/QUIRKS.md](docs/en/QUIRKS.md)).
 

@@ -308,5 +308,6 @@ int PS4_SYSV_ABI Func_BFB41C057478F0BF();
 int PS4_SYSV_ABI Func_E51D44DB8151238C();
 int PS4_SYSV_ABI Func_F916890425496553();
 
-void RegisterLib(Core::Loader::SymbolsResolver* sym);
+/// psport: false when the presenter could not be created (logged); nothing is registered then.
+[[nodiscard]] bool RegisterLib(Core::Loader::SymbolsResolver* sym);
 } // namespace Libraries::GnmDriver

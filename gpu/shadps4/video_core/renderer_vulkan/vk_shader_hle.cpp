@@ -65,6 +65,9 @@ static bool MultiCopy(Rasterizer& rasterizer, const VideoCore::Buffer* src,
         const vk::PushConstantRange range{.stageFlags = vk::ShaderStageFlagBits::eCompute,
                                           .offset = 0,
                                           .size = sizeof(u32)};
+        if (!p.set_layout) {
+            return p;
+        }
         p.layout = Check(device.createPipelineLayoutUnique({
             .setLayoutCount = 1,
             .pSetLayouts = &*p.set_layout,
@@ -72,6 +75,10 @@ static bool MultiCopy(Rasterizer& rasterizer, const VideoCore::Buffer* src,
             .pPushConstantRanges = &range,
         }));
         const auto module = CompileSPV(BUFFER_MULTI_COPY_COMP, device);
+        if (!p.layout || !module) {
+            device.destroyShaderModule(module);
+            return p;
+        }
         p.pipeline = Check(device.createComputePipelineUnique(
             {}, vk::ComputePipelineCreateInfo{
                     .stage = {.stage = vk::ShaderStageFlagBits::eCompute,
@@ -82,6 +89,9 @@ static bool MultiCopy(Rasterizer& rasterizer, const VideoCore::Buffer* src,
         device.destroyShaderModule(module);
         return p;
     }();
+    if (!pipe.pipeline) {
+        return false; // its creation was logged: the copies go as vkCmdCopyBuffer
+    }
 
     // The region table goes into the stream buffer (host writes, visible at submission).
     thread_local std::vector<u32> regions;
@@ -144,7 +154,12 @@ static bool ExecuteCopyShaderHLE(const Shader::Info& info, const AmdGpu::Compute
     const auto src_buf_sharp = info.buffers[1].GetSharp(info);
     const auto dst_buf_sharp = info.buffers[2].GetSharp(info);
     const auto buf_stride = src_buf_sharp.GetStride();
-    ASSERT(buf_stride == dst_buf_sharp.GetStride());
+    if (buf_stride != dst_buf_sharp.GetStride()) {
+        LOG_ERROR_COUNTED(Render_Vulkan, "Copy shader with source stride {} and destination stride {}, "
+                                         "run as a shader",
+                          buf_stride, dst_buf_sharp.GetStride());
+        return false;
+    }
 
     struct CopyShaderControl {
         u32 dst_idx;
@@ -152,7 +167,11 @@ static bool ExecuteCopyShaderHLE(const Shader::Info& info, const AmdGpu::Compute
         u32 end;
     };
     static_assert(sizeof(CopyShaderControl) == 12);
-    ASSERT(ctl_buf_sharp.GetStride() == sizeof(CopyShaderControl));
+    if (ctl_buf_sharp.GetStride() != sizeof(CopyShaderControl)) {
+        LOG_ERROR_COUNTED(Render_Vulkan, "Copy shader with control stride {}, run as a shader",
+                          ctl_buf_sharp.GetStride());
+        return false;
+    }
     const auto ctl_buf = reinterpret_cast<const CopyShaderControl*>(ctl_buf_sharp.base_address);
 
     static std::vector<vk::BufferCopy> copies;

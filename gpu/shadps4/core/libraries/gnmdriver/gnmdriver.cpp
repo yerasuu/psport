@@ -3128,10 +3128,16 @@ int PS4_SYSV_ABI Func_F916890425496553() {
     return ORBIS_OK;
 }
 
-void RegisterLib(Core::Loader::SymbolsResolver* sym) {
+bool RegisterLib(Core::Loader::SymbolsResolver* sym) {
     LOG_INFO(Lib_GnmDriver, "Initializing presenter");
     liverpool = std::make_unique<AmdGpu::Liverpool>();
-    presenter = std::make_unique<Vulkan::Presenter>(*g_window, liverpool.get());
+    presenter = Vulkan::Presenter::Create(*g_window, liverpool.get());
+    if (!presenter) {
+        // psport: kept for the process's lifetime, which ends right away: a presenter that failed
+        // halfway may have left its rasterizer bound to it.
+        static_cast<void>(liverpool.release());
+        return false;
+    }
 
     const s32 result = sceKernelGetCompiledSdkVersion(&sdk_version);
     if (result != ORBIS_OK) {
@@ -3499,6 +3505,7 @@ void RegisterLib(Core::Loader::SymbolsResolver* sym) {
                  Func_4774D83BB4DDBF9A);
     LIB_FUNCTION("ut57TBmRQN0", "libSceGnmWaitFreeSubmit", 1, "libSceGnmDriver",
                  Func_BADE7B4C199140DD);
+    return true;
 };
 
 } // namespace Libraries::GnmDriver

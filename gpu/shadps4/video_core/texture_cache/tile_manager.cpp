@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "video_core/renderer_vulkan/vk_instance.h"
+#include "video_core/renderer_vulkan/vk_platform.h"
 #include "video_core/renderer_vulkan/vk_runtime.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_shader_util.h"
@@ -65,11 +66,12 @@ TileManager::TileManager(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
         .bindingCount = static_cast<u32>(bindings.size()),
         .pBindings = bindings.data(),
     };
-    auto desc_layout_result = device.createDescriptorSetLayoutUnique(desc_layout_ci);
-    ASSERT_MSG(desc_layout_result.result == vk::Result::eSuccess,
-               "Failed to create descriptor set layout: {}",
-               vk::to_string(desc_layout_result.result));
-    desc_layout = std::move(desc_layout_result.value);
+    desc_layout = Vulkan::Check<"create the tiling descriptor set layout">(
+        device.createDescriptorSetLayoutUnique(desc_layout_ci));
+    if (!desc_layout) {
+        Vulkan::ReportInitFailure();
+        return;
+    }
 
     const vk::DescriptorSetLayout set_layout = *desc_layout;
     const vk::PipelineLayoutCreateInfo layout_info = {
@@ -78,10 +80,11 @@ TileManager::TileManager(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
         .pushConstantRangeCount = 0U,
         .pPushConstantRanges = nullptr,
     };
-    auto [layout_result, layout] = device.createPipelineLayoutUnique(layout_info);
-    ASSERT_MSG(layout_result == vk::Result::eSuccess, "Failed to create pipeline layout: {}",
-               vk::to_string(layout_result));
-    pl_layout = std::move(layout);
+    pl_layout = Vulkan::Check<"create the tiling pipeline layout">(
+        device.createPipelineLayoutUnique(layout_info));
+    if (!pl_layout) {
+        Vulkan::ReportInitFailure();
+    }
 }
 
 TileManager::~TileManager() = default;
@@ -95,6 +98,9 @@ vk::Pipeline TileManager::GetTilingPipeline(const ImageInfo& info, bool is_tiler
     };
     if (const auto it = tiling_pipelines.find(key); it != tiling_pipelines.end()) {
         return *it->second;
+    }
+    if (!pl_layout) {
+        return {};
     }
     // An unknown tile mode was already reported and handled as linear: nothing to detile.
     if (info.array_mode == AmdGpu::ArrayMode::ArrayLinearAligned ||

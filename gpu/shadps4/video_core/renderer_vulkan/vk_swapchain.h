@@ -99,22 +99,22 @@ public:
 
 private:
     /// Selects the best available swapchain image format
-    void FindPresentFormat();
+    bool FindPresentFormat();
 
     /// Selects the best available present mode
     void FindPresentMode();
 
     /// Sets the surface properties according to device capabilities
-    void SetSurfaceProperties();
+    bool SetSurfaceProperties();
 
     /// Destroys current swapchain resources
     void Destroy();
 
     /// Performs creation of image views and framebuffers from the swapchain images
-    void SetupImages();
+    bool SetupImages();
 
     /// Creates the image acquired and present ready semaphores
-    void RefreshSemaphores();
+    bool RefreshSemaphores();
 
 private:
     const Instance& instance;

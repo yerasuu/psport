@@ -51,7 +51,12 @@ class Rasterizer;
 
 class Presenter {
 public:
-    Presenter(Frontend::WindowSDL& window, AmdGpu::Liverpool* liverpool);
+    /// psport: null when the Vulkan instance, the device, the swapchain or another object needed
+    /// from the start could not be created (logged); psport_gpu_init then fails.
+    static std::unique_ptr<Presenter> Create(Frontend::WindowSDL& window, AmdGpu::Liverpool* liverpool);
+
+    Presenter(Frontend::WindowSDL& window, AmdGpu::Liverpool* liverpool,
+              std::unique_ptr<Instance> p_instance);
     ~Presenter();
 
     HostPasses::PostProcessingPass::Settings& GetPPSettingsRef() {
@@ -107,7 +112,7 @@ public:
 private:
     Frame* GetRenderFrame();
 
-    void RecreateFrame(Frame* frame, u32 width, u32 height);
+    bool RecreateFrame(Frame* frame, u32 width, u32 height);
 
     void SetExpectedGameSize(s32 width, s32 height);
 
@@ -117,7 +122,8 @@ private:
     u32 expected_frame_height{1080};
 
     Frontend::WindowSDL& window;
-    Instance instance;
+    std::unique_ptr<Instance> m_p_instance; ///< psport: created first, by Create
+    Instance& instance;
     HostPasses::FsrPass fsr_pass;
     HostPasses::FsrPass::Settings fsr_settings{};
     HostPasses::PostProcessingPass::Settings pp_settings{};

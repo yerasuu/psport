@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "video_core/renderer_vulkan/vk_instance.h"
+#include "video_core/renderer_vulkan/vk_platform.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_shader_util.h"
 #include "video_core/texture_cache/blit_helper.h"
@@ -264,6 +265,9 @@ void BlitHelper::CreateShaders() {
     color_to_ms_depth_frag = Vulkan::CompileSPV(COLOR_TO_MS_DEPTH_FRAG, device);
     src_msaa_copy_frag = Vulkan::CompileSPV(MS_IMAGE_BLIT_MSAA_FRAG, device);
     src_non_msaa_copy_frag = Vulkan::CompileSPV(MS_IMAGE_BLIT_FRAG, device);
+    if (!fs_tri_vertex || !color_to_ms_depth_frag || !src_msaa_copy_frag || !src_non_msaa_copy_frag) {
+        Vulkan::ReportInitFailure();
+    }
 }
 
 void BlitHelper::CreatePipelineLayouts() {
@@ -278,9 +282,12 @@ void BlitHelper::CreatePipelineLayouts() {
         .bindingCount = 1U,
         .pBindings = &texture_binding,
     };
-    auto [desc_layout_result, desc_layout] =
-        instance.GetDevice().createDescriptorSetLayoutUnique(desc_layout_ci);
-    single_texture_descriptor_set_layout = std::move(desc_layout);
+    single_texture_descriptor_set_layout = Vulkan::Check<"create the blit descriptor set layout">(
+        instance.GetDevice().createDescriptorSetLayoutUnique(desc_layout_ci));
+    if (!single_texture_descriptor_set_layout) {
+        Vulkan::ReportInitFailure();
+        return;
+    }
     const vk::DescriptorSetLayout set_layout = *single_texture_descriptor_set_layout;
     const vk::PipelineLayoutCreateInfo layout_info = {
         .setLayoutCount = 1U,
@@ -288,15 +295,20 @@ void BlitHelper::CreatePipelineLayouts() {
         .pushConstantRangeCount = 0U,
         .pPushConstantRanges = nullptr,
     };
-    auto [layout_result, pipeline_layout] =
-        instance.GetDevice().createPipelineLayoutUnique(layout_info);
-    ASSERT_MSG(layout_result == vk::Result::eSuccess,
-               "Failed to create graphics pipeline layout: {}", vk::to_string(layout_result));
-    Vulkan::SetObjectName(instance.GetDevice(), *pipeline_layout, "Single texture pipeline layout");
-    single_texture_pl_layout = std::move(pipeline_layout);
+    single_texture_pl_layout = Vulkan::Check<"create the blit pipeline layout">(
+        instance.GetDevice().createPipelineLayoutUnique(layout_info));
+    if (!single_texture_pl_layout) {
+        Vulkan::ReportInitFailure();
+        return;
+    }
+    Vulkan::SetObjectName(instance.GetDevice(), *single_texture_pl_layout,
+                          "Single texture pipeline layout");
 }
 
 bool BlitHelper::CreateColorToMSDepthPipeline(const MsPipelineKey& key) {
+    if (!single_texture_pl_layout || !fs_tri_vertex || !color_to_ms_depth_frag) {
+        return false;
+    }
     const vk::PipelineInputAssemblyStateCreateInfo input_assembly = {
         .topology = vk::PrimitiveTopology::eTriangleList,
     };
@@ -368,6 +380,10 @@ bool BlitHelper::CreateColorToMSDepthPipeline(const MsPipelineKey& key) {
 }
 
 bool BlitHelper::CreateMsCopyPipeline(const MsPipelineKey& key) {
+    if (!single_texture_pl_layout || !fs_tri_vertex ||
+        !(key.src_msaa ? src_msaa_copy_frag : src_non_msaa_copy_frag)) {
+        return false;
+    }
     const vk::PipelineInputAssemblyStateCreateInfo input_assembly = {
         .topology = vk::PrimitiveTopology::eTriangleList,
     };

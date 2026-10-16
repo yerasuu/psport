@@ -825,8 +825,8 @@ public:
         }
         if (!CurrentChunk().Push(std::forward<Func>(func))) {
             RetireChunk();
-            const bool pushed = CurrentChunk().Push(std::forward<Func>(func));
-            ASSERT(pushed);
+            [[maybe_unused]] const bool pushed = CurrentChunk().Push(std::forward<Func>(func));
+            DEBUG_ASSERT(pushed); // an empty chunk takes any command (static_assert in Push)
         }
         spilling = false;
     }
@@ -1122,8 +1122,8 @@ private:
             auto full = AcquireChunk();
             ordered_chunk.swap(full);
             ordered_full.push_back(std::move(full));
-            const bool pushed = OrderedChunk().Push(std::move(command));
-            ASSERT(pushed);
+            [[maybe_unused]] const bool pushed = OrderedChunk().Push(std::move(command));
+            DEBUG_ASSERT(pushed); // an empty chunk takes any command (static_assert in Push)
         }
     }
 

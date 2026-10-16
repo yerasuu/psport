@@ -13,6 +13,9 @@
 #define VK_USE_PLATFORM_XLIB_KHR
 #endif
 
+#include <atomic>
+#include <cstdio>
+#include <cstdlib>
 #include <vector>
 #include <fmt/ranges.h>
 
@@ -27,6 +30,10 @@
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
 #endif
+#include <unistd.h>
+
+extern "C" volatile int runtime_restarting;
+extern "C" void runtime_calls_report(void);
 
 namespace Vulkan {
 
@@ -73,7 +80,7 @@ vk::SurfaceKHR CreateSurface(vk::Instance instance, const Frontend::WindowSDL& e
 
         if (instance.createWin32SurfaceKHR(&win32_ci, nullptr, &surface) != vk::Result::eSuccess) {
             LOG_CRITICAL(Render_Vulkan, "Failed to initialize Win32 surface");
-            UNREACHABLE();
+            return {};
         }
     }
 #elif defined(VK_USE_PLATFORM_XLIB_KHR) || defined(VK_USE_PLATFORM_WAYLAND_KHR)
@@ -84,8 +91,8 @@ vk::SurfaceKHR CreateSurface(vk::Instance instance, const Frontend::WindowSDL& e
         };
 
         if (instance.createXlibSurfaceKHR(&xlib_ci, nullptr, &surface) != vk::Result::eSuccess) {
-            LOG_ERROR(Render_Vulkan, "Failed to initialize Xlib surface");
-            UNREACHABLE();
+            LOG_CRITICAL(Render_Vulkan, "Failed to initialize Xlib surface");
+            return {};
         }
     } else if (window_info.type == Frontend::WindowSystemType::Wayland) {
         if (EmulatorSettings.IsRenderdocEnabled()) {
@@ -100,8 +107,8 @@ vk::SurfaceKHR CreateSurface(vk::Instance instance, const Frontend::WindowSDL& e
 
         if (instance.createWaylandSurfaceKHR(&wayland_ci, nullptr, &surface) !=
             vk::Result::eSuccess) {
-            LOG_ERROR(Render_Vulkan, "Failed to initialize Wayland surface");
-            UNREACHABLE();
+            LOG_CRITICAL(Render_Vulkan, "Failed to initialize Wayland surface");
+            return {};
         }
     }
 #elif defined(VK_USE_PLATFORM_METAL_EXT)
@@ -112,14 +119,13 @@ vk::SurfaceKHR CreateSurface(vk::Instance instance, const Frontend::WindowSDL& e
 
         if (instance.createMetalSurfaceEXT(&macos_ci, nullptr, &surface) != vk::Result::eSuccess) {
             LOG_CRITICAL(Render_Vulkan, "Failed to initialize MacOS surface");
-            UNREACHABLE();
+            return {};
         }
     }
 #endif
 
     if (!surface) {
         LOG_CRITICAL(Render_Vulkan, "Presentation not supported on this platform");
-        UNREACHABLE();
     }
 
     return surface;
@@ -272,6 +278,10 @@ vk::UniqueInstance CreateInstance(Frontend::WindowSystemType window_type, bool e
 #endif
 
     static vk::detail::DynamicLoader dl;
+    if (!dl.success()) {
+        LOG_CRITICAL(Render_Vulkan, "The Vulkan loader library could not be loaded");
+        return {};
+    }
     VULKAN_HPP_DEFAULT_DISPATCHER.init(
         dl.getProcAddress<PFN_vkGetInstanceProcAddr>("vkGetInstanceProcAddr"));
 
@@ -279,12 +289,17 @@ vk::UniqueInstance CreateInstance(Frontend::WindowSystemType window_type, bool e
         VULKAN_HPP_DEFAULT_DISPATCHER.vkEnumerateInstanceVersion
             ? vk::enumerateInstanceVersion()
             : vk::ResultValue(vk::Result::eSuccess, VK_API_VERSION_1_0);
-    ASSERT_MSG(available_version_result == vk::Result::eSuccess,
-               "Failed to query Vulkan API version: {}", vk::to_string(available_version_result));
-    ASSERT_MSG(available_version >= TargetVulkanApiVersion,
-               "Vulkan {}.{} is required, but only {}.{} is supported by instance!",
-               VK_VERSION_MAJOR(TargetVulkanApiVersion), VK_VERSION_MINOR(TargetVulkanApiVersion),
-               VK_VERSION_MAJOR(available_version), VK_VERSION_MINOR(available_version));
+    if (available_version_result != vk::Result::eSuccess) {
+        LOG_CRITICAL(Render_Vulkan, "Failed to query Vulkan API version: {}",
+                     vk::to_string(available_version_result));
+        return {};
+    }
+    if (available_version < TargetVulkanApiVersion) {
+        LOG_CRITICAL(Render_Vulkan, "Vulkan {}.{} is required, but only {}.{} is supported by instance!",
+                     VK_VERSION_MAJOR(TargetVulkanApiVersion), VK_VERSION_MINOR(TargetVulkanApiVersion),
+                     VK_VERSION_MAJOR(available_version), VK_VERSION_MINOR(available_version));
+        return {};
+    }
 
     const auto layers = GetInstanceLayers(enable_validation, enable_crash_diagnostic);
     auto extensions = GetLayerExtensions(GetInstanceExtensions(window_type, true), layers);
@@ -419,8 +434,10 @@ vk::UniqueInstance CreateInstance(Frontend::WindowSystemType window_type, bool e
     };
 
     auto [instance_result, instance] = vk::createInstanceUnique(instance_ci_chain.get());
-    ASSERT_MSG(instance_result == vk::Result::eSuccess, "Failed to create instance: {}",
-               vk::to_string(instance_result));
+    if (instance_result != vk::Result::eSuccess) {
+        LOG_CRITICAL(Render_Vulkan, "Failed to create instance: {}", vk::to_string(instance_result));
+        return {};
+    }
 
     VULKAN_HPP_DEFAULT_DISPATCHER.init(*instance);
 
@@ -439,9 +456,38 @@ vk::UniqueDebugUtilsMessengerEXT CreateDebugCallback(vk::Instance instance) {
         .pfnUserCallback = DebugUtilsCallback,
     };
     auto [messenger_result, messenger] = instance.createDebugUtilsMessengerEXTUnique(msg_ci);
-    ASSERT_MSG(messenger_result == vk::Result::eSuccess, "Failed to create debug callback: {}",
-               vk::to_string(messenger_result));
+    if (messenger_result != vk::Result::eSuccess) {
+        LOG_ERROR(Render_Vulkan, "Failed to create debug callback, validation messages not shown: {}",
+                  vk::to_string(messenger_result));
+    }
     return std::move(messenger);
+}
+
+namespace {
+std::atomic<bool> s_has_init_failed;
+} // Anonymous namespace
+
+void ReportInitFailure() {
+    s_has_init_failed.store(true, std::memory_order_relaxed);
+}
+
+bool HasInitFailed() {
+    return s_has_init_failed.load(std::memory_order_relaxed);
+}
+
+void StopOnDeviceLost(const char* sz_where) {
+    // The port closes the device before it restarts itself (probe.c): what fails then waits for
+    // the exec instead, as assert_fail_impl does.
+    if (runtime_restarting) {
+        for (;;) {
+            pause();
+        }
+    }
+    Breadcrumbs::ReportDeviceLost(sz_where);
+    std::fflush(stdout);
+    std::fprintf(stderr, "STOP: GPU device lost (%s)\n", sz_where);
+    runtime_calls_report();
+    std::_Exit(24);
 }
 
 } // namespace Vulkan

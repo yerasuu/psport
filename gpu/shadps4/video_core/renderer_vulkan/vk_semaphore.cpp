@@ -4,6 +4,7 @@
 #include <limits>
 #include "video_core/renderer_vulkan/vk_breadcrumbs.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
+#include "video_core/renderer_vulkan/vk_platform.h"
 #include "video_core/renderer_vulkan/vk_semaphore.h"
 
 #include "common/assert.h"
@@ -20,11 +21,11 @@ Semaphore::Semaphore(const Instance& instance_) : instance{instance_} {
             .initialValue = 0,
         },
     };
-    auto [semaphore_result, sem] =
-        instance.GetDevice().createSemaphoreUnique(semaphore_chain.get());
-    ASSERT_MSG(semaphore_result == vk::Result::eSuccess, "Failed to create master semaphore: {}",
-               vk::to_string(semaphore_result));
-    semaphore = std::move(sem);
+    semaphore = Check<"create a master semaphore">(
+        instance.GetDevice().createSemaphoreUnique(semaphore_chain.get()));
+    if (!semaphore) {
+        ReportInitFailure();
+    }
 }
 
 Semaphore::~Semaphore() = default;
@@ -36,10 +37,14 @@ void Semaphore::Refresh() {
         this_tick = gpu_tick.load(std::memory_order_acquire);
         auto [counter_result, cntr] = instance.GetDevice().getSemaphoreCounterValue(*semaphore);
         if (counter_result == vk::Result::eErrorDeviceLost) {
-            Breadcrumbs::ReportDeviceLost("reading the GPU progress");
+            StopOnDeviceLost("reading the GPU progress");
         }
-        ASSERT_MSG(counter_result == vk::Result::eSuccess,
-                   "Failed to get master semaphore value: {}", vk::to_string(counter_result));
+        if (counter_result != vk::Result::eSuccess) {
+            // The known tick stays as it was; the next refresh reads it again.
+            LOG_ERROR_COUNTED(Render_Vulkan, "Failed to get master semaphore value: {}",
+                              vk::to_string(counter_result));
+            return;
+        }
         counter = cntr;
         if (counter < this_tick) {
             return;
@@ -73,8 +78,7 @@ void Semaphore::Wait(u64 tick) {
             break;
         }
         if (result == vk::Result::eErrorDeviceLost) {
-            Breadcrumbs::ReportDeviceLost("waiting for a submission");
-            ASSERT_MSG(false, "Device lost while waiting for a submission");
+            StopOnDeviceLost("waiting for a submission");
         }
     }
     Refresh();

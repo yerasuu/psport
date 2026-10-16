@@ -6,6 +6,8 @@
 #include "common/logging/log.h"
 
 extern "C" void runtime_calls_hle_stub(const char* function, const std::uint64_t* count);
+extern "C" void runtime_calls_fallback(const char* function, const char* message,
+                                       const std::uint64_t* count);
 
 namespace Common::Log {
 static Level threshold() {
@@ -21,6 +23,9 @@ static Level threshold() {
 }
 bool ShouldLog(Level level) { return level >= threshold(); }
 void Stubbed(const char* function, const std::uint64_t* count) { runtime_calls_hle_stub(function, count); }
+void Fallback(const char* function, const char* message, const std::uint64_t* count) {
+    runtime_calls_fallback(function, message, count);
+}
 void Write(std::string_view log_class, Level level, const char* file, int line, const char* function,
            std::string&& message) {
     static std::mutex mutex;

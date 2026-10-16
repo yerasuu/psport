@@ -35,8 +35,8 @@ public:
 protected:
     std::size_t CommitResource();
 
-    /// Called when a chunk of resources have to be allocated.
-    virtual void Allocate(std::size_t begin, std::size_t end) = 0;
+    /// Called when a chunk of resources have to be allocated; false when they could not be.
+    virtual bool Allocate(std::size_t begin, std::size_t end) = 0;
 
 private:
     /// Manages pool overflow allocating new resources.
@@ -54,7 +54,7 @@ public:
     explicit CommandPool(const Instance& instance, Semaphore* work_semaphore);
     ~CommandPool() override;
 
-    void Allocate(std::size_t begin, std::size_t end) override;
+    bool Allocate(std::size_t begin, std::size_t end) override;
 
     vk::CommandBuffer Commit();
 

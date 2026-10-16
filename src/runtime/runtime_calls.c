@@ -17,12 +17,12 @@ static const char (*s_p_import_names)[128];
 static uint64_t s_c_imports;
 static uint64_t *s_p_unimplemented_calls, *s_p_stub_calls;
 static struct { uint64_t key, c_failures; } s_failures[FAILURE_SLOTS];
-static struct { const char *sz_function; const uint64_t *p_count; } s_hle_stubs[HLE_STUB_SLOTS];
+static struct { const char *sz_function, *sz_detail; const uint64_t *p_count; int kind; } s_hle_stubs[HLE_STUB_SLOTS];
 static size_t s_c_hle_stubs;
 static RuntimeSummary s_pfn_summaries[SUMMARY_SLOTS];
 static size_t s_c_summaries;
 static pthread_mutex_t s_hle_stub_lock = PTHREAD_MUTEX_INITIALIZER;
-typedef struct { uint64_t c_calls; uint32_t id, code; int kind; const char *sz_function; } Entry;
+typedef struct { uint64_t c_calls; uint32_t id, code; int kind; const char *sz_function, *sz_detail; } Entry;
 static Entry *s_p_entries;
 
 void runtime_calls_configure(const char (*p_names)[128], uint64_t c_names) {
@@ -98,14 +98,24 @@ ABI int64_t runtime_calls_failed(uint32_t id, const uintptr_t *p_arguments, int6
     return result;
 }
 
-void runtime_calls_hle_stub(const char *sz_function, const uint64_t *p_count) {
+static void add_hle_entry(const char *sz_function, const char *sz_detail, const uint64_t *p_count, int kind) {
     pthread_mutex_lock(&s_hle_stub_lock);
     if (s_c_hle_stubs < HLE_STUB_SLOTS) {
         s_hle_stubs[s_c_hle_stubs].sz_function = sz_function;
+        s_hle_stubs[s_c_hle_stubs].sz_detail = sz_detail;
         s_hle_stubs[s_c_hle_stubs].p_count = p_count;
+        s_hle_stubs[s_c_hle_stubs].kind = kind;
         __atomic_store_n(&s_c_hle_stubs, s_c_hle_stubs + 1, __ATOMIC_RELEASE);
     }
     pthread_mutex_unlock(&s_hle_stub_lock);
+}
+
+void runtime_calls_hle_stub(const char *sz_function, const uint64_t *p_count) {
+    add_hle_entry(sz_function, NULL, p_count, 1);
+}
+
+void runtime_calls_fallback(const char *sz_function, const char *sz_detail, const uint64_t *p_count) {
+    add_hle_entry(sz_function, sz_detail, p_count, 4);
 }
 
 void runtime_calls_add_summary(RuntimeSummary pfn_summary) {
@@ -120,8 +130,10 @@ void runtime_calls_add_summary(RuntimeSummary pfn_summary) {
 }
 
 static int report_line(char *sz_out, size_t cb_out, const Entry *p_entry) {
-    static const char *const s_kinds[] = {"unimplemented", "stub", "failed", "status"};
+    static const char *const s_kinds[] = {"unimplemented", "stub", "failed", "status", "fallback"};
     int used = snprintf(sz_out, cb_out, "Calls: summary %s %" PRIu64 " ", s_kinds[p_entry->kind], p_entry->c_calls);
+    if (p_entry->sz_detail)
+        return used + snprintf(sz_out + used, cb_out - (size_t)used, "%s (GPU): %s\n", p_entry->sz_function, p_entry->sz_detail);
     if (p_entry->sz_function) return used + snprintf(sz_out + used, cb_out - (size_t)used, "%s (HLE)\n", p_entry->sz_function);
     used += snprintf(sz_out + used, cb_out - (size_t)used, "%s (%s)", s_p_import_names[p_entry->id],
                      runtime_import_name(s_p_import_names[p_entry->id]));
@@ -135,22 +147,22 @@ static int report_line(char *sz_out, size_t cb_out, const Entry *p_entry) {
 void runtime_calls_report(void) {
     static int s_has_reported;
     if (!s_p_entries || __atomic_exchange_n(&s_has_reported, 1, __ATOMIC_ACQ_REL)) return;
-    size_t c_path = 0, totals[4] = {0};
+    size_t c_path = 0, totals[5] = {0};
     for (uint64_t id = 0; id < s_c_imports; ++id) {
         const uint64_t unimplemented = __atomic_load_n(&s_p_unimplemented_calls[id], __ATOMIC_RELAXED);
         const uint64_t stub = __atomic_load_n(&s_p_stub_calls[id], __ATOMIC_RELAXED);
-        if (unimplemented) s_p_entries[c_path++] = (Entry){unimplemented, (uint32_t)id, 0, 0, NULL};
-        if (stub) s_p_entries[c_path++] = (Entry){stub, (uint32_t)id, 0, 1, NULL};
+        if (unimplemented) s_p_entries[c_path++] = (Entry){unimplemented, (uint32_t)id, 0, 0, NULL, NULL};
+        if (stub) s_p_entries[c_path++] = (Entry){stub, (uint32_t)id, 0, 1, NULL, NULL};
     }
     for (size_t i = 0, c_stubs = __atomic_load_n(&s_c_hle_stubs, __ATOMIC_ACQUIRE); i < c_stubs; ++i)
-        s_p_entries[c_path++] =
-            (Entry){__atomic_load_n(s_hle_stubs[i].p_count, __ATOMIC_RELAXED), 0, 0, 1, s_hle_stubs[i].sz_function};
+        s_p_entries[c_path++] = (Entry){__atomic_load_n(s_hle_stubs[i].p_count, __ATOMIC_RELAXED), 0, 0,
+                                        s_hle_stubs[i].kind, s_hle_stubs[i].sz_function, s_hle_stubs[i].sz_detail};
     for (size_t i = 0; i < FAILURE_SLOTS; ++i) {
         const uint64_t key = __atomic_load_n(&s_failures[i].key, __ATOMIC_ACQUIRE);
         if (!key) continue;
         const uint32_t id = (uint32_t)(key >> 32) - 1, code = (uint32_t)key;
         s_p_entries[c_path++] = (Entry){__atomic_load_n(&s_failures[i].c_failures, __ATOMIC_RELAXED), id, code,
-                                   runtime_import_status(s_p_import_names[id], code) ? 3 : 2, NULL};
+                                   runtime_import_status(s_p_import_names[id], code) ? 3 : 2, NULL, NULL};
     }
     for (size_t i = 1; i < c_path; ++i)
         for (size_t j = i; j && s_p_entries[j - 1].c_calls < s_p_entries[j].c_calls; --j) {
@@ -161,8 +173,9 @@ void runtime_calls_report(void) {
     const int file = sz_path && *sz_path ? open(sz_path, O_WRONLY | O_CREAT | O_TRUNC, 0644) : -1;
     char sz_line[512];
     snprintf(sz_line, sizeof(sz_line),
-             "Calls: summary: %zu unimplemented, %zu stub, %zu failed, %zu status (import and error code)\n",
-             totals[0], totals[1], totals[2], totals[3]);
+             "Calls: summary: %zu unimplemented, %zu stub, %zu failed, %zu status (import and error code), "
+             "%zu fallback (GPU)\n",
+             totals[0], totals[1], totals[2], totals[3], totals[4]);
     put(1, sz_line);
     if (file >= 0) put(file, sz_line);
     for (size_t i = 0; i < c_path; ++i) {

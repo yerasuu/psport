@@ -119,6 +119,9 @@ void Pipeline::BindResources(DescriptorWrites& set_writes, const Shader::PushDat
 
     // Descriptor set updates are device calls: they stay on this thread.
     const auto desc_set = desc_heap.Commit(*desc_layout);
+    if (!desc_set) {
+        return; // DescriptorHeap::Commit logged it: the draw reads null descriptors
+    }
     for (auto& set_write : set_writes) {
         set_write.dstSet = desc_set;
     }

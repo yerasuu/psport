@@ -83,12 +83,8 @@ ComputePipeline::ComputePipeline(const Instance& instance, Scheduler& scheduler,
         .pBindings = bindings.data(),
     };
     const auto device = instance.GetDevice();
-    auto [descriptor_set_result, descriptor_set] =
-        device.createDescriptorSetLayoutUnique(desc_layout_ci);
-    ASSERT_MSG(descriptor_set_result == vk::Result::eSuccess,
-               "Failed to create compute descriptor set layout: {}",
-               vk::to_string(descriptor_set_result));
-    desc_layout = std::move(descriptor_set);
+    desc_layout = Check<"create a compute descriptor set layout">(
+        device.createDescriptorSetLayoutUnique(desc_layout_ci));
 
     const vk::DescriptorSetLayout set_layout = *desc_layout;
     const vk::PipelineLayoutCreateInfo layout_info = {
@@ -97,27 +93,37 @@ ComputePipeline::ComputePipeline(const Instance& instance, Scheduler& scheduler,
         .pushConstantRangeCount = 1U,
         .pPushConstantRanges = &push_constants,
     };
-    auto [layout_result, layout] = instance.GetDevice().createPipelineLayoutUnique(layout_info);
-    ASSERT_MSG(layout_result == vk::Result::eSuccess,
-               "Failed to create compute pipeline layout: {}", vk::to_string(layout_result));
-    pipeline_layout = std::move(layout);
-    SetObjectName(device, *pipeline_layout, "Compute PipelineLayout {}", debug_str);
+    if (desc_layout) {
+        pipeline_layout = Check<"create a compute pipeline layout">(
+            instance.GetDevice().createPipelineLayoutUnique(layout_info));
+    }
+    if (pipeline_layout) {
+        SetObjectName(device, *pipeline_layout, "Compute PipelineLayout {}", debug_str);
+    }
 
     const vk::ComputePipelineCreateInfo compute_pipeline_ci = {
         .stage = shader_ci,
         .layout = *pipeline_layout,
     };
-    auto [pipeline_result, pipe] =
-        instance.GetDevice().createComputePipelineUnique(pipeline_cache, compute_pipeline_ci);
+    // psport: a layout or shader module that could not be created leaves the pipeline null.
+    vk::Result pipeline_result = vk::Result::eErrorInitializationFailed;
+    if (pipeline_layout && module) {
+        auto [result, pipe] =
+            instance.GetDevice().createComputePipelineUnique(pipeline_cache, compute_pipeline_ci);
+        pipeline_result = result;
+        pipeline = std::move(pipe);
+    }
     if (preloading && pipeline_result != vk::Result::eSuccess) {
         // psport: a pipeline from the cache the driver rejects is a damaged cache entry: the
         // cache is rebuilt (PipelineCache::WarmUp) instead of stopping the game at every start.
         throw Serialization::CorruptData{"cached compute pipeline rejected by the driver: " +
                                          vk::to_string(pipeline_result)};
     }
-    ASSERT_MSG(pipeline_result == vk::Result::eSuccess, "Failed to create compute pipeline: {}",
-               vk::to_string(pipeline_result));
-    pipeline = std::move(pipe);
+    if (pipeline_result != vk::Result::eSuccess) {
+        LOG_ERROR_COUNTED(Render_Vulkan, "Failed to create compute pipeline {}, left null: {}",
+                          debug_str, vk::to_string(pipeline_result));
+        return;
+    }
     SetObjectName(device, *pipeline, "Compute Pipeline {}", debug_str);
 }
 

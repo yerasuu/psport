@@ -27,6 +27,12 @@ public:
                       bool enable_validation = false, bool enable_crash_diagnostic = false);
     ~Instance();
 
+    /// psport: false when the instance, a suitable device or the allocator could not be created
+    /// (logged); nothing else may then use this instance.
+    [[nodiscard]] bool IsCreated() const {
+        return m_is_created;
+    }
+
     /// Returns a formatted string for the driver version
     std::string GetDriverVersionName();
 
@@ -575,7 +581,7 @@ private:
     bool CreateDevice();
 
     /// Creates the VMA allocator handle
-    void CreateAllocator();
+    bool CreateAllocator();
 
     /// Collects various information from the device.
     void CollectDeviceParameters();
@@ -613,6 +619,7 @@ private:
     vk::UniqueDebugUtilsMessengerEXT debug_callback{};
     std::string vendor_name;
     VmaAllocator allocator{};
+    bool m_is_created{};
     vk::Queue present_queue;
     vk::Queue graphics_queue;
     vk::Queue readback_queue;

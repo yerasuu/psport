@@ -29,7 +29,8 @@ static vk::ImageType ConvertImageType(AmdGpu::ImageType type) noexcept {
     case AmdGpu::ImageType::Color3D:
         return vk::ImageType::e3D;
     default:
-        UNREACHABLE_MSG("Unexpected image type {}", u32(type));
+        LOG_ERROR_COUNTED(Render_Vulkan, "Unexpected image type {}, copied as 2D", u32(type));
+        return vk::ImageType::e2D;
     }
 }
 
@@ -435,7 +436,13 @@ void Runtime::CopyImageWithBuffer(VideoCore::Image* src, VideoCore::Image* dst,
                                   const VideoCore::Buffer* buffer, u64 offset) {
     const u32 num_mips = std::min(src->info.resources.levels, dst->info.resources.levels);
     const u32 num_layers = std::min(src->info.resources.layers, dst->info.resources.layers);
-    ASSERT(src->info.resources.layers == dst->info.resources.layers && num_mips == 1);
+    if (src->info.resources.layers != dst->info.resources.layers || num_mips != 1) {
+        LOG_ERROR_COUNTED(Render_Vulkan,
+                          "Copy through a buffer between images of {} and {} layers, {} levels, "
+                          "skipped",
+                          src->info.resources.layers, dst->info.resources.layers, num_mips);
+        return;
+    }
 
     SetBackingSamples(dst, dst->info.num_samples, false);
     SetBackingSamples(src, src->info.num_samples);
@@ -500,9 +507,16 @@ void Runtime::CopyMip(VideoCore::Image* src, VideoCore::Image* dst, u32 mip, u32
     const auto mip_block_p = std::max(dst->info.mips_layout[mip].pitch >> dst_dim, 1u);
 
     const auto src_dim = src->info.props.is_block ? 2 : 0;
-    ASSERT(mip_block_w == (src->info.size.width >> src_dim));
-    ASSERT(mip_block_h == (src->info.size.height >> src_dim));
-    ASSERT(mip_block_p == (src->info.pitch >> src_dim));
+    if (mip_block_w != (src->info.size.width >> src_dim) ||
+        mip_block_h != (src->info.size.height >> src_dim) ||
+        mip_block_p != (src->info.pitch >> src_dim)) {
+        LOG_ERROR_COUNTED(Render_Vulkan,
+                          "Mip {} of {}x{} (pitch {}) does not match the {}x{} (pitch {}) source, "
+                          "copy skipped",
+                          mip, mip_block_w, mip_block_h, mip_block_p, src->info.size.width >> src_dim,
+                          src->info.size.height >> src_dim, src->info.pitch >> src_dim);
+        return;
+    }
 
     const auto [src_layers, dst_layers] =
         SanitizeCopyLayers(src->info, dst->info, src->info.size.depth);
@@ -730,7 +744,11 @@ void Runtime::SetBackingSamples(VideoCore::Image* image, u32 num_samples, bool c
     if (!backing || backing->num_samples == num_samples) {
         return;
     }
-    ASSERT_MSG(!image->info.props.is_depth, "Swapping samples is only valid for color images");
+    if (image->info.props.is_depth) {
+        LOG_ERROR_COUNTED(Render_Vulkan, "Sample count change of a depth image to {}, kept at {}",
+                          num_samples, backing->num_samples);
+        return;
+    }
     VideoCore::Image::BackingImage* new_backing;
     auto it = std::ranges::find(backing_images, num_samples,
                                 &VideoCore::Image::BackingImage::num_samples);
@@ -753,9 +771,15 @@ void Runtime::SetBackingSamples(VideoCore::Image* image, u32 num_samples, bool c
         new_backing = std::addressof(*it);
     }
 
+    if (copy_backing && (image->info.resources.levels != 1 || image->info.resources.layers != 1)) {
+        LOG_ERROR_COUNTED(Render_Vulkan,
+                          "Sample count change of an image of {} levels and {} layers, contents "
+                          "not copied",
+                          image->info.resources.levels, image->info.resources.layers);
+        copy_backing = false;
+    }
     if (copy_backing) {
         scheduler.EndRendering();
-        ASSERT(image->info.resources.levels == 1 && image->info.resources.layers == 1);
 
         // Transition current backing to shader read layout
         Transit(image, vk::ImageLayout::eShaderReadOnlyOptimal,
