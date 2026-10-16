@@ -102,7 +102,7 @@ void UniqueImage::Destroy() {
     }
 }
 
-void UniqueImage::Create(const vk::ImageCreateInfo& image_ci) {
+bool UniqueImage::Create(const vk::ImageCreateInfo& image_ci, bool can_exceed_budget) {
     this->image_ci = image_ci;
     ASSERT(!image);
     // psport: images of PS_VMA_DEDICATED_MB (4) or more get memory of their own, given back to
@@ -119,7 +119,7 @@ void UniqueImage::Create(const vk::ImageCreateInfo& image_ci) {
             dedicated = VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
         }
     }
-    const VmaAllocationCreateInfo alloc_ci = {
+    VmaAllocationCreateInfo alloc_ci = {
         .flags = VMA_ALLOCATION_CREATE_WITHIN_BUDGET_BIT | dedicated,
         .usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,
         .requiredFlags = 0,
@@ -133,11 +133,24 @@ void UniqueImage::Create(const vk::ImageCreateInfo& image_ci) {
     VmaAllocationInfo alloc_info{};
     VkResult result = vmaCreateImage(allocator, &image_ci_unsafe, &alloc_ci, &unsafe_image,
                                      &allocation, &alloc_info);
-    ASSERT_MSG(result == VK_SUCCESS, "Failed allocating image with error {}",
-               vk::to_string(vk::Result{result}));
+    if (result != VK_SUCCESS && can_exceed_budget) {
+        alloc_ci.flags &= ~VMA_ALLOCATION_CREATE_WITHIN_BUDGET_BIT;
+        result = vmaCreateImage(allocator, &image_ci_unsafe, &alloc_ci, &unsafe_image, &allocation,
+                                &alloc_info);
+    }
+    if (result != VK_SUCCESS) {
+        allocation = {};
+        if (can_exceed_budget) {
+            LOG_ERROR_COUNTED(Render_Vulkan, "Failed allocating a {}x{}x{} {} image: {}",
+                              image_ci.extent.width, image_ci.extent.height, image_ci.extent.depth,
+                              vk::to_string(image_ci.format), vk::to_string(vk::Result{result}));
+        }
+        return false;
+    }
     image = vk::Image{unsafe_image};
     size_bytes = alloc_info.size;
     PsStats::g_cb_vk_image.fetch_add(size_bytes, std::memory_order_relaxed);
+    return true;
 }
 
 Image::Image(const Vulkan::Instance& instance, Vulkan::Runtime& runtime_,
@@ -212,7 +225,10 @@ Image::Image(const Vulkan::Instance& instance, Vulkan::Runtime& runtime_,
     backing = &backing_images.emplace_back();
     backing->num_samples = info.num_samples;
     backing->image = UniqueImage{instance.GetDevice(), instance.GetAllocator()};
-    backing->image.Create(image_ci);
+    // psport: within the budget only: the texture cache evicts and retries (CreateImage).
+    if (!backing->image.Create(image_ci, false)) {
+        return;
+    }
 
     Vulkan::SetObjectName(instance.GetDevice(), GetImage(),
                           "Image {}x{}x{} {} {} {:#x}:{:#x} L:{} M:{} S:{}", info.size.width,
@@ -246,6 +262,9 @@ ImageView& Image::FindView(const ImageViewInfo& view_info, bool ensure_guest_sam
 void Image::GetBarriers(Barriers& barriers, vk::ImageLayout dst_layout, vk::AccessFlags2 dst_mask,
                         vk::PipelineStageFlags2 dst_stage,
                         std::optional<SubresourceRange> subres_range) {
+    if (!IsAllocated()) {
+        return;
+    }
     auto& last_state = backing->state;
     auto& subresource_states = backing->subresource_states;
 

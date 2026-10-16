@@ -76,8 +76,10 @@ Sampler::Sampler(const Vulkan::Instance& instance, const AmdGpu::Sampler& sample
         .unnormalizedCoordinates = false, // Handled in shader due to Vulkan limitations.
     };
     auto [sampler_result, smplr] = instance.GetDevice().createSamplerUnique(sampler_ci);
-    ASSERT_MSG(sampler_result == vk::Result::eSuccess, "Failed to create sampler: {}",
-               vk::to_string(sampler_result));
+    if (sampler_result != vk::Result::eSuccess) {
+        LOG_ERROR_COUNTED(Render_Vulkan, "Failed to create sampler, the default one is used: {}",
+                          vk::to_string(sampler_result));
+    }
     handle = std::move(smplr);
 }
 

@@ -294,6 +294,15 @@ While the game runs, a swapchain that is out of date or suboptimal, or whose sur
 could not be recreated, is recreated at the next present and the frame is skipped; a pipeline the
 driver rejects is left null; a descriptor set that cannot be had from a fresh pool is not bound;
 a command pool that cannot grow reuses its oldest buffer once the GPU is done with it.
+An image whose memory cannot be allocated within the driver's budget makes the texture cache
+evict up to 64 images unused in the current submission whose contents need no write-back
+(`TextureCache::EvictForAllocation`, only for a new image `FindImage` creates) and try again, then
+allocate over the budget; failing that the image has no memory (`Image::IsAllocated`): its views
+are null views (`nullDescriptor`), so the draws reading it see zeros and those rendering to it
+write nothing, and the uploads, downloads, copies, clears and barriers on it are skipped. A
+sampler the driver refuses is replaced by a default linear sampler made at start. FSR's images and
+the presenter's frame images retry over the budget too; FSR is left out of a frame that cannot
+have them, and a frame image keeps its previous size.
 `Vulkan::Check` (`vk_platform.h`) logs a failed call and leaves its result null for the caller to
 check. A lost device cannot be recovered from: `Vulkan::StopOnDeviceLost` prints the breadcrumbs,
 `STOP: GPU device lost (<where>)` and the call summary, and exits with code 24. A value from

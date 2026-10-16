@@ -17,6 +17,16 @@
 
 namespace Vulkan {
 
+// psport: an image without memory (TextureCache::CreateImage) takes no commands.
+static bool IsMissing(const VideoCore::Image* image) {
+    if (image->IsAllocated()) {
+        return false;
+    }
+    LOG_ERROR_COUNTED(Render_Vulkan, "Operation on an image without memory at {:#x} skipped",
+                      image->info.guest_address);
+    return true;
+}
+
 static vk::ImageType ConvertImageType(AmdGpu::ImageType type) noexcept {
     switch (type) {
     case AmdGpu::ImageType::Color1D:
@@ -272,6 +282,10 @@ Runtime::TransferMark::~TransferMark() {
 
 void Runtime::UploadImage(VideoCore::Image* dst, const VideoCore::Buffer* src,
                           std::span<const vk::BufferImageCopy> upload_copies) {
+    if (IsMissing(dst)) {
+        dst->flags &= ~VideoCore::ImageFlagBits::Dirty; // so that it is not uploaded again each use
+        return;
+    }
     SetBackingSamples(dst, dst->info.num_samples, false);
     scheduler.EndRendering();
     const TransferMark mark{*this, "image upload", *dst};
@@ -304,6 +318,9 @@ void Runtime::UploadImage(VideoCore::Image* dst, const VideoCore::Buffer* src,
 
 void Runtime::DownloadImage(VideoCore::Image* src, const VideoCore::Buffer* dst,
                             std::span<const vk::BufferImageCopy> download_copies) {
+    if (IsMissing(src)) {
+        return;
+    }
     SetBackingSamples(src, src->info.num_samples);
     scheduler.EndRendering();
     const TransferMark mark{*this, "image download", *src};
@@ -333,6 +350,9 @@ void Runtime::DownloadImage(VideoCore::Image* src, const VideoCore::Buffer* dst,
 }
 
 void Runtime::CopyImage(VideoCore::Image* src, VideoCore::Image* dst) {
+    if (IsMissing(src) || IsMissing(dst)) {
+        return;
+    }
     const u32 num_mips = std::min(src->info.resources.levels, dst->info.resources.levels);
 
     // Format mismatch warning (safe but useful)
@@ -434,6 +454,9 @@ void Runtime::CopyImage(VideoCore::Image* src, VideoCore::Image* dst) {
 
 void Runtime::CopyImageWithBuffer(VideoCore::Image* src, VideoCore::Image* dst,
                                   const VideoCore::Buffer* buffer, u64 offset) {
+    if (IsMissing(src) || IsMissing(dst)) {
+        return;
+    }
     const u32 num_mips = std::min(src->info.resources.levels, dst->info.resources.levels);
     const u32 num_layers = std::min(src->info.resources.layers, dst->info.resources.layers);
     if (src->info.resources.layers != dst->info.resources.layers || num_mips != 1) {
@@ -501,6 +524,9 @@ void Runtime::CopyImageWithBuffer(VideoCore::Image* src, VideoCore::Image* dst,
 }
 
 void Runtime::CopyMip(VideoCore::Image* src, VideoCore::Image* dst, u32 mip, u32 slice) {
+    if (IsMissing(src) || IsMissing(dst)) {
+        return;
+    }
     const auto dst_dim = dst->info.props.is_block ? 2 : 0;
     const auto mip_block_w = std::max(dst->info.size.width >> (mip + dst_dim), 1u);
     const auto mip_block_h = std::max(dst->info.size.height >> (mip + dst_dim), 1u);
@@ -562,6 +588,9 @@ void Runtime::CopyMip(VideoCore::Image* src, VideoCore::Image* dst, u32 mip, u32
 }
 
 void Runtime::CopyColorAndDepth(VideoCore::Image* src, VideoCore::Image* dst) {
+    if (IsMissing(src) || IsMissing(dst)) {
+        return;
+    }
     if (src->info.num_samples == 1 && dst->info.num_samples == 1) {
         if (instance.IsMaintenance8Supported() ||
             src->info.props.is_depth == dst->info.props.is_depth) {
@@ -597,6 +626,9 @@ void Runtime::CopyColorAndDepth(VideoCore::Image* src, VideoCore::Image* dst) {
 
 void Runtime::CopyDepthStencil(VideoCore::Image* src, VideoCore::Image* dst,
                                const VideoCore::SubresourceRange& sub_range) {
+    if (IsMissing(src) || IsMissing(dst)) {
+        return;
+    }
     scheduler.EndRendering();
 
     bool needs_flush =
@@ -641,6 +673,9 @@ void Runtime::CopyDepthStencil(VideoCore::Image* src, VideoCore::Image* dst,
 void Runtime::ResolveImage(VideoCore::Image* src, VideoCore::Image* dst,
                            const VideoCore::SubresourceRange& src_range,
                            const VideoCore::SubresourceRange& dst_range) {
+    if (IsMissing(src) || IsMissing(dst)) {
+        return;
+    }
     SetBackingSamples(dst, 1, false);
     scheduler.EndRendering();
 
@@ -711,6 +746,9 @@ void Runtime::ResolveImage(VideoCore::Image* src, VideoCore::Image* dst,
 
 void Runtime::ClearImage(VideoCore::Image* dst, const VideoCore::SubresourceRange& range,
                          const vk::ClearValue& clear_value) {
+    if (IsMissing(dst)) {
+        return;
+    }
     scheduler.EndRendering();
 
     const bool needs_flush =
@@ -741,7 +779,7 @@ void Runtime::SetBackingSamples(VideoCore::Image* image, u32 num_samples, bool c
     auto& backing = image->backing;
     auto& backing_images = image->backing_images;
     const auto& info = image->info;
-    if (!backing || backing->num_samples == num_samples) {
+    if (!backing || !backing->image || backing->num_samples == num_samples) {
         return;
     }
     if (image->info.props.is_depth) {
@@ -756,10 +794,13 @@ void Runtime::SetBackingSamples(VideoCore::Image* image, u32 num_samples, bool c
         auto new_image_ci = backing->image.image_ci;
         new_image_ci.samples = LiverpoolToVK::NumSamples(num_samples, image->supported_samples);
 
+        VideoCore::UniqueImage new_image{instance.GetDevice(), instance.GetAllocator()};
+        if (!new_image.Create(new_image_ci)) {
+            return; // logged by Create: the image keeps its current sample count
+        }
         new_backing = &backing_images.emplace_back();
         new_backing->num_samples = num_samples;
-        new_backing->image = VideoCore::UniqueImage{instance.GetDevice(), instance.GetAllocator()};
-        new_backing->image.Create(new_image_ci);
+        new_backing->image = std::move(new_image);
 
         Vulkan::SetObjectName(instance.GetDevice(), new_backing->image.image,
                               "Image {}x{}x{} {} {} {:#x}:{:#x} L:{} M:{} S:{} (backing)",

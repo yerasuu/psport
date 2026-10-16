@@ -167,8 +167,9 @@ vk::ImageView FsrPass::Render(vk::CommandBuffer cmdbuf, vk::ImageView input,
         cur_image = 0;
     }
 
-    if (img.dirty) {
-        CreateImages(img);
+    if (img.dirty && !CreateImages(img)) {
+        DebugState.is_using_fsr = false;
+        return input; // shown without FSR; CreateImages tries again next frame
     }
 
     if (EmulatorSettings.IsVkHostMarkersEnabled()) {
@@ -411,7 +412,7 @@ void FsrPass::ResizeAndInvalidate(u32 width, u32 height) {
     }
 }
 
-void FsrPass::CreateImages(Img& img) const {
+bool FsrPass::CreateImages(Img& img) const {
     img.dirty = false;
 
     // Destroy previous resources before re-creating at new size.
@@ -436,13 +437,19 @@ void FsrPass::CreateImages(Img& img) const {
         .usage = vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage,
         .initialLayout = vk::ImageLayout::eUndefined,
     };
-    img.intermediary_image.Create(image_create_info);
+    if (!img.intermediary_image.Create(image_create_info)) {
+        img.dirty = true;
+        return false;
+    }
     SetObjectName(device, static_cast<vk::Image>(img.intermediary_image),
                   "FSR Intermediary Image #{}", img.id);
     image_create_info.usage = vk::ImageUsageFlagBits::eTransferSrc |
                               vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage |
                               vk::ImageUsageFlagBits::eColorAttachment;
-    img.output_image.Create(image_create_info);
+    if (!img.output_image.Create(image_create_info)) {
+        img.dirty = true;
+        return false;
+    }
     SetObjectName(device, static_cast<vk::Image>(img.output_image), "FSR Output Image #{}", img.id);
 
     vk::ImageViewCreateInfo image_view_create_info{
@@ -464,6 +471,11 @@ void FsrPass::CreateImages(Img& img) const {
     img.output_image_view =
         Check<"create fsr output image view">(device.createImageViewUnique(image_view_create_info));
     SetObjectName(device, img.output_image_view.get(), "FSR Output ImageView #{}", img.id);
+    if (!img.intermediary_image_view || !img.output_image_view) {
+        img.dirty = true;
+        return false;
+    }
+    return true;
 }
 
 } // namespace Vulkan::HostPasses

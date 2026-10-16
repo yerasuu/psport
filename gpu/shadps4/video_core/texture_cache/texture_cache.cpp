@@ -15,6 +15,7 @@
 #include "video_core/buffer_cache/buffer_cache.h"
 #include "video_core/page_manager.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
+#include "video_core/renderer_vulkan/vk_platform.h"
 #include "video_core/renderer_vulkan/vk_runtime.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/texture_cache/host_compatibility.h"
@@ -33,6 +34,17 @@ TextureCache::TextureCache(const Vulkan::Instance& instance_, Vulkan::Scheduler&
       buffer_cache{buffer_cache_}, tracker{tracker_}, blit_helper{instance, scheduler},
       tile_manager{instance, scheduler, runtime, buffer_cache.GetStreamBuffer()},
       readback_linear_images{EmulatorSettings.IsReadbackLinearImagesEnabled()} {
+
+    m_default_sampler = Vulkan::Check<"create the default sampler">(
+        instance.GetDevice().createSamplerUnique({
+            .magFilter = vk::Filter::eLinear,
+            .minFilter = vk::Filter::eLinear,
+            .mipmapMode = vk::SamplerMipmapMode::eLinear,
+            .maxLod = VK_LOD_CLAMP_NONE,
+        }));
+    if (!m_default_sampler) {
+        Vulkan::ReportInitFailure();
+    }
 
     u32 max_samplers = instance.GetMaxSamplerAllocationCount();
     trigger_gc_samplers = max_samplers * 3 / 4;
@@ -101,7 +113,7 @@ void TextureCache::ProcessDownloadImages() {
 
 void TextureCache::DownloadImageMemory(ImageId image_id, bool sync) {
     Image& image = slot_images[image_id];
-    if (False(image.flags & ImageFlagBits::GpuModified)) {
+    if (False(image.flags & ImageFlagBits::GpuModified) || !image.IsAllocated()) {
         return;
     }
     const u32 download_size = image.info.pitch * image.info.size.height * image.info.size.depth *
@@ -332,7 +344,7 @@ ImageId TextureCache::ResolveDepthOverlap(const ImageInfo& requested_info, Bindi
         auto new_info = requested_info;
         new_info.resources = std::max(requested_info.resources, cache_image.info.resources);
         new_info.UpdateSize();
-        const auto new_image_id = slot_images.insert(instance, runtime, slot_image_views, new_info);
+        const auto new_image_id = CreateImage(new_info, false);
         RegisterImage(new_image_id);
 
         // Inherit image usage
@@ -587,7 +599,7 @@ std::tuple<ImageId, int, int> TextureCache::ResolveOverlap(const ImageInfo& imag
 }
 
 ImageId TextureCache::ExpandImage(const ImageInfo& info, ImageId image_id) {
-    const auto new_image_id = slot_images.insert(instance, runtime, slot_image_views, info);
+    const auto new_image_id = CreateImage(info, false);
     RegisterImage(new_image_id);
 
     auto& src_image = slot_images[image_id];
@@ -710,7 +722,7 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
     }
     // Create and register a new image
     if (!image_id) {
-        image_id = slot_images.insert(instance, runtime, slot_image_views, info);
+        image_id = CreateImage(info, true);
         RegisterImage(image_id);
     }
 
@@ -866,7 +878,7 @@ ImageView& TextureCache::FindDepthTarget(ImageId image_id, const ImageDesc& desc
             info.guest_address = desc.info.stencil_addr;
             info.guest_size = desc.info.stencil_size;
             info.size = desc.info.size;
-            stencil_id = slot_images.insert(instance, runtime, slot_image_views, info);
+            stencil_id = CreateImage(info, false);
             RegisterImage(stencil_id);
         }
         Image& stencil_image = slot_images[stencil_id];
@@ -1019,6 +1031,11 @@ vk::Sampler TextureCache::GetSampler(const AmdGpu::Sampler& sampler,
     std::scoped_lock lock{samplers_mutex};
     const auto [it, new_sampler] = samplers.try_emplace(hash, instance, sampler, border_color_base,
                                                         is_depth, extra_lod_bias);
+    if (!it->second.Handle()) {
+        // Sampler logged it; dropped so that a later use tries again.
+        samplers.erase(it);
+        return *m_default_sampler;
+    }
     if (new_sampler) {
         samplers.at(hash).lru_id = sampler_lru_cache.Insert(hash, gc_tick);
     } else {
@@ -1343,6 +1360,41 @@ void TextureCache::GarbageCollectImages() {
             gc_evictions = gc_downloads = 0;
         }
     }
+}
+
+ImageId TextureCache::CreateImage(const ImageInfo& info, bool can_evict) {
+    const ImageId image_id = slot_images.insert(instance, runtime, slot_image_views, info);
+    Image& image = slot_images[image_id];
+    if (image.IsAllocated() || !image.backing) {
+        return image_id;
+    }
+    if (can_evict) {
+        EvictForAllocation();
+        if (image.backing->image.Create(image.backing->image.image_ci, false)) {
+            return image_id;
+        }
+    }
+    if (!image.backing->image.Create(image.backing->image.image_ci)) {
+        LOG_ERROR_COUNTED(Render_Vulkan,
+                          "Image {}x{} at {:#x} has no memory: its views are null and the "
+                          "operations on it are skipped",
+                          info.size.width, info.size.height, info.guest_address);
+    }
+    return image_id;
+}
+
+void TextureCache::EvictForAllocation() {
+    // Images unused in this submission whose contents need no write-back, oldest first; their
+    // memory goes back once the GPU is past them (DeleteImage).
+    u32 c_evicted = 0;
+    lru_cache.ForEachItemBelow(gc_tick, [&](ImageId image_id) {
+        if (slot_images[image_id].SafeToDownload()) {
+            return false;
+        }
+        FreeImage(image_id);
+        ++gc_evictions;
+        return ++c_evicted >= 64;
+    });
 }
 
 void TextureCache::GarbageCollectSamplers() {

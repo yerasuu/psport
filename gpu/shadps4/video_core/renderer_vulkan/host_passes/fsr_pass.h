@@ -35,7 +35,7 @@ private:
     };
 
     void ResizeAndInvalidate(u32 width, u32 height);
-    void CreateImages(Img& img) const;
+    [[nodiscard]] bool CreateImages(Img& img) const;
 
     vk::Device device{};
     u32 num_images{};

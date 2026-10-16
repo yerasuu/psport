@@ -63,7 +63,9 @@ struct UniqueImage {
         return *this;
     }
 
-    void Create(const vk::ImageCreateInfo& image_ci);
+    /// psport: false when no memory could be allocated, the image staying null. Over the
+    /// driver's budget only when can_exceed_budget (after a try within it); logged then.
+    bool Create(const vk::ImageCreateInfo& image_ci, bool can_exceed_budget = true);
 
     void Destroy();
 
@@ -104,6 +106,12 @@ struct Image {
 
     vk::Image GetImage() const {
         return backing->image.image;
+    }
+
+    /// psport: false when its memory could not be allocated (TextureCache::CreateImage): its
+    /// views are null views and the operations on it are skipped.
+    [[nodiscard]] bool IsAllocated() const {
+        return backing && backing->image;
     }
 
     vk::DeviceSize GetHostImageSize() const {

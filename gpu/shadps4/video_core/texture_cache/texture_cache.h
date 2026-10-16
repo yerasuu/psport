@@ -396,6 +396,13 @@ private:
     void GarbageCollectImages();
     void GarbageCollectSamplers();
 
+    /// psport: inserts a new image. When its memory cannot be had within the budget, images
+    /// unused in this submission go first (can_evict: only with `mutex` held and no other
+    /// image in use by the caller), then it is allocated over the budget; failing that it stays
+    /// without memory (Image::IsAllocated).
+    [[nodiscard]] ImageId CreateImage(const ImageInfo& info, bool can_evict);
+    void EvictForAllocation();
+
 private:
     const Vulkan::Instance& instance;
     Vulkan::Scheduler& scheduler;
@@ -408,6 +415,7 @@ private:
     Common::SlotVector<Image> slot_images;
     Common::SlotVector<ImageView> slot_image_views;
     tsl::robin_map<u64, Sampler> samplers;
+    vk::UniqueSampler m_default_sampler; ///< psport: stands in for a sampler that fails
     std::unordered_set<ImageId> download_images;
     u64 total_used_memory = 0;
     u64 gc_evictions = 0, gc_downloads = 0; ///< psport: pressure report
