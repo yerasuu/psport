@@ -91,7 +91,8 @@ Bloodborne.
   (`~/.cache/psport/ccache`, `CCACHE_DIR`).
 - `nix-build packaging/port.nix` compila el port desde el código en el sandbox de Nix; la CI compila
   cada commit de `master` y publica la build de cada tag `vX.Y.Z` como caché binaria de Nix y como
-  GitHub Release (FORK.md, "CI and binary cache").
+  GitHub Release, con un paquete que funciona sin Nix (`psport-<tag>-x86_64.tar.zst`,
+  `tools/bundle.sh`; FORK.md, "CI and binary cache").
 
 ## Medir el progreso
 

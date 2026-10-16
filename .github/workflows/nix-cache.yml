@@ -26,6 +26,11 @@ jobs:
           extra_nix_config: experimental-features = nix-command
       - name: Build
         run: nix-build packaging/port.nix --out-link result
+      # Before anything is published, so that a bundle that fails leaves no release half done.
+      - name: Bundle
+        env:
+          TAG: ${{ github.ref_name }}
+        run: SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) tools/bundle.sh "$(readlink result)" "$TAG" dist
       - name: Publish the binary cache
         env:
           GH_TOKEN: ${{ github.token }}
@@ -53,3 +58,10 @@ jobs:
             gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --title "$TAG" \
               --notes-file notes --latest="$is_latest"
           fi
+      - name: Publish the bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber \
+            "dist/psport-$TAG-x86_64.tar.zst" "dist/psport-$TAG-x86_64.tar.zst.sha256"

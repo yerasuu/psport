@@ -22,6 +22,17 @@ if [[ ${1:-} == --software ]]; then
     if [[ -z ${VK_DRIVER_FILES:-} ]]; then echo 'Lavapipe not found; set VK_DRIVER_FILES.' >&2; exit 1; fi
     export VK_LOADER_LAYERS_DISABLE='~implicit~'
 fi
+# A relocatable bundle (tools/bundle.sh, a release's psport-<tag>-x86_64.tar.zst) is prebuilt, laid
+# out as packaging/port.nix's output; relocate.sh points its programs at its own glibc loader for
+# wherever it now is. Its Vulkan loader, Nix's, finds the host's drivers everywhere but in /etc.
+if [[ -f relocate.sh ]]; then
+    export PS_PREBUILT=1
+    PS_PROBE=${PS_PROBE:-out/psport}
+    bash relocate.sh || exit 1
+    if [[ -z ${VK_DRIVER_FILES:-}${VK_ICD_FILENAMES:-} && -d /etc/vulkan/icd.d ]]; then
+        export VK_ADD_DRIVER_FILES=/etc/vulkan/icd.d${VK_ADD_DRIVER_FILES:+:$VK_ADD_DRIVER_FILES}
+    fi
+fi
 # PS_PREBUILT=1 (packaged builds, the AppImage): out/psport and its GPU library are installed
 # next to this script; nothing is built and no nix-shell is needed.
 # PS_DATA_DIR: writable directory for the generated files (out/), saves (user/) and psport.ini;

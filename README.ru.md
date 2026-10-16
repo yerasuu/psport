@@ -89,7 +89,8 @@ PS_GAME_DIR=/путь/к/дампу PS_SKIP_GAME_CHECK=1 PS_PERMISSIVE=1 bash ru
   через него, с одним кэшем для всех копий и worktree (`~/.cache/psport/ccache`, `CCACHE_DIR`).
 - `nix-build packaging/port.nix` собирает порт из исходников в песочнице Nix; CI собирает каждый
   коммит в `master` и публикует сборку каждого тега `vX.Y.Z` как бинарный кэш Nix и GitHub Release
-  (FORK.md, «CI and binary cache»).
+  с пакетом, который работает без Nix (`psport-<tag>-x86_64.tar.zst`, `tools/bundle.sh`;
+  FORK.md, «CI and binary cache»).
 
 ## Измерение прогресса
 

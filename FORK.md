@@ -426,3 +426,24 @@ and the paths no kept commit uses; then it uploads only the paths the release la
 about 220 paths (440 files), and a release that changes only the port adds 5. Runs are serialized (a
 run prunes what another could be publishing). `tools/nix_cache.sh <store path> <commit> <tag>
 <directory>` writes the same files to a local folder, for `nix copy --from file://<directory>`.
+
+The same job also publishes the release's port without Nix, as assets of the tag's own release:
+`psport-<tag>-x86_64.tar.zst` and `psport-<tag>-x86_64.tar.zst.sha256` (`sha256sum` format), made by
+`tools/bundle.sh <store path> <tag> <directory>` and uploaded after the release is created (a release
+without them, as every one before this, is still fetched from the cache). It holds one folder,
+`psport-<tag>-x86_64/`, laid out as the output above plus `lib/` (every library the programs and
+`out/gpu/` link from the store, with the store's glibc and its loader) and `relocate.sh`. It runs
+from wherever it is extracted, writable, as `PS_DATA_DIR=<writable folder> bash <path>/run.sh` with the
+host's own Vulkan drivers: `run.sh` sees `relocate.sh`, takes the build as prebuilt and runs it first.
+
+The programs keep starting as programs: started through `ld.so --library-path`, as AppImages do, the
+loader is the program and the kernel puts the brk heap above it at ~85 TiB, where the non-PIE psport
+can no longer hand the guest heap pointers below 1 TiB. Their PT_INTERP names the bundled loader
+instead, written in place by `relocate.sh` the first time and whenever the folder moved (through a
+link in `XDG_RUNTIME_DIR` when the path is longer than Nix's field, 82 bytes with the pinned glibc). Their RUNPATHs
+become RPATHs, `$ORIGIN/gpu:$ORIGIN/../lib` and then the host's lib directories, and the libraries'
+are removed, all in place (patchelf corrupts the non-PIE binary's symbol versions): a library without
+one, the host's Vulkan drivers included, has its dependencies searched in the program's RPATH, so the
+bundle's libraries come first and the host's after them. Nix's Vulkan loader searches the host's
+ICDs in `XDG_DATA_DIRS` and `/run/opengl-driver` but not `/etc/vulkan/icd.d`, which `run.sh` adds
+with `VK_ADD_DRIVER_FILES`.

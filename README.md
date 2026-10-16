@@ -99,7 +99,8 @@ inherited from bbport and built around Bloodborne.
   through it, one cache for every checkout and worktree (`~/.cache/psport/ccache`, `CCACHE_DIR`).
 - `nix-build packaging/port.nix` builds the port from source in Nix's sandbox; CI builds every
   commit on `master` and publishes the build of each `vX.Y.Z` tag as a Nix binary cache and a GitHub
-  Release (FORK.md, "CI and binary cache").
+  Release, with a bundle that runs without Nix (`psport-<tag>-x86_64.tar.zst`, `tools/bundle.sh`;
+  FORK.md, "CI and binary cache").
 
 ## Measuring progress
 
