@@ -1,14 +1,16 @@
 /* NID -> function name and the result with which the export reports a state its caller polls or
- * waits for (no event pending, timed out, busy, would block, already held by the caller) or a
- * getter's "never set", not a failure: the call report counts these apart. Sorted by NID in strcmp
- * order, then by result, for a binary search. Kept by hand from the codes the runtime's
- * implementations return. */
+ * waits for (no event pending, timed out, busy, would block, already held by the caller), a
+ * getter's "never set", or the error retail firmware itself always returns (the GnmDriver resource
+ * registration calls, which only work under the debugger): expected results, not failures, so the
+ * call report counts these apart. Sorted by NID in strcmp order, then by result, for a binary
+ * search. Kept by hand from the codes the runtime's implementations return. */
 {"12wOHk8ywb0","sceKernelPollSema",0x80020010},
 {"2QfqfeLblbg","sceFontStyleFrameGetScalePixel",0x80460058},
 {"304ooNZxWDY","sceNetRecvfrom",0x80410123},
 {"3e+4Iv7IJ8U","accept",35},
 {"656LMQSrg6U","sceSystemServiceReceiveEvent",0x80a10004},
 {"7x2xKiiB7MA","sceFontStyleFrameGetScalePoint",0x80460058},
+{"9Mv61HaMhfA","sceGnmRegisterGdsResource",0x8eee00ff},
 {"9UK1vLZQft4","scePthreadMutexLock",0x8002000b},
 {"9lvj5DjHZiA","sceKernelPollEventFlag",0x80020010},
 {"9wO9XrMsNhc","sceNetRecv",0x80410123},
@@ -24,21 +26,27 @@
 {"XD3mDeybCnk","scePthreadRwlockTryrdlock",0x80020010},
 {"XVL8So3QJUk","connect",36},
 {"XVL8So3QJUk","connect",37},
+{"ZFqKFl23aMc","sceGnmRegisterOwner",0x8eee00ff},
 {"Zxa0VhQVTsk","sceKernelWaitSema",0x8002003c},
 {"aNeavPDNKzA","sendmsg",35},
 {"adh--6nIqTk","scePthreadRwlockTimedwrlock",0x8002003c},
 {"bIHoZCTomsI","scePthreadRwlockTrywrlock",0x80020010},
 {"beRjXBn-z+o","sceNetSend",0x80410123},
 {"fZOeZIOEmLw","send",35},
+{"fhKwCVVj9nk","sceGnmUnregisterOwnerAndResources",0x8eee00ff},
 {"fjN6NQHhK8k","scePthreadSemTimedwait",0x8002003c},
 {"fzyMKs9kim0","sceKernelWaitEqueue",0x8002003c},
 {"gvD1greCu0A","sceNetSendto",0x80410123},
 {"hI7oVeOluPM","recvmsg",35},
 {"iPtZRWICjrM","scePthreadRwlockTimedrdlock",0x8002003c},
+{"j6mSQs3UgaY","sceGnmRegisterOwnerForSystem",0x8eee00ff},
+{"k8EXkhIP+lM","sceGnmUnregisterResource",0x8eee00ff},
 {"lOfduYnjgbo","sceFontStyleFrameGetEffectSlant",0x80460058},
 {"lUk6wrGXyMw","recvfrom",35},
+{"nvEwfYAImTs","sceGnmRegisterResource",0x8eee00ff},
 {"oBr313PppNE","sendto",35},
 {"obuxdTiwkF8","sceNetCtlGetInfo",0x80412108},
 {"upoVrzMHFeE","scePthreadMutexTrylock",0x80020010},
 {"w5IHyvahg-o","sem_timedwait",60},
 {"yH17Q6NWtVg","sceUserServiceGetEvent",0x80960007},
+{"yhFCnaz5daw","sceGnmUnregisterAllResourcesForOwner",0x8eee00ff},
