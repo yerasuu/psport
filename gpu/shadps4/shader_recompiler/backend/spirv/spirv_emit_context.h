@@ -362,6 +362,9 @@ public:
         /// psport PS_LAYER_MEMORY: reached through the page table (IsPagedBuffer); the descriptor
         /// holds {guest address lo, hi, size, write-through, trash address lo, hi} (PagedPointer).
         bool paged = false;
+        /// psport: a Dynamic binding (paged too): the Private uvec4 holding the V# its next
+        /// access uses (SetDynamicBufferSharp); PagedPointer takes address and size from it.
+        Id dynamic_sharp{};
 
         template <class Self>
         auto& Alias(this Self& self, PointerType alias) {

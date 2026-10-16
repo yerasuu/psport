@@ -973,8 +973,16 @@ void EmitContext::DefineBuffers() {
         // Define aliases depending on the shader usage.
         auto& spv_buffer = buffers.emplace_back(binding.buffer++, desc.buffer_type);
         // psport PS_LAYER_MEMORY: its descriptor holds the page table record (read as U32).
-        spv_buffer.paged = desc.buffer_type == BufferType::Guest &&
-                           IsPagedBuffer(profile.paged_buffers, buf_sharp);
+        spv_buffer.paged = (desc.buffer_type == BufferType::Guest &&
+                            IsPagedBuffer(profile.paged_buffers, buf_sharp)) ||
+                           desc.buffer_type == BufferType::Dynamic;
+        if (desc.buffer_type == BufferType::Dynamic) {
+            const Id pointer_type = TypePointer(spv::StorageClass::Private, U32[4]);
+            spv_buffer.dynamic_sharp = AddGlobalVariable(pointer_type, spv::StorageClass::Private,
+                                                         ConstantNull(U32[4]));
+            Name(spv_buffer.dynamic_sharp, fmt::format("dynamic_vsharp_{}", spv_buffer.binding));
+            interfaces.push_back(spv_buffer.dynamic_sharp);
+        }
         if (spv_buffer.paged) {
             spv_buffer.Alias(PointerType::U32) =
                 DefineBuffer(false, false, 2, desc.buffer_type, U32[1]);
@@ -1437,8 +1445,22 @@ EmitContext::PagedAccess EmitContext::PagedPointer(const BufferDefinition& buffe
         return OpBitwiseOr(U64, OpUConvert(U64, lo),
                            OpShiftLeftLogical(U64, OpUConvert(U64, hi), ConstU32(32U)));
     };
-    const Id base = wide(word(0), word(1));
-    const Id size = word(2);
+    Id base;
+    Id size;
+    if (Sirit::ValidId(buffer.dynamic_sharp)) {
+        // psport: the run-time V#: address dwords 0 and 1 [7:0], size as AmdGpu::Buffer::GetSize.
+        const Id sharp = OpLoad(U32[4], buffer.dynamic_sharp);
+        const Id dword1 = OpCompositeExtract(U32[1], sharp, 1);
+        const Id num_records = OpCompositeExtract(U32[1], sharp, 2);
+        const Id stride = OpBitFieldUExtract(U32[1], dword1, ConstU32(16U), ConstU32(14U));
+        base = wide(OpCompositeExtract(U32[1], sharp, 0),
+                    OpBitwiseAnd(U32[1], dword1, ConstU32(0xFFU)));
+        size = OpSelect(U32[1], OpIEqual(U1[1], stride, u32_zero_value), num_records,
+                        OpIMul(U32[1], num_records, stride));
+    } else {
+        base = wide(word(0), word(1));
+        size = word(2);
+    }
     const Id trash = wide(word(4), word(5));
     // Within the buffer: offset < size and offset + access <= size (PS4 range checking: reads
     // outside give zero, writes outside are dropped).

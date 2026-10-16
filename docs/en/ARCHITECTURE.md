@@ -293,6 +293,40 @@ memory:` line. bbport 0.3's model (VRAM copies kept current by write tracking) i
 Write traps on guest pages are shared by the runtime and the GPU library
 (`gpu/layer/pslayer_write_traps.h`, `runtime_memory_trap`).
 
+### Buffer V#s picked at run time
+
+The recompiler binds a buffer by tracing its V# (the 4-dword buffer descriptor) to where the CPU
+can read it when the draw is bound: user data registers or constant memory the SRT walker
+flattens. Some shaders pick the V# at run time instead (Blood Omen 2's PS2 emulator: dword 0 is a
+`Phi` of a user data register and a constant buffer read). Resource discovery
+(`shader_recompiler/ir/passes/resource_discover_pass.cpp`) marks every dword that is not a sharp
+source as dynamic and collects, through `Phi`s, the values it can take that the CPU reads
+(immediates, user data, flattenable constant buffer reads); anything else makes the V# unbounded.
+Statically traced V#s keep the bound-buffer path unchanged.
+
+A dynamic V# becomes a `BufferType::Dynamic` binding (`resource_patching_pass.cpp`,
+`PatchDynamicBufferSharp`): just before each access the shader hands the V# it computed to the
+binding (`SetDynamicBufferSharp`, a private `uvec4`), and the access goes through the buffer
+cache's page table as a paged buffer's does (`EmitContext::PagedPointer`): address from dwords
+0-1, size as `AmdGpu::Buffer::GetSize` (`num_records`, times the stride when there is one),
+translated block by block to a buffer device address. Out of range or on a block without an
+entry, loads read zero and stores and atomics go to a trash buffer (GCN range checking). The
+address calculation's compile-time parts come from the static dwords; a run-time dword 1 gives
+the stride at run time, and a run-time V# that turns on swizzling or `add_tid` reads as out of
+range. Shapes the path cannot follow (no `bufferDeviceAddress`, an inline constant buffer,
+swizzling with a run-time dword 3) bind a null buffer (loads read zero, stores are dropped), with
+a warning and a count. Each translated shader with dynamic V#s says so once (`buffer V#s picked
+at run time`).
+
+Sync rule: at bind time (`Rasterizer::BindDynamicBuffer`) every V# the shader can pick from the
+CPU-readable sources (at most 16) is evaluated from the flattened user data, and its range is
+prepared as a bound buffer's would be (`BufferCache::PrepareDynamicRange`): made resident with
+current page table entries and, when the binding writes, counted as GPU-modified with its images
+invalidated, the conservative rule paged bindings follow (`LayerPagedRecord` in layer mode,
+`ObtainBuffer`'s arena path otherwise). The draw takes global barriers before and after, as paged
+bindings do. A value the CPU cannot read (unbounded) reaches only memory other bindings already
+made resident, and its writes are not tracked; the shader's log line says when it has one.
+
 ## Game profiles
 
 `gpu/games/game_profile.h` defines what psport knows about one title, kept out of the core, in two

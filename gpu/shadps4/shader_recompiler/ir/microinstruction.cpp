@@ -60,6 +60,7 @@ bool Inst::MayHaveSideEffects() const noexcept {
     case Opcode::StoreBufferF32x3:
     case Opcode::StoreBufferF32x4:
     case Opcode::StoreBufferFormatF32:
+    case Opcode::SetDynamicBufferSharp:
     case Opcode::BufferAtomicIAdd32:
     case Opcode::BufferAtomicIAdd64:
     case Opcode::BufferAtomicISub32:

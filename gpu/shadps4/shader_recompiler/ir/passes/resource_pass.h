@@ -4,6 +4,7 @@
 #pragma once
 
 #include <boost/container/small_vector.hpp>
+#include <boost/container/static_vector.hpp>
 
 #include "shader_recompiler/ir/opcodes.h"
 #include "shader_recompiler/ir/value.h"
@@ -24,6 +25,11 @@ struct SharpReference {
     u32 num_dwords{};
     SharpFetchPostOp post_op{};
     PostOpData post_op_data;
+    /// psport: buffer V# dwords that are not a sharp source (a Phi of several, for one): read by
+    /// the shader at run time, with the sources the CPU can read for the bind.
+    u8 dynamic_mask{};
+    std::array<boost::container::static_vector<IR::Value, 4>, 4> dynamic_sources;
+    bool is_unbounded{};
 };
 
 struct ResourceDiscovery {

@@ -235,6 +235,12 @@ public:
         return transform_feedback;
     }
 
+    /// psport: shaders reach the game's memory through the page table (buffer V#s picked at
+    /// run time).
+    bool IsBufferDeviceAddressSupported() const {
+        return vk12_features.bufferDeviceAddress;
+    }
+
     /// Returns true when VK_EXT_transform_feedback also supports streams other than stream 0.
     bool IsTransformFeedbackGeometryStreamsSupported() const {
         return transform_feedback && transform_feedback_features.geometryStreams;

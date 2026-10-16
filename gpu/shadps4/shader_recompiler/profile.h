@@ -47,6 +47,8 @@ struct Profile {
     bool supports_fragment_shader_barycentric{};
     bool supports_shader_subgroup_clock{};
     bool supports_transform_feedback{};
+    /// psport: buffer V#s picked at run time go through the page table (BufferType::Dynamic).
+    bool supports_buffer_device_address{};
     bool has_broken_spirv_clamp{};
     bool lower_left_origin_mode{};
     bool needs_manual_interpolation{};

@@ -220,6 +220,16 @@ public:
     /// A paged binding (Shader::IsPagedBuffer): the record its shader reads ({address, size,
     /// trash address}, see EmitContext::PagedPointer), with page table entries for the range.
     std::pair<const Buffer*, u64> LayerPagedRecord(VAddr address, u64 size, bool is_written);
+    /// psport: a binding whose V# the shader picks at run time (Shader::BufferType::Dynamic)
+    /// reaches the game's memory through the page table. [address, address + size) is a range it
+    /// may touch: resident, with current page table entries, and when written counted as
+    /// GPU-modified as a bound buffer's range is (ObtainBuffer; LayerPagedRecord in layer mode).
+    void PrepareDynamicRange(VAddr address, u64 size, bool is_written);
+    /// The descriptor of a Dynamic binding: a page table record whose range the shader takes from
+    /// its V#, with the trash address out-of-range stores land on (EmitContext::PagedPointer).
+    std::pair<const Buffer*, u64> DynamicRecord() {
+        return PageTableRecord(0, 0, false);
+    }
     /// The CPU wrote [address, address + size): VRAM copies there are refreshed before paged
     /// bindings read them.
     void LayerNoteCpuWrite(VAddr address, u64 size);
@@ -402,6 +412,10 @@ private:
     u64 LayerCompactMirrors(u64 wanted);
     /// The GPU writes [address, address + size) in the submission being recorded (write ticks).
     void NoteWriteTick(VAddr address, u64 size);
+    /// LayerPagedRecord without the record: page table entries for the range, its writes noted.
+    void LayerPagedPublish(VAddr address, u64 size, bool is_written);
+    /// The record a paged binding's descriptor holds (EmitContext::PagedPointer).
+    std::pair<const Buffer*, u64> PageTableRecord(VAddr address, u64 size, bool is_write_through);
     /// Page table entry of a block (LayerPagedRecord), its writes, and rewrites after changes.
     u64 LayerEntry(u64 block);
     void LayerWriteEntries(u64 first_block, u64 end_block);

@@ -1136,6 +1136,12 @@ void BufferCache::LayerFlushUploads() {
 
 std::pair<const Buffer*, u64> BufferCache::LayerPagedRecord(VAddr va_range, u64 cb_range,
                                                             bool is_written) {
+    LayerPagedPublish(va_range, cb_range, is_written);
+    PsStats::g_cb_bound_in_place.fetch_add(cb_range, std::memory_order_relaxed);
+    return PageTableRecord(va_range, cb_range, is_written && force_writes_in_place);
+}
+
+void BufferCache::LayerPagedPublish(VAddr va_range, u64 cb_range, bool is_written) {
     if (maintained_epoch != packet_epoch) {
         Maintain();
     }
@@ -1171,6 +1177,10 @@ std::pair<const Buffer*, u64> BufferCache::LayerPagedRecord(VAddr va_range, u64 
             });
         }
     }
+}
+
+std::pair<const Buffer*, u64> BufferCache::PageTableRecord(VAddr va_range, u64 cb_range,
+                                                           bool is_write_through) {
     if (!layer_trash) {
         layer_trash = std::make_unique<Buffer>(instance, 0, 64_KB, MemoryType::DeviceLocal,
                                                "psport paged trash");
@@ -1179,14 +1189,13 @@ std::pair<const Buffer*, u64> BufferCache::LayerPagedRecord(VAddr va_range, u64 
     const u32 record[8] = {static_cast<u32>(va_range),
                            static_cast<u32>(va_range >> 32),
                            static_cast<u32>(std::min<u64>(cb_range, 0xFFFFFFFFull)),
-                           u32(is_written && force_writes_in_place),
+                           u32(is_write_through),
                            static_cast<u32>(trash),
                            static_cast<u32>(trash >> 32),
                            static_cast<u32>(bda_pagetable_buffer->SizeBytes() /
                                             (2 * sizeof(vk::DeviceAddress))),
                            0};
     const u64 off_record = stream_buffer.Copy(record, sizeof(record), instance.StorageMinAlignment());
-    PsStats::g_cb_bound_in_place.fetch_add(cb_range, std::memory_order_relaxed);
     return {&stream_buffer, off_record};
 }
 

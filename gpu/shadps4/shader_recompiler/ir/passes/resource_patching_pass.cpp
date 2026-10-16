@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <atomic>
 #include <limits>
 #include "shader_recompiler/info.h"
 #include "shader_recompiler/ir/basic_block.h"
@@ -103,7 +104,7 @@ public:
         const u32 index{Add(buffer_resources, desc, [&desc](const auto& existing) {
             return desc.sharp_fetch == existing.sharp_fetch && desc.post_op == existing.post_op &&
                    desc.post_op_dw1_mask == existing.post_op_dw1_mask &&
-                   desc.buffer_type == existing.buffer_type;
+                   desc.buffer_type == existing.buffer_type && desc.dynamic == existing.dynamic;
         })};
         auto& buffer = buffer_resources[index];
         buffer.used_types |= desc.used_types;
@@ -185,6 +186,9 @@ SharpFetch<T> ConstructSharpFetch(const SharpReference& sharp) {
     SharpFetch<T> sharp_fetch{};
     for (u32 i = 0; i < sharp.num_dwords; i++) {
         auto dword = sharp.dwords[i];
+        if ((sharp.dynamic_mask >> i) & 1) {
+            continue;
+        }
         if (dword.IsImmediate()) {
             sharp_fetch.immediates[i] = dword.U32();
         } else {
@@ -195,9 +199,122 @@ SharpFetch<T> ConstructSharpFetch(const SharpReference& sharp) {
     return sharp_fetch;
 }
 
+IR::U32 CalculateBufferAddress(IR::IREmitter& ir, const IR::Inst& inst, const Info& info,
+                               const AmdGpu::Buffer& buffer, u32 stride,
+                               IR::U32 runtime_stride = {});
+
+// psport: the CPU-readable sources of a V#'s run-time dwords (BufferResource::DynamicCandidates).
+static DynamicSharpSources MakeDynamicSources(const SharpReference& sharp) {
+    DynamicSharpSources dynamic{.dynamic_mask = sharp.dynamic_mask,
+                                .is_unbounded = sharp.is_unbounded};
+    for (u32 i = 0; i < 4; ++i) {
+        for (const IR::Value& source : sharp.dynamic_sources[i]) {
+            u32 value = 0;
+            bool is_location = false;
+            if (source.IsImmediate()) {
+                value = source.U32();
+            } else if (const SharpLocation location = SharpLocationFromSource(source.Inst());
+                       location != UNKNOWN_LOCATION) {
+                value = location;
+                is_location = true;
+            } else {
+                dynamic.is_unbounded = true;
+                continue;
+            }
+            const u8 i_source = dynamic.c_sources[i]++;
+            dynamic.values[i][i_source] = value;
+            dynamic.location_masks[i] |= u8(u32(is_location) << i_source);
+        }
+    }
+    return dynamic;
+}
+
+// psport: a buffer access whose V# the shader computes at run time (resource discovery's
+// dynamic_mask). The access goes through the page table (EmitContext::PagedPointer) with the V#
+// handed over just before it (SetDynamicBufferSharp); what the address calculation needs at
+// compile time (swizzling, add_tid, the format) comes from the static dwords. A V# shape this
+// cannot reach is bound as a null buffer: loads read zero and stores are dropped.
+void PatchDynamicBufferSharp(const ResourceDiscovery& resource, Info& info,
+                             Descriptors& descriptors, const Profile& profile) {
+    IR::Inst& inst = *resource.user;
+    const SharpReference& vsharp = resource.sharps[0];
+    IR::Inst* handle = inst.Arg(0).Inst();
+    BufferResource desc{
+        .sharp_fetch = ConstructSharpFetch<AmdGpu::Buffer>(vsharp),
+        .used_types = BufferDataType(inst, profile),
+        .buffer_type = BufferType::Dynamic,
+        .is_written = IsBufferStore(inst),
+        .is_formatted = inst.GetOpcode() == IR::Opcode::LoadBufferFormatF32 ||
+                        inst.GetOpcode() == IR::Opcode::StoreBufferFormatF32,
+        .post_op = vsharp.post_op,
+        .post_op_dw1_mask = vsharp.post_op_data.dw1_mask,
+        .dynamic = MakeDynamicSources(vsharp),
+    };
+    const bool is_dw1_dynamic = (vsharp.dynamic_mask >> 1) & 1;
+    const bool is_dw3_dynamic = (vsharp.dynamic_mask >> 3) & 1;
+    const AmdGpu::Buffer shape = desc.GetSharp(info);
+    const char* sz_unsupported =
+        !profile.supports_buffer_device_address ? "no bufferDeviceAddress"
+        : handle->NumArgs() != 4                ? "not a 4-dword V#"
+        : vsharp.post_op == SharpFetchPostOp::OffsetByProgramBase
+            ? "inline constant buffer"
+        : is_dw3_dynamic && shape.swizzle_enable ? "swizzled with a run-time dword 3"
+                                                 : nullptr;
+    if (sz_unsupported) {
+        static std::atomic<u64> s_c_unsupported{};
+        const u64 n = s_c_unsupported.fetch_add(1, std::memory_order_relaxed);
+        if ((n & (n + 1)) == 0) {
+            LOG_WARNING(Render_Recompiler,
+                        "Shader {:#x}: buffer V# picked at run time (dwords mask {:#x}) "
+                        "unsupported ({}): bound as a null buffer ({} accesses)",
+                        info.pgm_hash, vsharp.dynamic_mask, sz_unsupported, n + 1);
+        }
+        SharpFetch<AmdGpu::Buffer> null_fetch{};
+        null_fetch.offsets.fill(UNKNOWN_LOCATION);
+        desc.sharp_fetch = null_fetch;
+        desc.buffer_type = BufferType::Guest;
+        desc.post_op = SharpFetchPostOp::None;
+        desc.post_op_dw1_mask = 0;
+        desc.dynamic = {};
+        IR::IREmitter ir{*inst.GetParent(), IR::Block::InstructionList::s_iterator_to(inst)};
+        inst.SetArg(0, ir.Imm32(descriptors.Add(desc)));
+        return;
+    }
+
+    const u32 binding = descriptors.Add(desc);
+    IR::IREmitter ir{*inst.GetParent(), IR::Block::InstructionList::s_iterator_to(inst)};
+    const IR::U32 dword1{handle->Arg(1)};
+    const IR::U32 dword3{handle->Arg(3)};
+    // Run-time shapes the compile-time address calculation does not follow read as out of range
+    // (no records): swizzling or add_tid that only the run-time dwords enable.
+    IR::U32 num_records{handle->Arg(2)};
+    if (is_dw1_dynamic) {
+        const IR::U1 is_swizzled =
+            ir.INotEqual(ir.BitFieldExtract(dword1, ir.Imm32(31), ir.Imm32(1)), ir.Imm32(0));
+        num_records = IR::U32{ir.Select(is_swizzled, ir.Imm32(0), num_records)};
+    }
+    if (is_dw3_dynamic && !shape.add_tid_enable) {
+        const IR::U1 is_add_tid =
+            ir.INotEqual(ir.BitFieldExtract(dword3, ir.Imm32(23), ir.Imm32(1)), ir.Imm32(0));
+        num_records = IR::U32{ir.Select(is_add_tid, ir.Imm32(0), num_records)};
+    }
+    ir.SetDynamicBufferSharp(ir.Imm32(binding),
+                             ir.CompositeConstruct(handle->Arg(0), dword1, num_records, dword3));
+    if (inst.GetOpcode() != IR::Opcode::ReadConstBuffer) {
+        const IR::U32 runtime_stride =
+            is_dw1_dynamic ? ir.BitFieldExtract(dword1, ir.Imm32(16), ir.Imm32(14)) : IR::U32{};
+        inst.SetArg(IR::LoadBufferArgs::Address,
+                    CalculateBufferAddress(ir, inst, info, shape, shape.stride, runtime_stride));
+    }
+    inst.SetArg(0, ir.Imm32(binding));
+}
+
 void PatchBufferSharp(const ResourceDiscovery& resource, Info& info, Descriptors& descriptors,
                       const Profile& profile) {
     IR::Inst& inst = *resource.user;
+    if (resource.sharps[0].dynamic_mask != 0) {
+        return PatchDynamicBufferSharp(resource, info, descriptors, profile);
+    }
 
     const u32 buffer_binding = descriptors.Add(BufferResource{
         .sharp_fetch = ConstructSharpFetch<AmdGpu::Buffer>(resource.sharps[0]),
@@ -544,7 +661,7 @@ void PatchGlobalDataShareAccess(IR::Inst& inst, Info& info, Descriptors& descrip
 }
 
 IR::U32 CalculateBufferAddress(IR::IREmitter& ir, const IR::Inst& inst, const Info& info,
-                               const AmdGpu::Buffer& buffer, u32 stride) {
+                               const AmdGpu::Buffer& buffer, u32 stride, IR::U32 runtime_stride) {
     const auto inst_info = inst.Flags<IR::BufferInstInfo>();
     const u32 inst_offset = inst_info.inst_offset.Value();
     const auto is_inst_typed = inst_info.inst_data_fmt != AmdGpu::DataFormat::FormatInvalid;
@@ -557,8 +674,9 @@ IR::U32 CalculateBufferAddress(IR::IREmitter& ir, const IR::Inst& inst, const In
 
     // If address calculation is of the form "index * const_stride + offset" with offset constant
     // and both const_stride and offset are divisible with the element size, apply shift directly.
-    if (inst_info.index_enable && !inst_info.voffset_enable && soffset.IsImmediate() &&
-        !buffer.swizzle_enable && !buffer.add_tid_enable && (stride & mask) == 0) {
+    if (runtime_stride.IsEmpty() && inst_info.index_enable && !inst_info.voffset_enable &&
+        soffset.IsImmediate() && !buffer.swizzle_enable && !buffer.add_tid_enable &&
+        (stride & mask) == 0) {
         const u32 total_offset = soffset.U32() + inst_offset;
         if ((total_offset & mask) == 0) {
             // buffer_offset = index * (const_stride >> shift) + (offset >> shift)
@@ -587,7 +705,7 @@ IR::U32 CalculateBufferAddress(IR::IREmitter& ir, const IR::Inst& inst, const In
         const IR::U32 voffset = IR::GetBufferVOffsetArg(&inst);
         offset = ir.IAdd(offset, voffset);
     }
-    const IR::U32 const_stride = ir.Imm32(stride);
+    const IR::U32 const_stride = runtime_stride.IsEmpty() ? ir.Imm32(stride) : runtime_stride;
     IR::U32 buffer_offset;
     if (buffer.swizzle_enable) {
         const IR::U32 const_index_stride = ir.Imm32(buffer.GetIndexStride());
@@ -625,7 +743,9 @@ void PatchBufferArgs(IR::Inst& inst, Info& info) {
     const auto buffer = buffer_res.GetSharp(info);
 
     // Address of constant buffer reads can be calculated at IR emission time.
-    if (inst.GetOpcode() == IR::Opcode::ReadConstBuffer) {
+    // psport: Dynamic bindings had theirs calculated with their run-time V#.
+    if (inst.GetOpcode() == IR::Opcode::ReadConstBuffer ||
+        buffer_res.buffer_type == BufferType::Dynamic) {
         return;
     }
 
@@ -937,6 +1057,30 @@ void PatchImageArgs(IR::Inst& inst, Info& info) {
     }
 }
 
+// psport: once per translated shader, so that a title whose shaders pick V#s at run time says so.
+static void LogDynamicBuffers(const Info& info) {
+    u32 c_dynamic = 0;
+    bool is_unbounded = false;
+    for (const auto& buffer : info.buffers) {
+        if (buffer.buffer_type == BufferType::Dynamic) {
+            ++c_dynamic;
+            is_unbounded |= buffer.dynamic.is_unbounded;
+        }
+    }
+    if (c_dynamic == 0) {
+        return;
+    }
+    static std::atomic<u64> s_c_shaders{};
+    LOG_WARNING(Render_Recompiler,
+                "Shader {:#x}: {} buffer V#s picked at run time, read through the page table "
+                "(buffer device address){} ({} shaders)",
+                info.pgm_hash, c_dynamic,
+                is_unbounded ? "; some from values the CPU cannot read: those reach only "
+                               "memory other bindings made resident"
+                             : "",
+                s_c_shaders.fetch_add(1, std::memory_order_relaxed) + 1);
+}
+
 void ResourcePatchingPass(Shader::Info& info, const ResourceDiscoveryList& resources,
                           const Profile& profile) {
     // Iterate over discovered resources and patch them after finding the sharp.
@@ -950,6 +1094,7 @@ void ResourcePatchingPass(Shader::Info& info, const ResourceDiscoveryList& resou
             PatchImageSharp(usage, info, descriptors, profile);
         }
     }
+    LogDynamicBuffers(info);
 
     // Pass 2: Patch instruction args
     for (const auto& usage : resources) {

@@ -1211,6 +1211,27 @@ std::optional<std::pair<const Buffer*, u64>> BufferCache::CommandWriteTarget(VAd
     return std::pair<const Buffer*, u64>{arena, arena->Offset(device_addr)};
 }
 
+void BufferCache::PrepareDynamicRange(VAddr address, u64 size, bool is_written) {
+    if (LayerMode()) {
+        LayerPagedPublish(address, size, is_written);
+        return;
+    }
+    const u32 cb_range = static_cast<u32>(std::min<u64>(size, 0xFFFFFFFFull));
+    if (is_written || cb_range > STREAM_THRESHOLD || IsRegionGpuModified(address, cb_range)) {
+        (void)ObtainBuffer(address, cb_range, is_written);
+        return;
+    }
+    // A small read-only range would be copied into the stream buffer, out of the page table's
+    // reach: its blocks are made resident in the arena like a larger binding's.
+    const u64 first_block = address >> block_shift;
+    const u64 last_block = (address + cb_range - 1) >> block_shift;
+    const auto* arena = GetArena(first_block, last_block);
+    EnsureResident(arena, first_block, last_block);
+    if (!IsInPlace(address, cb_range)) {
+        SynchronizeMemory(arena, address, cb_range, false, false);
+    }
+}
+
 std::pair<const Buffer*, u64> BufferCache::ObtainBufferForImage(VAddr device_addr, u32 size) {
     // psport: texture data is read by the GPU from the game's memory itself:
     // through the arena where it is bound in place, else (PS_CHUNK_TEXTURES) from its guest

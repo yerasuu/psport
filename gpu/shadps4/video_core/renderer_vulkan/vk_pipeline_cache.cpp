@@ -367,6 +367,7 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
         .supports_fragment_shader_barycentric = instance_.IsFragmentShaderBarycentricSupported(),
         .supports_shader_subgroup_clock = instance_.IsShaderSubgroupClockSupported(),
         .supports_transform_feedback = instance_.IsTransformFeedbackSupported(),
+        .supports_buffer_device_address = instance_.IsBufferDeviceAddressSupported(),
         .needs_manual_interpolation = instance.IsFragmentShaderBarycentricSupported() &&
                                       instance.GetDriverID() == vk::DriverId::eNvidiaProprietary,
         // psport: older NVIDIA (Pascal) has no barycentrics; PS_INTERP_INT_FIX=0/1 overrides.

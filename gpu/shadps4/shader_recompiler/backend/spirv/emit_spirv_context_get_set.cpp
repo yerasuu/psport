@@ -70,10 +70,16 @@ Id EmitReadConst(EmitContext& ctx, IR::Inst* inst, Id addr, Id offset) {
     }
 }
 
+static Id PagedLoad(EmitContext& ctx, const EmitContext::BufferDefinition& buffer, Id index,
+                    u32 bytes, Id type, Id zero);
+
 Id EmitReadConstBuffer(EmitContext& ctx, u32 handle, Id index) {
     const auto& buffer = ctx.buffers[handle];
     if (const Id offset = buffer.Offset(PointerSize::B32); Sirit::ValidId(offset)) {
         index = ctx.OpIAdd(ctx.U32[1], index, offset);
+    }
+    if (Sirit::ValidId(buffer.dynamic_sharp)) {
+        return PagedLoad(ctx, buffer, index, 4, ctx.U32[1], ctx.u32_zero_value);
     }
     const auto [id, pointer_type] = buffer.Alias(PointerType::U32);
     const Id ptr{ctx.OpAccessChain(pointer_type, id, ctx.u32_zero_value, index)};
@@ -632,6 +638,10 @@ void EmitStoreBufferF32x4(EmitContext& ctx, IR::Inst* inst, u32 handle, Id addre
 
 void EmitStoreBufferFormatF32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address, Id value) {
     UNREACHABLE_MSG("SPIR-V instruction");
+}
+
+void EmitSetDynamicBufferSharp(EmitContext& ctx, u32 handle, Id sharp) {
+    ctx.OpStore(ctx.buffers[handle].dynamic_sharp, sharp);
 }
 
 void EmitGetScalarRegister(EmitContext&) {

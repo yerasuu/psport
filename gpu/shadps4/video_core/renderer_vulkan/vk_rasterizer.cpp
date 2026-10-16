@@ -2374,7 +2374,8 @@ bool Rasterizer::HelperEligible(const Pipeline* pipeline) const {
         }
         // Storage writes invalidate cached images from the buffer side.
         for (const auto& buffer : stage->buffers) {
-            if (!buffer.IsSpecial() && buffer.is_written) {
+            if (buffer.is_written && (!buffer.IsSpecial() ||
+                                      buffer.buffer_type == Shader::BufferType::Dynamic)) {
                 return false;
             }
         }
@@ -3207,6 +3208,35 @@ void TraceShaderBinding(const Shader::Info& stage, VAddr addr, u64 size, bool wr
 }
 } // namespace
 
+// psport: a binding whose V# the shader picks at run time reaches the game's memory through the
+// page table: every V# it can pick that the CPU reads is prepared as a written or read range,
+// and, as for a paged binding, barriers cover any buffer of the game's memory.
+void Rasterizer::BindDynamicBuffer(const Shader::Info& stage, const Shader::BufferResource& desc) {
+    Shader::DynamicCandidateList candidates;
+    if (!desc.DynamicCandidates(stage, candidates)) {
+        static std::atomic<u64> s_c_overflows{};
+        const u64 n = s_c_overflows.fetch_add(1, std::memory_order_relaxed);
+        if ((n & (n + 1)) == 0) {
+            LOG_WARNING(Render_Vulkan,
+                        "Shader {:#x}: run-time buffer V# with more than {} possible values: none "
+                        "prepared, it reaches only memory other bindings made resident ({} binds)",
+                        stage.pgm_hash, Shader::DynamicSharpSources::MaxCandidates, n + 1);
+        }
+    }
+    for (const auto& vsharp : candidates) {
+        const u64 size = memory->ClampRangeSize(vsharp.base_address, vsharp.GetSize());
+        if (size == 0) {
+            continue;
+        }
+        buffer_cache.PrepareDynamicRange(vsharp.base_address, size, desc.is_written);
+        if (desc.is_written) {
+            texture_cache.InvalidateMemoryFromGPU(vsharp.base_address, size);
+        }
+    }
+    bound_buffers.emplace_back(nullptr, 0, 0, desc.is_written);
+    needs_barrier = true;
+}
+
 void Rasterizer::BindBuffers(const Shader::Info& stage, const PreparedStage* prepared,
                              Shader::Backend::Bindings& binding,
                              Shader::PushData& push_data, u32& write_index) {
@@ -3259,6 +3289,11 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, const PreparedStage* pre
                     const u64 offset = vk_buffer.Copy(planes.data(), ubo_size, alignment);
                     buffer_infos.emplace_back(vk_buffer.Handle(), offset, ubo_size);
                 }
+            } else if (desc.buffer_type == Shader::BufferType::Dynamic) {
+                BindDynamicBuffer(stage, desc);
+                push_data.AddOffset(binding.buffer, 0);
+                const auto [record, record_offset] = buffer_cache.DynamicRecord();
+                buffer_infos.emplace_back(record->Handle(), record_offset, 32);
             } else if (desc.buffer_type == Shader::BufferType::BdaPagetable) {
                 const auto* bda_buffer = buffer_cache.GetBdaPageTableBuffer();
                 buffer_infos.emplace_back(bda_buffer->Handle(), 0, bda_buffer->SizeBytes());

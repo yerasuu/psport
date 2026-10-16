@@ -15,7 +15,7 @@
 namespace Serialization {
 /* You should increment versions below once corresponding serialization scheme is changed. */
 static constexpr u32 ShaderBinaryVersion = 10u; // psport: point-list GS output mode (OutputPoints)
-static constexpr u32 ShaderMetaVersion = 11u; // psport: motion_location in place of motion_vectors
+static constexpr u32 ShaderMetaVersion = 12u; // psport: BufferResource::dynamic
 static constexpr u32 PipelineKeyVersion = 6u; // psport: SerializationSupport::xfb_stride
 } // namespace Serialization
 

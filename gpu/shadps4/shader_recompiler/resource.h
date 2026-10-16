@@ -7,6 +7,10 @@
 #include "shader_recompiler/ir/type.h"
 #include "video_core/amdgpu/resource.h"
 
+#include <algorithm>
+#include <array>
+#include <cstring>
+
 #include <boost/container/static_vector.hpp>
 
 namespace Shader {
@@ -73,7 +77,29 @@ enum class BufferType : u8 {
     GdsBuffer,
     SharedMemory,
     ClipPlanes,
+    /// psport: a guest buffer whose V# the shader picks at run time (DynamicSharpSources).
+    Dynamic,
 };
+
+/// psport: the V# dwords a Dynamic binding's shader computes at run time, with the values each
+/// can take that the CPU reads at bind time (flat user data locations or immediates). The
+/// shader reaches the game's memory through the page table; the bind prepares every candidate.
+struct DynamicSharpSources {
+    static constexpr u32 MaxSources = 4;
+    static constexpr u32 MaxCandidates = 16;
+
+    std::array<std::array<u32, MaxSources>, 4> values{};
+    std::array<u8, 4> c_sources{};
+    std::array<u8, 4> location_masks{};
+    u8 dynamic_mask{};
+    /// Some source is not readable by the CPU: what the shader computes from it reaches only
+    /// memory other bindings made resident, and reads zero elsewhere.
+    bool is_unbounded{};
+
+    bool operator==(const DynamicSharpSources&) const = default;
+};
+using DynamicCandidateList =
+    boost::container::static_vector<AmdGpu::Buffer, DynamicSharpSources::MaxCandidates>;
 
 struct BufferResource {
     SharpFetch<AmdGpu::Buffer> sharp_fetch{};
@@ -83,9 +109,63 @@ struct BufferResource {
     bool is_formatted{};
     SharpFetchPostOp post_op{};
     u32 post_op_dw1_mask{};
+    DynamicSharpSources dynamic{};
 
     bool IsSpecial() const noexcept {
         return buffer_type != BufferType::Guest;
+    }
+
+    /// psport: every V# a Dynamic binding's shader can pick among the sources the CPU reads
+    /// (the static dwords as GetSharp reads them, each run-time dword from one of its sources).
+    /// False when there are more than DynamicSharpSources::MaxCandidates; `out` is then empty.
+    bool DynamicCandidates(const auto& info, DynamicCandidateList& out) const noexcept {
+        out.clear();
+        std::array<u32, 4> shape;
+        if (!sharp_fetch.Fetch(info.FlatUserData().data(),
+                               reinterpret_cast<AmdGpu::Buffer*>(shape.data()))) {
+            return true;
+        }
+        u32 c_candidates = 1;
+        for (const u8 c_sources : dynamic.c_sources) {
+            c_candidates *= std::max<u32>(c_sources, 1);
+        }
+        if (c_candidates > DynamicSharpSources::MaxCandidates) {
+            return false;
+        }
+        const auto flat = info.FlatUserData();
+        for (u32 i_candidate = 0; i_candidate < c_candidates; ++i_candidate) {
+            auto dwords = shape;
+            bool is_readable = true;
+            u32 digits = i_candidate;
+            for (u32 i = 0; i < 4 && is_readable; ++i) {
+                const u32 c_sources = dynamic.c_sources[i];
+                if (c_sources == 0) {
+                    continue;
+                }
+                const u32 i_source = digits % c_sources;
+                digits /= c_sources;
+                const u32 value = dynamic.values[i][i_source];
+                if (((dynamic.location_masks[i] >> i_source) & 1) == 0) {
+                    dwords[i] = value;
+                } else if (value < flat.size()) {
+                    dwords[i] = flat[value];
+                } else {
+                    is_readable = false;
+                }
+            }
+            if (!is_readable) {
+                continue;
+            }
+            if (post_op == SharpFetchPostOp::BitwiseOrDw1WithImm) {
+                dwords[1] |= post_op_dw1_mask;
+            }
+            AmdGpu::Buffer buffer;
+            std::memcpy(&buffer, dwords.data(), sizeof(buffer));
+            if (buffer.Valid() && buffer.base_address != 0 && buffer.GetSize() != 0) {
+                out.push_back(buffer);
+            }
+        }
+        return true;
     }
 
     constexpr AmdGpu::Buffer GetSharp(const auto& info) const noexcept {

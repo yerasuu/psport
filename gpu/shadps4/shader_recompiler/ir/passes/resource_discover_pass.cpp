@@ -8,7 +8,12 @@
 #include "shader_recompiler/profile.h"
 #include "shader_recompiler/resource.h"
 
+#include <algorithm>
+
 namespace Shader::Optimization {
+
+static_assert(DynamicSharpSources::MaxSources == 4,
+              "SharpReference::dynamic_sources holds DynamicSharpSources::MaxSources values");
 
 static bool IsSharpSource(const IR::Inst* inst) {
     return inst->GetOpcode() == IR::Opcode::GetUserData ||
@@ -246,21 +251,81 @@ IR::Inst* FindSharpSource(IR::Inst* handle) {
     return handle;
 }
 
+static void MarkSharpSource(IR::Inst* source) {
+    if (source->GetOpcode() == IR::Opcode::ReadConstBuffer) {
+        auto flags = source->Flags<IR::BufferInstInfo>();
+        flags.sharp_source.Assign(1u);
+        source->SetFlags(flags);
+    }
+}
+
 void MarkReadConstBufferSharpSources(const SharpReference& sharp) {
     // In cases of bindless sharp fetches mark all producer instructions
     // so the extended userdata flattening pass will include them.
     for (size_t i = 0; i < sharp.num_dwords; i++) {
-        IR::Inst* source = sharp.dwords[i].TryInst();
-        if (!source) {
+        if ((sharp.dynamic_mask >> i) & 1) {
+            for (const IR::Value& source : sharp.dynamic_sources[i]) {
+                if (IR::Inst* inst = source.TryInst()) {
+                    MarkSharpSource(inst);
+                }
+            }
             continue;
         }
-        ASSERT(IsSharpSource(source));
-        if (source->GetOpcode() == IR::Opcode::ReadConstBuffer) {
-            auto flags = source->Flags<IR::BufferInstInfo>();
-            flags.sharp_source.Assign(1u);
-            source->SetFlags(flags);
+        if (IR::Inst* source = sharp.dwords[i].TryInst(); source && IsSharpSource(source)) {
+            MarkSharpSource(source);
         }
     }
+}
+
+// psport: a ReadConstBuffer the flattening pass can read on the CPU: its V#'s address comes from
+// constant memory (the pass asserts on any other).
+static bool IsFlattenableConstBuffer(const IR::Inst* inst) {
+    const IR::Inst* handle = inst->Arg(0).TryInst();
+    if (!handle || handle->NumArgs() < 2) {
+        return false;
+    }
+    for (u32 i = 0; i < 2; ++i) {
+        const IR::Inst* dword = handle->Arg(i).TryInst();
+        if (!dword || dword->GetOpcode() == IR::Opcode::ReadFirstLane ||
+            !(dword->GetOpcode() == IR::Opcode::GetUserData ||
+              dword->GetOpcode() == IR::Opcode::ReadConst ||
+              dword->GetOpcode() == IR::Opcode::ReadConstBuffer)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// psport: the values a run-time V# dword can take, through Phis: immediates and sharp sources
+// the CPU reads at bind time. Anything else (arithmetic, a vector value) makes it unbounded.
+static void CollectDynamicSources(const IR::Value& value, SharpReference& sharp, u32 i_dword,
+                                  boost::container::small_vector<const IR::Inst*, 8>& visited) {
+    auto& sources = sharp.dynamic_sources[i_dword];
+    IR::Inst* inst = value.TryInst();
+    if (inst && inst->GetOpcode() == IR::Opcode::ReadFirstLane) {
+        return CollectDynamicSources(inst->Arg(0), sharp, i_dword, visited);
+    }
+    if (inst && inst->GetOpcode() == IR::Opcode::Phi) {
+        if (std::ranges::find(visited, inst) != visited.end()) {
+            return;
+        }
+        visited.push_back(inst);
+        for (size_t i = 0; i < inst->NumArgs(); ++i) {
+            CollectDynamicSources(inst->Arg(i), sharp, i_dword, visited);
+        }
+        return;
+    }
+    const bool is_readable =
+        !inst || (IsSharpSource(inst) && (inst->GetOpcode() != IR::Opcode::ReadConstBuffer ||
+                                          IsFlattenableConstBuffer(inst)));
+    if (is_readable && std::ranges::find(sources, value) != sources.end()) {
+        return;
+    }
+    if (!is_readable || sources.size() == sources.capacity()) {
+        sharp.is_unbounded = true;
+        return;
+    }
+    sources.push_back(value);
 }
 
 void DiscoverBufferSharp(IR::Block& block, IR::Inst& inst, ResourceDiscoveryList& resources) {
@@ -287,6 +352,15 @@ void DiscoverBufferSharp(IR::Block& block, IR::Inst& inst, ResourceDiscoveryList
         vsharp.post_op = SharpFetchPostOp::BitwiseOrDw1WithImm;
         vsharp.post_op_data.dw1_mask = mask;
         vsharp.dwords[1] = dword1;
+    }
+
+    for (u32 i = 0; i < vsharp.num_dwords; ++i) {
+        const IR::Inst* source = vsharp.dwords[i].TryInst();
+        if (source && !IsSharpSource(source)) {
+            vsharp.dynamic_mask |= u8(1u << i);
+            boost::container::small_vector<const IR::Inst*, 8> visited;
+            CollectDynamicSources(vsharp.dwords[i], vsharp, i, visited);
+        }
     }
 
     MarkReadConstBufferSharpSources(vsharp);
