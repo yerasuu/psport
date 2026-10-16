@@ -204,6 +204,9 @@ unsigned psport_gpu_symbol_count(void);
 /* PS_CP_CENSUS=1: the command stream census, printed once after the call report (async-signal
  * tolerant: write(2) only). */
 void psport_gpu_cp_census_report(void);
+/* PS_NATIVE_PROBE=1: the parallel recording probe's summary and decision, printed once after the
+ * census (write(2) only, like it). */
+void psport_gpu_native_probe_report(void);
 #ifdef __cplusplus
 }
 #endif

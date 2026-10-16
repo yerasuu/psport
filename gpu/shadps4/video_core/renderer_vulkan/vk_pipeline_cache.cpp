@@ -42,6 +42,7 @@
 #include "psport_settings.h"
 #include "game_profile.h"
 #include "psport_toggles.h"
+#include "psport_native_probe.h"
 
 namespace Vulkan {
 
@@ -592,6 +593,9 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline(const DrawIndirectPar
                                                            const PreparedDraw* prepared,
                                                            bool indirect) {
     used_prepared = nullptr;
+    if (PsNativeProbe::g_is_enabled) {
+        PsNativeProbe::BeginSelection();
+    }
     NoteDrawTarget(liverpool->regs);
     if (prepared) {
         if (const auto* pipeline = TryPreparedPipeline(*prepared)) {
@@ -605,6 +609,9 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline(const DrawIndirectPar
     }
     if (const auto found = graphics_pipelines.find(sel.graphics_key); found != graphics_pipelines.end()) {
         return found->second.get();
+    }
+    if (PsNativeProbe::g_is_enabled) {
+        PsNativeProbe::NotePipelineCompile();
     }
     // psport PS_ASYNC_PIPELINES: being compiled on a worker, or to be.
     const bool skippable = AsyncSkippable(sel, indirect);

@@ -5,6 +5,7 @@
 
 #include "psport_toggles.h"
 #include "psport_free_check.h"
+#include "psport_native_probe.h"
 #include "common/assert.h"
 #include "common/debug.h"
 #include "common/div_ceil.h"
@@ -660,6 +661,7 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
         }
         return cached.image_id;
     }
+    PsNativeProbe::Note(PsNativeProbe::MemoMiss);
 
     ImageIds image_ids;
     ForEachImageInRegion(info.guest_address, info.guest_size,
@@ -807,6 +809,7 @@ ImageView& TextureCache::FindTexture(ImageId image_id, const ImageDesc& desc, Vi
         if (memo->image_id == image_id && memo->backing == image.backing && memo->view_id) {
             return slot_image_views[memo->view_id];
         }
+        PsNativeProbe::Note(PsNativeProbe::MemoMiss);
         ImageView& view = image.FindView(desc.view_info);
         const auto& ids = image.backing->image_view_ids;
         const u32 last = image.backing->last_view;
@@ -1013,6 +1016,7 @@ void TextureCache::RefreshImage(Image& image) {
         return;
     }
 
+    PsNativeProbe::Note(PsNativeProbe::Upload);
     scheduler.EndRendering();
 
     const auto [in_buffer, in_offset] =
@@ -1041,6 +1045,7 @@ vk::Sampler TextureCache::GetSampler(const AmdGpu::Sampler& sampler,
         return *m_default_sampler;
     }
     if (new_sampler) {
+        PsNativeProbe::Note(PsNativeProbe::Other);
         samplers.at(hash).lru_id = sampler_lru_cache.Insert(hash, gc_tick);
     } else {
         sampler_lru_cache.Touch(it->second.lru_id, gc_tick);

@@ -11,6 +11,7 @@
 #include "game_profile.h"
 #include "psport_ce_stats.h"
 #include "psport_toggles.h"
+#include "psport_native_probe.h"
 #include "psport_write_log.h"
 #include "psport_free_check.h"
 #include "psport_guest_memory.h"
@@ -625,6 +626,7 @@ VideoCore::ImageId Rasterizer::FindTargetMemoized(VideoCore::TextureCache::Image
         remember(memo.image_id);
         return memo.image_id;
     }
+    PsNativeProbe::Note(PsNativeProbe::MemoMiss);
     make_desc();
     const VideoCore::ImageId image_id = texture_cache.FindImage(desc);
     if (generation == texture_cache.RegistryGeneration()) {
@@ -783,7 +785,7 @@ struct DrawPacket {
     std::array<AmdGpu::CbDbExtent, AmdGpu::NUM_COLOR_BUFFERS> cb_extent;
     AmdGpu::CbDbExtent db_extent;
     u32 num_vsharps; ///< V#s of the vertex streams, after the indirect arguments
-    u32 pad;
+    u32 probe_origin; ///< PS_NATIVE_PROBE: PsNativeProbe::TakeDrawOrigin
     u64 ring_end; ///< constant ring position after this packet's copies
     AmdGpu::Buffer strmout_sharp; ///< stream-out buffer 0's V#, zero unless the draw captures
 };
@@ -1208,6 +1210,7 @@ void Rasterizer::PostDraw(const Pipeline* pipeline, const PreparedDraw* used_pre
     packet.db_extent = liverpool->last_db_extent;
     packet.ring_end = constant_ring ? constant_ring->Position() : 0;
     packet.num_vsharps = static_cast<u32>(vsharps.size());
+    packet.probe_origin = PsNativeProbe::g_is_enabled ? PsNativeProbe::TakeDrawOrigin() : 0;
     packet.strmout_sharp = strmout_sharp;
     out += sizeof(DrawPacket);
     std::memcpy(out, blocks.data(), num_blocks * sizeof(u16));
@@ -1436,9 +1439,15 @@ void Rasterizer::RunDrawPacket(void* context, const u8* data, u32 size) {
         }
         stage_cs = nullptr;
     } else if (indirect) {
+        if (PsNativeProbe::g_is_enabled) {
+            PsNativeProbe::SetDrawOrigin(packet.probe_origin);
+        }
         self.DrawIndirectRecord(static_cast<const GraphicsPipeline*>(packet.pipeline),
                                 packet.is_indexed, *indirect);
     } else {
+        if (PsNativeProbe::g_is_enabled) {
+            PsNativeProbe::SetDrawOrigin(packet.probe_origin);
+        }
         self.DrawRecord(static_cast<const GraphicsPipeline*>(packet.pipeline), packet.prepared,
                         packet.is_indexed, packet.index_offset);
     }
@@ -1598,6 +1607,9 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset, const PreparedDraw* pre
     if (pipelined && FilterDrawPasses()) {
         PostDraw(pipeline, used_prepared, is_indexed, index_offset);
         return;
+    }
+    if (PsNativeProbe::g_is_enabled && pipelined) {
+        PsNativeProbe::NoteDrainedDraw();
     }
     DrawRecord(pipeline, used_prepared, is_indexed, index_offset);
 }
@@ -1769,6 +1781,7 @@ void Rasterizer::StreamOutBufferUpdate(const StreamOutUpdate& update) {
 void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw* used_prepared,
                             bool is_indexed, u32 index_offset) {
     BB_SECTION(DrawRecord);
+    PsNativeProbe::DrawScope probe_scope;
     buffer_cache.NewPacket();
     if (DrawPipe::OnStageB()) {
         FrameCapture::Poll();
@@ -2059,11 +2072,15 @@ void Rasterizer::DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u3
         PostDraw(pipeline, nullptr, is_indexed, 0, nullptr, &indirect);
         return;
     }
+    if (PsNativeProbe::g_is_enabled && UseDrawPipe()) {
+        PsNativeProbe::NoteDrainedDraw();
+    }
     DrawIndirectRecord(pipeline, is_indexed, indirect);
 }
 
 void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_indexed,
                                     const IndirectDraw& indirect) {
+    PsNativeProbe::DrawScope probe_scope;
     buffer_cache.NewPacket();
     if (DrawPipe::OnStageB()) {
         FrameCapture::Poll();
@@ -2204,6 +2221,7 @@ void Rasterizer::DispatchDirect() {
 
 void Rasterizer::DispatchRecord(const ComputePipeline* pipeline) {
     BB_SECTION(DispatchRecord);
+    PsNativeProbe::StreamScope probe_scope;
     buffer_cache.NewPacket();
     FrameCapture::Poll();
     gbuffer_draw = false;
@@ -2296,6 +2314,7 @@ void Rasterizer::DispatchIndirect(VAddr address, u32 offset, u32 size) {
 
 void Rasterizer::DispatchIndirectRecord(const ComputePipeline* pipeline, VAddr address,
                                         u32 size) {
+    PsNativeProbe::StreamScope probe_scope;
     buffer_cache.NewPacket();
     scheduler.PopPendingOperations();
     const u32 offset = 0;
@@ -2475,6 +2494,7 @@ bool Rasterizer::TexturesBindableOnHelper(const Shader::Info& stage,
 void Rasterizer::RunTextureTask(void* context) {
     auto& self = *static_cast<Rasterizer*>(context);
     auto& task = self.texture_task;
+    PsNativeProbe::HelperScope probe_scope;
     for (u32 i = 0; i < task.count; ++i) {
         auto& stage = task.stages[i];
         if (!self.TexturesBindableOnHelper(*stage.info, stage.prepared)) {
@@ -3500,6 +3520,7 @@ Rasterizer::ImageDescCacheEntry& Rasterizer::CachedImageDescEntry(const AmdGpu::
     auto& entry = *slot;
     if (entry.flags != flags || entry.sharp != key ||
         PsToggle::Disabled(PsToggle::ImageDescCache)) {
+        PsNativeProbe::Note(PsNativeProbe::MemoMiss);
         entry.desc = VideoCore::TextureCache::ImageDesc{sharp, res};
         entry.sharp = key;
         entry.flags = flags;

@@ -14,6 +14,7 @@
 #include <unistd.h>
 #include "common/assert.h"
 #include "psport_toggles.h"
+#include "psport_native_probe.h"
 #include "game_profile.h"
 #include "psport_wait_trace.h"
 #include "video_core/renderer_vulkan/vk_frame_capture.h"
@@ -614,12 +615,14 @@ void VideoOutDriver::Flip(const Request& req) {
                 cb_appended = std::snprintf(sz_appended, sizeof(sz_appended), "; stage B off");
             }
             window_tsc = tsc;
+            double gpu_busy_ms = -1.0;
+            u64 busy_frames = 0;
             if (PsStats::g_is_gpu_busy_sampled.load(std::memory_order_relaxed)) {
-                const u64 busy_frames = PsStats::g_c_gpu_busy_frames.exchange(0);
+                busy_frames = PsStats::g_c_gpu_busy_frames.exchange(0);
+                gpu_busy_ms = busy_frames ? PsStats::g_gpu_busy_ns.exchange(0) / (1e6 * double(busy_frames)) : -1.0;
                 std::snprintf(sz_appended + cb_appended, sizeof(sz_appended) - cb_appended,
                               "; GPU busy %.2f ms/frame (%llu frames sampled, %llu not ready)",
-                              busy_frames ? PsStats::g_gpu_busy_ns.exchange(0) / (1e6 * double(busy_frames)) : 0.0,
-                              static_cast<unsigned long long>(busy_frames),
+                              std::max(gpu_busy_ms, 0.0), static_cast<unsigned long long>(busy_frames),
                               static_cast<unsigned long long>(PsStats::g_c_gpu_busy_unread.exchange(0)));
             } else {
                 std::snprintf(sz_appended + cb_appended, sizeof(sz_appended) - cb_appended, "; GPU busy n/a");
@@ -644,6 +647,9 @@ void VideoOutDriver::Flip(const Request& req) {
                         frames ? double(PsStats::g_c_reduced_draws.exchange(0)) / frames : 0.0,
                         frames ? double(PsStats::g_c_scene_draws.exchange(0)) / frames : 0.0,
                         sz_appended);
+            if (PsNativeProbe::g_is_enabled) {
+                PsNativeProbe::PrintWindow(window, frames, gpu_busy_ms, busy_frames);
+            }
             VideoCore::PageManager::ReportFaultSites();
             if (const u64 notes = PsStats::g_c_cpu_write_notes.exchange(0)) {
                 std::printf("Write notices: %.0f/s, %.2f MB/s (libc copies over pages the GPU side "

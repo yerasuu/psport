@@ -6,6 +6,7 @@
 #include <boost/container/small_vector.hpp>
 #include <boost/container/static_vector.hpp>
 
+#include "psport_native_probe.h"
 #include "shader_recompiler/resource.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
@@ -118,6 +119,7 @@ void Pipeline::BindResources(DescriptorWrites& set_writes, const Shader::PushDat
     }
 
     // Descriptor set updates are device calls: they stay on this thread.
+    PsNativeProbe::Note(PsNativeProbe::Descriptors);
     const auto desc_set = desc_heap.Commit(*desc_layout);
     if (!desc_set) {
         return; // DescriptorHeap::Commit logged it: the draw reads null descriptors

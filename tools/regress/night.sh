@@ -5,7 +5,9 @@
 #      the base's regress run (-r, or one run here first on the base checkout);
 #   2. perf: the branch's perf.txt with PS_FRAME_STATS=1, base and branch in turn, twice (base 1,
 #      branch 1, base 2, branch 2), one title at a time, from the seed folder given with -u;
-#   3. the branch's dumps against the base's (report.py --compare-shots);
+#   3. probe: the branch's perf.txt once more on the branch alone with PS_NATIVE_PROBE=1 as well (it times
+#      every draw, so it stays out of the timed perf runs);
+#   4. the branch's dumps against the base's (report.py --compare-shots);
 # then a summary table (OUT/summary.txt and stdout). The steps run one after the other and perf
 # needs the machine to itself.
 #   -o OUT      default out/night/<time> in the branch checkout
@@ -24,7 +26,7 @@ while getopts 'o:r:u:s:p:' opt; do
     esac
 done
 shift $((OPTIND - 1))
-(($# == 3)) || { sed -n '2,16p' "$0" | cut -c3-; exit 2; }
+(($# == 3)) || { sed -n '2,18p' "$0" | cut -c3-; exit 2; }
 base=$(realpath -- "$1") branch=$(realpath -- "$2") games=$(realpath -- "$3")
 for checkout in "$base" "$branch"; do
     [[ -x $checkout/out/psport && -x $checkout/tools/regress.sh ]] ||
@@ -63,6 +65,8 @@ for round in 1 2; do
             "${seed_args[@]}"
     done
 done
+PS_FRAME_STATS=1 PS_NATIVE_PROBE=1 regress "$branch" "$out/probe-branch" -j 1 -t "$branch/tools/regress/perf.txt" \
+    "${seed_args[@]}"
 log "shots: regress-branch against $base_run"
 "${PYTHON:-python3}" "$here/report.py" "$out/regress-branch" --compare "$base_run" --compare-shots "$base_run" \
     --psnr-min "$psnr" > "$out/shots.txt" 2>&1
@@ -107,6 +111,16 @@ for name in names:
                  '/'.join(fmt(get('branch', n, 'stage_b_busy_pct')) for n in (1, 2)),
                  '/'.join(fmt(get('branch', n, 'gpu_busy_ms')) for n in (1, 2))])
 table(['title', 'base fps', 'branch fps', 'branch vs base', 'stage B us/draw', 'stage B busy%', 'GPU busy ms'], rows)
-print(f'\nfull tables: {out}/shots.txt (dumps, CP census), {out}/*.log')
+probe = load(out / 'probe-branch')
+print('\nnative probe (PS_NATIVE_PROBE, branch, exit summary): go if pure >= 90% and GPU busy < 70% of the frame')
+rows = []
+for name in sorted(probe):
+    s = ((probe[name].get('native_probe') or {}).get('summary')) or {}
+    reasons = ', '.join(f'{k} {v}' for k, v in (s.get('main_reasons') or {}).items()) or '-'
+    rows.append([name, fmt(s.get('pure')), fmt(s.get('all_pure_dcbs')), fmt(s.get('dcbs_per_frame')), fmt(s.get('pure_time')),
+                 fmt(s.get('amdahl_4')), fmt(s.get('amdahl_8')), fmt(s.get('gpu_busy')) if s.get('gpu_busy') != 'n/a' else 'n/a',
+                 s.get('decision') or 'no summary', reasons])
+table(['title', 'pure%', 'pure dcb%', 'dcb/fr', 'pure time%', 'x4', 'x8', 'GPU busy%', 'decision', 'main reasons'], rows)
+print(f'\nfull tables: {out}/shots.txt (dumps, CP census), {out}/probe-branch.log, {out}/*.log')
 EOF
 cat "$out/summary.txt"

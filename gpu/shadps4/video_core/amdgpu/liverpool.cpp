@@ -16,6 +16,7 @@
 #include "psport_threads.h"
 #include "psport_ce_stats.h"
 #include "psport_cp_census.h"
+#include "psport_native_probe.h"
 #include "psport_timeline.h"
 #include "psport_copy.h"
 #include "psport_toggles.h"
@@ -1643,6 +1644,9 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
     }
     if (PsCpCensus::g_is_enabled) {
         PsCpCensus::ScanGraphics(dcb, ccb, dcb_depth);
+    }
+    if (PsNativeProbe::g_is_enabled && dcb_depth == 0) {
+        PsNativeProbe::BeginDcb();
     }
 
     cblock.Reset();

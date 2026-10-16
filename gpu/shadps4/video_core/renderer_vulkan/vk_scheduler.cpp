@@ -17,6 +17,7 @@
 #include "psport_copy.h"
 #include "video_core/renderer_vulkan/vk_gpu_profiler.h"
 #include "psport_toggles.h"
+#include "psport_native_probe.h"
 #include "psport_wait_trace.h"
 #include "common/assert.h"
 #include "common/debug.h"
@@ -464,6 +465,7 @@ void Scheduler::WaitHostCopies() {
         }
     } forget{*this, sources_seen};
     if (host_copies_done.load(std::memory_order_acquire) < host_copies_issued) {
+        PsNativeProbe::Note(PsNativeProbe::Sync);
         PsStats::WaitTimer timer{PsStats::g_host_copies_wait_ns};
         PsStats::g_c_host_copy_waits.fetch_add(1, std::memory_order_relaxed);
         KickRecording(true);
@@ -643,6 +645,7 @@ void Scheduler::SyncRecording() {
     if (workers.empty()) {
         return;
     }
+    PsNativeProbe::Note(PsNativeProbe::Sync);
     KickRecording(true);
     PsStats::WaitTimer timer{PsStats::g_sync_recording_ns};
     std::unique_lock lk{recorder_mutex};
@@ -830,6 +833,7 @@ void Scheduler::Finish() {
 }
 
 void Scheduler::Wait(u64 tick) {
+    PsNativeProbe::Note(PsNativeProbe::Sync);
     if (tick >= work_semaphore.CurrentTick()) {
         // Make sure we are not waiting for the current tick without signalling
         SubmitInfo info{};
@@ -916,6 +920,7 @@ void Scheduler::AllocateWorkerCommandBuffers() {
 }
 
 void Scheduler::SubmitExecution(SubmitInfo& info) {
+    PsNativeProbe::Note(PsNativeProbe::Sync);
     ProducerScope producer{*this, "SubmitExecution"};
     if (async_submit) {
         SubmitAsync(info);
@@ -1018,6 +1023,7 @@ void Scheduler::SubmitExecution(SubmitInfo& info) {
 }
 
 void Scheduler::SubmitAsync(SubmitInfo& info) {
+    PsNativeProbe::Note(PsNativeProbe::Sync);
     const u64 signal_value = work_semaphore.NextTick();
     if (on_submit) {
         on_submit(info);

@@ -13,6 +13,7 @@
 #include "psport_toggles.h"
 #include "psport_sections.h"
 #include "psport_free_check.h"
+#include "psport_native_probe.h"
 #include "psport_guest_memory.h"
 #include "game_profile.h"
 #include "pslayer_gpu_memory.h"
@@ -1399,6 +1400,7 @@ const Buffer* BufferCache::GetArena(u64 first_block, u64 last_block) {
     const auto* last_arena = address_space[last_page];
     if (first_arena == last_arena) {
         if (!first_arena) {
+            PsNativeProbe::Note(PsNativeProbe::BufferCreate);
             const u64 base_block = Common::AlignDownPow2<u64>(first_block, blocks_per_arena_page);
             const u64 num_pages = last_page - first_page + 1;
             const auto* new_arena =
@@ -1411,6 +1413,7 @@ const Buffer* BufferCache::GetArena(u64 first_block, u64 last_block) {
     }
 
     LOG_WARNING(Render, "Migrating arena");
+    PsNativeProbe::Note(PsNativeProbe::BufferCreate);
 
     const u64 first_addr = first_arena ? first_arena->cpu_addr : (first_page << ARENA_PAGE_BITS);
     const u64 first_size = first_arena ? first_arena->size_bytes : ARENA_PAGE_SIZE;
@@ -1462,9 +1465,11 @@ void BufferCache::EnsureResident(const Buffer* arena, u64 first_block, u64 last_
     resident_ranges.ForEachGap(first_block, last_block + 1,
                                [&](u64 start, u64 end) { bind_ranges.Add({start, end}); });
     if (bind_ranges.Empty()) {
+        PsNativeProbe::Note(PsNativeProbe::MemoMiss);
         memo = {first_block, last_block, ResidencyGeneration()};
         return;
     }
+    PsNativeProbe::Note(PsNativeProbe::BufferCreate);
     PsStats::Timer timer{PsStats::g_t_resident};
 
     // psport: blocks of the game's direct memory are bound to the memory it lives in; the rest
@@ -3192,6 +3197,7 @@ bool BufferCache::SynchronizeMemory(const Buffer* arena, VAddr device_addr, u32 
         runtime.CopyBuffer(src_buffer, arena, copies);
     }
     for (const auto& [chunk_buffer, copy] : chunk_copies) {
+        PsNativeProbe::Note(PsNativeProbe::Upload);
         PsStats::g_cb_buffer_upload.fetch_add(copy.size, std::memory_order_relaxed);
         // psport PS_LAYER_MEMORY: the GPU writes the game's memory too (through the chunk's
         // buffer wrapper): a copy from it waits for those writes like any buffer copy.
@@ -3216,6 +3222,7 @@ const Buffer* BufferCache::UploadCopies(const Buffer* arena, std::span<vk::Buffe
     if (copies.empty()) {
         return nullptr;
     }
+    PsNativeProbe::Note(PsNativeProbe::Upload);
     PsStats::g_cb_buffer_upload.fetch_add(total_size_bytes, std::memory_order_relaxed);
     const auto staging = staging_pool.Request(total_size_bytes, MemoryType::HostUncached);
     // psport: the guest memory is copied into staging on the copy threads, started now in

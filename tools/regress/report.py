@@ -13,7 +13,8 @@ that is new or different. Python's standard library only, so that it runs wherev
 
 perf holds the means of the last 10 PS_FRAME_STATS 'Frame stats' lines before the stop (FPS, stage B
 us/draw and busy share, GPU busy ms/frame), census the PS_CP_CENSUS 'CP census:' block (section ->
-key -> value); both are null in a run that did not print them. --compare-shots compares each present
+key -> value), native_probe the PS_NATIVE_PROBE lines (summary and decision from 'Native probe summary:',
+window the means of the last 10 'Native probe:' lines); all three are null in a run that did not print them. --compare-shots compares each present
 dump with the base run's dump taken for the same schedule second (PSNR over RGB and the largest
 channel difference; identical dumps read 99 dB) and lists those under --psnr-min (default 25 dB):
 listed, not counted as regressions, since animation alone moves a frame between two runs.
@@ -52,6 +53,8 @@ FRAME_STATS = re.compile(r'^Frame stats: ([\d.]+) FPS')
 STAGE_B = re.compile(r'; stage B ([\d.]+) us/draw, busy ([\d.]+)%')
 GPU_BUSY = re.compile(r'; GPU busy ([\d.]+) ms/frame \((\d+) frames sampled')
 CENSUS = re.compile(r'^CP census: ([a-z][a-z ]*): (.*)$')
+NATIVE_PROBE = re.compile(r'^Native probe: (.*)$')
+NATIVE_SUMMARY = re.compile(r'^Native probe summary: (.*)$')
 PERF_LINES = 10
 IDENTICAL_PSNR_DB = 99.0
 
@@ -222,7 +225,7 @@ def classify(run_dir):
               'status': f"skipped ({meta['skipped']})" if 'skipped' in meta else meta.get('ended', 'unknown'),
               'seconds': int(meta.get('seconds', 0)), 'crash': '', 'no_impl_called': None, 'submit_forced': None,
               'peak_dbfs': None, 'frames_drawn': 0, 'frames_dumped': 0, 'max_luma': None, 'max_lit_pct': None,
-              'perf': None, 'census': None}
+              'perf': None, 'census': None, 'native_probe': None}
     result.update({m: False for m in MILESTONES})
     log = run_dir / 'log'
     if 'skipped' in meta or not log.exists():
@@ -232,6 +235,7 @@ def classify(run_dir):
     offset = 0
     frame_stats = []
     census = {}
+    probe_windows, probe_summary = [], {}
     for raw in log.read_bytes().splitlines(keepends=True):
         stopping = 0 <= stop_offset <= offset
         offset += len(raw)
@@ -246,6 +250,11 @@ def classify(run_dir):
                 frame_stats.append((float(m[1]), STAGE_B.search(line), GPU_BUSY.search(line)))
         elif m := CENSUS.match(line):
             census[m[1]] = {k: number(v) for k, _, v in (p.partition('=') for p in m[2].split()) if v}
+        elif m := NATIVE_SUMMARY.match(line):
+            probe_summary.update(probe_fields(m[1]))
+        elif m := NATIVE_PROBE.match(line):
+            if not stopping:
+                probe_windows.append(probe_fields(m[1]))
         elif m := AUDIO.match(line):
             peak = float(m[1])
             if result['peak_dbfs'] is None or peak > result['peak_dbfs']:
@@ -255,6 +264,12 @@ def classify(run_dir):
         elif not result['crash'] and not stopping and (sig := crash_signature(line)):
             result['crash'] = sig
     result['census'] = census or None
+    if probe_windows or probe_summary:
+        last = probe_windows[-PERF_LINES:]
+        keys = [k for k, v in (last[-1] if last else {}).items() if isinstance(v, (int, float))]
+        window = {k: round(sum(w[k] for w in last if isinstance(w.get(k), (int, float))) /
+                           max(1, sum(isinstance(w.get(k), (int, float)) for w in last)), 2) for k in keys}
+        result['native_probe'] = {'summary': probe_summary or None, 'window': window or None, 'lines': len(last)}
     if frame_stats:
         last = frame_stats[-PERF_LINES:]
         mean = lambda values: round(sum(values) / len(values), 2) if values else None
@@ -279,6 +294,20 @@ def classify(run_dir):
     result['frames'] = result['frames_drawn'] > 0
     result['audio'] = result['peak_dbfs'] is not None and result['peak_dbfs'] > AUDIO_FLOOR_DBFS
     return result
+
+
+def probe_fields(text):
+    """A PS_NATIVE_PROBE line's `key=value` fields: percentages and ratios as numbers, `reason:pct,...` lists
+    (dcb_first, main_reasons) as {reason: pct}, `none` as {}."""
+    fields = {}
+    for key, _, value in (p.partition('=') for p in text.replace(';', ' ').split()):
+        if not value:
+            continue
+        if key in ('dcb_first', 'main_reasons'):
+            fields[key] = {} if value == 'none' else {r: number(v) for r, _, v in (x.partition(':') for x in value.split(','))}
+        elif key != 'rule':
+            fields[key] = number(value[:-1] if value.endswith('%') else value)
+    return fields
 
 
 def number(text):
@@ -338,6 +367,32 @@ def print_census(results):
     head = ['title', 'dcb/fr', 'pkt/fr', 'asc/fr', 'ce dump/s', 'ib', 'ib nested', 'setpred', 'condexec',
             'predicated', 'wrm gpu/cpu', 'memsem', 'driver calls']
     print('CP census:')
+    widths = [max(len(x) for x in col) for col in zip(head, *rows)]
+    for row in [head, *rows]:
+        print('  '.join(x.ljust(w) for x, w in zip(row, widths)).rstrip())
+
+
+def print_native_probe(results):
+    """The PS_NATIVE_PROBE table (the exit summary, else the last windows): one row per title with it."""
+    rows = []
+    fmt = lambda v: '' if v is None else str(v)
+    for r in results:
+        p = r.get('native_probe')
+        if not p:
+            continue
+        s = p.get('summary') or p.get('window') or {}
+        reasons = s.get('main_reasons') or {k: s[k] for k in ('new_image', 'new_view', 'upload', 'buffer', 'layout', 'sync',
+                                                               'compile', 'descriptors', 'memo_miss', 'other') if s.get(k)}
+        top = sorted(reasons.items(), key=lambda kv: -kv[1])[:3]
+        rows.append([r['name'], fmt(s.get('draws_per_frame')), fmt(s.get('pure')), fmt(s.get('dcbs_per_frame')),
+                     fmt(s.get('all_pure_dcbs')), fmt(s.get('pure_time')), fmt(s.get('amdahl_4')), fmt(s.get('amdahl_8')),
+                     fmt(s.get('gpu_busy')), fmt(s.get('decision')) or ('(window)' if not p.get('summary') else ''),
+                     ', '.join(f'{k} {v}' for k, v in top) or '-'])
+    if not rows:
+        return
+    head = ['title', 'draws/fr', 'pure%', 'dcb/fr', 'pure dcb%', 'pure time%', 'x4', 'x8', 'GPU busy%', 'decision',
+            'main mutating reasons (% of draws)']
+    print('Native probe:')
     widths = [max(len(x) for x in col) for col in zip(head, *rows)]
     for row in [head, *rows]:
         print('  '.join(x.ljust(w) for x, w in zip(row, widths)).rstrip())
@@ -408,6 +463,7 @@ def main(argv):
         print('  '.join(x.ljust(w) for x, w in zip(row, widths)).rstrip())
     print_perf(results)
     print_census(results)
+    print_native_probe(results)
     if args.compare_shots:
         print(f'shots against {args.compare_shots} (PSNR over RGB, flagged under {args.psnr_min:g} dB):')
         shot_head = ['title', 'compared', 'min dB', 'mean dB', 'max diff', 'flagged', 'unmatched here/base']

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "psport_toggles.h"
+#include "psport_native_probe.h"
 #include <ranges>
 #include "common/assert.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
@@ -158,6 +159,7 @@ Image::Image(const Vulkan::Instance& instance, Vulkan::Runtime& runtime_,
     : guest_begin{info_.guest_address}, guest_end{info_.guest_address + info_.guest_size},
       info{info_}, runtime{&runtime_}, slot_image_views{&slot_image_views_} {
     PsStats::Timer timer{PsStats::g_t_image_create};
+    PsNativeProbe::Note(PsNativeProbe::NewImage);
     if (info.pixel_format == vk::Format::eUndefined) {
         return;
     }
@@ -253,6 +255,7 @@ ImageView& Image::FindView(const ImageViewInfo& view_info, bool ensure_guest_sam
         const auto view_id = backing->image_view_ids[backing->last_view];
         return (*slot_image_views)[view_id];
     }
+    PsNativeProbe::Note(PsNativeProbe::NewView);
     const auto view_id = slot_image_views->insert(runtime->GetInstance(), view_info, *this);
     backing->image_view_infos.emplace_back(view_info);
     backing->image_view_ids.emplace_back(view_id);
@@ -274,6 +277,7 @@ void Image::GetBarriers(Barriers& barriers, vk::ImageLayout dst_layout, vk::Acce
     const bool partially_transited = !subresource_states.empty();
 
     if (needs_partial_transition || partially_transited) {
+        PsNativeProbe::ForgetLayout(backing);
         if (!partially_transited) {
             subresource_states.resize(info.resources.levels * info.resources.layers);
             std::fill(subresource_states.begin(), subresource_states.end(), last_state);
@@ -335,6 +339,7 @@ void Image::GetBarriers(Barriers& barriers, vk::ImageLayout dst_layout, vk::Acce
             subresource_states.clear();
         }
     } else { // Full resource transition
+        PsNativeProbe::NoteLayout(backing, u32(last_state.layout), u32(dst_layout));
         constexpr auto write_flags = vk::AccessFlagBits2::eTransferWrite |
                                      vk::AccessFlagBits2::eShaderWrite |
                                      vk::AccessFlagBits2::eMemoryWrite;
