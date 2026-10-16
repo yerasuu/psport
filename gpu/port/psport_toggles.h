@@ -130,7 +130,7 @@ inline std::atomic<std::uint64_t> g_c_asc_submits{0};
 inline std::array<std::atomic<std::uint64_t>, 4> g_range_allocators{}, g_range_live{}, g_range_bytes{};
 inline std::atomic<std::int64_t> g_c_hot_pages{0};
 /// Stall diagnostics (PS_FRAME_STATS): per-frame deltas printed for frames over 40 ms.
-inline std::atomic<std::uint64_t> g_images_registered{0};
+inline std::atomic<std::uint64_t> g_images_registered{0}, g_images_unregistered{0};
 inline std::atomic<std::uint64_t> g_cb_image_upload{0};
 inline std::atomic<std::uint64_t> g_cb_buffer_upload{0};
 inline std::atomic<int> g_gpu_thread_clock{-1}; ///< clockid_t of the GPU command thread

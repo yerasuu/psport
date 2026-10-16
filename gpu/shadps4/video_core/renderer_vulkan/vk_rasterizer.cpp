@@ -3976,6 +3976,14 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
                     (unsigned long long)texture_set_why[2], (unsigned long long)texture_set_why[3]);
         std::printf("  scene proxies sampled directly: %llu bindings\n",
                     static_cast<unsigned long long>(proxy_samples));
+        // Each one bumps the registry generation, which invalidates every texture set and memo.
+        const u64 registered = PsStats::g_images_registered.load(std::memory_order_relaxed);
+        const u64 unregistered = PsStats::g_images_unregistered.load(std::memory_order_relaxed);
+        std::printf("  images: %llu registered, %llu unregistered\n",
+                    static_cast<unsigned long long>(registered - images_registered_seen),
+                    static_cast<unsigned long long>(unregistered - images_unregistered_seen));
+        images_registered_seen = registered;
+        images_unregistered_seen = unregistered;
         proxy_samples = 0;
         texture_set_why = {};
         begin_memo_hits = begin_memo_misses = texture_set_hits = texture_set_misses = 0;

@@ -683,6 +683,7 @@ private:
     u64 untracked_reads_packet = 0; ///< newest packet reading guest memory it does not list
     u64 constram_waits_skipped = 0; ///< statistics: CPU writes that did not have to wait
     u64 proxy_samples = 0; ///< texture bindings that read a scene proxy (statistics)
+    u64 images_registered_seen = 0, images_unregistered_seen = 0; ///< at the last memo report
     float sampler_lod_bias = 0.0f; ///< psport: extra bias of this draw's samplers
     bool pipeline_is_compute = false; ///< psport: the bound pipeline of BindResources
     bool scene_debug_frame = false; ///< PS_SCENE_DEBUG: this frame's passes are printed
