@@ -84,6 +84,11 @@ ABI int64_t runtime_calls_stub(uint32_t id, uintptr_t a0, uintptr_t a1, uintptr_
 ABI int64_t runtime_calls_failed(uint32_t id, const uintptr_t *p_arguments, int64_t result, uint32_t kind);
 /* An HLE function logging "(STUBBED)" was called the first time; *count keeps counting its calls. */
 void runtime_calls_hle_stub(const char *sz_function, const uint64_t *p_count);
+/* A line (newline included) runtime_calls_report prints after its own, for a diagnostic that must
+ * be summed up on every exit: it may run from the fault and watchdog handlers, so it takes no locks
+ * and reads only counters. */
+typedef void (*RuntimeSummary)(char *sz_out, size_t cb_out);
+void runtime_calls_add_summary(RuntimeSummary pfn_summary);
 void runtime_calls_report(void);
 uintptr_t runtime_rwlock_resolve(const char *sz_name);
 void runtime_rwlock_report(void);

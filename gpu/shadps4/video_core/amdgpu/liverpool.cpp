@@ -37,6 +37,7 @@
 #include "video_core/amdgpu/pm4_cmds.h"
 #include "video_core/amdgpu/pm4_selftest.h"
 #include "cp_decoder.h"
+#include "cp_stream.h"
 #include "video_core/renderdoc.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
 
@@ -1138,6 +1139,76 @@ void CpShadowCompare(const Regs& regs) {
 }
 } // namespace
 
+extern "C" {
+// runtime_config.c, runtime_calls.c
+int runtime_env_flag(const char* sz_name, int fallback);
+void runtime_calls_add_summary(void (*pfn_summary)(char* sz_out, std::size_t cb_out));
+}
+
+// psport PS_CP_TRANSLATOR=1 (phase P3 of the native GPU plan, decision #361): stage A also records
+// each top-level graphics buffer as the translator's command stream (gpu/cp/cp_stream.h), with a
+// decoder and register file of its own, and checks it packet by packet against what the switch in
+// ProcessGraphics runs. Liverpool still executes everything; the stream is only compared.
+namespace {
+struct CpTranslator {
+    std::array<u32, PsCp::Bank::End> registers{};
+    PsCp::Decoder decoder{std::span<u32, PsCp::Bank::End>{registers},
+                          PsCp::DecoderOptions{.is_compute_sh_to_owner = true,
+                                               .compute_words = sizeof(ComputeProgram) / 4}};
+    PsCp::StreamRecorder recorder{decoder};
+    PsCp::CommandStream stream;
+    PsCp::StreamCheck check;
+    bool is_started = false;
+};
+
+CpTranslator& Translator() {
+    static CpTranslator s_translator;
+    return s_translator;
+}
+
+void SummarizeCpTranslator(char* sz_out, std::size_t cb_out) {
+    Translator().check.FormatSummary(sz_out, cb_out);
+}
+
+bool CpTranslatorEnabled() {
+    static const bool s_is_enabled = [] {
+        if (runtime_env_flag("PS_CP_TRANSLATOR", 0) == 0) {
+            return false;
+        }
+        if (Pm4SelfTest::Enabled()) {
+            std::printf("CP translator: off with PS_PM4_SELFTEST (its packets are not in the game's "
+                        "buffers)\n");
+            return false;
+        }
+        std::printf("CP translator: graphics buffers recorded as command streams and checked against "
+                    "Liverpool (gpu/cp/cp_stream.h)\n");
+        runtime_calls_add_summary(&SummarizeCpTranslator);
+        return true;
+    }();
+    return s_is_enabled;
+}
+
+void CpTranslatorRecord(std::span<const u32> dcb, const Regs& regs, VAddr va_indirect_base) {
+    auto& translator = Translator();
+    if (!translator.is_started) {
+        static Regs s_defaults;
+        s_defaults.SetDefaults();
+        translator.decoder.Registers().SetDefaults(s_defaults.reg_array);
+        translator.decoder.Registers().Write(0, regs.reg_array);
+        translator.is_started = true;
+    }
+    translator.recorder.Record(dcb, va_indirect_base, translator.stream);
+    translator.check.Begin(translator.stream);
+}
+
+void CpTranslatorEnd(const Regs& regs) {
+    auto& translator = Translator();
+    if (translator.check.End()) {
+        translator.decoder.Registers().Write(0, regs.reg_array);
+    }
+}
+} // namespace
+
 void ScanDcb(std::span<const u32> dcb, int depth) {
     auto& st = g_dcb_stats;
     const int d = depth > 0 ? 1 : 0;
@@ -1398,6 +1469,10 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
     if (seq != NoSeq && CpShadowEnabled()) {
         CpShadowDecode(dcb, regs);
     }
+    const bool is_translating = CpTranslatorEnabled();
+    if (seq != NoSeq && is_translating) {
+        CpTranslatorRecord(dcb, regs, indirect_args_addr);
+    }
     const auto base_addr = reinterpret_cast<uintptr_t>(dcb.data());
     const std::size_t dcb_dwords = dcb.size();
     // psport PS_CP_DECODER=1: packets and their register writes come from the
@@ -1455,6 +1530,10 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
             const PM4ItOpcode opcode = header->type3.opcode;
             if (!cp_cursor) {
                 ApplyGraphicsRegisterPacket(regs, header, gfx_reg_checksum, &pipe_dirty);
+            }
+            if (is_translating) {
+                Translator().check.OnExecuted({dcb.data(), count + 1}, dcb_depth, regs.reg_array,
+                                              indirect_args_addr);
             }
             // DmaData to 0x3022C does nothing here (skipped below): no need to wait.
             if (rasterizer && !PipelinedOpcode(opcode) &&
@@ -2261,6 +2340,9 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                     skip = value == 0;
                 }
                 if (skip) {
+                    if (is_translating) {
+                        Translator().check.OnConditionalSkip(cond_exec->exec_count.Value());
+                    }
                     if (cp_cursor) {
                         cp_cursor->Skip(cond_exec->exec_count.Value());
                     }
@@ -2299,6 +2381,9 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
 
     if (seq != NoSeq && CpShadowEnabled()) {
         CpShadowCompare(regs);
+    }
+    if (seq != NoSeq && is_translating) {
+        CpTranslatorEnd(regs);
     }
     if (rasterizer && seq != NoSeq) {
         rasterizer->RetireSubmission(); // prepared draws live until the recording thread is past

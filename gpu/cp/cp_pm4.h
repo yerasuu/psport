@@ -128,6 +128,11 @@ inline constexpr u32 VgtNumIndices = 0xC24C;   ///< VGT_NUM_INDICES (uconfig)
 inline constexpr u32 VgtNumInstances = 0xC24D; ///< VGT_NUM_INSTANCES (uconfig)
 } // namespace Reg
 
+/// SET_BASE base indices.
+namespace BaseIndex {
+inline constexpr u32 DrawIndexIndirectPatchTable = 1; ///< the arguments of indirect draws and dispatches
+} // namespace BaseIndex
+
 /// EVENT_WRITE event types the decoder looks at.
 namespace Event {
 inline constexpr u32 SoVgtStreamoutFlush = 0x1F;

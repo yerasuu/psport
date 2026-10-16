@@ -267,7 +267,7 @@ The translator, from the game's submission to the screen:
 |---|---|
 | libSceGnmDriver (`sceGnmSubmitCommandBuffers`, `sceGnmSubmitDone`, packet builders) | `gpu/shadps4/core/libraries/gnmdriver/` |
 | libSceVideoOut (flips, vblank, `PS_VBLANK_HZ`, cursor state) | `gpu/shadps4/core/libraries/videoout/` |
-| Liverpool command processor: PM4 decoding, register state, draws and dispatches | `gpu/shadps4/video_core/amdgpu/liverpool.cpp`, `gpu/cp/` (psport's own PM4 decoder) |
+| Liverpool command processor: PM4 decoding, register state, draws and dispatches | `gpu/shadps4/video_core/amdgpu/liverpool.cpp`, `gpu/cp/` (psport's own PM4 decoder, and the command stream stage A records with it: `cp_stream.h`) |
 | Vulkan rasterizer, presenter, upscalers | `gpu/shadps4/video_core/renderer_vulkan/` |
 | buffer, texture and pipeline caches; page tracking | `gpu/shadps4/video_core/buffer_cache/`, `texture_cache/`, `page_manager.cpp`, `renderer_vulkan/vk_pipeline_cache.cpp` |
 | GCN shader recompiler to SPIR-V | `gpu/shadps4/shader_recompiler/` |

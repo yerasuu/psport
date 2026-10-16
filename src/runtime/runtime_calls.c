@@ -12,13 +12,15 @@
 #include <pthread.h>
 #include <unistd.h>
 
-enum { FAILURE_SLOTS = 4096, HLE_STUB_SLOTS = 1024 };
+enum { FAILURE_SLOTS = 4096, HLE_STUB_SLOTS = 1024, SUMMARY_SLOTS = 8 };
 static const char (*s_p_import_names)[128];
 static uint64_t s_c_imports;
 static uint64_t *s_p_unimplemented_calls, *s_p_stub_calls;
 static struct { uint64_t key, c_failures; } s_failures[FAILURE_SLOTS];
 static struct { const char *sz_function; const uint64_t *p_count; } s_hle_stubs[HLE_STUB_SLOTS];
 static size_t s_c_hle_stubs;
+static RuntimeSummary s_pfn_summaries[SUMMARY_SLOTS];
+static size_t s_c_summaries;
 static pthread_mutex_t s_hle_stub_lock = PTHREAD_MUTEX_INITIALIZER;
 typedef struct { uint64_t c_calls; uint32_t id, code; int kind; const char *sz_function; } Entry;
 static Entry *s_p_entries;
@@ -106,6 +108,17 @@ void runtime_calls_hle_stub(const char *sz_function, const uint64_t *p_count) {
     pthread_mutex_unlock(&s_hle_stub_lock);
 }
 
+void runtime_calls_add_summary(RuntimeSummary pfn_summary) {
+    pthread_mutex_lock(&s_hle_stub_lock);
+    if (s_c_summaries < SUMMARY_SLOTS) {
+        s_pfn_summaries[s_c_summaries] = pfn_summary;
+        __atomic_store_n(&s_c_summaries, s_c_summaries + 1, __ATOMIC_RELEASE);
+    } else {
+        printf("Calls: no slot left for a summary line (%d in use); it will not be printed\n", SUMMARY_SLOTS);
+    }
+    pthread_mutex_unlock(&s_hle_stub_lock);
+}
+
 static int report_line(char *sz_out, size_t cb_out, const Entry *p_entry) {
     static const char *const s_kinds[] = {"unimplemented", "stub", "failed", "status"};
     int used = snprintf(sz_out, cb_out, "Calls: summary %s %" PRIu64 " ", s_kinds[p_entry->kind], p_entry->c_calls);
@@ -159,6 +172,10 @@ void runtime_calls_report(void) {
     }
     if (file >= 0) close(file);
     put(1, runtime_quirks_summary());
+    for (size_t i = 0, c_summaries = __atomic_load_n(&s_c_summaries, __ATOMIC_ACQUIRE); i < c_summaries; ++i) {
+        s_pfn_summaries[i](sz_line, sizeof(sz_line));
+        put(1, sz_line);
+    }
     runtime_eventflag_created_report();
     runtime_memory_flexible_report();
     runtime_file_unmounted_report();
