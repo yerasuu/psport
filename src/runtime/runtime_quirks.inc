@@ -17,17 +17,12 @@
  * general fix ("#<number>", checked by gpu/games/game_profile.cpp) and its code lives in
  * gpu/games/<game>/. */
 
-QUIRK(amd_guest_sparse_arena, HOST,
-      "the game's memory in a sparse arena on AMD GPUs, the layer's memory module elsewhere (PS_LAYER_MEMORY): "
-      "each rebinding held NVIDIA's GPU for 10 s and more (GTX 1660 Ti, 615.71), while on an RX 7800 XT the module "
-      "kept ~1 GB of an area's data out of VRAM (100 FPS against ~200)",
-      "#261")
-QUIRK_GPU(amd_guest_sparse_arena, 0x1002, 0, "", 0, 0xffffffff)
-QUIRK(amd_guest_dmabuf_first, HOST,
-      "the game's direct memory in dma-buf chunks first on AMD GPUs (tested the most), host memory import first "
-      "elsewhere (PS_GUEST_MEMORY): NVIDIA's dma-buf maps at offset 0 only and CPU access through it may be slow",
-      "#261")
-QUIRK_GPU(amd_guest_dmabuf_first, 0x1002, 0, "", 0, 0xffffffff)
+QUIRK(nvidia_slow_sparse_rebind, HOST,
+      "NVIDIA's proprietary driver: each rebinding of the game's memory in the sparse arena held the GPU for 10 s and "
+      "more, the desktop with it (GTX 1660 Ti, 615.71; its sparse binding has slowed since 555, the time growing with "
+      "the pages already bound, which the startup test bind does not reach): the layer's memory module there",
+      "#261, #373")
+QUIRK_GPU(nvidia_slow_sparse_rebind, 0, 4, "", 0, 0xffffffff)
 QUIRK(radv_gcn_nohiz, HOST,
       "GCN 3-5 under RADV (Polaris, Vega and their APUs): with HiZ, depth compression drew black halos and lost "
       "geometry; run.sh sets RADV_DEBUG=nohiz unless RADV_DEBUG is the user's or PS_AUTO_NOHIZ=0",

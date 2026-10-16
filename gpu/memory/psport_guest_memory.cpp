@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "psport_guest_memory.h"
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <string>
@@ -10,6 +11,7 @@
 #include <mutex>
 #include <sys/mman.h>
 #include <unistd.h>
+#include <vector>
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "pslayer_gpu_memory.h"
 #include "psport_quirks.h"
@@ -480,6 +482,9 @@ bool HostImportWorks(const Vulkan::Instance& instance, const char*& why) {
     return is_ok;
 }
 
+/// Below this the mapping is uncached (write-combined reads run at a few hundred MB/s).
+constexpr double MinCachedReadMBps = 1000.0;
+
 /// CPU read speed through a dma-buf mapping, MB/s (the game's code runs on this memory: an
 /// uncached mapping would slow it to a crawl).
 double MappedReadSpeed(const volatile std::uint64_t* p_words, u64 cb_range) {
@@ -501,23 +506,143 @@ namespace {
 /// The GPU's choice of LayerMemory without PS_LAYER_MEMORY: -1 not known yet, 0 or 1.
 std::atomic<int> s_layer_default{-1};
 
-/// The sparse arena (PS_LAYER_MEMORY=0) where amd_guest_sparse_arena applies, the layer's memory
-/// module everywhere else. On NVIDIA its host memory import works, but each rebinding of the
-/// game's memory in the arena (vkQueueBindSparse, blocks moved to and from VRAM) held the GPU for
-/// 10 s and more, the desktop frozen with it (GTX 1660 Ti, driver 615.71): the Linux driver's
-/// sparse binding has slowed down since 555, the time growing with the pages already bound (NVIDIA
-/// developer forum, "Sparse texture binding is painfully slow"). On an RX 7800 XT the module was on
-/// par with the arena on a route in Yharnam, but in the Hunter's Dream it kept ~1 GB of the area's
-/// data out of VRAM (ranges with a few unannounced blocks stay in place without volatile blocks):
-/// 100 FPS against ~200.
+/// What Usable found and why it chose as it did, for its one summary line.
+struct Detected {
+    bool has_sparse_binding = false;
+    bool has_sparse_residency_buffer = false;
+    bool has_sparse_queue = false;
+    double sparse_bind_ms = -1.0; ///< negative: not measured or failed
+    const char* sz_backing_why = "";
+    const char* sz_dmabuf = "untested";
+    double dmabuf_read_mbps = 0.0;
+    const char* sz_host_import = "untested";
+    const char* sz_chunks_why = "";
+};
+Detected s_detected;
+
+/// Well above what a driver that binds in the page tables takes (a few ms), well below the
+/// seconds of a stalled rebinding.
+constexpr double MaxSparseBindMs = 250.0;
+
+/// Binds 64 MiB of VRAM into a sparse buffer in the arena's blocks, rebinds every block to
+/// another part of the memory and unbinds them, each pass waited for: ms for the three, or a
+/// negative value when the driver failed one.
+double MeasureSparseBind(const Vulkan::Instance& instance) {
+    constexpr u64 Size = 64 << 20;
+    constexpr u64 MinBlock = 16 << 10;
+    const vk::Device dev = instance.GetDevice();
+    const auto [buffer_result, buffer] = dev.createBuffer({
+        .flags = vk::BufferCreateFlagBits::eSparseBinding | vk::BufferCreateFlagBits::eSparseResidency,
+        .size = Size,
+        .usage = vk::BufferUsageFlagBits::eTransferSrc | vk::BufferUsageFlagBits::eTransferDst,
+        .sharingMode = vk::SharingMode::eExclusive,
+    });
+    if (buffer_result != vk::Result::eSuccess) {
+        return -1.0;
+    }
+    const auto reqs = dev.getBufferMemoryRequirements(buffer);
+    const u64 cb_block = (std::max<u64>(reqs.alignment, MinBlock) + reqs.alignment - 1) / reqs.alignment *
+                         reqs.alignment;
+    std::uint32_t type = ~0u;
+    for (std::uint32_t i = 0; i < s_memory_properties.memoryTypeCount && type == ~0u; ++i) {
+        if ((reqs.memoryTypeBits & (1u << i)) &&
+            (s_memory_properties.memoryTypes[i].propertyFlags & vk::MemoryPropertyFlagBits::eDeviceLocal)) {
+            type = i;
+        }
+    }
+    vk::DeviceMemory memory;
+    if (type != ~0u && Size % cb_block == 0) {
+        const auto [memory_result, allocated] = dev.allocateMemory({.allocationSize = Size, .memoryTypeIndex = type});
+        if (memory_result == vk::Result::eSuccess) {
+            memory = allocated;
+        }
+    }
+    const auto [fence_result, fence] = dev.createFence({});
+    double ms = -1.0;
+    if (memory && fence_result == vk::Result::eSuccess) {
+        const u64 c_blocks = Size / cb_block;
+        std::vector<vk::SparseMemoryBind> binds(c_blocks);
+        const vk::Queue queue = instance.GetGraphicsQueue();
+        const auto run_pass = [&](int i_pass) {
+            for (u64 i = 0; i < c_blocks; ++i) {
+                const u64 i_memory_block = i_pass == 1 ? c_blocks - 1 - i : i;
+                binds[i] = vk::SparseMemoryBind{
+                    .resourceOffset = i * cb_block,
+                    .size = cb_block,
+                    .memory = i_pass == 2 ? vk::DeviceMemory{} : memory,
+                    .memoryOffset = i_pass == 2 ? 0 : i_memory_block * cb_block,
+                };
+            }
+            const vk::SparseBufferMemoryBindInfo buffer_bind{
+                .buffer = buffer, .bindCount = static_cast<std::uint32_t>(c_blocks), .pBinds = binds.data()};
+            return dev.resetFences(fence) == vk::Result::eSuccess &&
+                   queue.bindSparse(vk::BindSparseInfo{.bufferBindCount = 1, .pBufferBinds = &buffer_bind},
+                                    fence) == vk::Result::eSuccess &&
+                   dev.waitForFences(fence, true, 5'000'000'000ull) == vk::Result::eSuccess;
+        };
+        const auto start = std::chrono::steady_clock::now();
+        if (run_pass(0) && run_pass(1) && run_pass(2)) {
+            ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+        } else {
+            // so that nothing still uses the buffer when it goes, since a pass may have timed out
+            (void)queue.waitIdle();
+        }
+    }
+    if (fence_result == vk::Result::eSuccess) {
+        dev.destroyFence(fence);
+    }
+    dev.destroyBuffer(buffer);
+    if (memory) {
+        dev.freeMemory(memory);
+    }
+    return ms;
+}
+
+/// The sparse arena where the device can bind sparse buffers and does it fast, the layer's memory
+/// module (no sparse binding) elsewhere; PS_LAYER_MEMORY=1/0 chooses by hand. On an RX 7800 XT the
+/// module was on par with the arena on a route in Yharnam, but in the Hunter's Dream it kept ~1 GB
+/// of the area's data out of VRAM (ranges with a few unannounced blocks stay in place without
+/// volatile blocks): 100 FPS against ~200. NVIDIA's proprietary driver held the GPU for 10 s and
+/// more on each rebinding of the game's memory, the time growing with the pages already bound,
+/// which the test bind does not reach (nvidia_slow_sparse_rebind; NVIDIA developer forum, "Sparse
+/// texture binding is painfully slow").
 void ChooseLayerDefault(const Vulkan::Instance& instance) {
-    const std::uint32_t vendor = instance.GetVendorID();
-    s_layer_default.store(PsQuirk::Active(RUNTIME_QUIRK_amd_guest_sparse_arena) ? 0 : 1,
-                          std::memory_order_relaxed);
-    std::printf("Guest memory: the game's memory in place on this GPU (vendor 0x%04x), %s\n",
-                vendor,
-                LayerMemory() ? "through the layer's memory module (no sparse binding)"
-                              : "in a sparse arena (PS_LAYER_MEMORY=1: the layer's memory module)");
+    const vk::PhysicalDevice physical = instance.GetPhysicalDevice();
+    const vk::PhysicalDeviceFeatures features = physical.getFeatures();
+    const auto families = physical.getQueueFamilyProperties();
+    const std::uint32_t i_family = instance.GetGraphicsQueueFamilyIndex();
+    s_detected.has_sparse_binding = features.sparseBinding;
+    s_detected.has_sparse_residency_buffer = features.sparseResidencyBuffer;
+    s_detected.has_sparse_queue = i_family < families.size() &&
+                                  (families[i_family].queueFlags & vk::QueueFlagBits::eSparseBinding);
+    const char* sz_env = std::getenv("PS_LAYER_MEMORY");
+    const bool is_forced = sz_env && *sz_env;
+    const bool can_bind_sparse = s_detected.has_sparse_binding && s_detected.has_sparse_residency_buffer &&
+                                 s_detected.has_sparse_queue;
+    if (can_bind_sparse && !(is_forced && sz_env[0] == '1')) {
+        s_detected.sparse_bind_ms = MeasureSparseBind(instance);
+    }
+    const char*& sz_why = s_detected.sz_backing_why;
+    bool is_arena = false;
+    if (is_forced) {
+        sz_why = "PS_LAYER_MEMORY";
+    } else if (!s_detected.has_sparse_binding) {
+        sz_why = "no sparseBinding";
+    } else if (!s_detected.has_sparse_residency_buffer) {
+        sz_why = "no sparseResidencyBuffer";
+    } else if (!s_detected.has_sparse_queue) {
+        sz_why = "the graphics queue cannot bind sparse memory";
+    } else if (s_detected.sparse_bind_ms < 0) {
+        sz_why = "the test bind failed";
+    } else if (s_detected.sparse_bind_ms > MaxSparseBindMs) {
+        sz_why = "the test bind was slow";
+    } else if (PsQuirk::Active(RUNTIME_QUIRK_nvidia_slow_sparse_rebind)) {
+        sz_why = "HOST quirk nvidia_slow_sparse_rebind";
+    } else {
+        is_arena = true;
+        sz_why = "sparse buffers bound fast";
+    }
+    s_layer_default.store(is_arena ? 0 : 1, std::memory_order_relaxed);
 }
 } // namespace
 
@@ -553,6 +678,7 @@ bool DmaBufWorks(const Vulkan::Instance& instance) {
     {
         if (!instance.IsGuestMemoryExportSupported()) {
             std::printf("Guest memory: the driver cannot export system memory as a dma-buf\n");
+            s_detected.sz_dmabuf = "unsupported";
             return false;
         }
         const vk::Device dev = instance.GetDevice();
@@ -568,6 +694,7 @@ bool DmaBufWorks(const Vulkan::Instance& instance) {
             .sharingMode = vk::SharingMode::eExclusive,
         });
         if (buffer_result != vk::Result::eSuccess) {
+            s_detected.sz_dmabuf = "unsupported";
             return false;
         }
         const auto requirements = dev.getBufferMemoryRequirements(buffer);
@@ -624,12 +751,14 @@ bool DmaBufWorks(const Vulkan::Instance& instance) {
                     MappedReadSpeed(static_cast<const volatile std::uint64_t*>(p_whole), Size);
                 std::printf("Guest memory: CPU reads through the driver's dma-buf: %.0f MB/s\n",
                             speed);
-                if (speed < 1000.0) {
+                s_detected.dmabuf_read_mbps = speed;
+                if (speed < MinCachedReadMBps) {
                     std::printf("Guest memory: CPU reads of the driver's dma-buf run at %.0f MB/s "
                                 "(uncached?): not used\n",
                                 speed);
                     is_ok = false;
                     s_is_whole_only = false;
+                    s_detected.sz_dmabuf = "slow";
                 }
             }
             if (p_whole != MAP_FAILED) {
@@ -644,12 +773,12 @@ bool DmaBufWorks(const Vulkan::Instance& instance) {
             dev.freeMemory(memory);
         }
         dev.destroyBuffer(buffer);
-        if (!is_ok) {
+        if (is_ok) {
+            s_detected.sz_dmabuf = s_is_whole_only ? "whole" : "offsets";
+        } else if (s_detected.dmabuf_read_mbps == 0.0) {
             std::printf("Guest memory: the driver's dma-buf cannot be mapped (%s)\n",
                         h_fd >= 0 ? "mmap failed" : "no exportable cached system memory");
-        } else if (s_is_whole_only) {
-            std::printf("Guest memory: the driver's dma-buf maps at offset 0 only: one chunk per "
-                        "direct memory allocation\n");
+            s_detected.sz_dmabuf = "unmappable";
         }
         return is_ok;
     }
@@ -686,40 +815,104 @@ vk::BufferUsageFlags ExternalXfbUsage(const Vulkan::Instance& instance,
 }
 } // namespace
 
+namespace {
+/// The one line that says what the device offers the game's memory and what Usable chose.
+void PrintDetected(const Vulkan::Instance& instance, bool is_usable) {
+    u64 cb_device_local = 0, cb_rebar = 0, cb_host_visible = 0;
+    for (std::uint32_t i = 0; i < s_memory_properties.memoryTypeCount; ++i) {
+        const auto flags = s_memory_properties.memoryTypes[i].propertyFlags;
+        const vk::MemoryHeap& heap = s_memory_properties.memoryHeaps[s_memory_properties.memoryTypes[i].heapIndex];
+        const bool is_local_heap = static_cast<bool>(heap.flags & vk::MemoryHeapFlagBits::eDeviceLocal);
+        const bool is_host_visible = static_cast<bool>(flags & vk::MemoryPropertyFlagBits::eHostVisible);
+        if (is_local_heap) {
+            cb_device_local = std::max<u64>(cb_device_local, heap.size);
+        }
+        if (is_host_visible && (flags & vk::MemoryPropertyFlagBits::eDeviceLocal)) {
+            cb_rebar = std::max<u64>(cb_rebar, heap.size);
+        }
+        if (is_host_visible && !is_local_heap) {
+            cb_host_visible = std::max<u64>(cb_host_visible, heap.size);
+        }
+    }
+    const vk::PhysicalDeviceType device_type = instance.GetPhysicalDevice().getProperties().deviceType;
+    const bool is_uma =
+        device_type == vk::PhysicalDeviceType::eIntegratedGpu || device_type == vk::PhysicalDeviceType::eCpu;
+    const char* sz_host_import = s_detected.sz_host_import;
+    if (std::string_view{sz_host_import} == "untested" && !instance.IsHostMemoryImportSupported()) {
+        sz_host_import = "unsupported";
+    }
+    const char* sz_chunks = !is_usable                ? "none"
+                            : s_mode == Mode::HostImport ? "host-import"
+                            : s_is_whole_only            ? "dmabuf-whole"
+                                                         : "dmabuf";
+    const std::string model{instance.GetModelName()};
+    std::printf("Guest memory: detected device=\"%s\" driver=%s vram_mib=%llu rebar_mib=%llu host_visible_mib=%llu "
+                "uma=%d sparse_binding=%d sparse_residency_buffer=%d sparse_queue=%d sparse_bind_ms=%.1f "
+                "dmabuf=%s dmabuf_read_mbps=%.0f host_import=%s backing=%s backing_why=\"%s\" chunks=%s "
+                "chunks_why=\"%s\"\n",
+                model.c_str(), vk::to_string(instance.GetDriverID()).c_str(),
+                (unsigned long long)(cb_device_local >> 20), (unsigned long long)(cb_rebar >> 20),
+                (unsigned long long)(cb_host_visible >> 20), is_uma ? 1 : 0, s_detected.has_sparse_binding ? 1 : 0,
+                s_detected.has_sparse_residency_buffer ? 1 : 0, s_detected.has_sparse_queue ? 1 : 0,
+                s_detected.sparse_bind_ms, s_detected.sz_dmabuf, s_detected.dmabuf_read_mbps, sz_host_import,
+                LayerMemory() ? "layer-module" : "sparse-arena", s_detected.sz_backing_why, sz_chunks,
+                s_detected.sz_chunks_why);
+}
+} // namespace
+
 bool Usable(const Vulkan::Instance& instance) {
     static const bool s_is_usable = [&] {
-        ChooseLayerDefault(instance);
         s_device = instance.GetDevice();
         s_memory_properties = instance.GetPhysicalDevice().getMemoryProperties();
+        ChooseLayerDefault(instance);
         s_xfb_dmabuf = ExternalXfbUsage(instance, vk::ExternalMemoryHandleTypeFlagBits::eDmaBufEXT);
         s_xfb_host =
             ExternalXfbUsage(instance, vk::ExternalMemoryHandleTypeFlagBits::eHostAllocationEXT);
         s_is_usable_checked = true;
-        // PS_GUEST_MEMORY=dmabuf|host chooses; else dma-buf chunks where amd_guest_dmabuf_first
-        // applies and host memory import first elsewhere (NVIDIA: its dma-buf maps at offset 0
-        // only, and CPU access through it may be slow).
+        // PS_GUEST_MEMORY=dmabuf|host chooses. Else dma-buf chunks when the driver's dma-buf maps at
+        // page offsets at cached speed, host memory import first when it maps at offset 0 only
+        // (NVIDIA: a chunk per allocation) or not at all. Host import is not preferred for being
+        // reported: RADV reports it and passes the probe, yet the game stalls after 2 s on imported
+        // memfd memory.
         const char* sz_forced = std::getenv("PS_GUEST_MEMORY");
         const bool should_force_host = sz_forced && std::string_view{sz_forced} == "host";
         const bool should_force_dmabuf = sz_forced && std::string_view{sz_forced} == "dmabuf";
-        const bool is_host_first =
-            should_force_host ||
-            (!should_force_dmabuf && !PsQuirk::Active(RUNTIME_QUIRK_amd_guest_dmabuf_first));
-        const char* sz_why = "";
-        if (is_host_first && HostImportWorks(instance, sz_why)) {
-            s_mode = Mode::HostImport;
-            std::printf("Guest memory: host memory imported by the GPU (VK_EXT_external_memory_host, "
-                        "alignment %llu)\n",
-                        (unsigned long long)s_import_alignment);
-            return true;
-        }
-        if (is_host_first) {
-            std::printf("Guest memory: host memory import does not work here: %s\n", sz_why);
-            if (should_force_host) {
-                return false;
+        const bool is_dmabuf_ok = !should_force_host && DmaBufWorks(instance);
+        const char*& sz_why = s_detected.sz_chunks_why;
+        bool is_usable = false;
+        if (should_force_dmabuf) {
+            sz_why = "PS_GUEST_MEMORY=dmabuf";
+            is_usable = is_dmabuf_ok;
+        } else if (is_dmabuf_ok && !s_is_whole_only) {
+            sz_why = "dma-buf maps at page offsets at cached speed";
+            is_usable = true;
+        } else {
+            const char* sz_host_why = "";
+            if (HostImportWorks(instance, sz_host_why)) {
+                s_mode = Mode::HostImport;
+                s_detected.sz_host_import = "works";
+                std::printf("Guest memory: host memory imported by the GPU (VK_EXT_external_memory_host, "
+                            "alignment %llu)\n",
+                            (unsigned long long)s_import_alignment);
+                sz_why = should_force_host ? "PS_GUEST_MEMORY=host"
+                         : is_dmabuf_ok    ? "dma-buf maps at offset 0 only"
+                                           : "dma-buf unusable";
+                is_usable = true;
+            } else {
+                std::printf("Guest memory: host memory import does not work here: %s\n", sz_host_why);
+                s_detected.sz_host_import = "fails";
+                sz_why = should_force_host ? "PS_GUEST_MEMORY=host and host import fails"
+                         : is_dmabuf_ok    ? "host import fails, dma-buf maps at offset 0 only"
+                                           : "neither dma-buf nor host import works";
+                is_usable = !should_force_host && is_dmabuf_ok;
             }
         }
-        s_mode = Mode::DmaBuf;
-        return DmaBufWorks(instance);
+        if (is_usable && s_mode == Mode::DmaBuf && s_is_whole_only) {
+            std::printf("Guest memory: the driver's dma-buf maps at offset 0 only: one chunk per "
+                        "direct memory allocation\n");
+        }
+        PrintDetected(instance, is_usable);
+        return is_usable;
     }();
     return s_is_usable;
 }

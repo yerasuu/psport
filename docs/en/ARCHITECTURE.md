@@ -283,12 +283,34 @@ TAA, DLSS): [upscaler.md](upscaler.md). Changes to inherited shadPS4 files:
 ### Memory model
 
 One model on every GPU: the GPU uses the game's memory where it is (GPU-visible system memory),
-keeps often-read data in VRAM, and the command processor's work is translated. AMD keeps the game's
-memory in a sparse arena (`HOST` quirk `amd_guest_sparse_arena`, [QUIRKS.md](QUIRKS.md)); other GPUs
-(and `PS_LAYER_MEMORY=1`) go through the memory module in `gpu/layer/`, which binds the game's
-memory in place without sparse binding, from imported host memory or dma-buf chunks
-(`gpu/memory/psport_guest_memory.cpp`). A driver that can do neither stops the launch with a `Guest
-memory:` line. bbport 0.3's model (VRAM copies kept current by write tracking) is gone;
+keeps often-read data in VRAM, and the command processor's work is translated. The backing is chosen
+by what the device reports and does at startup, never by vendor (`PsGuestMemory::Usable`,
+`gpu/memory/psport_guest_memory.cpp`):
+
+- Sparse arena or memory module: the game's memory goes into a sparse arena when the device has
+  `sparseBinding`, `sparseResidencyBuffer` and a graphics queue with sparse binding, and a test bind
+  (64 MiB of VRAM bound, rebound and unbound in the arena's blocks) completes within 250 ms; else
+  through the memory module in `gpu/layer/`, which binds the game's memory in place without sparse
+  binding. The `HOST` quirk `nvidia_slow_sparse_rebind` ([QUIRKS.md](QUIRKS.md)) keeps NVIDIA's
+  proprietary driver on the module: its rebinding stalls grow with the pages bound, beyond what the
+  test reaches. `PS_LAYER_MEMORY=1/0` chooses by hand.
+- Chunks: dma-buf chunks (exported cached system memory) when the driver's dma-buf maps at page
+  offsets and CPU reads through it run at cached speed (1000 MB/s or more); host memory the GPU
+  imports (`VK_EXT_external_memory_host`) when the dma-buf maps at offset 0 only or not at all, and
+  dma-buf in whole chunks when the import fails too. Reporting the import is not enough to prefer
+  it: RADV reports it and passes the probe, yet stalls on imported memfd memory.
+  `PS_GUEST_MEMORY=dmabuf/host` chooses by hand.
+
+One line says what was found and chosen:
+
+```
+Guest memory: detected device="..." driver=MesaRadv vram_mib=.. rebar_mib=.. host_visible_mib=.. uma=0 sparse_binding=1 sparse_residency_buffer=1 sparse_queue=1 sparse_bind_ms=.. dmabuf=offsets dmabuf_read_mbps=.. host_import=untested backing=sparse-arena backing_why="sparse buffers bound fast" chunks=dmabuf chunks_why="dma-buf maps at page offsets at cached speed"
+```
+
+`rebar_mib` is the heap behind a device-local, host-visible type (Resizable BAR when above 256 MiB);
+`sparse_bind_ms` is negative when not measured or failed; `dmabuf` is `offsets`, `whole`, `slow`,
+`unmappable`, `unsupported` or `untested`; `host_import` is `works`, `fails`, `unsupported` or
+`untested`. A driver that can do neither stops the launch with a `Guest memory:` line. bbport 0.3's model (VRAM copies kept current by write tracking) is gone;
 `PS_PC_MODEL`, `PS_AS_0_3` and the other switches of the old launcher are ignored with one log line.
 Write traps on guest pages are shared by the runtime and the GPU library
 (`gpu/layer/pslayer_write_traps.h`, `runtime_memory_trap`).

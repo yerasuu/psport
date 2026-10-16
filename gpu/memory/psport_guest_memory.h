@@ -35,8 +35,8 @@ bool Usable(const Vulkan::Instance& instance);
 /// Ends the process with `why`: the GPU cannot use the game's memory in place, and the port has no
 /// other memory model.
 [[noreturn]] void Unsupported(const std::string& why);
-/// Whether the chunks are imported host memory (without amd_guest_dmabuf_first). Valid after
-/// Usable(). The sparse arena then keeps the first binding of every block (BufferCache FixedArena).
+/// Whether the chunks are imported host memory (the dma-buf maps at offset 0 only or not at all,
+/// or PS_GUEST_MEMORY=host). Valid after Usable(). The sparse arena then keeps the first binding of every block (BufferCache FixedArena).
 bool HostImported();
 /// psport PS_LAYER_MEMORY=1: the layer's memory module (gpu/layer/pslayer_gpu_memory.h) gives the
 /// GPU the game's memory through the chunk buffers instead of a sparse arena. Chunks are then one

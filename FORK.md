@@ -133,13 +133,15 @@ resolution and effect presets live in `gpu/games/bloodborne/`).
 
 ## Memory model
 
-The GPU uses the game's memory where it is, on every GPU, as a PC release would: AMD binds it into a
-sparse arena (`HOST` quirk `amd_guest_sparse_arena`), other GPUs through the layer's memory module
-(`gpu/layer/`, no sparse binding; NVIDIA's stalls the GPU for seconds), `PS_LAYER_MEMORY=1/0` to
-choose by hand. The chunks are dma-buf memory on AMD (`amd_guest_dmabuf_first`) and host memory the
-GPU imports (`VK_EXT_external_memory_host`) elsewhere, `PS_GUEST_MEMORY=host` or `dmabuf` to choose
-(`gpu/memory/psport_guest_memory.cpp`). bbport's 0.3 model (VRAM copies of the game's memory kept by
-page protection, readbacks, labels written ahead of the GPU) is removed; when the driver can do
+The GPU uses the game's memory where it is, on every GPU, as a PC release would, the backing chosen
+by Vulkan capability (docs/en/ARCHITECTURE.md, memory model): a sparse arena where the device binds
+sparse buffers and a startup test bind is fast, the layer's memory module (`gpu/layer/`, no sparse
+binding) elsewhere and on NVIDIA's proprietary driver (`HOST` quirk `nvidia_slow_sparse_rebind`: its
+rebinding stalls the GPU for seconds), `PS_LAYER_MEMORY=1/0` to choose by hand. The chunks are
+dma-buf memory where the driver's dma-buf maps at page offsets at cached speed, host memory the GPU
+imports (`VK_EXT_external_memory_host`) where it maps at offset 0 only or not at all,
+`PS_GUEST_MEMORY=host` or `dmabuf` to choose (`gpu/memory/psport_guest_memory.cpp`). bbport's 0.3
+model (VRAM copies of the game's memory kept by page protection, readbacks, labels written ahead of the GPU) is removed; when the driver can do
 neither, the launch stops with a `Guest memory:` line saying so. `PS_PC_MODEL`, `PS_AS_0_3`,
 `PS_GUEST_IN_PLACE`, `PS_PREUPLOAD` and `PS_UFFD` from an older launcher are ignored (`run.sh` logs
 one line). Testing it on NVIDIA: [docs/en/NVIDIA_TEST.md](docs/en/NVIDIA_TEST.md).
@@ -281,7 +283,7 @@ profile (or with `PS_GAME_PROFILE=none`) runs with the values in the first colum
 | Object motion (`object_motion`, `PS_OBJECT_MOTION`) | on, while the upscaler is available | it only feeds the upscaler | |
 | Frame rate (`PS_FPS`) and vblank (`PS_VBLANK_HZ`) | a title without presets: unpatched, 60 Hz vblank (the console's) | the frame rate presets are patches to one executable, its title's (`Game::Title::add_patches`); at 480 Hz a title pacing itself by its flip rate ran 8 times too fast | `uncap` (delta-time patch, 480 Hz vblank, frames shown at once), 60 or 90 (`gpu/games/bloodborne/patches.cpp`, which sets `PS_VBLANK_HZ` for the preset) |
 | Scaled output (`output_res`) and `PS_DMEM_MB` 9152 | only for a title with presets (run.sh asks `psport --has-presets`); otherwise its own size and the console's 5056 MiB of direct memory | they are a patch to the same executable, and the larger direct memory exists for its larger targets | as `output_res` and `live_resolution` choose |
-| Memory model | the PC one on every GPU, the only one (`PS_PC_MODEL`, `PS_AS_0_3`, `PS_GUEST_IN_PLACE`, `PS_PREUPLOAD` and `PS_UFFD` are ignored with one line from run.sh); AMD binds the game's memory into a sparse arena (`HOST` quirk `amd_guest_sparse_arena`), other GPUs go through the layer's memory module (`PS_LAYER_MEMORY`) | a property of the driver, not of the game: sparse binding of the game's memory works on RADV and stalls NVIDIA's GPU for seconds | |
+| Memory model | the PC one on every GPU, the only one (`PS_PC_MODEL`, `PS_AS_0_3`, `PS_GUEST_IN_PLACE`, `PS_PREUPLOAD` and `PS_UFFD` are ignored with one line from run.sh); the game's memory in a sparse arena where the device binds sparse buffers fast (startup test bind), else and on NVIDIA's proprietary driver (`HOST` quirk `nvidia_slow_sparse_rebind`) through the layer's memory module (`PS_LAYER_MEMORY`) | a property of the driver, not of the game: sparse binding of the game's memory works on RADV and stalls NVIDIA's GPU for seconds | |
 | `PS_COPY_GPU_BUFFERS` | 1 (run.sh) | the GPU thread decodes a submission after the game's call returns, later than the console's command processor reads it; the copy keeps a game that refills that memory from changing what the GPU gets | |
 | `PS_READBACKS` | 1 (relaxed) | the console's memory is shared: the CPU reads what the GPU wrote (vertices, compute results), and relaxed readbacks are the cheapest mode that gives it that | |
 | `PS_GPU_WRITE_TWINS`, `PS_GPU_WRITE_TWINS_MAX` | 1, 65536 bytes (run.sh) | a CPU write next to small GPU outputs keeps the GPU's bytes and the CPU's apart instead of waiting for the GPU; the result is the same | |

@@ -204,9 +204,10 @@ fi
 patch_args=(--patches-dir "${PS_PATCHES_DIR:-$data/patches}" --patches-config "${PS_PATCHES_CONFIG:-$data/patches.json}")
 # The GPU uses the game's memory where it is (GPU-visible system memory) and keeps the data it reads
 # often in VRAM, as a PC release would; the command processor's work is translated rather than
-# emulated. AMD keeps the game's memory in a sparse arena (amd_guest_sparse_arena); other GPUs get
-# the layer's memory module, which binds it in place and keeps VRAM copies without sparse binding
-# (NVIDIA's sparse binding stalls the GPU for seconds); PS_LAYER_MEMORY=1/0 by hand. The memory
+# emulated. A GPU that binds sparse buffers fast keeps the game's memory in a sparse arena; others,
+# and NVIDIA's proprietary driver (nvidia_slow_sparse_rebind: its sparse binding stalls the GPU for
+# seconds), get the layer's memory module, which binds it in place and keeps VRAM copies without
+# sparse binding; PS_LAYER_MEMORY=1/0 by hand. The memory
 # model of 0.3 (VRAM copies of the game's memory, write tracking) is gone: an older launcher's
 # PS_PC_MODEL, PS_AS_0_3, PS_GUEST_IN_PLACE, PS_PREUPLOAD or PS_UFFD does nothing.
 ignored=()

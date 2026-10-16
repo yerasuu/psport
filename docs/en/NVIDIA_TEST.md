@@ -50,8 +50,10 @@ still work behind a deprecation line.
 
 Expected near the start:
 
-- `Guest memory: the game's memory in place on this GPU (vendor 0x10de), through the layer's memory module (no sparse binding)`
 - `Guest memory: host memory imported by the GPU (VK_EXT_external_memory_host, alignment N)`
+- `Guest memory: detected ... sparse_bind_ms=X ... dmabuf=whole ... host_import=works backing=layer-module backing_why="HOST quirk nvidia_slow_sparse_rebind" chunks=host-import ...`
+  (send this line back: `sparse_bind_ms` says whether the startup test bind alone would have
+  caught NVIDIA's slow sparse binding)
 - `Guest memory: direct memory chunks come from Vulkan`
 - `GPU: end-of-pipe labels are written by the GPU (portable Vulkan updates; ...)`
 
