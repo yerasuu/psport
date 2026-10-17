@@ -76,9 +76,13 @@ if [[ ${PS_SAVE_LOG:-} == 1 ]]; then
     export PS_FRAME_STATS=1 PS_FRAME_LOG=${PS_FRAME_LOG:-$logs/$stamp.frames.csv}
     export PS_READBACK_LOG=${PS_READBACK_LOG:-$logs/$stamp.readbacks.csv}
     echo "Log: $logs/$stamp.log"
-    exec 3>"$logs/$stamp.log"
+    # A descriptor bash picks (10 and up), not 3: the AppImage's runtime keeps its mount for as
+    # long as the program holds an inherited pipe (the first free descriptor, 3); with --play
+    # this script replaced the launcher, and closing that pipe unmounted the store under it
+    # ("python3: Software caused connection abort").
+    exec {log_fd}>"$logs/$stamp.log"
     # Bash builtins only (the AppImage's PATH has no tee).
-    exec > >(while IFS= read -r line || [[ -n $line ]]; do printf '%s\n' "$line"; printf '%s\n' "$line" >&3; done) 2>&1
+    exec > >(while IFS= read -r line || [[ -n $line ]]; do printf '%s\n' "$line"; printf '%s\n' "$line" >&$log_fd; done) 2>&1
 fi
 # PS_GAME_DIR: the game's folder (eboot.bin, sce_module, ...); unset, the only dump next to this
 # directory (bbport's layout, ../<title id>).

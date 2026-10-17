@@ -1677,6 +1677,9 @@ class LauncherApp(Adw.Application):
 def play():
     """--play: the game with the saved settings, no window (Steam Deck game mode)."""
     settings = load_settings()
+    # The launcher window does this in its constructor; without it the in-game menu's language
+    # was the module default whatever was chosen (#134).
+    set_language(settings.get("ui_language", ""))
     if not (Path(settings["game_dir"]).expanduser() / "eboot.bin").is_file():
         print("psport: choose the game folder in the launcher first", file=sys.stderr)
         return 1

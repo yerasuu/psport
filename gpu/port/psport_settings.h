@@ -29,6 +29,9 @@ inline constexpr int OutputDefault = 1; ///< 1920x1080, the game's own size
 
 struct Values {
     std::atomic<MenuLanguage> menu_language{MenuLanguage::Russian};
+    /// Chosen in the menu (or already in psport.ini): only then is it saved, so the language
+    /// the menu merely started with keeps following the launcher's (#134).
+    std::atomic<bool> is_menu_language_chosen{false};
     std::atomic<int> upscaler{UpscalerFsr3};
     std::atomic<int> preset{NativeAA};
     std::atomic<bool> should_sharpen{true};

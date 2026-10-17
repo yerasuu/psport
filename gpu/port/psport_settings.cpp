@@ -41,6 +41,7 @@ void Set(Values& v, const std::string& key, const std::string& value) {
         else if (value == "ru") v.menu_language = MenuLanguage::Russian;
         else if (value == "es") v.menu_language = MenuLanguage::Spanish;
         else std::printf("Settings: unknown menu_language '%s' (expected en, ru or es)\n", value.c_str());
+        v.is_menu_language_chosen = value == "en" || value == "ru" || value == "es";
     } else if (key == "upscaler") {
         for (int u = 0; u < UpscalerCount; ++u) {
             if (value == UpscalerName(u)) {
@@ -236,9 +237,11 @@ void Save() {
         return std::string(sz_text);
     };
     const auto flag = [](bool is_on) { return std::string(is_on ? "1" : "0"); };
-    put("menu_language", v.menu_language == MenuLanguage::Russian   ? "ru"
-                         : v.menu_language == MenuLanguage::Spanish ? "es"
-                                                                    : "en");
+    if (v.is_menu_language_chosen) {
+        put("menu_language", v.menu_language == MenuLanguage::Russian   ? "ru"
+                             : v.menu_language == MenuLanguage::Spanish ? "es"
+                                                                        : "en");
+    }
     put("upscaler", UpscalerName(v.upscaler));
     put("preset", std::to_string(v.preset.load()));
     put("sharpen", flag(v.should_sharpen));

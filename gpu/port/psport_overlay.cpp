@@ -251,6 +251,7 @@ void Menu() {
     int language = int(s.menu_language.load());
     if (ImGui::Combo("Language", &language, s_languages, 3)) {
         s.menu_language = PsSettings::MenuLanguage(language);
+        s.is_menu_language_chosen = true;
         PsSettings::Save();
     }
     ImGui::Text(PsSettings::MenuText("%.0f FPS  (%.1f ms)", "%.0f FPS  (%.1f мс)", "%.0f FPS  (%.1f ms)"),
