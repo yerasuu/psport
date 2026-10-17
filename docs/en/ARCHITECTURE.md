@@ -245,7 +245,7 @@ a file.
 What psport asks of the operating system goes through one small C ABI, `ps_host_*`
 (`src/platform/ps_host.h`, decision #540), with an implementation per OS in `src/platform/<os>/`
 (and, when they come, `gpu/platform/<os>/` for C++-only parts). Only Linux is implemented; a directory for another OS
-appears with its first code. Its groups: vm, fault, thread, tls, time, fs/path, proc, dl, rand and net,
+appears with its first code. Its groups: vm, fault/interrupt, thread, tls, time, fs/path, proc, dl, rand and net,
 moved behind the ABI area by area without changing what Linux does. So far:
 
 | Group | Functions | Linux |
@@ -253,17 +253,24 @@ moved behind the ABI area by area without changing what Linux does. So far:
 | time | `ps_host_time_read`, `ps_host_time_resolution` (`PsHostClock`), `ps_host_time_monotonic_ns`, `ps_host_time_realtime_ns`, `ps_host_time_sleep_ns`, `ps_host_time_sleep_until_ns` | `clock_gettime`, `clock_getres`, `nanosleep`, `clock_nanosleep` (`linux/host_time.c`) |
 | rand | `ps_host_random_bytes` | `getrandom` (`linux/host_system.c`) |
 | path | `ps_host_exe_path` | `/proc/self/exe` (`linux/host_system.c`) |
-| thread | `ps_host_thread_id`, `ps_host_thread_signal`, `ps_host_wait_on_address`, `ps_host_wake_address`, `ps_host_thread_set_name` (15 characters kept), `ps_host_thread_name`, `ps_host_thread_find` (by name prefix), `ps_host_thread_stack`, `ps_host_thread_cpu_count`, `ps_host_thread_make_background` | `gettid`, `tgkill`, `futex` (`FUTEX_WAIT_BITSET`, `FUTEX_WAKE`), `pthread_setname_np`, `pthread_getname_np`, `/proc/self/task/*/comm`, `pthread_getattr_np`, `sched_getaffinity`, `SCHED_IDLE` else nice 19 (`linux/host_thread.c`) |
+| thread | `ps_host_thread_id`, `ps_host_wait_on_address`, `ps_host_wake_address`, `ps_host_thread_set_name` (15 characters kept), `ps_host_thread_name`, `ps_host_thread_find` (by name prefix), `ps_host_thread_each` (no allocation: the watchdog walks threads with it), `ps_host_thread_stack`, `ps_host_thread_cpu_count`, `ps_host_thread_make_background` | `gettid`, `/proc/self/task`, `futex` (`FUTEX_WAIT_BITSET`, `FUTEX_WAKE`), `pthread_setname_np`, `pthread_getname_np`, `/proc/self/task/*/comm`, `pthread_getattr_np`, `sched_getaffinity`, `SCHED_IDLE` else nice 19 (`linux/host_thread.c`) |
 | fs | `ps_host_list_dir` (no allocation: usable in a signal handler) | `getdents64` (`linux/host_process.c`) |
 | fs | `ps_host_fs_open`, `_close`, `_read`, `_pread`, `_write` (safe in signal handlers), `_pwrite`, `_seek`, `_sync`, `_truncate`, `_truncate_path`, `_stat`, `_stat_link`, `_stat_file` (`PsHostStat`, the Unix mode word), `_access`, `_make_dir`, `_make_unique_dir`, `_remove_dir`, `_remove`, `_rename`, `_symlink`, `_free_space`, `_real_path`, `_set_times`, `_set_times_file`, `_set_mode`, `_set_mode_file`, `_status`, `_set_status`, `_close_on_exec`, `_set_close_on_exec` (`PS_HOST_OPEN_*` flags; 0 or the host's errno, counts or minus it); `ps_host_dir_open`, `_next`, `_stat`, `_close` (`PsHostDirEntry`) | `open` (always `O_CLOEXEC`), `read`, `pread`, `write`, `lseek`, `fsync`, `ftruncate`, `stat`, `lstat`, `fstat`, `fstatat`, `mkdir`, `mkdtemp`, `rename`, `symlink`, `statvfs`, `realpath`, `utimes`, `fcntl`, `opendir`/`readdir` (`linux/host_file.c`) |
 | vm | `ps_host_list_mappings` (`PsHostMapping`; no allocation: usable in a fault handler) | `/proc/self/maps` read with `read` (`linux/host_memory.c`) |
 | net | `ps_host_net_init`, `ps_host_net_close`, `ps_host_net_error`, `ps_host_net_set_nonblocking`, `ps_host_net_queued`, `ps_host_net_tcp_state` (`PsHostTcpState`, FreeBSD's order); the rest are the BSD socket calls | `close`, `errno`, `fcntl`, `ioctl(FIONREAD, TIOCOUTQ)`, `TCP_INFO` (`linux/host_net.c`) |
+| fault | `PsHostFaultContext` and its accessors: `ps_host_fault_kind` (`PsHostFaultKind`: access, bus, illegal, arithmetic, breakpoint), `_signal`, `_address`, `_access` (read, write, execute), `_register`, `_set_register` (`PsHostRegister`, x86-64), `_cpu` (trap number, error code, code selector, fxsave image), `_recover` (to a `sigsetjmp` recovery point), `_backtrace`; `ps_host_fault_install` (handlers per kind, newest first, a 0 passes the fault on; `PS_HOST_FAULT_NESTED`, `PS_HOST_FAULT_HOLD_GUEST_EXCEPTION`); `ps_host_resume` (a whole register set and xsave image in one step, the guest's `sigreturn`); `ps_host_read_memory` (no fault: a page without access ends the copy) | `sigaction` of `SIGSEGV`, `SIGBUS`, `SIGILL`, `SIGFPE`, `SIGTRAP` to one dispatcher, `ucontext_t` `gregs` and `REG_ERR` bits, `siglongjmp` with the context's mask, `backtrace` from the faulting RIP, `rt_sigreturn`, `process_vm_readv` (`linux/host_fault.c`) |
+| interrupt | `ps_host_interrupt_install`, `ps_host_interrupt_thread`, `ps_host_interrupt_signal` (`PsHostInterrupt`: guest exception, thread dump, watchdog, sample; the handler gets a `PsHostFaultContext`), `ps_host_watchdog_arm`, `ps_host_on_termination` | `SIGRTMIN+3`, `SIGUSR2`, `SIGALRM`, `SIGPROF` through `tgkill`, `alarm`, `SIGTERM`/`SIGINT`/`SIGHUP` when SDL left them at their default (`linux/host_fault.c`) |
 | proc | `ps_host_close_from`, `ps_host_exec`, `ps_host_exec_self` | `close_range`, `execvp`, `execv("/proc/self/exe")` (`linux/host_process.c`) |
 | dl | `ps_host_dl_open`, `ps_host_dl_sym`, `ps_host_dl_address` (`PsHostCodeAddress`: file, symbol, their addresses) | `dlopen(RTLD_NOW \| RTLD_LOCAL)`, `dlsym`, `dladdr` (`linux/host_library.c`) |
 
-Faults, guest memory (its memfd in `runtime_memory.c`), guest TLS (`arch_prctl`), the mod view's
-cleaner process (`fork`, `pipe2`, `dup2` in `loader_mods.c`) and RenderDoc's `dlopen(RTLD_NOLOAD)`
-stay where they are until their own steps. The guest's mounts, case-insensitive lookups, save
+Guest memory (its memfd and `mprotect` in `runtime_memory.c` and the GPU library), guest TLS
+(`arch_prctl`, also read by the guest exception's context), the mod view's cleaner process (`fork`,
+`pipe2`, `dup2` in `loader_mods.c`) and RenderDoc's `dlopen(RTLD_NOLOAD)` stay where they are until
+their own steps. Every fault and interrupt handler, the GPU library's included, reads and changes the
+interrupted registers only through `PsHostFaultContext`: `Core::SignalDispatch` hands one on as its
+`void *` context, and shadPS4's `Common::GetRip` and `Common::IsWriteError` read it through the
+accessors. Thread signal masks and `pthread_kill` of the guest exception signal stay POSIX, and
+recovery points are still set with `sigsetjmp`. The guest's mounts, case-insensitive lookups, save
 commits and FreeBSD flags, modes and errors stay in `runtime_file.c` and `runtime_socket.c`, which
 reach the host only through `ps_host_fs_*` and `ps_host_net_*`; files read whole go through stdio,
 tree walks through `nftw`, and the socket calls themselves (`socket`, `accept4`, `ppoll`, ...) stay

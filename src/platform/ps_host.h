@@ -5,6 +5,7 @@
  * OS has. */
 #ifndef PS_HOST_H
 #define PS_HOST_H
+#include <setjmp.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <time.h>
@@ -96,8 +97,6 @@ int ps_host_dl_address(const void *p_code, PsHostCodeAddress *p_out);
 /* ---- threads ---- */
 /* The calling thread's id as the host's tools and thread signals name it. Safe in signal handlers. */
 int32_t ps_host_thread_id(void);
-/* Sends a signal to one thread of this process: 0, or the host's errno. Safe in signal handlers. */
-int ps_host_thread_signal(int32_t tid, int signal);
 /* Sleeps while the 32-bit word at p_word holds expected, until a wake on that address, the
  * absolute deadline on clock (MONOTONIC or REALTIME; NULL waits without one) or a signal. A
  * private wait pairs only with wakes from this process, which is cheaper. 0 when woken, EAGAIN
@@ -113,6 +112,9 @@ void ps_host_thread_set_name(const char *sz_name);
 int ps_host_thread_name(char *sz_out, size_t cb_out);
 /* The id of a thread of this process whose name starts with sz_prefix, or 0 when none does. */
 int32_t ps_host_thread_find(const char *sz_prefix);
+/* Calls pfn_thread with each thread of this process, without allocating, so that the watchdog may
+ * walk them from its signal handler: 0, or the host's errno when they cannot be listed. */
+int ps_host_thread_each(void (*pfn_thread)(int32_t tid, void *p_context), void *p_context);
 /* The calling thread's stack, its lowest address and size: 0, or the host's errno. */
 int ps_host_thread_stack(uintptr_t *p_out_va_low, size_t *p_out_cb_stack);
 /* Hardware threads this process may run on (its affinity, so that taskset can stand in for a
@@ -281,6 +283,130 @@ int ps_host_exec(const char *sz_file, char *const *pp_argv);
 /* Replaces the process with a new run of psport's own executable, the same file even when its path
  * changed since: returns only when that fails, with the host's errno (errno holds it too). */
 int ps_host_exec_self(char *const *pp_argv);
+
+/* ---- faults and thread interrupts ---- */
+/* What a fault or an interrupt handler is handed: the interrupted thread's registers, which it may
+ * change for when the thread resumes, and what faulted. Valid only during the handler. Handlers run
+ * in signal context: only what is safe in a signal handler, and the thread may hold any lock. */
+typedef struct PsHostFaultContext PsHostFaultContext;
+typedef enum {
+    PS_HOST_FAULT_ACCESS,
+    PS_HOST_FAULT_BUS,
+    PS_HOST_FAULT_ILLEGAL,
+    PS_HOST_FAULT_ARITHMETIC,
+    /* An int3: the instruction pointer is past it. */
+    PS_HOST_FAULT_BREAKPOINT,
+    PS_HOST_FAULT_KIND_COUNT,
+} PsHostFaultKind;
+typedef enum {
+    PS_HOST_FAULT_UNKNOWN,
+    PS_HOST_FAULT_READ,
+    PS_HOST_FAULT_WRITE,
+    PS_HOST_FAULT_EXECUTE,
+} PsHostFaultAccess;
+typedef enum {
+    PS_HOST_REG_RAX,
+    PS_HOST_REG_RBX,
+    PS_HOST_REG_RCX,
+    PS_HOST_REG_RDX,
+    PS_HOST_REG_RSI,
+    PS_HOST_REG_RDI,
+    PS_HOST_REG_RBP,
+    PS_HOST_REG_RSP,
+    PS_HOST_REG_R8,
+    PS_HOST_REG_R9,
+    PS_HOST_REG_R10,
+    PS_HOST_REG_R11,
+    PS_HOST_REG_R12,
+    PS_HOST_REG_R13,
+    PS_HOST_REG_R14,
+    PS_HOST_REG_R15,
+    PS_HOST_REG_RIP,
+    PS_HOST_REG_RFLAGS,
+    PS_HOST_REG_COUNT,
+} PsHostRegister;
+/* What the CPU recorded beyond the general registers, for the guest's own exception context. */
+typedef struct {
+    uint32_t trap_number;
+    uint64_t error_code;
+    uint16_t code_selector;
+    /* The 512-byte fxsave image of the FPU and SSE state, NULL when the host gives none. */
+    const void *p_fxsave;
+} PsHostFaultCpu;
+
+PsHostFaultKind ps_host_fault_kind(const PsHostFaultContext *p_context);
+/* The host's signal number, for reports and exit codes. */
+int ps_host_fault_signal(const PsHostFaultContext *p_context);
+/* The address an access, bus or arithmetic fault names. */
+void *ps_host_fault_address(const PsHostFaultContext *p_context);
+/* What the faulting access did, for access faults; UNKNOWN for the rest. */
+PsHostFaultAccess ps_host_fault_access(const PsHostFaultContext *p_context);
+uint64_t ps_host_fault_register(const PsHostFaultContext *p_context, PsHostRegister reg);
+void ps_host_fault_set_register(PsHostFaultContext *p_context, PsHostRegister reg, uint64_t value);
+void ps_host_fault_cpu(const PsHostFaultContext *p_context, PsHostFaultCpu *p_out);
+/* Leaves the handler for a recovery point a speculative reader set with sigsetjmp (its second
+ * argument 0), with the signal mask the interrupted code had. */
+__attribute__((noreturn)) void ps_host_fault_recover(const PsHostFaultContext *p_context, sigjmp_buf *p_point);
+
+/* Nonzero when the handler took the fault: the thread resumes with the registers it left. Zero
+ * passes it on to the handler installed before it, and past the first the host's default action
+ * ends the process. */
+typedef int (*PsHostFaultHandler)(PsHostFaultContext *p_context);
+enum {
+    /* The same kind may fault again while the handler runs (a breakpoint the handler steps over). */
+    PS_HOST_FAULT_NESTED = 1,
+    /* The guest exception interrupt waits while the handler runs. */
+    PS_HOST_FAULT_HOLD_GUEST_EXCEPTION = 2,
+};
+/* Adds pfn_handler in front of the handlers of kind (at most 4 each): 0, or the host's errno. Each
+ * call's flags add to the earlier ones. */
+int ps_host_fault_install(PsHostFaultKind kind, PsHostFaultHandler pfn_handler, unsigned flags);
+
+/* Interrupts: a thread of this process stopped where it runs to call a handler with its registers. */
+typedef enum {
+    /* sceKernelRaiseException's SIGUSR1, delivered to the guest's handler. */
+    PS_HOST_INTERRUPT_GUEST_EXCEPTION,
+    /* The watchdog's request to a thread to print its stack. */
+    PS_HOST_INTERRUPT_THREAD_DUMP,
+    /* The watchdog itself, when its timeout runs out (ps_host_watchdog_arm). */
+    PS_HOST_INTERRUPT_WATCHDOG,
+    /* The wait profile's sample of one thread. */
+    PS_HOST_INTERRUPT_SAMPLE,
+    PS_HOST_INTERRUPT_COUNT,
+} PsHostInterrupt;
+typedef void (*PsHostInterruptHandler)(PsHostFaultContext *p_context);
+enum {
+    /* Calls the interrupt cut short (file reads, futex waits) start again by themselves. */
+    PS_HOST_INTERRUPT_RESTART = 1,
+};
+/* Replaces the interrupt's handler: 0, or the host's errno. */
+int ps_host_interrupt_install(PsHostInterrupt interrupt, PsHostInterruptHandler pfn_handler, unsigned flags);
+/* Interrupts one thread of this process: 0, or the host's errno. Safe in signal handlers. */
+int ps_host_interrupt_thread(int32_t tid, PsHostInterrupt interrupt);
+/* The host signal behind an interrupt, for the code that masks it around a thread's start and in
+ * sigreturn's frame. */
+int ps_host_interrupt_signal(PsHostInterrupt interrupt);
+/* The watchdog interrupt arrives once after seconds (0 disarms it), on whichever thread the host
+ * picks. */
+void ps_host_watchdog_arm(unsigned seconds);
+/* pfn_report runs once when the process is asked to end (a terminal's ^C, a launcher's stop) and
+ * the host's default action follows; a request someone else already handles is left to them. */
+void ps_host_on_termination(void (*pfn_report)(void));
+
+/* Resumes the calling thread with these registers (RSP, RIP and RFLAGS included) in one step, so
+ * that nothing is written below the restored stack pointer. p_fpu is an 832-byte xsave image
+ * (legacy area, header, the YMM upper halves when its header says so) or NULL to reset the FPU;
+ * exception_signal is masked when is_exception_masked, else unmasked. */
+__attribute__((noreturn)) void ps_host_resume(const uint64_t p_registers[PS_HOST_REG_COUNT], const void *p_fpu,
+                                              int exception_signal, int is_exception_masked);
+
+/* Copies from memory of this process without faulting: a page without read access ends the copy.
+ * The bytes copied, or minus the host's errno when none could be. Safe in signal handlers. */
+int64_t ps_host_read_memory(void *p_out, const void *p_from, size_t cb_copy);
+/* The interrupted code's call chain from the host's unwind information, starting at the faulting
+ * instruction (at the handler's own frames when the unwinder cannot see past them): how many
+ * return addresses were stored. For a fault report: not promised safe in a signal handler. */
+int ps_host_fault_backtrace(const PsHostFaultContext *p_context, void **pp_frames, int c_frames);
 
 #ifdef __cplusplus
 }

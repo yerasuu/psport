@@ -12,6 +12,7 @@
 #include <SDL3/SDL.h>
 #include <unistd.h>
 #include "../psport_gpu.h"
+#include "../../src/platform/ps_host.h"
 #include "common/elf_info.h"
 #include "common/thread.h"
 #include "core/libraries/kernel/orbis_error.h"
@@ -198,14 +199,14 @@ extern "C" uintptr_t psport_gpu_resolve(const char* sz_scoped_nid) {
     return 0;
 }
 
-extern "C" int psport_gpu_handle_fault(void* p_ucontext, void* p_address) {
+extern "C" int psport_gpu_handle_fault(PsHostFaultContext* p_context, void* p_address) {
     // PS_LABEL_TRAP (diagnostic): its read-only label pages first. Not passed on to GPU page
     // tracking (a write fault drains the draw pipe: thousands a second would change the timing
     // under test); label pages are not expected to be GPU-tracked.
-    if (PsFreeCheck::OnTrapFault(p_ucontext, reinterpret_cast<std::uint64_t>(p_address))) {
+    if (PsFreeCheck::OnTrapFault(p_context, reinterpret_cast<std::uint64_t>(p_address))) {
         return 1;
     }
-    if (Core::Signals::Instance()->DispatchAccessViolation(p_ucontext, p_address)) {
+    if (Core::Signals::Instance()->DispatchAccessViolation(p_context, p_address)) {
         return 1;
     }
     return PsFreeCheck::OnStaleTrapFault(reinterpret_cast<std::uint64_t>(p_address)) ? 1 : 0;

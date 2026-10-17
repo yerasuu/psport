@@ -12,12 +12,12 @@
 #include <string_view>
 #include <vector>
 #include <sys/syscall.h>
-#include <ucontext.h>
 #include <unistd.h>
 #include <xxhash.h>
 #include "pslayer_write_traps.h"
 #include "psport_toggles.h"
 #include "common/signal_context.h"
+#include "../../src/platform/ps_host.h"
 #include "core/memory.h"
 #include "core/signals.h"
 #include "video_core/amdgpu/pm4_cmds.h"
@@ -210,8 +210,8 @@ bool OnFault(void* p_context, void* p_fault_address) {
     }
     const std::uint64_t frame = it->frame;
     char sz_detail[64];
-    std::snprintf(sz_detail, sizeof(sz_detail), " (tid %ld, rip %#llx)", (long)syscall(SYS_gettid),
-                  (unsigned long long)static_cast<const ucontext_t*>(p_context)->uc_mcontext.gregs[REG_RIP]);
+    std::snprintf(sz_detail, sizeof(sz_detail), " (tid %ld, rip %#llx)", (long)ps_host_thread_id(),
+                  (unsigned long long)ps_host_fault_register(static_cast<const PsHostFaultContext*>(p_context), PS_HOST_REG_RIP));
     Trip("the game writes into", *it, address, sz_detail);
     if (frame <= s_closed) {
         if (!s_retired_cv.wait_for(lock, WaitLimit, [&] { return s_retired >= frame; })) {

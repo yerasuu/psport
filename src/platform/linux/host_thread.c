@@ -1,4 +1,4 @@
-/* Linux: thread ids, names, stacks and scheduling, thread signals and address waits (ps_host.h). */
+/* Linux: thread ids, names, stacks and scheduling, and address waits (ps_host.h). */
 #define _GNU_SOURCE
 #include "ps_host.h"
 #include <dirent.h>
@@ -15,10 +15,6 @@
 #include <unistd.h>
 
 int32_t ps_host_thread_id(void) { return (int32_t)syscall(SYS_gettid); }
-
-int ps_host_thread_signal(int32_t tid, int signal) {
-    return syscall(SYS_tgkill, getpid(), (pid_t)tid, signal) ? errno : 0;
-}
 
 int ps_host_wait_on_address(const void *p_word, uint32_t expected, int is_private, PsHostClock clock,
                             const struct timespec *p_deadline) {
@@ -83,4 +79,20 @@ int ps_host_thread_make_background(void) {
     const struct sched_param param = {0};
     if (!sched_setscheduler(0, SCHED_IDLE, &param)) return 0;
     return setpriority(PRIO_PROCESS, (id_t)syscall(SYS_gettid), 19) ? errno : 0;
+}
+
+typedef struct {
+    void (*pfn_thread)(int32_t tid, void *p_context);
+    void *p_context;
+} ThreadWalk;
+
+static void visit_task(const char *sz_tid, void *p_walk) {
+    const ThreadWalk *p = p_walk;
+    const int32_t tid = (int32_t)strtol(sz_tid, NULL, 10);
+    if (tid > 0) p->pfn_thread(tid, p->p_context);
+}
+
+int ps_host_thread_each(void (*pfn_thread)(int32_t tid, void *p_context), void *p_context) {
+    ThreadWalk walk = {pfn_thread, p_context};
+    return ps_host_list_dir("/proc/self/task", visit_task, &walk);
 }

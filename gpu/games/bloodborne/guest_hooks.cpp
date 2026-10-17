@@ -3,17 +3,15 @@
 #include "heap_sites.h"
 #include "psport_quirks.h"
 #include "psport_toggles.h"
+#include "../../../src/platform/ps_host.h"
 
 #include <array>
 #include <atomic>
-#include <csignal>
 #include <cstdint>
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
 #include <sys/mman.h>
-#include <sys/uio.h>
-#include <ucontext.h>
 #include <unistd.h>
 
 extern "C" void runtime_memory_note_write(uintptr_t va_range, uint64_t cb_range);
@@ -287,42 +285,46 @@ bool InstallGxNodeGuard() {
     return true;
 }
 
-struct sigaction s_previous_action {};
+u64 Get(const PsHostFaultContext* p_context, PsHostRegister reg) {
+    return ps_host_fault_register(p_context, reg);
+}
+void Set(PsHostFaultContext* p_context, PsHostRegister reg, u64 value) {
+    ps_host_fault_set_register(p_context, reg, value);
+}
 
-void OnTrap(int sig, siginfo_t* p_info, void* p_context) {
-    auto* p_registers = static_cast<ucontext_t*>(p_context)->uc_mcontext.gregs;
-    const u64 rip = u64(p_registers[REG_RIP]) - 1; // past the int3
+int OnTrap(PsHostFaultContext* p_context) {
+    const u64 rip = Get(p_context, PS_HOST_REG_RIP) - 1; // past the int3
     const bool is_gx_site = rip == ImageBase + GxNodeSite;
     if (is_gx_site || (rip != 0 && rip == s_va_gx_null_trap.load(std::memory_order_acquire))) {
-        if (is_gx_site && p_registers[REG_R12] != 0) {
-            *reinterpret_cast<u64*>(u64(p_registers[REG_R12]) + 8) = u64(p_registers[REG_R13]);
-            p_registers[REG_RIP] = greg_t(ImageBase + GxNodeSite + 5);
-            return;
+        if (is_gx_site && Get(p_context, PS_HOST_REG_R12) != 0) {
+            *reinterpret_cast<u64*>(Get(p_context, PS_HOST_REG_R12) + 8) = Get(p_context, PS_HOST_REG_R13);
+            Set(p_context, PS_HOST_REG_RIP, ImageBase + GxNodeSite + 5);
+            return 1;
         }
         if (s_c_gx_node_skips.fetch_add(1, std::memory_order_relaxed) == 0) {
             static const char sz_text[] = "Guest hooks: the GX per-frame command heap was full: a render "
                                           "command waits for the next frame (bbport #162)\n";
             [[maybe_unused]] const auto cb_written = write(STDOUT_FILENO, sz_text, sizeof(sz_text) - 1);
         }
-        p_registers[REG_RIP] = greg_t(ImageBase + GxNodeSkip);
-        return;
+        Set(p_context, PS_HOST_REG_RIP, ImageBase + GxNodeSkip);
+        return 1;
     }
     for (const auto& site : s_native_sites) {
         if (rip == ImageBase + site.off_code) {
             if (const u64 stub = site.stub.load(std::memory_order_acquire)) {
-                p_registers[REG_RIP] = greg_t(stub); // the detour is going in: its stub runs the site
-                return;
+                Set(p_context, PS_HOST_REG_RIP, stub); // the detour is going in: its stub runs the site
+                return 1;
             }
         }
     }
     if (rip == ImageBase + ReleaseCheck) {
-        const auto result = static_cast<std::int32_t>(p_registers[REG_RAX] & 0xffffffff);
+        const auto result = static_cast<std::int32_t>(Get(p_context, PS_HOST_REG_RAX) & 0xffffffff);
         PsHeapSites::NoteReleaseCheck(std::uint32_t(result));
-        p_registers[REG_RIP] = greg_t(ImageBase + (result < 0 ? 0xbb5fc7 : ReleaseCheck + 2));
-        return;
+        Set(p_context, PS_HOST_REG_RIP, ImageBase + (result < 0 ? 0xbb5fc7 : ReleaseCheck + 2));
+        return 1;
     }
     if (rip == ImageBase + CollectorEntry) {
-        const u64 allocator = u64(p_registers[REG_RDI]);
+        const u64 allocator = Get(p_context, PS_HOST_REG_RDI);
         for (std::size_t i = 0; i < PsStats::g_range_allocators.size(); ++i) {
             u64 expected = 0;
             if (PsStats::g_range_allocators[i].load(std::memory_order_relaxed) == allocator ||
@@ -334,26 +336,26 @@ void OnTrap(int sig, siginfo_t* p_info, void* p_context) {
                 break;
             }
         }
-        p_registers[REG_RSP] -= 8; // push rbp
-        *reinterpret_cast<u64*>(p_registers[REG_RSP]) = u64(p_registers[REG_RBP]);
-        p_registers[REG_RIP] = greg_t(ImageBase + CollectorEntry + 1);
-        return;
+        Set(p_context, PS_HOST_REG_RSP, Get(p_context, PS_HOST_REG_RSP) - 8); // push rbp
+        *reinterpret_cast<u64*>(Get(p_context, PS_HOST_REG_RSP)) = Get(p_context, PS_HOST_REG_RBP);
+        Set(p_context, PS_HOST_REG_RIP, ImageBase + CollectorEntry + 1);
+        return 1;
     }
     for (const u64 site : HeapAllocReturns) {
         if (rip != ImageBase + site) {
             continue;
         }
-        const u64 address = u64(p_registers[REG_RAX]);
-        const u64 cb_copy = *reinterpret_cast<const u64*>(u64(p_registers[REG_RBP]) - 0x50);
+        const u64 address = Get(p_context, PS_HOST_REG_RAX);
+        const u64 cb_copy = *reinterpret_cast<const u64*>(Get(p_context, PS_HOST_REG_RBP) - 0x50);
         if (address != 0 && cb_copy != 0 && cb_copy < (u64(1) << 32)) {
             s_pfn_on_range_allocated(address, cb_copy);
         }
-        p_registers[REG_RBX] = p_registers[REG_RAX];
-        p_registers[REG_RIP] = greg_t(ImageBase + site + sizeof(HeapAllocReturnCode));
-        return;
+        Set(p_context, PS_HOST_REG_RBX, Get(p_context, PS_HOST_REG_RAX));
+        Set(p_context, PS_HOST_REG_RIP, ImageBase + site + sizeof(HeapAllocReturnCode));
+        return 1;
     }
     if (rip == ImageBase + AllocReturn) {
-        if (const u64 node = u64(p_registers[REG_RAX])) {
+        if (const u64 node = Get(p_context, PS_HOST_REG_RAX)) {
             const u64 start = *reinterpret_cast<const u64*>(node + 8);
             const u64 next = *reinterpret_cast<const u64*>(node + 0x18);
             const u64 end = next ? *reinterpret_cast<const u64*>(next + 8) : start;
@@ -361,9 +363,9 @@ void OnTrap(int sig, siginfo_t* p_info, void* p_context) {
                 s_pfn_on_range_allocated(start, end - start);
             }
         }
-        p_registers[REG_RSP] += 0x18;
-        p_registers[REG_RIP] = greg_t(ImageBase + AllocReturn + sizeof(AllocReturnCode));
-        return;
+        Set(p_context, PS_HOST_REG_RSP, Get(p_context, PS_HOST_REG_RSP) + 0x18);
+        Set(p_context, PS_HOST_REG_RIP, ImageBase + AllocReturn + sizeof(AllocReturnCode));
+        return 1;
     }
     for (std::size_t i = 0; i < MemcpySites.size(); ++i) {
         const auto& site = MemcpySites[i];
@@ -373,29 +375,17 @@ void OnTrap(int sig, siginfo_t* p_info, void* p_context) {
         s_hits[i].fetch_add(1, std::memory_order_relaxed);
         // The call, to LoaderCopy instead of the game's memcpy: push the return address, jump.
         const u64 ret = ImageBase + site.off_code + 5;
-        p_registers[REG_RSP] -= 8;
-        *reinterpret_cast<u64*>(p_registers[REG_RSP]) = ret;
-        p_registers[REG_RIP] = greg_t(reinterpret_cast<u64>(&LoaderCopy));
-        return;
+        Set(p_context, PS_HOST_REG_RSP, Get(p_context, PS_HOST_REG_RSP) - 8);
+        *reinterpret_cast<u64*>(Get(p_context, PS_HOST_REG_RSP)) = ret;
+        Set(p_context, PS_HOST_REG_RIP, reinterpret_cast<u64>(&LoaderCopy));
+        return 1;
     }
-    if (s_previous_action.sa_flags & SA_SIGINFO) {
-        if (s_previous_action.sa_sigaction) {
-            s_previous_action.sa_sigaction(sig, p_info, p_context);
-            return;
-        }
-    } else if (s_previous_action.sa_handler != SIG_DFL && s_previous_action.sa_handler != SIG_IGN &&
-               s_previous_action.sa_handler) {
-        s_previous_action.sa_handler(sig);
-        return;
-    }
-    signal(SIGTRAP, SIG_DFL);
-    raise(SIGTRAP);
+    return 0;
 }
 
 bool Patch(u64 va_range, const unsigned char* p_expected, std::size_t cb_expected) {
     unsigned char bytes[16]{};
-    iovec local{bytes, cb_expected}, remote{reinterpret_cast<void*>(va_range), cb_expected};
-    if (process_vm_readv(getpid(), &local, 1, &remote, 1, 0) != ssize_t(cb_expected) ||
+    if (ps_host_read_memory(bytes, reinterpret_cast<const void*>(va_range), cb_expected) != std::int64_t(cb_expected) ||
         std::memcmp(bytes, p_expected, cb_expected) != 0) {
         return false;
     }
@@ -426,11 +416,10 @@ void Install(RangeCallback pfn_on_gpu_range_allocated) {
     if (s_is_installed.exchange(true)) {
         return;
     }
-    struct sigaction action {};
-    action.sa_sigaction = OnTrap;
-    action.sa_flags = SA_SIGINFO | SA_NODEFER;
-    sigemptyset(&action.sa_mask);
-    sigaction(SIGTRAP, &action, &s_previous_action);
+    if (const int error = ps_host_fault_install(PS_HOST_FAULT_BREAKPOINT, OnTrap, PS_HOST_FAULT_NESTED)) {
+        std::printf("Guest hooks: the breakpoint handler could not be installed (%s): no hooks\n", std::strerror(error));
+        return;
+    }
     int c_patched = 0;
     for (const auto& site : MemcpySites) {
         c_patched += Patch(ImageBase + site.off_code, site.code, sizeof(site.code));

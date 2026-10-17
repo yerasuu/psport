@@ -18,4 +18,4 @@ void NoteIntent(std::uint64_t va_range, const void* p_data, std::uint64_t cb_ran
 void DumpRange(std::uint64_t va_range, std::uint64_t cb_range);
 }
 
-extern "C" void psport_gpu_dump_guest_writes(void* p_ucontext);
+extern "C" void psport_gpu_dump_guest_writes(const struct PsHostFaultContext* p_context);

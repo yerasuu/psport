@@ -18,6 +18,7 @@
 #include "game_profile.h"
 #include "pslayer_gpu_memory.h"
 #include "pslayer_write_traps.h"
+#include "../../src/platform/ps_host.h"
 #include "common/alignment.h"
 #include "core/emulator_settings.h"
 #include "core/memory.h"
@@ -40,7 +41,6 @@
 #include <string>
 #include <fmt/format.h>
 #include <sys/mman.h>
-#include <ucontext.h>
 #include "common/signal_context.h"
 #include "core/signals.h"
 #include <vk_mem_alloc.h>
@@ -2712,11 +2712,11 @@ bool VramTrapHandler(void* context, void* fault_address) {
             return false;
         }
     }
-    const auto* g = static_cast<const ucontext_t*>(context)->uc_mcontext.gregs;
-    const u64 rip = u64(g[REG_RIP]);
+    const auto* p_context = static_cast<const PsHostFaultContext*>(context);
+    const u64 rip = ps_host_fault_register(p_context, PS_HOST_REG_RIP);
     constexpr u64 Image = 0x800000000ull, ImageEnd = 0x810000000ull;
     u64 caller = 0;
-    const auto* stack = reinterpret_cast<const u64*>(g[REG_RSP]);
+    const auto* stack = reinterpret_cast<const u64*>(ps_host_fault_register(p_context, PS_HOST_REG_RSP));
     for (u32 i = 0; i < 48; ++i) {
         if (stack[i] >= Image && stack[i] < ImageEnd) {
             caller = stack[i] - Image;

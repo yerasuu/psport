@@ -12,7 +12,6 @@
 #include <pthread.h>
 #include <signal.h>
 #include <stdatomic.h>
-#include <ucontext.h>
 #include <unistd.h>
 #include <sys/syscall.h>
 #include <asm/prctl.h>
@@ -28,9 +27,6 @@
 #define MC_FPOWNED_FPU 0x20001
 #define GUEST_EFAULT 14
 #define GUEST_EINVAL 22
-#define FXSAVE_SW_RESERVED 464
-#define XSAVE_HEADER 512
-#define XSAVE_YMM_END 832
 
 typedef void (ABI *GuestHandler)(int, void *);
 /* FreeBSD amd64 mcontext_t and ucontext_t as the PS4 kernel passes them (shadPS4's exception.h). */
@@ -102,31 +98,37 @@ int runtime_exception_wait(pthread_cond_t *p_cond, pthread_mutex_t *p_lock, cons
     return e==ETIMEDOUT && !last ? 0 : e;
 }
 
-static void deliver(int sig, siginfo_t *p_info, void *p_raw) {
-    (void)sig; (void)p_info;
+/* GuestMcontext's general registers in PsHostRegister's order. */
+static const size_t s_off_registers[PS_HOST_REG_COUNT]={
+    offsetof(GuestMcontext,rax), offsetof(GuestMcontext,rbx), offsetof(GuestMcontext,rcx), offsetof(GuestMcontext,rdx),
+    offsetof(GuestMcontext,rsi), offsetof(GuestMcontext,rdi), offsetof(GuestMcontext,rbp), offsetof(GuestMcontext,rsp),
+    offsetof(GuestMcontext,r8), offsetof(GuestMcontext,r9), offsetof(GuestMcontext,r10), offsetof(GuestMcontext,r11),
+    offsetof(GuestMcontext,r12), offsetof(GuestMcontext,r13), offsetof(GuestMcontext,r14), offsetof(GuestMcontext,r15),
+    offsetof(GuestMcontext,rip), offsetof(GuestMcontext,rflags),
+};
+static void deliver(PsHostFaultContext *p_host) {
     GuestHandler pfn_handler=atomic_load(&s_handlers[GUEST_SIGUSR1]);
     if (!pfn_handler) { s_is_deferred=0; return; }
     if (s_held) { s_is_deferred=1; return; }
     s_is_deferred=0;
-    ucontext_t *p_host=p_raw;
-    greg_t *p_registers=p_host->uc_mcontext.gregs;
     /* The handler may call back into the runtime, which sets both errnos. */
     int host_errno=errno;
     int32_t guest_errno=*runtime_errno();
     GuestUcontext context;
     memset(&context,0,sizeof(context));
     GuestMcontext *p_mcontext=&context.mcontext;
-    p_mcontext->rdi=(uint64_t)p_registers[REG_RDI]; p_mcontext->rsi=(uint64_t)p_registers[REG_RSI]; p_mcontext->rdx=(uint64_t)p_registers[REG_RDX]; p_mcontext->rcx=(uint64_t)p_registers[REG_RCX];
-    p_mcontext->r8=(uint64_t)p_registers[REG_R8]; p_mcontext->r9=(uint64_t)p_registers[REG_R9]; p_mcontext->rax=(uint64_t)p_registers[REG_RAX]; p_mcontext->rbx=(uint64_t)p_registers[REG_RBX];
-    p_mcontext->rbp=(uint64_t)p_registers[REG_RBP]; p_mcontext->r10=(uint64_t)p_registers[REG_R10]; p_mcontext->r11=(uint64_t)p_registers[REG_R11]; p_mcontext->r12=(uint64_t)p_registers[REG_R12];
-    p_mcontext->r13=(uint64_t)p_registers[REG_R13]; p_mcontext->r14=(uint64_t)p_registers[REG_R14]; p_mcontext->r15=(uint64_t)p_registers[REG_R15];
-    p_mcontext->rip=(uint64_t)p_registers[REG_RIP]; p_mcontext->rsp=(uint64_t)p_registers[REG_RSP]; p_mcontext->rflags=(uint64_t)p_registers[REG_EFL];
-    p_mcontext->cs=(uint64_t)p_registers[REG_CSGSFS]&0xffff;
-    p_mcontext->trapno=(uint32_t)p_registers[REG_TRAPNO]; p_mcontext->err=(uint64_t)p_registers[REG_ERR];
+    for (int reg=0;reg<PS_HOST_REG_COUNT;++reg) {
+        const uint64_t value=ps_host_fault_register(p_host,(PsHostRegister)reg);
+        memcpy((char *)p_mcontext+s_off_registers[reg],&value,sizeof(value));
+    }
+    PsHostFaultCpu cpu;
+    ps_host_fault_cpu(p_host,&cpu);
+    p_mcontext->cs=cpu.code_selector;
+    p_mcontext->trapno=cpu.trap_number; p_mcontext->err=cpu.error_code;
     p_mcontext->len=sizeof(*p_mcontext);
     /* fxsave layout as FreeBSD's savefpu begins: a collector may find pointers spilled to xmm. */
-    if (p_host->uc_mcontext.fpregs) {
-        memcpy(p_mcontext->fpstate,p_host->uc_mcontext.fpregs,512);
+    if (cpu.p_fxsave) {
+        memcpy(p_mcontext->fpstate,cpu.p_fxsave,512);
         p_mcontext->fpformat=0x10002; /* _MC_FPFMT_XMM */
         p_mcontext->ownedfp=0x20001;  /* _MC_FPOWNED_FPU */
     }
@@ -143,11 +145,11 @@ static void deliver(int sig, siginfo_t *p_info, void *p_raw) {
     s_delivery.is_active=0;
     /* As on the console, register changes the handler makes take effect on return. The FPU area
      * is a copy for the handler to read and is not restored. */
-    p_registers[REG_RDI]=(greg_t)p_mcontext->rdi; p_registers[REG_RSI]=(greg_t)p_mcontext->rsi; p_registers[REG_RDX]=(greg_t)p_mcontext->rdx; p_registers[REG_RCX]=(greg_t)p_mcontext->rcx;
-    p_registers[REG_R8]=(greg_t)p_mcontext->r8; p_registers[REG_R9]=(greg_t)p_mcontext->r9; p_registers[REG_RAX]=(greg_t)p_mcontext->rax; p_registers[REG_RBX]=(greg_t)p_mcontext->rbx;
-    p_registers[REG_RBP]=(greg_t)p_mcontext->rbp; p_registers[REG_R10]=(greg_t)p_mcontext->r10; p_registers[REG_R11]=(greg_t)p_mcontext->r11; p_registers[REG_R12]=(greg_t)p_mcontext->r12;
-    p_registers[REG_R13]=(greg_t)p_mcontext->r13; p_registers[REG_R14]=(greg_t)p_mcontext->r14; p_registers[REG_R15]=(greg_t)p_mcontext->r15;
-    p_registers[REG_RIP]=(greg_t)p_mcontext->rip; p_registers[REG_RSP]=(greg_t)p_mcontext->rsp; p_registers[REG_EFL]=(greg_t)p_mcontext->rflags;
+    for (int reg=0;reg<PS_HOST_REG_COUNT;++reg) {
+        uint64_t value;
+        memcpy(&value,(const char *)p_mcontext+s_off_registers[reg],sizeof(value));
+        ps_host_fault_set_register(p_host,(PsHostRegister)reg,value);
+    }
     *runtime_errno()=guest_errno;
     errno=host_errno;
 }
@@ -157,14 +159,11 @@ static ABI int32_t install_handler(int sig, GuestHandler pfn_handler) {
     GuestHandler pfn_none=NULL;
     if (!atomic_compare_exchange_strong(&s_handlers[sig],&pfn_none,pfn_handler)) return ERR(35);
     if (sig==GUEST_SIGUSR1) {
-        /* SA_RESTART so that file reads and futex waits the signal interrupts resume by themselves;
-         * the runtime's sleeps retry on EINTR. Not SA_ONSTACK: the collector scans the stack the
-         * handler runs on as the thread's own. */
-        struct sigaction action={0};
-        action.sa_sigaction=deliver;
-        action.sa_flags=SA_SIGINFO|SA_RESTART;
-        sigemptyset(&action.sa_mask);
-        if (sigaction(RUNTIME_EXCEPTION_SIGNAL,&action,NULL)) { atomic_store(&s_handlers[sig],NULL); return ERR(runtime_guest_errno(errno)); }
+        /* Restarting, so that file reads and futex waits the interrupt cuts short resume by
+         * themselves; the runtime's sleeps retry on EINTR. On the thread's own stack: the collector
+         * scans the stack the handler runs on as the thread's. */
+        const int error=ps_host_interrupt_install(PS_HOST_INTERRUPT_GUEST_EXCEPTION,deliver,PS_HOST_INTERRUPT_RESTART);
+        if (error) { atomic_store(&s_handlers[sig],NULL); return ERR(runtime_guest_errno(error)); }
     }
     printf("Runtime: guest exception handler for signal %d installed at %p%s\n",sig,(void *)pfn_handler,
            sig==GUEST_SIGUSR1 ? "" : " (host faults are not forwarded to it)");
@@ -187,67 +186,25 @@ static ABI int32_t raise_exception(void *p_thread, int sig) {
     return result;
 }
 
-/* FreeBSD's sigreturn: the whole context through the host's rt_sigreturn, which sets rsp, rip,
- * rflags, the FPU and the signal mask in one step, so nothing is written below the restored rsp
- * (an interrupted leaf function's red zone survives). */
+/* FreeBSD's sigreturn: the whole context in one step (ps_host_resume), so nothing is written below
+ * the restored rsp (an interrupted leaf function's red zone survives). */
 static ABI int32_t guest_sigreturn(const GuestUcontext *p_context) {
     if (!p_context) { *runtime_errno()=GUEST_EFAULT; return -1; }
     const GuestMcontext *p_mcontext=&p_context->mcontext;
     if ((p_mcontext->flags & ~MC_FLAG_MASK) || (p_mcontext->cs & 3)!=3) { *runtime_errno()=GUEST_EINVAL; return -1; }
-    ucontext_t frame;
-    memset(&frame,0,sizeof(frame));
-    greg_t *p_regs=frame.uc_mcontext.gregs;
-    p_regs[REG_RDI]=(greg_t)p_mcontext->rdi; p_regs[REG_RSI]=(greg_t)p_mcontext->rsi;
-    p_regs[REG_RDX]=(greg_t)p_mcontext->rdx; p_regs[REG_RCX]=(greg_t)p_mcontext->rcx;
-    p_regs[REG_R8]=(greg_t)p_mcontext->r8; p_regs[REG_R9]=(greg_t)p_mcontext->r9;
-    p_regs[REG_RAX]=(greg_t)p_mcontext->rax; p_regs[REG_RBX]=(greg_t)p_mcontext->rbx;
-    p_regs[REG_RBP]=(greg_t)p_mcontext->rbp; p_regs[REG_R10]=(greg_t)p_mcontext->r10;
-    p_regs[REG_R11]=(greg_t)p_mcontext->r11; p_regs[REG_R12]=(greg_t)p_mcontext->r12;
-    p_regs[REG_R13]=(greg_t)p_mcontext->r13; p_regs[REG_R14]=(greg_t)p_mcontext->r14;
-    p_regs[REG_R15]=(greg_t)p_mcontext->r15; p_regs[REG_RIP]=(greg_t)p_mcontext->rip;
-    p_regs[REG_RSP]=(greg_t)p_mcontext->rsp; p_regs[REG_EFL]=(greg_t)p_mcontext->rflags;
-    /* The host's own user selectors: the guest runs in the same code segment, whatever it saved. */
-    uint16_t code_selector, stack_selector;
-    __asm__("mov %%cs,%0" : "=r"(code_selector));
-    __asm__("mov %%ss,%0" : "=r"(stack_selector));
-    p_regs[REG_CSGSFS]=(greg_t)((uint64_t)code_selector|(uint64_t)stack_selector<<48);
-    /* With the FPU not owned the kernel resets it, as FreeBSD does for _MC_FPOWNED_NONE. A valid
-     * xsave header that holds AVX state brings the YMM upper halves back too. */
-    _Alignas(64) uint8_t fpu[XSAVE_YMM_END+64];
-    if (p_mcontext->ownedfp==MC_FPOWNED_FPU && p_mcontext->fpformat==MC_FPFMT_XMM) {
-        memset(fpu,0,sizeof(fpu));
-        memcpy(fpu,p_mcontext->fpstate,XSAVE_YMM_END);
-        uint64_t xstate_bv, xcomp_bv;
-        memcpy(&xstate_bv,fpu+XSAVE_HEADER,8);
-        memcpy(&xcomp_bv,fpu+XSAVE_HEADER+8,8);
-        memset(fpu+FXSAVE_SW_RESERVED,0,XSAVE_HEADER-FXSAVE_SW_RESERVED);
-        if ((xstate_bv & 4) && !(xstate_bv & ~UINT64_C(7)) && !xcomp_bv) {
-            const struct _fpx_sw_bytes sw_bytes={.magic1=FP_XSTATE_MAGIC1,.extended_size=XSAVE_YMM_END+4,
-                                                 .xstate_bv=7,.xstate_size=XSAVE_YMM_END};
-            const uint32_t magic2=FP_XSTATE_MAGIC2;
-            memcpy(fpu+FXSAVE_SW_RESERVED,&sw_bytes,sizeof(sw_bytes));
-            memcpy(fpu+XSAVE_YMM_END,&magic2,4);
-        }
-        frame.uc_mcontext.fpregs=(fpregset_t)fpu;
-    }
+    uint64_t registers[PS_HOST_REG_COUNT];
+    for (int reg=0;reg<PS_HOST_REG_COUNT;++reg) memcpy(&registers[reg],(const char *)p_mcontext+s_off_registers[reg],sizeof(registers[reg]));
+    /* With the FPU not owned the host resets it, as FreeBSD does for _MC_FPOWNED_NONE. */
+    const int is_fpu_owned=p_mcontext->ownedfp==MC_FPOWNED_FPU && p_mcontext->fpformat==MC_FPFMT_XMM;
     /* Only the guest's SIGUSR1 has a host signal behind it; the others keep their host state. */
-    pthread_sigmask(SIG_SETMASK,NULL,&frame.uc_sigmask);
-    if (p_context->sigmask[0] & 1u<<(GUEST_SIGUSR1-1)) sigaddset(&frame.uc_sigmask,RUNTIME_EXCEPTION_SIGNAL);
-    else sigdelset(&frame.uc_sigmask,RUNTIME_EXCEPTION_SIGNAL);
-    /* rt_sigreturn applies uc_stack as the alternate signal stack. */
-    sigaltstack(NULL,&frame.uc_stack);
+    const int is_exception_masked=(p_context->sigmask[0] & 1u<<(GUEST_SIGUSR1-1))!=0;
     runtime_kernel_set_signal_mask(p_context->sigmask);
     if (s_delivery.is_active) {
         s_delivery.is_active=0;
         *runtime_errno()=s_delivery.guest_errno;
         errno=s_delivery.host_errno;
     }
-    /* A signal taken between the stack switch and the syscall would push its frame over fpu. */
-    sigset_t all;
-    sigfillset(&all);
-    pthread_sigmask(SIG_SETMASK,&all,NULL);
-    __asm__ volatile("mov %0,%%rsp\n\tmov $15,%%eax\n\tsyscall\n\tud2" : : "r"(&frame) : "memory");
-    __builtin_unreachable();
+    ps_host_resume(registers,is_fpu_owned ? p_mcontext->fpstate : NULL,RUNTIME_EXCEPTION_SIGNAL,is_exception_masked);
 }
 /* libunwind's x86-64 setcontext as built for FreeBSD: the FPU from fxsave when the context owns
  * it, rip pushed on the restored stack, rcx and rdi last. r10, r11, rflags and the signal mask

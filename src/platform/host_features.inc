@@ -41,15 +41,18 @@ FEATURE_PROBED(gpu_memory_host_import)
 FEATURE(write_traps, fault, "faults on guest memory: the write traps that track what the GPU reads, fault recovery and "
                             "fault reports")
 FEATURE_HOST(write_traps, LINUX, IMPLEMENTED,
-             "SIGSEGV and SIGBUS handlers over mprotect (signals.c, gpu/shim/core/signals.h)", "#540")
+             "SIGSEGV, SIGBUS, SIGILL, SIGFPE and SIGTRAP handlers reading the ucontext, siglongjmp recovery and "
+             "process_vm_readv (src/platform/linux/host_fault.c) over mprotect",
+             "#540")
 
 FEATURE(guest_tls, tls, "the guest's thread-local storage: a TCB and static TLS per thread, the thread pointer on GS")
 FEATURE_HOST(guest_tls, LINUX, IMPLEMENTED, "arch_prctl(ARCH_SET_GS) (runtime_thread.c)", "#540")
 
 FEATURE(threads, thread, "guest threads on host threads: creation, signals to one thread, waits on an address")
 FEATURE_HOST(threads, LINUX, IMPLEMENTED,
-             "pthreads (runtime_thread.c); gettid, tgkill, futex, thread names and stacks, sched_getaffinity and "
-             "SCHED_IDLE (src/platform/linux/host_thread.c)",
+             "pthreads (runtime_thread.c); gettid, futex, thread names and stacks, sched_getaffinity and SCHED_IDLE "
+             "(src/platform/linux/host_thread.c); interrupts as tgkill of SIGRTMIN+3, SIGUSR2 and SIGPROF, the "
+             "watchdog as alarm (src/platform/linux/host_fault.c)",
              "#540")
 
 FEATURE(time, time, "clocks, sleeping and the time stamp counter")

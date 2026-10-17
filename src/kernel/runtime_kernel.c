@@ -14,10 +14,7 @@
 #include <sched.h>
 #include <time.h>
 #include <unistd.h>
-#include <dirent.h>
-#include <ucontext.h>
 #include <signal.h>
-#include <sys/uio.h>
 #include <sys/resource.h>
 #include <sys/time.h>
 #include <x86intrin.h>
@@ -237,11 +234,10 @@ static ABI __attribute__((noreturn)) void raise_exception(uint32_t code,uint64_t
     const char *sz_module=runtime_module_locate(va_caller,&off_code);
     if (sz_module) fprintf(stderr,"STOP: called from %s+0x%llx; game code up the stack:",sz_module,(unsigned long long)off_code);
     else fprintf(stderr,"STOP: called from host 0x%llx; game code up the stack:",(unsigned long long)va_caller);
-    /* Read through the kernel because a guest stack may end before 256 words do. */
+    /* Read without faulting because a guest stack may end before 256 words do. */
     uint64_t stack[256]={0};
-    struct iovec local={stack,sizeof(stack)}, remote={__builtin_frame_address(0),sizeof(stack)};
-    const ssize_t cb_read=process_vm_readv(getpid(),&local,1,&remote,1,0);
-    for (ssize_t i=0,c_found=0;i<cb_read/8 && c_found<12;++i) {
+    const int64_t cb_read=ps_host_read_memory(stack,__builtin_frame_address(0),sizeof(stack));
+    for (int64_t i=0,c_found=0;i<cb_read/8 && c_found<12;++i) {
         if ((sz_module=runtime_module_locate(stack[i],&off_code))) {
             fprintf(stderr," %s+0x%llx",sz_module,(unsigned long long)off_code);
             ++c_found;
@@ -547,24 +543,21 @@ void runtime_wait_report(double frames) {
     printf("\n");
 }
 
-/* psport PS_SAMPLE_THREAD=<name> (with frame stats): where that thread runs, sampled with SIGPROF
+/* psport PS_SAMPLE_THREAD=<name> (with frame stats): where that thread runs, interrupted
  * every 0.5 ms; reported with the wait profile. A thread that never blocks but waits for the GPU
  * shows up spinning in its polling loop. */
 static _Atomic uint64_t s_sample_keys[1024], s_c_slot_samples[1024];
 static uint64_t s_sample_rips[1024], s_sample_callers[1024];
 static _Atomic uint64_t s_c_samples;
-static void sample_handler(int sig, siginfo_t *p_info, void *p_context) {
-    (void)sig; (void)p_info;
-    const ucontext_t *p_ucontext=(const ucontext_t *)p_context;
-    uint64_t rip=(uint64_t)p_ucontext->uc_mcontext.gregs[REG_RIP];
+static void sample_handler(PsHostFaultContext *p_context) {
+    uint64_t rip=ps_host_fault_register(p_context,PS_HOST_REG_RIP);
     const uint64_t text_lo=0x800000000ull, text_hi=0x800000000ull+0x50d96dcull;
     /* Host code: keyed with its guest caller, the first return address into the game on the stack. */
     uint64_t caller=0;
     if (rip<text_lo || rip>=text_hi) {
         uint64_t stack[256]={0};
-        struct iovec local={stack,sizeof(stack)}, remote={(void *)p_ucontext->uc_mcontext.gregs[REG_RSP],sizeof(stack)};
-        const ssize_t got=process_vm_readv(getpid(),&local,1,&remote,1,0);
-        for (ssize_t i=0;i<got/8;++i) if (stack[i]>=text_lo && stack[i]<text_hi) { caller=stack[i]-text_lo; break; }
+        const int64_t got=ps_host_read_memory(stack,(const void *)ps_host_fault_register(p_context,PS_HOST_REG_RSP),sizeof(stack));
+        for (int64_t i=0;i<got/8;++i) if (stack[i]>=text_lo && stack[i]<text_hi) { caller=stack[i]-text_lo; break; }
     }
     const uint64_t key=(rip*0x9E3779B97F4A7C15ull)^caller^1;
     atomic_fetch_add(&s_c_samples,1);
@@ -584,7 +577,7 @@ static void *sampler_main(void *p_arg) {
     while (!(tid=ps_host_thread_find(sz_name))) ps_host_time_sleep_ns(1000000000,NULL);
     printf("Runtime: sampling thread %s (%d)\n",sz_name,(int)tid);
     for (;;) {
-        if (ps_host_thread_signal(tid,SIGPROF)) break;
+        if (ps_host_interrupt_thread(tid,PS_HOST_INTERRUPT_SAMPLE)) break;
         ps_host_time_sleep_ns(500000,NULL);
     }
     return NULL;
@@ -594,11 +587,7 @@ static void sample_start(void) {
     const char *sz_name=runtime_env("PS_SAMPLE_THREAD",NULL);
     if (s_has_started || !sz_name || !*sz_name) return;
     s_has_started=1;
-    struct sigaction action={0};
-    action.sa_sigaction=sample_handler;
-    action.sa_flags=SA_SIGINFO|SA_RESTART;
-    sigemptyset(&action.sa_mask);
-    sigaction(SIGPROF,&action,NULL);
+    ps_host_interrupt_install(PS_HOST_INTERRUPT_SAMPLE,sample_handler,PS_HOST_INTERRUPT_RESTART);
     pthread_t thread;
     pthread_create(&thread,NULL,sampler_main,(void *)sz_name);
     pthread_detach(thread);

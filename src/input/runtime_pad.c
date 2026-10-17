@@ -41,7 +41,6 @@
 #include <time.h>
 #include <SDL3/SDL.h>
 #include <sys/stat.h>
-#include <sys/uio.h>
 #include <unistd.h>
 
 #define ERR_INVALID_ARG ((int32_t)0x80920001)
@@ -262,8 +261,7 @@ static void report_guest_heap(void) {
     const uint8_t *p_stub=(const uint8_t *)(0x800000000ull+0x56e0000+0x1f8c0);
     /* Read without touching it first: in another title nothing need be mapped there. */
     uint8_t head[2];
-    struct iovec local={head,sizeof(head)}, remote={(void *)p_stub,sizeof(head)};
-    if (process_vm_readv(getpid(),&local,1,&remote,1,0)!=(ssize_t)sizeof(head)) return;
+    if (ps_host_read_memory(head,p_stub,sizeof(head))!=(int64_t)sizeof(head)) return;
     if (head[0]!=0xff || head[1]!=0x25) return; /* another libc */
     ABI int (*pfn_stats)(MallocManagedSize *)=(ABI int (*)(MallocManagedSize *))(uintptr_t)p_stub;
     MallocManagedSize m={.size=sizeof(m),.version=1};

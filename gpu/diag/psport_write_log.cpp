@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "psport_write_log.h"
 #include "psport_free_check.h"
+#include "../../src/platform/ps_host.h"
 
 #include <array>
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <ucontext.h>
 #include <unistd.h>
 #include <x86intrin.h>
 
@@ -103,18 +103,17 @@ void DumpRange(std::uint64_t va_range, std::uint64_t cb_range) {
 }
 } // namespace PsWriteLog
 
-extern "C" void psport_gpu_dump_guest_writes(void* p_ucontext) {
+extern "C" void psport_gpu_dump_guest_writes(const PsHostFaultContext* p_context) {
     using namespace PsWriteLog;
-    const auto* p_signal_context = static_cast<const ucontext_t*>(p_ucontext);
-    const auto* p_registers = p_signal_context->uc_mcontext.gregs;
-    PsFreeCheck::DumpAtFault(std::uint64_t(p_registers[REG_RAX]), std::uint64_t(p_registers[REG_R14]));
+    PsFreeCheck::DumpAtFault(ps_host_fault_register(p_context, PS_HOST_REG_RAX),
+                             ps_host_fault_register(p_context, PS_HOST_REG_R14));
     if (Mode() == 0) {
         return;
     }
-    const std::uint64_t regs[] = {std::uint64_t(p_registers[REG_RAX]), std::uint64_t(p_registers[REG_RBX]),
-                                  std::uint64_t(p_registers[REG_RCX]), std::uint64_t(p_registers[REG_RDX]),
-                                  std::uint64_t(p_registers[REG_RSI]), std::uint64_t(p_registers[REG_RDI]),
-                                  std::uint64_t(p_registers[REG_R14]), std::uint64_t(p_registers[REG_R15])};
+    const std::uint64_t regs[] = {ps_host_fault_register(p_context, PS_HOST_REG_RAX), ps_host_fault_register(p_context, PS_HOST_REG_RBX),
+                                  ps_host_fault_register(p_context, PS_HOST_REG_RCX), ps_host_fault_register(p_context, PS_HOST_REG_RDX),
+                                  ps_host_fault_register(p_context, PS_HOST_REG_RSI), ps_host_fault_register(p_context, PS_HOST_REG_RDI),
+                                  ps_host_fault_register(p_context, PS_HOST_REG_R14), ps_host_fault_register(p_context, PS_HOST_REG_R15)};
     const char* names[] = {"rax", "rbx", "rcx", "rdx", "rsi", "rdi", "r14", "r15"};
     for (int i = 0; i < 8; ++i) {
         std::fprintf(stderr, "Write log: %s=%#llx\n", names[i], (unsigned long long)regs[i]);

@@ -22,10 +22,11 @@ void psport_gpu_register_kernel(void);
 int psport_gpu_init(const PsGpuConfig *p_config);
 /* Function for an imported NID ("NID#lib#mod"), or 0 when the GPU library does not provide it. */
 uintptr_t psport_gpu_resolve(const char *sz_scoped_nid);
-/* Called first by the loader's SIGSEGV handler: 1 when a GPU page-tracking fault was handled. */
-int psport_gpu_handle_fault(void *p_ucontext, void *p_address);
+struct PsHostFaultContext;
+/* Called first by the loader's access fault handler: 1 when a GPU page-tracking fault was handled. */
+int psport_gpu_handle_fault(struct PsHostFaultContext *p_context, void *p_address);
 /* PS_WRITE_LOG=1: prints the logged GPU-side writes to guest memory near the fault. */
-void psport_gpu_dump_guest_writes(void *p_ucontext);
+void psport_gpu_dump_guest_writes(const struct PsHostFaultContext *p_context);
 /* Before the process ends through _exit or exec: waits up to 2 s for the pipeline cache writer to
  * finish what is queued and logs what was flushed or dropped. can_wait=0 (signal handlers, failed
  * assertions) takes no lock and only reports the blobs still queued. */

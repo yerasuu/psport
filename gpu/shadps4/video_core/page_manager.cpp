@@ -11,6 +11,7 @@
 #include "common/error.h"
 #include "common/range_lock.h"
 #include "common/signal_context.h"
+#include "../../src/platform/ps_host.h"
 #include "core/emulator_settings.h"
 #include "core/memory.h"
 #include "video_core/buffer_cache/buffer.h"
@@ -18,11 +19,9 @@
 #include <array>
 #include <atomic>
 #include <cstdio>
-#include <sys/uio.h>
 #include <dlfcn.h>
 #include <string>
 #include <fmt/format.h>
-#include <ucontext.h>
 #include <unistd.h>
 #include "core/signals.h"
 #include "video_core/page_manager.h"
@@ -101,16 +100,16 @@ struct ImageFaultSite {
 std::array<ImageFaultSite, 256> image_fault_sites;
 
 void NoteFaultSite(void* context, VAddr address) {
-    const auto* g = static_cast<const ucontext_t*>(context)->uc_mcontext.gregs;
+    const auto* p_context = static_cast<const PsHostFaultContext*>(context);
     current_fault_rip = 0;
-    const u64 rip = u64(g[REG_RIP]);
+    const u64 rip = ps_host_fault_register(p_context, PS_HOST_REG_RIP);
     const bool guest_code = rip >= GuestImage && rip < GuestImageEnd;
     u64 caller = 0;
     if (guest_code) {
         // The caller: [rbp + 8] when the guest code keeps frames (its memcpy-like leaves do not).
         u64 saved[2] = {};
-        iovec local{saved, sizeof(saved)}, remote{reinterpret_cast<void*>(g[REG_RBP]), sizeof(saved)};
-        if (process_vm_readv(getpid(), &local, 1, &remote, 1, 0) == ssize_t(sizeof(saved)) &&
+        if (ps_host_read_memory(saved, reinterpret_cast<const void*>(ps_host_fault_register(p_context, PS_HOST_REG_RBP)),
+                                sizeof(saved)) == std::int64_t(sizeof(saved)) &&
             saved[1] >= GuestImage && saved[1] < GuestImageEnd) {
             caller = saved[1];
         }
@@ -118,10 +117,9 @@ void NoteFaultSite(void* context, VAddr address) {
         // Host code (a libc import the port runs natively, the runtime): the first guest return
         // address on the stack is its guest caller.
         std::array<u64, 64> stack{};
-        iovec local{stack.data(), sizeof(stack)},
-            remote{reinterpret_cast<void*>(g[REG_RSP]), sizeof(stack)};
-        const ssize_t got = process_vm_readv(getpid(), &local, 1, &remote, 1, 0);
-        for (ssize_t i = 0; i < got / 8; ++i) {
+        const std::int64_t got = ps_host_read_memory(
+            stack.data(), reinterpret_cast<const void*>(ps_host_fault_register(p_context, PS_HOST_REG_RSP)), sizeof(stack));
+        for (std::int64_t i = 0; i < got / 8; ++i) {
             if (stack[i] >= GuestImage && stack[i] < GuestImageEnd) {
                 caller = stack[i];
                 break;
@@ -323,9 +321,8 @@ struct PageManager::Impl {
             return rasterizer->OnVramDataAccess(addr, is_gpu_thread);
         }
         if (PsLayer::WriteTraps::Reasons(addr) & PsLayer::WriteTraps::QueryReads) {
-            return rasterizer->OnOcclusionPageAccess(
-                addr, u64(static_cast<const ucontext_t*>(context)->uc_mcontext.gregs[REG_RIP]),
-                Common::IsWriteError(context), is_gpu_thread);
+            return rasterizer->OnOcclusionPageAccess(addr, u64(Common::GetRip(context)),
+                                                     Common::IsWriteError(context), is_gpu_thread);
         }
         if (Common::IsWriteError(context)) {
             if (ImageTraps() && !(PsLayer::WriteTraps::Reasons(addr) &
@@ -337,9 +334,7 @@ struct PageManager::Impl {
                 return runtime_memory_vma_info(addr, &prot, &type, &end) && (prot & 0x2);
             }
             PsStats::Timer timer{PsStats::g_t_write_faults};
-            const bool handled = rasterizer->OnWriteFault(
-                addr, is_gpu_thread,
-                u64(static_cast<const ucontext_t*>(context)->uc_mcontext.gregs[REG_RIP]));
+            const bool handled = rasterizer->OnWriteFault(addr, is_gpu_thread, u64(Common::GetRip(context)));
             current_fault_rip = 0;
             return handled;
         } else {

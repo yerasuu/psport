@@ -15,7 +15,6 @@
 #include <mutex>
 #include <unordered_set>
 #include <sys/mman.h>
-#include <ucontext.h>
 #include <map>
 #include <tuple>
 #include <string>
@@ -26,6 +25,7 @@
 #include <fmt/format.h>
 #include <xxhash.h>
 #include "psport_guest_memory.h"
+#include "../../src/platform/ps_host.h"
 #include "psport_sections.h"
 #include "psport_toggles.h"
 #include "video_core/buffer_cache/buffer_cache.h"
@@ -1555,8 +1555,7 @@ bool LayerTrapHandler(void* p_context, void* p_fault_address) {
         // under this lock, and an unprotect after it took that new trap away while the block still
         // counted as armed, so the CPU's next writes went unseen and the VRAM copy stayed stale.
         LayerUnprotect(block); // the write runs again, now through
-        const auto* p_g = static_cast<const ucontext_t*>(p_context)->uc_mcontext.gregs;
-        s_layer_trap_hits.emplace_back(block, u64(p_g[REG_RIP]));
+        s_layer_trap_hits.emplace_back(block, u64(Common::GetRip(p_context)));
     }
     s_c_layer_trap_faults.fetch_add(1, std::memory_order_relaxed);
     s_is_layer_trap_pending.store(true, std::memory_order_release);

@@ -1,5 +1,7 @@
-// psport: fault-handler registry. The C loader's SIGSEGV handler calls
-// psport_gpu_handle_fault() first; registered handlers run in priority order.
+// psport: fault-handler registry. The C loader's access fault handler calls
+// psport_gpu_handle_fault() first; registered handlers run in priority order. The context they
+// get is a PsHostFaultContext (src/platform/ps_host.h), read through ps_host_fault_* or
+// common/signal_context.h.
 #pragma once
 #include <compare>
 #include <cstdint>
