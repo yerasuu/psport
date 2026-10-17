@@ -680,6 +680,7 @@ static void sample_host(PadData *p_pad_data) {
     memset(p_pad_data,0,sizeof(*p_pad_data));
     p_pad_data->left_x=p_pad_data->left_y=p_pad_data->right_x=p_pad_data->right_y=128;
     p_pad_data->orientation[3]=1.0f;
+    p_pad_data->acceleration[1]=1.0f; /* 1 g up, the pad lying flat: zeros read as free fall */
     p_pad_data->connected=1; p_pad_data->connected_count=s_c_connecteds ? s_c_connecteds : 1;
     p_pad_data->timestamp=now_us();
     SDL_Gamepad *p_sdl_gamepad=current_gamepad();
