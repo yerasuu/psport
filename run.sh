@@ -170,7 +170,8 @@ if [[ -z ${PS_RENDER_RES:-} && $has_presets == 1 && -f $PS_CONFIG ]]; then
     if [[ -n $ratio && $upscaler != taa && ${width}x$height != 1920x1080 ]]; then
         sizes=()
         for size in "$width" "$height"; do
-            (( divisor = 2 * ${ratio%/*}, half = size * ${ratio#*/} / divisor, rest = size * ${ratio#*/} % divisor ))
+            # Plain assignments: under set -e an (( )) whose last value is 0 (an even size at ratio 1) fails.
+            divisor=$((2 * ${ratio%/*})) half=$((size * ${ratio#*/} / divisor)) rest=$((size * ${ratio#*/} % divisor))
             (( 2 * rest > divisor || (2 * rest == divisor && half % 2) )) && (( half += 1 ))
             sizes+=($(( half * 2 > 2 ? half * 2 : 2 )))
         done
