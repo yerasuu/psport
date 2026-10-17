@@ -65,6 +65,7 @@ source commit), as the rows below already are. Last reviewed points:
 | `PS_PAD_FILE`'s `mdx=` and `mdy=` move the mouse that many pixels at every pad read, as if the window held it (scripted mouse look tests) | `src/input/runtime_pad_script.c` (`runtime_pad_read_inject`), `runtime_pad.h` (`PadInjected`), `runtime_pad.c` (`sample`) | bbport `72e5c8c` (`src/runtime_pad.c`) | through the native camera hook when the profile has one, else the right stick; the pad file's log line shows the motion |
 | `PS_PAD_TRACE=1` logs the pad state the game reads when its buttons change and every 5 s | `src/input/runtime_pad.c` (`trace_read`) | bbport `72e5c8c` (`BB_PAD_TRACE`) | outside the pad's lock; triggers and touch count logged too |
 | A refused `scePadOpen` (another user, port type or index) is logged with its arguments | `src/input/runtime_pad.c` (`pad_open`) | bbport `72e5c8c` (`src/runtime_pad.c`) | as is |
+| Motion emulation for controllers without sensors: the spray can (the controller held sideways: G, or View+A on a pad), aiming with the mouse or the right stick, spraying with the left button, shaking (H, View+B), centering (T); touchpad swipes (a touchpad key + the mouse; View + the right stick one finger, View + the left stick two); a View tap as the touchpad; orientation, gravity and angular velocity reported consistently; the window takes the mouse on request | `src/input/runtime_pad_motion.c`, `runtime_pad.h`, `runtime_pad.c` (`load_bindings`, `sample_host`), `gpu/psport_gpu.h` (`psport_gpu_mouse_capture`), `gpu/port/psport_gpu_input.cpp`, `gpu/shim/sdl_window.h` (`RequestMouseCapture`), `gpu/shim/window.cpp` | bbport `72e5c8c` (`src/runtime_pad.c` `motion_*`, `BB_PAD_MOTION`, `bbgpu_mouse_capture`) | its own file instead of runtime_pad.c; off unless `pad_motion=1` in `psport.ini` or `PS_PAD_MOTION=1`; the swipe drag follows both touchpad keys as bindings, not Tab and Backspace |
 
 ## Names
 
@@ -298,6 +299,10 @@ unless the running title brings its own (`Game::Title` `sz_default_controls`, `p
 read through `psport_gpu_title_controls`; Bloodborne's is close to Dark Souls III on PC); the
 player's `key.<input>=` and `pad.<input>=` lines in `psport.ini` win over both. A key may be a chord,
 `key.r2=Left Shift+Mouse Left`: while its modifier is held the key's plain bindings do not count.
+Games that read the sensors get them from controllers without any with `pad_motion=1` in `psport.ini`
+or `PS_PAD_MOTION=1` (`src/input/runtime_pad_motion.c`, keys and pad combinations in its header):
+the controller held sideways and aimed with the mouse or the right stick, shaken, and touchpad swipes;
+off, the pad lies flat (1 g up, no turn).
 `runtime_pad_prompt_device`, `runtime_pad_prompt_generation` and `runtime_pad_prompt` tell button
 prompts which device was used last (a PlayStation pad, another gamepad, or the keyboard and mouse)
 and the short name of what an input is bound to there (`Shift`, `Esc`, `⇧Left`, `RB`, `A`).

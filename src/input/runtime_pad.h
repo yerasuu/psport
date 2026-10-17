@@ -1,6 +1,7 @@
 #ifndef BB_RUNTIME_PAD_H
 #define BB_RUNTIME_PAD_H
 /* libScePad's data and the scripted input that runtime_pad.c mixes into it (runtime_pad_script.c). */
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 enum {
@@ -47,5 +48,19 @@ int runtime_pad_mouse_look(void);
  * shoulder or trigger (LB RB LT RT; L R ZL ZR), 'C' another button or a stick (LS RS Menu View ...). */
 int runtime_pad_prompt(const char *sz_input, int should_prefer_mouse, char *sz_out_label, size_t cb_label);
 void runtime_pad_record_sample(const PadData *p_pad_data);
+/* Motion emulation (runtime_pad_motion.c). configure: psport.ini's pad_motion (-1 without the line),
+ * PS_PAD_MOTION wins; the rest only while it is on. begin: once per sample, the seconds since the
+ * previous one. from_pad after the gamepad's buttons and sticks; from_desktop after the keyboard's
+ * and the mouse buttons', before mouse look, which gets what is left of the motion in *p_dx, *p_dy;
+ * report last. */
+typedef struct SDL_Gamepad SDL_Gamepad;
+void runtime_pad_motion_configure(int configured);
+int runtime_pad_motion_is_on(void);
+float runtime_pad_motion_begin(uint64_t timestamp_us);
+void runtime_pad_motion_from_pad(PadData *p_pad_data, SDL_Gamepad *p_sdl_gamepad, float dt);
+void runtime_pad_motion_from_desktop(PadData *p_pad_data, const bool *p_is_key_down, int is_touch_key_down,
+                                     int is_mouse_left_down, float mouse_sensitivity, double *p_dx, double *p_dy,
+                                     int is_captured);
+void runtime_pad_motion_report(PadData *p_pad_data, float dt);
 void runtime_pad_replay_sample(PadData *p_pad_data);
 #endif

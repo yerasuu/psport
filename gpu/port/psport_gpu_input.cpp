@@ -56,6 +56,12 @@ extern "C" int psport_gpu_game_keyboard_take(PsKeyEvent* p_events, int max, int*
     return c_keys;
 }
 
+extern "C" void psport_gpu_mouse_capture(void) {
+    if (g_window) {
+        g_window->RequestMouseCapture();
+    }
+}
+
 extern "C" void psport_gpu_mouse_look_enable(int is_enabled) {
     Frontend::WindowSDL::EnableMouseLook(is_enabled != 0);
 }

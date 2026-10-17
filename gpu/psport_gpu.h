@@ -49,6 +49,9 @@ int psport_gpu_overlay_pad_file_press(int guide, int cross, int circle);
 void psport_gpu_mouse_take(double *p_dx, double *p_dy, int *p_wheel_up, int *p_wheel_down);
 int psport_gpu_mouse_captured(void);
 void psport_gpu_mouse_look_enable(int is_enabled);
+/* Asks the window to take the mouse at its next poll, as a click in the game does (motion
+ * emulation's spray can: the mouse aims); not while a menu or a text entry wants the cursor. */
+void psport_gpu_mouse_capture(void);
 /* Native mouse look (Game::MouseHooks pfn_camera_look): turns the game's camera by pitch and yaw
  * (radians) at its next update; 0 without such a hook or while the camera does not take turns
  * (lock-on, menus): drive the right stick then. */

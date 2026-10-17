@@ -427,16 +427,19 @@ static void load_bindings(void) {
     bind_defaults();
     apply_title_controls();
     s_mouse_look=1; s_mouse_invert_y=0; s_mouse_sensitivity=1.0f;
+    int pad_motion=-1;
     const char *sz_key, *sz_value;
     for (size_t i_entry=0; runtime_config_entry(i_entry,&sz_key,&sz_value); ++i_entry) {
         if (apply_binding_line(sz_key,sz_value,"psport.ini")) continue;
         if (!strcmp(sz_key,"mouse_look")) s_mouse_look=atoi(sz_value)!=0;
+        else if (!strcmp(sz_key,"pad_motion")) pad_motion=atoi(sz_value)!=0;
         else if (!strcmp(sz_key,"mouse_invert_y")) s_mouse_invert_y=atoi(sz_value)!=0;
         else if (!strcmp(sz_key,"mouse_sensitivity")) {
             const float v=strtof(sz_value,NULL);
             if (v>=0.05f && v<=20.0f) s_mouse_sensitivity=v;
         }
     }
+    runtime_pad_motion_configure(pad_motion);
 }
 /* The mouse while the window holds it: buttons, and the wheel as short presses (one per notch,
  * each held and released for a few frames so the game sees it). */
@@ -685,6 +688,7 @@ static void sample_host(PadData *p_pad_data) {
     p_pad_data->acceleration[1]=1.0f; /* 1 g up, the pad lying flat: zeros read as free fall */
     p_pad_data->connected=1; p_pad_data->connected_count=s_c_connecteds ? s_c_connecteds : 1;
     p_pad_data->timestamp=now_us();
+    const float motion_dt=runtime_pad_motion_begin(p_pad_data->timestamp);
     SDL_Gamepad *p_sdl_gamepad=current_gamepad();
     if (!s_is_bindings_ready) { load_bindings(); s_is_bindings_ready=1; psport_gpu_mouse_look_enable(s_mouse_look); }
     /* The mouse's motion and wheel since the last sample (always taken: none of it piles up while
@@ -726,6 +730,7 @@ static void sample_host(PadData *p_pad_data) {
                 }
             }
         }
+        if (runtime_pad_motion_is_on()) runtime_pad_motion_from_pad(p_pad_data,p_sdl_gamepad,motion_dt);
         // Back/Select on pads without a touch surface is a left-side click.
         if ((p_pad_data->buttons & BTN_TOUCHPAD) && !p_pad_data->touch_count) touch_click(p_pad_data,0);
         if (touch_right) touch_click(p_pad_data,1);
@@ -739,6 +744,11 @@ static void sample_host(PadData *p_pad_data) {
     for (int i=0;i<IN_COUNT && !is_keyboard_active;++i) is_keyboard_active=key_down(p__bool,i);
     prompt_note(p_sdl_gamepad,is_pad_active,is_keyboard_active);
     apply_keyboard(p_pad_data,p__bool); /* the bound mouse buttons too */
+    if (runtime_pad_motion_is_on()) {
+        runtime_pad_motion_from_desktop(p_pad_data,p__bool,key_down(p__bool,IN_TOUCHPAD) || key_down(p__bool,IN_TOUCHPAD_RIGHT),
+                                        (s_mouse_buttons & SDL_BUTTON_LMASK)!=0,s_mouse_sensitivity,&mouse_dx,&mouse_dy,is_captured);
+        runtime_pad_motion_report(p_pad_data,motion_dt);
+    }
     apply_mouse_look(p_pad_data,mouse_dx,mouse_dy,p_pad_data->timestamp,is_captured);
 }
 

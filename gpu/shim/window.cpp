@@ -444,6 +444,10 @@ bool WindowSDL::PollEvents() {
             break;
         }
     }
+    if (m_is_capture_requested.exchange(false, std::memory_order_relaxed) && !PsOverlay::MenuOpen() &&
+        !m_is_text_active) {
+        CaptureMouse(true);
+    }
     // The menu, the name dialog, the game's own cursor and mouse_look=0 want the mouse as a pointer.
     if (m_is_mouse_captured.load(std::memory_order_relaxed) &&
         (PsOverlay::MenuOpen() || m_is_text_active || PsOverlay::GameCursorShown() ||

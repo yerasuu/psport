@@ -48,6 +48,8 @@ public:
     bool MouseCaptured() const { return m_is_mouse_captured.load(std::memory_order_relaxed); }
     /// mouse_look=0: a click does not take the mouse.
     static void EnableMouseLook(bool is_enabled) { m_is_mouse_look.store(is_enabled, std::memory_order_relaxed); }
+    /// From any thread: the window takes the mouse at its next poll (psport_gpu_mouse_capture).
+    void RequestMouseCapture() { m_is_capture_requested.store(true, std::memory_order_relaxed); }
     /// libSceMouse (psport_gpu_game_mouse_take): the buttons held (SDL_BUTTON_MASK bits), and the motion,
     /// wheel and tilt since the last call, reset. False while the host has no mouse.
     bool TakeGameMouse(s32& dx, s32& dy, s32& wheel, s32& tilt, u32& buttons);
@@ -76,6 +78,7 @@ private:
     double m_mouse_dx{}, m_mouse_dy{};
     int m_c_wheel_up{}, m_c_wheel_down{};
     std::atomic<bool> m_is_mouse_captured{false};
+    std::atomic<bool> m_is_capture_requested{false};
     static inline std::atomic<bool> m_is_mouse_look{true};
     double m_game_dx{}, m_game_dy{};
     float m_game_wheel{}, m_game_tilt{};
