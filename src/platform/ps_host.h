@@ -233,6 +233,49 @@ int ps_host_dir_stat(PsHostDir *p_dir, const char *sz_name, PsHostStat *p_out);
 void ps_host_dir_close(PsHostDir *p_dir);
 
 /* ---- the address space ---- */
+/* What a mapping allows. Write and execute access may imply read on some hosts. */
+enum { PS_HOST_VM_NONE = 0, PS_HOST_VM_READ = 1, PS_HOST_VM_WRITE = 2, PS_HOST_VM_EXECUTE = 4 };
+/* Where a mapping goes: with neither REPLACE nor EXACT, p_at is a hint (NULL: anywhere). */
+enum {
+    /* At p_at, replacing whatever the process had mapped there. */
+    PS_HOST_VM_REPLACE = 1,
+    /* At p_at, or nowhere (EEXIST) when something is mapped there. */
+    PS_HOST_VM_EXACT = 2,
+    /* Address space only: pages are committed when first touched and not charged up front, so that
+     * tables over the guest's whole 40-bit range cost what is used. */
+    PS_HOST_VM_SPARSE = 4,
+};
+size_t ps_host_vm_page_size(void);
+/* Private zeroed memory: its address, or NULL with the host's errno in errno. */
+void *ps_host_vm_map(void *p_at, size_t cb_range, unsigned access, unsigned flags);
+/* A view of a section or file from off_file: every view of the same bytes aliases them and writes
+ * reach the file. NULL with the host's errno in errno (EACCES: the file does not allow access). */
+void *ps_host_vm_map_shared(void *p_at, size_t cb_range, unsigned access, unsigned flags, int h_file,
+                            uint64_t off_file);
+/* 0, or the host's errno. */
+int ps_host_vm_unmap(void *p_range, size_t cb_range);
+/* Changes the access of mapped pages: 0, or the host's errno. Safe in signal handlers, where the
+ * write traps lift their protection. */
+int ps_host_vm_protect(void *p_range, size_t cb_range, unsigned access);
+enum {
+    /* Starts writing the range back without waiting for it. */
+    PS_HOST_VM_FLUSH_ASYNC = 1,
+    /* Later reads see what other views and the file hold. */
+    PS_HOST_VM_FLUSH_INVALIDATE = 2,
+};
+/* Writes a shared view's changes back to its file: 0, or the host's errno. */
+int ps_host_vm_flush(void *p_range, size_t cb_range, unsigned flags);
+/* Memory that is not a file, which ps_host_vm_map_shared views at several addresses (the guest's
+ * direct memory): cb_section zeroed bytes, the descriptor in *p_out_h_section, closed with
+ * ps_host_fs_close. 0, or the host's errno with nothing left open. */
+int ps_host_vm_section_create(const char *sz_name, uint64_t cb_section, int *p_out_h_section);
+/* The bytes read zero again and their storage goes back to the host: 0, or the host's errno. */
+int ps_host_vm_section_discard(int h_section, uint64_t off_section, uint64_t cb_range);
+/* malloc hands out addresses below 1 TiB from now on, so that host objects the guest holds (thread
+ * handles, TLS blocks, its argv) fit the 40-bit pointers PS4 code packs. Once at launch, before the
+ * first allocation the guest may see. */
+void ps_host_vm_keep_heap_low(void);
+
 typedef struct {
     uintptr_t va_begin, va_end;
     int is_readable, is_writable, is_executable;
@@ -403,6 +446,9 @@ __attribute__((noreturn)) void ps_host_resume(const uint64_t p_registers[PS_HOST
 /* Copies from memory of this process without faulting: a page without read access ends the copy.
  * The bytes copied, or minus the host's errno when none could be. Safe in signal handlers. */
 int64_t ps_host_read_memory(void *p_out, const void *p_from, size_t cb_copy);
+/* Copies into memory of this process without faulting: a page without write access ends the copy.
+ * The bytes copied, or minus the host's errno when none could be. */
+int64_t ps_host_write_memory(void *p_to, const void *p_from, size_t cb_copy);
 /* The interrupted code's call chain from the host's unwind information, starting at the faulting
  * instruction (at the handler's own frames when the unwinder cannot see past them): how many
  * return addresses were stored. For a fault report: not promised safe in a signal handler. */

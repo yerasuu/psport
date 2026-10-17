@@ -9,8 +9,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <mutex>
-#include <sys/mman.h>
-#include <unistd.h>
 #include <vector>
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "pslayer_gpu_memory.h"
@@ -366,24 +364,21 @@ bool HostImportWorks(const Vulkan::Instance& instance, const char*& why) {
         why = "import alignment above 4 MiB";
         return false;
     }
-    const int h_fd = memfd_create("psport-guest-memory-probe", MFD_CLOEXEC);
-    if (h_fd < 0 || ftruncate(h_fd, Size) != 0) {
+    int h_fd = -1;
+    if (ps_host_vm_section_create("psport-guest-memory-probe", Size, &h_fd) != 0) {
         why = "memfd";
-        if (h_fd >= 0) {
-            close(h_fd);
-        }
         return false;
     }
     auto* p_view = static_cast<std::uint32_t*>(
-        mmap(nullptr, Size, PROT_READ | PROT_WRITE, MAP_SHARED, h_fd, 0));
+        ps_host_vm_map_shared(nullptr, Size, PS_HOST_VM_READ | PS_HOST_VM_WRITE, 0, h_fd, 0));
     auto* p_guest = static_cast<std::uint32_t*>(
-        mmap(nullptr, Size, PROT_READ | PROT_WRITE, MAP_SHARED, h_fd, 0));
-    close(h_fd);
+        ps_host_vm_map_shared(nullptr, Size, PS_HOST_VM_READ | PS_HOST_VM_WRITE, 0, h_fd, 0));
+    ps_host_fs_close(h_fd);
     bool is_ok = false;
     vk::Buffer buffer, sparse;
     vk::DeviceMemory memory;
     vk::Result error{};
-    if (p_view == MAP_FAILED || p_guest == MAP_FAILED) {
+    if (!p_view || !p_guest) {
         why = "mmap of the memfd";
     } else if (!ImportHost(p_view, Size, buffer, memory, error)) {
         static std::string s_text;
@@ -474,11 +469,11 @@ bool HostImportWorks(const Vulkan::Instance& instance, const char*& why) {
     if (memory) {
         dev.freeMemory(memory);
     }
-    if (p_view != MAP_FAILED) {
-        munmap(p_view, Size);
+    if (p_view) {
+        ps_host_vm_unmap(p_view, Size);
     }
-    if (p_guest != MAP_FAILED) {
-        munmap(p_guest, Size);
+    if (p_guest) {
+        ps_host_vm_unmap(p_guest, Size);
     }
     return is_ok;
 }
@@ -726,24 +721,24 @@ bool DmaBufWorks(const Vulkan::Instance& instance) {
         }
         if (h_fd >= 0) {
             // The whole buffer and one page inside it, writing through one, reading through the other.
-            void* p_whole = mmap(nullptr, Size, PROT_READ | PROT_WRITE, MAP_SHARED, h_fd, 0);
-            void* p_page = mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, h_fd, Offset);
+            void* p_whole = ps_host_vm_map_shared(nullptr, Size, PS_HOST_VM_READ | PS_HOST_VM_WRITE, 0, h_fd, 0);
+            void* p_page = ps_host_vm_map_shared(nullptr, 4096, PS_HOST_VM_READ | PS_HOST_VM_WRITE, 0, h_fd, Offset);
             // PS_GUEST_WHOLE_CHUNKS=1: as if the offset mapping failed (tests the NVIDIA path).
             const char* sz_force_whole = std::getenv("PS_GUEST_WHOLE_CHUNKS");
-            if (sz_force_whole && sz_force_whole[0] == '1' && p_page != MAP_FAILED) {
-                munmap(p_page, 4096);
-                p_page = MAP_FAILED;
+            if (sz_force_whole && sz_force_whole[0] == '1' && p_page) {
+                ps_host_vm_unmap(p_page, 4096);
+                p_page = nullptr;
             }
-            if (p_whole != MAP_FAILED && p_page != MAP_FAILED) {
+            if (p_whole && p_page) {
                 *static_cast<volatile std::uint32_t*>(p_page) = 0x5ca1ab1e;
                 is_ok = static_cast<volatile std::uint32_t*>(p_whole)[Offset / 4] == 0x5ca1ab1e;
-            } else if (p_whole != MAP_FAILED) {
+            } else if (p_whole) {
                 // Offset 0 only (NVIDIA): a second mapping of the start must alias the first.
-                void* p_again = mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, h_fd, 0);
-                if (p_again != MAP_FAILED) {
+                void* p_again = ps_host_vm_map_shared(nullptr, 4096, PS_HOST_VM_READ | PS_HOST_VM_WRITE, 0, h_fd, 0);
+                if (p_again) {
                     *static_cast<volatile std::uint32_t*>(p_again) = 0x5ca1ab1e;
                     is_ok = s_is_whole_only = static_cast<volatile std::uint32_t*>(p_whole)[0] == 0x5ca1ab1e;
-                    munmap(p_again, 4096);
+                    ps_host_vm_unmap(p_again, 4096);
                 }
             }
             // The game's code works on this memory: an uncached CPU mapping would crawl.
@@ -762,13 +757,13 @@ bool DmaBufWorks(const Vulkan::Instance& instance) {
                     s_detected.sz_dmabuf = "slow";
                 }
             }
-            if (p_whole != MAP_FAILED) {
-                munmap(p_whole, Size);
+            if (p_whole) {
+                ps_host_vm_unmap(p_whole, Size);
             }
-            if (p_page != MAP_FAILED) {
-                munmap(p_page, 4096);
+            if (p_page) {
+                ps_host_vm_unmap(p_page, 4096);
             }
-            close(h_fd);
+            ps_host_fs_close(h_fd);
         }
         if (memory) {
             dev.freeMemory(memory);

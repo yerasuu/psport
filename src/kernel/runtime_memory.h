@@ -5,7 +5,6 @@
 #define BB_RUNTIME_MEMORY_H
 #include "runtime.h"
 #ifndef _WIN32
-#include <sys/mman.h>
 #pragma GCC visibility push(hidden)
 uint64_t pool_size_bytes(void);
 #define POOL_SIZE pool_size_bytes()
@@ -38,9 +37,9 @@ enum { HOOK_MAP, HOOK_UNMAP, HOOK_INVALIDATE };
 extern size_t g_c_pending_hooks;
 extern uint64_t g_cb_flexible;
 static inline uint64_t align_up(uint64_t value, uint64_t alignment) { return (value+alignment-1) & ~(alignment-1); }
-static inline int host_prot(int prot) {
+static inline unsigned host_prot(int prot) {
     /* GPU read/write bits (0x10/0x20) need host access for the future GPU backend. */
-    return ((prot & 0x11) ? PROT_READ : 0) | ((prot & 0x22) ? PROT_WRITE|PROT_READ : 0) | ((prot & 4) ? PROT_EXEC|PROT_READ : 0);
+    return ((prot & 0x11) ? PS_HOST_VM_READ : 0u) | ((prot & 0x22) ? PS_HOST_VM_WRITE|PS_HOST_VM_READ : 0u) | ((prot & 4) ? PS_HOST_VM_EXECUTE|PS_HOST_VM_READ : 0u);
 }
 int pool(void);
 void ensure_chunks(uint64_t phys, uint64_t cb_range);

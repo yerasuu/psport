@@ -16,7 +16,10 @@
 FEATURE(guest_memory, vm, "the guest's address space at the PS4's addresses: fixed mappings below 1 TiB and direct memory "
                           "mapped at several addresses")
 FEATURE_HOST(guest_memory, LINUX, IMPLEMENTED,
-             "mmap with MAP_FIXED_NOREPLACE and MAP_NORESERVE, direct memory in a memfd (runtime_memory.c)", "#540")
+             "mmap with MAP_FIXED_NOREPLACE and MAP_NORESERVE, direct memory in a memfd punched with fallocate, malloc "
+             "kept below 1 TiB in the -no-pie brk heap (src/platform/linux/host_memory.c; the guest's map in "
+             "runtime_memory.c)",
+             "#540")
 
 FEATURE(gpu_memory_dmabuf, gpu_memory, "the GPU uses guest memory in place: cached system memory exported as a dma-buf and "
                                        "mapped at the game's addresses")

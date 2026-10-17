@@ -14,10 +14,6 @@
 #endif
 #ifdef _WIN32
 #include <windows.h>
-#else
-#include <sys/mman.h>
-#include <malloc.h>
-#include <unistd.h>
 #endif
 
 char (*g_p_names)[128];
@@ -71,31 +67,15 @@ static void check_cpu(void) {
 }
 size_t round_page(size_t cb_page) { return (cb_page + g_cb_page - 1) & ~(g_cb_page - 1); }
 void *allocate(size_t cb_allocation) {
-#ifndef _WIN32
-    void *p_low=runtime_low_map(cb_allocation,PROT_READ|PROT_WRITE);
+    void *p_low=runtime_low_map(cb_allocation,PS_HOST_VM_READ|PS_HOST_VM_WRITE);
     if (p_low) return p_low;
-#endif
-#ifdef _WIN32
-    void *p = VirtualAlloc(NULL, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
-    if (!p) fail("VirtualAlloc failed");
-#else
-    void *p_mapping = mmap(NULL, cb_allocation, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (p_mapping == MAP_FAILED) fail("mmap failed");
-#endif
+    void *p_mapping = ps_host_vm_map(NULL, cb_allocation, PS_HOST_VM_READ | PS_HOST_VM_WRITE, 0);
+    if (!p_mapping) fail("mmap failed");
     return p_mapping;
 }
 void protect(void *p_range, size_t cb_range, unsigned flags) {
-#ifdef _WIN32
-    DWORD old, mode = PAGE_NOACCESS;
-    if (flags & 1) mode = (flags & 2) ? PAGE_EXECUTE_READWRITE : PAGE_EXECUTE_READ;
-    else if (flags & 2) mode = PAGE_READWRITE;
-    else if (flags & 4) mode = PAGE_READONLY;
-    if (!VirtualProtect(p, size, mode, &old)) fail("VirtualProtect failed");
-    FlushInstructionCache(GetCurrentProcess(), p, size);
-#else
-    int mode = ((flags & 4) ? PROT_READ : 0) | ((flags & 2) ? PROT_WRITE : 0) | ((flags & 1) ? PROT_EXEC : 0);
-    if (mprotect(p_range, cb_range, mode)) fail("mprotect failed");
-#endif
+    const unsigned access = ((flags & 4) ? PS_HOST_VM_READ : 0u) | ((flags & 2) ? PS_HOST_VM_WRITE : 0u) | ((flags & 1) ? PS_HOST_VM_EXECUTE : 0u);
+    if (ps_host_vm_protect(p_range, cb_range, access)) fail("mprotect failed");
 }
 #ifndef _WIN32
 /* enter_on_stack(p_entry, p_arg0, p_arg1, p_top): call p_entry(p_arg0,p_arg1) on a new stack. */
@@ -112,10 +92,7 @@ int main(int argc, char **argv) {
     runtime_restart_configure(argc, argv);
 #ifndef _WIN32
     accept_deprecated_names(argv);
-    /* Keep host heap objects handed to the guest (thread handles, TLS) in the
-       non-PIE brk heap, i.e. below 1 TiB: the guest packs pointers into 40 bits. */
-    mallopt(M_ARENA_MAX,1);
-    mallopt(M_MMAP_THRESHOLD,32*1024*1024);
+    ps_host_vm_keep_heap_low();
 #endif
     if (argc == 2 && !strcmp(argv[1], "--vulkan-only")) return vulkan_smoke();
     int query_status = answer_query(argc, argv);
@@ -187,10 +164,8 @@ int main(int argc, char **argv) {
     }
     runtime_set_arguments(pp_guest_arguments, c_guest_arguments);
     psport_gpu_register_kernel();
-#ifdef _WIN32
-    SYSTEM_INFO system_info; GetSystemInfo(&system_info); page_size = system_info.dwPageSize;
-#else
-    g_cb_page = (size_t)sysconf(_SC_PAGESIZE);
+    g_cb_page = ps_host_vm_page_size();
+#ifndef _WIN32
     install_fault_handlers(timeout_seconds);
 #endif
     LoaderImage boot_image;
@@ -383,7 +358,7 @@ int main(int argc, char **argv) {
 #else
     /* The guest main thread runs on a stack below 1 TiB like PS4 stacks. */
     enum { MAIN_STACK=8*1024*1024 };
-    unsigned char *p_stack=runtime_low_map(MAIN_STACK,PROT_READ|PROT_WRITE);
+    unsigned char *p_stack=runtime_low_map(MAIN_STACK,PS_HOST_VM_READ|PS_HOST_VM_WRITE);
     if (!p_stack) fail("cannot allocate guest main stack");
     if (native_libc) runtime_thread_set_stack(p_stack,MAIN_STACK);
     enter_on_stack(g_p_image+entry,p_params,(void *)guest_exit,p_stack+MAIN_STACK-64);

@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "game_menu.h"
 
-#include <sys/mman.h>
-#include <unistd.h>
+#include "../../../src/platform/ps_host.h"
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -551,9 +550,9 @@ u8* MapNear(unsigned char* p_image, u64 cb_image, std::size_t cb_range) {
     const u64 base = reinterpret_cast<u64>(p_image);
     for (u64 k = 1; k <= 64; ++k) {
         for (const u64 hint : {base - k * (24ull << 20), base + cb_image + k * (24ull << 20)}) {
-            void* p_mapping = mmap(reinterpret_cast<void*>(hint), cb_range, PROT_READ | PROT_WRITE,
-                           MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
-            if (p_mapping != MAP_FAILED) {
+            void* p_mapping = ps_host_vm_map(reinterpret_cast<void*>(hint), cb_range, PS_HOST_VM_READ | PS_HOST_VM_WRITE,
+                                             PS_HOST_VM_EXACT);
+            if (p_mapping) {
                 return static_cast<u8*>(p_mapping);
             }
         }
@@ -568,7 +567,7 @@ void PatchImage(unsigned char* p_image, std::uint64_t cb_image) {
         return;
     }
     s_image_base = reinterpret_cast<u64>(p_image);
-    const std::size_t page = std::size_t(sysconf(_SC_PAGESIZE));
+    const std::size_t page = ps_host_vm_page_size();
     u8* p_stubs = MapNear(p_image, cb_image, page);
     if (!p_stubs) {
         std::printf("Game menu: no memory near the image, the port's pages are off\n");
@@ -597,7 +596,7 @@ void PatchImage(unsigned char* p_image, std::uint64_t cb_image) {
                reinterpret_cast<void*>(&LookupHook), reinterpret_cast<void**>(&s_pfn_lookup_original), p_cursor) &&
         Detour(p_image, AddPageItem, AddPageItemPrologue, sizeof(AddPageItemPrologue),
                reinterpret_cast<void*>(&AddHook), reinterpret_cast<void**>(&s_pfn_add_original), p_cursor);
-    mprotect(p_stubs, page, PROT_READ | PROT_EXEC);
+    ps_host_vm_protect(p_stubs, page, PS_HOST_VM_READ | PS_HOST_VM_EXECUTE);
     std::printf("Game menu: %s (%zu pages in System)\n", is_ok ? "the port's pages are in" : "hooks failed, off",
                 s_pages.size());
 }

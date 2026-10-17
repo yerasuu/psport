@@ -12,9 +12,6 @@
 #include <pthread.h>
 #ifndef _WIN32
 #include <errno.h>
-#include <fcntl.h>
-#include <sys/mman.h>
-#include <unistd.h>
 /* sceKernelGetDirectMemorySize on retail PS4: 5056 MiB. PS_DMEM_MB raises it (the resolution
  * patches above 1080p need about 4 GiB more; run.sh sets it). */
 uint64_t pool_size_bytes(void) {
@@ -82,8 +79,8 @@ static const Region *region_at(uint64_t phys, uint64_t *p_next) {
 static void add_region(uint64_t phys, uint64_t cb_range) {
     if (s_c_regions==MAX_REGIONS) return;
     int h_fd=s_pfn_chunk_alloc(phys,cb_range);
-    if (h_fd>=0 && mmap(g_p_backing_base+phys,cb_range,PROT_READ|PROT_WRITE,MAP_SHARED|MAP_FIXED,h_fd,0)==MAP_FAILED) {
-        close(h_fd);
+    if (h_fd>=0 && !ps_host_vm_map_shared(g_p_backing_base+phys,cb_range,PS_HOST_VM_READ|PS_HOST_VM_WRITE,PS_HOST_VM_REPLACE,h_fd,0)) {
+        ps_host_fs_close(h_fd);
         h_fd=-1;
     }
     size_t i=s_c_regions;
@@ -102,10 +99,9 @@ uint64_t g_cb_flexible;
 /* Direct memory occupies [0,POOL_SIZE) of the memfd, flexible memory [POOL_SIZE,+FLEX_SPAN). */
 int pool(void) {
     if (s_h_pool>=0) return 0;
-    s_h_pool=memfd_create("psport-guest-memory", MFD_CLOEXEC);
-    if (s_h_pool<0 || ftruncate(s_h_pool,(off_t)(POOL_SIZE+FLEX_SPAN))) return -1;
-    void *p_view=mmap(NULL,POOL_SIZE+FLEX_SPAN,PROT_READ|PROT_WRITE,MAP_SHARED|MAP_NORESERVE,s_h_pool,0);
-    if (p_view==MAP_FAILED) return -1;
+    if (ps_host_vm_section_create("psport-guest-memory",POOL_SIZE+FLEX_SPAN,&s_h_pool)) return -1;
+    void *p_view=ps_host_vm_map_shared(NULL,POOL_SIZE+FLEX_SPAN,PS_HOST_VM_READ|PS_HOST_VM_WRITE,PS_HOST_VM_SPARSE,s_h_pool,0);
+    if (!p_view) return -1;
     g_p_backing_base=p_view;
     s_p_chunk_fds=malloc((POOL_SIZE/CHUNK+1)*sizeof(int));
     if (!s_p_chunk_fds) return -1;
@@ -137,17 +133,17 @@ void ensure_chunks(uint64_t phys, uint64_t cb_range) {
     for (uint64_t c=phys/CHUNK;c<=last;++c) {
         if (s_p_chunk_fds[c]!=-1) continue;
         int h_fd=s_pfn_chunk_alloc ? s_pfn_chunk_alloc(c*CHUNK,chunk_size(c)) : -1;
-        if (h_fd>=0 && mmap(g_p_backing_base+c*CHUNK,chunk_size(c),PROT_READ|PROT_WRITE,MAP_SHARED|MAP_FIXED,h_fd,0)==MAP_FAILED) {
-            close(h_fd);
+        if (h_fd>=0 && !ps_host_vm_map_shared(g_p_backing_base+c*CHUNK,chunk_size(c),PS_HOST_VM_READ|PS_HOST_VM_WRITE,PS_HOST_VM_REPLACE,h_fd,0)) {
+            ps_host_fs_close(h_fd);
             h_fd=-1;
         }
         s_p_chunk_fds[c]=h_fd>=0 || h_fd==CHUNK_IMPORTED ? h_fd : -2;
     }
 }
-/* mmap of direct or flexible memory at phys, split where it crosses chunks. */
-static void *map_phys(uintptr_t va_range, uint64_t cb_range, int prot, uint64_t phys) {
+/* A view of direct or flexible memory at phys, split where it crosses chunks. */
+static void *map_phys(uintptr_t va_range, uint64_t cb_range, unsigned access, uint64_t phys) {
     if (!s_p_chunk_fds || phys>=POOL_SIZE)
-        return mmap((void *)va_range,cb_range,prot,MAP_SHARED|MAP_FIXED,s_h_pool,(off_t)phys);
+        return ps_host_vm_map_shared((void *)va_range,cb_range,access,PS_HOST_VM_REPLACE,s_h_pool,phys);
     ensure_chunks(phys,cb_range);
     for (uint64_t done=0;s_has_whole_chunks && done<cb_range;) {
         const uint64_t at=phys+done;
@@ -155,14 +151,14 @@ static void *map_phys(uintptr_t va_range, uint64_t cb_range, int prot, uint64_t 
         const Region *p_region=region_at(at,&next);
         const uint64_t room=p_region ? p_region->phys+p_region->cb_range-at : next-at, cb_chunk=cb_range-done<room ? cb_range-done : room;
         void *p_mapping = p_region && p_region->h_fd>=0
-            ? mmap((void *)(va_range+done),cb_chunk,prot,MAP_SHARED|MAP_FIXED,p_region->h_fd,(off_t)(at-p_region->phys))
-            : mmap((void *)(va_range+done),cb_chunk,prot,MAP_SHARED|MAP_FIXED,s_h_pool,(off_t)at);
-        if (p_mapping==MAP_FAILED) {
+            ? ps_host_vm_map_shared((void *)(va_range+done),cb_chunk,access,PS_HOST_VM_REPLACE,p_region->h_fd,at-p_region->phys)
+            : ps_host_vm_map_shared((void *)(va_range+done),cb_chunk,access,PS_HOST_VM_REPLACE,s_h_pool,at);
+        if (!p_mapping) {
             static int s_has_reported;
             if (s_has_reported++ < 4)
                 fprintf(stderr,"Runtime: mapping direct memory %#" PRIx64 "+%#" PRIx64 " from %s failed: %s\n",
                         at,cb_chunk,p_region && p_region->h_fd>=0 ? "a GPU-visible dma-buf (whole-allocation chunk)" : "the memfd",strerror(errno));
-            return MAP_FAILED;
+            return NULL;
         }
         done+=cb_chunk;
         if (done==cb_range) return (void *)va_range;
@@ -171,14 +167,14 @@ static void *map_phys(uintptr_t va_range, uint64_t cb_range, int prot, uint64_t 
         const uint64_t at=phys+done, c=at/CHUNK;
         const uint64_t room=c*CHUNK+chunk_size(c)-at, cb_chunk=cb_range-done<room ? cb_range-done : room;
         void *p_mapping = s_p_chunk_fds[c]>=0
-            ? mmap((void *)(va_range+done),cb_chunk,prot,MAP_SHARED|MAP_FIXED,s_p_chunk_fds[c],(off_t)(at-c*CHUNK))
-            : mmap((void *)(va_range+done),cb_chunk,prot,MAP_SHARED|MAP_FIXED,s_h_pool,(off_t)at);
-        if (p_mapping==MAP_FAILED) {
+            ? ps_host_vm_map_shared((void *)(va_range+done),cb_chunk,access,PS_HOST_VM_REPLACE,s_p_chunk_fds[c],at-c*CHUNK)
+            : ps_host_vm_map_shared((void *)(va_range+done),cb_chunk,access,PS_HOST_VM_REPLACE,s_h_pool,at);
+        if (!p_mapping) {
             static int s_has_reported;
             if (s_has_reported++ < 4)
                 fprintf(stderr,"Runtime: mapping direct memory %#" PRIx64 "+%#" PRIx64 " from %s failed: %s\n",
                         at,cb_chunk,s_p_chunk_fds[c]>=0 ? "a GPU-visible dma-buf chunk" : "the memfd",strerror(errno));
-            return MAP_FAILED;
+            return NULL;
         }
         done+=cb_chunk;
     }
@@ -189,7 +185,7 @@ void zero_phys(uint64_t phys, uint64_t cb_range) {
     for (uint64_t done=0;done<cb_range;) {
         const uint64_t at=phys+done;
         if (!s_p_chunk_fds || at>=POOL_SIZE) {
-            fallocate(s_h_pool,FALLOC_FL_PUNCH_HOLE|FALLOC_FL_KEEP_SIZE,(off_t)at,(off_t)(cb_range-done));
+            ps_host_vm_section_discard(s_h_pool,at,cb_range-done);
             return;
         }
         if (s_has_whole_chunks) {
@@ -197,13 +193,13 @@ void zero_phys(uint64_t phys, uint64_t cb_range) {
             const Region *p_region=region_at(at,&next);
             const uint64_t room=p_region ? p_region->phys+p_region->cb_range-at : next-at, cb_chunk=cb_range-done<room ? cb_range-done : room;
             if (p_region && GPU_CHUNK(p_region->h_fd)) memset(g_p_backing_base+at,0,cb_chunk);
-            else fallocate(s_h_pool,FALLOC_FL_PUNCH_HOLE|FALLOC_FL_KEEP_SIZE,(off_t)at,(off_t)cb_chunk);
+            else ps_host_vm_section_discard(s_h_pool,at,cb_chunk);
             done+=cb_chunk;
             continue;
         }
         const uint64_t c=at/CHUNK, room=c*CHUNK+chunk_size(c)-at, cb_chunk=cb_range-done<room ? cb_range-done : room;
         if (GPU_CHUNK(s_p_chunk_fds[c])) memset(g_p_backing_base+at,0,cb_chunk);
-        else fallocate(s_h_pool,FALLOC_FL_PUNCH_HOLE|FALLOC_FL_KEEP_SIZE,(off_t)at,(off_t)cb_chunk);
+        else ps_host_vm_section_discard(s_h_pool,at,cb_chunk);
         done+=cb_chunk;
     }
 }
@@ -250,7 +246,7 @@ uint64_t flex_alloc(uint64_t cb_range) {
 }
 void flex_free(uint64_t phys, uint64_t cb_range) {
     flex_set((phys-POOL_SIZE)/PAGE,cb_range/PAGE,0);
-    fallocate(s_h_pool,FALLOC_FL_PUNCH_HOLE|FALLOC_FL_KEEP_SIZE,(off_t)phys,(off_t)cb_range);
+    ps_host_vm_section_discard(s_h_pool,phys,cb_range);
 }
 size_t vma_index(uintptr_t a) { /* first VMA with end > a */
     size_t lo=0, hi=g_c_vmas;
@@ -314,7 +310,7 @@ void drop_range(uintptr_t start, uintptr_t end) {
             g_cb_flexible-=g_p_vmas[i+c_dropped].end-g_p_vmas[i+c_dropped].start;
             flex_free(g_p_vmas[i+c_dropped].phys,g_p_vmas[i+c_dropped].end-g_p_vmas[i+c_dropped].start);
         }
-        if (g_p_vmas[i+c_dropped].p_view) munmap(g_p_vmas[i+c_dropped].p_view,g_p_vmas[i+c_dropped].end-g_p_vmas[i+c_dropped].start);
+        if (g_p_vmas[i+c_dropped].p_view) ps_host_vm_unmap(g_p_vmas[i+c_dropped].p_view,g_p_vmas[i+c_dropped].end-g_p_vmas[i+c_dropped].start);
         ++c_dropped;
     }
     vma_erase(i,c_dropped);
@@ -330,15 +326,14 @@ static int32_t place_backed(void **pp_inout, uint64_t cb_range, int prot, int fl
         if (!va_range) return NO_MEMORY;
     }
     void *p_mapped = kind==KIND_RESERVED
-        ? mmap((void *)va_range,cb_range,PROT_NONE,MAP_PRIVATE|MAP_ANONYMOUS|MAP_NORESERVE|MAP_FIXED,-1,0)
-        : kind==KIND_FILE ? mmap((void *)va_range,cb_range,host_prot(prot),MAP_SHARED|MAP_FIXED,file,(off_t)phys)
+        ? ps_host_vm_map((void *)va_range,cb_range,PS_HOST_VM_NONE,PS_HOST_VM_REPLACE|PS_HOST_VM_SPARSE)
+        : kind==KIND_FILE ? ps_host_vm_map_shared((void *)va_range,cb_range,host_prot(prot),PS_HOST_VM_REPLACE,file,phys)
         : map_phys(va_range,cb_range,host_prot(prot),phys);
-    if (p_mapped==MAP_FAILED) return kind==KIND_FILE && errno==EACCES ? ACCESS : NO_MEMORY;
+    if (!p_mapped) return kind==KIND_FILE && errno==EACCES ? ACCESS : NO_MEMORY;
     unsigned char *p_view=NULL;
     if (kind==KIND_FILE) {
-        p_view=mmap(NULL,cb_range,PROT_READ|PROT_WRITE,MAP_SHARED,file,(off_t)phys);
-        if (p_view==MAP_FAILED) {
-            p_view=NULL;
+        p_view=ps_host_vm_map_shared(NULL,cb_range,PS_HOST_VM_READ|PS_HOST_VM_WRITE,0,file,phys);
+        if (!p_view) {
             printf("Runtime: file mapping %p+%#" PRIx64 " has no host view (%s): the GPU's writes to it are dropped\n",
                    p_mapped,cb_range,strerror(errno));
         }
@@ -365,20 +360,20 @@ int32_t place_file(void **pp_inout, uint64_t cb_range, int prot, int flags, int 
  * [LOW_MIN, USER_MIN): PS4 code packs pointers into 40-bit fields. */
 #define LOW_MIN UINT64_C(0x0800000000)
 static uintptr_t s_low_next=LOW_MIN;
-void *runtime_low_map(size_t cb_range, int prot) {
+void *runtime_low_map(size_t cb_range, unsigned access) {
     cb_range=align_up(cb_range,PAGE);
     write_lock();
-    void *p_mapping=MAP_FAILED;
+    void *p_mapping=NULL;
     while (s_low_next+cb_range<=USER_MIN) {
-        p_mapping=mmap((void *)s_low_next,cb_range,prot,MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED_NOREPLACE,-1,0);
+        p_mapping=ps_host_vm_map((void *)s_low_next,cb_range,access,PS_HOST_VM_EXACT);
         s_low_next+=cb_range+PAGE; /* unmapped gap catches overruns */
-        if (p_mapping!=MAP_FAILED) break;
+        if (p_mapping) break;
     }
     write_unlock();
-    return p_mapping==MAP_FAILED ? NULL : p_mapping;
+    return p_mapping;
 }
 #else
-void *runtime_low_map(size_t size, int prot) { (void)size; (void)prot; return NULL; }
+void *runtime_low_map(size_t size, unsigned access) { (void)size; (void)access; return NULL; }
 uintptr_t runtime_memory_resolve(const char *name) { (void)name; return 0; }
 int runtime_memory_is_mapped(uintptr_t address, uint64_t size) { (void)address; (void)size; return 0; }
 void runtime_memory_report(void) { puts("Runtime: Windows direct-memory backend not implemented"); }

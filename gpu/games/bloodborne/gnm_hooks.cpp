@@ -10,8 +10,7 @@
 #include <cstring>
 #include <thread>
 #include <vector>
-#include <sys/mman.h>
-#include <unistd.h>
+#include "../../../src/platform/ps_host.h"
 
 namespace PsGnmHooks {
 namespace {
@@ -37,7 +36,7 @@ constexpr std::size_t CounterStride = 64; // one cache line per counter
 
 u8* s_p_stubs = nullptr;
 u64* CounterAt(std::size_t i) {
-    const std::size_t page = std::size_t(sysconf(_SC_PAGESIZE));
+    const std::size_t page = ps_host_vm_page_size();
     const std::size_t cb_code = ((Count + 1) * SlotSize + page - 1) / page * page;
     return reinterpret_cast<u64*>(s_p_stubs + cb_code + i * CounterStride);
 }
@@ -47,9 +46,9 @@ u8* MapNear(unsigned char* p_image, std::uint64_t cb_image, std::size_t cb_range
     const u64 base = reinterpret_cast<u64>(p_image);
     for (u64 k = 1; k <= 64; ++k) {
         for (const u64 hint : {base - k * (16ull << 20), base + cb_image + k * (16ull << 20)}) {
-            void* p_mapping = mmap(reinterpret_cast<void*>(hint), cb_range, PROT_READ | PROT_WRITE,
-                           MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
-            if (p_mapping != MAP_FAILED) {
+            void* p_mapping = ps_host_vm_map(reinterpret_cast<void*>(hint), cb_range, PS_HOST_VM_READ | PS_HOST_VM_WRITE,
+                                             PS_HOST_VM_EXACT);
+            if (p_mapping) {
                 return static_cast<u8*>(p_mapping);
             }
         }
@@ -517,7 +516,7 @@ void PatchImage(unsigned char* p_image, std::uint64_t cb_image) {
         return;
     }
     const std::size_t cb_stub = (Count + 1) * SlotSize; // + the shared exit thunk
-    const std::size_t page = std::size_t(sysconf(_SC_PAGESIZE));
+    const std::size_t page = ps_host_vm_page_size();
     const std::size_t cb_code = (cb_stub + page - 1) / page * page;
     const std::size_t cb_map = cb_code + Count * CounterStride;
     s_image_base = reinterpret_cast<u64>(p_image);
@@ -588,7 +587,7 @@ void PatchImage(unsigned char* p_image, std::uint64_t cb_image) {
         std::memset(p_function + 5, 0xcc, e.cb_prologue - 5);
         ++patched;
     }
-    mprotect(s_p_stubs, cb_code, PROT_READ | PROT_EXEC);
+    ps_host_vm_protect(s_p_stubs, cb_code, PS_HOST_VM_READ | PS_HOST_VM_EXECUTE);
     std::printf("Gnm census: %zu of %zu libGnm entry points hooked (%zu do not match the 1.09 eboot)%s\n",
                 patched, Count, mismatched, s_should_observe ? "; command buffer methods observed" : "");
     std::thread(ReportLoop).detach();

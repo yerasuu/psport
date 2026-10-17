@@ -494,9 +494,9 @@ struct PageManager::Impl {
     static void UpdateTraps(TrapOwners& owners, PsLayer::WriteTraps::Reason reason,
                             ForEachPage&& for_each_page) {
         std::call_once(owners.once, [&owners] {
-            void* mem = mmap(nullptr, NUM_ADDRESS_PAGES * sizeof(u16), PROT_READ | PROT_WRITE,
-                             MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
-            ASSERT_MSG(mem != MAP_FAILED, "trap owner table");
+            void* mem = ps_host_vm_map(nullptr, NUM_ADDRESS_PAGES * sizeof(u16), PS_HOST_VM_READ | PS_HOST_VM_WRITE,
+                                       PS_HOST_VM_SPARSE);
+            ASSERT_MSG(mem != nullptr, "trap owner table");
             owners.counts = static_cast<u16*>(mem);
         });
         // Runs of pages whose first owner came or last one went: one trap change each.

@@ -89,8 +89,8 @@ static _Atomic(uint64_t) *s_p_write_watch;
 static GpuRange s_pfn_hook_cpu_write;
 void runtime_memory_set_cpu_write_hook(GpuRange pfn_hook) {
     if (!s_p_write_watch) {
-        void *p_bits=mmap(NULL,WATCH_LIMIT>>15,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS|MAP_NORESERVE,-1,0);
-        if (p_bits==MAP_FAILED) { perror("psport: write watch bitmap"); return; }
+        void *p_bits=ps_host_vm_map(NULL,WATCH_LIMIT>>15,PS_HOST_VM_READ|PS_HOST_VM_WRITE,PS_HOST_VM_SPARSE);
+        if (!p_bits) { perror("psport: write watch bitmap"); return; }
         s_p_write_watch=p_bits;
     }
     s_pfn_hook_cpu_write=pfn_hook;
@@ -137,8 +137,8 @@ static void trap_apply(uintptr_t a, uintptr_t b, int level) {
     for (size_t i=vma_index(a); i<g_c_vmas && g_p_vmas[i].start<b; ++i) {
         if (g_p_vmas[i].kind==KIND_RESERVED) continue;
         const uintptr_t s=g_p_vmas[i].start>a ? g_p_vmas[i].start : a, e=g_p_vmas[i].end<b ? g_p_vmas[i].end : b;
-        const int prot=host_prot(g_p_vmas[i].prot);
-        mprotect((void *)s,e-s,level==2 ? PROT_NONE : level ? (prot & ~PROT_WRITE) : prot);
+        const unsigned access=host_prot(g_p_vmas[i].prot);
+        ps_host_vm_protect((void *)s,e-s,level==2 ? PS_HOST_VM_NONE : level ? (access & ~(unsigned)PS_HOST_VM_WRITE) : access);
     }
 }
 /* No traps in [start, end) any more: a mapping replaced or gone (runtime lock held). */
@@ -167,11 +167,11 @@ void trap_reapply(uintptr_t start, uintptr_t end) {
 void runtime_memory_trap(uintptr_t va_range, uint64_t cb_range, unsigned reason, int is_on) {
     if (!cb_range || va_range>=TRAP_LIMIT) return;
     if (!s_p_trap_reasons) {
-        void *p_bytes=mmap(NULL,TRAP_LIMIT>>12,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS|MAP_NORESERVE,-1,0);
-        if (p_bytes==MAP_FAILED) { perror("psport: write trap table"); return; }
+        void *p_bytes=ps_host_vm_map(NULL,TRAP_LIMIT>>12,PS_HOST_VM_READ|PS_HOST_VM_WRITE,PS_HOST_VM_SPARSE);
+        if (!p_bytes) { perror("psport: write trap table"); return; }
         uint8_t *p_expected=NULL;
         if (!__atomic_compare_exchange_n(&s_p_trap_reasons,&p_expected,(uint8_t *)p_bytes,0,__ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE))
-            munmap(p_bytes,TRAP_LIMIT>>12);
+            ps_host_vm_unmap(p_bytes,TRAP_LIMIT>>12);
     }
     uintptr_t end=va_range+cb_range>TRAP_LIMIT ? TRAP_LIMIT : va_range+cb_range;
     read_lock();
@@ -355,9 +355,9 @@ void runtime_memory_gpu_protect(uintptr_t va_range, uint64_t cb_range, int read,
         if (g_p_vmas[i].kind==KIND_RESERVED) continue;
         uintptr_t a=g_p_vmas[i].start>va_range ? g_p_vmas[i].start : va_range;
         uintptr_t b=g_p_vmas[i].end<va_range+cb_range ? g_p_vmas[i].end : va_range+cb_range;
-        int guest=host_prot(g_p_vmas[i].prot);
-        int want=(read ? PROT_READ : 0)|(write ? PROT_WRITE|PROT_READ : 0)|(guest & PROT_EXEC);
-        mprotect((void *)a,b-a,guest & want);
+        unsigned guest=host_prot(g_p_vmas[i].prot);
+        unsigned want=(read ? PS_HOST_VM_READ : 0u)|(write ? PS_HOST_VM_WRITE|PS_HOST_VM_READ : 0u)|(guest & PS_HOST_VM_EXECUTE);
+        ps_host_vm_protect((void *)a,b-a,guest & want);
     }
     read_unlock();
 }

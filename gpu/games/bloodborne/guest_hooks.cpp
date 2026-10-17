@@ -11,7 +11,6 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
-#include <sys/mman.h>
 #include <unistd.h>
 
 extern "C" void runtime_memory_note_write(uintptr_t va_range, uint64_t cb_range);
@@ -101,9 +100,9 @@ constexpr std::size_t StubPageSize = 4096;
 u8* MapStubPage() {
     for (u64 k = 1; k <= 64; ++k) {
         const u64 hint = ImageBase - k * (16ull << 20);
-        void* p_mapping = mmap(reinterpret_cast<void*>(hint), StubPageSize, PROT_READ | PROT_WRITE | PROT_EXEC,
-                       MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
-        if (p_mapping != MAP_FAILED) {
+        void* p_mapping = ps_host_vm_map(reinterpret_cast<void*>(hint), StubPageSize,
+                                         PS_HOST_VM_READ | PS_HOST_VM_WRITE | PS_HOST_VM_EXECUTE, PS_HOST_VM_EXACT);
+        if (p_mapping) {
             return static_cast<u8*>(p_mapping);
         }
     }
@@ -167,16 +166,16 @@ bool Rel32To(u64 from_next, u64 to, std::uint32_t& rel) {
 
 /// Replaces bytes [1, 5) at `va_guest` (byte 0 is the trap already there), then byte 0.
 void WriteJumpOverTrap(u64 va_guest, u8 opcode, std::uint32_t rel) {
-    const long cb_page = sysconf(_SC_PAGESIZE);
+    const long cb_page = long(ps_host_vm_page_size());
     void* p_page = reinterpret_cast<void*>(va_guest & ~u64(cb_page - 1));
     const std::size_t span = (va_guest + 5) - reinterpret_cast<u64>(p_page);
-    mprotect(p_page, span, PROT_READ | PROT_WRITE | PROT_EXEC);
+    ps_host_vm_protect(p_page, span, PS_HOST_VM_READ | PS_HOST_VM_WRITE | PS_HOST_VM_EXECUTE);
     auto* p_code = reinterpret_cast<u8*>(va_guest);
     for (int i = 0; i < 4; ++i) {
         __atomic_store_n(p_code + 1 + i, u8(rel >> (8 * i)), __ATOMIC_SEQ_CST);
     }
     __atomic_store_n(p_code, opcode, __ATOMIC_SEQ_CST);
-    mprotect(p_page, span, PROT_READ | PROT_EXEC);
+    ps_host_vm_protect(p_page, span, PS_HOST_VM_READ | PS_HOST_VM_EXECUTE);
 }
 
 void AllocHook(u64 node) {
@@ -389,15 +388,15 @@ bool Patch(u64 va_range, const unsigned char* p_expected, std::size_t cb_expecte
         std::memcmp(bytes, p_expected, cb_expected) != 0) {
         return false;
     }
-    const long cb_page = sysconf(_SC_PAGESIZE);
+    const long cb_page = long(ps_host_vm_page_size());
     void* p_page = reinterpret_cast<void*>(va_range & ~u64(cb_page - 1));
     const std::size_t span = (va_range + cb_expected) - reinterpret_cast<u64>(p_page);
-    if (mprotect(p_page, span, PROT_READ | PROT_WRITE | PROT_EXEC) != 0) {
+    if (ps_host_vm_protect(p_page, span, PS_HOST_VM_READ | PS_HOST_VM_WRITE | PS_HOST_VM_EXECUTE) != 0) {
         return false;
     }
     __atomic_store_n(reinterpret_cast<unsigned char*>(va_range), static_cast<unsigned char>(0xcc),
                      __ATOMIC_SEQ_CST);
-    mprotect(p_page, span, PROT_READ | PROT_EXEC);
+    ps_host_vm_protect(p_page, span, PS_HOST_VM_READ | PS_HOST_VM_EXECUTE);
     return true;
 }
 } // namespace
@@ -464,7 +463,7 @@ void Install(RangeCallback pfn_on_gpu_range_allocated) {
         }
         has_gx_node_detour = has_gx_node_trap && InstallGxNodeGuard();
         detours += has_gx_node_detour;
-        mprotect(s_p_stub_page, StubPageSize, PROT_READ | PROT_EXEC);
+        ps_host_vm_protect(s_p_stub_page, StubPageSize, PS_HOST_VM_READ | PS_HOST_VM_EXECUTE);
         std::printf("Guest hooks: %d native detours (no traps; PS_GUEST_HOOK_TRAPS=1: int3)\n",
                     detours);
     }

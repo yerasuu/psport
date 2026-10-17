@@ -15,7 +15,6 @@
 #include <errno.h>
 #include <unistd.h>
 #include <sys/syscall.h>
-#include <sys/mman.h>
 #include <asm/prctl.h>
 #define ERR(n) ((int32_t)(UINT32_C(0x80020000)|(n)))
 #define ATTR_MAGIC UINT32_C(0x41545452)
@@ -105,7 +104,7 @@ static GuestThread *allocate_low_record(void) {
     void *p_record=NULL;
     pthread_mutex_lock(&s_pool_lock);
     if (s_cb_left<cb_record) {
-        s_p_pool=runtime_low_map(cb_piece,PROT_READ|PROT_WRITE);
+        s_p_pool=runtime_low_map(cb_piece,PS_HOST_VM_READ|PS_HOST_VM_WRITE);
         s_cb_left=s_p_pool ? cb_piece : 0;
     }
     if (s_cb_left>=cb_record) { p_record=s_p_pool; s_p_pool+=cb_record; s_cb_left-=cb_record; }
@@ -346,7 +345,7 @@ static int32_t create(GuestThread **pp_out,ThreadAttr **pp_attr_slot,GuestEntry 
     if (e==EINVAL && !p_thread->attr.p_stack_addr) {
         /* Stacks below 1 TiB as on PS4; guest code may pack stack addresses. */
         size_t cb_stack=(size_t)stack+STACK_MARGIN;
-        void *p_stack_memory=runtime_low_map(cb_stack,PROT_READ|PROT_WRITE);
+        void *p_stack_memory=runtime_low_map(cb_stack,PS_HOST_VM_READ|PS_HOST_VM_WRITE);
         if (p_stack_memory) {
             pthread_attr_setstack(&host,p_stack_memory,cb_stack);
             /* Known before the thread runs: libSceUlt reads it (scePthreadAttrGet) right after

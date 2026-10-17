@@ -114,7 +114,7 @@ static int32_t unmap_locked(uintptr_t start, uint64_t cb_range) {
         }
     for (size_t i=vma_index(start); i<g_c_vmas && g_p_vmas[i].start<end; ++i) {
         uintptr_t a=g_p_vmas[i].start>start ? g_p_vmas[i].start : start, b=g_p_vmas[i].end<end ? g_p_vmas[i].end : end;
-        if (munmap((void *)a,b-a)) return INVALID;
+        if (ps_host_vm_unmap((void *)a,b-a)) return INVALID;
     }
     drop_range(start,end);
     trap_forget(start,end);
@@ -281,7 +281,7 @@ static int32_t protect_locked(uintptr_t start, uint64_t cb_range, int prot, int 
     uintptr_t end=start+align_up(cb_range,PAGE);
     start&=~(uintptr_t)(PAGE-1);
     if ((prot & ~0x37) || !covered(start,end,0)) return INVALID;
-    if (mprotect((void *)start,end-start,host_prot(prot))) return INVALID;
+    if (ps_host_vm_protect((void *)start,end-start,host_prot(prot))) return INVALID;
     trap_reapply(start,end); /* pages with write traps stay read-only */
     int error; size_t i=carve(start,end,&error);
     if (error) return NO_MEMORY;
@@ -504,8 +504,7 @@ int32_t runtime_memory_pool_decommit(uintptr_t va_range, uint64_t cb_range, void
 static int sync_range(uintptr_t va_start,uint64_t cb_range,int32_t flags) {
     if ((va_start&4095) || (flags&~3) || (flags&1 && flags&2)) return EINVAL;
     if (!runtime_memory_is_mapped(va_start,cb_range)) return ENOMEM;
-    const int host_flags=(flags&1 ? MS_ASYNC : MS_SYNC)|(flags&2 ? MS_INVALIDATE : 0);
-    return msync((void *)va_start,cb_range,host_flags) ? errno : 0;
+    return ps_host_vm_flush((void *)va_start,cb_range,(flags&1 ? PS_HOST_VM_FLUSH_ASYNC : 0u)|(flags&2 ? PS_HOST_VM_FLUSH_INVALIDATE : 0u));
 }
 static ABI int32_t kernel_msync(void *p_start,uint64_t cb_range,int32_t flags) {
     const int error=sync_range((uintptr_t)p_start,cb_range,flags);

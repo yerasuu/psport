@@ -14,7 +14,6 @@
 #include <thread>
 #include <unordered_map>
 #include <pthread.h>
-#include <sys/mman.h>
 #include <unordered_set>
 #include <unistd.h>
 
@@ -706,7 +705,7 @@ void NoteTrapDecoded(u64 label) {
     p.writing_ns = 0;
     t.ever_trapped.insert(page);
     if (TrapMode() == 1 && t.read_only.insert(page).second) {
-        mprotect(reinterpret_cast<void*>(page), PageSize, PROT_READ);
+        ps_host_vm_protect(reinterpret_cast<void*>(page), PageSize, PS_HOST_VM_READ);
     }
 }
 } // namespace
@@ -741,7 +740,7 @@ void NoteFenceWritten(u64 label, u64 write_ns) {
     if (const auto pp = t.page_pending.find(page); pp != t.page_pending.end() && --pp->second == 0) {
         t.page_pending.erase(pp);
         if (t.read_only.erase(page)) {
-            mprotect(reinterpret_cast<void*>(page), PageSize, PROT_READ | PROT_WRITE);
+            ps_host_vm_protect(reinterpret_cast<void*>(page), PageSize, PS_HOST_VM_READ | PS_HOST_VM_WRITE);
         }
     }
 }
@@ -783,7 +782,7 @@ int OnStepTrap(PsHostFaultContext* p_context) {
         auto& t = Trap();
         std::scoped_lock lk{t.mutex};
         if (page && t.read_only.count(page)) {
-            mprotect(reinterpret_cast<void*>(page), PageSize, PROT_READ);
+            ps_host_vm_protect(reinterpret_cast<void*>(page), PageSize, PS_HOST_VM_READ);
         }
         return 1;
     }
@@ -801,12 +800,12 @@ bool PatchInt3(u64 va_range, std::initializer_list<unsigned char> expected) {
         return false;
     }
     void* p_page = reinterpret_cast<void*>(va_range & ~(PageSize - 1));
-    if (mprotect(p_page, PageSize, PROT_READ | PROT_WRITE | PROT_EXEC) != 0) {
+    if (ps_host_vm_protect(p_page, PageSize, PS_HOST_VM_READ | PS_HOST_VM_WRITE | PS_HOST_VM_EXECUTE) != 0) {
         return false;
     }
     __atomic_store_n(reinterpret_cast<unsigned char*>(va_range), static_cast<unsigned char>(0xcc),
                      __ATOMIC_SEQ_CST);
-    mprotect(p_page, PageSize, PROT_READ | PROT_EXEC);
+    ps_host_vm_protect(p_page, PageSize, PS_HOST_VM_READ | PS_HOST_VM_EXECUTE);
     return true;
 }
 
@@ -1038,7 +1037,7 @@ bool OnTrapFault(PsHostFaultContext* p_context, u64 va_guest) {
     const bool is_hit = it != t.pending.end();
     const Pending p = is_hit ? it->second : Pending{};
     // Writable for the faulting instruction only (single step), read-only again after it.
-    mprotect(reinterpret_cast<void*>(page), PageSize, PROT_READ | PROT_WRITE);
+    ps_host_vm_protect(reinterpret_cast<void*>(page), PageSize, PS_HOST_VM_READ | PS_HOST_VM_WRITE);
     if (!ArmStep(p_context, page)) {
         t.read_only.erase(page);
     }
@@ -1085,7 +1084,7 @@ bool OnStaleTrapFault(u64 va_guest) {
     // handler got the lock: the page is writable again (or made so) and the write is retried.
     // Trapped again meanwhile: the retry faults into OnTrapFault.
     if (!t.read_only.count(page)) {
-        mprotect(reinterpret_cast<void*>(page), PageSize, PROT_READ | PROT_WRITE);
+        ps_host_vm_protect(reinterpret_cast<void*>(page), PageSize, PS_HOST_VM_READ | PS_HOST_VM_WRITE);
     }
     return true;
 }

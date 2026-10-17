@@ -215,6 +215,12 @@ int64_t ps_host_read_memory(void *p_out, const void *p_from, size_t cb_copy) {
     return cb_read < 0 ? -errno : cb_read;
 }
 
+int64_t ps_host_write_memory(void *p_to, const void *p_from, size_t cb_copy) {
+    const struct iovec local = {(void *)p_from, cb_copy}, remote = {p_to, cb_copy};
+    const ssize_t cb_written = process_vm_writev(getpid(), &local, 1, &remote, 1, 0);
+    return cb_written < 0 ? -errno : cb_written;
+}
+
 int ps_host_fault_backtrace(const PsHostFaultContext *p_context, void **pp_frames, int c_frames) {
     void *frames[64];
     const int depth = backtrace(frames, 64);

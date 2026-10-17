@@ -13,9 +13,6 @@
 #include <memory>
 #include <mutex>
 #include <vector>
-#include <sys/mman.h>
-#include <sys/uio.h>
-#include <unistd.h>
 
 #include <xbyak/xbyak.h>
 #include <Zydis/Zydis.h>
@@ -56,10 +53,10 @@ bool IsInReach(u64 va_a, u64 va_b) {
     return distance > -JumpReach && distance < JumpReach;
 }
 
-/// cb_range bytes mapped with prot at a page within reach of va_near: below it first (a game's
+/// cb_range bytes mapped with access at a page within reach of va_near: below it first (a game's
 /// image has room under it), then above, in SearchStep steps.
-void* MapInReach(u64 va_near, std::size_t cb_range, int prot) {
-    const u64 cb_page = u64(sysconf(_SC_PAGESIZE));
+void* MapInReach(u64 va_near, std::size_t cb_range, unsigned access) {
+    const u64 cb_page = u64(ps_host_vm_page_size());
     for (std::int64_t step = 1; step * SearchStep < JumpReach; ++step) {
         for (const std::int64_t sign : {-1ll, 1ll}) {
             const std::int64_t va_try = std::int64_t(va_near) + sign * step * SearchStep;
@@ -67,16 +64,10 @@ void* MapInReach(u64 va_near, std::size_t cb_range, int prot) {
                 continue;
             }
             void* p_hint = reinterpret_cast<void*>(u64(va_try) & ~(cb_page - 1));
-            void* p_mapped = mmap(p_hint, cb_range, prot, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
-            if (p_mapped == MAP_FAILED) {
-                continue;
+            void* p_mapped = ps_host_vm_map(p_hint, cb_range, access, PS_HOST_VM_EXACT);
+            if (p_mapped) {
+                return p_mapped;
             }
-            // A kernel older than MAP_FIXED_NOREPLACE takes the address as a hint only.
-            if (p_mapped != p_hint) {
-                munmap(p_mapped, cb_range);
-                continue;
-            }
-            return p_mapped;
         }
     }
     return nullptr;
@@ -88,7 +79,7 @@ Xbyak::CodeGenerator* AreaFor(u64 va_code) {
             return area.p_generator.get();
         }
     }
-    void* p_area = MapInReach(va_code, CbArea, PROT_READ | PROT_WRITE | PROT_EXEC);
+    void* p_area = MapInReach(va_code, CbArea, PS_HOST_VM_READ | PS_HOST_VM_WRITE | PS_HOST_VM_EXECUTE);
     if (!p_area) {
         return nullptr;
     }
@@ -131,24 +122,24 @@ Error CheckInstructions(const u8* p_code, std::size_t cb_code, bool is_absolute_
 /// running there meanwhile meets either the old first instruction or the whole jump.
 bool WriteCode(u64 va_code, std::span<const u8> bytes) {
     const auto write_direct = [](u64 va_to, const u8* p_from, std::size_t cb_copy) {
-        iovec local{const_cast<u8*>(p_from), cb_copy}, remote{reinterpret_cast<void*>(va_to), cb_copy};
-        return process_vm_writev(getpid(), &local, 1, &remote, 1, 0) == ssize_t(cb_copy);
+        return ps_host_write_memory(reinterpret_cast<void*>(va_to), p_from, cb_copy) == std::int64_t(cb_copy);
     };
     if (bytes.size() > 1 ? write_direct(va_code + 1, bytes.data() + 1, bytes.size() - 1) : true) {
         return write_direct(va_code, bytes.data(), 1);
     }
-    const u64 cb_page = u64(sysconf(_SC_PAGESIZE));
+    const u64 cb_page = u64(ps_host_vm_page_size());
     void* p_first = reinterpret_cast<void*>(va_code & ~(cb_page - 1));
     const std::size_t cb_span = va_code + bytes.size() - reinterpret_cast<u64>(p_first);
-    if (mprotect(p_first, cb_span, PROT_READ | PROT_WRITE | PROT_EXEC) != 0) {
+    if (ps_host_vm_protect(p_first, cb_span, PS_HOST_VM_READ | PS_HOST_VM_WRITE | PS_HOST_VM_EXECUTE) != 0) {
         return false;
     }
     auto* p_code = reinterpret_cast<u8*>(va_code);
     std::memcpy(p_code + 1, bytes.data() + 1, bytes.size() - 1);
     __atomic_store_n(p_code, bytes[0], __ATOMIC_SEQ_CST);
-    const int prot_after = s_is_code_writable.load(std::memory_order_acquire) ? PROT_READ | PROT_WRITE | PROT_EXEC
-                                                                               : PROT_READ | PROT_EXEC;
-    return mprotect(p_first, cb_span, prot_after) == 0;
+    const unsigned access_after = s_is_code_writable.load(std::memory_order_acquire)
+                                      ? PS_HOST_VM_READ | PS_HOST_VM_WRITE | PS_HOST_VM_EXECUTE
+                                      : PS_HOST_VM_READ | PS_HOST_VM_EXECUTE;
+    return ps_host_vm_protect(p_first, cb_span, access_after) == 0;
 }
 
 /// A jump to va_target at va_site, the rest of cb_site int3.
@@ -429,7 +420,8 @@ std::uint32_t KeepWritable(std::uint64_t va_image, std::uint64_t cb_image) {
         if (va_begin >= va_end) {
             continue;
         }
-        if (mprotect(reinterpret_cast<void*>(va_begin), va_end - va_begin, PROT_READ | PROT_WRITE | PROT_EXEC) == 0) {
+        if (ps_host_vm_protect(reinterpret_cast<void*>(va_begin), va_end - va_begin,
+                               PS_HOST_VM_READ | PS_HOST_VM_WRITE | PS_HOST_VM_EXECUTE) == 0) {
             ++c_writable;
         } else {
             ++c_refused;
@@ -442,7 +434,7 @@ std::uint32_t KeepWritable(std::uint64_t va_image, std::uint64_t cb_image) {
 }
 
 void* MapNear(std::uint64_t va_near, std::size_t cb_range) {
-    void* p_mapped = MapInReach(va_near, cb_range, PROT_READ | PROT_WRITE);
+    void* p_mapped = MapInReach(va_near, cb_range, PS_HOST_VM_READ | PS_HOST_VM_WRITE);
     if (!p_mapped) {
         std::printf("Guest code: no free memory within a jump's reach of %#llx (%zu bytes)\n",
                     static_cast<unsigned long long>(va_near), cb_range);

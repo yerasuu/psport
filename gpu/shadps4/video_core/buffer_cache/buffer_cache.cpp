@@ -40,7 +40,6 @@
 #include <dlfcn.h>
 #include <string>
 #include <fmt/format.h>
-#include <sys/mman.h>
 #include "common/signal_context.h"
 #include "core/signals.h"
 #include <vk_mem_alloc.h>
@@ -2667,7 +2666,7 @@ void BufferCache::QueueCopyBacks(u64 submitted) {
 
 namespace {
 // psport PS_VRAM_ACCESS_TRAP=1 (diagnostics): blocks moved to VRAM are closed to the CPU
-// (PROT_NONE); the first CPU access to each is recorded (code site, read or write) and the block
+// (PS_HOST_VM_NONE); the first CPU access to each is recorded (code site, read or write) and the block
 // opened again. Finds CPU readers of data the GPU writes in VRAM, where the CPU sees a stale copy.
 struct VramTrap {
     std::atomic<u64> address{0}, rip{0}, caller{0};
@@ -2750,7 +2749,7 @@ bool VramTrapHandler(void* context, void* fault_address) {
             trap.address = address;
         }
     }
-    mprotect(reinterpret_cast<void*>(block), vram_trap_block_size, PROT_READ | PROT_WRITE);
+    ps_host_vm_protect(reinterpret_cast<void*>(block), vram_trap_block_size, PS_HOST_VM_READ | PS_HOST_VM_WRITE);
     return true;
 }
 
@@ -2778,7 +2777,7 @@ void ReportVramTraps() {
             }
         }
         for (const u64 block : blocks) {
-            mprotect(reinterpret_cast<void*>(block), vram_trap_block_size, PROT_NONE);
+            ps_host_vm_protect(reinterpret_cast<void*>(block), vram_trap_block_size, PS_HOST_VM_NONE);
         }
         static auto last = std::chrono::steady_clock::now();
         if (std::chrono::steady_clock::now() - last < std::chrono::seconds(3)) {
@@ -2950,7 +2949,7 @@ void BufferCache::QueuePromotions(u64 submitted) {
             vram_trap_block_size = block_size;
             std::scoped_lock lk{vram_trapped_mutex};
             vram_trapped[address] = block_size;
-            mprotect(reinterpret_cast<void*>(address), block_size, PROT_NONE);
+            ps_host_vm_protect(reinterpret_cast<void*>(address), block_size, PS_HOST_VM_NONE);
         }
     }
     if (moved == 0) {
