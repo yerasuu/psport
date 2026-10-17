@@ -14,8 +14,6 @@
 #include <setjmp.h>
 #include <errno.h>
 #include <unistd.h>
-#include <sys/syscall.h>
-#include <asm/prctl.h>
 #define ERR(n) ((int32_t)(UINT32_C(0x80020000)|(n)))
 #define ATTR_MAGIC UINT32_C(0x41545452)
 #define STACK_MARGIN (256*1024)
@@ -66,7 +64,8 @@ void runtime_set_main_tls(const void *p_data,uint64_t filesz,uint64_t memsz,uint
 }
 static uint64_t tls_offset(void) { return (s_tls_memsz+s_tls_align-1)&~(s_tls_align-1); }
 static void set_gs(void *p_base) {
-    if (syscall(SYS_arch_prctl,ARCH_SET_GS,(unsigned long)p_base)) { perror("STOP: arch_prctl(ARCH_SET_GS)"); runtime_stop(21); }
+    const int error=ps_host_tls_set_base(p_base);
+    if (error) { errno=error; perror("STOP: arch_prctl(ARCH_SET_GS)"); runtime_stop(21); }
 }
 /* Build TCB/static TLS for the calling host thread and point GS at it. */
 /* The stack this host thread runs on, kept in the attributes scePthreadAttrGet copies. */

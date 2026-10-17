@@ -260,6 +260,7 @@ moved behind the ABI area by area without changing what Linux does. So far:
 | net | `ps_host_net_init`, `ps_host_net_close`, `ps_host_net_error`, `ps_host_net_set_nonblocking`, `ps_host_net_queued`, `ps_host_net_tcp_state` (`PsHostTcpState`, FreeBSD's order); the rest are the BSD socket calls | `close`, `errno`, `fcntl`, `ioctl(FIONREAD, TIOCOUTQ)`, `TCP_INFO` (`linux/host_net.c`) |
 | fault | `PsHostFaultContext` and its accessors: `ps_host_fault_kind` (`PsHostFaultKind`: access, bus, illegal, arithmetic, breakpoint), `_signal`, `_address`, `_access` (read, write, execute), `_register`, `_set_register` (`PsHostRegister`, x86-64), `_cpu` (trap number, error code, code selector, fxsave image), `_recover` (to a `sigsetjmp` recovery point), `_backtrace`; `ps_host_fault_install` (handlers per kind, newest first, a 0 passes the fault on; `PS_HOST_FAULT_NESTED`, `PS_HOST_FAULT_HOLD_GUEST_EXCEPTION`); `ps_host_resume` (a whole register set and xsave image in one step, the guest's `sigreturn`); `ps_host_read_memory` and `ps_host_write_memory` (no fault: a page without access ends the copy) | `sigaction` of `SIGSEGV`, `SIGBUS`, `SIGILL`, `SIGFPE`, `SIGTRAP` to one dispatcher, `ucontext_t` `gregs` and `REG_ERR` bits, `siglongjmp` with the context's mask, `backtrace` from the faulting RIP, `rt_sigreturn`, `process_vm_readv`, `process_vm_writev` (`linux/host_fault.c`) |
 | interrupt | `ps_host_interrupt_install`, `ps_host_interrupt_thread`, `ps_host_interrupt_signal` (`PsHostInterrupt`: guest exception, thread dump, watchdog, sample; the handler gets a `PsHostFaultContext`), `ps_host_watchdog_arm`, `ps_host_on_termination` | `SIGRTMIN+3`, `SIGUSR2`, `SIGALRM`, `SIGPROF` through `tgkill`, `alarm`, `SIGTERM`/`SIGINT`/`SIGHUP` when SDL left them at their default (`linux/host_fault.c`) |
+| tls | `ps_host_tls_set_base`, `ps_host_tls_base` (the guest's TCB, on GS) | `arch_prctl(ARCH_SET_GS, ARCH_GET_GS)` (`linux/host_thread.c`) |
 | proc | `ps_host_close_from`, `ps_host_exec`, `ps_host_exec_self` | `close_range`, `execvp`, `execv("/proc/self/exe")` (`linux/host_process.c`) |
 | dl | `ps_host_dl_open`, `ps_host_dl_sym`, `ps_host_dl_address` (`PsHostCodeAddress`: file, symbol, their addresses) | `dlopen(RTLD_NOW \| RTLD_LOCAL)`, `dlsym`, `dladdr` (`linux/host_library.c`) |
 
@@ -267,8 +268,9 @@ The guest's memory map, its region table and the low allocator (`runtime_low_map
 guest sees in `[0x0800000000, 0x1000000000)`) stay in `runtime_memory.c` and reach the host only
 through `ps_host_vm_*`; the dma-buf chunks the GPU library exports are views through
 `ps_host_vm_map_shared` like the memfd, and `-no-pie` stays in `build.sh` as the Linux half of
-`ps_host_vm_keep_heap_low`. Guest TLS (`arch_prctl`, also read by the guest exception's context),
-the mod view's cleaner process (`fork`,
+`ps_host_vm_keep_heap_low`. The guest's thread pointer is set and read (the guest exception's
+context) through `ps_host_tls_*`; where the loader rewrites the guest's FS accesses stays in the
+loader. The mod view's cleaner process (`fork`,
 `pipe2`, `dup2` in `loader_mods.c`) and RenderDoc's `dlopen(RTLD_NOLOAD)` stay where they are until
 their own steps. Every fault and interrupt handler, the GPU library's included, reads and changes the
 interrupted registers only through `PsHostFaultContext`: `Core::SignalDispatch` hands one on as its

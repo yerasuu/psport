@@ -49,7 +49,9 @@ FEATURE_HOST(write_traps, LINUX, IMPLEMENTED,
              "#540")
 
 FEATURE(guest_tls, tls, "the guest's thread-local storage: a TCB and static TLS per thread, the thread pointer on GS")
-FEATURE_HOST(guest_tls, LINUX, IMPLEMENTED, "arch_prctl(ARCH_SET_GS) (runtime_thread.c)", "#540")
+FEATURE_HOST(guest_tls, LINUX, IMPLEMENTED,
+             "arch_prctl(ARCH_SET_GS, ARCH_GET_GS) (src/platform/linux/host_thread.c), the TCB in runtime_thread.c",
+             "#540")
 
 FEATURE(threads, thread, "guest threads on host threads: creation, signals to one thread, waits on an address")
 FEATURE_HOST(threads, LINUX, IMPLEMENTED,

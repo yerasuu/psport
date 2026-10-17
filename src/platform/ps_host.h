@@ -124,6 +124,13 @@ unsigned ps_host_thread_cpu_count(void);
  * has no such class: 0, or the host's errno when neither could be set. */
 int ps_host_thread_make_background(void);
 
+/* ---- guest TLS ---- */
+/* The guest's thread pointer, the TCB its code reaches through a segment register: GS, since
+ * the host's own TLS keeps FS. Sets the calling thread's: 0, or the host's errno. */
+int ps_host_tls_set_base(void *p_base);
+/* The calling thread's guest thread pointer: 0, or the host's errno. Safe in signal handlers. */
+int ps_host_tls_base(uintptr_t *p_out_va_base);
+
 /* ---- files and folders ---- */
 /* Calls pfn_entry with each name in the folder but "." and "..", without allocating, so that a
  * signal handler may list one (the watchdog lists /proc/self/task): 0, or the host's errno when the

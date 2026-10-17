@@ -1,6 +1,8 @@
-/* Linux: thread ids, names, stacks and scheduling, and address waits (ps_host.h). */
+/* Linux: thread ids, names, stacks and scheduling, address waits and the guest's thread pointer
+ * (ps_host.h). */
 #define _GNU_SOURCE
 #include "ps_host.h"
+#include <asm/prctl.h>
 #include <dirent.h>
 #include <errno.h>
 #include <limits.h>
@@ -95,4 +97,15 @@ static void visit_task(const char *sz_tid, void *p_walk) {
 int ps_host_thread_each(void (*pfn_thread)(int32_t tid, void *p_context), void *p_context) {
     ThreadWalk walk = {pfn_thread, p_context};
     return ps_host_list_dir("/proc/self/task", visit_task, &walk);
+}
+
+int ps_host_tls_set_base(void *p_base) {
+    return syscall(SYS_arch_prctl, ARCH_SET_GS, (unsigned long)p_base) ? errno : 0;
+}
+
+int ps_host_tls_base(uintptr_t *p_out_va_base) {
+    unsigned long va_base = 0;
+    if (syscall(SYS_arch_prctl, ARCH_GET_GS, &va_base)) return errno;
+    *p_out_va_base = (uintptr_t)va_base;
+    return 0;
 }

@@ -13,8 +13,6 @@
 #include <signal.h>
 #include <stdatomic.h>
 #include <unistd.h>
-#include <sys/syscall.h>
-#include <asm/prctl.h>
 #define ERR(n) ((int32_t)(UINT32_C(0x80020000)|(n)))
 #define GUEST_SIGNALS 128
 #define GUEST_SIGUSR1 30
@@ -133,8 +131,8 @@ static void deliver(PsHostFaultContext *p_host) {
         p_mcontext->ownedfp=0x20001;  /* _MC_FPOWNED_FPU */
     }
     /* The guest's FS base is its TCB, which the runtime keeps in GS. */
-    unsigned long tcb=0;
-    if (!syscall(SYS_arch_prctl,ARCH_GET_GS,&tcb)) { p_mcontext->fsbase=tcb; p_mcontext->flags=0x2; /* _MC_HASBASES */ }
+    uintptr_t tcb=0;
+    if (!ps_host_tls_base(&tcb)) { p_mcontext->fsbase=tcb; p_mcontext->flags=0x2; /* _MC_HASBASES */ }
     if (!atomic_fetch_add(&s_c_delivered,1)) {
         static const char s_sz_first[]="Runtime: first guest exception delivered to its handler\n";
         /* write, not stdio: this runs in a signal handler. */
