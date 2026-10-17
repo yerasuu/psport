@@ -416,7 +416,11 @@ SceneTargets::Entry& SceneTargets::Get(VideoCore::ImageId id, u32 level) {
         const auto proxy = ProxySize(original, level);
         ci.extent = vk::Extent3D{proxy.width, proxy.height, 1};
         ci.mipLevels = 1;
-        entry->image.Create(ci);
+        if (entry->image.Create(ci)) {
+            SetObjectName(m_instance.GetDevice(), vk::Image(entry->image),
+                          "psport: scene proxy {}x{} of {:#x} level {}", proxy.width, proxy.height,
+                          original.info.guest_address, level);
+        }
         m_tracked.insert(original.image_uid);
     }
     m_recent[m_recent_next++ % m_recent.size()] = {key, entry.get()};

@@ -203,18 +203,20 @@ ObjectMotion::Target& ObjectMotion::GetTarget(u32 width, u32 height) {
     }
     const auto device = m_instance.GetDevice();
     p_slot->image = VideoCore::UniqueImage(device, m_instance.GetAllocator());
-    p_slot->image.Create(vk::ImageCreateInfo{
-        .imageType = vk::ImageType::e2D,
-        .format = vk::Format::eR32G32B32A32Sfloat,
-        .extent = {width, height, 1},
-        .mipLevels = 1,
-        .arrayLayers = 1,
-        .samples = vk::SampleCountFlagBits::e1,
-        .tiling = vk::ImageTiling::eOptimal,
-        .usage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled |
-                 vk::ImageUsageFlagBits::eTransferSrc,
-        .initialLayout = vk::ImageLayout::eUndefined,
-    });
+    if (p_slot->image.Create(vk::ImageCreateInfo{
+            .imageType = vk::ImageType::e2D,
+            .format = vk::Format::eR32G32B32A32Sfloat,
+            .extent = {width, height, 1},
+            .mipLevels = 1,
+            .arrayLayers = 1,
+            .samples = vk::SampleCountFlagBits::e1,
+            .tiling = vk::ImageTiling::eOptimal,
+            .usage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled |
+                     vk::ImageUsageFlagBits::eTransferSrc,
+            .initialLayout = vk::ImageLayout::eUndefined,
+        })) {
+        SetObjectName(device, vk::Image(p_slot->image), "psport: object motion {}x{}", width, height);
+    }
     p_slot->view = Check(device.createImageViewUnique({
         .image = vk::Image(p_slot->image),
         .viewType = vk::ImageViewType::e2D,

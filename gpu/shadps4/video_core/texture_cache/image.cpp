@@ -232,11 +232,15 @@ Image::Image(const Vulkan::Instance& instance, Vulkan::Runtime& runtime_,
         return;
     }
 
-    Vulkan::SetObjectName(instance.GetDevice(), GetImage(),
-                          "Image {}x{}x{} {} {} {:#x}:{:#x} L:{} M:{} S:{}", info.size.width,
-                          info.size.height, info.size.depth, AmdGpu::NameOf(info.tile_mode),
-                          vk::to_string(info.pixel_format), info.guest_address, info.guest_size,
-                          info.resources.layers, info.resources.levels, info.num_samples);
+    NameBacking(instance.GetDevice());
+}
+
+void Image::NameBacking(vk::Device device) const {
+    Vulkan::SetObjectName(device, GetImage(), "Image {}x{}x{} {} {} {:#x}:{:#x} L:{} M:{} S:{}",
+                          info.size.width, info.size.height, info.size.depth,
+                          AmdGpu::NameOf(info.tile_mode), vk::to_string(info.pixel_format),
+                          info.guest_address, info.guest_size, info.resources.layers,
+                          info.resources.levels, info.num_samples);
 }
 
 Image::~Image() = default;

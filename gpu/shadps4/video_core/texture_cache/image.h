@@ -118,6 +118,9 @@ struct Image {
         return backing && backing->image;
     }
 
+    /// psport: also after an allocation retried by TextureCache::CreateImage.
+    void NameBacking(vk::Device device) const;
+
     vk::DeviceSize GetHostImageSize() const {
         return backing->image.size_bytes;
     }

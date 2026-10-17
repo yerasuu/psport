@@ -134,6 +134,8 @@ bool TextureSubstitutes::Upload(Game::SubstitutePictures&& pictures) {
             LOG_ERROR_COUNTED(Render_Vulkan, "Texture substitution: no memory for the pictures");
             return false;
         }
+        Vulkan::SetObjectName(m_instance.GetDevice(), m_picture_image.image, "psport: substitute pictures {}x{}x{}",
+                              pictures.side, pictures.side, m_c_layers);
     }
     if (c_pictures != m_c_layers || pictures.side != m_picture_image.image_ci.extent.width) {
         LOG_ERROR_COUNTED(Render_Vulkan, "Texture substitution: {} pictures of side {} after {} of side {}",
@@ -256,6 +258,8 @@ vk::ImageView TextureSubstitutes::CompositeView(Image& image, const Game::Textur
             LOG_ERROR_COUNTED(Render_Vulkan, "Texture substitution: no memory for a {}x{} copy", width, height);
             return {};
         }
+        Vulkan::SetObjectName(m_instance.GetDevice(), composite.image.image, "psport: substitute copy {}x{} of {:#x}",
+                              width, height, image.info.guest_address);
     }
     if (composite.width != width || composite.height != height || composite.is_srgb != is_srgb) {
         LOG_ERROR_COUNTED(Render_Vulkan, "Texture substitution: a {}x{} texture for a {}x{} copy", width, height,

@@ -245,6 +245,7 @@ struct Upscaler::Impl {
     VkPhysicalDeviceMemoryProperties m_memory{};
     VkDeviceSize m_ubo_align = 256;
     PFN_vkCmdPushDescriptorSetKHR m_pfn_push_descriptors = nullptr;
+    PFN_vkSetDebugUtilsObjectNameEXT m_pfn_set_object_name = nullptr;
 
     // Current set and sizes.
     std::string m_set;
@@ -305,6 +306,8 @@ struct Upscaler::Impl {
         m_ubo_align = std::max<VkDeviceSize>(256, props.limits.minUniformBufferOffsetAlignment);
         m_pfn_push_descriptors = reinterpret_cast<PFN_vkCmdPushDescriptorSetKHR>(
             vkGetDeviceProcAddr(m_h_device, "vkCmdPushDescriptorSetKHR"));
+        m_pfn_set_object_name = reinterpret_cast<PFN_vkSetDebugUtilsObjectNameEXT>(
+            vkGetDeviceProcAddr(m_h_device, "vkSetDebugUtilsObjectNameEXT"));
         m_period_ns = props.limits.timestampPeriod;
         const char* sz_profile = std::getenv("PS_FSR4_PROFILE");
         if (sz_profile && sz_profile[0] == '1') {
@@ -400,7 +403,7 @@ struct Upscaler::Impl {
         return true;
     }
 
-    bool MakeImage(Img& img, VkFormat format, uint32_t w, uint32_t h) {
+    bool MakeImage(Img& img, const char* sz_name, VkFormat format, uint32_t w, uint32_t h) {
         VkImageCreateInfo ci{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
         ci.imageType = VK_IMAGE_TYPE_2D;
         ci.format = format;
@@ -420,6 +423,14 @@ struct Upscaler::Impl {
         if (!Allocate(req, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, img.h_memory) ||
             vkBindImageMemory(m_h_device, img.h_image, img.h_memory, 0) != VK_SUCCESS) {
             return false;
+        }
+        if (m_pfn_set_object_name) {
+            const std::string name = std::string("psport: FSR 4.1.1 ") + sz_name;
+            VkDebugUtilsObjectNameInfoEXT name_info{VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT};
+            name_info.objectType = VK_OBJECT_TYPE_IMAGE;
+            name_info.objectHandle = reinterpret_cast<uint64_t>(img.h_image);
+            name_info.pObjectName = name.c_str();
+            (void)m_pfn_set_object_name(m_h_device, &name_info); // a debug name only: nothing depends on it
         }
         VkImageViewCreateInfo vi{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
         vi.image = img.h_image;
@@ -566,14 +577,14 @@ struct Upscaler::Impl {
             return false;
         }
         const VkDeviceSize cb_scratch = is_tier2160 ? 83232256u : 20880256u;
-        if (!MakeImage(m_recurrent, VK_FORMAT_R8G8B8A8_UNORM, ow, oh) ||
-            !MakeImage(m_history, VK_FORMAT_R16G16B16A16_SFLOAT, ow, oh) ||
-            !MakeImage(m_reprojected, VK_FORMAT_R16G16B16A16_SFLOAT, ow, oh) ||
-            !MakeImage(m_mlsr_output, VK_FORMAT_R16G16B16A16_SFLOAT, ow, oh) ||
-            !MakeImage(m_exposure, VK_FORMAT_R32_SFLOAT, 2, 1) ||
-            !MakeImage(m_exposure_identity, VK_FORMAT_R32_SFLOAT, 2, 1) ||
-            !MakeImage(m_spd_atomic, VK_FORMAT_R32_UINT, 1, 1) ||
-            !MakeImage(m_spd_mip5, VK_FORMAT_R32_SFLOAT, CeilDiv(ow, 16), CeilDiv(oh, 16)) ||
+        if (!MakeImage(m_recurrent, "recurrent", VK_FORMAT_R8G8B8A8_UNORM, ow, oh) ||
+            !MakeImage(m_history, "history", VK_FORMAT_R16G16B16A16_SFLOAT, ow, oh) ||
+            !MakeImage(m_reprojected, "reprojected", VK_FORMAT_R16G16B16A16_SFLOAT, ow, oh) ||
+            !MakeImage(m_mlsr_output, "output", VK_FORMAT_R16G16B16A16_SFLOAT, ow, oh) ||
+            !MakeImage(m_exposure, "exposure", VK_FORMAT_R32_SFLOAT, 2, 1) ||
+            !MakeImage(m_exposure_identity, "identity exposure", VK_FORMAT_R32_SFLOAT, 2, 1) ||
+            !MakeImage(m_spd_atomic, "SPD atomic", VK_FORMAT_R32_UINT, 1, 1) ||
+            !MakeImage(m_spd_mip5, "SPD mip 5", VK_FORMAT_R32_SFLOAT, CeilDiv(ow, 16), CeilDiv(oh, 16)) ||
             !MakeBuffer(m_scratch, cb_scratch,
                         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, false) ||
             !MakeBuffer(m_initializer, 131072,

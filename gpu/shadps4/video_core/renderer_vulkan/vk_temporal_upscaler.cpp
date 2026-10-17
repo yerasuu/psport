@@ -569,30 +569,34 @@ bool TemporalUpscaler::EnsureResources(u32 w, u32 h, u32 ow, u32 oh, bool is_hdr
     m_motion_view.reset();
     m_output_view.reset();
     m_motion_image = VideoCore::UniqueImage(device, p_allocator);
-    m_motion_image.Create(vk::ImageCreateInfo{
-        .imageType = vk::ImageType::e2D,
-        .format = vk::Format::eR16G16Sfloat,
-        .extent = {w, h, 1},
-        .mipLevels = 1,
-        .arrayLayers = 1,
-        .samples = vk::SampleCountFlagBits::e1,
-        .tiling = vk::ImageTiling::eOptimal,
-        .usage = vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled,
-        .initialLayout = vk::ImageLayout::eUndefined,
-    });
+    if (m_motion_image.Create(vk::ImageCreateInfo{
+            .imageType = vk::ImageType::e2D,
+            .format = vk::Format::eR16G16Sfloat,
+            .extent = {w, h, 1},
+            .mipLevels = 1,
+            .arrayLayers = 1,
+            .samples = vk::SampleCountFlagBits::e1,
+            .tiling = vk::ImageTiling::eOptimal,
+            .usage = vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled,
+            .initialLayout = vk::ImageLayout::eUndefined,
+        })) {
+        SetObjectName(device, vk::Image(m_motion_image), "psport: upscaler motion {}x{}", w, h);
+    }
     m_output_image = VideoCore::UniqueImage(device, p_allocator);
-    m_output_image.Create(vk::ImageCreateInfo{
-        .imageType = vk::ImageType::e2D,
-        .format = vk::Format::eR16G16B16A16Sfloat,
-        .extent = {ow, oh, 1},
-        .mipLevels = 1,
-        .arrayLayers = 1,
-        .samples = vk::SampleCountFlagBits::e1,
-        .tiling = vk::ImageTiling::eOptimal,
-        .usage = vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled |
-                 vk::ImageUsageFlagBits::eTransferSrc,
-        .initialLayout = vk::ImageLayout::eUndefined,
-    });
+    if (m_output_image.Create(vk::ImageCreateInfo{
+            .imageType = vk::ImageType::e2D,
+            .format = vk::Format::eR16G16B16A16Sfloat,
+            .extent = {ow, oh, 1},
+            .mipLevels = 1,
+            .arrayLayers = 1,
+            .samples = vk::SampleCountFlagBits::e1,
+            .tiling = vk::ImageTiling::eOptimal,
+            .usage = vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled |
+                     vk::ImageUsageFlagBits::eTransferSrc,
+            .initialLayout = vk::ImageLayout::eUndefined,
+        })) {
+        SetObjectName(device, vk::Image(m_output_image), "psport: upscaler output {}x{}", ow, oh);
+    }
     m_output_view = Check(device.createImageViewUnique({
         .image = vk::Image(m_output_image),
         .viewType = vk::ImageViewType::e2D,
@@ -606,24 +610,27 @@ bool TemporalUpscaler::EnsureResources(u32 w, u32 h, u32 ow, u32 oh, bool is_hdr
         .subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
     }));
     const auto make_image = [&](VideoCore::UniqueImage& image, vk::UniqueImageView& view,
-                                vk::Format format, vk::ImageUsageFlags usage, u32 iw = 0,
-                                u32 ih = 0, vk::ImageAspectFlags aspect =
-                                                vk::ImageAspectFlagBits::eColor,
+                                const char* sz_name, vk::Format format,
+                                vk::ImageUsageFlags usage, u32 iw = 0, u32 ih = 0,
+                                vk::ImageAspectFlags aspect = vk::ImageAspectFlagBits::eColor,
                                 vk::ImageCreateFlags flags = {}) {
         view.reset();
         image = VideoCore::UniqueImage(device, p_allocator);
-        image.Create(vk::ImageCreateInfo{
-            .flags = flags,
-            .imageType = vk::ImageType::e2D,
-            .format = format,
-            .extent = {iw ? iw : w, ih ? ih : h, 1},
-            .mipLevels = 1,
-            .arrayLayers = 1,
-            .samples = vk::SampleCountFlagBits::e1,
-            .tiling = vk::ImageTiling::eOptimal,
-            .usage = usage,
-            .initialLayout = vk::ImageLayout::eUndefined,
-        });
+        if (image.Create(vk::ImageCreateInfo{
+                .flags = flags,
+                .imageType = vk::ImageType::e2D,
+                .format = format,
+                .extent = {iw ? iw : w, ih ? ih : h, 1},
+                .mipLevels = 1,
+                .arrayLayers = 1,
+                .samples = vk::SampleCountFlagBits::e1,
+                .tiling = vk::ImageTiling::eOptimal,
+                .usage = usage,
+                .initialLayout = vk::ImageLayout::eUndefined,
+            })) {
+            SetObjectName(device, vk::Image(image), "psport: upscaler {} {}x{}", sz_name,
+                          iw ? iw : w, ih ? ih : h);
+        }
         view = Check(device.createImageViewUnique({
             .image = vk::Image(image),
             .viewType = vk::ImageViewType::e2D,
@@ -631,22 +638,23 @@ bool TemporalUpscaler::EnsureResources(u32 w, u32 h, u32 ow, u32 oh, bool is_hdr
             .subresourceRange = {aspect, 0, 1, 0, 1},
         }));
     };
-    make_image(m_opaque_image, m_opaque_view, vk::Format::eR16G16B16A16Sfloat,
+    make_image(m_opaque_image, m_opaque_view, "opaque", vk::Format::eR16G16B16A16Sfloat,
                vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferDst |
                    vk::ImageUsageFlagBits::eTransferSrc);
-    make_image(m_reactive_image, m_reactive_view, vk::Format::eR8Unorm,
+    make_image(m_reactive_image, m_reactive_view, "reactive", vk::Format::eR8Unorm,
                vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled);
     m_fsr4_linear_view.reset();
     m_fsr4_linear_image = VideoCore::UniqueImage{};
     if (should_use_fsr4) {
-        make_image(m_fsr4_linear_image, m_fsr4_linear_view, vk::Format::eR16G16B16A16Sfloat,
+        make_image(m_fsr4_linear_image, m_fsr4_linear_view, "FSR 4 linear", vk::Format::eR16G16B16A16Sfloat,
                    vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled);
     }
     for (u32 i = 0; i < m_taa_history.size(); ++i) {
         m_taa_history_views[i].reset();
         m_taa_history[i] = VideoCore::UniqueImage{};
         if (should_use_taa) {
-            make_image(m_taa_history[i], m_taa_history_views[i], vk::Format::eR32G32B32A32Sfloat,
+            make_image(m_taa_history[i], m_taa_history_views[i], i == 0 ? "TAA history 0" : "TAA history 1",
+                       vk::Format::eR32G32B32A32Sfloat,
                        vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled |
                            vk::ImageUsageFlagBits::eTransferSrc,
                        ow, oh);
@@ -926,15 +934,17 @@ void TemporalUpscaler::ExtraSharpen(vk::Image target, bool is_ldr, u32 w, u32 h)
             image.Destroy();
         });
         m_extra_sharpen_image = VideoCore::UniqueImage(device, m_instance.GetAllocator());
-        m_extra_sharpen_image.Create(vk::ImageCreateInfo{
-            .imageType = vk::ImageType::e2D,
-            .format = vk::Format::eR32G32B32A32Sfloat,
-            .extent = {w, h, 1},
-            .mipLevels = 1, .arrayLayers = 1, .samples = vk::SampleCountFlagBits::e1,
-            .tiling = vk::ImageTiling::eOptimal,
-            .usage = vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferDst,
-            .initialLayout = vk::ImageLayout::eUndefined,
-        });
+        if (m_extra_sharpen_image.Create(vk::ImageCreateInfo{
+                .imageType = vk::ImageType::e2D,
+                .format = vk::Format::eR32G32B32A32Sfloat,
+                .extent = {w, h, 1},
+                .mipLevels = 1, .arrayLayers = 1, .samples = vk::SampleCountFlagBits::e1,
+                .tiling = vk::ImageTiling::eOptimal,
+                .usage = vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eTransferDst,
+                .initialLayout = vk::ImageLayout::eUndefined,
+            })) {
+            SetObjectName(device, vk::Image(m_extra_sharpen_image), "psport: extra sharpen copy {}x{}", w, h);
+        }
         m_extra_sharpen_view = Check(device.createImageViewUnique({
             .image = vk::Image(m_extra_sharpen_image), .viewType = vk::ImageViewType::e2D,
             .format = vk::Format::eR32G32B32A32Sfloat,
@@ -1266,6 +1276,13 @@ void TemporalUpscaler::Run() {
                 vk::ImageLayout::eGeneral, all, vk::AccessFlagBits2::eShaderRead);
 
     const bool has_reactive = m_is_mask_ready || RecordReactive(input_color_view);
+    if (!has_reactive) {
+        // The merge pass binds the mask in GENERAL even when it is off, so it must leave UNDEFINED.
+        own_barrier(vk::Image(m_reactive_image), vk::ImageLayout::eUndefined, all,
+                    vk::AccessFlagBits2::eNone, vk::ImageLayout::eGeneral,
+                    vk::PipelineStageFlagBits2::eComputeShader,
+                    vk::AccessFlagBits2::eShaderRead);
+    }
 
     const auto now = std::chrono::steady_clock::now();
     float frame_ms = std::chrono::duration<float, std::milli>(now - m_last_frame).count();
@@ -1601,33 +1618,38 @@ void TemporalUpscaler::EnsureUiResources(u32 w, u32 h, vk::Format color, vk::For
         m_ui_view.reset();
         m_ui_storage_view.reset();
         m_ui_image = VideoCore::UniqueImage(device, p_allocator);
-        m_ui_image.Create(vk::ImageCreateInfo{
-            .flags = vk::ImageCreateFlagBits::eMutableFormat | vk::ImageCreateFlagBits::eExtendedUsage,
-            .imageType = vk::ImageType::e2D,
-            .format = color,
-            .extent = {w, h, 1},
-            .mipLevels = 1, .arrayLayers = 1, .samples = vk::SampleCountFlagBits::e1,
-            .tiling = vk::ImageTiling::eOptimal,
-            .usage = vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled |
-                     vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferDst |
-                     vk::ImageUsageFlagBits::eTransferSrc,
-            .initialLayout = vk::ImageLayout::eUndefined,
-        });
+        if (m_ui_image.Create(vk::ImageCreateInfo{
+                .flags = vk::ImageCreateFlagBits::eMutableFormat | vk::ImageCreateFlagBits::eExtendedUsage,
+                .imageType = vk::ImageType::e2D,
+                .format = color,
+                .extent = {w, h, 1},
+                .mipLevels = 1, .arrayLayers = 1, .samples = vk::SampleCountFlagBits::e1,
+                .tiling = vk::ImageTiling::eOptimal,
+                .usage = vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled |
+                         vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferDst |
+                         vk::ImageUsageFlagBits::eTransferSrc,
+                .initialLayout = vk::ImageLayout::eUndefined,
+            })) {
+            SetObjectName(device, vk::Image(m_ui_image), "psport: UI color {}x{} {}", w, h, vk::to_string(color));
+        }
         m_ui_format = color;
     }
     if (is_new_depth) {
         m_ui_depth_view.reset();
         m_ui_depth_image = VideoCore::UniqueImage(device, p_allocator);
-        m_ui_depth_image.Create(vk::ImageCreateInfo{
-            .imageType = vk::ImageType::e2D,
-            .format = depth,
-            .extent = {w, h, 1},
-            .mipLevels = 1, .arrayLayers = 1, .samples = vk::SampleCountFlagBits::e1,
-            .tiling = vk::ImageTiling::eOptimal,
-            .usage = vk::ImageUsageFlagBits::eDepthStencilAttachment |
-                     vk::ImageUsageFlagBits::eTransferDst,
-            .initialLayout = vk::ImageLayout::eUndefined,
-        });
+        if (m_ui_depth_image.Create(vk::ImageCreateInfo{
+                .imageType = vk::ImageType::e2D,
+                .format = depth,
+                .extent = {w, h, 1},
+                .mipLevels = 1, .arrayLayers = 1, .samples = vk::SampleCountFlagBits::e1,
+                .tiling = vk::ImageTiling::eOptimal,
+                .usage = vk::ImageUsageFlagBits::eDepthStencilAttachment |
+                         vk::ImageUsageFlagBits::eTransferDst,
+                .initialLayout = vk::ImageLayout::eUndefined,
+            })) {
+            SetObjectName(device, vk::Image(m_ui_depth_image), "psport: UI depth {}x{} {}", w, h,
+                          vk::to_string(depth));
+        }
         const auto aspect = vk::ImageAspectFlagBits::eDepth |
             (depth == vk::Format::eD32SfloatS8Uint ? vk::ImageAspectFlagBits::eStencil
                                                 : vk::ImageAspectFlags{});
@@ -2199,19 +2221,22 @@ bool TemporalUpscaler::RedirectColor(VideoCore::ImageId color,
         display.width = m_ui_width;
         display.height = m_ui_height;
         display.image = VideoCore::UniqueImage(device, m_instance.GetAllocator());
-        display.image.Create(vk::ImageCreateInfo{
-            .flags = vk::ImageCreateFlagBits::eMutableFormat,
-            .imageType = vk::ImageType::e2D,
-            .format = display.format,
-            .extent = {m_ui_width, m_ui_height, 1},
-            .mipLevels = 1,
-            .arrayLayers = 1,
-            .samples = vk::SampleCountFlagBits::e1,
-            .tiling = vk::ImageTiling::eOptimal,
-            .usage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled |
-                     vk::ImageUsageFlagBits::eTransferSrc,
-            .initialLayout = vk::ImageLayout::eUndefined,
-        });
+        if (display.image.Create(vk::ImageCreateInfo{
+                .flags = vk::ImageCreateFlagBits::eMutableFormat,
+                .imageType = vk::ImageType::e2D,
+                .format = display.format,
+                .extent = {m_ui_width, m_ui_height, 1},
+                .mipLevels = 1,
+                .arrayLayers = 1,
+                .samples = vk::SampleCountFlagBits::e1,
+                .tiling = vk::ImageTiling::eOptimal,
+                .usage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eSampled |
+                         vk::ImageUsageFlagBits::eTransferSrc,
+                .initialLayout = vk::ImageLayout::eUndefined,
+            })) {
+            SetObjectName(device, vk::Image(display.image), "psport: display {:#x} {}x{}", address, m_ui_width,
+                          m_ui_height);
+        }
         display.views.clear();
     }
     m_scheduler.EndRendering();

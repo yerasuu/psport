@@ -1461,6 +1461,7 @@ ImageId TextureCache::CreateImage(const ImageInfo& info, bool can_evict) {
     if (can_evict) {
         EvictForAllocation();
         if (image.backing->image.Create(image.backing->image.image_ci, false)) {
+            image.NameBacking(instance.GetDevice());
             return image_id;
         }
     }
@@ -1469,7 +1470,9 @@ ImageId TextureCache::CreateImage(const ImageInfo& info, bool can_evict) {
                           "Image {}x{} at {:#x} has no memory: its views are null and the "
                           "operations on it are skipped",
                           info.size.width, info.size.height, info.guest_address);
+        return image_id;
     }
+    image.NameBacking(instance.GetDevice());
     return image_id;
 }
 
