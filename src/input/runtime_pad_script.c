@@ -14,9 +14,10 @@ static uint64_t now_us(void) { return ps_host_time_monotonic_ns()/1000u; }
  * tokens, re-read when it changes: button names (cross circle square triangle l1 r1 l2 r2 l3 r3
  * options touchpad touchpad_left touchpad_right up down left right) are held while listed;
  * touchpad defaults to a left-side click; lx= ly= rx= ry= (0..255) override
- * the sticks; ps presses the Guide button (the overlay's close prompt, answered with cross or
+ * the sticks; mdx= mdy= move the mouse that many pixels at every pad read, as if the window held
+ * it (mouse look tests); ps presses the Guide button (the overlay's close prompt, answered with cross or
  * circle). An empty file releases everything. */
-PadInjected g_runtime_pad_injected={0,{-1,-1,-1,-1},-1};
+PadInjected g_runtime_pad_injected={0,{-1,-1,-1,-1},-1,0,0};
 static int s_replay_armed;      /* 1 while a PS_PAD_REPLAY recording plays, 2 once it ended */
 static uint64_t s_replay_start; /* 0: (re)start at the next sample */
 void runtime_pad_read_inject(void) {
@@ -42,6 +43,7 @@ void runtime_pad_read_inject(void) {
     g_runtime_pad_injected.buttons=0;
     g_runtime_pad_injected.touch_side=-1;
     for (int i=0;i<4;++i) g_runtime_pad_injected.stick[i]=-1;
+    g_runtime_pad_injected.mouse_dx=g_runtime_pad_injected.mouse_dy=0;
     int guide=0;
     char sz_token[64];
     while (fscanf(p_file,"%63s",sz_token)==1) {
@@ -53,12 +55,15 @@ void runtime_pad_read_inject(void) {
         }
         for (size_t i=0;i<sizeof(s_names)/sizeof(*s_names);++i) if (!strcmp(sz_token,s_names[i].sz_name)) g_runtime_pad_injected.buttons|=s_names[i].ps;
         for (int i=0;i<4;++i) if (!strncmp(sz_token,s_sticks[i],3)) { int v=atoi(sz_token+3); g_runtime_pad_injected.stick[i]=v<0 ? 0 : v>255 ? 255 : v; }
+        if (!strncmp(sz_token,"mdx=",4)) g_runtime_pad_injected.mouse_dx=strtof(sz_token+4,NULL);
+        if (!strncmp(sz_token,"mdy=",4)) g_runtime_pad_injected.mouse_dy=strtof(sz_token+4,NULL);
     }
     fclose(p_file);
     if (psport_gpu_overlay_pad_file_press(guide,(g_runtime_pad_injected.buttons & BTN_CROSS)!=0,(g_runtime_pad_injected.buttons & BTN_CIRCLE)!=0))
         g_runtime_pad_injected.buttons&=~(uint32_t)(BTN_CROSS|BTN_CIRCLE);
-    printf("Runtime: pad file: buttons 0x%x sticks %d %d %d %d\n",g_runtime_pad_injected.buttons,
-           g_runtime_pad_injected.stick[0],g_runtime_pad_injected.stick[1],g_runtime_pad_injected.stick[2],g_runtime_pad_injected.stick[3]);
+    printf("Runtime: pad file: buttons 0x%x sticks %d %d %d %d mouse %.1f %.1f\n",g_runtime_pad_injected.buttons,
+           g_runtime_pad_injected.stick[0],g_runtime_pad_injected.stick[1],g_runtime_pad_injected.stick[2],g_runtime_pad_injected.stick[3],
+           (double)g_runtime_pad_injected.mouse_dx,(double)g_runtime_pad_injected.mouse_dy);
 }
 /* PS_PAD_RECORD=<file>: F9 starts and stops recording the pad state (gamepad or keyboard) with
  * the time since F9; PS_PAD_REPLAY=<file> plays such a recording back, started by the token

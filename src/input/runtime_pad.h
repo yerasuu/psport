@@ -28,8 +28,9 @@ _Static_assert(__builtin_offsetof(PadData,touches)==60,"OrbisPadData touch offse
 _Static_assert(__builtin_offsetof(PadData,timestamp)==80,"OrbisPadData timestamp offset");
 /* 1 once SDL's gamepad subsystem is up, -1 when it is not used. */
 extern int g_runtime_pad_sdl_ready;
-/* PS_PAD_FILE's held buttons, sticks (-1: not overridden) and touchpad side (-1: none). */
-typedef struct { uint32_t buttons; int stick[4]; int touch_side; } PadInjected;
+/* PS_PAD_FILE's held buttons, sticks (-1: not overridden), touchpad side (-1: none) and the mouse
+ * motion in pixels added at every pad read. */
+typedef struct { uint32_t buttons; int stick[4]; int touch_side; float mouse_dx, mouse_dy; } PadInjected;
 extern PadInjected g_runtime_pad_injected;
 void runtime_pad_read_inject(void);
 /* Button prompts for the device in use (runtime_pad.c): the device whose input came last, and a

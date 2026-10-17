@@ -770,6 +770,8 @@ static void sample(PadData *p_pad_data) {
     if (g_runtime_pad_injected.buttons & BTN_R2) p_pad_data->r2=255;
     uint8_t *axes[4]={&p_pad_data->left_x,&p_pad_data->left_y,&p_pad_data->right_x,&p_pad_data->right_y};
     for (int i=0;i<4;++i) if (g_runtime_pad_injected.stick[i]>=0) *axes[i]=(uint8_t)g_runtime_pad_injected.stick[i];
+    if (g_runtime_pad_injected.mouse_dx!=0 || g_runtime_pad_injected.mouse_dy!=0)
+        apply_mouse_look(p_pad_data,g_runtime_pad_injected.mouse_dx,g_runtime_pad_injected.mouse_dy,p_pad_data->timestamp,1);
     const uint8_t sticks[4]={p_pad_data->left_x,p_pad_data->left_y,p_pad_data->right_x,p_pad_data->right_y};
     psport_gpu_filter_pad(&p_pad_data->buttons,sticks); /* the game profile's (a menu pointer's presses) */
     touch_ids(p_pad_data);
