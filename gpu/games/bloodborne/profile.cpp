@@ -4,6 +4,7 @@
 // that is the one running); every retail release runs the same one.
 #include "game_profile.h"
 #include <cstdlib>
+#include "aspect.h"
 #include "frame_rate.h"
 #include "gnm_hooks.h"
 #include "guest_hooks.h"
@@ -40,6 +41,7 @@ void PatchImage(unsigned char* p_image, std::uint64_t cb_image) {
     }
     PsMouseLook::PatchImage(p_image, cb_image);
     PsMenuPointer::PatchImage(p_image, cb_image);
+    PsAspect::PatchImage(p_image, cb_image);
 }
 
 void ReportStats() {
@@ -101,6 +103,7 @@ extern const Profile BloodborneProfile = {
                                    .cb_min_small_skeleton = 96,
                                    .cb_min_skeleton = 640,
                                    .cb_max_skeleton = 16384}},
+    .pfn_display_aspect = PsAspect::SetDisplayAspect,
     .pfn_report_stats = ReportStats,
     .label_release = LabelRelease,
     .small_object_pool = {.off_header = 0xfc0, .cb_block = 0x30},
