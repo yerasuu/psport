@@ -14,14 +14,24 @@ lines): the game's server -> the community server; its summon route -> the shadN
 that has the summon service. A title without servers gets an empty file, no overrides, so that a
 file left by another game's launch does not apply. A player who needs other addresses puts them
 in DIR/host_overrides.custom.json, which is then used as it is, for any game.
+
+`online.py local-server --user DIR --title-online TEXT`: the game server of the title's co-op
+extension (BBSC's for Bloodborne) to run on this PC, for run.sh: its port, its console log and its
+command (one argument per line), or nothing. Only when the extension is on (its switch, PS_BBSC=1)
+and its local switch (PS_BBSC_LOCAL_SERVER) is 1, or auto and the community game server does not
+answer its status path within 5 s (Seamless Hunt's timed out for players on 2026-10-14 while the
+rest of it worked); unset or 0 never. Its data and logs go to DIR/<extension>/; it sends summons
+to the shadNet server's WebAPI, so messages and bloodstains are then this PC's only.
 """
 import argparse
 import json
 import os
 from pathlib import Path
+import shlex
 import socket
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 
 # The launcher's default (it is built around Bloodborne); a launch takes its title's
@@ -132,6 +142,51 @@ def check(server, webapi, community):
     return results
 
 
+def local_server(title, user_dir, community, server):
+    """[port, console log, script, arguments...] for the title extension's game server on this PC,
+    or [] (see the module's description)."""
+    script, local_switch = title.get('local_server'), title.get('local_switch')
+    extension_switch = title.get('extension_switch')
+    if not script or not local_switch or not extension_switch:
+        return []
+    if os.environ.get(extension_switch, '').strip() != '1':
+        return []
+    mode = os.environ.get(local_switch, '').strip().lower()
+    if mode in ('', '0', 'off', 'no'):
+        return []
+    if mode not in ('1', 'on', 'yes', 'auto'):
+        print(f'Co-op: {local_switch}={mode} is not 1, auto or 0: no game server on this PC',
+              file=sys.stderr)
+        return []
+    try:
+        port = urllib.parse.urlsplit(title.get('game_server', '')).port
+    except ValueError:
+        port = None
+    if not port:
+        print('Co-op: the title names no game server port: no game server on this PC',
+              file=sys.stderr)
+        return []
+    if mode == 'auto':
+        host = community.split('://', 1)[1]
+        if host in ('127.0.0.1', 'localhost'):
+            return []
+        status = f'{community}:{port}{title.get("status_path") or "/"}'
+        try:
+            with urllib.request.urlopen(status, timeout=5) as reply:
+                reply.read(64)
+            return []
+        except (OSError, ValueError) as error:
+            print(f'Co-op: {status} does not answer ({error}): the game server runs on this PC',
+                  file=sys.stderr)
+    shadnet = server.rsplit(':', 1)[0] if server.count(':') == 1 else server
+    data = Path(user_dir) / title.get('extension', 'extension')
+    (data / 'logs').mkdir(parents=True, exist_ok=True)
+    return [str(port), str(data / 'logs' / 'gameserver-console.log'), script,
+            '--shadnet', shadnet, '--host', '127.0.0.1', '--port', str(port),
+            '--data', str(data / 'online-data.json'), '--log-dir', str(data / 'logs'),
+            *shlex.split(title.get('local_server_args', ''))]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     sub = parser.add_subparsers(dest='command', required=True)
@@ -139,12 +194,19 @@ def main():
     overrides.add_argument('--user', required=True)
     overrides.add_argument('--title-online', default='')
     sub.add_parser('check')
+    local = sub.add_parser('local-server')
+    local.add_argument('--user', required=True)
+    local.add_argument('--title-online', default='')
     a = parser.parse_args()
     server = os.environ.get('PS_SHADNET_SERVER') or SHADNET_SERVER
     title = title_online(getattr(a, 'title_online', ''))
     community = community_address(os.environ.get('PS_COMMUNITY_SERVER'),
                                   title.get('community_server') or COMMUNITY_SERVER)
     webapi = webapi_setting(os.environ.get('PS_SHADNET_WEBAPI'), server, community)
+    if a.command == 'local-server':
+        for line in local_server(title, a.user, community, server):
+            print(line)
+        return
     if a.command == 'overrides':
         print(write_overrides(a.user, title, community, webapi))
     else:

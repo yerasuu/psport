@@ -215,6 +215,8 @@ EN = {
     'Выключено: игра остаётся офлайн, как раньше': 'Off: the game stays offline, as before',
     'Выключите при Tailscale или другом VPN': 'Turn it off with Tailscale or another VPN',
     'Играть онлайн': 'Play online',
+    'Бесшовный кооператив (BBSC)': 'Seamless co-op (BBSC)',
+    'Сессия переживает смерти, лампы, смену локаций и боссов; до 5 охотников. Нужен сервер с игровым сервером BBSC, у всех игроков включено': 'The session survives deaths, lamps, area changes and bosses; up to 5 hunters. Needs a server running the BBSC game server, and every player turns it on',
     'Играть офлайн': 'Play offline',
     'Игровой сервер': 'Game server',
     'Игровой сервер (сообщения, пятна крови, призраки)': 'Game server (messages, bloodstains, ghosts)',

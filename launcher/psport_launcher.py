@@ -183,6 +183,9 @@ DEFAULTS = {
     # Online play (Online page, the online module gpu/net): off by default; Seamless Hunt's
     # shadNet server and game server.
     "online": False,
+    # BBSC, Bloodborne's seamless co-op (PS_BBSC=1, gpu/games/bloodborne/net): off by default; every
+    # player needs it and a server running BBSC's game server next to shadNet (Seamless Hunt's does).
+    "online_bbsc": False,
     "online_community": online.COMMUNITY_SERVER,
     "online_server": online.SHADNET_SERVER,
     "online_webapi": "",
@@ -388,6 +391,8 @@ def game_environment(s):
         env["PS_SHADNET_PASSWORD"] = s["online_password"]
         env["PS_UPNP"] = "1" if s["online_upnp"] else "0"
         env["PS_COMMUNITY_SERVER"] = community
+        if s.get("online_bbsc"):
+            env["PS_BBSC"] = "1"
     for item in s["extra_env"].split():
         if "=" in item:
             key, value = item.split("=", 1)
@@ -1112,6 +1117,7 @@ class LauncherWindow(Adw.ApplicationWindow):
         s["extra_env"] = self.extra_row.get_text().strip()
         s["mods_enabled"] = self.mods_enabled_row.get_active()
         s["online"] = self.online_row.get_active()
+        s["online_bbsc"] = self.bbsc_row.get_active()
         s["online_community"] = self.community_row.get_text().strip()
         s["online_server"] = self.server_row.get_text().strip()
         s["online_webapi"] = self.webapi_row.get_text().strip()
@@ -1295,6 +1301,12 @@ class LauncherWindow(Adw.ApplicationWindow):
         self.webapi_row = Adw.EntryRow(title=tr("Адрес WebAPI"), text=s["online_webapi"])
         coop.add(self.server_row)
         coop.add(self.webapi_row)
+        self.bbsc_row = Adw.SwitchRow(
+            title=tr("Бесшовный кооператив (BBSC)"),
+            subtitle=tr("Сессия переживает смерти, лампы, смену локаций и боссов; до 5 охотников. "
+                        "Нужен сервер с игровым сервером BBSC, у всех игроков включено"),
+            active=s.get("online_bbsc", False))
+        coop.add(self.bbsc_row)
         page.add(coop)
 
         account = Adw.PreferencesGroup(

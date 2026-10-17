@@ -519,7 +519,8 @@ A launch runs no Python, except for online play:
 
 | Script | Use |
 |---|---|
-| `scripts/online.py` | addresses for `PS_ONLINE=1` from the title's servers (`psport --online-overrides`; it probes the shadNet WebAPI for the summon service); the bundled launcher imports it too |
+| `scripts/online.py` | addresses for `PS_ONLINE=1` from the title's servers (`psport --online-overrides`; it probes the shadNet WebAPI for the summon service), and the command of the title extension's local game server (`local-server`); the bundled launcher imports it too |
+| `scripts/bbsc_gameserver/` | BBSC's game server (Bloodborne's extension), started by `run.sh` only with `PS_BBSC=1` and `PS_BBSC_LOCAL_SERVER` |
 | `scripts/sce_file.py` | `param.sfo` and SELF/ELF readers for the Python tools (`tools/got_import.py`, `tools/re/`) |
 | `tools/dcx_check.py` | every `.dcx` file of a Bloodborne folder checked (the launch checks the shaders only) |
 
@@ -590,6 +591,16 @@ keeps the code writable, gives its cinematic camera (F1) the window's events and
 network side of BBSC is in the inherited libraries: its signaling packets (`np_signaling_bbsc.h`,
 handed to its code only while it runs), the room replay, the summon broker's connect-first area,
 stale record cleanup and fast sign in `http.cpp`.
+
+Switching it on: the launcher's *Online* page, "Seamless co-op (BBSC)" (`online_bbsc`, off by
+default), sets `PS_BBSC=1`; every player needs it and the same server, a shadNet server with BBSC's
+game server next to it (Seamless Hunt's). When that game server does not answer, BBSC's own
+(`scripts/bbsc_gameserver/`, BBSC's files) can run on this PC: `PS_BBSC_LOCAL_SERVER=1` always,
+`auto` when `<community>:20443/bb-eu/ss.info` does not answer within 5 s, unset or `0` never.
+`run.sh` asks `scripts/online.py local-server` (from the title's `--online-overrides` lines), starts
+it on 127.0.0.1 with its data and logs in `<user>/bbsc/`, points `PS_COMMUNITY_SERVER` at it and
+stops it with the game; summons then go to the shadNet server's WebAPI, messages and bloodstains
+stay on this PC.
 
 ## Other parts
 

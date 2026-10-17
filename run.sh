@@ -286,6 +286,25 @@ if [[ ${PS_ONLINE:-0} == 1 && -f scripts/online.py ]]; then
     fi
     [[ -n ${PS_SHADNET_WEBAPI:-} ]] || export PS_SHADNET_WEBAPI=http://${PS_SHADNET_SERVER%:*}:31315
     title_online=$("$tools/psport" --online-overrides --game "$game") || title_online=
+    # A title's co-op extension may bring its own game server, run on this PC when the community
+    # server's does not answer (scripts/online.py local-server: its port, its console log, then its
+    # command, one per line; nothing unless the extension and its local switch are on). It lives as
+    # long as the game: a watcher stops it once this process (exec'd into the game below) is gone.
+    mapfile -t local_server < <("$PYTHON" scripts/online.py local-server --user "${PS_USER_DIR:-$data/user}" --title-online "$title_online") || true
+    if (( ${#local_server[@]} > 2 )); then
+        local_port=${local_server[0]} local_log=${local_server[1]}
+        if (exec 3<>"/dev/tcp/127.0.0.1/$local_port") 2>/dev/null; then
+            echo "Co-op: a game server answers on 127.0.0.1:$local_port already: used"
+        else
+            game_pid=$$
+            ( "$PYTHON" "${local_server[@]:2}" > "$local_log" 2>&1 &
+              server_pid=$!
+              while kill -0 "$game_pid" 2>/dev/null && kill -0 "$server_pid" 2>/dev/null; do sleep 2; done
+              kill "$server_pid" 2>/dev/null ) &
+            echo "Co-op: the title's game server on 127.0.0.1:$local_port (${local_server[2]}; log $local_log)"
+        fi
+        export PS_COMMUNITY_SERVER=http://127.0.0.1
+    fi
     SHADPS4_HTTP_HOST_OVERRIDES_JSON=$("$PYTHON" scripts/online.py overrides --user "${PS_USER_DIR:-$data/user}" --title-online "$title_online") || true
     export SHADPS4_HTTP_HOST_OVERRIDES_JSON
 fi

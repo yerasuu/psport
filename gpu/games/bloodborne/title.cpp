@@ -118,7 +118,12 @@ extern const Title BloodborneTitle = {
                .sz_community_server = "http://play.seamlesshunt.com",
                .community_api_port = 18671,
                .sz_summon_route = "/summon_messenger",
-               .extension = {.sz_name = "bbsc", .sz_switch = "PS_BBSC"}},
+               .extension = {.sz_name = "bbsc",
+                             .sz_switch = "PS_BBSC",
+                             .sz_local_server = "scripts/bbsc_gameserver/bbsc_gameserver.py",
+                             .sz_local_server_args = "--relay-port 0 --no-bbhost --no-playlog",
+                             .sz_local_switch = "PS_BBSC_LOCAL_SERVER",
+                             .sz_status_path = "/bb-eu/ss.info"}},
     .quirks = Quirks,
     .p_profile = &BloodborneProfile,
 };
