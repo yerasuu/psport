@@ -167,6 +167,13 @@ Error InstallDetour(const char* sz_name, std::uint64_t va_site, std::span<const 
 Error RedirectOperand(const char* sz_name, std::uint64_t va_instruction, std::uint64_t va_expected,
                       const void* p_target);
 
+/// For a game module that writes the game's code itself and switches some of it while the game
+/// runs (a title's online extension: BBSC's byte patches): the executable mappings within
+/// [va_image, va_image + cb_image) become read, write and execute, and every later write of this
+/// layer leaves its pages so. Once called it holds for the process. Returns the mappings made
+/// writable; each refusal is logged.
+std::uint32_t KeepWritable(std::uint64_t va_image, std::uint64_t cb_image);
+
 /// cb_range bytes of zeroed, read-write memory within a rel32 reach of va_near, for values the
 /// game's code reads RIP-relative (RedirectOperand); nullptr (logged) when none is free. Never
 /// unmapped.

@@ -20,10 +20,16 @@ file(GLOB_RECURSE PSPORT_NET_SOURCES CONFIGURE_DEPENDS shadps4/core/libraries/ne
 list(FILTER PSPORT_NET_SOURCES EXCLUDE REGEX
     "np_trophy|trophy_ui|np_sns_facebook_dialog|np_profile_dialog/|np_commerce/")
 
-add_library(psport-net SHARED ${PSPORT_NET_SOURCES} "${SHADNET_PROTO_OUT}/shadnet.pb.cc" psport_net_glue.cpp)
+# A title's own part of the module (Game::OnlineExtension): games/<game>/net/, its sources and its
+# headers (each folder an include directory), started only for that title (psport_net_title.h).
+file(GLOB_RECURSE PSPORT_NET_TITLE_SOURCES CONFIGURE_DEPENDS ../games/*/net/*.cpp)
+file(GLOB PSPORT_NET_TITLE_DIRS LIST_DIRECTORIES true CONFIGURE_DEPENDS ../games/*/net)
+
+add_library(psport-net SHARED ${PSPORT_NET_SOURCES} ${PSPORT_NET_TITLE_SOURCES} "${SHADNET_PROTO_OUT}/shadnet.pb.cc"
+    psport_net_glue.cpp psport_net_title.cpp)
 # The module's own headers first, then the port's shim and shadPS4 (common/, logging).
 target_include_directories(psport-net PRIVATE include shadps4 shadps4/shadnet "${SHADNET_PROTO_OUT}"
-    ${CMAKE_CURRENT_SOURCE_DIR} ../shim ../shadps4 ../third_party/imgui ../third_party/httplib)
+    ${PSPORT_NET_TITLE_DIRS} ${CMAKE_CURRENT_SOURCE_DIR} ../shim ../shadps4 ../third_party/imgui ../third_party/httplib)
 # The version the shadNet client reports to the server (ShadNetClient::BuildVersionString). psport has
 # no release numbers yet: its unstable version and commit, as packaging/port.nix names it; set on that
 # file alone so that each commit rebuilds one source, not the module.

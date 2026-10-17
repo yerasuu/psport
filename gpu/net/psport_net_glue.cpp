@@ -63,6 +63,7 @@
 #include "core/libraries/np/np_web_api2/np_web_api2.h"
 
 #include "psport_net.h"
+#include "psport_net_title.h"
 
 namespace {
 /// The runtime's side (psport_net_init).
@@ -341,9 +342,6 @@ void ClearSeamlessHostPlacementHeader() {
     s_placement.reset();
 }
 void TraceMatching2LeaveRoom(std::uintptr_t, std::uint64_t) {}
-std::string_view TitleSummonRoute() {
-    return s_host.sz_summon_route ? s_host.sz_summon_route : "";
-}
 } // namespace Core::Bloodborne
 
 // ---- Notifications (log only for now) ------------------------------------------------------------
@@ -488,6 +486,11 @@ extern "C" __attribute__((visibility("default"))) uintptr_t psport_net_resolve(c
     return 0;
 }
 
+extern "C" __attribute__((visibility("default"))) void psport_net_image_ready(std::uint64_t va_image,
+                                                                            std::uint64_t cb_image) {
+    PsNetTitle::ImageReady(va_image, cb_image);
+}
+
 extern "C" __attribute__((visibility("default"))) int psport_net_init(const PsNetHost* p_host) {
     if (!p_host || p_host->abi != PSPORT_NET_ABI_VERSION || !p_host->pfn_thread_spawn || !p_host->pfn_thread_join) {
         std::printf("Online: the runtime and the online module are from different versions\n");
@@ -501,6 +504,7 @@ extern "C" __attribute__((visibility("default"))) int psport_net_init(const PsNe
         std::printf("Co-op: the title declares no summon route; the summon helpers stay off unless "
                     "SHADPS4_BLOODBORNE_SEAMLESS_COOP or SHADPS4_CAPTURE_BLOODBORNE_SUMMON is set\n");
     }
+    PsNetTitle::Start(*p_host);
     Core::Loader::SymbolsResolver resolver;
     Core::Loader::SymbolsResolver* p_sym = &resolver;
     Libraries::Net::RegisterLib(p_sym);

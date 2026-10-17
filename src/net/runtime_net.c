@@ -41,6 +41,27 @@ int runtime_net_symbol(const char *sz_symbol) {
     return match;
 }
 
+static void *s_p_module;
+
+/* The title's extension (Game::OnlineExtension), when the player turned it on with its switch. */
+static const char *title_extension(const PsTitleOnlineExtension *p_extension) {
+    if (!p_extension->sz_name) return NULL;
+    const char *sz_value=p_extension->sz_switch ? getenv(p_extension->sz_switch) : NULL;
+    if (sz_value && sz_value[0]=='1') {
+        printf("Online: the title's extension %s is on (%s=1)\n",p_extension->sz_name,p_extension->sz_switch);
+        return p_extension->sz_name;
+    }
+    printf("Online: the title's extension %s is off (%s=1 turns it on)\n",p_extension->sz_name,
+           p_extension->sz_switch ? p_extension->sz_switch : "its switch");
+    return NULL;
+}
+
+void runtime_net_image_ready(uintptr_t va_image, uint64_t cb_image) {
+    if (!s_p_module) return;
+    const PsNetImageReadyFn pfn_ready=(PsNetImageReadyFn)dlsym(s_p_module,"psport_net_image_ready");
+    if (pfn_ready) pfn_ready((uint64_t)va_image,cb_image);
+}
+
 /* The module: PS_NET_MODULE, else gpu/libpsport-net.so beside psport (where libpsport-gpu.so is). */
 static PsNetResolveFn module_resolve(void) {
     static int s_has_tried;
@@ -73,12 +94,14 @@ static PsNetResolveFn module_resolve(void) {
         .abi=PSPORT_NET_ABI_VERSION, .sz_app0=s_sz_game_folder, .sz_serial=s_sz_game_serial, .sz_title=s_sz_game_title,
         .sz_app_ver=s_sz_game_version, .pfn_thread_spawn=runtime_thread_spawn,
         .pfn_thread_join=runtime_thread_join_spawned, .sz_summon_route=title.online.sz_summon_route,
+        .sz_extension=title_extension(&title.online.extension),
     };
     if (!pfn_init || !pfn_found || pfn_init(&host)!=0) {
         printf("Online: %s did not start: offline play\n",sz_path);
         return NULL;
     }
     printf("Online: module %s\n",sz_path);
+    s_p_module=p_module;
     s_pfn_resolve=pfn_found;
     return s_pfn_resolve;
 }

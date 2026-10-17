@@ -134,6 +134,28 @@ struct GameEffects {
     LocalizedText hint;
 };
 
+/// The title's own part of the online module (games/<game>/net/, built into libpsport-net.so with
+/// the network libraries it calls): code that only this game's online play needs. It stays off
+/// unless the player turns it on (sz_switch=1); the runtime then names it to the module (PsNetHost
+/// sz_extension), which starts it if it carries it. All unset for a title without one.
+struct OnlineExtension {
+    /// The name the module knows it by.
+    const char* sz_name = nullptr;
+    /// The environment variable that turns it on (the launcher sets it from its own switch).
+    const char* sz_switch = nullptr;
+    /// A game server to run on this PC instead of the community server's when that does not answer
+    /// (run.sh, scripts/online.py local-server): a Python script relative to psport's folder, given
+    /// --shadnet HOST --host 127.0.0.1 --port PORT (the game server's) --data FILE --log-dir DIR,
+    /// then sz_local_server_args. nullptr for none.
+    const char* sz_local_server = nullptr;
+    const char* sz_local_server_args = nullptr;
+    /// Whether that server runs: =1 always, =auto when the community game server does not answer,
+    /// unset or 0 never.
+    const char* sz_local_switch = nullptr;
+    /// The path the community game server answers on its game server port when it is up.
+    const char* sz_status_path = nullptr;
+};
+
 /// The servers the game's online play (PS_ONLINE=1) goes to, which run.sh's host overrides
 /// redirect (psport --online-overrides, scripts/online.py); all unset for a title without any.
 struct OnlineServices {
@@ -148,6 +170,7 @@ struct OnlineServices {
     /// WebAPI when that has the service, and the only path the online module's summon helpers
     /// (host placement, SHADPS4_BLOODBORNE_SEAMLESS_COOP, SHADPS4_CAPTURE_BLOODBORNE_SUMMON) act on.
     const char* sz_summon_route = nullptr;
+    OnlineExtension extension;
 };
 
 /// The mouse in the game's own code (keyboard-and-mouse play), from hooks the profile installs.

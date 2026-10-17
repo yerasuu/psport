@@ -13,6 +13,10 @@ extern "C" int psport_gpu_overlay_captures_input(void) {
     return PsOverlay::CapturesInput() ? 1 : 0;
 }
 
+extern "C" void psport_gpu_overlay_banner(const char* sz_utf8) {
+    PsOverlay::SetBanner(sz_utf8);
+}
+
 extern "C" int psport_gpu_overlay_pad_file_press(int guide, int cross, int circle) {
     return PsOverlay::PadFilePress(guide != 0, cross != 0, circle != 0) ? 1 : 0;
 }

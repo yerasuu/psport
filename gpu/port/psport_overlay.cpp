@@ -62,6 +62,12 @@ std::atomic<bool> s_is_release_pending{false};
 SDL_Keycode s_release_key = SDLK_UNKNOWN;
 int s_release_button = -1;
 
+// A game module's line over the game (psport_gpu_overlay_banner), shown where the game's own
+// picture is black.
+std::mutex s_banner_mutex;
+std::string s_banner_text;
+std::atomic<bool> s_is_banner_shown{false};
+
 std::mutex s_cursor_mutex;
 std::array<GameCursor, MaxGameCursors> s_game_cursors{};
 std::atomic<bool> s_is_game_cursor_shown{false};
@@ -808,6 +814,25 @@ void ClosePrompt() {
     ImGui::End();
 }
 
+void Banner() {
+    std::string text;
+    {
+        std::scoped_lock lock{s_banner_mutex};
+        text = s_banner_text;
+    }
+    const ImGuiViewport* p_viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(ImVec2(p_viewport->WorkPos.x + p_viewport->WorkSize.x * 0.5f,
+                                   p_viewport->WorkPos.y + p_viewport->WorkSize.y * 0.82f),
+                            ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowBgAlpha(0.65f);
+    ImGui::Begin("##banner", nullptr,
+                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+                     ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoNav |
+                     ImGuiWindowFlags_NoFocusOnAppearing);
+    ImGui::TextUnformatted(text.c_str());
+    ImGui::End();
+}
+
 void TextPrompt() {
     std::string title, text;
     {
@@ -1103,7 +1128,16 @@ bool HandleEvent(const SDL_Event& event) {
 
 bool Visible() {
     return s_is_initialized &&
-           (s_is_menu_open || s_is_prompt_active || s_is_close_prompt_open || s_is_game_cursor_shown || PsSettings::Get().should_show_fps);
+           (s_is_menu_open || s_is_prompt_active || s_is_close_prompt_open || s_is_game_cursor_shown ||
+            s_is_banner_shown || PsSettings::Get().should_show_fps);
+}
+
+void SetBanner(const char* sz_text) {
+    {
+        std::scoped_lock lock{s_banner_mutex};
+        s_banner_text = sz_text ? sz_text : "";
+    }
+    s_is_banner_shown = sz_text && sz_text[0];
 }
 
 void SetGameCursor(u32 i_cursor, const GameCursor& cursor) {
@@ -1186,6 +1220,9 @@ void Render(vk::CommandBuffer cmdbuf, vk::ImageView view, vk::Extent2D extent, v
     }
     if (s_is_close_prompt_open) {
         ClosePrompt();
+    }
+    if (s_is_banner_shown) {
+        Banner();
     }
     ImGui::Render();
 

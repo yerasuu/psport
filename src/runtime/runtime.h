@@ -185,6 +185,9 @@ int32_t *runtime_net_errno(void);
 void runtime_net_ether_address(uint8_t p_out_address[6]);
 /* Online play (runtime_net.c, PS_ONLINE=1): the online module answers the network and PSN imports. */
 void runtime_net_configure(const char *sz_app0, const char *sz_serial, const char *sz_title, const char *sz_version);
+/* The game's image is mapped and patched, before its first instruction: the online module's title
+ * extension (if loaded and started) hooks it now. */
+void runtime_net_image_ready(uintptr_t va_image, uint64_t cb_image);
 int runtime_net_enabled(void);
 int runtime_net_symbol(const char *sz_symbol);
 uintptr_t runtime_net_resolve(const char *sz_name);

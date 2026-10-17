@@ -40,6 +40,7 @@ extern "C" PsTitleInfo psport_gpu_title(const char* sz_serial) {
     if (!p_title) {
         return {};
     }
+    const Game::OnlineExtension& extension = p_title->online.extension;
     const bool has_patch_image = p_title->pfn_patch_image || (p_title->p_profile && p_title->p_profile->pfn_patch_image);
     return {
         .sz_name = p_title->sz_name,
@@ -56,7 +57,9 @@ extern "C" PsTitleInfo psport_gpu_title(const char* sz_serial) {
         .p_quirks = p_title->quirks.data(),
         .c_quirks = p_title->quirks.size(),
         .online = {p_title->online.sz_game_server, p_title->online.sz_community_server,
-                   p_title->online.community_api_port, p_title->online.sz_summon_route},
+                   p_title->online.community_api_port, p_title->online.sz_summon_route,
+                   {extension.sz_name, extension.sz_switch, extension.sz_local_server,
+                    extension.sz_local_server_args, extension.sz_local_switch, extension.sz_status_path}},
     };
 }
 

@@ -145,6 +145,13 @@ int answer_query(int argc, char **argv) {
         if (p_online->sz_community_server) printf("community_server=%s\n",p_online->sz_community_server);
         if (p_online->community_api_port) printf("community_api_port=%u\n",p_online->community_api_port);
         if (p_online->sz_summon_route) printf("summon_route=%s\n",p_online->sz_summon_route);
+        const PsTitleOnlineExtension *p_extension=&p_online->extension;
+        if (p_extension->sz_name) printf("extension=%s\n",p_extension->sz_name);
+        if (p_extension->sz_switch) printf("extension_switch=%s\n",p_extension->sz_switch);
+        if (p_extension->sz_local_server) printf("local_server=%s\n",p_extension->sz_local_server);
+        if (p_extension->sz_local_server_args) printf("local_server_args=%s\n",p_extension->sz_local_server_args);
+        if (p_extension->sz_local_switch) printf("local_switch=%s\n",p_extension->sz_local_switch);
+        if (p_extension->sz_status_path) printf("status_path=%s\n",p_extension->sz_status_path);
         return 0;
     }
     if (argc >= 2 && !strcmp(argv[1], "--list-effects")) {

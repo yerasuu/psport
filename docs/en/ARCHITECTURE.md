@@ -497,6 +497,10 @@ and `RedirectOperand` (an instruction reads a value next to the image instead of
 `MapNear`). Each compares the site with the bytes the profile expects and returns a
 `PsGuestCode::Error` instead of writing when they differ; each hook is logged as `Guest code: <name>
 hooked at <address>` or `... not hooked: <why>`.
+`PsGuestCode::KeepWritable` is for a game module that writes the game's code itself and switches
+some of it while the game runs (a title's online extension, below): the image's code becomes read,
+write and execute, and the layer's later writes leave it so; nothing calls it unless such an
+extension starts.
 
 A profile makes a title faster or easier to diagnose; it never makes it work. The core must run
 every title correctly on its generic paths, which `PS_GAME_PROFILE=none` checks. The only title
@@ -553,12 +557,27 @@ player is told; one that never answers counts as accepting after 15 s. Notificat
 refused, e.g. matchmaking full) is shown to the player.
 
 The module learns the summon route through `PsNetHost` `sz_summon_route` (`PSPORT_NET_ABI_VERSION`
-2; a runtime and a module of different versions refuse each other and the game stays offline). The
+3; a runtime and a module of different versions refuse each other and the game stays offline). The
 summon helpers in `http.cpp` (the host placement header, the seamless route of
 `SHADPS4_BLOODBORNE_SEAMLESS_COOP=1`, the exchange capture of `SHADPS4_CAPTURE_BLOODBORNE_SUMMON=1`)
 act on that route only; for a title that declares none, either `SHADPS4_*` switch still forces
 shadp2p's `/summon_messenger`, with a warning. The module logs `Co-op: summon route ... (the
 title's)` or that the title declares none.
+
+A title may carry its own part of the online module (`Game::OnlineExtension` in `online`): code
+under `gpu/games/<game>/net/` that needs the network libraries, built into `libpsport-net.so`
+(`gpu/net/CMakeLists.txt` takes every `games/*/net/` folder) and registered there by name
+(`gpu/net/psport_net_title.h`). It stays off unless the player sets its switch (`sz_switch`=1):
+`src/net/runtime_net.c` then names it in `PsNetHost` `sz_extension` (ABI 3) and the module starts
+it; the log says `Online: the title's extension <name> is on` or `off (<switch>=1 turns it on)`.
+Once the image is mapped and patched, before its first instruction, the runtime calls the module's
+optional `psport_net_image_ready`, which hands the image to the started extension. What such an
+extension may ask of the GPU library is generic: `psport_gpu_add_event_filter` (the window's events
+before the profile's), `psport_gpu_overlay_banner` (a line over the game) and
+`PsGuestCode::KeepWritable`. Its own game server, run on this PC when the community server's does
+not answer, is declared there too (`sz_local_server`, `sz_local_switch`, `sz_status_path`) and
+printed by `--online-overrides` (`extension`, `extension_switch`, `local_server`,
+`local_server_args`, `local_switch`, `status_path`).
 
 ## Other parts
 

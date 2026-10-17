@@ -55,6 +55,14 @@ int psport_gpu_camera_look(float pitch, float yaw);
 /* The game profile's changes to the pad state the game reads (Game::MouseHooks pfn_filter_pad):
  * the buttons (PS4 bits); the sticks (lx ly rx ry) as they are. */
 void psport_gpu_filter_pad(uint32_t *p_buttons, const uint8_t *p_sticks);
+/* A game module's look at every window event first (an SDL_Event and the SDL_Window, on the window
+ * thread), before the profile's (Game::MouseHooks pfn_window_event): nonzero takes the event, and
+ * neither the port nor the game sees it. Up to 4, never removed; 0 when all are taken. */
+typedef int (*PsGpuEventFilter)(const void *p_sdl_event, void *p_sdl_window);
+int psport_gpu_add_event_filter(PsGpuEventFilter pfn_filter);
+/* A game module's line of text over the game, near the bottom, until called with NULL (any
+ * thread): what it shows while the game's own picture is black (a co-op extension's loads). */
+void psport_gpu_overlay_banner(const char *sz_utf8);
 /* libSceMouse (runtime_mouse.c): the host mouse's buttons (SDL_BUTTON_MASK bits) and its motion
  * (pixels), wheel and tilt (notches) since the last call, reset; returns 0 while there is no window
  * or the host has no mouse. */
@@ -96,12 +104,22 @@ typedef struct {
     /* The index-th write so far: its bytes, which may be rewritten in place, and where they go. */
     unsigned char *(*pfn_write)(PsPatchList *p_list, size_t i_write, uint64_t *p_out_offset, uint64_t *p_out_length);
 } PsPatchServices;
+/* A title's own part of the online module (Game::OnlineExtension): all NULL for none. */
+typedef struct {
+    const char *sz_name;
+    const char *sz_switch;
+    const char *sz_local_server;
+    const char *sz_local_server_args;
+    const char *sz_local_switch;
+    const char *sz_status_path;
+} PsTitleOnlineExtension;
 /* The servers of a title's online play (Game::OnlineServices): NULL and 0 for a title without any. */
 typedef struct {
     const char *sz_game_server;
     const char *sz_community_server;
     uint16_t community_api_port;
     const char *sz_summon_route;
+    PsTitleOnlineExtension extension;
 } PsTitleOnline;
 /* What the launch takes from the game's title (Game::Title), found by TITLE_ID whatever
  * PS_GAME_PROFILE says: it is part of running the game, not an optimisation of the translator.

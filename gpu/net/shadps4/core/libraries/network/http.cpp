@@ -24,6 +24,7 @@
 #include "common/logging/log.h"
 #include "common/path_util.h"
 #include "core/bloodborne_re.h"
+#include "psport_net_title.h"
 #include "core/debugger.h"
 #include "core/emulator_settings.h"
 #include "core/libraries/error_codes.h"
@@ -693,7 +694,7 @@ std::string SummonPathPrefix(std::string_view title_route, bool is_seamless_on, 
 
 const std::string& SummonPrefix() {
     static const std::string prefix = [] {
-        const std::string_view title_route = Core::Bloodborne::TitleSummonRoute();
+        const std::string_view title_route = PsNetTitle::SummonRoute();
         std::string chosen =
             SummonPathPrefix(title_route, EnvFlagEnabled("SHADPS4_BLOODBORNE_SEAMLESS_COOP"),
                              EnvFlagEnabled("SHADPS4_CAPTURE_BLOODBORNE_SUMMON"));

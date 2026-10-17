@@ -1,4 +1,6 @@
 // psport: SDL3 window for the Vulkan swapchain (X11 or Wayland).
+#include <array>
+#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -9,6 +11,31 @@
 #include "sdl_window.h"
 #include "psport_overlay.h"
 #include "psport_settings.h"
+
+namespace {
+std::array<std::atomic<PsGpuEventFilter>, 4> s_event_filters{};
+
+bool IsTakenByModule(const SDL_Event* p_event, SDL_Window* p_window) {
+    for (const auto& slot : s_event_filters) {
+        const PsGpuEventFilter pfn_filter = slot.load(std::memory_order_acquire);
+        if (pfn_filter && pfn_filter(p_event, p_window)) {
+            return true;
+        }
+    }
+    return false;
+}
+} // namespace
+
+extern "C" int psport_gpu_add_event_filter(PsGpuEventFilter pfn_filter) {
+    for (auto& slot : s_event_filters) {
+        PsGpuEventFilter pfn_empty = nullptr;
+        if (slot.compare_exchange_strong(pfn_empty, pfn_filter)) {
+            return 1;
+        }
+    }
+    LOG_ERROR(Frontend, "Window: no free event filter slot: a game module does not see the window's events");
+    return 0;
+}
 
 namespace Frontend {
 
@@ -321,7 +348,8 @@ bool WindowSDL::PollEvents() {
     const bool is_pointer_wanted = game_mouse.pfn_wants_pointer && game_mouse.pfn_wants_pointer();
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
-        if (game_mouse.pfn_window_event && game_mouse.pfn_window_event(&event, m_p_window)) {
+        if (IsTakenByModule(&event, m_p_window) ||
+            (game_mouse.pfn_window_event && game_mouse.pfn_window_event(&event, m_p_window))) {
             continue;
         }
         if (event.type == SDL_EVENT_MOUSE_MOTION) {

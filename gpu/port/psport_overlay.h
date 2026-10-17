@@ -59,6 +59,10 @@ bool PadFilePress(bool is_guide_pressed, bool is_cross_pressed, bool is_circle_p
 /// The settings menu is open: the window shows the system cursor over it.
 bool MenuOpen();
 
+/// A line over the game near the bottom until called with nullptr or "" (any thread;
+/// psport_gpu_overlay_banner).
+void SetBanner(const char* sz_text);
+
 /// Window thread: the game's text dialog (ImeDialog) state, drawn as a box over the frame.
 void SetTextPrompt(bool is_active, const std::string& prompt, const std::string& text);
 

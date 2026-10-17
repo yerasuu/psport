@@ -342,6 +342,7 @@ int main(int argc, char **argv) {
     }
     if (!executable_entry) fail("entry is not executable");
     printf("Mapped %" PRIu64 " bytes, %" PRIu64 " segments; applied %" PRIu64 " relocations\n", cb_image, c_segments, c_relocs);
+    if (runtime_net_enabled()) runtime_net_image_ready((uintptr_t)g_p_image, cb_image);
     if (native_libc) {
         for (uint64_t m=0;m<g_c_modules;++m) {
             int init_executable=0;

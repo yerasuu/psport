@@ -1,7 +1,7 @@
 /* psport online module (libpsport-net.so, gpu/net): the PS4 network and PSN libraries with the
  * shadNet client. A separate library the runtime loads only for online play (PS_ONLINE=1,
  * src/net/runtime_net.c); offline the port never touches it, and a build without it runs offline.
- * Its C++ inside is private (hidden symbols, -Bsymbolic): these two calls are all it exports. */
+ * Its C++ inside is private (hidden symbols, -Bsymbolic): these calls are all it exports. */
 #ifndef PSPORT_NET_H
 #define PSPORT_NET_H
 #include <stdint.h>
@@ -10,7 +10,7 @@
 extern "C" {
 #endif
 
-#define PSPORT_NET_ABI_VERSION 2
+#define PSPORT_NET_ABI_VERSION 3
 
 /* What the runtime gives the module: the game's identity (param.sfo, its folder for
  * sce_sys/npbind.dat), guest threads for the NP libraries' callbacks into the game and what its
@@ -28,11 +28,19 @@ typedef struct PsNetHost {
     /* The path of the title's summon calls (no trailing slash), NULL when it declares none: the
      * summon helpers of http.cpp act only on it. Since ABI 2. */
     const char *sz_summon_route;
+    /* The title's own part of the module to start (Game::OnlineExtension sz_name), NULL when it
+     * has none or the player left it off: the module starts it if it carries it. Since ABI 3. */
+    const char *sz_extension;
 } PsNetHost;
 
 /* Registers the libraries; 0 on success, else the module cannot run (the game stays offline). */
 typedef int (*PsNetInitFn)(const PsNetHost *p_host);
 int psport_net_init(const PsNetHost *p_host);
+
+/* Optional (since ABI 3): the game's image is mapped, relocated and patched, before any of its
+ * code runs; the title's extension hooks it here. */
+typedef void (*PsNetImageReadyFn)(uint64_t va_image, uint64_t cb_image);
+void psport_net_image_ready(uint64_t va_image, uint64_t cb_image);
 
 /* The module's function for an imported NID ("NID#lib#mod"), or 0. */
 typedef uintptr_t (*PsNetResolveFn)(const char *sz_scoped_nid);
