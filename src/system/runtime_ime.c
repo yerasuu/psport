@@ -97,7 +97,7 @@ static ABI int32_t ime_open(const ImeParam *p_param, const void *p_extended) {
     s_panel.is_open=true;
     s_panel.param=*p_param;
     utf16_to_utf8(p_param->p_text,p_param->max_text_length,s_panel.sz_delivered,sizeof(s_panel.sz_delivered));
-    const char *sz_preset=getenv("PS_IME_TEXT");
+    const char *sz_preset=runtime_env("PS_IME_TEXT",NULL);
     s_panel.is_typing=!sz_preset && psport_gpu_text_input_begin(s_panel.sz_delivered,"Text");
     if (!s_panel.is_typing) {
         snprintf(s_panel.sz_entry,sizeof(s_panel.sz_entry),"%s",sz_preset ? sz_preset : s_panel.sz_delivered);

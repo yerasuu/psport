@@ -28,7 +28,7 @@ static uint64_t s_cb_live, s_cb_flexible_mapped;
 /* Some titles map flexible memory dozens of times a second: past these, maps are counted. */
 enum { LISTED_FLEXIBLE_MAPS=8 };
 
-static int trace_memory(void) { static int s_is_enabled=-1; if (s_is_enabled<0) s_is_enabled=getenv("PS_TRACE_MEM")!=NULL; return s_is_enabled; }
+static int trace_memory(void) { static int s_is_enabled=-1; if (s_is_enabled<0) s_is_enabled=runtime_env("PS_TRACE_MEM",NULL)!=NULL; return s_is_enabled; }
 static int valid_alignment(uint64_t a) { return a >= PAGE && a <= POOL_SIZE && !(a & (a-1)); }
 static int block_type(uint64_t phys) {
     for (int i=0;i<LIMIT;++i)

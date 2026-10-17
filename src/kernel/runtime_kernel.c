@@ -15,7 +15,6 @@
 #include <time.h>
 #include <unistd.h>
 #include <sys/syscall.h>
-#include <dlfcn.h>
 #include <dirent.h>
 #include <ucontext.h>
 #include <signal.h>
@@ -505,7 +504,7 @@ static void guest_call_sites(uint64_t out[3]) {
 }
 void runtime_wait_note(int kind, uint64_t ns) {
     static int s_is_enabled=-1;
-    if (s_is_enabled<0) s_is_enabled=getenv("PS_FRAME_STATS")!=NULL;
+    if (s_is_enabled<0) s_is_enabled=runtime_env("PS_FRAME_STATS",NULL)!=NULL;
     if (!s_is_enabled) return;
     if (!s_wait_tid) s_wait_tid=(int)syscall(SYS_gettid);
     uint64_t sites[3];
@@ -532,7 +531,7 @@ void runtime_wait_report(double frames) {
     }
     if (!c_rows || frames<=0) return;
     static FILE *s_p_dump; static int s_is_dump_checked;
-    if (!s_is_dump_checked) { const char *sz_path=getenv("PS_WAIT_LOG"); if (sz_path && *sz_path) s_p_dump=fopen(sz_path,"w"); s_is_dump_checked=1; }
+    if (!s_is_dump_checked) { const char *sz_path=runtime_env("PS_WAIT_LOG",NULL); if (sz_path && *sz_path) s_p_dump=fopen(sz_path,"w"); s_is_dump_checked=1; }
     if (s_p_dump) {
         for (int i=0;i<c_rows;++i)
             fprintf(s_p_dump,"%s %d %s %#lx %#lx %#lx %.2f %.3f\n", rows[i].p_wait_site->sz_name, rows[i].p_wait_site->tid, s_kinds[rows[i].p_wait_site->kind&3],
@@ -606,7 +605,7 @@ static void *sampler_main(void *p_arg) {
 }
 static void sample_start(void) {
     static int s_has_started;
-    const char *sz_name=getenv("PS_SAMPLE_THREAD");
+    const char *sz_name=runtime_env("PS_SAMPLE_THREAD",NULL);
     if (s_has_started || !sz_name || !*sz_name) return;
     s_has_started=1;
     struct sigaction action={0};
@@ -622,13 +621,13 @@ static void sample_report(void) {
     static int s_got_dumped;
     if (!s_got_dumped) {
         s_got_dumped=1;
-        const char *sz_got=getenv("PS_DUMP_GOT"); /* a guest GOT slot (offset): which host function it calls */
+        const char *sz_got=runtime_env("PS_DUMP_GOT",NULL); /* a guest GOT slot (offset): which host function it calls */
         if (sz_got && *sz_got) {
             const uint64_t target=*(const uint64_t *)(0x800000000ull+strtoull(sz_got,NULL,0));
-            Dl_info dl={0};
-            dladdr((void *)target,&dl);
-            printf("Runtime: GOT %s -> %#lx %s:%s+%#lx\n",sz_got,(unsigned long)target,dl.dli_fname ? dl.dli_fname : "?",
-                   dl.dli_sname ? dl.dli_sname : "?",(unsigned long)(target-(uint64_t)(dl.dli_sname ? dl.dli_saddr : dl.dli_fbase)));
+            PsHostCodeAddress where;
+            ps_host_dl_address((void *)target,&where);
+            printf("Runtime: GOT %s -> %#lx %s:%s+%#lx\n",sz_got,(unsigned long)target,where.sz_file ? where.sz_file : "?",
+                   where.sz_symbol ? where.sz_symbol : "?",(unsigned long)(target-(where.sz_symbol ? where.va_symbol : where.va_base)));
         }
     }
     const uint64_t c_samples=atomic_exchange(&s_c_samples,0);
@@ -643,11 +642,11 @@ static void sample_report(void) {
             printf("%s +%#lx %.1f%%",i?";":"",(unsigned long)(rows[i].rip-text_lo),100.0*rows[i].c_samples/c_samples);
             continue;
         }
-        Dl_info dl={0};
-        dladdr((void *)rows[i].rip,&dl);
-        const char *sz_module=dl.dli_fname ? strrchr(dl.dli_fname,'/') : NULL;
-        printf("%s host:%s%s%s+%#lx (from +%#lx) %.1f%%",i?";":"",sz_module ? sz_module+1 : "?",dl.dli_sname ? ":" : "",
-               dl.dli_sname ? dl.dli_sname : "",(unsigned long)(rows[i].rip-(dl.dli_sname ? (uint64_t)dl.dli_saddr : (uint64_t)dl.dli_fbase)),
+        PsHostCodeAddress where;
+        ps_host_dl_address((void *)rows[i].rip,&where);
+        const char *sz_module=where.sz_file ? strrchr(where.sz_file,'/') : NULL;
+        printf("%s host:%s%s%s+%#lx (from +%#lx) %.1f%%",i?";":"",sz_module ? sz_module+1 : "?",where.sz_symbol ? ":" : "",
+               where.sz_symbol ? where.sz_symbol : "",(unsigned long)(rows[i].rip-(where.sz_symbol ? where.va_symbol : where.va_base)),
                (unsigned long)rows[i].caller,100.0*rows[i].c_samples/c_samples);
     }
     printf("\n");

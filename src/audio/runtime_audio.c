@@ -57,7 +57,7 @@ static uint64_t now_ns(void) { return ps_host_time_monotonic_ns(); }
 static void sleep_until(uint64_t deadline) { while (ps_host_time_sleep_until_ns(deadline)) {} }
 static int sdl_audio(void) {
     if (s_is_sdl_ready<0) {
-        const char *sz_mode=getenv("PS_AUDIO");
+        const char *sz_mode=runtime_env("PS_AUDIO",NULL);
         s_is_sdl_ready = (!sz_mode || strcmp(sz_mode,"none")) && SDL_InitSubSystem(SDL_INIT_AUDIO);
         printf("Runtime: audio backend %s\n", s_is_sdl_ready ? SDL_GetCurrentAudioDriver() : "timer (silent)");
     }
@@ -119,8 +119,8 @@ static ABI int32_t audio_open(int32_t user, int32_t type, int32_t i_device, uint
         if (p_port->p_stream) SDL_ResumeAudioStreamDevice(p_port->p_stream);
         else fprintf(stderr,"Runtime: SDL audio stream failed (%s); port %d uses the timer sink\n",SDL_GetError(),id);
     }
-    p_port->stats=getenv("PS_AUDIO_STATS")!=NULL;
-    const char *sz_dump=getenv("PS_AUDIO_DUMP");
+    p_port->stats=runtime_env("PS_AUDIO_STATS",NULL)!=NULL;
+    const char *sz_dump=runtime_env("PS_AUDIO_DUMP",NULL);
     if (sz_dump) {
         char sz_path[4096];
         snprintf(sz_path,sizeof(sz_path),"%s.port%d.%dch.%s",sz_dump,id,p_port->channels,p_port->is_float ? "f32" : "s16");

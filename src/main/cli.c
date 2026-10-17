@@ -83,7 +83,7 @@ void accept_deprecated_names(char **pp_argv) {
         char *sz_value=strchr(pp_found[i],'=');
         *sz_value++='\0';
         char sz_renamed[256];
-        if (snprintf(sz_renamed,sizeof(sz_renamed),"PS_%s",pp_found[i]+3)<(int)sizeof(sz_renamed) && !getenv(sz_renamed)) {
+        if (snprintf(sz_renamed,sizeof(sz_renamed),"PS_%s",pp_found[i]+3)<(int)sizeof(sz_renamed) && !runtime_env(sz_renamed,NULL)) {
             setenv(sz_renamed,sz_value,0);
             int wrote=snprintf(sz_list+cb_used,sizeof(sz_list)-cb_used,"%s%s",c_copied?", ":"",pp_found[i]);
             if (wrote>0 && (size_t)wrote<sizeof(sz_list)-cb_used) cb_used+=(size_t)wrote;

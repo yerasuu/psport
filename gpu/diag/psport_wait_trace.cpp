@@ -4,15 +4,16 @@
 #include <algorithm>
 #include <array>
 #include <cstdio>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <map>
 #include <mutex>
 #include <string>
 #include <vector>
-#include <dlfcn.h>
 #include <execinfo.h>
 #include <pthread.h>
+#include "../../src/platform/ps_host.h"
 
 namespace PsWaitTrace {
 namespace {
@@ -36,23 +37,21 @@ std::mutex s_mutex;
 std::map<Key, Total> s_totals;
 
 std::string Describe(void* p_address) {
-    Dl_info info{};
-    if (!dladdr(p_address, &info)) {
+    PsHostCodeAddress where;
+    if (!ps_host_dl_address(p_address, &where)) {
         char sz_text[32];
         std::snprintf(sz_text, sizeof(sz_text), "%p", p_address);
         return sz_text;
     }
-    const char* sz_file = info.dli_fname ? std::strrchr(info.dli_fname, '/') : nullptr;
-    sz_file = sz_file ? sz_file + 1 : (info.dli_fname ? info.dli_fname : "?");
+    const char* sz_file = where.sz_file ? std::strrchr(where.sz_file, '/') : nullptr;
+    sz_file = sz_file ? sz_file + 1 : (where.sz_file ? where.sz_file : "?");
+    const auto va_address = reinterpret_cast<std::uintptr_t>(p_address);
     char sz_text[512];
-    if (info.dli_sname) {
-        std::snprintf(sz_text, sizeof(sz_text), "%s+%#lx", info.dli_sname,
-                      (unsigned long)(static_cast<char*>(p_address) -
-                                      static_cast<char*>(info.dli_saddr)));
+    if (where.sz_symbol) {
+        std::snprintf(sz_text, sizeof(sz_text), "%s+%#lx", where.sz_symbol,
+                      (unsigned long)(va_address - where.va_symbol));
     } else {
-        std::snprintf(sz_text, sizeof(sz_text), "%s+%#lx", sz_file,
-                      (unsigned long)(static_cast<char*>(p_address) -
-                                      static_cast<char*>(info.dli_fbase)));
+        std::snprintf(sz_text, sizeof(sz_text), "%s+%#lx", sz_file, (unsigned long)(va_address - where.va_base));
     }
     return sz_text;
 }

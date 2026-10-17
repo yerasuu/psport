@@ -34,7 +34,7 @@ int sfo_value(const char *sz_path, const char *sz_key, char *sz_text, size_t cb_
 /* AppContent's base-game profile: param.sfo's user-defined parameters; the SKU is a launch setting
  * (PS_CONTENT_SKU=full or trial), not a license check. */
 void configure_content(const char *sz_sfo) {
-    const char *sz_sku=getenv("PS_CONTENT_SKU");
+    const char *sz_sku=runtime_env("PS_CONTENT_SKU",NULL);
     if (!sz_sku || !*sz_sku) sz_sku="full";
     uint32_t values[5]={0};
     if (!strcmp(sz_sku,"full")) values[0]=3;

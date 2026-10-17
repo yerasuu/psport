@@ -41,7 +41,7 @@ static size_t s_c_live, s_c_workers;
 static size_t s_c_submissions, s_c_commands, s_c_failures, s_c_cancels, s_c_deletes, s_c_timeouts;
 static uint64_t s_cb_read, s_cb_written;
 
-static int trace(void) { static int s_is_enabled=-1; if (s_is_enabled<0) s_is_enabled=getenv("PS_TRACE_AIO")!=NULL; return s_is_enabled; }
+static int trace(void) { static int s_is_enabled=-1; if (s_is_enabled<0) s_is_enabled=runtime_env("PS_TRACE_AIO",NULL)!=NULL; return s_is_enabled; }
 static int settled(uint32_t state) { return state==COMPLETED || state==ABORTED; }
 /* Lock held. */
 static Submission *find(int32_t id) {

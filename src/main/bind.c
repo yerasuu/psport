@@ -141,14 +141,14 @@ void apply_patches(const PsPatchList *p_patches, Segment *p_segments, uint64_t c
 void bind_imports(Segment *p_segments, uint64_t c_segments, Reloc *p_relocs, uint64_t c_relocs, int native_libc,
                   const uint64_t *p_bindings, const uint64_t *p_binding_kinds, unsigned char **pp_out_traps,
                   unsigned char **pp_out_thunks) {
-    const char *sz_permissive = getenv("PS_PERMISSIVE");
+    const char *sz_permissive = runtime_env("PS_PERMISSIVE", NULL);
     if (sz_permissive && !strcmp(sz_permissive, "1")) {
         s_p_permissive_seen = calloc(g_c_imports ? g_c_imports : 1, 1);
         s_p_permissive_outputs = calloc(g_c_imports ? g_c_imports : 1, 1);
         if (!s_p_permissive_seen || !s_p_permissive_outputs) fail("allocation failed");
         for (uint64_t i = 0; i < g_c_imports; ++i)
             s_p_permissive_outputs[i] = (unsigned char)runtime_import_outputs(g_p_names[i]);
-        const char *sz_out = getenv("PS_PERMISSIVE_OUT");
+        const char *sz_out = runtime_env("PS_PERMISSIVE_OUT", NULL);
         s_is_permissive_out_error = sz_out && !strcmp(sz_out, "error");
     }
     unsigned char *p_traps = allocate(round_page((g_c_imports + 1) * 32));

@@ -39,7 +39,7 @@ void fail(const char *sz_message) { fprintf(stderr, "ERROR: %s\n", sz_message); 
  * them stops at the first one with SIGILL (exit code 132, issue #26), and lzcnt/tzcnt even run as
  * bsr/bsf there, with other results. Said before the game starts; PS_SKIP_CPU_CHECK=1 skips it. */
 static void check_cpu(void) {
-    const char *sz_skip = getenv("PS_SKIP_CPU_CHECK");
+    const char *sz_skip = runtime_env("PS_SKIP_CPU_CHECK", NULL);
     if (sz_skip && !strcmp(sz_skip, "1")) return;
     unsigned a, b, c, d, leaf1_c = 0, leaf7_b = 0, ext1_c = 0;
     if (__get_cpuid(1, &a, &b, &c, &d)) leaf1_c = c;

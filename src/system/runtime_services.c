@@ -52,7 +52,7 @@ static ABI int32_t user_list(int32_t *p_ids) {
 }
 static ABI int32_t user_name(int32_t id,char *sz_name,uint64_t cb_name) {
     if (id!=USER_ID || !sz_name) return USER_INVALID_ARGUMENT;
-    const char *sz_value=getenv("PS_USER_NAME") ? getenv("PS_USER_NAME") : "Hunter";
+    const char *sz_value=runtime_env("PS_USER_NAME","Hunter");
     if (strlen(sz_value)+1>cb_name) return (int32_t)0x8096000a; /* BUFFER_TOO_SHORT */
     strcpy(sz_name,sz_value); return 0;
 }
@@ -71,7 +71,7 @@ static ABI int32_t user_event(int32_t *p_event) {
 }
 
 /* ---- SystemService ---- */
-int runtime_system_language(void) { const char *sz_value=getenv("PS_LANGUAGE"); return sz_value ? atoi(sz_value) : 1; }
+int runtime_system_language(void) { const char *sz_value=runtime_env("PS_LANGUAGE",NULL); return sz_value ? atoi(sz_value) : 1; }
 static ABI int32_t system_param(int32_t id,int32_t *p_value) {
     if (!p_value) return SYSTEM_PARAMETER;
     switch (id) {
@@ -485,10 +485,10 @@ static ABI int32_t ime_init(const ImeParam *p_param, const void *p_extended) {
     char sz_initial[512], sz_prompt[256];
     utf16_to_utf8(p_param->buffer,p_param->max_length,sz_initial,sizeof(sz_initial));
     utf16_to_utf8(p_param->title,128,sz_prompt,sizeof(sz_prompt));
-    const char *sz_preset=getenv("PS_IME_TEXT");
+    const char *sz_preset=runtime_env("PS_IME_TEXT",NULL);
     if (sz_preset) { ime_complete(0,sz_preset); return 0; }
     if (!psport_gpu_text_input_begin(sz_initial,sz_prompt[0] ? sz_prompt : "Text")) {
-        const char *sz_name=getenv("PS_USER_NAME");
+        const char *sz_name=runtime_env("PS_USER_NAME",NULL);
         ime_complete(0,sz_name ? sz_name : sz_initial[0] ? sz_initial : "Hunter");
     } else printf("Runtime: ImeDialog opened: type in the game window, Enter to confirm, Esc to cancel\n");
     return 0;

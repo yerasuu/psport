@@ -171,7 +171,7 @@ void runtime_calls_report(void) {
             const Entry swap = s_p_entries[j]; s_p_entries[j] = s_p_entries[j - 1]; s_p_entries[j - 1] = swap;
         }
     for (size_t i = 0; i < c_path; ++i) ++totals[s_p_entries[i].kind];
-    const char *sz_path = getenv("PS_CALL_REPORT");
+    const char *sz_path = runtime_env("PS_CALL_REPORT", NULL);
     const int file = sz_path && *sz_path ? open(sz_path, O_WRONLY | O_CREAT | O_TRUNC, 0644) : -1;
     char sz_line[512];
     snprintf(sz_line, sizeof(sz_line),

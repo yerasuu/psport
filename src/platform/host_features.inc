@@ -60,7 +60,7 @@ FEATURE(processes, proc, "the process starting again on itself (restart, sceSyst
 FEATURE_HOST(processes, LINUX, IMPLEMENTED, "execv of /proc/self/exe, fork and close_range", "#540")
 
 FEATURE(dynamic_libraries, dl, "host libraries loaded at run time (the online module) and the symbols fault reports name")
-FEATURE_HOST(dynamic_libraries, LINUX, IMPLEMENTED, "dlopen, dlsym and dladdr", "#540")
+FEATURE_HOST(dynamic_libraries, LINUX, IMPLEMENTED, "dlopen, dlsym and dladdr (src/platform/linux/host_library.c)", "#540")
 
 FEATURE(randomness, rand, "random bytes for the stack canary, sceKernel random numbers, UUIDs and kern.arandom")
 FEATURE_HOST(randomness, LINUX, IMPLEMENTED, "getrandom (src/platform/linux/host_system.c)", "#540")

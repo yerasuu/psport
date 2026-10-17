@@ -75,6 +75,24 @@ int ps_host_random_bytes(void *p_buffer, size_t cb_buffer);
  * say or it does not fit in cb_out. */
 long ps_host_exe_path(char *sz_out, size_t cb_out);
 
+/* ---- dynamic libraries ---- */
+typedef struct PsHostLibrary PsHostLibrary;
+/* Loads a host library with every symbol bound now and kept out of the process's own scope, so that
+ * its dependencies cannot interpose on psport's. NULL on failure, with the host's reason in
+ * sz_out_error when it is given. */
+PsHostLibrary *ps_host_dl_open(const char *sz_path, char *sz_out_error, size_t cb_out_error);
+void *ps_host_dl_sym(PsHostLibrary *p_library, const char *sz_symbol);
+/* What a code address belongs to, for fault reports and samples: the loaded file (NULL when none
+ * holds it) and the nearest exported symbol (NULL when none). The strings belong to the host loader
+ * and stay valid while that file is loaded. */
+typedef struct {
+    const char *sz_file, *sz_symbol;
+    uintptr_t va_base, va_symbol;
+} PsHostCodeAddress;
+/* Nonzero when the address lies in a loaded file; *p_out is zeroed otherwise. Usable in a fault
+ * handler that is ending the process. */
+int ps_host_dl_address(const void *p_code, PsHostCodeAddress *p_out);
+
 #ifdef __cplusplus
 }
 #endif

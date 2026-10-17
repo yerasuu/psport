@@ -31,7 +31,7 @@ static uint64_t s_next_id=1;
 static size_t s_c_created, s_c_deleted, s_c_waits, s_c_timed_out;
 /* Some titles create event flags dozens of times a second: past these, creations are counted. */
 enum { LISTED_CREATIONS=8 };
-static int trace_eventflag(void) { static int s_is_enabled=-1; if (s_is_enabled<0) s_is_enabled=getenv("PS_TRACE_EVENTFLAG")!=NULL; return s_is_enabled; }
+static int trace_eventflag(void) { static int s_is_enabled=-1; if (s_is_enabled<0) s_is_enabled=runtime_env("PS_TRACE_EVENTFLAG",NULL)!=NULL; return s_is_enabled; }
 static Flag *find(uint64_t id) {
     for (Flag *p_flag=s_p_registry;p_flag;p_flag=p_flag->p_next) if (p_flag->id==id) return p_flag;
     return NULL;

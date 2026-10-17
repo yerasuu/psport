@@ -6,7 +6,6 @@
 #include "runtime.h"
 #include "gpu/net/psport_net.h"
 #include "gpu/psport_gpu.h"
-#include <dlfcn.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,7 +23,7 @@ void runtime_net_configure(const char *sz_app0, const char *sz_serial, const cha
 
 int runtime_net_enabled(void) {
     static int s_is_enabled=-1;
-    if (s_is_enabled<0) { const char *sz_value=getenv("PS_ONLINE"); s_is_enabled=sz_value && sz_value[0]=='1'; }
+    if (s_is_enabled<0) { const char *sz_value=runtime_env("PS_ONLINE",NULL); s_is_enabled=sz_value && sz_value[0]=='1'; }
     return s_is_enabled;
 }
 
@@ -41,12 +40,12 @@ int runtime_net_symbol(const char *sz_symbol) {
     return match;
 }
 
-static void *s_p_module;
+static PsHostLibrary *s_p_module;
 
 /* The title's extension (Game::OnlineExtension), when the player turned it on with its switch. */
 static const char *title_extension(const PsTitleOnlineExtension *p_extension) {
     if (!p_extension->sz_name) return NULL;
-    const char *sz_value=p_extension->sz_switch ? getenv(p_extension->sz_switch) : NULL;
+    const char *sz_value=p_extension->sz_switch ? runtime_env(p_extension->sz_switch,NULL) : NULL;
     if (sz_value && sz_value[0]=='1') {
         printf("Online: the title's extension %s is on (%s=1)\n",p_extension->sz_name,p_extension->sz_switch);
         return p_extension->sz_name;
@@ -58,7 +57,7 @@ static const char *title_extension(const PsTitleOnlineExtension *p_extension) {
 
 void runtime_net_image_ready(uintptr_t va_image, uint64_t cb_image) {
     if (!s_p_module) return;
-    const PsNetImageReadyFn pfn_ready=(PsNetImageReadyFn)dlsym(s_p_module,"psport_net_image_ready");
+    const PsNetImageReadyFn pfn_ready=(PsNetImageReadyFn)ps_host_dl_sym(s_p_module,"psport_net_image_ready");
     if (pfn_ready) pfn_ready((uint64_t)va_image,cb_image);
 }
 
@@ -69,7 +68,7 @@ static PsNetResolveFn module_resolve(void) {
     if (s_has_tried) return s_pfn_resolve;
     s_has_tried=1;
     char sz_path[PATH_MAX];
-    const char *sz_forced=getenv("PS_NET_MODULE");
+    const char *sz_forced=runtime_env("PS_NET_MODULE",NULL);
     if (sz_forced && sz_forced[0]) {
         snprintf(sz_path,sizeof(sz_path),"%s",sz_forced);
     } else {
@@ -80,13 +79,14 @@ static PsNetResolveFn module_resolve(void) {
         snprintf(sz_path,sizeof(sz_path),"%s/gpu/libpsport-net.so",sz_exe);
     }
     /* RTLD_LOCAL: its C++ (network and NP libraries) stays out of the process's symbol scope. */
-    void *p_module=dlopen(sz_path,RTLD_NOW|RTLD_LOCAL);
+    char sz_error[512];
+    PsHostLibrary *p_module=ps_host_dl_open(sz_path,sz_error,sizeof(sz_error));
     if (!p_module) {
-        printf("Online: the online module is not available (%s): offline play\n",dlerror());
+        printf("Online: the online module is not available (%s): offline play\n",sz_error);
         return NULL;
     }
-    const PsNetInitFn pfn_init=(PsNetInitFn)dlsym(p_module,"psport_net_init");
-    const PsNetResolveFn pfn_found=(PsNetResolveFn)dlsym(p_module,"psport_net_resolve");
+    const PsNetInitFn pfn_init=(PsNetInitFn)ps_host_dl_sym(p_module,"psport_net_init");
+    const PsNetResolveFn pfn_found=(PsNetResolveFn)ps_host_dl_sym(p_module,"psport_net_resolve");
     const PsTitleInfo title=psport_gpu_title(s_sz_game_serial);
     const PsNetHost host={
         .abi=PSPORT_NET_ABI_VERSION, .sz_app0=s_sz_game_folder, .sz_serial=s_sz_game_serial, .sz_title=s_sz_game_title,

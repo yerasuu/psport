@@ -253,8 +253,11 @@ moved behind the ABI area by area without changing what Linux does. So far:
 | time | `ps_host_time_read`, `ps_host_time_resolution` (`PsHostClock`), `ps_host_time_monotonic_ns`, `ps_host_time_realtime_ns`, `ps_host_time_sleep_ns`, `ps_host_time_sleep_until_ns` | `clock_gettime`, `clock_getres`, `nanosleep`, `clock_nanosleep` (`linux/host_time.c`) |
 | rand | `ps_host_random_bytes` | `getrandom` (`linux/host_system.c`) |
 | path | `ps_host_exe_path` | `/proc/self/exe` (`linux/host_system.c`) |
+| dl | `ps_host_dl_open`, `ps_host_dl_sym`, `ps_host_dl_address` (`PsHostCodeAddress`: file, symbol, their addresses) | `dlopen(RTLD_NOW \| RTLD_LOCAL)`, `dlsym`, `dladdr` (`linux/host_library.c`) |
 
-Faults, guest memory and guest TLS stay in the runtime until their own steps.
+Faults, guest memory and guest TLS stay in the runtime until their own steps. The environment is read
+through `runtime_env`, `runtime_env_int` and `runtime_env_flag` (`runtime_config.c`), except in
+`runtime_quirks.c`, which `psport-gpu-capabilities` links without them.
 
 `src/platform/host_features.inc` is the capability table, an X-macro list like the quirk registry:
 `FEATURE(id, area, sz_desc)` names a capability, `FEATURE_HOST(id, os, state, sz_reason, sz_ref)` gives

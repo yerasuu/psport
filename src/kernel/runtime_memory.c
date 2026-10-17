@@ -20,7 +20,7 @@
 uint64_t pool_size_bytes(void) {
     static uint64_t s_cb_pool;
     if (!s_cb_pool) {
-        const char *sz_env = getenv("PS_DMEM_MB");
+        const char *sz_env = runtime_env("PS_DMEM_MB", NULL);
         uint64_t mb = sz_env ? strtoull(sz_env, NULL, 10) : 0;
         if (mb < 5056 || mb > 16384) mb = 5056;
         s_cb_pool = mb * 1024 * 1024;

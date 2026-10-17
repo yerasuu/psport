@@ -8,7 +8,6 @@
 #include <signal.h>
 #include <ucontext.h>
 #include <fcntl.h>
-#include <dlfcn.h>
 #include <execinfo.h>
 #include <pthread.h>
 #include <sys/syscall.h>
@@ -35,17 +34,17 @@ static void fault(int sig, siginfo_t *p_info, void *p_context) {
         pthread_sigmask(SIG_SETMASK, &((ucontext_t *)p_context)->uc_sigmask, NULL);
         siglongjmp(*p_recover, 1);
     }
-    /* The process is terminating: dladdr/snprintf are acceptable here. */
+    /* The process is terminating: the loader's address lookup and snprintf are acceptable here. */
     ucontext_t *p_ucontext = p_context;
     uintptr_t rip = (uintptr_t)p_ucontext->uc_mcontext.gregs[REG_RIP];
     char sz_line[512];
-    Dl_info where;
+    PsHostCodeAddress where;
     if (rip - (uintptr_t)g_p_image < 0x10000000)
         snprintf(sz_line, sizeof(sz_line), "Guest fault (signal %d) at guest offset 0x%lx, address %p\n",
                  sig, (unsigned long)(rip - (uintptr_t)g_p_image), p_info->si_addr);
-    else if (dladdr((void *)rip, &where) && where.dli_fname)
-        snprintf(sz_line, sizeof(sz_line), "Host fault (signal %d) in %s+0x%lx (%s), address %p\n", sig, where.dli_fname,
-                 (unsigned long)(rip - (uintptr_t)where.dli_fbase), where.dli_sname ? where.dli_sname : "?", p_info->si_addr);
+    else if (ps_host_dl_address((void *)rip, &where) && where.sz_file)
+        snprintf(sz_line, sizeof(sz_line), "Host fault (signal %d) in %s+0x%lx (%s), address %p\n", sig, where.sz_file,
+                 (unsigned long)(rip - where.va_base), where.sz_symbol ? where.sz_symbol : "?", p_info->si_addr);
     else
         snprintf(sz_line, sizeof(sz_line), "Fault (signal %d) at RIP %p, address %p\n", sig, (void *)rip, p_info->si_addr);
     { ssize_t written_=write(2, sz_line, strlen(sz_line)); (void)written_; }
@@ -55,7 +54,7 @@ static void fault(int sig, siginfo_t *p_info, void *p_context) {
     if (rip - (uintptr_t)g_p_image < 0x10000000) dump_frames(p_ucontext);
     /* A call through a null or stale pointer (an import PS_PERMISSIVE answered with 0, a symbol
      * lookup that failed): the return address on the stack names the guest caller. */
-    else if (!(dladdr((void *)rip, &where) && where.dli_fname)) {
+    else if (!(ps_host_dl_address((void *)rip, &where) && where.sz_file)) {
         uintptr_t caller = 0;
         struct iovec local = {&caller, sizeof(caller)}, remote = {(void *)p_ucontext->uc_mcontext.gregs[REG_RSP], sizeof(caller)};
         if (process_vm_readv(getpid(), &local, 1, &remote, 1, 0) == (ssize_t)sizeof(caller) &&
@@ -68,7 +67,7 @@ static void fault(int sig, siginfo_t *p_info, void *p_context) {
     }
     /* Outside the image and any shared object (generated code, a freed mapping): the mapping
      * from /proc/self/maps, and the thread. */
-    if (rip - (uintptr_t)g_p_image >= 0x10000000 && !(dladdr((void *)rip, &where) && where.dli_fname)) {
+    if (rip - (uintptr_t)g_p_image >= 0x10000000 && !(ps_host_dl_address((void *)rip, &where) && where.sz_file)) {
         char sz_thread[32] = "?";
         pthread_getname_np(pthread_self(), sz_thread, sizeof(sz_thread));
         snprintf(sz_line, sizeof(sz_line), "  thread %s; mapping of RIP: ", sz_thread);
@@ -90,9 +89,9 @@ static void fault(int sig, siginfo_t *p_info, void *p_context) {
     void *frames[32];
     int depth = backtrace(frames, 32);
     for (int i = 2; i < depth; ++i) {
-        if (dladdr(frames[i], &where) && where.dli_fname)
-            snprintf(sz_line, sizeof(sz_line), "  #%d %s+0x%lx (%s)\n", i, where.dli_fname,
-                     (unsigned long)((uintptr_t)frames[i] - (uintptr_t)where.dli_fbase), where.dli_sname ? where.dli_sname : "?");
+        if (ps_host_dl_address(frames[i], &where) && where.sz_file)
+            snprintf(sz_line, sizeof(sz_line), "  #%d %s+0x%lx (%s)\n", i, where.sz_file,
+                     (unsigned long)((uintptr_t)frames[i] - where.va_base), where.sz_symbol ? where.sz_symbol : "?");
         else
             snprintf(sz_line, sizeof(sz_line), "  #%d %p\n", i, frames[i]);
         ssize_t written_=write(2, sz_line, strlen(sz_line)); (void)written_;
@@ -154,8 +153,8 @@ void install_fault_handlers(unsigned timeout_seconds) {
     struct sigaction sa = {0}; sa.sa_sigaction = fault; sa.sa_flags = SA_SIGINFO;
     sigemptyset(&sa.sa_mask); sigaddset(&sa.sa_mask, RUNTIME_EXCEPTION_SIGNAL);
     sigaction(SIGSEGV, &sa, NULL); sigaction(SIGILL, &sa, NULL); sigaction(SIGBUS, &sa, NULL); sigaction(SIGFPE, &sa, NULL);
-    Dl_info self_info;
-    if (dladdr((void *)main,&self_info)) s_exe_base=(uintptr_t)self_info.dli_fbase;
+    PsHostCodeAddress self;
+    if (ps_host_dl_address((void *)main,&self)) s_exe_base=self.va_base;
     struct sigaction dump = {0}; dump.sa_sigaction = thread_dump; dump.sa_flags = SA_SIGINFO|SA_RESTART;
     sigemptyset(&dump.sa_mask); sigaction(SIGUSR2, &dump, NULL);
     struct sigaction alarm_action = {0}; alarm_action.sa_sigaction = watchdog; alarm_action.sa_flags = SA_SIGINFO;

@@ -50,7 +50,7 @@ static void *toggle_watcher(void *p_path) {
 }
 static GpuRange s_pfn_hook_note_write; /* psport: data written into GPU memory (runtime_memory_note_write) */
 void runtime_memory_set_gpu_hooks(GpuRange pfn_map, GpuRange pfn_unmap, GpuRange pfn_invalidate) {
-    const char *sz_toggles=getenv("PS_TOGGLE_FILE");
+    const char *sz_toggles=runtime_env("PS_TOGGLE_FILE",NULL);
     static pthread_t s_watcher;
     if (sz_toggles && !s_watcher) pthread_create(&s_watcher,NULL,toggle_watcher,(void *)sz_toggles);
     write_lock();

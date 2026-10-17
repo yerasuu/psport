@@ -52,7 +52,7 @@ static ABI int32_t sem_create(uint32_t *p_out,const char *sz_name,uint32_t attr,
     uint32_t id=p_sema->id;
     p_sema->p_next=s_p_registry; s_p_registry=p_sema; *p_out=id; ++s_c_created;
     runtime_exception_unlock(&s_lock);
-    if (getenv("PS_TRACE_SEMA")) printf("Runtime: semaphore id=%u, attr=%u, initial=%d, max=%d\n",id,attr,initial,maximum);
+    if (runtime_env("PS_TRACE_SEMA",NULL)) printf("Runtime: semaphore id=%u, attr=%u, initial=%d, max=%d\n",id,attr,initial,maximum);
     return 0;
 }
 static int32_t wait_count(uint32_t id,int32_t need,uint32_t *p_timeout,int block) {
@@ -67,7 +67,7 @@ static int32_t wait_count(uint32_t id,int32_t need,uint32_t *p_timeout,int block
     else {
         /* Priority-ordered semaphores (attr 2) are served FIFO: there is no
            PS4 priority scheduler, host threads run at equal priority. */
-        if (getenv("PS_TRACE_SEMA")) fprintf(stderr,"Runtime: blocking wait on semaphore %u (need %d, count %d)\n",id,need,p_sema->c_resources); /* deadlock diagnosis */
+        if (runtime_env("PS_TRACE_SEMA",NULL)) fprintf(stderr,"Runtime: blocking wait on semaphore %u (need %d, count %d)\n",id,need,p_sema->c_resources); /* deadlock diagnosis */
         Waiter w={.need=need};
         pthread_condattr_t attr;
         host_check(pthread_condattr_init(&attr));

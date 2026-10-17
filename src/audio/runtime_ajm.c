@@ -92,7 +92,7 @@ static size_t s_c_jobs_run, s_c_frames_decoded, s_c_mp3_frames, s_c_aac_frames, 
 /* PS_AUDIO_TRACE=1: instance configurations and jobs that return a non-zero result. */
 static int s_c_trace_left=-1;
 static int ajm_trace(void) {
-    if (s_c_trace_left<0) { const char *sz_value=getenv("PS_AUDIO_TRACE"); s_c_trace_left=sz_value && sz_value[0]=='1' ? 400 : 0; }
+    if (s_c_trace_left<0) { const char *sz_value=runtime_env("PS_AUDIO_TRACE",NULL); s_c_trace_left=sz_value && sz_value[0]=='1' ? 400 : 0; }
     return s_c_trace_left>0 && s_c_trace_left--;
 }
 static uint32_t ident(uint32_t word) { return word & 0x3f; }

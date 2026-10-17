@@ -22,7 +22,7 @@ static int s_replay_armed;      /* 1 while a PS_PAD_REPLAY recording plays, 2 on
 static uint64_t s_replay_start; /* 0: (re)start at the next sample */
 void runtime_pad_read_inject(void) {
     static const char *s_sz_path; static int s_checked; static uint64_t s_last_check; static struct timespec s_mtime;
-    if (!s_checked) { s_sz_path=getenv("PS_PAD_FILE"); s_checked=1; }
+    if (!s_checked) { s_sz_path=runtime_env("PS_PAD_FILE",NULL); s_checked=1; }
     if (!s_sz_path || !*s_sz_path) return;
     uint64_t now=now_us();
     if (now-s_last_check<20000) return;
@@ -71,7 +71,7 @@ static uint64_t s_record_start;
 static PadSample s_record_last;
 void runtime_pad_record_sample(const PadData *p_pad_data) {
     static const char *s_sz_path; static int s_checked, s_is_f9_held;
-    if (!s_checked) { s_sz_path=getenv("PS_PAD_RECORD"); s_checked=1; }
+    if (!s_checked) { s_sz_path=runtime_env("PS_PAD_RECORD",NULL); s_checked=1; }
     if (!s_sz_path || !*s_sz_path || !g_runtime_pad_sdl_ready) return;
     const bool *p__bool=SDL_GetKeyboardState(NULL);
     const int f9=p__bool && p__bool[SDL_SCANCODE_F9];
@@ -103,7 +103,7 @@ void runtime_pad_replay_sample(PadData *p_pad_data) {
         static int s_is_loaded;
         if (!s_is_loaded) {
             s_is_loaded=1;
-            const char *sz_path=getenv("PS_PAD_REPLAY");
+            const char *sz_path=runtime_env("PS_PAD_REPLAY",NULL);
             FILE *p_file=sz_path ? fopen(sz_path,"r") : NULL;
             PadSample s; unsigned v[8]; size_t cap=0;
             while (p_file && fscanf(p_file,"%u %u %u %u %u %u %u %u",&v[0],&v[1],&v[2],&v[3],&v[4],&v[5],&v[6],&v[7])==8) {
