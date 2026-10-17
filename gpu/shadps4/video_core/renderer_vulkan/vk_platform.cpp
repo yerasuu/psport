@@ -34,6 +34,7 @@
 
 extern "C" volatile int runtime_restarting;
 extern "C" void runtime_calls_report(void);
+extern "C" void psport_gpu_flush_caches(int can_wait);
 
 namespace Vulkan {
 
@@ -486,6 +487,7 @@ void StopOnDeviceLost(const char* sz_where) {
     Breadcrumbs::ReportDeviceLost(sz_where);
     std::fflush(stdout);
     std::fprintf(stderr, "STOP: GPU device lost (%s)\n", sz_where);
+    psport_gpu_flush_caches(1);
     runtime_calls_report();
     std::_Exit(24);
 }

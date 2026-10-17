@@ -1,6 +1,7 @@
 /* Narrow, explicit PS4 libc contracts. No automatic success stubs. */
 #define _CRT_RAND_S
 #include "runtime.h"
+#include "gpu/psport_gpu.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -109,6 +110,7 @@ void runtime_report(void) {
     runtime_calls_report();
 }
 void runtime_stop(int status) {
+    psport_gpu_flush_caches(1);
     runtime_calls_report();
     fflush(NULL);
     _exit(status);
@@ -228,6 +230,7 @@ static ABI __attribute__((noreturn)) void guest_libc_exit(int status) {
     printf("Runtime: guest requested exit(%d)\n", status);
     runtime_finalize(NULL);
     runtime_report();
+    psport_gpu_flush_caches(1);
     exit(status);
 }
 /* Imports the runtime answers itself ahead of the libraries (the game's libc wrappers, TLS, its

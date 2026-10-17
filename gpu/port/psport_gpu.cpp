@@ -1,4 +1,5 @@
 // psport: glue between the C loader and the vendored shadPS4 video core.
+#include <algorithm>
 #include <chrono>
 #include <condition_variable>
 #include <cstdio>
@@ -9,6 +10,7 @@
 #include <thread>
 #include <vector>
 #include <SDL3/SDL.h>
+#include <unistd.h>
 #include "../psport_gpu.h"
 #include "common/elf_info.h"
 #include "common/thread.h"
@@ -19,6 +21,7 @@
 #include "psport_free_check.h"
 #include "psport_settings.h"
 #include "sdl_window.h"
+#include "video_core/cache_storage.h"
 
 extern "C" {
 // runtime_calls.c
@@ -148,6 +151,7 @@ extern "C" int psport_gpu_init(const PsGpuConfig* p_config) {
         while (p_window->PollEvents()) {
             SDL_Delay(2);
         }
+        psport_gpu_flush_caches(1);
         std::fflush(stdout);
         runtime_calls_report();
         std::_Exit(0);
@@ -205,6 +209,26 @@ extern "C" int psport_gpu_handle_fault(void* p_ucontext, void* p_address) {
         return 1;
     }
     return PsFreeCheck::OnStaleTrapFault(reinterpret_cast<std::uint64_t>(p_address)) ? 1 : 0;
+}
+
+extern "C" void psport_gpu_flush_caches(int can_wait) {
+    if (!can_wait) {
+        if (const u32 c_pending = Storage::PendingBlobs(); c_pending != 0) {
+            char sz_line[128];
+            const int cb_line = std::snprintf(sz_line, sizeof(sz_line),
+                                              "Pipeline cache: %u blobs still queued at exit, not flushed (failure exit)\n",
+                                              c_pending);
+            if (cb_line > 0) {
+                const ssize_t written = write(2, sz_line, std::min<std::size_t>(cb_line, sizeof(sz_line) - 1));
+                (void)written;
+            }
+        }
+        return;
+    }
+    // Two threads may end the process at once (the window closing while the game exits): the
+    // second waits here for the first flush instead of cutting it short with its own _exit.
+    static std::once_flag s_flush_once;
+    std::call_once(s_flush_once, [] { Storage::DataBase::Instance().FlushForExit(); });
 }
 
 extern "C" unsigned psport_gpu_symbol_count(void) {

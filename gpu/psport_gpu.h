@@ -26,6 +26,10 @@ uintptr_t psport_gpu_resolve(const char *sz_scoped_nid);
 int psport_gpu_handle_fault(void *p_ucontext, void *p_address);
 /* PS_WRITE_LOG=1: prints the logged GPU-side writes to guest memory near the fault. */
 void psport_gpu_dump_guest_writes(void *p_ucontext);
+/* Before the process ends through _exit or exec: waits up to 2 s for the pipeline cache writer to
+ * finish what is queued and logs what was flushed or dropped. can_wait=0 (signal handlers, failed
+ * assertions) takes no lock and only reports the blobs still queued. */
+void psport_gpu_flush_caches(int can_wait);
 /* Keyboard text entry through the game window (IME dialog, libSceIme). begin returns 0 when
  * no window exists; poll returns 0 typing, 1 confirmed, 2 cancelled (UTF-8 text). */
 int psport_gpu_text_input_begin(const char *sz_initial_utf8, const char *sz_prompt_utf8);

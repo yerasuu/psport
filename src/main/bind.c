@@ -59,6 +59,7 @@ static ABI __attribute__((noreturn)) void unresolved(uint32_t id, uintptr_t argu
         if (caller>=g_p_modules[m].base && caller-g_p_modules[m].base<g_p_modules[m].cb_module)
             printf("Caller in linked module %" PRIu64 " (%s): +0x%" PRIxPTR "\n",m,g_p_modules[m].sz_name,caller-g_p_modules[m].base);
     runtime_report();
+    psport_gpu_flush_caches(1);
     puts(g_has_entered_game ? "Original guest entry instructions executed; game initialization is incomplete." :
                         "Native libc initialization is incomplete; game entry has not run.");
     fflush(NULL);

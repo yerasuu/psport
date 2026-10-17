@@ -97,6 +97,7 @@ static void fault(int sig, siginfo_t *p_info, void *p_context) {
             snprintf(sz_line, sizeof(sz_line), "  #%d %p\n", i, frames[i]);
         ssize_t written_=write(2, sz_line, strlen(sz_line)); (void)written_;
     }
+    if (g_is_gpu_enabled) psport_gpu_flush_caches(0);
     runtime_calls_report();
     _exit(128 + sig);
 }
@@ -144,6 +145,7 @@ static void watchdog(int sig, siginfo_t *p_info, void *p_context) {
             at+=p_entry->reclen;
         }
     usleep(100000);
+    if (g_is_gpu_enabled) psport_gpu_flush_caches(0);
     runtime_calls_report();
     _exit(128 + sig);
 }

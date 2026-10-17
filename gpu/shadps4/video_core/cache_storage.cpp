@@ -13,11 +13,15 @@
 
 #include <miniz.h>
 
+#include <atomic>
+#include <chrono>
 #include <condition_variable>
+#include <cstdio>
 #include <deque>
 #include <functional>
 #include <mutex>
 #include <type_traits>
+#include <utility>
 
 namespace {
 
@@ -28,9 +32,18 @@ struct BlobWrite {
     std::filesystem::path path;
     std::vector<u8> bytes;
 };
-std::mutex s_queue_mutex{};
+// Timed so that a flush at exit stays bounded even if the exiting thread could not get it.
+std::timed_mutex s_queue_mutex{};
 std::condition_variable_any s_queue_cv{};
+std::condition_variable_any s_idle_cv{};
 std::deque<BlobWrite> s_queue{};
+std::atomic<u32> s_c_pending{};
+bool s_is_closed_for_exit{};
+bool s_has_reported_refusal{};
+
+// psport: the process ends through _exit (runtime_stop, the window thread), which never runs
+// Close: what the writer has not finished by then is lost and recompiled at the next start.
+constexpr std::chrono::milliseconds EXIT_FLUSH_LIMIT{2000};
 
 // psport: the archive is read from <serial>.zip and written to <serial>.zip.tmp (the entries
 // kept copied over), which replaces it when the cache is closed, so a crash or an exit before
@@ -94,6 +107,9 @@ void ProcessIO(const std::stop_token& stoken) {
         lk.unlock();
         WriteBlob(write, is_zip_writable);
         lk.lock();
+        if (s_c_pending.fetch_sub(1, std::memory_order_relaxed) == 1) {
+            s_idle_cv.notify_all();
+        }
     }
 }
 
@@ -158,14 +174,7 @@ void DataBase::Open() {
     opened = true;
 }
 
-void DataBase::Close() {
-    if (!IsOpened()) {
-        return;
-    }
-
-    io_worker.request_stop();
-    io_worker.join();
-
+void FinishArchive(const std::filesystem::path& cache_path) {
     if (EmulatorSettings.IsPipelineCacheArchived()) {
         if (s_has_zip_reader) {
             mz_zip_reader_end(&s_zip_reader);
@@ -185,6 +194,19 @@ void DataBase::Close() {
             }
         }
     }
+}
+
+void DataBase::Close() {
+    if (!IsOpened()) {
+        return;
+    }
+
+    // FlushForExit may have stopped the writer already.
+    if (io_worker.joinable()) {
+        io_worker.request_stop();
+        io_worker.join();
+    }
+    FinishArchive(cache_path);
 
     opened = false;
     LOG_INFO(Render, "Cache dumped");
@@ -202,10 +224,52 @@ bool WriteVector(const BlobType type, std::filesystem::path&& path, std::vector<
     }
     {
         std::scoped_lock lk{s_queue_mutex};
+        if (s_is_closed_for_exit) {
+            if (!std::exchange(s_has_reported_refusal, true)) {
+                LOG_WARNING(Render, "Pipeline cache: closed for exit, later blobs are not saved");
+            }
+            return false;
+        }
         s_queue.push_back(std::move(write));
+        s_c_pending.fetch_add(1, std::memory_order_relaxed);
     }
     s_queue_cv.notify_one();
     return true;
+}
+
+u32 PendingBlobs() {
+    return s_c_pending.load(std::memory_order_relaxed);
+}
+
+void DataBase::FlushForExit() {
+    if (!opened) {
+        return;
+    }
+    const auto start = std::chrono::steady_clock::now();
+    const auto deadline = start + EXIT_FLUSH_LIMIT;
+    std::unique_lock lk{s_queue_mutex, deadline};
+    if (!lk.owns_lock()) {
+        std::printf("Pipeline cache: %u blobs still queued at exit, dropped after the time limit "
+                    "(%lld ms, queue lock not taken)\n",
+                    PendingBlobs(), static_cast<long long>(EXIT_FLUSH_LIMIT.count()));
+        return;
+    }
+    const u32 c_queued = PendingBlobs();
+    const bool is_idle = s_idle_cv.wait_until(lk, deadline, [] { return PendingBlobs() == 0; });
+    s_is_closed_for_exit = true;
+    lk.unlock();
+    if (!is_idle) {
+        std::printf("Pipeline cache: %u blobs still queued at exit, dropped after the time limit (%lld ms)\n",
+                    PendingBlobs(), static_cast<long long>(EXIT_FLUSH_LIMIT.count()));
+        return;
+    }
+    io_worker.request_stop();
+    io_worker.join();
+    FinishArchive(cache_path);
+    const auto elapsed =
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start);
+    std::printf("Pipeline cache: flushed %u blobs in %lld ms\n", c_queued,
+                static_cast<long long>(elapsed.count()));
 }
 
 template <typename T>

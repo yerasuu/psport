@@ -2,6 +2,7 @@
  * sceSystemServiceLoadExec on psport's own command line. */
 #define _GNU_SOURCE
 #include "runtime.h"
+#include "gpu/psport_gpu.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,6 +18,7 @@
  * released before the new process opens its own. */
 volatile int runtime_restarting;
 void runtime_restart(void) {
+    psport_gpu_flush_caches(1);
     fflush(NULL);
     puts("Runtime: restarting through run.sh");
     /* The GPU threads still run until exec: their Vulkan calls fail once the device fd is
@@ -57,6 +59,7 @@ void runtime_load_exec(const char *sz_path, char *const *pp_arguments) {
     }
     printf("Runtime: sceSystemServiceLoadExec: replacing the application with %s and %zu arguments\n", sz_path, c_arguments);
     for (size_t i = 0; i < c_arguments; ++i) printf("Runtime: sceSystemServiceLoadExec argument %zu: %s\n", i + 1, pp_arguments[i]);
+    psport_gpu_flush_caches(1);
     runtime_calls_report();
     fflush(NULL);
     /* The calling thread's signal mask outlives the exec and would be the new main thread's. */

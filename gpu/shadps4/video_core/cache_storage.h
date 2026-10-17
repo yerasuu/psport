@@ -34,6 +34,10 @@ public:
     void FinishPreload();
     /// psport: removes every cached blob (an incompatible cache is rebuilt, not ignored).
     void Clear();
+    /// psport: drains the writer queue before the process ends through _exit, within
+    /// EXIT_FLUSH_LIMIT, and refuses saves after it. It takes the queue lock: never from a
+    /// signal handler, which reports PendingBlobs() instead.
+    void FlushForExit();
 
     bool Save(BlobType type, const std::string& name, std::vector<u8>&& data);
     bool Save(BlobType type, const std::string& name, std::vector<u32>&& data);
@@ -48,5 +52,8 @@ private:
     std::filesystem::path cache_path{};
     bool opened{};
 };
+
+/// psport: blobs queued or being written, read without a lock.
+u32 PendingBlobs();
 
 } // namespace Storage
