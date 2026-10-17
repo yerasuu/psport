@@ -276,7 +276,7 @@ if [[ ${PS_ONLINE:-0} == 1 && -f scripts/online.py ]]; then
         fi
     fi
     if [[ -z ${PYTHON:-} ]]; then echo 'Online play (PS_ONLINE=1) needs Python 3: install it or set PYTHON.' >&2; exit 1; fi
-    export PS_SHADNET_SERVER=${PS_SHADNET_SERVER:-srv.shadps4.net:31313}
+    export PS_SHADNET_SERVER=${PS_SHADNET_SERVER:-play.seamlesshunt.com:31313}
     # HTTPS needs CA certificates: OpenSSL from Nix looks only in its own store path (the
     # packaged wrapper brings a bundle; from source the system's is taken).
     if [[ ! -r ${SSL_CERT_FILE:-} ]]; then

@@ -24,6 +24,17 @@ add_library(psport-net SHARED ${PSPORT_NET_SOURCES} "${SHADNET_PROTO_OUT}/shadne
 # The module's own headers first, then the port's shim and shadPS4 (common/, logging).
 target_include_directories(psport-net PRIVATE include shadps4 shadps4/shadnet "${SHADNET_PROTO_OUT}"
     ${CMAKE_CURRENT_SOURCE_DIR} ../shim ../shadps4 ../third_party/imgui ../third_party/httplib)
+# The version the shadNet client reports to the server (ShadNetClient::BuildVersionString). psport has
+# no release numbers yet: its unstable version and commit, as packaging/port.nix names it; set on that
+# file alone so that each commit rebuilds one source, not the module.
+execute_process(COMMAND git rev-parse --short HEAD WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    OUTPUT_VARIABLE PSPORT_NET_REVISION OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+set(PSPORT_NET_VERSION "0-unstable")
+if(PSPORT_NET_REVISION)
+    string(APPEND PSPORT_NET_VERSION "-${PSPORT_NET_REVISION}")
+endif()
+set_property(SOURCE shadps4/shadnet/client.cpp APPEND PROPERTY COMPILE_DEFINITIONS
+    PSPORT_NET_VERSION="${PSPORT_NET_VERSION}")
 target_compile_definitions(psport-net PRIVATE BOOST_ASIO_STANDALONE NDEBUG
     CPPHTTPLIB_OPENSSL_SUPPORT CPPHTTPLIB_ZLIB_SUPPORT)
 target_compile_options(psport-net PRIVATE -fvisibility=hidden -fvisibility-inlines-hidden

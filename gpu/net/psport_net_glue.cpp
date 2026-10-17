@@ -58,6 +58,7 @@
 #include "core/libraries/np/np_score/np_score.h"
 #include "core/libraries/np/np_signaling/np_signaling.h"
 #include "core/libraries/np/np_tus.h"
+#include "core/libraries/np/np_utility.h"
 #include "core/libraries/np/np_web_api/np_web_api.h"
 #include "core/libraries/np/np_web_api2/np_web_api2.h"
 
@@ -517,6 +518,7 @@ extern "C" __attribute__((visibility("default"))) int psport_net_init(const PsNe
     Libraries::Np::NpScore::RegisterLib(p_sym);
     Libraries::Np::NpSignaling::RegisterLib(p_sym);
     Libraries::Np::NpTus::RegisterLib(p_sym);
+    Libraries::Np::NpUtility::RegisterLib(p_sym);
     Libraries::Np::NpWebApi::RegisterLib(p_sym);
     Libraries::Np::NpWebApi2::RegisterLib(p_sym);
     std::printf("Online: %zu network and PSN functions\n", s_symbols.size());

@@ -87,7 +87,7 @@ extern const Title BloodborneTitle = {
     .pfn_patch_image = PsGameMenu::PatchImage,
     .pfn_before_present = PsGameMenu::Poll,
     .online = {.sz_game_server = "https://ss4.scej-network.jp:20443",
-               .sz_community_server = "https://thehuntersdream.com",
+               .sz_community_server = "http://play.seamlesshunt.com",
                .community_api_port = 18671,
                .sz_summon_route = "/summon_messenger"},
     .quirks = Quirks,

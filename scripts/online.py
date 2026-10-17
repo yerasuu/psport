@@ -3,8 +3,9 @@
 """Co-op addresses (PS_ONLINE=1): the game's own server, the shadNet server and its WebAPI.
 
 From run.py and the launcher of the Windows port of bbport. Messages,
-bloodstains and ghosts come from the community game server (The Hunter's Dream by default);
-bells and summons go through a shadNet server (shadPS4's public one by default).
+bloodstains and ghosts come from the community game server (the title's, Seamless Hunt's for
+Bloodborne); bells and summons go through a shadNet server (Seamless Hunt's by default:
+shadPS4's public one, srv.shadps4.net, accepts only shadPS4's own builds since 2026-10-12).
 
 `online.py overrides --user DIR --title-online TEXT` writes DIR/host_overrides.json for this
 launch and prints its path for SHADPS4_HTTP_HOST_OVERRIDES_JSON. TEXT is what
@@ -25,8 +26,13 @@ import urllib.request
 
 # The launcher's default (it is built around Bloodborne); a launch takes its title's
 # (psport --online-overrides).
-COMMUNITY_SERVER = 'https://thehuntersdream.com'
-SHADNET_SERVER = 'srv.shadps4.net:31313'
+COMMUNITY_SERVER = 'http://play.seamlesshunt.com'
+SHADNET_SERVER = 'play.seamlesshunt.com:31313'
+# Saved launcher settings that still hold these earlier defaults get the current ones.
+OLD_DEFAULTS = {
+    'online_server': ('srv.shadps4.net:31313',),
+    'online_community': ('https://thehuntersdream.com',),
+}
 
 
 def title_online(text):
@@ -35,11 +41,13 @@ def title_online(text):
 
 
 def community_address(value, default=COMMUNITY_SERVER):
-    """The game server as https://host (the game picks the ports), The Hunter's Dream by default."""
+    """The game server as scheme://host (the game picks the ports), the default's when unset.
+    Without a scheme: https, but the default's own for its host (Seamless Hunt serves plain http)."""
     value = str(value or '').strip() or default
     scheme, _sep, rest = value.rpartition('://')
     host = rest.split('/')[0].split(':')[0]
-    return f'{scheme or "https"}://{host}'
+    default_scheme, _sep, default_host = default.partition('://')
+    return f'{scheme or (default_scheme if host == default_host else "https")}://{host}'
 
 
 def webapi_address(server):

@@ -515,7 +515,7 @@ servers a game talks to are its title's data (`Game::Title` `online`), never the
 | Field | Bloodborne |
 |---|---|
 | `sz_game_server` (the game's own server, as it addresses it) | `https://ss4.scej-network.jp:20443` |
-| `sz_community_server` (answers for it on the same port; `PS_COMMUNITY_SERVER` names another) | `https://thehuntersdream.com` |
+| `sz_community_server` (answers for it on the same port; `PS_COMMUNITY_SERVER` names another) | `http://play.seamlesshunt.com` (Seamless Hunt) |
 | `community_api_port` (where the community server sends the game for its API) | `18671` |
 | `sz_summon_route` (the path of its summon calls on that API) | `/summon_messenger` |
 
@@ -527,6 +527,17 @@ is loaded; a title without online servers prints nothing. `run.sh` passes that t
 on the community API port to the shadNet WebAPI (`PS_SHADNET_WEBAPI`) when that answers the summon
 probe. A title without servers gets an empty file, so a file another game's launch left is not
 used; `user/host_overrides.custom.json`, when present, is used as it is for any game.
+
+The shadNet server is the core's, the same for every game: `PS_SHADNET_SERVER`, by default
+`play.seamlesshunt.com:31313` (Seamless Hunt; `run.sh`, `scripts/online.py`, the launcher), and its
+WebAPI `http://<host>:31315` unless `PS_SHADNET_WEBAPI` names another. shadPS4's public server
+(`srv.shadps4.net`) accepts only shadPS4's own builds since 2026-10-12; the launcher replaces that
+earlier default, and The Hunter's Dream as game server, in saved settings (`online.OLD_DEFAULTS`).
+After login the client reports its version (command 13, `psport 0-unstable-<commit> (...)` from
+`gpu/net/CMakeLists.txt`; `PS_SHADNET_CLIENT_VERSION` overrides it). A server that refuses it
+(notification 19) ends the login: shadNet stays off for the session, without reconnects, and the
+player is told; one that never answers counts as accepting after 15 s. Notification 18 (a service
+refused, e.g. matchmaking full) is shown to the player.
 
 The module learns the summon route through `PsNetHost` `sz_summon_route` (`PSPORT_NET_ABI_VERSION`
 2; a runtime and a module of different versions refuse each other and the game stays offline). The

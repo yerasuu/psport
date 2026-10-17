@@ -132,8 +132,8 @@ DEFAULTS = {
     "gpu_profile": False,
     "vk_validation": False,
     "extra_env": "",
-    # Online play (Online page, the online module gpu/net): off by default; shadPS4's public
-    # shadNet server and The Hunter's Dream.
+    # Online play (Online page, the online module gpu/net): off by default; Seamless Hunt's
+    # shadNet server and game server.
     "online": False,
     "online_community": online.COMMUNITY_SERVER,
     "online_server": online.SHADNET_SERVER,
@@ -168,6 +168,11 @@ def load_settings():
         settings.update(json.loads(source.read_text(encoding='utf-8')))
     except (OSError, ValueError):
         pass
+    # shadPS4's public shadNet accepts only shadPS4's own builds since 2026-10-12: addresses saved
+    # as the earlier defaults become the current ones.
+    for key, old_values in online.OLD_DEFAULTS.items():
+        if str(settings.get(key, '')).strip() in old_values:
+            settings[key] = DEFAULTS[key]
     return settings
 
 
@@ -1167,9 +1172,9 @@ class LauncherWindow(Adw.ApplicationWindow):
         s = self.settings
         page = Adw.PreferencesPage()
         play = Adw.PreferencesGroup(description=tr(
-            "Сообщения, пятна крови и призраки приходят с The Hunter's Dream; колокола и призывы "
-            "идут через сервер shadNet. Игра по сети совместима с версией для Windows: нужны версия "
-            "игры 1.09 и тот же сервер"))
+            "Сообщения, пятна крови и призраки приходят с игрового сервера; колокола и призывы "
+            "идут через сервер shadNet. По умолчанию оба — Seamless Hunt. Игра по сети совместима "
+            "с версией для Windows: нужны версия игры 1.09 и тот же сервер"))
         self.online_row = Adw.SwitchRow(title=tr("Играть онлайн"),
                                         subtitle=tr("Выключено: игра остаётся офлайн, как раньше"),
                                         active=s["online"])
@@ -1186,7 +1191,8 @@ class LauncherWindow(Adw.ApplicationWindow):
 
         coop = Adw.PreferencesGroup(
             title=tr("Сервер кооператива (колокола и призывы)"),
-            description=tr("srv.shadps4.net:31313 — публичный сервер shadPS4. Для частного сервера "
+            description=tr("play.seamlesshunt.com:31313 — сервер Seamless Hunt. Публичный сервер "
+                           "shadPS4 принимает только сборки shadPS4. Для частного сервера "
                            "укажите host:port от его владельца. WebAPI: оставьте пустым, тогда "
                            "берётся адрес сервера с портом 31315"))
         self.server_row = Adw.EntryRow(title=tr("Адрес сервера"), text=s["online_server"])
@@ -1198,7 +1204,7 @@ class LauncherWindow(Adw.ApplicationWindow):
         account = Adw.PreferencesGroup(
             title=tr("Учётная запись"),
             description=tr("Имя учётной записи shadNet, не email. Зарегистрируйтесь на "
-                           "shadnet.shadps4.net или спросите владельца частного сервера. Пароль "
+                           "seamlesshunt.com или спросите владельца частного сервера. Пароль "
                            "хранится на этом компьютере вместе с настройками лаунчера"))
         self.npid_row = Adw.EntryRow(title=tr("Online ID (NPID)"), text=s["online_npid"])
         self.password_row = Adw.PasswordEntryRow(title=tr("Пароль"), text=s["online_password"])
