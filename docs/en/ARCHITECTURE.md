@@ -535,6 +535,7 @@ servers a game talks to are its title's data (`Game::Title` `online`), never the
 | `sz_community_server` (answers for it on the same port; `PS_COMMUNITY_SERVER` names another) | `http://play.seamlesshunt.com` (Seamless Hunt) |
 | `community_api_port` (where the community server sends the game for its API) | `18671` |
 | `sz_summon_route` (the path of its summon calls on that API) | `/summon_messenger` |
+| `extension` (its own part of the online module, below) | `bbsc` (BBSC, Bloodborne's seamless co-op), switch `PS_BBSC` |
 
 `psport --online-overrides (--game <dir> | --title <TITLE_ID>)` prints them as `key=value` lines
 (`game_server`, `community_server`, `community_api_port`, `summon_route`) and exits before any game
@@ -578,6 +579,17 @@ before the profile's), `psport_gpu_overlay_banner` (a line over the game) and
 not answer, is declared there too (`sz_local_server`, `sz_local_switch`, `sz_status_path`) and
 printed by `--online-overrides` (`extension`, `extension_switch`, `local_server`,
 `local_server_args`, `local_switch`, `status_path`).
+
+Bloodborne's extension is BBSC, its seamless co-op (`gpu/games/bloodborne/net/`: BBSC's own files
+under `core/` and `imgui/`, unchanged but for `Core::Bbsc::Started`, and `bbsc_glue.cpp`). Started
+(`PS_BBSC=1`), it turns on BBSC's default switches (`SHADPS4_BBSC_*`, `SHADPS4_BLOODBORNE_*`, listed
+in `core/bbsc_persistence.h`; `=0` turns one off) and the P2P relay; at `psport_net_image_ready` it
+keeps the code writable, gives its cinematic camera (F1) the window's events and installs its hooks
+(through `Core::InstallGuestCodeHook`, `gpu/net/include/core/cpu_patches.h`, which is
+`PsGuestCode::InstallHook`) and byte patches, each checked against CUSA03173 01.09's bytes. The
+network side of BBSC is in the inherited libraries: its signaling packets (`np_signaling_bbsc.h`,
+handed to its code only while it runs), the room replay, the summon broker's connect-first area,
+stale record cleanup and fast sign in `http.cpp`.
 
 ## Other parts
 

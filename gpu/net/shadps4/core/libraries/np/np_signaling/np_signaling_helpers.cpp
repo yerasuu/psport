@@ -19,6 +19,8 @@
 #include "core/libraries/np/np_signaling/np_signaling_helpers.h"
 #include "core/libraries/np/np_signaling/np_signaling_state.h"
 #include "core/libraries/np/np_signaling/np_signaling_stubs.h"
+#include "core/bbsc_persistence.h"
+#include "core/bloodborne_re.h"
 
 namespace Libraries::Np::NpSignaling::Helpers {
 
@@ -370,6 +372,22 @@ static void ReceiveThreadMain() {
             pong.conn_id = ping.conn_id;
             pong.orig_ts_us = ping.send_ts_us;
             Stubs::SignalingSendTo(&pong, sizeof(pong), from_addr, from_port);
+            continue;
+        }
+        // psport: BBSC's packets reach its code only while Bloodborne's title runs it.
+        if (Core::Bbsc::Started() &&
+            (nbytes == sizeof(SignalingBbscFollow) || nbytes == kSignalingBbscFollowV1Size) &&
+            type == static_cast<u8>(SignalingPacketType::BbscFollow)) {
+            SignalingBbscFollow follow{}; // lamp_point stays -1 for an older build's packet
+            std::memcpy(&follow, buf, static_cast<size_t>(nbytes));
+            Core::Bloodborne::OnBbscHostFollowPacket(follow.packed_map, follow.x, follow.y,
+                                                     follow.z, follow.heading, follow.sequence,
+                                                     follow.lamp_point);
+            continue;
+        }
+        if (Core::Bbsc::Started() && nbytes == sizeof(SignalingBbscWorldFlags) &&
+            type == static_cast<u8>(SignalingPacketType::BbscWorldFlags)) {
+            Core::Bloodborne::OnBbscWorldFlagsPacket(buf, static_cast<u32>(nbytes));
             continue;
         }
         if (nbytes == sizeof(SignalingEchoPong) &&

@@ -30,7 +30,7 @@
 #include "common/elf_info.h"
 #include "common/types.h"
 #include "core/emulator_settings.h"
-#include "core/bloodborne_re.h"
+#include "core/cpu_patches.h"
 #include "core/debugger.h"
 #include "core/libraries/kernel/kernel.h"
 #include "core/libraries/kernel/memory.h"
@@ -291,7 +291,7 @@ int posix_pthread_join(PthreadT p_thread, void** pp_ret) {
 
 } // namespace Libraries::Kernel
 
-// ---- User and system service, debugger, Bloodborne helpers -------------------------------------
+// ---- User and system service, debugger, guest code hooks ------------------------------------------
 
 namespace Libraries::UserService {
 s32 PS4_SYSV_ABI sceUserServiceGetInitialUser(int* p_user_id) {
@@ -320,29 +320,37 @@ s32 GetCurrentPid() {
 }
 } // namespace Core::Debugger
 
-namespace Core::Bloodborne {
+
+namespace Core {
 namespace {
-std::mutex s_placement_mutex;
-std::optional<std::string> s_placement;
+/// A hook's own tag and handler: PsGuestCode passes the entry as the tag.
+struct HookEntry {
+    std::uint64_t tag;
+    GuestCodeHook pfn_hook;
+};
+std::mutex s_hook_mutex;
+std::deque<HookEntry> s_hook_entries;
+
+void DispatchHook(std::uint64_t tag, PsGuestCode::Registers* p_registers) {
+    const auto* p_entry = reinterpret_cast<const HookEntry*>(tag);
+    p_entry->pfn_hook(p_entry->tag, p_registers);
+}
 } // namespace
-std::optional<std::string> GetSeamlessHostPlacementHeader() {
-    std::scoped_lock lock{s_placement_mutex};
-    return s_placement;
-}
-bool SetSeamlessHostPlacementHeader(std::string_view value) {
-    if (value.empty() || value.size() > 4096) {
-        return false;
+
+bool InstallGuestCodeHook(void* p_address, std::span<const std::uint8_t> expected_instructions, std::uint64_t tag,
+                          GuestCodeHook pfn_hook, const std::uint8_t* p_skip_flag) {
+    const HookEntry* p_entry = nullptr;
+    {
+        std::scoped_lock lock{s_hook_mutex};
+        p_entry = &s_hook_entries.emplace_back(HookEntry{tag, pfn_hook});
     }
-    std::scoped_lock lock{s_placement_mutex};
-    s_placement = std::string{value};
-    return true;
+    char sz_name[48];
+    std::snprintf(sz_name, sizeof(sz_name), "online extension %#llx", static_cast<unsigned long long>(tag));
+    return PsGuestCode::InstallHook(sz_name, reinterpret_cast<std::uint64_t>(p_address), expected_instructions,
+                                    reinterpret_cast<std::uint64_t>(p_entry), DispatchHook,
+                                    const_cast<std::uint8_t*>(p_skip_flag)) == PsGuestCode::Error::None;
 }
-void ClearSeamlessHostPlacementHeader() {
-    std::scoped_lock lock{s_placement_mutex};
-    s_placement.reset();
-}
-void TraceMatching2LeaveRoom(std::uintptr_t, std::uint64_t) {}
-} // namespace Core::Bloodborne
+} // namespace Core
 
 // ---- Notifications (log only for now) ------------------------------------------------------------
 

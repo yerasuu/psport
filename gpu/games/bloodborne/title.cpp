@@ -117,7 +117,8 @@ extern const Title BloodborneTitle = {
     .online = {.sz_game_server = "https://ss4.scej-network.jp:20443",
                .sz_community_server = "http://play.seamlesshunt.com",
                .community_api_port = 18671,
-               .sz_summon_route = "/summon_messenger"},
+               .sz_summon_route = "/summon_messenger",
+               .extension = {.sz_name = "bbsc", .sz_switch = "PS_BBSC"}},
     .quirks = Quirks,
     .p_profile = &BloodborneProfile,
 };
