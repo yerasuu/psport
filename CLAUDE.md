@@ -76,6 +76,9 @@ converted area by area in its own commits; new and touched code follows this now
 - Branches: `main` (what users get, a tag per version), `develop` (integration),
   `<type>/<kb id>-<topic>` per task; into `develop` by rebase, squash and fast-forward; into
   `main` only after a clean night run. The user pushes.
+- Once a branch is integrated and its task finished, clean it up as part of the integration: remove
+  its worktree (`git worktree remove`) and delete the branch (`git branch -d`), after checking its
+  content is in `develop`. Never leave integrated branches or worktrees behind.
 - One useful commit per task, carrying its docs, FORK.md rows and comments; always Conventional
   Commits `type(area): subject` (imperative English, ~50 characters, 72 at most; type and area from
   the board tags: psport, loader, kernel, system, gpu, audio, video, input, net, regress-test,
