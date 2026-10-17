@@ -17,7 +17,7 @@ let
 in
 pkgs.stdenv.mkDerivation {
   pname = "psport";
-  version = "0-unstable";
+  version = lib.fileContents ../VERSION;
   # Tracked files only: the checkout also holds builds, profiles (no PGO here) and captures.
   src = lib.fileset.toSource {
     inherit root;

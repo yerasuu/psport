@@ -611,8 +611,8 @@ The shadNet server is the core's, the same for every game: `PS_SHADNET_SERVER`, 
 WebAPI `http://<host>:31315` unless `PS_SHADNET_WEBAPI` names another. shadPS4's public server
 (`srv.shadps4.net`) accepts only shadPS4's own builds since 2026-10-12; the launcher replaces that
 earlier default, and The Hunter's Dream as game server, in saved settings (`online.OLD_DEFAULTS`).
-After login the client reports its version (command 13, `psport 0-unstable-<commit> (...)` from
-`gpu/net/CMakeLists.txt`; `PS_SHADNET_CLIENT_VERSION` overrides it). A server that refuses it
+After login the client reports its version (command 13, `psport <VERSION>[-<commit>] (...)` from
+`VERSION` through `gpu/net/CMakeLists.txt`, the commit only between releases; `PS_SHADNET_CLIENT_VERSION` overrides it). A server that refuses it
 (notification 19) ends the login: shadNet stays off for the session, without reconnects, and the
 player is told; one that never answers counts as accepting after 15 s. Notification 18 (a service
 refused, e.g. matchmaking full) is shown to the player.

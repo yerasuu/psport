@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd -- "$(dirname -- "$0")"
+# VERSION is the one version source (gpu/net/CMakeLists.txt and packaging/port.nix read it too):
+# 0-unstable between releases, X.Y.Z for a release, which builds only with its notes written.
+version=$(<VERSION)
+if [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    if [[ ! -s tag-changelog/v$version.md ]]; then
+        echo "psport $version is a release: write its notes in tag-changelog/v$version.md first." >&2; exit 1
+    fi
+elif [[ $version != 0-unstable ]]; then
+    echo "VERSION holds '$version': expected X.Y.Z or 0-unstable." >&2; exit 1
+fi
 # bbport, and psport releases before the rename, read BB_* names: launchers written for them keep
 # working for a transition. Each one set is copied to its PS_* name unless that is set too.
 deprecated=()

@@ -24,6 +24,13 @@ jobs:
       - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
         with:
           extra_nix_config: experimental-features = nix-command
+      # build.sh then requires the version's notes, tag-changelog/<tag>.md, which the tag's message carries.
+      - name: Check the version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version=$(<VERSION)
+          if [[ v$version != "$TAG" ]]; then echo "::error::$TAG does not match VERSION ($version)"; exit 1; fi
       - name: Build
         run: nix-build packaging/port.nix --out-link result
       # Before anything is published, so that a bundle that fails leaves no release half done.
