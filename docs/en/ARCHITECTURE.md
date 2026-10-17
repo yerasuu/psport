@@ -483,7 +483,7 @@ builds.
 ### Occlusion queries
 
 A ZPASS_DONE event (the game's occlusion query) has the PS4's depth blocks write their running
-sample counts. With `PS_OCCLUSION_QUERIES=1` they are counted by Vulkan occlusion queries
+sample counts. By default they are counted by Vulkan occlusion queries
 (`renderer_vulkan/vk_occlusion.*`): a chain of query segments, one always active once the game
 has used them, cut at every event and at every boundary a query may not span (a render pass, a
 command buffer: `Scheduler::CarriedScope`). Outside a render pass one dispatch
@@ -492,10 +492,10 @@ pending event's total through the game memory's device address, before any later
 (`PS_OCCLUSION_LABEL_ORDER=0` lets labels go ahead); the valid bits stay clear until then. Each
 segment is first scaled by its render pass's factor (8.8 fixed point, from the rasterizer's
 `target_scale`), so a pass the upscaler draws smaller (the reduced scene) or larger (the
-output-size UI) counts as at the game's resolution. `PS_OCCLUSION_QUERIES=0`, and the default
-while `OCCLUSION_QUERIES_BY_DEFAULT` (`Rasterizer::OcclusionTranslated`) is false, keep the fixed
-sequence written when the event is decoded (everything visible); `PS_PM4_SELFTEST=1` turns the
-queries on to check them. Diagnostics: `PS_OCCLUSION_TRACE=N` (the first N events),
+output-size UI) counts as at the game's resolution. `PS_OCCLUSION_QUERIES=0` keeps the fixed
+sequence written when the event is decoded (everything visible); the default is one constant,
+`OCCLUSION_QUERIES_BY_DEFAULT` (`Rasterizer::OcclusionTranslated`). On by default since 13 titles ran
+with no regression and Bloodborne gained 8 % (the game culls by the real counts). Diagnostics: `PS_OCCLUSION_TRACE=N` (the first N events),
 `PS_OCCLUSION_SAMPLES=N` (the samples the game read, N queries), `PS_OCCLUSION_READ_TRACE=1` (when
 the game first reads its counters) and the 5-second line of `PS_FRAME_STATS`.
 

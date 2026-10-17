@@ -233,7 +233,7 @@ bool Rasterizer::OcclusionTranslated() {
     // the game read 1/4 or 1/9 of the PS4's counts, and a lamp's glow in the cathedral at 640x360
     // flashed grey. Off by default until night runs on several titles confirm the scaled counts.
     // The PM4 self-test (PS_PM4_SELFTEST=1) checks them, so it turns them on.
-    constexpr bool OCCLUSION_QUERIES_BY_DEFAULT = false;
+    constexpr bool OCCLUSION_QUERIES_BY_DEFAULT = true;
     static const bool enabled = [] {
         const char* env = std::getenv("PS_OCCLUSION_QUERIES");
         const char* selftest = std::getenv("PS_PM4_SELFTEST");
