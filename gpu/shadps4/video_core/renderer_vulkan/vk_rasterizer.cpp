@@ -221,16 +221,21 @@ bool Rasterizer::WriteDataOnGpu(VAddr address, const void* data, u32 size) {
 }
 
 bool Rasterizer::OcclusionTranslated() {
-    // PS_OCCLUSION_QUERIES=1 (opt-in): Vulkan occlusion queries. Else the counters stay the fixed
-    // sequence written when decoded (everything visible). With an upscaler
-    // the scene is drawn smaller and jittered: a light's sub-pixel test shape passed samples in
-    // one frame and none in the next, and its glow flashed grey over the whole frame (a lamp in
-    // the cathedral at 640x360). Counting has to become stable against that first.
+    // Vulkan occlusion queries with PS_OCCLUSION_QUERIES=1, the fixed sequence written when
+    // decoded (everything visible) with 0; unset, OCCLUSION_QUERIES_BY_DEFAULT. A pass drawn at
+    // another size than the game's target (the reduced scene with an upscaler, the output-size UI)
+    // has its samples scaled to the game's resolution (OcclusionQueries::SetPassScale): unscaled,
+    // the game read 1/4 or 1/9 of the PS4's counts, and a lamp's glow in the cathedral at 640x360
+    // flashed grey. Off by default until night runs on several titles confirm the scaled counts.
     // The PM4 self-test (PS_PM4_SELFTEST=1) checks them, so it turns them on.
+    constexpr bool OCCLUSION_QUERIES_BY_DEFAULT = false;
     static const bool enabled = [] {
         const char* env = std::getenv("PS_OCCLUSION_QUERIES");
         const char* selftest = std::getenv("PS_PM4_SELFTEST");
-        return (env && env[0] == '1') || (selftest && selftest[0] == '1');
+        if (selftest && selftest[0] == '1') {
+            return true;
+        }
+        return env && env[0] != '\0' ? env[0] == '1' : OCCLUSION_QUERIES_BY_DEFAULT;
     }();
     // Experiment bit 4 of PS_TOGGLE_FILE: the fixed sequence while the game runs (A/B).
     return enabled && !PsToggle::Experiment(4);
@@ -1923,6 +1928,9 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
     }
     UpdateDynamicState(pipeline, is_indexed);
     MarkPass(pipeline, state);
+    if (occlusion) {
+        occlusion->SetPassScale(target_scale[0] * target_scale[1]); // samples at the game's size
+    }
     scheduler.BeginRendering(state);
 
     const auto& vs_info = pipeline->GetStage(Shader::SwStage::Vertex);
@@ -2079,6 +2087,9 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
     }
     UpdateDynamicState(pipeline, is_indexed);
     MarkPass(pipeline, state);
+    if (occlusion) {
+        occlusion->SetPassScale(target_scale[0] * target_scale[1]); // samples at the game's size
+    }
     scheduler.BeginRendering(state);
 
     ASSERT(stride == (is_indexed ? sizeof(VkDrawIndexedIndirectCommand)

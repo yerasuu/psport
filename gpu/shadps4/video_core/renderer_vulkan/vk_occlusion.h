@@ -12,7 +12,9 @@
 // CarriedScope). An event remembers how many segments ended before it. Where no render pass is
 // open (the next boundary), the segments' results are copied and one dispatch
 // (occlusion_resolve.comp) adds them up in order, writing each pending event's running total into
-// the game's memory through its device address. Results land a little after the PS4 would write
+// the game's memory through its device address. Each segment's samples are scaled by its render
+// pass's factor first, so that passes the upscaler draws at another size than the game's target
+// count as the PS4 would have. Results land a little after the PS4 would write
 // them; until then their valid bits are clear, which the game checks as on the PS4.
 #pragma once
 
@@ -62,6 +64,11 @@ public:
     /// whether the event's results were on the CPU by then. False: not such a page.
     bool OnAccess(VAddr va_guest, u64 rip, bool is_write, bool is_gpu_thread);
 
+    /// The render pass about to begin, as an area relative to the game's target (the rasterizer's
+    /// target_scale.x * .y: a reduced scene 1/4 or 1/9, the output-size UI 4): the samples counted
+    /// in it are scaled to the game's resolution, as the PS4 would have counted them.
+    void SetPassScale(float area_scale);
+
     void Suspend(bool is_inside_render_pass) override;
     void Resume(bool is_inside_render_pass) override;
 
@@ -105,6 +112,8 @@ private:
     vk::UniquePipelineLayout m_pipeline_layout;
     vk::UniquePipeline m_pipeline;
     std::vector<Pending> m_pending;
+    u32 m_pass_scale = 256;                   ///< the current pass's sample factor, 8.8 fixed point
+    std::array<u32, NumSlots> m_slot_scale{}; ///< per query slot: its pass's factor
     u64 m_begun = 0;       ///< segments begun (the next one uses slot begun % NumSlots)
     u64 m_resolved = 0;    ///< segments added to the total
     u64 m_reset_until = 0; ///< slots below it (absolute) are reset and unused

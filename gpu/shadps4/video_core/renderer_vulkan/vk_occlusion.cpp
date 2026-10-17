@@ -60,7 +60,7 @@ OcclusionQueries::OcclusionQueries(const Instance& instance_, Scheduler& schedul
                                                   "Occlusion results");
     m_total = std::make_unique<VideoCore::Buffer>(m_instance, 0, 256, VideoCore::MemoryType::DeviceLocal,
                                                 "Occlusion total");
-    std::array<vk::DescriptorSetLayoutBinding, 3> bindings{};
+    std::array<vk::DescriptorSetLayoutBinding, 4> bindings{};
     for (u32 i = 0; i < bindings.size(); ++i) {
         bindings[i] = {.binding = i,
                        .descriptorType = vk::DescriptorType::eStorageBuffer,
@@ -108,12 +108,24 @@ void OcclusionQueries::BeginSegment(bool is_inside_render_pass) {
     }
     const u32 slot = static_cast<u32>(m_begun % NumSlots);
     const bool is_precise = m_instance.IsOcclusionQueryPrecise();
+    m_slot_scale[slot] = is_inside_render_pass ? m_pass_scale : 256;
     m_scheduler.Record([pool = *m_pool, slot, is_precise](vk::CommandBuffer cmdbuf) {
         cmdbuf.beginQuery(pool, slot,
                           is_precise ? vk::QueryControlFlagBits::ePrecise : vk::QueryControlFlags{});
     });
     ++m_begun;
     m_is_active = true;
+}
+
+void OcclusionQueries::SetPassScale(float area_scale) {
+    // 8.8 fixed point; the reduced scene 1/9 -> 2304, the output-size UI 4 -> 64.
+    const u32 scale = area_scale > 0.0f ? u32(256.0f / area_scale + 0.5f) : 256u;
+    // Asked before every draw's pass and written by this thread only: the lock only on a change.
+    if (scale == m_pass_scale) {
+        return;
+    }
+    std::scoped_lock lk{m_mutex};
+    m_pass_scale = scale;
 }
 
 void OcclusionQueries::EndSegment() {
@@ -169,10 +181,17 @@ void OcclusionQueries::Resolve() {
     const u64 cb_entries = entries.size() * sizeof(EventEntry);
     const u64 off_entries =
         stream.Copy(entries.data(), cb_entries, m_instance.StorageMinAlignment());
+    // The segments' factors, in the order the shader adds them (from slot `first`, wrapping).
+    std::vector<u32> scales(std::max<u32>(c_segments, 1), 256u);
+    for (u32 i = 0; i < c_segments; ++i) {
+        scales[i] = m_slot_scale[(first + i) % NumSlots];
+    }
+    const u64 cb_scales = scales.size() * sizeof(u32);
+    const u64 off_scales = stream.Copy(scales.data(), cb_scales, m_instance.StorageMinAlignment());
     const bool should_clear_total = !m_is_total_cleared;
     m_is_total_cleared = true;
     m_scheduler.Record([this, first, c_segments, c_events, should_clear_total, stream = stream.Handle(),
-                      off_entries, cb_entries](vk::CommandBuffer cmdbuf) {
+                      off_entries, cb_entries, off_scales, cb_scales](vk::CommandBuffer cmdbuf) {
         if (should_clear_total) {
             cmdbuf.fillBuffer(m_total->Handle(), 0, 8, 0);
         }
@@ -189,12 +208,13 @@ void OcclusionQueries::Resolve() {
                                             vk::QueryResultFlagBits::eWait);
         }
         FullBarrier(cmdbuf);
-        const std::array<vk::DescriptorBufferInfo, 3> infos{{
+        const std::array<vk::DescriptorBufferInfo, 4> infos{{
             {m_results->Handle(), 0, NumSlots * sizeof(u64)},
             {m_total->Handle(), 0, 8},
             {stream, off_entries, cb_entries},
+            {stream, off_scales, cb_scales},
         }};
-        std::array<vk::WriteDescriptorSet, 3> writes{};
+        std::array<vk::WriteDescriptorSet, 4> writes{};
         for (u32 i = 0; i < writes.size(); ++i) {
             writes[i] = {.dstBinding = i,
                          .descriptorCount = 1,
@@ -312,6 +332,16 @@ void OcclusionQueries::Event(VAddr va_guest, u32 pairs) {
                 samples += (end & ~Valid) - (begin & ~Valid);
             }
             ++(!is_valid ? m_c_queries_invalid : samples ? m_c_queries_passed : m_c_queries_hidden);
+            // PS_OCCLUSION_SAMPLES=N (diagnostics): the samples the game read, N queries.
+            static u64 s_c_sample_prints = [] {
+                const char* sz_env = std::getenv("PS_OCCLUSION_SAMPLES");
+                return sz_env ? std::strtoull(sz_env, nullptr, 10) : 0ull;
+            }();
+            if (s_c_sample_prints != 0 && is_valid) {
+                --s_c_sample_prints;
+                std::printf("Occlusion samples: %#llx %llu\n", (unsigned long long)va_guest,
+                            (unsigned long long)samples);
+            }
         }
     }
     m_pending.push_back({buffer->BufferDeviceAddress() + offset, pairs, m_begun, va_guest, m_c_events + 1});

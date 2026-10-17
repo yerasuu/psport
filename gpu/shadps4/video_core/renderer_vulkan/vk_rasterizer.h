@@ -214,9 +214,9 @@ public:
     bool WriteLabelOnGpu(VAddr address, u64 value, u32 num_bytes);
     /// psport: a ZPASS_DONE event (the game's occlusion query) at `address` for `pairs` depth
     /// blocks, in stream order (vk_occlusion.h). False when it is left to the caller
-    /// (PS_OCCLUSION_QUERIES off).
+    /// (occlusion queries off).
     bool OcclusionEvent(VAddr address, u32 pairs);
-    /// Whether ZPASS_DONE events go to OcclusionEvent (PS_OCCLUSION_QUERIES=1).
+    /// Whether ZPASS_DONE events go to OcclusionEvent (PS_OCCLUSION_QUERIES, else the default).
     static bool OcclusionTranslated();
     /// ZPASS_DONE events translated so far.
     u64 OcclusionEvents() const;
