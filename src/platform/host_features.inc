@@ -79,6 +79,12 @@ FEATURE_HOST(audio, LINUX, IMPLEMENTED, "SDL3 (runtime_audio.c); PS_AUDIO=none r
 FEATURE(input, io, "gamepads, keyboard and mouse")
 FEATURE_HOST(input, LINUX, IMPLEMENTED, "SDL3 (runtime_pad.c, runtime_keyboard.c, runtime_mouse.c)", "#540")
 
+FEATURE(input_sensors, io, "the gamepad's motion sensors (gyroscope and accelerometer) as the DualShock 4's orientation, "
+                           "acceleration and angular velocity")
+FEATURE_HOST(input_sensors, LINUX, IMPLEMENTED,
+             "SDL3 gamepad sensors (runtime_pad_sensors.c); pads without them get the motion emulation or rest",
+             "#550")
+
 FEATURE(window, io, "the game's window and its Vulkan surface")
 FEATURE_HOST(window, LINUX, IMPLEMENTED, "SDL3 (gpu/shim/window.cpp)", "#540")
 

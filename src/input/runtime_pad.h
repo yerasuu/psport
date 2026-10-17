@@ -63,4 +63,16 @@ void runtime_pad_motion_from_desktop(PadData *p_pad_data, const bool *p_is_key_d
                                      int is_captured);
 void runtime_pad_motion_report(PadData *p_pad_data, float dt);
 void runtime_pad_replay_sample(PadData *p_pad_data);
+/* The pad's own motion sensors (runtime_pad_sensors.c). open: each time another pad (or none) is
+ * opened, which enables its sensors; read: once per sample with the seconds since the previous one,
+ * 1 when the sensors filled the motion fields (the emulation then stays out); finish last, at rest
+ * while the game has turned the reports off. Called under the pad's lock. */
+void runtime_pad_sensors_open(SDL_Gamepad *p_sdl_gamepad);
+int runtime_pad_sensors_read(PadData *p_pad_data, float dt);
+void runtime_pad_sensors_finish(PadData *p_pad_data);
+void runtime_pad_sensors_set_reporting(int is_enabled);
+void runtime_pad_sensors_set_tilt_correction(int is_enabled);
+void runtime_pad_sensors_set_deadband(int is_enabled);
+void runtime_pad_sensors_reset_orientation(void);
+void runtime_pad_sensors_report(void);
 #endif

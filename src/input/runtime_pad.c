@@ -226,7 +226,11 @@ static SDL_Gamepad *current_gamepad(void) {
         g_runtime_pad_sdl_ready = !runtime_env_flag("PS_PAD_HOST",1) ? -1 : SDL_WasInit(SDL_INIT_GAMEPAD) ? 1 : SDL_InitSubSystem(SDL_INIT_GAMEPAD) ? 1 : -1;
     }
     if (g_runtime_pad_sdl_ready<0) return NULL;
-    if (s_p_gamepad && !SDL_GamepadConnected(s_p_gamepad)) { SDL_CloseGamepad(s_p_gamepad); s_p_gamepad=NULL; }
+    if (s_p_gamepad && !SDL_GamepadConnected(s_p_gamepad)) {
+        SDL_CloseGamepad(s_p_gamepad);
+        s_p_gamepad=NULL;
+        runtime_pad_sensors_open(NULL);
+    }
     const char *sz_want=preferred_gamepad();
     const uint64_t now=now_us();
     if (!s_p_gamepad || (sz_want && !s_is_on_preferred && now-s_last_scan>1000000)) {
@@ -245,6 +249,7 @@ static SDL_Gamepad *current_gamepad(void) {
                 printf("Runtime: gamepad connected: %s%s\n",SDL_GetGamepadName(s_p_gamepad),
                        !sz_want ? "" : s_is_on_preferred ? " (the chosen one)" : " (the chosen one is not connected)");
             }
+            runtime_pad_sensors_open(s_p_gamepad);
         }
         SDL_free(p_ids);
     }
@@ -690,6 +695,7 @@ static void sample_host(PadData *p_pad_data) {
     p_pad_data->timestamp=now_us();
     const float motion_dt=runtime_pad_motion_begin(p_pad_data->timestamp);
     SDL_Gamepad *p_sdl_gamepad=current_gamepad();
+    int is_real_motion=0;
     if (!s_is_bindings_ready) { load_bindings(); s_is_bindings_ready=1; psport_gpu_mouse_look_enable(s_mouse_look); }
     /* The mouse's motion and wheel since the last sample (always taken: none of it piles up while
      * the menu is open); it counts while the window holds the mouse. */
@@ -730,7 +736,8 @@ static void sample_host(PadData *p_pad_data) {
                 }
             }
         }
-        if (runtime_pad_motion_is_on()) runtime_pad_motion_from_pad(p_pad_data,p_sdl_gamepad,motion_dt);
+        is_real_motion=runtime_pad_sensors_read(p_pad_data,motion_dt);
+        if (runtime_pad_motion_is_on() && !is_real_motion) runtime_pad_motion_from_pad(p_pad_data,p_sdl_gamepad,motion_dt);
         // Back/Select on pads without a touch surface is a left-side click.
         if ((p_pad_data->buttons & BTN_TOUCHPAD) && !p_pad_data->touch_count) touch_click(p_pad_data,0);
         if (touch_right) touch_click(p_pad_data,1);
@@ -744,11 +751,12 @@ static void sample_host(PadData *p_pad_data) {
     for (int i=0;i<IN_COUNT && !is_keyboard_active;++i) is_keyboard_active=key_down(p__bool,i);
     prompt_note(p_sdl_gamepad,is_pad_active,is_keyboard_active);
     apply_keyboard(p_pad_data,p__bool); /* the bound mouse buttons too */
-    if (runtime_pad_motion_is_on()) {
+    if (runtime_pad_motion_is_on() && !is_real_motion) {
         runtime_pad_motion_from_desktop(p_pad_data,p__bool,key_down(p__bool,IN_TOUCHPAD) || key_down(p__bool,IN_TOUCHPAD_RIGHT),
                                         (s_mouse_buttons & SDL_BUTTON_LMASK)!=0,s_mouse_sensitivity,&mouse_dx,&mouse_dy,is_captured);
         runtime_pad_motion_report(p_pad_data,motion_dt);
     }
+    runtime_pad_sensors_finish(p_pad_data);
     apply_mouse_look(p_pad_data,mouse_dx,mouse_dy,p_pad_data->timestamp,is_captured);
 }
 
@@ -911,8 +919,29 @@ static ABI int32_t pad_is_remote(int32_t h_handle, uint8_t *p_remote) {
     *p_remote=0;
     return 0;
 }
-static ABI int32_t pad_ok_handle(int32_t h_handle) { return h_handle==PAD_HANDLE && s_is_opened ? 0 : ERR_INVALID_HANDLE; }
-static ABI int32_t pad_ok_handle_flag(int32_t h_handle, uint8_t flag) { (void)flag; return pad_ok_handle(h_handle); }
+static ABI int32_t pad_reset_orientation(int32_t h_handle) {
+    if (h_handle!=PAD_HANDLE || !s_is_opened) return ERR_INVALID_HANDLE;
+    pthread_mutex_lock(&s_lock);
+    runtime_pad_sensors_reset_orientation();
+    pthread_mutex_unlock(&s_lock);
+    return 0;
+}
+static int32_t set_sensor_flag(int32_t h_handle, uint8_t is_enabled, void (*pfn_set)(int)) {
+    if (h_handle!=PAD_HANDLE || !s_is_opened) return ERR_INVALID_HANDLE;
+    pthread_mutex_lock(&s_lock);
+    pfn_set(is_enabled!=0);
+    pthread_mutex_unlock(&s_lock);
+    return 0;
+}
+static ABI int32_t pad_set_motion_sensor_state(int32_t h_handle, uint8_t is_enabled) {
+    return set_sensor_flag(h_handle,is_enabled,runtime_pad_sensors_set_reporting);
+}
+static ABI int32_t pad_set_tilt_correction_state(int32_t h_handle, uint8_t is_enabled) {
+    return set_sensor_flag(h_handle,is_enabled,runtime_pad_sensors_set_tilt_correction);
+}
+static ABI int32_t pad_set_angular_velocity_deadband_state(int32_t h_handle, uint8_t is_enabled) {
+    return set_sensor_flag(h_handle,is_enabled,runtime_pad_sensors_set_deadband);
+}
 
 static const RuntimeExport s_exports[]={
     {"scePadInit",pad_init}, {"scePadOpen",pad_open}, {"scePadGetHandle",pad_get_handle}, {"scePadClose",pad_close},
@@ -920,9 +949,12 @@ static const RuntimeExport s_exports[]={
     {"scePadGetControllerInformation",pad_info}, {"scePadIsRemoteController",pad_is_remote},
     {"scePadDeviceClassGetExtendedInformation",pad_class_info}, {"scePadDeviceClassParseData",pad_class_parse}, {"scePadSetVibration",pad_vibration},
     {"scePadSetLightBar",pad_set_light_bar}, {"scePadResetLightBar",pad_reset_light_bar},
-    {"scePadResetOrientation",pad_ok_handle},
-    {"scePadSetAngularVelocityDeadbandState",pad_ok_handle_flag}, {"scePadSetTiltCorrectionState",pad_ok_handle_flag},
-    {"scePadSetMotionSensorState",pad_ok_handle_flag},
+    {"scePadResetOrientation",pad_reset_orientation},
+    {"scePadSetAngularVelocityDeadbandState",pad_set_angular_velocity_deadband_state},
+    {"scePadSetTiltCorrectionState",pad_set_tilt_correction_state}, {"scePadSetMotionSensorState",pad_set_motion_sensor_state},
 };
 uintptr_t runtime_pad_resolve(const char *sz_name) { return RUNTIME_LOOKUP(s_exports,sz_name); }
-void runtime_pad_report(void) { printf("Runtime: pad reads=%zu, gamepad=%s\n",s_c_reads,s_p_gamepad ? SDL_GetGamepadName(s_p_gamepad) : "none"); }
+void runtime_pad_report(void) {
+    printf("Runtime: pad reads=%zu, gamepad=%s\n",s_c_reads,s_p_gamepad ? SDL_GetGamepadName(s_p_gamepad) : "none");
+    runtime_pad_sensors_report();
+}

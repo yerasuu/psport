@@ -208,7 +208,7 @@ in link order (libc first) and the eboot's entry runs with `argv[0] = /app0/eboo
 | absent peripherals: USB devices (libSceUsbd), PlayStation Camera | `runtime_devices.c` |
 | Remote Play, Share Play, video recording, core dumps (none running) | `runtime_capture.c` |
 | PlayStation VR with no headset connected: Hmd, VrTracker, SocialScreen | `runtime_vr.c` |
-| input | `runtime_pad.c`, `runtime_pad_script.c` (scripted input for automated runs), `runtime_gesture.c` |
+| input | `runtime_pad.c`, `runtime_pad_sensors.c` (the pad's motion sensors), `runtime_pad_script.c` (scripted input for automated runs), `runtime_gesture.c` |
 | call report | `runtime_calls.c` |
 | quirk registry: evaluation, `PS_QUIRKS`, `--list-quirks` | `runtime_quirks.c`, `runtime_quirks.inc` |
 

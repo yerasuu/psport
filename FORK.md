@@ -299,6 +299,16 @@ unless the running title brings its own (`Game::Title` `sz_default_controls`, `p
 read through `psport_gpu_title_controls`; Bloodborne's is close to Dark Souls III on PC); the
 player's `key.<input>=` and `pad.<input>=` lines in `psport.ini` win over both. A key may be a chord,
 `key.r2=Left Shift+Mouse Left`: while its modifier is held the key's plain bindings do not count.
+A gamepad with motion sensors (DualShock 4, DualSense, Switch Pro, the Steam Deck when SDL reaches its
+own device) has them enabled when it is opened, again after each reconnection, and read at every pad
+read (`src/input/runtime_pad_sensors.c`): SDL's gamepad sensor frame is the DualShock 4's, so the
+axes pass through with the acceleration in g, and the orientation is the angular velocity integrated
+with its tilt pulled towards gravity (`scePadSetTiltCorrectionState`); yaw drifts until
+`scePadResetOrientation`. `scePadSetMotionSensorState(0)` reports the pad at rest and
+`scePadSetAngularVelocityDeadbandState` zeroes turns under 1 degree/s. The log says once per pad
+what it found (`Runtime: gamepad sensors: gyro+accel (used)`, or `none: motion emulated` / `at
+rest`), failed reads are logged at each power of two and counted at exit. Real sensors win over the
+emulation below; `PS_PAD_SENSORS=0` leaves them off.
 Games that read the sensors get them from controllers without any with `pad_motion=1` in `psport.ini`
 or `PS_PAD_MOTION=1` (`src/input/runtime_pad_motion.c`, keys and pad combinations in its header):
 the controller held sideways and aimed with the mouse or the right stick, shaken, and touchpad swipes;
