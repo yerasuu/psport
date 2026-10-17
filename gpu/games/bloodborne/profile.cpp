@@ -5,6 +5,7 @@
 #include "game_profile.h"
 #include <cstdlib>
 #include "aspect.h"
+#include "button_prompts.h"
 #include "frame_rate.h"
 #include "gnm_hooks.h"
 #include "guest_hooks.h"
@@ -111,6 +112,11 @@ extern const Profile BloodborneProfile = {
               .pfn_window_event = PsMenuPointer::WindowEvent,
               .pfn_wants_pointer = PsMenuPointer::WantsPointer,
               .pfn_filter_pad = PsMenuPointer::FilterPad},
+    .texture_substitution = {.pfn_start = PsButtonPrompts::Start,
+                             .pfn_identify = PsButtonPrompts::Identify,
+                             .pfn_is_rescanned = PsButtonPrompts::IsRescanned,
+                             .pfn_generation = PsButtonPrompts::Generation,
+                             .pfn_draw = PsButtonPrompts::Draw},
 };
 
 } // namespace Game

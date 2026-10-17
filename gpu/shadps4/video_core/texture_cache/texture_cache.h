@@ -24,6 +24,7 @@
 #include "video_core/texture_cache/image.h"
 #include "video_core/texture_cache/image_view.h"
 #include "video_core/texture_cache/sampler.h"
+#include "video_core/texture_cache/texture_substitutes.h"
 #include "video_core/texture_cache/tile_manager.h"
 
 namespace AmdGpu {
@@ -106,6 +107,11 @@ public:
 
     TileManager& GetTileManager() noexcept {
         return tile_manager;
+    }
+
+    /// psport: the profile's pictures sampled instead of some of the game's textures.
+    TextureSubstitutes& Substitutes() noexcept {
+        return m_substitutes;
     }
 
     /// Invalidates any image in the logical page range.
@@ -412,6 +418,7 @@ private:
     PageManager& tracker;
     BlitHelper blit_helper;
     TileManager tile_manager;
+    TextureSubstitutes m_substitutes;
     Common::SlotVector<Image> slot_images;
     Common::SlotVector<ImageView> slot_image_views;
     tsl::robin_map<u64, Sampler> samplers;

@@ -2484,6 +2484,7 @@ bool Rasterizer::TexturesBindableOnHelper(const Shader::Info& stage,
         }
         if (image->binding.needs_rebind || !texture_cache.IsUpToDate(image_id) ||
             scene_targets->Tracks(image->image_uid) ||
+            texture_cache.Substitutes().MayReplace(*image) ||
             (upscaler->Enabled() && upscaler->RedirectsSampled(image_id))) {
             return false;
         }
@@ -2682,6 +2683,9 @@ bool Rasterizer::BindResources(const Pipeline* pipeline) {
             helper_full = helper_partial = helper_serial = 0;
         }
     }
+
+    // psport: before the texture helper starts, which reads what this sets.
+    texture_cache.Substitutes().Update();
 
     // Bind resource buffers and textures.
     Shader::Backend::Bindings binding{};
@@ -3717,6 +3721,19 @@ void Rasterizer::BindTextures(const Shader::Info& stage, const PreparedStage* pr
                 image_id, desc, memo_entry ? &memo_entry->view_memo : nullptr, !on_helper);
             const auto binding = image.binding;
 
+            // psport: the profile's picture instead (TextureSubstitutes), never remembered in the
+            // set since the pictures change with the device in use.
+            if (!is_storage && texture_cache.Substitutes().Replaces(image)) {
+                if (const vk::ImageView substitute =
+                        texture_cache.Substitutes().View(image, desc.view_info)) {
+                    image.usage.texture = 1u;
+                    image_infos.emplace_back(VK_NULL_HANDLE, substitute,
+                                             vk::ImageLayout::eShaderReadOnlyOptimal);
+                    set_ok = false;
+                    continue;
+                }
+            }
+
             // psport: a proxied scene image sampled with normalized coordinates reads the proxy:
             // no resample to the native size (the native image is not touched).
             if (binding_proxy_ok[binding_index] && !is_storage && !binding.force_general &&
@@ -3938,12 +3955,14 @@ bool Rasterizer::BindTexturesFromSet(const Shader::Info& stage, const PreparedSt
         if (!entry.id) {
             continue;
         }
-        const auto& image = texture_cache.GetImage(entry.id);
+        auto& image = texture_cache.GetImage(entry.id);
         // Proxy entries need a current proxy; native entries of a proxied image go through
-        // BindTextures, which may sample the proxy instead.
+        // BindTextures, which may sample the proxy instead, as one now replaced by a picture
+        // samples it.
         const bool proxies_on = !PsToggle::Disabled(PsToggle::SampleSceneProxies);
         if (image.backing != entry.backing || image.binding.needs_rebind ||
             image.binding.is_target || !texture_cache.IsUpToDate(entry.id) ||
+            texture_cache.Substitutes().Replaces(image) ||
             (entry.proxy ? !proxies_on ||
                                !scene_targets->ProxyCurrent(image, entry.range.base.level,
                                                             entry.range.extent.levels)

@@ -34,6 +34,7 @@ TextureCache::TextureCache(const Vulkan::Instance& instance_, Vulkan::Scheduler&
     : instance{instance_}, scheduler{scheduler_}, runtime{runtime_}, liverpool{liverpool_},
       buffer_cache{buffer_cache_}, tracker{tracker_}, blit_helper{instance, scheduler},
       tile_manager{instance, scheduler, runtime, buffer_cache.GetStreamBuffer()},
+      m_substitutes{instance, scheduler, runtime, buffer_cache},
       readback_linear_images{EmulatorSettings.IsReadbackLinearImagesEnabled()} {
 
     m_default_sampler = Vulkan::Check<"create the default sampler">(
@@ -1016,6 +1017,7 @@ void TextureCache::RefreshImage(Image& image) {
         return;
     }
 
+    m_substitutes.Identify(image);
     PsNativeProbe::Note(PsNativeProbe::Upload);
     scheduler.EndRendering();
 

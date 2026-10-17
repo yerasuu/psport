@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <span>
 #include <string>
+#include <vector>
 #include "../psport_gpu.h"
 #include "psport_quirks.h"
 
@@ -190,6 +191,52 @@ struct MouseHooks {
     void (*pfn_filter_pad)(std::uint32_t* p_buttons, const std::uint8_t* p_sticks) = nullptr;
 };
 
+/// A cell of a texture the port draws into (TextureSubstitute): the side x side texels at (x, y)
+/// of its first level show picture i_picture, scaled to them.
+struct SubstituteCell {
+    std::uint32_t x = 0, y = 0, side = 0;
+    std::uint32_t i_picture = 0;
+};
+
+/// What a texture of the game is sampled as while its pictures are drawn: picture
+/// i_whole_picture instead of the texture, at the picture's own size, or (NoPicture) a copy of
+/// the texture with pictures in its cells.
+struct TextureSubstitute {
+    static constexpr std::uint32_t NoPicture = ~0u;
+    std::uint32_t i_whole_picture = NoPicture;
+    std::span<const SubstituteCell> cells;
+};
+
+/// The port's pictures: square, side texels, straight-alpha RGBA8 as the game's own textures
+/// hold them, picture i at pixels[i * side * side]; is_drawn[i] 0 keeps the game's texels where
+/// picture i would go. The number of pictures stays the same for the session.
+struct SubstitutePictures {
+    std::uint32_t side = 0;
+    std::vector<std::uint8_t> is_drawn;
+    std::vector<std::uint32_t> pixels;
+};
+
+/// Textures of the game sampled from pictures the port draws instead, known by their bytes
+/// (Bloodborne: its key guide icons for the device in use). The core asks about each upload of a
+/// single-level, single-layer block-compressed texture; all null for a profile without any.
+struct TextureSubstitution {
+    /// Once when the GPU starts: begins reading what pfn_identify needs, off the game's thread.
+    void (*pfn_start)() = nullptr;
+    /// The substitute a texture is by its bytes as the game laid them out (cb_texels at p_texels,
+    /// its first level width x height), or nullptr; a result stays valid for the session.
+    const TextureSubstitute* (*pfn_identify)(const void* p_texels, std::size_t cb_texels, std::uint32_t width,
+                                             std::uint32_t height) = nullptr;
+    /// Whether a texture of this shape that is none of them is identified again at each bind while
+    /// pictures are drawn, because the GPU may copy one in after its upload. It hashes at every
+    /// bind: small shapes only.
+    bool (*pfn_is_rescanned)(std::size_t cb_texels, std::uint32_t width, std::uint32_t height) = nullptr;
+    /// Changes whenever the pictures do; asked once per draw, so it must be cheap.
+    std::uint32_t (*pfn_generation)() = nullptr;
+    /// The pictures for the current generation (the draw recording thread); false when none is
+    /// drawn and the game's own textures stay.
+    bool (*pfn_draw)(SubstitutePictures& out) = nullptr;
+};
+
 /// The translator's knowledge of the game's code, gated by PS_GAME_PROFILE: it makes the game
 /// faster or easier to diagnose, never makes it work.
 struct Profile {
@@ -246,6 +293,7 @@ struct Profile {
     /// The pool holding the game's GPU labels; zeros when unknown, and the free check stays off.
     SmallObjectPool small_object_pool;
     MouseHooks mouse;
+    TextureSubstitution texture_substitution;
 };
 
 /// The game as psport runs it, whatever PS_GAME_PROFILE says.
@@ -343,6 +391,12 @@ inline UpscalerPlacement Upscaler() {
 inline MouseHooks Mouse() {
     const Profile* p_profile = Active();
     return p_profile ? p_profile->mouse : MouseHooks{};
+}
+
+/// The active profile's texture substitution, or none.
+inline TextureSubstitution Substitution() {
+    const Profile* p_profile = Active();
+    return p_profile ? p_profile->texture_substitution : TextureSubstitution{};
 }
 
 /// Whether the active profile's hooks pace the game's frames (Profile::pfn_drives_frame_rate).

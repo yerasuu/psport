@@ -20,6 +20,10 @@ class Instance;
 class Runtime;
 } // namespace Vulkan
 
+namespace Game {
+struct TextureSubstitute;
+} // namespace Game
+
 VK_DEFINE_HANDLE(VmaAllocation)
 VK_DEFINE_HANDLE(VmaAllocator)
 
@@ -162,6 +166,10 @@ public:
         u32 vo_surface : 1;
     } usage{};
     bool scene_proxy = false; ///< psport: SceneTargets holds a reduced-size proxy of it
+    /// psport: none yet, but identified again at its binds (TextureSubstitutes::Replaces).
+    bool is_substitute_rescanned = false;
+    /// psport: the profile's substitute its bytes are (TextureSubstitutes), or null.
+    const Game::TextureSubstitute* p_substitute = nullptr;
     VAddr track_addr = 0;
     VAddr track_addr_end = 0;
     VAddr guest_begin = 0; ///< info.guest_address
