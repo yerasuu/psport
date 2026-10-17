@@ -781,9 +781,10 @@ static ABI int32_t pad_init(void) { pthread_mutex_lock(&s_lock); s_is_initialize
 static ABI int32_t pad_open(int32_t user, int32_t type, int32_t i_device, const void *p_param) {
     (void)p_param;
     if (!s_is_initialized) return ERR_NOT_INITIALIZED;
-    if (user!=1) return ERR_INVALID_ARG;
-    if (type!=0 && type!=2) return ERR_INVALID_ARG; /* standard / special port */
-    if (i_device) return ERR_INVALID_ARG;
+    if (user!=1 || (type!=0 && type!=2) || i_device) { /* only user 1's standard or special port */
+        printf("Runtime: scePadOpen(user %d, type %d, index %d) refused\n",user,type,i_device);
+        return ERR_INVALID_ARG;
+    }
     pthread_mutex_lock(&s_lock);
     int already=s_is_opened; s_is_opened=1;
     pthread_mutex_unlock(&s_lock);
