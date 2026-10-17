@@ -197,10 +197,12 @@ static uint8_t stick_axis(int axis,int16_t raw) {
 static uint16_t touch_axis(float v, int max) {
     return (uint16_t)(v<=0.0f ? 0 : v>=1.0f ? max : (int)(v*max+0.5f));
 }
+/* A finger on the left or right half of the touchpad; both halves held are two fingers. */
 static void touch_click(PadData *p_pad_data, int right) {
     p_pad_data->buttons|=BTN_TOUCHPAD;
-    p_pad_data->touch_count=1;
-    p_pad_data->touches[0]=(PadTouch){.x=right ? 1440 : 480,.y=471,.id=0};
+    const uint16_t x=right ? 1440 : 480;
+    for (int i=0;i<p_pad_data->touch_count;++i) if (p_pad_data->touches[i].x==x) return;
+    if (p_pad_data->touch_count<2) p_pad_data->touches[p_pad_data->touch_count++]=(PadTouch){.x=x,.y=471,.id=0};
 }
 
 /* PS_GAMEPAD (the launcher's controller choice): its SDL GUID, or part of its name. Issue #15:
