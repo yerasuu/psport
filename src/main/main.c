@@ -8,6 +8,7 @@
 #include <cpuid.h>
 #include "main.h"
 #include "loader_traits.h"
+#include "ps_host.h"
 #if !defined(__x86_64__) || !defined(__GNUC__)
 #error This prototype requires x86-64 GCC or Clang (including MinGW).
 #endif
@@ -150,7 +151,7 @@ int main(int argc, char **argv) {
         else { fprintf(stderr, "Unknown option: %s\n", argv[i]); return 1; }
     }
     if (!game.sz_game) {
-        fprintf(stderr, "Usage: %s --game dir [--system-modules dir] [--hle libs] [--lle libs] [--cpu-only] [--strict-imports] [--app0 dir] [--user dir] [--patches-dir dir [--patches-config file]] [--mods dir [--mods-config file]] [--out dir] [--timeout seconds] [--exec guest-path [--arg value]...] | --check-game dir | --has-presets dir | --list-patches dir (--game dir | --title id [--version v]) | --list-mods dir [--game dir | --title id] | --list-quirks [--game dir] | --list-traits --game dir | --online-overrides (--game dir | --title id) | --list-effects (--game dir | --title id) | --vulkan-only\n", argv[0]);
+        fprintf(stderr, "Usage: %s --game dir [--system-modules dir] [--hle libs] [--lle libs] [--cpu-only] [--strict-imports] [--app0 dir] [--user dir] [--patches-dir dir [--patches-config file]] [--mods dir [--mods-config file]] [--out dir] [--timeout seconds] [--exec guest-path [--arg value]...] | --check-game dir | --has-presets dir | --list-patches dir (--game dir | --title id [--version v]) | --list-mods dir [--game dir | --title id] | --list-quirks [--game dir] | --list-features | --list-traits --game dir | --online-overrides (--game dir | --title id) | --list-effects (--game dir | --title id) | --vulkan-only\n", argv[0]);
         return 1;
     }
     const char *mod_folders[256];
@@ -198,6 +199,7 @@ int main(int argc, char **argv) {
      * window opens: a launch that cannot work stops here, with why. */
     GameInfo info;
     game_info(game.sz_game,&info);
+    ps_host_features_log();
     RuntimeQuirkLaunch quirks=quirk_launch(&info,loader_game_traits());
     runtime_quirks_evaluate(&quirks);
     if (info.title.pfn_prepare_environment) info.title.pfn_prepare_environment();

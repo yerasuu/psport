@@ -4,6 +4,7 @@
  * run from the fault and watchdog handlers. */
 #include "runtime.h"
 #include "runtime_quirks.h"
+#include "ps_host.h"
 #include "gpu/psport_gpu.h"
 #include <inttypes.h>
 #include <fcntl.h>
@@ -188,6 +189,7 @@ void runtime_calls_report(void) {
     psport_gpu_cp_census_report();
     psport_gpu_native_probe_report();
     put(1, runtime_quirks_summary());
+    put(1, ps_host_features_summary());
     for (size_t i = 0, c_summaries = __atomic_load_n(&s_c_summaries, __ATOMIC_ACQUIRE); i < c_summaries; ++i) {
         s_pfn_summaries[i](sz_line, sizeof(sz_line));
         put(1, sz_line);

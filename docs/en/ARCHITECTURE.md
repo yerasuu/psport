@@ -11,12 +11,13 @@ The model is Wine's, not an emulator's.
 |---|---|---|---|
 | Launch script | `run.sh` | - | environment and settings, then `psport` |
 | Entry | `src/main/main.c`, `src/main/main.h` | `out/psport` | launch sequence: arguments, image mapping, entering the game |
-| Launcher queries | `src/main/cli.c`, `src/main/game_info.c` | `out/psport` | `--check-game`, `--has-presets`, `--list-patches`, `--list-mods`, `--list-quirks`, `--list-traits`, `--list-effects`, `--online-overrides`, `BB_*` names; `param.sfo` and the game's identity |
+| Launcher queries | `src/main/cli.c`, `src/main/game_info.c` | `out/psport` | `--check-game`, `--has-presets`, `--list-patches`, `--list-mods`, `--list-quirks`, `--list-features`, `--list-traits`, `--list-effects`, `--online-overrides`, `BB_*` names; `param.sfo` and the game's identity |
 | Import binding | `src/main/bind.c` | `out/psport` | traps, failure thunks, relocation walk, patch writes |
 | Signals | `src/main/signals.c` | `out/psport` | fault, watchdog, thread dump and termination handlers |
 | Native loader | `src/loader/loader.h`, `src/loader/loader_self.c`, `src/loader/loader_link.c`, `src/loader/loader_traits.c` | `out/psport` | SELF/ELF parsing, module linking, relocations, TLS, bindings; middleware traits (`Middleware:` line) |
 | Launch data | `src/loader/loader_mods.c`, `src/loader/loader_patches.c`, `src/loader/loader_xml.c`, `src/loader/loader_hash.c`, `src/loader/loader_json.c` | `out/psport` | loose-file mod view, shadPS4/GoldHEN XML patches, the eboot's identity (SHA-256), `mods.json`/`patches.json` |
 | Quirk registry | `src/runtime/runtime_quirks.inc`, `runtime_quirks.h`, `runtime_quirks.c`, `gpu/port/psport_quirks.h` | `out/psport` | fixes for one title, host or middleware, decided once and read at setup ([QUIRKS.md](QUIRKS.md)) |
+| Platform layer | `src/platform/ps_host.h`, `src/platform/host_features.inc`, `src/platform/host_features.c`, `src/platform/<os>/` | `out/psport` | what psport asks of the operating system (`ps_host_*`) and what each OS has ([Platform layer](#platform-layer)) |
 | C runtime | `src/*/runtime*.c`, `src/runtime/runtime.h`, `src/runtime/imports/import_*.inc` | `out/psport` | libkernel and the other system libraries, import resolution, the call report |
 | GPU library | `gpu/port/psport_gpu*.cpp`, `gpu/psport_gpu.h` | `out/gpu/libpsport-gpu.so` | C interface between `psport` and the C++ side |
 | Translator | `gpu/shadps4/` (inherited from shadPS4, `gpu/VENDOR.txt`), `gpu/cp/`, `gpu/layer/` | `libpsport-gpu.so` | GnmDriver, VideoOut, command processor, Vulkan rasterizer, caches, shader recompiler |
@@ -27,8 +28,8 @@ The model is Wine's, not an emulator's.
 | Online addresses | `scripts/online.py` | - | Python run by `run.sh` with `PS_ONLINE=1` only; see [Launch scripts](#launch-scripts) |
 | Regression runs | `tools/regress.sh`, `tools/regress/` | - | headless runs of every title |
 
-`build.sh` builds `libpsport-gpu.so` with CMake/Ninja, then compiles `src/main/*.c`, `src/loader/loader*.c` and
-`src/*/runtime*.c` with `-Werror` into `out/psport`, linked against `libpsport-gpu.so`.
+`build.sh` builds `libpsport-gpu.so` with CMake/Ninja, then compiles `src/main/*.c`, `src/loader/loader*.c`,
+`src/*/runtime*.c` and `src/platform/` with `-Werror` into `out/psport`, linked against `libpsport-gpu.so`.
 
 ## Launch flow
 
@@ -238,6 +239,29 @@ done: imports without implementation, stubs, GPU library functions marked `(STUB
 when the process ends, by any route (guest exit, window close, signal, fault, watchdog, `STOP:`).
 Line formats: [FORK.md](../../FORK.md#call-report). `PS_CALL_REPORT=<file>` also writes the summary to
 a file.
+
+### Platform layer
+
+What psport asks of the operating system goes through one small C ABI, `ps_host_*`
+(`src/platform/ps_host.h`, decision #540), with an implementation per OS in `src/platform/<os>/`
+(and `gpu/platform/<os>/` for C++-only parts). Only Linux is implemented; a directory for another OS
+appears with its first code. Its groups: vm, fault, thread, tls, time, fs/path, proc, dl and rand,
+moved behind the ABI area by area without changing what Linux does.
+
+`src/platform/host_features.inc` is the capability table, an X-macro list like the quirk registry:
+`FEATURE(id, area, sz_desc)` names a capability, `FEATURE_HOST(id, os, state, sz_reason, sz_ref)` gives
+its state on one OS (`LINUX`, `WIN32`, `MACOS`; `IMPLEMENTED`, `EXPERIMENTAL` or `UNAVAILABLE`, with
+how or why not and the decision or task behind it; an OS without a row has none) and
+`FEATURE_PROBED(id)` marks one decided at run time too. Empty texts, unknown areas, OSes and states
+fail the build (`host_features.c`). The GPU library reports its probes with `ps_host_feature_probed`:
+the dma-buf and host memory import checks of `gpu/memory/psport_guest_memory.cpp` (`dmabuf=` and
+`host_import=` of the `Guest memory: detected` line).
+
+`psport --list-features` prints the table as JSON and exits before any game is loaded: `os`, then per
+feature `id`, `area`, `description`, this host's `state`, `reason` and `reference`,
+`probed_at_run_time` and every OS row under `hosts`. A launch logs `Host features: linux, N
+implemented, N experimental, N unavailable (ids)` before the quirks, a `Host features: <id> probed:`
+line per probe, and the exit summary repeats the counts with each probe's result.
 
 ## GPU library
 

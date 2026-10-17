@@ -1,0 +1,78 @@
+/* The host capability table (decision #540, docs/en/ARCHITECTURE.md), expanded by ps_host.h and
+ * host_features.c, which define each macro before including this file:
+ *
+ *   FEATURE(id, area, sz_desc)
+ *       a capability psport needs from the host; area is one of the platform layer's groups (vm,
+ *       gpu_memory, fault, tls, thread, time, fs, proc, dl, rand, io, net), sz_desc a non-empty
+ *       string literal.
+ *   FEATURE_HOST(id, os, state, sz_reason, sz_ref)
+ *       its state on one OS (LINUX, WIN32 or MACOS): IMPLEMENTED, EXPERIMENTAL or UNAVAILABLE, with
+ *       how (or why not) and the decision, task or issue behind it, both non-empty string literals.
+ *       An OS without a row has no implementation (UNAVAILABLE).
+ *   FEATURE_PROBED(id)
+ *       the state on this host is decided at run time too: the probing code reports it with
+ *       ps_host_feature_probed, and the log and the exit summary say what it found. */
+
+FEATURE(guest_memory, vm, "the guest's address space at the PS4's addresses: fixed mappings below 1 TiB and direct memory "
+                          "mapped at several addresses")
+FEATURE_HOST(guest_memory, LINUX, IMPLEMENTED,
+             "mmap with MAP_FIXED_NOREPLACE and MAP_NORESERVE, direct memory in a memfd (runtime_memory.c)", "#540")
+
+FEATURE(gpu_memory_dmabuf, gpu_memory, "the GPU uses guest memory in place: cached system memory exported as a dma-buf and "
+                                       "mapped at the game's addresses")
+FEATURE_HOST(gpu_memory_dmabuf, LINUX, IMPLEMENTED,
+             "VK_EXT_external_memory_dma_buf; whether the driver's dma-buf maps at page offsets at cached speed is probed "
+             "when the Vulkan device starts (gpu/memory/psport_guest_memory.cpp)",
+             "#540")
+FEATURE_HOST(gpu_memory_dmabuf, WIN32, UNAVAILABLE, "dma-buf is a Linux kernel interface: host memory import is the path",
+             "#540")
+FEATURE_HOST(gpu_memory_dmabuf, MACOS, UNAVAILABLE, "dma-buf is a Linux kernel interface: host memory import is the path",
+             "#540")
+FEATURE_PROBED(gpu_memory_dmabuf)
+
+FEATURE(gpu_memory_host_import, gpu_memory,
+        "the GPU imports the guest's host memory (VK_EXT_external_memory_host) where dma-buf chunks do not work")
+FEATURE_HOST(gpu_memory_host_import, LINUX, IMPLEMENTED,
+             "probed when dma-buf maps at offset 0 only or not at all, or with PS_GUEST_MEMORY=host; not preferred for "
+             "being reported, since RADV passes the probe and stalls (gpu/memory/psport_guest_memory.cpp)",
+             "#540")
+FEATURE_PROBED(gpu_memory_host_import)
+
+FEATURE(write_traps, fault, "faults on guest memory: the write traps that track what the GPU reads, fault recovery and "
+                            "fault reports")
+FEATURE_HOST(write_traps, LINUX, IMPLEMENTED,
+             "SIGSEGV and SIGBUS handlers over mprotect (signals.c, gpu/shim/core/signals.h)", "#540")
+
+FEATURE(guest_tls, tls, "the guest's thread-local storage: a TCB and static TLS per thread, the thread pointer on GS")
+FEATURE_HOST(guest_tls, LINUX, IMPLEMENTED, "arch_prctl(ARCH_SET_GS) (runtime_thread.c)", "#540")
+
+FEATURE(threads, thread, "guest threads on host threads: creation, signals to one thread, waits on an address")
+FEATURE_HOST(threads, LINUX, IMPLEMENTED, "pthreads, tgkill and futex (runtime_thread.c, runtime_sema.c)", "#540")
+
+FEATURE(time, time, "clocks, sleeping and the time stamp counter")
+FEATURE_HOST(time, LINUX, IMPLEMENTED, "clock_gettime, nanosleep and rdtsc", "#540")
+
+FEATURE(files, fs, "the guest's file system on host folders: /app0, user data and savedata")
+FEATURE_HOST(files, LINUX, IMPLEMENTED, "POSIX files and folders (runtime_file.c)", "#540")
+
+FEATURE(processes, proc, "the process starting again on itself (restart, sceSystemServiceLoadExec) and the mod view's "
+                         "cleaner process")
+FEATURE_HOST(processes, LINUX, IMPLEMENTED, "execv of /proc/self/exe, fork and close_range", "#540")
+
+FEATURE(dynamic_libraries, dl, "host libraries loaded at run time (the online module) and the symbols fault reports name")
+FEATURE_HOST(dynamic_libraries, LINUX, IMPLEMENTED, "dlopen, dlsym and dladdr", "#540")
+
+FEATURE(randomness, rand, "random bytes for the stack canary, sceKernel random numbers, UUIDs and kern.arandom")
+FEATURE_HOST(randomness, LINUX, IMPLEMENTED, "getrandom", "#540")
+
+FEATURE(audio, io, "audio output")
+FEATURE_HOST(audio, LINUX, IMPLEMENTED, "SDL3 (runtime_audio.c); PS_AUDIO=none runs without a device", "#540")
+
+FEATURE(input, io, "gamepads, keyboard and mouse")
+FEATURE_HOST(input, LINUX, IMPLEMENTED, "SDL3 (runtime_pad.c, runtime_keyboard.c, runtime_mouse.c)", "#540")
+
+FEATURE(window, io, "the game's window and its Vulkan surface")
+FEATURE_HOST(window, LINUX, IMPLEMENTED, "SDL3 (gpu/shim/window.cpp)", "#540")
+
+FEATURE(online_module, net, "online play through libpsport-net.so, loaded on the first network import with PS_ONLINE=1")
+FEATURE_HOST(online_module, LINUX, IMPLEMENTED, "dlopen of gpu/libpsport-net.so when it was built (runtime_net.c)", "#540")

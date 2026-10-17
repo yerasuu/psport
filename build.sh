@@ -92,7 +92,7 @@ fi
 # also for the libraries CMake links above): its sandbox's path would stay in the store's binaries.
 gpu=(-Lout/gpu -lpsport-gpu -Wl,-rpath,'$ORIGIN/gpu' -rdynamic)
 [[ -n ${PS_ORIGIN_RPATH_ONLY:-} ]] || gpu+=(-Wl,-rpath,"$PWD/out/gpu")
-areas=(main loader runtime runtime/imports kernel system audio input net)
+areas=(main loader runtime runtime/imports kernel system audio input net platform)
 # By file name, as the flat src/ listed them, so that the link order and the binary's layout stay.
 mapfile -t runtime < <(printf '%s\n' src/*/runtime*.c | LC_ALL=C sort -t/ -k3)
 # Third-party decoders: compiled once, without this project's -Werror policy.
@@ -102,7 +102,7 @@ if [[ ! -f out/libatrac9.a || -n $(find third_party/LibAtrac9/C/src -newer out/l
     for source in "${atrac9[@]}"; do "$CC" -std=c99 -O2 -g -w -c "$source" -o "out/atrac9/$(basename "${source%.c}").o"; done
     ar rcs out/libatrac9.a out/atrac9/*.o
 fi
-"$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -pthread -no-pie "${profile[@]}" "${includes[@]}" -I. "${areas[@]/#/-Isrc/}" src/main/main.c src/main/cli.c src/main/game_info.c src/main/bind.c src/main/signals.c src/loader/loader*.c "${runtime[@]}" src/main/vulkan_smoke.c out/libatrac9.a -lm "${gpu[@]}" "${libraries[@]}" -o out/psport
+"$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -pthread -no-pie "${profile[@]}" "${includes[@]}" -I. "${areas[@]/#/-Isrc/}" src/main/main.c src/main/cli.c src/main/game_info.c src/main/bind.c src/main/signals.c src/loader/loader*.c "${runtime[@]}" src/platform/*.c src/main/vulkan_smoke.c out/libatrac9.a -lm "${gpu[@]}" "${libraries[@]}" -o out/psport
 echo "Built $PWD/out/psport"
 # GPU check for run.sh (--host-env, live_resolution=auto) and the launcher's gamepad list (--gamepads).
 "$CC" -std=c11 -O2 -Wall -Wextra -Werror "${includes[@]}" -Isrc/runtime tools/gpu_capabilities.c src/runtime/runtime_quirks.c src/runtime/runtime_json_print.c "${libraries[@]}" -o out/psport-gpu-capabilities

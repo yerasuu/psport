@@ -8,6 +8,7 @@
 #include "runtime_json_print.h"
 #include "main.h"
 #include "loader_traits.h"
+#include "ps_host.h"
 
 /* A launcher's question names the game by its folder (--game dir) or, without one, by its title
  * (--title TITLE_ID [--version APP_VER]); the arguments from argv[first] on. 0 when they are
@@ -130,6 +131,11 @@ int answer_query(int argc, char **argv) {
         g_sz_loader_file=NULL;
         RuntimeQuirkLaunch launch=quirk_launch(&info,loader_detect_traits(argv[3],&eboot));
         runtime_quirks_list(&launch);
+        return 0;
+    }
+    if (argc >= 2 && !strcmp(argv[1], "--list-features")) {
+        if (argc != 2) { fprintf(stderr, "Usage: %s --list-features\n", argv[0]); return 1; }
+        ps_host_features_list();
         return 0;
     }
     /* key=value lines for scripts/online.py; none for a title without online servers. */

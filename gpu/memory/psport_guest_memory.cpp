@@ -15,6 +15,7 @@
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "pslayer_gpu_memory.h"
 #include "psport_quirks.h"
+#include "../../src/platform/ps_host.h"
 
 extern "C" void runtime_memory_set_guest_chunk_allocator(int (*pfn_alloc)(uint64_t phys,
                                                                       uint64_t cb_range));
@@ -857,6 +858,15 @@ void PrintDetected(const Vulkan::Instance& instance, bool is_usable) {
                 s_detected.sparse_bind_ms, s_detected.sz_dmabuf, s_detected.dmabuf_read_mbps, sz_host_import,
                 LayerMemory() ? "layer-module" : "sparse-arena", s_detected.sz_backing_why, sz_chunks,
                 s_detected.sz_chunks_why);
+    const std::string_view dmabuf{s_detected.sz_dmabuf};
+    if (dmabuf != "untested") {
+        ps_host_feature_probed(PS_HOST_FEATURE_gpu_memory_dmabuf, dmabuf == "offsets" || dmabuf == "whole",
+                               s_detected.sz_dmabuf);
+    }
+    const std::string_view host_import{sz_host_import};
+    if (host_import != "untested") {
+        ps_host_feature_probed(PS_HOST_FEATURE_gpu_memory_host_import, host_import == "works", sz_host_import);
+    }
 }
 } // namespace
 
