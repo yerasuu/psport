@@ -70,17 +70,9 @@ static ABI void *guest_tls_get_addr(const uint64_t *p_index) {
 void runtime_start(uint64_t flags) {
     s_capabilities = flags;
     if (!(flags & 1)) return;
-#ifdef _WIN32
-    unsigned int halves[2];
-    if (rand_s(&halves[0]) || rand_s(&halves[1])) { fputs("Cannot initialize stack canary\n", stderr); exit(1); }
-    memcpy(&stack_canary, halves, sizeof(stack_canary));
-#else
-    FILE *p_random = fopen("/dev/urandom", "rb");
-    if (!p_random || fread(&s_stack_canary, sizeof(s_stack_canary), 1, p_random) != 1) {
+    if (ps_host_random_bytes(&s_stack_canary, sizeof(s_stack_canary))) {
         fputs("Cannot initialize stack canary\n", stderr); exit(1);
     }
-    fclose(p_random);
-#endif
     s_stack_canary &= ~UINT64_C(255);
 }
 void runtime_report(void) {

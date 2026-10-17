@@ -67,13 +67,13 @@ static ABI int32_t usbd_cancel_transfer(UsbdTransfer *p_transfer) { (void)p_tran
  * libusb does. */
 typedef struct { int64_t tv_sec, tv_usec; } UsbdTimeval;
 static int32_t wait_for_usbd_events(const UsbdTimeval *p_timeout) {
-    struct timespec wait={USBD_DEFAULT_EVENT_TIMEOUT_SECONDS,0};
+    uint64_t wait_ns=(uint64_t)USBD_DEFAULT_EVENT_TIMEOUT_SECONDS*1000000000u;
     if (p_timeout) {
         if (p_timeout->tv_sec<0 || p_timeout->tv_usec<0 || p_timeout->tv_usec>=1000000) return USBD_INVALID_ARG;
-        wait.tv_sec=(time_t)p_timeout->tv_sec; wait.tv_nsec=(long)p_timeout->tv_usec*1000;
+        wait_ns=(uint64_t)p_timeout->tv_sec*1000000000u+(uint64_t)p_timeout->tv_usec*1000u;
     }
     const uint64_t wait_start_ns=runtime_wait_clock();
-    while (nanosleep(&wait,&wait)) {}
+    while (ps_host_time_sleep_ns(wait_ns,&wait_ns)) {}
     runtime_wait_note(3,runtime_wait_clock()-wait_start_ns);
     return 0;
 }

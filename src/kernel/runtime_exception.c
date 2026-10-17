@@ -94,7 +94,7 @@ void runtime_exception_unlock(pthread_mutex_t *p_lock) {
 int runtime_exception_wait(pthread_cond_t *p_cond, pthread_mutex_t *p_lock, const struct timespec *p_end) {
     if (s_is_deferred && s_held==1) { runtime_exception_unlock(p_lock); runtime_exception_lock(p_lock); return 0; }
     struct timespec slice;
-    clock_gettime(CLOCK_MONOTONIC,&slice);
+    ps_host_time_read(PS_HOST_CLOCK_MONOTONIC,&slice);
     slice.tv_nsec+=atomic_load(&s_handlers[GUEST_SIGUSR1]) ? RAISE_SLICE_NS : IDLE_SLICE_NS;
     slice.tv_sec+=slice.tv_nsec/1000000000; slice.tv_nsec%=1000000000;
     int last=p_end && (p_end->tv_sec<slice.tv_sec || (p_end->tv_sec==slice.tv_sec && p_end->tv_nsec<=slice.tv_nsec));

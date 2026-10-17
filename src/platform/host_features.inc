@@ -50,7 +50,7 @@ FEATURE(threads, thread, "guest threads on host threads: creation, signals to on
 FEATURE_HOST(threads, LINUX, IMPLEMENTED, "pthreads, tgkill and futex (runtime_thread.c, runtime_sema.c)", "#540")
 
 FEATURE(time, time, "clocks, sleeping and the time stamp counter")
-FEATURE_HOST(time, LINUX, IMPLEMENTED, "clock_gettime, nanosleep and rdtsc", "#540")
+FEATURE_HOST(time, LINUX, IMPLEMENTED, "clock_gettime and nanosleep (src/platform/linux/host_time.c), rdtsc", "#540")
 
 FEATURE(files, fs, "the guest's file system on host folders: /app0, user data and savedata")
 FEATURE_HOST(files, LINUX, IMPLEMENTED, "POSIX files and folders (runtime_file.c)", "#540")
@@ -63,7 +63,7 @@ FEATURE(dynamic_libraries, dl, "host libraries loaded at run time (the online mo
 FEATURE_HOST(dynamic_libraries, LINUX, IMPLEMENTED, "dlopen, dlsym and dladdr", "#540")
 
 FEATURE(randomness, rand, "random bytes for the stack canary, sceKernel random numbers, UUIDs and kern.arandom")
-FEATURE_HOST(randomness, LINUX, IMPLEMENTED, "getrandom", "#540")
+FEATURE_HOST(randomness, LINUX, IMPLEMENTED, "getrandom (src/platform/linux/host_system.c)", "#540")
 
 FEATURE(audio, io, "audio output")
 FEATURE_HOST(audio, LINUX, IMPLEMENTED, "SDL3 (runtime_audio.c); PS_AUDIO=none runs without a device", "#540")

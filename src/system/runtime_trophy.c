@@ -132,9 +132,7 @@ static const char *grade_name(int32_t grade) {
 }
 
 static uint64_t current_tick(void) {
-    struct timespec now;
-    clock_gettime(CLOCK_REALTIME, &now);
-    return RTC_TICK_UNIX_EPOCH + (uint64_t)now.tv_sec * 1000000 + (uint64_t)now.tv_nsec / 1000;
+    return RTC_TICK_UNIX_EPOCH + ps_host_time_realtime_ns() / 1000;
 }
 static void format_tick(uint64_t tick, char *sz_out, size_t cb_out) {
     const time_t seconds = (time_t)((tick - RTC_TICK_UNIX_EPOCH) / 1000000);

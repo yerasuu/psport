@@ -43,7 +43,7 @@ static ABI int32_t http_epoll(int32_t ctx,void **pp_handle) {
 }
 static ABI int32_t http_wait(void *p_handle,void *p_events,int32_t max,int64_t timeout) {
     (void)p_handle; (void)p_events; (void)max;
-    if (timeout>0) { struct timespec t={timeout/1000000,(timeout%1000000)*1000}; nanosleep(&t,NULL); }
+    if (timeout>0) ps_host_time_sleep_ns((uint64_t)timeout*1000,NULL);
     return 0; /* no events: nothing is in flight */
 }
 

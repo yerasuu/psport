@@ -56,8 +56,7 @@ void configure_content(const char *sz_sfo) {
 /* A path under psport's own folder, the one holding out/ or bin/ (a checkout or a package). */
 static void install_path(const char *sz_relative, char *sz_out, size_t cb_out) {
     char sz_exe[4096];
-    ssize_t cb_exe=readlink("/proc/self/exe",sz_exe,sizeof(sz_exe)-1);
-    sz_exe[cb_exe>0 ? cb_exe : 0]=0;
+    ps_host_exe_path(sz_exe,sizeof(sz_exe));
     for (int up=0; up<2; ++up) { char *p_slash=strrchr(sz_exe,'/'); if (p_slash) *p_slash=0; }
     if ((size_t)snprintf(sz_out,cb_out,"%s/%s",sz_exe[0] ? sz_exe : ".",sz_relative)>=cb_out) fail("install path too long");
 }

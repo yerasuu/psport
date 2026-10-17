@@ -119,7 +119,8 @@ static ABI int32_t mutex_destroy(GuestMutex **pp_mutex) {
     return orbis_error(e);
 }
 static int deadline_after(clockid_t clock, struct timespec *p_end, uint64_t usec) {
-    if (clock_gettime(clock, p_end)) return errno;
+    const int e = ps_host_time_read(clock == CLOCK_MONOTONIC ? PS_HOST_CLOCK_MONOTONIC : PS_HOST_CLOCK_REALTIME, p_end);
+    if (e) return e;
     uint64_t ns = (uint64_t)p_end->tv_nsec + (usec % 1000000) * 1000;
     p_end->tv_sec += (time_t)(usec / 1000000 + ns / 1000000000);
     p_end->tv_nsec = (long)(ns % 1000000000);

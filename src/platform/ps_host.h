@@ -7,6 +7,7 @@
 #define PS_HOST_H
 #include <stddef.h>
 #include <stdint.h>
+#include <time.h>
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -41,6 +42,38 @@ void ps_host_feature_probed(PsHostFeatureId id, int is_available, const char *sz
 /* The exit summary line, rebuilt at each publication so that the call report can print it from the
  * fault and watchdog handlers. */
 const char *ps_host_features_summary(void);
+
+/* ---- time ---- */
+typedef enum {
+    PS_HOST_CLOCK_MONOTONIC,
+    PS_HOST_CLOCK_REALTIME,
+    /* Realtime at the scheduler tick's resolution, cheaper to read. */
+    PS_HOST_CLOCK_REALTIME_COARSE,
+    PS_HOST_CLOCK_THREAD_CPU,
+    PS_HOST_CLOCK_PROCESS_CPU,
+} PsHostClock;
+
+/* 0, or the host's errno. */
+int ps_host_time_read(PsHostClock clock, struct timespec *p_out_time);
+int ps_host_time_resolution(PsHostClock clock, struct timespec *p_out_time);
+/* The monotonic and realtime clocks in nanoseconds, for callers that cannot fail: both clocks
+ * always read on every host psport supports. */
+uint64_t ps_host_time_monotonic_ns(void);
+uint64_t ps_host_time_realtime_ns(void);
+/* One sleep on the monotonic clock: 0 once it elapsed, EINTR when a signal cut it short (with what
+ * was left in *p_out_remaining_ns when given), another errno on failure. Safe in signal handlers. */
+int ps_host_time_sleep_ns(uint64_t ns, uint64_t *p_out_remaining_ns);
+/* Sleeps until the monotonic clock reaches deadline_ns: 0, EINTR or another errno. */
+int ps_host_time_sleep_until_ns(uint64_t deadline_ns);
+
+/* ---- randomness ---- */
+/* Fills the buffer from the host's cryptographic source: 0, or the host's errno. */
+int ps_host_random_bytes(void *p_buffer, size_t cb_buffer);
+
+/* ---- paths ---- */
+/* The running executable's absolute path, NUL-terminated: its length, or -1 when the host cannot
+ * say or it does not fit in cb_out. */
+long ps_host_exe_path(char *sz_out, size_t cb_out);
 
 #ifdef __cplusplus
 }

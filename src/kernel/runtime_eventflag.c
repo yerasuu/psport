@@ -39,11 +39,7 @@ static Flag *find(uint64_t id) {
 static void host_check(int e) {
     if (e) { fprintf(stderr,"STOP: event flag host error %d\n",e); runtime_stop(21); }
 }
-static uint64_t now_ns(void) {
-    struct timespec t;
-    if (clock_gettime(CLOCK_MONOTONIC,&t)) { perror("clock_gettime"); exit(1); }
-    return (uint64_t)t.tv_sec*1000000000+(uint64_t)t.tv_nsec;
-}
+static uint64_t now_ns(void) { return ps_host_time_monotonic_ns(); }
 static ABI int32_t flag_create(uint64_t *p_out,const char *sz_name,uint32_t attr,uint64_t pattern,const void *p_options) {
     (void)p_options; /* only a size field on the console; nothing in it changes behaviour here */
     if (!p_out || !sz_name || (attr & ~(uint32_t)(ATTR_FIFO|ATTR_PRIO|ATTR_SINGLE|ATTR_MULTI)) ||

@@ -20,7 +20,6 @@
 #include <ucontext.h>
 #include <signal.h>
 #include <sys/uio.h>
-#include <sys/random.h>
 #include <sys/resource.h>
 #include <sys/time.h>
 #include <x86intrin.h>
@@ -55,23 +54,24 @@ static int32_t fail_posix(int e) { *runtime_errno()=runtime_guest_errno(e); retu
 /* ---- clocks and sleeping ---- */
 static struct timespec s_process_start;
 static uint64_t s_process_start_tsc;
-__attribute__((constructor)) static void remember_start(void) { clock_gettime(CLOCK_MONOTONIC,&s_process_start); s_process_start_tsc=__rdtsc(); }
-static int host_clock(uint32_t id,clockid_t *p_out) {
+__attribute__((constructor)) static void remember_start(void) { ps_host_time_read(PS_HOST_CLOCK_MONOTONIC,&s_process_start); s_process_start_tsc=__rdtsc(); }
+static int host_clock(uint32_t id,PsHostClock *p_out) {
     switch (id) {
-    case 0: case 9: case 10: *p_out=CLOCK_REALTIME; return 1;            /* REALTIME(_PRECISE/_FAST) */
-    case 4: case 11: case 12: case 5: case 7: case 8: *p_out=CLOCK_MONOTONIC; return 1; /* MONOTONIC/UPTIME */
-    case 13: *p_out=CLOCK_REALTIME_COARSE; return 1;                    /* SECOND */
-    case 14: *p_out=CLOCK_THREAD_CPUTIME_ID; return 1;
-    case 2: case 15: *p_out=CLOCK_PROCESS_CPUTIME_ID; return 1;         /* PROF/PROCTIME */
-    case 16: case 17: case 18: case 19: *p_out=CLOCK_MONOTONIC; return 1; /* PS4 network clocks */
+    case 0: case 9: case 10: *p_out=PS_HOST_CLOCK_REALTIME; return 1;            /* REALTIME(_PRECISE/_FAST) */
+    case 4: case 11: case 12: case 5: case 7: case 8: *p_out=PS_HOST_CLOCK_MONOTONIC; return 1; /* MONOTONIC/UPTIME */
+    case 13: *p_out=PS_HOST_CLOCK_REALTIME_COARSE; return 1;                    /* SECOND */
+    case 14: *p_out=PS_HOST_CLOCK_THREAD_CPU; return 1;
+    case 2: case 15: *p_out=PS_HOST_CLOCK_PROCESS_CPU; return 1;         /* PROF/PROCTIME */
+    case 16: case 17: case 18: case 19: *p_out=PS_HOST_CLOCK_MONOTONIC; return 1; /* PS4 network clocks */
     default: return 0;
     }
 }
 static int clock_read(uint32_t id,GuestTimespec *p_timespec) {
-    clockid_t host;
+    PsHostClock host;
     if (!p_timespec || !host_clock(id,&host)) return EINVAL;
     struct timespec t;
-    if (clock_gettime(host,&t)) return errno;
+    const int e=ps_host_time_read(host,&t);
+    if (e) return e;
     if (id==13) t.tv_nsec=0;
     p_timespec->sec=t.tv_sec; p_timespec->nsec=t.tv_nsec; return 0;
 }
@@ -82,14 +82,15 @@ static ABI int32_t posix_clock_gettime(uint32_t id,GuestTimespec *p_timespec) {
     int e=clock_read(id,p_timespec); return e ? fail_posix(e) : 0;
 }
 static ABI int32_t posix_clock_getres(uint32_t id,GuestTimespec *p_timespec) {
-    clockid_t host; struct timespec t;
+    PsHostClock host; struct timespec t;
     if (!host_clock(id,&host)) return fail_posix(EINVAL);
-    if (clock_getres(host,&t)) return fail_posix(errno);
+    const int e=ps_host_time_resolution(host,&t);
+    if (e) return fail_posix(e);
     if (p_timespec) { p_timespec->sec=t.tv_sec; p_timespec->nsec=t.tv_nsec; }
     return 0;
 }
 static ABI uint64_t process_time(void) {
-    struct timespec t; clock_gettime(CLOCK_MONOTONIC,&t);
+    struct timespec t; ps_host_time_read(PS_HOST_CLOCK_MONOTONIC,&t);
     return (uint64_t)(t.tv_sec-s_process_start.tv_sec)*1000000+(uint64_t)((t.tv_nsec-s_process_start.tv_nsec)/1000);
 }
 /* The console's process time counter is the TSC since the process started, and games mix it with
@@ -99,11 +100,10 @@ static ABI uint64_t read_tsc(void) { return __rdtsc(); }
 static uint64_t s_tsc_hz;
 static ABI uint64_t tsc_frequency(void) {
     if (!s_tsc_hz) {
-        struct timespec a,b,nap={0,20000000};
-        clock_gettime(CLOCK_MONOTONIC,&a); uint64_t t0=__rdtsc();
-        nanosleep(&nap,NULL);
-        clock_gettime(CLOCK_MONOTONIC,&b); uint64_t t1=__rdtsc();
-        uint64_t ns=(uint64_t)(b.tv_sec-a.tv_sec)*1000000000+(uint64_t)(b.tv_nsec-a.tv_nsec);
+        const uint64_t a=ps_host_time_monotonic_ns(), t0=__rdtsc();
+        ps_host_time_sleep_ns(20000000,NULL);
+        const uint64_t b=ps_host_time_monotonic_ns(), t1=__rdtsc();
+        uint64_t ns=b-a;
         s_tsc_hz=(t1-t0)*1000000000/(ns ? ns : 1);
     }
     return s_tsc_hz;
@@ -119,16 +119,15 @@ void runtime_sleep_stats(uint64_t *p_calls, uint64_t *p_ns) {
     *p_calls=atomic_exchange(&s_c_sleep_calls,0); *p_ns=atomic_exchange(&s_sleep_total_ns,0);
 }
 static int sleep_ns(uint64_t ns) {
-    struct timespec t={.tv_sec=(time_t)(ns/1000000000),.tv_nsec=(long)(ns%1000000000)}, a, b;
-    clock_gettime(CLOCK_MONOTONIC,&a);
-    int result=0;
+    const uint64_t a=ps_host_time_monotonic_ns();
+    int result=0, e;
     RUNTIME_ZONE(zone,"sleep");
-    while (nanosleep(&t,&t)) if (errno!=EINTR) { result=errno; break; }
+    while ((e=ps_host_time_sleep_ns(ns,&ns))) if (e!=EINTR) { result=e; break; }
     RUNTIME_ZONE_END(zone);
-    clock_gettime(CLOCK_MONOTONIC,&b);
+    const uint64_t b=ps_host_time_monotonic_ns();
     atomic_fetch_add(&s_c_sleep_calls,1);
-    atomic_fetch_add(&s_sleep_total_ns,(uint64_t)((b.tv_sec-a.tv_sec)*1000000000+(b.tv_nsec-a.tv_nsec)));
-    runtime_wait_note(3,(uint64_t)((b.tv_sec-a.tv_sec)*1000000000+(b.tv_nsec-a.tv_nsec)));
+    atomic_fetch_add(&s_sleep_total_ns,b-a);
+    runtime_wait_note(3,b-a);
     return result;
 }
 static ABI int32_t kernel_usleep(uint32_t usec) { sleep_ns((uint64_t)usec*1000); return 0; }
@@ -299,8 +298,8 @@ static ABI int32_t guest_sysctl(const int32_t *p_name,uint32_t namelen,void *p_o
     if (!p_name || namelen<2 || p_new_value) return fail_posix(EINVAL);
     if (p_name[0]==1 && p_name[1]==37) { /* kern.arandom */
         if (!p_old || !p_oldlen) return fail_posix(EINVAL);
-        if (getrandom(p_old,(size_t)*p_oldlen,0)<0) return fail_posix(errno);
-        return 0;
+        const int e=ps_host_random_bytes(p_old,(size_t)*p_oldlen);
+        return e ? fail_posix(e) : 0;
     }
     if (p_name[0]==6 && (p_name[1]==7 || p_name[1]==3)) { /* hw.pagesize / hw.ncpu */
         if (!p_oldlen) return fail_posix(EINVAL);
@@ -315,7 +314,7 @@ static ABI int32_t guest_sysctl(const int32_t *p_name,uint32_t namelen,void *p_o
 }
 static ABI int32_t uuid_create(uint8_t *p_uuid) {
     if (!p_uuid) return ERR(22);
-    if (getrandom(p_uuid,16,0)!=16) return ERR(14);
+    if (ps_host_random_bytes(p_uuid,16)) return ERR(14);
     p_uuid[7]=(uint8_t)((p_uuid[7]&0x0f)|0x40); /* version 4 in the high bits of the little-endian time_hi */
     p_uuid[8]=(uint8_t)((p_uuid[8]&0x3f)|0x80);
     return 0;
@@ -325,7 +324,7 @@ static ABI int32_t uuid_create(uint8_t *p_uuid) {
 #define RANDOM_MAX_SIZE 64
 static ABI int32_t random_number(void *p_buffer,uint64_t cb_buffer) {
     if (!p_buffer || cb_buffer>RANDOM_MAX_SIZE) return RANDOM_INVALID;
-    return getrandom(p_buffer,cb_buffer,0)==(ssize_t)cb_buffer ? 0 : RANDOM_INVALID;
+    return ps_host_random_bytes(p_buffer,cb_buffer) ? RANDOM_INVALID : 0;
 }
 
 /* ---- pthread_once and thread-specific data ---- */
@@ -601,8 +600,7 @@ static void *sampler_main(void *p_arg) {
     printf("Runtime: sampling thread %s (%d)\n",sz_name,(int)tid);
     for (;;) {
         if (syscall(SYS_tgkill,getpid(),tid,SIGPROF)) break;
-        struct timespec t={0,500000};
-        nanosleep(&t,NULL);
+        ps_host_time_sleep_ns(500000,NULL);
     }
     return NULL;
 }

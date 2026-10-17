@@ -39,11 +39,7 @@ static Sema *find(uint32_t id) {
 static void host_check(int e) {
     if (e) { fprintf(stderr,"STOP: semaphore host error %d\n",e); runtime_stop(21); }
 }
-static uint64_t now_ns(void) {
-    struct timespec t;
-    if (clock_gettime(CLOCK_MONOTONIC,&t)) { perror("clock_gettime"); exit(1); }
-    return (uint64_t)t.tv_sec*1000000000+(uint64_t)t.tv_nsec;
-}
+static uint64_t now_ns(void) { return ps_host_time_monotonic_ns(); }
 static ABI int32_t sem_create(uint32_t *p_out,const char *sz_name,uint32_t attr,
                               int32_t initial,int32_t maximum,const void *p_options) {
     if (!p_out || !sz_name || attr>2 || initial<0 || maximum<=0 || initial>maximum) return ERR(22);
@@ -286,7 +282,7 @@ static int umtx_deadline(const void *p_size, const void *p_timeout, clockid_t *p
     *p_out_end=(struct timespec){.tv_sec=(time_t)timeout.timeout.seconds,.tv_nsec=(long)timeout.timeout.nanoseconds};
     if (timeout.flags&1) return 0;
     struct timespec now;
-    clock_gettime(*p_out_clock,&now);
+    ps_host_time_read(timeout.clock==0 ? PS_HOST_CLOCK_REALTIME : PS_HOST_CLOCK_MONOTONIC,&now);
     p_out_end->tv_sec+=now.tv_sec;
     p_out_end->tv_nsec+=now.tv_nsec;
     if (p_out_end->tv_nsec>=1000000000) { p_out_end->tv_nsec-=1000000000; ++p_out_end->tv_sec; }

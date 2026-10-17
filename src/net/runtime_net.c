@@ -74,9 +74,7 @@ static PsNetResolveFn module_resolve(void) {
         snprintf(sz_path,sizeof(sz_path),"%s",sz_forced);
     } else {
         char sz_exe[PATH_MAX-32];
-        const ssize_t cb_path=readlink("/proc/self/exe",sz_exe,sizeof(sz_exe)-1);
-        if (cb_path<=0) return NULL;
-        sz_exe[cb_path]=0;
+        if (ps_host_exe_path(sz_exe,sizeof(sz_exe))<0) return NULL;
         char *sz_slash=strrchr(sz_exe,'/');
         if (sz_slash) *sz_slash=0;
         snprintf(sz_path,sizeof(sz_path),"%s/gpu/libpsport-net.so",sz_exe);

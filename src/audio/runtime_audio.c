@@ -53,11 +53,8 @@ static Port s_ports[PORTS];
 static int s_is_initialized, s_is_sdl_ready=-1;
 static size_t s_c_buffers_out, s_c_ports_opened;
 
-static uint64_t now_ns(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC,&t); return (uint64_t)t.tv_sec*1000000000u+(uint64_t)t.tv_nsec; }
-static void sleep_until(uint64_t deadline) {
-    struct timespec t={(time_t)(deadline/1000000000u),(long)(deadline%1000000000u)};
-    while (clock_nanosleep(CLOCK_MONOTONIC,TIMER_ABSTIME,&t,NULL)) {}
-}
+static uint64_t now_ns(void) { return ps_host_time_monotonic_ns(); }
+static void sleep_until(uint64_t deadline) { while (ps_host_time_sleep_until_ns(deadline)) {} }
 static int sdl_audio(void) {
     if (s_is_sdl_ready<0) {
         const char *sz_mode=getenv("PS_AUDIO");

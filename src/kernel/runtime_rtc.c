@@ -66,8 +66,7 @@ static void from_tick(uint64_t tick, DateTime *p_date_time) {
     p_date_time->microsecond=(uint32_t)(us%1000000u);
 }
 static uint64_t now_utc(void) {
-    struct timespec ts; clock_gettime(CLOCK_REALTIME,&ts);
-    return UNIX_EPOCH_TICKS+(uint64_t)ts.tv_sec*1000000u+(uint64_t)ts.tv_nsec/1000u;
+    return UNIX_EPOCH_TICKS+ps_host_time_realtime_ns()/1000u;
 }
 /* Offset of local time from UTC at the given UTC tick, in microseconds. */
 static int64_t local_offset(uint64_t utc) {

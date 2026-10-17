@@ -141,10 +141,10 @@ static void watchdog(int sig, siginfo_t *p_info, void *p_context) {
         for (long at=0; at<cb_read;) {
             struct { uint64_t ino; int64_t off; unsigned short reclen; unsigned char type; char sz_name[]; } *p_entry=(void *)(sz_buffer+at);
             pid_t tid=(pid_t)strtol(p_entry->sz_name,NULL,10);
-            if (tid>0 && tid!=self) { syscall(SYS_tgkill,getpid(),tid,SIGUSR2); usleep(20000); }
+            if (tid>0 && tid!=self) { syscall(SYS_tgkill,getpid(),tid,SIGUSR2); ps_host_time_sleep_ns(20000000,NULL); }
             at+=p_entry->reclen;
         }
-    usleep(100000);
+    ps_host_time_sleep_ns(100000000,NULL);
     if (g_is_gpu_enabled) psport_gpu_flush_caches(0);
     runtime_calls_report();
     _exit(128 + sig);

@@ -38,7 +38,7 @@ static uint32_t s_c_chunks;
 static uint64_t *s_p_chunk_sizes, s_language_mask, s_speed_since_ms;
 static int32_t s_speed=SPEED_TRICKLE;
 
-static uint64_t now_ms(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC,&t); return (uint64_t)t.tv_sec*1000u+(uint64_t)t.tv_nsec/1000000u; }
+static uint64_t now_ms(void) { return ps_host_time_monotonic_ns()/1000000u; }
 static uint16_t le16(const unsigned char *p_bytes) { return (uint16_t)(p_bytes[0]|p_bytes[1]<<8); }
 static uint32_t le32(const unsigned char *p_bytes) { return (uint32_t)p_bytes[0]|(uint32_t)p_bytes[1]<<8|(uint32_t)p_bytes[2]<<16|(uint32_t)p_bytes[3]<<24; }
 static uint64_t le64(const unsigned char *p_bytes) { return le32(p_bytes)|(uint64_t)le32(p_bytes+4)<<32; }

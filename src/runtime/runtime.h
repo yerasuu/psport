@@ -5,6 +5,7 @@
 #include <stddef.h>
 #ifndef _WIN32
 #include <setjmp.h>
+#include "ps_host.h"
 /* Recovery point for speculative guest memory reads on this thread (signals.c fault handler). */
 extern __thread sigjmp_buf *g_p_runtime_fault_recover;
 /* Restarts the game (in-game settings menu, render resolution change). */
@@ -72,7 +73,7 @@ uint64_t runtime_heap_growths(void);
 #define RUNTIME_ZONE(zone, sz_name)
 #define RUNTIME_ZONE_END(zone)
 #endif
-static inline uint64_t runtime_wait_clock(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC,&t); return (uint64_t)t.tv_sec*1000000000+(uint64_t)t.tv_nsec; }
+static inline uint64_t runtime_wait_clock(void) { return ps_host_time_monotonic_ns(); }
 const char *runtime_import_name(const char *sz_name);
 /* Arguments (bit N: argument N) the export writes through a pointer, per shadPS4's prototypes; 0
  * when it has none or the NID is not listed. */

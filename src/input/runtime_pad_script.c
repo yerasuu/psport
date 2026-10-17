@@ -10,7 +10,7 @@
 #include <SDL3/SDL.h>
 #include <sys/stat.h>
 
-static uint64_t now_us(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC,&t); return (uint64_t)t.tv_sec*1000000u+(uint64_t)t.tv_nsec/1000u; }
+static uint64_t now_us(void) { return ps_host_time_monotonic_ns()/1000u; }
 /* PS_PAD_FILE=<file>: scripted input for automated runs. The file holds whitespace-separated
  * tokens, re-read when it changes: button names (cross circle square triangle l1 r1 l2 r2 l3 r3
  * options touchpad touchpad_left touchpad_right up down left right) are held while listed;

@@ -44,7 +44,7 @@ static void *toggle_watcher(void *p_path) {
             printf("Runtime: disabled optimizations mask=%llu\n",value);
             last=value;
         }
-        struct timespec t={0,250000000}; nanosleep(&t,NULL);
+        ps_host_time_sleep_ns(250000000,NULL);
     }
     return NULL;
 }

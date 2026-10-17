@@ -62,7 +62,7 @@ static int32_t scaled(int32_t delta, float *p_carry) {
     return whole;
 }
 
-static uint64_t now_us(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC,&t); return (uint64_t)t.tv_sec*1000000u+(uint64_t)t.tv_nsec/1000u; }
+static uint64_t now_us(void) { return ps_host_time_monotonic_ns()/1000u; }
 static MousePort *port_of(int32_t h_handle) { return h_handle>=1 && h_handle<=MOUSE_HANDLES && s_ports[h_handle-1].is_open ? &s_ports[h_handle-1] : NULL; }
 static uint32_t ps4_buttons(uint32_t sdl) {
     return (sdl & SDL_BUTTON_LMASK ? BTN_PRIMARY : 0) | (sdl & SDL_BUTTON_RMASK ? BTN_SECONDARY : 0) |

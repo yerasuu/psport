@@ -94,7 +94,7 @@ static int s_cal_base[4];                /* 0: normal pad; else |neutral| of a b
 static int s_cal_max[4][2];              /* largest push seen per direction on a biased axis */
 static uint64_t s_cal_since;
 
-static uint64_t now_us(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC,&t); return (uint64_t)t.tv_sec*1000000u+(uint64_t)t.tv_nsec/1000u; }
+static uint64_t now_us(void) { return ps_host_time_monotonic_ns()/1000u; }
 static uint8_t trigger(int16_t v) { int x=v>>7; return (uint8_t)(x<0 ? 0 : x>255 ? 255 : x); }
 static void cal_load(void) {
     static int s_is_loaded;
