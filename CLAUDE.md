@@ -78,7 +78,7 @@ converted area by area in its own commits; new and touched code follows this now
   `main` only after a clean night run. The user pushes.
 - One useful commit per task, carrying its docs, FORK.md rows and comments; always Conventional
   Commits `type(area): subject` (imperative English, ~50 characters, 72 at most; type and area from
-  the board tags: psport, loader, kernel, system, gpu, audio, video, input, net, regress,
+  the board tags: psport, loader, kernel, system, gpu, audio, video, input, net, regress-test,
   toolchain) with an optional one-to-four-line body, after a blank line, giving the why;
   `BREAKING CHANGE:` footer when it breaks launchers or settings; no AI attribution; signed.
 - psport is an independent project, not a fork: never merge bbport or shadPS4 wholesale. Review
