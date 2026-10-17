@@ -47,6 +47,9 @@ int runtime_pad_mouse_look(void);
  * mouse button (Left Right Middle X1 X2, Wheel Up, Wheel Down), 'F' a face button (A B X Y), 'S' a
  * shoulder or trigger (LB RB LT RT; L R ZL ZR), 'C' another button or a stick (LS RS Menu View ...). */
 int runtime_pad_prompt(const char *sz_input, int should_prefer_mouse, char *sz_out_label, size_t cb_label);
+/* 1 once per press of psport.ini's key.menu or pad.menu binding (unbound: never), for the overlay's
+ * window-thread event handler, which toggles the port's menu on it. */
+int runtime_pad_menu_pressed(void);
 void runtime_pad_record_sample(const PadData *p_pad_data);
 /* Motion emulation (runtime_pad_motion.c). configure: psport.ini's pad_motion (-1 without the line),
  * PS_PAD_MOTION wins; the rest only while it is on. begin: once per sample, the seconds since the

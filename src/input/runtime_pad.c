@@ -286,17 +286,21 @@ static void report_guest_heap(void) {
  * keyboard the sticks: move_* (left), look_* (right). Gamepad names as SDL's: a b x y back start leftstick rightstick leftshoulder
  * rightshoulder dpup dpdown dpleft dpright touchpad misc1 paddle1-4, plus lefttrigger and
  * righttrigger. The keyboard works next to a gamepad (the Steam Deck always has one): its buttons
- * add to the gamepad's, a held move/look key moves the stick all the way. */
+ * add to the gamepad's, a held move/look key moves the stick all the way.
+ * menu is no PS4 input: key.menu (keys, a chord allowed) and pad.menu (buttons, or a two-button
+ * chord "leftstick+rightstick") open and close the port's menu (runtime_pad_menu_pressed), besides
+ * the built-in Insert and L3+R3, and are unbound unless set. While a menu binding is held, its keys
+ * and buttons reach no other input, so it wins over the game's use of them. */
 enum {
     IN_CROSS, IN_CIRCLE, IN_SQUARE, IN_TRIANGLE, IN_L1, IN_R1, IN_L2, IN_R2, IN_L3, IN_R3,
     IN_OPTIONS, IN_TOUCHPAD, IN_TOUCHPAD_RIGHT, IN_UP, IN_DOWN, IN_LEFT, IN_RIGHT,
     IN_MOVE_UP, IN_MOVE_DOWN, IN_MOVE_LEFT, IN_MOVE_RIGHT, IN_LOOK_UP, IN_LOOK_DOWN, IN_LOOK_LEFT,
-    IN_LOOK_RIGHT, IN_COUNT
+    IN_LOOK_RIGHT, IN_MENU, IN_COUNT
 };
 static const char *const s_input_names[IN_COUNT]={
     "cross","circle","square","triangle","l1","r1","l2","r2","l3","r3","options","touchpad",
     "touchpad_right","up","down","left","right","move_up","move_down","move_left","move_right",
-    "look_up","look_down","look_left","look_right",
+    "look_up","look_down","look_left","look_right","menu",
 };
 static const uint32_t s_input_buttons[IN_COUNT]={
     BTN_CROSS,BTN_CIRCLE,BTN_SQUARE,BTN_TRIANGLE,BTN_L1,BTN_R1,BTN_L2,BTN_R2,BTN_L3,BTN_R3,
@@ -313,10 +317,11 @@ static const struct { const char *sz_name; int code; } s_mouse_keys[]={
     {"Mouse X2",MOUSE_KEY+SDL_BUTTON_X2}, {"Wheel Up",MOUSE_WHEEL_UP}, {"Wheel Down",MOUSE_WHEEL_DOWN},
 };
 enum { PAD_LEFT_TRIGGER=SDL_GAMEPAD_BUTTON_COUNT, PAD_RIGHT_TRIGGER }; /* triggers as buttons */
-/* keys[i] needs mods[i] held too when mods[i] is not -1 (a chord: "Left Shift+Mouse Left"). */
-typedef struct { int c_keys, c_pads; int keys[MAX_BIND]; int mods[MAX_BIND]; int pad[MAX_BIND]; } Binding;
+/* keys[i] needs mods[i] held too when mods[i] is not -1 (a chord: "Left Shift+Mouse Left"); pad[i]
+ * likewise needs pad_mods[i] (pad.menu only). */
+typedef struct { int c_keys, c_pads; int keys[MAX_BIND]; int mods[MAX_BIND]; int pad[MAX_BIND]; int pad_mods[MAX_BIND]; } Binding;
 static Binding s_bindings[IN_COUNT];
-static int s_is_bindings_ready;
+static int s_is_bindings_ready, s_is_menu_held;
 
 static void bind_defaults(void) {
     static const struct { int input; int key; } s_keys[]={
@@ -350,7 +355,8 @@ static void bind_defaults(void) {
         p_binding->mods[p_binding->c_keys]=-1; p_binding->keys[p_binding->c_keys++]=s_keys[i].key;
     }
     for (size_t i=0;i<sizeof(s_pads)/sizeof(*s_pads);++i) {
-        Binding *p_binding=&s_bindings[s_pads[i].input]; p_binding->pad[p_binding->c_pads++]=s_pads[i].button;
+        Binding *p_binding=&s_bindings[s_pads[i].input];
+        p_binding->pad_mods[p_binding->c_pads]=-1; p_binding->pad[p_binding->c_pads++]=s_pads[i].button;
     }
 }
 static int pad_button_from_name(const char *sz_name) {
@@ -376,7 +382,7 @@ static int apply_binding_line(const char *sz_key, const char *sz_value, const ch
     if (!keyboard && !pad) return 0;
     int input=-1;
     for (int i=0;i<IN_COUNT;++i) if (!strcmp(sz_key+4,s_input_names[i])) input=i;
-    if (input<0 || (pad && input>=IN_MOVE_UP)) { printf("Runtime: controls: unknown input %s (%s)\n",sz_key,sz_origin); return 1; }
+    if (input<0 || (pad && input>=IN_MOVE_UP && input!=IN_MENU)) { printf("Runtime: controls: unknown input %s (%s)\n",sz_key,sz_origin); return 1; }
     Binding *p_binding=&s_bindings[input];
     if (keyboard) p_binding->c_keys=0; else p_binding->c_pads=0;
     char sz_names[512];
@@ -399,13 +405,28 @@ static int apply_binding_line(const char *sz_key, const char *sz_value, const ch
             }
             const int s=key_from_name(sz_name);
             if (s<0) printf("Runtime: controls: unknown key \"%s\" for %s (%s)\n",sz_name,sz_key+4,sz_origin);
+            else if (input==IN_MENU && (s>=MOUSE_KEY || mod>=MOUSE_KEY))
+                printf("Runtime: controls: \"%s\" ignored for menu, which takes keyboard keys only (%s)\n",sz_name,sz_origin);
             else if (p_binding->c_keys<MAX_BIND) { p_binding->mods[p_binding->c_keys]=mod; p_binding->keys[p_binding->c_keys++]=s; }
         } else {
+            int mod=-1;
+            char *p_plus=input==IN_MENU ? strchr(sz_name,'+') : NULL;
+            if (p_plus) {
+                *p_plus=0;
+                for (char *sz_end=p_plus; sz_end>sz_name && sz_end[-1]==' ';) *--sz_end=0;
+                mod=pad_button_from_name(sz_name);
+                sz_name=p_plus+1;
+                while (*sz_name==' ') ++sz_name;
+            }
             const int button=pad_button_from_name(sz_name);
-            if (button<0) printf("Runtime: controls: unknown gamepad button \"%s\" for %s (%s)\n",sz_name,sz_key+4,sz_origin);
-            else if (p_binding->c_pads<MAX_BIND) p_binding->pad[p_binding->c_pads++]=button;
+            if (button<0 || (p_plus && mod<0))
+                printf("Runtime: controls: unknown gamepad button in \"%s\" for %s (%s)\n",sz_value,sz_key+4,sz_origin);
+            else if (p_binding->c_pads<MAX_BIND) { p_binding->pad_mods[p_binding->c_pads]=mod; p_binding->pad[p_binding->c_pads++]=button; }
         }
     }
+    if (input==IN_MENU)
+        printf("Runtime: controls: the port's menu on %s \"%s\" (%s; %d bound), besides Insert and L3+R3\n",
+               keyboard ? "keys" : "gamepad buttons",sz_value,sz_origin,keyboard ? p_binding->c_keys : p_binding->c_pads);
     return 1;
 }
 /* The running title's default controls (psport.ini lines, one per line), over the neutral ones. */
@@ -478,11 +499,35 @@ static int is_chord_held(const bool *p_is_key_down, int code) {
                 code_down(p_is_key_down,s_bindings[input].mods[i])) return 1;
     return 0;
 }
+/* Whether code belongs to a held key.menu binding: it then reaches no other input. */
+static int is_menu_key(const bool *p_is_key_down, int code) {
+    const Binding *p_menu=&s_bindings[IN_MENU];
+    for (int i=0;i<p_menu->c_keys;++i) {
+        const int key=p_menu->keys[i], mod=p_menu->mods[i];
+        if ((code==key || code==mod) && code_down(p_is_key_down,key) && (mod<0 || code_down(p_is_key_down,mod))) return 1;
+    }
+    return 0;
+}
 static int key_down(const bool *p__bool, int input) {
     for (int i=0;i<s_bindings[input].c_keys;++i) {
         const int code=s_bindings[input].keys[i], mod=s_bindings[input].mods[i];
-        if (!code_down(p__bool,code)) continue;
+        if (!code_down(p__bool,code) || (input!=IN_MENU && is_menu_key(p__bool,code))) continue;
         if (mod>=0 ? code_down(p__bool,mod) : !is_chord_held(p__bool,code)) return 1;
+    }
+    return 0;
+}
+static int pad_button_value(SDL_Gamepad *p_sdl_gamepad, int button) {
+    return button==PAD_LEFT_TRIGGER ? trigger(SDL_GetGamepadAxis(p_sdl_gamepad,SDL_GAMEPAD_AXIS_LEFT_TRIGGER))
+         : button==PAD_RIGHT_TRIGGER ? trigger(SDL_GetGamepadAxis(p_sdl_gamepad,SDL_GAMEPAD_AXIS_RIGHT_TRIGGER))
+         : SDL_GetGamepadButton(p_sdl_gamepad,(SDL_GamepadButton)button) ? 255 : 0;
+}
+/* Whether button belongs to a held pad.menu binding: it then reaches no other input. */
+static int is_menu_button(SDL_Gamepad *p_sdl_gamepad, int button) {
+    const Binding *p_menu=&s_bindings[IN_MENU];
+    for (int i=0;i<p_menu->c_pads;++i) {
+        const int held=p_menu->pad[i], mod=p_menu->pad_mods[i];
+        if ((button==held || button==mod) && pad_button_value(p_sdl_gamepad,held)>30 &&
+            (mod<0 || pad_button_value(p_sdl_gamepad,mod)>30)) return 1;
     }
     return 0;
 }
@@ -490,13 +535,28 @@ static int key_down(const bool *p__bool, int input) {
 static int pad_value(SDL_Gamepad *p_sdl_gamepad, int input) {
     int value=0;
     for (int i=0;i<s_bindings[input].c_pads;++i) {
-        const int b=s_bindings[input].pad[i];
-        const int v=b==PAD_LEFT_TRIGGER ? trigger(SDL_GetGamepadAxis(p_sdl_gamepad,SDL_GAMEPAD_AXIS_LEFT_TRIGGER))
-                  : b==PAD_RIGHT_TRIGGER ? trigger(SDL_GetGamepadAxis(p_sdl_gamepad,SDL_GAMEPAD_AXIS_RIGHT_TRIGGER))
-                  : SDL_GetGamepadButton(p_sdl_gamepad,(SDL_GamepadButton)b) ? 255 : 0;
+        const int b=s_bindings[input].pad[i], mod=s_bindings[input].pad_mods[i];
+        if (mod>=0 && pad_button_value(p_sdl_gamepad,mod)<=30) continue;
+        if (input!=IN_MENU && is_menu_button(p_sdl_gamepad,b)) continue;
+        const int v=pad_button_value(p_sdl_gamepad,b);
         if (v>value) value=v;
     }
     return value;
+}
+/* Called by the overlay on every key and gamepad button event, outside its own lock since the pad's
+ * lock is taken before the overlay's elsewhere (runtime_pad_read_inject). Until the game's first pad
+ * read loads the bindings there is nothing bound. */
+int runtime_pad_menu_pressed(void) {
+    pthread_mutex_lock(&s_lock);
+    int is_held=0;
+    if (s_is_bindings_ready) {
+        const bool *p_is_key_down=SDL_WasInit(SDL_INIT_VIDEO) && !runtime_keyboard_taken() ? SDL_GetKeyboardState(NULL) : NULL;
+        is_held=key_down(p_is_key_down,IN_MENU) || (s_p_gamepad && pad_value(s_p_gamepad,IN_MENU)>30);
+    }
+    const int is_pressed=is_held && !s_is_menu_held;
+    s_is_menu_held=is_held;
+    pthread_mutex_unlock(&s_lock);
+    return is_pressed;
 }
 
 /* key held for the negative / positive direction: the stick all the way, else the gamepad's. */

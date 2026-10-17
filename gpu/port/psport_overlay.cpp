@@ -41,6 +41,7 @@ extern "C" const unsigned char psport_font_ttf_end[];
 extern "C" void runtime_restart(void); // psport (src/runtime/runtime_restart.c)
 extern "C" const char* runtime_toypad_file(void);              // src/system/runtime_toypad.c
 extern "C" void runtime_toypad_lights(uint32_t p_out_colours[3]); // src/system/runtime_toypad.c
+extern "C" int runtime_pad_menu_pressed(void);                    // src/input/runtime_pad.c
 
 namespace PsOverlay {
 
@@ -1197,6 +1198,10 @@ void UpdateTextInput(SDL_Window* p_window) {
 }
 
 bool HandleEvent(const SDL_Event& event) {
+    const bool is_input_event = event.type == SDL_EVENT_KEY_DOWN || event.type == SDL_EVENT_KEY_UP ||
+                                event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN || event.type == SDL_EVENT_GAMEPAD_BUTTON_UP;
+    // Asked before taking the ImGui lock because the runtime takes its pad lock before this one.
+    const bool is_menu_pressed = is_input_event && runtime_pad_menu_pressed() != 0;
     std::scoped_lock lock{s_imgui_mutex};
     if (!s_is_initialized) {
         return false;
@@ -1225,6 +1230,10 @@ bool HandleEvent(const SDL_Event& event) {
         }
         if (is_down && !event.key.repeat && !is_open && event.key.key == SDLK_HOME) {
             OpenClosePrompt();
+            return true;
+        }
+        if (is_menu_pressed) {
+            SetOpen(!is_open);
             return true;
         }
         if (is_down && !event.key.repeat &&
@@ -1270,7 +1279,7 @@ bool HandleEvent(const SDL_Event& event) {
             OpenClosePrompt();
             return true;
         }
-        if (is_down && s_is_l3_down && s_is_r3_down) {
+        if (is_down && ((s_is_l3_down && s_is_r3_down) || is_menu_pressed)) {
             SetOpen(!is_open);
             return true;
         }

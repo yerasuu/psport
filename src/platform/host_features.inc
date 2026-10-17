@@ -85,6 +85,13 @@ FEATURE_HOST(input_sensors, LINUX, IMPLEMENTED,
              "SDL3 gamepad sensors (runtime_pad_sensors.c); pads without them get the motion emulation or rest",
              "#550")
 
+FEATURE(port_menu_binding, io, "psport.ini's key.menu and pad.menu: a key, gamepad button or two-button chord that opens "
+                               "the port's menu besides Insert and L3+R3")
+FEATURE_HOST(port_menu_binding, LINUX, IMPLEMENTED,
+             "SDL3 keyboard and gamepad state on the window thread's events (runtime_pad.c runtime_pad_menu_pressed, "
+             "gpu/port/psport_overlay.cpp)",
+             "#557")
+
 FEATURE(window, io, "the game's window and its Vulkan surface")
 FEATURE_HOST(window, LINUX, IMPLEMENTED, "SDL3 (gpu/shim/window.cpp)", "#540")
 

@@ -302,6 +302,11 @@ unless the running title brings its own (`Game::Title` `sz_default_controls`, `p
 read through `psport_gpu_title_controls`; Bloodborne's is close to Dark Souls III on PC); the
 player's `key.<input>=` and `pad.<input>=` lines in `psport.ini` win over both. A key may be a chord,
 `key.r2=Left Shift+Mouse Left`: while its modifier is held the key's plain bindings do not count.
+`key.menu=` (keyboard keys, a chord allowed) and `pad.menu=` (gamepad buttons, each may be a
+two-button chord, `pad.menu=back,leftshoulder+rightshoulder`) open and close the overlay menu like
+Insert and L3+R3, which keep working; both are unbound unless set, logged when read, and listed as
+`port_menu_binding` by `--list-features`. While a menu binding is held its keys and buttons reach
+no other input, so it wins over the game's use of them; the built-in Insert and L3+R3 do not.
 A gamepad with motion sensors (DualShock 4, DualSense, Switch Pro, the Steam Deck when SDL reaches its
 own device) has them enabled when it is opened, again after each reconnection, and read at every pad
 read (`src/input/runtime_pad_sensors.c`): SDL's gamepad sensor frame is the DualShock 4's, so the
