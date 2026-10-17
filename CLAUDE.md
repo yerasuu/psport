@@ -91,3 +91,17 @@ converted area by area in its own commits; new and touched code follows this now
 - Keep changes focused and minimal. Do not refactor or reformat unrelated code.
 - Prefer reusing existing abstractions in the codebase over introducing new ones.
 - Make sure the project builds before proposing changes.
+
+## Recording work (mandatory)
+
+psport's tasks, decisions and notes live on decanter's kanbrain board: run `kb` from decanter's
+checkout. Everything done in a session is recorded there as it happens; the user follows it live and
+it is the only record other sessions read.
+
+- Work that changes the repository, the user's files or settings gets its task before it starts
+  (`kb add --start`).
+- Each step lands as a comment when it happens: builds, game runs and their results, rebases and how
+  each conflict was resolved, integrations, cleanups.
+- Every answer the user gives is a decision (`kb add --decision`); every non-obvious finding a note
+  (`kb add --note`).
+- Before ending a turn, check that nothing done or decided in it is missing from the board.
