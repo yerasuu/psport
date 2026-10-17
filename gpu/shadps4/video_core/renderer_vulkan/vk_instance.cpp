@@ -504,6 +504,7 @@ bool Instance::CreateDevice() {
     vk12_features = feature_chain.get<vk::PhysicalDeviceVulkan12Features>();
     vk13_features = feature_chain.get<vk::PhysicalDeviceVulkan13Features>();
     // psport: DLSS (optional bridge library) needs its own device extensions on NVIDIA GPUs.
+    const size_t c_own_extensions = enabled_extensions.size();
     std::vector<const char*> dlss_extensions;
     if (Dlss* dlss = Dlss::Get()) {
         dlss->AppendDeviceExtensions(*instance, physical_device, dlss_extensions);
@@ -751,14 +752,57 @@ bool Instance::CreateDevice() {
         device_chain.unlink<vk::PhysicalDeviceShaderFloat8FeaturesEXT>();
     }
 
-    auto [device_result, dev] = physical_device.createDeviceUnique(device_chain.get());
-    if (device_result != vk::Result::eSuccess) {
-        LOG_CRITICAL(Render_Vulkan, "Failed to create device: {}", vk::to_string(device_result));
+    auto created = physical_device.createDeviceUnique(device_chain.get());
+    if (created.result != vk::Result::eSuccess && enabled_extensions.size() > c_own_extensions) {
+        // psport: the driver advertises NGX's extensions, but they need what the system may lack
+        // (libcuda.so.1 where the loader looks, the nvidia-uvm module) and creation fails with
+        // ErrorInitializationFailed. DLSS is optional, so try again without them (#135, #147).
+        LOG_WARNING(Render_Vulkan,
+                    "Device creation with the DLSS extensions failed ({}): again without them",
+                    vk::to_string(created.result));
+        if (Dlss* dlss = Dlss::Get()) {
+            dlss->Disable("the Vulkan device does not start with NGX's extensions: NVIDIA's "
+                          "libcuda.so.1 or the nvidia-uvm module is missing");
+        }
+        enabled_extensions.resize(c_own_extensions);
+        device_chain.get<vk::DeviceCreateInfo>().enabledExtensionCount =
+            static_cast<u32>(enabled_extensions.size());
+        created = physical_device.createDeviceUnique(device_chain.get());
+    }
+    if (created.result != vk::Result::eSuccess) {
+        LOG_CRITICAL(Render_Vulkan, "Failed to create device: {}", vk::to_string(created.result));
         return false;
     }
-    device = std::move(dev);
+    device = std::move(created.value);
 
     VULKAN_HPP_DEFAULT_DISPATCHER.init(*device);
+    // psport: an extension the driver lists and enables but whose commands it does not resolve
+    // counts as missing, because calling them jumped to address 0 (NVIDIA 595, #161; Intel ANV,
+    // #177).
+    const auto& dispatch = VULKAN_HPP_DEFAULT_DISPATCHER;
+    const auto require_commands = [](bool& is_enabled, const void* p_command,
+                                     std::string_view name) {
+        if (is_enabled && !p_command) {
+            LOG_WARNING(Render_Vulkan, "{} is enabled but its commands are not resolved: off",
+                        name);
+            is_enabled = false;
+        }
+    };
+    require_commands(buffer_marker,
+                     reinterpret_cast<const void*>(dispatch.vkCmdWriteBufferMarkerAMD),
+                     VK_AMD_BUFFER_MARKER_EXTENSION_NAME);
+    require_commands(vertex_input_dynamic_state,
+                     reinterpret_cast<const void*>(dispatch.vkCmdSetVertexInputEXT),
+                     VK_EXT_VERTEX_INPUT_DYNAMIC_STATE_EXTENSION_NAME);
+    require_commands(dynamic_state_3,
+                     reinterpret_cast<const void*>(dispatch.vkCmdSetColorWriteMaskEXT),
+                     VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME);
+    require_commands(guest_memory_export,
+                     reinterpret_cast<const void*>(dispatch.vkGetMemoryFdKHR),
+                     VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME);
+    require_commands(host_memory_import,
+                     reinterpret_cast<const void*>(dispatch.vkGetMemoryHostPointerPropertiesEXT),
+                     VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME);
     if (Dlss* dlss = Dlss::Get()) {
         dlss->Initialize(*instance, physical_device, *device);
     }

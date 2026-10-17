@@ -26,6 +26,18 @@ source commit), as the rows below already are. Last reviewed points:
   outside `gpu/shadps4/` (libSceFiber, libSceFont, Videodec2, the per-NID tables, Audio3d, memory
   pools) follows `3a9f572`, as its rows say.
 
+### Ported from bbport
+
+| Change | Files | Source | Here |
+|---|---|---|---|
+| The device is created again without NGX's extensions when it fails with them (DLSS off, FSR 3.1 stays) | `gpu/shadps4/video_core/renderer_vulkan/vk_instance.cpp` (`CreateDevice`), `vk_dlss.*` (`Dlss::Disable`) | bbport `72e5c8c` (#135, #147, #152) | as is; the launcher's `libcuda` is its own row |
+| An extension whose commands the driver does not resolve after the dispatcher's init is turned off (RIP=0) | `gpu/shadps4/video_core/renderer_vulkan/vk_instance.cpp` (`CreateDevice`) | bbport `72e5c8c` (#161, #177, #181) | `VK_AMD_buffer_marker`, `VK_EXT_vertex_input_dynamic_state`, `VK_EXT_extended_dynamic_state3`, `VK_KHR_external_memory_fd` (guest memory export), `VK_EXT_external_memory_host`; logged, no assert for push descriptors |
+| Thread records (the `ScePthread` handles) below 40 bits, carved from `runtime_low_map` (lamp travel hung at loading) | `src/kernel/runtime_thread.c` (`allocate_low_record`) | bbport `72e5c8c` (PR #193) | a record outside low memory is logged and counted in the thread report |
+| Every upload of a GPU-modified image stores its level hashes, a `GpuDirty` one too, so the first refresh does not upload unchanged bytes over the GPU's data | `gpu/shadps4/video_core/texture_cache/texture_cache.cpp` (`RefreshImage`) | bbport `72e5c8c` (#178) | as is |
+| Pipeline cache: a geometry-shader pipeline keeps its vertex stage's fetch shader; NVIDIA's clip-distance discard shader saved after `xfb_stride` (older entries read without it, no version change); a draw without a pixel shader decides clip-distance emulation from its own registers | `gpu/shadps4/video_core/renderer_vulkan/vk_pipeline_serialization.cpp`, `vk_graphics_pipeline.cpp`, `vk_pipeline_cache.cpp` (`NeedsClipDistanceEmulation`) | bbport `72e5c8c` | an entry left half loaded lends nothing to the next |
+| Bloodborne: a null node from the per-frame GX heap skips the render command's post instead of faulting at `0x2199310` | `gpu/games/bloodborne/guest_hooks.cpp` (`InstallGxNodeGuard`, `Report`), `title.cpp`, `src/runtime/runtime_quirks.inc` | bbport `72e5c8c` (#162, #192) | declared `WORKAROUND` quirk `bloodborne_gx_node_guard` until #504 ([docs/en/QUIRKS.md](docs/en/QUIRKS.md)), over psport's guest hooks (a trap with `PS_GUEST_HOOK_TRAPS=1`); deferred commands counted in the profile's stats report |
+| `raise_exception` logs its caller and the game's return addresses up the stack | `src/kernel/runtime_kernel.c` (`raise_exception`), `src/kernel/runtime_module.c` (`runtime_module_locate`) | bbport `72e5c8c` | by loaded module and offset instead of Bloodborne's text bounds; the stack walk stops at the thread's stack end |
+
 ## Names
 
 The port's binary is `out/psport`, its GPU library `out/gpu/libpsport-gpu.so` and the optional DLSS

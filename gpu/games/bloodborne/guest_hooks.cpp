@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "guest_hooks.h"
 #include "heap_sites.h"
+#include "psport_quirks.h"
 #include "psport_toggles.h"
 
 #include <array>
@@ -59,6 +60,20 @@ constexpr std::array<CallSite, 2> MemcpySites = {{
     {0x2171fea, {0xe8, 0xc1, 0x81, 0x4a, 0x00}},
 }};
 std::array<std::atomic<u64>, MemcpySites.size()> s_hits{};
+
+/// The GX swap chain's per-frame render command (bbport #162, #192): its 16-byte node comes from
+/// a per-frame bump allocator that returns null once the frame's heap is used up, and the game
+/// writes through it unchecked (`mov [r12 + 8], r13` at 0x2199310, then posts it to the render
+/// thread): a guest fault at address 8. Without a node the post is skipped and the pending flag
+/// (this + 0x3ab) stays set, so the command goes out with the next frame. A WORKAROUND quirk
+/// (bloodborne_gx_node_guard) until #504 finds why the heap fills under psport.
+constexpr u64 GxNodeSite = 0x2199310;
+constexpr u64 GxNodeSkip = 0x219934e; // past the post and the flag's clear
+constexpr unsigned char GxNodeCode[9] = {0x4d, 0x89, 0x6c, 0x24, 0x08,  // mov [r12 + 8], r13
+                                         0x49, 0x8b, 0x87, 0xb0};        // mov rax, [r15 + 0xb0]
+std::atomic<u64> s_va_gx_null_trap{0};
+std::atomic<u64> s_c_gx_node_skips{0};
+u64 s_c_gx_node_skips_reported = 0;
 
 /// The game's memcpy at those sites: the GPU side is told before (its write traps lift: no fault
 /// per page) and after the copy (the data now there), as for file reads.
@@ -250,11 +265,48 @@ bool InstallCallDetour(u64 off_code) {
     WriteJumpOverTrap(address, 0xe8, rel);
     return true;
 }
+/// The detour of the GX node site whose int3 is in place (Patch): a null node reaches the stub's
+/// int3, which OnTrap sends past the post.
+bool InstallGxNodeGuard() {
+    const u64 address = ImageBase + GxNodeSite;
+    Emitter e;
+    e.Bytes({0x4d, 0x85, 0xe4});                   // test r12, r12
+    e.Bytes({0x74, 0x13});                         // jz null (past the next 19 bytes)
+    e.Bytes({0x4d, 0x89, 0x6c, 0x24, 0x08});       // mov [r12 + 8], r13
+    e.Bytes({0xff, 0x25, 0x00, 0x00, 0x00, 0x00}); // jmp [rip]
+    e.U64(address + 5);
+    const std::size_t off_trap = e.m_cb_code;
+    e.Bytes({0xcc}); // null
+    const u64 stub = PlaceStub(e);
+    std::uint32_t rel = 0;
+    if (!stub || !Rel32To(address + 5, stub, rel)) {
+        return false;
+    }
+    s_va_gx_null_trap.store(stub + off_trap, std::memory_order_release);
+    WriteJumpOverTrap(address, 0xe9, rel);
+    return true;
+}
+
 struct sigaction s_previous_action {};
 
 void OnTrap(int sig, siginfo_t* p_info, void* p_context) {
     auto* p_registers = static_cast<ucontext_t*>(p_context)->uc_mcontext.gregs;
     const u64 rip = u64(p_registers[REG_RIP]) - 1; // past the int3
+    const bool is_gx_site = rip == ImageBase + GxNodeSite;
+    if (is_gx_site || (rip != 0 && rip == s_va_gx_null_trap.load(std::memory_order_acquire))) {
+        if (is_gx_site && p_registers[REG_R12] != 0) {
+            *reinterpret_cast<u64*>(u64(p_registers[REG_R12]) + 8) = u64(p_registers[REG_R13]);
+            p_registers[REG_RIP] = greg_t(ImageBase + GxNodeSite + 5);
+            return;
+        }
+        if (s_c_gx_node_skips.fetch_add(1, std::memory_order_relaxed) == 0) {
+            static const char sz_text[] = "Guest hooks: the GX per-frame command heap was full: a render "
+                                          "command waits for the next frame (bbport #162)\n";
+            [[maybe_unused]] const auto cb_written = write(STDOUT_FILENO, sz_text, sizeof(sz_text) - 1);
+        }
+        p_registers[REG_RIP] = greg_t(ImageBase + GxNodeSkip);
+        return;
+    }
     for (const auto& site : s_native_sites) {
         if (rip == ImageBase + site.off_code) {
             if (const u64 stub = site.stub.load(std::memory_order_acquire)) {
@@ -360,6 +412,15 @@ bool Patch(u64 va_range, const unsigned char* p_expected, std::size_t cb_expecte
 }
 } // namespace
 
+void Report() {
+    const u64 c_skips = s_c_gx_node_skips.load(std::memory_order_relaxed);
+    if (c_skips != s_c_gx_node_skips_reported) {
+        std::printf("Guest hooks: %llu render commands waited for a GX node (per-frame heap full)\n",
+                    static_cast<unsigned long long>(c_skips));
+        s_c_gx_node_skips_reported = c_skips;
+    }
+}
+
 void Install(RangeCallback pfn_on_gpu_range_allocated) {
     static std::atomic<bool> s_is_installed{false};
     if (s_is_installed.exchange(true)) {
@@ -394,6 +455,10 @@ void Install(RangeCallback pfn_on_gpu_range_allocated) {
     std::printf("Guest hooks: GPU heap allocations seen at %d of %zu call sites\n", heap_sites,
                 HeapAllocReturns.size());
     std::printf("Guest hooks: GPU memory allocator %s\n", has_allocator_hook ? "tells the GPU side of new ranges" : "not found");
+    const bool is_gx_node_guard_on = PsQuirk::Active(RUNTIME_QUIRK_bloodborne_gx_node_guard);
+    const bool has_gx_node_trap =
+        is_gx_node_guard_on && Patch(ImageBase + GxNodeSite, GxNodeCode, sizeof(GxNodeCode));
+    bool has_gx_node_detour = false;
     // Native detours over the traps just placed (PS_GUEST_HOOK_TRAPS=1 keeps the traps).
     const char* sz_traps_env = std::getenv("PS_GUEST_HOOK_TRAPS");
     if (!(sz_traps_env && sz_traps_env[0] == '1') && (s_p_stub_page = MapStubPage()) != nullptr) {
@@ -408,10 +473,17 @@ void Install(RangeCallback pfn_on_gpu_range_allocated) {
                 detours += InstallDetour(site);
             }
         }
+        has_gx_node_detour = has_gx_node_trap && InstallGxNodeGuard();
+        detours += has_gx_node_detour;
         mprotect(s_p_stub_page, StubPageSize, PROT_READ | PROT_EXEC);
         std::printf("Guest hooks: %d native detours (no traps; PS_GUEST_HOOK_TRAPS=1: int3)\n",
                     detours);
     }
+    std::printf("Guest hooks: GX command heap guard %s\n",
+                !is_gx_node_guard_on ? "off (quirk bloodborne_gx_node_guard disabled)"
+                : has_gx_node_detour ? "in (bbport #162)"
+                : has_gx_node_trap   ? "in as a trap (bbport #162)"
+                                     : "not installed (other code there)");
     PsHeapSites::Install();
     if (const char* sz_env = std::getenv("PS_HEAP_SITES"); sz_env && sz_env[0] == '1') {
         Patch(ImageBase + ReleaseCheck, ReleaseCheckCode, sizeof(ReleaseCheckCode));

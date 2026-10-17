@@ -14,4 +14,6 @@ using RangeCallback = void (*)(std::uint64_t va_range, std::uint64_t cb_range);
 
 /// Installs the hooks once (GPU side, after the game is loaded).
 void Install(RangeCallback pfn_on_gpu_range_allocated);
+/// Prints the total of render commands the GX node guard deferred, when it grew since the last call.
+void Report();
 } // namespace PsGuestHooks

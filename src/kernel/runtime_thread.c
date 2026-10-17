@@ -60,6 +60,7 @@ static const unsigned char *s_p_tls_template;
 static uint64_t s_tls_filesz, s_tls_memsz, s_tls_align=16;
 static size_t s_c_created, s_c_joined, s_c_exited;
 static size_t s_c_cancel_requests, s_c_cancels_taken;
+static size_t s_c_high_records;
 
 void runtime_set_main_tls(const void *p_data,uint64_t filesz,uint64_t memsz,uint64_t align) {
     s_p_tls_template=p_data; s_tls_filesz=filesz; s_tls_memsz=memsz; s_tls_align=align ? align : 16;
@@ -94,8 +95,33 @@ static void attach(GuestThread *p_thread) {
     set_gs(p_tcb);
     s_p_current=p_thread;
 }
+/* A thread's record is its ScePthread handle, and the game packs handles into 40-bit fields:
+ * Bloodborne masks the owner of its hybrid lock to 0xffffffffff and compares it with the whole
+ * handle, so a handle above 40 bits never matches its own lock and the thread sleeps forever
+ * (lamp travel hung at loading, bbport #193). Records are carved from low memory in 256 KiB
+ * pieces; records are never freed. */
+static GuestThread *allocate_low_record(void) {
+    static pthread_mutex_t s_pool_lock=PTHREAD_MUTEX_INITIALIZER;
+    static unsigned char *s_p_pool;
+    static size_t s_cb_left;
+    const size_t cb_record=(sizeof(GuestThread)+63)&~(size_t)63, cb_piece=256*1024;
+    void *p_record=NULL;
+    pthread_mutex_lock(&s_pool_lock);
+    if (s_cb_left<cb_record) {
+        s_p_pool=runtime_low_map(cb_piece,PROT_READ|PROT_WRITE);
+        s_cb_left=s_p_pool ? cb_piece : 0;
+    }
+    if (s_cb_left>=cb_record) { p_record=s_p_pool; s_p_pool+=cb_record; s_cb_left-=cb_record; }
+    pthread_mutex_unlock(&s_pool_lock);
+    return p_record;
+}
 static GuestThread *new_thread(void) {
-    GuestThread *p_thread=calloc(1,sizeof(*p_thread));
+    GuestThread *p_thread=allocate_low_record();
+    if (!p_thread) {
+        fputs("Runtime: no low memory for a thread record; its handle may not fit 40 bits\n",stderr);
+        __atomic_add_fetch(&s_c_high_records,1,__ATOMIC_RELAXED);
+        p_thread=calloc(1,sizeof(*p_thread));
+    }
     if (!p_thread) return NULL;
     p_thread->attr=(ThreadAttr){.magic=ATTR_MAGIC,.policy=1,.prio=DEFAULT_PRIO,.stack=DEFAULT_STACK,.guard=DEFAULT_GUARD,.affinity=0x7f};
     return p_thread;
@@ -522,6 +548,8 @@ void runtime_thread_report(void) {
         printf("Runtime: thread cancellation: %zu requested, %zu taken at pthread_testcancel (blocking "
                "cancellation points and asynchronous cancellation are not honoured)\n",s_c_cancel_requests,
                s_c_cancels_taken);
+    if (s_c_high_records)
+        printf("Runtime: %zu thread records outside low memory (handles above 40 bits)\n",s_c_high_records);
     runtime_exception_unlock(&s_lock);
 }
 #else

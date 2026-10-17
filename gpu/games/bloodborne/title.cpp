@@ -30,7 +30,8 @@ constexpr const char* ModFolders[] = {"action", "adhoc",    "chr",   "event", "f
                                       "menu",   "movie",    "msg",   "mtd",   "obj",     "other",  "param",
                                       "paramdef", "parts",  "remo",  "script", "sfx",    "shader", "sound"};
 
-constexpr RuntimeQuirkId Quirks[] = {RUNTIME_QUIRK_bloodborne_save_sound_flag};
+constexpr RuntimeQuirkId Quirks[] = {RUNTIME_QUIRK_bloodborne_save_sound_flag,
+                                     RUNTIME_QUIRK_bloodborne_gx_node_guard};
 
 /// The "sound hack" (rainvmaker, from the Diegolix29 shadPS4 fork): the game data save carries a
 /// flag at 0x204E of SPRJ0005/userdata0010; with it clear, parts of the game's audio (e.g. the

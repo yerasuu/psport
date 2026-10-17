@@ -12,6 +12,7 @@
 
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "common/types.h"
@@ -31,6 +32,9 @@ public:
                                 std::vector<const char*>& enabled);
     /// After the device exists.
     void Initialize(vk::Instance instance, vk::PhysicalDevice physical, vk::Device device);
+    /// The device could not be created with NGX's extensions (the driver advertises them, but
+    /// what they load is missing: libcuda.so.1, the UVM module): DLSS off, FSR 3.1 instead.
+    void Disable(std::string_view reason);
     void Shutdown();
 
     [[nodiscard]] bool Available() const;

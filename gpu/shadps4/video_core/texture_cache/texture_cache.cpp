@@ -977,10 +977,14 @@ void TextureCache::RefreshImage(Image& image) {
         const auto [mip_size, mip_pitch, mip_height, mip_offset] = image.info.mips_layout[m];
 
         // Protect GPU modified resources from accidental CPU reuploads.
-        if (is_gpu_modified && !is_gpu_dirty) {
+        // psport: every upload of such an image stores the hashes, a GpuDirty one too, so that
+        // the first refresh after the GPU wrote it does not find stale hashes and upload
+        // unchanged memory over the GPU's data (a 1x1 exposure written by a compute shader went
+        // to 0, bbport #178).
+        if (is_gpu_modified) {
             const u8* addr = std::bit_cast<u8*>(image.info.guest_address);
             const u64 hash = XXH3_64bits(addr + mip_offset, mip_size);
-            if (image.mip_hashes[m] == hash) {
+            if (!is_gpu_dirty && image.mip_hashes[m] == hash) {
                 continue;
             }
             image.mip_hashes[m] = hash;

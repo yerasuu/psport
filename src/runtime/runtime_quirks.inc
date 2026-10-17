@@ -49,3 +49,10 @@ QUIRK(bloodborne_save_sound_flag, WORKAROUND,
       "from answers differently from the console, most likely an audio output or system state query (AudioOut, "
       "Audio3d, Ngs2, SystemService); the general fix finds what writes or clears the byte and corrects that library",
       "#348")
+QUIRK(bloodborne_gx_node_guard, WORKAROUND,
+      "Bloodborne's GX swap chain takes its per-frame render command's node from a per-frame bump allocator that "
+      "returns null once the frame's heap is used up, and writes through it unchecked at 0x2199310 (a guest fault at "
+      "address 8, bbport #162, #192): the title's guest hook skips the post for a null node, so the command goes out "
+      "with the next frame. The heap does not fill on a PS4; the general fix finds what makes it fill under psport "
+      "(nodes the render thread releases late, or a frame pacing difference) and corrects that",
+      "#504")

@@ -230,6 +230,23 @@ static ABI __attribute__((noreturn)) void hard_exit(int status) {
 }
 static ABI __attribute__((noreturn)) void raise_exception(uint32_t code,uint64_t argument) {
     fprintf(stderr,"STOP: guest raised debug exception code=0x%x argument=0x%llx\n",code,(unsigned long long)argument);
+    /* Who raised it: the caller and the game's return addresses further up this thread's stack. */
+    const uintptr_t va_caller=(uintptr_t)__builtin_return_address(0);
+    uint64_t off_code=0;
+    const char *sz_module=runtime_module_locate(va_caller,&off_code);
+    if (sz_module) fprintf(stderr,"STOP: called from %s+0x%llx; game code up the stack:",sz_module,(unsigned long long)off_code);
+    else fprintf(stderr,"STOP: called from host 0x%llx; game code up the stack:",(unsigned long long)va_caller);
+    /* Read through the kernel because a guest stack may end before 256 words do. */
+    uint64_t stack[256]={0};
+    struct iovec local={stack,sizeof(stack)}, remote={__builtin_frame_address(0),sizeof(stack)};
+    const ssize_t cb_read=process_vm_readv(getpid(),&local,1,&remote,1,0);
+    for (ssize_t i=0,c_found=0;i<cb_read/8 && c_found<12;++i) {
+        if ((sz_module=runtime_module_locate(stack[i],&off_code))) {
+            fprintf(stderr," %s+0x%llx",sz_module,(unsigned long long)off_code);
+            ++c_found;
+        }
+    }
+    fputc('\n',stderr);
     runtime_report();
     runtime_stop(23);
 }

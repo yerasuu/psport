@@ -277,6 +277,8 @@ void runtime_modules_configure(unsigned char *p_image, RuntimeModule *p_modules,
 /* 1 when this call ran the initializer (its value in *result), 0 when it had run already. */
 int runtime_module_start(size_t h_handle, uint64_t args, const void *p_argp, int32_t *p_result);
 uintptr_t runtime_module_resolve(const char *sz_name);
+/* The loaded module holding va_guest (its file name) and the offset in it; NULL outside them all. */
+const char *runtime_module_locate(uintptr_t va_guest, uint64_t *p_out_offset);
 /* psport.ini (runtime_config.c), read once on first use from PS_CONFIG, else psport.ini in the
  * working directory; the C++ side declares what it uses itself. Keys and values are trimmed, #
  * starts a comment line. The strings stay valid for the process. */

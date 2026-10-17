@@ -235,13 +235,17 @@ GraphicsPipeline::GraphicsPipeline(
         });
     }
     stage = u32(Shader::SwStage::Fragment);
+    // psport: a preloaded pipeline has no runtime infos; its saved discard shader says it.
+    const bool has_discard_fragment =
+        preloading ? !sdata.fragment.empty()
+                   : runtime_infos[stage].hw.fs.clip_distance_emulation;
     if (infos[stage]) {
         shader_stages.emplace_back(vk::PipelineShaderStageCreateInfo{
             .stage = vk::ShaderStageFlagBits::eFragment,
             .module = modules[stage],
             .pName = "main",
         });
-    } else if (runtime_infos[u32(Shader::SwStage::Fragment)].hw.fs.clip_distance_emulation) {
+    } else if (has_discard_fragment) {
         if (!preloading) {
             const auto& vs = runtime_infos[static_cast<u32>(Shader::SwStage::Vertex)].hw.vs;
 

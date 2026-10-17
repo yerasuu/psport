@@ -123,7 +123,10 @@ bool LoadShaderMeta(Serialization::Archive& ar, Shader::Info& info,
         return false;
     }
 
-    fetch_shader_data = spec.fetch_shader_data;
+    // psport: only the vertex stage has one; a later stage (geometry) must not clear it.
+    if (spec.fetch_shader_data) {
+        fetch_shader_data = spec.fetch_shader_data;
+    }
     return true;
 }
 
@@ -209,6 +212,7 @@ void GraphicsPipeline::SerializationSupport::Serialize(Serialization::Archive& a
     sdata.Write(tcs);
     sdata.Write(tes);
     sdata.Write(xfb_stride);
+    sdata.Write(fragment);
 }
 
 bool GraphicsPipeline::SerializationSupport::Deserialize(Serialization::Archive& ar) {
@@ -221,10 +225,19 @@ bool GraphicsPipeline::SerializationSupport::Deserialize(Serialization::Archive&
     sdata.Read(tcs);
     sdata.Read(tes);
     sdata.Read(xfb_stride);
+    // psport: the clip distance discard shader is stored after xfb_stride; older entries end
+    // before it and their pipelines are created without it, as they were.
+    if (!ar.IsEoS()) {
+        sdata.Read(fragment);
+    }
     return true;
 }
 
 bool PipelineCache::LoadGraphicsPipeline(Serialization::Archive& ar) {
+    // psport: an entry left half loaded must not lend its stages or fetch shader to this one.
+    sel.infos.fill(nullptr);
+    sel.modules.fill(nullptr);
+    sel.fetch_shader.reset();
     sel.graphics_key.Deserialize(ar);
 
     GraphicsPipeline::SerializationSupport sdata{};

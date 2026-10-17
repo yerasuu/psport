@@ -86,6 +86,7 @@ visibly and for a limited time (decision #331), on these terms:
 | Id | Title | Code | Stands in for |
 |---|---|---|---|
 | `bloodborne_save_sound_flag` | Bloodborne | `gpu/games/bloodborne/title.cpp` `PrepareSaves` (`Title::pfn_prepare_saves`): byte `0x204E` of `SPRJ0005/userdata0010` set to 1 in the user's saves before the game runs | #348: find what the game decides that byte from (an audio output or system state answer that differs from the console's) and fix that library |
+| `bloodborne_gx_node_guard` | Bloodborne | `gpu/games/bloodborne/guest_hooks.cpp` `InstallGxNodeGuard` and `OnTrap` (installed with the profile's guest hooks): a null node from the GX swap chain's per-frame heap skips the render command's post at `0x2199310` instead of faulting, the command going out with the next frame; deferred commands counted in the profile's stats report | #504: find why the per-frame GX heap fills under psport and not on a PS4, and fix that |
 
 ## Evaluation and readers
 

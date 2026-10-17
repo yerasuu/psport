@@ -25,6 +25,7 @@ void InstallHooks(const CoreServices& services) {
 }
 
 void ReportStats() {
+    PsGuestHooks::Report();
     if (static int s_heap_reports = 0; ++s_heap_reports % 6 == 1) {
         PsHeapSites::Report();
     }

@@ -256,6 +256,10 @@ void Dlss::AppendDeviceExtensions(vk::Instance instance, vk::PhysicalDevice phys
     m_impl->m_is_device_ready = true;
 }
 
+void Dlss::Disable(std::string_view reason) {
+    m_impl->Disable(reason);
+}
+
 void Dlss::Initialize(vk::Instance instance, vk::PhysicalDevice physical, vk::Device device) {
     if (!m_impl->m_is_eligible || !m_impl->m_is_device_ready || m_impl->m_is_initialized) {
         return;
@@ -343,6 +347,7 @@ Dlss* Dlss::Get() {
 void Dlss::AppendInstanceExtensions(std::vector<const char*>&) {}
 void Dlss::AppendDeviceExtensions(vk::Instance, vk::PhysicalDevice, std::vector<const char*>&) {}
 void Dlss::Initialize(vk::Instance, vk::PhysicalDevice, vk::Device) {}
+void Dlss::Disable(std::string_view) {}
 void Dlss::Shutdown() {}
 bool Dlss::Available() const {
     return false;

@@ -214,3 +214,10 @@ static const RuntimeExport s_exports[]={
     {"sceSysmoduleGetModuleInfoForUnwind",module_info_for_unwind},
 };
 uintptr_t runtime_module_resolve(const char *sz_name) { return s_c_modules ? RUNTIME_LOOKUP(s_exports,sz_name) : 0; }
+const char *runtime_module_locate(uintptr_t va_guest, uint64_t *p_out_offset) {
+    const RuntimeModule *p_module=find_address(va_guest);
+    if (!p_module) return NULL;
+    *p_out_offset=va_guest-(uintptr_t)(s_p_image+p_module->base);
+    const char *sz_own=strrchr(p_module->sz_name,'/');
+    return sz_own ? sz_own+1 : p_module->sz_name;
+}
