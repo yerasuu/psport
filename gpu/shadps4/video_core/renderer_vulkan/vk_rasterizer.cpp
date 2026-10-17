@@ -1832,6 +1832,7 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
         runtime.FlushBarriers();
     }
 
+    UiEdgeStretch(pipeline);
     // psport: screen-space (clip disabled) draws into the upscaler's output-size images.
     push_data.xscale *= target_scale[0];
     push_data.xoffset *= target_scale[0];
@@ -1997,6 +1998,33 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
     scheduler.KickRecording();
 }
 
+void Rasterizer::UiEdgeStretch(const GraphicsPipeline* pipeline) {
+    // Every vertex shader but the motion vectors' has the corner snap (EmitUiEdgeStretch), and
+    // reads motion_param; the motion vectors' set their own after this.
+    if (pipeline->GetGraphicsKey().motion_vectors) {
+        return;
+    }
+    push_data.motion_param = 0;
+    // A picture over the whole screen (a title screen's 2048x1024) keeps its proportions, and so
+    // does text (a glyph sheet of 2048x2048). Masked content (Scaleform's masks are stencil
+    // tests: the HUD's item icons slide in a strip much taller than their slot) and the masks stay.
+    const auto& regs = Regs();
+    if (ui_placement.edge_x == 0.0f || regs.IsClipDisabled() ||
+        (regs.depth_control.stencil_enable && regs.depth_buffer.StencilValid())) {
+        return;
+    }
+    const auto* p_ps = pipeline->GetStages()[u32(Shader::SwStage::Fragment)];
+    // Experiment bit 5 (PS_TOGGLE_FILE, while the game runs): big textures stretched too.
+    if (p_ps && !p_ps->images.empty() && !PsToggle::Experiment(1u << 5)) {
+        const auto texture = p_ps->images[0].GetSharp(*p_ps);
+        if (u32(texture.width) + 1 >= 2048 || u32(texture.height) + 1 >= 2048) {
+            return;
+        }
+    }
+    push_data.motion_param =
+        UiComposition::EdgeParam(ui_placement.edge_x, ui_placement.edge_y, regs.viewports[0].yscale > 0.0f);
+}
+
 void Rasterizer::DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u32 stride,
                               u32 max_count, VAddr count_address, u16 vertex_sgpr_offset,
                               u16 instance_sgpr_offset) {
@@ -2080,6 +2108,7 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
         runtime.FlushBarriers();
     }
 
+    UiEdgeStretch(pipeline);
     // psport: screen-space (clip disabled) draws into the upscaler's output-size images.
     push_data.xscale *= target_scale[0];
     push_data.xoffset *= target_scale[0];
@@ -3970,6 +3999,7 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
             attachment_feedback_loop = false;
             push_data.scene_size = begin_memo.scene_size;
             target_scale = begin_memo.target_scale;
+            ui_placement = begin_memo.ui_placement;
             return begin_memo.state;
         }
         ++begin_memo_misses;
@@ -3986,7 +4016,7 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
         if (!clears) {
             // Recomputed after the full path: it may have started the scene (scene_started).
             begin_memo = {true, MakeBeginSignature(pipeline), state, push_data.scene_size,
-                          target_scale};
+                          target_scale, ui_placement};
         }
     }
     return state;
@@ -4224,6 +4254,7 @@ RenderState Rasterizer::BeginRenderingFull(const GraphicsPipeline* pipeline) {
     // psport: a pass drawn into the upscaler's output-size images (UI, display pass): every
     // attachment must be redirected, viewports and scissors are scaled.
     target_scale = {1.0f, 1.0f};
+    ui_placement = {};
     if (color_redirected || depth_redirected) {
         u32 color_targets = 0;
         for (u32 cb = 0; cb < state.num_color_attachments; ++cb) {
@@ -4273,6 +4304,10 @@ RenderState Rasterizer::BeginRenderingFull(const GraphicsPipeline* pipeline) {
             target_scale = UiComposition::Scale(guest_extent.first, guest_extent.second,
                                                 redirect.width, redirect.height,
                                                 native_coordinates);
+            if (const auto edges = UiComposition::ScreenEdges(redirect.width, redirect.height);
+                native_coordinates && (edges[0] < 1.0f || edges[1] < 1.0f)) {
+                ui_placement = {edges[0], edges[1]};
+            }
         }
     }
 

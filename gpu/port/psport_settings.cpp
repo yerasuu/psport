@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -86,10 +87,26 @@ void Set(Values& v, const std::string& key, const std::string& value) {
     } else if (key == "live_resolution") {
         v.live_resolution = value == "auto" ? -1 : std::clamp(i, 0, 1);
     } else if (key == "output_res") {
-        for (int r = 0; r < OutputCount; ++r) {
-            if (value == std::to_string(OutputWidths[r]) + "x" + std::to_string(OutputHeights[r])) {
-                v.output_res = r;
+        int width = 0, height = 0;
+        if (std::sscanf(value.c_str(), "%dx%d", &width, &height) == 2 && width >= 320 && height >= 200 &&
+            width <= 16384 && height <= 16384) {
+            v.output_res = PackSize({width, height});
+        } else {
+            std::printf("Settings: output_res '%s' is not WIDTHxHEIGHT: %s kept\n", value.c_str(),
+                        SizeText(UnpackSize(v.output_res)).c_str());
+        }
+    } else if (key == "aspect_ratio") {
+        int aspect = -1;
+        for (int a = 0; a < AspectCount; ++a) {
+            if (value == AspectKey(a)) {
+                aspect = a;
             }
+        }
+        if (aspect < 0) {
+            std::printf("Settings: unknown aspect_ratio '%s' (expected auto, 4:3, 16:10, 16:9, 21:9 or 32:9)\n",
+                        value.c_str());
+        } else {
+            v.aspect = aspect;
         }
     } else {
         const auto switches = Game::Effects().switches;
@@ -101,7 +118,131 @@ void Set(Values& v, const std::string& key, const std::string& value) {
     }
 }
 
+struct Group {
+    const char* sz_key;
+    double ratio;
+    std::array<OutputSize, 10> sizes;
+    int c_sizes;
+};
+constexpr Group Groups[AspectCount] = {
+    {"auto", 0.0, {}, 0},
+    {"4:3", 4.0 / 3.0,
+     {{{640, 480}, {800, 600}, {1024, 768}, {1280, 960}, {1440, 1080}, {1600, 1200}, {2048, 1536}, {2880, 2160}}},
+     8},
+    {"16:10", 16.0 / 10.0,
+     {{{640, 400}, {960, 600}, {1280, 800}, {1440, 900}, {1680, 1050}, {1920, 1200}, {2560, 1600}, {3840, 2400}}},
+     8},
+    {"16:9", 16.0 / 9.0,
+     {{{640, 360}, {854, 480}, {960, 540}, {1280, 720}, {1600, 900}, {1920, 1080}, {2560, 1440}, {3200, 1800},
+       {3840, 2160}}},
+     9},
+    // 2560x1080 and 5120x2160 are 64:27, 3440x1440 43:18, 3840x1600 12:5: each output's own ratio
+    // is the camera's.
+    {"21:9", 64.0 / 27.0,
+     {{{860, 360}, {1280, 540}, {1720, 720}, {2560, 1080}, {3440, 1440}, {3840, 1600}, {5120, 2160}}},
+     7},
+    {"32:9", 32.0 / 9.0, {{{1280, 360}, {1920, 540}, {2560, 720}, {3840, 1080}, {5120, 1440}, {7680, 2160}}}, 6},
+};
+std::atomic<std::uint32_t> s_monitor{0}; ///< PackSize, 0 until known
 } // namespace
+
+int OutputList::IndexOf(OutputSize size) const {
+    for (int i = 0; i < c_sizes; ++i) {
+        if (sizes[i] == size) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+const char* AspectKey(int aspect) {
+    return Groups[std::clamp(aspect, 0, AspectCount - 1)].sz_key;
+}
+
+OutputSize Monitor() {
+    return UnpackSize(s_monitor.load(std::memory_order_relaxed));
+}
+
+int ResolvedAspect(int aspect) {
+    if (aspect > AspectAuto && aspect < AspectCount) {
+        return aspect;
+    }
+    const OutputSize monitor = Monitor();
+    if (monitor.width <= 0 || monitor.height <= 0) {
+        return Aspect16x9;
+    }
+    const double ratio = double(monitor.width) / monitor.height;
+    int best = Aspect16x9;
+    for (int a = AspectAuto + 1; a < AspectCount; ++a) {
+        if (std::abs(std::log(ratio / Groups[a].ratio)) < std::abs(std::log(ratio / Groups[best].ratio))) {
+            best = a;
+        }
+    }
+    return best;
+}
+
+OutputList Outputs(int aspect) {
+    const Group& group = Groups[ResolvedAspect(aspect)];
+    OutputList list;
+    for (int i = 0; i < group.c_sizes; ++i) {
+        list.sizes[list.c_sizes++] = group.sizes[i];
+    }
+    // Auto: the monitor's own size too (another ratio than its group's sizes, 1366x768, ...).
+    const OutputSize monitor = Monitor();
+    if (aspect == AspectAuto && monitor.width >= 640 && monitor.height >= 360 && monitor.width <= 7680 &&
+        monitor.height <= 4320 && list.IndexOf(monitor) < 0) {
+        int i_at = 0;
+        while (i_at < list.c_sizes && (list.sizes[i_at].height < monitor.height ||
+                                       (list.sizes[i_at].height == monitor.height && list.sizes[i_at].width < monitor.width))) {
+            ++i_at;
+        }
+        for (int i = list.c_sizes; i > i_at; --i) {
+            list.sizes[i] = list.sizes[i - 1];
+        }
+        list.sizes[i_at] = monitor;
+        ++list.c_sizes;
+    }
+    return list;
+}
+
+OutputSize NearestOutput(int aspect, OutputSize size) {
+    const OutputList list = Outputs(aspect);
+    if (list.IndexOf(size) >= 0) {
+        return size;
+    }
+    OutputSize best = list.sizes[0];
+    for (const OutputSize& candidate : list) {
+        if (std::abs(candidate.height - size.height) < std::abs(best.height - size.height)) {
+            best = candidate;
+        }
+    }
+    return best;
+}
+
+OutputSize CurrentOutput() {
+    const auto& v = Get();
+    return NearestOutput(v.aspect.load(std::memory_order_relaxed), UnpackSize(v.output_res.load(std::memory_order_relaxed)));
+}
+
+std::string SizeText(OutputSize size) {
+    return std::to_string(size.width) + "x" + std::to_string(size.height);
+}
+
+void SetMonitor(int width, int height) {
+    const OutputSize monitor{width, height};
+    if (width <= 0 || height <= 0 || monitor == Monitor()) {
+        return;
+    }
+    s_monitor.store(PackSize(monitor), std::memory_order_relaxed);
+    auto& v = Get();
+    // Auto follows the monitor: its output is kept (and saved: run.sh's startup patch reads it).
+    const OutputSize fitted = CurrentOutput();
+    if (v.aspect == AspectAuto && PackSize(fitted) != v.output_res.load()) {
+        std::printf("Output: %s for the monitor (%dx%d, aspect ratio auto)\n", SizeText(fitted).c_str(), width, height);
+        v.output_res = PackSize(fitted);
+        Save();
+    }
+}
 
 Values& Get() {
     static Values s_values;
@@ -175,7 +316,7 @@ void Load() {
         v.startup_effects[e] = v.effects[e];
     }
     v.startup_model_lod = v.model_lod;
-    v.startup_output_res = v.output_res;
+    v.startup_output = CurrentOutput();
     v.startup_live_resolution = v.live_resolution;
 }
 
@@ -220,7 +361,7 @@ bool ResolutionNeedsRestart() {
     const auto& v = Get();
     // TAA needs the live path (native guest targets): run.sh selects it on restart.
     return FixedRenderSession() &&
-        (v.preset != v.startup_preset || v.output_res != v.startup_output_res ||
+        (v.preset != v.startup_preset || CurrentOutput() != v.startup_output ||
          (v.upscaler == UpscalerOff) != (v.startup_upscaler == UpscalerOff) ||
          (v.upscaler == UpscalerTaa) != (v.startup_upscaler == UpscalerTaa));
 }
@@ -264,8 +405,8 @@ void Save() {
     if (effects.has_model_detail) {
         put("model_lod", std::to_string(v.model_lod.load()));
     }
-    put("output_res", std::to_string(OutputWidths[v.output_res]) + "x" +
-                          std::to_string(OutputHeights[v.output_res]));
+    put("aspect_ratio", AspectKey(v.aspect));
+    put("output_res", SizeText(CurrentOutput()));
     // Read by run.sh at start.
     put("live_resolution", v.live_resolution < 0 ? "auto" : flag(v.live_resolution != 0));
     if (v.menu_x >= 0.0f && v.menu_y >= 0.0f) {

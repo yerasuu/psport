@@ -10,6 +10,7 @@ text is the key).
 """
 
 import json
+import math
 import shutil
 import os
 import re
@@ -77,7 +78,54 @@ UPSCALERS = [("FSR 4", "fsr4"), ("FSR 4.1.1", "fsr411"), ("FSR 3", "fsr3"),
              ("TAA (нативное сглаживание)", "taa"), ("Выключен", "off")]
 PRESETS = [("Native AA", 0), ("Quality (x1.5)", 1), ("Balanced (x1.7)", 2),
            ("Performance (x2)", 3), ("Ultra Performance (x3)", 4)]
-OUTPUT_RES = [("1280×720 (Steam Deck)", "1280x720"), ("1920×1080", "1920x1080"), ("2560×1440", "2560x1440"), ("3840×2160", "3840x2160")]
+# Output aspect ratios and their resolutions (gpu/port/psport_settings.cpp, the same lists): the
+# game keeps its 1920x1080 frame; where its profile follows the output (Bloodborne) its camera sees
+# more to the sides (above and below) and the UI keeps to the screen edges, changed live; other
+# games keep 16:9 in the middle. Auto: the monitor's group.
+ASPECTS = ["auto", "4:3", "16:10", "16:9", "21:9", "32:9"]
+ASPECT_RATIOS = {"4:3": 4 / 3, "16:10": 16 / 10, "16:9": 16 / 9, "21:9": 64 / 27, "32:9": 32 / 9}
+OUTPUTS = {
+    "4:3": [(640, 480), (800, 600), (1024, 768), (1280, 960), (1440, 1080), (1600, 1200), (2048, 1536),
+            (2880, 2160)],
+    "16:10": [(640, 400), (960, 600), (1280, 800), (1440, 900), (1680, 1050), (1920, 1200), (2560, 1600),
+              (3840, 2400)],
+    "16:9": [(640, 360), (854, 480), (960, 540), (1280, 720), (1600, 900), (1920, 1080), (2560, 1440),
+             (3200, 1800), (3840, 2160)],
+    "21:9": [(860, 360), (1280, 540), (1720, 720), (2560, 1080), (3440, 1440), (3840, 1600), (5120, 2160)],
+    "32:9": [(1280, 360), (1920, 540), (2560, 720), (3840, 1080), (5120, 1440), (7680, 2160)],
+}
+
+
+def resolved_aspect(aspect, monitor):
+    """The aspect ratio group: Auto is the one nearest the monitor's (16:9 when unknown)."""
+    if aspect in OUTPUTS:
+        return aspect
+    if not monitor:
+        return "16:9"
+    ratio = monitor[0] / monitor[1]
+    return min(OUTPUTS, key=lambda a: abs(math.log(ratio / ASPECT_RATIOS[a])))
+
+
+def output_sizes(aspect, monitor):
+    """The resolutions of an aspect ratio; Auto adds the monitor's own size."""
+    sizes = list(OUTPUTS[resolved_aspect(aspect, monitor)])
+    if (aspect == "auto" and monitor and monitor not in sizes and 640 <= monitor[0] <= 7680
+            and 360 <= monitor[1] <= 4320):
+        sizes = sorted(sizes + [monitor], key=lambda size: (size[1], size[0]))
+    return sizes
+
+
+def nearest_output(sizes, size):
+    """The size itself if listed, else the one nearest in height (another aspect ratio keeps it)."""
+    return size if size in sizes else min(sizes, key=lambda s: abs(s[1] - size[1]))
+
+
+def parse_size(text, default=(1920, 1080)):
+    try:
+        width, height = (int(v) for v in text.lower().split("x"))
+        return (width, height) if width > 0 and height > 0 else default
+    except ValueError:
+        return default
 # Game effects (patches applied at start): psport.ini key, title, default.
 EFFECTS = [
     ("effect_chromatic_aberration", "Хроматическая аберрация", True),
@@ -151,6 +199,7 @@ INI_DEFAULTS = {
     "sharpness": "0.50",
     "object_motion": "1",
     "show_fps": "1",
+    "aspect_ratio": "16:9",
     "output_res": "1920x1080",
     "model_lod": "0",
     "live_resolution": "0",
@@ -438,8 +487,9 @@ def connected_gamepads():
 
 
 def connected_displays():
-    """(PS_DISPLAY value, label) of the monitors (psport-gpu-capabilities --displays), [] if unknown.
-    The value is the monitor's name, or its number when two monitors share a name."""
+    """(PS_DISPLAY value, label, (w, h) or None, primary) of the monitors (psport-gpu-capabilities
+    --displays), [] if unknown. The value is the monitor's name, or its number when two monitors
+    share a name."""
     tool = PORT_DIR / ("bin" if PACKAGED else "out") / "psport-gpu-capabilities"
     try:
         run = subprocess.run([str(tool), "--displays"], capture_output=True, text=True, timeout=5)
@@ -448,7 +498,8 @@ def connected_displays():
     rows = [line.split("\t") for line in run.stdout.splitlines() if line.count("\t") == 2]
     names = [name for name, _, _ in rows]
     return [(name if names.count(name) == 1 else str(number),
-             f"{number}: {name} ({size})" + (tr(", основной") if primary == "1" else ""))
+             f"{number}: {name} ({size})" + (tr(", основной") if primary == "1" else ""),
+             parse_size(size, None), primary == "1")
             for number, (name, size, primary) in enumerate(rows, 1)]
 
 
@@ -599,9 +650,15 @@ class LauncherWindow(Adw.ApplicationWindow):
         page.add(self.patches_group)
 
         screen = Adw.PreferencesGroup(title=tr("Экран"))
-        self.output_row = combo_row(tr("Разрешение вывода"),
-                                    tr("Апскейлер дорисовывает кадр; Steam Deck — 720p"),
-                                    OUTPUT_RES, self.ini.get("output_res", "1920x1080"))
+        # The aspect ratio, then its resolutions (rebuilt when it changes, the height kept).
+        self.aspect_row = Adw.ComboRow(title=tr("Соотношение сторон"), subtitle=tr(
+            "Шире 16:9 — больше обзор по бокам, выше — сверху и снизу, интерфейс у краёв экрана "
+            "(Bloodborne); другие игры остаются 16:9 посередине"))
+        self.aspect_row.values = ASPECTS
+        self.output_row = Adw.ComboRow(title=tr("Разрешение вывода"),
+                                       subtitle=tr("Апскейлер дорисовывает кадр; Steam Deck — 720p"))
+        self.output_row.values = []
+        screen.add(self.aspect_row)
         screen.add(self.output_row)
         self.live_row = combo_row(tr("Смена разрешения на лету"),
                                   tr("Без перезапуска, но медленнее на Steam Deck и старых GPU"),
@@ -616,6 +673,12 @@ class LauncherWindow(Adw.ApplicationWindow):
                                                 lambda _button: self.fill_displays()))
         self.fill_displays()
         screen.add(self.display_row)
+        aspect = self.ini.get("aspect_ratio", "16:9")
+        self.fill_aspects(aspect if aspect in ASPECTS else "16:9")
+        self.fill_outputs(parse_size(self.ini.get("output_res", "1920x1080")))
+        self.aspect_row.connect("notify::selected",
+                                lambda *_: self.fill_outputs(parse_size(combo_value(self.output_row))))
+        self.display_row.connect("notify::selected", lambda *_: self.on_display_changed())
         self.present_row = combo_row(tr("Режим показа кадров"), None, PRESENT_MODES,
                                      self.settings["present_mode"])
         screen.add(self.present_row)
@@ -979,11 +1042,41 @@ class LauncherWindow(Adw.ApplicationWindow):
         self.gamepad_row.set_selected(self.gamepad_row.values.index(current) if current in self.gamepad_row.values else 0)
         self.show_gamepad()
 
+    def monitor_size(self):
+        """The size of the monitor chosen for the game (Auto's aspect ratio), None if unknown."""
+        value = combo_value(self.display_row) if self.display_row.values else ""
+        sizes = getattr(self, "display_sizes", {})
+        return sizes.get(value) or sizes.get("")
+
+    def fill_aspects(self, current):
+        labels = [tr("Авто") + f" ({resolved_aspect('auto', self.monitor_size())})"] + ASPECTS[1:]
+        self.aspect_row.set_model(Gtk.StringList.new(labels))
+        self.aspect_row.set_selected(ASPECTS.index(current))
+
+    def fill_outputs(self, keep):
+        """The chosen aspect ratio's resolutions; the one of keep's height selected."""
+        sizes = output_sizes(combo_value(self.aspect_row), self.monitor_size())
+        chosen = nearest_output(sizes, keep)
+        self.output_row.values = [f"{w}x{h}" for w, h in sizes]
+        self.output_row.set_model(Gtk.StringList.new(
+            [f"{w}×{h}" + (" (Steam Deck)" if (w, h) in ((1280, 720), (1280, 800)) else "") for w, h in sizes]))
+        self.output_row.set_selected(sizes.index(chosen))
+
+    def on_display_changed(self):
+        aspect, output = combo_value(self.aspect_row), parse_size(combo_value(self.output_row))
+        self.fill_aspects(aspect)
+        self.fill_outputs(output)
+
     def fill_displays(self):
         """The monitor choices: the primary one, the connected ones, and the saved choice while it
         is not connected."""
         current = self.settings.get("display", "")
-        choices = [(tr("Основной"), "")] + [(label, value) for value, label in connected_displays()]
+        displays = connected_displays()
+        self.display_sizes = {value: size for value, _label, size, _primary in displays}
+        primary = [size for _value, _label, size, is_primary in displays if is_primary]
+        if primary:
+            self.display_sizes[""] = primary[0]
+        choices = [(tr("Основной"), "")] + [(label, value) for value, label, _size, _primary in displays]
         if current and current not in [value for _, value in choices]:
             choices.append((tr("{} (не подключён)").format(current), current))
         self.display_row.set_model(Gtk.StringList.new([label for label, _ in choices]))
@@ -1035,6 +1128,7 @@ class LauncherWindow(Adw.ApplicationWindow):
             "sharpness": f"{self.sharpness_row.get_value():.2f}",
             "object_motion": "1" if self.motion_row.get_active() else "0",
             "show_fps": "1" if self.show_fps_row.get_active() else "0",
+            "aspect_ratio": combo_value(self.aspect_row),
             "output_res": combo_value(self.output_row),
             "model_lod": combo_value(self.lod_row),
             "live_resolution": combo_value(self.live_row),

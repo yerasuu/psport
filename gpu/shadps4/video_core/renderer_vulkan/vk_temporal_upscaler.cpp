@@ -378,8 +378,9 @@ bool TemporalUpscaler::OnFrameStart() {
                 value < PsSettings::PresetCount) {
                 PsSettings::Get().preset.store(value);
             }
-            if (fields >= 2 && output >= 0 && output < PsSettings::OutputCount) {
-                PsSettings::Get().output_res.store(output);
+            const PsSettings::OutputList outputs = PsSettings::Outputs(PsSettings::Get().aspect);
+            if (fields >= 2 && output >= 0 && output < outputs.c_sizes) {
+                PsSettings::Get().output_res.store(PsSettings::PackSize(outputs.sizes[output]));
             }
             if (fields == 3 && provider >= 0 && provider < PsSettings::UpscalerCount) {
                 PsSettings::Get().upscaler.store(provider);
@@ -398,19 +399,39 @@ bool TemporalUpscaler::OnFrameStart() {
     const bool is_active = Active();
     const bool is_jitter_on = is_active && settings.should_jitter && !PsToggle::Disabled(1u << 25);
     const int upscaler = settings.upscaler.load();
-    const int output = settings.output_res.load();
+    PsSettings::OutputSize output_size = PsSettings::CurrentOutput();
+    // psport: the profile's camera, HUD markers and UI placement follow the output's aspect ratio
+    // when its hooks are in.
+    if (const float aspect = m_is_enabled ? float(output_size.width) / float(output_size.height) : 16.0f / 9.0f;
+        aspect != m_applied_aspect) {
+        m_applied_aspect = aspect;
+        const Game::Profile* p_profile = Game::Active();
+        m_is_aspect_followed = p_profile && p_profile->pfn_display_aspect && p_profile->pfn_display_aspect(aspect);
+        PsSettings::Get().is_aspect_followed = m_is_aspect_followed;
+    }
+    if (!m_is_aspect_followed && output_size.width * 9 != output_size.height * 16) {
+        // psport: a game whose camera keeps 16:9: its picture at that shape, as high (wide) as the
+        // output allows; the presenter puts it in the middle.
+        if (output_size.width * 9 > output_size.height * 16) {
+            output_size.width = int(std::lround(output_size.height * 16 / 9.0 / 2)) * 2;
+        } else {
+            output_size.height = int(std::lround(output_size.width * 9 / 16.0 / 2)) * 2;
+        }
+    }
+    const std::uint32_t output = PsSettings::PackSize(output_size);
     const bool is_output_changed = !m_is_scaled_session && m_applied_output != output;
     if (is_output_changed) {
-        m_target_width = PsSettings::OutputWidths[output];
-        m_target_height = PsSettings::OutputHeights[output];
+        m_target_width = u32(output_size.width);
+        m_target_height = u32(output_size.height);
         std::printf("Output resolution: %ux%u (live)\n", m_target_width, m_target_height);
         m_has_failed = false;
         m_has_fsr4_failed = false;
     }
     const bool is_changed = is_output_changed || m_applied_preset != preset || is_active != m_is_last_active ||
                          is_jitter_on != m_is_last_jitter || m_applied_upscaler != upscaler;
-    if (m_applied_upscaler != upscaler) {
-        // A failed provider keeps a fatal flag internally; a user retry gets a fresh context.
+    if (m_applied_upscaler != upscaler || (is_output_changed && PsSettings::IsFsr4(upscaler))) {
+        // A failed provider keeps a fatal flag internally; a user retry gets a fresh context, and so
+        // does another output (one it could not do, 7680x2160, must not keep it off at 2560x1080).
         m_scheduler.Finish();
         m_fsr4 = std::make_unique<Fsr4Upscaler>(m_instance, m_scheduler);
         if (PsSettings::IsFsr4(upscaler)) PsSettings::Get().sz_fsr4_problem = nullptr;
@@ -1716,16 +1737,25 @@ void TemporalUpscaler::RunUiOnly(VideoCore::ImageId color_id, VideoCore::ImageId
                         vk::PipelineStageFlagBits2::eTransfer, vk::AccessFlagBits2::eTransferRead);
         m_runtime.FlushBarriers();
     }
+    // psport: without a scene (a title screen, loading screens) on an output of another aspect ratio,
+    // the frame past the game's 16:9 screen is black: a game whose UI follows the output fills its
+    // movies' whole (wider) view with their background colour there, as it fills the screen at 16:9.
+    const auto edges = UiComposition::ScreenEdges(m_target_width, m_target_height);
+    const bool is_screen_only = !m_camera_motion.Depth() && (edges[0] < 1.0f || edges[1] < 1.0f);
+    const auto part = [](u32 size, float edge, bool is_high) {
+        return s32(std::lround(float(size) * (is_high ? 1.0f + edge : 1.0f - edge) * 0.5f));
+    };
+    const float ex = is_screen_only ? edges[0] : 1.0f, ey = is_screen_only ? edges[1] : 1.0f;
     const vk::ImageBlit region{
         .srcSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1},
-        .srcOffsets = std::array{vk::Offset3D{0, 0, 0},
-            vk::Offset3D{s32(source_width), s32(source_height), 1}},
+        .srcOffsets = std::array{vk::Offset3D{part(source_width, ex, false), part(source_height, ey, false), 0},
+                                 vk::Offset3D{part(source_width, ex, true), part(source_height, ey, true), 1}},
         .dstSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1},
-        .dstOffsets = std::array{vk::Offset3D{0, 0, 0},
-            vk::Offset3D{s32(m_ui_width), s32(m_ui_height), 1}},
+        .dstOffsets = std::array{vk::Offset3D{part(m_ui_width, ex, false), part(m_ui_height, ey, false), 0},
+                                 vk::Offset3D{part(m_ui_width, ex, true), part(m_ui_height, ey, true), 1}},
     };
-    m_scheduler.Record([source, source_layout, ui = vk::Image(m_ui_image),
-                      region](vk::CommandBuffer cmd) {
+    m_scheduler.Record([source, source_layout, ui = vk::Image(m_ui_image), region,
+                        is_screen_only](vk::CommandBuffer cmd) {
         vk::ImageMemoryBarrier2 barrier{
             .srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
             .srcAccessMask = vk::AccessFlagBits2::eMemoryRead | vk::AccessFlagBits2::eMemoryWrite,
@@ -1737,6 +1767,18 @@ void TemporalUpscaler::RunUiOnly(VideoCore::ImageId color_id, VideoCore::ImageId
             .subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
         };
         cmd.pipelineBarrier2({.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &barrier});
+        if (is_screen_only) {
+            const vk::ClearColorValue black{std::array<float, 4>{0.0f, 0.0f, 0.0f, 1.0f}};
+            const vk::ImageSubresourceRange all{vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1};
+            cmd.clearColorImage(ui, vk::ImageLayout::eTransferDstOptimal, black, all);
+            const vk::MemoryBarrier2 clear_then_blit{
+                .srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
+                .srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
+                .dstStageMask = vk::PipelineStageFlagBits2::eTransfer,
+                .dstAccessMask = vk::AccessFlagBits2::eTransferWrite,
+            };
+            cmd.pipelineBarrier2({.memoryBarrierCount = 1, .pMemoryBarriers = &clear_then_blit});
+        }
         cmd.blitImage(source, source_layout, ui, vk::ImageLayout::eTransferDstOptimal, region,
                       vk::Filter::eLinear);
         barrier.srcStageMask = vk::PipelineStageFlagBits2::eTransfer;

@@ -118,6 +118,19 @@ std::atomic<bool> s_has_values{false};
 constexpr float SharpnessStep = 0.2f; // the game's slider: 0..10 -> 0.0 .. 2.0
 constexpr int SharpnessSteps = 11;
 constexpr int LodValues[] = {-2, 0, 1, 2};
+/// The output resolution row's choices: the output's height, in the aspect ratio chosen in the
+/// overlay or the launcher (PsSettings::NearestOutput keeps it).
+constexpr int OutputHeights[] = {720, 1080, 1440, 2160};
+
+int OutputChoice(PsSettings::OutputSize output) {
+    int i_best = 0;
+    for (int i = 1; i < int(std::size(OutputHeights)); ++i) {
+        if (std::abs(OutputHeights[i] - output.height) < std::abs(OutputHeights[i_best] - output.height)) {
+            i_best = i;
+        }
+    }
+    return i_best;
+}
 /// Rows with a few ordered choices on the game's 0..10 slider (the quality preset, the output
 /// resolution): a pop-up list let the rows below it show through, so only the last row of a page
 /// is a list. The game keeps its own copy of a slider's value while the page is open, so every
@@ -135,7 +148,7 @@ u8 ChoicePosition(int choice, int c_choices) {
 
 /// The rows' values of settings `s`.
 void Fill(const PsSettings::Values& s, int* p_values) {
-    p_values[OutputRes] = s.output_res;
+    p_values[OutputRes] = OutputChoice(PsSettings::CurrentOutput());
     p_values[Upscaler] = s.upscaler;
     p_values[Preset] = s.preset;
     // One slider for both: 0 is sharpening off.
@@ -206,10 +219,9 @@ void DefineTexts() {
     row(Sharpness, "Sharpness", "Резкость", "RCAS after the upscaler: 0 off, 10 strongest",
         "RCAS после апскейлера: 0 выкл, 10 сильнее всего", {}, Kind::Slider);
     row(OutputRes, "Output resolution", "Разрешение вывода",
-        "Final frame: 0-1 1280x720, 2-4 1920x1080, 5-7 2560x1440, 8-10 3840x2160",
-        "Готовый кадр: 0-1 1280x720, 2-4 1920x1080, 5-7 2560x1440, 8-10 3840x2160",
-        {AddText("1280 x 720", "1280 x 720"), AddText("1920 x 1080", "1920 x 1080"),
-         AddText("2560 x 1440", "2560 x 1440"), AddText("3840 x 2160", "3840 x 2160")},
+        "Final frame height: 0-1 720, 2-4 1080, 5-7 1440, 8-10 2160 (aspect ratio: overlay, launcher)",
+        "Высота кадра: 0-1 720, 2-4 1080, 5-7 1440, 8-10 2160 (соотношение сторон: оверлей, лаунчер)",
+        {AddText("720p", "720p"), AddText("1080p", "1080p"), AddText("1440p", "1440p"), AddText("2160p", "2160p")},
         Kind::Steps);
     row(ShowFps, "FPS counter", "Счётчик FPS", "Frame rate in the top right corner",
         "Частота кадров в правом верхнем углу", toggle);
@@ -621,7 +633,10 @@ void Poll() {
         return;
     }
     auto& s = PsSettings::Get();
-    s.output_res = std::clamp(s_values[OutputRes], 0, PsSettings::OutputCount - 1);
+    if (s_values[OutputRes] != s_applied[OutputRes]) {
+        const int height = OutputHeights[std::clamp(s_values[OutputRes], 0, int(std::size(OutputHeights)) - 1)];
+        s.output_res = PsSettings::PackSize(PsSettings::NearestOutput(s.aspect, {height * 16 / 9, height}));
+    }
     const int upscaler = std::clamp(s_values[Upscaler], 0, PsSettings::UpscalerCount - 1);
     s.upscaler = UpscalerAvailable(upscaler) ? upscaler : int(PsSettings::UpscalerFsr3);
     s.preset = std::clamp(s_values[Preset], 0, PsSettings::PresetCount - 1);

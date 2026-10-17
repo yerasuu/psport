@@ -387,14 +387,13 @@ void Menu() {
             for (int i = 0; i < PsSettings::PresetCount; ++i) {
                 char sz_label[64];
                 const float scale = PsSettings::PresetScale(i);
-                const int output = s.output_res;
+                const PsSettings::OutputSize output = PsSettings::CurrentOutput();
                 std::snprintf(
                     sz_label, sizeof(sz_label),
                     PsSettings::MenuText("%s (x%.1f, render %dx%d)", "%s (x%.1f, рендер %dx%d)",
                                          "%s (x%.1f, render %dx%d)"),
-                    PsSettings::PresetName(i), scale,
-                    int(std::lround(PsSettings::OutputWidths[output] / scale / 2) * 2),
-                    int(std::lround(PsSettings::OutputHeights[output] / scale / 2) * 2));
+                    PsSettings::PresetName(i), scale, int(std::lround(output.width / scale / 2) * 2),
+                    int(std::lround(output.height / scale / 2) * 2));
                 if (ImGui::Selectable(sz_label, i == preset)) {
                     Store(s.preset, i, true);
                 }
@@ -547,38 +546,71 @@ void Menu() {
         ImGui::EndDisabled(); // upscaler off
     }
 
-    ImGui::SeparatorText(PsSettings::MenuText("Output resolution", "Разрешение вывода",
-                                              "Resolución de salida"));
-    static const char* s_outputs[] = {"1280 x 720", "1920 x 1080", "2560 x 1440", "3840 x 2160"};
-    int output = s.output_res;
-    if (ImGui::BeginCombo(PsSettings::MenuText("Output resolution", "Разрешение вывода",
-                                               "Resolución de salida"),
-                          s_outputs[output])) {
-        for (int i = 0; i < PsSettings::OutputCount; ++i) {
-            if (ImGui::Selectable(s_outputs[i], i == output)) {
-                Store(s.output_res, i, true);
+    ImGui::SeparatorText(PsSettings::MenuText("Output", "Вывод", "Salida"));
+    // The aspect ratio first; its resolutions follow (another one keeps the height).
+    const auto aspect_label = [](int aspect) {
+        if (aspect != PsSettings::AspectAuto) {
+            return std::string(PsSettings::AspectKey(aspect));
+        }
+        return std::string(PsSettings::MenuText("Auto", "Авто", "Automática")) + " (" +
+               PsSettings::AspectKey(PsSettings::ResolvedAspect(aspect)) + ")";
+    };
+    const int aspect = s.aspect;
+    if (ImGui::BeginCombo(PsSettings::MenuText("Aspect ratio", "Соотношение сторон", "Relación de aspecto"),
+                          aspect_label(aspect).c_str())) {
+        for (int a = 0; a < PsSettings::AspectCount; ++a) {
+            if (ImGui::Selectable(aspect_label(a).c_str(), a == aspect)) {
+                Store(s.output_res, PsSettings::PackSize(PsSettings::NearestOutput(a, PsSettings::CurrentOutput())),
+                      true);
+                Store(s.aspect, a, true);
             }
         }
         ImGui::EndCombo();
     }
+    const auto size_label = [](PsSettings::OutputSize size) {
+        return std::to_string(size.width) + " x " + std::to_string(size.height);
+    };
+    const PsSettings::OutputSize current = PsSettings::CurrentOutput();
+    if (ImGui::BeginCombo(PsSettings::MenuText("Output resolution", "Разрешение вывода", "Resolución de salida"),
+                          size_label(current).c_str())) {
+        for (const PsSettings::OutputSize& size : PsSettings::Outputs(s.aspect)) {
+            if (ImGui::Selectable(size_label(size).c_str(), size == current)) {
+                Store(s.output_res, PsSettings::PackSize(size), true);
+            }
+        }
+        ImGui::EndCombo();
+    }
+    if (const PsSettings::OutputSize chosen = PsSettings::CurrentOutput();
+        chosen.width * 9 != chosen.height * 16 && !PsSettings::Get().is_aspect_followed) {
+        Hint(PsSettings::MenuText(
+            "This game keeps its 16:9 picture: another aspect ratio shows it in the middle of the output.",
+            "Эта игра сохраняет картинку 16:9: при другом соотношении она показывается в середине кадра.",
+            "Este juego mantiene su imagen 16:9: con otra relación se muestra en el centro de la salida."));
+    }
     if (PsSettings::FixedRenderSession()) {
         Hint(PsSettings::MenuText(
             "Size of the final frame and UI. The preset sets the scene size relative to "
-            "the output: 4K Performance = 1920x1080. Applies after restarting the game.",
+            "the output: 4K Performance = 1920x1080. Another aspect ratio widens the view (the UI keeps "
+            "to the screen's edges). Applies after restarting the game.",
             "Размер готового кадра и интерфейса. Пресет задаёт размер сцены относительно "
-            "вывода: 4K Performance = 1920x1080. Применяется после перезапуска игры.",
+            "вывода: 4K Performance = 1920x1080. Другое соотношение сторон расширяет обзор (интерфейс "
+            "у краёв экрана). Применяется после перезапуска игры.",
             "Tamaño del fotograma final y de la interfaz. El preajuste fija el tamaño de la escena respecto a "
-            "la salida: 4K Performance = 1920x1080. Se aplica tras reiniciar el juego."));
+            "la salida: 4K Performance = 1920x1080. Otra relación de aspecto amplía la vista (la interfaz "
+            "queda en los bordes de la pantalla). Se aplica tras reiniciar el juego."));
     } else {
         Hint(PsSettings::MenuText(
             "The final frame and UI size changes at the next frame boundary. "
             "The preset sets the scene size relative to the output: 4K Performance = 1920x1080. "
+            "Another aspect ratio widens the view (the UI keeps to the screen's edges). "
             "Changing the size resets the upscaler's history and may cause a brief pause.",
             "Размер готового кадра и интерфейса меняется на границе следующего кадра. "
             "Пресет задаёт размер сцены относительно вывода: 4K Performance = 1920x1080. "
+            "Другое соотношение сторон расширяет обзор (интерфейс у краёв экрана). "
             "Смена размера сбрасывает историю апскейлера и может вызвать короткую паузу.",
             "El tamaño del fotograma final y de la interfaz cambia en el siguiente fotograma. El preajuste "
-            "fija el tamaño de la escena respecto a la salida: 4K Performance = 1920x1080. Cambiar el tamaño "
+            "fija el tamaño de la escena respecto a la salida: 4K Performance = 1920x1080. Otra relación de "
+            "aspecto amplía la vista (la interfaz queda en los bordes de la pantalla). Cambiar el tamaño "
             "reinicia el historial del escalador y puede causar una pausa breve."));
     }
     if (const Game::Title* p_launched = Game::Launched(); p_launched && p_launched->pfn_add_patches) {

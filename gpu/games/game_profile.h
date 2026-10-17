@@ -208,6 +208,12 @@ struct Profile {
     /// Zeros when unknown: the temporal upscaler stays off (PS_UPSCALE_BEFORE_CS and
     /// PS_UI_TRIGGER_VS place it by hand).
     UpscalerPlacement upscaler;
+    /// The output's aspect ratio (width / height), from the upscaler when the chosen output's
+    /// changes: true when the game's camera, HUD and UI placement follow it (its hooks are in),
+    /// and a wider (taller) output shows more to the sides (above and below), with the UI's
+    /// full-screen fills reaching the output's edges (UiComposition::EdgeParam). false, or
+    /// nullptr: the core keeps the game's 16:9 picture in the middle of any output.
+    bool (*pfn_display_aspect)(float aspect) = nullptr;
     /// With each frame statistics report (PS_FRAME_STATS, the video out thread): the profile's
     /// own diagnostics.
     void (*pfn_report_stats)() = nullptr;

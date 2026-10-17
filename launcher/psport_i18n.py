@@ -127,6 +127,11 @@ EN = {
     "Экран": "Display",
     "Разрешение вывода": "Output resolution",
     "Апскейлер дорисовывает кадр; Steam Deck — 720p": "The upscaler fills the frame; Steam Deck: 720p",
+    "Соотношение сторон": "Aspect ratio",
+    "Шире 16:9 — больше обзор по бокам, выше — сверху и снизу, интерфейс у краёв экрана "
+    "(Bloodborne); другие игры остаются 16:9 посередине":
+        "Wider than 16:9 sees more to the sides, taller more above and below, the UI at the screen "
+        "edges (Bloodborne); other games stay 16:9 in the middle",
     "Полноэкранный режим": "Fullscreen",
     "Смена разрешения на лету": "Live resolution changes",
     "Без перезапуска, но медленнее на Steam Deck и старых GPU":
@@ -381,6 +386,12 @@ PT_BR = {
     "Экран": "Tela",
     "Разрешение вывода": "Resolução de saída",
     "Апскейлер дорисовывает кадр; Steam Deck — 720p": "O upscaler preenche o quadro; Steam Deck: 720p",
+    "Соотношение сторон": "Proporção da tela",
+    "Шире 16:9 — больше обзор по бокам, выше — сверху и снизу, интерфейс у краёв экрана "
+    "(Bloodborne); другие игры остаются 16:9 посередине":
+        "Mais larga que 16:9 mostra mais dos lados, mais alta mais acima e abaixo, a interface nas "
+        "bordas da tela (Bloodborne); outros jogos ficam em 16:9 no centro",
+    "Авто": "Automático",
     "Полноэкранный режим": "Tela cheia",
     "Смена разрешения на лету": "Alteração de resolução em tempo real",
     "Без перезапуска, но медленнее на Steam Deck и старых GPU":
@@ -618,6 +629,11 @@ ZH_CN = {
     "Экран": "显示",
     "Разрешение вывода": "输出分辨率",
     "Апскейлер дорисовывает кадр; Steam Deck — 720p": "超分辨率会将画面放大到此分辨率；Steam Deck 建议 720p",
+    "Соотношение сторон": "宽高比",
+    "Шире 16:9 — больше обзор по бокам, выше — сверху и снизу, интерфейс у краёв экрана "
+    "(Bloodborne); другие игры остаются 16:9 посередине":
+        "比 16:9 更宽可看到两侧更多内容，更高可看到上下更多内容，界面贴近屏幕边缘（Bloodborne）；"
+        "其他游戏保持 16:9 居中显示",
     "Полноэкранный режим": "全屏模式",
     "Смена разрешения на лету": "实时切换分辨率",
     "Без перезапуска, но медленнее на Steam Deck и старых GPU":

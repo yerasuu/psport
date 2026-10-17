@@ -5,7 +5,10 @@
 
 #pragma once
 
+#include <array>
 #include <atomic>
+#include <cstdint>
+#include <string>
 
 namespace PsSettings {
 
@@ -21,11 +24,47 @@ enum class MenuLanguage { English, Russian, Spanish };
 
 /// The most effect switches a game title offers (Game::GameEffects) the settings keep.
 inline constexpr int MaxEffects = 16;
-/// Live output resolutions: the upscaler's output and the UI host targets.
-inline constexpr int OutputWidths[] = {1280, 1920, 2560, 3840};
-inline constexpr int OutputHeights[] = {720, 1080, 1440, 2160};
-inline constexpr int OutputCount = 4;
-inline constexpr int OutputDefault = 1; ///< 1920x1080, the game's own size
+/// Output aspect ratios, and the output resolutions of each: the upscaler's output and the UI host
+/// targets, changed live. The game keeps its own 1920x1080 frame; a profile whose camera follows the
+/// output (Game::Profile::pfn_display_aspect) shows more to the sides (above and below) with its UI
+/// at the screen's edges, any other game keeps its 16:9 picture in the middle of the output. Auto:
+/// the group of the monitor the game's window is on.
+enum Aspect : int { AspectAuto = 0, Aspect4x3, Aspect16x10, Aspect16x9, Aspect21x9, Aspect32x9, AspectCount };
+struct OutputSize {
+    int width = 1920, height = 1080;
+    bool operator==(const OutputSize&) const = default;
+};
+inline constexpr OutputSize OutputDefault{1920, 1080}; ///< the game's own size
+constexpr std::uint32_t PackSize(OutputSize size) {
+    return std::uint32_t(size.width) | std::uint32_t(size.height) << 16;
+}
+constexpr OutputSize UnpackSize(std::uint32_t packed) {
+    return {int(packed & 0xffff), int(packed >> 16)};
+}
+/// An aspect ratio's outputs, smallest first.
+struct OutputList {
+    std::array<OutputSize, 12> sizes{};
+    int c_sizes = 0;
+    const OutputSize* begin() const { return sizes.data(); }
+    const OutputSize* end() const { return sizes.data() + c_sizes; }
+    /// -1: not in the list.
+    int IndexOf(OutputSize size) const;
+};
+/// psport.ini value ("auto", "4:3", "16:10", "16:9", "21:9", "32:9").
+const char* AspectKey(int aspect);
+/// The monitor the game's window is on (window.cpp): Auto follows it. 0x0 until known.
+void SetMonitor(int width, int height);
+OutputSize Monitor();
+/// Auto resolved to the group nearest the monitor's aspect ratio (16:9 until it is known).
+int ResolvedAspect(int aspect);
+/// The output resolutions of an aspect ratio (Auto: the monitor's group and its own size).
+OutputList Outputs(int aspect);
+/// The output of aspect nearest size in height: another aspect ratio keeps the height.
+OutputSize NearestOutput(int aspect, OutputSize size);
+/// The output in use: the chosen resolution in the chosen aspect ratio.
+OutputSize CurrentOutput();
+/// "2560x1080".
+std::string SizeText(OutputSize size);
 
 struct Values {
     std::atomic<MenuLanguage> menu_language{MenuLanguage::Russian};
@@ -50,6 +89,9 @@ struct Values {
     std::atomic<bool> should_use_fsr4_auto_exposure{true};
     std::atomic<bool> should_invert_fsr4_jitter{false};
     std::atomic<int> active_render_width{1920}, active_render_height{1080};
+    /// The game's camera and UI follow the output's aspect ratio (Game::Profile::pfn_display_aspect);
+    /// set by the upscaler.
+    std::atomic<bool> is_aspect_followed{false};
     /// The presented frame's width / height, which the window letterboxes; set by the presenter.
     std::atomic<float> shown_frame_aspect{1920.0f / 1080.0f};
     /// Applied at start (the game title's patches), in the order of Game::Effects()'s switches,
@@ -57,7 +99,10 @@ struct Values {
     std::atomic<bool> effects[MaxEffects]{};
     int c_effects = 0;
     std::atomic<int> model_lod{0}; ///< -2 highest .. 2 lowest, 0 the game's
-    std::atomic<int> output_res{OutputDefault}; ///< index into OutputWidths
+    /// 16:9 unless chosen: the game's own (psport.ini aspect_ratio).
+    std::atomic<int> aspect{Aspect16x9};
+    /// The chosen output resolution (PackSize; CurrentOutput fits it to the aspect ratio).
+    std::atomic<std::uint32_t> output_res{PackSize(OutputDefault)};
     /// Live resolution and preset changes (run.sh): 0 off by default (startup patch, fastest
     /// on the Steam Deck and older GPUs), -1 auto (strong discrete GPUs), 1 on. On restart.
     std::atomic<int> live_resolution{0};
@@ -74,7 +119,7 @@ struct Values {
     bool is_object_motion_at_startup = true;
     bool startup_effects[MaxEffects]{};
     int startup_model_lod = 0;
-    int startup_output_res = OutputDefault;
+    OutputSize startup_output;
     int startup_live_resolution = 0;
 };
 

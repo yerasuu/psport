@@ -187,6 +187,66 @@ static void EmitFragmentMotion(EmitContext& ctx) {
                     ctx.OpSelect(f32_type, front, dy, zero), valid, depth}));
 }
 
+// psport: a game's UI on an output of another aspect ratio (UiComposition::EdgeParam): with
+// motion_param set, a vertex in a corner of the game's 16:9 screen or past it (on or beyond its
+// edges in both x and y: normalized edges, 16 bits each) goes to that corner of the output, so that
+// full-screen fills and backgrounds (some drawn a little larger than the screen) cover the output;
+// and (subtitles' backdrops, lower screen) a vertex on a side edge. What the HUD moved past one edge
+// only stays where it is.
+static void EmitUiEdgeStretch(EmitContext& ctx) {
+    const Id f32 = ctx.F32[1];
+    const Id u32_type = ctx.U32[1];
+    const Id b1 = ctx.U1[1];
+    const Id param = ctx.OpLoad(u32_type, ctx.OpAccessChain(ctx.TypePointer(spv::StorageClass::PushConstant, u32_type),
+                                                            ctx.push_data_block,
+                                                            ctx.ConstU32(PushData::MotionParamIndex)));
+    const Id is_on = ctx.OpINotEqual(b1, param, ctx.u32_zero_value);
+    const Id ex = ctx.OpFMul(f32, ctx.OpConvertUToF(f32, ctx.OpShiftRightLogical(u32_type, param, ctx.ConstU32(16u))),
+                             ctx.Constant(f32, 1.0f / 65535.0f));
+    const Id ey = ctx.OpFMul(f32,
+                             ctx.OpConvertUToF(f32, ctx.OpShiftRightLogical(
+                                                        u32_type, ctx.OpBitwiseAnd(u32_type, param, ctx.ConstU32(65534u)),
+                                                        ctx.ConstU32(1u))),
+                             ctx.Constant(f32, 1.0f / 32767.0f));
+    const Id is_y_down =
+        ctx.OpINotEqual(b1, ctx.OpBitwiseAnd(u32_type, param, ctx.ConstU32(1u)), ctx.u32_zero_value);
+    const Id position = ctx.OpLoad(ctx.F32[4], ctx.output_position);
+    const Id x = ctx.OpCompositeExtract(f32, position, 0u);
+    const Id y = ctx.OpCompositeExtract(f32, position, 1u);
+    const Id w = ctx.OpFAbs(f32, ctx.OpCompositeExtract(f32, position, 3u));
+    // On the edge (within 0.002: a pixel of the 1080 lines, two of the 1920 columns) or past it.
+    const auto is_out = [&](Id v, Id edge) {
+        return ctx.OpFOrdGreaterThanEqual(b1, ctx.OpFAbs(f32, v),
+                                          ctx.OpFMul(f32, w, ctx.OpFSub(f32, edge, ctx.Constant(f32, 0.002f))));
+    };
+    // On the edge only (up to two pixels past it: an anti-aliasing fringe): a band a movie draws
+    // from edge to edge of its screen (the subtitles' backdrop) has its inner vertices there. What
+    // the game moved to the edges (its HUD's groups) lies further out.
+    const auto is_at = [&](Id v, Id edge) {
+        return ctx.OpLogicalAnd(b1, is_out(v, edge),
+                                ctx.OpFOrdLessThanEqual(b1, ctx.OpFAbs(f32, v),
+                                                        ctx.OpFMul(f32, w, ctx.OpFAdd(f32, edge, ctx.Constant(f32, 0.004f)))));
+    };
+    // The band's vertices on a side edge only in the lower part of the screen (y past 0.4 of its
+    // half height: the subtitles), not anywhere: HUD groups moved toward the edges put some of their
+    // vertices on the 16:9 screen's edge by chance (a glyph, a frame), which went to the output's
+    // edge (white streaks across the HUD at 21:9). Top and bottom edges: corners only, for the same
+    // reason (the HUD moved up and down on taller outputs).
+    const Id towards_bottom = ctx.OpSelect(f32, is_y_down, y, ctx.OpFNegate(f32, y));
+    const Id is_lower = ctx.OpFOrdGreaterThan(b1, towards_bottom, ctx.OpFMul(f32, w, ctx.Constant(f32, 0.4f)));
+    const Id is_corner = ctx.OpLogicalAnd(b1, is_out(x, ex), is_out(y, ey));
+    const Id should_snap_x =
+        ctx.OpLogicalAnd(b1, is_on, ctx.OpLogicalOr(b1, is_corner, ctx.OpLogicalAnd(b1, is_lower, is_at(x, ex))));
+    const Id should_snap_y = ctx.OpLogicalAnd(b1, is_on, is_corner);
+    // v * |w| / |v|: the output's edge on v's side.
+    const auto snap = [&](Id v, Id should_snap) {
+        return ctx.OpSelect(f32, should_snap, ctx.OpFDiv(f32, ctx.OpFMul(f32, v, w), ctx.OpFAbs(f32, v)), v);
+    };
+    ctx.OpStore(ctx.output_position,
+                ctx.OpCompositeInsert(ctx.F32[4], snap(y, should_snap_y),
+                                      ctx.OpCompositeInsert(ctx.F32[4], snap(x, should_snap_x), position, 0u), 1u));
+}
+
 void EmitEpilogue(EmitContext& ctx) {
     if (Sirit::ValidId(ctx.motion_out_cur)) {
         EmitVertexMotion(ctx);
@@ -200,6 +260,10 @@ void EmitEpilogue(EmitContext& ctx) {
     }
     if (ctx.hw_stage == HwStage::Vertex && ctx.runtime_info.hw.vs.clip_disable) {
         ConvertPositionToClipSpace(ctx);
+    } else if (ctx.hw_stage == HwStage::Vertex && !Sirit::ValidId(ctx.motion_out_cur)) {
+        // psport: any vertex shader can draw a game's UI; outside the UI on an output of another
+        // aspect ratio motion_param is 0 and this changes nothing.
+        EmitUiEdgeStretch(ctx);
     }
 }
 

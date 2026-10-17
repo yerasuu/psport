@@ -214,7 +214,9 @@ private:
     VideoCore::ImageId m_scene_color{};
     bool m_is_done_this_frame = false;
     u32 m_c_preset_file_frames = 0; ///< PS_PRESET_FILE polling
-    int m_applied_output = -1;
+    std::uint32_t m_applied_output = 0; ///< PsSettings::PackSize
+    float m_applied_aspect = 0.0f;      ///< told to the profile (Game::Profile::pfn_display_aspect)
+    bool m_is_aspect_followed = false;  ///< the profile's camera and UI follow it
     bool m_is_snapshot_taken = false;
     bool m_is_opaque_valid = false;
     bool m_is_mask_ready = false;

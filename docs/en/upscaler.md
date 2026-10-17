@@ -1,5 +1,24 @@
 # Temporal upscaling and frame generation — frame analysis and plan
 
+## Output aspect ratios (2026-10-17)
+
+`aspect_ratio` in `psport.ini` (`auto`, `4:3`, `16:10`, `16:9`, `21:9`, `32:9`; 16:9 unless chosen,
+in the overlay or the launcher) picks the group of output resolutions `output_res` is taken from
+(`PsSettings::Outputs`, the same lists in `launcher/psport_launcher.py`); another aspect ratio
+keeps the height (`NearestOutput`), and `auto` is the group nearest the monitor the window is on
+(`SetMonitor`) plus the monitor's own size. The game keeps its 1920x1080 frame. When the output's
+aspect ratio changes, the upscaler tells the profile (`Game::Profile::pfn_display_aspect`): a
+profile whose camera and UI follow it (Bloodborne) returns true, and its scene and UI fill the
+output, the UI drawn at `UiComposition::Scale` (output / 1920 by output / 1080) because its movies
+draw their wider view squeezed into the 1920x1080 frame. Its full-screen fills reach the output's
+edges: the UI's draws in native coordinates get `UiComposition::EdgeParam` in the push constant
+`motion_param`, and every vertex shader but the motion vectors' moves a vertex on or past a corner
+of the 16:9 screen (or on a side edge in the lower part: subtitles' backdrops) to the output's
+(`EmitUiEdgeStretch`; skipped for stencil-masked draws and textures of 2048 or more, so pictures and
+text keep their proportions; `ShaderBinaryVersion` 12). A frame without a scene keeps the 16:9
+screen in the middle and black past it. Any other game keeps its 16:9 picture: its output is the
+largest 16:9 size inside the chosen one, and the presenter puts it in the middle.
+
 ## Native TAA and missing FSR 4 assets (2026-10-01)
 
 `upscaler=taa` / `PS_UPSCALER=taa` is a separate native-resolution temporal AA

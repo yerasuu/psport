@@ -8,6 +8,7 @@
 #include "game_profile.h"
 #include "sdl_window.h"
 #include "psport_overlay.h"
+#include "psport_settings.h"
 
 namespace Frontend {
 
@@ -51,6 +52,14 @@ SDL_DisplayID ChooseDisplay() {
     }
     SDL_free(p_ids);
     return display;
+}
+
+// The monitor the window is on, in pixels: the output's aspect ratio "Auto" follows it.
+void TellMonitor(SDL_Window* p_window) {
+    if (const SDL_DisplayMode* p_mode = SDL_GetDesktopDisplayMode(SDL_GetDisplayForWindow(p_window))) {
+        const float density = p_mode->pixel_density > 0.0f ? p_mode->pixel_density : 1.0f;
+        PsSettings::SetMonitor(int(p_mode->w * density + 0.5f), int(p_mode->h * density + 0.5f));
+    }
 }
 
 } // namespace
@@ -113,6 +122,7 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* sz_title, const char* 
     m_width = w;
     m_height = h;
     LOG_INFO(Frontend, "Window {}x{} on {}", w, h, sz_driver);
+    TellMonitor(m_p_window);
     std::printf("Window: %s (app id %s)\n", sz_title, SDL_GetAppMetadataProperty(SDL_PROP_APP_METADATA_IDENTIFIER_STRING));
     m_is_host_mouse = SDL_HasMouse();
     m_is_host_keyboard = SDL_HasKeyboard();
@@ -385,6 +395,9 @@ bool WindowSDL::PollEvents() {
             m_height = h;
             break;
         }
+        case SDL_EVENT_WINDOW_DISPLAY_CHANGED:
+            TellMonitor(m_p_window);
+            break;
         case SDL_EVENT_KEYBOARD_ADDED:
         case SDL_EVENT_KEYBOARD_REMOVED:
             m_is_host_keyboard = SDL_HasKeyboard();
