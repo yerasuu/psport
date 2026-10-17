@@ -14,57 +14,86 @@
 #include <miniz.h>
 
 #include <condition_variable>
+#include <deque>
 #include <functional>
-#include <future>
 #include <mutex>
-#include <queue>
+#include <type_traits>
 
 namespace {
 
-std::mutex submit_mutex{};
-u32 num_requests{};
-std::condition_variable_any request_cv{};
-std::queue<std::packaged_task<void()>> req_queue{};
-std::mutex m_request{};
+// psport: one queue drained by the writer thread, which finishes it before stopping. The
+// upstream worker dropped what was still queued when stopped and polled a counter both threads
+// changed without a lock.
+struct BlobWrite {
+    std::filesystem::path path;
+    std::vector<u8> bytes;
+};
+std::mutex s_queue_mutex{};
+std::condition_variable_any s_queue_cv{};
+std::deque<BlobWrite> s_queue{};
 
-mz_zip_archive zip_ar{};
-bool ar_is_read_only{true};
+// psport: the archive is read from <serial>.zip and written to <serial>.zip.tmp (the entries
+// kept copied over), which replaces it when the cache is closed, so a crash or an exit before
+// that leaves the old archive, never one cut short without its central directory.
+mz_zip_archive s_zip_reader{};
+bool s_has_zip_reader{};
+mz_zip_archive s_zip_writer{};
+bool s_is_zip_writable{};
+std::filesystem::path s_zip_temp_path{};
 
 } // namespace
 
 namespace Storage {
 
+void WriteBlob(const BlobWrite& write, bool is_zip_writable) {
+    if (EmulatorSettings.IsPipelineCacheArchived()) {
+        if (!is_zip_writable) {
+            LOG_ERROR(Render, "Pipeline cache: {} saved before the archive was writable, dropped",
+                      write.path.string());
+            return;
+        }
+        if (!mz_zip_writer_add_mem(&s_zip_writer, write.path.string().c_str(), write.bytes.data(),
+                                   write.bytes.size(), MZ_BEST_COMPRESSION)) {
+            LOG_ERROR(Render, "Failed to add {} to the archive", write.path.string().c_str());
+        }
+        return;
+    }
+    // psport: written under a temporary name and renamed into place, so a crash or a power loss
+    // mid-write leaves the old file or none, never a cut-short one that the next start reads as
+    // a damaged entry (issue #28).
+    using namespace Common::FS;
+    auto temp = write.path;
+    temp += ".tmp";
+    bool is_written = false;
+    {
+        const auto file = IOFile{temp, FileAccessMode::Create};
+        is_written = file.IsOpen() && file.Write(write.bytes) == write.bytes.size();
+    }
+    std::error_code ec;
+    if (is_written) {
+        std::filesystem::rename(temp, write.path, ec);
+    }
+    if (!is_written || ec) {
+        LOG_ERROR(Render, "Failed to write {}", write.path.string());
+        std::filesystem::remove(temp, ec);
+    }
+}
+
 void ProcessIO(const std::stop_token& stoken) {
     Common::SetCurrentThreadName("shadPS4:PipelineCacheIO");
 
-    while (!stoken.stop_requested()) {
-        {
-            std::unique_lock lk{submit_mutex};
-            Common::CondvarWait(request_cv, lk, stoken, [&] { return num_requests; });
+    std::unique_lock lk{s_queue_mutex};
+    for (;;) {
+        Common::CondvarWait(s_queue_cv, lk, stoken, [] { return !s_queue.empty(); });
+        if (s_queue.empty()) {
+            return;
         }
-
-        if (stoken.stop_requested()) {
-            break;
-        }
-
-        while (num_requests) {
-            std::packaged_task<void()> request{};
-            {
-                std::scoped_lock lock{m_request};
-                if (req_queue.empty()) {
-                    continue;
-                }
-                request = std::move(req_queue.front());
-                req_queue.pop();
-            }
-
-            if (request.valid()) {
-                request();
-                request.get_future().wait();
-            }
-
-            --num_requests;
-        }
+        const BlobWrite write = std::move(s_queue.front());
+        s_queue.pop_front();
+        const bool is_zip_writable = s_is_zip_writable;
+        lk.unlock();
+        WriteBlob(write, is_zip_writable);
+        lk.lock();
     }
 }
 
@@ -96,23 +125,32 @@ void DataBase::Open() {
 
     using namespace Common::FS;
     if (EmulatorSettings.IsPipelineCacheArchived()) {
-        mz_zip_zero_struct(&zip_ar);
+        mz_zip_zero_struct(&s_zip_reader);
+        mz_zip_zero_struct(&s_zip_writer);
 
         cache_path = GetUserPath(PathType::CacheDir) /
                      std::filesystem::path{game_info.GameSerial()}.replace_extension(".zip");
+        s_zip_temp_path = cache_path;
+        s_zip_temp_path += ".tmp";
 
-        if (!mz_zip_reader_init_file(&zip_ar, cache_path.string().c_str(),
-                                     MZ_ZIP_FLAG_READ_ALLOW_WRITING) ||
-            !mz_zip_validate_archive(&zip_ar, 0)) {
+        s_has_zip_reader = mz_zip_reader_init_file(&s_zip_reader, cache_path.string().c_str(), 0) &&
+            mz_zip_validate_archive(&s_zip_reader, 0);
+        if (!s_has_zip_reader) {
             LOG_INFO(Render, "Cache archive {} is not found or archive is corrupted",
                      cache_path.string().c_str());
-            mz_zip_reader_end(&zip_ar);
-            mz_zip_writer_init_file(&zip_ar, cache_path.string().c_str(), 0);
+            mz_zip_reader_end(&s_zip_reader);
         }
     } else {
         cache_path = GetUserPath(PathType::CacheDir) / game_info.GameSerial();
         if (!std::filesystem::exists(cache_path)) {
             std::filesystem::create_directories(cache_path);
+        }
+        // psport: temporary files of writes a crash or an exit cut short (never read as blobs).
+        std::error_code ec;
+        for (const auto& entry : std::filesystem::directory_iterator(cache_path, ec)) {
+            if (entry.path().extension() == ".tmp") {
+                std::filesystem::remove(entry.path(), ec);
+            }
         }
     }
 
@@ -129,8 +167,23 @@ void DataBase::Close() {
     io_worker.join();
 
     if (EmulatorSettings.IsPipelineCacheArchived()) {
-        mz_zip_writer_finalize_archive(&zip_ar);
-        mz_zip_writer_end(&zip_ar);
+        if (s_has_zip_reader) {
+            mz_zip_reader_end(&s_zip_reader);
+            s_has_zip_reader = false;
+        }
+        if (s_is_zip_writable) {
+            const bool is_finalized = mz_zip_writer_finalize_archive(&s_zip_writer);
+            mz_zip_writer_end(&s_zip_writer);
+            s_is_zip_writable = false;
+            std::error_code ec;
+            if (is_finalized) {
+                std::filesystem::rename(s_zip_temp_path, cache_path, ec);
+            }
+            if (!is_finalized || ec) {
+                LOG_ERROR(Render, "Failed to write the cache archive {}", cache_path.string());
+                std::filesystem::remove(s_zip_temp_path, ec);
+            }
+        }
     }
 
     opened = false;
@@ -138,47 +191,20 @@ void DataBase::Close() {
 }
 
 template <typename T>
-bool WriteVector(const BlobType type, std::filesystem::path&& path_, std::vector<T>&& v) {
-    {
-        auto request = std::packaged_task<void()>{[=]() {
-            auto path{path_};
-            path.replace_extension(GetBlobFileExtension(type));
-            if (EmulatorSettings.IsPipelineCacheArchived()) {
-                ASSERT_MSG(!ar_is_read_only,
-                           "The archive is read-only. Did you forget to call `FinishPreload`?");
-                if (!mz_zip_writer_add_mem(&zip_ar, path.string().c_str(), v.data(),
-                                           v.size() * sizeof(T), MZ_BEST_COMPRESSION)) {
-                    LOG_ERROR(Render, "Failed to add {} to the archive", path.string().c_str());
-                }
-            } else {
-                // psport: written under a temporary name and renamed into place, so a crash or a
-                // power loss mid-write leaves the old file or none, never a cut-short one that
-                // the next start reads as a damaged entry (issue #28).
-                using namespace Common::FS;
-                auto temp = path;
-                temp += ".tmp";
-                bool written = false;
-                {
-                    const auto file = IOFile{temp, FileAccessMode::Create};
-                    written = file.IsOpen() && file.Write(v) == v.size();
-                }
-                std::error_code ec;
-                if (written) {
-                    std::filesystem::rename(temp, path, ec);
-                }
-                if (!written || ec) {
-                    LOG_ERROR(Render, "Failed to write {}", path.string());
-                    std::filesystem::remove(temp, ec);
-                }
-            }
-        }};
-        std::scoped_lock lock{m_request};
-        req_queue.emplace(std::move(request));
+bool WriteVector(const BlobType type, std::filesystem::path&& path, std::vector<T>&& v) {
+    path.replace_extension(GetBlobFileExtension(type));
+    BlobWrite write{std::move(path), {}};
+    if constexpr (std::is_same_v<T, u8>) {
+        write.bytes = std::move(v);
+    } else {
+        const auto* p_bytes = reinterpret_cast<const u8*>(v.data());
+        write.bytes.assign(p_bytes, p_bytes + v.size() * sizeof(T));
     }
-
-    std::scoped_lock lk{submit_mutex};
-    ++num_requests;
-    request_cv.notify_one();
+    {
+        std::scoped_lock lk{s_queue_mutex};
+        s_queue.push_back(std::move(write));
+    }
+    s_queue_cv.notify_one();
     return true;
 }
 
@@ -187,16 +213,19 @@ void LoadVector(BlobType type, std::filesystem::path& path, std::vector<T>& v) {
     using namespace Common::FS;
     path.replace_extension(GetBlobFileExtension(type));
     if (EmulatorSettings.IsPipelineCacheArchived()) {
+        if (!s_has_zip_reader) {
+            return;
+        }
         int index{-1};
-        index = mz_zip_reader_locate_file(&zip_ar, path.string().c_str(), nullptr, 0);
+        index = mz_zip_reader_locate_file(&s_zip_reader, path.string().c_str(), nullptr, 0);
         if (index < 0) {
             LOG_WARNING(Render, "File {} is not found in the archive", path.string().c_str());
             return;
         }
         mz_zip_archive_file_stat stat{};
-        mz_zip_reader_file_stat(&zip_ar, index, &stat);
+        mz_zip_reader_file_stat(&s_zip_reader, index, &stat);
         v.resize(stat.m_uncomp_size / sizeof(T));
-        mz_zip_reader_extract_to_mem(&zip_ar, index, v.data(), stat.m_uncomp_size, 0);
+        mz_zip_reader_extract_to_mem(&s_zip_reader, index, v.data(), stat.m_uncomp_size, 0);
     } else {
         const auto file = IOFile{path, FileAccessMode::Read};
         v.resize(file.GetSize() / sizeof(T));
@@ -247,16 +276,16 @@ void DataBase::Load(BlobType type, const std::string& name, std::vector<u32>& da
 void DataBase::ForEachBlob(BlobType type, const std::function<void(std::vector<u8>&& data)>& func) {
     const auto& ext = GetBlobFileExtension(type);
     if (EmulatorSettings.IsPipelineCacheArchived()) {
-        const auto num_files = mz_zip_reader_get_num_files(&zip_ar);
+        const auto num_files = s_has_zip_reader ? mz_zip_reader_get_num_files(&s_zip_reader) : 0;
         for (int index = 0; index < num_files; ++index) {
             std::array<char, MZ_ZIP_MAX_ARCHIVE_FILENAME_SIZE> file_name{};
             file_name.fill(0);
-            mz_zip_reader_get_filename(&zip_ar, index, file_name.data(), file_name.size());
+            mz_zip_reader_get_filename(&s_zip_reader, index, file_name.data(), file_name.size());
             if (std::string{file_name.data()}.ends_with(ext)) {
                 mz_zip_archive_file_stat stat{};
-                mz_zip_reader_file_stat(&zip_ar, index, &stat);
+                mz_zip_reader_file_stat(&s_zip_reader, index, &stat);
                 std::vector<u8> data(stat.m_uncomp_size);
-                mz_zip_reader_extract_to_mem(&zip_ar, index, data.data(), data.size(), 0);
+                mz_zip_reader_extract_to_mem(&s_zip_reader, index, data.data(), data.size(), 0);
                 func(std::move(data));
             }
         }
@@ -276,7 +305,16 @@ void DataBase::ForEachBlob(BlobType type, const std::function<void(std::vector<u
 }
 
 void DataBase::Clear() {
-    if (!opened || EmulatorSettings.IsPipelineCacheArchived()) {
+    if (!opened) {
+        return;
+    }
+    if (EmulatorSettings.IsPipelineCacheArchived()) {
+        // The archive is replaced at Close by one without the old entries.
+        if (s_has_zip_reader) {
+            mz_zip_reader_end(&s_zip_reader);
+            s_has_zip_reader = false;
+        }
+        LOG_WARNING(Render, "Pipeline cache cleared: it is rebuilt for this build");
         return;
     }
     std::error_code ec;
@@ -290,10 +328,28 @@ void DataBase::Clear() {
 }
 
 void DataBase::FinishPreload() {
-    if (EmulatorSettings.IsPipelineCacheArchived()) {
-        mz_zip_writer_init_from_reader(&zip_ar, cache_path.string().c_str());
-        ar_is_read_only = false;
+    if (!EmulatorSettings.IsPipelineCacheArchived()) {
+        return;
     }
+    if (!mz_zip_writer_init_file(&s_zip_writer, s_zip_temp_path.string().c_str(), 0)) {
+        LOG_ERROR(Render, "Failed to create the cache archive {}: nothing is saved this session",
+                  s_zip_temp_path.string());
+        return;
+    }
+    if (s_has_zip_reader) {
+        u32 c_lost = 0;
+        const u32 c_files = mz_zip_reader_get_num_files(&s_zip_reader);
+        for (u32 i_file = 0; i_file < c_files; ++i_file) {
+            c_lost += !mz_zip_writer_add_from_zip_reader(&s_zip_writer, &s_zip_reader, i_file);
+        }
+        if (c_lost != 0) {
+            LOG_ERROR(Render, "Cache archive: {} of {} entries not carried over", c_lost, c_files);
+        }
+        mz_zip_reader_end(&s_zip_reader);
+        s_has_zip_reader = false;
+    }
+    std::scoped_lock lk{s_queue_mutex};
+    s_is_zip_writable = true;
 }
 
 } // namespace Storage
