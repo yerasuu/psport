@@ -14,7 +14,6 @@
 #include <sched.h>
 #include <time.h>
 #include <unistd.h>
-#include <sys/syscall.h>
 #include <dirent.h>
 #include <ucontext.h>
 #include <signal.h>
@@ -506,7 +505,7 @@ void runtime_wait_note(int kind, uint64_t ns) {
     static int s_is_enabled=-1;
     if (s_is_enabled<0) s_is_enabled=runtime_env("PS_FRAME_STATS",NULL)!=NULL;
     if (!s_is_enabled) return;
-    if (!s_wait_tid) s_wait_tid=(int)syscall(SYS_gettid);
+    if (!s_wait_tid) s_wait_tid=ps_host_thread_id();
     uint64_t sites[3];
     guest_call_sites(sites);
     const uint64_t key=((sites[0]<<20)^(sites[1]*0x9E3779B1ull)^(sites[2]<<7)^((uint64_t)s_wait_tid<<4)^(uint64_t)kind)|1;
@@ -598,7 +597,7 @@ static void *sampler_main(void *p_arg) {
     }
     printf("Runtime: sampling thread %s (%d)\n",sz_name,(int)tid);
     for (;;) {
-        if (syscall(SYS_tgkill,getpid(),tid,SIGPROF)) break;
+        if (ps_host_thread_signal(tid,SIGPROF)) break;
         ps_host_time_sleep_ns(500000,NULL);
     }
     return NULL;

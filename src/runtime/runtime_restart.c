@@ -10,7 +10,6 @@
 #include <pthread.h>
 #include <signal.h>
 #include <unistd.h>
-#include <sys/syscall.h>
 #endif
 
 /* Restarts the game through run.sh (the settings menu: a new render resolution is a patch
@@ -26,8 +25,9 @@ void runtime_restart(void) {
     runtime_restarting = 1;
     __sync_synchronize();
 #ifndef _WIN32
-    syscall(SYS_close_range, 3u, ~0u, 0u);
-    execlp("bash", "bash", "run.sh", (char *)NULL);
+    ps_host_close_from(3, -1, 0);
+    char *const pp_argv[] = {"bash", "run.sh", NULL};
+    ps_host_exec("bash", pp_argv);
     perror("runtime_restart: exec");
     _exit(1);
 #endif
@@ -66,8 +66,8 @@ void runtime_load_exec(const char *sz_path, char *const *pp_arguments) {
     sigset_t none, previous;
     sigemptyset(&none);
     pthread_sigmask(SIG_SETMASK, &none, &previous);
-    close_range(3u, ~0u, CLOSE_RANGE_CLOEXEC);
-    execv("/proc/self/exe", pp_argv);
+    ps_host_close_from(3, -1, 1);
+    ps_host_exec_self(pp_argv);
     perror("runtime_load_exec: exec");
     pthread_sigmask(SIG_SETMASK, &previous, NULL);
     free(pp_argv);

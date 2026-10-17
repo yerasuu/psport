@@ -10,7 +10,6 @@
 #include <fcntl.h>
 #include <execinfo.h>
 #include <pthread.h>
-#include <sys/syscall.h>
 #include <sys/uio.h>
 #include "main.h"
 
@@ -111,7 +110,7 @@ static void write_hex(char *sz_out, uint64_t v) {
 static void dump_frames(ucontext_t *p_ucontext) {
     char sz_line[] = "  tid=0000000000000000 rip=0000000000000000 image-relative=0000000000000000 host-relative=0000000000000000\n";
     uintptr_t rip=(uintptr_t)p_ucontext->uc_mcontext.gregs[REG_RIP], rbp=(uintptr_t)p_ucontext->uc_mcontext.gregs[REG_RBP];
-    uint64_t tid=(uint64_t)gettid();
+    uint64_t tid=(uint64_t)ps_host_thread_id();
     /* First argument register: the lock address when a thread waits on a futex. */
     char sz_arg[]="  tid=0000000000000000 rdi=0000000000000000\n";
     write_hex(sz_arg+6,tid); write_hex(sz_arg+27,(uint64_t)p_ucontext->uc_mcontext.gregs[REG_RDI]);
@@ -127,22 +126,17 @@ static void dump_frames(ucontext_t *p_ucontext) {
     }
 }
 static void thread_dump(int sig, siginfo_t *p_info, void *p_context) { (void)sig; (void)p_info; dump_frames(p_context); }
+static void dump_other_thread(const char *sz_tid, void *p_context) {
+    (void)p_context;
+    const int32_t tid=(int32_t)strtol(sz_tid,NULL,10);
+    if (tid>0 && tid!=ps_host_thread_id()) { ps_host_thread_signal(tid,SIGUSR2); ps_host_time_sleep_ns(20000000,NULL); }
+}
 static void watchdog(int sig, siginfo_t *p_info, void *p_context) {
     (void)p_info;
     const char sz_head[]="STOP: watchdog timeout; thread stacks:\n";
     { ssize_t written_=write(2,sz_head,sizeof(sz_head)-1); (void)written_; }
     dump_frames(p_context);
-    int dir=open("/proc/self/task",O_RDONLY|O_DIRECTORY);
-    char sz_buffer[4096];
-    long cb_read;
-    pid_t self=gettid();
-    while (dir>=0 && (cb_read=syscall(SYS_getdents64,dir,sz_buffer,sizeof(sz_buffer)))>0)
-        for (long at=0; at<cb_read;) {
-            struct { uint64_t ino; int64_t off; unsigned short reclen; unsigned char type; char sz_name[]; } *p_entry=(void *)(sz_buffer+at);
-            pid_t tid=(pid_t)strtol(p_entry->sz_name,NULL,10);
-            if (tid>0 && tid!=self) { syscall(SYS_tgkill,getpid(),tid,SIGUSR2); ps_host_time_sleep_ns(20000000,NULL); }
-            at+=p_entry->reclen;
-        }
+    ps_host_list_dir("/proc/self/task",dump_other_thread,NULL);
     ps_host_time_sleep_ns(100000000,NULL);
     if (g_is_gpu_enabled) psport_gpu_flush_caches(0);
     runtime_calls_report();

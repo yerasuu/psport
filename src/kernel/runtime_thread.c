@@ -448,7 +448,7 @@ static ABI int32_t thread_rename(GuestThread *p_thread,const char *sz_name) {
     return 0;
 }
 static ABI int32_t thread_equal(GuestThread *p_a,GuestThread *p_b) { return p_a==p_b; }
-static ABI int32_t thread_get_id(void) { return (int32_t)gettid(); }
+static ABI int32_t thread_get_id(void) { return ps_host_thread_id(); }
 
 /* POSIX (libScePosix) variants return positive errno values. */
 static int32_t posix(int32_t r) { return r ? (int32_t)((uint32_t)r&0xffff) : 0; }

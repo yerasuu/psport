@@ -94,7 +94,7 @@ void accept_deprecated_names(char **pp_argv) {
     free(pp_found);
     if (!c_copied) return;
     printf("psport: BB_* variables are deprecated, use PS_*: %s\n",sz_list);
-    execv("/proc/self/exe",pp_argv);
+    ps_host_exec_self(pp_argv);
     perror("psport: restart with the PS_* variables");
 }
 #endif

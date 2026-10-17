@@ -11,8 +11,6 @@
 #include <time.h>
 #include <stdatomic.h>
 #include <unistd.h>
-#include <sys/syscall.h>
-#include <linux/futex.h>
 #define ERR(n) ((int32_t)(UINT32_C(0x80020000)|(n)))
 typedef struct Waiter {
     int32_t need, result;
@@ -203,7 +201,7 @@ static int usem_init(GuestSem *p_sem,int shared,uint32_t value) {
     return 0;
 }
 static int usem_valid(const GuestSem *p_sem) { return p_sem && p_sem->magic==SEM_MAGIC; }
-static int usem_futex(GuestSem *p_sem,int op) { return op|(p_sem->flags&SEM_SHARED ? 0 : FUTEX_PRIVATE_FLAG); }
+static int usem_is_private(const GuestSem *p_sem) { return !(p_sem->flags&SEM_SHARED); }
 static int usem_take(GuestSem *p_sem) {
     uint32_t c_resources=atomic_load(&p_sem->count);
     while (c_resources) if (atomic_compare_exchange_weak(&p_sem->count,&c_resources,c_resources-1)) return 1;
@@ -211,16 +209,15 @@ static int usem_take(GuestSem *p_sem) {
 }
 static int usem_trywait(GuestSem *p_sem) { return !usem_valid(p_sem) ? 22 : usem_take(p_sem) ? 0 : 35; }
 /* end: absolute time on `clock`, NULL to wait without a limit. */
-static int usem_wait(GuestSem *p_sem,clockid_t clock,const struct timespec *p_end) {
+static int usem_wait(GuestSem *p_sem,PsHostClock clock,const struct timespec *p_end) {
     if (!usem_valid(p_sem)) return 22;
     if (usem_take(p_sem)) return 0;
     if (p_end && (p_end->tv_nsec<0 || p_end->tv_nsec>=1000000000)) return 22;
-    const int op=usem_futex(p_sem,FUTEX_WAIT_BITSET)|(clock==CLOCK_REALTIME ? FUTEX_CLOCK_REALTIME : 0);
     const uint64_t wait_start=runtime_wait_clock();
     int result=0;
     while (!usem_take(p_sem)) {
         atomic_store(&p_sem->has_waiters,1);
-        if (syscall(SYS_futex,&p_sem->count,op,0,p_end,NULL,FUTEX_BITSET_MATCH_ANY) && errno==ETIMEDOUT) {
+        if (ps_host_wait_on_address((const void *)&p_sem->count,0,usem_is_private(p_sem),clock,p_end)==ETIMEDOUT) {
             result=usem_take(p_sem) ? 0 : 60;
             break;
         }
@@ -231,7 +228,7 @@ static int usem_wait(GuestSem *p_sem,clockid_t clock,const struct timespec *p_en
 static int usem_post(GuestSem *p_sem) {
     if (!usem_valid(p_sem)) return 22;
     atomic_fetch_add(&p_sem->count,1);
-    if (atomic_load(&p_sem->has_waiters)) syscall(SYS_futex,&p_sem->count,usem_futex(p_sem,FUTEX_WAKE),1,NULL,NULL,0);
+    if (atomic_load(&p_sem->has_waiters)) ps_host_wake_address((const void *)&p_sem->count,1,usem_is_private(p_sem));
     return 0;
 }
 static int usem_destroy(GuestSem *p_sem) {
@@ -252,14 +249,14 @@ static int32_t posix_result(int e) {
 typedef struct { int64_t seconds, nanoseconds; } GuestTime;
 static ABI int32_t posix_sem_init(GuestSem *p_sem,int shared,uint32_t value) { return posix_result(usem_init(p_sem,shared,value)); }
 static ABI int32_t posix_sem_destroy(GuestSem *p_sem) { return posix_result(usem_destroy(p_sem)); }
-static ABI int32_t posix_sem_wait(GuestSem *p_sem) { return posix_result(usem_wait(p_sem,CLOCK_MONOTONIC,NULL)); }
+static ABI int32_t posix_sem_wait(GuestSem *p_sem) { return posix_result(usem_wait(p_sem,PS_HOST_CLOCK_MONOTONIC,NULL)); }
 static ABI int32_t posix_sem_trywait(GuestSem *p_sem) { return posix_result(usem_trywait(p_sem)); }
 static ABI int32_t posix_sem_post(GuestSem *p_sem) { return posix_result(usem_post(p_sem)); }
 static ABI int32_t posix_sem_getvalue(GuestSem *p_sem,int32_t *p_value) { return posix_result(usem_getvalue(p_sem,p_value)); }
 static ABI int32_t posix_sem_timedwait(GuestSem *p_sem,const GuestTime *p_end) {
-    if (!p_end) return posix_result(usem_wait(p_sem,CLOCK_REALTIME,NULL));
+    if (!p_end) return posix_result(usem_wait(p_sem,PS_HOST_CLOCK_REALTIME,NULL));
     struct timespec t={.tv_sec=(time_t)p_end->seconds,.tv_nsec=(long)p_end->nanoseconds};
-    return posix_result(usem_wait(p_sem,CLOCK_REALTIME,&t));
+    return posix_result(usem_wait(p_sem,PS_HOST_CLOCK_REALTIME,&t));
 }
 /* FreeBSD's _umtx_op for the ops libc's own primitives build on: plain waits and wakes on a word
  * (over futexes, private ones for the _PRIVATE ops as FreeBSD keys them apart) and the _usem
@@ -274,35 +271,34 @@ typedef struct { GuestTime timeout; uint32_t flags, clock; } GuestUmtxTime;
 /* The timeout as an absolute CLOCK_MONOTONIC or CLOCK_REALTIME time: FreeBSD 9 passes a relative
  * timespec in uaddr2; later ABIs put its size in uaddr and, past a timespec, a _umtx_time with
  * UMTX_ABSTIME (1) and a clock (0 realtime). */
-static int umtx_deadline(const void *p_size, const void *p_timeout, clockid_t *p_out_clock, struct timespec *p_out_end) {
+static int umtx_deadline(const void *p_size, const void *p_timeout, PsHostClock *p_out_clock, struct timespec *p_out_end) {
     GuestUmtxTime timeout={.clock=4};
     memcpy(&timeout,p_timeout,(uintptr_t)p_size>sizeof(GuestTime) ? sizeof(timeout) : sizeof(GuestTime));
     if (timeout.timeout.seconds<0 || timeout.timeout.nanoseconds<0 || timeout.timeout.nanoseconds>=1000000000) return 22;
-    *p_out_clock=timeout.clock==0 ? CLOCK_REALTIME : CLOCK_MONOTONIC;
+    *p_out_clock=timeout.clock==0 ? PS_HOST_CLOCK_REALTIME : PS_HOST_CLOCK_MONOTONIC;
     *p_out_end=(struct timespec){.tv_sec=(time_t)timeout.timeout.seconds,.tv_nsec=(long)timeout.timeout.nanoseconds};
     if (timeout.flags&1) return 0;
     struct timespec now;
-    ps_host_time_read(timeout.clock==0 ? PS_HOST_CLOCK_REALTIME : PS_HOST_CLOCK_MONOTONIC,&now);
+    ps_host_time_read(*p_out_clock,&now);
     p_out_end->tv_sec+=now.tv_sec;
     p_out_end->tv_nsec+=now.tv_nsec;
     if (p_out_end->tv_nsec>=1000000000) { p_out_end->tv_nsec-=1000000000; ++p_out_end->tv_sec; }
     return 0;
 }
 static int umtx_sleep(void *p_word, uint32_t expected, int is_private, const void *p_size, const void *p_timeout) {
-    clockid_t clock=CLOCK_MONOTONIC;
+    PsHostClock clock=PS_HOST_CLOCK_MONOTONIC;
     struct timespec end;
     if (p_timeout) {
         const int error=umtx_deadline(p_size,p_timeout,&clock,&end);
         if (error) return error;
     }
-    const int op=FUTEX_WAIT_BITSET|(is_private ? FUTEX_PRIVATE_FLAG : 0)|(clock==CLOCK_REALTIME ? FUTEX_CLOCK_REALTIME : 0);
     const uint64_t wait_start=runtime_wait_clock();
-    const long result=syscall(SYS_futex,p_word,op,expected,p_timeout ? &end : NULL,NULL,FUTEX_BITSET_MATCH_ANY);
+    const int result=ps_host_wait_on_address(p_word,expected,is_private,clock,p_timeout ? &end : NULL);
     runtime_wait_note(2,runtime_wait_clock()-wait_start);
-    return result && errno==ETIMEDOUT ? 60 : 0;
+    return result==ETIMEDOUT ? 60 : 0;
 }
 static void umtx_wake(void *p_word, uint64_t c_waiters, int is_private) {
-    syscall(SYS_futex,p_word,FUTEX_WAKE|(is_private ? FUTEX_PRIVATE_FLAG : 0),c_waiters>INT32_MAX ? INT32_MAX : (int)c_waiters,NULL,NULL,0);
+    ps_host_wake_address(p_word,c_waiters>INT32_MAX ? INT32_MAX : (int)c_waiters,is_private);
 }
 static ABI int32_t posix_umtx_op(void *p_object, int op, uint64_t value, void *p_address, void *p_address2) {
     static _Atomic unsigned char s_is_op_reported[UMTX_OP_COUNT];

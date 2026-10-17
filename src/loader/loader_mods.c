@@ -7,6 +7,7 @@
 #define _GNU_SOURCE
 #include "runtime_json_print.h"
 #include "loader.h"
+#include "ps_host.h"
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -19,7 +20,6 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/prctl.h>
-#include <sys/syscall.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -417,8 +417,8 @@ static void remove_when_done(const char *sz_view) {
     int h_watch = fcntl(pipe_fds[0], F_DUPFD, 3), h_null = open("/dev/null", O_RDWR);
     if (h_watch < 0 || h_null < 0) _exit(1);
     for (int h_fd = 0; h_fd < 3; ++h_fd) dup2(h_null, h_fd);
-    syscall(SYS_close_range, 3u, (unsigned)h_watch - 1, 0u);
-    syscall(SYS_close_range, (unsigned)h_watch + 1, ~0u, 0u);
+    ps_host_close_from(3, h_watch - 1, 0);
+    ps_host_close_from(h_watch + 1, -1, 0);
     prctl(PR_SET_NAME, "mod-view-clean");
     setsid();
     signal(SIGINT, SIG_IGN);

@@ -93,6 +93,38 @@ typedef struct {
  * handler that is ending the process. */
 int ps_host_dl_address(const void *p_code, PsHostCodeAddress *p_out);
 
+/* ---- threads ---- */
+/* The calling thread's id as the host's tools and thread signals name it. Safe in signal handlers. */
+int32_t ps_host_thread_id(void);
+/* Sends a signal to one thread of this process: 0, or the host's errno. Safe in signal handlers. */
+int ps_host_thread_signal(int32_t tid, int signal);
+/* Sleeps while the 32-bit word at p_word holds expected, until a wake on that address, the
+ * absolute deadline on clock (MONOTONIC or REALTIME; NULL waits without one) or a signal. A
+ * private wait pairs only with wakes from this process, which is cheaper. 0 when woken, EAGAIN
+ * when the word did not hold expected, ETIMEDOUT, EINTR, or another errno. */
+int ps_host_wait_on_address(const void *p_word, uint32_t expected, int is_private, PsHostClock clock,
+                            const struct timespec *p_deadline);
+/* Wakes up to c_waiters threads waiting on p_word: the number woken, or minus the host's errno. */
+int ps_host_wake_address(const void *p_word, int c_waiters, int is_private);
+
+/* ---- files ---- */
+/* Calls pfn_entry with each name in the folder but "." and "..", without allocating, so that a
+ * signal handler may list one (the watchdog lists /proc/self/task): 0, or the host's errno when the
+ * folder cannot be read. */
+int ps_host_list_dir(const char *sz_path, void (*pfn_entry)(const char *sz_name, void *p_context), void *p_context);
+
+/* ---- processes ---- */
+/* Closes descriptors h_first to h_last (-1: every one from h_first on), or with is_on_exec only marks
+ * them close-on-exec, so that a failed exec leaves them working: 0, or the host's errno. Safe
+ * between fork and exec. */
+int ps_host_close_from(int h_first, int h_last, int is_on_exec);
+/* Replaces the process with sz_file (looked up in PATH when it has no slash): returns only when that
+ * fails, with the host's errno (errno holds it too). */
+int ps_host_exec(const char *sz_file, char *const *pp_argv);
+/* Replaces the process with a new run of psport's own executable, the same file even when its path
+ * changed since: returns only when that fails, with the host's errno (errno holds it too). */
+int ps_host_exec_self(char *const *pp_argv);
+
 #ifdef __cplusplus
 }
 #endif

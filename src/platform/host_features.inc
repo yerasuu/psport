@@ -47,7 +47,7 @@ FEATURE(guest_tls, tls, "the guest's thread-local storage: a TCB and static TLS 
 FEATURE_HOST(guest_tls, LINUX, IMPLEMENTED, "arch_prctl(ARCH_SET_GS) (runtime_thread.c)", "#540")
 
 FEATURE(threads, thread, "guest threads on host threads: creation, signals to one thread, waits on an address")
-FEATURE_HOST(threads, LINUX, IMPLEMENTED, "pthreads, tgkill and futex (runtime_thread.c, runtime_sema.c)", "#540")
+FEATURE_HOST(threads, LINUX, IMPLEMENTED, "pthreads (runtime_thread.c); gettid, tgkill and futex (src/platform/linux/host_thread.c)", "#540")
 
 FEATURE(time, time, "clocks, sleeping and the time stamp counter")
 FEATURE_HOST(time, LINUX, IMPLEMENTED, "clock_gettime and nanosleep (src/platform/linux/host_time.c), rdtsc", "#540")
@@ -57,7 +57,8 @@ FEATURE_HOST(files, LINUX, IMPLEMENTED, "POSIX files and folders (runtime_file.c
 
 FEATURE(processes, proc, "the process starting again on itself (restart, sceSystemServiceLoadExec) and the mod view's "
                          "cleaner process")
-FEATURE_HOST(processes, LINUX, IMPLEMENTED, "execv of /proc/self/exe, fork and close_range", "#540")
+FEATURE_HOST(processes, LINUX, IMPLEMENTED,
+             "execv of /proc/self/exe, execvp and close_range (src/platform/linux/host_process.c), fork (loader_mods.c)", "#540")
 
 FEATURE(dynamic_libraries, dl, "host libraries loaded at run time (the online module) and the symbols fault reports name")
 FEATURE_HOST(dynamic_libraries, LINUX, IMPLEMENTED, "dlopen, dlsym and dladdr (src/platform/linux/host_library.c)", "#540")

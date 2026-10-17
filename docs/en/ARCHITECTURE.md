@@ -244,7 +244,7 @@ a file.
 
 What psport asks of the operating system goes through one small C ABI, `ps_host_*`
 (`src/platform/ps_host.h`, decision #540), with an implementation per OS in `src/platform/<os>/`
-(and `gpu/platform/<os>/` for C++-only parts). Only Linux is implemented; a directory for another OS
+(and, when they come, `gpu/platform/<os>/` for C++-only parts). Only Linux is implemented; a directory for another OS
 appears with its first code. Its groups: vm, fault, thread, tls, time, fs/path, proc, dl and rand,
 moved behind the ABI area by area without changing what Linux does. So far:
 
@@ -253,11 +253,16 @@ moved behind the ABI area by area without changing what Linux does. So far:
 | time | `ps_host_time_read`, `ps_host_time_resolution` (`PsHostClock`), `ps_host_time_monotonic_ns`, `ps_host_time_realtime_ns`, `ps_host_time_sleep_ns`, `ps_host_time_sleep_until_ns` | `clock_gettime`, `clock_getres`, `nanosleep`, `clock_nanosleep` (`linux/host_time.c`) |
 | rand | `ps_host_random_bytes` | `getrandom` (`linux/host_system.c`) |
 | path | `ps_host_exe_path` | `/proc/self/exe` (`linux/host_system.c`) |
+| thread | `ps_host_thread_id`, `ps_host_thread_signal`, `ps_host_wait_on_address`, `ps_host_wake_address` | `gettid`, `tgkill`, `futex` (`FUTEX_WAIT_BITSET`, `FUTEX_WAKE`) (`linux/host_thread.c`) |
+| fs | `ps_host_list_dir` (no allocation: usable in a signal handler) | `getdents64` (`linux/host_process.c`) |
+| proc | `ps_host_close_from`, `ps_host_exec`, `ps_host_exec_self` | `close_range`, `execvp`, `execv("/proc/self/exe")` (`linux/host_process.c`) |
 | dl | `ps_host_dl_open`, `ps_host_dl_sym`, `ps_host_dl_address` (`PsHostCodeAddress`: file, symbol, their addresses) | `dlopen(RTLD_NOW \| RTLD_LOCAL)`, `dlsym`, `dladdr` (`linux/host_library.c`) |
 
-Faults, guest memory and guest TLS stay in the runtime until their own steps. The environment is read
-through `runtime_env`, `runtime_env_int` and `runtime_env_flag` (`runtime_config.c`), except in
-`runtime_quirks.c`, which `psport-gpu-capabilities` links without them.
+Faults, guest memory, guest TLS (`arch_prctl`), the mod view's cleaner process (`fork` in
+`loader_mods.c`) and RenderDoc's `dlopen(RTLD_NOLOAD)` stay where they are until their own steps.
+The environment is read through `runtime_env`, `runtime_env_int` and `runtime_env_flag`
+(`runtime_config.c`), except in `runtime_quirks.c`, which `psport-gpu-capabilities` links without
+them.
 
 `src/platform/host_features.inc` is the capability table, an X-macro list like the quirk registry:
 `FEATURE(id, area, sz_desc)` names a capability, `FEATURE_HOST(id, os, state, sz_reason, sz_ref)` gives
