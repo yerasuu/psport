@@ -466,6 +466,7 @@ A title may provide:
 | `effects` | the settings of `add_patches` the overlay menu's "Game effects" section offers: its `psport.ini` switches (key, label and hint in the menu's languages, default), the `model_lod` choice, a note; without them the section is not shown |
 | `prepare_saves` | changes to the user's saves the game needs before it runs (Bloodborne: the sound flag at `0x204E`, gated by its `WORKAROUND` quirk `bloodborne_save_sound_flag`) |
 | `patch_image`, `before_present` | the port's own pages in the game's menus: patched into its code after the profile's patches, and applied each presented frame |
+| `default_controls` | its keyboard and mouse layout as `psport.ini` `key.`/`pad.` lines over the neutral one (Bloodborne: close to Dark Souls III on PC); the player's lines win |
 | `online` | the servers of its online play: its own game server, the community server that answers for it, the community API port and its summon route ([Online play](#online-play)) |
 | `quirks` | its entries of the quirk registry ([QUIRKS.md](QUIRKS.md)) |
 | `profile` | its `Game::Profile`, or none |

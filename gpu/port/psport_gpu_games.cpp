@@ -60,6 +60,11 @@ extern "C" PsTitleInfo psport_gpu_title(const char* sz_serial) {
     };
 }
 
+extern "C" const char* psport_gpu_title_controls(void) {
+    const Game::Title* p_title = Game::Launched();
+    return p_title ? p_title->sz_default_controls : nullptr;
+}
+
 extern "C" PsTitleEffects psport_gpu_title_effects(const char* sz_serial) {
     const Game::Title* p_title = Game::Find(sz_serial);
     if (!p_title) {

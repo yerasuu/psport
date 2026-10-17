@@ -383,35 +383,37 @@ def combo_value(row):
     return row.values[row.get_selected()]
 
 
-# Controls (runtime_pad.c): input, label, default keyboard keys, default gamepad buttons (SDL names).
+# Controls (runtime_pad.c): input, label, default keyboard keys (Bloodborne's layout,
+# gpu/games/bloodborne/title.cpp DefaultControls; a chord is "Left Shift+Mouse Left"), default
+# gamepad buttons (SDL names).
 # psport.ini key.<input>= / pad.<input>= replace a default; no line keeps it. Mouse buttons and the
 # wheel are keys ("Mouse Left", "Wheel Down"); they act while the game holds the mouse.
 CONTROLS = [
-    ("cross", "Крест", "Space", "a"),
-    ("circle", "Круг", "Left Shift", "b"),
-    ("square", "Квадрат", "E", "x"),
+    ("cross", "Крест", "F, Return", "a"),
+    ("circle", "Круг", "Space", "b"),
+    ("square", "Квадрат", "Tab, R", "x"),
     ("triangle", "Треугольник", "Q", "y"),
-    ("l1", "L1", "1, Mouse X2", "leftshoulder"),
-    ("r1", "R1", "3, Mouse Left", "rightshoulder"),
-    ("l2", "L2", "R, Mouse Right", "lefttrigger"),
-    ("r2", "R2", "F, Mouse X1", "righttrigger"),
-    ("l3", "L3", "Z", "leftstick"),
+    ("l1", "L1", "E, Mouse X2", "leftshoulder"),
+    ("r1", "R1", "Mouse Left", "rightshoulder"),
+    ("l2", "L2", "Mouse Right", "lefttrigger"),
+    ("r2", "R2", "Left Shift+Mouse Left, Mouse X1", "righttrigger"),
+    ("l3", "L3", "Left Ctrl", "leftstick"),
     ("r3", "R3", "C, Mouse Middle", "rightstick"),
-    ("options", "Options", "Return", "start"),
-    ("touchpad", "Тачпад, левая половина (жесты)", "Tab", "back, touchpad"),
+    ("options", "Options", "Escape", "start"),
+    ("touchpad", "Тачпад, левая половина (жесты)", "G", "back, touchpad"),
     ("touchpad_right", "Тачпад, правая половина (личные вещи)", "Backspace", ""),
-    ("up", "Крестовина вверх", "I, Wheel Up", "dpup"),
-    ("down", "Крестовина вниз", "K, Wheel Down", "dpdown"),
-    ("left", "Крестовина влево", "J", "dpleft"),
-    ("right", "Крестовина вправо", "L", "dpright"),
+    ("up", "Крестовина вверх", "3, Up, Wheel Up", "dpup"),
+    ("down", "Крестовина вниз", "4, Down, Wheel Down", "dpdown"),
+    ("left", "Крестовина влево", "1, Left", "dpleft"),
+    ("right", "Крестовина вправо", "2, Right", "dpright"),
     ("move_up", "Движение вперёд", "W", None),
     ("move_down", "Движение назад", "S", None),
     ("move_left", "Движение влево", "A", None),
     ("move_right", "Движение вправо", "D", None),
-    ("look_up", "Камера вверх", "Up", None),
-    ("look_down", "Камера вниз", "Down", None),
-    ("look_left", "Камера влево", "Left", None),
-    ("look_right", "Камера вправо", "Right", None),
+    ("look_up", "Камера вверх", "I", None),
+    ("look_down", "Камера вниз", "K", None),
+    ("look_left", "Камера влево", "J", None),
+    ("look_right", "Камера вправо", "L", None),
 ]
 
 

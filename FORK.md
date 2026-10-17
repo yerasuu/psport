@@ -48,6 +48,7 @@ source commit), as the rows below already are. Last reviewed points:
 | miniz built with FetchContent (tag `3.1.2`) when no package exists; the online module's missing dependencies named | `gpu/CMakeLists.txt` | bbport `72e5c8c` (#136, #145) | as is |
 | FP8 FSR 4 passes captured under an RX 9070 XT's id on an RX 9000 that needed the RX 7800 XT's id | `tools/fsr4cap/capture_all.sh` (`rdna4_present`) | bbport `72e5c8c` (#186) | the FP8 id kept for every FP8 size, not only the first |
 | Guest code hooks: a byte-checked jump to a trampoline that hands a host function every register (shadPS4's `InstallGuestCodeHook` of the shadp2p/BBSC forks), the stub emitter of bbport's detours | `gpu/port/psport_guest_code.*` (`PsGuestCode::InstallHook`, `InstallDetour`, `Emitter`) | bbport `72e5c8c` (`gpu/shim/bbport_guest_code_hooks.*`, `bbport_guest_code.h`) | for any game's profile; results as `PsGuestCode::Error` values instead of `bool`, every hook logged when it goes in or is refused; `RedirectOperand` (a RIP-relative operand moved, checked with Zydis) and `MapNear` added; pages still writable during the loader's patching are written in place |
+| Chord bindings (a modifier per key slot; its plain bindings held back while the chord's modifier is down), the device in use and short key names for button prompts, the Dark Souls III-like layout | `src/input/runtime_pad.*` (`apply_binding_line`, `is_chord_held`, `runtime_pad_prompt*`), `gpu/games/bloodborne/title.cpp` (`DefaultControls`), `gpu/games/game_profile.h` (`sz_default_controls`), `launcher/psport_launcher.py` (`CONTROLS`) | bbport `72e5c8c` (`src/runtime_pad.c`) | the layout is Bloodborne's title data, other games keep psport's neutral layout; the motion emulation (spray can) and two-finger touch not ported |
 
 ## Names
 
@@ -249,6 +250,15 @@ port keeps Insert, Home, the menu's and the name dialog's keys and F1 while it h
 Without a window or a host keyboard the keyboard opens and lists none, so `GetResourceId` fails with
 `0x80BC0004` as on a console with no keyboard. The log says whether the host keyboard reaches the
 game (`Runtime: keyboard: ...`) and sums up the events delivered at exit.
+
+The keyboard-as-pad's layout (`src/input/runtime_pad.c`) is the neutral one in that file's header
+unless the running title brings its own (`Game::Title` `sz_default_controls`, `psport.ini` lines
+read through `psport_gpu_title_controls`; Bloodborne's is close to Dark Souls III on PC); the
+player's `key.<input>=` and `pad.<input>=` lines in `psport.ini` win over both. A key may be a chord,
+`key.r2=Left Shift+Mouse Left`: while its modifier is held the key's plain bindings do not count.
+`runtime_pad_prompt_device`, `runtime_pad_prompt_generation` and `runtime_pad_prompt` tell button
+prompts which device was used last (a PlayStation pad, another gamepad, or the keyboard and mouse)
+and the short name of what an input is bound to there (`Shift`, `Esc`, `⇧Left`, `RB`, `A`).
 
 libSceIme's on-screen keyboard (`src/system/runtime_ime.c`) is the same text entry as the IME dialog: while
 the game has it open, the game window takes the host keyboard's typing and the overlay draws the

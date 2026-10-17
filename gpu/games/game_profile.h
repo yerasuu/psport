@@ -231,6 +231,10 @@ struct Title {
     /// Each presented frame, on the presenter thread before the overlay is drawn: what the
     /// player changed in the game's own menus is applied here.
     void (*pfn_before_present)() = nullptr;
+    /// Its keyboard and mouse layout: psport.ini key.<input>= and pad.<input>= lines, one per line,
+    /// over the neutral layout (src/input/runtime_pad.c); the player's own lines win over both.
+    /// nullptr keeps the neutral one.
+    const char* sz_default_controls = nullptr;
     OnlineServices online;
     /// Its entries of the quirk registry (src/runtime/runtime_quirks.inc): LAUNCH ones always
     /// apply, WORKAROUND ones also with PS_GAME_PROFILE=none, OPTIMIZATION ones not then

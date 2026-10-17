@@ -33,6 +33,33 @@ constexpr const char* ModFolders[] = {"action", "adhoc",    "chr",   "event", "f
 constexpr RuntimeQuirkId Quirks[] = {RUNTIME_QUIRK_bloodborne_save_sound_flag,
                                      RUNTIME_QUIRK_bloodborne_gx_node_guard};
 
+/// Close to Dark Souls III on PC, which Bloodborne's players know (bbport 0.6): WASD move, IJKL the
+/// camera, Space dodge and run, F or Enter interact, the mouse's left button attack and with Shift
+/// the strong attack, its right button the gun, Q the blood vial, E the weapon's transformation, Tab
+/// or R the quick item, 1 and 2 the left and right hand's weapons, 3 and 4 the quick items, C
+/// lock-on, Esc the menu, G gestures, Backspace the personal items.
+constexpr const char* DefaultControls = "key.cross=F, Return\n"
+                                        "key.circle=Space\n"
+                                        "key.square=Tab, R\n"
+                                        "key.triangle=Q\n"
+                                        "key.l1=E, Mouse X2\n"
+                                        "key.r1=Mouse Left\n"
+                                        "key.l2=Mouse Right\n"
+                                        "key.r2=Left Shift+Mouse Left, Mouse X1\n"
+                                        "key.l3=Left Ctrl\n"
+                                        "key.r3=C, Mouse Middle\n"
+                                        "key.options=Escape\n"
+                                        "key.touchpad=G\n"
+                                        "key.touchpad_right=Backspace\n"
+                                        "key.up=3, Up, Wheel Up\n"
+                                        "key.down=4, Down, Wheel Down\n"
+                                        "key.left=1, Left\n"
+                                        "key.right=2, Right\n"
+                                        "key.look_up=I\n"
+                                        "key.look_down=K\n"
+                                        "key.look_left=J\n"
+                                        "key.look_right=L\n";
+
 /// The "sound hack" (rainvmaker, from the Diegolix29 shadPS4 fork): the game data save carries a
 /// flag at 0x204E of SPRJ0005/userdata0010; with it clear, parts of the game's audio (e.g. the
 /// player's weapon sounds) never play. A WORKAROUND quirk until #348 finds the general fix:
@@ -86,6 +113,7 @@ extern const Title BloodborneTitle = {
     .pfn_prepare_saves = PrepareSaves,
     .pfn_patch_image = PsGameMenu::PatchImage,
     .pfn_before_present = PsGameMenu::Poll,
+    .sz_default_controls = DefaultControls,
     .online = {.sz_game_server = "https://ss4.scej-network.jp:20443",
                .sz_community_server = "http://play.seamlesshunt.com",
                .community_api_port = 18671,

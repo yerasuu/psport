@@ -2,7 +2,8 @@
  * (gpu/shim/window.cpp); here state is only sampled.
  *
  * Keyboard layout (also with a gamepad connected: both drive the game; not while the game has
- * libSceImeKeyboard open, runtime_keyboard.c, when the keys are the game's):
+ * libSceImeKeyboard open, runtime_keyboard.c, when the keys are the game's), unless the game's
+ * title brings its own (Game::Title sz_default_controls, psport_gpu_title_controls):
  *   WASD left stick, arrow keys right stick, Space Cross, LShift Circle,
  *   E Square, Q Triangle, 1 L1, 3 R1, R L2, F R2, Z L3, C R3,
  *   Enter Options, Tab left touchpad, Backspace right touchpad,
@@ -10,6 +11,8 @@
  *   Mouse (once the game window is clicked; F1 or leaving the window releases it): look (the
  *   right stick), Left R1, Right L2, Middle R3, side buttons R2 (X1) and L1 (X2), wheel the
  *   d-pad's up/down (quick items).
+ *   A binding may be a chord, "Left Shift+Mouse Left": while its modifier is held, the second
+ *   key's plain bindings do not count (Shift+Left is R2 alone, not R2 and R1).
  *
  * Stick neutral: SDL exposes no way to read a pad's calibration and some clones report a
  * biased neutral (a Switch-style pad was seen returning both sticks at a constant ~ +/-16380).
@@ -271,11 +274,11 @@ static void report_guest_heap(void) {
                m.in_use/1048576.0,m.max_in_use/1048576.0,m.system/1048576.0,m.max_system/1048576.0);
     }
 }
-/* Controls: what each PS4 input is bound to. Defaults below; psport.ini (PS_CONFIG) lines
- * key.<input>=<SDL key names> and pad.<input>=<SDL gamepad button names>, comma-separated,
- * replace an input's binding (empty: unbound). Inputs: the buttons (cross ... right, touchpad =
- * a left-side click, touchpad_right), and on the keyboard the sticks: move_* (left), look_*
- * (right). Gamepad names as SDL's: a b x y back start leftstick rightstick leftshoulder
+/* Controls: what each PS4 input is bound to. Defaults below, then the title's own lines; psport.ini
+ * (PS_CONFIG) lines key.<input>=<SDL key names> and pad.<input>=<SDL gamepad button names>,
+ * comma-separated, replace an input's binding (empty: unbound); a key may be "<modifier>+<key>".
+ * Inputs: the buttons (cross ... right, touchpad = a left-side click, touchpad_right), and on the
+ * keyboard the sticks: move_* (left), look_* (right). Gamepad names as SDL's: a b x y back start leftstick rightstick leftshoulder
  * rightshoulder dpup dpdown dpleft dpright touchpad misc1 paddle1-4, plus lefttrigger and
  * righttrigger. The keyboard works next to a gamepad (the Steam Deck always has one): its buttons
  * add to the gamepad's, a held move/look key moves the stick all the way. */
@@ -305,7 +308,8 @@ static const struct { const char *sz_name; int code; } s_mouse_keys[]={
     {"Mouse X2",MOUSE_KEY+SDL_BUTTON_X2}, {"Wheel Up",MOUSE_WHEEL_UP}, {"Wheel Down",MOUSE_WHEEL_DOWN},
 };
 enum { PAD_LEFT_TRIGGER=SDL_GAMEPAD_BUTTON_COUNT, PAD_RIGHT_TRIGGER }; /* triggers as buttons */
-typedef struct { int c_keys, c_pads; int keys[MAX_BIND]; int pad[MAX_BIND]; } Binding;
+/* keys[i] needs mods[i] held too when mods[i] is not -1 (a chord: "Left Shift+Mouse Left"). */
+typedef struct { int c_keys, c_pads; int keys[MAX_BIND]; int mods[MAX_BIND]; int pad[MAX_BIND]; } Binding;
 static Binding s_bindings[IN_COUNT];
 static int s_is_bindings_ready;
 
@@ -337,7 +341,8 @@ static void bind_defaults(void) {
     };
     memset(s_bindings,0,sizeof s_bindings);
     for (size_t i=0;i<sizeof(s_keys)/sizeof(*s_keys);++i) {
-        Binding *p_binding=&s_bindings[s_keys[i].input]; p_binding->keys[p_binding->c_keys++]=s_keys[i].key;
+        Binding *p_binding=&s_bindings[s_keys[i].input];
+        p_binding->mods[p_binding->c_keys]=-1; p_binding->keys[p_binding->c_keys++]=s_keys[i].key;
     }
     for (size_t i=0;i<sizeof(s_pads)/sizeof(*s_pads);++i) {
         Binding *p_binding=&s_bindings[s_pads[i].input]; p_binding->pad[p_binding->c_pads++]=s_pads[i].button;
@@ -359,42 +364,77 @@ static int key_from_name(const char *sz_name) {
  * ~1000 pixels/s turn the camera at full speed), mouse_invert_y=1. */
 static int s_mouse_look=1, s_mouse_invert_y;
 static float s_mouse_sensitivity=1.0f;
+/* A key.<input>= or pad.<input>= line (sz_origin: where it comes from, for the log); 0 when it is
+ * not one. */
+static int apply_binding_line(const char *sz_key, const char *sz_value, const char *sz_origin) {
+    const int keyboard=!strncmp(sz_key,"key.",4), pad=!strncmp(sz_key,"pad.",4);
+    if (!keyboard && !pad) return 0;
+    int input=-1;
+    for (int i=0;i<IN_COUNT;++i) if (!strcmp(sz_key+4,s_input_names[i])) input=i;
+    if (input<0 || (pad && input>=IN_MOVE_UP)) { printf("Runtime: controls: unknown input %s (%s)\n",sz_key,sz_origin); return 1; }
+    Binding *p_binding=&s_bindings[input];
+    if (keyboard) p_binding->c_keys=0; else p_binding->c_pads=0;
+    char sz_names[512];
+    snprintf(sz_names,sizeof sz_names,"%s",sz_value);
+    char *p_save=NULL;
+    for (char *sz_name=strtok_r(sz_names,",",&p_save); sz_name; sz_name=strtok_r(NULL,",",&p_save)) {
+        while (*sz_name==' ') ++sz_name;
+        for (char *sz_end=sz_name+strlen(sz_name); sz_end>sz_name && sz_end[-1]==' ';) *--sz_end=0;
+        if (!*sz_name) continue;
+        if (keyboard) {
+            /* A chord: "<modifier>+<key>" ("Keypad +" is one key: nothing after its '+'). */
+            int mod=-1;
+            char *p_plus=strrchr(sz_name,'+');
+            if (p_plus && p_plus>sz_name && p_plus[1]) {
+                *p_plus=0;
+                for (char *sz_end=p_plus; sz_end>sz_name && sz_end[-1]==' ';) *--sz_end=0;
+                mod=key_from_name(sz_name);
+                if (mod<0) *p_plus='+'; else sz_name=p_plus+1;
+                while (*sz_name==' ') ++sz_name;
+            }
+            const int s=key_from_name(sz_name);
+            if (s<0) printf("Runtime: controls: unknown key \"%s\" for %s (%s)\n",sz_name,sz_key+4,sz_origin);
+            else if (p_binding->c_keys<MAX_BIND) { p_binding->mods[p_binding->c_keys]=mod; p_binding->keys[p_binding->c_keys++]=s; }
+        } else {
+            const int button=pad_button_from_name(sz_name);
+            if (button<0) printf("Runtime: controls: unknown gamepad button \"%s\" for %s (%s)\n",sz_name,sz_key+4,sz_origin);
+            else if (p_binding->c_pads<MAX_BIND) p_binding->pad[p_binding->c_pads++]=button;
+        }
+    }
+    return 1;
+}
+/* The running title's default controls (psport.ini lines, one per line), over the neutral ones. */
+static void apply_title_controls(void) {
+    const char *sz_controls=psport_gpu_title_controls();
+    if (!sz_controls) return;
+    int c_lines=0;
+    for (const char *sz_line=sz_controls; *sz_line;) {
+        const char *sz_end=strchr(sz_line,'\n');
+        const size_t cb_line=sz_end ? (size_t)(sz_end-sz_line) : strlen(sz_line);
+        char sz_entry[512];
+        snprintf(sz_entry,sizeof sz_entry,"%.*s",(int)cb_line,sz_line);
+        char *p_equals=strchr(sz_entry,'=');
+        if (p_equals) {
+            *p_equals=0;
+            c_lines+=apply_binding_line(sz_entry,p_equals+1,"the title's defaults");
+        }
+        sz_line+=cb_line+(sz_end ? 1 : 0);
+    }
+    printf("Runtime: controls: the title's default layout (%d bindings), psport.ini's key. and pad. lines over it\n",c_lines);
+}
 /* key.<input>= / pad.<input>= lines of the settings file. */
 static void load_bindings(void) {
     bind_defaults();
+    apply_title_controls();
     s_mouse_look=1; s_mouse_invert_y=0; s_mouse_sensitivity=1.0f;
     const char *sz_key, *sz_value;
     for (size_t i_entry=0; runtime_config_entry(i_entry,&sz_key,&sz_value); ++i_entry) {
-        const int keyboard=!strncmp(sz_key,"key.",4), pad=!strncmp(sz_key,"pad.",4);
-        if (!keyboard && !pad) {
-            if (!strcmp(sz_key,"mouse_look")) s_mouse_look=atoi(sz_value)!=0;
-            else if (!strcmp(sz_key,"mouse_invert_y")) s_mouse_invert_y=atoi(sz_value)!=0;
-            else if (!strcmp(sz_key,"mouse_sensitivity")) {
-                const float v=strtof(sz_value,NULL);
-                if (v>=0.05f && v<=20.0f) s_mouse_sensitivity=v;
-            }
-            continue;
-        }
-        int input=-1;
-        for (int i=0;i<IN_COUNT;++i) if (!strcmp(sz_key+4,s_input_names[i])) input=i;
-        if (input<0 || (pad && input>=IN_MOVE_UP)) { printf("Runtime: controls: unknown input %s\n",sz_key); continue; }
-        Binding *p_binding=&s_bindings[input];
-        if (keyboard) p_binding->c_keys=0; else p_binding->c_pads=0;
-        char sz_names[512];
-        snprintf(sz_names,sizeof sz_names,"%s",sz_value);
-        for (char *sz_name=strtok(sz_names,","); sz_name; sz_name=strtok(NULL,",")) {
-            while (*sz_name==' ') ++sz_name;
-            for (char *sz_end=sz_name+strlen(sz_name); sz_end>sz_name && sz_end[-1]==' ';) *--sz_end=0;
-            if (!*sz_name) continue;
-            if (keyboard) {
-                const int s=key_from_name(sz_name);
-                if (s<0) printf("Runtime: controls: unknown key \"%s\" for %s\n",sz_name,sz_key+4);
-                else if (p_binding->c_keys<MAX_BIND) p_binding->keys[p_binding->c_keys++]=s;
-            } else {
-                const int button=pad_button_from_name(sz_name);
-                if (button<0) printf("Runtime: controls: unknown gamepad button \"%s\" for %s\n",sz_name,sz_key+4);
-                else if (p_binding->c_pads<MAX_BIND) p_binding->pad[p_binding->c_pads++]=button;
-            }
+        if (apply_binding_line(sz_key,sz_value,"psport.ini")) continue;
+        if (!strcmp(sz_key,"mouse_look")) s_mouse_look=atoi(sz_value)!=0;
+        else if (!strcmp(sz_key,"mouse_invert_y")) s_mouse_invert_y=atoi(sz_value)!=0;
+        else if (!strcmp(sz_key,"mouse_sensitivity")) {
+            const float v=strtof(sz_value,NULL);
+            if (v>=0.05f && v<=20.0f) s_mouse_sensitivity=v;
         }
     }
 }
@@ -418,10 +458,23 @@ static int mouse_key_down(int code) {
     if (code==MOUSE_WHEEL_DOWN) return s_wheel_phase[1]==1;
     return (s_mouse_buttons & SDL_BUTTON_MASK(code-MOUSE_KEY))!=0;
 }
+static int code_down(const bool *p_is_key_down, int code) {
+    return code>=MOUSE_KEY ? mouse_key_down(code) : p_is_key_down && p_is_key_down[code];
+}
+/* Whether a chord on code (any input's) has its modifier held: the key's plain bindings then wait
+ * (Shift+Left is R2 alone). */
+static int is_chord_held(const bool *p_is_key_down, int code) {
+    for (int input=0;input<IN_COUNT;++input)
+        for (int i=0;i<s_bindings[input].c_keys;++i)
+            if (s_bindings[input].keys[i]==code && s_bindings[input].mods[i]>=0 &&
+                code_down(p_is_key_down,s_bindings[input].mods[i])) return 1;
+    return 0;
+}
 static int key_down(const bool *p__bool, int input) {
     for (int i=0;i<s_bindings[input].c_keys;++i) {
-        const int code=s_bindings[input].keys[i];
-        if (code>=MOUSE_KEY ? mouse_key_down(code) : p__bool && p__bool[code]) return 1;
+        const int code=s_bindings[input].keys[i], mod=s_bindings[input].mods[i];
+        if (!code_down(p__bool,code)) continue;
+        if (mod>=0 ? code_down(p__bool,mod) : !is_chord_held(p__bool,code)) return 1;
     }
     return 0;
 }
@@ -490,6 +543,130 @@ static void apply_mouse_look(PadData *p_pad_data, double dx, double dy, uint64_t
     p_pad_data->right_y=look_axis(s_look_y,p_pad_data->right_y,s_deadzone);
 }
 
+/* Button prompts: the device whose input came last. RUNTIME_PAD_PROMPT_PLAYSTATION a PlayStation pad
+ * (the game's own icons), _GAMEPAD another gamepad (its labels), _KEYBOARD the keyboard and mouse.
+ * The generation changes with the device, the pad's type and the bindings. */
+static int s_prompt_device=-1;
+static SDL_GamepadType s_prompt_pad_type=SDL_GAMEPAD_TYPE_UNKNOWN;
+static unsigned s_prompt_generation=1;
+static void prompt_note(SDL_Gamepad *p_sdl_gamepad, int is_pad_active, int is_keyboard_active) {
+    int device=s_prompt_device;
+    const SDL_GamepadType type=p_sdl_gamepad ? SDL_GetGamepadType(p_sdl_gamepad) : SDL_GAMEPAD_TYPE_UNKNOWN;
+    const int is_playstation=type==SDL_GAMEPAD_TYPE_PS3 || type==SDL_GAMEPAD_TYPE_PS4 || type==SDL_GAMEPAD_TYPE_PS5;
+    if (is_keyboard_active) device=RUNTIME_PAD_PROMPT_KEYBOARD;
+    else if (p_sdl_gamepad && (is_pad_active || device<0))
+        device=is_playstation ? RUNTIME_PAD_PROMPT_PLAYSTATION : RUNTIME_PAD_PROMPT_GAMEPAD;
+    else if (device<0) device=RUNTIME_PAD_PROMPT_KEYBOARD;
+    if (device!=s_prompt_device || (device!=RUNTIME_PAD_PROMPT_KEYBOARD && type!=s_prompt_pad_type)) {
+        s_prompt_device=device;
+        if (device!=RUNTIME_PAD_PROMPT_KEYBOARD) s_prompt_pad_type=type;
+        __atomic_add_fetch(&s_prompt_generation,1,__ATOMIC_RELAXED);
+    }
+}
+static int is_stick_moved(uint8_t value) { return value<128-48 || value>128+48; }
+int runtime_pad_prompt_device(void) {
+    return __atomic_load_n(&s_prompt_device,__ATOMIC_RELAXED);
+}
+unsigned runtime_pad_prompt_generation(void) {
+    return __atomic_load_n(&s_prompt_generation,__ATOMIC_RELAXED);
+}
+int runtime_pad_mouse_look(void) {
+    return __atomic_load_n(&s_mouse_look,__ATOMIC_RELAXED);
+}
+/* A key's name for a prompt: short (a prompt is a key cap), arrows as arrows. */
+static void key_label(int code, char *sz_out, size_t cb_out) {
+    static const struct { const char *sz_sdl, *sz_label; } s_names[]={
+        {"Left Shift","Shift"}, {"Right Shift","RShift"}, {"Left Ctrl","Ctrl"}, {"Right Ctrl","RCtrl"},
+        {"Left Alt","Alt"}, {"Right Alt","AltGr"}, {"Return","Enter"}, {"Keypad Enter","Enter"},
+        {"Backspace","Bksp"}, {"Escape","Esc"}, {"CapsLock","Caps"}, {"Delete","Del"},
+        {"Insert","Ins"}, {"PageUp","PgUp"}, {"PageDown","PgDn"}, {"Up","\xe2\x86\x91"},
+        {"Down","\xe2\x86\x93"}, {"Left","\xe2\x86\x90"}, {"Right","\xe2\x86\x92"},
+    };
+    const char *sz_name=SDL_GetScancodeName((SDL_Scancode)code);
+    if (!sz_name || !*sz_name) sz_name="?";
+    for (size_t i=0;i<sizeof(s_names)/sizeof(*s_names);++i)
+        if (!strcmp(sz_name,s_names[i].sz_sdl)) { sz_name=s_names[i].sz_label; break; }
+    if (!strncmp(sz_name,"Keypad ",7)) { snprintf(sz_out,cb_out,"Num%s",sz_name+7); return; }
+    snprintf(sz_out,cb_out,"%s",sz_name);
+}
+int runtime_pad_prompt(const char *sz_input, int should_prefer_mouse, char *sz_out_label, size_t cb_label) {
+    if (!sz_input || !sz_out_label || cb_label<2) return 0;
+    sz_out_label[0]=0;
+    int input=-1;
+    for (int i=0;i<IN_COUNT;++i) if (!strcmp(sz_input,s_input_names[i])) input=i;
+    if (input<0) return 0;
+    pthread_mutex_lock(&s_lock);
+    if (!s_is_bindings_ready) { load_bindings(); s_is_bindings_ready=1; }
+    const int device=s_prompt_device;
+    const Binding binding=s_bindings[input];
+    const int is_look=s_mouse_look;
+    const SDL_GamepadType type=s_prompt_pad_type;
+    pthread_mutex_unlock(&s_lock);
+    if (device==RUNTIME_PAD_PROMPT_KEYBOARD) {
+        int key=-1, mouse=-1, key_mod=-1, mouse_mod=-1;
+        for (int i=0;i<binding.c_keys;++i) {
+            if (binding.keys[i]>=MOUSE_KEY) { if (mouse<0) { mouse=binding.keys[i]; mouse_mod=binding.mods[i]; } }
+            else if (key<0) { key=binding.keys[i]; key_mod=binding.mods[i]; }
+        }
+        /* With mouse look the hand is on the mouse: its button first (R1: Left), unless a key cluster
+           is drawn (should_prefer_mouse 0: the d-pad's keys, not the wheel). */
+        const int is_mouse=mouse>=0 && ((is_look && should_prefer_mouse) || key<0);
+        /* A chord's modifier as a prefix: Shift as its arrow (R2: "\xe2\x87\xa7Left"). */
+        char sz_prefix[24]="";
+        const int mod=is_mouse ? mouse_mod : key_mod;
+        if (mod==SDL_SCANCODE_LSHIFT || mod==SDL_SCANCODE_RSHIFT) snprintf(sz_prefix,sizeof sz_prefix,"\xe2\x87\xa7");
+        else if (mod>=0) {
+            char sz_mod[16];
+            key_label(mod,sz_mod,sizeof sz_mod);
+            snprintf(sz_prefix,sizeof sz_prefix,"%s+",sz_mod);
+        }
+        if (is_mouse) {
+            for (size_t i=0;i<sizeof(s_mouse_keys)/sizeof(*s_mouse_keys);++i)
+                if (s_mouse_keys[i].code==mouse) {
+                    const char *sz_name=s_mouse_keys[i].sz_name;
+                    snprintf(sz_out_label,cb_label,"%s%s",sz_prefix,strncmp(sz_name,"Mouse ",6) ? sz_name : sz_name+6);
+                }
+            return 'M';
+        }
+        if (key<0) return 0;
+        char sz_name[32];
+        key_label(key,sz_name,sizeof sz_name);
+        snprintf(sz_out_label,cb_label,"%s%s",sz_prefix,sz_name);
+        return 'K';
+    }
+    if (device!=RUNTIME_PAD_PROMPT_GAMEPAD) return 0; /* a PlayStation pad: the game's own icons */
+    const int is_nintendo=type==SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO ||
+                          type==SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_LEFT ||
+                          type==SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_RIGHT ||
+                          type==SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_PAIR;
+    if (input>=IN_MOVE_UP) { snprintf(sz_out_label,cb_label,"%s",input<IN_LOOK_UP ? "LS" : "RS"); return 'C'; }
+    if (binding.c_pads==0) return 0;
+    const int button=binding.pad[0];
+    switch (button) {
+    case SDL_GAMEPAD_BUTTON_SOUTH: case SDL_GAMEPAD_BUTTON_EAST:
+    case SDL_GAMEPAD_BUTTON_WEST: case SDL_GAMEPAD_BUTTON_NORTH: {
+        static const char *const s_by_position[]={"A","B","X","Y"};
+        const SDL_GamepadButtonLabel label=SDL_GetGamepadButtonLabelForType(type,(SDL_GamepadButton)button);
+        const char *sz_text=label==SDL_GAMEPAD_BUTTON_LABEL_A ? "A" : label==SDL_GAMEPAD_BUTTON_LABEL_B ? "B"
+                          : label==SDL_GAMEPAD_BUTTON_LABEL_X ? "X" : label==SDL_GAMEPAD_BUTTON_LABEL_Y ? "Y"
+                          : s_by_position[button-SDL_GAMEPAD_BUTTON_SOUTH];
+        snprintf(sz_out_label,cb_label,"%s",sz_text);
+        return 'F';
+    }
+    case SDL_GAMEPAD_BUTTON_LEFT_SHOULDER: snprintf(sz_out_label,cb_label,"%s",is_nintendo ? "L" : "LB"); return 'S';
+    case SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER: snprintf(sz_out_label,cb_label,"%s",is_nintendo ? "R" : "RB"); return 'S';
+    case PAD_LEFT_TRIGGER: snprintf(sz_out_label,cb_label,"%s",is_nintendo ? "ZL" : "LT"); return 'S';
+    case PAD_RIGHT_TRIGGER: snprintf(sz_out_label,cb_label,"%s",is_nintendo ? "ZR" : "RT"); return 'S';
+    case SDL_GAMEPAD_BUTTON_LEFT_STICK: snprintf(sz_out_label,cb_label,"LS"); return 'C';
+    case SDL_GAMEPAD_BUTTON_RIGHT_STICK: snprintf(sz_out_label,cb_label,"RS"); return 'C';
+    case SDL_GAMEPAD_BUTTON_START: snprintf(sz_out_label,cb_label,"%s",is_nintendo ? "+" : "Menu"); return 'C';
+    case SDL_GAMEPAD_BUTTON_BACK: snprintf(sz_out_label,cb_label,"%s",is_nintendo ? "-" : "View"); return 'C';
+    case SDL_GAMEPAD_BUTTON_MISC1: snprintf(sz_out_label,cb_label,"Share"); return 'C';
+    case SDL_GAMEPAD_BUTTON_TOUCHPAD: snprintf(sz_out_label,cb_label,"Pad"); return 'C';
+    default: return 0; /* the d-pad: the game's icons fit any pad */
+    }
+}
+
 static void sample_host(PadData *p_pad_data) {
     report_guest_heap();
     memset(p_pad_data,0,sizeof(*p_pad_data));
@@ -542,6 +719,14 @@ static void sample_host(PadData *p_pad_data) {
         if ((p_pad_data->buttons & BTN_TOUCHPAD) && !p_pad_data->touch_count) touch_click(p_pad_data,0);
         if (touch_right) touch_click(p_pad_data,1);
     }
+    const int is_pad_active=p_sdl_gamepad && (p_pad_data->buttons || p_pad_data->l2>30 || p_pad_data->r2>30 ||
+                                              p_pad_data->touch_count || is_stick_moved(p_pad_data->left_x) ||
+                                              is_stick_moved(p_pad_data->left_y) || is_stick_moved(p_pad_data->right_x) ||
+                                              is_stick_moved(p_pad_data->right_y));
+    int is_keyboard_active=(is_captured && (mouse_dx*mouse_dx+mouse_dy*mouse_dy>9.0 || wheel_up || is_wheel_down)) ||
+                           s_mouse_buttons!=0;
+    for (int i=0;i<IN_COUNT && !is_keyboard_active;++i) is_keyboard_active=key_down(p__bool,i);
+    prompt_note(p_sdl_gamepad,is_pad_active,is_keyboard_active);
     apply_keyboard(p_pad_data,p__bool); /* the bound mouse buttons too */
     apply_mouse_look(p_pad_data,mouse_dx,mouse_dy,p_pad_data->timestamp,is_captured);
 }

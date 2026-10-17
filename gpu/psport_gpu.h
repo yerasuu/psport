@@ -135,6 +135,9 @@ typedef struct {
     PsTitleOnline online;
 } PsTitleInfo;
 PsTitleInfo psport_gpu_title(const char *sz_serial);
+/* The running title's default controls (Game::Title sz_default_controls: psport.ini key.<input>= and
+ * pad.<input>= lines, one per line, over the neutral layout of src/input/runtime_pad.c), or NULL. */
+const char *psport_gpu_title_controls(void);
 /* A text in the overlay's languages (Game::LocalizedText); NULL where it has none. */
 typedef struct {
     const char *sz_english, *sz_russian, *sz_spanish;
