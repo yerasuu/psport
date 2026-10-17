@@ -1,202 +1,290 @@
-# psport — juegos de PS4 nativos en Linux
+# psport
 
-> El README en inglés ([README.md](README.md)) es la referencia; esta traducción puede no estar al día. Documentación técnica: [docs/en/](docs/en/ARCHITECTURE.md).
+Juegos de PS4 nativos en Linux.
 
-[English](README.md) · [Русский](README.ru.md) · **Español**
+[English](README.md) · **Español** · [Русский](README.ru.md)
 
-psport es una capa de compatibilidad de PS4 para Linux. El ejecutable original de un juego de PS4 se
-ejecuta en un PC Linux x86-64 igual que un programa de Windows bajo Wine: psport lo carga, le da las
-bibliotecas del sistema que importa y traduce su trabajo de GPU a Vulkan. No es un emulador. psport
-es un proyecto independiente derivado de [bbport](https://github.com/deadinside28/bloodborne_pc), el
-port nativo de Bloodborne para Linux, y de [shadPS4](https://github.com/shadps4-emu/shadPS4), y se
-está generalizando hasta ser una capa para cualquier juego; Bloodborne sigue siendo un juego
-compatible con su propio perfil. bbport y shadPS4 se revisan de vez en cuando, y los cambios que le
-sirven a psport se portan a mano y se anotan en [FORK.md](FORK.md).
+> El README en inglés ([README.md](README.md)) es la referencia; esta traducción puede ir por
+> detrás. La documentación técnica está en inglés, en [docs/en/](docs/en/ARCHITECTURE.md).
 
-- **CPU.** La CPU de PS4 es x86-64, así que el código del juego se ejecuta tal cual en la CPU del
-  PC, sin emulación ni traducción de instrucciones. Un cargador en C (`src/main/main.c`,
-  `src/loader/loader_*.c`) lee el eboot y los módulos que enlaza (SELF o ELF) directamente de la
-  carpeta del juego, los reubica y los enlaza en una sola imagen y salta a ella.
-- **Bibliotecas del sistema.** Las proporciona el propio psport: el runtime en C de
-  `src/*/runtime_*.c` (memoria, hilos, sincronización, archivos, audio, mando, partidas guardadas,
-  excepciones, servicios, hilos de usuario, módulos que el juego carga mientras se ejecuta) y las
-  bibliotecas de `gpu/` (GnmDriver, VideoOut, AvPlayer, Videodec2, Ngs2, Audiodec, Fiber, Font,
-  PngEnc, PngDec). Ningún juego probado necesita un volcado de los módulos del sistema de la consola.
-- **Gráficos.** El flujo de comandos de la GPU y los shaders GCN se traducen a Vulkan con un
-  renderizador derivado del núcleo de vídeo y del recompilador de shaders de
-  [shadPS4](https://github.com/shadps4-emu/shadPS4) (`gpu/shadps4/`), tal como lo amplió bbport.
-- **Perfiles de juego.** Lo que es propio de un juego (hooks y optimizaciones en su código) vive en
-  su perfil, en `gpu/games/`; todos los juegos funcionan por las rutas genéricas sin él.
+## Descripción
 
-Cómo encaja todo: [docs/en/ARCHITECTURE.md](docs/en/ARCHITECTURE.md). Qué toma psport de otros
-proyectos (commit de origen y licencia) y qué cambia en el código heredado: [FORK.md](FORK.md).
+psport es una capa de compatibilidad de PS4 para Linux x86-64. No es un emulador: funciona como
+Wine con los programas de Windows. La CPU de PS4 es x86-64, así que el ejecutable original del juego
+se ejecuta directamente en el procesador del PC, sin traducir instrucciones. psport carga el
+ejecutable y los módulos que enlaza, proporciona las bibliotecas del sistema que importa el juego y
+traduce su trabajo de GPU a Vulkan.
 
-> **No se incluye ningún archivo de juego.** Necesitas tus propios volcados de los juegos que tengas.
-> Este proyecto no está afiliado a Sony Interactive Entertainment, FromSoftware, AMD ni a las
-> editoras de los juegos de abajo, y no tiene relación con shadPS4.
+psport es un proyecto independiente. Nació de
+[bbport](https://github.com/deadinside28/bloodborne_pc), el port nativo de Bloodborne para Linux, y
+se apoya en el núcleo de vídeo y el recompilador de shaders de
+[shadPS4](https://github.com/shadps4-emu/shadPS4). Se está generalizando de un solo juego a una capa
+para cualquier título; Bloodborne sigue siendo compatible, con su propio perfil de juego.
 
-## Juegos
+> [!IMPORTANT]
+> **No se incluye ningún archivo de juego.** El usuario necesita sus propios volcados de los juegos
+> que posea. Este proyecto no está afiliado a Sony Interactive Entertainment, FromSoftware, AMD ni a
+> las editoras de los juegos de la lista, y no tiene relación con shadPS4.
 
-Cada juego de `tools/regress/titles.txt` se ejecuta sin ventana con `tools/regress.sh` (ver más
-abajo). El estado indica hasta dónde se ha visto llegar al juego; las filas «regress» recogen lo que
-muestra su ejecución guionizada (primer fotograma de la GPU, fotogramas dibujados, sonido), no una
-partida completa.
+## Estado
 
-| Juego | Title ID | Estado |
+psport está en desarrollo activo. Todos los juegos de la tabla figuran en
+[tools/regress/titles.txt](tools/regress/titles.txt) y se ejecutan sin ventana con
+`tools/regress.sh` (véase [Pruebas](#pruebas)). El estado es hasta dónde se ha visto llegar al
+juego, no una partida completa. Las filas marcadas con «regress» solo muestran lo que registra la
+ejecución guionizada del juego (primer fotograma de GPU, fotogramas dibujados, sonido).
+
+| Juego | ID | Estado |
 |---|---|---|
 | Bloodborne (1.09) | CUSA03173 | jugable: partidas guardadas, varias zonas, sonido, mando |
-| Atelier Ryza | CUSA16458 | menú del título, prólogo, el mapa con el jugador al mando, sonido |
-| Atelier Ayesha DX | CUSA16921 | película de introducción, menú del título, escenas iniciales, mapa, taller, sonido |
+| Atelier Ryza | CUSA16458 | menú principal, prólogo, mapa con el control del jugador, sonido |
+| Atelier Ayesha DX | CUSA16921 | vídeo de introducción, menú principal, escenas iniciales, mapa, taller, sonido |
 | Tales of Symphonia Remastered | CUSA50989 | pantalla de título, la primera sala, sonido |
-| Astrea | CUSA49515 | los paneles de la historia de la introducción, sonido |
+| Astrea | CUSA49515 | las viñetas de la historia de la introducción, sonido |
 | SaGa Emerald Beyond | CUSA43027 | pantalla de título, primeras escenas de la historia con diálogos, sonido |
-| ALTDEUS: Beyond Chronos | CUSA26563 | pantalla en negro: exige un casco PS VR y no tiene modo de pantalla plana |
+| ALTDEUS: Beyond Chronos | CUSA26563 | pantalla negra: requiere un casco PS VR, sin modo de pantalla plana |
 | Gal Guardians: Demon Purge | CUSA41240 | regress: fotogramas dibujados, sonido |
 | Gal Guardians: Servants of the Dark (JP) | CUSA52187 | regress: fotogramas dibujados, sonido |
 | Call of Duty: Black Ops | CUSA57547 | regress: fotogramas dibujados, sonido |
-| Call of Duty: Black Ops II | CUSA57548 | primera misión (Pyrrhic Victory) a través de puntos de control encadenados hasta la barcaza del río, Save and Quit, Resume Story, vídeos, sonido, mando |
+| Call of Duty: Black Ops II | CUSA57548 | primera misión (Pyrrhic Victory) por puntos de control encadenados hasta la barcaza del río, Guardar y salir, Reanudar historia, vídeos, sonido, mando |
 | Blood Omen 2 | CUSA49769 | regress: fotogramas dibujados, sin sonido |
-| Onigiri | CUSA01458 | regress: primer fotograma de la GPU y sonido, ningún fotograma iluminado en su guion |
-| OCTOPATH TRAVELER 0 (JP) | CUSA53477 | carga una partida guardada y luego la GPU falla; fuera de las ejecuciones habituales |
+| Onigiri | CUSA01458 | regress: primer fotograma de GPU y sonido, ningún fotograma iluminado en su guion |
+| OCTOPATH TRAVELER 0 (JP) | CUSA53477 | carga una partida guardada y luego falla la GPU; fuera de las ejecuciones habituales |
 
-Los juegos que exigen PS VR (`require_ps_vr` en `param.sfo`) no son compatibles. Solo se ha probado a
-fondo en una máquina (AMD Radeon RX 7800 XT, Mesa/RADV).
+- Los juegos que requieren PS VR (`require_ps_vr` en `param.sfo`) no son compatibles.
+- Ningún juego probado necesita un volcado de los módulos del sistema de la consola.
+- Solo se ha probado a fondo una máquina: AMD Radeon RX 7800 XT con Mesa (RADV).
 
-## Uso
+## Requisitos
 
-Lo normal es usarlo a través de decanter: su sección de PS clona psport, lo compila con `build.sh`, lo
-recompila cuando el checkout avanza y ejecuta cada volcado con `run.sh` (los juegos que no son
-Bloodborne, con `PS_PERMISSIVE=1`).
+- **Sistema:** Linux en x86-64.
+- **GPU:** Vulkan 1.3 con descriptor indexing y buffer device address. La ruta de GPU es la misma
+  para todos los fabricantes y elige las funciones según lo que informa el dispositivo, no según el
+  fabricante. Está probada en AMD con RADV; NVIDIA e Intel aún no están verificadas
+  ([guía de pruebas en NVIDIA](docs/en/NVIDIA_TEST.md)).
+- **Juegos:** los volcados propios del usuario de juegos que posea (la carpeta del juego con `eboot.bin`,
+  `sce_module/` y `sce_sys/param.sfo`).
+- **Herramientas de compilación**, una de estas opciones:
+  - [Nix](https://nixos.org): si faltan dependencias, `build.sh` y `run.sh` entran solos en
+    [shell.nix](shell.nix).
+  - Paquetes del sistema: GCC (u otro compilador mediante `CC`), CMake, Ninja, pkg-config y las
+    bibliotecas de `shell.nix` (Vulkan, SDL3, FreeType, FFmpeg, Boost, glslang y el resto de
+    dependencias del núcleo de vídeo de shadPS4; protobuf, nlohmann_json, OpenSSL, zlib y miniupnpc
+    para el módulo en línea opcional).
+- **Python 3** solo para el juego en línea, el lanzador incluido y las herramientas de desarrollo;
+  un arranque normal no lo necesita.
 
-Por separado:
+## Primeros pasos
+
+### Con decanter (recomendado)
+
+[decanter](https://github.com/yerasuu/decanter) es la interfaz recomendada. Su sección de PS clona
+psport, lo compila con `build.sh`, lo vuelve a compilar cuando cambia la copia de trabajo e inicia
+cada volcado mediante `run.sh` (los juegos que no son Bloodborne, con `PS_PERMISSIVE=1`).
+
+### Compilar desde el código fuente
 
 ```bash
-git clone --recursive https://github.com/yerasuu/psport.git && cd psport
-bash build.sh                                   # out/psport y out/gpu/libpsport-gpu.so
-PS_GAME_DIR=/ruta/a/CUSA03173 bash run.sh       # Bloodborne
-PS_GAME_DIR=/ruta/al/volcado PS_PERMISSIVE=1 bash run.sh
+git clone --recursive https://github.com/yerasuu/psport.git
+cd psport
+bash build.sh        # genera out/psport y out/gpu/libpsport-gpu.so
 ```
 
-`PS_GAME_DIR` vale por defecto el único volcado junto al checkout (`../CUSA03173`, por
-ejemplo). `PS_PERMISSIVE=1` hace que las importaciones que le faltan a psport devuelvan 0 en lugar
-de detener el juego. `PS_SYS_MODULES=<carpeta>` enlaza, de forma opcional, tu propio volcado de
-módulos del sistema (`*.sprx`) donde el port aún no tiene la biblioteca; nada de ese volcado se
-distribuye. Las partidas guardadas y la caché de shaders van a `user/`, y los ajustes a
-`psport.ini`. El lanzador GTK4 (`bash launcher/psport-launcher.sh`; `launcher/install-desktop.sh`
-lo añade al menú de aplicaciones) es el de bbport y está pensado para Bloodborne.
+Sin `--recursive`, `build.sh` descarga él mismo el submódulo (Dear ImGui).
 
-## Requisitos y compilación
+| Opción de compilación | Efecto |
+|---|---|
+| `PS_LTO=OFF` | desactiva la optimización en tiempo de enlazado (activa por defecto) |
+| `PS_PGO=generate\|use\|off` | optimización guiada por perfiles; `use` por defecto cuando `pgo/` contiene un perfil |
+| ccache instalado | la biblioteca de GPU se compila con él, una sola caché para todas las copias de trabajo (`~/.cache/psport/ccache`, o `CCACHE_DIR`) |
 
-- Linux x86-64 y una GPU con Vulkan 1.3.
-- GCC (u otro compilador mediante `CC`), CMake, Ninja, pkg-config, Python 3 (para el juego en línea,
-  el lanzador incluido y las herramientas; para arrancar un juego no hace falta) y los paquetes de
-  `shell.nix`: Vulkan, SDL3, FreeType, FFmpeg, Boost, glslang y el resto de dependencias del núcleo
-  de vídeo de shadPS4, además de protobuf, nlohmann_json, OpenSSL, zlib y miniupnpc para el módulo
-  en línea opcional. Si faltan y [Nix](https://nixos.org) está instalado, `build.sh` y `run.sh`
-  entran solos en `shell.nix`.
-- Submódulo (Dear ImGui): clona con `--recursive`, o deja que `build.sh` ejecute
-  `git submodule update --init --recursive`.
-- `PS_LTO=OFF` desactiva la optimización en el enlazado; `PS_PGO=generate|use|off` controla la
-  optimización guiada por perfil (`use` por defecto cuando `pgo/` contiene un perfil).
-- Con [ccache](https://ccache.dev) instalado (`shell.nix` lo incluye), la biblioteca de la GPU se
-  compila a través de él, con una sola caché para todos los checkouts y worktrees
-  (`~/.cache/psport/ccache`, `CCACHE_DIR`).
-- `nix-build packaging/port.nix` compila el port desde el código en el sandbox de Nix; la CI compila
-  cada commit de `master` y publica la build de cada tag `vX.Y.Z` como caché binaria de Nix y como
-  GitHub Release, con un paquete que funciona sin Nix (`psport-<tag>-x86_64.tar.zst`,
-  `tools/bundle.sh`; FORK.md, "CI and binary cache").
+`nix-build packaging/port.nix` compila el port desde el código fuente en el entorno aislado de Nix.
 
-## Medir el progreso
+### Ejecutar un juego
 
-`tools/regress.sh` ejecuta cada juego de `tools/regress/titles.txt` dentro de un gamescope sin
-ventana (`PS_AUDIO=none`, `PS_PAD_HOST=0`: sin ventana, sin sonido y sin los mandos del usuario), lo
-maneja con un guion de pulsaciones (`tools/regress/*.sched`) e informa de hasta dónde ha llegado
-(cargado, entrada en el código del juego, inicializado, primer fotograma de la GPU, fotogramas
-dibujados, audio), de su firma de fallo y de cuántas importaciones sin implementar ha llamado; con
-`-c <results.json anterior>` señala las regresiones. Todos los juegos se ejecutan sin volcado de
-módulos del sistema; `SYS_MODULES=<carpeta>` pasa uno, de forma opcional, a los juegos que no son
-Bloodborne, para compararlos con las bibliotecas propias de psport. Uso e hitos:
-[FORK.md](FORK.md#regression-runs); cómo poner en marcha un juego nuevo:
-[docs/en/ADDING_A_TITLE.md](docs/en/ADDING_A_TITLE.md).
+```bash
+PS_GAME_DIR=/ruta/a/CUSA03173 bash run.sh                     # Bloodborne
+PS_GAME_DIR=/ruta/al/volcado PS_PERMISSIVE=1 bash run.sh      # cualquier otro juego
+```
 
-## Diagnóstico
+`run.sh` compila el port si hace falta y luego inicia el juego.
 
-Antes de arrancar el juego se listan todas las importaciones sin implementar o atendidas por un
-stub. Las variables de diagnóstico (`PS_PERMISSIVE_OUT`, `PS_AUDIO_STATS`, `PS_NGS2_TRACE`,
-`PS_FIBER_TRACE`) y los interruptores de módulos del sistema (`PS_SYS_MODULES`, `PS_HLE`, `PS_LLE`,
-`PS_SYS_FONTS`) se describen en [FORK.md](FORK.md). `tools/gcn_dis.sh` desensambla shaders GCN.
+| Variable | Efecto |
+|---|---|
+| `PS_GAME_DIR` | la carpeta del juego; por defecto, el único volcado junto a la copia de trabajo |
+| `PS_PERMISSIVE=1` | las importaciones que psport aún no implementa devuelven 0 en vez de detener el juego |
+| `PS_DATA_DIR` | carpeta con permiso de escritura para lo compilado (`out/`), las partidas guardadas y la caché de shaders (`user/`) y `psport.ini`; por defecto, la copia de trabajo |
+| `PS_SYS_MODULES=<carpeta>` | enlaza, si el usuario quiere, su propio volcado de módulos del sistema (`*.sprx`) donde psport aún no tiene biblioteca; no se distribuye nada de él |
 
-## Reglas
+`bash run.sh --software` dibuja con Lavapipe (el controlador Vulkan por CPU de Mesa) en vez de con
+la GPU.
 
-Según [CLAUDE.md](CLAUDE.md): nada de apaños para un juego o un shader concretos, los arreglos
-corrigen el comportamiento de fondo; las optimizaciones para un solo juego van en su perfil de juego
-(`gpu/games/`), y todos los juegos deben funcionar bien sin él (`PS_GAME_PROFILE=none`); no hay
-tests en el repositorio (los cambios se comprueban con `tools/regress.sh`; las pruebas en hardware,
-cuando hacen falta, son homebrew de OpenOrbis); hay que seguir las convenciones del código que rodea
-al cambio.
+Durante el juego, Insert o L3+R3 abre el menú superpuesto. Las partidas guardadas y la caché de
+shaders van a `user/`, y los ajustes a `psport.ini`.
 
-## Para seguir leyendo
+### Versiones precompiladas
 
-- [docs/en/ARCHITECTURE.md](docs/en/ARCHITECTURE.md): componentes y el flujo de arranque.
-- [docs/en/ADDING_A_TITLE.md](docs/en/ADDING_A_TITLE.md): cómo poner en marcha un volcado nuevo.
-- [FORK.md](FORK.md): componentes portados, cambios en el código heredado, variables, informe de
-  llamadas, ejecuciones de regresión, CI.
-- Notas de funciones: [reescalador](docs/en/upscaler.md), [trabajo de GPU en paralelo](docs/en/parallel_gpu.md),
-  [vectores de movimiento](docs/en/motion_vectors.md), [mods y parches](docs/en/MODS.md).
-- [docs/en/history/](docs/en/history/): notas de diseño, planes y registros de cambios de bbport.
+Cada etiqueta de versión `vX.Y.Z` la compila la CI y se publica como GitHub Release con un paquete
+que funciona sin Nix: `psport-<tag>-x86_64.tar.zst` y su `.sha256`, generados por
+[tools/bundle.sh](tools/bundle.sh). Se extrae en cualquier sitio con permiso de escritura y se ejecuta
+con los controladores Vulkan del propio sistema:
 
-## Estructura del repositorio
+```bash
+PS_DATA_DIR=<carpeta escribible> PS_GAME_DIR=/ruta/al/volcado bash <carpeta extraída>/run.sh
+```
+
+La misma compilación se publica como caché binaria de Nix; véase
+[FORK.md](FORK.md#ci-and-binary-cache).
+
+### Lanzador
+
+[launcher/](launcher/) contiene el lanzador GTK4 heredado de bbport, pensado para Bloodborne:
+`bash launcher/psport-launcher.sh` lo inicia y `bash launcher/install-desktop.sh` lo añade al menú
+de aplicaciones.
+
+## Configuración
+
+Los ajustes están en `psport.ini`, en la carpeta de datos (`PS_CONFIG` indica otro archivo). La
+mayoría se cambian desde el menú superpuesto, que escribe el archivo. Claves y variables más
+utilizadas:
+
+| Ajuste | Efecto |
+|---|---|
+| `output_res` | resolución de salida; en un juego con preajustes, los tamaños distintos de 1080p escalan la escena |
+| `upscaler` (`PS_UPSCALER`) | reescalador temporal, donde lo coloca el perfil del juego ([notas del reescalador](docs/en/upscaler.md)) |
+| `menu_language` (`PS_MENU_LANGUAGE`) | idioma del menú superpuesto: `en`, `es` o `ru` |
+| `game_mouse_sensitivity` | escala del movimiento del ratón del sistema que recibe el juego (de 0,05 a 20; 1 por defecto) |
+| `PS_LANGUAGE` | el idioma del sistema que lee el juego (1 inglés, 3 español, 8 ruso) |
+| `PS_FPS` | preajuste de fotogramas por segundo en los juegos que los tienen (Bloodborne: 30, 60, 90, `uncap`) |
+| `PS_ONLINE=1` | juego en línea mediante los servidores comunitarios del título ([juego en línea](docs/en/ARCHITECTURE.md#online-play)) |
+| `PS_MODS_ENABLED=0` | desactiva los mods de archivos ([mods y parches](docs/en/MODS.md)) |
+| `PS_GAME_PROFILE=none` | ejecuta sin el perfil del juego, solo por las rutas genéricas |
+| `PS_QUIRKS=none,-<id>,+<id>` | desactiva o activa las correcciones para un juego o un sistema ([quirks](docs/en/QUIRKS.md)) |
+
+Los valores por defecto y por qué sirven para cualquier juego: [FORK.md, Defaults](FORK.md#defaults).
+Variables de diagnóstico e informe de llamadas: [FORK.md, Diagnostics](FORK.md#diagnostics). Módulos
+y fuentes del sistema (`PS_SYS_MODULES`, `PS_HLE`, `PS_LLE`, `PS_SYS_FONTS`):
+[FORK.md, System modules](FORK.md#system-modules).
+
+## Cómo funciona
+
+- **Cargador.** Un cargador en C lee el eboot y los módulos que enlaza (SELF o ELF) directamente de
+  la carpeta del juego, los reubica y los enlaza en una sola imagen y salta al código del juego.
+- **Bibliotecas del sistema.** psport las implementa de forma nativa: un runtime en C (memoria,
+  hilos, sincronización, archivos, audio, mando, partidas guardadas, excepciones, servicios, hilos
+  de usuario, módulos cargados durante la ejecución) y las bibliotecas de `gpu/` (GnmDriver,
+  VideoOut, AvPlayer, Videodec2, Ngs2, Audiodec, Fiber, Font, PngEnc, PngDec).
+- **Gráficos.** El flujo de comandos de la GPU y los shaders GCN se traducen a Vulkan con un
+  renderizador derivado del núcleo de vídeo y del recompilador de shaders de shadPS4
+  (`gpu/shadps4/`), tal como lo amplió bbport.
+- **Perfiles de juego.** Lo propio de un juego (hooks y optimizaciones) vive en su perfil, en
+  `gpu/games/`; todos los juegos funcionan por las rutas genéricas sin él.
+- **Nada en silencio.** Antes de que empiece un juego se listan todas las importaciones sin
+  implementar o resueltas con un stub; las llamadas que fallan o no hacen trabajo real se registran
+  y se cuentan en un informe de llamadas.
+
+Detalles: [docs/en/ARCHITECTURE.md](docs/en/ARCHITECTURE.md) (componentes y flujo de arranque) y
+[FORK.md](FORK.md) (lo que psport toma de otros proyectos y lo que cambia).
+
+## Desarrollo
+
+### Pruebas
+
+`tools/regress.sh <carpeta de juegos>` ejecuta todos los juegos de `tools/regress/titles.txt` en un
+gamescope sin ventana, sin sonido y sin ninguno de los mandos del usuario. Un guion de mando
+(`tools/regress/*.sched`) maneja cada juego, y el informe indica hasta dónde llegó (cargado,
+iniciado, inicializado, primer fotograma de GPU, fotogramas dibujados, audio), su firma de fallo y
+cuántas importaciones sin implementar llamó. Con `-c <results.json anterior>` señala las
+regresiones. Uso e hitos: [FORK.md, Regression runs](FORK.md#regression-runs).
+
+### Poner en marcha un juego
+
+[docs/en/ADDING_A_TITLE.md](docs/en/ADDING_A_TITLE.md) explica cómo ejecutar un volcado nuevo, leer
+su registro y su informe de llamadas, implementar lo que falta y comprobar el resultado.
+
+### Normas para los cambios
+
+- Las correcciones atacan el comportamiento de fondo; nada de apaños para un juego o un shader
+  concreto en el núcleo.
+- Las optimizaciones para un solo juego van en su perfil (`gpu/games/<juego>/`), y todos los juegos
+  deben funcionar correctamente sin él (`PS_GAME_PROFILE=none`).
+- Una corrección temporal que necesita un juego es un quirk declarado, registrado en el log y
+  desactivable ([docs/en/QUIRKS.md](docs/en/QUIRKS.md)).
+- Sin pruebas en el repositorio: los cambios se comprueban con `tools/regress.sh`; las pruebas en
+  hardware, cuando hacen falta, son homebrew de OpenOrbis.
+- Los cambios siguen el estilo del código que los rodea; la nomenclatura y el resto de convenciones están en
+  [CLAUDE.md](CLAUDE.md).
+- Los cambios de bbport y shadPS4 se portan a mano, cada uno anotado en [FORK.md](FORK.md) con su
+  commit de origen.
+
+`tools/gcn_dis.sh` desensambla shaders GCN.
+
+### Estructura del repositorio
 
 | Ruta | Contenido |
 |---|---|
-| `src/` | Entrada (`src/main/`), cargador nativo (`loader_*.c`) y runtime en C (`runtime_*.c`) |
-| `scripts/` | `online.py`, las direcciones del juego en línea que `run.sh` escribe con `PS_ONLINE=1` (el único paso del arranque en Python), y `sce_file.py` para las herramientas en Python |
-| `gpu/` | Biblioteca de la GPU: núcleo de vídeo de shadPS4 con los cambios de bbport (`gpu/VENDOR.txt`), decodificador PM4 propio (`cp/`) y módulo de memoria (`layer/`), bibliotecas portadas (`ngs2/`, `audiodec/`, `fiber/`, `font/`, `pngenc/`, `pngdec/`), perfiles de juego (`games/`), overlay y menú del juego (`port/`), puente de DLSS, módulo en línea |
-| `launcher/`, `packaging/` | El lanzador GTK4 de bbport; paquete de Nix y script de AppImage |
-| `patches/` | Parches de la comunidad para Bloodborne |
-| `tools/` | Ejecuciones de regresión, desensamblador GCN, herramientas de FSR 4 y `fsr4cap`, utilidades para ejecuciones guionizadas |
-| `docs/` | Una carpeta por idioma: `docs/en/` (arquitectura, cómo poner en marcha un juego, notas de funciones, historia de bbport en inglés) y `docs/ru/` (originales rusos de bbport, mismos nombres de archivo) |
+| `src/` | punto de entrada (`src/main/`), cargador nativo y runtime en C |
+| `gpu/` | biblioteca de GPU: núcleo de vídeo de shadPS4 con los cambios de bbport ([gpu/VENDOR.txt](gpu/VENDOR.txt)), decodificador PM4 (`cp/`), módulo de memoria (`layer/`), bibliotecas portadas (`ngs2/`, `audiodec/`, `fiber/`, `font/`, `pngenc/`, `pngdec/`), perfiles de juego (`games/`), menú superpuesto y menú del juego (`port/`), puente DLSS, módulo en línea (`net/`) |
+| `scripts/` | `online.py` (direcciones en línea para `PS_ONLINE=1`) y `sce_file.py` para las herramientas en Python |
+| `launcher/`, `packaging/` | el lanzador GTK4 de bbport; paquete de Nix y script de AppImage |
+| `patches/` | parches de la comunidad para Bloodborne |
+| `tools/` | ejecuciones de regresión, desensamblador GCN, herramientas de FSR 4, utilidades para ejecuciones guionizadas, paquete de versión |
+| `docs/` | `docs/en/` (arquitectura, poner en marcha un juego, notas de funciones, historial de bbport en inglés), `docs/ru/` (los originales en ruso de bbport) |
 
-## Créditos y licencias
+### Más información
 
-psport se distribuye bajo la **GNU GPL v2 o posterior** ([LICENSE](LICENSE)).
+- [docs/en/ARCHITECTURE.md](docs/en/ARCHITECTURE.md): componentes y flujo de arranque.
+- [docs/en/ADDING_A_TITLE.md](docs/en/ADDING_A_TITLE.md): poner en marcha un volcado nuevo.
+- [docs/en/QUIRKS.md](docs/en/QUIRKS.md): el registro de correcciones para un juego, un sistema o
+  un middleware.
+- [FORK.md](FORK.md): componentes portados, cambios en el código heredado, variables, informe de
+  llamadas, ejecuciones de regresión, CI.
+- Notas de funciones: [reescalador](docs/en/upscaler.md),
+  [trabajo de GPU en paralelo](docs/en/parallel_gpu.md),
+  [vectores de movimiento](docs/en/motion_vectors.md), [mods y parches](docs/en/MODS.md).
+- [docs/en/history/](docs/en/history/): notas de diseño, planes y registros de cambios de bbport
+  (los originales en ruso están en [docs/ru/](docs/ru/)).
+
+## Licencia y créditos
+
+psport se distribuye bajo la **GNU General Public License v2.0 o posterior** ([LICENSE](LICENSE)).
+Lo mantiene Yerasuu.
 
 ### Proyectos en los que se basa
 
 | Proyecto | Qué aporta | Licencia |
 |---|---|---|
 | [bbport](https://github.com/deadinside28/bloodborne_pc), de deadinside | el origen de psport: cargador nativo, runtime HLE, renderizador Vulkan, todo lo de Bloodborne | GPL-2.0-or-later |
-| [shadPS4](https://github.com/shadps4-emu/shadPS4) | núcleo de vídeo, recompilador de shaders, AvPlayer y otras bibliotecas que incluye bbport; origen de los ports de libSceFiber y libSceFont | GPL-2.0-or-later |
+| [shadPS4](https://github.com/shadps4-emu/shadPS4) | núcleo de vídeo, recompilador de shaders, AvPlayer y otras bibliotecas que trae bbport; origen de los ports de libSceFiber y libSceFont | GPL-2.0-or-later |
 | [AnyPS5](https://github.com/boykopovar/AnyPS5) | origen de los ports de libSceNgs2 y libSceAudiodec | GPL-2.0 |
 
-El propio psport lo mantiene Yerasuu para [decanter](#uso). Qué cambia psport en el código heredado
-y qué porta (con los commits de origen), junto con los últimos puntos revisados de bbport y shadPS4,
-queda registrado en [FORK.md](FORK.md).
+Los commits de origen y los cambios en el código heredado están anotados en [FORK.md](FORK.md) y
+[gpu/VENDOR.txt](gpu/VENDOR.txt).
 
 ### Código de terceros incluido
 
-| Componente | Para qué | Licencia |
+| Componente | Uso | Licencia |
 |---|---|---|
-| [sirit](https://github.com/shadps4-emu/sirit) | generación de SPIR-V | BSD-3-Clause |
+| [sirit](https://github.com/shadps4-emu/sirit) | emisión de SPIR-V | BSD-3-Clause |
 | Cabeceras GCN de AMD (`gpu/third_party/gcn`) | decodificación de instrucciones GCN | MIT |
-| [half](https://half.sourceforge.net/) | números de media precisión | MIT |
-| [FSR-Vulkan](https://github.com/FireBurn/FSR-Vulkan), de FireBurn, y AMD FidelityFX SDK | FSR 3.1 | MIT |
+| [half](https://half.sourceforge.net/) | números de coma flotante de media precisión | MIT |
+| [FSR-Vulkan](https://github.com/FireBurn/FSR-Vulkan), de FireBurn, AMD FidelityFX SDK | FSR 3.1 | MIT |
 | [LibAtrac9](https://github.com/Thealexbarney/LibAtrac9) | decodificación de audio ATRAC9 | MIT |
-| [Dear ImGui](https://github.com/ocornut/imgui) | overlay y menús del juego | MIT |
+| [Dear ImGui](https://github.com/ocornut/imgui) | menú superpuesto y menús del juego | MIT |
 | [cpp-httplib](https://github.com/yhirose/cpp-httplib) | módulo en línea | MIT |
-| Puente de DLSS (`gpu/dlss_bridge`) del [port para Windows de Supermedo](https://github.com/Supermedo/bloodborne_pc), adaptado de [IFreemz/shadPS4-Bloodborne-DLSS-FSR](https://github.com/IFreemz/shadPS4-Bloodborne-DLSS-FSR) | DLSS | MIT |
-| [Fuentes DejaVu](https://dejavu-fonts.github.io/) | texto del overlay, fuente de reserva de libSceFont | Bitstream Vera (los cambios de DejaVu son de dominio público) |
-| [dxil-spirv](https://github.com/HansKristian-Work/dxil-spirv) | crear los archivos de FSR 4.1.1 en el equipo del usuario | MIT |
+| Puente DLSS (`gpu/dlss_bridge`) del [port para Windows de Supermedo](https://github.com/Supermedo/bloodborne_pc), adaptado de [IFreemz/shadPS4-Bloodborne-DLSS-FSR](https://github.com/IFreemz/shadPS4-Bloodborne-DLSS-FSR) | DLSS | MIT |
+| [Fuentes DejaVu](https://dejavu-fonts.github.io/) | texto del menú superpuesto, alternativa para libSceFont | Bitstream Vera (cambios de DejaVu en dominio público) |
+| [dxil-spirv](https://github.com/HansKristian-Work/dxil-spirv) | generar los recursos de FSR 4.1.1 en el equipo del usuario | MIT |
 
-Se enlazan desde el sistema o desde el entorno de Nix, sin incluirse, cada uno con su licencia:
-FFmpeg, FreeType, Vulkan, SDL3, Boost, fmt y el resto de lo que aparece en `shell.nix`.
+Enlazados desde el sistema o el entorno de Nix, no incluidos, con sus propias licencias: FFmpeg,
+FreeType, Vulkan, SDL3, Boost, fmt y el resto de `shell.nix`.
 
 ### Comunidad
 
 Parches de Bloodborne de Kyo, Lance McDonald, auser1337, illusion, emoose y otros miembros de la
 comunidad (`patches/Bloodborne.xml`).
 
-### No se distribuye
+### Lo que no se distribuye
 
-Ningún archivo de juego ni módulo del sistema de la consola. Tampoco se incluyen las DLL ni los datos
-del modelo de FSR 4 de AMD, ni el SDK ni las bibliotecas de DLSS de NVIDIA; los aporta el usuario.
+Ningún archivo de juego ni módulo del sistema de la consola. Tampoco se incluyen las DLL y los datos
+del modelo de FSR 4 de AMD ni el SDK y las bibliotecas de DLSS de NVIDIA; los aporta el usuario.

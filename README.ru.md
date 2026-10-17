@@ -1,198 +1,284 @@
-# psport — игры PS4 нативно на Linux
+# psport
 
-> Справочным является README на английском ([README.md](README.md)); этот перевод может отставать. Техническая документация: [docs/en/](docs/en/ARCHITECTURE.md).
+Игры PS4 нативно на Linux.
 
-[English](README.md) · **Русский** · [Español](README.es.md)
+[English](README.md) · [Español](README.es.md) · **Русский**
 
-psport — слой совместимости PS4 для Linux. Оригинальный исполняемый файл игры PS4 запускается на ПК
-с Linux x86-64 так же, как программа для Windows под Wine: psport загружает его, предоставляет
-импортируемые им системные библиотеки и переводит его работу с видеочипом в Vulkan. Это не эмулятор.
-psport — независимый проект, выросший из [bbport](https://github.com/deadinside28/bloodborne_pc),
-нативного порта Bloodborne для Linux, и из [shadPS4](https://github.com/shadps4-emu/shadPS4); он
-обобщается в слой для любой игры, а Bloodborne остаётся поддерживаемой игрой со своим профилем.
-bbport и shadPS4 время от времени просматриваются; полезные для psport изменения переносятся
-вручную и записываются в [FORK.md](FORK.md).
+> Справочным является README на английском ([README.md](README.md)); этот перевод может отставать.
+> Техническая документация на английском: [docs/en/](docs/en/ARCHITECTURE.md).
 
-- **Процессор.** Процессор PS4 — x86-64, поэтому код игры выполняется на процессоре ПК как есть,
-  без эмуляции и без трансляции инструкций. Загрузчик на C (`src/main/main.c`,
-  `src/loader/loader_*.c`) читает eboot и слинкованные с ним модули (SELF или ELF) прямо из папки
-  игры, релоцирует и связывает их в один образ и передаёт ему управление.
-- **Системные библиотеки.** Их предоставляет сам psport: рантайм на C в `src/*/runtime_*.c`
-  (память, потоки, синхронизация, файлы, звук, геймпад, сохранения, исключения, сервисы, потоки
-  пользовательского уровня, модули, которые игра загружает во время работы) и библиотеки в `gpu/`
-  (GnmDriver, VideoOut, AvPlayer, Videodec2, Ngs2, Audiodec, Fiber, Font, PngEnc, PngDec). Ни одной
-  из проверенных игр не нужен дамп системных модулей консоли.
-- **Графика.** Поток команд видеочипа и шейдеры GCN переводятся в Vulkan рендером на основе
-  видеоядра и рекомпилятора шейдеров [shadPS4](https://github.com/shadps4-emu/shadPS4)
-  (`gpu/shadps4/`) в том виде, как его доработал bbport.
-- **Профили игр.** То, что относится к одной игре (хуки и оптимизации в её коде), лежит в её
-  профиле в `gpu/games/`; без профиля любая игра работает по общим путям.
+## Обзор
 
-Как всё устроено: [docs/en/ARCHITECTURE.md](docs/en/ARCHITECTURE.md). Что psport берёт из других
-проектов (коммит источника, лицензия) и что меняет в унаследованном коде: [FORK.md](FORK.md).
+psport — слой совместимости PS4 для Linux x86-64. Это не эмулятор: он работает так же, как Wine с
+программами для Windows. Процессор PS4 — x86-64, поэтому оригинальный исполняемый файл игры
+выполняется прямо на процессоре ПК, без трансляции инструкций. psport загружает исполняемый файл и
+связанные с ним модули, предоставляет системные библиотеки, которые импортирует игра, и переводит
+её работу с видеочипом в Vulkan.
 
-> **Файлов игр в репозитории нет.** Нужны собственные дампы своих игр.
+psport — независимый проект. Он вырос из [bbport](https://github.com/deadinside28/bloodborne_pc),
+нативного порта Bloodborne для Linux, и опирается на видеоядро и рекомпилятор шейдеров
+[shadPS4](https://github.com/shadps4-emu/shadPS4). Из порта одной игры он обобщается в слой для
+любой игры; Bloodborne по-прежнему поддерживается, со своим профилем игры.
+
+> [!IMPORTANT]
+> **Файлы игр не входят в проект.** Пользователю нужны собственные дампы игр, которыми он владеет.
 > Проект не связан с Sony Interactive Entertainment, FromSoftware, AMD и издателями перечисленных
 > ниже игр и не имеет отношения к shadPS4.
 
-## Игры
+## Состояние
 
-Каждая игра из `tools/regress/titles.txt` запускается без окна через `tools/regress.sh` (см. ниже).
-Состояние — докуда игра доходила при проверке; строки «regress» показывают, что даёт её прогон по
-сценарию (первый кадр видеочипа, нарисованные кадры, звук), а не прохождение.
+psport активно разрабатывается. Каждая игра из таблицы есть в
+[tools/regress/titles.txt](tools/regress/titles.txt) и запускается без окна через
+`tools/regress.sh` (см. [Тестирование](#тестирование)). Состояние — докуда игра доходила на глазах,
+а не полное прохождение. Строки с пометкой «regress» показывают только то, что фиксирует её
+сценарный прогон (первый кадр видеочипа, нарисованные кадры, звук).
 
-| Игра | Title ID | Состояние |
+| Игра | ID | Состояние |
 |---|---|---|
 | Bloodborne (1.09) | CUSA03173 | играбельна: сохранения, несколько локаций, звук, геймпад |
-| Atelier Ryza | CUSA16458 | титульное меню, пролог, поле под управлением игрока, звук |
-| Atelier Ayesha DX | CUSA16921 | вступительный ролик, титульное меню, первые сцены, поле, ателье, звук |
+| Atelier Ryza | CUSA16458 | главное меню, пролог, локация с управлением у игрока, звук |
+| Atelier Ayesha DX | CUSA16921 | вступительный ролик, главное меню, начальные сцены, локация, ателье, звук |
 | Tales of Symphonia Remastered | CUSA50989 | титульный экран, первая комната, звук |
-| Astrea | CUSA49515 | сюжетные кадры вступления, звук |
+| Astrea | CUSA49515 | сюжетные панели вступления, звук |
 | SaGa Emerald Beyond | CUSA43027 | титульный экран, первые сюжетные сцены с диалогами, звук |
-| ALTDEUS: Beyond Chronos | CUSA26563 | чёрный экран: нужен шлем PS VR, режима для обычного экрана нет |
+| ALTDEUS: Beyond Chronos | CUSA26563 | чёрный экран: требует шлем PS VR, плоского режима нет |
 | Gal Guardians: Demon Purge | CUSA41240 | regress: нарисованные кадры, звук |
 | Gal Guardians: Servants of the Dark (JP) | CUSA52187 | regress: нарисованные кадры, звук |
 | Call of Duty: Black Ops | CUSA57547 | regress: нарисованные кадры, звук |
-| Call of Duty: Black Ops II | CUSA57548 | первая миссия (Pyrrhic Victory) через цепочку контрольных точек до речной баржи, Save and Quit, Resume Story, ролики, звук, геймпад |
+| Call of Duty: Black Ops II | CUSA57548 | первая миссия (Pyrrhic Victory) по цепочке контрольных точек до речной баржи, Save and Quit, Resume Story, ролики, звук, геймпад |
 | Blood Omen 2 | CUSA49769 | regress: нарисованные кадры, без звука |
-| Onigiri | CUSA01458 | regress: первый кадр видеочипа и звук, освещённого кадра в его сценарии нет |
-| OCTOPATH TRAVELER 0 (JP) | CUSA53477 | загружает сохранение, затем видеочип падает; исключена из обычных прогонов |
+| Onigiri | CUSA01458 | regress: первый кадр видеочипа и звук, в её сценарии нет освещённого кадра |
+| OCTOPATH TRAVELER 0 (JP) | CUSA53477 | загружает сохранение, затем сбой видеочипа; исключена из регулярных прогонов |
 
-Игры, которым обязателен PS VR (`require_ps_vr` в `param.sfo`), не поддерживаются. Основательно
-проверена одна машина (AMD Radeon RX 7800 XT, Mesa/RADV).
+- Игры, требующие PS VR (`require_ps_vr` в `param.sfo`), не поддерживаются.
+- Ни одной проверенной игре не нужен дамп системных модулей консоли.
+- Тщательно проверена только одна машина: AMD Radeon RX 7800 XT с Mesa (RADV).
 
-## Использование
+## Требования
 
-Обычно через decanter: его раздел PS клонирует psport, собирает его через `build.sh`, пересобирает,
-когда checkout сдвинулся, и запускает каждый дамп через `run.sh` (все игры, кроме Bloodborne, — с
-`PS_PERMISSIVE=1`).
+- **ОС:** Linux на x86-64.
+- **Видеочип:** Vulkan 1.3 с descriptor indexing и buffer device address. Путь видеочипа один для
+  всех производителей и выбирает возможности по тому, что сообщает устройство, а не по
+  производителю. Проверен на AMD с RADV; NVIDIA и Intel пока не проверены
+  ([руководство по проверке на NVIDIA](docs/en/NVIDIA_TEST.md)).
+- **Игры:** собственные дампы игр, которыми владеет пользователь (папка игры с `eboot.bin`, `sce_module/` и
+  `sce_sys/param.sfo`).
+- **Инструменты сборки**, на выбор:
+  - [Nix](https://nixos.org): если зависимостей не хватает, `build.sh` и `run.sh` сами входят в
+    [shell.nix](shell.nix).
+  - Пакеты системы: GCC (или другой компилятор через `CC`), CMake, Ninja, pkg-config и библиотеки
+    из `shell.nix` (Vulkan, SDL3, FreeType, FFmpeg, Boost, glslang и остальные зависимости
+    видеоядра shadPS4; protobuf, nlohmann_json, OpenSSL, zlib и miniupnpc для необязательного
+    сетевого модуля).
+- **Python 3** нужен только для сетевой игры, встроенного лаунчера и инструментов разработчика;
+  обычному запуску он не нужен.
 
-Отдельно:
+## Начало работы
+
+### Через decanter (рекомендуется)
+
+[decanter](https://github.com/yerasuu/decanter) — рекомендуемая оболочка. Его раздел PS клонирует
+psport, собирает его через `build.sh`, пересобирает при изменении рабочей копии и запускает каждый
+дамп через `run.sh` (игры, кроме Bloodborne, с `PS_PERMISSIVE=1`).
+
+### Сборка из исходников
 
 ```bash
-git clone --recursive https://github.com/yerasuu/psport.git && cd psport
-bash build.sh                                   # out/psport и out/gpu/libpsport-gpu.so
-PS_GAME_DIR=/путь/к/CUSA03173 bash run.sh       # Bloodborne
-PS_GAME_DIR=/путь/к/дампу PS_PERMISSIVE=1 bash run.sh
+git clone --recursive https://github.com/yerasuu/psport.git
+cd psport
+bash build.sh        # собирает out/psport и out/gpu/libpsport-gpu.so
 ```
 
-По умолчанию `PS_GAME_DIR` — единственный дамп рядом с checkout (например,
-`../CUSA03173`). С `PS_PERMISSIVE=1` импорты, которых нет в psport, возвращают 0, а не
-останавливают игру. `PS_SYS_MODULES=<папка>` по желанию подключает собственный дамп системных
-модулей (`*.sprx`) там, где у порта ещё нет своей библиотеки; из него ничего не распространяется.
-Сохранения и кэш шейдеров лежат в `user/`, настройки — в `psport.ini`. Лаунчер на GTK4
-(`bash launcher/psport-launcher.sh`; `launcher/install-desktop.sh` добавляет его в меню
-приложений) взят из bbport и рассчитан на Bloodborne.
+Без `--recursive` `build.sh` сам загрузит подмодуль (Dear ImGui).
 
-## Требования и сборка
+| Параметр сборки | Действие |
+|---|---|
+| `PS_LTO=OFF` | отключает оптимизацию при компоновке (по умолчанию включена) |
+| `PS_PGO=generate\|use\|off` | оптимизация по профилю; по умолчанию `use`, когда в `pgo/` есть профиль |
+| установлен ccache | библиотека видеочипа компилируется через него, один кэш на все рабочие копии (`~/.cache/psport/ccache` или `CCACHE_DIR`) |
 
-- Linux x86-64 и видеокарта с Vulkan 1.3.
-- GCC (или другой компилятор через `CC`), CMake, Ninja, pkg-config, Python 3 (для игры по сети,
-  встроенного лаунчера и инструментов; для самого запуска он не нужен) и пакеты из
-  `shell.nix`: Vulkan, SDL3, FreeType, FFmpeg, Boost, glslang и остальные зависимости видеоядра
-  shadPS4, а также protobuf, nlohmann_json, OpenSSL, zlib и miniupnpc для необязательного сетевого
-  модуля. Если их нет, а [Nix](https://nixos.org) установлен, `build.sh` и `run.sh` сами
-  перезапускаются в `shell.nix`.
-- Подмодуль (Dear ImGui): клонируйте с `--recursive`, иначе `build.sh`
-  выполнит `git submodule update --init --recursive`.
-- `PS_LTO=OFF` отключает оптимизацию при линковке; `PS_PGO=generate|use|off` задаёт оптимизацию по
-  профилю (по умолчанию `use`, если в `pgo/` есть профиль).
-- Если установлен [ccache](https://ccache.dev) (он есть в `shell.nix`), библиотека GPU собирается
-  через него, с одним кэшем для всех копий и worktree (`~/.cache/psport/ccache`, `CCACHE_DIR`).
-- `nix-build packaging/port.nix` собирает порт из исходников в песочнице Nix; CI собирает каждый
-  коммит в `master` и публикует сборку каждого тега `vX.Y.Z` как бинарный кэш Nix и GitHub Release
-  с пакетом, который работает без Nix (`psport-<tag>-x86_64.tar.zst`, `tools/bundle.sh`;
-  FORK.md, «CI and binary cache»).
+`nix-build packaging/port.nix` собирает порт из исходников в песочнице Nix.
 
-## Измерение прогресса
+### Запуск игры
 
-`tools/regress.sh` запускает каждую игру из `tools/regress/titles.txt` в gamescope без окна
-(`PS_AUDIO=none`, `PS_PAD_HOST=0`: ни окна, ни звука, ни геймпадов пользователя), ведёт её по
-расписанию нажатий (`tools/regress/*.sched`) и сообщает, докуда она дошла (загружена, вход в код
-игры, инициализирована, первый кадр видеочипа, нарисованные кадры, звук), её сигнатуру падения и
-сколько импортов без реализации она вызвала; с `-c <прежний results.json>` отмечает регрессии. Все
-игры запускаются без дампа системных модулей; `SYS_MODULES=<папка>` при желании передаёт его играм,
-кроме Bloodborne, чтобы сравнить с собственными библиотеками psport. Запуск и вехи:
-[FORK.md](FORK.md#regression-runs); как запустить новую игру:
-[docs/en/ADDING_A_TITLE.md](docs/en/ADDING_A_TITLE.md).
+```bash
+PS_GAME_DIR=/путь/к/CUSA03173 bash run.sh                     # Bloodborne
+PS_GAME_DIR=/путь/к/дампу PS_PERMISSIVE=1 bash run.sh         # любая другая игра
+```
 
-## Диагностика
+`run.sh` при необходимости собирает порт, затем запускает игру.
 
-Перед запуском игры перечисляются все импорты без реализации или с заглушкой. Диагностические
-переменные (`PS_PERMISSIVE_OUT`, `PS_AUDIO_STATS`, `PS_NGS2_TRACE`, `PS_FIBER_TRACE`) и
-переключатели системных модулей (`PS_SYS_MODULES`, `PS_HLE`, `PS_LLE`, `PS_SYS_FONTS`) описаны в
-[FORK.md](FORK.md). `tools/gcn_dis.sh` дизассемблирует шейдеры GCN.
+| Переменная | Действие |
+|---|---|
+| `PS_GAME_DIR` | папка игры; по умолчанию единственный дамп рядом с рабочей копией |
+| `PS_PERMISSIVE=1` | импорты, которые psport ещё не реализует, возвращают 0 вместо остановки игры |
+| `PS_DATA_DIR` | папка с правом записи для результатов сборки (`out/`), сохранений и кэша шейдеров (`user/`) и `psport.ini`; по умолчанию рабочая копия |
+| `PS_SYS_MODULES=<папка>` | по желанию подключает собственный дамп системных модулей пользователя (`*.sprx`) там, где у psport ещё нет библиотеки; ничего из него не распространяется |
 
-## Правила
+`bash run.sh --software` рисует через Lavapipe (программный драйвер Vulkan из Mesa) вместо
+видеочипа.
 
-Из [CLAUDE.md](CLAUDE.md): никаких обходов под конкретные игры или шейдеры, исправления
-устраняют саму причину; оптимизации для одной игры идут в её профиль (`gpu/games/`), и любая игра
-должна правильно работать без него (`PS_GAME_PROFILE=none`); тестов в репозитории нет (изменения
-проверяются через `tools/regress.sh`, аппаратные тесты, если нужны, — homebrew на OpenOrbis); код
-следует соглашениям окружающего кода.
+В игре Insert или L3+R3 открывает меню оверлея. Сохранения и кэш шейдеров хранятся в `user/`,
+настройки — в `psport.ini`.
 
-## Что читать дальше
+### Готовые сборки
 
-- [docs/en/ARCHITECTURE.md](docs/en/ARCHITECTURE.md): компоненты и порядок запуска.
-- [docs/en/ADDING_A_TITLE.md](docs/en/ADDING_A_TITLE.md): как запустить новый дамп.
-- [FORK.md](FORK.md): перенесённые компоненты, изменения в унаследованном коде, переменные, отчёт о
-  вызовах, регрессионные прогоны, CI.
-- Описания функций: [апскейлер](docs/en/upscaler.md), [параллельная работа GPU](docs/en/parallel_gpu.md),
-  [векторы движения](docs/ru/motion_vectors.md), [моды и патчи](docs/ru/MODS.md).
-- [docs/ru/history/](docs/ru/history/): проектные заметки, планы и журналы изменений bbport.
+Каждый тег версии `vX.Y.Z` собирается в CI и публикуется как GitHub Release с архивом, который
+работает без Nix: `psport-<tag>-x86_64.tar.zst` и его `.sha256`, созданные
+[tools/bundle.sh](tools/bundle.sh). Распакуйте его в любое место с правом записи и запускайте с
+драйверами Vulkan самой системы:
 
-## Структура репозитория
+```bash
+PS_DATA_DIR=<папка с правом записи> PS_GAME_DIR=/путь/к/дампу bash <распакованная папка>/run.sh
+```
+
+Та же сборка публикуется как бинарный кэш Nix; см. [FORK.md](FORK.md#ci-and-binary-cache).
+
+### Лаунчер
+
+В [launcher/](launcher/) лежит лаунчер на GTK4, унаследованный от bbport и рассчитанный на
+Bloodborne: `bash launcher/psport-launcher.sh` запускает его, а `bash launcher/install-desktop.sh`
+добавляет в меню приложений.
+
+## Настройка
+
+Настройки хранятся в `psport.ini` в папке данных (`PS_CONFIG` указывает другой файл). Большинство
+из них меняется в меню оверлея, которое записывает файл. Самые используемые ключи и переменные:
+
+| Настройка | Действие |
+|---|---|
+| `output_res` | разрешение вывода; для игры с пресетами размеры, отличные от 1080p, масштабируют сцену |
+| `upscaler` (`PS_UPSCALER`) | временной апскейлер там, где его размещает профиль игры ([заметки об апскейлере](docs/en/upscaler.md)) |
+| `menu_language` (`PS_MENU_LANGUAGE`) | язык оверлея: `en`, `es` или `ru` |
+| `game_mouse_sensitivity` | масштаб движения мыши системы, которое получает игра (от 0,05 до 20, по умолчанию 1) |
+| `PS_LANGUAGE` | системный язык, который читает игра (1 английский, 3 испанский, 8 русский) |
+| `PS_FPS` | пресет частоты кадров для игр, у которых они есть (Bloodborne: 30, 60, 90, `uncap`) |
+| `PS_ONLINE=1` | сетевая игра через серверы сообщества для этой игры ([сетевая игра](docs/en/ARCHITECTURE.md#online-play)) |
+| `PS_MODS_ENABLED=0` | отключает файловые моды ([моды и патчи](docs/en/MODS.md)) |
+| `PS_GAME_PROFILE=none` | запуск без профиля игры, только по общим путям |
+| `PS_QUIRKS=none,-<id>,+<id>` | выключает или включает исправления для отдельной игры или системы ([quirks](docs/en/QUIRKS.md)) |
+
+Значения по умолчанию и почему они подходят любой игре: [FORK.md, Defaults](FORK.md#defaults).
+Диагностические переменные и отчёт о вызовах: [FORK.md, Diagnostics](FORK.md#diagnostics).
+Системные модули и шрифты (`PS_SYS_MODULES`, `PS_HLE`, `PS_LLE`, `PS_SYS_FONTS`):
+[FORK.md, System modules](FORK.md#system-modules).
+
+## Как это работает
+
+- **Загрузчик.** Загрузчик на C читает eboot и связанные с ним модули (SELF или ELF) прямо из папки
+  игры, перемещает и связывает их в один образ и передаёт управление коду игры.
+- **Системные библиотеки.** psport реализует их нативно: среда выполнения на C (память, потоки,
+  синхронизация, файлы, звук, геймпад, сохранения, исключения, сервисы, пользовательские потоки,
+  модули, загружаемые во время работы) и библиотеки в `gpu/` (GnmDriver, VideoOut, AvPlayer,
+  Videodec2, Ngs2, Audiodec, Fiber, Font, PngEnc, PngDec).
+- **Графика.** Поток команд видеочипа и шейдеры GCN переводятся в Vulkan рендерером, выросшим из
+  видеоядра и рекомпилятора шейдеров shadPS4 (`gpu/shadps4/`) в том виде, как его расширил bbport.
+- **Профили игр.** То, что относится к одной игре (хуки и оптимизации), живёт в её профиле в
+  `gpu/games/`; без профиля каждая игра работает по общим путям.
+- **Ничего молча.** До старта игры перечисляются все импорты без реализации или с заглушкой;
+  вызовы, которые завершаются ошибкой или не выполняют настоящей работы, записываются в журнал и
+  подсчитываются в отчёте о вызовах.
+
+Подробности: [docs/en/ARCHITECTURE.md](docs/en/ARCHITECTURE.md) (компоненты и порядок запуска) и
+[FORK.md](FORK.md) (что psport берёт из других проектов и что меняет).
+
+## Разработка
+
+### Тестирование
+
+`tools/regress.sh <папка с играми>` запускает каждую игру из `tools/regress/titles.txt` в
+gamescope без окна, без звука и без контроллеров пользователя. Каждой игрой управляет сценарий геймпада
+(`tools/regress/*.sched`), а отчёт показывает, докуда она дошла (загружена, вход в код,
+инициализирована, первый кадр видеочипа, нарисованные кадры, звук), её сигнатуру сбоя и сколько
+нереализованных импортов она вызвала. С `-c <прежний results.json>` он отмечает регрессии.
+Использование и вехи: [FORK.md, Regression runs](FORK.md#regression-runs).
+
+### Запуск новой игры
+
+[docs/en/ADDING_A_TITLE.md](docs/en/ADDING_A_TITLE.md) описывает, как запустить новый дамп,
+прочитать его журнал и отчёт о вызовах, реализовать недостающее и проверить результат.
+
+### Правила для изменений
+
+- Исправления устраняют исходное поведение; никаких хаков под отдельную игру или шейдер в ядре.
+- Оптимизации для одной игры идут в её профиль (`gpu/games/<игра>/`), и каждая игра должна
+  правильно работать без него (`PS_GAME_PROFILE=none`).
+- Временное исправление, нужное одной игре, — это объявленный quirk, который пишется в журнал и
+  отключается ([docs/en/QUIRKS.md](docs/en/QUIRKS.md)).
+- Тестов в репозитории нет: изменения проверяются через `tools/regress.sh`; тесты на железе, когда
+  нужны, — это homebrew на OpenOrbis.
+- Изменения следуют стилю окружающего кода; именование и остальные соглашения описаны в [CLAUDE.md](CLAUDE.md).
+- Изменения из bbport и shadPS4 переносятся вручную, каждое записывается в [FORK.md](FORK.md) с
+  исходным коммитом.
+
+`tools/gcn_dis.sh` дизассемблирует шейдеры GCN.
+
+### Структура репозитория
 
 | Путь | Содержимое |
 |---|---|
-| `src/` | Точка входа (`src/main/`), нативный загрузчик (`loader_*.c`) и рантайм на C (`runtime_*.c`) |
-| `scripts/` | `online.py` — адреса для игры по сети, которые `run.sh` записывает при `PS_ONLINE=1` (единственный шаг запуска на Python), и `sce_file.py` для инструментов на Python |
-| `gpu/` | Библиотека GPU: видеоядро shadPS4 с изменениями bbport (`gpu/VENDOR.txt`), собственный декодер PM4 (`cp/`) и модуль памяти (`layer/`), перенесённые библиотеки (`ngs2/`, `audiodec/`, `fiber/`, `font/`, `pngenc/`, `pngdec/`), профили игр (`games/`), оверлей и меню в игре (`port/`), мост DLSS, сетевой модуль |
-| `launcher/`, `packaging/` | Лаунчер на GTK4 из bbport; пакет Nix и скрипт AppImage |
-| `patches/` | Патчи сообщества для Bloodborne |
-| `tools/` | Регрессионные прогоны, дизассемблер GCN, инструменты FSR 4 и `fsr4cap`, помощники для скриптовых запусков |
-| `docs/` | По папке на язык: `docs/en/` (архитектура, запуск новой игры, описания функций, история bbport на английском) и `docs/ru/` (русские оригиналы bbport с теми же именами файлов) |
+| `src/` | точка входа (`src/main/`), нативный загрузчик и среда выполнения на C |
+| `gpu/` | библиотека видеочипа: видеоядро shadPS4 с изменениями bbport ([gpu/VENDOR.txt](gpu/VENDOR.txt)), декодер PM4 (`cp/`), модуль памяти (`layer/`), перенесённые библиотеки (`ngs2/`, `audiodec/`, `fiber/`, `font/`, `pngenc/`, `pngdec/`), профили игр (`games/`), оверлей и внутриигровое меню (`port/`), мост DLSS, сетевой модуль (`net/`) |
+| `scripts/` | `online.py` (сетевые адреса для `PS_ONLINE=1`) и `sce_file.py` для инструментов на Python |
+| `launcher/`, `packaging/` | лаунчер bbport на GTK4; пакет Nix и скрипт AppImage |
+| `patches/` | патчи сообщества для Bloodborne |
+| `tools/` | регрессионные прогоны, дизассемблер GCN, инструменты FSR 4, помощники сценарных прогонов, архив релиза |
+| `docs/` | `docs/en/` (архитектура, запуск новой игры, заметки о возможностях, история bbport на английском), `docs/ru/` (русские оригиналы bbport) |
 
-## Благодарности и лицензии
+### Что почитать дальше
 
-psport распространяется под лицензией **GNU GPL v2 или новее** ([LICENSE](LICENSE)).
+- [docs/en/ARCHITECTURE.md](docs/en/ARCHITECTURE.md): компоненты и порядок запуска.
+- [docs/en/ADDING_A_TITLE.md](docs/en/ADDING_A_TITLE.md): запуск нового дампа.
+- [docs/en/QUIRKS.md](docs/en/QUIRKS.md): реестр исправлений для одной игры, системы или
+  middleware.
+- [FORK.md](FORK.md): перенесённые компоненты, изменения унаследованного кода, переменные, отчёт о
+  вызовах, регрессионные прогоны, CI.
+- Заметки о возможностях: [апскейлер](docs/en/upscaler.md),
+  [параллельная работа видеочипа](docs/en/parallel_gpu.md),
+  [векторы движения](docs/en/motion_vectors.md), [моды и патчи](docs/en/MODS.md).
+- [docs/en/history/](docs/en/history/): проектные заметки, планы и журналы изменений bbport
+  (русские оригиналы — в [docs/ru/](docs/ru/)).
 
-### На чём построен
+## Лицензия и благодарности
+
+psport распространяется под **GNU General Public License v2.0 или более поздней версии**
+([LICENSE](LICENSE)). Проект поддерживает Yerasuu.
+
+### На чём основан проект
 
 | Проект | Что даёт | Лицензия |
 |---|---|---|
-| [bbport](https://github.com/deadinside28/bloodborne_pc) от deadinside | основа psport: нативный загрузчик, HLE-рантайм, рендерер на Vulkan, всё для Bloodborne | GPL-2.0-or-later |
-| [shadPS4](https://github.com/shadps4-emu/shadPS4) | видеоядро, рекомпилятор шейдеров, AvPlayer и другие библиотеки, которые несёт bbport; источник переноса libSceFiber и libSceFont | GPL-2.0-or-later |
-| [AnyPS5](https://github.com/boykopovar/AnyPS5) | источник переноса libSceNgs2 и libSceAudiodec | GPL-2.0 |
+| [bbport](https://github.com/deadinside28/bloodborne_pc) от deadinside | исток psport: нативный загрузчик, среда HLE, рендерер Vulkan, всё для Bloodborne | GPL-2.0-or-later |
+| [shadPS4](https://github.com/shadps4-emu/shadPS4) | видеоядро, рекомпилятор шейдеров, AvPlayer и другие библиотеки, пришедшие с bbport; источник портов libSceFiber и libSceFont | GPL-2.0-or-later |
+| [AnyPS5](https://github.com/boykopovar/AnyPS5) | источник портов libSceNgs2 и libSceAudiodec | GPL-2.0 |
 
-Сам psport поддерживает Yerasuu для [decanter](#использование). Что psport меняет в унаследованном
-коде и что переносит (с коммитами источников), а также последние просмотренные точки bbport и
-shadPS4 записаны в [FORK.md](FORK.md).
+Исходные коммиты и изменения унаследованного кода записаны в [FORK.md](FORK.md) и
+[gpu/VENDOR.txt](gpu/VENDOR.txt).
 
 ### Встроенный сторонний код
 
 | Компонент | Для чего | Лицензия |
 |---|---|---|
 | [sirit](https://github.com/shadps4-emu/sirit) | генерация SPIR-V | BSD-3-Clause |
-| заголовки AMD GCN (`gpu/third_party/gcn`) | декодирование инструкций GCN | MIT |
+| Заголовки GCN от AMD (`gpu/third_party/gcn`) | декодирование инструкций GCN | MIT |
 | [half](https://half.sourceforge.net/) | числа половинной точности | MIT |
 | [FSR-Vulkan](https://github.com/FireBurn/FSR-Vulkan) от FireBurn, AMD FidelityFX SDK | FSR 3.1 | MIT |
 | [LibAtrac9](https://github.com/Thealexbarney/LibAtrac9) | декодирование звука ATRAC9 | MIT |
-| [Dear ImGui](https://github.com/ocornut/imgui) | оверлей и игровые меню | MIT |
+| [Dear ImGui](https://github.com/ocornut/imgui) | оверлей и внутриигровые меню | MIT |
 | [cpp-httplib](https://github.com/yhirose/cpp-httplib) | сетевой модуль | MIT |
-| мост DLSS (`gpu/dlss_bridge`) из [Windows-порта Supermedo](https://github.com/Supermedo/bloodborne_pc), адаптированного из [IFreemz/shadPS4-Bloodborne-DLSS-FSR](https://github.com/IFreemz/shadPS4-Bloodborne-DLSS-FSR) | DLSS | MIT |
-| [шрифты DejaVu](https://dejavu-fonts.github.io/) | текст оверлея, запасной шрифт для libSceFont | Bitstream Vera (изменения DejaVu — общественное достояние) |
-| [dxil-spirv](https://github.com/HansKristian-Work/dxil-spirv) | сборка файлов FSR 4.1.1 на машине пользователя | MIT |
+| Мост DLSS (`gpu/dlss_bridge`) из [порта для Windows от Supermedo](https://github.com/Supermedo/bloodborne_pc), адаптированный из [IFreemz/shadPS4-Bloodborne-DLSS-FSR](https://github.com/IFreemz/shadPS4-Bloodborne-DLSS-FSR) | DLSS | MIT |
+| [Шрифты DejaVu](https://dejavu-fonts.github.io/) | текст оверлея, запасной вариант для libSceFont | Bitstream Vera (изменения DejaVu — общественное достояние) |
+| [dxil-spirv](https://github.com/HansKristian-Work/dxil-spirv) | сборка ресурсов FSR 4.1.1 на машине пользователя | MIT |
 
-Подключаются из системы или оболочки Nix, а не встраиваются, под своими лицензиями: FFmpeg,
+Подключаются из системы или окружения Nix, не встроены, под собственными лицензиями: FFmpeg,
 FreeType, Vulkan, SDL3, Boost, fmt и остальное из `shell.nix`.
 
 ### Сообщество
 
-Патчи Bloodborne — Kyo, Lance McDonald, auser1337, illusion, emoose и другие участники сообщества
+Патчи Bloodborne от Kyo, Lance McDonald, auser1337, illusion, emoose и других участников сообщества
 (`patches/Bloodborne.xml`).
 
-### Не распространяется
+### Что не распространяется
 
-Никаких файлов игры и системных модулей консоли. DLL и данные моделей FSR 4 от AMD, а также SDK и
-библиотеки DLSS от NVIDIA тоже не включены — их предоставляет пользователь.
+Никаких файлов игр и системных модулей консоли. DLL и данные модели FSR 4 от AMD, а также SDK и
+библиотеки DLSS от NVIDIA тоже не входят в проект; их предоставляет пользователь.

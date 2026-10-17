@@ -1,44 +1,34 @@
-# psport — PS4 titles natively on Linux
+# psport
 
-**English** · [Русский](README.ru.md) · [Español](README.es.md)
+Run PS4 games natively on Linux.
 
-psport is a PS4 compatibility layer for Linux. A PS4 title's original executable runs on an
-x86-64 Linux PC the way a Windows program runs under Wine: psport loads it, provides the system
-libraries it imports and translates its GPU work to Vulkan. It is not an emulator. psport is an
-independent project derived from [bbport](https://github.com/deadinside28/bloodborne_pc), the
-native Linux port of Bloodborne, and from [shadPS4](https://github.com/shadps4-emu/shadPS4), and
-is being generalised into a layer for any title; Bloodborne remains a supported title with its own
-profile. bbport and shadPS4 are reviewed from time to time, and the changes useful to psport are
-ported by hand and recorded in [FORK.md](FORK.md).
+**English** · [Español](README.es.md) · [Русский](README.ru.md)
 
-- **CPU.** The PS4 CPU is x86-64, so the game's code runs on the PC's CPU as it is, with no
-  emulation and no instruction translation. A C loader (`src/main/main.c`, `src/loader/loader_*.c`) reads the
-  eboot and the modules it links (SELF or ELF) straight from the game's folder, relocates and binds
-  them into one image and jumps into it.
-- **System libraries.** psport provides them itself: the C runtime in `src/*/runtime_*.c` (memory,
-  threads, synchronization, files, audio, pad, saves, exceptions, services, user-level threads,
-  modules a game loads at run time) and the libraries in `gpu/` (GnmDriver, VideoOut, AvPlayer,
-  Videodec2, Ngs2, Audiodec, Fiber, Font, PngEnc, PngDec). No tested title needs a dump of the console's
-  system modules.
-- **Graphics.** The GPU command stream and GCN shaders are translated to Vulkan by a renderer
-  derived from [shadPS4](https://github.com/shadps4-emu/shadPS4)'s video core and shader
-  recompiler (`gpu/shadps4/`), as bbport extended it.
-- **Game profiles.** What is specific to one title (hooks and optimisations in its code) lives in
-  its profile under `gpu/games/`; every title runs on the generic paths without one.
+## Overview
 
-How it fits together: [docs/en/ARCHITECTURE.md](docs/en/ARCHITECTURE.md). What psport takes from
-other projects (source commit, license) and what it changes in inherited code:
-[FORK.md](FORK.md).
+psport is a PS4 compatibility layer for x86-64 Linux. It is not an emulator: it works the way Wine
+does for Windows programs. The PS4 CPU is x86-64, so a game's original executable runs directly on
+the PC's processor, with no instruction translation. psport loads the executable and the modules it
+links, provides the system libraries the game imports, and translates the game's GPU work to Vulkan.
 
-> **No game files are included.** You need your own dumps of the games you own.
+psport is an independent project. It started from
+[bbport](https://github.com/deadinside28/bloodborne_pc), the native Linux port of Bloodborne, and
+builds on the video core and shader recompiler of [shadPS4](https://github.com/shadps4-emu/shadPS4).
+It is being generalised from one game into a layer for any title; Bloodborne remains supported with
+its own game profile.
+
+> [!IMPORTANT]
+> **No game files are included.** The user needs their own dumps of the games they own.
 > This project is not affiliated with Sony Interactive Entertainment, FromSoftware, AMD or the
-> publishers of the titles below, and it is not related to shadPS4.
+> publishers of the titles listed below, and it is not related to shadPS4.
 
-## Titles
+## Status
 
-Every title in `tools/regress/titles.txt` is run headless with `tools/regress.sh` (see below).
-The state is how far a title has been seen to get; "regress" rows are what its scripted run shows
-(first GPU frame, frames drawn, sound), not a play-through.
+psport is under active development. Every title below is listed in
+[tools/regress/titles.txt](tools/regress/titles.txt) and run headless with `tools/regress.sh`
+(see [Testing](#testing)). The state is how far a title has been seen to get, not a full
+play-through. Rows marked "regress" show only what the title's scripted run records (first GPU
+frame, frames drawn, sound).
 
 | Title | Title ID | State |
 |---|---|---|
@@ -57,78 +47,180 @@ The state is how far a title has been seen to get; "regress" rows are what its s
 | Onigiri | CUSA01458 | regress: first GPU frame and sound, no lit frame in its schedule |
 | OCTOPATH TRAVELER 0 (JP) | CUSA53477 | loads a saved game, then the GPU faults; left out of routine runs |
 
-Titles that require PS VR (`require_ps_vr` in `param.sfo`) are unsupported. Only one machine
-(AMD Radeon RX 7800 XT, Mesa/RADV) has been tested thoroughly.
+- Titles that require PS VR (`require_ps_vr` in `param.sfo`) are not supported.
+- No tested title needs a dump of the console's system modules.
+- Only one machine has been tested thoroughly: AMD Radeon RX 7800 XT with Mesa (RADV).
 
-## Using it
+## Requirements
 
-Normally through decanter: its PS section clones psport, builds it with `build.sh`, rebuilds it
-when the checkout moves and runs each dump through `run.sh` (titles other than Bloodborne with
-`PS_PERMISSIVE=1`).
+- **OS:** Linux on x86-64.
+- **GPU:** Vulkan 1.3 with descriptor indexing and buffer device address. The GPU path is the same
+  for every vendor and chooses features by what the device reports, not by vendor. It is tested on
+  AMD with RADV; NVIDIA and Intel are not verified yet
+  ([NVIDIA test guide](docs/en/NVIDIA_TEST.md)).
+- **Games:** the user's own dumps of games they own (the game folder with `eboot.bin`, `sce_module/` and
+  `sce_sys/param.sfo`).
+- **Build tools**, one of:
+  - [Nix](https://nixos.org): when dependencies are missing, `build.sh` and `run.sh` enter
+    [shell.nix](shell.nix) themselves.
+  - Host packages: GCC (or another compiler through `CC`), CMake, Ninja, pkg-config and the
+    libraries in `shell.nix` (Vulkan, SDL3, FreeType, FFmpeg, Boost, glslang and the rest of
+    shadPS4's video core dependencies; protobuf, nlohmann_json, OpenSSL, zlib and miniupnpc for the
+    optional online module).
+- **Python 3** only for online play, the bundled launcher and the developer tools; a normal launch
+  does not need it.
 
-Standalone:
+## Getting started
+
+### With decanter (recommended)
+
+[decanter](https://github.com/yerasuu/decanter) is the recommended front-end. Its PS section
+clones psport, builds it with `build.sh`, rebuilds it when the checkout moves and launches each dump
+through `run.sh` (titles other than Bloodborne with `PS_PERMISSIVE=1`).
+
+### Build from source
 
 ```bash
-git clone --recursive https://github.com/yerasuu/psport.git && cd psport
-bash build.sh                                   # out/psport and out/gpu/libpsport-gpu.so
-PS_GAME_DIR=/path/to/CUSA03173 bash run.sh      # Bloodborne
-PS_GAME_DIR=/path/to/dump PS_PERMISSIVE=1 bash run.sh
+git clone --recursive https://github.com/yerasuu/psport.git
+cd psport
+bash build.sh        # produces out/psport and out/gpu/libpsport-gpu.so
 ```
 
-`PS_GAME_DIR` defaults to the only dump next to the checkout (`../CUSA03173`, say).
-`PS_PERMISSIVE=1` makes imports psport lacks return 0 instead of stopping. `PS_SYS_MODULES=<folder>` optionally links the user's own dump of system
-modules (`*.sprx`) where the port has no library yet; nothing from it is shipped. Saves and the
-shader cache go to `user/`, settings to `psport.ini`. The GTK4 launcher
-(`bash launcher/psport-launcher.sh`; `launcher/install-desktop.sh` adds it to the app menu) is
-inherited from bbport and built around Bloodborne.
+Without `--recursive`, `build.sh` fetches the submodule (Dear ImGui) itself.
 
-## Requirements and building
+| Build option | Effect |
+|---|---|
+| `PS_LTO=OFF` | disable link-time optimization (on by default) |
+| `PS_PGO=generate\|use\|off` | profile-guided optimization; `use` by default when `pgo/` holds a profile |
+| ccache installed | the GPU library compiles through it, one cache for every checkout (`~/.cache/psport/ccache`, or `CCACHE_DIR`) |
 
-- Linux x86-64 and a Vulkan 1.3 GPU.
-- GCC (or another compiler through `CC`), CMake, Ninja, pkg-config, Python 3 (for online play,
-  the bundled launcher and tools; a launch does not need it otherwise) and the packages in
-  `shell.nix`: Vulkan, SDL3, FreeType, FFmpeg, Boost, glslang and the rest of shadPS4's video core
-  dependencies, plus protobuf, nlohmann_json, OpenSSL, zlib and miniupnpc for the optional online
-  module. When these are missing and [Nix](https://nixos.org) is installed, `build.sh` and
-  `run.sh` re-enter `shell.nix` themselves.
-- Submodule (Dear ImGui): clone with `--recursive`, or `build.sh` runs
-  `git submodule update --init --recursive`.
-- `PS_LTO=OFF` disables link-time optimization; `PS_PGO=generate|use|off` sets profile-guided
-  optimization (`use` by default when `pgo/` holds a profile).
-- With [ccache](https://ccache.dev) installed (`shell.nix` has it), the GPU library is compiled
-  through it, one cache for every checkout and worktree (`~/.cache/psport/ccache`, `CCACHE_DIR`).
-- `nix-build packaging/port.nix` builds the port from source in Nix's sandbox; CI builds every
-  commit on `master` and publishes the build of each `vX.Y.Z` tag as a Nix binary cache and a GitHub
-  Release, with a bundle that runs without Nix (`psport-<tag>-x86_64.tar.zst`, `tools/bundle.sh`;
-  FORK.md, "CI and binary cache").
+`nix-build packaging/port.nix` builds the port from source in Nix's sandbox.
 
-## Measuring progress
+### Run a game
 
-`tools/regress.sh` runs every title in `tools/regress/titles.txt` inside a headless gamescope
-(`PS_AUDIO=none`, `PS_PAD_HOST=0`: no window, no sound, none of the user's controllers), drives each
-with a pad schedule (`tools/regress/*.sched`) and reports how far it got (loaded, entered,
-initialized, first GPU frame, drawn frames, audio), its crash signature and how many imports without
-implementation it called; with `-c <earlier results.json>` it flags regressions. Every title runs
-without a dump of system modules; `SYS_MODULES=<folder>` optionally passes one to the titles other
-than Bloodborne, to compare with psport's own libraries. Usage and milestones:
-[FORK.md](FORK.md#regression-runs); bringing up a new title:
-[docs/en/ADDING_A_TITLE.md](docs/en/ADDING_A_TITLE.md).
+```bash
+PS_GAME_DIR=/path/to/CUSA03173 bash run.sh                    # Bloodborne
+PS_GAME_DIR=/path/to/dump PS_PERMISSIVE=1 bash run.sh         # any other title
+```
 
-## Diagnostics
+`run.sh` builds the port when needed, then starts the game.
 
-Before a game starts, every import without implementation or answered by a stub is listed. The
-diagnostic variables (`PS_PERMISSIVE_OUT`, `PS_AUDIO_STATS`, `PS_NGS2_TRACE`, `PS_FIBER_TRACE`)
-and the system module switches (`PS_SYS_MODULES`, `PS_HLE`, `PS_LLE`, `PS_SYS_FONTS`) are
-described in [FORK.md](FORK.md). `tools/gcn_dis.sh` disassembles GCN shaders.
+| Variable | Effect |
+|---|---|
+| `PS_GAME_DIR` | the game folder; by default the only dump next to the checkout |
+| `PS_PERMISSIVE=1` | imports psport does not implement yet return 0 instead of stopping the game |
+| `PS_DATA_DIR` | writable folder for build output (`out/`), saves and shader cache (`user/`) and `psport.ini`; by default the checkout |
+| `PS_SYS_MODULES=<folder>` | optionally links the user's own dump of system modules (`*.sprx`) where psport has no library yet; nothing from it is shipped |
 
-## Rules
+`bash run.sh --software` renders with Lavapipe (Mesa's CPU Vulkan driver) instead of the GPU.
 
-From [CLAUDE.md](CLAUDE.md): no game-specific or shader-specific hacks, fixes address the
-underlying behavior; optimisations for one title go in its game profile (`gpu/games/`), and every
-title must run correctly without one (`PS_GAME_PROFILE=none`); no tests in the repository (changes are checked with `tools/regress.sh`;
-hardware tests, when needed, are OpenOrbis homebrew); match the surrounding code.
+In game, Insert or L3+R3 opens the overlay menu. Saves and the shader cache go to `user/`,
+settings to `psport.ini`.
 
-## Read next
+### Prebuilt releases
+
+Each version tag `vX.Y.Z` is built by CI and published as a GitHub Release with a bundle that runs
+without Nix: `psport-<tag>-x86_64.tar.zst` and its `.sha256`, made by
+[tools/bundle.sh](tools/bundle.sh). Extract it anywhere writable and run it with the host's own
+Vulkan drivers:
+
+```bash
+PS_DATA_DIR=<writable folder> PS_GAME_DIR=/path/to/dump bash <extracted folder>/run.sh
+```
+
+The same build is published as a Nix binary cache; see [FORK.md](FORK.md#ci-and-binary-cache).
+
+### Launcher
+
+[launcher/](launcher/) holds the GTK4 launcher inherited from bbport, built around Bloodborne:
+`bash launcher/psport-launcher.sh` starts it and `bash launcher/install-desktop.sh` adds it to the
+application menu.
+
+## Configuration
+
+Settings live in `psport.ini` in the data folder (`PS_CONFIG` names another file). Most of them
+are changed from the overlay menu, which writes the file. Commonly used keys and variables:
+
+| Setting | Effect |
+|---|---|
+| `output_res` | output resolution; for a title with presets, sizes other than 1080p scale the scene |
+| `upscaler` (`PS_UPSCALER`) | temporal upscaler, where the game's profile places it ([upscaler notes](docs/en/upscaler.md)) |
+| `menu_language` (`PS_MENU_LANGUAGE`) | overlay language: `en`, `es` or `ru` |
+| `game_mouse_sensitivity` | scale of the host mouse motion a game receives (0.05 to 20, default 1) |
+| `PS_LANGUAGE` | the system language the game reads (1 English, 3 Spanish, 8 Russian) |
+| `PS_FPS` | frame rate preset for titles that have presets (Bloodborne: 30, 60, 90, `uncap`) |
+| `PS_ONLINE=1` | online play through the title's community servers ([online play](docs/en/ARCHITECTURE.md#online-play)) |
+| `PS_MODS_ENABLED=0` | disables file mods ([mods and patches](docs/en/MODS.md)) |
+| `PS_GAME_PROFILE=none` | runs without the game's profile, on the generic paths only |
+| `PS_QUIRKS=none,-<id>,+<id>` | turns per-title or per-host fixes off or on ([quirks](docs/en/QUIRKS.md)) |
+
+Defaults and why they hold for any game: [FORK.md, Defaults](FORK.md#defaults). Diagnostic
+variables and the call report: [FORK.md, Diagnostics](FORK.md#diagnostics). System modules and
+fonts (`PS_SYS_MODULES`, `PS_HLE`, `PS_LLE`, `PS_SYS_FONTS`):
+[FORK.md, System modules](FORK.md#system-modules).
+
+## How it works
+
+- **Loader.** A C loader reads the eboot and the modules it links (SELF or ELF) straight from the
+  game folder, relocates and binds them into one image and jumps into the game's code.
+- **System libraries.** psport implements them natively: a C runtime (memory, threads,
+  synchronization, files, audio, pad, saves, exceptions, services, user-level threads, modules
+  loaded at run time) and the libraries in `gpu/` (GnmDriver, VideoOut, AvPlayer, Videodec2, Ngs2,
+  Audiodec, Fiber, Font, PngEnc, PngDec).
+- **Graphics.** The GPU command stream and GCN shaders are translated to Vulkan by a renderer
+  derived from shadPS4's video core and shader recompiler (`gpu/shadps4/`), as bbport extended it.
+- **Game profiles.** What is specific to one title (hooks and optimisations) lives in its profile
+  under `gpu/games/`; every title runs on the generic paths without one.
+- **Nothing silent.** Before a game starts, every import without an implementation or answered by
+  a stub is listed; calls that fail or do no real work are logged and counted in a call report.
+
+Details: [docs/en/ARCHITECTURE.md](docs/en/ARCHITECTURE.md) (components and launch flow) and
+[FORK.md](FORK.md) (what psport takes from other projects and what it changes).
+
+## Development
+
+### Testing
+
+`tools/regress.sh <games root>` runs every title in `tools/regress/titles.txt` in a headless
+gamescope, with no window, no sound and none of the user's controllers. A pad schedule
+(`tools/regress/*.sched`) drives each title, and the report says how far it got (loaded, entered,
+initialized, first GPU frame, frames drawn, audio), its crash signature and how many unimplemented
+imports it called. With `-c <earlier results.json>` it flags regressions. Usage and milestones:
+[FORK.md, Regression runs](FORK.md#regression-runs).
+
+### Bringing up a title
+
+[docs/en/ADDING_A_TITLE.md](docs/en/ADDING_A_TITLE.md) walks through running a new dump, reading
+its log and call report, implementing what is missing and checking the result.
+
+### Rules for changes
+
+- Fixes address the underlying behaviour; no game- or shader-specific hacks in the core.
+- Optimisations for one title go in its profile (`gpu/games/<game>/`), and every title must run
+  correctly without one (`PS_GAME_PROFILE=none`).
+- A temporary fix one title needs is a declared, logged and disableable quirk
+  ([docs/en/QUIRKS.md](docs/en/QUIRKS.md)).
+- No tests in the repository: changes are checked with `tools/regress.sh`; hardware tests, when
+  needed, are OpenOrbis homebrew.
+- Changes match the surrounding code; naming and the other conventions are in [CLAUDE.md](CLAUDE.md).
+- Changes from bbport and shadPS4 are ported by hand, each recorded in [FORK.md](FORK.md) with its
+  source commit.
+
+`tools/gcn_dis.sh` disassembles GCN shaders.
+
+### Repository layout
+
+| Path | Contents |
+|---|---|
+| `src/` | entry point (`src/main/`), native loader and C runtime |
+| `gpu/` | GPU library: shadPS4 video core with bbport's changes ([gpu/VENDOR.txt](gpu/VENDOR.txt)), PM4 decoder (`cp/`), memory module (`layer/`), ported libraries (`ngs2/`, `audiodec/`, `fiber/`, `font/`, `pngenc/`, `pngdec/`), game profiles (`games/`), overlay and in-game menu (`port/`), DLSS bridge, online module (`net/`) |
+| `scripts/` | `online.py` (online addresses for `PS_ONLINE=1`) and `sce_file.py` for the Python tools |
+| `launcher/`, `packaging/` | bbport's GTK4 launcher; Nix package and AppImage script |
+| `patches/` | community patches for Bloodborne |
+| `tools/` | regression runs, GCN disassembler, FSR 4 tools, scripted-run helpers, release bundle |
+| `docs/` | `docs/en/` (architecture, bringing up a title, feature notes, bbport's history in English), `docs/ru/` (bbport's Russian originals) |
+
+### Further reading
 
 - [docs/en/ARCHITECTURE.md](docs/en/ARCHITECTURE.md): components and the launch flow.
 - [docs/en/ADDING_A_TITLE.md](docs/en/ADDING_A_TITLE.md): bringing up a new dump.
@@ -137,23 +229,13 @@ hardware tests, when needed, are OpenOrbis homebrew); match the surrounding code
   regression runs, CI.
 - Feature notes: [upscaler](docs/en/upscaler.md), [parallel GPU work](docs/en/parallel_gpu.md),
   [motion vectors](docs/en/motion_vectors.md), [mods and patches](docs/en/MODS.md).
-- [docs/en/history/](docs/en/history/): bbport's design notes, plans and change logs.
+- [docs/en/history/](docs/en/history/): bbport's design notes, plans and change logs
+  (Russian originals in [docs/ru/](docs/ru/)).
 
-## Repository layout
+## License and credits
 
-| Path | Contents |
-|---|---|
-| `src/` | Entry (`src/main/`), native loader (`loader_*.c`) and C runtime (`runtime_*.c`) |
-| `scripts/` | `online.py`, the online addresses `run.sh` writes with `PS_ONLINE=1` from the game's title ([online play](docs/en/ARCHITECTURE.md#online-play); the one launch step in Python), and `sce_file.py` for the Python tools |
-| `gpu/` | GPU library: shadPS4 video core with bbport's changes (`gpu/VENDOR.txt`), own PM4 decoder (`cp/`) and memory module (`layer/`), ported libraries (`ngs2/`, `audiodec/`, `fiber/`, `font/`, `pngenc/`, `pngdec/`), game profiles (`games/`), overlay and in-game menu (`port/`), DLSS bridge, online module |
-| `launcher/`, `packaging/` | bbport's GTK4 launcher; Nix package and AppImage script |
-| `patches/` | Community patches for Bloodborne |
-| `tools/` | Regression runs, GCN disassembler, FSR 4 tools and `fsr4cap`, scripted-run helpers |
-| `docs/` | One folder per language: `docs/en/` (architecture, bringing up a title, feature notes, bbport's history in English), `docs/ru/` (bbport's Russian originals, same file names) |
-
-## Credits and licenses
-
-psport is licensed under the **GNU GPL v2 or later** ([LICENSE](LICENSE)).
+psport is licensed under the **GNU General Public License v2.0 or later** ([LICENSE](LICENSE)).
+It is maintained by Yerasuu.
 
 ### Projects it builds on
 
@@ -163,9 +245,8 @@ psport is licensed under the **GNU GPL v2 or later** ([LICENSE](LICENSE)).
 | [shadPS4](https://github.com/shadps4-emu/shadPS4) | video core, shader recompiler, AvPlayer and other libraries carried by bbport; source of the libSceFiber and libSceFont ports | GPL-2.0-or-later |
 | [AnyPS5](https://github.com/boykopovar/AnyPS5) | source of the libSceNgs2 and libSceAudiodec ports | GPL-2.0 |
 
-psport itself is maintained by Yerasuu for [decanter](#using-it). What psport changes in inherited
-code and what it ports (with source commits), and the last reviewed points of bbport and shadPS4,
-are recorded in [FORK.md](FORK.md).
+Source commits and changes to inherited code are recorded in [FORK.md](FORK.md) and
+[gpu/VENDOR.txt](gpu/VENDOR.txt).
 
 ### Bundled third-party code
 
