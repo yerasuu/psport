@@ -47,6 +47,7 @@ source commit), as the rows below already are. Last reviewed points:
 | `run.sh`'s log on a descriptor bash picks (`exec {log_fd}>`), not 3, so the AppImage runtime's pipe stays open | `run.sh` | bbport `72e5c8c` (AppImage `--play`) | as is |
 | miniz built with FetchContent (tag `3.1.2`) when no package exists; the online module's missing dependencies named | `gpu/CMakeLists.txt` | bbport `72e5c8c` (#136, #145) | as is |
 | FP8 FSR 4 passes captured under an RX 9070 XT's id on an RX 9000 that needed the RX 7800 XT's id | `tools/fsr4cap/capture_all.sh` (`rdna4_present`) | bbport `72e5c8c` (#186) | the FP8 id kept for every FP8 size, not only the first |
+| Guest code hooks: a byte-checked jump to a trampoline that hands a host function every register (shadPS4's `InstallGuestCodeHook` of the shadp2p/BBSC forks), the stub emitter of bbport's detours | `gpu/port/psport_guest_code.*` (`PsGuestCode::InstallHook`, `InstallDetour`, `Emitter`) | bbport `72e5c8c` (`gpu/shim/bbport_guest_code_hooks.*`, `bbport_guest_code.h`) | for any game's profile; results as `PsGuestCode::Error` values instead of `bool`, every hook logged when it goes in or is refused; `RedirectOperand` (a RIP-relative operand moved, checked with Zydis) and `MapNear` added; pages still writable during the loader's patching are written in place |
 
 ## Names
 

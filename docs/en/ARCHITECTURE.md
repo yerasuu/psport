@@ -486,6 +486,14 @@ A profile may provide:
 | `label_release` | the game's label release code, for the free check's `PS_LABEL_TRAP=2` |
 | `small_object_pool` | the layout of the pool holding its GPU labels, for the free check (`PS_FREE_CHECK`) |
 
+Hooks and patches in a game's code go through `gpu/port/psport_guest_code.h` (`PsGuestCode`), the
+same for any profile: `InstallHook` (a trampoline that hands a host function every register and may
+let it return from the game's function), `InstallDetour` (a stub the profile writes with `Emitter`)
+and `RedirectOperand` (an instruction reads a value next to the image instead of its constant,
+`MapNear`). Each compares the site with the bytes the profile expects and returns a
+`PsGuestCode::Error` instead of writing when they differ; each hook is logged as `Guest code: <name>
+hooked at <address>` or `... not hooked: <why>`.
+
 A profile makes a title faster or easier to diagnose; it never makes it work. The core must run
 every title correctly on its generic paths, which `PS_GAME_PROFILE=none` checks. The only title
 today is Bloodborne (`gpu/games/bloodborne/`: `title.cpp` and, for the launch, `patches.cpp`: the
