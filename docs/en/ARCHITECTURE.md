@@ -483,6 +483,7 @@ A profile may provide:
 | `c_submits_ahead` | the frame overlap the game takes when `PS_SUBMIT_AHEAD` is unset |
 | `anisotropy` | anisotropic filtering forced on its textures when `PS_ANISO` is unset |
 | `upscaler` | where the temporal upscaler goes in its frame (scene combine and UI shaders), its scene constants (camera) and bone palettes (object motion); without it the upscaler stays off |
+| `drives_frame_rate` | true once its hooks pace the game's frames: the video out shows each frame as it comes, whatever flip rate the game asks for (Bloodborne's frame rate hooks) |
 | `report_stats` | profile diagnostics with each frame statistics report |
 | `label_release` | the game's label release code, for the free check's `PS_LABEL_TRAP=2` |
 | `small_object_pool` | the layout of the pool holding its GPU labels, for the free check (`PS_FREE_CHECK`) |
@@ -498,7 +499,8 @@ hooked at <address>` or `... not hooked: <why>`.
 A profile makes a title faster or easier to diagnose; it never makes it work. The core must run
 every title correctly on its generic paths, which `PS_GAME_PROFILE=none` checks. The only title
 today is Bloodborne (`gpu/games/bloodborne/`: `title.cpp` and, for the launch, `patches.cpp`: the
-`PS_FPS` presets 30/60/90/uncap, `PS_PATCHES`, the effect switches and `model_lod` of `psport.ini`,
+`PS_FPS` presets 30/60/90/uncap (by hooks in its code, `frame_rate.cpp`, unless `PS_FRAME_HOOKS=0`
+or the executable is not 1.09), `PS_PATCHES`, the effect switches and `model_lod` of `psport.ini`,
 the `PS_RENDER_RES` scene size, the Intel tone mapping and online-choice fixes, all from
 `patches/Bloodborne.xml`; `game_check.cpp`: the 1.09 executable and intact shaders; the in-game menu
 pages, `game_menu.cpp`; its profile in `profile.cpp`, with Gnm entry hooks and `gnm_table.inc`,

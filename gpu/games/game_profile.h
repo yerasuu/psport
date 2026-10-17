@@ -160,6 +160,9 @@ struct Profile {
     /// Patches the game's code once, before any of it runs, while the image is still writable
     /// (each patch checks the bytes it replaces, as the hooks do).
     void (*pfn_patch_image)(unsigned char* p_image, std::uint64_t cb_range) = nullptr;
+    /// True once the profile's hooks pace the game's frames themselves: the video out shows each
+    /// frame as it comes, whatever flip rate the game asks for (sceVideoOutSetFlipRate).
+    bool (*pfn_drives_frame_rate)() = nullptr;
     /// Guest code known to write per-frame data into GPU memory: the blocks it writes stay in
     /// the game's memory from its first write instead of after a few frames.
     std::span<const CodeRange> dynamic_writers;
@@ -287,6 +290,12 @@ inline std::uint32_t Anisotropy() {
 inline UpscalerPlacement Upscaler() {
     const Profile* p_profile = Active();
     return p_profile ? p_profile->upscaler : UpscalerPlacement{};
+}
+
+/// Whether the active profile's hooks pace the game's frames (Profile::pfn_drives_frame_rate).
+inline bool DrivesFrameRate() {
+    const Profile* p_profile = Active();
+    return p_profile && p_profile->pfn_drives_frame_rate && p_profile->pfn_drives_frame_rate();
 }
 
 /// Whether guest_rip is in code the active profile knows to write per-frame data.

@@ -17,4 +17,9 @@ bool CheckFiles(const PsGameFiles& game, std::string& kind, std::string& advice)
 /// The PS_FPS preset, PS_PATCHES, the effect switches of psport.ini, PS_RENDER_RES and the
 /// Intel and online-choice fixes.
 bool AddPatches(const PsGameFiles& game, const PsPatchServices& services);
+/// The 1.09 executable the presets' patches and the profile's hooks are written for.
+bool IsSupportedImage(const PsGameFiles& game);
+/// The preset's frame rate (60, 90 or 480 for uncap) when AddPatches left the frame rate to the
+/// profile's hooks (frame_rate.cpp) instead of the preset's patches; 0 otherwise.
+int FrameHooksChosen();
 } // namespace PsLaunch

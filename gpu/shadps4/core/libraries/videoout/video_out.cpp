@@ -12,6 +12,7 @@
 #include "core/libraries/videoout/videoout_error.h"
 #include "core/platform.h"
 #include "video_core/renderer_vulkan/vk_presenter.h"
+#include "game_profile.h"
 #include "psport_overlay.h"
 
 extern std::unique_ptr<Vulkan::Presenter> presenter;
@@ -153,6 +154,15 @@ s32 PS4_SYSV_ABI sceVideoOutSetFlipRate(s32 handle, s32 rate) {
     if (rate < 0 || rate > 2) {
         LOG_ERROR(Lib_VideoOut, "Invalid rate = {}", rate);
         return ORBIS_VIDEO_OUT_ERROR_INVALID_VALUE;
+    }
+    // psport: a profile whose hooks pace the game's frames has each frame shown as it comes (the
+    // game asks for every second vblank, 30 FPS).
+    if (Game::DrivesFrameRate()) {
+        static std::atomic<bool> s_is_told{false};
+        if (rate != 0 && !s_is_told.exchange(true)) {
+            std::printf("VideoOut: flip rate %d ignored: the game profile's hooks pace its frames\n", rate);
+        }
+        rate = 0;
     }
     port->flip_rate = rate;
     return ORBIS_OK;

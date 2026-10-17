@@ -3,6 +3,7 @@
 // title.cpp). Addresses are those of the 1.09 executable (CheckFiles, game_check.cpp, makes sure
 // that is the one running); every retail release runs the same one.
 #include "game_profile.h"
+#include "frame_rate.h"
 #include "gnm_hooks.h"
 #include "guest_hooks.h"
 #include "heap_sites.h"
@@ -22,6 +23,11 @@ constexpr CodeRange DynamicWriters[] = {
 void InstallHooks(const CoreServices& services) {
     // The resource loaders' copies, the GPU memory range allocator and the heap (guest_hooks).
     PsGuestHooks::Install(services.pfn_fresh_range);
+}
+
+void PatchImage(unsigned char* p_image, std::uint64_t cb_image) {
+    PsGnmHooks::PatchImage(p_image, cb_image);
+    PsFrameRate::PatchImage(p_image, cb_image);
 }
 
 void ReportStats() {
@@ -48,7 +54,8 @@ constexpr LabelReleaseCode LabelRelease = {
 
 extern const Profile BloodborneProfile = {
     .pfn_install_hooks = InstallHooks,
-    .pfn_patch_image = PsGnmHooks::PatchImage,
+    .pfn_patch_image = PatchImage,
+    .pfn_drives_frame_rate = PsFrameRate::IsUnlocked,
     .dynamic_writers = DynamicWriters,
     // The game's buffer-copy compute shader (not the export-stage copy shader).
     .buffer_copy_shader = 0xfefebf9f,

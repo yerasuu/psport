@@ -82,6 +82,16 @@ bool HasBrokenDcx(const std::string& folder) {
 }
 } // namespace
 
+bool IsSupportedImage(const PsGameFiles& game) {
+    unsigned char digest[32];
+    game.pfn_eboot_sha256(game.sz_game_dir, digest);
+    char sz_image[65];
+    for (int i = 0; i < 32; ++i) {
+        std::snprintf(sz_image + 2 * i, 3, "%02x", digest[i]);
+    }
+    return std::strcmp(sz_image, SupportedImage) == 0;
+}
+
 bool CheckFiles(const PsGameFiles& game, std::string& kind, std::string& advice) {
     if (const char* sz_skip = std::getenv("PS_SKIP_GAME_CHECK"); sz_skip && !std::strcmp(sz_skip, "1")) {
         return true;

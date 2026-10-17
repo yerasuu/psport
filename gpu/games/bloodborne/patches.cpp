@@ -36,14 +36,17 @@ struct FpsPreset {
     const char* sz_name;
     std::vector<const char*> patches;
     const char* sz_vblank_hz;
+    /// The most frames a second the profile's hooks let the game's pacer run (frame_rate.cpp).
+    int rate;
 };
 const FpsPreset FpsPresets[] = {
-    {"30", {}, "60"},
-    {"60", {"60 FPS++"}, "60"},
-    {"90", {"90 FPS++", "Sprint Fix (High FPS)"}, "90"},
+    {"30", {}, "60", 30},
+    {"60", {"60 FPS++"}, "60", 60},
+    {"90", {"90 FPS++", "Sprint Fix (High FPS)"}, "90", 90},
     // Delta-time patch: vblank at 480 Hz, frames shown as soon as they are done.
-    {"uncap", {"Uncap FPS++", "Sprint Fix (High FPS)"}, "480"},
+    {"uncap", {"Uncap FPS++", "Sprint Fix (High FPS)"}, "480", 480},
 };
+int s_frame_hooks_rate = 0;
 
 /// psport.ini key -> patch when it is 0, patch when it is 1.
 struct Effect {
@@ -103,6 +106,23 @@ const Operand ResolutionOperands[] = {
     {0x02358554 - EbootBase, 0xB8, 0x500, true, false},
     {0x0235855D - EbootBase, 0xB9, 0x2D0, false, false},
 };
+
+/// Why the frame rate stays with the preset's patches instead of the profile's hooks, or null for
+/// the hooks: PS_FRAME_HOOKS=0, the profile or the guest hooks off, or another executable than the
+/// one the hooks are written for (they check their bytes too, but by then the patches can no
+/// longer be chosen).
+const char* FrameHooksRefusal(const PsGameFiles& game) {
+    if (std::strcmp(runtime_env("PS_FRAME_HOOKS", "1"), "0") == 0) {
+        return "PS_FRAME_HOOKS=0";
+    }
+    if (std::strcmp(runtime_env("PS_GAME_PROFILE", ""), "none") == 0) {
+        return "PS_GAME_PROFILE=none";
+    }
+    if (std::strcmp(runtime_env("PS_GUEST_HOOKS", "1"), "0") == 0) {
+        return "PS_GUEST_HOOKS=0";
+    }
+    return IsSupportedImage(game) ? nullptr : "not the 1.09 executable";
+}
 
 /// PS_FPS, uncap when unset or empty.
 std::string FpsPresetName() {
@@ -310,7 +330,12 @@ bool AddPatches(const PsGameFiles& game, const PsPatchServices& services) {
         std::fprintf(stderr, "ERROR: Patches: PS_FPS=%s: expected 30, 60, 90 or uncap\n", fps.c_str());
         return false;
     }
-    std::vector<std::string> names(p_preset->patches.begin(), p_preset->patches.end());
+    const char* sz_refusal = p_preset->rate > 30 ? FrameHooksRefusal(game) : "";
+    s_frame_hooks_rate = sz_refusal ? 0 : p_preset->rate;
+    std::vector<std::string> names;
+    if (sz_refusal) {
+        names.assign(p_preset->patches.begin(), p_preset->patches.end());
+    }
     const std::string extra = runtime_env("PS_PATCHES", "");
     for (std::size_t off_name = 0; off_name <= extra.size();) {
         std::size_t off_end = extra.find(';', off_name);
@@ -374,8 +399,14 @@ bool AddPatches(const PsGameFiles& game, const PsPatchServices& services) {
     for (const std::string& name : names) {
         list += (list.empty() ? "'" : ", '") + name + "'";
     }
-    std::printf("Patches: FPS preset %s; %zu writes from %s\n", fps.c_str(), services.pfn_count(services.p_list),
+    std::printf("Patches: FPS preset %s%s%s%s; %zu writes from %s\n", fps.c_str(),
+                !sz_refusal ? " by hooks" : *sz_refusal ? " by patches (" : "", sz_refusal ? sz_refusal : "",
+                sz_refusal && *sz_refusal ? ")" : "", services.pfn_count(services.p_list),
                 names.empty() ? "none" : ("[" + list + "]").c_str());
     return true;
+}
+
+int FrameHooksChosen() {
+    return s_frame_hooks_rate;
 }
 } // namespace PsLaunch
