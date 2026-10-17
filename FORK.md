@@ -303,9 +303,10 @@ player's `key.<input>=` and `pad.<input>=` lines in `psport.ini` win over both. 
 A gamepad with motion sensors (DualShock 4, DualSense, Switch Pro, the Steam Deck when SDL reaches its
 own device) has them enabled when it is opened, again after each reconnection, and read at every pad
 read (`src/input/runtime_pad_sensors.c`): SDL's gamepad sensor frame is the DualShock 4's, so the
-axes pass through with the acceleration in g, and the orientation is the angular velocity integrated
-with its tilt pulled towards gravity (`scePadSetTiltCorrectionState`); yaw drifts until
-`scePadResetOrientation`. `scePadSetMotionSensorState(0)` reports the pad at rest and
+axes pass through with the acceleration in g (libScePad does not swap them for the DualShock 4), and
+the orientation is the angular velocity integrated from identity, its tilt pulled towards gravity only
+with `scePadSetTiltCorrectionState` (off by default, within 0.08 g of 1 g, at libScePad's gain); yaw
+drifts until `scePadResetOrientation`, which sets identity. `scePadSetMotionSensorState(0)` reports the pad at rest and
 `scePadSetAngularVelocityDeadbandState` zeroes turns under 1 degree/s. The log says once per pad
 what it found (`Runtime: gamepad sensors: gyro+accel (used)`, or `none: motion emulated` / `at
 rest`), failed reads are logged at each power of two and counted at exit. Real sensors win over the

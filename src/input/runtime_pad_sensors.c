@@ -10,10 +10,11 @@
  * emulation and shadPS4's and AnyPS5's pads report), so the axes and signs pass through unchanged
  * and only the acceleration is divided by standard gravity.
  *
- * Orientation: the angular velocity integrated into the quaternion, its tilt pulled towards the
- * measured gravity (a complementary filter: the correction turns the estimate at TILT_GAIN times
- * the angle between them) while the acceleration is near 1 g, so shaking does not tilt it. Yaw has
- * no reference and drifts, as on the console; scePadResetOrientation sets it back to zero.
+ * Orientation, as libScePad computes it (kb #553): it starts at identity, the first read after an
+ * open only latches the time, then the angular velocity is integrated into the quaternion. With
+ * scePadSetTiltCorrectionState (off by default, as on the console) its tilt is pulled towards the
+ * measured gravity, only while the acceleration is within 0.08 g of 1 g, by libScePad's gain.
+ * Yaw has no reference and drifts; scePadResetOrientation sets the quaternion back to identity.
  *
  * Off with PS_PAD_SENSORS=0 (the motion emulation or the pad at rest instead); the game turns the
  * reports off and on with scePadSetMotionSensorState and the tilt correction with
@@ -26,9 +27,8 @@
 #include <string.h>
 #include <SDL3/SDL.h>
 
-#define TILT_GAIN 1.0f
-#define TILT_MIN_G 0.7f /* outside 0.7..1.3 g the pad is being moved: gravity is not what it reads */
-#define TILT_MAX_G 1.3f
+#define TILT_MAX_OFF_G 0.08f /* further from 1 g the pad is being moved: gravity is not what it reads */
+#define TILT_MIN_AXIS 0.01f   /* a smaller correction axis is noise */
 #define DEADBAND_RAD_PER_S 0.0174533f /* 1 degree/s, scePadSetAngularVelocityDeadbandState */
 #define MAX_STEP_S 0.1f /* a longer gap between reads (a menu, a load) is not integrated */
 
@@ -40,7 +40,7 @@ static struct {
     int has_orientation;
     size_t c_reads, c_read_failures, c_enable_failures;
 } s_sensors;
-static int s_is_reporting=1, s_is_tilt_corrected=1, s_has_deadband;
+static int s_is_reporting=1, s_is_tilt_corrected, s_has_deadband;
 
 static void set_identity(float q[4]) { q[0]=q[1]=q[2]=0.0f; q[3]=1.0f; }
 static void normalize(float q[4]) {
@@ -54,15 +54,13 @@ static void seed_from_gravity(float q[4], const float a[3]) {
     q[0]=-a[2]; q[1]=0.0f; q[2]=a[0]; q[3]=1.0f+a[1];
     normalize(q);
 }
-static void reset_orientation(void) {
+/* A pad with an accelerometer and no gyroscope (not a console pad) shows its tilt from gravity. */
+static void tilt_from_gravity(void) {
     const float *p_a=s_sensors.acceleration;
     const float len=sqrtf(p_a[0]*p_a[0]+p_a[1]*p_a[1]+p_a[2]*p_a[2]);
-    if (s_sensors.has_accel && s_is_tilt_corrected && len>TILT_MIN_G && len<TILT_MAX_G) {
-        const float a[3]={p_a[0]/len,p_a[1]/len,p_a[2]/len};
-        seed_from_gravity(s_sensors.orientation,a);
-    } else {
-        set_identity(s_sensors.orientation);
-    }
+    if (len<1e-3f) { set_identity(s_sensors.orientation); return; }
+    const float a[3]={p_a[0]/len,p_a[1]/len,p_a[2]/len};
+    seed_from_gravity(s_sensors.orientation,a);
 }
 
 static int enable_sensor(SDL_Gamepad *p_gamepad, SDL_SensorType type) {
@@ -130,13 +128,16 @@ static void integrate(float rate[3], float dt) {
     const float *p_a=s_sensors.acceleration;
     const float len=sqrtf(p_a[0]*p_a[0]+p_a[1]*p_a[1]+p_a[2]*p_a[2]);
     float turn[3]={rate[0],rate[1],rate[2]};
-    if (s_is_tilt_corrected && s_sensors.has_accel && len>TILT_MIN_G && len<TILT_MAX_G) {
+    if (s_is_tilt_corrected && s_sensors.has_accel && fabsf(len-1.0f)<TILT_MAX_OFF_G) {
         float up[3];
         up_in_frame(q,up);
         const float a[3]={p_a[0]/len,p_a[1]/len,p_a[2]/len};
-        turn[0]+=TILT_GAIN*(a[1]*up[2]-a[2]*up[1]);
-        turn[1]+=TILT_GAIN*(a[2]*up[0]-a[0]*up[2]);
-        turn[2]+=TILT_GAIN*(a[0]*up[1]-a[1]*up[0]);
+        const float axis[3]={a[1]*up[2]-a[2]*up[1],a[2]*up[0]-a[0]*up[2],a[0]*up[1]-a[1]*up[0]};
+        if (sqrtf(axis[0]*axis[0]+axis[1]*axis[1]+axis[2]*axis[2])>TILT_MIN_AXIS) {
+            /* libScePad turns min(dt/8 ms, 2) * 0.04 of the way per update: as a rate, that over dt. */
+            const float gain=fminf(dt/0.008f,2.0f)*0.04f/dt;
+            for (int i=0;i<3;++i) turn[i]+=gain*axis[i];
+        }
     }
     const float hx=0.5f*turn[0]*dt, hy=0.5f*turn[1]*dt, hz=0.5f*turn[2]*dt;
     const float x=q[0], y=q[1], z=q[2], w=q[3];
@@ -157,8 +158,8 @@ int runtime_pad_sensors_read(PadData *p_pad_data, float dt) {
     if (s_sensors.has_gyro && !read_sensor(SDL_SENSOR_GYRO,rate)) rate[0]=rate[1]=rate[2]=0.0f;
     if (s_has_deadband)
         for (int i=0;i<3;++i) if (fabsf(rate[i])<DEADBAND_RAD_PER_S) rate[i]=0.0f;
-    if (!s_sensors.has_orientation) { s_sensors.has_orientation=1; reset_orientation(); }
-    else if (!s_sensors.has_gyro) reset_orientation();
+    if (!s_sensors.has_gyro) tilt_from_gravity();
+    else if (!s_sensors.has_orientation) s_sensors.has_orientation=1; /* the first read only latches the time */
     else if (dt>0.0f && dt<=MAX_STEP_S) integrate(rate,dt);
     memcpy(p_pad_data->orientation,s_sensors.orientation,sizeof(p_pad_data->orientation));
     memcpy(p_pad_data->acceleration,s_sensors.acceleration,sizeof(p_pad_data->acceleration));
@@ -183,7 +184,7 @@ void runtime_pad_sensors_set_tilt_correction(int is_enabled) {
     s_is_tilt_corrected=!!is_enabled;
 }
 void runtime_pad_sensors_set_deadband(int is_enabled) { s_has_deadband=!!is_enabled; }
-void runtime_pad_sensors_reset_orientation(void) { if (s_sensors.has_orientation) reset_orientation(); }
+void runtime_pad_sensors_reset_orientation(void) { set_identity(s_sensors.orientation); }
 
 void runtime_pad_sensors_report(void) {
     if (!s_sensors.c_reads && !s_sensors.c_enable_failures) return;
