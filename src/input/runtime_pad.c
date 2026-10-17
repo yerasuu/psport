@@ -799,12 +799,27 @@ static ABI int32_t pad_close(int32_t h_handle) {
     if (h_handle!=PAD_HANDLE || !s_is_opened) return ERR_INVALID_HANDLE;
     s_is_opened=0; return 0;
 }
+/* PS_PAD_TRACE=1: the state the game reads, logged when its buttons change and every 5 s. */
+static void trace_read(const PadData *p_pad_data, size_t c_reads) {
+    static int s_is_enabled=-1;
+    static uint32_t s_last_buttons;
+    static uint64_t s_last_us;
+    if (s_is_enabled<0) s_is_enabled=runtime_env_flag("PS_PAD_TRACE",0);
+    if (!s_is_enabled) return;
+    if (p_pad_data->buttons==s_last_buttons && p_pad_data->timestamp-s_last_us<=5000000) return;
+    s_last_buttons=p_pad_data->buttons; s_last_us=p_pad_data->timestamp;
+    printf("Runtime: pad read %zu: buttons 0x%x sticks %u %u %u %u triggers %u %u touches %u\n",c_reads,
+           p_pad_data->buttons,p_pad_data->left_x,p_pad_data->left_y,p_pad_data->right_x,p_pad_data->right_y,
+           p_pad_data->l2,p_pad_data->r2,p_pad_data->touch_count);
+}
 static ABI int32_t pad_read_state(int32_t h_handle, PadData *p_data) {
     if (h_handle!=PAD_HANDLE || !s_is_opened) return ERR_INVALID_HANDLE;
     if (!p_data) return ERR_INVALID_ARG;
     pthread_mutex_lock(&s_lock);
     sample(p_data); ++s_c_reads;
+    const size_t c_reads=s_c_reads;
     pthread_mutex_unlock(&s_lock);
+    trace_read(p_data,c_reads);
     return 0;
 }
 /* Buffered read: the port samples once per call, so one entry is returned. */

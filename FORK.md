@@ -63,6 +63,7 @@ source commit), as the rows below already are. Last reviewed points:
 | The pad's default state reports 1 g of gravity up (the controller lying flat) instead of zero acceleration, which a game reads as free fall | `src/input/runtime_pad.c` (`sample_host`) | bbport `72e5c8c` (`src/runtime_pad.c`) | as is |
 | The touchpad keys add a finger each (both held: two fingers, one on each half) instead of one replacing the other | `src/input/runtime_pad.c` (`touch_click`) | bbport `72e5c8c` (`src/runtime_pad.c`) | also for the gamepad's right-touchpad binding and `PS_PAD_FILE`'s `touchpad_left`/`touchpad_right` |
 | `PS_PAD_FILE`'s `mdx=` and `mdy=` move the mouse that many pixels at every pad read, as if the window held it (scripted mouse look tests) | `src/input/runtime_pad_script.c` (`runtime_pad_read_inject`), `runtime_pad.h` (`PadInjected`), `runtime_pad.c` (`sample`) | bbport `72e5c8c` (`src/runtime_pad.c`) | through the native camera hook when the profile has one, else the right stick; the pad file's log line shows the motion |
+| `PS_PAD_TRACE=1` logs the pad state the game reads when its buttons change and every 5 s | `src/input/runtime_pad.c` (`trace_read`) | bbport `72e5c8c` (`BB_PAD_TRACE`) | outside the pad's lock; triggers and touch count logged too |
 
 ## Names
 
