@@ -107,11 +107,153 @@ int ps_host_wait_on_address(const void *p_word, uint32_t expected, int is_privat
 /* Wakes up to c_waiters threads waiting on p_word: the number woken, or minus the host's errno. */
 int ps_host_wake_address(const void *p_word, int c_waiters, int is_private);
 
-/* ---- files ---- */
+/* ---- files and folders ---- */
 /* Calls pfn_entry with each name in the folder but "." and "..", without allocating, so that a
  * signal handler may list one (the watchdog lists /proc/self/task): 0, or the host's errno when the
  * folder cannot be read. */
 int ps_host_list_dir(const char *sz_path, void (*pfn_entry)(const char *sz_name, void *p_context), void *p_context);
+
+/* Host files are int descriptors (0-2 being the process's stdio), opened close-on-exec. Calls that
+ * can fail return 0 or the host's errno; reads, writes and seeks a count or offset, or minus the
+ * host's errno. Paths are host paths: the guest's mounts and FreeBSD's flags are runtime_file.c's. */
+enum {
+    PS_HOST_OPEN_READ = 0,
+    PS_HOST_OPEN_WRITE = 1,
+    PS_HOST_OPEN_READ_WRITE = 2,
+    PS_HOST_OPEN_ACCESS_MASK = 3,
+    PS_HOST_OPEN_NONBLOCK = 1 << 2,
+    PS_HOST_OPEN_APPEND = 1 << 3,
+    PS_HOST_OPEN_SYNC = 1 << 4,
+    PS_HOST_OPEN_CREATE = 1 << 5,
+    PS_HOST_OPEN_TRUNCATE = 1 << 6,
+    PS_HOST_OPEN_EXCLUSIVE = 1 << 7,
+    PS_HOST_OPEN_DIRECTORY = 1 << 8,
+};
+/* The traditional Unix mode word, whose type bits and permissions FreeBSD and Linux share; a host
+ * without one fills it in. */
+enum {
+    PS_HOST_MODE_TYPE_MASK = 0170000,
+    PS_HOST_MODE_DIRECTORY = 0040000,
+    PS_HOST_MODE_REGULAR = 0100000,
+    PS_HOST_MODE_LINK = 0120000,
+};
+#define PS_HOST_MODE_IS_DIRECTORY(mode) (((mode) & PS_HOST_MODE_TYPE_MASK) == PS_HOST_MODE_DIRECTORY)
+#define PS_HOST_MODE_IS_REGULAR(mode) (((mode) & PS_HOST_MODE_TYPE_MASK) == PS_HOST_MODE_REGULAR)
+#define PS_HOST_MODE_IS_LINK(mode) (((mode) & PS_HOST_MODE_TYPE_MASK) == PS_HOST_MODE_LINK)
+typedef struct {
+    uint64_t dev, ino;
+    uint32_t mode, c_links, cb_block;
+    int64_t cb_size, c_blocks;
+    struct timespec atime, mtime, ctime;
+} PsHostStat;
+/* ps_host_fs_access's mode: any of these, or 0 to ask whether the path exists. */
+enum { PS_HOST_ACCESS_READ = 4, PS_HOST_ACCESS_WRITE = 2, PS_HOST_ACCESS_EXECUTE = 1 };
+
+/* A descriptor, or minus the host's errno; mode applies to a file the call creates. */
+int ps_host_fs_open(const char *sz_path, unsigned flags, unsigned mode);
+int ps_host_fs_close(int h_file);
+int64_t ps_host_fs_read(int h_file, void *p_buffer, size_t cb_buffer);
+int64_t ps_host_fs_pread(int h_file, void *p_buffer, size_t cb_buffer, int64_t off_file);
+/* Safe in signal handlers, which write their reports to descriptors 1 and 2 with it. */
+int64_t ps_host_fs_write(int h_file, const void *p_buffer, size_t cb_buffer);
+int64_t ps_host_fs_pwrite(int h_file, const void *p_buffer, size_t cb_buffer, int64_t off_file);
+/* whence as fseek's: SEEK_SET, SEEK_CUR, SEEK_END. */
+int64_t ps_host_fs_seek(int h_file, int64_t off_file, int whence);
+int ps_host_fs_sync(int h_file);
+int ps_host_fs_truncate(int h_file, int64_t cb_file);
+int ps_host_fs_truncate_path(const char *sz_path, int64_t cb_file);
+/* What the path names, following links (ps_host_fs_stat_link: the link itself). */
+int ps_host_fs_stat(const char *sz_path, PsHostStat *p_out);
+int ps_host_fs_stat_link(const char *sz_path, PsHostStat *p_out);
+int ps_host_fs_stat_file(int h_file, PsHostStat *p_out);
+int ps_host_fs_access(const char *sz_path, int mode);
+int ps_host_fs_make_dir(const char *sz_path, unsigned mode);
+/* Creates a folder no one else has: sz_template ends in XXXXXX, which the call replaces in place. */
+int ps_host_fs_make_unique_dir(char *sz_template);
+int ps_host_fs_remove_dir(const char *sz_path);
+int ps_host_fs_remove(const char *sz_path);
+/* Replaces sz_to in one step when it exists, so that a reader sees the old file or the new one. */
+int ps_host_fs_rename(const char *sz_from, const char *sz_to);
+int ps_host_fs_symlink(const char *sz_target, const char *sz_link);
+/* Bytes an unprivileged writer may still use on the file system holding the path. */
+int ps_host_fs_free_space(const char *sz_path, uint64_t *p_out_cb_free);
+/* The absolute path with every link and "." or ".." resolved; the path must exist. */
+int ps_host_fs_real_path(const char *sz_path, char *sz_out, size_t cb_out);
+/* Access then modification time; NULL sets both to now. */
+int ps_host_fs_set_times(const char *sz_path, const struct timespec *p_times);
+int ps_host_fs_set_times_file(int h_file, const struct timespec *p_times);
+int ps_host_fs_set_mode(const char *sz_path, unsigned mode);
+int ps_host_fs_set_mode_file(int h_file, unsigned mode);
+/* The access mode, PS_HOST_OPEN_NONBLOCK and PS_HOST_OPEN_APPEND as the descriptor has them now;
+ * ps_host_fs_set_status changes only those two. */
+int ps_host_fs_status(int h_file, unsigned *p_out_flags);
+int ps_host_fs_set_status(int h_file, unsigned flags);
+/* 1 or 0, or minus the host's errno. */
+int ps_host_fs_close_on_exec(int h_file);
+int ps_host_fs_set_close_on_exec(int h_file, int is_set);
+
+typedef struct PsHostDir PsHostDir;
+typedef enum {
+    PS_HOST_ENTRY_UNKNOWN,
+    PS_HOST_ENTRY_REGULAR,
+    PS_HOST_ENTRY_DIRECTORY,
+    PS_HOST_ENTRY_LINK,
+    PS_HOST_ENTRY_OTHER,
+} PsHostEntryKind;
+/* sz_name stays valid until the next call on the same listing. kind is what the folder records
+ * without a lookup: a link stays a link, and some file systems answer UNKNOWN (ps_host_dir_stat
+ * says more). */
+typedef struct {
+    const char *sz_name;
+    PsHostEntryKind kind;
+} PsHostDirEntry;
+/* NULL with errno set when the folder cannot be read. */
+PsHostDir *ps_host_dir_open(const char *sz_path);
+/* 1 with the next entry ("." and ".." included where the host lists them), 0 at the end. */
+int ps_host_dir_next(PsHostDir *p_dir, PsHostDirEntry *p_out);
+/* An entry of the listing, following links. */
+int ps_host_dir_stat(PsHostDir *p_dir, const char *sz_name, PsHostStat *p_out);
+void ps_host_dir_close(PsHostDir *p_dir);
+
+/* ---- the address space ---- */
+typedef struct {
+    uintptr_t va_begin, va_end;
+    int is_readable, is_writable, is_executable;
+    /* The host's own line for the mapping (offsets, file), for logs. */
+    const char *sz_description;
+} PsHostMapping;
+/* Calls pfn_mapping with each mapping in address order until it returns nonzero, without
+ * allocating, so that a fault handler may look one up: 0, or the host's errno when the list
+ * cannot be read. */
+int ps_host_list_mappings(int (*pfn_mapping)(const PsHostMapping *p_mapping, void *p_context), void *p_context);
+
+/* ---- sockets ---- */
+/* Sockets are int descriptors like files (runtime_file.c keeps both in the guest's table) and use
+ * the BSD socket calls, except what follows. ps_host_net_init comes before the first socket and
+ * may be called again at no cost: 0, or the host's errno. */
+int ps_host_net_init(void);
+int ps_host_net_close(int h_socket);
+/* The last failed socket call's error on this thread, as an errno value. */
+int ps_host_net_error(void);
+int ps_host_net_set_nonblocking(int h_socket, int is_nonblocking);
+/* Bytes waiting to be read and not yet sent; each is left as it was when the host cannot say. */
+void ps_host_net_queued(int h_socket, int32_t *p_out_cb_receive, int32_t *p_out_cb_send);
+/* RFC 793's states in the order FreeBSD numbers them (TCPS_*), which the guest reads. */
+typedef enum {
+    PS_HOST_TCP_CLOSED,
+    PS_HOST_TCP_LISTEN,
+    PS_HOST_TCP_SYN_SENT,
+    PS_HOST_TCP_SYN_RECEIVED,
+    PS_HOST_TCP_ESTABLISHED,
+    PS_HOST_TCP_CLOSE_WAIT,
+    PS_HOST_TCP_FIN_WAIT_1,
+    PS_HOST_TCP_CLOSING,
+    PS_HOST_TCP_LAST_ACK,
+    PS_HOST_TCP_FIN_WAIT_2,
+    PS_HOST_TCP_TIME_WAIT,
+} PsHostTcpState;
+/* A stream socket's state; CLOSED when the host cannot say. */
+PsHostTcpState ps_host_net_tcp_state(int h_socket);
 
 /* ---- processes ---- */
 /* Closes descriptors h_first to h_last (-1: every one from h_first on), or with is_on_exec only marks

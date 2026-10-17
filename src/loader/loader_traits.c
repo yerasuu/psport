@@ -3,11 +3,9 @@
  * that only some titles use the same way stays out, so a trait is never guessed from one game. */
 #define _GNU_SOURCE
 #include "loader_traits.h"
-#include <dirent.h>
 #include <stdio.h>
 #include <string.h>
 #include <strings.h>
-#include <sys/stat.h>
 
 static const struct {
     const char *sz_id, *sz_name;
@@ -103,28 +101,28 @@ static void walk(const char *sz_root, const char *sz_relative, uint32_t *p_trait
     if ((size_t)snprintf(sz_path, sizeof(sz_path), "%s%s%s", sz_root, sz_relative[0] ? "/" : "", sz_relative) >=
         sizeof(sz_path))
         return;
-    DIR *p_dir = opendir(sz_path);
+    PsHostDir *p_dir = ps_host_dir_open(sz_path);
     if (!p_dir) return;
-    for (struct dirent *p_entry; (p_entry = readdir(p_dir));) {
-        if (!strcmp(p_entry->d_name, ".") || !strcmp(p_entry->d_name, "..")) continue;
-        if (!sz_relative[0] && !strcmp(p_entry->d_name, "sce_sys")) continue;
+    for (PsHostDirEntry entry; ps_host_dir_next(p_dir, &entry);) {
+        if (!strcmp(entry.sz_name, ".") || !strcmp(entry.sz_name, "..")) continue;
+        if (!sz_relative[0] && !strcmp(entry.sz_name, "sce_sys")) continue;
         char sz_child[4096];
         if ((size_t)snprintf(sz_child, sizeof(sz_child), "%s%s%s", sz_relative, sz_relative[0] ? "/" : "",
-                             p_entry->d_name) >= sizeof(sz_child))
+                             entry.sz_name) >= sizeof(sz_child))
             continue;
-        int is_directory = p_entry->d_type == DT_DIR, is_file = p_entry->d_type == DT_REG;
-        if (p_entry->d_type == DT_LNK || p_entry->d_type == DT_UNKNOWN) {
+        int is_directory = entry.kind == PS_HOST_ENTRY_DIRECTORY, is_file = entry.kind == PS_HOST_ENTRY_REGULAR;
+        if (entry.kind == PS_HOST_ENTRY_LINK || entry.kind == PS_HOST_ENTRY_UNKNOWN) {
             char sz_full[8192];
-            struct stat st;
+            PsHostStat st;
             snprintf(sz_full, sizeof(sz_full), "%s/%s", sz_root, sz_child);
-            if (stat(sz_full, &st)) continue;
-            is_directory = S_ISDIR(st.st_mode);
-            is_file = S_ISREG(st.st_mode);
+            if (ps_host_fs_stat(sz_full, &st)) continue;
+            is_directory = PS_HOST_MODE_IS_DIRECTORY(st.mode);
+            is_file = PS_HOST_MODE_IS_REGULAR(st.mode);
         }
         if (is_directory) walk(sz_root, sz_child, p_traits, depth + 1);
-        else if (is_file) *p_traits |= file_traits(sz_child, p_entry->d_name);
+        else if (is_file) *p_traits |= file_traits(sz_child, entry.sz_name);
     }
-    closedir(p_dir);
+    ps_host_dir_close(p_dir);
 }
 
 uint32_t loader_detect_traits(const char *sz_game, const LoaderModule *p_eboot) {

@@ -12,7 +12,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 #ifndef _WIN32
@@ -166,10 +165,10 @@ static bool write_atomic(const char *sz_path, const void *p_data, size_t cb_data
     snprintf(sz_temp, sizeof(sz_temp), "%s.tmp", sz_path);
     FILE *p_file = fopen(sz_temp, "wb");
     if (!p_file) return false;
-    bool is_written = fwrite(p_data, 1, cb_data, p_file) == cb_data && !fflush(p_file) && !fsync(fileno(p_file));
+    bool is_written = fwrite(p_data, 1, cb_data, p_file) == cb_data && !fflush(p_file) && !ps_host_fs_sync(fileno(p_file));
     is_written = !fclose(p_file) && is_written;
-    if (!is_written || rename(sz_temp, sz_path)) {
-        unlink(sz_temp);
+    if (!is_written || ps_host_fs_rename(sz_temp, sz_path)) {
+        ps_host_fs_remove(sz_temp);
         return false;
     }
     return true;
@@ -312,7 +311,7 @@ static void register_pack(TrophyContext *p_context) {
     snprintf(sz_pack_guest, sizeof(sz_pack_guest), "/app0/sce_sys/trophy/trophy%02u.trp", p_context->label);
     const char *sz_configuration = "missing";
     TrophyPack *p_pack = malloc(sizeof(*p_pack));
-    if (p_pack && !runtime_file_translate(sz_pack_guest, sz_pack_host, sizeof(sz_pack_host)) && !access(sz_pack_host, R_OK) &&
+    if (p_pack && !runtime_file_translate(sz_pack_guest, sz_pack_host, sizeof(sz_pack_host)) && !ps_host_fs_access(sz_pack_host, PS_HOST_ACCESS_READ) &&
         trophy_pack_open(sz_pack_host, runtime_system_language(), p_pack)) {
         p_context->p_pack = p_pack;
         sz_configuration = p_pack->has_config ? "plain" : p_pack->sz_encrypted_file[0] ? "encrypted" : "invalid";
@@ -336,8 +335,10 @@ static void register_pack(TrophyContext *p_context) {
     char sz_trophy_root[600];
     snprintf(sz_trophy_root, sizeof(sz_trophy_root), "%s/trophy", runtime_file_user_dir());
     snprintf(p_context->sz_state_dir, sizeof(p_context->sz_state_dir), "%s/%s", sz_trophy_root, p_context->sz_np_comm_id);
-    if ((mkdir(sz_trophy_root, 0755) && errno != EEXIST) || (mkdir(p_context->sz_state_dir, 0755) && errno != EEXIST))
-        printf("Runtime: NpTrophy: could not create %s: %s; unlocks are not kept\n", p_context->sz_state_dir, strerror(errno));
+    int error = ps_host_fs_make_dir(sz_trophy_root, 0755);
+    if (!error || error == EEXIST) error = ps_host_fs_make_dir(p_context->sz_state_dir, 0755);
+    if (error && error != EEXIST)
+        printf("Runtime: NpTrophy: could not create %s: %s; unlocks are not kept\n", p_context->sz_state_dir, strerror(error));
     const uint32_t c_unlocked = load_state(p_context);
     save_trophy_set(p_context, sz_pack_guest, sz_configuration);
     printf("Runtime: NpTrophy: context %d (user %d, service label %u) registered: NP communication id %s, %u trophies, %u groups, %s; %u unlocked (%s)\n",

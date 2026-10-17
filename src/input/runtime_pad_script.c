@@ -8,7 +8,6 @@
 #include <string.h>
 #include <time.h>
 #include <SDL3/SDL.h>
-#include <sys/stat.h>
 
 static uint64_t now_us(void) { return ps_host_time_monotonic_ns()/1000u; }
 /* PS_PAD_FILE=<file>: scripted input for automated runs. The file holds whitespace-separated
@@ -27,10 +26,10 @@ void runtime_pad_read_inject(void) {
     uint64_t now=now_us();
     if (now-s_last_check<20000) return;
     s_last_check=now;
-    struct stat st;
-    if (stat(s_sz_path,&st)!=0) return;
-    if (st.st_mtim.tv_sec==s_mtime.tv_sec && st.st_mtim.tv_nsec==s_mtime.tv_nsec) return;
-    s_mtime=st.st_mtim;
+    PsHostStat st;
+    if (ps_host_fs_stat(s_sz_path,&st)) return;
+    if (st.mtime.tv_sec==s_mtime.tv_sec && st.mtime.tv_nsec==s_mtime.tv_nsec) return;
+    s_mtime=st.mtime;
     FILE *p_file=fopen(s_sz_path,"r");
     if (!p_file) return;
     static const struct { const char *sz_name; uint32_t ps; } s_names[]={

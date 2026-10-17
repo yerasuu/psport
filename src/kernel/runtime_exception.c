@@ -136,7 +136,7 @@ static void deliver(int sig, siginfo_t *p_info, void *p_raw) {
     if (!atomic_fetch_add(&s_c_delivered,1)) {
         static const char s_sz_first[]="Runtime: first guest exception delivered to its handler\n";
         /* write, not stdio: this runs in a signal handler. */
-        ssize_t written=write(2,s_sz_first,sizeof(s_sz_first)-1); (void)written;
+        (void)ps_host_fs_write(2,s_sz_first,sizeof(s_sz_first)-1);
     }
     s_delivery=(Delivery){1,host_errno,guest_errno};
     pfn_handler(GUEST_SIGUSR1,&context);
@@ -182,7 +182,7 @@ static ABI int32_t raise_exception(void *p_thread, int sig) {
         /* write, not stdio: the thread may stop in the handler while it holds stdout's lock. */
         char sz_line[96];
         int cb_line=snprintf(sz_line,sizeof(sz_line),"Runtime: first guest exception raised (signal %d) to thread %p\n",sig,p_thread);
-        ssize_t written=write(2,sz_line,(size_t)cb_line); (void)written;
+        (void)ps_host_fs_write(2,sz_line,(size_t)cb_line);
     }
     return result;
 }

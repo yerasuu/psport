@@ -8,13 +8,11 @@
 #include <string.h>
 #ifndef _WIN32
 #include <errno.h>
-#include <fcntl.h>
 #include <poll.h>
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
-#include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/uio.h>
 
@@ -61,7 +59,7 @@ static int64_t posix(int64_t result) {
     *runtime_errno()=(int32_t)-result;
     return -1;
 }
-static int64_t host_failure(void) { return -runtime_guest_errno(errno); }
+static int64_t host_failure(void) { return -runtime_guest_errno(ps_host_net_error()); }
 /* Sockets live in the runtime's file table (runtime_file.c), as on the console where a socket is a
  * kernel descriptor like a file; 0-2 are the host's stdio, never a socket. */
 static int host_socket(int32_t h_socket) { return h_socket<3 ? -1 : runtime_file_host(h_socket); }
@@ -69,7 +67,7 @@ static int64_t adopt(int h_host) {
     if (h_host<0) return host_failure();
     int h_socket=runtime_file_adopt(h_host);
     if (h_socket<0) {
-        close(h_host);
+        ps_host_net_close(h_host);
         return -GUEST_EMFILE;
     }
     return h_socket;
@@ -95,6 +93,8 @@ static int64_t do_socket(int family, int type, int protocol) {
     /* The P2P types (6 datagram, 10 stream) carry a virtual port the loopback path has no use for. */
     int host_type=type==1 || type==10 ? SOCK_STREAM : type==2 || type==6 ? SOCK_DGRAM : -1;
     if (host_type<0) return -GUEST_EPROTONOSUPPORT;
+    int e=ps_host_net_init();
+    if (e) return -runtime_guest_errno(e);
     return adopt(socket(AF_INET,host_type|host_flags,protocol));
 }
 static int64_t do_close(int32_t s) {
@@ -246,8 +246,8 @@ static int64_t do_setsockopt(int32_t s, int level, int option, const void *p_val
         if (!p_value || len<4) return -GUEST_EINVAL;
         int nbio;
         memcpy(&nbio,p_value,sizeof(nbio));
-        int f=fcntl(h,F_GETFL);
-        return f<0 || fcntl(h,F_SETFL,nbio ? f|O_NONBLOCK : f&~O_NONBLOCK) ? host_failure() : 0;
+        int e=ps_host_net_set_nonblocking(h,nbio);
+        return e ? -runtime_guest_errno(e) : 0;
     }
     int host_level, host=host_option(level,option,&host_level);
     if (!host) {
@@ -369,11 +369,6 @@ typedef struct {
     int32_t state, flags, reserved[8];
 } GuestSockInfo;
 _Static_assert(sizeof(GuestSockInfo)==108,"SceNetSockInfo layout");
-/* Linux's TCP states (1 ESTABLISHED .. 11 CLOSING) to FreeBSD's (0 CLOSED .. 10 TIME_WAIT). */
-static int32_t guest_tcp_state(uint8_t state) {
-    static const int8_t s_states[12]={0,4,2,3,6,9,10,0,5,8,1,7};
-    return state<12 ? s_states[state] : 0;
-}
 static int describe_socket(int32_t h_socket, GuestSockInfo *p_out_info) {
     int h_host=host_socket(h_socket), type;
     socklen_t cb_type=sizeof(type);
@@ -381,9 +376,7 @@ static int describe_socket(int32_t h_socket, GuestSockInfo *p_out_info) {
     memset(p_out_info,0,sizeof(*p_out_info));
     p_out_info->h_socket=h_socket;
     p_out_info->socket_type=type==SOCK_STREAM ? 1 : 2;
-    int cb_queued=0;
-    if (!ioctl(h_host,FIONREAD,&cb_queued)) p_out_info->cb_recv_queue=cb_queued;
-    if (!ioctl(h_host,TIOCOUTQ,&cb_queued)) p_out_info->cb_send_queue=cb_queued;
+    ps_host_net_queued(h_host,&p_out_info->cb_recv_queue,&p_out_info->cb_send_queue);
     struct sockaddr_in address;
     socklen_t cb_address=sizeof(address);
     if (!getsockname(h_host,(struct sockaddr *)&address,&cb_address)) {
@@ -395,9 +388,7 @@ static int describe_socket(int32_t h_socket, GuestSockInfo *p_out_info) {
         p_out_info->remote_address=address.sin_addr.s_addr;
         p_out_info->remote_port=address.sin_port;
     }
-    struct tcp_info tcp;
-    socklen_t cb_tcp=sizeof(tcp);
-    if (type==SOCK_STREAM && !getsockopt(h_host,IPPROTO_TCP,TCP_INFO,&tcp,&cb_tcp)) p_out_info->state=guest_tcp_state(tcp.tcpi_state);
+    if (type==SOCK_STREAM) p_out_info->state=(int32_t)ps_host_net_tcp_state(h_host);
     return 1;
 }
 /* One socket, or every socket with h_socket -1; returns how many entries were written. */

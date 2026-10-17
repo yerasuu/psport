@@ -126,10 +126,10 @@ static ABI int32_t display_safe_area(float *p_ratio) {
  * itself again on it (runtime_load_exec), so this returns only when that failed. */
 static ABI int32_t load_exec(const char *sz_path, char *const *pp_arguments) {
     char sz_guest[1024], sz_host[4096];
-    struct stat info;
+    PsHostStat info;
     if (sz_path) snprintf(sz_guest,sizeof(sz_guest),sz_path[0]=='/' ? "%s" : "/app0/%s",sz_path);
     if (!sz_path || strncmp(sz_guest,"/app0/",6) || runtime_file_translate(sz_guest,sz_host,sizeof(sz_host)) ||
-        stat(sz_host,&info) || !S_ISREG(info.st_mode)) {
+        ps_host_fs_stat(sz_host,&info) || !PS_HOST_MODE_IS_REGULAR(info.mode)) {
         printf("Runtime: sceSystemServiceLoadExec: %s is no executable of the package\n",sz_path ? sz_path : "(null)");
         return SYSTEM_PARAMETER;
     }

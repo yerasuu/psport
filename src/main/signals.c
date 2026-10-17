@@ -23,6 +23,15 @@ static void shutdown_signal(int sig) {
 #endif
 #ifndef _WIN32
 static void dump_frames(ucontext_t *p_ucontext);
+typedef struct { uintptr_t va; int is_found; } MappingSearch;
+static int write_mapping_of(const PsHostMapping *p_mapping, void *p_context) {
+    MappingSearch *p_search = p_context;
+    if (p_search->va < p_mapping->va_begin || p_search->va >= p_mapping->va_end) return 0;
+    (void)ps_host_fs_write(2, p_mapping->sz_description, strlen(p_mapping->sz_description));
+    (void)ps_host_fs_write(2, "\n", 1);
+    p_search->is_found = 1;
+    return 1;
+}
 static void fault(int sig, siginfo_t *p_info, void *p_context) {
     /* GPU page tracking (write-protected guest pages) is resolved first. */
     if (g_is_gpu_enabled && sig == SIGSEGV && psport_gpu_handle_fault(p_context, p_info->si_addr)) return;
@@ -46,7 +55,7 @@ static void fault(int sig, siginfo_t *p_info, void *p_context) {
                  (unsigned long)(rip - where.va_base), where.sz_symbol ? where.sz_symbol : "?", p_info->si_addr);
     else
         snprintf(sz_line, sizeof(sz_line), "Fault (signal %d) at RIP %p, address %p\n", sig, (void *)rip, p_info->si_addr);
-    { ssize_t written_=write(2, sz_line, strlen(sz_line)); (void)written_; }
+    (void)ps_host_fs_write(2, sz_line, strlen(sz_line));
     if (g_is_gpu_enabled) psport_gpu_dump_guest_writes(p_context);
     /* Guest code keeps frame pointers: its call chain says which caller handed over the bad
      * value, where the host backtrace below stops at the first guest frame. */
@@ -59,30 +68,21 @@ static void fault(int sig, siginfo_t *p_info, void *p_context) {
         if (process_vm_readv(getpid(), &local, 1, &remote, 1, 0) == (ssize_t)sizeof(caller) &&
             caller - (uintptr_t)g_p_image < 0x10000000) {
             snprintf(sz_line, sizeof(sz_line), "  called from guest offset 0x%lx\n", (unsigned long)(caller - (uintptr_t)g_p_image));
-            { ssize_t written_=write(2, sz_line, strlen(sz_line)); (void)written_; }
+            (void)ps_host_fs_write(2, sz_line, strlen(sz_line));
             p_ucontext->uc_mcontext.gregs[REG_RIP] = (greg_t)caller;
             dump_frames(p_ucontext);
         }
     }
     /* Outside the image and any shared object (generated code, a freed mapping): the mapping
-     * from /proc/self/maps, and the thread. */
+     * the host lists, and the thread. */
     if (rip - (uintptr_t)g_p_image >= 0x10000000 && !(ps_host_dl_address((void *)rip, &where) && where.sz_file)) {
         char sz_thread[32] = "?";
         pthread_getname_np(pthread_self(), sz_thread, sizeof(sz_thread));
         snprintf(sz_line, sizeof(sz_line), "  thread %s; mapping of RIP: ", sz_thread);
-        { ssize_t written_=write(2, sz_line, strlen(sz_line)); (void)written_; }
-        FILE *p_maps = fopen("/proc/self/maps", "r");
-        int is_found = 0;
-        while (p_maps && fgets(sz_line, sizeof(sz_line), p_maps)) {
-            unsigned long from, to;
-            if (sscanf(sz_line, "%lx-%lx", &from, &to) == 2 && rip >= from && rip < to) {
-                ssize_t written_=write(2, sz_line, strlen(sz_line)); (void)written_;
-                is_found = 1;
-                break;
-            }
-        }
-        if (p_maps) fclose(p_maps);
-        if (!is_found) { ssize_t written_=write(2, "none\n", 5); (void)written_; }
+        (void)ps_host_fs_write(2, sz_line, strlen(sz_line));
+        MappingSearch search = {rip, 0};
+        ps_host_list_mappings(write_mapping_of, &search);
+        if (!search.is_found) (void)ps_host_fs_write(2, "none\n", 5);
     }
     /* Host call chain (frames with unwind info; guest frames end it). */
     void *frames[32];
@@ -93,7 +93,7 @@ static void fault(int sig, siginfo_t *p_info, void *p_context) {
                      (unsigned long)((uintptr_t)frames[i] - where.va_base), where.sz_symbol ? where.sz_symbol : "?");
         else
             snprintf(sz_line, sizeof(sz_line), "  #%d %p\n", i, frames[i]);
-        ssize_t written_=write(2, sz_line, strlen(sz_line)); (void)written_;
+        (void)ps_host_fs_write(2, sz_line, strlen(sz_line));
     }
     if (g_is_gpu_enabled) psport_gpu_flush_caches(0);
     runtime_calls_report();
@@ -114,10 +114,10 @@ static void dump_frames(ucontext_t *p_ucontext) {
     /* First argument register: the lock address when a thread waits on a futex. */
     char sz_arg[]="  tid=0000000000000000 rdi=0000000000000000\n";
     write_hex(sz_arg+6,tid); write_hex(sz_arg+27,(uint64_t)p_ucontext->uc_mcontext.gregs[REG_RDI]);
-    { ssize_t written_=write(2,sz_arg,sizeof(sz_arg)-1); (void)written_; }
+    (void)ps_host_fs_write(2, sz_arg,sizeof(sz_arg)-1);
     for (int depth=0; depth<24; ++depth) {
         write_hex(sz_line+6,tid); write_hex(sz_line+27,rip); write_hex(sz_line+59,rip-(uintptr_t)g_p_image); write_hex(sz_line+90,rip-s_exe_base);
-        { ssize_t written_=write(2,sz_line,sizeof(sz_line)-1); (void)written_; }
+        (void)ps_host_fs_write(2, sz_line,sizeof(sz_line)-1);
         uintptr_t frame[2];
         struct iovec local={frame,sizeof(frame)}, remote={(void *)rbp,sizeof(frame)};
         if (!rbp || process_vm_readv(getpid(),&local,1,&remote,1,0)!=(ssize_t)sizeof(frame)) break;
@@ -134,7 +134,7 @@ static void dump_other_thread(const char *sz_tid, void *p_context) {
 static void watchdog(int sig, siginfo_t *p_info, void *p_context) {
     (void)p_info;
     const char sz_head[]="STOP: watchdog timeout; thread stacks:\n";
-    { ssize_t written_=write(2,sz_head,sizeof(sz_head)-1); (void)written_; }
+    (void)ps_host_fs_write(2, sz_head,sizeof(sz_head)-1);
     dump_frames(p_context);
     ps_host_list_dir("/proc/self/task",dump_other_thread,NULL);
     ps_host_time_sleep_ns(100000000,NULL);

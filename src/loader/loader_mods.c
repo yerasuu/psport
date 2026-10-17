@@ -8,7 +8,6 @@
 #include "runtime_json_print.h"
 #include "loader.h"
 #include "ps_host.h"
-#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <ftw.h>
@@ -38,7 +37,7 @@ static Names s_game_folders;
 
 static int remove_entry(const char *sz_path, const struct stat *p_stat, int type, struct FTW *p_ftw) {
     (void)p_stat; (void)p_ftw;
-    return type == FTW_DP ? rmdir(sz_path) : unlink(sz_path);
+    return type == FTW_DP ? ps_host_fs_remove_dir(sz_path) : ps_host_fs_remove(sz_path);
 }
 static void remove_tree(const char *sz_path) {
     nftw(sz_path, remove_entry, 16, FTW_DEPTH | FTW_PHYS);
@@ -61,20 +60,20 @@ static void join_path(char *sz_out, const char *sz_folder, const char *sz_name) 
         mods_fail("path too long: %s/%s", sz_folder, sz_name);
 }
 static int is_dir(const char *sz_path) {
-    struct stat st;
-    return !stat(sz_path, &st) && S_ISDIR(st.st_mode);
+    PsHostStat st;
+    return !ps_host_fs_stat(sz_path, &st) && PS_HOST_MODE_IS_DIRECTORY(st.mode);
 }
 static int is_file(const char *sz_path) {
-    struct stat st;
-    return !stat(sz_path, &st) && S_ISREG(st.st_mode);
+    PsHostStat st;
+    return !ps_host_fs_stat(sz_path, &st) && PS_HOST_MODE_IS_REGULAR(st.mode);
 }
 static int is_symlink(const char *sz_path) {
-    struct stat st;
-    return !lstat(sz_path, &st) && S_ISLNK(st.st_mode);
+    PsHostStat st;
+    return !ps_host_fs_stat_link(sz_path, &st) && PS_HOST_MODE_IS_LINK(st.mode);
 }
 static int exists(const char *sz_path) {
-    struct stat st;
-    return !stat(sz_path, &st);
+    PsHostStat st;
+    return !ps_host_fs_stat(sz_path, &st);
 }
 static const char *base_name(const char *sz_path) {
     const char *p_slash = strrchr(sz_path, '/');
@@ -101,11 +100,11 @@ static void names_free(Names *p_names) {
 }
 /* Entries in the directory's own order, as the first match ignoring case depends on it. */
 static void list_dir(const char *sz_folder, Names *p_out) {
-    DIR *p_dir = opendir(sz_folder);
+    PsHostDir *p_dir = ps_host_dir_open(sz_folder);
     if (!p_dir) return;
-    for (struct dirent *p_entry; (p_entry = readdir(p_dir));)
-        if (strcmp(p_entry->d_name, ".") && strcmp(p_entry->d_name, "..")) names_add(p_out, p_entry->d_name);
-    closedir(p_dir);
+    for (PsHostDirEntry entry; ps_host_dir_next(p_dir, &entry);)
+        if (strcmp(entry.sz_name, ".") && strcmp(entry.sz_name, "..")) names_add(p_out, entry.sz_name);
+    ps_host_dir_close(p_dir);
 }
 static int compare_folded(const void *p_a, const void *p_b) {
     const char *sz_a = *(char *const *)p_a, *sz_b = *(char *const *)p_b;
@@ -119,16 +118,16 @@ static int compare_bytes(const void *p_a, const void *p_b) {
 /* sz_name inside sz_folder, matching an existing entry ignoring case (mods made on Windows often
  * differ from the game's lower-case names); sz_folder/sz_name when none does. */
 static void child(const char *sz_folder, const char *sz_name, char *sz_out) {
-    DIR *p_dir = opendir(sz_folder);
+    PsHostDir *p_dir = ps_host_dir_open(sz_folder);
     if (p_dir) {
-        for (struct dirent *p_entry; (p_entry = readdir(p_dir));) {
-            if (!strcmp(p_entry->d_name, ".") || !strcmp(p_entry->d_name, "..") || strcasecmp(p_entry->d_name, sz_name))
+        for (PsHostDirEntry entry; ps_host_dir_next(p_dir, &entry);) {
+            if (!strcmp(entry.sz_name, ".") || !strcmp(entry.sz_name, "..") || strcasecmp(entry.sz_name, sz_name))
                 continue;
-            join_path(sz_out, sz_folder, p_entry->d_name);
-            closedir(p_dir);
+            join_path(sz_out, sz_folder, entry.sz_name);
+            ps_host_dir_close(p_dir);
             return;
         }
-        closedir(p_dir);
+        ps_host_dir_close(p_dir);
     }
     join_path(sz_out, sz_folder, sz_name);
 }
@@ -295,7 +294,8 @@ static void add_mod(Mods *p_mods, Names *p_owners, const char *sz_name, const ch
     const char *sz_prefix;
     if (!content_root(p_mods->p_options, sz_folder, sz_root, &sz_prefix))
         mods_fail("%s: expected dvdroot_ps4 (or chr/, parts/, ...) inside the mod folder", sz_folder);
-    if (!realpath(sz_root, sz_real)) mods_fail("%s: %s", sz_root, strerror(errno));
+    const int error = ps_host_fs_real_path(sz_root, sz_real, sizeof(sz_real));
+    if (error) mods_fail("%s: %s", sz_root, strerror(error));
     size_t first = p_mods->c_replacements, c_added = 0;
     walk(p_mods, sz_real, sz_prefix, &c_added);
     for (size_t i = first; i < p_mods->c_replacements; ++i) {
@@ -321,22 +321,27 @@ static void add_mod(Mods *p_mods, Names *p_owners, const char *sz_name, const ch
 static void expand(const char *sz_directory) {
     if (is_symlink(sz_directory)) {
         char sz_target[PATH_MAX];
-        if (!realpath(sz_directory, sz_target)) mods_fail("%s: %s", sz_directory, strerror(errno));
+        int error = ps_host_fs_real_path(sz_directory, sz_target, sizeof(sz_target));
+        if (error) mods_fail("%s: %s", sz_directory, strerror(error));
         if (!is_dir(sz_target)) mods_fail("File/directory conflict at %s", base_name(sz_directory));
-        if (unlink(sz_directory) || mkdir(sz_directory, 0777)) mods_fail("%s: %s", sz_directory, strerror(errno));
+        error = ps_host_fs_remove(sz_directory);
+        if (!error) error = ps_host_fs_make_dir(sz_directory, 0777);
+        if (error) mods_fail("%s: %s", sz_directory, strerror(error));
         Names entries = {0};
         list_dir(sz_target, &entries);
         for (size_t i = 0; i < entries.c_items; ++i) {
             char sz_from[PATH_MAX], sz_link[PATH_MAX];
             join_path(sz_from, sz_target, entries.pp_items[i]);
             join_path(sz_link, sz_directory, entries.pp_items[i]);
-            if (symlink(sz_from, sz_link)) mods_fail("%s: %s", sz_link, strerror(errno));
+            error = ps_host_fs_symlink(sz_from, sz_link);
+            if (error) mods_fail("%s: %s", sz_link, strerror(error));
         }
         names_free(&entries);
     } else if (exists(sz_directory) && !is_dir(sz_directory)) {
         mods_fail("File/directory conflict at %s", base_name(sz_directory));
-    } else if (mkdir(sz_directory, 0777) && errno != EEXIST) {
-        mods_fail("%s: %s", sz_directory, strerror(errno));
+    } else {
+        const int error = ps_host_fs_make_dir(sz_directory, 0777);
+        if (error && error != EEXIST) mods_fail("%s: %s", sz_directory, strerror(error));
     }
 }
 static int is_inside(const char *sz_path, const char *sz_folder) {
@@ -347,12 +352,15 @@ static void build_view(Mods *p_mods, const char *sz_game, const char *sz_out_dir
     char sz_out[PATH_MAX];
     if ((size_t)snprintf(sz_out, sizeof(sz_out), "%s", sz_out_dir) >= sizeof(sz_out)) mods_fail("path too long: %s", sz_out_dir);
     for (char *sz_cursor = sz_out + 1; *sz_cursor; ++sz_cursor)
-        if (*sz_cursor == '/') { *sz_cursor = 0; mkdir(sz_out, 0777); *sz_cursor = '/'; }
-    if (mkdir(sz_out, 0777) && errno != EEXIST) mods_fail("%s: %s", sz_out, strerror(errno));
+        if (*sz_cursor == '/') { *sz_cursor = 0; ps_host_fs_make_dir(sz_out, 0777); *sz_cursor = '/'; }
+    int error = ps_host_fs_make_dir(sz_out, 0777);
+    if (error && error != EEXIST) mods_fail("%s: %s", sz_out, strerror(error));
     char sz_template[PATH_MAX];
-    if (!realpath(sz_out, sz_template)) mods_fail("%s: %s", sz_out, strerror(errno));
+    error = ps_host_fs_real_path(sz_out, sz_template, sizeof(sz_template));
+    if (error) mods_fail("%s: %s", sz_out, strerror(error));
     strncat(sz_template, "/mod-game-XXXXXX", sizeof(sz_template) - strlen(sz_template) - 1);
-    if (!mkdtemp(sz_template)) mods_fail("%s: %s", sz_template, strerror(errno));
+    error = ps_host_fs_make_unique_dir(sz_template);
+    if (error) mods_fail("%s: %s", sz_template, strerror(error));
     snprintf(p_mods->sz_view, sizeof(p_mods->sz_view), "%s", sz_template);
     Names entries = {0};
     list_dir(sz_game, &entries);
@@ -360,7 +368,8 @@ static void build_view(Mods *p_mods, const char *sz_game, const char *sz_out_dir
         char sz_from[PATH_MAX], sz_link[PATH_MAX];
         join_path(sz_from, sz_game, entries.pp_items[i]);
         join_path(sz_link, p_mods->sz_view, entries.pp_items[i]);
-        if (symlink(sz_from, sz_link)) mods_fail("%s: %s", sz_link, strerror(errno));
+        error = ps_host_fs_symlink(sz_from, sz_link);
+        if (error) mods_fail("%s: %s", sz_link, strerror(error));
     }
     names_free(&entries);
     size_t c_replaced = 0, c_added = 0;
@@ -379,14 +388,16 @@ static void build_view(Mods *p_mods, const char *sz_game, const char *sz_out_dir
         child(sz_parent, sz_cursor, sz_destination);
         if (is_symlink(sz_destination)) {
             char sz_target[PATH_MAX];
-            c_replaced += realpath(sz_destination, sz_target) && is_inside(sz_target, sz_game);
-            if (unlink(sz_destination)) mods_fail("%s: %s", sz_destination, strerror(errno));
+            c_replaced += !ps_host_fs_real_path(sz_destination, sz_target, sizeof(sz_target)) && is_inside(sz_target, sz_game);
+            error = ps_host_fs_remove(sz_destination);
+            if (error) mods_fail("%s: %s", sz_destination, strerror(error));
         } else if (exists(sz_destination)) {
             mods_fail("File/directory conflict: %s", p_replacement->sz_relative);
         } else {
             ++c_added;
         }
-        if (symlink(p_replacement->sz_source, sz_destination)) mods_fail("%s: %s", sz_destination, strerror(errno));
+        error = ps_host_fs_symlink(p_replacement->sz_source, sz_destination);
+        if (error) mods_fail("%s: %s", sz_destination, strerror(error));
     }
     fprintf(stderr, "Mods: %zu game files replaced, %zu added\n", c_replaced, c_added);
 }
@@ -459,7 +470,8 @@ char *loader_mods_view(const char *sz_game, const LoaderModOptions *p_options) {
     trim_slashes(&options, sz_mods_dir);
     Mods mods = {.p_options = &options};
     s_p_failing = &mods;
-    if (!realpath(sz_game, sz_game_real)) mods_fail("%s: %s", sz_game, strerror(errno));
+    const int error = ps_host_fs_real_path(sz_game, sz_game_real, sizeof(sz_game_real));
+    if (error) mods_fail("%s: %s", sz_game, strerror(error));
     find_game_folders(sz_game_real);
     Names owners = {0};
     /* shadPS4's convention: a loose overlay beside the game folder, <game>-mods. */

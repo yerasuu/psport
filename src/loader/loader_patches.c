@@ -7,7 +7,6 @@
 #include "runtime_json_print.h"
 #include "loader.h"
 #include "loader_xml.h"
-#include <dirent.h>
 #include <limits.h>
 #include <math.h>
 #include <stdarg.h>
@@ -15,7 +14,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
-#include <sys/stat.h>
 
 #define EBOOT_BASE 0x400000
 
@@ -319,23 +317,23 @@ static int has_suffix(const char *sz_name, const char *sz_suffix) {
     return cb_name >= cb_suffix && !strcmp(sz_name + cb_name - cb_suffix, sz_suffix);
 }
 static void find_externals(const LoaderPatchFolder *p_folder, Externals *p_out) {
-    DIR *p_dir = opendir(p_folder->sz_dir);
+    PsHostDir *p_dir = ps_host_dir_open(p_folder->sz_dir);
     if (!p_dir) return;
     char **pp_files = NULL;
     size_t c_files = 0;
-    for (struct dirent *p_entry; (p_entry = readdir(p_dir));) {
-        if (!has_suffix(p_entry->d_name, ".xml")) continue;
+    for (PsHostDirEntry entry; ps_host_dir_next(p_dir, &entry);) {
+        if (!has_suffix(entry.sz_name, ".xml")) continue;
         pp_files = realloc(pp_files, (c_files + 1) * sizeof(*pp_files));
-        if (!pp_files || !(pp_files[c_files++] = strdup(p_entry->d_name))) loader_fail("allocation failed");
+        if (!pp_files || !(pp_files[c_files++] = strdup(entry.sz_name))) loader_fail("allocation failed");
     }
-    closedir(p_dir);
+    ps_host_dir_close(p_dir);
     if (c_files) qsort(pp_files, c_files, sizeof(*pp_files), compare_names);
     char sz_excluded[PATH_MAX] = "";
-    if (p_folder->sz_excluded && !realpath(p_folder->sz_excluded, sz_excluded)) sz_excluded[0] = 0;
+    if (p_folder->sz_excluded && ps_host_fs_real_path(p_folder->sz_excluded, sz_excluded, sizeof(sz_excluded))) sz_excluded[0] = 0;
     for (size_t f = 0; f < c_files; ++f) {
         char sz_path[PATH_MAX], sz_real[PATH_MAX], sz_error[256];
         snprintf(sz_path, sizeof(sz_path), "%s/%s", p_folder->sz_dir, pp_files[f]);
-        if (sz_excluded[0] && realpath(sz_path, sz_real) && !strcmp(sz_real, sz_excluded)) continue;
+        if (sz_excluded[0] && !ps_host_fs_real_path(sz_path, sz_real, sizeof(sz_real)) && !strcmp(sz_real, sz_excluded)) continue;
         XmlNode *p_root = read_xml(sz_path, sz_error, sizeof(sz_error));
         if (!p_root) {
             fprintf(stderr, "Patches: %s: %s\n", pp_files[f], sz_error);
@@ -392,8 +390,8 @@ void loader_patches_external(PsPatchList *p_list, const LoaderPatchFolder *p_fol
     Externals externals = {0};
     find_externals(p_folder, &externals);
     LoaderJsonList settings[2] = {{.sz_key = "enabled"}, {.sz_key = "disabled"}};
-    struct stat st;
-    if (sz_config && !stat(sz_config, &st) && S_ISREG(st.st_mode) && !loader_json_lists(sz_config, settings, 2)) {
+    PsHostStat st;
+    if (sz_config && !ps_host_fs_stat(sz_config, &st) && PS_HOST_MODE_IS_REGULAR(st.mode) && !loader_json_lists(sz_config, settings, 2)) {
         fprintf(stderr, "ERROR: Patches: %s is not a JSON object\n", sz_config);
         exit(1);
     }

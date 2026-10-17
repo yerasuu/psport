@@ -245,7 +245,7 @@ a file.
 What psport asks of the operating system goes through one small C ABI, `ps_host_*`
 (`src/platform/ps_host.h`, decision #540), with an implementation per OS in `src/platform/<os>/`
 (and, when they come, `gpu/platform/<os>/` for C++-only parts). Only Linux is implemented; a directory for another OS
-appears with its first code. Its groups: vm, fault, thread, tls, time, fs/path, proc, dl and rand,
+appears with its first code. Its groups: vm, fault, thread, tls, time, fs/path, proc, dl, rand and net,
 moved behind the ABI area by area without changing what Linux does. So far:
 
 | Group | Functions | Linux |
@@ -255,11 +255,19 @@ moved behind the ABI area by area without changing what Linux does. So far:
 | path | `ps_host_exe_path` | `/proc/self/exe` (`linux/host_system.c`) |
 | thread | `ps_host_thread_id`, `ps_host_thread_signal`, `ps_host_wait_on_address`, `ps_host_wake_address` | `gettid`, `tgkill`, `futex` (`FUTEX_WAIT_BITSET`, `FUTEX_WAKE`) (`linux/host_thread.c`) |
 | fs | `ps_host_list_dir` (no allocation: usable in a signal handler) | `getdents64` (`linux/host_process.c`) |
+| fs | `ps_host_fs_open`, `_close`, `_read`, `_pread`, `_write` (safe in signal handlers), `_pwrite`, `_seek`, `_sync`, `_truncate`, `_truncate_path`, `_stat`, `_stat_link`, `_stat_file` (`PsHostStat`, the Unix mode word), `_access`, `_make_dir`, `_make_unique_dir`, `_remove_dir`, `_remove`, `_rename`, `_symlink`, `_free_space`, `_real_path`, `_set_times`, `_set_times_file`, `_set_mode`, `_set_mode_file`, `_status`, `_set_status`, `_close_on_exec`, `_set_close_on_exec` (`PS_HOST_OPEN_*` flags; 0 or the host's errno, counts or minus it); `ps_host_dir_open`, `_next`, `_stat`, `_close` (`PsHostDirEntry`) | `open` (always `O_CLOEXEC`), `read`, `pread`, `write`, `lseek`, `fsync`, `ftruncate`, `stat`, `lstat`, `fstat`, `fstatat`, `mkdir`, `mkdtemp`, `rename`, `symlink`, `statvfs`, `realpath`, `utimes`, `fcntl`, `opendir`/`readdir` (`linux/host_file.c`) |
+| vm | `ps_host_list_mappings` (`PsHostMapping`; no allocation: usable in a fault handler) | `/proc/self/maps` read with `read` (`linux/host_memory.c`) |
+| net | `ps_host_net_init`, `ps_host_net_close`, `ps_host_net_error`, `ps_host_net_set_nonblocking`, `ps_host_net_queued`, `ps_host_net_tcp_state` (`PsHostTcpState`, FreeBSD's order); the rest are the BSD socket calls | `close`, `errno`, `fcntl`, `ioctl(FIONREAD, TIOCOUTQ)`, `TCP_INFO` (`linux/host_net.c`) |
 | proc | `ps_host_close_from`, `ps_host_exec`, `ps_host_exec_self` | `close_range`, `execvp`, `execv("/proc/self/exe")` (`linux/host_process.c`) |
 | dl | `ps_host_dl_open`, `ps_host_dl_sym`, `ps_host_dl_address` (`PsHostCodeAddress`: file, symbol, their addresses) | `dlopen(RTLD_NOW \| RTLD_LOCAL)`, `dlsym`, `dladdr` (`linux/host_library.c`) |
 
-Faults, guest memory, guest TLS (`arch_prctl`), the mod view's cleaner process (`fork` in
-`loader_mods.c`) and RenderDoc's `dlopen(RTLD_NOLOAD)` stay where they are until their own steps.
+Faults, guest memory (its memfd in `runtime_memory.c`), guest TLS (`arch_prctl`), the mod view's
+cleaner process (`fork`, `pipe2`, `dup2` in `loader_mods.c`) and RenderDoc's `dlopen(RTLD_NOLOAD)`
+stay where they are until their own steps. The guest's mounts, case-insensitive lookups, save
+commits and FreeBSD flags, modes and errors stay in `runtime_file.c` and `runtime_socket.c`, which
+reach the host only through `ps_host_fs_*` and `ps_host_net_*`; files read whole go through stdio,
+tree walks through `nftw`, and the socket calls themselves (`socket`, `accept4`, `ppoll`, ...) stay
+the BSD ones.
 The environment is read through `runtime_env`, `runtime_env_int` and `runtime_env_flag`
 (`runtime_config.c`), except in `runtime_quirks.c`, which `psport-gpu-capabilities` links without
 them.

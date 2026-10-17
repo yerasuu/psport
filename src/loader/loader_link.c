@@ -13,11 +13,9 @@
 #define _GNU_SOURCE
 #include "loader.h"
 #include "loader_traits.h"
-#include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 
 #define PT_TLS 7
 #define PT_SCE_PROCPARAM 0x61000001
@@ -374,11 +372,11 @@ static int has_suffix(const char *sz_name, const char *sz_suffix) {
 }
 /* The directory's entries ending in suffix, by name. */
 static void glob_directory(const char *sz_directory, const char *sz_suffix, List *p_names) {
-    DIR *p_dir = opendir(sz_directory);
+    PsHostDir *p_dir = ps_host_dir_open(sz_directory);
     if (!p_dir) return;
-    for (struct dirent *p_entry; (p_entry = readdir(p_dir));)
-        if (strcmp(p_entry->d_name, ".") && strcmp(p_entry->d_name, "..") && has_suffix(p_entry->d_name, sz_suffix)) list_add(p_names, p_entry->d_name);
-    closedir(p_dir);
+    for (PsHostDirEntry entry; ps_host_dir_next(p_dir, &entry);)
+        if (strcmp(entry.sz_name, ".") && strcmp(entry.sz_name, "..") && has_suffix(entry.sz_name, sz_suffix)) list_add(p_names, entry.sz_name);
+    ps_host_dir_close(p_dir);
     qsort(p_names->pp_items, p_names->c_items, sizeof(*p_names->pp_items), compare_names);
 }
 /* Modules the game loads by path (any *.prx or *.sprx outside sce_module and sce_sys, such as
@@ -389,28 +387,28 @@ static void find_loadable(const char *sz_root, const char *sz_relative, List *p_
     char sz_path[4096];
     if (sz_relative[0]) join(sz_path, sizeof(sz_path), sz_root, sz_relative);
     else snprintf(sz_path, sizeof(sz_path), "%s", sz_root);
-    DIR *p_dir = opendir(sz_path);
+    PsHostDir *p_dir = ps_host_dir_open(sz_path);
     if (!p_dir) return;
-    for (struct dirent *p_entry; (p_entry = readdir(p_dir));) {
-        if (!strcmp(p_entry->d_name, ".") || !strcmp(p_entry->d_name, "..")) continue;
-        if (!sz_relative[0] && (!strcmp(p_entry->d_name, "sce_module") || !strcmp(p_entry->d_name, "sce_sys"))) continue;
+    for (PsHostDirEntry entry; ps_host_dir_next(p_dir, &entry);) {
+        if (!strcmp(entry.sz_name, ".") || !strcmp(entry.sz_name, "..")) continue;
+        if (!sz_relative[0] && (!strcmp(entry.sz_name, "sce_module") || !strcmp(entry.sz_name, "sce_sys"))) continue;
         char sz_child[4096], sz_full[4096];
-        if (sz_relative[0]) join(sz_child, sizeof(sz_child), sz_relative, p_entry->d_name);
-        else snprintf(sz_child, sizeof(sz_child), "%s", p_entry->d_name);
+        if (sz_relative[0]) join(sz_child, sizeof(sz_child), sz_relative, entry.sz_name);
+        else snprintf(sz_child, sizeof(sz_child), "%s", entry.sz_name);
         join(sz_full, sizeof(sz_full), sz_root, sz_child);
-        struct stat st;
-        if (stat(sz_full, &st)) continue;
-        if (S_ISDIR(st.st_mode)) {
+        PsHostStat st;
+        if (ps_host_fs_stat(sz_full, &st)) continue;
+        if (PS_HOST_MODE_IS_DIRECTORY(st.mode)) {
             find_loadable(sz_root, sz_child, p_found, depth + 1);
             continue;
         }
         char sz_extension[8] = "";
-        const char *sz_dot = strrchr(p_entry->d_name, '.');
-        if (!S_ISREG(st.st_mode) || !sz_dot || sz_dot == p_entry->d_name || !sz_dot[1] || strlen(sz_dot) >= sizeof(sz_extension)) continue;
+        const char *sz_dot = strrchr(entry.sz_name, '.');
+        if (!PS_HOST_MODE_IS_REGULAR(st.mode) || !sz_dot || sz_dot == entry.sz_name || !sz_dot[1] || strlen(sz_dot) >= sizeof(sz_extension)) continue;
         for (size_t i = 0; sz_dot[i]; ++i) sz_extension[i] = (char)(sz_dot[i] >= 'A' && sz_dot[i] <= 'Z' ? sz_dot[i] + 32 : sz_dot[i]);
         if (!strcmp(sz_extension, ".prx") || !strcmp(sz_extension, ".sprx")) list_add(p_found, sz_child);
     }
-    closedir(p_dir);
+    ps_host_dir_close(p_dir);
 }
 
 static int linked_stem(const Linker *p_linker, const char *sz_library) {
@@ -483,14 +481,14 @@ static void link_module(Linker *p_linker, const char *sz_filename, LoaderModule 
                         uint64_t *p_fs_patched) {
     int deferred = list_has(&p_linker->deferred, sz_filename), from_system = list_has(&p_linker->from_system, sz_filename);
     char sz_path[4096], sz_name[256];
-    struct stat st;
+    PsHostStat st;
     if (deferred) join(sz_path, sizeof(sz_path), p_linker->sz_game, sz_filename);
     else {
         char sz_directory[4096];
         join(sz_directory, sizeof(sz_directory), p_linker->sz_game, "sce_module");
         join(sz_path, sizeof(sz_path), sz_directory, sz_filename);
     }
-    if (stat(sz_path, &st) && from_system) {
+    if (ps_host_fs_stat(sz_path, &st) && from_system) {
         stem(sz_filename, sz_name, sizeof(sz_name));
         size_t s = 0;
         while (strcmp(p_linker->system_stems.pp_items[s], sz_name)) ++s;

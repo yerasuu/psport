@@ -13,7 +13,6 @@
 #include <pthread.h>
 #include <time.h>
 #ifndef _WIN32
-#include <dirent.h>
 #include <errno.h>
 #include <ftw.h>
 #include <sys/stat.h>
@@ -95,8 +94,9 @@ const char *runtime_savedata_title(void) { return s_sz_title_id; }
 static int make_dirs(const char *sz_path) {
     char sz_buffer[700];
     snprintf(sz_buffer,sizeof(sz_buffer),"%s",sz_path);
-    for (char *sz_cursor=sz_buffer+1;*sz_cursor;++sz_cursor) if (*sz_cursor=='/') { *sz_cursor=0; mkdir(sz_buffer,0755); *sz_cursor='/'; }
-    return mkdir(sz_buffer,0755) && errno!=EEXIST ? -1 : 0;
+    for (char *sz_cursor=sz_buffer+1;*sz_cursor;++sz_cursor) if (*sz_cursor=='/') { *sz_cursor=0; ps_host_fs_make_dir(sz_buffer,0755); *sz_cursor='/'; }
+    const int e=ps_host_fs_make_dir(sz_buffer,0755);
+    return e && e!=EEXIST ? -1 : 0;
 }
 static void root(int32_t user, const char *sz_title, char *sz_out, size_t cb_out) {
     snprintf(sz_out,cb_out,"%s/savedata/%d/%s",runtime_file_user_dir(),user,sz_title && *sz_title ? sz_title : s_sz_title_id);
@@ -112,9 +112,9 @@ static int write_atomic(const char *sz_path, const void *p_data, size_t cb_data)
     char sz_temp[760]; snprintf(sz_temp,sizeof(sz_temp),"%s.bbtmp",sz_path);
     FILE *p_file=fopen(sz_temp,"wb");
     if (!p_file) return -1;
-    int is_ok=fwrite(p_data,1,cb_data,p_file)==cb_data && !fflush(p_file) && !fsync(fileno(p_file));
+    int is_ok=fwrite(p_data,1,cb_data,p_file)==cb_data && !fflush(p_file) && !ps_host_fs_sync(fileno(p_file));
     is_ok=!fclose(p_file) && is_ok;
-    if (!is_ok || rename(sz_temp,sz_path)) { unlink(sz_temp); return -1; }
+    if (!is_ok || ps_host_fs_rename(sz_temp,sz_path)) { ps_host_fs_remove(sz_temp); return -1; }
     return 0;
 }
 static void write_param(const char *sz_meta, const Param *p_param) {
@@ -128,8 +128,8 @@ static int read_param(const char *sz_meta, Param *p_param) {
     FILE *p_file=fopen(sz_path,"rb");
     if (!p_file) return -1;
     size_t c_read=fread(p_param,sizeof(*p_param),1,p_file); fclose(p_file);
-    struct stat st;
-    if (!stat(sz_path,&st)) p_param->mtime=st.st_mtime;
+    PsHostStat st;
+    if (!ps_host_fs_stat(sz_path,&st)) p_param->mtime=st.mtime.tv_sec;
     return c_read==1 ? 0 : -1;
 }
 static int remove_entry(const char *sz_path, const struct stat *p_stat, int flag, struct FTW *p_ftw) {
@@ -150,8 +150,8 @@ static int32_t mount(int32_t user, const char *sz_title, const DirName *p_dir, u
     root(user,sz_title,sz_base,sizeof(sz_base));
     snprintf(sz_host,sizeof(sz_host),"%s/%s",sz_base,p_dir->data);
     snprintf(sz_meta,sizeof(sz_meta),"%s/%s.sce_sys",sz_base,p_dir->data);
-    struct stat st;
-    int exists=!stat(sz_host,&st) && S_ISDIR(st.st_mode);
+    PsHostStat st;
+    int exists=!ps_host_fs_stat(sz_host,&st) && PS_HOST_MODE_IS_DIRECTORY(st.mode);
     if ((mode & MODE_CREATE) && exists) return ERR_EXISTS;
     if (!(mode & (MODE_CREATE|MODE_CREATE2)) && !exists) return ERR_NOT_FOUND;
     pthread_mutex_lock(&s_lock);
@@ -322,8 +322,8 @@ static ABI int32_t save_delete(const Delete *p_delete) {
     root(p_delete->user,p_delete->p_title ? p_delete->p_title->data : NULL,sz_base,sizeof(sz_base));
     snprintf(sz_host,sizeof(sz_host),"%s/%s",sz_base,p_delete->p_dir->data);
     snprintf(sz_meta,sizeof(sz_meta),"%s/%s.sce_sys",sz_base,p_delete->p_dir->data);
-    struct stat st;
-    if (stat(sz_host,&st)) return ERR_NOT_FOUND;
+    PsHostStat st;
+    if (ps_host_fs_stat(sz_host,&st)) return ERR_NOT_FOUND;
     nftw(sz_host,remove_entry,16,FTW_DEPTH|FTW_PHYS);
     nftw(sz_meta,remove_entry,16,FTW_DEPTH|FTW_PHYS);
     printf("Runtime: save data '%s' deleted\n",p_delete->p_dir->data);
@@ -350,18 +350,18 @@ static ABI int32_t save_search(const SearchCond *p_cond, SearchResult *p_result)
     char sz_base[600];
     root(p_cond->user,p_cond->title ? p_cond->title->data : NULL,sz_base,sizeof(sz_base));
     Entry *p_entries=NULL; size_t c_entries=0, c_capacity=0;
-    DIR *p___dirstream=opendir(sz_base);
-    for (struct dirent *p_entry; p___dirstream && (p_entry=readdir(p___dirstream));) {
-        size_t cb_name=strlen(p_entry->d_name);
-        if (p_entry->d_name[0]=='.' || cb_name>=32 || (cb_name>8 && !strcmp(p_entry->d_name+cb_name-8,".sce_sys"))) continue;
-        if (p_cond->dir && p_cond->dir->data[0] && !like(p_entry->d_name,p_cond->dir->data)) continue;
+    PsHostDir *p_dir=ps_host_dir_open(sz_base);
+    for (PsHostDirEntry entry; p_dir && ps_host_dir_next(p_dir,&entry);) {
+        size_t cb_name=strlen(entry.sz_name);
+        if (entry.sz_name[0]=='.' || cb_name>=32 || (cb_name>8 && !strcmp(entry.sz_name+cb_name-8,".sce_sys"))) continue;
+        if (p_cond->dir && p_cond->dir->data[0] && !like(entry.sz_name,p_cond->dir->data)) continue;
         if (c_entries==c_capacity) { c_capacity=c_capacity ? c_capacity*2 : 16; p_entries=realloc(p_entries,c_capacity*sizeof(*p_entries)); }
-        snprintf(p_entries[c_entries].sz_name,32,"%s",p_entry->d_name);
-        char sz_meta[680]; snprintf(sz_meta,sizeof(sz_meta),"%s/%s.sce_sys",sz_base,p_entry->d_name);
+        snprintf(p_entries[c_entries].sz_name,32,"%s",entry.sz_name);
+        char sz_meta[680]; snprintf(sz_meta,sizeof(sz_meta),"%s/%s.sce_sys",sz_base,entry.sz_name);
         read_param(sz_meta,&p_entries[c_entries].param);
         ++c_entries;
     }
-    if (p___dirstream) closedir(p___dirstream);
+    if (p_dir) ps_host_dir_close(p_dir);
     s_sort_key=p_cond->key; s_sort_order=p_cond->order;
     if (c_entries) qsort(p_entries,c_entries,sizeof(*p_entries),compare);
     p_result->hits=(uint32_t)c_entries;
@@ -394,7 +394,7 @@ static int32_t memory_open(int32_t user, uint32_t slot, uint64_t cb_memory, uint
     if (p_file) {
         fseek(p_file,0,SEEK_END);
         old=(uint64_t)ftell(p_file);
-        if (old<cb_memory && ftruncate(fileno(p_file),(off_t)cb_memory)) goto done;
+        if (old<cb_memory && ps_host_fs_truncate(fileno(p_file),(int64_t)cb_memory)) goto done;
         *p_existed=old;
         snprintf(s_memories[slot].sz_dir,sizeof(s_memories[slot].sz_dir),"%s",sz_dir);
         s_memories[slot].cb_memory=cb_memory; r=0;
@@ -504,7 +504,7 @@ static int copy_entry(const char *sz_path, const struct stat *p_stat, int flag, 
     (void)p_stat; (void)p_ftw;
     char sz_target[1400];
     snprintf(sz_target,sizeof(sz_target),"%s%s",s_sz_copy_target,sz_path+strlen(s_sz_copy_source));
-    if (flag==FTW_D) return mkdir(sz_target,0755) && errno!=EEXIST ? -1 : 0;
+    if (flag==FTW_D) { const int e=ps_host_fs_make_dir(sz_target,0755); return e && e!=EEXIST ? -1 : 0; }
     if (flag!=FTW_F) return 0;
     FILE *p_in=fopen(sz_path,"rb"), *p_out=p_in ? fopen(sz_target,"wb") : NULL;
     int is_copied=p_out!=NULL;
@@ -528,7 +528,7 @@ static void save_paths(int32_t user, const TitleId *p_title, const char *sz_dir,
     snprintf(sz_out_host,640,"%s%s/%s",sz_base,is_backup ? "/.backup" : "",sz_dir);
     snprintf(sz_out_meta,680,"%s%s/%s.sce_sys",sz_base,is_backup ? "/.backup" : "",sz_dir);
 }
-static int is_folder(const char *sz_path) { struct stat st; return !stat(sz_path,&st) && S_ISDIR(st.st_mode); }
+static int is_folder(const char *sz_path) { PsHostStat st; return !ps_host_fs_stat(sz_path,&st) && PS_HOST_MODE_IS_DIRECTORY(st.mode); }
 static int32_t copy_save_locked(int32_t user, const TitleId *p_title, const char *sz_dir, int is_restore) {
     char sz_host[640], sz_meta[680], sz_backup_host[640], sz_backup_meta[680];
     save_paths(user,p_title,sz_dir,0,sz_host,sz_meta);
@@ -616,7 +616,7 @@ static ABI int32_t memory_sync(const MemorySync *p_sync) {
         char sz_path[700];
         snprintf(sz_path,sizeof(sz_path),"%s/memory.dat",s_memories[p_sync->slot].sz_dir);
         FILE *p_file=fopen(sz_path,"r+b");
-        result=p_file && !fsync(fileno(p_file)) ? 0 : ERR_INTERNAL;
+        result=p_file && !ps_host_fs_sync(fileno(p_file)) ? 0 : ERR_INTERNAL;
         if (p_file) fclose(p_file);
         if (!result) queue_event_locked(EVENT_MEMORY_SYNC,p_sync->user,NULL,NULL);
     }
@@ -644,11 +644,11 @@ static const RuntimeExport s_exports[]={
 uintptr_t runtime_savedata_resolve(const char *sz_name) { return RUNTIME_LOOKUP(s_exports,sz_name); }
 int runtime_savedata_param(int32_t user, const char *sz_title, const char *sz_dir, void *p_param) {
     char sz_base[600], sz_path[680];
-    struct stat st;
+    PsHostStat st;
     if (!valid_name(sz_dir,32)) return -1;
     root(user,sz_title,sz_base,sizeof(sz_base));
     snprintf(sz_path,sizeof(sz_path),"%s/%s",sz_base,sz_dir);
-    if (stat(sz_path,&st) || !S_ISDIR(st.st_mode)) return -1;
+    if (ps_host_fs_stat(sz_path,&st) || !PS_HOST_MODE_IS_DIRECTORY(st.mode)) return -1;
     snprintf(sz_path,sizeof(sz_path),"%s/%s.sce_sys",sz_base,sz_dir);
     read_param(sz_path,p_param);
     return 0;

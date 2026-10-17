@@ -7,12 +7,10 @@
 #include "ps_host.h"
 #include "gpu/psport_gpu.h"
 #include <inttypes.h>
-#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
-#include <unistd.h>
 
 enum { FAILURE_SLOTS = 4096, HLE_STUB_SLOTS = 1024, SUMMARY_SLOTS = 8 };
 static const char (*s_p_import_names)[128];
@@ -39,7 +37,7 @@ void runtime_calls_configure(const char (*p_names)[128], uint64_t c_names) {
 
 static void put(int h_fd, const char *sz_text) {
     for (size_t left = strlen(sz_text); left;) {
-        ssize_t written = write(h_fd, sz_text, left);
+        const int64_t written = ps_host_fs_write(h_fd, sz_text, left);
         if (written <= 0) return;
         sz_text += written; left -= (size_t)written;
     }
@@ -172,7 +170,7 @@ void runtime_calls_report(void) {
         }
     for (size_t i = 0; i < c_path; ++i) ++totals[s_p_entries[i].kind];
     const char *sz_path = runtime_env("PS_CALL_REPORT", NULL);
-    const int file = sz_path && *sz_path ? open(sz_path, O_WRONLY | O_CREAT | O_TRUNC, 0644) : -1;
+    const int file = sz_path && *sz_path ? ps_host_fs_open(sz_path, PS_HOST_OPEN_WRITE | PS_HOST_OPEN_CREATE | PS_HOST_OPEN_TRUNCATE, 0644) : -1;
     char sz_line[512];
     snprintf(sz_line, sizeof(sz_line),
              "Calls: summary: %zu unimplemented, %zu stub, %zu failed, %zu status (import and error code), "
@@ -185,7 +183,7 @@ void runtime_calls_report(void) {
         put(1, sz_line);
         if (file >= 0) put(file, sz_line);
     }
-    if (file >= 0) close(file);
+    if (file >= 0) ps_host_fs_close(file);
     psport_gpu_cp_census_report();
     psport_gpu_native_probe_report();
     put(1, runtime_quirks_summary());

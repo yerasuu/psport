@@ -185,7 +185,7 @@ void runtime_eventflag_created_report(void) {
     char sz_line[96];
     const int used=snprintf(sz_line,sizeof(sz_line),"Runtime: event flags created=%zu, deleted=%zu\n",
                             __atomic_load_n(&s_c_created,__ATOMIC_RELAXED),__atomic_load_n(&s_c_deleted,__ATOMIC_RELAXED));
-    if (used>0 && write(1,sz_line,(size_t)used)<0) return;
+    if (used>0 && ps_host_fs_write(1,sz_line,(size_t)used)<0) return;
 }
 #else
 uintptr_t runtime_eventflag_resolve(const char *name) { (void)name; return 0; }

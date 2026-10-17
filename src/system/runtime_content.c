@@ -5,15 +5,12 @@
 #define _GNU_SOURCE
 #endif
 #include "runtime.h"
-#include <dirent.h>
 #include <errno.h>
-#include <fcntl.h>
 #include <ftw.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-#include <sys/statvfs.h>
 #include <unistd.h>
 #define INVALID_ID ((int32_t)0x805a1000)
 #define NOT_LOADED ((int32_t)0x805a1001)
@@ -119,28 +116,27 @@ static ABI int32_t addon_list(uint32_t service,void *p_list,uint32_t c_capacity,
     uint32_t c_found=0;
     char sz_root[4096];
     snprintf(sz_root,sizeof(sz_root),"%s/addcont",runtime_file_user_dir());
-    DIR *p_titles=opendir(sz_root);
-    for (struct dirent *p_entry; p_titles && (p_entry=readdir(p_titles));) {
-        if (p_entry->d_name[0]=='.') continue;
-        int title=openat(dirfd(p_titles),p_entry->d_name,O_RDONLY|O_DIRECTORY);
-        DIR *p_labels=title>=0 ? fdopendir(title) : NULL;
-        if (!p_labels && title>=0) close(title);
-        for (struct dirent *p_label; p_labels && (p_label=readdir(p_labels));) {
-            struct stat entry;
-            size_t cb_label=strlen(p_label->d_name);
-            if (p_label->d_name[0]=='.' || cb_label>=LABEL_SIZE || fstatat(dirfd(p_labels),p_label->d_name,&entry,0) ||
-                !S_ISDIR(entry.st_mode) || (fill && c_found>=c_capacity)) continue;
+    PsHostDir *p_titles=ps_host_dir_open(sz_root);
+    for (PsHostDirEntry title; p_titles && ps_host_dir_next(p_titles,&title);) {
+        if (title.sz_name[0]=='.') continue;
+        char sz_title[4352];
+        PsHostDir *p_labels=(size_t)snprintf(sz_title,sizeof(sz_title),"%s/%s",sz_root,title.sz_name)<sizeof(sz_title) ? ps_host_dir_open(sz_title) : NULL;
+        for (PsHostDirEntry label; p_labels && ps_host_dir_next(p_labels,&label);) {
+            PsHostStat entry;
+            size_t cb_label=strlen(label.sz_name);
+            if (label.sz_name[0]=='.' || cb_label>=LABEL_SIZE || ps_host_dir_stat(p_labels,label.sz_name,&entry) ||
+                !PS_HOST_MODE_IS_DIRECTORY(entry.mode) || (fill && c_found>=c_capacity)) continue;
             if (fill) {
                 AddonInfo info;
-                memset(&info,'\0',sizeof(info)); memcpy(info.label,p_label->d_name,cb_label);
+                memset(&info,'\0',sizeof(info)); memcpy(info.label,label.sz_name,cb_label);
                 info.status=ADDON_INSTALLED;
                 memcpy((unsigned char *)p_list+(size_t)c_found*sizeof(info),&info,sizeof(info));
             }
             ++c_found;
         }
-        if (p_labels) closedir(p_labels);
+        if (p_labels) ps_host_dir_close(p_labels);
     }
-    if (p_titles) closedir(p_titles);
+    if (p_titles) ps_host_dir_close(p_titles);
     if (p_hits) *p_hits=c_found;
     if (c_found) printf("Runtime: AppContent add-ons reported installed (%s): %u\n",sz_root,(unsigned)c_found);
     ++s_c_lists; return 0;
@@ -151,15 +147,15 @@ static int find_addon_folder(const char *sz_label,char *sz_out_path,size_t cb_ou
     if (!sz_label || !memchr(sz_label,0,LABEL_SIZE) || !sz_label[0] || strchr(sz_label,'/') || sz_label[0]=='.') return -1;
     char sz_root[4096];
     snprintf(sz_root,sizeof(sz_root),"%s/addcont",runtime_file_user_dir());
-    DIR *p_titles=opendir(sz_root);
+    PsHostDir *p_titles=ps_host_dir_open(sz_root);
     int is_found=0;
-    for (struct dirent *p_title; p_titles && !is_found && (p_title=readdir(p_titles));) {
-        if (p_title->d_name[0]=='.') continue;
-        struct stat entry;
-        if (snprintf(sz_out_path,cb_out_path,"%s/%s/%s",sz_root,p_title->d_name,sz_label)>=(int)cb_out_path) continue;
-        is_found=!stat(sz_out_path,&entry) && S_ISDIR(entry.st_mode);
+    for (PsHostDirEntry title; p_titles && !is_found && ps_host_dir_next(p_titles,&title);) {
+        if (title.sz_name[0]=='.') continue;
+        PsHostStat entry;
+        if (snprintf(sz_out_path,cb_out_path,"%s/%s/%s",sz_root,title.sz_name,sz_label)>=(int)cb_out_path) continue;
+        is_found=!ps_host_fs_stat(sz_out_path,&entry) && PS_HOST_MODE_IS_DIRECTORY(entry.mode);
     }
-    if (p_titles) closedir(p_titles);
+    if (p_titles) ps_host_dir_close(p_titles);
     return is_found ? 0 : -1;
 }
 static ABI int32_t addon_info(uint32_t service,const char *sz_label,AddonInfo *p_out_info) {
@@ -221,9 +217,9 @@ static ABI int32_t download_space(const char *sz_mount,uint64_t *p_kb) {
     require_initialized();
     if (!sz_mount || !p_kb || !memchr(sz_mount,0,16)) return PARAMETER;
     char sz_host[4096];
-    struct statvfs fs;
-    if (runtime_file_translate(sz_mount,sz_host,sizeof(sz_host)) || statvfs(sz_host,&fs)) return PARAMETER;
-    *p_kb=(uint64_t)fs.f_bavail*fs.f_frsize/1024;
+    uint64_t cb_free;
+    if (runtime_file_translate(sz_mount,sz_host,sizeof(sz_host)) || ps_host_fs_free_space(sz_host,&cb_free)) return PARAMETER;
+    *p_kb=cb_free/1024;
     return 0;
 }
 /* Temporary data is /temp0, backed by <user>/temp/<title id> so titles sharing a user folder don't
@@ -248,8 +244,11 @@ static ABI int32_t temp_mount(uint32_t option,char *sz_mount) {
     temp_folder(sz_host,sizeof(sz_host));
     char sz_parent[4096];
     snprintf(sz_parent,sizeof(sz_parent),"%s/temp",runtime_file_user_dir());
-    if ((mkdir(sz_parent,0755) && errno!=EEXIST) || (mkdir(sz_host,0755) && errno!=EEXIST) || (option && temp_format())) {
-        fprintf(stderr,"Runtime: AppContent temporary data mount of %s failed: %s\n",sz_host,strerror(errno));
+    int error=ps_host_fs_make_dir(sz_parent,0755);
+    if (!error || error==EEXIST) error=ps_host_fs_make_dir(sz_host,0755);
+    if (error==EEXIST) error=0;
+    if (error || (option && temp_format())) {
+        fprintf(stderr,"Runtime: AppContent temporary data mount of %s failed: %s\n",sz_host,strerror(error ? error : errno));
         return PARAMETER;
     }
     if (runtime_file_mount(TEMP_MOUNT,sz_host)) {
@@ -281,10 +280,10 @@ static ABI int32_t temp_space(const char *sz_mount,uint64_t *p_kb) {
     if (!temp_point(sz_mount) || !p_kb) return PARAMETER;
     if (!s_c_temp_mounts) return NOT_MOUNTED;
     char sz_host[4096];
-    struct statvfs fs;
+    uint64_t cb_free;
     temp_folder(sz_host,sizeof(sz_host));
-    if (statvfs(sz_host,&fs)) return PARAMETER;
-    *p_kb=(uint64_t)fs.f_bavail*fs.f_frsize/1024;
+    if (ps_host_fs_free_space(sz_host,&cb_free)) return PARAMETER;
+    *p_kb=cb_free/1024;
     return 0;
 }
 static const RuntimeExport s_exports[]={

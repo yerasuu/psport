@@ -53,7 +53,8 @@ FEATURE(time, time, "clocks, sleeping and the time stamp counter")
 FEATURE_HOST(time, LINUX, IMPLEMENTED, "clock_gettime and nanosleep (src/platform/linux/host_time.c), rdtsc", "#540")
 
 FEATURE(files, fs, "the guest's file system on host folders: /app0, user data and savedata")
-FEATURE_HOST(files, LINUX, IMPLEMENTED, "POSIX files and folders (runtime_file.c)", "#540")
+FEATURE_HOST(files, LINUX, IMPLEMENTED,
+             "POSIX files and folders (src/platform/linux/host_file.c), the guest's mounts in runtime_file.c", "#540")
 
 FEATURE(processes, proc, "the process starting again on itself (restart, sceSystemServiceLoadExec) and the mod view's "
                          "cleaner process")
@@ -74,6 +75,12 @@ FEATURE_HOST(input, LINUX, IMPLEMENTED, "SDL3 (runtime_pad.c, runtime_keyboard.c
 
 FEATURE(window, io, "the game's window and its Vulkan surface")
 FEATURE_HOST(window, LINUX, IMPLEMENTED, "SDL3 (gpu/shim/window.cpp)", "#540")
+
+FEATURE(sockets, net, "the guest's sockets (libSceNet and the POSIX socket calls) on host sockets, loopback when offline")
+FEATURE_HOST(sockets, LINUX, IMPLEMENTED,
+             "BSD sockets (runtime_socket.c); close, errors, non-blocking mode, queue sizes and TCP state in "
+             "src/platform/linux/host_net.c",
+             "#540")
 
 FEATURE(online_module, net, "online play through libpsport-net.so, loaded on the first network import with PS_ONLINE=1")
 FEATURE_HOST(online_module, LINUX, IMPLEMENTED, "dlopen of gpu/libpsport-net.so when it was built (runtime_net.c)", "#540")

@@ -6,7 +6,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 
 typedef struct {
     const char *p_start, *p_cursor, *p_end;
@@ -346,15 +345,15 @@ void find_from(const XmlNode *p_root, const char *sz_name, NodeList *p_out) {
 }
 XmlNode *read_xml(const char *sz_path, char *sz_out_error, size_t cb_error) {
     FILE *p_file = fopen(sz_path, "rb");
-    struct stat st;
-    if (!p_file || fstat(fileno(p_file), &st) || !S_ISREG(st.st_mode)) {
+    PsHostStat st;
+    if (!p_file || ps_host_fs_stat_file(fileno(p_file), &st) || !PS_HOST_MODE_IS_REGULAR(st.mode)) {
         snprintf(sz_out_error, cb_error, "%s", p_file ? "not a regular file" : strerror(errno));
         if (p_file) fclose(p_file);
         return NULL;
     }
-    char *p_text = malloc((size_t)st.st_size + 1);
+    char *p_text = malloc((size_t)st.cb_size + 1);
     if (!p_text) loader_fail("allocation failed");
-    size_t cb_text = fread(p_text, 1, (size_t)st.st_size, p_file);
+    size_t cb_text = fread(p_text, 1, (size_t)st.cb_size, p_file);
     fclose(p_file);
     XmlNode *p_root = parse_xml(p_text, cb_text, sz_out_error, cb_error);
     free(p_text);

@@ -10,14 +10,9 @@
 #include <string.h>
 #include <strings.h>
 #ifndef _WIN32
-#include <dirent.h>
 #include <errno.h>
-#include <fcntl.h>
 #include <limits.h>
 #include <pthread.h>
-#include <unistd.h>
-#include <sys/stat.h>
-#include <sys/time.h>
 #define ERR(n) ((int32_t)(UINT32_C(0x80020000)|(n)))
 #define MAX_FILES 1024
 #define MAX_MOUNTS 16
@@ -38,7 +33,7 @@ _Static_assert(sizeof(GuestStat)==120,"FreeBSD stat layout");
 typedef struct { char *sz_names; size_t c_names, *p_offsets; unsigned char *p_types; } Listing;
 /* commit: a save file opened for writing is written to a temporary copy (temp), which replaces
  * the file (commit) in one rename when closed: a crash or a kill mid-save leaves the old file. */
-typedef struct { int used, host, is_dirty; Listing *p_dir; size_t position; char sz_path[512]; char *sz_commit, *sz_temp; } File;
+typedef struct { int used, host, is_dirty, is_socket; Listing *p_dir; size_t position; char sz_path[512]; char *sz_commit, *sz_temp; } File;
 typedef struct { char guest[64]; char host[512]; } Mount;
 static File s_files[MAX_FILES];
 static Mount s_mounts[MAX_MOUNTS];
@@ -56,22 +51,22 @@ static int temp_name(const char *sz_name) {
 }
 /* Copies left by a crash (none of them open): removed when their directory is mounted. */
 static void remove_stale_temps(const char *sz_dir,int depth) {
-    DIR *p___dirstream=opendir(sz_dir);
-    if (!p___dirstream) return;
-    for (struct dirent *p_entry; (p_entry=readdir(p___dirstream));) {
-        if (p_entry->d_name[0]=='.') continue;
+    PsHostDir *p_dir=ps_host_dir_open(sz_dir);
+    if (!p_dir) return;
+    for (PsHostDirEntry entry; ps_host_dir_next(p_dir,&entry);) {
+        if (entry.sz_name[0]=='.') continue;
         char sz_path[1024];
-        if ((size_t)snprintf(sz_path,sizeof(sz_path),"%s/%s",sz_dir,p_entry->d_name)>=sizeof(sz_path)) continue;
-        if (temp_name(p_entry->d_name)) {
+        if ((size_t)snprintf(sz_path,sizeof(sz_path),"%s/%s",sz_dir,entry.sz_name)>=sizeof(sz_path)) continue;
+        if (temp_name(entry.sz_name)) {
             int is_open_now=0;
             pthread_mutex_lock(&s_lock);
             for (int i=3;i<MAX_FILES;++i) if (s_files[i].used && s_files[i].sz_temp && !strcmp(s_files[i].sz_temp,sz_path)) is_open_now=1;
-            const int is_removed=!is_open_now && !unlink(sz_path);
+            const int is_removed=!is_open_now && !ps_host_fs_remove(sz_path);
             pthread_mutex_unlock(&s_lock);
             if (is_removed) printf("Runtime: removed %s (a save interrupted earlier; the file it would have replaced is intact)\n",sz_path);
-        } else if (depth<4 && p_entry->d_type==DT_DIR) remove_stale_temps(sz_path,depth+1);
+        } else if (depth<4 && entry.kind==PS_HOST_ENTRY_DIRECTORY) remove_stale_temps(sz_path,depth+1);
     }
-    closedir(p___dirstream);
+    ps_host_dir_close(p_dir);
 }
 
 int runtime_file_mount(const char *sz_guest,const char *sz_host) {
@@ -107,10 +102,10 @@ void runtime_file_configure(const char *sz_app0,const char *sz_user) {
     runtime_file_mount("/dev/urandom","/dev/urandom");
     runtime_file_mount("/dev/random","/dev/random");
     const char *writable[]={"temp0","download0","data"};
-    mkdir(sz_user,0755);
+    ps_host_fs_make_dir(sz_user,0755);
     for (int i=0;i<3;++i) {
         snprintf(sz_path,sizeof(sz_path),"%s/%s",sz_user,writable[i]);
-        mkdir(sz_path,0755);
+        ps_host_fs_make_dir(sz_path,0755);
         char sz_guest[32]; snprintf(sz_guest,sizeof(sz_guest),"/%s",writable[i]);
         runtime_file_mount(sz_guest,sz_path);
     }
@@ -166,13 +161,13 @@ static int fix_case(char *sz_path) {
         if (len>=sizeof(sz_part)) return 0;
         memcpy(sz_part,sz_cursor,len); sz_part[len]=0;
         if ((size_t)snprintf(sz_trial,sizeof(sz_trial),"%s/%s",sz_out,sz_part)>=sizeof(sz_trial)) return 0;
-        if (access(sz_trial,F_OK)) {
-            DIR *p___dirstream=opendir(sz_out[0] ? sz_out : "/");
-            if (!p___dirstream) return 0;
+        if (ps_host_fs_access(sz_trial,0)) {
+            PsHostDir *p_dir=ps_host_dir_open(sz_out[0] ? sz_out : "/");
+            if (!p_dir) return 0;
             int is_found=0;
-            for (struct dirent *p_entry;(p_entry=readdir(p___dirstream));)
-                if (!strcasecmp(p_entry->d_name,sz_part)) { snprintf(sz_trial,sizeof(sz_trial),"%s/%s",sz_out,p_entry->d_name); is_found=1; break; }
-            closedir(p___dirstream);
+            for (PsHostDirEntry entry;ps_host_dir_next(p_dir,&entry);)
+                if (!strcasecmp(entry.sz_name,sz_part)) { snprintf(sz_trial,sizeof(sz_trial),"%s/%s",sz_out,entry.sz_name); is_found=1; break; }
+            ps_host_dir_close(p_dir);
             if (!is_found) return 0;
         }
         memcpy(sz_out,sz_trial,strlen(sz_trial)+1);
@@ -182,28 +177,28 @@ static int fix_case(char *sz_path) {
     memcpy(sz_path,sz_out,strlen(sz_out)+1);
     return 1;
 }
-static int host_flags(int flags) {
-    int r;
-    switch (flags&3) { case 0: r=O_RDONLY; break; case 1: r=O_WRONLY; break; default: r=O_RDWR; }
-    if (flags&0x4) r|=O_NONBLOCK;
-    if (flags&0x8) r|=O_APPEND;
-    if (flags&0x80) r|=O_SYNC;
-    if (flags&0x200) r|=O_CREAT;
-    if (flags&0x400) r|=O_TRUNC;
-    if (flags&0x800) r|=O_EXCL;
-    if (flags&0x20000) r|=O_DIRECTORY;
-    return r|O_CLOEXEC;
+static unsigned host_flags(int flags) {
+    unsigned r;
+    switch (flags&3) { case 0: r=PS_HOST_OPEN_READ; break; case 1: r=PS_HOST_OPEN_WRITE; break; default: r=PS_HOST_OPEN_READ_WRITE; }
+    if (flags&0x4) r|=PS_HOST_OPEN_NONBLOCK;
+    if (flags&0x8) r|=PS_HOST_OPEN_APPEND;
+    if (flags&0x80) r|=PS_HOST_OPEN_SYNC;
+    if (flags&0x200) r|=PS_HOST_OPEN_CREATE;
+    if (flags&0x400) r|=PS_HOST_OPEN_TRUNCATE;
+    if (flags&0x800) r|=PS_HOST_OPEN_EXCLUSIVE;
+    if (flags&0x20000) r|=PS_HOST_OPEN_DIRECTORY;
+    return r;
 }
 static void free_listing(Listing *p_listing) { if (p_listing) { free(p_listing->sz_names); free(p_listing->p_offsets); free(p_listing->p_types); free(p_listing); } }
 static Listing *list_directory(const char *sz_path) {
-    DIR *p___dirstream=opendir(sz_path);
-    if (!p___dirstream) return NULL;
+    PsHostDir *p_dir=ps_host_dir_open(sz_path);
+    if (!p_dir) return NULL;
     Listing *p_listing=calloc(1,sizeof(*p_listing));
     size_t c_capacity=0,cb_names=0,cap_names=0;
-    struct dirent *p_entry;
-    while (p_listing && (p_entry=readdir(p___dirstream))) {
-        if (temp_name(p_entry->d_name)) continue;
-        size_t cb_name=strlen(p_entry->d_name)+1;
+    PsHostDirEntry entry;
+    while (p_listing && ps_host_dir_next(p_dir,&entry)) {
+        if (temp_name(entry.sz_name)) continue;
+        size_t cb_name=strlen(entry.sz_name)+1;
         if (p_listing->c_names==c_capacity) {
             c_capacity=c_capacity ? c_capacity*2 : 64;
             p_listing->p_offsets=realloc(p_listing->p_offsets,c_capacity*sizeof(size_t));
@@ -211,28 +206,28 @@ static Listing *list_directory(const char *sz_path) {
         }
         if (cb_names+cb_name>cap_names) { cap_names=(cb_names+cb_name)*2; p_listing->sz_names=realloc(p_listing->sz_names,cap_names); }
         if (!p_listing->p_offsets || !p_listing->p_types || !p_listing->sz_names) { fputs("Out of memory listing directory\n",stderr); exit(1); }
-        memcpy(p_listing->sz_names+cb_names,p_entry->d_name,cb_name);
+        memcpy(p_listing->sz_names+cb_names,entry.sz_name,cb_name);
         p_listing->p_offsets[p_listing->c_names]=cb_names;
-        unsigned char type=p_entry->d_type;
-        if (type==DT_LNK || type==DT_UNKNOWN) {
-            struct stat entry;
-            if (!fstatat(dirfd(p___dirstream),p_entry->d_name,&entry,0))
-                type=S_ISDIR(entry.st_mode) ? DT_DIR : S_ISREG(entry.st_mode) ? DT_REG : type;
+        PsHostEntryKind kind=entry.kind;
+        if (kind==PS_HOST_ENTRY_LINK || kind==PS_HOST_ENTRY_UNKNOWN) {
+            PsHostStat target;
+            if (!ps_host_dir_stat(p_dir,entry.sz_name,&target))
+                kind=PS_HOST_MODE_IS_DIRECTORY(target.mode) ? PS_HOST_ENTRY_DIRECTORY : PS_HOST_MODE_IS_REGULAR(target.mode) ? PS_HOST_ENTRY_REGULAR : kind;
         }
-        p_listing->p_types[p_listing->c_names]=type==DT_DIR ? 4 : type==DT_REG ? 8 : type==DT_LNK ? 10 : 0;
+        p_listing->p_types[p_listing->c_names]=kind==PS_HOST_ENTRY_DIRECTORY ? 4 : kind==PS_HOST_ENTRY_REGULAR ? 8 : kind==PS_HOST_ENTRY_LINK ? 10 : 0;
         ++p_listing->c_names; cb_names+=cb_name;
     }
-    closedir(p___dirstream);
+    ps_host_dir_close(p_dir);
     return p_listing;
 }
-static void convert_stat(const struct stat *p_host_stat,GuestStat *p_guest_stat) {
+static void convert_stat(const PsHostStat *p_host_stat,GuestStat *p_guest_stat) {
     memset(p_guest_stat,0,sizeof(*p_guest_stat));
-    p_guest_stat->dev=(uint32_t)p_host_stat->st_dev; p_guest_stat->ino=(uint32_t)p_host_stat->st_ino;
-    p_guest_stat->mode=(uint16_t)p_host_stat->st_mode; p_guest_stat->nlink=(uint16_t)p_host_stat->st_nlink;
-    p_guest_stat->size=p_host_stat->st_size; p_guest_stat->blocks=p_host_stat->st_blocks; p_guest_stat->blksize=(uint32_t)p_host_stat->st_blksize;
-    p_guest_stat->atime=(GuestTimespec){p_host_stat->st_atim.tv_sec,p_host_stat->st_atim.tv_nsec};
-    p_guest_stat->mtime=(GuestTimespec){p_host_stat->st_mtim.tv_sec,p_host_stat->st_mtim.tv_nsec};
-    p_guest_stat->ctime=(GuestTimespec){p_host_stat->st_ctim.tv_sec,p_host_stat->st_ctim.tv_nsec};
+    p_guest_stat->dev=(uint32_t)p_host_stat->dev; p_guest_stat->ino=(uint32_t)p_host_stat->ino;
+    p_guest_stat->mode=(uint16_t)p_host_stat->mode; p_guest_stat->nlink=(uint16_t)p_host_stat->c_links;
+    p_guest_stat->size=p_host_stat->cb_size; p_guest_stat->blocks=p_host_stat->c_blocks; p_guest_stat->blksize=p_host_stat->cb_block;
+    p_guest_stat->atime=(GuestTimespec){p_host_stat->atime.tv_sec,p_host_stat->atime.tv_nsec};
+    p_guest_stat->mtime=(GuestTimespec){p_host_stat->mtime.tv_sec,p_host_stat->mtime.tv_nsec};
+    p_guest_stat->ctime=(GuestTimespec){p_host_stat->ctime.tv_sec,p_host_stat->ctime.tv_nsec};
     p_guest_stat->birthtime=p_guest_stat->ctime;
 }
 static File *get(int h_fd) {
@@ -252,16 +247,17 @@ static int game_path(const char *sz_path) {
 }
 /* Saves (/savedataN): see File. The copy starts as the old file unless the open truncates. */
 static unsigned s_temp_serial;
+/* 0, or the host's errno. */
 static int copy_contents(int from,int to) {
     char sz_buffer[65536];
     for (;;) {
-        ssize_t cb_read=read(from,sz_buffer,sizeof(sz_buffer));
-        if (cb_read<0 && errno==EINTR) continue;
-        if (cb_read<=0) return cb_read<0 ? -1 : 0;
-        for (ssize_t done=0; done<cb_read;) {
-            ssize_t w=write(to,sz_buffer+done,(size_t)(cb_read-done));
-            if (w<0 && errno==EINTR) continue;
-            if (w<0) return -1;
+        int64_t cb_read=ps_host_fs_read(from,sz_buffer,sizeof(sz_buffer));
+        if (cb_read==-EINTR) continue;
+        if (cb_read<=0) return (int)-cb_read;
+        for (int64_t done=0; done<cb_read;) {
+            int64_t w=ps_host_fs_write(to,sz_buffer+done,(size_t)(cb_read-done));
+            if (w==-EINTR) continue;
+            if (w<0) return (int)-w;
             done+=w;
         }
     }
@@ -276,28 +272,28 @@ static void current_copy(char *sz_path,size_t cb_path,int write) {
 }
 /* Returns the descriptor of the copy, or -(errno). */
 static int open_for_commit(const char *sz_path,const char *sz_source,int flags,int mode,char **pp_commit,char **pp_temp) {
-    int hf=host_flags(flags);
-    struct stat s;
-    int exists=!stat(sz_source,&s);
-    if (exists && !S_ISREG(s.st_mode)) { int h=open(sz_path,hf,mode ? mode : 0644); return h<0 ? -errno : h; }
-    if (exists && (hf&O_CREAT) && (hf&O_EXCL)) return -EEXIST;
-    if (!exists && !(hf&O_CREAT)) return -ENOENT;
+    unsigned hf=host_flags(flags);
+    PsHostStat s;
+    int exists=!ps_host_fs_stat(sz_source,&s);
+    if (exists && !PS_HOST_MODE_IS_REGULAR(s.mode)) return ps_host_fs_open(sz_path,hf,mode ? (unsigned)mode : 0644);
+    if (exists && (hf&PS_HOST_OPEN_CREATE) && (hf&PS_HOST_OPEN_EXCLUSIVE)) return -EEXIST;
+    if (!exists && !(hf&PS_HOST_OPEN_CREATE)) return -ENOENT;
     size_t cb_temp=strlen(sz_path)+32;
     char *sz_temp=malloc(cb_temp), *sz_commit=strdup(sz_path);
     if (!sz_temp || !sz_commit) { free(sz_temp); free(sz_commit); return -ENOMEM; }
     snprintf(sz_temp,cb_temp,"%s.%u.bbtmp",sz_path,__atomic_add_fetch(&s_temp_serial,1,__ATOMIC_RELAXED));
-    int out=open(sz_temp,O_WRONLY|O_CREAT|O_TRUNC|O_CLOEXEC,exists ? (int)(s.st_mode&07777) : mode ? mode : 0644);
-    int e=out<0 ? errno : 0;
-    if (!e && exists && !(hf&O_TRUNC)) {
-        int in=open(sz_source,O_RDONLY|O_CLOEXEC);
-        if (in<0 || copy_contents(in,out)) e=errno ? errno : EIO;
-        if (in>=0) close(in);
+    int out=ps_host_fs_open(sz_temp,PS_HOST_OPEN_WRITE|PS_HOST_OPEN_CREATE|PS_HOST_OPEN_TRUNCATE,exists ? s.mode&07777 : mode ? (unsigned)mode : 0644);
+    int e=out<0 ? -out : 0;
+    if (!e && exists && !(hf&PS_HOST_OPEN_TRUNCATE)) {
+        int in=ps_host_fs_open(sz_source,PS_HOST_OPEN_READ,0);
+        e=in<0 ? -in : copy_contents(in,out);
+        if (in>=0) ps_host_fs_close(in);
     }
-    if (out>=0) close(out);
-    int host=e ? -1 : open(sz_temp,hf&~(O_CREAT|O_EXCL|O_TRUNC));
+    if (out>=0) ps_host_fs_close(out);
+    int host=e ? -e : ps_host_fs_open(sz_temp,hf&~(unsigned)(PS_HOST_OPEN_CREATE|PS_HOST_OPEN_EXCLUSIVE|PS_HOST_OPEN_TRUNCATE),0);
     if (host<0) {
-        if (!e) e=errno;
-        unlink(sz_temp); free(sz_temp); free(sz_commit);
+        e=-host;
+        ps_host_fs_remove(sz_temp); free(sz_temp); free(sz_commit);
         return -e;
     }
     *pp_commit=sz_commit; *pp_temp=sz_temp;
@@ -309,17 +305,17 @@ static void sync_directory(const char *sz_file) {
     char *sz_slash=strrchr(sz_dir,'/');
     if (!sz_slash) return;
     *sz_slash=0;
-    int d=open(sz_dir,O_RDONLY|O_DIRECTORY|O_CLOEXEC);
-    if (d>=0) { fsync(d); close(d); }
+    int d=ps_host_fs_open(sz_dir,PS_HOST_OPEN_READ|PS_HOST_OPEN_DIRECTORY,0);
+    if (d>=0) { ps_host_fs_sync(d); ps_host_fs_close(d); }
 }
 static int commit_file(const File *p_file) {
-    if (!p_file->is_dirty) { close(p_file->host); unlink(p_file->sz_temp); return 0; } /* opened for writing, not written */
-    int e=fsync(p_file->host) ? errno : 0;
-    close(p_file->host);
-    if (!e && rename(p_file->sz_temp,p_file->sz_commit)) e=errno;
+    if (!p_file->is_dirty) { ps_host_fs_close(p_file->host); ps_host_fs_remove(p_file->sz_temp); return 0; } /* opened for writing, not written */
+    int e=ps_host_fs_sync(p_file->host);
+    ps_host_fs_close(p_file->host);
+    if (!e) e=ps_host_fs_rename(p_file->sz_temp,p_file->sz_commit);
     if (e) {
         fprintf(stderr,"Runtime: save file %s not replaced (%s); the old one is kept\n",p_file->sz_path,strerror(e));
-        unlink(p_file->sz_temp);
+        ps_host_fs_remove(p_file->sz_temp);
         return -e;
     }
     sync_directory(p_file->sz_commit);
@@ -335,44 +331,41 @@ static int64_t do_open(const char *sz_guest,int flags,int mode) {
     snprintf(sz_current,sizeof(sz_current),"%s",sz_path);
     if (save_path(sz_guest)) current_copy(sz_current,sizeof(sz_current),0);
     int host;
-    if (save_path(sz_guest) && (flags&3)) {
-        host=open_for_commit(sz_path,sz_current,flags,mode,&sz_commit,&sz_temp);
-        if (host<0) { errno=-host; host=-1; }
-    } else {
-        host=open(sz_current,host_flags(flags),mode ? mode : 0644);
-        if (host<0 && errno==ENOENT && !(flags&0x200) && !save_path(sz_guest) && fix_case(sz_current)) {
-            host=open(sz_current,host_flags(flags),mode ? mode : 0644);
+    if (save_path(sz_guest) && (flags&3)) host=open_for_commit(sz_path,sz_current,flags,mode,&sz_commit,&sz_temp);
+    else {
+        host=ps_host_fs_open(sz_current,host_flags(flags),mode ? (unsigned)mode : 0644);
+        if (host==-ENOENT && !(flags&0x200) && !save_path(sz_guest) && fix_case(sz_current)) {
+            host=ps_host_fs_open(sz_current,host_flags(flags),mode ? (unsigned)mode : 0644);
             snprintf(sz_path,sizeof(sz_path),"%s",sz_current); // the directory listing below uses it
         }
     }
     if (save_trace() && save_path(sz_guest))
-        printf("Save trace: open(%s, flags 0x%x) -> host %d%s%s\n",sz_guest,flags,host,sz_temp ? ", copy " : "",sz_temp ? sz_temp : "");
+        printf("Save trace: open(%s, flags 0x%x) -> host %d%s%s\n",sz_guest,flags,host<0 ? -1 : host,sz_temp ? ", copy " : "",sz_temp ? sz_temp : "");
     if (host<0) {
-        e=errno;
-        if (e==ENOENT) { ++s_c_missing; printf("Runtime: open(%s) -> not found\n",sz_guest); }
-        return -e;
+        if (host==-ENOENT) { ++s_c_missing; printf("Runtime: open(%s) -> not found\n",sz_guest); }
+        return host;
     }
-    struct stat s;
+    PsHostStat s={0};
     Listing *p_dir=NULL;
-    if (!fstat(host,&s) && S_ISDIR(s.st_mode)) p_dir=list_directory(sz_path);
+    if (!ps_host_fs_stat_file(host,&s) && PS_HOST_MODE_IS_DIRECTORY(s.mode)) p_dir=list_directory(sz_path);
     pthread_mutex_lock(&s_lock);
     int h_fd=-1;
     for (int i=3;i<MAX_FILES;++i) if (!s_files[i].used) { h_fd=i; break; }
     if (h_fd<0) {
-        pthread_mutex_unlock(&s_lock); close(host); free_listing(p_dir);
-        if (sz_temp) unlink(sz_temp);
+        pthread_mutex_unlock(&s_lock); ps_host_fs_close(host); free_listing(p_dir);
+        if (sz_temp) ps_host_fs_remove(sz_temp);
         free(sz_commit); free(sz_temp); return -EMFILE;
     }
     s_files[h_fd]=(File){.used=1,.host=host,.p_dir=p_dir,.sz_commit=sz_commit,.sz_temp=sz_temp};
     snprintf(s_files[h_fd].sz_path,sizeof(s_files[h_fd].sz_path),"%s",sz_guest);
     ++s_c_opens;
     pthread_mutex_unlock(&s_lock);
-    if (audio_trace() && strstr(sz_guest,"sound/")) printf("Audio trace: open(%s) -> fd %d, %lld bytes\n",sz_guest,h_fd,(long long)s.st_size);
+    if (audio_trace() && strstr(sz_guest,"sound/")) printf("Audio trace: open(%s) -> fd %d, %lld bytes\n",sz_guest,h_fd,(long long)s.cb_size);
     const char *sz_mod_trace=runtime_env("PS_MOD_TRACE",NULL), *sz_mod_root=runtime_env("PS_MODS_DIR",NULL);
     if (sz_mod_trace && sz_mod_trace[0]=='1' && sz_mod_root) {
         char sz_actual[PATH_MAX],sz_root[PATH_MAX];
         static unsigned s_c_traced;
-        if (realpath(sz_path,sz_actual) && realpath(sz_mod_root,sz_root)) {
+        if (!ps_host_fs_real_path(sz_path,sz_actual,sizeof(sz_actual)) && !ps_host_fs_real_path(sz_mod_root,sz_root,sizeof(sz_root))) {
             size_t cb_root=strlen(sz_root);
             if (!strncmp(sz_actual,sz_root,cb_root) && sz_actual[cb_root]=='/' &&
                 __atomic_fetch_add(&s_c_traced,1,__ATOMIC_RELAXED)<32)
@@ -393,7 +386,8 @@ static int64_t do_close(int h_fd) {
     free_listing(closed.p_dir);
     int result=0;
     if (closed.sz_temp) result=commit_file(&closed);
-    else close(closed.host);
+    else if (closed.is_socket) ps_host_net_close(closed.host);
+    else ps_host_fs_close(closed.host);
     if (save_trace() && save_path(closed.sz_path))
         printf("Save trace: close(fd %d, %s)%s -> %d\n",h_fd,closed.sz_path,closed.sz_temp ? closed.is_dirty ? " commit" : " unwritten" : "",result);
     free(closed.sz_commit); free(closed.sz_temp);
@@ -410,7 +404,7 @@ int runtime_file_adopt(int h_host) {
     pthread_mutex_lock(&s_lock);
     int h_fd=-1;
     for (int i=3;i<MAX_FILES;++i) if (!s_files[i].used) { h_fd=i; break; }
-    if (h_fd>=0) s_files[h_fd]=(File){.used=1,.host=h_host};
+    if (h_fd>=0) s_files[h_fd]=(File){.used=1,.host=h_host,.is_socket=1};
     pthread_mutex_unlock(&s_lock);
     return h_fd<0 ? -EMFILE : h_fd;
 }
@@ -436,11 +430,11 @@ static void touch_for_write(void *p_buffer,uint64_t cb_buffer) {
 }
 /* A page protected again between the touch and the kernel's copy (the GPU side re-arms its write
  * traps): EFAULT with nothing read. Touched again, the read is tried again a few times. */
-static ssize_t read_retrying(int h,void *p_buffer,uint64_t cb_buffer,int64_t off_file,int positional) {
-    ssize_t cb_transferred=-1;
+static int64_t read_retrying(int h,void *p_buffer,uint64_t cb_buffer,int64_t off_file,int positional) {
+    int64_t cb_transferred=-EFAULT;
     for (int attempt=0; attempt<8; ++attempt) {
-        cb_transferred=positional ? pread(h,p_buffer,cb_buffer,off_file) : read(h,p_buffer,cb_buffer);
-        if (cb_transferred>=0 || errno!=EFAULT) break;
+        cb_transferred=positional ? ps_host_fs_pread(h,p_buffer,cb_buffer,off_file) : ps_host_fs_read(h,p_buffer,cb_buffer);
+        if (cb_transferred!=-EFAULT) break;
         touch_for_write(p_buffer,cb_buffer);
     }
     return cb_transferred;
@@ -450,8 +444,8 @@ static int64_t do_read(int h_fd,void *p_buffer,uint64_t cb_buffer) {
     if (h<0) return -EBADF;
     runtime_memory_note_write((uintptr_t)p_buffer,cb_buffer);
     touch_for_write(p_buffer,cb_buffer);
-    ssize_t cb_transferred=read_retrying(h,p_buffer,cb_buffer,0,0);
-    if (cb_transferred<0) { if (audio_trace()) printf("Audio trace: read(fd %d, %llu) failed, errno %d\n",h_fd,(unsigned long long)cb_buffer,errno); return -errno; }
+    int64_t cb_transferred=read_retrying(h,p_buffer,cb_buffer,0,0);
+    if (cb_transferred<0) { if (audio_trace()) printf("Audio trace: read(fd %d, %llu) failed, errno %d\n",h_fd,(unsigned long long)cb_buffer,(int)-cb_transferred); return cb_transferred; }
     if (cb_transferred>0) runtime_memory_note_write((uintptr_t)p_buffer,(uint64_t)cb_transferred); /* and once the data is there */
     __atomic_add_fetch(&s_c_reads,1,__ATOMIC_RELAXED); __atomic_add_fetch(&s_cb_read,(uint64_t)cb_transferred,__ATOMIC_RELAXED);
     return cb_transferred;
@@ -461,8 +455,8 @@ static int64_t do_pread(int h_fd,void *p_buffer,uint64_t cb_buffer,int64_t off_f
     if (h<0) return -EBADF;
     runtime_memory_note_write((uintptr_t)p_buffer,cb_buffer);
     touch_for_write(p_buffer,cb_buffer);
-    ssize_t cb_transferred=read_retrying(h,p_buffer,cb_buffer,off_file,1);
-    if (cb_transferred<0) { if (audio_trace()) printf("Audio trace: pread(fd %d, %llu @%lld) failed, errno %d\n",h_fd,(unsigned long long)cb_buffer,(long long)off_file,errno); return -errno; }
+    int64_t cb_transferred=read_retrying(h,p_buffer,cb_buffer,off_file,1);
+    if (cb_transferred<0) { if (audio_trace()) printf("Audio trace: pread(fd %d, %llu @%lld) failed, errno %d\n",h_fd,(unsigned long long)cb_buffer,(long long)off_file,(int)-cb_transferred); return cb_transferred; }
     if (cb_transferred>0) runtime_memory_note_write((uintptr_t)p_buffer,(uint64_t)cb_transferred); /* and once the data is there */
     __atomic_add_fetch(&s_c_reads,1,__ATOMIC_RELAXED); __atomic_add_fetch(&s_cb_read,(uint64_t)cb_transferred,__ATOMIC_RELAXED);
     return cb_transferred;
@@ -480,8 +474,8 @@ static int64_t do_write(int h_fd,const void *p_buffer,uint64_t cb_buffer) {
     int h=host_fd_written(h_fd);
     if (h<0) return -EBADF;
     touch_for_read(p_buffer,cb_buffer);
-    ssize_t cb_transferred=write(h,p_buffer,cb_buffer);
-    if (cb_transferred<0) return -errno;
+    int64_t cb_transferred=ps_host_fs_write(h,p_buffer,cb_buffer);
+    if (cb_transferred<0) return cb_transferred;
     __atomic_add_fetch(&s_c_writes,1,__ATOMIC_RELAXED);
     return cb_transferred;
 }
@@ -489,8 +483,7 @@ static int64_t do_pwrite(int h_fd,const void *p_buffer,uint64_t cb_buffer,int64_
     int h=host_fd_written(h_fd);
     if (h<0) return -EBADF;
     touch_for_read(p_buffer,cb_buffer);
-    ssize_t cb_transferred=pwrite(h,p_buffer,cb_buffer,off_file);
-    return cb_transferred<0 ? -errno : cb_transferred;
+    return ps_host_fs_pwrite(h,p_buffer,cb_buffer,off_file);
 }
 static int64_t do_lseek(int h_fd,int64_t off_file,int whence) {
     if (save_trace()) { File *p_file=get(h_fd); if (p_file && save_path(p_file->sz_path)) printf("Save trace: lseek(fd %d, %lld, %d)\n",h_fd,(long long)off_file,whence); }
@@ -502,27 +495,27 @@ static int64_t do_lseek(int h_fd,int64_t off_file,int whence) {
         if (whence==0 && off_file>=0) { p_file->position=(size_t)off_file; return off_file; }
         return -EINVAL;
     }
-    off_t r=lseek(p_file->host,off_file,whence);
-    return r<0 ? -errno : r;
+    return ps_host_fs_seek(p_file->host,off_file,whence);
 }
 static int64_t do_fstat(int h_fd,GuestStat *p_out) {
     if (save_trace()) { File *p_file=get(h_fd); if (p_file && save_path(p_file->sz_path)) printf("Save trace: fstat(fd %d)\n",h_fd); }
     int h=host_fd(h_fd);
     if (h<0) return -EBADF;
     if (!p_out) return -EFAULT;
-    struct stat s;
-    if (fstat(h,&s)) return -errno;
+    PsHostStat s;
+    int e=ps_host_fs_stat_file(h,&s);
+    if (e) return -e;
     convert_stat(&s,p_out); return 0;
 }
 static int64_t do_stat(const char *sz_guest,GuestStat *p_out) {
-    char sz_path[1024]; struct stat s;
+    char sz_path[1024]; PsHostStat s;
     int e=translate(sz_guest,sz_path,sizeof(sz_path));
     if (e) return -e;
     if (save_path(sz_guest)) current_copy(sz_path,sizeof(sz_path),0);
     if (!p_out) return -EFAULT;
-    int r=stat(sz_path,&s) ? -errno : 0;
-    if (r==-ENOENT && !save_path(sz_guest) && fix_case(sz_path)) r=stat(sz_path,&s) ? -errno : 0;
-    if (save_trace() && save_path(sz_guest)) printf("Save trace: stat(%s) -> %d, %lld bytes\n",sz_guest,r,r ? -1LL : (long long)s.st_size);
+    int r=-ps_host_fs_stat(sz_path,&s);
+    if (r==-ENOENT && !save_path(sz_guest) && fix_case(sz_path)) r=-ps_host_fs_stat(sz_path,&s);
+    if (save_trace() && save_path(sz_guest)) printf("Save trace: stat(%s) -> %d, %lld bytes\n",sz_guest,r,r ? -1LL : (long long)s.cb_size);
     if (r) return r;
     convert_stat(&s,p_out); return 0;
 }
@@ -560,8 +553,7 @@ static int64_t path_op(const char *sz_guest,int op,int mode) {
     char sz_path[1024];
     int e=translate(sz_guest,sz_path,sizeof(sz_path));
     if (e) return -e;
-    int r= op==0 ? mkdir(sz_path,mode ? mode : 0755) : op==1 ? rmdir(sz_path) : unlink(sz_path);
-    r=r ? -errno : 0;
+    int r=-(op==0 ? ps_host_fs_make_dir(sz_path,mode ? (unsigned)mode : 0755) : op==1 ? ps_host_fs_remove_dir(sz_path) : ps_host_fs_remove(sz_path));
     if (save_trace() && save_path(sz_guest)) printf("Save trace: %s(%s) -> %d\n",op==0 ? "mkdir" : op==1 ? "rmdir" : "unlink",sz_guest,r);
     return r;
 }
@@ -571,14 +563,14 @@ static int64_t do_rename(const char *sz_from,const char *sz_to) {
     int e=translate(sz_from,sz_a,sizeof(sz_a));
     if (!e) e=translate(sz_to,sz_b,sizeof(sz_b));
     if (e) return -e;
-    int r=rename(sz_a,sz_b) ? -errno : 0;
+    int r=-ps_host_fs_rename(sz_a,sz_b);
     if (save_trace() && (save_path(sz_from) || save_path(sz_to))) printf("Save trace: rename(%s, %s) -> %d\n",sz_from,sz_to,r);
     return r;
 }
 static int64_t do_ftruncate(int h_fd,int64_t length) {
     int h=host_fd_written(h_fd);
     if (h<0) return -EBADF;
-    return ftruncate(h,length) ? -errno : 0;
+    return -ps_host_fs_truncate(h,length);
 }
 static int64_t do_truncate(const char *sz_guest,int64_t length) {
     if (game_path(sz_guest)) return -EROFS;
@@ -587,33 +579,33 @@ static int64_t do_truncate(const char *sz_guest,int64_t length) {
     if (e) return -e;
     if (save_path(sz_guest)) current_copy(sz_path,sizeof(sz_path),1);
     if (save_trace() && save_path(sz_guest)) printf("Save trace: truncate(%s, %lld)\n",sz_guest,(long long)length);
-    return truncate(sz_path,length) ? -errno : 0;
+    return -ps_host_fs_truncate_path(sz_path,length);
 }
 typedef struct { int64_t sec, usec; } GuestTimeval;
 static int64_t do_utimes(const char *sz_guest,const GuestTimeval *p_times) {
-    struct timeval host[2];
+    struct timespec host[2];
     for (int i=0;p_times && i<2;++i) {
         if (p_times[i].usec<0 || p_times[i].usec>=1000000) return -EINVAL;
-        host[i].tv_sec=(time_t)p_times[i].sec; host[i].tv_usec=(suseconds_t)p_times[i].usec;
+        host[i]=(struct timespec){.tv_sec=(time_t)p_times[i].sec,.tv_nsec=(long)p_times[i].usec*1000};
     }
     if (game_path(sz_guest)) return -EROFS;
     char sz_path[1024];
     int e=translate(sz_guest,sz_path,sizeof(sz_path));
     if (e) return -e;
     if (save_path(sz_guest)) current_copy(sz_path,sizeof(sz_path),1);
-    return utimes(sz_path,p_times ? host : NULL) ? -errno : 0;
+    return -ps_host_fs_set_times(sz_path,p_times ? host : NULL);
 }
 static int64_t do_futimes(int h_fd,const GuestTimeval *p_times) {
-    struct timeval host_times[2];
+    struct timespec host_times[2];
     for (int i=0;p_times && i<2;++i) {
         if (p_times[i].usec<0 || p_times[i].usec>=1000000) return -EINVAL;
-        host_times[i].tv_sec=(time_t)p_times[i].sec; host_times[i].tv_usec=(suseconds_t)p_times[i].usec;
+        host_times[i]=(struct timespec){.tv_sec=(time_t)p_times[i].sec,.tv_nsec=(long)p_times[i].usec*1000};
     }
     const File *p_file=get(h_fd);
     if (p_file && game_path(p_file->sz_path)) return -EROFS;
     int h_host=host_fd_written(h_fd);
     if (h_host<0) return -EBADF;
-    return futimes(h_host,p_times ? host_times : NULL) ? -errno : 0;
+    return -ps_host_fs_set_times_file(h_host,p_times ? host_times : NULL);
 }
 static int64_t do_chmod(const char *sz_guest,int mode) {
     if (game_path(sz_guest)) return -EROFS;
@@ -621,45 +613,43 @@ static int64_t do_chmod(const char *sz_guest,int mode) {
     int error=translate(sz_guest,sz_path,sizeof(sz_path));
     if (error) return -error;
     if (save_path(sz_guest)) current_copy(sz_path,sizeof(sz_path),1);
-    return chmod(sz_path,(mode_t)(mode&07777)) ? -errno : 0;
+    return -ps_host_fs_set_mode(sz_path,(unsigned)mode);
 }
 static int64_t do_fchmod(int h_fd,int mode) {
     const File *p_file=get(h_fd);
     if (p_file && game_path(p_file->sz_path)) return -EROFS;
     int h_host=host_fd_written(h_fd);
     if (h_host<0) return -EBADF;
-    return fchmod(h_host,(mode_t)(mode&07777)) ? -errno : 0;
+    return -ps_host_fs_set_mode_file(h_host,(unsigned)mode);
 }
 /* FreeBSD's commands and status flags (O_NONBLOCK 0x4, O_APPEND 0x8); FD_CLOEXEC is 1 on both. */
 static int64_t do_fcntl(int h_fd,int command,int64_t argument) {
     int h_host=host_fd(h_fd);
     if (h_host<0) return -EBADF;
-    int r;
+    unsigned status;
+    int e;
     switch (command) {
-    case 1: r=fcntl(h_host,F_GETFD); break;
-    case 2: r=fcntl(h_host,F_SETFD,argument&1 ? FD_CLOEXEC : 0); break;
+    case 1: return ps_host_fs_close_on_exec(h_host);
+    case 2: return -ps_host_fs_set_close_on_exec(h_host,argument&1);
     case 3:
-        r=fcntl(h_host,F_GETFL);
-        if (r>=0) r=(r&O_ACCMODE)|(r&O_NONBLOCK ? 0x4 : 0)|(r&O_APPEND ? 0x8 : 0);
-        break;
+        e=ps_host_fs_status(h_host,&status);
+        if (e) return -e;
+        return (status&PS_HOST_OPEN_ACCESS_MASK)|(status&PS_HOST_OPEN_NONBLOCK ? 0x4 : 0)|(status&PS_HOST_OPEN_APPEND ? 0x8 : 0);
     case 4:
-        r=fcntl(h_host,F_GETFL);
-        if (r>=0) r=fcntl(h_host,F_SETFL,(r&~(O_NONBLOCK|O_APPEND))|(argument&0x4 ? O_NONBLOCK : 0)|(argument&0x8 ? O_APPEND : 0));
-        break;
+        return -ps_host_fs_set_status(h_host,(argument&0x4 ? PS_HOST_OPEN_NONBLOCK : 0u)|(argument&0x8 ? PS_HOST_OPEN_APPEND : 0u));
     default:
         fprintf(stderr,"Runtime: fcntl command %d on descriptor %d not supported\n",command,h_fd);
         return -EINVAL;
     }
-    return r<0 ? -errno : r;
 }
-static int64_t do_fsync(int h_fd) { int h=host_fd(h_fd); if (h<0) return -EBADF; return fsync(h) ? -errno : 0; }
+static int64_t do_fsync(int h_fd) { int h=host_fd(h_fd); if (h<0) return -EBADF; return -ps_host_fs_sync(h); }
 static int64_t do_access(const char *sz_guest,int mode) {
     char sz_path[1024];
     int e=translate(sz_guest,sz_path,sizeof(sz_path));
     if (e) return -e;
     if (save_path(sz_guest)) current_copy(sz_path,sizeof(sz_path),0);
-    int r=access(sz_path,mode&7) ? -errno : 0;
-    if (r==-ENOENT && !save_path(sz_guest) && fix_case(sz_path)) r=access(sz_path,mode&7) ? -errno : 0;
+    int r=-ps_host_fs_access(sz_path,mode&7);
+    if (r==-ENOENT && !save_path(sz_guest) && fix_case(sz_path)) r=-ps_host_fs_access(sz_path,mode&7);
     return r;
 }
 
@@ -753,7 +743,7 @@ void runtime_file_unmounted_report(void) {
     for (size_t i=0,c_unmounted=__atomic_load_n(&s_c_unmounted,__ATOMIC_ACQUIRE);i<c_unmounted;++i) {
         int used=snprintf(sz_line,sizeof(sz_line),"Runtime: no mount for %zu guest paths under %s\n",
                           __atomic_load_n(&s_unmounted[i].c_hits,__ATOMIC_RELAXED),s_unmounted[i].sz_root);
-        if (used>0 && write(1,sz_line,(size_t)used)<0) return;
+        if (used>0 && ps_host_fs_write(1,sz_line,(size_t)used)<0) return;
     }
 }
 #else

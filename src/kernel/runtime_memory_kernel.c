@@ -560,6 +560,6 @@ void runtime_memory_flexible_report(void) {
                             __atomic_load_n(&s_c_flexible_maps,__ATOMIC_RELAXED),
                             __atomic_load_n(&s_cb_flexible_mapped,__ATOMIC_RELAXED),
                             __atomic_load_n(&g_cb_flexible,__ATOMIC_RELAXED));
-    if (used>0 && write(1,sz_line,(size_t)used)<0) return;
+    if (used>0 && ps_host_fs_write(1,sz_line,(size_t)used)<0) return;
 }
 #endif

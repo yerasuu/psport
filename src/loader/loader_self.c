@@ -7,7 +7,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 
 #define PT_DYNAMIC 2
 #define PT_SCE_DYNLIBDATA 0x61000000
@@ -38,12 +37,12 @@ void loader_fail(const char *sz_format, ...) {
 
 unsigned char *loader_read_file(const char *sz_path, size_t *p_size) {
     FILE *p_file = fopen(sz_path, "rb");
-    struct stat st;
-    if (!p_file || fstat(fileno(p_file), &st) || !S_ISREG(st.st_mode)) loader_fail("cannot read %s", sz_path);
-    unsigned char *p_data = malloc(st.st_size ? (size_t)st.st_size : 1);
-    if (!p_data || fread(p_data, 1, (size_t)st.st_size, p_file) != (size_t)st.st_size) loader_fail("cannot read %s", sz_path);
+    PsHostStat st;
+    if (!p_file || ps_host_fs_stat_file(fileno(p_file), &st) || !PS_HOST_MODE_IS_REGULAR(st.mode)) loader_fail("cannot read %s", sz_path);
+    unsigned char *p_data = malloc(st.cb_size ? (size_t)st.cb_size : 1);
+    if (!p_data || fread(p_data, 1, (size_t)st.cb_size, p_file) != (size_t)st.cb_size) loader_fail("cannot read %s", sz_path);
     fclose(p_file);
-    *p_size = (size_t)st.st_size;
+    *p_size = (size_t)st.cb_size;
     return p_data;
 }
 

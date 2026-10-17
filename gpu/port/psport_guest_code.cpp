@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdio>
+#include <cstring>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -20,6 +21,7 @@
 #include <Zydis/Zydis.h>
 
 #include "common/decoder.h"
+#include "../../src/platform/ps_host.h"
 
 namespace PsGuestCode {
 namespace {
@@ -405,19 +407,23 @@ Error RedirectOperand(const char* sz_name, std::uint64_t va_instruction, std::ui
 
 std::uint32_t KeepWritable(std::uint64_t va_image, std::uint64_t cb_image) {
     s_is_code_writable.store(true, std::memory_order_release);
-    std::FILE* p_maps = std::fopen("/proc/self/maps", "r");
-    if (!p_maps) {
-        std::printf("Guest code: /proc/self/maps unreadable: the game's code keeps its protection\n");
+    struct Executable {
+        unsigned long long va_begin, va_end;
+    };
+    std::vector<Executable> executables;
+    const auto collect = [](const PsHostMapping* p_mapping, void* p_context) {
+        if (p_mapping->is_executable) {
+            static_cast<std::vector<Executable>*>(p_context)->push_back({p_mapping->va_begin, p_mapping->va_end});
+        }
+        return 0;
+    };
+    if (const int error = ps_host_list_mappings(collect, &executables)) {
+        std::printf("Guest code: the host's mappings are unreadable (%s): the game's code keeps its protection\n",
+                    std::strerror(error));
         return 0;
     }
     std::uint32_t c_writable = 0, c_refused = 0;
-    char sz_line[512];
-    while (std::fgets(sz_line, sizeof(sz_line), p_maps)) {
-        unsigned long long va_begin = 0, va_end = 0;
-        char sz_perms[5] = {};
-        if (std::sscanf(sz_line, "%llx-%llx %4s", &va_begin, &va_end, sz_perms) != 3 || sz_perms[2] != 'x') {
-            continue;
-        }
+    for (auto [va_begin, va_end] : executables) {
         va_begin = std::max<unsigned long long>(va_begin, va_image);
         va_end = std::min<unsigned long long>(va_end, va_image + cb_image);
         if (va_begin >= va_end) {
@@ -430,7 +436,6 @@ std::uint32_t KeepWritable(std::uint64_t va_image, std::uint64_t cb_image) {
             std::printf("Guest code: %#llx-%#llx could not be made writable\n", va_begin, va_end);
         }
     }
-    std::fclose(p_maps);
     std::printf("Guest code: the game's code at %#llx stays writable (%u mappings, %u refused)\n",
                 static_cast<unsigned long long>(va_image), c_writable, c_refused);
     return c_writable;
