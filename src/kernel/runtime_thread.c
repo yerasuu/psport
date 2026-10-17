@@ -73,11 +73,8 @@ static void set_gs(void *p_base) {
 /* The stack this host thread runs on, kept in the attributes scePthreadAttrGet copies. */
 static void record_stack(GuestThread *p_thread) {
     if (p_thread->attr.p_stack_addr) return;
-    pthread_attr_t self;
-    void *p_addr=NULL; size_t cb_stack=0;
-    if (pthread_getattr_np(pthread_self(),&self)) return;
-    if (!pthread_attr_getstack(&self,&p_addr,&cb_stack)) { p_thread->attr.p_stack_addr=p_addr; p_thread->attr.stack=cb_stack; }
-    pthread_attr_destroy(&self);
+    uintptr_t va_low; size_t cb_stack;
+    if (!ps_host_thread_stack(&va_low,&cb_stack)) { p_thread->attr.p_stack_addr=(void *)va_low; p_thread->attr.stack=cb_stack; }
 }
 static void attach(GuestThread *p_thread) {
     uint64_t off_tls=tls_offset();
@@ -296,18 +293,12 @@ static ABI int32_t attr_get_guard(ThreadAttr **pp_slot,uint64_t *p_size) {
     *p_size=p_thread_attr->guard; return 0;
 }
 
-/* Linux thread names hold 15 characters; longer ones would be rejected. */
-static void set_host_name(const char *sz_name) {
-    char sz_host[16]={0};
-    memcpy(sz_host,sz_name,strnlen(sz_name,sizeof(sz_host)-1));
-    pthread_setname_np(pthread_self(),sz_host);
-}
 static void *host_start(void *p_argument) {
     GuestThread *p_thread=p_argument;
     attach(p_thread);
     pthread_sigmask(SIG_SETMASK,&p_thread->start_mask,NULL);
     record_stack(p_thread);
-    set_host_name(p_thread->name);
+    ps_host_thread_set_name(p_thread->name);
     if (!setjmp(p_thread->exit_jump)) p_thread->result=p_thread->entry(p_thread->argument);
     runtime_thread_keys_cleanup();
     runtime_exception_lock(&s_lock); p_thread->finished=1; ++s_c_exited; runtime_exception_unlock(&s_lock);
@@ -444,7 +435,7 @@ static ABI int32_t thread_rename(GuestThread *p_thread,const char *sz_name) {
     if (!find_thread(p_thread)) return ERR(3);
     if (!sz_name) return ERR(22);
     snprintf(p_thread->name,sizeof(p_thread->name),"%s",sz_name);
-    if (p_thread==s_p_current) set_host_name(p_thread->name);
+    if (p_thread==s_p_current) ps_host_thread_set_name(p_thread->name);
     return 0;
 }
 static ABI int32_t thread_equal(GuestThread *p_a,GuestThread *p_b) { return p_a==p_b; }

@@ -492,9 +492,9 @@ static void guest_call_sites(uint64_t out[3]) {
     const uintptr_t text_lo=0x800000000ull, text_hi=0x800000000ull+0x50d96dcull;
     static _Thread_local uintptr_t s_stack_hi;
     if (!s_stack_hi) {
-        pthread_attr_t attr; void *p_base=NULL; size_t cb_stack=0;
-        if (!pthread_getattr_np(pthread_self(),&attr)) { pthread_attr_getstack(&attr,&p_base,&cb_stack); pthread_attr_destroy(&attr); }
-        s_stack_hi=(uintptr_t)p_base+cb_stack;
+        uintptr_t va_low=0; size_t cb_stack=0;
+        (void)ps_host_thread_stack(&va_low,&cb_stack);
+        s_stack_hi=va_low+cb_stack;
     }
     const uintptr_t *p_stack=(const uintptr_t *)__builtin_frame_address(0);
     int is_found=0;
@@ -513,7 +513,7 @@ void runtime_wait_note(int kind, uint64_t ns) {
         WaitSite *p_wait_site=&s_wait_sites[(slot+i)%512];
         uint64_t expected=0;
         if (atomic_load(&p_wait_site->key)==key || atomic_compare_exchange_strong(&p_wait_site->key,&expected,key)) {
-            if (!p_wait_site->tid) { p_wait_site->site=sites[0]; p_wait_site->site2=sites[1]; p_wait_site->site3=sites[2]; p_wait_site->kind=kind; pthread_getname_np(pthread_self(),p_wait_site->sz_name,sizeof(p_wait_site->sz_name)); p_wait_site->tid=s_wait_tid; }
+            if (!p_wait_site->tid) { p_wait_site->site=sites[0]; p_wait_site->site2=sites[1]; p_wait_site->site3=sites[2]; p_wait_site->kind=kind; ps_host_thread_name(p_wait_site->sz_name,sizeof(p_wait_site->sz_name)); p_wait_site->tid=s_wait_tid; }
             atomic_fetch_add(&p_wait_site->count,1); atomic_fetch_add(&p_wait_site->ns,ns);
             return;
         }
@@ -580,21 +580,8 @@ static void sample_handler(int sig, siginfo_t *p_info, void *p_context) {
 }
 static void *sampler_main(void *p_arg) {
     const char *sz_name=(const char *)p_arg;
-    pid_t tid=0;
-    while (!tid) {
-        DIR *p_dir=opendir("/proc/self/task");
-        struct dirent *p_entry;
-        while (p_dir && (p_entry=readdir(p_dir))) {
-            char sz_path[300], sz_comm[32]={0};
-            snprintf(sz_path,sizeof(sz_path),"/proc/self/task/%s/comm",p_entry->d_name);
-            FILE *p_file=fopen(sz_path,"r");
-            if (!p_file) continue;
-            if (fgets(sz_comm,sizeof(sz_comm),p_file) && !strncmp(sz_comm,sz_name,strlen(sz_name))) tid=(pid_t)atoi(p_entry->d_name);
-            fclose(p_file);
-        }
-        if (p_dir) closedir(p_dir);
-        if (!tid) sleep(1);
-    }
+    int32_t tid;
+    while (!(tid=ps_host_thread_find(sz_name))) ps_host_time_sleep_ns(1000000000,NULL);
     printf("Runtime: sampling thread %s (%d)\n",sz_name,(int)tid);
     for (;;) {
         if (ps_host_thread_signal(tid,SIGPROF)) break;

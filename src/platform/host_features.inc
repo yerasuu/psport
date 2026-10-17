@@ -47,7 +47,10 @@ FEATURE(guest_tls, tls, "the guest's thread-local storage: a TCB and static TLS 
 FEATURE_HOST(guest_tls, LINUX, IMPLEMENTED, "arch_prctl(ARCH_SET_GS) (runtime_thread.c)", "#540")
 
 FEATURE(threads, thread, "guest threads on host threads: creation, signals to one thread, waits on an address")
-FEATURE_HOST(threads, LINUX, IMPLEMENTED, "pthreads (runtime_thread.c); gettid, tgkill and futex (src/platform/linux/host_thread.c)", "#540")
+FEATURE_HOST(threads, LINUX, IMPLEMENTED,
+             "pthreads (runtime_thread.c); gettid, tgkill, futex, thread names and stacks, sched_getaffinity and "
+             "SCHED_IDLE (src/platform/linux/host_thread.c)",
+             "#540")
 
 FEATURE(time, time, "clocks, sleeping and the time stamp counter")
 FEATURE_HOST(time, LINUX, IMPLEMENTED, "clock_gettime and nanosleep (src/platform/linux/host_time.c), rdtsc", "#540")

@@ -84,7 +84,7 @@ Scope::~Scope() {
     for (int i = 0; i < Kept && Skip + i < m_depth; ++i) {
         key.m_frames[i] = m_frames[Skip + i];
     }
-    pthread_getname_np(pthread_self(), key.m_thread.data(), key.m_thread.size());
+    ps_host_thread_name(key.m_thread.data(), key.m_thread.size());
     std::scoped_lock lk{s_mutex};
     auto& total = s_totals[key];
     total.ns += ns;

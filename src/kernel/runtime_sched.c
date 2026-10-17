@@ -65,7 +65,7 @@ static ABI int32_t get_name(void *p_thread, char *sz_name) {
         return ERR(78); /* ENOSYS */
     }
     char sz_host[16]={0};
-    pthread_getname_np(pthread_self(),sz_host,sizeof(sz_host));
+    ps_host_thread_name(sz_host,sizeof(sz_host));
     memcpy(sz_name,sz_host,sizeof(sz_host));
     return 0;
 }

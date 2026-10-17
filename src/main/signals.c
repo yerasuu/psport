@@ -77,7 +77,7 @@ static void fault(int sig, siginfo_t *p_info, void *p_context) {
      * the host lists, and the thread. */
     if (rip - (uintptr_t)g_p_image >= 0x10000000 && !(ps_host_dl_address((void *)rip, &where) && where.sz_file)) {
         char sz_thread[32] = "?";
-        pthread_getname_np(pthread_self(), sz_thread, sizeof(sz_thread));
+        ps_host_thread_name(sz_thread, sizeof(sz_thread));
         snprintf(sz_line, sizeof(sz_line), "  thread %s; mapping of RIP: ", sz_thread);
         (void)ps_host_fs_write(2, sz_line, strlen(sz_line));
         MappingSearch search = {rip, 0};

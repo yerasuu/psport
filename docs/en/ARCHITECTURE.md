@@ -253,7 +253,7 @@ moved behind the ABI area by area without changing what Linux does. So far:
 | time | `ps_host_time_read`, `ps_host_time_resolution` (`PsHostClock`), `ps_host_time_monotonic_ns`, `ps_host_time_realtime_ns`, `ps_host_time_sleep_ns`, `ps_host_time_sleep_until_ns` | `clock_gettime`, `clock_getres`, `nanosleep`, `clock_nanosleep` (`linux/host_time.c`) |
 | rand | `ps_host_random_bytes` | `getrandom` (`linux/host_system.c`) |
 | path | `ps_host_exe_path` | `/proc/self/exe` (`linux/host_system.c`) |
-| thread | `ps_host_thread_id`, `ps_host_thread_signal`, `ps_host_wait_on_address`, `ps_host_wake_address` | `gettid`, `tgkill`, `futex` (`FUTEX_WAIT_BITSET`, `FUTEX_WAKE`) (`linux/host_thread.c`) |
+| thread | `ps_host_thread_id`, `ps_host_thread_signal`, `ps_host_wait_on_address`, `ps_host_wake_address`, `ps_host_thread_set_name` (15 characters kept), `ps_host_thread_name`, `ps_host_thread_find` (by name prefix), `ps_host_thread_stack`, `ps_host_thread_cpu_count`, `ps_host_thread_make_background` | `gettid`, `tgkill`, `futex` (`FUTEX_WAIT_BITSET`, `FUTEX_WAKE`), `pthread_setname_np`, `pthread_getname_np`, `/proc/self/task/*/comm`, `pthread_getattr_np`, `sched_getaffinity`, `SCHED_IDLE` else nice 19 (`linux/host_thread.c`) |
 | fs | `ps_host_list_dir` (no allocation: usable in a signal handler) | `getdents64` (`linux/host_process.c`) |
 | fs | `ps_host_fs_open`, `_close`, `_read`, `_pread`, `_write` (safe in signal handlers), `_pwrite`, `_seek`, `_sync`, `_truncate`, `_truncate_path`, `_stat`, `_stat_link`, `_stat_file` (`PsHostStat`, the Unix mode word), `_access`, `_make_dir`, `_make_unique_dir`, `_remove_dir`, `_remove`, `_rename`, `_symlink`, `_free_space`, `_real_path`, `_set_times`, `_set_times_file`, `_set_mode`, `_set_mode_file`, `_status`, `_set_status`, `_close_on_exec`, `_set_close_on_exec` (`PS_HOST_OPEN_*` flags; 0 or the host's errno, counts or minus it); `ps_host_dir_open`, `_next`, `_stat`, `_close` (`PsHostDirEntry`) | `open` (always `O_CLOEXEC`), `read`, `pread`, `write`, `lseek`, `fsync`, `ftruncate`, `stat`, `lstat`, `fstat`, `fstatat`, `mkdir`, `mkdtemp`, `rename`, `symlink`, `statvfs`, `realpath`, `utimes`, `fcntl`, `opendir`/`readdir` (`linux/host_file.c`) |
 | vm | `ps_host_list_mappings` (`PsHostMapping`; no allocation: usable in a fault handler) | `/proc/self/maps` read with `read` (`linux/host_memory.c`) |
@@ -267,7 +267,9 @@ stay where they are until their own steps. The guest's mounts, case-insensitive 
 commits and FreeBSD flags, modes and errors stay in `runtime_file.c` and `runtime_socket.c`, which
 reach the host only through `ps_host_fs_*` and `ps_host_net_*`; files read whole go through stdio,
 tree walks through `nftw`, and the socket calls themselves (`socket`, `accept4`, `ppoll`, ...) stay
-the BSD ones.
+the BSD ones. Guest threads, their mutexes, condition variables and read-write locks stay
+plain pthreads (portable), and the user-level threads (`runtime_ult.c`) run each one to its end on
+the worker's own stack, with no context switch to move.
 The environment is read through `runtime_env`, `runtime_env_int` and `runtime_env_flag`
 (`runtime_config.c`), except in `runtime_quirks.c`, which `psport-gpu-capabilities` links without
 them.

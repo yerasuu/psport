@@ -106,6 +106,21 @@ int ps_host_wait_on_address(const void *p_word, uint32_t expected, int is_privat
                             const struct timespec *p_deadline);
 /* Wakes up to c_waiters threads waiting on p_word: the number woken, or minus the host's errno. */
 int ps_host_wake_address(const void *p_word, int c_waiters, int is_private);
+/* Names the calling thread for the host's tools, ps_host_thread_name and ps_host_thread_find; the
+ * host may keep only the first 15 characters. */
+void ps_host_thread_set_name(const char *sz_name);
+/* The calling thread's name as the host keeps it: 0, or the host's errno. */
+int ps_host_thread_name(char *sz_out, size_t cb_out);
+/* The id of a thread of this process whose name starts with sz_prefix, or 0 when none does. */
+int32_t ps_host_thread_find(const char *sz_prefix);
+/* The calling thread's stack, its lowest address and size: 0, or the host's errno. */
+int ps_host_thread_stack(uintptr_t *p_out_va_low, size_t *p_out_cb_stack);
+/* Hardware threads this process may run on (its affinity, so that taskset can stand in for a
+ * smaller machine), or 0 when the host cannot say. */
+unsigned ps_host_thread_cpu_count(void);
+/* The calling thread runs only on otherwise idle cores, or at the lowest priority when the host
+ * has no such class: 0, or the host's errno when neither could be set. */
+int ps_host_thread_make_background(void);
 
 /* ---- files and folders ---- */
 /* Calls pfn_entry with each name in the folder but "." and "..", without allocating, so that a
