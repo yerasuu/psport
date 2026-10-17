@@ -53,6 +53,13 @@ struct Program {
     Shader::Info info;
     ModuleList modules{};
     size_t last_used = 0; ///< psport: permutation of the previous lookup, compared first
+    /// psport: what the specialization of the last lookup that chose last_used derived from its
+    /// inputs (BuildSpecKey), with its runtime info and the fetch shader parse it read; key empty
+    /// when unknown. Equal inputs pick last_used without building and comparing a
+    /// StageSpecialization. GPU thread only.
+    std::vector<u32> last_used_key;
+    Shader::RuntimeInfo last_used_runtime{};
+    std::optional<Shader::Gcn::FetchShaderData> last_used_fetch;
     /// psport: `info` as translated, for draw-preparation workers (they must not read `info`,
     /// whose user data the GPU thread rewrites every draw). Guarded by programs_mutex.
     std::unique_ptr<Shader::Info> info_template;
@@ -70,6 +77,7 @@ struct Program {
     void InsertPermut(vk::ShaderModule module, Shader::StageSpecialization&& spec,
                       size_t perm_idx) {
         modules.resize(std::max(modules.size(), perm_idx + 1)); // <-- beware of realloc
+        last_used_key.clear();
         modules[perm_idx] = {module, std::move(spec)};
     }
 };
@@ -201,6 +209,8 @@ private:
     tsl::robin_map<size_t, std::unique_ptr<Program>> program_cache;
     /// psport: programs whose first translation failed, not tried again. GPU thread only.
     std::unordered_set<u64> m_untranslated_programs;
+    /// psport: GetProgram's BuildSpecKey output, kept to reuse its storage. GPU thread only.
+    std::vector<u32> m_spec_key;
     /// psport: exclusive for program/permutation insertions, shared for worker lookups.
     std::shared_mutex programs_mutex;
     u64 prepared_hits = 0, prepared_misses = 0;

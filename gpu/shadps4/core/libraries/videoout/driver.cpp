@@ -650,6 +650,13 @@ void VideoOutDriver::Flip(const Request& req) {
                         frames ? double(PsStats::g_c_reduced_draws.exchange(0)) / frames : 0.0,
                         frames ? double(PsStats::g_c_scene_draws.exchange(0)) / frames : 0.0,
                         sz_appended);
+            if (const u64 c_hits = PsStats::g_c_spec_key_hits.exchange(0),
+                c_builds = PsStats::g_c_spec_builds.exchange(0);
+                frames && c_hits + c_builds != 0) {
+                std::printf("Shader specializations: %.0f/frame reused by equal inputs, %.0f/frame "
+                            "built and compared\n",
+                            c_hits / double(frames), c_builds / double(frames));
+            }
             if (PsNativeProbe::g_is_enabled) {
                 PsNativeProbe::PrintWindow(window, frames, gpu_busy_ms, busy_frames);
             }

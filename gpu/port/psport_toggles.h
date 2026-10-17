@@ -135,6 +135,9 @@ inline std::atomic<std::uint64_t> g_cb_image_upload{0};
 inline std::atomic<std::uint64_t> g_cb_buffer_upload{0};
 inline std::atomic<int> g_gpu_thread_clock{-1}; ///< clockid_t of the GPU command thread
 inline std::atomic<std::uint64_t> g_c_draws{0}, g_c_dispatches{0}, g_c_submissions{0};
+/// Shader stage lookups (PipelineCache::GetProgram) that reused the last permutation because its
+/// specialization inputs were equal, and those that built and compared a specialization.
+inline std::atomic<std::uint64_t> g_c_spec_key_hits{0}, g_c_spec_builds{0};
 /// Frames the GPU command thread has started (display pass), for per-frame diagnostics.
 inline std::atomic<std::uint64_t> g_c_gpu_frames{0};
 /// Wall time spent in operations suspected of stalls (ns, all threads).

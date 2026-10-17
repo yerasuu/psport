@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <atomic>
+#include <bit>
 #include <chrono>
 #include <condition_variable>
 #include <cstdio>
@@ -1256,6 +1257,109 @@ vk::ShaderModule PipelineCache::CompileModule(Shader::Info& info, Shader::Runtim
     return module;
 }
 
+namespace {
+/// psport: the values a StageSpecialization of a program, whose Info is fixed once translated,
+/// derives from its sharps and start bindings, word for word as it stores them: equal words with
+/// an equal RuntimeInfo (compared apart, by its operator==) mean an equal specialization. Sharp
+/// base addresses and the user data words holding them change per draw without changing what is
+/// derived, so only the derived fields go in. The fetch shader goes in as its code, because equal
+/// code parses the same; `fetch` must be the parse of the fetch shader the key is compared against.
+/// False when the inputs cannot all be read here: tessellation stages also read a constant buffer
+/// from guest memory, and a fetch shader that did not parse has no known code length.
+bool BuildSpecKey(const Shader::Info& info, const Shader::Profile& profile,
+                  const Shader::Backend::Bindings& start,
+                  const std::optional<Shader::Gcn::FetchShaderData>& fetch,
+                  std::vector<u32>& out_key) {
+    static_assert(sizeof(AmdGpu::CompMapping) == sizeof(u32));
+    if (info.sw_stage == SwStage::TessellationControl ||
+        info.sw_stage == SwStage::TessellationEval || (info.has_fetch_shader && !fetch)) {
+        return false;
+    }
+    out_key.clear();
+    const auto push_mapping = [&out_key](const AmdGpu::CompMapping& mapping) {
+        out_key.push_back(std::bit_cast<u32>(mapping.array));
+    };
+    if (info.has_fetch_shader) {
+        const u32* p_code = Shader::Gcn::GetFetchShaderCode(info, info.fetch_shader_sgpr_base);
+        const size_t c_words = (fetch->size + sizeof(u32) - 1) / sizeof(u32);
+        out_key.push_back(fetch->size);
+        out_key.insert(out_key.end(), p_code, p_code + c_words);
+        if (info.sw_stage == SwStage::Vertex) {
+            for (const auto& attribute : fetch->attributes) {
+                const auto sharp = attribute.GetSharp(info);
+                if (!sharp) {
+                    out_key.push_back(0);
+                    continue;
+                }
+                out_key.push_back(1 | u32(AmdGpu::GetNumberClass(sharp.GetNumberFmt())) << 1);
+                push_mapping(sharp.DstSelect());
+            }
+        }
+    }
+    bool has_bound = false;
+    for (const auto& desc : info.buffers) {
+        const auto sharp = desc.GetSharp(info);
+        if (!sharp) {
+            out_key.push_back(0);
+            continue;
+        }
+        has_bound = true;
+        const bool is_paged = Shader::IsPagedBuffer(profile.paged_buffers, sharp);
+        out_key.push_back(1 | u32(is_paged) << 1 | u32(sharp.swizzle_enable) << 2);
+        out_key.push_back(sharp.GetStride());
+        if (desc.is_formatted) {
+            out_key.push_back(u32(sharp.GetDataFmt()) | u32(sharp.GetNumberFmt()) << 8);
+            push_mapping(sharp.DstSelect());
+            out_key.push_back(u32(sharp.GetNumberConversion()));
+        }
+        if (sharp.swizzle_enable) {
+            out_key.push_back(u32(sharp.index_stride) | u32(sharp.element_size) << 8);
+        }
+    }
+    for (const auto& desc : info.images) {
+        const auto sharp = desc.GetSharp(info);
+        if (!sharp) {
+            out_key.push_back(0);
+            continue;
+        }
+        has_bound = true;
+        const auto num_fmt = sharp.GetNumberFmt();
+        const bool is_srgb = !desc.is_written && num_fmt == AmdGpu::NumberFormat::Srgb;
+        out_key.push_back(1 | u32(AmdGpu::IsInteger(num_fmt)) << 1 | u32(sharp.IsCube()) << 2 |
+                          u32(is_srgb) << 3 | u32(sharp.GetViewType(desc.is_array)) << 8);
+        if (desc.is_written) {
+            push_mapping(sharp.DstSelect());
+        }
+        out_key.push_back(u32(sharp.GetNumberConversion()));
+        out_key.push_back(desc.NumBindings(info));
+    }
+    for (const auto& desc : info.fmasks) {
+        const auto sharp = desc.GetSharp(info);
+        if (!sharp) {
+            out_key.push_back(0);
+            continue;
+        }
+        has_bound = true;
+        out_key.push_back(1);
+        out_key.push_back(u32(sharp.width));
+        out_key.push_back(u32(sharp.height));
+    }
+    for (const auto& desc : info.samplers) {
+        const auto sharp = desc.GetSharp(info);
+        out_key.push_back(sharp ? 1 | u32(sharp.force_unnormalized) << 1 |
+                                      u32(sharp.force_degamma) << 2
+                                : 0);
+    }
+    // StageSpecialization compares start bindings only when some buffer, image or fmask is bound.
+    if (has_bound) {
+        out_key.push_back(start.unified);
+        out_key.push_back(start.buffer);
+        out_key.push_back(start.user_data);
+    }
+    return true;
+}
+} // namespace
+
 PipelineCache::Result PipelineCache::GetProgram(PipelineSelection& sel, HwStage hw_stage,
                                                 SwStage sw_stage,
                                                 const Shader::ShaderParams& params,
@@ -1340,6 +1444,18 @@ PipelineCache::Result PipelineCache::GetProgram(PipelineSelection& sel, HwStage 
     info.pgm_base = params.Base(); // Needs to be actualized for inline cbuffer address fixup
     info.user_data = params.user_data;
     info.RefreshFlatBuf();
+    if (program->last_used < program->modules.size() && !program->last_used_key.empty() &&
+        runtime_info == program->last_used_runtime &&
+        BuildSpecKey(info, profile, binding, program->last_used_fetch, m_spec_key) &&
+        m_spec_key == program->last_used_key) {
+        PsStats::g_c_spec_key_hits.fetch_add(1, std::memory_order_relaxed);
+        info.AddBindings(binding);
+        const auto& used = program->modules[program->last_used];
+        return std::make_tuple(&program->info, used.module, used.spec.fetch_shader_data,
+                               HashCombine(params.hash, program->last_used),
+                               used.spec.xfb_stride);
+    }
+    PsStats::g_c_spec_builds.fetch_add(1, std::memory_order_relaxed);
     auto spec = Shader::StageSpecialization(info, runtime_info, profile, binding);
 
     size_t perm_idx = program->modules.size();
@@ -1354,6 +1470,12 @@ PipelineCache::Result PipelineCache::GetProgram(PipelineSelection& sel, HwStage 
                   : std::ranges::find(program->modules, spec, &Program::Module::spec);
     if (it != program->modules.end()) {
         program->last_used = std::distance(program->modules.begin(), it);
+        if (BuildSpecKey(info, profile, binding, spec.fetch_shader_data, program->last_used_key)) {
+            program->last_used_runtime = runtime_info;
+            program->last_used_fetch = spec.fetch_shader_data;
+        } else {
+            program->last_used_key.clear();
+        }
     }
     if (it == program->modules.end()) {
         if (std::ranges::find(program->untranslated_specs, spec) !=
