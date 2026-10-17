@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -38,6 +39,8 @@ extern "C" const unsigned char psport_font_ttf[];
 extern "C" const unsigned char psport_font_ttf_end[];
 
 extern "C" void runtime_restart(void); // psport (src/runtime/runtime_restart.c)
+extern "C" const char* runtime_toypad_file(void);              // src/system/runtime_toypad.c
+extern "C" void runtime_toypad_lights(uint32_t p_out_colours[3]); // src/system/runtime_toypad.c
 
 namespace PsOverlay {
 
@@ -195,6 +198,200 @@ void Hint(const char* sz_text) {
     }
 }
 
+// The emulated USB toy pad: its figures, put on and lifted off from the menu with the gamepad. The
+// runtime names the figures file once the game has initialized libSceUsbd with the pad connected,
+// and reads it again when it changes; this section edits that file.
+struct ToyPadFigure {
+    int zone;
+    unsigned id;
+};
+struct ToyPadName {
+    unsigned id;
+    std::string name;
+};
+
+std::vector<ToyPadFigure> ReadToyPad(const char* sz_path) {
+    std::vector<ToyPadFigure> figures;
+    FILE* p_file = std::fopen(sz_path, "r");
+    if (!p_file) {
+        return figures;
+    }
+    char sz_line[256];
+    while (std::fgets(sz_line, sizeof(sz_line), p_file)) {
+        if (char* sz_hash = std::strchr(sz_line, '#')) {
+            *sz_hash = 0;
+        }
+        int zone;
+        unsigned id;
+        if (std::sscanf(sz_line, "%d %u", &zone, &id) == 2 && zone >= 1 && zone <= 3 && id) {
+            figures.push_back({zone, id});
+        }
+    }
+    std::fclose(p_file);
+    return figures;
+}
+
+// Figure names: "<id> <name>" lines in figure_ids.txt next to the figures file (PS_TOYPAD_NAMES
+// names another one); without it the ids are shown.
+const std::vector<ToyPadName>& ToyPadNames(const char* sz_figures_path) {
+    static std::vector<ToyPadName> s_names;
+    static bool s_is_loaded;
+    if (s_is_loaded) {
+        return s_names;
+    }
+    s_is_loaded = true;
+    std::string path;
+    if (const char* sz_env = std::getenv("PS_TOYPAD_NAMES"); sz_env && *sz_env) {
+        path = sz_env;
+    } else {
+        path = sz_figures_path;
+        const size_t off_slash = path.rfind('/');
+        path = (off_slash == std::string::npos ? std::string{} : path.substr(0, off_slash + 1)) + "figure_ids.txt";
+    }
+    FILE* p_file = std::fopen(path.c_str(), "r");
+    if (!p_file) {
+        std::printf("Overlay: toy pad: no figure names (%s), ids are shown\n", path.c_str());
+        return s_names;
+    }
+    char sz_line[256];
+    while (std::fgets(sz_line, sizeof(sz_line), p_file)) {
+        unsigned id;
+        int cb_used = 0;
+        if (std::sscanf(sz_line, "%u %n", &id, &cb_used) == 1 && id) {
+            std::string name = sz_line + cb_used;
+            while (!name.empty() && (name.back() == '\n' || name.back() == '\r' || name.back() == ' ')) {
+                name.pop_back();
+            }
+            s_names.push_back({id, std::move(name)});
+        }
+    }
+    std::fclose(p_file);
+    return s_names;
+}
+
+std::string ToyPadLabel(const std::vector<ToyPadName>& names, unsigned id) {
+    for (const auto& n : names) {
+        if (n.id == id) {
+            return n.name + " (" + std::to_string(id) + ")";
+        }
+    }
+    return "#" + std::to_string(id);
+}
+
+// Written to a temporary file and renamed, so the runtime never reads half a list.
+void WriteToyPad(const char* sz_path, const std::vector<ToyPadFigure>& figures,
+                 const std::vector<ToyPadName>& names) {
+    const std::string temp = std::string{sz_path} + ".tmp";
+    FILE* p_file = std::fopen(temp.c_str(), "w");
+    if (!p_file) {
+        std::printf("Overlay: toy pad: cannot write %s\n", temp.c_str());
+        return;
+    }
+    std::fputs("# Figures on the emulated toy pad: \"<zone> <figure id>\", one per line.\n"
+               "# Zone 1: centre (1 figure), 2: left (3), 3: right (3). Also edited from the menu "
+               "(Insert / L3+R3).\n",
+               p_file);
+    for (const auto& f : figures) {
+        std::fprintf(p_file, "%d %u  # %s\n", f.zone, f.id, ToyPadLabel(names, f.id).c_str());
+    }
+    const bool is_written = std::fclose(p_file) == 0;
+    if (!is_written || std::rename(temp.c_str(), sz_path) != 0) {
+        std::printf("Overlay: toy pad: cannot replace %s\n", sz_path);
+    }
+}
+
+void ToyPadSection() {
+    const char* sz_path = runtime_toypad_file();
+    if (!sz_path) {
+        return;
+    }
+    const auto& names = ToyPadNames(sz_path);
+    auto figures = ReadToyPad(sz_path);
+    bool is_changed = false;
+    u32 lights[3] = {};
+    runtime_toypad_lights(lights);
+    static unsigned s_pick_id = 1;
+    ImGui::SeparatorText(PsSettings::MenuText("Toy pad", "Toy pad (фигурки)", "Toy pad (figuras)"));
+    // Characters first, then vehicles and gadgets (ids from 1000).
+    const std::string current = ToyPadLabel(names, s_pick_id);
+    if (ImGui::BeginCombo(PsSettings::MenuText("Figure", "Фигурка", "Figura"), current.c_str(),
+                          ImGuiComboFlags_HeightLarge)) {
+        for (int is_vehicles = 0; is_vehicles < 2; ++is_vehicles) {
+            ImGui::SeparatorText(is_vehicles
+                                     ? PsSettings::MenuText("Vehicles and gadgets", "Техника", "Vehículos y objetos")
+                                     : PsSettings::MenuText("Characters", "Персонажи", "Personajes"));
+            for (const auto& n : names) {
+                if ((n.id >= 1000) != bool(is_vehicles)) {
+                    continue;
+                }
+                const std::string label = ToyPadLabel(names, n.id);
+                if (ImGui::Selectable(label.c_str(), n.id == s_pick_id)) {
+                    s_pick_id = n.id;
+                }
+                if (n.id == s_pick_id && ImGui::IsWindowAppearing()) {
+                    ImGui::SetScrollHereY();
+                }
+            }
+        }
+        ImGui::EndCombo();
+    }
+    // The zones in the pad's order (left, centre, right), each lit as the game lights it: the zone
+    // it wants a figure on glows.
+    static const int s_order[] = {2, 1, 3};
+    static const char* s_zone_english[] = {"Centre", "Left", "Right"};
+    static const char* s_zone_russian[] = {"Центр", "Левая", "Правая"};
+    static const char* s_zone_spanish[] = {"Centro", "Izquierda", "Derecha"};
+    for (const int zone : s_order) {
+        ImGui::PushID(zone);
+        const u32 c = lights[zone - 1];
+        const ImVec4 colour = c ? ImVec4(((c >> 16) & 255) / 255.0f, ((c >> 8) & 255) / 255.0f, (c & 255) / 255.0f, 1.0f)
+                                : ImVec4(0.35f, 0.35f, 0.35f, 1.0f);
+        ImGui::TextColored(colour, "%s", c ? "●" : "○");
+        ImGui::SameLine();
+        ImGui::TextUnformatted(
+            PsSettings::MenuText(s_zone_english[zone - 1], s_zone_russian[zone - 1], s_zone_spanish[zone - 1]));
+        int c_in_zone = 0;
+        for (size_t i = 0; i < figures.size(); ++i) {
+            if (figures[i].zone != zone) {
+                continue;
+            }
+            ++c_in_zone;
+            ImGui::PushID(int(i));
+            ImGui::SameLine();
+            const std::string label = ToyPadLabel(names, figures[i].id) + "  ×";
+            const bool is_lifted = ImGui::SmallButton(label.c_str());
+            ImGui::PopID();
+            if (is_lifted) {
+                figures.erase(figures.begin() + long(i));
+                is_changed = true;
+                break;
+            }
+        }
+        const bool is_full = c_in_zone >= (zone == 1 ? 1 : 3) || figures.size() >= 7;
+        if (!is_full) {
+            ImGui::SameLine();
+            if (ImGui::SmallButton(PsSettings::MenuText("+ put here", "+ поставить сюда", "+ poner aquí"))) {
+                figures.push_back({zone, s_pick_id});
+                is_changed = true;
+            }
+        }
+        ImGui::PopID();
+    }
+    Hint(PsSettings::MenuText(
+        "Choose a figure, then \"+ put here\" on a zone; press a figure to lift it. The dot is the "
+        "zone's light: when the game asks for a figure it lights the zone to put it on. If the "
+        "game misses a figure, lift it and put it on again.",
+        "Выберите фигурку и нажмите «+ поставить сюда» у зоны; нажатие на фигурку снимает её. "
+        "Кружок — подсветка зоны: когда игра просит фигурку, она подсвечивает зону, куда её "
+        "ставить. Если игра не заметила фигурку — снимите и поставьте снова.",
+        "Elige una figura y pulsa «+ poner aquí» en una zona; pulsa una figura para quitarla. El "
+        "punto es la luz de la zona: cuando el juego pide una figura, ilumina la zona donde ponerla. "
+        "Si el juego no detecta una figura, quítala y vuelve a ponerla."));
+    if (is_changed) {
+        WriteToyPad(sz_path, figures, names);
+    }
+}
+
 // The settings menu as in 0.3 and 0.4: one window (moved with the mouse, its place kept in
 // psport.ini), sections one under the other, ImGui's own widgets and keyboard/gamepad navigation.
 void Menu() {
@@ -262,6 +459,7 @@ void Menu() {
     }
     ImGui::Text(PsSettings::MenuText("%.0f FPS  (%.1f ms)", "%.0f FPS  (%.1f мс)", "%.0f FPS  (%.1f ms)"),
                 s_frame_ms_avg > 0.0f ? 1000.0f / s_frame_ms_avg : 0.0f, s_frame_ms_avg);
+    ToyPadSection();
 
     ImGui::SeparatorText(PsSettings::MenuText("Temporal upscaler", "Временной апскейлер",
                                               "Escalado temporal"));

@@ -153,6 +153,7 @@ are changed from the overlay menu, which writes the file. Commonly used keys and
 | `PS_MODS_ENABLED=0` | disables file mods ([mods and patches](docs/en/MODS.md)) |
 | `PS_GAME_PROFILE=none` | runs without the game's profile, on the generic paths only |
 | `PS_QUIRKS=none,-<id>,+<id>` | turns per-title or per-host fixes off or on ([quirks](docs/en/QUIRKS.md)) |
+| `toypad` (`PS_TOYPAD=1`) | plugs in the emulated LEGO Dimensions toy pad, off by default ([toy pad](docs/en/TOYPAD.md)) |
 
 Defaults and why they hold for any game: [FORK.md, Defaults](FORK.md#defaults). Diagnostic
 variables and the call report: [FORK.md, Diagnostics](FORK.md#diagnostics). System modules and
@@ -229,7 +230,7 @@ its log and call report, implementing what is missing and checking the result.
   regression runs, CI.
 - Feature notes: [upscaler](docs/en/upscaler.md), [parallel GPU work](docs/en/parallel_gpu.md),
   [motion vectors](docs/en/motion_vectors.md), [mods and patches](docs/en/MODS.md),
-  [profiling](docs/en/PROFILING.md).
+  [profiling](docs/en/PROFILING.md), [toy pad](docs/en/TOYPAD.md).
 - [docs/en/history/](docs/en/history/): bbport's design notes, plans and change logs
   (Russian originals in [docs/ru/](docs/ru/)).
 

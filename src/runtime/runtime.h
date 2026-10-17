@@ -175,6 +175,14 @@ int runtime_system_language(void);
 uintptr_t runtime_playgo_resolve(const char *sz_name);
 /* Absent peripherals: USB devices and the PlayStation Camera (runtime_devices.c). */
 uintptr_t runtime_devices_resolve(const char *sz_name);
+/* The emulated LEGO Dimensions toy pad (runtime_toypad.c), consulted by runtime_devices_resolve:
+ * its libSceUsbd exports with PS_TOYPAD=1 or toypad=1 in psport.ini, none otherwise. */
+uintptr_t runtime_toypad_resolve(const char *sz_name);
+void runtime_toypad_report(void);
+/* For the overlay's Toy pad section: the figures file once the game has initialized libSceUsbd
+ * with the pad connected (NULL before and without it), and the zones' colours (centre, left, right). */
+const char *runtime_toypad_file(void);
+void runtime_toypad_lights(uint32_t p_out_colours[3]);
 /* Remote Play, Share Play, video recording and core dumps, none of them running (runtime_capture.c). */
 uintptr_t runtime_capture_resolve(const char *sz_name);
 /* PlayStation VR with no headset connected: Hmd, VrTracker, SocialScreen (runtime_vr.c). */

@@ -1,8 +1,10 @@
 /* Peripherals a console without them answers for: no USB device is plugged in (libSceUsbd, the
- * SDK's libusb) and no PlayStation Camera is attached. The libraries run; device lists are empty
- * and anything that needs a device fails with the library's no-device error. */
+ * SDK's libusb) unless the emulated toy pad is (runtime_toypad.c, whose exports come first), and no
+ * PlayStation Camera is attached. The libraries run; device lists are empty and anything that needs
+ * a device fails with the library's no-device error. */
 #define _GNU_SOURCE
 #include "runtime.h"
+#include "runtime_usbd.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -11,25 +13,6 @@
 #include <time.h>
 
 /* ---- libSceUsbd ---- */
-#define USBD_INVALID_ARG ((int32_t)0x80240002)
-#define USBD_NO_DEVICE ((int32_t)0x80240004)
-#define USBD_NOT_FOUND ((int32_t)0x80240005)
-#define USBD_NO_MEMORY ((int32_t)0x8024000B)
-#define USBD_TRANSFER_TYPE_INTERRUPT 3
-#define USBD_DEFAULT_EVENT_TIMEOUT_SECONDS 60
-/* libusb_transfer: handle, flags, endpoint, type, timeout, status, length, actual length, callback,
- * user data, buffer, iso packet count, then 12 bytes per iso packet descriptor. */
-typedef struct {
-    void *dev_handle;
-    uint8_t flags, endpoint, type, padding;
-    uint32_t timeout;
-    int32_t status, length, actual_length;
-    void *callback, *user_data;
-    uint8_t *buffer;
-    int32_t num_iso_packets;
-    uint8_t iso_packet_desc[];
-} UsbdTransfer;
-_Static_assert(__builtin_offsetof(UsbdTransfer,iso_packet_desc)==60,"libusb_transfer layout");
 static pthread_mutex_t s_usbd_events_lock=PTHREAD_MUTEX_INITIALIZER;
 static int s_is_usbd_logged;
 static ABI int32_t usbd_init(void) {
@@ -63,15 +46,10 @@ static ABI void usbd_fill_interrupt_transfer(UsbdTransfer *p_transfer,void *p_de
 }
 /* A transfer is never in flight: none could be submitted. */
 static ABI int32_t usbd_cancel_transfer(UsbdTransfer *p_transfer) { (void)p_transfer; return USBD_NOT_FOUND; }
-/* struct timeval. With no device nothing completes, so event handling waits out its timeout as
- * libusb does. */
-typedef struct { int64_t tv_sec, tv_usec; } UsbdTimeval;
+/* With no device nothing completes, so event handling waits out its timeout as libusb does. */
 static int32_t wait_for_usbd_events(const UsbdTimeval *p_timeout) {
-    uint64_t wait_ns=(uint64_t)USBD_DEFAULT_EVENT_TIMEOUT_SECONDS*1000000000u;
-    if (p_timeout) {
-        if (p_timeout->tv_sec<0 || p_timeout->tv_usec<0 || p_timeout->tv_usec>=1000000) return USBD_INVALID_ARG;
-        wait_ns=(uint64_t)p_timeout->tv_sec*1000000000u+(uint64_t)p_timeout->tv_usec*1000u;
-    }
+    uint64_t wait_ns;
+    if (!usbd_event_wait_ns(p_timeout,&wait_ns)) return USBD_INVALID_ARG;
     const uint64_t wait_start_ns=runtime_wait_clock();
     while (ps_host_time_sleep_ns(wait_ns,&wait_ns)) {}
     runtime_wait_note(3,runtime_wait_clock()-wait_start_ns);
@@ -117,7 +95,10 @@ static const RuntimeExport s_exports[]={
     {"sceCameraSetVideoSync",camera_not_open}, {"sceCameraGetFrameData",camera_not_open},
     {"sceCameraIsValidFrameData",camera_not_open},
 };
-uintptr_t runtime_devices_resolve(const char *sz_name) { return RUNTIME_LOOKUP(s_exports,sz_name); }
+uintptr_t runtime_devices_resolve(const char *sz_name) {
+    const uintptr_t va_toypad=runtime_toypad_resolve(sz_name);
+    return va_toypad ? va_toypad : RUNTIME_LOOKUP(s_exports,sz_name);
+}
 #else
 uintptr_t runtime_devices_resolve(const char *sz_name) { (void)sz_name; return 0; }
 #endif

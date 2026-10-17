@@ -95,6 +95,7 @@ void runtime_report(void) {
     runtime_pad_report();
     runtime_mouse_report();
     runtime_keyboard_report();
+    runtime_toypad_report();
     runtime_savedata_report();
     runtime_file_report();
     runtime_aio_report();
