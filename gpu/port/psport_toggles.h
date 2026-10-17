@@ -213,6 +213,9 @@ inline std::atomic<std::uint64_t> g_cb_dynamic_reloaded{0}, g_cb_gpu_writes_kept
 inline std::atomic<std::uint64_t> g_c_residency_chunks{0}, g_c_evacuations{0}, g_evac_kept_gpu{0}, g_evac_kept_other{0};
 /// Images the collector passed over (GPU-written, not evictable without memory pressure).
 inline std::atomic<std::uint64_t> g_c_gc_kept_images{0};
+/// Collector passes that scanned, passes skipped while it backed off (a pass freed nothing) and
+/// backoffs (TextureCache::BackOffCollector).
+inline std::atomic<std::uint64_t> g_c_gc_passes{0}, g_c_gc_skipped_passes{0}, g_c_gc_backoffs{0};
 struct WaitTimer {
     std::atomic<std::uint64_t>& m_total;
     std::chrono::steady_clock::time_point m_start = std::chrono::steady_clock::now();

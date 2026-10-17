@@ -352,7 +352,7 @@ static void PrintMemory() {
     std::printf("Memory: VRAM %llu MiB, GTT %llu MiB, RSS %llu MiB; Vulkan memory %llu MiB "
                 "allocated (VMA blocks %llu MiB, %llu MiB of them used); Vulkan images %llu MiB; "
                 "cached images %llu MiB in %llu; guest blocks in VRAM %llu MiB allocated, "
-                "%llu MiB of it unused (%llu MiB moved back idle, %llu MiB unmapped, %llu MiB freed; %llu chunks, %llu emptied, blocks kept: %llu GPU-written, %llu not direct memory); texture collector: usage %llu MiB, starts at %llu MiB, %llu images freed, %llu GPU-written kept\n",
+                "%llu MiB of it unused (%llu MiB moved back idle, %llu MiB unmapped, %llu MiB freed; %llu chunks, %llu emptied, blocks kept: %llu GPU-written, %llu not direct memory); texture collector: usage %llu MiB, starts at %llu MiB, %llu images freed, %llu GPU-written kept, %llu passes, %llu skipped in %llu backoffs\n",
                 (unsigned long long)(vram_kib >> 10), (unsigned long long)(gtt_kib >> 10),
                 (unsigned long long)(rss >> 20), (unsigned long long)(device >> 20),
                 (unsigned long long)(vma_blocks >> 20), (unsigned long long)(vma_used >> 20),
@@ -371,7 +371,10 @@ static void PrintMemory() {
                 (unsigned long long)(PsStats::g_cb_gc_used.load() >> 20),
                 (unsigned long long)(PsStats::g_cb_gc_trigger.load() >> 20),
                 (unsigned long long)PsStats::g_c_gc_freed_images.exchange(0),
-                (unsigned long long)PsStats::g_c_gc_kept_images.exchange(0));
+                (unsigned long long)PsStats::g_c_gc_kept_images.exchange(0),
+                (unsigned long long)PsStats::g_c_gc_passes.exchange(0),
+                (unsigned long long)PsStats::g_c_gc_skipped_passes.exchange(0),
+                (unsigned long long)PsStats::g_c_gc_backoffs.exchange(0));
 }
 
 void VideoOutDriver::Flip(const Request& req) {

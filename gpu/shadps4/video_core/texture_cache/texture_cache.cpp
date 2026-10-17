@@ -1210,7 +1210,14 @@ void TextureCache::UntrackImageTail(ImageId image_id) {
 }
 
 void TextureCache::GarbageCollectImages() {
-    if (instance.CanReportMemoryUsage()) {
+    const u64 second = u64(std::chrono::duration_cast<std::chrono::seconds>(
+                               std::chrono::steady_clock::now().time_since_epoch())
+                               .count());
+    // psport: the driver's usage once a frame (or a second, without frames), not at each of the
+    // hundreds of submissions a second; in between, registrations keep the count (#479).
+    const u32 frame = PsStats::g_frame_number.load(std::memory_order_relaxed);
+    if (instance.CanReportMemoryUsage() && (frame != m_gc_query_frame || second != gc_second)) {
+        m_gc_query_frame = frame;
         total_used_memory = instance.GetDeviceMemoryUsage();
         // psport: on integrated GPUs (Steam Deck) the usage covers system-memory heaps holding
         // much more than images (buffers backing guest memory), and the startup budget left
@@ -1239,9 +1246,6 @@ void TextureCache::GarbageCollectImages() {
     // discrete GPU it stays over the trigger, where an age of 16 ticks (~3 frames) evicted every
     // texture briefly off screen and uploaded it again. Below the pressure mark an image goes
     // once unused for PS_GC_IDLE_SECONDS (20): the textures of an area left behind.
-    const u64 second = u64(std::chrono::duration_cast<std::chrono::seconds>(
-                               std::chrono::steady_clock::now().time_since_epoch())
-                               .count());
     if (second != gc_second) {
         gc_second = second;
         // psport: the driver's budget for our process, once a second: near it the collector evicts
@@ -1260,6 +1264,11 @@ void TextureCache::GarbageCollectImages() {
         return;
     }
     if (total_used_memory < trigger_gc_memory) {
+        m_is_gc_backed_off = false;
+        m_c_gc_backoff_ticks = 0;
+        return;
+    }
+    if (IsCollectorBackedOff(second)) {
         return;
     }
     static const u64 idle_seconds = [] {
@@ -1287,6 +1296,9 @@ void TextureCache::GarbageCollectImages() {
     u64 below_tick = 0;
     size_t num_deletions = 0;
     u32 visited = 0;
+    u32 c_freed = 0;
+    u32 c_kept = 0;
+    PsStats::g_c_gc_passes.fetch_add(1, std::memory_order_relaxed);
 
     // emergency: over the critical mark after evicting what was unused for a second.
     const auto configure = [&](bool allow_aggressive, bool emergency = false) {
@@ -1317,6 +1329,7 @@ void TextureCache::GarbageCollectImages() {
         if ((tiled && download) || (download && !pressured)) {
             lru_cache.Touch(image.lru_id, gc_tick);
             PsStats::g_c_gc_kept_images.fetch_add(1, std::memory_order_relaxed);
+            ++c_kept;
             return false;
         }
         --num_deletions;
@@ -1328,6 +1341,7 @@ void TextureCache::GarbageCollectImages() {
             ++gc_downloads;
         }
         ++gc_evictions;
+        ++c_freed;
         PsStats::g_c_gc_freed_images.fetch_add(1, std::memory_order_relaxed);
         FreeImage(image_id);
         if (total_used_memory < critical_gc_memory) {
@@ -1358,6 +1372,11 @@ void TextureCache::GarbageCollectImages() {
         configure(true, true);
         lru_cache.ForEachItemBelow(below_tick, clean_up);
     }
+    if (c_freed == 0) {
+        BackOffCollector(second, c_kept);
+    } else {
+        m_c_gc_backoff_ticks = 0;
+    }
     // psport: evictions under memory pressure, at most every 5 s (PS_FRAME_STATS or not).
     if (pressured || gc_downloads != 0) {
         const auto now = std::chrono::steady_clock::now();
@@ -1371,6 +1390,65 @@ void TextureCache::GarbageCollectImages() {
             gc_report_time = now;
             gc_evictions = gc_downloads = 0;
         }
+    }
+}
+
+bool TextureCache::IsCollectorBackedOff(u64 second) {
+    if (!m_is_gc_backed_off) {
+        return false;
+    }
+    static constexpr u64 CB_GROWTH_TO_RESUME = 64_MB;
+    const bool is_vram_short = vram_short_until.load(std::memory_order_relaxed) > second;
+    const char* sz_reason = nullptr;
+    if (total_used_memory >= m_cb_gc_used_at_backoff + CB_GROWTH_TO_RESUME) {
+        sz_reason = "usage grew";
+    } else if (is_vram_short && !m_was_vram_short_at_backoff) {
+        sz_reason = "VRAM ran short";
+    } else if (gc_tick < m_gc_backoff_until_tick && second < m_gc_backoff_until_second) {
+        ++m_c_gc_skips_unlogged;
+        PsStats::g_c_gc_skipped_passes.fetch_add(1, std::memory_order_relaxed);
+        return true;
+    } else {
+        sz_reason = "backoff over";
+    }
+    m_is_gc_backed_off = false;
+    const auto now = std::chrono::steady_clock::now();
+    if (now - m_gc_resume_log_time >= std::chrono::seconds(5)) {
+        std::printf("Texture cache: collector resumes (%s, usage %llu MiB); %llu passes skipped "
+                    "since the last such line\n",
+                    sz_reason, (unsigned long long)(total_used_memory >> 20),
+                    (unsigned long long)m_c_gc_skips_unlogged);
+        m_gc_resume_log_time = now;
+        m_c_gc_skips_unlogged = 0;
+    }
+    return false;
+}
+
+void TextureCache::BackOffCollector(u64 second, u32 c_kept) {
+    static constexpr u64 C_FIRST_BACKOFF_TICKS = 32;
+    static constexpr u64 C_MAX_BACKOFF_TICKS = 1024;
+    static constexpr u64 MAX_BACKOFF_SECONDS = 2;
+    m_c_gc_backoff_ticks = m_c_gc_backoff_ticks == 0
+                               ? C_FIRST_BACKOFF_TICKS
+                               : std::min(m_c_gc_backoff_ticks * 2, C_MAX_BACKOFF_TICKS);
+    m_is_gc_backed_off = true;
+    m_gc_backoff_until_tick = gc_tick + m_c_gc_backoff_ticks;
+    m_gc_backoff_until_second = second + MAX_BACKOFF_SECONDS;
+    m_cb_gc_used_at_backoff = total_used_memory;
+    m_was_vram_short_at_backoff = vram_short_until.load(std::memory_order_relaxed) > second;
+    PsStats::g_c_gc_backoffs.fetch_add(1, std::memory_order_relaxed);
+    ++m_c_gc_backoffs_unlogged;
+    const auto now = std::chrono::steady_clock::now();
+    if (now - m_gc_backoff_log_time >= std::chrono::seconds(5)) {
+        std::printf("Texture cache: collector backs off for %llu submissions (at most %llu s): a "
+                    "pass freed nothing (%u images kept, usage %llu MiB, starts at %llu); %llu "
+                    "backoffs since the last such line\n",
+                    (unsigned long long)m_c_gc_backoff_ticks,
+                    (unsigned long long)MAX_BACKOFF_SECONDS, c_kept, (unsigned long long)(total_used_memory >> 20),
+                    (unsigned long long)(trigger_gc_memory >> 20),
+                    (unsigned long long)m_c_gc_backoffs_unlogged);
+        m_gc_backoff_log_time = now;
+        m_c_gc_backoffs_unlogged = 0;
     }
 }
 

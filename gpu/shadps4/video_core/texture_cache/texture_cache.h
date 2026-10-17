@@ -401,6 +401,10 @@ private:
 
     void GarbageCollectImages();
     void GarbageCollectSamplers();
+    /// psport: true while a backoff (BackOffCollector) still holds; ends it, logged, once the
+    /// usage grows, VRAM runs short or its ticks or seconds have passed.
+    bool IsCollectorBackedOff(u64 second);
+    void BackOffCollector(u64 second, u32 c_kept);
 
     /// psport: inserts a new image. When its memory cannot be had within the budget, images
     /// unused in this submission go first (can_evict: only with `mutex` held and no other
@@ -426,6 +430,18 @@ private:
     std::unordered_set<ImageId> download_images;
     u64 total_used_memory = 0;
     u64 gc_evictions = 0, gc_downloads = 0; ///< psport: pressure report
+    /// psport: a pass over the trigger that freed nothing (everything old enough GPU-written and
+    /// tiled, or in use) puts the next ones off, twice as long after each such pass (#479).
+    bool m_is_gc_backed_off = false;
+    u64 m_c_gc_backoff_ticks = 0;
+    u64 m_gc_backoff_until_tick = 0;
+    u64 m_gc_backoff_until_second = 0;
+    u64 m_cb_gc_used_at_backoff = 0;
+    bool m_was_vram_short_at_backoff = false;
+    u64 m_c_gc_backoffs_unlogged = 0, m_c_gc_skips_unlogged = 0;
+    std::chrono::steady_clock::time_point m_gc_backoff_log_time{}, m_gc_resume_log_time{};
+    /// psport: frame shown at the last memory usage query (one query a frame, not a submission).
+    u32 m_gc_query_frame = 0;
     std::chrono::steady_clock::time_point gc_report_time{};
     /// psport: gc_tick at each of the last 64 seconds (GarbageCollectImages).
     std::array<u64, 64> gc_tick_at_second{};
