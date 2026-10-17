@@ -48,6 +48,13 @@ int psport_gpu_overlay_pad_file_press(int guide, int cross, int circle);
 void psport_gpu_mouse_take(double *p_dx, double *p_dy, int *p_wheel_up, int *p_wheel_down);
 int psport_gpu_mouse_captured(void);
 void psport_gpu_mouse_look_enable(int is_enabled);
+/* Native mouse look (Game::MouseHooks pfn_camera_look): turns the game's camera by pitch and yaw
+ * (radians) at its next update; 0 without such a hook or while the camera does not take turns
+ * (lock-on, menus): drive the right stick then. */
+int psport_gpu_camera_look(float pitch, float yaw);
+/* The game profile's changes to the pad state the game reads (Game::MouseHooks pfn_filter_pad):
+ * the buttons (PS4 bits); the sticks (lx ly rx ry) as they are. */
+void psport_gpu_filter_pad(uint32_t *p_buttons, const uint8_t *p_sticks);
 /* libSceMouse (runtime_mouse.c): the host mouse's buttons (SDL_BUTTON_MASK bits) and its motion
  * (pixels), wheel and tilt (notches) since the last call, reset; returns 0 while there is no window
  * or the host has no mouse. */

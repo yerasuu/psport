@@ -484,6 +484,7 @@ A profile may provide:
 | `anisotropy` | anisotropic filtering forced on its textures when `PS_ANISO` is unset |
 | `upscaler` | where the temporal upscaler goes in its frame (scene combine and UI shaders), its scene constants (camera) and bone palettes (object motion); without it the upscaler stays off |
 | `drives_frame_rate` | true once its hooks pace the game's frames: the video out shows each frame as it comes, whatever flip rate the game asks for (Bloodborne's frame rate hooks) |
+| `mouse` | the mouse in the game's code: native mouse look (`camera_look`), a pointer in its menus (`wants_pointer`, `window_event`, `filter_pad`) |
 | `report_stats` | profile diagnostics with each frame statistics report |
 | `label_release` | the game's label release code, for the free check's `PS_LABEL_TRAP=2` |
 | `small_object_pool` | the layout of the pool holding its GPU labels, for the free check (`PS_FREE_CHECK`) |

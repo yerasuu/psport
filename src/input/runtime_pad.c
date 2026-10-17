@@ -524,7 +524,17 @@ static uint8_t look_axis(float value, uint8_t stick, int deadzone) {
     const int v=128+(int)(value<0 ? -out : out);
     return (uint8_t)(v<0 ? 0 : v>255 ? 255 : v);
 }
+/* Native mouse look (the game profile's camera hook, psport_gpu_camera_look): the camera's own update
+ * takes the turn, as far as the mouse moved: MOUSE_RAD_PER_PIXEL at sensitivity 1 (1000 pixels: 1.5
+ * rad, 86 degrees). The stick below only without that hook or while the camera does not take it. */
+#define MOUSE_RAD_PER_PIXEL 0.0015f
 static void apply_mouse_look(PadData *p_pad_data, double dx, double dy, uint64_t now, int is_captured) {
+    if (is_captured && (dx!=0 || dy!=0)) {
+        const float k=MOUSE_RAD_PER_PIXEL*s_mouse_sensitivity;
+        /* The camera's pitch grows as it rises (looking down): the mouse moving down (dy > 0) looks
+           down, as the stick pushed down does. */
+        if (psport_gpu_camera_look((float)(s_mouse_invert_y ? -dy : dy)*k,(float)dx*k)) dx=dy=0;
+    }
     float dt=s_look_last_us && now>s_look_last_us ? (float)(now-s_look_last_us) : 0.0f;
     s_look_last_us=now;
     if (!is_captured) { s_look_x=s_look_y=0; return; }
@@ -759,6 +769,8 @@ static void sample(PadData *p_pad_data) {
     if (g_runtime_pad_injected.buttons & BTN_R2) p_pad_data->r2=255;
     uint8_t *axes[4]={&p_pad_data->left_x,&p_pad_data->left_y,&p_pad_data->right_x,&p_pad_data->right_y};
     for (int i=0;i<4;++i) if (g_runtime_pad_injected.stick[i]>=0) *axes[i]=(uint8_t)g_runtime_pad_injected.stick[i];
+    const uint8_t sticks[4]={p_pad_data->left_x,p_pad_data->left_y,p_pad_data->right_x,p_pad_data->right_y};
+    psport_gpu_filter_pad(&p_pad_data->buttons,sticks); /* the game profile's (a menu pointer's presses) */
     touch_ids(p_pad_data);
 }
 

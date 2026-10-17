@@ -14,6 +14,7 @@
 #include "video_core/renderer_vulkan/vk_platform.h"
 #include "game_profile.h"
 #include "psport_overlay.h"
+#include "psport_settings.h"
 #include "psport_timeline.h"
 #include "video_core/renderer_vulkan/vk_temporal_upscaler.h"
 #include "video_core/renderer_vulkan/vk_presenter.h"
@@ -705,6 +706,8 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
                          vk::ImageLayout::eTransferDstOptimal,
                          MakeImageBlitFit(frame->width, frame->height, extent.width, extent.height),
                          vk::Filter::eLinear);
+        PsSettings::Get().shown_frame_aspect.store(float(frame->width) / float(std::max(frame->height, 1u)),
+                                                   std::memory_order_relaxed);
         // psport: the settings menu / FPS counter over the frame, at display resolution.
         if (const Game::Title* game = Game::Launched(); game && game->pfn_before_present) {
             game->pfn_before_present();

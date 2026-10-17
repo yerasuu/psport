@@ -67,6 +67,9 @@ private:
     void UpdateCursor();
     u64 m_last_mouse_motion_ms{}; ///< SDL_GetTicks of the last mouse motion (UpdateCursor)
     bool m_is_cursor_hidden{};
+    u64 m_capture_settle_ms{};       ///< mouse motion before this (SDL_GetTicks) is not looking around
+    bool m_is_pointer_shown{};       ///< a game's pointer menu is open (Game::MouseHooks pfn_wants_pointer)
+    bool m_is_released_for_pointer{}; ///< the mouse was let go for it: taken back after
     void CaptureMouse(bool should_capture);
     void GameMouseEvent(const SDL_Event& event);
     std::mutex m_mouse_mutex;

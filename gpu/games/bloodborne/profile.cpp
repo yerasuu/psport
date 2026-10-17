@@ -3,10 +3,13 @@
 // title.cpp). Addresses are those of the 1.09 executable (CheckFiles, game_check.cpp, makes sure
 // that is the one running); every retail release runs the same one.
 #include "game_profile.h"
+#include <cstdlib>
 #include "frame_rate.h"
 #include "gnm_hooks.h"
 #include "guest_hooks.h"
 #include "heap_sites.h"
+#include "menu_pointer.h"
+#include "mouse_look.h"
 
 namespace Game {
 namespace {
@@ -25,9 +28,18 @@ void InstallHooks(const CoreServices& services) {
     PsGuestHooks::Install(services.pfn_fresh_range);
 }
 
+/// After the launch's patches, before any of the game's code runs: its own hooks are installed
+/// here rather than with install_hooks, so that no patch is written over one of them.
 void PatchImage(unsigned char* p_image, std::uint64_t cb_image) {
     PsGnmHooks::PatchImage(p_image, cb_image);
     PsFrameRate::PatchImage(p_image, cb_image);
+    // PS_GUEST_HOOKS=0: nothing more of the game's code hooked (the frame rate stays with the
+    // patches then: patches.cpp).
+    if (const char* sz_env = std::getenv("PS_GUEST_HOOKS"); sz_env && sz_env[0] == '0') {
+        return;
+    }
+    PsMouseLook::PatchImage(p_image, cb_image);
+    PsMenuPointer::PatchImage(p_image, cb_image);
 }
 
 void ReportStats() {
@@ -92,6 +104,10 @@ extern const Profile BloodborneProfile = {
     .pfn_report_stats = ReportStats,
     .label_release = LabelRelease,
     .small_object_pool = {.off_header = 0xfc0, .cb_block = 0x30},
+    .mouse = {.pfn_camera_look = PsMouseLook::Turn,
+              .pfn_window_event = PsMenuPointer::WindowEvent,
+              .pfn_wants_pointer = PsMenuPointer::WantsPointer,
+              .pfn_filter_pad = PsMenuPointer::FilterPad},
 };
 
 } // namespace Game

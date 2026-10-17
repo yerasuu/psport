@@ -150,6 +150,23 @@ struct OnlineServices {
     const char* sz_summon_route = nullptr;
 };
 
+/// The mouse in the game's own code (keyboard-and-mouse play), from hooks the profile installs.
+struct MouseHooks {
+    /// Native mouse look (src/input/runtime_pad.c): turns the game's camera by pitch and yaw
+    /// (radians) at its next update. False while the camera does not take turns (lock-on, menus)
+    /// or its hook is not in: the mouse drives the right stick then.
+    bool (*pfn_camera_look)(float pitch, float yaw) = nullptr;
+    /// Every window event first (an SDL_Event and the SDL_Window, on the window thread): true takes
+    /// it, and neither the port nor the game sees it.
+    bool (*pfn_window_event)(const void* p_sdl_event, void* p_sdl_window) = nullptr;
+    /// True while the game shows a menu the mouse points into: the window lets the mouse go and
+    /// shows the cursor, and takes the mouse back after (as it had it).
+    bool (*pfn_wants_pointer)() = nullptr;
+    /// Changes to the pad state the game reads (runtime_pad.c, after the host's and the scripted
+    /// input, on the game's thread): the buttons (PS4 bits); the sticks (lx ly rx ry) as they are.
+    void (*pfn_filter_pad)(std::uint32_t* p_buttons, const std::uint8_t* p_sticks) = nullptr;
+};
+
 /// The translator's knowledge of the game's code, gated by PS_GAME_PROFILE: it makes the game
 /// faster or easier to diagnose, never makes it work.
 struct Profile {
@@ -199,6 +216,7 @@ struct Profile {
     LabelReleaseCode label_release;
     /// The pool holding the game's GPU labels; zeros when unknown, and the free check stays off.
     SmallObjectPool small_object_pool;
+    MouseHooks mouse;
 };
 
 /// The game as psport runs it, whatever PS_GAME_PROFILE says.
@@ -290,6 +308,12 @@ inline std::uint32_t Anisotropy() {
 inline UpscalerPlacement Upscaler() {
     const Profile* p_profile = Active();
     return p_profile ? p_profile->upscaler : UpscalerPlacement{};
+}
+
+/// The active profile's mouse hooks, or none.
+inline MouseHooks Mouse() {
+    const Profile* p_profile = Active();
+    return p_profile ? p_profile->mouse : MouseHooks{};
 }
 
 /// Whether the active profile's hooks pace the game's frames (Profile::pfn_drives_frame_rate).

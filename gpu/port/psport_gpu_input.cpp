@@ -3,6 +3,7 @@
 #include <cstring>
 #include <string>
 #include "../psport_gpu.h"
+#include "game_profile.h"
 #include "psport_overlay.h"
 #include "sdl_window.h"
 
@@ -53,6 +54,17 @@ extern "C" int psport_gpu_game_keyboard_take(PsKeyEvent* p_events, int max, int*
 
 extern "C" void psport_gpu_mouse_look_enable(int is_enabled) {
     Frontend::WindowSDL::EnableMouseLook(is_enabled != 0);
+}
+
+extern "C" int psport_gpu_camera_look(float pitch, float yaw) {
+    const Game::MouseHooks mouse = Game::Mouse();
+    return mouse.pfn_camera_look && mouse.pfn_camera_look(pitch, yaw) ? 1 : 0;
+}
+
+extern "C" void psport_gpu_filter_pad(uint32_t* p_buttons, const uint8_t* p_sticks) {
+    if (const Game::MouseHooks mouse = Game::Mouse(); mouse.pfn_filter_pad) {
+        mouse.pfn_filter_pad(p_buttons, p_sticks);
+    }
 }
 
 extern "C" int psport_gpu_text_input_begin(const char* sz_initial, const char* sz_prompt) {

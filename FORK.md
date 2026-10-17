@@ -50,6 +50,7 @@ source commit), as the rows below already are. Last reviewed points:
 | Guest code hooks: a byte-checked jump to a trampoline that hands a host function every register (shadPS4's `InstallGuestCodeHook` of the shadp2p/BBSC forks), the stub emitter of bbport's detours | `gpu/port/psport_guest_code.*` (`PsGuestCode::InstallHook`, `InstallDetour`, `Emitter`) | bbport `72e5c8c` (`gpu/shim/bbport_guest_code_hooks.*`, `bbport_guest_code.h`) | for any game's profile; results as `PsGuestCode::Error` values instead of `bool`, every hook logged when it goes in or is refused; `RedirectOperand` (a RIP-relative operand moved, checked with Zydis) and `MapNear` added; pages still writable during the loader's patching are written in place |
 | Chord bindings (a modifier per key slot; its plain bindings held back while the chord's modifier is down), the device in use and short key names for button prompts, the Dark Souls III-like layout | `src/input/runtime_pad.*` (`apply_binding_line`, `is_chord_held`, `runtime_pad_prompt*`), `gpu/games/bloodborne/title.cpp` (`DefaultControls`), `gpu/games/game_profile.h` (`sz_default_controls`), `launcher/psport_launcher.py` (`CONTROLS`) | bbport `72e5c8c` (`src/runtime_pad.c`) | the layout is Bloodborne's title data, other games keep psport's neutral layout; the motion emulation (spray can) and two-finger touch not ported |
 | Bloodborne's frame rate by hooks: the pacer's mode, late frames and the main loop's step detoured, two fixed steps, the run's wall check by speed, 48 RIP-relative constants read from a live page rewritten each frame (dt, damping, approaches, cloth stiffness), 480 FPS cap | `gpu/games/bloodborne/frame_rate.*`, `patches.cpp` (`FrameHooksRefusal`, `FrameHooksChosen`), `game_check.cpp` (`IsSupportedImage`), `profile.cpp`, `gpu/games/game_profile.h` (`pfn_drives_frame_rate`), `video_out.cpp` | bbport `72e5c8c` (`gpu/shim/bbport_frame_rate.*`, `BB_FRAME_HOOKS`) | through `PsGuestCode`; chosen at launch (`PS_FRAME_HOOKS`, the profile, the guest hooks, the 1.09 executable's digest) so the preset's patches stay the fallback; the 60 and 90 presets keep their vblank |
+| Native mouse look (the follow camera's turn increment detoured, the mouse's turn added; a turn not taken for 100 ms hands the mouse back to the right stick) and the menu pointer (Scaleform list hit testing, cursor moves, clicks as pad presses), the window's motion settle after capture | `gpu/games/bloodborne/mouse_look.*`, `menu_pointer.*`, `profile.cpp`, `gpu/games/game_profile.h` (`MouseHooks`), `gpu/port/psport_gpu_input.cpp`, `gpu/shim/window.cpp`, `src/input/runtime_pad.c` (`apply_mouse_look`) | bbport `72e5c8c` (`gpu/shim/bbport_guest_hooks.cpp` `InstallLookHook`, `gpu/games/bloodborne_menu_pointer.*`, `gpu/shim/window.cpp`, `BB_NATIVE_MOUSE`, `BB_MENU_POINTER`) | through `PsGuestCode`, installed with the profile's `patch_image` (after the launch's patches); the window and pad parts are profile callbacks instead of registration lists |
 
 ## Names
 
@@ -130,7 +131,7 @@ obvious.
 | Custom border colour without a table | `video_core/texture_cache/sampler.cpp` | a sampler with a custom border colour while `TA_BC_BASE` is 0 samples transparent black (the hardware's fetch reads an unmapped page as zeros) instead of reading the table at guest address 0 (a segfault); logged with a count | bug present at `3a9f572` |
 | Synchronous image downloads | `video_core/texture_cache/texture_cache.cpp` | the buffer invalidation after a synchronous image download reads back GPU data in place (`assume_locks`) instead of queuing it to the GPU command thread: downloads run on that thread or the draw recording thread, and the queued readback never ran while the command thread drained the draw pipe (Onigiri hung after its first frame once it had a mouse) | no (bbport's draw recording thread) |
 | Command buffer pool growth | `video_core/renderer_vulkan/vk_resource_pool.cpp` | `CommitResource` searches again with the GPU tick it has just refreshed: the search lambda had captured the tick before the refresh, so every pass through the pool overflowed and added four command buffers, and the driver's buffers behind them (~384 KiB of VRAM each time, ~2.5 MiB a minute in play, never freed) | bug present at `3a9f572` |
-| Presenter | `video_core/renderer_vulkan/vk_presenter.cpp` | logs the first presented game frame once (`tools/regress.sh` reads it) | no |
+| Presenter | `video_core/renderer_vulkan/vk_presenter.cpp` | logs the first presented game frame once (`tools/regress.sh` reads it); publishes the shown frame's aspect ratio (`PsSettings` `shown_frame_aspect`, a menu pointer's window-to-frame mapping) | no |
 | VideoOut flip rate | `core/libraries/videoout/video_out.cpp` | `sceVideoOutSetFlipRate` keeps rate 0 while the game profile's hooks pace the frames (`Game::DrivesFrameRate`), logged once | no |
 | Quirk registry | `video_core/renderer_vulkan/vk_instance.cpp` | the chosen physical device's vendor, driver id, name and driver version go to `runtime_quirks_note_gpu` before `CreateDevice` (`HOST` quirks, [docs/en/QUIRKS.md](docs/en/QUIRKS.md)) | no |
 | Prepared vertex streams | `video_core/renderer_vulkan/vk_rasterizer.cpp`, `vk_rasterizer.h` | a draw-preparation worker's vertex inputs are used only while its V#s equal the ones read in order for the draw (`ArePreparedVsharpsCurrent`): the worker reads the V# tables ahead of the constant engine dumps that rewrite them, and the user data it verifies holds only the tables' address (Onigiri's login screen and PSN notice drew with another draw's vertices) | no (bbport's draw preparation) |
@@ -238,6 +239,24 @@ mouse look. The log says once whether the host mouse reaches the game (`Runtime:
 `game_mouse_sensitivity` in `psport.ini` (0.05 to 20, default 1: the host's pixels as they are)
 scales the motion the game receives, keeping fractions for the next read; a value other than 1 is
 logged. Mouse look keeps its own `mouse_sensitivity`.
+
+Mouse look (`src/input/runtime_pad.c`, while the window holds the mouse) turns the game's camera
+itself where the game's profile hooks it (`Game::MouseHooks` `pfn_camera_look`,
+`psport_gpu_camera_look`): as far as the mouse moved, 0.0015 rad a pixel at `mouse_sensitivity` 1,
+with none of the stick's dead zone or acceleration. Where the camera does not take the turn (no
+hook, lock-on, menus) the mouse drives the right stick as before. Bloodborne's hook is
+`gpu/games/bloodborne/mouse_look.cpp`; `PS_NATIVE_MOUSE=0` keeps the stick. The window ignores the
+mouse's motion for 100 ms after taking it, so the pointer's jump into relative mode does not turn
+the camera.
+
+A profile may also give the mouse a pointer in the game's own menus (`Game::MouseHooks`
+`pfn_wants_pointer`, `pfn_window_event`, `pfn_filter_pad`): while it says a menu is open the window
+lets the mouse go and shows the cursor, its events go to the profile first, and the presses it
+makes reach the game through the pad state (`psport_gpu_filter_pad`). Bloodborne's
+(`gpu/games/bloodborne/menu_pointer.cpp`) hooks its Scaleform list update: hovering selects, the
+left button confirms (or moves a slider), the right one goes back, the wheel moves up and down
+(`Menu pointer: ...` in the log; `PS_MENU_POINTER=0` turns it off, `PS_MENU_POINTER_FILE=<file>`
+with `x y [click|right|up|down]` in stage pixels drives it in tests).
 
 ## Keyboard
 

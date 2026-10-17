@@ -5,6 +5,7 @@
 #include <cstring>
 #include <SDL3/SDL.h>
 #include "common/logging/log.h"
+#include "game_profile.h"
 #include "sdl_window.h"
 #include "psport_overlay.h"
 
@@ -266,6 +267,9 @@ void WindowSDL::CaptureMouse(bool should_capture) {
         m_c_wheel_up = m_c_wheel_down = 0;
     }
     m_is_mouse_captured.store(should_capture, std::memory_order_relaxed);
+    if (should_capture) {
+        m_capture_settle_ms = SDL_GetTicks() + 100;
+    }
     static bool s_has_told;
     if (should_capture && !s_has_told) {
         s_has_told = true;
@@ -302,11 +306,18 @@ bool WindowSDL::PollEvents() {
     if (!m_is_text_active) {
         PsOverlay::UpdateTextInput(m_p_window);
     }
+    const Game::MouseHooks game_mouse = Game::Mouse();
+    // A menu of the game's that the mouse points into (Game::MouseHooks pfn_wants_pointer).
+    const bool is_pointer_wanted = game_mouse.pfn_wants_pointer && game_mouse.pfn_wants_pointer();
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
+        if (game_mouse.pfn_window_event && game_mouse.pfn_window_event(&event, m_p_window)) {
+            continue;
+        }
         if (event.type == SDL_EVENT_MOUSE_MOTION) {
             m_last_mouse_motion_ms = SDL_GetTicks();
-            if (m_is_mouse_captured.load(std::memory_order_relaxed)) {
+            // Just taken: the pointer's jump into relative mode is not a turn of the camera.
+            if (m_is_mouse_captured.load(std::memory_order_relaxed) && SDL_GetTicks() >= m_capture_settle_ms) {
                 std::scoped_lock lock{m_mouse_mutex};
                 m_mouse_dx += event.motion.xrel;
                 m_mouse_dy += event.motion.yrel;
@@ -344,7 +355,8 @@ bool WindowSDL::PollEvents() {
         // button: runtime_pad.c reads the buttons only while it is held); F1 and leaving the
         // window let it go.
         if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && !m_is_mouse_captured.load(std::memory_order_relaxed) &&
-            m_is_mouse_look.load(std::memory_order_relaxed) && !PsOverlay::MenuOpen() && !PsOverlay::GameCursorShown()) {
+            m_is_mouse_look.load(std::memory_order_relaxed) && !PsOverlay::MenuOpen() && !PsOverlay::GameCursorShown() &&
+            !is_pointer_wanted) {
             CaptureMouse(true);
             continue;
         }
@@ -397,16 +409,28 @@ bool WindowSDL::PollEvents() {
          !m_is_mouse_look.load(std::memory_order_relaxed))) {
         CaptureMouse(false);
     }
+    // The game's pointer menus: the mouse goes, and comes back when they close.
+    if (is_pointer_wanted && m_is_mouse_captured.load(std::memory_order_relaxed)) {
+        CaptureMouse(false);
+        m_is_released_for_pointer = true;
+    } else if (!is_pointer_wanted && m_is_released_for_pointer) {
+        m_is_released_for_pointer = false;
+        if (m_is_mouse_look.load(std::memory_order_relaxed) && !PsOverlay::MenuOpen() && !m_is_text_active &&
+            (SDL_GetWindowFlags(m_p_window) & SDL_WINDOW_INPUT_FOCUS)) {
+            CaptureMouse(true);
+        }
+    }
+    m_is_pointer_shown = is_pointer_wanted;
     UpdateCursor();
     return m_is_open;
 }
 
 // Issue #3: the OS cursor over the game. Hidden in fullscreen, while the game draws its own
 // (VideoOut's hardware cursor), and in a window after 3 s without moving the mouse; always shown
-// while the settings menu is open.
+// while the settings menu or a game's pointer menu is open.
 void WindowSDL::UpdateCursor() {
     const bool is_fullscreen = (SDL_GetWindowFlags(m_p_window) & SDL_WINDOW_FULLSCREEN) != 0;
-    const bool should_hide = !PsOverlay::MenuOpen() && (is_fullscreen || PsOverlay::GameCursorShown() ||
+    const bool should_hide = !PsOverlay::MenuOpen() && !m_is_pointer_shown && (is_fullscreen || PsOverlay::GameCursorShown() ||
                                                  SDL_GetTicks() - m_last_mouse_motion_ms > 3000);
     if (should_hide != m_is_cursor_hidden) {
         m_is_cursor_hidden = should_hide;

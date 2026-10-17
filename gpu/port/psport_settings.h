@@ -50,6 +50,8 @@ struct Values {
     std::atomic<bool> should_use_fsr4_auto_exposure{true};
     std::atomic<bool> should_invert_fsr4_jitter{false};
     std::atomic<int> active_render_width{1920}, active_render_height{1080};
+    /// The presented frame's width / height, which the window letterboxes; set by the presenter.
+    std::atomic<float> shown_frame_aspect{1920.0f / 1080.0f};
     /// Applied at start (the game title's patches), in the order of Game::Effects()'s switches,
     /// c_effects of them; the menu shows when a restart is needed.
     std::atomic<bool> effects[MaxEffects]{};
