@@ -4,6 +4,7 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cstdlib>
 
@@ -29,6 +30,11 @@ using LockType = Common::AdaptiveMutex;
 #else
 using LockType = Common::SpinLock;
 #endif
+
+/// psport: counts every change that marks pages CPU-modified anywhere, bumped before the bits are
+/// set (as a guest write's fault comes before its store): a reading binding found settled at one
+/// value needs no upload check while it holds (BufferCache::BindMemo).
+inline std::atomic<u64> g_cpu_change_epoch{0};
 
 /**
  * Allows tracking CPU and GPU modification of pages in a contigious 16MB virtual address region.
@@ -94,6 +100,7 @@ public:
 
         RegionBits& bits = GetRegionBits<type>();
         if constexpr (type == Type::CPU && enable) {
+            g_cpu_change_epoch.fetch_add(1, std::memory_order_acq_rel);
             CountWriteFaults(start_page, end_page);
         }
         if constexpr (enable) {
@@ -122,6 +129,7 @@ public:
         if (add.None()) {
             return;
         }
+        g_cpu_change_epoch.fetch_add(1, std::memory_order_acq_rel);
         cpu |= add;
         UpdateProtection<false, false>();
     }
@@ -286,6 +294,7 @@ private:
             num_hot = 0;
             return;
         }
+        g_cpu_change_epoch.fetch_add(1, std::memory_order_acq_rel);
         cpu |= RegionBits(hot, start_page, end_page);
     }
 

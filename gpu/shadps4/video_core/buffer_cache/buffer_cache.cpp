@@ -729,20 +729,26 @@ void BufferCache::ReadMemory(VAddr device_addr, u64 size, bool is_write, bool as
     }
 }
 
-bool BufferCache::LayerReadTrapHit(VAddr address, bool assume_locks) {
+bool BufferCache::LayerReadTrapHit(VAddr address, TrapCaller caller) {
     if (!(PsLayer::WriteTraps::Reasons(address) & PsLayer::WriteTraps::VramData)) {
         return false;
     }
     layer_read_trap_hits.fetch_add(1, std::memory_order_relaxed);
-    if (assume_locks) {
-        LayerCopyBackForCpu(address);
-    } else {
-        liverpool->SendCommand<true>([this, address] { LayerCopyBackForCpu(address); });
+    switch (caller) {
+    case TrapCaller::Guest:
+        liverpool->SendCommand<true>([this, address] { LayerCopyBackForCpu(address, true); });
+        break;
+    case TrapCaller::CommandThread:
+        LayerCopyBackForCpu(address, true); // the caller drained the draw pipe
+        break;
+    case TrapCaller::RecordingThread:
+        LayerCopyBackForCpu(address, false);
+        break;
     }
     return true;
 }
 
-void BufferCache::LayerCopyBackForCpu(VAddr address) {
+void BufferCache::LayerCopyBackForCpu(VAddr address, bool may_record) {
     if (!(PsLayer::WriteTraps::Reasons(address) & PsLayer::WriteTraps::VramData)) {
         return; // copied back meanwhile
     }
@@ -763,9 +769,23 @@ void BufferCache::LayerCopyBackForCpu(VAddr address) {
         });
     }
     bool copied = copies.empty();
+    if (!copies.empty() && !may_record && tick != 0 && !scheduler.IsSubmitted(tick)) {
+        // The recording thread itself, before its own GPU writes are submitted: they cannot be
+        // waited for here. The page is read as it is in the game's memory (as without read
+        // traps); the GPU's data stays marked for later copies back.
+        layer_read_trap_stale.fetch_add(1, std::memory_order_relaxed);
+        std::scoped_lock lk{layer_read_trap_mutex};
+        PsLayer::WriteTraps::Set(from, block_size, PsLayer::WriteTraps::VramData, false);
+        layer_read_trapped.Subtract(from, block_size);
+        return;
+    }
     if (!copies.empty()) {
         if (tick != 0 && !scheduler.IsFree(tick)) {
-            scheduler.Wait(tick); // submitted, and done
+            if (may_record) {
+                scheduler.Wait(tick); // submitted, and done
+            } else {
+                scheduler.GetWorkSemaphore()->Wait(tick); // submitted already: done
+            }
         }
         auto& readback = SharedReadback(instance);
         if (readback.Available() && !PsToggle::Disabled(PsToggle::ReadbackQueue)) {
@@ -781,14 +801,23 @@ void BufferCache::LayerCopyBackForCpu(VAddr address) {
         }
         if (copied) {
             gpu_modified_ranges.Subtract(from, block_size);
-        } else {
+        } else if (may_record) {
             // No readback queue: a copy in stream order, waited for.
             LayerCopyBack(from >> block_shift, (from >> block_shift) + 1);
             scheduler.Finish();
+        } else {
+            layer_read_trap_stale.fetch_add(1, std::memory_order_relaxed);
         }
         layer_read_trap_bytes.fetch_add(total, std::memory_order_relaxed);
     } else if (layer_copy_back_tick != 0 && !scheduler.IsFree(layer_copy_back_tick)) {
-        scheduler.Wait(layer_copy_back_tick); // a copy back recorded is not done yet
+        // A copy back recorded is not done yet.
+        if (may_record) {
+            scheduler.Wait(layer_copy_back_tick);
+        } else if (scheduler.IsSubmitted(layer_copy_back_tick)) {
+            scheduler.GetWorkSemaphore()->Wait(layer_copy_back_tick);
+        } else {
+            layer_read_trap_stale.fetch_add(1, std::memory_order_relaxed);
+        }
     }
     std::scoped_lock lk{layer_read_trap_mutex};
     PsLayer::WriteTraps::Set(from, block_size, PsLayer::WriteTraps::VramData, false);
@@ -1030,6 +1059,21 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
         u64 first = ~0ULL, last = 0, generation = 0;
         const Buffer* arena = nullptr;
     };
+    if (LayerMode() && !is_written && !is_texel_buffer && !stats && BindMemoOn()) {
+        // psport: a reading binding resolved before, with nothing changed since (BindMemo).
+        if (maintained_epoch != packet_epoch) {
+            Maintain();
+        }
+        LayerProcessTraps();
+        const BindMemo& memo = BindMemoSlot(device_addr, size);
+        if (memo.va_range == device_addr && memo.cb_range == size && memo.generation == layer_generation &&
+            memo.second == PsStats::g_coarse_second.load(std::memory_order_relaxed) &&
+            memo.epoch == g_cpu_change_epoch.load(std::memory_order_acquire)) {
+            (memo.is_vram ? PsStats::g_cb_bound_vram : PsStats::g_cb_bound_in_place)
+                .fetch_add(size, std::memory_order_relaxed);
+            return {memo.p_buffer, memo.off_buffer};
+        }
+    }
     // psport PS_LAYER_MEMORY: the game's memory in place through its chunk buffer (the module
     // says which); what is not whole in one chunk takes the paths below (VRAM copies).
     if (LayerMode() && (is_written || size > STREAM_THRESHOLD || ConstantsInPlace() ||
@@ -2244,6 +2288,34 @@ void BufferCache::ProcessPendingAssets() {
             continue;
         }
         asset_bytes.Add({addr, addr + size});
+        // psport: a block the GPU once wrote in place (dynamic for good) that the loaders have now
+        // written whole holds only the CPU's data, so it may have a VRAM copy again. Kept, such
+        // marks piled up as areas loaded over memory the previous area's GPU buffers had used
+        // (164 -> 1117 MiB after a few lamp travels), and one such block kept a whole range in
+        // place (FPS -28 %). GPU writes there stay in place (layer_cpu_blocks) so that the CPU
+        // never reads behind a VRAM copy; blocks the CPU writes often stay dynamic.
+        // PS_LAYER_RELOAD_RESET=0: as before.
+        static const bool s_should_reset_reloaded = [] {
+            const char* sz_env = std::getenv("PS_LAYER_RELOAD_RESET");
+            return !(sz_env && sz_env[0] == '0');
+        }();
+        if (LayerMode() && s_should_reset_reloaded) {
+            for (u64 block = first; block < end; ++block) {
+                if (!dynamic_blocks.Contains(block) || layer_cpu_hot.Contains(block, block + 1)) {
+                    continue;
+                }
+                bool is_whole = true;
+                asset_bytes.ForEachGap(block << block_shift, (block + 1) << block_shift,
+                                       [&](u64, u64) { is_whole = false; });
+                if (!is_whole) {
+                    continue;
+                }
+                layer_cpu_blocks.Add({block, block + 1});
+                dynamic_blocks.Subtract(block, block + 1);
+                layer_write_bounces.Subtract(block, block + 1);
+                PsStats::g_cb_dynamic_reloaded.fetch_add(block_size, std::memory_order_relaxed);
+            }
+        }
         for (u64 block = first; block < end; ++block) {
             const bool in_place =
                 LayerMode() ? !PsLayer::GpuMemory::Get().AnyValid(block, block + 1)
@@ -2931,6 +3003,40 @@ void BufferCache::ProcessPendingUnmaps() {
         }
         asset_bytes.Subtract(first << block_shift, end << block_shift);
         gpu_written_bytes.Subtract(first << block_shift, end << block_shift);
+        // psport: blocks wholly unmapped hold nobody's data: whatever kept them in place (CPU
+        // writes, GPU writes in place, a failed watch) is over, and memory mapped there again
+        // starts as new. PS_LAYER_UNMAP_RESET=0: as before.
+        static const bool s_should_reset_unmapped = [] {
+            const char* sz_env = std::getenv("PS_LAYER_UNMAP_RESET");
+            return !(sz_env && sz_env[0] == '0');
+        }();
+        if (const u64 whole_first = (addr + block_size - 1) >> block_shift, whole_end = (addr + size) >> block_shift;
+            s_should_reset_unmapped && whole_first < whole_end) {
+            static u64 s_cb_unmap_reset = 0;
+            const u64 cb_reset = (whole_end - whole_first) << block_shift;
+            if (((s_cb_unmap_reset + cb_reset) >> 26) != (s_cb_unmap_reset >> 26)) {
+                std::printf("Guest memory: %llu MiB of unmapped blocks started over\n",
+                            (unsigned long long)((s_cb_unmap_reset + cb_reset) >> 20));
+            }
+            s_cb_unmap_reset += cb_reset;
+            dynamic_blocks.Subtract(whole_first, whole_end);
+            if (LayerMode()) {
+                layer_cpu_blocks.Subtract(whole_first, whole_end);
+                layer_cpu_hot.Subtract(whole_first, whole_end);
+                layer_watch_failed.Subtract(whole_first, whole_end);
+                layer_write_bounces.Subtract(whole_first, whole_end);
+                layer_watched.Subtract(whole_first, whole_end);
+                layer_edge_blocks.Subtract(whole_first, whole_end);
+                layer_volatile.Subtract(whole_first, whole_end);
+                for (u64 block = whole_first; block < whole_end; ++block) {
+                    layer_watch_strikes.erase(block);
+                }
+            }
+            std::scoped_lock dynamic_lock{dynamic_mutex};
+            for (u64 block = whole_first; block < whole_end; ++block) {
+                cpu_write_frames.erase(block);
+            }
+        }
         copy_back_blocks.Subtract(first, end);
         promote_candidates.Subtract(first, end);
         idle_demoted.Subtract(first, end);

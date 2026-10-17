@@ -214,6 +214,7 @@ private:
         }
         // Each manager tracks a 4_MB virtual address space.
         auto* new_manager = free_managers.back();
+        g_cpu_change_epoch.fetch_add(1, std::memory_order_acq_rel); // a new region is all CPU-modified
         new_manager->SetCpuAddress(base_cpu_addr);
         free_managers.pop_back();
         top_tier[page_index] = new_manager;

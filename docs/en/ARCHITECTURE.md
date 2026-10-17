@@ -355,6 +355,14 @@ Guest memory: detected device="..." driver=MesaRadv vram_mib=.. rebar_mib=.. hos
 Write traps on guest pages are shared by the runtime and the GPU library
 (`gpu/layer/pslayer_write_traps.h`, `runtime_memory_trap`).
 
+With the memory module, a block whose VRAM copy the CPU writes unannounced is caught by its write
+trap, which is lifted under the trap lock before the hit is queued. A range the GPU writes may lie
+in VRAM even when it covers its first or last block in part: those edge blocks are trapped, and the
+GPU's bytes in them are copied back before the CPU's write sends them in place. Blocks the GPU once
+wrote in place stay there until the loaders rewrite them whole (`PS_LAYER_RELOAD_RESET`) or the game
+unmaps them (`PS_LAYER_UNMAP_RESET`). A reading binding resolved before is reused without the
+module's walk while no block moved and no page became CPU-modified (`PS_BIND_MEMO`).
+
 ### Buffer V#s picked at run time
 
 The recompiler binds a buffer by tracing its V# (the 4-dword buffer descriptor) to where the CPU

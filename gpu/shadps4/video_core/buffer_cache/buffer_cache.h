@@ -115,10 +115,13 @@ public:
     /// Flushes any GPU modified buffer in the logical page range back to CPU memory.
     void ReadMemory(VAddr device_addr, u64 size, bool is_write = false, bool assume_locks = false);
 
+    /// Who hit a read trap: a guest (or runtime) thread, the GPU command thread (stage A, the
+    /// draw pipe drained) or the draw recording thread (stage B: it may not record or flush).
+    enum class TrapCaller { Guest, CommandThread, RecordingThread };
     /// psport PS_LAYER_READ_TRAPS: a CPU access hit a page whose newest data the GPU wrote into a
-    /// VRAM copy only: the block's GPU data is copied back into the game's memory first (on the
-    /// GPU command thread unless `assume_locks`). False: not such a page.
-    bool LayerReadTrapHit(VAddr address, bool assume_locks);
+    /// VRAM copy only: the block's GPU data is copied back into the game's memory first (a guest's
+    /// access on the GPU command thread). False: not such a page.
+    bool LayerReadTrapHit(VAddr address, TrapCaller caller);
 
     /// psport: a new draw or dispatch is being recorded: the per-binding housekeeping of
     /// EnsureResident (unmaps, demotions, assets, late writes) runs once for it, not per binding.
@@ -377,6 +380,21 @@ private:
     bool SynchronizeMemoryFromImage(const Buffer* buffer, u64 offset, VAddr device_addr, u32 size);
     /// psport PS_LAYER_MEMORY (statistics): a binding not whole in one chunk.
     void NoteLayerMiss(VAddr address, u64 size, bool is_written);
+    /// psport: reading bindings LayerBind resolved to a whole mirror or in place, reused while
+    /// nothing moved (layer_generation), the CPU marked nothing modified anywhere
+    /// (g_cpu_change_epoch: no upload can be due) and within the same second (the idle tracking's
+    /// use marks are per second). PS_BIND_MEMO=0: every binding takes the full path.
+    struct BindMemo {
+        VAddr va_range = 0;
+        u64 cb_range = 0, generation = 0, epoch = 0, off_buffer = 0;
+        const Buffer* p_buffer = nullptr;
+        u32 second = 0;
+        bool is_vram = false;
+    };
+    static BindMemo& BindMemoSlot(VAddr va_range, u64 cb_range);
+    static bool BindMemoOn();
+    void StoreBindMemo(VAddr va_range, u64 cb_range, u64 epoch, const Buffer* p_buffer, u64 off_buffer,
+                       bool is_vram);
     /// psport PS_LAYER_MEMORY (buffer_cache_layer.cpp): a binding through the layer's memory
     /// module: a mirror in VRAM, or in place (empty: neither; the arena takes it). may_promote
     /// false (image uploads): a mirror only where the range is in VRAM already, none made for it.
@@ -506,6 +524,11 @@ private:
     /// in VRAM (layer_cpu_blocks). On NVIDIA shaders reading the game's memory over the bus were
     /// slow where the model of 0.3 had copies in VRAM.
     IntervalList<> layer_watched;
+    /// Blocks a range the GPU writes covers only in part (its first and last), moved to VRAM with
+    /// it all the same (LayerBind): a trap catches the CPU writing beside it, and the GPU's bytes
+    /// there are copied back before the block goes in place. Otherwise a frame-sized buffer went
+    /// in place for two such blocks of 305 (#149).
+    IntervalList<> layer_edge_blocks;
     /// Watched blocks that went back in place for writes (LayerDemote): not watched again.
     IntervalList<> layer_watch_failed;
     std::unordered_map<u64, u8> layer_watch_strikes; ///< watched blocks sent back for requests
@@ -530,7 +553,14 @@ private:
     std::atomic<u64> layer_read_trap_hits{0}, layer_read_trap_bytes{0};
     static bool LayerReadTrapsOn();
     void LayerArmReadTraps(VAddr address, u64 size);
-    void LayerCopyBackForCpu(VAddr address);
+    /// `may_record`: the scheduler may be flushed and copies recorded (not on the recording
+    /// thread, which may be inside a render pass with its own commands half recorded).
+    void LayerCopyBackForCpu(VAddr address, bool may_record);
+    std::atomic<u64> layer_read_trap_stale{0}; ///< recording thread hits on unsubmitted GPU data
+    /// PS_LAYER_VERIFY=1 (diagnostics): stale VRAM copies reported (LayerVerifyMirror).
+    static bool LayerVerifyOn();
+    void LayerVerifyMirror(VAddr address, u64 size, bool is_texel_buffer);
+    void LayerVerifyForget(u64 first_block, u64 end_block);
     u64 layer_watch_refreshes = 0;        ///< statistics: watched blocks uploaded again
     /// Statistics: trap hits announced; by the game's code on watched / other blocks; by other
     /// code on watched / other blocks.

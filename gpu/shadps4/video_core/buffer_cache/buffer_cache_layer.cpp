@@ -20,7 +20,11 @@
 #include <tuple>
 #include <string>
 #include <cstdio>
+#include <cstring>
+#include <memory>
+#include <unordered_map>
 #include <fmt/format.h>
+#include <xxhash.h>
 #include "psport_guest_memory.h"
 #include "psport_sections.h"
 #include "psport_toggles.h"
@@ -92,8 +96,10 @@ std::optional<std::pair<const Buffer*, u64>> BufferCache::LayerBind(VAddr va_ran
         u64 generation = 0;
         PsLayer::Resolution resolution;
     };
-    thread_local std::array<ResolveMemo, 512> resolve_memo{};
-    auto& memo = resolve_memo[((va_range >> 4) ^ (va_range >> 13) ^ cb_range) & (resolve_memo.size() - 1)];
+    // On the heap: a static TLS array is reserved on every thread's stack, and the game's threads
+    // with small stacks failed to start (pthread_create: EINVAL).
+    thread_local auto p_resolve_memo = std::make_unique<std::array<ResolveMemo, 2048>>();
+    auto& memo = (*p_resolve_memo)[((va_range * 0x9E3779B97F4A7C15ull) ^ (cb_range * 0xC2B2AE3D27D4EB4Full)) >> 53];
     PsLayer::Resolution resolution;
     if (memo.va_range == va_range && memo.cb_range == cb_range && memo.generation == layer_generation + 1) {
         resolution = memo.resolution;
@@ -249,16 +255,23 @@ std::optional<std::pair<const Buffer*, u64>> BufferCache::LayerBind(VAddr va_ran
         const u32 frame = static_cast<u32>(PsStats::g_frame_number.load(std::memory_order_relaxed));
         const bool should_skip = t.first == first && t.end == end && t.generation == layer_generation &&
                           t.frame == frame && t.is_written == is_written;
-        // Blocks with unannounced bytes are watched copies for a reading binding (PS_LAYER_WATCH).
-        std::vector<u64> blocks, unknown, watch;
+        // Blocks with unannounced bytes are watched copies for a reading binding (PS_LAYER_WATCH);
+        // for a writing one only its first and last block when it covers them in part
+        // (layer_edge_blocks).
+        std::vector<u64> blocks, unknown, watch, edges;
         for (u64 block = first; !should_skip && block < end && unknown.size() <= VolatileMaxBlocks;
              ++block) {
             if (!Layer().AnyValid(block, block + 1)) {
+                const bool is_partial = (block << block_shift) < va_range ||
+                                        ((block + 1) << block_shift) > va_range + cb_range;
                 if (LayerEligible(block)) {
                     blocks.push_back(block);
                 } else if (!is_written && LayerWatchable(block)) {
                     blocks.push_back(block);
                     watch.push_back(block);
+                } else if (is_written && is_partial && LayerWatchable(block)) {
+                    blocks.push_back(block);
+                    edges.push_back(block);
                 } else {
                     unknown.push_back(block);
                 }
@@ -273,7 +286,15 @@ std::optional<std::pair<const Buffer*, u64>> BufferCache::LayerBind(VAddr va_ran
             for (const u64 block : watch) {
                 layer_watched.Add({block, block + 1});
             }
+            for (const u64 block : edges) {
+                layer_edge_blocks.Add({block, block + 1});
+            }
             LayerPromote(blocks);
+            for (const u64 block : edges) {
+                if (!Layer().AnyValid(block, block + 1)) {
+                    layer_edge_blocks.Subtract(block, block + 1); // not moved (VRAM short)
+                }
+            }
             for (const u64 block : watch) {
                 if (Layer().AnyValid(block, block + 1)) {
                     layer_cpu_blocks.Add({block, block + 1}); // the GPU writes it in place
@@ -333,8 +354,16 @@ std::optional<std::pair<const Buffer*, u64>> BufferCache::LayerBind(VAddr va_ran
             }
             LayerRefreshVolatile(va_range, cb_range);
         }
+        if (!is_written && LayerVerifyOn()) {
+            LayerVerifyMirror(va_range, cb_range, is_texel_buffer);
+        }
+        // Read before the upload check, so that a CPU change during it makes the memo stale at once.
+        const u64 epoch = g_cpu_change_epoch.load(std::memory_order_acquire);
         // Uploads what the CPU changed there since (announced writes), images aliasing it.
         SynchronizeMemory(p_mirror, va_range, static_cast<u32>(cb_range), is_written, is_texel_buffer);
+        if (!is_written && !is_texel_buffer && can_promote && !layer_volatile.Overlaps(first, end)) {
+            StoreBindMemo(va_range, cb_range, epoch, p_mirror, p_mirror->Offset(va_range), true);
+        }
         if (is_written) {
             // The GPU's data is in VRAM only: copied back before the blocks go in place.
             gpu_modified_ranges.Add(va_range, cb_range);
@@ -364,6 +393,8 @@ std::optional<std::pair<const Buffer*, u64>> BufferCache::LayerBind(VAddr va_ran
             LayerCopyBack(first, end);
         }
     }
+    const bool is_pure_in_place = resolution.kind == Kind::InPlace;
+    const u64 epoch = g_cpu_change_epoch.load(std::memory_order_acquire);
     // In place (huge bindings over several chunks are cut at the end of the first).
     const auto in_place = LayerInPlace(va_range, cb_range, true);
     if (!in_place) {
@@ -389,8 +420,43 @@ std::optional<std::pair<const Buffer*, u64>> BufferCache::LayerBind(VAddr va_ran
     if (is_texel_buffer && !is_written) {
         SynchronizeMemoryFromImage(buffer, offset, va_range, static_cast<u32>(cb_range));
     }
+    // Small constants stay out, since ObtainBuffer copies them when not GPU-written (decode order).
+    if (!is_written && !is_texel_buffer && can_promote && is_pure_in_place &&
+        (cb_range > STREAM_THRESHOLD || ConstantsInPlace())) {
+        StoreBindMemo(va_range, cb_range, epoch, buffer, offset, false);
+    }
     TraceBinding(va_range, cb_range, is_written, is_written ? 0 : 2);
     return in_place;
+}
+
+bool BufferCache::BindMemoOn() {
+    static const bool s_is_on = [] {
+        const char* sz_env = std::getenv("PS_BIND_MEMO");
+        return !(sz_env && sz_env[0] == '0');
+    }();
+    return s_is_on;
+}
+
+BufferCache::BindMemo& BufferCache::BindMemoSlot(VAddr va_range, u64 cb_range) {
+    thread_local auto p_memo = std::make_unique<std::array<BindMemo, 4096>>(); // heap: see LayerBind
+    return (*p_memo)[((va_range * 0x9E3779B97F4A7C15ull) ^ (cb_range * 0xC2B2AE3D27D4EB4Full)) >> 52];
+}
+
+void BufferCache::StoreBindMemo(VAddr va_range, u64 cb_range, u64 epoch, const Buffer* p_buffer,
+                                u64 off_buffer, bool is_vram) {
+    if (!BindMemoOn()) {
+        return;
+    }
+    BindMemoSlot(va_range, cb_range) = {
+        .va_range = va_range,
+        .cb_range = cb_range,
+        .generation = layer_generation,
+        .epoch = epoch,
+        .off_buffer = off_buffer,
+        .p_buffer = p_buffer,
+        .second = PsStats::g_coarse_second.load(std::memory_order_relaxed),
+        .is_vram = is_vram,
+    };
 }
 
 bool BufferCache::LayerEligible(u64 block) {
@@ -490,7 +556,8 @@ void BufferCache::LayerPromote(const std::vector<u64>& blocks) {
         u64 run_first = ~0ULL, run_end = 0;
         for (u64 block = a; block < b; ++block) {
             if (Layer().AnyValid(block, block + 1) ||
-                !(LayerEligible(block) || layer_watched.Contains(block, block + 1))) {
+                !(LayerEligible(block) || layer_watched.Contains(block, block + 1) ||
+                  layer_edge_blocks.Contains(block, block + 1))) {
                 if (run_first != ~0ULL) {
                     moved += LayerPromoteRun(run_first, run_end);
                     run_first = ~0ULL;
@@ -578,6 +645,8 @@ u64 BufferCache::LayerPromoteRun(u64 first, u64 end) {
             Layer().RemoveMirror(old.base);
             auto node = layer_mirrors.extract(old.base);
             if (!node.empty()) {
+                // Otherwise the statistic only grew with every merge.
+                PsStats::g_cb_residency_alloc.fetch_sub(old.cb_source, std::memory_order_relaxed);
                 layer_retired.push_back({std::move(node.mapped()), scheduler.CurrentTick()});
             }
         }
@@ -596,6 +665,9 @@ u64 BufferCache::LayerPromoteRun(u64 first, u64 end) {
     gpu_modified_ranges.Subtract(from, cb_range);
     memory_tracker->MarkRegionAsCpuModified(from, cb_range);
     SynchronizeMemory(p_target, from, static_cast<u32>(cb_range), false, false);
+    if (LayerVerifyOn()) {
+        LayerVerifyForget(first, end); // a fresh copy: compared from its next binding
+    }
     LayerArmTraps(first, end); // writes nobody announces send it back in place
     // Paged bindings find the mirror (a merge moved its other blocks too). Not all of it: a
     // mirror of a GiB rewrote 16k entries for every run moved into it (160k in a frame).
@@ -661,6 +733,7 @@ void BufferCache::LayerDemote(u64 first, u64 end, bool should_copy_back, int rea
             }
         }
         layer_volatile.Subtract(a, b);
+        layer_edge_blocks.Subtract(a, b);
         // A watched block sent back for a GPU write (binding or command) is not watched again (it
         // came back for every binding, ~40 MiB/s while playing; memory handed out anew does not
         // clear it either: the game's allocator recycles some every frame); one sent back for an
@@ -762,10 +835,12 @@ void BufferCache::LayerMaintain() {
                 layer_read_trapped.ForEach([&](VAddr a, VAddr b) { trapped += b - a; });
             }
             std::printf("Layer memory: read traps (GPU data in VRAM only): %llu KiB trapped; %llu CPU "
-                        "accesses in 10 s, %llu KiB copied back for them\n",
+                        "accesses in 10 s, %llu KiB copied back for them, %llu by the recording "
+                        "thread before the GPU's writes went out (read as they were)\n",
                         (unsigned long long)(trapped >> 10),
                         (unsigned long long)layer_read_trap_hits.exchange(0),
-                        (unsigned long long)(layer_read_trap_bytes.exchange(0) >> 10));
+                        (unsigned long long)(layer_read_trap_bytes.exchange(0) >> 10),
+                        (unsigned long long)layer_read_trap_stale.exchange(0));
         }
         std::printf("Layer memory: back in place (MiB): written %llu, mixed %llu, command %llu, "
                     "request %llu, copy back %llu, unmap %llu, idle %llu; GPU data copied back %llu MiB\n",
@@ -777,6 +852,29 @@ void BufferCache::LayerMaintain() {
                     (unsigned long long)(s_cb_layer_demoted[5].load() >> 20),
                     (unsigned long long)(s_cb_layer_demoted[6].load() >> 20),
                     (unsigned long long)(layer_copied_back_bytes >> 20));
+        // What keeps blocks in place for good, and loaded data without a copy: over a long session
+        // the copies' share fell (84 % -> 50 %) while these marks only grew.
+        const auto mib = [&](const auto& list) {
+            u64 c_blocks = 0;
+            for (const auto& iv : list) {
+                c_blocks += iv.end - iv.start;
+            }
+            return (unsigned long long)((c_blocks << block_shift) >> 20);
+        };
+        u64 c_loaded_out = 0;
+        asset_bytes.ForEachInRange(0, ~0ULL, [&](const Interval& iv) {
+            for (u64 b = iv.start >> block_shift; b <= (iv.end - 1) >> block_shift; ++b) {
+                c_loaded_out += Layer().AnyValid(b, b + 1) ? 0 : 1;
+            }
+        });
+        std::printf("Layer memory: held in place (MiB): dynamic %llu (CPU-hot %llu), watch failed %llu, "
+                    "CPU-written %llu (GPU writes kept in place by them: %llu MiB in 10 s), write bounces "
+                    "%llu; dynamic blocks reloaded whole %llu; blocks with loaded data and no copy %llu MiB\n",
+                    mib(dynamic_blocks), mib(layer_cpu_hot), mib(layer_watch_failed), mib(layer_cpu_blocks),
+                    (unsigned long long)(PsStats::g_cb_gpu_writes_kept_by_cpu.exchange(0) >> 20),
+                    mib(layer_write_bounces),
+                    (unsigned long long)(PsStats::g_cb_dynamic_reloaded.load() >> 20),
+                    (unsigned long long)((c_loaded_out << block_shift) >> 20));
     }
 }
 
@@ -850,6 +948,7 @@ u64 BufferCache::LayerCompactMirrors(u64 wanted) {
             }
         });
         Layer().RemoveMirror(start);
+        PsStats::g_cb_residency_alloc.fetch_sub(cb_old, std::memory_order_relaxed); // replaced below
         u64 kept = 0;
         for (const auto& [a, b] : segments) {
             const VAddr base = a << block_shift;
@@ -1237,9 +1336,12 @@ bool BufferCache::LayerInImage(VAddr va_range, u64 cb_range) {
 
 bool BufferCache::LayerGpuWriteToVram(VAddr va_range, u64 cb_range) {
     const int mode = LayerGpuWritesMode();
-    const bool is_vram =
-        mode == 2 || (mode == 1 && !layer_cpu_blocks.Overlaps(va_range >> block_shift,
-                                                              ((va_range + cb_range - 1) >> block_shift) + 1));
+    const bool is_cpu_block =
+        layer_cpu_blocks.Overlaps(va_range >> block_shift, ((va_range + cb_range - 1) >> block_shift) + 1);
+    const bool is_vram = mode == 2 || (mode == 1 && !is_cpu_block);
+    if (mode == 1 && is_cpu_block) {
+        PsStats::g_cb_gpu_writes_kept_by_cpu.fetch_add(cb_range, std::memory_order_relaxed);
+    }
     // PS_LAYER_WRITE_LOG=1 (diagnostics): large GPU writes kept in place, and the images near them.
     static const bool s_should_log = std::getenv("PS_LAYER_WRITE_LOG") != nullptr;
     if (s_should_log && !is_vram && cb_range >= (u64{1} << 20)) {
@@ -1320,18 +1422,37 @@ void BufferCache::LayerArmReadTraps(VAddr va_range, u64 cb_range) {
 }
 
 void BufferCache::LayerQueuePromotion(u64 first, u64 end) {
-    thread_local std::array<std::pair<u64, u64>, 256> memo{};
-    thread_local std::array<u64, 256> memo_generation{};
-    const size_t slot = first & (memo.size() - 1);
-    if (memo[slot] == std::pair{first, end} && memo_generation[slot] == layer_generation) {
+    // Hashed by the whole range: indexed by its first block alone, ranges starting in the same
+    // block (vertex streams of one buffer) took each other's slot and 1 call in 8 walked its
+    // blocks again under the module's lock. Looked at again each second too, since blocks become
+    // known data without anything moving (loads, GPU writes).
+    struct Memo {
+        u64 first = ~0ULL, end = 0, generation = 0;
+        u32 second = 0;
+    };
+    thread_local auto p_memo = std::make_unique<std::array<Memo, 4096>>(); // heap: see LayerBind
+    auto& m = (*p_memo)[((first * 0x9E3779B97F4A7C15ull) ^ (end * 0xC2B2AE3D27D4EB4Full)) >> 52];
+    const u32 second = PsStats::g_coarse_second.load(std::memory_order_relaxed);
+    if (m.first == first && m.end == end && m.generation == layer_generation && m.second == second) {
         return;
     }
-    memo[slot] = {first, end};
-    memo_generation[slot] = layer_generation;
+    m = {first, end, layer_generation, second};
     if (!GarlicInVramForLayer()) {
         return;
     }
+    // And by block, since the rings the game writes each frame are new ranges every time but the
+    // same blocks.
+    struct BlockMemo {
+        u64 block = ~0ULL, generation = 0;
+        u32 second = 0;
+    };
+    thread_local auto p_block_memo = std::make_unique<std::array<BlockMemo, 4096>>();
     for (u64 block = first; block < end; ++block) {
+        auto& b = (*p_block_memo)[(block * 0x9E3779B97F4A7C15ull) >> 52];
+        if (b.block == block && b.generation == layer_generation && b.second == second) {
+            continue;
+        }
+        b = {block, layer_generation, second};
         if (!Layer().AnyValid(block, block + 1) && VramEligible(block)) {
             promote_candidates.Add({block, block + 1});
         }
@@ -1430,10 +1551,13 @@ bool LayerTrapHandler(void* p_context, void* p_fault_address) {
         if (!s_layer_trap_armed.erase(block)) {
             return false;
         }
+        // Under the lock, before the hit is visible: LayerProcessTraps re-arms a watched block
+        // under this lock, and an unprotect after it took that new trap away while the block still
+        // counted as armed, so the CPU's next writes went unseen and the VRAM copy stayed stale.
+        LayerUnprotect(block); // the write runs again, now through
         const auto* p_g = static_cast<const ucontext_t*>(p_context)->uc_mcontext.gregs;
         s_layer_trap_hits.emplace_back(block, u64(p_g[REG_RIP]));
     }
-    LayerUnprotect(block); // the write runs again, now through
     s_c_layer_trap_faults.fetch_add(1, std::memory_order_relaxed);
     s_is_layer_trap_pending.store(true, std::memory_order_release);
     return true;
@@ -1530,11 +1654,11 @@ void BufferCache::LayerDisarmTraps(u64 first, u64 end, bool should_demote) {
 }
 
 void BufferCache::LayerProcessTraps() {
-    PsStats::Timer timer{PsStats::g_t_layer[3]};
     LayerForgetGpuData(); // before any demotion copies the GPU's data back
     if (!s_is_layer_trap_pending.load(std::memory_order_acquire)) {
-        return;
+        return; // every binding asks: no clock read when there is nothing to do
     }
+    PsStats::Timer timer{PsStats::g_t_layer[3]};
     std::vector<std::pair<u64, u64>> hits;
     {
         std::scoped_lock lk{s_layer_trap_mutex};
@@ -1543,6 +1667,9 @@ void BufferCache::LayerProcessTraps() {
     }
     for (const auto& [block, rip] : hits) {
         const bool is_watched = layer_watched.Contains(block, block + 1);
+        // The CPU wrote beside a range the GPU writes in VRAM: the GPU's bytes there are copied
+        // back below before the block goes in place.
+        const bool is_edge = layer_edge_blocks.Contains(block, block + 1) && Layer().AnyValid(block, block + 1);
         ++layer_trap_kinds[rip == 0 ? 0 : (is_watched ? 1 : 2) + (IsGuestCode(rip) ? 0 : 2)];
         // The CPU uses this block: GPU writes there stay in place from now on (until it is handed
         // out again), so a VRAM copy never holds GPU data the CPU's data could meet.
@@ -1564,7 +1691,7 @@ void BufferCache::LayerProcessTraps() {
         // data again. An announced write: the GPU's data beside its bytes is copied back first
         // (LayerForgetGpuData took its bytes out). A write nobody announced: the CPU reuses the
         // memory, the GPU's data there is dead (copying it back would land over the CPU's).
-        LayerDemote(block, block + 1, rip == 0, 3);
+        LayerDemote(block, block + 1, rip == 0 || is_edge, 3);
     }
 }
 
@@ -1579,21 +1706,136 @@ bool BufferCache::LayerMirrored(VAddr va_range, u64 cb_range) {
         return false;
     }
     // Asked for every small binding by two threads: the answer memoized per thread while no
-    // block gained or lost its copy (the module's lock taken only then).
+    // block gained or lost its copy (the module's lock taken only then). By the blocks covered,
+    // not by address, since the game's constants move through a ring: a new address every draw
+    // within the same few blocks.
     struct Memo {
-        VAddr va_range = 0;
-        u64 cb_range = 0, version = ~0ULL;
+        u64 first = 0, end = 0, version = ~0ULL;
         bool is_mirrored = false;
     };
-    thread_local std::array<Memo, 1024> memo{};
-    auto& m = memo[((va_range >> 4) ^ (va_range >> 14) ^ cb_range) & (memo.size() - 1)];
+    thread_local auto p_memo = std::make_unique<std::array<Memo, 1024>>(); // heap: see LayerBind
+    const u32 shift = Layer().BlockShift();
+    const u64 first = va_range >> shift, end = ((va_range + cb_range - 1) >> shift) + 1;
+    auto& m = (*p_memo)[(first ^ (end << 7)) & (p_memo->size() - 1)];
     const u64 version = Layer().ValidVersion();
-    if (m.va_range == va_range && m.cb_range == cb_range && m.version == version) {
+    if (m.first == first && m.end == end && m.version == version) {
         return m.is_mirrored;
     }
-    const u32 shift = Layer().BlockShift();
-    const bool is_mirrored = Layer().AnyValid(va_range >> shift, ((va_range + cb_range - 1) >> shift) + 1);
-    m = {va_range, cb_range, version, is_mirrored};
+    const bool is_mirrored = Layer().AnyValid(first, end);
+    m = {first, end, version, is_mirrored};
     return is_mirrored;
+}
+
+// PS_LAYER_VERIFY=1 (diagnostics, slow): a VRAM copy bound for reading while the game's bytes
+// changed with no trap hit or announced write is reported as stale, with what is known of its block.
+bool BufferCache::LayerVerifyOn() {
+    static const bool s_is_on = [] {
+        const char* sz_env = std::getenv("PS_LAYER_VERIFY");
+        const bool is_enabled = sz_env && sz_env[0] == '1';
+        if (is_enabled) {
+            std::printf("Layer verify: VRAM copies checked against the game's memory at every "
+                        "binding (PS_LAYER_VERIFY=1, slow)\n");
+        }
+        return is_enabled;
+    }();
+    return s_is_on;
+}
+
+namespace {
+/// The game's bytes of each mirrored block as last bound (its VRAM copy matched them then).
+struct VerifiedBlock {
+    u64 hash = 0;
+    u64 frame = 0;
+    std::unique_ptr<u8[]> p_bytes;
+};
+std::mutex s_layer_verify_mutex;
+std::unordered_map<u64, VerifiedBlock> s_layer_verified;
+u64 s_c_layer_verify_reports = 0;
+} // namespace
+
+void BufferCache::LayerVerifyForget(u64 first, u64 end) {
+    std::scoped_lock lk{s_layer_verify_mutex};
+    for (u64 block = first; block < end; ++block) {
+        s_layer_verified.erase(block);
+    }
+}
+
+void BufferCache::LayerVerifyMirror(VAddr va_range, u64 cb_range, bool is_texel_buffer) {
+    constexpr u64 MaxReports = 300;
+    const u64 first = va_range >> block_shift;
+    const u64 end = ((va_range + cb_range - 1) >> block_shift) + 1;
+    const u64 frame = PsStats::g_frame_number.load(std::memory_order_relaxed);
+    std::scoped_lock lk{s_layer_verify_mutex};
+    for (u64 block = first; block < end; ++block) {
+        const VAddr va_block = block << block_shift;
+        // The GPU's data is newer than the game's memory, and volatile blocks are refreshed at
+        // every binding: neither can be compared.
+        if (!Layer().AnyValid(block, block + 1) || layer_volatile.Contains(block, block + 1) ||
+            gpu_modified_ranges.Intersects(va_block, block_size)) {
+            s_layer_verified.erase(block);
+            continue;
+        }
+        auto& entry = s_layer_verified[block];
+        if (entry.p_bytes && entry.frame == frame) {
+            continue;
+        }
+        const auto* p_now = reinterpret_cast<const u8*>(va_block);
+        const u64 hash = XXH3_64bits(p_now, block_size);
+        const bool is_announced = memory_tracker->IsRegionCpuModified(va_block, block_size);
+        bool is_armed;
+        {
+            std::scoped_lock trap_lk{s_layer_trap_mutex};
+            is_armed = s_layer_trap_armed.contains(block);
+        }
+        u32 c_open_pages = 0;
+        for (VAddr va_page = va_block; va_page < va_block + block_size; va_page += 4096) {
+            c_open_pages += (PsLayer::WriteTraps::Reasons(va_page) & PsLayer::WriteTraps::Mirror) ? 0 : 1;
+        }
+        // Only a trap that should have seen the write is reported: armed with pages open (a
+        // refresh uploaded meanwhile also changes the bytes with nothing pending).
+        if (entry.p_bytes && hash != entry.hash && !is_announced && is_armed && c_open_pages != 0 &&
+            s_c_layer_verify_reports < MaxReports) {
+            ++s_c_layer_verify_reports;
+            u64 cb_changed = 0, off_first = ~0ull, off_last = 0;
+            for (u64 i = 0; i < block_size; ++i) {
+                if (entry.p_bytes[i] != p_now[i]) {
+                    ++cb_changed;
+                    off_first = std::min(off_first, i);
+                    off_last = i;
+                }
+            }
+            bool was_zero = true;
+            for (u64 i = off_first; i <= off_last && was_zero; ++i) {
+                was_zero = entry.p_bytes[i] == 0;
+            }
+            int prot = 0, type = -1;
+            uintptr_t va_vma_end = 0;
+            const bool has_vma = runtime_memory_vma_info(va_block, &prot, &type, &va_vma_end);
+            const auto part = [&](const IntervalList<>& list) {
+                return list.Contains(va_block, va_block + block_size)   ? "all"
+                       : list.Overlaps(va_block, va_block + block_size) ? "part"
+                                                                        : "none";
+            };
+            std::printf("Layer verify: STALE %#llx (binding %#llx+%#llx%s): %llu bytes changed at "
+                        "+%#llx..+%#llx (before: %s); %u pages without their trap, page traps %#x, "
+                        "vma %s prot %#x type %d; asset %s, GPU-written %s, watched %d, CPU block %d, "
+                        "dynamic %d, frames since last check %llu\n",
+                        (unsigned long long)va_block, (unsigned long long)va_range,
+                        (unsigned long long)cb_range, is_texel_buffer ? " texel" : "",
+                        (unsigned long long)cb_changed, (unsigned long long)off_first,
+                        (unsigned long long)off_last, was_zero ? "zeros" : "data", c_open_pages,
+                        PsLayer::WriteTraps::Reasons(va_block), has_vma ? "yes" : "no", prot, type,
+                        part(asset_bytes), part(gpu_written_bytes),
+                        layer_watched.Contains(block, block + 1) ? 1 : 0,
+                        layer_cpu_blocks.Contains(block, block + 1) ? 1 : 0,
+                        dynamic_blocks.Contains(block) ? 1 : 0, (unsigned long long)(frame - entry.frame));
+        }
+        if (!entry.p_bytes) {
+            entry.p_bytes = std::make_unique<u8[]>(block_size);
+        }
+        std::memcpy(entry.p_bytes.get(), p_now, block_size);
+        entry.hash = hash;
+        entry.frame = frame;
+    }
 }
 } // namespace VideoCore

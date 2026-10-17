@@ -859,6 +859,10 @@ public:
         }
     }
 
+    [[nodiscard]] bool IsSubmitted(u64 tick) const noexcept {
+        return submitted_tick.load(std::memory_order_acquire) >= tick;
+    }
+
     /// psport: the breadcrumb stream of this scheduler, for passes recorded on CommandBuffer().
     [[nodiscard]] u32 CrumbStream() const noexcept {
         return crumb_stream;

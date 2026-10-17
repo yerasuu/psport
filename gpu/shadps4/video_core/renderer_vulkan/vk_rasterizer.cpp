@@ -260,11 +260,17 @@ bool Rasterizer::OnOcclusionPageAccess(VAddr addr, u64 rip, bool write, bool gpu
     return occlusion && occlusion->OnAccess(addr, rip, write, gpu_thread);
 }
 
-bool Rasterizer::OnVramDataAccess(VAddr addr, bool assume_locks) {
-    if (!assume_locks) {
-        DrainDrawPipe(); // as ReadMemory: the recording thread idle while the copy back runs
+bool Rasterizer::OnVramDataAccess(VAddr addr, bool is_gpu_thread) {
+    using Caller = VideoCore::BufferCache::TrapCaller;
+    if (!is_gpu_thread) {
+        return buffer_cache.LayerReadTrapHit(addr, Caller::Guest);
     }
-    return buffer_cache.LayerReadTrapHit(addr, assume_locks);
+    if (OnStageA()) {
+        // The copy back may flush the scheduler and record copies: the recording thread idle.
+        DrainDrawPipe();
+        return buffer_cache.LayerReadTrapHit(addr, Caller::CommandThread);
+    }
+    return buffer_cache.LayerReadTrapHit(addr, Caller::RecordingThread);
 }
 
 bool Rasterizer::WriteTimestampOnGpu(VAddr address, bool end_of_pipe) {
