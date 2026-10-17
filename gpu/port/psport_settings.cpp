@@ -303,6 +303,7 @@ void Load() {
         {"PS_REACTIVE", "reactive"},              {"PS_REACTIVE_SCALE", "reactive_scale"},
         {"PS_REACTIVE_THRESHOLD", "reactive_threshold"}, {"PS_REACTIVE_MAX", "reactive_max"},
         {"PS_UPSCALE_PRESET", "preset"},            {"PS_OBJECT_MOTION", "object_motion"},
+        {"PS_ASPECT_RATIO", "aspect_ratio"},
     };
     for (const auto& [env, key] : env_keys) {
         if (const char* sz_value = runtime_env(env, nullptr)) {

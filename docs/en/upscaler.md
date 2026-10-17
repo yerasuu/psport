@@ -3,7 +3,8 @@
 ## Output aspect ratios (2026-10-17)
 
 `aspect_ratio` in `psport.ini` (`auto`, `4:3`, `16:10`, `16:9`, `21:9`, `32:9`; 16:9 unless chosen,
-in the overlay or the launcher) picks the group of output resolutions `output_res` is taken from
+in the overlay or the launcher, or given by a launcher that detects it in `PS_ASPECT_RATIO`, which
+wins over the file) picks the group of output resolutions `output_res` is taken from
 (`PsSettings::Outputs`, the same lists in `launcher/psport_launcher.py`); another aspect ratio
 keeps the height (`NearestOutput`), and `auto` is the group nearest the monitor the window is on
 (`SetMonitor`) plus the monitor's own size. The game keeps its 1920x1080 frame. When the output's
