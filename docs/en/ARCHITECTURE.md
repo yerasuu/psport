@@ -82,7 +82,9 @@ reads `param.sfo` (title, title ID, save directory, SDK version, attributes, the
 parameters; `PS_CONTENT_SKU=full` or `trial` sets the SKU), configures the file mounts (`/app0` is
 the game folder, saves under `user/`), loads the game, lets its title check the game's files and
 choose its patches, reads the external patches, binds its imports, installs the fault (`SIGSEGV`, `SIGILL`, `SIGBUS`, `SIGFPE`), dump
-(`SIGUSR2`) and watchdog (`SIGALRM`, `--timeout`) handlers and jumps to the eboot's entry. Host
+(`SIGUSR2`) and watchdog (`SIGALRM`, `--timeout`) handlers and jumps to the eboot's entry. A fault report
+shows, besides the guest offset and the call chains, the guest memory ranges `PS_FAULT_DUMP` names
+([FORK.md](../../FORK.md#diagnostics)). Host
 heap objects handed to the guest stay below 1 TiB (`mallopt` keeps glibc in the non-PIE brk heap):
 PS4 code packs pointers into 40 bits. Guest memory is placed there too.
 

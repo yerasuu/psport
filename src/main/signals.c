@@ -1,6 +1,8 @@
 /* Fault, watchdog and termination signal handlers: what the log shows when the process stops. */
+#include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include "main.h"
@@ -15,6 +17,127 @@ static int write_mapping_of(const PsHostMapping *p_mapping, void *p_context) {
     (void)ps_host_fs_write(2, "\n", 1);
     p_search->is_found = 1;
     return 1;
+}
+/* PS_FAULT_DUMP: guest memory a fault report shows, parsed once at startup so that a malformed
+ * value is reported while the launch can still be fixed, not when the process is already dying. */
+enum { FAULT_DUMP_MAX_RANGES = 16, FAULT_DUMP_MAX_BYTES = 64 * 1024 };
+typedef struct {
+    uintptr_t va_address;
+    int64_t off_from_pointer;
+    size_t cb_dump, cb_pointer;
+} FaultDumpRange;
+static FaultDumpRange s_fault_dumps[FAULT_DUMP_MAX_RANGES];
+static size_t s_c_fault_dumps;
+static int parse_number(const char **psz_text, uint64_t *p_out_value) {
+    char *sz_end;
+    errno = 0;
+    *p_out_value = strtoull(*psz_text, &sz_end, 0);
+    if (sz_end == *psz_text || errno || **psz_text == '-' || **psz_text == '+') return 0;
+    *psz_text = sz_end;
+    return 1;
+}
+static const char *parse_fault_dump(const char *sz_item, FaultDumpRange *p_out_range) {
+    uint64_t value;
+    *p_out_range = (FaultDumpRange){0};
+    const int is_indirect = *sz_item == '*';
+    if (is_indirect) ++sz_item;
+    if (!parse_number(&sz_item, &value)) return "expected an address";
+    p_out_range->va_address = value;
+    if (is_indirect) {
+        p_out_range->cb_pointer = 8;
+        if (*sz_item == '/') {
+            ++sz_item;
+            if (!parse_number(&sz_item, &value) || (value != 4 && value != 8)) return "pointer width must be /4 or /8";
+            p_out_range->cb_pointer = value;
+        }
+        while (*sz_item == '+' || *sz_item == '-') {
+            const int is_negative = *sz_item++ == '-';
+            if (!parse_number(&sz_item, &value) || value > INT64_MAX) return "expected an offset after + or -";
+            p_out_range->off_from_pointer += is_negative ? -(int64_t)value : (int64_t)value;
+        }
+    }
+    if (*sz_item++ != ':') return "expected :<length>";
+    if (!parse_number(&sz_item, &value) || !value) return "expected a non-zero length";
+    if (*sz_item) return "unexpected text after the length";
+    if (value > FAULT_DUMP_MAX_BYTES) return "length above 64 KiB";
+    p_out_range->cb_dump = value;
+    return NULL;
+}
+static void configure_fault_dumps(void) {
+    const char *sz_value = runtime_env("PS_FAULT_DUMP", "");
+    size_t cb_total = 0;
+    while (*sz_value) {
+        const size_t cb_item = strcspn(sz_value, ",");
+        char sz_item[128];
+        FaultDumpRange range;
+        const char *sz_problem = NULL;
+        snprintf(sz_item, sizeof(sz_item), "%.*s", (int)cb_item, sz_value);
+        if (cb_item >= sizeof(sz_item)) sz_problem = "entry too long";
+        else if (s_c_fault_dumps == FAULT_DUMP_MAX_RANGES) sz_problem = "more than 16 ranges";
+        else sz_problem = parse_fault_dump(sz_item, &range);
+        if (!sz_problem && cb_total + range.cb_dump > FAULT_DUMP_MAX_BYTES) sz_problem = "ranges above 64 KiB in total";
+        if (sz_problem) fprintf(stderr, "Runtime: PS_FAULT_DUMP entry '%s' ignored: %s\n", sz_item, sz_problem);
+        else {
+            s_fault_dumps[s_c_fault_dumps++] = range;
+            cb_total += range.cb_dump;
+        }
+        sz_value += cb_item;
+        if (*sz_value == ',') ++sz_value;
+    }
+    if (s_c_fault_dumps)
+        fprintf(stderr, "Runtime: PS_FAULT_DUMP: %zu ranges, %zu bytes dumped on a fault\n", s_c_fault_dumps, cb_total);
+}
+static void write_unreadable(uintptr_t va_begin, size_t cb_unreadable) {
+    char sz_line[96];
+    snprintf(sz_line, sizeof(sz_line), "  %016lx: unreadable (%zu bytes)\n", (unsigned long)va_begin, cb_unreadable);
+    (void)ps_host_fs_write(2, sz_line, strlen(sz_line));
+}
+/* Reads go through ps_host_read_memory row by row, so an unmapped page only costs its rows. */
+static void dump_fault_ranges(void) {
+    char sz_line[160];
+    for (size_t i_range = 0; i_range < s_c_fault_dumps; ++i_range) {
+        const FaultDumpRange *p_range = &s_fault_dumps[i_range];
+        uintptr_t va_dump = p_range->va_address;
+        if (p_range->cb_pointer) {
+            uint64_t pointer = 0;
+            if (ps_host_read_memory(&pointer, (const void *)p_range->va_address, p_range->cb_pointer) !=
+                (int64_t)p_range->cb_pointer) {
+                snprintf(sz_line, sizeof(sz_line), "Fault dump *0x%lx/%zu: pointer unreadable\n",
+                         (unsigned long)p_range->va_address, p_range->cb_pointer);
+                (void)ps_host_fs_write(2, sz_line, strlen(sz_line));
+                continue;
+            }
+            va_dump = (uintptr_t)(pointer + (uint64_t)p_range->off_from_pointer);
+            const int64_t off = p_range->off_from_pointer;
+            snprintf(sz_line, sizeof(sz_line), "Fault dump *0x%lx/%zu = 0x%lx, %c0x%lx -> 0x%lx, %zu bytes:\n",
+                     (unsigned long)p_range->va_address, p_range->cb_pointer, (unsigned long)pointer, off < 0 ? '-' : '+',
+                     (unsigned long)(off < 0 ? -(uint64_t)off : (uint64_t)off), (unsigned long)va_dump, p_range->cb_dump);
+        } else
+            snprintf(sz_line, sizeof(sz_line), "Fault dump 0x%lx, %zu bytes:\n", (unsigned long)va_dump, p_range->cb_dump);
+        (void)ps_host_fs_write(2, sz_line, strlen(sz_line));
+        uintptr_t va_unreadable = 0;
+        size_t cb_unreadable = 0;
+        for (size_t off_row = 0; off_row < p_range->cb_dump; off_row += 16) {
+            const uintptr_t va_row = va_dump + off_row;
+            const size_t cb_row = p_range->cb_dump - off_row < 16 ? p_range->cb_dump - off_row : 16;
+            unsigned char row[16];
+            const int64_t cb_read = ps_host_read_memory(row, (const void *)va_row, cb_row);
+            if (cb_read <= 0) {
+                if (!cb_unreadable) va_unreadable = va_row;
+                cb_unreadable += cb_row;
+                continue;
+            }
+            if (cb_unreadable) write_unreadable(va_unreadable, cb_unreadable);
+            cb_unreadable = 0;
+            int cb_line = snprintf(sz_line, sizeof(sz_line), "  %016lx:", (unsigned long)va_row);
+            for (size_t i = 0; i < cb_row; ++i)
+                cb_line += (int)i < cb_read ? snprintf(sz_line + cb_line, sizeof(sz_line) - (size_t)cb_line, " %02x", row[i])
+                                            : snprintf(sz_line + cb_line, sizeof(sz_line) - (size_t)cb_line, " ??");
+            sz_line[cb_line++] = '\n';
+            (void)ps_host_fs_write(2, sz_line, (size_t)cb_line);
+        }
+        if (cb_unreadable) write_unreadable(va_unreadable, cb_unreadable);
+    }
 }
 static int fault(PsHostFaultContext *p_context) {
     const PsHostFaultKind kind = ps_host_fault_kind(p_context);
@@ -41,6 +164,7 @@ static int fault(PsHostFaultContext *p_context) {
     else
         snprintf(sz_line, sizeof(sz_line), "Fault (signal %d) at RIP %p, address %p\n", sig, (void *)rip, p_address);
     (void)ps_host_fs_write(2, sz_line, strlen(sz_line));
+    dump_fault_ranges();
     if (g_is_gpu_enabled) psport_gpu_dump_guest_writes(p_context);
     /* Guest code keeps frame pointers: its call chain says which caller handed over the bad
      * value, where the host backtrace below stops at the first guest frame. */
@@ -130,6 +254,7 @@ void install_fault_handlers(unsigned timeout_seconds) {
                                               PS_HOST_FAULT_ARITHMETIC};
     for (size_t i = 0; i < sizeof(s_kinds) / sizeof(*s_kinds); ++i)
         ps_host_fault_install(s_kinds[i], fault, PS_HOST_FAULT_HOLD_GUEST_EXCEPTION);
+    configure_fault_dumps();
     PsHostCodeAddress self;
     if (ps_host_dl_address((void *)main,&self)) s_exe_base=self.va_base;
     ps_host_interrupt_install(PS_HOST_INTERRUPT_THREAD_DUMP, thread_dump, PS_HOST_INTERRUPT_RESTART);
