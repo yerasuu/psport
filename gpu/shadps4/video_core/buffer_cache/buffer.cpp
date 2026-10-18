@@ -132,12 +132,16 @@ bool UniqueBuffer::Create(vk::BufferCreateInfo& buffer_ci, MemoryType mem_type,
             .handleTypes = PsGuestMemory::HandleType(),
         };
         buffer_ci.pNext = &external;
+        // psport: a failure leaves the buffer null (Buffer::IsAllocated); GetArena returns null
+        // and its callers go on without the arena.
         const auto [result, created] = device.createBuffer(buffer_ci);
         if (result != vk::Result::eSuccess) {
-            PsGuestMemory::Unsupported("the arena cannot take exported memory (" +
-                                       vk::to_string(result) + ")");
+            LOG_ERROR_COUNTED(Render_Vulkan,
+                              "Sparse arena of {:#x} bytes not created: it cannot take exported "
+                              "memory ({})",
+                              buffer_ci.size, vk::to_string(result));
+            return false;
         }
-        buffer = created;
         // psport: VRAM blocks are bound into it too: the external memory type must not keep
         // device-local memory out (a driver may restrict it).
         const auto reqs = device.getBufferMemoryRequirements(created);
@@ -149,8 +153,13 @@ bool UniqueBuffer::Create(vk::BufferCreateInfo& buffer_ci, MemoryType mem_type,
                     (props->memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
         }
         if (!vram) {
-            PsGuestMemory::Unsupported("the arena for guest memory cannot take VRAM");
+            device.destroyBuffer(created);
+            LOG_ERROR_COUNTED(Render_Vulkan,
+                              "Sparse arena of {:#x} bytes not created: it cannot take VRAM",
+                              buffer_ci.size);
+            return false;
         }
+        buffer = created;
     }
 
     if (with_bda) {

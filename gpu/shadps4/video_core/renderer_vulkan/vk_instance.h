@@ -486,6 +486,11 @@ public:
         return vk11_props.maxMemoryAllocationSize;
     }
 
+    /// psport: the largest VkBuffer the driver accepts (Vulkan 1.3, maintenance4).
+    vk::DeviceSize MaxBufferSize() const {
+        return vk13_props.maxBufferSize;
+    }
+
     /// Returns the vulkan 1.2 physical device properties.
     const vk::PhysicalDeviceVulkan12Properties& GetVk12Properties() const noexcept {
         return vk12_props;

@@ -70,9 +70,6 @@ public:
 
 class BufferCache {
     static constexpr u64 ADDRESS_SPACE_BITS = 40;
-    static constexpr u64 ARENA_PAGE_BITS = 32;
-    static constexpr u64 ARENA_PAGE_SIZE = u64{1} << ARENA_PAGE_BITS;
-    static constexpr u64 NUM_ARENA_PAGES = u64{1} << (ADDRESS_SPACE_BITS - ARENA_PAGE_BITS);
     static constexpr u64 MIN_BLOCK_SIZE = 16_KB;
 
 public:
@@ -283,9 +280,14 @@ private:
         return &pending_binds.emplace_back(arena);
     }
 
-    /// psport: null for a range over more than two arena pages, which no arena covers. A request
-    /// of at most 4 GiB (a 32-bit size) spans two pages at most, so only 64-bit requests check.
+    /// psport: the arena covering every block of [first_block, last_block]; null (counted and
+    /// logged) when the span needs more than maxBufferSize or the arena cannot be created.
     const Buffer* GetArena(u64 first_block, u64 last_block);
+    /// psport: GetArena for a range the caller may shorten: `last_block` is lowered to the last
+    /// block one arena from `first_block` can cover.
+    const Buffer* GetArenaClamped(u64 first_block, u64& last_block);
+    /// psport: what a binding without an arena gets (64 KiB, contents undefined).
+    std::pair<const Buffer*, u64> NullBinding();
 
     /// `in_place`: bind what can be in place even when Garlic (texture data, read once into an
     /// image: a VRAM copy of it would only cost an upload).
@@ -527,8 +529,13 @@ private:
     std::unique_ptr<FaultManager> fault_manager;
     std::unique_ptr<Buffer> bda_pagetable_buffer;
 
-    std::array<const Buffer*, NUM_ARENA_PAGES> address_space{};
+    /// psport: arena pages sized from maxBufferSize (BufferCache's constructor).
+    u64 m_arena_page_bits{};
+    u64 m_cb_max_arena{};
+    u64 m_c_max_arena_pages{};
+    std::vector<const Buffer*> address_space;
     std::deque<Buffer> arenas;
+    std::unique_ptr<Buffer> m_null_binding;
     std::vector<ArenaBinds> pending_binds;
     Vulkan::Semaphore memory_semaphore;
     /// psport PS_LAYER_MEMORY: mirrors by start address, retired ones with the tick to wait for.

@@ -34,6 +34,7 @@ bool s_is_whole_only = false; // the driver's dma-buf maps at offset 0 only: a c
 enum class Mode { DmaBuf, HostImport };
 Mode s_mode = Mode::DmaBuf;
 std::atomic<u64> s_cb_chunk{0};
+u64 s_cb_max_buffer = ~u64{0};
 bool s_is_usable_checked = false;
 vk::BufferUsageFlags s_xfb_dmabuf;
 vk::BufferUsageFlags s_xfb_host;
@@ -71,6 +72,24 @@ std::uint32_t FindType(std::uint32_t bits) {
 
 /// Uses of a chunk's buffer. With the layer's memory module the chunk buffers are what the GPU
 /// binds (no sparse arena): every buffer use, texel buffers and a device address too.
+/// A chunk over maxBufferSize gets no buffer (VUID-VkBufferCreateInfo-size-06409): it stays in the
+/// memfd, as after any other failure.
+bool FitsInBuffer(u64 phys, u64 cb_range) {
+    if (cb_range <= s_cb_max_buffer) {
+        return true;
+    }
+    static std::atomic<int> s_c_too_large{0};
+    const int c_too_large = s_c_too_large.fetch_add(1) + 1;
+    if ((c_too_large & (c_too_large - 1)) == 0) {
+        std::fprintf(stderr,
+                     "Guest memory: chunk %#llx+%llu MiB exceeds maxBufferSize (%llu MiB); it "
+                     "stays in the memfd (%d so far)\n",
+                     (unsigned long long)phys, (unsigned long long)(cb_range >> 20),
+                     (unsigned long long)(s_cb_max_buffer >> 20), c_too_large);
+    }
+    return false;
+}
+
 vk::BufferUsageFlags ChunkBufferUsage(vk::ExternalMemoryHandleTypeFlagBits type) {
     vk::BufferUsageFlags usage =
         vk::BufferUsageFlagBits::eTransferSrc | vk::BufferUsageFlagBits::eTransferDst |
@@ -103,6 +122,9 @@ int AllocChunk(u64 phys, u64 cb_range) {
         if (s_c_chunks == MaxChunks) {
             return -1;
         }
+    }
+    if (!FitsInBuffer(phys, cb_range)) {
+        return -1;
     }
     static std::atomic<int> s_c_failures{0};
     const auto fail = [&](const char* sz_what, vk::Result result) {
@@ -276,6 +298,9 @@ int AllocImported(u64 phys, u64 cb_range) {
         if (s_c_chunks == MaxChunks) {
             return -1;
         }
+    }
+    if (!FitsInBuffer(phys, cb_range)) {
+        return -1;
     }
     void* p_pointer = runtime_memory_backing_pointer(phys);
     if (!p_pointer || reinterpret_cast<std::uintptr_t>(p_pointer) % s_import_alignment != 0 ||
@@ -903,6 +928,7 @@ bool Usable(const Vulkan::Instance& instance) {
     static const bool s_is_usable = [&] {
         s_device = instance.GetDevice();
         s_memory_properties = instance.GetPhysicalDevice().getMemoryProperties();
+        s_cb_max_buffer = instance.MaxBufferSize();
         ChooseLayerDefault(instance);
         s_xfb_dmabuf = ExternalXfbUsage(instance, vk::ExternalMemoryHandleTypeFlagBits::eDmaBufEXT);
         s_xfb_host =

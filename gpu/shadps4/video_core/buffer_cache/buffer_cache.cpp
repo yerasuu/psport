@@ -547,13 +547,25 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
         std::printf("Guest memory: the layer's memory module binds the game's memory in place "
                     "(chunk buffers, no sparse arena for it; PS_LAYER_MEMORY=1)\n");
     }
+    // psport: one bit under maxBufferSize, so that the two pages a request crossing a page
+    // boundary needs always fit in one arena (RADV: 4 GiB - 4, 1 GiB pages); 4 GiB pages at most,
+    // as before. Vulkan 1.3 guarantees at least 2^30.
+    m_cb_max_arena = std::max<u64>(instance.MaxBufferSize(), u64{1} << 30);
+    m_arena_page_bits = std::min<u64>(32, std::bit_width(m_cb_max_arena) - 2);
+    m_c_max_arena_pages = m_cb_max_arena >> m_arena_page_bits;
+    address_space.assign(u64{1} << (ADDRESS_SPACE_BITS - m_arena_page_bits), nullptr);
+    std::printf("GPU memory: maxBufferSize %#llx, arena pages of %llu MiB, at most %llu pages an "
+                "arena\n",
+                static_cast<unsigned long long>(instance.MaxBufferSize()),
+                static_cast<unsigned long long>((u64{1} << m_arena_page_bits) >> 20),
+                static_cast<unsigned long long>(m_c_max_arena_pages));
     const std::array<u32, 2> families = {instance.GetGraphicsQueueFamilyIndex(),
                                          instance.GetReadbackQueueFamilyIndex()};
     const bool shared = bool(instance.GetReadbackQueue()); // as Buffer creates the arenas
     const vk::BufferCreateInfo probe_ci = {
         .flags =
             vk::BufferCreateFlagBits::eSparseBinding | vk::BufferCreateFlagBits::eSparseResidency,
-        .size = ARENA_PAGE_SIZE,
+        .size = u64{1} << m_arena_page_bits,
         .usage = ARENA_USAGE | PsGuestMemory::TransformFeedbackUsage(instance),
         .sharingMode = shared ? vk::SharingMode::eConcurrent : vk::SharingMode::eExclusive,
         .queueFamilyIndexCount = shared ? 2u : 0u,
@@ -568,8 +580,8 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
     block_size = std::bit_ceil(
         Common::AlignUp(std::max<u64>(reqs.alignment, MIN_BLOCK_SIZE), reqs.alignment));
     block_shift = std::bit_width(block_size) - 1;
-    blocks_per_arena_page = ARENA_PAGE_SIZE / block_size;
-    blocks_per_arena_page_shift = ARENA_PAGE_BITS - block_shift;
+    blocks_per_arena_page = (u64{1} << m_arena_page_bits) / block_size;
+    blocks_per_arena_page_shift = m_arena_page_bits - block_shift;
     PsLayer::GpuMemory::Get().SetBlockShift(static_cast<u32>(block_shift));
     group_use.assign(u64{1} << (ADDRESS_SPACE_BITS - USE_GROUP_BITS), 0);
     group_demoted.assign(group_use.size(), 0);
@@ -591,11 +603,10 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
         }
     }
 
-    const u64 bda_pagetable_size =
-        (blocks_per_arena_page * NUM_ARENA_PAGES) * sizeof(vk::DeviceAddress) *
-        (LayerActive() ? 2 : 1);
-    fault_manager = std::make_unique<FaultManager>(instance, scheduler, *this, block_shift,
-                                                   blocks_per_arena_page * NUM_ARENA_PAGES);
+    const u64 c_blocks = u64{blocks_per_arena_page} * address_space.size();
+    const u64 bda_pagetable_size = c_blocks * sizeof(vk::DeviceAddress) * (LayerActive() ? 2 : 1);
+    fault_manager =
+        std::make_unique<FaultManager>(instance, scheduler, *this, block_shift, c_blocks);
     bda_pagetable_buffer = std::make_unique<Buffer>(
         instance, 0, bda_pagetable_size, MemoryType::DeviceLocal, "BDA Page Table Buffer");
     runtime.FillBuffer(bda_pagetable_buffer.get(), 0u, bda_pagetable_size, 0u);
@@ -671,10 +682,14 @@ void BufferCache::ReadMemory(VAddr device_addr, u64 size, bool is_write, bool as
     const auto flush_request = [this, device_addr, size, is_write, requester] {
         readback_requester = requester.data();
         readback_is_write = is_write;
-        const u32 first_block = device_addr >> block_shift;
-        const u32 last_block = (device_addr + size - 1) >> block_shift;
-        const auto* arena = GetArena(first_block, last_block);
+        const u64 first_block = device_addr >> block_shift;
+        u64 last_block = (device_addr + size - 1) >> block_shift;
+        const auto* arena = GetArenaClamped(first_block, last_block);
         if (!arena) {
+            // Nothing downloaded (counted in GetArena); a write goes on as with a twin.
+            if (is_write) {
+                memory_tracker->MarkRegionAsCpuModified(device_addr, size);
+            }
             return;
         }
 
@@ -1173,8 +1188,13 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
     if (is_written || size > STREAM_THRESHOLD || ConstantsInPlace() ||
         IsRegionGpuModified(device_addr, size)) {
         const u64 first_block = device_addr >> block_shift;
-        const u64 last_block = (device_addr + size - 1) >> block_shift;
-        const auto* arena = GetArena(first_block, last_block);
+        u64 last_block = (device_addr + size - 1) >> block_shift;
+        const auto* arena = GetArenaClamped(first_block, last_block);
+        if (!arena) {
+            return NullBinding();
+        }
+        size = static_cast<u32>(
+            std::min<u64>(size, ((last_block + 1) << block_shift) - device_addr));
         // GPU-written buffers: the GPU is a writer we hear of, like the loaders: VRAM wherever
         // whole blocks are known data, as a default heap. The CPU does not read what the GPU wrote
         // there (no readbacks: PS_READBACKS was relaxed before too); PS_GPU_WRITES_IN_PLACE=1 keeps
@@ -1252,8 +1272,13 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
         }
     }
     const u64 first_block = device_addr >> block_shift;
-    const u64 last_block = (device_addr + size - 1) >> block_shift;
-    const auto* arena = GetArena(first_block, last_block);
+    u64 last_block = (device_addr + size - 1) >> block_shift;
+    const auto* arena = GetArenaClamped(first_block, last_block);
+    if (!arena) {
+        return NullBinding();
+    }
+    size =
+        static_cast<u32>(std::min<u64>(size, ((last_block + 1) << block_shift) - device_addr));
     EnsureResident(arena, first_block, last_block);
     BB_SECTION(ObtainVram);
     if (!is_written) {
@@ -1322,6 +1347,9 @@ std::optional<std::pair<const Buffer*, u64>> BufferCache::CommandWriteTarget(VAd
     const u64 first_block = device_addr >> block_shift;
     const u64 last_block = (device_addr + size - 1) >> block_shift;
     const auto* arena = GetArena(first_block, last_block);
+    if (!arena) {
+        return std::nullopt;
+    }
     EnsureResident(arena, first_block, last_block);
     if (!IsInPlace(device_addr, size)) {
         return std::nullopt;
@@ -1345,6 +1373,9 @@ void BufferCache::PrepareDynamicRange(VAddr address, u64 size, bool is_written) 
     const u64 first_block = address >> block_shift;
     const u64 last_block = (address + cb_range - 1) >> block_shift;
     const auto* arena = GetArena(first_block, last_block);
+    if (!arena) {
+        return;
+    }
     EnsureResident(arena, first_block, last_block);
     if (!IsInPlace(address, cb_range)) {
         SynchronizeMemory(arena, address, cb_range, false, false);
@@ -1367,13 +1398,18 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBufferForImage(VAddr device_add
     } else {
         const u64 first_block = device_addr >> block_shift;
         const u64 last_block = (device_addr + size - 1) >> block_shift;
-        if (InPlaceTextures()) {
-            EnsureResident(GetArena(first_block, last_block), first_block, last_block, true);
+        const Buffer* arena = InPlaceTextures() ? GetArena(first_block, last_block) : nullptr;
+        if (arena) {
+            EnsureResident(arena, first_block, last_block, true);
         }
         if (IsInPlace(device_addr, size)) {
-            const auto* arena = GetArena(first_block, last_block);
-            TraceBinding(device_addr, size, false, 5);
-            return {arena, arena->Offset(device_addr)};
+            if (!arena) {
+                arena = GetArena(first_block, last_block);
+            }
+            if (arena) {
+                TraceBinding(device_addr, size, false, 5);
+                return {arena, arena->Offset(device_addr)};
+            }
         }
         if (ChunkTextures() && !IsRegionGpuModified(device_addr, size)) {
             if (const auto source = GuestChunkSource(device_addr, size)) {
@@ -1460,81 +1496,179 @@ void BufferCache::ProcessFaultBuffer() {
 
 void BufferCache::SynchronizeDmaBuffers() {
     for (const auto& range : resident_ranges) {
-        const u64 page = range.start >> (ARENA_PAGE_BITS - block_shift);
-        const VAddr device_addr = range.start << block_shift;
-        const u64 size = (range.end - range.start) << block_shift;
-        SynchronizeMemory(address_space[page], device_addr, size, false, false);
+        // psport: page by page, since a resident range may cross arenas.
+        for (u64 block = range.start; block < range.end;) {
+            const u64 page = block >> blocks_per_arena_page_shift;
+            const u64 end = std::min<u64>(range.end, (page + 1) << blocks_per_arena_page_shift);
+            if (const Buffer* arena = address_space[page]) {
+                SynchronizeMemory(arena, block << block_shift, (end - block) << block_shift, false,
+                                  false);
+            }
+            block = end;
+        }
     }
 }
 
-// psport: every binding of the game's memory goes through an arena, so a game cannot run without
-// one; its creation only fails where the driver cannot give it a device address, which belongs
-// with the other arena requirements checked when it is created (UniqueBuffer::Create).
-static void StopWithoutArena(const Buffer& arena) {
-    if (!arena.IsAllocated()) {
-        PsGuestMemory::Unsupported("the arena for guest memory has no device address");
+namespace {
+enum class ArenaSpan { Split, Clamped, Failed };
+
+void NoteArenaSpan(ArenaSpan kind, VAddr va_first, VAddr va_end) {
+    static std::array<std::atomic<u64>, 3> s_c_spans{};
+    static constexpr std::array<std::string_view, 3> s_what = {
+        "got an arena of its own pages: merging its arenas would exceed maxBufferSize",
+        "clamped to what one arena covers (maxBufferSize)",
+        "has no arena: bound to the null binding or skipped",
+    };
+    static constexpr std::array<std::atomic<u64>*, 3> s_p_stats = {
+        &PsStats::g_c_arena_spans_split,
+        &PsStats::g_c_arena_spans_clamped,
+        &PsStats::g_c_arena_spans_failed,
+    };
+    const auto i_kind = static_cast<std::size_t>(kind);
+    s_p_stats[i_kind]->fetch_add(1, std::memory_order_relaxed);
+    const u64 c_spans = s_c_spans[i_kind].fetch_add(1, std::memory_order_relaxed) + 1;
+    if ((c_spans & (c_spans - 1)) == 0) {
+        LOG_WARNING(Render, "Buffer range {:#x}..{:#x} {} ({} so far)", va_first, va_end,
+                    s_what[i_kind], c_spans);
     }
 }
+} // namespace
 
 const Buffer* BufferCache::GetArena(u64 first_block, u64 last_block) {
     const u64 first_page = first_block >> blocks_per_arena_page_shift;
     const u64 last_page = last_block >> blocks_per_arena_page_shift;
-    if (last_page - first_page > 1) {
-        LOG_ERROR_COUNTED(Render_Vulkan, "Buffer request over arena pages {:#x}-{:#x} skipped",
-                          first_page, last_page);
+    const Buffer* owner = address_space[first_page];
+    bool is_owned = owner != nullptr;
+    for (u64 page = first_page + 1; is_owned && page <= last_page; ++page) {
+        is_owned = address_space[page] == owner;
+    }
+    if (is_owned) {
+        return owner;
+    }
+    const auto fail = [&] {
+        NoteArenaSpan(ArenaSpan::Failed, first_block << block_shift,
+                      (last_block + 1) << block_shift);
         return nullptr;
+    };
+    if (last_page - first_page + 1 > m_c_max_arena_pages) {
+        return fail();
     }
-
-    const auto* first_arena = address_space[first_page];
-    const auto* last_arena = address_space[last_page];
-    if (first_arena == last_arena) {
-        if (!first_arena) {
-            PsNativeProbe::Note(PsNativeProbe::BufferCreate);
-            const u64 base_block = Common::AlignDownPow2<u64>(first_block, blocks_per_arena_page);
-            const u64 num_pages = last_page - first_page + 1;
-            const auto* new_arena =
-                &arenas.emplace_back(instance, base_block << block_shift,
-                                     num_pages << ARENA_PAGE_BITS, MemoryType::Sparse);
-            StopWithoutArena(*new_arena);
-            address_space[first_page] = new_arena;
-            address_space[last_page] = new_arena;
+    const auto create = [&](u64 begin_page, u64 end_page) -> const Buffer* {
+        PsNativeProbe::Note(PsNativeProbe::BufferCreate);
+        auto& arena = arenas.emplace_back(instance, begin_page << m_arena_page_bits,
+                                          (end_page - begin_page) << m_arena_page_bits,
+                                          MemoryType::Sparse);
+        if (!arena.IsAllocated()) {
+            arenas.pop_back();
+            return nullptr;
         }
-        return address_space[first_page];
+        return &arena;
+    };
+
+    // The arenas the range touches are replaced whole by one covering them all.
+    u64 begin_page = first_page, end_page = last_page + 1;
+    bool has_arenas = false;
+    for (bool is_grown = true; is_grown;) {
+        is_grown = false;
+        for (u64 page = begin_page; page < end_page; ++page) {
+            const Buffer* arena = address_space[page];
+            if (!arena) {
+                continue;
+            }
+            has_arenas = true;
+            const u64 arena_begin = arena->cpu_addr >> m_arena_page_bits;
+            const u64 arena_end = (arena->cpu_addr + arena->size_bytes) >> m_arena_page_bits;
+            if (arena_begin < begin_page || arena_end > end_page) {
+                begin_page = std::min(begin_page, arena_begin);
+                end_page = std::max(end_page, arena_end);
+                is_grown = true;
+            }
+        }
+    }
+    const Buffer* target = nullptr;
+    if (end_page - begin_page <= m_c_max_arena_pages) {
+        target = create(begin_page, end_page);
+    } else {
+        // Too large merged: the range's own pages move to an arena covering just them, an earlier
+        // one where it exists, so that ranges alternating across a boundary between arenas do not
+        // create one each time. The other pages keep their arenas, which still cover them.
+        NoteArenaSpan(ArenaSpan::Split, first_block << block_shift,
+                      (last_block + 1) << block_shift);
+        begin_page = first_page;
+        end_page = last_page + 1;
+        const VAddr va_begin = begin_page << m_arena_page_bits;
+        const VAddr va_end = end_page << m_arena_page_bits;
+        for (auto it = arenas.rbegin(); it != arenas.rend() && !target; ++it) {
+            if (it->cpu_addr <= va_begin && it->cpu_addr + it->size_bytes >= va_end) {
+                target = &*it;
+            }
+        }
+        if (!target) {
+            target = create(begin_page, end_page);
+        }
+    }
+    if (!target) {
+        return fail();
+    }
+    if (has_arenas) {
+        LOG_WARNING(Render, "Migrating arena");
     }
 
-    LOG_WARNING(Render, "Migrating arena");
-    PsNativeProbe::Note(PsNativeProbe::BufferCreate);
-
-    const u64 first_addr = first_arena ? first_arena->cpu_addr : (first_page << ARENA_PAGE_BITS);
-    const u64 first_size = first_arena ? first_arena->size_bytes : ARENA_PAGE_SIZE;
-    const u64 last_size = last_arena ? last_arena->size_bytes : ARENA_PAGE_SIZE;
-
-    const u64 base_block = first_addr >> block_shift;
-    const u64 total_size = first_size + last_size;
-    const u64 end_block = (first_addr + total_size) >> block_shift;
-    auto* new_arena = &arenas.emplace_back(instance, first_addr, total_size, MemoryType::Sparse);
-    StopWithoutArena(*new_arena);
-    auto* bind = BindsForArena(new_arena);
-    resident_ranges.ForEachInRange(base_block, end_block, [&](const Backing& backing) {
-        const u64 start = std::max(base_block, backing.start);
-        const u64 end = std::min(end_block, backing.end);
-        bind->binds.push_back(vk::SparseMemoryBind{
-            .resourceOffset = (start - base_block) << block_shift,
-            .size = (end - start) << block_shift,
-            .memory = backing.memory,
-            .memoryOffset = (backing.offset + (start - backing.start)) << block_shift,
+    // The pages changing arena get the blocks resident there bound into the new one (the BDA
+    // page table keeps the old arena's addresses, whose binds stay).
+    const auto rebind = [&](u64 page_begin, u64 page_end) {
+        const u64 base_block = page_begin << blocks_per_arena_page_shift;
+        const u64 end_block = page_end << blocks_per_arena_page_shift;
+        auto* bind = BindsForArena(target);
+        resident_ranges.ForEachInRange(base_block, end_block, [&](const Backing& backing) {
+            const u64 start = std::max(base_block, backing.start);
+            const u64 end = std::min(end_block, backing.end);
+            bind->binds.push_back(vk::SparseMemoryBind{
+                .resourceOffset = (start << block_shift) - target->cpu_addr,
+                .size = (end - start) << block_shift,
+                .memory = backing.memory,
+                .memoryOffset = (backing.offset + (start - backing.start)) << block_shift,
+            });
         });
-    });
+    };
+    u64 run_begin = end_page;
+    for (u64 page = begin_page; page < end_page; ++page) {
+        if (address_space[page] == target) {
+            if (run_begin != end_page) {
+                rebind(run_begin, page);
+                run_begin = end_page;
+            }
+            continue;
+        }
+        if (run_begin == end_page) {
+            run_begin = page;
+        }
+        address_space[page] = target;
+    }
+    if (run_begin != end_page) {
+        rebind(run_begin, end_page);
+    }
+    return target;
+}
 
-    u64 base_page = first_addr >> ARENA_PAGE_BITS;
-    for (u32 page = 0; page < (first_size >> ARENA_PAGE_BITS); ++page) {
-        address_space[base_page + page] = new_arena;
+const Buffer* BufferCache::GetArenaClamped(u64 first_block, u64& last_block) {
+    const u64 first_page = first_block >> blocks_per_arena_page_shift;
+    const u64 max_last_block =
+        ((first_page + m_c_max_arena_pages) << blocks_per_arena_page_shift) - 1;
+    if (last_block > max_last_block) {
+        NoteArenaSpan(ArenaSpan::Clamped, first_block << block_shift,
+                      (last_block + 1) << block_shift);
+        last_block = max_last_block;
     }
-    base_page = last_page;
-    for (u32 page = 0; page < (last_size >> ARENA_PAGE_BITS); ++page) {
-        address_space[base_page + page] = new_arena;
+    return GetArena(first_block, last_block);
+}
+
+std::pair<const Buffer*, u64> BufferCache::NullBinding() {
+    if (!m_null_binding) {
+        m_null_binding = std::make_unique<Buffer>(instance, 0, 64_KB, MemoryType::DeviceLocal,
+                                                  "Null Binding Buffer");
     }
-    return new_arena;
+    return {m_null_binding.get(), 0};
 }
 
 void BufferCache::EnsureResident(const Buffer* arena, u64 first_block, u64 last_block,
@@ -2671,6 +2805,9 @@ void BufferCache::ProcessLateWrites() {
             continue; // the GPU reads the game's memory there (or nothing yet)
         }
         const auto* arena = GetArena(first, last);
+        if (!arena) {
+            continue;
+        }
         runtime.UpdateBuffer(arena, arena->Offset(addr), bytes);
         PsStats::g_c_late_vram_writes.fetch_add(1, std::memory_order_relaxed);
     }
@@ -2689,6 +2826,10 @@ void BufferCache::ProcessLateWrites() {
                 (chunk = PsGuestMemory::Find(phys)) != nullptr &&
                 phys + (to - at) <= chunk->phys + chunk->cb_chunk) {
                 const auto* arena = GetArena(block, block);
+                if (!arena) {
+                    at = to;
+                    continue;
+                }
                 const vk::BufferCopy copy{phys - chunk->phys, at - arena->cpu_addr, to - at};
                 runtime.CopyFromGuestChunk(chunk->buffer, arena, std::span{&copy, 1});
                 PsStats::g_c_late_vram_writes.fetch_add(1, std::memory_order_relaxed);
@@ -2755,6 +2896,9 @@ bool BufferCache::UpdateGpuWritten(VAddr addr, std::span<const u8> data) {
         return false;
     }
     const auto* arena = GetArena(first, last);
+    if (!arena) {
+        return false;
+    }
     runtime.UpdateBuffer(arena, arena->Offset(addr), data);
     PsStats::g_c_gpu_data_updates.fetch_add(1, std::memory_order_relaxed);
     return true;
@@ -2834,6 +2978,9 @@ void BufferCache::QueueCopyBacks(u64 submitted) {
         // What the GPU wrote there since the block was handed out (not the bytes handed out
         // again: the CPU may be writing them now), copied at the end of this submission.
         const auto* arena = GetArena(block, block);
+        if (!arena) {
+            continue;
+        }
         boost::container::small_vector<vk::BufferCopy, 8> copies;
         gpu_written_bytes.ForEachInRange(address, address + block_size, [&](const Interval& iv) {
             const VAddr from = std::max<VAddr>(iv.start, address);

@@ -701,6 +701,18 @@ void VideoOutDriver::Flip(const Request& req) {
                                 kept / window);
                 }
             }
+            {
+                const u64 split = PsStats::g_c_arena_spans_split.exchange(0);
+                const u64 clamped = PsStats::g_c_arena_spans_clamped.exchange(0);
+                const u64 failed = PsStats::g_c_arena_spans_failed.exchange(0);
+                if (split + clamped + failed != 0) {
+                    std::printf("Buffer arenas over maxBufferSize: %llu ranges given their own "
+                                "pages, %llu clamped, %llu without an arena\n",
+                                static_cast<unsigned long long>(split),
+                                static_cast<unsigned long long>(clamped),
+                                static_cast<unsigned long long>(failed));
+                }
+            }
             Libraries::Kernel::ReportEqueueWaits(frames);
             if (const Game::Profile* game = Game::Active(); game && game->pfn_report_stats) {
                 game->pfn_report_stats();

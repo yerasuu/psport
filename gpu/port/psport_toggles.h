@@ -126,6 +126,10 @@ inline std::atomic<std::uint64_t> g_c_late_vram_writes{0}; ///< labels and the l
 /// GPU data dropped, not read back, before a CPU write of its whole pages (DropOverwrittenGpuData):
 /// writes and bytes; and page runs left to the readback since the GPU's write there was not done.
 inline std::atomic<std::uint64_t> g_c_overwrite_drops{0}, g_cb_overwrite_drop{0}, g_c_overwrite_drops_kept{0};
+/// Buffer cache arena spans over maxBufferSize: given an arena of their own pages instead of the
+/// merge, clamped to what one arena covers, and left without an arena.
+inline std::atomic<std::uint64_t> g_c_arena_spans_split{0}, g_c_arena_spans_clamped{0},
+    g_c_arena_spans_failed{0};
 /// Copies of in-place data the CPU writes into VRAM for reading (ShadowCopy).
 inline std::atomic<std::uint64_t> g_c_shadow_copies{0}, g_cb_shadow{0};
 /// Images tiled back into system memory: through VRAM with one copy (LocalTiling), and bytes.
