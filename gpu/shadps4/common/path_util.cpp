@@ -118,7 +118,15 @@ static auto UserPaths = [] {
     create_path(PathType::UserDir, user_dir);
     create_path(PathType::LogDir, user_dir / LOG_DIR);
     create_path(PathType::ScreenshotsDir, user_dir / SCREENSHOTS_DIR);
-    create_path(PathType::ShaderDir, user_dir / SHADER_DIR);
+    // psport: PS_CACHE_DIR moves the shader and pipeline caches off the user directory, so
+    // decanter can keep them on a faster disk than the game's saves.
+    const char* sz_cache_dir = std::getenv("PS_CACHE_DIR");
+    const auto cache_root =
+        sz_cache_dir && *sz_cache_dir ? std::filesystem::path(sz_cache_dir) : user_dir;
+    if (cache_root != user_dir) {
+        std::filesystem::create_directories(cache_root);
+    }
+    create_path(PathType::ShaderDir, cache_root / SHADER_DIR);
     create_path(PathType::GameDataDir, user_dir / GAMEDATA_DIR);
     create_path(PathType::TempDataDir, user_dir / TEMPDATA_DIR);
     create_path(PathType::SysModuleDir, user_dir / SYSMODULES_DIR);
@@ -129,7 +137,7 @@ static auto UserPaths = [] {
     create_path(PathType::MetaDataDir, user_dir / METADATA_DIR);
     create_path(PathType::CustomTrophy, user_dir / CUSTOM_TROPHY);
     create_path(PathType::CustomConfigs, user_dir / CUSTOM_CONFIGS);
-    create_path(PathType::CacheDir, user_dir / CACHE_DIR);
+    create_path(PathType::CacheDir, cache_root / CACHE_DIR);
     create_path(PathType::FontsDir, user_dir / FONTS_DIR);
     create_path(PathType::TrophyDir, user_dir / TROPHY_DIR);
     create_path(PathType::HomeDir, user_dir / HOME_DIR);

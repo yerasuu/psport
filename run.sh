@@ -56,6 +56,12 @@ export __GL_SHADER_DISK_CACHE=${__GL_SHADER_DISK_CACHE:-1}
 export __GL_SHADER_DISK_CACHE_SKIP_CLEANUP=${__GL_SHADER_DISK_CACHE_SKIP_CLEANUP:-1}
 export __GL_SHADER_DISK_CACHE_SIZE=${__GL_SHADER_DISK_CACHE_SIZE:-10737418240}
 export MESA_SHADER_CACHE_MAX_SIZE=${MESA_SHADER_CACHE_MAX_SIZE:-4G}
+# PS_CACHE_DIR (decanter's cache location for the game's library folder) also holds the drivers' caches.
+if [[ -n ${PS_CACHE_DIR:-} ]]; then
+    export MESA_SHADER_CACHE_DIR=${MESA_SHADER_CACHE_DIR:-$PS_CACHE_DIR/mesa}
+    export __GL_SHADER_DISK_CACHE_PATH=${__GL_SHADER_DISK_CACHE_PATH:-$PS_CACHE_DIR/nvidia}
+    mkdir -p "$PS_CACHE_DIR"
+fi
 mkdir -p "$PS_GPU_USER_DIR"
 # FSR 4.1.1 assets (tools/fsr4cap/build_assets.sh): next to run.sh or in the data directory.
 if [[ -z ${PS_FSR411_DIR:-} && ! -d fsr4_411 && -d $data/fsr4_411 ]]; then
