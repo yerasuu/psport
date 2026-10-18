@@ -160,6 +160,7 @@ utilizadas:
 | `PS_MODS_ENABLED=0` | desactiva los mods de archivos ([mods y parches](docs/en/MODS.md)) |
 | `PS_GAME_PROFILE=none` | ejecuta sin el perfil del juego, solo por las rutas genéricas |
 | `PS_QUIRKS=none,-<id>,+<id>` | desactiva o activa las correcciones para un juego o un sistema ([quirks](docs/en/QUIRKS.md)) |
+| `toypad` (`PS_TOYPAD=1`) | conecta el toy pad de LEGO Dimensions emulado, desactivado por defecto ([toy pad](docs/en/TOYPAD.md)) |
 
 Los valores por defecto y por qué sirven para cualquier juego: [FORK.md, Defaults](FORK.md#defaults).
 Variables de diagnóstico e informe de llamadas: [FORK.md, Diagnostics](FORK.md#diagnostics). Módulos
@@ -242,7 +243,7 @@ su registro y su informe de llamadas, implementar lo que falta y comprobar el re
 - Notas de funciones: [reescalador](docs/en/upscaler.md),
   [trabajo de GPU en paralelo](docs/en/parallel_gpu.md),
   [vectores de movimiento](docs/en/motion_vectors.md), [mods y parches](docs/en/MODS.md),
-  [perfilado](docs/en/PROFILING.md).
+  [perfilado](docs/en/PROFILING.md), [toy pad](docs/en/TOYPAD.md).
 - [docs/en/history/](docs/en/history/): notas de diseño, planes y registros de cambios de bbport
   (los originales en ruso están en [docs/ru/](docs/ru/)).
 
@@ -272,6 +273,8 @@ Los commits de origen y los cambios en el código heredado están anotados en [F
 | [FSR-Vulkan](https://github.com/FireBurn/FSR-Vulkan), de FireBurn, AMD FidelityFX SDK | FSR 3.1 | MIT |
 | [LibAtrac9](https://github.com/Thealexbarney/LibAtrac9) | decodificación de audio ATRAC9 | MIT |
 | [Dear ImGui](https://github.com/ocornut/imgui) | menú superpuesto y menús del juego | MIT |
+| [Tracy](https://github.com/wolfpld/tracy) (submódulo, solo se descarga con `PS_TRACY=ON`) | compilaciones para perfilado | BSD-3-Clause |
+| Cabecera de la API in-application de RenderDoc (`gpu/third_party/renderdoc`) | capturas de un fotograma | MIT |
 | [cpp-httplib](https://github.com/yhirose/cpp-httplib) | módulo en línea | MIT |
 | Puente DLSS (`gpu/dlss_bridge`) del [port para Windows de Supermedo](https://github.com/Supermedo/bloodborne_pc), adaptado de [IFreemz/shadPS4-Bloodborne-DLSS-FSR](https://github.com/IFreemz/shadPS4-Bloodborne-DLSS-FSR) | DLSS | MIT |
 | [Fuentes DejaVu](https://dejavu-fonts.github.io/) | texto del menú superpuesto, alternativa para libSceFont | Bitstream Vera (cambios de DejaVu en dominio público) |

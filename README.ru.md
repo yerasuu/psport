@@ -157,6 +157,7 @@ Bloodborne: `bash launcher/psport-launcher.sh` запускает его, а `ba
 | `PS_MODS_ENABLED=0` | отключает файловые моды ([моды и патчи](docs/en/MODS.md)) |
 | `PS_GAME_PROFILE=none` | запуск без профиля игры, только по общим путям |
 | `PS_QUIRKS=none,-<id>,+<id>` | выключает или включает исправления для отдельной игры или системы ([quirks](docs/en/QUIRKS.md)) |
+| `toypad` (`PS_TOYPAD=1`) | подключает эмулируемый toy pad LEGO Dimensions, по умолчанию выключен ([toy pad](docs/en/TOYPAD.md)) |
 
 Значения по умолчанию и почему они подходят любой игре: [FORK.md, Defaults](FORK.md#defaults).
 Диагностические переменные и отчёт о вызовах: [FORK.md, Diagnostics](FORK.md#diagnostics).
@@ -236,7 +237,7 @@ gamescope без окна, без звука и без контроллеров 
 - Заметки о возможностях: [апскейлер](docs/en/upscaler.md),
   [параллельная работа видеочипа](docs/en/parallel_gpu.md),
   [векторы движения](docs/en/motion_vectors.md), [моды и патчи](docs/en/MODS.md),
-  [профилирование](docs/en/PROFILING.md).
+  [профилирование](docs/en/PROFILING.md), [toy pad](docs/en/TOYPAD.md).
 - [docs/en/history/](docs/en/history/): проектные заметки, планы и журналы изменений bbport
   (русские оригиналы — в [docs/ru/](docs/ru/)).
 
@@ -266,6 +267,8 @@ psport распространяется под **GNU General Public License v2.0
 | [FSR-Vulkan](https://github.com/FireBurn/FSR-Vulkan) от FireBurn, AMD FidelityFX SDK | FSR 3.1 | MIT |
 | [LibAtrac9](https://github.com/Thealexbarney/LibAtrac9) | декодирование звука ATRAC9 | MIT |
 | [Dear ImGui](https://github.com/ocornut/imgui) | оверлей и внутриигровые меню | MIT |
+| [Tracy](https://github.com/wolfpld/tracy) (подмодуль, загружается только при `PS_TRACY=ON`) | сборки для профилирования | BSD-3-Clause |
+| Заголовок in-application API из RenderDoc (`gpu/third_party/renderdoc`) | захват одного кадра | MIT |
 | [cpp-httplib](https://github.com/yhirose/cpp-httplib) | сетевой модуль | MIT |
 | Мост DLSS (`gpu/dlss_bridge`) из [порта для Windows от Supermedo](https://github.com/Supermedo/bloodborne_pc), адаптированный из [IFreemz/shadPS4-Bloodborne-DLSS-FSR](https://github.com/IFreemz/shadPS4-Bloodborne-DLSS-FSR) | DLSS | MIT |
 | [Шрифты DejaVu](https://dejavu-fonts.github.io/) | текст оверлея, запасной вариант для libSceFont | Bitstream Vera (изменения DejaVu — общественное достояние) |
