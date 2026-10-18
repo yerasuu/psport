@@ -155,6 +155,26 @@ void CFG::EmitLabels() {
     std::ranges::sort(labels);
 }
 
+// psport: an EXEC set to a constant (s_mov_b64 exec, 1 so that one lane does the wave's atomic
+// add) masks the vector instructions after it as a saved mask does; run by every lane, such an add
+// counted 64 times and wrote past its counter, and a dispatch waiting on the counters never ended.
+static bool SetsExecToConstant(const GcnInst& inst) {
+    if (inst.opcode != Opcode::S_MOV_B64 || inst.dst[0].field != OperandField::ExecLo) {
+        return false;
+    }
+    const InstOperand& src = inst.src[0];
+    switch (src.field) {
+    case OperandField::ConstZero:
+    case OperandField::SignedConstIntPos:
+    case OperandField::LiteralConst:
+        return true;
+    case OperandField::SignedConstIntNeg:
+        return src.code != SignedConstIntNegMin;
+    default:
+        return false;
+    }
+}
+
 void CFG::SplitDivergenceScopes() {
     const auto is_open_scope = [](const GcnInst& inst) {
         // An open scope instruction is an instruction that modifies EXEC
@@ -165,7 +185,7 @@ void CFG::SplitDivergenceScopes() {
                // with SAVEEXEC to mask the threads that didn't pass the condition
                // of initial branch.
                (inst.opcode == Opcode::S_ANDN2_B64 && inst.dst[0].field == OperandField::ExecLo) ||
-               inst.IsCmpx();
+               inst.IsCmpx() || SetsExecToConstant(inst);
     };
     const auto is_close_scope = [](const GcnInst& inst) {
         // Closing an EXEC scope can be either a branch instruction
