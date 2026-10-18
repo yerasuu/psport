@@ -388,13 +388,22 @@ s32 sceVideoOutSubmitEopFlip(s32 handle, u32 buf_id, u32 mode, s64 flip_arg, voi
                                   static_cast<u32>(irq));
                 return;
             }
-            // psport: the flip still goes ahead, since the game waits for it whatever its label.
-            if (buf_id < MaxDisplayBuffers && port->buffer_labels[buf_id] != 1) {
+            const bool is_display_buffer = buf_id < MaxDisplayBuffers;
+            // psport: a game that locks a buffer again without waiting for its label sees it
+            // released by the display of an earlier flip still queued; the label guards the
+            // game's writes, not the flip, so the flip goes ahead.
+            if (std::scoped_lock lock{port->vo_mutex};
+                is_display_buffer && port->buffer_labels[buf_id] != 1) {
                 LOG_ERROR_COUNTED(Lib_VideoOut, "Out of order flip IRQ for buffer {} (label {})",
                                   buf_id, port->buffer_labels[buf_id]);
             }
             if (!driver->SubmitFlip(port, buf_id, flip_arg, true)) {
                 LOG_ERROR_COUNTED(Lib_VideoOut, "EOP flip of buffer {} dropped", buf_id);
+                if (is_display_buffer) {
+                    std::scoped_lock lock{port->vo_mutex};
+                    port->buffer_labels[buf_id] = 0;
+                    port->vo_cv.notify_one();
+                }
             }
         });
 

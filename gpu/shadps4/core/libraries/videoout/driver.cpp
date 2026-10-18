@@ -805,8 +805,19 @@ void VideoOutDriver::Flip(const Request& req) {
         presenter->WaitRendered(req.frame);
     }
 
-    // Update flip status.
+    // psport: the previous buffer is released before the flip event, as the display does, so
+    // that a game woken by the event and locking that buffer again at once is not released by
+    // this flip after its own label write.
     auto* port = req.port;
+    {
+        std::scoped_lock lock{port->vo_mutex};
+        if (port->prev_index != -1) {
+            port->buffer_labels[port->prev_index] = 0;
+            port->vo_cv.notify_one();
+        }
+        port->prev_index = req.index;
+    }
+
     {
         std::unique_lock lock{port->port_mutex};
         auto& flip_status = port->flip_status;
@@ -832,14 +843,6 @@ void VideoOutDriver::Flip(const Request& req) {
             }
         }
     }
-
-    // Reset prev flip label
-    if (port->prev_index != -1) {
-        port->buffer_labels[port->prev_index] = 0;
-        port->SignalVoLabel();
-    }
-    // save to prev buf index
-    port->prev_index = req.index;
 }
 
 void VideoOutDriver::DrawBlankFrame() {
