@@ -370,8 +370,13 @@ private:
             local_labels.emplace(&block, label_it);
             ++label_id;
         }
+        const auto label_of = [&](Block* p_block) {
+            const auto it = local_labels.find(p_block);
+            SHADER_ASSERT_MSG(it != local_labels.end(), "branch to a block outside the CFG");
+            return it->second;
+        };
         for (Block& block : cfg.blocks) {
-            const Node label{local_labels.at(&block)};
+            const Node label{label_of(&block)};
             // Insertion point
             const Node ip{std::next(label)};
 
@@ -388,19 +393,19 @@ private:
                 Statement* const always_cond{
                     pool.Create(Identity{}, IR::Value{true}, IR::Condition::True, &root_stmt)};
                 if (block.cond == IR::Condition::True) {
-                    const Node true_label{local_labels.at(block.branch_true)};
+                    const Node true_label{label_of(block.branch_true)};
                     gotos.push_back(
                         root.insert(ip, *pool.Create(Goto{}, always_cond, true_label, &root_stmt)));
                 } else if (block.cond == IR::Condition::False) {
-                    const Node false_label{local_labels.at(block.branch_false)};
+                    const Node false_label{label_of(block.branch_false)};
                     gotos.push_back(root.insert(
                         ip, *pool.Create(Goto{}, always_cond, false_label, &root_stmt)));
                 } else {
                     const IR::Value value = block.ir_block->branch_cond;
                     SHADER_ASSERT(!value.IsEmpty());
                     IR::Inst* cond_ref = value.Inst();
-                    const Node true_label{local_labels.at(block.branch_true)};
-                    const Node false_label{local_labels.at(block.branch_false)};
+                    const Node true_label{label_of(block.branch_true)};
+                    const Node false_label{label_of(block.branch_false)};
                     Statement* const true_cond{
                         pool.Create(Identity{}, cond_ref->Arg(0), block.cond, &root_stmt)};
                     cond_ref->Invalidate();
@@ -571,10 +576,17 @@ private:
 
 [[nodiscard]] Statement* TryFindForwardBlock(Node forward_node, Node end) {
     while (forward_node != end && !HasChildren(forward_node->type)) {
-        if (forward_node->type == StatementType::Code) {
+        switch (forward_node->type) {
+        case StatementType::Code:
             return &*forward_node;
+        // psport: a merge block found past a break or a return would take that statement's
+        // condition and successors too (a block that branches to itself, or twice to the same one).
+        case StatementType::Break:
+        case StatementType::Return:
+            return nullptr;
+        default:
+            ++forward_node;
         }
-        ++forward_node;
     }
     return nullptr;
 }

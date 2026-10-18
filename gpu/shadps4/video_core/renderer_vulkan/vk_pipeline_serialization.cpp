@@ -14,7 +14,7 @@
 
 namespace Serialization {
 /* You should increment versions below once corresponding serialization scheme is changed. */
-static constexpr u32 ShaderBinaryVersion = 12u; // psport: the UI's edge stretch in vertex shaders
+static constexpr u32 ShaderBinaryVersion = 13u; // psport: V_CMPX fall-through and breaks in control flow
 static constexpr u32 ShaderMetaVersion = 12u; // psport: BufferResource::dynamic
 static constexpr u32 PipelineKeyVersion = 6u; // psport: SerializationSupport::xfb_stride
 } // namespace Serialization

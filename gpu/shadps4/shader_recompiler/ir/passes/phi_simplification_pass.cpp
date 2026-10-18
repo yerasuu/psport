@@ -42,7 +42,18 @@ static bool IsCompositeExtract(IR::Opcode opcode) {
 }
 
 static bool IsDisallowedOp(IR::Opcode op) {
-    return op == IR::Opcode::InverseBallot;
+    // psport: an operand that names a register or an attribute is an immediate; folded into the
+    // Phi it would make a Phi of that type, which no later pass can lower.
+    switch (IR::ArgTypeOf(op, 0)) {
+    case IR::Type::ScalarReg:
+    case IR::Type::VectorReg:
+    case IR::Type::VirtualReg:
+    case IR::Type::Attribute:
+    case IR::Type::Patch:
+        return true;
+    default:
+        return op == IR::Opcode::InverseBallot;
+    }
 }
 
 using InstList = boost::container::small_vector<IR::Inst*, 4>;

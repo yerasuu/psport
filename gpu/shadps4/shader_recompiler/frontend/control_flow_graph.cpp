@@ -24,10 +24,6 @@ struct Compare {
 };
 
 static IR::Condition MakeCondition(const GcnInst& inst) {
-    if (inst.IsCmpx()) {
-        return IR::Condition::Execnz;
-    }
-
     switch (inst.opcode) {
     case Opcode::S_CBRANCH_SCC0:
         return IR::Condition::Scc0;
