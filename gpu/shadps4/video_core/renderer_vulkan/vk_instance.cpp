@@ -18,7 +18,10 @@
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_platform.h"
 
+#include <unistd.h>
 #include <vk_mem_alloc.h>
+
+extern "C" int runtime_debug_open(const char* sz_name); // psport: src/runtime/runtime_debug.c
 
 namespace Vulkan {
 
@@ -939,6 +942,15 @@ void Instance::CollectDeviceParameters() {
                 IsIntegrated() ? " (integrated)" : "",
                 static_cast<unsigned long long>(device_local >> 20), vendor_name.c_str(),
                 driver_version.c_str(), driver.driverInfo.data(), api_version.c_str());
+    // psport: and in debug mode's config.txt (src/runtime/runtime_debug.c).
+    if (const int h_config = runtime_debug_open("config.txt"); h_config >= 0) {
+        const std::string text = fmt::format(
+            "GPU: {}{}, {} MiB VRAM; {} {} ({}), Vulkan {}; vendor 0x{:04x}, device 0x{:04x}\n", model_name,
+            IsIntegrated() ? " (integrated)" : "", device_local >> 20, vendor_name, driver_version,
+            driver.driverInfo.data(), api_version, properties.vendorID, properties.deviceID);
+        (void)!write(h_config, text.data(), text.size());
+        close(h_config);
+    }
     LOG_INFO(Render_Vulkan, "GPU_Vendor: {}", vendor_name);
     LOG_INFO(Render_Vulkan, "GPU_Model: {}", model_name);
     LOG_INFO(Render_Vulkan, "GPU_Integrated: {}", IsIntegrated() ? "Yes" : "No");

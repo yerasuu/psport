@@ -131,6 +131,12 @@ int main(int argc, char **argv) {
         fprintf(stderr, "Usage: %s --game dir [--system-modules dir] [--hle libs] [--lle libs] [--cpu-only] [--strict-imports] [--app0 dir] [--user dir] [--patches-dir dir [--patches-config file]] [--mods dir [--mods-config file]] [--out dir] [--timeout seconds] [--exec guest-path [--arg value]...] | --check-game dir | --has-presets dir | --list-patches dir (--game dir | --title id [--version v]) | --list-mods dir [--game dir | --title id] | --list-quirks [--game dir] | --list-features | --list-traits --game dir | --online-overrides (--game dir | --title id) | --list-effects (--game dir | --title id) | --vulkan-only\n", argv[0]);
         return 1;
     }
+    {
+        char sz_sfo[4096], sz_serial[16]="";
+        snprintf(sz_sfo,sizeof(sz_sfo),"%s/sce_sys/param.sfo",game.sz_game);
+        sfo_value(sz_sfo,"TITLE_ID",sz_serial,sizeof(sz_serial),NULL);
+        runtime_debug_start(argv,sz_serial);
+    }
     const char *mod_folders[256];
     if (sz_mods_dir) {
         GameInfo original;

@@ -32,7 +32,7 @@ static _Atomic(PsHostFaultHandler) s_fault_handlers[PS_HOST_FAULT_KIND_COUNT][MA
 static _Atomic int s_c_fault_handlers[PS_HOST_FAULT_KIND_COUNT];
 static unsigned s_fault_flags[PS_HOST_FAULT_KIND_COUNT];
 static _Atomic(PsHostInterruptHandler) s_interrupt_handlers[PS_HOST_INTERRUPT_COUNT];
-static void (*s_pfn_termination_report)(void);
+static void (*s_pfn_termination_report)(int sig);
 static pthread_mutex_t s_install_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /* SIGUSR1 stays free for host libraries. */
@@ -148,13 +148,13 @@ int ps_host_interrupt_thread(int32_t tid, PsHostInterrupt interrupt) {
 void ps_host_watchdog_arm(unsigned seconds) { alarm(seconds); }
 
 static void on_termination(int sig) {
-    s_pfn_termination_report();
+    s_pfn_termination_report(sig);
     signal(sig, SIG_DFL);
     raise(sig);
 }
 
 /* SDL takes these unless it runs without video (--cpu-only): only a default action is replaced. */
-void ps_host_on_termination(void (*pfn_report)(void)) {
+void ps_host_on_termination(void (*pfn_report)(int sig)) {
     static const int s_signals[] = {SIGTERM, SIGINT, SIGHUP};
     s_pfn_termination_report = pfn_report;
     for (size_t i = 0; i < sizeof(s_signals) / sizeof(*s_signals); ++i) {

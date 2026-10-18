@@ -34,6 +34,7 @@
 
 extern "C" volatile int runtime_restarting;
 extern "C" void runtime_calls_report(void);
+extern "C" int runtime_debug_open(const char* sz_name);
 extern "C" void psport_gpu_flush_caches(int can_wait);
 
 namespace Vulkan {
@@ -64,6 +65,17 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL DebugUtilsCallback(
     LOG_GENERIC(Common::Log::Class::Render_Vulkan, level, "{}: {}",
                 callback_data->pMessageIdName ? callback_data->pMessageIdName : "<null>",
                 callback_data->pMessage ? callback_data->pMessage : "<null>");
+
+    // psport: debug mode's validation.txt (src/runtime/runtime_debug.c) gets every message,
+    // whatever PS_GPU_LOG lets through to the log.
+    static const int s_h_validation = runtime_debug_open("validation.txt");
+    if (s_h_validation >= 0) {
+        const std::string text =
+            fmt::format("{} {}: {}\n", vk::to_string(severity),
+                        callback_data->pMessageIdName ? callback_data->pMessageIdName : "<null>",
+                        callback_data->pMessage ? callback_data->pMessage : "<null>");
+        (void)!write(s_h_validation, text.data(), text.size());
+    }
 
     return VK_FALSE;
 }

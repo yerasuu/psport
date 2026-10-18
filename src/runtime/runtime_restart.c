@@ -25,6 +25,8 @@ void runtime_restart(void) {
     runtime_restarting = 1;
     __sync_synchronize();
 #ifndef _WIN32
+    runtime_debug_finish("restart through run.sh", 0);
+    ps_host_output_untee();
     ps_host_close_from(3, -1, 0);
     char *const pp_argv[] = {"bash", "run.sh", NULL};
     ps_host_exec("bash", pp_argv);
@@ -61,7 +63,9 @@ void runtime_load_exec(const char *sz_path, char *const *pp_arguments) {
     for (size_t i = 0; i < c_arguments; ++i) printf("Runtime: sceSystemServiceLoadExec argument %zu: %s\n", i + 1, pp_arguments[i]);
     psport_gpu_flush_caches(1);
     runtime_calls_report();
+    runtime_debug_finish("sceSystemServiceLoadExec", 0);
     fflush(NULL);
+    ps_host_output_untee();
     /* The calling thread's signal mask outlives the exec and would be the new main thread's. */
     sigset_t none, previous;
     sigemptyset(&none);

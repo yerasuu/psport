@@ -1,4 +1,4 @@
-/* Linux: randomness and the executable's path (ps_host.h). */
+/* Linux: randomness, the executable's path and the machine's name (ps_host.h). */
 #define _GNU_SOURCE
 #include "ps_host.h"
 #include <errno.h>
@@ -28,4 +28,11 @@ long ps_host_exe_path(char *sz_out, size_t cb_out) {
     }
     sz_out[cb_path] = 0;
     return (long)cb_path;
+}
+
+int ps_host_host_name(char *sz_out, size_t cb_out) {
+    if (!cb_out) return EINVAL;
+    if (gethostname(sz_out, cb_out)) return errno;
+    sz_out[cb_out - 1] = 0;
+    return 0;
 }

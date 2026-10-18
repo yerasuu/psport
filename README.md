@@ -153,6 +153,7 @@ are changed from the overlay menu, which writes the file. Commonly used keys and
 | `PS_MODS_ENABLED=0` | disables file mods ([mods and patches](docs/en/MODS.md)) |
 | `PS_GAME_PROFILE=none` | runs without the game's profile, on the generic paths only |
 | `PS_QUIRKS=none,-<id>,+<id>` | turns per-title or per-host fixes off or on ([quirks](docs/en/QUIRKS.md)) |
+| `debug` (`PS_DEBUG=1`) | gathers each run's logs in one folder (`PS_DEBUG_DIR`, `PS_DEBUG_KEEP`; [FORK.md, Diagnostics](FORK.md#diagnostics)) |
 | `toypad` (`PS_TOYPAD=1`) | plugs in the emulated LEGO Dimensions toy pad, off by default ([toy pad](docs/en/TOYPAD.md)) |
 
 Defaults and why they hold for any game: [FORK.md, Defaults](FORK.md#defaults). Diagnostic

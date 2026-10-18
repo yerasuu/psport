@@ -171,6 +171,7 @@ void runtime_calls_report(void) {
     for (size_t i = 0; i < c_path; ++i) ++totals[s_p_entries[i].kind];
     const char *sz_path = runtime_env("PS_CALL_REPORT", NULL);
     const int file = sz_path && *sz_path ? ps_host_fs_open(sz_path, PS_HOST_OPEN_WRITE | PS_HOST_OPEN_CREATE | PS_HOST_OPEN_TRUNCATE, 0644) : -1;
+    const int h_debug = runtime_debug_open("calls.txt");
     char sz_line[512];
     snprintf(sz_line, sizeof(sz_line),
              "Calls: summary: %zu unimplemented, %zu stub, %zu failed, %zu status (import and error code), "
@@ -178,12 +179,16 @@ void runtime_calls_report(void) {
              totals[0], totals[1], totals[2], totals[3], totals[4]);
     put(1, sz_line);
     if (file >= 0) put(file, sz_line);
+    if (h_debug >= 0) put(h_debug, sz_line);
+    runtime_debug_note_calls(sz_line);
     for (size_t i = 0; i < c_path; ++i) {
         report_line(sz_line, sizeof(sz_line), &s_p_entries[i]);
         put(1, sz_line);
         if (file >= 0) put(file, sz_line);
+        if (h_debug >= 0) put(h_debug, sz_line);
     }
     if (file >= 0) ps_host_fs_close(file);
+    if (h_debug >= 0) ps_host_fs_close(h_debug);
     psport_gpu_cp_census_report();
     psport_gpu_native_probe_report();
     put(1, runtime_quirks_summary());

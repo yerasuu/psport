@@ -105,6 +105,7 @@ void runtime_report(void) {
 void runtime_stop(int status) {
     psport_gpu_flush_caches(1);
     runtime_calls_report();
+    runtime_debug_finish("STOP", status);
     fflush(NULL);
     _exit(status);
 }

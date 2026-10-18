@@ -7,14 +7,29 @@
 #include <unistd.h>
 #include "main.h"
 
+/* Fault and watchdog reports go to stderr and, in debug mode, to faults.txt too (opened by the
+ * first report, from the handler). */
+static int s_h_faults = -1;
+static void write_report(const char *p_text, size_t cb_text) {
+    (void)ps_host_fs_write(2, p_text, cb_text);
+    int h_faults = __atomic_load_n(&s_h_faults, __ATOMIC_ACQUIRE);
+    if (h_faults < 0) {
+        const int h_opened = runtime_debug_open("faults.txt");
+        if (h_opened < 0) return;
+        int expected = -1;
+        if (__atomic_compare_exchange_n(&s_h_faults, &expected, h_opened, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) h_faults = h_opened;
+        else { ps_host_fs_close(h_opened); h_faults = expected; }
+    }
+    (void)ps_host_fs_write(h_faults, p_text, cb_text);
+}
 #ifndef _WIN32
 static void dump_frames(const PsHostFaultContext *p_context);
 typedef struct { uintptr_t va; int is_found; } MappingSearch;
 static int write_mapping_of(const PsHostMapping *p_mapping, void *p_context) {
     MappingSearch *p_search = p_context;
     if (p_search->va < p_mapping->va_begin || p_search->va >= p_mapping->va_end) return 0;
-    (void)ps_host_fs_write(2, p_mapping->sz_description, strlen(p_mapping->sz_description));
-    (void)ps_host_fs_write(2, "\n", 1);
+    write_report(p_mapping->sz_description, strlen(p_mapping->sz_description));
+    write_report("\n", 1);
     p_search->is_found = 1;
     return 1;
 }
@@ -90,7 +105,7 @@ static void configure_fault_dumps(void) {
 static void write_unreadable(uintptr_t va_begin, size_t cb_unreadable) {
     char sz_line[96];
     snprintf(sz_line, sizeof(sz_line), "  %016lx: unreadable (%zu bytes)\n", (unsigned long)va_begin, cb_unreadable);
-    (void)ps_host_fs_write(2, sz_line, strlen(sz_line));
+    write_report(sz_line, strlen(sz_line));
 }
 /* Reads go through ps_host_read_memory row by row, so an unmapped page only costs its rows. */
 static void dump_fault_ranges(void) {
@@ -104,7 +119,7 @@ static void dump_fault_ranges(void) {
                 (int64_t)p_range->cb_pointer) {
                 snprintf(sz_line, sizeof(sz_line), "Fault dump *0x%lx/%zu: pointer unreadable\n",
                          (unsigned long)p_range->va_address, p_range->cb_pointer);
-                (void)ps_host_fs_write(2, sz_line, strlen(sz_line));
+                write_report(sz_line, strlen(sz_line));
                 continue;
             }
             va_dump = (uintptr_t)(pointer + (uint64_t)p_range->off_from_pointer);
@@ -114,7 +129,7 @@ static void dump_fault_ranges(void) {
                      (unsigned long)(off < 0 ? -(uint64_t)off : (uint64_t)off), (unsigned long)va_dump, p_range->cb_dump);
         } else
             snprintf(sz_line, sizeof(sz_line), "Fault dump 0x%lx, %zu bytes:\n", (unsigned long)va_dump, p_range->cb_dump);
-        (void)ps_host_fs_write(2, sz_line, strlen(sz_line));
+        write_report(sz_line, strlen(sz_line));
         uintptr_t va_unreadable = 0;
         size_t cb_unreadable = 0;
         for (size_t off_row = 0; off_row < p_range->cb_dump; off_row += 16) {
@@ -134,7 +149,7 @@ static void dump_fault_ranges(void) {
                 cb_line += (int)i < cb_read ? snprintf(sz_line + cb_line, sizeof(sz_line) - (size_t)cb_line, " %02x", row[i])
                                             : snprintf(sz_line + cb_line, sizeof(sz_line) - (size_t)cb_line, " ??");
             sz_line[cb_line++] = '\n';
-            (void)ps_host_fs_write(2, sz_line, (size_t)cb_line);
+            write_report(sz_line, (size_t)cb_line);
         }
         if (cb_unreadable) write_unreadable(va_unreadable, cb_unreadable);
     }
@@ -163,7 +178,7 @@ static int fault(PsHostFaultContext *p_context) {
                  (unsigned long)(rip - where.va_base), where.sz_symbol ? where.sz_symbol : "?", p_address);
     else
         snprintf(sz_line, sizeof(sz_line), "Fault (signal %d) at RIP %p, address %p\n", sig, (void *)rip, p_address);
-    (void)ps_host_fs_write(2, sz_line, strlen(sz_line));
+    write_report(sz_line, strlen(sz_line));
     dump_fault_ranges();
     if (g_is_gpu_enabled) psport_gpu_dump_guest_writes(p_context);
     /* Guest code keeps frame pointers: its call chain says which caller handed over the bad
@@ -177,7 +192,7 @@ static int fault(PsHostFaultContext *p_context) {
                 (int64_t)sizeof(caller) &&
             caller - (uintptr_t)g_p_image < 0x10000000) {
             snprintf(sz_line, sizeof(sz_line), "  called from guest offset 0x%lx\n", (unsigned long)(caller - (uintptr_t)g_p_image));
-            (void)ps_host_fs_write(2, sz_line, strlen(sz_line));
+            write_report(sz_line, strlen(sz_line));
             ps_host_fault_set_register(p_context, PS_HOST_REG_RIP, caller);
             dump_frames(p_context);
         }
@@ -188,10 +203,10 @@ static int fault(PsHostFaultContext *p_context) {
         char sz_thread[32] = "?";
         ps_host_thread_name(sz_thread, sizeof(sz_thread));
         snprintf(sz_line, sizeof(sz_line), "  thread %s; mapping of RIP: ", sz_thread);
-        (void)ps_host_fs_write(2, sz_line, strlen(sz_line));
+        write_report(sz_line, strlen(sz_line));
         MappingSearch search = {rip, 0};
         ps_host_list_mappings(write_mapping_of, &search);
-        if (!search.is_found) (void)ps_host_fs_write(2, "none\n", 5);
+        if (!search.is_found) write_report("none\n", 5);
     }
     /* Host call chain (frames with unwind info; guest frames end it). */
     void *frames[32];
@@ -202,10 +217,11 @@ static int fault(PsHostFaultContext *p_context) {
                      (unsigned long)((uintptr_t)frames[i] - where.va_base), where.sz_symbol ? where.sz_symbol : "?");
         else
             snprintf(sz_line, sizeof(sz_line), "  #%d %p\n", i, frames[i]);
-        (void)ps_host_fs_write(2, sz_line, strlen(sz_line));
+        write_report(sz_line, strlen(sz_line));
     }
     if (g_is_gpu_enabled) psport_gpu_flush_caches(0);
     runtime_calls_report();
+    runtime_debug_finish("fault", 128 + sig);
     _exit(128 + sig);
 }
 #endif
@@ -223,10 +239,10 @@ static void dump_frames(const PsHostFaultContext *p_context) {
     /* First argument register: the lock address when a thread waits on a futex. */
     char sz_arg[]="  tid=0000000000000000 rdi=0000000000000000\n";
     write_hex(sz_arg+6,tid); write_hex(sz_arg+27,ps_host_fault_register(p_context,PS_HOST_REG_RDI));
-    (void)ps_host_fs_write(2, sz_arg,sizeof(sz_arg)-1);
+    write_report(sz_arg,sizeof(sz_arg)-1);
     for (int depth=0; depth<24; ++depth) {
         write_hex(sz_line+6,tid); write_hex(sz_line+27,rip); write_hex(sz_line+59,rip-(uintptr_t)g_p_image); write_hex(sz_line+90,rip-s_exe_base);
-        (void)ps_host_fs_write(2, sz_line,sizeof(sz_line)-1);
+        write_report(sz_line,sizeof(sz_line)-1);
         uintptr_t frame[2];
         if (!rbp || ps_host_read_memory(frame,(const void *)rbp,sizeof(frame))!=(int64_t)sizeof(frame)) break;
         if (frame[0]<=rbp) break;
@@ -240,12 +256,13 @@ static void dump_other_thread(int32_t tid, void *p_context) {
 }
 static void watchdog(PsHostFaultContext *p_context) {
     const char sz_head[]="STOP: watchdog timeout; thread stacks:\n";
-    (void)ps_host_fs_write(2, sz_head,sizeof(sz_head)-1);
+    write_report(sz_head,sizeof(sz_head)-1);
     dump_frames(p_context);
     ps_host_thread_each(dump_other_thread,NULL);
     ps_host_time_sleep_ns(100000000,NULL);
     if (g_is_gpu_enabled) psport_gpu_flush_caches(0);
     runtime_calls_report();
+    runtime_debug_finish("watchdog timeout", 128 + ps_host_fault_signal(p_context));
     _exit(128 + ps_host_fault_signal(p_context));
 }
 #ifndef _WIN32
@@ -262,5 +279,9 @@ void install_fault_handlers(unsigned timeout_seconds) {
     ps_host_watchdog_arm(timeout_seconds); /* 0 disables the watchdog */
 }
 /* Termination requests SDL does not take (--cpu-only): the call summary, then the default action. */
-void install_shutdown_signals(void) { ps_host_on_termination(runtime_calls_report); }
+static void report_termination(int sig) {
+    runtime_calls_report();
+    runtime_debug_finish("termination signal", 128 + sig);
+}
+void install_shutdown_signals(void) { ps_host_on_termination(report_termination); }
 #endif

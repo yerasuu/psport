@@ -333,6 +333,23 @@ int ps_host_exec(const char *sz_file, char *const *pp_argv);
 /* Replaces the process with a new run of psport's own executable, the same file even when its path
  * changed since: returns only when that fails, with the host's errno (errno holds it too). */
 int ps_host_exec_self(char *const *pp_argv);
+/* pfn_exit runs at exit() with its status, after the handlers registered later (atexit order). */
+int ps_host_on_exit(void (*pfn_exit)(int status));
+/* Descriptors 1 and 2 go through pipes to a helper process, which writes each chunk on to where they
+ * pointed before and hands it to pfn_chunk (is_error: it came through 2), then calls pfn_end once
+ * both pipes are closed (this process and whatever inherited them ended, or ps_host_output_untee)
+ * and exits. The helper ignores the termination signals so that it outlives this process to drain
+ * them, and the callbacks run in a forked child: only what is safe in a signal handler. Called
+ * before any thread starts: 0, or the host's errno (nothing changed then). */
+int ps_host_output_tee(void (*pfn_chunk)(int is_error, const char *p_data, size_t cb_data), void (*pfn_end)(void));
+/* Points 1 and 2 back where they pointed before ps_host_output_tee, so that its helper sees the
+ * pipes closed and ends; nothing without one. */
+void ps_host_output_untee(void);
+/* Points h_target at what h_file names (h_target < 0: a new close-on-exec descriptor): the
+ * descriptor, or minus the host's errno. */
+int ps_host_fs_duplicate(int h_file, int h_target);
+/* The machine's network name, NUL-terminated: 0, or the host's errno. */
+int ps_host_host_name(char *sz_out, size_t cb_out);
 
 /* ---- faults and thread interrupts ---- */
 /* What a fault or an interrupt handler is handed: the interrupted thread's registers, which it may
@@ -439,9 +456,9 @@ int ps_host_interrupt_signal(PsHostInterrupt interrupt);
 /* The watchdog interrupt arrives once after seconds (0 disarms it), on whichever thread the host
  * picks. */
 void ps_host_watchdog_arm(unsigned seconds);
-/* pfn_report runs once when the process is asked to end (a terminal's ^C, a launcher's stop) and
- * the host's default action follows; a request someone else already handles is left to them. */
-void ps_host_on_termination(void (*pfn_report)(void));
+/* pfn_report runs once, with the signal, when the process is asked to end (a terminal's ^C, a
+ * launcher's stop) and the host's default action follows; a request someone else already handles is left to them. */
+void ps_host_on_termination(void (*pfn_report)(int sig));
 
 /* Resumes the calling thread with these registers (RSP, RIP and RFLAGS included) in one step, so
  * that nothing is written below the restored stack pointer. p_fpu is an 832-byte xsave image

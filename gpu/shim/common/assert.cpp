@@ -12,6 +12,7 @@
 // before exec; Vulkan calls failing then are not errors: this thread waits for the exec instead.
 extern "C" volatile int runtime_restarting;
 extern "C" void runtime_calls_report(void);
+extern "C" void runtime_debug_finish(const char* sz_how, int exit_code);
 extern "C" void psport_gpu_flush_caches(int can_wait);
 
 void assert_fail_impl() {
@@ -39,6 +40,7 @@ void assert_fail_impl() {
     std::fputs("STOP: GPU library assertion failed (see GPU log above)\n", stderr);
     psport_gpu_flush_caches(0);
     runtime_calls_report();
+    runtime_debug_finish("GPU library assertion", 23);
     std::_Exit(23);
 }
 

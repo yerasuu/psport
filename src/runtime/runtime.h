@@ -104,6 +104,20 @@ void runtime_calls_fallback(const char *sz_function, const char *sz_detail, cons
 typedef void (*RuntimeSummary)(char *sz_out, size_t cb_out);
 void runtime_calls_add_summary(RuntimeSummary pfn_summary);
 void runtime_calls_report(void);
+/* Debug mode (runtime_debug.c, PS_DEBUG=1 or psport.ini debug=1): the run's logs in
+ * <PS_DEBUG_DIR>/<host>/<YYYYmmdd-HHMMSS>-<serial>/, each file written as <name>.partial and renamed
+ * once complete, summary.txt last. Started from main before any thread, with psport's own argv
+ * (the process may start again on it to set PS_FRAME_STATS) and the game's title ID, NULL or
+ * empty when it has none. */
+void runtime_debug_start(char **pp_argv, const char *sz_serial);
+/* A descriptor appending to the run folder's <sz_name>.partial, which the caller closes; -1
+ * outside debug mode. Safe in signal handlers. */
+int runtime_debug_open(const char *sz_name);
+/* The call report's summary line, for summary.txt. Safe in signal handlers. */
+void runtime_debug_note_calls(const char *sz_line);
+/* Every route out of the process calls it once its call report is written, with how it ends and the
+ * exit status: summary.txt and the renames, done by the first call. Safe in signal handlers. */
+void runtime_debug_finish(const char *sz_how, int exit_code);
 uintptr_t runtime_rwlock_resolve(const char *sz_name);
 void runtime_rwlock_report(void);
 uintptr_t runtime_barrier_resolve(const char *sz_name);
