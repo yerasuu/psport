@@ -1,8 +1,8 @@
 /* The host platform layer (decision #540): what psport asks of the operating system, behind one
  * small C ABI with an implementation per OS in src/platform/<os>/, so that the runtime and the
  * loader name what they need instead of a Linux call. Included from C and C++ (libpsport-gpu.so
- * reaches these through -rdynamic). Only Linux is implemented; host_features.inc says what each
- * OS has. */
+ * reaches these through -rdynamic). Linux is implemented, Windows in part (src/platform/win32/,
+ * not built yet); host_features.inc says what each OS has. */
 #ifndef PS_HOST_H
 #define PS_HOST_H
 #include <setjmp.h>
@@ -72,8 +72,8 @@ int ps_host_time_sleep_until_ns(uint64_t deadline_ns);
 int ps_host_random_bytes(void *p_buffer, size_t cb_buffer);
 
 /* ---- paths ---- */
-/* The running executable's absolute path, NUL-terminated: its length, or -1 when the host cannot
- * say or it does not fit in cb_out. */
+/* The running executable's absolute path, NUL-terminated, with '/' between folders: its length, or
+ * -1 when the host cannot say or it does not fit in cb_out. */
 long ps_host_exe_path(char *sz_out, size_t cb_out);
 
 /* ---- dynamic libraries ---- */
@@ -411,9 +411,16 @@ PsHostFaultAccess ps_host_fault_access(const PsHostFaultContext *p_context);
 uint64_t ps_host_fault_register(const PsHostFaultContext *p_context, PsHostRegister reg);
 void ps_host_fault_set_register(PsHostFaultContext *p_context, PsHostRegister reg, uint64_t value);
 void ps_host_fault_cpu(const PsHostFaultContext *p_context, PsHostFaultCpu *p_out);
+#ifdef _WIN32
+/* Windows has no sigjmp_buf; its recovery points come with its fault handling. */
+typedef jmp_buf PsHostRecoveryPoint;
+#else
+typedef sigjmp_buf PsHostRecoveryPoint;
+#endif
 /* Leaves the handler for a recovery point a speculative reader set with sigsetjmp (its second
  * argument 0), with the signal mask the interrupted code had. */
-__attribute__((noreturn)) void ps_host_fault_recover(const PsHostFaultContext *p_context, sigjmp_buf *p_point);
+__attribute__((noreturn)) void ps_host_fault_recover(const PsHostFaultContext *p_context,
+                                                     PsHostRecoveryPoint *p_point);
 
 /* Nonzero when the handler took the fault: the thread resumes with the registers it left. Zero
  * passes it on to the handler installed before it, and past the first the host's default action

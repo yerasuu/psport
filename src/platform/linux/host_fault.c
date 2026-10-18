@@ -84,7 +84,7 @@ void ps_host_fault_cpu(const PsHostFaultContext *p_context, PsHostFaultCpu *p_ou
     };
 }
 
-void ps_host_fault_recover(const PsHostFaultContext *p_context, sigjmp_buf *p_point) {
+void ps_host_fault_recover(const PsHostFaultContext *p_context, PsHostRecoveryPoint *p_point) {
     pthread_sigmask(SIG_SETMASK, &p_context->p_ucontext->uc_sigmask, NULL);
     siglongjmp(*p_point, 1);
 }

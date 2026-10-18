@@ -59,9 +59,20 @@ FEATURE_HOST(threads, LINUX, IMPLEMENTED,
              "(src/platform/linux/host_thread.c); interrupts as tgkill of SIGRTMIN+3, SIGUSR2 and SIGPROF, the "
              "watchdog as alarm (src/platform/linux/host_fault.c)",
              "#540")
+FEATURE_HOST(threads, WIN32, EXPERIMENTAL,
+             "WaitOnAddress and WakeByAddress (within the process; the wake count is the one asked for), "
+             "SetThreadDescription, Toolhelp thread lists, GetCurrentThreadStackLimits, the process affinity mask and "
+             "THREAD_PRIORITY_IDLE (src/platform/win32/host_thread.c), compile-checked with mingw-w64, not run yet; "
+             "no interrupts (guest exception, thread dump, watchdog, samples)",
+             "#614")
 
 FEATURE(time, time, "clocks, sleeping and the time stamp counter")
 FEATURE_HOST(time, LINUX, IMPLEMENTED, "clock_gettime and nanosleep (src/platform/linux/host_time.c), rdtsc", "#540")
+FEATURE_HOST(time, WIN32, EXPERIMENTAL,
+             "QueryPerformanceCounter, GetSystemTimePreciseAsFileTime, CPU times at the scheduler tick from "
+             "GetThreadTimes and GetProcessTimes, sleeps on a per-thread CREATE_WAITABLE_TIMER_HIGH_RESOLUTION timer "
+             "(Sleep in milliseconds without one) (src/platform/win32/host_time.c), compile-checked, not run yet",
+             "#614")
 
 FEATURE(files, fs, "the guest's file system on host folders: /app0, user data and savedata")
 FEATURE_HOST(files, LINUX, IMPLEMENTED,
@@ -74,9 +85,17 @@ FEATURE_HOST(processes, LINUX, IMPLEMENTED,
 
 FEATURE(dynamic_libraries, dl, "host libraries loaded at run time (the online module) and the symbols fault reports name")
 FEATURE_HOST(dynamic_libraries, LINUX, IMPLEMENTED, "dlopen, dlsym and dladdr (src/platform/linux/host_library.c)", "#540")
+FEATURE_HOST(dynamic_libraries, WIN32, EXPERIMENTAL,
+             "LoadLibraryExW with UTF-8 paths, GetProcAddress, GetModuleHandleExW and the PE export directory for the "
+             "nearest symbol (src/platform/win32/host_library.c), compile-checked, not run yet",
+             "#614")
 
 FEATURE(randomness, rand, "random bytes for the stack canary, sceKernel random numbers, UUIDs and kern.arandom")
 FEATURE_HOST(randomness, LINUX, IMPLEMENTED, "getrandom (src/platform/linux/host_system.c)", "#540")
+FEATURE_HOST(randomness, WIN32, EXPERIMENTAL,
+             "BCryptGenRandom with the system's preferred generator (src/platform/win32/host_system.c), "
+             "compile-checked, not run yet",
+             "#614")
 
 FEATURE(audio, io, "audio output")
 FEATURE_HOST(audio, LINUX, IMPLEMENTED, "SDL3 (runtime_audio.c); PS_AUDIO=none runs without a device", "#540")

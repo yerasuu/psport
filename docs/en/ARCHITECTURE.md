@@ -257,8 +257,9 @@ call report. `PS_DEBUG_KEEP` (20) run folders of the host are kept. Details:
 
 What psport asks of the operating system goes through one small C ABI, `ps_host_*`
 (`src/platform/ps_host.h`, decision #540), with an implementation per OS in `src/platform/<os>/`
-(and, when they come, `gpu/platform/<os>/` for C++-only parts). Only Linux is implemented; a directory for another OS
-appears with its first code. Its groups: vm, fault/interrupt, thread, tls, time, fs/path, proc, dl, rand and net,
+(and, when they come, `gpu/platform/<os>/` for C++-only parts). Linux is implemented; Windows
+(`src/platform/win32/`, #614) has the time, rand, path, dl and thread groups below, compile-checked with mingw-w64
+and not yet part of a build. Its groups: vm, fault/interrupt, thread, tls, time, fs/path, proc, dl, rand and net,
 moved behind the ABI area by area without changing what Linux does. So far:
 
 | Group | Functions | Linux |
@@ -276,6 +277,14 @@ moved behind the ABI area by area without changing what Linux does. So far:
 | tls | `ps_host_tls_set_base`, `ps_host_tls_base` (the guest's TCB, on GS) | `arch_prctl(ARCH_SET_GS, ARCH_GET_GS)` (`linux/host_thread.c`) |
 | proc | `ps_host_close_from`, `ps_host_exec`, `ps_host_exec_self` | `close_range`, `execvp`, `execv("/proc/self/exe")` (`linux/host_process.c`) |
 | dl | `ps_host_dl_open`, `ps_host_dl_sym`, `ps_host_dl_address` (`PsHostCodeAddress`: file, symbol, their addresses) | `dlopen(RTLD_NOW \| RTLD_LOCAL)`, `dlsym`, `dladdr` (`linux/host_library.c`) |
+
+On Windows: `QueryPerformanceCounter`, `GetSystemTimePreciseAsFileTime`, `GetThreadTimes` and `GetProcessTimes`,
+sleeps on a per-thread high-resolution waitable timer (`win32/host_time.c`); `BCryptGenRandom` and
+`GetModuleFileNameW` with `/` separators (`win32/host_system.c`); `LoadLibraryExW`, `GetProcAddress`,
+`GetModuleHandleExW` and the PE export directory (`win32/host_library.c`); `WaitOnAddress`, `WakeByAddressSingle`
+and `WakeByAddressAll`, `SetThreadDescription`, Toolhelp thread lists, `GetCurrentThreadStackLimits`, the process
+affinity mask and `THREAD_PRIORITY_IDLE` (`win32/host_thread.c`); UTF-8 paths and Win32 errors as errno values in
+`win32/host_win32.c`. Recovery points are `PsHostRecoveryPoint` (`sigjmp_buf` on Linux).
 
 The guest's memory map, its region table and the low allocator (`runtime_low_map`, host memory the
 guest sees in `[0x0800000000, 0x1000000000)`) stay in `runtime_memory.c` and reach the host only
