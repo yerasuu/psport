@@ -1,7 +1,9 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <cstdio>
 #include <fstream>
+#include <optional>
 #include <unordered_map>
 #include "common/logging/log.h"
 #include "common/path_util.h"
@@ -12,6 +14,11 @@
 #include <CoreFoundation/CFBundle.h>
 #include <dlfcn.h>
 #include <sys/param.h>
+#endif
+
+#ifndef _WIN32
+#include <pwd.h>
+#include <unistd.h>
 #endif
 
 #ifndef MAX_PATH
@@ -84,6 +91,28 @@ static std::optional<std::filesystem::path> GetBundleParentDirectory() {
 }
 #endif
 
+#ifndef _WIN32
+// psport: HOME may be unset (a service, `env -i`); its null getenv made the path constructor crash
+// while the library loaded, so the account's home from the user database stands in for it.
+static std::optional<std::filesystem::path> GetHomeDirectory() {
+    if (const char* sz_home = std::getenv("HOME"); sz_home && *sz_home) {
+        return std::filesystem::path(sz_home);
+    }
+    if (const passwd* p_account = getpwuid(getuid());
+        p_account && p_account->pw_dir && *p_account->pw_dir) {
+        return std::filesystem::path(p_account->pw_dir);
+    }
+    return std::nullopt;
+}
+
+static void ReportNoHomeDirectory(const std::filesystem::path& user_dir) {
+    std::fprintf(stderr,
+                 "psport: neither HOME nor the user database names a home folder; GPU files go "
+                 "to %s\n",
+                 user_dir.string().c_str());
+}
+#endif
+
 static auto UserPaths = [] {
     // psport: the port keeps GPU caches where PS_GPU_USER_DIR points.
     const char* port_dir = std::getenv("PS_GPU_USER_DIR");
@@ -92,14 +121,19 @@ static auto UserPaths = [] {
         // If it doesn't exist, use the standard path for the platform instead.
         // NOTE: On Windows we currently just create the portable directory instead.
 #ifdef __APPLE__
-        user_dir =
-            std::filesystem::path(getenv("HOME")) / "Library" / "Application Support" / "shadPS4";
+        if (const auto home = GetHomeDirectory()) {
+            user_dir = *home / "Library" / "Application Support" / "shadPS4";
+        } else {
+            ReportNoHomeDirectory(user_dir);
+        }
 #elif defined(__linux__)
         const char* xdg_data_home = getenv("XDG_DATA_HOME");
         if (xdg_data_home != nullptr && strlen(xdg_data_home) > 0) {
             user_dir = std::filesystem::path(xdg_data_home) / "shadPS4";
+        } else if (const auto home = GetHomeDirectory()) {
+            user_dir = *home / ".local" / "share" / "shadPS4";
         } else {
-            user_dir = std::filesystem::path(getenv("HOME")) / ".local" / "share" / "shadPS4";
+            ReportNoHomeDirectory(user_dir);
         }
 #elif _WIN32
         TCHAR appdata[MAX_PATH] = {0};
