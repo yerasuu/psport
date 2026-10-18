@@ -598,6 +598,7 @@ has no key. Every file sits at the top of
 | `closure-<commit>` | the store paths of that commit's closure |
 | `commit-<commit>` | the store path of that commit's output |
 | `release-<tag>` | the commit of that release |
+| `branch-<commit>` | marks a develop/main commit published by `build.yml`, uploaded after its `commit-` |
 | `latest-release` | `<tag> <commit> <store path>` of the highest version published, one line, uploaded last |
 
 The current release is read from
@@ -606,14 +607,24 @@ The current release is read from
 and runs as `PS_PREBUILT=1 PS_PROBE=<path>/out/psport PS_DATA_DIR=<writable folder> bash <path>/run.sh`
 with Python and the Vulkan drivers of the same nixpkgs from the caller. A tag pushed for a version
 lower than the latest (a fix on an earlier line) is published without moving `latest-release`.
-Commits between releases have no published build: build them locally.
 
-Each run first keeps this release, the one `latest-release` names and the newest others up to 30
-(`NIX_CACHE_KEEP`), fewer if their paths would not fit in the 1000 files a release holds, and deletes
-the other releases' `release-` files, the `commit-`/`closure-` files of commits no kept release names
-and the paths no kept commit uses; then it uploads only the paths the release lacks. A closure is
-about 220 paths (440 files), and a release that changes only the port adds 5. Runs are serialized (a
-run prunes what another could be publishing). `tools/nix_cache.sh <store path> <commit> <tag>
+Every push to `develop` or `main` also publishes that commit (`.github/workflows/build.yml`): the
+`build` job builds it, makes its closure content-addressed and hands it on as an artifact; the
+`publish` job, the only one with `contents: write` and only on this repository, imports it and runs
+`tools/nix_cache.sh <store path> <commit> - github:yerasuu/psport`, which uploads `commit-`,
+`closure-` and `branch-<commit>` without touching `release-`/`latest-release`. A commit already
+published (the release's commit pushed to `main`, or the same commit on both branches) keeps the
+build there and only gets its `branch-` file. decanter's Testing channel fetches `commit-<commit>`
+for the commit it is on and builds locally when there is none.
+
+Each run first keeps its own commit, the release `latest-release` names, the newest branch commits up
+to 20 (`NIX_CACHE_KEEP_COMMITS`) and the newest other releases up to 30 (`NIX_CACHE_KEEP`), in that
+order and fewer if their paths would not fit in the 1000 files a release holds, and deletes the other
+`release-`/`branch-` files, the `commit-`/`closure-` files of commits nothing kept names and the paths
+no kept commit uses; then it uploads only the paths the cache lacks. A closure is about 220 paths
+(440 files); a release or branch commit that changes only the port adds one path (about 9 MB), so 5
+files for a branch commit and 5 for a release. Runs are serialized in the `nix-cache` concurrency
+group (a run prunes what another could be publishing). `tools/nix_cache.sh <store path> <commit> <tag>
 <directory>` writes the same files to a local folder, for `nix copy --from file://<directory>`.
 
 The same job also publishes the release's port without Nix, as assets of the tag's own release:
