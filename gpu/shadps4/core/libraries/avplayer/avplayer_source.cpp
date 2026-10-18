@@ -405,12 +405,12 @@ bool AvPlayerSource::Start(u64 time) {
         return false;
     }
     if (m_video_stream_index) {
-        const auto stream_index = m_streams[m_video_stream_index.value()].ffmpeg_index;
+        const auto stream_index = m_video_stream_index.value();
         const auto stream = m_avformat_context->streams[stream_index];
         const auto ts = std::max<s64>(
             0, av_rescale_q(time, AVRational{1, 1000}, stream->time_base) -
                    EmptyEditDelay(stream_index));
-        avformat_seek_file(m_avformat_context.get(), m_video_stream_index.value(), 0, ts,
+        avformat_seek_file(m_avformat_context.get(), stream_index, 0, ts,
                            time == 0 ? stream->duration : ts, 0);
         const auto decoder = avcodec_find_decoder(stream->codecpar->codec_id);
         if (decoder == nullptr) {
@@ -442,12 +442,12 @@ bool AvPlayerSource::Start(u64 time) {
         }
     }
     if (m_audio_stream_index) {
-        const auto stream_index = m_streams[m_audio_stream_index.value()].ffmpeg_index;
+        const auto stream_index = m_audio_stream_index.value();
         const auto stream = m_avformat_context->streams[stream_index];
         const auto ts = std::max<s64>(
             0, av_rescale_q(time, AVRational{1, 1000}, stream->time_base) -
                    EmptyEditDelay(stream_index));
-        avformat_seek_file(m_avformat_context.get(), m_audio_stream_index.value(), 0, ts,
+        avformat_seek_file(m_avformat_context.get(), stream_index, 0, ts,
                            time == 0 ? stream->duration : ts, 0);
         if (time != 0) {
             m_last_audio_ts = time;
@@ -627,8 +627,8 @@ u64 AvPlayerSource::DurationMillis() const {
         if (stream_index.value() < 0) {
             return;
         }
-        const auto index = m_streams[stream_index.value()].ffmpeg_index;
-        if (index >= m_streams.size()) {
+        const auto index = u32(stream_index.value());
+        if (index >= m_avformat_context->nb_streams) {
             return;
         }
         const auto stream = m_avformat_context->streams[index];
@@ -764,12 +764,12 @@ void AvPlayerSource::DemuxerThread(std::stop_token stop) {
                     // moov atom again as a new root, drops it as a duplicate and returns EOF
                     // forever, so a looping movie froze on its last frame (Atelier Ayesha).
                     if (m_video_stream_index.has_value()) {
-                        const auto index = m_streams[m_video_stream_index.value()].ffmpeg_index;
+                        const auto index = m_video_stream_index.value();
                         seeked &= avformat_seek_file(m_avformat_context.get(), index, 0, 0,
                                                      INT64_MAX, 0) >= 0;
                     }
                     if (m_audio_stream_index.has_value()) {
-                        const auto index = m_streams[m_audio_stream_index.value()].ffmpeg_index;
+                        const auto index = m_audio_stream_index.value();
                         seeked &= avformat_seek_file(m_avformat_context.get(), index, 0, 0,
                                                      INT64_MAX, 0) >= 0;
                     }
@@ -885,7 +885,7 @@ std::optional<Frame> AvPlayerSource::PrepareVideoFrame(GuestBuffer buffer, const
         return std::nullopt;
     }
 
-    const auto stream_index = m_streams[m_video_stream_index.value()].ffmpeg_index;
+    const auto stream_index = m_video_stream_index.value();
     const auto stream = m_avformat_context->streams[stream_index];
     const auto timestamp =
         FrameTimestampMillis(frame, stream->time_base, EmptyEditDelay(stream_index));
@@ -1038,7 +1038,7 @@ std::optional<Frame> AvPlayerSource::PrepareAudioFrame(GuestBuffer buffer, const
     auto p_buffer = buffer.GetBuffer();
     std::memcpy(p_buffer, frame.data[0], size);
 
-    const auto stream_index = m_streams[m_audio_stream_index.value()].ffmpeg_index;
+    const auto stream_index = m_audio_stream_index.value();
     const auto stream = m_avformat_context->streams[stream_index];
     const auto timestamp =
         FrameTimestampMillis(frame, stream->time_base, EmptyEditDelay(stream_index));
