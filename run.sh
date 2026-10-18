@@ -195,7 +195,9 @@ if [[ -n ${scaled_output:-} ]]; then
             key=${line%%=*} value=${line#*=}
             key=${key#"${key%%[![:space:]]*}"} key=${key%"${key##*[![:space:]]}"}
             value=${value#"${value%%[![:space:]]*}"} value=${value%"${value##*[![:space:]]}"}
-            [[ $key == live_resolution && $value =~ ^([01]|auto)$ ]] && live=$value
+            [[ $key == live_resolution ]] || continue
+            # As psport's settings read it (atoi, clamped to 0..1), so both agree on any value.
+            if [[ $value == auto ]]; then live=auto; elif [[ $value =~ ^\+?0*[1-9] ]]; then live=1; else live=0; fi
         done < "$PS_CONFIG"
     fi
     if [[ $live == auto ]]; then
