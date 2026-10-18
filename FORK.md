@@ -100,7 +100,7 @@ commit up to it was read; what was not ported yet waits as a task. Last reviewed
 | A key repeated in `psport.ini` keeps its first line when the in-game menu or the launcher saves, so saving never copies it again | `gpu/port/psport_settings.cpp` (`Save`), `launcher/psport_launcher.py` (`save_ini`) | SrShadowy `f5d3dcb` (`gpu/shim/bbport_settings.cpp`, `launcher/bbport_config.py`) | psport's menu writes no key twice (SrShadowy's cause, a second `put("frame_generation")`), so only the file's own repeats are dropped |
 | An HTTP error status from the community game server counts as an answer (the connection check, and `auto` not starting a local game server) | `scripts/online.py` (`check`, `local_server`) | SrShadowy `4e0ab58` (`scripts/online.py`) | its User-Agent, the forced `:20443` and The Hunter's Dream redirects not ported (#669) |
 | The launcher's Python without its build configuration, IDLE and turtledemo, tkinter and the test suite, the stdlib's bytecode kept | `packaging/default.nix` (`python3`) | SrShadowy `d843170` (`packaging/default.nix`) | through nixpkgs' own `strip*` switches, with `self` pointed at the stripped interpreter so that `withPackages` builds PyGObject against it (no `buildEnv` nor `PYTHONPATH`); `__pycache__` kept (SrShadowy drops it: the read-only store would recompile the stdlib at every start); `psport-game` and `PYTHON` use it too, so the full Python leaves the closure (interpreter 137 MiB to 61 MiB, package closure 678 MiB to 602 MiB) |
-| The GPU library's Windows build: magic_enum fetched and Vulkan Memory Allocator taken as a bare header where no CMake package has them (MSYS2), X11 left out, `-mno-ms-bitfields` on every target so that bit-fields keep GCC's layout, no `-ftls-model=initial-exec` or `--allow-shlib-undefined` | `gpu/CMakeLists.txt`, `build.sh` (the `MINGW*`/`MSYS*` branch) | bbport `72e5c8c` (`gpu/CMakeLists.txt` WIN32 branches) | built by hand for psport's tree (#614, decision #623): the library stays a DLL linked against an import library of `psport.exe` made from `gpu/port/psport_runtime.def` (bbport linked it statically into its executable), Linux-only calls in the GPU code go through `ps_host_*` (`ps_host_backtrace`, `ps_host_env_set`, `ps_host_dl_address`, `ps_host_read_memory`, `PS_HOST_RECOVERY_SET`) instead of bbport's POSIX headers over Win32; the runtime does not link on Windows yet |
+| The GPU library's Windows build: magic_enum fetched and Vulkan Memory Allocator taken as a bare header where no CMake package has them (MSYS2), X11 left out, `-mno-ms-bitfields` on every target so that bit-fields keep GCC's layout, no `-ftls-model=initial-exec` or `--allow-shlib-undefined` | `gpu/CMakeLists.txt`, `build.sh` (the `MINGW*`/`MSYS*` branch), `.github/workflows/windows.yml` | bbport `72e5c8c` (`gpu/CMakeLists.txt` WIN32 branches) | built by hand for psport's tree (#614, decision #623): the library stays a DLL linked against an import library of `psport.exe` made from `gpu/port/psport_runtime.def` (bbport linked it statically into its executable), Linux-only calls in the GPU code go through `ps_host_*` (`ps_host_backtrace`, `ps_host_env_set`, `ps_host_dl_address`, `ps_host_read_memory`, `PS_HOST_RECOVERY_SET`) instead of bbport's POSIX headers over Win32, and the CI job builds it with MSYS2 CLANG64 for the user to try; the runtime does not link on Windows yet |
 
 ## Names
 
@@ -761,6 +761,13 @@ module (`libpsport-net.so`, which links OpenSSL and abseil, Apache-2.0) until kb
 `build.sh`'s). Before anything is published, `tools/check_bundle_licences.sh --port` checks the build
 and every library its programs and modules link; the rest of the closure is nixpkgs' packages as they
 are (SDL3 brings PipeWire's, whose own plugins and tools link OpenSSL, abseil and a GPL FFmpeg).
+
+`.github/workflows/windows.yml` (same triggers, `contents: read`, no secrets) builds what builds on
+Windows so far (decision #623): `build.sh`'s Windows branch in MSYS2's CLANG64 on `windows-latest`,
+without LTO, gives `libpsport-gpu.dll` and `psport-gpu-capabilities.exe`. The artifact
+`psport-windows-<commit>` holds them with the CLANG64 DLLs they load, the build's output and
+`BUILD-STATUS.txt` (what built and what is not built yet); kept 14 days, nothing published. Locally,
+the win32 sources are compile-checked with nixpkgs' mingw-w64 GCC.
 
 The version lives in `VERSION` alone: `0-unstable` between releases, `X.Y.Z` in a release, read by
 `build.sh`, `packaging/port.nix` (`version`) and `gpu/net/CMakeLists.txt` (the shadNet client's

@@ -267,7 +267,7 @@ What psport asks of the operating system goes through one small C ABI, `ps_host_
 (`src/platform/win32/`, #614) has the time, rand, path, dl, thread and tls groups below, compile-checked with mingw-w64
 and not yet part of a build. On Windows `build.sh` builds the GPU library (`libpsport-gpu.dll`, which imports
 the runtime's symbols from `psport.exe` through `gpu/port/psport_runtime.def`) and the capability check with
-MSYS2's CLANG64 (decision #623); the runtime does not link there yet. Its groups: vm, fault/interrupt, thread, tls, time, fs/path, proc, dl, rand and net,
+MSYS2's CLANG64 (`.github/workflows/windows.yml`, decision #623); the runtime does not link there yet. Its groups: vm, fault/interrupt, thread, tls, time, fs/path, proc, dl, rand and net,
 moved behind the ABI area by area without changing what Linux does. So far:
 
 | Group | Functions | Linux |

@@ -23,17 +23,16 @@ if (( ${#deprecated[@]} )); then
     echo "psport: BB_* variables are deprecated, use PS_*: ${list%, }"
 fi
 mkdir -p out
-# Windows, from MSYS2's CLANG64 shell (clang, libc++, UCRT; decision #623) with the CLANG64
-# builds of the libraries gpu/CMakeLists.txt finds: the GPU library and the capability check. The
-# runtime (src/) does not link there yet, since most of src/platform/win32 is still to be written
-# (#614).
+# Windows, from MSYS2's CLANG64 shell (clang, libc++, UCRT; decision #623, the packages in
+# .github/workflows/windows.yml): the GPU library and the capability check. The runtime (src/)
+# does not link there yet, since most of src/platform/win32 is still to be written (#614).
 case $(uname -s) in
 MINGW* | MSYS*)
     if [[ ${MSYSTEM:-} != CLANG64 ]]; then
         echo "Build from MSYS2's CLANG64 shell (MSYSTEM is '${MSYSTEM:-}')." >&2; exit 1
     fi
     for tool in clang clang++ cmake ninja pkg-config; do
-        command -v "$tool" >/dev/null || { echo "Need $tool from MSYS2's CLANG64 packages." >&2; exit 1; }
+        command -v "$tool" >/dev/null || { echo "Need $tool (.github/workflows/windows.yml lists the packages)." >&2; exit 1; }
     done
     [[ -f gpu/third_party/imgui/imgui.h ]] || git submodule update --init --recursive
     # No PGO (its flags are GCC's), no online module, DLSS bridge or Tracy yet.
