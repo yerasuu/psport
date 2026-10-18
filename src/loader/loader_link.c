@@ -31,7 +31,6 @@ static const char *const s_port_implements[] = {"libkernel", "libkernel_unity", 
                                               "libSceVideoOut", "libScePad", "libSceAudioOut", "libSceFiber",
                                               "libSceFont", "libSceFontFt", "libSceAudiodec", "libSceNgs2",
                                               "libSceUlt", "libSceRtc"};
-static const unsigned char s_fs_load[9] = {0x64, 0x48, 0x8b, 0x04, 0x25, 0, 0, 0, 0}; /* mov rax, fs:[0] */
 
 typedef struct { char **pp_items; size_t c_items, c_capacity; } List;
 typedef struct { uint64_t hash; uint32_t i_entry; } Slot;
@@ -241,17 +240,33 @@ static void add_export_entry(RuntimeModule *p_module, size_t *p_capacity, const 
     p_module_export->va_export = va_export;
 }
 
-/* Rewrites initial-exec `mov rax, fs:[0]` to GS: glibc owns FS on Linux. */
+#define FS_LOAD_SIZE 9
+/* `mov r64, fs:[0]`: FS prefix, REX.W with or without REX.R, 8B, ModRM with mod 00 and r/m 100 (any
+ * register), SIB 25 (no base, no index) and a zero disp32. Games load the thread pointer into any
+ * register (Bloodborne only into rax). */
+static int is_fs_load(const unsigned char *p) {
+    return p[0] == 0x64 && (p[1] == 0x48 || p[1] == 0x4c) && p[2] == 0x8b && (p[3] & 0xc7) == 0x04 && p[4] == 0x25 &&
+           !p[5] && !p[6] && !p[7] && !p[8];
+}
+
+/* Rewrites initial-exec `mov r64, fs:[0]` to GS, since the host's own TLS keeps FS, reading the TCB
+ * pointer at the platform layer's displacement from GS's base. */
 static uint64_t patch_fs_loads(unsigned char *p_image, const LoaderModule *p_module, uint64_t base) {
+    const int32_t off_tcb = ps_host_tls_tcb_offset();
     uint64_t patched = 0;
     for (unsigned i = 0; i < p_module->phnum; ++i) {
         const LoaderPh *p_ph = &p_module->p_ph[i];
-        if (p_ph->type != 1 || !(p_ph->flags & 1)) continue;
-        unsigned char *p_cursor = p_image + base + p_ph->vaddr, *p_end = p_cursor + p_ph->filesz;
-        while ((p_cursor = memmem(p_cursor, (size_t)(p_end - p_cursor), s_fs_load, sizeof(s_fs_load)))) {
-            *p_cursor = 0x65;
+        if (p_ph->type != 1 || !(p_ph->flags & 1) || p_ph->filesz < FS_LOAD_SIZE) continue;
+        unsigned char *p_cursor = p_image + base + p_ph->vaddr, *p_last = p_cursor + p_ph->filesz - FS_LOAD_SIZE;
+        while (p_cursor <= p_last && (p_cursor = memchr(p_cursor, 0x64, (size_t)(p_last - p_cursor) + 1))) {
+            if (!is_fs_load(p_cursor)) {
+                ++p_cursor;
+                continue;
+            }
+            p_cursor[0] = 0x65;
+            memcpy(p_cursor + 5, &off_tcb, sizeof(off_tcb));
             ++patched;
-            p_cursor += sizeof(s_fs_load);
+            p_cursor += FS_LOAD_SIZE;
         }
     }
     return patched;

@@ -52,6 +52,11 @@ FEATURE(guest_tls, tls, "the guest's thread-local storage: a TCB and static TLS 
 FEATURE_HOST(guest_tls, LINUX, IMPLEMENTED,
              "arch_prctl(ARCH_SET_GS, ARCH_GET_GS) (src/platform/linux/host_thread.c), the TCB in runtime_thread.c",
              "#540")
+FEATURE_HOST(guest_tls, WIN32, EXPERIMENTAL,
+             "a TlsAlloc slot of the TEB's 64 inline ones taken first thing in main, the loader writing 0x1480 + 8 * slot "
+             "into the guest's mov r64, gs:[0] (src/platform/win32/host_thread.c, ps_host_tls_tcb_offset), "
+             "compile-checked, not run yet",
+             "#614")
 
 FEATURE(threads, thread, "guest threads on host threads: creation, signals to one thread, waits on an address")
 FEATURE_HOST(threads, LINUX, IMPLEMENTED,

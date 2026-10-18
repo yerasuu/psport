@@ -89,6 +89,11 @@ static ABI void guest_exit(void) { puts("Runtime: process finalizer callback rea
 
 int main(int argc, char **argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
+    const int tls_error = ps_host_tls_init();
+    if (tls_error) {
+        fprintf(stderr, "ERROR: no thread-local slot for the guest's thread pointer: %s\n", strerror(tls_error));
+        return 1;
+    }
     runtime_restart_configure(argc, argv);
 #ifndef _WIN32
     accept_deprecated_names(argv);

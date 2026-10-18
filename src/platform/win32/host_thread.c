@@ -1,4 +1,5 @@
-/* Windows: thread ids, names, stacks and scheduling, and address waits (ps_host.h). */
+/* Windows: thread ids, names, stacks and scheduling, address waits and the guest's thread pointer
+ * (ps_host.h). */
 #include "ps_host.h"
 #include "host_win32.h"
 #include <errno.h>
@@ -130,4 +131,37 @@ unsigned ps_host_thread_cpu_count(void) {
 /* Windows has no idle scheduling class for one thread: the idle priority is the lowest. */
 int ps_host_thread_make_background(void) {
     return SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_IDLE) ? 0 : ps_win32_errno(GetLastError());
+}
+
+/* GS's base is the TEB, whose TlsSlots array holds the first 64 TlsAlloc slots inline at 0x1480:
+ * the guest's TCB pointer lives in one of them, which a single gs-relative load reaches. Slots past
+ * 64 sit behind another pointer, which a patched load cannot follow. */
+#define TEB_TLS_SLOTS 0x1480
+#define TEB_INLINE_SLOTS 64
+static DWORD s_i_tls_slot = TLS_OUT_OF_INDEXES;
+
+int ps_host_tls_init(void) {
+    if (s_i_tls_slot != TLS_OUT_OF_INDEXES) return 0;
+    const DWORD i_slot = TlsAlloc();
+    if (i_slot == TLS_OUT_OF_INDEXES) return ps_win32_errno(GetLastError());
+    if (i_slot >= TEB_INLINE_SLOTS) {
+        TlsFree(i_slot);
+        return ENOSPC;
+    }
+    s_i_tls_slot = i_slot;
+    return 0;
+}
+
+int32_t ps_host_tls_tcb_offset(void) { return TEB_TLS_SLOTS + 8 * (int32_t)s_i_tls_slot; }
+
+int ps_host_tls_set_base(void *p_base) {
+    if (s_i_tls_slot == TLS_OUT_OF_INDEXES) return EINVAL;
+    return TlsSetValue(s_i_tls_slot, p_base) ? 0 : ps_win32_errno(GetLastError());
+}
+
+/* Read straight from the TEB, since TlsGetValue changes the thread's last error. */
+int ps_host_tls_base(uintptr_t *p_out_va_base) {
+    if (s_i_tls_slot == TLS_OUT_OF_INDEXES) return EINVAL;
+    *p_out_va_base = (uintptr_t)__readgsqword(TEB_TLS_SLOTS + 8 * s_i_tls_slot);
+    return 0;
 }

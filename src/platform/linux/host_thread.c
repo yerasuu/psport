@@ -109,3 +109,7 @@ int ps_host_tls_base(uintptr_t *p_out_va_base) {
     *p_out_va_base = (uintptr_t)va_base;
     return 0;
 }
+
+int ps_host_tls_init(void) { return 0; }
+
+int32_t ps_host_tls_tcb_offset(void) { return 0; }

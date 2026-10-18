@@ -130,6 +130,13 @@ int ps_host_thread_make_background(void);
 int ps_host_tls_set_base(void *p_base);
 /* The calling thread's guest thread pointer: 0, or the host's errno. Safe in signal handlers. */
 int ps_host_tls_base(uintptr_t *p_out_va_base);
+/* Reserves what ps_host_tls_set_base needs on every thread: once at launch, before the host loads
+ * other libraries, which could take it first. 0, or the host's errno. */
+int ps_host_tls_init(void);
+/* The displacement the loader writes into the guest's thread pointer loads (`mov r64, fs:[0]`,
+ * rewritten to GS) so that they read the TCB pointer: 0 where GS's base is the TCB itself, whose
+ * first word points to itself. Valid once ps_host_tls_init succeeded. */
+int32_t ps_host_tls_tcb_offset(void);
 
 /* ---- files and folders ---- */
 /* Calls pfn_entry with each name in the folder but "." and "..", without allocating, so that a
