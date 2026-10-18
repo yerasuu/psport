@@ -14,7 +14,6 @@
 #include <atomic>
 #include <mutex>
 #include <unordered_set>
-#include <sys/mman.h>
 #include <map>
 #include <tuple>
 #include <string>

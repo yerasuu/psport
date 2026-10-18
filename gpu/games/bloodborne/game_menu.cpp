@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <new>
 #include <string>
 #include <vector>
 
@@ -360,7 +361,7 @@ void AddRows(void* p_page, const std::vector<Row>& rows) {
         }
         if (row.kind == Kind::Toggle) {
             using PairRowFn = void (*)(void*, void*, u8*, void*, const u8*);
-            u8* p_two = static_cast<u8*>(std::aligned_alloc(16, PairListSize));
+            u8* p_two = static_cast<u8*>(::operator new(PairListSize, std::align_val_t{16}));
             std::memset(p_two, 0, PairListSize);
             for (std::size_t i = 0; i < 2; ++i) {
                 alignas(16) u8 value[ValueSize] = {};
@@ -371,11 +372,11 @@ void AddRows(void* p_page, const std::vector<Row>& rows) {
             }
             Game<PairRowFn>(PairRow)(p_page, pair, &s_bytes[row.field], p_two, &s_default_bytes[row.field]);
             DestroyValues(p_two, PairCountOffset);
-            std::free(p_two);
+            ::operator delete(p_two, std::align_val_t{16});
             DestroyTexts(pair);
             continue;
         }
-        u8* p_list = static_cast<u8*>(std::aligned_alloc(16, ListSize));
+        u8* p_list = static_cast<u8*>(::operator new(ListSize, std::align_val_t{16}));
         std::memset(p_list, 0, ListSize);
         for (std::size_t i = 0; i < row.choices.size(); ++i) {
             if (row.field == Upscaler && !UpscalerAvailable(int(i))) {
@@ -389,7 +390,7 @@ void AddRows(void* p_page, const std::vector<Row>& rows) {
         }
         Game<AddRow>(ListRow)(p_page, pair, &s_values[row.field], p_list, &s_default_values[row.field]);
         DestroyValues(p_list, ListCountOffset);
-        std::free(p_list);
+        ::operator delete(p_list, std::align_val_t{16});
         DestroyTexts(pair);
     }
 }

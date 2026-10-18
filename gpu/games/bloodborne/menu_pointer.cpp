@@ -40,9 +40,7 @@
 #include "psport_guest_code.h"
 #include "psport_overlay.h"
 #include "psport_settings.h"
-
-// The runtime's fault recovery (src/main/signals.c): a fault while it is set jumps back to it.
-extern "C" __thread sigjmp_buf* g_p_runtime_fault_recover;
+#include "psport_toggles.h"
 
 namespace PsMenuPointer {
 namespace {
@@ -98,8 +96,8 @@ bool Read(u64 va_from, void* p_out, std::size_t cb_copy) {
     if (va_from < 0x10000) {
         return false;
     }
-    sigjmp_buf recover;
-    if (sigsetjmp(recover, 0)) {
+    PsHostRecoveryPoint recover;
+    if (PS_HOST_RECOVERY_SET(recover)) {
         g_p_runtime_fault_recover = nullptr;
         return false;
     }

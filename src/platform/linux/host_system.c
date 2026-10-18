@@ -1,7 +1,8 @@
-/* Linux: randomness, the executable's path and the machine's name (ps_host.h). */
+/* Linux: randomness, the executable's path, the machine's name and the environment (ps_host.h). */
 #define _GNU_SOURCE
 #include "ps_host.h"
 #include <errno.h>
+#include <stdlib.h>
 #include <sys/random.h>
 #include <unistd.h>
 
@@ -35,4 +36,8 @@ int ps_host_host_name(char *sz_out, size_t cb_out) {
     if (gethostname(sz_out, cb_out)) return errno;
     sz_out[cb_out - 1] = 0;
     return 0;
+}
+
+int ps_host_env_set(const char *sz_name, const char *sz_value, int is_overwrite) {
+    return setenv(sz_name, sz_value, is_overwrite) ? errno : 0;
 }

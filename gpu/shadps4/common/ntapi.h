@@ -509,11 +509,14 @@ typedef struct _TEB {                             /* win32/win64 */
 static_assert(offsetof(TEB, DeallocationStack) ==
               0x1478); /* The only member we care about at the moment */
 
+// psport: mingw-w64's processthreadsapi.h declares it too when targeting Windows 10 2004 or later.
+#if !defined(NTDDI_WIN10_MN) || NTDDI_VERSION < NTDDI_WIN10_MN
 typedef enum _QUEUE_USER_APC_FLAGS {
     QueueUserApcFlagsNone,
     QueueUserApcFlagsSpecialUserApc,
     QueueUserApcFlagsMaxValue
 } QUEUE_USER_APC_FLAGS;
+#endif
 
 typedef union _USER_APC_OPTION {
     ULONG_PTR UserApcFlags;

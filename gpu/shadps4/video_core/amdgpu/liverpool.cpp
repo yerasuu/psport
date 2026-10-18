@@ -4,8 +4,9 @@
 #include <chrono>
 #include <thread>
 #include <pthread.h>
+#ifndef _WIN32
 #include <sys/resource.h>
-#include <sys/uio.h>
+#endif
 #include <unistd.h>
 #include <array>
 #include <bit>
@@ -215,9 +216,7 @@ void Liverpool::Process(std::stop_token stoken) {
         PsStats::g_gpu_thread_clock.store(static_cast<int>(clock));
     }
     gpu_id = std::this_thread::get_id();
-#ifdef __linux__
-    gpu_tid = gettid();
-#endif
+    gpu_tid = ps_host_thread_id();
 
     while (!stoken.stop_requested()) {
         // Fences (and GPU idle) wait for work not submitted yet. Submitted once this thread has
@@ -2713,6 +2712,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
     }
     if (seq != NoSeq && PsStats::g_is_enabled) {
         PsStats::g_c_submissions.fetch_add(1, std::memory_order_relaxed);
+#ifndef _WIN32
         if (rusage usage{}; getrusage(RUSAGE_THREAD, &usage) == 0) {
             PsStats::g_gpu_user_us.store(u64(usage.ru_utime.tv_sec) * 1000000 + usage.ru_utime.tv_usec,
                                        std::memory_order_relaxed);
@@ -2722,6 +2722,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
             PsStats::g_c_gpu_vol_switches.store(usage.ru_nvcsw, std::memory_order_relaxed);
             PsStats::g_c_gpu_minor_faults.store(usage.ru_minflt, std::memory_order_relaxed);
         }
+#endif
     }
 
     if (copy && PsFreeCheck::Enabled()) {
@@ -3298,8 +3299,7 @@ void Liverpool::CheckSubmittedCopy(const SubmittedCopy& copy, u64 seq) {
         std::array<u32, 1024> buf;
         for (std::size_t at = 0; at < dwords; at += buf.size()) {
             const std::size_t n = std::min(buf.size(), dwords - at);
-            iovec local{buf.data(), n * 4}, remote{const_cast<u32*>(guest + at), n * 4};
-            if (process_vm_readv(getpid(), &local, 1, &remote, 1, 0) != ssize_t(n * 4)) {
+            if (ps_host_read_memory(buf.data(), guest + at, n * 4) != s64(n * 4)) {
                 // psport: dma-buf guest memory is not readable that way; still
                 // mapped, it is read directly.
                 int prot = 0, type = -1;
@@ -3351,8 +3351,8 @@ void Liverpool::CheckSubmittedCopy(const SubmittedCopy& copy, u64 seq) {
     const std::size_t dwords = dcb_change != -1 ? copy.dcb_dwords : copy.ccb_dwords;
     const std::size_t from = at >= 8 ? at - 8 : 0, to = std::min<std::size_t>(dwords, at + 8);
     std::array<u32, 16> now{};
-    iovec local{now.data(), (to - from) * 4}, remote{const_cast<u32*>(guest + from), (to - from) * 4};
-    const bool readable = process_vm_readv(getpid(), &local, 1, &remote, 1, 0) == ssize_t((to - from) * 4);
+    const bool readable =
+        ps_host_read_memory(now.data(), guest + from, (to - from) * 4) == s64((to - from) * 4);
     std::printf("  submitted:");
     for (std::size_t i = from; i < to; ++i) {
         std::printf(i == std::size_t(at) ? " [%08x]" : " %08x", kept[i]);

@@ -282,9 +282,7 @@ public:
     }
 
     std::thread::id GetGpuCommandProcessorThread();
-#ifdef __linux__
     u32 GetGpuCommandProcessorThreadId();
-#endif
 
 private:
     /// psport: false when the draw is skipped (a render target without memory).

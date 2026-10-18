@@ -57,7 +57,7 @@ void Note(std::uint64_t va_range, const void* p_data, std::uint64_t cb_range, So
 }
 
 void Record(std::uint64_t va_range, const void* p_data, std::uint64_t cb_range, Source source) {
-    static thread_local const std::uint32_t s_tid = static_cast<std::uint32_t>(gettid());
+    static thread_local const std::uint32_t s_tid = static_cast<std::uint32_t>(ps_host_thread_id());
     Entry e{va_range, cb_range, 0, __rdtsc(), source, s_tid};
     std::memcpy(&e.first, p_data, cb_range < 8 ? cb_range : 8);
     Push(s_ring, s_head, e);

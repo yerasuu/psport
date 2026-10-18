@@ -114,7 +114,7 @@ u64 NowNs() {
 }
 
 u32 Tid() {
-    static thread_local const u32 s_tid = u32(gettid());
+    static thread_local const u32 s_tid = u32(ps_host_thread_id());
     return s_tid;
 }
 

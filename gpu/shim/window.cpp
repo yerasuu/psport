@@ -61,7 +61,7 @@ SDL_DisplayID ChooseDisplay() {
         } else {
             for (int i = 0; i < c_displays && !chosen; ++i) {
                 const char* sz_name = SDL_GetDisplayName(p_ids[i]);
-                if (sz_name && strcasestr(sz_name, sz_wanted)) {
+                if (sz_name && SDL_strcasestr(sz_name, sz_wanted)) {
                     chosen = p_ids[i];
                 }
             }

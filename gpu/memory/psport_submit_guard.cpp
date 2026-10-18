@@ -11,7 +11,6 @@
 #include <optional>
 #include <string_view>
 #include <vector>
-#include <sys/syscall.h>
 #include <unistd.h>
 #include <xxhash.h>
 #include "pslayer_write_traps.h"
@@ -137,8 +136,8 @@ std::optional<std::uint64_t> Hash(const Range& range) {
     const auto* p_bytes = reinterpret_cast<const unsigned char*>(range.begin);
     const std::uint64_t cb_range = range.end - range.begin;
     std::uint64_t hash = 0, at = 0;
-    sigjmp_buf recover;
-    if (sigsetjmp(recover, 0)) {
+    PsHostRecoveryPoint recover;
+    if (PS_HOST_RECOVERY_SET(recover)) {
         g_p_runtime_fault_recover = nullptr;
         return std::nullopt;
     }

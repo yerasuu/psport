@@ -197,7 +197,7 @@ void Report(const Hooks& hooks) {
     const u64 copied = Read<u64>(s + CopyClock);
     const double gpu_interval = double(gpu2 - gpu1);
     const double cpu_interval = double(s_state.clock_cpu2 - s_state.clock_cpu1);
-    const auto near = [](u64 gpu, u64 cpu) { // 100 MHz: from 1 ms before to 100 ms after
+    const auto is_near = [](u64 gpu, u64 cpu) { // 100 MHz: from 1 ms before to 100 ms after
         return gpu + 100'000 >= cpu && gpu < cpu + 10'000'000;
     };
     std::snprintf(sz_detail, sizeof(sz_detail), "%.3f s apart (CPU %.3f s); %+.2f ms, copy %+.2f ms",
@@ -206,7 +206,7 @@ void Report(const Hooks& hooks) {
                   (double(copied) - double(s_state.clock_cpu1)) / 1e5);
     check("GPU clock: 100 MHz, the CPU's time line",
           gpu2 > gpu1 && std::abs(gpu_interval - cpu_interval) < 0.05 * cpu_interval &&
-              near(gpu1, s_state.clock_cpu1) && near(copied, s_state.clock_cpu1),
+              is_near(gpu1, s_state.clock_cpu1) && is_near(copied, s_state.clock_cpu1),
           sz_detail);
     std::snprintf(sz_detail, sizeof(sz_detail), "%llu of 4 predicated draws skipped, 2 expected",
                   (unsigned long long)s_state.skips);

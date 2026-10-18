@@ -82,7 +82,9 @@ Nine vendored files have narrow Linux/compute-only or correctness changes:
 
 `src/ffx_1_1_4_portability.hpp` supplies `_countof`, the two-argument MSVC
 `wcscpy_s` array overload, and missing C string declarations without changing
-the effect data layout. The target explicitly uses C++17; AMD's public 1.1.4
+the effect data layout. On MinGW (GCC or Clang) it is force-included too, for the
+standard headers MSVC's bring in transitively; the MSVC replacements stay
+non-Windows only, since MinGW's CRT has them. The target explicitly uses C++17; AMD's public 1.1.4
 host headers are not directly C-compilable because they include C++ mutex
 headers even though their exported functions have C linkage.
 

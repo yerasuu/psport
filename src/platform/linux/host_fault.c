@@ -221,6 +221,14 @@ int64_t ps_host_write_memory(void *p_to, const void *p_from, size_t cb_copy) {
     return cb_written < 0 ? -errno : cb_written;
 }
 
+int ps_host_backtrace(void **pp_frames, int c_frames) {
+    void *frames[65];
+    const int depth = backtrace(frames, c_frames < 64 ? c_frames + 1 : 65);
+    const int c_stored = depth > 0 ? depth - 1 : 0;
+    memcpy(pp_frames, frames + 1, (size_t)c_stored * sizeof(*frames));
+    return c_stored;
+}
+
 int ps_host_fault_backtrace(const PsHostFaultContext *p_context, void **pp_frames, int c_frames) {
     void *frames[64];
     const int depth = backtrace(frames, 64);

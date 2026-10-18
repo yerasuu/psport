@@ -37,7 +37,6 @@
 #include <pthread.h>
 #include <x86intrin.h>
 #include <cstring>
-#include <dlfcn.h>
 #include <string>
 #include <fmt/format.h>
 #include "common/signal_context.h"
@@ -2930,12 +2929,11 @@ std::string VramTrapSiteName(u64 rip) {
     if (!(rip >> 63)) {
         return fmt::format("+{:#x}", rip);
     }
-    Dl_info info{};
+    PsHostCodeAddress where;
     const u64 address = rip & ~(1ull << 63);
-    dladdr(reinterpret_cast<void*>(address), &info);
-    const char* name = info.dli_fname ? std::strrchr(info.dli_fname, '/') : nullptr;
-    return fmt::format("host {}+{:#x}", name ? name + 1 : "?",
-                       address - reinterpret_cast<u64>(info.dli_fbase));
+    ps_host_dl_address(reinterpret_cast<void*>(address), &where);
+    const char* name = where.sz_file ? std::strrchr(where.sz_file, '/') : nullptr;
+    return fmt::format("host {}+{:#x}", name ? name + 1 : "?", address - where.va_base);
 }
 
 void ReportVramTraps() {

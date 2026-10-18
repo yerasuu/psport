@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
-#include <dlfcn.h>
 #include <map>
 #include <unordered_set>
 #include <xxhash.h>
@@ -1423,8 +1422,8 @@ void Rasterizer::RunDrawPacket(void* context, const u8* data, u32 size) {
             std::memcpy(flat.data(), snapshot.user_data,
                         std::min(snapshot.user_data_size, snapshot.flat_size) * sizeof(u32));
             // Pointers in the tables may be stale by now: a fault only skips the check.
-            sigjmp_buf recover;
-            if (sigsetjmp(recover, 0)) {
+            PsHostRecoveryPoint recover;
+            if (PS_HOST_RECOVERY_SET(recover)) {
                 g_p_runtime_fault_recover = nullptr;
                 continue;
             }
@@ -1569,12 +1568,12 @@ void Rasterizer::PrintPipeStats() {
         std::printf("\n  stage B tasks (us per frame-second, count/s):");
         static std::array<u64, TaskKinds> last_task_cycles{}, last_task_counts{};
         for (std::size_t k = 0; k < TaskKinds && task_kinds[k]; ++k) {
-            Dl_info info{};
-            dladdr(task_kinds[k], &info);
+            PsHostCodeAddress where;
+            ps_host_dl_address(task_kinds[k], &where);
             char name[32];
             std::snprintf(name, sizeof(name), "+0x%llx",
                           (unsigned long long)(reinterpret_cast<u64>(task_kinds[k]) -
-                                               reinterpret_cast<u64>(info.dli_fbase)));
+                                               where.va_base));
             const u64 c = task_cycles[k], n = task_counts[k];
             std::printf(" [%s %.0f us/s %.0f/s]", name,
                         1e6 * double(c - last_task_cycles[k]) / tsc_hz / seconds,
@@ -5221,11 +5220,9 @@ std::thread::id Rasterizer::GetGpuCommandProcessorThread() {
     return liverpool->GetGpuCommandProcessorThread();
 }
 
-#ifdef __linux__
 u32 Rasterizer::GetGpuCommandProcessorThreadId() {
     return liverpool->GetGpuCommandProcessorThreadId();
 }
-#endif
 
 } // namespace Vulkan
 

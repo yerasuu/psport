@@ -5,7 +5,9 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#ifndef _WIN32
 #include <dlfcn.h>
+#endif
 #include <renderdoc_app.h>
 
 namespace PsRenderDoc {
@@ -26,6 +28,11 @@ std::uint64_t ReadCaptureFrame() {
 }
 
 RENDERDOC_API_1_1_2* LoadApi() {
+#ifdef _WIN32
+    std::printf("RenderDoc: PS_RENDERDOC_CAPTURE_FRAME is not supported on Windows yet, "
+                "no capture\n");
+    return nullptr;
+#else
     // RTLD_NOLOAD: RenderDoc must hook the process from its start to capture it; loading it
     // now would only add a library that sees none of the Vulkan objects already created.
     void* h_module = dlopen("librenderdoc.so", RTLD_NOW | RTLD_NOLOAD);
@@ -46,6 +53,7 @@ RENDERDOC_API_1_1_2* LoadApi() {
         p_api->SetCaptureFilePathTemplate(sz_template);
     }
     return p_api;
+#endif
 }
 } // namespace
 

@@ -378,6 +378,9 @@ void ps_host_output_untee(void);
 int ps_host_fs_duplicate(int h_file, int h_target);
 /* The machine's network name, NUL-terminated: 0, or the host's errno. */
 int ps_host_host_name(char *sz_out, size_t cb_out);
+/* Sets an environment variable of this process, leaving one already set when !is_overwrite: 0, or
+ * the host's errno. Not thread-safe against readers of the environment, as setenv. */
+int ps_host_env_set(const char *sz_name, const char *sz_value, int is_overwrite);
 
 /* ---- faults and thread interrupts ---- */
 /* What a fault or an interrupt handler is handed: the interrupted thread's registers, which it may
@@ -439,14 +442,20 @@ PsHostFaultAccess ps_host_fault_access(const PsHostFaultContext *p_context);
 uint64_t ps_host_fault_register(const PsHostFaultContext *p_context, PsHostRegister reg);
 void ps_host_fault_set_register(PsHostFaultContext *p_context, PsHostRegister reg, uint64_t value);
 void ps_host_fault_cpu(const PsHostFaultContext *p_context, PsHostFaultCpu *p_out);
+/* PS_HOST_RECOVERY_SET marks a recovery point (a macro, since it must run in the reader's own
+ * frame): 0 when set, nonzero when a fault or PS_HOST_RECOVERY_JUMP comes back to it. */
 #ifdef _WIN32
 /* Windows has no sigjmp_buf; its recovery points come with its fault handling. */
 typedef jmp_buf PsHostRecoveryPoint;
+#define PS_HOST_RECOVERY_SET(point) setjmp(point)
+#define PS_HOST_RECOVERY_JUMP(point) longjmp(point, 1)
 #else
 typedef sigjmp_buf PsHostRecoveryPoint;
+#define PS_HOST_RECOVERY_SET(point) sigsetjmp(point, 0)
+#define PS_HOST_RECOVERY_JUMP(point) siglongjmp(point, 1)
 #endif
-/* Leaves the handler for a recovery point a speculative reader set with sigsetjmp (its second
- * argument 0), with the signal mask the interrupted code had. */
+/* Leaves the handler for a recovery point a speculative reader set with PS_HOST_RECOVERY_SET,
+ * with the signal mask the interrupted code had. */
 __attribute__((noreturn)) void ps_host_fault_recover(const PsHostFaultContext *p_context,
                                                      PsHostRecoveryPoint *p_point);
 
@@ -508,6 +517,8 @@ int64_t ps_host_read_memory(void *p_out, const void *p_from, size_t cb_copy);
 /* Copies into memory of this process without faulting: a page without write access ends the copy.
  * The bytes copied, or minus the host's errno when none could be. */
 int64_t ps_host_write_memory(void *p_to, const void *p_from, size_t cb_copy);
+/* The calling thread's call chain, starting at the caller: how many return addresses were stored. */
+int ps_host_backtrace(void **pp_frames, int c_frames);
 /* The interrupted code's call chain from the host's unwind information, starting at the faulting
  * instruction (at the handler's own frames when the unwinder cannot see past them): how many
  * return addresses were stored. For a fault report: not promised safe in a signal handler. */

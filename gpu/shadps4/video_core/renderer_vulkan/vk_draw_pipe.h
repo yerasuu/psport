@@ -202,7 +202,7 @@ private:
         Common::SetCurrentThreadName("bb:DrawRec");
         m_is_on_stage_b = true;
         PsSections::g_is_recording_thread = true;
-        m_stage_b_tid.store(static_cast<u32>(gettid()), std::memory_order_release);
+        m_stage_b_tid.store(static_cast<u32>(ps_host_thread_id()), std::memory_order_release);
         u64 at = 0;
         while (true) {
             // Packets follow each other within microseconds while a frame is decoded: spin,

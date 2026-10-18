@@ -19,7 +19,6 @@
 #include <array>
 #include <atomic>
 #include <cstdio>
-#include <dlfcn.h>
 #include <string>
 #include <fmt/format.h>
 #include <unistd.h>
@@ -79,12 +78,13 @@ std::string SiteName(u64 key) {
         return fmt::format("{}+{:#x}", access, key);
     }
     const u64 address = key & ~HostSite;
-    Dl_info info{};
-    if (dladdr(reinterpret_cast<void*>(address), &info) && info.dli_sname) {
-        return fmt::format("{}host:{}+{:#x}", access, info.dli_sname, address - u64(info.dli_saddr));
+    PsHostCodeAddress where;
+    if (ps_host_dl_address(reinterpret_cast<void*>(address), &where) && where.sz_symbol) {
+        return fmt::format("{}host:{}+{:#x}", access, where.sz_symbol,
+                           address - u64(where.va_symbol));
     }
-    if (info.dli_fname) {
-        return fmt::format("{}host:{}+{:#x}", access, info.dli_fname, address - u64(info.dli_fbase));
+    if (where.sz_file) {
+        return fmt::format("{}host:{}+{:#x}", access, where.sz_file, address - u64(where.va_base));
     }
     return fmt::format("{}host:{:#x}", access, address);
 }

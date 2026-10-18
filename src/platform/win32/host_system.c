@@ -1,9 +1,10 @@
-/* Windows: randomness and the executable's path (ps_host.h). */
+/* Windows: randomness, the executable's path and the environment (ps_host.h). */
 #include "ps_host.h"
 #include "host_win32.h"
 #include <bcrypt.h>
 #include <errno.h>
 #include <limits.h>
+#include <stdlib.h>
 #include <string.h>
 
 int ps_host_random_bytes(void *p_buffer, size_t cb_buffer) {
@@ -28,4 +29,15 @@ long ps_host_exe_path(char *sz_out, size_t cb_out) {
     /* psport's own path code splits on '/', which every Win32 call accepts as a separator. */
     for (char *p_slash = sz_out; (p_slash = strchr(p_slash, '\\'));) *p_slash = '/';
     return (long)strlen(sz_out);
+}
+
+/* Through the wide environment, so that UTF-8 values (paths) survive whatever the ANSI code page is;
+ * the CRT keeps its narrow copy in step. */
+int ps_host_env_set(const char *sz_name, const char *sz_value, int is_overwrite) {
+    wchar_t sz_wide_name[256], sz_wide_value[PS_WIN32_PATH_MAX];
+    int error = ps_win32_to_wide(sz_name, sz_wide_name, sizeof(sz_wide_name) / sizeof(*sz_wide_name));
+    if (!error) error = ps_win32_to_wide(sz_value, sz_wide_value, PS_WIN32_PATH_MAX);
+    if (error) return error;
+    if (!is_overwrite && _wgetenv(sz_wide_name)) return 0;
+    return _wputenv_s(sz_wide_name, sz_wide_value);
 }

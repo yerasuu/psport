@@ -9,8 +9,7 @@
 
 #pragma once
 
-#if !defined(_WIN32)
-
+// MSVC's headers bring these in transitively; MinGW's (GCC or Clang) do not.
 #include <cerrno>
 #include <cmath>
 #include <cstddef>
@@ -18,6 +17,8 @@
 #include <cstdio>
 #include <cstring>
 #include <cwchar>
+
+#if !defined(_WIN32)
 
 #ifndef _countof
 #define _countof(array) (sizeof(array) / sizeof((array)[0]))

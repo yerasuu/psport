@@ -43,13 +43,27 @@ endif()
 find_package(Vulkan REQUIRED)
 find_package(fmt REQUIRED)
 find_package(Boost REQUIRED)
-find_package(magic_enum REQUIRED)
+find_package(magic_enum QUIET)
+if(NOT magic_enum_FOUND)
+    # Header-only; packaged on few systems (MSYS2 has none).
+    include(FetchContent)
+    FetchContent_Declare(magic_enum GIT_REPOSITORY https://github.com/Neargye/magic_enum.git GIT_TAG v0.9.7)
+    FetchContent_MakeAvailable(magic_enum)
+endif()
 find_package(tsl-robin-map REQUIRED)
-find_package(VulkanMemoryAllocator CONFIG REQUIRED)
+find_package(VulkanMemoryAllocator CONFIG QUIET)
+if (NOT TARGET GPUOpen::VulkanMemoryAllocator)
+    # The header alone, without its CMake package (MSYS2: include/vma/vk_mem_alloc.h).
+    find_path(VMA_INCLUDE_DIR vk_mem_alloc.h PATH_SUFFIXES vma REQUIRED)
+    add_library(GPUOpen::VulkanMemoryAllocator INTERFACE IMPORTED)
+    target_include_directories(GPUOpen::VulkanMemoryAllocator INTERFACE ${VMA_INCLUDE_DIR})
+endif()
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(XXHASH REQUIRED IMPORTED_TARGET libxxhash)
 pkg_check_modules(SDL3 REQUIRED IMPORTED_TARGET sdl3)
-pkg_check_modules(X11 REQUIRED IMPORTED_TARGET x11)
+if (NOT WIN32)
+    pkg_check_modules(X11 REQUIRED IMPORTED_TARGET x11)
+endif()
 find_package(miniz QUIET)
 if(NOT miniz_FOUND)
     # Distributions without a miniz package (Debian, Ubuntu: #136): built from its release.
@@ -64,6 +78,11 @@ find_package(Zydis REQUIRED)
 find_program(GLSLANG_COMPILER NAMES glslang glslangValidator REQUIRED)
 
 set(SIRIT_USE_SYSTEM_SPIRV_HEADERS OFF CACHE BOOL "" FORCE)
+if (WIN32)
+    # Bit-fields laid out as on Linux (GCC's way), not MSVC's: the GPU registers and the PS4's
+    # structures are declared with them. Every target, the third-party ones too.
+    add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:-mno-ms-bitfields>)
+endif()
 add_subdirectory(third_party/sirit EXCLUDE_FROM_ALL)
 
 # psport: FSR 3.1 temporal upscaling / frame generation, native Vulkan (MIT, FireBurn/FSR-Vulkan).
@@ -128,6 +147,9 @@ set(COMMON
     shadps4/common/path_util.cpp shadps4/common/rdtsc.cpp shadps4/common/spin_lock.cpp shadps4/common/recursive_lock.cpp
     shadps4/common/string_util.cpp shadps4/common/thread.cpp shadps4/common/signal_context.cpp
     shim/common/logging/log.cpp)
+if (WIN32)
+    list(APPEND COMMON shadps4/common/ntapi.cpp)
+endif()
 file(GLOB AVPLAYER CONFIGURE_DEPENDS shadps4/core/libraries/avplayer/*.cpp)
 pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET libavformat libavcodec libavutil libswscale libswresample)
 # Stand-ins for the shadPS4 parts the port replaces: shim/.
@@ -190,11 +212,27 @@ target_include_directories(psport-gpu PRIVATE shim port memory diag layer games 
 set_source_files_properties(${ATRAC9_SOURCES} PROPERTIES COMPILE_OPTIONS -w)
 target_compile_definitions(psport-gpu PRIVATE BOOST_ASIO_STANDALONE NDEBUG)
 target_compile_options(psport-gpu PRIVATE -Wno-deprecated-declarations -Wno-missing-field-initializers)
-# Loaded with psport at startup (DT_NEEDED, never dlopen): thread_local access without a
-# TLS descriptor call (_dl_tlsdesc_return was ~2% of the draw recording thread).
-target_compile_options(psport-gpu PRIVATE -ftls-model=initial-exec)
-# Runtime symbols (runtime_memory_*, runtime_process_*) resolve against psport.
-target_link_options(psport-gpu PRIVATE -Wl,--allow-shlib-undefined)
+if (NOT WIN32)
+    # Loaded with psport at startup (DT_NEEDED, never dlopen): thread_local access without a
+    # TLS descriptor call (_dl_tlsdesc_return was ~2% of the draw recording thread).
+    target_compile_options(psport-gpu PRIVATE -ftls-model=initial-exec)
+    # Runtime symbols (runtime_memory_*, runtime_process_*) resolve against psport.
+    target_link_options(psport-gpu PRIVATE -Wl,--allow-shlib-undefined)
+else()
+    # A DLL resolves every symbol when linked: the runtime's come from an import library of
+    # psport.exe made from port/psport_runtime.def (bbport linked the library into its
+    # executable instead).
+    find_program(PS_DLLTOOL NAMES llvm-dlltool dlltool REQUIRED)
+    set(PS_RUNTIME_IMPORTS ${CMAKE_CURRENT_BINARY_DIR}/libpsport-runtime.a)
+    add_custom_command(OUTPUT ${PS_RUNTIME_IMPORTS}
+        COMMAND ${PS_DLLTOOL} -m i386:x86-64 -D psport.exe -d ${CMAKE_CURRENT_SOURCE_DIR}/port/psport_runtime.def
+                -l ${PS_RUNTIME_IMPORTS}
+        DEPENDS port/psport_runtime.def VERBATIM)
+    add_custom_target(psport-runtime-imports DEPENDS ${PS_RUNTIME_IMPORTS})
+    add_dependencies(psport-gpu psport-runtime-imports)
+    # winpthreads: the pthread calls the shadPS4 code and the port's diagnostics make.
+    target_link_libraries(psport-gpu PRIVATE ${PS_RUNTIME_IMPORTS} pthread)
+endif()
 target_link_libraries(psport-gpu PRIVATE ffx-vulkan::portable ffx-vulkan::fsr4-v07-vulkan)
 # psport: Tracy profiler zones (PS_TRACY, off by default, docs/en/PROFILING.md). Off, the shim's Tracy
 # macros compile to nothing and third_party/tracy need not be checked out. On demand: nothing is
@@ -209,7 +247,10 @@ if (PS_TRACY)
         TRACY_NO_BROADCAST TRACY_NO_CRASH_HANDLER)
 endif()
 target_link_libraries(psport-gpu PUBLIC Vulkan::Headers fmt::fmt Boost::headers magic_enum::magic_enum
-    tsl::robin_map GPUOpen::VulkanMemoryAllocator PkgConfig::XXHASH PkgConfig::SDL3 PkgConfig::X11 PkgConfig::FFMPEG PkgConfig::FREETYPE miniz::miniz Zydis::Zydis sirit)
+    tsl::robin_map GPUOpen::VulkanMemoryAllocator PkgConfig::XXHASH PkgConfig::SDL3 PkgConfig::FFMPEG PkgConfig::FREETYPE miniz::miniz Zydis::Zydis sirit)
+if (NOT WIN32)
+    target_link_libraries(psport-gpu PUBLIC PkgConfig::X11)
+endif()
 
 # psport: FSR 4 benchmark outside the game (tools/fsr4_bench.cpp): ninja -C out/gpu fsr4-bench.
 add_executable(fsr4-bench EXCLUDE_FROM_ALL tools/fsr4_bench.cpp

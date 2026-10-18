@@ -23,6 +23,37 @@ if (( ${#deprecated[@]} )); then
     echo "psport: BB_* variables are deprecated, use PS_*: ${list%, }"
 fi
 mkdir -p out
+# Windows, from MSYS2's CLANG64 shell (clang, libc++, UCRT; decision #623) with the CLANG64
+# builds of the libraries gpu/CMakeLists.txt finds: the GPU library and the capability check. The
+# runtime (src/) does not link there yet, since most of src/platform/win32 is still to be written
+# (#614).
+case $(uname -s) in
+MINGW* | MSYS*)
+    if [[ ${MSYSTEM:-} != CLANG64 ]]; then
+        echo "Build from MSYS2's CLANG64 shell (MSYSTEM is '${MSYSTEM:-}')." >&2; exit 1
+    fi
+    for tool in clang clang++ cmake ninja pkg-config; do
+        command -v "$tool" >/dev/null || { echo "Need $tool from MSYS2's CLANG64 packages." >&2; exit 1; }
+    done
+    [[ -f gpu/third_party/imgui/imgui.h ]] || git submodule update --init --recursive
+    # No PGO (its flags are GCC's), no online module, DLSS bridge or Tracy yet.
+    cmake -S gpu -B out/gpu -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_C_COMPILER=clang \
+        -DCMAKE_CXX_COMPILER=clang++ -DPS_PGO=off -DPS_LTO="${PS_LTO:-ON}" -DPS_NET=OFF >/dev/null
+    echo "GPU library: LTO ${PS_LTO:-ON} (Windows: no PGO, no online module)"
+    if ! ninja -C out/gpu psport-gpu > out/gpu-build.log 2>&1; then
+        grep -v '^\[' out/gpu-build.log | tail -40 >&2
+        echo 'GPU library build failed (full log: out/gpu-build.log)' >&2; exit 1
+    fi
+    echo "Built $PWD/out/gpu/libpsport-gpu.dll"
+    read -r -a includes <<< "$(pkg-config --cflags vulkan sdl3)"
+    read -r -a libraries <<< "$(pkg-config --libs vulkan sdl3)"
+    clang -std=c11 -O2 -Wall -Wextra -Werror "${includes[@]}" -Isrc/runtime tools/gpu_capabilities.c \
+        src/runtime/runtime_quirks.c src/runtime/runtime_json_print.c "${libraries[@]}" -o out/psport-gpu-capabilities.exe
+    echo "Built $PWD/out/psport-gpu-capabilities.exe"
+    echo 'Not built on Windows yet: psport.exe (the runtime, src/: #614), the online module, the DLSS bridge.'
+    exit 0
+    ;;
+esac
 if [[ -z ${CC:-} ]]; then
     CC=$(command -v cc || command -v gcc || true)
     if [[ -z $CC ]]; then

@@ -27,13 +27,13 @@ void assert_fail_impl() {
                         "(%u so far)\n",
                         c_abandoned_reads);
         }
-        sigjmp_buf* p_recover = g_p_runtime_fault_recover;
+        PsHostRecoveryPoint* p_recover = g_p_runtime_fault_recover;
         g_p_runtime_fault_recover = nullptr;
-        siglongjmp(*p_recover, 1);
+        PS_HOST_RECOVERY_JUMP(*p_recover);
     }
     if (runtime_restarting) {
         for (;;) {
-            pause();
+            ps_host_time_sleep_ns(1000000000, nullptr);
         }
     }
     std::fflush(stdout);

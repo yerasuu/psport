@@ -26,6 +26,7 @@
 #include "sdl_window.h"
 #include "video_core/renderer_vulkan/vk_platform.h"
 #include "video_core/renderer_vulkan/vk_dlss.h"
+#include "../../src/platform/ps_host.h"
 
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
@@ -500,7 +501,7 @@ void StopOnDeviceLost(const char* sz_where) {
     // the exec instead, as assert_fail_impl does.
     if (runtime_restarting) {
         for (;;) {
-            pause();
+            ps_host_time_sleep_ns(1000000000, nullptr);
         }
     }
     Breadcrumbs::ReportDeviceLost(sz_where);

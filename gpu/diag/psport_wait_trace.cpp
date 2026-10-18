@@ -11,7 +11,6 @@
 #include <mutex>
 #include <string>
 #include <vector>
-#include <execinfo.h>
 #include <pthread.h>
 #include "../../src/platform/ps_host.h"
 
@@ -69,7 +68,7 @@ Scope::Scope() {
     if (!Enabled()) {
         return;
     }
-    m_depth = backtrace(m_frames, int(std::size(m_frames)));
+    m_depth = ps_host_backtrace(m_frames, int(std::size(m_frames)));
     m_start = std::chrono::steady_clock::now();
 }
 

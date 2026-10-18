@@ -127,7 +127,7 @@ extern "C" int psport_gpu_init(const PsGpuConfig* p_config) {
     StartProfileWriter();
 #endif
     s_sdk_version = p_config->sdk_version;
-    if (p_config->sz_user_dir) setenv("PS_GPU_USER_DIR", p_config->sz_user_dir, 0);
+    if (p_config->sz_user_dir) ps_host_env_set("PS_GPU_USER_DIR", p_config->sz_user_dir, 0);
     Core::Emulator::FillElfInfo(*p_config);
     const std::string title = p_config->sz_title && *p_config->sz_title ? p_config->sz_title
                                   : p_config->sz_serial ? p_config->sz_serial : "UNKNOWN";

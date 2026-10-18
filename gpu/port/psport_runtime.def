@@ -1,0 +1,87 @@
+; What libpsport-gpu.dll imports from psport.exe (the runtime's symbols, which libpsport-gpu.so
+; leaves to the executable with --allow-shlib-undefined on Linux). A Windows DLL cannot leave
+; symbols unresolved: it links against this import library instead, built by dlltool. A new
+; runtime symbol the GPU library uses goes here too, or the Windows link fails naming it; variables
+; are marked DATA, since without it their name would bind to a function thunk.
+NAME psport.exe
+EXPORTS
+    g_runtime_disabled_optimizations DATA
+    g_runtime_experiment_bits DATA
+    g_runtime_quirks DATA
+    ps_host_backtrace
+    ps_host_dl_address
+    ps_host_env_set
+    ps_host_fault_access
+    ps_host_fault_install
+    ps_host_fault_register
+    ps_host_fault_set_register
+    ps_host_feature_probed
+    ps_host_fs_close
+    ps_host_list_mappings
+    ps_host_read_memory
+    ps_host_thread_cpu_count
+    ps_host_thread_id
+    ps_host_thread_make_background
+    ps_host_thread_name
+    ps_host_thread_set_name
+    ps_host_time_sleep_ns
+    ps_host_vm_map
+    ps_host_vm_map_shared
+    ps_host_vm_page_size
+    ps_host_vm_protect
+    ps_host_vm_section_create
+    ps_host_vm_unmap
+    ps_host_write_memory
+    runtime_calls_add_summary
+    runtime_calls_fallback
+    runtime_calls_hle_stub
+    runtime_calls_report
+    runtime_config_entry
+    runtime_config_get
+    runtime_config_is_read
+    runtime_config_path
+    runtime_debug_finish
+    runtime_debug_open
+    runtime_env
+    runtime_env_flag
+    runtime_errno
+    runtime_fault_recover_slot
+    runtime_file_translate
+    runtime_file_user_dir
+    runtime_heap_growths
+    runtime_memory_backing_pointer
+    runtime_memory_clamp
+    runtime_memory_direct_phys
+    runtime_memory_generation
+    runtime_memory_gpu_protect
+    runtime_memory_note_write
+    runtime_memory_read_backing
+    runtime_memory_region
+    runtime_memory_resolve
+    runtime_memory_set_cpu_write_hook
+    runtime_memory_set_gpu_hooks
+    runtime_memory_set_guest_chunk_allocator
+    runtime_memory_set_guest_chunk_whole
+    runtime_memory_set_note_write_hook
+    runtime_memory_set_write_watch
+    runtime_memory_trap
+    runtime_memory_trap_reasons
+    runtime_memory_vma_info
+    runtime_memory_write_backing
+    runtime_pad_menu_pressed
+    runtime_pad_mouse_look
+    runtime_pad_prompt
+    runtime_pad_prompt_device
+    runtime_pad_prompt_generation
+    runtime_process_time_counter
+    runtime_process_time_us
+    runtime_quirks_note_gpu
+    runtime_restart
+    runtime_restarting DATA
+    runtime_savedata_title
+    runtime_sleep_stats
+    runtime_thread_attach_host
+    runtime_toypad_file
+    runtime_toypad_lights
+    runtime_tsc_frequency
+    runtime_wait_report

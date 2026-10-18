@@ -9,8 +9,9 @@
 #include <unordered_map>
 #include <cstring>
 #include <string>
-#include <dlfcn.h>
+#ifndef _WIN32
 #include <execinfo.h>
+#endif
 #include <unistd.h>
 #include <functional>
 
@@ -74,20 +75,30 @@ void ReportProducer(const char* what, u32 other, const char* other_where, const 
     if (producer_reports.fetch_add(1, std::memory_order_relaxed) >= 8) {
         return;
     }
-    const u32 self = u32(gettid());
+    const u32 self = u32(ps_host_thread_id());
     std::fprintf(stderr,
                  "Scheduler: %s: thread %u (%s) entering %s while thread %u (%s) is in %s\n",
                  what, self, ThreadName(self).c_str(), where, other, ThreadName(other).c_str(),
                  other_where ? other_where : "?");
     void* frames[24];
-    const int depth = backtrace(frames, 24);
+    const int depth = ps_host_backtrace(frames, 24);
+#ifdef _WIN32
+    for (int i = 0; i < depth; ++i) {
+        PsHostCodeAddress where;
+        ps_host_dl_address(frames[i], &where);
+        std::fprintf(stderr, "%s+%#llx\n", where.sz_file ? where.sz_file : "?",
+                     static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(frames[i]) -
+                                                     where.va_base));
+    }
+#else
     backtrace_symbols_fd(frames, depth, 2);
+#endif
 }
 } // namespace
 
 void Scheduler::ProducerScope::Enter(const char* where) noexcept {
     previous_where = producer_scope_where;
-    static thread_local const u32 tid = u32(gettid());
+    static thread_local const u32 tid = u32(ps_host_thread_id());
     producer_scope_where = where;
     u32 expected = 0;
     if (scheduler.producer_tid.compare_exchange_strong(expected, tid,
@@ -314,13 +325,13 @@ void Scheduler::TracePassBreak(void* caller) {
                 static_cast<unsigned long long>(breaks),
                 std::chrono::duration<double>(now - last).count());
     for (size_t i = 0; i < std::min<size_t>(top.size(), 10); ++i) {
-        Dl_info info{};
-        dladdr(top[i].second, &info);
+        PsHostCodeAddress where;
+        ps_host_dl_address(top[i].second, &where);
         std::printf("Render pass break caller: %llu x %s+0x%lx\n",
                     static_cast<unsigned long long>(top[i].first),
-                    info.dli_fname ? info.dli_fname : "?",
+                    where.sz_file ? where.sz_file : "?",
                     static_cast<unsigned long>(reinterpret_cast<uintptr_t>(top[i].second) -
-                                               reinterpret_cast<uintptr_t>(info.dli_fbase)));
+                                               where.va_base));
     }
     callers.clear();
     breaks = 0;
@@ -349,13 +360,13 @@ void Scheduler::TraceDirectRecording(void* caller) {
     }
     std::ranges::sort(top, std::greater{});
     for (size_t i = 0; i < std::min<size_t>(top.size(), 8); ++i) {
-        Dl_info info{};
-        dladdr(top[i].second, &info);
+        PsHostCodeAddress where;
+        ps_host_dl_address(top[i].second, &where);
         std::printf("Recorder sync caller: %llu x %s+0x%lx\n",
                     static_cast<unsigned long long>(top[i].first),
-                    info.dli_fname ? info.dli_fname : "?",
+                    where.sz_file ? where.sz_file : "?",
                     static_cast<unsigned long>(reinterpret_cast<uintptr_t>(top[i].second) -
-                                               reinterpret_cast<uintptr_t>(info.dli_fbase)));
+                                               where.va_base));
     }
     callers.clear();
 }
@@ -553,7 +564,7 @@ void Scheduler::HandOver() {
         inside && (std::strcmp(inside, "Record") == 0 || std::strcmp(inside, "RecordData") == 0 ||
                    std::strcmp(inside, "RecordOrdered") == 0 ||
                    std::strcmp(inside, "RetireChunk") == 0)) {
-        ReportProducer("REENTERED recording", u32(gettid()), inside, "HandOver");
+        ReportProducer("REENTERED recording", u32(ps_host_thread_id()), inside, "HandOver");
     }
     ProducerScope producer{*this, "HandOver"};
     if (!record_chunk || !ordered_chunk) {

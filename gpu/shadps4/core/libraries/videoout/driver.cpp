@@ -7,7 +7,9 @@
 #include <chrono>
 #include <cstdio>
 #include <time.h>
+#ifndef _WIN32
 #include <sys/resource.h>
+#endif
 #include <cstring>
 #include <dirent.h>
 #include <x86intrin.h>
@@ -345,7 +347,7 @@ static void PrintMemory() {
         }
         std::fclose(statm);
     }
-    const u64 rss = u64(rss_pages) * u64(sysconf(_SC_PAGESIZE));
+    const u64 rss = u64(rss_pages) * u64(ps_host_vm_page_size());
     const u64 device = PsStats::g_cb_device_alloc.load() - PsStats::g_cb_device_free.load();
     u64 vma_blocks = 0, vma_used = 0;
     Vulkan::VmaDeviceUsage(vma_blocks, vma_used);
@@ -422,9 +424,11 @@ void VideoOutDriver::Flip(const Request& req) {
         last_twf = twf;
         const u64 copy_ns = PsStats::g_t_copy.load(), copy_bytes = PsStats::g_cb_copy.load();
         u64 proc_flt = 0;
+#ifndef _WIN32
         if (rusage usage{}; getrusage(RUSAGE_SELF, &usage) == 0) {
             proc_flt = usage.ru_minflt;
         }
+#endif
         const u64 t_now[6] = {PsStats::g_t_resident.load(), PsStats::g_t_protect.load(),
                               PsStats::g_t_image_create.load(), PsStats::g_t_refresh.load(),
                               PsStats::g_t_staging.load(), PsStats::g_t_host_wait.load()};

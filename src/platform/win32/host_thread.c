@@ -9,6 +9,10 @@
 
 int32_t ps_host_thread_id(void) { return (int32_t)GetCurrentThreadId(); }
 
+int ps_host_backtrace(void **pp_frames, int c_frames) {
+    return c_frames > 0 ? RtlCaptureStackBackTrace(1, (DWORD)c_frames, pp_frames, NULL) : 0;
+}
+
 /* WaitOnAddress pairs waits and wakes within one process only, which is all psport's guest has:
  * a shared wait (is_private 0) is served the same way. No signal ends a wait early, so EINTR never
  * comes; a wake may still return without the word changing, as futex allows. */

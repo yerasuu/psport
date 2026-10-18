@@ -337,7 +337,7 @@ void ReserveGraphicsHeapMemory() {
     s_is_reserved = true;
     const char* sz_dmem_mb = runtime_env("PS_DMEM_MB", "");
     if (!*sz_dmem_mb) {
-        setenv("PS_DMEM_MB", std::to_string(GraphicsHeapDirectMemoryMb).c_str(), 1);
+        ps_host_env_set("PS_DMEM_MB", std::to_string(GraphicsHeapDirectMemoryMb).c_str(), 1);
         std::printf("Patches: '%s': direct memory %llu MiB (PS_DMEM_MB sets it)\n", GraphicsHeap,
                     GraphicsHeapDirectMemoryMb);
     } else if (std::strtoull(sz_dmem_mb, nullptr, 10) < GraphicsHeapDirectMemoryMb) {
@@ -355,7 +355,7 @@ void ReserveGraphicsHeapMemory() {
 void PrepareEnvironment() {
     if (!*runtime_env("PS_VBLANK_HZ", "")) {
         const FpsPreset* p_preset = FindPreset(FpsPresetName());
-        setenv("PS_VBLANK_HZ", p_preset ? p_preset->sz_vblank_hz : "60", 1);
+        ps_host_env_set("PS_VBLANK_HZ", p_preset ? p_preset->sz_vblank_hz : "60", 1);
     }
 }
 

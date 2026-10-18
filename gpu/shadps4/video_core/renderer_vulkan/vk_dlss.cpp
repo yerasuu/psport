@@ -88,6 +88,7 @@ Module LoadModule(const std::filesystem::path& path) {
 void* FindSymbol(Module p_module, const char* sz_name) {
     return dlsym(p_module, sz_name);
 }
+#endif
 /// The player's DLSS folder (<user>/dlss, PS_GPU_USER_DIR; beside psport without it): NGX's
 /// logs, and NVIDIA's library when the player chose one in the launcher (newer than the package's,
 /// or the only one: the package may come without it).
@@ -121,7 +122,6 @@ std::filesystem::path BridgeDirectory() {
     }
     return {};
 }
-#endif
 
 void BridgeLog(int warning, const char* sz_message) {
     std::printf("DLSS: %s%s\n", warning ? "warning: " : "", sz_message);
