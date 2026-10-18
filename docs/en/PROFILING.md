@@ -30,6 +30,10 @@ fault reports own those signals). The runtime (`out/psport`) is compiled with `T
 the client's C interface exported by `libpsport-gpu.so`. A later `bash build.sh` without
 `PS_TRACY` configures the GPU library back to a normal build.
 
+Even with no profiler connected, the zones cost time: with `PS_PROFILE=1` as well, Bloodborne's perf
+scene ran at 187.9 FPS against 205.5 for the normal build (−8.6 %, 2026-10-18). Compare a Tracy
+build only with another Tracy build.
+
 How it switches: shadPS4's code includes `common/debug.h` and `<tracy/Tracy.hpp>`, which resolve
 to psport's stand-ins in `gpu/shim/`. Without `TRACY_ENABLE` they define every macro as nothing; with
 it they include shadPS4's own `common/debug.h` and Tracy's real header, so shadPS4's existing
