@@ -159,6 +159,9 @@ private:
 
     void Run();
     void RunScaled();
+    /// psport: whether an image id kept since an earlier draw of the frame is still live; one
+    /// freed since is forgotten.
+    bool KeepsLive(VideoCore::ImageId& id, const char* sz_role);
     void RunUiOnly(VideoCore::ImageId color, VideoCore::ImageId depth);
     /// psport: false when its images could not be allocated (the UI then stays at the scene's
     /// resolution).

@@ -423,7 +423,8 @@ void CameraMotion::CommitFrameCamera() {
 
 void CameraMotion::OnDisplayPass(VideoCore::ImageId frame) {
     CommitFrameCamera();
-    if (m_has_debug_overlay && frame && m_depth_id && m_current.is_valid && m_previous.is_valid) {
+    if (m_has_debug_overlay && frame && m_current.is_valid && m_previous.is_valid &&
+        KeepsLiveDepth()) {
         Overlay(frame);
     }
     if (m_c_frame_gbuffer_passes > 1) {
@@ -444,6 +445,20 @@ void CameraMotion::OnDisplayPass(VideoCore::ImageId frame) {
     m_has_committed = false;
     m_c_frame_gbuffer_passes = 0;
     m_depth_id = {};
+}
+
+bool CameraMotion::KeepsLiveDepth() {
+    if (!m_depth_id) {
+        return false;
+    }
+    if (m_texture_cache.HasImage(m_depth_id)) {
+        return true;
+    }
+    LOG_ERROR_COUNTED(Render_Vulkan,
+                      "Camera motion: scene depth {} freed during the frame, forgotten",
+                      m_depth_id.index);
+    m_depth_id = {};
+    return false;
 }
 
 void CameraMotion::Overlay(VideoCore::ImageId frame) {

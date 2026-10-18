@@ -227,6 +227,17 @@ public:
         auto& image = slot_images[id];
         return !uid || image.image_uid == uid ? &image : nullptr;
     }
+    /// psport: whether an id kept across draws still names a live image. A freed image is
+    /// unregistered at once, but its slot is erased (and then reused) only once the GPU is past it.
+    [[nodiscard]] bool HasImage(ImageId id) const {
+        if (!slot_images.is_allocated(id)) {
+            return false;
+        }
+        const u32 flags = std::atomic_ref<const u32>(
+                              reinterpret_cast<const u32&>(slot_images[id].flags))
+                              .load(std::memory_order_acquire);
+        return (flags & static_cast<u32>(ImageFlagBits::Registered)) != 0;
+    }
     [[nodiscard]] Image& GetImage(ImageId id) {
         auto& image = slot_images[id];
         TouchImage(image);

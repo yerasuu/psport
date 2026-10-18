@@ -60,6 +60,9 @@ public:
     [[nodiscard]] VideoCore::ImageId Depth() const noexcept {
         return m_depth_id;
     }
+    /// psport: whether the scene depth kept since the G-buffer pass is still a live image; one
+    /// freed since (the game unmapped it mid-frame, e.g. on a level change) is forgotten.
+    bool KeepsLiveDepth();
     /// The render size in the scene constants (the game's viewport; its targets may be
     /// allocated larger, e.g. 1916x1080 for a 1916x1078 scene), or zero before the first camera.
     [[nodiscard]] std::array<u32, 2> RenderSize() const noexcept {

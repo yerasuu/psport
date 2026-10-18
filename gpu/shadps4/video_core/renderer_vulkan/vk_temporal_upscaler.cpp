@@ -339,6 +339,19 @@ void TemporalUpscaler::OnSceneColor(VideoCore::ImageId color) {
     m_scene_color = color;
 }
 
+bool TemporalUpscaler::KeepsLive(VideoCore::ImageId& id, const char* sz_role) {
+    if (!id) {
+        return false;
+    }
+    if (m_texture_cache.HasImage(id)) {
+        return true;
+    }
+    LOG_ERROR_COUNTED(Render_Vulkan, "Upscaler: {} image {} freed during the frame, forgotten",
+                      sz_role, id.index);
+    id = {};
+    return false;
+}
+
 namespace {
 float Halton(u32 i_sample, u32 base) {
     float f = 1.0f, result = 0.0f;
@@ -497,7 +510,8 @@ void TemporalUpscaler::OnDispatch(u64 cs_hash) {
         return;
     }
     m_is_done_this_frame = true;
-    if (!m_scene_color || !m_camera_motion.Ready() || !Active()) {
+    if (!Active() || !m_camera_motion.Ready() || !KeepsLive(m_scene_color, "scene color") ||
+        !m_camera_motion.KeepsLiveDepth()) {
         m_should_reset = true;
         return;
     }
@@ -1041,7 +1055,8 @@ void TemporalUpscaler::ExtraSharpen(vk::Image target, bool is_ldr, u32 w, u32 h)
 void TemporalUpscaler::OnBlendedSceneDraw() {
     // The mask is opt-in (menu, PS_REACTIVE=1): on thin mist it trades trails for
     // jitter shimmer, which looked worse. Toggle 1 << 27 switches it off.
-    if (m_is_snapshot_taken || !m_scene_color || !Active() || !ReactiveOn()) {
+    if (m_is_snapshot_taken || !Active() || !ReactiveOn() ||
+        !KeepsLive(m_scene_color, "scene color")) {
         return;
     }
     m_is_snapshot_taken = true;
@@ -1116,7 +1131,8 @@ void TemporalUpscaler::OnBlendedSceneDraw() {
 }
 
 void TemporalUpscaler::OnSceneComposite() {
-    if (!m_is_opaque_valid || m_is_mask_ready || m_has_failed || !ReactiveOn()) {
+    if (!m_is_opaque_valid || m_is_mask_ready || m_has_failed || !ReactiveOn() ||
+        !KeepsLive(m_scene_color, "scene color")) {
         return;
     }
     auto& color = m_texture_cache.GetImage(m_scene_color);
@@ -1549,7 +1565,7 @@ bool TemporalUpscaler::Scaled() const {
 }
 
 void TemporalUpscaler::OnColorTarget(VideoCore::ImageId color) {
-    if (m_is_ui_phase || !m_camera_motion.Depth()) {
+    if (m_is_ui_phase || !m_camera_motion.KeepsLiveDepth()) {
         return;
     }
     const auto& image = m_texture_cache.GetImage(color);
@@ -1569,7 +1585,8 @@ void TemporalUpscaler::OnDraw(u64 vs_hash, VideoCore::ImageId color,
     // output-size depth like them. Left in the guest depth, the mask was lost when the next UI
     // draw switched to the UI depth (PrepareUiDepth clears its stencil): masked images (the
     // loading screen's item picture, cut out of a sheet) vanished.
-    if (m_is_ui_phase && !color && depth && depth != m_ui_depth && m_ui_color) {
+    if (m_is_ui_phase && !color && depth && depth != m_ui_depth &&
+        KeepsLive(m_ui_color, "UI color")) {
         const auto& depth_image = m_texture_cache.GetImage(depth);
         const auto& ui_target = m_texture_cache.GetImage(m_ui_color);
         if (depth_image.info.size.width == ui_target.info.size.width &&
@@ -1617,7 +1634,8 @@ void TemporalUpscaler::OnDraw(u64 vs_hash, VideoCore::ImageId color,
         RenderTarget(image.info.size.width, image.info.size.height) &&
         !FrameCapture::IsDisplayBuffer(image.info.guest_address);
     switch (UiComposition::Choose(Scaled(), is_ui_draw,
-                                  m_camera_motion.Ready() && m_ldr_target == color,
+                                  m_camera_motion.Ready() && m_ldr_target == color &&
+                                      m_camera_motion.KeepsLiveDepth(),
                                   Active() && !m_has_failed)) {
     case UiComposition::Background::None:
         return;
