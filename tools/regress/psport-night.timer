@@ -1,0 +1,14 @@
+# Starts psport-night.service at the night's start, at a start missed while the machine was off
+# (Persistent) and shortly after a boot or a new user session, so that a cut night resumes; outside
+# the window plan.sh -w exits without starting anything. Install and uninstall: psport-night.service.
+[Unit]
+Description=psport night plan: start and resume
+
+[Timer]
+OnCalendar=*-*-* 22:30:00
+Persistent=true
+OnBootSec=3min
+OnStartupSec=2min
+
+[Install]
+WantedBy=timers.target

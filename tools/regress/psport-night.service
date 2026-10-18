@@ -1,0 +1,26 @@
+# Runs a night plan with tools/regress/plan.sh, started by psport-night.timer at the night's start
+# and again after a reboot or a restart of the user's session; plan.sh -w keeps it from starting a
+# game outside the window and skips what an earlier start finished. A template: nothing installs it.
+# Install (paths in the drop-in; PSPORT is the checkout whose plan.sh runs):
+#   mkdir -p ~/.config/systemd/user/psport-night.service.d
+#   cp tools/regress/psport-night.service tools/regress/psport-night.timer ~/.config/systemd/user/
+#   printf '[Service]\nEnvironment=PSPORT=%s NIGHT_PLAN=%s NIGHT_STATE=%s\n' \
+#       "$PWD" <plan file> <state folder> > ~/.config/systemd/user/psport-night.service.d/plan.conf
+#   systemctl --user daemon-reload && systemctl --user enable --now psport-night.timer
+# Follow it: journalctl --user -u psport-night -f, or <state folder>/plan.log and status.txt.
+# Uninstall once the night is over (the timer would start the plan again every night):
+#   systemctl --user disable --now psport-night.timer && systemctl --user stop psport-night.service
+#   rm -r ~/.config/systemd/user/psport-night.{service,timer,service.d}
+#   systemctl --user daemon-reload
+[Unit]
+Description=psport night plan (tools/regress/plan.sh)
+
+[Service]
+Type=oneshot
+Environment=PSPORT=%h/psport NIGHT_PLAN=%h/psport-night/plan NIGHT_STATE=%h/psport-night NIGHT_WINDOW=22:30-08:00
+Environment=PATH=%h/.nix-profile/bin:/nix/var/nix/profiles/default/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/env bash ${PSPORT}/tools/regress/plan.sh -w ${NIGHT_WINDOW} ${NIGHT_PLAN} ${NIGHT_STATE}
+Nice=10
+TimeoutStartSec=infinity
+# regress.sh stops its game before gamescope on SIGTERM; the step left .running runs again next start.
+TimeoutStopSec=90

@@ -562,6 +562,18 @@ checkout> <games root>` is the night order for a branch: regress of every title 
 twice, then the shot comparison, and a summary table in `summary.txt` (regressions and shots per
 title; FPS of each perf run, the branch against the base, stage B and GPU busy).
 
+`tools/regress/plan.sh [-n] [-w HH:MM-HH:MM] [-a N] <plan> <state folder>` runs a longer night as a
+list of steps (`step ID DESCRIPTION -- COMMAND...` in a sourced bash file) that survives a cut: each
+step's end is written to the state folder (`ID.done`), so a new start skips what finished and runs a
+step left `ID.running` again in a fresh `ID.attemptN/` folder (up to `-a`, default 2), after stopping
+what the cut runner left behind. A failing step does not stop the plan; `status.txt` and `plan.log`
+are the morning's record. One instance at a time (`flock` on the folder's `lock`); with `-w` no step
+starts outside the window, so a reboot by day does not start a game; every step runs with online
+play off (`PS_ONLINE`, `PS_BBSC`, `PS_BBSC_LOCAL_SERVER`, `PS_UPNP` exported as 0, the server
+variables unset; a step that sets them again is refused). `tools/regress/psport-night.service` and
+`.timer` are user-unit templates that start it at the night's start and again after a boot or a new
+session, with their install and uninstall commands in their headers.
+
 ## CI and binary cache
 
 `.github/workflows/build.yml` builds `packaging/port.nix` on every push to `develop` and `main` (and by hand), as
