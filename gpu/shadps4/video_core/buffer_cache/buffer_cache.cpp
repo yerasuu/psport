@@ -3306,7 +3306,11 @@ bool BufferCache::SynchronizeMemoryFromImage(const Buffer* arena, u64 arena_offs
             runtime.FillBuffer(arena, arena_offset, size, ZmaskUncompressed);
             return true;
         } else {
-            LOG_WARNING(Render_Vulkan, "Unhandled metadata type {}", magic_enum::enum_name(*type));
+            static std::atomic<u32> c_unhandled{0};
+            if (c_unhandled.fetch_add(1, std::memory_order_relaxed) < 8) {
+                LOG_WARNING(Render_Vulkan, "Unhandled metadata type {} at {:#x}+{:#x}",
+                            magic_enum::enum_name(*type), device_addr, size);
+            }
         }
     }
     // psport: most texel buffers alias no image; remember misses until images change.
