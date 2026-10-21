@@ -10,7 +10,6 @@
 #include <string.h>
 #include <inttypes.h>
 #include <pthread.h>
-#ifndef _WIN32
 #include <errno.h>
 /* sceKernelGetDirectMemorySize on retail PS4: 5056 MiB. PS_DMEM_MB raises it (the resolution
  * patches above 1080p need about 4 GiB more; run.sh or the title's profile sets it). */
@@ -368,6 +367,9 @@ int32_t place_file(void **pp_inout, uint64_t cb_range, int prot, int flags, int 
  * [LOW_MIN, USER_MIN): PS4 code packs pointers into 40-bit fields. */
 #define LOW_MIN UINT64_C(0x0800000000)
 static uintptr_t s_low_next=LOW_MIN;
+int runtime_memory_reserve_arena(void) {
+    return ps_host_vm_reserve_arena((void *)(uintptr_t)LOW_MIN,(size_t)(USER_MAX-LOW_MIN));
+}
 void *runtime_low_map(size_t cb_range, unsigned access) {
     cb_range=align_up(cb_range,PAGE);
     write_lock();
@@ -380,11 +382,3 @@ void *runtime_low_map(size_t cb_range, unsigned access) {
     write_unlock();
     return p_mapping;
 }
-#else
-void *runtime_low_map(size_t size, unsigned access) { (void)size; (void)access; return NULL; }
-uintptr_t runtime_memory_resolve(const char *name) { (void)name; return 0; }
-int runtime_memory_is_mapped(uintptr_t address, uint64_t size) { (void)address; (void)size; return 0; }
-int64_t runtime_memory_read_guest(void *p_out, uintptr_t va_range, uint64_t cb_range) { return ps_host_read_memory(p_out,(const void *)va_range,cb_range); }
-int64_t runtime_memory_read_guest_signal(void *p_out, uintptr_t va_range, uint64_t cb_range) { return ps_host_read_memory(p_out,(const void *)va_range,cb_range); }
-void runtime_memory_report(void) { puts("Runtime: Windows direct-memory backend not implemented"); }
-#endif

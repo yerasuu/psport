@@ -12,9 +12,6 @@
 #if !defined(__x86_64__) || !defined(__GNUC__)
 #error This prototype requires x86-64 GCC or Clang (including MinGW).
 #endif
-#ifdef _WIN32
-#include <windows.h>
-#endif
 
 char (*g_p_names)[128];
 uint64_t g_c_imports;
@@ -77,14 +74,13 @@ void protect(void *p_range, size_t cb_range, unsigned flags) {
     const unsigned access = ((flags & 4) ? PS_HOST_VM_READ : 0u) | ((flags & 2) ? PS_HOST_VM_WRITE : 0u) | ((flags & 1) ? PS_HOST_VM_EXECUTE : 0u);
     if (ps_host_vm_protect(p_range, cb_range, access)) fail("mprotect failed");
 }
-#ifndef _WIN32
-/* enter_on_stack(p_entry, p_arg0, p_arg1, p_top): call p_entry(p_arg0,p_arg1) on a new stack. */
-void enter_on_stack(void *p_entry, void *p_arg0, void *p_arg1, void *p_top);
+/* enter_on_stack(p_entry, p_arg0, p_arg1, p_top): call p_entry(p_arg0,p_arg1) on a new stack, its
+ * arguments in System V's registers on every host. */
+ABI void enter_on_stack(void *p_entry, void *p_arg0, void *p_arg1, void *p_top);
 __asm__(".text\n.globl enter_on_stack\nenter_on_stack:\n"
         " push %rbp\n mov %rsp,%rbp\n and $-16,%rcx\n mov %rcx,%rsp\n"
         " mov %rdi,%rax\n mov %rsi,%rdi\n mov %rdx,%rsi\n call *%rax\n"
         " mov %rbp,%rsp\n pop %rbp\n ret\n");
-#endif
 static ABI void guest_exit(void) { puts("Runtime: process finalizer callback reached"); }
 
 int main(int argc, char **argv) {
@@ -94,11 +90,15 @@ int main(int argc, char **argv) {
         fprintf(stderr, "ERROR: no thread-local slot for the guest's thread pointer: %s\n", strerror(tls_error));
         return 1;
     }
+    /* Before the window, the Vulkan driver and their threads take address space the guest needs. */
+    const int arena_error = runtime_memory_reserve_arena();
+    if (arena_error) {
+        fprintf(stderr, "ERROR: cannot reserve the guest's address range: %s\n", strerror(arena_error));
+        return 1;
+    }
     runtime_restart_configure(argc, argv);
-#ifndef _WIN32
     accept_deprecated_names(argv);
     ps_host_vm_keep_heap_low();
-#endif
     if (argc == 2 && !strcmp(argv[1], "--vulkan-only")) return vulkan_smoke();
     int query_status = answer_query(argc, argv);
     if (query_status >= 0) return query_status;
@@ -176,9 +176,7 @@ int main(int argc, char **argv) {
     runtime_set_arguments(pp_guest_arguments, c_guest_arguments);
     psport_gpu_register_kernel();
     g_cb_page = ps_host_vm_page_size();
-#ifndef _WIN32
     install_fault_handlers(timeout_seconds);
-#endif
     LoaderImage boot_image;
     loader_load_game(&game,&boot_image);
     /* The game's title and its files, then the patches, all before any of its code runs or a
@@ -312,9 +310,7 @@ int main(int argc, char **argv) {
         if (psport_gpu_init(&gpu)) fail("GPU initialization failed");
         printf("GPU: window and Vulkan presenter ready; SDK 0x%08x, %u HLE symbols\n",(unsigned)sdk,psport_gpu_symbol_count());
     }
-#ifndef _WIN32
     install_shutdown_signals();
-#endif
     unsigned char *p_traps, *p_thunks;
     bind_imports(p_segments, c_segments, p_relocs, c_relocs, native_libc, p_bindings, p_binding_kinds, &p_traps, &p_thunks);
     if (is_eboot) apply_patches(&patches, p_segments, c_segments, p_relocs, c_relocs);
@@ -363,16 +359,11 @@ int main(int argc, char **argv) {
     if (!p_params) fail("allocation failed");
     p_params[0] = (uint64_t)c_guest_arguments;
     for (int i = 0; i < c_guest_arguments; ++i) p_params[i + 1] = (uint64_t)(uintptr_t)pp_guest_arguments[i];
-#ifdef _WIN32
-    typedef void (ABI *Entry)(void *, void (ABI *)(void));
-    ((Entry)(image + entry))(params, guest_exit);
-#else
     /* The guest main thread runs on a stack below 1 TiB like PS4 stacks. */
     enum { MAIN_STACK=8*1024*1024 };
     unsigned char *p_stack=runtime_low_map(MAIN_STACK,PS_HOST_VM_READ|PS_HOST_VM_WRITE);
     if (!p_stack) fail("cannot allocate guest main stack");
     if (native_libc) runtime_thread_set_stack(p_stack,MAIN_STACK);
     enter_on_stack(g_p_image+entry,p_params,(void *)guest_exit,p_stack+MAIN_STACK-64);
-#endif
     fail("entry unexpectedly returned");
 }

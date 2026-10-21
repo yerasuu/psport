@@ -47,9 +47,7 @@ LoaderPatchFolder patch_folder(const char *sz_dir, const GameInfo *p_info);
 /* What the quirk registry decides on from the game's title; traits are the caller's. */
 RuntimeQuirkLaunch quirk_launch(const GameInfo *p_info, uint64_t traits);
 void mod_options(const GameInfo *p_info, LoaderModOptions *p_options, const char **pp_folders, size_t c_capacity);
-#ifndef _WIN32
 void accept_deprecated_names(char **pp_argv);
-#endif
 /* The options that answer a launcher's question and exit before any game is loaded (--check-game,
  * --has-presets, --list-patches, --list-mods, --list-quirks, --list-traits, --online-overrides): their exit status, -1 when argv asks none of them. */
 int answer_query(int argc, char **argv);
@@ -58,9 +56,7 @@ void bind_imports(Segment *p_segments, uint64_t c_segments, Reloc *p_relocs, uin
                   const uint64_t *p_bindings, const uint64_t *p_binding_kinds, unsigned char **pp_out_traps,
                   unsigned char **pp_out_thunks);
 void apply_patches(const PsPatchList *p_patches, Segment *p_segments, uint64_t c_segments, const Reloc *p_relocs, uint64_t c_relocs);
-#ifndef _WIN32
 void install_fault_handlers(unsigned timeout_seconds);
 void install_shutdown_signals(void);
-#endif
 #pragma GCC visibility pop
 #endif

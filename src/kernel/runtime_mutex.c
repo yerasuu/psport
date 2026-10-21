@@ -6,7 +6,6 @@
 #include <string.h>
 #include <inttypes.h>
 #include <limits.h>
-#ifndef _WIN32
 #include <pthread.h>
 #include <errno.h>
 #include <time.h>
@@ -251,12 +250,10 @@ static ABI int32_t cond_init(GuestCond **pp_out, GuestCondAttr **pp_attr, const 
     if (!pp_out) return orbis_error(EINVAL);
     GuestCond *p_cond = malloc(sizeof(*p_cond));
     if (!p_cond) return orbis_error(ENOMEM);
+    /* The clock goes with each timed wait (pthread_cond_clockwait) rather than in the condition's
+     * attributes, which winpthreads takes for CLOCK_REALTIME only. */
     p_cond->clock = pp_attr && *pp_attr && (*pp_attr)->clock == 4 ? CLOCK_MONOTONIC : CLOCK_REALTIME;
-    pthread_condattr_t native_attr;
-    int e = pthread_condattr_init(&native_attr);
-    if (!e) e = pthread_condattr_setclock(&native_attr, p_cond->clock);
-    if (!e) e = pthread_cond_init(&p_cond->native, &native_attr);
-    pthread_condattr_destroy(&native_attr);
+    int e = pthread_cond_init(&p_cond->native, NULL);
     if (e) { free(p_cond); return orbis_error(e); }
     *pp_out = p_cond; __atomic_fetch_add(&s_c_conds, 1, __ATOMIC_RELAXED); return 0;
 }
@@ -295,7 +292,7 @@ static int wait_released(GuestCond *p_cond, GuestMutex *p_mutex, const struct ti
     __atomic_fetch_add(&s_c_waits, 1, __ATOMIC_RELAXED);
     const uint64_t start = runtime_wait_clock();
     RUNTIME_ZONE(zone, "cond wait");
-    const int e = p_end ? pthread_cond_timedwait(&p_cond->native, &p_mutex->native, p_end)
+    const int e = p_end ? pthread_cond_clockwait(&p_cond->native, &p_mutex->native, p_cond->clock, p_end)
                         : pthread_cond_wait(&p_cond->native, &p_mutex->native);
     RUNTIME_ZONE_END(zone);
     runtime_wait_note(0, runtime_wait_clock() - start);
@@ -419,21 +416,3 @@ void runtime_mutex_report(void) {
            s_c_recursive_lock_failures, s_c_recursive_unlock_failures, s_c_foreign_unlocks, s_c_self_deadlocks);
     printf("Runtime: condition variables created=%zu, waits=%zu, wakeups=%zu\n", s_c_conds, s_c_waits, s_c_wakeups);
 }
-#else
-static ABI int32_t posix_cond_init(GuestCond **c, void **a) { return posix_result(cond_init(c, a, NULL)); }
-static ABI int32_t posix_cond_destroy(GuestCond **c) { return posix_result(cond_destroy(c)); }
-static ABI int32_t posix_cond_wait(GuestCond **c, GuestMutex **m) { return posix_result(cond_wait(c, m)); }
-static ABI int32_t posix_cond_timedwait(GuestCond **c, GuestMutex **m, const GuestTimespec *t) { return posix_result(cond_abs_timedwait(c, m, t)); }
-static ABI int32_t posix_cond_signal(GuestCond **c) { return posix_result(cond_signal(c)); }
-static ABI int32_t posix_cond_broadcast(GuestCond **c) { return posix_result(cond_broadcast(c)); }
-static const RuntimeExport exports[] = {
-    {"pthread_cond_init",posix_cond_init}, {"pthread_cond_destroy",posix_cond_destroy},
-    {"pthread_cond_wait",posix_cond_wait}, {"pthread_cond_timedwait",posix_cond_timedwait},
-    {"pthread_cond_signal",posix_cond_signal}, {"pthread_cond_broadcast",posix_cond_broadcast},
-    {"scePthreadCondInit",cond_init}, {"scePthreadCondDestroy",cond_destroy}, {"scePthreadCondWait",cond_wait},
-    {"scePthreadCondTimedwait",cond_timedwait}, {"scePthreadCondSignal",cond_signal},
-    {"scePthreadCondBroadcast",cond_broadcast}, {"scePthreadMutexTimedlock",mutex_timedlock},
-};
-uintptr_t runtime_mutex_resolve(const char *name) { return RUNTIME_LOOKUP(exports, name); }
-void runtime_mutex_report(void) { puts("Runtime: Windows mutex backend not implemented"); }
-#endif

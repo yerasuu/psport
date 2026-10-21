@@ -14,7 +14,6 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
-#ifndef _WIN32
 
 #define TROPHY_INVALID ((int32_t)0x80551604)
 #define TROPHY_OUT_OF_MEMORY ((int32_t)0x80551603)
@@ -142,8 +141,13 @@ static void format_tick(uint64_t tick, char *sz_out, size_t cb_out) {
 }
 static bool parse_tick(const char *sz_time, uint64_t *p_out_tick) {
     struct tm utc = {0};
-    char *sz_rest = strptime(sz_time, "%Y-%m-%dT%H:%M:%S", &utc);
-    if (!sz_rest) return false;
+    int cb_parsed = 0;
+    if (sscanf(sz_time, "%4d-%2d-%2dT%2d:%2d:%2d%n", &utc.tm_year, &utc.tm_mon, &utc.tm_mday, &utc.tm_hour, &utc.tm_min,
+               &utc.tm_sec, &cb_parsed) != 6 || !cb_parsed)
+        return false;
+    utc.tm_year -= 1900;
+    --utc.tm_mon;
+    char *sz_rest = (char *)sz_time + cb_parsed;
     unsigned long microseconds = 0;
     if (*sz_rest == '.') microseconds = strtoul(sz_rest + 1, &sz_rest, 10);
     const time_t seconds = timegm(&utc);
@@ -160,18 +164,27 @@ static bool is_directory_name(const char *sz_name) {
     return true;
 }
 /* A whole file replaced in one rename, so a crash mid-write keeps the previous one. */
-static bool write_atomic(const char *sz_path, const void *p_data, size_t cb_data) {
-    char sz_temp[760];
-    snprintf(sz_temp, sizeof(sz_temp), "%s.tmp", sz_path);
-    FILE *p_file = fopen(sz_temp, "wb");
-    if (!p_file) return false;
-    bool is_written = fwrite(p_data, 1, cb_data, p_file) == cb_data && !fflush(p_file) && !ps_host_fs_sync(fileno(p_file));
+/* A file written whole replaces sz_path in one step: begun into "<path>.tmp", then committed. */
+static FILE *begin_atomic(const char *sz_path, char *sz_out_temp, size_t cb_out_temp) {
+    if (snprintf(sz_out_temp, cb_out_temp, "%s.tmp", sz_path) >= (int)cb_out_temp) {
+        errno = ENAMETOOLONG;
+        return NULL;
+    }
+    return fopen(sz_out_temp, "wb");
+}
+static bool commit_atomic(FILE *p_file, bool is_written, const char *sz_temp, const char *sz_path) {
+    is_written = is_written && !fflush(p_file) && !ps_host_fs_sync_stream(p_file);
     is_written = !fclose(p_file) && is_written;
     if (!is_written || ps_host_fs_rename(sz_temp, sz_path)) {
         ps_host_fs_remove(sz_temp);
         return false;
     }
     return true;
+}
+static bool write_atomic(const char *sz_path, const void *p_data, size_t cb_data) {
+    char sz_temp[760];
+    FILE *p_file = begin_atomic(sz_path, sz_temp, sizeof(sz_temp));
+    return p_file && commit_atomic(p_file, fwrite(p_data, 1, cb_data, p_file) == cb_data, sz_temp, sz_path);
 }
 static void state_path(const TrophyContext *p_context, char *sz_out, size_t cb_out) {
     snprintf(sz_out, cb_out, "%s/unlocks_%d.tsv", p_context->sz_state_dir, p_context->user);
@@ -218,10 +231,13 @@ static void put_json_string(FILE *p_out, const char *sz_text) {
     fputc('"', p_out);
 }
 static void save_trophy_set(const TrophyContext *p_context, const char *sz_pack_guest, const char *sz_configuration) {
-    char *p_text = NULL, sz_path[760];
-    size_t cb_text = 0;
-    FILE *p_out = open_memstream(&p_text, &cb_text);
-    if (!p_out) return;
+    char sz_path[760], sz_temp[760];
+    snprintf(sz_path, sizeof(sz_path), "%s/trophyset.json", p_context->sz_state_dir);
+    FILE *p_out = begin_atomic(sz_path, sz_temp, sizeof(sz_temp));
+    if (!p_out) {
+        printf("Runtime: NpTrophy: could not write %s: %s\n", sz_path, strerror(errno));
+        return;
+    }
     const TrophyPack *p_pack = p_context->p_pack;
     fprintf(p_out, "{\n  \"format\": 1,\n  \"np_comm_id\": ");
     put_json_string(p_out, p_context->sz_np_comm_id);
@@ -252,11 +268,8 @@ static void save_trophy_set(const TrophyContext *p_context, const char *sz_pack_
         fputc('}', p_out);
     }
     fprintf(p_out, "%s]\n}\n", count_trophies(p_context) ? "\n  " : "");
-    const bool is_complete = !fclose(p_out);
-    snprintf(sz_path, sizeof(sz_path), "%s/trophyset.json", p_context->sz_state_dir);
-    if (!is_complete || !write_atomic(sz_path, p_text, cb_text))
+    if (!commit_atomic(p_out, !ferror(p_out), sz_temp, sz_path))
         printf("Runtime: NpTrophy: could not write %s: %s\n", sz_path, strerror(errno));
-    free(p_text);
 }
 
 static ABI int32_t trophy_context(int32_t *p_ctx,int32_t user,uint32_t label,uint64_t options) {
@@ -630,6 +643,3 @@ static const RuntimeExport s_exports[]={
     {"sceNpTrophyGetTrophyUnlockState",trophy_unlock_state},
 };
 uintptr_t runtime_trophy_resolve(const char *sz_name) { return RUNTIME_LOOKUP(s_exports,sz_name); }
-#else
-uintptr_t runtime_trophy_resolve(const char *name) { (void)name; return 0; }
-#endif

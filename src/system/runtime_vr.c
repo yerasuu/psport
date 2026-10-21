@@ -7,7 +7,6 @@
 #include "runtime.h"
 #include <stdio.h>
 #include <string.h>
-#ifndef _WIN32
 #include <stdatomic.h>
 
 /* ---- libSceHmd ---- */
@@ -181,6 +180,3 @@ static const RuntimeExport s_exports[]={
     {"sceSocialScreenSetMode",social_screen_set_mode},
 };
 uintptr_t runtime_vr_resolve(const char *sz_name) { return RUNTIME_LOOKUP(s_exports,sz_name); }
-#else
-uintptr_t runtime_vr_resolve(const char *sz_name) { (void)sz_name; return 0; }
-#endif

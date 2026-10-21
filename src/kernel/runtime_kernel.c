@@ -8,14 +8,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#ifndef _WIN32
 #include <errno.h>
 #include <pthread.h>
 #include <sched.h>
 #include <time.h>
 #include <unistd.h>
 #include <signal.h>
-#include <sys/resource.h>
 #include <sys/time.h>
 #include <x86intrin.h>
 #define ERR(n) ((int32_t)(UINT32_C(0x80020000)|(n)))
@@ -402,12 +400,13 @@ static ABI int32_t guest_sigwait(const GuestSigset *p_set,int32_t *p_out_sig) {
 static ABI int32_t is_signal_return(const void *p_address) { (void)p_address; return 0; }
 typedef struct { GuestTimeval utime, stime; int64_t rest[14]; } GuestRusage;
 static ABI int32_t guest_getrusage(int who,GuestRusage *p_out) {
-    struct rusage r;
+    struct timespec user, system;
     if (!p_out || (who!=0 && who!=1)) return fail_posix(EINVAL);
-    getrusage(who==0 ? RUSAGE_SELF : RUSAGE_THREAD,&r);
+    const int error=ps_host_thread_cpu_times(who==0,&user,&system);
+    if (error) return fail_posix(error);
     memset(p_out,0,sizeof(*p_out));
-    p_out->utime=(GuestTimeval){r.ru_utime.tv_sec,r.ru_utime.tv_usec};
-    p_out->stime=(GuestTimeval){r.ru_stime.tv_sec,r.ru_stime.tv_usec};
+    p_out->utime=(GuestTimeval){user.tv_sec,user.tv_nsec/1000};
+    p_out->stime=(GuestTimeval){system.tv_sec,system.tv_nsec/1000};
     return 0;
 }
 /* libkernel answers CTL_USER itself, as FreeBSD's libc does (kb #691); the integers are FreeBSD 9's
@@ -692,12 +691,6 @@ static const RuntimeExport s_exports[]={
     {"__sys_namedobj_create",namedobj_create}, {"__sys_namedobj_delete",namedobj_delete},
 };
 uintptr_t runtime_kernel_resolve(const char *sz_name) { return RUNTIME_LOOKUP(s_exports,sz_name); }
-#else
-uintptr_t runtime_kernel_resolve(const char *name) { (void)name; return 0; }
-void runtime_process_configure(uint32_t sdk, uint32_t attributes) { (void)sdk; (void)attributes; }
-int32_t runtime_guest_errno(int e) { return e ? 5 : 0; }
-void runtime_thread_keys_cleanup(void) {}
-#endif
 
 static void sample_start(void);
 static void sample_report(void);

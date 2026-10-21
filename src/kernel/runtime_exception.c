@@ -7,7 +7,6 @@
 #include "runtime.h"
 #include <stdio.h>
 #include <string.h>
-#ifndef _WIN32
 #include <errno.h>
 #include <pthread.h>
 #include <signal.h>
@@ -76,7 +75,7 @@ void runtime_exception_release(void) {
     atomic_signal_fence(memory_order_seq_cst);
     --s_held;
     atomic_signal_fence(memory_order_seq_cst);
-    if (!s_held && s_is_deferred) pthread_kill(pthread_self(),RUNTIME_EXCEPTION_SIGNAL);
+    if (!s_held && s_is_deferred) ps_host_interrupt_thread(ps_host_thread_id(),PS_HOST_INTERRUPT_GUEST_EXCEPTION);
 }
 void runtime_exception_lock(pthread_mutex_t *p_lock) {
     runtime_exception_hold();
@@ -192,7 +191,7 @@ static ABI int32_t remove_handler(int sig) {
 }
 static ABI int32_t raise_exception(void *p_thread, int sig) {
     if (sig!=GUEST_SIGUSR1) return ERR(22);
-    int32_t result=runtime_thread_kill(p_thread,RUNTIME_EXCEPTION_SIGNAL);
+    int32_t result=runtime_thread_kill(p_thread,PS_HOST_INTERRUPT_GUEST_EXCEPTION);
     if (!result && !atomic_fetch_add(&s_c_raised,1)) {
         /* write, not stdio: the thread may stop in the handler while it holds stdout's lock. */
         char sz_line[96];
@@ -271,9 +270,3 @@ void runtime_exception_report(void) {
 }
 int runtime_exception_is_delivering(void) { return s_delivery.is_active; }
 int runtime_exception_is_holding(void) { return s_held!=0; }
-#else
-uintptr_t runtime_exception_resolve(const char *name) { (void)name; return 0; }
-void runtime_exception_report(void) {}
-int runtime_exception_is_delivering(void) { return 0; }
-int runtime_exception_is_holding(void) { return 0; }
-#endif

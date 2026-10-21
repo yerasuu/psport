@@ -8,7 +8,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#ifndef _WIN32
 #include <pthread.h>
 #include <time.h>
 
@@ -99,6 +98,3 @@ uintptr_t runtime_devices_resolve(const char *sz_name) {
     const uintptr_t va_toypad=runtime_toypad_resolve(sz_name);
     return va_toypad ? va_toypad : RUNTIME_LOOKUP(s_exports,sz_name);
 }
-#else
-uintptr_t runtime_devices_resolve(const char *sz_name) { (void)sz_name; return 0; }
-#endif

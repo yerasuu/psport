@@ -24,8 +24,7 @@ if (( ${#deprecated[@]} )); then
 fi
 mkdir -p out
 # Windows, from MSYS2's CLANG64 shell (clang, libc++, UCRT; decision #623, the packages in
-# .github/workflows/windows.yml): the GPU library and the capability check. The runtime (src/)
-# does not link there yet, since most of src/platform/win32 is still to be written (#614).
+# .github/workflows/windows.yml): the GPU library, psport.exe and the capability check (#614).
 case $(uname -s) in
 MINGW* | MSYS*)
     if [[ ${MSYSTEM:-} != CLANG64 ]]; then
@@ -46,10 +45,28 @@ MINGW* | MSYS*)
     echo "Built $PWD/out/gpu/libpsport-gpu.dll"
     read -r -a includes <<< "$(pkg-config --cflags vulkan sdl3)"
     read -r -a libraries <<< "$(pkg-config --libs vulkan sdl3)"
+    # The runtime: the Linux build's sources with src/platform/win32, and posix_compat.h for the C
+    # library calls UCRT lacks. A console program, so that its log reaches stdout (no -mwindows);
+    # it exports what libpsport-gpu.dll imports (gpu/port/psport_runtime.def), and its low
+    # addresses stay free for the guest without high-entropy ASLR (ps_host_vm_reserve_arena).
+    read -r -a console_libraries <<< "$(pkg-config --libs vulkan sdl3 | sed 's/ -mwindows//')"
+    mkdir -p out/atrac9
+    for source in third_party/LibAtrac9/C/src/*.c; do clang -std=c99 -O2 -g -w -c "$source" -o "out/atrac9/$(basename "${source%.c}").o"; done
+    llvm-ar rcs out/libatrac9.a out/atrac9/*.o
+    mapfile -t runtime < <(printf '%s\n' src/*/runtime*.c | LC_ALL=C sort -t/ -k3)
+    areas=(main loader runtime runtime/imports kernel system audio input net platform)
+    commit=$(git rev-parse --short=12 HEAD 2>/dev/null || true)
+    clang -std=c11 -O2 -g -Wall -Wextra -Werror -include src/platform/win32/posix_compat.h -DPS_VERSION="\"$version\"" \
+        -DPS_COMMIT="\"$commit\"" "${includes[@]}" -I. "${areas[@]/#/-Isrc/}" src/main/main.c src/main/cli.c \
+        src/main/game_info.c src/main/bind.c src/main/signals.c src/loader/loader*.c "${runtime[@]}" src/platform/*.c \
+        src/platform/win32/*.c src/main/vulkan_smoke.c out/libatrac9.a gpu/port/psport_runtime.def -Lout/gpu -lpsport-gpu \
+        "${console_libraries[@]}" -pthread -lws2_32 -lbcrypt -lsynchronization -lonecore -Wl,--disable-high-entropy-va \
+        -o out/psport.exe
+    echo "Built $PWD/out/psport.exe"
     clang -std=c11 -O2 -Wall -Wextra -Werror "${includes[@]}" -Isrc/runtime tools/gpu_capabilities.c \
         src/runtime/runtime_quirks.c src/runtime/runtime_json_print.c "${libraries[@]}" -o out/psport-gpu-capabilities.exe
     echo "Built $PWD/out/psport-gpu-capabilities.exe"
-    echo 'Not built on Windows yet: psport.exe (the runtime, src/: #614), the online module, the DLSS bridge.'
+    echo 'Not built on Windows yet: the online module, the DLSS bridge.'
     exit 0
     ;;
 esac

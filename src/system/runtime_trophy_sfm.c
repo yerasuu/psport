@@ -5,7 +5,6 @@
 #include "runtime_trophy.h"
 #include <stdlib.h>
 #include <string.h>
-#ifndef _WIN32
 
 typedef struct SfmTag {
     const char *p_name, *p_attributes, *p_attributes_end;
@@ -240,4 +239,3 @@ bool trophy_sfm_parse(const char *p_text, size_t cb_text, TrophyPack *p_pack) {
     }
     return is_trophyconf;
 }
-#endif

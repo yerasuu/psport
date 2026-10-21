@@ -10,7 +10,6 @@
 #include <stdatomic.h>
 #include <pthread.h>
 #include <time.h>
-#ifndef _WIN32
 /* Optimizations switched off at run time (diagnostics): the number in the file named by
  * PS_TOGGLE_FILE, re-read every 250 ms. Bits: 1 region cache, 2 fetch shader cache,
  * 4 page tracking early exit, 8 pending-op poll limit, 16 threaded Vulkan recording,
@@ -33,6 +32,7 @@ uint64_t g_runtime_experiment_bits;
 /* Speculative readers of guest memory (GPU draw-preparation workers) register a recovery
  * point: a fault on that thread jumps back to it instead of terminating (signals.c). */
 __thread PsHostRecoveryPoint *g_p_runtime_fault_recover;
+PsHostRecoveryPoint **runtime_fault_recover_slot(void) { return &g_p_runtime_fault_recover; }
 static void *toggle_watcher(void *p_path) {
     for (unsigned long long last=ULLONG_MAX;;) {
         FILE *p_file=fopen(p_path,"r");
@@ -401,4 +401,3 @@ int runtime_memory_is_mapped(uintptr_t va_range, uint64_t cb_range) {
     read_unlock();
     return result;
 }
-#endif

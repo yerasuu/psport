@@ -4,12 +4,10 @@
 #pragma once
 
 #include <atomic>
-#include <csetjmp>
 #include <cstdint>
 #include <cstring>
 
-// The runtime's fault recovery (src/main/signals.c): a fault while it is set jumps back to it.
-extern "C" __thread sigjmp_buf* g_p_runtime_fault_recover;
+#include "psport_toggles.h"
 
 namespace PsBlackOps {
 /// The guest's pointers fit 40 bits.
@@ -22,8 +20,8 @@ inline bool IsGuestAddress(std::uint64_t va, std::uint64_t alignment) {
 /// Copies between guest and host memory; false where nothing is mapped (the runtime's fault
 /// recovery).
 inline bool Copy(void* p_to, const void* p_from, std::size_t cb_copy) {
-    sigjmp_buf recover;
-    if (sigsetjmp(recover, 0)) {
+    PsHostRecoveryPoint recover;
+    if (PS_HOST_RECOVERY_SET(recover)) {
         g_p_runtime_fault_recover = nullptr;
         return false;
     }

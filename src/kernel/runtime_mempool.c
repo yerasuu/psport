@@ -8,7 +8,6 @@
 #include <stdio.h>
 #include <inttypes.h>
 #include <pthread.h>
-#ifndef _WIN32
 #define INVALID ((int32_t)UINT32_C(0x80020016))
 #define NO_MEMORY ((int32_t)UINT32_C(0x8002000c))
 #define BLOCK UINT64_C(0x10000)
@@ -134,7 +133,3 @@ void runtime_mempool_report(void) {
            s_c_expands,s_cb_expanded,s_c_reserves,s_c_commits,s_c_decommits,s_cb_expanded-s_cb_free);
     runtime_exception_unlock(&s_lock);
 }
-#else
-uintptr_t runtime_mempool_resolve(const char *name) { (void)name; return 0; }
-void runtime_mempool_report(void) {}
-#endif

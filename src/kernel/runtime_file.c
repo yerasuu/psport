@@ -9,7 +9,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
-#ifndef _WIN32
 #include <errno.h>
 #include <limits.h>
 #include <pthread.h>
@@ -1012,7 +1011,8 @@ int runtime_file_ready(int h_fd,uint64_t serial,int is_write,int64_t *p_out_data
     } else if (is_open) {
         unsigned events=0;
         const unsigned wanted=is_write ? PS_HOST_POLL_OUT : PS_HOST_POLL_IN;
-        const int e=ps_host_fs_poll(p_file->host,wanted,&events,p_out_data);
+        const int e=p_file->is_socket ? ps_host_net_ready(p_file->host,wanted,&events,p_out_data)
+                                       : ps_host_fs_poll(p_file->host,wanted,&events,p_out_data);
         *p_out_is_eof=!e && (events&PS_HOST_POLL_HANGUP)!=0;
         result=e ? -e : (events&(wanted|PS_HOST_POLL_HANGUP|PS_HOST_POLL_ERROR))!=0;
     }
@@ -1054,9 +1054,3 @@ void runtime_file_unmounted_report(void) {
         if (used>0 && ps_host_fs_write(1,sz_line,(size_t)used)<0) return;
     }
 }
-#else
-uintptr_t runtime_file_resolve(const char *name) { (void)name; return 0; }
-void runtime_file_report(void) {}
-void runtime_file_unmounted_report(void) {}
-void runtime_file_configure(const char *a,const char *u) { (void)a; (void)u; }
-#endif

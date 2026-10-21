@@ -110,6 +110,12 @@ int ps_host_fs_stat_file(int h_file, PsHostStat *p_out) {
     return 0;
 }
 
+int ps_host_fs_stat_stream(FILE *p_stream, PsHostStat *p_out) { return ps_host_fs_stat_file(fileno(p_stream), p_out); }
+
+int ps_host_fs_sync_stream(FILE *p_stream) { return ps_host_fs_sync(fileno(p_stream)); }
+
+int ps_host_fs_truncate_stream(FILE *p_stream, int64_t cb_file) { return ps_host_fs_truncate(fileno(p_stream), cb_file); }
+
 int ps_host_fs_access(const char *sz_path, int mode) { return access(sz_path, mode) ? errno : 0; }
 
 int ps_host_fs_make_dir(const char *sz_path, unsigned mode) { return mkdir(sz_path, (mode_t)mode) ? errno : 0; }

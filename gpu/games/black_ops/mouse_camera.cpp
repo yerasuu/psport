@@ -21,7 +21,6 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
-#include <csetjmp>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -203,8 +202,8 @@ void NoteFailure(std::atomic<u64>& c_failures, const char* sz_what, i32 counts_x
 /// Adds value to the guest's int at va atomically (the game's thread may flip and zero it at the
 /// same time); *p_out_sum is what it holds after. False where nothing is mapped.
 bool Add(u64 va, i32 value, i32* p_out_sum) {
-    sigjmp_buf recover;
-    if (sigsetjmp(recover, 0)) {
+    PsHostRecoveryPoint recover;
+    if (PS_HOST_RECOVERY_SET(recover)) {
         g_p_runtime_fault_recover = nullptr;
         return false;
     }

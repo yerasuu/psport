@@ -6,7 +6,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <inttypes.h>
-#ifndef _WIN32
 #include <errno.h>
 #include <pthread.h>
 #include <signal.h>
@@ -99,17 +98,15 @@ static void *worker(void *p_unused) {
 }
 /* Lock held. The workers take only fault signals: the guest's own signals go to its threads. */
 static void start_workers(void) {
-    sigset_t all, previous;
-    sigfillset(&all);
-    sigdelset(&all,SIGSEGV); sigdelset(&all,SIGBUS); sigdelset(&all,SIGILL); sigdelset(&all,SIGFPE);
-    pthread_sigmask(SIG_SETMASK,&all,&previous);
+    PsHostInterruptMask previous;
+    ps_host_interrupts_hold(1,&previous);
     for (; s_c_workers<WORKERS; ++s_c_workers) {
         pthread_t thread;
         int e=pthread_create(&thread,NULL,worker,NULL);
         if (e) { fprintf(stderr,"STOP: aio worker pthread_create failed: %d\n",e); runtime_stop(21); }
         pthread_detach(thread);
     }
-    pthread_sigmask(SIG_SETMASK,&previous,NULL);
+    ps_host_interrupts_restore(&previous);
 }
 
 /* Lock held; live leaves room for it. */
@@ -301,7 +298,3 @@ void runtime_aio_report(void) {
            s_c_submissions,s_c_commands,s_c_failures,s_cb_read,s_cb_written,s_c_cancels,s_c_deletes,s_c_timeouts,s_c_live);
     runtime_exception_unlock(&s_lock);
 }
-#else
-uintptr_t runtime_aio_resolve(const char *name) { (void)name; return 0; }
-void runtime_aio_report(void) {}
-#endif

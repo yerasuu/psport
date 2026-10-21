@@ -9,7 +9,6 @@
 #include <sched.h>
 #include <pthread.h>
 #include <unistd.h>
-#include <elf.h>
 
 typedef struct {
     union { GuestCallback pfn_plain; void (ABI *pfn_with_arg)(void *); } callback;
@@ -47,10 +46,9 @@ void runtime_set_procparam(void *p_param) {
     printf("\n");
 }
 static ABI void *guest_procparam(void) { return s_p_process_param; }
-static void **s_pp_application_heap_api;
+/* The game's own allocator for the system libraries to use; the runtime's never call it. */
 static ABI void guest_set_heap_api(void **pp_api) {
-    s_pp_application_heap_api=pp_api;
-    puts("Runtime: application heap API registered");
+    printf("Runtime: application heap API registered at %p, not used by the runtime\n",(void *)pp_api);
 }
 void runtime_set_module_tls(uint64_t module, const void *p_data, uint64_t filesz, uint64_t memsz) {
     if (module<2 || module>=TLS_MODULES) { fputs("STOP: unsupported TLS module id\n",stderr); runtime_stop(21); }
@@ -164,14 +162,17 @@ void runtime_finalize(void *p_dso) {
     }
 }
 static ABI void guest_finalize(void *p_dso) { runtime_finalize(p_dso); }
+/* ELF's 64-bit program header, the guest's own format whatever the host's executables are. */
+typedef struct { uint32_t p_type, p_flags; uint64_t p_offset, p_vaddr, p_paddr, p_filesz, p_memsz, p_align; } GuestPhdr;
+enum { GUEST_PT_LOAD = 1, GUEST_PF_X = 1 };
 /* FreeBSD's struct dl_phdr_info, as libc's __cxa_finalize hands it over for an object it unloads. */
-typedef struct { uint64_t va_dlpi; const char *sz_dlpi_name; const Elf64_Phdr *p_dlpi_phdr; uint16_t dlpi_phnum; } PhdrInfo;
+typedef struct { uint64_t va_dlpi; const char *sz_dlpi_name; const GuestPhdr *p_dlpi_phdr; uint16_t dlpi_phnum; } PhdrInfo;
 /* Whether the address lies in one of the object's executable segments, as FreeBSD's libc answers it. */
 static ABI int32_t guest_phdr_match_address(const PhdrInfo *p_info, const void *p_code) {
     const uintptr_t va_code=(uintptr_t)p_code;
     for (uint16_t i=0;i<p_info->dlpi_phnum;++i) {
-        const Elf64_Phdr *p_segment=&p_info->p_dlpi_phdr[i];
-        if (p_segment->p_type!=PT_LOAD || !(p_segment->p_flags&PF_X)) continue;
+        const GuestPhdr *p_segment=&p_info->p_dlpi_phdr[i];
+        if (p_segment->p_type!=GUEST_PT_LOAD || !(p_segment->p_flags&GUEST_PF_X)) continue;
         const uintptr_t va_start=p_info->va_dlpi+p_segment->p_vaddr;
         if (va_start<=va_code && va_code+sizeof(p_code)<va_start+p_segment->p_memsz) return 1;
     }

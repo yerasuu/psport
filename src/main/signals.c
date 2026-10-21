@@ -22,7 +22,6 @@ static void write_report(const char *p_text, size_t cb_text) {
     }
     (void)ps_host_fs_write(h_faults, p_text, cb_text);
 }
-#ifndef _WIN32
 static void dump_frames(const PsHostFaultContext *p_context);
 typedef struct { uintptr_t va; int is_found; } MappingSearch;
 static int write_mapping_of(const PsHostMapping *p_mapping, void *p_context) {
@@ -224,7 +223,6 @@ static int fault(PsHostFaultContext *p_context) {
     runtime_debug_finish("fault", 128 + sig);
     _exit(128 + sig);
 }
-#endif
 /* Watchdog: dump RIP and the rbp frame chain of every thread (guest offsets when inside the
  * image). Reads go through runtime_memory_read_guest_signal so bad frames cannot fault. */
 static uintptr_t s_exe_base;
@@ -265,7 +263,6 @@ static void watchdog(PsHostFaultContext *p_context) {
     runtime_debug_finish("watchdog timeout", 128 + ps_host_fault_signal(p_context));
     _exit(128 + ps_host_fault_signal(p_context));
 }
-#ifndef _WIN32
 void install_fault_handlers(unsigned timeout_seconds) {
     static const PsHostFaultKind s_kinds[] = {PS_HOST_FAULT_ACCESS, PS_HOST_FAULT_ILLEGAL, PS_HOST_FAULT_BUS,
                                               PS_HOST_FAULT_ARITHMETIC};
@@ -284,4 +281,3 @@ static void report_termination(int sig) {
     runtime_debug_finish("termination signal", 128 + sig);
 }
 void install_shutdown_signals(void) { ps_host_on_termination(report_termination); }
-#endif

@@ -5,7 +5,6 @@
 #include "runtime.h"
 #include <stdio.h>
 #include <string.h>
-#ifndef _WIN32
 
 /* ---- libSceRemoteplay ---- */
 #define REMOTEPLAY_INVALID_ARGUMENT ((int32_t)0x80B10002)
@@ -37,13 +36,13 @@ static ABI int32_t video_recording_status(void) { return VIDEO_RECORDING_STATUS_
 
 /* ---- libSceCoredump ---- */
 typedef int32_t (ABI *CoredumpHandler)(void *);
-static CoredumpHandler s_pfn_coredump_handler;
+/* A console calls the handler only while it writes a core dump, which psport never does. */
 static ABI int32_t coredump_register_handler(CoredumpHandler pfn_handler,uint64_t cb_stack,void *p_argument) {
     (void)cb_stack; (void)p_argument;
-    s_pfn_coredump_handler=pfn_handler;
+    printf("Coredump: handler %p registered; psport writes no core dumps, so it is never called\n",(void *)pfn_handler);
     return 0;
 }
-static ABI int32_t coredump_unregister_handler(void) { s_pfn_coredump_handler=NULL; return 0; }
+static ABI int32_t coredump_unregister_handler(void) { return 0; }
 /* Only a running handler writes, and none runs without a debugger: the data is dropped. */
 static ABI int64_t coredump_write_user_data(const void *p_data,uint64_t cb_data) { (void)p_data; return (int64_t)cb_data; }
 static ABI int32_t coredump_attach_user_file(uint64_t id,const char *sz_path) { (void)id; (void)sz_path; return 0; }
@@ -75,6 +74,3 @@ static const RuntimeExport s_exports[]={
     {"sceCoredumpDebugTextOut",coredump_debug_text_out},
 };
 uintptr_t runtime_capture_resolve(const char *sz_name) { return RUNTIME_LOOKUP(s_exports,sz_name); }
-#else
-uintptr_t runtime_capture_resolve(const char *sz_name) { (void)sz_name; return 0; }
-#endif

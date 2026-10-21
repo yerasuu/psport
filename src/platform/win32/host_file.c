@@ -188,6 +188,7 @@ int ps_host_fs_open(const char *sz_path, unsigned flags, unsigned mode) {
 }
 
 int ps_host_fs_close(int h_file) {
+    if (h_file >= PS_WIN32_SECTION_BASE) return ps_win32_section_close(h_file);
     if (!is_valid_descriptor(h_file)) return EBADF;
     ensure_stdio();
     AcquireSRWLockExclusive(&s_lock);
@@ -297,6 +298,78 @@ int ps_host_fs_sync(int h_file) {
     return FlushFileBuffers(descriptor.h_handle) ? 0 : ps_win32_errno(GetLastError());
 }
 
+int ps_host_fs_sync_data(int h_file) { return ps_host_fs_sync(h_file); }
+
+int ps_host_fs_pipe(int p_out_h_files[2]) {
+    HANDLE h_read, h_write;
+    if (!CreatePipe(&h_read, &h_write, NULL, 0)) return ps_win32_errno(GetLastError());
+    const int h_read_file = ps_win32_fd_adopt(h_read, PS_HOST_OPEN_READ);
+    if (h_read_file < 0) {
+        CloseHandle(h_write);
+        return -h_read_file;
+    }
+    const int h_write_file = ps_win32_fd_adopt(h_write, PS_HOST_OPEN_WRITE);
+    if (h_write_file < 0) {
+        (void)ps_host_fs_close(h_read_file);
+        return -h_write_file;
+    }
+    p_out_h_files[0] = h_read_file;
+    p_out_h_files[1] = h_write_file;
+    return 0;
+}
+
+/* LockFileEx over the whole file stands in for flock. Unlike flock's advisory locks, Windows' are
+ * mandatory: other handles' reads and writes of a locked range fail while it is held. A change
+ * between shared and exclusive lets the old lock go first, as flock's conversion is not atomic
+ * either. A lock held elsewhere reads as EAGAIN, which is Linux's EWOULDBLOCK. */
+int ps_host_fs_lock(int h_file, unsigned operation) {
+    Descriptor descriptor;
+    if (descriptor_get(h_file, &descriptor)) return EBADF;
+    OVERLAPPED whole = {0};
+    if (!UnlockFileEx(descriptor.h_handle, 0, MAXDWORD, MAXDWORD, &whole) && GetLastError() != ERROR_NOT_LOCKED)
+        return ps_win32_errno(GetLastError());
+    if (operation & PS_HOST_LOCK_UNLOCK) return 0;
+    const DWORD flags = (operation & PS_HOST_LOCK_EXCLUSIVE ? LOCKFILE_EXCLUSIVE_LOCK : 0) |
+                        (operation & PS_HOST_LOCK_NONBLOCK ? LOCKFILE_FAIL_IMMEDIATELY : 0);
+    whole = (OVERLAPPED){0};
+    if (LockFileEx(descriptor.h_handle, flags, 0, MAXDWORD, MAXDWORD, &whole)) return 0;
+    const DWORD error = GetLastError();
+    return error == ERROR_LOCK_VIOLATION || error == ERROR_IO_PENDING ? EAGAIN : ps_win32_errno(error);
+}
+
+/* Anonymous pipes say how much a read gets (PeekNamedPipe) but not a write's room, and a write end
+ * cannot see its reader gone until it writes; disk files are always ready, a console's input when
+ * its handle is signalled. */
+int ps_host_fs_poll(int h_file, unsigned events, unsigned *p_out_events, int64_t *p_out_cb_ready) {
+    Descriptor descriptor;
+    if (descriptor_get(h_file, &descriptor)) return EBADF;
+    *p_out_events = 0;
+    *p_out_cb_ready = 0;
+    switch (descriptor.type) {
+    case FILE_TYPE_PIPE:
+        if (descriptor.access & GENERIC_READ) {
+            DWORD cb_available = 0;
+            if (!PeekNamedPipe(descriptor.h_handle, NULL, 0, NULL, &cb_available, NULL)) {
+                const DWORD error = GetLastError();
+                if (error != ERROR_BROKEN_PIPE) return ps_win32_errno(error);
+                *p_out_events |= PS_HOST_POLL_HANGUP;
+            } else if (cb_available && events & PS_HOST_POLL_IN) {
+                *p_out_events |= PS_HOST_POLL_IN;
+                *p_out_cb_ready = cb_available;
+            }
+        }
+        if (descriptor.access & GENERIC_WRITE) *p_out_events |= events & PS_HOST_POLL_OUT;
+        return 0;
+    case FILE_TYPE_CHAR:
+        if (events & PS_HOST_POLL_IN && descriptor.access & GENERIC_READ &&
+            WaitForSingleObject(descriptor.h_handle, 0) == WAIT_OBJECT_0)
+            *p_out_events |= PS_HOST_POLL_IN;
+        if (descriptor.access & GENERIC_WRITE) *p_out_events |= events & PS_HOST_POLL_OUT;
+        return 0;
+    default: *p_out_events = events & (PS_HOST_POLL_IN | PS_HOST_POLL_OUT); return 0;
+    }
+}
+
 static int set_size(HANDLE h_handle, int64_t cb_file) {
     FILE_END_OF_FILE_INFO end = {.EndOfFile.QuadPart = cb_file};
     return SetFileInformationByHandle(h_handle, FileEndOfFileInfo, &end, sizeof(end)) ? 0
@@ -404,6 +477,27 @@ int ps_host_fs_stat_file(int h_file, PsHostStat *p_out) {
 
 /* Only the read-only attribute denies anything Windows' permission bits would: write access to a
  * read-only file. */
+static HANDLE stream_handle(FILE *p_stream) {
+    const intptr_t h_handle = _get_osfhandle(_fileno(p_stream));
+    return h_handle == -1 ? NULL : (HANDLE)h_handle;
+}
+
+int ps_host_fs_stat_stream(FILE *p_stream, PsHostStat *p_out) {
+    const HANDLE h_handle = stream_handle(p_stream);
+    return h_handle ? stat_handle(h_handle, p_out) : EBADF;
+}
+
+int ps_host_fs_sync_stream(FILE *p_stream) {
+    const HANDLE h_handle = stream_handle(p_stream);
+    if (!h_handle) return EBADF;
+    return FlushFileBuffers(h_handle) ? 0 : ps_win32_errno(GetLastError());
+}
+
+int ps_host_fs_truncate_stream(FILE *p_stream, int64_t cb_file) {
+    const HANDLE h_handle = stream_handle(p_stream);
+    return h_handle ? set_size(h_handle, cb_file) : EBADF;
+}
+
 int ps_host_fs_access(const char *sz_path, int mode) {
     wchar_t sz_wide[PS_WIN32_PATH_MAX];
     const int error = wide_path(sz_path, sz_wide, PS_WIN32_PATH_MAX);

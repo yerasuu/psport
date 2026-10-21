@@ -480,6 +480,36 @@ static int interrupt_self(PsHostInterrupt interrupt) {
     return 0;
 }
 
+/* Runs what came while held and is open now, as unblocking a pending signal delivers it. */
+static void deliver_pending(ThreadState *p_state) {
+    for (int interrupt = 0; interrupt < PS_HOST_INTERRUPT_COUNT; ++interrupt) {
+        const unsigned bit = 1u << interrupt;
+        if (!(atomic_load(&p_state->held) & bit) && (atomic_fetch_and(&p_state->pending, ~bit) & bit))
+            interrupt_self((PsHostInterrupt)interrupt);
+    }
+}
+
+/* A thread's state starts with nothing held: Windows passes no mask to the threads it creates. */
+void ps_host_interrupts_hold(int is_holding_all, PsHostInterruptMask *p_out_previous) {
+    ThreadState *p_state = state_of_self();
+    unsigned previous = 0;
+    if (p_state) {
+        previous = atomic_exchange(&p_state->held, is_holding_all ? (1u << PS_HOST_INTERRUPT_COUNT) - 1 : 0u);
+        if (!is_holding_all) deliver_pending(p_state);
+    }
+    if (p_out_previous) {
+        memset(p_out_previous, 0, sizeof(*p_out_previous));
+        p_out_previous->opaque[0] = previous;
+    }
+}
+
+void ps_host_interrupts_restore(const PsHostInterruptMask *p_mask) {
+    ThreadState *p_state = state_of_self();
+    if (!p_state) return;
+    atomic_store(&p_state->held, (unsigned)p_mask->opaque[0]);
+    deliver_pending(p_state);
+}
+
 /* The thread is suspended and redirected to the interrupt's entry stub; one held there stays
  * pending. A thread waiting on an address is woken (a spurious wake, which futex allows) so that
  * the interrupt runs now, as SA_RESTART does on Linux; other blocking calls run it when they

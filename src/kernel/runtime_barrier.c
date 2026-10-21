@@ -5,7 +5,6 @@
 #include "runtime.h"
 #include <stdio.h>
 #include <stdlib.h>
-#ifndef _WIN32
 #include <pthread.h>
 #include <errno.h>
 #define ERR(n) ((int32_t)(UINT32_C(0x80020000)|(n)))
@@ -47,11 +46,7 @@ static ABI int32_t barrier_init(Barrier **pp_out_barrier,BarrierAttributes **pp_
     if (!pp_out_barrier || (pp_attributes && !*pp_attributes) || !c_threads) return ERR(EINVAL);
     Barrier *p_barrier=calloc(1,sizeof(*p_barrier));
     if (!p_barrier) return ERR(ENOMEM);
-    pthread_condattr_t cond_attributes;
-    pthread_condattr_init(&cond_attributes);
-    pthread_condattr_setclock(&cond_attributes,CLOCK_MONOTONIC);
-    pthread_cond_init(&p_barrier->released,&cond_attributes);
-    pthread_condattr_destroy(&cond_attributes);
+    pthread_cond_init(&p_barrier->released,NULL);
     p_barrier->c_threads=c_threads;
     runtime_exception_lock(&s_lock);
     p_barrier->p_next=s_p_registry; s_p_registry=p_barrier; ++s_c_created;
@@ -138,7 +133,3 @@ void runtime_barrier_report(void) {
     if (s_c_created) printf("Runtime: barriers created=%zu, waits=%zu, releases=%zu\n",s_c_created,s_c_waits,s_c_releases);
     runtime_exception_unlock(&s_lock);
 }
-#else
-uintptr_t runtime_barrier_resolve(const char *sz_name) { (void)sz_name; return 0; }
-void runtime_barrier_report(void) {}
-#endif

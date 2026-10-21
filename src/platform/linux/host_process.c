@@ -3,6 +3,7 @@
 #include "ps_host.h"
 #include <errno.h>
 #include <fcntl.h>
+#include <ftw.h>
 #include <linux/close_range.h>
 #include <poll.h>
 #include <signal.h>
@@ -61,6 +62,49 @@ int ps_host_exec_self(char *const *pp_argv) {
     }
     execv("/proc/self/exe", pp_argv);
     return errno;
+}
+
+static int remove_entry(const char *sz_path, const struct stat *p_stat, int type, struct FTW *p_ftw) {
+    (void)p_stat;
+    (void)p_ftw;
+    return type == FTW_DP ? ps_host_fs_remove_dir(sz_path) : ps_host_fs_remove(sz_path);
+}
+
+/* A process of its own outlives this one whichever way it ends (a fault, SIGKILL, an exec into
+ * run.sh for a restart): it waits for the pipe's write end, which only this process holds, to
+ * close. */
+int ps_host_remove_tree_at_exit(const char *sz_path) {
+    int pipe_fds[2];
+    if (pipe2(pipe_fds, O_CLOEXEC)) return errno;
+    const pid_t pid = fork();
+    if (pid < 0) {
+        const int error = errno;
+        close(pipe_fds[0]);
+        close(pipe_fds[1]);
+        return error;
+    }
+    if (pid) {
+        close(pipe_fds[0]);
+        return 0;
+    }
+    /* It keeps none of this process's descriptors (a launcher's log pipe would stay open), has a
+     * name of its own, so counting psport processes leaves it out, and a session of its own:
+     * signals for psport or its process group (the terminal's, a launcher stopping the game) must
+     * not end it before psport. */
+    const int h_watch = fcntl(pipe_fds[0], F_DUPFD, 3), h_null = open("/dev/null", O_RDWR);
+    if (h_watch < 0 || h_null < 0) _exit(1);
+    for (int h_fd = 0; h_fd < 3; ++h_fd) dup2(h_null, h_fd);
+    ps_host_close_from(3, h_watch - 1, 0);
+    ps_host_close_from(h_watch + 1, -1, 0);
+    prctl(PR_SET_NAME, "mod-view-clean");
+    setsid();
+    signal(SIGINT, SIG_IGN);
+    signal(SIGTERM, SIG_IGN);
+    signal(SIGHUP, SIG_IGN);
+    char byte;
+    while (read(h_watch, &byte, 1) < 0 && errno == EINTR) {}
+    nftw(sz_path, remove_entry, 16, FTW_DEPTH | FTW_PHYS);
+    _exit(0);
 }
 
 static void (*s_pfn_exit)(int status);

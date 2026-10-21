@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
 #ifndef PS_VERSION
 #define PS_VERSION "unknown"
@@ -20,8 +21,6 @@
 #define PS_COMMIT ""
 #endif
 
-#ifndef _WIN32
-extern char **environ;
 
 enum { DEBUG_KEEP_DEFAULT = 20, DEBUG_TAIL_LINES = 40, DEBUG_SERIAL_MAX = 40 };
 static char s_sz_run_dir[4352];
@@ -336,7 +335,7 @@ void runtime_debug_start(char **pp_argv, const char *sz_serial) {
     /* The GPU library's initializers read PS_FRAME_STATS before main: set, the process starts
      * again (as accept_deprecated_names does for BB_* names). */
     if (!getenv("PS_FRAME_STATS")) {
-        setenv("PS_FRAME_STATS", "1", 0);
+        ps_host_env_set("PS_FRAME_STATS", "1", 0);
         ps_host_exec_self(pp_argv);
         printf("Debug: restart with PS_FRAME_STATS=1 failed (%s): GPU frame statistics stay off\n", strerror(errno));
     }
@@ -411,12 +410,3 @@ void runtime_debug_finish(const char *sz_how, int exit_code) {
     for (size_t i = 0; i < sizeof(s_psport_files) / sizeof(*s_psport_files); ++i) publish(s_psport_files[i]);
     if (!s_is_tee_active) publish("summary.txt");
 }
-#else
-void runtime_debug_start(char **pp_argv, const char *sz_serial) {
-    (void)pp_argv; (void)sz_serial;
-    if (runtime_env_flag("PS_DEBUG", 0)) puts("Debug: debug mode is not implemented on this host");
-}
-int runtime_debug_open(const char *sz_name) { (void)sz_name; return -1; }
-void runtime_debug_note_calls(const char *sz_line) { (void)sz_line; }
-void runtime_debug_finish(const char *sz_how, int exit_code) { (void)sz_how; (void)exit_code; }
-#endif

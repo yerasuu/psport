@@ -141,6 +141,25 @@ int ps_host_interrupt_install(PsHostInterrupt interrupt, PsHostInterruptHandler 
     return sigaction(ps_host_interrupt_signal(interrupt), &action, NULL) ? errno : 0;
 }
 
+_Static_assert(sizeof(sigset_t) <= sizeof(((PsHostInterruptMask *)0)->opaque), "sigset_t fits PsHostInterruptMask");
+void ps_host_interrupts_hold(int is_holding_all, PsHostInterruptMask *p_out_previous) {
+    sigset_t held, previous;
+    if (is_holding_all) {
+        sigfillset(&held);
+        for (int i = 0; i < PS_HOST_FAULT_KIND_COUNT; ++i) sigdelset(&held, s_fault_signals[i]);
+    } else {
+        sigemptyset(&held);
+    }
+    pthread_sigmask(SIG_SETMASK, &held, &previous);
+    if (p_out_previous) memcpy(p_out_previous->opaque, &previous, sizeof(previous));
+}
+
+void ps_host_interrupts_restore(const PsHostInterruptMask *p_mask) {
+    sigset_t mask;
+    memcpy(&mask, p_mask->opaque, sizeof(mask));
+    pthread_sigmask(SIG_SETMASK, &mask, NULL);
+}
+
 int ps_host_interrupt_thread(int32_t tid, PsHostInterrupt interrupt) {
     return syscall(SYS_tgkill, getpid(), (pid_t)tid, ps_host_interrupt_signal(interrupt)) ? errno : 0;
 }

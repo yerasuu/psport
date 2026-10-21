@@ -5,7 +5,6 @@
 #include "runtime.h"
 #include <stdio.h>
 #include <string.h>
-#ifndef _WIN32
 #include <pthread.h>
 #define ERR(n) ((int32_t)(UINT32_C(0x80020000)|(n)))
 #define SCHED_FIFO_GUEST 1 /* FreeBSD numbering: 1 FIFO, 2 OTHER, 3 RR; scePthreadAttrInit's default */
@@ -85,6 +84,3 @@ static const RuntimeExport s_exports[]={
     {"scePthreadGetname",get_name},
 };
 uintptr_t runtime_sched_resolve(const char *sz_name) { return RUNTIME_LOOKUP(s_exports,sz_name); }
-#else
-uintptr_t runtime_sched_resolve(const char *name) { (void)name; return 0; }
-#endif

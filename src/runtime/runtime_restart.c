@@ -6,11 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#ifndef _WIN32
-#include <pthread.h>
-#include <signal.h>
 #include <unistd.h>
-#endif
 
 /* Restarts the game through run.sh (the settings menu: a new render resolution is a patch
  * applied at start). Descriptors are closed first so the old GPU device and its memory are
@@ -24,7 +20,6 @@ void runtime_restart(void) {
      * closed below, and an assertion there must not end the process (exit 23) before exec. */
     runtime_restarting = 1;
     __sync_synchronize();
-#ifndef _WIN32
     runtime_debug_finish("restart through run.sh", 0);
     ps_host_output_untee();
     ps_host_close_from(3, -1, 0);
@@ -32,7 +27,6 @@ void runtime_restart(void) {
     ps_host_exec("bash", pp_argv);
     perror("runtime_restart: exec");
     _exit(1);
-#endif
 }
 static char **s_pp_argv;
 static int s_c_argv;
@@ -43,7 +37,6 @@ void runtime_restart_configure(int c_argv, char **pp_argv) {
 /* Descriptors are only marked close-on-exec, unlike a restart, so that a failed exec leaves the
  * application running; the old GPU device is released all the same before the new image starts. */
 void runtime_load_exec(const char *sz_path, char *const *pp_arguments) {
-#ifndef _WIN32
     size_t c_arguments = 0;
     while (pp_arguments && pp_arguments[c_arguments]) ++c_arguments;
     char **pp_argv = calloc((size_t)s_c_argv + 2 * c_arguments + 3, sizeof(*pp_argv));
@@ -67,15 +60,11 @@ void runtime_load_exec(const char *sz_path, char *const *pp_arguments) {
     fflush(NULL);
     ps_host_output_untee();
     /* The calling thread's signal mask outlives the exec and would be the new main thread's. */
-    sigset_t none, previous;
-    sigemptyset(&none);
-    pthread_sigmask(SIG_SETMASK, &none, &previous);
+    PsHostInterruptMask previous;
+    ps_host_interrupts_hold(0, &previous);
     ps_host_close_from(3, -1, 1);
     ps_host_exec_self(pp_argv);
     perror("runtime_load_exec: exec");
-    pthread_sigmask(SIG_SETMASK, &previous, NULL);
+    ps_host_interrupts_restore(&previous);
     free(pp_argv);
-#else
-    (void)sz_path; (void)pp_arguments;
-#endif
 }

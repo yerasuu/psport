@@ -22,7 +22,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#ifndef _WIN32
 #include <pthread.h>
 #include <sys/stat.h>
 #include <time.h>
@@ -197,7 +196,8 @@ static void create_figure(Figure *p_figure) {
 static void make_toypad_directory(void) {
     char sz_path[512];
     snprintf(sz_path,sizeof(sz_path),"%s/toypad",runtime_file_user_dir());
-    if (mkdir(sz_path,0755) && errno!=EEXIST) printf("Runtime: toypad: cannot create %s: %s\n",sz_path,strerror(errno));
+    const int error=ps_host_fs_make_dir(sz_path,0755);
+    if (error && error!=EEXIST) printf("Runtime: toypad: cannot create %s: %s\n",sz_path,strerror(error));
 }
 static void format_figure_path(const Figure *p_figure, char *sz_out, size_t cb_out) {
     snprintf(sz_out,cb_out,"%s/toypad/%u-%u.bin",runtime_file_user_dir(),p_figure->id,p_figure->copy);
@@ -504,13 +504,13 @@ static void sync_figures_locked(void) {
     const uint64_t now_ns=ps_host_time_monotonic_ns();
     if (now_ns-s_last_check_ns<300000000u) return;
     s_last_check_ns=now_ns;
-    struct stat st;
-    const int has_file=stat(s_sz_figures_file,&st)==0;
-    if (has_file==s_had_file && (!has_file || (st.st_mtim.tv_sec==s_last_mtime.tv_sec && st.st_mtim.tv_nsec==s_last_mtime.tv_nsec)))
+    PsHostStat st;
+    const int has_file=ps_host_fs_stat(s_sz_figures_file,&st)==0;
+    if (has_file==s_had_file && (!has_file || (st.mtime.tv_sec==s_last_mtime.tv_sec && st.mtime.tv_nsec==s_last_mtime.tv_nsec)))
         return;
     if (s_had_file<0 && !has_file) printf("Runtime: toypad: no figures file yet (%s): the pad is empty\n",s_sz_figures_file);
     s_had_file=has_file;
-    if (has_file) s_last_mtime=st.st_mtim;
+    if (has_file) s_last_mtime=st.mtime;
     WantedFigure wanted[SLOTS];
     unsigned c_wanted=0;
     if (has_file) {
@@ -677,9 +677,3 @@ void runtime_toypad_report(void) {
            __atomic_load_n(&s_c_commands,__ATOMIC_RELAXED),__atomic_load_n(&s_c_unknown_commands,__ATOMIC_RELAXED),
            __atomic_load_n(&s_c_figure_reports,__ATOMIC_RELAXED),__atomic_load_n(&s_c_dropped,__ATOMIC_RELAXED));
 }
-#else
-uintptr_t runtime_toypad_resolve(const char *sz_name) { (void)sz_name; return 0; }
-const char *runtime_toypad_file(void) { return NULL; }
-void runtime_toypad_lights(uint32_t p_out_colours[3]) { memset(p_out_colours,0,3*sizeof(*p_out_colours)); }
-void runtime_toypad_report(void) {}
-#endif

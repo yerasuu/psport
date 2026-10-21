@@ -7,7 +7,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#ifndef _WIN32
 #include <pthread.h>
 #include <sched.h>
 #include <signal.h>
@@ -42,8 +41,11 @@ typedef struct GuestThread {
     ThreadAttr attr;
     char name[32];
     int detached, finished, joined, host_owned, is_cancel_requested;
-    /* The creator's signal mask, which the thread takes once its TCB is in place. */
-    sigset_t start_mask;
+    /* The creator's interrupt mask, which the thread takes once its TCB is in place. */
+    PsHostInterruptMask start_mask;
+    /* Known once the TCB is in place; interrupts sent before then wait in early_interrupts. */
+    int32_t tid;
+    unsigned early_interrupts;
     jmp_buf exit_jump;
     struct GuestThread *next;
 } GuestThread;
@@ -78,8 +80,10 @@ static void record_stack(GuestThread *p_thread) {
 static void attach(GuestThread *p_thread) {
     uint64_t off_tls=tls_offset();
     size_t cb_block=off_tls+256;
-    unsigned char *p_block=aligned_alloc(64,(cb_block+63)&~(size_t)63);
-    if (!p_block) { fputs("Cannot allocate guest TLS\n",stderr); exit(1); }
+    /* Never freed, so aligned by hand: UCRT has no aligned_alloc whose memory free() takes. */
+    unsigned char *p_raw=malloc(cb_block+63);
+    if (!p_raw) { fputs("Cannot allocate guest TLS\n",stderr); exit(1); }
+    unsigned char *p_block=(unsigned char *)(((uintptr_t)p_raw+63)&~(uintptr_t)63);
     memset(p_block,0,cb_block);
     if (s_tls_filesz) memcpy(p_block,s_p_tls_template,s_tls_filesz);
     uint64_t *p_tcb=(uint64_t *)(p_block+off_tls);
@@ -131,7 +135,7 @@ GuestThread *runtime_thread_current(void) {
     if (s_p_current) return s_p_current;
     GuestThread *p_thread=new_thread();
     if (!p_thread) { fputs("Cannot allocate guest thread\n",stderr); exit(1); }
-    p_thread->host=pthread_self(); p_thread->host_owned=1;
+    p_thread->host=pthread_self(); p_thread->host_owned=1; p_thread->tid=ps_host_thread_id();
     snprintf(p_thread->name,sizeof(p_thread->name),"host");
     attach(p_thread); record_stack(p_thread); publish(p_thread);
     return p_thread;
@@ -157,13 +161,18 @@ static GuestThread *find_thread(void *p_handle) {
     runtime_exception_unlock(&s_lock);
     return p_found;
 }
-/* Under the table's lock, so the host thread cannot be joined and its pthread_t reused between
+/* Under the table's lock, so the host thread cannot be joined and its id reused between
  * the lookup and the kill. */
-int32_t runtime_thread_kill(void *p_handle, int host_signal) {
+int32_t runtime_thread_kill(void *p_handle, PsHostInterrupt interrupt) {
     int e=ESRCH;
     runtime_exception_lock(&s_lock);
-    for (GuestThread *p_thread=s_p_threads;p_thread;p_thread=p_thread->next)
-        if (p_thread==p_handle) { if (!p_thread->finished && p_thread->host) e=pthread_kill(p_thread->host,host_signal); break; }
+    for (GuestThread *p_thread=s_p_threads;p_thread;p_thread=p_thread->next) {
+        if (p_thread!=p_handle) continue;
+        if (p_thread->finished || !p_thread->host) break;
+        if (p_thread->tid) e=ps_host_interrupt_thread(p_thread->tid,interrupt);
+        else { p_thread->early_interrupts|=1u<<interrupt; e=0; }
+        break;
+    }
     runtime_exception_unlock(&s_lock);
     return e==ESRCH ? ERR(3) : e ? ERR(22) : 0;
 }
@@ -308,7 +317,14 @@ static ABI int32_t attr_get_guard(ThreadAttr **pp_slot,uint64_t *p_size) {
 static void *host_start(void *p_argument) {
     GuestThread *p_thread=p_argument;
     attach(p_thread);
-    pthread_sigmask(SIG_SETMASK,&p_thread->start_mask,NULL);
+    runtime_exception_lock(&s_lock);
+    p_thread->tid=ps_host_thread_id();
+    const unsigned early_interrupts=p_thread->early_interrupts;
+    p_thread->early_interrupts=0;
+    runtime_exception_unlock(&s_lock);
+    ps_host_interrupts_restore(&p_thread->start_mask);
+    for (int interrupt=0;interrupt<PS_HOST_INTERRUPT_COUNT;++interrupt)
+        if (early_interrupts&(1u<<interrupt)) ps_host_interrupt_thread(p_thread->tid,(PsHostInterrupt)interrupt);
     record_stack(p_thread);
     ps_host_thread_set_name(p_thread->name);
     if (!setjmp(p_thread->exit_jump)) p_thread->result=p_thread->entry(p_thread->argument);
@@ -336,11 +352,7 @@ static int32_t create(GuestThread **pp_out,ThreadAttr **pp_attr_slot,GuestEntry 
      * before then would find no TCB. */
     /* Faults stay open: one taken while blocked kills the process instead of reaching the GPU's
      * write tracking (psport_gpu_handle_fault), and pthread_create writes into the guest's stack. */
-    sigset_t all;
-    sigfillset(&all);
-    sigdelset(&all,SIGSEGV); sigdelset(&all,SIGBUS); sigdelset(&all,SIGILL); sigdelset(&all,SIGFPE);
-    sigdelset(&all,SIGTRAP);
-    pthread_sigmask(SIG_SETMASK,&all,&p_thread->start_mask);
+    ps_host_interrupts_hold(1,&p_thread->start_mask);
     int e=EINVAL;
     if (p_thread->attr.p_stack_addr) {
         /* The game's own memory, as the console runs it. glibc keeps its thread record and the
@@ -369,7 +381,7 @@ static int32_t create(GuestThread **pp_out,ThreadAttr **pp_attr_slot,GuestEntry 
         e=pthread_create(&p_thread->host,&host,host_start,p_thread);
     }
     pthread_attr_destroy(&host);
-    pthread_sigmask(SIG_SETMASK,&p_thread->start_mask,NULL);
+    ps_host_interrupts_restore(&p_thread->start_mask);
     if (e) { fprintf(stderr,"STOP: host pthread_create failed: %d\n",e); runtime_stop(21); }
     if (p_thread->detached) pthread_detach(p_thread->host);
     runtime_exception_lock(&s_lock); ++s_c_created; runtime_exception_unlock(&s_lock);
@@ -588,10 +600,3 @@ void runtime_thread_report(void) {
         printf("Runtime: %zu thread records outside low memory (handles above 40 bits)\n",s_c_high_records);
     runtime_exception_unlock(&s_lock);
 }
-#else
-uintptr_t runtime_thread_resolve(const char *name) { (void)name; return 0; }
-void runtime_thread_report(void) {}
-void runtime_thread_attach_main(void) {}
-void runtime_thread_set_stack(void *addr, uint64_t size) { (void)addr; (void)size; }
-void runtime_set_main_tls(const void *d,uint64_t f,uint64_t m,uint64_t a) { (void)d;(void)f;(void)m;(void)a; }
-#endif

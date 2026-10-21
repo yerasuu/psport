@@ -7,7 +7,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#ifndef _WIN32
 
 #define TRP_MAGIC 0xDCA24D00u
 #define CB_TRP_HEADER 0x60
@@ -161,4 +160,3 @@ void trophy_pack_close(TrophyPack *p_pack) {
     p_pack->p_entries = NULL;
     p_pack->c_entries = 0;
 }
-#endif

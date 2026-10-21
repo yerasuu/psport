@@ -9,7 +9,6 @@
 #include <stdatomic.h>
 #include <unistd.h>
 #include <errno.h>
-#ifndef _WIN32
 #define LIMIT 4096
 #define ERR(n) ((int32_t)(UINT32_C(0x80020000)|(n)))
 typedef struct { uint64_t start, cb_block; int type, used; } Block;
@@ -567,4 +566,3 @@ void runtime_memory_flexible_report(void) {
                             __atomic_load_n(&g_cb_flexible,__ATOMIC_RELAXED));
     if (used>0 && ps_host_fs_write(1,sz_line,(size_t)used)<0) return;
 }
-#endif

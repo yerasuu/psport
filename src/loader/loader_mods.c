@@ -9,18 +9,14 @@
 #include "loader.h"
 #include "ps_host.h"
 #include <errno.h>
-#include <fcntl.h>
 #include <ftw.h>
 #include <limits.h>
-#include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
-#include <sys/prctl.h>
 #include <sys/stat.h>
-#include <unistd.h>
 
 typedef struct { char **pp_items; size_t c_items, c_capacity; } Names;
 typedef struct { char sz_relative[PATH_MAX], sz_source[PATH_MAX]; } Replacement;
@@ -457,43 +453,9 @@ static void build_view(Mods *p_mods, const char *sz_game, const char *sz_out_dir
     fprintf(stderr, "Mods: %zu game files replaced, %zu added\n", c_replaced, c_added);
 }
 
-/* A process of its own outlives psport whichever way it ends (a fault, SIGKILL, an exec into
- * run.sh for a restart): it waits for the pipe's write end, which only psport holds, to close. */
 static void remove_when_done(const char *sz_view) {
-    int pipe_fds[2];
-    if (pipe2(pipe_fds, O_CLOEXEC)) {
-        fprintf(stderr, "Mods: %s stays after this run: %s\n", sz_view, strerror(errno));
-        return;
-    }
-    pid_t pid = fork();
-    if (pid < 0) {
-        fprintf(stderr, "Mods: %s stays after this run: %s\n", sz_view, strerror(errno));
-        close(pipe_fds[0]);
-        close(pipe_fds[1]);
-        return;
-    }
-    if (pid) {
-        close(pipe_fds[0]);
-        return;
-    }
-    /* It keeps none of psport's descriptors (the launcher's log pipe would stay open), has a name
-     * of its own, so counting psport processes leaves it out, and a session of its own: signals for
-     * psport or its process group (the terminal's, a launcher stopping the game) must not end it
-     * before psport. */
-    int h_watch = fcntl(pipe_fds[0], F_DUPFD, 3), h_null = open("/dev/null", O_RDWR);
-    if (h_watch < 0 || h_null < 0) _exit(1);
-    for (int h_fd = 0; h_fd < 3; ++h_fd) dup2(h_null, h_fd);
-    ps_host_close_from(3, h_watch - 1, 0);
-    ps_host_close_from(h_watch + 1, -1, 0);
-    prctl(PR_SET_NAME, "mod-view-clean");
-    setsid();
-    signal(SIGINT, SIG_IGN);
-    signal(SIGTERM, SIG_IGN);
-    signal(SIGHUP, SIG_IGN);
-    char byte;
-    while (read(h_watch, &byte, 1) < 0 && errno == EINTR) {}
-    remove_tree(sz_view);
-    _exit(0);
+    const int error = ps_host_remove_tree_at_exit(sz_view);
+    if (error) fprintf(stderr, "Mods: %s stays after this run: %s\n", sz_view, strerror(error));
 }
 
 /* The mods folder as named, without trailing slashes: its last part names a folder that is itself

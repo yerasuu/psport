@@ -4,17 +4,10 @@
  * much to come up for single player. */
 #define _GNU_SOURCE
 #include "runtime.h"
+#include "ps_host_sockets.h"
 #include <stdio.h>
 #include <string.h>
-#ifndef _WIN32
 #include <errno.h>
-#include <poll.h>
-#include <unistd.h>
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <netinet/tcp.h>
-#include <sys/socket.h>
-#include <sys/uio.h>
 
 #define NET_ERR(e) ((int32_t)(UINT32_C(0x80410100)|(uint32_t)(e)))
 #define GUEST_EBADF 9
@@ -38,7 +31,7 @@ _Static_assert(sizeof(GuestSockaddr)==16,"SceNetSockaddrIn layout");
 typedef struct {
     GuestSockaddr *p_name;
     uint32_t cb_name;
-    struct iovec *p_iov;
+    PsHostIoVector *p_iov;
     int32_t c_iov;
     void *p_control;
     uint32_t cb_control;
@@ -89,14 +82,15 @@ static int loopback(const struct sockaddr_in *p_address) { return (ntohl(p_addre
 
 static int64_t do_socket(int family, int type, int protocol) {
     if (family!=AF_INET) return -GUEST_EAFNOSUPPORT;
-    int host_flags=SOCK_CLOEXEC|(type&GUEST_SOCK_NONBLOCK ? SOCK_NONBLOCK : 0);
+    const int is_nonblocking=(type&GUEST_SOCK_NONBLOCK)!=0;
     type&=~(GUEST_SOCK_CLOEXEC|GUEST_SOCK_NONBLOCK);
     /* The P2P types (6 datagram, 10 stream) carry a virtual port the loopback path has no use for. */
     int host_type=type==1 || type==10 ? SOCK_STREAM : type==2 || type==6 ? SOCK_DGRAM : -1;
     if (host_type<0) return -GUEST_EPROTONOSUPPORT;
     int e=ps_host_net_init();
     if (e) return -runtime_guest_errno(e);
-    return adopt(socket(AF_INET,host_type|host_flags,protocol));
+    int h_host=ps_host_net_socket(AF_INET,host_type,protocol,is_nonblocking);
+    return h_host<0 ? -runtime_guest_errno(-h_host) : adopt(h_host);
 }
 static int64_t do_close(int32_t s) {
     if (host_socket(s)<0) return -GUEST_EBADF;
@@ -124,7 +118,8 @@ static int64_t do_connect(int32_t s, const GuestSockaddr *p_addr, uint32_t len) 
     if (h<0) return -GUEST_EBADF;
     if (!host_address(p_addr,len,&a)) return -GUEST_EINVAL;
     if (!loopback(&a)) return -GUEST_ENETUNREACH;
-    return connect(h,(struct sockaddr *)&a,sizeof(a)) ? host_failure() : 0;
+    int e=ps_host_net_connect(h,&a,sizeof(a));
+    return e ? -runtime_guest_errno(e) : 0;
 }
 static int64_t do_listen(int32_t s, int backlog) {
     int h=host_socket(s);
@@ -133,10 +128,12 @@ static int64_t do_listen(int32_t s, int backlog) {
 }
 static int64_t do_accept(int32_t s, GuestSockaddr *p_addr, uint32_t *p_len) {
     struct sockaddr_in a;
-    socklen_t cb_address=sizeof(a);
+    uint32_t cb_address=sizeof(a);
     int h=host_socket(s);
     if (h<0) return -GUEST_EBADF;
-    int64_t accepted=adopt(accept4(h,(struct sockaddr *)&a,&cb_address,SOCK_CLOEXEC));
+    int h_accepted=ps_host_net_accept(h,&a,&cb_address);
+    if (h_accepted<0) return -runtime_guest_errno(-h_accepted);
+    int64_t accepted=adopt(h_accepted);
     if (accepted>=0) guest_address(&a,p_addr,p_len);
     return accepted;
 }
@@ -159,16 +156,19 @@ static int64_t do_getpeername(int32_t h_socket, GuestSockaddr *p_out_address, ui
     return 0;
 }
 /* The console's BSD MSG_WAITALL (0x40) is Linux's MSG_DONTWAIT, so each flag is translated. */
-static int host_flags(int flags) {
-    return (flags&0x1 ? MSG_OOB : 0)|(flags&0x2 ? MSG_PEEK : 0)|(flags&0x40 ? MSG_WAITALL : 0)|(flags&0x80 ? MSG_DONTWAIT : 0);
+static unsigned host_flags(int flags) {
+    return (flags&0x1 ? PS_HOST_NET_OUT_OF_BAND : 0u)|(flags&0x2 ? PS_HOST_NET_PEEK : 0u)|
+           (flags&0x40 ? PS_HOST_NET_WAIT_ALL : 0u)|(flags&0x80 ? PS_HOST_NET_DONT_WAIT : 0u);
 }
+static int64_t host_result(int64_t result) { return result<0 ? -runtime_guest_errno((int)-result) : result; }
 static int64_t do_recvfrom(int32_t s, void *p_buf, uint64_t len, int flags, GuestSockaddr *p_from, uint32_t *p_fromlen) {
     struct sockaddr_in a={0};
-    socklen_t cb_address=sizeof(a);
+    uint32_t cb_address=sizeof(a);
     int h=host_socket(s);
     if (h<0) return -GUEST_EBADF;
-    ssize_t cb_received=recvfrom(h,p_buf,len,host_flags(flags)|MSG_NOSIGNAL,(struct sockaddr *)&a,&cb_address);
-    if (cb_received<0) return host_failure();
+    const PsHostIoVector buffer={p_buf,len};
+    int64_t cb_received=ps_host_net_receive(h,&buffer,1,&a,&cb_address,host_flags(flags),NULL);
+    if (cb_received<0) return host_result(cb_received);
     if (p_from && cb_address) guest_address(&a,p_from,p_fromlen);
     return cb_received;
 }
@@ -178,8 +178,8 @@ static int64_t do_sendto(int32_t s, const void *p_buf, uint64_t len, int flags, 
     if (h<0) return -GUEST_EBADF;
     if (p_sockaddr && !host_address(p_sockaddr,tolen,&a)) return -GUEST_EINVAL;
     if (p_sockaddr && !loopback(&a)) return -GUEST_ENETUNREACH;
-    ssize_t cb_sent=sendto(h,p_buf,len,host_flags(flags)|MSG_NOSIGNAL,p_sockaddr ? (struct sockaddr *)&a : NULL,p_sockaddr ? sizeof(a) : 0);
-    return cb_sent<0 ? host_failure() : cb_sent;
+    const PsHostIoVector buffer={(void *)p_buf,len};
+    return host_result(ps_host_net_send(h,&buffer,1,p_sockaddr ? &a : NULL,p_sockaddr ? sizeof(a) : 0,host_flags(flags)));
 }
 /* Control messages (descriptor passing, credentials) have no use between the game's own loopback
  * sockets and FreeBSD lays them out differently, so a message carrying one is refused. */
@@ -194,25 +194,24 @@ static int64_t do_sendmsg(int32_t h_socket, const GuestMsghdr *p_message, int fl
     }
     if (p_message->p_name && !host_address(p_message->p_name,p_message->cb_name,&to)) return -GUEST_EINVAL;
     if (p_message->p_name && !loopback(&to)) return -GUEST_ENETUNREACH;
-    struct msghdr host_message={.msg_name=p_message->p_name ? &to : NULL,.msg_namelen=p_message->p_name ? sizeof(to) : 0,
-                                .msg_iov=p_message->p_iov,.msg_iovlen=(size_t)p_message->c_iov};
-    ssize_t cb_sent=sendmsg(h_host,&host_message,host_flags(flags)|MSG_NOSIGNAL);
-    return cb_sent<0 ? host_failure() : cb_sent;
+    return host_result(ps_host_net_send(h_host,p_message->p_iov,p_message->c_iov,p_message->p_name ? &to : NULL,
+                                        p_message->p_name ? sizeof(to) : 0,host_flags(flags)));
 }
 static int64_t do_recvmsg(int32_t h_socket, GuestMsghdr *p_message, int flags) {
     struct sockaddr_in from={0};
     int h_host=host_socket(h_socket);
     if (h_host<0) return -GUEST_EBADF;
     if (!p_message || p_message->c_iov<0) return -GUEST_EINVAL;
-    struct msghdr host_message={.msg_name=&from,.msg_namelen=sizeof(from),.msg_iov=p_message->p_iov,
-                                .msg_iovlen=(size_t)p_message->c_iov};
-    ssize_t cb_received=recvmsg(h_host,&host_message,host_flags(flags)|MSG_NOSIGNAL);
-    if (cb_received<0) return host_failure();
-    if (p_message->p_name && host_message.msg_namelen) guest_address(&from,p_message->p_name,&p_message->cb_name);
+    uint32_t cb_from=sizeof(from);
+    unsigned received_flags=0;
+    int64_t cb_received=ps_host_net_receive(h_host,p_message->p_iov,p_message->c_iov,&from,&cb_from,host_flags(flags),
+                                            &received_flags);
+    if (cb_received<0) return host_result(cb_received);
+    if (p_message->p_name && cb_from) guest_address(&from,p_message->p_name,&p_message->cb_name);
     else p_message->cb_name=0;
     p_message->cb_control=0;
-    p_message->flags=(host_message.msg_flags&MSG_TRUNC ? 0x10 : 0)|(host_message.msg_flags&MSG_CTRUNC ? 0x20 : 0)|
-                     (host_message.msg_flags&MSG_OOB ? 0x1 : 0);
+    p_message->flags=(received_flags&PS_HOST_NET_TRUNCATED ? 0x10 : 0)|(received_flags&PS_HOST_NET_CONTROL_TRUNCATED ? 0x20 : 0)|
+                     (received_flags&PS_HOST_NET_GOT_OUT_OF_BAND ? 0x1 : 0);
     return cb_received;
 }
 /* The console's option numbers (BSD, plus SO_NBIO) for the host's; 0 when there is none. */
@@ -264,7 +263,7 @@ static int64_t do_getsockopt(int32_t s, int level, int option, void *p_value, ui
     if (!host) return -GUEST_ENOPROTOOPT;
     socklen_t cb_value=p_len ? *p_len : 0;
     if (getsockopt(h,host_level,host,p_value,&cb_value)) return host_failure();
-    if (host==SO_ERROR && host_level==SOL_SOCKET && p_value && cb_value>=sizeof(int32_t)) {
+    if (host==SO_ERROR && host_level==SOL_SOCKET && p_value && cb_value>=(socklen_t)sizeof(int32_t)) {
         int32_t e;
         memcpy(&e,p_value,sizeof(e));
         e=runtime_guest_errno(e);
@@ -278,36 +277,35 @@ static int64_t do_getsockopt(int32_t s, int level, int option, void *p_value, ui
 static int64_t do_select(int c_fds, uint64_t *p_read, uint64_t *p_write, uint64_t *p_except, const GuestTimeval *p_timeout) {
     if (c_fds<0 || c_fds>GUEST_FD_SETSIZE) return -GUEST_EINVAL;
     if (p_timeout && (p_timeout->sec<0 || p_timeout->usec<0 || p_timeout->usec>=1000000)) return -GUEST_EINVAL;
-    struct pollfd polled[c_fds ? c_fds : 1];
+    PsHostPollEntry polled[c_fds ? c_fds : 1];
     int h_guest[c_fds ? c_fds : 1], c_polled=0;
     for (int h_fd=0;h_fd<c_fds;++h_fd) {
         const uint64_t bit=UINT64_C(1)<<(h_fd&63);
         const int i_word=h_fd>>6;
-        short events=(p_read && p_read[i_word]&bit ? POLLIN : 0)|(p_write && p_write[i_word]&bit ? POLLOUT : 0)|
-                     (p_except && p_except[i_word]&bit ? POLLPRI : 0);
+        unsigned events=(p_read && p_read[i_word]&bit ? PS_HOST_NET_POLL_IN : 0u)|(p_write && p_write[i_word]&bit ? PS_HOST_NET_POLL_OUT : 0u)|
+                        (p_except && p_except[i_word]&bit ? PS_HOST_NET_POLL_PRIORITY : 0u);
         if (!events) continue;
         int h_host=runtime_file_host(h_fd);
         if (h_host<0) return -GUEST_EBADF;
-        polled[c_polled]=(struct pollfd){.fd=h_host,.events=events};
+        polled[c_polled]=(PsHostPollEntry){.h_socket=h_host,.events=events};
         h_guest[c_polled++]=h_fd;
     }
-    struct timespec timeout;
-    if (p_timeout) timeout=(struct timespec){.tv_sec=p_timeout->sec,.tv_nsec=p_timeout->usec*1000};
-    int c_ready=ppoll(polled,(nfds_t)c_polled,p_timeout ? &timeout : NULL,NULL);
-    if (c_ready<0) return host_failure();
+    const int64_t timeout_ns=p_timeout ? p_timeout->sec*1000000000+p_timeout->usec*1000 : -1;
+    int c_ready=ps_host_net_poll(polled,c_polled,timeout_ns);
+    if (c_ready<0) return -runtime_guest_errno(-c_ready);
     const size_t cb_set=(size_t)(c_fds+63)/64*sizeof(uint64_t);
     if (p_read) memset(p_read,0,cb_set);
     if (p_write) memset(p_write,0,cb_set);
     if (p_except) memset(p_except,0,cb_set);
     int64_t c_bits=0;
     for (int i=0;i<c_polled;++i) {
-        const short events=polled[i].events, revents=polled[i].revents;
+        const unsigned events=polled[i].events, revents=polled[i].revents;
         const uint64_t bit=UINT64_C(1)<<(h_guest[i]&63);
         const int i_word=h_guest[i]>>6;
-        if (revents&POLLNVAL) return -GUEST_EBADF;
-        if (events&POLLIN && revents&(POLLIN|POLLHUP|POLLERR)) { p_read[i_word]|=bit; ++c_bits; }
-        if (events&POLLOUT && revents&(POLLOUT|POLLERR)) { p_write[i_word]|=bit; ++c_bits; }
-        if (events&POLLPRI && revents&POLLPRI) { p_except[i_word]|=bit; ++c_bits; }
+        if (revents&PS_HOST_NET_POLL_INVALID) return -GUEST_EBADF;
+        if (events&PS_HOST_NET_POLL_IN && revents&(PS_HOST_NET_POLL_IN|PS_HOST_NET_POLL_HANG_UP|PS_HOST_NET_POLL_ERROR)) { p_read[i_word]|=bit; ++c_bits; }
+        if (events&PS_HOST_NET_POLL_OUT && revents&(PS_HOST_NET_POLL_OUT|PS_HOST_NET_POLL_ERROR)) { p_write[i_word]|=bit; ++c_bits; }
+        if (events&PS_HOST_NET_POLL_PRIORITY && revents&PS_HOST_NET_POLL_PRIORITY) { p_except[i_word]|=bit; ++c_bits; }
     }
     return c_bits;
 }
@@ -315,11 +313,12 @@ static int64_t do_select(int c_fds, uint64_t *p_read, uint64_t *p_write, uint64_
 static int64_t do_socketpair(int family, int type, int protocol, int32_t *p_out_sockets) {
     if (!p_out_sockets) return -GUEST_EFAULT;
     if (family!=AF_UNIX) return -GUEST_EAFNOSUPPORT;
-    int host_flags=SOCK_CLOEXEC|(type&GUEST_SOCK_NONBLOCK ? SOCK_NONBLOCK : 0);
+    const int is_nonblocking=(type&GUEST_SOCK_NONBLOCK)!=0;
     type&=~(GUEST_SOCK_CLOEXEC|GUEST_SOCK_NONBLOCK);
     if (type!=SOCK_STREAM && type!=SOCK_DGRAM && type!=SOCK_SEQPACKET) return -GUEST_EPROTONOSUPPORT;
     int h_hosts[2];
-    if (socketpair(AF_UNIX,type|host_flags,protocol,h_hosts)) return host_failure();
+    const int e=ps_host_net_socketpair(type,protocol,is_nonblocking,h_hosts);
+    if (e) return -runtime_guest_errno(e);
     const int64_t h_first=adopt(h_hosts[0]);
     if (h_first<0) { ps_host_net_close(h_hosts[1]); return h_first; }
     const int64_t h_second=adopt(h_hosts[1]);
@@ -389,7 +388,7 @@ _Static_assert(sizeof(GuestSockInfo)==108,"SceNetSockInfo layout");
 static int describe_socket(int32_t h_socket, GuestSockInfo *p_out_info) {
     int h_host=host_socket(h_socket), type;
     socklen_t cb_type=sizeof(type);
-    if (h_host<0 || getsockopt(h_host,SOL_SOCKET,SO_TYPE,&type,&cb_type)) return 0;
+    if (h_host<0 || getsockopt(h_host,SOL_SOCKET,SO_TYPE,(void *)&type,&cb_type)) return 0;
     memset(p_out_info,0,sizeof(*p_out_info));
     p_out_info->h_socket=h_socket;
     p_out_info->socket_type=type==SOCK_STREAM ? 1 : 2;
@@ -600,7 +599,3 @@ static const RuntimeExport s_exports[]={
     {"select",posix_select}, {"inet_pton",posix_inet_pton}, {"inet_ntop",posix_inet_ntop},
 };
 uintptr_t runtime_socket_resolve(const char *sz_name) { return RUNTIME_LOOKUP(s_exports,sz_name); }
-#else
-int32_t *runtime_net_errno(void) { static int32_t e; return &e; }
-uintptr_t runtime_socket_resolve(const char *name) { (void)name; return 0; }
-#endif

@@ -12,10 +12,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#ifndef _WIN32
 #include <pthread.h>
 #include <time.h>
-#include <arpa/inet.h>
+#include "ps_host_sockets.h"
 #include <sys/stat.h>
 
 #define USER_ID 1
@@ -225,8 +224,7 @@ static Dialog s_dialogs[]={{"CommonDialog",0,0},{"MsgDialog",0,0},{"SaveDataDial
                          {"ErrorDialog",0,0},{"WebBrowserDialog",0,0},{"InvitationDialog",0,0},
                          {"SigninDialog",0,0},{"SocialScreenDialog",0,0},
                          {"HmdSetupDialog",0,0},{"PlayGoDialog",0,0}};
-static int s_is_common_initialized;
-static ABI int32_t common_init(void) { s_is_common_initialized=1; return 0; }
+static ABI int32_t common_init(void) { return 0; }
 static int32_t dialog_init(int i) {
     if (s_dialogs[i].is_initialized) return (int32_t)0x80B80004;
     s_dialogs[i].is_initialized=1; s_dialogs[i].status=1; return 0;
@@ -1050,6 +1048,3 @@ uintptr_t runtime_services_resolve(const char *sz_name) {
     const uintptr_t va_np=runtime_np_resolve(sz_name);
     return va_np ? va_np : runtime_socket_resolve(sz_name);
 }
-#else
-uintptr_t runtime_services_resolve(const char *name) { (void)name; return 0; }
-#endif

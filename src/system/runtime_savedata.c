@@ -12,7 +12,6 @@
 #include <string.h>
 #include <pthread.h>
 #include <time.h>
-#ifndef _WIN32
 #include <errno.h>
 #include <ftw.h>
 #include <sys/stat.h>
@@ -117,7 +116,7 @@ static int write_atomic(const char *sz_path, const void *p_data, size_t cb_data)
     char sz_temp[760]; snprintf(sz_temp,sizeof(sz_temp),"%s.bbtmp",sz_path);
     FILE *p_file=fopen(sz_temp,"wb");
     if (!p_file) return -1;
-    int is_ok=fwrite(p_data,1,cb_data,p_file)==cb_data && !fflush(p_file) && !ps_host_fs_sync(fileno(p_file));
+    int is_ok=fwrite(p_data,1,cb_data,p_file)==cb_data && !fflush(p_file) && !ps_host_fs_sync_stream(p_file);
     is_ok=!fclose(p_file) && is_ok;
     if (!is_ok || ps_host_fs_rename(sz_temp,sz_path)) { ps_host_fs_remove(sz_temp); return -1; }
     return 0;
@@ -220,8 +219,9 @@ static ABI int32_t save_umount(const MountPoint *p_point) { return umount(p_poin
 #define BLOCK_SIZE_BYTES 32768
 static uint64_t s_cb_used;
 static int add_used_size(const char *sz_path, const struct stat *p_stat, int flag, struct FTW *p_ftw) {
-    (void)sz_path; (void)p_ftw;
-    if (flag==FTW_F) s_cb_used+=(uint64_t)p_stat->st_blocks*512;
+    (void)p_stat; (void)p_ftw;
+    PsHostStat st;
+    if (flag==FTW_F && !ps_host_fs_stat_link(sz_path,&st)) s_cb_used+=(uint64_t)st.c_blocks*512;
     return 0;
 }
 /* OrbisSaveDataMountInfo: blocks and free blocks of the mounted save, the blocks it was mounted
@@ -401,7 +401,7 @@ static int32_t memory_open(int32_t user, uint32_t slot, uint64_t cb_memory, uint
     if (p_file) {
         fseek(p_file,0,SEEK_END);
         old=(uint64_t)ftell(p_file);
-        if (old<cb_memory && ps_host_fs_truncate(fileno(p_file),(int64_t)cb_memory)) goto done;
+        if (old<cb_memory && ps_host_fs_truncate_stream(p_file,(int64_t)cb_memory)) goto done;
         *p_existed=old;
         snprintf(s_memories[slot].sz_dir,sizeof(s_memories[slot].sz_dir),"%s",sz_dir);
         s_memories[slot].cb_memory=cb_memory; r=0;
@@ -623,7 +623,7 @@ static ABI int32_t memory_sync(const MemorySync *p_sync) {
         char sz_path[700];
         snprintf(sz_path,sizeof(sz_path),"%s/memory.dat",s_memories[p_sync->slot].sz_dir);
         FILE *p_file=fopen(sz_path,"r+b");
-        result=p_file && !ps_host_fs_sync(fileno(p_file)) ? 0 : ERR_INTERNAL;
+        result=p_file && !ps_host_fs_sync_stream(p_file) ? 0 : ERR_INTERNAL;
         if (p_file) fclose(p_file);
         if (!result) queue_event_locked(EVENT_MEMORY_SYNC,p_sync->user,NULL,NULL);
     }
@@ -661,9 +661,3 @@ int runtime_savedata_param(int32_t user, const char *sz_title, const char *sz_di
     return 0;
 }
 void runtime_savedata_report(void) { printf("Runtime: save data mounts=%zu, memory writes=%zu\n",s_c_mounts_done,s_c_memory_writes); }
-#else
-void runtime_savedata_configure(const char *title) { (void)title; }
-uintptr_t runtime_savedata_resolve(const char *name) { (void)name; return 0; }
-int runtime_savedata_param(int32_t user, const char *title, const char *dir, void *param) { (void)user; (void)title; (void)dir; (void)param; return -1; }
-void runtime_savedata_report(void) {}
-#endif

@@ -4,7 +4,6 @@
 #ifndef BB_RUNTIME_MEMORY_H
 #define BB_RUNTIME_MEMORY_H
 #include "runtime.h"
-#ifndef _WIN32
 #pragma GCC visibility push(hidden)
 uint64_t pool_size_bytes(void);
 #define POOL_SIZE pool_size_bytes()
@@ -60,5 +59,4 @@ int32_t place_file(void **pp_inout, uint64_t cb_range, int prot, int flags, int 
 void trap_reapply(uintptr_t start, uintptr_t end);
 void trap_forget(uintptr_t start, uintptr_t end);
 #pragma GCC visibility pop
-#endif
 #endif

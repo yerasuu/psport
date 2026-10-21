@@ -26,6 +26,7 @@ EXPORTS
     ps_host_thread_make_background
     ps_host_thread_name
     ps_host_thread_set_name
+    ps_host_time_monotonic_ns
     ps_host_time_sleep_ns
     ps_host_vm_map
     ps_host_vm_map_shared
@@ -48,6 +49,9 @@ EXPORTS
     runtime_env_flag
     runtime_errno
     runtime_fault_recover_slot
+    runtime_file_changes
+    runtime_file_ready
+    runtime_file_serial
     runtime_file_translate
     runtime_file_user_dir
     runtime_heap_growths
@@ -56,8 +60,11 @@ EXPORTS
     runtime_memory_direct_phys
     runtime_memory_generation
     runtime_memory_gpu_protect
+    runtime_memory_is_mapped
     runtime_memory_note_write
     runtime_memory_read_backing
+    runtime_memory_read_guest
+    runtime_memory_read_guest_signal
     runtime_memory_region
     runtime_memory_resolve
     runtime_memory_set_cpu_write_hook
@@ -78,6 +85,7 @@ EXPORTS
     runtime_process_time_counter
     runtime_process_time_us
     runtime_quirks_note_gpu
+    runtime_report
     runtime_restart
     runtime_restarting DATA
     runtime_savedata_title

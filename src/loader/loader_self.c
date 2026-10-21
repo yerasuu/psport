@@ -38,7 +38,7 @@ void loader_fail(const char *sz_format, ...) {
 unsigned char *loader_read_file(const char *sz_path, size_t *p_size) {
     FILE *p_file = fopen(sz_path, "rb");
     PsHostStat st;
-    if (!p_file || ps_host_fs_stat_file(fileno(p_file), &st) || !PS_HOST_MODE_IS_REGULAR(st.mode)) loader_fail("cannot read %s", sz_path);
+    if (!p_file || ps_host_fs_stat_stream(p_file, &st) || !PS_HOST_MODE_IS_REGULAR(st.mode)) loader_fail("cannot read %s", sz_path);
     unsigned char *p_data = malloc(st.cb_size ? (size_t)st.cb_size : 1);
     if (!p_data || fread(p_data, 1, (size_t)st.cb_size, p_file) != (size_t)st.cb_size) loader_fail("cannot read %s", sz_path);
     fclose(p_file);

@@ -1,13 +1,14 @@
 /* The host platform layer (decision #540): what psport asks of the operating system, behind one
  * small C ABI with an implementation per OS in src/platform/<os>/, so that the runtime and the
  * loader name what they need instead of a Linux call. Included from C and C++ (libpsport-gpu.so
- * reaches these through -rdynamic). Linux is implemented, Windows in part (src/platform/win32/,
- * not built yet); host_features.inc says what each OS has. */
+ * reaches these through -rdynamic). Linux is implemented, Windows too (src/platform/win32/, not run
+ * with a game yet); host_features.inc says what each OS has. */
 #ifndef PS_HOST_H
 #define PS_HOST_H
 #include <setjmp.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <time.h>
 #ifdef __cplusplus
 extern "C" {
@@ -123,6 +124,9 @@ int32_t ps_host_thread_find(const char *sz_prefix);
 int ps_host_thread_each(void (*pfn_thread)(int32_t tid, void *p_context), void *p_context);
 /* The calling thread's stack, its lowest address and size: 0, or the host's errno. */
 int ps_host_thread_stack(uintptr_t *p_out_va_low, size_t *p_out_cb_stack);
+/* CPU time the process or the calling thread spent in user mode and in the kernel: 0, or the
+ * host's errno. */
+int ps_host_thread_cpu_times(int is_whole_process, struct timespec *p_out_user, struct timespec *p_out_system);
 /* Hardware threads this process may run on (its affinity, so that taskset can stand in for a
  * smaller machine), or 0 when the host cannot say. */
 unsigned ps_host_thread_cpu_count(void);
@@ -203,6 +207,11 @@ int ps_host_fs_truncate_path(const char *sz_path, int64_t cb_file);
 int ps_host_fs_stat(const char *sz_path, PsHostStat *p_out);
 int ps_host_fs_stat_link(const char *sz_path, PsHostStat *p_out);
 int ps_host_fs_stat_file(int h_file, PsHostStat *p_out);
+/* The same calls on a stdio stream's file, whose fileno is the C runtime's descriptor and need not
+ * be one of psport's. */
+int ps_host_fs_stat_stream(FILE *p_stream, PsHostStat *p_out);
+int ps_host_fs_sync_stream(FILE *p_stream);
+int ps_host_fs_truncate_stream(FILE *p_stream, int64_t cb_file);
 int ps_host_fs_access(const char *sz_path, int mode);
 int ps_host_fs_make_dir(const char *sz_path, unsigned mode);
 /* Creates a folder no one else has: sz_template ends in XXXXXX, which the call replaces in place. */
@@ -328,9 +337,63 @@ int ps_host_list_mappings(int (*pfn_mapping)(const PsHostMapping *p_mapping, voi
 
 /* ---- sockets ---- */
 /* Sockets are int descriptors like files (runtime_file.c keeps both in the guest's table) and use
- * the BSD socket calls, except what follows. ps_host_net_init comes before the first socket and
- * may be called again at no cost: 0, or the host's errno. */
+ * the BSD socket calls of ps_host_sockets.h, except what follows. ps_host_net_init comes before the
+ * first socket and may be called again at no cost: 0, or the host's errno. */
 int ps_host_net_init(void);
+/* family, type and protocol as the host's headers number them; close-on-exec, and non-blocking when
+ * asked: the descriptor, or minus the host's errno. */
+int ps_host_net_socket(int family, int type, int protocol, int is_nonblocking);
+/* The connection's socket, close-on-exec, and its peer's address: its descriptor, or minus the
+ * host's errno. */
+int ps_host_net_accept(int h_socket, void *p_out_address, uint32_t *p_cb_address);
+/* A connected pair of local (AF_UNIX) sockets, close-on-exec, non-blocking when asked: 0, or the
+ * host's errno (EOPNOTSUPP where the host has no socket pairs). */
+int ps_host_net_socketpair(int type, int protocol, int is_nonblocking, int p_out_h_sockets[2]);
+/* 0, or the host's errno: EINPROGRESS while a non-blocking socket still connects. */
+int ps_host_net_connect(int h_socket, const void *p_address, uint32_t cb_address);
+/* struct iovec's layout, which FreeBSD's msghdr hands over too. */
+typedef struct {
+    void *p_base;
+    size_t cb_length;
+} PsHostIoVector;
+/* What a send or receive asks; a broken connection never raises a signal. */
+enum {
+    PS_HOST_NET_OUT_OF_BAND = 1,
+    PS_HOST_NET_PEEK = 2,
+    PS_HOST_NET_WAIT_ALL = 4,
+    PS_HOST_NET_DONT_WAIT = 8,
+};
+/* What a receive found, beyond the bytes. */
+enum {
+    PS_HOST_NET_TRUNCATED = 1,
+    PS_HOST_NET_CONTROL_TRUNCATED = 2,
+    PS_HOST_NET_GOT_OUT_OF_BAND = 4,
+};
+/* To p_to when not NULL: the bytes sent, or minus the host's errno. */
+int64_t ps_host_net_send(int h_socket, const PsHostIoVector *p_vectors, int c_vectors, const void *p_to, uint32_t cb_to,
+                         unsigned flags);
+/* The sender's address in p_out_from, *p_cb_from its room then its size (0 when it has none or
+ * p_out_from is NULL): the bytes received, or minus the host's errno. */
+int64_t ps_host_net_receive(int h_socket, const PsHostIoVector *p_vectors, int c_vectors, void *p_out_from,
+                            uint32_t *p_cb_from, unsigned flags, unsigned *p_out_flags);
+enum {
+    PS_HOST_NET_POLL_IN = 1,
+    PS_HOST_NET_POLL_OUT = 2,
+    PS_HOST_NET_POLL_PRIORITY = 4,
+    /* Only in revents. */
+    PS_HOST_NET_POLL_ERROR = 8,
+    PS_HOST_NET_POLL_HANG_UP = 16,
+    PS_HOST_NET_POLL_INVALID = 32,
+};
+typedef struct {
+    int h_socket;
+    unsigned events, revents;
+} PsHostPollEntry;
+/* Waits until one entry is ready or timeout_ns passes (negative: no timeout): how many are, or minus
+ * the host's errno. */
+int ps_host_net_poll(PsHostPollEntry *p_entries, int c_entries, int64_t timeout_ns);
+/* ps_host_fs_poll for a socket, whose descriptor is not a file's on every host. */
+int ps_host_net_ready(int h_socket, unsigned events, unsigned *p_out_events, int64_t *p_out_cb_ready);
 int ps_host_net_close(int h_socket);
 /* The last failed socket call's error on this thread, as an errno value. */
 int ps_host_net_error(void);
@@ -365,6 +428,10 @@ int ps_host_exec(const char *sz_file, char *const *pp_argv);
 /* Replaces the process with a new run of psport's own executable, the same file even when its path
  * changed since: returns only when that fails, with the host's errno (errno holds it too). */
 int ps_host_exec_self(char *const *pp_argv);
+/* A helper process removes the folder once this process has ended, whichever way it ends (a fault,
+ * a kill, an exec into something else): 0, or the host's errno (ENOSYS where it has no such helper),
+ * the folder left in place then. */
+int ps_host_remove_tree_at_exit(const char *sz_path);
 /* pfn_exit runs at exit() with its status, after the handlers registered later (atexit order). */
 int ps_host_on_exit(void (*pfn_exit)(int status));
 /* Descriptors 1 and 2 go through pipes to a helper process, which writes each chunk on to where they
@@ -501,6 +568,17 @@ enum {
 int ps_host_interrupt_install(PsHostInterrupt interrupt, PsHostInterruptHandler pfn_handler, unsigned flags);
 /* Interrupts one thread of this process: 0, or the host's errno. Safe in signal handlers. */
 int ps_host_interrupt_thread(int32_t tid, PsHostInterrupt interrupt);
+/* Which interrupts the calling thread holds back, as a signal mask (Linux's sigset_t), so that a
+ * new thread holds them until its TCB is in place. */
+typedef struct {
+    uint64_t opaque[16];
+} PsHostInterruptMask;
+/* Holds every interrupt on the calling thread, faults excepted (with is_holding_all, so that one
+ * taken meanwhile still reaches its handler), or none: the mask it had in *p_out_previous when not
+ * NULL. A thread created meanwhile starts with the same mask where the host passes it on. */
+void ps_host_interrupts_hold(int is_holding_all, PsHostInterruptMask *p_out_previous);
+/* Puts back a mask ps_host_interrupts_hold saved; what arrived while held is delivered once open. */
+void ps_host_interrupts_restore(const PsHostInterruptMask *p_mask);
 /* The host signal behind an interrupt, for the code that masks it around a thread's start and in
  * sigreturn's frame. */
 int ps_host_interrupt_signal(PsHostInterrupt interrupt);

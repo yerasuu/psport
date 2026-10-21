@@ -4,10 +4,11 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "ps_host.h"
-#ifndef _WIN32
 #include <setjmp.h>
 /* Recovery point for speculative guest memory reads on this thread (signals.c fault handler). */
 extern __thread PsHostRecoveryPoint *g_p_runtime_fault_recover;
+/* The same for the GPU library on Windows, where a DLL cannot import an executable's thread-local. */
+PsHostRecoveryPoint **runtime_fault_recover_slot(void);
 /* Restarts the game (in-game settings menu, render resolution change). */
 void runtime_restart(void);
 /* sceSystemServiceLoadExec (main.c): psport starts again on its own command line with sz_path, a
@@ -16,7 +17,6 @@ void runtime_restart(void);
 void runtime_load_exec(const char *sz_path, char *const *pp_arguments);
 /* psport's own command line, which runtime_load_exec starts again from; kept. */
 void runtime_restart_configure(int c_argv, char **pp_argv);
-#endif
 #define ABI __attribute__((sysv_abi))
 typedef void (ABI *GuestCallback)(void);
 void runtime_start(uint64_t capabilities);
@@ -139,9 +139,9 @@ uintptr_t runtime_sched_resolve(const char *sz_name);
 void runtime_thread_report(void);
 void runtime_set_main_tls(const void *p_data, uint64_t filesz, uint64_t memsz, uint64_t align);
 void runtime_thread_attach_main(void);
-/* Sends a host signal to a guest thread (ScePthread handle): 0, or 0x80020003 when the handle names
- * no live thread. */
-int32_t runtime_thread_kill(void *p_thread, int host_signal);
+/* Interrupts a guest thread (ScePthread handle), once its TCB is in place when it is still starting: 0,
+ * or 0x80020003 when the handle names no live thread. */
+int32_t runtime_thread_kill(void *p_thread, PsHostInterrupt interrupt);
 /* The guest's sigprocmask bookkeeping for the calling thread (sigreturn's uc_sigmask). */
 void runtime_kernel_set_signal_mask(const uint32_t bits[4]);
 /* The UTC second a local second stands for under the host zone's rule in force then, with that
@@ -158,7 +158,6 @@ int runtime_exception_is_delivering(void);
 /* The calling thread holds a runtime lock or a hold (runtime_exception_hold): a long jump out
  * would leave it held. */
 int runtime_exception_is_holding(void);
-#ifndef _WIN32
 #include <pthread.h>
 /* The host signal a guest exception raise arrives on, for the masks around a thread's start. */
 #define RUNTIME_EXCEPTION_SIGNAL ps_host_interrupt_signal(PS_HOST_INTERRUPT_GUEST_EXCEPTION)
@@ -182,7 +181,6 @@ int runtime_exception_wait(pthread_cond_t *p_cond, pthread_mutex_t *p_lock, cons
  * hanging the exit. 1 when taken (let go with runtime_exception_unlock), 0 when sz_report was
  * skipped. */
 int runtime_exception_report_lock(pthread_mutex_t *p_lock, const char *sz_report);
-#endif
 /* The calling thread runs guest code on this stack from now on (the guest main stack): what
  * scePthreadAttrGet reports, which garbage collectors scan up to. */
 void runtime_thread_set_stack(void *p_addr, uint64_t cb_stack);
@@ -296,6 +294,9 @@ int64_t runtime_file_getdents(int h_fd, char *sz_buffer, uint64_t cb_buffer, int
 void runtime_thread_keys_cleanup(void);
 /* Guest-visible errno values are FreeBSD's. */
 int32_t runtime_guest_errno(int host_errno);
+/* Takes the guest's whole range, [0x0800000000, 0xfc00000000), before the host places anything there:
+ * once, first thing in main. 0, or the host's errno. */
+int runtime_memory_reserve_arena(void);
 void *runtime_low_map(size_t cb_range, unsigned access);
 uintptr_t runtime_ajm_resolve(const char *sz_name);
 void runtime_ajm_report(void);

@@ -8,9 +8,9 @@ on:
 permissions: {}
 
 jobs:
-  # What builds on Windows so far (decision #623, #614): the GPU library and the capability check,
-  # with MSYS2's CLANG64 (clang, libc++, UCRT), handed over as an artifact to try. Nothing is
-  # published.
+  # What builds on Windows so far (decision #623, #614): the GPU library, psport.exe and the
+  # capability check, with MSYS2's CLANG64 (clang, libc++, UCRT), handed over as an artifact to try.
+  # Nothing is published.
   build:
     runs-on: windows-latest
     timeout-minutes: 240
@@ -57,17 +57,16 @@ jobs:
           {
             echo "psport Windows build of $GITHUB_SHA ($GITHUB_REF_NAME), $(date -u +%Y-%m-%dT%H:%M:%SZ)"
             echo "Toolchain: MSYS2 CLANG64, $(clang --version | head -n 1)"
-            for file in out/gpu/libpsport-gpu.dll out/psport-gpu-capabilities.exe; do
+            for file in out/psport.exe out/gpu/libpsport-gpu.dll out/psport-gpu-capabilities.exe; do
               if [[ -f $file ]]; then
                 echo "built: ${file##*/}"; built+=("$file")
               else
                 echo "not built: ${file##*/} (see build-output.txt)"
               fi
             done
-            echo 'not built yet: psport.exe (the runtime, src/: most of src/platform/win32 is missing, #614),'
-            echo '  libpsport-net.dll (the online module), the DLSS bridge'
-            echo 'libpsport-gpu.dll imports the runtime from psport.exe (gpu/port/psport_runtime.def): it'
-            echo 'cannot be loaded on its own until psport.exe exists.'
+            echo 'not built yet: libpsport-net.dll (the online module), the DLSS bridge'
+            echo 'psport.exe loads libpsport-gpu.dll from its own folder; psport.exe --list-features says'
+            echo 'what is EXPERIMENTAL or UNAVAILABLE on Windows (#614).'
           } > dist/BUILD-STATUS.txt
           for file in "${built[@]}"; do
             cp "$file" dist/

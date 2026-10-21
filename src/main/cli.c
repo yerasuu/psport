@@ -62,8 +62,6 @@ static void print_effects(const char *sz_serial) {
     puts("]}]");
 }
 
-#ifndef _WIN32
-extern char **environ;
 /* bbport, and psport releases before the rename, read BB_* names: launchers written for them keep
    working for a transition. Each one set is copied to its PS_* name unless that is set too, then
    the process starts again, since the GPU library's initializers have already read the
@@ -85,7 +83,7 @@ void accept_deprecated_names(char **pp_argv) {
         *sz_value++='\0';
         char sz_renamed[256];
         if (snprintf(sz_renamed,sizeof(sz_renamed),"PS_%s",pp_found[i]+3)<(int)sizeof(sz_renamed) && !runtime_env(sz_renamed,NULL)) {
-            setenv(sz_renamed,sz_value,0);
+            ps_host_env_set(sz_renamed,sz_value,0);
             int wrote=snprintf(sz_list+cb_used,sizeof(sz_list)-cb_used,"%s%s",c_copied?", ":"",pp_found[i]);
             if (wrote>0 && (size_t)wrote<sizeof(sz_list)-cb_used) cb_used+=(size_t)wrote;
             c_copied++;
@@ -98,7 +96,6 @@ void accept_deprecated_names(char **pp_argv) {
     ps_host_exec_self(pp_argv);
     perror("psport: restart with the PS_* variables");
 }
-#endif
 
 int answer_query(int argc, char **argv) {
     if (argc == 3 && !strcmp(argv[1], "--check-game")) {

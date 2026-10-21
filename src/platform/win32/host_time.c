@@ -48,6 +48,16 @@ static int cpu_time_ns(PsHostClock clock, uint64_t *p_out_ns) {
     return 0;
 }
 
+int ps_host_thread_cpu_times(int is_whole_process, struct timespec *p_out_user, struct timespec *p_out_system) {
+    FILETIME created, exited, kernel, user;
+    const BOOL is_read = is_whole_process ? GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user)
+                                          : GetThreadTimes(GetCurrentThread(), &created, &exited, &kernel, &user);
+    if (!is_read) return ps_win32_errno(GetLastError());
+    split_ns(filetime_ticks(user) * NS_PER_FILETIME_TICK, p_out_user);
+    split_ns(filetime_ticks(kernel) * NS_PER_FILETIME_TICK, p_out_system);
+    return 0;
+}
+
 int ps_host_time_read(PsHostClock clock, struct timespec *p_out_time) {
     uint64_t ns = 0;
     switch (clock) {

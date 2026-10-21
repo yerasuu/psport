@@ -8,7 +8,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#ifndef _WIN32
 #include <pthread.h>
 #include <sched.h>
 #include <setjmp.h>
@@ -156,7 +155,7 @@ static UltObject *s_p_objects;
 static int s_is_initialized;
 static uint64_t s_c_serials;
 static _Thread_local Ulthread *s_p_current;
-static _Thread_local sigjmp_buf s_exit_jump;
+static _Thread_local PsHostRecoveryPoint s_exit_jump;
 static size_t s_c_created, s_c_destroyed, s_c_recreated, s_c_waits, s_c_long_waits, s_c_no_pool, s_c_try_misses,
     s_c_failed;
 
@@ -304,7 +303,7 @@ static ABI void *run_ulthread(void *p_argument) {
     s_p_current=p_ulthread;
     runtime_thread_set_exit_hook(finish_ulthread);
     /* No host unwinder: guest frames have no registered FDEs, so sceUltUlthreadExit jumps back here. */
-    if (!sigsetjmp(s_exit_jump,1)) p_ulthread->status=p_ulthread->pfn_entry(p_ulthread->argument);
+    if (!PS_HOST_RECOVERY_SET(s_exit_jump)) p_ulthread->status=p_ulthread->pfn_entry(p_ulthread->argument);
     return NULL;
 }
 
@@ -485,7 +484,7 @@ static ABI int32_t ulthread_exit(int32_t status) {
     if (!s_p_current) return counted(__func__,ERR_PERMISSION);
     if (runtime_exception_is_delivering() || runtime_exception_is_holding()) return counted(__func__,ERR_STATE);
     s_p_current->status=status;
-    siglongjmp(s_exit_jump,1);
+    PS_HOST_RECOVERY_JUMP(s_exit_jump);
 }
 
 static ABI uint64_t waiting_pool_work_area_size(uint32_t c_threads,uint32_t c_sync_objects) {
@@ -1165,7 +1164,3 @@ void runtime_ult_report(void) {
            __atomic_load_n(&s_c_try_misses,__ATOMIC_RELAXED),__atomic_load_n(&s_c_failed,__ATOMIC_RELAXED));
     runtime_exception_unlock(&s_lock);
 }
-#else
-uintptr_t runtime_ult_resolve(const char *name) { (void)name; return 0; }
-void runtime_ult_report(void) { puts("Runtime: Windows ULT backend not implemented"); }
-#endif

@@ -174,6 +174,13 @@ int ps_host_on_exit(void (*pfn_exit)(int status)) {
     return ENOSYS;
 }
 
+/* The cleaner would have to be psport.exe started again with an option of its own, since Windows
+ * has no fork to give it the caller's code. */
+int ps_host_remove_tree_at_exit(const char *sz_path) {
+    (void)sz_path;
+    return ENOSYS;
+}
+
 /* The helper's callbacks are this process's code, which only fork gives to another process: a
  * thread instead would end with the process instead of draining its output after a crash. */
 int ps_host_output_tee(void (*pfn_chunk)(int is_error, const char *p_data, size_t cb_data), void (*pfn_end)(void)) {

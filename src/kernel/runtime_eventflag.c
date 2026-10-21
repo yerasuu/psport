@@ -7,7 +7,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#ifndef _WIN32
 #include <pthread.h>
 #include <errno.h>
 #include <time.h>
@@ -49,11 +48,7 @@ static ABI int32_t flag_create(uint64_t *p_out,const char *sz_name,uint32_t attr
     if (strlen(sz_name)>31) return ERR(63);
     Flag *p_flag=calloc(1,sizeof(*p_flag));
     if (!p_flag) return ERR(12);
-    pthread_condattr_t cattr;
-    host_check(pthread_condattr_init(&cattr));
-    host_check(pthread_condattr_setclock(&cattr,CLOCK_MONOTONIC));
-    host_check(pthread_cond_init(&p_flag->changed,&cattr));
-    host_check(pthread_condattr_destroy(&cattr));
+    host_check(pthread_cond_init(&p_flag->changed,NULL));
     runtime_exception_lock(&s_lock);
     p_flag->id=s_next_id++; p_flag->attr=attr; p_flag->pattern=pattern;
     snprintf(p_flag->sz_name,sizeof(p_flag->sz_name),"%s",sz_name);
@@ -215,8 +210,3 @@ void runtime_eventflag_created_report(void) {
                             __atomic_load_n(&s_c_created,__ATOMIC_RELAXED),__atomic_load_n(&s_c_deleted,__ATOMIC_RELAXED));
     if (used>0 && ps_host_fs_write(1,sz_line,(size_t)used)<0) return;
 }
-#else
-uintptr_t runtime_eventflag_resolve(const char *name) { (void)name; return 0; }
-void runtime_eventflag_report(void) { puts("Runtime: Windows event flag backend not implemented"); }
-void runtime_eventflag_created_report(void) {}
-#endif

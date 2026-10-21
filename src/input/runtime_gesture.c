@@ -7,7 +7,6 @@
 #include "runtime_pad.h"
 #include <stdio.h>
 #include <string.h>
-#ifndef _WIN32
 #include <pthread.h>
 #define GESTURE_INVALID_ARGUMENT ((int32_t)0x80890001)
 #define GESTURE_NOT_INITIALIZED ((int32_t)0x80890003)
@@ -324,6 +323,3 @@ static const RuntimeExport s_exports[]={
     {"sceSystemGestureGetTouchEventByEventID",recognizer_event_by_id},
 };
 uintptr_t runtime_gesture_resolve(const char *sz_name) { return RUNTIME_LOOKUP(s_exports,sz_name); }
-#else
-uintptr_t runtime_gesture_resolve(const char *name) { (void)name; return 0; }
-#endif

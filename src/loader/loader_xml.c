@@ -346,7 +346,7 @@ void find_from(const XmlNode *p_root, const char *sz_name, NodeList *p_out) {
 XmlNode *read_xml(const char *sz_path, char *sz_out_error, size_t cb_error) {
     FILE *p_file = fopen(sz_path, "rb");
     PsHostStat st;
-    if (!p_file || ps_host_fs_stat_file(fileno(p_file), &st) || !PS_HOST_MODE_IS_REGULAR(st.mode)) {
+    if (!p_file || ps_host_fs_stat_stream(p_file, &st) || !PS_HOST_MODE_IS_REGULAR(st.mode)) {
         snprintf(sz_out_error, cb_error, "%s", p_file ? "not a regular file" : strerror(errno));
         if (p_file) fclose(p_file);
         return NULL;

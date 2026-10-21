@@ -7,8 +7,8 @@
 #
 #   tools/win32-cross.sh sysroot   downloads and unpacks the packages into $PS_WIN32_SYSROOT
 #   tools/win32-cross.sh build     builds libpsport-gpu.dll and psport-gpu-capabilities.exe in out/win32
-#   tools/win32-cross.sh runtime   then tries psport.exe: lists the files that do not compile and the
-#                                  symbols missing at the link, and fails until it links
+#   tools/win32-cross.sh runtime   then psport.exe; when it fails, lists the files that do not compile
+#                                  and the symbols missing at the link
 #
 # PS_WIN32_SYSROOT: where the packages go (default ~/.cache/psport/win32-sysroot, about 2 GB), outside
 # the checkout. PS_LTO=ON for link-time optimisation (off by default, as in the CI job).
@@ -116,13 +116,14 @@ build() {
     echo "Built $out/psport-gpu-capabilities.exe (its DLLs: $sysroot/bin)"
 }
 
-# The runtime with build.sh's sources, src/platform/win32 in place of src/platform/linux. psport.exe
-# exports what libpsport-gpu.dll imports from it (gpu/port/psport_runtime.def).
+# The runtime with build.sh's sources, src/platform/win32 in place of src/platform/linux and the same
+# compile and link flags as build.sh's Windows branch. psport.exe exports what libpsport-gpu.dll
+# imports from it (gpu/port/psport_runtime.def).
 runtime() {
     local cc=$out/bin/x86_64-w64-mingw32-clang
     if [[ ! -f $out/gpu/libpsport-gpu.dll.a ]]; then echo 'Run tools/win32-cross.sh build first.' >&2; exit 1; fi
     read -r -a includes <<< "$(pkg-config --cflags vulkan sdl3)"
-    read -r -a libraries <<< "$(pkg-config --libs vulkan sdl3)"
+    read -r -a libraries <<< "$(pkg-config --libs vulkan sdl3 | sed 's/ -mwindows//')"
     local -a areas=(main loader runtime runtime/imports kernel system audio input net platform) objects=() failed=()
     local version commit source object
     version=$(<VERSION)
@@ -131,8 +132,9 @@ runtime() {
     for source in src/main/main.c src/main/cli.c src/main/game_info.c src/main/bind.c src/main/signals.c \
         src/loader/loader*.c src/*/runtime*.c src/platform/*.c src/platform/win32/*.c src/main/vulkan_smoke.c; do
         object=$out/runtime/${source//\//_}.o
-        if "$cc" -std=c11 -O2 -g -Wall -Wextra -Werror -DPS_VERSION="\"$version\"" -DPS_COMMIT="\"$commit\"" \
-            "${includes[@]}" -I. "${areas[@]/#/-Isrc/}" -c "$source" -o "$object" 2>> "$out/runtime/compile.log"; then
+        if "$cc" -std=c11 -O2 -g -Wall -Wextra -Werror -include src/platform/win32/posix_compat.h \
+            -DPS_VERSION="\"$version\"" -DPS_COMMIT="\"$commit\"" "${includes[@]}" -I. "${areas[@]/#/-Isrc/}" \
+            -c "$source" -o "$object" 2>> "$out/runtime/compile.log"; then
             objects+=("$object")
         else
             failed+=("$source")
@@ -143,7 +145,8 @@ runtime() {
     done
     llvm-ar rcs "$out/runtime/libatrac9.a" "$out"/runtime/atrac9_*.o
     if "$cc" "${objects[@]}" "$out/runtime/libatrac9.a" gpu/port/psport_runtime.def -L"$out/gpu" -lpsport-gpu \
-        "${libraries[@]}" -lbcrypt -lsynchronization -Wl,--error-limit=0 -o "$out/psport.exe" 2> "$out/runtime/link.log" &&
+        "${libraries[@]}" -pthread -lws2_32 -lbcrypt -lsynchronization -lonecore -Wl,--disable-high-entropy-va \
+        -Wl,--error-limit=0 -o "$out/psport.exe" 2> "$out/runtime/link.log" &&
         ((${#failed[@]} == 0)); then
         echo "Built $out/psport.exe"; return
     fi

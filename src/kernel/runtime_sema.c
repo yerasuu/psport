@@ -5,7 +5,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#ifndef _WIN32
 #include <pthread.h>
 #include <errno.h>
 #include <time.h>
@@ -67,11 +66,7 @@ static int32_t wait_count(uint32_t id,int32_t need,uint32_t *p_timeout,int block
            PS4 priority scheduler, host threads run at equal priority. */
         if (runtime_env("PS_TRACE_SEMA",NULL)) fprintf(stderr,"Runtime: blocking wait on semaphore %u (need %d, count %d)\n",id,need,p_sema->c_resources); /* deadlock diagnosis */
         Waiter w={.need=need};
-        pthread_condattr_t attr;
-        host_check(pthread_condattr_init(&attr));
-        host_check(pthread_condattr_setclock(&attr,CLOCK_MONOTONIC));
-        host_check(pthread_cond_init(&w.event,&attr));
-        host_check(pthread_condattr_destroy(&attr));
+        host_check(pthread_cond_init(&w.event,NULL));
         Waiter **pp_tail=&p_sema->p_first;
         while (*pp_tail) pp_tail=&(*pp_tail)->p_next;
         *pp_tail=&w; ++p_sema->active;
@@ -355,7 +350,3 @@ void runtime_sema_report(void) {
            s_c_created,s_c_deleted,s_c_acquired,s_c_signaled,s_c_timed_out);
     runtime_exception_unlock(&s_lock);
 }
-#else
-uintptr_t runtime_sema_resolve(const char *name) { (void)name; return 0; }
-void runtime_sema_report(void) { puts("Runtime: Windows semaphore backend not implemented"); }
-#endif

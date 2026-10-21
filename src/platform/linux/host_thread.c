@@ -71,6 +71,14 @@ int ps_host_thread_stack(uintptr_t *p_out_va_low, size_t *p_out_cb_stack) {
     return 0;
 }
 
+int ps_host_thread_cpu_times(int is_whole_process, struct timespec *p_out_user, struct timespec *p_out_system) {
+    struct rusage usage;
+    if (getrusage(is_whole_process ? RUSAGE_SELF : RUSAGE_THREAD, &usage)) return errno;
+    *p_out_user = (struct timespec){usage.ru_utime.tv_sec, usage.ru_utime.tv_usec * 1000};
+    *p_out_system = (struct timespec){usage.ru_stime.tv_sec, usage.ru_stime.tv_usec * 1000};
+    return 0;
+}
+
 unsigned ps_host_thread_cpu_count(void) {
     cpu_set_t set;
     CPU_ZERO(&set);

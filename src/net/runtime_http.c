@@ -7,7 +7,6 @@
 #include <ctype.h>
 #include <string.h>
 #include <strings.h>
-#ifndef _WIN32
 #include <time.h>
 
 #define HTTP_OUT_OF_MEMORY ((int32_t)0x80431022)
@@ -335,6 +334,3 @@ static const RuntimeExport s_exports[]={
     {"sceHttp2CreateTemplate",http_object}, {"sceHttp2DeleteTemplate",runtime_stub},
 };
 uintptr_t runtime_http_resolve(const char *sz_name) { return RUNTIME_LOOKUP(s_exports,sz_name); }
-#else
-uintptr_t runtime_http_resolve(const char *name) { (void)name; return 0; }
-#endif
