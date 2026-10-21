@@ -20,7 +20,7 @@ PS_GAME_DIR=/path/to/dump PS_PERMISSIVE=1 PS_SAVE_LOG=1 bash run.sh
 - `PS_PERMISSIVE_OUT=error`: with `PS_PERMISSIVE=1`, missing imports that write through a pointer
   argument return `0x80020016`, so the game takes its error path instead of reading memory nothing
   wrote.
-- `PS_SAVE_LOG=1`: the output also goes to `<data>/logs/<time>.log`.
+- `PS_SAVE_LOG=1`: the output also goes to `<data>/logs/<time>.log`; the newest 30 runs stay (`PS_KEEP_LOGS=n`, 0 keeps them all).
 - `PS_GAME_PROFILE=none`: run a title that has a profile without it (its title data still applies).
 - `PS_SYS_MODULES=<folder>`: the user's own dump of system modules, for comparison only (see
   [Missing system libraries](#missing-system-libraries)).
