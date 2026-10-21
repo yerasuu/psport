@@ -227,9 +227,9 @@ uintptr_t runtime_rwlock_resolve(const char *sz_name) {
     return RUNTIME_LOOKUP(s_exports,sz_name);
 }
 void runtime_rwlock_report(void) {
-    pthread_mutex_lock(&s_registry_lock);
+    if (!runtime_exception_report_lock(&s_registry_lock,"rwlock")) return;
     printf("Runtime: rwlocks created=%zu, reads=%zu, writes=%zu, unlocks=%zu\n",s_c_created,s_c_reads,s_c_writes,s_c_unlocks);
-    pthread_mutex_unlock(&s_registry_lock);
+    runtime_exception_unlock(&s_registry_lock);
 }
 #else
 uintptr_t runtime_rwlock_resolve(const char *name) { (void)name; return 0; }

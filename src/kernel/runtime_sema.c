@@ -350,7 +350,7 @@ uintptr_t runtime_sema_resolve(const char *sz_name) {
     return RUNTIME_LOOKUP(s_exports,sz_name);
 }
 void runtime_sema_report(void) {
-    runtime_exception_lock(&s_lock);
+    if (!runtime_exception_report_lock(&s_lock,"semaphore")) return;
     printf("Runtime: semaphores created=%zu, deleted=%zu, acquired=%zu, signals=%zu, timeouts=%zu\n",
            s_c_created,s_c_deleted,s_c_acquired,s_c_signaled,s_c_timed_out);
     runtime_exception_unlock(&s_lock);

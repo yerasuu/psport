@@ -134,7 +134,7 @@ static const RuntimeExport s_exports[]={
 };
 uintptr_t runtime_barrier_resolve(const char *sz_name) { return RUNTIME_LOOKUP(s_exports,sz_name); }
 void runtime_barrier_report(void) {
-    runtime_exception_lock(&s_lock);
+    if (!runtime_exception_report_lock(&s_lock,"barrier")) return;
     if (s_c_created) printf("Runtime: barriers created=%zu, waits=%zu, releases=%zu\n",s_c_created,s_c_waits,s_c_releases);
     runtime_exception_unlock(&s_lock);
 }

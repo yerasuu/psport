@@ -170,6 +170,12 @@ void runtime_exception_release(void);
  * while it sleeps; the sleep is cut into slices and returns 0 early, as a spurious wakeup, to deliver
  * one. */
 int runtime_exception_wait(pthread_cond_t *p_cond, pthread_mutex_t *p_lock, const struct timespec *p_end);
+/* runtime_exception_lock for an exit report: the game's threads still run when the window closes
+ * and one may never let the lock go (stopped inside it by a fault, or a lock the report shares with
+ * the exiting thread), so the wait is bounded and a report that cannot take it says so instead of
+ * hanging the exit. 1 when taken (let go with runtime_exception_unlock), 0 when sz_report was
+ * skipped. */
+int runtime_exception_report_lock(pthread_mutex_t *p_lock, const char *sz_report);
 #endif
 /* The calling thread runs guest code on this stack from now on (the guest main stack): what
  * scePthreadAttrGet reports, which garbage collectors scan up to. */

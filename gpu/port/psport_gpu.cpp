@@ -26,8 +26,7 @@
 #include "video_core/cache_storage.h"
 
 extern "C" {
-// runtime_calls.c
-void runtime_calls_report(void);
+void runtime_report(void); // runtime.c
 void runtime_debug_finish(const char* sz_how, int exit_code); // runtime_debug.c
 const char* runtime_file_user_dir(void);
 const char* runtime_savedata_title(void);
@@ -156,8 +155,7 @@ extern "C" int psport_gpu_init(const PsGpuConfig* p_config) {
             SDL_Delay(2);
         }
         psport_gpu_flush_caches(1);
-        std::fflush(stdout);
-        runtime_calls_report();
+        runtime_report();
         runtime_debug_finish("window closed", 0);
         std::_Exit(0);
     });

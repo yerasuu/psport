@@ -578,7 +578,7 @@ uintptr_t runtime_thread_resolve(const char *sz_name) {
     return 0;
 }
 void runtime_thread_report(void) {
-    runtime_exception_lock(&s_lock);
+    if (!runtime_exception_report_lock(&s_lock,"thread")) return;
     printf("Runtime: guest threads created=%zu, exited=%zu, joined=%zu\n",s_c_created,s_c_exited,s_c_joined);
     if (s_c_cancel_requests)
         printf("Runtime: thread cancellation: %zu requested, %zu taken at pthread_testcancel (blocking "

@@ -205,7 +205,7 @@ static const RuntimeExport s_exports[]={
 };
 uintptr_t runtime_eventflag_resolve(const char *sz_name) { return RUNTIME_LOOKUP(s_exports,sz_name); }
 void runtime_eventflag_report(void) {
-    runtime_exception_lock(&s_lock);
+    if (!runtime_exception_report_lock(&s_lock,"event flag")) return;
     printf("Runtime: event flag waits=%zu, timeouts=%zu\n",s_c_waits,s_c_timed_out);
     runtime_exception_unlock(&s_lock);
 }

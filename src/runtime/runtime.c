@@ -23,6 +23,8 @@ static _Atomic size_t s_c_guards_acquired, s_c_guards_released;
 static uint64_t s_stack_canary;
 static _Atomic size_t s_c_memory_calls;
 #define TLS_MODULES RUNTIME_TLS_MODULES
+/* Longer than every exit report bounded lock wait together. */
+#define REPORT_WAIT_MS 3000
 static struct { const void *p_data; uint64_t filesz, memsz; } s_tls_modules[TLS_MODULES];
 static _Thread_local unsigned char *s_tls_blocks[TLS_MODULES];
 static void *s_p_process_param;
@@ -75,7 +77,15 @@ void runtime_start(uint64_t flags) {
     }
     s_stack_canary &= ~UINT64_C(255);
 }
+/* The window thread and a game thread leaving through exit or _exit may both report: one prints,
+ * and the other waits for it (bounded, its reports' locks are) since it ends the process after. */
 void runtime_report(void) {
+    static int s_state;
+    int expected=0;
+    if (!__atomic_compare_exchange_n(&s_state,&expected,1,0,__ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE)) {
+        for (int i=0;i<REPORT_WAIT_MS && __atomic_load_n(&s_state,__ATOMIC_ACQUIRE)!=2;++i) ps_host_time_sleep_ns(1000000,NULL);
+        return;
+    }
     printf("Runtime: _init_env=%zu, atexit=%zu, __cxa_atexit=%zu, registered handlers=%zu\n",
            s_c_init_calls, s_c_atexit_calls, s_c_cxa_calls, s_c_handlers);
     printf("Runtime: static guards acquired=%zu, released=%zu\n", (size_t)s_c_guards_acquired, (size_t)s_c_guards_released);
@@ -102,6 +112,7 @@ void runtime_report(void) {
     runtime_aio_report();
     printf("Runtime: memory operations=%zu\n", (size_t)s_c_memory_calls);
     runtime_calls_report();
+    __atomic_store_n(&s_state,2,__ATOMIC_RELEASE);
 }
 void runtime_stop(int status) {
     psport_gpu_flush_caches(1);

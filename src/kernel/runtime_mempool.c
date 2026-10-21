@@ -128,11 +128,11 @@ static const RuntimeExport s_exports[]={
 };
 uintptr_t runtime_mempool_resolve(const char *sz_name) { return RUNTIME_LOOKUP(s_exports,sz_name); }
 void runtime_mempool_report(void) {
-    pthread_mutex_lock(&s_lock);
+    if (!runtime_exception_report_lock(&s_lock,"memory pool")) return;
     printf("Runtime: memory pool expands=%zu (%#" PRIx64 " bytes), reserves=%zu, commits=%zu, decommits=%zu, "
            "committed=%#" PRIx64 "\n",
            s_c_expands,s_cb_expanded,s_c_reserves,s_c_commits,s_c_decommits,s_cb_expanded-s_cb_free);
-    pthread_mutex_unlock(&s_lock);
+    runtime_exception_unlock(&s_lock);
 }
 #else
 uintptr_t runtime_mempool_resolve(const char *name) { (void)name; return 0; }

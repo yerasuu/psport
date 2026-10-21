@@ -295,11 +295,11 @@ static const RuntimeExport s_exports[]={
 };
 uintptr_t runtime_aio_resolve(const char *sz_name) { return RUNTIME_LOOKUP(s_exports,sz_name); }
 void runtime_aio_report(void) {
-    pthread_mutex_lock(&s_lock);
+    if (!runtime_exception_report_lock(&s_lock,"aio")) return;
     printf("Runtime: aio submissions=%zu, commands=%zu (failed %zu), read=%" PRIu64 " bytes, written=%" PRIu64
            " bytes, cancels=%zu, deletes=%zu, wait timeouts=%zu, ids in use=%zu\n",
            s_c_submissions,s_c_commands,s_c_failures,s_cb_read,s_cb_written,s_c_cancels,s_c_deletes,s_c_timeouts,s_c_live);
-    pthread_mutex_unlock(&s_lock);
+    runtime_exception_unlock(&s_lock);
 }
 #else
 uintptr_t runtime_aio_resolve(const char *name) { (void)name; return 0; }

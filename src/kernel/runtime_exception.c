@@ -20,6 +20,7 @@
  * handler installed and without one (only a handler installed during the sleep can need it). */
 #define RAISE_SLICE_NS 2000000
 #define IDLE_SLICE_NS 100000000
+#define REPORT_LOCK_WAIT_NS 100000000
 #define MC_FLAG_MASK 0x7u
 #define MC_FPFMT_XMM 0x10002
 #define MC_FPOWNED_FPU 0x20001
@@ -84,6 +85,23 @@ void runtime_exception_lock(pthread_mutex_t *p_lock) {
 void runtime_exception_unlock(pthread_mutex_t *p_lock) {
     pthread_mutex_unlock(p_lock);
     runtime_exception_release();
+}
+int runtime_exception_report_lock(pthread_mutex_t *p_lock, const char *sz_report) {
+    runtime_exception_hold();
+    struct timespec end;
+    int error=ps_host_time_read(PS_HOST_CLOCK_MONOTONIC,&end);
+    if (!error) {
+        end.tv_nsec+=REPORT_LOCK_WAIT_NS;
+        end.tv_sec+=end.tv_nsec/1000000000; end.tv_nsec%=1000000000;
+        error=pthread_mutex_clocklock(p_lock,CLOCK_MONOTONIC,&end);
+        if (!error) return 1;
+    }
+    runtime_exception_release();
+    if (error==ETIMEDOUT)
+        printf("Runtime: %s report skipped: its lock stayed held for %d ms, another thread keeps it at exit\n",
+               sz_report,REPORT_LOCK_WAIT_NS/1000000);
+    else printf("Runtime: %s report skipped: its lock could not be taken: %s\n",sz_report,strerror(error));
+    return 0;
 }
 int runtime_exception_wait(pthread_cond_t *p_cond, pthread_mutex_t *p_lock, const struct timespec *p_end) {
     if (s_is_deferred && s_held==1) { runtime_exception_unlock(p_lock); runtime_exception_lock(p_lock); return 0; }

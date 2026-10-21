@@ -1306,8 +1306,13 @@ static const RuntimeExport s_exports[]={
 };
 uintptr_t runtime_pad_resolve(const char *sz_name) { return RUNTIME_LOOKUP(s_exports,sz_name); }
 void runtime_pad_report(void) {
-    printf("Runtime: pad reads=%zu, short presses=%zu (expired unread %zu), gamepad=%s\n",s_c_reads,s_c_short_presses,
-           s_c_expired_presses,s_p_gamepad ? SDL_GetGamepadName(s_p_gamepad) : "none");
+    /* Under the lock because a game thread's current_gamepad may close the gamepad meanwhile. */
+    if (runtime_exception_report_lock(&s_lock,"pad")) {
+        const char *sz_name=s_p_gamepad ? SDL_GetGamepadName(s_p_gamepad) : NULL;
+        printf("Runtime: pad reads=%zu, short presses=%zu (expired unread %zu), gamepad=%s\n",s_c_reads,
+               s_c_short_presses,s_c_expired_presses,s_p_gamepad ? sz_name ? sz_name : "unnamed" : "none");
+        runtime_exception_unlock(&s_lock);
+    }
     if (s_is_skip_enabled)
         printf("Runtime: skip_movie presses=%zu, movies asked to stop=%zu, title scene skips=%zu\n",
                s_c_skip_presses,s_c_skip_movies,s_c_skip_scenes);
