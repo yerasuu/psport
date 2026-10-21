@@ -526,6 +526,22 @@ void runtime_pad_print_default_controls(const char *sz_title_controls) {
     if (s_look_tau_us!=LOOK_TAU_US) printf("mouse_look_smoothing_ms=%g\n",s_look_tau_us/1000.0f);
     if (s_look_deadzone!=LOOK_DEADZONE) printf("mouse_look_deadzone=%d\n",s_look_deadzone);
 }
+/* A gamepad without a touch surface has only View (Back) for the touchpad, a click on its left half,
+ * and games want both halves (the right one holds key items or a prompt's second choice). While View
+ * is bound to the touchpad alone and the motion emulation does not own it, View + d-pad left or right
+ * clicks that half as long as both are held, and the d-pad's press is not the game's. View alone
+ * clicks the left half once held BACK_TAP_US, or for BACK_TAP_US when let go sooner, so View + right
+ * does not click the left half first. */
+#define BACK_TAP_US 150000u
+static int s_is_back_touchpad_only, s_is_touch_combo, s_is_combo_back_down;
+static int is_back_touchpad_only(void) {
+    for (int input=0;input<IN_COUNT;++input)
+        for (int i=0;input!=IN_TOUCHPAD && i<s_bindings[input].c_pads;++i)
+            if (s_bindings[input].pad[i]==SDL_GAMEPAD_BUTTON_BACK || s_bindings[input].pad_mods[i]==SDL_GAMEPAD_BUTTON_BACK) return 0;
+    for (int i=0;i<s_bindings[IN_TOUCHPAD].c_pads;++i)
+        if (s_bindings[IN_TOUCHPAD].pad[i]==SDL_GAMEPAD_BUTTON_BACK && s_bindings[IN_TOUCHPAD].pad_mods[i]<0) return 1;
+    return 0;
+}
 /* key.<input>= / pad.<input>= lines of the settings file. */
 static void load_bindings(void) {
     bind_defaults();
@@ -572,6 +588,7 @@ static void load_bindings(void) {
     else
         printf("Runtime: skip_movies on: key.skip_movie (%d bound) or pad.skip_movie (%d bound) stops the movies playing\n",
                s_bindings[IN_SKIP_MOVIE].c_keys,s_bindings[IN_SKIP_MOVIE].c_pads);
+    s_is_back_touchpad_only=is_back_touchpad_only();
 }
 /* The mouse while the window holds it: buttons, and the wheel as short presses (one per notch,
  * each held and released for a few frames so the game sees it). */
@@ -746,13 +763,36 @@ static int is_menu_button(SDL_Gamepad *p_sdl_gamepad, int button) {
     }
     return 0;
 }
+static int is_touch_combo_button(int button) {
+    return s_is_touch_combo && (button==SDL_GAMEPAD_BUTTON_BACK ||
+                                (s_is_combo_back_down && (button==SDL_GAMEPAD_BUTTON_DPAD_LEFT || button==SDL_GAMEPAD_BUTTON_DPAD_RIGHT)));
+}
+static void touch_combo(PadData *p_pad_data, SDL_Gamepad *p_sdl_gamepad) {
+    static int s_was_back_down, s_is_combo_used;
+    static uint64_t s_back_down_us, s_tap_until_us;
+    const uint64_t now=p_pad_data->timestamp;
+    int side=-1;
+    if (s_is_combo_back_down) {
+        if (!s_was_back_down) { s_is_combo_used=0; s_back_down_us=now; }
+        const int is_left=pad_button_value(p_sdl_gamepad,SDL_GAMEPAD_BUTTON_DPAD_LEFT)>30;
+        const int is_right=pad_button_value(p_sdl_gamepad,SDL_GAMEPAD_BUTTON_DPAD_RIGHT)>30;
+        if (is_left || is_right) { side=is_right; s_is_combo_used=1; }
+        else if (!s_is_combo_used && now-s_back_down_us>=BACK_TAP_US) side=0;
+    } else if (s_was_back_down && !s_is_combo_used && now-s_back_down_us<BACK_TAP_US) {
+        s_tap_until_us=now+BACK_TAP_US;
+    }
+    s_was_back_down=s_is_combo_back_down;
+    if (side<0 && now<s_tap_until_us) side=0;
+    if (side>=0) touch_click(p_pad_data,side);
+}
 /* The bound gamepad buttons' state; triggers as their analog value. */
 static int pad_value(SDL_Gamepad *p_sdl_gamepad, int input) {
     int value=0;
     for (int i=0;i<s_bindings[input].c_pads;++i) {
         const int b=s_bindings[input].pad[i], mod=s_bindings[input].pad_mods[i];
         if (mod>=0 && pad_button_value(p_sdl_gamepad,mod)<=30) continue;
-        if ((input!=IN_MENU && is_menu_button(p_sdl_gamepad,b)) || (input!=IN_SKIP_MOVIE && is_skip_button(b))) continue;
+        if ((input!=IN_MENU && is_menu_button(p_sdl_gamepad,b)) || (input!=IN_SKIP_MOVIE && is_skip_button(b)) ||
+            is_touch_combo_button(b)) continue;
         const int v=pad_button_value(p_sdl_gamepad,b);
         if (v>value) value=v;
     }
@@ -1097,6 +1137,12 @@ static void sample_host(PadData *p_pad_data) {
     latch_take(p_pad_data->timestamp,p__bool,p_sdl_gamepad,is_captured);
     skip_update(p_sdl_gamepad,p__bool,0);
     if (p_sdl_gamepad) {
+        s_is_touch_combo=s_is_back_touchpad_only && !SDL_GetNumGamepadTouchpads(p_sdl_gamepad) && !runtime_pad_motion_is_on();
+        s_is_combo_back_down=s_is_touch_combo && pad_button_value(p_sdl_gamepad,SDL_GAMEPAD_BUTTON_BACK)>30;
+        static int s_was_touch_combo;
+        if (s_is_touch_combo && !s_was_touch_combo)
+            puts("Runtime: gamepad without a touch surface: View + d-pad left/right clicks each touchpad half, View alone the left");
+        s_was_touch_combo=s_is_touch_combo;
         int touch_right=0;
         for (int i=IN_CROSS;i<=IN_RIGHT;++i) {
             const int v=pad_value(p_sdl_gamepad,i);
@@ -1130,6 +1176,7 @@ static void sample_host(PadData *p_pad_data) {
         // Back/Select on pads without a touch surface is a left-side click.
         if ((p_pad_data->buttons & BTN_TOUCHPAD) && !p_pad_data->touch_count) touch_click(p_pad_data,0);
         if (touch_right) touch_click(p_pad_data,1);
+        if (s_is_touch_combo) touch_combo(p_pad_data,p_sdl_gamepad);
     }
     const int is_pad_active=p_sdl_gamepad && (p_pad_data->buttons || p_pad_data->l2>30 || p_pad_data->r2>30 ||
                                               p_pad_data->touch_count || is_stick_moved(p_pad_data->left_x) ||
