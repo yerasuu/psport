@@ -100,7 +100,7 @@ static void prune_locked(Rwlock *p_rwlock, Holder *p_holder) {
     *pp_link=p_holder->p_next; free(p_holder);
 }
 enum Operation { READ, WRITE, TRY_READ, TRY_WRITE, TIMED_READ, TIMED_WRITE };
-static int32_t acquire(Rwlock **pp_handle, enum Operation op, const GuestTime *p_time) {
+static int32_t acquire(Rwlock **pp_handle, enum Operation op, const GuestTime *p_time, clockid_t clock) {
     if (!pp_handle) return error(EINVAL);
     int writer=op==WRITE || op==TRY_WRITE || op==TIMED_WRITE;
     int attempt=op==TRY_READ || op==TRY_WRITE;
@@ -133,7 +133,7 @@ static int32_t acquire(Rwlock **pp_handle, enum Operation op, const GuestTime *p
         if (!p_time || p_time->nanoseconds<0 || p_time->nanoseconds>=1000000000) e=EINVAL;
         else {
             struct timespec deadline={.tv_sec=(time_t)p_time->seconds,.tv_nsec=(long)p_time->nanoseconds};
-            e=writer ? pthread_rwlock_timedwrlock(&p_rwlock->native,&deadline) : pthread_rwlock_timedrdlock(&p_rwlock->native,&deadline);
+            e=writer ? pthread_rwlock_clockwrlock(&p_rwlock->native,clock,&deadline) : pthread_rwlock_clockrdlock(&p_rwlock->native,clock,&deadline);
         }
     }
     pthread_mutex_lock(&s_registry_lock);
@@ -145,12 +145,21 @@ static int32_t acquire(Rwlock **pp_handle, enum Operation op, const GuestTime *p
     prune_locked(p_rwlock,p_holder);
     pthread_mutex_unlock(&s_registry_lock); return error(e);
 }
-static ABI int32_t rw_read(Rwlock **pp_rwlock) { return acquire(pp_rwlock,READ,NULL); }
-static ABI int32_t rw_write(Rwlock **pp_rwlock) { return acquire(pp_rwlock,WRITE,NULL); }
-static ABI int32_t rw_tryread(Rwlock **pp_rwlock) { return acquire(pp_rwlock,TRY_READ,NULL); }
-static ABI int32_t rw_trywrite(Rwlock **pp_rwlock) { return acquire(pp_rwlock,TRY_WRITE,NULL); }
-static ABI int32_t rw_timedread(Rwlock **pp_rwlock,const GuestTime *p_time) { return acquire(pp_rwlock,TIMED_READ,p_time); }
-static ABI int32_t rw_timedwrite(Rwlock **pp_rwlock,const GuestTime *p_time) { return acquire(pp_rwlock,TIMED_WRITE,p_time); }
+static ABI int32_t rw_read(Rwlock **pp_rwlock) { return acquire(pp_rwlock,READ,NULL,CLOCK_REALTIME); }
+static ABI int32_t rw_write(Rwlock **pp_rwlock) { return acquire(pp_rwlock,WRITE,NULL,CLOCK_REALTIME); }
+static ABI int32_t rw_tryread(Rwlock **pp_rwlock) { return acquire(pp_rwlock,TRY_READ,NULL,CLOCK_REALTIME); }
+static ABI int32_t rw_trywrite(Rwlock **pp_rwlock) { return acquire(pp_rwlock,TRY_WRITE,NULL,CLOCK_REALTIME); }
+/* scePthreadRwlockTimed*lock take a timeout in microseconds from the call, unlike the POSIX calls'
+   absolute realtime deadline; libkernel measures it on a monotonic clock. */
+static int32_t sce_timed(Rwlock **pp_rwlock, enum Operation op, uint32_t timeout_us) {
+    struct timespec now;
+    if (ps_host_time_read(PS_HOST_CLOCK_MONOTONIC,&now)) return error(EINVAL);
+    int64_t ns=now.tv_nsec+(int64_t)(timeout_us%1000000)*1000;
+    GuestTime end={.seconds=now.tv_sec+timeout_us/1000000+ns/1000000000,.nanoseconds=ns%1000000000};
+    return acquire(pp_rwlock,op,&end,CLOCK_MONOTONIC);
+}
+static ABI int32_t rw_timedread(Rwlock **pp_rwlock,uint32_t timeout_us) { return sce_timed(pp_rwlock,TIMED_READ,timeout_us); }
+static ABI int32_t rw_timedwrite(Rwlock **pp_rwlock,uint32_t timeout_us) { return sce_timed(pp_rwlock,TIMED_WRITE,timeout_us); }
 static ABI int32_t rw_unlock(Rwlock **pp_handle) {
     if (!pp_handle) return error(EINVAL);
     pthread_mutex_lock(&s_registry_lock);
@@ -192,8 +201,8 @@ static ABI int32_t posix_read(Rwlock **pp_rwlock) { return posix_result(rw_read(
 static ABI int32_t posix_write(Rwlock **pp_rwlock) { return posix_result(rw_write(pp_rwlock)); }
 static ABI int32_t posix_tryread(Rwlock **pp_rwlock) { return posix_result(rw_tryread(pp_rwlock)); }
 static ABI int32_t posix_trywrite(Rwlock **pp_rwlock) { return posix_result(rw_trywrite(pp_rwlock)); }
-static ABI int32_t posix_timedread(Rwlock **pp_rwlock,const GuestTime *p_time) { return posix_result(rw_timedread(pp_rwlock,p_time)); }
-static ABI int32_t posix_timedwrite(Rwlock **pp_rwlock,const GuestTime *p_time) { return posix_result(rw_timedwrite(pp_rwlock,p_time)); }
+static ABI int32_t posix_timedread(Rwlock **pp_rwlock,const GuestTime *p_time) { return posix_result(acquire(pp_rwlock,TIMED_READ,p_time,CLOCK_REALTIME)); }
+static ABI int32_t posix_timedwrite(Rwlock **pp_rwlock,const GuestTime *p_time) { return posix_result(acquire(pp_rwlock,TIMED_WRITE,p_time,CLOCK_REALTIME)); }
 static ABI int32_t posix_unlock(Rwlock **pp_rwlock) { return posix_result(rw_unlock(pp_rwlock)); }
 static const RuntimeExport s_exports[]={
     {"scePthreadRwlockInit",rw_init}, {"scePthreadRwlockDestroy",rw_destroy}, {"scePthreadRwlockRdlock",rw_read},
