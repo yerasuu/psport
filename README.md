@@ -204,7 +204,7 @@ its log and call report, implementing what is missing and checking the result.
 - A temporary fix one title needs is a declared, logged and disableable quirk
   ([docs/en/QUIRKS.md](docs/en/QUIRKS.md)).
 - No tests in the repository: changes are checked with `tools/regress.sh`; hardware tests, when
-  needed, are OpenOrbis homebrew.
+  needed, are OpenOrbis homebrew (`tools/hwtest/`).
 - Changes match the surrounding code; naming and the other conventions are in [CLAUDE.md](CLAUDE.md).
 - Changes from bbport and shadPS4 are ported by hand, each recorded in [FORK.md](FORK.md) with its
   source commit.

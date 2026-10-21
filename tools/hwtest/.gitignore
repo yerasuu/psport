@@ -1,0 +1,5 @@
+build/
+sce_sys/
+eboot.bin
+pkg.gp4
+*.pkg
