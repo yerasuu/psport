@@ -93,9 +93,12 @@ static ABI int32_t system_param(int32_t id,int32_t *p_value) {
     case 3: *p_value=1; break;                    /* 24-hour clock */
     case 4: case 5: {                             /* time zone (standard, minutes east), summer time */
         int32_t standard_sec=0, dst_sec=0;
-        const int e=ps_host_time_zone(&standard_sec,&dst_sec);
+        const int e=ps_host_time_zone_at((int64_t)time(NULL),&standard_sec,&dst_sec);
         if (e) fprintf(stderr,"Runtime: host time zone unreadable (errno %d), reporting UTC\n",e);
-        *p_value=id==4 ? standard_sec/60 : dst_sec!=0;
+        /* Summer time is in minutes (kb #772). A negative daylight saving (Europe/Dublin's winter)
+         * goes into the zone, so that summer time never reads negative and zone plus summer time
+         * stays the offset in force. */
+        *p_value=id==4 ? (standard_sec+(dst_sec<0 ? dst_sec : 0))/60 : (dst_sec>0 ? dst_sec : 0)/60;
         break;
     }
     case 7: *p_value=0; break;                    /* parental level off */

@@ -40,16 +40,28 @@ int ps_host_time_sleep_ns(uint64_t ns, uint64_t *p_out_remaining_ns) {
     return error;
 }
 
-int ps_host_time_zone(int32_t *p_out_standard_sec, int32_t *p_out_dst_sec) {
+int ps_host_time_zone_at(int64_t utc_sec, int32_t *p_out_standard_sec, int32_t *p_out_dst_sec) {
     tzset();
-    const time_t now = time(NULL);
+    const time_t at = (time_t)utc_sec;
     struct tm local;
-    if (!localtime_r(&now, &local)) return errno;
-    /* timezone is the zone's standard offset west of UTC, so that the daylight saving is whatever
-       tm_gmtoff carries beyond it, not a fixed hour. */
-    const long dst_sec = local.tm_isdst > 0 ? local.tm_gmtoff + timezone : 0;
-    *p_out_standard_sec = (int32_t)(local.tm_gmtoff - dst_sec);
-    *p_out_dst_sec = (int32_t)dst_sec;
+    if (!localtime_r(&at, &local)) return errno;
+    /* As the firmware's tzdata table: daylight saving is what the offset carries beyond the last
+       standard period's, so that it may be negative (Europe/Dublin's winter) and the sum stays the
+       offset in force. Week steps since only that period's offset matters, not where it ends. */
+    long standard_sec = local.tm_gmtoff;
+    if (local.tm_isdst > 0) {
+        standard_sec = -timezone;
+        for (int week = 1; week <= 60; ++week) {
+            const time_t probe = at - (time_t)week * 7 * 86400;
+            struct tm prior;
+            if (localtime_r(&probe, &prior) && prior.tm_isdst <= 0) {
+                standard_sec = prior.tm_gmtoff;
+                break;
+            }
+        }
+    }
+    *p_out_standard_sec = (int32_t)standard_sec;
+    *p_out_dst_sec = (int32_t)(local.tm_gmtoff - standard_sec);
     return 0;
 }
 

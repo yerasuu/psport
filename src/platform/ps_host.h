@@ -68,9 +68,10 @@ uint64_t ps_host_time_realtime_ns(void);
 int ps_host_time_sleep_ns(uint64_t ns, uint64_t *p_out_remaining_ns);
 /* Sleeps until the monotonic clock reaches deadline_ns: 0, EINTR or another errno. */
 int ps_host_time_sleep_until_ns(uint64_t deadline_ns);
-/* The host's time zone now, east of UTC in seconds: its standard offset and the daylight saving in
- * effect on top of it (0 outside it), so that local time is UTC plus both. 0, or the host's errno. */
-int ps_host_time_zone(int32_t *p_out_standard_sec, int32_t *p_out_dst_sec);
+/* The host's time zone rule in force at that UTC second, east of UTC in seconds: its standard
+ * offset and the daylight saving on top of it (0 outside it, negative in zones whose standard time
+ * is their summer one), so that local time is UTC plus both. 0, or the host's errno. */
+int ps_host_time_zone_at(int64_t utc_sec, int32_t *p_out_standard_sec, int32_t *p_out_dst_sec);
 
 /* ---- randomness ---- */
 /* Fills the buffer from the host's cryptographic source: 0, or the host's errno. */

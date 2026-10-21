@@ -2,11 +2,13 @@
 #include "ps_host.h"
 #include "host_win32.h"
 #include <errno.h>
+#include <stdio.h>
 
 #define NS_PER_SECOND 1000000000u
 #define NS_PER_FILETIME_TICK 100u
 /* 1601-01-01, FILETIME's epoch, to 1970-01-01 in 100 ns ticks. */
 #define FILETIME_UNIX_EPOCH 116444736000000000ull
+#define FILETIME_TICKS_PER_SECOND 10000000
 
 static uint64_t filetime_ticks(FILETIME time) {
     return ((uint64_t)time.dwHighDateTime << 32) | time.dwLowDateTime;
@@ -148,12 +150,36 @@ int ps_host_time_sleep_until_ns(uint64_t deadline_ns) {
     return deadline_ns > now_ns ? ps_host_time_sleep_ns(deadline_ns - now_ns, NULL) : 0;
 }
 
-/* Biases are minutes west of UTC, the daylight one counted from the standard time's. */
-int ps_host_time_zone(int32_t *p_out_standard_sec, int32_t *p_out_dst_sec) {
+/* Biases are minutes west of UTC, the daylight one counted from the standard time's; the year's
+ * rule converts the instant, so daylight saving is whatever its offset carries beyond the standard
+ * bias. */
+int ps_host_time_zone_at(int64_t utc_sec, int32_t *p_out_standard_sec, int32_t *p_out_dst_sec) {
+    const int64_t off_epoch_sec = (int64_t)(FILETIME_UNIX_EPOCH / FILETIME_TICKS_PER_SECOND);
+    /* FILETIME starts in 1601, but guest ticks start in year 1 and a zeroed one is common (an empty
+       save slot): earlier instants take the rule of 1601-01-02, a day in so that local time stays
+       within 1601 in every zone. */
+    const int64_t first_utc_sec = -off_epoch_sec + 86400;
+    if (utc_sec < first_utc_sec) {
+        static LONG s_is_logged;
+        if (!InterlockedExchange(&s_is_logged, 1))
+            fprintf(stderr, "Runtime: time zone asked for a time before 1601 (%lld s from 1970), using 1601's rule\n",
+                    (long long)utc_sec);
+        utc_sec = first_utc_sec;
+    }
+    if (utc_sec > INT64_MAX / FILETIME_TICKS_PER_SECOND - off_epoch_sec) return EOVERFLOW;
+    const uint64_t ticks_utc = (uint64_t)(utc_sec + off_epoch_sec) * FILETIME_TICKS_PER_SECOND;
+    const FILETIME file_utc = {.dwLowDateTime = (DWORD)ticks_utc, .dwHighDateTime = (DWORD)(ticks_utc >> 32)};
+    DYNAMIC_TIME_ZONE_INFORMATION dynamic;
+    SYSTEMTIME system_utc, system_local;
     TIME_ZONE_INFORMATION zone;
-    const DWORD id = GetTimeZoneInformation(&zone);
-    if (id == TIME_ZONE_ID_INVALID) return ps_win32_errno(GetLastError());
+    FILETIME file_local;
+    if (GetDynamicTimeZoneInformation(&dynamic) == TIME_ZONE_ID_INVALID || !FileTimeToSystemTime(&file_utc, &system_utc) ||
+        !GetTimeZoneInformationForYear(system_utc.wYear, &dynamic, &zone) ||
+        !SystemTimeToTzSpecificLocalTimeEx(&dynamic, &system_utc, &system_local) ||
+        !SystemTimeToFileTime(&system_local, &file_local))
+        return ps_win32_errno(GetLastError());
+    const int64_t offset_sec = ((int64_t)filetime_ticks(file_local) - (int64_t)ticks_utc) / FILETIME_TICKS_PER_SECOND;
     *p_out_standard_sec = -(int32_t)(zone.Bias + zone.StandardBias) * 60;
-    *p_out_dst_sec = id == TIME_ZONE_ID_DAYLIGHT ? -(int32_t)(zone.DaylightBias - zone.StandardBias) * 60 : 0;
+    *p_out_dst_sec = (int32_t)(offset_sec - *p_out_standard_sec);
     return 0;
 }

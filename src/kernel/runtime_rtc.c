@@ -7,6 +7,7 @@
 #include <string.h>
 #include <time.h>
 
+#define ERR_KERNEL(n) ((int32_t)(UINT32_C(0x80020000)|(n)))
 #define ERR_INVALID_POINTER ((int32_t)0x80B50002)
 #define ERR_INVALID_VALUE ((int32_t)0x80B50003)
 #define ERR_BAD_PARSE ((int32_t)0x80B50007)
@@ -79,18 +80,35 @@ static uint64_t host_utc(void) {
 static uint64_t now_utc(void) {
     return host_utc()+(uint64_t)__atomic_load_n(&s_offset_system_us,__ATOMIC_RELAXED);
 }
-/* Offset of local time from UTC at the given UTC tick, in microseconds. */
-static int64_t local_offset(uint64_t utc) {
-    time_t seconds=(time_t)((int64_t)(utc-UNIX_EPOCH_TICKS)/1000000);
-    struct tm local;
-    localtime_r(&seconds,&local);
-    return (int64_t)local.tm_gmtoff*1000000;
+static int64_t epoch_seconds(uint64_t tick) { return ((int64_t)tick-(int64_t)UNIX_EPOCH_TICKS)/1000000; }
+/* libSceRtc asks libkernel for the zone rule in force at that instant and keeps whole minutes of
+ * its standard offset plus daylight saving (kb #772); libkernel's error codes pass through. */
+static int32_t zone_minutes_at_utc(uint64_t utc, int64_t *p_out_minutes) {
+    int32_t standard_sec, dst_sec;
+    const int error=ps_host_time_zone_at(epoch_seconds(utc),&standard_sec,&dst_sec);
+    if (error) return ERR_KERNEL(runtime_guest_errno(error));
+    *p_out_minutes=(standard_sec+dst_sec)/60; return 0;
+}
+static int32_t zone_minutes_at_local(uint64_t local, int64_t *p_out_minutes) {
+    int64_t utc_sec;
+    int32_t standard_sec, dst_sec;
+    const int error=runtime_time_zone_at_local(epoch_seconds(local),-1,&utc_sec,&standard_sec,&dst_sec);
+    if (error) return ERR_KERNEL(runtime_guest_errno(error));
+    *p_out_minutes=(standard_sec+dst_sec)/60; return 0;
+}
+static int32_t add_minutes(uint64_t tick, int64_t minutes, uint64_t *p_out_tick) {
+    const int64_t offset_us=minutes*60000000;
+    if (offset_us<0 ? tick<(uint64_t)-offset_us : tick>UINT64_MAX-(uint64_t)offset_us) return ERR_INVALID_VALUE;
+    *p_out_tick=tick+(uint64_t)offset_us; return 0;
 }
 
 static ABI int32_t rtc_current_local(DateTime *p_date_time) {
     if (!p_date_time) return ERR_INVALID_POINTER;
-    uint64_t utc=now_utc();
-    from_tick((uint64_t)((int64_t)utc+local_offset(utc)),p_date_time);
+    const uint64_t utc=now_utc();
+    int64_t minutes;
+    const int32_t error=zone_minutes_at_utc(utc,&minutes);
+    if (error) return error;
+    from_tick(utc+(uint64_t)(minutes*60000000),p_date_time);
     return 0;
 }
 static ABI int32_t rtc_current_clock(DateTime *p_date_time, int32_t minutes) {
@@ -99,18 +117,17 @@ static ABI int32_t rtc_current_clock(DateTime *p_date_time, int32_t minutes) {
     return 0;
 }
 static ABI int32_t rtc_current_tick(uint64_t *p_tick) { if (!p_tick) return ERR_INVALID_POINTER; *p_tick=now_utc(); return 0; }
-/* With the zone in effect now, as sceKernelConvertUtcToLocaltime gives it, not the one at that tick. */
 static ABI int32_t rtc_utc_to_local(const uint64_t *p_utc, uint64_t *p_local) {
     if (!p_utc || !p_local) return ERR_INVALID_POINTER;
-    int32_t standard_sec, dst_sec;
-    if (ps_host_time_zone(&standard_sec,&dst_sec)) return ERR_INVALID_VALUE;
-    const int64_t offset_us=(int64_t)(standard_sec/60+dst_sec/60)*60000000;
-    if (offset_us<0 ? *p_utc<(uint64_t)-offset_us : *p_utc>UINT64_MAX-(uint64_t)offset_us) return ERR_INVALID_VALUE;
-    *p_local=*p_utc+(uint64_t)offset_us; return 0;
+    int64_t minutes;
+    const int32_t error=zone_minutes_at_utc(*p_utc,&minutes);
+    return error ? error : add_minutes(*p_utc,minutes,p_local);
 }
 static ABI int32_t rtc_local_to_utc(const uint64_t *p_local, uint64_t *p_utc) {
     if (!p_local || !p_utc) return ERR_INVALID_POINTER;
-    *p_utc=(uint64_t)((int64_t)*p_local-local_offset(*p_local)); return 0;
+    int64_t minutes;
+    const int32_t error=zone_minutes_at_local(*p_local,&minutes);
+    return error ? error : add_minutes(*p_local,-minutes,p_utc);
 }
 static ABI int32_t rtc_day_of_week(int32_t year, int32_t month, int32_t day) {
     if (year<1 || year>9999) return ERR_INVALID_YEAR;
@@ -145,9 +162,10 @@ static ABI int32_t rtc_get_time_t(const DateTime *p_date_time, int64_t *p_second
 static ABI int32_t rtc_rfc2822_local(char *sz_out, const uint64_t *p_utc_tick) {
     if (!sz_out) return ERR_INVALID_POINTER;
     uint64_t utc=p_utc_tick ? *p_utc_tick : now_utc();
-    int64_t zone_seconds=local_offset(utc);
-    DateTime t; from_tick((uint64_t)((int64_t)utc+zone_seconds),&t);
-    int64_t minutes=zone_seconds/60000000;
+    int64_t minutes;
+    const int32_t error=zone_minutes_at_utc(utc,&minutes);
+    if (error) return error;
+    DateTime t; from_tick(utc+(uint64_t)(minutes*60000000),&t);
     char sz_text[64];
     snprintf(sz_text,sizeof(sz_text),"%s, %02u %s %04u %02u:%02u:%02u %c%02d%02d",s_day_names[rtc_day_of_week(t.year,t.month,t.day)],t.day,
              s_month_names[t.month-1],t.year,t.hour,t.minute,t.second,minutes<0 ? '-' : '+',

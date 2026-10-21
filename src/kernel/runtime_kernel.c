@@ -144,7 +144,8 @@ typedef struct { int32_t minuteswest, dsttime; } GuestTimezone;
 static ABI int32_t kernel_gettimezone(GuestTimezone *p_timezone) {
     if (!p_timezone) return ERR(22);
     int32_t standard_sec, dst_sec;
-    if (ps_host_time_zone(&standard_sec,&dst_sec)) return ERR(22);
+    const int error=ps_host_time_zone_at((int64_t)time(NULL),&standard_sec,&dst_sec);
+    if (error) return ERR(runtime_guest_errno(error));
     p_timezone->minuteswest=standard_sec/60; p_timezone->dsttime=dst_sec/60;
     return 0;
 }
@@ -161,45 +162,51 @@ static ABI int32_t kernel_gettimeofday(GuestTimeval *p_timeval) {
 }
 static ABI int64_t posix_time(int64_t *p_out) { int64_t t=(int64_t)time(NULL); if (p_out) *p_out=t; return t; }
 /* SceKernelTimesec: west_sec is the standard offset east of UTC (whatever its name says), dst_sec
- * the daylight saving on top of it; local time is UTC plus both. */
-typedef struct { int64_t t; uint32_t west_sec, dst_sec; } GuestTimesec;
-/* Daylight saving in effect at a broken-down time: its offset beyond the zone's standard one. */
-static int64_t daylight_saving(const struct tm *p_time) { return p_time->tm_isdst>0 ? p_time->tm_gmtoff+timezone : 0; }
-/* libkernel converts with the zone in effect now, whatever time it is given. */
-static ABI int32_t utc_to_local(int64_t utc,int64_t *p_local,GuestTimesec *p_zone,uint64_t *p_dst_sec) {
-    if (!p_local) return ERR(22);
-    GuestTimezone zone;
-    const int32_t result=kernel_gettimezone(&zone);
-    if (result) return result;
-    const int64_t west_sec=(int64_t)zone.minuteswest*60, dst_sec=(int64_t)zone.dsttime*60;
-    *p_local=utc+west_sec+dst_sec;
-    if (p_zone) { p_zone->t=utc; p_zone->west_sec=(uint32_t)west_sec; p_zone->dst_sec=(uint32_t)dst_sec; }
-    if (p_dst_sec) *p_dst_sec=(uint64_t)dst_sec;
+ * the daylight saving on top of it, negative in some zones; local time is UTC plus both. */
+typedef struct { int64_t t; int32_t west_sec, dst_sec; } GuestTimesec;
+/* The firmware converts each instant with the zone rule in force then (kb #772), and libSceRtc
+ * relies on it to go back from local time to the same tick. */
+static ABI int32_t utc_to_local(int64_t utc,int64_t *p_local,GuestTimesec *p_zone,int32_t *p_dst_sec) {
+    int32_t standard_sec, dst_sec;
+    const int error=ps_host_time_zone_at(utc,&standard_sec,&dst_sec);
+    if (error) return ERR(runtime_guest_errno(error));
+    if (p_local) *p_local=utc+standard_sec+dst_sec;
+    if (p_zone) { p_zone->t=utc; p_zone->west_sec=standard_sec; p_zone->dst_sec=dst_sec; }
+    if (p_dst_sec) *p_dst_sec=dst_sec;
     return 0;
 }
-/* The zone's daylight saving whether or not it is in effect at that time: libc's mktime moves a
- * time the caller marks as daylight saving by it when the zone is on standard time then. */
-static int64_t zone_daylight_saving(time_t at) {
-    for (int half=0; half<2; ++half) {
-        const time_t probe=at+half*183*86400; struct tm t;
-        if (localtime_r(&probe,&t) && t.tm_isdst>0) return daylight_saving(&t);
+int runtime_time_zone_at_local(int64_t local,int32_t is_dst,int64_t *p_out_utc,int32_t *p_out_standard_sec,int32_t *p_out_dst_sec) {
+    /* A local time takes the offset of the period it falls in, found from the offsets a day either
+     * side since no zone changes twice in a day. It falls in two at a backward change, the earlier
+     * one on the larger offset: is_dst 0 picks the later, 1 and -1 (automatic) the earlier, because
+     * Europe/Dublin's negative daylight saving makes the flag of each side no guide. It falls in
+     * none at a forward change, where the earlier offset moves it past the change as mktime does. */
+    int has_found=0;
+    int32_t standard_sec=0, dst_sec=0;
+    int64_t utc=0;
+    for (int day=-1; day<=1; ++day) {
+        int32_t probe_standard_sec, probe_dst_sec, check_standard_sec, check_dst_sec;
+        int error=ps_host_time_zone_at(local+day*86400,&probe_standard_sec,&probe_dst_sec);
+        if (error) return error;
+        const int64_t candidate=local-probe_standard_sec-probe_dst_sec;
+        if (day==-1) { standard_sec=probe_standard_sec; dst_sec=probe_dst_sec; utc=candidate; }
+        error=ps_host_time_zone_at(candidate,&check_standard_sec,&check_dst_sec);
+        if (error) return error;
+        if (check_standard_sec+check_dst_sec!=probe_standard_sec+probe_dst_sec) continue;
+        if (!has_found || is_dst==0) { standard_sec=check_standard_sec; dst_sec=check_dst_sec; utc=candidate; }
+        has_found=1;
     }
+    *p_out_utc=utc; *p_out_standard_sec=standard_sec; *p_out_dst_sec=dst_sec;
     return 0;
 }
-/* libc's mktime passes the tm_isdst it was given as the second argument and settles a conflict
- * with the zone itself, from the zone in effect at that local time written to `zone`. */
 static ABI int32_t local_to_utc(int64_t local,int32_t is_dst,int64_t *p_utc,GuestTimesec *p_zone,int32_t *p_dst_sec) {
-    (void)is_dst;
-    if (!p_zone) return ERR(22);
-    tzset();
-    time_t at=(time_t)local; struct tm t;
-    if (!gmtime_r(&at,&t)) return ERR(22);
-    t.tm_isdst=-1;
-    const time_t when=mktime(&t);
-    const int64_t dst=daylight_saving(&t);
-    if (p_utc) *p_utc=(int64_t)when;
-    p_zone->t=(int64_t)when; p_zone->west_sec=(uint32_t)(t.tm_gmtoff-dst); p_zone->dst_sec=(uint32_t)dst;
-    if (p_dst_sec) *p_dst_sec=(int32_t)zone_daylight_saving(when);
+    int64_t utc;
+    int32_t standard_sec, dst_sec;
+    const int error=runtime_time_zone_at_local(local,is_dst,&utc,&standard_sec,&dst_sec);
+    if (error) return ERR(runtime_guest_errno(error));
+    if (p_utc) *p_utc=utc;
+    if (p_zone) { p_zone->t=utc; p_zone->west_sec=standard_sec; p_zone->dst_sec=dst_sec; }
+    if (p_dst_sec) *p_dst_sec=dst_sec;
     return 0;
 }
 

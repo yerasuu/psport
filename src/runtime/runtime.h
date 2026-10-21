@@ -144,6 +144,12 @@ void runtime_thread_attach_main(void);
 int32_t runtime_thread_kill(void *p_thread, int host_signal);
 /* The guest's sigprocmask bookkeeping for the calling thread (sigreturn's uc_sigmask). */
 void runtime_kernel_set_signal_mask(const uint32_t bits[4]);
+/* The UTC second a local second stands for under the host zone's rule in force then, with that
+ * rule's standard offset and daylight saving (sceKernelConvertLocaltimeToUtc). is_dst only matters
+ * in the hour a backward change repeats: 0 the later instant, 1 or -1 (automatic) the earlier.
+ * 0, or the host's errno. */
+int runtime_time_zone_at_local(int64_t local, int32_t is_dst, int64_t *p_out_utc, int32_t *p_out_standard_sec,
+                               int32_t *p_out_dst_sec);
 uintptr_t runtime_exception_resolve(const char *sz_name);
 void runtime_exception_report(void);
 /* The calling thread runs a guest exception handler from inside the host's signal delivery: code

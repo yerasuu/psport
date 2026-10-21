@@ -73,10 +73,10 @@ FEATURE_HOST(threads, WIN32, EXPERIMENTAL,
              "#614")
 
 FEATURE(time, time, "clocks, sleeping and the time stamp counter")
-FEATURE_HOST(time, LINUX, IMPLEMENTED, "clock_gettime, nanosleep and localtime_r's zone (src/platform/linux/host_time.c), rdtsc", "#540")
+FEATURE_HOST(time, LINUX, IMPLEMENTED, "clock_gettime, nanosleep, localtime_r's zone at each instant (src/platform/linux/host_time.c), rdtsc", "#540")
 FEATURE_HOST(time, WIN32, EXPERIMENTAL,
              "QueryPerformanceCounter, GetSystemTimePreciseAsFileTime, CPU times at the scheduler tick from "
-             "GetThreadTimes and GetProcessTimes, GetTimeZoneInformation, sleeps on a per-thread CREATE_WAITABLE_TIMER_HIGH_RESOLUTION timer "
+             "GetThreadTimes and GetProcessTimes, the zone at each instant from GetTimeZoneInformationForYear and SystemTimeToTzSpecificLocalTimeEx, sleeps on a per-thread CREATE_WAITABLE_TIMER_HIGH_RESOLUTION timer "
              "(Sleep in milliseconds without one) (src/platform/win32/host_time.c), compile-checked, not run yet",
              "#614")
 
