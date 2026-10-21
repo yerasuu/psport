@@ -34,6 +34,7 @@
 #include "runtime.h"
 #include "runtime_pad.h"
 #include "gpu/psport_gpu.h"
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -75,6 +76,7 @@ static pthread_mutex_t s_lock=PTHREAD_MUTEX_INITIALIZER;
 static int s_is_initialized, s_is_opened;
 int g_runtime_pad_sdl_ready;
 static SDL_Gamepad *s_p_gamepad;
+static SDL_JoystickID s_latch_gamepad_id; /* s_p_gamepad's, for the window thread's press latches */
 static size_t s_c_reads;
 static uint8_t s_c_connecteds;
 
@@ -253,6 +255,7 @@ static SDL_Gamepad *current_gamepad(void) {
         }
         SDL_free(p_ids);
     }
+    __atomic_store_n(&s_latch_gamepad_id,s_p_gamepad ? SDL_GetGamepadID(s_p_gamepad) : 0,__ATOMIC_RELAXED);
     return s_p_gamepad;
 }
 /* psport (frame stats): the game's libc heap, read every 5 s from a game thread (it reads the pad)
@@ -286,7 +289,7 @@ static void report_guest_heap(void) {
  * keyboard the sticks: move_* (left), look_* (right). Gamepad names as SDL's: a b x y back start leftstick rightstick leftshoulder
  * rightshoulder dpup dpdown dpleft dpright touchpad misc1 paddle1-4, plus lefttrigger and
  * righttrigger. The keyboard works next to a gamepad (the Steam Deck always has one): its buttons
- * add to the gamepad's, a held move/look key moves the stick all the way.
+ * add to the gamepad's, a held move/look key moves the stick to its edge over a short ramp (key_stick).
  * menu is no PS4 input: key.menu (keys, a chord allowed) and pad.menu (buttons, or a two-button
  * chord "leftstick+rightstick") open and close the port's menu (runtime_pad_menu_pressed), besides
  * the built-in Insert and L3+R3, and are unbound unless set. While a menu binding is held, its keys
@@ -487,7 +490,96 @@ static int mouse_key_down(int code) {
     if (code==MOUSE_WHEEL_DOWN) return s_wheel_phase[1]==1;
     return (s_mouse_buttons & SDL_BUTTON_MASK(code-MOUSE_KEY))!=0;
 }
+/* Short presses: a key, mouse button or gamepad button pressed and let go between two reads never
+ * shows in SDL's state at the read, so a light tap did not reach the game. Each press is latched
+ * when the window thread receives its event (an SDL event watch), with its own time, and the next
+ * read sees it held once; scePadInit clears the latches. A press not read within PAD_LATCH_US is
+ * dropped, so it never shows later as a new one, and a newer press does not keep an older one
+ * alive. A trigger keeps the furthest it was pulled. Mouse buttons are latched only while the
+ * window holds the mouse, so the click that takes it is no attack. */
+#define PAD_LATCH_US 100000u
+#define PAD_TRIGGER_PRESSED 30
+static uint64_t s_key_latch_us[MOUSE_WHEEL_UP]; /* the scancodes, then the mouse buttons */
+static uint64_t s_button_latch_us[SDL_GAMEPAD_BUTTON_COUNT];
+static uint64_t s_trigger_latch[2];             /* (time << 8) | the analog value */
+static int s_is_latch_watched;
+static bool s_is_key_latched[MOUSE_WHEEL_UP], s_is_button_latched[SDL_GAMEPAD_BUTTON_COUNT];
+static int s_trigger_latched[2];
+static size_t s_c_short_presses, s_c_expired_presses;
+
+static void latch_press(uint64_t *p_at_us) { __atomic_store_n(p_at_us,now_us(),__ATOMIC_RELAXED); }
+static bool SDLCALL latch_event(void *p_user, SDL_Event *p_event) {
+    (void)p_user;
+    /* The watch sees an event before the overlay does: a press that closes the menu is its own. */
+    if (psport_gpu_overlay_captures_input()) return true;
+    const SDL_JoystickID id_gamepad=__atomic_load_n(&s_latch_gamepad_id,__ATOMIC_RELAXED);
+    if (p_event->type==SDL_EVENT_KEY_DOWN && !p_event->key.repeat && (int)p_event->key.scancode<SDL_SCANCODE_COUNT) {
+        latch_press(&s_key_latch_us[p_event->key.scancode]);
+    } else if (p_event->type==SDL_EVENT_MOUSE_BUTTON_DOWN && p_event->button.button<=SDL_BUTTON_X2 &&
+               psport_gpu_mouse_captured()) {
+        latch_press(&s_key_latch_us[MOUSE_KEY+p_event->button.button]);
+    } else if (p_event->type==SDL_EVENT_GAMEPAD_BUTTON_DOWN && p_event->gbutton.which==id_gamepad &&
+               p_event->gbutton.button<SDL_GAMEPAD_BUTTON_COUNT) {
+        latch_press(&s_button_latch_us[p_event->gbutton.button]);
+    } else if (p_event->type==SDL_EVENT_GAMEPAD_AXIS_MOTION && p_event->gaxis.which==id_gamepad &&
+               (p_event->gaxis.axis==SDL_GAMEPAD_AXIS_LEFT_TRIGGER || p_event->gaxis.axis==SDL_GAMEPAD_AXIS_RIGHT_TRIGGER)) {
+        uint64_t *p_latch=&s_trigger_latch[p_event->gaxis.axis==SDL_GAMEPAD_AXIS_RIGHT_TRIGGER];
+        const uint64_t now=now_us(), latched=__atomic_load_n(p_latch,__ATOMIC_RELAXED);
+        const int value=trigger(p_event->gaxis.value);
+        const int is_further=!latched || (latched>>8)+PAD_LATCH_US<now || value>(int)(latched & 0xff);
+        if (value>PAD_TRIGGER_PRESSED && is_further) __atomic_store_n(p_latch,now<<8 | (uint64_t)value,__ATOMIC_RELAXED);
+    }
+    return true;
+}
+static uint64_t latch_take_time(uint64_t *p_at_us, uint64_t now) {
+    const uint64_t at=__atomic_exchange_n(p_at_us,0,__ATOMIC_RELAXED);
+    if (at && at+PAD_LATCH_US<now) { ++s_c_expired_presses; return 0; }
+    return at;
+}
+/* The presses latched since the last read that SDL's state no longer shows, for this read only
+ * (latch_forget ends it). Under the pad's lock. */
+static void latch_take(uint64_t now, const bool *p_is_key_down, SDL_Gamepad *p_sdl_gamepad, int is_captured) {
+    if (!s_is_latch_watched && SDL_WasInit(SDL_INIT_VIDEO)) {
+        s_is_latch_watched=SDL_AddEventWatch(latch_event,NULL) ? 1 : -1;
+        if (s_is_latch_watched<0) printf("Runtime: pad: no SDL event watch (%s): short presses between reads are lost\n",SDL_GetError());
+    }
+    for (int code=0;code<MOUSE_WHEEL_UP;++code) {
+        const int is_held=code>=MOUSE_KEY ? (s_mouse_buttons & SDL_BUTTON_MASK(code-MOUSE_KEY))!=0
+                                          : p_is_key_down && p_is_key_down[code];
+        const int is_usable=code>=MOUSE_KEY ? is_captured : p_is_key_down!=NULL;
+        s_is_key_latched[code]=latch_take_time(&s_key_latch_us[code],now) && is_usable && !is_held;
+        s_c_short_presses+=s_is_key_latched[code];
+    }
+    for (int button=0;button<SDL_GAMEPAD_BUTTON_COUNT;++button) {
+        s_is_button_latched[button]=latch_take_time(&s_button_latch_us[button],now) && p_sdl_gamepad &&
+                                    !SDL_GetGamepadButton(p_sdl_gamepad,(SDL_GamepadButton)button);
+        s_c_short_presses+=s_is_button_latched[button];
+    }
+    static const SDL_GamepadAxis s_triggers[2]={SDL_GAMEPAD_AXIS_LEFT_TRIGGER,SDL_GAMEPAD_AXIS_RIGHT_TRIGGER};
+    for (int i=0;i<2;++i) {
+        const uint64_t latched=__atomic_exchange_n(&s_trigger_latch[i],0,__ATOMIC_RELAXED);
+        s_trigger_latched[i]=0;
+        if (!latched) continue;
+        if ((latched>>8)+PAD_LATCH_US<now) { ++s_c_expired_presses; continue; }
+        if (p_sdl_gamepad && trigger(SDL_GetGamepadAxis(p_sdl_gamepad,s_triggers[i]))<(int)(latched & 0xff)) {
+            s_trigger_latched[i]=(int)(latched & 0xff);
+            s_c_short_presses+=trigger(SDL_GetGamepadAxis(p_sdl_gamepad,s_triggers[i]))<=PAD_TRIGGER_PRESSED;
+        }
+    }
+}
+static void latch_forget(void) {
+    memset(s_is_key_latched,0,sizeof(s_is_key_latched));
+    memset(s_is_button_latched,0,sizeof(s_is_button_latched));
+    memset(s_trigger_latched,0,sizeof(s_trigger_latched));
+}
+static void latch_clear(void) {
+    for (int code=0;code<MOUSE_WHEEL_UP;++code) __atomic_store_n(&s_key_latch_us[code],0,__ATOMIC_RELAXED);
+    for (int button=0;button<SDL_GAMEPAD_BUTTON_COUNT;++button) __atomic_store_n(&s_button_latch_us[button],0,__ATOMIC_RELAXED);
+    for (int i=0;i<2;++i) __atomic_store_n(&s_trigger_latch[i],0,__ATOMIC_RELAXED);
+    latch_forget();
+}
 static int code_down(const bool *p_is_key_down, int code) {
+    if (code<MOUSE_WHEEL_UP && s_is_key_latched[code]) return 1;
     return code>=MOUSE_KEY ? mouse_key_down(code) : p_is_key_down && p_is_key_down[code];
 }
 /* Whether a chord on code (any input's) has its modifier held: the key's plain bindings then wait
@@ -517,9 +609,12 @@ static int key_down(const bool *p__bool, int input) {
     return 0;
 }
 static int pad_button_value(SDL_Gamepad *p_sdl_gamepad, int button) {
-    return button==PAD_LEFT_TRIGGER ? trigger(SDL_GetGamepadAxis(p_sdl_gamepad,SDL_GAMEPAD_AXIS_LEFT_TRIGGER))
-         : button==PAD_RIGHT_TRIGGER ? trigger(SDL_GetGamepadAxis(p_sdl_gamepad,SDL_GAMEPAD_AXIS_RIGHT_TRIGGER))
-         : SDL_GetGamepadButton(p_sdl_gamepad,(SDL_GamepadButton)button) ? 255 : 0;
+    if (button==PAD_LEFT_TRIGGER || button==PAD_RIGHT_TRIGGER) {
+        const int i_trigger=button==PAD_RIGHT_TRIGGER;
+        const int value=trigger(SDL_GetGamepadAxis(p_sdl_gamepad,i_trigger ? SDL_GAMEPAD_AXIS_RIGHT_TRIGGER : SDL_GAMEPAD_AXIS_LEFT_TRIGGER));
+        return value>s_trigger_latched[i_trigger] ? value : s_trigger_latched[i_trigger];
+    }
+    return SDL_GetGamepadButton(p_sdl_gamepad,(SDL_GamepadButton)button) || s_is_button_latched[button] ? 255 : 0;
 }
 /* Whether button belongs to a held pad.menu binding: it then reaches no other input. */
 static int is_menu_button(SDL_Gamepad *p_sdl_gamepad, int button) {
@@ -559,9 +654,52 @@ int runtime_pad_menu_pressed(void) {
     return is_pressed;
 }
 
-/* key held for the negative / positive direction: the stick all the way, else the gamepad's. */
-static uint8_t key_axis(uint8_t value, int negative, int positive) {
-    return negative || positive ? (uint8_t)(128-(negative ? 128 : 0)+(positive ? 127 : 0)) : value;
+/* The move and look keys as a stick. Thrown to its stop at once, with the diagonal at the square's
+ * corner (1.41 long), a game's character snapped to the new direction and slipped into a run. The
+ * keys give a direction on the unit circle instead (a diagonal as long as one key), and the stick
+ * follows it as a thumb does: its length ramps up in PS_KEY_RISE_MS (70) and back in PS_KEY_FALL_MS
+ * (45), its angle turns at PS_KEY_TURN_DPS (1100 degrees a second) the short way round, so a
+ * reversal sweeps through the sides rather than the centre; a stick almost at rest takes the new
+ * angle at once. The gamepad's stick is kept while the keys leave it at rest. */
+typedef struct { float angle, magnitude; uint64_t last_us; } KeyStick;
+static KeyStick s_move_stick, s_look_stick;
+static float key_tunable(const char *sz_name, float fallback) {
+    const char *sz_value=runtime_env(sz_name,NULL);
+    const float value=sz_value ? (float)atof(sz_value) : 0.0f;
+    return value>0 ? value : fallback;
+}
+static void key_stick(KeyStick *p_stick, uint64_t now, int left, int right, int up, int down, uint8_t *p_out_x, uint8_t *p_out_y) {
+    static float s_rise_ms, s_fall_ms, s_turn_dps;
+    if (!s_rise_ms) {
+        s_rise_ms=key_tunable("PS_KEY_RISE_MS",70.0f);
+        s_fall_ms=key_tunable("PS_KEY_FALL_MS",45.0f);
+        s_turn_dps=key_tunable("PS_KEY_TURN_DPS",1100.0f);
+    }
+    const int target_x=(right ? 1 : 0)-(left ? 1 : 0), target_y=(down ? 1 : 0)-(up ? 1 : 0);
+    float dt=p_stick->last_us && now>p_stick->last_us ? (float)(now-p_stick->last_us)*1e-6f : 0.0f;
+    p_stick->last_us=now;
+    if (dt>0.05f) dt=0.05f;
+    const float target_magnitude=target_x || target_y ? 1.0f : 0.0f;
+    if (target_x || target_y) {
+        const float target=atan2f((float)target_y,(float)target_x);
+        if (p_stick->magnitude<0.12f) {
+            p_stick->angle=target;
+        } else {
+            float diff=target-p_stick->angle;
+            while (diff>(float)M_PI) diff-=2.0f*(float)M_PI;
+            while (diff<-(float)M_PI) diff+=2.0f*(float)M_PI;
+            const float step=s_turn_dps*(float)M_PI/180.0f*dt;
+            p_stick->angle+=diff>step ? step : diff<-step ? -step : diff;
+        }
+    }
+    const int is_rising=target_magnitude>p_stick->magnitude;
+    const float delta=dt/((is_rising ? s_rise_ms : s_fall_ms)*1e-3f), gap=fabsf(target_magnitude-p_stick->magnitude);
+    p_stick->magnitude+=(is_rising ? 1.0f : -1.0f)*(gap<delta ? gap : delta);
+    if (p_stick->magnitude<0.003f) { p_stick->magnitude=0; return; }
+    const int x=128+(int)lroundf(cosf(p_stick->angle)*p_stick->magnitude*127.0f);
+    const int y=128+(int)lroundf(sinf(p_stick->angle)*p_stick->magnitude*127.0f);
+    *p_out_x=(uint8_t)(x<0 ? 0 : x>255 ? 255 : x);
+    *p_out_y=(uint8_t)(y<0 ? 0 : y>255 ? 255 : y);
 }
 static void apply_keyboard(PadData *p_pad_data, const bool *p__bool) {
     for (int i=IN_CROSS;i<=IN_RIGHT;++i)
@@ -570,10 +708,10 @@ static void apply_keyboard(PadData *p_pad_data, const bool *p__bool) {
     if (key_down(p__bool,IN_TOUCHPAD_RIGHT)) touch_click(p_pad_data,1);
     if (key_down(p__bool,IN_L2)) p_pad_data->l2=255;
     if (key_down(p__bool,IN_R2)) p_pad_data->r2=255;
-    p_pad_data->left_x=key_axis(p_pad_data->left_x,key_down(p__bool,IN_MOVE_LEFT),key_down(p__bool,IN_MOVE_RIGHT));
-    p_pad_data->left_y=key_axis(p_pad_data->left_y,key_down(p__bool,IN_MOVE_UP),key_down(p__bool,IN_MOVE_DOWN));
-    p_pad_data->right_x=key_axis(p_pad_data->right_x,key_down(p__bool,IN_LOOK_LEFT),key_down(p__bool,IN_LOOK_RIGHT));
-    p_pad_data->right_y=key_axis(p_pad_data->right_y,key_down(p__bool,IN_LOOK_UP),key_down(p__bool,IN_LOOK_DOWN));
+    key_stick(&s_move_stick,p_pad_data->timestamp,key_down(p__bool,IN_MOVE_LEFT),key_down(p__bool,IN_MOVE_RIGHT),
+              key_down(p__bool,IN_MOVE_UP),key_down(p__bool,IN_MOVE_DOWN),&p_pad_data->left_x,&p_pad_data->left_y);
+    key_stick(&s_look_stick,p_pad_data->timestamp,key_down(p__bool,IN_LOOK_LEFT),key_down(p__bool,IN_LOOK_RIGHT),
+              key_down(p__bool,IN_LOOK_UP),key_down(p__bool,IN_LOOK_DOWN),&p_pad_data->right_x,&p_pad_data->right_y);
 }
 
 /* Mouse look: the game turns its camera at a rate set by the right stick, so the stick follows
@@ -763,10 +901,20 @@ static void sample_host(PadData *p_pad_data) {
     int wheel_up=0, is_wheel_down=0;
     psport_gpu_mouse_take(&mouse_dx,&mouse_dy,&wheel_up,&is_wheel_down);
     const int is_captured=psport_gpu_mouse_captured();
-    if (psport_gpu_overlay_captures_input()) { apply_mouse_look(p_pad_data,0,0,p_pad_data->timestamp,0); return; } /* menu open: neutral input */
+    /* The presses that open or close the menu are the menu's: none latched across either edge. */
+    static int s_was_overlay_open;
+    const int is_overlay_open=psport_gpu_overlay_captures_input();
+    if (is_overlay_open!=s_was_overlay_open) latch_clear();
+    s_was_overlay_open=is_overlay_open;
+    if (is_overlay_open) { /* menu open: neutral input */
+        latch_clear();
+        apply_mouse_look(p_pad_data,0,0,p_pad_data->timestamp,0);
+        return;
+    }
     const bool *p__bool=SDL_WasInit(SDL_INIT_VIDEO) && !runtime_keyboard_taken() ? SDL_GetKeyboardState(NULL) : NULL;
     s_mouse_buttons=is_captured && SDL_WasInit(SDL_INIT_VIDEO) ? SDL_GetMouseState(NULL,NULL) : 0;
     mouse_wheel_step(p_pad_data->timestamp,is_captured ? wheel_up : 0,is_captured ? is_wheel_down : 0);
+    latch_take(p_pad_data->timestamp,p__bool,p_sdl_gamepad,is_captured);
     if (p_sdl_gamepad) {
         int touch_right=0;
         for (int i=IN_CROSS;i<=IN_RIGHT;++i) {
@@ -855,7 +1003,7 @@ static void sample(PadData *p_pad_data) {
     touch_ids(p_pad_data);
 }
 
-static ABI int32_t pad_init(void) { pthread_mutex_lock(&s_lock); s_is_initialized=1; pthread_mutex_unlock(&s_lock); return 0; }
+static ABI int32_t pad_init(void) { pthread_mutex_lock(&s_lock); s_is_initialized=1; latch_clear(); pthread_mutex_unlock(&s_lock); return 0; }
 static ABI int32_t pad_open(int32_t user, int32_t type, int32_t i_device, const void *p_param) {
     (void)p_param;
     if (!s_is_initialized) return ERR_NOT_INITIALIZED;
@@ -896,12 +1044,15 @@ static ABI int32_t pad_read_state(int32_t h_handle, PadData *p_data) {
     if (!p_data) return ERR_INVALID_ARG;
     pthread_mutex_lock(&s_lock);
     sample(p_data); ++s_c_reads;
+    latch_forget();
     const size_t c_reads=s_c_reads;
     pthread_mutex_unlock(&s_lock);
     trace_read(p_data,c_reads);
     return 0;
 }
-/* Buffered read: the port samples once per call, so one entry is returned. */
+/* Buffered read: the port samples once per call, so one entry is returned, with the presses latched
+ * since the last read in it (the firmware's buffer would hold them as earlier entries). The Ext reads
+ * return the same: no extension controller is emulated. */
 static ABI int32_t pad_read(int32_t h_handle, PadData *p_data, int32_t c_data) {
     if (h_handle!=PAD_HANDLE || !s_is_opened) return ERR_INVALID_HANDLE;
     if (!p_data || c_data<1 || c_data>64) return ERR_INVALID_ARG;
@@ -1006,6 +1157,7 @@ static ABI int32_t pad_set_angular_velocity_deadband_state(int32_t h_handle, uin
 static const RuntimeExport s_exports[]={
     {"scePadInit",pad_init}, {"scePadOpen",pad_open}, {"scePadGetHandle",pad_get_handle}, {"scePadClose",pad_close},
     {"scePadReadState",pad_read_state}, {"scePadRead",pad_read},
+    {"scePadReadStateExt",pad_read_state}, {"scePadReadExt",pad_read},
     {"scePadGetControllerInformation",pad_info}, {"scePadIsRemoteController",pad_is_remote},
     {"scePadDeviceClassGetExtendedInformation",pad_class_info}, {"scePadDeviceClassParseData",pad_class_parse}, {"scePadSetVibration",pad_vibration},
     {"scePadSetLightBar",pad_set_light_bar}, {"scePadResetLightBar",pad_reset_light_bar},
@@ -1015,6 +1167,7 @@ static const RuntimeExport s_exports[]={
 };
 uintptr_t runtime_pad_resolve(const char *sz_name) { return RUNTIME_LOOKUP(s_exports,sz_name); }
 void runtime_pad_report(void) {
-    printf("Runtime: pad reads=%zu, gamepad=%s\n",s_c_reads,s_p_gamepad ? SDL_GetGamepadName(s_p_gamepad) : "none");
+    printf("Runtime: pad reads=%zu, short presses=%zu (expired unread %zu), gamepad=%s\n",s_c_reads,s_c_short_presses,
+           s_c_expired_presses,s_p_gamepad ? SDL_GetGamepadName(s_p_gamepad) : "none");
     runtime_pad_sensors_report();
 }
