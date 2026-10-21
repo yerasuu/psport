@@ -35,7 +35,7 @@ public:
             return std::string{value && value[0] ? value : fallback};
         };
         user.user_id = RuntimeUserId;
-        user.user_name = text("PS_USER_NAME", "Hunter");
+        user.user_name = text("PS_USER_NAME", "Player");
         user.player_index = 1;
         user.logged_in = true;
         user.shadnet_npid = text("PS_SHADNET_NPID", "");

@@ -18,6 +18,7 @@
 #include <sys/stat.h>
 
 #define USER_ID 1
+#define DEFAULT_USER_NAME "Player"
 #define ORBIS_OK 0
 #define USER_NOT_INITIALIZED ((int32_t)0x80960002)
 #define USER_ALREADY_INITIALIZED ((int32_t)0x80960003)
@@ -65,7 +66,7 @@ static ABI int32_t user_list(int32_t *p_ids) {
 }
 static ABI int32_t user_name(int32_t id,char *sz_name,uint64_t cb_name) {
     if (id!=USER_ID || !sz_name) return USER_INVALID_ARGUMENT;
-    const char *sz_value=runtime_env("PS_USER_NAME","Hunter");
+    const char *sz_value=runtime_env("PS_USER_NAME",DEFAULT_USER_NAME);
     if (strlen(sz_value)+1>cb_name) return (int32_t)0x8096000a; /* BUFFER_TOO_SHORT */
     strcpy(sz_name,sz_value); return 0;
 }
@@ -549,7 +550,7 @@ static ABI int32_t ime_init(const ImeParam *p_param, const void *p_extended) {
     if (sz_preset) { ime_complete(0,sz_preset); return 0; }
     if (!psport_gpu_text_input_begin(sz_initial,sz_prompt[0] ? sz_prompt : "Text")) {
         const char *sz_name=runtime_env("PS_USER_NAME",NULL);
-        ime_complete(0,sz_name ? sz_name : sz_initial[0] ? sz_initial : "Hunter");
+        ime_complete(0,sz_name ? sz_name : sz_initial[0] ? sz_initial : DEFAULT_USER_NAME);
     } else printf("Runtime: ImeDialog opened: type in the game window, Enter to confirm, Esc to cancel\n");
     return 0;
 }
