@@ -19,6 +19,7 @@
 #define ERR_INVALID_MICROSECOND ((int32_t)0x80B5000E)
 #define UNIX_EPOCH_TICKS UINT64_C(0xdcbffeff2bc000)
 #define TICKS_PER_DAY UINT64_C(86400000000)
+#define CLOCK_UNSET INT64_MIN
 
 typedef struct { uint16_t year, month, day, hour, minute, second; uint32_t microsecond; } DateTime;
 _Static_assert(sizeof(DateTime)==16,"OrbisRtcDateTime layout");
@@ -66,8 +67,17 @@ static void from_tick(uint64_t tick, DateTime *p_date_time) {
     p_date_time->hour=(uint16_t)(us/3600000000u); p_date_time->minute=(uint16_t)(us/60000000u%60); p_date_time->second=(uint16_t)(us/1000000u%60);
     p_date_time->microsecond=(uint32_t)(us%1000000u);
 }
-static uint64_t now_utc(void) {
+/* sceRtcSetCurrentTick and the network clocks' setters move clocks of this process only, as offsets
+ * from the host's clock, so that a game never changes the host's time. */
+static int64_t s_offset_system_us;
+static int64_t s_offset_network_us[3]={CLOCK_UNSET,CLOCK_UNSET,CLOCK_UNSET};
+enum { CLOCK_NETWORK, CLOCK_DEBUG_NETWORK, CLOCK_AD_NETWORK };
+
+static uint64_t host_utc(void) {
     return UNIX_EPOCH_TICKS+ps_host_time_realtime_ns()/1000u;
+}
+static uint64_t now_utc(void) {
+    return host_utc()+(uint64_t)__atomic_load_n(&s_offset_system_us,__ATOMIC_RELAXED);
 }
 /* Offset of local time from UTC at the given UTC tick, in microseconds. */
 static int64_t local_offset(uint64_t utc) {
@@ -229,18 +239,111 @@ static ABI int32_t rtc_format_rfc3339(char *p_out_text, const uint64_t *p_utc_ti
                  magnitude_minutes%60);
     return 0;
 }
-/* The same date and time that many years on; 29 February becomes the 28th in a common year. */
+#define RTC_TICK_ADD(function, type, us_per_unit)                                                    \
+    static ABI int32_t function(uint64_t *p_out_tick, const uint64_t *p_tick, type units) {         \
+        if (!p_out_tick || !p_tick) return ERR_INVALID_POINTER;                                     \
+        *p_out_tick=*p_tick+(uint64_t)(int64_t)units*(us_per_unit);                                 \
+        return 0;                                                                                   \
+    }
+RTC_TICK_ADD(rtc_add_tick_ticks,int64_t,UINT64_C(1))
+RTC_TICK_ADD(rtc_add_tick_microseconds,int64_t,UINT64_C(1))
+RTC_TICK_ADD(rtc_add_tick_seconds,int64_t,UINT64_C(1000000))
+RTC_TICK_ADD(rtc_add_tick_minutes,int64_t,UINT64_C(60000000))
+RTC_TICK_ADD(rtc_add_tick_hours,int32_t,UINT64_C(3600000000))
+RTC_TICK_ADD(rtc_add_tick_days,int32_t,TICKS_PER_DAY)
+RTC_TICK_ADD(rtc_add_tick_weeks,int32_t,7*TICKS_PER_DAY)
+/* The calendar adds leave the result unwritten and still return 0 when it falls outside years
+ * 1..9999, as the firmware does; the day is clipped to the new month's length. */
+static void write_if_valid(uint64_t *p_out_tick, DateTime *p_date_time) {
+    if (p_date_time->year>=1 && p_date_time->year<=9999 && p_date_time->month>=1 && p_date_time->month<=12 &&
+        p_date_time->day>days_in_month(p_date_time->year,p_date_time->month))
+        p_date_time->day=(uint16_t)days_in_month(p_date_time->year,p_date_time->month);
+    if (!validate(p_date_time)) *p_out_tick=to_tick(p_date_time);
+}
+static ABI int32_t rtc_add_tick_months(uint64_t *p_out_tick, const uint64_t *p_tick, int32_t months) {
+    if (!p_out_tick || !p_tick) return ERR_INVALID_POINTER;
+    DateTime date_time;
+    from_tick(*p_tick,&date_time);
+    const int32_t total=(int32_t)(12u*date_time.year+date_time.month-1u+(uint32_t)months);
+    if (total<12 || total>=12*10000) return 0;
+    date_time.year=(uint16_t)(total/12);
+    date_time.month=(uint16_t)(total%12+1);
+    write_if_valid(p_out_tick,&date_time);
+    return 0;
+}
 static ABI int32_t rtc_add_tick_years(uint64_t *p_out_tick, const uint64_t *p_tick, int32_t years) {
     if (!p_out_tick || !p_tick) return ERR_INVALID_POINTER;
     DateTime date_time;
     from_tick(*p_tick,&date_time);
-    const int32_t year=date_time.year+years;
-    if (year<1 || year>9999) return ERR_INVALID_YEAR;
-    date_time.year=(uint16_t)year;
-    if (date_time.month==2 && date_time.day==29 && !leap(year)) date_time.day=28;
-    *p_out_tick=to_tick(&date_time);
+    date_time.year=(uint16_t)(date_time.year+years);
+    write_if_valid(p_out_tick,&date_time);
     return 0;
 }
+/* The console's clock is the host's: moving it is kept for this process (see s_offset_system_us). */
+static ABI int32_t rtc_set_current_tick(const uint64_t *p_tick) {
+    static uint64_t s_c_sets;
+    if (!p_tick) return ERR_INVALID_POINTER;
+    if (*p_tick<UNIX_EPOCH_TICKS) return ERR_INVALID_VALUE;
+    const int64_t offset_us=(int64_t)(*p_tick-host_utc());
+    __atomic_store_n(&s_offset_system_us,offset_us,__ATOMIC_RELAXED);
+    if (!__atomic_fetch_add(&s_c_sets,1,__ATOMIC_RELAXED)) {
+        printf("Runtime: Rtc: sceRtcSetCurrentTick moves this process's clock by %lld us; applies to libSceRtc only "
+               "(libkernel time and the host's clock stay the host's)\n",(long long)offset_us);
+        runtime_calls_hle_stub("sceRtcSetCurrentTick (applies to libSceRtc only, host clock untouched)",&s_c_sets);
+    }
+    return 0;
+}
+/* A NULL tick unsets the clock, as clock_settime(id, NULL) does on the console. */
+static int32_t set_network_clock(int i_clock, const uint64_t *p_tick, const char *sz_function, uint64_t *p_count) {
+    __atomic_store_n(&s_offset_network_us[i_clock],p_tick ? (int64_t)(*p_tick-host_utc()) : CLOCK_UNSET,
+                     __ATOMIC_RELAXED);
+    if (!__atomic_fetch_add(p_count,1,__ATOMIC_RELAXED)) {
+        printf("Runtime: Rtc: %s %s this process's clock; the host's clock is untouched\n",sz_function,
+               p_tick ? "sets" : "unsets");
+        runtime_calls_hle_stub(sz_function,p_count);
+    }
+    return 0;
+}
+static ABI int32_t rtc_set_network_tick(const uint64_t *p_tick) {
+    static uint64_t s_c_sets;
+    return set_network_clock(CLOCK_NETWORK,p_tick,"sceRtcSetCurrentNetworkTick (process-local clock)",&s_c_sets);
+}
+static ABI int32_t rtc_set_debug_network_tick(const uint64_t *p_tick) {
+    static uint64_t s_c_sets;
+    return set_network_clock(CLOCK_DEBUG_NETWORK,p_tick,"sceRtcSetCurrentDebugNetworkTick (process-local clock)",
+                             &s_c_sets);
+}
+static ABI int32_t rtc_set_ad_network_tick(const uint64_t *p_tick) {
+    static uint64_t s_c_sets;
+    return set_network_clock(CLOCK_AD_NETWORK,p_tick,"sceRtcSetCurrentAdNetworkTick (process-local clock)",&s_c_sets);
+}
+/* A clock the game never set reads as on a console whose system synced it, since the host's clock
+ * already is: the current time, where the firmware's unsynced clock answers 0x80B50001. The debug
+ * and ad clocks fall back to the network clock, as the firmware does; the raw clock, which has no
+ * setter, is the network clock. */
+static int32_t get_network_clock(int i_clock, uint64_t *p_tick) {
+    static uint64_t s_c_unset_reads;
+    if (!p_tick) return ERR_INVALID_POINTER;
+    int64_t offset_us=__atomic_load_n(&s_offset_network_us[i_clock],__ATOMIC_RELAXED);
+    if (offset_us==CLOCK_UNSET && i_clock!=CLOCK_NETWORK)
+        offset_us=__atomic_load_n(&s_offset_network_us[CLOCK_NETWORK],__ATOMIC_RELAXED);
+    if (offset_us!=CLOCK_UNSET) {
+        *p_tick=host_utc()+(uint64_t)offset_us;
+        return 0;
+    }
+    if (!__atomic_fetch_add(&s_c_unset_reads,1,__ATOMIC_RELAXED)) {
+        puts("Runtime: Rtc: a network clock the game never set reads the current time; an unsynced console "
+             "answers 0x80B50001");
+        runtime_calls_hle_stub("sceRtcGetCurrent*NetworkTick (never set: current time instead of 0x80B50001)",
+                               &s_c_unset_reads);
+    }
+    *p_tick=now_utc();
+    return 0;
+}
+static ABI int32_t rtc_network_tick(uint64_t *p_tick) { return get_network_clock(CLOCK_NETWORK,p_tick); }
+static ABI int32_t rtc_raw_network_tick(uint64_t *p_tick) { return get_network_clock(CLOCK_NETWORK,p_tick); }
+static ABI int32_t rtc_debug_network_tick(uint64_t *p_tick) { return get_network_clock(CLOCK_DEBUG_NETWORK,p_tick); }
+static ABI int32_t rtc_ad_network_tick(uint64_t *p_tick) { return get_network_clock(CLOCK_AD_NETWORK,p_tick); }
 /* RFC 3339 ("2026-10-12T09:30:00.25+02:00"), RFC 2822 ("Mon, 12 Oct 2026 09:30:00 +0200") or
  * asctime ("Mon Oct 12 09:30:00 2026", UTC). */
 static ABI int32_t rtc_parse_date_time(uint64_t *p_tick, const char *sz_text) {
@@ -268,12 +371,22 @@ static ABI int32_t rtc_parse_date_time(uint64_t *p_tick, const char *sz_text) {
 
 static const RuntimeExport s_exports[]={
     {"sceRtcGetCurrentClockLocalTime",rtc_current_local}, {"sceRtcGetCurrentClock",rtc_current_clock},
-    {"sceRtcGetCurrentTick",rtc_current_tick}, {"sceRtcGetCurrentNetworkTick",rtc_current_tick},
+    {"sceRtcGetCurrentTick",rtc_current_tick}, {"sceRtcGetCurrentNetworkTick",rtc_network_tick},
     {"sceRtcConvertUtcToLocalTime",rtc_utc_to_local}, {"sceRtcConvertLocalTimeToUtc",rtc_local_to_utc},
     {"sceRtcGetDayOfWeek",rtc_day_of_week}, {"sceRtcGetTick",rtc_get_tick}, {"sceRtcSetTick",rtc_set_tick},
     {"sceRtcGetTickResolution",rtc_tick_resolution}, {"sceRtcSetTime_t",rtc_set_time_t},
     {"sceRtcGetTime_t",rtc_get_time_t}, {"sceRtcFormatRFC2822LocalTime",rtc_rfc2822_local},
     {"sceRtcParseDateTime",rtc_parse_date_time}, {"sceRtcParseRFC3339",rtc_parse_rfc3339},
     {"sceRtcFormatRFC3339",rtc_format_rfc3339}, {"sceRtcTickAddYears",rtc_add_tick_years},
+    {"sceRtcTickAddTicks",rtc_add_tick_ticks}, {"sceRtcTickAddMicroseconds",rtc_add_tick_microseconds},
+    {"sceRtcTickAddSeconds",rtc_add_tick_seconds}, {"sceRtcTickAddMinutes",rtc_add_tick_minutes},
+    {"sceRtcTickAddHours",rtc_add_tick_hours}, {"sceRtcTickAddDays",rtc_add_tick_days},
+    {"sceRtcTickAddWeeks",rtc_add_tick_weeks}, {"sceRtcTickAddMonths",rtc_add_tick_months},
+    {"sceRtcSetCurrentTick",rtc_set_current_tick}, {"sceRtcSetCurrentNetworkTick",rtc_set_network_tick},
+    {"sceRtcSetCurrentDebugNetworkTick",rtc_set_debug_network_tick},
+    {"sceRtcSetCurrentAdNetworkTick",rtc_set_ad_network_tick},
+    {"sceRtcGetCurrentRawNetworkTick",rtc_raw_network_tick},
+    {"sceRtcGetCurrentDebugNetworkTick",rtc_debug_network_tick},
+    {"sceRtcGetCurrentAdNetworkTick",rtc_ad_network_tick},
 };
 uintptr_t runtime_rtc_resolve(const char *sz_name) { return RUNTIME_LOOKUP(s_exports,sz_name); }
