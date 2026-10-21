@@ -99,7 +99,8 @@ void TextureSubstitutes::Identify(Image& image) const {
         return;
     }
     const auto* p_texels = reinterpret_cast<const void*>(info.guest_address);
-    image.p_substitute = m_substitution.pfn_identify(p_texels, info.guest_size, info.size.width, info.size.height);
+    image.p_substitute = m_substitution.pfn_identify(p_texels, info.guest_size, info.size.width, info.size.height,
+                                                     static_cast<u32>(info.pixel_format));
     image.is_substitute_rescanned =
         !image.p_substitute && m_substitution.pfn_is_rescanned &&
         m_substitution.pfn_is_rescanned(info.guest_size, info.size.width, info.size.height);
@@ -195,8 +196,9 @@ bool TextureSubstitutes::Replaces(Image& image) {
     }
     if (!image.p_substitute && image.is_substitute_rescanned) {
         const auto& info = image.info;
-        image.p_substitute = m_substitution.pfn_identify(reinterpret_cast<const void*>(info.guest_address),
-                                                         info.guest_size, info.size.width, info.size.height);
+        image.p_substitute =
+            m_substitution.pfn_identify(reinterpret_cast<const void*>(info.guest_address), info.guest_size,
+                                        info.size.width, info.size.height, static_cast<u32>(info.pixel_format));
         image.is_substitute_rescanned = !image.p_substitute;
     }
     return image.p_substitute && IsDrawn(*image.p_substitute);

@@ -175,10 +175,61 @@ Milestones and evidence: [FORK.md](../../FORK.md#regression-runs).
 
 ## 6. Button glyphs
 
-The keyboard and other gamepads get their own button prompts through texture substitution
-(`Game::TextureSubstitution`, Bloodborne's `gpu/games/bloodborne/button_prompts.cpp`): the
-title's profile knows its glyph textures by their bytes and the port draws pictures in their
-place. Before writing one for a new title, see how it stores its glyphs:
+The keyboard and other gamepads get their own button prompts through texture substitution: the
+title's profile declares which of the game's textures show a PlayStation button and what each one
+means, as data (`Game::Profile::p_glyphs`, a `PsGlyphs::Table` from `gpu/games/common/glyphs.h`),
+and the port draws a picture for the device in use in their place. Bloodborne's table is
+`gpu/games/bloodborne/button_prompts.cpp`; `PS_BUTTON_PROMPTS=0` turns every table off. The
+table's `palette` gives the colours the pictures are drawn in (plates, frames, labels, what is lit).
+
+A table has glyphs and atlases:
+
+- `Glyph`: a name for the logs, its `Texture`, and what it shows: a layout (`Single`, `Column`,
+  `Row`, `Cross`, `Stick`) and as many input names of `src/input/runtime_pad.c` as the layout takes
+  (`cross`, `circle`, `l1`, `options`, `touchpad`, `up`, `move_up`, `look_left`, ...). The texture
+  is replaced whole. A glyph without a texture is a picture that only atlas cells use.
+- `Atlas`: a name, its `Texture` and its cells, each `{x, y, side, glyph name}`: the square of side
+  texels at (x, y) of its first level shows that glyph's picture, scaled. A cell is drawn while its
+  glyph's own texture was found (or it has none); the rest of the atlas stays the game's.
+- `Texture`: how the game's texture is known when it is uploaded: its first level's `width` and
+  `height`, the first `cb_texels` bytes hashed with XXH3-64, and its `format`: the numeric
+  `VkFormat` (`VK_FORMAT_BC7_SRGB_BLOCK`, 146), or 0 for any. Only single-level, single-layer block-compressed textures are asked about. The
+  reference hash comes one of two ways:
+  - given: `hash` (and no source), for instance `level0_hash` and `level0_size` of a texture the
+    game uploaded, which identify it without being its art. They come from the small texture
+    inventory (`PS_DUMP_SMALL_TEXTURES`, [below](#finding-a-titles-glyphs)), whose
+    `format` column is the `vk::Format` name (`Bc7SrgbBlock`): its `VkFormat` is
+    `VK_FORMAT_` and the name in upper snake case (`VK_FORMAT_BC7_SRGB_BLOCK`), whose number
+    `vulkan_core.h` gives (146); leave `format` 0 when the hash is enough;
+  - computed when the game starts from the user's own files: `p_source` names a `Source` (the
+    guest path of a file of the game, `/app0/...`, so a mod that replaces it is followed, and the
+    id of an extractor for its format) and `sz_entry` the entry inside it, whose bytes must be
+    `cb_texels` long. Prefer this: it follows every release and mod of the game.
+
+An extractor reads one file format (`PsGlyphs::Extractor`: an id and a function that hands each
+texture entry's name and first-level bytes to a visitor, or says why the file is not in its
+format). It lives in the folder of the game it came with and is listed in
+`gpu/games/common/glyphs.cpp` (`Extractors`), as `game_profile.cpp` lists the titles; FromSoftware's
+DCX-packed TPF is `fromsoftware.dcx_tpf` (`gpu/games/bloodborne/fromsoftware_tpf.cpp`). A title whose
+glyphs are in a format already known only adds its table.
+
+Never commit the game's art or files: a table holds names, shapes, positions and hashes. The log
+says what was found:
+
+```
+Button prompts: 22 of the game's 22 glyphs and 1 of 1 atlases found (drawn for the keyboard and other gamepads; PS_BUTTON_PROMPTS=0: off)
+Button prompts: not in the game's files, the game's own stay: <names>
+Button prompts: glyphs from the keyboard and mouse, 22 of 22 drawn by the port
+```
+
+A source that cannot be read, an unknown extractor, an entry that can never match or an atlas cell
+outside its atlas or naming no glyph of the table is logged once at start. Glyphs a game draws
+through a font (libSceFont) or into a larger texture without known cells are out of reach of a
+table.
+
+### Finding a title's glyphs
+
+Before writing a table for a new title, see how it stores its glyphs:
 
 ```
 PS_DUMP_SMALL_TEXTURES=1 tools/regress.sh -j 1 -n <name> <games root>
@@ -190,5 +241,4 @@ atlas (`PS_DUMP_SMALL_TEXTURES_ATLAS`, 2048) is listed once per content hash in
 mips, layers, tiling, when it first appeared and how often it was bound. Glyphs drawn through a
 font (libSceFont) or by middleware into a larger texture do not show up there. Columns and
 variables: [FORK.md](../../FORK.md#diagnostics); a night step per title:
-`tools/regress/small-textures.plan`. The hashes the profile matches are computed when the game
-starts from the user's own files, as Bloodborne's are, never shipped as art.
+`tools/regress/small-textures.plan`.

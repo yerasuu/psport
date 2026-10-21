@@ -18,6 +18,10 @@
 #include "../psport_gpu.h"
 #include "psport_quirks.h"
 
+namespace PsGlyphs {
+struct Table;
+}
+
 namespace Game {
 
 /// Guest addresses [begin, end).
@@ -216,16 +220,18 @@ struct SubstitutePictures {
     std::vector<std::uint32_t> pixels;
 };
 
-/// Textures of the game sampled from pictures the port draws instead, known by their bytes
-/// (Bloodborne: its key guide icons for the device in use). The core asks about each upload of a
-/// single-level, single-layer block-compressed texture; all null for a profile without any.
+/// Textures of the game sampled from pictures the port draws instead, known by their bytes (a
+/// profile's button glyphs for the device in use: Profile::p_glyphs). The core asks about each
+/// upload of a single-level, single-layer block-compressed texture; all null for a profile without
+/// any.
 struct TextureSubstitution {
     /// Once when the GPU starts: begins reading what pfn_identify needs, off the game's thread.
     void (*pfn_start)() = nullptr;
     /// The substitute a texture is by its bytes as the game laid them out (cb_texels at p_texels,
-    /// its first level width x height), or nullptr; a result stays valid for the session.
+    /// its first level width x height, format its VkFormat), or nullptr; a result stays valid for
+    /// the session.
     const TextureSubstitute* (*pfn_identify)(const void* p_texels, std::size_t cb_texels, std::uint32_t width,
-                                             std::uint32_t height) = nullptr;
+                                             std::uint32_t height, std::uint32_t format) = nullptr;
     /// Whether a texture of this shape that is none of them is identified again at each bind while
     /// pictures are drawn, because the GPU may copy one in after its upload. It hashes at every
     /// bind: small shapes only.
@@ -293,11 +299,15 @@ struct Profile {
     /// The pool holding the game's GPU labels; zeros when unknown, and the free check stays off.
     SmallObjectPool small_object_pool;
     MouseHooks mouse;
+    /// Its own texture substitution; a profile with p_glyphs leaves it empty.
     TextureSubstitution texture_substitution;
     /// The player pressed the skip binding with skip_movies on (src/input/runtime_pad.c, on the
     /// game's thread under the pad's lock, after the core asked the playing movies to stop): true
     /// when the game takes the press to leave its own scene, which then reaches it no further.
     bool (*pfn_skip_scene)(bool has_stopped_movie) = nullptr;
+    /// Its button glyphs as data (games/common/glyphs.h), drawn through GlyphSubstitution; nullptr
+    /// for none.
+    const PsGlyphs::Table* p_glyphs = nullptr;
 };
 
 /// The game as psport runs it, whatever PS_GAME_PROFILE says.
@@ -406,10 +416,17 @@ inline MouseHooks Mouse() {
     return p_profile ? p_profile->mouse : MouseHooks{};
 }
 
-/// The active profile's texture substitution, or none.
+/// The substitution that draws the active profile's glyph table (games/common/glyphs.cpp).
+TextureSubstitution GlyphSubstitution();
+
+/// The active profile's texture substitution, its glyph table's, or none.
 inline TextureSubstitution Substitution() {
     const Profile* p_profile = Active();
-    return p_profile ? p_profile->texture_substitution : TextureSubstitution{};
+    if (!p_profile) {
+        return {};
+    }
+    return !p_profile->texture_substitution.pfn_identify && p_profile->p_glyphs ? GlyphSubstitution()
+                                                                                 : p_profile->texture_substitution;
 }
 
 /// Whether the active profile's hooks pace the game's frames (Profile::pfn_drives_frame_rate).

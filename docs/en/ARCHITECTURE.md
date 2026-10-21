@@ -589,7 +589,8 @@ A profile may provide:
 | `report_stats` | profile diagnostics with each frame statistics report |
 | `label_release` | the game's label release code, for the free check's `PS_LABEL_TRAP=2` |
 | `small_object_pool` | the layout of the pool holding its GPU labels, for the free check (`PS_FREE_CHECK`) |
-| `texture_substitution` | textures of the game it knows by their bytes and the pictures the port draws for them: the texture cache asks it about each upload of a single-level block-compressed texture (and, for small shapes, at their binds), samples the picture or a copy of the texture with pictures in its cells while they are drawn, and redraws them when its generation changes (`texture_substitutes.*`; Bloodborne's button prompts) |
+| `texture_substitution` | textures of the game it knows by their bytes and the pictures the port draws for them: the texture cache asks it about each upload of a single-level block-compressed texture (and, for small shapes, at their binds), samples the picture or a copy of the texture with pictures in its cells while they are drawn, and redraws them when its generation changes (`texture_substitutes.*`); a profile with `glyphs` leaves it empty |
+| `glyphs` | its button glyphs as data (`gpu/games/common/glyphs.h`): textures known by shape and hash, given or computed at start from the user's files through an extractor of their format, each replaced whole by the port's picture of its inputs or an atlas with glyphs in some cells ([ADDING_A_TITLE.md](ADDING_A_TITLE.md#6-button-glyphs)) |
 
 Hooks and patches in a game's code go through `gpu/port/psport_guest_code.h` (`PsGuestCode`), the
 same for any profile: `InstallHook` (a trampoline that hands a host function every register and may
@@ -611,10 +612,12 @@ or the executable is not 1.09), `PS_PATCHES`, the effect switches and `model_lod
 the `PS_RENDER_RES` scene size, the Intel tone mapping and online-choice fixes, all from
 `patches/Bloodborne.xml`; `game_check.cpp`: the 1.09 executable and intact shaders; the in-game menu
 pages, `game_menu.cpp`; its profile in `profile.cpp`, with Gnm entry hooks and `gnm_table.inc`,
-guest hooks and heap sites; its button prompts for the device in use, `button_prompts.cpp`, unless
+guest hooks and heap sites; its button prompts for the device in use, the glyph table in
+`button_prompts.cpp` read from `menu/common.tpf.dcx` by `fromsoftware_tpf.cpp`, unless
 `PS_BUTTON_PROMPTS=0`), listed in `gpu/games/game_profile.cpp`. What any title's profile may share
-lives in `gpu/games/common/`: `button_prompt_art.cpp` draws the prompt icons (key caps, the mouse,
-another gamepad's buttons) in the palette the title passes.
+lives in `gpu/games/common/`: `glyphs.cpp` substitutes a title's glyph table and
+`button_prompt_art.cpp` draws the prompt icons (key caps, the mouse, another gamepad's buttons) in
+the palette the table carries.
 Another title runs unpatched, on the console's 60 Hz vblank.
 
 ## Launch scripts
