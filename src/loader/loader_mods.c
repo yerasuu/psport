@@ -137,19 +137,27 @@ static int is_listed(const char *const *pp_list, size_t c_list, const char *sz_n
         if (!strcasecmp(pp_list[i], sz_name)) return 1;
     return 0;
 }
-/* Files a mod may carry beside its content without making it something else (an archive's
- * readme or screenshot). */
+/* Files a mod may carry beside its content without making it something else, as mod sites ship
+ * them: notes (a README without a suffix too), previews, links and licences. */
 static int is_document(const char *sz_name) {
-    static const char *const s_documents[] = {".txt", ".md", ".jpg", ".png", ".ini"};
+    static const char *const s_documents[] = {".txt", ".md",  ".ini",  ".json", ".pdf", ".rtf", ".nfo", ".url", ".htm",
+                                              ".html", ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"};
     const char *sz_dot = strrchr(sz_name, '.');
-    return sz_dot && sz_dot != sz_name && is_listed(s_documents, sizeof(s_documents) / sizeof(*s_documents), sz_dot);
+    return !sz_dot || sz_dot == sz_name || is_listed(s_documents, sizeof(s_documents) / sizeof(*s_documents), sz_dot);
+}
+static int is_game_folder(const LoaderModOptions *p_options, const char *sz_name) {
+    return is_listed(p_options->pp_folders, p_options->c_folders, sz_name) ||
+           is_listed((const char *const *)s_game_folders.pp_items, s_game_folders.c_items, sz_name);
 }
 
+#define MAX_WRAPPERS 3
 /* Where a mod's files are (sz_out_root) and the game path they go to (*psz_out_prefix), or 0.
  * Accepted layouts: <mod>/dvdroot_ps4, <mod>/app0/dvdroot_ps4, <mod>/<serial>/dvdroot_ps4 (any
- * TITLE_ID of the game's executable), one wrapper folder around any of these (an archive extracted
- * into a folder of its name), and the game's folders without dvdroot_ps4 (<mod>/chr, ...). */
-static int content_root(const LoaderModOptions *p_options, const char *sz_folder, char *sz_out_root,
+ * TITLE_ID of the game's executable), up to MAX_WRAPPERS wrapper folders around any of these
+ * (archives extracted into a folder of their name, beside notes and previews), and the game's
+ * folders without dvdroot_ps4 (<mod>/chr, ...), also next to other folders (Screenshots), which
+ * add_mod leaves out. */
+static int content_root(const LoaderModOptions *p_options, const char *sz_folder, int c_wrappers, char *sz_out_root,
                         const char **psz_out_prefix) {
     if (!is_dir(sz_folder)) return 0;
     for (size_t i = 0; i < 2 + p_options->c_serials; ++i) {
@@ -166,7 +174,7 @@ static int content_root(const LoaderModOptions *p_options, const char *sz_folder
     Names entries = {0};
     list_dir(sz_folder, &entries);
     size_t c_folders = 0;
-    int is_game_layout = 1, has_other_files = 0;
+    int is_game_layout = 0, has_other_files = 0;
     char sz_only[PATH_MAX] = "";
     for (size_t i = 0; i < entries.c_items; ++i) {
         if (entries.pp_items[i][0] == '.') continue;
@@ -174,19 +182,57 @@ static int content_root(const LoaderModOptions *p_options, const char *sz_folder
         join_path(sz_path, sz_folder, entries.pp_items[i]);
         if (is_dir(sz_path)) {
             if (!c_folders++) snprintf(sz_only, sizeof(sz_only), "%s", sz_path);
-            if (!is_listed(p_options->pp_folders, p_options->c_folders, entries.pp_items[i]) &&
-                !is_listed((const char *const *)s_game_folders.pp_items, s_game_folders.c_items, entries.pp_items[i]))
-                is_game_layout = 0;
+            if (is_game_folder(p_options, entries.pp_items[i])) is_game_layout = 1;
         } else if (is_file(sz_path) && !is_document(entries.pp_items[i])) has_other_files = 1;
     }
     names_free(&entries);
-    if (c_folders && is_game_layout) {
+    if (is_game_layout) {
         snprintf(sz_out_root, PATH_MAX, "%s", sz_folder);
         *psz_out_prefix = "dvdroot_ps4";
         return 1;
     }
-    if (c_folders == 1 && !has_other_files) return content_root(p_options, sz_only, sz_out_root, psz_out_prefix);
+    if (c_folders == 1 && !has_other_files && c_wrappers < MAX_WRAPPERS)
+        return content_root(p_options, sz_only, c_wrappers + 1, sz_out_root, psz_out_prefix);
     return 0;
+}
+
+typedef struct { size_t c_files; int has_archive; } FolderScan;
+static void scan_folder(const char *sz_folder, int depth, FolderScan *p_scan) {
+    static const char *const s_archives[] = {".zip", ".7z", ".rar"};
+    Names entries = {0};
+    list_dir(sz_folder, &entries);
+    for (size_t i = 0; i < entries.c_items && p_scan->c_files < 2000; ++i) {
+        char sz_path[PATH_MAX];
+        join_path(sz_path, sz_folder, entries.pp_items[i]);
+        /* walk() refuses links too; following them could leave the mods folder or loop. */
+        if (is_symlink(sz_path)) continue;
+        if (is_dir(sz_path)) {
+            if (depth < 8) scan_folder(sz_path, depth + 1, p_scan);
+            continue;
+        }
+        ++p_scan->c_files;
+        const char *sz_dot = strrchr(entries.pp_items[i], '.');
+        p_scan->has_archive |= sz_dot && is_listed(s_archives, sizeof(s_archives) / sizeof(*s_archives), sz_dot);
+    }
+    names_free(&entries);
+}
+/* Why a folder of the mods folder is not a mod (content_root gave 0), for the log. */
+static const char *rejection(const char *sz_folder) {
+    FolderScan scan = {0};
+    scan_folder(sz_folder, 0, &scan);
+    if (!scan.c_files) return "empty";
+    if (scan.has_archive) return "still an archive: extract it here";
+    Names entries = {0};
+    list_dir(sz_folder, &entries);
+    size_t c_folders = 0;
+    for (size_t i = 0; i < entries.c_items; ++i) {
+        char sz_path[PATH_MAX];
+        join_path(sz_path, sz_folder, entries.pp_items[i]);
+        c_folders += entries.pp_items[i][0] != '.' && is_dir(sz_path);
+    }
+    names_free(&entries);
+    if (c_folders > 1) return "several folders: each mod goes in its own folder, with dvdroot_ps4 or the game's folders";
+    return "no game files: expected dvdroot_ps4 or the game's folders (chr, parts, map...)";
 }
 
 static void discover(const LoaderModOptions *p_options, const char *sz_root, Names *p_out) {
@@ -197,7 +243,9 @@ static void discover(const LoaderModOptions *p_options, const char *sz_root, Nam
         char sz_path[PATH_MAX], sz_content[PATH_MAX];
         const char *sz_prefix;
         join_path(sz_path, sz_root, entries.pp_items[i]);
-        if (is_dir(sz_path) && content_root(p_options, sz_path, sz_content, &sz_prefix)) names_add(p_out, entries.pp_items[i]);
+        if (!is_dir(sz_path)) continue;
+        if (content_root(p_options, sz_path, 0, sz_content, &sz_prefix)) names_add(p_out, entries.pp_items[i]);
+        else fprintf(stderr, "Mods: %s is not a mod: %s\n", entries.pp_items[i], rejection(sz_path));
     }
     names_free(&entries);
     if (p_out->c_items) qsort(p_out->pp_items, p_out->c_items, sizeof(*p_out->pp_items), compare_folded);
@@ -244,14 +292,21 @@ static int is_first_part(const char *sz_relative, const char *sz_name) {
     return !strncasecmp(sz_relative, sz_name, cb_name) && (!sz_relative[cb_name] || sz_relative[cb_name] == '/');
 }
 /* Top-down, each directory's files sorted and its subdirectories in their own order; a link
- * anywhere in a mod is refused, as the view must not reach outside the mod through it. */
-static void walk(Mods *p_mods, const char *sz_directory, const char *sz_relative, size_t *p_count) {
+ * anywhere in a mod is refused, as the view must not reach outside the mod through it. At the top
+ * of a mod made of the game's folders (is_game_layout), its other folders and its notes stay out. */
+static void walk(Mods *p_mods, const char *sz_directory, const char *sz_relative, int is_game_layout, size_t *p_count) {
     Names entries = {0}, folders = {0}, files = {0};
     list_dir(sz_directory, &entries);
     for (size_t i = 0; i < entries.c_items; ++i) {
         char sz_path[PATH_MAX];
         join_path(sz_path, sz_directory, entries.pp_items[i]);
-        names_add(is_dir(sz_path) ? &folders : &files, entries.pp_items[i]);
+        const int is_folder = is_dir(sz_path);
+        const int is_kept = is_folder ? is_game_folder(p_mods->p_options, entries.pp_items[i]) : !is_document(entries.pp_items[i]);
+        if (is_game_layout && !is_kept) {
+            fprintf(stderr, "Mods: %s left out: not one of the game's folders or files\n", sz_path);
+            continue;
+        }
+        names_add(is_folder ? &folders : &files, entries.pp_items[i]);
     }
     names_free(&entries);
     for (size_t pass = 0; pass < 2; ++pass) {
@@ -284,7 +339,7 @@ static void walk(Mods *p_mods, const char *sz_directory, const char *sz_relative
         join_path(sz_path, sz_directory, folders.pp_items[i]);
         if (sz_relative[0]) join_path(sz_game_path, sz_relative, folders.pp_items[i]);
         else snprintf(sz_game_path, sizeof(sz_game_path), "%s", folders.pp_items[i]);
-        walk(p_mods, sz_path, sz_game_path, p_count);
+        walk(p_mods, sz_path, sz_game_path, 0, p_count);
     }
     names_free(&folders);
     names_free(&files);
@@ -292,12 +347,12 @@ static void walk(Mods *p_mods, const char *sz_directory, const char *sz_relative
 static void add_mod(Mods *p_mods, Names *p_owners, const char *sz_name, const char *sz_folder) {
     char sz_root[PATH_MAX], sz_real[PATH_MAX];
     const char *sz_prefix;
-    if (!content_root(p_mods->p_options, sz_folder, sz_root, &sz_prefix))
+    if (!content_root(p_mods->p_options, sz_folder, 0, sz_root, &sz_prefix))
         mods_fail("%s: expected dvdroot_ps4 (or chr/, parts/, ...) inside the mod folder", sz_folder);
     const int error = ps_host_fs_real_path(sz_root, sz_real, sizeof(sz_real));
     if (error) mods_fail("%s: %s", sz_root, strerror(error));
     size_t first = p_mods->c_replacements, c_added = 0;
-    walk(p_mods, sz_real, sz_prefix, &c_added);
+    walk(p_mods, sz_real, sz_prefix, sz_prefix[0] != 0, &c_added);
     for (size_t i = first; i < p_mods->c_replacements; ++i) {
         const char *sz_relative = p_mods->p_replacements[i].sz_relative;
         for (size_t j = 0; j < p_owners->c_items; j += 2) {

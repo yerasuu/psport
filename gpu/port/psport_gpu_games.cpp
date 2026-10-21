@@ -54,6 +54,7 @@ extern "C" PsTitleInfo psport_gpu_title(const char* sz_serial) {
         .pfn_check_files = p_title->pfn_check_files ? CheckFiles : nullptr,
         .pfn_add_patches = p_title->pfn_add_patches ? AddPatches : nullptr,
         .pfn_external_patch_refusal = p_title->pfn_external_patch_refusal,
+        .pfn_replaced_patch_consequence = p_title->pfn_replaced_patch_consequence,
         .pfn_patch_image = has_patch_image ? PatchImage : nullptr,
         .p_quirks = p_title->quirks.data(),
         .c_quirks = p_title->quirks.size(),

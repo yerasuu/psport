@@ -337,6 +337,9 @@ struct Title {
     /// After pfn_add_patches: why an external patch (its XML Name) must not apply, or nullptr. For
     /// what the title already does another way an external patch would undo (its hooks' code).
     const char* (*pfn_external_patch_refusal)(const char* sz_name) = nullptr;
+    /// After pfn_add_patches: what the game loses when an external patch replaces one of its own
+    /// patches it relies on (by its XML Name), or nullptr; the loader then warns with it.
+    const char* (*pfn_replaced_patch_consequence)(const char* sz_name) = nullptr;
     /// The settings of pfn_add_patches the player changes in the overlay menu.
     GameEffects effects;
     /// Changes to the user's saves the game needs, made before any of its code runs. saves is the

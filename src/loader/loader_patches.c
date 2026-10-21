@@ -241,14 +241,20 @@ static int is_group_overlapping(const PsPatchList *p_list, const LoaderPatchGrou
 }
 /* Applied over a profile patch, an external one of the same bytes but other values would leave a
  * mix of both (an FPS patch at the preset's addresses), so the profile patch goes whole. */
-static void replace_overlapped(PsPatchList *p_list, size_t i_first, const char *sz_key) {
+static void replace_overlapped(PsPatchList *p_list, size_t i_first, const char *sz_key,
+                               const char *(*pfn_consequence)(const char *sz_name)) {
     for (size_t g = 0; g < p_list->c_groups;) {
         LoaderPatchGroup group = p_list->p_groups[g];
         if (!is_group_overlapping(p_list, &group, i_first)) {
             ++g;
             continue;
         }
-        printf("Patches: external %s replaces the profile's '%s' (%zu writes removed)\n", sz_key, group.sz_name, group.c_writes);
+        const char *sz_consequence = pfn_consequence ? pfn_consequence(group.sz_name) : NULL;
+        if (sz_consequence)
+            fprintf(stderr, "WARNING: Patches: external %s replaces the profile's '%s' (%zu writes removed): %s\n", sz_key,
+                    group.sz_name, group.c_writes, sz_consequence);
+        else
+            printf("Patches: external %s replaces the profile's '%s' (%zu writes removed)\n", sz_key, group.sz_name, group.c_writes);
         for (size_t i = group.i_first; i < group.i_first + group.c_writes; ++i) free(p_list->p_writes[i].p_data);
         memmove(&p_list->p_writes[group.i_first], &p_list->p_writes[group.i_first + group.c_writes],
                 (p_list->c_writes - group.i_first - group.c_writes) * sizeof(*p_list->p_writes));
@@ -456,9 +462,12 @@ void loader_patches_external(PsPatchList *p_list, const LoaderPatchFolder *p_fol
             continue;
         }
         size_t c_added = p_list->c_writes - c_before;
-        replace_overlapped(p_list, c_before, p_external->sz_key);
+        replace_overlapped(p_list, c_before, p_external->sz_key, p_folder->pfn_replaced_consequence);
         printf("Patches: external %s (%zu writes)\n", p_external->sz_key, c_added);
     }
+    free(p_list->p_groups);
+    p_list->p_groups = NULL;
+    p_list->c_groups = p_list->c_group_capacity = 0;
     loader_json_free(settings, 2);
     free_externals(&externals);
 }

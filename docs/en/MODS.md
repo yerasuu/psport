@@ -27,12 +27,18 @@ Also accepted:
 
 - `Mod name/app0/dvdroot_ps4/...` and `Mod name/CUSA03173/dvdroot_ps4/...` (the game's title ID or,
   with a game profile, any title ID of the same executable: for Bloodborne, any retail release);
-- one extra wrapper folder, as left by extracting an archive into a folder of its name:
-  `Mod name/Mod name v1.2/dvdroot_ps4/...` (readme files and pictures may sit next to it);
+- up to three wrapper folders, as left by extracting an archive into a folder of its name:
+  `Mod name/Mod name v1.2/dvdroot_ps4/...` (notes, a README without a suffix, pictures, PDFs and
+  `.url` links may sit next to each);
 - a mod without `dvdroot_ps4` that holds the game's folders directly: `Mod name/chr/...`,
   `Mod name/parts/...` (the folders of the game's own `dvdroot_ps4` and those its profile lists:
   for Bloodborne `chr`, `parts`, `map`, `menu`, `msg`, `param`, `sfx`, `sound`, `font`, `adhoc` and
-  the others).
+  the others). Other folders next to them (`Screenshots`, `Optional`) and notes stay out of the
+  game, each named in the log.
+
+A folder of the mods folder that is none of these is not loaded, and the log says why:
+`Mods: <folder> is not a mod: <reason>` (empty, still an archive, several mods in one folder, no
+game files).
 
 Case in a mod's names does not matter: `DVDROOT_PS4/Chr/C0000.chrbnd.dcx` from a mod built on
 Windows replaces the game's `dvdroot_ps4/chr/c0000.chrbnd.dcx`. Earlier such a file was added next

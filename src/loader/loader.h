@@ -49,7 +49,8 @@ typedef struct {
  * An error ends the process. */
 char *loader_mods_view(const char *sz_game, const LoaderModOptions *p_options);
 /* --list-mods: the mod folders under sz_mods_dir, as a JSON array of names. game may be NULL: then
- * only layouts with dvdroot_ps4 (directly, under app0 or a wrapper folder) are known. */
+ * only layouts with dvdroot_ps4 (directly, under app0 or wrapper folders) are known. Folders that
+ * are not mods are named on stderr, with why. */
 void loader_mods_list(const char *sz_game, const LoaderModOptions *p_options);
 /* mods.json and patches.json (loader_json.c): the string arrays of the named members of a JSON
  * object. is_list stays 0 for a member whose value is not an array of strings only. */
@@ -80,12 +81,14 @@ struct PsPatchList {
 void loader_patch_services(PsPatchList *p_list, PsPatchServices *p_out);
 /* The patches in the *.xml files of sz_dir for a game: files whose <ID>s name one of its serials (or none),
  * entries for its sz_version and eboot.bin; sz_excluded (a profile's own file) is left out, and so is
- * each patch pfn_refusal gives a reason for (by its Name). */
+ * each patch pfn_refusal gives a reason for (by its Name). pfn_replaced_consequence: what the game
+ * loses when an external patch replaces the profile patch of that name, or NULL. */
 typedef struct {
     const char *sz_dir, *sz_excluded, *sz_version;
     const char *const *pp_serials;
     size_t c_serials;
     const char *(*pfn_refusal)(const char *sz_name);
+    const char *(*pfn_replaced_consequence)(const char *sz_name);
 } LoaderPatchFolder;
 /* Appends the selected ones: patches.json's (sz_config) "enabled", else each entry's isEnabled
  * unless "disabled" names it. A patch with an unsupported line is skipped whole, and said. One that

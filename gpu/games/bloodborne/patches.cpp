@@ -431,6 +431,17 @@ int FrameHooksChosen() {
     return s_frame_hooks_rate;
 }
 
+const char* ReplacedPatchConsequence(const char* sz_name) {
+    if (std::strcmp(sz_name, ResolutionTemplate) == 0) {
+        return "PS_RENDER_RES no longer sets the scene size: the game renders at the external patch's";
+    }
+    if (std::strcmp(sz_name, GraphicsHeap) == 0) {
+        return "the graphics heaps keep the external patch's sizes, which may be too small for the PS_RENDER_RES "
+               "scene (the game then crashes at 0x443025)";
+    }
+    return nullptr;
+}
+
 const char* ExternalPatchRefusal(const char* sz_name) {
     if (!s_frame_hooks_rate) {
         return nullptr;

@@ -117,6 +117,7 @@ extern const Title BloodborneTitle = {
     .pfn_check_files = PsLaunch::CheckFiles,
     .pfn_add_patches = PsLaunch::AddPatches,
     .pfn_external_patch_refusal = PsLaunch::ExternalPatchRefusal,
+    .pfn_replaced_patch_consequence = PsLaunch::ReplacedPatchConsequence,
     .effects = {.switches = PsEffects::Switches,
                 .has_model_detail = true,
                 .hint = {"Motion blur and shadows from dynamic lights place a significant load on the GPU.",

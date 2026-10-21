@@ -27,4 +27,6 @@ int FrameHooksChosen();
 /// External patches (a copy of the community XML) that would rewrite the code the frame rate hooks
 /// replace: the presets' frame rate patches, while the hooks drive it.
 const char* ExternalPatchRefusal(const char* sz_name);
+/// The resolution template and the graphics heap patch, which PS_RENDER_RES relies on.
+const char* ReplacedPatchConsequence(const char* sz_name);
 } // namespace PsLaunch
