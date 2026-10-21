@@ -10,10 +10,12 @@
 
 #define VOICE_NOT_INIT ((int32_t)0x804E0801)
 #define VOICE_INITIALIZED ((int32_t)0x804E0802)
+#define VOICE_PORT_INVALID ((int32_t)0x804E0804)
 #define VOICE_ARGUMENT_INVALID ((int32_t)0x804E0805)
 #define VOICE_TOPOLOGY ((int32_t)0x804E0807)
 #define VOICE_RESOURCE_INSUFFICIENT ((int32_t)0x804E0808)
-#define MAX_PORTS 128
+#define VOICE_NO_PORT_TABLE ((int32_t)0x804E080A)
+#define MAX_PORTS 64
 #define PORT_IN_DEVICE 0
 #define PORT_IN_PCMAUDIO 1
 #define PORT_IN_VOICE 2
@@ -23,6 +25,7 @@
 #define STATE_IDLE 0
 #define STATE_READY 1
 #define PCM_FRAME_BYTES 640 /* 20 ms of 16 kHz 16-bit mono */
+#define CB_RING 0x800 /* device and voice ports; a high-quality instance's voice ports have 0x1800 */
 #define ATTR_SILENT_STATE 1001
 
 typedef struct {
@@ -70,9 +73,11 @@ static uint32_t frame_size(const PortParam *p_param) {
         return p_param->voice.bitrate>0 ? ((uint32_t)p_param->voice.bitrate*20u+7999u)/8000u : 0;
     return PCM_FRAME_BYTES;
 }
-static uint32_t writable_bytes(const PortParam *p_param) {
-    if (p_param->type==PORT_IN_PCMAUDIO) return p_param->pcm.cb_buffer;
-    return p_param->type==PORT_IN_VOICE ? frame_size(p_param) : 0;
+/* An input port's queued bytes and an output port's free space: nothing is ever queued here, so
+   inputs hold none and an output's whole ring is free. */
+static uint32_t info_bytes(const PortParam *p_param) {
+    if (p_param->type==PORT_OUT_PCMAUDIO) return p_param->pcm.cb_buffer;
+    return is_output(p_param->type) ? CB_RING : 0;
 }
 
 static ABI int32_t voice_init(const void *p_param) {
@@ -158,15 +163,15 @@ static ABI int32_t voice_disconnect(uint32_t in_id, uint32_t out_id) {
 static ABI int32_t voice_port_info(uint32_t id, PortInfo *p_info) {
     pthread_mutex_lock(&s_lock);
     Port *p_port=s_is_initialized ? find_port(id) : NULL;
-    const int32_t result=!s_is_initialized ? VOICE_NOT_INIT : !p_port ? VOICE_TOPOLOGY : !p_info ? VOICE_ARGUMENT_INVALID : 0;
+    /* libSceVoice builds its port table in sceVoiceStart, which is also what makes a port READY. */
+    const int32_t result=!s_is_initialized ? VOICE_NOT_INIT : id>=MAX_PORTS ? VOICE_PORT_INVALID : !p_info ? VOICE_ARGUMENT_INVALID
+        : !s_has_started ? VOICE_NO_PORT_TABLE : !p_port ? VOICE_TOPOLOGY : 0;
+    /* The edge pointer and count stay as the caller left them, since libSceVoice never writes them. */
     if (!result) {
-        memset(p_info,0,sizeof(*p_info));
         p_info->type=p_port->param.type;
-        p_info->state=s_has_started && p_port->c_edges ? STATE_READY : STATE_IDLE;
-        p_info->edges=p_port->edges;
-        p_info->bytes=writable_bytes(&p_port->param);
+        p_info->state=p_port->c_edges && !p_port->param.muted ? STATE_READY : STATE_IDLE;
+        p_info->bytes=info_bytes(&p_port->param);
         p_info->frame_size=frame_size(&p_port->param);
-        p_info->edge_count=p_port->c_edges;
     }
     pthread_mutex_unlock(&s_lock);
     return result;
