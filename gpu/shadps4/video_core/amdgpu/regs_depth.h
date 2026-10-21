@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <algorithm>
+
 #include "common/assert.h"
 #include "common/types.h"
 #include "video_core/amdgpu/tiling.h"
@@ -121,6 +123,19 @@ struct DepthView {
 
     u32 NumSlices() const {
         return slice_max + 1u;
+    }
+
+    // psport: the DB writes slice_start plus the layer a pre-rasterization stage exports, clamped
+    // to slice_max, so a draw without that export touches slice_start alone, or slice_max when
+    // slice_start is past it. slice_max is no array size (games leave it past their allocation,
+    // #175), so it must not size the image.
+    DepthView ForDraw(bool is_layered) const {
+        DepthView view = *this;
+        view.slice_start = std::min(slice_start, slice_max);
+        if (!is_layered) {
+            view.slice_max = view.slice_start;
+        }
+        return view;
     }
 };
 

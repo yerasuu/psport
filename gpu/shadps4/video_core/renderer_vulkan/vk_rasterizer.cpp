@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <algorithm>
 #include <dlfcn.h>
 #include <map>
 #include <unordered_set>
@@ -683,13 +684,18 @@ void Rasterizer::PrepareRenderState(const GraphicsPipeline* pipeline) {
         const auto& hint = DbExtent();
         auto& [image_id, desc] = db_desc;
         const u32 tag = 2;
+        const bool is_layered =
+            std::ranges::any_of(pipeline->GetStages(), [](const Shader::Info* p_info) {
+                return p_info && p_info->stores.GetAny(Shader::IR::Attribute::RenderTargetIndex);
+            });
+        const auto depth_view = regs.depth_view.ForDraw(is_layered);
         image_id = bound_images.emplace_back(FindTargetMemoized(
             desc, last_targets[AmdGpu::NUM_COLOR_BUFFERS],
             [&] {
-                std::construct_at(&desc, regs.depth_buffer, regs.depth_view, regs.depth_control,
+                std::construct_at(&desc, regs.depth_buffer, depth_view, regs.depth_control,
                                   htile_address, hint);
             },
-            tag, regs.depth_buffer, regs.depth_view, regs.depth_control, htile_address, hint));
+            tag, regs.depth_buffer, depth_view, regs.depth_control, htile_address, hint));
         auto& image = texture_cache.GetImage(image_id);
         image.binding.is_target = 1u;
     } else {
@@ -4487,12 +4493,15 @@ void Rasterizer::Resolve() {
 
 void Rasterizer::DepthStencilCopy(bool is_depth, bool is_stencil) {
     auto& regs = Regs();
+    // psport: this pass's vertex stage is never compiled, so whether it exports a layer is
+    // unknown; a copy quad exports none and moves slice_start alone (DepthView::ForDraw).
+    const auto depth_view = regs.depth_view.ForDraw(false);
 
     auto read_desc = VideoCore::TextureCache::ImageDesc(
-        regs.depth_buffer, regs.depth_view, regs.depth_control,
+        regs.depth_buffer, depth_view, regs.depth_control,
         regs.depth_htile_data_base.GetAddress(), DbExtent(), false);
     auto write_desc = VideoCore::TextureCache::ImageDesc(
-        regs.depth_buffer, regs.depth_view, regs.depth_control,
+        regs.depth_buffer, depth_view, regs.depth_control,
         regs.depth_htile_data_base.GetAddress(), DbExtent(), true);
 
     const auto read_id = texture_cache.FindImage(read_desc);
@@ -4500,9 +4509,7 @@ void Rasterizer::DepthStencilCopy(bool is_depth, bool is_stencil) {
     // The copy destination is never bound as a target, so its stencil plane is linked here.
     texture_cache.AssociateStencil(write_id, write_desc.info);
 
-    VideoCore::SubresourceRange sub_range;
-    sub_range.base.layer = Regs().depth_view.slice_start;
-    sub_range.extent.layers = Regs().depth_view.NumSlices() - sub_range.base.layer;
+    const auto& sub_range = write_desc.view_info.range;
 
     ScopeMarkerBegin(fmt::format(
         "DepthStencilCopy:DR={:#x}:SR={:#x}:DW={:#x}:SW={:#x}", regs.depth_buffer.DepthAddress(),
