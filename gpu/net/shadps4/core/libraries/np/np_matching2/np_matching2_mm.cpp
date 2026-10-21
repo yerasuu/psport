@@ -1244,7 +1244,7 @@ bool RequestSignalingInfos(std::string_view target_online_id, u32* out_addr, u16
     return true;
 }
 
-// BBSC (experimental, Phase 2): after Bloodborne keeps a session through a stage load, the reloaded
+// BBSC (experimental, Phase 2): after the game keeps a session through a stage load, the reloaded
 // process has lost the partner's character. Re-deliver the room membership notifications that the
 // game originally used to insert the partner, built from the unchanged room cache. Nothing is sent
 // to shadNet and no cache, peer or signaling state is modified.

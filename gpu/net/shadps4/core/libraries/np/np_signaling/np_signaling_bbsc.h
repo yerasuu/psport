@@ -3,9 +3,9 @@
 
 #pragma once
 
-// BBSC packets on the np_signaling socket that the Bloodborne code also builds and reads. Kept out
-// of np_signaling_state.h, which pulls in the platform headers (their `near`/`far` macros break
-// bloodborne_re.cpp).
+// BBSC packets on the np_signaling socket that BBSC's game code (games/<game>/net/core/) also builds
+// and reads. Kept out of np_signaling_state.h, which pulls in the platform headers (their
+// `near`/`far` macros break that code).
 
 #include <cstddef>
 
@@ -16,7 +16,7 @@ namespace Libraries::Np::NpSignaling {
 inline constexpr u8 kSignalingBbscWorldFlagsType = 0x22;
 
 // One chunk of a host world-flag snapshot: up to 8 event-flag groups (1000 flags, 125 bytes each)
-// of the host's current map block, in the fixed order of Core::Bloodborne's BbscWorldGroupKey.
+// of the host's current map block, in the fixed order of BBSC's BbscWorldGroupKey.
 // ~1 KB, below the 1280-byte tunnel MTU (Tailscale) with the UDP and v-port headers.
 inline constexpr size_t kBbscWorldFlagGroupBytes = 125;
 inline constexpr size_t kBbscWorldFlagGroupsPerChunk = 8;

@@ -680,11 +680,15 @@ refused, e.g. matchmaking full) is shown to the player.
 
 The module learns the summon route through `PsNetHost` `sz_summon_route` (`PSPORT_NET_ABI_VERSION`
 3; a runtime and a module of different versions refuse each other and the game stays offline). The
-summon helpers in `http.cpp` (the host placement header, the seamless route of
-`SHADPS4_BLOODBORNE_SEAMLESS_COOP=1`, the exchange capture of `SHADPS4_CAPTURE_BLOODBORNE_SUMMON=1`)
-act on that route only; for a title that declares none, either `SHADPS4_*` switch still forces
-shadp2p's `/summon_messenger`, with a warning. The module logs `Co-op: summon route ... (the
-title's)` or that the title declares none.
+route picks the title's summon client (`PsNetTitle::SummonClient`, `gpu/net/psport_net_title.h`),
+code under `gpu/games/<game>/net/` registered for that route, whether or not the title's extension
+runs; `http.cpp` hands it every request (before its worker, before sending, once answered and when
+finished, `gpu/net/shadps4/core/libraries/network/http_plan.h`) and it acts on its own calls.
+Bloodborne's (`gpu/games/bloodborne/net/summon_client.cpp`, `/summon_messenger`) carries the host
+placement header, the seamless route of `SHADPS4_BLOODBORNE_SEAMLESS_COOP=1` and the exchange
+capture of `SHADPS4_CAPTURE_BLOODBORNE_SUMMON=1`; for a title that declares no route, either switch
+still forces it, logged as `Co-op: summon route /summon_messenger forced`. The module logs `Co-op:
+summon route ... (the title's)` or that the title declares none.
 
 A title may carry its own part of the online module (`Game::OnlineExtension` in `online`): code
 under `gpu/games/<game>/net/` that needs the network libraries, built into `libpsport-net.so`
@@ -709,8 +713,9 @@ keeps the code writable, gives its cinematic camera (F1) the window's events and
 (through `Core::InstallGuestCodeHook`, `gpu/net/include/core/cpu_patches.h`, which is
 `PsGuestCode::InstallHook`) and byte patches, each checked against CUSA03173 01.09's bytes. The
 network side of BBSC is in the inherited libraries: its signaling packets (`np_signaling_bbsc.h`,
-handed to its code only while it runs), the room replay, the summon broker's connect-first area,
-stale record cleanup and fast sign in `http.cpp`.
+handed to its code only while it runs, through the extension's `pfn_signaling_packet`) and the room
+replay; the extension also traces `sceNpMatching2LeaveRoom` (`pfn_leave_room`). The summon broker's
+connect-first area, stale record cleanup and fast sign are in Bloodborne's summon client.
 
 Switching it on: the launcher's *Online* page, "Seamless co-op (BBSC)" (`online_bbsc`, off by
 default), sets `PS_BBSC=1`; every player needs it and the same server, a shadNet server with BBSC's

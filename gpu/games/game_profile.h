@@ -171,9 +171,9 @@ struct OnlineServices {
     const char* sz_community_server = nullptr;
     /// The port the community server sends the game to for its API (summons among them).
     std::uint16_t community_api_port = 0;
-    /// The path of its summon calls on that API, without a trailing slash: routed to the shadNet
-    /// WebAPI when that has the service, and the only path the online module's summon helpers
-    /// (host placement, SHADPS4_BLOODBORNE_SEAMLESS_COOP, SHADPS4_CAPTURE_BLOODBORNE_SUMMON) act on.
+    /// The path of its summon calls on that API, without a trailing slash: the online module hands
+    /// them to the summon client registered for it (PsNetTitle::SummonClient, the title's code in
+    /// games/<game>/net/), which may route them to the shadNet WebAPI.
     const char* sz_summon_route = nullptr;
     OnlineExtension extension;
 };

@@ -6,8 +6,11 @@
 // cinematic camera sees the window's events first. From bbport (gpu/bbnet/bbsc_glue.cpp and the
 // BBSC part of bbnet_image_ready in gpu/bbnet/bbnet_glue.cpp).
 #include <atomic>
+#include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <string_view>
 #include <system_error>
@@ -23,6 +26,7 @@
 #include "core/bloodborne_re.h"
 #include "core/file_format/psf.h"
 #include "core/libraries/network/sockets.h"
+#include "core/libraries/np/np_signaling/np_signaling_state.h"
 #include "imgui/bbsc_intro_layer.h"
 #include "imgui/bbsc_loading_layer.h"
 #include "psport_net_title.h"
@@ -111,6 +115,28 @@ void ImageReady(std::uint64_t va_image, std::uint64_t cb_image) {
     Core::Bloodborne::InstallReverseEngineeringTrace();
 }
 
-const bool s_is_registered = PsNetTitle::Register({.sz_name = "bbsc", .pfn_start = Start, .pfn_image_ready = ImageReady});
+bool ReceiveSignaling(const std::uint8_t* p_packet, std::size_t cb_packet) {
+    using namespace Libraries::Np::NpSignaling;
+    if ((cb_packet == sizeof(SignalingBbscFollow) || cb_packet == kSignalingBbscFollowV1Size) &&
+        p_packet[4] == static_cast<u8>(SignalingPacketType::BbscFollow)) {
+        SignalingBbscFollow follow{}; // lamp_point stays -1 for an older build's packet
+        std::memcpy(&follow, p_packet, cb_packet);
+        Core::Bloodborne::OnBbscHostFollowPacket(follow.packed_map, follow.x, follow.y, follow.z, follow.heading,
+                                                 follow.sequence, follow.lamp_point);
+        return true;
+    }
+    if (cb_packet == sizeof(SignalingBbscWorldFlags) &&
+        p_packet[4] == static_cast<u8>(SignalingPacketType::BbscWorldFlags)) {
+        Core::Bloodborne::OnBbscWorldFlagsPacket(p_packet, static_cast<u32>(cb_packet));
+        return true;
+    }
+    return false;
+}
+
+const bool s_is_registered = PsNetTitle::Register({.sz_name = "bbsc",
+                                                   .pfn_start = Start,
+                                                   .pfn_image_ready = ImageReady,
+                                                   .pfn_signaling_packet = ReceiveSignaling,
+                                                   .pfn_leave_room = Core::Bloodborne::TraceMatching2LeaveRoom});
 
 } // namespace

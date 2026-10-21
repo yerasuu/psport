@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // psport online module: shadPS4's guest code hook interface (core/cpu_patches.h of the shadp2p and
-// BBSC forks) as a title's extension calls it (BBSC's bloodborne_re.cpp), over the port's guest
+// BBSC forks) as a title's extension calls it (BBSC's game code), over the port's guest
 // code layer (gpu/port/psport_guest_code.h), so that every hook is byte-checked and logged there.
 // From bbport (gpu/shim/bbport_guest_code_hooks.h).
 #pragma once

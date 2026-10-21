@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// psport online module: what BBSC (bloodborne_re.cpp, bbsc_persistence.cpp) reads of shadPS4's
+// psport online module: what BBSC's game code (games/<game>/net/core/) reads of shadPS4's
 // memory patcher: where the game's image is and which game it is, set when BBSC starts and at
 // psport_net_image_ready. From bbport (gpu/bbnet/include/common/memory_patcher.h).
 #pragma once

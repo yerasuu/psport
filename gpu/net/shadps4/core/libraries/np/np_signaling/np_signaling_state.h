@@ -55,7 +55,7 @@ enum class SignalingPacketType : u8 {
     Handshake = 0x07,
     Control = 0x10,
     // BBSC, not part of the PS4 protocol: the host tells its co-op partners which map it is in,
-    // so a guest can follow it through a lamp warp. Bloodborne itself never carries this - when a
+    // so a guest can follow it through a lamp warp. The game itself never carries this - when a
     // host changes stage the game simply ends the session - so there is nothing to piggyback on.
     // Only BBSC builds send it, and any other build drops it as an unknown packet.
     BbscFollow = 0x20,

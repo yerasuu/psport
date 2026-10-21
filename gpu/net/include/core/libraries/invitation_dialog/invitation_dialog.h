@@ -1,5 +1,5 @@
 // psport co-op: the session invitation event types from shadPS4's invitation_dialog.h
-// (the dialog itself is not ported; Bloodborne's co-op uses bells, not invitations).
+// (the dialog is not ported; the co-op played online so far summons in game, not by invitation).
 #pragma once
 #include <cstddef>
 #include "common/types.h"

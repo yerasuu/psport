@@ -509,8 +509,7 @@ extern "C" __attribute__((visibility("default"))) int psport_net_init(const PsNe
     if (p_host->sz_summon_route) {
         std::printf("Co-op: summon route %s (the title's)\n", p_host->sz_summon_route);
     } else {
-        std::printf("Co-op: the title declares no summon route; the summon helpers stay off unless "
-                    "SHADPS4_BLOODBORNE_SEAMLESS_COOP or SHADPS4_CAPTURE_BLOODBORNE_SUMMON is set\n");
+        std::printf("Co-op: the title declares no summon route\n");
     }
     PsNetTitle::Start(*p_host);
     Core::Loader::SymbolsResolver resolver;
