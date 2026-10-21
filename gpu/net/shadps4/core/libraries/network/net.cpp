@@ -10,9 +10,12 @@
 #include <arpa/inet.h>
 #endif
 
+#include <algorithm>
+#include <atomic>
 #include <bitset>
 #include <cstring>
 #include <mutex>
+#include <ranges>
 
 #include <core/libraries/kernel/kernel.h>
 #include <magic_enum/magic_enum.hpp>
@@ -619,9 +622,27 @@ int PS4_SYSV_ABI sceNetDuplicateIpStop() {
     return ORBIS_OK;
 }
 
-int PS4_SYSV_ABI sceNetEpollAbort() {
+int PS4_SYSV_ABI sceNetEpollAbort(OrbisNetId epollid, int flags) {
+#ifdef __linux__
+    auto file = FDTable::Instance()->GetEpoll(epollid);
+    if (!file) {
+        *sceNetErrnoLoc() = ORBIS_NET_EBADF;
+        return ORBIS_NET_ERROR_EBADF;
+    }
+    auto epoll = file->epoll;
+    LOG_TRACE(Lib_Net, "called, epollid = {} ({}), flags = {:#x}", epollid, epoll->name, flags);
+    if (epoll->abort_fd != -1 && std::atomic_ref{epoll->c_waiters}.load() > 0) {
+        const u64 c_aborts = 1;
+        if (write(epoll->abort_fd, &c_aborts, sizeof(c_aborts)) < 0) {
+            LOG_ERROR(Lib_Net, "epoll {}: abort not signalled ({})", epoll->name,
+                      Common::GetLastErrorMsg());
+        }
+    }
+    return ORBIS_OK;
+#else
     LOG_TRACE(Lib_Net, "(STUBBED) called");
     return ORBIS_OK;
+#endif
 }
 
 int PS4_SYSV_ABI sceNetEpollControl(OrbisNetId epollid, OrbisNetEpollFlag op, OrbisNetId id,
@@ -836,8 +857,26 @@ int PS4_SYSV_ABI sceNetEpollWait(OrbisNetId epollid, OrbisNetEpollEvent* events,
 #ifdef __linux__
         const timespec epoll_timeout{.tv_sec = timeout / 1000000,
                                      .tv_nsec = (timeout % 1000000) * 1000};
+        std::atomic_ref c_waiters{epoll->c_waiters};
+        ++c_waiters;
         result = epoll_pwait2(epoll->epoll_fd, native_events.data(), maxevents,
                               timeout < 0 ? nullptr : &epoll_timeout, nullptr);
+        const bool is_aborted =
+            result > 0 && std::ranges::any_of(native_events | std::views::take(result),
+                                              [](const epoll_event& native_event) {
+                                                  return native_event.data.u64 == EPOLL_ABORT_TAG;
+                                              });
+        if (--c_waiters == 0 && epoll->abort_fd != -1) {
+            u64 c_aborts;
+            if (read(epoll->abort_fd, &c_aborts, sizeof(c_aborts)) < 0 && errno != EAGAIN) {
+                LOG_ERROR(Lib_Net, "epoll {}: abort not cleared ({})", epoll->name,
+                          Common::GetLastErrorMsg());
+            }
+        }
+        if (is_aborted) {
+            *sceNetErrnoLoc() = ORBIS_NET_EINTR;
+            return ORBIS_NET_ERROR_EINTR;
+        }
 #else
         result = epoll_wait(epoll->epoll_fd, native_events.data(), maxevents,
                             timeout < 0 ? timeout : timeout / 1000);

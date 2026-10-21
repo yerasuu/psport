@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "common/error.h"
+#include "common/logging/log.h"
 #include "common/types.h"
 #include "core/libraries/network/net.h"
 
@@ -20,6 +22,10 @@
 #include <unistd.h>
 #endif
 
+#ifdef __linux__
+#include <sys/eventfd.h>
+#endif
+
 namespace Libraries::Net {
 
 #ifdef _WIN32
@@ -28,11 +34,21 @@ using epoll_handle = HANDLE;
 using epoll_handle = int;
 #endif
 
+// psport: the epoll tag of an Epoll's abort_fd, apart from the net ids the other entries carry.
+constexpr u64 EPOLL_ABORT_TAG = ~u64{0};
+
 struct Epoll {
     std::vector<std::pair<u32 /*netId*/, OrbisNetEpollEvent>> events{};
     std::string name;
     epoll_handle epoll_fd;
     std::deque<u32> async_resolutions{};
+#ifdef __linux__
+    // psport: sceNetEpollAbort wakes the threads waiting at that moment through this eventfd, which
+    // the last of them to leave clears, so an abort with nobody waiting has no effect (libSceNet's
+    // waits end with EINTR when the kernel aborts them, kb #735).
+    int abort_fd{-1};
+    int c_waiters{};
+#endif
 
     explicit Epoll(const char* name_) : name(name_), epoll_fd(epoll_create1(0)) {
 #ifdef _WIN32
@@ -43,6 +59,14 @@ struct Epoll {
         if (name_ == nullptr) {
             name = "anon";
         }
+#ifdef __linux__
+        abort_fd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+        epoll_event abort_event{.events = EPOLLIN, .data = {.u64 = EPOLL_ABORT_TAG}};
+        if (abort_fd == -1 || epoll_ctl(epoll_fd, EPOLL_CTL_ADD, abort_fd, &abort_event) == -1) {
+            LOG_ERROR(Lib_Net, "epoll {}: no abort eventfd ({}), sceNetEpollAbort will not wake it",
+                      name, Common::GetLastErrorMsg());
+        }
+#endif
     }
 
     bool Destroyed() const noexcept {
@@ -57,6 +81,12 @@ struct Epoll {
 #else
         close(epoll_fd);
         epoll_fd = -1;
+#endif
+#ifdef __linux__
+        if (abort_fd != -1) {
+            close(abort_fd);
+            abort_fd = -1;
+        }
 #endif
         name = "";
         destroyed = true;
