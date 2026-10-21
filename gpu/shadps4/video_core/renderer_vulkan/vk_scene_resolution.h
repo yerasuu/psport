@@ -30,7 +30,8 @@ public:
     bool Reduced() const { return m_size != m_native_size; }
     /// A reduced proxy can stand in for the image: a scene target of the native size or, scaled
     /// by the same factor, a post-processing one (native size / post divisor; toggle
-    /// SceneHalfRes).
+    /// SceneHalfRes) or, with PS_SCALE_REDUCED_TARGETS=1, another intermediate one
+    /// (IsIntermediateTarget).
     bool Eligible(const VideoCore::Image&) const;
     /// Eligible at the native scene size: the upscaler's inputs, the scene start.
     bool EligibleScene(const VideoCore::Image&) const;
@@ -90,6 +91,7 @@ private:
     bool Blittable(vk::Format) const;
     bool ShaderResampled(const VideoCore::Image&) const;
     u32 SizeDivisor(const VideoCore::ImageInfo&) const;
+    bool IsIntermediateTarget(const VideoCore::Image&) const;
     void Resample(vk::Image src, vk::Image dst, const VideoCore::Image& original,
                   vk::Extent2D dst_size);
     vk::Pipeline ResamplePipeline(vk::Format, bool is_stencil);
@@ -109,6 +111,7 @@ private:
     Entry m_null_entry; ///< what Get returns for such a proxy: no image, null views
     bool m_is_copying = false;
     bool m_should_force_stencil_bits = false; ///< test the portable resampler on any driver
+    bool m_should_scale_intermediate = false; ///< PS_SCALE_REDUCED_TARGETS=1
     u64 m_generation = 0;
     mutable std::unordered_map<vk::Format, vk::FormatFeatureFlags> m_format_features;
     mutable std::array<vk::FormatFeatureFlags, 256> m_format_table{};

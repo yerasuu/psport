@@ -1,5 +1,17 @@
 # Temporal upscaling and frame generation — frame analysis and plan
 
+## Intermediate targets under live scaling (2026-10-22)
+
+Live scene scaling gives proxies only to targets of the scene size (1920x1080) and of the
+post-processing size (960x540, `post_divisor`). Targets the game sizes from its scene at other
+ratios stayed native: Bloodborne's depth of field blur buffers (1176x441, 2352x882 when the
+startup patch renders 4K) were sampled by passes drawn at the larger scene size, which came out
+blurred above 1080p. `PS_SCALE_REDUCED_TARGETS=1` makes `SceneTargets::IsIntermediateTarget`
+also accept color targets from a quarter of the scene size up to it, other than power-of-two
+sizes; their proxies are their size times the scene factor, rounded to whole pixels. Depth
+targets, smaller reductions and LUTs keep the native size. Off by default until a game run
+checks it (kb #787).
+
 ## Output aspect ratios (2026-10-17)
 
 `aspect_ratio` in `psport.ini` (`auto`, `4:3`, `16:10`, `16:9`, `21:9`, `32:9`; 16:9 unless chosen,

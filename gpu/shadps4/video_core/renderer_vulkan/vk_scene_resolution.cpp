@@ -11,6 +11,8 @@
 #include "video_core/host_shaders/depth_stencil_bits_frag.h"
 #include "video_core/host_shaders/fs_tri_vert.h"
 #include "psport_toggles.h"
+#include <bit>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 
@@ -29,6 +31,14 @@ SceneTargets::SceneTargets(const Instance& i, Scheduler& s, Runtime& r, Lookup g
     m_native_size = {placement.scene_width, placement.scene_height};
     m_post_divisor = std::max(1u, placement.post_divisor);
     m_size = m_native_size;
+    const char* sz_intermediate = std::getenv("PS_SCALE_REDUCED_TARGETS");
+    m_should_scale_intermediate = sz_intermediate && sz_intermediate[0] == '1';
+    if (m_should_scale_intermediate) {
+        std::printf("Scene resolution: intermediate targets from %ux%u to %ux%u scale with the "
+                    "scene (PS_SCALE_REDUCED_TARGETS=1)\n",
+                    m_native_size.width / 4, m_native_size.height / 4, m_native_size.width,
+                    m_native_size.height);
+    }
     CreateResampleResources();
 }
 SceneTargets::~SceneTargets() {
@@ -85,17 +95,31 @@ u32 SceneTargets::SizeDivisor(const VideoCore::ImageInfo& i) const {
     }
     return 0;
 }
+// Intermediate color targets the game sizes from its scene at uneven ratios (a depth of field's
+// blur buffers at 1176x441 of 1920x1080) stayed native under live scaling, so the passes sampling
+// them blurred the larger scene. From a quarter of the scene up, since smaller ones are mostly
+// reductions read back or LUTs; power-of-two squares and rectangles are sized apart from the
+// screen (shadow and reflection maps); depth stays out because shadow maps are depth targets.
+bool SceneTargets::IsIntermediateTarget(const VideoCore::Image& image) const {
+    const auto& size = image.info.size;
+    const bool is_post_size = size.width == m_native_size.width / m_post_divisor &&
+                              size.height == m_native_size.height / m_post_divisor;
+    return m_should_scale_intermediate && !image.info.props.is_depth && !is_post_size &&
+           size.width <= m_native_size.width && size.height <= m_native_size.height &&
+           size.width * 4 >= m_native_size.width && size.height * 4 >= m_native_size.height &&
+           !(std::has_single_bit(size.width) && std::has_single_bit(size.height));
+}
 bool SceneTargets::Eligible(const VideoCore::Image& image) const {
     const auto& i = image.info;
     const u32 div = SizeDivisor(i);
-    if (!div || i.size.depth != 1 || i.resources.layers != 1 || i.num_samples != 1 ||
-        i.props.is_block || !image.IsAllocated() || image.backing->num_samples != 1 ||
-        m_unallocated.contains(image.image_uid)) {
+    if ((!div && !IsIntermediateTarget(image)) || i.size.depth != 1 || i.resources.layers != 1 ||
+        i.num_samples != 1 || i.props.is_block || !image.IsAllocated() ||
+        image.backing->num_samples != 1 || m_unallocated.contains(image.image_uid)) {
         return false;
     }
     if (i.resources.levels != 1) {
         // Mip chains (the bloom pyramid at half resolution): one blitted proxy per level.
-        return div > 1 && i.resources.levels <= 16 && !i.props.is_depth &&
+        return div != 1 && i.resources.levels <= 16 && !i.props.is_depth &&
                Blittable(image.backing->image.image_ci.format);
     }
     return Blittable(image.backing->image.image_ci.format) || ShaderResampled(image);
@@ -105,8 +129,19 @@ bool SceneTargets::EligibleScene(const VideoCore::Image& image) const {
            image.info.size.height == m_native_size.height && Eligible(image);
 }
 SceneResolution::Size SceneTargets::ProxySize(const VideoCore::Image& image, u32 level) const {
-    const u32 div = std::max(1u, SizeDivisor(image.info));
-    return {std::max(1u, m_size.width / div >> level), std::max(1u, m_size.height / div >> level)};
+    if (const u32 div = SizeDivisor(image.info); div || !IsIntermediateTarget(image)) {
+        const u32 divisor = std::max(1u, div);
+        return {std::max(1u, m_size.width / divisor >> level),
+                std::max(1u, m_size.height / divisor >> level)};
+    }
+    // Rounded to whole pixels, the FragCoord conversion (native / scene) misses the exact
+    // factor by under half a native pixel at the far edge.
+    const auto scale = [](u32 extent, u32 scene, u32 native) {
+        return u32(std::max(1l, std::lround(double(extent) * scene / native)));
+    };
+    const auto& size = image.info.size;
+    return {std::max(1u, scale(size.width, m_size.width, m_native_size.width) >> level),
+            std::max(1u, scale(size.height, m_size.height, m_native_size.height) >> level)};
 }
 bool SceneTargets::SetSize(SceneResolution::Size next) {
     if (next == m_size) return false;
