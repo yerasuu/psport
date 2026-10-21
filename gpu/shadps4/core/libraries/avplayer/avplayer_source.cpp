@@ -105,12 +105,166 @@ bool AvPlayerSource::Init(const AvPlayerInitData& init_data, std::string_view pa
         }
     }
     m_avformat_context = AVFormatContextPtr(context, &ReleaseAVFormatContext);
+    ReadEmptyEditDelays(path);
 
     return true;
 }
 
+namespace {
+
+struct Mp4Box {
+    u32 type;
+    s64 off_end;
+};
+
+std::optional<Mp4Box> ReadMp4Box(AVIOContext* p_io, s64 off_limit) {
+    const auto off_box = avio_tell(p_io);
+    if (off_box < 0 || off_limit - off_box < 8) {
+        return std::nullopt;
+    }
+    u64 cb_box = avio_rb32(p_io);
+    const auto type = avio_rb32(p_io);
+    u64 cb_header = 8;
+    if (cb_box == 1) {
+        cb_box = avio_rb64(p_io);
+        cb_header += 8;
+    } else if (cb_box == 0) {
+        cb_box = u64(off_limit - off_box);
+    }
+    if (p_io->eof_reached || cb_box < cb_header || cb_box > u64(off_limit - off_box)) {
+        return std::nullopt;
+    }
+    return Mp4Box{type, off_box + s64(cb_box)};
+}
+
+// libSceAvPlayer (0x2e700) honours only an edit list of exactly an empty edit followed by an edit
+// at media time 0; any other edit list leaves the sample times as they are.
+std::optional<u64> ReadEmptyEditDuration(AVIOContext* p_io) {
+    const auto version = avio_r8(p_io);
+    avio_skip(p_io, 3);
+    if (version > 1 || avio_rb32(p_io) != 2) {
+        return std::nullopt;
+    }
+    const auto read_entry = [&] {
+        const u64 duration = version == 1 ? avio_rb64(p_io) : avio_rb32(p_io);
+        const s64 media_time = version == 1 ? s64(avio_rb64(p_io)) : s32(avio_rb32(p_io));
+        avio_skip(p_io, 4);
+        return std::pair{duration, media_time};
+    };
+    const auto [empty_duration, empty_media_time] = read_entry();
+    const auto media_time = read_entry().second;
+    if (p_io->eof_reached || empty_media_time != -1 || media_time != 0 ||
+        empty_duration > u64(INT64_MAX)) {
+        return std::nullopt;
+    }
+    return empty_duration;
+}
+
+} // namespace
+
+// psport: FFmpeg opens MP4 files with ignore_editlist and then drops the edit list entirely, while
+// libSceAvPlayer adds an empty edit's duration to every sample time of its track (0x2bc40 starts
+// the decode time at it), so the edit lists are read here.
+void AvPlayerSource::ReadEmptyEditDelays(std::string_view path) {
+    const auto p_context = m_avformat_context.get();
+    m_empty_edit_delays.assign(p_context->nb_streams, 0);
+    if (std::string_view(p_context->iformat->name).find("mp4") == std::string_view::npos) {
+        return;
+    }
+    const auto p_io = p_context->pb;
+    const auto off_resume = avio_tell(p_io);
+    const auto cb_file = avio_size(p_io);
+    const auto off_file_end = cb_file > 0 ? cb_file : INT64_MAX;
+    if (off_resume < 0 || avio_seek(p_io, 0, SEEK_SET) < 0) {
+        LOG_WARNING(Lib_AvPlayer, "Could not read the edit lists of {}: not seekable", path);
+        return;
+    }
+
+    std::vector<std::pair<u32, u64>> empty_edits;
+    u32 movie_timescale = 0;
+    u32 track_id = 0;
+    bool has_moov = false;
+    auto off_limit = off_file_end;
+    while (const auto box = ReadMp4Box(p_io, off_limit)) {
+        switch (box->type) {
+        case MKBETAG('m', 'o', 'o', 'v'):
+            has_moov = true;
+            off_limit = box->off_end;
+            continue;
+        case MKBETAG('t', 'r', 'a', 'k'):
+            track_id = 0;
+            continue;
+        case MKBETAG('e', 'd', 't', 's'):
+            continue;
+        case MKBETAG('m', 'v', 'h', 'd'): {
+            const auto version = avio_r8(p_io);
+            avio_skip(p_io, 3 + (version == 1 ? 16 : 8));
+            movie_timescale = avio_rb32(p_io);
+            break;
+        }
+        case MKBETAG('t', 'k', 'h', 'd'): {
+            const auto version = avio_r8(p_io);
+            avio_skip(p_io, 3 + (version == 1 ? 16 : 8));
+            track_id = avio_rb32(p_io);
+            break;
+        }
+        case MKBETAG('e', 'l', 's', 't'):
+            if (const auto duration = ReadEmptyEditDuration(p_io); duration && *duration != 0) {
+                empty_edits.emplace_back(track_id, *duration);
+            }
+            break;
+        default:
+            break;
+        }
+        if (avio_seek(p_io, box->off_end, SEEK_SET) < 0) {
+            break;
+        }
+    }
+    if (avio_seek(p_io, off_resume, SEEK_SET) < 0) {
+        LOG_ERROR(Lib_AvPlayer, "Could not seek {} back to {} after reading its edit lists", path,
+                  off_resume);
+    }
+    if (!has_moov) {
+        LOG_WARNING(Lib_AvPlayer, "Could not read the edit lists of {}: no moov box found", path);
+        return;
+    }
+    if (!empty_edits.empty() && (movie_timescale == 0 || movie_timescale > u32(INT32_MAX))) {
+        LOG_WARNING(Lib_AvPlayer, "Ignoring the empty edits of {}: invalid movie timescale {}",
+                    path, movie_timescale);
+        return;
+    }
+
+    for (const auto& [empty_track_id, duration] : empty_edits) {
+        for (u32 i_stream = 0; i_stream < p_context->nb_streams; ++i_stream) {
+            const auto p_stream = p_context->streams[i_stream];
+            if (u32(p_stream->id) != empty_track_id) {
+                continue;
+            }
+            const auto delay = av_rescale_q(s64(duration), AVRational{1, s32(movie_timescale)},
+                                            p_stream->time_base);
+            if (delay < 0) {
+                LOG_WARNING(Lib_AvPlayer,
+                            "Ignoring the empty edit of stream {} of {}: {}/{} s overflows its "
+                            "time base",
+                            i_stream, path, duration, movie_timescale);
+                continue;
+            }
+            m_empty_edit_delays[i_stream] = delay;
+            LOG_INFO(Lib_AvPlayer, "Stream {} of {} starts {} ms late: empty edit of {}/{} s",
+                     i_stream, path,
+                     av_rescale_q(m_empty_edit_delays[i_stream], p_stream->time_base,
+                                  AVRational{1, 1000}),
+                     duration, movie_timescale);
+        }
+    }
+}
+
+// psport: demuxers without a header (MPEG-TS, FLV, raw streams) add their streams only while
+// probing, after the edit lists were read, so the delays are extended to the final stream count.
 bool AvPlayerSource::FindStreams() {
-    if (avformat_find_stream_info(m_avformat_context.get(), nullptr) >= 0) {
+    const auto has_info = avformat_find_stream_info(m_avformat_context.get(), nullptr) >= 0;
+    m_empty_edit_delays.resize(m_avformat_context->nb_streams, 0);
+    if (has_info) {
         m_streams.reserve(m_avformat_context->nb_streams);
         for (u32 idx = 0; idx < m_avformat_context->nb_streams; ++idx) {
             if (!IsStreamSupported(m_avformat_context->streams[idx])) {
@@ -252,7 +406,9 @@ bool AvPlayerSource::Start(u64 time) {
     if (m_video_stream_index) {
         const auto stream_index = m_streams[m_video_stream_index.value()].ffmpeg_index;
         const auto stream = m_avformat_context->streams[stream_index];
-        const auto ts = av_rescale_q(time, AVRational{1, 1000}, stream->time_base);
+        const auto ts = std::max<s64>(
+            0, av_rescale_q(time, AVRational{1, 1000}, stream->time_base) -
+                   EmptyEditDelay(stream_index));
         avformat_seek_file(m_avformat_context.get(), m_video_stream_index.value(), 0, ts,
                            time == 0 ? stream->duration : ts, 0);
         const auto decoder = avcodec_find_decoder(stream->codecpar->codec_id);
@@ -281,7 +437,9 @@ bool AvPlayerSource::Start(u64 time) {
     if (m_audio_stream_index) {
         const auto stream_index = m_streams[m_audio_stream_index.value()].ffmpeg_index;
         const auto stream = m_avformat_context->streams[stream_index];
-        const auto ts = av_rescale_q(time, AVRational{1, 1000}, stream->time_base);
+        const auto ts = std::max<s64>(
+            0, av_rescale_q(time, AVRational{1, 1000}, stream->time_base) -
+                   EmptyEditDelay(stream_index));
         avformat_seek_file(m_avformat_context.get(), m_audio_stream_index.value(), 0, ts,
                            time == 0 ? stream->duration : ts, 0);
         if (time != 0) {
@@ -486,9 +644,9 @@ u64 AvPlayerSource::CurrentTime() {
     if (!m_start_time.has_value()) {
         return 0;
     }
-    // psport: libSceAvPlayer reports the last handed out frame's timestamp, which may pass the
-    // container duration (sample tables without the edit list's media time).
-    if (m_video_stream_index && !m_audio_stream_index) {
+    // psport: libSceAvPlayer reports the last handed out frame's timestamp whenever a video stream
+    // is enabled, audio or not, and it may pass the container duration (kb #771).
+    if (m_video_stream_index) {
         return m_last_video_ts;
     }
 
@@ -679,7 +837,11 @@ AvPlayerSource::AVFramePtr AvPlayerSource::ConvertVideoFrame(const AVFrame& fram
     return nv12_frame;
 }
 
-static u64 FrameTimestampMillis(const AVFrame& frame, AVRational time_base) {
+s64 AvPlayerSource::EmptyEditDelay(size_t i_stream) const {
+    return i_stream < m_empty_edit_delays.size() ? m_empty_edit_delays[i_stream] : 0;
+}
+
+static u64 FrameTimestampMillis(const AVFrame& frame, AVRational time_base, s64 empty_edit_delay) {
     auto timestamp = frame.best_effort_timestamp;
     if (timestamp == AV_NOPTS_VALUE) {
         timestamp = frame.pts;
@@ -687,11 +849,12 @@ static u64 FrameTimestampMillis(const AVFrame& frame, AVRational time_base) {
     if (timestamp == AV_NOPTS_VALUE) {
         timestamp = frame.pkt_dts;
     }
-    if (timestamp == AV_NOPTS_VALUE || timestamp < 0 || time_base.den <= 0) {
+    if (timestamp == AV_NOPTS_VALUE || timestamp < 0 || time_base.den <= 0 ||
+        timestamp > INT64_MAX - empty_edit_delay) {
         return 0;
     }
 
-    const auto millis = av_rescale_q(timestamp, time_base, AVRational{1, 1000});
+    const auto millis = av_rescale_q(timestamp + empty_edit_delay, time_base, AVRational{1, 1000});
     return millis > 0 ? u64(millis) : 0;
 }
 
@@ -703,7 +866,8 @@ Frame AvPlayerSource::PrepareVideoFrame(GuestBuffer buffer, const AVFrame& frame
 
     const auto stream_index = m_streams[m_video_stream_index.value()].ffmpeg_index;
     const auto stream = m_avformat_context->streams[stream_index];
-    const auto timestamp = FrameTimestampMillis(frame, stream->time_base);
+    const auto timestamp =
+        FrameTimestampMillis(frame, stream->time_base, EmptyEditDelay(stream_index));
 
     const auto width = Common::AlignUp<u32>(frame.width, 16);
     const auto pitch = Common::AlignUp<u32>(frame.width, 64);
@@ -840,7 +1004,8 @@ Frame AvPlayerSource::PrepareAudioFrame(GuestBuffer buffer, const AVFrame& frame
 
     const auto stream_index = m_streams[m_audio_stream_index.value()].ffmpeg_index;
     const auto stream = m_avformat_context->streams[stream_index];
-    const auto timestamp = FrameTimestampMillis(frame, stream->time_base);
+    const auto timestamp =
+        FrameTimestampMillis(frame, stream->time_base, EmptyEditDelay(stream_index));
 
     return Frame{
         .buffer = std::move(buffer),

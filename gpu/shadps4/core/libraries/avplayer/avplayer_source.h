@@ -172,6 +172,7 @@ public:
 private:
     u64 DurationMillis() const;
     u64 PlaybackClockMillis();
+    void ReadEmptyEditDelays(std::string_view path);
     AvPlayerStreamInfo CreateStreamInfo(u32 stream_index);
 
     static void ReleaseAVPacket(AVPacket* packet);
@@ -197,6 +198,7 @@ private:
 
     Frame PrepareAudioFrame(GuestBuffer buffer, const AVFrame& frame);
     Frame PrepareVideoFrame(GuestBuffer buffer, const AVFrame& frame);
+    s64 EmptyEditDelay(size_t i_stream) const;
 
     AvPlayerStateCallback& m_state;
 
@@ -206,6 +208,7 @@ private:
     };
 
     std::vector<Stream> m_streams;
+    std::vector<s64> m_empty_edit_delays;
     u64 m_duration = 0;
 
     AvPlayerMemAllocator m_memory_replacement{};

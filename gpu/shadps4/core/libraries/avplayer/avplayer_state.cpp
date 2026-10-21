@@ -219,22 +219,18 @@ bool AvPlayerState::Start() {
     if (m_current_state != AvState::Ready && m_current_state != AvState::Stop) {
         // libSceAvPlayer stops a playing or finished source first and reports that stop to the
         // game before the new StatePlay.
-        const bool should_report_stop = !m_eof_stop_event_sent;
         if (!StopLocked()) {
             LOG_ERROR(Lib_AvPlayer, "Could not start playback.");
             return false;
         }
-        if (should_report_stop) {
-            lock.unlock();
-            OnPlaybackStateChanged(AvState::Stop);
-            lock.lock();
-            if (m_up_source == nullptr) {
-                LOG_ERROR(Lib_AvPlayer, "Could not start playback: source closed during the stop.");
-                return false;
-            }
+        lock.unlock();
+        OnPlaybackStateChanged(AvState::Stop);
+        lock.lock();
+        if (m_up_source == nullptr) {
+            LOG_ERROR(Lib_AvPlayer, "Could not start playback: source closed during the stop.");
+            return false;
         }
     }
-    m_eof_stop_event_sent = false;
     SetState(AvState::Starting);
     if (!m_up_source->Start()) {
         LOG_ERROR(Lib_AvPlayer, "Could not start playback.");
@@ -383,18 +379,12 @@ bool AvPlayerState::Stop() {
     if (m_has_stopped) {
         return true;
     }
-    // psport reports StateStop when a source runs out, where libSceAvPlayer waits for this Stop,
-    // so the game hears one StateStop either way; a legacy title's repeated Stop reports it again,
-    // as libSceAvPlayer's StopLegacy does.
-    const bool should_report_stop = !m_eof_stop_event_sent || m_current_state == AvState::Stop;
     if (!StopLocked()) {
         return false;
     }
     m_has_stopped = !m_is_legacy_sdk;
     lock.unlock();
-    if (should_report_stop) {
-        OnPlaybackStateChanged(AvState::Stop);
-    }
+    OnPlaybackStateChanged(AvState::Stop);
     return true;
 }
 
@@ -404,11 +394,7 @@ bool AvPlayerState::StopLocked() {
         return false;
     }
     m_up_source->Stop();
-    if (!SetState(AvState::Stop)) {
-        return false;
-    }
-    m_eof_stop_event_sent = true;
-    return true;
+    return SetState(AvState::Stop);
 }
 
 bool AvPlayerState::GetVideoData(AvPlayerFrameInfo& video_info) {
@@ -478,18 +464,10 @@ void AvPlayerState::OnError() {
     OnPlaybackStateChanged(AvState::Error);
 }
 
+// psport: libSceAvPlayer's demuxer thread sets the end of file state without an event; the game
+// hears StateStop only from its own Stop (kb #771).
 void AvPlayerState::OnEOF() {
     SetState(AvState::EndOfFile);
-}
-
-void AvPlayerState::UpdateEndOfFileState() {
-    std::shared_lock lock(m_source_mutex);
-    if (m_up_source == nullptr || m_up_source->IsActive() || m_eof_stop_event_sent.exchange(true)) {
-        return;
-    }
-    lock.unlock();
-
-    EmitEvent(AvPlayerEvents::StateStop);
 }
 
 // Called inside CONTROLLER thread
@@ -634,9 +612,7 @@ void AvPlayerState::ProcessEvent() {
 
 // Called inside CONTROLLER thread
 void AvPlayerState::UpdateBufferingState() {
-    if (m_current_state == AvState::EndOfFile) {
-        UpdateEndOfFileState();
-    } else if (m_current_state == AvState::Buffering) {
+    if (m_current_state == AvState::Buffering) {
         const auto has_frames = OnBufferingCheckEvent(10);
         if (!has_frames.has_value()) {
             return;

@@ -74,7 +74,6 @@ private:
     void StartControllerThread();
     void ProcessEvent();
     void UpdateBufferingState();
-    void UpdateEndOfFileState();
     bool IsStateTransitionValid(AvState state);
 
     std::unique_ptr<AvPlayerSource> m_up_source;
@@ -88,7 +87,6 @@ private:
 
     std::atomic<AvState> m_current_state;
     std::atomic<AvState> m_previous_state;
-    std::atomic_bool m_eof_stop_event_sent{false};
     bool m_is_legacy_sdk{};
     bool m_has_stopped{};
     u32 m_thread_priority;
