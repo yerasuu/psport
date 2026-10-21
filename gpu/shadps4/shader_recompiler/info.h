@@ -8,6 +8,7 @@
 #include <boost/container/static_vector.hpp>
 #include "common/assert.h"
 #include "common/types.h"
+#include "psport_srt_faults.h"
 #include "shader_recompiler/backend/bindings.h"
 #include "shader_recompiler/frontend/copy_shader.h"
 #include "shader_recompiler/frontend/tessellation.h"
@@ -271,6 +272,7 @@ struct Info : InfoPersistent {
         }
         std::memcpy(flattened_ud_buf.data(), ud.data(), ud.size_bytes());
         if (srt_info.walker_func) {
+            PsSrtFaults::SetWalker(this, user_data.data(), user_data.size());
             srt_info.walker_func(user_data.data(), flattened_ud_buf.data());
         }
     }

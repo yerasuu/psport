@@ -15,6 +15,7 @@
 #include "common/signal_context.h"
 #include "core/emulator_settings.h"
 #include "core/signals.h"
+#include "psport_srt_faults.h"
 #include "shader_recompiler/info.h"
 #include "shader_recompiler/ir/ir_emitter.h"
 #include "shader_recompiler/ir/opcodes.h"
@@ -102,6 +103,7 @@ static bool SrtWalkerSignalHandler(void* context, void* fault_address) {
 
     LOG_ERROR_COUNTED(Render_Recompiler, "SRT walker read unavailable memory at {} (instruction {}), supplied zero",
                       fault_address, static_cast<const void*>(code));
+    PsSrtFaults::Note(code, reinterpret_cast<uintptr_t>(fault_address));
     return true;
 }
 

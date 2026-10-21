@@ -37,6 +37,7 @@
 #include "video_core/amdgpu/liverpool.h"
 #include "psport_write_log.h"
 #include "psport_free_check.h"
+#include "psport_srt_faults.h"
 #include "video_core/amdgpu/pm4_cmds.h"
 #include "video_core/amdgpu/pm4_faults.h"
 #include "video_core/amdgpu/pm4_selftest.h"
@@ -61,9 +62,15 @@ static_assert(Liverpool::NumComputeRings <= MAX_NAMES);
 
 static const char* acb_task_name[] = NAME_ARRAY(ACB_TASK, MAX_NAMES);
 
+// psport: command processor coroutines interleave on one thread, so each keeps its own SRT fault
+// origin (the packet it executes) across the others that run while it is suspended or resumed.
 #define YIELD(name)                                                                                \
     FIBER_EXIT;                                                                                    \
-    co_yield {};                                                                                   \
+    {                                                                                              \
+        const auto ps_origin = PsSrtFaults::g_origin;                                              \
+        co_yield {};                                                                               \
+        PsSrtFaults::g_origin = ps_origin;                                                         \
+    }                                                                                              \
     FIBER_ENTER(name);
 
 #define YIELD_CE() YIELD(ccb_task_name)
@@ -72,7 +79,11 @@ static const char* acb_task_name[] = NAME_ARRAY(ACB_TASK, MAX_NAMES);
 
 #define RESUME(task, name)                                                                         \
     FIBER_EXIT;                                                                                    \
-    task.handle.resume();                                                                          \
+    {                                                                                              \
+        const auto ps_origin = PsSrtFaults::g_origin;                                              \
+        task.handle.resume();                                                                      \
+        PsSrtFaults::g_origin = ps_origin;                                                         \
+    }                                                                                              \
     FIBER_ENTER(name);
 
 #define RESUME_CE(task) RESUME(task, ccb_task_name)
@@ -1738,6 +1749,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
 
         const auto* header = reinterpret_cast<const PM4Header*>(dcb.data());
         const u32 type = header->type;
+        PsSrtFaults::SetPacket(reinterpret_cast<const u32*>(base_addr), dcb.data());
 
         switch (type) {
         default:
@@ -2700,6 +2712,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
         CheckSubmittedCopy(*copy, seq); // diagnostic
     }
 
+    PsSrtFaults::SetPacket(nullptr, nullptr);
     FIBER_EXIT;
 }
 
@@ -2786,6 +2799,7 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
         }
 
         const PM4ItOpcode opcode = header->type3.opcode;
+        PsSrtFaults::SetPacket(reinterpret_cast<const u32*>(base_addr), reinterpret_cast<const u32*>(header));
         if (IsBodyShort(opcode, header->type3.NumWords(), true)) {
             acb = NextPacket(acb, next_dw_off);
             if constexpr (!is_indirect) {
@@ -3091,6 +3105,7 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
         }
     }
 
+    PsSrtFaults::SetPacket(nullptr, nullptr);
     FIBER_EXIT;
 }
 

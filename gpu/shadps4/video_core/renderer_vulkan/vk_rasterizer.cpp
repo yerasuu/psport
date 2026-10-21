@@ -15,6 +15,7 @@
 #include "psport_native_probe.h"
 #include "psport_write_log.h"
 #include "psport_free_check.h"
+#include "psport_srt_faults.h"
 #include "psport_guest_memory.h"
 #include "video_core/renderer_vulkan/vk_frame_capture.h"
 #include "common/hash.h"
@@ -1424,6 +1425,7 @@ void Rasterizer::RunDrawPacket(void* context, const u8* data, u32 size) {
                 continue;
             }
             g_p_runtime_fault_recover = &recover;
+            PsSrtFaults::SetWalker(snapshot.info, snapshot.user_data, snapshot.user_data_size);
             srt.walker_func(snapshot.user_data, flat.data());
             g_p_runtime_fault_recover = nullptr;
             if (std::memcmp(flat.data(), snapshot.flat, snapshot.flat_size * sizeof(u32)) != 0) {
