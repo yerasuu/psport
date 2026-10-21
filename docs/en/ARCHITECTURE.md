@@ -317,11 +317,19 @@ how or why not and the decision or task behind it; an OS without a row has none)
 `FEATURE_PROBED(id)` marks one decided at run time too. Empty texts, unknown areas, OSes and states
 fail the build (`host_features.c`). The GPU library reports its probes with `ps_host_feature_probed`:
 the dma-buf and host memory import checks of `gpu/memory/psport_guest_memory.cpp` (`dmabuf=` and
-`host_import=` of the `Guest memory: detected` line).
+`host_import=` of the `Guest memory: detected` line) during a launch, and for `--list-features`
+`psport_gpu_probe_host_features` (`gpu/port/psport_host_features.cpp`): the `upscaler` rows
+(`upscaler_fsr4`, `upscaler_fsr411`, `upscaler_dlss`) from a `Vulkan::Instance` made as the game makes
+it (`PS_GPU_ID`, no window) with the game's own checks (`IsFsr4Int8Supported`, `IsFsr411Supported`,
+`Dlss::Available`), and the titles' rows through `Game::Title::pfn_probe_host_features` (Bloodborne's
+`intel_tonemap_fix`, area `cpu`).
 
-`psport --list-features` prints the table as JSON and exits before any game is loaded: `os`, then per
-feature `id`, `area`, `description`, this host's `state`, `reason` and `reference`,
-`probed_at_run_time` and every OS row under `hosts`. A launch logs `Host features: linux, N
+`psport --list-features` runs those probes (their log lines on stderr), prints the table as JSON and
+exits before any game is loaded: `os`, then per feature `id`, `area`, `description`, this host's
+`state`, `reason` and `reference` (a probe that found the feature missing makes it `UNAVAILABLE` with
+what it found as the reason), `probed_at_run_time`, `probe_result` (what the probe found, `null`
+when it did not run) and every OS row under `hosts`. Launchers hide the options of an `upscaler` or
+`cpu` row that is `UNAVAILABLE`. A launch logs `Host features: linux, N
 implemented, N experimental, N unavailable (ids)` before the quirks, a `Host features: <id> probed:`
 line per probe, and the exit summary repeats the counts with each probe's result.
 

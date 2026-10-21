@@ -205,6 +205,11 @@ int psport_gpu_audio_decoder_decode(void *p_decoder, const uint8_t *p_data, uint
                                PsAudioFrame *p_frame);
 void psport_gpu_audio_decoder_reset(void *p_decoder);
 void psport_gpu_audio_decoder_destroy(void *p_decoder);
+/* psport --list-features, before the table is listed: answers the GPU library's FEATURE_PROBED rows
+ * (src/platform/host_features.inc) with ps_host_feature_probed. The upscalers' from a Vulkan
+ * instance and device made as the game makes them (PS_GPU_ID), without a window, destroyed before
+ * it returns; the titles' from their own checks. Its log lines go to stdout. Once per process. */
+void psport_gpu_probe_host_features(void);
 /* Number of symbols registered by the vendored libraries (diagnostics). */
 unsigned psport_gpu_symbol_count(void);
 /* PS_CP_CENSUS=1: the command stream census, printed once after the call report (async-signal

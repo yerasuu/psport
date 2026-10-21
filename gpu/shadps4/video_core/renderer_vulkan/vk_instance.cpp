@@ -128,7 +128,7 @@ Instance::Instance(Frontend::WindowSDL& window, s32 physical_device_index,
 
 Instance::Instance(const Frontend::WindowSystemInfo& window_info, s32 physical_device_index,
                    bool enable_validation, bool enable_crash_diagnostic)
-    : instance{CreateInstance(window_info.type, enable_validation, enable_crash_diagnostic)},
+    : instance{CreateInstance(window_info.type, enable_validation, enable_crash_diagnostic, &m_instance_failure)},
       physical_devices{EnumeratePhysicalDevices(instance)} {
     if (!instance) {
         return;
@@ -224,6 +224,24 @@ Instance::Instance(const Frontend::WindowSystemInfo& window_info, s32 physical_d
     CollectImageFormatInfo();
     CollectToolingInfo();
     m_is_created = true;
+}
+
+std::string Instance::DescribeFailure() const {
+    if (m_is_created) {
+        return {};
+    }
+    if (!instance) {
+        return m_instance_failure;
+    }
+    if (physical_devices.empty()) {
+        return "the Vulkan instance lists no physical device";
+    }
+    if (properties.apiVersion < TargetVulkanApiVersion) {
+        return fmt::format("{} supports Vulkan {}.{}, 1.3 is needed", properties.deviceName.data(),
+                           VK_VERSION_MAJOR(properties.apiVersion), VK_VERSION_MINOR(properties.apiVersion));
+    }
+    return fmt::format("{}: the logical device or its allocator could not be created (Render_Vulkan log)",
+                       properties.deviceName.data());
 }
 
 Instance::~Instance() {

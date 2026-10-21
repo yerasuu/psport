@@ -310,6 +310,9 @@ struct Title {
     const char* sz_patch_file = nullptr;
     /// Before anything of the game runs, before psport_gpu_init: environment defaults it chooses.
     void (*pfn_prepare_environment)() = nullptr;
+    /// psport --list-features, whatever game is chosen: answers the host table's FEATURE_PROBED
+    /// rows about the title's own fixes (src/platform/host_features.inc, ps_host_feature_probed).
+    void (*pfn_probe_host_features)() = nullptr;
     /// Checks the game's files before any of its code runs (PS_SKIP_GAME_CHECK=1 is its own to
     /// honour): false when they cannot work, with a short kind for launchers and what to do.
     bool (*pfn_check_files)(const PsGameFiles& game, std::string& kind, std::string& advice) = nullptr;
@@ -355,6 +358,9 @@ void Select(const char* sz_serial);
 
 /// The title of the running game (Find at Select), or nullptr.
 const Title* Launched();
+
+/// Every title's pfn_probe_host_features (psport_gpu_probe_host_features).
+void ProbeHostFeatures();
 
 /// The active profile: the running title's, or nullptr (an unknown game, a title without a
 /// profile, or PS_GAME_PROFILE=none).

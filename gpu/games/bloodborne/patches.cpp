@@ -18,6 +18,7 @@
 #include <strings.h>
 #include <sys/stat.h>
 #include <vector>
+#include "../../../src/platform/ps_host.h"
 
 extern "C" {
 // runtime_config.c
@@ -321,6 +322,16 @@ void PrepareEnvironment() {
     }
     const FpsPreset* p_preset = FindPreset(FpsPresetName());
     setenv("PS_VBLANK_HZ", p_preset ? p_preset->sz_vblank_hz : "60", 1);
+}
+
+void ProbeHostFeatures() {
+    if (IsIntelCpu()) {
+        ps_host_feature_probed(PS_HOST_FEATURE_intel_tonemap_fix, 1,
+                               "GenuineIntel CPU: the fix is on unless PS_INTEL_TONEMAP_FIX=0");
+    } else {
+        ps_host_feature_probed(PS_HOST_FEATURE_intel_tonemap_fix, 0,
+                               "not needed: this CPU's float instructions answer as the PS4's");
+    }
 }
 
 bool AddPatches(const PsGameFiles& game, const PsPatchServices& services) {

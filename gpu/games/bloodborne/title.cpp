@@ -103,6 +103,7 @@ extern const Title BloodborneTitle = {
     .mod_folders = ModFolders,
     .sz_patch_file = PsLaunch::PatchFile,
     .pfn_prepare_environment = PsLaunch::PrepareEnvironment,
+    .pfn_probe_host_features = PsLaunch::ProbeHostFeatures,
     .pfn_check_files = PsLaunch::CheckFiles,
     .pfn_add_patches = PsLaunch::AddPatches,
     .pfn_external_patch_refusal = PsLaunch::ExternalPatchRefusal,

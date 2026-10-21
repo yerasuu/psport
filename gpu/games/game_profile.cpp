@@ -66,6 +66,14 @@ void Select(const char* sz_serial) {
                                     : "translator profile active");
 }
 
+void ProbeHostFeatures() {
+    for (const Title* p_title : Titles) {
+        if (p_title->pfn_probe_host_features) {
+            p_title->pfn_probe_host_features();
+        }
+    }
+}
+
 const Title* Launched() {
     return s_p_launched.load(std::memory_order_acquire);
 }

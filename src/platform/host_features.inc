@@ -3,15 +3,16 @@
  *
  *   FEATURE(id, area, sz_desc)
  *       a capability psport needs from the host; area is one of the platform layer's groups (vm,
- *       gpu_memory, fault, tls, thread, time, fs, proc, dl, rand, io, net), sz_desc a non-empty
- *       string literal.
+ *       gpu_memory, fault, tls, thread, time, fs, proc, dl, rand, io, net), or of the options a
+ *       launcher offers only where they run (upscaler, cpu); sz_desc a non-empty string literal.
  *   FEATURE_HOST(id, os, state, sz_reason, sz_ref)
  *       its state on one OS (LINUX, WIN32 or MACOS): IMPLEMENTED, EXPERIMENTAL or UNAVAILABLE, with
  *       how (or why not) and the decision, task or issue behind it, both non-empty string literals.
  *       An OS without a row has no implementation (UNAVAILABLE).
  *   FEATURE_PROBED(id)
  *       the state on this host is decided at run time too: the probing code reports it with
- *       ps_host_feature_probed, and the log and the exit summary say what it found. */
+ *       ps_host_feature_probed, and the log, the exit summary and --list-features say what it
+ *       found. */
 
 FEATURE(guest_memory, vm, "the guest's address space at the PS4's addresses: fixed mappings below 1 TiB and direct memory "
                           "mapped at several addresses")
@@ -132,3 +133,34 @@ FEATURE_HOST(sockets, LINUX, IMPLEMENTED,
 
 FEATURE(online_module, net, "online play through libpsport-net.so, loaded on the first network import with PS_ONLINE=1")
 FEATURE_HOST(online_module, LINUX, IMPLEMENTED, "dlopen of gpu/libpsport-net.so when it was built (runtime_net.c)", "#540")
+
+FEATURE(upscaler_fsr4, upscaler, "FSR 4 (the v07 INT8 shaders) on the GPU the game takes")
+FEATURE_HOST(upscaler_fsr4, LINUX, IMPLEMENTED,
+             "vk_fsr4.cpp when the device has Float16, Int8, Int16, integer dot products and linear compute "
+             "derivatives (Vulkan::Instance::IsFsr4Int8Supported); probed by --list-features "
+             "(gpu/port/psport_host_features.cpp)",
+             "#757")
+FEATURE_PROBED(upscaler_fsr4)
+
+FEATURE(upscaler_fsr411, upscaler, "FSR 4.1.1 on the GPU the game takes; its assets are a separate build")
+FEATURE_HOST(upscaler_fsr411, LINUX, IMPLEMENTED,
+             "fsr411/ when the device also has VK_VALVE_shader_mixed_float_dot_product "
+             "(Vulkan::Instance::IsFsr411Supported), FP8 cooperative matrices where it has them; probed by "
+             "--list-features (gpu/port/psport_host_features.cpp)",
+             "#757")
+FEATURE_PROBED(upscaler_fsr411)
+
+FEATURE(upscaler_dlss, upscaler, "DLSS Super Resolution through libpsport_dlss.so and NVIDIA's libnvidia-ngx-dlss.so")
+FEATURE_HOST(upscaler_dlss, LINUX, IMPLEMENTED,
+             "vk_dlss.cpp when both libraries load, the device takes NGX's extensions and NGX starts on it "
+             "(Vulkan::Dlss::Available); probed by --list-features (gpu/port/psport_host_features.cpp)",
+             "#757")
+FEATURE_PROBED(upscaler_dlss)
+
+FEATURE(intel_tonemap_fix, cpu, "Bloodborne's Intel Black Tonemap Fix, for CPUs whose approximate float instructions "
+                                "differ from the PS4's")
+FEATURE_HOST(intel_tonemap_fix, LINUX, IMPLEMENTED,
+             "the patch on by default on GenuineIntel CPUs of /proc/cpuinfo, PS_INTEL_TONEMAP_FIX=0 or 1 forces it "
+             "(gpu/games/bloodborne/patches.cpp); probed by --list-features",
+             "#757")
+FEATURE_PROBED(intel_tonemap_fix)

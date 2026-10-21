@@ -12,6 +12,8 @@ namespace PsLaunch {
 inline constexpr const char* PatchFile = "patches/Bloodborne.xml";
 /// PS_VBLANK_HZ for the PS_FPS preset, unless it is set.
 void PrepareEnvironment();
+/// The host table's intel_tonemap_fix row: whether this CPU is one AddPatches turns the fix on for.
+void ProbeHostFeatures();
 /// The 1.09 executable, its shaders intact.
 bool CheckFiles(const PsGameFiles& game, std::string& kind, std::string& advice);
 /// The PS_FPS preset, PS_PATCHES, the effect switches of psport.ini, PS_RENDER_RES and the

@@ -32,13 +32,15 @@ enum {
     PS_HOST_FEATURE_COUNT
 };
 
-/* psport --list-features: every entry as JSON on stdout, with this host's state. */
+/* psport --list-features: every entry as JSON on stdout, with this host's state; a probe that found
+ * the feature missing makes it UNAVAILABLE with what it found as the reason. */
 void ps_host_features_list(void);
 /* Once at launch, before the game's code runs: the "Host features:" line and the exit summary. */
 void ps_host_features_log(void);
 /* A FEATURE_PROBED entry's run-time answer, from the code that probes it (the GPU library once the
- * Vulkan device is known): logged and kept for the exit summary. sz_result must outlive the
- * process (a string literal); later answers for the same feature are ignored and said. */
+ * Vulkan device is known, psport_gpu_probe_host_features): logged and kept for the exit summary.
+ * sz_result must outlive the process (a string literal or static storage); later answers for the
+ * same feature are ignored and said. */
 void ps_host_feature_probed(PsHostFeatureId id, int is_available, const char *sz_result);
 /* The exit summary line, rebuilt at each publication so that the call report can print it from the
  * fault and watchdog handlers. */

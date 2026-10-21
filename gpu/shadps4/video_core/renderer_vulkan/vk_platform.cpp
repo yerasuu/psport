@@ -275,7 +275,13 @@ std::vector<const char*> GetInstanceLayers(bool enable_validation, bool enable_c
 }
 
 vk::UniqueInstance CreateInstance(Frontend::WindowSystemType window_type, bool enable_validation,
-                                  bool enable_crash_diagnostic) {
+                                  bool enable_crash_diagnostic, std::string* p_out_failure) {
+    const auto fail = [p_out_failure](std::string failure) -> vk::UniqueInstance {
+        if (p_out_failure) {
+            *p_out_failure = std::move(failure);
+        }
+        return {};
+    };
     LOG_INFO(Render_Vulkan, "Creating vulkan instance");
 
 #if defined(__APPLE__)
@@ -293,7 +299,7 @@ vk::UniqueInstance CreateInstance(Frontend::WindowSystemType window_type, bool e
     static vk::detail::DynamicLoader dl;
     if (!dl.success()) {
         LOG_CRITICAL(Render_Vulkan, "The Vulkan loader library could not be loaded");
-        return {};
+        return fail("the Vulkan loader library could not be loaded");
     }
     VULKAN_HPP_DEFAULT_DISPATCHER.init(
         dl.getProcAddress<PFN_vkGetInstanceProcAddr>("vkGetInstanceProcAddr"));
@@ -305,13 +311,14 @@ vk::UniqueInstance CreateInstance(Frontend::WindowSystemType window_type, bool e
     if (available_version_result != vk::Result::eSuccess) {
         LOG_CRITICAL(Render_Vulkan, "Failed to query Vulkan API version: {}",
                      vk::to_string(available_version_result));
-        return {};
+        return fail("vkEnumerateInstanceVersion returned " + vk::to_string(available_version_result));
     }
     if (available_version < TargetVulkanApiVersion) {
         LOG_CRITICAL(Render_Vulkan, "Vulkan {}.{} is required, but only {}.{} is supported by instance!",
                      VK_VERSION_MAJOR(TargetVulkanApiVersion), VK_VERSION_MINOR(TargetVulkanApiVersion),
                      VK_VERSION_MAJOR(available_version), VK_VERSION_MINOR(available_version));
-        return {};
+        return fail(fmt::format("the Vulkan loader offers {}.{}, 1.3 is needed", VK_VERSION_MAJOR(available_version),
+                                VK_VERSION_MINOR(available_version)));
     }
 
     const auto layers = GetInstanceLayers(enable_validation, enable_crash_diagnostic);
@@ -449,7 +456,7 @@ vk::UniqueInstance CreateInstance(Frontend::WindowSystemType window_type, bool e
     auto [instance_result, instance] = vk::createInstanceUnique(instance_ci_chain.get());
     if (instance_result != vk::Result::eSuccess) {
         LOG_CRITICAL(Render_Vulkan, "Failed to create instance: {}", vk::to_string(instance_result));
-        return {};
+        return fail("vkCreateInstance returned " + vk::to_string(instance_result));
     }
 
     VULKAN_HPP_DEFAULT_DISPATCHER.init(*instance);

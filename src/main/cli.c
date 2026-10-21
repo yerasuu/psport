@@ -135,6 +135,17 @@ int answer_query(int argc, char **argv) {
     }
     if (argc >= 2 && !strcmp(argv[1], "--list-features")) {
         if (argc != 2) { fprintf(stderr, "Usage: %s --list-features\n", argv[0]); return 1; }
+        /* The probes log on stdout, which carries the JSON: their lines go to stderr meanwhile. */
+        fflush(stdout);
+        const int h_stdout = ps_host_fs_duplicate(1, -1);
+        if (h_stdout >= 0 && ps_host_fs_duplicate(2, 1) == 1) {
+            psport_gpu_probe_host_features();
+            fflush(stdout);
+            (void)ps_host_fs_duplicate(h_stdout, 1);
+        } else {
+            fprintf(stderr, "psport: --list-features without probes: stdout cannot be duplicated\n");
+        }
+        if (h_stdout >= 0) ps_host_fs_close(h_stdout);
         ps_host_features_list();
         return 0;
     }

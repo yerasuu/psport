@@ -575,8 +575,13 @@ public:
     /// Determines if a format is supported for a set of feature flags.
     [[nodiscard]] bool IsFormatSupported(vk::Format format, vk::FormatFeatureFlags2 flags) const;
 
-private:
+    /// psport: what stopped IsCreated, for a caller that reports it (empty once created).
+    [[nodiscard]] std::string DescribeFailure() const;
+
+    /// psport: public for a device without a window (WindowSystemType::Headless).
     Instance(const Frontend::WindowSystemInfo&, s32, bool, bool);
+
+private:
     /// Creates the logical device opportunistically enabling extensions
     bool CreateDevice();
 
@@ -593,6 +598,8 @@ private:
     [[nodiscard]] vk::FormatFeatureFlags2 GetFormatFeatureFlags(vk::Format format) const;
 
 private:
+    // psport: declared before instance, since CreateInstance writes its failure here while instance is built.
+    std::string m_instance_failure;
     vk::UniqueInstance instance;
     vk::PhysicalDevice physical_device;
     vk::UniqueDevice device;

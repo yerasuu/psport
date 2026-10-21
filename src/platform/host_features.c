@@ -17,7 +17,7 @@ static const HostOs s_this_os = OS_MACOS;
 #endif
 
 typedef enum { AREA_vm, AREA_gpu_memory, AREA_fault, AREA_tls, AREA_thread, AREA_time, AREA_fs, AREA_proc, AREA_dl,
-               AREA_rand, AREA_io, AREA_net } FeatureArea;
+               AREA_rand, AREA_io, AREA_net, AREA_upscaler, AREA_cpu } FeatureArea;
 
 #define FEATURE(id, area, sz_desc)                                                                                  \
     _Static_assert(sizeof("" sz_desc) > 1, "feature " #id ": the description must be a non-empty string literal");   \
@@ -154,7 +154,8 @@ void ps_host_features_log(void) {
     publish();
 }
 
-/* Called from one thread, the GPU library's while it chooses how guest memory reaches the GPU. */
+/* Called from one thread: the GPU library's while it chooses how guest memory reaches the GPU, or
+ * psport --list-features' before it lists the table. */
 void ps_host_feature_probed(PsHostFeatureId id, int is_available, const char *sz_result) {
     if (id >= PS_HOST_FEATURE_COUNT || !is_probed(id)) {
         printf("Host features: probe answer for feature %u ignored: not a probed feature\n", id);
@@ -185,7 +186,9 @@ static void print_row(const HostRow *p_row) {
 void ps_host_features_list(void) {
     printf("{\"os\": \"%s\", \"features\": [", s_os_names[s_this_os]);
     for (PsHostFeatureId id = 0; s_features[id].sz_id; ++id) {
-        const HostRow row = row_for(id, s_this_os);
+        HostRow row = row_for(id, s_this_os);
+        if (s_answers[id].has_answered && !s_answers[id].is_available)
+            row = (HostRow){PS_HOST_FEATURE_STATE_UNAVAILABLE, s_answers[id].sz_result, row.sz_ref};
         printf("%s\n    {\"id\": ", id ? "," : "");
         runtime_json_print_string(s_features[id].sz_id);
         printf(", \"area\": ");
@@ -194,7 +197,10 @@ void ps_host_features_list(void) {
         runtime_json_print_string(s_features[id].sz_desc);
         printf(", ");
         print_row(&row);
-        printf(", \"probed_at_run_time\": %s, \"hosts\": [", is_probed(id) ? "true" : "false");
+        printf(", \"probed_at_run_time\": %s, \"probe_result\": ", is_probed(id) ? "true" : "false");
+        if (s_answers[id].has_answered) runtime_json_print_string(s_answers[id].sz_result);
+        else fputs("null", stdout);
+        printf(", \"hosts\": [");
         const char *sz_separator = "";
         for (size_t i = 0; s_hosts[i].sz_reason; ++i) {
             if (s_hosts[i].id != id) continue;
