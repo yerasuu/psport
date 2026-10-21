@@ -9,6 +9,7 @@
 #include "common/logging/log.h"
 #include "game_profile.h"
 #include "sdl_window.h"
+#include "psport_keyboard.h"
 #include "psport_overlay.h"
 #include "psport_settings.h"
 
@@ -159,12 +160,18 @@ WindowSDL::~WindowSDL() {
     SDL_DestroyWindow(m_p_window);
 }
 
-void WindowSDL::BeginTextInput(const std::string& initial, const std::string& prompt) {
+void WindowSDL::BeginTextInput(const std::string& initial, const std::string& prompt, u32 max_length, int charset) {
+    PsOverlay::OpenKeyboard(charset, max_length);
     std::scoped_lock lock{m_text_mutex};
     m_text = initial;
     m_text_prompt = prompt;
     m_text_state = 0;
     m_is_text_requested = true;
+}
+
+void WindowSDL::ReplaceTextInput(const std::string& text) {
+    std::scoped_lock lock{m_text_mutex};
+    m_text = text;
 }
 
 void WindowSDL::EndTextInput() {
@@ -321,6 +328,25 @@ void WindowSDL::UpdateTextTitle() {
     PsOverlay::SetTextPrompt(m_is_text_active, m_text_prompt, m_text);
 }
 
+// Circle erases, and once nothing is left cancels, as the dialog's back button.
+void WindowSDL::PressKeyboardKey(const PsOverlay::KeyPress& press) {
+    std::scoped_lock lock{m_text_mutex};
+    if (press.action == PsOverlay::KeyAction::None) {
+        return;
+    }
+    if (press.action == PsOverlay::KeyAction::Accept ||
+        (press.action == PsOverlay::KeyAction::Back && m_text.empty())) {
+        m_text_state = press.action == PsOverlay::KeyAction::Accept ? 1 : 2;
+        m_is_text_active = false;
+        SDL_StopTextInput(m_p_window);
+    } else if (press.action == PsOverlay::KeyAction::Type) {
+        PsOverlay::TypeInto(m_text, press.text);
+    } else {
+        PsOverlay::EraseLast(m_text);
+    }
+    UpdateTextTitle();
+}
+
 bool WindowSDL::PollEvents() {
     {
         std::scoped_lock lock{m_text_mutex};
@@ -369,11 +395,9 @@ bool WindowSDL::PollEvents() {
         if (m_is_text_active && (event.type == SDL_EVENT_TEXT_INPUT || event.type == SDL_EVENT_KEY_DOWN)) {
             std::scoped_lock lock{m_text_mutex};
             if (event.type == SDL_EVENT_TEXT_INPUT) {
-                m_text += event.text.text;
-            } else if (event.key.key == SDLK_BACKSPACE && !m_text.empty()) {
-                size_t cut = m_text.size() - 1; // drop one UTF-8 code point
-                while (cut > 0 && (static_cast<unsigned char>(m_text[cut]) & 0xC0) == 0x80) --cut;
-                m_text.erase(cut);
+                PsOverlay::TypeInto(m_text, event.text.text);
+            } else if (event.key.key == SDLK_BACKSPACE) {
+                PsOverlay::EraseLast(m_text);
             } else if (event.key.key == SDLK_RETURN || event.key.key == SDLK_KP_ENTER || event.key.key == SDLK_ESCAPE) {
                 m_text_state = event.key.key == SDLK_ESCAPE ? 2 : 1;
                 m_is_text_active = false;
@@ -382,16 +406,19 @@ bool WindowSDL::PollEvents() {
             UpdateTextTitle();
             continue;
         }
-        // The port has no on-screen keyboard: a player with only a controller accepts the starting
-        // text with Cross (the enter button, system parameter 1000) or cancels with Circle.
-        if (m_is_text_active && !PsOverlay::MenuOpen() && event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN &&
-            (event.gbutton.button == SDL_GAMEPAD_BUTTON_SOUTH || event.gbutton.button == SDL_GAMEPAD_BUTTON_EAST)) {
-            std::scoped_lock lock{m_text_mutex};
-            m_text_state = event.gbutton.button == SDL_GAMEPAD_BUTTON_SOUTH ? 1 : 2;
-            m_is_text_active = false;
-            SDL_StopTextInput(m_p_window);
-            UpdateTextTitle();
-            continue;
+        // A player with only a controller types on the overlay's keyboard; the buttons it leaves
+        // (L3+R3, Guide) and the menu or close prompt they open stay the overlay's.
+        if (m_is_text_active && !PsOverlay::MenuOpen() && !PsOverlay::ClosePromptOpen()) {
+            if (event.type == SDL_EVENT_GAMEPAD_AXIS_MOTION) {
+                PsOverlay::KeyboardAxis(event.gaxis.axis, event.gaxis.value);
+                continue;
+            }
+            PsOverlay::KeyPress press;
+            if ((event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN || event.type == SDL_EVENT_GAMEPAD_BUTTON_UP) &&
+                PsOverlay::KeyboardButton(event.gbutton.button, event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN, press)) {
+                PressKeyboardKey(press);
+                continue;
+            }
         }
         // A release always counts, so a button held while the menu opened is not left held.
         if (!PsOverlay::CapturesInput() || event.type == SDL_EVENT_MOUSE_BUTTON_UP) {

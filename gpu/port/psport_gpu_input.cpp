@@ -87,10 +87,15 @@ extern "C" int psport_gpu_skip_scene(int has_stopped_movie) {
     return p_profile && p_profile->pfn_skip_scene && p_profile->pfn_skip_scene(has_stopped_movie != 0) ? 1 : 0;
 }
 
-extern "C" int psport_gpu_text_input_begin(const char* sz_initial, const char* sz_prompt) {
+extern "C" int psport_gpu_text_input_begin(const char* sz_initial, const char* sz_prompt, uint32_t max_length,
+                                           int charset) {
     if (!g_window) return 0;
-    g_window->BeginTextInput(sz_initial ? sz_initial : "", sz_prompt ? sz_prompt : "Text");
+    g_window->BeginTextInput(sz_initial ? sz_initial : "", sz_prompt ? sz_prompt : "Text", max_length, charset);
     return 1;
+}
+
+extern "C" void psport_gpu_text_input_replace(const char* sz_text) {
+    if (g_window) g_window->ReplaceTextInput(sz_text ? sz_text : "");
 }
 
 extern "C" void psport_gpu_text_input_end(void) {

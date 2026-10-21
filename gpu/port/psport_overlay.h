@@ -58,6 +58,8 @@ bool PadFilePress(bool is_guide_pressed, bool is_cross_pressed, bool is_circle_p
 
 /// The settings menu is open: the window shows the system cursor over it.
 bool MenuOpen();
+/// Guide's close prompt is open: Cross and Circle answer it.
+bool ClosePromptOpen();
 
 /// A line over the game near the bottom until called with nullptr or "" (any thread;
 /// psport_gpu_overlay_banner).

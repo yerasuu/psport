@@ -498,7 +498,8 @@ static ABI int32_t web_result(int32_t *p_out_result) {
     p_out_result[0]=1;
     return 0;
 }
-/* ImeDialog: text typed on the keyboard into the game window (title bar shows it).
+/* ImeDialog: text typed on the keyboard into the game window (title bar shows it) or with the
+ * controller on the overlay's keyboard (gpu/port/psport_keyboard.cpp).
  * OrbisImeDialogParam: user, type, languages(8), enter label, method, filter,
  * option, max length, char16 buffer, position, alignment, placeholder, title. */
 typedef struct {
@@ -547,12 +548,19 @@ static ABI int32_t ime_init(const ImeParam *p_param, const void *p_extended) {
     utf16_to_utf8(p_param->buffer,p_param->max_length,sz_initial,sizeof(sz_initial));
     utf16_to_utf8(p_param->title,128,sz_prompt,sizeof(sz_prompt));
     const char *sz_preset=runtime_env("PS_IME_TEXT",NULL);
-    if (sz_preset) { ime_complete(0,sz_preset); return 0; }
-    /* An empty field starts with the user's name (sceUserServiceGetUserName's) so that a player
-     * with only a controller, who cannot type, can still accept it. */
-    const char *sz_start=sz_initial[0] ? sz_initial : runtime_env("PS_USER_NAME",DEFAULT_USER_NAME);
-    if (!psport_gpu_text_input_begin(sz_start,sz_prompt[0] ? sz_prompt : "Text")) ime_complete(0,sz_start);
-    else printf("Runtime: ImeDialog opened with \"%s\": type in the game window; Enter or Cross confirms, Esc or Circle cancels\n",sz_start);
+    if (sz_preset) {
+        char sz_entered[512];
+        runtime_ime_filter_entered(sz_preset,p_param->type,p_param->max_length,sz_entered,sizeof(sz_entered));
+        ime_complete(0,sz_entered);
+        return 0;
+    }
+    if (p_param->filter) printf("Runtime: ImeDialog text filter %p not called: the entry checks only its type %u\n",p_param->filter,p_param->type);
+    /* The field starts with the game's text, as on the console: the dialog's parameters say nothing
+     * that tells a name entry apart, so the user's name is never put in for it. */
+    if (!psport_gpu_text_input_begin(sz_initial,sz_prompt[0] ? sz_prompt : "Text",p_param->max_length,runtime_ime_charset(p_param->type)))
+        ime_complete(0,sz_initial);
+    else printf("Runtime: ImeDialog opened with \"%s\" (type %u, up to %u characters): type in the game window or on the "
+                "on-screen keyboard; Enter or Options confirms, Esc or Circle on an empty field cancels\n",sz_initial,p_param->type,p_param->max_length);
     return 0;
 }
 static ABI int32_t ime_status(void) {

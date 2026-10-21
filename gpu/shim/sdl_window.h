@@ -12,6 +12,10 @@
 struct SDL_Window;
 union SDL_Event;
 
+namespace PsOverlay {
+struct KeyPress;
+}
+
 namespace Frontend {
 
 enum class WindowSystemType : u8 { Headless, Windows, X11, Wayland, Metal };
@@ -36,8 +40,12 @@ public:
     bool IsOpen() const { return m_is_open.load(std::memory_order_relaxed); }
     /// Processes pending window events. Returns false once the user closed the window.
     bool PollEvents();
-    /// Keyboard text entry for the system IME dialog; typed text shows in the title bar.
-    void BeginTextInput(const std::string& initial, const std::string& prompt);
+    /// Text entry for the system IME dialog, typed on the keyboard or on the overlay's keyboard with
+    /// a controller (psport_keyboard.h); typed text shows in the title bar. The game's `initial` text
+    /// is kept as given; only what the player types is held to `charset` and `max_length`.
+    void BeginTextInput(const std::string& initial, const std::string& prompt, u32 max_length, int charset);
+    /// The game rewrote the text of the open entry: the keyboard keeps its cursor, shift and page.
+    void ReplaceTextInput(const std::string& text);
     /// 0 while typing, 1 confirmed (Enter), 2 cancelled (Escape); text is UTF-8.
     int PollTextInput(std::string& text);
     /// Ends an entry the game took back (libSceIme closed) as cancelled, without waiting for a key.
@@ -66,6 +74,7 @@ private:
     int m_text_state{};
     std::string m_text, m_text_prompt, m_base_title;
     void UpdateTextTitle();
+    void PressKeyboardKey(const PsOverlay::KeyPress& press);
     void UpdateCursor();
     u64 m_last_mouse_motion_ms{}; ///< SDL_GetTicks of the last mouse motion (UpdateCursor)
     bool m_is_cursor_hidden{};

@@ -1,10 +1,10 @@
 /* libSceIme's on-screen keyboard over the port's text entry: the game window takes the host
- * keyboard's typing and the overlay draws the panel, as for the IME dialog. sceImeUpdate
- * (runtime_keyboard.c) hands the game's handler the open event, the text as it changes (written to
- * the game's buffer too) and Enter or Esc as the panel's enter or close button; the game then closes
- * the panel. Without a window nobody can type, so the entry ends at once as entered with PS_IME_TEXT
- * or the text it opened with, as the IME dialog does. The caret stays at the end of the text and no
- * input method composes. */
+ * keyboard's typing or the controller's on the overlay's keyboard, which draws the panel, as for
+ * the IME dialog. sceImeUpdate (runtime_keyboard.c) hands the game's handler the open event, the
+ * text as it changes (written to the game's buffer too) and Enter or Esc as the panel's enter or
+ * close button; the game then closes the panel. Without a window nobody can type, so the entry ends
+ * at once as entered with PS_IME_TEXT or the text it opened with, as the IME dialog does. The caret
+ * stays at the end of the text and no input method composes. */
 #define _GNU_SOURCE
 #include "runtime.h"
 #include "gpu/psport_gpu.h"
@@ -70,6 +70,33 @@ void runtime_ime_panel_size(uint32_t type, uint32_t *p_out_width, uint32_t *p_ou
     *p_out_height=type==TYPE_NUMBER ? 402 : 408;
 }
 
+int runtime_ime_charset(uint32_t type) {
+    return type==TYPE_NUMBER ? PS_TEXT_DIGITS : type==TYPE_DEFAULT ? PS_TEXT_ANY : PS_TEXT_LATIN;
+}
+
+void runtime_ime_filter_entered(const char *sz_entered, uint32_t type, uint32_t max_length, char *sz_out, size_t cb_out) {
+    const int charset=runtime_ime_charset(type);
+    size_t cb_written=0, c_dropped=0;
+    uint32_t c_units=0;
+    for (const unsigned char *p_cursor=(const unsigned char *)sz_entered; *p_cursor;) {
+        const unsigned char lead=*p_cursor;
+        const size_t cb_lead=lead<0x80 ? 1 : (lead&0xE0)==0xC0 ? 2 : (lead&0xF0)==0xE0 ? 3 : 4;
+        size_t cb_character=1;
+        while (cb_character<cb_lead && p_cursor[cb_character]) ++cb_character;
+        const uint32_t c_character_units=cb_lead==4 ? 2 : 1;
+        const bool is_accepted=charset==PS_TEXT_DIGITS ? lead>='0' && lead<='9'
+                              : charset==PS_TEXT_LATIN ? lead>=0x20 && lead<0x7F : lead>=0x20 && lead!=0x7F;
+        if (is_accepted && c_units+c_character_units<=max_length && cb_written+cb_character<cb_out) {
+            memcpy(sz_out+cb_written,p_cursor,cb_character);
+            cb_written+=cb_character; c_units+=c_character_units;
+        } else ++c_dropped;
+        p_cursor+=cb_character;
+    }
+    sz_out[cb_written]=0;
+    if (c_dropped) printf("Runtime: entered text \"%s\" lost %zu characters to the entry's type %u and length %u\n",sz_entered,
+                          c_dropped,type,max_length);
+}
+
 static ABI void ime_param_init(ImeParam *p_param) {
     if (!p_param) return;
     memset(p_param,0,sizeof(*p_param));
@@ -99,15 +126,19 @@ static ABI int32_t ime_open(const ImeParam *p_param, const void *p_extended) {
     s_panel.param=*p_param;
     utf16_to_utf8(p_param->p_text,p_param->max_text_length,s_panel.sz_delivered,sizeof(s_panel.sz_delivered));
     const char *sz_preset=runtime_env("PS_IME_TEXT",NULL);
-    s_panel.is_typing=!sz_preset && psport_gpu_text_input_begin(s_panel.sz_delivered,"Text");
+    s_panel.is_typing=!sz_preset && psport_gpu_text_input_begin(s_panel.sz_delivered,"Text",p_param->max_text_length,
+                                                                runtime_ime_charset(p_param->type));
     if (!s_panel.is_typing) {
-        snprintf(s_panel.sz_entry,sizeof(s_panel.sz_entry),"%s",sz_preset ? sz_preset : s_panel.sz_delivered);
+        if (sz_preset) runtime_ime_filter_entered(sz_preset,p_param->type,p_param->max_text_length,s_panel.sz_entry,sizeof(s_panel.sz_entry));
+        else snprintf(s_panel.sz_entry,sizeof(s_panel.sz_entry),"%s",s_panel.sz_delivered);
         s_panel.entry=ENTRY_ENTERED;
     }
     const bool is_typing=s_panel.is_typing;
     pthread_mutex_unlock(&s_lock);
     printf("Runtime: on-screen keyboard opened for user %d (type %u, up to %u characters)%s\n",p_param->user,p_param->type,
-           p_param->max_text_length,is_typing ? ": type in the game window, Enter to confirm, Esc to close" : "; no window, entered as given");
+           p_param->max_text_length,is_typing ? ": type in the game window or with the controller, Enter or Options to confirm, Esc to close"
+                                              : "; no window, entered as given");
+    if (p_param->pfn_filter) printf("Runtime: on-screen keyboard text filter not called: the entry checks only its type\n");
     return 0;
 }
 static ABI int32_t ime_close(void) {
@@ -122,6 +153,7 @@ static ABI int32_t ime_close(void) {
 }
 /* The game's own text replaces the panel's; it is not echoed back as an update. */
 static ABI int32_t ime_set_text(const uint16_t *p_text, uint32_t length) {
+    static size_t s_c_truncated;
     if (!p_text) return IME_INVALID_ADDRESS;
     pthread_mutex_lock(&s_lock);
     if (!s_panel.is_open) {
@@ -129,10 +161,12 @@ static ABI int32_t ime_set_text(const uint16_t *p_text, uint32_t length) {
         return IME_NOT_OPENED;
     }
     const uint32_t c_units=length<s_panel.param.max_text_length ? length : s_panel.param.max_text_length;
+    if (c_units<length && __atomic_fetch_add(&s_c_truncated,1,__ATOMIC_RELAXED)<8)
+        printf("Runtime: on-screen keyboard text set with %u characters, cut to the entry's %u\n",length,c_units);
     utf16_to_utf8(p_text,c_units,s_panel.sz_delivered,sizeof(s_panel.sz_delivered));
     snprintf(s_panel.sz_entry,sizeof(s_panel.sz_entry),"%s",s_panel.sz_delivered);
     utf8_to_utf16(s_panel.sz_delivered,s_panel.param.p_text,s_panel.param.max_text_length);
-    if (s_panel.is_typing) psport_gpu_text_input_begin(s_panel.sz_delivered,"Text");
+    if (s_panel.is_typing) psport_gpu_text_input_replace(s_panel.sz_delivered);
     pthread_mutex_unlock(&s_lock);
     return 0;
 }

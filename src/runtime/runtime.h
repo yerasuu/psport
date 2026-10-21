@@ -323,6 +323,11 @@ uintptr_t runtime_ime_resolve(const char *sz_name);
 int runtime_ime_update(void *p_handler);
 /* The panel's size in pixels of a 1920x1080 screen for an OrbisImeType. */
 void runtime_ime_panel_size(uint32_t type, uint32_t *p_width, uint32_t *p_height);
+/* The characters the port's text entry takes for an OrbisImeType (psport_gpu.h PS_TEXT_*). */
+int runtime_ime_charset(uint32_t type);
+/* What the player enters without the window (PS_IME_TEXT) held to the entry's type and length in
+ * UTF-16 units, as the on-screen keyboard's keys are; what is dropped is logged. */
+void runtime_ime_filter_entered(const char *sz_entered, uint32_t type, uint32_t max_length, char *sz_out, size_t cb_out);
 /* UTF-16 text of the IME and its dialog to UTF-8 and back (runtime_services.c): at most limit units
  * are read; max units and a terminator are written. */
 size_t utf16_to_utf8(const uint16_t *p_in, size_t limit, char *sz_out, size_t cb_out);

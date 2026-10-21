@@ -475,11 +475,16 @@ prompts which device was used last (a PlayStation pad, another gamepad, or the k
 and the short name of what an input is bound to there (`Shift`, `Esc`, `⇧Left`, `RB`, `A`).
 
 libSceIme's on-screen keyboard (`src/system/runtime_ime.c`) is the same text entry as the IME dialog: while
-the game has it open, the game window takes the host keyboard's typing and the overlay draws the
-panel with the text. `sceImeUpdate` hands the game the open event (the panel's place and size), each
+the game has it open, the game window takes the host keyboard's typing, the overlay draws the
+panel with the text under an on-screen keyboard typed with the controller (`gpu/port/psport_keyboard.cpp`:
+the left stick or d-pad moves, Cross presses the key, L2 shifts, R2 switches to the symbols, Options
+accepts, Circle erases and on an empty field closes), and only what the player types is held to the
+panel's type and length; the game's own text, at open or from `sceImeSetText`, is kept as given and
+a rewrite leaves the keyboard where the player had it. `sceImeUpdate` hands the game the open event (the panel's place and size), each
 change of the text (also written to the game's buffer) and Enter or Esc as the panel's enter or close
 button; the caret stays at the end of the text and no input method composes. Without a window the
-panel is entered at once with `PS_IME_TEXT` or the text the game opened it with.
+panel is entered at once with `PS_IME_TEXT`, held to the panel's type and length, or the text the
+game opened it with.
 
 ## Trophies
 

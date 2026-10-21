@@ -31,10 +31,19 @@ void psport_gpu_dump_guest_writes(const struct PsHostFaultContext *p_context);
  * finish what is queued and logs what was flushed or dropped. can_wait=0 (signal handlers, failed
  * assertions) takes no lock and only reports the blobs still queued. */
 void psport_gpu_flush_caches(int can_wait);
-/* Keyboard text entry through the game window (IME dialog, libSceIme). begin returns 0 when
- * no window exists; poll returns 0 typing, 1 confirmed, 2 cancelled (UTF-8 text). */
-int psport_gpu_text_input_begin(const char *sz_initial_utf8, const char *sz_prompt_utf8);
+/* What a text entry accepts, from the game's OrbisImeType: any text (default), Basic Latin (Basic
+ * Latin, URL, mail) or digits (number). */
+enum { PS_TEXT_ANY, PS_TEXT_LATIN, PS_TEXT_DIGITS };
+/* Text entry through the game window (IME dialog, libSceIme), typed on the keyboard or on the
+ * overlay's on-screen keyboard with a controller, up to max_length UTF-16 units of charset's
+ * characters typed; the game's initial text is kept as given. begin returns 0 when no window
+ * exists; poll returns 0 typing, 1 confirmed, 2 cancelled (UTF-8 text). */
+int psport_gpu_text_input_begin(const char *sz_initial_utf8, const char *sz_prompt_utf8, uint32_t max_length,
+                                int charset);
 int psport_gpu_text_input_poll(char *sz_out_utf8, uint64_t cb_out);
+/* The game's own text replaces the open entry's (sceImeSetText), as given, leaving the on-screen
+ * keyboard where the player had it. */
+void psport_gpu_text_input_replace(const char *sz_text_utf8);
 /* Ends the entry begin started, as cancelled, when the game closes it first (libSceIme). */
 void psport_gpu_text_input_end(void);
 /* 1 while the in-game settings menu is open: the game's pad input is held neutral. */

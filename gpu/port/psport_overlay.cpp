@@ -16,6 +16,7 @@
 #include <vector>
 
 #include <SDL3/SDL.h>
+#include "psport_keyboard.h"
 #include "psport_settings.h"
 #include "common/elf_info.h"
 #include "game_profile.h"
@@ -54,8 +55,9 @@ std::atomic<bool> s_is_menu_open{false};
 bool s_is_l3_down = false, s_is_r3_down = false;
 bool s_is_dirty = false; // settings changed while open: saved on close
 float s_base_scale = 1.0f;
-// The game's text dialog (ImeDialog, the character name), typed on the keyboard: drawn while it
-// is open. In fullscreen the window title that showed it is not visible (issues #17, #19).
+// The game's text dialog (ImeDialog, the character name), typed on the keyboard or on the
+// on-screen one with a controller: drawn while it is open. In fullscreen the window title that
+// showed it is not visible (issues #17, #19).
 std::mutex s_prompt_mutex;
 std::atomic<bool> s_is_prompt_active{false};
 std::string s_prompt_title, s_prompt_text;
@@ -1062,13 +1064,19 @@ void TextPrompt() {
     ImGui::TextUnformatted(title.c_str());
     ImGui::Separator();
     ImGui::Text("%s_", text.c_str());
+    DrawKeyboard(text);
     ImGui::Separator();
     ImGui::TextUnformatted(PsSettings::MenuText("Keyboard: type, Backspace = delete, Enter = OK, Esc = cancel",
                                                 "Клавиатура: ввод, Backspace — удалить, Enter — OK, Esc — отмена",
                                                 "Teclado: escribe, Retroceso = borrar, Intro = aceptar, Esc = cancelar"));
-    ImGui::TextUnformatted(PsSettings::MenuText("Controller: Cross (A) = OK, Circle (B) = cancel",
-                                                "Геймпад: крест (A) — OK, круг (B) — отмена",
-                                                "Mando: Cruz (A) = aceptar, Círculo (B) = cancelar"));
+    ImGui::TextUnformatted(PsSettings::MenuText(
+        "Controller: d-pad or left stick = move, Cross = press, Options = OK, Square = delete",
+        "Геймпад: крестовина или левый стик — выбор, крест — нажать, Options — OK, квадрат — удалить",
+        "Mando: cruceta o stick izquierdo = mover, Cruz = pulsar, Options = aceptar, Cuadrado = borrar"));
+    ImGui::TextUnformatted(PsSettings::MenuText(
+        "Circle = delete, or cancel when empty, Triangle = space, L2 = shift, R2 = symbols",
+        "круг — удалить или отмена, если пусто, треугольник — пробел, L2 — регистр, R2 — символы",
+        "Círculo = borrar, o cancelar si está vacío, Triángulo = espacio, L2 = mayúsculas, R2 = símbolos"));
     ImGui::End();
 }
 
@@ -1374,6 +1382,10 @@ bool GameCursorShown() {
 
 bool MenuOpen() {
     return s_is_menu_open;
+}
+
+bool ClosePromptOpen() {
+    return s_is_close_prompt_open;
 }
 
 bool CapturesInput() {
