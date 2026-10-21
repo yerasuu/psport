@@ -732,6 +732,11 @@ public:
     /// Attempts to execute operations whose tick the GPU has caught up with.
     void PopPendingOperations();
 
+    /// psport: whether this thread runs a pending operation (pending_ops_mutex held) or the submit
+    /// callback (inside the submission being built): such code must neither wait for the GPU nor
+    /// pop pending operations, or it waits for itself.
+    static bool IsInsideSchedulerWork();
+
     /// Starts a new rendering scope with provided state.
     void BeginRendering(const RenderState& new_state);
 

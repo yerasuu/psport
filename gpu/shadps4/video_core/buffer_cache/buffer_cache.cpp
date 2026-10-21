@@ -1495,6 +1495,9 @@ void BufferCache::EnsureResident(const Buffer* arena, u64 first_block, u64 last_
             u64 block = range.start;
             for (; block < range.end && free_slot_count != 0; ++block) {
                 const auto [memory, memory_offset] = AllocateResidency(block_size);
+                if (!memory) {
+                    break;
+                }
                 auto* last = binds.empty() ? nullptr : &binds.back();
                 if (last && last->end == block && last->memory == memory &&
                     last->offset + ((block - last->start) << block_shift) == memory_offset) {
@@ -1510,7 +1513,34 @@ void BufferCache::EnsureResident(const Buffer* arena, u64 first_block, u64 last_
         }
         if (vram_blocks != 0) {
             auto [memory, memory_offset] = AllocateResidency(vram_blocks << block_shift);
+            if (!memory && WaitForFreedResidency()) {
+                IntervalList still_unbound;
+                for (const auto& range : rest_ranges) {
+                    resident_ranges.ForEachGap(range.start, range.end,
+                                               [&](u64 start, u64 end) { still_unbound.Add({start, end}); });
+                }
+                rest_ranges = std::move(still_unbound);
+                vram_blocks = 0;
+                for (const auto& range : rest_ranges) {
+                    vram_blocks += range.end - range.start;
+                }
+                if (vram_blocks != 0) {
+                    std::tie(memory, memory_offset) = AllocateResidency(vram_blocks << block_shift);
+                }
+                static std::atomic<u32> waited{0};
+                if (memory && waited.fetch_add(1, std::memory_order_relaxed) < 8) {
+                    std::printf("Guest memory: VRAM is full: waited for the GPU to free memory (%llu MiB)\n",
+                                (unsigned long long)((vram_blocks << block_shift) >> 20));
+                }
+            }
+            if (!memory && vram_blocks != 0) {
+                NoteResidencyShort(vram_blocks << block_shift);
+            }
             for (const auto& range : rest_ranges) {
+                if (!memory) {
+                    unbacked_blocks.Add({range.start, range.end});
+                    continue;
+                }
                 binds.push_back({range.start, range.end, memory, memory_offset});
                 memory_offset += (range.end - range.start) << block_shift;
             }
@@ -1534,6 +1564,18 @@ void BufferCache::EnsureResident(const Buffer* arena, u64 first_block, u64 last_
         backing.memory = bind.memory;
         backing.offset = bind.offset >> block_shift;
         resident_ranges.Add(backing);
+        // psport: what was uploaded while these blocks had no memory went nowhere: the VRAM copy
+        // is filled from the game's memory again.
+        if (!unbacked_blocks.Empty() && unbacked_blocks.Overlaps(bind.start, bind.end)) {
+            if (!in_place_blocks.Contains(bind.start, bind.end)) {
+                unbacked_blocks.ForEachInRange(bind.start, bind.end, [&](const auto& iv) {
+                    const u64 start = std::max(iv.start, bind.start);
+                    const u64 end = std::min(iv.end, bind.end);
+                    memory_tracker->MarkRegionAsCpuModified(start << block_shift, (end - start) << block_shift);
+                });
+            }
+            unbacked_blocks.Subtract(bind.start, bind.end);
+        }
 
         const auto& sparse = arena_binds->binds.emplace_back(vk::SparseMemoryBind{
             .resourceOffset = (bind.start << block_shift) - arena->cpu_addr,
@@ -1591,9 +1633,15 @@ std::pair<vk::DeviceMemory, u64> BufferCache::AllocateResidency(u64 bytes) {
         vk::Result result = vk::Result::eErrorOutOfDeviceMemory;
         vk::DeviceMemory memory{};
         // FixedArena: no VRAM in the arena (system memory, as the guest chunks it is bound with).
+        // psport: out of memory here returns none too, and AllocateResidency waits and tries
+        // again; Vulkan::Check stopped the game (bbport 8185b88, PR #206).
         if (FixedArena() && arena_fallback_type_index) {
-            memory = Vulkan::Check(device.allocateMemory(
-                {.allocationSize = size, .memoryTypeIndex = *arena_fallback_type_index}));
+            auto host = device.allocateMemory(
+                {.allocationSize = size, .memoryTypeIndex = *arena_fallback_type_index});
+            if (host.result != vk::Result::eSuccess) {
+                return vk::DeviceMemory{};
+            }
+            memory = host.value;
             PsStats::g_cb_device_alloc.fetch_add(size, std::memory_order_relaxed);
             PsStats::g_cb_residency_alloc.fetch_add(size, std::memory_order_relaxed);
             return memory;
@@ -1615,8 +1663,12 @@ std::pair<vk::DeviceMemory, u64> BufferCache::AllocateResidency(u64 bytes) {
                             "go to system memory (slower)\n",
                             vk::to_string(result).c_str());
             }
-            memory = Vulkan::Check(device.allocateMemory(
-                {.allocationSize = size, .memoryTypeIndex = *arena_fallback_type_index}));
+            auto host = device.allocateMemory(
+                {.allocationSize = size, .memoryTypeIndex = *arena_fallback_type_index});
+            if (host.result != vk::Result::eSuccess) {
+                return vk::DeviceMemory{};
+            }
+            memory = host.value;
         } else {
             // No system-memory type for the arena (NVIDIA's sparse buffers take VRAM only):
             // AllocateResidency tries a smaller block and the other memory types.
@@ -1647,18 +1699,29 @@ std::pair<vk::DeviceMemory, u64> BufferCache::AllocateResidency(u64 bytes) {
             size = bytes;
             memory = allocate(size);
         }
-        const auto& types = instance.GetMemoryProperties();
-        for (u32 i = 0; !memory && i < types.memoryTypeCount; ++i) {
-            if (((arena_memory_type_bits >> i) & 1) && i != arena_memory_type_index) {
-                auto other = instance.GetDevice().allocateMemory({.allocationSize = size, .memoryTypeIndex = i});
-                if (other.result == vk::Result::eSuccess) {
-                    memory = other.value;
-                    PsStats::g_cb_device_alloc.fetch_add(size, std::memory_order_relaxed);
-                    PsStats::g_cb_residency_alloc.fetch_add(size, std::memory_order_relaxed);
+        const auto allocate_other_type = [&] {
+            const auto& types = instance.GetMemoryProperties();
+            vk::DeviceMemory other_memory{};
+            for (u32 i = 0; !other_memory && i < types.memoryTypeCount; ++i) {
+                if (((arena_memory_type_bits >> i) & 1) && i != arena_memory_type_index) {
+                    auto other = instance.GetDevice().allocateMemory({.allocationSize = size, .memoryTypeIndex = i});
+                    if (other.result == vk::Result::eSuccess) {
+                        other_memory = other.value;
+                        PsStats::g_cb_device_alloc.fetch_add(size, std::memory_order_relaxed);
+                        PsStats::g_cb_residency_alloc.fetch_add(size, std::memory_order_relaxed);
+                    }
                 }
             }
+            return other_memory;
+        };
+        if (!memory) {
+            memory = allocate_other_type();
         }
-        ASSERT_MSG(memory, "Failed to allocate {} MiB for guest memory copies: VRAM is full", size >> 20);
+        if (!memory) {
+            LOG_ERROR_COUNTED(Render_Vulkan, "No memory for {} MiB of guest memory copies (VRAM and system memory full)",
+                              size >> 20);
+            return {vk::DeviceMemory{}, 0};
+        }
         residency_memory = memory;
         residency_size = size;
         residency_used = 0;
@@ -1882,11 +1945,16 @@ void BufferCache::ProcessIdleBlocks() {
         }
     }
     // Chunks without blocks for 5 s, the rebinds away from them long done: back to the driver.
+    FreeEmptyResidencyChunks(5);
+}
+
+void BufferCache::FreeEmptyResidencyChunks(u32 min_empty_seconds) {
+    const u32 now = PsStats::g_coarse_second.load(std::memory_order_relaxed);
     for (auto it = residency_chunks.begin(); it != residency_chunks.end();) {
         const ResidencyChunk& chunk = it->second;
         const VkDeviceMemory memory = it->first;
         if (chunk.used != 0 || memory == static_cast<VkDeviceMemory>(residency_memory) ||
-            now - chunk.empty_second < 5 || !pending_binds.empty() ||
+            now - chunk.empty_second < min_empty_seconds || !pending_binds.empty() ||
             !scheduler.GetWorkSemaphore()->IsFree(chunk.empty_tick + 1)) {
             ++it;
             continue;
@@ -1899,6 +1967,28 @@ void BufferCache::ProcessIdleBlocks() {
         it = residency_chunks.erase(it);
         NoteResidencyUnused();
     }
+}
+
+bool BufferCache::WaitForFreedResidency() {
+    // psport: memory still full (bbport 8185b88, PR #206; 4 GB cards on area loads): what was
+    // freed is given back only once the GPU is past it. Pending operations are not run here: one
+    // of them (a fault callback) binds buffers again, over the binding being made, and the texture
+    // binding helper may be reading what another erases.
+    const u32 frame = PsStats::g_frame_number.load(std::memory_order_relaxed);
+    if (residency_failed_frame == frame || Vulkan::Scheduler::IsInsideSchedulerWork()) {
+        return false;
+    }
+    residency_failed_frame = frame;
+    scheduler.WaitSubmittedWork();
+    FreeEmptyResidencyChunks(0);
+    return true;
+}
+
+void BufferCache::NoteResidencyShort(u64 bytes) {
+    // psport: the blocks stay unbound (the arena is sparse resident: reads undefined, writes
+    // dropped); a later binding over them tries again and uploads their data.
+    LOG_ERROR_COUNTED(Render_Vulkan, "No memory for {} MiB of guest memory copies (VRAM and system memory full)",
+                      bytes >> 20);
 }
 
 bool BufferCache::VramEligible(u64 block) {
@@ -2912,9 +3002,14 @@ void BufferCache::QueuePromotions(u64 submitted) {
             !VramEligible(block)) {
             continue;
         }
+        // Inside the submit callback (SubmitPendingArenaBinds): no waiting for memory.
+        const auto [memory, offset] = AllocateResidency(block_size);
+        if (!memory) {
+            NoteResidencyShort(block_size);
+            break;
+        }
         memory_tracker->UnmarkRegionAsGpuModified(address, block_size);
         gpu_modified_ranges.Subtract(address, block_size);
-        const auto [memory, offset] = AllocateResidency(block_size);
         Backing backing;
         backing.start = block;
         backing.end = block + 1;
@@ -3043,6 +3138,7 @@ void BufferCache::ProcessPendingUnmaps() {
         }
         copy_back_blocks.Subtract(first, end);
         promote_candidates.Subtract(first, end);
+        unbacked_blocks.Subtract(first, end);
         idle_demoted.Subtract(first, end);
         in_place_blocks.ForEachInRange(first, end, [&](const Interval& iv) {
             unbind.Add({std::max(first, iv.start), std::min(end, iv.end)});

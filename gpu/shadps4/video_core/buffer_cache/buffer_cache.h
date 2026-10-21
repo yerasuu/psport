@@ -351,7 +351,15 @@ private:
     void QueuePromotions(u64 submitted);
     void ReportInPlaceBlocks(); ///< psport PS_RESIDENCY_REPORT (diagnostics)
     /// Arena residency memory from the 64 MiB blocks: the memory and the byte offset in it.
+    /// psport: none when memory is full; it never waits for the GPU (WaitForFreedResidency).
     std::pair<vk::DeviceMemory, u64> AllocateResidency(u64 bytes);
+    /// psport: with memory full, waits for the submitted work and frees the buffer cache's empty
+    /// chunks, once a frame at most and never inside the scheduler's own work. Whether it waited:
+    /// the caller then looks again at what is still unbound before binding.
+    bool WaitForFreedResidency();
+    /// psport: the buffer cache's chunks without blocks for `min_empty_seconds`, back to the driver.
+    void FreeEmptyResidencyChunks(u32 min_empty_seconds);
+    void NoteResidencyShort(u64 bytes);
     /// psport: PsStats::residency_unused_bytes after the free list or the current block changed.
     void NoteResidencyUnused();
     /// psport: idle VRAM blocks (see group_use).
@@ -621,6 +629,10 @@ private:
     std::vector<std::pair<VAddr, std::vector<u8>>> late_writes;
     std::vector<std::pair<VAddr, u64>> precise_uploads;
     std::atomic<bool> late_writes_pending{false};
+    /// psport: blocks left unbound with memory full; their guest data is uploaded again once bound.
+    IntervalList<> unbacked_blocks;
+    /// psport: the frame that already waited for the GPU to free memory (one wait a frame).
+    u32 residency_failed_frame = ~0u;
     u64 bind_wait_tick = 0;                            ///< the next arena binds wait for it
     std::array<std::unique_ptr<Buffer>, 256> chunk_buffers{}; ///< per guest memory chunk (Chunk::index)
 

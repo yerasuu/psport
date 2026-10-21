@@ -29,6 +29,22 @@
 
 namespace Vulkan {
 
+namespace {
+thread_local u32 s_c_scheduler_work = 0;
+struct SchedulerWork {
+    SchedulerWork() {
+        ++s_c_scheduler_work;
+    }
+    ~SchedulerWork() {
+        --s_c_scheduler_work;
+    }
+};
+} // namespace
+
+bool Scheduler::IsInsideSchedulerWork() {
+    return s_c_scheduler_work != 0;
+}
+
 std::mutex Scheduler::submit_mutex;
 
 namespace {
@@ -861,6 +877,7 @@ void Scheduler::PopPendingOperations() {
         }
         work_semaphore.Refresh();
     }
+    const SchedulerWork scheduler_work;
     while (!pending_ops.empty() && work_semaphore.IsFree(pending_ops.front().gpu_tick)) {
         pending_ops.front().callback();
         pending_ops.pop();
@@ -938,6 +955,7 @@ void Scheduler::SubmitExecution(SubmitInfo& info) {
 #endif
 
     if (on_submit) {
+        const SchedulerWork scheduler_work;
         on_submit(info);
     }
 
@@ -1030,6 +1048,7 @@ void Scheduler::SubmitAsync(SubmitInfo& info) {
     PsNativeProbe::Note(PsNativeProbe::Sync);
     const u64 signal_value = work_semaphore.NextTick();
     if (on_submit) {
+        const SchedulerWork scheduler_work;
         on_submit(info);
     }
     EndRendering();
