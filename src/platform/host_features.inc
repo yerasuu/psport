@@ -122,6 +122,13 @@ FEATURE_HOST(port_menu_binding, LINUX, IMPLEMENTED,
              "gpu/port/psport_overlay.cpp)",
              "#557")
 
+FEATURE(key_stick, io, "psport.ini's key_stick_opposite (last or neutral) and key_stick_hold_ms (0 to 200): of two "
+                       "opposite move or look keys the last pressed wins, and the move stick keeps its direction that "
+                       "long after its keys are let go")
+FEATURE_HOST(key_stick, LINUX, IMPLEMENTED,
+             "SDL3 keyboard state at pad reads (runtime_pad.c key_axis, key_stick, load_bindings)",
+             "#785")
+
 FEATURE(movie_skip, io, "psport.ini's skip_movies (PS_SKIP_MOVIES): key.skip_movie or pad.skip_movie stops the movies "
                         "playing and gives the title's profile its own skip")
 FEATURE_HOST(movie_skip, LINUX, IMPLEMENTED,
