@@ -597,18 +597,23 @@ bool TemporalUpscaler::EnsureResources(u32 w, u32 h, u32 ow, u32 oh, bool is_hdr
         })) {
         SetObjectName(device, vk::Image(m_output_image), "psport: upscaler output {}x{}", ow, oh);
     }
-    m_output_view = Check(device.createImageViewUnique({
-        .image = vk::Image(m_output_image),
-        .viewType = vk::ImageViewType::e2D,
-        .format = vk::Format::eR16G16B16A16Sfloat,
-        .subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
-    }));
-    m_motion_view = Check(device.createImageViewUnique({
-        .image = vk::Image(m_motion_image),
-        .viewType = vk::ImageViewType::e2D,
-        .format = vk::Format::eR16G16Sfloat,
-        .subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
-    }));
+    // psport: an image that could not be allocated (UniqueImage::Create logged it) gets no view;
+    // the upscaler is then off (m_has_failed) instead of running on null images.
+    bool is_allocated = m_motion_image && m_output_image;
+    if (is_allocated) {
+        m_output_view = Check(device.createImageViewUnique({
+            .image = vk::Image(m_output_image),
+            .viewType = vk::ImageViewType::e2D,
+            .format = vk::Format::eR16G16B16A16Sfloat,
+            .subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
+        }));
+        m_motion_view = Check(device.createImageViewUnique({
+            .image = vk::Image(m_motion_image),
+            .viewType = vk::ImageViewType::e2D,
+            .format = vk::Format::eR16G16Sfloat,
+            .subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
+        }));
+    }
     const auto make_image = [&](VideoCore::UniqueImage& image, vk::UniqueImageView& view,
                                 const char* sz_name, vk::Format format,
                                 vk::ImageUsageFlags usage, u32 iw = 0, u32 ih = 0,
@@ -630,6 +635,10 @@ bool TemporalUpscaler::EnsureResources(u32 w, u32 h, u32 ow, u32 oh, bool is_hdr
             })) {
             SetObjectName(device, vk::Image(image), "psport: upscaler {} {}x{}", sz_name,
                           iw ? iw : w, ih ? ih : h);
+        }
+        if (!image) {
+            is_allocated = false;
+            return;
         }
         view = Check(device.createImageViewUnique({
             .image = vk::Image(image),
@@ -661,6 +670,11 @@ bool TemporalUpscaler::EnsureResources(u32 w, u32 h, u32 ow, u32 oh, bool is_hdr
         }
     }
     m_taa_next = 0;
+    if (!is_allocated) {
+        LOG_ERROR_COUNTED(Render_Vulkan, "Upscaler images for {}x{} -> {}x{} not allocated, upscaler off",
+                          w, h, ow, oh);
+        return false;
+    }
     CreatePipelines();
     m_is_opaque_valid = false;
     m_should_reset = true;
@@ -945,6 +959,11 @@ void TemporalUpscaler::ExtraSharpen(vk::Image target, bool is_ldr, u32 w, u32 h)
             })) {
             SetObjectName(device, vk::Image(m_extra_sharpen_image), "psport: extra sharpen copy {}x{}", w, h);
         }
+        if (!m_extra_sharpen_image) {
+            LOG_ERROR_COUNTED(Render_Vulkan, "Extra sharpening skipped: its {}x{} copy not allocated",
+                              w, h);
+            return;
+        }
         m_extra_sharpen_view = Check(device.createImageViewUnique({
             .image = vk::Image(m_extra_sharpen_image), .viewType = vk::ImageViewType::e2D,
             .format = vk::Format::eR32G32B32A32Sfloat,
@@ -1052,6 +1071,9 @@ void TemporalUpscaler::OnBlendedSceneDraw() {
         ci.format = color.info.pixel_format;
         source = m_scene_targets.Read(m_scene_color, ci, vk::PipelineStageFlagBits2::eTransfer,
                                     vk::AccessFlagBits2::eTransferRead).image;
+        if (!source) {
+            return; // SceneTargets logged the missing proxy
+        }
         source_layout = vk::ImageLayout::eGeneral;
     } else {
         m_runtime.Transit(&color, vk::ImageLayout::eTransferSrcOptimal,
@@ -1111,7 +1133,7 @@ void TemporalUpscaler::OnSceneComposite() {
         VideoCore::ImageViewInfo ci;
         ci.format = color.info.pixel_format;
         const auto proxy = m_scene_targets.Read(m_scene_color, ci);
-        m_is_mask_ready = RecordReactive(proxy.view);
+        m_is_mask_ready = proxy.image && RecordReactive(proxy.view);
         return;
     }
     const auto device = m_instance.GetDevice();
@@ -1237,6 +1259,9 @@ void TemporalUpscaler::Run() {
         const auto c = m_scene_targets.Read(m_scene_color, ci);
         ci.format = depth.info.pixel_format;
         const auto d = m_scene_targets.Read(m_camera_motion.Depth(), ci);
+        if (!c.image || !d.image) {
+            return; // SceneTargets logged the missing proxy
+        }
         input_color = c.image;
         input_depth = d.image;
         input_color_view = c.view;
@@ -1549,7 +1574,11 @@ void TemporalUpscaler::OnDraw(u64 vs_hash, VideoCore::ImageId color,
         const auto& ui_target = m_texture_cache.GetImage(m_ui_color);
         if (depth_image.info.size.width == ui_target.info.size.width &&
             depth_image.info.size.height == ui_target.info.size.height) {
-            EnsureUiResources(m_ui_width, m_ui_height, m_ui_format, depth_image.info.pixel_format);
+            if (!EnsureUiResources(m_ui_width, m_ui_height, m_ui_format,
+                                   depth_image.info.pixel_format)) {
+                m_is_ui_phase = false;
+                return;
+            }
             PrepareUiDepth(depth);
             m_ui_depth = depth;
         }
@@ -1561,8 +1590,11 @@ void TemporalUpscaler::OnDraw(u64 vs_hash, VideoCore::ImageId color,
     if (m_is_ui_phase) {
         // A UI movie can start without stencil and enable it for later text/masks.
         if (color == m_ui_color && depth && depth != m_ui_depth) {
-            EnsureUiResources(m_ui_width, m_ui_height, m_ui_format,
-                              m_texture_cache.GetImage(depth).info.pixel_format);
+            if (!EnsureUiResources(m_ui_width, m_ui_height, m_ui_format,
+                                   m_texture_cache.GetImage(depth).info.pixel_format)) {
+                m_is_ui_phase = false;
+                return;
+            }
             PrepareUiDepth(depth);
             m_ui_depth = depth;
         }
@@ -1602,12 +1634,18 @@ void TemporalUpscaler::OnDraw(u64 vs_hash, VideoCore::ImageId color,
     }
 }
 
-void TemporalUpscaler::EnsureUiResources(u32 w, u32 h, vk::Format color, vk::Format depth) {
+bool TemporalUpscaler::EnsureUiResources(u32 w, u32 h, vk::Format color, vk::Format depth) {
     const bool is_resized = w != m_ui_width || h != m_ui_height;
     const bool is_new_color = !m_ui_image || is_resized || color != m_ui_format;
     const bool is_new_depth = !m_ui_depth_image || is_resized || depth != m_ui_depth_format;
     if (!is_new_color && !is_new_depth) {
-        return;
+        return true;
+    }
+    const auto now = std::chrono::steady_clock::now();
+    if (now < m_ui_retry_time) {
+        LOG_ERROR_COUNTED(Render_Vulkan,
+                          "UI images {}x{} skipped until the retry after a failed allocation", w, h);
+        return false;
     }
     m_scheduler.Finish();
     const auto device = m_instance.GetDevice();
@@ -1654,14 +1692,26 @@ void TemporalUpscaler::EnsureUiResources(u32 w, u32 h, vk::Format color, vk::For
         const auto aspect = vk::ImageAspectFlagBits::eDepth |
             (depth == vk::Format::eD32SfloatS8Uint ? vk::ImageAspectFlagBits::eStencil
                                                 : vk::ImageAspectFlags{});
-        m_ui_depth_view = Check(device.createImageViewUnique({
-            .image = vk::Image(m_ui_depth_image), .viewType = vk::ImageViewType::e2D,
-            .format = depth, .subresourceRange = {aspect, 0, 1, 0, 1},
-        }));
+        if (m_ui_depth_image) {
+            m_ui_depth_view = Check(device.createImageViewUnique({
+                .image = vk::Image(m_ui_depth_image), .viewType = vk::ImageViewType::e2D,
+                .format = depth, .subresourceRange = {aspect, 0, 1, 0, 1},
+            }));
+        }
         m_ui_depth_format = depth;
+    }
+    if (!m_ui_image || !m_ui_depth_image) {
+        LOG_ERROR_COUNTED(Render_Vulkan,
+                          "UI images {}x{} not allocated, the UI is drawn at the scene resolution",
+                          w, h);
+        // psport: retried after a delay because every attempt waits for the GPU (Finish), which
+        // under memory pressure stalled every UI phase.
+        m_ui_retry_time = now + std::chrono::seconds(2);
+        return false;
     }
     std::printf("UI: native composition %ux%u (scene %ux%u), independent of FSR history\n",
                 w, h, m_render_width, m_render_height);
+    return true;
 }
 
 void TemporalUpscaler::PrepareUiDepth(VideoCore::ImageId depth_id) {
@@ -1737,7 +1787,9 @@ void TemporalUpscaler::RunUiOnly(VideoCore::ImageId color_id, VideoCore::ImageId
     const auto& color = m_texture_cache.GetImage(color_id);
     const auto depth_format = depth_id ? m_texture_cache.GetImage(depth_id).info.pixel_format
                                       : vk::Format::eD32SfloatS8Uint;
-    EnsureUiResources(m_target_width, m_target_height, color.info.pixel_format, depth_format);
+    if (!EnsureUiResources(m_target_width, m_target_height, color.info.pixel_format, depth_format)) {
+        return;
+    }
     PrepareUiDepth(depth_id);
     // Copy only the background already drawn. The subsequent menu/HUD/text draws execute
     // directly at output resolution, including frames with no scene or camera at all.
@@ -1751,6 +1803,9 @@ void TemporalUpscaler::RunUiOnly(VideoCore::ImageId color_id, VideoCore::ImageId
         const auto proxy = m_scene_targets.Read(color_id, view,
                                               vk::PipelineStageFlagBits2::eTransfer,
                                               vk::AccessFlagBits2::eTransferRead);
+        if (!proxy.image) {
+            return; // SceneTargets logged the missing proxy
+        }
         source = proxy.image;
         source_layout = proxy.layout;
         source_width = m_render_width;
@@ -1839,7 +1894,10 @@ void TemporalUpscaler::RunScaled() {
         m_has_failed = true;
         return;
     }
-    EnsureUiResources(ow, oh, color.info.pixel_format, depth.info.pixel_format);
+    if (!EnsureUiResources(ow, oh, color.info.pixel_format, depth.info.pixel_format)) {
+        m_has_failed = true;
+        return;
+    }
     PrepareUiDepth(m_camera_motion.Depth());
     const auto depth_format = depth.info.pixel_format;
     // Views kept across frames: FSR 4 registers images by view in a registry of eight.
@@ -1852,6 +1910,9 @@ void TemporalUpscaler::RunScaled() {
         di.format = depth_format;
         const auto cp = m_scene_targets.Read(m_ldr_target, ci);
         const auto dp = m_scene_targets.Read(m_camera_motion.Depth(), di);
+        if (!cp.image || !dp.image) {
+            return; // SceneTargets logged the missing proxy
+        }
         color_image = cp.image;
         color_view = cp.view;
         depth_image = dp.image;
@@ -2240,6 +2301,13 @@ bool TemporalUpscaler::RedirectColor(VideoCore::ImageId color,
                           m_ui_height);
         }
         display.views.clear();
+        if (!display.image) {
+            LOG_ERROR_COUNTED(Render_Vulkan,
+                              "Display buffer {:#x} not allocated at {}x{}, the game's buffer shown",
+                              address, m_ui_width, m_ui_height);
+            display.is_valid = false;
+            return false;
+        }
     }
     m_scheduler.EndRendering();
     const vk::ImageMemoryBarrier2 b{

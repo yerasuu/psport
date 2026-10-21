@@ -274,6 +274,8 @@ private:
         return &pending_binds.emplace_back(arena);
     }
 
+    /// psport: null for a range over more than two arena pages, which no arena covers. A request
+    /// of at most 4 GiB (a 32-bit size) spans two pages at most, so only 64-bit requests check.
     const Buffer* GetArena(u64 first_block, u64 last_block);
 
     /// `in_place`: bind what can be in place even when Garlic (texture data, read once into an

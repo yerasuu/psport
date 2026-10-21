@@ -42,8 +42,9 @@ public:
         return m_index_ranges.Get(key, m_frame, scan);
     }
 
-    /// Rendering of a motion pipeline: the motion attachment (render-target size).
-    void Attach(RenderState& state, u32 width, u32 height);
+    /// Rendering of a motion pipeline: the motion attachment (render-target size). False when
+    /// it has no image: the attachment is then a null view the pipeline still declares.
+    bool Attach(RenderState& state, u32 width, u32 height);
 
     /// Start of a frame (display pass).
     void OnFrameStart();
@@ -85,8 +86,9 @@ private:
         return nullptr;
     }
     /// The image of this size, created when missing (replacing the one used longest ago; it is
-    /// destroyed once the GPU is done with it, without waiting).
-    Target& GetTarget(u32 width, u32 height);
+    /// destroyed once the GPU is done with it, without waiting). Null when it cannot be
+    /// allocated: the motion output is then dropped.
+    Target* GetTarget(u32 width, u32 height);
 
     const Instance& m_instance;
     Scheduler& m_scheduler;

@@ -7,17 +7,10 @@
 #include "common/types.h"
 
 #include <cstddef>
-#include <stdexcept>
+#include <cstring>
 #include <vector>
 
 namespace Serialization {
-
-/// psport: a cache entry that cannot be used: shorter than what it claims to hold (a file cut
-/// short by a crash or a power loss, issue #28), or rejected by the driver while preloading. The
-/// pipeline cache drops the entry and compiles it again instead of stopping the game.
-struct CorruptData : std::runtime_error {
-    using std::runtime_error::runtime_error;
-};
 
 template <typename T>
 concept Container = requires(T t) {
@@ -51,9 +44,29 @@ struct Archive {
 
     void Advance(size_t size) {
         if (size > container.size() - offset) {
-            throw CorruptData{"Invalid or corrupted deserialization container/shader cache"};
+            MarkCorrupt("an entry shorter than what it holds");
+            offset = static_cast<u32>(container.size());
+            return;
         }
         offset += size;
+    }
+
+    /// psport: a cache entry that cannot be used: shorter than what it claims to hold (a file cut
+    /// short by a crash or a power loss, issue #28), or rejected by the driver while preloading.
+    /// Reads past the end leave zeros; the pipeline cache checks this once the entry is read,
+    /// drops it and compiles it again instead of stopping the game. The first reason stays.
+    void MarkCorrupt(const char* sz_reason) {
+        if (!sz_corrupt) {
+            sz_corrupt = sz_reason;
+        }
+    }
+
+    [[nodiscard]] bool IsCorrupt() const {
+        return sz_corrupt != nullptr;
+    }
+
+    [[nodiscard]] const char* CorruptReason() const {
+        return sz_corrupt;
     }
 
     std::vector<u8>&& TakeOff() {
@@ -71,6 +84,7 @@ struct Archive {
 private:
     u32 offset{};
     std::vector<u8> container{};
+    const char* sz_corrupt = nullptr;
 
     friend struct Writer;
     friend struct Reader;
@@ -115,7 +129,9 @@ struct Reader {
     template <typename T>
     void Read(T* ptr, size_t size) {
         if (size > ar.container.size() - ar.offset) {
-            throw CorruptData{"Invalid or corrupted deserialization container/shader cache"};
+            ar.MarkCorrupt("an entry shorter than what it holds");
+            std::memset(reinterpret_cast<void*>(ptr), 0, size);
+            return;
         }
         std::memcpy(reinterpret_cast<void*>(ptr), ar.CurrPtr(), size);
         ar.Advance(size);
@@ -132,9 +148,10 @@ struct Reader {
         size_t num_elements{};
         Read(num_elements);
         if (num_elements > ar.container.size() - ar.offset) {
-            throw CorruptData{"Invalid or corrupted deserialization container/shader cache"};
+            ar.MarkCorrupt("an element count past the end of the entry");
+            return;
         }
-        for (int i = 0; i < num_elements; ++i) {
+        for (size_t i = 0; i < num_elements && !ar.IsCorrupt(); ++i) {
             v.emplace_back();
             Read(v.back());
         }
@@ -144,7 +161,8 @@ struct Reader {
         size_t length{};
         Read(length);
         if (length > ar.container.size() - ar.offset) {
-            throw CorruptData{"Invalid or corrupted deserialization container/shader cache"};
+            ar.MarkCorrupt("a string length past the end of the entry");
+            return;
         }
         s.resize(length);
         Read(s.data(), length);

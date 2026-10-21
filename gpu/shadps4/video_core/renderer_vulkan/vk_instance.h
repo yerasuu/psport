@@ -174,6 +174,12 @@ public:
         return attachment_feedback_loop;
     }
 
+    /// psport: VK_EXT_dynamic_rendering_unused_attachments: a null attachment view may stand
+    /// where the pipeline declares a format (its writes are dropped).
+    bool IsDynamicRenderingUnusedAttachmentsSupported() const {
+        return dynamic_rendering_unused_attachments;
+    }
+
     /// Returns true when VK_EXT_custom_border_color is supported
     bool IsCustomBorderColorSupported() const {
         return custom_border_color;
@@ -672,6 +678,7 @@ private:
     bool buffer_marker{};
     bool device_fault{}; // psport: VK_EXT_device_fault (ReportDeviceFault)
     bool attachment_feedback_loop{};
+    bool dynamic_rendering_unused_attachments{};
     bool image_2d_view_of_3d{};
     bool image_view_min_lod{};
     bool shader_clock{};

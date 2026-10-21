@@ -286,7 +286,8 @@ bool Instance::CreateDevice() {
         vk::PhysicalDeviceComputeShaderDerivativesFeaturesKHR,
         vk::PhysicalDeviceShaderMixedFloatDotProductFeaturesVALVE,
         vk::PhysicalDeviceCooperativeMatrixFeaturesKHR, vk::PhysicalDeviceShaderFloat8FeaturesEXT,
-        vk::PhysicalDeviceTransformFeedbackFeaturesEXT, vk::PhysicalDeviceFaultFeaturesEXT>();
+        vk::PhysicalDeviceTransformFeedbackFeaturesEXT, vk::PhysicalDeviceFaultFeaturesEXT,
+        vk::PhysicalDeviceDynamicRenderingUnusedAttachmentsFeaturesEXT>();
     features = feature_chain.get().features;
 
     const vk::StructureChain properties_chain = physical_device.getProperties2<
@@ -362,6 +363,10 @@ bool Instance::CreateDevice() {
             enabled_extensions.pop_back();
         }
     }
+    dynamic_rendering_unused_attachments =
+        feature_chain.get<vk::PhysicalDeviceDynamicRenderingUnusedAttachmentsFeaturesEXT>()
+            .dynamicRenderingUnusedAttachments &&
+        add_extension(VK_EXT_DYNAMIC_RENDERING_UNUSED_ATTACHMENTS_EXTENSION_NAME);
     depth_range_unrestricted = add_extension(VK_EXT_DEPTH_RANGE_UNRESTRICTED_EXTENSION_NAME);
     dynamic_state_3 = add_extension(VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME);
     if (dynamic_state_3) {
@@ -676,6 +681,9 @@ bool Instance::CreateDevice() {
         vk::PhysicalDeviceAttachmentFeedbackLoopDynamicStateFeaturesEXT{
             .attachmentFeedbackLoopDynamicState = true,
         },
+        vk::PhysicalDeviceDynamicRenderingUnusedAttachmentsFeaturesEXT{
+            .dynamicRenderingUnusedAttachments = true,
+        },
         vk::PhysicalDeviceShaderAtomicFloat2FeaturesEXT{
             .shaderBufferFloat32AtomicMinMax =
                 shader_atomic_float2_features.shaderBufferFloat32AtomicMinMax,
@@ -758,6 +766,9 @@ bool Instance::CreateDevice() {
     if (!attachment_feedback_loop) {
         device_chain.unlink<vk::PhysicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT>();
         device_chain.unlink<vk::PhysicalDeviceAttachmentFeedbackLoopDynamicStateFeaturesEXT>();
+    }
+    if (!dynamic_rendering_unused_attachments) {
+        device_chain.unlink<vk::PhysicalDeviceDynamicRenderingUnusedAttachmentsFeaturesEXT>();
     }
     if (!shader_atomic_float2) {
         device_chain.unlink<vk::PhysicalDeviceShaderAtomicFloat2FeaturesEXT>();

@@ -29,7 +29,8 @@
 
 using namespace Xbyak::util;
 
-static Xbyak::CodeGenerator g_srt_codegen(32_MB);
+static constexpr size_t CB_SRT_CODEGEN = 32_MB;
+static Xbyak::CodeGenerator g_srt_codegen(CB_SRT_CODEGEN);
 static const u8* g_srt_codegen_start = nullptr;
 // psport: how much of the buffer holds finished walkers, for the fault handler's range check.
 static std::atomic<size_t> g_srt_published_size{0};
@@ -186,6 +187,11 @@ namespace Shader {
 PFN_SrtWalker RegisterWalkerCode(const u8* ptr, size_t size) {
     // psport: walkers read back from the pipeline cache fault like freshly built ones.
     RegisterSrtFaultHandler();
+    // psport: Xbyak throws when the arena overflows, and nothing on the pipeline cache's path
+    // catches it.
+    if (size > CB_SRT_CODEGEN - g_srt_codegen.getSize()) {
+        return nullptr;
+    }
     const auto func_addr = (PFN_SrtWalker)g_srt_codegen.getCurr();
     g_srt_codegen.db(ptr, size);
     g_srt_codegen.ready();

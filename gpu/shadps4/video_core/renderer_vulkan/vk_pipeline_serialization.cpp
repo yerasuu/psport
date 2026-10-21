@@ -156,6 +156,9 @@ bool PipelineCache::LoadComputePipeline(Serialization::Archive& ar) {
 
     ComputePipeline::SerializationSupport sdata{};
     sdata.Deserialize(ar);
+    if (ar.IsCorrupt()) {
+        return false;
+    }
 
     std::vector<u8> meta_blob;
     Storage::DataBase::Instance().Load(Storage::BlobType::ShaderMeta,
@@ -167,14 +170,21 @@ bool PipelineCache::LoadComputePipeline(Serialization::Archive& ar) {
     Serialization::Archive meta_ar{std::move(meta_blob)};
 
     if (!LoadPipelineStage(meta_ar, 0)) {
+        if (meta_ar.IsCorrupt()) {
+            ar.MarkCorrupt(meta_ar.CorruptReason());
+        }
         return false;
     }
 
-    // psport: built before it is inserted: a pipeline the driver rejects while preloading throws
-    // (Serialization::CorruptData) and leaves no empty entry behind.
+    // psport: built before it is inserted: a pipeline the driver rejects while preloading is a
+    // damaged entry and leaves no empty entry behind.
     auto pipeline =
         std::make_unique<ComputePipeline>(instance, scheduler, desc_heap, profile, *pipeline_cache,
                                           compute_key, *sel.infos[0], sel.modules[0], sdata, true);
+    if (!pipeline->Handle()) {
+        ar.MarkCorrupt("a cached compute pipeline rejected by the driver");
+        return false;
+    }
     // psport: a damaged cache may list a pipeline twice; the first one stays.
     if (const auto [it, is_new] = compute_pipelines.try_emplace(compute_key); is_new) {
         it.value() = std::move(pipeline);
@@ -242,6 +252,9 @@ bool PipelineCache::LoadGraphicsPipeline(Serialization::Archive& ar) {
 
     GraphicsPipeline::SerializationSupport sdata{};
     sdata.Deserialize(ar);
+    if (ar.IsCorrupt()) {
+        return false;
+    }
 
     for (int stage_idx = 0; stage_idx < MaxShaderStages; ++stage_idx) {
         const auto& hash = sel.graphics_key.stage_hashes[stage_idx];
@@ -259,6 +272,9 @@ bool PipelineCache::LoadGraphicsPipeline(Serialization::Archive& ar) {
         Serialization::Archive meta_ar{std::move(meta_blob)};
 
         if (!LoadPipelineStage(meta_ar, stage_idx)) {
+            if (meta_ar.IsCorrupt()) {
+                ar.MarkCorrupt(meta_ar.CorruptReason());
+            }
             return false;
         }
     }
@@ -266,6 +282,10 @@ bool PipelineCache::LoadGraphicsPipeline(Serialization::Archive& ar) {
     auto pipeline = std::make_unique<GraphicsPipeline>(
         instance, scheduler, desc_heap, profile, sel.graphics_key, *pipeline_cache, sel.infos,
         sel.runtime_infos, sel.fetch_shader, sel.modules, sdata, true);
+    if (!pipeline->Handle()) {
+        ar.MarkCorrupt("a cached graphics pipeline rejected by the driver");
+        return false;
+    }
     if (const auto [it, is_new] = graphics_pipelines.try_emplace(sel.graphics_key); is_new) {
         it.value() = std::move(pipeline);
     } else {
@@ -285,7 +305,7 @@ bool PipelineCache::LoadPipelineStage(Serialization::Archive& ar, size_t stage) 
     Shader::StageSpecialization spec{};
     spec.info = &program->info;
     size_t perm_idx{};
-    if (!LoadShaderMeta(ar, program->info, sel.fetch_shader, spec, perm_idx)) {
+    if (!LoadShaderMeta(ar, program->info, sel.fetch_shader, spec, perm_idx) || ar.IsCorrupt()) {
         return false;
     }
 
@@ -297,7 +317,7 @@ bool PipelineCache::LoadPipelineStage(Serialization::Archive& ar, size_t stage) 
     // a damaged file (crash or power loss while it was written) the driver must not see.
     if (spv.size() < 5 || spv[0] != 0x07230203u) {
         if (!spv.empty()) {
-            throw Serialization::CorruptData{"damaged SPIR-V in the shader cache"};
+            ar.MarkCorrupt("damaged SPIR-V in the shader cache");
         }
         return false;
     }
@@ -312,7 +332,8 @@ bool PipelineCache::LoadPipelineStage(Serialization::Archive& ar, size_t stage) 
         auto [result, created] = instance.GetDevice().createShaderModule(
             {.codeSize = spv.size() * sizeof(u32), .pCode = spv.data()});
         if (result != vk::Result::eSuccess) {
-            throw Serialization::CorruptData{"cached SPIR-V rejected by the driver"};
+            ar.MarkCorrupt("cached SPIR-V rejected by the driver");
+            return vk::ShaderModule{};
         }
         return created;
     };
@@ -320,6 +341,10 @@ bool PipelineCache::LoadPipelineStage(Serialization::Archive& ar, size_t stage) 
     auto [it_pgm, new_program] = program_cache.try_emplace(program->info.pgm_hash);
     if (new_program) {
         module = compile();
+        if (!module) {
+            program_cache.erase(it_pgm);
+            return false;
+        }
         it_pgm.value() = std::move(program);
     } else {
         const auto& it = std::ranges::find(it_pgm.value()->modules, spec, &Program::Module::spec);
@@ -338,6 +363,9 @@ bool PipelineCache::LoadPipelineStage(Serialization::Archive& ar, size_t stage) 
             module = it->module;
         } else {
             module = compile();
+            if (!module) {
+                return false;
+            }
         }
     }
     it_pgm.value()->InsertPermut(module, std::move(spec), perm_idx);
@@ -407,36 +435,28 @@ void PipelineCache::WarmUp() {
             // psport: a damaged entry (cut short by a crash or a power loss, or rejected by the
             // driver) used to stop the game at every start until the cache was deleted by hand
             // (issues #28, #38, #39). It is counted here and the cache is rebuilt below.
-            try {
-                Serialization::Archive ar{std::move(data)};
-                Serialization::Reader pldata{ar};
+            Serialization::Archive ar{std::move(data)};
+            Serialization::Reader pldata{ar};
 
-                u32 version{};
-                pldata.Read(version);
-                if (version != Serialization::PipelineKeyVersion) {
-                    return;
-                }
-
+            u32 version{};
+            pldata.Read(version);
+            bool result = false;
+            if (!ar.IsCorrupt() && version == Serialization::PipelineKeyVersion) {
                 u32 is_compute{};
                 pldata.Read(is_compute);
-
-                bool result{};
-                if (is_compute) {
-                    result = LoadComputePipeline(ar);
-                } else {
-                    result = LoadGraphicsPipeline(ar);
-                }
-
-                if (result) {
-                    ++num_pipelines;
-                }
-            } catch (const std::exception& e) {
+                result = is_compute ? LoadComputePipeline(ar) : LoadGraphicsPipeline(ar);
+            }
+            if (ar.IsCorrupt()) {
                 if (num_damaged++ == 0) {
-                    LOG_WARNING(Render, "Pipeline cache: damaged entry ({})", e.what());
+                    LOG_WARNING(Render, "Pipeline cache: damaged entry ({})", ar.CorruptReason());
                 }
                 sel.infos.fill(nullptr);
                 sel.modules.fill(nullptr);
                 sel.fetch_shader.reset();
+                return;
+            }
+            if (result) {
+                ++num_pipelines;
             }
         });
 
@@ -541,7 +561,15 @@ bool PersistentSrtInfo::Deserialize(Serialization::Archive& ar) {
         // a cut-short file must not have bytes past its end run as the walker.
         const auto code = ar.CurrPtr();
         ar.Advance(walker_func_size);
+        if (ar.IsCorrupt()) {
+            walker_func = nullptr;
+            return false;
+        }
         walker_func = RegisterWalkerCode(code, walker_func_size);
+        if (!walker_func) {
+            ar.MarkCorrupt("an SRT walker larger than the room left in the walker arena");
+            return false;
+        }
     }
 
     return true;
@@ -578,7 +606,20 @@ bool StageSpecialization::Deserialize(Serialization::Archive& ar) {
 
     std::string bits{};
     spec.Read(bits);
-    bitset = std::bitset<MaxStageResources>(bits);
+    // psport: std::bitset's string constructor throws on anything but '0' and '1', and WarmUp
+    // has no catch: a damaged mask marks the entry instead.
+    bitset.reset();
+    if (bits.size() != bitset.size()) {
+        ar.MarkCorrupt("a stage resource mask of the wrong length");
+    }
+    for (size_t i = 0; i < bits.size() && !ar.IsCorrupt(); ++i) {
+        const char bit = bits[bits.size() - 1 - i];
+        if (bit == '1') {
+            bitset[i] = true;
+        } else if (bit != '0') {
+            ar.MarkCorrupt("a damaged stage resource mask");
+        }
+    }
 
     u64 fetch_data_size{};
     spec.Read(fetch_data_size);

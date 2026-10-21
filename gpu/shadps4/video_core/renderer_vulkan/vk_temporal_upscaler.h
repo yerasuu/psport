@@ -160,7 +160,9 @@ private:
     void Run();
     void RunScaled();
     void RunUiOnly(VideoCore::ImageId color, VideoCore::ImageId depth);
-    void EnsureUiResources(u32 width, u32 height, vk::Format color, vk::Format depth);
+    /// psport: false when its images could not be allocated (the UI then stays at the scene's
+    /// resolution).
+    [[nodiscard]] bool EnsureUiResources(u32 width, u32 height, vk::Format color, vk::Format depth);
     void PrepareUiDepth(VideoCore::ImageId depth);
     /// Render size below the scaled-preset output size (the resolution patch is on).
     [[nodiscard]] bool Scaled() const;
@@ -248,6 +250,8 @@ private:
     u32 m_render_width = 0, m_render_height = 0;
     vk::Format m_ui_format = vk::Format::eUndefined;
     vk::Format m_ui_depth_format = vk::Format::eUndefined;
+    /// After a failed UI image allocation, no new attempt (each waits for the GPU) before this.
+    std::chrono::steady_clock::time_point m_ui_retry_time{};
     /// Views of the port's images in the formats/swizzles the game's views use.
     struct MirrorView {
         vk::Format format;

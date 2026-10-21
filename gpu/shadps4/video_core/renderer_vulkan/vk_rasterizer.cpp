@@ -461,8 +461,7 @@ void Rasterizer::GpuSignalLoop(std::stop_token token) {
                 break;
             }
             if (result == vk::Result::eErrorDeviceLost) {
-                Breadcrumbs::ReportDeviceLost("waiting for the GPU");
-                ASSERT_MSG(false, "Device lost while waiting for the GPU");
+                StopOnDeviceLost("waiting for the GPU");
             }
             if (!watched && std::chrono::steady_clock::now() - wait_start > std::chrono::seconds(10)) {
                 watched = true;
@@ -650,7 +649,7 @@ VideoCore::ImageId Rasterizer::FindTargetMemoized(VideoCore::TextureCache::Image
     return image_id;
 }
 
-void Rasterizer::PrepareRenderState(const GraphicsPipeline* pipeline) {
+bool Rasterizer::PrepareRenderState(const GraphicsPipeline* pipeline) {
     BB_SECTION(PrepareRenderState);
     // Prefetch render targets to handle overlaps with bound textures (e.g. mipgen)
     const auto& key = pipeline->GetGraphicsKey();
@@ -661,6 +660,7 @@ void Rasterizer::PrepareRenderState(const GraphicsPipeline* pipeline) {
 
     const bool skip_cb_binding =
         regs.color_control.mode == AmdGpu::ColorControl::OperationMode::Disable;
+    bool is_target_missing = false;
     for (s32 cb = 0; cb < std::bit_width(key.mrt_mask); ++cb) {
         auto& [image_id, desc] = cb_descs[cb];
         const auto& col_buf = regs.color_buffers[cb];
@@ -676,6 +676,7 @@ void Rasterizer::PrepareRenderState(const GraphicsPipeline* pipeline) {
             col_buf, hint));
         auto& image = texture_cache.GetImage(image_id);
         image.binding.is_target = 1u;
+        is_target_missing |= !image.IsAllocated();
     }
 
     if ((regs.depth_control.depth_enable && regs.depth_buffer.DepthValid()) ||
@@ -698,8 +699,20 @@ void Rasterizer::PrepareRenderState(const GraphicsPipeline* pipeline) {
             tag, regs.depth_buffer, depth_view, regs.depth_control, htile_address, hint));
         auto& image = texture_cache.GetImage(image_id);
         image.binding.is_target = 1u;
+        is_target_missing |= !image.IsAllocated();
     } else {
         db_desc.first = {};
+    }
+    // psport: a target whose memory could not be allocated (TextureCache::CreateImage) is not
+    // drawn to, and the upscaler and motion passes never see it (the display pass reads the
+    // previous draw's targets).
+    if (is_target_missing) {
+        LOG_ERROR_COUNTED(Render_Vulkan, "Draw skipped: a render target has no memory");
+        for (s32 cb = 0; cb < std::bit_width(key.mrt_mask); ++cb) {
+            cb_descs[cb].first = {};
+        }
+        db_desc.first = {};
+        return false;
     }
     // psport: the G-buffer pass (5+ color targets) holds the scene depth, and its constants the
     // main camera (shadow passes bind the same layout with the light's camera).
@@ -734,6 +747,7 @@ void Rasterizer::PrepareRenderState(const GraphicsPipeline* pipeline) {
             }
         }
     }
+    return true;
 }
 
 static std::pair<u32, u32> GetDrawOffsets(
@@ -1205,6 +1219,12 @@ void Rasterizer::PostDraw(const Pipeline* pipeline, const PreparedDraw* used_pre
     }
 
     u8* out = draw_pipe->Begin(size);
+    if (!out) {
+        // The dirty register blocks stay marked and go with the next packet.
+        LOG_ERROR_COUNTED(Render_Vulkan,
+                          "Draw packet of {} bytes too large for the draw pipe, skipped", size);
+        return;
+    }
     u8* const start = out;
     auto& packet = *reinterpret_cast<DrawPacket*>(out);
     packet.kind = cs         ? (indirect ? PacketKind::IndirectDispatch : PacketKind::Dispatch)
@@ -1299,6 +1319,13 @@ bool Rasterizer::RunInOrder(OrderedTask task, const void* data, u32 size, u64 to
     }
     const u32 total = sizeof(TaskPacket) + AlignPacket(size);
     u8* out = draw_pipe->Begin(total);
+    if (!out) {
+        LOG_ERROR_COUNTED(Render_Vulkan,
+                          "Task of {} bytes too large for the draw pipe, run in place", size);
+        DrainDrawPipe(DrawPipe::ReasonRasterizer);
+        task(*this, static_cast<const u8*>(data));
+        return false;
+    }
     *reinterpret_cast<TaskPacket*>(out) = {PacketKind::Task, size, task};
     std::memcpy(out + sizeof(TaskPacket), data, size);
     draw_pipe->Commit(total);
@@ -1349,7 +1376,7 @@ void Rasterizer::RunDrawPacket(void* context, const u8* data, u32 size) {
                     AmdGpu::RegDirty::BlockWords * sizeof(u32));
         in += AmdGpu::RegDirty::BlockWords * sizeof(u32);
     }
-    ASSERT(packet.num_stages <= Shader::Info::MaxUdSnapshots);
+    static_assert(Shader::MaxStageTypes <= Shader::Info::MaxUdSnapshots);
     for (u32 i = 0; i < packet.num_stages; ++i) {
         const auto& stage = *reinterpret_cast<const PacketStage*>(in);
         in += sizeof(PacketStage);
@@ -1433,7 +1460,11 @@ void Rasterizer::RunDrawPacket(void* context, const u8* data, u32 size) {
             }
         }
     }
-    ASSERT(static_cast<u32>(in - data) == size);
+    if (static_cast<u32>(in - data) != size) {
+        LOG_ERROR_COUNTED(Render_Vulkan, "Draw packet of {} bytes read as {}, its draw skipped",
+                          size, static_cast<u32>(in - data));
+        return;
+    }
     stage_regs = &regs;
     self.pipe_cb_extent = packet.cb_extent;
     self.pipe_db_extent = packet.db_extent;
@@ -1822,7 +1853,13 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
     motion_draw = pipeline->GetGraphicsKey().motion_vectors;
     motion_geometry = 0;
 
-    PrepareRenderState(pipeline);
+    // psport: every skipped draw clears the binding flags PrepareRenderState and
+    // BindResources set, so that the next draw does not see its images as targets.
+    if (!PrepareRenderState(pipeline)) {
+        bind_prepared = nullptr;
+        ResetBindings(false);
+        return;
+    }
     if (upscaler->Enabled() && std::popcount(pipeline->GetGraphicsKey().mrt_mask) == 1) {
         const auto& viewport = Regs().viewports[0];
         upscaler->OnDraw(pipeline->GetStage(Shader::SwStage::Vertex).pgm_hash,
@@ -1833,6 +1870,7 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
     StreamOutBinding strmout;
     if (!ObtainStreamOut(pipeline, strmout)) {
         bind_prepared = nullptr;
+        ResetBindings(false);
         return;
     }
     // psport: vertex and index buffers are resolved while the helper binds textures (their
@@ -1843,9 +1881,14 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
     const bool inputs_resolved = draw_inputs.resolved;
     draw_inputs.pending = false;
     if (!bound) {
+        ResetBindings(false);
         return;
     }
     const auto state = BeginRendering(pipeline);
+    if (!CanDrawAttachments()) {
+        ResetBindings(false);
+        return;
+    }
 
     if (!inputs_resolved) {
         ResolveVertexBuffers(pipeline, draw_prepared);
@@ -2106,11 +2149,20 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
     const VAddr count_address = indirect.count;
     const u32 stride = indirect.stride;
     const u32 max_count = indirect.max_count;
+    if (stride != (is_indexed ? sizeof(VkDrawIndexedIndirectCommand)
+                              : sizeof(VkDrawIndirectCommand))) {
+        LOG_ERROR_COUNTED(Render_Vulkan, "Indirect draw with a {}-byte argument stride skipped",
+                          stride);
+        return;
+    }
 
     // Indirect arguments may be GPU-written: leave these draws on camera fallback.
     motion_draw = false;
     motion_geometry = 0;
-    PrepareRenderState(pipeline);
+    if (!PrepareRenderState(pipeline)) {
+        ResetBindings(false);
+        return;
+    }
     if (upscaler->Enabled() && std::popcount(pipeline->GetGraphicsKey().mrt_mask) == 1) {
         const auto& viewport = Regs().viewports[0];
         upscaler->OnDraw(pipeline->GetStage(Shader::SwStage::Vertex).pgm_hash,
@@ -2119,12 +2171,18 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
     }
     StreamOutBinding strmout;
     if (!ObtainStreamOut(pipeline, strmout)) {
+        ResetBindings(false);
         return;
     }
     if (!BindResources(pipeline)) {
+        ResetBindings(false);
         return;
     }
     const auto state = BeginRendering(pipeline);
+    if (!CanDrawAttachments()) {
+        ResetBindings(false);
+        return;
+    }
 
     BindVertexBuffers(pipeline);
     if (is_indexed) {
@@ -2167,8 +2225,6 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
     pipeline->BindResources(set_writes, push_data, {image_infos.data(), image_infos.size()},
                             {buffer_infos.data(), buffer_infos.size()});
 
-    ASSERT(stride == (is_indexed ? sizeof(VkDrawIndexedIndirectCommand)
-                                 : sizeof(VkDrawIndirectCommand)));
     const vk::Pipeline handle = pipeline->Handle();
     const vk::Buffer args = buffer->Handle();
     const u64 args_offset = base;
@@ -2998,10 +3054,17 @@ void Rasterizer::ResolveVertexBuffers(const GraphicsPipeline* pipeline,
                             return buffer.base_address >= range.base_address &&
                                    buffer.base_address < range.end_address;
                         });
-            ASSERT(host_buffer_info != ranges_merged.cend());
-            host_buffers.emplace_back(host_buffer_info->buffer->Handle());
-            host_offsets.push_back(host_buffer_info->offset + buffer.base_address -
-                                   host_buffer_info->base_address);
+            if (host_buffer_info != ranges_merged.cend()) {
+                host_buffers.emplace_back(host_buffer_info->buffer->Handle());
+                host_offsets.push_back(host_buffer_info->offset + buffer.base_address -
+                                       host_buffer_info->base_address);
+            } else {
+                LOG_ERROR_COUNTED(Render_Vulkan,
+                                  "Vertex stream at {:#x} outside the merged ranges, bound null",
+                                  buffer.base_address);
+                host_buffers.emplace_back(VK_NULL_HANDLE);
+                host_offsets.push_back(0);
+            }
         } else {
             host_buffers.emplace_back(VK_NULL_HANDLE);
             host_offsets.push_back(0);
@@ -3449,7 +3512,9 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, const PreparedStage* pre
                 lds_buffer.Commit();
                 buffer_infos.emplace_back(lds_buffer.Handle(), offset, lds_size);
             } else {
-                UNREACHABLE_MSG("Unexpected buffer type {}", u32(desc.buffer_type));
+                LOG_ERROR_COUNTED(Render_Vulkan, "Unexpected buffer type {}, bound null",
+                                  u32(desc.buffer_type));
+                buffer_infos.emplace_back(VK_NULL_HANDLE, 0, VK_WHOLE_SIZE);
             }
         } else {
             const auto vsharp =
@@ -3723,7 +3788,11 @@ void Rasterizer::BindTextures(const Shader::Info& stage, const PreparedStage* pr
             binding_proxy_ok.push_back(proxy_candidate);
 
             if (mip_fallback_mode == Shader::MipStorageFallbackMode::ConstantIndex) {
-                ASSERT(num_bindings == 1);
+                if (num_bindings != 1) {
+                    LOG_ERROR_COUNTED(Render_Vulkan,
+                                      "Constant mip index on {} bindings, each binds the same mip",
+                                      num_bindings);
+                }
                 desc.view_info.range.base.level += image_desc.constant_mip_index;
                 desc.view_info.range.extent.levels = 1;
             } else if (mip_fallback_mode == Shader::MipStorageFallbackMode::DynamicIndex) {
@@ -3819,7 +3888,8 @@ void Rasterizer::BindTextures(const Shader::Info& stage, const PreparedStage* pr
             // target in feedback loop. Depth images are excluded because they can't be bound as
             // storage and feedback loop doesn't make sense for them
             if ((binding.force_general || binding.is_target) && !image.info.props.is_depth) {
-                if (instance.IsAttachmentFeedbackLoopLayoutSupported() && image.binding.is_target) {
+                if (instance.IsAttachmentFeedbackLoopLayoutSupported() && image.binding.is_target &&
+                    !binding.force_general) {
                     barrier |= runtime.Transit(
                         &image, vk::ImageLayout::eAttachmentFeedbackLoopOptimalEXT,
                         vk::PipelineStageFlagBits2::eAllGraphics, vk::AccessFlagBits2::eShaderRead);
@@ -4082,6 +4152,15 @@ bool Rasterizer::BindTexturesFromSet(const Shader::Info& stage, const PreparedSt
     return true;
 }
 
+bool Rasterizer::CanDrawAttachments() const {
+    if (!is_attachment_null || instance.IsDynamicRenderingUnusedAttachmentsSupported()) {
+        return true;
+    }
+    LOG_ERROR_COUNTED(Render_Vulkan, "Draw skipped: an attachment has no memory and the device "
+                                     "does not allow null attachments");
+    return false;
+}
+
 RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
     BB_SECTION(BeginRendering);
     // psport: RenderStateMemo (see BeginMemo).
@@ -4128,6 +4207,7 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
         if (usable) {
             ++begin_memo_hits;
             attachment_feedback_loop = false;
+            is_attachment_null = false;
             push_data.scene_size = begin_memo.scene_size;
             target_scale = begin_memo.target_scale;
             ui_placement = begin_memo.ui_placement;
@@ -4137,7 +4217,7 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
     }
     begin_memo.valid = false;
     RenderState state = BeginRenderingFull(pipeline);
-    if (memo_on && !attachment_feedback_loop) {
+    if (memo_on && !attachment_feedback_loop && !is_attachment_null) {
         // (is_clear of the depth attachment shares its bytes with has_depth.)
         bool clears = state.depth_stencil_attachment.depth_clear ||
                       state.depth_stencil_attachment.stencil_clear;
@@ -4155,6 +4235,7 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
 
 RenderState Rasterizer::BeginRenderingFull(const GraphicsPipeline* pipeline) {
     attachment_feedback_loop = false;
+    is_attachment_null = false;
     using VulkanUpscalerTarget = TemporalUpscaler::Target;
     VulkanUpscalerTarget redirect{};
     bool color_redirected = false, depth_redirected = false;
@@ -4256,12 +4337,19 @@ RenderState Rasterizer::BeginRenderingFull(const GraphicsPipeline* pipeline) {
         if (reduced) {
             // The native image is resolved lazily when a shader/copy actually reads it.
         } else if (image->binding.is_bound) {
-            ASSERT_MSG(!image->binding.force_general,
-                       "Having image both as storage and render target is unsupported");
+            // psport: a storage descriptor requires the general layout; the feedback loop
+            // layout only covers sampled and input attachment reads.
+            if (image->binding.force_general) {
+                LOG_ERROR_COUNTED(Render_Vulkan,
+                                  "Image at {:#x} both storage and render target, drawn in the "
+                                  "general layout",
+                                  image->info.guest_address);
+            }
             runtime.FlushBarriers();
             needs_barrier |=
                 runtime.Transit(image,
-                                instance.IsAttachmentFeedbackLoopLayoutSupported()
+                                instance.IsAttachmentFeedbackLoopLayoutSupported() &&
+                                        !image->binding.force_general
                                     ? vk::ImageLayout::eAttachmentFeedbackLoopOptimalEXT
                                     : vk::ImageLayout::eGeneral,
                                 vk::PipelineStageFlagBits2::eColorAttachmentOutput,
@@ -4292,6 +4380,7 @@ RenderState Rasterizer::BeginRenderingFull(const GraphicsPipeline* pipeline) {
             const auto target = scene_targets->Attachment(image_id, desc.view_info);
             attachment.image_view = target.view;
             attachment.image_layout = target.layout;
+            is_attachment_null |= !target.view;
         }
         image->usage.render_target = 1u;
         if (cb == 0 && upscaler->Enabled()) {
@@ -4321,7 +4410,12 @@ RenderState Rasterizer::BeginRenderingFull(const GraphicsPipeline* pipeline) {
             texture_cache.IsMetaCleared(htile_address, slice);
         const bool is_stencil_clear = regs.depth_render_control.stencil_clear_enable;
         texture_cache.TouchMeta(htile_address, slice, false);
-        ASSERT(desc.view_info.range.extent.levels == 1 && !image.binding.needs_rebind);
+        if (desc.view_info.range.extent.levels != 1 || image.binding.needs_rebind) {
+            LOG_ERROR_COUNTED(Render_Vulkan,
+                              "Depth target at {:#x} with {} levels or pending a rebind, drawn "
+                              "as found",
+                              image.info.guest_address, desc.view_info.range.extent.levels);
+        }
 
         const bool has_stencil = image.info.props.has_stencil;
         // Stencil writes can be enabled while depth writes are off.
@@ -4366,6 +4460,7 @@ RenderState Rasterizer::BeginRenderingFull(const GraphicsPipeline* pipeline) {
             const auto target = scene_targets->Attachment(image_id, desc.view_info);
             attachment.image_view = target.view;
             attachment.image_layout = target.layout;
+            is_attachment_null |= !target.view;
         }
         image.usage.depth_target = true;
         if (upscaler->Enabled()) {
@@ -4470,7 +4565,7 @@ RenderState Rasterizer::BeginRenderingFull(const GraphicsPipeline* pipeline) {
     }
     // psport: object motion vector attachment of G-buffer pipelines.
     if (key.motion_vectors) {
-        object_motion->Attach(state, state.width, state.height);
+        is_attachment_null |= !object_motion->Attach(state, state.width, state.height);
     }
     return state;
 }
@@ -4526,8 +4621,12 @@ void Rasterizer::DepthStencilCopy(bool is_depth, bool is_stencil) {
 
 void Rasterizer::FillBuffer(VAddr address, u32 num_bytes, u32 value, bool is_gds) {
     DrainDrawPipe();
-    ASSERT_MSG(address % 4 == 0 && num_bytes % 4 == 0,
-               "FillBuffer address and size must be a multiple of 4 bytes");
+    if (address % 4 != 0 || num_bytes % 4 != 0) {
+        LOG_ERROR_COUNTED(Render_Vulkan,
+                          "Fill of {} bytes at {:#x} not 4-byte aligned, skipped", num_bytes,
+                          address);
+        return;
+    }
     if (!is_gds) {
         texture_cache.ClearMeta(address);
         // psport: memory the GPU uses in place is filled by the GPU in stream order (a fill on the
@@ -4990,9 +5089,12 @@ void Rasterizer::UpdatePrimitiveState(const bool is_indexed) const {
         (regs.enable_primitive_restart & 1) != 0 &&
         (instance.IsListRestartSupported() || !is_list_topology(regs.primitive_type)) &&
         (instance.IsPatchListRestartSupported() || !is_patch_list_topology(regs.primitive_type));
-    ASSERT_MSG(!is_indexed || !prim_restart || regs.primitive_restart_index == 0xFFFF ||
-                   regs.primitive_restart_index == 0xFFFFFFFF,
-               "Primitive restart index other than -1 is not supported yet");
+    if (is_indexed && prim_restart && regs.primitive_restart_index != 0xFFFF &&
+        regs.primitive_restart_index != 0xFFFFFFFF) {
+        LOG_ERROR_COUNTED(Render_Vulkan,
+                          "Primitive restart index {:#x} unsupported, all ones used instead",
+                          regs.primitive_restart_index);
+    }
 
     const auto cull_mode = LiverpoolToVK::IsPrimitiveCulled(regs.primitive_type)
                                ? LiverpoolToVK::CullMode(regs.polygon_control.CullingMode())

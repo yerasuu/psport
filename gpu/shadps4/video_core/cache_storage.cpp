@@ -354,7 +354,8 @@ void DataBase::ForEachBlob(BlobType type, const std::function<void(std::vector<u
             }
         }
     } else {
-        for (const auto& file_name : std::filesystem::directory_iterator{cache_path}) {
+        std::error_code ec;
+        for (const auto& file_name : std::filesystem::directory_iterator{cache_path, ec}) {
             if (file_name.path().extension().string().ends_with(ext)) {
                 using namespace Common::FS;
                 const auto& file = IOFile{file_name, FileAccessMode::Read};

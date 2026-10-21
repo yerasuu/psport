@@ -169,11 +169,11 @@ u32 ObjectMotion::PrepareDraw(const DrawInfo& draw) {
     return i_param;
 }
 
-ObjectMotion::Target& ObjectMotion::GetTarget(u32 width, u32 height) {
+ObjectMotion::Target* ObjectMotion::GetTarget(u32 width, u32 height) {
     for (auto& target : m_targets) {
         if (target.image && target.width == width && target.height == height) {
             target.used_frame = m_frame;
-            return target;
+            return &target;
         }
     }
     // A free slot, else the image used longest ago (not the one being read).
@@ -217,6 +217,15 @@ ObjectMotion::Target& ObjectMotion::GetTarget(u32 width, u32 height) {
         })) {
         SetObjectName(device, vk::Image(p_slot->image), "psport: object motion {}x{}", width, height);
     }
+    if (!p_slot->image) {
+        LOG_ERROR_COUNTED(Render_Vulkan,
+                          "Object motion image {}x{} not allocated, its vectors dropped", width,
+                          height);
+        p_slot->width = 0;
+        p_slot->height = 0;
+        p_slot->is_written = false;
+        return nullptr;
+    }
     p_slot->view = Check(device.createImageViewUnique({
         .image = vk::Image(p_slot->image),
         .viewType = vk::ImageViewType::e2D,
@@ -228,14 +237,19 @@ ObjectMotion::Target& ObjectMotion::GetTarget(u32 width, u32 height) {
     p_slot->is_written = false;
     p_slot->layout = vk::ImageLayout::eUndefined;
     p_slot->used_frame = m_frame;
-    return *p_slot;
+    return p_slot;
 }
 
-void ObjectMotion::Attach(RenderState& state, u32 width, u32 height) {
+bool ObjectMotion::Attach(RenderState& state, u32 width, u32 height) {
     constexpr u32 slot = Shader::MotionVectors::Output;
-    Target& target = GetTarget(width, height);
+    Target* p_target = GetTarget(width, height);
     auto& attachment = state.color_attachments[slot];
     attachment = {};
+    state.num_color_attachments = std::max<u16>(state.num_color_attachments, slot + 1);
+    if (!p_target) {
+        return false;
+    }
+    Target& target = *p_target;
     attachment.image_view = *target.view;
     attachment.image_layout = vk::ImageLayout::eColorAttachmentOptimal;
     if (!target.is_written || target.layout != vk::ImageLayout::eColorAttachmentOptimal) {
@@ -261,7 +275,7 @@ void ObjectMotion::Attach(RenderState& state, u32 width, u32 height) {
         attachment.is_clear = !target.is_written;
         target.is_written = true;
     }
-    state.num_color_attachments = std::max<u16>(state.num_color_attachments, slot + 1);
+    return true;
 }
 
 vk::ImageView ObjectMotion::PrepareRead(u32 width, u32 height, bool& valid) {
@@ -275,7 +289,11 @@ vk::ImageView ObjectMotion::PrepareRead(u32 width, u32 height, bool& valid) {
         }
     }
     if (!p_target) {
-        p_target = &GetTarget(1, 1);
+        p_target = GetTarget(1, 1);
+    }
+    if (!p_target) {
+        valid = false;
+        return {}; // a null view (nullDescriptor): GetTarget logged it
     }
     valid = p_target->is_written && width == p_target->width && height == p_target->height;
     const vk::ImageMemoryBarrier2 barrier{

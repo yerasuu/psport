@@ -415,11 +415,20 @@ culling), or the image operation is skipped (a download larger than the image's 
 tiling pass whose views or pipeline failed). Each fallback is logged with `LOG_ERROR_COUNTED`
 (`gpu/shim/common/logging/log.h`): on its 1st, 2nd, 4th, 8th... occurrence, with the running count,
 and listed with its total in the call summary at exit (`Calls: summary fallback`, FORK.md).
-Assertions remain for the library's own invariants (texture cache registration and page tracking,
-the draw pipeline's packet size bound in `DrawPipe::Begin`) and for callers' contracts
-(`FindImage` with address 0, which the rasterizer filters out). A pipeline the driver rejects while
-the pipeline cache is preloaded still throws `Serialization::CorruptData`, which
-`PipelineCache::WarmUp` catches to rebuild the cache.
+Assertions remain for the library's own invariants (texture cache registration and page tracking)
+and for callers' contracts (`FindImage` with address 0, which the rasterizer filters out). A draw
+is skipped when one of its render targets has no memory, when its pipeline was rejected by the
+driver or cannot be specialized, or when its draw pipe packet would take over a quarter of the ring
+(`DrawPipe::Begin` returns null; an ordered task that large runs in place). A pipeline cache entry
+cut short, holding damaged SPIR-V or rejected by the driver while the cache is preloaded marks its
+`Serialization::Archive` corrupt (nothing is thrown), and `PipelineCache::WarmUp` rebuilds the
+cache. Images of the upscaler that cannot be allocated turn it off (its UI images keep the UI at
+the scene's resolution and are tried again after two seconds, since each attempt waits for the
+GPU; its display buffer leaves the game's buffer shown), a scene proxy that
+cannot be allocated keeps its image at native size, and a missing object motion image drops the
+motion vectors. Both leave a null attachment the pipeline declares, which only
+`VK_EXT_dynamic_rendering_unused_attachments` allows: where the device lacks it, the draw is
+skipped.
 
 ### Memory model
 

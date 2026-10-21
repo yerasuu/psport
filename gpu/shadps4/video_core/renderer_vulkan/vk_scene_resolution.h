@@ -105,6 +105,8 @@ private:
     SceneResolution::Size m_size;
     std::unordered_map<u64, std::unique_ptr<Entry>> m_entries; ///< by Key(uid, level)
     std::unordered_set<u64> m_tracked; ///< uids with proxies
+    std::unordered_set<u64> m_unallocated; ///< uids whose proxy could not be allocated
+    Entry m_null_entry; ///< what Get returns for such a proxy: no image, null views
     bool m_is_copying = false;
     bool m_should_force_stencil_bits = false; ///< test the portable resampler on any driver
     u64 m_generation = 0;

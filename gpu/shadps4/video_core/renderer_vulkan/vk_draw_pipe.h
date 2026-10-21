@@ -58,9 +58,12 @@ public:
     }
 
     /// Stage A: space for a packet of `cb_payload` bytes (8-byte aligned), valid until Commit().
-    u8* Begin(u32 cb_payload) {
+    /// Null for a packet over a quarter of the ring, which the caller runs in place instead.
+    [[nodiscard]] u8* Begin(u32 cb_payload) {
         cb_payload = Align(cb_payload + sizeof(Header));
-        ASSERT(cb_payload <= Capacity / 4);
+        if (cb_payload > Capacity / 4) {
+            return nullptr;
+        }
         u64 at = m_head;
         const u64 off_header = at % Capacity;
         if (off_header + cb_payload > Capacity) {

@@ -171,7 +171,9 @@ private:
         case CompSwizzle::Alpha:
             return data[3];
         default:
-            UNREACHABLE();
+            LOG_ERROR_COUNTED(Render, "Reserved component swizzle {}, read as zero",
+                              static_cast<u32>(swizzle));
+            return T(0);
         }
     }
 

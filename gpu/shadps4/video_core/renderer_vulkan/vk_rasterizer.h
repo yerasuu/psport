@@ -287,8 +287,10 @@ public:
 #endif
 
 private:
-    void PrepareRenderState(const GraphicsPipeline* pipeline);
+    /// psport: false when the draw is skipped (a render target without memory).
+    [[nodiscard]] bool PrepareRenderState(const GraphicsPipeline* pipeline);
     RenderState BeginRendering(const GraphicsPipeline* pipeline);
+    bool CanDrawAttachments() const;
     RenderState BeginRenderingFull(const GraphicsPipeline* pipeline);
     /// psport: a draw continuing the open render pass with the same inputs gets the same render
     /// state (RenderStateMemo); nothing can have broken the pass in between (barriers, copies and
@@ -630,6 +632,10 @@ private:
     boost::container::static_vector<ImageDescCacheEntry*, Shader::NUM_IMAGES> image_binding_entries;
     bool fault_process_pending{};
     bool attachment_feedback_loop{};
+    // psport: BeginRendering left an attachment the pipeline declares as a null view (a proxy
+    // or motion image without memory), which only VK_EXT_dynamic_rendering_unused_attachments
+    // allows.
+    bool is_attachment_null{};
     bool needs_barrier{};
     // psport: two-stage draw pipeline (stage B state; the thread is the last member so it
     // stops first).

@@ -565,9 +565,9 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
     };
     const auto device = instance.GetDevice();
     const auto reqs = device.getBufferMemoryRequirements(req_info).memoryRequirements;
-    block_size = Common::AlignUp(std::max<u64>(reqs.alignment, MIN_BLOCK_SIZE), reqs.alignment);
-    ASSERT_MSG(std::popcount(block_size) == 1, "Sparse block size {} is not a power of 2",
-               block_size);
+    // psport: Vulkan reports a power of two alignment, which bit_ceil keeps as it is.
+    block_size = std::bit_ceil(
+        Common::AlignUp(std::max<u64>(reqs.alignment, MIN_BLOCK_SIZE), reqs.alignment));
     block_shift = std::bit_width(block_size) - 1;
     blocks_per_arena_page = ARENA_PAGE_SIZE / block_size;
     blocks_per_arena_page_shift = ARENA_PAGE_BITS - block_shift;
@@ -675,6 +675,9 @@ void BufferCache::ReadMemory(VAddr device_addr, u64 size, bool is_write, bool as
         const u32 first_block = device_addr >> block_shift;
         const u32 last_block = (device_addr + size - 1) >> block_shift;
         const auto* arena = GetArena(first_block, last_block);
+        if (!arena) {
+            return;
+        }
 
         // GPU-modified ranges come as many small scattered islands,
         // so the download is widened to a window around the request
@@ -1410,8 +1413,11 @@ void BufferCache::SynchronizeDmaBuffers() {
 const Buffer* BufferCache::GetArena(u64 first_block, u64 last_block) {
     const u64 first_page = first_block >> blocks_per_arena_page_shift;
     const u64 last_page = last_block >> blocks_per_arena_page_shift;
-    ASSERT_MSG(last_page - first_page <= 1,
-               "Buffer request cannot span more than two VA arena pages");
+    if (last_page - first_page > 1) {
+        LOG_ERROR_COUNTED(Render_Vulkan, "Buffer request over arena pages {:#x}-{:#x} skipped",
+                          first_page, last_page);
+        return nullptr;
+    }
 
     const auto* first_arena = address_space[first_page];
     const auto* last_arena = address_space[last_page];
@@ -3469,9 +3475,13 @@ bool BufferCache::SynchronizeMemoryFromImage(const Buffer* arena, u64 arena_offs
     // copy below changes image state, so the helper finishes first.
     runtime.BeforeImageAccess();
     Image& image = texture_cache.GetImage(image_id);
-    ASSERT_MSG(device_addr == image.info.guest_address,
-               "Texel buffer aliases image subresources {:x} : {:x}", device_addr,
-               image.info.guest_address);
+    if (device_addr != image.info.guest_address || !image.IsAllocated()) {
+        LOG_ERROR_COUNTED(Render_Vulkan,
+                          "Texel buffer at {:#x} over an image at {:#x} it does not start or "
+                          "without memory: not copied from it",
+                          device_addr, image.info.guest_address);
+        return false;
+    }
     boost::container::small_vector<vk::BufferImageCopy, 8> buffer_copies;
     for (u32 mip = 0; mip < image.info.resources.levels; mip++) {
         const auto& mip_info = image.info.mips_layout[mip];
@@ -3594,9 +3604,12 @@ void BufferCache::SubmitPendingArenaBinds(Vulkan::SubmitInfo& info) {
                         (unsigned long long)ranges, bind_ms);
         }
         if (submit_result == vk::Result::eErrorDeviceLost) {
-            Vulkan::Breadcrumbs::ReportDeviceLost("submit");
+            Vulkan::StopOnDeviceLost("binding guest memory");
         }
-        ASSERT_MSG(submit_result != vk::Result::eErrorDeviceLost, "Device lost during submit");
+        if (submit_result != vk::Result::eSuccess) {
+            LOG_ERROR_COUNTED(Render_Vulkan, "vkQueueBindSparse failed: {}",
+                              vk::to_string(submit_result));
+        }
     });
     QueueCopyBacks(submitted); // bound with the next submission
     QueuePromotions(submitted);

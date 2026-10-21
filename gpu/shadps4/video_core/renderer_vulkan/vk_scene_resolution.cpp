@@ -89,7 +89,8 @@ bool SceneTargets::Eligible(const VideoCore::Image& image) const {
     const auto& i = image.info;
     const u32 div = SizeDivisor(i);
     if (!div || i.size.depth != 1 || i.resources.layers != 1 || i.num_samples != 1 ||
-        i.props.is_block || !image.backing || image.backing->num_samples != 1) {
+        i.props.is_block || !image.IsAllocated() || image.backing->num_samples != 1 ||
+        m_unallocated.contains(image.image_uid)) {
         return false;
     }
     if (i.resources.levels != 1) {
@@ -113,6 +114,7 @@ bool SceneTargets::SetSize(SceneResolution::Size next) {
     m_scheduler.Finish();
     m_entries.clear(); // no command buffer can still reference these images/views
     m_tracked.clear();
+    m_unallocated.clear();
     ++m_generation;
     m_recent = {};
     m_size = next;
@@ -144,6 +146,9 @@ void SceneTargets::NativeAccess(VideoCore::Image& image, vk::AccessFlags2 access
 }
 void SceneTargets::Transition(Entry& e, vk::ImageAspectFlags aspect, vk::ImageLayout layout,
                                vk::PipelineStageFlags2 stages, vk::AccessFlags2 access) {
+    if (!e.image) {
+        return;
+    }
     m_scheduler.EndRendering();
     const vk::ImageMemoryBarrier2 barrier{
         .srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
@@ -416,11 +421,21 @@ SceneTargets::Entry& SceneTargets::Get(VideoCore::ImageId id, u32 level) {
         const auto proxy = ProxySize(original, level);
         ci.extent = vk::Extent3D{proxy.width, proxy.height, 1};
         ci.mipLevels = 1;
-        if (entry->image.Create(ci)) {
-            SetObjectName(m_instance.GetDevice(), vk::Image(entry->image),
-                          "psport: scene proxy {}x{} of {:#x} level {}", proxy.width, proxy.height,
-                          original.info.guest_address, level);
+        if (!entry->image.Create(ci)) {
+            // psport: the image stays at its native size from the next draw on (Eligible); this
+            // draw goes to a null proxy, which drops what it draws (the rasterizer skips the
+            // draw where null attachments are not allowed).
+            LOG_ERROR_COUNTED(Render_Vulkan,
+                              "Scene proxy {}x{} of {:#x} level {} not allocated, the image stays "
+                              "at native size",
+                              proxy.width, proxy.height, original.info.guest_address, level);
+            m_entries.erase(key);
+            m_unallocated.insert(original.image_uid);
+            return m_null_entry;
         }
+        SetObjectName(m_instance.GetDevice(), vk::Image(entry->image),
+                      "psport: scene proxy {}x{} of {:#x} level {}", proxy.width, proxy.height,
+                      original.info.guest_address, level);
         m_tracked.insert(original.image_uid);
     }
     m_recent[m_recent_next++ % m_recent.size()] = {key, entry.get()};
@@ -429,6 +444,9 @@ SceneTargets::Entry& SceneTargets::Get(VideoCore::ImageId id, u32 level) {
 }
 vk::ImageView SceneTargets::View(Entry& e, const VideoCore::Image& original,
                                  const VideoCore::ImageViewInfo& info) {
+    if (!e.image) {
+        return {}; // a null view (nullDescriptor): Get logged the missing proxy
+    }
     for (const auto& [key,view] : e.views) if (key == info) return *view;
     const auto aspect = original.info.props.is_depth
         ? (info.is_storage ? original.aspect_mask : vk::ImageAspectFlags(vk::ImageAspectFlagBits::eDepth))

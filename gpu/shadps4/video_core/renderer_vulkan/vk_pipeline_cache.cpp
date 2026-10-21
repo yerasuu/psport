@@ -195,7 +195,10 @@ const Shader::RuntimeInfo& PipelineCache::BuildRuntimeInfo(PipelineSelection& se
                 case AmdGpu::TessellationTopology::TriangleCcw:
                     return AmdGpu::PrimitiveType::TriangleList;
                 default:
-                    UNREACHABLE();
+                    LOG_ERROR_COUNTED(Render_Vulkan,
+                                      "Unknown tessellation topology {}, triangles assumed",
+                                      static_cast<u32>(regs.tess_config.topology));
+                    return AmdGpu::PrimitiveType::TriangleList;
                 }
             }();
         } else {
@@ -404,10 +407,9 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
     };
     WarmUp();
 
-    auto [cache_result, cache] = instance.GetDevice().createPipelineCacheUnique({});
-    ASSERT_MSG(cache_result == vk::Result::eSuccess, "Failed to create pipeline cache: {}",
-               vk::to_string(cache_result));
-    pipeline_cache = std::move(cache);
+    // psport: without one (VK_NULL_HANDLE) pipelines are created all the same, as WarmUp does.
+    pipeline_cache =
+        Check<"create the pipeline cache">(instance.GetDevice().createPipelineCacheUnique({}));
 }
 
 /// psport PS_ASYNC_PIPELINES: worker threads creating graphics pipelines (the driver's compile,
@@ -514,6 +516,19 @@ struct CompileTimer {
 };
 } // namespace
 
+namespace {
+/// psport: a pipeline the driver rejected stays in the cache with a null handle (it is not
+/// compiled again); its draws and dispatches are skipped.
+template <typename T>
+const T* UsablePipeline(const T* p_pipeline) {
+    if (p_pipeline && !p_pipeline->Handle()) {
+        LOG_ERROR_COUNTED(Render_Vulkan, "Draw or dispatch skipped: its pipeline was not created");
+        return nullptr;
+    }
+    return p_pipeline;
+}
+} // namespace
+
 bool PipelineCache::PrepareGraphicsPipeline(PipelineSelection& worker_sel) {
     // Tessellation stages read constant buffers from memory at selection time: not prepared.
     if (worker_sel.regs->stage_enable.hs_en) {
@@ -606,7 +621,7 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline(const DrawIndirectPar
     if (prepared) {
         if (const auto* pipeline = TryPreparedPipeline(*prepared)) {
             used_prepared = prepared;
-            return pipeline;
+            return UsablePipeline(pipeline);
         }
     }
     sel.draw_indirect_params = params;
@@ -614,7 +629,7 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline(const DrawIndirectPar
         return nullptr;
     }
     if (const auto found = graphics_pipelines.find(sel.graphics_key); found != graphics_pipelines.end()) {
-        return found->second.get();
+        return UsablePipeline(found->second.get());
     }
     if (PsNativeProbe::g_is_enabled) {
         PsNativeProbe::NotePipelineCompile();
@@ -640,7 +655,7 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline(const DrawIndirectPar
             }
         }
         pending_graphics.erase(sel.graphics_key);
-        return FinishPipeline(sel.graphics_key, *job);
+        return UsablePipeline(FinishPipeline(sel.graphics_key, *job));
     }
     if (skippable) {
         if (!compiler) {
@@ -697,7 +712,7 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline(const DrawIndirectPar
         }
         sel.fetch_shader.reset();
     }
-    return it->second.get();
+    return UsablePipeline(it->second.get());
 }
 
 const GraphicsPipeline* PipelineCache::FinishPipeline(const GraphicsPipelineKey& key,
@@ -791,7 +806,7 @@ const ComputePipeline* PipelineCache::GetComputePipeline() {
             module_related_pipelines[m].emplace_back(compute_key);
         }
     }
-    return it->second.get();
+    return UsablePipeline(it->second.get());
 }
 
 bool PipelineCache::RefreshGraphicsKey(PipelineSelection& sel) {
@@ -1195,9 +1210,13 @@ bool PipelineCache::RefreshGraphicsStages(PipelineSelection& sel) {
         u32 vertex_binding = 0;
         for (const auto& attrib : sel.fetch_shader->attributes) {
             const auto& buffer = attrib.GetSharp(*vs_info);
-            ASSERT_MSG(vertex_binding < MaxVertexBufferCount,
-                       "Vertex attribute binding count exceeded limit: {} >= {}", vertex_binding,
-                       MaxVertexBufferCount);
+            if (vertex_binding >= MaxVertexBufferCount) {
+                LOG_ERROR_COUNTED(Render_Vulkan,
+                                  "Draw with more than {} vertex attributes skipped (no vertex "
+                                  "input dynamic state)",
+                                  MaxVertexBufferCount);
+                return false;
+            }
             key.vertex_buffer_formats[vertex_binding++] =
                 Vulkan::LiverpoolToVK::SurfaceFormat(buffer.GetDataFmt(), buffer.GetNumberFmt());
         }
