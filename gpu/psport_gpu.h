@@ -154,6 +154,8 @@ typedef struct {
     /* Its own patches of the executable, chosen by the player's settings, before the external XML
      * patches (which win over them): 0 when the launch must stop (it printed why), else 1. */
     int (*pfn_add_patches)(const PsGameFiles *p_game, const PsPatchServices *p_services);
+    /* After pfn_add_patches: why an external patch (its XML Name) must not apply, or NULL. */
+    const char *(*pfn_external_patch_refusal)(const char *sz_name);
     /* Patches the loaded image before the game runs (image still writable), after psport_gpu_init
      * chose the running title: its translator profile's patches unless PS_GAME_PROFILE=none, then
      * its own. */

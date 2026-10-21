@@ -22,4 +22,7 @@ bool IsSupportedImage(const PsGameFiles& game);
 /// The preset's frame rate (60, 90 or 480 for uncap) when AddPatches left the frame rate to the
 /// profile's hooks (frame_rate.cpp) instead of the preset's patches; 0 otherwise.
 int FrameHooksChosen();
+/// External patches (a copy of the community XML) that would rewrite the code the frame rate hooks
+/// replace: the presets' frame rate patches, while the hooks drive it.
+const char* ExternalPatchRefusal(const char* sz_name);
 } // namespace PsLaunch

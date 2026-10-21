@@ -75,11 +75,13 @@ struct PsPatchList {
 };
 void loader_patch_services(PsPatchList *p_list, PsPatchServices *p_out);
 /* The patches in the *.xml files of sz_dir for a game: files whose <ID>s name one of its serials (or none),
- * entries for its sz_version and eboot.bin; sz_excluded (a profile's own file) is left out. */
+ * entries for its sz_version and eboot.bin; sz_excluded (a profile's own file) is left out, and so is
+ * each patch pfn_refusal gives a reason for (by its Name). */
 typedef struct {
     const char *sz_dir, *sz_excluded, *sz_version;
     const char *const *pp_serials;
     size_t c_serials;
+    const char *(*pfn_refusal)(const char *sz_name);
 } LoaderPatchFolder;
 /* Appends the selected ones: patches.json's (sz_config) "enabled", else each entry's isEnabled
  * unless "disabled" names it. A patch with an unsupported line is skipped whole, and said. */

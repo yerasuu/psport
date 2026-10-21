@@ -26,6 +26,7 @@
 #include <cstring>
 #include <iterator>
 #include <new>
+#include <span>
 #include "launch.h"
 #include "psport_guest_code.h"
 
@@ -169,12 +170,12 @@ constexpr Redirect Redirects[] = {
 };
 #undef LIVE
 
+constexpr u64 OffPacerMode = 0x203493d;
+constexpr u8 PacerModeCode[] = {0x4d, 0x8d, 0xbc, 0x24, 0x68, 0x02, 0x00, 0x00};
 /// The pacer's mode, after the game chose it (0x203493d, `lea r15, [r12 + 0x268]`; r12 the
 /// pacer): one vblank (+0x10), no flip skipping (+0x14), the shortest frame as the frame time
 /// target (+0x18), no vblank counts to wait for (+0x268, +0x26c).
 bool HookPacerMode() {
-    constexpr u64 OffSite = 0x203493d;
-    constexpr u8 Code[] = {0x4d, 0x8d, 0xbc, 0x24, 0x68, 0x02, 0x00, 0x00};
     Emitter e;
     e.Bytes({0x41, 0xc7, 0x44, 0x24, 0x10, 0x01, 0x00, 0x00, 0x00}); // mov dword [r12 + 0x10], 1
     e.Bytes({0x41, 0xc6, 0x44, 0x24, 0x14, 0x00});                   // mov byte [r12 + 0x14], 0
@@ -183,37 +184,58 @@ bool HookPacerMode() {
     e.Bytes({0x8b, 0x00});                         // mov eax, [rax]
     e.Bytes({0x41, 0x89, 0x44, 0x24, 0x18, 0x58}); // mov [r12 + 0x18], eax; pop rax
     e.Bytes({0x49, 0xc7, 0x84, 0x24, 0x68, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}); // mov qword [r12 + 0x268], 0
-    e.Copy(Code);
-    e.JmpAbs(s_va_image + OffSite + sizeof(Code));
-    return PsGuestCode::InstallDetour("Bloodborne frame pacer mode", s_va_image + OffSite, Code, e) == Error::None;
-}
-
-/// The pacer keeps its one vblank when a frame came late (0x2034d96: `test dl, dl; je; mov eax,
-/// [r12 + 0x10]`, then eax is stored back: 0 when late).
-bool HookPacerLate() {
-    constexpr u64 OffSite = 0x2034d96;
-    constexpr u8 Code[] = {0x84, 0xd2, 0x74, 0x05, 0x41, 0x8b, 0x44, 0x24, 0x10};
-    Emitter e;
-    e.Bytes({0x84, 0xd2});                   // test dl, dl
-    e.Bytes({0x41, 0x8b, 0x44, 0x24, 0x10}); // mov eax, [r12 + 0x10]
-    e.JmpAbs(s_va_image + OffSite + sizeof(Code));
-    return PsGuestCode::InstallDetour("Bloodborne frame pacer late frame", s_va_image + OffSite, Code, e) ==
+    e.Copy(PacerModeCode);
+    e.JmpAbs(s_va_image + OffPacerMode + sizeof(PacerModeCode));
+    return PsGuestCode::InstallDetour("Bloodborne frame pacer mode", s_va_image + OffPacerMode, PacerModeCode, e) ==
            Error::None;
 }
 
+constexpr u64 OffPacerLate = 0x2034d96;
+constexpr u8 PacerLateCode[] = {0x84, 0xd2, 0x74, 0x05, 0x41, 0x8b, 0x44, 0x24, 0x10};
+/// The pacer keeps its one vblank when a frame came late (0x2034d96: `test dl, dl; je; mov eax,
+/// [r12 + 0x10]`, then eax is stored back: 0 when late).
+bool HookPacerLate() {
+    Emitter e;
+    e.Bytes({0x84, 0xd2});                   // test dl, dl
+    e.Bytes({0x41, 0x8b, 0x44, 0x24, 0x10}); // mov eax, [r12 + 0x10]
+    e.JmpAbs(s_va_image + OffPacerLate + sizeof(PacerLateCode));
+    return PsGuestCode::InstallDetour("Bloodborne frame pacer late frame", s_va_image + OffPacerLate, PacerLateCode,
+                                      e) == Error::None;
+}
+
+constexpr u64 OffStep = 0x2018e36;
+constexpr u8 StepCode[] = {0xc7, 0x45, 0xc8, 0x89, 0x88, 0x08, 0x3d};
 /// The main loop's step (0x2018e36: `mov dword [rbp - 0x38], 1/30`, its time; rbx the pacer):
 /// FrameStep, then the frame's time.
 bool HookStep() {
-    constexpr u64 OffSite = 0x2018e36;
-    constexpr u8 Code[] = {0xc7, 0x45, 0xc8, 0x89, 0x88, 0x08, 0x3d};
     Emitter e;
     e.SaveVolatile();
     e.Bytes({0x48, 0x89, 0xdf}); // mov rdi, rbx
     e.CallAbs(reinterpret_cast<const void*>(&FrameStep));
     e.RestoreVolatile();
     e.StoreToFrame(&s_p_live->dt, -0x38);
-    e.JmpAbs(s_va_image + OffSite + sizeof(Code));
-    return PsGuestCode::InstallDetour("Bloodborne main loop step", s_va_image + OffSite, Code, e) == Error::None;
+    e.JmpAbs(s_va_image + OffStep + sizeof(StepCode));
+    return PsGuestCode::InstallDetour("Bloodborne main loop step", s_va_image + OffStep, StepCode, e) == Error::None;
+}
+
+/// The core's sites checked before any of them changes, so that a mismatch leaves the game's own
+/// pacer whole instead of half hooked.
+bool IsCoreIntact() {
+    struct Site {
+        u64 off_site;
+        std::span<const u8> code;
+    };
+    const Site sites[] = {{OffPacerMode, PacerModeCode}, {OffPacerLate, PacerLateCode}, {OffStep, StepCode}};
+    bool is_intact = true;
+    for (const Site& site : sites) {
+        if (std::memcmp(reinterpret_cast<const u8*>(s_va_image + site.off_site), site.code.data(), site.code.size())) {
+            std::printf("Frame rate: the game's code at +0x%llx differs (another build of the game, or a patch "
+                        "there)\n",
+                        static_cast<unsigned long long>(site.off_site));
+            is_intact = false;
+        }
+    }
+    return is_intact;
 }
 
 /// A subsystem stepped by a fixed 1/30 s (`mov dword [rbp + off_frame], 1/30` at off_site): by
@@ -277,7 +299,7 @@ void PatchImage(unsigned char* p_image, std::uint64_t) {
     }
     s_p_live->shortest = 1.0f / float(rate);
     // The core first: without all three the game keeps its own frame rate.
-    if (!(HookPacerMode() && HookPacerLate() && HookStep())) {
+    if (!(IsCoreIntact() && HookPacerMode() && HookPacerLate() && HookStep())) {
         std::printf("ERROR: Frame rate: the game's frame pacer is not the expected code: 30 FPS "
                     "(PS_FRAME_HOOKS=0: the patches)\n");
         return;

@@ -317,6 +317,9 @@ struct Title {
     /// services before the external ones; false stops the launch (it printed why). A title with
     /// them has frame rate and resolution presets (psport --has-presets).
     bool (*pfn_add_patches)(const PsGameFiles& game, const PsPatchServices& services) = nullptr;
+    /// After pfn_add_patches: why an external patch (its XML Name) must not apply, or nullptr. For
+    /// what the title already does another way an external patch would undo (its hooks' code).
+    const char* (*pfn_external_patch_refusal)(const char* sz_name) = nullptr;
     /// The settings of pfn_add_patches the player changes in the overlay menu.
     GameEffects effects;
     /// Changes to the user's saves the game needs, made before any of its code runs. saves is the

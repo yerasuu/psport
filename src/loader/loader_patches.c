@@ -400,6 +400,12 @@ void loader_patches_external(PsPatchList *p_list, const LoaderPatchFolder *p_fol
         if (!loader_json_has(&settings[0], p_external->sz_key) &&
             (loader_json_has(&settings[1], p_external->sz_key) || !is_enabled_by_default(p_external->p_entry)))
             continue;
+        const char *sz_name = attribute(p_external->p_entry, "Name");
+        const char *sz_refusal = p_folder->pfn_refusal && sz_name ? p_folder->pfn_refusal(sz_name) : NULL;
+        if (sz_refusal) {
+            printf("Patches: skipped external %s: %s\n", p_external->sz_key, sz_refusal);
+            continue;
+        }
         char sz_error[256];
         size_t c_before = p_list->c_writes;
         if (!add_entry(p_list, p_external->p_entry, sz_error, sizeof(sz_error))) {

@@ -409,4 +409,18 @@ bool AddPatches(const PsGameFiles& game, const PsPatchServices& services) {
 int FrameHooksChosen() {
     return s_frame_hooks_rate;
 }
+
+const char* ExternalPatchRefusal(const char* sz_name) {
+    if (!s_frame_hooks_rate) {
+        return nullptr;
+    }
+    for (const FpsPreset& preset : FpsPresets) {
+        for (const char* sz_patch : preset.patches) {
+            if (std::strcmp(sz_patch, sz_name) == 0) {
+                return "the profile's hooks drive the frame rate (PS_FRAME_HOOKS=0: the patches)";
+            }
+        }
+    }
+    return nullptr;
+}
 } // namespace PsLaunch
