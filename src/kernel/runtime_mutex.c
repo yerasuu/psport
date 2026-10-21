@@ -4,13 +4,20 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <inttypes.h>
 #ifndef _WIN32
 #include <pthread.h>
 #include <errno.h>
 #include <time.h>
 typedef struct { int type, protocol; } GuestAttr;
-typedef struct { pthread_mutex_t native; } GuestMutex;
+/* p_owner and c_holds mirror the host mutex's owner and recursion count as FreeBSD's libthr keeps
+ * them: glibc neither refuses a normal mutex's unlock by another thread nor releases a recursive
+ * one fully in a condition wait, and libkernel does both. c_holds is written only by the owner. */
+typedef struct { pthread_mutex_t native; int type; const void *p_owner; unsigned c_holds; } GuestMutex;
 static size_t s_c_created, s_c_locks, s_c_unlocks;
+static size_t s_c_recursive_lock_failures, s_c_recursive_unlock_failures, s_c_foreign_unlocks, s_c_self_deadlocks;
+enum { LOGGED_MUTEX_FAILURES=8 };
+static __thread char s_owner_tag;
 static int32_t orbis_error(int e) {
     if (!e) return 0;
     unsigned code;
@@ -48,6 +55,28 @@ static ABI int32_t attr_destroy(GuestAttr **pp_attr) {
     if (!pp_attr || !*pp_attr) return orbis_error(EINVAL);
     free(*pp_attr); *pp_attr = NULL; return 0;
 }
+static int is_owner(const GuestMutex *p_mutex) { return __atomic_load_n(&p_mutex->p_owner,__ATOMIC_RELAXED)==&s_owner_tag; }
+static void note_acquired(GuestMutex *p_mutex) {
+    if (!p_mutex->c_holds++) __atomic_store_n(&p_mutex->p_owner,&s_owner_tag,__ATOMIC_RELAXED);
+}
+static void note_released(GuestMutex *p_mutex) {
+    if (!--p_mutex->c_holds) __atomic_store_n(&p_mutex->p_owner,NULL,__ATOMIC_RELAXED);
+}
+static void log_mutex_failure(size_t *p_c_failures, const char *sz_what, const void *p_mutex, int e) {
+    if (__atomic_fetch_add(p_c_failures,1,__ATOMIC_RELAXED)>=LOGGED_MUTEX_FAILURES) return;
+    uint64_t sites[3];
+    runtime_guest_call_sites(sites);
+    printf("Runtime: %s %p failed with host error %d from +%#" PRIx64 " < +%#" PRIx64 " < +%#" PRIx64 "\n",
+           sz_what,p_mutex,e,sites[0],sites[1],sites[2]);
+}
+/* Busy try locks and expired timed locks are expected; anything else on a recursive mutex leaves
+ * the caller unprotected, since games ignore what lock returns. */
+static int finish_lock(GuestMutex *p_mutex, int e) {
+    if (!e) { ++s_c_locks; note_acquired(p_mutex); return 0; }
+    if (e==EDEADLK) log_mutex_failure(&s_c_self_deadlocks,"relock by its owner of non-recursive mutex",p_mutex,e);
+    else if (p_mutex->type==2 && e!=EBUSY && e!=ETIMEDOUT) log_mutex_failure(&s_c_recursive_lock_failures,"lock of recursive mutex",p_mutex,e);
+    return e;
+}
 static ABI int32_t mutex_init(GuestMutex **pp_out, GuestAttr **pp_attr, const char *sz_name) {
     (void)sz_name;
     if (!pp_out || (pp_attr && !*pp_attr)) return orbis_error(EINVAL);
@@ -63,6 +92,7 @@ static ABI int32_t mutex_init(GuestMutex **pp_out, GuestAttr **pp_attr, const ch
     if (!e) e = pthread_mutex_init(&p_mutex->native, &native_attr);
     pthread_mutexattr_destroy(&native_attr);
     if (e) { free(p_mutex); return orbis_error(e); }
+    p_mutex->type = type; p_mutex->p_owner = NULL; p_mutex->c_holds = 0;
     *pp_out = p_mutex; ++s_c_created; return 0;
 }
 static pthread_mutex_t s_static_init = PTHREAD_MUTEX_INITIALIZER;
@@ -85,31 +115,42 @@ static int32_t ensure_mutex(GuestMutex **pp_mutex) {
 static ABI int32_t mutex_lock(GuestMutex **pp_mutex) {
     int32_t e = ensure_mutex(pp_mutex);
     if (e) return e;
-    int r = pthread_mutex_trylock(&(*pp_mutex)->native);
+    GuestMutex *p_mutex = *pp_mutex;
+    int r = pthread_mutex_trylock(&p_mutex->native);
     if (r == EBUSY) { /* contended: timed for the wait profile */
         const uint64_t start = runtime_wait_clock();
         RUNTIME_ZONE(zone, "mutex wait");
-        r = pthread_mutex_lock(&(*pp_mutex)->native);
+        r = pthread_mutex_lock(&p_mutex->native);
         RUNTIME_ZONE_END(zone);
         runtime_wait_note(1, runtime_wait_clock() - start);
     }
-    e = orbis_error(r);
-    if (!e) ++s_c_locks;
-    return e;
+    return orbis_error(finish_lock(p_mutex, r));
 }
 static ABI int32_t mutex_trylock(GuestMutex **pp_mutex) {
     int32_t e = ensure_mutex(pp_mutex);
     if (e) return e;
-    e = orbis_error(pthread_mutex_trylock(&(*pp_mutex)->native));
-    if (!e) ++s_c_locks;
-    return e;
+    return orbis_error(finish_lock(*pp_mutex, pthread_mutex_trylock(&(*pp_mutex)->native)));
 }
 static ABI int32_t mutex_unlock(GuestMutex **pp_mutex) {
     if (!pp_mutex || (uintptr_t)*pp_mutex == 2) return orbis_error(EINVAL);
-    if ((uintptr_t)*pp_mutex < 2) return orbis_error(EPERM);
-    int32_t e = orbis_error(pthread_mutex_unlock(&(*pp_mutex)->native));
-    if (!e) ++s_c_unlocks;
-    return e;
+    if ((uintptr_t)*pp_mutex < 2) {
+        log_mutex_failure(&s_c_foreign_unlocks, "unlock of never locked mutex", pp_mutex, EPERM);
+        return orbis_error(EPERM);
+    }
+    GuestMutex *p_mutex = *pp_mutex;
+    if (!is_owner(p_mutex)) {
+        log_mutex_failure(&s_c_foreign_unlocks, "unlock by a thread not owning mutex", p_mutex, EPERM);
+        if (p_mutex->type == 2) __atomic_fetch_add(&s_c_recursive_unlock_failures, 1, __ATOMIC_RELAXED);
+        return orbis_error(EPERM);
+    }
+    note_released(p_mutex);
+    const int e = pthread_mutex_unlock(&p_mutex->native);
+    if (e) {
+        if (p_mutex->type == 2) log_mutex_failure(&s_c_recursive_unlock_failures, "unlock by its owner of recursive mutex", p_mutex, e);
+        return orbis_error(e);
+    }
+    ++s_c_unlocks;
+    return 0;
 }
 static ABI int32_t mutex_destroy(GuestMutex **pp_mutex) {
     if (!pp_mutex || (uintptr_t)*pp_mutex == 2) return orbis_error(EINVAL);
@@ -132,9 +173,7 @@ static ABI int32_t mutex_timedlock(GuestMutex **pp_mutex, uint32_t usec) {
     if (e) return e;
     struct timespec end;
     if (deadline_after(CLOCK_REALTIME, &end, usec)) return orbis_error(EINVAL);
-    e = timed_error(pthread_mutex_timedlock(&(*pp_mutex)->native, &end));
-    if (!e) ++s_c_locks;
-    return e;
+    return timed_error(finish_lock(*pp_mutex, pthread_mutex_timedlock(&(*pp_mutex)->native, &end)));
 }
 /* A relative timeout of 64-bit microseconds, unlike scePthreadMutexTimedlock's 32. */
 static int32_t mutex_reltimedlock(GuestMutex **pp_mutex, uint64_t usec) {
@@ -142,9 +181,7 @@ static int32_t mutex_reltimedlock(GuestMutex **pp_mutex, uint64_t usec) {
     if (e) return e;
     struct timespec end;
     if (deadline_after(CLOCK_REALTIME, &end, usec)) return orbis_error(EINVAL);
-    e = timed_error(pthread_mutex_timedlock(&(*pp_mutex)->native, &end));
-    if (!e) ++s_c_locks;
-    return e;
+    return timed_error(finish_lock(*pp_mutex, pthread_mutex_timedlock(&(*pp_mutex)->native, &end)));
 }
 /* Names are for the console's debugger only and the runtime keeps none (scePthreadMutexInit's
  * neither): libkernel puts "SceNoNameMutex" in place of a null one and never fails. */
@@ -217,29 +254,42 @@ static ABI int32_t cond_destroy(GuestCond **pp_cond) {
     if (!e) { free(*pp_cond); *pp_cond = NULL; }
     return orbis_error(e);
 }
+/* The wait releases every hold of a recursive mutex and takes them all back after it, as libthr's
+ * _mutex_cv_unlock does: glibc drops one, so the mutex stayed locked for the whole wait. */
+static int wait_released(GuestCond *p_cond, GuestMutex *p_mutex, const struct timespec *p_end) {
+    if (!is_owner(p_mutex)) {
+        log_mutex_failure(&s_c_foreign_unlocks, "condition wait by a thread not owning mutex", p_mutex, EPERM);
+        return EPERM;
+    }
+    const unsigned c_holds = p_mutex->c_holds;
+    /* An owner's unlock of a recursive mutex held more than once only decrements its count. */
+    for (unsigned i = 1; i < c_holds; ++i) (void)pthread_mutex_unlock(&p_mutex->native);
+    p_mutex->c_holds = 1;
+    note_released(p_mutex);
+    ++s_c_waits;
+    const uint64_t start = runtime_wait_clock();
+    RUNTIME_ZONE(zone, "cond wait");
+    const int e = p_end ? pthread_cond_timedwait(&p_cond->native, &p_mutex->native, p_end)
+                        : pthread_cond_wait(&p_cond->native, &p_mutex->native);
+    RUNTIME_ZONE_END(zone);
+    runtime_wait_note(0, runtime_wait_clock() - start);
+    note_acquired(p_mutex);
+    /* The owner's relock only increments the count, back to where it was before the wait. */
+    for (unsigned i = 1; i < c_holds; ++i) (void)pthread_mutex_lock(&p_mutex->native);
+    p_mutex->c_holds = c_holds;
+    return e;
+}
 static ABI int32_t cond_wait(GuestCond **pp_cond, GuestMutex **pp_mutex) {
     int32_t e = ensure_cond(pp_cond);
     if (e) return e;
     if (!pp_mutex || (uintptr_t)*pp_mutex < 3) return orbis_error(EINVAL);
-    ++s_c_waits;
-    const uint64_t start = runtime_wait_clock();
-    RUNTIME_ZONE(zone, "cond wait");
-    const int e2 = pthread_cond_wait(&(*pp_cond)->native, &(*pp_mutex)->native);
-    RUNTIME_ZONE_END(zone);
-    runtime_wait_note(0, runtime_wait_clock() - start);
-    return orbis_error(e2);
+    return orbis_error(wait_released(*pp_cond, *pp_mutex, NULL));
 }
 static int32_t cond_wait_until(GuestCond **pp_cond, GuestMutex **pp_mutex, const struct timespec *p_end) {
     int32_t e = ensure_cond(pp_cond);
     if (e) return e;
     if (!pp_mutex || (uintptr_t)*pp_mutex < 3 || !p_end) return orbis_error(EINVAL);
-    ++s_c_waits;
-    const uint64_t start = runtime_wait_clock();
-    RUNTIME_ZONE(zone, "cond wait");
-    const int e2 = pthread_cond_timedwait(&(*pp_cond)->native, &(*pp_mutex)->native, p_end);
-    RUNTIME_ZONE_END(zone);
-    runtime_wait_note(0, runtime_wait_clock() - start);
-    return timed_error(e2);
+    return timed_error(wait_released(*pp_cond, *pp_mutex, p_end));
 }
 static ABI int32_t cond_timedwait(GuestCond **pp_cond, GuestMutex **pp_mutex, uint32_t usec) {
     int32_t e = ensure_cond(pp_cond);
@@ -321,6 +371,9 @@ uintptr_t runtime_mutex_resolve(const char *sz_name) {
 }
 void runtime_mutex_report(void) {
     printf("Runtime: mutexes created=%zu, locks=%zu, unlocks=%zu\n", s_c_created, s_c_locks, s_c_unlocks);
+    printf("Runtime: mutex failures: recursive lock=%zu, recursive unlock=%zu, unlock by non-owner=%zu, "
+           "relock of non-recursive=%zu\n",
+           s_c_recursive_lock_failures, s_c_recursive_unlock_failures, s_c_foreign_unlocks, s_c_self_deadlocks);
     printf("Runtime: condition variables created=%zu, waits=%zu, wakeups=%zu\n", s_c_conds, s_c_waits, s_c_wakeups);
 }
 #else
