@@ -15,6 +15,7 @@
 #include <x86intrin.h>
 #include <unistd.h>
 #include "common/assert.h"
+#include "psport_settings.h"
 #include "psport_toggles.h"
 #include "psport_native_probe.h"
 #include "game_profile.h"
@@ -940,10 +941,16 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
     // intervals at a cap of 120), and counting only from the flip added the wake-up delay to
     // every frame (116 FPS at 120). Slots are waited for precisely (PreciseSleepUntil).
     const u32 frame_limit = EmulatorSettings.GetFrameLimit();
-    const auto frame_period = frame_limit ? std::chrono::nanoseconds(1000000000 / frame_limit)
-                                          : std::chrono::nanoseconds(0);
-    const auto slack = frame_period / 16;
+    // Frame generation with FIFO presentation lowers the limit while it runs
+    // (PsSettings::frame_gen_flip_limit, set by the Presenter), so the generated frames fit too.
+    const auto get_frame_period = [frame_limit] {
+        const int fg_limit = PsSettings::Get().frame_gen_flip_limit.load(std::memory_order_relaxed);
+        const u32 limit = fg_limit > 0 && frame_limit ? std::min(frame_limit, u32(fg_limit)) : frame_limit;
+        return limit ? std::chrono::nanoseconds(1000000000 / limit) : std::chrono::nanoseconds(0);
+    };
+    auto frame_period = get_frame_period();
     const auto get_next_slot = [&](std::chrono::steady_clock::time_point slot) {
+        const auto slack = frame_period / 16;
         return std::max(slot + frame_period,
                         std::chrono::steady_clock::now() + frame_period - slack);
     };
@@ -969,6 +976,7 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
     while (!token.stop_requested()) {
         timer.Start();
         const auto tick_deadline = std::chrono::steady_clock::now() + vblank_period;
+        frame_period = get_frame_period();
 
         if (DebugState.IsGuestThreadsPaused()) {
             DrawLastFrame();

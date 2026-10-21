@@ -792,6 +792,56 @@ void Menu() {
         ImGui::EndDisabled(); // upscaler off
     }
 
+    // Offered only where the device has FSR 3.1 frame generation's prerequisites (decision #840).
+    if (s.is_frame_gen_fsr_supported) {
+        ImGui::SeparatorText(PsSettings::MenuText("Frame generation", "Генерация кадров", "Generación de fotogramas"));
+        if (Vulkan::GetUpscalerPlacement().scene_combine_shader == 0) {
+            ImGui::PushTextWrapPos();
+            ImGui::TextUnformatted(PsSettings::MenuText(
+                "It reads the scene's depth and motion where a game profile places the upscaler; no profile "
+                "places it in this title's frame, so it stays off.",
+                "Она читает глубину и движение сцены там, где игровой профиль размещает апскейлер; ни один "
+                "профиль не размещает его в кадре этой игры, поэтому она выключена.",
+                "Lee la profundidad y el movimiento de la escena donde un perfil de juego coloca el escalador; "
+                "ningún perfil lo coloca en el fotograma de este título, así que está desactivada."));
+            ImGui::PopTextWrapPos();
+        } else {
+            const char* frame_gens[] = {PsSettings::MenuText("Off", "Выкл", "Desactivado"), "FSR 3.1 (2x)"};
+            static_assert(sizeof(frame_gens) / sizeof(frame_gens[0]) == PsSettings::FrameGenCount);
+            const int chosen = s.frame_gen_chosen;
+            if (ImGui::BeginCombo(PsSettings::MenuText("Frame generation##frame_gen", "Генерация кадров##frame_gen",
+                                                       "Generación de fotogramas##frame_gen"),
+                                  frame_gens[chosen])) {
+                for (int i = 0; i < PsSettings::FrameGenCount; ++i) {
+                    if (ImGui::Selectable(frame_gens[i], i == chosen)) {
+                        Store(s.frame_gen_chosen, i, i != chosen);
+                    }
+                }
+                ImGui::EndCombo();
+            }
+            Hint(PsSettings::MenuText(
+                "One generated frame between two of the game's: smoother motion on a display with room for "
+                "twice the game's frame rate. It adds input latency (about half a game frame) and works best "
+                "from about 60 FPS. Applies after restarting the game.",
+                "Один сгенерированный кадр между двумя кадрами игры: плавнее движение на дисплее, у которого "
+                "есть запас на удвоенную частоту кадров игры. Добавляет задержку ввода (около половины кадра "
+                "игры), лучше всего работает примерно от 60 FPS. Применяется после перезапуска игры.",
+                "Un fotograma generado entre dos del juego: movimiento más fluido en una pantalla con margen "
+                "para el doble de fotogramas del juego. Añade latencia de entrada (alrededor de medio fotograma "
+                "del juego) y funciona mejor a partir de unos 60 FPS. Se aplica tras reiniciar el juego."));
+            if (s.frame_gen != PsSettings::FrameGenOff) {
+                ImGui::TextDisabled("%s", s.c_frame_gen_now > 0
+                                              ? PsSettings::MenuText("Now: 2x", "Сейчас: 2x", "Ahora: 2x")
+                                              : PsSettings::MenuText("Now: paused", "Сейчас: на паузе",
+                                                                     "Ahora: en pausa"));
+            } else if (const char* sz_problem = s.sz_frame_gen_problem.load()) {
+                ImGui::PushTextWrapPos();
+                ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "%s", sz_problem);
+                ImGui::PopTextWrapPos();
+            }
+        }
+    }
+
     ImGui::SeparatorText(PsSettings::MenuText("Output", "Вывод", "Salida"));
     // The aspect ratio first; its resolutions follow (another one keeps the height).
     const auto aspect_label = [](int aspect) {
@@ -945,7 +995,8 @@ void Menu() {
 
     bool should_restart =
         s.should_use_object_motion != s.is_object_motion_at_startup || s.model_lod != s.startup_model_lod ||
-        s.live_resolution != s.startup_live_resolution || PsSettings::ResolutionNeedsRestart();
+        s.live_resolution != s.startup_live_resolution || s.frame_gen_chosen != s.startup_frame_gen ||
+        PsSettings::ResolutionNeedsRestart();
     for (int e = 0; e < s.c_effects; ++e) {
         should_restart |= s.effects[e] != s.startup_effects[e];
     }
@@ -1033,6 +1084,16 @@ void FpsCounter() {
                 : s.upscaler == PsSettings::UpscalerTaa    ? "TAA"
                 : s.upscaler == PsSettings::UpscalerDlss   ? "DLSS"
                                                            : "");
+    // With frame generation the presented rate is the game's times two while the GPU keeps up:
+    // the game's own rate is what resolution and upscaler change.
+    if (s.frame_gen != PsSettings::FrameGenOff) {
+        ImGui::Text(s.c_frame_gen_now > 0
+                        ? PsSettings::MenuText("game %.0f, frame gen 2x", "игра %.0f, генерация кадров 2x",
+                                               "juego %.0f, generación de fotogramas 2x")
+                        : PsSettings::MenuText("game %.0f, frame gen paused", "игра %.0f, генерация кадров на паузе",
+                                               "juego %.0f, generación de fotogramas en pausa"),
+                    double(s.game_fps.load(std::memory_order_relaxed)));
+    }
     ImGui::End();
 }
 

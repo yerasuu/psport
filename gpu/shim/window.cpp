@@ -81,11 +81,14 @@ PsHostDisplayId ChooseDisplay() {
     return display;
 }
 
-// The monitor the window is on, in pixels: the output's aspect ratio "Auto" follows it.
+// The monitor the window is on, in pixels: the output's aspect ratio "Auto" follows it, and frame
+// generation's pacing its refresh rate.
 void TellMonitor(PsHostWindow* p_window) {
     if (PsHostDisplayMode mode{}; ps_host_window_display_mode(ps_host_window_display(p_window), &mode) == 0) {
         const float density = mode.pixel_density > 0.0f ? mode.pixel_density : 1.0f;
         PsSettings::SetMonitor(int(mode.width * density + 0.5f), int(mode.height * density + 0.5f));
+        PsSettings::Get().display_refresh_hz.store(mode.refresh_hz > 0.0f ? int(mode.refresh_hz + 0.5f) : 0,
+                                                   std::memory_order_relaxed);
     }
 }
 

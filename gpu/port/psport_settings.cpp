@@ -49,6 +49,27 @@ void Set(Values& v, const std::string& key, const std::string& value) {
                 v.upscaler = u;
             }
         }
+    } else if (key == "frame_gen") {
+        int frame_gen = -1;
+        for (int g = 0; g < FrameGenCount; ++g) {
+            if (value == FrameGenName(g)) {
+                frame_gen = g;
+            }
+        }
+        if (value == "auto" || value == "dlss") {
+            std::printf("Settings: frame_gen=%s is not available in this build (only off and fsr); frame "
+                        "generation stays off\n",
+                        value.c_str());
+            frame_gen = FrameGenOff;
+        }
+        if (frame_gen < 0) {
+            std::printf("Settings: unknown frame_gen '%s' (expected off or fsr)\n", value.c_str());
+        } else {
+            v.frame_gen = frame_gen;
+            v.frame_gen_chosen = frame_gen;
+        }
+    } else if (key == "frame_gen_fit_display") {
+        v.should_fit_frame_gen_to_display = i != 0;
     } else if (key == "preset") {
         v.preset = std::clamp(i, 0, PresetCount - 1);
     } else if (key == "sharpen") {
@@ -303,7 +324,8 @@ void Load() {
         {"PS_REACTIVE", "reactive"},              {"PS_REACTIVE_SCALE", "reactive_scale"},
         {"PS_REACTIVE_THRESHOLD", "reactive_threshold"}, {"PS_REACTIVE_MAX", "reactive_max"},
         {"PS_UPSCALE_PRESET", "preset"},            {"PS_OBJECT_MOTION", "object_motion"},
-        {"PS_ASPECT_RATIO", "aspect_ratio"},
+        {"PS_ASPECT_RATIO", "aspect_ratio"},      {"PS_FRAME_GEN", "frame_gen"},
+        {"PS_FRAME_GEN_FIT_DISPLAY", "frame_gen_fit_display"},
     };
     for (const auto& [env, key] : env_keys) {
         if (const char* sz_value = runtime_env(env, nullptr)) {
@@ -312,6 +334,7 @@ void Load() {
     }
     v.startup_preset = v.preset;
     v.startup_upscaler = v.upscaler;
+    v.startup_frame_gen = v.frame_gen;
     v.is_object_motion_at_startup = v.should_use_object_motion;
     for (int e = 0; e < v.c_effects; ++e) {
         v.startup_effects[e] = v.effects[e];
@@ -345,6 +368,16 @@ void ConfigureDlssSupport(bool is_available, const char* sz_problem) {
         std::printf("Upscaler: DLSS unavailable (%s); falling back to FSR 3.1\n",
                     s_kept.empty() ? "the DLSS bridge or NVIDIA's DLSS library is missing" : s_kept.c_str());
         v.upscaler = UpscalerFsr3;
+    }
+}
+
+void ConfigureFrameGenSupport(bool is_fsr_supported, const char* sz_result) {
+    auto& v = Get();
+    v.is_frame_gen_fsr_supported = is_fsr_supported;
+    if (v.frame_gen == FrameGenFsr && !is_fsr_supported) {
+        std::printf("Frame generation: off, FSR 3.1 frame generation cannot run on this device (%s)\n", sz_result);
+        v.sz_frame_gen_problem = sz_result;
+        v.frame_gen = FrameGenOff;
     }
 }
 
@@ -385,6 +418,10 @@ void Save() {
                                                                         : "en");
     }
     put("upscaler", UpscalerName(v.upscaler));
+    // Only once chosen, so that a file never touched by frame generation stays as it was.
+    if (v.frame_gen_chosen != FrameGenOff || v.startup_frame_gen != FrameGenOff) {
+        put("frame_gen", FrameGenName(v.frame_gen_chosen));
+    }
     put("preset", std::to_string(v.preset.load()));
     put("sharpen", flag(v.should_sharpen));
     put("sharpness", fixed(v.sharpness, 2));
@@ -475,6 +512,11 @@ const char* PresetName(int preset) {
 const char* UpscalerName(int upscaler) {
     static constexpr const char* s_names[UpscalerCount] = {"off", "fsr3", "fsr4", "fsr411", "taa", "dlss"};
     return s_names[std::clamp(upscaler, 0, UpscalerCount - 1)];
+}
+
+const char* FrameGenName(int frame_gen) {
+    static constexpr const char* s_names[FrameGenCount] = {"off", "fsr"};
+    return s_names[std::clamp(frame_gen, 0, FrameGenCount - 1)];
 }
 
 } // namespace PsSettings

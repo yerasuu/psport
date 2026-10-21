@@ -1,5 +1,50 @@
 # Temporal upscaling and frame generation — frame analysis and plan
 
+## Frame generation
+
+`frame_gen=fsr` in `psport.ini` (`PS_FRAME_GEN=fsr`) turns on FSR 3.1 frame generation (frame
+interpolation 3.1.6 and optical flow from FireBurn's FSR-Vulkan, native Vulkan): between two
+finished frames of the game the presenter shows one generated frame, so the display gets two images
+per game frame. It is off by default and read at start (the presentation frames are composed in
+RGBA8 with it, whose storage every device supports, and the swapchain gets one image more); off,
+nothing of it is made. `auto` and `dlss` are recognised but not available yet: they are logged and
+leave it off.
+
+- Capability: chosen by what the device reports, never by vendor. At start, before the swapchain is
+  made, `FrameGenerator::IsFsrSupported` asks FSR-Vulkan for `fsr3FrameGenerationPrerequisites`
+  (a compute queue, the subgroup operations, the FSR 3 storage formats,
+  `shaderStorageImageWriteWithoutFormat`, timeline semaphores) and checks the device was created
+  with `shaderStorageImageWriteWithoutFormat`; without them, or without the game profile's
+  upscaler placement, `fsr` is turned off with the reason logged. `psport --list-features` reports
+  the same probe as the `frame_gen_fsr` row, in the `upscaler` area so that launchers treat it as
+  an option, not as something a game needs. The in-game menu offers the switch (applied at the next
+  start) only where the probe says yes.
+
+- Inputs: the scene depth (copied to R32F) and the motion vectors (`CameraMotion`, camera and object
+  motion) at the upscaler's trigger, so it needs the game profile's upscaler placement and runs with
+  the upscaler off too. Frames without them (menus, movies, loading) are presented alone and the
+  next generated frame starts over.
+- UI: the picture before the UI is copied at the profile's first UI draw (the 1080p UI target, or
+  the output-size UI image of the scaled presets) and composed through the presenter's passes like
+  the frame; FSR 3.1 interpolates that picture and the frame's UI is drawn over the result where the
+  frame and the picture differ (`frame_gen_ui.comp`). `PS_FRAME_GEN_HUDLESS=0` interpolates the UI
+  too (diagnostics).
+- Pacing: the generated frame is presented first and the game's own half a smoothed game frame
+  later; it is dropped when the game is waiting for a presentation frame. When presenting takes
+  nearly the whole game frame for about ten frames in a row (FIFO on a slower display, a GPU too
+  slow) generation pauses for 5 s, doubling up to 120 s. `frame_gen_fit_display=1`
+  (`PS_FRAME_GEN_FIT_DISPLAY`) generates only while the display's refresh rate has room for both
+  images. With FIFO (V-Sync) presentation and a frame limit the game is capped at half the
+  display's refresh rate (VideoOut's limiter, `PsSettings::frame_gen_flip_limit`).
+- Counts: the FPS counter adds the game's own rate; the exit report prints a `Frame generation:
+  summary:` line (game frames, generated, presented, dropped, frames without capture, held,
+  pauses, failures, the flip limit) and a `Frame generation: game frames without a generated frame:`
+  line counting each game frame shown without one by reason (HDR output, without capture, paused,
+  no room on the display, no memory, after a failure, dropped because the game waited, no swapchain
+  image); the first frame of each reason is logged when it happens.
+- HDR output presents without generated frames. DLSS Frame Generation is NVIDIA-only and is not
+  in the port.
+
 ## Intermediate targets under live scaling (2026-10-22)
 
 Live scene scaling gives proxies only to targets of the scene size (1920x1080) and of the

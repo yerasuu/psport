@@ -39,6 +39,7 @@ class Scheduler;
 class Runtime;
 class CameraMotion;
 class SceneTargets;
+class FrameGenerator;
 
 /// psport PS_FINAL_DUMP_TRIGGER: the frame as presented (after FSR and post processing) is saved
 /// as final_<w>x<h> in PS_DUMP_DIR when the trigger file exists (consumed). `image` in General.
@@ -62,6 +63,12 @@ public:
 
     [[nodiscard]] bool Enabled() const noexcept {
         return m_is_enabled;
+    }
+
+    /// psport: the Presenter's frame generation, null when off: its depth and motion vectors are
+    /// taken at the upscaler's trigger, the picture before the UI at the frame's first UI draw.
+    void SetFrameGenerator(FrameGenerator* p_generator) noexcept {
+        m_p_frame_generator = p_generator;
     }
 
     /// A draw into a full-size RGBA16F target with the scene depth: the scene color.
@@ -158,6 +165,13 @@ private:
     u64 m_c_view_uses = 0;
 
     void Run();
+    /// The scene depth and motion vectors for frame generation, also with the upscaler off.
+    void CaptureFrameGen();
+    /// The UI target before the first UI draw (frame generation's picture without UI): `color`
+    /// (a texture cache image) at 1080p, the port's output-size UI image on the scaled presets.
+    void CaptureHudless(VideoCore::ImageId color);
+    void CaptureHudlessUi();
+    [[nodiscard]] bool IsHudlessWanted() const;
     void RunScaled();
     /// psport: whether an image id kept since an earlier draw of the frame is still live; one
     /// freed since is forgotten.
@@ -216,6 +230,9 @@ private:
     /// An FSR 3 dispatch recorded on a recording thread failed; `m_has_failed` at the next frame.
     std::atomic<bool> m_has_dispatch_failed{false};
     u64 m_trigger_hash = 0;
+    FrameGenerator* m_p_frame_generator = nullptr;
+    bool m_is_frame_gen_captured = false; ///< this frame's depth and motion are taken
+    bool m_is_hudless_pending = false;    ///< the UI started; its picture is taken at its next draw
     VideoCore::ImageId m_scene_color{};
     bool m_is_done_this_frame = false;
     u32 m_c_preset_file_frames = 0; ///< PS_PRESET_FILE polling

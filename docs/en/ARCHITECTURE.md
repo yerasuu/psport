@@ -380,9 +380,9 @@ fail the build (`host_features.c`). The GPU library reports its probes with `ps_
 the dma-buf and host memory import checks of `gpu/memory/psport_guest_memory.cpp` (`dmabuf=` and
 `host_import=` of the `Guest memory: detected` line) during a launch, and for `--list-features`
 `psport_gpu_probe_host_features` (`gpu/port/psport_host_features.cpp`): the `upscaler` rows
-(`upscaler_fsr4`, `upscaler_fsr411`, `upscaler_dlss`) from a `Vulkan::Instance` made as the game makes
-it (`PS_GPU_ID`, no window) with the game's own checks (`IsFsr4Int8Supported`, `IsFsr411Supported`,
-`Dlss::Available`), and the titles' rows through `Game::Title::pfn_probe_host_features` (Bloodborne's
+(`upscaler_fsr4`, `upscaler_fsr411`, `upscaler_dlss`, `frame_gen_fsr`) from a `Vulkan::Instance` made as
+the game makes it (`PS_GPU_ID`, no window) with the game's own checks (`IsFsr4Int8Supported`,
+`IsFsr411Supported`, `Dlss::Available`, `FrameGenerator::IsFsrSupported`), and the titles' rows through `Game::Title::pfn_probe_host_features` (Bloodborne's
 `intel_tonemap_fix`, area `cpu`).
 
 `psport --list-features` runs those probes (their log lines on stderr), prints the table as JSON and

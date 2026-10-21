@@ -18,6 +18,10 @@ enum Upscaler : int { UpscalerOff = 0, UpscalerFsr3 = 1, UpscalerFsr4 = 2, Upsca
 inline bool IsFsr4(int upscaler) {
     return upscaler == UpscalerFsr4 || upscaler == UpscalerFsr411;
 }
+/// Frame generation (vk_frame_generation.h): off, or FSR 3.1 frame interpolation (2x) where the
+/// device has its prerequisites. psport.ini also names `auto` and `dlss`, not available yet: they
+/// leave it off.
+enum FrameGen : int { FrameGenOff = 0, FrameGenFsr = 1, FrameGenCount };
 enum Preset : int { NativeAA = 0, Quality, Balanced, Performance, UltraPerformance, PresetCount };
 enum DebugView : int { DebugNone = 0, DebugReactive = 1, DebugMotion = 2, DebugViewCount };
 enum class MenuLanguage { English, Russian, Spanish };
@@ -112,10 +116,30 @@ struct Values {
     /// DLSS (gpu/dlss_bridge, NVIDIA RTX) is ready, or why not (null before the device exists).
     std::atomic<bool> is_dlss_supported{false};
     std::atomic<const char*> sz_dlss_problem{nullptr};
+    /// Frame generation, chosen at start (psport.ini frame_gen, PS_FRAME_GEN): the presentation
+    /// frames' format and the swapchain's image count follow it. The renderer turns it off when it
+    /// cannot run (sz_frame_gen_problem says why).
+    std::atomic<int> frame_gen{FrameGenOff};
+    std::atomic<const char*> sz_frame_gen_problem{nullptr};
+    /// The menu's choice, written by Save(); it runs from the next start.
+    std::atomic<int> frame_gen_chosen{FrameGenOff};
+    /// FSR 3.1 frame generation's prerequisites on the device the game takes (set at start).
+    std::atomic<bool> is_frame_gen_fsr_supported{false};
+    /// Generated frames only where the display's refresh rate has room for them (frame_gen_fit_display).
+    std::atomic<bool> should_fit_frame_gen_to_display{false};
+    /// Set by the presenter: generated frames per game frame now (0 paused), the game's own frame
+    /// rate, and the flip limit VideoOut applies while FIFO presentation shows the generated frames
+    /// (0 none).
+    std::atomic<int> c_frame_gen_now{0};
+    std::atomic<float> game_fps{0.0f};
+    std::atomic<int> frame_gen_flip_limit{0};
+    /// The refresh rate of the display the window is on (window.cpp), 0 until known.
+    std::atomic<int> display_refresh_hz{0};
 
     /// Startup settings for the explicit PS_RENDER_RES compatibility patch only.
     int startup_preset = NativeAA;
     int startup_upscaler = UpscalerFsr3;
+    int startup_frame_gen = FrameGenOff;
     bool is_object_motion_at_startup = true;
     bool startup_effects[MaxEffects]{};
     int startup_model_lod = 0;
@@ -134,6 +158,9 @@ void Load();
 void ConfigureUpscalerSupport(bool is_fsr4_supported, bool is_fsr411_supported);
 /// After device creation: DLSS availability; a DLSS setting falls back to FSR 3.1 without it.
 void ConfigureDlssSupport(bool is_available, const char* sz_problem);
+/// After device creation: whether FSR 3.1 frame generation can run on it (`sz_result` says what
+/// was found and must outlive the process); a frame_gen=fsr setting is turned off without it.
+void ConfigureFrameGenSupport(bool is_fsr_supported, const char* sz_result);
 /// Startup-patched scene dimensions cannot change until run.sh prepares a new image.
 bool FixedRenderSession();
 int RenderPreset();
@@ -145,5 +172,7 @@ void Save();
 float PresetScale(int preset);
 const char* PresetName(int preset);
 const char* UpscalerName(int upscaler);
+/// psport.ini value ("off", "fsr").
+const char* FrameGenName(int frame_gen);
 
 } // namespace PsSettings

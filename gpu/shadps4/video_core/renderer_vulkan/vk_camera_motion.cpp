@@ -187,6 +187,13 @@ float CameraMotion::Near() const noexcept {
     return -m_current.proj[3] / m_current.proj[2];
 }
 
+float CameraMotion::FarPlane(float fallback) const noexcept {
+    // depth = zs + zo / z is 1 at the far plane; zs = 1 is an infinite one.
+    const float zs = m_current.proj[2], zo = m_current.proj[3];
+    const float far_z = zs < 1.0f ? zo / (1.0f - zs) : 0.0f;
+    return far_z > Near() && far_z < 1e7f ? far_z : fallback;
+}
+
 void CameraMotion::PrintState(int frame) const {
     const auto print = [](const char* sz_name, const float* p_values, int c_values) {
         std::printf(" %s", sz_name);

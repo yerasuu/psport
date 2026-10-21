@@ -28,6 +28,7 @@
 #include "video_core/renderer_vulkan/vk_shader_util.h"
 #include "video_core/renderer_vulkan/vk_camera_motion.h"
 #include "video_core/renderer_vulkan/vk_frame_capture.h"
+#include "video_core/renderer_vulkan/vk_frame_generation.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_runtime.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
@@ -486,6 +487,8 @@ bool TemporalUpscaler::OnFrameStart() {
     m_is_ui_phase = false;
     m_is_ui_read_barrier = false;
     m_is_done_this_frame = false;
+    m_is_frame_gen_captured = false;
+    m_is_hudless_pending = false;
     m_ldr_target = {};
     m_scene_color = {};
     m_is_snapshot_taken = false;
@@ -506,7 +509,16 @@ bool TemporalUpscaler::OnFrameStart() {
 }
 
 void TemporalUpscaler::OnDispatch(u64 cs_hash) {
-    if (cs_hash != m_trigger_hash || m_is_done_this_frame || m_has_failed || Scaled()) {
+    if (cs_hash != m_trigger_hash || m_is_done_this_frame) {
+        return;
+    }
+    // Before the upscale, which changes the scene color only; frame generation runs with the
+    // upscaler off and on the scaled presets as well.
+    if (m_p_frame_generator && m_p_frame_generator->IsWanted() && !m_is_frame_gen_captured) {
+        m_is_frame_gen_captured = true;
+        CaptureFrameGen();
+    }
+    if (m_has_failed || Scaled()) {
         return;
     }
     m_is_done_this_frame = true;
@@ -1579,7 +1591,17 @@ void TemporalUpscaler::OnColorTarget(VideoCore::ImageId color) {
 
 void TemporalUpscaler::OnDraw(u64 vs_hash, VideoCore::ImageId color,
                               VideoCore::ImageId depth, bool is_native_viewport) {
-    if (!Scaled() && vs_hash == m_ui_trigger_vs) m_is_done_this_frame = true;
+    if (!Scaled() && vs_hash == m_ui_trigger_vs) {
+        // The UI starts: its target holds the finished picture without UI (frame generation).
+        m_is_done_this_frame = true;
+        m_is_hudless_pending = true;
+    }
+    // The trigger draw itself may be a stencil mask without a color target (Scaleform): the
+    // picture is taken before the first UI draw that has one, once a frame.
+    if (m_is_hudless_pending && color) {
+        m_is_hudless_pending = false;
+        CaptureHudless(color);
+    }
     // psport (issue #67, patch by bmy): a UI draw without a color target (a Scaleform mask, color
     // writes off) writes the stencil the UI's next draws test, so it must go into the UI's
     // output-size depth like them. Left in the guest depth, the mask was lost when the next UI
@@ -1642,14 +1664,114 @@ void TemporalUpscaler::OnDraw(u64 vs_hash, VideoCore::ImageId color,
     case UiComposition::Background::Temporal:
         RunScaled();
         if (m_is_ui_phase) {
+            CaptureHudlessUi();
             return;
         }
         // A failed FSR dispatch must not force UI text back to the scene resolution.
         [[fallthrough]];
     case UiComposition::Background::Copy:
         RunUiOnly(color, depth);
+        CaptureHudlessUi();
         return;
     }
+}
+
+void TemporalUpscaler::CaptureFrameGen() {
+    if (!m_camera_motion.Depth()) {
+        return;
+    }
+    auto& depth = m_texture_cache.GetImage(m_camera_motion.Depth());
+    // Where Run and RunScaled read the scene: the reduced proxies (live scene resolution), the
+    // top-left of the guest targets (startup resolution patch), or all of them.
+    u32 w = depth.info.size.width, h = depth.info.size.height;
+    vk::ImageView depth_view{};
+    m_scheduler.EndRendering();
+    if (!m_is_scaled_session && m_scene_targets.Reduced() && m_scene_targets.EligibleScene(depth)) {
+        VideoCore::ImageViewInfo view;
+        view.format = depth.info.pixel_format;
+        depth_view = m_scene_targets.Read(m_camera_motion.Depth(), view).view;
+        w = m_scene_targets.Size().width;
+        h = m_scene_targets.Size().height;
+    } else {
+        if (m_is_scaled_session) {
+            const auto size = SceneSize(w, h);
+            w = size[0];
+            h = size[1];
+        }
+        depth_view = CachedView(depth, depth.info.pixel_format, vk::ImageAspectFlagBits::eDepth);
+        m_runtime.Transit(&depth, vk::ImageLayout::eGeneral, vk::PipelineStageFlagBits2::eComputeShader,
+                          vk::AccessFlagBits2::eShaderRead);
+        m_runtime.FlushBarriers();
+    }
+    const auto cmdbuf = m_scheduler.CommandBuffer();
+    // The motion vectors the upscaler gets: camera and object motion, previous minus current.
+    if (const vk::ImageView motion = m_p_frame_generator->BeginCapture(cmdbuf, depth_view, w, h)) {
+        m_camera_motion.RecordMotion(depth_view, motion, w, h);
+        const FrameGenCamera camera{m_camera_motion.Near(), m_camera_motion.FarPlane(3000.0f),
+                                    m_camera_motion.VerticalFov()};
+        m_p_frame_generator->EndCapture(cmdbuf, m_jitter, m_camera_motion.Ready() && !m_camera_motion.IsCut(),
+                                        camera);
+    }
+}
+
+bool TemporalUpscaler::IsHudlessWanted() const {
+    // PS_FRAME_GEN_HUDLESS=0 (diagnostics): the generated frames are interpolated with the UI.
+    static const bool s_is_wanted = [] {
+        const char* sz_env = std::getenv("PS_FRAME_GEN_HUDLESS");
+        return !(sz_env && sz_env[0] == '0');
+    }();
+    return s_is_wanted && m_p_frame_generator && m_p_frame_generator->IsWanted();
+}
+
+namespace {
+bool IsRgba8(vk::Format format) {
+    return format == vk::Format::eR8G8B8A8Unorm || format == vk::Format::eR8G8B8A8Srgb ||
+           format == vk::Format::eB8G8R8A8Unorm || format == vk::Format::eB8G8R8A8Srgb;
+}
+} // namespace
+
+void TemporalUpscaler::CaptureHudless(VideoCore::ImageId color) {
+    if (!IsHudlessWanted() || !color) {
+        return;
+    }
+    auto& image = m_texture_cache.GetImage(color);
+    if (!IsRgba8(image.info.pixel_format)) {
+        return;
+    }
+    m_scheduler.EndRendering();
+    m_runtime.Transit(&image, vk::ImageLayout::eTransferSrcOptimal, vk::PipelineStageFlagBits2::eTransfer,
+                      vk::AccessFlagBits2::eTransferRead);
+    m_runtime.FlushBarriers();
+    m_p_frame_generator->CaptureHudless(m_scheduler.CommandBuffer(), image.GetImage(), image.info.pixel_format,
+                                        image.info.size.width, image.info.size.height);
+}
+
+void TemporalUpscaler::CaptureHudlessUi() {
+    if (!m_is_ui_phase || !m_ui_image || !IsHudlessWanted() || !IsRgba8(m_ui_format)) {
+        return;
+    }
+    // The background is in the UI image (General): copied before the UI draws into it.
+    m_scheduler.EndRendering();
+    const auto cmdbuf = m_scheduler.CommandBuffer();
+    vk::ImageMemoryBarrier2 barrier{
+        .srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
+        .srcAccessMask = vk::AccessFlagBits2::eMemoryWrite,
+        .dstStageMask = vk::PipelineStageFlagBits2::eTransfer,
+        .dstAccessMask = vk::AccessFlagBits2::eTransferRead,
+        .oldLayout = vk::ImageLayout::eGeneral,
+        .newLayout = vk::ImageLayout::eTransferSrcOptimal,
+        .image = vk::Image(m_ui_image),
+        .subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1},
+    };
+    cmdbuf.pipelineBarrier2({.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &barrier});
+    m_p_frame_generator->CaptureHudless(cmdbuf, vk::Image(m_ui_image), m_ui_format, m_ui_width, m_ui_height);
+    barrier.srcStageMask = vk::PipelineStageFlagBits2::eTransfer;
+    barrier.srcAccessMask = vk::AccessFlagBits2::eTransferRead;
+    barrier.dstStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
+    barrier.dstAccessMask = vk::AccessFlagBits2::eColorAttachmentRead | vk::AccessFlagBits2::eColorAttachmentWrite;
+    barrier.oldLayout = vk::ImageLayout::eTransferSrcOptimal;
+    barrier.newLayout = vk::ImageLayout::eGeneral;
+    cmdbuf.pipelineBarrier2({.imageMemoryBarrierCount = 1, .pImageMemoryBarriers = &barrier});
 }
 
 bool TemporalUpscaler::EnsureUiResources(u32 w, u32 h, vk::Format color, vk::Format depth) {

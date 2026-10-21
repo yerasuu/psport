@@ -301,6 +301,15 @@ FEATURE_HOST(upscaler_dlss, LINUX, IMPLEMENTED,
              "#757")
 FEATURE_PROBED(upscaler_dlss)
 
+FEATURE(frame_gen_fsr, upscaler, "FSR 3.1 frame generation (FSR-Vulkan 3.1.6 interpolation and optical flow) on the GPU "
+                                 "the game takes")
+FEATURE_HOST(frame_gen_fsr, LINUX, IMPLEMENTED,
+             "vk_frame_generation.cpp when FSR-Vulkan reports fsr3FrameGenerationPrerequisites on the device and it was "
+             "created with shaderStorageImageWriteWithoutFormat (FrameGenerator::IsFsrSupported); probed by "
+             "--list-features (gpu/port/psport_host_features.cpp)",
+             "#597")
+FEATURE_PROBED(frame_gen_fsr)
+
 FEATURE(intel_tonemap_fix, cpu, "Bloodborne's Intel Black Tonemap Fix, for Intel CPUs; the cause is open (#770)")
 FEATURE_HOST(intel_tonemap_fix, LINUX, IMPLEMENTED,
              "the patch on by default on GenuineIntel CPUs of /proc/cpuinfo, PS_INTEL_TONEMAP_FIX=0 or 1 forces it "

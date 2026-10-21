@@ -37,6 +37,10 @@ public:
     [[nodiscard]] bool TakeCut() noexcept {
         return std::exchange(m_is_cut, false);
     }
+    /// psport: the cut TakeCut would report, left for it (frame generation starts over too).
+    [[nodiscard]] bool IsCut() const noexcept {
+        return m_is_cut;
+    }
     void SetObjectMotion(ObjectMotion* p_motion) noexcept {
         m_p_object_motion = p_motion;
     }
@@ -71,6 +75,8 @@ public:
     /// Vertical field of view and near/far planes of the current camera.
     [[nodiscard]] float VerticalFov() const noexcept;
     [[nodiscard]] float Near() const noexcept;
+    /// psport: the current camera's far plane, or `fallback` for an infinite or unknown one.
+    [[nodiscard]] float FarPlane(float fallback) const noexcept;
     // Current projection, previous projection, and row Z of previous-view * inverse-view.
     [[nodiscard]] std::array<std::array<float, 4>, 3> TaaDepthParameters() const noexcept;
     /// psport: the matrices and jitter of the motion of this frame, printed with an upscaler dump

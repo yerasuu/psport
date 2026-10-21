@@ -159,6 +159,7 @@ are changed from the overlay menu, which writes the file. Commonly used keys and
 |---|---|
 | `output_res` | output resolution; for a title with presets, sizes other than 1080p scale the scene |
 | `upscaler` (`PS_UPSCALER`) | temporal upscaler, where the game's profile places it ([upscaler notes](docs/en/upscaler.md)) |
+| `frame_gen` (`PS_FRAME_GEN`) | `off` (default) or `fsr`: FSR 3.1 frame generation, one generated frame per game frame, where the GPU has its prerequisites (`--list-features` row `frame_gen_fsr`); `auto` and `dlss` are not available yet and leave it off; read at start ([frame generation](docs/en/upscaler.md#frame-generation)) |
 | `menu_language` (`PS_MENU_LANGUAGE`) | overlay language: `en`, `es` or `ru` |
 | `game_mouse_sensitivity` | scale of the host mouse motion a game receives (0.05 to 20, default 1) |
 | `PS_LANGUAGE` | the system language the game reads (1 English, 3 Spanish, 8 Russian) |

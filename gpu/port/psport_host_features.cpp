@@ -1,6 +1,6 @@
 // psport: psport --list-features' answers for the host table's rows the GPU library knows
-// (src/platform/host_features.inc): the upscalers on the device the game takes, from the game's
-// own Vulkan::Instance and Dlss, and the titles' rows.
+// (src/platform/host_features.inc): the upscalers and frame generation on the device the game
+// takes, from the game's own Vulkan::Instance and Dlss, and the titles' rows.
 #include <initializer_list>
 #include <string>
 #include "../../src/platform/ps_host.h"
@@ -9,11 +9,12 @@
 #include "game_profile.h"
 #include "sdl_window.h"
 #include "video_core/renderer_vulkan/vk_dlss.h"
+#include "video_core/renderer_vulkan/vk_frame_generation.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 
 namespace {
 // ps_host_feature_probed keeps the pointers for the exit summary.
-std::string s_fsr4, s_fsr411, s_dlss;
+std::string s_fsr4, s_fsr411, s_dlss, s_frame_gen_fsr;
 
 void ProbeUpscalers() {
     const Vulkan::Instance instance{nullptr, EmulatorSettings.GetGpuId(),
@@ -22,7 +23,8 @@ void ProbeUpscalers() {
     if (!instance.IsCreated()) {
         s_fsr4 = "no Vulkan device: " + instance.DescribeFailure();
         for (const PsHostFeatureId id :
-             {PS_HOST_FEATURE_upscaler_fsr4, PS_HOST_FEATURE_upscaler_fsr411, PS_HOST_FEATURE_upscaler_dlss}) {
+             {PS_HOST_FEATURE_upscaler_fsr4, PS_HOST_FEATURE_upscaler_fsr411, PS_HOST_FEATURE_upscaler_dlss,
+              PS_HOST_FEATURE_frame_gen_fsr}) {
             ps_host_feature_probed(id, 0, s_fsr4.c_str());
         }
         return;
@@ -40,6 +42,9 @@ void ProbeUpscalers() {
                          : instance.IsFsr411Fp8Supported() ? ": INT8 passes and FP8 cooperative matrices"
                                                            : ": INT8 passes, without FP8 cooperative matrices");
     ps_host_feature_probed(PS_HOST_FEATURE_upscaler_fsr411, is_fsr411, s_fsr411.c_str());
+
+    const bool is_frame_gen_fsr = Vulkan::FrameGenerator::IsFsrSupported(instance, s_frame_gen_fsr);
+    ps_host_feature_probed(PS_HOST_FEATURE_frame_gen_fsr, is_frame_gen_fsr, s_frame_gen_fsr.c_str());
 
     Vulkan::Dlss* p_dlss = Vulkan::Dlss::Get();
     const bool is_dlss = p_dlss && p_dlss->Available();

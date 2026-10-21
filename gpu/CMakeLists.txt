@@ -89,6 +89,13 @@ add_subdirectory(third_party/sirit EXCLUDE_FROM_ALL)
 set(FFX_VK_PORTABLE_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(FFX_VK_PORTABLE_BUILD_PROBE OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/fsr-vulkan EXCLUDE_FROM_ALL)
+# psport: FSR 3.1 frame generation (vk_frame_generation.cpp). Its SDK 2.3 closure repeats type
+# names of the SDK 1.1.4 closure in ffx-vulkan::portable with other layouts (FSR-Vulkan renames the
+# functions, not the types): kept out of link-time optimization so that the two are never merged as
+# one type. Missing field initializers are not reported, as for psport-gpu.
+set_target_properties(ffx_vulkan_fsr3_vk_framegeneration_3_1_6 ffx_vulkan_fsr3_framegen_3_1_6_scaffold
+    ffx_vulkan_fsr3_sdk_core_3_1_5_scaffold PROPERTIES INTERPROCEDURAL_OPTIMIZATION OFF)
+target_compile_options(ffx_vulkan_fsr3_vk_framegeneration_3_1_6 PRIVATE -Wno-missing-field-initializers)
 
 # Host shaders -> headers (same scheme as shadPS4's host_shaders/CMakeLists.txt).
 set(SHADER_SRC ${CMAKE_CURRENT_SOURCE_DIR}/shadps4/video_core/host_shaders)
@@ -132,6 +139,8 @@ add_host_shader(depth_resample.frag depth_resample_frag)
 add_host_shader(depth_resample.frag depth_stencil_resample_frag HAS_STENCIL=1)
 add_host_shader(depth_resample.frag depth_stencil_bits_frag STENCIL_BITS=1)
 add_host_shader(camera_motion.comp camera_motion_debug_comp DEBUG_OVERLAY=1)
+add_host_shader(frame_gen_inputs.comp frame_gen_inputs_comp)
+add_host_shader(frame_gen_ui.comp frame_gen_ui_comp)
 foreach(BPP IN ITEMS 8 16 32 64 96 128)
     add_host_shader(tiling.comp tiling_micro_${BPP}_comp BITS_PER_PIXEL=${BPP} IS_MACRO_TILED=0)
     add_host_shader(tiling.comp tiling_macro_${BPP}_comp BITS_PER_PIXEL=${BPP} IS_MACRO_TILED=1)
@@ -247,7 +256,8 @@ else()
     # kernel32 import library has.
     target_link_libraries(psport-gpu PRIVATE ${PS_RUNTIME_IMPORTS} pthread ws2_32 onecore)
 endif()
-target_link_libraries(psport-gpu PRIVATE ffx-vulkan::portable ffx-vulkan::fsr4-v07-vulkan)
+target_link_libraries(psport-gpu PRIVATE ffx-vulkan::portable ffx-vulkan::fsr4-v07-vulkan
+    ffx-vulkan::fsr3-vk-framegeneration-3.1.6)
 # psport: Tracy profiler zones (PS_TRACY, off by default, docs/en/PROFILING.md). Off, the shim's Tracy
 # macros compile to nothing and third_party/tracy need not be checked out. On demand: nothing is
 # collected until a profiler connects, and only from this machine, without announcing itself on the

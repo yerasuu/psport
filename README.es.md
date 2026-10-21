@@ -165,6 +165,7 @@ utilizadas:
 |---|---|
 | `output_res` | resolución de salida; en un juego con preajustes, los tamaños distintos de 1080p escalan la escena |
 | `upscaler` (`PS_UPSCALER`) | reescalador temporal, donde lo coloca el perfil del juego ([notas del reescalador](docs/en/upscaler.md)) |
+| `frame_gen` (`PS_FRAME_GEN`) | `off` (por defecto) o `fsr`: generación de fotogramas FSR 3.1, un fotograma generado por cada fotograma del juego, donde la GPU cumple sus requisitos (fila `frame_gen_fsr` de `--list-features`); `auto` y `dlss` aún no están disponibles y la dejan desactivada; se lee al arrancar ([generación de fotogramas](docs/en/upscaler.md#frame-generation)) |
 | `menu_language` (`PS_MENU_LANGUAGE`) | idioma del menú superpuesto: `en`, `es` o `ru` |
 | `game_mouse_sensitivity` | escala del movimiento del ratón del sistema que recibe el juego (de 0,05 a 20; 1 por defecto) |
 | `PS_LANGUAGE` | el idioma del sistema que lee el juego (1 inglés, 3 español, 8 ruso) |

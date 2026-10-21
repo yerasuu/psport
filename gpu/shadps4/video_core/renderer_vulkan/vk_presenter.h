@@ -3,7 +3,10 @@
 
 #pragma once
 
+#include <atomic>
+#include <chrono>
 #include <deque>
+#include <memory>
 
 #include <condition_variable>
 #include <mutex>
@@ -11,6 +14,7 @@
 #include "core/libraries/videoout/buffer.h"
 #include "video_core/renderer_vulkan/host_passes/fsr_pass.h"
 #include "video_core/renderer_vulkan/host_passes/pp_pass.h"
+#include "video_core/renderer_vulkan/vk_frame_generation.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_runtime.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
@@ -38,6 +42,14 @@ struct Frame {
     u64 ready_tick;
     bool is_hdr{false};
     u8 id{};
+
+    /// psport: frame generation's frame between the previous game frame and this one, presented
+    /// before it (FrameGenerator); made at the first frame that generates one.
+    VmaAllocation generated_allocation{};
+    vk::Image generated_image{};
+    vk::ImageView generated_view{};
+    bool has_generated{false};
+    FrameGenSkip frame_gen_skip{FrameGenSkip::None}; ///< why it has none
 
 };
 
@@ -117,6 +129,18 @@ private:
     Frame* GetRenderFrame();
 
     bool RecreateFrame(Frame* frame, u32 width, u32 height);
+    void DestroyGenerated(Frame* frame);
+    /// psport: frame generation for the frame just composed (GPU thread, after its passes).
+    /// `view_format` and `image_size`: how the display buffer was read.
+    void GenerateFrame(Frame* frame, vk::Format view_format, vk::Extent2D image_size);
+    /// psport: blits `image` (General layout) into a swapchain image with the overlay and presents
+    /// it. `is_last`: the game's frame itself, whose submission also signals the frame's fence
+    /// (covering the generated frame's before it on the same queue). False when the swapchain gave
+    /// no image or the fence could not be reset.
+    bool PresentImage(Frame* frame, vk::Image image, bool is_last);
+    /// psport: present thread, after a game frame: whether the display can show the generated
+    /// frames (m_c_frame_gen_limit) and the flip limit with FIFO. `present_ms`: time Present took.
+    void UpdateFrameGenLimit(double present_ms);
 
     void SetExpectedGameSize(s32 width, s32 height);
 
@@ -150,6 +174,27 @@ private:
     std::condition_variable free_cv;
     std::condition_variable_any frame_cv;
     std::vector<VAddr> vo_buffers_addr;
+    /// psport: frame generation, null unless chosen at start (PsSettings::frame_gen). With it the
+    /// frames are composed in its RGBA8 (m_frame_format) and blitted into the swapchain's format.
+    std::unique_ptr<FrameGenerator> m_p_frame_generator;
+    vk::Format m_frame_format{};
+    /// The game's picture before its UI, through the same passes as the frame.
+    Frame m_hudless_frame{};
+    /// Generated frames per game frame the display shows now, 0 or 1 (present thread writes it).
+    std::atomic<u32> m_c_frame_gen_limit{1};
+    /// Why m_c_frame_gen_limit is 0: paused, or no room on the display.
+    std::atomic<FrameGenSkip> m_frame_gen_held{FrameGenSkip::NoRoom};
+    // Present thread: the interval of the game's frames the generated ones are paced in, the share
+    // of it spent presenting, the pause after presenting fell behind, and the game frames of the
+    // current second with the seconds in a row that had room for a generated frame.
+    std::chrono::steady_clock::time_point m_last_game_present{};
+    double m_game_frame_ms = 16.7;
+    double m_present_busy = 0.0;
+    int m_frame_gen_hold_seconds = 5;
+    std::chrono::steady_clock::time_point m_frame_gen_hold_until{};
+    std::chrono::steady_clock::time_point m_limit_window{};
+    u32 m_c_limit_frames = 0;
+    u32 m_c_limit_up_seconds = 0;
 };
 
 } // namespace Vulkan
