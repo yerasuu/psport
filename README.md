@@ -271,6 +271,7 @@ Source commits and changes to inherited code are recorded in [FORK.md](FORK.md) 
 | [sirit](https://github.com/shadps4-emu/sirit) | SPIR-V emission | BSD-3-Clause |
 | AMD GCN headers (`gpu/third_party/gcn`) | GCN instruction decoding | MIT |
 | [half](https://half.sourceforge.net/) | half-precision floats | MIT |
+| [xbyak](https://github.com/herumi/xbyak) 7.43 (`gpu/third_party/xbyak`, its headers) | x86-64 code emitted at run time | BSD-3-Clause |
 | [FSR-Vulkan](https://github.com/FireBurn/FSR-Vulkan) by FireBurn, AMD FidelityFX SDK | FSR 3.1 | MIT |
 | [LibAtrac9](https://github.com/Thealexbarney/LibAtrac9) | ATRAC9 audio decoding | MIT |
 | [Dear ImGui](https://github.com/ocornut/imgui) | overlay and in-game menus | MIT |

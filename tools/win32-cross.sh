@@ -77,7 +77,7 @@ enter_nix() {
     fi
     if [[ -z ${PS_WIN32_IN_NIX:-} ]]; then
         exec env PS_WIN32_IN_NIX=1 nix-shell -p "llvmPackages_$llvm.clang-unwrapped" "llvmPackages_$llvm.lld" \
-            "llvmPackages_$llvm.llvm" cmake ninja pkg-config glslang xbyak --run "bash tools/win32-cross.sh $1"
+            "llvmPackages_$llvm.llvm" cmake ninja pkg-config glslang --run "bash tools/win32-cross.sh $1"
     fi
     export PKG_CONFIG_SYSROOT_DIR=$root PKG_CONFIG_LIBDIR=$sysroot/lib/pkgconfig:$sysroot/share/pkgconfig
     unset PKG_CONFIG_PATH
@@ -95,17 +95,13 @@ build() {
             "$(command -v "$tool")" "$sysroot" "$out/resource" > "$out/bin/x86_64-w64-mingw32-$tool"
         chmod +x -- "$out/bin/x86_64-w64-mingw32-$tool"
     done
-    # xbyak is header-only and CLANG64 has no package of it (nor does the CI job install one): nixpkgs'.
-    local xbyak= input
-    for input in ${nativeBuildInputs:-} ${buildInputs:-}; do [[ $input == *-xbyak-* ]] && xbyak=$input/include; done
-    [[ -f $xbyak/xbyak/xbyak.h ]] || { echo 'No xbyak headers in the Nix shell.' >&2; exit 1; }
     cmake -S gpu -B "$out/gpu" -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_SYSTEM_NAME=Windows \
         -DCMAKE_SYSTEM_PROCESSOR=x86_64 -DCMAKE_C_COMPILER="$out/bin/x86_64-w64-mingw32-clang" \
         -DCMAKE_CXX_COMPILER="$out/bin/x86_64-w64-mingw32-clang++" -DCMAKE_RC_COMPILER="$(command -v llvm-windres)" \
         -DCMAKE_AR="$(command -v llvm-ar)" -DCMAKE_RANLIB="$(command -v llvm-ranlib)" \
         -DCMAKE_FIND_ROOT_PATH="$sysroot" -DCMAKE_PREFIX_PATH="$sysroot" -DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER \
         -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
-        -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY -DCMAKE_CXX_FLAGS="-isystem $xbyak" -DPS_PGO=off -DPS_LTO="${PS_LTO:-OFF}" -DPS_NET=OFF > "$out/configure.log"
+        -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY -DPS_PGO=off -DPS_LTO="${PS_LTO:-OFF}" -DPS_NET=OFF > "$out/configure.log"
     echo "GPU library (cross, CLANG64 sysroot $root): LTO ${PS_LTO:-OFF}, no PGO, no online module"
     if ! ninja -C "$out/gpu" psport-gpu > "$out/gpu-build.log" 2>&1; then
         grep -v '^\[' "$out/gpu-build.log" | tail -40 >&2

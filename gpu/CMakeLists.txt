@@ -208,6 +208,8 @@ set_source_files_properties(port/psport_overlay.cpp PROPERTIES
     OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/fonts/DejaVuSans.ttf")
 target_include_directories(psport-gpu PRIVATE shim port memory diag layer games cp shadps4 ${SHADER_INCLUDE} third_party/gcn/include third_party/half/include third_party/renderdoc
     ../third_party/LibAtrac9/C/src)
+# Vendored (third_party/xbyak, as herumi/xbyak ships it): MSYS2 has no package of it.
+target_include_directories(psport-gpu SYSTEM PRIVATE third_party/xbyak)
 # Third-party C, built as its upstream ships it (build.sh builds the runtime's copy with -w too).
 set_source_files_properties(${ATRAC9_SOURCES} PROPERTIES COMPILE_OPTIONS -w)
 target_compile_definitions(psport-gpu PRIVATE BOOST_ASIO_STANDALONE NDEBUG)

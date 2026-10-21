@@ -15,7 +15,7 @@ let
   shell = import ../shell.nix { inherit pkgs; };
   port = import ./port.nix { inherit pkgs; };
   # Header-only or static: in psport's binaries, never in lib/ (gpu/CMakeLists.txt).
-  compiledIn = with pkgs; [ boost magic-enum robin-map vulkan-memory-allocator vulkan-headers xbyak zydis miniz ];
+  compiledIn = with pkgs; [ boost magic-enum robin-map vulkan-memory-allocator vulkan-headers zydis miniz ];
   dependencies = d: lib.filter lib.isDerivation (lib.flatten [ (d.buildInputs or [ ]) (d.propagatedBuildInputs or [ ]) ]);
   key = d: builtins.unsafeDiscardStringContext d.drvPath;
   # The runtime libraries are among the build inputs of what shell.nix lists, plus the compiler's
@@ -93,6 +93,7 @@ let
     (vendor "AMD GCN headers" "https://github.com/GPUOpen-Drivers/pal" "MIT"
       [ { file = ../gpu/third_party/gcn/include/gcn/si_ci_vi_merged_offset.h; lines = 24; } ])
     (vendor "half" "https://half.sourceforge.net/" "MIT" [ { file = ../gpu/third_party/half/LICENSE.txt; } ])
+    (vendor "Xbyak" "https://github.com/herumi/xbyak" "BSD-3-Clause" [ { file = ../gpu/third_party/xbyak/COPYRIGHT; } ])
     (vendor "FSR-Vulkan and AMD FidelityFX SDK" "https://github.com/FireBurn/FSR-Vulkan" "MIT" [
       { file = ../gpu/third_party/fsr-vulkan/LICENSE.txt; }
       { file = ../gpu/third_party/fsr-vulkan/NOTICE.md; }

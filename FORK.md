@@ -775,8 +775,7 @@ Locally, without Windows (#777): `tools/win32-cross.sh sysroot` unpacks the CLAN
 workflow installs, with their dependencies, from repo.msys2.org (checksums from its database) into
 `PS_WIN32_SYSROOT` (default `~/.cache/psport/win32-sysroot`, ~2 GB); `tools/win32-cross.sh build`
 builds `out/win32/gpu/libpsport-gpu.dll` and `out/win32/psport-gpu-capabilities.exe` with nixpkgs'
-clang and lld at CLANG64's LLVM version over that sysroot (same libc++, UCRT and DLLs), xbyak's
-headers from nixpkgs; `tools/win32-cross.sh runtime` tries `psport.exe` and lists the files that do
+clang and lld at CLANG64's LLVM version over that sysroot (same libc++, UCRT and DLLs); `tools/win32-cross.sh runtime` tries `psport.exe` and lists the files that do
 not compile and the symbols missing at the link. `tools/win32-proton-run.sh EXE [ARGS...]` runs a
 result under Proton with umu-run (`PS_WIN32_PREFIX`, `PS_UMU_RUN`), the CLANG64 DLLs and
 `libpsport-gpu.dll` found through `WINEPATH`.

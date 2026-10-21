@@ -44,7 +44,7 @@ pkgs.mkShell {
     gcc gnumake cmake ninja pkg-config python3 binutils ccache
     vulkan-headers vulkan-loader sdl3
     # GPU library (gpu/): shadPS4 video core dependencies
-    ffmpeg boost fmt magic-enum robin-map xxhash vulkan-memory-allocator glslang spirv-cross xbyak zydis spirv-headers miniz libx11 libxcb xorgproto wayland
+    ffmpeg boost fmt magic-enum robin-map xxhash vulkan-memory-allocator glslang spirv-cross zydis spirv-headers miniz libx11 libxcb xorgproto wayland
     # libSceFont (gpu/font): glyphs rasterized by FreeType
     freetype
     # Online module (gpu/net): shadNet client, HTTPS, UPnP

@@ -283,6 +283,7 @@ Los commits de origen y los cambios en el código heredado están anotados en [F
 | [sirit](https://github.com/shadps4-emu/sirit) | emisión de SPIR-V | BSD-3-Clause |
 | Cabeceras GCN de AMD (`gpu/third_party/gcn`) | decodificación de instrucciones GCN | MIT |
 | [half](https://half.sourceforge.net/) | números de coma flotante de media precisión | MIT |
+| [xbyak](https://github.com/herumi/xbyak) 7.43 (`gpu/third_party/xbyak`, sus cabeceras) | código x86-64 generado en tiempo de ejecución | BSD-3-Clause |
 | [FSR-Vulkan](https://github.com/FireBurn/FSR-Vulkan), de FireBurn, AMD FidelityFX SDK | FSR 3.1 | MIT |
 | [LibAtrac9](https://github.com/Thealexbarney/LibAtrac9) | decodificación de audio ATRAC9 | MIT |
 | [Dear ImGui](https://github.com/ocornut/imgui) | menú superpuesto y menús del juego | MIT |

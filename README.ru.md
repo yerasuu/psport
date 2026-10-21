@@ -277,6 +277,7 @@ GPL-2.0-or-later и используются как версия 2. Проект
 | [sirit](https://github.com/shadps4-emu/sirit) | генерация SPIR-V | BSD-3-Clause |
 | Заголовки GCN от AMD (`gpu/third_party/gcn`) | декодирование инструкций GCN | MIT |
 | [half](https://half.sourceforge.net/) | числа половинной точности | MIT |
+| [xbyak](https://github.com/herumi/xbyak) 7.43 (`gpu/third_party/xbyak`, заголовки) | генерация кода x86-64 во время выполнения | BSD-3-Clause |
 | [FSR-Vulkan](https://github.com/FireBurn/FSR-Vulkan) от FireBurn, AMD FidelityFX SDK | FSR 3.1 | MIT |
 | [LibAtrac9](https://github.com/Thealexbarney/LibAtrac9) | декодирование звука ATRAC9 | MIT |
 | [Dear ImGui](https://github.com/ocornut/imgui) | оверлей и внутриигровые меню | MIT |
