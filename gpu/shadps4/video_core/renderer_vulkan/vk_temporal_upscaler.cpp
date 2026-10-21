@@ -1271,6 +1271,7 @@ void TemporalUpscaler::Run() {
                 vk::AccessFlagBits2::eNone, vk::ImageLayout::eGeneral, all, rw);
 
     m_camera_motion.RecordMotion(input_depth_view, *m_motion_view, w, h);
+    if (m_camera_motion.TakeCut()) m_should_reset = true;
     own_barrier(vk::Image(m_motion_image), vk::ImageLayout::eGeneral,
                 vk::PipelineStageFlagBits2::eComputeShader, vk::AccessFlagBits2::eShaderWrite,
                 vk::ImageLayout::eGeneral, all, vk::AccessFlagBits2::eShaderRead);
@@ -1901,6 +1902,7 @@ void TemporalUpscaler::RunScaled() {
             all, vk::AccessFlagBits2::eNone, vk::ImageLayout::eGeneral,
             vk::PipelineStageFlagBits2::eComputeShader, vk::AccessFlagBits2::eShaderWrite);
     m_camera_motion.RecordMotion(depth_view, *m_motion_view, w, h);
+    if (m_camera_motion.TakeCut()) m_should_reset = true;
     barrier(vk::Image(m_motion_image), vk::ImageAspectFlagBits::eColor, vk::ImageLayout::eGeneral,
             vk::PipelineStageFlagBits2::eComputeShader, vk::AccessFlagBits2::eShaderWrite,
             vk::ImageLayout::eGeneral, all, vk::AccessFlagBits2::eShaderRead);

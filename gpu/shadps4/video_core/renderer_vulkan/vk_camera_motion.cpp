@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "video_core/renderer_vulkan/vk_camera_motion.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 
 #include "psport_toggles.h"
 
@@ -372,6 +374,47 @@ void CameraMotion::CommitFrameCamera() {
     m_previous = m_current;
     m_current = m_pass_camera;
     m_has_committed = true;
+    // psport: a cut (a cutscene's next shot, a respawn) turns or moves the camera further in one
+    // frame than it can move, so the previous frame's image is another shot: the upscaler starts its
+    // history over (TakeCut) instead of reprojecting it, which flashed the old shot for a frame or
+    // two. Scale-free thresholds, the same for every game: 30 degrees, or 64 near-plane distances.
+    // PS_CAMERA_CUTS=0 (diagnostics): no cuts detected.
+    static const bool s_is_on = [] {
+        const char* sz_env = std::getenv("PS_CAMERA_CUTS");
+        return !(sz_env && sz_env[0] == '0');
+    }();
+    if (!s_is_on || !m_previous.is_valid || !m_current.is_valid) {
+        return;
+    }
+    const auto& p = m_previous.view;
+    const auto& q = m_current.view;
+    float cos_sum = 0.0f;
+    for (int row = 0; row < 3; ++row) {
+        const float* a = &p[row * 4];
+        const float* b = &q[row * 4];
+        const float len =
+            std::sqrt((a[0] * a[0] + a[1] * a[1] + a[2] * a[2]) * (b[0] * b[0] + b[1] * b[1] + b[2] * b[2]));
+        cos_sum += len > 0.0f ? (a[0] * b[0] + a[1] * b[1] + a[2] * b[2]) / len : 1.0f;
+    }
+    const float turned = std::acos(std::clamp((cos_sum - 1.0f) * 0.5f, -1.0f, 1.0f)) * (180.0f / 3.14159265f);
+    const auto& pi = m_previous.inv_view;
+    const auto& qi = m_current.inv_view;
+    const float dx = qi[3] - pi[3], dy = qi[7] - pi[7], dz = qi[11] - pi[11];
+    const float near_plane = Near();
+    const float moved = near_plane > 0.0f ? std::sqrt(dx * dx + dy * dy + dz * dz) / near_plane : 0.0f;
+    if (turned < 30.0f && moved < 64.0f) {
+        return;
+    }
+    m_is_cut = true;
+    ++m_c_cuts;
+    // The wall clock, so that a cut can be matched with what the player saw.
+    const std::time_t now = std::time(nullptr);
+    std::tm local{};
+    localtime_r(&now, &local);
+    std::printf("Camera motion: cut at %02d:%02d:%02d (turned %.0f degrees, moved %.0f near planes): "
+                "upscaler history reset (%llu so far; PS_CAMERA_CUTS=0: off)\n",
+                local.tm_hour, local.tm_min, local.tm_sec, turned, moved,
+                static_cast<unsigned long long>(m_c_cuts));
 }
 
 void CameraMotion::OnDisplayPass(VideoCore::ImageId frame) {

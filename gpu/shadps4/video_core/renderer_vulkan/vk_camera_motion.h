@@ -6,6 +6,7 @@
 #pragma once
 
 #include <array>
+#include <utility>
 #include <vector>
 
 #include "common/types.h"
@@ -31,6 +32,11 @@ public:
                  VideoCore::TextureCache& texture_cache, Runtime& runtime);
     ~CameraMotion();
     void InvalidateHistory() { m_current.is_valid = m_previous.is_valid = false; }
+    /// psport: whether this frame's camera is a cut from the previous one (CommitFrameCamera), once:
+    /// temporal history from another shot must not be blended in.
+    [[nodiscard]] bool TakeCut() noexcept {
+        return std::exchange(m_is_cut, false);
+    }
     void SetObjectMotion(ObjectMotion* p_motion) noexcept {
         m_p_object_motion = p_motion;
     }
@@ -118,6 +124,8 @@ private:
     Camera m_pass_camera;
     bool m_has_pass_camera = false;
     bool m_has_committed = false;
+    bool m_is_cut = false;
+    u64 m_c_cuts = 0;
     u32 m_c_frame_gbuffer_passes = 0;
     std::array<std::array<float, 3>, 4> m_pass_positions{};
     void CommitFrameCamera();
