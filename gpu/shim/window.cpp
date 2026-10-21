@@ -382,6 +382,17 @@ bool WindowSDL::PollEvents() {
             UpdateTextTitle();
             continue;
         }
+        // The port has no on-screen keyboard: a player with only a controller accepts the starting
+        // text with Cross (the enter button, system parameter 1000) or cancels with Circle.
+        if (m_is_text_active && !PsOverlay::MenuOpen() && event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN &&
+            (event.gbutton.button == SDL_GAMEPAD_BUTTON_SOUTH || event.gbutton.button == SDL_GAMEPAD_BUTTON_EAST)) {
+            std::scoped_lock lock{m_text_mutex};
+            m_text_state = event.gbutton.button == SDL_GAMEPAD_BUTTON_SOUTH ? 1 : 2;
+            m_is_text_active = false;
+            SDL_StopTextInput(m_p_window);
+            UpdateTextTitle();
+            continue;
+        }
         // A release always counts, so a button held while the menu opened is not left held.
         if (!PsOverlay::CapturesInput() || event.type == SDL_EVENT_MOUSE_BUTTON_UP) {
             GameMouseEvent(event);

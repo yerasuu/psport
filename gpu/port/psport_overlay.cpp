@@ -1066,6 +1066,9 @@ void TextPrompt() {
     ImGui::TextUnformatted(PsSettings::MenuText("Keyboard: type, Backspace = delete, Enter = OK, Esc = cancel",
                                                 "Клавиатура: ввод, Backspace — удалить, Enter — OK, Esc — отмена",
                                                 "Teclado: escribe, Retroceso = borrar, Intro = aceptar, Esc = cancelar"));
+    ImGui::TextUnformatted(PsSettings::MenuText("Controller: Cross (A) = OK, Circle (B) = cancel",
+                                                "Геймпад: крест (A) — OK, круг (B) — отмена",
+                                                "Mando: Cruz (A) = aceptar, Círculo (B) = cancelar"));
     ImGui::End();
 }
 

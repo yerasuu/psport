@@ -548,10 +548,11 @@ static ABI int32_t ime_init(const ImeParam *p_param, const void *p_extended) {
     utf16_to_utf8(p_param->title,128,sz_prompt,sizeof(sz_prompt));
     const char *sz_preset=runtime_env("PS_IME_TEXT",NULL);
     if (sz_preset) { ime_complete(0,sz_preset); return 0; }
-    if (!psport_gpu_text_input_begin(sz_initial,sz_prompt[0] ? sz_prompt : "Text")) {
-        const char *sz_name=runtime_env("PS_USER_NAME",NULL);
-        ime_complete(0,sz_name ? sz_name : sz_initial[0] ? sz_initial : DEFAULT_USER_NAME);
-    } else printf("Runtime: ImeDialog opened: type in the game window, Enter to confirm, Esc to cancel\n");
+    /* An empty field starts with the user's name (sceUserServiceGetUserName's) so that a player
+     * with only a controller, who cannot type, can still accept it. */
+    const char *sz_start=sz_initial[0] ? sz_initial : runtime_env("PS_USER_NAME",DEFAULT_USER_NAME);
+    if (!psport_gpu_text_input_begin(sz_start,sz_prompt[0] ? sz_prompt : "Text")) ime_complete(0,sz_start);
+    else printf("Runtime: ImeDialog opened with \"%s\": type in the game window; Enter or Cross confirms, Esc or Circle cancels\n",sz_start);
     return 0;
 }
 static ABI int32_t ime_status(void) {

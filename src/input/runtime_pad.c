@@ -1122,10 +1122,24 @@ static void touch_ids(PadData *p_pad_data) {
     else if (!s_since) s_since=p_pad_data->timestamp;
     p_pad_data->touch_held_time=p_pad_data->touch_count ? (uint32_t)(p_pad_data->timestamp-s_since) : 0;
 }
+/* Buttons still held when the overlay lets the input go (the Cross that accepted a name, L3+R3
+ * closing the menu) stay away from the game until released, since it reads the pad's state and
+ * would take them as a new press. */
+static int s_was_captured;
+static uint32_t s_held_after_capture;
+static void hide_held_after_capture(PadData *p_pad_data) {
+    if (s_was_captured) { s_was_captured=0; s_held_after_capture=p_pad_data->buttons; }
+    s_held_after_capture&=p_pad_data->buttons;
+    if (!s_held_after_capture) return;
+    p_pad_data->buttons&=~s_held_after_capture;
+    if (s_held_after_capture & BTN_L2) p_pad_data->l2=0;
+    if (s_held_after_capture & BTN_R2) p_pad_data->r2=0;
+    if (s_held_after_capture & BTN_TOUCHPAD) p_pad_data->touch_count=0;
+}
 static void sample(PadData *p_pad_data) {
     sample_host(p_pad_data);
     runtime_pad_read_inject();
-    if (psport_gpu_overlay_captures_input()) return;
+    if (psport_gpu_overlay_captures_input()) { s_was_captured=1; return; }
     runtime_pad_record_sample(p_pad_data);
     runtime_pad_replay_sample(p_pad_data);
     p_pad_data->buttons|=g_runtime_pad_injected.buttons;
@@ -1137,6 +1151,7 @@ static void sample(PadData *p_pad_data) {
     for (int i=0;i<4;++i) if (g_runtime_pad_injected.stick[i]>=0) *axes[i]=(uint8_t)g_runtime_pad_injected.stick[i];
     if (g_runtime_pad_injected.mouse_dx!=0 || g_runtime_pad_injected.mouse_dy!=0)
         apply_mouse_look(p_pad_data,g_runtime_pad_injected.mouse_dx,g_runtime_pad_injected.mouse_dy,p_pad_data->timestamp,1);
+    hide_held_after_capture(p_pad_data);
     const uint8_t sticks[4]={p_pad_data->left_x,p_pad_data->left_y,p_pad_data->right_x,p_pad_data->right_y};
     psport_gpu_filter_pad(&p_pad_data->buttons,sticks); /* the game profile's (a menu pointer's presses) */
     touch_ids(p_pad_data);
