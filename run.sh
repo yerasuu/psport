@@ -87,8 +87,10 @@ if [[ ${PS_SAVE_LOG:-} == 1 ]]; then
     # this script replaced the launcher, and closing that pipe unmounted the store under it
     # ("python3: Software caused connection abort").
     exec {log_fd}>"$logs/$stamp.log"
-    # Bash builtins only (the AppImage's PATH has no tee).
-    exec > >(while IFS= read -r line || [[ -n $line ]]; do printf '%s\n' "$line"; printf '%s\n' "$line" >&$log_fd; done) 2>&1
+    # Bash builtins only (the AppImage's PATH has no tee). It ignores the stop signals because a
+    # launcher stops the whole process group (decanter's stop, Ctrl+C): otherwise it dies with the
+    # game and what the game writes as it ends (the window's quit, the calls summary) is lost.
+    exec > >(trap '' TERM INT HUP; while IFS= read -r line || [[ -n $line ]]; do printf '%s\n' "$line"; printf '%s\n' "$line" >&$log_fd; done) 2>&1
 fi
 # PS_GAME_DIR: the game's folder (eboot.bin, sce_module, ...); unset, the only dump next to this
 # directory (bbport's layout, ../<title id>).
