@@ -378,7 +378,9 @@ private:
     /// Iterate over all page indices in a range
     template <typename Func>
     static void ForEachPage(PAddr addr, size_t size, Func&& func) {
-        static constexpr bool RETURNS_BOOL = std::is_same_v<std::invoke_result<Func, u64>, bool>;
+        // psport: the trait's type, not the trait, since the trait never equals bool and a
+        // callback returning true otherwise never stopped the walk (ForEachImageInRegion's break).
+        static constexpr bool RETURNS_BOOL = std::is_same_v<std::invoke_result_t<Func, u64>, bool>;
         const u64 page_end = (addr + size - 1) >> Traits::PageBits;
         for (u64 page = addr >> Traits::PageBits; page <= page_end; ++page) {
             if constexpr (RETURNS_BOOL) {
