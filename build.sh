@@ -40,6 +40,12 @@ if ! { command -v pkg-config >/dev/null && pkg-config --exists vulkan sdl3 freet
     fi
     echo 'Need pkg-config with vulkan, sdl3 and freetype2, cmake and ninja (see shell.nix).' >&2; exit 1
 fi
+# Compiler temporaries (LTO streams gigabytes of them) stay in the checkout, because /tmp is often
+# a tmpfs with a per-user quota that everything else the user runs shares. Emptied before and
+# after each build, so that a build that failed leaves nothing behind either.
+export TMPDIR=$PWD/out/tmp
+rm -rf -- "$TMPDIR" && mkdir -p -- "$TMPDIR"
+trap 'rm -rf -- "$TMPDIR"' EXIT
 read -r -a includes <<< "$(pkg-config --cflags vulkan sdl3)"
 read -r -a libraries <<< "$(pkg-config --libs vulkan sdl3)"
 # GPU library (shadPS4 video core + drivers), built by CMake into out/gpu/libpsport-gpu.so.

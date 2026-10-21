@@ -78,6 +78,17 @@ fi
 if [[ ${PS_SAVE_LOG:-} == 1 ]]; then
     logs=$data/logs
     mkdir -p "$logs"
+    # Only the newest runs stay (PS_KEEP_LOGS, 30 as decanter keeps its own; 0 keeps them all),
+    # because each one leaves megabytes of per-frame statistics behind.
+    keep=${PS_KEEP_LOGS:-30}
+    shopt -s nullglob
+    runs=("$logs"/[0-9]*_[0-9]*.log)
+    shopt -u nullglob
+    if [[ $keep =~ ^[0-9]+$ ]] && (( keep > 0 && ${#runs[@]} >= keep )); then
+        for run in "${runs[@]:0:${#runs[@]}-keep+1}"; do
+            rm -f -- "$run" "${run%.log}.frames.csv" "${run%.log}.readbacks.csv"
+        done
+    fi
     printf -v stamp '%(%Y%m%d_%H%M%S)T' -1
     export PS_FRAME_STATS=1 PS_FRAME_LOG=${PS_FRAME_LOG:-$logs/$stamp.frames.csv}
     export PS_READBACK_LOG=${PS_READBACK_LOG:-$logs/$stamp.readbacks.csv}
