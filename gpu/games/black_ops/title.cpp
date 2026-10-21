@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// Call of Duty: Black Ops and Black Ops II: their keyboard and mouse layout (Game::Title), no
-// translator profile.
+// Call of Duty: Black Ops and Black Ops II: their keyboard and mouse layout (Game::Title); their
+// profile (profile.cpp) turns the camera with the mouse through the games' own mouse input.
 #include "game_profile.h"
 
 namespace Game {
+
+extern const Profile BlackOpsProfile;
+extern const Profile BlackOps2Profile;
 
 namespace {
 constexpr const char* BlackOpsSerials[] = {"CUSA57547"};
@@ -13,7 +16,8 @@ constexpr const char* BlackOps2Serials[] = {"CUSA57548"};
 /// +speed_throw, R1 +frag, L1 +smoke, R3 +melee, L3 +breath_sprint, cross +gostand, circle +stance,
 /// square +usereload, triangle weapnext (Black Ops II: +weapnext_inventory, held for the
 /// inventory), the d-pad +actionslot 1-4, options the menu, the touchpad the scores. The
-/// mouse_look_ values are provisional until #457 measures the games' stick.
+/// mouse_look_ values tune the stick the mouse drives without the native camera (PS_NATIVE_MOUSE=0,
+/// another build, menus); provisional until #457 measures the games' stick.
 constexpr const char* DefaultControls = "key.cross=Space\n"
                                         "key.circle=Left Ctrl, C\n"
                                         "key.square=R, F\n"
@@ -39,12 +43,14 @@ extern const Title BlackOpsTitle = {
     .sz_name = "Call of Duty: Black Ops",
     .serials = BlackOpsSerials,
     .sz_default_controls = DefaultControls,
+    .p_profile = &BlackOpsProfile,
 };
 
 extern const Title BlackOps2Title = {
     .sz_name = "Call of Duty: Black Ops II",
     .serials = BlackOps2Serials,
     .sz_default_controls = DefaultControls,
+    .p_profile = &BlackOps2Profile,
 };
 
 } // namespace Game

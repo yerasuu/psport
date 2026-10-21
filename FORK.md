@@ -312,9 +312,40 @@ itself where the game's profile hooks it (`Game::MouseHooks` `pfn_camera_look`,
 `psport_gpu_camera_look`): as far as the mouse moved, 0.0015 rad a pixel at `mouse_sensitivity` 1,
 with none of the stick's dead zone or acceleration. Where the camera does not take the turn (no
 hook, lock-on, menus) the mouse drives the right stick as before. Bloodborne's hook is
-`gpu/games/bloodborne/mouse_look.cpp`; `PS_NATIVE_MOUSE=0` keeps the stick. The window ignores the
+`gpu/games/bloodborne/mouse_look.cpp`; `PS_NATIVE_MOUSE=0` keeps the stick in every game that has
+one. The window ignores the
 mouse's motion for 100 ms after taking it, so the pointer's jump into relative mode does not turn
 the camera.
+
+Black Ops and Black Ops II (`gpu/games/black_ops/mouse_camera.cpp`, their `Game::Profile`) still
+carry the PC games' mouse input (`CL_MouseMove`, kb #723): two int accumulators per axis that no one
+writes on the console. Each pad sample adds the mouse's counts to the slot the game reads next with
+an atomic add from the host (no code patched): one count a pixel at `mouse_sensitivity` 1 (the hook
+takes the turn as 0.0015 rad a count), so `mouse_sensitivity` scales the counts fed and the game
+applies its own sensitivity on top, `sensitivity` × `m_yaw` = 5 × 0.022 = 0.11 degrees a count by
+default (Black Ops: dvar `sensitivity`; Black Ops II: the profile's `mouseSensitivity`), before its
+aim assist and with none of the stick's dead zone, curve, turn rate or slowdown. 1 gives what the
+PC games gave the same mouse (relative motion is its counts): at 800 DPI 0.11 degrees a count turns
+360 degrees in about 4 inches; 0.5 to 2 covers most players, below 1 for mice above 1600 DPI. +x turns
+right, +y looks down (`mouse_invert_y` flips it). Before it turns on, the executable's code around
+the reader and the fields below is compared byte for byte (Black Ops `0x3f4625`, `0x3f5401`,
+`0x3f545b`, `0x3f565b`; Black Ops II `0x1302a8`, `0x130330`, `0x1303b7`); another build keeps the
+stick (`Mouse camera: ...: not the known build` in the log). Each sample checks the pointers (local
+client 0 present and in the guest's memory, the slot index 0 or 1) and skips otherwise. Where
+`CL_MouseMove` reads and zeroes the counts without turning by them, the sample goes to the stick:
+a frame of 0 ms, the client's flags it tests first (Black Ops `+0x34 & 0x800`, `+0x180 == 0x24`;
+Black Ops II `+0xc5 & 8`, `+0x230 == 0x2b`, `+0xd1 & 4`: vehicles, killcams and the like) and
+Black Ops' `player_topDownCamMode` (Dead Ops Arcade) unless the client's `+0x2c` is 2. Not read:
+the `+strafe` key (the mouse then strafes; no pad button binds it) and the guided-missile spin
+guard (`cl_preventTvGuidedSpin`). The game shows it reads the counts by flipping its slot index;
+counts left unread 100 ms after the last read it showed (or after they were added, when later:
+menus, loading, a long frame) are taken back and the stick takes the mouse, with no counts added,
+until the index moves again. While the camera takes the mouse the right stick gets nothing from it,
+not even the smoothed tail of earlier stick motion (`runtime_pad.c` clears it). The exit summary
+counts the samples fed, those that raced the game's slot flip (lost; decision #724 moves to a
+detour if the night shows it matters), those sent to the stick while the game ignores the mouse,
+skipped, handed to the stick, failed take-backs and half-done adds (`Mouse camera: <game>: ...`;
+failures are also logged their first 8 times).
 
 As a stick, the mouse's speed is smoothed exponentially with the time constant
 `mouse_look_smoothing_ms` (default 60): a steady speed holds the stick at the same level whatever
@@ -323,13 +354,16 @@ there in one time constant. Full deflection takes 1000 / (`mouse_sensitivity` ×
 pixels/s (`mouse_look_gain` default 1). The stick starts from `mouse_look_deadzone` (default 16 of
 127, `PS_MOUSE_DEADZONE` wins) so the game's own dead zone does not swallow slow aiming. A title's default controls may set the three
 (`mouse_look_*` lines in `Game::Title` `sz_default_controls`; Black Ops and Black Ops II carry
-provisional values until #457 measures their stick); the player's `psport.ini` lines win, and
+provisional values for when the stick takes over, until #457 measures their stick); the player's `psport.ini` lines win, and
 values other than the defaults are logged (`Runtime: controls: mouse look ...`).
 
-Aim assist in shooters is the game's own and does not know the device: Black Ops and Black Ops II
-apply their slowdown, lock-on and auto-aim to the mouse's stick as to a pad's, so the mouse feels
-dragged and the view jumps when aiming down sights. With the mouse, turn off Aim Assist (Black Ops
-II: also Target Assist) in the game's controller options. Their layout puts the grenade (R1) on G,
+Aim assist in shooters is the game's own and does not know the device. On the stick (no native
+camera) Black Ops and Black Ops II apply their slowdown, lock-on and auto-aim to the mouse as to a
+pad, so the mouse feels dragged and the view jumps when aiming down sights. Through the native
+camera the slowdown no longer touches the mouse (it scales only the stick's turn); the auto-aim snap
+when aiming down sights remains while the game's Aim Assist option is on (Black Ops II: also Target
+Assist), so turn it off in the controller options; the lock-on still pulls the view toward a target
+while the left stick strafes (keyboard A/D included), which no option of the game turns off. Their layout puts the grenade (R1) on G,
 which with `pad_motion=1` is also the fixed key that takes the sideways controller
 (`MOTION_KEY_HOLD`, `src/input/runtime_pad_motion.c`): a grenade then also hands the mouse to the
 sensors and stops the camera turning, so keep `pad_motion` off for them or bind `key.r1` elsewhere.

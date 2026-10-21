@@ -845,7 +845,12 @@ static void apply_mouse_look(PadData *p_pad_data, double dx, double dy, uint64_t
         const float k=MOUSE_RAD_PER_PIXEL*s_mouse_sensitivity;
         /* The camera's pitch grows as it rises (looking down): the mouse moving down (dy > 0) looks
            down, as the stick pushed down does. */
-        if (psport_gpu_camera_look((float)(s_mouse_invert_y ? -dy : dy)*k,(float)dx*k)) dx=dy=0;
+        /* The stick's smoothed deflection goes with it, else its tail turns the camera twice. */
+        if (psport_gpu_camera_look((float)(s_mouse_invert_y ? -dy : dy)*k,(float)dx*k)) {
+            dx=dy=0;
+            s_look_x=s_look_y=0;
+            s_look_pending_x=s_look_pending_y=0;
+        }
     }
     if (!is_captured) { s_look_x=s_look_y=0; s_look_pending_x=s_look_pending_y=0; s_look_last_us=now; return; }
     s_look_pending_x+=dx;
