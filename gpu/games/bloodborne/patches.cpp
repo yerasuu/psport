@@ -19,6 +19,7 @@
 #include <sys/stat.h>
 #include <vector>
 #include "../../../src/platform/ps_host.h"
+#include "psport_quirks.h"
 
 extern "C" {
 // runtime_config.c
@@ -75,7 +76,9 @@ const std::map<std::string, const char*> ModelLod = {
 /// Intel CPUs: the game's tone mapping turns black (DLC areas most; reported as darker than on the
 /// PS4): the game code runs natively, and Intel's approximate float instructions differ from the
 /// PS4's AMD CPU, so a block the game gates on a computed flag never runs. The community fix runs
-/// it always; on by default on Intel. PS_INTEL_TONEMAP_FIX=0/1 forces it off or on.
+/// it always; on by default on Intel. PS_INTEL_TONEMAP_FIX=0/1 forces it off or on. A WORKAROUND
+/// quirk until #350 makes those instructions answer as the PS4's: PS_QUIRKS=-bloodborne_intel_tonemap
+/// leaves the game's code as it is, PS_INTEL_TONEMAP_FIX=1 included.
 constexpr const char* IntelTonemap = "Intel Black Tonemap Fix";
 /// The title's PLAY ONLINE / PLAY OFFLINE dialog: the port has no PSN, the game goes straight to
 /// the main menu offline. On by default (the launcher's switch); PS_SKIP_NETWORK_CHOICE=0 shows it.
@@ -328,7 +331,8 @@ void PrepareEnvironment() {
 void ProbeHostFeatures() {
     if (IsIntelCpu()) {
         ps_host_feature_probed(PS_HOST_FEATURE_intel_tonemap_fix, 1,
-                               "GenuineIntel CPU: the fix is on unless PS_INTEL_TONEMAP_FIX=0");
+                               "GenuineIntel CPU: the fix is on unless PS_INTEL_TONEMAP_FIX=0 or PS_QUIRKS turns off "
+                               "the quirk bloodborne_intel_tonemap (-bloodborne_intel_tonemap or none)");
     } else {
         ps_host_feature_probed(PS_HOST_FEATURE_intel_tonemap_fix, 0,
                                "not needed: this CPU's float instructions answer as the PS4's");
@@ -374,7 +378,12 @@ bool AddPatches(const PsGameFiles& game, const PsPatchServices& services) {
         AddOnce(names, it->second);
     }
     const std::string intel = runtime_env("PS_INTEL_TONEMAP_FIX", "");
-    if (intel == "1" || (intel != "0" && IsIntelCpu())) {
+    if (!PsQuirk::Active(RUNTIME_QUIRK_bloodborne_intel_tonemap)) {
+        if (intel == "1") {
+            std::fprintf(stderr,
+                         "ERROR: Patches: PS_INTEL_TONEMAP_FIX=1 ignored: quirk bloodborne_intel_tonemap is off\n");
+        }
+    } else if (intel == "1" || (intel != "0" && IsIntelCpu())) {
         AddOnce(names, IntelTonemap);
     }
     if (std::strcmp(runtime_env("PS_SKIP_NETWORK_CHOICE", "1"), "0") != 0) {

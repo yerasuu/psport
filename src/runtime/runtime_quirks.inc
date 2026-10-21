@@ -81,3 +81,11 @@ QUIRK(bloodborne_fx_init_clear, WORKAROUND,
       "into those targets in memory instead, in their format (bbport 0.6 zeroes them with a private WRITE_DATA). The "
       "general fix finds what the translator does wrong with those clears",
       "#685")
+QUIRK(bloodborne_intel_tonemap, WORKAROUND,
+      "Bloodborne's tone mapping turns black on Intel CPUs (DLC areas most; darker than on a PS4): the game skips a "
+      "block gated on the byte at +0x128 of its tone mapping state (je at 0x25843e5), a flag the community traces to "
+      "approximate float instructions (rcpps/rsqrtps, ~5,800 VEX and SSE ones in eboot.bin) whose results differ "
+      "between Intel and the PS4's AMD Jaguar (not yet confirmed in the code that writes it). The title applies the "
+      "community's Intel Black Tonemap Fix (that je as NOPs) on GenuineIntel CPUs, PS_INTEL_TONEMAP_FIX=0/1 forcing "
+      "it; the general fix makes those instructions answer as the Jaguar's for every title",
+      "#350")
