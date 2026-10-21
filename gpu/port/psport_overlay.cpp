@@ -27,16 +27,26 @@
 #include "video_core/renderer_vulkan/vk_temporal_upscaler.h"
 
 // DejaVu Sans (Cyrillic), embedded (third_party/fonts, Bitstream Vera license).
-asm(".section .rodata\n"
+// Windows objects are COFF, which has neither .hidden nor .previous.
+#ifdef _WIN32
+#define PS_FONT_SECTION ".section .rdata,\"dr\"\n"
+#define PS_FONT_HIDDEN(symbol) ""
+#define PS_FONT_SECTION_END ".text\n"
+#else
+#define PS_FONT_SECTION ".section .rodata\n"
+#define PS_FONT_HIDDEN(symbol) ".hidden " symbol "\n"
+#define PS_FONT_SECTION_END ".previous\n"
+#endif
+asm(PS_FONT_SECTION
     ".balign 16\n"
-    ".hidden psport_font_ttf\n"
+    PS_FONT_HIDDEN("psport_font_ttf")
     ".global psport_font_ttf\n"
     "psport_font_ttf:\n"
     ".incbin \"" PS_FONT_PATH "\"\n"
-    ".hidden psport_font_ttf_end\n"
+    PS_FONT_HIDDEN("psport_font_ttf_end")
     ".global psport_font_ttf_end\n"
     "psport_font_ttf_end:\n"
-    ".previous\n");
+    PS_FONT_SECTION_END);
 extern "C" const unsigned char psport_font_ttf[];
 extern "C" const unsigned char psport_font_ttf_end[];
 

@@ -466,12 +466,12 @@ static void ShowCursor(s32 handle, u32 index) {
     const VideoOutCursor& cursor = port->cursors[index];
     PsOverlay::SetGameCursor(index, PsOverlay::GameCursor{
                                         .p_image = static_cast<const u32*>(cursor.image),
-                                        .x = cursor.x,
-                                        .y = cursor.y,
-                                        .hot_x = cursor.hot_x,
-                                        .hot_y = cursor.hot_y,
-                                        .width = port->resolution.full_width,
-                                        .height = port->resolution.full_height,
+                                        .x = static_cast<s32>(cursor.x),
+                                        .y = static_cast<s32>(cursor.y),
+                                        .hot_x = static_cast<u32>(cursor.hot_x),
+                                        .hot_y = static_cast<u32>(cursor.hot_y),
+                                        .width = static_cast<u32>(port->resolution.full_width),
+                                        .height = static_cast<u32>(port->resolution.full_height),
                                         .is_enabled = cursor.enabled,
                                         .is_magnified = cursor.magnified,
                                     });

@@ -16,7 +16,9 @@ namespace Libraries::Font {
 
 template <auto F>
 struct Guarded;
-template <typename R, typename... Args, R (*F)(Args...)>
+// PS4_SYSV_ABI in the pointer type, since on Windows it is not the default convention and the
+// exports would not match a plain function pointer.
+template <typename R, typename... Args, R(PS4_SYSV_ABI* F)(Args...)>
 struct Guarded<F> {
     static const char* name;
     static R PS4_SYSV_ABI Call(Args... args) {
@@ -35,7 +37,7 @@ struct Guarded<F> {
         }
     }
 };
-template <typename R, typename... Args, R (*F)(Args...)>
+template <typename R, typename... Args, R(PS4_SYSV_ABI* F)(Args...)>
 const char* Guarded<F>::name = "?";
 
 } // namespace Libraries::Font

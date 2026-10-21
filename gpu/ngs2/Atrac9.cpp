@@ -277,7 +277,7 @@ static bool AddAtrac9Range(Ngs2WaveformInfo& info, std::uint64_t begin, std::uin
     const auto bytes = frames * info.audio_frame_size;
     if (offset > info.data_size || bytes > info.data_size - offset) return false;
     auto& block = info.block[info.num_blocks++];
-    block = {info.data_offset + offset, bytes, repeats, static_cast<std::uint32_t>(skip), samples, 0, 0};
+    block = {static_cast<std::uint32_t>(info.data_offset + offset), static_cast<std::uint32_t>(bytes), repeats, static_cast<std::uint32_t>(skip), samples, 0, 0};
     return true;
 }
 

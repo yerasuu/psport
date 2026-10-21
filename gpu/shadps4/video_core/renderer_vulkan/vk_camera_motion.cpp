@@ -410,7 +410,11 @@ void CameraMotion::CommitFrameCamera() {
     // The wall clock, so that a cut can be matched with what the player saw.
     const std::time_t now = std::time(nullptr);
     std::tm local{};
+#ifdef _WIN32
+    localtime_s(&local, &now);
+#else
     localtime_r(&now, &local);
+#endif
     std::printf("Camera motion: cut at %02d:%02d:%02d (turned %.0f degrees, moved %.0f near planes): "
                 "upscaler history reset (%llu so far; PS_CAMERA_CUTS=0: off)\n",
                 local.tm_hour, local.tm_min, local.tm_sec, turned, moved,

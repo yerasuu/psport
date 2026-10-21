@@ -555,7 +555,9 @@ s32 PS4_SYSV_ABI sceFiberSwitch(OrbisFiber* fiber, u64 arg_on_run_to, u64* arg_o
 // stays on the caller's stack, which a switch leaves and comes back to.
 template <auto F>
 struct Checked;
-template <typename... Args, s32 (*F)(Args...)>
+// PS4_SYSV_ABI in the pointer type, since on Windows it is not the default convention and the
+// exports would not match a plain function pointer.
+template <typename... Args, s32(PS4_SYSV_ABI* F)(Args...)>
 struct Checked<F> {
     static const char* name;
     static s32 PS4_SYSV_ABI Call(Args... args) {
@@ -587,7 +589,7 @@ struct Checked<F> {
         return result;
     }
 };
-template <typename... Args, s32 (*F)(Args...)>
+template <typename... Args, s32(PS4_SYSV_ABI* F)(Args...)>
 const char* Checked<F>::name = "?";
 
 #define FIBER_FUNCTION(nid, function)                                                              \

@@ -3,9 +3,9 @@
 #include <time.h>
 #include <stdint.h>
 #include <stddef.h>
+#include "ps_host.h"
 #ifndef _WIN32
 #include <setjmp.h>
-#include "ps_host.h"
 /* Recovery point for speculative guest memory reads on this thread (signals.c fault handler). */
 extern __thread sigjmp_buf *g_p_runtime_fault_recover;
 /* Restarts the game (in-game settings menu, render resolution change). */

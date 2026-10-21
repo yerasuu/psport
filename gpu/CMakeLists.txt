@@ -230,8 +230,10 @@ else()
         DEPENDS port/psport_runtime.def VERBATIM)
     add_custom_target(psport-runtime-imports DEPENDS ${PS_RUNTIME_IMPORTS})
     add_dependencies(psport-gpu psport-runtime-imports)
-    # winpthreads: the pthread calls the shadPS4 code and the port's diagnostics make.
-    target_link_libraries(psport-gpu PRIVATE ${PS_RUNTIME_IMPORTS} pthread)
+    # winpthreads: the pthread calls the shadPS4 code and the port's diagnostics make. ws2_32:
+    # Boost.Asio's headers start Winsock. onecore: CreateFileMapping2 (io_file.cpp), which no
+    # kernel32 import library has.
+    target_link_libraries(psport-gpu PRIVATE ${PS_RUNTIME_IMPORTS} pthread ws2_32 onecore)
 endif()
 target_link_libraries(psport-gpu PRIVATE ffx-vulkan::portable ffx-vulkan::fsr4-v07-vulkan)
 # psport: Tracy profiler zones (PS_TRACY, off by default, docs/en/PROFILING.md). Off, the shim's Tracy

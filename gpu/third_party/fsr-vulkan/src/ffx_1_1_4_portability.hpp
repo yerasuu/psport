@@ -15,8 +15,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <cwchar>
+#include <mutex>
+#include <new>
 
 #if !defined(_WIN32)
 
