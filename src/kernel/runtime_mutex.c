@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <inttypes.h>
+#include <limits.h>
 #ifndef _WIN32
 #include <pthread.h>
 #include <errno.h>
@@ -62,6 +63,10 @@ static void note_acquired(GuestMutex *p_mutex) {
 static void note_released(GuestMutex *p_mutex) {
     if (!--p_mutex->c_holds) __atomic_store_n(&p_mutex->p_owner,NULL,__ATOMIC_RELAXED);
 }
+/* libkernel keeps a recursive mutex's extra holds in a signed int and refuses another once it wrapped. */
+static int has_full_recursion(const GuestMutex *p_mutex) {
+    return p_mutex->type == 2 && is_owner(p_mutex) && p_mutex->c_holds - 1 > INT_MAX;
+}
 static void log_mutex_failure(size_t *p_c_failures, const char *sz_what, const void *p_mutex, int e) {
     if (__atomic_fetch_add(p_c_failures,1,__ATOMIC_RELAXED)>=LOGGED_MUTEX_FAILURES) return;
     uint64_t sites[3];
@@ -72,7 +77,7 @@ static void log_mutex_failure(size_t *p_c_failures, const char *sz_what, const v
 /* Busy try locks and expired timed locks are expected; anything else on a recursive mutex leaves
  * the caller unprotected, since games ignore what lock returns. */
 static int finish_lock(GuestMutex *p_mutex, int e) {
-    if (!e) { ++s_c_locks; note_acquired(p_mutex); return 0; }
+    if (!e) { __atomic_fetch_add(&s_c_locks,1,__ATOMIC_RELAXED); note_acquired(p_mutex); return 0; }
     if (e==EDEADLK) log_mutex_failure(&s_c_self_deadlocks,"relock by its owner of non-recursive mutex",p_mutex,e);
     else if (p_mutex->type==2 && e!=EBUSY && e!=ETIMEDOUT) log_mutex_failure(&s_c_recursive_lock_failures,"lock of recursive mutex",p_mutex,e);
     return e;
@@ -93,10 +98,11 @@ static ABI int32_t mutex_init(GuestMutex **pp_out, GuestAttr **pp_attr, const ch
     pthread_mutexattr_destroy(&native_attr);
     if (e) { free(p_mutex); return orbis_error(e); }
     p_mutex->type = type; p_mutex->p_owner = NULL; p_mutex->c_holds = 0;
-    *pp_out = p_mutex; ++s_c_created; return 0;
+    *pp_out = p_mutex; __atomic_fetch_add(&s_c_created, 1, __ATOMIC_RELAXED); return 0;
 }
 static pthread_mutex_t s_static_init = PTHREAD_MUTEX_INITIALIZER;
-/* Statically initialized handles (0/1) are created once, even under contention. */
+/* Statically initialized handles are created once, even under contention: 0 with the default
+ * attributes and 1 as an adaptive mutex, as libthr's init_static picks between its two defaults. */
 static int32_t ensure_mutex(GuestMutex **pp_mutex) {
     if (!pp_mutex) return orbis_error(EINVAL);
     uintptr_t value = __atomic_load_n((uintptr_t *)pp_mutex, __ATOMIC_ACQUIRE);
@@ -106,7 +112,8 @@ static int32_t ensure_mutex(GuestMutex **pp_mutex) {
     int32_t e = 0;
     if ((uintptr_t)*pp_mutex < 2) {
         GuestMutex *p_created_mutex = NULL;
-        e = mutex_init(&p_created_mutex, NULL, NULL);
+        GuestAttr adaptive = {.type = 4, .protocol = 0}, *p_adaptive = &adaptive;
+        e = mutex_init(&p_created_mutex, (uintptr_t)*pp_mutex == 1 ? &p_adaptive : NULL, NULL);
         if (!e) __atomic_store_n(pp_mutex, p_created_mutex, __ATOMIC_RELEASE);
     }
     pthread_mutex_unlock(&s_static_init);
@@ -116,6 +123,7 @@ static ABI int32_t mutex_lock(GuestMutex **pp_mutex) {
     int32_t e = ensure_mutex(pp_mutex);
     if (e) return e;
     GuestMutex *p_mutex = *pp_mutex;
+    if (has_full_recursion(p_mutex)) return orbis_error(finish_lock(p_mutex, EAGAIN));
     int r = pthread_mutex_trylock(&p_mutex->native);
     if (r == EBUSY) { /* contended: timed for the wait profile */
         const uint64_t start = runtime_wait_clock();
@@ -129,7 +137,14 @@ static ABI int32_t mutex_lock(GuestMutex **pp_mutex) {
 static ABI int32_t mutex_trylock(GuestMutex **pp_mutex) {
     int32_t e = ensure_mutex(pp_mutex);
     if (e) return e;
-    return orbis_error(finish_lock(*pp_mutex, pthread_mutex_trylock(&(*pp_mutex)->native)));
+    GuestMutex *p_mutex = *pp_mutex;
+    if (has_full_recursion(p_mutex)) return orbis_error(finish_lock(p_mutex, EAGAIN));
+    /* libkernel refuses an adaptive mutex's owner with EINVAL where FreeBSD answers EBUSY. */
+    if (p_mutex->type == 4 && is_owner(p_mutex)) {
+        log_mutex_failure(&s_c_self_deadlocks, "try lock by its owner of adaptive mutex", p_mutex, EINVAL);
+        return orbis_error(EINVAL);
+    }
+    return orbis_error(finish_lock(p_mutex, pthread_mutex_trylock(&p_mutex->native)));
 }
 static ABI int32_t mutex_unlock(GuestMutex **pp_mutex) {
     if (!pp_mutex || (uintptr_t)*pp_mutex == 2) return orbis_error(EINVAL);
@@ -146,10 +161,11 @@ static ABI int32_t mutex_unlock(GuestMutex **pp_mutex) {
     note_released(p_mutex);
     const int e = pthread_mutex_unlock(&p_mutex->native);
     if (e) {
+        note_acquired(p_mutex);
         if (p_mutex->type == 2) log_mutex_failure(&s_c_recursive_unlock_failures, "unlock by its owner of recursive mutex", p_mutex, e);
         return orbis_error(e);
     }
-    ++s_c_unlocks;
+    __atomic_fetch_add(&s_c_unlocks, 1, __ATOMIC_RELAXED);
     return 0;
 }
 static ABI int32_t mutex_destroy(GuestMutex **pp_mutex) {
@@ -168,12 +184,22 @@ static int deadline_after(clockid_t clock, struct timespec *p_end, uint64_t usec
     return 0;
 }
 static int32_t timed_error(int e) { return e == ETIMEDOUT ? (int32_t)UINT32_C(0x8002003c) : orbis_error(e); }
+/* An owner can never see its non-recursive mutex released, so libkernel sleeps the whole timeout and
+ * reports it expired, for an error checking or adaptive mutex too (glibc answers EDEADLK). It sleeps
+ * once and ignores how the sleep ended, so a signal ends the wait early (kb #798). */
+static int timedlock_until(GuestMutex *p_mutex, const struct timespec *p_end) {
+    if (has_full_recursion(p_mutex)) return EAGAIN;
+    if (p_mutex->type == 2 || !is_owner(p_mutex)) return pthread_mutex_timedlock(&p_mutex->native, p_end);
+    log_mutex_failure(&s_c_self_deadlocks, "timed relock by its owner of non-recursive mutex", p_mutex, ETIMEDOUT);
+    (void)clock_nanosleep(CLOCK_REALTIME, TIMER_ABSTIME, p_end, NULL);
+    return ETIMEDOUT;
+}
 static ABI int32_t mutex_timedlock(GuestMutex **pp_mutex, uint32_t usec) {
     int32_t e = ensure_mutex(pp_mutex);
     if (e) return e;
     struct timespec end;
     if (deadline_after(CLOCK_REALTIME, &end, usec)) return orbis_error(EINVAL);
-    return timed_error(finish_lock(*pp_mutex, pthread_mutex_timedlock(&(*pp_mutex)->native, &end)));
+    return timed_error(finish_lock(*pp_mutex, timedlock_until(*pp_mutex, &end)));
 }
 /* A relative timeout of 64-bit microseconds, unlike scePthreadMutexTimedlock's 32. */
 static int32_t mutex_reltimedlock(GuestMutex **pp_mutex, uint64_t usec) {
@@ -181,7 +207,7 @@ static int32_t mutex_reltimedlock(GuestMutex **pp_mutex, uint64_t usec) {
     if (e) return e;
     struct timespec end;
     if (deadline_after(CLOCK_REALTIME, &end, usec)) return orbis_error(EINVAL);
-    return timed_error(finish_lock(*pp_mutex, pthread_mutex_timedlock(&(*pp_mutex)->native, &end)));
+    return timed_error(finish_lock(*pp_mutex, timedlock_until(*pp_mutex, &end)));
 }
 /* Names are for the console's debugger only and the runtime keeps none (scePthreadMutexInit's
  * neither): libkernel puts "SceNoNameMutex" in place of a null one and never fails. */
@@ -232,7 +258,7 @@ static ABI int32_t cond_init(GuestCond **pp_out, GuestCondAttr **pp_attr, const 
     if (!e) e = pthread_cond_init(&p_cond->native, &native_attr);
     pthread_condattr_destroy(&native_attr);
     if (e) { free(p_cond); return orbis_error(e); }
-    *pp_out = p_cond; ++s_c_conds; return 0;
+    *pp_out = p_cond; __atomic_fetch_add(&s_c_conds, 1, __ATOMIC_RELAXED); return 0;
 }
 static int32_t ensure_cond(GuestCond **pp_cond) {
     if (!pp_cond) return orbis_error(EINVAL);
@@ -266,7 +292,7 @@ static int wait_released(GuestCond *p_cond, GuestMutex *p_mutex, const struct ti
     for (unsigned i = 1; i < c_holds; ++i) (void)pthread_mutex_unlock(&p_mutex->native);
     p_mutex->c_holds = 1;
     note_released(p_mutex);
-    ++s_c_waits;
+    __atomic_fetch_add(&s_c_waits, 1, __ATOMIC_RELAXED);
     const uint64_t start = runtime_wait_clock();
     RUNTIME_ZONE(zone, "cond wait");
     const int e = p_end ? pthread_cond_timedwait(&p_cond->native, &p_mutex->native, p_end)
@@ -301,12 +327,14 @@ static ABI int32_t cond_timedwait(GuestCond **pp_cond, GuestMutex **pp_mutex, ui
 static ABI int32_t cond_signal(GuestCond **pp_cond) {
     int32_t e = ensure_cond(pp_cond);
     if (e) return e;
-    ++s_c_wakeups; return orbis_error(pthread_cond_signal(&(*pp_cond)->native));
+    __atomic_fetch_add(&s_c_wakeups, 1, __ATOMIC_RELAXED);
+    return orbis_error(pthread_cond_signal(&(*pp_cond)->native));
 }
 static ABI int32_t cond_broadcast(GuestCond **pp_cond) {
     int32_t e = ensure_cond(pp_cond);
     if (e) return e;
-    ++s_c_wakeups; return orbis_error(pthread_cond_broadcast(&(*pp_cond)->native));
+    __atomic_fetch_add(&s_c_wakeups, 1, __ATOMIC_RELAXED);
+    return orbis_error(pthread_cond_broadcast(&(*pp_cond)->native));
 }
 /* PS4 struct timespec is {int64 sec, int64 nsec}, identical to Linux x86-64. */
 typedef struct { int64_t sec, nsec; } GuestTimespec;
@@ -317,6 +345,20 @@ static ABI int32_t cond_abs_timedwait(GuestCond **pp_cond, GuestMutex **pp_mutex
 }
 /* POSIX pthread APIs return positive guest errno values, unlike scePthread. */
 static int32_t posix_result(int32_t result) { return result ? (int32_t)((uint32_t)result & 0xffff) : 0; }
+/* The deadline is checked only once the mutex cannot be taken at once, as libthr does, and before
+ * any sleep. */
+static int32_t mutex_abs_timedlock(GuestMutex **pp_mutex, const GuestTimespec *p_abs) {
+    int32_t e = ensure_mutex(pp_mutex);
+    if (e) return e;
+    GuestMutex *p_mutex = *pp_mutex;
+    int r = has_full_recursion(p_mutex) ? EAGAIN : pthread_mutex_trylock(&p_mutex->native);
+    if (r == EBUSY) {
+        if (!p_abs || p_abs->sec < 0 || p_abs->nsec < 0 || p_abs->nsec > 999999999) return orbis_error(EINVAL);
+        const struct timespec end = {.tv_sec = (time_t)p_abs->sec, .tv_nsec = (long)p_abs->nsec};
+        r = timedlock_until(p_mutex, &end);
+    }
+    return timed_error(finish_lock(p_mutex, r));
+}
 static ABI int32_t posix_attr_init(GuestAttr **pp_out) { return posix_result(attr_init(pp_out)); }
 static ABI int32_t posix_attr_type(GuestAttr **pp_attr,int type) { return posix_result(attr_type(pp_attr,type)); }
 static ABI int32_t posix_attr_destroy(GuestAttr **pp_attr) { return posix_result(attr_destroy(pp_attr)); }
@@ -335,6 +377,7 @@ static ABI int32_t posix_cond_signal(GuestCond **pp_cond) { return posix_result(
 static ABI int32_t posix_cond_broadcast(GuestCond **pp_cond) { return posix_result(cond_broadcast(pp_cond)); }
 static ABI int32_t posix_cond_setname(GuestCond **pp_cond, const char *sz_name) { (void)pp_cond; return sz_name ? 0 : EINVAL; }
 static ABI int32_t posix_mutex_reltimedlock(GuestMutex **pp_mutex, uint64_t usec) { return posix_result(mutex_reltimedlock(pp_mutex, usec)); }
+static ABI int32_t posix_mutex_timedlock(GuestMutex **pp_mutex, const GuestTimespec *p_abs) { return posix_result(mutex_abs_timedlock(pp_mutex, p_abs)); }
 static ABI int32_t posix_condattr_init(GuestCondAttr **pp_cond_attr) { return posix_result(condattr_init(pp_cond_attr)); }
 static ABI int32_t posix_condattr_destroy(GuestCondAttr **pp_cond_attr) { return posix_result(condattr_destroy(pp_cond_attr)); }
 static ABI int32_t posix_condattr_getclock(GuestCondAttr **pp_cond_attr, int32_t *p_clock) { return posix_result(condattr_getclock(pp_cond_attr, p_clock)); }
@@ -364,7 +407,7 @@ static const RuntimeExport s_exports[] = {
     {"pthread_condattr_getpshared", posix_condattr_getpshared}, {"pthread_condattr_setpshared", posix_condattr_setpshared},
     {"pthread_mutexattr_setprotocol", posix_attr_protocol}, {"pthread_mutexattr_getprotocol", posix_attr_get_protocol},
     {"pthread_mutex_setname_np", posix_mutex_setname}, {"pthread_cond_setname_np", posix_cond_setname},
-    {"pthread_mutex_reltimedlock_np", posix_mutex_reltimedlock},
+    {"pthread_mutex_reltimedlock_np", posix_mutex_reltimedlock}, {"pthread_mutex_timedlock", posix_mutex_timedlock},
 };
 uintptr_t runtime_mutex_resolve(const char *sz_name) {
     return RUNTIME_LOOKUP(s_exports, sz_name);
