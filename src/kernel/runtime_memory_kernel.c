@@ -380,6 +380,11 @@ static ABI int32_t set_virtual_range_name(const void *p_address, uint64_t cb_ran
     if (strnlen(sz_name,32)>=32) return (int32_t)UINT32_C(0x8002003f); /* ENAMETOOLONG */
     return 0;
 }
+/* Range names are not kept (sceKernelSetVirtualRangeName checks its name only), so there is none to clear. */
+static ABI int32_t clear_virtual_range_name(const void *p_address, uint64_t cb_range) {
+    (void)p_address; (void)cb_range;
+    return 0;
+}
 static ABI int32_t batch_map2(BatchEntry *p_entries, int c_entries, int *p_processed, int flags) {
     if (!p_entries || c_entries<0) return INVALID;
     int32_t result=0; int is_done=0;
@@ -535,6 +540,7 @@ static const RuntimeExport s_exports[]={
     {"sceKernelMprotect",kernel_mprotect}, {"sceKernelQueryMemoryProtection",query_protection},
     {"sceKernelVirtualQuery",virtual_query}, {"sceKernelGetDirectMemoryType",direct_memory_type},
     {"sceKernelDirectMemoryQuery",direct_memory_query}, {"sceKernelSetVirtualRangeName",set_virtual_range_name},
+    {"sceKernelClearVirtualRangeName",clear_virtual_range_name},
     {"sceKernelMlock",lock_range},
     {"sceKernelBatchMap",batch_map}, {"sceKernelBatchMap2",batch_map2},
     {"mmap",posix_mmap}, {"sceKernelMmap",kernel_mmap},

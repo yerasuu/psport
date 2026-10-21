@@ -227,6 +227,21 @@ int ps_host_fs_set_status(int h_file, unsigned flags);
 /* 1 or 0, or minus the host's errno. */
 int ps_host_fs_close_on_exec(int h_file);
 int ps_host_fs_set_close_on_exec(int h_file, int is_set);
+/* Writes the file's data back, without the metadata a later read does not need: 0, or the host's
+ * errno. */
+int ps_host_fs_sync_data(int h_file);
+/* A pipe whose p_out_h_files[0] reads what p_out_h_files[1] writes, both close-on-exec: 0, or the
+ * host's errno. */
+int ps_host_fs_pipe(int p_out_h_files[2]);
+/* flock's whole-file advisory locks: SHARED or EXCLUSIVE (with NONBLOCK, EWOULDBLOCK instead of
+ * waiting), or UNLOCK. 0, or the host's errno. */
+enum { PS_HOST_LOCK_SHARED = 1, PS_HOST_LOCK_EXCLUSIVE = 2, PS_HOST_LOCK_NONBLOCK = 4, PS_HOST_LOCK_UNLOCK = 8 };
+int ps_host_fs_lock(int h_file, unsigned operation);
+/* What a pipe, socket or other stream can do now, without waiting: the events asked for (IN, OUT)
+ * that hold, with HANGUP and ERROR whenever they do, and the bytes a read gets (IN) or a write has
+ * room for (OUT, 0 when the host cannot say). 0, or the host's errno (EBADF: not open). */
+enum { PS_HOST_POLL_IN = 1, PS_HOST_POLL_OUT = 2, PS_HOST_POLL_HANGUP = 4, PS_HOST_POLL_ERROR = 8 };
+int ps_host_fs_poll(int h_file, unsigned events, unsigned *p_out_events, int64_t *p_out_cb_ready);
 
 typedef struct PsHostDir PsHostDir;
 typedef enum {

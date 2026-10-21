@@ -22,7 +22,23 @@
 #include "core/libraries/kernel/time.h"
 #include "core/libraries/libs.h"
 
+// psport: the runtime's descriptor table (src/kernel/runtime_file.c).
+extern "C" uint64_t runtime_file_serial(int h_fd);
+extern "C" int runtime_file_ready(int h_fd, uint64_t serial, int is_write, int64_t* p_out_data, int* p_out_is_eof);
+extern "C" int runtime_file_changes(int h_fd, uint64_t serial, int64_t p_inout_state[4]);
+
 namespace Libraries::Kernel {
+
+// psport: shadPS4 124328bcd
+static bool IsIoFilter(s16 filter) {
+    return filter == OrbisKernelEvent::Filter::Read || filter == OrbisKernelEvent::Filter::Write ||
+           filter == OrbisKernelEvent::Filter::Vnode;
+}
+
+// psport: which open of the descriptor table the ident is, 0 when none.
+static u64 DescriptorSerial(u64 ident) {
+    return ident <= 0x7fffffff ? runtime_file_serial(static_cast<int>(ident)) : 0;
+}
 
 extern boost::asio::io_context io_context;
 extern void KernelSignalRequest();
@@ -80,6 +96,17 @@ bool EqueueInternal::AddEvent(EqueueEvent& event) {
             event.timer_interval = std::chrono::nanoseconds(ts.tv_nsec + ts.tv_sec * 1000000000);
         }
 
+        // psport: a read or write filter's data is its low-water mark with NOTE_LOWAT (1), a
+        // vnode filter's fflags the changes it reports (shadPS4 124328bcd, FreeBSD's kevent).
+        const bool is_io = IsIoFilter(filter);
+        if (is_io) {
+            event.io_serial = DescriptorSerial(id);
+            event.io_low_water = filter != OrbisKernelEvent::Filter::Vnode && (event.event.fflags & 1)
+                                     ? event.event.data
+                                     : 0;
+            event.io_notes = filter == OrbisKernelEvent::Filter::Vnode ? event.event.fflags : 0;
+        }
+
         // First, check if there's already an event with the same id and filter.
         const auto& find_it = std::ranges::find_if(m_events, [id, filter](auto& ev) {
             return ev.event.ident == id && ev.event.filter == filter;
@@ -91,6 +118,18 @@ bool EqueueInternal::AddEvent(EqueueEvent& event) {
             auto& old_event = *find_it;
             old_event.timer_interval = event.timer_interval;
             old_event.event.udata = event.event.udata;
+            if (is_io) { // psport
+                if (old_event.io_serial != event.io_serial) { // another open behind the same number
+                    old_event.io_serial = event.io_serial;
+                    old_event.vnode_state[0] = -1;
+                    old_event.Clear();
+                }
+                old_event.io_low_water = event.io_low_water;
+                old_event.io_notes = event.io_notes;
+                if (CheckIoEvent(old_event) && old_event.IsTriggered()) {
+                    m_cond.notify_one();
+                }
+            }
             return true;
         }
 
@@ -101,15 +140,28 @@ bool EqueueInternal::AddEvent(EqueueEvent& event) {
         event.event.flags &= ~OrbisKernelEvent::Flags::Add;
 
         // Clear flag is appended to most event types internally.
-        if (event.event.filter != OrbisKernelEvent::Filter::User) {
+        // psport: not to read and write filters, which hold while their descriptor is ready
+        // (FreeBSD sets it for vnode filters, whose changes add up until they are read).
+        if (event.event.filter != OrbisKernelEvent::Filter::User &&
+            event.event.filter != OrbisKernelEvent::Filter::Read &&
+            event.event.filter != OrbisKernelEvent::Filter::Write) {
             event.event.flags |= OrbisKernelEvent::Flags::Clear;
         }
+
+        // psport: an I/O filter is checked at once (shadPS4 124328bcd).
+        if (is_io) {
+            CheckIoEvent(event);
+        }
+        const bool is_triggered = event.IsTriggered();
 
         const auto& it = std::ranges::find(m_events, event);
         if (it != m_events.cend()) {
             *it = std::move(event);
         } else {
             m_events.emplace_back(std::move(event));
+        }
+        if (is_triggered) {
+            m_cond.notify_one();
         }
     }
 
@@ -182,6 +234,7 @@ int EqueueInternal::WaitForEvents(OrbisKernelEvent* ev, int num, const OrbisKern
     if (timo != nullptr && *timo == 0) {
         // Effectively acts as a poll; only events that have already
         // arrived at the time of this function call can be received
+        std::scoped_lock lock{m_mutex}; // psport: shadPS4 124328bcd
         return GetTriggeredEvents(ev, num);
     }
     const auto micros = timo ? *timo : 0u;
@@ -198,13 +251,24 @@ int EqueueInternal::WaitForEvents(OrbisKernelEvent* ev, int num, const OrbisKern
         return count > 0;
     };
 
-    if (micros == 0) {
+    std::unique_lock lock{m_mutex};
+    // psport: nothing triggers an I/O filter, so the queue looks at its descriptors every 1-10 ms
+    // while it has one (shadPS4 124328bcd).
+    if (HasPendingIoEvents()) {
+        const auto deadline = micros == 0 ? std::chrono::steady_clock::time_point::max()
+                                          : std::chrono::steady_clock::now() + std::chrono::microseconds(micros);
+        while (!predicate() && std::chrono::steady_clock::now() < deadline) {
+            const auto remaining = deadline == std::chrono::steady_clock::time_point::max()
+                                       ? std::chrono::milliseconds(10)
+                                       : std::chrono::duration_cast<std::chrono::milliseconds>(
+                                             deadline - std::chrono::steady_clock::now());
+            m_cond.wait_for(lock, std::clamp(remaining, std::chrono::milliseconds(1), std::chrono::milliseconds(10)));
+        }
+    } else if (micros == 0) {
         // Wait indefinitely for events
-        std::unique_lock lock{m_mutex};
         m_cond.wait(lock, predicate);
     } else {
         // Wait up until the timeout value
-        std::unique_lock lock{m_mutex};
         m_cond.wait_for(lock, std::chrono::microseconds(micros), predicate);
     }
 
@@ -238,6 +302,10 @@ bool EqueueInternal::TriggerEvent(u64 ident, s16 filter, void* trigger_data) {
 int EqueueInternal::GetTriggeredEvents(OrbisKernelEvent* ev, int num) {
     int count = 0;
     for (auto it = m_events.begin(); it != m_events.end();) {
+        if (IsIoFilter(it->event.filter) && !CheckIoEvent(*it)) { // psport
+            it = m_events.erase(it);
+            continue;
+        }
         if (it->IsTriggered()) {
             ev[count++] = it->event;
             if (it->event.flags & OrbisKernelEvent::Flags::Clear) {
@@ -258,6 +326,40 @@ int EqueueInternal::GetTriggeredEvents(OrbisKernelEvent* ev, int num) {
     }
 
     return count;
+}
+
+// psport: shadPS4 124328bcd, as FreeBSD's filters report: data is the bytes to read or the room to
+// write, EOF set once the other end is gone; a vnode filter collects the changes it asked for.
+bool EqueueInternal::CheckIoEvent(EqueueEvent& ev) {
+    const int h_fd = static_cast<int>(ev.event.ident);
+    if (ev.event.filter == OrbisKernelEvent::Filter::Vnode) {
+        const int notes = runtime_file_changes(h_fd, ev.io_serial, ev.vnode_state);
+        if (notes < 0) {
+            return false;
+        }
+        const u32 seen = (ev.IsTriggered() ? ev.event.fflags : 0u) | (static_cast<u32>(notes) & ev.io_notes);
+        if (seen) {
+            ev.TriggerIo(0, seen);
+        }
+        return true;
+    }
+    s64 data = 0;
+    int is_eof = 0;
+    const int ready =
+        runtime_file_ready(h_fd, ev.io_serial, ev.event.filter == OrbisKernelEvent::Filter::Write, &data, &is_eof);
+    if (ready < 0) {
+        return false;
+    }
+    if (ready && (is_eof || static_cast<u64>(data) >= ev.io_low_water)) {
+        ev.TriggerIo(static_cast<u64>(data), 0, is_eof ? OrbisKernelEvent::Flags::Eof : 0);
+    } else {
+        ev.Clear();
+    }
+    return true;
+}
+
+bool EqueueInternal::HasPendingIoEvents() {
+    return std::ranges::any_of(m_events, [](const auto& e) { return IsIoFilter(e.event.filter); });
 }
 
 bool EqueueInternal::AddSmallTimer(EqueueEvent& ev) {
@@ -350,7 +452,7 @@ bool SupportedEqueueFilter(OrbisKernelEvent::Filter filter) {
     return filter == OrbisKernelEvent::Filter::GraphicsCore ||
            filter == OrbisKernelEvent::Filter::HrTimer ||
            filter == OrbisKernelEvent::Filter::Timer || filter == OrbisKernelEvent::Filter::User ||
-           filter == OrbisKernelEvent::Filter::VideoOut;
+           filter == OrbisKernelEvent::Filter::VideoOut || IsIoFilter(filter); // psport: shadPS4 124328bcd
 }
 
 s32 PS4_SYSV_ABI posix_kevent(s32 handle, OrbisKernelEvent* changelist, u64 nchanges,
@@ -377,6 +479,10 @@ s32 PS4_SYSV_ABI posix_kevent(s32 handle, OrbisKernelEvent* changelist, u64 ncha
 
         // Check the event flags to determine the appropriate action
         if (event.flags & OrbisKernelEvent::Flags::Add) {
+            if (IsIoFilter(event.filter) && !DescriptorSerial(event.ident)) { // psport
+                *__Error() = POSIX_EBADF;
+                return ORBIS_FAIL;
+            }
             // The caller is requesting to add an event.
             EqueueEvent internal_event{};
             internal_event.event = event;
@@ -396,13 +502,13 @@ s32 PS4_SYSV_ABI posix_kevent(s32 handle, OrbisKernelEvent* changelist, u64 ncha
             }
         }
 
-        if (event.filter == OrbisKernelEvent::Filter::User && event.fflags == 0x1000000) {
+        if (event.filter == OrbisKernelEvent::Filter::User && (event.fflags & 0x1000000)) { // psport: shadPS4 124328bcd
             // For user events, this fflags value indicates we need to trigger the event.
             if (!equeue->TriggerEvent(event.ident, OrbisKernelEvent::Filter::User, event.udata)) {
                 *__Error() = POSIX_ENOENT;
                 return ORBIS_FAIL;
             }
-        } else if (event.fflags != 0) {
+        } else if (event.fflags != 0 && !IsIoFilter(event.filter)) { // psport: shadPS4 124328bcd
             // The title is using filter-specific flags. Right now, these are unhandled.
             LOG_ERROR(Kernel_Event, "Unhandled fflags {:#x} for event filter {}", event.fflags,
                       magic_enum::enum_name(event.filter));
@@ -690,6 +796,69 @@ u64 PS4_SYSV_ABI sceKernelGetEventData(const OrbisKernelEvent* ev) {
     return ev->data;
 }
 
+// psport: shadPS4 124328bcd, without its assertions; descriptors checked in the runtime's table.
+u32 PS4_SYSV_ABI sceKernelGetEventFflags(const OrbisKernelEvent* ev) {
+    return ev ? ev->fflags : 0;
+}
+
+// An EV_ERROR event carries its errno in data (FreeBSD's kevent); any other has no error. Which
+// field the console's libkernel reads is not confirmed (shadPS4 reads fflags).
+int PS4_SYSV_ABI sceKernelGetEventError(const OrbisKernelEvent* ev) {
+    return ev && (ev->flags & OrbisKernelEvent::Flags::Error) && ev->data
+               ? static_cast<int>(0x80020000 | (ev->data & 0xffff))
+               : 0;
+}
+
+static int AddIoEvent(OrbisKernelEqueue eq, int fd, OrbisKernelEvent::Filter filter, u32 fflags, u64 data,
+                      void* udata) {
+    if (!kqueues.contains(eq) || fd < 0 || !DescriptorSerial(static_cast<u64>(fd))) {
+        return ORBIS_KERNEL_ERROR_EBADF;
+    }
+    EqueueEvent event{};
+    event.event.ident = static_cast<u64>(fd);
+    event.event.filter = filter;
+    event.event.udata = udata;
+    event.event.flags = OrbisKernelEvent::Flags::Add;
+    event.event.fflags = fflags;
+    event.event.data = data;
+    return kqueues[eq]->AddEvent(event) ? ORBIS_OK : ORBIS_KERNEL_ERROR_ENOMEM;
+}
+
+static int DeleteIoEvent(OrbisKernelEqueue eq, int fd, OrbisKernelEvent::Filter filter) {
+    if (!kqueues.contains(eq) || fd < 0) {
+        return ORBIS_KERNEL_ERROR_EBADF;
+    }
+    return kqueues[eq]->RemoveEvent(static_cast<u64>(fd), filter) ? ORBIS_OK : ORBIS_KERNEL_ERROR_ENOENT;
+}
+
+int PS4_SYSV_ABI sceKernelAddReadEvent(OrbisKernelEqueue eq, int fd, size_t size, void* udata) {
+    return AddIoEvent(eq, fd, OrbisKernelEvent::Filter::Read, size != 0 ? 1 : 0, size, udata);
+}
+
+int PS4_SYSV_ABI sceKernelDeleteReadEvent(OrbisKernelEqueue eq, int fd) {
+    return DeleteIoEvent(eq, fd, OrbisKernelEvent::Filter::Read);
+}
+
+int PS4_SYSV_ABI sceKernelAddWriteEvent(OrbisKernelEqueue eq, int fd, size_t size, void* udata) {
+    return AddIoEvent(eq, fd, OrbisKernelEvent::Filter::Write, size != 0 ? 1 : 0, size, udata);
+}
+
+int PS4_SYSV_ABI sceKernelDeleteWriteEvent(OrbisKernelEqueue eq, int fd) {
+    return DeleteIoEvent(eq, fd, OrbisKernelEvent::Filter::Write);
+}
+
+// The vnode notes libkernel accepts (shadPS4 124328bcd, from its disassembly).
+int PS4_SYSV_ABI sceKernelAddFileEvent(OrbisKernelEqueue eq, int fd, u32 fflags, void* udata) {
+    if (fflags & 0xffffff90) {
+        return kqueues.contains(eq) ? ORBIS_KERNEL_ERROR_EINVAL : ORBIS_KERNEL_ERROR_EBADF;
+    }
+    return AddIoEvent(eq, fd, OrbisKernelEvent::Filter::Vnode, fflags, 0, udata);
+}
+
+int PS4_SYSV_ABI sceKernelDeleteFileEvent(OrbisKernelEqueue eq, int fd) {
+    return DeleteIoEvent(eq, fd, OrbisKernelEvent::Filter::Vnode);
+}
+
 void RegisterEventQueue(Core::Loader::SymbolsResolver* sym) {
     LIB_FUNCTION("nh2IFMgKTv8", "libScePosix", 1, "libkernel", posix_kqueue);
     LIB_FUNCTION("RW-GEfpnsqg", "libScePosix", 1, "libkernel", posix_kevent);
@@ -708,6 +877,15 @@ void RegisterEventQueue(Core::Loader::SymbolsResolver* sym) {
     LIB_FUNCTION("mJ7aghmgvfc", "libkernel", 1, "libkernel", sceKernelGetEventId);
     LIB_FUNCTION("23CPPI1tyBY", "libkernel", 1, "libkernel", sceKernelGetEventFilter);
     LIB_FUNCTION("kwGyyjohI50", "libkernel", 1, "libkernel", sceKernelGetEventData);
+    // psport: shadPS4 124328bcd
+    LIB_FUNCTION("VHCS3rCd0PM", "libkernel", 1, "libkernel", sceKernelAddReadEvent);
+    LIB_FUNCTION("JxJ4tfgKlXA", "libkernel", 1, "libkernel", sceKernelDeleteReadEvent);
+    LIB_FUNCTION("R-tyYMpYaxY", "libkernel", 1, "libkernel", sceKernelAddWriteEvent);
+    LIB_FUNCTION("cBGTk8S92XM", "libkernel", 1, "libkernel", sceKernelDeleteWriteEvent);
+    LIB_FUNCTION("cG3t15OK4Ow", "libkernel", 1, "libkernel", sceKernelAddFileEvent);
+    LIB_FUNCTION("UmXngHKB6is", "libkernel", 1, "libkernel", sceKernelDeleteFileEvent);
+    LIB_FUNCTION("Q0qr9AyqJSk", "libkernel", 1, "libkernel", sceKernelGetEventFflags);
+    LIB_FUNCTION("Uu-iDFC9aUc", "libkernel", 1, "libkernel", sceKernelGetEventError);
 }
 
 } // namespace Libraries::Kernel

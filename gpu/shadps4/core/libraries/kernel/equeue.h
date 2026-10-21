@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
+// SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #pragma once
@@ -59,6 +59,8 @@ struct OrbisKernelEvent {
         Receipt = 0x40u,
         Dispatch = 0x80u,
         Flag1 = 0x2000u,
+        Error = 0x4000u, // psport: shadPS4 124328bcd
+        Eof = 0x8000u,   // psport: shadPS4 124328bcd
         System = 0xf000u,
     };
 
@@ -88,11 +90,18 @@ struct EqueueEvent {
     std::chrono::steady_clock::time_point time_added;
     std::chrono::nanoseconds timer_interval;
     std::unique_ptr<boost::asio::steady_timer> timer;
+    // psport: what a read, write or vnode filter was added with (FreeBSD's kn_sdata and
+    // kn_sfflags), and the file's state the vnode filter compares with (runtime_file_changes).
+    u64 io_low_water = 0;
+    u32 io_notes = 0;
+    u64 io_serial = 0; // psport: the descriptor's open (runtime_file_serial)
+    s64 vnode_state[4] = {-1, 0, 0, 0};
 
     void Clear() {
         is_triggered = false;
         event.fflags = 0;
         event.data = 0;
+        event.flags &= ~(OrbisKernelEvent::Flags::Error | OrbisKernelEvent::Flags::Eof); // psport
     }
 
     void Trigger(void* data) {
@@ -126,6 +135,14 @@ struct EqueueEvent {
                     (time & 0xfff) | (counter << 0xc) | (event_hint_raw & 0xffffffffffff0000);
             }
         }
+    }
+
+    // psport: shadPS4 124328bcd
+    void TriggerIo(u64 data_val, u32 fflags_val = 0, u16 flags_add = 0) {
+        is_triggered = true;
+        event.data = data_val;
+        event.fflags = fflags_val;
+        event.flags |= flags_add;
     }
 
     bool IsTriggered() const {
@@ -162,6 +179,10 @@ public:
     int WaitForEvents(OrbisKernelEvent* ev, int num, const OrbisKernelUseconds* timo);
     bool TriggerEvent(u64 ident, s16 filter, void* trigger_data);
     int GetTriggeredEvents(OrbisKernelEvent* ev, int num);
+    // psport: shadPS4 124328bcd, over the runtime's descriptor table. False once the descriptor's
+    // open was closed (its number may be in use again), which takes its events with it as on FreeBSD.
+    bool CheckIoEvent(EqueueEvent& ev);
+    bool HasPendingIoEvents();
 
     bool AddSmallTimer(EqueueEvent& event);
     bool HasSmallTimer() {

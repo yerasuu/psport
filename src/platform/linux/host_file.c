@@ -5,8 +5,12 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/file.h>
+#include <sys/ioctl.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <sys/time.h>
@@ -172,6 +176,48 @@ int ps_host_fs_close_on_exec(int h_file) {
 
 int ps_host_fs_set_close_on_exec(int h_file, int is_set) {
     return fcntl(h_file, F_SETFD, is_set ? FD_CLOEXEC : 0) ? errno : 0;
+}
+
+int ps_host_fs_sync_data(int h_file) { return fdatasync(h_file) ? errno : 0; }
+
+int ps_host_fs_pipe(int p_out_h_files[2]) { return pipe2(p_out_h_files, O_CLOEXEC) ? errno : 0; }
+
+int ps_host_fs_lock(int h_file, unsigned operation) {
+    int host = operation & PS_HOST_LOCK_UNLOCK ? LOCK_UN : operation & PS_HOST_LOCK_EXCLUSIVE ? LOCK_EX : LOCK_SH;
+    if (operation & PS_HOST_LOCK_NONBLOCK) host |= LOCK_NB;
+    return flock(h_file, host) ? errno : 0;
+}
+
+static int64_t room_to_write(int h_file) {
+    int cb_queued = 0;
+    const int cb_pipe = fcntl(h_file, F_GETPIPE_SZ);
+    if (cb_pipe >= 0) return ioctl(h_file, FIONREAD, &cb_queued) || cb_queued > cb_pipe ? 0 : cb_pipe - cb_queued;
+    int cb_buffer = 0;
+    socklen_t cb_option = sizeof(cb_buffer);
+    if (getsockopt(h_file, SOL_SOCKET, SO_SNDBUF, &cb_buffer, &cb_option) || ioctl(h_file, TIOCOUTQ, &cb_queued))
+        return 0;
+    return cb_queued > cb_buffer ? 0 : cb_buffer - cb_queued;
+}
+
+int ps_host_fs_poll(int h_file, unsigned events, unsigned *p_out_events, int64_t *p_out_cb_ready) {
+    const short host_events = (short)((events & PS_HOST_POLL_IN ? POLLIN : 0) | (events & PS_HOST_POLL_OUT ? POLLOUT : 0));
+    struct pollfd polled = {.fd = h_file, .events = host_events};
+    int c_ready;
+    while ((c_ready = poll(&polled, 1, 0)) < 0 && errno == EINTR) {}
+    if (c_ready < 0) return errno;
+    if (polled.revents & POLLNVAL) return EBADF;
+    *p_out_events = (polled.revents & POLLIN ? PS_HOST_POLL_IN : 0u) |
+                    (polled.revents & POLLOUT ? PS_HOST_POLL_OUT : 0u) |
+                    (polled.revents & POLLHUP ? PS_HOST_POLL_HANGUP : 0u) |
+                    (polled.revents & POLLERR ? PS_HOST_POLL_ERROR : 0u);
+    *p_out_cb_ready = 0;
+    int cb_queued = 0;
+    if (events & PS_HOST_POLL_IN) {
+        if (!ioctl(h_file, FIONREAD, &cb_queued)) *p_out_cb_ready = cb_queued;
+    } else if (events & PS_HOST_POLL_OUT) {
+        *p_out_cb_ready = room_to_write(h_file);
+    }
+    return 0;
 }
 
 PsHostDir *ps_host_dir_open(const char *sz_path) { return (PsHostDir *)opendir(sz_path); }

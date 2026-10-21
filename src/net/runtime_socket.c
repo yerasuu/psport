@@ -18,6 +18,7 @@
 
 #define NET_ERR(e) ((int32_t)(UINT32_C(0x80410100)|(uint32_t)(e)))
 #define GUEST_EBADF 9
+#define GUEST_EFAULT 14
 #define GUEST_EMFILE 24
 #define GUEST_EINVAL 22
 #define GUEST_ENOSPC 28
@@ -310,6 +311,22 @@ static int64_t do_select(int c_fds, uint64_t *p_read, uint64_t *p_write, uint64_
     }
     return c_bits;
 }
+/* Only local pairs exist (AF_LOCAL is 1 on both systems), stream, datagram or seqpacket. */
+static int64_t do_socketpair(int family, int type, int protocol, int32_t *p_out_sockets) {
+    if (!p_out_sockets) return -GUEST_EFAULT;
+    if (family!=AF_UNIX) return -GUEST_EAFNOSUPPORT;
+    int host_flags=SOCK_CLOEXEC|(type&GUEST_SOCK_NONBLOCK ? SOCK_NONBLOCK : 0);
+    type&=~(GUEST_SOCK_CLOEXEC|GUEST_SOCK_NONBLOCK);
+    if (type!=SOCK_STREAM && type!=SOCK_DGRAM && type!=SOCK_SEQPACKET) return -GUEST_EPROTONOSUPPORT;
+    int h_hosts[2];
+    if (socketpair(AF_UNIX,type|host_flags,protocol,h_hosts)) return host_failure();
+    const int64_t h_first=adopt(h_hosts[0]);
+    if (h_first<0) { ps_host_net_close(h_hosts[1]); return h_first; }
+    const int64_t h_second=adopt(h_hosts[1]);
+    if (h_second<0) { runtime_file_close((int)h_first); return h_second; }
+    p_out_sockets[0]=(int32_t)h_first; p_out_sockets[1]=(int32_t)h_second;
+    return 0;
+}
 static int host_family(int family) { return family==AF_INET ? AF_INET : family==GUEST_AF_INET6 ? AF_INET6 : -1; }
 
 static ABI int32_t net_socket(const char *sz_name, int family, int type, int protocol) {
@@ -407,6 +424,9 @@ static ABI int32_t net_get_sock_info(int32_t h_socket, GuestSockInfo *p_out_info
 }
 
 static ABI int32_t posix_socket(int family, int type, int protocol) { return (int32_t)posix(do_socket(family,type,protocol)); }
+static ABI int32_t posix_socketpair(int family, int type, int protocol, int32_t *p_out_sockets) {
+    return (int32_t)posix(do_socketpair(family,type,protocol,p_out_sockets));
+}
 static ABI int32_t posix_shutdown(int32_t h_socket, int how) { return (int32_t)posix(do_shutdown(h_socket,how)); }
 static ABI int32_t posix_bind(int32_t h_socket, const GuestSockaddr *p_address, uint32_t cb_address) {
     return (int32_t)posix(do_bind(h_socket,p_address,cb_address));
@@ -573,7 +593,7 @@ static const RuntimeExport s_exports[]={
     {"sceNetSetsockopt",net_setsockopt}, {"sceNetGetsockopt",net_getsockopt},
     {"sceNetGetMacAddress",net_get_mac_address}, {"sceNetGetSockInfo",net_get_sock_info},
     {"sceNetInetPton",net_inet_pton}, {"sceNetInetPtonEx",net_inet_pton_ex}, {"sceNetInetNtop",net_inet_ntop},
-    {"socket",posix_socket}, {"shutdown",posix_shutdown}, {"bind",posix_bind}, {"connect",posix_connect},
+    {"socket",posix_socket}, {"socketpair",posix_socketpair}, {"shutdown",posix_shutdown}, {"bind",posix_bind}, {"connect",posix_connect},
     {"listen",posix_listen}, {"accept",posix_accept}, {"getsockname",posix_getsockname}, {"getpeername",posix_getpeername},
     {"recvfrom",posix_recvfrom}, {"recv",posix_recv}, {"sendto",posix_sendto}, {"send",posix_send},
     {"sendmsg",posix_sendmsg}, {"recvmsg",posix_recvmsg}, {"setsockopt",posix_setsockopt}, {"getsockopt",posix_getsockopt},

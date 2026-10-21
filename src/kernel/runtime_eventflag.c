@@ -22,6 +22,7 @@ typedef struct Flag {
     /* Bumped by a cancel; a waiter that saw it change returns ECANCELED. */
     uint64_t cancels;
     int deleted;
+    char sz_name[32];
     pthread_cond_t changed;
     struct Flag *p_next;
 } Flag;
@@ -55,6 +56,7 @@ static ABI int32_t flag_create(uint64_t *p_out,const char *sz_name,uint32_t attr
     host_check(pthread_condattr_destroy(&cattr));
     runtime_exception_lock(&s_lock);
     p_flag->id=s_next_id++; p_flag->attr=attr; p_flag->pattern=pattern;
+    snprintf(p_flag->sz_name,sizeof(p_flag->sz_name),"%s",sz_name);
     uint64_t id=p_flag->id;
     p_flag->p_next=s_p_registry; s_p_registry=p_flag; *p_out=id;
     const size_t c_created=++s_c_created, c_deleted=s_c_deleted;
@@ -169,11 +171,37 @@ static ABI int32_t flag_delete(uint64_t id) {
     runtime_exception_unlock(&s_lock);
     return 0;
 }
+/* One process: the flags it can open by name are the ones it created. What the kernel answers for a
+ * name nobody created is not confirmed (kb #691); ENOENT, counted. */
+static uint64_t s_c_open_misses;
+static ABI int32_t flag_open(uint64_t *p_out,const char *sz_name) {
+    if (!p_out || !sz_name) return ERR(14);
+    if (strnlen(sz_name,32)>31) return ERR(63);
+    runtime_exception_lock(&s_lock);
+    const Flag *p_flag=s_p_registry;
+    while (p_flag && strcmp(p_flag->sz_name,sz_name)) p_flag=p_flag->p_next;
+    if (p_flag) *p_out=p_flag->id;
+    runtime_exception_unlock(&s_lock);
+    if (p_flag) return 0;
+    if (!__atomic_fetch_add(&s_c_open_misses,1,__ATOMIC_RELAXED)) {
+        printf("Runtime: sceKernelOpenEventFlag('%s'): no event flag of that name, ENOENT\n",sz_name);
+        runtime_calls_hle_stub("sceKernelOpenEventFlag of a name nobody created (ENOENT)",&s_c_open_misses);
+    }
+    return ERR(2);
+}
+/* Closing what was opened leaves the flag to its creator, who deletes it. */
+static ABI int32_t flag_close(uint64_t id) {
+    runtime_exception_lock(&s_lock);
+    const Flag *p_flag=find(id);
+    runtime_exception_unlock(&s_lock);
+    return p_flag ? 0 : ERR(3);
+}
 static const RuntimeExport s_exports[]={
     {"sceKernelCreateEventFlag",flag_create}, {"sceKernelDeleteEventFlag",flag_delete},
     {"sceKernelWaitEventFlag",flag_wait}, {"sceKernelPollEventFlag",flag_poll},
     {"sceKernelSetEventFlag",flag_set}, {"sceKernelClearEventFlag",flag_clear},
     {"sceKernelCancelEventFlag",flag_cancel},
+    {"sceKernelOpenEventFlag",flag_open}, {"sceKernelCloseEventFlag",flag_close},
 };
 uintptr_t runtime_eventflag_resolve(const char *sz_name) { return RUNTIME_LOOKUP(s_exports,sz_name); }
 void runtime_eventflag_report(void) {

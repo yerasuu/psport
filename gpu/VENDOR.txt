@@ -67,3 +67,5 @@ Backported from upstream b4e7ae7..c1b2655 (#657), recompiler fixes, ShaderBinary
   V# candidates.
   psport deviation with 945dbc3cc/08225c2b3: needs_lds_barriers comes from capability (no guaranteed
   64-lane compute subgroup, IsSubgroupSize64Supported) instead of the NVIDIA/KosmicKrisp driver ids.
+Also backported after b4e7ae7: 124328bcd I/O event queue filters (#5192) in equeue.{h,cpp}, over the
+  runtime's descriptor table (src/kernel/runtime_file.c) instead of the handle table and Core::Net.

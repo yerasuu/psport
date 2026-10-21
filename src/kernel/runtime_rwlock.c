@@ -204,6 +204,8 @@ static ABI int32_t posix_trywrite(Rwlock **pp_rwlock) { return posix_result(rw_t
 static ABI int32_t posix_timedread(Rwlock **pp_rwlock,const GuestTime *p_time) { return posix_result(acquire(pp_rwlock,TIMED_READ,p_time,CLOCK_REALTIME)); }
 static ABI int32_t posix_timedwrite(Rwlock **pp_rwlock,const GuestTime *p_time) { return posix_result(acquire(pp_rwlock,TIMED_WRITE,p_time,CLOCK_REALTIME)); }
 static ABI int32_t posix_unlock(Rwlock **pp_rwlock) { return posix_result(rw_unlock(pp_rwlock)); }
+/* Names are for the console's debugger only; the runtime keeps none (scePthreadRwlockInit's neither). */
+static ABI int32_t posix_setname(Rwlock **pp_rwlock,const char *sz_name) { (void)pp_rwlock; return sz_name ? 0 : EINVAL; }
 static const RuntimeExport s_exports[]={
     {"scePthreadRwlockInit",rw_init}, {"scePthreadRwlockDestroy",rw_destroy}, {"scePthreadRwlockRdlock",rw_read},
     {"scePthreadRwlockWrlock",rw_write}, {"scePthreadRwlockTryrdlock",rw_tryread},
@@ -219,7 +221,7 @@ static const RuntimeExport s_exports[]={
     {"pthread_rwlock_rdlock",posix_read}, {"pthread_rwlock_wrlock",posix_write},
     {"pthread_rwlock_tryrdlock",posix_tryread}, {"pthread_rwlock_trywrlock",posix_trywrite},
     {"pthread_rwlock_timedrdlock",posix_timedread}, {"pthread_rwlock_timedwrlock",posix_timedwrite},
-    {"pthread_rwlock_unlock",posix_unlock},
+    {"pthread_rwlock_unlock",posix_unlock}, {"pthread_rwlock_setname_np",posix_setname},
 };
 uintptr_t runtime_rwlock_resolve(const char *sz_name) {
     return RUNTIME_LOOKUP(s_exports,sz_name);

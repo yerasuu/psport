@@ -136,6 +136,22 @@ static ABI int32_t mutex_timedlock(GuestMutex **pp_mutex, uint32_t usec) {
     if (!e) ++s_c_locks;
     return e;
 }
+/* A relative timeout of 64-bit microseconds, unlike scePthreadMutexTimedlock's 32. */
+static int32_t mutex_reltimedlock(GuestMutex **pp_mutex, uint64_t usec) {
+    int32_t e = ensure_mutex(pp_mutex);
+    if (e) return e;
+    struct timespec end;
+    if (deadline_after(CLOCK_REALTIME, &end, usec)) return orbis_error(EINVAL);
+    e = timed_error(pthread_mutex_timedlock(&(*pp_mutex)->native, &end));
+    if (!e) ++s_c_locks;
+    return e;
+}
+/* Names are for the console's debugger only and the runtime keeps none (scePthreadMutexInit's
+ * neither): libkernel puts "SceNoNameMutex" in place of a null one and never fails. */
+static ABI int32_t posix_mutex_setname(GuestMutex **pp_mutex, const char *sz_name) {
+    (void)pp_mutex; (void)sz_name;
+    return 0;
+}
 /* Condition attributes: the clock timed waits measure deadlines on (FreeBSD ids: 0 realtime,
  * 1 virtual, 2 prof, 4 monotonic) and process sharing, of which only private exists. */
 typedef struct { int32_t clock; } GuestCondAttr;
@@ -267,6 +283,8 @@ static ABI int32_t posix_cond_wait(GuestCond **pp_cond, GuestMutex **pp_mutex) {
 static ABI int32_t posix_cond_timedwait(GuestCond **pp_cond, GuestMutex **pp_mutex, const GuestTimespec *p_timespec) { return posix_result(cond_abs_timedwait(pp_cond, pp_mutex, p_timespec)); }
 static ABI int32_t posix_cond_signal(GuestCond **pp_cond) { return posix_result(cond_signal(pp_cond)); }
 static ABI int32_t posix_cond_broadcast(GuestCond **pp_cond) { return posix_result(cond_broadcast(pp_cond)); }
+static ABI int32_t posix_cond_setname(GuestCond **pp_cond, const char *sz_name) { (void)pp_cond; return sz_name ? 0 : EINVAL; }
+static ABI int32_t posix_mutex_reltimedlock(GuestMutex **pp_mutex, uint64_t usec) { return posix_result(mutex_reltimedlock(pp_mutex, usec)); }
 static ABI int32_t posix_condattr_init(GuestCondAttr **pp_cond_attr) { return posix_result(condattr_init(pp_cond_attr)); }
 static ABI int32_t posix_condattr_destroy(GuestCondAttr **pp_cond_attr) { return posix_result(condattr_destroy(pp_cond_attr)); }
 static ABI int32_t posix_condattr_getclock(GuestCondAttr **pp_cond_attr, int32_t *p_clock) { return posix_result(condattr_getclock(pp_cond_attr, p_clock)); }
@@ -295,6 +313,8 @@ static const RuntimeExport s_exports[] = {
     {"pthread_condattr_getclock", posix_condattr_getclock}, {"pthread_condattr_setclock", posix_condattr_setclock},
     {"pthread_condattr_getpshared", posix_condattr_getpshared}, {"pthread_condattr_setpshared", posix_condattr_setpshared},
     {"pthread_mutexattr_setprotocol", posix_attr_protocol}, {"pthread_mutexattr_getprotocol", posix_attr_get_protocol},
+    {"pthread_mutex_setname_np", posix_mutex_setname}, {"pthread_cond_setname_np", posix_cond_setname},
+    {"pthread_mutex_reltimedlock_np", posix_mutex_reltimedlock},
 };
 uintptr_t runtime_mutex_resolve(const char *sz_name) {
     return RUNTIME_LOOKUP(s_exports, sz_name);

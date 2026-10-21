@@ -253,6 +253,8 @@ static ABI int32_t posix_sem_wait(GuestSem *p_sem) { return posix_result(usem_wa
 static ABI int32_t posix_sem_trywait(GuestSem *p_sem) { return posix_result(usem_trywait(p_sem)); }
 static ABI int32_t posix_sem_post(GuestSem *p_sem) { return posix_result(usem_post(p_sem)); }
 static ABI int32_t posix_sem_getvalue(GuestSem *p_sem,int32_t *p_value) { return posix_result(usem_getvalue(p_sem,p_value)); }
+/* A name is for the console's debugger only; the runtime keeps none. */
+static ABI int32_t posix_sem_setname(GuestSem *p_sem,const char *sz_name) { (void)p_sem; return posix_result(sz_name ? 0 : 22); }
 static ABI int32_t posix_sem_timedwait(GuestSem *p_sem,const GuestTime *p_end) {
     if (!p_end) return posix_result(usem_wait(p_sem,PS_HOST_CLOCK_REALTIME,NULL));
     struct timespec t={.tv_sec=(time_t)p_end->seconds,.tv_nsec=(long)p_end->nanoseconds};
@@ -339,7 +341,7 @@ static const RuntimeExport s_exports[]={
     {"sceKernelPollSema",sem_poll}, {"sceKernelCancelSema",sem_cancel}, {"sceKernelDeleteSema",sem_delete},
     {"sem_init",posix_sem_init}, {"sem_destroy",posix_sem_destroy}, {"sem_wait",posix_sem_wait},
     {"sem_trywait",posix_sem_trywait}, {"sem_timedwait",posix_sem_timedwait}, {"sem_post",posix_sem_post},
-    {"sem_getvalue",posix_sem_getvalue}, {"_umtx_op",posix_umtx_op},
+    {"sem_getvalue",posix_sem_getvalue}, {"sem_setname",posix_sem_setname}, {"_umtx_op",posix_umtx_op},
     {"scePthreadSemInit",psem_init}, {"scePthreadSemWait",psem_wait}, {"scePthreadSemTrywait",psem_trywait},
     {"scePthreadSemTimedwait",psem_timedwait}, {"scePthreadSemPost",psem_post},
     {"scePthreadSemDestroy",psem_destroy}, {"scePthreadSemGetvalue",psem_getvalue},

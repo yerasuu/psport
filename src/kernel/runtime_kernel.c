@@ -265,6 +265,7 @@ static ABI uintptr_t guest_signal(int sig,uintptr_t handler) {
     printf("Runtime: guest signal(%d) handler recorded (host signals are not forwarded)\n",sig);
     return old;
 }
+static void deliver_unblocked(void);
 static ABI int32_t guest_sigprocmask(int how,const GuestSigset *p_set,GuestSigset *p_old) {
     if (p_old) *p_old=s_signal_mask;
     if (!p_set) return 0;
@@ -274,11 +275,121 @@ static ABI int32_t guest_sigprocmask(int how,const GuestSigset *p_set,GuestSigse
         else if (how==3) s_signal_mask.bits[i]=p_set->bits[i];    /* SIG_SETMASK */
         else return fail_posix(EINVAL);
     }
+    deliver_unblocked();
     return 0;
 }
 void runtime_kernel_set_signal_mask(const uint32_t bits[4]) { memcpy(s_signal_mask.bits,bits,sizeof(s_signal_mask.bits)); }
 static ABI int32_t guest_sigfillset(GuestSigset *p_set) { if (!p_set) return fail_posix(EINVAL); memset(p_set,0xff,sizeof(*p_set)); return 0; }
 static ABI int32_t guest_sigemptyset(GuestSigset *p_set) { if (!p_set) return fail_posix(EINVAL); memset(p_set,0,sizeof(*p_set)); return 0; }
+/* Signals the guest sends itself (raise, kill on its own pid) are the only ones it gets: host
+ * signals are not forwarded. One blocked by the sender, or that a thread waits for in sigtimedwait,
+ * stays pending for the process until a wait takes it. */
+#define GUEST_SIGNALS 128
+#define GUEST_PID 1000
+#define GUEST_SIGUSR1 30
+#define GUEST_SI_USER 0x10001
+typedef struct { int32_t signo, error, code, pid; uint32_t uid; int32_t status; uint64_t addr, value; int64_t band; uint32_t spare[8]; } GuestSiginfo;
+_Static_assert(sizeof(GuestSiginfo)==0x50,"FreeBSD siginfo_t size");
+static pthread_mutex_t s_signal_lock=PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t s_signal_posted=PTHREAD_COND_INITIALIZER;
+static GuestSigset s_pending;
+static unsigned s_c_awaiting[GUEST_SIGNALS];
+static uint64_t s_c_signals_sent;
+static int has_signal(const GuestSigset *p_set,int sig) { return (p_set->bits[(sig-1)/32]>>((sig-1)%32))&1; }
+/* FreeBSD's default action ignores these; it ends the process for the rest (stopping does not
+ * apply to a game). */
+static int is_ignored_by_default(int sig) { return (sig>=16 && sig<=23) || sig==28 || sig==29 || sig==32 || sig==33; }
+static uint64_t s_c_fatal_signals;
+static void deliver_signal(int sig) {
+    const uintptr_t handler=__atomic_load_n(&s_handlers[sig],__ATOMIC_ACQUIRE);
+    if (handler>1) { ((void (ABI *)(int))handler)(sig); return; }
+    /* SIGUSR1 is the one host signal the guest has: its exception handler takes it, if any. */
+    if (sig==GUEST_SIGUSR1 && !handler) { pthread_kill(pthread_self(),RUNTIME_EXCEPTION_SIGNAL); return; }
+    if (handler==1 || is_ignored_by_default(sig)) return;
+    /* As on the console the process ends; the call report lists why. */
+    if (!__atomic_fetch_add(&s_c_fatal_signals,1,__ATOMIC_RELAXED))
+        runtime_calls_hle_stub("guest signal with no handler whose default action ends the process",&s_c_fatal_signals);
+    fprintf(stderr,"STOP: guest sent itself signal %d with no handler; its default action ends the process\n",sig);
+    runtime_stop(23);
+}
+static int32_t send_signal(int sig) {
+    if (sig<0 || sig>=GUEST_SIGNALS) return fail_posix(EINVAL);
+    if (!sig) return 0;
+    if (!__atomic_fetch_add(&s_c_signals_sent,1,__ATOMIC_RELAXED)) {
+        printf("Runtime: guest sent itself signal %d (only the signals it sends itself are delivered)\n",sig);
+        runtime_calls_hle_stub("raise/kill to the own process (host signals are not forwarded)",&s_c_signals_sent);
+    }
+    runtime_exception_lock(&s_signal_lock);
+    const int is_pending=has_signal(&s_signal_mask,sig) || s_c_awaiting[sig];
+    if (is_pending) {
+        s_pending.bits[(sig-1)/32]|=1u<<((sig-1)%32);
+        pthread_cond_broadcast(&s_signal_posted);
+    }
+    runtime_exception_unlock(&s_signal_lock);
+    if (!is_pending) deliver_signal(sig);
+    return 0;
+}
+/* A pending signal the thread no longer blocks, and no sigtimedwait waits for, is delivered now. */
+static void deliver_unblocked(void) {
+    for (;;) {
+        int sig=1;
+        runtime_exception_lock(&s_signal_lock);
+        while (sig<GUEST_SIGNALS &&
+               !(has_signal(&s_pending,sig) && !has_signal(&s_signal_mask,sig) && !s_c_awaiting[sig])) ++sig;
+        if (sig<GUEST_SIGNALS) s_pending.bits[(sig-1)/32]&=~(1u<<((sig-1)%32));
+        runtime_exception_unlock(&s_signal_lock);
+        if (sig==GUEST_SIGNALS) return;
+        deliver_signal(sig);
+    }
+}
+static ABI int32_t guest_raise(int sig) { return send_signal(sig); }
+static ABI int32_t guest_kill(int32_t pid,int sig) {
+    if (pid!=GUEST_PID && pid!=0 && pid!=-1) return fail_posix(ESRCH);
+    return send_signal(sig);
+}
+/* 0 with the signal taken, or the host errno (EAGAIN: none came in time). */
+static int take_signal(const GuestSigset *p_set,const GuestTimespec *p_timeout,int *p_out_sig) {
+    struct timespec end;
+    if (p_timeout) {
+        if (p_timeout->sec<0 || p_timeout->nsec<0 || p_timeout->nsec>=1000000000) return EINVAL;
+        ps_host_time_read(PS_HOST_CLOCK_MONOTONIC,&end);
+        const uint64_t ns=(uint64_t)end.tv_nsec+(uint64_t)p_timeout->nsec;
+        end.tv_sec+=(time_t)p_timeout->sec+(time_t)(ns/1000000000); end.tv_nsec=(long)(ns%1000000000);
+    }
+    int e=0;
+    runtime_exception_lock(&s_signal_lock);
+    for (int sig=1;sig<GUEST_SIGNALS;++sig) if (has_signal(p_set,sig)) ++s_c_awaiting[sig];
+    for (;;) {
+        int sig=1;
+        while (sig<GUEST_SIGNALS && !(has_signal(p_set,sig) && has_signal(&s_pending,sig))) ++sig;
+        if (sig<GUEST_SIGNALS) {
+            s_pending.bits[(sig-1)/32]&=~(1u<<((sig-1)%32));
+            *p_out_sig=sig;
+            break;
+        }
+        if (runtime_exception_wait(&s_signal_posted,&s_signal_lock,p_timeout ? &end : NULL)==ETIMEDOUT) { e=EAGAIN; break; }
+    }
+    for (int sig=1;sig<GUEST_SIGNALS;++sig) if (has_signal(p_set,sig)) --s_c_awaiting[sig];
+    runtime_exception_unlock(&s_signal_lock);
+    return e;
+}
+static ABI int32_t guest_sigtimedwait(const GuestSigset *p_set,GuestSiginfo *p_out_info,const GuestTimespec *p_timeout) {
+    if (!p_set) return fail_posix(EFAULT);
+    int sig=0;
+    const int e=take_signal(p_set,p_timeout,&sig);
+    if (e) return fail_posix(e);
+    if (p_out_info) *p_out_info=(GuestSiginfo){.signo=sig,.code=GUEST_SI_USER,.pid=GUEST_PID};
+    return sig;
+}
+static ABI int32_t guest_sigwaitinfo(const GuestSigset *p_set,GuestSiginfo *p_out_info) { return guest_sigtimedwait(p_set,p_out_info,NULL); }
+static ABI int32_t guest_sigwait(const GuestSigset *p_set,int32_t *p_out_sig) {
+    if (!p_set || !p_out_sig) return 22;
+    int sig=0;
+    const int e=take_signal(p_set,NULL,&sig);
+    if (e) return runtime_guest_errno(e);
+    *p_out_sig=sig;
+    return 0;
+}
 /* Guest exception handlers are called from the runtime's host signal handler and return into it, so
  * no guest frame is a signal trampoline. */
 static ABI int32_t is_signal_return(const void *p_address) { (void)p_address; return 0; }
@@ -292,25 +403,124 @@ static ABI int32_t guest_getrusage(int who,GuestRusage *p_out) {
     p_out->stime=(GuestTimeval){r.ru_stime.tv_sec,r.ru_stime.tv_usec};
     return 0;
 }
+/* libkernel answers CTL_USER itself, as FreeBSD's libc does (kb #691); the integers are FreeBSD 9's
+ * limits.h and unistd.h values for USER_BC_BASE_MAX (2) to USER_TZNAME_MAX (20). */
+static int32_t user_sysctl(const int32_t *p_name,uint32_t namelen,void *p_old,uint64_t *p_oldlen,const void *p_new_value) {
+    static const char s_sz_cs_path[]="/usr/bin:/bin:/usr/sbin:/sbin";
+    static const int32_t s_values[]={99,2048,99,1000,10,32,2048,255,199212,0,0,0,0,0,0,0,0,20,255};
+    if (p_new_value) return fail_posix(EPERM);
+    if (namelen!=2) return fail_posix(EINVAL);
+    if (!p_oldlen) return fail_posix(EFAULT);
+    if (p_name[1]==1) {
+        if (p_old && *p_oldlen<sizeof(s_sz_cs_path)) return fail_posix(ENOMEM);
+        *p_oldlen=sizeof(s_sz_cs_path);
+        if (p_old) memcpy(p_old,s_sz_cs_path,sizeof(s_sz_cs_path));
+        return 0;
+    }
+    if (p_old && *p_oldlen<4) return fail_posix(ENOMEM);
+    *p_oldlen=4;
+    if (!p_old) return 0;
+    if (p_name[1]<2 || p_name[1]>20) return fail_posix(EINVAL);
+    memcpy(p_old,&s_values[p_name[1]-2],4);
+    return 0;
+}
+static uint64_t s_c_rng_pseudo, s_c_unknown_mibs;
 static ABI int32_t guest_sysctl(const int32_t *p_name,uint32_t namelen,void *p_old,uint64_t *p_oldlen,const void *p_new_value,uint64_t newlen) {
     (void)newlen;
-    if (!p_name || namelen<2 || p_new_value) return fail_posix(EINVAL);
-    if (p_name[0]==1 && p_name[1]==37) { /* kern.arandom */
+    if (!p_name) return fail_posix(EFAULT);
+    if (namelen<2 || namelen>24) return fail_posix(EINVAL);
+    if (p_name[0]==8) return user_sysctl(p_name,namelen,p_old,p_oldlen,p_new_value);
+    const int is_leaf=namelen==2;
+    if (is_leaf && p_name[0]==1 && p_name[1]==37) { /* kern.arandom */
+        if (p_new_value) return fail_posix(EPERM);
         if (!p_old || !p_oldlen) return fail_posix(EINVAL);
         const int e=ps_host_random_bytes(p_old,(size_t)*p_oldlen);
         return e ? fail_posix(e) : 0;
     }
-    if (p_name[0]==6 && (p_name[1]==7 || p_name[1]==3)) { /* hw.pagesize / hw.ncpu */
+    if (is_leaf && p_name[0]==1 && p_name[1]==50) { /* kern.rng_pseudo */
+        if (p_new_value) return fail_posix(EPERM);
+        if (!p_oldlen) return fail_posix(EFAULT);
+        if (!__atomic_fetch_add(&s_c_rng_pseudo,1,__ATOMIC_RELAXED)) {
+            puts("Runtime: sysctl kern.rng_pseudo answered with up to 64 host random bytes (the console's block size is not confirmed)");
+            runtime_calls_hle_stub("sysctl kern.rng_pseudo (up to 64 host random bytes)",&s_c_rng_pseudo);
+        }
+        if (!p_old) { *p_oldlen=64; return 0; }
+        const uint64_t cb_block=*p_oldlen<64 ? *p_oldlen : 64;
+        const int e=ps_host_random_bytes(p_old,(size_t)cb_block);
+        if (e) return fail_posix(e);
+        *p_oldlen=cb_block;
+        return 0;
+    }
+    if (is_leaf && p_name[0]==6 && (p_name[1]==7 || p_name[1]==3)) { /* hw.pagesize / hw.ncpu */
+        if (p_new_value) return fail_posix(EPERM);
         if (!p_oldlen) return fail_posix(EINVAL);
         int32_t value=p_name[1]==7 ? PAGE : 7;
         if (p_old) { if (*p_oldlen<4) return fail_posix(ENOMEM); memcpy(p_old,&value,4); }
         *p_oldlen=4; return 0;
     }
-    fprintf(stderr,"STOP: unsupported sysctl mib");
-    for (uint32_t i=0;i<namelen && i<8;++i) fprintf(stderr," %d",p_name[i]);
-    fputc('\n',stderr);
-    runtime_stop(21);
+    /* What the kernel answers for a name it does not have; the first ones are listed with their MIB. */
+    const uint64_t c_unknown=__atomic_fetch_add(&s_c_unknown_mibs,1,__ATOMIC_RELAXED);
+    if (c_unknown<8) {
+        char sz_mib[128];
+        size_t used=0;
+        for (uint32_t i=0;i<namelen && i<8 && used<sizeof(sz_mib);++i)
+            used+=(size_t)snprintf(sz_mib+used,sizeof(sz_mib)-used,"%s%d",i ? "." : "",p_name[i]);
+        printf("Runtime: sysctl MIB %s not answered: ENOENT%s\n",sz_mib,c_unknown==7 ? " (further ones are only counted)" : "");
+        if (!c_unknown) runtime_calls_hle_stub("sysctl MIB the runtime does not answer (ENOENT)",&s_c_unknown_mibs);
+    }
+    return fail_posix(ENOENT);
 }
+/* The kernel's value for a game is not confirmed: the big application type, as shadPS4 answers. */
+static uint64_t s_c_process_type;
+static ABI int32_t get_process_type(int32_t pid) {
+    if (pid!=GUEST_PID && pid!=0 && pid!=-1) return ERR(3);
+    if (!__atomic_fetch_add(&s_c_process_type,1,__ATOMIC_RELAXED))
+        runtime_calls_hle_stub("sceKernelGetProcessType (big application assumed, kernel value not confirmed)",&s_c_process_type);
+    return 0;
+}
+/* getrlimit and setrlimit are system calls (kb #691), so no limit comes from the console: the file
+ * table's size for RLIMIT_NOFILE, none for the rest. A limit may be lowered, and raised again up to
+ * its hard limit. FreeBSD 9 has 13 resources. */
+#define GUEST_RLIMITS 13
+#define GUEST_RLIMIT_NOFILE 8
+typedef struct { int64_t cur, max; } GuestRlimit;
+static GuestRlimit s_rlimits[GUEST_RLIMITS];
+static pthread_mutex_t s_rlimit_lock=PTHREAD_MUTEX_INITIALIZER;
+static uint64_t s_c_rlimit_calls;
+static int is_rlimit(int resource) {
+    if (!__atomic_fetch_add(&s_c_rlimit_calls,1,__ATOMIC_RELAXED)) {
+        puts("Runtime: getrlimit/setrlimit answered with the runtime's own limits (the console kernel's are not read)");
+        runtime_calls_hle_stub("getrlimit/setrlimit (runtime limits, not the console kernel's)",&s_c_rlimit_calls);
+    }
+    return resource>=0 && resource<GUEST_RLIMITS;
+}
+static GuestRlimit *rlimit_locked(int resource) {
+    if (!s_rlimits[0].max)
+        for (int i=0;i<GUEST_RLIMITS;++i)
+            s_rlimits[i]=i==GUEST_RLIMIT_NOFILE ? (GuestRlimit){RUNTIME_MAX_FILES,RUNTIME_MAX_FILES} : (GuestRlimit){INT64_MAX,INT64_MAX};
+    return &s_rlimits[resource];
+}
+static ABI int32_t guest_getrlimit(int resource,GuestRlimit *p_out) {
+    if (!is_rlimit(resource)) return fail_posix(EINVAL);
+    if (!p_out) return fail_posix(EFAULT);
+    pthread_mutex_lock(&s_rlimit_lock);
+    *p_out=*rlimit_locked(resource);
+    pthread_mutex_unlock(&s_rlimit_lock);
+    return 0;
+}
+static ABI int32_t guest_setrlimit(int resource,const GuestRlimit *p_limit) {
+    if (!is_rlimit(resource)) return fail_posix(EINVAL);
+    if (!p_limit) return fail_posix(EFAULT);
+    if (p_limit->cur<0 || p_limit->max<0 || p_limit->cur>p_limit->max) return fail_posix(EINVAL);
+    pthread_mutex_lock(&s_rlimit_lock);
+    GuestRlimit *p_current=rlimit_locked(resource);
+    const int is_raised=p_limit->max>p_current->max;
+    if (!is_raised) *p_current=*p_limit;
+    pthread_mutex_unlock(&s_rlimit_lock);
+    return is_raised ? fail_posix(EPERM) : 0;
+}
+static ABI uint32_t byte_order_32(uint32_t value) { return __builtin_bswap32(value); }
+static ABI uint16_t byte_order_16(uint16_t value) { return __builtin_bswap16(value); }
 static ABI int32_t uuid_create(uint8_t *p_uuid) {
     if (!p_uuid) return ERR(22);
     if (ps_host_random_bytes(p_uuid,16)) return ERR(14);
@@ -454,6 +664,10 @@ static const RuntimeExport s_exports[]={
     {"signal",guest_signal}, {"sigprocmask",guest_sigprocmask}, {"_sigprocmask",guest_sigprocmask},
     {"sigfillset",guest_sigfillset}, {"sigemptyset",guest_sigemptyset}, {"_is_signal_return",is_signal_return},
     {"getrusage",guest_getrusage}, {"sysctl",guest_sysctl}, {"sceKernelUuidCreate",uuid_create},
+    {"raise",guest_raise}, {"kill",guest_kill}, {"sigtimedwait",guest_sigtimedwait},
+    {"sigwaitinfo",guest_sigwaitinfo}, {"sigwait",guest_sigwait},
+    {"sceKernelGetProcessType",get_process_type}, {"getrlimit",guest_getrlimit}, {"setrlimit",guest_setrlimit},
+    {"htonl",byte_order_32}, {"ntohl",byte_order_32}, {"htons",byte_order_16}, {"ntohs",byte_order_16},
     {"sceRandomGetRandomNumber",random_number},
     {"scePthreadOnce",thread_once}, {"pthread_once",posix_once},
     {"scePthreadKeyCreate",key_create}, {"scePthreadKeyDelete",key_delete},

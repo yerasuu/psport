@@ -14,7 +14,7 @@
 #include <limits.h>
 #include <pthread.h>
 #define ERR(n) ((int32_t)(UINT32_C(0x80020000)|(n)))
-#define MAX_FILES 1024
+#define MAX_FILES RUNTIME_MAX_FILES
 #define MAX_MOUNTS 16
 
 typedef struct { int64_t sec, nsec; } GuestTimespec;
@@ -33,18 +33,35 @@ _Static_assert(sizeof(GuestStat)==120,"FreeBSD stat layout");
 typedef struct { char *sz_names; size_t c_names, *p_offsets; unsigned char *p_types; } Listing;
 /* commit: a save file opened for writing is written to a temporary copy (temp), which replaces
  * the file (commit) in one rename when closed: a crash or a kill mid-save leaves the old file. */
-typedef struct { int used, host, is_dirty, is_socket; Listing *p_dir; size_t position; char sz_path[512]; char *sz_commit, *sz_temp; } File;
+/* serial: which open this entry is, so a kqueue filter knows its descriptor was closed (and the
+ * number taken again) since it was added. */
+typedef struct { int used, host, is_dirty, is_socket; Listing *p_dir; size_t position; char sz_path[512]; char *sz_commit, *sz_temp; uint64_t serial; } File;
 typedef struct { char guest[64]; char host[512]; } Mount;
 static File s_files[MAX_FILES];
 static Mount s_mounts[MAX_MOUNTS];
 static size_t s_c_mounts, s_c_opens, s_c_reads, s_c_writes, s_c_missing;
 static uint64_t s_cb_read;
 static pthread_mutex_t s_lock=PTHREAD_MUTEX_INITIALIZER;
+static uint64_t s_last_serial;
 #define MAX_UNMOUNTED 32
 static struct { char sz_root[64]; size_t c_hits; } s_unmounted[MAX_UNMOUNTED];
 static size_t s_c_unmounted;
 
-static int save_path(const char *sz_path) { return sz_path && !strncmp(sz_path,"/savedata",9); }
+/* Where relative guest paths start: the game package until the game changes it (chdir). */
+static char s_sz_cwd[512]="/app0";
+static pthread_mutex_t s_cwd_lock=PTHREAD_MUTEX_INITIALIZER;
+static void absolute_path(const char *sz_guest,char *sz_out,size_t cb_out) {
+    if (!*sz_guest || sz_guest[0]=='/') { snprintf(sz_out,cb_out,"%s",sz_guest); return; }
+    pthread_mutex_lock(&s_cwd_lock);
+    snprintf(sz_out,cb_out,"%s/%s",s_sz_cwd,sz_guest);
+    pthread_mutex_unlock(&s_cwd_lock);
+}
+static int save_path(const char *sz_path) {
+    if (!sz_path || !*sz_path) return 0;
+    char sz_absolute[1024];
+    absolute_path(sz_path,sz_absolute,sizeof(sz_absolute));
+    return !strncmp(sz_absolute,"/savedata",9);
+}
 static int temp_name(const char *sz_name) {
     size_t cb_name=strlen(sz_name);
     return cb_name>6 && !strcmp(sz_name+cb_name-6,".bbtmp");
@@ -114,10 +131,15 @@ void runtime_file_configure(const char *sz_app0,const char *sz_user) {
 static int translate(const char *sz_guest,char *sz_out,size_t cb_out) {
     if (!sz_guest || !*sz_guest) return ENOENT;
     char sz_buffer[1024];
-    if (sz_guest[0]!='/') snprintf(sz_buffer,sizeof(sz_buffer),"/app0/%s",sz_guest);
-    else snprintf(sz_buffer,sizeof(sz_buffer),"%s",sz_guest);
+    absolute_path(sz_guest,sz_buffer,sizeof(sz_buffer));
     for (const char *sz_cursor=sz_buffer;(sz_cursor=strstr(sz_cursor,".."));sz_cursor+=2)
-        if ((sz_cursor==sz_buffer || sz_cursor[-1]=='/') && (sz_cursor[2]==0 || sz_cursor[2]=='/')) return EACCES;
+        if ((sz_cursor==sz_buffer || sz_cursor[-1]=='/') && (sz_cursor[2]==0 || sz_cursor[2]=='/')) {
+            static uint64_t s_c_parent_refusals;
+            const uint64_t c_before=__atomic_fetch_add(&s_c_parent_refusals,1,__ATOMIC_RELAXED);
+            if (c_before<8) printf("Runtime: guest path %s refused (EACCES): \"..\" components are not resolved\n",sz_guest);
+            if (!c_before) runtime_calls_hle_stub("guest path with \"..\" refused (EACCES)",&s_c_parent_refusals);
+            return EACCES;
+        }
     pthread_mutex_lock(&s_lock);
     size_t best=0; const Mount *p_mount=NULL;
     for (size_t i=0;i<s_c_mounts;++i) {
@@ -239,9 +261,10 @@ static int audio_trace(void) { static int s_is_enabled=-1; if (s_is_enabled<0) {
 /* PS_SAVE_TRACE=1: every operation on save files (/savedataN). */
 static int save_trace(void) { static int s_is_enabled=-1; if (s_is_enabled<0) { const char *sz_value=runtime_env("PS_SAVE_TRACE",NULL); s_is_enabled=sz_value && sz_value[0]=='1'; } return s_is_enabled; }
 /* Game mounts (including linked mod overlays) are read-only. Saves use other mounts. */
-static int game_path(const char *sz_path) {
-    if (!sz_path || !*sz_path) return 0;
-    if (*sz_path!='/') return 1;
+static int game_path(const char *sz_guest) {
+    if (!sz_guest || !*sz_guest) return 0;
+    char sz_path[1024];
+    absolute_path(sz_guest,sz_path,sizeof(sz_path));
     return (!strncmp(sz_path,"/app0",5) && (!sz_path[5] || sz_path[5]=='/')) ||
            (!strncmp(sz_path,"/hostapp",8) && (!sz_path[8] || sz_path[8]=='/'));
 }
@@ -323,6 +346,8 @@ static int commit_file(const File *p_file) {
 }
 /* All operations return >=0 or -(host errno); wrappers adapt the convention. */
 static int64_t do_open(const char *sz_guest,int flags,int mode) {
+    char sz_absolute[1024];
+    if (sz_guest) { absolute_path(sz_guest,sz_absolute,sizeof(sz_absolute)); sz_guest=sz_absolute; }
     if (game_path(sz_guest) && (flags & (3|0x8|0x200|0x400|0x800))) return -EROFS;
     char sz_path[1024];
     int e=translate(sz_guest,sz_path,sizeof(sz_path));
@@ -356,8 +381,8 @@ static int64_t do_open(const char *sz_guest,int flags,int mode) {
         if (sz_temp) ps_host_fs_remove(sz_temp);
         free(sz_commit); free(sz_temp); return -EMFILE;
     }
-    s_files[h_fd]=(File){.used=1,.host=host,.p_dir=p_dir,.sz_commit=sz_commit,.sz_temp=sz_temp};
-    snprintf(s_files[h_fd].sz_path,sizeof(s_files[h_fd].sz_path),"%s",sz_guest);
+    s_files[h_fd]=(File){.used=1,.host=host,.p_dir=p_dir,.sz_commit=sz_commit,.sz_temp=sz_temp,.serial=++s_last_serial};
+    absolute_path(sz_guest,s_files[h_fd].sz_path,sizeof(s_files[h_fd].sz_path));
     ++s_c_opens;
     pthread_mutex_unlock(&s_lock);
     if (audio_trace() && strstr(sz_guest,"sound/")) printf("Audio trace: open(%s) -> fd %d, %lld bytes\n",sz_guest,h_fd,(long long)s.cb_size);
@@ -375,6 +400,7 @@ static int64_t do_open(const char *sz_guest,int flags,int mode) {
     if (save_trace() && save_path(sz_guest)) printf("Save trace: open(%s) -> fd %d\n",sz_guest,h_fd);
     return h_fd;
 }
+static int64_t release_file(int h_fd,File *p_closed);
 static int64_t do_close(int h_fd) {
     if (h_fd>=0 && h_fd<3) return 0;
     pthread_mutex_lock(&s_lock);
@@ -383,6 +409,11 @@ static int64_t do_close(int h_fd) {
     File closed=*p_file;
     *p_file=(File){0};
     pthread_mutex_unlock(&s_lock);
+    return release_file(h_fd,&closed);
+}
+/* What closing does once the entry left the table. */
+static int64_t release_file(int h_fd,File *p_closed) {
+    File closed=*p_closed;
     free_listing(closed.p_dir);
     int result=0;
     if (closed.sz_temp) result=commit_file(&closed);
@@ -400,14 +431,15 @@ static int host_fd(int h_fd) {
 }
 /* Sockets (runtime_socket.c) take descriptors from this table too, so close, read, write and fcntl
  * find them as the console's kernel would. The table owns the host descriptor once adopted. */
-int runtime_file_adopt(int h_host) {
+static int adopt(int h_host,int is_socket) {
     pthread_mutex_lock(&s_lock);
     int h_fd=-1;
     for (int i=3;i<MAX_FILES;++i) if (!s_files[i].used) { h_fd=i; break; }
-    if (h_fd>=0) s_files[h_fd]=(File){.used=1,.host=h_host,.is_socket=1};
+    if (h_fd>=0) s_files[h_fd]=(File){.used=1,.host=h_host,.is_socket=is_socket,.serial=++s_last_serial};
     pthread_mutex_unlock(&s_lock);
     return h_fd<0 ? -EMFILE : h_fd;
 }
+int runtime_file_adopt(int h_host) { return adopt(h_host,1); }
 int runtime_file_host(int h_fd) { return host_fd(h_fd); }
 static int host_fd_written(int h_fd) {
     if (h_fd>=0 && h_fd<3) return h_fd;
@@ -507,17 +539,54 @@ static int64_t do_fstat(int h_fd,GuestStat *p_out) {
     if (e) return -e;
     convert_stat(&s,p_out); return 0;
 }
-static int64_t do_stat(const char *sz_guest,GuestStat *p_out) {
+static int64_t stat_path(const char *sz_guest,GuestStat *p_out,int is_link) {
+    char sz_absolute[1024];
+    if (sz_guest) { absolute_path(sz_guest,sz_absolute,sizeof(sz_absolute)); sz_guest=sz_absolute; }
     char sz_path[1024]; PsHostStat s;
     int e=translate(sz_guest,sz_path,sizeof(sz_path));
     if (e) return -e;
     if (save_path(sz_guest)) current_copy(sz_path,sizeof(sz_path),0);
     if (!p_out) return -EFAULT;
-    int r=-ps_host_fs_stat(sz_path,&s);
-    if (r==-ENOENT && !save_path(sz_guest) && fix_case(sz_path)) r=-ps_host_fs_stat(sz_path,&s);
+    int (*const pfn_stat)(const char *,PsHostStat *)=is_link ? ps_host_fs_stat_link : ps_host_fs_stat;
+    int r=-pfn_stat(sz_path,&s);
+    if (r==-ENOENT && !save_path(sz_guest) && fix_case(sz_path)) r=-pfn_stat(sz_path,&s);
     if (save_trace() && save_path(sz_guest)) printf("Save trace: stat(%s) -> %d, %lld bytes\n",sz_guest,r,r ? -1LL : (long long)s.cb_size);
     if (r) return r;
     convert_stat(&s,p_out); return 0;
+}
+static int64_t do_stat(const char *sz_guest,GuestStat *p_out) { return stat_path(sz_guest,p_out,0); }
+static int64_t do_lstat(const char *sz_guest,GuestStat *p_out) { return stat_path(sz_guest,p_out,1); }
+#define GUEST_AT_FDCWD (-100)
+#define GUEST_AT_SYMLINK_NOFOLLOW 0x200
+static int64_t do_fstatat(int h_dir,const char *sz_guest,GuestStat *p_out,int flags) {
+    if (!sz_guest) return -EFAULT;
+    if (flags&~GUEST_AT_SYMLINK_NOFOLLOW) return -EINVAL;
+    const int is_link=(flags&GUEST_AT_SYMLINK_NOFOLLOW)!=0;
+    if (sz_guest[0]=='/' || h_dir==GUEST_AT_FDCWD) return stat_path(sz_guest,p_out,is_link);
+    char sz_path[1024];
+    pthread_mutex_lock(&s_lock);
+    const File *p_dir=get(h_dir);
+    const int e=!p_dir ? EBADF : !p_dir->p_dir ? ENOTDIR :
+                (size_t)snprintf(sz_path,sizeof(sz_path),"%s/%s",p_dir->sz_path,sz_guest)>=sizeof(sz_path) ? ENAMETOOLONG : 0;
+    pthread_mutex_unlock(&s_lock);
+    return e ? -e : stat_path(sz_path,p_out,is_link);
+}
+static int64_t do_chdir(const char *sz_guest) {
+    if (!sz_guest) return -EFAULT;
+    char sz_absolute[1024], sz_path[1024];
+    absolute_path(sz_guest,sz_absolute,sizeof(sz_absolute));
+    for (size_t cb_path=strlen(sz_absolute); cb_path>1 && sz_absolute[cb_path-1]=='/';) sz_absolute[--cb_path]=0;
+    if (strlen(sz_absolute)>=sizeof(s_sz_cwd)) return -ENAMETOOLONG;
+    int e=translate(sz_absolute,sz_path,sizeof(sz_path));
+    PsHostStat s;
+    if (!e) e=ps_host_fs_stat(sz_path,&s);
+    if (!e && !PS_HOST_MODE_IS_DIRECTORY(s.mode)) e=ENOTDIR;
+    if (e) return -e;
+    pthread_mutex_lock(&s_cwd_lock);
+    snprintf(s_sz_cwd,sizeof(s_sz_cwd),"%s",sz_absolute);
+    pthread_mutex_unlock(&s_cwd_lock);
+    printf("Runtime: guest working directory is now %s\n",sz_absolute);
+    return 0;
 }
 static int64_t do_getdents(int h_fd,char *sz_buffer,uint64_t cb_buffer,int64_t *p_basep) {
     pthread_mutex_lock(&s_lock);
@@ -549,6 +618,8 @@ static int64_t do_getdents(int h_fd,char *sz_buffer,uint64_t cb_buffer,int64_t *
     return result;
 }
 static int64_t path_op(const char *sz_guest,int op,int mode) {
+    char sz_absolute[1024];
+    if (sz_guest) { absolute_path(sz_guest,sz_absolute,sizeof(sz_absolute)); sz_guest=sz_absolute; }
     if (game_path(sz_guest)) return -EROFS;
     char sz_path[1024];
     int e=translate(sz_guest,sz_path,sizeof(sz_path));
@@ -558,6 +629,9 @@ static int64_t path_op(const char *sz_guest,int op,int mode) {
     return r;
 }
 static int64_t do_rename(const char *sz_from,const char *sz_to) {
+    char sz_absolute_from[1024], sz_absolute_to[1024];
+    if (sz_from) { absolute_path(sz_from,sz_absolute_from,sizeof(sz_absolute_from)); sz_from=sz_absolute_from; }
+    if (sz_to) { absolute_path(sz_to,sz_absolute_to,sizeof(sz_absolute_to)); sz_to=sz_absolute_to; }
     if (game_path(sz_from) || game_path(sz_to)) return -EROFS;
     char sz_a[1024],sz_b[1024];
     int e=translate(sz_from,sz_a,sizeof(sz_a));
@@ -573,6 +647,8 @@ static int64_t do_ftruncate(int h_fd,int64_t length) {
     return -ps_host_fs_truncate(h,length);
 }
 static int64_t do_truncate(const char *sz_guest,int64_t length) {
+    char sz_absolute[1024];
+    if (sz_guest) { absolute_path(sz_guest,sz_absolute,sizeof(sz_absolute)); sz_guest=sz_absolute; }
     if (game_path(sz_guest)) return -EROFS;
     char sz_path[1024];
     int e=translate(sz_guest,sz_path,sizeof(sz_path));
@@ -583,6 +659,8 @@ static int64_t do_truncate(const char *sz_guest,int64_t length) {
 }
 typedef struct { int64_t sec, usec; } GuestTimeval;
 static int64_t do_utimes(const char *sz_guest,const GuestTimeval *p_times) {
+    char sz_absolute[1024];
+    if (sz_guest) { absolute_path(sz_guest,sz_absolute,sizeof(sz_absolute)); sz_guest=sz_absolute; }
     struct timespec host[2];
     for (int i=0;p_times && i<2;++i) {
         if (p_times[i].usec<0 || p_times[i].usec>=1000000) return -EINVAL;
@@ -608,6 +686,8 @@ static int64_t do_futimes(int h_fd,const GuestTimeval *p_times) {
     return -ps_host_fs_set_times_file(h_host,p_times ? host_times : NULL);
 }
 static int64_t do_chmod(const char *sz_guest,int mode) {
+    char sz_absolute[1024];
+    if (sz_guest) { absolute_path(sz_guest,sz_absolute,sizeof(sz_absolute)); sz_guest=sz_absolute; }
     if (game_path(sz_guest)) return -EROFS;
     char sz_path[1024];
     int error=translate(sz_guest,sz_path,sizeof(sz_path));
@@ -643,7 +723,159 @@ static int64_t do_fcntl(int h_fd,int command,int64_t argument) {
     }
 }
 static int64_t do_fsync(int h_fd) { int h=host_fd(h_fd); if (h<0) return -EBADF; return -ps_host_fs_sync(h); }
+static int64_t do_fdatasync(int h_fd) { int h=host_fd(h_fd); if (h<0) return -EBADF; return -ps_host_fs_sync_data(h); }
+/* Everything the game has open goes to disk; host files the runtime keeps for itself are not its. */
+static int64_t do_sync(void) {
+    int h_copies[MAX_FILES], c_copies=0;
+    pthread_mutex_lock(&s_lock);
+    for (int i=3;i<MAX_FILES;++i)
+        if (s_files[i].used && !s_files[i].is_socket && !s_files[i].p_dir) {
+            const int h_copy=ps_host_fs_duplicate(s_files[i].host,-1);
+            if (h_copy>=0) h_copies[c_copies++]=h_copy;
+        }
+    pthread_mutex_unlock(&s_lock);
+    /* The copies keep each file open while it is written back, outside the table's lock. */
+    for (int i=0;i<c_copies;++i) { ps_host_fs_sync(h_copies[i]); ps_host_fs_close(h_copies[i]); }
+    return 0;
+}
+/* struct iovec, the same on FreeBSD and Linux x86-64. A short transfer ends the vector, as it would
+ * have ended the kernel's single one. */
+typedef struct { void *p_base; uint64_t cb_base; } GuestIovec;
+#define GUEST_IOV_MAX 1024
+static int64_t do_vector(int h_fd,const GuestIovec *p_iov,int c_iov,int64_t off_file,int is_write,int is_positional) {
+    if (c_iov<0 || c_iov>GUEST_IOV_MAX) return -EINVAL;
+    if (c_iov && !p_iov) return -EFAULT;
+    if (is_positional && off_file<0) return -EINVAL;
+    int64_t cb_total=0;
+    for (int i=0;i<c_iov;++i) {
+        const int64_t off_at=off_file+cb_total;
+        void *p_base=p_iov[i].p_base;
+        const uint64_t cb_base=p_iov[i].cb_base;
+        int64_t cb_done;
+        if (is_write) cb_done=is_positional ? do_pwrite(h_fd,p_base,cb_base,off_at) : do_write(h_fd,p_base,cb_base);
+        else cb_done=is_positional ? do_pread(h_fd,p_base,cb_base,off_at) : do_read(h_fd,p_base,cb_base);
+        if (cb_done<0) return cb_total ? cb_total : cb_done;
+        cb_total+=cb_done;
+        if ((uint64_t)cb_done<cb_base) break;
+    }
+    return cb_total;
+}
+static int64_t do_readv(int h_fd,const GuestIovec *p_iov,int c_iov) { return do_vector(h_fd,p_iov,c_iov,0,0,0); }
+static int64_t do_writev(int h_fd,const GuestIovec *p_iov,int c_iov) { return do_vector(h_fd,p_iov,c_iov,0,1,0); }
+static int64_t do_preadv(int h_fd,const GuestIovec *p_iov,int c_iov,int64_t off_file) { return do_vector(h_fd,p_iov,c_iov,off_file,0,1); }
+static int64_t do_pwritev(int h_fd,const GuestIovec *p_iov,int c_iov,int64_t off_file) { return do_vector(h_fd,p_iov,c_iov,off_file,1,1); }
+/* flock's operations have the same numbers on FreeBSD and in ps_host.h. */
+static int64_t do_flock(int h_fd,int operation) {
+    const int kind=operation&(PS_HOST_LOCK_SHARED|PS_HOST_LOCK_EXCLUSIVE|PS_HOST_LOCK_UNLOCK);
+    if (operation&~(kind|PS_HOST_LOCK_NONBLOCK) || (kind!=PS_HOST_LOCK_SHARED && kind!=PS_HOST_LOCK_EXCLUSIVE && kind!=PS_HOST_LOCK_UNLOCK))
+        return -EINVAL;
+    const File *p_file=get(h_fd);
+    if (!p_file) return -EBADF;
+    if (p_file->is_socket) return -EOPNOTSUPP;
+    return -ps_host_fs_lock(p_file->host,(unsigned)operation);
+}
+/* FreeBSD's file flags (UF_*, SF_*) have no host counterpart: the file is checked as the kernel
+ * would and the flags are not kept, so fstat keeps reporting none. */
+static uint64_t s_c_dropped_flags;
+static void note_dropped_flags(uint32_t flags) {
+    if (flags && !__atomic_fetch_add(&s_c_dropped_flags,1,__ATOMIC_RELAXED)) {
+        printf("Runtime: file flags 0x%x not kept (the host has no BSD file flags)\n",flags);
+        runtime_calls_hle_stub("chflags/fchflags (BSD file flags not kept)",&s_c_dropped_flags);
+    }
+}
+static int64_t do_chflags(const char *sz_guest,uint32_t flags) {
+    if (!sz_guest) return -EFAULT;
+    char sz_absolute[1024];
+    absolute_path(sz_guest,sz_absolute,sizeof(sz_absolute));
+    sz_guest=sz_absolute;
+    if (game_path(sz_guest)) return -EROFS;
+    char sz_path[1024];
+    PsHostStat s;
+    int e=translate(sz_guest,sz_path,sizeof(sz_path));
+    if (!e && save_path(sz_guest)) current_copy(sz_path,sizeof(sz_path),0);
+    if (!e) e=ps_host_fs_stat(sz_path,&s);
+    if (e) return -e;
+    note_dropped_flags(flags);
+    return 0;
+}
+static int64_t do_fchflags(int h_fd,uint32_t flags) {
+    const File *p_file=get(h_fd);
+    if (!p_file) return -EBADF;
+    if (game_path(p_file->sz_path)) return -EROFS;
+    note_dropped_flags(flags);
+    return 0;
+}
+static int64_t do_pipe(int32_t *p_out_fds) {
+    if (!p_out_fds) return -EFAULT;
+    int h_hosts[2];
+    const int e=ps_host_fs_pipe(h_hosts);
+    if (e) return -e;
+    const int h_read=adopt(h_hosts[0],0);
+    const int h_write=h_read<0 ? -EMFILE : adopt(h_hosts[1],0);
+    if (h_write<0) {
+        if (h_read>=0) do_close(h_read); else ps_host_fs_close(h_hosts[0]);
+        ps_host_fs_close(h_hosts[1]);
+        return -EMFILE;
+    }
+    p_out_fds[0]=h_read; p_out_fds[1]=h_write;
+    return 0;
+}
+/* The copy shares the host file (offset and status) as dup's does. A save file being written keeps
+ * its commit on the original descriptor, counted as written since the copy may write it; a
+ * folder's copy lists it again from the start. dup2's target is taken over in one step under the
+ * table's lock, its old file closed afterwards. Descriptors 0-2 are the host's own stdio, which the
+ * game does not get to replace. */
+static uint64_t s_c_stdio_replacements;
+static int64_t do_dup(int h_fd,int h_target) {
+    if (h_target<-1 || h_target>=MAX_FILES) return -EBADF;
+    File copy={.used=1};
+    pthread_mutex_lock(&s_lock);
+    const File *p_file=get(h_fd);
+    if (p_file) { copy.is_socket=p_file->is_socket; memcpy(copy.sz_path,p_file->sz_path,sizeof(copy.sz_path)); }
+    const int is_open=p_file || (h_fd>=0 && h_fd<3), is_dir=p_file && p_file->p_dir;
+    pthread_mutex_unlock(&s_lock);
+    if (!is_open) return -EBADF;
+    if (h_target==h_fd) return h_fd;
+    if (h_target>=0 && h_target<3) {
+        if (!__atomic_fetch_add(&s_c_stdio_replacements,1,__ATOMIC_RELAXED)) {
+            printf("Runtime: dup2 onto descriptor %d refused: 0-2 are the host's stdio\n",h_target);
+            runtime_calls_hle_stub("dup2 onto stdio (refused, EBADF)",&s_c_stdio_replacements);
+        }
+        return -EBADF;
+    }
+    if (is_dir) {
+        char sz_host_path[1024];
+        const int e=translate(copy.sz_path,sz_host_path,sizeof(sz_host_path));
+        if (e) return -e;
+        if (!(copy.p_dir=list_directory(sz_host_path))) return -ENOMEM;
+    }
+    File replaced={0};
+    pthread_mutex_lock(&s_lock);
+    File *p_source=get(h_fd);
+    const int h_host=p_source ? p_source->host : h_fd<3 ? h_fd : -1;
+    int h_new=h_target;
+    if (h_new<0) for (int i=3;i<MAX_FILES;++i) if (!s_files[i].used) { h_new=i; break; }
+    int64_t result=h_host<0 ? -EBADF : h_new<0 ? -EMFILE : 0;
+    if (!result) {
+        copy.host=ps_host_fs_duplicate(h_host,-1);
+        if (copy.host<0) result=copy.host;
+    }
+    if (!result) {
+        if (p_source && p_source->sz_temp) p_source->is_dirty=1;
+        if (s_files[h_new].used) replaced=s_files[h_new];
+        copy.serial=++s_last_serial;
+        s_files[h_new]=copy;
+        result=h_new;
+    }
+    pthread_mutex_unlock(&s_lock);
+    if (result<0) free_listing(copy.p_dir);
+    if (replaced.used) release_file(h_new,&replaced);
+    return result;
+}
+static int64_t do_dup2(int h_fd,int h_target) { return h_target<0 ? -EBADF : do_dup(h_fd,h_target); }
 static int64_t do_access(const char *sz_guest,int mode) {
+    char sz_absolute[1024];
+    if (sz_guest) { absolute_path(sz_guest,sz_absolute,sizeof(sz_absolute)); sz_guest=sz_absolute; }
     char sz_path[1024];
     int e=translate(sz_guest,sz_path,sizeof(sz_path));
     if (e) return -e;
@@ -678,6 +910,21 @@ PAIR(futimes,(int h_fd,const GuestTimeval *p_times),(h_fd,p_times))
 PAIR(chmod,(const char *sz_path,int mode),(sz_path,mode))
 PAIR(fchmod,(int h_fd,int mode),(h_fd,mode))
 PAIR(fcntl,(int h_fd,int command,int64_t argument),(h_fd,command,argument))
+PAIR(fdatasync,(int h_fd),(h_fd))
+PAIR(readv,(int h_fd,const GuestIovec *p_iov,int c_iov),(h_fd,p_iov,c_iov))
+PAIR(writev,(int h_fd,const GuestIovec *p_iov,int c_iov),(h_fd,p_iov,c_iov))
+PAIR(preadv,(int h_fd,const GuestIovec *p_iov,int c_iov,int64_t off_file),(h_fd,p_iov,c_iov,off_file))
+PAIR(pwritev,(int h_fd,const GuestIovec *p_iov,int c_iov,int64_t off_file),(h_fd,p_iov,c_iov,off_file))
+PAIR(sync,(void),())
+static ABI int64_t posix_lstat(const char *sz_path,GuestStat *p_stat) { return posix(do_lstat(sz_path,p_stat)); }
+static ABI int64_t posix_fstatat(int h_dir,const char *sz_path,GuestStat *p_stat,int flags) { return posix(do_fstatat(h_dir,sz_path,p_stat,flags)); }
+static ABI int64_t posix_chdir(const char *sz_path) { return posix(do_chdir(sz_path)); }
+static ABI int64_t posix_flock(int h_fd,int operation) { return posix(do_flock(h_fd,operation)); }
+static ABI int64_t posix_chflags(const char *sz_path,uint32_t flags) { return posix(do_chflags(sz_path,flags)); }
+static ABI int64_t posix_fchflags(int h_fd,uint32_t flags) { return posix(do_fchflags(h_fd,flags)); }
+static ABI int64_t posix_pipe(int32_t *p_out_fds) { return posix(do_pipe(p_out_fds)); }
+static ABI int64_t posix_dup(int h_fd) { return posix(do_dup(h_fd,-1)); }
+static ABI int64_t posix_dup2(int h_fd,int h_target) { return posix(do_dup2(h_fd,h_target)); }
 /* getdirentries without the position out-parameter (Atelier Ryza lists its UI style folders with
  * it; answered by a stub, they read as empty and every UI image fell back to NO IMAGE). */
 static ABI int64_t sce_getdents_plain(int h_fd,char *sz_buffer,uint64_t cb_buffer) { return sce(do_getdents(h_fd,sz_buffer,cb_buffer,NULL)); }
@@ -701,14 +948,20 @@ static const RuntimeExport s_exports[]={
     {"sceKernelWrite",sce_write}, {"write",posix_write}, {"_write",posix_write},
     {"sceKernelPwrite",sce_pwrite}, {"pwrite",posix_pwrite},
     {"sceKernelLseek",sce_lseek}, {"lseek",posix_lseek},
-    {"sceKernelFstat",sce_fstat}, {"fstat",posix_fstat},
-    {"sceKernelStat",sce_stat}, {"stat",posix_stat},
-    {"sceKernelGetdirentries",sce_getdents}, {"getdirentries",posix_getdents},
+    {"sceKernelFstat",sce_fstat}, {"fstat",posix_fstat}, {"_fstat",posix_fstat},
+    {"sceKernelStat",sce_stat}, {"stat",posix_stat}, {"lstat",posix_lstat}, {"fstatat",posix_fstatat},
+    {"sceKernelGetdirentries",sce_getdents}, {"getdirentries",posix_getdents}, {"_getdirentries",posix_getdents},
     {"sceKernelGetdents",sce_getdents_plain}, {"getdents",posix_getdents_plain},
     {"sceKernelRename",sce_rename}, {"rename",posix_rename},
     {"sceKernelFtruncate",sce_ftruncate}, {"ftruncate",posix_ftruncate},
     {"sceKernelTruncate",sce_truncate}, {"truncate",posix_truncate},
     {"sceKernelFsync",sce_fsync}, {"fsync",posix_fsync},
+    {"sceKernelFdatasync",sce_fdatasync}, {"fdatasync",posix_fdatasync}, {"sceKernelSync",sce_sync}, {"sync",posix_sync},
+    {"sceKernelReadv",sce_readv}, {"readv",posix_readv}, {"_readv",posix_readv},
+    {"sceKernelWritev",sce_writev}, {"writev",posix_writev}, {"_writev",posix_writev},
+    {"sceKernelPreadv",sce_preadv}, {"preadv",posix_preadv}, {"sceKernelPwritev",sce_pwritev}, {"pwritev",posix_pwritev},
+    {"chdir",posix_chdir}, {"flock",posix_flock}, {"chflags",posix_chflags}, {"fchflags",posix_fchflags},
+    {"pipe",posix_pipe}, {"dup",posix_dup}, {"dup2",posix_dup2}, {"_dup2",posix_dup2},
     {"sceKernelUtimes",sce_utimes}, {"utimes",posix_utimes},
     {"sceKernelFutimes",sce_futimes}, {"futimes",posix_futimes},
     {"sceKernelChmod",sce_chmod}, {"chmod",posix_chmod}, {"sceKernelFchmod",sce_fchmod}, {"fchmod",posix_fchmod},
@@ -733,6 +986,61 @@ int64_t runtime_file_stat(const char *sz_path,void *p_stat) { return do_stat(sz_
 int64_t runtime_file_fstat(int h_fd,void *p_stat) { return do_fstat(h_fd,p_stat); }
 int64_t runtime_file_getdents(int h_fd,char *sz_buffer,uint64_t cb_buffer,int64_t *p_base) { return do_getdents(h_fd,sz_buffer,cb_buffer,p_base); }
 int runtime_file_translate(const char *sz_guest,char *sz_out,size_t cb_out) { return translate(sz_guest,sz_out,cb_out); }
+uint64_t runtime_file_serial(int h_fd) {
+    pthread_mutex_lock(&s_lock);
+    const File *p_file=get(h_fd);
+    const uint64_t serial=p_file ? p_file->serial : 0;
+    pthread_mutex_unlock(&s_lock);
+    return serial;
+}
+/* As FreeBSD's vnode filters: a regular file is readable while its offset is before its end and
+ * always writable (with 0 room); pipes and sockets as the host polls them. Asked under the table's
+ * lock, which a close takes before the host descriptor goes; none of it waits. */
+int runtime_file_ready(int h_fd,uint64_t serial,int is_write,int64_t *p_out_data,int *p_out_is_eof) {
+    *p_out_data=0; *p_out_is_eof=0;
+    pthread_mutex_lock(&s_lock);
+    const File *p_file=get(h_fd);
+    const int is_open=p_file && p_file->serial==serial;
+    PsHostStat s;
+    const int is_file=is_open && !p_file->is_socket && !ps_host_fs_stat_file(p_file->host,&s) &&
+                      (PS_HOST_MODE_IS_REGULAR(s.mode) || PS_HOST_MODE_IS_DIRECTORY(s.mode));
+    int result=-EBADF;
+    if (is_file) {
+        const int64_t off_now=is_write ? 0 : ps_host_fs_seek(p_file->host,0,1);
+        if (!is_write) *p_out_data=off_now<0 || off_now>=s.cb_size ? 0 : s.cb_size-off_now;
+        result=is_write || *p_out_data!=0;
+    } else if (is_open) {
+        unsigned events=0;
+        const unsigned wanted=is_write ? PS_HOST_POLL_OUT : PS_HOST_POLL_IN;
+        const int e=ps_host_fs_poll(p_file->host,wanted,&events,p_out_data);
+        *p_out_is_eof=!e && (events&PS_HOST_POLL_HANGUP)!=0;
+        result=e ? -e : (events&(wanted|PS_HOST_POLL_HANGUP|PS_HOST_POLL_ERROR))!=0;
+    }
+    pthread_mutex_unlock(&s_lock);
+    return result;
+}
+/* EVFILT_VNODE: the NOTE_* changes (1 delete, 2 write, 4 extend, 8 attributes, 0x10 link count)
+ * since p_inout_state, which the first call fills (p_inout_state[0] < 0) and each call updates. */
+int runtime_file_changes(int h_fd,uint64_t serial,int64_t p_inout_state[4]) {
+    pthread_mutex_lock(&s_lock);
+    const File *p_file=get(h_fd);
+    PsHostStat s;
+    const int is_gone=!p_file || p_file->serial!=serial || p_file->is_socket || ps_host_fs_stat_file(p_file->host,&s);
+    pthread_mutex_unlock(&s_lock);
+    if (is_gone) return -EBADF;
+    const int64_t now[4]={s.cb_size,(int64_t)s.mtime.tv_sec*1000000000+s.mtime.tv_nsec,
+                          (int64_t)s.ctime.tv_sec*1000000000+s.ctime.tv_nsec,(int64_t)s.c_links};
+    int notes=0;
+    if (p_inout_state[0]>=0) {
+        if (!now[3]) notes|=0x1;
+        if (now[1]!=p_inout_state[1]) notes|=0x2;
+        if (now[0]>p_inout_state[0]) notes|=0x4;
+        if (now[2]!=p_inout_state[2]) notes|=0x8;
+        if (now[3]!=p_inout_state[3]) notes|=0x10;
+    }
+    memcpy(p_inout_state,now,sizeof(now));
+    return notes;
+}
 void runtime_file_report(void) {
     printf("Runtime: files opened=%zu, reads=%zu (%llu bytes), writes=%zu, not found=%zu\n",
            s_c_opens,s_c_reads,(unsigned long long)s_cb_read,s_c_writes,s_c_missing);

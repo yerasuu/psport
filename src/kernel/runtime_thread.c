@@ -119,7 +119,7 @@ static GuestThread *new_thread(void) {
         p_thread=calloc(1,sizeof(*p_thread));
     }
     if (!p_thread) return NULL;
-    p_thread->attr=(ThreadAttr){.magic=ATTR_MAGIC,.policy=1,.prio=DEFAULT_PRIO,.stack=DEFAULT_STACK,.guard=DEFAULT_GUARD,.affinity=0x7f};
+    p_thread->attr=(ThreadAttr){.magic=ATTR_MAGIC,.policy=1,.prio=DEFAULT_PRIO,.inherit=4,.stack=DEFAULT_STACK,.guard=DEFAULT_GUARD,.affinity=0x7f};
     return p_thread;
 }
 static void publish(GuestThread *p_thread) {
@@ -201,8 +201,9 @@ static ABI int32_t attr_destroy(ThreadAttr **pp_slot) {
 static ABI int32_t attr_get(void *h_thread,ThreadAttr **pp_out) {
     ThreadAttr *p_thread_attr=find_attr(pp_out);
     if (!p_thread_attr || !h_thread) return ERR(22);
+    /* A thread that ended, joined or not, is no longer found (kb #691). */
     GuestThread *p_thread=find_thread(h_thread);
-    if (!p_thread) return ERR(3);
+    if (!p_thread || __atomic_load_n(&p_thread->finished,__ATOMIC_ACQUIRE)) return ERR(3);
     ThreadAttr *p_next=p_thread_attr->p_next;
     *p_thread_attr=p_thread->attr; p_thread_attr->magic=ATTR_MAGIC; p_thread_attr->p_next=p_next;
     p_thread_attr->is_detached=p_thread->detached;
@@ -255,6 +256,18 @@ static ABI int32_t attr_set_policy(ThreadAttr **pp_slot,int policy) {
     ThreadAttr *p_thread_attr=find_attr(pp_slot);
     if (!p_thread_attr || policy<1 || policy>3) return ERR(22);
     p_thread_attr->policy=policy; return 0;
+}
+/* The console checks only attr and *attr before reading attr+4 (kb #691); a null out here is EINVAL
+ * instead of a fault. */
+static ABI int32_t attr_get_inherit(ThreadAttr **pp_slot,int *p_inherit) {
+    ThreadAttr *p_thread_attr=find_attr(pp_slot);
+    if (!p_thread_attr || !p_inherit) return ERR(22);
+    *p_inherit=p_thread_attr->inherit; return 0;
+}
+static ABI int32_t attr_get_policy(ThreadAttr **pp_slot,int *p_policy) {
+    ThreadAttr *p_thread_attr=find_attr(pp_slot);
+    if (!p_thread_attr || !p_policy) return ERR(22);
+    *p_policy=p_thread_attr->policy; return 0;
 }
 static ABI int32_t attr_set_inherit(ThreadAttr **pp_slot,int inherit) {
     ThreadAttr *p_thread_attr=find_attr(pp_slot);
@@ -449,6 +462,9 @@ static ABI int32_t posix_attr_set_detach(ThreadAttr **pp_thread_attr,int s) { re
 static ABI int32_t posix_attr_set_stack(ThreadAttr **pp_thread_attr,uint64_t s) { return posix(attr_set_stack(pp_thread_attr,s)); }
 static ABI int32_t posix_attr_set_param(ThreadAttr **pp_thread_attr,const int *p_param) { return posix(attr_set_param(pp_thread_attr,p_param)); }
 static ABI int32_t posix_attr_set_policy(ThreadAttr **pp_thread_attr,int p) { return posix(attr_set_policy(pp_thread_attr,p)); }
+static ABI int32_t posix_attr_get_policy(ThreadAttr **pp_thread_attr,int *p_policy) { return posix(attr_get_policy(pp_thread_attr,p_policy)); }
+static ABI int32_t posix_attr_get_inherit(ThreadAttr **pp_thread_attr,int *p_inherit) { return posix(attr_get_inherit(pp_thread_attr,p_inherit)); }
+static ABI int32_t posix_attr_set_inherit(ThreadAttr **pp_thread_attr,int inherit) { return posix(attr_set_inherit(pp_thread_attr,inherit)); }
 static ABI int32_t posix_create(GuestThread **pp_thread,ThreadAttr **pp_thread_attr,GuestEntry pfn_entry,void *p_arg) { return posix(create(pp_thread,pp_thread_attr,pfn_entry,p_arg,"posix")); }
 static ABI int32_t posix_create_name(GuestThread **pp_thread,ThreadAttr **pp_thread_attr,GuestEntry pfn_entry,void *p_arg,const char *sz_name) { return posix(create(pp_thread,pp_thread_attr,pfn_entry,p_arg,sz_name)); }
 static ABI int32_t posix_join(GuestThread *p_thread,void **pp_result) { return posix(thread_join(p_thread,pp_result)); }
@@ -486,6 +502,29 @@ static ABI void thread_test_cancel(void) {
     thread_exit((void *)1); /* PTHREAD_CANCELED */
 }
 
+/* Suspending a thread and reading its user context need it stopped only in guest code, as the
+ * console's kernel stops it on its way back to user mode; the runtime has no hook where a thread
+ * leaves its own code for the game's, and stopped elsewhere it may hold any host lock its suspender
+ * then waits for. Until there is one these fail with ENOSYS, counted. */
+static uint64_t s_c_user_context_calls;
+static int32_t user_context_unavailable(const char *sz_function) {
+    if (!__atomic_fetch_add(&s_c_user_context_calls,1,__ATOMIC_RELAXED)) {
+        printf("Runtime: %s not available (threads are not suspended): ENOSYS\n",sz_function);
+        runtime_calls_hle_stub("pthread_suspend/resume/get/set_user_context_np (ENOSYS)",&s_c_user_context_calls);
+    }
+    return 78;
+}
+static ABI int32_t posix_suspend_context(void *h_thread) { (void)h_thread; return user_context_unavailable("pthread_suspend_user_context_np"); }
+static ABI int32_t posix_resume_context(void *h_thread) { (void)h_thread; return user_context_unavailable("pthread_resume_user_context_np"); }
+static ABI int32_t posix_get_context(void *h_thread,void *p_out_context) {
+    (void)h_thread; (void)p_out_context;
+    return user_context_unavailable("pthread_get_user_context_np");
+}
+static ABI int32_t posix_set_context(void *h_thread,const void *p_context) {
+    (void)h_thread; (void)p_context;
+    return user_context_unavailable("pthread_set_user_context_np");
+}
+
 int32_t runtime_thread_spawn(void **pp_out,void *(ABI *pfn_entry)(void *),void *p_argument,uint64_t stack,const char *sz_name) {
     ThreadAttr *p_attr=NULL;
     int32_t r=attr_init(&p_attr);
@@ -511,6 +550,8 @@ uintptr_t runtime_thread_resolve(const char *sz_name) {
         {"JaRMy+QcpeU",attr_get_detach}, {"-fA+7ZlGDQs",attr_get_stack},
         {"FXPWHNk8Of0",attr_get_param}, {"El+cQ20DynU",attr_set_guard},
         {"txHtngJ+eyc",attr_get_guard},
+        {"NMyIQ9WgWbU",attr_get_policy}, {"lpMP8HhkBbg",attr_get_inherit},
+        {"RtLRV-pBTTY",posix_attr_get_policy}, {"oLjPqUKhzes",posix_attr_get_inherit}, {"7ZlAakEf0Qg",posix_attr_set_inherit},
         {"Bvn74vj6oLo",attr_set_stack_region}, {"Ru36fiTtJzA",attr_get_stack_addr},
         {"-quPa4SEJUw",attr_get_stack_region},
         {"ruZ9hhQ8oUk",thread_get_stack},
@@ -528,6 +569,9 @@ uintptr_t runtime_thread_resolve(const char *sz_name) {
         {"qBDmpCyGssE",thread_cancel}, {"0D4-FVvEikw",posix_cancel},
         {"LapIb799SSE",thread_test_cancel}, {"nYBrkGDqxh8",thread_test_cancel},
         {"1xvtUVx1-Sg",push_cleanup_handler}, {"iWsFlYMf3Kw",pop_cleanup_handler},
+        {"cfjAjVTFG6A",posix_suspend_context}, {"QRdE7dBfNks",posix_resume_context},
+        {"YkGOXpJEtO8",posix_get_context}, {"el9stmu6290",posix_set_context},
+        {"4e9dMKt+UYA",posix_suspend_context}, {"BYM3L--ojzI",posix_resume_context},
     };
     for (size_t i=0;i<sizeof(s_table)/sizeof(*s_table);++i)
         if (runtime_same_nid(sz_name,s_table[i].sz_nid)) return (uintptr_t)s_table[i].p_function;

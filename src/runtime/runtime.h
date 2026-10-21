@@ -200,6 +200,8 @@ void runtime_process_configure(uint32_t sdk_version, uint32_t psf_attributes);
 /* The SDK version the eboot was built with (its process parameters), for behaviour tied to it. */
 uint32_t runtime_process_sdk_version(void);
 uintptr_t runtime_file_resolve(const char *sz_name);
+/* Size of the guest's descriptor table (files, pipes and sockets), what RLIMIT_NOFILE reports. */
+#define RUNTIME_MAX_FILES 1024
 uintptr_t runtime_services_resolve(const char *sz_name);
 /* sceSystemServiceParamGetInt's language (PS_LANGUAGE, default 1 = English US). */
 int runtime_system_language(void);
@@ -252,6 +254,15 @@ void runtime_file_configure(const char *sz_app0, const char *sz_user);
 int runtime_file_mount(const char *sz_guest, const char *sz_host);
 void runtime_file_unmount(const char *sz_guest);
 int runtime_file_translate(const char *sz_guest, char *sz_out, size_t cb_out);
+/* Which open of the file table a descriptor is (0: not open); a kqueue filter passes it back to the
+ * two calls below, which answer -EBADF once that open was closed, even if the number was reused. */
+uint64_t runtime_file_serial(int h_fd);
+/* kevent's EVFILT_READ and EVFILT_WRITE on a guest descriptor: 1 ready, 0 not yet, -EBADF; the
+ * bytes to read or room to write, and whether the other end is gone. */
+int runtime_file_ready(int h_fd, uint64_t serial, int is_write, int64_t *p_out_data, int *p_out_is_eof);
+/* kevent's EVFILT_VNODE: the NOTE_* changes since the state the last call left (p_inout_state[0] < 0
+ * the first time), or -EBADF. */
+int runtime_file_changes(int h_fd, uint64_t serial, int64_t p_inout_state[4]);
 int64_t runtime_file_open(const char *sz_path, int flags, int mode);
 int64_t runtime_file_close(int h_fd);
 int64_t runtime_file_read(int h_fd, void *p_buffer, uint64_t cb_buffer);
