@@ -79,6 +79,18 @@ TextureCache::TextureCache(const Vulkan::Instance& instance_, Vulkan::Scheduler&
     critical_gc_memory = static_cast<u64>(
         std::max<u64>(std::min(device_local_memory - min_vacancy_critical, min_spacing_critical),
                       DEFAULT_CRITICAL_GC_MEMORY));
+    // psport: below 8 GB the pressure mark fell to 40-50 % of the budget (1.3 GB of 3.3 GB), under
+    // what a game holds outside textures (~2.2 GB for Bloodborne), so such cards evicted textures
+    // unused for 5 s all session (Supermedo a02c38f: 13528 evictions on a route, 1398 at 60 %, same
+    // FPS). PS_GC_PRESSURE_PERCENT (10-75) raises it, never lowers it.
+    if (device_local_memory < TARGET_GC_THRESHOLD) {
+        static const s64 percent = [] {
+            const char* sz_env = std::getenv("PS_GC_PRESSURE_PERCENT");
+            return std::clamp<s64>(sz_env ? std::strtoll(sz_env, nullptr, 10) : 60, 10, 75);
+        }();
+        pressure_gc_memory = std::max<u64>(pressure_gc_memory,
+                                           static_cast<u64>(device_local_memory / 100 * percent));
+    }
     trigger_gc_memory = static_cast<u64>((device_local_memory - mem_threshold) / 2);
 }
 
