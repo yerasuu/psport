@@ -121,16 +121,12 @@ static void EmitVertexMotion(EmitContext& ctx) {
     ctx.AddLabel(store_label);
     const Id store_address = address(MotionVectors::positions_address,
                                      ctx.OpIAdd(u32_type, store_base, slot), 16);
-    // Indexed draws may invoke the same vertex more than once. Atomic component stores
-    // avoid write/write races; all these invocations produce the same clip position.
-    const Id scalar_ptr = ctx.TypePointer(spv::StorageClass::PhysicalStorageBuffer, u32_type);
-    const Id scope = ctx.ConstU32(static_cast<u32>(spv::Scope::Device));
-    for (u32 i = 0; i < 4; ++i) {
-        const Id ptr = ctx.OpConvertUToPtr(scalar_ptr,
-            ctx.OpIAdd(ctx.U64, store_address, ctx.Constant(ctx.U64, u64(i * 4))));
-        const Id bits = ctx.OpBitcast(u32_type, ctx.OpCompositeExtract(ctx.F32[1], position, i));
-        ctx.OpAtomicExchange(u32_type, ptr, scope, ctx.u32_zero_value, bits);
-    }
+    // Indexed draws may invoke the same vertex more than once; those invocations write the same
+    // clip position, so one aligned store is enough. Device-scope atomics through
+    // PhysicalStorageBuffer pointers are not allowed under the GLSL450 memory model and lose the
+    // device on RDNA2 as soon as object motion is on.
+    ctx.OpStore(ctx.OpConvertUToPtr(f32x4_ptr, store_address), position,
+                spv::MemoryAccessMask::Aligned, 16u);
     ctx.OpBranch(store_merge);
     ctx.AddLabel(store_merge);
 
