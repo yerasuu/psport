@@ -54,7 +54,9 @@ s32 PS4_SYSV_ABI sceGnmDrawIndexIndirectCountMulti(u32* cmdbuf, u32 size, u32 da
 int PS4_SYSV_ABI sceGnmDrawIndexIndirectMulti(u32* cmdbuf, u32 size, u32 data_offset, u32 max_count,
                                               u32 shader_stage, u32 vertex_sgpr_offset,
                                               u32 instance_sgpr_offset, u32 flags);
-int PS4_SYSV_ABI sceGnmDrawIndexMultiInstanced();
+int PS4_SYSV_ABI sceGnmDrawIndexMultiInstanced(u32* cmdbuf, u32 size, u32 index_count,
+                                               u32 instance_count, const void* index_addr,
+                                               const void* object_id_addr);
 s32 PS4_SYSV_ABI sceGnmDrawIndexOffset(u32* cmdbuf, u32 size, u32 index_offset, u32 index_count,
                                        u32 flags);
 s32 PS4_SYSV_ABI sceGnmDrawIndirect(u32* cmdbuf, u32 size, u32 data_offset, u32 shader_stage,

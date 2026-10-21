@@ -272,7 +272,11 @@ s32 PS4_SYSV_ABI sceGnmAddEqEvent(OrbisKernelEqueue eq, u64 id, void* udata) {
     Platform::IrqC::Instance()->Register(
         static_cast<Platform::InterruptId>(id),
         [=](Platform::InterruptId irq) {
-            ASSERT_MSG(irq == static_cast<Platform::InterruptId>(id), "An unexpected IRQ occured");
+            if (irq != static_cast<Platform::InterruptId>(id)) {
+                LOG_ERROR_COUNTED(Lib_GnmDriver, "IRQ {:#x} reached the handler of IRQ {:#x}",
+                                  static_cast<u32>(irq), static_cast<u32>(id));
+                return;
+            }
 
             // We need to convert IRQ# to event id
             if (!IsValidEventType(irq))
@@ -751,10 +755,27 @@ int PS4_SYSV_ABI sceGnmDrawIndexIndirectMulti(u32* cmdbuf, u32 size, u32 data_of
     return -1;
 }
 
-int PS4_SYSV_ABI sceGnmDrawIndexMultiInstanced() {
+int PS4_SYSV_ABI sceGnmDrawIndexMultiInstanced(u32* cmdbuf, u32 size, u32 index_count,
+                                               u32 instance_count, const void* index_addr,
+                                               const void* object_id_addr) {
     PsCpCensus::NoteDriverCall(__func__);
-    LOG_ERROR(Lib_GnmDriver, "(STUBBED) called");
-    UNREACHABLE();
+    LOG_TRACE(Lib_GnmDriver, "called");
+
+    // psport: the checks and the NOP over all 13 dwords are libSceGnmDriver's (export at 0x1d10);
+    // only the Neo module emits a draw (PM4 opcode 0x3A), which the command processor lacks.
+    const auto va_index = reinterpret_cast<uintptr_t>(index_addr);
+    const auto va_object_id = reinterpret_cast<uintptr_t>(object_id_addr);
+    if (!cmdbuf || size != 13 || va_index == 0 || (va_index & 1) != 0 || va_object_id == 0 ||
+        (va_object_id & 0xffu) != 0) {
+        return -1;
+    }
+    if (sceKernelIsNeoMode()) {
+        LOG_ERROR_COUNTED(Lib_GnmDriver,
+                          "(STUBBED) Neo multi-instanced draw of {} indices x {} instances "
+                          "not emitted",
+                          index_count, instance_count);
+    }
+    WriteTrailingNop<12>(cmdbuf);
     return ORBIS_OK;
 }
 
@@ -1380,8 +1401,13 @@ s32 PS4_SYSV_ABI sceGnmInsertWaitFlipDone(u32* cmdbuf, u32 size, s32 vo_handle, 
     }
 
     uintptr_t label_addr{};
-    ASSERT_MSG(VideoOut::sceVideoOutGetBufferLabelAddress(vo_handle, &label_addr) == 16,
-               "sceVideoOutGetBufferLabelAddress call failed");
+    if (VideoOut::sceVideoOutGetBufferLabelAddress(vo_handle, &label_addr) != 16) {
+        LOG_ERROR_COUNTED(Lib_GnmDriver,
+                          "No buffer labels for VideoOut handle {}, wait not written", vo_handle);
+        // psport: the game submits these 7 dwords whatever the call returns, so they become a NOP.
+        WriteTrailingNop<6>(cmdbuf);
+        return -1;
+    }
 
     auto* wait_reg_mem = reinterpret_cast<PM4CmdWaitRegMem*>(cmdbuf);
     wait_reg_mem->header = PM4Type3Header{PM4ItOpcode::WaitRegMem, 5};

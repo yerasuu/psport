@@ -322,7 +322,10 @@ s32 PS4_SYSV_ABI sceVideoOutGetResolutionStatus(s32 handle, SceVideoOutResolutio
 s32 PS4_SYSV_ABI sceVideoOutOpen(Libraries::UserService::OrbisUserServiceUserId userId, s32 busType,
                                  s32 index, const void* param) {
     LOG_INFO(Lib_VideoOut, "called");
-    ASSERT(busType == SCE_VIDEO_OUT_BUS_TYPE_MAIN);
+    if (busType != SCE_VIDEO_OUT_BUS_TYPE_MAIN) {
+        LOG_ERROR_COUNTED(Lib_VideoOut, "Bus type {} not supported, only the main output", busType);
+        return ORBIS_VIDEO_OUT_ERROR_INVALID_VALUE;
+    }
 
     if (index != 0) {
         LOG_ERROR(Lib_VideoOut, "Index != 0");
@@ -372,12 +375,27 @@ s32 sceVideoOutSubmitEopFlip(s32 handle, u32 buf_id, u32 mode, s64 flip_arg, voi
         return ORBIS_VIDEO_OUT_ERROR_INVALID_HANDLE;
     }
 
+    if (buf_id != 0xffff'ffffu && buf_id >= MaxDisplayBuffers) {
+        LOG_ERROR_COUNTED(Lib_VideoOut, "EOP flip of buffer index {} past the {} display buffers",
+                          buf_id, MaxDisplayBuffers);
+        return ORBIS_VIDEO_OUT_ERROR_INVALID_INDEX;
+    }
+
     Platform::IrqC::Instance()->RegisterOnce(
         Platform::InterruptId::GfxFlip, [=](Platform::InterruptId irq) {
-            ASSERT_MSG(irq == Platform::InterruptId::GfxFlip, "An unexpected IRQ occured");
-            ASSERT_MSG(port->buffer_labels[buf_id] == 1, "Out of order flip IRQ");
-            const auto result = driver->SubmitFlip(port, buf_id, flip_arg, true);
-            ASSERT_MSG(result, "EOP flip submission failed");
+            if (irq != Platform::InterruptId::GfxFlip) {
+                LOG_ERROR_COUNTED(Lib_VideoOut, "IRQ {:#x} reached the EOP flip handler",
+                                  static_cast<u32>(irq));
+                return;
+            }
+            // psport: the flip still goes ahead, since the game waits for it whatever its label.
+            if (buf_id < MaxDisplayBuffers && port->buffer_labels[buf_id] != 1) {
+                LOG_ERROR_COUNTED(Lib_VideoOut, "Out of order flip IRQ for buffer {} (label {})",
+                                  buf_id, port->buffer_labels[buf_id]);
+            }
+            if (!driver->SubmitFlip(port, buf_id, flip_arg, true)) {
+                LOG_ERROR_COUNTED(Lib_VideoOut, "EOP flip of buffer {} dropped", buf_id);
+            }
         });
 
     return ORBIS_OK;
