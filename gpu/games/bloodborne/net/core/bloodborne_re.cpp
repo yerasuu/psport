@@ -43,6 +43,10 @@
 #include "core/libraries/np/np_signaling/np_signaling_bbsc.h"
 #include "core/memory.h"
 
+// psport's runtime: where the game's saves are kept (<user dir>/savedata/<user>/<title>).
+extern "C" const char* runtime_file_user_dir(void);
+extern "C" const char* runtime_savedata_title(void);
+
 namespace Core::Bloodborne {
 namespace {
 
@@ -9572,7 +9576,8 @@ bool BbscSharedProgressEnabled() {
     return enabled;
 }
 
-bool BackupBbscSaves(); // see "The BBSC hunter's kit"
+enum class BbscSaveBackup { Copied, NoSaveYet, Failed };
+BbscSaveBackup BackupBbscSaves(); // see "The BBSC hunter's kit"
 
 std::mutex bbsc_progress_mutex;
 std::vector<u32> bbsc_progress_host_flags;                         // guest: host's boss flags seen
@@ -9598,7 +9603,7 @@ std::pair<s64, size_t> MergeBbscSharedProgress(std::string_view when) {
         return {-1, 0};
     }
     if (!bbsc_progress_backed_up) {
-        bbsc_progress_backed_up = BackupBbscSaves();
+        bbsc_progress_backed_up = BackupBbscSaves() == BbscSaveBackup::Copied;
     }
     using SetEventFlag = u64 PS4_SYSV_ABI (*)(u64 unused, u32 flag, u8 value);
     const auto set = reinterpret_cast<SetEventFlag>(image_base + 0x0132E5A0);
@@ -12344,17 +12349,28 @@ u64 BbscCarriedInventory() {
 
 // The storage box (Hunter's Dream), or 0: [player->vtable[0x1C8](player) + 0x5B0], where the give
 // puts what does not fit (test 2026-10-05: the bell given there showed in the box, not the items).
-u64 BbscStorageInventory() {
+// std::nullopt while the chain cannot be read; 0 when the character's data has no box yet.
+std::optional<u64> BbscStorageInventoryChecked() {
     const u64 player = GetLocalPlayerCharacter();
     const u64 vtable = ReadablePointer(player, 0x410) ? ReadValue<u64>(player, 0) : 0;
     const u64 getter = ReadablePointer(vtable, 0x1D0) ? ReadValue<u64>(vtable, 0x1C8) : 0;
     if (!IsEbootCodeAddress(getter)) {
-        return 0;
+        return std::nullopt;
     }
     using GameData = u64 PS4_SYSV_ABI (*)(u64 chr);
     const u64 data = reinterpret_cast<GameData>(getter)(player);
-    const u64 inventory = ReadablePointer(data, 0x5B8) ? ReadValue<u64>(data, 0x5B0) : 0;
-    return ReadablePointer(inventory, 0x90) ? inventory : 0;
+    if (!ReadablePointer(data, 0x5B8)) {
+        return std::nullopt;
+    }
+    const u64 inventory = ReadValue<u64>(data, 0x5B0);
+    if (inventory == 0) {
+        return 0;
+    }
+    return ReadablePointer(inventory, 0x90) ? std::optional<u64>{inventory} : std::nullopt;
+}
+
+u64 BbscStorageInventory() {
+    return BbscStorageInventoryChecked().value_or(0);
 }
 
 // The inventory's own lookup (0x014D9A80): hash [inv+0x68][code % 0x7E1] (s16, <0 = none) into the
@@ -12517,27 +12533,33 @@ void BbscRestockFromStorage(std::string_view why) {
 
 // The user's rule: saves are backed up before anything touches them. Giving the bell writes it into
 // the save, so first every Bloodborne save folder BBSC can find - <base>\home\<user>\savedata\
-// CUSA00207 (the game's save id) and the older <base>\savedata\<user>\CUSA00207, with <base> the
-// portable "user" folder in the working directory or %APPDATA%\shadPS4 - is copied to
+// <title> and the older <base>\savedata\<user>\<title>, any title holding SPRJ0005 (the game's
+// save), with <base> the portable "user" folder in the working directory, psport's user folder
+// (PS_GPU_USER_DIR) or %APPDATA%\shadPS4 - is copied to
 // <mod folder>\save-backups\before-duel-bell-<time>\<user>. User 1004 is left alone (the user's
-// rule). False when nothing could be copied.
-bool BackupBbscSavesUnchecked();
+// rule). NoSaveYet when no save folder exists (a new character before its first save): nothing
+// can be lost. Failed when a save folder exists and any of them could not be copied.
+BbscSaveBackup BackupBbscSavesUnchecked();
 // Called from game ticks: a filesystem error (access denied, a strange folder name) must not throw
 // out of it (review 2026-10-08: the directory walk's ++ throws even with an error_code).
-bool BackupBbscSaves() {
+BbscSaveBackup BackupBbscSaves() {
     try {
         return BackupBbscSavesUnchecked();
     } catch (const std::exception& e) {
         LOG_WARNING(Debug, "BBSC save backup failed: {}", e.what());
-        return false;
+        return BbscSaveBackup::Failed;
     }
 }
 
-bool BackupBbscSavesUnchecked() {
+BbscSaveBackup BackupBbscSavesUnchecked() {
     namespace fs = std::filesystem;
     std::vector<fs::path> bases;
     std::error_code ec;
     bases.push_back(fs::current_path(ec) / "user");
+    const char* runtime_user_dir = runtime_file_user_dir();
+    if (runtime_user_dir != nullptr && runtime_user_dir[0]) {
+        bases.push_back(fs::absolute(runtime_user_dir, ec));
+    }
 #ifdef _WIN32
     if (const char* appdata = std::getenv("APPDATA")) {
         bases.push_back(fs::path(appdata) / "shadPS4");
@@ -12548,62 +12570,128 @@ bool BackupBbscSavesUnchecked() {
                          "save-backups" /
                          fmt::format("before-duel-bell-{}",
                                      std::chrono::duration_cast<std::chrono::seconds>(stamp).count());
+    size_t discovery_errors = 0;
+    // A folder that is not there is no error; anything else means a save may be missed.
+    const auto note_error = [&](const fs::path& path) {
+        if (ec && ec != std::errc::no_such_file_or_directory) {
+            ++discovery_errors;
+            LOG_WARNING(Debug, "BBSC duel bell: cannot look into {}: {}",
+                        Common::FS::PathToUTF8String(path), ec.message());
+        }
+        ec.clear();
+    };
     std::vector<std::pair<fs::path, fs::path>> saves; // save folder, backup folder
-    for (const fs::path& base : bases) {
+    const auto collect_titles = [&](const fs::path& parent, const fs::path& target) {
+        for (const auto& title : fs::directory_iterator(parent, ec)) {
+            const fs::path game = fs::weakly_canonical(title.path(), ec);
+            note_error(title.path());
+            if (fs::is_directory(game / "SPRJ0005", ec) &&
+                std::ranges::none_of(saves, [&](const auto& save) { return save.first == game; })) {
+                saves.emplace_back(game, target / game.filename());
+            }
+            note_error(game / "SPRJ0005");
+        }
+        note_error(parent);
+    };
+    // Each base its own backup folder: two bases may hold a user and title of the same names.
+    for (size_t i_base = 0; i_base < bases.size(); ++i_base) {
+        const fs::path& base = bases[i_base];
+        const fs::path base_out = i_base == 0 ? out : out / fmt::format("base{}", i_base);
         for (const auto& user : fs::directory_iterator(base / "home", ec)) {
-            saves.emplace_back(user.path() / "savedata" / "CUSA00207",
-                               out / ("home-" + user.path().filename().string()));
+            collect_titles(user.path() / "savedata",
+                           base_out / ("home-" + user.path().filename().string()));
         }
-        ec.clear();
+        note_error(base / "home");
         for (const auto& user : fs::directory_iterator(base / "savedata", ec)) {
-            saves.emplace_back(user.path() / "CUSA00207",
-                               out / ("savedata-" + user.path().filename().string()));
+            collect_titles(user.path(), base_out / ("savedata-" + user.path().filename().string()));
         }
-        ec.clear();
+        note_error(base / "savedata");
     }
     size_t copied = 0;
-    // BBSC_SAVE_DIR: the save folder itself (bbhost), copied as it is.
-    if (const char* save_dir = std::getenv("BBSC_SAVE_DIR"); save_dir != nullptr && save_dir[0]) {
-        const fs::path game(save_dir);
-        if (fs::is_directory(game, ec)) {
-            const fs::path target = out / "save-dir" / game.filename();
-            fs::create_directories(target.parent_path(), ec);
-            fs::copy(game, target, fs::copy_options::recursive, ec);
-            if (!ec) {
-                ++copied;
-                LOG_INFO(Debug, "BBSC duel bell: save backed up {} -> {}",
-                         Common::FS::PathToUTF8String(game), Common::FS::PathToUTF8String(target));
-            }
-        }
-        ec.clear();
-        if (copied != 0) {
-            return true; // the host's own save is the one in use; shadPS4's are not touched
-        }
-    }
-    for (const auto& [game, target] : saves) {
-        if (!fs::is_directory(game, ec) || game.parent_path().filename() == "1004" ||
-            game.parent_path().parent_path().filename() == "1004") {
-            continue;
-        }
-        fs::create_directories(target, ec);
-        fs::copy(game, target / "CUSA00207", fs::copy_options::recursive, ec);
+    size_t failed = 0;
+    const auto copy = [&](const fs::path& game, const fs::path& target) {
+        fs::create_directories(target.parent_path(), ec);
         if (!ec) {
+            fs::copy(game, target, fs::copy_options::recursive, ec);
+        }
+        if (ec) {
+            ++failed;
+            LOG_WARNING(Debug, "BBSC duel bell: save NOT backed up {} -> {}: {}",
+                        Common::FS::PathToUTF8String(game), Common::FS::PathToUTF8String(target),
+                        ec.message());
+        } else {
             ++copied;
             LOG_INFO(Debug, "BBSC duel bell: save backed up {} -> {}",
                      Common::FS::PathToUTF8String(game), Common::FS::PathToUTF8String(target));
         }
+        ec.clear();
+    };
+    // BBSC_SAVE_DIR: the save folder itself (bbhost), copied as it is.
+    if (const char* save_dir = std::getenv("BBSC_SAVE_DIR"); save_dir != nullptr && save_dir[0]) {
+        const fs::path game(save_dir);
+        if (fs::is_directory(game, ec)) {
+            copy(game, out / "save-dir" / game.filename());
+            if (copied != 0) {
+                return BbscSaveBackup::Copied; // the save in use; shadPS4's are not touched
+            }
+        } else {
+            ++discovery_errors;
+            LOG_WARNING(Debug, "BBSC duel bell: BBSC_SAVE_DIR {} is not a folder",
+                        Common::FS::PathToUTF8String(game));
+        }
+        ec.clear();
     }
-    return copied != 0;
+    for (const auto& [game, target] : saves) {
+        if (game.parent_path().filename() == "1004" ||
+            game.parent_path().parent_path().filename() == "1004") {
+            continue;
+        }
+        copy(game, target);
+    }
+    if (failed != 0 || discovery_errors != 0) {
+        return BbscSaveBackup::Failed;
+    }
+    if (copied != 0) {
+        return BbscSaveBackup::Copied;
+    }
+    // Nothing copied: only a save folder the runtime would use, confirmed absent for every user,
+    // makes this a new character's first run. Any other case (the runtime's folders unknown, a
+    // save there that was not copied, user 1004's) is a failure, so the kit waits.
+    const char* title = runtime_savedata_title();
+    if (runtime_user_dir == nullptr || !runtime_user_dir[0] || title == nullptr || !title[0]) {
+        LOG_WARNING(Debug, "BBSC duel bell: the runtime's save folder is unknown");
+        return BbscSaveBackup::Failed;
+    }
+    const fs::path root = fs::path(runtime_user_dir) / "savedata";
+    for (const auto& user : fs::directory_iterator(root, ec)) {
+        const fs::path expected = user.path() / title / "SPRJ0005";
+        const bool is_there = fs::exists(expected, ec);
+        if (ec || is_there) {
+            LOG_WARNING(Debug, "BBSC duel bell: save {} {} but nothing was backed up",
+                        Common::FS::PathToUTF8String(expected),
+                        ec ? "cannot be checked" : "exists");
+            return BbscSaveBackup::Failed;
+        }
+    }
+    if (ec && ec != std::errc::no_such_file_or_directory) {
+        LOG_WARNING(Debug, "BBSC duel bell: cannot look into {}: {}",
+                    Common::FS::PathToUTF8String(root), ec.message());
+        return BbscSaveBackup::Failed;
+    }
+    return BbscSaveBackup::NoSaveYet;
 }
 
 // The kit every BBSC player gets (the user, 2026-10-05: given when you start playing, even as a new
 // player, only once - it checks whether you carry it or have it in storage). Each kit item missing
 // from BOTH the carried items and the storage box goes into the carried items. Checked once per
 // loaded character (every new local player character), so a save loaded later is checked too; the
-// saves are backed up before anything is added.
+// saves are backed up before anything is added, once per character, and nothing is given or taken
+// while that backup fails. A new character whose data has no storage box yet gets it too.
 void TickBbscDuelBellGive() {
     static s64 last_ms = 0;
     static u64 checked_player = 0;
+    static u64 backed_up_player = 0;
+    static u64 c_backup_failures = 0;
     const s64 now = SteadyNowMs();
     if (!bbsc_duel_bell_ready || now - last_ms < 5'000) {
         return;
@@ -12617,14 +12705,15 @@ void TickBbscDuelBellGive() {
         return; // already checked, not in the game yet, dead, or loading
     }
     const u64 carried = BbscCarriedInventory();
-    const u64 storage = BbscStorageInventory();
-    if (carried == 0 || storage == 0) {
-        return;
+    const std::optional<u64> storage_lookup = BbscStorageInventoryChecked();
+    if (carried == 0 || !storage_lookup) {
+        return; // tried again: an unreadable storage box is not an empty one
     }
-    checked_player = player;
+    const u64 storage = *storage_lookup;
     const auto has = [&](u32 id) {
         const u32 code = 0x40000000u | id;
-        return BbscInventoryHas(carried, code) || BbscInventoryHas(storage, code);
+        return BbscInventoryHas(carried, code) ||
+               (storage != 0 && BbscInventoryHas(storage, code));
     };
     std::vector<const BbscKitItem*> missing;
     for (const BbscKitItem& item : BbscKit) {
@@ -12652,15 +12741,27 @@ void TickBbscDuelBellGive() {
     }
     if (missing.empty() && !retire) {
         LOG_INFO(Debug, "BBSC kit: all carried or in storage, no vanilla bells left");
+        checked_player = player;
         return;
     }
-    if (!BackupBbscSaves()) {
-        LOG_WARNING(Debug, "BBSC kit: no save folder found to back up - nothing given or removed");
-        return;
+    if (backed_up_player != player) {
+        const BbscSaveBackup backup = BackupBbscSaves();
+        if (backup == BbscSaveBackup::Failed) {
+            ++c_backup_failures;
+            LOG_WARNING(Debug,
+                        "BBSC kit: save backup failed - nothing given or removed, tried again in "
+                        "5 s ({} failure(s))",
+                        c_backup_failures);
+            return;
+        }
+        if (backup == BbscSaveBackup::NoSaveYet) {
+            LOG_INFO(Debug, "BBSC kit: no save on disk yet (new character) - nothing to back up");
+        }
+        backed_up_player = player;
     }
     for (const u32 id : Retired) {
         for (const u64 inventory : {carried, storage}) {
-            if (BbscInventoryHas(inventory, 0x40000000u | id)) {
+            if (inventory != 0 && BbscInventoryHas(inventory, 0x40000000u | id)) {
                 const bool gone = BbscInventoryRemove(inventory, 0x40000000u | id);
                 LOG_INFO(Debug, "BBSC kit: vanilla goods {} taken out of the {} ({})", id,
                          inventory == carried ? "carried items" : "storage box",
@@ -12669,6 +12770,7 @@ void TickBbscDuelBellGive() {
         }
     }
     if (missing.empty()) {
+        checked_player = player;
         return;
     }
     // 0x014D9A80(inventory, &code, count) is how many fit; 0x014DA0A0(inventory, &key, count) adds,
@@ -12697,6 +12799,7 @@ void TickBbscDuelBellGive() {
         }
     }
     if (given != 0) {
+        checked_player = player;
         BbscAnnounce(notice.c_str(), "kit given");
     }
 }
