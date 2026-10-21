@@ -422,7 +422,7 @@ u32 PS4_SYSV_ABI sceNetNtohl(u32 net32);
 int PS4_SYSV_ABI sceNetNtohll();
 u16 PS4_SYSV_ABI sceNetNtohs(u16 net16);
 int PS4_SYSV_ABI sceNetPoolCreate(const char* name, int size, int flags);
-int PS4_SYSV_ABI sceNetPoolDestroy();
+int PS4_SYSV_ABI sceNetPoolDestroy(int h_pool);
 int PS4_SYSV_ABI sceNetPppoeStart();
 int PS4_SYSV_ABI sceNetPppoeStop();
 int PS4_SYSV_ABI sceNetRecv(OrbisNetId s, void* buf, u64 len, int flags);

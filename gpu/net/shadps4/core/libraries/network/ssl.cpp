@@ -1,6 +1,9 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <bitset>
+#include <mutex>
+
 #include "common/logging/log.h"
 #include "core/libraries/error_codes.h"
 #include "core/libraries/libs.h"
@@ -702,11 +705,29 @@ int PS4_SYSV_ABI sceSslGetSubjectName() {
     return ORBIS_OK;
 }
 
+// psport: libSceSsl keeps 128 contexts with fixed ids 1..128 and hands out the next free one after
+// the last given, wrapping; each sceSslInit takes a new one. Its pool backs the firmware's own
+// TLS, which the host's does not use, so only the ids and their checks are kept.
+static constexpr int ORBIS_SSL_ERROR_INVALID_ID = 0x8095F006;
+static constexpr int ORBIS_SSL_ERROR_NO_FREE_CONTEXT = 0x8095F008;
+static std::mutex s_contexts_mutex;
+static std::bitset<128> s_is_context_used;
+static std::size_t s_i_last_context = s_is_context_used.size() - 1;
+
 int PS4_SYSV_ABI sceSslInit(std::size_t poolSize) {
-    LOG_ERROR(Lib_Ssl, "(DUMMY) called poolSize = {}", poolSize);
-    // return a value >1
-    static int id = 0;
-    return ++id;
+    std::scoped_lock lock{s_contexts_mutex};
+    for (std::size_t c_tried = 1; c_tried <= s_is_context_used.size(); ++c_tried) {
+        const std::size_t i_context = (s_i_last_context + c_tried) % s_is_context_used.size();
+        if (!s_is_context_used[i_context]) {
+            s_is_context_used[i_context] = true;
+            s_i_last_context = i_context;
+            const int h_context = static_cast<int>(i_context) + 1;
+            LOG_INFO(Lib_Ssl, "context {}, pool {} bytes", h_context, poolSize);
+            return h_context;
+        }
+    }
+    LOG_ERROR(Lib_Ssl, "no free context of {}", s_is_context_used.size());
+    return ORBIS_SSL_ERROR_NO_FREE_CONTEXT;
 }
 
 int PS4_SYSV_ABI sceSslLoadCert() {
@@ -754,8 +775,14 @@ int PS4_SYSV_ABI sceSslShowMemoryStat() {
     return ORBIS_OK;
 }
 
-int PS4_SYSV_ABI sceSslTerm() {
-    LOG_ERROR(Lib_Ssl, "(STUBBED) called");
+int PS4_SYSV_ABI sceSslTerm(int h_context) {
+    const auto i_context = static_cast<std::size_t>(h_context - 1);
+    std::scoped_lock lock{s_contexts_mutex};
+    if (h_context < 1 || i_context >= s_is_context_used.size() || !s_is_context_used[i_context]) {
+        return ORBIS_SSL_ERROR_INVALID_ID;
+    }
+    s_is_context_used[i_context] = false;
+    LOG_INFO(Lib_Ssl, "context {} terminated", h_context);
     return ORBIS_OK;
 }
 

@@ -10,6 +10,10 @@
 #include <arpa/inet.h>
 #endif
 
+#include <bitset>
+#include <cstring>
+#include <mutex>
+
 #include <core/libraries/kernel/kernel.h>
 #include <magic_enum/magic_enum.hpp>
 #include "common/assert.h"
@@ -1267,8 +1271,9 @@ int PS4_SYSV_ABI sceNetInfoDumpStop() {
     return ORBIS_OK;
 }
 
+// psport: the host's sockets need no setup; libSceNet answers a second call with 0 as well.
 int PS4_SYSV_ABI sceNetInit() {
-    LOG_ERROR(Lib_Net, "(DUMMY) called");
+    LOG_INFO(Lib_Net, "called");
     return ORBIS_OK;
 }
 
@@ -1313,14 +1318,54 @@ u16 PS4_SYSV_ABI sceNetNtohs(u16 net16) {
     return ntohs(net16);
 }
 
+// psport: libSceNet's pools hold its own allocations, which the host's sockets do not make, so only
+// their ids and checks are kept: 3000 + the lowest free of 32 slots, a name under 32 characters, at
+// least 4 KiB and no flags.
+static constexpr int POOL_ID_BASE = 3000;
+static constexpr int CB_POOL_MIN = 0x1000;
+static constexpr std::size_t CB_POOL_NAME = 32;
+static std::mutex s_pools_mutex;
+static std::bitset<32> s_is_pool_used;
+
 int PS4_SYSV_ABI sceNetPoolCreate(const char* name, int size, int flags) {
-    LOG_ERROR(Lib_Net, "(DUMMY) name = {} size = {} flags = {} ", std::string(name), size, flags);
-    static s32 id = 1;
-    return id++;
+    if (!g_isNetInitialized) {
+        *sceNetErrnoLoc() = ORBIS_NET_ENOTINIT;
+        return ORBIS_NET_ERROR_ENOTINIT;
+    }
+    if (name == nullptr || size < CB_POOL_MIN || flags != 0) {
+        *sceNetErrnoLoc() = ORBIS_NET_EINVAL;
+        return ORBIS_NET_ERROR_EINVAL;
+    }
+    if (strnlen(name, CB_POOL_NAME) == CB_POOL_NAME) {
+        *sceNetErrnoLoc() = ORBIS_NET_ENAMETOOLONG;
+        return ORBIS_NET_ERROR_ENAMETOOLONG;
+    }
+    std::scoped_lock lock{s_pools_mutex};
+    for (std::size_t i_slot = 0; i_slot < s_is_pool_used.size(); ++i_slot) {
+        if (!s_is_pool_used[i_slot]) {
+            s_is_pool_used[i_slot] = true;
+            const int h_pool = POOL_ID_BASE + static_cast<int>(i_slot);
+            LOG_INFO(Lib_Net, "pool {} '{}', {} bytes", h_pool, name, size);
+            return h_pool;
+        }
+    }
+    *sceNetErrnoLoc() = ORBIS_NET_ENFILE;
+    return ORBIS_NET_ERROR_ENFILE;
 }
 
-int PS4_SYSV_ABI sceNetPoolDestroy() {
-    LOG_ERROR(Lib_Net, "(STUBBED) called");
+int PS4_SYSV_ABI sceNetPoolDestroy(int h_pool) {
+    if (!g_isNetInitialized) {
+        *sceNetErrnoLoc() = ORBIS_NET_ENOTINIT;
+        return ORBIS_NET_ERROR_ENOTINIT;
+    }
+    const auto i_slot = static_cast<std::size_t>(h_pool - POOL_ID_BASE);
+    std::scoped_lock lock{s_pools_mutex};
+    if (h_pool < POOL_ID_BASE || i_slot >= s_is_pool_used.size() || !s_is_pool_used[i_slot]) {
+        *sceNetErrnoLoc() = ORBIS_NET_EBADF;
+        return ORBIS_NET_ERROR_EBADF;
+    }
+    s_is_pool_used[i_slot] = false;
+    LOG_INFO(Lib_Net, "pool {} destroyed", h_pool);
     return ORBIS_OK;
 }
 

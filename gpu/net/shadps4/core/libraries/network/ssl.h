@@ -165,7 +165,7 @@ int PS4_SYSV_ABI sceSslSetMinSslVersion();
 int PS4_SYSV_ABI sceSslSetSslVersion();
 int PS4_SYSV_ABI sceSslSetVerifyCallback();
 int PS4_SYSV_ABI sceSslShowMemoryStat();
-int PS4_SYSV_ABI sceSslTerm();
+int PS4_SYSV_ABI sceSslTerm(int h_context);
 int PS4_SYSV_ABI sceSslUnloadCert();
 int PS4_SYSV_ABI SSL_acceptConnection();
 int PS4_SYSV_ABI SSL_acceptConnectionCommon();
