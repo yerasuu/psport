@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include <numeric>
+#include <memory>
 #include <utility>
 #include <vector>
 #include "common/assert.h"
@@ -26,9 +26,13 @@ struct SlotId {
     u32 index = INVALID_INDEX;
 };
 
+// psport: entries live in fixed chunks that never move, so a T& taken before insert() stays valid
+// after it; growing by reallocation moved every entry and left such references dangling. Upstream
+// shadPS4 reserves the whole range as address space instead; chunks from the heap fail the way the
+// old growth did and need no host mapping.
 template <class T>
 class SlotVector {
-    constexpr static std::size_t InitialCapacity = 2048;
+    constexpr static std::size_t CHUNK_ENTRIES = 2048;
 
 public:
     template <typename ValueType, typename Pointer, typename Reference>
@@ -89,30 +93,32 @@ public:
     using const_reverse_iterator = std::reverse_iterator<const_iterator>;
 
     SlotVector() {
-        Reserve(InitialCapacity);
+        AddChunk();
     }
+
+    SlotVector(const SlotVector&) = delete;
+    SlotVector& operator=(const SlotVector&) = delete;
 
     ~SlotVector() noexcept {
         std::size_t index = 0;
         for (u64 bits : stored_bitset) {
             for (std::size_t bit = 0; bits; ++bit, bits >>= 1) {
                 if ((bits & 1) != 0) {
-                    values[index + bit].object.~T();
+                    At(index + bit).object.~T();
                 }
             }
             index += 64;
         }
-        delete[] values;
     }
 
     [[nodiscard]] T& operator[](SlotId id) noexcept {
         ValidateIndex(id);
-        return values[id.index].object;
+        return At(id.index).object;
     }
 
     [[nodiscard]] const T& operator[](SlotId id) const noexcept {
         ValidateIndex(id);
-        return values[id.index].object;
+        return At(id.index).object;
     }
 
     bool is_allocated(SlotId id) const {
@@ -122,14 +128,14 @@ public:
     template <typename... Args>
     SlotId insert(Args&&... args) noexcept {
         const u32 index = FreeValueIndex();
-        new (&values[index].object) T(std::forward<Args>(args)...);
+        new (&At(index).object) T(std::forward<Args>(args)...);
         SetStorageBit(index);
 
         return SlotId{index};
     }
 
     void erase(SlotId id) noexcept {
-        values[id.index].object.~T();
+        At(id.index).object.~T();
         free_list.push_back(id.index);
         ResetStorageBit(id.index);
     }
@@ -199,6 +205,14 @@ private:
         T object;
     };
 
+    Entry& At(std::size_t index) noexcept {
+        return chunks[index / CHUNK_ENTRIES][index % CHUNK_ENTRIES];
+    }
+
+    const Entry& At(std::size_t index) const noexcept {
+        return chunks[index / CHUNK_ENTRIES][index % CHUNK_ENTRIES];
+    }
+
     void SetStorageBit(u32 index) noexcept {
         stored_bitset[index / 64] |= u64(1) << (index % 64);
     }
@@ -219,7 +233,7 @@ private:
 
     [[nodiscard]] u32 FreeValueIndex() noexcept {
         if (free_list.empty()) {
-            Reserve(values_capacity ? (values_capacity << 1) : 1);
+            AddChunk();
         }
 
         const u32 free_index = free_list.back();
@@ -227,36 +241,17 @@ private:
         return free_index;
     }
 
-    void Reserve(std::size_t new_capacity) noexcept {
-        Entry* const new_values = new Entry[new_capacity];
-        std::size_t index = 0;
-        for (u64 bits : stored_bitset) {
-            for (std::size_t bit = 0; bits; ++bit, bits >>= 1) {
-                const std::size_t i = index + bit;
-                if ((bits & 1) == 0) {
-                    continue;
-                }
-                T& old_value = values[i].object;
-                new (&new_values[i].object) T(std::move(old_value));
-                old_value.~T();
-            }
-            index += 64;
-        }
-
+    void AddChunk() {
+        chunks.push_back(std::make_unique<Entry[]>(CHUNK_ENTRIES));
+        const std::size_t new_capacity = values_capacity + CHUNK_ENTRIES;
         stored_bitset.resize((new_capacity + 63) / 64);
-
-        const std::size_t old_free_size = free_list.size();
-        free_list.resize(old_free_size + (new_capacity - values_capacity));
-        const std::size_t new_free_size = free_list.size();
-        std::iota(free_list.rbegin(), free_list.rbegin() + new_free_size - old_free_size,
-                  static_cast<u32>(values_capacity));
-
-        delete[] values;
-        values = new_values;
+        for (std::size_t i = new_capacity; i-- > values_capacity;) {
+            free_list.push_back(static_cast<u32>(i));
+        }
         values_capacity = new_capacity;
     }
 
-    Entry* values = nullptr;
+    std::vector<std::unique_ptr<Entry[]>> chunks;
     std::size_t values_capacity = 0;
 
     std::vector<u64> stored_bitset;

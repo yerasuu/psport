@@ -358,7 +358,6 @@ ImageId TextureCache::ResolveDepthOverlap(const ImageInfo& requested_info, Bindi
 
         // Inherit image usage
         auto& new_image = slot_images[new_image_id];
-        // psport: looked up again because CreateImage may grow slot_images and move the image.
         auto& old_image = slot_images[cache_image_id];
         new_image.usage = old_image.usage;
         if (new_info.num_samples == 1 &&
@@ -611,7 +610,6 @@ std::tuple<ImageId, int, int> TextureCache::ResolveOverlap(const ImageInfo& imag
                     TrackImage(merged_image_id);
                 }
                 auto& merged_image = slot_images[merged_image_id];
-                // psport: looked up again because CreateImage may grow slot_images and move it.
                 runtime.CopyMip(&slot_images[cache_image_id], &merged_image, mip, slice);
                 FreeImage(cache_image_id);
             }
@@ -945,7 +943,6 @@ ImageView& TextureCache::FindDepthTarget(ImageId image_id, const ImageDesc& desc
 
     AssociateStencil(image_id, desc.info);
 
-    // psport: looked up again because AssociateStencil may create an image and move this one.
     return slot_images[image_id].FindView(desc.view_info, false);
 }
 
