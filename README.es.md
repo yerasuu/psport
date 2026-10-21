@@ -174,7 +174,7 @@ y fuentes del sistema (`PS_SYS_MODULES`, `PS_HLE`, `PS_LLE`, `PS_SYS_FONTS`):
 - **Bibliotecas del sistema.** psport las implementa de forma nativa: un runtime en C (memoria,
   hilos, sincronización, archivos, audio, mando, partidas guardadas, excepciones, servicios, hilos
   de usuario, módulos cargados durante la ejecución) y las bibliotecas de `gpu/` (GnmDriver,
-  VideoOut, AvPlayer, Videodec2, Ngs2, Audiodec, Fiber, Font, PngEnc, PngDec).
+  VideoOut, AvPlayer, Videodec2, Ngs2, Audiodec, Fiber, Font, PngEnc, PngDec, JpegDec).
 - **Gráficos.** El flujo de comandos de la GPU y los shaders GCN se traducen a Vulkan con un
   renderizador derivado del núcleo de vídeo y del recompilador de shaders de shadPS4
   (`gpu/shadps4/`), tal como lo amplió bbport.
@@ -225,7 +225,7 @@ su registro y su informe de llamadas, implementar lo que falta y comprobar el re
 | Ruta | Contenido |
 |---|---|
 | `src/` | punto de entrada (`src/main/`), cargador nativo y runtime en C |
-| `gpu/` | biblioteca de GPU: núcleo de vídeo de shadPS4 con los cambios de bbport ([gpu/VENDOR.txt](gpu/VENDOR.txt)), decodificador PM4 (`cp/`), módulo de memoria (`layer/`), bibliotecas portadas (`ngs2/`, `audiodec/`, `fiber/`, `font/`, `pngenc/`, `pngdec/`), perfiles de juego (`games/`), menú superpuesto y menú del juego (`port/`), puente DLSS, módulo en línea (`net/`) |
+| `gpu/` | biblioteca de GPU: núcleo de vídeo de shadPS4 con los cambios de bbport ([gpu/VENDOR.txt](gpu/VENDOR.txt)), decodificador PM4 (`cp/`), módulo de memoria (`layer/`), bibliotecas portadas (`ngs2/`, `audiodec/`, `fiber/`, `font/`, `pngenc/`, `pngdec/`, `jpegdec/`), perfiles de juego (`games/`), menú superpuesto y menú del juego (`port/`), puente DLSS, módulo en línea (`net/`) |
 | `scripts/` | `online.py` (direcciones en línea para `PS_ONLINE=1`) y `sce_file.py` para las herramientas en Python |
 | `launcher/`, `packaging/` | el lanzador GTK4 de bbport; paquete de Nix y script de AppImage |
 | `patches/` | parches de la comunidad para Bloodborne |

@@ -19,6 +19,8 @@
 
 #define USER_ID 1
 #define ORBIS_OK 0
+#define USER_NOT_INITIALIZED ((int32_t)0x80960002)
+#define USER_ALREADY_INITIALIZED ((int32_t)0x80960003)
 #define USER_INVALID_ARGUMENT ((int32_t)0x80960005)
 #define USER_NO_EVENT ((int32_t)0x80960007)
 #define SYSTEM_NO_EVENT ((int32_t)0x80A10004)
@@ -43,7 +45,19 @@ static void note(const char *sz_what) { printf("Runtime: %s\n",sz_what); }
 
 /* ---- UserService ---- */
 static int s_is_login_event_pending=1;
-static ABI int32_t user_initialize(const void *p_params) { (void)p_params; note("UserService initialized (user 1 logged in)"); return 0; }
+static int s_is_user_initialized;
+/* The service thread's priority: 700 without parameters, else within 0x100-0x2FF. No thread runs here. */
+static int32_t user_start(int32_t priority) {
+    if (priority<0x100 || priority>0x2FF) return USER_INVALID_ARGUMENT;
+    if (__atomic_exchange_n(&s_is_user_initialized,1,__ATOMIC_ACQ_REL)) return USER_ALREADY_INITIALIZED;
+    note("UserService initialized (user 1 logged in)");
+    return 0;
+}
+static ABI int32_t user_initialize(const int32_t *p_params) { return user_start(p_params ? p_params[0] : 700); }
+static ABI int32_t user_initialize2(int32_t priority, uint64_t cpu_mask) { (void)cpu_mask; return user_start(priority); }
+static ABI int32_t user_terminate(void) {
+    return __atomic_exchange_n(&s_is_user_initialized,0,__ATOMIC_ACQ_REL) ? 0 : USER_NOT_INITIALIZED;
+}
 static ABI int32_t user_initial(int32_t *p_id) { if (!p_id) return USER_INVALID_ARGUMENT; *p_id=USER_ID; return 0; }
 static ABI int32_t user_list(int32_t *p_ids) {
     if (!p_ids) return USER_INVALID_ARGUMENT;
@@ -425,6 +439,53 @@ static ABI int32_t playgo_result(int32_t *p_out_result) {
     return 0;
 }
 static ABI int32_t playgo_close(void) { s_dialogs[12].status=3; return 0; }
+/* LoginDialog keeps its own state and codes. With no UI it finishes on open as backed out of. */
+#define LOGIN_NOT_INITIALIZED ((int32_t)0x81340001)
+#define LOGIN_ALREADY_INITIALIZED ((int32_t)0x81340002)
+#define LOGIN_INVALID_PARAM ((int32_t)0x81340003)
+#define LOGIN_INVALID_STATE ((int32_t)0x81340005)
+#define LOGIN_INVALID_USER_ID ((int32_t)0x81340007)
+enum { LOGIN_NONE, LOGIN_INITIALIZED, LOGIN_RUNNING, LOGIN_FINISHED };
+static int s_login_state;
+static ABI int32_t login_init(void) {
+    if (s_login_state!=LOGIN_NONE) return LOGIN_ALREADY_INITIALIZED;
+    s_login_state=LOGIN_INITIALIZED; return 0;
+}
+static int is_login_user(int32_t user) { return user==-1 || (user>=0x10000000 && user<=0x3FFFFFFF); }
+static ABI int32_t login_open(const uint8_t *p_param) {
+    if (s_login_state==LOGIN_NONE) return LOGIN_NOT_INITIALIZED;
+    if (s_login_state==LOGIN_RUNNING) return LOGIN_INVALID_STATE;
+    if (!p_param) return LOGIN_INVALID_PARAM;
+    uint32_t cb_param, mode;
+    memcpy(&cb_param,p_param,4); memcpy(&mode,p_param+4,4);
+    if (cb_param!=0x40 || mode>1) return LOGIN_INVALID_PARAM;
+    for (int i=0x2C;i<0x40;++i) if (p_param[i]) return LOGIN_INVALID_PARAM;
+    for (int i=0;i<9;++i) {
+        int32_t user; memcpy(&user,p_param+8+i*4,4);
+        if (!is_login_user(user)) return LOGIN_INVALID_USER_ID;
+    }
+    printf("Runtime: LoginDialog opened; completed immediately (no dialog UI yet)\n");
+    s_login_state=LOGIN_FINISHED; return 0;
+}
+static ABI int32_t login_status(void) { return s_login_state; }
+/* The firmware fills the result as cancelled with a bad user before it looks at the state. */
+static ABI int32_t login_result(int32_t *p_out_result) {
+    if (!p_out_result) return LOGIN_INVALID_PARAM;
+    p_out_result[0]=1; p_out_result[1]=LOGIN_INVALID_USER_ID;
+    if (s_login_state==LOGIN_NONE) return LOGIN_NOT_INITIALIZED;
+    if (s_login_state!=LOGIN_FINISHED) return LOGIN_INVALID_STATE;
+    p_out_result[1]=0;
+    return 0;
+}
+static ABI int32_t login_close(void) {
+    if (s_login_state==LOGIN_NONE) return LOGIN_NOT_INITIALIZED;
+    if (s_login_state==LOGIN_RUNNING) s_login_state=LOGIN_FINISHED;
+    return 0;
+}
+static ABI int32_t login_term(void) {
+    if (s_login_state==LOGIN_NONE) return LOGIN_NOT_INITIALIZED;
+    s_login_state=LOGIN_NONE; return 0;
+}
 /* SceWebBrowserDialogResult: result, then reserved. Offline, no page loads and the user can only
  * back out: SCE_COMMON_DIALOG_RESULT_USER_CANCELED. */
 static ABI int32_t web_result(int32_t *p_out_result) {
@@ -540,6 +601,8 @@ static ABI int32_t discmap_8a82(const char *sz_path,int64_t off_file,int64_t cb_
 
 /* ---- Devices that are absent: microphone ---- */
 static ABI int32_t audio_in_open(void) { return AUDIO_IN_NOT_OPENED; }
+/* The firmware answers 0 for any port and leaves the output untouched. */
+static ABI int32_t audio_in_gain(void) { return 0; }
 /* PlayStation Move: the library runs, no motion controller is ever connected. A handle is still
  * handed out per open, distinct from other devices' handles, as on the console. */
 static int s_is_move_initialized;
@@ -580,7 +643,8 @@ static ABI int32_t razor_idle(void) { return 0; }
 
 
 static const RuntimeExport s_exports[]={
-    {"sceUserServiceInitialize",user_initialize}, {"sceUserServiceTerminate",runtime_stub},
+    {"sceUserServiceInitialize",user_initialize}, {"sceUserServiceInitialize2",user_initialize2},
+    {"sceUserServiceTerminate",user_terminate},
     {"sceUserServiceGetInitialUser",user_initial}, {"sceUserServiceGetLoginUserIdList",user_list},
     {"sceUserServiceGetUserName",user_name}, {"sceUserServiceGetEvent",user_event},
     {"sceUserServiceGetUserColor",user_color}, {"sceUserServiceRegisterEventCallback",runtime_stub},
@@ -706,8 +770,13 @@ static const RuntimeExport s_exports[]={
     {"scePlayGoDialogInitialize",playgo_init}, {"scePlayGoDialogOpen",playgo_open},
     {"scePlayGoDialogUpdateStatus",playgo_status}, {"scePlayGoDialogGetStatus",playgo_status},
     {"scePlayGoDialogGetResult",playgo_result}, {"scePlayGoDialogClose",playgo_close},
-    {"scePlayGoDialogTerminate",playgo_term}, {"sceCommonDialogIsUsed",common_is_used},
+    {"scePlayGoDialogTerminate",playgo_term},
+    {"sceLoginDialogInitialize",login_init}, {"sceLoginDialogOpen",login_open},
+    {"sceLoginDialogUpdateStatus",login_status}, {"sceLoginDialogGetStatus",login_status},
+    {"sceLoginDialogGetResult",login_result}, {"sceLoginDialogClose",login_close},
+    {"sceLoginDialogTerminate",login_term}, {"sceCommonDialogIsUsed",common_is_used},
     {"sceAudioInOpen",audio_in_open}, {"sceAudioInHqOpen",audio_in_open}, {"sceAudioInGetSilentState",audio_in_open},
+    {"sceAudioInGetGain",audio_in_gain}, {"sceAudioInGetRerouteCount",audio_in_open},
     {"sceMoveInit",move_init}, {"sceMoveOpen",move_open}, {"sceMoveGetDeviceInfo",move_device_info},
     {"sceMoveReadStateRecent",move_read_recent}, {"sceMoveSetLightSphere",move_no_controller},
     {"sceMoveSetVibration",move_no_controller}, {"sceMoveTerm",move_term},

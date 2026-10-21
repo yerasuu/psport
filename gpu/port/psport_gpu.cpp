@@ -45,6 +45,7 @@ namespace Libraries::Audiodec { void RegisterLib(Core::Loader::SymbolsResolver* 
 namespace Libraries::Videodec2 { void RegisterLib(Core::Loader::SymbolsResolver* p_sym); }
 namespace Libraries::PngEnc { void RegisterLib(Core::Loader::SymbolsResolver* p_sym); }
 namespace Libraries::PngDec { void RegisterLib(Core::Loader::SymbolsResolver* p_sym); }
+namespace Libraries::JpegDec { void RegisterLib(Core::Loader::SymbolsResolver* p_sym); }
 namespace Libraries::Kernel { void RegisterEventQueue(Core::Loader::SymbolsResolver* p_sym); }
 
 namespace {
@@ -188,6 +189,7 @@ extern "C" void psport_gpu_register_kernel(void) {
     Libraries::Videodec2::RegisterLib(&resolver);
     Libraries::PngEnc::RegisterLib(&resolver);
     Libraries::PngDec::RegisterLib(&resolver);
+    Libraries::JpegDec::RegisterLib(&resolver);
 }
 
 extern "C" uintptr_t psport_gpu_resolve(const char* sz_scoped_nid) {

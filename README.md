@@ -168,7 +168,7 @@ fonts (`PS_SYS_MODULES`, `PS_HLE`, `PS_LLE`, `PS_SYS_FONTS`):
 - **System libraries.** psport implements them natively: a C runtime (memory, threads,
   synchronization, files, audio, pad, saves, exceptions, services, user-level threads, modules
   loaded at run time) and the libraries in `gpu/` (GnmDriver, VideoOut, AvPlayer, Videodec2, Ngs2,
-  Audiodec, Fiber, Font, PngEnc, PngDec).
+  Audiodec, Fiber, Font, PngEnc, PngDec, JpegDec).
 - **Graphics.** The GPU command stream and GCN shaders are translated to Vulkan by a renderer
   derived from shadPS4's video core and shader recompiler (`gpu/shadps4/`), as bbport extended it.
 - **Game profiles.** What is specific to one title (hooks and optimisations) lives in its profile
@@ -215,7 +215,7 @@ its log and call report, implementing what is missing and checking the result.
 | Path | Contents |
 |---|---|
 | `src/` | entry point (`src/main/`), native loader and C runtime |
-| `gpu/` | GPU library: shadPS4 video core with bbport's changes ([gpu/VENDOR.txt](gpu/VENDOR.txt)), PM4 decoder (`cp/`), memory module (`layer/`), ported libraries (`ngs2/`, `audiodec/`, `fiber/`, `font/`, `pngenc/`, `pngdec/`), game profiles (`games/`), overlay and in-game menu (`port/`), DLSS bridge, online module (`net/`) |
+| `gpu/` | GPU library: shadPS4 video core with bbport's changes ([gpu/VENDOR.txt](gpu/VENDOR.txt)), PM4 decoder (`cp/`), memory module (`layer/`), ported libraries (`ngs2/`, `audiodec/`, `fiber/`, `font/`, `pngenc/`, `pngdec/`, `jpegdec/`), game profiles (`games/`), overlay and in-game menu (`port/`), DLSS bridge, online module (`net/`) |
 | `scripts/` | `online.py` (online addresses for `PS_ONLINE=1`) and `sce_file.py` for the Python tools |
 | `launcher/`, `packaging/` | bbport's GTK4 launcher; Nix package and AppImage script |
 | `patches/` | community patches for Bloodborne |

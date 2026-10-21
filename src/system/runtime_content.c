@@ -72,6 +72,16 @@ static ABI int32_t module_load_internal(uint32_t id,int32_t argc,const void *p_a
     printf("Runtime: internal system module 0x%x loaded (host implementation)\n",id);
     return 0;
 }
+static ABI int32_t module_unload_internal(uint32_t id,int32_t argc,const void *p_argv,uint64_t flags,int32_t *p_result) {
+    (void)argc; (void)p_argv;
+    const uint32_t i_module=id&0x7fffffff;
+    if (!i_module || i_module>=0x10000 || flags) return INVALID_ID;
+    if (!s_c_internal_refs[i_module]) return NOT_LOADED;
+    --s_c_internal_refs[i_module];
+    if (p_result) *p_result=0;
+    printf("Runtime: internal system module 0x%x unloaded\n",id);
+    return 0;
+}
 static void require_loaded(void) {
     require_provider();
     if (!s_c_refs) { fputs("STOP: AppContent called before module load\n",stderr); runtime_stop(21); }
@@ -289,6 +299,7 @@ static ABI int32_t temp_space(const char *sz_mount,uint64_t *p_kb) {
 static const RuntimeExport s_exports[]={
     {"sceSysmoduleLoadModule",module_load}, {"sceSysmoduleIsLoaded",module_loaded},
     {"sceSysmoduleUnloadModule",module_unload}, {"sceSysmoduleLoadModuleInternalWithArg",module_load_internal},
+    {"sceSysmoduleUnloadModuleInternalWithArg",module_unload_internal},
     {"sceAppContentInitialize",content_init}, {"sceAppContentAppParamGetInt",param_int},
     {"sceAppContentGetAddcontInfoList",addon_list}, {"sceAppContentGetAddcontInfo",addon_info},
     {"sceAppContentGetEntitlementKey",addon_entitlement_key}, {"sceAppContentAddcontMount",addon_mount},

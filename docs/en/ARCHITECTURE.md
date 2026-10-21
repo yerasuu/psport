@@ -21,7 +21,7 @@ The model is Wine's, not an emulator's.
 | C runtime | `src/*/runtime*.c`, `src/runtime/runtime.h`, `src/runtime/imports/import_*.inc` | `out/psport` | libkernel and the other system libraries, import resolution, the call report |
 | GPU library | `gpu/port/psport_gpu*.cpp`, `gpu/psport_gpu.h` | `out/gpu/libpsport-gpu.so` | C interface between `psport` and the C++ side |
 | Translator | `gpu/shadps4/` (inherited from shadPS4, `gpu/VENDOR.txt`), `gpu/cp/`, `gpu/layer/` | `libpsport-gpu.so` | GnmDriver, VideoOut, command processor, Vulkan rasterizer, caches, shader recompiler |
-| Ported libraries | `gpu/ngs2/`, `gpu/audiodec/`, `gpu/fiber/`, `gpu/font/`, `gpu/pngenc/`, `gpu/pngdec/` | `libpsport-gpu.so` | libSceNgs2, libSceAudiodec, libSceFiber, libSceFont/FontFt, libScePngEnc, libScePngDec |
+| Ported libraries | `gpu/ngs2/`, `gpu/audiodec/`, `gpu/fiber/`, `gpu/font/`, `gpu/pngenc/`, `gpu/pngdec/`, `gpu/jpegdec/` | `libpsport-gpu.so` | libSceNgs2, libSceAudiodec, libSceFiber, libSceFont/FontFt, libScePngEnc, libScePngDec, libSceJpegDec |
 | Port services | `gpu/port/`, `gpu/memory/`, `gpu/diag/` | `libpsport-gpu.so` | settings (`psport.ini`), overlay, submit guard, guest memory, diagnostics |
 | Game profiles | `gpu/games/` | `libpsport-gpu.so` | per-title launch and game data (`Game::Title`) and translator optimisations (`Game::Profile`) |
 | Online module | `gpu/net/` | `out/gpu/` (optional) | network and PSN imports with `PS_ONLINE=1` |
@@ -341,7 +341,7 @@ in `psport_gpu_games.cpp`; the shadPS4 parts the port replaces (memory manager, 
 stood in for in `gpu/shim/psport_stand_ins.cpp`:
 
 - `psport_gpu_register_kernel` registers the kernel event queues and the libraries that do not need a
-  window: AvPlayer, Ngs2, Fiber, Font, FontFt, Audiodec, Videodec2, PngEnc, PngDec.
+  window: AvPlayer, Ngs2, Fiber, Font, FontFt, Audiodec, Videodec2, PngEnc, PngDec, JpegDec.
 - `psport_gpu_init` selects the game's title and profile, loads `psport.ini`, prepares saves through
   the title, starts the SDL window on its own thread and registers GnmDriver and VideoOut. The
   Vulkan instance hands the chosen device's facts to `runtime_quirks_note_gpu` before creating the

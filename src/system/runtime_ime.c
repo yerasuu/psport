@@ -21,6 +21,7 @@
 #define IME_INVALID_MAX_TEXT_LENGTH ((int32_t)0x80BC0016)
 #define IME_INVALID_INPUT_TEXT_BUFFER ((int32_t)0x80BC0017)
 #define IME_INVALID_HANDLER ((int32_t)0x80BC0022)
+#define IME_INVALID_PARAM ((int32_t)0x80BC0030)
 #define IME_INVALID_ADDRESS ((int32_t)0x80BC0031)
 #define IME_MAX_TEXT_LENGTH 2048
 #define TEXT_BYTES (IME_MAX_TEXT_LENGTH*4+1)
@@ -210,9 +211,83 @@ int runtime_ime_update(void *pfn_handler) {
     return 1;
 }
 
+/* sceImeFilterText's languages are SceImeLanguage bits. A mask of none takes the default the firmware
+ * derives from the parameter's version; every language it knows stands in for that default here. */
+#define LANGUAGE_RUSSIAN 0x400ull
+#define LANGUAGE_JAPANESE 0x2000ull
+#define LANGUAGE_KOREAN 0x4000ull
+#define LANGUAGE_CHINESE 0x18000ull
+#define LANGUAGE_ARABIC 0x1000000ull
+#define LANGUAGE_THAI 0x4000000ull
+#define LANGUAGE_GREEK 0x10000000ull
+#define LANGUAGE_VIETNAMESE 0x40000000ull
+#define LANGUAGE_ROMANIAN 0x80000000ull
+#define LANGUAGE_UKRAINIAN 0x200000000ull
+#define LANGUAGE_CARONS 0x188000000ull
+#define LANGUAGE_ALL 0x3FFFFFFFFull
+#define LANGUAGES_WITHOUT_LATIN_EXTENDED (0x4ull|0x40000ull|LANGUAGE_RUSSIAN|LANGUAGE_JAPANESE|LANGUAGE_KOREAN| \
+                                          LANGUAGE_CHINESE|LANGUAGE_ARABIC|LANGUAGE_THAI|LANGUAGE_GREEK|LANGUAGE_UKRAINIAN)
+enum { FILTER_LATIN=0x100, FILTER_DEFAULT_EXTENDED=0x101 };
+typedef struct { uint64_t languages; uint32_t type, version; } ImeFilterParam;
+
+static bool is_in(uint32_t c, uint32_t first, uint32_t last) { return c>=first && c<=last; }
+static bool is_vietnamese(uint32_t c) {
+    return is_in(c,0x300,0x323) || is_in(c,0x1E00,0x1EFF) || c==0x1A0 || c==0x1A1 || c==0x1AF || c==0x1B0 || c==0x20AB;
+}
+static bool is_latin1_symbol(uint32_t c) {
+    static const uint16_t s_symbols[]={0xA1,0xBF,0xB4,0x2018,0x2019,0x201A,0x201C,0x201D,0x201E,0xB0,0x2039,0x203A,
+                                       0xAB,0xBB,0xAA,0xBA,0xD7,0xF7,0xA4,0xA2,0x20AC,0xA3,0xA5,0x20A9,0xA7,0xA6,
+                                       0xB5,0xAC,0xB7,0xB9,0xB2,0xB3,0xBC,0xBD,0xBE,0x2116};
+    for (size_t i=0;i<sizeof(s_symbols)/sizeof(*s_symbols);++i)
+        if (c==s_symbols[i]) return true;
+    return false;
+}
+/* The firmware asks its SJIS and GB/Big5 conversion tables; their blocks stand in for them here. */
+static bool is_cjk_text(uint32_t c) {
+    return is_in(c,0x3000,0x30FF) || is_in(c,0x3400,0x4DBF) || is_in(c,0x4E00,0x9FFF) || is_in(c,0xF900,0xFAFF) ||
+           is_in(c,0xFF01,0xFF60) || is_in(c,0xFFE0,0xFFE6);
+}
+static bool is_kept(uint32_t c, uint32_t type, uint64_t languages) {
+    switch (type) {
+    case TYPE_BASIC_LATIN:
+    case TYPE_MAIL: return c<0x7F;
+    case TYPE_NUMBER: return is_in(c,'0','9') || c==',' || c=='.' || c=='-' || c=='\n';
+    case FILTER_LATIN:
+        return c<0x17F || ((languages&LANGUAGE_VIETNAMESE) && is_vietnamese(c)) ||
+               ((languages&LANGUAGE_ROMANIAN) && is_in(c,0x218,0x21B));
+    default: break;
+    }
+    if (c<((languages&~LANGUAGES_WITHOUT_LATIN_EXTENDED) ? 0x17Fu : 0x7Fu) || is_latin1_symbol(c)) return true;
+    if ((languages&LANGUAGE_KOREAN) && (is_in(c,0x3130,0x318F) || is_in(c,0xAC00,0xD7AF))) return true;
+    if ((languages&(LANGUAGE_RUSSIAN|LANGUAGE_UKRAINIAN)) && is_in(c,0x400,0x4FF)) return true;
+    if ((languages&(LANGUAGE_JAPANESE|LANGUAGE_KOREAN|LANGUAGE_CHINESE)) && is_in(c,0xFF10,0xFF19)) return true;
+    if ((languages&(LANGUAGE_JAPANESE|LANGUAGE_KOREAN|LANGUAGE_CHINESE)) && is_in(c,0x3000,0x303F)) return true;
+    if ((languages&(LANGUAGE_JAPANESE|LANGUAGE_CHINESE)) && is_cjk_text(c)) return true;
+    if ((languages&LANGUAGE_ARABIC) && (is_in(c,0x600,0x6FF) || is_in(c,0x200C,0x200F))) return true;
+    if ((languages&LANGUAGE_THAI) && is_in(c,0xE00,0xE7F)) return true;
+    if ((languages&LANGUAGE_GREEK) && (is_in(c,0x370,0x3E1) || is_in(c,0x3F0,0x3FF))) return true;
+    if ((languages&LANGUAGE_VIETNAMESE) && is_vietnamese(c)) return true;
+    if ((languages&LANGUAGE_ROMANIAN) && is_in(c,0x218,0x21B)) return true;
+    return (languages&LANGUAGE_CARONS) && (c==0x2C7 || is_in(c,0x2D8,0x2DB) || c==0x2DD);
+}
+static ABI int32_t ime_filter_text(uint16_t *p_out, uint32_t *p_out_length, uint32_t c_out_capacity,
+                                   const ImeFilterParam *p_param, const uint16_t *p_in, uint32_t c_in) {
+    if (!p_out || !p_out_length || !p_param || !p_in) return IME_INVALID_ADDRESS;
+    const uint32_t type=p_param->type;
+    const uint64_t languages=(p_param->languages ? p_param->languages : LANGUAGE_ALL)&LANGUAGE_ALL;
+    if (c_out_capacity<2 || (type>TYPE_NUMBER && type!=FILTER_LATIN && type!=FILTER_DEFAULT_EXTENDED) || !languages)
+        return IME_INVALID_PARAM;
+    uint32_t c_kept=0;
+    for (uint32_t i=0;i<c_in && p_in[i] && c_kept<c_out_capacity-1;++i)
+        if (is_kept(p_in[i],type,languages)) p_out[c_kept++]=p_in[i];
+    p_out[c_kept]=0;
+    *p_out_length=c_kept;
+    return 0;
+}
+
 static const RuntimeExport s_exports[]={
     {"sceImeParamInit",ime_param_init}, {"sceImeGetPanelSize",ime_panel_size}, {"sceImeOpen",ime_open},
     {"sceImeClose",ime_close}, {"sceImeSetText",ime_set_text}, {"sceImeSetCaret",ime_set_caret},
-    {"sceImeSetTextGeometry",ime_set_text_geometry},
+    {"sceImeSetTextGeometry",ime_set_text_geometry}, {"sceImeFilterText",ime_filter_text},
 };
 uintptr_t runtime_ime_resolve(const char *sz_name) { return RUNTIME_LOOKUP(s_exports,sz_name); }

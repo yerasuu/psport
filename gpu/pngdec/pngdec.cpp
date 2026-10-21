@@ -17,6 +17,7 @@ constexpr s32 ORBIS_PNG_DEC_ERROR_INVALID_ADDR = 0x80690001;
 constexpr s32 ORBIS_PNG_DEC_ERROR_INVALID_SIZE = 0x80690002;
 constexpr s32 ORBIS_PNG_DEC_ERROR_INVALID_PARAM = 0x80690003;
 constexpr s32 ORBIS_PNG_DEC_ERROR_INVALID_HANDLE = 0x80690004;
+constexpr s32 ORBIS_PNG_DEC_ERROR_INVALID_WORK_MEMORY = 0x80690005;
 constexpr s32 ORBIS_PNG_DEC_ERROR_INVALID_DATA = 0x80690010;
 constexpr s32 ORBIS_PNG_DEC_ERROR_UNSUPPORT_DATA = 0x80690011;
 constexpr s32 ORBIS_PNG_DEC_ERROR_DECODE_ERROR = 0x80690012;
@@ -44,12 +45,18 @@ static_assert(sizeof(DecodeParam) == 32 && sizeof(ImageInfo) == 16);
 
 enum ColorSpace : u16 { Grayscale = 2, Rgb = 3, Clut = 4, GrayscaleAlpha = 18, Rgba = 19 };
 enum ImageFlag : u32 { Adam7Interlace = 1, TrnsChunkExist = 2 };
-enum PixelFormat : u16 { R8G8B8A8 = 0, B8G8R8A8 = 1 };
+enum PixelFormat : u16 { R8G8B8A8 = 0, B8G8R8A8 = 1, Clut8 = 0x84 };
 constexpr u32 kAttributeBitDepth16 = 1;
+constexpr u32 kMaxImageWidth = 1000000;
+constexpr u32 kCbClutPalette = 0x400;
+constexpr u64 kCbMaxImage = 0x7fffffff;
 
-constexpr u32 kDecoderMagic = 0x504e4744;
+// The handle is the work memory aligned to 16 and points at itself; the firmware sizes that memory
+// for libpng's row buffers, of which this decoder uses only the head.
 struct Decoder {
-    u32 magic, attribute, max_image_width;
+    Decoder* p_self;
+    u32 attribute, reserved;
+    u32 max_image_width;
 };
 
 struct PngImage {
@@ -183,22 +190,27 @@ static u32 ReadSample(const u8* p_row, u32 i_sample, u8 bit_depth) {
 struct OutputImage {
     u8* p_base;
     u32 cb_pitch;
-    bool is_wide, is_bgr;
+    bool is_bgr, is_clut;
     u16 opaque_alpha, missing_alpha;
 };
 
-// Takes RGBA at 16 bits per channel and writes it at the output's width.
+// Takes RGBA at 16 bits per channel and writes it as 8 bits per channel.
 static void StorePixel(const OutputImage& output, u32 x, u32 y, u32 red, u32 green, u32 blue,
                        u32 alpha) {
     if (output.is_bgr) std::swap(red, blue);
-    if (output.is_wide) {
-        u16* p_pixel = reinterpret_cast<u16*>(output.p_base + size_t(output.cb_pitch) * y) + size_t(x) * 4;
-        p_pixel[0] = u16(red), p_pixel[1] = u16(green), p_pixel[2] = u16(blue);
-        p_pixel[3] = u16(alpha);
-    } else {
-        u8* p_pixel = output.p_base + size_t(output.cb_pitch) * y + size_t(x) * 4;
-        p_pixel[0] = u8(red >> 8), p_pixel[1] = u8(green >> 8), p_pixel[2] = u8(blue >> 8);
-        p_pixel[3] = u8(alpha >> 8);
+    u8* p_pixel = output.p_base + size_t(output.cb_pitch) * y + size_t(x) * 4;
+    p_pixel[0] = u8(red >> 8), p_pixel[1] = u8(green >> 8), p_pixel[2] = u8(blue >> 8);
+    p_pixel[3] = u8(alpha >> 8);
+}
+
+// The CLUT output starts with the 256-entry RGBA palette; the indices follow it a byte each.
+static void StoreClutPalette(const PngImage& image, u8* p_palette, u8 missing_alpha) {
+    std::memset(p_palette, 0, kCbClutPalette);
+    for (u32 i = 0; i < image.c_palette_entries; ++i) {
+        u8* p_entry = p_palette + i * 4;
+        std::memcpy(p_entry, image.p_palette + i * 3, 3);
+        if (!image.p_transparency) p_entry[3] = missing_alpha;
+        else p_entry[3] = i < image.cb_transparency ? image.p_transparency[i] : 0xff;
     }
 }
 
@@ -212,6 +224,11 @@ static void ConvertRow(const PngImage& image, const OutputImage& output, const u
     const u32 max_sample = (1u << image.bit_depth) - 1;
     const u8 depth = image.bit_depth;
     const auto widen = [&](u32 sample) { return sample * 65535 / max_sample; };
+    if (output.is_clut) {
+        u8* p_indices = output.p_base + kCbClutPalette + size_t(output.cb_pitch) * y;
+        for (u32 i = 0; i < c_pixels; ++i) p_indices[x_start + i * x_step] = u8(ReadSample(p_row, i, depth));
+        return;
+    }
     for (u32 i = 0; i < c_pixels; ++i) {
         const u32 i_first_sample = i * c_channels;
         u32 red, green, blue, alpha = output.missing_alpha;
@@ -247,32 +264,42 @@ static void ConvertRow(const PngImage& image, const OutputImage& output, const u
     }
 }
 
+static bool IsValidHandle(const Decoder* p_handle) {
+    return p_handle && !(reinterpret_cast<uintptr_t>(p_handle) & 0xf) && p_handle->p_self == p_handle;
+}
+
 s32 PS4_SYSV_ABI scePngDecQueryMemorySize(const CreateParam* p_param) {
     if (!p_param) return ORBIS_PNG_DEC_ERROR_INVALID_ADDR;
     if (p_param->this_size != sizeof(CreateParam)) return ORBIS_PNG_DEC_ERROR_INVALID_SIZE;
-    if (p_param->attribute > kAttributeBitDepth16 || !p_param->max_image_width) return ORBIS_PNG_DEC_ERROR_INVALID_PARAM;
-    return sizeof(Decoder);
+    if (p_param->attribute > kAttributeBitDepth16 || !p_param->max_image_width ||
+        p_param->max_image_width > kMaxImageWidth)
+        return ORBIS_PNG_DEC_ERROR_INVALID_PARAM;
+    return s32((8u << p_param->attribute) * ((p_param->max_image_width + 0x47) & ~7u) + 0xd090);
 }
 
 s32 PS4_SYSV_ABI scePngDecCreate(const CreateParam* p_param, void* p_memory, u32 cb_memory, Decoder** pp_out_handle) {
-    if (!p_param || !p_memory || !pp_out_handle) return ORBIS_PNG_DEC_ERROR_INVALID_ADDR;
     const s32 cb_needed = scePngDecQueryMemorySize(p_param);
     if (cb_needed < 0) return cb_needed;
+    if (!p_memory) return ORBIS_PNG_DEC_ERROR_INVALID_ADDR;
     if (cb_memory < u32(cb_needed)) return ORBIS_PNG_DEC_ERROR_INVALID_SIZE;
-    auto* p_decoder = static_cast<Decoder*>(p_memory);
-    *p_decoder = {kDecoderMagic, p_param->attribute, p_param->max_image_width};
+    if (!pp_out_handle) return ORBIS_PNG_DEC_ERROR_INVALID_ADDR;
+    auto* p_decoder = reinterpret_cast<Decoder*>((reinterpret_cast<uintptr_t>(p_memory) + 0xf) & ~uintptr_t(0xf));
+    *p_decoder = {p_decoder, p_param->attribute, 0, (p_param->max_image_width + 7) & ~7u};
     *pp_out_handle = p_decoder;
     return 0;
 }
 
 s32 PS4_SYSV_ABI scePngDecDelete(Decoder* p_handle) {
-    if (!p_handle || p_handle->magic != kDecoderMagic) return ORBIS_PNG_DEC_ERROR_INVALID_HANDLE;
-    p_handle->magic = 0;
+    if (!IsValidHandle(p_handle)) return ORBIS_PNG_DEC_ERROR_INVALID_HANDLE;
+    p_handle->p_self = nullptr;
     return 0;
 }
 
 s32 PS4_SYSV_ABI scePngDecParseHeader(const ParseParam* p_param, ImageInfo* p_out_info) {
-    if (!p_param || !p_out_info || !p_param->png_mem_addr) return ORBIS_PNG_DEC_ERROR_INVALID_ADDR;
+    if (!p_param || !p_param->png_mem_addr) return ORBIS_PNG_DEC_ERROR_INVALID_ADDR;
+    if (!p_param->png_mem_size) return ORBIS_PNG_DEC_ERROR_INVALID_SIZE;
+    if (p_param->reserved) return ORBIS_PNG_DEC_ERROR_INVALID_PARAM;
+    if (!p_out_info) return ORBIS_PNG_DEC_ERROR_INVALID_ADDR;
     PngImage image;
     const s32 result = ParseChunks(p_param->png_mem_addr, p_param->png_mem_size, image, true);
     if (result) return result;
@@ -283,22 +310,34 @@ s32 PS4_SYSV_ABI scePngDecParseHeader(const ParseParam* p_param, ImageInfo* p_ou
 // Returns the image's width and height packed as (width << 16) | height, 0 when either does not
 // fit in 15 bits.
 s32 PS4_SYSV_ABI scePngDecDecode(Decoder* p_handle, const DecodeParam* p_param, ImageInfo* p_out_info) {
-    if (!p_handle || p_handle->magic != kDecoderMagic) return ORBIS_PNG_DEC_ERROR_INVALID_HANDLE;
-    if (!p_param || !p_param->png_mem_addr || !p_param->image_mem_addr) return ORBIS_PNG_DEC_ERROR_INVALID_ADDR;
-    if (p_param->pixel_format != R8G8B8A8 && p_param->pixel_format != B8G8R8A8) return ORBIS_PNG_DEC_ERROR_INVALID_PARAM;
+    if (!IsValidHandle(p_handle)) return ORBIS_PNG_DEC_ERROR_INVALID_HANDLE;
+    if (!p_param || !p_param->png_mem_addr || !p_param->image_mem_addr ||
+        (reinterpret_cast<uintptr_t>(p_param->image_mem_addr) & 3))
+        return ORBIS_PNG_DEC_ERROR_INVALID_ADDR;
+    if (!p_param->png_mem_size || !p_param->image_mem_size) return ORBIS_PNG_DEC_ERROR_INVALID_SIZE;
+    const u16 pixel_format = p_param->pixel_format;
+    if ((pixel_format != R8G8B8A8 && pixel_format != B8G8R8A8 && pixel_format != Clut8) || p_param->alpha_value > 0xff)
+        return ORBIS_PNG_DEC_ERROR_INVALID_PARAM;
     PngImage image;
     s32 result = ParseChunks(p_param->png_mem_addr, p_param->png_mem_size, image, false);
     if (result) return result;
     if (p_out_info) DescribeImage(image, p_out_info);
-    if (image.width > p_handle->max_image_width) return ORBIS_PNG_DEC_ERROR_UNSUPPORT_DATA;
 
-    const bool is_wide = (p_handle->attribute & kAttributeBitDepth16) && image.bit_depth == 16;
-    const u32 cb_output_pixel = is_wide ? 8 : 4;
-    const u64 cb_output_row = u64(image.width) * cb_output_pixel;
+    const bool is_clut = pixel_format == Clut8;
+    if (is_clut && (image.color_type != 3 || image.bit_depth > 8)) return ORBIS_PNG_DEC_ERROR_INVALID_PARAM;
+    const u64 cb_output_row = u64(image.width) * (is_clut ? 1 : 4);
+    const u64 cb_header = is_clut ? kCbClutPalette : 0;
     const u64 cb_pitch = p_param->image_pitch ? p_param->image_pitch : cb_output_row;
-    if (cb_pitch < cb_output_row) return ORBIS_PNG_DEC_ERROR_INVALID_PARAM;
-    if (cb_pitch * (image.height - 1) + cb_output_row > p_param->image_mem_size)
-        return ORBIS_PNG_DEC_ERROR_INVALID_SIZE;
+    if (p_param->image_pitch) {
+        if ((!is_clut && (cb_pitch & 3)) || cb_pitch < cb_output_row || cb_pitch * image.height > kCbMaxImage ||
+            cb_header + cb_pitch * image.height > p_param->image_mem_size)
+            return ORBIS_PNG_DEC_ERROR_INVALID_PARAM;
+    } else {
+        if (cb_output_row * image.height > kCbMaxImage + 1) return ORBIS_PNG_DEC_ERROR_UNSUPPORT_DATA;
+        if (cb_header + cb_output_row * image.height > p_param->image_mem_size) return ORBIS_PNG_DEC_ERROR_INVALID_SIZE;
+    }
+    if (((image.width + 7) & ~7u) > p_handle->max_image_width || image.bit_depth > (8u << p_handle->attribute))
+        return ORBIS_PNG_DEC_ERROR_INVALID_WORK_MEMORY;
 
     size_t cb_inflated = 0;
     u8* p_inflated = static_cast<u8*>(tinfl_decompress_mem_to_heap(
@@ -307,9 +346,9 @@ s32 PS4_SYSV_ABI scePngDecDecode(Decoder* p_handle, const DecodeParam* p_param, 
 
     const u32 bits_per_pixel = u32(CountChannels(image.color_type)) * image.bit_depth;
     const size_t cb_pixel = bits_per_pixel < 8 ? 1 : bits_per_pixel / 8;
-    const u16 missing_alpha = is_wide ? p_param->alpha_value : u16(p_param->alpha_value * 257u);
-    const OutputImage output{p_param->image_mem_addr, u32(cb_pitch), is_wide, p_param->pixel_format == B8G8R8A8,
-                               0xffff, missing_alpha};
+    const OutputImage output{p_param->image_mem_addr, u32(cb_pitch), pixel_format == B8G8R8A8, is_clut, 0xffff,
+                             u16(p_param->alpha_value * 257u)};
+    if (is_clut) StoreClutPalette(image, p_param->image_mem_addr, u8(p_param->alpha_value));
     // x start, y start, x step, y step of each pass.
     static constexpr u8 s_adam7_passes[7][4] = {{0, 0, 8, 8}, {4, 0, 8, 8}, {0, 4, 4, 8}, {2, 0, 4, 4},
                                                  {0, 2, 2, 4}, {1, 0, 2, 2}, {0, 1, 1, 2}};

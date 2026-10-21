@@ -28,6 +28,11 @@
 #define ERR_BAD_MOUNTED ((int32_t)0x809F000D)
 #define ERR_INVALID_USER ((int32_t)0x809F0011)
 #define ERR_MEMORY_NOT_READY ((int32_t)0x809F0012)
+/* Umount, SetParam, SaveIcon and LoadIcon check their arguments in the library itself, which has
+ * codes of its own for that. */
+#define ERR_INVALID_ARGUMENT ((int32_t)0x809F8004)
+#define ERR_ARGUMENT_TOO_LARGE ((int32_t)0x809F8007)
+#define CB_MAX_PARAM 0x1C800
 #define MODE_RDONLY 1
 #define MODE_CREATE 4
 #define MODE_COPY_ICON 16
@@ -199,6 +204,7 @@ static int slot_of(const MountPoint *p_point) {
 static int32_t copy_save_locked(int32_t user, const TitleId *p_title, const char *sz_dir, int is_restore);
 static int32_t umount(const MountPoint *p_point, int backup) {
     if (!s_is_initialized) return ERR_NOT_INITIALIZED;
+    if (!p_point) return ERR_INVALID_ARGUMENT;
     pthread_mutex_lock(&s_lock);
     int slot=slot_of(p_point);
     if (slot>=0) {
@@ -249,7 +255,8 @@ static ABI int32_t save_event_result(const void *p_param, Event *p_event) {
 }
 static ABI int32_t save_set_param(const MountPoint *p_point, uint32_t type, const void *p_buffer, uint64_t cb_buffer) {
     if (!s_is_initialized) return ERR_NOT_INITIALIZED;
-    if (!p_buffer) return ERR_PARAMETER;
+    if (!p_point || !p_buffer || type>4) return ERR_INVALID_ARGUMENT;
+    if (cb_buffer>CB_MAX_PARAM) return ERR_ARGUMENT_TOO_LARGE;
     pthread_mutex_lock(&s_lock);
     int slot=slot_of(p_point);
     if (slot<0) { pthread_mutex_unlock(&s_lock); return ERR_NOT_MOUNTED; }
@@ -267,7 +274,7 @@ static ABI int32_t save_set_param(const MountPoint *p_point, uint32_t type, cons
     return 0;
 bad:
     pthread_mutex_unlock(&s_lock);
-    return ERR_PARAMETER;
+    return ERR_INVALID_ARGUMENT;
 }
 static uint64_t copy_text(void *p_buffer, uint64_t cb_buffer, const char *sz_text, size_t c_capacity) {
     size_t length=strnlen(sz_text,c_capacity-1);
@@ -299,7 +306,7 @@ static ABI int32_t save_get_param(const MountPoint *p_point, uint32_t type, void
 }
 static ABI int32_t save_icon(const MountPoint *p_point, const Icon *p_icon) {
     if (!s_is_initialized) return ERR_NOT_INITIALIZED;
-    if (!p_icon || !p_icon->buffer) return ERR_PARAMETER;
+    if (!p_point || !p_icon || !p_icon->buffer) return ERR_INVALID_ARGUMENT;
     pthread_mutex_lock(&s_lock);
     int slot=slot_of(p_point);
     int32_t r=ERR_NOT_MOUNTED;
@@ -592,7 +599,7 @@ static ABI int32_t save_progress(float *p_out_progress) {
 }
 static ABI int32_t save_load_icon(const MountPoint *p_point, Icon *p_icon) {
     if (!s_is_initialized) return ERR_NOT_INITIALIZED;
-    if (!p_icon || !p_icon->buffer) return ERR_PARAMETER;
+    if (!p_point || !p_icon || !p_icon->buffer) return ERR_INVALID_ARGUMENT;
     pthread_mutex_lock(&s_lock);
     const int i_slot=slot_of(p_point);
     int32_t result=ERR_NOT_MOUNTED;

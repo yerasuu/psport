@@ -1544,8 +1544,61 @@ s32 PS4_SYSV_ABI sceFontCreateWritingLine() {
     return ORBIS_OK;
 }
 
-s32 PS4_SYSV_ABI sceFontDefineAttribute() {
-    LOG_ERROR(Lib_Font, "(STUBBED) called");
+// psport: attributes come in pairs, the even code off and the odd one on; the font keeps each as a
+// bit of its flags word (0x8000, vertical layout, is only read through 0x40/0x41).
+static u16 FontAttributeFlag(u32 attribute) {
+    switch (attribute & ~1u) {
+    case 0x10: return 0x100;
+    case 0x20: return 0x1000;
+    case 0x30: return 0x2000;
+    case 0x40: return 0x8000;
+    default: return 0;
+    }
+}
+
+static u32 FontAttributeCode(u32 attribute, bool is_on) {
+    return (attribute & ~1u) | (is_on ? 1u : 0u);
+}
+
+s32 PS4_SYSV_ABI sceFontDefineAttribute(OrbisFontHandle h_font, u32 attribute, u32* p_out_previous) {
+    auto* p_font = GetNativeFont(h_font);
+    if (!p_font || p_font->magic != 0x0F02) {
+        LOG_ERROR(Lib_Font, "INVALID_HANDLE");
+        return ORBIS_FONT_ERROR_INVALID_FONT_HANDLE;
+    }
+    const u16 flag = FontAttributeFlag(attribute);
+    if (!flag || flag == 0x8000) {
+        LOG_ERROR(Lib_Font, "INVALID_PARAMETER attribute={:#x}", attribute);
+        return ORBIS_FONT_ERROR_INVALID_PARAMETER;
+    }
+    u32 prev_lock = 0;
+    if (!AcquireFontLock(p_font, prev_lock)) {
+        LOG_ERROR(Lib_Font, "INVALID_HANDLE");
+        return ORBIS_FONT_ERROR_INVALID_FONT_HANDLE;
+    }
+    const bool was_on = (p_font->flags & flag) != 0;
+    const bool is_on = (attribute & 1u) != 0;
+    s32 rc = ORBIS_OK;
+    if (flag == 0x1000 && is_on && p_font->open_info.fontset_record) {
+        rc = ORBIS_FONT_ERROR_NO_SUPPORT_FONTSET;
+    } else {
+        p_font->flags = static_cast<u16>(is_on ? p_font->flags | flag : p_font->flags & ~flag);
+        if (flag == 0x1000 && !is_on) {
+            p_font->flags = static_cast<u16>(p_font->flags & ~0x8000u);
+            p_font->cached_style.layout_cache_state = 0;
+        }
+    }
+    ReleaseFontLock(p_font, prev_lock);
+    if (rc != ORBIS_OK) {
+        LOG_ERROR(Lib_Font, "NO_SUPPORT_FONTSET attribute={:#x}", attribute);
+        return rc;
+    }
+    if (flag == 0x2000) {
+        LOG_WARNING(Lib_Font, "attribute {:#x} set; metrics are not recomputed for it", attribute);
+    }
+    if (p_out_previous) {
+        *p_out_previous = FontAttributeCode(attribute, was_on);
+    }
     return ORBIS_OK;
 }
 
@@ -1803,8 +1856,26 @@ s32 PS4_SYSV_ABI sceFontGenerateCharGlyph(OrbisFontHandle glyph_handle, u32 code
     return ORBIS_OK;
 }
 
-s32 PS4_SYSV_ABI sceFontGetAttribute() {
-    LOG_ERROR(Lib_Font, "(STUBBED) called");
+s32 PS4_SYSV_ABI sceFontGetAttribute(OrbisFontHandle h_font, u32 attribute, u32* p_out_value) {
+    if (!p_out_value) {
+        LOG_ERROR(Lib_Font, "INVALID_PARAMETER");
+        return ORBIS_FONT_ERROR_INVALID_PARAMETER;
+    }
+    auto* p_font = GetNativeFont(h_font);
+    u32 prev_lock = 0;
+    if (!p_font || p_font->magic != 0x0F02 || !AcquireFontLock(p_font, prev_lock)) {
+        *p_out_value = 0;
+        LOG_ERROR(Lib_Font, "INVALID_HANDLE");
+        return ORBIS_FONT_ERROR_INVALID_FONT_HANDLE;
+    }
+    const u16 flags = p_font->flags;
+    ReleaseFontLock(p_font, prev_lock);
+    const u16 flag = FontAttributeFlag(attribute);
+    if (!flag) {
+        LOG_ERROR(Lib_Font, "INVALID_PARAMETER attribute={:#x}", attribute);
+        return ORBIS_FONT_ERROR_INVALID_PARAMETER;
+    }
+    *p_out_value = FontAttributeCode(attribute, (flags & flag) != 0);
     return ORBIS_OK;
 }
 
@@ -2390,14 +2461,44 @@ s32 PS4_SYSV_ABI sceFontGetVerticalLayout(OrbisFontHandle fontHandle,
     return rc;
 }
 
-s32 PS4_SYSV_ABI sceFontGlyphDefineAttribute() {
-    LOG_ERROR(Lib_Font, "(STUBBED) called");
+s32 PS4_SYSV_ABI sceFontGlyphDefineAttribute(OrbisFontGlyph p_glyph, u32 attribute, u32* p_out_previous) {
+    if (!p_glyph || p_glyph->magic != 0x0F03) {
+        LOG_ERROR(Lib_Font, "INVALID_GLYPH");
+        return ORBIS_FONT_ERROR_INVALID_GLYPH;
+    }
+    if ((attribute & ~1u) != 0x10) {
+        LOG_ERROR(Lib_Font, "INVALID_PARAMETER attribute={:#x}", attribute);
+        return ORBIS_FONT_ERROR_INVALID_PARAMETER;
+    }
+    const bool was_on = (p_glyph->flags & 0x2) != 0;
+    p_glyph->flags = static_cast<u16>((attribute & 1u) ? p_glyph->flags | 0x2 : p_glyph->flags & ~0x2u);
+    if (p_out_previous) {
+        *p_out_previous = FontAttributeCode(attribute, was_on);
+    }
     return ORBIS_OK;
 }
 
-s32 PS4_SYSV_ABI sceFontGlyphGetAttribute() {
-    LOG_ERROR(Lib_Font, "(STUBBED) called");
-    return ORBIS_OK;
+s32 PS4_SYSV_ABI sceFontGlyphGetAttribute(OrbisFontGlyph p_glyph, u32 attribute, u32* p_out_value) {
+    if (!p_out_value) {
+        LOG_ERROR(Lib_Font, "INVALID_PARAMETER");
+        return ORBIS_FONT_ERROR_INVALID_PARAMETER;
+    }
+    if (!p_glyph || p_glyph->magic != 0x0F03) {
+        *p_out_value = 0;
+        LOG_ERROR(Lib_Font, "INVALID_GLYPH");
+        return ORBIS_FONT_ERROR_INVALID_GLYPH;
+    }
+    switch (attribute & ~1u) {
+    case 0x10:
+        *p_out_value = FontAttributeCode(attribute, (p_glyph->flags & 0x2) != 0);
+        return ORBIS_OK;
+    case 0x40:
+        *p_out_value = FontAttributeCode(attribute, (p_glyph->baseline & 0x8000) != 0);
+        return ORBIS_OK;
+    default:
+        LOG_ERROR(Lib_Font, "INVALID_PARAMETER attribute={:#x}", attribute);
+        return ORBIS_FONT_ERROR_INVALID_PARAMETER;
+    }
 }
 
 s32 PS4_SYSV_ABI sceFontGlyphGetGlyphForm(OrbisFontGlyph fontGlyph) {

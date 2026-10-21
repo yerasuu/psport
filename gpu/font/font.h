@@ -505,7 +505,7 @@ s32 PS4_SYSV_ABI sceFontCreateString(const OrbisFontMem* fontMemory,
                                      OrbisFontString* pFontString);
 s32 PS4_SYSV_ABI sceFontCreateWords();
 s32 PS4_SYSV_ABI sceFontCreateWritingLine();
-s32 PS4_SYSV_ABI sceFontDefineAttribute();
+s32 PS4_SYSV_ABI sceFontDefineAttribute(OrbisFontHandle h_font, u32 attribute, u32* p_out_previous);
 s32 PS4_SYSV_ABI sceFontDeleteGlyph(const OrbisFontMem* memory, OrbisFontGlyph* glyph);
 s32 PS4_SYSV_ABI sceFontDestroyGraphicsDevice();
 s32 PS4_SYSV_ABI sceFontDestroyGraphicsService();
@@ -518,7 +518,7 @@ s32 PS4_SYSV_ABI sceFontDettachDeviceCacheBuffer();
 s32 PS4_SYSV_ABI sceFontGenerateCharGlyph(OrbisFontHandle glyph_handle, u32 codepoint,
                                           const OrbisFontGenerateGlyphParams* gen_params,
                                           OrbisFontGlyph* glyph_out);
-s32 PS4_SYSV_ABI sceFontGetAttribute();
+s32 PS4_SYSV_ABI sceFontGetAttribute(OrbisFontHandle h_font, u32 attribute, u32* p_out_value);
 s32 PS4_SYSV_ABI sceFontGetCharGlyphCode();
 s32 PS4_SYSV_ABI sceFontGetCharGlyphMetrics(OrbisFontHandle fontHandle, u32 code,
                                             OrbisFontGlyphMetrics* metrics);
@@ -552,8 +552,8 @@ s32 PS4_SYSV_ABI sceFontGetScriptLanguage();
 s32 PS4_SYSV_ABI sceFontGetTypographicDesign();
 s32 PS4_SYSV_ABI sceFontGetVerticalLayout(OrbisFontHandle fontHandle,
                                           OrbisFontVerticalLayout* layout);
-s32 PS4_SYSV_ABI sceFontGlyphDefineAttribute();
-s32 PS4_SYSV_ABI sceFontGlyphGetAttribute();
+s32 PS4_SYSV_ABI sceFontGlyphDefineAttribute(OrbisFontGlyph p_glyph, u32 attribute, u32* p_out_previous);
+s32 PS4_SYSV_ABI sceFontGlyphGetAttribute(OrbisFontGlyph p_glyph, u32 attribute, u32* p_out_value);
 s32 PS4_SYSV_ABI sceFontGlyphGetGlyphForm(OrbisFontGlyph fontGlyph);
 s32 PS4_SYSV_ABI sceFontGlyphGetMetricsForm(OrbisFontGlyph fontGlyph);
 s32 PS4_SYSV_ABI sceFontGlyphGetScalePixel(OrbisFontGlyph fontGlyph, float* w, float* h);

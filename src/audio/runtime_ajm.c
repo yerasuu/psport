@@ -604,17 +604,24 @@ static ABI int32_t ajm_batch_start(uint32_t id, unsigned char *p_buffer, uint32_
     pthread_mutex_unlock(&s_lock);
     return 0;
 }
+/* A context is a descriptor of /dev/ajm and the driver knows each batch only through the one that
+ * started it, so another context's batch is as unknown as one never started. */
+static int32_t batch_status(uint32_t id, uint32_t batch) {
+    if (!context(id)) return ERR_INVALID_CONTEXT;
+    if (!batch || batch>MAX_BATCHES || !s_batches[batch-1].used || s_batches[batch-1].context!=(int)id) return ERR_INVALID_BATCH;
+    return 0;
+}
 static ABI int32_t ajm_batch_wait(uint32_t id, uint32_t batch, uint32_t timeout, BatchError *p_error) {
     (void)timeout; (void)p_error;
     pthread_mutex_lock(&s_lock);
-    int32_t r=!context(id) ? ERR_INVALID_CONTEXT : !batch || batch>MAX_BATCHES || !s_batches[batch-1].used ? ERR_INVALID_BATCH : 0;
+    int32_t r=batch_status(id,batch);
     if (!r) { if (s_batches[batch-1].is_canceled) r=ERR_CANCELLED; s_batches[batch-1].used=0; }
     pthread_mutex_unlock(&s_lock);
     return r;
 }
 static ABI int32_t ajm_batch_cancel(uint32_t id, uint32_t batch) {
     pthread_mutex_lock(&s_lock);
-    int32_t r=!context(id) ? ERR_INVALID_CONTEXT : !batch || batch>MAX_BATCHES || !s_batches[batch-1].used ? ERR_INVALID_BATCH : 0;
+    int32_t r=batch_status(id,batch);
     pthread_mutex_unlock(&s_lock);
     return r; /* already processed at submission: nothing to cancel */
 }
