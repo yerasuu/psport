@@ -206,6 +206,7 @@ static ABI int32_t local_to_utc(int64_t local,int32_t is_dst,int64_t *p_utc,Gues
 /* ---- process ---- */
 static uint32_t s_sdk_version, s_psf_attributes;
 void runtime_process_configure(uint32_t sdk, uint32_t attributes) { s_sdk_version=sdk; s_psf_attributes=attributes; }
+uint32_t runtime_process_sdk_version(void) { return s_sdk_version; }
 /* Always the base PS4, never a Pro or a PS5 (sceKernelIsProspero shares the answer): the GPU library
  * builds its command buffers for it (its own sceKernelIsNeoMode answers 0), so a Pro answer here
  * would contradict what it draws. */

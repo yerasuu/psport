@@ -190,6 +190,8 @@ const char *runtime_symbol(const char *sz_nid);
 uintptr_t runtime_lookup(const RuntimeExport *p_table, size_t c_exports, const char *sz_nid);
 uintptr_t runtime_kernel_resolve(const char *sz_name);
 void runtime_process_configure(uint32_t sdk_version, uint32_t psf_attributes);
+/* The SDK version the eboot was built with (its process parameters), for behaviour tied to it. */
+uint32_t runtime_process_sdk_version(void);
 uintptr_t runtime_file_resolve(const char *sz_name);
 uintptr_t runtime_services_resolve(const char *sz_name);
 /* sceSystemServiceParamGetInt's language (PS_LANGUAGE, default 1 = English US). */
