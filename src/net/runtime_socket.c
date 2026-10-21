@@ -466,6 +466,105 @@ static ABI const char *posix_inet_ntop(int family, const void *p_address, char *
     return sz_result;
 }
 
+static int is_space(char c) { return c==' ' || (c>='\t' && c<='\r'); }
+/* inet_aton's forms: a part is decimal, 0x hexadecimal or octal after a 0 ("09" stays decimal), parts
+ * wrap at 32 bits unchecked, and the address ends at NUL or white space, after which anything may
+ * follow. The strict form (sceNetInetPton) takes only four decimal parts. */
+static int parse_inet4(const char *sz_address, int is_strict, uint8_t *p_out_address) {
+    uint32_t parts[4];
+    int c_parts=0;
+    const char *p_cursor=sz_address;
+    for (;;) {
+        if (*p_cursor<'0' || *p_cursor>'9') return 0;
+        uint32_t base=10, value=0;
+        if (!is_strict && *p_cursor=='0') {
+            if ((p_cursor[1]|0x20)=='x') base=16, p_cursor+=2;
+            else if (p_cursor[1]>='0' && p_cursor[1]<='7') base=8, ++p_cursor;
+        }
+        for (;;++p_cursor) {
+            uint32_t digit;
+            if (*p_cursor>='0' && *p_cursor<='9') digit=(uint32_t)(*p_cursor-'0');
+            else if (base==16 && (*p_cursor|0x20)>='a' && (*p_cursor|0x20)<='f') digit=(uint32_t)((*p_cursor|0x20)-'a'+10);
+            else break;
+            if (digit>=base) return 0;
+            value=value*base+digit;
+        }
+        parts[c_parts++]=value;
+        if (*p_cursor!='.') break;
+        if (c_parts==4) return 0;
+        ++p_cursor;
+    }
+    if (*p_cursor && !is_space(*p_cursor)) return 0;
+    if (is_strict && c_parts!=4) return 0;
+    static const uint32_t s_last_max[4]={UINT32_MAX,0xFFFFFF,0xFFFF,0xFF};
+    uint32_t address=0;
+    for (int i=0;i<c_parts-1;++i) {
+        if (parts[i]>0xFF) return 0;
+        address|=parts[i]<<(24-8*i);
+    }
+    if (parts[c_parts-1]>s_last_max[c_parts-1]) return 0;
+    address|=parts[c_parts-1];
+    for (int i=0;i<4;++i) p_out_address[i]=(uint8_t)(address>>(24-8*i));
+    return 1;
+}
+/* 1, 0 for an address the family cannot read (errno untouched), or the error; the flags of
+ * sceNetInetPtonEx change nothing. */
+static int32_t inet_to_binary(int family, const char *sz_address, void *p_out_address, int is_strict) {
+    if (!sz_address) return fail(GUEST_EINVAL);
+    if (family!=AF_INET && family!=GUEST_AF_INET6) return fail(GUEST_EAFNOSUPPORT);
+    uint8_t address[16];
+    if (family==AF_INET ? !parse_inet4(sz_address,is_strict,address) : inet_pton(AF_INET6,sz_address,address)!=1)
+        return 0;
+    if (p_out_address) memcpy(p_out_address,address,family==AF_INET ? 4 : 16);
+    return 1;
+}
+static ABI int32_t net_inet_pton(int family, const char *sz_address, void *p_out_address) {
+    return inet_to_binary(family,sz_address,p_out_address,1);
+}
+static ABI int32_t net_inet_pton_ex(int family, const char *sz_address, void *p_out_address, int32_t flags) {
+    (void)flags;
+    return inet_to_binary(family,sz_address,p_out_address,0);
+}
+/* Lowercase groups with the longest run of two or more zero groups (the first of equals) as "::",
+ * and no dotted IPv4 tail, as the console writes it. */
+static size_t format_inet6(const uint8_t *p_address, char *sz_out) {
+    uint16_t words[8];
+    int i_best=-1, c_best=0;
+    for (int i=0;i<8;++i) words[i]=(uint16_t)(p_address[2*i]<<8|p_address[2*i+1]);
+    for (int i=0;i<8;) {
+        int c_zeros=0;
+        while (i+c_zeros<8 && !words[i+c_zeros]) ++c_zeros;
+        if (c_zeros>=2 && c_zeros>c_best) i_best=i, c_best=c_zeros;
+        i+=c_zeros ? c_zeros : 1;
+    }
+    char *p_cursor=sz_out;
+    for (int i=0;i<8;++i) {
+        if (i_best>=0 && i>=i_best && i<i_best+c_best) {
+            if (i==i_best) *p_cursor++=':';
+            continue;
+        }
+        if (i) *p_cursor++=':';
+        p_cursor+=sprintf(p_cursor,"%x",words[i]);
+    }
+    if (i_best>=0 && i_best+c_best==8) *p_cursor++=':';
+    *p_cursor=0;
+    return (size_t)(p_cursor-sz_out);
+}
+/* The console copies all cb_out bytes of its scratch buffer, garbage after the NUL included; here
+ * the bytes after the NUL are zeroed instead. */
+static ABI const char *net_inet_ntop(int family, const void *p_address, char *sz_out, uint32_t cb_out) {
+    if (family!=AF_INET && family!=GUEST_AF_INET6) { fail(GUEST_EAFNOSUPPORT); return NULL; }
+    if (!p_address || !sz_out) { fail(GUEST_ENOSPC); return NULL; }
+    const uint8_t *p_bytes=p_address;
+    char sz_text[64];
+    const size_t len=family==AF_INET ? (size_t)sprintf(sz_text,"%u.%u.%u.%u",p_bytes[0],p_bytes[1],p_bytes[2],p_bytes[3])
+                                     : format_inet6(p_bytes,sz_text);
+    if (len>=cb_out) { fail(GUEST_ENOSPC); return NULL; }
+    memcpy(sz_out,sz_text,len+1);
+    memset(sz_out+len+1,0,cb_out-len-1);
+    return sz_out;
+}
+
 static const RuntimeExport s_exports[]={
     {"sceNetErrnoLoc",net_errno_loc}, {"sceNetSocket",net_socket}, {"sceNetSocketClose",net_close},
     {"sceNetSocketAbort",net_abort}, {"sceNetShutdown",net_shutdown}, {"sceNetBind",net_bind},
@@ -473,6 +572,7 @@ static const RuntimeExport s_exports[]={
     {"sceNetRecv",net_recv}, {"sceNetSendto",net_sendto}, {"sceNetSend",net_send},
     {"sceNetSetsockopt",net_setsockopt}, {"sceNetGetsockopt",net_getsockopt},
     {"sceNetGetMacAddress",net_get_mac_address}, {"sceNetGetSockInfo",net_get_sock_info},
+    {"sceNetInetPton",net_inet_pton}, {"sceNetInetPtonEx",net_inet_pton_ex}, {"sceNetInetNtop",net_inet_ntop},
     {"socket",posix_socket}, {"shutdown",posix_shutdown}, {"bind",posix_bind}, {"connect",posix_connect},
     {"listen",posix_listen}, {"accept",posix_accept}, {"getsockname",posix_getsockname}, {"getpeername",posix_getpeername},
     {"recvfrom",posix_recvfrom}, {"recv",posix_recv}, {"sendto",posix_sendto}, {"send",posix_send},

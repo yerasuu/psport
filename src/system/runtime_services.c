@@ -29,7 +29,6 @@
 #define NP_SIGNED_OUT ((int32_t)0x80550006)
 #define NP_INVALID_ARGUMENT ((int32_t)0x80550003)
 #define NET_ENETUNREACH ((int32_t)0x80410133)
-#define NET_EINVAL ((int32_t)0x80410116)
 #define DIALOG_NOT_INITIALIZED ((int32_t)0x80B80003)
 #define AUDIO_IN_NOT_OPENED ((int32_t)0x80260109)
 #define MOVE_NO_CONTROLLER 1
@@ -152,14 +151,6 @@ static ABI uint16_t net_htons(uint16_t v) { return htons(v); }
 static ABI uint16_t net_ntohs(uint16_t v) { return ntohs(v); }
 static ABI uint32_t net_htonl(uint32_t v) { return htonl(v); }
 static ABI uint32_t net_ntohl(uint32_t v) { return ntohl(v); }
-static ABI int32_t net_pton(int af,const char *sz_src,void *p_dst) {
-    if (af!=2) { *runtime_net_errno()=47; return NET_EINVAL; }
-    return inet_pton(AF_INET,sz_src,p_dst);
-}
-static ABI const char *net_ntop(int af,const void *p_src,char *sz_dst,uint32_t cb_dst) {
-    if (af!=2) { *runtime_net_errno()=47; return NULL; }
-    return inet_ntop(AF_INET,p_src,sz_dst,cb_dst);
-}
 static ABI int32_t netctl_state(int32_t *p_state) { if (!p_state) return NET_CTL_INVALID_ADDR; *p_state=0; return 0; }
 /* The interface's own address does not need a connection; everything else does. */
 static ABI int32_t netctl_info(int code,void *p_info) {
@@ -610,7 +601,6 @@ static const RuntimeExport s_exports[]={
     {"sceNetResolverCreate",net_resolver_create}, {"sceNetResolverDestroy",runtime_stub},
     {"sceNetResolverAbort",net_resolver_abort},
     {"sceNetHtons",net_htons}, {"sceNetNtohs",net_ntohs}, {"sceNetHtonl",net_htonl}, {"sceNetNtohl",net_ntohl},
-    {"sceNetInetPton",net_pton}, {"sceNetInetNtop",net_ntop},
     {"sceNetEpollControl",net_unreachable}, {"sceNetEpollWait",net_unreachable}, {"sceNetEpollAbort",net_unreachable},
     {"sceNetResolverStartNtoa",net_unreachable}, {"sceNetResolverStartAton",net_unreachable},
     {"sceNetCtlInit",netctl_init}, {"sceNetCtlGetState",netctl_state}, {"sceNetCtlGetInfo",netctl_info},
