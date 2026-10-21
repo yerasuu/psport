@@ -225,6 +225,9 @@ void psport_gpu_cp_census_report(void);
 /* PS_NATIVE_PROBE=1: the parallel recording probe's summary and decision, printed once after the
  * census (write(2) only, like it). */
 void psport_gpu_native_probe_report(void);
+/* PS_DUMP_SMALL_TEXTURES: the small texture inventory's counts, printed once after the probe
+ * (write(2) only, like it; the index itself is written at a normal exit, psport_gpu_flush_caches). */
+void psport_gpu_small_textures_report(void);
 #ifdef __cplusplus
 }
 #endif

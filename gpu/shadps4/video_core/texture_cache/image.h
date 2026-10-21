@@ -173,6 +173,9 @@ public:
     bool is_substitute_rescanned = false;
     /// psport: the profile's substitute its bytes are (TextureSubstitutes), or null.
     const Game::TextureSubstitute* p_substitute = nullptr;
+    /// psport: its bytes' entry + 1 in PS_DUMP_SMALL_TEXTURES's inventory, 0 none; written at
+    /// uploads and read at bindings on other threads, through std::atomic_ref.
+    u32 i_small_texture = 0;
     VAddr track_addr = 0;
     VAddr track_addr_end = 0;
     VAddr guest_begin = 0; ///< info.guest_address

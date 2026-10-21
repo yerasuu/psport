@@ -1,0 +1,35 @@
+# Steps for a night plan (tools/regress/plan.sh): the small texture inventory (PS_DUMP_SMALL_TEXTURES,
+# FORK.md Diagnostics) of each title, to see how it stores its button glyphs (#706). Source it from
+# the night's plan after setting:
+#   SMALL_TEXTURES_CHECKOUT  the psport checkout whose out/psport and tools/regress.sh run
+#   G                        the games root (tools/regress.sh's last argument)
+#   SH                       optional toolchain nix file (tools/regress.sh -s)
+#   SMALL_TEXTURES_TITLES    optional: comma-separated names of titles.txt (default: all but octopath0)
+# One step per title, so that a cut loses one title at most. Each title's inventory lands in
+# <step folder>/regress/<name>/small_textures/ (index.tsv, <hash>.png) and its summary line in that
+# title's log; the step's note says how many textures it holds.
+# shellcheck shell=bash
+: "${SMALL_TEXTURES_TITLES:=$(awk '!/^#/ && NF && $1 != "octopath0" {print $1}' \
+    "$SMALL_TEXTURES_CHECKOUT/tools/regress/titles.txt" | paste -sd,)}"
+
+# s_small_textures NAME: one title's regular schedule with the inventory on.
+s_small_textures() {
+    local shell_args=()
+    [[ -n ${SH:-} ]] && shell_args=(-s "$SH")
+    PS_DUMP_SMALL_TEXTURES=1 "$SMALL_TEXTURES_CHECKOUT/tools/regress.sh" "${shell_args[@]}" -j 1 -n "$1" \
+        -o "$STEP_DIR/regress" "$G"
+    local rc=$?
+    local summary
+    summary=$(grep -h '^Small textures: summary:' "$STEP_DIR/regress/$1/log" 2> /dev/null | tail -1)
+    summary=${summary#Small textures: summary: }
+    printf '%s\n' "${summary:-no summary line (the run ended before the call report)}" |
+        sed 's/^dir=[^ ]* //' > "$STEP_DIR/note"
+    return $rc
+}
+
+IFS=, read -ra small_textures_names <<< "$SMALL_TEXTURES_TITLES"
+for small_textures_name in "${small_textures_names[@]}"; do
+    step "small-textures-$small_textures_name" "$small_textures_name: small texture inventory (#706)" -- \
+        s_small_textures "$small_textures_name"
+done
+unset small_textures_name small_textures_names

@@ -172,3 +172,23 @@ Every change is checked against all titles, not only the one being brought up:
 - `tools/regress/report.py <folder>` classifies an output folder again.
 
 Milestones and evidence: [FORK.md](../../FORK.md#regression-runs).
+
+## 6. Button glyphs
+
+The keyboard and other gamepads get their own button prompts through texture substitution
+(`Game::TextureSubstitution`, Bloodborne's `gpu/games/bloodborne/button_prompts.cpp`): the
+title's profile knows its glyph textures by their bytes and the port draws pictures in their
+place. Before writing one for a new title, see how it stores its glyphs:
+
+```
+PS_DUMP_SMALL_TEXTURES=1 tools/regress.sh -j 1 -n <name> <games root>
+```
+
+Each texture the game uploads that is small (`PS_DUMP_SMALL_TEXTURES_MAX`, 256) or shaped like a UI
+atlas (`PS_DUMP_SMALL_TEXTURES_ATLAS`, 2048) is listed once per content hash in
+`<output>/<name>/small_textures/index.tsv`, with a PNG of its level 0 beside it: format, size,
+mips, layers, tiling, when it first appeared and how often it was bound. Glyphs drawn through a
+font (libSceFont) or by middleware into a larger texture do not show up there. Columns and
+variables: [FORK.md](../../FORK.md#diagnostics); a night step per title:
+`tools/regress/small-textures.plan`. The hashes the profile matches are computed when the game
+starts from the user's own files, as Bloodborne's are, never shipped as art.

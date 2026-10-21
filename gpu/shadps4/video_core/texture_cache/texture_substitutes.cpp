@@ -5,6 +5,7 @@
 #include <array>
 #include <cstring>
 
+#include "psport_small_textures.h"
 #include "common/logging/log.h"
 #include "video_core/buffer_cache/buffer_cache.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
@@ -188,6 +189,7 @@ bool TextureSubstitutes::IsDrawn(const Game::TextureSubstitute& substitute) cons
 }
 
 bool TextureSubstitutes::Replaces(Image& image) {
+    PsSmallTextures::NoteBind(image);
     if (!m_is_active) {
         return false;
     }

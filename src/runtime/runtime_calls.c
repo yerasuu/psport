@@ -191,6 +191,7 @@ void runtime_calls_report(void) {
     if (h_debug >= 0) ps_host_fs_close(h_debug);
     psport_gpu_cp_census_report();
     psport_gpu_native_probe_report();
+    psport_gpu_small_textures_report();
     put(1, runtime_quirks_summary());
     put(1, ps_host_features_summary());
     for (size_t i = 0, c_summaries = __atomic_load_n(&s_c_summaries, __ATOMIC_ACQUIRE); i < c_summaries; ++i) {

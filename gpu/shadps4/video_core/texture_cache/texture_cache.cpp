@@ -6,6 +6,7 @@
 #include "psport_toggles.h"
 #include "psport_free_check.h"
 #include "psport_native_probe.h"
+#include "psport_small_textures.h"
 #include "common/assert.h"
 #include "common/debug.h"
 #include "common/div_ceil.h"
@@ -1113,6 +1114,7 @@ void TextureCache::RefreshImage(Image& image) {
     }
 
     runtime.UploadImage(&image, buffer, image_copies);
+    PsSmallTextures::NoteUpload(instance, scheduler, runtime, image);
 }
 
 vk::Sampler TextureCache::GetSampler(const AmdGpu::Sampler& sampler,

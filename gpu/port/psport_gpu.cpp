@@ -21,6 +21,7 @@
 #include "game_profile.h"
 #include "psport_free_check.h"
 #include "psport_settings.h"
+#include "psport_small_textures.h"
 #include "sdl_window.h"
 #include "video_core/cache_storage.h"
 
@@ -233,7 +234,10 @@ extern "C" void psport_gpu_flush_caches(int can_wait) {
     // Two threads may end the process at once (the window closing while the game exits): the
     // second waits here for the first flush instead of cutting it short with its own _exit.
     static std::once_flag s_flush_once;
-    std::call_once(s_flush_once, [] { Storage::DataBase::Instance().FlushForExit(); });
+    std::call_once(s_flush_once, [] {
+        Storage::DataBase::Instance().FlushForExit();
+        PsSmallTextures::WriteIndexAtExit();
+    });
 }
 
 extern "C" unsigned psport_gpu_symbol_count(void) {
