@@ -136,6 +136,7 @@ private:
     u32 image_count = 0;
     u32 image_index = 0;
     u32 frame_index = 0;
+    u32 m_c_zero_surfaces = 0;
     bool needs_recreation = true;
     bool zero_extent = false; ///< psport: the surface was 0x0 (minimised) at the last Create
     bool needs_hdr = false;    // The game requested HDR swapchain

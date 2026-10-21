@@ -618,10 +618,16 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
         free_frame();
         return;
     }
+    // psport: recreating waits for the device idle, so no other thread may submit meanwhile, as
+    // around the recreation after a failed present below.
+    const auto recreate_swapchain = [&] {
+        std::scoped_lock submit_lock{Scheduler::submit_mutex};
+        swapchain.Recreate(window.GetWidth(), window.GetHeight());
+    };
     // Recreate the swapchain if the window was resized (or was minimised at the last try).
     if (window.GetWidth() != swapchain.GetWidth() || window.GetHeight() != swapchain.GetHeight() ||
         !swapchain.IsPresentable()) {
-        swapchain.Recreate(window.GetWidth(), window.GetHeight());
+        recreate_swapchain();
         if (!swapchain.IsPresentable()) {
             free_frame();
             return;
@@ -629,7 +635,7 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
     }
 
     if (!swapchain.AcquireNextImage()) {
-        swapchain.Recreate(window.GetWidth(), window.GetHeight());
+        recreate_swapchain();
         if (!swapchain.AcquireNextImage()) {
             // User resizes the window too fast and GPU can't keep up. Skip this frame.
             LOG_WARNING(Render_Vulkan, "Skipping frame!");
@@ -643,7 +649,7 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
     // the frame's present fence and future GetRenderFrame() call will hang waiting for this frame.
     if (!Check<"reset a present done fence">(instance.GetDevice().resetFences(frame->present_done))) {
         // The acquired image is given back by recreating the swapchain; the frame is not shown.
-        swapchain.Recreate(window.GetWidth(), window.GetHeight());
+        recreate_swapchain();
         free_frame();
         return;
     }

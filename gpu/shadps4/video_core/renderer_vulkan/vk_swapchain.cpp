@@ -53,9 +53,19 @@ void Swapchain::Create(u32 width_, u32 height_) {
         return;
     }
     if (extent.width == 0 || extent.height == 0) {
+        if (!zero_extent) {
+            LOG_WARNING(Render_Vulkan,
+                        "Surface 0x0 (window minimised, on a hidden workspace or not mapped by "
+                        "the compositor), presents skipped until it has a size ({} times so far)",
+                        ++m_c_zero_surfaces);
+        }
         zero_extent = true;
         needs_recreation = true;
         return;
+    }
+    if (zero_extent) {
+        LOG_WARNING(Render_Vulkan, "Surface back at {}x{}, presents resume", extent.width,
+                    extent.height);
     }
     zero_extent = false;
 
