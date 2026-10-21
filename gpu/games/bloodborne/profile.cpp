@@ -12,6 +12,7 @@
 #include "heap_sites.h"
 #include "menu_pointer.h"
 #include "mouse_look.h"
+#include "workarounds.h"
 
 namespace Game {
 namespace {
@@ -47,6 +48,7 @@ void PatchImage(unsigned char* p_image, std::uint64_t cb_image) {
 
 void ReportStats() {
     PsGuestHooks::Report();
+    PsWorkarounds::Report();
     if (static int s_heap_reports = 0; ++s_heap_reports % 6 == 1) {
         PsHeapSites::Report();
     }

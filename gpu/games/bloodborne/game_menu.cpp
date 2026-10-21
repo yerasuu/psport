@@ -260,6 +260,7 @@ void DefineTexts() {
          "Тени от динамических источников света"},
         {"effect_ssr", "SSR reflections", "Отражения SSR", "Screen-space reflections (not in the original)",
          "Экранные отражения (не было в оригинале)"},
+        {"effect_bloom", "Bloom", "Свечение", "Glow around bright light", "Свечение вокруг ярких источников"},
         {"skip_intro", "Skip intros", "Пропуск заставок", "Skip the startup logos and intro",
          "Пропуск логотипов и заставки при запуске", false},
         {"debug_camera", "Free camera", "Свободная камера", "Toggled with Cross + L3",

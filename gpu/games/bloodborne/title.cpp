@@ -9,6 +9,7 @@
 #include "effects.h"
 #include "game_menu.h"
 #include "launch.h"
+#include "workarounds.h"
 
 namespace Game {
 extern const Profile BloodborneProfile;
@@ -30,8 +31,10 @@ constexpr const char* ModFolders[] = {"action", "adhoc",    "chr",   "event", "f
                                       "menu",   "movie",    "msg",   "mtd",   "obj",     "other",  "param",
                                       "paramdef", "parts",  "remo",  "script", "sfx",    "shader", "sound"};
 
-constexpr RuntimeQuirkId Quirks[] = {RUNTIME_QUIRK_bloodborne_save_sound_flag,
-                                     RUNTIME_QUIRK_bloodborne_gx_node_guard};
+constexpr RuntimeQuirkId Quirks[] = {
+    RUNTIME_QUIRK_bloodborne_save_sound_flag, RUNTIME_QUIRK_bloodborne_gx_node_guard,
+    RUNTIME_QUIRK_bloodborne_gx_command_heap, RUNTIME_QUIRK_bloodborne_render_job_slots,
+    RUNTIME_QUIRK_bloodborne_blur_sample_clamp, RUNTIME_QUIRK_bloodborne_fx_init_clear};
 
 /// Close to Dark Souls III on PC, which Bloodborne's players know (bbport 0.6): WASD move, IJKL the
 /// camera, Space dodge and run, F or Enter interact, the mouse's left button attack and with Shift
@@ -95,6 +98,12 @@ void PrepareSaves(const char* sz_saves, const char* sz_save_title) {
     closedir(p_users);
 }
 
+/// Here rather than in the profile so that PS_GAME_PROFILE=none keeps the WORKAROUND quirks on.
+void PatchImage(unsigned char* p_image, std::uint64_t cb_image) {
+    PsWorkarounds::PatchImage(p_image, cb_image);
+    PsGameMenu::PatchImage(p_image, cb_image);
+}
+
 } // namespace
 
 extern const Title BloodborneTitle = {
@@ -113,7 +122,7 @@ extern const Title BloodborneTitle = {
                          "Размытие в движении и тени от динамических источников заметно нагружают GPU.",
                          "El desenfoque de movimiento y las sombras de luces dinámicas cargan bastante la GPU."}},
     .pfn_prepare_saves = PrepareSaves,
-    .pfn_patch_image = PsGameMenu::PatchImage,
+    .pfn_patch_image = PatchImage,
     .pfn_before_present = PsGameMenu::Poll,
     .sz_default_controls = DefaultControls,
     .online = {.sz_game_server = "https://ss4.scej-network.jp:20443",

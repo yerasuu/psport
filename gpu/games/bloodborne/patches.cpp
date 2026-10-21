@@ -63,6 +63,7 @@ const Effect Effects[] = {
     {"effect_game_aa", "Disable AA", nullptr},
     {"effect_dynamic_shadows", "Disable Dynamic Light Shadows (perf increase)", nullptr},
     {"effect_ssr", nullptr, "Enable Screen Space Reflections (READ NOTE)"},
+    {"effect_bloom", "Disable Bloom", nullptr},
     {"skip_intro", nullptr, "Skip Intro"},
     {"debug_camera", nullptr, "Restore Debug Camera"},
     {"debug_menu", nullptr, "Restore Debug Menu (READ NOTES)"},

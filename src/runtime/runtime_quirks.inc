@@ -56,3 +56,28 @@ QUIRK(bloodborne_gx_node_guard, WORKAROUND,
       "with the next frame. The heap does not fill on a PS4; the general fix finds what makes it fill under psport "
       "(nodes the render thread releases late, or a frame pacing difference) and corrects that",
       "#504")
+QUIRK(bloodborne_gx_command_heap, WORKAROUND,
+      "Bloodborne's GX swap chain sets up its two per-frame command heaps with 256 KiB (mov edx, 0x40000 at "
+      "0x2195c0a and 0x2195c47) and under psport they fill, the render command's node coming back null (what "
+      "bloodborne_gx_node_guard catches): the title gives each 1 MiB (bbport 0.6). The heap does not fill on a PS4; "
+      "the general fix finds what makes it fill under psport and corrects that",
+      "#504")
+QUIRK(bloodborne_render_job_slots, WORKAROUND,
+      "Bloodborne's render job runner step (0x1067f60) leaves through its failure branches with its pool slot still "
+      "held, and the runner's destructor and reset drop a held slot without giving it back: after six failed jobs "
+      "every thread waiting for a slot sleeps for good (Laurence's cinematic above 30 FPS). The title gives the slot "
+      "back at the step's exit and before those clears (bbport 0.6); the general fix finds why the steps fail under "
+      "psport (0x2165150, 0x2169c30) and not on a PS4",
+      "#683")
+QUIRK(bloodborne_blur_sample_clamp, WORKAROUND,
+      "Bloodborne's Yebis blur kernel (GPUTexUtil_GetRecursiveSampleParameters, 0xbbc3e0) asserts nBaseSamples >= 3 "
+      "in the retail build and now and then gets 2 under psport: the assertion raises 0xa0020007 and the game stops. "
+      "The title raises the count to 3 at the entry (bbport 0.6); the general fix finds where the 2 comes from (a "
+      "resolution, format or value psport reports differently from a PS4)",
+      "#684")
+QUIRK(bloodborne_fx_init_clear, WORKAROUND,
+      "Bloodborne's FX init (0xebb960) clears three 2x2 RG16F history targets through a graphics context's clear "
+      "(0x2168630), whose packets came out as bad PM4 (opcode 23) at a save's load: the title writes the clear colour "
+      "into those targets in memory instead, in their format (bbport 0.6 zeroes them with a private WRITE_DATA). The "
+      "general fix finds what the translator does wrong with those clears",
+      "#685")

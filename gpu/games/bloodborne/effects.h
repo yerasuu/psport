@@ -20,6 +20,7 @@ inline constexpr Game::EffectSwitch Switches[] = {
      {"Screen-space reflections (not in original game)", "Отражения SSR (не было в игре)",
       "Reflejos en espacio de pantalla (no estaban en el juego)"},
      false},
+    {"effect_bloom", {"Bloom", "Свечение (bloom)", "Resplandor (bloom)"}, true},
     {"skip_intro", {"Skip startup intros", "Пропуск заставок при запуске", "Saltar las intros al iniciar"}, false},
     {"debug_camera",
      {"Free camera (Cross + L3)", "Свободная камера (Cross + L3)", "Cámara libre (X + L3)"},

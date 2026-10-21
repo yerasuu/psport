@@ -135,6 +135,7 @@ EFFECTS = [
     ("effect_game_aa", "Собственное сглаживание игры", True),
     ("effect_dynamic_shadows", "Тени от динамических источников", True),
     ("effect_ssr", "Отражения SSR (не было в игре)", False),
+    ("effect_bloom", "Свечение (bloom)", True),
     ("skip_intro", "Пропуск заставок при запуске", False),
     ("debug_camera", "Свободная камера (Cross + L3 / Space + Z)", False),
     ("debug_menu", "Debug menu (левый touchpad / Tab; нужны шрифты)", False),

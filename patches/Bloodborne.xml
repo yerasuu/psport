@@ -263,6 +263,11 @@
             <Line Type="bytes" Address="0x0269faa8" Value="c783ac000000000000009090"/>
         </PatchList>
     </Metadata>
+    <Metadata Title="Bloodborne" Name="Disable Bloom" Note="Disable Bloom, minor performance increase." Author="Kyo" PatchVer="1.0" AppVer="01.09" AppElf="eboot.bin" isEnabled="false">
+        <PatchList>
+            <Line Type="bytes" Address="0x025D72F0" Value="31F60F1F4000"/>
+        </PatchList>
+    </Metadata>
     <Metadata Title="Bloodborne" Name="Disable AA" Note="Disables Anti-Aliasing constructor." Author="Kyo" PatchVer="1.0" AppVer="01.09" AppElf="eboot.bin" isEnabled="true">
         <PatchList>
             <Line Type="bytes" Address="0x026C254A" Value="00"/>
