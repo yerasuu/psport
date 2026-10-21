@@ -556,6 +556,7 @@ bool Rasterizer::FilterDraw() {
         // TODO: check for a valid MRT1 to promote the draw to the resolve pass.
         LOG_TRACE(Render_Vulkan, "FMask decompression pass skipped");
         ScopedMarkerInsert("FmaskDecompress");
+        EliminateFastClear();
         return false;
     }
     if (regs.color_control.mode == AmdGpu::ColorControl::OperationMode::Resolve) {
@@ -2120,7 +2121,7 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
 
     BindVertexBuffers(pipeline);
     if (is_indexed) {
-        BindIndexBuffer();
+        BindIndexBuffer(0, true);
     }
 
     const auto [buffer, base] =
@@ -3005,19 +3006,24 @@ void Rasterizer::ResolveVertexBuffers(const GraphicsPipeline* pipeline,
     v.num_buffers = static_cast<u32>(guest_buffers.size());
 }
 
-void Rasterizer::BindIndexBuffer(u32 index_offset) {
-    ResolveIndexBuffer(index_offset);
+void Rasterizer::BindIndexBuffer(u32 index_offset, bool is_indirect) {
+    ResolveIndexBuffer(index_offset, is_indirect);
     EmitIndexBuffer();
 }
 
 void Rasterizer::EmitIndexBuffer() {
     scheduler.Record([handle = index_bind.handle, offset = index_bind.offset,
-                      type = index_bind.type](vk::CommandBuffer cmdbuf) {
-        cmdbuf.bindIndexBuffer(handle, offset, type);
+                      size = index_bind.size, type = index_bind.type,
+                      has_size = instance.IsMaintenance5Supported()](vk::CommandBuffer cmdbuf) {
+        if (has_size) {
+            cmdbuf.bindIndexBuffer2KHR(handle, offset, size, type);
+        } else {
+            cmdbuf.bindIndexBuffer(handle, offset, type);
+        }
     });
 }
 
-void Rasterizer::ResolveIndexBuffer(u32 index_offset) {
+void Rasterizer::ResolveIndexBuffer(u32 index_offset, bool is_indirect) {
     BB_SECTION(ResolveIndexBuffer);
     const auto& regs = Regs();
 
@@ -3025,18 +3031,42 @@ void Rasterizer::ResolveIndexBuffer(u32 index_offset) {
     const bool is_index16 = regs.index_buffer_type.index_type == AmdGpu::IndexType::Index16;
     const vk::IndexType index_type = is_index16 ? vk::IndexType::eUint16 : vk::IndexType::eUint32;
     const u32 index_size = is_index16 ? sizeof(u16) : sizeof(u32);
-    const VAddr index_address =
-        regs.index_base_address.Address<VAddr>() + index_offset * index_size;
+    const VAddr base_address = regs.index_base_address.Address<VAddr>();
+    const VAddr index_address = base_address + u64(index_offset) * index_size;
 
     // Bind index buffer.
-    const u32 index_buffer_size = regs.num_indices * index_size;
-    const auto [buffer, offset] =
-        buffer_cache.ObtainBuffer(index_address, index_buffer_size, false);
+    const u32 num_indices =
+        is_indirect ? regs.max_index_size : std::min(regs.num_indices, regs.max_index_size);
+    const u64 requested_size = u64(num_indices) * index_size;
+    const u64 mapped_size =
+        base_address != 0 ? memory->ClampRangeSize(index_address, requested_size) : 0;
+    u32 index_buffer_size = static_cast<u32>(Common::AlignDown(mapped_size, index_size));
+    const VideoCore::Buffer* buffer;
+    u64 offset;
+    if (index_buffer_size != 0) {
+        std::tie(buffer, offset) =
+            buffer_cache.ObtainBuffer(index_address, index_buffer_size, false);
+    } else {
+        if (requested_size != 0) {
+            LOG_ERROR_COUNTED(Render_Vulkan,
+                              "Index buffer at {:#x} of {} indices is not mapped, bound a zero "
+                              "index buffer",
+                              index_address, num_indices);
+        } else if (is_indirect) {
+            LOG_ERROR_COUNTED(Render_Vulkan,
+                              "Indirect indexed draw at {:#x} without an index buffer size, bound "
+                              "a zero index buffer",
+                              index_address);
+        }
+        buffer = buffer_cache.GetNullIndexBuffer();
+        offset = 0;
+        index_buffer_size = static_cast<u32>(buffer->SizeBytes());
+    }
     needs_barrier |= runtime.IsBufferAccessed(buffer, offset, index_buffer_size);
     // ResetBindings tracks graphics reads after the draw. Without this, an upload into a
     // mirrored index range could overtake the previous draw's fixed-function index fetches.
     bound_buffers.emplace_back(buffer, offset, index_buffer_size, false);
-    index_bind = {buffer->Handle(), offset, index_type};
+    index_bind = {buffer->Handle(), offset, index_buffer_size, index_type};
 }
 
 void Rasterizer::ResetBindings(bool is_compute) {
@@ -3901,6 +3931,19 @@ void Rasterizer::BindSamplers(const Shader::Info& stage, const PreparedStage* pr
         const auto& sampler = stage.samplers[sampler_index];
         auto ssharp =
             prepared ? prepared->p_sampler_sharps[sampler_index] : sampler.GetSharp(stage);
+        if (!ssharp.Valid() || (ssharp.border_color_type.Value() == AmdGpu::BorderColor::Custom &&
+                                Regs().ta_bc_base.Address() == 0)) {
+            LOG_ERROR_COUNTED(Render_Vulkan,
+                              "Rejecting invalid S# max_aniso={}, filter_mode={}, mip_filter={}, "
+                              "border_color_type={}, border_color_base={:#x}, bound the default "
+                              "sampler",
+                              static_cast<u32>(ssharp.max_aniso.Value()),
+                              static_cast<u32>(ssharp.filter_mode.Value()),
+                              static_cast<u32>(ssharp.mip_filter.Value()),
+                              static_cast<u32>(ssharp.border_color_type.Value()),
+                              Regs().ta_bc_base.Address());
+            ssharp = AmdGpu::Sampler{};
+        }
         ForceAnisotropy(ssharp, sampler.is_depth);
         const auto vk_sampler = texture_cache.GetSampler(
             ssharp, Regs().ta_bc_base, sampler.is_depth, sampler.is_depth ? 0.0f : sampler_lod_bias);
@@ -4366,9 +4409,10 @@ RenderState Rasterizer::BeginRenderingFull(const GraphicsPipeline* pipeline) {
                 state.color_attachments[0].image_layout = original_color.second;
             }
             if (depth_redirected) {
-                auto& depth_image = texture_cache.GetImage(db_desc.first);
                 state.depth_stencil_attachment.image_view =
                     *texture_cache.FindDepthTarget(db_desc.first, db_desc.second).image_view;
+                // psport: fetched after FindDepthTarget because it may create images and move it.
+                auto& depth_image = texture_cache.GetImage(db_desc.first);
                 state.depth_stencil_attachment.image_layout = depth_image.backing->state.layout;
             }
         } else {
@@ -4450,8 +4494,10 @@ void Rasterizer::DepthStencilCopy(bool is_depth, bool is_stencil) {
         regs.depth_buffer, regs.depth_view, regs.depth_control,
         regs.depth_htile_data_base.GetAddress(), DbExtent(), true);
 
-    auto& read_image = texture_cache.GetImage(texture_cache.FindImage(read_desc));
-    auto& write_image = texture_cache.GetImage(texture_cache.FindImage(write_desc));
+    const auto read_id = texture_cache.FindImage(read_desc);
+    const auto write_id = texture_cache.FindImage(write_desc);
+    // The copy destination is never bound as a target, so its stencil plane is linked here.
+    texture_cache.AssociateStencil(write_id, write_desc.info);
 
     VideoCore::SubresourceRange sub_range;
     sub_range.base.layer = Regs().depth_view.slice_start;
@@ -4462,7 +4508,10 @@ void Rasterizer::DepthStencilCopy(bool is_depth, bool is_stencil) {
         regs.depth_buffer.StencilAddress(), regs.depth_buffer.DepthWriteAddress(),
         regs.depth_buffer.StencilWriteAddress()));
 
-    runtime.CopyDepthStencil(&read_image, &write_image, sub_range);
+    // psport: fetched last because FindImage and AssociateStencil may create images and move
+    // the earlier ones.
+    runtime.CopyDepthStencil(&texture_cache.GetImage(read_id), &texture_cache.GetImage(write_id),
+                             sub_range);
 
     ScopeMarkerEnd();
 }

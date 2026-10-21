@@ -18,3 +18,21 @@ Backported from upstream, gnmdriver functions that were stubs:
   header size and sceGnmRequestFlipAndSubmitDone (through psport's own flip submission) (#5341),
   2319a3698 sceGnmComputeWaitSemaphore (#5345), 30d82c900 sceGnmSetGsRingSizes and
   sceGnmSetupMipStatsReport (#5179).
+Backported from upstream after b4e7ae7, texture cache, buffer cache and rasterizer (#656):
+  c6fa48c75 no storage usage on MSAA images without shaderStorageImageMultisample, view type falls back to the image's (#5110)
+  1a0f5be8d default sampler for an S# with undefined fields or a custom border without base, in BindSamplers (#5137)
+  fecfbed09 FindDepthTarget links only a placeholder or a stencil-compatible image at the stencil address (#5118)
+  c679ce609 ResolveDepthOverlap uploads guest data into layers/levels the grown image adds (#5229)
+  14ada48a1 FMASK decompress pass applies a pending fast clear of MRT0 (#5283)
+  92c7a8843 CopyColorAndDepth goes through the buffer between images of different aspects, D32<->D32S8 (#5261)
+  afde63182 CopyImageWithBuffer copies the common layers of images with different layer counts (#5299)
+  c5dd8b8b5 MIN/MAX blend with zero/one factors on Unorm/Srgb targets as the equivalent add, color and alpha; replaces the inherited alpha-only rewrite (#5197)
+  69b6041d7 stencil plane sized like the depth plane, AssociateStencil also links DepthStencilCopy destinations (#5296)
+  002769610 adapted: INDEX_BUFFER_SIZE writes max_index_size (VGT_DMA_MAX_SIZE) in both decoders instead of a side field, ResolveIndexBuffer clamps to it and to mapped memory, sized bind with maintenance5 (#5278)
+  e9f2c54c2 adapted: an empty or unmapped index range binds a 16-byte zero index buffer (counted log); maintenance6 null-handle path not taken, the zero buffer works on every device (#5327)
+  23c413338 a null index base binds the zero index buffer instead of reading from address 0 (#5358)
+  995e37e4e CMask reads return the expanded (decompressed) pattern per sample count; metas carry their owner image and are only dropped by it (#5046)
+  b3d46e96f CopyImageWithBuffer copies every common mip level; a chain larger than the copy buffer is skipped with a counted error (#5368)
+  626f3ace6 stencil-only depth targets (Z invalid: the image is the stencil plane), stencil sized from its own slice size; no devtools reg popup here (#5384)
+  d3ff0e0cc ResolveOverlap creates the parent image when a cached subresource has none yet, so its GPU data is copied in, not lost (#5433)
+  699009c94 ExpandImage copies the old image only when it holds GPU-valid data (SafeToDownload, upstream HasGpuValidData), a CPU-dirty source no longer overwrites the fresh upload (#5444)

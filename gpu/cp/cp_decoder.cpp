@@ -71,7 +71,7 @@ bool Decoder::ApplyRegisters(const Packet& packet) {
         noted(Reg::VgtDmaBaseHi, m_registers.WriteBits(Reg::VgtDmaBaseHi, packet.Word(1), 0xFF));
         break;
     case Op::IndexBufferSize:
-        write(Reg::VgtNumIndices, packet.Word(0));
+        write(Reg::VgtDmaMaxSize, packet.Word(0));
         break;
     case Op::EventWrite:
         // A streamout flush: the offsets are updated at once (no streamout here).

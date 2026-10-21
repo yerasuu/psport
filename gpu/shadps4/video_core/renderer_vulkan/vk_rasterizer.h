@@ -458,12 +458,12 @@ private:
     bool ArePreparedVsharpsCurrent(const PreparedVertexInputs& inputs,
                                    const Shader::Gcn::FetchShaderData& fetch,
                                    const Shader::Info& vs) const;
-    void BindIndexBuffer(u32 index_offset = 0);
+    void BindIndexBuffer(u32 index_offset = 0, bool is_indirect = false);
     /// psport: BindVertexBuffers/BindIndexBuffer in two halves: obtaining the buffers
     /// (vertex_binds, index_bind) and recording the binds.
     void ResolveVertexBuffers(const GraphicsPipeline* pipeline, const PreparedDraw* prepared);
     void EmitVertexBuffers();
-    void ResolveIndexBuffer(u32 index_offset);
+    void ResolveIndexBuffer(u32 index_offset, bool is_indirect = false);
     void EmitIndexBuffer();
 
     void ResetBindings(bool is_compute);
@@ -597,6 +597,7 @@ private:
     struct IndexBind {
         vk::Buffer handle;
         u64 offset;
+        u64 size;
         vk::IndexType type;
     } index_bind{};
     /// The direct draw whose vertex/index buffers BindResources may resolve early.
