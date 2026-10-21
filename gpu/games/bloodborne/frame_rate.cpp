@@ -60,7 +60,11 @@ struct alignas(64) Live {
     float step_up = 0.1f;                            ///< +0.1 per 30 FPS frame
     float decay08 = 0.8f;                            ///< 0.8 per 30 FPS frame
     float cloth = 1.0f;                              ///< cloth constraints' stiffness
+    float pad2[2] = {};
+    float frames[4] = {1.0f, 1.0f, 1.0f, 1.0f}; ///< the frame's length in 30 FPS frames (read as four)
+    std::int32_t frames_q16 = 1 << 16;          ///< the same in 16.16 fixed point
 };
+static_assert(offsetof(Live, frames) % 16 == 0, "vmulps reads frames aligned");
 Live* s_p_live = nullptr;
 
 float EnvFloat(const char* sz_name, float fallback) {
@@ -96,6 +100,10 @@ void FrameStep(u64 va_pacer) {
     live.step_down = -0.1f * frames;
     live.step_up = 0.1f * frames;
     live.decay08 = std::pow(0.8f, frames);
+    for (float& value : live.frames) {
+        value = frames;
+    }
+    live.frames_q16 = static_cast<std::int32_t>(std::lround(frames * 65536.0f));
     // Cloth is stiffer the more often it is solved: the game's 1.0 at 30 FPS, 0.5 from 60 FPS up
     // (the value the community's 60 FPS patches settled on). It is the upper bound the cloth setups
     // clamp their Stiffness, Rigid Factor and Allowed Compression to when they load.
@@ -276,6 +284,80 @@ RunCheck HookRunSpeed() {
                ? RunCheck::Hooked
                : RunCheck::Unchanged;
 }
+
+/// The replay ghosts' playback (ReplayManipulator::Update, 0x152c390: a bloodstain's phantom): a
+/// recorded sample every 10 frames by an integer countdown at [this + 0xf8], and between samples a
+/// tenth of the gap moved and turned each frame ([this + 0xd0] and [this + 0xe0], the per-frame
+/// steps). The countdown counts 30 FPS frames in 16.16 fixed point and keeps its remainder, so a
+/// sample lasts 1/3 s as the recording takes them; the steps are scaled by the frame's length.
+/// The 0.1 they come from (0x48f6420) is read only on the frame that takes a sample: redirecting
+/// it would scale ten frames by one frame's time.
+int HookGhostReplay() {
+    constexpr u64 OffCountdown = 0x152c3e7;
+    constexpr u8 CountdownCode[] = {0xff, 0xca, 0x89, 0x93, 0xf8, 0x00, 0x00, 0x00}; // dec edx; mov [rbx+0xf8], edx
+    constexpr u64 OffReload = 0x152c3ff;
+    constexpr u8 ReloadCode[] = {0xc7, 0x83, 0xf8, 0x00, 0x00, 0x00,
+                                 0x0a, 0x00, 0x00, 0x00}; // mov dword [rbx+0xf8], 10
+    constexpr u64 OffMove = 0x152c817;
+    constexpr u8 MoveCode[] = {0x48, 0x8d, 0xb3, 0xd0, 0x00, 0x00, 0x00,
+                               0x48, 0x89, 0xdf, 0xff, 0xd0}; // lea rsi, [rbx+0xd0]; mov rdi, rbx; call rax
+    constexpr u64 OffTurn = 0x152c823;
+    constexpr u8 TurnCode[] = {0xc5, 0xf8, 0x28, 0x83, 0xe0, 0x00, 0x00, 0x00,
+                               0xc5, 0xf8, 0x29, 0x43, 0x20}; // vmovaps xmm0, [rbx+0xe0]; vmovaps [rbx+0x20], xmm0
+    struct Site {
+        u64 off_site;
+        std::span<const u8> code;
+    };
+    // All four or none: a countdown in 16.16 reloaded with the game's 10 takes a sample every frame.
+    for (const Site& site : {Site{OffCountdown, CountdownCode}, Site{OffReload, ReloadCode}, Site{OffMove, MoveCode},
+                             Site{OffTurn, TurnCode}}) {
+        if (std::memcmp(reinterpret_cast<const u8*>(s_va_image + site.off_site), site.code.data(), site.code.size())) {
+            std::printf("Frame rate: the replay ghosts' code at +0x%llx differs, their playback left per frame\n",
+                        static_cast<unsigned long long>(site.off_site));
+            return 0;
+        }
+    }
+    const u64 va_frames = reinterpret_cast<u64>(s_p_live->frames);
+    int c_hooked = 0;
+
+    Emitter countdown;
+    countdown.Bytes({0x50, 0x48, 0xb8}); // push rax; movabs rax, &frames_q16
+    countdown.U64(reinterpret_cast<u64>(&s_p_live->frames_q16));
+    countdown.Bytes({0x2b, 0x10, 0x58});                         // sub edx, [rax]; pop rax
+    countdown.Bytes({0x89, 0x93, 0xf8, 0x00, 0x00, 0x00});       // mov [rbx+0xf8], edx
+    countdown.JmpAbs(s_va_image + OffCountdown + sizeof(CountdownCode));
+    c_hooked += PsGuestCode::InstallDetour("Bloodborne replay ghost countdown", s_va_image + OffCountdown,
+                                           CountdownCode, countdown) == Error::None;
+
+    Emitter reload;
+    reload.Bytes({0x81, 0x83, 0xf8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0a, 0x00}); // add dword [rbx+0xf8], 10 << 16
+    reload.JmpAbs(s_va_image + OffReload + sizeof(ReloadCode));
+    c_hooked += PsGuestCode::InstallDetour("Bloodborne replay ghost sample", s_va_image + OffReload, ReloadCode,
+                                           reload) == Error::None;
+
+    // rax and xmm0 are free after the call: both are loaded again before they are read.
+    Emitter move;
+    move.Copy(MoveCode);
+    move.Bytes({0x48, 0xb8}); // movabs rax, &frames
+    move.U64(va_frames);
+    move.Bytes({0xc5, 0xf8, 0x28, 0x43, 0x70}); // vmovaps xmm0, [rbx+0x70]
+    move.Bytes({0xc5, 0xf8, 0x59, 0x00});       // vmulps xmm0, xmm0, [rax]
+    move.Bytes({0xc5, 0xf8, 0x29, 0x43, 0x70}); // vmovaps [rbx+0x70], xmm0
+    move.JmpAbs(s_va_image + OffMove + sizeof(MoveCode));
+    c_hooked += PsGuestCode::InstallDetour("Bloodborne replay ghost move", s_va_image + OffMove, MoveCode, move) ==
+                Error::None;
+
+    Emitter turn;
+    turn.Bytes({0x48, 0xb8}); // movabs rax, &frames
+    turn.U64(va_frames);
+    turn.Bytes({0xc5, 0xf8, 0x28, 0x83, 0xe0, 0x00, 0x00, 0x00}); // vmovaps xmm0, [rbx+0xe0]
+    turn.Bytes({0xc5, 0xf8, 0x59, 0x00});                         // vmulps xmm0, xmm0, [rax]
+    turn.Bytes({0xc5, 0xf8, 0x29, 0x43, 0x20});                   // vmovaps [rbx+0x20], xmm0
+    turn.JmpAbs(s_va_image + OffTurn + sizeof(TurnCode));
+    c_hooked += PsGuestCode::InstallDetour("Bloodborne replay ghost turn", s_va_image + OffTurn, TurnCode, turn) ==
+                Error::None;
+    return c_hooked;
+}
 } // namespace
 
 void PatchImage(unsigned char* p_image, std::uint64_t) {
@@ -308,6 +390,7 @@ void PatchImage(unsigned char* p_image, std::uint64_t) {
     const int c_steps = HookFixedStep("Bloodborne fixed step 0x17f9b71", 0x17f9b71, -0x48) +
                         HookFixedStep("Bloodborne fixed step 0x1572a7d", 0x1572a7d, -0x30);
     const RunCheck run = HookRunSpeed();
+    const int c_ghost = HookGhostReplay();
     int c_redirected = 0;
     for (const Redirect& redirect : Redirects) {
         c_redirected += PsGuestCode::RedirectOperand("Bloodborne per-frame value", s_va_image + redirect.off_site,
@@ -317,11 +400,12 @@ void PatchImage(unsigned char* p_image, std::uint64_t) {
     }
     std::printf("Frame rate: free (hooks, no patches; PS_FRAME_HOOKS=0: the patches): the game steps by each "
                 "frame's time (1/%d..1/30 s); %d of 2 fixed steps, %d of %zu per-frame values follow the frame's "
-                "time, the run's wall check %s\n",
+                "time, the run's wall check %s, %d of 4 replay ghost sites by time\n",
                 rate, c_steps, c_redirected, std::size(Redirects),
                 run == RunCheck::Hooked           ? "by speed"
                 : run == RunCheck::SprintFixPatch ? "by speed (a Sprint Fix patch did it already)"
-                                                  : "unchanged (not found)");
+                                                  : "unchanged (not found)",
+                c_ghost);
 }
 
 bool IsUnlocked() {
