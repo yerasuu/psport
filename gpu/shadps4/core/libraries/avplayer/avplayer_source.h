@@ -159,7 +159,7 @@ public:
     bool IsLooping() const { return m_is_looping; } // psport
     std::optional<bool> HasFrames(u32 num_frames);
     bool Start(u64 time = 0);
-    bool Stop();
+    void Stop();
     bool JumpToTime(u64 time);
     void Pause();
     void Resume();
@@ -190,8 +190,6 @@ private:
     void DemuxerThread(std::stop_token stop);
     void VideoDecoderThread(std::stop_token stop);
     void AudioDecoderThread(std::stop_token stop);
-
-    bool HasRunningThreads() const;
 
     AVFramePtr ConvertAudioFrame(const AVFrame& frame);
     AVFramePtr ConvertVideoFrame(const AVFrame& frame);

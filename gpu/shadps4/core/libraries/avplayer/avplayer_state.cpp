@@ -128,6 +128,15 @@ AvPlayerState::AvPlayerState(const AvPlayerInitData& init_data)
     if (init_data.default_language != nullptr) {
         std::memcpy(m_default_language, init_data.default_language, sizeof(m_default_language));
     }
+    // libSceAvPlayer keeps the old stop semantics (every Stop reports StateStop, Start works again
+    // after a Stop) for titles built with an SDK before 5.50, and treats an unreadable version as
+    // a new one.
+    constexpr u32 SDK_VERSION_5_50 = 0x05500000;
+    s32 sdk_version{};
+    m_is_legacy_sdk = Libraries::Kernel::sceKernelGetCompiledSdkVersion(&sdk_version) == ORBIS_OK &&
+                      u32(sdk_version) < SDK_VERSION_5_50;
+    LOG_INFO(Lib_AvPlayer, "Compiled SDK version {:#x}: {} stop semantics", u32(sdk_version),
+             m_is_legacy_sdk ? "legacy" : "5.50");
     SetState(AvState::Initial);
     StartControllerThread();
     std::scoped_lock lock(s_players_mutex);
@@ -165,8 +174,6 @@ bool AvPlayerState::AddSource(std::string_view path, AvPlayerSourceType source_t
             return false;
         }
 
-        s32 sdk_ver{};
-        Libraries::Kernel::sceKernelGetCompiledSdkVersion(&sdk_ver);
         m_up_source = std::make_unique<AvPlayerSource>(*this);
         if (!m_up_source->Init(m_init_data, path)) {
             SetState(AvState::Error);
@@ -201,13 +208,31 @@ bool AvPlayerState::GetStreamInfo(u32 stream_index, AvPlayerStreamInfo& info) {
 // Called inside GAME thread
 bool AvPlayerState::Start() {
     std::unique_lock lock(m_source_mutex);
+    if (m_has_stopped) {
+        LOG_INFO(Lib_AvPlayer, "Start after Stop ignored, as libSceAvPlayer does from SDK 5.50.");
+        return true;
+    }
     if (m_up_source == nullptr) {
         LOG_ERROR(Lib_AvPlayer, "Could not start playback: no source.");
         return false;
     }
-    if (m_current_state != AvState::Ready && m_current_state != AvState::Stop && !StopLocked()) {
-        LOG_ERROR(Lib_AvPlayer, "Could not start playback.");
-        return false;
+    if (m_current_state != AvState::Ready && m_current_state != AvState::Stop) {
+        // libSceAvPlayer stops a playing or finished source first and reports that stop to the
+        // game before the new StatePlay.
+        const bool should_report_stop = !m_eof_stop_event_sent;
+        if (!StopLocked()) {
+            LOG_ERROR(Lib_AvPlayer, "Could not start playback.");
+            return false;
+        }
+        if (should_report_stop) {
+            lock.unlock();
+            OnPlaybackStateChanged(AvState::Stop);
+            lock.lock();
+            if (m_up_source == nullptr) {
+                LOG_ERROR(Lib_AvPlayer, "Could not start playback: source closed during the stop.");
+                return false;
+            }
+        }
     }
     m_eof_stop_event_sent = false;
     SetState(AvState::Starting);
@@ -261,8 +286,15 @@ bool AvPlayerState::Resume() {
 // Called inside GAME thread
 bool AvPlayerState::JumpToTime(u64 time) {
     std::unique_lock lock(m_source_mutex);
-    if (m_up_source == nullptr || !IsStateTransitionValid(AvState::Jump) ||
-        !m_up_source->JumpToTime(time)) {
+    const auto state = m_current_state.load();
+    if (state != AvState::Play && state != AvState::Buffering && state != AvState::Pause) {
+        LOG_WARNING(Lib_AvPlayer,
+                    "Could not jump to {} ms from state {}: only a playing, buffering or paused "
+                    "source jumps.",
+                    time, magic_enum::enum_name(state));
+        return false;
+    }
+    if (m_up_source == nullptr || !m_up_source->JumpToTime(time)) {
         LOG_ERROR(Lib_AvPlayer, "Could not jump to {} ms.", time);
         return false;
     }
@@ -348,21 +380,30 @@ bool AvPlayerState::EnableStream(u32 stream_index) {
 // Called inside GAME thread
 bool AvPlayerState::Stop() {
     std::unique_lock lock(m_source_mutex);
+    if (m_has_stopped) {
+        return true;
+    }
+    // psport reports StateStop when a source runs out, where libSceAvPlayer waits for this Stop,
+    // so the game hears one StateStop either way; a legacy title's repeated Stop reports it again,
+    // as libSceAvPlayer's StopLegacy does.
+    const bool should_report_stop = !m_eof_stop_event_sent || m_current_state == AvState::Stop;
     if (!StopLocked()) {
         return false;
     }
+    m_has_stopped = !m_is_legacy_sdk;
     lock.unlock();
-    OnPlaybackStateChanged(AvState::Stop);
+    if (should_report_stop) {
+        OnPlaybackStateChanged(AvState::Stop);
+    }
     return true;
 }
 
 bool AvPlayerState::StopLocked() {
-    if (m_up_source == nullptr || m_current_state == AvState::Stop) {
+    if (m_up_source == nullptr) {
+        LOG_ERROR(Lib_AvPlayer, "Could not stop playback: no source.");
         return false;
     }
-    if (!m_up_source->Stop()) {
-        return false;
-    }
+    m_up_source->Stop();
     if (!SetState(AvState::Stop)) {
         return false;
     }

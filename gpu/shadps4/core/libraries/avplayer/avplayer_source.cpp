@@ -306,13 +306,8 @@ bool AvPlayerSource::Start(u64 time) {
     return true;
 }
 
-bool AvPlayerSource::Stop() {
+void AvPlayerSource::Stop() {
     std::unique_lock lock(m_state_mutex);
-
-    if (!HasRunningThreads()) {
-        LOG_WARNING(Lib_AvPlayer, "Could not stop playback: already stopped.");
-        return false;
-    }
 
     m_video_decoder_thread.Stop();
     m_audio_decoder_thread.Stop();
@@ -336,13 +331,12 @@ bool AvPlayerSource::Stop() {
 
     m_is_paused = false;
     m_is_eof = false;
-
-    return true;
 }
 
 bool AvPlayerSource::JumpToTime(u64 time) {
     const bool is_paused = m_is_paused;
-    if (!Stop() || !Start(time)) {
+    Stop();
+    if (!Start(time)) {
         return false;
     }
     if (is_paused) {
@@ -904,11 +898,6 @@ void AvPlayerSource::AudioDecoderThread(std::stop_token stop) {
 
     LOG_INFO(Lib_AvPlayer, "Audio Decoder Thread exited normally");
     m_audio_decoder_thread.Join();
-}
-
-bool AvPlayerSource::HasRunningThreads() const {
-    return m_demuxer_thread.Joinable() || m_video_decoder_thread.Joinable() ||
-           m_audio_decoder_thread.Joinable();
 }
 
 } // namespace Libraries::AvPlayer
