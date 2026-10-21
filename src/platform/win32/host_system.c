@@ -1,4 +1,4 @@
-/* Windows: randomness, the executable's path and the environment (ps_host.h). */
+/* Windows: randomness, the executable's path, the machine's name and the environment (ps_host.h). */
 #include "ps_host.h"
 #include "host_win32.h"
 #include <bcrypt.h>
@@ -29,6 +29,13 @@ long ps_host_exe_path(char *sz_out, size_t cb_out) {
     /* psport's own path code splits on '/', which every Win32 call accepts as a separator. */
     for (char *p_slash = sz_out; (p_slash = strchr(p_slash, '\\'));) *p_slash = '/';
     return (long)strlen(sz_out);
+}
+
+int ps_host_host_name(char *sz_out, size_t cb_out) {
+    wchar_t sz_wide[256];
+    DWORD c_wide = sizeof(sz_wide) / sizeof(*sz_wide);
+    if (!GetComputerNameExW(ComputerNameDnsHostname, sz_wide, &c_wide)) return ps_win32_errno(GetLastError());
+    return ps_win32_to_utf8(sz_wide, sz_out, cb_out);
 }
 
 /* Through the wide environment, so that UTF-8 values (paths) survive whatever the ANSI code page is;

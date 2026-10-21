@@ -107,11 +107,28 @@ FEATURE_HOST(time, WIN32, EXPERIMENTAL,
 FEATURE(files, fs, "the guest's file system on host folders: /app0, user data and savedata")
 FEATURE_HOST(files, LINUX, IMPLEMENTED,
              "POSIX files and folders (src/platform/linux/host_file.c), the guest's mounts in runtime_file.c", "#540")
+FEATURE_HOST(files, WIN32, EXPERIMENTAL,
+             "CreateFileW and the other W calls with UTF-8 paths, '/' taken as '\\', \\\\?\\ past MAX_PATH; psport's int "
+             "descriptors as slots over Win32 handles (0-2 copies of the standard handles, followed by the C runtime "
+             "when duplicated onto), pread and pwrite on a second ReOpenFile handle so that the shared file pointer stays, "
+             "O_APPEND as Windows' end-of-file offset, folders with FILE_FLAG_BACKUP_SEMANTICS and FindFirstFileExW, "
+             "symbolic links and junctions as links; only the owner's write bit maps (the read-only attribute) and "
+             "O_NONBLOCK is kept without effect (src/platform/win32/host_file.c), compile-checked, not run yet; "
+             "runtime_file.c is still Linux-only",
+             "#614")
 
 FEATURE(processes, proc, "the process starting again on itself (restart, sceSystemServiceLoadExec) and the mod view's "
                          "cleaner process")
 FEATURE_HOST(processes, LINUX, IMPLEMENTED,
              "execv of /proc/self/exe, execvp and close_range (src/platform/linux/host_process.c), fork (loader_mods.c)", "#540")
+FEATURE_HOST(processes, WIN32, EXPERIMENTAL,
+             "exec as CreateProcessW with the command line quoted for CommandLineToArgvW, SearchPathW for names "
+             "without a folder, only descriptors 0-2 inherited (PROC_THREAD_ATTRIBUTE_HANDLE_LIST); the caller waits "
+             "for the new process, keeping its Vulkan device meanwhile, and exits with its code "
+             "(src/platform/win32/host_process.c), compile-checked, not run yet; no output helper for debug mode "
+             "(ps_host_output_tee needs fork), no exit hook (atexit gets no status), no mod view cleaner (fork in "
+             "loader_mods.c)",
+             "#614")
 
 FEATURE(dynamic_libraries, dl, "host libraries loaded at run time (the online module) and the symbols fault reports name")
 FEATURE_HOST(dynamic_libraries, LINUX, IMPLEMENTED, "dlopen, dlsym and dladdr (src/platform/linux/host_library.c)", "#540")
@@ -168,6 +185,12 @@ FEATURE_HOST(sockets, LINUX, IMPLEMENTED,
              "BSD sockets (runtime_socket.c); close, errors, non-blocking mode, queue sizes and TCP state in "
              "src/platform/linux/host_net.c",
              "#540")
+FEATURE_HOST(sockets, WIN32, UNAVAILABLE,
+             "Winsock 2 underneath is written (src/platform/win32/host_net.c: WSAStartup once, WSA errors as errno, "
+             "FIONBIO, FIONREAD and SIO_TCP_INFO for queues and TCP state), compile-checked; runtime_socket.c is "
+             "Linux-only: it still needs WSAPoll for ppoll, accept without accept4's flags, WSASendMsg and WSARecvMsg "
+             "(or WSASend and WSARecv) for sendmsg and recvmsg, and no MSG_NOSIGNAL",
+             "#614")
 
 FEATURE(online_module, net, "online play through libpsport-net.so, loaded on the first network import with PS_ONLINE=1")
 FEATURE_HOST(online_module, LINUX, IMPLEMENTED,

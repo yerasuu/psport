@@ -264,7 +264,7 @@ call report. `PS_DEBUG_KEEP` (20) run folders of the host are kept. Details:
 What psport asks of the operating system goes through one small C ABI, `ps_host_*`
 (`src/platform/ps_host.h`, decision #540), with an implementation per OS in `src/platform/<os>/`
 (and, when they come, `gpu/platform/<os>/` for C++-only parts). Linux is implemented; Windows
-(`src/platform/win32/`, #614) has the time, rand, path, dl, thread, tls and vm groups below, compile-checked with mingw-w64
+(`src/platform/win32/`, #614) has the time, rand, path, dl, thread, tls, vm, fault/interrupt, fs, proc and net groups below, compile-checked with mingw-w64
 and not yet part of a build. On Windows `build.sh` builds the GPU library (`libpsport-gpu.dll`, which imports
 the runtime's symbols from `psport.exe` through `gpu/port/psport_runtime.def`) and the capability check with
 MSYS2's CLANG64 (`.github/workflows/windows.yml`, decision #623); the runtime does not link there yet. Its groups: vm, fault/interrupt, thread, tls, time, fs/path, proc, dl, rand and net,
@@ -295,7 +295,17 @@ affinity mask and `THREAD_PRIORITY_IDLE`, `RtlCaptureStackBackTrace`, the guest'
 the loader's patched loads read at `0x1480 + 8 * slot` (`win32/host_thread.c`); UTF-8 paths and Win32 errors as errno values in
 `win32/host_win32.c`; the arena as one `VirtualAlloc2` placeholder that fixed mappings are carved into and filled with
 `MapViewOfFile3` views of `CreateFileMapping2` sections (private memory a section of its own, `SEC_RESERVE` committed as views
-map it past the commit limit), `VirtualProtect` and `VirtualQuery` (`win32/host_memory.c`). Recovery points are `PsHostRecoveryPoint` (`sigjmp_buf` on Linux, `jmp_buf` until the win32 fault handling
+map it past the commit limit), `VirtualProtect` and `VirtualQuery` (`win32/host_memory.c`).
+Files are `CreateFileW` handles in `win32/host_file.c`'s descriptor table (0-2 copies of the standard
+handles; a duplicate onto them moves the C runtime's stdio and `SetStdHandle` too, as `dup2` does), `pread` and `pwrite`
+on a second `ReOpenFile` handle so that the file pointer the descriptor shares stays put, append through Windows'
+end-of-file offset, folders through `FILE_FLAG_BACKUP_SEMANTICS` and `FindFirstFileExW`, paths past `MAX_PATH` with
+`\\?\`; other modules hand handles to the table with `ps_win32_fd_adopt` and read them with `ps_win32_fd_handle`.
+`win32/host_process.c` has no exec: `CreateProcessW` (arguments quoted for `CommandLineToArgvW`, only descriptors 0-2
+inherited) and the caller waits for the new process and exits with its code; `ps_host_output_tee` and
+`ps_host_on_exit` answer `ENOSYS` (no `fork`, no status in `atexit`). `win32/host_net.c` starts Winsock once and
+maps its errors (`WSAEWOULDBLOCK` as `EAGAIN`), with `FIONBIO`, `FIONREAD` and `SIO_TCP_INFO`; socket descriptors are
+`SOCKET` values. Recovery points are `PsHostRecoveryPoint` (`sigjmp_buf` on Linux, `jmp_buf` until the win32 fault handling
 brings its own); the GPU library reaches the runtime's thread-local one through `runtime_fault_recover_slot`
 there, since a DLL cannot import an executable's thread-local variable.
 

@@ -19,9 +19,18 @@ int ps_win32_to_utf8(const wchar_t *sz_wide, char *sz_out, size_t cb_out);
 #define PS_WIN32_SECTION_BASE 0x50000000
 /* 0, or EBADF when h_section is not an open section. Views of it stay valid until unmapped. */
 int ps_win32_section_close(int h_section);
+
 /* Around a wait on an address (host_thread.c), so that an interrupt wakes the thread to run
  * (host_fault.c). */
 void ps_win32_wait_begin(const void *p_word);
 void ps_win32_wait_end(void);
+
+/* psport's int descriptors are slots of host_file.c's table over Win32 handles, 0-2 copies of the
+ * standard handles. The handle stays the table's: NULL when the descriptor is not open, or, with
+ * is_for_exec, when it is marked close-on-exec. */
+HANDLE ps_win32_fd_handle(int h_file, int is_for_exec);
+/* Hands a handle the caller owns (a section, a pipe) to the table, close-on-exec, with flags as
+ * ps_host_fs_open's access mode: the descriptor, or minus EMFILE with the handle closed. */
+int ps_win32_fd_adopt(HANDLE h_handle, unsigned flags);
 
 #endif

@@ -34,6 +34,20 @@ int ps_win32_errno(DWORD error) {
     case ERROR_NO_UNICODE_TRANSLATION: return EILSEQ;
     case ERROR_NOT_READY:
     case ERROR_BUSY: return EBUSY;
+    case ERROR_BAD_NETPATH:
+    case ERROR_BAD_PATHNAME: return ENOENT;
+    case ERROR_DIRECTORY: return ENOTDIR;
+    case ERROR_DIR_NOT_EMPTY: return ENOTEMPTY;
+    case ERROR_DISK_FULL:
+    case ERROR_HANDLE_DISK_FULL: return ENOSPC;
+    case ERROR_BROKEN_PIPE:
+    case ERROR_NO_DATA: return EPIPE;
+    case ERROR_NEGATIVE_SEEK: return EINVAL;
+    case ERROR_PRIVILEGE_NOT_HELD: return EPERM;
+    case ERROR_WRITE_PROTECT: return EROFS;
+    case ERROR_TOO_MANY_OPEN_FILES: return EMFILE;
+    case ERROR_NOT_SAME_DEVICE: return EXDEV;
+    case ERROR_CANT_RESOLVE_FILENAME: return ELOOP;
     }
     return EIO;
 }
