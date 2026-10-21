@@ -4,6 +4,7 @@
  * registration calls, which only work under the debugger): expected results, not failures, so the
  * call report counts these apart. Sorted by NID in strcmp order, then by result, for a binary
  * search. Kept by hand from the codes the runtime's implementations return. */
+{"0a2TBNfE3BU","sceHttpGetStatusCode",0x80431082},
 {"12wOHk8ywb0","sceKernelPollSema",0x80020010},
 {"2QfqfeLblbg","sceFontStyleFrameGetScalePixel",0x80460058},
 {"304ooNZxWDY","sceNetRecvfrom",0x80410123},
