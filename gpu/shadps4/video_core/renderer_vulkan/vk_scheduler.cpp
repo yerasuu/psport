@@ -976,9 +976,13 @@ void Scheduler::SubmitExecution(SubmitInfo& info) {
     const vk::Semaphore timeline = work_semaphore.Handle();
     info.AddSignal(timeline, signal_value);
 
-    static constexpr std::array<vk::PipelineStageFlags, 2> wait_stage_masks = {
+    // psport: every wait covers all stages, because the presenter's frame (its second wait) is
+    // first read by the present blit (Transfer), before ColorAttachmentOutput.
+    static constexpr std::array<vk::PipelineStageFlags, 4> wait_stage_masks = {
         vk::PipelineStageFlagBits::eAllCommands,
-        vk::PipelineStageFlagBits::eColorAttachmentOutput,
+        vk::PipelineStageFlagBits::eAllCommands,
+        vk::PipelineStageFlagBits::eAllCommands,
+        vk::PipelineStageFlagBits::eAllCommands,
     };
 
     const vk::TimelineSemaphoreSubmitInfo timeline_si = {
@@ -1064,9 +1068,10 @@ void Scheduler::SubmitAsync(SubmitInfo& info) {
         }
         recorded_segments.fetch_add(num_cmdbufs, std::memory_order_relaxed);
         recorded_submissions.fetch_add(1, std::memory_order_relaxed);
+        // psport: all stages, as in the direct submission (the present blit reads the frame).
         static constexpr std::array<vk::PipelineStageFlags, 4> wait_stage_masks = {
             vk::PipelineStageFlagBits::eAllCommands,
-            vk::PipelineStageFlagBits::eColorAttachmentOutput,
+            vk::PipelineStageFlagBits::eAllCommands,
             vk::PipelineStageFlagBits::eAllCommands,
             vk::PipelineStageFlagBits::eAllCommands,
         };
