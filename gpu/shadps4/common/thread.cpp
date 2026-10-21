@@ -6,6 +6,9 @@
 #include <ctime>
 #include <string>
 #include <thread>
+#if defined(__x86_64__) || defined(_M_X64)
+#include <immintrin.h>
+#endif
 
 
 #include "common/error.h"
@@ -19,6 +22,9 @@
 #elif defined(_WIN32)
 #include <windows.h>
 #include "common/string_util.h"
+#ifndef CREATE_WAITABLE_TIMER_HIGH_RESOLUTION
+#define CREATE_WAITABLE_TIMER_HIGH_RESOLUTION 0x00000002
+#endif
 #else
 #if defined(__Bitrig__) || defined(__DragonFly__) || defined(__FreeBSD__) || defined(__OpenBSD__)
 #include <pthread_np.h>
@@ -223,6 +229,41 @@ void SetThreadName(void* thread, const char* name) {
 #endif
 
 #endif
+
+void PreciseSleepUntil(std::chrono::steady_clock::time_point deadline) {
+    using namespace std::chrono;
+    // Woken this long before the deadline and spinning the rest, so that the timer's lateness
+    // does not reach the caller.
+    constexpr auto spin_margin = microseconds(500);
+    const auto now = steady_clock::now();
+    if (deadline - now > spin_margin) {
+#ifdef _WIN32
+        static thread_local HANDLE h_timer = CreateWaitableTimerExW(
+            nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
+        LARGE_INTEGER due{
+            .QuadPart = -static_cast<LONGLONG>(
+                duration_cast<nanoseconds>(deadline - spin_margin - now).count() / 100),
+        };
+        if (h_timer && SetWaitableTimer(h_timer, &due, 0, nullptr, nullptr, FALSE)) {
+            WaitForSingleObject(h_timer, INFINITE);
+        } else if (const auto coarse = deadline - milliseconds(2); coarse > now) {
+            // Without a high-resolution timer (before Windows 10 1803) sleeps take milliseconds.
+            std::this_thread::sleep_until(coarse);
+        }
+#else
+        std::this_thread::sleep_until(deadline - spin_margin);
+#endif
+    }
+    while (steady_clock::now() < deadline) {
+#if defined(__x86_64__) || defined(_M_X64)
+        _mm_pause();
+#elif defined(__aarch64__) && defined(_MSC_VER)
+        __yield();
+#elif defined(__aarch64__)
+        asm volatile("yield");
+#endif
+    }
+}
 
 AccurateTimer::AccurateTimer(std::chrono::nanoseconds target_interval)
     : target_interval(target_interval) {}

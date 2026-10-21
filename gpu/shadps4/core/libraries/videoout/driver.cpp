@@ -906,10 +906,19 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
     Common::AccurateTimer timer{vblank_period};
 
     // psport: frame limit (see EmulatorSettings::GetFrameLimit). A request waits in the queue
-    // until its slot; slots advance by one period (no drift) but never lag behind by more.
+    // until its slot. The flip times are the frame times the game sees (flip status), so the next
+    // slot is a period after the planned one but never sooner than a period minus `slack` after
+    // the flip made: on a fixed grid the frame after a late one flipped early (single 6 ms
+    // intervals at a cap of 120), and counting only from the flip added the wake-up delay to
+    // every frame (116 FPS at 120). Slots are waited for precisely (PreciseSleepUntil).
     const u32 frame_limit = EmulatorSettings.GetFrameLimit();
     const auto frame_period = frame_limit ? std::chrono::nanoseconds(1000000000 / frame_limit)
                                           : std::chrono::nanoseconds(0);
+    const auto slack = frame_period / 16;
+    const auto get_next_slot = [&](std::chrono::steady_clock::time_point slot) {
+        return std::max(slot + frame_period,
+                        std::chrono::steady_clock::now() + frame_period - slack);
+    };
     auto next_flip = std::chrono::steady_clock::now();
     std::printf("VideoOut: vblank %u Hz, frame limit %u FPS\n",
                 EmulatorSettings.GetVblankFrequency(), frame_limit);
@@ -946,7 +955,7 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
         if (flip_slot && vblank_status.count % (main_port.flip_rate + 1) == 0) {
             const auto request = receive_request();
             if (request && frame_limit) {
-                next_flip = std::max(next_flip + frame_period, now - frame_period);
+                next_flip = get_next_slot(next_flip);
             }
             if (!request) {
                 if (timer.GetTotalWait().count() < 0) { // Dont draw too fast
@@ -1002,12 +1011,11 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
                 if (next_flip >= tick_deadline) {
                     break;
                 }
-                std::this_thread::sleep_until(next_flip);
+                Common::PreciseSleepUntil(next_flip);
             }
-            const auto now = std::chrono::steady_clock::now();
             const auto request = receive_request();
             if (request) {
-                next_flip = std::max(next_flip + frame_period, now - frame_period);
+                next_flip = get_next_slot(next_flip);
                 Flip(request);
                 FRAME_END;
             }

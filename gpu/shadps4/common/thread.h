@@ -29,6 +29,11 @@ void SetThreadName(void* thread, const char* name);
 bool AccurateSleep(std::chrono::nanoseconds duration, std::chrono::nanoseconds* remaining,
                    bool interruptible);
 
+/// psport: returns at `deadline`, within microseconds: sleeps until shortly before it (a
+/// high-resolution timer on Windows), then spins. For the frame limiter, where a sleep that wakes
+/// late shortens the next frame interval the game sees.
+void PreciseSleepUntil(std::chrono::steady_clock::time_point deadline);
+
 class AccurateTimer {
     std::chrono::nanoseconds target_interval{};
     std::chrono::nanoseconds total_wait{};
