@@ -120,6 +120,7 @@ constexpr auto s_min_body_words = [] {
     set(PM4ItOpcode::DrawIndexIndirect, BodyWords<PM4CmdDrawIndexIndirect>());
     set(PM4ItOpcode::DrawIndirectMulti, BodyWords<PM4CmdDrawIndirectMulti>());
     set(PM4ItOpcode::DrawIndexIndirectMulti, BodyWords<PM4CmdDrawIndexIndirectMulti>());
+    set(PM4ItOpcode::DrawIndirectCountMulti, BodyWords<PM4CmdDrawIndirectCountMulti>());
     set(PM4ItOpcode::DrawIndexIndirectCountMulti, BodyWords<PM4CmdDrawIndexIndirectCountMulti>());
     set(PM4ItOpcode::DispatchDirect, BodyWords<PM4CmdDispatchDirect>());
     set(PM4ItOpcode::DispatchIndirect, BodyWords<PM4CmdDispatchIndirect>());
@@ -448,6 +449,7 @@ bool PipelinedOpcode(PM4ItOpcode opcode) {
     case PM4ItOpcode::DrawIndirectMulti:
     case PM4ItOpcode::DrawIndexIndirect:
     case PM4ItOpcode::DrawIndexIndirectMulti:
+    case PM4ItOpcode::DrawIndirectCountMulti:
     case PM4ItOpcode::DrawIndexIndirectCountMulti:
     case PM4ItOpcode::DispatchIndirect:
     case PM4ItOpcode::WriteData:     // run in order on the recording thread (RunInOrder)
@@ -1238,6 +1240,7 @@ bool IsDrawOpcode(PM4ItOpcode op) {
     case PM4ItOpcode::DrawIndirectMulti:
     case PM4ItOpcode::DrawIndexIndirect:
     case PM4ItOpcode::DrawIndexIndirectMulti:
+    case PM4ItOpcode::DrawIndirectCountMulti:
     case PM4ItOpcode::DrawIndexIndirectCountMulti:
         return true;
     default:
@@ -2044,6 +2047,31 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                                                  draw_indirect->stride, draw_indirect->count, 0,
                                                  draw_indirect->base_vtx_loc,
                                                  draw_indirect->start_inst_loc);
+                    });
+                break;
+            }
+            case PM4ItOpcode::DrawIndirectCountMulti: {
+                if (PredicationSkips(header)) {
+                    break;
+                }
+                const auto* draw_indirect =
+                    reinterpret_cast<const PM4CmdDrawIndirectCountMulti*>(header);
+                const auto offset = draw_indirect->data_offset;
+                if (DebugState.DumpingCurrentReg()) {
+                    DebugState.PushRegsDump(base_addr, reinterpret_cast<uintptr_t>(header), regs);
+                }
+                if (!rasterizer) {
+                    break;
+                }
+                const auto cmd_address = reinterpret_cast<const void*>(header);
+                rasterizer->ScopeMarker(
+                    "gfx:{}:DrawIndirectCountMulti", fmt::make_format_args(cmd_address), [&] {
+                        rasterizer->DrawIndirect(
+                            false, indirect_args_addr, offset, draw_indirect->stride,
+                            draw_indirect->count,
+                            draw_indirect->count_indirect_enable.Value() ? draw_indirect->count_addr
+                                                                         : 0,
+                            draw_indirect->base_vtx_loc, draw_indirect->start_inst_loc);
                     });
                 break;
             }

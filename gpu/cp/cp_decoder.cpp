@@ -186,6 +186,7 @@ void Decoder::Decode(std::span<const u32> buffer, Sink& sink, int depth) {
         case Op::DrawIndexIndirect:
         case Op::DrawIndirectMulti:
         case Op::DrawIndexIndirectMulti:
+        case Op::DrawIndirectCountMulti:
         case Op::DrawIndexIndirectCountMulti: {
             static constexpr auto s_kind = [](Op op) {
                 switch (op) {
@@ -197,6 +198,8 @@ void Decoder::Decode(std::span<const u32> buffer, Sink& sink, int depth) {
                     return DrawKind::IndirectMulti;
                 case Op::DrawIndexIndirectMulti:
                     return DrawKind::IndexIndirectMulti;
+                case Op::DrawIndirectCountMulti:
+                    return DrawKind::IndirectCountMulti;
                 default:
                     return DrawKind::IndexIndirectCountMulti;
                 }

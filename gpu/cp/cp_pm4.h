@@ -76,6 +76,7 @@ enum class Op : std::uint8_t {
     WaitOnCeCounter = 0x86,
     WaitOnDeCounterDiff = 0x88,
     GetLodStats = 0x8E,
+    DrawIndirectCountMulti = 0x9C,
     DrawIndexIndirectCountMulti = 0x9D,
 };
 

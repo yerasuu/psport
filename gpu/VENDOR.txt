@@ -13,3 +13,8 @@ Backported from upstream, liverpool/gnmdriver correctness fixes:
   12c5978f6 destroy finished nested indirect buffer tasks (#5258), e6c79a5fe CE/DE counter waits
   (#5406), fec7684d7 MapComputeQueue resets the ring offset (#5463), 359234bbb SlotVector
   is_allocated bounds (#5158), c01ae7e6e read fault probe kept within the page (#5150).
+Backported from upstream, gnmdriver functions that were stubs:
+  443f02245 sceGnmDrawIndirectCountMulti with IT_DRAW_INDIRECT_COUNT_MULTI, the DrawIndirectMulti
+  header size and sceGnmRequestFlipAndSubmitDone (through psport's own flip submission) (#5341),
+  2319a3698 sceGnmComputeWaitSemaphore (#5345), 30d82c900 sceGnmSetGsRingSizes and
+  sceGnmSetupMipStatsReport (#5179).

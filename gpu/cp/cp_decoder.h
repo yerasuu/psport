@@ -106,6 +106,7 @@ enum class DrawKind : std::uint8_t {
     IndirectMulti,
     IndexIndirectMulti,
     IndexIndirectCountMulti,
+    IndirectCountMulti,
 };
 
 struct Draw {
