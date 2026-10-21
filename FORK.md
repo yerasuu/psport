@@ -15,9 +15,10 @@ fits together: [docs/en/ARCHITECTURE.md](docs/en/ARCHITECTURE.md); bringing up a
 ## Following bbport and shadPS4
 
 psport's history starts from bbport's and carries bbport's releases up to 0.51; since then nothing
-is merged wholesale. bbport and shadPS4 are reviewed from time to time, and the changes useful to
-psport are ported by hand, each recorded in this file as a row of the table it belongs to (with its
-source commit), as the rows below already are. Last reviewed points:
+is merged wholesale. bbport, shadPS4 and the forks below are reviewed from time to time, and the
+changes useful to psport are ported by hand, each recorded in this file as a row of the table it
+belongs to (with its source commit), as the rows below already are. A reviewed point means every
+commit up to it was read; what was not ported yet waits as a task. Last reviewed points:
 
 - bbport: `3c57da4` (0.51, 2026-10-11), the last bbport release merged into psport's history
   (merge `884d0ea`); `2d7361a` (FSR 4 v07 pass timing and statistics) was ported by hand after it.
@@ -25,11 +26,19 @@ source commit), as the rows below already are. Last reviewed points:
   version report and `sceNpLookupNpId`, and its seamless co-op (BBSC: its game code, the online
   module's relay, signaling and summon broker changes, the image-ready call, event filter and overlay
   line, the launcher switch and the local game server; rows below), except BBSC's animated title card
-  and Discord status.
+  and Discord status. Reviewed up to `8185b88` (0.6, 2026-10-19): its online stack is shadPS4 v0.20's
+  copied whole and its The Hunter's Dream client derives from bbhost (GPL-3.0-or-later); neither is
+  taken.
+- SrShadowy's fork (SrShadowy/bloodborne_pc, GPL-2.0): reviewed up to `f5d3dcb` (2026-10-20, on
+  bbport `8185b88`, after its release 0.6.1 `b1d3b8b`).
+- Teefpyre's fork (Teefpyre/bloodborne_pc-LinuxBBSCFix): reviewed up to `f3b5504` (2026-10-20, on
+  bbport `8185b88`).
+- AnyPS5 (boykopovar/AnyPS5, GPL-2.0-only): reviewed up to `5b59fbc` (2026-10-21). Its licence keeps
+  its code out of psport; only behaviour is taken, confirmed on the firmware and written natively.
 - shadPS4: `b4e7ae7` (2026-10-02), the vendored commit in `gpu/VENDOR.txt`, plus the recompiler
   fixes backported after it that the same file lists. The code ported or written from shadPS4
   outside `gpu/shadps4/` (libSceFiber, libSceFont, Videodec2, the per-NID tables, Audio3d, memory
-  pools) follows `3a9f572`, as its rows say.
+  pools) follows `3a9f572`, as its rows say. Reviewed up to `c1b2655` (2026-10-21).
 
 ### Ported from bbport
 
