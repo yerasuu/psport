@@ -100,24 +100,27 @@ void runtime_pad_record_sample(const PadData *p_pad_data) {
             s.axes[3],s.l2,s.r2);
     fflush(s_p_record_file);
 }
-static PadSample *s_p_replay; static size_t s_c_replays, s_replay_next;
+static PadSample *s_p_replay; static size_t s_c_replays, s_c_replay_capacity, s_replay_next;
 void runtime_pad_replay_sample(PadData *p_pad_data) {
     if (!s_replay_armed) return;
     if (!s_replay_start) {
-        static int s_is_loaded;
-        if (!s_is_loaded) {
-            s_is_loaded=1;
-            const char *sz_path=runtime_env("PS_PAD_REPLAY",NULL);
-            FILE *p_file=sz_path ? fopen(sz_path,"r") : NULL;
-            PadSample s; unsigned v[8]; size_t cap=0;
-            while (p_file && fscanf(p_file,"%u %u %u %u %u %u %u %u",&v[0],&v[1],&v[2],&v[3],&v[4],&v[5],&v[6],&v[7])==8) {
-                s=(PadSample){v[0],v[1],{(uint8_t)v[2],(uint8_t)v[3],(uint8_t)v[4],(uint8_t)v[5]},(uint8_t)v[6],(uint8_t)v[7]};
-                if (s_c_replays==cap && !(s_p_replay=realloc(s_p_replay,(cap=cap ? cap*2 : 1024)*sizeof(*s_p_replay)))) break;
-                s_p_replay[s_c_replays++]=s;
+        /* Read at every start: a test with several routes writes the next one into the same file. */
+        s_c_replays=0;
+        const char *sz_path=runtime_env("PS_PAD_REPLAY",NULL);
+        FILE *p_file=sz_path ? fopen(sz_path,"r") : NULL;
+        PadSample s; unsigned v[8];
+        while (p_file && fscanf(p_file,"%u %u %u %u %u %u %u %u",&v[0],&v[1],&v[2],&v[3],&v[4],&v[5],&v[6],&v[7])==8) {
+            s=(PadSample){v[0],v[1],{(uint8_t)v[2],(uint8_t)v[3],(uint8_t)v[4],(uint8_t)v[5]},(uint8_t)v[6],(uint8_t)v[7]};
+            if (s_c_replays==s_c_replay_capacity) {
+                const size_t c_grown=s_c_replay_capacity ? s_c_replay_capacity*2 : 1024;
+                PadSample *p_grown=realloc(s_p_replay,c_grown*sizeof(*s_p_replay));
+                if (!p_grown) { printf("Runtime: pad replay: out of memory after %zu samples\n",s_c_replays); break; }
+                s_p_replay=p_grown; s_c_replay_capacity=c_grown;
             }
-            if (p_file) fclose(p_file);
-            printf("Runtime: pad replay of %zu samples from %s\n",s_c_replays,sz_path ? sz_path : "(unset)");
+            s_p_replay[s_c_replays++]=s;
         }
+        if (p_file) fclose(p_file);
+        printf("Runtime: pad replay of %zu samples from %s\n",s_c_replays,sz_path ? sz_path : "(unset)");
         s_replay_start=now_us();
         s_replay_next=0;
     }

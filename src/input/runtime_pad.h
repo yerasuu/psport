@@ -69,6 +69,8 @@ void runtime_pad_motion_from_desktop(PadData *p_pad_data, const bool *p_is_key_d
                                      int is_mouse_left_down, float mouse_sensitivity, double *p_dx, double *p_dy,
                                      int is_captured);
 void runtime_pad_motion_report(PadData *p_pad_data, float dt);
+/* PS_PAD_REPLAY (runtime_pad_script.c). Callers must hold runtime_pad.c's pad lock (sample() does),
+ * since a re-arm frees and reloads the recording another pad reader would otherwise be indexing. */
 void runtime_pad_replay_sample(PadData *p_pad_data);
 /* The pad's own motion sensors (runtime_pad_sensors.c). open: each time another pad (or none) is
  * opened, which enables its sensors; read: once per sample with the seconds since the previous one,
