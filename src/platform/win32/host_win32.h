@@ -14,4 +14,10 @@ int ps_win32_errno(DWORD error);
 int ps_win32_to_wide(const char *sz_utf8, wchar_t *sz_out, size_t c_out);
 int ps_win32_to_utf8(const wchar_t *sz_wide, char *sz_out, size_t cb_out);
 
+/* ps_host_vm_section_create's descriptors start here, above any host_file.c hands out, so that
+ * ps_host_fs_close passes them to ps_win32_section_close (host_memory.c). */
+#define PS_WIN32_SECTION_BASE 0x50000000
+/* 0, or EBADF when h_section is not an open section. Views of it stay valid until unmapped. */
+int ps_win32_section_close(int h_section);
+
 #endif

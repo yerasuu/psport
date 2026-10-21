@@ -281,6 +281,10 @@ enum {
     PS_HOST_VM_SPARSE = 4,
 };
 size_t ps_host_vm_page_size(void);
+/* The range the guest's REPLACE and EXACT mappings go to, taken before the host can place anything
+ * there: once at launch, before the first of them. Windows reserves it as placeholders, since a
+ * fixed mapping can replace nothing else there; Linux needs nothing. 0, or the host's errno. */
+int ps_host_vm_reserve_arena(void *p_begin, size_t cb_range);
 /* Private zeroed memory: its address, or NULL with the host's errno in errno. */
 void *ps_host_vm_map(void *p_at, size_t cb_range, unsigned access, unsigned flags);
 /* A view of a section or file from off_file: every view of the same bytes aliases them and writes

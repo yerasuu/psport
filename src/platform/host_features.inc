@@ -21,6 +21,15 @@ FEATURE_HOST(guest_memory, LINUX, IMPLEMENTED,
              "kept below 1 TiB in the -no-pie brk heap (src/platform/linux/host_memory.c; the guest's map in "
              "runtime_memory.c)",
              "#540")
+FEATURE_HOST(guest_memory, WIN32, EXPERIMENTAL,
+             "the arena reserved as VirtualAlloc2 placeholders (ps_host_vm_reserve_arena), fixed mappings as "
+             "MapViewOfFile3 views of CreateFileMapping2 sections carved into it (UnmapViewOfFile2, placeholders split "
+             "and coalesced, cut views mapped again with their protections; private memory a section of its own), "
+             "SEC_RESERVE committed as views map it when SEC_COMMIT exceeds the commit limit, discards zeroed "
+             "(src/platform/win32/host_memory.c); checked under Proton's Wine with a test program, the runtime not "
+             "linked yet; a thread touching the kept ends of a cut view while they are mapped again faults, file views "
+             "are refused (ENODEV), malloc stays low only with psport.exe linked --disable-high-entropy-va",
+             "#614")
 
 FEATURE(gpu_memory_dmabuf, gpu_memory, "the GPU uses guest memory in place: cached system memory exported as a dma-buf and "
                                        "mapped at the game's addresses")

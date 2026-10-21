@@ -14,6 +14,13 @@ _Static_assert(PS_HOST_VM_READ == PROT_READ && PS_HOST_VM_WRITE == PROT_WRITE &&
 
 size_t ps_host_vm_page_size(void) { return (size_t)sysconf(_SC_PAGESIZE); }
 
+/* MAP_FIXED replaces whatever is mapped, so the range needs no reservation. */
+int ps_host_vm_reserve_arena(void *p_begin, size_t cb_range) {
+    (void)p_begin;
+    (void)cb_range;
+    return 0;
+}
+
 static int placement(unsigned flags) {
     return (flags & PS_HOST_VM_REPLACE ? MAP_FIXED : 0) | (flags & PS_HOST_VM_EXACT ? MAP_FIXED_NOREPLACE : 0) |
            (flags & PS_HOST_VM_SPARSE ? MAP_NORESERVE : 0);
