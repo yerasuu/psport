@@ -50,6 +50,7 @@
 
 extern "C" void runtime_memory_set_write_watch(uintptr_t address, uint64_t size, int watch);
 extern "C" int runtime_memory_vma_info(uintptr_t address, int* prot, int* type, uintptr_t* end);
+extern "C" std::int64_t runtime_memory_read_guest_signal(void* p_out, uintptr_t va_range, uint64_t cb_range);
 
 namespace VideoCore {
 
@@ -108,8 +109,8 @@ void NoteFaultSite(void* context, VAddr address) {
     if (guest_code) {
         // The caller: [rbp + 8] when the guest code keeps frames (its memcpy-like leaves do not).
         u64 saved[2] = {};
-        if (ps_host_read_memory(saved, reinterpret_cast<const void*>(ps_host_fault_register(p_context, PS_HOST_REG_RBP)),
-                                sizeof(saved)) == std::int64_t(sizeof(saved)) &&
+        if (runtime_memory_read_guest_signal(saved, ps_host_fault_register(p_context, PS_HOST_REG_RBP), sizeof(saved)) ==
+                std::int64_t(sizeof(saved)) &&
             saved[1] >= GuestImage && saved[1] < GuestImageEnd) {
             caller = saved[1];
         }
@@ -117,8 +118,8 @@ void NoteFaultSite(void* context, VAddr address) {
         // Host code (a libc import the port runs natively, the runtime): the first guest return
         // address on the stack is its guest caller.
         std::array<u64, 64> stack{};
-        const std::int64_t got = ps_host_read_memory(
-            stack.data(), reinterpret_cast<const void*>(ps_host_fault_register(p_context, PS_HOST_REG_RSP)), sizeof(stack));
+        const std::int64_t got = runtime_memory_read_guest_signal(
+            stack.data(), ps_host_fault_register(p_context, PS_HOST_REG_RSP), sizeof(stack));
         for (std::int64_t i = 0; i < got / 8; ++i) {
             if (stack[i] >= GuestImage && stack[i] < GuestImageEnd) {
                 caller = stack[i];

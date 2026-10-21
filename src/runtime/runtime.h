@@ -40,6 +40,14 @@ void runtime_memory_report(void);
  * take no locks and write to stdout directly. */
 void runtime_memory_flexible_report(void);
 int runtime_memory_is_mapped(uintptr_t va_range, uint64_t cb_range);
+/* Guest memory read without faulting (fault reports, diagnostics), as ps_host_read_memory: the
+ * bytes read from the start, or -errno when none. Where the host cannot copy it (process_vm_readv
+ * cannot pin the dma-buf mappings of direct memory) and the range is mapped guest memory, through
+ * the backing view. */
+int64_t runtime_memory_read_guest(void *p_out, uintptr_t va_range, uint64_t cb_range);
+/* The same from a signal handler: never waits and never allocates. The backing view is skipped
+ * (the host's bytes only) while a writer holds the mapping table, this thread included. */
+int64_t runtime_memory_read_guest_signal(void *p_out, uintptr_t va_range, uint64_t cb_range);
 /* The CPU is about to write the range outside guest code (a file read): tells the GPU side. */
 void runtime_memory_note_write(uintptr_t va_range, uint64_t cb_range);
 void runtime_memory_note_cpu_write(uintptr_t va_range, uint64_t cb_range);

@@ -107,7 +107,7 @@ static void write_unreadable(uintptr_t va_begin, size_t cb_unreadable) {
     snprintf(sz_line, sizeof(sz_line), "  %016lx: unreadable (%zu bytes)\n", (unsigned long)va_begin, cb_unreadable);
     write_report(sz_line, strlen(sz_line));
 }
-/* Reads go through ps_host_read_memory row by row, so an unmapped page only costs its rows. */
+/* Reads go through runtime_memory_read_guest_signal row by row, so an unmapped page only costs its rows. */
 static void dump_fault_ranges(void) {
     char sz_line[160];
     for (size_t i_range = 0; i_range < s_c_fault_dumps; ++i_range) {
@@ -115,7 +115,7 @@ static void dump_fault_ranges(void) {
         uintptr_t va_dump = p_range->va_address;
         if (p_range->cb_pointer) {
             uint64_t pointer = 0;
-            if (ps_host_read_memory(&pointer, (const void *)p_range->va_address, p_range->cb_pointer) !=
+            if (runtime_memory_read_guest_signal(&pointer, p_range->va_address, p_range->cb_pointer) !=
                 (int64_t)p_range->cb_pointer) {
                 snprintf(sz_line, sizeof(sz_line), "Fault dump *0x%lx/%zu: pointer unreadable\n",
                          (unsigned long)p_range->va_address, p_range->cb_pointer);
@@ -136,7 +136,7 @@ static void dump_fault_ranges(void) {
             const uintptr_t va_row = va_dump + off_row;
             const size_t cb_row = p_range->cb_dump - off_row < 16 ? p_range->cb_dump - off_row : 16;
             unsigned char row[16];
-            const int64_t cb_read = ps_host_read_memory(row, (const void *)va_row, cb_row);
+            const int64_t cb_read = runtime_memory_read_guest_signal(row, va_row, cb_row);
             if (cb_read <= 0) {
                 if (!cb_unreadable) va_unreadable = va_row;
                 cb_unreadable += cb_row;
@@ -188,7 +188,7 @@ static int fault(PsHostFaultContext *p_context) {
      * lookup that failed): the return address on the stack names the guest caller. */
     else if (!(ps_host_dl_address((void *)rip, &where) && where.sz_file)) {
         uintptr_t caller = 0;
-        if (ps_host_read_memory(&caller, (const void *)ps_host_fault_register(p_context, PS_HOST_REG_RSP), sizeof(caller)) ==
+        if (runtime_memory_read_guest_signal(&caller, (uintptr_t)ps_host_fault_register(p_context, PS_HOST_REG_RSP), sizeof(caller)) ==
                 (int64_t)sizeof(caller) &&
             caller - (uintptr_t)g_p_image < 0x10000000) {
             snprintf(sz_line, sizeof(sz_line), "  called from guest offset 0x%lx\n", (unsigned long)(caller - (uintptr_t)g_p_image));
@@ -226,7 +226,7 @@ static int fault(PsHostFaultContext *p_context) {
 }
 #endif
 /* Watchdog: dump RIP and the rbp frame chain of every thread (guest offsets when inside the
- * image). Reads go through ps_host_read_memory so bad frames cannot fault. */
+ * image). Reads go through runtime_memory_read_guest_signal so bad frames cannot fault. */
 static uintptr_t s_exe_base;
 static void write_hex(char *sz_out, uint64_t v) {
     const char sz_digits[] = "0123456789abcdef";
@@ -244,7 +244,7 @@ static void dump_frames(const PsHostFaultContext *p_context) {
         write_hex(sz_line+6,tid); write_hex(sz_line+27,rip); write_hex(sz_line+59,rip-(uintptr_t)g_p_image); write_hex(sz_line+90,rip-s_exe_base);
         write_report(sz_line,sizeof(sz_line)-1);
         uintptr_t frame[2];
-        if (!rbp || ps_host_read_memory(frame,(const void *)rbp,sizeof(frame))!=(int64_t)sizeof(frame)) break;
+        if (!rbp || runtime_memory_read_guest_signal(frame,rbp,sizeof(frame))!=(int64_t)sizeof(frame)) break;
         if (frame[0]<=rbp) break;
         rbp=frame[0]; rip=frame[1];
     }

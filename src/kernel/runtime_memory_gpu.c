@@ -296,6 +296,37 @@ void runtime_memory_read_backing(uintptr_t va_range, void *p_data, uint64_t cb_r
     }
     read_unlock();
 }
+/* The rest of a guest read from the backing view, with the table locked: the bytes now read. */
+static uint64_t read_guest_backing(void *p_out, uintptr_t va_range, uint64_t cb_range, uint64_t cb_read) {
+    for (uintptr_t at=va_range+cb_read, end=va_range+cb_range; at<end;) {
+        const size_t i=vma_index(at);
+        /* A file mapping without a host view has no backing to read but the guest's own pages. */
+        if (i==g_c_vmas || g_p_vmas[i].start>at || g_p_vmas[i].kind==KIND_RESERVED ||
+            (g_p_vmas[i].kind==KIND_FILE && !g_p_vmas[i].p_view)) break;
+        const uint64_t cb_chunk=(g_p_vmas[i].end<end ? g_p_vmas[i].end : end)-at;
+        memcpy((unsigned char *)p_out+(at-va_range),backing_of(&g_p_vmas[i],at),cb_chunk);
+        at+=cb_chunk;
+        cb_read+=cb_chunk;
+    }
+    return cb_read;
+}
+int64_t runtime_memory_read_guest(void *p_out, uintptr_t va_range, uint64_t cb_range) {
+    const int64_t cb_host=ps_host_read_memory(p_out,(const void *)va_range,cb_range);
+    uint64_t cb_read=cb_host>0 ? (uint64_t)cb_host : 0;
+    if (cb_read==cb_range) return cb_host;
+    read_lock();
+    cb_read=read_guest_backing(p_out,va_range,cb_range,cb_read);
+    read_unlock();
+    return cb_read ? (int64_t)cb_read : cb_host;
+}
+int64_t runtime_memory_read_guest_signal(void *p_out, uintptr_t va_range, uint64_t cb_range) {
+    const int64_t cb_host=ps_host_read_memory(p_out,(const void *)va_range,cb_range);
+    uint64_t cb_read=cb_host>0 ? (uint64_t)cb_host : 0;
+    if (cb_read==cb_range || !read_trylock()) return cb_host;
+    cb_read=read_guest_backing(p_out,va_range,cb_range,cb_read);
+    read_tryunlock();
+    return cb_read ? (int64_t)cb_read : cb_host;
+}
 /* Per-thread cache of recently found regions for the GPU's per-draw queries:
  * entries hold for as long as the table generation they were read at. */
 typedef struct { uint64_t generation; uintptr_t start, end; int kind; } CachedRegion;

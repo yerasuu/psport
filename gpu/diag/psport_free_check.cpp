@@ -19,6 +19,9 @@
 
 #include "../../src/platform/ps_host.h"
 
+extern "C" std::int64_t runtime_memory_read_guest(void* p_out, uintptr_t va_range, uint64_t cb_range);
+extern "C" std::int64_t runtime_memory_read_guest_signal(void* p_out, uintptr_t va_range, uint64_t cb_range);
+
 namespace PsFreeCheck {
 namespace {
 using u64 = std::uint64_t;
@@ -268,7 +271,7 @@ void PrintBlock(const unsigned char* p_bytes, u64 page, u64 block) {
 }
 
 bool ReadPage(u64 page, unsigned char* p_out) {
-    return ps_host_read_memory(p_out, reinterpret_cast<const void*>(page), PageSize) == std::int64_t(PageSize);
+    return runtime_memory_read_guest(p_out, page, PageSize) == std::int64_t(PageSize);
 }
 
 /// What the watcher saw of a page's blocks: when each was last seen taken and released by the
@@ -679,8 +682,9 @@ int TrapMode() {
 bool TrapEnabled() {
     return TrapMode() != 0;
 }
+/// From the trap and hook handlers (signal context).
 bool ReadQword(u64 va_guest, u64& value) {
-    return ps_host_read_memory(&value, reinterpret_cast<const void*>(va_guest), 8) == 8;
+    return runtime_memory_read_guest_signal(&value, va_guest, 8) == 8;
 }
 u32 SignalTid() {
     return u32(ps_host_thread_id());
@@ -691,7 +695,7 @@ void NoteTrapDecoded(u64 label) {
         return;
     }
     Header h;
-    if (ps_host_read_memory(&h, reinterpret_cast<const void*>(page + s_off_header), sizeof(h)) != std::int64_t(sizeof(h)) ||
+    if (runtime_memory_read_guest(&h, page + s_off_header, sizeof(h)) != std::int64_t(sizeof(h)) ||
         !Plausible(page, h)) {
         return;
     }

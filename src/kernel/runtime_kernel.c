@@ -236,7 +236,7 @@ static ABI __attribute__((noreturn)) void raise_exception(uint32_t code,uint64_t
     else fprintf(stderr,"STOP: called from host 0x%llx; game code up the stack:",(unsigned long long)va_caller);
     /* Read without faulting because a guest stack may end before 256 words do. */
     uint64_t stack[256]={0};
-    const int64_t cb_read=ps_host_read_memory(stack,__builtin_frame_address(0),sizeof(stack));
+    const int64_t cb_read=runtime_memory_read_guest(stack,(uintptr_t)__builtin_frame_address(0),sizeof(stack));
     for (int64_t i=0,c_found=0;i<cb_read/8 && c_found<12;++i) {
         if ((sz_module=runtime_module_locate(stack[i],&off_code))) {
             fprintf(stderr," %s+0x%llx",sz_module,(unsigned long long)off_code);
@@ -556,7 +556,7 @@ static void sample_handler(PsHostFaultContext *p_context) {
     uint64_t caller=0;
     if (rip<text_lo || rip>=text_hi) {
         uint64_t stack[256]={0};
-        const int64_t got=ps_host_read_memory(stack,(const void *)ps_host_fault_register(p_context,PS_HOST_REG_RSP),sizeof(stack));
+        const int64_t got=runtime_memory_read_guest_signal(stack,(uintptr_t)ps_host_fault_register(p_context,PS_HOST_REG_RSP),sizeof(stack));
         for (int64_t i=0;i<got/8;++i) if (stack[i]>=text_lo && stack[i]<text_hi) { caller=stack[i]-text_lo; break; }
     }
     const uint64_t key=(rip*0x9E3779B97F4A7C15ull)^caller^1;

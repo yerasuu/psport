@@ -28,6 +28,8 @@ void write_lock(void);
 void write_unlock(void);
 void read_lock(void);
 void read_unlock(void);
+int read_trylock(void);
+void read_tryunlock(void);
 extern uint64_t g_table_generation;
 extern Vma *g_p_vmas; extern size_t g_c_vmas;
 extern unsigned char *g_p_backing_base;

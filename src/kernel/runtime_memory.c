@@ -44,6 +44,10 @@ void write_unlock(void) {
 }
 void read_lock(void) { runtime_exception_hold(); if (!s_exclusive_depth) pthread_rwlock_rdlock(&s_lock); }
 void read_unlock(void) { if (!s_exclusive_depth) pthread_rwlock_unlock(&s_lock); runtime_exception_release(); }
+/* For signal handlers, which must not wait: 0 when a writer holds the lock, or this thread does
+ * (it was interrupted while changing the table). */
+int read_trylock(void) { return !s_exclusive_depth && !pthread_rwlock_tryrdlock(&s_lock); }
+void read_tryunlock(void) { pthread_rwlock_unlock(&s_lock); }
 Vma *g_p_vmas; size_t g_c_vmas; static size_t s_c_vma_capacity;
 static int s_h_pool=-1;
 /* psport: direct memory in GPU-visible system memory the GPU library allocates (dma-buf chunks,
@@ -376,5 +380,7 @@ void *runtime_low_map(size_t cb_range, unsigned access) {
 void *runtime_low_map(size_t size, unsigned access) { (void)size; (void)access; return NULL; }
 uintptr_t runtime_memory_resolve(const char *name) { (void)name; return 0; }
 int runtime_memory_is_mapped(uintptr_t address, uint64_t size) { (void)address; (void)size; return 0; }
+int64_t runtime_memory_read_guest(void *p_out, uintptr_t va_range, uint64_t cb_range) { return ps_host_read_memory(p_out,(const void *)va_range,cb_range); }
+int64_t runtime_memory_read_guest_signal(void *p_out, uintptr_t va_range, uint64_t cb_range) { return ps_host_read_memory(p_out,(const void *)va_range,cb_range); }
 void runtime_memory_report(void) { puts("Runtime: Windows direct-memory backend not implemented"); }
 #endif
