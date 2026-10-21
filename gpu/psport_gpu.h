@@ -59,6 +59,11 @@ int psport_gpu_camera_look(float pitch, float yaw);
 /* The game profile's changes to the pad state the game reads (Game::MouseHooks pfn_filter_pad):
  * the buttons (PS4 bits); the sticks (lx ly rx ry) as they are. */
 void psport_gpu_filter_pad(uint32_t *p_buttons, const uint8_t *p_sticks);
+/* skip_movies (src/input/runtime_pad.c), at a press of its binding: asks every movie that is
+ * playing (AvPlayer) to stop on its player's own thread and returns how many were asked; then the
+ * running title's own skip (Game::Profile pfn_skip_scene), 1 when it took the press. */
+int psport_gpu_skip_movies(void);
+int psport_gpu_skip_scene(int has_stopped_movie);
 /* A game module's look at every window event first (an SDL_Event and the SDL_Window, on the window
  * thread), before the profile's (Game::MouseHooks pfn_window_event): nonzero takes the event, and
  * neither the port nor the game sees it. Up to 4, never removed; 0 when all are taken. */

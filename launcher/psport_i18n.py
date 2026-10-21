@@ -277,6 +277,10 @@ EN = {
     "Щелчок в окне игры захватывает мышь, F1 — отпускает": "A click in the game window takes the mouse, F1 releases it",
     "Чувствительность мыши": "Mouse sensitivity",
     "Инвертировать мышь по вертикали": "Invert mouse Y axis",
+    "Пропускать видео": "Skip movies",
+    "Кнопка пропуска останавливает идущее видео (Esc или Share/Capture на геймпаде)":
+        "The skip button stops the movie playing (Esc, or Share/Capture on the gamepad)",
+    "Пропуск видео": "Skip movie",
     "DLSS не найден: выберите библиотеку NVIDIA ниже (и нужна сборка с мостом DLSS). Игра включит FSR 3.1":
         "DLSS not found: choose NVIDIA's library below (a build with the DLSS bridge is needed too). The game will use FSR 3.1",
     "Нет или повреждён файл {}": "Missing or damaged file {}",
@@ -790,6 +794,10 @@ ZH_CN = {
     "Щелчок в окне игры захватывает мышь, F1 — отпускает": "在游戏窗口中单击以捕获鼠标，按 F1 释放",
     "Чувствительность мыши": "鼠标灵敏度",
     "Инвертировать мышь по вертикали": "反转鼠标纵轴",
+    "Пропускать видео": "跳过视频",
+    "Кнопка пропуска останавливает идущее видео (Esc или Share/Capture на геймпаде)":
+        "跳过键停止正在播放的视频（Esc，或手柄上的分享/截图键）",
+    "Пропуск видео": "跳过视频（按键）",
     "DLSS не найден: выберите библиотеку NVIDIA ниже (и нужна сборка с мостом DLSS). Игра включит FSR 3.1":
         "未找到 DLSS：请在下方选择 NVIDIA 的库（还需要带 DLSS 桥接的版本）。游戏将改用 FSR 3.1",
     "Нет или повреждён файл {}": "文件 {} 缺失或已损坏",

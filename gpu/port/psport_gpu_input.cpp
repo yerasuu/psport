@@ -3,6 +3,7 @@
 #include <cstring>
 #include <string>
 #include "../psport_gpu.h"
+#include "core/libraries/avplayer/avplayer_state.h"
 #include "game_profile.h"
 #include "psport_overlay.h"
 #include "sdl_window.h"
@@ -75,6 +76,15 @@ extern "C" void psport_gpu_filter_pad(uint32_t* p_buttons, const uint8_t* p_stic
     if (const Game::MouseHooks mouse = Game::Mouse(); mouse.pfn_filter_pad) {
         mouse.pfn_filter_pad(p_buttons, p_sticks);
     }
+}
+
+extern "C" int psport_gpu_skip_movies(void) {
+    return static_cast<int>(Libraries::AvPlayer::RequestSkipAll());
+}
+
+extern "C" int psport_gpu_skip_scene(int has_stopped_movie) {
+    const Game::Profile* p_profile = Game::Active();
+    return p_profile && p_profile->pfn_skip_scene && p_profile->pfn_skip_scene(has_stopped_movie != 0) ? 1 : 0;
 }
 
 extern "C" int psport_gpu_text_input_begin(const char* sz_initial, const char* sz_prompt) {

@@ -218,6 +218,7 @@ INI_DEFAULTS = {
     "mouse_look": "1",
     "mouse_sensitivity": "1.00",
     "mouse_invert_y": "0",
+    "skip_movies": "0",
     **{key: "1" if default else "0" for key, _, default in EFFECTS},
 }
 
@@ -488,6 +489,7 @@ CONTROLS = [
     ("look_down", "Камера вниз", "K", None),
     ("look_left", "Камера влево", "J", None),
     ("look_right", "Камера вправо", "L", None),
+    ("skip_movie", "Пропуск видео", "Escape", "misc1"),
 ]
 
 
@@ -785,6 +787,12 @@ class LauncherWindow(Adw.ApplicationWindow):
                 row.set_sensitive(self.mouse_look_row.get_active())
         self.mouse_look_row.connect("notify::active", mouse_rows_sensitive)
         mouse_rows_sensitive()
+        # Off by default (runtime_pad.c skip_update): the binding is the "Skip movie" row above.
+        self.skip_movies_row = Adw.SwitchRow(
+            title=tr("Пропускать видео"),
+            subtitle=tr("Кнопка пропуска останавливает идущее видео (Esc или Share/Capture на геймпаде)"),
+            active=self.ini.get("skip_movies") == "1")
+        controls.add(self.skip_movies_row)
         page.add(controls)
 
         upscaler = Adw.PreferencesGroup(
@@ -1206,6 +1214,7 @@ class LauncherWindow(Adw.ApplicationWindow):
             "mouse_look": "1" if self.mouse_look_row.get_active() else "0",
             "mouse_sensitivity": f"{self.mouse_sensitivity_row.get_value():.2f}",
             "mouse_invert_y": "1" if self.mouse_invert_row.get_active() else "0",
+            "skip_movies": "1" if self.skip_movies_row.get_active() else "0",
             **{key: "1" if row.get_active() else "0" for key, row in self.effect_rows.items()},
         })
         save_ini(self.ini, self.ini_lines)

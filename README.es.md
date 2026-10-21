@@ -161,6 +161,7 @@ utilizadas:
 | `PS_GAME_PROFILE=none` | ejecuta sin el perfil del juego, solo por las rutas genéricas |
 | `PS_QUIRKS=none,-<id>,+<id>` | desactiva o activa las correcciones para un juego o un sistema ([quirks](docs/en/QUIRKS.md)) |
 | `toypad` (`PS_TOYPAD=1`) | conecta el toy pad de LEGO Dimensions emulado, desactivado por defecto ([toy pad](docs/en/TOYPAD.md)) |
+| `skip_movies` (`PS_SKIP_MOVIES=1`) | `key.skip_movie` (Escape) o `pad.skip_movie` (`misc1`) detiene los vídeos en reproducción, desactivado por defecto ([FORK.md, Keyboard](FORK.md#keyboard)) |
 
 Los valores por defecto y por qué sirven para cualquier juego: [FORK.md, Defaults](FORK.md#defaults).
 Variables de diagnóstico e informe de llamadas: [FORK.md, Diagnostics](FORK.md#diagnostics). Módulos

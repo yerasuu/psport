@@ -294,6 +294,10 @@ struct Profile {
     SmallObjectPool small_object_pool;
     MouseHooks mouse;
     TextureSubstitution texture_substitution;
+    /// The player pressed the skip binding with skip_movies on (src/input/runtime_pad.c, on the
+    /// game's thread under the pad's lock, after the core asked the playing movies to stop): true
+    /// when the game takes the press to leave its own scene, which then reaches it no further.
+    bool (*pfn_skip_scene)(bool has_stopped_movie) = nullptr;
 };
 
 /// The game as psport runs it, whatever PS_GAME_PROFILE says.

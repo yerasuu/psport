@@ -8,9 +8,28 @@
 #include "core/libraries/avplayer/avplayer_state.h"
 #include "core/libraries/kernel/process.h"
 
+#include <vector>
+
 #include <magic_enum/magic_enum.hpp>
 
 namespace Libraries::AvPlayer {
+
+namespace {
+// psport: the live players for RequestSkipAll. A player leaves before its source and controller
+// thread go, so a request never reaches one being torn down.
+std::mutex s_players_mutex;
+std::vector<AvPlayerState*> s_players;
+std::atomic_uint32_t s_c_skips{0}, s_c_skips_dropped{0};
+} // namespace
+
+u32 RequestSkipAll() {
+    std::scoped_lock lock(s_players_mutex);
+    u32 c_asked = 0;
+    for (AvPlayerState* p_player : s_players) {
+        c_asked += p_player->RequestSkip() ? 1 : 0;
+    }
+    return c_asked;
+}
 
 void PS4_SYSV_ABI AvPlayerState::AutoPlayEventCallback(void* opaque, AvPlayerEvents event_id,
                                                        s32 source_id, void* event_data) {
@@ -111,9 +130,15 @@ AvPlayerState::AvPlayerState(const AvPlayerInitData& init_data)
     }
     SetState(AvState::Initial);
     StartControllerThread();
+    std::scoped_lock lock(s_players_mutex);
+    s_players.push_back(this);
 }
 
 AvPlayerState::~AvPlayerState() {
+    {
+        std::scoped_lock lock(s_players_mutex);
+        std::erase(s_players, this);
+    }
     {
         std::unique_lock lock(m_source_mutex);
         m_up_source.reset();
@@ -269,6 +294,30 @@ void AvPlayerState::AddSourceEvent() {
     SetState(AvState::AddingSource);
     m_event_queue.Push(AvPlayerEvent{
         .event = AvEventType::AddSource,
+    });
+}
+
+// psport: a movie the player is showing. Ready (not started yet) and Pause are the game's own
+// choice, and a looping source is a background (a title screen), not a movie to leave.
+bool AvPlayerState::IsSkippable() {
+    std::shared_lock lock(m_source_mutex);
+    const AvState state = m_current_state.load();
+    return m_up_source != nullptr && (state == AvState::Play || state == AvState::Buffering) &&
+           !m_up_source->IsLooping() && m_up_source->IsActive();
+}
+
+// psport: called on the input thread; the CONTROLLER thread stops the player (ProcessEvent).
+bool AvPlayerState::RequestSkip() {
+    if (!IsSkippable()) {
+        return false;
+    }
+    SkipEvent();
+    return true;
+}
+
+void AvPlayerState::SkipEvent() {
+    m_event_queue.Push(AvPlayerEvent{
+        .event = AvEventType::Skip,
     });
 }
 
@@ -508,6 +557,27 @@ void AvPlayerState::ProcessEvent() {
         } else {
             OnWarning(ORBIS_AVPLAYER_ERROR_NOT_SUPPORTED);
             SetState(AvState::Error);
+        }
+        break;
+    }
+    case AvEventType::Skip: {
+        if (!IsSkippable()) {
+            LOG_INFO(Lib_AvPlayer,
+                     "psport: movie skip dropped: the player left playback first (state {}, "
+                     "player {}, dropped {})",
+                     magic_enum::enum_name(m_current_state.load()), static_cast<const void*>(this),
+                     s_c_skips_dropped.fetch_add(1) + 1);
+            break;
+        }
+        const u64 position_ms = CurrentTime();
+        if (Stop()) {
+            LOG_INFO(Lib_AvPlayer, "psport: movie skipped at {} ms (player {}, skip {})", position_ms,
+                     static_cast<const void*>(this), s_c_skips.fetch_add(1) + 1);
+        } else {
+            LOG_WARNING(Lib_AvPlayer,
+                        "psport: movie skip at {} ms refused in state {} (player {}, dropped {})",
+                        position_ms, magic_enum::enum_name(m_current_state.load()),
+                        static_cast<const void*>(this), s_c_skips_dropped.fetch_add(1) + 1);
         }
         break;
     }

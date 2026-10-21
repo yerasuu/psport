@@ -158,6 +158,7 @@ Bloodborne: `bash launcher/psport-launcher.sh` запускает его, а `ba
 | `PS_GAME_PROFILE=none` | запуск без профиля игры, только по общим путям |
 | `PS_QUIRKS=none,-<id>,+<id>` | выключает или включает исправления для отдельной игры или системы ([quirks](docs/en/QUIRKS.md)) |
 | `toypad` (`PS_TOYPAD=1`) | подключает эмулируемый toy pad LEGO Dimensions, по умолчанию выключен ([toy pad](docs/en/TOYPAD.md)) |
+| `skip_movies` (`PS_SKIP_MOVIES=1`) | `key.skip_movie` (Escape) или `pad.skip_movie` (`misc1`) останавливает идущие видео, по умолчанию выключен ([FORK.md, Keyboard](FORK.md#keyboard)) |
 
 Значения по умолчанию и почему они подходят любой игре: [FORK.md, Defaults](FORK.md#defaults).
 Диагностические переменные и отчёт о вызовах: [FORK.md, Diagnostics](FORK.md#diagnostics).

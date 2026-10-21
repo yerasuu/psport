@@ -86,6 +86,8 @@ enum : std::size_t {
 };
 
 std::atomic<bool> s_is_installed{false};
+/// The 1.09 executable at its base, whether the pointer is on or not: IsInputBlocked reads its data.
+std::atomic<bool> s_is_image_known{false};
 
 u64 At(u64 off_image) {
     return ImageBase + off_image;
@@ -439,8 +441,12 @@ std::atomic<bool> s_is_pad_steering{false};    ///< the pad's directions are in 
 std::atomic<std::int64_t> s_list_focus_ms{0};
 
 constexpr std::int64_t ClickLifeMs = 250;
+} // namespace
 
 bool IsInputBlocked() {
+    if (!s_is_image_known.load(std::memory_order_acquire)) {
+        return false;
+    }
     const u64 va_flow = Get<u64>(At(OffMenuFlow));
     if (va_flow && Get<u64>(va_flow + 0xa78)) {
         return true;
@@ -449,6 +455,7 @@ bool IsInputBlocked() {
     return va_block && Get<std::uint32_t>(va_block + 0x2e4);
 }
 
+namespace {
 bool IsInMenu() {
     const u64 va_flow = Get<u64>(At(OffMenuFlow));
     const bool is_title = va_flow && !Get<u8>(va_flow + 0xb11, 1);
@@ -609,13 +616,16 @@ void ReadTestFile() {
 }
 } // namespace
 
-void PatchImage(unsigned char* p_image, std::uint64_t) {
-    if (const char* sz_env = std::getenv("PS_MENU_POINTER"); sz_env && sz_env[0] == '0') {
-        std::printf("Menu pointer: off (PS_MENU_POINTER=0)\n");
-        return;
-    }
+void PatchImage(unsigned char* p_image, std::uint64_t cb_image) {
     if (reinterpret_cast<u64>(p_image) != ImageBase) {
         std::printf("Menu pointer: the image is not at %#llx: off\n", static_cast<unsigned long long>(ImageBase));
+        return;
+    }
+    s_is_image_known.store(cb_image >= OffListUpdate + sizeof(ListUpdateEntry) &&
+                               std::memcmp(p_image + OffListUpdate, ListUpdateEntry, sizeof(ListUpdateEntry)) == 0,
+                           std::memory_order_release);
+    if (const char* sz_env = std::getenv("PS_MENU_POINTER"); sz_env && sz_env[0] == '0') {
+        std::printf("Menu pointer: off (PS_MENU_POINTER=0)\n");
         return;
     }
     if (PsGuestCode::InstallHook("Bloodborne menu list update", At(OffListUpdate), ListUpdateEntry, 0, OnListUpdate) !=

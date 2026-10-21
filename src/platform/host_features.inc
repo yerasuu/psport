@@ -122,6 +122,13 @@ FEATURE_HOST(port_menu_binding, LINUX, IMPLEMENTED,
              "gpu/port/psport_overlay.cpp)",
              "#557")
 
+FEATURE(movie_skip, io, "psport.ini's skip_movies (PS_SKIP_MOVIES): key.skip_movie or pad.skip_movie stops the movies "
+                        "playing and gives the title's profile its own skip")
+FEATURE_HOST(movie_skip, LINUX, IMPLEMENTED,
+             "SDL3 keyboard and gamepad state at pad reads (runtime_pad.c skip_update); AvPlayer stopped on its "
+             "controller thread (avplayer_state.cpp RequestSkipAll)",
+             "#670")
+
 FEATURE(window, io, "the game's window and its Vulkan surface")
 FEATURE_HOST(window, LINUX, IMPLEMENTED, "SDL3 (gpu/shim/window.cpp)", "#540")
 

@@ -293,17 +293,22 @@ static void report_guest_heap(void) {
  * menu is no PS4 input: key.menu (keys, a chord allowed) and pad.menu (buttons, or a two-button
  * chord "leftstick+rightstick") open and close the port's menu (runtime_pad_menu_pressed), besides
  * the built-in Insert and L3+R3, and are unbound unless set. While a menu binding is held, its keys
- * and buttons reach no other input, so it wins over the game's use of them. */
+ * and buttons reach no other input, so it wins over the game's use of them.
+ * skip_movie is no PS4 input either: with skip_movies=1 (PS_SKIP_MOVIES wins), a press of
+ * key.skip_movie (default Escape, which the neutral layout leaves free) or pad.skip_movie (default
+ * misc1: Share, Capture or the microphone button where the pad has one; a two-button chord allowed)
+ * stops the movies playing (skip_update). Only when it asked one to stop does the press reach no other
+ * input until released; otherwise it is the game's as bound. Off, the binding is cleared. */
 enum {
     IN_CROSS, IN_CIRCLE, IN_SQUARE, IN_TRIANGLE, IN_L1, IN_R1, IN_L2, IN_R2, IN_L3, IN_R3,
     IN_OPTIONS, IN_TOUCHPAD, IN_TOUCHPAD_RIGHT, IN_UP, IN_DOWN, IN_LEFT, IN_RIGHT,
     IN_MOVE_UP, IN_MOVE_DOWN, IN_MOVE_LEFT, IN_MOVE_RIGHT, IN_LOOK_UP, IN_LOOK_DOWN, IN_LOOK_LEFT,
-    IN_LOOK_RIGHT, IN_MENU, IN_COUNT
+    IN_LOOK_RIGHT, IN_MENU, IN_SKIP_MOVIE, IN_COUNT
 };
 static const char *const s_input_names[IN_COUNT]={
     "cross","circle","square","triangle","l1","r1","l2","r2","l3","r3","options","touchpad",
     "touchpad_right","up","down","left","right","move_up","move_down","move_left","move_right",
-    "look_up","look_down","look_left","look_right","menu",
+    "look_up","look_down","look_left","look_right","menu","skip_movie",
 };
 static const uint32_t s_input_buttons[IN_COUNT]={
     BTN_CROSS,BTN_CIRCLE,BTN_SQUARE,BTN_TRIANGLE,BTN_L1,BTN_R1,BTN_L2,BTN_R2,BTN_L3,BTN_R3,
@@ -339,7 +344,7 @@ static void bind_defaults(void) {
         {IN_LOOK_LEFT,SDL_SCANCODE_LEFT}, {IN_LOOK_RIGHT,SDL_SCANCODE_RIGHT},
         {IN_R1,MOUSE_KEY+SDL_BUTTON_LEFT}, {IN_L2,MOUSE_KEY+SDL_BUTTON_RIGHT},
         {IN_R3,MOUSE_KEY+SDL_BUTTON_MIDDLE}, {IN_R2,MOUSE_KEY+SDL_BUTTON_X1}, {IN_L1,MOUSE_KEY+SDL_BUTTON_X2},
-        {IN_UP,MOUSE_WHEEL_UP}, {IN_DOWN,MOUSE_WHEEL_DOWN},
+        {IN_UP,MOUSE_WHEEL_UP}, {IN_DOWN,MOUSE_WHEEL_DOWN}, {IN_SKIP_MOVIE,SDL_SCANCODE_ESCAPE},
     };
     static const struct { int input, button; } s_pads[]={
         {IN_CROSS,SDL_GAMEPAD_BUTTON_SOUTH}, {IN_CIRCLE,SDL_GAMEPAD_BUTTON_EAST},
@@ -351,6 +356,7 @@ static void bind_defaults(void) {
         {IN_TOUCHPAD,SDL_GAMEPAD_BUTTON_BACK}, {IN_TOUCHPAD,SDL_GAMEPAD_BUTTON_TOUCHPAD},
         {IN_UP,SDL_GAMEPAD_BUTTON_DPAD_UP}, {IN_DOWN,SDL_GAMEPAD_BUTTON_DPAD_DOWN},
         {IN_LEFT,SDL_GAMEPAD_BUTTON_DPAD_LEFT}, {IN_RIGHT,SDL_GAMEPAD_BUTTON_DPAD_RIGHT},
+        {IN_SKIP_MOVIE,SDL_GAMEPAD_BUTTON_MISC1},
     };
     memset(s_bindings,0,sizeof s_bindings);
     for (size_t i=0;i<sizeof(s_keys)/sizeof(*s_keys);++i) {
@@ -376,7 +382,7 @@ static int key_from_name(const char *sz_name) {
 }
 /* Mouse look (psport.ini): mouse_look=0 leaves the mouse alone; mouse_sensitivity (default 1:
  * ~1000 pixels/s turn the camera at full speed), mouse_invert_y=1. */
-static int s_mouse_look=1, s_mouse_invert_y;
+static int s_mouse_look=1, s_mouse_invert_y, s_is_skip_enabled;
 static float s_mouse_sensitivity=1.0f;
 /* A key.<input>= or pad.<input>= line (sz_origin: where it comes from, for the log); 0 when it is
  * not one. */
@@ -385,7 +391,7 @@ static int apply_binding_line(const char *sz_key, const char *sz_value, const ch
     if (!keyboard && !pad) return 0;
     int input=-1;
     for (int i=0;i<IN_COUNT;++i) if (!strcmp(sz_key+4,s_input_names[i])) input=i;
-    if (input<0 || (pad && input>=IN_MOVE_UP && input!=IN_MENU)) { printf("Runtime: controls: unknown input %s (%s)\n",sz_key,sz_origin); return 1; }
+    if (input<0 || (pad && input>=IN_MOVE_UP && input<IN_MENU)) { printf("Runtime: controls: unknown input %s (%s)\n",sz_key,sz_origin); return 1; }
     Binding *p_binding=&s_bindings[input];
     if (keyboard) p_binding->c_keys=0; else p_binding->c_pads=0;
     char sz_names[512];
@@ -413,7 +419,7 @@ static int apply_binding_line(const char *sz_key, const char *sz_value, const ch
             else if (p_binding->c_keys<MAX_BIND) { p_binding->mods[p_binding->c_keys]=mod; p_binding->keys[p_binding->c_keys++]=s; }
         } else {
             int mod=-1;
-            char *p_plus=input==IN_MENU ? strchr(sz_name,'+') : NULL;
+            char *p_plus=input>=IN_MENU ? strchr(sz_name,'+') : NULL;
             if (p_plus) {
                 *p_plus=0;
                 for (char *sz_end=p_plus; sz_end>sz_name && sz_end[-1]==' ';) *--sz_end=0;
@@ -456,12 +462,13 @@ static void load_bindings(void) {
     bind_defaults();
     apply_title_controls();
     s_mouse_look=1; s_mouse_invert_y=0; s_mouse_sensitivity=1.0f;
-    int pad_motion=-1;
+    int pad_motion=-1, skip_movies=0;
     const char *sz_key, *sz_value;
     for (size_t i_entry=0; runtime_config_entry(i_entry,&sz_key,&sz_value); ++i_entry) {
         if (apply_binding_line(sz_key,sz_value,"psport.ini")) continue;
         if (!strcmp(sz_key,"mouse_look")) s_mouse_look=atoi(sz_value)!=0;
         else if (!strcmp(sz_key,"pad_motion")) pad_motion=atoi(sz_value)!=0;
+        else if (!strcmp(sz_key,"skip_movies")) skip_movies=atoi(sz_value)!=0;
         else if (!strcmp(sz_key,"mouse_invert_y")) s_mouse_invert_y=atoi(sz_value)!=0;
         else if (!strcmp(sz_key,"mouse_sensitivity")) {
             const float v=strtof(sz_value,NULL);
@@ -469,6 +476,11 @@ static void load_bindings(void) {
         }
     }
     runtime_pad_motion_configure(pad_motion);
+    s_is_skip_enabled=runtime_env_flag("PS_SKIP_MOVIES",skip_movies);
+    if (!s_is_skip_enabled) s_bindings[IN_SKIP_MOVIE].c_keys=s_bindings[IN_SKIP_MOVIE].c_pads=0;
+    else
+        printf("Runtime: skip_movies on: key.skip_movie (%d bound) or pad.skip_movie (%d bound) stops the movies playing\n",
+               s_bindings[IN_SKIP_MOVIE].c_keys,s_bindings[IN_SKIP_MOVIE].c_pads);
 }
 /* The mouse while the window holds it: buttons, and the wheel as short presses (one per notch,
  * each held and released for a few frames so the game sees it). */
@@ -600,10 +612,27 @@ static int is_menu_key(const bool *p_is_key_down, int code) {
     }
     return 0;
 }
+/* A press of skip_movie that stopped something (skip_update) keeps its keys and buttons from every
+ * other input until it is released. */
+static int s_is_skip_key_held=1, s_is_skip_pad_held=1, s_is_skip_taken;
+static size_t s_c_skip_presses, s_c_skip_movies, s_c_skip_scenes;
+static int is_skip_key(int code) {
+    const Binding *p_skip=&s_bindings[IN_SKIP_MOVIE];
+    for (int i=0;s_is_skip_taken && i<p_skip->c_keys;++i)
+        if (code==p_skip->keys[i] || code==p_skip->mods[i]) return 1;
+    return 0;
+}
+static int is_skip_button(int button) {
+    const Binding *p_skip=&s_bindings[IN_SKIP_MOVIE];
+    for (int i=0;s_is_skip_taken && i<p_skip->c_pads;++i)
+        if (button==p_skip->pad[i] || button==p_skip->pad_mods[i]) return 1;
+    return 0;
+}
 static int key_down(const bool *p__bool, int input) {
     for (int i=0;i<s_bindings[input].c_keys;++i) {
         const int code=s_bindings[input].keys[i], mod=s_bindings[input].mods[i];
-        if (!code_down(p__bool,code) || (input!=IN_MENU && is_menu_key(p__bool,code))) continue;
+        if (!code_down(p__bool,code) || (input!=IN_MENU && is_menu_key(p__bool,code)) ||
+            (input!=IN_SKIP_MOVIE && is_skip_key(code))) continue;
         if (mod>=0 ? code_down(p__bool,mod) : !is_chord_held(p__bool,code)) return 1;
     }
     return 0;
@@ -632,7 +661,7 @@ static int pad_value(SDL_Gamepad *p_sdl_gamepad, int input) {
     for (int i=0;i<s_bindings[input].c_pads;++i) {
         const int b=s_bindings[input].pad[i], mod=s_bindings[input].pad_mods[i];
         if (mod>=0 && pad_button_value(p_sdl_gamepad,mod)<=30) continue;
-        if (input!=IN_MENU && is_menu_button(p_sdl_gamepad,b)) continue;
+        if ((input!=IN_MENU && is_menu_button(p_sdl_gamepad,b)) || (input!=IN_SKIP_MOVIE && is_skip_button(b))) continue;
         const int v=pad_button_value(p_sdl_gamepad,b);
         if (v>value) value=v;
     }
@@ -883,6 +912,31 @@ int runtime_pad_prompt(const char *sz_input, int should_prefer_mouse, char *sz_o
     }
 }
 
+/* skip_movies: at each press of skip_movie the movies playing are asked to stop (each on its
+ * player's own thread) and the title gets its own skip; the press is taken from the game only when
+ * a movie was asked. While the port's menu or text dialog has the input, or the game the keyboard,
+ * the binding counts as held, so a key still down when they let go (Escape closing them) is no
+ * press. */
+static void skip_update(SDL_Gamepad *p_sdl_gamepad, const bool *p_is_key_down, int is_input_ours) {
+    if (!s_is_skip_enabled) return;
+    const int is_key_down=p_is_key_down && key_down(p_is_key_down,IN_SKIP_MOVIE);
+    const int is_pad_down=p_sdl_gamepad && pad_value(p_sdl_gamepad,IN_SKIP_MOVIE)>30;
+    const int is_key_held=is_input_ours || !p_is_key_down || is_key_down;
+    const int is_pad_held=is_input_ours || is_pad_down;
+    if ((is_key_held && !s_is_skip_key_held) || (is_pad_held && !s_is_skip_pad_held)) {
+        const int c_movies=psport_gpu_skip_movies();
+        const int is_scene=psport_gpu_skip_scene(c_movies>0);
+        ++s_c_skip_presses; s_c_skip_movies+=(size_t)c_movies; s_c_skip_scenes+=(size_t)is_scene;
+        s_is_skip_taken=c_movies>0;
+        printf("Runtime: skip_movie pressed: %d movie(s) asked to stop%s\n",c_movies,
+               is_scene ? ", the title skips its scene" : c_movies ? "" : ": nothing playing, the press is the game's");
+    } else if (!is_key_down && !is_pad_down) {
+        s_is_skip_taken=0;
+    }
+    s_is_skip_key_held=is_key_held;
+    s_is_skip_pad_held=is_pad_held;
+}
+
 static void sample_host(PadData *p_pad_data) {
     report_guest_heap();
     memset(p_pad_data,0,sizeof(*p_pad_data));
@@ -908,6 +962,7 @@ static void sample_host(PadData *p_pad_data) {
     s_was_overlay_open=is_overlay_open;
     if (is_overlay_open) { /* menu open: neutral input */
         latch_clear();
+        skip_update(NULL,NULL,1);
         apply_mouse_look(p_pad_data,0,0,p_pad_data->timestamp,0);
         return;
     }
@@ -915,6 +970,7 @@ static void sample_host(PadData *p_pad_data) {
     s_mouse_buttons=is_captured && SDL_WasInit(SDL_INIT_VIDEO) ? SDL_GetMouseState(NULL,NULL) : 0;
     mouse_wheel_step(p_pad_data->timestamp,is_captured ? wheel_up : 0,is_captured ? is_wheel_down : 0);
     latch_take(p_pad_data->timestamp,p__bool,p_sdl_gamepad,is_captured);
+    skip_update(p_sdl_gamepad,p__bool,0);
     if (p_sdl_gamepad) {
         int touch_right=0;
         for (int i=IN_CROSS;i<=IN_RIGHT;++i) {
@@ -1169,5 +1225,8 @@ uintptr_t runtime_pad_resolve(const char *sz_name) { return RUNTIME_LOOKUP(s_exp
 void runtime_pad_report(void) {
     printf("Runtime: pad reads=%zu, short presses=%zu (expired unread %zu), gamepad=%s\n",s_c_reads,s_c_short_presses,
            s_c_expired_presses,s_p_gamepad ? SDL_GetGamepadName(s_p_gamepad) : "none");
+    if (s_is_skip_enabled)
+        printf("Runtime: skip_movie presses=%zu, movies asked to stop=%zu, title scene skips=%zu\n",
+               s_c_skip_presses,s_c_skip_movies,s_c_skip_scenes);
     runtime_pad_sensors_report();
 }

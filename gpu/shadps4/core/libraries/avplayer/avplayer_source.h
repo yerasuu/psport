@@ -156,6 +156,7 @@ public:
     bool GetStreamInfo(u32 stream_index, AvPlayerStreamInfo& info);
     bool EnableStream(u32 stream_index);
     void SetLooping(bool is_looping);
+    bool IsLooping() const { return m_is_looping; } // psport
     std::optional<bool> HasFrames(u32 num_frames);
     bool Start(u64 time = 0);
     bool Stop();

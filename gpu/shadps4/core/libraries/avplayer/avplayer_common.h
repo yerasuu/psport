@@ -38,6 +38,7 @@ enum class AvEventType {
     WarningId = 22,
     RevertState = 30,
     AddSource = 40,
+    Skip = 50, // psport: the player's skip binding (RequestSkipAll)
     Error = 255,
 };
 

@@ -18,4 +18,8 @@ void PatchImage(unsigned char* p_image, std::uint64_t cb_image);
 bool WindowEvent(const void* p_sdl_event, void* p_sdl_window);
 bool WantsPointer();
 void FilterPad(std::uint32_t* p_buttons, const std::uint8_t* p_sticks);
+
+/// Whether the game holds its input back (either input block of menu_pointer.cpp's notes); false
+/// until PatchImage has seen the 1.09 executable's code.
+bool IsInputBlocked();
 } // namespace PsMenuPointer

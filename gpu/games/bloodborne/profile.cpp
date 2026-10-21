@@ -13,6 +13,7 @@
 #include "menu_pointer.h"
 #include "mouse_look.h"
 #include "workarounds.h"
+#include "scene_skip.h"
 
 namespace Game {
 namespace {
@@ -44,6 +45,11 @@ void PatchImage(unsigned char* p_image, std::uint64_t cb_image) {
     PsMouseLook::PatchImage(p_image, cb_image);
     PsMenuPointer::PatchImage(p_image, cb_image);
     PsAspect::PatchImage(p_image, cb_image);
+}
+
+void FilterPad(std::uint32_t* p_buttons, const std::uint8_t* p_sticks) {
+    PsMenuPointer::FilterPad(p_buttons, p_sticks);
+    PsSceneSkip::FilterPad(p_buttons);
 }
 
 void ReportStats() {
@@ -113,12 +119,13 @@ extern const Profile BloodborneProfile = {
     .mouse = {.pfn_camera_look = PsMouseLook::Turn,
               .pfn_window_event = PsMenuPointer::WindowEvent,
               .pfn_wants_pointer = PsMenuPointer::WantsPointer,
-              .pfn_filter_pad = PsMenuPointer::FilterPad},
+              .pfn_filter_pad = FilterPad},
     .texture_substitution = {.pfn_start = PsButtonPrompts::Start,
                              .pfn_identify = PsButtonPrompts::Identify,
                              .pfn_is_rescanned = PsButtonPrompts::IsRescanned,
                              .pfn_generation = PsButtonPrompts::Generation,
                              .pfn_draw = PsButtonPrompts::Draw},
+    .pfn_skip_scene = PsSceneSkip::Press,
 };
 
 } // namespace Game

@@ -41,6 +41,7 @@ public:
     bool IsActive();
     u64 CurrentTime();
     bool SetLooping(bool is_looping);
+    bool RequestSkip(); // psport
 
 private:
     // Event Replacement
@@ -67,6 +68,8 @@ private:
 
     void AddSourceEvent();
     void WarningEvent(s32 id);
+    void SkipEvent();   // psport
+    bool IsSkippable(); // psport
 
     void StartControllerThread();
     void ProcessEvent();
@@ -96,5 +99,11 @@ private:
     Kernel::Thread m_controller_thread{};
     AvPlayerQueue<AvPlayerEvent> m_event_queue{};
 };
+
+/// psport: asks every player showing a movie (playing or buffering, not looping) to stop (the
+/// runtime's skip_movies binding, src/input/runtime_pad.c); each one's controller thread stops it,
+/// never the caller's, so the decoder is not torn down under a thread reading its frames. Returns
+/// how many were asked.
+u32 RequestSkipAll();
 
 } // namespace Libraries::AvPlayer
