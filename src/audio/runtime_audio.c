@@ -32,6 +32,7 @@
 
 typedef struct {
     int used, is_opening, type, channels, is_float, frames, cb_sample, std_layout;
+    int c_device_channels; /* what the port hands SDL: fewer than channels when downmix() folds them */
     int32_t volume[8];
     SDL_AudioStream *p_stream;
     uint64_t next_deadline_ns; /* next return of sceAudioOutOutput */
@@ -52,6 +53,44 @@ static pthread_mutex_t s_table_lock=PTHREAD_MUTEX_INITIALIZER;
 static Port s_ports[PORTS];
 static int s_is_initialized, s_is_sdl_ready=-1;
 static size_t s_c_buffers_out, s_c_ports_opened;
+
+/* SDL normalises its downmix matrices so that every channel at full scale cannot clip: from 7.1
+ * the fronts reach a stereo device at 0.2119 (-13.5 dB), a quad one at 0.4663 and a 5.1 one at
+ * 0.541, while a game mixes mostly into its fronts, which then play ~13 dB below other programs.
+ * The fold here keeps the fronts at unity, centre and surrounds at -3 dB (ITU-R BS.775) and LFE
+ * at -6 dB, unnormalised like PipeWire's channel mixer by default (channelmix.normalize = false)
+ * when it gets the 8 channels itself, and clamps. In and out in SDL's channel orders: FL FR FC
+ * LFE BL BR SL SR, then 2.1 = FL FR LFE, quad = FL FR BL BR, 4.1 = FL FR LFE BL BR, 5.1 = FL FR
+ * FC LFE BL BR, 6.1 = FL FR FC LFE BC SL SR. */
+static void downmix(const float in[8], float *p_out, int c_out) {
+    const float k=0.70710678f;
+    const float fl=in[0], fr=in[1], fc=in[2], lfe=in[3], bl=in[4], br=in[5], sl=in[6], sr=in[7];
+    switch (c_out) {
+    case 1: p_out[0]=0.5f*(fl+fr+2.f*k*fc+lfe+k*(sl+sr+bl+br)); break;
+    case 2: p_out[0]=fl+k*fc+0.5f*lfe+k*sl+k*bl; p_out[1]=fr+k*fc+0.5f*lfe+k*sr+k*br; break;
+    case 3: p_out[0]=fl+k*fc+k*sl+k*bl; p_out[1]=fr+k*fc+k*sr+k*br; p_out[2]=lfe; break;
+    case 4: p_out[0]=fl+k*fc+0.5f*lfe+k*sl; p_out[1]=fr+k*fc+0.5f*lfe+k*sr; p_out[2]=bl; p_out[3]=br; break;
+    case 5: p_out[0]=fl+k*fc+k*sl; p_out[1]=fr+k*fc+k*sr; p_out[2]=lfe; p_out[3]=bl; p_out[4]=br; break;
+    case 6: p_out[0]=fl; p_out[1]=fr; p_out[2]=fc; p_out[3]=lfe; p_out[4]=bl+k*sl; p_out[5]=br+k*sr; break;
+    default: p_out[0]=fl; p_out[1]=fr; p_out[2]=fc; p_out[3]=lfe; p_out[4]=k*(bl+br); p_out[5]=sl; p_out[6]=sr; break;
+    }
+    for (int c=0;c<c_out;++c) p_out[c]=p_out[c]>1.f ? 1.f : p_out[c]<-1.f ? -1.f : p_out[c];
+}
+/* In place: frame f's c_out samples land at or before where its 8 were read. */
+static void downmix_buffer(unsigned char *p_samples, int c_frames, int is_float, int c_out) {
+    for (size_t f=0;f<(size_t)c_frames;++f) {
+        float in[8], out[7];
+        for (size_t c=0;c<8;++c) {
+            if (is_float) memcpy(&in[c],p_samples+(f*8+c)*4,4);
+            else { int16_t v; memcpy(&v,p_samples+(f*8+c)*2,2); in[c]=v/32768.f; }
+        }
+        downmix(in,out,c_out);
+        for (size_t c=0;c<(size_t)c_out;++c) {
+            if (is_float) memcpy(p_samples+(f*(size_t)c_out+c)*4,&out[c],4);
+            else { int16_t v=(int16_t)lrintf(out[c]*32767.f); memcpy(p_samples+(f*(size_t)c_out+c)*2,&v,2); }
+        }
+    }
+}
 
 static uint64_t now_ns(void) { return ps_host_time_monotonic_ns(); }
 static void sleep_until(uint64_t deadline) { while (ps_host_time_sleep_until_ns(deadline)) {} }
@@ -108,6 +147,7 @@ static ABI int32_t audio_open(int32_t user, int32_t type, int32_t i_device, uint
     pthread_mutex_init(&p_port->lock,NULL);
     p_port->is_opening=1; p_port->type=type; p_port->channels=s_channels[format]; p_port->is_float=format>=3 && format!=6;
     p_port->cb_sample=p_port->is_float ? 4 : 2; p_port->frames=(int)length; p_port->std_layout=format>=6;
+    p_port->c_device_channels=p_port->channels;
     for (int c=0;c<8;++c) p_port->volume[c]=VOLUME_0DB;
     const int is_sdl_ready=sdl_audio();
     /* Opening the device takes tens of milliseconds, and every other port's output looks its
@@ -116,6 +156,17 @@ static ABI int32_t audio_open(int32_t user, int32_t type, int32_t i_device, uint
     if (is_sdl_ready) {
         SDL_AudioSpec spec={p_port->is_float ? SDL_AUDIO_F32 : SDL_AUDIO_S16, p_port->channels, 48000};
         p_port->p_stream=SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,&spec,NULL,NULL);
+        /* Only after the open is the device's channel count known: PipeWire and PulseAudio take the
+           8 channels and mix them themselves, while ALSA, WASAPI and a device an earlier stereo
+           port already opened in stereo leave the fold to SDL (see downmix). */
+        SDL_AudioSpec device_spec;
+        if (p_port->p_stream && p_port->channels==8 &&
+            SDL_GetAudioDeviceFormat(SDL_GetAudioStreamDevice(p_port->p_stream),&device_spec,NULL) &&
+            device_spec.channels>0 && device_spec.channels<8) {
+            spec.channels=device_spec.channels;
+            if (SDL_SetAudioStreamFormat(p_port->p_stream,&spec,NULL)) p_port->c_device_channels=device_spec.channels;
+            else fprintf(stderr,"Runtime: audio port %d: own downmix to %d ch refused (%s); SDL folds the 8 channels\n",id,device_spec.channels,SDL_GetError());
+        }
         if (p_port->p_stream) SDL_ResumeAudioStreamDevice(p_port->p_stream);
         else fprintf(stderr,"Runtime: SDL audio stream failed (%s); port %d uses the timer sink\n",SDL_GetError(),id);
     }
@@ -123,14 +174,17 @@ static ABI int32_t audio_open(int32_t user, int32_t type, int32_t i_device, uint
     const char *sz_dump=runtime_env("PS_AUDIO_DUMP",NULL);
     if (sz_dump) {
         char sz_path[4096];
-        snprintf(sz_path,sizeof(sz_path),"%s.port%d.%dch.%s",sz_dump,id,p_port->channels,p_port->is_float ? "f32" : "s16");
+        snprintf(sz_path,sizeof(sz_path),"%s.port%d.%dch.%s",sz_dump,id,p_port->c_device_channels,p_port->is_float ? "f32" : "s16");
         p_port->p_dump=fopen(sz_path,"wb");
     }
     pthread_mutex_lock(&s_table_lock);
     p_port->is_opening=0; p_port->used=1;
     ++s_c_ports_opened;
     pthread_mutex_unlock(&s_table_lock);
-    printf("Runtime: audio port %d opened (type %d, %d ch, %s, %u frames)\n",id,type,p_port->channels,p_port->is_float ? "float" : "s16",length);
+    if (p_port->c_device_channels!=p_port->channels)
+        printf("Runtime: audio port %d opened (type %d, %d ch downmixed to the device's %d, %s, %u frames)\n",id,type,p_port->channels,
+               p_port->c_device_channels,p_port->is_float ? "float" : "s16",length);
+    else printf("Runtime: audio port %d opened (type %d, %d ch, %s, %u frames)\n",id,type,p_port->channels,p_port->is_float ? "float" : "s16",length);
     return (type<<16) | id | 0x20000000;
 }
 static ABI int32_t audio_close(int32_t h_handle) {
@@ -160,7 +214,8 @@ static int32_t output_port(int32_t h_handle, const void *p_data, int pace) {
     pthread_mutex_unlock(&s_table_lock);
     if (!p_port) return error;
     pthread_mutex_lock(&p_port->lock);
-    size_t samples=(size_t)p_port->frames*(size_t)p_port->channels, cb_data=samples*(size_t)p_port->cb_sample;
+    size_t samples=(size_t)p_port->frames*(size_t)p_port->channels;
+    size_t cb_data=(size_t)p_port->frames*(size_t)p_port->c_device_channels*(size_t)p_port->cb_sample;
     uint64_t period=(uint64_t)p_port->frames*1000000000u/48000u;
     if (p_data) {
         /* Apply per-channel volume and map PS4 8ch (L R C LFE SL SR BL BR) to SDL 7.1 order. */
@@ -179,6 +234,7 @@ static int32_t output_port(int32_t h_handle, const void *p_data, int pace) {
             }
         }
         if (p_port->stats) p_port->stat_samples+=samples;
+        if (p_port->c_device_channels!=p_port->channels) downmix_buffer(converted,p_port->frames,p_port->is_float,p_port->c_device_channels);
         if (p_port->p_dump) fwrite(converted,1,cb_data,p_port->p_dump);
         if (p_port->stats) {
             uint64_t now=now_ns();
