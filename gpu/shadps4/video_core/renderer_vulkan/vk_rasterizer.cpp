@@ -1939,11 +1939,6 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
             });
         }
     }
-    {
-        BB_SECTION(PipelineBind);
-        pipeline->BindResources(set_writes, push_data, {image_infos.data(), image_infos.size()},
-                                {buffer_infos.data(), buffer_infos.size()});
-    }
     // psport: jitter geometry drawn with the scene depth, not full-screen passes (a shifted
     // full-screen quad leaves an edge column unwritten).
     draw_jitter = {};
@@ -1957,6 +1952,14 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
         occlusion->SetPassScale(target_scale[0] * target_scale[1]); // samples at the game's size
     }
     scheduler.BeginRendering(state);
+    // psport: push constants after the pass begins, because beginning it may record the
+    // occlusion resolve's compute dispatch (OcclusionQueries), whose push constants would
+    // otherwise replace the draw's xoffset/yoffset (frames shifted by half the screen).
+    {
+        BB_SECTION(PipelineBind);
+        pipeline->BindResources(set_writes, push_data, {image_infos.data(), image_infos.size()},
+                                {buffer_infos.data(), buffer_infos.size()});
+    }
 
     const auto& vs_info = pipeline->GetStage(Shader::SwStage::Vertex);
     const auto& fetch_shader = pipeline->GetFetchShader();
@@ -2136,8 +2139,6 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
     push_data.xoffset *= target_scale[0];
     push_data.yscale *= target_scale[1];
     push_data.yoffset *= target_scale[1];
-    pipeline->BindResources(set_writes, push_data, {image_infos.data(), image_infos.size()},
-                            {buffer_infos.data(), buffer_infos.size()});
     draw_jitter = {};
     if (upscaler->Enabled() && db_desc.first && db_desc.first == camera_motion->Depth()) {
         draw_jitter = upscaler->Jitter();
@@ -2148,6 +2149,9 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
         occlusion->SetPassScale(target_scale[0] * target_scale[1]); // samples at the game's size
     }
     scheduler.BeginRendering(state);
+    // psport: after the pass begins, as in the direct draw path.
+    pipeline->BindResources(set_writes, push_data, {image_infos.data(), image_infos.size()},
+                            {buffer_infos.data(), buffer_infos.size()});
 
     ASSERT(stride == (is_indexed ? sizeof(VkDrawIndexedIndirectCommand)
                                  : sizeof(VkDrawIndirectCommand)));
