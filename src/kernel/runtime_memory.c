@@ -13,13 +13,17 @@
 #ifndef _WIN32
 #include <errno.h>
 /* sceKernelGetDirectMemorySize on retail PS4: 5056 MiB. PS_DMEM_MB raises it (the resolution
- * patches above 1080p need about 4 GiB more; run.sh sets it). */
+ * patches above 1080p need about 4 GiB more; run.sh or the title's profile sets it). */
 uint64_t pool_size_bytes(void) {
     static uint64_t s_cb_pool;
     if (!s_cb_pool) {
         const char *sz_env = runtime_env("PS_DMEM_MB", NULL);
         uint64_t mb = sz_env ? strtoull(sz_env, NULL, 10) : 0;
-        if (mb < 5056 || mb > 16384) mb = 5056;
+        if (mb < 5056 || mb > 16384) {
+            if (sz_env && *sz_env)
+                fprintf(stderr,"Runtime: PS_DMEM_MB=%s is outside 5056-16384 MiB: direct memory stays at the retail 5056 MiB\n",sz_env);
+            mb = 5056;
+        }
         s_cb_pool = mb * 1024 * 1024;
     }
     return s_cb_pool;

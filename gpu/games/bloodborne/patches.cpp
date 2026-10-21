@@ -97,6 +97,9 @@ constexpr const char* DebugMenuShaders[] = {"adhoc/FontShader/debugFont_vs.vpo",
 /// rather than the scene's.
 constexpr const char* ResolutionTemplate = "Resolution Patch 1280x720 (16:9)";
 constexpr const char* GraphicsHeap = "Increased Graphics Heap Sizes";
+/// The patch's heaps take ~3339 MiB more direct memory than the retail pool of 5056 MiB holds:
+/// without it the allocations fail and the game's allocator follows a null block (0x443025).
+constexpr unsigned long long GraphicsHeapDirectMemoryMb = 9152;
 constexpr int UiWidth = 1920, UiHeight = 1080;
 /// The template's mov instructions (opcode, its 1280x720 operand) and the size each one takes.
 struct Operand {
@@ -318,14 +321,42 @@ bool ParseSize(const std::string& text, int& out_width, int& out_height) {
     out_height = int(height);
     return true;
 }
+
+bool NeedsGraphicsHeap(int width, int height) {
+    return static_cast<long long>(width) * height > UiWidth * UiHeight;
+}
+
+/// Raises the direct memory for the heap patch, whichever way it was selected (the scene size,
+/// PS_PATCHES or an external patch). Every way runs before runtime_start, and the pool is sized on
+/// the guest's first memory call, so PS_DMEM_MB set here still counts.
+void ReserveGraphicsHeapMemory() {
+    static bool s_is_reserved = false;
+    if (s_is_reserved) {
+        return;
+    }
+    s_is_reserved = true;
+    const char* sz_dmem_mb = runtime_env("PS_DMEM_MB", "");
+    if (!*sz_dmem_mb) {
+        setenv("PS_DMEM_MB", std::to_string(GraphicsHeapDirectMemoryMb).c_str(), 1);
+        std::printf("Patches: '%s': direct memory %llu MiB (PS_DMEM_MB sets it)\n", GraphicsHeap,
+                    GraphicsHeapDirectMemoryMb);
+    } else if (std::strtoull(sz_dmem_mb, nullptr, 10) < GraphicsHeapDirectMemoryMb) {
+        std::fprintf(stderr,
+                     "WARNING: Patches: '%s' needs %llu MiB of direct memory and PS_DMEM_MB=%s gives less: the game "
+                     "will run out of memory (its allocator then crashes at 0x443025)\n",
+                     GraphicsHeap, GraphicsHeapDirectMemoryMb, sz_dmem_mb);
+    } else {
+        std::printf("Patches: '%s': direct memory PS_DMEM_MB=%s as set (the patch needs %llu MiB)\n", GraphicsHeap,
+                    sz_dmem_mb, GraphicsHeapDirectMemoryMb);
+    }
+}
 } // namespace
 
 void PrepareEnvironment() {
-    if (*runtime_env("PS_VBLANK_HZ", "")) {
-        return;
+    if (!*runtime_env("PS_VBLANK_HZ", "")) {
+        const FpsPreset* p_preset = FindPreset(FpsPresetName());
+        setenv("PS_VBLANK_HZ", p_preset ? p_preset->sz_vblank_hz : "60", 1);
     }
-    const FpsPreset* p_preset = FindPreset(FpsPresetName());
-    setenv("PS_VBLANK_HZ", p_preset ? p_preset->sz_vblank_hz : "60", 1);
 }
 
 void ProbeHostFeatures() {
@@ -408,13 +439,16 @@ bool AddPatches(const PsGameFiles& game, const PsPatchServices& services) {
         if (!AddResolution(services, file, width, height)) {
             return false;
         }
-        if (static_cast<long long>(width) * height > UiWidth * UiHeight) {
+        if (NeedsGraphicsHeap(width, height)) {
             if (!Add(services, file, {GraphicsHeap})) {
                 return false;
             }
             names.push_back(GraphicsHeap);
         }
         std::printf("Patches: scene %dx%d; UI %dx%d\n", width, height, UiWidth, UiHeight);
+    }
+    if (std::find(names.begin(), names.end(), GraphicsHeap) != names.end()) {
+        ReserveGraphicsHeapMemory();
     }
     std::string list;
     for (const std::string& name : names) {
@@ -443,6 +477,11 @@ const char* ReplacedPatchConsequence(const char* sz_name) {
 }
 
 const char* ExternalPatchRefusal(const char* sz_name) {
+    // The loader asks here for each external patch it is about to apply: the one point where the
+    // profile learns that the heap patch was selected outside PS_PATCHES and the scene size.
+    if (std::strcmp(sz_name, GraphicsHeap) == 0) {
+        ReserveGraphicsHeapMemory();
+    }
     if (!s_frame_hooks_rate) {
         return nullptr;
     }

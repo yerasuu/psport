@@ -49,7 +49,7 @@ run.sh
     runtime_quirks_evaluate()              PS_QUIRKS, the title's quirks, published (QUIRKS.md)
     pfn_prepare_environment                the title's environment defaults (PS_VBLANK_HZ)
     pfn_check_files                        the title's check of the game's files (exit 2)
-    pfn_add_patches                        the title's own patches, then the external XML patches
+    pfn_add_patches                        the title's own patches (and the PS_DMEM_MB they need), then the external XML patches
     runtime_start()
     psport_gpu_init()                      game title and profile, settings, saves, window thread, GnmDriver, VideoOut
     bind every import                 native binding or runtime_resolve() or trap
