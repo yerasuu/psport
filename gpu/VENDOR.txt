@@ -36,3 +36,34 @@ Backported from upstream after b4e7ae7, texture cache, buffer cache and rasteriz
   626f3ace6 stencil-only depth targets (Z invalid: the image is the stencil plane), stencil sized from its own slice size; no devtools reg popup here (#5384)
   d3ff0e0cc ResolveOverlap creates the parent image when a cached subresource has none yet, so its GPU data is copied in, not lost (#5433)
   699009c94 ExpandImage copies the old image only when it holds GPU-valid data (SafeToDownload, upstream HasGpuValidData), a CPU-dirty source no longer overwrites the fresh upload (#5444)
+Backported from upstream b4e7ae7..c1b2655 (#657), recompiler fixes, ShaderBinaryVersion 14:
+  945dbc3cc subgroup barriers for shared memory dependencies (#5285).
+  2f40f87b5 ballot and MBCNT lowered as a pair (#5116), 3f21ee0be PackedAncillary lowered from its
+  load (#5141).
+  c49529087 NaN semantics: DX10_CLAMP, unordered v_cmp_n*, legacy MAC/MAD, NMin/NMax min3/max3/med3
+  (#5257); sirit gains OpNClamp (GLSLstd450NClamp) for it. Properties kept unpacked (NumVgprs()
+  reaches 256), V_CMPX_TRU_F32 kept, the f64 clamp takes f64 bounds.
+  1c2b8f97a V_RCP_CLAMP/V_RSQ_CLAMP/V_RSQ_LEGACY/V_LOG_CLAMP_F32 clamping (#5346).
+  7721a1eff, 643c7997a, 10393d2c3 vertex and instance ids unbiased in every indirect draw, step
+  rates included (#5260, #5348, #5274).
+  78bedfac4 CFG fallthrough edges kept (#5365): the part psport's own break/return fix lacked.
+  c34ca21f1 EXEC scope kept after an empty branch (#5220).
+  7d28d2790 early fragment tests from DEPTH_BEFORE_SHADER (#5264); left off, with a counted log, for a
+  shader that exports depth or stencil or runs under clip-distance emulation.
+  b08fd9bb4 fp64 use detected from instruction types (#5342).
+  e0cd957ac SampleId defined for BaryCoordSmoothSample on the KHR path (#5131).
+  3a9f57265 IMAGE_GATHER4_C_L (#5344).
+  282f64454 V_MIN_F64 (#5125).
+  53af37af4 V_TRUNC_F64 (#5127).
+  c1b265583 coarse derivatives count as derivatives (#5468).
+  ab1dd384d undefined 64-bit integers emitted (#5366).
+  6752d8b19 BUFFER_WBINVL1(_SC) decoded without operands (#5447); psport already translated it.
+  caeb240de no Flat on SubgroupLocalInvocationId in vertex shaders (#5145).
+  603cff43d phi deduplication in a stable order (#5364).
+  4c7b287f1 readlanes eliminated before the tessellation and ring passes (#5169).
+  259e815af the append/consume lane offset add patched instead of the lane id (#5199).
+  08225c2b3 singleton workgroup dimensions are not divergent in the LDS barrier analysis (#5429).
+  8bafaa5ac V# pattern that clears the stride and shifts num_records (#5352), also for the run-time
+  V# candidates.
+  psport deviation with 945dbc3cc/08225c2b3: needs_lds_barriers comes from capability (no guaranteed
+  64-lane compute subgroup, IsSubgroupSize64Supported) instead of the NVIDIA/KosmicKrisp driver ids.

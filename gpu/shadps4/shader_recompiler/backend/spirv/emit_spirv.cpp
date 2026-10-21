@@ -390,7 +390,8 @@ void SetupCapabilities(const Info& info, const Profile& profile, const RuntimeIn
     }
 }
 
-void DefineEntryPoint(const Info& info, EmitContext& ctx, Id main) {
+void DefineEntryPoint(const Info& info, const RuntimeInfo& runtime_info, EmitContext& ctx,
+                      Id main) {
     const std::span interfaces(ctx.interfaces.data(), ctx.interfaces.size());
     spv::ExecutionModel execution_model{};
     switch (info.sw_stage) {
@@ -420,7 +421,7 @@ void DefineEntryPoint(const Info& info, EmitContext& ctx, Id main) {
                                        : spv::ExecutionMode::VertexOrderCw);
         break;
     }
-    case SwStage::Fragment:
+    case SwStage::Fragment: {
         execution_model = spv::ExecutionModel::Fragment;
         if (ctx.profile.lower_left_origin_mode) {
             ctx.AddExecutionMode(main, spv::ExecutionMode::OriginLowerLeft);
@@ -430,10 +431,29 @@ void DefineEntryPoint(const Info& info, EmitContext& ctx, Id main) {
         if (info.has_discard) {
             ctx.AddCapability(spv::Capability::DemoteToHelperInvocation);
         }
-        if (info.stores.GetAny(IR::Attribute::Depth)) {
+        const bool stores_depth = info.stores.GetAny(IR::Attribute::Depth);
+        if (stores_depth) {
             ctx.AddExecutionMode(main, spv::ExecutionMode::DepthReplacing);
         }
+        // psport: upstream asserts on a depth export. Early tests are left off whenever the shader
+        // decides depth or stencil itself: Vulkan would drop the depth or stencil it exports, and
+        // would write both for fragments the clip-distance emulation discards.
+        if (runtime_info.hw.fs.depth_before_shader) {
+            if (stores_depth) {
+                SHADER_LOG_FALLBACK("DEPTH_BEFORE_SHADER set for a depth-exporting fragment "
+                                    "shader, early fragment tests left off");
+            } else if (info.stores.Get(IR::Attribute::StencilRef)) {
+                SHADER_LOG_FALLBACK("DEPTH_BEFORE_SHADER set for a stencil-exporting fragment "
+                                    "shader, early fragment tests left off");
+            } else if (runtime_info.hw.fs.clip_distance_emulation) {
+                SHADER_LOG_FALLBACK("DEPTH_BEFORE_SHADER set with clip distance emulation, early "
+                                    "fragment tests left off");
+            } else {
+                ctx.AddExecutionMode(main, spv::ExecutionMode::EarlyFragmentTests);
+            }
+        }
         break;
+    }
     case SwStage::Geometry:
         execution_model = spv::ExecutionModel::Geometry;
         ctx.AddExecutionMode(main, GetInputPrimitiveType(ctx.runtime_info.hw.gs.in_primitive));
@@ -667,7 +687,7 @@ std::expected<std::vector<u32>, TranslationError> EmitSPIRV(const Profile& profi
     try {
         EmitContext ctx{profile, runtime_info, program.info, binding};
         const Id main{DefineMain(ctx, program)};
-        DefineEntryPoint(program.info, ctx, main);
+        DefineEntryPoint(program.info, runtime_info, ctx, main);
         SetupCapabilities(program.info, profile, runtime_info, ctx);
         SetupFloatMode(ctx, profile, runtime_info, main);
         PatchPhiNodes(program, ctx);

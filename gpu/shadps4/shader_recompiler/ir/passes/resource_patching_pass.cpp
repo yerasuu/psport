@@ -105,6 +105,7 @@ public:
         const u32 index{Add(buffer_resources, desc, [&desc](const auto& existing) {
             return desc.sharp_fetch == existing.sharp_fetch && desc.post_op == existing.post_op &&
                    desc.post_op_dw1_mask == existing.post_op_dw1_mask &&
+                   desc.post_op_dw2_shift == existing.post_op_dw2_shift &&
                    desc.buffer_type == existing.buffer_type && desc.dynamic == existing.dynamic;
         })};
         auto& buffer = buffer_resources[index];
@@ -249,6 +250,7 @@ void PatchDynamicBufferSharp(const ResourceDiscovery& resource, Info& info,
                         inst.GetOpcode() == IR::Opcode::StoreBufferFormatF32,
         .post_op = vsharp.post_op,
         .post_op_dw1_mask = vsharp.post_op_data.dw1_mask,
+        .post_op_dw2_shift = vsharp.post_op_data.dw2_shift,
         .dynamic = MakeDynamicSources(vsharp),
     };
     const bool is_dw1_dynamic = (vsharp.dynamic_mask >> 1) & 1;
@@ -276,6 +278,7 @@ void PatchDynamicBufferSharp(const ResourceDiscovery& resource, Info& info,
         desc.buffer_type = BufferType::Guest;
         desc.post_op = SharpFetchPostOp::None;
         desc.post_op_dw1_mask = 0;
+        desc.post_op_dw2_shift = 0;
         desc.dynamic = {};
         IR::IREmitter ir{*inst.GetParent(), IR::Block::InstructionList::s_iterator_to(inst)};
         inst.SetArg(0, ir.Imm32(descriptors.Add(desc)));
@@ -326,6 +329,7 @@ void PatchBufferSharp(const ResourceDiscovery& resource, Info& info, Descriptors
                         inst.GetOpcode() == IR::Opcode::StoreBufferFormatF32,
         .post_op = resource.sharps[0].post_op,
         .post_op_dw1_mask = resource.sharps[0].post_op_data.dw1_mask,
+        .post_op_dw2_shift = resource.sharps[0].post_op_data.dw2_shift,
     });
 
     // Replace handle with binding index in buffer resource list.
@@ -552,7 +556,7 @@ static void RemoveAppendBufferLaneOffset(IR::Inst& vx) {
         SHADER_ASSERT(!vy.IsEmpty() && !vy.IsImmediate());
         auto zero_const = IsMbcntWithExec(vy, true, exec);
         SHADER_ASSERT(!zero_const.IsEmpty() && zero_const.IsImmediate() && zero_const.U32() == 0u);
-        vz.Inst()->ReplaceUsesWithAndRemove(IR::Value{u32{0u}});
+        user->SetArg(1 - operand, IR::Value{u32{0u}});
     }
 }
 

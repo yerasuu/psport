@@ -152,13 +152,14 @@ const Shader::RuntimeInfo& PipelineCache::BuildRuntimeInfo(PipelineSelection& se
     auto& info = sel.runtime_infos[u32(l_stage)];
     const auto& regs = (*sel.regs);
     const auto BuildCommon = [&](const auto& program) {
-        info.props.num_user_data = program.settings.num_user_regs;
-        info.props.num_input_vgprs = program.settings.vgpr_comp_cnt;
-        info.props.num_allocated_vgprs = program.NumVgprs();
         info.props.fp_denorm_mode32 = program.settings.fp_denorm_mode32;
         info.props.fp_denorm_mode16_64 = program.settings.fp_denorm_mode64;
         info.props.fp_round_mode32 = program.settings.fp_round_mode32;
         info.props.fp_round_mode16_64 = program.settings.fp_round_mode64;
+        info.props.num_allocated_vgprs = program.NumVgprs();
+        info.props.num_user_data = program.settings.num_user_regs;
+        info.props.num_input_vgprs = program.settings.vgpr_comp_cnt;
+        info.props.dx10_clamp = program.settings.dx10_clamp;
     };
     info.Initialize(stage, l_stage);
     switch (stage) {
@@ -232,6 +233,7 @@ const Shader::RuntimeInfo& PipelineCache::BuildRuntimeInfo(PipelineSelection& se
         info.hw.fs.addr_flags = regs.ps_input_addr;
         info.hw.fs.num_inputs = regs.num_interp;
         info.hw.fs.front_face_all_bits = regs.barycentric_control.front_face_all_bits;
+        info.hw.fs.depth_before_shader = regs.depth_shader_control.depth_before_shader;
         info.hw.fs.num_samples =
             regs.ps_input_addr.sample_coverage_ena && regs.ps_input_ena.sample_coverage_ena
                 ? regs.aa_config.NumSamples()
@@ -280,6 +282,7 @@ const Shader::RuntimeInfo& PipelineCache::BuildRuntimeInfo(PipelineSelection& se
         info.props.fp_denorm_mode16_64 = cs_pgm.settings.fp_denorm_mode64;
         info.props.fp_round_mode32 = cs_pgm.settings.fp_round_mode32;
         info.props.fp_round_mode16_64 = cs_pgm.settings.fp_round_mode64;
+        info.props.dx10_clamp = cs_pgm.settings.dx10_clamp;
         info.hw.cs.workgroup_size = {cs_pgm.num_thread_x.full, cs_pgm.num_thread_y.full,
                                      cs_pgm.num_thread_z.full};
         info.hw.cs.tgid_enable = {cs_pgm.IsTgidEnabled(0), cs_pgm.IsTgidEnabled(1),
@@ -296,6 +299,7 @@ const Shader::RuntimeInfo& PipelineCache::BuildRuntimeInfo(PipelineSelection& se
         info.sw.vs.step_rate_1 = regs.vgt_instance_step_rate_1;
         info.sw.vs.vertex_sgpr_offset = sel.draw_indirect_params.vertex_sgpr_offset;
         info.sw.vs.instance_sgpr_offset = sel.draw_indirect_params.instance_sgpr_offset;
+        info.sw.vs.is_indirect = sel.draw_indirect_params.is_indirect;
         info.sw.vs.tess_emulated_primitive =
             regs.primitive_type == AmdGpu::PrimitiveType::RectList ||
             regs.primitive_type == AmdGpu::PrimitiveType::QuadList;
@@ -384,8 +388,9 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
             return !instance.IsFragmentShaderBarycentricSupported() &&
                    instance.GetDriverID() == vk::DriverId::eNvidiaProprietary;
         }(),
-        .needs_lds_barriers = instance.GetDriverID() == vk::DriverId::eNvidiaProprietary ||
-                              instance.GetDriverID() == vk::DriverId::eMesaKosmickrisp,
+        // psport: by capability, not driver id; LDS ordering by subgroup barriers holds only when
+        // the compute pipeline is guaranteed a 64-lane subgroup (requiredSubgroupSize 64).
+        .needs_lds_barriers = !instance.IsSubgroupSize64Supported(),
         .needs_buffer_offsets = instance.StorageMinAlignment() > 4,
         .needs_unorm_fixup = instance.GetDriverID() == vk::DriverId::eMesaKosmickrisp,
         .needs_clip_distance_emulation = instance.GetDriverID() == vk::DriverId::eNvidiaProprietary,

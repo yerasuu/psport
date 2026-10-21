@@ -583,6 +583,7 @@ private:
         // condition and successors too (a block that branches to itself, or twice to the same one).
         case StatementType::Break:
         case StatementType::Return:
+        case StatementType::Unreachable:
             return nullptr;
         default:
             ++forward_node;
@@ -641,6 +642,9 @@ private:
                 // Labels can be ignored
                 break;
             case StatementType::Code: {
+                if (current_block && current_block != stmt.block->ir_block) {
+                    current_block->AddBranch(stmt.block->ir_block);
+                }
                 current_block = stmt.block->ir_block;
                 insert_point = current_block->end();
                 for (auto& node : syntax_list) {
