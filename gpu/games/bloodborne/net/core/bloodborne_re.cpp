@@ -998,6 +998,12 @@ T ReadValue(u64 address, size_t offset) {
         return value;
     }
 
+    if (MemoryManager::IsHostOwned(source)) {
+        if (!MemoryManager::ReadHostOwned(&value, source, sizeof(value))) {
+            value = T{};
+        }
+        return value;
+    }
     std::memcpy(&value, reinterpret_cast<const void*>(source), sizeof(value));
     return value;
 }
@@ -11790,18 +11796,93 @@ u64 BbscParamRow(u64 table, u32 id, size_t size = 8) {
     return 0;
 }
 
+// SoloParamRepository (kb #681): its slots, one per param (0 EquipParamWeapon .. 61
+// MenuValueTableParam, 62 the default), each a count (at most 8) and the resources loaded for it;
+// [[resource+0x70]+0x70] is the param file, its type name at +0x0C.
+constexpr u64 SoloParamRepositoryVtableOffset = 0x05355AB0;
+constexpr size_t SoloParamSlotsOffset = 0x70;
+constexpr size_t SoloParamSlotSize = 0x48;
+constexpr size_t SoloParamSlotCount = 63;
+constexpr s32 SoloParamSlotCapacity = 8;
+std::atomic<u64> bbsc_param_repository_finds{0};
+std::atomic<u64> bbsc_param_scan_fallbacks{0};
+
+// The repository at its global (kb #681 calls the global the instance; BbscNpcParamRow reads it as
+// a pointer): either form is taken once its vtable is there, and which one is logged once.
+u64 FindSoloParamRepository() {
+    constexpr size_t SoloParamRepositorySize =
+        SoloParamSlotsOffset + SoloParamSlotCount * SoloParamSlotSize;
+    const u64 vtable = image_base + SoloParamRepositoryVtableOffset;
+    const u64 global = image_base + SoloParamRepositoryPointerOffset;
+    const auto is_repository = [&](u64 at) {
+        return ReadablePointer(at, SoloParamRepositorySize) && ReadValue<u64>(at, 0) == vtable;
+    };
+    static std::atomic<int> logged_form{0};
+    const auto log_form = [](int form, u64 repository) {
+        int none = 0;
+        if (logged_form.compare_exchange_strong(none, form)) {
+            LOG_INFO(Debug, "BBSC params: SoloParamRepository at {:#x} ({})", repository,
+                     form == 1 ? "the global is the instance" : "the global points to it");
+        }
+    };
+    if (image_base == 0) {
+        return 0;
+    }
+    if (is_repository(global)) {
+        log_form(1, global);
+        return global;
+    }
+    if (const u64 pointed = ReadValue<u64>(global, 0); is_repository(pointed)) {
+        log_form(2, pointed);
+        return pointed;
+    }
+    return 0;
+}
+
+bool IsBbscParamTable(u64 table, u16 min_rows, u32 first_id) {
+    return ReadValue<u16>(table, 0x0A) > min_rows && ReadValue<u32>(table, 0x40) == first_id;
+}
+
 // min_rows / first_id: the table's row count must be above min_rows and its first row id first_id.
 std::vector<u64> FindBbscParamTables(std::string_view type, u16 min_rows = 1000,
                                      u32 first_id = 0) {
+    std::vector<u64> tables;
+    const u64 repository = FindSoloParamRepository();
+    const bool is_repository = repository != 0;
+    for (size_t i_slot = 0; is_repository && i_slot < SoloParamSlotCount; ++i_slot) {
+        const u64 slot = repository + SoloParamSlotsOffset + i_slot * SoloParamSlotSize;
+        const s32 c_resources = std::min(ReadValue<s32>(slot, 0), SoloParamSlotCapacity);
+        for (s32 i_resource = 0; i_resource < c_resources; ++i_resource) {
+            const u64 resource = ReadValue<u64>(slot, 0x08 + static_cast<size_t>(i_resource) * 8);
+            const u64 holder = ReadablePointer(resource, 0x78) ? ReadValue<u64>(resource, 0x70) : 0;
+            const u64 table = ReadablePointer(holder, 0x78) ? ReadValue<u64>(holder, 0x70) : 0;
+            if (ReadablePointer(table, 0x48) && ReadGuestAscii(table + 0x0C, 32) == type &&
+                IsBbscParamTable(table, min_rows, first_id) &&
+                std::ranges::find(tables, table) == tables.end()) {
+                tables.push_back(table);
+            }
+        }
+    }
+    if (!tables.empty()) {
+        bbsc_param_repository_finds.fetch_add(1, std::memory_order_relaxed);
+        return tables;
+    }
+    // A different executable, or the params not loaded yet: the old search of the whole address
+    // space for the type name, slow (seconds), kept visible.
+    const u64 c_fallbacks = bbsc_param_scan_fallbacks.fetch_add(1, std::memory_order_relaxed) + 1;
     std::vector<u8> needle(type.begin(), type.end());
     needle.push_back(0);
-    std::vector<u64> tables;
     for (const u64 hit : Core::Bbsc::FindInMemory(needle, BbscScanLow(), 0x10000000000ULL, 16)) {
         const u64 table = hit - 0x0C;
-        if (ReadValue<u16>(table, 0x0A) > min_rows && ReadValue<u32>(table, 0x40) == first_id) {
+        if (IsBbscParamTable(table, min_rows, first_id)) {
             tables.push_back(table);
         }
     }
+    LOG_WARNING(Debug,
+                "BBSC params: {} not in SoloParamRepository ({}), memory scan found {} table(s) "
+                "(scans {}, repository finds {})",
+                type, is_repository ? "no such table yet" : "repository not found", tables.size(),
+                c_fallbacks, bbsc_param_repository_finds.load(std::memory_order_relaxed));
     return tables;
 }
 
