@@ -180,12 +180,16 @@ void Store(std::atomic<T>& target, T value, bool is_changed) {
 
 void Checkbox(const char* sz_label, std::atomic<bool>& value) {
     bool is_checked = value;
-    Store(value, is_checked, ImGui::Checkbox(sz_label, &is_checked));
+    // The widget runs before Store reads is_checked: argument evaluation order is unspecified,
+    // and with Clang the copy taken before the click lost the change.
+    const bool is_changed = ImGui::Checkbox(sz_label, &is_checked);
+    Store(value, is_checked, is_changed);
 }
 
 void Slider(const char* sz_label, std::atomic<float>& value, float lo, float hi) {
     float v = value;
-    Store(value, v, ImGui::SliderFloat(sz_label, &v, lo, hi, "%.2f"));
+    const bool is_changed = ImGui::SliderFloat(sz_label, &v, lo, hi, "%.2f");
+    Store(value, v, is_changed);
 }
 
 void Hint(const char* sz_text) {
