@@ -23,6 +23,7 @@ struct Chunk {
     vk::Buffer buffer;      ///< the whole chunk, for transfers
     vk::DeviceMemory memory;
     std::uint32_t i_creation = 0; ///< creation order (stable key)
+    bool is_device_local = false; ///< in VRAM (PS_GUEST_IN_VRAM), not system memory over the bus
 };
 
 /// Whether the runtime can use such chunks: host memory the GPU imports, or dma-buf export and mmap

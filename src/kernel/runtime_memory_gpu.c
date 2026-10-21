@@ -23,7 +23,7 @@
  * 32768 hot pages (opt-in with PS_HOT_PAGES=1),
  * 65536 unprotect the 256 KiB window around a guest write fault (PS_FAULT_WINDOW KiB),
  * 131072 large guest memory copies split across copy threads (PS_COPY_THREADS),
- * 262144 with PS_ASYNC_FENCES=1: wait for guest copies at fences again,
+ * 262144 images tiled back into system memory straight there, not through VRAM (LocalTiling),
  * 524288 small guest copies batched for the copy threads instead of the recording thread,
  * 1073741824 the lock-free UpdateImage path for clean, tracked images. */
 /* Bits 32 and up: the draw pipeline and related GPU thread work (gpu/port/psport_toggles.h). */

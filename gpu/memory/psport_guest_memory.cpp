@@ -169,7 +169,9 @@ int AllocChunk(u64 phys, u64 cb_range) {
             s_chunks[i] = s_chunks[i - 1];
         }
         static std::uint32_t s_i_next = 0;
-        s_chunks[i] = new Chunk{phys, cb_range, buffer, memory, s_i_next++};
+        const bool is_device_local = static_cast<bool>(s_memory_properties.memoryTypes[type].propertyFlags &
+                                                       vk::MemoryPropertyFlagBits::eDeviceLocal);
+        s_chunks[i] = new Chunk{phys, cb_range, buffer, memory, s_i_next++, is_device_local};
         RegisterChunk(s_chunks[i]);
     }
     const u64 cb_total = s_cb_chunk.fetch_add(cb_range) + cb_range;

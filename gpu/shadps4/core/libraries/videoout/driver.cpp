@@ -739,6 +739,11 @@ void VideoOutDriver::Flip(const Request& req) {
                             "copied into VRAM for reading)\n",
                             copies / double(frames), PsStats::g_cb_shadow.exchange(0) / (frames * 1e6));
             }
+            if (const u64 tilings = PsStats::g_c_local_tilings.exchange(0)) {
+                std::printf("Local tiling: %.1f images/frame, %.1f MB/frame tiled in VRAM and copied to "
+                            "system memory\n",
+                            tilings / double(frames), PsStats::g_cb_local_tiling.exchange(0) / (frames * 1e6));
+            }
             if (const u64 allocs = PsStats::g_c_gpu_range_allocs.exchange(0)) {
                 std::printf("Guest GPU memory: %.0f ranges/s handed out, %.2f MB/s\n", allocs / window,
                             PsStats::g_cb_gpu_range_alloc.exchange(0) / (window * 1e6));

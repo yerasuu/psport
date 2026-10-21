@@ -176,6 +176,9 @@ public:
     void UnmapInPlace(VAddr addr, u64 size);
     /// Whether the range is bound to the game's own memory (no uploads, tracking or readbacks).
     [[nodiscard]] bool IsInPlace(VAddr addr, u64 size) const;
+    /// psport: whether `buffer` holds [addr, addr + size) in system memory (the game's memory in
+    /// place, unless it was allocated in VRAM), chosen by the memory type, never by the GPU.
+    [[nodiscard]] bool IsHostMemory(const Buffer* buffer, VAddr addr, u64 size) const;
     /// psport: [addr, addr + size) gets data through a path
     /// the GPU side hears of (file reads, the game's resource loaders, DMA): its blocks may then
     /// keep a VRAM copy (any thread).

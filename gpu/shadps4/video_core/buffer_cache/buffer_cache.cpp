@@ -3172,6 +3172,20 @@ void BufferCache::ProcessPendingUnmaps() {
     }
 }
 
+bool BufferCache::IsHostMemory(const Buffer* buffer, VAddr addr, u64 size) const {
+    if (buffer->mem_type == MemoryType::HostCached || buffer->mem_type == MemoryType::HostUncached) {
+        return true;
+    }
+    if (!IsInPlace(addr, size)) {
+        return false;
+    }
+    u64 phys = 0;
+    uintptr_t mapping_end = 0;
+    const PsGuestMemory::Chunk* chunk =
+        runtime_memory_direct_phys(addr, &phys, &mapping_end) ? PsGuestMemory::Find(phys) : nullptr;
+    return chunk != nullptr && !chunk->is_device_local;
+}
+
 bool BufferCache::IsInPlace(VAddr addr, u64 size) const {
     if (size == 0) {
         return false;
@@ -3473,7 +3487,7 @@ bool BufferCache::SynchronizeMemoryFromImage(const Buffer* arena, u64 arena_offs
         }
     }
     auto& tile_manager = texture_cache.GetTileManager();
-    tile_manager.TileImage(image, buffer_copies, arena, arena_offset);
+    tile_manager.TileImage(image, buffer_copies, arena, arena_offset, IsHostMemory(arena, device_addr, size));
     DropShadows(device_addr, size);
     // A GPU write like any other: what the GPU copies there each frame (a render target read as a
     // texel buffer) goes to VRAM instead of crossing PCIe twice (written there, read back).

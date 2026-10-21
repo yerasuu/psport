@@ -34,6 +34,9 @@ enum : std::uint64_t {
     HotPages = 32768,
     FaultWindow = 65536,
     ParallelCopies = 131072,
+    /// Images tiled back into system memory are tiled into VRAM and copied over in one transfer;
+    /// bit set: tiled straight into system memory, one write over the bus per texel, as before.
+    LocalTiling = 262144,
     PoolSmallCopies = 524288,
     RecordPrefetch = 1ull << 32,
     TextureViewMemo = 1ull << 33,
@@ -114,6 +117,8 @@ inline std::atomic<std::uint64_t> g_c_gpu_data_updates{0}, g_c_copied_back_block
 inline std::atomic<std::uint64_t> g_c_late_vram_writes{0}; ///< labels and the like put into VRAM copies
 /// Copies of in-place data the CPU writes into VRAM for reading (ShadowCopy).
 inline std::atomic<std::uint64_t> g_c_shadow_copies{0}, g_cb_shadow{0};
+/// Images tiled back into system memory: through VRAM with one copy (LocalTiling), and bytes.
+inline std::atomic<std::uint64_t> g_c_local_tilings{0}, g_cb_local_tiling{0};
 /// Submissions sent early because the GPU had finished everything before them.
 inline std::atomic<std::uint64_t> g_c_idle_flushes{0};
 /// EOP fences with data: decoded, and their labels written (a growing gap: lost fences, guest leaks).

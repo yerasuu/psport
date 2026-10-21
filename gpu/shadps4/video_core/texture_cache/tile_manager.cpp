@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include "psport_toggles.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_platform.h"
 #include "video_core/renderer_vulkan/vk_runtime.h"
@@ -304,7 +305,8 @@ std::pair<const Buffer*, u64> TileManager::DetileImage(const VideoCore::Buffer* 
 }
 
 void TileManager::TileImage(Image& in_image, std::span<vk::BufferImageCopy> buffer_copies,
-                            const VideoCore::Buffer* out_buffer, u64 out_offset) {
+                            const VideoCore::Buffer* out_buffer, u64 out_offset,
+                            bool is_host_destination) {
     const auto& info = in_image.info;
     if (!info.props.is_tiled) {
         for (auto& copy : buffer_copies) {
@@ -355,7 +357,38 @@ void TileManager::TileImage(Image& in_image, std::span<vk::BufferImageCopy> buff
         .offset = staging.offset,
         .range = info.guest_size,
     };
-    const auto dim_x = static_cast<u32>((info.guest_size / (info.num_bits / 8)) / 64);
+    const u64 c_texels = info.guest_size / (info.num_bits / 8);
+    const auto dim_x = static_cast<u32>(c_texels / 64);
+    // psport: the tiler writes a texel at a time at swizzled addresses; into system memory each
+    // write crossed the bus on its own (bbport 8185b88, PR #210: 17.0 to 10.4 ms of GPU a frame on
+    // an RTX 5090). Tiled into VRAM and copied over in one transfer instead, only where the tiler
+    // writes every byte of the copy: all levels back to back over guest_size and whole workgroups,
+    // otherwise the bytes it leaves alone would be overwritten.
+    u64 cb_covered = 0;
+    for (u32 mip = 0; mip < params.num_mips; ++mip) {
+        const auto& mip_info = info.mips_layout[mip];
+        cb_covered = mip_info.offset == cb_covered ? cb_covered + mip_info.size : ~0ULL;
+    }
+    if (is_host_destination && cb_covered == info.guest_size && c_texels % 64 == 0 &&
+        !PsToggle::Disabled(PsToggle::LocalTiling)) {
+        const auto local = runtime.GetStagingPool().Request(info.guest_size, MemoryType::DeviceLocal);
+        const vk::DescriptorBufferInfo local_buffer_info{
+            .buffer = local.buffer->Handle(),
+            .offset = local.offset,
+            .range = info.guest_size,
+        };
+        RecordTilingDispatch(pipeline, local_buffer_info, linear_buffer_info, params_buffer_info,
+                             dim_x);
+        runtime.AccessBuffer(local.buffer, local.offset, info.guest_size,
+                             vk::PipelineStageFlagBits2::eComputeShader,
+                             vk::AccessFlagBits2::eShaderWrite);
+        const vk::BufferCopy copy{
+            .srcOffset = local.offset, .dstOffset = out_offset, .size = info.guest_size};
+        runtime.CopyBuffer(local.buffer, out_buffer, {&copy, 1});
+        PsStats::g_c_local_tilings.fetch_add(1, std::memory_order_relaxed);
+        PsStats::g_cb_local_tiling.fetch_add(info.guest_size, std::memory_order_relaxed);
+        return;
+    }
     // psport: recorded with copies of the descriptor infos (threaded recording).
     RecordTilingDispatch(pipeline, tiled_buffer_info, linear_buffer_info,
                          params_buffer_info, dim_x);
