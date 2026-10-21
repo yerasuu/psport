@@ -392,6 +392,9 @@ static float s_mouse_sensitivity=1.0f;
 #define LOOK_DEADZONE 16
 static float s_look_gain=1.0f, s_look_tau_us=LOOK_TAU_US;
 static int s_look_deadzone=LOOK_DEADZONE;
+#define KEY_HOLD_US 60000u
+static int s_is_key_opposite_last=1;
+static uint32_t s_key_hold_us=KEY_HOLD_US;
 /* What a settings line was to a reader: not its key, its key with a value it rejected (logged), or
  * applied. */
 typedef enum { LINE_OTHER, LINE_IGNORED, LINE_APPLIED } LineResult;
@@ -532,6 +535,7 @@ static void load_bindings(void) {
         printf("Runtime: controls: the title's default layout (%d lines), psport.ini's key., pad. and mouse_look_ lines over it\n",
                apply_title_controls(sz_controls));
     s_mouse_look=1; s_mouse_invert_y=0; s_mouse_sensitivity=1.0f;
+    s_is_key_opposite_last=1; s_key_hold_us=KEY_HOLD_US;
     int pad_motion=-1, skip_movies=0;
     const char *sz_key, *sz_value;
     for (size_t i_entry=0; runtime_config_entry(i_entry,&sz_key,&sz_value); ++i_entry) {
@@ -541,6 +545,15 @@ static void load_bindings(void) {
         else if (!strcmp(sz_key,"pad_motion")) pad_motion=atoi(sz_value)!=0;
         else if (!strcmp(sz_key,"skip_movies")) skip_movies=atoi(sz_value)!=0;
         else if (!strcmp(sz_key,"mouse_invert_y")) s_mouse_invert_y=atoi(sz_value)!=0;
+        else if (!strcmp(sz_key,"key_stick_opposite")) {
+            if (!strcmp(sz_value,"last") || !strcmp(sz_value,"neutral")) s_is_key_opposite_last=!strcmp(sz_value,"last");
+            else printf("Runtime: controls: key_stick_opposite=%s ignored (psport.ini): last or neutral\n",sz_value);
+        } else if (!strcmp(sz_key,"key_stick_hold_ms")) {
+            char *p_end=NULL;
+            const long ms=strtol(sz_value,&p_end,10);
+            if (p_end!=sz_value && !*p_end && ms>=0 && ms<=200) s_key_hold_us=(uint32_t)ms*1000u;
+            else printf("Runtime: controls: key_stick_hold_ms=%s ignored (psport.ini): 0 to 200\n",sz_value);
+        }
         else if (!strcmp(sz_key,"mouse_sensitivity")) {
             const float v=strtof(sz_value,NULL);
             if (v>=0.05f && v<=20.0f) s_mouse_sensitivity=v;
@@ -550,6 +563,9 @@ static void load_bindings(void) {
     if (env_deadzone>=0 && env_deadzone<=100) s_look_deadzone=env_deadzone;
     if (s_look_gain!=1.0f || s_look_tau_us!=LOOK_TAU_US || s_look_deadzone!=LOOK_DEADZONE)
         printf("Runtime: controls: mouse look gain %.2f, smoothing %.0f ms, deadzone %d\n",s_look_gain,s_look_tau_us/1000.0f,s_look_deadzone);
+    if (!s_is_key_opposite_last || s_key_hold_us!=KEY_HOLD_US)
+        printf("Runtime: controls: keyboard stick: opposite keys %s, move held %u ms after release\n",
+               s_is_key_opposite_last ? "last wins" : "cancel",s_key_hold_us/1000u);
     runtime_pad_motion_configure(pad_motion);
     s_is_skip_enabled=runtime_env_flag("PS_SKIP_MOVIES",skip_movies);
     if (!s_is_skip_enabled) s_bindings[IN_SKIP_MOVIE].c_keys=s_bindings[IN_SKIP_MOVIE].c_pads=0;
@@ -762,24 +778,50 @@ int runtime_pad_menu_pressed(void) {
  * corner (1.41 long), a game's character snapped to the new direction and slipped into a run. The
  * keys give a direction on the unit circle instead (a diagonal as long as one key), and the stick
  * follows it as a thumb does: its length ramps up in PS_KEY_RISE_MS (70) and back in PS_KEY_FALL_MS
- * (45), its angle turns at PS_KEY_TURN_DPS (1100 degrees a second) the short way round, so a
- * reversal sweeps through the sides rather than the centre; a stick almost at rest takes the new
- * angle at once. The gamepad's stick is kept while the keys leave it at rest. */
-typedef struct { float angle, magnitude; uint64_t last_us; } KeyStick;
+ * (45), its angle turns at PS_KEY_TURN_DPS (1100 degrees a second) the short way round and at most
+ * 30 degrees a read, so a reversal sweeps through the sides rather than the centre; a stick almost
+ * at rest takes the new angle at once. A game may end a sprint when the stick passes through the
+ * centre or jumps 45 degrees between two reads (Bloodborne does), so two opposite keys held give
+ * the one pressed last (psport.ini key_stick_opposite=last, the default; neutral cancels them), and
+ * the move stick keeps its last direction key_stick_hold_ms (60, 0 to 200) after its keys are let
+ * go, so one key released just before the next is pressed is no stop. The gamepad's stick is kept
+ * while the keys leave it at rest. */
+#define KEY_TURN_MAX_STEP_RAD (30.0f*(float)M_PI/180.0f)
+typedef struct {
+    float angle, magnitude; uint64_t last_us;
+    uint64_t pressed_us[4]; /* since when left, right, up and down are held, 0 when not */
+    int held_x, held_y; uint64_t held_us;
+} KeyStick;
 static KeyStick s_move_stick, s_look_stick;
 static float key_tunable(const char *sz_name, float fallback) {
     const char *sz_value=runtime_env(sz_name,NULL);
     const float value=sz_value ? (float)atof(sz_value) : 0.0f;
     return value>0 ? value : fallback;
 }
-static void key_stick(KeyStick *p_stick, uint64_t now, int left, int right, int up, int down, uint8_t *p_out_x, uint8_t *p_out_y) {
+static int key_axis(uint64_t now, int is_minus, int is_plus, uint64_t *p_minus_us, uint64_t *p_plus_us) {
+    if (!is_minus) *p_minus_us=0; else if (!*p_minus_us) *p_minus_us=now;
+    if (!is_plus) *p_plus_us=0; else if (!*p_plus_us) *p_plus_us=now;
+    if (!is_minus || !is_plus) return is_plus-is_minus;
+    if (!s_is_key_opposite_last || *p_minus_us==*p_plus_us) return 0;
+    return *p_plus_us>*p_minus_us ? 1 : -1;
+}
+static void key_stick(KeyStick *p_stick, uint64_t now, uint32_t hold_us, int left, int right, int up, int down,
+                      uint8_t *p_out_x, uint8_t *p_out_y) {
     static float s_rise_ms, s_fall_ms, s_turn_dps;
     if (!s_rise_ms) {
         s_rise_ms=key_tunable("PS_KEY_RISE_MS",70.0f);
         s_fall_ms=key_tunable("PS_KEY_FALL_MS",45.0f);
         s_turn_dps=key_tunable("PS_KEY_TURN_DPS",1100.0f);
     }
-    const int target_x=(right ? 1 : 0)-(left ? 1 : 0), target_y=(down ? 1 : 0)-(up ? 1 : 0);
+    int target_x=key_axis(now,left,right,&p_stick->pressed_us[0],&p_stick->pressed_us[1]);
+    int target_y=key_axis(now,up,down,&p_stick->pressed_us[2],&p_stick->pressed_us[3]);
+    if (target_x || target_y) {
+        p_stick->held_x=target_x; p_stick->held_y=target_y; p_stick->held_us=now;
+    } else if ((p_stick->held_x || p_stick->held_y) && now-p_stick->held_us<hold_us) {
+        target_x=p_stick->held_x; target_y=p_stick->held_y;
+    } else {
+        p_stick->held_x=p_stick->held_y=0;
+    }
     float dt=p_stick->last_us && now>p_stick->last_us ? (float)(now-p_stick->last_us)*1e-6f : 0.0f;
     p_stick->last_us=now;
     if (dt>0.05f) dt=0.05f;
@@ -792,7 +834,7 @@ static void key_stick(KeyStick *p_stick, uint64_t now, int left, int right, int 
             float diff=target-p_stick->angle;
             while (diff>(float)M_PI) diff-=2.0f*(float)M_PI;
             while (diff<-(float)M_PI) diff+=2.0f*(float)M_PI;
-            const float step=s_turn_dps*(float)M_PI/180.0f*dt;
+            const float step=fminf(s_turn_dps*(float)M_PI/180.0f*dt,KEY_TURN_MAX_STEP_RAD);
             p_stick->angle+=diff>step ? step : diff<-step ? -step : diff;
         }
     }
@@ -812,9 +854,9 @@ static void apply_keyboard(PadData *p_pad_data, const bool *p__bool) {
     if (key_down(p__bool,IN_TOUCHPAD_RIGHT)) touch_click(p_pad_data,1);
     if (key_down(p__bool,IN_L2)) p_pad_data->l2=255;
     if (key_down(p__bool,IN_R2)) p_pad_data->r2=255;
-    key_stick(&s_move_stick,p_pad_data->timestamp,key_down(p__bool,IN_MOVE_LEFT),key_down(p__bool,IN_MOVE_RIGHT),
+    key_stick(&s_move_stick,p_pad_data->timestamp,s_key_hold_us,key_down(p__bool,IN_MOVE_LEFT),key_down(p__bool,IN_MOVE_RIGHT),
               key_down(p__bool,IN_MOVE_UP),key_down(p__bool,IN_MOVE_DOWN),&p_pad_data->left_x,&p_pad_data->left_y);
-    key_stick(&s_look_stick,p_pad_data->timestamp,key_down(p__bool,IN_LOOK_LEFT),key_down(p__bool,IN_LOOK_RIGHT),
+    key_stick(&s_look_stick,p_pad_data->timestamp,0,key_down(p__bool,IN_LOOK_LEFT),key_down(p__bool,IN_LOOK_RIGHT),
               key_down(p__bool,IN_LOOK_UP),key_down(p__bool,IN_LOOK_DOWN),&p_pad_data->right_x,&p_pad_data->right_y);
 }
 

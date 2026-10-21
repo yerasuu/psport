@@ -434,6 +434,10 @@ read through `psport_gpu_title_controls`; Bloodborne's is close to Dark Souls II
 and Black Ops II share the PC games' layout, `gpu/games/black_ops/title.cpp`); the player's
 `key.<input>=` and `pad.<input>=` lines in `psport.ini` win over both. A key may be a chord,
 `key.r2=Left Shift+Mouse Left`: while its modifier is held the key's plain bindings do not count.
+The move and look keys drive their stick as a thumb would (`key_stick` in `runtime_pad.c`): two
+opposite keys held give the one pressed last (`key_stick_opposite=last`, the default, or `neutral`,
+where they cancel), and the move stick keeps its direction `key_stick_hold_ms` (default 60, 0 to
+200) after its keys are let go, so a change of direction is never a stop that ends a sprint.
 `key.menu=` (keyboard keys, a chord allowed) and `pad.menu=` (gamepad buttons, each may be a
 two-button chord, `pad.menu=back,leftshoulder+rightshoulder`) open and close the overlay menu like
 Insert and L3+R3, which keep working; both are unbound unless set, logged when read, and listed as
