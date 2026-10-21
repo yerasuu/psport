@@ -65,7 +65,11 @@ TextureCache::TextureCache(const Vulkan::Instance& instance_, Vulkan::Scheduler&
     const s64 min_spacing_expected = device_local_memory - 1_GB;
     const s64 min_spacing_critical = device_local_memory - 512_MB;
     const s64 mem_threshold = std::min<s64>(device_local_memory, TARGET_GC_THRESHOLD);
-    const s64 min_vacancy_expected = (6 * mem_threshold) / 10;
+    // psport: 60 % of the threshold free, but at most 30 % of the budget (at least 2 GB): on an
+    // 8 GB card 60 % had the collector evicting hundreds of images every 5 s at 3 GB used (bbport
+    // 8185b88, its #204).
+    const s64 min_vacancy_expected =
+        std::min<s64>((6 * mem_threshold) / 10, std::max<s64>((3 * device_local_memory) / 10, 2_GB));
     const s64 min_vacancy_critical = (2 * mem_threshold) / 10;
     pressure_gc_memory = static_cast<u64>(
         std::max<u64>(std::min(device_local_memory - min_vacancy_expected, min_spacing_expected),
@@ -259,7 +263,7 @@ void TextureCache::WatchImage(const Image& image, const char* what) {
     }
 }
 
-void TextureCache::InvalidateMemoryFromGPU(VAddr address, size_t max_size) {
+void TextureCache::InvalidateMemoryFromGPU(VAddr address, size_t max_size, bool is_whole_image_only) {
     std::scoped_lock lock{mutex};
     // psport: only an image starting at `address` is affected, so the images over its first byte
     // are all there is to look at (the whole range was walked for every GPU write binding).
@@ -277,7 +281,8 @@ void TextureCache::InvalidateMemoryFromGPU(VAddr address, size_t max_size) {
         }
         // Only consider images that match base address.
         // TODO: Maybe also consider subresources
-        if (image.info.guest_address != address) {
+        if (image.info.guest_address != address ||
+            (is_whole_image_only && image.info.guest_size > max_size)) {
             return;
         }
         // Ensure image is reuploaded when accessed again.

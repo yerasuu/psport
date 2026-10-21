@@ -118,7 +118,9 @@ public:
     void InvalidateMemory(VAddr addr, size_t size);
 
     /// Marks an image as dirty if it exists at the provided address.
-    void InvalidateMemoryFromGPU(VAddr address, size_t max_size);
+    /// psport: `is_whole_image_only` leaves an image the write does not cover whole as it is, so
+    /// that a refresh from memory does not drop its texels only the GPU has.
+    void InvalidateMemoryFromGPU(VAddr address, size_t max_size, bool is_whole_image_only = false);
 
     /// Evicts any images that overlap the unmapped range.
     void UnmapMemory(VAddr cpu_addr, size_t size);

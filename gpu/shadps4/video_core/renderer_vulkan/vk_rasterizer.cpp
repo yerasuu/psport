@@ -217,6 +217,12 @@ bool Rasterizer::WriteDataOnGpu(VAddr address, const void* data, u32 size) {
         runtime.UpdateBuffer(mirror->first, mirror->second, {static_cast<const u8*>(data), size});
     }
     runtime.UpdateBuffer(target->first, target->second, {static_cast<const u8*>(data), size});
+    // psport: a bulk WRITE_DATA may initialise texture memory (bbport 8185b88: the FX history
+    // clears); an image there written whole is uploaded again from the new bytes, else a reload
+    // kept the previous owner's image. Fences and labels keep their fast path.
+    if (size > sizeof(u64)) {
+        texture_cache.InvalidateMemoryFromGPU(address, size, true);
+    }
     if (size <= sizeof(u64)) {
         u64 value = 0;
         std::memcpy(&value, data, size);
@@ -3145,8 +3151,12 @@ bool Rasterizer::IsComputeImageCopy(const Pipeline* pipeline, bool dry_run) {
     // Image copy must be valid
     VideoCore::Image& image0 = texture_cache.GetImage(image0_id);
     VideoCore::Image& image1 = texture_cache.GetImage(image1_id);
-    if (image0.info.guest_size != image1.info.guest_size ||
-        image0.info.pitch != image1.info.pitch || image0.info.guest_size != buf0.GetSize() ||
+    // psport: the buffers may run past the images, padding up to the next one (bbport 8185b88:
+    // 960x540 targets copied as 0x241800 bytes of 0x240000); those bytes are copied as a buffer.
+    constexpr u64 MaxCopyTail = 64_KB;
+    const u64 cb_image = image0.info.guest_size;
+    if (cb_image != image1.info.guest_size || image0.info.pitch != image1.info.pitch ||
+        buf0.GetSize() < cb_image || buf0.GetSize() - cb_image > MaxCopyTail ||
         image0.info.num_bits != image1.info.num_bits) {
         return false;
     }
@@ -3173,6 +3183,20 @@ bool Rasterizer::IsComputeImageCopy(const Pipeline* pipeline, bool dry_run) {
         return false;
     }
     runtime.CopyColorAndDepth(&src_image, &dst_image);
+    if (const u64 cb_tail = buf0.GetSize() - cb_image) {
+        const VAddr va_src_tail = src_image.info.guest_address + cb_image;
+        const VAddr va_dst_tail = dst_image.info.guest_address + cb_image;
+        const auto [p_src_buffer, off_src] = buffer_cache.ObtainBuffer(va_src_tail, u32(cb_tail), false);
+        const auto [p_dst_buffer, off_dst] = buffer_cache.ObtainBuffer(va_dst_tail, u32(cb_tail), true);
+        if (p_src_buffer && p_dst_buffer) {
+            const vk::BufferCopy copy{off_src, off_dst, cb_tail};
+            runtime.CopyBuffer(p_src_buffer, p_dst_buffer, {&copy, 1});
+            texture_cache.InvalidateMemoryFromGPU(va_dst_tail, cb_tail);
+        } else {
+            LOG_ERROR_COUNTED(Render_Vulkan, "Image copy: no buffer for the {} bytes past image {:#x}, not copied",
+                              cb_tail, dst_image.info.guest_address);
+        }
+    }
     return true;
 }
 

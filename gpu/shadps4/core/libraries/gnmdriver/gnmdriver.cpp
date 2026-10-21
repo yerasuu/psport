@@ -40,6 +40,9 @@ using namespace AmdGpu;
 
 /// Hands the packets a sceGnm call wrote into the game's command buffer to the game's profile
 /// once the call has written them (at the end of its scope).
+// psport: `dwords` is what the call writes, not the buffer it was given: the init calls write
+// HwInitPacketSize of a larger buffer, and the profile's hook scanned the rest as fresh commands
+// (bbport 8185b88).
 struct DriverWrite {
     u32* commands;
     u64 dwords;
@@ -568,7 +571,7 @@ s32 PS4_SYSV_ABI sceGnmDispatchIndirectOnMec(u32* cmdbuf, u32 size, VAddr args, 
 
 u32 PS4_SYSV_ABI sceGnmDispatchInitDefaultHardwareState(u32* cmdbuf, u32 size) {
     PsCpCensus::NoteDriverCall(__func__);
-    DriverWrite driver_write{cmdbuf, size};
+    DriverWrite driver_write{cmdbuf, size < HwInitPacketSize ? 0u : HwInitPacketSize};
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (size < HwInitPacketSize) {
@@ -821,7 +824,7 @@ s32 PS4_SYSV_ABI sceGnmDrawIndirectMulti(u32* cmdbuf, u32 size, u32 data_offset,
 
 u32 PS4_SYSV_ABI sceGnmDrawInitDefaultHardwareState(u32* cmdbuf, u32 size) {
     PsCpCensus::NoteDriverCall(__func__);
-    DriverWrite driver_write{cmdbuf, size};
+    DriverWrite driver_write{cmdbuf, size < HwInitPacketSize ? 0u : HwInitPacketSize};
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (size < HwInitPacketSize) {
@@ -848,7 +851,7 @@ u32 PS4_SYSV_ABI sceGnmDrawInitDefaultHardwareState(u32* cmdbuf, u32 size) {
 
 u32 PS4_SYSV_ABI sceGnmDrawInitDefaultHardwareState175(u32* cmdbuf, u32 size) {
     PsCpCensus::NoteDriverCall(__func__);
-    DriverWrite driver_write{cmdbuf, size};
+    DriverWrite driver_write{cmdbuf, size < HwInitPacketSize ? 0u : HwInitPacketSize};
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (size < HwInitPacketSize) {
@@ -868,7 +871,7 @@ u32 PS4_SYSV_ABI sceGnmDrawInitDefaultHardwareState175(u32* cmdbuf, u32 size) {
 
 u32 PS4_SYSV_ABI sceGnmDrawInitDefaultHardwareState200(u32* cmdbuf, u32 size) {
     PsCpCensus::NoteDriverCall(__func__);
-    DriverWrite driver_write{cmdbuf, size};
+    DriverWrite driver_write{cmdbuf, size < HwInitPacketSize ? 0u : HwInitPacketSize};
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (size < HwInitPacketSize) {
@@ -906,7 +909,7 @@ u32 PS4_SYSV_ABI sceGnmDrawInitDefaultHardwareState200(u32* cmdbuf, u32 size) {
 
 u32 PS4_SYSV_ABI sceGnmDrawInitDefaultHardwareState350(u32* cmdbuf, u32 size) {
     PsCpCensus::NoteDriverCall(__func__);
-    DriverWrite driver_write{cmdbuf, size};
+    DriverWrite driver_write{cmdbuf, size < HwInitPacketSize ? 0u : HwInitPacketSize};
     LOG_TRACE(Lib_GnmDriver, "called");
 
     if (size < HwInitPacketSize) {
