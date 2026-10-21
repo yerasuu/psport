@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <atomic>
 #include <cstdio>
 #include <boost/container/static_vector.hpp>
 #include <fmt/format.h>
@@ -26,6 +27,9 @@ extern "C" int runtime_debug_open(const char* sz_name); // psport: src/runtime/r
 namespace Vulkan {
 
 namespace {
+
+// Atomic because a worker thread that sees the device lost reads it while ~Instance may clear it.
+std::atomic<VkDevice> s_h_fault_device{VK_NULL_HANDLE};
 
 /// psport PS_VRAM_LIMIT_MB=N (tests): the driver's VRAM budget taken as at most N MiB, at startup
 /// and while the game runs, so the texture collector and VRAM copies behave as on a smaller card
@@ -245,6 +249,7 @@ std::string Instance::DescribeFailure() const {
 }
 
 Instance::~Instance() {
+    s_h_fault_device.store(VK_NULL_HANDLE, std::memory_order_release);
     ImGui::Core::Shutdown(GetDevice());
     vmaDestroyAllocator(allocator);
 }
@@ -281,7 +286,7 @@ bool Instance::CreateDevice() {
         vk::PhysicalDeviceComputeShaderDerivativesFeaturesKHR,
         vk::PhysicalDeviceShaderMixedFloatDotProductFeaturesVALVE,
         vk::PhysicalDeviceCooperativeMatrixFeaturesKHR, vk::PhysicalDeviceShaderFloat8FeaturesEXT,
-        vk::PhysicalDeviceTransformFeedbackFeaturesEXT>();
+        vk::PhysicalDeviceTransformFeedbackFeaturesEXT, vk::PhysicalDeviceFaultFeaturesEXT>();
     features = feature_chain.get().features;
 
     const vk::StructureChain properties_chain = physical_device.getProperties2<
@@ -345,6 +350,9 @@ bool Instance::CreateDevice() {
     maintenance_8 = add_extension(VK_KHR_MAINTENANCE_8_EXTENSION_NAME);
     // psport: GPU breadcrumbs (vk_breadcrumbs.h).
     buffer_marker = add_extension(VK_AMD_BUFFER_MARKER_EXTENSION_NAME);
+    // psport: the driver's fault report at device lost (ReportDeviceFault).
+    device_fault = feature_chain.get<vk::PhysicalDeviceFaultFeaturesEXT>().deviceFault &&
+                   add_extension(VK_EXT_DEVICE_FAULT_EXTENSION_NAME);
     attachment_feedback_loop = add_extension(VK_EXT_ATTACHMENT_FEEDBACK_LOOP_LAYOUT_EXTENSION_NAME);
     if (attachment_feedback_loop) {
         attachment_feedback_loop =
@@ -656,6 +664,9 @@ bool Instance::CreateDevice() {
         vk::PhysicalDeviceMaintenance5FeaturesKHR{
             .maintenance5 = true,
         },
+        vk::PhysicalDeviceFaultFeaturesEXT{
+            .deviceFault = true,
+        },
         vk::PhysicalDeviceMaintenance8FeaturesKHR{
             .maintenance8 = true,
         },
@@ -737,6 +748,9 @@ bool Instance::CreateDevice() {
     }
     if (!maintenance_5) {
         device_chain.unlink<vk::PhysicalDeviceMaintenance5FeaturesKHR>();
+    }
+    if (!device_fault) {
+        device_chain.unlink<vk::PhysicalDeviceFaultFeaturesEXT>();
     }
     if (!maintenance_8) {
         device_chain.unlink<vk::PhysicalDeviceMaintenance8FeaturesKHR>();
@@ -824,6 +838,10 @@ bool Instance::CreateDevice() {
     require_commands(host_memory_import,
                      reinterpret_cast<const void*>(dispatch.vkGetMemoryHostPointerPropertiesEXT),
                      VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME);
+    require_commands(device_fault, reinterpret_cast<const void*>(dispatch.vkGetDeviceFaultInfoEXT),
+                     VK_EXT_DEVICE_FAULT_EXTENSION_NAME);
+    s_h_fault_device.store(device_fault ? static_cast<VkDevice>(*device) : VK_NULL_HANDLE,
+                           std::memory_order_release);
     if (Dlss* dlss = Dlss::Get()) {
         dlss->Initialize(*instance, physical_device, *device);
     }
@@ -871,6 +889,50 @@ bool Instance::CreateDevice() {
 
 namespace {
 const Instance* stats_instance = nullptr;
+}
+
+void ReportDeviceFault() {
+    const vk::Device h_fault_device{s_h_fault_device.load(std::memory_order_acquire)};
+    if (!h_fault_device) {
+        std::printf("GPU fault report: none, the device has no VK_EXT_device_fault\n");
+        return;
+    }
+    vk::DeviceFaultCountsEXT counts{};
+    const vk::Result counts_result = h_fault_device.getFaultInfoEXT(&counts, nullptr);
+    if (counts_result != vk::Result::eSuccess) {
+        std::printf("GPU fault report: the driver gave none (%s)\n",
+                    vk::to_string(counts_result).c_str());
+        return;
+    }
+    std::vector<vk::DeviceFaultAddressInfoEXT> addresses(counts.addressInfoCount);
+    std::vector<vk::DeviceFaultVendorInfoEXT> vendor_infos(counts.vendorInfoCount);
+    // The vendor's binary dump needs deviceFaultVendorBinary and is not read.
+    counts.vendorBinarySize = 0;
+    vk::DeviceFaultInfoEXT info{
+        .pAddressInfos = addresses.data(),
+        .pVendorInfos = vendor_infos.data(),
+    };
+    const vk::Result info_result = h_fault_device.getFaultInfoEXT(&counts, &info);
+    if (info_result != vk::Result::eSuccess && info_result != vk::Result::eIncomplete) {
+        std::printf("GPU fault report: the driver gave none (%s)\n",
+                    vk::to_string(info_result).c_str());
+        return;
+    }
+    std::printf("GPU fault report: %s\n", info.description.data());
+    for (u32 i = 0; i < counts.addressInfoCount; ++i) {
+        const auto& address = addresses[i];
+        std::printf("GPU fault report: address %s %#llx (precision %#llx)\n",
+                    vk::to_string(address.addressType).c_str(),
+                    static_cast<unsigned long long>(address.reportedAddress),
+                    static_cast<unsigned long long>(address.addressPrecision));
+    }
+    for (u32 i = 0; i < counts.vendorInfoCount; ++i) {
+        const auto& vendor_info = vendor_infos[i];
+        std::printf("GPU fault report: vendor fault %s (code %#llx, data %#llx)\n",
+                    vendor_info.description.data(),
+                    static_cast<unsigned long long>(vendor_info.vendorFaultCode),
+                    static_cast<unsigned long long>(vendor_info.vendorFaultData));
+    }
 }
 
 void VmaDeviceUsage(u64& block_bytes, u64& allocation_bytes) {

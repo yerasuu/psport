@@ -39,7 +39,8 @@ void Mark(vk::CommandBuffer cmdbuf, u32 stream, u32 id, bool is_after);
 /// report and the statistics show them), ~0u when off. CopyArgs is recorded before the dispatch.
 u32 ArgsSlot();
 void CopyArgs(vk::CommandBuffer cmdbuf, vk::Buffer args, u64 off_source, u32 slot);
-/// Device lost: prints, per stream, the command the GPU did not finish and what it was.
+/// Device lost: prints the driver's fault report (ReportDeviceFault) and, per stream, the command
+/// the GPU did not finish and what it was.
 void ReportDeviceLost(const char* sz_where);
 /// The same report, once, while the GPU has not finished submitted work for a long time (no
 /// device lost yet: a reset may never come, or the waiting thread would not see it).

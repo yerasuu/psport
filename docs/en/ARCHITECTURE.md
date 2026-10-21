@@ -404,8 +404,9 @@ sampler the driver refuses is replaced by a default linear sampler made at start
 the presenter's frame images retry over the budget too; FSR is left out of a frame that cannot
 have them, and a frame image keeps its previous size.
 `Vulkan::Check` (`vk_platform.h`) logs a failed call and leaves its result null for the caller to
-check. A lost device cannot be recovered from: `Vulkan::StopOnDeviceLost` prints the breadcrumbs,
-`STOP: GPU device lost (<where>)` and the call summary, and exits with code 24. A value from
+check. A lost device cannot be recovered from: `Vulkan::StopOnDeviceLost` prints the driver's
+fault report (`GPU fault report: ...`, from `VK_EXT_device_fault` where the device has it), the
+breadcrumbs, `STOP: GPU device lost (<where>)` and the call summary, and exits with code 24. A value from
 the game that the translator cannot map (a data or number format, tile mode, macro tile mode,
 array mode, sample count, primitive type, blend, stencil or sampler enum) takes a fallback: a
 compatible format (the same data format with another number format, D32 for depth), linear

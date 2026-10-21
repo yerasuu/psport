@@ -274,7 +274,11 @@ void Report(const char* sz_title, const char* sz_where);
 
 void ReportDeviceLost(const char* sz_where) {
     static std::atomic_flag s_reported = ATOMIC_FLAG_INIT;
-    if (s_is_enabled && !s_reported.test_and_set()) {
+    if (s_reported.test_and_set()) {
+        return;
+    }
+    ReportDeviceFault();
+    if (s_is_enabled) {
         Report("at device lost", sz_where);
     }
 }

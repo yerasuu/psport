@@ -670,6 +670,7 @@ private:
     bool maintenance_5{};
     bool maintenance_8{};
     bool buffer_marker{};
+    bool device_fault{}; // psport: VK_EXT_device_fault (ReportDeviceFault)
     bool attachment_feedback_loop{};
     bool image_2d_view_of_3d{};
     bool image_view_min_lod{};
@@ -687,5 +688,9 @@ private:
 /// psport memory statistics: device-local VMA memory blocks and the allocations in them (the
 /// difference is free space VMA keeps).
 void VmaDeviceUsage(u64& block_bytes, u64& allocation_bytes);
+
+/// psport: device lost: prints the driver's fault report (VK_EXT_device_fault), or that the device
+/// gives none. The device must be lost already, since the query is only valid then.
+void ReportDeviceFault();
 
 } // namespace Vulkan
