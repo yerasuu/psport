@@ -1,9 +1,9 @@
 /* NID -> function name and the result with which the export reports a state its caller polls or
- * waits for (no event pending, timed out, busy, would block, already held by the caller), a
- * getter's "never set", or the error retail firmware itself always returns (the GnmDriver resource
- * registration calls, which only work under the debugger): expected results, not failures, so the
- * call report counts these apart. Sorted by NID in strcmp order, then by result, for a binary
- * search. Kept by hand from the codes the runtime's implementations return. */
+ * waits for (no event pending, timed out, woken by an abort, busy, would block, already held by the
+ * caller), a getter's "never set", or the error retail firmware itself always returns (the
+ * GnmDriver resource registration calls, which only work under the debugger): expected results,
+ * not failures, so the call report counts these apart. Sorted by NID in strcmp order, then by
+ * result, for a binary search. Kept by hand from the codes the runtime's implementations return. */
 {"0a2TBNfE3BU","sceHttpGetStatusCode",0x80431082},
 {"12wOHk8ywb0","sceKernelPollSema",0x80020010},
 {"2QfqfeLblbg","sceFontStyleFrameGetScalePixel",0x80460058},
@@ -33,6 +33,7 @@
 {"adh--6nIqTk","scePthreadRwlockTimedwrlock",0x8002003c},
 {"bIHoZCTomsI","scePthreadRwlockTrywrlock",0x80020010},
 {"beRjXBn-z+o","sceNetSend",0x80410123},
+{"drjIbDbA7UQ","sceNetEpollWait",0x80410104},
 {"fZOeZIOEmLw","send",35},
 {"fhKwCVVj9nk","sceGnmUnregisterOwnerAndResources",0x8eee00ff},
 {"fjN6NQHhK8k","scePthreadSemTimedwait",0x8002003c},
