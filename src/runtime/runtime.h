@@ -146,6 +146,12 @@ int32_t runtime_thread_kill(void *p_thread, int host_signal);
 void runtime_kernel_set_signal_mask(const uint32_t bits[4]);
 uintptr_t runtime_exception_resolve(const char *sz_name);
 void runtime_exception_report(void);
+/* The calling thread runs a guest exception handler from inside the host's signal delivery: code
+ * that leaves by a long jump must not cross those host frames. */
+int runtime_exception_is_delivering(void);
+/* The calling thread holds a runtime lock or a hold (runtime_exception_hold): a long jump out
+ * would leave it held. */
+int runtime_exception_is_holding(void);
 #ifndef _WIN32
 #include <pthread.h>
 /* The host signal a guest exception raise arrives on, for the masks around a thread's start. */
@@ -174,6 +180,7 @@ void runtime_sema_report(void);
 uintptr_t runtime_eventflag_resolve(const char *sz_name);
 uintptr_t runtime_ulobjmgr_resolve(const char *sz_name);
 uintptr_t runtime_ult_resolve(const char *sz_name);
+void runtime_ult_report(void);
 void runtime_eventflag_report(void);
 void runtime_eventflag_created_report(void);
 void runtime_content_configure(const uint32_t values[5]);
@@ -236,6 +243,9 @@ uintptr_t runtime_net_resolve(const char *sz_name);
 /* Guest threads for host code (the online module's NP threads); 0 or a positive errno value. */
 int32_t runtime_thread_spawn(void **pp_thread, void *(ABI *pfn_entry)(void *), void *p_argument, uint64_t stack, const char *sz_name);
 int32_t runtime_thread_join_spawned(void *p_thread, void **pp_result);
+/* Run on the calling guest thread once it ends, whether its entry returns or it leaves by
+ * scePthreadExit or a cancel: libSceUlt finishes a user-level thread there. */
+void runtime_thread_set_exit_hook(void (*pfn_hook)(void));
 void runtime_file_report(void);
 void runtime_file_unmounted_report(void);
 void runtime_file_configure(const char *sz_app0, const char *sz_user);

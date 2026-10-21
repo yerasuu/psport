@@ -53,6 +53,7 @@ static ThreadAttr *s_p_attributes;
 static GuestThread *s_p_threads;
 static _Thread_local GuestThread *s_p_current;
 static _Thread_local int32_t s_guest_errno;
+static _Thread_local void (*s_pfn_exit_hook)(void);
 static const unsigned char *s_p_tls_template;
 static uint64_t s_tls_filesz, s_tls_memsz, s_tls_align=16;
 static size_t s_c_created, s_c_joined, s_c_exited;
@@ -298,6 +299,7 @@ static void *host_start(void *p_argument) {
     record_stack(p_thread);
     ps_host_thread_set_name(p_thread->name);
     if (!setjmp(p_thread->exit_jump)) p_thread->result=p_thread->entry(p_thread->argument);
+    if (s_pfn_exit_hook) s_pfn_exit_hook();
     runtime_thread_keys_cleanup();
     runtime_exception_lock(&s_lock); p_thread->finished=1; ++s_c_exited; runtime_exception_unlock(&s_lock);
     return p_thread->result;
@@ -492,6 +494,7 @@ int32_t runtime_thread_spawn(void **pp_out,void *(ABI *pfn_entry)(void *),void *
     if (p_attr) attr_destroy(&p_attr);
     return posix(r);
 }
+void runtime_thread_set_exit_hook(void (*pfn_hook)(void)) { s_pfn_exit_hook=pfn_hook; }
 int32_t runtime_thread_join_spawned(void *p_thread,void **pp_result) {
     return posix(thread_join((GuestThread *)p_thread,pp_result));
 }

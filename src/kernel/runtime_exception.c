@@ -251,7 +251,11 @@ void runtime_exception_report(void) {
     unsigned r=atomic_load(&s_c_raised);
     if (r) printf("Runtime: exceptions raised=%u, delivered=%u\n",r,atomic_load(&s_c_delivered));
 }
+int runtime_exception_is_delivering(void) { return s_delivery.is_active; }
+int runtime_exception_is_holding(void) { return s_held!=0; }
 #else
 uintptr_t runtime_exception_resolve(const char *name) { (void)name; return 0; }
 void runtime_exception_report(void) {}
+int runtime_exception_is_delivering(void) { return 0; }
+int runtime_exception_is_holding(void) { return 0; }
 #endif
