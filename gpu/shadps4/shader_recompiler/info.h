@@ -217,12 +217,23 @@ struct Info : InfoPersistent {
 
     template <typename T>
     T ReadUdReg(u32 ptr_index, u32 dword_offset) const noexcept {
-        T data;
+        T data{};
         const auto ud = UserData();
         const u32* base = ud.data();
         if (ptr_index != IR::NumScalarRegs) {
+            // psport: a missing or null table (a failed game allocation) reads as an empty
+            // descriptor, as an unavailable SRT walker load does, not as a host read at the offset
+            // (bbport 8185b88, its crash 139).
+            if (ptr_index >= ud.size() || ud.size() - ptr_index < 2) {
+                return data;
+            }
             std::memcpy(&base, &ud[ptr_index], sizeof(base));
             base = reinterpret_cast<const u32*>(VAddr(base) & 0xFFFFFFFFFFFFULL);
+            if (base == nullptr) {
+                return data;
+            }
+        } else if (dword_offset > ud.size() || sizeof(T) > (ud.size() - dword_offset) * sizeof(u32)) {
+            return data;
         }
         std::memcpy(&data, base + dword_offset, sizeof(T));
         return data;
