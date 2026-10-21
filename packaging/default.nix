@@ -31,7 +31,19 @@ let
       in builtins.elem rel wanted || builtins.elem rel dlssFiles || isNgx rel
         || lib.any (dir: lib.hasPrefix (dir + "/") rel) assetDirs;
   };
-  python = pkgs.python3.withPackages (ps: [ ps.pygobject3 ]);
+  # The launcher's Python without what it never runs: its build configuration (C extensions are
+  # built here, never at run time), IDLE and turtledemo, tkinter (no Tk in the closure anyway) and
+  # the test suite. The stdlib's bytecode stays, otherwise the read-only store makes every start
+  # recompile it. `self` points the package set at this interpreter, so that `withPackages` builds
+  # PyGObject against it instead of bringing the full Python back.
+  python3 = pkgs.python3.override {
+    self = python3;
+    stripConfig = true;
+    stripIdlelib = true;
+    stripTkinter = true;
+    stripTests = true;
+  };
+  python = python3.withPackages (ps: [ ps.pygobject3 ]);
   # FSR 4.1.1 from the user's own AMD DLL (the launcher's button, tools/fsr4cap/build_assets.sh):
   # its two tools built here, so that the package needs no compiler and no network for it. Proton
   # (GE-Proton 10+) and Steam's runtime come from the user's Steam. On NixOS the recording runs
@@ -211,17 +223,17 @@ pkgs.stdenv.mkDerivation {
       "''${gappsWrapperArgs[@]}" \
       ${common}      --add-flags "$out/share/psport/launcher/psport_vulkan.py ${python}/bin/python3 $out/share/psport/launcher/psport_launcher.py" \
       --set PS_PREBUILT 1 \
-      --set PYTHON ${pkgs.python3}/bin/python3 \
+      --set PYTHON ${python}/bin/python3 \
       --set PS_BUNDLED_VK_DRIVER_FILES ${icds} \
       --prefix PATH : ${lib.makeBinPath [ pkgs.bash pkgs.coreutils pkgs.util-linux pkgs.procps
                                           pkgs.gawk pkgs.gnused pkgs.gnugrep pkgs.spirv-tools
                                           pkgs.systemdMinimal ]} \
       --run '${dataDir}'
     # The game alone, without the launcher (settings from the data directory's psport.ini).
-    makeShellWrapper ${pkgs.python3}/bin/python3 $out/bin/psport-game \
+    makeShellWrapper ${python}/bin/python3 $out/bin/psport-game \
       ${common}      --add-flags "$out/share/psport/launcher/psport_vulkan.py ${pkgs.bash}/bin/bash $out/share/psport/run.sh" \
       --set PS_PREBUILT 1 \
-      --set PYTHON ${pkgs.python3}/bin/python3 \
+      --set PYTHON ${python}/bin/python3 \
       --set PS_BUNDLED_VK_DRIVER_FILES ${icds} \
       --prefix PATH : ${lib.makeBinPath [ pkgs.bash pkgs.coreutils pkgs.procps ]} \
       --run '${dataDir}'
