@@ -161,7 +161,7 @@ static int fault(PsHostFaultContext *p_context) {
     if (g_is_gpu_enabled && kind == PS_HOST_FAULT_ACCESS && psport_gpu_handle_fault(p_context, p_address)) return 1;
     /* A speculative guest memory read (runtime_memory.c) failed: resume its recovery point. */
     if ((kind == PS_HOST_FAULT_ACCESS || kind == PS_HOST_FAULT_BUS) && g_p_runtime_fault_recover) {
-        sigjmp_buf *p_recover = g_p_runtime_fault_recover;
+        PsHostRecoveryPoint *p_recover = g_p_runtime_fault_recover;
         g_p_runtime_fault_recover = NULL;
         ps_host_fault_recover(p_context, p_recover);
     }

@@ -19,5 +19,9 @@ int ps_win32_to_utf8(const wchar_t *sz_wide, char *sz_out, size_t cb_out);
 #define PS_WIN32_SECTION_BASE 0x50000000
 /* 0, or EBADF when h_section is not an open section. Views of it stay valid until unmapped. */
 int ps_win32_section_close(int h_section);
+/* Around a wait on an address (host_thread.c), so that an interrupt wakes the thread to run
+ * (host_fault.c). */
+void ps_win32_wait_begin(const void *p_word);
+void ps_win32_wait_end(void);
 
 #endif

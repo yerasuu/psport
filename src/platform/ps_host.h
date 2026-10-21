@@ -449,10 +449,13 @@ void ps_host_fault_cpu(const PsHostFaultContext *p_context, PsHostFaultCpu *p_ou
 /* PS_HOST_RECOVERY_SET marks a recovery point (a macro, since it must run in the reader's own
  * frame): 0 when set, nonzero when a fault or PS_HOST_RECOVERY_JUMP comes back to it. */
 #ifdef _WIN32
-/* Windows has no sigjmp_buf; its recovery points come with its fault handling. */
-typedef jmp_buf PsHostRecoveryPoint;
-#define PS_HOST_RECOVERY_SET(point) setjmp(point)
-#define PS_HOST_RECOVERY_JUMP(point) longjmp(point, 1)
+/* Hand-written (src/platform/win32/host_fault.c), since the C runtime's longjmp unwinds through SEH,
+ * which stops at guest frames that have no unwind data. */
+typedef uint64_t PsHostRecoveryPoint[32];
+__attribute__((returns_twice)) int ps_host_recovery_set(PsHostRecoveryPoint point);
+__attribute__((noreturn)) void ps_host_recovery_jump(PsHostRecoveryPoint point, int value);
+#define PS_HOST_RECOVERY_SET(point) ps_host_recovery_set(point)
+#define PS_HOST_RECOVERY_JUMP(point) ps_host_recovery_jump(point, 1)
 #else
 typedef sigjmp_buf PsHostRecoveryPoint;
 #define PS_HOST_RECOVERY_SET(point) sigsetjmp(point, 0)

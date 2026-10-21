@@ -57,6 +57,17 @@ FEATURE_HOST(write_traps, LINUX, IMPLEMENTED,
              "SIGSEGV, SIGBUS, SIGILL, SIGFPE and SIGTRAP handlers reading the ucontext, siglongjmp recovery and "
              "process_vm_readv (src/platform/linux/host_fault.c) over mprotect",
              "#540")
+FEATURE_HOST(write_traps, WIN32, EXPERIMENTAL,
+             "a first vectored exception handler mapping access violations, in-page errors, illegal and privileged "
+             "instructions, divide and floating-point exceptions, int3 (rip moved past it) and single steps to the "
+             "handlers with the CONTEXT's registers; recovery by resuming the thread in a hand-written longjmp outside "
+             "the dispatch; NtRead/NtWriteVirtualMemory page by page (src/platform/win32/host_fault.c); checked under "
+             "Proton with a test program (recovery, int3, copies, backtrace), not run with a game yet. Windows writes "
+             "the exception frame into the 128-byte System V red zone below the guest's rsp before any handler runs "
+             "(Supermedo bc893e2): a write trap in a guest leaf function can corrupt its locals, which the handler "
+             "cannot prevent; first-chance exceptions a host library would catch itself (SEH) reach psport's handlers "
+             "too",
+             "#614")
 
 FEATURE(guest_tls, tls, "the guest's thread-local storage: a TCB and static TLS per thread, the thread pointer on GS")
 FEATURE_HOST(guest_tls, LINUX, IMPLEMENTED,
@@ -78,7 +89,11 @@ FEATURE_HOST(threads, WIN32, EXPERIMENTAL,
              "WaitOnAddress and WakeByAddress (within the process; the wake count is the one asked for), "
              "SetThreadDescription, Toolhelp thread lists, GetCurrentThreadStackLimits, the process affinity mask and "
              "THREAD_PRIORITY_IDLE (src/platform/win32/host_thread.c), compile-checked with mingw-w64, not run yet; "
-             "no interrupts (guest exception, thread dump, watchdog, samples)",
+             "interrupts by suspending the thread and redirecting it below the red zone to a stub that saves its "
+             "registers and AVX state, runs the handler and resumes through iretq, held and pending per thread in "
+             "place of a signal mask, a thread waiting on an address woken to take it, other blocking calls taking it "
+             "when they return; the watchdog a waitable timer on a thread of its own (src/platform/win32/host_fault.c), "
+             "checked under Proton with a test program, not run with a game yet",
              "#614")
 
 FEATURE(time, time, "clocks, sleeping and the time stamp counter")

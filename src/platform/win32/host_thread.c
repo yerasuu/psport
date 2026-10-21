@@ -15,7 +15,8 @@ int ps_host_backtrace(void **pp_frames, int c_frames) {
 
 /* WaitOnAddress pairs waits and wakes within one process only, which is all psport's guest has:
  * a shared wait (is_private 0) is served the same way. No signal ends a wait early, so EINTR never
- * comes; a wake may still return without the word changing, as futex allows. */
+ * comes; a wake may still return without the word changing, as futex allows, and an interrupt to
+ * the thread wakes it that way (ps_host_interrupt_thread). */
 int ps_host_wait_on_address(const void *p_word, uint32_t expected, int is_private, PsHostClock clock,
                             const struct timespec *p_deadline) {
     (void)is_private;
@@ -32,8 +33,11 @@ int ps_host_wait_on_address(const void *p_word, uint32_t expected, int is_privat
         const uint64_t ms = ((uint64_t)remaining_ns + 999999u) / 1000000u;
         timeout_ms = ms >= INFINITE ? INFINITE - 1 : (DWORD)ms;
     }
-    if (WaitOnAddress(p_watched, &expected, sizeof(expected), timeout_ms)) return 0;
+    ps_win32_wait_begin(p_word);
+    const BOOL is_woken = WaitOnAddress(p_watched, &expected, sizeof(expected), timeout_ms);
     const DWORD error = GetLastError();
+    ps_win32_wait_end();
+    if (is_woken) return 0;
     return error == ERROR_TIMEOUT ? ETIMEDOUT : ps_win32_errno(error);
 }
 
