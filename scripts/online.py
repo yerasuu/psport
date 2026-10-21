@@ -125,6 +125,10 @@ def check(server, webapi, community):
         with urllib.request.urlopen(community + ':20443/bb-eu/ss.info', timeout=6) as reply:
             reply.read(64)
         results.append(('game', community, True, ''))
+    except urllib.error.HTTPError as error:
+        # A status below 500 (403 from a proxy in front of it, 404 for the path) means the server
+        # answered; 5xx is the proxy saying the server behind it is down.
+        results.append(('game', community, error.code < 500, f'HTTP {error.code}'))
     except (OSError, ValueError) as error:
         results.append(('game', community, False, str(error)))
     host, _sep, port = server.rpartition(':')
@@ -175,6 +179,12 @@ def local_server(title, user_dir, community, server):
             with urllib.request.urlopen(status, timeout=5) as reply:
                 reply.read(64)
             return []
+        except urllib.error.HTTPError as error:
+            if error.code < 500:
+                print(f'Co-op: {status} answers HTTP {error.code}: its game server is up', file=sys.stderr)
+                return []
+            print(f'Co-op: {status} answers HTTP {error.code}: the game server runs on this PC',
+                  file=sys.stderr)
         except (OSError, ValueError) as error:
             print(f'Co-op: {status} does not answer ({error}): the game server runs on this PC',
                   file=sys.stderr)

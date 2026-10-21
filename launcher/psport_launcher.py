@@ -149,8 +149,14 @@ PRESENT_MODES = [("Mailbox", "Mailbox"), ("FIFO (VSync)", "Fifo"),
 # choice labels stay short, so the selected one is shown in full.
 DRAW_PIPE = [("Авто", "", "Включён при 8 и более потоках процессора"), ("Включён", "1"),
              ("Выключен", "0", "Стабильнее, но медленнее")]
-LANGUAGES = [("Английский", "1"), ("Русский", "8"), ("Японский", "0"), ("Французский", "2"),
-             ("Испанский", "3"), ("Немецкий", "4"), ("Итальянский", "5")]
+# The game's text languages by the PS4 system language code (PS_LANGUAGE).
+LANGUAGES = [("Английский", "1"), ("Английский (Великобритания)", "18"), ("Русский", "8"),
+             ("Японский", "0"), ("Французский", "2"), ("Испанский", "3"),
+             ("Испанский (Латинская Америка)", "20"), ("Немецкий", "4"), ("Итальянский", "5"),
+             ("Нидерландский", "6"), ("Португальский", "7"), ("Португальский (Бразилия)", "17"),
+             ("Польский", "16"), ("Турецкий", "19"), ("Корейский", "9"),
+             ("Китайский (упрощённый)", "11"), ("Китайский (традиционный)", "10"),
+             ("Финский", "12"), ("Шведский", "13"), ("Датский", "14"), ("Норвежский", "15")]
 LIVE_RESOLUTION = [("Авто (по видеокарте)", "auto"), ("Выключена (быстрее)", "0"), ("Включена", "1")]
 READBACKS = [("Relaxed", "", "По умолчанию"), ("Выключены", "0"), ("Precise", "2")]
 
@@ -168,6 +174,8 @@ DEFAULTS = {
     "gamepad": "",
     "gamepad_name": "",
     "display": "",
+    # The GPU by its Vulkan name ("" = psport's choice: a discrete one first).
+    "gpu": "",
     "skip_network_choice": True,
     "fps_mode": "uncap",
     "fps_limit": 0,
@@ -261,12 +269,15 @@ def load_ini():
 
 def save_ini(values, lines):
     """Rewrites the edited keys in place, appends missing ones, keeps comments and others; a key
-    whose value is None is removed (a control binding back to its default)."""
+    whose value is None is removed (a control binding back to its default). A key repeated in the
+    file keeps only its first line, so saving never multiplies it."""
     written = set()
     out = []
     for line in lines:
         if "=" in line and not line.lstrip().startswith("#"):
             key = line.split("=", 1)[0].strip()
+            if key in written:
+                continue
             if key in values:
                 if values[key] is not None:
                     out.append(f"{key}={values[key]}")
@@ -357,6 +368,14 @@ def game_environment(s):
         env["PS_GAMEPAD"] = s["gamepad"]
     if s.get("display"):
         env["PS_DISPLAY"] = s["display"]
+    # The GPU chosen by name: its index in Vulkan's order now (PS_GPU_ID), which a driver update or
+    # another GPU plugged in can change. One not found leaves the choice to psport; PS_GPU_ID from
+    # the shell wins.
+    if s.get("gpu") and "PS_GPU_ID" not in os.environ:
+        index = next((index for index, _vendor, _kind, key, _best in connected_gpus()
+                      if key == s["gpu"]), None)
+        if index is not None:
+            env["PS_GPU_ID"] = str(index)
     env["PS_SKIP_NETWORK_CHOICE"] = "1" if s.get("skip_network_choice", True) else "0"
     if s["hdr"]:
         env["PS_HDR"] = "1"
@@ -506,6 +525,27 @@ def connected_displays():
              f"{number}: {name} ({size})" + (tr(", основной") if primary == "1" else ""),
              parse_size(size, None), primary == "1")
             for number, (name, size, primary) in enumerate(rows, 1)]
+
+
+def connected_gpus():
+    """(index, vendor ID, type, key, psport's own choice) of the GPUs in Vulkan's order
+    (psport-gpu-capabilities --gpus; PS_GPU_ID is the index), [] if unknown. The key is the GPU's
+    name, with its PCI address (or its place among them) when two GPUs share the name."""
+    tool = PORT_DIR / ("bin" if PACKAGED else "out") / "psport-gpu-capabilities"
+    env = {key: value for key, value in os.environ.items() if key != "PS_GPU_ID"}
+    try:
+        run = subprocess.run([str(tool), "--gpus"], capture_output=True, text=True, timeout=10, env=env)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    rows = [line.split("\t") for line in run.stdout.splitlines() if line.count("\t") == 5]
+    rows = [row for row in rows if row[0].isdigit()]
+    names = [name for _index, _vendor, _kind, name, _best, _pci in rows]
+    gpus, seen = [], {}
+    for index, vendor, kind, name, best, pci in rows:
+        seen[name] = seen.get(name, 0) + 1
+        key = name if names.count(name) == 1 else f"{name} ({pci or '#' + str(seen[name])})"
+        gpus.append((int(index), vendor, kind, key, best == "1"))
+    return gpus
 
 
 class FolderList:
@@ -684,6 +724,12 @@ class LauncherWindow(Adw.ApplicationWindow):
         self.aspect_row.connect("notify::selected",
                                 lambda *_: self.fill_outputs(parse_size(combo_value(self.output_row))))
         self.display_row.connect("notify::selected", lambda *_: self.on_display_changed())
+        # Laptops with two GPUs: kept by name, since Vulkan's order is not stable.
+        self.gpu_row = Adw.ComboRow(title=tr("Видеокарта"))
+        self.gpu_row.add_suffix(flat_button("view-refresh-symbolic", tr("Обновить список"),
+                                            lambda _button: self.fill_gpus()))
+        self.fill_gpus()
+        screen.add(self.gpu_row)
         self.present_row = combo_row(tr("Режим показа кадров"), None, PRESENT_MODES,
                                      self.settings["present_mode"])
         screen.add(self.present_row)
@@ -1088,6 +1134,23 @@ class LauncherWindow(Adw.ApplicationWindow):
         self.display_row.values = [value for _, value in choices]
         self.display_row.set_selected(self.display_row.values.index(current) if current in self.display_row.values else 0)
 
+    def fill_gpus(self):
+        """The GPU choices: psport's own (named), the GPUs found, and the saved one while it is not
+        found."""
+        current = self.settings.get("gpu", "")
+        gpus = connected_gpus()
+        best = [name for _index, _vendor, _kind, name, is_best in gpus if is_best]
+        choices = [(tr("Авто") + (f" ({best[0]})" if best else ""), "")]
+        for _index, _vendor, kind, name, _best in gpus:
+            note = {"integrated": tr("встроенная"), "cpu": tr("программная, очень медленно")}.get(kind)
+            choices.append((f"{name} ({note})" if note else name, name))
+        if current and current not in [value for _, value in choices]:
+            choices.append((tr("{} (не найдена)").format(current), current))
+        self.gpu_row.set_model(Gtk.StringList.new([label for label, _ in choices]))
+        self.gpu_row.values = [value for _, value in choices]
+        self.gpu_row.set_selected(self.gpu_row.values.index(current) if current in self.gpu_row.values else 0)
+        self.gpu_row.set_subtitle(tr("На ноутбуке с двумя видеокартами — дискретная; применяется при запуске игры"))
+
     def show_gamepad(self):
         names = getattr(self.gamepad_row, "names", None)
         selected = names[self.gamepad_row.get_selected()] if names else ""
@@ -1099,6 +1162,7 @@ class LauncherWindow(Adw.ApplicationWindow):
         s["gamepad"] = combo_value(self.gamepad_row)
         s["gamepad_name"] = self.gamepad_row.names[self.gamepad_row.get_selected()]
         s["display"] = combo_value(self.display_row)
+        s["gpu"] = combo_value(self.gpu_row)
         s["skip_network_choice"] = self.skip_network_row.get_active()
         s["language"] = combo_value(self.language_row)
         s["fullscreen"] = self.fullscreen_row.get_active()

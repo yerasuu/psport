@@ -395,6 +395,7 @@ bool WindowSDL::PollEvents() {
         if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && !m_is_mouse_captured.load(std::memory_order_relaxed) &&
             m_is_mouse_look.load(std::memory_order_relaxed) && !PsOverlay::MenuOpen() && !PsOverlay::GameCursorShown() &&
             !is_pointer_wanted) {
+            m_focus_recapture_ms = 0;
             CaptureMouse(true);
             continue;
         }
@@ -412,7 +413,16 @@ bool WindowSDL::PollEvents() {
             (notches > 0 ? m_c_wheel_up : m_c_wheel_down) += notches != 0 ? 1 : 0;
         }
         if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST) {
+            m_is_released_for_focus = m_is_mouse_captured.load(std::memory_order_relaxed);
+            m_focus_recapture_ms = 0;
             CaptureMouse(false);
+        }
+        // Back into the game: the mouse it held comes back, one let go with F1 stays free. Taken a
+        // moment later, since a click that gives the focus arrives just after it: that click then
+        // takes the mouse above, as any click does, instead of reaching the game as a button.
+        if (event.type == SDL_EVENT_WINDOW_FOCUS_GAINED && m_is_released_for_focus) {
+            m_is_released_for_focus = false;
+            m_focus_recapture_ms = SDL_GetTicks() + 250;
         }
         switch (event.type) {
         case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
@@ -447,6 +457,14 @@ bool WindowSDL::PollEvents() {
     if (m_is_capture_requested.exchange(false, std::memory_order_relaxed) && !PsOverlay::MenuOpen() &&
         !m_is_text_active) {
         CaptureMouse(true);
+    }
+    if (m_focus_recapture_ms && SDL_GetTicks() >= m_focus_recapture_ms) {
+        m_focus_recapture_ms = 0;
+        if (m_is_mouse_look.load(std::memory_order_relaxed) && !PsOverlay::MenuOpen() && !m_is_text_active &&
+            !PsOverlay::GameCursorShown() && !is_pointer_wanted &&
+            (SDL_GetWindowFlags(m_p_window) & SDL_WINDOW_INPUT_FOCUS)) {
+            CaptureMouse(true);
+        }
     }
     // The menu, the name dialog, the game's own cursor and mouse_look=0 want the mouse as a pointer.
     if (m_is_mouse_captured.load(std::memory_order_relaxed) &&

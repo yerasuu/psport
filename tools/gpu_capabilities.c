@@ -4,7 +4,10 @@
  * PS_GAMEPAD). --displays: the monitors, "name<tab>WxH<tab>primary (1 or 0)" per line in SDL's
  * order (the launcher's monitor list, PS_DISPLAY; issue #69). --read-input: one key or button for the
  * launcher's controls (below). --device: "vendorID<tab>name" of the GPU the game takes.
- * --host-env: run.sh's settings from the quirk registry's HOST quirks for that GPU (below). */
+ * --host-env: run.sh's settings from the quirk registry's HOST quirks for that GPU (below).
+ * --gpus: every GPU in Vulkan's order (PS_GPU_ID is the index), "index<tab>vendorID<tab>type<tab>
+ * name<tab>1 for the one psport takes by itself<tab>PCI address or empty" per line (the launcher's
+ * GPU list, kept by name, and by PCI address when two GPUs share a name). */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -23,6 +26,24 @@ static VkDeviceSize largest_local_heap(VkPhysicalDevice h_device) {
         }
     }
     return largest;
+}
+
+/* "domain:bus:device.function", or "" when the driver has no VK_EXT_pci_bus_info. */
+static void pci_address(VkPhysicalDevice h_device, char *sz_out, size_t cb_out) {
+    sz_out[0] = 0;
+    uint32_t c_extensions = 0;
+    if (vkEnumerateDeviceExtensionProperties(h_device, NULL, &c_extensions, NULL) != VK_SUCCESS) return;
+    VkExtensionProperties *p_extensions = calloc(c_extensions ? c_extensions : 1, sizeof(*p_extensions));
+    int has_pci = 0;
+    if (p_extensions && vkEnumerateDeviceExtensionProperties(h_device, NULL, &c_extensions, p_extensions) == VK_SUCCESS)
+        for (uint32_t i = 0; i < c_extensions && !has_pci; ++i)
+            has_pci = !strcmp(p_extensions[i].extensionName, VK_EXT_PCI_BUS_INFO_EXTENSION_NAME);
+    free(p_extensions);
+    if (!has_pci) return;
+    VkPhysicalDevicePCIBusInfoPropertiesEXT pci = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PCI_BUS_INFO_PROPERTIES_EXT};
+    VkPhysicalDeviceProperties2 props = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &pci};
+    vkGetPhysicalDeviceProperties2(h_device, &props);
+    snprintf(sz_out, cb_out, "%04x:%02x:%02x.%x", pci.pciDomain, pci.pciBus, pci.pciDevice, pci.pciFunction);
 }
 
 static int better_device(VkPhysicalDevice h_candidate, VkPhysicalDevice h_current) {
@@ -265,6 +286,24 @@ int main(int argc, char **argv) {
         free(p_devices);
         vkDestroyInstance(h_instance, NULL);
         return 1;
+    }
+    if (argc > 1 && !strcmp(argv[1], "--gpus")) {
+        VkPhysicalDevice h_best = p_devices[0];
+        for (uint32_t i = 1; i < c_devices; ++i)
+            if (better_device(p_devices[i], h_best)) h_best = p_devices[i];
+        static const char *const s_sz_types[] = {"other", "integrated", "discrete", "virtual", "cpu"};
+        for (uint32_t i = 0; i < c_devices; ++i) {
+            VkPhysicalDeviceProperties props;
+            vkGetPhysicalDeviceProperties(p_devices[i], &props);
+            const unsigned i_type = props.deviceType <= VK_PHYSICAL_DEVICE_TYPE_CPU ? props.deviceType : 0;
+            char sz_pci[32];
+            pci_address(p_devices[i], sz_pci, sizeof(sz_pci));
+            printf("%u\t%#06x\t%s\t%s\t%d\t%s\n", i, props.vendorID, s_sz_types[i_type], props.deviceName,
+                   p_devices[i] == h_best, sz_pci);
+        }
+        free(p_devices);
+        vkDestroyInstance(h_instance, NULL);
+        return 0;
     }
     /* Match vk_instance.cpp's default ranking or its explicit PS_GPU_ID index. */
     VkPhysicalDevice h_selected = p_devices[0];

@@ -72,6 +72,8 @@ private:
     u64 m_capture_settle_ms{};       ///< mouse motion before this (SDL_GetTicks) is not looking around
     bool m_is_pointer_shown{};       ///< a game's pointer menu is open (Game::MouseHooks pfn_wants_pointer)
     bool m_is_released_for_pointer{}; ///< the mouse was let go for it: taken back after
+    bool m_is_released_for_focus{};   ///< held when the window lost focus: taken back when it returns
+    u64 m_focus_recapture_ms{};       ///< SDL_GetTicks at which it is taken back, unless a click takes it first
     void CaptureMouse(bool should_capture);
     void GameMouseEvent(const SDL_Event& event);
     std::mutex m_mouse_mutex;

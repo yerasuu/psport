@@ -431,8 +431,11 @@ void Save() {
                 const auto it = std::find_if(keys.begin(), keys.end(),
                                              [&](const auto& k) { return k.first == key; });
                 if (it != keys.end()) {
-                    out += it->first + "=" + it->second + "\n";
-                    written[size_t(it - keys.begin())] = true;
+                    // A key repeated in the file keeps one line, so each save does not copy it again.
+                    if (!written[size_t(it - keys.begin())]) {
+                        out += it->first + "=" + it->second + "\n";
+                        written[size_t(it - keys.begin())] = true;
+                    }
                     continue;
                 }
             }
