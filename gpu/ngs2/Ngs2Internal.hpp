@@ -149,6 +149,22 @@ struct Ngs2PeakMeter {
     std::array<float, NGS2_MAX_CHANNELS> heights{};
 };
 
+// Firmware 11.00's mastering limiter (unit 0x11), with the values the mastering setup gives it.
+struct Ngs2Limiter {
+    bool isActive = true;
+    bool isRms = false;
+    bool isLfeLinkedApart = false;
+    float threshold = 1.0f;
+    float slope = 0.0f;
+    float knee = 0.001f;
+    float attackSeconds = 0.01f;
+    float releaseSeconds = 0.01f;
+    float outputGain = 1.0f;
+    std::array<float, NGS2_MAX_CHANNELS> gains{1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
+    float peakLevel = 0.0f;
+    float pressLevel = 0.0f;
+};
+
 struct Ngs2Voice {
     Ngs2Rack* rack = nullptr;
     Ngs2PlayState state = Ngs2PlayState::Empty;
@@ -179,6 +195,7 @@ struct Ngs2Voice {
     float lfeLevel = 1.0f;
     std::uint32_t lfeCutoff = 0;
     std::array<Ngs2Filter, 2> lfeFilters;
+    Ngs2Limiter limiter;
     std::array<std::vector<float>, NGS2_MASTERING_MATRIX_TYPES> outputMatrices;
     Ngs2PeakMeter peakMeter;
     Ngs2PeakMeter outputPeakMeter;
@@ -275,6 +292,7 @@ float Ngs2DefaultLevel(std::uint32_t sourceChannels, std::uint32_t source, std::
 void Ngs2SetPeakMeter(Ngs2PeakMeter& meter, std::uint32_t mode, std::uint32_t blocks);
 void Ngs2MeasurePeaks(Ngs2PeakMeter& meter, const float* samples, std::uint32_t channels, std::uint32_t grain);
 float Ngs2PeakHeight(const Ngs2PeakMeter& meter);
+void Ngs2ProcessLimiter(Ngs2Limiter& limiter, float* samples, std::uint32_t channels, std::uint32_t grain, std::uint32_t sampleRate);
 int Ngs2PanInit(Ngs2PanWork* work, const float* speaker_angles, float unit_angle, uint32_t num_speakers);
 int Ngs2PanGetVolumeMatrix(Ngs2PanWork* work, const Ngs2PanParam* params, uint32_t num_params, uint32_t matrix_format, float* out_volume_matrix);
 

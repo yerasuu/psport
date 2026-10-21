@@ -18,6 +18,8 @@ static constexpr std::uint8_t COMMAND_TYPE_INT = 3;
 static constexpr std::uint8_t COMMAND_TYPE_UINT = 4;
 static constexpr std::uint8_t COMMAND_TYPE_FLOAT_ARRAY = 0x11;
 static constexpr float MAX_MATRIX_LEVEL = 4.0f;
+static constexpr std::uint32_t SETUP_LFE_CUTOFF = 120;
+static constexpr float MAX_LIMITER_THRESHOLD = 4.0f;
 
 void Ngs2Voice::SetEvent(std::uint32_t eventId) {
     switch (eventId) {
@@ -65,8 +67,9 @@ void Ngs2Voice::ResetSetup() {
     envelope = {};
     fbwLevel = 1.0f;
     lfeLevel = 1.0f;
-    lfeCutoff = 0;
+    lfeCutoff = SETUP_LFE_CUTOFF;
     lfeFilters = {};
+    limiter = {};
     for (auto& matrix : outputMatrices) matrix.clear();
     channels = 0;
     sampleRate = 0;
@@ -380,6 +383,13 @@ static void ApplyParam(Ngs2Voice& voice, const Ngs2VoiceParamHeader& param) {
                 for (auto& stage : voice.lfeFilters) stage.sampleRate = 0;
                 return;
             }
+            if (param.id == SCE_NGS2_MASTERING_VOICE_PARAM_LIMITER) {
+                // Firmware 11.00 writes the limiter unit's own enable flag and threshold, the ones the setup fills.
+                const auto& limiter = ParamAs<Ngs2MasteringVoiceLimiterParam>(param);
+                voice.limiter.isActive = limiter.enabled != 0;
+                voice.limiter.threshold = limiter.threshold < 0.0f ? 0.0f : MAX_LIMITER_THRESHOLD < limiter.threshold ? MAX_LIMITER_THRESHOLD : limiter.threshold;
+                return;
+            }
             if (param.id == SCE_NGS2_MASTERING_VOICE_PARAM_MATRIX) {
                 SetOutputMatrix(voice, ParamAs<Ngs2MasteringVoiceMatrixParam>(param));
                 return;
@@ -400,6 +410,11 @@ static void ApplyParam(Ngs2Voice& voice, const Ngs2VoiceParamHeader& param) {
     throw std::runtime_error("NGS2: voice param " + Ngs2Hex(param.id) + " is not implemented");
 }
 
+static bool HasParamSize(const Ngs2Voice& voice, const Ngs2VoiceParamHeader& param) {
+    return param.id != SCE_NGS2_MASTERING_VOICE_PARAM_LIMITER || voice.rack->rackId != SCE_NGS2_RACK_ID_MASTERING ||
+           param.size == sizeof(Ngs2MasteringVoiceLimiterParam);
+}
+
 static Ngs2Voice& CheckedVoice(Ngs2Handle handle) {
     auto* voice = Ngs2FindVoice(handle);
     if (voice == nullptr) throw std::invalid_argument("NGS2: invalid voice handle");
@@ -415,6 +430,7 @@ int APS5_VABI sceNgs2VoiceControl(uintptr_t voice_handle, const Ngs2VoiceParamHe
     auto& voice = CheckedVoice(voice_handle);
     if (param_list == nullptr) APS5_INVALID_ARG_EX;
     for (const auto* param = param_list;; param = reinterpret_cast<const Ngs2VoiceParamHeader*>(reinterpret_cast<const std::uint8_t*>(param) + param->next)) {
+        if (!HasParamSize(voice, *param)) return SCE_NGS2_ERROR_INVALID_PARAM_SIZE;
         ApplyParam(voice, *param);
         if (param->next == 0) break;
     }
@@ -479,6 +495,8 @@ int APS5_VABI sceNgs2VoiceGetState(uintptr_t voice_handle, Ngs2VoiceState* state
             auto& mastering = *reinterpret_cast<Ngs2MasteringVoiceState*>(state);
             mastering = {};
             mastering.voice_state.state_flags = voice.stateFlags;
+            mastering.limiter_peak_level = voice.limiter.peakLevel;
+            mastering.limiter_press_level = voice.limiter.pressLevel;
             std::copy(voice.peakMeter.heights.begin(), voice.peakMeter.heights.end(), mastering.input_peak_height);
             std::copy(voice.outputPeakMeter.heights.begin(), voice.outputPeakMeter.heights.end(), mastering.output_peak_height);
             return SCE_NGS2_OK;

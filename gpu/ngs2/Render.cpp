@@ -323,19 +323,26 @@ static float OutputLevel(const Ngs2Voice& voice, std::uint32_t source, std::uint
 }
 
 // As firmware 11.00 does, the mastering matrix (Ryza masters 5.1 into the stereo buffer it sends to
-// AudioOut) comes before the gain, so the LFE level applies to the destination's LFE channel.
-static void MixMastering(Ngs2Voice& voice, std::vector<float>& mix, std::uint32_t outputChannels, std::uint32_t grain) {
+// AudioOut) comes before the limiter and the gain, so both work on the destination's channels.
+static void MixMastering(Ngs2Voice& voice, std::vector<float>& mix, std::uint32_t outputChannels, std::uint32_t grain, std::uint32_t systemRate) {
     std::vector<float> output(static_cast<std::size_t>(grain) * outputChannels);
+    for (std::uint32_t dst = 0; dst < outputChannels; dst++) {
+        float* out = output.data() + static_cast<std::size_t>(dst) * grain;
+        for (std::uint32_t src = 0; src < voice.channels; src++) {
+            const float level = OutputLevel(voice, src, outputChannels, dst);
+            if (level == 0.0f) continue;
+            for (std::uint32_t i = 0; i < grain; i++) out[i] += voice.samples[src * grain + i] * level;
+        }
+    }
+    Ngs2ProcessLimiter(voice.limiter, output.data(), outputChannels, grain, systemRate);
     for (std::uint32_t dst = 0; dst < outputChannels; dst++) {
         const bool lfe = dst == NGS2_LFE_CHANNEL && (outputChannels == 6 || outputChannels == 8);
         const float level = lfe ? voice.lfeLevel : voice.fbwLevel;
         float* out = output.data() + static_cast<std::size_t>(dst) * grain;
-        for (std::uint32_t src = 0; src < voice.channels; src++) {
-            const float gain = level * OutputLevel(voice, src, outputChannels, dst);
-            if (gain == 0.0f) continue;
-            for (std::uint32_t i = 0; i < grain; i++) out[i] += voice.samples[src * grain + i] * gain;
+        for (std::uint32_t i = 0; i < grain; i++) {
+            out[i] *= level;
+            mix[i * outputChannels + dst] += out[i];
         }
-        for (std::uint32_t i = 0; i < grain; i++) mix[i * outputChannels + dst] += out[i];
     }
     Ngs2MeasurePeaks(voice.outputPeakMeter, output.data(), outputChannels, grain);
 }
@@ -351,6 +358,12 @@ static void WriteOutput(const Ngs2RenderBufferInfo& output, const std::vector<fl
     }
 }
 
+// A limiter still sliding back to unity gain keeps running on silence, as on the console, so that
+// the next sound starts from where it would there.
+static bool IsLimiterSettled(const Ngs2Limiter& limiter) {
+    return !limiter.isActive || std::all_of(limiter.gains.begin(), limiter.gains.end(), [](float gain) { return gain == 1.0f; });
+}
+
 void Ngs2RenderSystem(Ngs2System& system, const Ngs2RenderBufferInfo* bufferInfo, std::uint32_t numBufferInfo) {
     const auto grain = system.option.num_grain_samples;
     std::vector<Ngs2Voice*> voices;
@@ -364,11 +377,15 @@ void Ngs2RenderSystem(Ngs2System& system, const Ngs2RenderBufferInfo* bufferInfo
     for (auto* voice : voices) {
         RenderVoice(*voice, voices, grain, system.option.sample_rate);
         if (voice->rack->rackId != SCE_NGS2_RACK_ID_MASTERING || voice->state != Ngs2PlayState::Playing) continue;
-        if (!voice->hasSamples) {
+        if (!voice->hasSamples && IsLimiterSettled(voice->limiter)) {
             Ngs2MeasurePeaks(voice->outputPeakMeter, voice->samples.data(), voice->channels, grain);
+            if (voice->limiter.isActive) {
+                voice->limiter.peakLevel = 0.0f;
+                voice->limiter.pressLevel = 1.0f;
+            }
             continue;
         }
-        MixMastering(*voice, OutputMix(mixes, bufferInfo, numBufferInfo, *voice, grain), bufferInfo[voice->outputId].num_channels, grain);
+        MixMastering(*voice, OutputMix(mixes, bufferInfo, numBufferInfo, *voice, grain), bufferInfo[voice->outputId].num_channels, grain, system.option.sample_rate);
     }
     for (std::uint32_t i = 0; i < numBufferInfo; i++) {
         if (bufferInfo[i].buffer != nullptr) std::memset(bufferInfo[i].buffer, 0, bufferInfo[i].buffer_size);
