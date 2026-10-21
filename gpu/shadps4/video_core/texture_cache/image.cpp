@@ -105,7 +105,44 @@ void UniqueImage::Destroy() {
     }
 }
 
-bool UniqueImage::Create(const vk::ImageCreateInfo& image_ci, bool can_exceed_budget) {
+// psport: integrated GPUs whose only device-local heap is a small BIOS carve-out (AMD APUs with
+// 256-512 MiB of UMA) give the GPU the rest from a shared heap of the same RAM. Every image
+// preferred the small heap, textures filled it and a render target failed later in play
+// (ErrorOutOfDeviceMemory after minutes, Supermedo a1235ee). There, images the game first used
+// as sampled textures prefer the shared heap. The mark is 768 MiB so that a 1 GiB carve-out
+// (Steam Deck) reported less the kernel's reservations stays out; RADV leaves APUs out anyway,
+// since it reports their GTT as one large device-local heap (20.96 GiB on a 512 MiB Raphael).
+// PS_IMAGES_PREFER_HOST=1 or 0 forces the choice.
+static bool ShouldTexturesPreferHost(VmaAllocator allocator) {
+    static const bool should_prefer = [allocator] {
+        if (const char* sz_env = std::getenv("PS_IMAGES_PREFER_HOST"); sz_env && sz_env[0]) {
+            return sz_env[0] == '1';
+        }
+        const VkPhysicalDeviceMemoryProperties* p_props = nullptr;
+        vmaGetMemoryProperties(allocator, &p_props);
+        u64 cb_device_local = 0;
+        bool has_shared_heap = false;
+        for (u32 i = 0; i < p_props->memoryHeapCount; ++i) {
+            if (p_props->memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) {
+                cb_device_local += p_props->memoryHeaps[i].size;
+            } else {
+                has_shared_heap = true;
+            }
+        }
+        const bool is_small = has_shared_heap && cb_device_local < 768_MB;
+        if (is_small) {
+            LOG_INFO(Render_Vulkan,
+                     "Device-local memory is {} MiB: sampled textures go to shared memory, the "
+                     "device-local heap stays for render targets",
+                     cb_device_local >> 20);
+        }
+        return is_small;
+    }();
+    return should_prefer;
+}
+
+bool UniqueImage::Create(const vk::ImageCreateInfo& image_ci, bool can_exceed_budget,
+                         bool is_sampled_only) {
     this->image_ci = image_ci;
     ASSERT(!image);
     // psport: images of PS_VMA_DEDICATED_MB (4) or more get memory of their own, given back to
@@ -122,9 +159,11 @@ bool UniqueImage::Create(const vk::ImageCreateInfo& image_ci, bool can_exceed_bu
             dedicated = VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
         }
     }
+    const bool should_prefer_host = is_sampled_only && ShouldTexturesPreferHost(allocator);
     VmaAllocationCreateInfo alloc_ci = {
         .flags = VMA_ALLOCATION_CREATE_WITHIN_BUDGET_BIT | dedicated,
-        .usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,
+        .usage = should_prefer_host ? VMA_MEMORY_USAGE_AUTO_PREFER_HOST
+                                    : VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,
         .requiredFlags = 0,
         .preferredFlags = 0,
         .pool = VK_NULL_HANDLE,
@@ -230,7 +269,7 @@ Image::Image(const Vulkan::Instance& instance, Vulkan::Runtime& runtime_,
     backing->num_samples = info.num_samples;
     backing->image = UniqueImage{instance.GetDevice(), instance.GetAllocator()};
     // psport: within the budget only: the texture cache evicts and retries (CreateImage).
-    if (!backing->image.Create(image_ci, false)) {
+    if (!backing->image.Create(image_ci, false, info.props.is_sampled_only)) {
         return;
     }
 

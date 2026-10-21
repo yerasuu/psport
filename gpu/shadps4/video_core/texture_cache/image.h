@@ -69,7 +69,10 @@ struct UniqueImage {
 
     /// psport: false when no memory could be allocated, the image staying null. Over the
     /// driver's budget only when can_exceed_budget (after a try within it); logged then.
-    bool Create(const vk::ImageCreateInfo& image_ci, bool can_exceed_budget = true);
+    /// is_sampled_only (a texture-cache image first bound as a sampled texture) lets it prefer
+    /// shared memory on a small carve-out; internal images stay device-local.
+    bool Create(const vk::ImageCreateInfo& image_ci, bool can_exceed_budget = true,
+                bool is_sampled_only = false);
 
     void Destroy();
 

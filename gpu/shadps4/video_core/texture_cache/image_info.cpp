@@ -144,6 +144,7 @@ ImageInfo::ImageInfo(const AmdGpu::Image& image, const Shader::ImageResource& de
     props.is_volume = type == AmdGpu::ImageType::Color3D;
     props.is_pow2 = image.pow2pad;
     props.is_block = AmdGpu::IsBlockCoded(image.GetDataFmt());
+    props.is_sampled_only = !desc.is_written;
     size.width = image.width + 1;
     size.height = image.height + 1;
     size.depth = props.is_volume ? image.depth + 1 : 1;

@@ -1550,12 +1550,13 @@ ImageId TextureCache::CreateImage(const ImageInfo& info, bool can_evict) {
     }
     if (can_evict) {
         EvictForAllocation();
-        if (image.backing->image.Create(image.backing->image.image_ci, false)) {
+        if (image.backing->image.Create(image.backing->image.image_ci, false,
+                                        info.props.is_sampled_only)) {
             image.NameBacking(instance.GetDevice());
             return image_id;
         }
     }
-    if (!image.backing->image.Create(image.backing->image.image_ci)) {
+    if (!image.backing->image.Create(image.backing->image.image_ci, true, info.props.is_sampled_only)) {
         LOG_ERROR_COUNTED(Render_Vulkan,
                           "Image {}x{} at {:#x} has no memory: its views are null and the "
                           "operations on it are skipped",
