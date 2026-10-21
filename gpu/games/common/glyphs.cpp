@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // The active profile's glyph table (glyphs.h) behind Game::TextureSubstitution. From bbport's
-// bbport_button_prompts (72e5c8c), out of Bloodborne's profile.
+// bbport_button_prompts (72e5c8c), shared by every title's profile.
 #include "glyphs.h"
 
 #include <algorithm>

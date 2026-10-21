@@ -4,7 +4,7 @@
 // C interface between psport and the DLSS bridge (libpsport_dlss.so / psport_dlss.dll). The port
 // contains no NVIDIA code: it loads the bridge at run time when it is present (next to psport,
 // with NVIDIA's libnvidia-ngx-dlss.so.<version> / nvngx_dlss.dll) and keeps
-// its other upscalers when it is absent. Adapted from IFreemz/shadPS4-Bloodborne-DLSS-FSR.
+// its other upscalers when it is absent. Adapted from IFreemz's DLSS/FSR fork of shadPS4.
 
 #pragma once
 

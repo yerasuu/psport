@@ -28,7 +28,7 @@ public:
     std::string GetPresentMode() { const char* v = std::getenv("PS_PRESENT_MODE"); return v ? v : "Mailbox"; }
     int GetRcasAttenuation() { static const auto value = int(Number("PS_RCAS_ATTENUATION", 250)); return value; }
     // psport: Relaxed by default: without readbacks FaceGen reads stale GPU-written vertices
-    // (vertex explosions); in Hunter's Nightmare it costs no measurable frame rate.
+    // (vertex explosions); in a dense area it costs no measurable frame rate.
     u32 GetReadbacksMode() { static const auto value = u32(Number("PS_READBACKS", GpuReadbacksMode::Relaxed)); return value; }
     // psport: uncapped presets (run.sh: PS_VBLANK_HZ=480; 0 means the same): vblank runs at
     // 480 Hz, and a finished frame is presented as soon as it arrives (IsUncappedVblank), not on

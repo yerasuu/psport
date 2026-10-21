@@ -313,7 +313,7 @@ void CameraMotion::OnConstants(const float* p_data) {
         }
     }
     // psport: the projection as the motion shaders use it: ndc +y down the screen. 0.2 assumed the
-    // viewport flips y (ndc +y up, as at Yahar'gul: yscale -540), 0.3 that it does not; the
+    // viewport flips y (ndc +y up, as a G-buffer pass with yscale -540), 0.3 that it does not; the
     // viewport of the frame's G-buffer pass decides (PS_CAMERA_Y=up/down forces one, for tests).
     static const float s_forced_y = [] {
         const char* sz_env = std::getenv("PS_CAMERA_Y");

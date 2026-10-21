@@ -4,7 +4,7 @@
 // libpsport_dlss.so / psport_dlss.dll: the only part of the project that uses the NVIDIA DLSS
 // (NGX) SDK; the port loads it at run time. Linux: build.sh with DLSS_SDK_ROOT; Windows: MSVC
 // (the SDK's Windows libraries are MSVC only), see CMakeLists.txt.
-// Adapted from IFreemz/shadPS4-Bloodborne-DLSS-FSR (dlss_bridge).
+// Adapted from IFreemz's DLSS/FSR fork of shadPS4 (dlss_bridge; LICENSE.txt).
 
 #include <algorithm>
 #include <array>

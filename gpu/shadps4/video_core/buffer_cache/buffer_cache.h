@@ -317,7 +317,7 @@ private:
     /// which images lie over them).
     void NoteLargeGpuWrite(VAddr addr, u64 size);
     /// psport, on a discrete GPU, PS_SHADOWS=1 (off by default: 85 copies, 20 MB a
-    /// frame in Yahar'gul cost more than reading in place, 48 -> 44 FPS): a read-only binding of data the
+    /// frame in a dense outdoor area cost more than reading in place, 48 -> 44 FPS): a read-only binding of data the
     /// CPU writes in place is copied once per submission by the GPU into VRAM and bound there, as a
     /// PC game copies an upload heap into a default heap: one sequential copy over PCIe instead of
     /// every shader reading it across the bus.

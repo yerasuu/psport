@@ -598,8 +598,8 @@ double MeasureSparseBind(const Vulkan::Instance& instance) {
 
 /// The sparse arena where the device can bind sparse buffers and does it fast, the layer's memory
 /// module (no sparse binding) elsewhere; PS_LAYER_MEMORY=1/0 chooses by hand. On an RX 7800 XT the
-/// module was on par with the arena on a route in Yharnam, but in the Hunter's Dream it kept ~1 GB
-/// of the area's data out of VRAM (ranges with a few unannounced blocks stay in place without
+/// module was on par with the arena on a city route, but in a hub area it kept ~1 GB of the
+/// area's data out of VRAM (ranges with a few unannounced blocks stay in place without
 /// volatile blocks): 100 FPS against ~200. NVIDIA's proprietary driver held the GPU for 10 s and
 /// more on each rebinding of the game's memory, the time growing with the pages already bound,
 /// which the test bind does not reach (nvidia_slow_sparse_rebind; NVIDIA developer forum, "Sparse

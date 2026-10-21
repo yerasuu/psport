@@ -243,7 +243,7 @@ static void add_export_entry(RuntimeModule *p_module, size_t *p_capacity, const 
 #define FS_LOAD_SIZE 9
 /* `mov r64, fs:[0]`: FS prefix, REX.W with or without REX.R, 8B, ModRM with mod 00 and r/m 100 (any
  * register), SIB 25 (no base, no index) and a zero disp32. Games load the thread pointer into any
- * register (Bloodborne only into rax). */
+ * register, not only rax. */
 static int is_fs_load(const unsigned char *p) {
     return p[0] == 0x64 && (p[1] == 0x48 || p[1] == 0x4c) && p[2] == 0x8b && (p[3] & 0xc7) == 0x04 && p[4] == 0x25 &&
            !p[5] && !p[6] && !p[7] && !p[8];

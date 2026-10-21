@@ -5,8 +5,8 @@
 // libpsport_dlss.so / psport_dlss.dll), loaded at run time from next to psport together with
 // NVIDIA's libnvidia-ngx-dlss.so.<version> / nvngx_dlss.dll. The port itself contains no NVIDIA
 // code; without the libraries, on other GPUs or
-// with PS_DLSS=0 nothing changes. Adapted from IFreemz/shadPS4-Bloodborne-DLSS-FSR
-// (vk_dlss_ngx).
+// with PS_DLSS=0 nothing changes. Adapted from IFreemz's DLSS/FSR fork of shadPS4
+// (vk_dlss_ngx; gpu/dlss_bridge/LICENSE.txt).
 
 #pragma once
 

@@ -91,10 +91,10 @@ static void attach(GuestThread *p_thread) {
     set_gs(p_tcb);
     s_p_current=p_thread;
 }
-/* A thread's record is its ScePthread handle, and the game packs handles into 40-bit fields:
- * Bloodborne masks the owner of its hybrid lock to 0xffffffffff and compares it with the whole
- * handle, so a handle above 40 bits never matches its own lock and the thread sleeps forever
- * (lamp travel hung at loading, bbport #193). Records are carved from low memory in 256 KiB
+/* A thread's record is its ScePthread handle, and games pack handles into 40-bit fields: a
+ * hybrid lock that masks its owner to 0xffffffffff and compares it with the whole handle never
+ * matches its own thread when the handle is above 40 bits, and the thread sleeps forever (a
+ * loading screen that never ended, bbport #193). Records are carved from low memory in 256 KiB
  * pieces; records are never freed. */
 static GuestThread *allocate_low_record(void) {
     static pthread_mutex_t s_pool_lock=PTHREAD_MUTEX_INITIALIZER;
