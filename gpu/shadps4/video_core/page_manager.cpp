@@ -340,7 +340,8 @@ struct PageManager::Impl {
         } else {
             PsStats::g_c_read_faults.fetch_add(1, std::memory_order_relaxed);
             PsStats::Timer timer{PsStats::g_t_read_faults};
-            return rasterizer->ReadMemory(addr, 8, is_gpu_thread);
+            const auto size = std::min<u64>(8, PageManager::GetNextPageAddr(addr) - addr);
+            return rasterizer->ReadMemory(addr, size, is_gpu_thread);
         }
         return false;
     }
