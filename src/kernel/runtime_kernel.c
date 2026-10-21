@@ -138,11 +138,14 @@ static ABI int32_t posix_nanosleep(const GuestTimespec *p_requested,GuestTimespe
 static ABI int32_t kernel_nanosleep(const GuestTimespec *p_requested,GuestTimespec *p_remaining) {
     return posix_nanosleep(p_requested,p_remaining) ? ERR(*runtime_errno()) : 0;
 }
+/* FreeBSD's struct timezone, though libkernel adds both fields to UTC: minuteswest holds the
+ * standard offset east of UTC and dsttime the daylight saving, both in minutes. */
 typedef struct { int32_t minuteswest, dsttime; } GuestTimezone;
 static ABI int32_t kernel_gettimezone(GuestTimezone *p_timezone) {
     if (!p_timezone) return ERR(22);
-    time_t now=time(NULL); struct tm local; localtime_r(&now,&local);
-    p_timezone->minuteswest=(int32_t)(-local.tm_gmtoff/60); p_timezone->dsttime=0;
+    int32_t standard_sec, dst_sec;
+    if (ps_host_time_zone(&standard_sec,&dst_sec)) return ERR(22);
+    p_timezone->minuteswest=standard_sec/60; p_timezone->dsttime=dst_sec/60;
     return 0;
 }
 static ABI int32_t posix_gettimeofday(GuestTimeval *p_timeval,GuestTimezone *p_timezone) {
@@ -162,15 +165,16 @@ static ABI int64_t posix_time(int64_t *p_out) { int64_t t=(int64_t)time(NULL); i
 typedef struct { int64_t t; uint32_t west_sec, dst_sec; } GuestTimesec;
 /* Daylight saving in effect at a broken-down time: its offset beyond the zone's standard one. */
 static int64_t daylight_saving(const struct tm *p_time) { return p_time->tm_isdst>0 ? p_time->tm_gmtoff+timezone : 0; }
+/* libkernel converts with the zone in effect now, whatever time it is given. */
 static ABI int32_t utc_to_local(int64_t utc,int64_t *p_local,GuestTimesec *p_zone,uint64_t *p_dst_sec) {
     if (!p_local) return ERR(22);
-    tzset();
-    time_t at=(time_t)utc; struct tm t;
-    if (!localtime_r(&at,&t)) return ERR(22);
-    const int64_t dst=daylight_saving(&t);
-    *p_local=utc+t.tm_gmtoff;
-    if (p_zone) { p_zone->t=utc; p_zone->west_sec=(uint32_t)(t.tm_gmtoff-dst); p_zone->dst_sec=(uint32_t)dst; }
-    if (p_dst_sec) *p_dst_sec=(uint64_t)dst;
+    GuestTimezone zone;
+    const int32_t result=kernel_gettimezone(&zone);
+    if (result) return result;
+    const int64_t west_sec=(int64_t)zone.minuteswest*60, dst_sec=(int64_t)zone.dsttime*60;
+    *p_local=utc+west_sec+dst_sec;
+    if (p_zone) { p_zone->t=utc; p_zone->west_sec=(uint32_t)west_sec; p_zone->dst_sec=(uint32_t)dst_sec; }
+    if (p_dst_sec) *p_dst_sec=(uint64_t)dst_sec;
     return 0;
 }
 /* The zone's daylight saving whether or not it is in effect at that time: libc's mktime moves a

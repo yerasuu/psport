@@ -40,6 +40,19 @@ int ps_host_time_sleep_ns(uint64_t ns, uint64_t *p_out_remaining_ns) {
     return error;
 }
 
+int ps_host_time_zone(int32_t *p_out_standard_sec, int32_t *p_out_dst_sec) {
+    tzset();
+    const time_t now = time(NULL);
+    struct tm local;
+    if (!localtime_r(&now, &local)) return errno;
+    /* timezone is the zone's standard offset west of UTC, so that the daylight saving is whatever
+       tm_gmtoff carries beyond it, not a fixed hour. */
+    const long dst_sec = local.tm_isdst > 0 ? local.tm_gmtoff + timezone : 0;
+    *p_out_standard_sec = (int32_t)(local.tm_gmtoff - dst_sec);
+    *p_out_dst_sec = (int32_t)dst_sec;
+    return 0;
+}
+
 int ps_host_time_sleep_until_ns(uint64_t deadline_ns) {
     const struct timespec time = {.tv_sec = (time_t)(deadline_ns / 1000000000u), .tv_nsec = (long)(deadline_ns % 1000000000u)};
     return clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &time, NULL);

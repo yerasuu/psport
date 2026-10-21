@@ -147,3 +147,13 @@ int ps_host_time_sleep_until_ns(uint64_t deadline_ns) {
     const uint64_t now_ns = ps_host_time_monotonic_ns();
     return deadline_ns > now_ns ? ps_host_time_sleep_ns(deadline_ns - now_ns, NULL) : 0;
 }
+
+/* Biases are minutes west of UTC, the daylight one counted from the standard time's. */
+int ps_host_time_zone(int32_t *p_out_standard_sec, int32_t *p_out_dst_sec) {
+    TIME_ZONE_INFORMATION zone;
+    const DWORD id = GetTimeZoneInformation(&zone);
+    if (id == TIME_ZONE_ID_INVALID) return ps_win32_errno(GetLastError());
+    *p_out_standard_sec = -(int32_t)(zone.Bias + zone.StandardBias) * 60;
+    *p_out_dst_sec = id == TIME_ZONE_ID_DAYLIGHT ? -(int32_t)(zone.DaylightBias - zone.StandardBias) * 60 : 0;
+    return 0;
+}

@@ -8,6 +8,7 @@
 #include <time.h>
 
 #define ERR_INVALID_POINTER ((int32_t)0x80B50002)
+#define ERR_INVALID_VALUE ((int32_t)0x80B50003)
 #define ERR_BAD_PARSE ((int32_t)0x80B50007)
 #define ERR_INVALID_YEAR ((int32_t)0x80B50008)
 #define ERR_INVALID_MONTH ((int32_t)0x80B50009)
@@ -88,9 +89,14 @@ static ABI int32_t rtc_current_clock(DateTime *p_date_time, int32_t minutes) {
     return 0;
 }
 static ABI int32_t rtc_current_tick(uint64_t *p_tick) { if (!p_tick) return ERR_INVALID_POINTER; *p_tick=now_utc(); return 0; }
+/* With the zone in effect now, as sceKernelConvertUtcToLocaltime gives it, not the one at that tick. */
 static ABI int32_t rtc_utc_to_local(const uint64_t *p_utc, uint64_t *p_local) {
     if (!p_utc || !p_local) return ERR_INVALID_POINTER;
-    *p_local=(uint64_t)((int64_t)*p_utc+local_offset(*p_utc)); return 0;
+    int32_t standard_sec, dst_sec;
+    if (ps_host_time_zone(&standard_sec,&dst_sec)) return ERR_INVALID_VALUE;
+    const int64_t offset_us=(int64_t)(standard_sec/60+dst_sec/60)*60000000;
+    if (offset_us<0 ? *p_utc<(uint64_t)-offset_us : *p_utc>UINT64_MAX-(uint64_t)offset_us) return ERR_INVALID_VALUE;
+    *p_local=*p_utc+(uint64_t)offset_us; return 0;
 }
 static ABI int32_t rtc_local_to_utc(const uint64_t *p_local, uint64_t *p_utc) {
     if (!p_local || !p_utc) return ERR_INVALID_POINTER;

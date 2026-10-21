@@ -78,8 +78,13 @@ static ABI int32_t system_param(int32_t id,int32_t *p_value) {
     case 1: *p_value=runtime_system_language(); break; /* language (1 = English US, 8 = Russian) */
     case 2: *p_value=1; break;                    /* date format DD/MM/YYYY */
     case 3: *p_value=1; break;                    /* 24-hour clock */
-    case 4: { time_t now=time(NULL); struct tm t; localtime_r(&now,&t); *p_value=(int32_t)(t.tm_gmtoff/60); break; }
-    case 5: *p_value=0; break;                    /* summer time */
+    case 4: case 5: {                             /* time zone (standard, minutes east), summer time */
+        int32_t standard_sec=0, dst_sec=0;
+        const int e=ps_host_time_zone(&standard_sec,&dst_sec);
+        if (e) fprintf(stderr,"Runtime: host time zone unreadable (errno %d), reporting UTC\n",e);
+        *p_value=id==4 ? standard_sec/60 : dst_sec!=0;
+        break;
+    }
     case 7: *p_value=0; break;                    /* parental level off */
     case 1000: *p_value=1; break;                 /* enter button = cross */
     default: fprintf(stderr,"STOP: unsupported system parameter %d\n",id); runtime_stop(21);
