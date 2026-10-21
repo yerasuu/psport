@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cfloat>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -413,6 +414,12 @@ void Menu() {
     }
     ImGui::SetNextWindowPos(pos, ImGuiCond_Appearing);
     ImGui::SetNextWindowSize(ImVec2(620.0f * s_base_scale, 0.0f), ImGuiCond_Appearing);
+    // Sized to its contents, the menu outgrew a 720p or 800p screen and its last row (Close, Quit)
+    // was out of reach: it ends above the screen's bottom and scrolls instead.
+    const float bottom_margin = 20.0f * s_base_scale;
+    ImGui::SetNextWindowSizeConstraints(
+        ImVec2(0.0f, 0.0f),
+        ImVec2(FLT_MAX, std::max(p_viewport->WorkPos.y + p_viewport->WorkSize.y - pos.y - bottom_margin, 200.0f * s_base_scale)));
     bool should_keep_open = true;
     static const std::string s_game_title = [] {
         const std::string_view title = Common::ElfInfo::Instance().Title();
