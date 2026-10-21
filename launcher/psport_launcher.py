@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-or-later
-"""Bloodborne launcher for the native port (GTK4 / libadwaita).
+"""psport's launcher for the native port (GTK4 / libadwaita).
 
 Picks the game folder, edits the port's settings (psport.ini: upscaler, preset, ...) and the
 start-up tweaks passed as environment variables to run.sh, starts and stops the game and shows
@@ -458,38 +458,37 @@ def combo_value(row):
     return row.values[row.get_selected()]
 
 
-# Controls (runtime_pad.c): input, label, default keyboard keys (Bloodborne's layout,
-# gpu/games/bloodborne/title.cpp DefaultControls; a chord is "Left Shift+Mouse Left"), default
-# gamepad buttons (SDL names).
+# Controls (runtime_pad.c): input, label, whether the gamepad binds it too. Their defaults are the
+# launched title's (title_controls).
 # psport.ini key.<input>= / pad.<input>= replace a default; no line keeps it. Mouse buttons and the
 # wheel are keys ("Mouse Left", "Wheel Down"); they act while the game holds the mouse.
 CONTROLS = [
-    ("cross", "Крест", "F, Return", "a"),
-    ("circle", "Круг", "Space", "b"),
-    ("square", "Квадрат", "Tab, R", "x"),
-    ("triangle", "Треугольник", "Q", "y"),
-    ("l1", "L1", "E, Mouse X2", "leftshoulder"),
-    ("r1", "R1", "Mouse Left", "rightshoulder"),
-    ("l2", "L2", "Mouse Right", "lefttrigger"),
-    ("r2", "R2", "Left Shift+Mouse Left, Mouse X1", "righttrigger"),
-    ("l3", "L3", "Left Ctrl", "leftstick"),
-    ("r3", "R3", "C, Mouse Middle", "rightstick"),
-    ("options", "Options", "Escape", "start"),
-    ("touchpad", "Тачпад, левая половина (жесты)", "G", "back, touchpad"),
-    ("touchpad_right", "Тачпад, правая половина (личные вещи)", "Backspace", ""),
-    ("up", "Крестовина вверх", "3, Up, Wheel Up", "dpup"),
-    ("down", "Крестовина вниз", "4, Down, Wheel Down", "dpdown"),
-    ("left", "Крестовина влево", "1, Left", "dpleft"),
-    ("right", "Крестовина вправо", "2, Right", "dpright"),
-    ("move_up", "Движение вперёд", "W", None),
-    ("move_down", "Движение назад", "S", None),
-    ("move_left", "Движение влево", "A", None),
-    ("move_right", "Движение вправо", "D", None),
-    ("look_up", "Камера вверх", "I", None),
-    ("look_down", "Камера вниз", "K", None),
-    ("look_left", "Камера влево", "J", None),
-    ("look_right", "Камера вправо", "L", None),
-    ("skip_movie", "Пропуск видео", "Escape", "misc1"),
+    ("cross", "Крест", True),
+    ("circle", "Круг", True),
+    ("square", "Квадрат", True),
+    ("triangle", "Треугольник", True),
+    ("l1", "L1", True),
+    ("r1", "R1", True),
+    ("l2", "L2", True),
+    ("r2", "R2", True),
+    ("l3", "L3", True),
+    ("r3", "R3", True),
+    ("options", "Options", True),
+    ("touchpad", "Тачпад, левая половина (жесты)", True),
+    ("touchpad_right", "Тачпад, правая половина (личные вещи)", True),
+    ("up", "Крестовина вверх", True),
+    ("down", "Крестовина вниз", True),
+    ("left", "Крестовина влево", True),
+    ("right", "Крестовина вправо", True),
+    ("move_up", "Движение вперёд", False),
+    ("move_down", "Движение назад", False),
+    ("move_left", "Движение влево", False),
+    ("move_right", "Движение вправо", False),
+    ("look_up", "Камера вверх", False),
+    ("look_down", "Камера вниз", False),
+    ("look_left", "Камера влево", False),
+    ("look_right", "Камера вправо", False),
+    ("skip_movie", "Пропуск видео", True),
 ]
 
 
@@ -501,6 +500,32 @@ def psport_answer(*args):
     except (OSError, subprocess.SubprocessError):
         return None, ""
     return run.returncode, run.stdout
+
+
+def title_controls(game_dir):
+    """(title name or None, {(kind, input): default binding}, None) of psport --list-controls for the
+    game folder (None: no game chosen, the neutral layout); (None, None, why) when psport cannot
+    answer, why for the launcher's log."""
+    if not PSPORT.is_file():
+        return None, None, f"psport --list-controls: {PSPORT} is not built yet"
+    command = [str(PSPORT), "--list-controls", *(("--game", str(game_dir)) if game_dir else ())]
+    try:
+        run = subprocess.run(command, capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError) as error:
+        return None, None, f"psport --list-controls could not run: {error}"
+    name, defaults = None, {}
+    for line in run.stdout.splitlines():
+        key, sep, value = line.partition("=")
+        if not sep:
+            continue
+        if key == "title":
+            name = value
+        elif key.startswith(("key.", "pad.")):
+            defaults[tuple(key.split(".", 1))] = value
+    if run.returncode != 0 or not defaults:
+        return None, None, (f"psport --list-controls failed (exit status {run.returncode}, "
+                            f"{len(defaults)} bindings): {run.stderr.strip() or 'no error output'}")
+    return name, defaults, None
 
 
 def connected_gamepads():
@@ -570,7 +595,7 @@ class FolderList:
 
 class LauncherWindow(Adw.ApplicationWindow):
     def __init__(self, app):
-        super().__init__(application=app, title="Bloodborne")
+        super().__init__(application=app, title="psport")
         self.set_default_size(760, 820)
         self.settings = load_settings()
         set_language(self.settings.get("ui_language", ""))
@@ -751,13 +776,14 @@ class LauncherWindow(Adw.ApplicationWindow):
         controls.add(self.gamepad_row)
         # Bindings: "Assign" waits for a key or button (psport-gpu-capabilities --read-input).
         self.control_rows = {}
+        self.control_defaults = None
+        self._title_controls_key = False
         for kind, title, icon in (("key", tr("Клавиатура и мышь"), "input-keyboard-symbolic"),
                                   ("pad", tr("Геймпад"), "input-gaming-symbolic")):
             expander = Adw.ExpanderRow(title=title,
                                        subtitle=tr("Назначение кнопок; применяется при запуске игры"))
-            for name, label, key_default, pad_default in CONTROLS:
-                default = key_default if kind == "key" else pad_default
-                if default is None:
+            for name, label, has_pad in CONTROLS:
+                if kind == "pad" and not has_pad:
                     continue
                 row = Adw.ActionRow(title=tr(label))
                 row.add_suffix(flat_button(icon, tr("Назначить"),
@@ -765,8 +791,7 @@ class LauncherWindow(Adw.ApplicationWindow):
                 row.add_suffix(flat_button("edit-undo-symbolic", tr("Сбросить"),
                                            lambda _b, k=kind, n=name: self.set_control(k, n, None)))
                 expander.add_row(row)
-                self.control_rows[(kind, name)] = (row, default)
-                self.show_control(kind, name)
+                self.control_rows[(kind, name)] = row
             controls.add(expander)
         # Mouse look (runtime_pad.c): a click in the game takes the mouse, F1 lets it go.
         self.mouse_look_row = Adw.SwitchRow(
@@ -1042,6 +1067,25 @@ class LauncherWindow(Adw.ApplicationWindow):
         self.game_status.set_from_icon_name("object-select-symbolic" if ok and not problem else "dialog-warning-symbolic")
         self.game_status.set_tooltip_text(tooltip)
         self.launch_button.set_sensitive(ok or self.process is not None)
+        self.update_title_controls(path if self.settings["game_dir"] else None)
+
+    def update_title_controls(self, path):
+        """The window's title and the controls' defaults from the chosen game's title; asked again
+        only when the folder or its param.sfo changes."""
+        try:
+            key = (str(path), (path / "sce_sys/param.sfo").stat().st_mtime_ns) if path else None
+        except OSError:
+            key = (str(path),)
+        if key == self._title_controls_key:
+            return
+        title, self.control_defaults, problem = title_controls(path)
+        if problem:
+            self.append_log(problem + "\n")
+        else:
+            self._title_controls_key = key
+        self.set_title(title or "psport")
+        for kind, name in self.control_rows:
+            self.show_control(kind, name)
 
     def on_choose_game(self, _button):
         def chosen(path):
@@ -1051,9 +1095,12 @@ class LauncherWindow(Adw.ApplicationWindow):
         self.choose_folder(tr("Папка игры (с eboot.bin)"), self.game_dir(), chosen)
 
     def show_control(self, kind, name):
-        row, default = self.control_rows[(kind, name)]
+        row = self.control_rows[(kind, name)]
         value = self.ini.get(f"{kind}.{name}")
-        if value is None:
+        if value is None and self.control_defaults is None:
+            row.set_subtitle(tr("по умолчанию"))
+        elif value is None:
+            default = self.control_defaults.get((kind, name))
             row.set_subtitle(tr("{} (по умолчанию)").format(default) if default else tr("не назначено"))
         else:
             row.set_subtitle(value or tr("не назначено"))
@@ -1072,7 +1119,7 @@ class LauncherWindow(Adw.ApplicationWindow):
         except GLib.Error as error:
             self.toasts.add_toast(Adw.Toast(title=tr("Не удалось запустить: {}").format(error.message)))
             return
-        row, _default = self.control_rows[(kind, name)]
+        row = self.control_rows[(kind, name)]
         row.set_subtitle(tr("Нажмите клавишу или кнопку… (Esc — отмена)"))
 
         def done(proc, result):
@@ -1519,7 +1566,7 @@ class LauncherWindow(Adw.ApplicationWindow):
             return
         npid = self.npid_row.get_text().strip()
         if online_module() and not self.online_row.get_active() and npid and hasattr(Adw, "AlertDialog"):
-            dialog = Adw.AlertDialog(heading="Bloodborne", body=tr(
+            dialog = Adw.AlertDialog(heading=self.get_title(), body=tr(
                 "Учётная запись для игры онлайн указана, но «Играть онлайн» выключено"))
             dialog.add_response("cancel", tr("Отмена"))
             dialog.add_response("offline", tr("Играть офлайн"))
@@ -1537,7 +1584,7 @@ class LauncherWindow(Adw.ApplicationWindow):
 
     def start_game(self):
         if self.online_row.get_active() and "@" in self.npid_row.get_text():
-            self.alert("Bloodborne", tr("Online ID — это имя учётной записи (NPID), "
+            self.alert(self.get_title(), tr("Online ID — это имя учётной записи (NPID), "
                                         "зарегистрированное на сервере, а не адрес email"))
             self.stack.set_visible_child_name("online")
             return

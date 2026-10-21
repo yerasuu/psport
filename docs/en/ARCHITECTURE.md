@@ -11,7 +11,7 @@ The model is Wine's, not an emulator's.
 |---|---|---|---|
 | Launch script | `run.sh` | - | environment and settings, then `psport` |
 | Entry | `src/main/main.c`, `src/main/main.h` | `out/psport` | launch sequence: arguments, image mapping, entering the game |
-| Launcher queries | `src/main/cli.c`, `src/main/game_info.c` | `out/psport` | `--check-game`, `--has-presets`, `--list-patches`, `--list-mods`, `--list-quirks`, `--list-features`, `--list-traits`, `--list-effects`, `--online-overrides`, `BB_*` names; `param.sfo` and the game's identity |
+| Launcher queries | `src/main/cli.c`, `src/main/game_info.c` | `out/psport` | `--check-game`, `--has-presets`, `--list-patches`, `--list-mods`, `--list-quirks`, `--list-features`, `--list-traits`, `--list-effects`, `--list-controls`, `--online-overrides`, `BB_*` names; `param.sfo` and the game's identity |
 | Import binding | `src/main/bind.c` | `out/psport` | traps, failure thunks, relocation walk, patch writes |
 | Signals | `src/main/signals.c` | `out/psport` | fault, watchdog, thread dump and termination handlers |
 | Native loader | `src/loader/loader.h`, `src/loader/loader_self.c`, `src/loader/loader_link.c`, `src/loader/loader_traits.c` | `out/psport` | SELF/ELF parsing, module linking, relocations, TLS, bindings; middleware traits (`Middleware:` line) |
@@ -160,6 +160,11 @@ library.
   an optional `hint`, and `effects` in the overlay's order, each with its `psport.ini` `key`, its
   `default` (the game's unpatched behaviour), a `name` and an optional `description`; texts are
   objects by language (`en`, `ru`, `es`, those the title has).
+  `psport --list-controls [--game <dir> | --title <TITLE_ID>]` prints `title=<name>` when psport
+  knows the title, then its default bindings as `psport.ini` lines (`key.<input>=`, and
+  `pad.<input>=` for the pad's inputs): the neutral layout of `src/input/runtime_pad.c` with the
+  title's `sz_default_controls` over it, the neutral layout alone without a game; the launcher's
+  controls page shows these as defaults.
 - Middleware traits (`src/loader/loader_traits.c`): read once at load from the eboot's module and
   library names (`PS4Player*`, `Il2CppUserAssemblies`, `libkernel_unity`, `<Project>-PS4-Shipping`,
   `libfmod*`), Havok's class names in the eboot, and the game's file names (`PS4Util.prx`,
@@ -605,8 +610,10 @@ or the executable is not 1.09), `PS_PATCHES`, the effect switches and `model_lod
 the `PS_RENDER_RES` scene size, the Intel tone mapping and online-choice fixes, all from
 `patches/Bloodborne.xml`; `game_check.cpp`: the 1.09 executable and intact shaders; the in-game menu
 pages, `game_menu.cpp`; its profile in `profile.cpp`, with Gnm entry hooks and `gnm_table.inc`,
-guest hooks and heap sites; its button prompts for the device in use, `button_prompts.cpp` and
-`button_prompt_art.cpp`, unless `PS_BUTTON_PROMPTS=0`), listed in `gpu/games/game_profile.cpp`.
+guest hooks and heap sites; its button prompts for the device in use, `button_prompts.cpp`, unless
+`PS_BUTTON_PROMPTS=0`), listed in `gpu/games/game_profile.cpp`. What any title's profile may share
+lives in `gpu/games/common/`: `button_prompt_art.cpp` draws the prompt icons (key caps, the mouse,
+another gamepad's buttons) in the palette the title passes.
 Another title runs unpatched, on the console's 60 Hz vblank.
 
 ## Launch scripts

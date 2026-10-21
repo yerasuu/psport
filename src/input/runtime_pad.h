@@ -50,6 +50,10 @@ int runtime_pad_prompt(const char *sz_input, int should_prefer_mouse, char *sz_o
 /* 1 once per press of psport.ini's key.menu or pad.menu binding (unbound: never), for the overlay's
  * window-thread event handler, which toggles the port's menu on it. */
 int runtime_pad_menu_pressed(void);
+/* The default bindings a launcher shows, as psport.ini key.<input>= and pad.<input>= lines on
+ * stdout: the neutral layout with sz_title_controls (Game::Title sz_default_controls, or NULL) over
+ * it. Only for a query: it leaves the bindings at those defaults. */
+void runtime_pad_print_default_controls(const char *sz_title_controls);
 void runtime_pad_record_sample(const PadData *p_pad_data);
 /* Motion emulation (runtime_pad_motion.c). configure: psport.ini's pad_motion (-1 without the line),
  * PS_PAD_MOTION wins; the rest only while it is on. begin: once per sample, the seconds since the

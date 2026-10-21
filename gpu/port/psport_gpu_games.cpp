@@ -61,6 +61,7 @@ extern "C" PsTitleInfo psport_gpu_title(const char* sz_serial) {
                    p_title->online.community_api_port, p_title->online.sz_summon_route,
                    {extension.sz_name, extension.sz_switch, extension.sz_local_server,
                     extension.sz_local_server_args, extension.sz_local_switch, extension.sz_status_path}},
+        .sz_default_controls = p_title->sz_default_controls,
     };
 }
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// Bloodborne: the port's key guide icons (button_prompts.h), drawn for the device in use: a key cap
-// with the bound key's name, a mouse with the bound button lit, or another gamepad's button. From
-// bbport's bbport_button_prompts.cpp (72e5c8c).
+// Button prompt icons any title's profile can substitute for its own, drawn for the device in use: a
+// key cap with the bound key's name, a mouse with the bound button lit, or another gamepad's button,
+// in the title's palette. From bbport's bbport_button_prompts.cpp (72e5c8c).
 #pragma once
 
 #include <array>
@@ -11,6 +11,17 @@ namespace PsButtonPromptArt {
 
 /// The icons are square, this many texels a side.
 constexpr std::uint32_t Side = 128;
+
+/// Premultiplied by its alpha when painted.
+struct Color {
+    float r, g, b, a = 1.0f;
+};
+
+/// The colours of a title's icons: plates, their frames, labels, and what is lit (the bound mouse
+/// button).
+struct Palette {
+    Color fill, frame, ink, accent;
+};
 
 /// What an icon of the game shows.
 enum class Layout {
@@ -24,6 +35,6 @@ enum class Layout {
 /// Draws the icon for `inputs` (runtime_pad.c input names, as many as `layout` takes) on the device
 /// in use into p_out, Side x Side straight-alpha RGBA8; false when the game's own icon stays (a
 /// PlayStation pad, the d-pad on any pad, an unbound input).
-bool Draw(Layout layout, const std::array<const char*, 4>& inputs, std::uint32_t* p_out);
+bool Draw(Layout layout, const std::array<const char*, 4>& inputs, const Palette& palette, std::uint32_t* p_out);
 
 } // namespace PsButtonPromptArt

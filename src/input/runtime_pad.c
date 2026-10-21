@@ -438,10 +438,9 @@ static int apply_binding_line(const char *sz_key, const char *sz_value, const ch
                keyboard ? "keys" : "gamepad buttons",sz_value,sz_origin,keyboard ? p_binding->c_keys : p_binding->c_pads);
     return 1;
 }
-/* The running title's default controls (psport.ini lines, one per line), over the neutral ones. */
-static void apply_title_controls(void) {
-    const char *sz_controls=psport_gpu_title_controls();
-    if (!sz_controls) return;
+/* A title's default controls (psport.ini lines, one per line) over the neutral ones; the count
+ * applied. */
+static int apply_title_controls(const char *sz_controls) {
     int c_lines=0;
     for (const char *sz_line=sz_controls; *sz_line;) {
         const char *sz_end=strchr(sz_line,'\n');
@@ -455,12 +454,45 @@ static void apply_title_controls(void) {
         }
         sz_line+=cb_line+(sz_end ? 1 : 0);
     }
-    printf("Runtime: controls: the title's default layout (%d bindings), psport.ini's key. and pad. lines over it\n",c_lines);
+    return c_lines;
+}
+static const char *key_name(int code) {
+    for (size_t i=0;i<sizeof(s_mouse_keys)/sizeof(*s_mouse_keys);++i)
+        if (code==s_mouse_keys[i].code) return s_mouse_keys[i].sz_name;
+    return SDL_GetScancodeName((SDL_Scancode)code);
+}
+static const char *pad_button_name(int button) {
+    if (button==PAD_LEFT_TRIGGER) return "lefttrigger";
+    if (button==PAD_RIGHT_TRIGGER) return "righttrigger";
+    return SDL_GetGamepadStringForButton((SDL_GamepadButton)button);
+}
+void runtime_pad_print_default_controls(const char *sz_title_controls) {
+    bind_defaults();
+    if (sz_title_controls) apply_title_controls(sz_title_controls);
+    for (int input=0;input<IN_COUNT;++input) {
+        const Binding *p_binding=&s_bindings[input];
+        printf("key.%s=",s_input_names[input]);
+        for (int i=0;i<p_binding->c_keys;++i) {
+            if (p_binding->mods[i]>=0) printf("%s+",key_name(p_binding->mods[i]));
+            printf(i+1<p_binding->c_keys ? "%s, " : "%s",key_name(p_binding->keys[i]));
+        }
+        putchar('\n');
+        if (input>=IN_MOVE_UP && input!=IN_MENU) continue;
+        printf("pad.%s=",s_input_names[input]);
+        for (int i=0;i<p_binding->c_pads;++i) {
+            if (p_binding->pad_mods[i]>=0) printf("%s+",pad_button_name(p_binding->pad_mods[i]));
+            printf(i+1<p_binding->c_pads ? "%s, " : "%s",pad_button_name(p_binding->pad[i]));
+        }
+        putchar('\n');
+    }
 }
 /* key.<input>= / pad.<input>= lines of the settings file. */
 static void load_bindings(void) {
     bind_defaults();
-    apply_title_controls();
+    const char *sz_controls=psport_gpu_title_controls();
+    if (sz_controls)
+        printf("Runtime: controls: the title's default layout (%d bindings), psport.ini's key. and pad. lines over it\n",
+               apply_title_controls(sz_controls));
     s_mouse_look=1; s_mouse_invert_y=0; s_mouse_sensitivity=1.0f;
     int pad_motion=-1, skip_movies=0;
     const char *sz_key, *sz_value;

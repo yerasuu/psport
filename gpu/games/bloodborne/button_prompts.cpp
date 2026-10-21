@@ -17,7 +17,7 @@
 #include <miniz.h>
 #include <xxhash.h>
 
-#include "button_prompt_art.h"
+#include "../common/button_prompt_art.h"
 
 extern "C" {
 // src/kernel/runtime_file.c, src/input/runtime_pad.c
@@ -32,6 +32,12 @@ using u8 = std::uint8_t;
 using u32 = std::uint32_t;
 using u64 = std::uint64_t;
 using PsButtonPromptArt::Layout;
+
+/// Close to the game's own menus: dark plates, parchment frames and labels, amber for what is lit.
+constexpr PsButtonPromptArt::Palette Palette{.fill = {0.075f, 0.07f, 0.065f, 0.93f},
+                                             .frame = {0.78f, 0.74f, 0.64f},
+                                             .ink = {0.95f, 0.92f, 0.85f},
+                                             .accent = {0.82f, 0.64f, 0.36f}};
 
 struct IconDef {
     const char* sz_name;
@@ -300,7 +306,7 @@ bool Draw(Game::SubstitutePictures& out) {
     out.pixels.assign(IconCount * Side * Side, 0);
     u32 c_drawn = 0;
     for (std::size_t i = 0; i < IconCount; ++i) {
-        if (s_icon_hashes[i] != 0 && PsButtonPromptArt::Draw(Icons[i].layout, Icons[i].inputs,
+        if (s_icon_hashes[i] != 0 && PsButtonPromptArt::Draw(Icons[i].layout, Icons[i].inputs, Palette,
                                                             out.pixels.data() + i * Side * Side)) {
             out.is_drawn[i] = 1;
             ++c_drawn;

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// Bloodborne: drawing the port's key guide icons (button_prompt_art.h). Shapes by signed distance
+// Drawing the button prompt icons (button_prompt_art.h). Shapes by signed distance
 // with one texel of smoothing, in premultiplied float RGBA; text through stb_truetype (Dear
 // ImGui's copy) with the embedded DejaVu Sans, which has Latin, Cyrillic and the arrows.
 #include "button_prompt_art.h"
@@ -31,16 +31,9 @@ using u32 = std::uint32_t;
 
 constexpr int PromptKeyboard = 2; // RUNTIME_PAD_PROMPT_KEYBOARD
 
-struct Color {
-    float r, g, b, a = 1.0f;
-};
-constexpr Color Fill{0.075f, 0.07f, 0.065f, 0.93f};
-constexpr Color Frame{0.78f, 0.74f, 0.64f};
-constexpr Color Ink{0.95f, 0.92f, 0.85f};
-constexpr Color Accent{0.82f, 0.64f, 0.36f};
-
 struct Canvas {
     static constexpr int N = int(Side);
+    const Palette& palette;
     std::vector<float> pixels = std::vector<float>(std::size_t(N) * N * 4, 0.0f);
 
     /// Paints `color` where `coverage(x, y)` (texel centres) is above 0.
@@ -99,8 +92,9 @@ float Segment(float x, float y, float ax, float ay, float bx, float by, float ha
 /// A filled shape with a frame of `stroke` texels on its edge.
 template <typename D>
 void Plate(Canvas& canvas, float stroke, D&& distance) {
-    canvas.Paint(Fill, [&](float x, float y) { return Cover(distance(x, y)); });
-    canvas.Paint(Frame,
+    const auto& [fill, frame, ink, accent] = canvas.palette;
+    canvas.Paint(fill, [&](float x, float y) { return Cover(distance(x, y)); });
+    canvas.Paint(frame,
                  [&](float x, float y) { return Cover(std::abs(distance(x, y) + stroke * 0.5f) - stroke * 0.5f); });
 }
 
@@ -197,68 +191,71 @@ void DrawText(Canvas& canvas, std::string_view text, float cx, float cy, float m
 
 /// A key cap with its label; one character fills the cap, longer names get smaller.
 void Key(Canvas& canvas, std::string_view label, float cx, float cy, float hw, float hh) {
+    const auto& [fill, frame, ink, accent] = canvas.palette;
     const float stroke = std::max(3.0f, hw * 0.09f);
     const float radius = std::min(hw, hh) * 0.32f;
     Plate(canvas, stroke, [&](float x, float y) { return RoundRect(x, y, cx, cy, hw, hh, radius); });
     const std::size_t c_glyphs = Decode(label).size();
     const float max_h = (hh - stroke) * (c_glyphs <= 1 ? 1.15f : c_glyphs <= 3 ? 0.9f : 0.7f);
-    DrawText(canvas, label, cx, cy, (hw - stroke) * 1.55f, max_h, Ink);
+    DrawText(canvas, label, cx, cy, (hw - stroke) * 1.55f, max_h, ink);
 }
 
 /// A mouse with the bound button lit: Left, Right, Middle, X1, X2, Wheel Up, Wheel Down; Move: none
 /// lit, arrows at its sides (the camera).
 void Mouse(Canvas& canvas, std::string_view button) {
+    const auto& [fill, frame, ink, accent] = canvas.palette;
     constexpr float cx = 64, cy = 66, hw = 33, hh = 50, radius = 31, stroke = 5;
     const auto body = [&](float x, float y) { return RoundRect(x, y, cx, cy, hw, hh, radius); };
-    canvas.Paint(Fill, [&](float x, float y) { return Cover(body(x, y)); });
+    canvas.Paint(fill, [&](float x, float y) { return Cover(body(x, y)); });
     constexpr float split = 58; // the buttons' lower edge
     const auto lit = [&](auto&& region) {
-        canvas.Paint(Accent, [&](float x, float y) { return std::min(Cover(body(x, y) + stroke), region(x, y)); });
+        canvas.Paint(accent, [&](float x, float y) { return std::min(Cover(body(x, y) + stroke), region(x, y)); });
     };
     if (button == "Left") {
         lit([&](float x, float y) { return std::min(Cover(x - cx), Cover(y - split)); });
     } else if (button == "Right") {
         lit([&](float x, float y) { return std::min(Cover(cx - x), Cover(y - split)); });
     }
-    canvas.Paint(Frame, [&](float x, float y) { return Cover(Segment(x, y, cx, cy - hh + 2, cx, split, 2.0f)); });
-    canvas.Paint(Frame, [&](float x, float y) { return Cover(Segment(x, y, cx - hw, split, cx + hw, split, 2.0f)); });
+    canvas.Paint(frame, [&](float x, float y) { return Cover(Segment(x, y, cx, cy - hh + 2, cx, split, 2.0f)); });
+    canvas.Paint(frame, [&](float x, float y) { return Cover(Segment(x, y, cx - hw, split, cx + hw, split, 2.0f)); });
     const bool is_wheel = button == "Middle" || button == "Wheel Up" || button == "Wheel Down";
-    canvas.Paint(Fill, [&](float x, float y) { return Cover(Segment(x, y, cx, 28, cx, 46, 7.5f)); });
-    canvas.Paint(is_wheel ? Accent : Frame, [&](float x, float y) {
+    canvas.Paint(fill, [&](float x, float y) { return Cover(Segment(x, y, cx, 28, cx, 46, 7.5f)); });
+    canvas.Paint(is_wheel ? accent : frame, [&](float x, float y) {
         const float distance = Segment(x, y, cx, 28, cx, 46, 5.5f);
         return is_wheel ? Cover(distance) : Cover(std::abs(distance + 1.25f) - 1.25f);
     });
     if (button == "Wheel Up" || button == "Wheel Down") {
-        DrawText(canvas, button == "Wheel Up" ? "\xe2\x96\xb2" : "\xe2\x96\xbc", cx, 90, 26, 20, Accent);
+        DrawText(canvas, button == "Wheel Up" ? "\xe2\x96\xb2" : "\xe2\x96\xbc", cx, 90, 26, 20, accent);
     }
     if (button == "X1" || button == "X2") {
         const float side_y = button == "X1" ? 92 : 74; // X1 back (lower), X2 forward
-        canvas.Paint(Accent, [&](float x, float y) { return Cover(RoundRect(x, y, cx - hw + 1, side_y, 6, 8, 4)); });
+        canvas.Paint(accent, [&](float x, float y) { return Cover(RoundRect(x, y, cx - hw + 1, side_y, 6, 8, 4)); });
     }
-    canvas.Paint(Frame, [&](float x, float y) { return Cover(std::abs(body(x, y) + stroke * 0.5f) - stroke * 0.5f); });
+    canvas.Paint(frame, [&](float x, float y) { return Cover(std::abs(body(x, y) + stroke * 0.5f) - stroke * 0.5f); });
     if (button == "Move") {
-        DrawText(canvas, "\xe2\x86\x90", 14, cy, 24, 22, Ink);
-        DrawText(canvas, "\xe2\x86\x92", 114, cy, 24, 22, Ink);
+        DrawText(canvas, "\xe2\x86\x90", 14, cy, 24, 22, ink);
+        DrawText(canvas, "\xe2\x86\x92", 114, cy, 24, 22, ink);
     }
 }
 
 /// A round button of another gamepad: A B X Y in their colours, else its name (LS, RS) or sign
 /// (Menu, View).
 void Round(Canvas& canvas, std::string_view label, bool is_face) {
+    const auto& [fill, frame, ink, accent] = canvas.palette;
     constexpr float cx = 64, cy = 64, radius = 56, stroke = 5;
     Plate(canvas, stroke, [&](float x, float y) { return Circle(x, y, cx, cy, radius); });
     if (is_face) {
-        const Color ink = label == "A"   ? Color{0.40f, 0.76f, 0.30f}
-                          : label == "B" ? Color{0.88f, 0.27f, 0.23f}
-                          : label == "X" ? Color{0.27f, 0.55f, 0.92f}
-                          : label == "Y" ? Color{0.95f, 0.78f, 0.18f}
-                                         : Ink;
-        DrawText(canvas, label, cx, cy, 70, 58, ink);
+        const Color face_ink = label == "A"   ? Color{0.40f, 0.76f, 0.30f}
+                               : label == "B" ? Color{0.88f, 0.27f, 0.23f}
+                               : label == "X" ? Color{0.27f, 0.55f, 0.92f}
+                               : label == "Y" ? Color{0.95f, 0.78f, 0.18f}
+                                              : ink;
+        DrawText(canvas, label, cx, cy, 70, 58, face_ink);
         return;
     }
     if (label == "Menu") {
         for (const float line_y : {48.0f, 64.0f, 80.0f}) {
-            canvas.Paint(Ink, [&](float x, float y) { return Cover(Segment(x, y, 44, line_y, 84, line_y, 4.0f)); });
+            canvas.Paint(ink, [&](float x, float y) { return Cover(Segment(x, y, 44, line_y, 84, line_y, 4.0f)); });
         }
         return;
     }
@@ -267,20 +264,21 @@ void Round(Canvas& canvas, std::string_view label, bool is_face) {
             return [=](float x, float y) { return RoundRect(x, y, bx, by, 15, 13, 4); };
         };
         const auto back = box(56, 56), front = box(72, 72);
-        canvas.Paint(Ink, [&](float x, float y) { return Cover(std::abs(back(x, y) + 2.0f) - 2.0f); });
-        canvas.Paint(Fill, [&](float x, float y) { return Cover(front(x, y)); });
-        canvas.Paint(Ink, [&](float x, float y) { return Cover(std::abs(front(x, y) + 2.0f) - 2.0f); });
+        canvas.Paint(ink, [&](float x, float y) { return Cover(std::abs(back(x, y) + 2.0f) - 2.0f); });
+        canvas.Paint(fill, [&](float x, float y) { return Cover(front(x, y)); });
+        canvas.Paint(ink, [&](float x, float y) { return Cover(std::abs(front(x, y) + 2.0f) - 2.0f); });
         return;
     }
-    DrawText(canvas, label, cx, cy, 78, label.size() <= 2 ? 46 : 34, Ink);
+    DrawText(canvas, label, cx, cy, 78, label.size() <= 2 ? 46 : 34, ink);
 }
 
 /// A shoulder button or a trigger of another gamepad.
 void Shoulder(Canvas& canvas, std::string_view label) {
+    const auto& [fill, frame, ink, accent] = canvas.palette;
     const bool is_trigger = label == "LT" || label == "RT" || label == "ZL" || label == "ZR";
     const float hw = is_trigger ? 48 : 58, hh = is_trigger ? 54 : 34, radius = is_trigger ? 26 : 16;
     Plate(canvas, 5, [&](float x, float y) { return RoundRect(x, y, 64, 64, hw, hh, radius); });
-    DrawText(canvas, label, 64, 64, hw * 1.4f, 42, Ink);
+    DrawText(canvas, label, 64, 64, hw * 1.4f, 42, ink);
 }
 
 bool DrawOn(Canvas& canvas, Layout layout, const std::array<const char*, 4>& inputs) {
@@ -348,8 +346,8 @@ bool DrawOn(Canvas& canvas, Layout layout, const std::array<const char*, 4>& inp
 
 } // namespace
 
-bool Draw(Layout layout, const std::array<const char*, 4>& inputs, std::uint32_t* p_out) {
-    Canvas canvas;
+bool Draw(Layout layout, const std::array<const char*, 4>& inputs, const Palette& palette, std::uint32_t* p_out) {
+    Canvas canvas{palette};
     if (!DrawOn(canvas, layout, inputs)) {
         return false;
     }

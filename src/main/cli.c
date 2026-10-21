@@ -9,6 +9,7 @@
 #include "main.h"
 #include "loader_traits.h"
 #include "ps_host.h"
+#include "runtime_pad.h"
 
 /* A launcher's question names the game by its folder (--game dir) or, without one, by its title
  * (--title TITLE_ID [--version APP_VER]); the arguments from argv[first] on. 0 when they are
@@ -179,6 +180,18 @@ int answer_query(int argc, char **argv) {
             return 1;
         }
         print_effects(info.sz_serial);
+        return 0;
+    }
+    /* The title's name, then its default controls; the neutral layout without a game. */
+    if (argc >= 2 && !strcmp(argv[1], "--list-controls")) {
+        GameInfo info;
+        const char *sz_game_dir;
+        if (!query_game(argc,argv,2,&info,&sz_game_dir)) {
+            fprintf(stderr, "Usage: %s --list-controls [--game dir | --title TITLE_ID]\n", argv[0]);
+            return 1;
+        }
+        if (info.title.sz_name) printf("title=%s\n",info.title.sz_name);
+        runtime_pad_print_default_controls(info.title.sz_default_controls);
         return 0;
     }
     if (argc >= 2 && !strcmp(argv[1], "--list-traits")) {

@@ -169,6 +169,8 @@ typedef struct {
     const uint16_t *p_quirks;
     size_t c_quirks;
     PsTitleOnline online;
+    /* Its default controls (Game::Title sz_default_controls), as psport_gpu_title_controls. */
+    const char *sz_default_controls;
 } PsTitleInfo;
 PsTitleInfo psport_gpu_title(const char *sz_serial);
 /* The running title's default controls (Game::Title sz_default_controls: psport.ini key.<input>= and
