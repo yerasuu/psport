@@ -171,6 +171,7 @@ public:
 
 private:
     u64 DurationMillis() const;
+    u64 PlaybackClockMillis();
     AvPlayerStreamInfo CreateStreamInfo(u32 stream_index);
 
     static void ReleaseAVPacket(AVPacket* packet);
@@ -251,6 +252,7 @@ private:
     SWSContextPtr m_sws_context{nullptr, &ReleaseSWSContext};
 
     std::optional<u64> m_last_audio_ts{};
+    std::atomic<u64> m_last_video_ts{};
     std::optional<std::chrono::high_resolution_clock::time_point> m_last_data_time{};
     std::optional<std::chrono::high_resolution_clock::time_point> m_start_time{};
     std::chrono::high_resolution_clock::time_point m_pause_time{};

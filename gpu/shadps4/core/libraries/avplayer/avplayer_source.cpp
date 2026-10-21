@@ -68,6 +68,17 @@ bool AvPlayerSource::Init(const AvPlayerInitData& init_data, std::string_view pa
         context->pb = m_up_data_streamer->GetContext();
         context->flags |= AVFMT_FLAG_CUSTOM_IO;
     };
+    // psport: libSceAvPlayer's MP4 parser does not subtract an edit list's media time, so frames
+    // keep their sample table timestamps, as games see them on the console (kb #771).
+    const auto open_input = [&](const char* sz_url) {
+        AVDictionary* p_options = nullptr;
+        if (av_dict_set(&p_options, "ignore_editlist", "1", 0) < 0) {
+            LOG_WARNING(Lib_AvPlayer, "Could not set ignore_editlist for {}", path);
+        }
+        const auto res = avformat_open_input(&context, sz_url, nullptr, &p_options);
+        av_dict_free(&p_options);
+        return res;
+    };
 
     if (init_data.file_replacement.open != nullptr) {
         LOG_INFO(Lib_AvPlayer, "Opening {} through the game-provided file replacement", path);
@@ -77,7 +88,7 @@ bool AvPlayerSource::Init(const AvPlayerInitData& init_data, std::string_view pa
             return false;
         }
         attach_custom_io();
-        if (AVPLAYER_IS_ERROR(avformat_open_input(&context, nullptr, nullptr, nullptr))) {
+        if (AVPLAYER_IS_ERROR(open_input(nullptr))) {
             return false;
         }
     } else {
@@ -89,7 +100,7 @@ bool AvPlayerSource::Init(const AvPlayerInitData& init_data, std::string_view pa
             return false;
         }
         LOG_INFO(Lib_AvPlayer, "Opening {} from host path {}", path, host);
-        if (AVPLAYER_IS_ERROR(avformat_open_input(&context, host, nullptr, nullptr))) {
+        if (AVPLAYER_IS_ERROR(open_input(host))) {
             return false;
         }
     }
@@ -303,6 +314,7 @@ bool AvPlayerSource::Start(u64 time) {
     m_video_decoder_thread.Run([this](std::stop_token stop) { this->VideoDecoderThread(stop); });
     m_audio_decoder_thread.Run([this](std::stop_token stop) { this->AudioDecoderThread(stop); });
     m_start_time = std::chrono::high_resolution_clock::now() - std::chrono::milliseconds(time);
+    m_last_video_ts = time;
     return true;
 }
 
@@ -324,6 +336,7 @@ void AvPlayerSource::Stop() {
     m_video_frames.Clear();
 
     m_last_audio_ts.reset();
+    m_last_video_ts = 0;
     m_last_data_time.reset();
     m_start_time.reset();
     m_pause_time = {};
@@ -378,10 +391,10 @@ bool AvPlayerSource::GetVideoData(AvPlayerFrameInfoEx& video_info) {
         return false;
     }
 
-    const auto current_time = CurrentTime();
+    const auto clock_ms = PlaybackClockMillis();
     const auto& new_frame = m_video_frames.Front();
     if (m_state.GetSyncMode() == AvPlayerAvSyncMode::Default) {
-        if (new_frame.info.timestamp > current_time) {
+        if (new_frame.info.timestamp > clock_ms) {
             return false;
         }
     }
@@ -394,6 +407,7 @@ bool AvPlayerSource::GetVideoData(AvPlayerFrameInfoEx& video_info) {
 
     auto frame = m_video_frames.Pop();
     video_info = frame->info;
+    m_last_video_ts = frame->info.timestamp;
 
     m_current_video_frame = std::move(frame);
     return true;
@@ -472,11 +486,23 @@ u64 AvPlayerSource::CurrentTime() {
     if (!m_start_time.has_value()) {
         return 0;
     }
+    // psport: libSceAvPlayer reports the last handed out frame's timestamp, which may pass the
+    // container duration (sample tables without the edit list's media time).
+    if (m_video_stream_index && !m_audio_stream_index) {
+        return m_last_video_ts;
+    }
 
     if (m_is_eof && !IsActive()) {
         return m_duration;
     }
     if (!IsActive()) {
+        return 0;
+    }
+    return PlaybackClockMillis();
+}
+
+u64 AvPlayerSource::PlaybackClockMillis() {
+    if (!m_start_time.has_value()) {
         return 0;
     }
 
@@ -491,11 +517,7 @@ u64 AvPlayerSource::CurrentTime() {
 
     const auto elapsed =
         duration_cast<milliseconds>(now - m_start_time.value() - m_pause_duration).count();
-    if (elapsed <= 0) {
-        return 0;
-    }
-    const auto current_time = u64(elapsed);
-    return m_duration != 0 && current_time > m_duration ? m_duration : current_time;
+    return elapsed > 0 ? u64(elapsed) : 0;
 }
 
 bool AvPlayerSource::IsActive() {
