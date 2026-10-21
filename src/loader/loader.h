@@ -67,11 +67,15 @@ void loader_json_free(LoaderJsonList *p_lists, size_t c_lists);
 void loader_eboot_sha256(const char *sz_game, unsigned char *p_out_digest);
 /* shadPS4/GoldHEN XML patches (loader_patches.c). Their addresses are the eboot's at 0x400000. */
 typedef struct { uint64_t off_image, cb_data; unsigned char *p_data; } LoaderPatchWrite;
+/* A profile patch's writes in the list, so that an external patch over any of its bytes replaces it whole. */
+typedef struct { char sz_name[128]; size_t i_first, c_writes; } LoaderPatchGroup;
 struct PsPatchList {
     LoaderPatchWrite *p_writes;
     size_t c_writes, c_capacity;
     const LoaderSegment *p_loads; /* the eboot's PT_LOAD segments: a write must fit in one */
     size_t c_loads;
+    LoaderPatchGroup *p_groups;
+    size_t c_groups, c_group_capacity;
 };
 void loader_patch_services(PsPatchList *p_list, PsPatchServices *p_out);
 /* The patches in the *.xml files of sz_dir for a game: files whose <ID>s name one of its serials (or none),
@@ -84,7 +88,8 @@ typedef struct {
     const char *(*pfn_refusal)(const char *sz_name);
 } LoaderPatchFolder;
 /* Appends the selected ones: patches.json's (sz_config) "enabled", else each entry's isEnabled
- * unless "disabled" names it. A patch with an unsupported line is skipped whole, and said. */
+ * unless "disabled" names it. A patch with an unsupported line is skipped whole, and said. One that
+ * writes any byte a profile patch writes removes that profile patch whole, and says so. */
 void loader_patches_external(PsPatchList *p_list, const LoaderPatchFolder *p_folder, const char *sz_config);
 /* --list-patches: what a launcher shows of them, as JSON. */
 void loader_patches_list(const LoaderPatchFolder *p_folder);

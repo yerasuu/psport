@@ -2,7 +2,7 @@
  * isEnabled> entries with <Line Type Address Value> writes, in files whose <ID>s name the titles
  * they are for. Literal writes only (bytes, bytes16/32/64, float32/64, utf8, utf16); pattern
  * ("mask") lines are refused. They are applied after relocation (bind.c), the external ones after
- * the profile's own, so an external patch of the same bytes wins. */
+ * the profile's own, so an external patch of the same bytes wins: it removes that profile patch whole. */
 #define _GNU_SOURCE
 #include "runtime_json_print.h"
 #include "loader.h"
@@ -217,6 +217,47 @@ static void add_write(PsPatchList *p_list, uint64_t off_image, const unsigned ch
 }
 static void truncate_list(PsPatchList *p_list, size_t c_writes) {
     while (p_list->c_writes > c_writes) free(p_list->p_writes[--p_list->c_writes].p_data);
+    while (p_list->c_groups && p_list->p_groups[p_list->c_groups - 1].i_first >= c_writes) --p_list->c_groups;
+}
+static void add_group(PsPatchList *p_list, const char *sz_name, size_t i_first) {
+    if (p_list->c_groups == p_list->c_group_capacity) {
+        p_list->c_group_capacity = p_list->c_group_capacity ? p_list->c_group_capacity * 2 : 32;
+        if (!(p_list->p_groups = realloc(p_list->p_groups, p_list->c_group_capacity * sizeof(*p_list->p_groups))))
+            loader_fail("allocation failed");
+    }
+    LoaderPatchGroup *p_group = &p_list->p_groups[p_list->c_groups++];
+    snprintf(p_group->sz_name, sizeof(p_group->sz_name), "%s", sz_name);
+    p_group->i_first = i_first;
+    p_group->c_writes = p_list->c_writes - i_first;
+}
+static int is_overlapping(const LoaderPatchWrite *p_a, const LoaderPatchWrite *p_b) {
+    return p_a->off_image < p_b->off_image + p_b->cb_data && p_b->off_image < p_a->off_image + p_a->cb_data;
+}
+static int is_group_overlapping(const PsPatchList *p_list, const LoaderPatchGroup *p_group, size_t i_first) {
+    for (size_t i = p_group->i_first; i < p_group->i_first + p_group->c_writes; ++i)
+        for (size_t j = i_first; j < p_list->c_writes; ++j)
+            if (is_overlapping(&p_list->p_writes[i], &p_list->p_writes[j])) return 1;
+    return 0;
+}
+/* Applied over a profile patch, an external one of the same bytes but other values would leave a
+ * mix of both (an FPS patch at the preset's addresses), so the profile patch goes whole. */
+static void replace_overlapped(PsPatchList *p_list, size_t i_first, const char *sz_key) {
+    for (size_t g = 0; g < p_list->c_groups;) {
+        LoaderPatchGroup group = p_list->p_groups[g];
+        if (!is_group_overlapping(p_list, &group, i_first)) {
+            ++g;
+            continue;
+        }
+        printf("Patches: external %s replaces the profile's '%s' (%zu writes removed)\n", sz_key, group.sz_name, group.c_writes);
+        for (size_t i = group.i_first; i < group.i_first + group.c_writes; ++i) free(p_list->p_writes[i].p_data);
+        memmove(&p_list->p_writes[group.i_first], &p_list->p_writes[group.i_first + group.c_writes],
+                (p_list->c_writes - group.i_first - group.c_writes) * sizeof(*p_list->p_writes));
+        p_list->c_writes -= group.c_writes;
+        i_first -= group.c_writes;
+        memmove(&p_list->p_groups[g], &p_list->p_groups[g + 1], (p_list->c_groups - g - 1) * sizeof(*p_list->p_groups));
+        --p_list->c_groups;
+        for (size_t h = g; h < p_list->c_groups; ++h) p_list->p_groups[h].i_first -= group.c_writes;
+    }
 }
 /* A metadata entry's lines appended, or none of them with the reason. */
 static int add_entry(PsPatchList *p_list, const XmlNode *p_entry, char *sz_out_error, size_t cb_error) {
@@ -283,8 +324,10 @@ static int add_named(PsPatchList *p_list, const char *sz_file, const char *const
     for (size_t i_name = 0; i_name < c_names && is_added; ++i_name) {
         const XmlNode *p_found = find_entry(&entries, pp_names[i_name], sz_app_version);
         char sz_reason_line[256];
+        size_t i_first = p_list->c_writes;
         if (!add_entry(p_list, p_found, sz_reason_line, sizeof(sz_reason_line)))
             is_added = line_error(sz_out_error, cb_error, "%s: %s", pp_names[i_name], sz_reason_line);
+        else if (p_list->c_writes > i_first) add_group(p_list, pp_names[i_name], i_first);
     }
     if (!is_added) truncate_list(p_list, c_before);
     free(entries.pp_nodes);
@@ -412,7 +455,9 @@ void loader_patches_external(PsPatchList *p_list, const LoaderPatchFolder *p_fol
             fprintf(stderr, "Patches: skipped %s: %s\n", p_external->sz_key, sz_error);
             continue;
         }
-        printf("Patches: external %s (%zu writes)\n", p_external->sz_key, p_list->c_writes - c_before);
+        size_t c_added = p_list->c_writes - c_before;
+        replace_overlapped(p_list, c_before, p_external->sz_key);
+        printf("Patches: external %s (%zu writes)\n", p_external->sz_key, c_added);
     }
     loader_json_free(settings, 2);
     free_externals(&externals);
