@@ -162,8 +162,9 @@ library.
   objects by language (`en`, `ru`, `es`, those the title has).
   `psport --list-controls [--game <dir> | --title <TITLE_ID>]` prints `title=<name>` when psport
   knows the title, then its default bindings as `psport.ini` lines (`key.<input>=`, and
-  `pad.<input>=` for the pad's inputs): the neutral layout of `src/input/runtime_pad.c` with the
-  title's `sz_default_controls` over it, the neutral layout alone without a game; the launcher's
+  `pad.<input>=` for the pad's inputs, then the `mouse_look_*` values the title sets): the neutral
+  layout of `src/input/runtime_pad.c` with the title's `sz_default_controls` over it, the neutral
+  layout alone without a game; the launcher's
   controls page shows these as defaults.
 - Middleware traits (`src/loader/loader_traits.c`): read once at load from the eboot's module and
   library names (`PS4Player*`, `Il2CppUserAssemblies`, `libkernel_unity`, `<Project>-PS4-Shipping`,
@@ -565,7 +566,7 @@ A title may provide:
 | `effects` | the settings of `add_patches` the overlay menu's "Game effects" section offers: its `psport.ini` switches (key, label and hint in the menu's languages, default), the `model_lod` choice, a note; without them the section is not shown |
 | `prepare_saves` | changes to the user's saves the game needs before it runs (Bloodborne: the sound flag at `0x204E`, gated by its `WORKAROUND` quirk `bloodborne_save_sound_flag`) |
 | `patch_image`, `before_present` | the port's own pages in the game's menus: patched into its code after the profile's patches, and applied each presented frame |
-| `default_controls` | its keyboard and mouse layout as `psport.ini` `key.`/`pad.` lines over the neutral one (Bloodborne: close to Dark Souls III on PC); the player's lines win |
+| `default_controls` | its keyboard and mouse layout as `psport.ini` `key.`/`pad.`/`mouse_look_` lines over the neutral one (Bloodborne: close to Dark Souls III on PC; Black Ops and Black Ops II: the PC games' layout); the player's lines win |
 | `online` | the servers of its online play: its own game server, the community server that answers for it, the community API port and its summon route ([Online play](#online-play)) |
 | `quirks` | its entries of the quirk registry ([QUIRKS.md](QUIRKS.md)) |
 | `profile` | its `Game::Profile`, or none |

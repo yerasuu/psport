@@ -316,6 +316,24 @@ hook, lock-on, menus) the mouse drives the right stick as before. Bloodborne's h
 mouse's motion for 100 ms after taking it, so the pointer's jump into relative mode does not turn
 the camera.
 
+As a stick, the mouse's speed is smoothed exponentially with the time constant
+`mouse_look_smoothing_ms` (default 60): a steady speed holds the stick at the same level whatever
+the frame rate, the smoothing or a hitch between samples, and a change of speed gets 63% of the way
+there in one time constant. Full deflection takes 1000 / (`mouse_sensitivity` × `mouse_look_gain`)
+pixels/s (`mouse_look_gain` default 1). The stick starts from `mouse_look_deadzone` (default 16 of
+127, `PS_MOUSE_DEADZONE` wins) so the game's own dead zone does not swallow slow aiming. A title's default controls may set the three
+(`mouse_look_*` lines in `Game::Title` `sz_default_controls`; Black Ops and Black Ops II carry
+provisional values until #457 measures their stick); the player's `psport.ini` lines win, and
+values other than the defaults are logged (`Runtime: controls: mouse look ...`).
+
+Aim assist in shooters is the game's own and does not know the device: Black Ops and Black Ops II
+apply their slowdown, lock-on and auto-aim to the mouse's stick as to a pad's, so the mouse feels
+dragged and the view jumps when aiming down sights. With the mouse, turn off Aim Assist (Black Ops
+II: also Target Assist) in the game's controller options. Their layout puts the grenade (R1) on G,
+which with `pad_motion=1` is also the fixed key that takes the sideways controller
+(`MOTION_KEY_HOLD`, `src/input/runtime_pad_motion.c`): a grenade then also hands the mouse to the
+sensors and stops the camera turning, so keep `pad_motion` off for them or bind `key.r1` elsewhere.
+
 A profile may also give the mouse a pointer in the game's own menus (`Game::MouseHooks`
 `pfn_wants_pointer`, `pfn_window_event`, `pfn_filter_pad`): while it says a menu is open the window
 lets the mouse go and shows the cursor, its events go to the profile first, and the presses it
@@ -341,8 +359,9 @@ game (`Runtime: keyboard: ...`) and sums up the events delivered at exit.
 
 The keyboard-as-pad's layout (`src/input/runtime_pad.c`) is the neutral one in that file's header
 unless the running title brings its own (`Game::Title` `sz_default_controls`, `psport.ini` lines
-read through `psport_gpu_title_controls`; Bloodborne's is close to Dark Souls III on PC); the
-player's `key.<input>=` and `pad.<input>=` lines in `psport.ini` win over both. A key may be a chord,
+read through `psport_gpu_title_controls`; Bloodborne's is close to Dark Souls III on PC, Black Ops
+and Black Ops II share the PC games' layout, `gpu/games/black_ops/title.cpp`); the player's
+`key.<input>=` and `pad.<input>=` lines in `psport.ini` win over both. A key may be a chord,
 `key.r2=Left Shift+Mouse Left`: while its modifier is held the key's plain bindings do not count.
 `key.menu=` (keyboard keys, a chord allowed) and `pad.menu=` (gamepad buttons, each may be a
 two-button chord, `pad.menu=back,leftshoulder+rightshoulder`) open and close the overlay menu like

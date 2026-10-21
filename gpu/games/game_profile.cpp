@@ -12,6 +12,8 @@ namespace Game {
 
 // One per game (games/<game>/title.cpp).
 extern const Title BloodborneTitle;
+extern const Title BlackOpsTitle;
+extern const Title BlackOps2Title;
 
 namespace {
 constexpr bool NamesTask(const char* sz_reference) {
@@ -33,7 +35,7 @@ constexpr bool NamesTask(const char* sz_reference) {
 #undef QUIRK_GPU
 #undef QUIRK_TRAITS
 
-constexpr std::array<const Title*, 1> Titles = {&BloodborneTitle};
+constexpr std::array<const Title*, 3> Titles = {&BloodborneTitle, &BlackOpsTitle, &BlackOps2Title};
 std::atomic<const Title*> s_p_launched{nullptr};
 std::atomic<const Profile*> s_p_active{nullptr};
 } // namespace

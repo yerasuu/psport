@@ -381,17 +381,44 @@ static int key_from_name(const char *sz_name) {
     return s==SDL_SCANCODE_UNKNOWN ? -1 : (int)s;
 }
 /* Mouse look (psport.ini): mouse_look=0 leaves the mouse alone; mouse_sensitivity (default 1:
- * ~1000 pixels/s turn the camera at full speed), mouse_invert_y=1. */
+ * ~1000 pixels/s turn the camera at full speed), mouse_invert_y=1. The stick's tuning, which a
+ * title's default controls may set and the player's lines override (apply_mouse_look):
+ * mouse_look_gain (scales the stick's deflection with mouse_sensitivity, default 1),
+ * mouse_look_smoothing_ms (the integrator's time constant, default 60) and mouse_look_deadzone
+ * (the deflection a moving mouse starts from, default 16 of 127; PS_MOUSE_DEADZONE wins). */
 static int s_mouse_look=1, s_mouse_invert_y, s_is_skip_enabled;
 static float s_mouse_sensitivity=1.0f;
-/* A key.<input>= or pad.<input>= line (sz_origin: where it comes from, for the log); 0 when it is
- * not one. */
-static int apply_binding_line(const char *sz_key, const char *sz_value, const char *sz_origin) {
+#define LOOK_TAU_US 60000.0f
+#define LOOK_DEADZONE 16
+static float s_look_gain=1.0f, s_look_tau_us=LOOK_TAU_US;
+static int s_look_deadzone=LOOK_DEADZONE;
+/* What a settings line was to a reader: not its key, its key with a value it rejected (logged), or
+ * applied. */
+typedef enum { LINE_OTHER, LINE_IGNORED, LINE_APPLIED } LineResult;
+/* A mouse_look_* line (sz_origin: where it comes from, for the log). */
+static LineResult apply_mouse_look_line(const char *sz_key, const char *sz_value, const char *sz_origin) {
+    if (strncmp(sz_key,"mouse_look_",11)) return LINE_OTHER;
+    char *p_end=NULL;
+    const float v=strtof(sz_value,&p_end);
+    const int is_number=p_end!=sz_value;
+    if (!strcmp(sz_key,"mouse_look_gain") && is_number && v>=0.05f && v<=20.0f) s_look_gain=v;
+    else if (!strcmp(sz_key,"mouse_look_smoothing_ms") && is_number && v>=1.0f && v<=500.0f) s_look_tau_us=v*1000.0f;
+    else if (!strcmp(sz_key,"mouse_look_deadzone") && is_number && v>=0.0f && v<=100.0f) s_look_deadzone=(int)v;
+    else {
+        printf("Runtime: controls: %s=%s ignored (%s): unknown key or out of range (gain 0.05-20, smoothing_ms 1-500, deadzone 0-100)\n",
+               sz_key,sz_value,sz_origin);
+        return LINE_IGNORED;
+    }
+    return LINE_APPLIED;
+}
+/* A key.<input>= or pad.<input>= line (sz_origin: where it comes from, for the log); applied once
+ * its input is known, the names it does not know logged and left out. */
+static LineResult apply_binding_line(const char *sz_key, const char *sz_value, const char *sz_origin) {
     const int keyboard=!strncmp(sz_key,"key.",4), pad=!strncmp(sz_key,"pad.",4);
-    if (!keyboard && !pad) return 0;
+    if (!keyboard && !pad) return LINE_OTHER;
     int input=-1;
     for (int i=0;i<IN_COUNT;++i) if (!strcmp(sz_key+4,s_input_names[i])) input=i;
-    if (input<0 || (pad && input>=IN_MOVE_UP && input<IN_MENU)) { printf("Runtime: controls: unknown input %s (%s)\n",sz_key,sz_origin); return 1; }
+    if (input<0 || (pad && input>=IN_MOVE_UP && input<IN_MENU)) { printf("Runtime: controls: unknown input %s (%s)\n",sz_key,sz_origin); return LINE_IGNORED; }
     Binding *p_binding=&s_bindings[input];
     if (keyboard) p_binding->c_keys=0; else p_binding->c_pads=0;
     char sz_names[512];
@@ -436,7 +463,7 @@ static int apply_binding_line(const char *sz_key, const char *sz_value, const ch
     if (input==IN_MENU)
         printf("Runtime: controls: the port's menu on %s \"%s\" (%s; %d bound), besides Insert and L3+R3\n",
                keyboard ? "keys" : "gamepad buttons",sz_value,sz_origin,keyboard ? p_binding->c_keys : p_binding->c_pads);
-    return 1;
+    return LINE_APPLIED;
 }
 /* A title's default controls (psport.ini lines, one per line) over the neutral ones; the count
  * applied. */
@@ -450,7 +477,10 @@ static int apply_title_controls(const char *sz_controls) {
         char *p_equals=strchr(sz_entry,'=');
         if (p_equals) {
             *p_equals=0;
-            c_lines+=apply_binding_line(sz_entry,p_equals+1,"the title's defaults");
+            LineResult result=apply_binding_line(sz_entry,p_equals+1,"the title's defaults");
+            if (result==LINE_OTHER) result=apply_mouse_look_line(sz_entry,p_equals+1,"the title's defaults");
+            if (result==LINE_OTHER) printf("Runtime: controls: %s ignored (the title's defaults): not a controls line\n",sz_entry);
+            c_lines+=result==LINE_APPLIED;
         }
         sz_line+=cb_line+(sz_end ? 1 : 0);
     }
@@ -466,8 +496,12 @@ static const char *pad_button_name(int button) {
     if (button==PAD_RIGHT_TRIGGER) return "righttrigger";
     return SDL_GetGamepadStringForButton((SDL_GamepadButton)button);
 }
+static void reset_look(void) {
+    s_look_gain=1.0f; s_look_tau_us=LOOK_TAU_US; s_look_deadzone=LOOK_DEADZONE;
+}
 void runtime_pad_print_default_controls(const char *sz_title_controls) {
     bind_defaults();
+    reset_look();
     if (sz_title_controls) apply_title_controls(sz_title_controls);
     for (int input=0;input<IN_COUNT;++input) {
         const Binding *p_binding=&s_bindings[input];
@@ -485,19 +519,24 @@ void runtime_pad_print_default_controls(const char *sz_title_controls) {
         }
         putchar('\n');
     }
+    if (s_look_gain!=1.0f) printf("mouse_look_gain=%g\n",s_look_gain);
+    if (s_look_tau_us!=LOOK_TAU_US) printf("mouse_look_smoothing_ms=%g\n",s_look_tau_us/1000.0f);
+    if (s_look_deadzone!=LOOK_DEADZONE) printf("mouse_look_deadzone=%d\n",s_look_deadzone);
 }
 /* key.<input>= / pad.<input>= lines of the settings file. */
 static void load_bindings(void) {
     bind_defaults();
+    reset_look();
     const char *sz_controls=psport_gpu_title_controls();
     if (sz_controls)
-        printf("Runtime: controls: the title's default layout (%d bindings), psport.ini's key. and pad. lines over it\n",
+        printf("Runtime: controls: the title's default layout (%d lines), psport.ini's key., pad. and mouse_look_ lines over it\n",
                apply_title_controls(sz_controls));
     s_mouse_look=1; s_mouse_invert_y=0; s_mouse_sensitivity=1.0f;
     int pad_motion=-1, skip_movies=0;
     const char *sz_key, *sz_value;
     for (size_t i_entry=0; runtime_config_entry(i_entry,&sz_key,&sz_value); ++i_entry) {
-        if (apply_binding_line(sz_key,sz_value,"psport.ini")) continue;
+        if (apply_binding_line(sz_key,sz_value,"psport.ini")!=LINE_OTHER || apply_mouse_look_line(sz_key,sz_value,"psport.ini")!=LINE_OTHER)
+            continue;
         if (!strcmp(sz_key,"mouse_look")) s_mouse_look=atoi(sz_value)!=0;
         else if (!strcmp(sz_key,"pad_motion")) pad_motion=atoi(sz_value)!=0;
         else if (!strcmp(sz_key,"skip_movies")) skip_movies=atoi(sz_value)!=0;
@@ -507,6 +546,10 @@ static void load_bindings(void) {
             if (v>=0.05f && v<=20.0f) s_mouse_sensitivity=v;
         }
     }
+    const int env_deadzone=runtime_env_int("PS_MOUSE_DEADZONE",s_look_deadzone);
+    if (env_deadzone>=0 && env_deadzone<=100) s_look_deadzone=env_deadzone;
+    if (s_look_gain!=1.0f || s_look_tau_us!=LOOK_TAU_US || s_look_deadzone!=LOOK_DEADZONE)
+        printf("Runtime: controls: mouse look gain %.2f, smoothing %.0f ms, deadzone %d\n",s_look_gain,s_look_tau_us/1000.0f,s_look_deadzone);
     runtime_pad_motion_configure(pad_motion);
     s_is_skip_enabled=runtime_env_flag("PS_SKIP_MOVIES",skip_movies);
     if (!s_is_skip_enabled) s_bindings[IN_SKIP_MOVIE].c_keys=s_bindings[IN_SKIP_MOVIE].c_pads=0;
@@ -776,13 +819,15 @@ static void apply_keyboard(PadData *p_pad_data, const bool *p__bool) {
 }
 
 /* Mouse look: the game turns its camera at a rate set by the right stick, so the stick follows
- * the mouse's speed. Each sample adds the motion since the last one and the sum decays over
- * LOOK_TAU (linearly per sample: the level a steady speed holds, speed * gain * LOOK_TAU, is the
- * same at any frame rate). ~1000 pixels/s reach full deflection at sensitivity 1. The game ignores
- * small deflections, so a moving mouse starts past them (PS_MOUSE_DEADZONE, default 16 of 127):
- * slow aiming still turns the camera. While the mouse moves it replaces the right stick. */
-#define LOOK_TAU_US 60000.0f
+ * the mouse's speed. The stick is the mouse's speed since the last sample, smoothed exponentially
+ * with the time constant mouse_look_smoothing_ms: a steady speed holds it at speed * 127/1000 *
+ * mouse_sensitivity * mouse_look_gain (full deflection at 1000 / (sensitivity * gain) pixels/s)
+ * whatever the frame rate, the smoothing and a hitch between samples; a change of speed gets 63% of
+ * the way there in one time constant. The game ignores small deflections, so a moving mouse starts
+ * past them (mouse_look_deadzone): slow aiming still turns the camera. While the mouse moves it
+ * replaces the right stick. */
 static float s_look_x, s_look_y;
+static double s_look_pending_x, s_look_pending_y;
 static uint64_t s_look_last_us;
 static uint8_t look_axis(float value, uint8_t stick, int deadzone) {
     if (value>-0.5f && value<0.5f) return stick;
@@ -802,22 +847,23 @@ static void apply_mouse_look(PadData *p_pad_data, double dx, double dy, uint64_t
            down, as the stick pushed down does. */
         if (psport_gpu_camera_look((float)(s_mouse_invert_y ? -dy : dy)*k,(float)dx*k)) dx=dy=0;
     }
-    float dt=s_look_last_us && now>s_look_last_us ? (float)(now-s_look_last_us) : 0.0f;
-    s_look_last_us=now;
-    if (!is_captured) { s_look_x=s_look_y=0; return; }
-    if (dt>LOOK_TAU_US) dt=LOOK_TAU_US;
-    static int s_deadzone=-1;
-    if (s_deadzone<0) {
-        s_deadzone=runtime_env_int("PS_MOUSE_DEADZONE",16);
-        if (s_deadzone<0 || s_deadzone>100) s_deadzone=16;
+    if (!is_captured) { s_look_x=s_look_y=0; s_look_pending_x=s_look_pending_y=0; s_look_last_us=now; return; }
+    s_look_pending_x+=dx;
+    s_look_pending_y+=s_mouse_invert_y ? -dy : dy;
+    /* Motion with no time since the last sample (the first one, or the same timestamp) waits for
+       the next sample, which gives it a speed. */
+    if (s_look_last_us && now>s_look_last_us) {
+        const float dt_us=(float)(now-s_look_last_us), keep=expf(-dt_us/s_look_tau_us);
+        const float per_pixel=(1.0f-keep)*1e6f/dt_us*127.0f/1000.0f*s_mouse_sensitivity*s_look_gain;
+        s_look_x=s_look_x*keep+(float)s_look_pending_x*per_pixel;
+        s_look_y=s_look_y*keep+(float)s_look_pending_y*per_pixel;
+        s_look_pending_x=s_look_pending_y=0;
     }
-    const float gain=127.0f/(1000.0f*LOOK_TAU_US/1e6f)*s_mouse_sensitivity, decay=1.0f-dt/LOOK_TAU_US;
-    s_look_x=s_look_x*decay+(float)dx*gain;
-    s_look_y=s_look_y*decay+(float)(s_mouse_invert_y ? -dy : dy)*gain;
+    if (now>s_look_last_us) s_look_last_us=now;
     s_look_x=s_look_x<-127 ? -127 : s_look_x>127 ? 127 : s_look_x;
     s_look_y=s_look_y<-127 ? -127 : s_look_y>127 ? 127 : s_look_y;
-    p_pad_data->right_x=look_axis(s_look_x,p_pad_data->right_x,s_deadzone);
-    p_pad_data->right_y=look_axis(s_look_y,p_pad_data->right_y,s_deadzone);
+    p_pad_data->right_x=look_axis(s_look_x,p_pad_data->right_x,s_look_deadzone);
+    p_pad_data->right_y=look_axis(s_look_y,p_pad_data->right_y,s_look_deadzone);
 }
 
 /* Button prompts: the device whose input came last. RUNTIME_PAD_PROMPT_PLAYSTATION a PlayStation pad
