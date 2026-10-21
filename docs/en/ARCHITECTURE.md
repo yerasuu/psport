@@ -584,7 +584,7 @@ A profile may provide:
 | `anisotropy` | anisotropic filtering forced on its textures when `PS_ANISO` is unset |
 | `upscaler` | where the temporal upscaler goes in its frame (scene combine and UI shaders), its scene constants (camera) and bone palettes (object motion); without it the upscaler stays off |
 | `drives_frame_rate` | true once its hooks pace the game's frames: the video out shows each frame as it comes, whatever flip rate the game asks for (Bloodborne's frame rate hooks) |
-| `mouse` | the mouse in the game's code: native mouse look (`camera_look`: Bloodborne's camera turn detoured; Black Ops and Black Ops II, the counts added to their own mouse input), a pointer in its menus (`wants_pointer`, `window_event`, `filter_pad`) |
+| `mouse` | the mouse in the game's code: native mouse look (`camera_look`: Bloodborne's camera turn detoured; Black Ops and Black Ops II, the counts added to their own mouse input), a pointer in its menus (`wants_pointer`, `window_event`, `filter_pad`), a look at each pad sample (`filter_pad`: Black Ops' crosshair) |
 | `display_aspect` | the output's aspect ratio; true when its camera and UI follow it (Bloodborne), else the core keeps the game's 16:9 picture in the middle ([upscaler.md](upscaler.md#output-aspect-ratios-2026-10-17)) |
 | `report_stats` | profile diagnostics with each frame statistics report |
 | `label_release` | the game's label release code, for the free check's `PS_LABEL_TRAP=2` |
@@ -608,7 +608,8 @@ A profile makes a title faster or easier to diagnose; it never makes it work. Th
 every title correctly on its generic paths, which `PS_GAME_PROFILE=none` checks. Black Ops and
 Black Ops II (`gpu/games/black_ops/`: `title.cpp`, their keyboard and mouse layout; `profile.cpp`,
 the mouse camera of `mouse_camera.cpp` feeding their own mouse input, unless `PS_NATIVE_MOUSE=0` or
-another build) bring no patches. Bloodborne has the most (`gpu/games/bloodborne/`: `title.cpp` and, for the launch, `patches.cpp`: the
+another build, and `crosshair.cpp`, `cg_drawCrosshair` held on with keyboard and mouse while the game
+shows its HUD, unless `PS_FORCE_CROSSHAIR=0`) bring no patches. Bloodborne has the most (`gpu/games/bloodborne/`: `title.cpp` and, for the launch, `patches.cpp`: the
 `PS_FPS` presets 30/60/90/uncap (by hooks in its code, `frame_rate.cpp`, unless `PS_FRAME_HOOKS=0`
 or the executable is not 1.09), `PS_PATCHES`, the effect switches and `model_lod` of `psport.ini`,
 the `PS_RENDER_RES` scene size, the Intel tone mapping and online-choice fixes, all from

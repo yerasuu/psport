@@ -16,6 +16,7 @@
 // (frame msec 0, a vehicle or killcam flag of the client, Black Ops' top-down camera) the sample
 // goes to the stick; its +strafe key and the guided-missile spin guard are not read.
 #include "mouse_camera.h"
+#include "guest_memory.h"
 
 #include <algorithm>
 #include <atomic>
@@ -26,13 +27,13 @@
 #include <cstring>
 #include <span>
 
-// The runtime's fault recovery (src/main/signals.c): a fault while it is set jumps back to it.
-extern "C" __thread sigjmp_buf* g_p_runtime_fault_recover;
 // src/runtime/runtime_calls.c: a line of the exit summary.
 extern "C" void runtime_calls_add_summary(void (*pfn_summary)(char* sz_out, std::size_t cb_out));
 
 namespace PsBlackOpsMouse {
 namespace {
+using PsBlackOps::Get;
+using PsBlackOps::IsGuestAddress;
 using u64 = std::uint64_t;
 using u8 = std::uint8_t;
 using i32 = std::int32_t;
@@ -160,8 +161,6 @@ constexpr float RadiansPerCount = 0.0015f;
 /// Counts left unread this long after the game last showed it reads them (or after they were
 /// added, when later): it does not (menus, loading).
 constexpr long long TakeTimeoutMs = 100;
-/// The guest's pointers fit 40 bits.
-constexpr u64 GuestAddressEnd = 1ull << 40;
 /// Each kind of failure is logged this many times, then only counted.
 constexpr u64 LoggedFailures = 8;
 
@@ -191,10 +190,6 @@ long long NowMs() {
         .count();
 }
 
-bool IsGuestAddress(u64 va, u64 alignment) {
-    return va >= 0x10000 && va < GuestAddressEnd && va % alignment == 0;
-}
-
 /// Counts a failure, logged its first LoggedFailures times.
 void NoteFailure(std::atomic<u64>& c_failures, const char* sz_what, i32 counts_x, i32 counts_y) {
     if (c_failures.fetch_add(1, std::memory_order_relaxed) < LoggedFailures) {
@@ -203,26 +198,6 @@ void NoteFailure(std::atomic<u64>& c_failures, const char* sz_what, i32 counts_x
                     p_layout ? p_layout->sz_game : "?", sz_what, counts_x, counts_y,
                     (unsigned long long)LoggedFailures);
     }
-}
-
-/// Copies guest memory; false where nothing is mapped (the runtime's fault recovery).
-bool Read(u64 va_from, void* p_out, std::size_t cb_copy) {
-    sigjmp_buf recover;
-    if (sigsetjmp(recover, 0)) {
-        g_p_runtime_fault_recover = nullptr;
-        return false;
-    }
-    g_p_runtime_fault_recover = &recover;
-    std::atomic_signal_fence(std::memory_order_seq_cst);
-    std::memcpy(p_out, reinterpret_cast<const void*>(va_from), cb_copy);
-    std::atomic_signal_fence(std::memory_order_seq_cst);
-    g_p_runtime_fault_recover = nullptr;
-    return true;
-}
-
-template <typename T>
-bool Get(u64 va_from, T* p_out) {
-    return Read(va_from, p_out, sizeof(T));
 }
 
 /// Adds value to the guest's int at va atomically (the game's thread may flip and zero it at the

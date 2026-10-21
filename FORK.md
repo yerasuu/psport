@@ -347,6 +347,37 @@ detour if the night shows it matters), those sent to the stick while the game ig
 skipped, handed to the stick, failed take-backs and half-done adds (`Mouse camera: <game>: ...`;
 failures are also logged their first 8 times).
 
+Their crosshair (`gpu/games/black_ops/crosshair.cpp`, kb #728, rea note #729) is on by default in
+both games: `CG_ShouldDrawCrosshair` reads dvar `cg_drawCrosshair` (bool, default 1) each frame with
+no gamepad, profile or platform gate. What hides it is the game: level scripts set the dvar to 0 for
+scripted moments (Black Ops kowloon, zombietron; Black Ops II blackout, karma, nicaragua, `so_*`;
+`reset_clientdvars` sets it back to 1 on connect), and `CG_Draw2D` skips it with `cg_draw2D`,
+`cg_drawHUD` or `hud_drawHUD` at 0 (cutscenes) or `hud_missionFailed` on, besides pause, vehicles,
+turrets, swimming, full ADS, `cg_crosshairAlpha` below 0.01, weapon states and a weapon without a
+reticle. Each pad sample (`Game::MouseHooks` `pfn_filter_pad`) reads `cg_drawCrosshair`, `cg_draw2D`,
+`cg_drawHUD`, `hud_drawHUD`, `hud_missionFailed` and `cg_crosshairAlpha` through the image's globals
+(Black Ops `cg_drawCrosshair` at `0x27702f0`, Black
+Ops II at `0x2470d98`), checking the `dvar_t` pointer and its type (`+0x1c`: bool 0 and float 1 in
+Black Ops, 1 and 2 in Black Ops II) before reading the current value (`+0x28`), and logs each change
+the game makes (`Crosshair: <game>: the game set ...`; `cg_drawCrosshair` and the other dvars
+each their first 32, then counted). While the
+keyboard and mouse are the device in use (`runtime_pad_prompt_device`) and the game shows its HUD
+(`cg_draw2D`, `cg_drawHUD`, `hud_drawHUD` on, `hud_missionFailed` off), psport writes 1 over the
+game's 0 at `+0x28` (the readers check neither the modified nor the latched copy), so scripted hides
+lift with the keyboard but cutscenes and HUD-off moments stay. With a pad, or once the HUD goes,
+psport stops holding it and writes nothing back (`stopped holding cg_drawCrosshair; the game's next
+write decides`): a write of 1 by the game over psport's 1 cannot be seen, so giving back an earlier
+0 could hide the crosshair where the game wants it. The byte stays 1 until the game writes it, so a
+pad taken up during a scripted hide shows the crosshair until the script's next write.
+`PS_FORCE_CROSSHAIR=0` keeps only the log. Before it starts, the reader at Black Ops `0x975e2`
+(Black Ops II `0xa4288`) is compared byte for byte (`Crosshair: <game>: not the known build`
+otherwise); the exit summary counts the samples it held, its writes and releases, the game's changes
+(`cg_drawCrosshair` apart from the other dvars, each logged its first 32 times),
+samples before registration, refusals (a type other than the build's), unreadable dvars and failed
+writes (`Crosshair: <game>: held on by psport for ...`). If the crosshair still does not show with
+`cg_drawCrosshair` at 1 and the HUD on, the cause is the game's state, its reticle materials or the
+render, not the dvar.
+
 As a stick, the mouse's speed is smoothed exponentially with the time constant
 `mouse_look_smoothing_ms` (default 60): a steady speed holds the stick at the same level whatever
 the frame rate, the smoothing or a hitch between samples, and a change of speed gets 63% of the way
