@@ -16,6 +16,68 @@ changes alone make no release. What breaks is psport's launch interface: `run.sh
 The tags without a `v` (`0.1` to `0.51`) are bbport's releases, carried in psport's history; their
 notes are in [docs/en/history/](docs/en/history/).
 
+## v0.1.1
+
+Fixes and ports on v0.1.0: bbport 0.6-pre1's and shadPS4's later fixes ported by hand, firmware
+behaviour read from the original libraries, and keyboard and mouse support for more titles. The
+launch interface does not change. The Windows port is not part of this version.
+
+### Packaging and licences
+- The bundle and the Nix cache leave out the online module (`libpsport-net.so`) until its mbedTLS
+  port (#850), and ship the third-party notices and the source offer; `--list-features` reports
+  `online_module` as unavailable on such builds, so launchers can hide the online settings.
+- A licence check gates every release and cache publication; files that mix licences now say
+  `GPL-2.0-only` in their headers.
+- The README keeps only each game's state (playable, experimental, broken, not supported); the detail
+  is in `docs/en/GAMES.md`, `docs/es/GAMES.md` and `docs/ru/GAMES.md`.
+- A smaller Python in the package (678 to 602 MiB); the Nix cache also holds the newest 20 branch
+  commits for launchers that follow `develop`.
+
+### Launching and diagnostics
+- `PS_CACHE_DIR` puts the shader and pipeline caches, and the drivers' caches, on another disk.
+- `PS_DEBUG=1` gathers a run's logs, calls, faults, frame statistics and settings in one folder.
+- `psport --list-controls` prints the title's default controls; `--list-features` also reports
+  which upscalers and CPU fixes a machine can run.
+- The GPU is kept by name, and a game's 21 text languages are available.
+- Fixed: `run.sh` quitting silently at 4K, 1440p or 720p, a crash at start without `HOME`, a lost
+  log when the game is stopped as a group, and an incomplete exit report on a window close.
+- The default user name is `Player`; `PS_USER_NAME` overrides it.
+
+### Loader and system libraries
+- Mods from mod sites are recognised in more layouts and rejected folders say why; an external patch
+  replaces a profile patch it overlaps instead of stacking on it.
+- Mutexes, read-write locks, time zones, Rtc arithmetic, AvPlayer, Voice, MsgDialog and the network
+  address functions follow the firmware's results; libSceUlt sync objects, JpegDec, LoginDialog and
+  many libkernel calls are native.
+- Dialogs and the IME can be answered with a controller alone, including typing text.
+- Ngs2's mastering limiter and LFE filter run; 7.1 audio folds to stereo with the fronts at full level.
+- Optional movie skip (`skip_movies=1`).
+
+### Graphics
+- Shader recompiler, texture cache and command processor fixes from shadPS4; cached shaders are
+  rebuilt once.
+- Fewer stops: assertions in the caches, GNM and VideoOut became counted fallbacks, and shader and
+  depth buffer bugs that hung the GPU (Blood Omen 2, Gal Guardians 2) are fixed.
+- Better behaviour on small VRAM (APUs) and when VRAM fills; faster tiling and shader specialization.
+- Temporal upscalers reset on camera cuts, so cutscenes no longer flash.
+
+### Input
+- Short taps are no longer lost; the keyboard stick keeps a sprint through direction changes; View +
+  d-pad clicks the touchpad halves.
+- Call of Duty: Black Ops 1 and 2 play with keyboard and mouse; Atelier Ayesha DX draws its button
+  glyphs.
+
+### Bloodborne
+- Play time counted in real time, replay ghosts at the right speed, a crash with `PS_RENDER_RES` above
+  1080p fixed, stale external FPS patches ignored.
+- Workarounds from bbport 0.6 declared as quirks (`PS_QUIRKS`), including the Intel tone mapping fix;
+  new Disable Bloom switch.
+- Seamless co-op gives its kit to new characters only with a verified save backup.
+
+### Online
+- Network calls Bloodborne polls (epoll abort, HTTP status, `sceNetInit`, SSL contexts) no longer show
+  as failures.
+
 ## v0.1.0
 
 The first version of psport as an independent project: bbport's native Bloodborne port taken to a
