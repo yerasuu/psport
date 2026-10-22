@@ -314,6 +314,23 @@ maps its errors (`WSAEWOULDBLOCK` as `EAGAIN`), with `FIONBIO`, `FIONREAD` and `
 brings its own); the GPU library reaches the runtime's thread-local one through `runtime_fault_recover_slot`
 there, since a DLL cannot import an executable's thread-local variable.
 
+What the Windows port changed in code Linux runs too (feat/614-win32), for the Linux regress to
+watch, all meant to behave as before:
+
+- `runtime_socket.c`: `recvfrom` and `sendto` go through `ps_host_net_receive`/`_send`, `recvmsg`
+  and `sendmsg` on Linux; `socketpair` through `ps_host_net_socketpair`; a socket's event queue
+  readiness through `ps_host_net_ready` (`ps_host_fs_poll` on Linux).
+- `runtime_mutex.c`: a condition's clock goes with each timed wait (`pthread_cond_clockwait`) instead
+  of its attributes.
+- `runtime_trophy.c`: `trophyset.json` streamed into `<path>.tmp` and renamed (was built in an
+  `open_memstream` buffer first); trophy times parsed with `sscanf` instead of `strptime`.
+- `runtime_savedata.c`: a slot's used size from `ps_host_fs_stat_link` per file, not `nftw`'s stat.
+- `runtime_ult.c`: `sceUltUlthreadExit` jumps back through `PS_HOST_RECOVERY_JUMP`, which does not
+  save and restore the signal mask (`sigsetjmp` savemask 1 before, 0 now); the exit is refused
+  inside exception delivery and while a runtime lock is held, so the mask is the same at both ends.
+- `game_info.c`: the install folder (title patch files) is `PS_INSTALL_DIR`, else the nearest folder
+  above the executable holding `patches/` (was always two folders up).
+
 The guest's memory map, its region table and the low allocator (`runtime_low_map`, host memory the
 guest sees in `[0x0800000000, 0x1000000000)`) stay in `runtime_memory.c` and reach the host only
 through `ps_host_vm_*`; the dma-buf chunks the GPU library exports are views through
