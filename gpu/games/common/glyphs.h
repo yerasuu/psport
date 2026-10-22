@@ -67,10 +67,13 @@ struct AtlasCell {
     const char* sz_glyph = nullptr;
 };
 
+/// is_upside_down: its first level holds its last row first (the game samples it with v
+/// reversed), so the pictures go into its cells upside down too.
 struct Atlas {
     const char* sz_name = nullptr;
     Texture texture;
     std::span<const AtlasCell> cells;
+    bool is_upside_down = false;
 };
 
 /// palette: the colours the port draws the title's glyphs in.

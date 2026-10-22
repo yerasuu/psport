@@ -619,7 +619,8 @@ every title correctly on its generic paths, which `PS_GAME_PROFILE=none` checks.
 Black Ops II (`gpu/games/black_ops/`: `title.cpp`, their keyboard and mouse layout; `profile.cpp`,
 the mouse camera of `mouse_camera.cpp` feeding their own mouse input, unless `PS_NATIVE_MOUSE=0` or
 another build, and `crosshair.cpp`, `cg_drawCrosshair` held on with keyboard and mouse while the game
-shows its HUD, unless `PS_FORCE_CROSSHAIR=0`) bring no patches. Bloodborne has the most (`gpu/games/bloodborne/`: `title.cpp` and, for the launch, `patches.cpp`: the
+shows its HUD, unless `PS_FORCE_CROSSHAIR=0`) bring no patches, nor does Atelier Ayesha DX
+(`gpu/games/ayesha/`: its profile is its button glyph table, one upside-down UI atlas). Bloodborne has the most (`gpu/games/bloodborne/`: `title.cpp` and, for the launch, `patches.cpp`: the
 `PS_FPS` presets 30/60/90/uncap (by hooks in its code, `frame_rate.cpp`, unless `PS_FRAME_HOOKS=0`
 or the executable is not 1.09), `PS_PATCHES`, the effect switches and `model_lod` of `psport.ini`,
 the `PS_RENDER_RES` scene size, the Intel tone mapping and online-choice fixes, all from

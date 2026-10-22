@@ -302,7 +302,7 @@ bool TextureSubstitutes::Compose(Composite& composite, Image& image, const Game:
             cell.side == 0 || cell.x + cell.side > composite.width || cell.y + cell.side > composite.height) {
             continue;
         }
-        ScalePicture(cell.i_picture, cell.side, scaled);
+        ScalePicture(cell.i_picture, cell.side, cell.is_upside_down, scaled);
         copies.push_back(vk::BufferImageCopy{
             .bufferOffset = pixels.size() * sizeof(u32),
             .imageSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1},
@@ -362,7 +362,7 @@ bool TextureSubstitutes::Compose(Composite& composite, Image& image, const Game:
     return true;
 }
 
-void TextureSubstitutes::ScalePicture(u32 i_picture, u32 side, std::vector<u32>& out) const {
+void TextureSubstitutes::ScalePicture(u32 i_picture, u32 side, bool is_upside_down, std::vector<u32>& out) const {
     const u32 source_side = m_pictures.side;
     const u32* p_picture = m_pictures.pixels.data() + std::size_t(i_picture) * source_side * source_side;
     out.resize(std::size_t(side) * side);
@@ -391,7 +391,7 @@ void TextureSubstitutes::ScalePicture(u32 i_picture, u32 side, std::vector<u32>&
                     texel |= u32((sums[c] + sum_alpha / 2) / sum_alpha) << (8 * c);
                 }
             }
-            out[std::size_t(y) * side + x] = texel;
+            out[std::size_t(is_upside_down ? side - 1 - y : y) * side + x] = texel;
         }
     }
 }

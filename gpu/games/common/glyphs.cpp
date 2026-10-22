@@ -210,7 +210,11 @@ void LoadTable(const Table& table) {
             }
             const u32 i_glyph = u32(p_glyph - table.glyphs.begin());
             if (s_atlas_hashes[k] != 0 && s_is_glyph_available[i_glyph]) {
-                s_atlas_cells[k].push_back({.x = cell.x, .y = cell.y, .side = cell.side, .i_picture = i_glyph});
+                s_atlas_cells[k].push_back({.x = cell.x,
+                                             .y = cell.y,
+                                             .side = cell.side,
+                                             .i_picture = i_glyph,
+                                             .is_upside_down = atlas.is_upside_down});
             }
         }
         s_atlas_substitutes[k].cells = s_atlas_cells[k];

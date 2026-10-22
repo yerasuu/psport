@@ -179,7 +179,8 @@ The keyboard and other gamepads get their own button prompts through texture sub
 title's profile declares which of the game's textures show a PlayStation button and what each one
 means, as data (`Game::Profile::p_glyphs`, a `PsGlyphs::Table` from `gpu/games/common/glyphs.h`),
 and the port draws a picture for the device in use in their place. Bloodborne's table is
-`gpu/games/bloodborne/button_prompts.cpp`; `PS_BUTTON_PROMPTS=0` turns every table off. The
+`gpu/games/bloodborne/button_prompts.cpp`, Atelier Ayesha DX's (one atlas, hash given)
+`gpu/games/ayesha/profile.cpp`; `PS_BUTTON_PROMPTS=0` turns every table off. The
 table's `palette` gives the colours the pictures are drawn in (plates, frames, labels, what is lit).
 
 A table has glyphs and atlases:
@@ -190,7 +191,10 @@ A table has glyphs and atlases:
   is replaced whole. A glyph without a texture is a picture that only atlas cells use.
 - `Atlas`: a name, its `Texture` and its cells, each `{x, y, side, glyph name}`: the square of side
   texels at (x, y) of its first level shows that glyph's picture, scaled. A cell is drawn while its
-  glyph's own texture was found (or it has none); the rest of the atlas stays the game's.
+  glyph's own texture was found (or it has none); the rest of the atlas stays the game's. An atlas
+  whose picture is stored upside down (its text reads upside down in the inventory's PNG, as in
+  Gust's games) sets `is_upside_down`: cells keep the texel coordinates of the PNG and the port
+  turns its pictures over to match.
 - `Texture`: how the game's texture is known when it is uploaded: its first level's `width` and
   `height`, the first `cb_texels` bytes hashed with XXH3-64, and its `format`: the numeric
   `VkFormat` (`VK_FORMAT_BC7_SRGB_BLOCK`, 146), or 0 for any. Only single-level, single-layer block-compressed textures are asked about. The

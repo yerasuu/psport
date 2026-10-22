@@ -196,10 +196,12 @@ struct MouseHooks {
 };
 
 /// A cell of a texture the port draws into (TextureSubstitute): the side x side texels at (x, y)
-/// of its first level show picture i_picture, scaled to them.
+/// of its first level show picture i_picture, scaled to them, its last row first when
+/// is_upside_down (a texture the game samples with its rows reversed).
 struct SubstituteCell {
     std::uint32_t x = 0, y = 0, side = 0;
     std::uint32_t i_picture = 0;
+    bool is_upside_down = false;
 };
 
 /// What a texture of the game is sampled as while its pictures are drawn: picture

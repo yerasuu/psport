@@ -74,8 +74,9 @@ private:
     vk::ImageView CompositeView(Image& image, const Game::TextureSubstitute& substitute,
                                 const ImageViewInfo& info);
     bool Compose(Composite& composite, Image& image, const Game::TextureSubstitute& substitute);
-    /// Picture i_picture at side x side texels (straight alpha, averaged by coverage).
-    void ScalePicture(u32 i_picture, u32 side, std::vector<u32>& out) const;
+    /// Picture i_picture at side x side texels (straight alpha, averaged by coverage), its rows
+    /// reversed when is_upside_down.
+    void ScalePicture(u32 i_picture, u32 side, bool is_upside_down, std::vector<u32>& out) const;
 
     const Vulkan::Instance& m_instance;
     Vulkan::Scheduler& m_scheduler;
