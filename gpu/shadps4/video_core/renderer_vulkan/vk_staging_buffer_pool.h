@@ -23,11 +23,15 @@ struct StagingBufferRef {
     VideoCore::MemoryType type{};
 
     void Flush() const noexcept {
-        buffer->Flush(offset, size);
+        if (buffer) {
+            buffer->Flush(offset, size);
+        }
     }
 
     void Invalidate() const noexcept {
-        buffer->Invalidate(offset, size);
+        if (buffer) {
+            buffer->Invalidate(offset, size);
+        }
     }
 };
 
@@ -39,7 +43,8 @@ public:
     StagingBufferPool(const StagingBufferPool&) = delete;
     StagingBufferPool& operator=(const StagingBufferPool&) = delete;
 
-    /// Requests size bytes of memory of the given type.
+    /// Requests size bytes of memory of the given type. psport: buffer and mapped are null (logged)
+    /// when no memory could be had even after idle buffers were freed; the caller skips the work.
     [[nodiscard]] StagingBufferRef Request(u64 size, VideoCore::MemoryType type, u64 alignment = 0,
                                            bool deferred = false);
 
@@ -73,7 +78,10 @@ private:
                                      VideoCore::MemoryType type);
     StagingBufferRef RequestLarge(u64 size, VideoCore::MemoryType type, bool deferred);
 
-    void TrimRing(Ring& ring);
+    /// psport: ring blocks and dedicated buffers the GPU is done with, freed at once when an
+    /// allocation fails.
+    void EvictIdle();
+    void TrimRing(Ring& ring, u64 c_keep, u64 idle_frames);
     void TrimLarge(std::vector<LargeBuffer>& cache);
 
     void PublishStats() const;

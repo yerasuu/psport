@@ -23,7 +23,9 @@ FaultManager::FaultManager(const Vulkan::Instance& instance, Vulkan::Scheduler& 
       fault_buffer{instance, 0, fault_buffer_size, MemoryType::DeviceLocal},
       download_buffer{instance, 0, MaxPendingFaults * PageFaultAreaSize, MemoryType::HostCached} {
     const auto device = instance.GetDevice();
-    Vulkan::SetObjectName(device, fault_buffer.Handle(), "Fault Buffer");
+    if (fault_buffer.IsAllocated()) {
+        Vulkan::SetObjectName(device, fault_buffer.Handle(), "Fault Buffer");
+    }
 
     const std::array<vk::DescriptorSetLayoutBinding, 2> bindings = {{
         {
@@ -85,6 +87,10 @@ FaultManager::FaultManager(const Vulkan::Instance& instance, Vulkan::Scheduler& 
 }
 
 void FaultManager::ProcessFaultBuffer() {
+    if (!fault_buffer.IsAllocated() || download_buffer.mapped_data.empty()) {
+        LOG_ERROR_COUNTED(Render_Vulkan, "Page faults not processed: the fault buffers have no memory");
+        return;
+    }
     if (u64 wait_tick = fault_areas[current_area]) {
         scheduler.Wait(wait_tick);
         scheduler.PopPendingOperations();

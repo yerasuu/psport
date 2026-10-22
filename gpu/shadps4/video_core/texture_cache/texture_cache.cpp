@@ -177,6 +177,11 @@ void TextureCache::DownloadImageMemory(ImageId image_id, bool sync) {
     }
     const auto download =
         runtime.GetStagingPool().Request(download_size, MemoryType::HostCached, 16, !sync);
+    if (!download.buffer) {
+        LOG_ERROR_COUNTED(Render_Vulkan, "Image at {:#x} not copied to the game's memory: no "
+                          "staging memory", image.info.guest_address);
+        return;
+    }
     const vk::BufferImageCopy image_download = {
         .bufferOffset = download.offset,
         .bufferRowLength = image.info.pitch,
@@ -1113,6 +1118,14 @@ void TextureCache::RefreshImage(Image& image) {
     const auto [in_buffer, in_offset] =
         buffer_cache.ObtainBufferForImage(image.info.guest_address, image.info.guest_size);
     const auto [buffer, offset] = tile_manager.DetileImage(in_buffer, in_offset, image.info);
+    if (!buffer) {
+        // psport: left Dirty with its hashes cleared so that its next use uploads it again.
+        for (const auto& copy : image_copies) {
+            image.mip_hashes[copy.imageSubresource.mipLevel] = 0;
+        }
+        image.hash = 0;
+        return;
+    }
     for (auto& copy : image_copies) {
         copy.bufferOffset += offset;
     }

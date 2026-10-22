@@ -625,8 +625,21 @@ u64 BufferCache::LayerPromoteRun(u64 first, u64 end) {
         }
         const VAddr start = lo << block_shift;
         const u64 cb_range = (hi - lo) << block_shift;
-        auto mirror = std::make_unique<Buffer>(instance, start, cb_range, MemoryType::DeviceLocal,
-                                               fmt::format("psport mirror {:#x}+{:#x}", start, cb_range));
+        const auto make_mirror = [&](bool can_exceed_budget) {
+            return std::make_unique<Buffer>(instance, start, cb_range, MemoryType::DeviceLocal,
+                                            fmt::format("psport mirror {:#x}+{:#x}", start, cb_range),
+                                            can_exceed_budget);
+        };
+        auto mirror = make_mirror(false);
+        if (!mirror->IsAllocated()) {
+            LayerReleaseRetired();
+            mirror = make_mirror(true);
+        }
+        if (!mirror->IsAllocated()) {
+            LOG_ERROR_COUNTED(Render_Vulkan, "No VRAM copy of {:#x}+{:#x}: its blocks stay in place",
+                              start, cb_range);
+            return 0;
+        }
         p_target = mirror.get();
         for (const auto& old : touching) {
             auto* p_old_buffer = static_cast<Buffer*>(old.p_owner);
@@ -723,13 +736,27 @@ void BufferCache::LayerDemote(u64 first, u64 end, bool should_copy_back, int rea
             const auto mirror = Layer().MirrorAt(from);
             if (mirror) {
                 auto* p_buffer = static_cast<Buffer*>(mirror->p_owner);
+                bool is_target_missing = false;
                 gpu_modified_ranges.ForEachInRange(from, cb_range, [&](VAddr w_from, VAddr w_to) {
                     if (const auto target = LayerInPlace(w_from, w_to - w_from)) {
                         const vk::BufferCopy copy{p_buffer->Offset(w_from), target->second,
                                                   w_to - w_from};
                         runtime.CopyBuffer(p_buffer, target->first, std::span{&copy, 1});
+                    } else if (const auto span = Layer().ResolvePrefix(w_from, w_to - w_from);
+                               span && span->cb_span == w_to - w_from) {
+                        is_target_missing = true; // whole in its chunk, which has no buffer
                     }
                 });
+                // psport: the run stays in VRAM, since marking it invalid would drop the GPU's
+                // data; the copy back is tried again at the next submission.
+                if (is_target_missing) {
+                    LOG_ERROR_COUNTED(Render_Vulkan,
+                                      "Blocks {:#x}+{:#x} kept in VRAM: no buffer to copy the GPU's "
+                                      "data back into",
+                                      from, cb_range);
+                    copy_back_blocks.Add({a, b});
+                    continue;
+                }
             }
         }
         layer_volatile.Subtract(a, b);
@@ -773,12 +800,15 @@ void BufferCache::LayerDemote(u64 first, u64 end, bool should_copy_back, int rea
     ++layer_generation;
 }
 
-void BufferCache::LayerMaintain() {
-    LayerProcessTraps();
-    // Retired mirrors the GPU is done with.
+void BufferCache::LayerReleaseRetired() {
     std::erase_if(layer_retired, [&](const auto& retired) {
         return scheduler.GetWorkSemaphore()->IsFree(retired.second);
     });
+}
+
+void BufferCache::LayerMaintain() {
+    LayerProcessTraps();
+    LayerReleaseRetired();
     static u32 s_c_printed = 0;
     const u32 now = PsStats::g_coarse_second.load(std::memory_order_relaxed);
     if (now - s_c_printed >= 10) {
@@ -947,14 +977,36 @@ u64 BufferCache::LayerCompactMirrors(u64 wanted) {
                 segments.emplace_back(a, b);
             }
         });
-        Layer().RemoveMirror(start);
-        PsStats::g_cb_residency_alloc.fetch_sub(cb_old, std::memory_order_relaxed); // replaced below
-        u64 kept = 0;
+        // psport: the new mirrors first, so that a failed one leaves the old mirror in use.
+        std::vector<std::unique_ptr<Buffer>> made;
+        made.reserve(segments.size());
         for (const auto& [a, b] : segments) {
             const VAddr base = a << block_shift;
             const u64 cb_range = (b - a) << block_shift;
+            // Within the budget only: compaction runs to give VRAM back, and the old mirror
+            // stays in use when a part does not fit.
             auto mirror = std::make_unique<Buffer>(instance, base, cb_range, MemoryType::DeviceLocal,
-                                                   fmt::format("psport mirror {:#x}+{:#x}", base, cb_range));
+                                                   fmt::format("psport mirror {:#x}+{:#x}", base, cb_range),
+                                                   false);
+            if (!mirror->IsAllocated()) {
+                break;
+            }
+            made.push_back(std::move(mirror));
+        }
+        if (made.size() != segments.size()) {
+            LOG_ERROR_COUNTED(Render_Vulkan, "Mirror at {:#x} not compacted: no memory for its parts",
+                              start);
+            layer_mirrors.insert(std::move(node));
+            continue;
+        }
+        Layer().RemoveMirror(start);
+        PsStats::g_cb_residency_alloc.fetch_sub(cb_old, std::memory_order_relaxed); // replaced below
+        u64 kept = 0;
+        for (size_t i = 0; i < segments.size(); ++i) {
+            const auto [a, b] = segments[i];
+            const VAddr base = a << block_shift;
+            const u64 cb_range = (b - a) << block_shift;
+            auto& mirror = made[i];
             boost::container::small_vector<vk::BufferCopy, 8> copies;
             Layer().ForEachValid(a, b, [&](u64 v_first, u64 v_end) {
                 const VAddr from = v_first << block_shift;
@@ -1096,7 +1148,12 @@ void BufferCache::LayerWriteEntries(u64 first, u64 end) {
     lap(8);
     // Read/current view, then CPU-visible guest view. A write-through store updates both: the CPU
     // sees the result without discarding all mirrors covered by a huge descriptor.
-    auto* p_entries = reinterpret_cast<vk::DeviceAddress*>(staging.mapped);
+    std::vector<vk::DeviceAddress> unstaged;
+    if (!staging.mapped) {
+        unstaged.resize((end - first) * 2);
+    }
+    auto* p_entries =
+        staging.mapped ? reinterpret_cast<vk::DeviceAddress*>(staging.mapped) : unstaged.data();
     auto* p_guest_entries = p_entries + (end - first);
     // The guest view (as LayerEntry in place: a block mapped whole, in a chunk), one translation
     // per mapping, not per block: each takes the runtime's memory lock, which the game's threads
@@ -1148,7 +1205,18 @@ void BufferCache::LayerWriteEntries(u64 first, u64 end) {
         {staging.offset + cb_table, bda_pagetable_buffer->SizeBytes() / 2 +
                                     first * sizeof(vk::DeviceAddress), cb_table},
     }};
-    runtime.CopyBuffer(staging.buffer, bda_pagetable_buffer.get(), copies);
+    if (staging.mapped) {
+        runtime.CopyBuffer(staging.buffer, bda_pagetable_buffer.get(), copies);
+    } else {
+        // psport: without staging memory the entries travel in the command buffer, since
+        // bindings would otherwise read through stale device addresses.
+        const auto entries = std::as_bytes(std::span{unstaged});
+        for (const auto& copy : copies) {
+            runtime.UpdateBuffer(bda_pagetable_buffer.get(), copy.dstOffset,
+                                 {reinterpret_cast<const u8*>(entries.data()) + copy.srcOffset,
+                                  copy.size});
+        }
+    }
     lap(11);
 }
 
@@ -1280,11 +1348,17 @@ void BufferCache::LayerPagedPublish(VAddr va_range, u64 cb_range, bool is_writte
 
 std::pair<const Buffer*, u64> BufferCache::PageTableRecord(VAddr va_range, u64 cb_range,
                                                            bool is_write_through) {
-    if (!layer_trash) {
+    const u32 now = PsStats::g_coarse_second.load(std::memory_order_relaxed);
+    if (!layer_trash || (!layer_trash->IsAllocated() && layer_trash_failed_at != now)) {
         layer_trash = std::make_unique<Buffer>(instance, 0, 64_KB, MemoryType::DeviceLocal,
                                                "psport paged trash");
+        layer_trash_failed_at = now;
     }
     const vk::DeviceAddress trash = layer_trash->BufferDeviceAddress();
+    if (trash == 0) {
+        LOG_ERROR_COUNTED(Render_Vulkan, "Paged binding without its trash buffer skipped");
+        return {nullptr, 0};
+    }
     const u32 record[8] = {static_cast<u32>(va_range),
                            static_cast<u32>(va_range >> 32),
                            static_cast<u32>(std::min<u64>(cb_range, 0xFFFFFFFFull)),
@@ -1294,8 +1368,11 @@ std::pair<const Buffer*, u64> BufferCache::PageTableRecord(VAddr va_range, u64 c
                            static_cast<u32>(bda_pagetable_buffer->SizeBytes() /
                                             (2 * sizeof(vk::DeviceAddress))),
                            0};
-    const u64 off_record = stream_buffer.Copy(record, sizeof(record), instance.StorageMinAlignment());
-    return {&stream_buffer, off_record};
+    const auto off_record = stream_buffer.Copy(record, sizeof(record), instance.StorageMinAlignment());
+    if (!off_record) {
+        return {nullptr, 0};
+    }
+    return {&stream_buffer, *off_record};
 }
 
 bool BufferCache::LayerActive() {

@@ -44,9 +44,13 @@ public:
                      VideoCore::BufferCache& buffer_cache);
     ~OcclusionQueries();
 
+    /// psport: false when its buffers have no memory: the caller writes the counters instead.
+    bool IsUsable() const;
+
     /// A ZPASS_DONE event writing the counters of `pairs` depth blocks at `va_guest` (recording
-    /// thread, in stream order).
-    void Event(VAddr va_guest, u32 pairs);
+    /// thread, in stream order). psport: false (logged) when the counters have no device address
+    /// and are left to the caller.
+    bool Event(VAddr va_guest, u32 pairs);
 
     /// Before a label (an end-of-pipe write the CPU may poll): the events recorded before it are
     /// written first, as on the PS4, where the counters land in stream order ahead of later

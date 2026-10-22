@@ -289,7 +289,9 @@ private:
 
     VAddr indirect_args_addr{};
     u32 num_counter_pairs{};
-    u64 pixel_counter{};
+    /// psport: one sequence for the CPU's occlusion results, from the command processor or, when
+    /// the queries' buffers are missing, from the recording thread (RunZpassDone).
+    std::atomic<u64> pixel_counter{};
 
     /// psport: SET_PREDICATION. Draws and dispatches with the predicate bit in their header are
     /// skipped while it fails; it is evaluated at the first such packet, once the GPU has done

@@ -11,7 +11,7 @@
 #include <utility>
 #include <vector>
 
-#include "common/assert.h"
+#include "common/logging/log.h"
 #include "common/types.h"
 #include "video_core/renderer_vulkan/vk_common.h"
 
@@ -81,8 +81,11 @@ struct UniqueBuffer {
         return *this;
     }
 
-    void Create(vk::BufferCreateInfo& buffer_ci, MemoryType mem_type,
-                VmaAllocationInfo* out_alloc_info);
+    /// psport: false when the buffer cannot be made (logged unless it only did not fit the memory
+    /// budget it may not exceed) or has no device address; nothing is left to destroy then.
+    /// Callers that can free memory first pass can_exceed_budget false, then retry with true.
+    [[nodiscard]] bool Create(vk::BufferCreateInfo& buffer_ci, MemoryType mem_type,
+                              VmaAllocationInfo* out_alloc_info, bool can_exceed_budget);
 
     void Destroy();
 
@@ -95,7 +98,8 @@ struct UniqueBuffer {
 
 struct Buffer {
     explicit Buffer(const Vulkan::Instance& instance, VAddr cpu_addr_, u64 size_bytes_,
-                    MemoryType mem_type, std::string_view debug_name = "");
+                    MemoryType mem_type, std::string_view debug_name = "",
+                    bool can_exceed_budget = true);
     /// psport: a buffer over memory owned elsewhere (a guest memory chunk,
     /// exported as a dma-buf): transfers and texel/storage reads, no device address.
     explicit Buffer(const Vulkan::Instance& instance, u64 size_bytes_, vk::DeviceMemory memory,
@@ -127,8 +131,14 @@ struct Buffer {
         return buffer.buffer;
     }
 
+    /// psport: a buffer whose creation failed has a null handle (a null descriptor where it is
+    /// bound); what cannot take one (copies, device addresses, indirect arguments) skips it.
+    [[nodiscard]] bool IsAllocated() const noexcept {
+        return bool(buffer.buffer);
+    }
+
+    /// psport: 0 for a buffer without memory (IsAllocated) or created without device address.
     vk::DeviceAddress BufferDeviceAddress() const noexcept {
-        ASSERT_MSG(buffer.bda_addr != 0, "Can't get BDA from a non BDA buffer");
         return buffer.bda_addr;
     }
 
@@ -148,7 +158,7 @@ struct Buffer {
 
 struct StreamBuffer : public Buffer {
     explicit StreamBuffer(const Vulkan::Instance& instance, Vulkan::Scheduler& scheduler,
-                          MemoryType mem_type, u64 size_bytes);
+                          MemoryType mem_type, u64 size_bytes, bool can_exceed_budget = true);
 
     /// Reserves a region of memory from the stream buffer. Must be followed by Commit().
     std::pair<u8*, u64> Map(u64 size, u64 alignment = 0, bool allow_wait = true);
@@ -164,10 +174,14 @@ struct StreamBuffer : public Buffer {
         return last_tick;
     }
 
-    /// Maps and commits a memory region with user provided data
-    u64 Copy(auto src, size_t size, size_t alignment = 0) {
+    /// Maps and commits a memory region with user provided data. psport: nullopt (logged) when
+    /// the buffer has no memory or the data does not fit; the caller skips what needed it.
+    std::optional<u64> Copy(auto src, size_t size, size_t alignment = 0) {
         const auto [data, offset] = Map(size, alignment);
-        ASSERT_MSG(data, "Failed to copy {:#x} bytes", size);
+        if (!data) {
+            LOG_ERROR_COUNTED(Render_Vulkan, "Stream buffer copy of {:#x} bytes failed", size);
+            return std::nullopt;
+        }
         std::memcpy(data, reinterpret_cast<const void*>(src), size);
         Commit();
         return offset;

@@ -31,6 +31,10 @@ namespace Core {
 class MemoryManager;
 }
 
+namespace PsGuestMemory {
+struct Chunk;
+}
+
 namespace Vulkan {
 class GraphicsPipeline;
 struct SubmitInfo;
@@ -382,6 +386,9 @@ private:
     void EvictVramBlock(u64 block);
     [[nodiscard]] static u32 VramIdleSeconds();
     void DownloadMemory(const Buffer* arena, VAddr device_addr, u64 size);
+    /// psport: the buffer over a guest memory chunk, null (logged) when it cannot be made; a failed
+    /// one is tried again once a second, not at every binding.
+    const Buffer* ChunkBuffer(const PsGuestMemory::Chunk& chunk);
 
     bool SynchronizeMemory(const Buffer* arena, VAddr device_addr, u32 size, bool is_written,
                            bool is_texel_buffer);
@@ -439,6 +446,8 @@ private:
     void LayerDemote(u64 first_block, u64 end_block, bool copy_back, int reason);
     /// Frees retired mirrors the GPU is done with.
     void LayerMaintain();
+    /// psport: retired mirrors the GPU is done with; also before a mirror allocation is retried.
+    void LayerReleaseRetired();
     /// Mirrored blocks not bound for PS_VRAM_IDLE_SECONDS go back in place.
     void LayerProcessIdle();
     /// VRAM near the texture collector's critical mark: idle mirrors go back in place.
@@ -449,7 +458,9 @@ private:
     void NoteWriteTick(VAddr address, u64 size);
     /// LayerPagedRecord without the record: page table entries for the range, its writes noted.
     void LayerPagedPublish(VAddr address, u64 size, bool is_written);
-    /// The record a paged binding's descriptor holds (EmitContext::PagedPointer).
+    /// The record a paged binding's descriptor holds (EmitContext::PagedPointer). psport: a null
+    /// buffer (logged) when its trash buffer or the stream buffer has no memory, and the draw or
+    /// dispatch is skipped; this also holds for LayerPagedRecord and DynamicRecord.
     std::pair<const Buffer*, u64> PageTableRecord(VAddr address, u64 size, bool is_write_through);
     /// Page table entry of a block (LayerPagedRecord), its writes, and rewrites after changes.
     u64 LayerEntry(u64 block);
@@ -528,6 +539,7 @@ private:
     std::atomic<bool> layer_cpu_written_pending{false};
     std::atomic<bool> layer_uploads_pending{false};
     std::unique_ptr<Buffer> layer_trash; ///< where paged accesses out of range go
+    u32 layer_trash_failed_at = ~0u;     ///< psport: coarse second of a failed creation
     /// Blocks with bytes nobody announced (an edge shared with other data, padding between
     /// images) in a mirror only so that the rest of a reading binding's range can be there:
     /// refreshed from the game's memory for every binding over them. Paged bindings and the
@@ -645,6 +657,7 @@ private:
     u32 residency_failed_frame = ~0u;
     u64 bind_wait_tick = 0;                            ///< the next arena binds wait for it
     std::array<std::unique_ptr<Buffer>, 256> chunk_buffers{}; ///< per guest memory chunk (Chunk::index)
+    std::array<u32, 256> chunk_buffer_failed_at{}; ///< psport: coarse second of a failed creation
 
     u32 arena_memory_type_index{};
     /// psport: system memory for residency when VRAM is full (4 GB cards), if sparse binding takes it

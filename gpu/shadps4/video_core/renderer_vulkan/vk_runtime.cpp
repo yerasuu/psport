@@ -28,6 +28,16 @@ static bool IsMissing(const VideoCore::Image* image) {
     return true;
 }
 
+// psport: a buffer whose creation failed (VideoCore::Buffer::IsAllocated), or none from a pool
+// out of memory, takes no commands.
+static bool IsMissing(const VideoCore::Buffer* buffer) {
+    if (buffer && buffer->IsAllocated()) {
+        return false;
+    }
+    LOG_ERROR_COUNTED(Render_Vulkan, "Operation on a buffer without memory skipped");
+    return true;
+}
+
 static vk::ImageType ConvertImageType(AmdGpu::ImageType type) noexcept {
     switch (type) {
     case AmdGpu::ImageType::Color1D:
@@ -125,6 +135,9 @@ void Runtime::TickFrame() {
 
 void Runtime::CopyBuffer(const VideoCore::Buffer* src, const VideoCore::Buffer* dst,
                          std::span<const vk::BufferCopy> copies) {
+    if (IsMissing(src) || IsMissing(dst)) {
+        return;
+    }
     scheduler.EndRendering();
 
     // psport: many regions (HLE copy shaders) are tracked as one bounding range per buffer:
@@ -175,6 +188,9 @@ void Runtime::CopyBuffer(const VideoCore::Buffer* src, const VideoCore::Buffer* 
 }
 
 void Runtime::FillBuffer(const VideoCore::Buffer* dst, u64 offset, u64 size, u32 value) {
+    if (IsMissing(dst)) {
+        return;
+    }
     scheduler.EndRendering();
 
     if (IsBufferAccessed(dst, offset, size, true)) {
@@ -191,7 +207,7 @@ void Runtime::FillBuffer(const VideoCore::Buffer* dst, u64 offset, u64 size, u32
 
 void Runtime::CopyFromGuestChunk(vk::Buffer src, const VideoCore::Buffer* dst,
                                  std::span<const vk::BufferCopy> copies) {
-    if (copies.empty()) {
+    if (copies.empty() || IsMissing(dst)) {
         return;
     }
     scheduler.EndRendering();
@@ -213,7 +229,7 @@ void Runtime::CopyFromGuestChunk(vk::Buffer src, const VideoCore::Buffer* dst,
 }
 
 void Runtime::UpdateBuffer(const VideoCore::Buffer* dst, u64 offset, std::span<const u8> data) {
-    if (data.empty()) {
+    if (data.empty() || IsMissing(dst)) {
         return;
     }
     scheduler.EndRendering();
@@ -233,6 +249,9 @@ void Runtime::UpdateBuffer(const VideoCore::Buffer* dst, u64 offset, std::span<c
 }
 
 void Runtime::InlineData(VideoCore::Buffer* dst, u64 offset, u32 value) {
+    if (IsMissing(dst)) {
+        return;
+    }
     scheduler.EndRendering();
 
     if (IsBufferAccessed(dst, offset, sizeof(value), true)) {
@@ -287,6 +306,9 @@ void Runtime::UploadImage(VideoCore::Image* dst, const VideoCore::Buffer* src,
         dst->flags &= ~VideoCore::ImageFlagBits::Dirty; // so that it is not uploaded again each use
         return;
     }
+    if (IsMissing(src)) {
+        return;
+    }
     SetBackingSamples(dst, dst->info.num_samples, false);
     scheduler.EndRendering();
     const TransferMark mark{*this, "image upload", *dst};
@@ -319,7 +341,7 @@ void Runtime::UploadImage(VideoCore::Image* dst, const VideoCore::Buffer* src,
 
 void Runtime::DownloadImage(VideoCore::Image* src, const VideoCore::Buffer* dst,
                             std::span<const vk::BufferImageCopy> download_copies) {
-    if (IsMissing(src)) {
+    if (IsMissing(src) || IsMissing(dst)) {
         return;
     }
     SetBackingSamples(src, src->info.num_samples);
@@ -455,7 +477,7 @@ void Runtime::CopyImage(VideoCore::Image* src, VideoCore::Image* dst) {
 
 void Runtime::CopyImageWithBuffer(VideoCore::Image* src, VideoCore::Image* dst,
                                   const VideoCore::Buffer* buffer, u64 offset) {
-    if (IsMissing(src) || IsMissing(dst)) {
+    if (IsMissing(src) || IsMissing(dst) || IsMissing(buffer)) {
         return;
     }
     const u32 num_mips = std::min(src->info.resources.levels, dst->info.resources.levels);

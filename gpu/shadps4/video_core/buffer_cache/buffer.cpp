@@ -4,12 +4,12 @@
 #include <numeric>
 
 #include "common/alignment.h"
-#include "common/assert.h"
 #include "video_core/buffer_cache/buffer.h"
 #include "psport_guest_memory.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_platform.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
+#include "video_core/texture_cache/texture_cache.h"
 
 #include <vk_mem_alloc.h>
 
@@ -82,13 +82,13 @@ void UniqueBuffer::Destroy() {
     bda_addr = 0;
 }
 
-void UniqueBuffer::Create(vk::BufferCreateInfo& buffer_ci, MemoryType mem_type,
-                          VmaAllocationInfo* out_alloc_info) {
+bool UniqueBuffer::Create(vk::BufferCreateInfo& buffer_ci, MemoryType mem_type,
+                          VmaAllocationInfo* out_alloc_info, bool can_exceed_budget) {
     const bool with_bda = bool(buffer_ci.usage & vk::BufferUsageFlagBits::eShaderDeviceAddress);
     if (mem_type != MemoryType::Sparse) {
         const VmaAllocationCreateFlags bda_flag =
             with_bda ? VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT : 0;
-        const VmaAllocationCreateInfo alloc_ci = {
+        VmaAllocationCreateInfo alloc_ci = {
             .flags =
                 VMA_ALLOCATION_CREATE_WITHIN_BUDGET_BIT | bda_flag | MemoryUsageVmaFlags(mem_type),
             .usage = MemoryUsageVma(mem_type),
@@ -102,8 +102,27 @@ void UniqueBuffer::Create(vk::BufferCreateInfo& buffer_ci, MemoryType mem_type,
         VkBuffer unsafe_buffer{};
         VkResult result = vmaCreateBuffer(allocator, &buffer_ci_unsafe, &alloc_ci, &unsafe_buffer,
                                           &allocation, out_alloc_info);
-        ASSERT_MSG(result == VK_SUCCESS, "Failed allocating buffer with error {}",
-                   vk::to_string(vk::Result{result}));
+        if (result != VK_SUCCESS) {
+            // psport: over the budget, as images do (TextureCache::CreateImage), while the texture
+            // collector evicts by submissions to give the memory back.
+            if (mem_type == MemoryType::DeviceLocal || mem_type == MemoryType::Stream) {
+                TextureCache::NoteVramShort();
+            }
+            if (!can_exceed_budget) {
+                allocation = {};
+                return false;
+            }
+            alloc_ci.flags &= ~VMA_ALLOCATION_CREATE_WITHIN_BUDGET_BIT;
+            result = vmaCreateBuffer(allocator, &buffer_ci_unsafe, &alloc_ci, &unsafe_buffer,
+                                     &allocation, out_alloc_info);
+        }
+        if (result != VK_SUCCESS) {
+            allocation = {};
+            LOG_ERROR_COUNTED(Render_Vulkan, "Failed allocating a {} buffer of {:#x} bytes: {}",
+                              BufferTypeName(mem_type), buffer_ci.size,
+                              vk::to_string(vk::Result{result}));
+            return false;
+        }
         buffer = vk::Buffer{unsafe_buffer};
     } else {
         buffer_ci.flags |=
@@ -138,10 +157,15 @@ void UniqueBuffer::Create(vk::BufferCreateInfo& buffer_ci, MemoryType mem_type,
         const vk::BufferDeviceAddressInfo bda_info = {
             .buffer = buffer,
         };
-        auto bda_result = device.getBufferAddress(bda_info);
-        ASSERT_MSG(bda_result != 0, "Failed to get buffer device address");
-        bda_addr = bda_result;
+        bda_addr = device.getBufferAddress(bda_info);
+        if (bda_addr == 0) {
+            LOG_ERROR_COUNTED(Render_Vulkan, "A {} buffer of {:#x} bytes has no device address",
+                              BufferTypeName(mem_type), buffer_ci.size);
+            Destroy();
+            return false;
+        }
     }
+    return true;
 }
 
 Buffer::Buffer(const Vulkan::Instance& instance, u64 size_bytes_, vk::DeviceMemory memory,
@@ -172,9 +196,15 @@ Buffer::Buffer(const Vulkan::Instance& instance, u64 size_bytes_, vk::DeviceMemo
     };
     const auto device = instance.GetDevice();
     buffer.buffer = Vulkan::Check(device.createBuffer(buffer_ci));
-    const auto result = device.bindBufferMemory(buffer.buffer, memory, 0);
-    ASSERT_MSG(result == vk::Result::eSuccess, "Binding a guest memory chunk failed: {}",
-               vk::to_string(result));
+    if (!buffer.buffer) {
+        return;
+    }
+    if (const auto result = device.bindBufferMemory(buffer.buffer, memory, 0);
+        result != vk::Result::eSuccess) {
+        LOG_ERROR_COUNTED(Render_Vulkan, "Binding {} failed: {}", debug_name, vk::to_string(result));
+        buffer.Destroy();
+        return;
+    }
     if (layer) {
         buffer.bda_addr = device.getBufferAddress({.buffer = buffer.buffer});
     }
@@ -183,7 +213,7 @@ Buffer::Buffer(const Vulkan::Instance& instance, u64 size_bytes_, vk::DeviceMemo
 }
 
 Buffer::Buffer(const Vulkan::Instance& instance, VAddr cpu_addr_, u64 size_bytes_,
-               MemoryType mem_type_, std::string_view debug_name)
+               MemoryType mem_type_, std::string_view debug_name, bool can_exceed_budget)
     : cpu_addr{cpu_addr_}, size_bytes{size_bytes_}, mem_type{mem_type_},
       buffer{instance.GetDevice(), instance.GetAllocator()} {
 
@@ -205,7 +235,9 @@ Buffer::Buffer(const Vulkan::Instance& instance, VAddr cpu_addr_, u64 size_bytes
         buffer_ci.pQueueFamilyIndices = families.data();
     }
     VmaAllocationInfo alloc_info{};
-    buffer.Create(buffer_ci, mem_type, &alloc_info);
+    if (!buffer.Create(buffer_ci, mem_type, &alloc_info, can_exceed_budget)) {
+        return;
+    }
 
     const auto device = instance.GetDevice();
     if (!debug_name.empty()) {
@@ -243,16 +275,22 @@ constexpr u64 WATCHES_INITIAL_RESERVE = 0x100;
 constexpr u64 WATCHES_RESERVE_CHUNK = 0x100;
 
 StreamBuffer::StreamBuffer(const Vulkan::Instance& instance, Vulkan::Scheduler& scheduler_,
-                           MemoryType mem_type, u64 size_bytes)
-    : Buffer{instance, 0, size_bytes, mem_type}, scheduler{scheduler_},
+                           MemoryType mem_type, u64 size_bytes, bool can_exceed_budget)
+    : Buffer{instance, 0, size_bytes, mem_type, "", can_exceed_budget}, scheduler{scheduler_},
       non_coherent_atom_size{instance.NonCoherentAtomSize()} {
     ReserveWatches(current_watches, WATCHES_INITIAL_RESERVE);
     ReserveWatches(previous_watches, WATCHES_INITIAL_RESERVE);
+    if (!IsAllocated()) {
+        return;
+    }
     Vulkan::SetObjectName(instance.GetDevice(), Handle(), "StreamBuffer({}):{:#x}",
                           BufferTypeName(mem_type), size_bytes);
 }
 
 bool StreamBuffer::PrepareMap(u64 size, u64 alignment, bool allow_wait) {
+    if (!IsAllocated()) {
+        return false;
+    }
     if (!mapped_data.empty() && !is_coherent) {
         size = Common::AlignUp(size, non_coherent_atom_size);
         alignment =

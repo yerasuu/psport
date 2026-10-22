@@ -737,12 +737,28 @@ void RunDmaData(Vulkan::Rasterizer& rasterizer, const u8* data) {
 struct ZpassEvent {
     VAddr address;
     u32 pairs;
+    std::atomic<u64>* p_pixel_counter;
 };
+
+static constexpr u64 OcclusionCounterValidMask = 0x8000000000000000ULL;
+static constexpr u64 OcclusionCounterStep = 0x2FFFFFFULL;
 
 void RunZpassDone(Vulkan::Rasterizer& rasterizer, const u8* data) {
     ZpassEvent event;
     std::memcpy(&event, data, sizeof(event));
-    rasterizer.OcclusionEvent(event.address, event.pairs);
+    if (rasterizer.OcclusionEvent(event.address, event.pairs)) {
+        return;
+    }
+    // psport: left to the CPU (the queries' buffers have no memory): the fixed sequence of the
+    // untranslated path, everything visible, so that a game polling its counters goes on.
+    const u64 pixel_counter =
+        event.p_pixel_counter->fetch_add(OcclusionCounterStep, std::memory_order_relaxed);
+    auto* p_results = reinterpret_cast<u64*>(event.address);
+    for (u32 i = 0; i < event.pairs; ++i, p_results += 2) {
+        *p_results = pixel_counter | OcclusionCounterValidMask;
+        rasterizer.NoteLateCommandWrite(reinterpret_cast<VAddr>(p_results), p_results,
+                                        sizeof(*p_results));
+    }
 }
 
 // psport: COPY_DATA from memory or GDS, or of a value into GDS, on the recording thread in stream
@@ -2240,22 +2256,22 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                         // psport: the samples that passed, counted by Vulkan occlusion queries
                         // and written by the GPU in stream order (vk_occlusion.h).
                         if (rasterizer && Vulkan::Rasterizer::OcclusionTranslated()) {
-                            const ZpassEvent zpass{event->Address<VAddr>(), u32(num_counter_pairs)};
+                            const ZpassEvent zpass{event->Address<VAddr>(), u32(num_counter_pairs),
+                                                   &pixel_counter};
                             rasterizer->RunInOrder(&RunZpassDone, &zpass, sizeof(zpass),
                                                    PsToggle::PipelinedMemoryWrites, false);
                             break;
                         }
-                        static constexpr u64 OcclusionCounterValidMask = 0x8000000000000000ULL;
-                        static constexpr u64 OcclusionCounterStep = 0x2FFFFFFULL;
+                        const u64 counter =
+                            pixel_counter.fetch_add(OcclusionCounterStep, std::memory_order_relaxed);
                         u64* results = event->Address<u64*>();
                         for (s32 i = 0; i < num_counter_pairs; ++i, results += 2) {
-                            *results = pixel_counter | OcclusionCounterValidMask;
+                            *results = counter | OcclusionCounterValidMask;
                             if (rasterizer) {
                                 rasterizer->NoteLateCommandWrite(reinterpret_cast<VAddr>(results),
                                                                  results, sizeof(*results));
                             }
                         }
-                        pixel_counter += OcclusionCounterStep;
                     }
                 }
                 break;

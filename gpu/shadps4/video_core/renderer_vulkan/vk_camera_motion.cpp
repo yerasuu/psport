@@ -443,6 +443,10 @@ void CameraMotion::OnDisplayPass(VideoCore::ImageId frame) {
 }
 
 void CameraMotion::Overlay(VideoCore::ImageId frame) {
+    if (!m_frames[0]->IsAllocated() || !m_frames[1]->IsAllocated()) {
+        LOG_ERROR_COUNTED(Render_Vulkan, "Camera motion overlay skipped: its buffers have no memory");
+        return;
+    }
     auto& depth = m_texture_cache.GetImage(m_depth_id);
     auto& color = m_texture_cache.GetImage(frame);
     const auto depth_format = depth.info.pixel_format;

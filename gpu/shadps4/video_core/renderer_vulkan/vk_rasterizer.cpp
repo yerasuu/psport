@@ -261,8 +261,12 @@ bool Rasterizer::OcclusionEvent(VAddr address, u32 pairs) {
     if (!occlusion) {
         occlusion = std::make_unique<OcclusionQueries>(instance, scheduler, buffer_cache);
     }
-    occlusion->Event(address, pairs);
-    return true;
+    if (!occlusion->IsUsable()) {
+        LOG_ERROR_COUNTED(Render_Vulkan, "Occlusion query at {:#x} written as visible: its "
+                          "buffers have no memory", address);
+        return false;
+    }
+    return occlusion->Event(address, pairs);
 }
 
 u64 Rasterizer::OcclusionEvents() const {
@@ -1751,6 +1755,9 @@ bool Rasterizer::ObtainStreamOut(const GraphicsPipeline* pipeline, StreamOutBind
     if (!buffer || !buffer->Handle()) {
         return skip("the buffer cache gave no buffer for the stream-out range");
     }
+    if (!StreamOutCounters()->IsAllocated()) {
+        return skip("the stream-out counters have no memory");
+    }
     // vkCmdBindTransformFeedbackBuffersEXT takes offsets that are multiples of 4 only.
     if (offset % 4 != 0) {
         return skip("the stream-out buffer is not 4-byte aligned");
@@ -1894,8 +1901,9 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
 
     if (!inputs_resolved) {
         ResolveVertexBuffers(pipeline, draw_prepared);
-        if (is_indexed) {
-            ResolveIndexBuffer(index_offset);
+        if (is_indexed && !ResolveIndexBuffer(index_offset)) {
+            ResetBindings(false);
+            return;
         }
     }
     EmitVertexBuffers();
@@ -2187,8 +2195,9 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
     }
 
     BindVertexBuffers(pipeline);
-    if (is_indexed) {
-        BindIndexBuffer(0, true);
+    if (is_indexed && !BindIndexBuffer(0, true)) {
+        ResetBindings(false);
+        return;
     }
 
     const auto [buffer, base] =
@@ -2336,6 +2345,7 @@ void Rasterizer::DispatchRecord(const ComputePipeline* pipeline) {
     const bool bound = BindResources(pipeline);
     buffer_cache.force_writes_in_place = false;
     if (!bound) {
+        ResetBindings(true);
         return;
     }
 
@@ -2396,6 +2406,7 @@ void Rasterizer::DispatchIndirectRecord(const ComputePipeline* pipeline, VAddr a
     const u32 offset = 0;
 
     if (!BindResources(pipeline)) {
+        ResetBindings(true);
         return;
     }
 
@@ -2415,7 +2426,12 @@ void Rasterizer::DispatchIndirectRecord(const ComputePipeline* pipeline, VAddr a
         if (!indirect_guard) {
             indirect_guard = std::make_unique<IndirectGuard>(instance, scheduler);
         }
-        std::tie(args, args_offset) = indirect_guard->CheckArgs(*buffer, base);
+        const auto checked = indirect_guard->CheckArgs(*buffer, base);
+        if (!checked) {
+            ResetBindings(true);
+            return;
+        }
+        std::tie(args, args_offset) = *checked;
     }
     pipeline->BindResources(set_writes, push_data, {image_infos.data(), image_infos.size()},
                             {buffer_infos.data(), buffer_infos.size()});
@@ -2723,6 +2739,7 @@ bool Rasterizer::BindResources(const Pipeline* pipeline) {
     set_writes.clear();
     buffer_infos.clear();
     image_infos.clear();
+    is_buffer_missing = false;
     // psport: G-buffer passes sample material textures for a scene rendered below the output
     // size; the temporal upscaler restores the detail of the output's mip level (FSR guide:
     // log2(render / output)). Shadows, post-processing and UI keep the guest's bias.
@@ -2825,7 +2842,7 @@ bool Rasterizer::BindResources(const Pipeline* pipeline) {
         if (draw_inputs.pending && !PsToggle::Disabled(PsToggle::EarlyDrawInputs)) {
             ResolveVertexBuffers(draw_inputs.pipeline, draw_inputs.prepared);
             if (draw_inputs.is_indexed) {
-                ResolveIndexBuffer(draw_inputs.index_offset);
+                is_buffer_missing |= !ResolveIndexBuffer(draw_inputs.index_offset);
             }
             draw_inputs.resolved = true;
         }
@@ -2839,6 +2856,11 @@ bool Rasterizer::BindResources(const Pipeline* pipeline) {
             u32 write_index = stage.write_index;
             BindTextures(*stage.info, stage.prepared, stage.binding, write_index, needs_barrier);
         }
+    }
+
+    if (is_buffer_missing) {
+        LOG_ERROR_COUNTED(Render_Vulkan, "Draw or dispatch skipped: a buffer it binds has no memory");
+        return false;
     }
 
     if (uses_dma) {
@@ -3078,9 +3100,12 @@ void Rasterizer::ResolveVertexBuffers(const GraphicsPipeline* pipeline,
     v.num_buffers = static_cast<u32>(guest_buffers.size());
 }
 
-void Rasterizer::BindIndexBuffer(u32 index_offset, bool is_indirect) {
-    ResolveIndexBuffer(index_offset, is_indirect);
+bool Rasterizer::BindIndexBuffer(u32 index_offset, bool is_indirect) {
+    if (!ResolveIndexBuffer(index_offset, is_indirect)) {
+        return false;
+    }
     EmitIndexBuffer();
+    return true;
 }
 
 void Rasterizer::EmitIndexBuffer() {
@@ -3095,7 +3120,7 @@ void Rasterizer::EmitIndexBuffer() {
     });
 }
 
-void Rasterizer::ResolveIndexBuffer(u32 index_offset, bool is_indirect) {
+bool Rasterizer::ResolveIndexBuffer(u32 index_offset, bool is_indirect) {
     BB_SECTION(ResolveIndexBuffer);
     const auto& regs = Regs();
 
@@ -3134,11 +3159,16 @@ void Rasterizer::ResolveIndexBuffer(u32 index_offset, bool is_indirect) {
         offset = 0;
         index_buffer_size = static_cast<u32>(buffer->SizeBytes());
     }
+    if (!buffer->IsAllocated()) {
+        LOG_ERROR_COUNTED(Render_Vulkan, "Indexed draw skipped: its index buffer has no memory");
+        return false;
+    }
     needs_barrier |= runtime.IsBufferAccessed(buffer, offset, index_buffer_size);
     // ResetBindings tracks graphics reads after the draw. Without this, an upload into a
     // mirrored index range could overtake the previous draw's fixed-function index fetches.
     bound_buffers.emplace_back(buffer, offset, index_buffer_size, false);
     index_bind = {buffer->Handle(), offset, index_buffer_size, index_type};
+    return true;
 }
 
 void Rasterizer::ResetBindings(bool is_compute) {
@@ -3463,6 +3493,7 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, const PreparedStage* pre
         } else if (desc.IsSpecial()) {
             if (desc.buffer_type == Shader::BufferType::GdsBuffer) {
                 const auto* gds_buf = buffer_cache.GetGdsBuffer();
+                is_buffer_missing |= !gds_buf->IsAllocated();
                 buffer_infos.emplace_back(gds_buf->Handle(), 0, gds_buf->SizeBytes());
                 needs_barrier |= runtime.IsBufferAccessed(gds_buf, 0, gds_buf->SizeBytes());
             } else if (desc.buffer_type == Shader::BufferType::Flatbuf) {
@@ -3472,9 +3503,10 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, const PreparedStage* pre
                     FrameCapture::Buffer(stage.pgm_hash, binding.buffer, 0,
                                          stage.FlatUserData().data(), ubo_size);
                 }
-                const u64 offset =
+                const auto offset =
                     vk_buffer.Copy(stage.FlatUserData().data(), ubo_size, alignment);
-                buffer_infos.emplace_back(vk_buffer.Handle(), offset, ubo_size);
+                is_buffer_missing |= !offset;
+                buffer_infos.emplace_back(vk_buffer.Handle(), offset.value_or(0), ubo_size);
             } else if (desc.buffer_type == Shader::BufferType::ClipPlanes) {
                 // Permutations compiled without enabled planes never read the buffer, so the
                 // declared binding is satisfied with a null descriptor instead of a copy.
@@ -3491,27 +3523,34 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, const PreparedStage* pre
                         planes[i * 4 + 3] = std::bit_cast<float>(plane.data_w);
                     }
                     const u32 ubo_size = static_cast<u32>(sizeof(planes));
-                    const u64 offset = vk_buffer.Copy(planes.data(), ubo_size, alignment);
-                    buffer_infos.emplace_back(vk_buffer.Handle(), offset, ubo_size);
+                    const auto offset = vk_buffer.Copy(planes.data(), ubo_size, alignment);
+                    is_buffer_missing |= !offset;
+                    buffer_infos.emplace_back(vk_buffer.Handle(), offset.value_or(0), ubo_size);
                 }
             } else if (desc.buffer_type == Shader::BufferType::Dynamic) {
                 BindDynamicBuffer(stage, desc);
                 push_data.AddOffset(binding.buffer, 0);
                 const auto [record, record_offset] = buffer_cache.DynamicRecord();
-                buffer_infos.emplace_back(record->Handle(), record_offset, 32);
+                is_buffer_missing |= !record;
+                buffer_infos.emplace_back(record ? record->Handle() : vk::Buffer{}, record_offset, 32);
             } else if (desc.buffer_type == Shader::BufferType::BdaPagetable) {
                 const auto* bda_buffer = buffer_cache.GetBdaPageTableBuffer();
+                is_buffer_missing |= !bda_buffer->IsAllocated();
                 buffer_infos.emplace_back(bda_buffer->Handle(), 0, bda_buffer->SizeBytes());
             } else if (desc.buffer_type == Shader::BufferType::FaultBuffer) {
                 const auto* fault_buffer = buffer_cache.GetFaultBuffer();
+                is_buffer_missing |= !fault_buffer->IsAllocated();
                 buffer_infos.emplace_back(fault_buffer->Handle(), 0, fault_buffer->SizeBytes());
             } else if (desc.buffer_type == Shader::BufferType::SharedMemory) {
                 auto& lds_buffer = buffer_cache.GetStreamBuffer();
                 const auto& cs_program = CsRegs();
                 const auto lds_size = cs_program.SharedMemSize() * cs_program.NumWorkgroups();
                 const auto [data, offset] = lds_buffer.Map(lds_size, alignment);
-                std::memset(data, 0, lds_size);
-                lds_buffer.Commit();
+                if (data) {
+                    std::memset(data, 0, lds_size);
+                    lds_buffer.Commit();
+                }
+                is_buffer_missing |= !data;
                 buffer_infos.emplace_back(lds_buffer.Handle(), offset, lds_size);
             } else {
                 LOG_ERROR_COUNTED(Render_Vulkan, "Unexpected buffer type {}, bound null",
@@ -3576,7 +3615,8 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, const PreparedStage* pre
                     }
                 }
                 push_data.AddOffset(binding.buffer, 0);
-                buffer_infos.emplace_back(record->Handle(), record_offset, 32);
+                is_buffer_missing |= !record;
+                buffer_infos.emplace_back(record ? record->Handle() : vk::Buffer{}, record_offset, 32);
                 bound_buffers.emplace_back(nullptr, 0, 0, desc.is_written);
                 if (desc.is_written) {
                     texture_cache.InvalidateMemoryFromGPU(
@@ -4705,6 +4745,11 @@ void Rasterizer::CopyBuffer(VAddr dst, VAddr src, u32 num_bytes, bool dst_gds, b
 u32 Rasterizer::ReadDataFromGds(u32 gds_offset) {
     DrainDrawPipe();
     auto* gds_buf = buffer_cache.GetGdsBuffer();
+    if (gds_buf->mapped_data.empty()) {
+        LOG_ERROR_COUNTED(Render_Vulkan, "GDS read at {:#x} gives 0: the GDS buffer has no memory",
+                          gds_offset);
+        return 0;
+    }
     u32 value;
     std::memcpy(&value, gds_buf->mapped_data.data() + gds_offset, sizeof(u32));
     return value;

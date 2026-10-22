@@ -67,6 +67,10 @@ GpuTimestamps::GpuTimestamps(const Instance& instance_, Scheduler& scheduler_,
     m_results = std::make_unique<VideoCore::Buffer>(m_instance, 0, NumSlots * sizeof(u64),
                                                   VideoCore::MemoryType::DeviceLocal,
                                                   "GPU timestamps");
+    if (!m_results->IsAllocated()) {
+        m_valid_bits = 0; // the CPU writes the clock, as without timestamps
+        return;
+    }
     const vk::DescriptorSetLayoutBinding binding{
         .binding = 0,
         .descriptorType = vk::DescriptorType::eStorageBuffer,
@@ -144,10 +148,16 @@ bool GpuTimestamps::Write(VAddr va_guest, bool is_end_of_pipe) {
     m_buffer_cache.force_writes_in_place = true;
     const auto [buffer, offset] = m_buffer_cache.ObtainBuffer(va_guest, sizeof(u64), true);
     m_buffer_cache.force_writes_in_place = false;
+    const vk::DeviceAddress va_device = buffer->BufferDeviceAddress();
+    if (va_device == 0) {
+        LOG_ERROR_COUNTED(Render_Vulkan, "GPU timestamp at {:#x} written by the CPU: no device "
+                          "address", va_guest);
+        return false;
+    }
     const u32 slot = m_next_slot;
     m_next_slot = m_next_slot + 1 == NumSlots ? 1 : m_next_slot + 1;
     Push push{};
-    Split(buffer->BufferDeviceAddress() + offset, push.address);
+    Split(va_device + offset, push.address);
     Split(m_base_ticks, push.base_ticks);
     Split(m_base_clock, push.base_clock);
     Split(m_valid_bits >= 64 ? ~0ull : (1ull << m_valid_bits) - 1, push.mask);

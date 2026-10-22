@@ -50,8 +50,10 @@ IndirectGuard::IndirectGuard(const Instance& instance_, Scheduler& scheduler_)
     m_skipped = std::make_unique<VideoCore::Buffer>(m_instance, 0, sizeof(Skipped),
                                                   VideoCore::MemoryType::HostCached,
                                                   "Indirect dispatches skipped");
-    std::memset(m_skipped->mapped_data.data(), 0, sizeof(Skipped));
-    m_skipped->Flush(0, sizeof(Skipped));
+    if (!m_skipped->mapped_data.empty()) {
+        std::memset(m_skipped->mapped_data.data(), 0, sizeof(Skipped));
+        m_skipped->Flush(0, sizeof(Skipped));
+    }
 
     const auto limits = m_instance.GetPhysicalDevice().getProperties().limits;
     for (u32 i = 0; i < 3; ++i) {
@@ -95,7 +97,12 @@ IndirectGuard::IndirectGuard(const Instance& instance_, Scheduler& scheduler_)
 
 IndirectGuard::~IndirectGuard() = default;
 
-std::pair<vk::Buffer, u64> IndirectGuard::CheckArgs(const VideoCore::Buffer& args, u64 off_args) {
+std::optional<std::pair<vk::Buffer, u64>> IndirectGuard::CheckArgs(const VideoCore::Buffer& args,
+                                                                    u64 off_args) {
+    if (!m_checked->IsAllocated() || m_skipped->mapped_data.empty()) {
+        LOG_ERROR_COUNTED(Render_Vulkan, "Indirect dispatch skipped: its check has no memory");
+        return std::nullopt;
+    }
     // A storage binding starts at a multiple of the device's alignment: the arguments are
     // `first` dwords into it.
     const u64 alignment = m_instance.StorageMinAlignment();
@@ -142,7 +149,7 @@ std::pair<vk::Buffer, u64> IndirectGuard::CheckArgs(const VideoCore::Buffer& arg
         cmdbuf.pipelineBarrier2({.memoryBarrierCount = 1, .pMemoryBarriers = &after});
     });
     Report();
-    return {m_checked->Handle(), u64(slot) * 16};
+    return std::pair{m_checked->Handle(), u64(slot) * 16};
 }
 
 void IndirectGuard::Report() {

@@ -460,12 +460,13 @@ private:
     bool ArePreparedVsharpsCurrent(const PreparedVertexInputs& inputs,
                                    const Shader::Gcn::FetchShaderData& fetch,
                                    const Shader::Info& vs) const;
-    void BindIndexBuffer(u32 index_offset = 0, bool is_indirect = false);
+    /// psport: false (logged) when the index buffer has no memory: the draw is skipped.
+    [[nodiscard]] bool BindIndexBuffer(u32 index_offset = 0, bool is_indirect = false);
     /// psport: BindVertexBuffers/BindIndexBuffer in two halves: obtaining the buffers
     /// (vertex_binds, index_bind) and recording the binds.
     void ResolveVertexBuffers(const GraphicsPipeline* pipeline, const PreparedDraw* prepared);
     void EmitVertexBuffers();
-    void ResolveIndexBuffer(u32 index_offset, bool is_indirect = false);
+    [[nodiscard]] bool ResolveIndexBuffer(u32 index_offset, bool is_indirect = false);
     void EmitIndexBuffer();
 
     void ResetBindings(bool is_compute);
@@ -636,6 +637,9 @@ private:
     // or motion image without memory), which only VK_EXT_dynamic_rendering_unused_attachments
     // allows.
     bool is_attachment_null{};
+    // psport: BindBuffers met a buffer without memory (a failed creation or stream buffer copy)
+    // the stages need, so BindResources skips the draw or dispatch.
+    bool is_buffer_missing{};
     bool needs_barrier{};
     // psport: two-stage draw pipeline (stage B state; the thread is the last member so it
     // stops first).

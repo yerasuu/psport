@@ -44,9 +44,13 @@ StagingBufferPool::StagingBufferPool(const Instance& instance_, Scheduler& sched
     keep_blocks = (env ? std::strtoull(env, nullptr, 10) : 512) * 1_MB / BLOCK_SIZE;
     Ring& ring = rings[u32(MemoryType::HostUncached)];
     for (u64 i = 0; i < PREWARM_BLOCKS; ++i) {
+        auto buffer = std::make_unique<VideoCore::StreamBuffer>(instance, scheduler,
+                                                                MemoryType::HostUncached, BLOCK_SIZE);
+        if (!buffer->IsAllocated()) {
+            break;
+        }
         auto& block = ring.blocks.emplace_back(Block{
-            .buffer = std::make_unique<VideoCore::StreamBuffer>(
-                instance, scheduler, MemoryType::HostUncached, BLOCK_SIZE),
+            .buffer = std::move(buffer),
             .last_used_frame = frame,
         });
         if (!block.buffer->mapped_data.empty()) {
@@ -85,13 +89,35 @@ StagingBufferRef StagingBufferPool::RequestFromRing(Ring& ring, u64 size, u64 al
     }
 
     if (!best) {
-        best = &ring.blocks.emplace_back(Block{
-            .buffer =
-                std::make_unique<VideoCore::StreamBuffer>(instance, scheduler, type, BLOCK_SIZE),
-            .last_used_frame = frame,
-        });
-        ring.current = ring.blocks.size() - 1;
-        best_offset = *best->buffer->Reserve(size, alignment, false);
+        auto buffer =
+            std::make_unique<VideoCore::StreamBuffer>(instance, scheduler, type, BLOCK_SIZE, false);
+        if (!buffer->IsAllocated()) {
+            EvictIdle();
+            buffer = std::make_unique<VideoCore::StreamBuffer>(instance, scheduler, type, BLOCK_SIZE);
+        }
+        std::optional<u64> offset;
+        if (buffer->IsAllocated()) {
+            best = &ring.blocks.emplace_back(Block{
+                .buffer = std::move(buffer),
+                .last_used_frame = frame,
+            });
+            ring.current = ring.blocks.size() - 1;
+            offset = best->buffer->Reserve(size, alignment, false);
+        } else if (!ring.blocks.empty() && !Scheduler::IsInsideSchedulerWork()) {
+            // psport: no memory for another block: the GPU is waited for to reuse one. Inside the
+            // submit callback or a pending operation that wait would flush the submission being
+            // built, so the request fails there instead.
+            best = &ring.blocks[ring.current];
+            offset = best->buffer->Reserve(size, alignment, true);
+        }
+        best_offset = offset.value_or(0);
+        if (!offset) {
+            best = nullptr;
+        }
+        if (!best) {
+            LOG_ERROR_COUNTED(Render_Vulkan, "No staging memory for {:#x} bytes", size);
+            return {.size = size, .type = type};
+        }
     }
 
     auto& buffer = *best->buffer;
@@ -126,9 +152,22 @@ StagingBufferRef StagingBufferPool::RequestLarge(u64 size, MemoryType type, bool
     }
 
     if (!best) {
+        const auto make_buffer = [&](bool can_exceed_budget) {
+            return std::make_unique<VideoCore::Buffer>(instance, 0, RoundAllocationSize(size), type,
+                                                       "StagingBufferPool:Dedicated",
+                                                       can_exceed_budget);
+        };
+        auto buffer = make_buffer(false);
+        if (!buffer->IsAllocated()) {
+            EvictIdle();
+            buffer = make_buffer(true);
+        }
+        if (!buffer->IsAllocated()) {
+            LOG_ERROR_COUNTED(Render_Vulkan, "No dedicated staging memory for {:#x} bytes", size);
+            return {.size = size, .type = type};
+        }
         best = &cache.emplace_back(LargeBuffer{
-            .buffer = std::make_unique<VideoCore::Buffer>(instance, 0, RoundAllocationSize(size),
-                                                          type, "StagingBufferPool:Dedicated"),
+            .buffer = std::move(buffer),
             .tick = 0,
             .last_used_frame = frame,
             .held = false,
@@ -153,6 +192,9 @@ StagingBufferRef StagingBufferPool::RequestLarge(u64 size, MemoryType type, bool
 }
 
 void StagingBufferPool::FreeDeferred(const StagingBufferRef& ref) {
+    if (!ref.buffer) {
+        return;
+    }
     auto& cache = large_caches[u32(ref.type)];
     const auto it = std::ranges::find_if(
         cache, [&](const LargeBuffer& entry) { return entry.buffer.get() == ref.buffer; });
@@ -168,7 +210,7 @@ void StagingBufferPool::FreeDeferred(const StagingBufferRef& ref) {
 void StagingBufferPool::TickFrame() {
     ++frame;
     for (Ring& ring : rings) {
-        TrimRing(ring);
+        TrimRing(ring, keep_blocks, RING_IDLE_FRAMES);
     }
     for (auto& cache : large_caches) {
         TrimLarge(cache);
@@ -176,11 +218,11 @@ void StagingBufferPool::TickFrame() {
     PublishStats();
 }
 
-void StagingBufferPool::TrimRing(Ring& ring) {
+void StagingBufferPool::TrimRing(Ring& ring, u64 c_keep, u64 idle_frames) {
     auto& blocks = ring.blocks;
     for (size_t i = blocks.size(); i-- > 0;) {
         const Block& block = blocks[i];
-        if (blocks.size() <= keep_blocks || frame - block.last_used_frame < RING_IDLE_FRAMES ||
+        if (blocks.size() <= c_keep || frame - block.last_used_frame < idle_frames ||
             !scheduler.IsFree(block.buffer->LastTick())) {
             continue;
         }
@@ -193,6 +235,17 @@ void StagingBufferPool::TrimRing(Ring& ring) {
     }
     if (ring.current >= blocks.size()) {
         ring.current = 0;
+    }
+}
+
+void StagingBufferPool::EvictIdle() {
+    for (Ring& ring : rings) {
+        TrimRing(ring, 0, 0);
+    }
+    for (auto& cache : large_caches) {
+        std::erase_if(cache, [this](const LargeBuffer& entry) {
+            return !entry.held && scheduler.IsFree(entry.tick);
+        });
     }
 }
 

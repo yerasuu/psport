@@ -104,7 +104,11 @@ static bool MultiCopy(Rasterizer& rasterizer, const VideoCore::Buffer* src,
     }
     auto& stream = rasterizer.GetBufferCache().GetStreamBuffer();
     const u64 table_size = regions.size() * sizeof(u32);
-    const u64 table_offset = stream.Copy(regions.data(), table_size, align);
+    const auto off_table = stream.Copy(regions.data(), table_size, align);
+    if (!off_table) {
+        return false; // copied with vkCmdCopyBuffer instead
+    }
+    const u64 table_offset = *off_table;
 
     if (auto* profiler = GpuProfiler::Get()) {
         profiler->Mark(0xC0B1ull, [] { return std::string{"copy shader HLE: barrier + dispatch"}; });

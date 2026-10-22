@@ -179,7 +179,7 @@ void OcclusionQueries::Resolve() {
     }
     auto& stream = m_buffer_cache.GetStreamBuffer();
     const u64 cb_entries = entries.size() * sizeof(EventEntry);
-    const u64 off_entries =
+    const auto off_entries =
         stream.Copy(entries.data(), cb_entries, m_instance.StorageMinAlignment());
     // The segments' factors, in the order the shader adds them (from slot `first`, wrapping).
     std::vector<u32> scales(std::max<u32>(c_segments, 1), 256u);
@@ -187,7 +187,10 @@ void OcclusionQueries::Resolve() {
         scales[i] = m_slot_scale[(first + i) % NumSlots];
     }
     const u64 cb_scales = scales.size() * sizeof(u32);
-    const u64 off_scales = stream.Copy(scales.data(), cb_scales, m_instance.StorageMinAlignment());
+    const auto off_scales = stream.Copy(scales.data(), cb_scales, m_instance.StorageMinAlignment());
+    if (!off_entries || !off_scales) {
+        return; // the events stay pending for the next resolve
+    }
     const bool should_clear_total = !m_is_total_cleared;
     m_is_total_cleared = true;
     m_scheduler.Record([this, first, c_segments, c_events, should_clear_total, stream = stream.Handle(),
@@ -211,8 +214,8 @@ void OcclusionQueries::Resolve() {
         const std::array<vk::DescriptorBufferInfo, 4> infos{{
             {m_results->Handle(), 0, NumSlots * sizeof(u64)},
             {m_total->Handle(), 0, 8},
-            {stream, off_entries, cb_entries},
-            {stream, off_scales, cb_scales},
+            {stream, *off_entries, cb_entries},
+            {stream, *off_scales, cb_scales},
         }};
         std::array<vk::WriteDescriptorSet, 4> writes{};
         for (u32 i = 0; i < writes.size(); ++i) {
@@ -281,7 +284,12 @@ void OcclusionQueries::Resume(bool is_inside_render_pass) {
     }
 }
 
-void OcclusionQueries::Event(VAddr va_guest, u32 pairs) {
+bool OcclusionQueries::IsUsable() const {
+    return m_results->IsAllocated() && m_total->IsAllocated() &&
+           m_buffer_cache.GetStreamBuffer().IsAllocated();
+}
+
+bool OcclusionQueries::Event(VAddr va_guest, u32 pairs) {
     std::scoped_lock lk{m_mutex};
     if (!m_has_started) {
         // The first event: from here on a segment is always active (slots reset outside a
@@ -312,6 +320,12 @@ void OcclusionQueries::Event(VAddr va_guest, u32 pairs) {
     m_buffer_cache.force_writes_in_place = true;
     const auto [buffer, offset] = m_buffer_cache.ObtainBuffer(va_guest, cb_results, true);
     m_buffer_cache.force_writes_in_place = false;
+    const vk::DeviceAddress va_device = buffer->BufferDeviceAddress();
+    if (va_device == 0) {
+        LOG_ERROR_COUNTED(Render_Vulkan, "Occlusion counters at {:#x} without a device address "
+                          "written as visible", va_guest);
+        return false;
+    }
     if (m_is_active) {
         EndSegment();
     }
@@ -344,7 +358,7 @@ void OcclusionQueries::Event(VAddr va_guest, u32 pairs) {
             }
         }
     }
-    m_pending.push_back({buffer->BufferDeviceAddress() + offset, pairs, m_begun, va_guest, m_c_events + 1});
+    m_pending.push_back({va_device + offset, pairs, m_begun, va_guest, m_c_events + 1});
     if (ReadTrace()) {
         WatchReads(va_guest, m_c_events + 1);
     }
@@ -383,6 +397,7 @@ void OcclusionQueries::Event(VAddr va_guest, u32 pairs) {
             PrintReadTrace();
         }
     }
+    return true;
 }
 
 bool OcclusionQueries::ReadTrace() {

@@ -266,13 +266,18 @@ std::pair<const Buffer*, u64> TileManager::DetileImage(const VideoCore::Buffer* 
         }
     }
 
+    const auto off_params = stream_buffer.Copy(&params, sizeof(params), instance.UniformMinAlignment());
+    const auto staging = runtime.GetStagingPool().Request(info.guest_size, MemoryType::DeviceLocal);
+    if (!off_params || !staging.buffer) {
+        LOG_ERROR_COUNTED(Render_Vulkan, "Image at {:#x} not uploaded: no memory to detile it",
+                          info.guest_address);
+        return {nullptr, 0};
+    }
     const vk::DescriptorBufferInfo params_buffer_info{
         .buffer = stream_buffer.Handle(),
-        .offset = stream_buffer.Copy(&params, sizeof(params), instance.UniformMinAlignment()),
+        .offset = *off_params,
         .range = sizeof(params),
     };
-
-    const auto staging = runtime.GetStagingPool().Request(info.guest_size, MemoryType::DeviceLocal);
 
     scheduler.EndRendering();
     runtime.FlushBarriers();
@@ -333,13 +338,18 @@ void TileManager::TileImage(Image& in_image, std::span<vk::BufferImageCopy> buff
         }
     }
 
+    const auto off_params = stream_buffer.Copy(&params, sizeof(params), instance.UniformMinAlignment());
+    const auto staging = runtime.GetStagingPool().Request(info.guest_size, MemoryType::DeviceLocal);
+    if (!off_params || !staging.buffer) {
+        LOG_ERROR_COUNTED(Render_Vulkan, "Image at {:#x} not written back: no memory to tile it",
+                          info.guest_address);
+        return;
+    }
     const vk::DescriptorBufferInfo params_buffer_info{
         .buffer = stream_buffer.Handle(),
-        .offset = stream_buffer.Copy(&params, sizeof(params), instance.UniformMinAlignment()),
+        .offset = *off_params,
         .range = sizeof(params),
     };
-
-    const auto staging = runtime.GetStagingPool().Request(info.guest_size, MemoryType::DeviceLocal);
     for (auto& copy : buffer_copies) {
         copy.bufferOffset += staging.offset;
     }
@@ -369,9 +379,11 @@ void TileManager::TileImage(Image& in_image, std::span<vk::BufferImageCopy> buff
         const auto& mip_info = info.mips_layout[mip];
         cb_covered = mip_info.offset == cb_covered ? cb_covered + mip_info.size : ~0ULL;
     }
-    if (is_host_destination && cb_covered == info.guest_size && c_texels % 64 == 0 &&
-        !PsToggle::Disabled(PsToggle::LocalTiling)) {
-        const auto local = runtime.GetStagingPool().Request(info.guest_size, MemoryType::DeviceLocal);
+    const auto local = is_host_destination && cb_covered == info.guest_size && c_texels % 64 == 0 &&
+                               !PsToggle::Disabled(PsToggle::LocalTiling)
+                           ? runtime.GetStagingPool().Request(info.guest_size, MemoryType::DeviceLocal)
+                           : Vulkan::StagingBufferRef{};
+    if (local.buffer) {
         const vk::DescriptorBufferInfo local_buffer_info{
             .buffer = local.buffer->Handle(),
             .offset = local.offset,

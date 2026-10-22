@@ -428,7 +428,24 @@ GPU; its display buffer leaves the game's buffer shown), a scene proxy that
 cannot be allocated keeps its image at native size, and a missing object motion image drops the
 motion vectors. Both leave a null attachment the pipeline declares, which only
 `VK_EXT_dynamic_rendering_unused_attachments` allows: where the device lacks it, the draw is
-skipped.
+skipped. A buffer that cannot be allocated within the memory budget is tried again over it while
+the texture collector evicts by submissions (`TextureCache::NoteVramShort`); where the caller can
+free memory itself (VRAM copies of guest memory, the staging pool) it does so first and only its
+second attempt may exceed the budget, and compaction never does. One that still fails, has no
+device address or cannot be bound to a guest memory chunk is left with a null handle
+(`Buffer::IsAllocated`). Copies, fills and image transfers on it are skipped, a draw or dispatch
+that binds it (or a stream buffer copy, the null index buffer or the stream-out counters that
+failed) is skipped, a VRAM copy of guest memory that cannot be made leaves its blocks in place
+(retired mirrors are freed and the allocation tried once more first), a chunk buffer leaves its
+ranges to the arena and is tried again once a second, VRAM blocks whose GPU data cannot be copied
+back stay in VRAM until it can, the staging pool frees its idle ring blocks and dedicated buffers
+and tries again, then waits for the GPU to reuse a block (never inside a submission: the submit
+callback or a pending operation gets no memory instead), and page table entries without staging
+travel in the command buffer. An upload or readback without staging leaves its range CPU- or
+GPU-modified, and an image that cannot be detiled stays dirty, so that the next use tries again;
+occlusion queries and GPU timestamps whose buffers are missing are written by the CPU as without
+them. An arena for guest memory without a device
+address stops the launch as its other requirements do.
 
 ### Memory model
 

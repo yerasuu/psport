@@ -925,13 +925,23 @@ void BufferCache::DownloadMemory(const Buffer* arena, VAddr device_addr, u64 siz
     if (!fast) {
         const auto download =
             staging_pool.Request(total_size_bytes, VideoCore::MemoryType::HostCached);
-        for (auto& copy : copies) {
-            copy.dstOffset += download.offset;
+        if (download.buffer) {
+            for (auto& copy : copies) {
+                copy.dstOffset += download.offset;
+            }
+            runtime.CopyBuffer(arena, download.buffer, copies);
+            scheduler.Finish();
+            download.buffer->Invalidate(download.offset, download.size);
+            write_back(download.mapped, download.offset);
+        } else {
+            LOG_ERROR_COUNTED(Render_Vulkan, "Readback of {:#x} bytes at {:#x} skipped",
+                              total_size_bytes, device_addr);
+            // psport: the data stays GPU-modified so that the next access reads it back again.
+            for (const auto& copy : copies) {
+                gpu_modified_ranges.Add(arena_base + copy.srcOffset, copy.size);
+            }
+            return;
         }
-        runtime.CopyBuffer(arena, download.buffer, copies);
-        scheduler.Finish();
-        download.buffer->Invalidate(download.offset, download.size);
-        write_back(download.mapped, download.offset);
     }
     if (auto* log = Readbacks()) {
         const auto now = std::chrono::steady_clock::now();
@@ -1191,11 +1201,14 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
                 return {&stream_buffer, *offset};
             }
         }
-        const auto [data, offset] = stream_buffer.Map(size, instance.UniformMinAlignment());
-        memory->CopySparseMemory(device_addr, data, size);
-        stream_buffer.Commit();
-        TraceBinding(device_addr, size, false, 3);
-        return {&stream_buffer, offset};
+        // psport: a stream buffer without memory leaves the binding to the arena below.
+        if (const auto [data, offset] = stream_buffer.Map(size, instance.UniformMinAlignment());
+            data) {
+            memory->CopySparseMemory(device_addr, data, size);
+            stream_buffer.Commit();
+            TraceBinding(device_addr, size, false, 3);
+            return {&stream_buffer, offset};
+        }
     }
     const u64 first_block = device_addr >> block_shift;
     const u64 last_block = (device_addr + size - 1) >> block_shift;
@@ -1335,6 +1348,9 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBufferForImage(VAddr device_add
     TraceBinding(device_addr, size, false, 9);
     const auto staging = staging_pool.Request(size, VideoCore::MemoryType::HostUncached,
                                               instance.StorageMinAlignment());
+    if (!staging.buffer) {
+        return ObtainBuffer(device_addr, size, false);
+    }
     if (!PsToggle::Disabled(PsToggle::DeferredUploads)) {
         // psport: texture data is copied on the copy threads (streaming: 100+ MB per frame);
         // the upload reads the staging only after submission, which waits for the copies.
@@ -1410,6 +1426,15 @@ void BufferCache::SynchronizeDmaBuffers() {
     }
 }
 
+// psport: every binding of the game's memory goes through an arena, so a game cannot run without
+// one; its creation only fails where the driver cannot give it a device address, which belongs
+// with the other arena requirements checked when it is created (UniqueBuffer::Create).
+static void StopWithoutArena(const Buffer& arena) {
+    if (!arena.IsAllocated()) {
+        PsGuestMemory::Unsupported("the arena for guest memory has no device address");
+    }
+}
+
 const Buffer* BufferCache::GetArena(u64 first_block, u64 last_block) {
     const u64 first_page = first_block >> blocks_per_arena_page_shift;
     const u64 last_page = last_block >> blocks_per_arena_page_shift;
@@ -1429,6 +1454,7 @@ const Buffer* BufferCache::GetArena(u64 first_block, u64 last_block) {
             const auto* new_arena =
                 &arenas.emplace_back(instance, base_block << block_shift,
                                      num_pages << ARENA_PAGE_BITS, MemoryType::Sparse);
+            StopWithoutArena(*new_arena);
             address_space[first_page] = new_arena;
             address_space[last_page] = new_arena;
         }
@@ -1446,6 +1472,7 @@ const Buffer* BufferCache::GetArena(u64 first_block, u64 last_block) {
     const u64 total_size = first_size + last_size;
     const u64 end_block = (first_addr + total_size) >> block_shift;
     auto* new_arena = &arenas.emplace_back(instance, first_addr, total_size, MemoryType::Sparse);
+    StopWithoutArena(*new_arena);
     auto* bind = BindsForArena(new_arena);
     resident_ranges.ForEachInRange(base_block, end_block, [&](const Backing& backing) {
         const u64 start = std::max(base_block, backing.start);
@@ -1579,7 +1606,12 @@ void BufferCache::EnsureResident(const Buffer* arena, u64 first_block, u64 last_
     const auto staging =
         staging_pool.Request(total_blocks * sizeof(vk::DeviceAddress), MemoryType::HostUncached);
     ArenaBinds* arena_binds = BindsForArena(arena);
-    auto* bda_addrs = reinterpret_cast<vk::DeviceAddress*>(staging.mapped);
+    std::vector<vk::DeviceAddress> unstaged;
+    if (!staging.mapped) {
+        unstaged.resize(total_blocks);
+    }
+    auto* bda_addrs =
+        staging.mapped ? reinterpret_cast<vk::DeviceAddress*>(staging.mapped) : unstaged.data();
     u64 offset = staging.offset;
     for (const auto& bind : binds) {
         Backing backing;
@@ -1615,8 +1647,19 @@ void BufferCache::EnsureResident(const Buffer* arena, u64 first_block, u64 last_
         offset += copy_size;
     }
 
-    staging.Flush();
-    runtime.CopyBuffer(staging.buffer, bda_pagetable_buffer.get(), copies);
+    if (staging.mapped) {
+        staging.Flush();
+        runtime.CopyBuffer(staging.buffer, bda_pagetable_buffer.get(), copies);
+        return;
+    }
+    // psport: without staging memory the entries travel in the command buffer, since a binding
+    // whose entries are missing would read through stale device addresses.
+    const auto entries = std::as_bytes(std::span{unstaged});
+    for (const auto& copy : copies) {
+        runtime.UpdateBuffer(bda_pagetable_buffer.get(), copy.dstOffset,
+                             {reinterpret_cast<const u8*>(entries.data()) + copy.srcOffset,
+                              copy.size});
+    }
 }
 
 std::pair<vk::DeviceMemory, u64> BufferCache::AllocateResidency(u64 bytes) {
@@ -2252,12 +2295,28 @@ std::optional<std::pair<const Buffer*, u64>> BufferCache::GuestChunkSource(VAddr
         phys + size > chunk->phys + chunk->cb_chunk) {
         return std::nullopt;
     }
-    auto& buffer = chunk_buffers[chunk->i_creation % chunk_buffers.size()];
-    if (!buffer) {
-        buffer = std::make_unique<Buffer>(instance, chunk->cb_chunk, chunk->memory,
-                                          fmt::format("psport guest memory {:#x}", chunk->phys));
+    const Buffer* p_buffer = ChunkBuffer(*chunk);
+    if (!p_buffer) {
+        return std::nullopt; // the arena serves the range
     }
-    return std::pair<const Buffer*, u64>{buffer.get(), phys - chunk->phys};
+    return std::pair<const Buffer*, u64>{p_buffer, phys - chunk->phys};
+}
+
+const Buffer* BufferCache::ChunkBuffer(const PsGuestMemory::Chunk& chunk) {
+    const size_t i_slot = chunk.i_creation % chunk_buffers.size();
+    auto& buffer = chunk_buffers[i_slot];
+    const u32 now = PsStats::g_coarse_second.load(std::memory_order_relaxed);
+    if (!buffer || (!buffer->IsAllocated() && chunk_buffer_failed_at[i_slot] != now)) {
+        buffer = std::make_unique<Buffer>(instance, chunk.cb_chunk, chunk.memory,
+                                          fmt::format("psport guest memory {:#x}", chunk.phys));
+        chunk_buffer_failed_at[i_slot] = now;
+    }
+    if (!buffer->IsAllocated()) {
+        LOG_ERROR_COUNTED(Render_Vulkan, "Guest memory chunk {:#x} has no buffer: not bound in place",
+                          chunk.phys);
+        return nullptr;
+    }
+    return buffer.get();
 }
 
 std::optional<std::pair<const Buffer*, u64>> BufferCache::LayerInPlace(VAddr address, u64 size,
@@ -2281,12 +2340,11 @@ std::optional<std::pair<const Buffer*, u64>> BufferCache::LayerInPlace(VAddr add
         }
     }
     const auto* chunk = static_cast<const PsGuestMemory::Chunk*>(span->p_source->p_owner);
-    auto& buffer = chunk_buffers[chunk->i_creation % chunk_buffers.size()];
-    if (!buffer) {
-        buffer = std::make_unique<Buffer>(instance, chunk->cb_chunk, chunk->memory,
-                                          fmt::format("psport guest memory {:#x}", chunk->phys));
+    const Buffer* p_buffer = ChunkBuffer(*chunk);
+    if (!p_buffer) {
+        return std::nullopt;
     }
-    return std::pair<const Buffer*, u64>{buffer.get(), span->off_source};
+    return std::pair<const Buffer*, u64>{p_buffer, span->off_source};
 }
 
 void BufferCache::NoteLayerMiss(VAddr address, u64 size, bool is_written) {
@@ -2700,11 +2758,12 @@ void BufferCache::QueueCopyBacks(u64 submitted) {
         return;
     }
     if (LayerMode()) {
-        // GPU data in mirrors back into the game's memory, then in place.
-        for (const auto& range : copy_back_blocks) {
+        // GPU data in mirrors back into the game's memory, then in place. A run whose copy back
+        // cannot be made is queued again by LayerDemote.
+        const auto pending = std::exchange(copy_back_blocks, {});
+        for (const auto& range : pending) {
             LayerDemote(range.start, range.end, true, 4);
         }
-        copy_back_blocks.Clear();
         return;
     }
     std::vector<u64> blocks;
@@ -2996,9 +3055,7 @@ void BufferCache::QueuePromotions(u64 submitted) {
     // psport PS_LAYER_MEMORY: mirrors replaced by bigger ones go as soon as the GPU is past them,
     // not once a second (LayerMaintain): loading a level replaced hundreds within a second.
     if (LayerMode() && !layer_retired.empty()) {
-        std::erase_if(layer_retired, [&](const auto& retired) {
-            return scheduler.GetWorkSemaphore()->IsFree(retired.second);
-        });
+        LayerReleaseRetired();
     }
     ReportInPlaceBlocks();
     if (promote_candidates.Empty()) {
@@ -3328,6 +3385,15 @@ bool BufferCache::SynchronizeMemory(const Buffer* arena, VAddr device_addr, u32 
 
     if (src_buffer) {
         runtime.CopyBuffer(src_buffer, arena, copies);
+    } else {
+        // psport: the upload failed after its pages were marked clean: they are marked again
+        // (and a written binding's GPU mark dropped) so that a later bind uploads them.
+        for (const auto& copy : copies) {
+            if (is_written) {
+                memory_tracker->UnmarkRegionAsGpuModified(copy.dstOffset, copy.size);
+            }
+            memory_tracker->MarkRegionAsCpuModified(copy.dstOffset, copy.size);
+        }
     }
     for (const auto& [chunk_buffer, copy] : chunk_copies) {
         PsNativeProbe::Note(PsNativeProbe::Upload);
@@ -3358,6 +3424,11 @@ const Buffer* BufferCache::UploadCopies(const Buffer* arena, std::span<vk::Buffe
     PsNativeProbe::Note(PsNativeProbe::Upload);
     PsStats::g_cb_buffer_upload.fetch_add(total_size_bytes, std::memory_order_relaxed);
     const auto staging = staging_pool.Request(total_size_bytes, MemoryType::HostUncached);
+    if (!staging.buffer) {
+        LOG_ERROR_COUNTED(Render_Vulkan, "Upload of {:#x} bytes into {:#x} skipped",
+                          total_size_bytes, arena->cpu_addr);
+        return nullptr;
+    }
     // psport: the guest memory is copied into staging on the copy threads, started now in
     // groups of about 1 MiB; submission and guest-visible fences wait for them
     // (Scheduler::WaitHostCopies).

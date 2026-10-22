@@ -51,6 +51,7 @@ public:
     void TileImage(Image& in_image, std::span<vk::BufferImageCopy> buffer_copies,
                    const VideoCore::Buffer* out_buffer, u64 out_offset, bool is_host_destination);
 
+    /// psport: the buffer is null when there was no memory to detile; the caller uploads later.
     std::pair<const Buffer*, u64> DetileImage(const VideoCore::Buffer* in_buffer, u64 in_offset,
                                               const ImageInfo& info);
 

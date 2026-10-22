@@ -14,6 +14,7 @@
 #include <atomic>
 #include <chrono>
 #include <memory>
+#include <optional>
 #include <utility>
 
 #include "common/types.h"
@@ -36,8 +37,9 @@ public:
     static bool Enabled();
 
     /// Records the check of the arguments at `off_args` in `args` (outside a render pass); returns
-    /// the buffer and offset to dispatch from.
-    std::pair<vk::Buffer, u64> CheckArgs(const VideoCore::Buffer& args, u64 off_args);
+    /// the buffer and offset to dispatch from. psport: nullopt (logged) when the check's buffers
+    /// have no memory, and the dispatch is skipped.
+    std::optional<std::pair<vk::Buffer, u64>> CheckArgs(const VideoCore::Buffer& args, u64 off_args);
 
 private:
     static constexpr u32 NumSlots = 1024;
