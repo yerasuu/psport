@@ -266,8 +266,9 @@ uintptr_t IOFile::GetFileMapping() {
     HANDLE mapping = nullptr;
 
     if (file_access_mode == FileAccessMode::ReadWrite) {
-        mapping = CreateFileMapping2(hfile, NULL, FILE_MAP_WRITE, PAGE_READWRITE, SEC_COMMIT, 0,
-                                     NULL, NULL, 0);
+        // psport: CreateFileMappingW, the same mapping without extended parameters, since Wine
+        // has no CreateFileMapping2 and the DLL's import of it would bind to an aborting stub.
+        mapping = CreateFileMappingW(hfile, NULL, PAGE_READWRITE | SEC_COMMIT, 0, 0, NULL);
     } else {
         mapping = hfile;
     }

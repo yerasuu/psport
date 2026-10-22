@@ -298,7 +298,7 @@ and `WakeByAddressAll`, `SetThreadDescription`, Toolhelp thread lists, `GetCurre
 affinity mask and `THREAD_PRIORITY_IDLE`, `RtlCaptureStackBackTrace`, the guest's TCB in a `TlsAlloc` slot of the TEB's 64 inline ones, which
 the loader's patched loads read at `0x1480 + 8 * slot` (`win32/host_thread.c`); UTF-8 paths and Win32 errors as errno values in
 `win32/host_win32.c`; the arena as one `VirtualAlloc2` placeholder that fixed mappings are carved into and filled with
-`MapViewOfFile3` views of `CreateFileMapping2` sections (private memory a section of its own, `SEC_RESERVE` committed as views
+`MapViewOfFile3` views of `CreateFileMapping2` sections (`CreateFileMappingW` where Wine lacks it, logged) (private memory a section of its own, `SEC_RESERVE` committed as views
 map it past the commit limit), `VirtualProtect` and `VirtualQuery` (`win32/host_memory.c`).
 Files are `CreateFileW` handles in `win32/host_file.c`'s descriptor table (0-2 copies of the standard
 handles; a duplicate onto them moves the C runtime's stdio and `SetStdHandle` too, as `dup2` does), `pread` and `pwrite`

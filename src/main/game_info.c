@@ -53,12 +53,39 @@ void configure_content(const char *sz_sfo) {
     printf("AppContent profile: SKU=%s (probe setting), user params=[%u, %u, %u, %u], mounted add-ons=0\n",
            sz_sku,values[1],values[2],values[3],values[4]);
 }
-/* A path under psport's own folder, the one holding out/ or bin/ (a checkout or a package). */
-static void install_path(const char *sz_relative, char *sz_out, size_t cb_out) {
+/* psport's own folder, the one holding patches/: PS_INSTALL_DIR when set, else the nearest folder
+ * above the executable with a patches/ folder, since the executable sits at different depths below
+ * it (out/psport, out/win32/psport.exe, a package's bin/psport, or beside patches/). */
+static void install_dir(char *sz_out, size_t cb_out) {
+    const char *sz_set=runtime_env("PS_INSTALL_DIR","");
+    if (*sz_set) {
+        if ((size_t)snprintf(sz_out,cb_out,"%s",sz_set)>=cb_out) fail("PS_INSTALL_DIR too long");
+        return;
+    }
     char sz_exe[4096];
-    ps_host_exe_path(sz_exe,sizeof(sz_exe));
-    for (int up=0; up<2; ++up) { char *p_slash=strrchr(sz_exe,'/'); if (p_slash) *p_slash=0; }
-    if ((size_t)snprintf(sz_out,cb_out,"%s/%s",sz_exe[0] ? sz_exe : ".",sz_relative)>=cb_out) fail("install path too long");
+    if (ps_host_exe_path(sz_exe,sizeof(sz_exe))<0) {
+        fprintf(stderr,"psport: the executable's path is unknown: install folder taken as the current one (set PS_INSTALL_DIR)\n");
+        snprintf(sz_out,cb_out,".");
+        return;
+    }
+    if ((size_t)snprintf(sz_out,cb_out,"%s",sz_exe)>=cb_out) fail("install path too long");
+    for (char *p_slash=strrchr(sz_out,'/'); p_slash; p_slash=strrchr(sz_out,'/')) {
+        *p_slash=0;
+        char sz_patches[4200];
+        PsHostStat stat;
+        snprintf(sz_patches,sizeof(sz_patches),"%s/patches",sz_out);
+        if (!ps_host_fs_stat(sz_patches,&stat) && PS_HOST_MODE_IS_DIRECTORY(stat.mode)) {
+            if (!sz_out[0]) snprintf(sz_out,cb_out,"/");
+            return;
+        }
+    }
+    fprintf(stderr,"psport: no patches/ folder above %s: install folder taken as the current one (set PS_INSTALL_DIR)\n",sz_exe);
+    snprintf(sz_out,cb_out,".");
+}
+static void install_path(const char *sz_relative, char *sz_out, size_t cb_out) {
+    char sz_dir[4096];
+    install_dir(sz_dir,sizeof(sz_dir));
+    if ((size_t)snprintf(sz_out,cb_out,"%s/%s",sz_dir,sz_relative)>=cb_out) fail("install path too long");
 }
 /* sz_game_dir may be NULL: a launcher asking about a title by its TITLE_ID and APP_VER. */
 void game_info_of(const char *sz_game_dir, const char *sz_serial, const char *sz_version, GameInfo *p_out_info) {

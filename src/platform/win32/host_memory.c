@@ -117,9 +117,37 @@ static int is_commit_limit(DWORD error) {
     return error == ERROR_COMMITMENT_LIMIT || error == ERROR_NO_SYSTEM_RESOURCES;
 }
 
+typedef HANDLE(WINAPI *PfnCreateFileMapping2)(HANDLE, SECURITY_ATTRIBUTES *, ULONG, ULONG, ULONG, ULONG64, PCWSTR,
+                                              MEM_EXTENDED_PARAMETER *, ULONG);
+static PfnCreateFileMapping2 s_pfn_create_file_mapping2;
+static INIT_ONCE s_create_file_mapping2_once = INIT_ONCE_STATIC_INIT;
+/* Logged at each power of two, so that a run shows how many sections took the fallback. */
+static volatile LONG s_c_fallback_mappings;
+
+static BOOL CALLBACK resolve_create_file_mapping2(PINIT_ONCE p_once, void *p_parameter, void **pp_context) {
+    (void)p_once;
+    (void)p_parameter;
+    (void)pp_context;
+    const HMODULE h_kernelbase = GetModuleHandleW(L"kernelbase.dll");
+    s_pfn_create_file_mapping2 =
+        h_kernelbase ? (PfnCreateFileMapping2)(void (*)(void))GetProcAddress(h_kernelbase, "CreateFileMapping2") : NULL;
+    return TRUE;
+}
+
+/* CreateFileMapping2 is a recent kernelbase export that Wine (UMU-Proton 10.0-4) lacks, where an
+ * import would bind to a stub that aborts at the first call: without it CreateFileMappingW makes the
+ * same section, since no extended parameter is passed. */
 static HANDLE create_mapping(uint64_t cb_section, ULONG attributes) {
-    return CreateFileMapping2(INVALID_HANDLE_VALUE, NULL, FILE_MAP_ALL_ACCESS, PAGE_EXECUTE_READWRITE, attributes,
-                              cb_section, NULL, NULL, 0);
+    InitOnceExecuteOnce(&s_create_file_mapping2_once, resolve_create_file_mapping2, NULL, NULL);
+    if (s_pfn_create_file_mapping2)
+        return s_pfn_create_file_mapping2(INVALID_HANDLE_VALUE, NULL, FILE_MAP_ALL_ACCESS, PAGE_EXECUTE_READWRITE,
+                                          attributes, cb_section, NULL, NULL, 0);
+    const LONG c_fallbacks = InterlockedIncrement(&s_c_fallback_mappings);
+    if (!(c_fallbacks & (c_fallbacks - 1)))
+        printf("Host memory: CreateFileMapping2 is missing (Wine): section %ld through CreateFileMappingW\n",
+               (long)c_fallbacks);
+    return CreateFileMappingW(INVALID_HANDLE_VALUE, NULL, PAGE_EXECUTE_READWRITE | attributes, (DWORD)(cb_section >> 32),
+                              (DWORD)cb_section, NULL);
 }
 
 static int add_section(const Section *p_section, int *p_out_i_section) {
@@ -171,7 +199,7 @@ int ps_host_vm_section_create(const char *sz_name, uint64_t cb_section, int *p_o
                    sz_name, (unsigned long long)(cb_section >> 20), commit_error);
         }
     }
-    if (!section.h_mapping) return report("CreateFileMapping2", 0, cb_section);
+    if (!section.h_mapping) return report("CreateFileMapping2 or CreateFileMappingW", 0, cb_section);
     section.p_whole = MapViewOfFile3(section.h_mapping, GetCurrentProcess(), NULL, 0, cb_section, 0, PAGE_READWRITE,
                                      NULL, 0);
     if (!section.p_whole) {
@@ -448,7 +476,7 @@ static int map_in_arena(uintptr_t va_begin, size_t cb_range, unsigned access, un
     int i_own = -1;
     if (i_section < 0 && access != PS_HOST_VM_NONE) {
         const Section own = {.h_mapping = create_mapping(cb_range, SEC_COMMIT), .cb_section = cb_range};
-        if (!own.h_mapping) return report("CreateFileMapping2 (private memory)", va_begin, cb_range);
+        if (!own.h_mapping) return report("CreateFileMapping2 or CreateFileMappingW (private memory)", va_begin, cb_range);
         const int error = add_section(&own, &i_own);
         if (error) {
             CloseHandle(own.h_mapping);
