@@ -24,28 +24,29 @@ its own game profile.
 
 ## Status
 
-psport is under active development. Every title below is listed in
+psport is under active development. A title is **playable**, **experimental** (it runs, but only a
+limited part has been seen), **broken** (it starts but a core part fails) or **not supported**. The
+state is how far a title has been seen to get, not a full play-through; what each title does is in
+[docs/en/GAMES.md](docs/en/GAMES.md). Every title is listed in
 [tools/regress/titles.txt](tools/regress/titles.txt) and run headless with `tools/regress.sh`
-(see [Testing](#testing)). The state is how far a title has been seen to get, not a full
-play-through. Rows marked "regress" show only what the title's scripted run records (first GPU
-frame, frames drawn, sound).
+(see [Testing](#testing)).
 
 | Title | Title ID | State |
 |---|---|---|
-| Bloodborne (1.09) | CUSA03173 | playable: saves, several areas, sound, pad, keyboard and mouse |
-| Atelier Ryza | CUSA16458 | title menu, prologue, field with the player in control, sound |
-| Atelier Ayesha DX | CUSA16921 | intro movie, title menu, opening scenes, field, atelier, sound |
-| Tales of Symphonia Remastered | CUSA50989 | title screen, the first room, sound |
-| Astrea | CUSA49515 | the intro's story panels, sound |
-| SaGa Emerald Beyond | CUSA43027 | title screen, first story scenes with dialogue, sound |
-| ALTDEUS: Beyond Chronos | CUSA26563 | black screen: requires a PS VR headset, no flat-screen mode |
-| Gal Guardians: Demon Purge | CUSA41240 | regress: frames drawn, sound |
-| Gal Guardians: Servants of the Dark (JP) | CUSA52187 | regress: frames drawn, sound |
-| Call of Duty: Black Ops | CUSA57547 | regress: frames drawn, sound; keyboard and mouse with the game's own camera, a shooter layout and a crosshair |
-| Call of Duty: Black Ops II | CUSA57548 | first mission (Pyrrhic Victory) through chained checkpoints to the river barge, Save and Quit, Resume Story, videos, sound, pad |
-| Blood Omen 2 | CUSA49769 | regress: frames drawn, no sound |
-| Onigiri | CUSA01458 | regress: frames drawn, sound |
-| OCTOPATH TRAVELER 0 (JP) | CUSA53477 | loads a saved game and draws frames and sound, but the 3D scene stays black (only the minimap shows); left out of routine runs |
+| Bloodborne (1.09) | CUSA03173 | playable |
+| Atelier Ryza | CUSA16458 | playable |
+| Atelier Ayesha DX | CUSA16921 | playable |
+| Tales of Symphonia Remastered | CUSA50989 | experimental |
+| Astrea | CUSA49515 | experimental |
+| SaGa Emerald Beyond | CUSA43027 | experimental |
+| ALTDEUS: Beyond Chronos | CUSA26563 | not supported |
+| Gal Guardians: Demon Purge | CUSA41240 | experimental |
+| Gal Guardians: Servants of the Dark (JP) | CUSA52187 | experimental |
+| Call of Duty: Black Ops | CUSA57547 | experimental |
+| Call of Duty: Black Ops II | CUSA57548 | playable |
+| Blood Omen 2 | CUSA49769 | experimental |
+| Onigiri | CUSA01458 | experimental |
+| OCTOPATH TRAVELER 0 (JP) | CUSA53477 | broken |
 
 - Titles that require PS VR (`require_ps_vr` in `param.sfo`) are not supported.
 - No tested title needs a dump of the console's system modules.

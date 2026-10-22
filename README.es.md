@@ -28,28 +28,29 @@ para cualquier título; Bloodborne sigue siendo compatible, con su propio perfil
 
 ## Estado
 
-psport está en desarrollo activo. Todos los juegos de la tabla figuran en
-[tools/regress/titles.txt](tools/regress/titles.txt) y se ejecutan sin ventana con
-`tools/regress.sh` (véase [Pruebas](#pruebas)). El estado es hasta dónde se ha visto llegar al
-juego, no una partida completa. Las filas marcadas con «regress» solo muestran lo que registra la
-ejecución guionizada del juego (primer fotograma de GPU, fotogramas dibujados, sonido).
+psport está en desarrollo activo. Un juego es **jugable**, **experimental** (arranca, pero solo se
+ha visto una parte limitada), **roto** (arranca pero falla una parte esencial) o **no soportado**.
+El estado es hasta dónde se ha visto llegar al juego, no una partida completa; lo que hace cada
+juego está en [docs/es/GAMES.md](docs/es/GAMES.md). Todos los juegos de la tabla figuran
+en [tools/regress/titles.txt](tools/regress/titles.txt) y se ejecutan sin ventana con
+`tools/regress.sh` (véase [Pruebas](#pruebas)).
 
 | Juego | ID | Estado |
 |---|---|---|
-| Bloodborne (1.09) | CUSA03173 | jugable: partidas guardadas, varias zonas, sonido, mando, teclado y ratón |
-| Atelier Ryza | CUSA16458 | menú principal, prólogo, mapa con el control del jugador, sonido |
-| Atelier Ayesha DX | CUSA16921 | vídeo de introducción, menú principal, escenas iniciales, mapa, taller, sonido |
-| Tales of Symphonia Remastered | CUSA50989 | pantalla de título, la primera sala, sonido |
-| Astrea | CUSA49515 | las viñetas de la historia de la introducción, sonido |
-| SaGa Emerald Beyond | CUSA43027 | pantalla de título, primeras escenas de la historia con diálogos, sonido |
-| ALTDEUS: Beyond Chronos | CUSA26563 | pantalla negra: requiere un casco PS VR, sin modo de pantalla plana |
-| Gal Guardians: Demon Purge | CUSA41240 | regress: fotogramas dibujados, sonido |
-| Gal Guardians: Servants of the Dark (JP) | CUSA52187 | regress: fotogramas dibujados, sonido |
-| Call of Duty: Black Ops | CUSA57547 | regress: fotogramas dibujados, sonido; teclado y ratón con la cámara del propio juego, una distribución de shooter y una mira |
-| Call of Duty: Black Ops II | CUSA57548 | primera misión (Pyrrhic Victory) por puntos de control encadenados hasta la barcaza del río, Guardar y salir, Reanudar historia, vídeos, sonido, mando |
-| Blood Omen 2 | CUSA49769 | regress: fotogramas dibujados, sin sonido |
-| Onigiri | CUSA01458 | regress: fotogramas dibujados, sonido |
-| OCTOPATH TRAVELER 0 (JP) | CUSA53477 | carga una partida guardada y dibuja fotogramas y sonido, pero la escena 3D sigue negra (solo se ve el minimapa); fuera de las ejecuciones habituales |
+| Bloodborne (1.09) | CUSA03173 | jugable |
+| Atelier Ryza | CUSA16458 | jugable |
+| Atelier Ayesha DX | CUSA16921 | jugable |
+| Tales of Symphonia Remastered | CUSA50989 | experimental |
+| Astrea | CUSA49515 | experimental |
+| SaGa Emerald Beyond | CUSA43027 | experimental |
+| ALTDEUS: Beyond Chronos | CUSA26563 | no soportado |
+| Gal Guardians: Demon Purge | CUSA41240 | experimental |
+| Gal Guardians: Servants of the Dark (JP) | CUSA52187 | experimental |
+| Call of Duty: Black Ops | CUSA57547 | experimental |
+| Call of Duty: Black Ops II | CUSA57548 | jugable |
+| Blood Omen 2 | CUSA49769 | experimental |
+| Onigiri | CUSA01458 | experimental |
+| OCTOPATH TRAVELER 0 (JP) | CUSA53477 | roto |
 
 - Los juegos que requieren PS VR (`require_ps_vr` en `param.sfo`) no son compatibles.
 - Ningún juego probado necesita un volcado de los módulos del sistema de la consola.
