@@ -10,6 +10,7 @@
 #include "gnm_hooks.h"
 #include "guest_hooks.h"
 #include "heap_sites.h"
+#include "job_step_probe.h"
 #include "menu_pointer.h"
 #include "mouse_look.h"
 #include "workarounds.h"
@@ -45,6 +46,7 @@ void PatchImage(unsigned char* p_image, std::uint64_t cb_image) {
     PsMouseLook::PatchImage(p_image, cb_image);
     PsMenuPointer::PatchImage(p_image, cb_image);
     PsAspect::PatchImage(p_image, cb_image);
+    PsJobStepProbe::PatchImage(p_image, cb_image);
 }
 
 void FilterPad(std::uint32_t* p_buttons, const std::uint8_t* p_sticks) {
@@ -55,6 +57,7 @@ void FilterPad(std::uint32_t* p_buttons, const std::uint8_t* p_sticks) {
 void ReportStats() {
     PsGuestHooks::Report();
     PsWorkarounds::Report();
+    PsJobStepProbe::Report();
     if (static int s_heap_reports = 0; ++s_heap_reports % 6 == 1) {
         PsHeapSites::Report();
     }
