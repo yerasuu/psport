@@ -3690,6 +3690,11 @@ const Buffer* BufferCache::UploadCopies(const Buffer* arena, std::span<vk::Buffe
     return staging.buffer;
 }
 
+bool BufferCache::WriteBackImage(VAddr addr, u32 size) {
+    const auto [arena, offset] = ObtainBuffer(addr, size, true);
+    return arena && SynchronizeMemoryFromImage(arena, offset, addr, size);
+}
+
 bool BufferCache::SynchronizeMemoryFromImage(const Buffer* arena, u64 arena_offset,
                                              VAddr device_addr, u32 size) {
     if (const auto meta = texture_cache.GetMetaInfo(device_addr)) {

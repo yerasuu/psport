@@ -123,6 +123,16 @@ public:
     /// that a refresh from memory does not drop its texels only the GPU has.
     void InvalidateMemoryFromGPU(VAddr address, size_t max_size, bool is_whole_image_only = false);
 
+    /// psport PS_GPU_WRITE_OVERLAP=1: a shader binding that writes memory changes every image over
+    /// it, as on the hardware, where memory is the truth (InvalidateMemoryFromGPU only reaches an
+    /// image starting where the binding does: a write from an earlier address or into a later
+    /// slice left the image stale). The binding calls WriteBackImagesUnder before it is resolved,
+    /// so that an image holding texels its memory lacks has them there for its reload, and
+    /// InvalidateImagesUnder after, which marks each image for that reload.
+    static bool SyncsGpuWriteOverlap();
+    void WriteBackImagesUnder(VAddr address, size_t size);
+    void InvalidateImagesUnder(VAddr address, size_t size);
+
     /// Evicts any images that overlap the unmapped range.
     void UnmapMemory(VAddr cpu_addr, size_t size);
 

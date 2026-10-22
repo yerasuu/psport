@@ -315,6 +315,48 @@ void TextureCache::InvalidateMemoryFromGPU(VAddr address, size_t max_size, bool 
     });
 }
 
+bool TextureCache::SyncsGpuWriteOverlap() {
+    static const bool is_enabled = [] {
+        const char* env = std::getenv("PS_GPU_WRITE_OVERLAP");
+        const bool is_set = env && env[0] == '1';
+        if (is_set) {
+            std::printf("GPU: shader writes reach every image over their memory, images holding "
+                        "texels their memory lacks written back first (PS_GPU_WRITE_OVERLAP=1)\n");
+        }
+        return is_set;
+    }();
+    return is_enabled;
+}
+
+void TextureCache::WriteBackImagesUnder(VAddr address, size_t size) {
+    boost::container::small_vector<std::pair<VAddr, u32>, 4> images;
+    {
+        std::scoped_lock lock{mutex};
+        ForEachImageInRegion(address, size, [&](ImageId, Image& image) {
+            if (image.SafeToDownload()) {
+                images.emplace_back(image.info.guest_address, image.info.guest_size);
+            }
+        });
+    }
+    // Outside the lock, since the buffer cache looks the image up again through this cache.
+    for (const auto [va_image, cb_image] : images) {
+        if (!buffer_cache.WriteBackImage(va_image, cb_image)) {
+            LOG_ERROR_COUNTED(Render_Vulkan,
+                              "GPU write {:#x}+{:#x}: image {:#x}+{:#x} not written back to memory, its "
+                              "reload drops the texels only it held",
+                              address, size, va_image, cb_image);
+        }
+    }
+}
+
+void TextureCache::InvalidateImagesUnder(VAddr address, size_t size) {
+    std::scoped_lock lock{mutex};
+    ForEachImageInRegion(address, size, [&](ImageId, Image& image) {
+        WatchImage(image, "GPU write over its memory (marked for refresh)");
+        image.flags |= ImageFlagBits::GpuDirty;
+    });
+}
+
 void TextureCache::UnmapMemory(VAddr cpu_addr, size_t size) {
     std::scoped_lock lk{mutex};
 

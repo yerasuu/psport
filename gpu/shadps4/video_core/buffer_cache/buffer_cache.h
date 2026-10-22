@@ -204,6 +204,9 @@ public:
     /// psport: copies of [addr, addr + size) in VRAM (ShadowCopy) are stale from here on in stream
     /// order: the GPU or the command processor wrote there (GPU side thread).
     void DropShadows(VAddr addr, u64 size);
+    /// psport: the image at addr, when it holds texels its memory lacks, is written back there in
+    /// stream order, as for a texel buffer that reads it. False when no such image is there.
+    bool WriteBackImage(VAddr addr, u32 size);
     /// psport, without write tracking (any thread): the command processor wrote these bytes into the
     /// game's memory outside the command stream (labels, timestamps, occlusion results; through
     /// the backing mapping, which nothing sees). Where VRAM holds a copy of them it gets them too, at

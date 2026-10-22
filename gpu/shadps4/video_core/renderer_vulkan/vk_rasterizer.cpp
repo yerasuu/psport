@@ -3638,6 +3638,12 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, const PreparedStage* pre
                     LOG_ERROR(Render, "Clamped size from {} to {} for stage {:#x}",
                               vsharp.GetSize(), size, stage.pgm_hash);
                 }
+                const bool is_write_overlap =
+                    desc.is_written && VideoCore::TextureCache::SyncsGpuWriteOverlap();
+                if (is_write_overlap) {
+                    // Before the binding is resolved, so that it waits for the write-backs.
+                    texture_cache.WriteBackImagesUnder(vsharp.base_address, size);
+                }
                 const auto [buffer, offset] = buffer_cache.ObtainBuffer(
                     vsharp.base_address, size, desc.is_written, desc.is_formatted);
                 TraceShaderBinding(stage, vsharp.base_address, size, desc.is_written, buffer_cache);
@@ -3654,7 +3660,9 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, const PreparedStage* pre
                     buffer->Handle(), offset_aligned,
                     std::min<u64>(size + adjust, buffer->SizeBytes() - offset_aligned));
                 bound_buffers.emplace_back(buffer, offset, size, desc.is_written);
-                if (desc.is_written) {
+                if (is_write_overlap) {
+                    texture_cache.InvalidateImagesUnder(vsharp.base_address, size);
+                } else if (desc.is_written) {
                     // Raw storage-buffer writes can also make an aliased cached image stale.
                     texture_cache.InvalidateMemoryFromGPU(vsharp.base_address, size);
                 }
