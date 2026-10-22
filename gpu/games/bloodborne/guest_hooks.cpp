@@ -5,6 +5,7 @@
 #include "psport_toggles.h"
 #include "../../../src/platform/ps_host.h"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstdint>
@@ -71,6 +72,81 @@ constexpr unsigned char GxNodeCode[9] = {0x4d, 0x89, 0x6c, 0x24, 0x08,  // mov [
 std::atomic<u64> s_va_gx_null_trap{0};
 std::atomic<u64> s_c_gx_node_skips{0};
 u64 s_c_gx_node_skips_reported = 0;
+
+/// #504 (kb note #816): the GX swap chain's state when a node comes back null, so a night run
+/// tells which way the heap fills. The site runs in 0x2198fd0 with r15 the swap chain: its two
+/// frame contexts at +0x360/+0x368, the current one picked by +0x380 (switched, and the incoming
+/// one's heap reset, on the main thread only, with no GPU wait); nodes and command data come from
+/// the context's chunked bump allocators at +0x48 and +0x78 (+0x10 chunks, +0x14 allocations);
+/// +0x38/+0x3c the job list's count and capacity; +0x3a9 && +0x131 the path that skips the
+/// switch and the reset; +0x600/+0x608 the frames begun and done.
+constexpr u64 GxSingleton = 0x55406c8;
+constexpr u64 GxNullLogEvery = 64;
+std::atomic<u64> s_gx_null_log_ns{0};
+std::atomic<u64> s_gx_null_log_frame{0};
+
+template <typename T>
+T ReadAt(const u8* p_block, std::size_t off_field) {
+    T value;
+    std::memcpy(&value, p_block + off_field, sizeof(value));
+    return value;
+}
+
+void LogGxNodeNull(u64 c_nulls, u64 va_gx) {
+    const u64 now_ns = ps_host_time_monotonic_ns();
+    const u64 host_frame = PsStats::g_c_gpu_frames.load(std::memory_order_relaxed);
+    const u64 last_ns = s_gx_null_log_ns.exchange(now_ns, std::memory_order_relaxed);
+    const u64 last_frame = s_gx_null_log_frame.exchange(host_frame, std::memory_order_relaxed);
+    const u64 fps_x10 = last_ns != 0 && now_ns > last_ns && host_frame >= last_frame
+                            ? (host_frame - last_frame) * 10'000'000'000ull / (now_ns - last_ns)
+                            : 0;
+    u64 va_singleton = 0;
+    std::array<u8, 0x610> gx{};
+    std::array<u8, 0x90> context{};
+    char sz_line[512];
+    int cb_line = 0;
+    const bool has_singleton =
+        ps_host_read_memory(&va_singleton, reinterpret_cast<const void*>(ImageBase + GxSingleton),
+                            sizeof(va_singleton)) == std::int64_t(sizeof(va_singleton));
+    if (ps_host_read_memory(gx.data(), reinterpret_cast<const void*>(va_gx), gx.size()) != std::int64_t(gx.size())) {
+        cb_line = std::snprintf(sz_line, sizeof(sz_line),
+                                "Guest hooks: GX node null %llu: host_frame=%llu swap chain 0x%llx unreadable\n",
+                                static_cast<unsigned long long>(c_nulls), static_cast<unsigned long long>(host_frame),
+                                static_cast<unsigned long long>(va_gx));
+    } else {
+        const auto i_context = ReadAt<std::int32_t>(gx.data(), 0x380);
+        const u64 va_context = ReadAt<u64>(gx.data(), i_context == 0 ? 0x360 : 0x368);
+        const bool has_context =
+            (i_context == 0 || i_context == 1) &&
+            ps_host_read_memory(context.data(), reinterpret_cast<const void*>(va_context), context.size()) ==
+                std::int64_t(context.size());
+        cb_line = std::snprintf(
+            sz_line, sizeof(sz_line),
+            "Guest hooks: GX node null %llu: host_frame=%llu fps=%llu.%llu gx=0x%llx singleton=%s "
+            "ctx=%d f=0x%llx%s f+0x38 jobs=%d/%d f+0x48 chunks=%u allocs=%u f+0x78 chunks=%u allocs=%u "
+            "gx+0x3a9=%u gx+0x131=%u gx+0x84=%u gx+0x3ab=%u gx+0x600=%llu gx+0x608=%llu\n",
+            static_cast<unsigned long long>(c_nulls), static_cast<unsigned long long>(host_frame),
+            static_cast<unsigned long long>(fps_x10 / 10), static_cast<unsigned long long>(fps_x10 % 10),
+            static_cast<unsigned long long>(va_gx),
+            !has_singleton ? "unreadable" : va_singleton == va_gx ? "yes" : "no", i_context,
+            static_cast<unsigned long long>(va_context), has_context ? "" : " unreadable",
+            ReadAt<std::int32_t>(context.data(), 0x38), ReadAt<std::int32_t>(context.data(), 0x3c),
+            ReadAt<std::uint32_t>(context.data(), 0x48 + 0x10), ReadAt<std::uint32_t>(context.data(), 0x48 + 0x14),
+            ReadAt<std::uint32_t>(context.data(), 0x78 + 0x10), ReadAt<std::uint32_t>(context.data(), 0x78 + 0x14),
+            unsigned(gx[0x3a9]), unsigned(gx[0x131]), unsigned(gx[0x84]), unsigned(gx[0x3ab]),
+            static_cast<unsigned long long>(ReadAt<u64>(gx.data(), 0x600)),
+            static_cast<unsigned long long>(ReadAt<u64>(gx.data(), 0x608)));
+    }
+    if (cb_line > 0) {
+        // NOTE: written with write(2), never through a FILE stream or the logger, because with
+        // PS_GUEST_HOOK_TRAPS=1 this runs in the breakpoint handler, where neither is
+        // async-signal-safe. The snprintf above only formats into the stack buffer: with these
+        // integer and string conversions glibc's takes no lock and does not allocate, though
+        // POSIX does not list it as async-signal-safe.
+        [[maybe_unused]] const auto cb_written =
+            write(STDOUT_FILENO, sz_line, std::min(std::size_t(cb_line), sizeof(sz_line) - 1));
+    }
+}
 
 /// The game's memcpy at those sites: the GPU side is told before (its write traps lift: no fault
 /// per page) and after the copy (the data now there), as for file reads.
@@ -300,10 +376,14 @@ int OnTrap(PsHostFaultContext* p_context) {
             Set(p_context, PS_HOST_REG_RIP, ImageBase + GxNodeSite + 5);
             return 1;
         }
-        if (s_c_gx_node_skips.fetch_add(1, std::memory_order_relaxed) == 0) {
+        const u64 c_nulls = s_c_gx_node_skips.fetch_add(1, std::memory_order_relaxed) + 1;
+        if (c_nulls == 1) {
             static const char sz_text[] = "Guest hooks: the GX per-frame command heap was full: a render "
                                           "command waits for the next frame (bbport #162)\n";
             [[maybe_unused]] const auto cb_written = write(STDOUT_FILENO, sz_text, sizeof(sz_text) - 1);
+        }
+        if (c_nulls == 1 || c_nulls % GxNullLogEvery == 0) {
+            LogGxNodeNull(c_nulls, Get(p_context, PS_HOST_REG_R15));
         }
         Set(p_context, PS_HOST_REG_RIP, ImageBase + GxNodeSkip);
         return 1;
