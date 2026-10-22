@@ -2,7 +2,8 @@
  *   - one local user (id 1) who is logged in but not signed in to PSN;
  *   - network cable unplugged: NetCtl disconnected, sockets on loopback only (runtime_socket.c),
  *     no HTTP transfer (runtime_http.c);
- *   - common dialogs complete immediately (no UI is drawn yet);
+ *   - common dialogs complete immediately (no UI is drawn yet), except MsgDialog, which the overlay
+ *     shows until the player answers;
  *   - no PlayStation VR headset is connected (runtime_vr.c).
  * Every entry here is an explicit contract; unknown functions still stop. */
 #define _GNU_SOURCE
@@ -217,7 +218,7 @@ static ABI int32_t np_compare(const void *p_a,const void *p_b) {
     return memcmp(p_a,p_b,16) ? (int32_t)0x80550609 : 0; /* NP_UTIL NOT_MATCH */
 }
 
-/* ---- Common dialogs: nothing is displayed; an opened dialog finishes. ---- */
+/* ---- Common dialogs: nothing is displayed; an opened dialog finishes (MsgDialog excepted). ---- */
 typedef struct { const char *sz_name; int is_initialized, status; } Dialog;
 static Dialog s_dialogs[]={{"CommonDialog",0,0},{"MsgDialog",0,0},{"SaveDataDialog",0,0},
                          {"NpProfileDialog",0,0},{"NpCommerceDialog",0,0},{"ImeDialog",0,0},
@@ -245,7 +246,7 @@ static int32_t dialog_term(int i) {
     static ABI int32_t tag##_open(const void *p) { (void)p; return dialog_open(i); } \
     static ABI int32_t tag##_status(void) { return dialog_status(i); } \
     static ABI int32_t tag##_term(void) { return dialog_term(i); }
-DIALOG(msg,1) DIALOG(profile,3) DIALOG(commerce,4)
+DIALOG(profile,3) DIALOG(commerce,4)
 DIALOG(web,7) DIALOG(invitation,8) DIALOG(signin,9) DIALOG(social,10) DIALOG(hmd_setup,11) DIALOG(playgo,12)
 static ABI int32_t profile_result(void *p_result) { if (p_result) memset(p_result,0,4); return 0; }
 /* OrbisNpCommerceDialogParam keeps userData at 0x58 and the result hands it back. Signed out, the
@@ -388,15 +389,245 @@ static ABI int32_t save_result(int32_t *p_result) {
     return 0;
 }
 static ABI int32_t save_close(const void *p_param) { (void)p_param; s_dialogs[2].status=3; return 0; }
-/* OrbisMsgDialogResult: mode, result, buttonId, reserved[32]; ends as accepted, like SaveDataDialog. */
-static ABI int32_t msg_result(int32_t *p_result) {
-    if (s_dialogs[1].status!=3) return (int32_t)0x80B80005; /* SCE_COMMON_DIALOG_ERROR_NOT_FINISHED */
-    if (!p_result) return (int32_t)0x80B8000D;              /* SCE_COMMON_DIALOG_ERROR_ARG_NULL */
-    memset(p_result,0,44);
-    p_result[2]=1;
+/* MsgDialog runs as on the console, from Open until the player answers or the game closes it: a game
+ * that polls UpdateStatus sees RUNNING (2) meanwhile, and code it runs only then (Bloodborne's boot
+ * dialog after a session that did not end with Quit Game) runs. The overlay draws it; without a
+ * window, or with PS_MSGDIALOG_AUTO_MS=<ms>, the default button is chosen once that time has passed
+ * (1000 ms without a window) so unattended runs go on. Dialogs with no button to choose (progress
+ * bars, WAIT) are never auto-answered: the game closes them.
+ * OrbisMsgDialogParam: common base (0x30), size, mode at 0x38, then the user message, progress bar
+ * and system message parameters at 0x40, 0x48 and 0x50. The user message: button type, message
+ * at 8, ButtonsParam (two labels) at 0x10; the progress bar: type, message at 8; the system
+ * message: its type. OrbisMsgDialogResult: mode, result, buttonId, reserved[32]. */
+enum { MSG_MODE_USER=1, MSG_MODE_PROGRESS_BAR=2, MSG_MODE_SYSTEM=3 };
+enum { MSG_BUTTONS_OK, MSG_BUTTONS_YESNO, MSG_BUTTONS_NONE, MSG_BUTTONS_OK_CANCEL, MSG_BUTTONS_CANCEL, MSG_BUTTONS_WAIT,
+       MSG_BUTTONS_WAIT_CANCEL, MSG_BUTTONS_YESNO_FOCUS_NO, MSG_BUTTONS_OK_CANCEL_FOCUS_CANCEL, MSG_BUTTONS_2BUTTONS };
+#define MSG_RESULT_OK 0
+#define MSG_RESULT_USER_CANCELED 1
+#define MSG_BUTTON_ID_INVALID 0
+#define DIALOG_NOT_FINISHED ((int32_t)0x80B80005)
+#define DIALOG_INVALID_STATE ((int32_t)0x80B80006)
+#define DIALOG_NOT_RUNNING ((int32_t)0x80B8000B)
+#define DIALOG_ARG_NULL ((int32_t)0x80B8000D)
+#define DIALOG_PARAM_INVALID ((int32_t)0x80B8000A)
+static pthread_mutex_t s_msg_lock=PTHREAD_MUTEX_INITIALIZER;
+static struct {
+    int32_t mode, result, button_id, button_type, system_type;
+    int c_buttons, i_default, can_cancel, is_shown;
+    int32_t button_ids[2];  /* per button; MSG_BUTTON_ID_INVALID is the cancel button */
+    uint64_t auto_at_ns;    /* 0: waits for the player or the game */
+} s_msg;
+static uint64_t s_c_msg_opened, s_c_msg_by_player, s_c_msg_auto, s_c_msg_closed, s_c_msg_refused;
+static void msg_summary(char *sz_out, size_t cb_out) {
+    snprintf(sz_out,cb_out,"Runtime: MsgDialog: %llu opened, %llu answered by the player, %llu auto-answered, %llu closed "
+             "by the game while running, %llu opens refused\n",
+             (unsigned long long)__atomic_load_n(&s_c_msg_opened,__ATOMIC_RELAXED),
+             (unsigned long long)__atomic_load_n(&s_c_msg_by_player,__ATOMIC_RELAXED),
+             (unsigned long long)__atomic_load_n(&s_c_msg_auto,__ATOMIC_RELAXED),
+             (unsigned long long)__atomic_load_n(&s_c_msg_closed,__ATOMIC_RELAXED),
+             (unsigned long long)__atomic_load_n(&s_c_msg_refused,__ATOMIC_RELAXED));
+}
+static void msg_finish(int32_t result, int32_t button_id) {
+    s_msg.result=result; s_msg.button_id=button_id; s_dialogs[1].status=3;
+    if (s_msg.is_shown) psport_gpu_message_end();
+    s_msg.is_shown=0;
+}
+/* libSceMsgDialog's GetResult, for a game built with SDK 3.00 or later, turns backing out of an OK
+ * or yes/no message, or of a system message other than types 3 and 5, into its button (kb #818). */
+static int32_t msg_back_button(void) {
+    if (runtime_process_sdk_version()<0x03000000u) return MSG_BUTTON_ID_INVALID;
+    if (s_msg.mode==MSG_MODE_SYSTEM) return s_msg.system_type==3 || s_msg.system_type==5 ? MSG_BUTTON_ID_INVALID : 1;
+    if (s_msg.mode!=MSG_MODE_USER) return MSG_BUTTON_ID_INVALID;
+    if (s_msg.button_type==MSG_BUTTONS_OK) return 1;
+    return s_msg.button_type==MSG_BUTTONS_YESNO || s_msg.button_type==MSG_BUTTONS_YESNO_FOCUS_NO ? 2 : MSG_BUTTON_ID_INVALID;
+}
+static void msg_choose(int i_button, const char *sz_how) {
+    const int32_t button_id=i_button<0 ? msg_back_button() : s_msg.button_ids[i_button];
+    const int32_t result=button_id==MSG_BUTTON_ID_INVALID ? MSG_RESULT_USER_CANCELED : MSG_RESULT_OK;
+    printf("Runtime: MsgDialog %s: result %d, button %d\n",sz_how,result,button_id);
+    msg_finish(result,button_id);
+}
+static void msg_poll(void) {
+    if (s_dialogs[1].status!=2) return;
+    if (s_msg.is_shown) {
+        const int answer=psport_gpu_message_poll();
+        if (answer) {
+            __atomic_add_fetch(&s_c_msg_by_player,1,__ATOMIC_RELAXED);
+            msg_choose(answer<0 ? -1 : answer-1,"answered by the player");
+            return;
+        }
+    }
+    if (s_msg.auto_at_ns && runtime_wait_clock()>=s_msg.auto_at_ns) {
+        __atomic_add_fetch(&s_c_msg_auto,1,__ATOMIC_RELAXED);
+        msg_choose(s_msg.i_default,"auto-answered with the default button");
+    }
+}
+static ABI int32_t msg_init(void) { return dialog_init(1); }
+static ABI int32_t msg_status(void) {
+    pthread_mutex_lock(&s_msg_lock);
+    msg_poll();
+    const int32_t status=s_dialogs[1].status;
+    pthread_mutex_unlock(&s_msg_lock);
+    return status;
+}
+static int32_t msg_refuse(int32_t error, const char *sz_why) {
+    __atomic_add_fetch(&s_c_msg_refused,1,__ATOMIC_RELAXED);
+    printf("Runtime: MsgDialog open refused (0x%08X): %s\n",(uint32_t)error,sz_why);
+    return error;
+}
+static int is_zero(const uint8_t *p_bytes, size_t off_first, size_t off_end) {
+    for (size_t off=off_first; off<off_end; ++off) if (p_bytes[off]) return 0;
+    return 1;
+}
+static const void *read_pointer(const uint8_t *p_bytes, size_t off) {
+    const void *p_value;
+    memcpy(&p_value,p_bytes+off,sizeof(p_value));
+    return p_value;
+}
+static int32_t read_int(const uint8_t *p_bytes, size_t off) {
+    int32_t value;
+    memcpy(&value,p_bytes+off,sizeof(value));
+    return value;
+}
+static int is_shorter(const char *sz_text, size_t cb_limit) { return memchr(sz_text,0,cb_limit)!=NULL; }
+static int is_button_label(const char *sz_label) {
+    return sz_label && is_shorter(sz_label,0x40) && !strpbrk(sz_label,"\r\n");
+}
+/* libSceMsgDialog's checks of each mode's parameters (kb #818): a NULL one is invalid too. */
+static int is_user_message_valid(const uint8_t *p_user) {
+    if (!p_user || (uint32_t)read_int(p_user,0)>=10) return 0;
+    const char *sz_text=read_pointer(p_user,8);
+    const size_t cb_limit=runtime_process_sdk_version()>=0x01500000u ? 0x2000 : 0x200;
+    if (!sz_text || !is_shorter(sz_text,cb_limit) || !is_zero(p_user,0x18,0x30)) return 0;
+    const uint8_t *p_buttons=read_pointer(p_user,0x10);
+    if (read_int(p_user,0)!=MSG_BUTTONS_2BUTTONS) return !p_buttons;
+    return p_buttons && is_button_label(read_pointer(p_buttons,0)) && is_button_label(read_pointer(p_buttons,8));
+}
+static int is_progress_bar_valid(const uint8_t *p_progress) {
+    if (!p_progress || (uint32_t)read_int(p_progress,0)>=2) return 0;
+    const char *sz_text=read_pointer(p_progress,8);
+    if (!sz_text || (runtime_process_sdk_version()>=0x01500000u && !is_shorter(sz_text,0x2000))) return 0;
+    return is_zero(p_progress,0x10,0x50);
+}
+static int is_system_message_valid(const uint8_t *p_system) {
+    return p_system && (uint32_t)read_int(p_system,0)<7 && is_zero(p_system,4,0x24);
+}
+/* The common base: its size, a magic made from its own address, and reserved bytes left zero. */
+static int is_base_param_valid(const uint8_t *p_param) {
+    uint64_t cb_base;
+    memcpy(&cb_base,p_param,sizeof(cb_base));
+    return cb_base==0x30 && (uint32_t)read_int(p_param,0x2c)==0xC0D1A109u+(uint32_t)(uintptr_t)p_param && is_zero(p_param,8,0x2c);
+}
+/* Parameters first, then the dialog's state, in libSceMsgDialog's order (kb #818). */
+static int32_t msg_start(const uint8_t *p_param) {
+    if (!p_param) return msg_refuse(DIALOG_ARG_NULL,"no parameters");
+    uint64_t cb_param;
+    memcpy(&cb_param,p_param+0x30,sizeof(cb_param));
+    if (!is_base_param_valid(p_param) || cb_param!=0x88) return msg_refuse(DIALOG_PARAM_INVALID,"bad base parameters or size");
+    const int32_t mode=read_int(p_param,0x38);
+    const uint8_t *p_user=read_pointer(p_param,0x40), *p_progress=read_pointer(p_param,0x48), *p_system=read_pointer(p_param,0x50);
+    int is_valid=0;
+    if (mode==MSG_MODE_USER) is_valid=!p_system && !p_progress && is_user_message_valid(p_user);
+    else if (mode==MSG_MODE_PROGRESS_BAR) is_valid=!p_user && !p_system && is_progress_bar_valid(p_progress);
+    else if (mode==MSG_MODE_SYSTEM) is_valid=!p_user && !p_progress && is_system_message_valid(p_system);
+    if (!is_valid) return msg_refuse(DIALOG_PARAM_INVALID,"bad mode or mode parameters");
+    if (!is_zero(p_param,0x5c,0x84)) return msg_refuse(DIALOG_PARAM_INVALID,"reserved bytes set");
+    if (!s_dialogs[1].is_initialized) return msg_refuse(DIALOG_NOT_INITIALIZED,"not initialized");
+    if (s_dialogs[1].status==2) return msg_refuse(DIALOG_INVALID_STATE,"one is already running");
+    const char *sz_text=NULL, *sz_label1=NULL, *sz_label2=NULL;
+    int32_t button_type=MSG_BUTTONS_NONE, system_id=-1;
+    if (mode==MSG_MODE_USER) {
+        button_type=read_int(p_user,0);
+        sz_text=read_pointer(p_user,8);
+        if (button_type==MSG_BUTTONS_2BUTTONS) {
+            const uint8_t *p_buttons=read_pointer(p_user,0x10);
+            sz_label1=read_pointer(p_buttons,0);
+            sz_label2=read_pointer(p_buttons,8);
+        }
+    } else if (mode==MSG_MODE_PROGRESS_BAR) sz_text=read_pointer(p_progress,8);
+    else {
+        system_id=read_int(p_system,0);
+        button_type=MSG_BUTTONS_OK;
+    }
+    PsMessageButton buttons[2]={{PS_MESSAGE_BUTTON_OK,NULL},{PS_MESSAGE_BUTTON_CANCEL,NULL}};
+    int32_t button_ids[2]={1,MSG_BUTTON_ID_INVALID};
+    int c_buttons=0, i_default=0, can_cancel=0;
+    switch (button_type) {
+    case MSG_BUTTONS_OK: c_buttons=1; break;
+    case MSG_BUTTONS_YESNO: case MSG_BUTTONS_YESNO_FOCUS_NO:
+        buttons[0].kind=PS_MESSAGE_BUTTON_YES; buttons[1].kind=PS_MESSAGE_BUTTON_NO; button_ids[1]=2;
+        c_buttons=2; i_default=button_type==MSG_BUTTONS_YESNO_FOCUS_NO; break;
+    case MSG_BUTTONS_OK_CANCEL: case MSG_BUTTONS_OK_CANCEL_FOCUS_CANCEL:
+        c_buttons=2; can_cancel=1; i_default=button_type==MSG_BUTTONS_OK_CANCEL_FOCUS_CANCEL; break;
+    case MSG_BUTTONS_CANCEL: case MSG_BUTTONS_WAIT_CANCEL:
+        buttons[0].kind=PS_MESSAGE_BUTTON_CANCEL; button_ids[0]=MSG_BUTTON_ID_INVALID; c_buttons=1; can_cancel=1; break;
+    case MSG_BUTTONS_2BUTTONS:
+        buttons[0]=(PsMessageButton){PS_MESSAGE_BUTTON_LABEL,sz_label1}; buttons[1]=(PsMessageButton){PS_MESSAGE_BUTTON_LABEL,sz_label2};
+        button_ids[1]=2; c_buttons=2; break;
+    case MSG_BUTTONS_NONE: case MSG_BUTTONS_WAIT: break;
+    }
+    /* The console backs out of any dialog with buttons; GetResult reports it as a button for some
+     * (msg_back_button). */
+    can_cancel|=c_buttons>0;
+    char sz_shown[1024];
+    snprintf(sz_shown,sizeof(sz_shown),"%s",sz_text ? sz_text : "");
+    memset(&s_msg,0,sizeof(s_msg));
+    s_msg.mode=mode; s_msg.button_type=button_type; s_msg.system_type=system_id; s_msg.c_buttons=c_buttons; s_msg.i_default=i_default; s_msg.can_cancel=can_cancel;
+    memcpy(s_msg.button_ids,button_ids,sizeof(s_msg.button_ids));
+    s_msg.is_shown=psport_gpu_message_begin(system_id>=0 ? NULL : sz_shown,system_id,buttons,c_buttons,i_default,can_cancel);
+    const int auto_ms=runtime_env_int("PS_MSGDIALOG_AUTO_MS",s_msg.is_shown ? -1 : 1000);
+    /* A dialog that only waits is the game's to close; choosing its cancel button would abort it. */
+    const int is_auto=auto_ms>=0 && c_buttons>0 && button_type!=MSG_BUTTONS_CANCEL && button_type!=MSG_BUTTONS_WAIT_CANCEL;
+    if (is_auto) s_msg.auto_at_ns=runtime_wait_clock()+(uint64_t)auto_ms*1000000u;
+    s_dialogs[1].status=2;
+    if (__atomic_fetch_add(&s_c_msg_opened,1,__ATOMIC_RELAXED)==0) runtime_calls_add_summary(msg_summary);
+    if (system_id>=0) printf("Runtime: MsgDialog opened: system message %d",system_id);
+    else printf("Runtime: MsgDialog opened: mode %d, button type %d, \"%s\"",mode,button_type,sz_shown);
+    printf(" (%d buttons, default %d%s); %s",c_buttons,i_default,can_cancel ? ", cancellable" : "",
+           s_msg.is_shown ? "shown by the overlay" : "not shown (no window or overlay)");
+    if (is_auto) printf(", auto-answered in %d ms\n",auto_ms);
+    else printf(c_buttons ? ", waits for the player\n" : ", waits for the game to close it\n");
     return 0;
 }
-static ABI int32_t msg_close(void) { s_dialogs[1].status=3; return 0; }
+static ABI int32_t msg_open(const uint8_t *p_param) {
+    pthread_mutex_lock(&s_msg_lock);
+    const int32_t error=msg_start(p_param);
+    pthread_mutex_unlock(&s_msg_lock);
+    return error;
+}
+/* OrbisMsgDialogResult: mode, result, button id, then 32 reserved bytes the game leaves zero. */
+static ABI int32_t msg_result(int32_t *p_result) {
+    if (!p_result) return DIALOG_ARG_NULL;
+    if (!is_zero((const uint8_t *)p_result,0x0c,0x2c)) return DIALOG_PARAM_INVALID;
+    pthread_mutex_lock(&s_msg_lock);
+    int32_t error=0;
+    if (!s_dialogs[1].is_initialized) error=DIALOG_NOT_INITIALIZED;
+    else if (s_dialogs[1].status!=3) error=DIALOG_NOT_FINISHED;
+    else { p_result[0]=s_msg.mode; p_result[1]=s_msg.result; p_result[2]=s_msg.button_id; }
+    pthread_mutex_unlock(&s_msg_lock);
+    return error;
+}
+/* The game takes it down: it ends with no button chosen. */
+static int32_t msg_stop(const char *sz_how) {
+    if (s_dialogs[1].status!=2) return DIALOG_NOT_RUNNING;
+    __atomic_add_fetch(&s_c_msg_closed,1,__ATOMIC_RELAXED);
+    printf("Runtime: MsgDialog %s while running\n",sz_how);
+    msg_finish(MSG_RESULT_OK,MSG_BUTTON_ID_INVALID);
+    return 0;
+}
+static ABI int32_t msg_close(void) {
+    pthread_mutex_lock(&s_msg_lock);
+    const int32_t error=s_dialogs[1].is_initialized ? msg_stop("closed by the game") : DIALOG_NOT_INITIALIZED;
+    pthread_mutex_unlock(&s_msg_lock);
+    return error;
+}
+static ABI int32_t msg_term(void) {
+    pthread_mutex_lock(&s_msg_lock);
+    (void)msg_stop("terminated by the game"); /* NOT_RUNNING when it had already finished */
+    const int32_t error=dialog_term(1);
+    pthread_mutex_unlock(&s_msg_lock);
+    return error;
+}
 typedef struct { int32_t size, error_code, user, reserved; } ErrorDialogParam;
 static ABI int32_t error_init(void) { return dialog_init(6); }
 static ABI int32_t error_open(const ErrorDialogParam *p_param) {

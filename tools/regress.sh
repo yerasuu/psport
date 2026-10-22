@@ -77,9 +77,11 @@ run_title() {
     # Inside a headless gamescope (its own X display, no window) and without the desktop's display
     # variables, with PS_AUDIO=none and PS_PAD_HOST=0 last so a title's env can't turn sound or the
     # user's controllers back on: a run never shows anything, plays sound or reads a pad on the
-    # user's session; what it shows comes back as dumps.
+    # user's session; what it shows comes back as dumps. A game's message dialog is answered with
+    # its default button after a second (before the title's env, which may change it), since no
+    # player is there to answer it.
     ( cd "$root" && exec setsid env -u DISPLAY -u WAYLAND_DISPLAY gamescope --backend headless -W 1920 -H 1080 -- \
-        env -u WAYLAND_DISPLAY "$@" SDL_VIDEO_DRIVER=x11 ENABLE_GAMESCOPE_WSI=0 PS_AUDIO=none PS_PAD_HOST=0 PS_AUDIO_STATS=1 \
+        env -u WAYLAND_DISPLAY PS_MSGDIALOG_AUTO_MS=1000 "$@" SDL_VIDEO_DRIVER=x11 ENABLE_GAMESCOPE_WSI=0 PS_AUDIO=none PS_PAD_HOST=0 PS_AUDIO_STATS=1 \
         PS_PREBUILT=1 PS_PROBE="$root/out/psport" PS_DATA_DIR="$dir" PS_USER_DIR="$dir/user" PS_GAME_DIR="$game" \
         PS_MODS_ENABLED=0 PS_PAD_FILE="$dir/pad" PS_PRESENT_DUMP_TRIGGER="$dir/shot" PS_DUMP_DIR="$dir/shots" \
         "${launch[@]}" ) > "$dir/log" 2>&1 < /dev/null &

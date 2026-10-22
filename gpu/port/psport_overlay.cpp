@@ -50,7 +50,7 @@ namespace PsOverlay {
 namespace {
 
 std::mutex s_imgui_mutex; // the ImGui context: window thread (input) and present thread
-bool s_is_initialized = false;
+std::atomic<bool> s_is_initialized{false};
 std::atomic<bool> s_is_menu_open{false};
 bool s_is_l3_down = false, s_is_r3_down = false;
 bool s_is_dirty = false; // settings changed while open: saved on close
@@ -68,6 +68,21 @@ std::atomic<bool> s_is_close_prompt_open{false};
 std::atomic<bool> s_is_release_pending{false};
 SDL_Keycode s_release_key = SDLK_UNKNOWN;
 int s_release_button = -1;
+
+// The game's message dialog (libSceMsgDialog): up while it runs, so the game sees it running until
+// the player answers, as on the console.
+struct MessageButton {
+    int kind;
+    std::string label;
+};
+std::mutex s_message_mutex;
+std::atomic<bool> s_is_message_open{false};
+std::atomic<int> s_message_answer{0};
+std::string s_message_text;
+int s_message_system_id = -1;
+std::vector<MessageButton> s_message_buttons;
+int s_i_message_focus = 0;
+bool s_can_message_cancel = false;
 
 // A game module's line over the game (psport_gpu_overlay_banner), shown where the game's own
 // picture is black.
@@ -109,6 +124,34 @@ void OpenClosePrompt() {
     SetOpen(false);
     s_is_close_prompt_open = true;
     std::printf("Overlay: close prompt open\n");
+}
+
+// The key or button that answered stays away from the game until released, as the close prompt's.
+// The answer is checked and stored under the dialog's lock, so that one the game closed meanwhile
+// gets none and the next one it opens is not answered with its button.
+void AnswerMessage(bool is_cancel, SDL_Keycode key, int button) {
+    int answer = 0;
+    {
+        std::scoped_lock lock{s_message_mutex};
+        if (!s_is_message_open || (is_cancel && !s_can_message_cancel) || (!is_cancel && s_message_buttons.empty())) {
+            return;
+        }
+        answer = is_cancel ? -1 : 1 + s_i_message_focus;
+        s_is_message_open = false;
+        s_message_answer = answer;
+    }
+    s_release_key = key;
+    s_release_button = button;
+    s_is_release_pending = true;
+    std::printf("Overlay: message dialog %s\n", answer < 0 ? "backed out of" : "answered");
+}
+
+void MoveMessageFocus(int step) {
+    std::scoped_lock lock{s_message_mutex};
+    const int c_buttons = int(s_message_buttons.size());
+    if (c_buttons > 1) {
+        s_i_message_focus = std::clamp(s_i_message_focus + step, 0, c_buttons - 1);
+    }
 }
 
 void AnswerClosePrompt(bool should_quit) {
@@ -1080,6 +1123,60 @@ void TextPrompt() {
     ImGui::End();
 }
 
+const char* MessageButtonLabel(const MessageButton& button) {
+    switch (button.kind) {
+    case PS_MESSAGE_BUTTON_OK: return PsSettings::MenuText("OK", "OK", "Aceptar");
+    case PS_MESSAGE_BUTTON_YES: return PsSettings::MenuText("Yes", "Да", "Sí");
+    case PS_MESSAGE_BUTTON_NO: return PsSettings::MenuText("No", "Нет", "No");
+    case PS_MESSAGE_BUTTON_CANCEL: return PsSettings::MenuText("Cancel", "Отмена", "Cancelar");
+    default: return button.label.c_str();
+    }
+}
+
+void MessagePrompt() {
+    std::scoped_lock lock{s_message_mutex};
+    const ImGuiViewport* p_viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(ImVec2(p_viewport->WorkPos.x + p_viewport->WorkSize.x * 0.5f,
+                                   p_viewport->WorkPos.y + p_viewport->WorkSize.y * 0.5f),
+                            ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowBgAlpha(0.9f);
+    ImGui::Begin("##messageprompt", nullptr,
+                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+                     ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoNav |
+                     ImGuiWindowFlags_NoFocusOnAppearing);
+    ImGui::PushTextWrapPos(p_viewport->WorkSize.x * 0.5f);
+    if (s_message_system_id >= 0) {
+        ImGui::Text(PsSettings::MenuText("System message %d", "Системное сообщение %d", "Mensaje del sistema %d"),
+                    s_message_system_id);
+    } else {
+        ImGui::TextUnformatted(s_message_text.c_str());
+    }
+    ImGui::PopTextWrapPos();
+    if (!s_message_buttons.empty()) {
+        ImGui::Separator();
+        for (std::size_t i = 0; i < s_message_buttons.size(); ++i) {
+            if (i) {
+                ImGui::SameLine();
+            }
+            ImGui::Text(int(i) == s_i_message_focus ? "[ %s ]" : "  %s  ", MessageButtonLabel(s_message_buttons[i]));
+        }
+        ImGui::Separator();
+        std::string hint =
+            PsSettings::MenuText("Cross / Enter: choose", "Крест / Enter — выбрать", "X / Intro: elegir");
+        if (s_message_buttons.size() > 1) {
+            hint = std::string(PsSettings::MenuText("Left / Right: select", "Влево / Вправо — выбор",
+                                                    "Izquierda / Derecha: seleccionar")) +
+                   "     " + hint;
+        }
+        if (s_can_message_cancel) {
+            hint += std::string("     ") +
+                    PsSettings::MenuText("Circle / Esc: cancel", "Круг / Esc — отмена", "Círculo / Esc: cancelar");
+        }
+        ImGui::TextUnformatted(hint.c_str());
+    }
+    ImGui::End();
+}
+
 /// PS_MENU_KEYS_FILE=<file> (scripted tests): tokens toggle up down left right enter back l1 r1,
 /// consumed when the file appears (it is removed), one key press per frame.
 void ScriptedKeys() {
@@ -1134,6 +1231,35 @@ void ScriptedKeys() {
 }
 
 } // namespace
+
+bool OpenMessage(const std::string& text, int system_id, std::span<const PsMessageButton> buttons, int i_focus,
+                 bool can_cancel) {
+    if (!s_is_initialized) {
+        return false;
+    }
+    std::scoped_lock lock{s_message_mutex};
+    s_message_text = text;
+    s_message_system_id = system_id;
+    s_message_buttons.clear();
+    s_message_buttons.reserve(buttons.size());
+    for (const PsMessageButton& button : buttons) {
+        s_message_buttons.push_back({button.kind, button.sz_label ? button.sz_label : ""});
+    }
+    s_i_message_focus = buttons.empty() ? 0 : std::clamp(i_focus, 0, int(buttons.size()) - 1);
+    s_can_message_cancel = can_cancel;
+    s_message_answer = 0;
+    s_is_message_open = true;
+    return true;
+}
+
+int PollMessage() {
+    return s_message_answer;
+}
+
+void CloseMessage() {
+    std::scoped_lock lock{s_message_mutex};
+    s_is_message_open = false;
+}
 
 void SetTextPrompt(bool is_active, const std::string& prompt, const std::string& text) {
     {
@@ -1263,6 +1389,18 @@ bool HandleEvent(const SDL_Event& event) {
             SetOpen(event.key.key == SDLK_INSERT ? !is_open : false);
             return true;
         }
+        if (!is_open && s_is_message_open) {
+            if (is_down && !event.key.repeat) {
+                if (event.key.key == SDLK_RETURN || event.key.key == SDLK_KP_ENTER) {
+                    AnswerMessage(false, event.key.key, -1);
+                } else if (event.key.key == SDLK_ESCAPE) {
+                    AnswerMessage(true, event.key.key, -1);
+                } else if (event.key.key == SDLK_LEFT || event.key.key == SDLK_RIGHT) {
+                    MoveMessageFocus(event.key.key == SDLK_LEFT ? -1 : 1);
+                }
+            }
+            return true;
+        }
         if (!is_open) {
             return false;
         }
@@ -1303,6 +1441,16 @@ bool HandleEvent(const SDL_Event& event) {
         }
         if (is_down && ((s_is_l3_down && s_is_r3_down) || is_menu_pressed)) {
             SetOpen(!is_open);
+            return true;
+        }
+        if (!is_open && s_is_message_open) {
+            if (is_down && button == SDL_GAMEPAD_BUTTON_SOUTH) {
+                AnswerMessage(false, SDLK_UNKNOWN, button);
+            } else if (is_down && button == SDL_GAMEPAD_BUTTON_EAST) {
+                AnswerMessage(true, SDLK_UNKNOWN, button);
+            } else if (is_down && (button == SDL_GAMEPAD_BUTTON_DPAD_LEFT || button == SDL_GAMEPAD_BUTTON_DPAD_RIGHT)) {
+                MoveMessageFocus(button == SDL_GAMEPAD_BUTTON_DPAD_LEFT ? -1 : 1);
+            }
             return true;
         }
         if (!is_open) {
@@ -1357,8 +1505,8 @@ bool HandleEvent(const SDL_Event& event) {
 
 bool Visible() {
     return s_is_initialized &&
-           (s_is_menu_open || s_is_prompt_active || s_is_close_prompt_open || s_is_game_cursor_shown ||
-            s_is_banner_shown || PsSettings::Get().should_show_fps);
+           (s_is_menu_open || s_is_prompt_active || s_is_close_prompt_open || s_is_message_open ||
+            s_is_game_cursor_shown || s_is_banner_shown || PsSettings::Get().should_show_fps);
 }
 
 void SetBanner(const char* sz_text) {
@@ -1390,7 +1538,8 @@ bool ClosePromptOpen() {
 
 bool CapturesInput() {
     // The text dialog too: keys typed into it (Backspace is the touchpad) stay out of the game.
-    return s_is_menu_open || s_is_prompt_active || s_is_close_prompt_open || s_is_release_pending;
+    return s_is_menu_open || s_is_prompt_active || s_is_close_prompt_open || s_is_message_open ||
+           s_is_release_pending;
 }
 
 bool PadFilePress(bool is_guide_pressed, bool is_cross_pressed, bool is_circle_pressed) {
@@ -1450,6 +1599,9 @@ void Render(vk::CommandBuffer cmdbuf, vk::ImageView view, vk::Extent2D extent, v
     }
     if (s_is_prompt_active && !s_is_menu_open) {
         TextPrompt();
+    }
+    if (s_is_message_open && !s_is_menu_open) {
+        MessagePrompt();
     }
     if (s_is_close_prompt_open) {
         ClosePrompt();

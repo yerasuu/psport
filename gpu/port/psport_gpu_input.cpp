@@ -1,6 +1,7 @@
 // psport: the game window's input for the C runtime: overlay, mouse, keyboard and text input.
 #include <algorithm>
 #include <cstring>
+#include <span>
 #include <string>
 #include "../psport_gpu.h"
 #include "core/libraries/avplayer/avplayer_state.h"
@@ -100,6 +101,24 @@ extern "C" void psport_gpu_text_input_replace(const char* sz_text) {
 
 extern "C" void psport_gpu_text_input_end(void) {
     if (g_window) g_window->EndTextInput();
+}
+
+extern "C" int psport_gpu_message_begin(const char* sz_text, int system_id, const PsMessageButton* p_buttons,
+                                        int c_buttons, int i_focus, int can_cancel) {
+    if (!g_window) return 0;
+    return PsOverlay::OpenMessage(sz_text ? sz_text : "", sz_text ? -1 : system_id,
+                                  std::span<const PsMessageButton>(p_buttons, std::size_t(std::max(c_buttons, 0))),
+                                  i_focus, can_cancel != 0)
+               ? 1
+               : 0;
+}
+
+extern "C" int psport_gpu_message_poll(void) {
+    return PsOverlay::PollMessage();
+}
+
+extern "C" void psport_gpu_message_end(void) {
+    PsOverlay::CloseMessage();
 }
 
 extern "C" int psport_gpu_text_input_poll(char* sz_out, uint64_t cb_out) {

@@ -46,6 +46,23 @@ int psport_gpu_text_input_poll(char *sz_out_utf8, uint64_t cb_out);
 void psport_gpu_text_input_replace(const char *sz_text_utf8);
 /* Ends the entry begin started, as cancelled, when the game closes it first (libSceIme). */
 void psport_gpu_text_input_end(void);
+/* The game's message dialog (libSceMsgDialog), drawn by the overlay over the frame: sz_text, or the
+ * system message system_id when sz_text is NULL, with up to two buttons (sz_label names a
+ * PS_MESSAGE_BUTTON_LABEL one). i_focus is the button selected first, Left and Right move it,
+ * Cross / Enter chooses it and Circle / Esc backs out only when can_cancel. begin returns 0 when no
+ * window exists or the overlay failed to start, so that the caller answers it itself; poll returns 0 while it is open, 1 + the chosen button's index, or -1 backed out;
+ * end takes it down unanswered (the game closed it). */
+enum {
+    PS_MESSAGE_BUTTON_OK, PS_MESSAGE_BUTTON_YES, PS_MESSAGE_BUTTON_NO, PS_MESSAGE_BUTTON_CANCEL, PS_MESSAGE_BUTTON_LABEL
+};
+typedef struct {
+    int kind;
+    const char *sz_label;
+} PsMessageButton;
+int psport_gpu_message_begin(const char *sz_text, int system_id, const PsMessageButton *p_buttons, int c_buttons,
+                             int i_focus, int can_cancel);
+int psport_gpu_message_poll(void);
+void psport_gpu_message_end(void);
 /* 1 while the in-game settings menu is open: the game's pad input is held neutral. */
 int psport_gpu_overlay_captures_input(void);
 /* PS_PAD_FILE's ps, cross and circle for the overlay's close prompt (Guide opens it): 1 when the

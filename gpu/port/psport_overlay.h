@@ -6,7 +6,9 @@
 
 #pragma once
 
+#include <span>
 #include <string>
+#include "../psport_gpu.h"
 #include "common/types.h"
 #include "video_core/renderer_vulkan/vk_common.h"
 
@@ -67,5 +69,13 @@ void SetBanner(const char* sz_text);
 
 /// Window thread: the game's text dialog (ImeDialog) state, drawn as a box over the frame.
 void SetTextPrompt(bool is_active, const std::string& prompt, const std::string& text);
+
+/// The game's message dialog (libSceMsgDialog, any thread): psport_gpu_message_begin, poll and end.
+/// system_id >= 0 shows that system message instead of text. False when the overlay is not
+/// initialized, since nobody could see or answer it.
+bool OpenMessage(const std::string& text, int system_id, std::span<const PsMessageButton> buttons, int i_focus,
+                 bool can_cancel);
+int PollMessage();
+void CloseMessage();
 
 } // namespace PsOverlay

@@ -487,6 +487,23 @@ button; the caret stays at the end of the text and no input method composes. Wit
 panel is entered at once with `PS_IME_TEXT`, held to the panel's type and length, or the text the
 game opened it with.
 
+libSceMsgDialog (`src/system/runtime_services.c`) runs as on the console: from `sceMsgDialogOpen`
+until the player answers, `sceMsgDialogUpdateStatus` reports RUNNING (2), and the overlay draws the
+message (the game's text, or the system message's number) with its buttons: Left and Right select,
+Cross or Enter chooses, Circle or Esc backs out of any dialog with buttons (`USER_CANCELED`; for a
+game built with SDK 3.00 or later, backing out of OK, yes/no or a system message other than types 3
+and 5 reports its OK or No button, as libSceMsgDialog does). Then it reports FINISHED (3) and
+`sceMsgDialogGetResult` hands back the mode, the result and the button. Open checks the parameters
+before the dialog's state, with libSceMsgDialog's codes and order (kb #818): `ARG_NULL`, then
+`PARAM_INVALID` (0x80B8000A) for the base parameters, the size, the mode's parameters and reserved
+bytes, then `NOT_INITIALIZED`, then `INVALID_STATE` while one runs. `sceMsgDialogClose` and
+`sceMsgDialogTerminate` end a running one with no button, and Close fails with `NOT_RUNNING`
+otherwise. When the overlay failed to start, the dialog counts as having no window. Progress bars and the `NONE` and `WAIT`
+types have no button and stay up until the game closes them. Without a window, after 1000 ms, or
+after `PS_MSGDIALOG_AUTO_MS` milliseconds when it is set (`tools/regress.sh` sets 1000), the default
+button is chosen and logged (`Runtime: MsgDialog auto-answered ...`); the exit summary counts the
+dialogs opened, answered, auto-answered, closed by the game and refused.
+
 ## Trophies
 
 libSceNpTrophy (`src/system/runtime_trophy.c`) serves the game's trophy pack and keeps each user's unlocks
