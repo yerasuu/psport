@@ -63,6 +63,11 @@ struct alignas(64) Live {
     float pad2[2] = {};
     float frames[4] = {1.0f, 1.0f, 1.0f, 1.0f}; ///< the frame's length in 30 FPS frames (read as four)
     std::int32_t frames_q16 = 1 << 16;          ///< the same in 16.16 fixed point
+    float ms_per_second = 1000.0f;
+    float play_time_lead_ms = 0.0f; ///< the play time counter minus the real time (-1..0 ms)
+    float play_time_sum_ms = 0.0f;
+    float zero = 0.0f;
+    float play_time_floor_ms = 0.0f;
 };
 static_assert(offsetof(Live, frames) % 16 == 0, "vmulps reads frames aligned");
 Live* s_p_live = nullptr;
@@ -256,6 +261,47 @@ bool HookFixedStep(const char* sz_name, u64 off_site, std::int8_t off_frame) {
     return PsGuestCode::InstallDetour(sz_name, s_va_image + off_site, code, e) == Error::None;
 }
 
+/// The play time counter (0x19419d6 in 0x193ac10, dt in xmm1: `ms = (int)(dt * 1000)`, then
+/// GameDataMan + 0x94 += ms up to 999:59:59): the truncation loses up to a millisecond a frame
+/// (-1 % at 30 FPS, -14 % at 144). The stub leaves rcx = floor(dt * 1000 + carry) and keeps the
+/// fraction, xmm0 as the game's code leaves it and the flags untouched (no instruction in it
+/// writes them). It addresses Live through rcx, which the game's code overwrites, and never
+/// touches the stack, because 0x193ac10 may keep locals in the red zone below rsp.
+bool HookPlayTime() {
+    constexpr u64 OffSite = 0x19419d6;
+    constexpr u8 Code[] = {0xc5, 0xf2, 0x59, 0x05, 0x12, 0x67, 0xfe, 0x02, // vmulss xmm0, xmm1, [1000.0]
+                           0xc4, 0xe1, 0xfa, 0x2c, 0xc8};                  // vcvttss2si rcx, xmm0
+    if (std::memcmp(reinterpret_cast<const u8*>(s_va_image + OffSite), Code, sizeof(Code))) {
+        std::printf("Frame rate: the play time counter's code at +0x%llx differs, left counting whole "
+                    "milliseconds a frame\n",
+                    static_cast<unsigned long long>(OffSite));
+        return false;
+    }
+    static_assert(offsetof(Live, play_time_floor_ms) < 0x80, "disp8 operands");
+    constexpr u8 OffThousand = offsetof(Live, ms_per_second);
+    constexpr u8 OffLead = offsetof(Live, play_time_lead_ms);
+    constexpr u8 OffSum = offsetof(Live, play_time_sum_ms);
+    constexpr u8 OffZero = offsetof(Live, zero);
+    constexpr u8 OffFloor = offsetof(Live, play_time_floor_ms);
+    Emitter e;
+    e.Bytes({0x48, 0xb9}); // movabs rcx, &live
+    e.U64(reinterpret_cast<u64>(s_p_live));
+    e.Bytes({0xc5, 0xf2, 0x59, 0x41, OffThousand}); // vmulss xmm0, xmm1, [rcx + ms_per_second]
+    e.Bytes({0xc5, 0xfa, 0x5c, 0x41, OffLead});     // vsubss xmm0, xmm0, [rcx + lead]
+    e.Bytes({0xc5, 0xfa, 0x11, 0x41, OffSum});      // vmovss [rcx + sum], xmm0
+    e.Bytes({0xc4, 0xe3, 0x79, 0x0a, 0xc0, 0x09});  // vroundss xmm0, xmm0, xmm0, floor
+    e.Bytes({0xc5, 0xfa, 0x11, 0x41, OffFloor});    // vmovss [rcx + floor], xmm0
+    e.Bytes({0xc5, 0xfa, 0x5c, 0x41, OffSum});      // vsubss xmm0, xmm0, [rcx + sum]
+    // vminss returns its memory operand for a NaN, so that a NaN or infinite step costs one frame's
+    // count (as the game's own conversion) instead of every frame after it.
+    e.Bytes({0xc5, 0xfa, 0x5d, 0x41, OffZero});        // vminss xmm0, xmm0, [rcx + zero]
+    e.Bytes({0xc5, 0xfa, 0x11, 0x41, OffLead});        // vmovss [rcx + lead], xmm0
+    e.Bytes({0xc5, 0xf2, 0x59, 0x41, OffThousand});    // vmulss xmm0, xmm1, [rcx + ms_per_second]
+    e.Bytes({0xc4, 0xe1, 0xfa, 0x2c, 0x49, OffFloor}); // vcvttss2si rcx, dword [rcx + floor]
+    e.JmpAbs(s_va_image + OffSite + sizeof(Code));
+    return PsGuestCode::InstallDetour("Bloodborne play time counter", s_va_image + OffSite, Code, e) == Error::None;
+}
+
 enum class RunCheck { Unchanged, Hooked, SprintFixPatch };
 
 /// The run's wall check (0x1514c24: the distance moved this frame x 30 = a speed at 30 FPS): the
@@ -391,6 +437,7 @@ void PatchImage(unsigned char* p_image, std::uint64_t) {
                         HookFixedStep("Bloodborne fixed step 0x1572a7d", 0x1572a7d, -0x30);
     const RunCheck run = HookRunSpeed();
     const int c_ghost = HookGhostReplay();
+    const bool is_play_time_real = HookPlayTime();
     int c_redirected = 0;
     for (const Redirect& redirect : Redirects) {
         c_redirected += PsGuestCode::RedirectOperand("Bloodborne per-frame value", s_va_image + redirect.off_site,
@@ -400,12 +447,12 @@ void PatchImage(unsigned char* p_image, std::uint64_t) {
     }
     std::printf("Frame rate: free (hooks, no patches; PS_FRAME_HOOKS=0: the patches): the game steps by each "
                 "frame's time (1/%d..1/30 s); %d of 2 fixed steps, %d of %zu per-frame values follow the frame's "
-                "time, the run's wall check %s, %d of 4 replay ghost sites by time\n",
+                "time, the run's wall check %s, %d of 4 replay ghost sites by time, the play time counter %s\n",
                 rate, c_steps, c_redirected, std::size(Redirects),
                 run == RunCheck::Hooked           ? "by speed"
                 : run == RunCheck::SprintFixPatch ? "by speed (a Sprint Fix patch did it already)"
                                                   : "unchanged (not found)",
-                c_ghost);
+                c_ghost, is_play_time_real ? "by real time" : "in whole milliseconds a frame (not found)");
 }
 
 bool IsUnlocked() {
