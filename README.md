@@ -50,7 +50,7 @@ state is how far a title has been seen to get, not a full play-through; what eac
 
 - Titles that require PS VR (`require_ps_vr` in `param.sfo`) are not supported.
 - No tested title needs a dump of the console's system modules.
-- Only one machine has been tested thoroughly: AMD Radeon RX 7800 XT with Mesa (RADV).
+- Only one machine has been tested thoroughly: AMD Radeon RX 7900 XT with Mesa (RADV).
 
 ## Requirements
 

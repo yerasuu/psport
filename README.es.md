@@ -54,7 +54,7 @@ en [tools/regress/titles.txt](tools/regress/titles.txt) y se ejecutan sin ventan
 
 - Los juegos que requieren PS VR (`require_ps_vr` en `param.sfo`) no son compatibles.
 - Ningún juego probado necesita un volcado de los módulos del sistema de la consola.
-- Solo se ha probado a fondo una máquina: AMD Radeon RX 7800 XT con Mesa (RADV).
+- Solo se ha probado a fondo una máquina: AMD Radeon RX 7900 XT con Mesa (RADV).
 
 ## Requisitos
 
