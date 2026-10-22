@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-License-Identifier: GPL-2.0-only
 // AnyPS5's libSceAudiodec structures (core/libs/SceTypes.hpp); the PS4 library takes the same layouts.
 #pragma once
 #include <cstdint>

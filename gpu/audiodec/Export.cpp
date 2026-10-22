@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0-or-later
+// SPDX-License-Identifier: GPL-2.0-only
 // The functions are called through Guarded: what the codecs throw (FFmpeg or ATRAC9 failing to
 // open, an output format not converted) becomes a logged error code, as an exception must not
 // unwind through the game's frames.
