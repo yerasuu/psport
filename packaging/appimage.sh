@@ -8,6 +8,16 @@ set -euo pipefail
 cd -- "$(dirname -- "$0")/.."
 [[ -f out/psport && -f out/gpu/libpsport-gpu.so ]] || { echo 'Build first: bash build.sh' >&2; exit 1; }
 root=$PWD
+# The online module stays out unless asked for: default.nix says why.
+net=
+if [[ -f out/gpu/libpsport-net.so ]]; then
+    if [[ ${PS_PACKAGE_NET:-0} == 1 ]]; then
+        net=out/gpu/libpsport-net.so
+        echo 'appimage: online module libpsport-net.so included (PS_PACKAGE_NET=1): it links OpenSSL and abseil (Apache-2.0), so this AppImage must not be redistributed'
+    else
+        echo 'appimage: online module libpsport-net.so left out: it links OpenSSL and abseil (Apache-2.0), not redistributable with GPL-2.0 psport until kb #850; PS_PACKAGE_NET=1 keeps it for local use'
+    fi
+fi
 # The libraries' store paths: for each library a binary needs (NEEDED), the RUNPATH directory it
 # is found in (their closures come along). Not every RUNPATH entry: built in nix-shell, the
 # binaries list the lib directories of the whole build environment (the full GCC, Vulkan headers,
@@ -24,7 +34,7 @@ needed_dirs() {
 }
 {
     echo '['
-    for elf in out/psport out/gpu/libpsport-gpu.so $(ls out/libpsport_dlss.so out/gpu/libpsport-net.so 2>/dev/null); do
+    for elf in out/psport out/gpu/libpsport-gpu.so $(ls out/libpsport_dlss.so 2>/dev/null) $net; do
         needed_dirs "$elf"
     done | grep -o '^/nix/store/[^/]*' | sort -u | grep -v -- '-nix-shell$' | sed 's/.*/  "&"/'
     echo ']'

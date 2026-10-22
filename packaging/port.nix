@@ -1,9 +1,13 @@
 # The port built from source in Nix's sandbox by build.sh, with shell.nix's dependencies: its output
 # is laid out as a checkout after build.sh (run.sh, scripts/, patches/, out/psport,
 # out/psport-gpu-capabilities, out/gpu/), so run.sh runs from it with PS_PREBUILT=1 and
-# PS_PROBE=<output>/out/psport. CI publishes it to the binary cache (tools/nix_cache.sh).
-# `nix-build packaging/port.nix`
-{ pkgs ? import ./nixpkgs.nix }:
+# PS_PROBE=<output>/out/psport. CI publishes it to the binary cache (tools/nix_cache.sh) with
+# withNet = false: the online module (libpsport-net.so) links OpenSSL and abseil (Apache-2.0), which
+# GPL-2.0 psport can't redistribute until kb #850, so the public cache leaves it and their closure out.
+# `nix-build packaging/port.nix [--arg withNet false]`
+{ pkgs ? import ./nixpkgs.nix
+, withNet ? true
+}:
 let
   lib = pkgs.lib;
   root = ./..;
@@ -32,13 +36,16 @@ pkgs.stdenv.mkDerivation {
   '';
   buildPhase = ''
     runHook preBuild
-    PS_IN_NIX_SHELL=1 PS_ORIGIN_RPATH_ONLY=1 CCACHE_DISABLE=1 bash build.sh
+    PS_IN_NIX_SHELL=1 PS_ORIGIN_RPATH_ONLY=1 CCACHE_DISABLE=1 PS_NET=${if withNet then "ON" else "OFF"} bash build.sh
     runHook postBuild
   '';
   installPhase = ''
     runHook preInstall
     mkdir -p $out/out/gpu
-    cp -r run.sh scripts patches $out/
+    cp -r LICENSE run.sh scripts patches $out/
+    # FSR 4 v07 assets are fetched on the user's machine, the optimized passes built there.
+    install -Dm755 -t $out/tools tools/fetch_fsr4_assets.sh tools/fsr4_optimize.sh
+    install -m644 -t $out/tools tools/fsr4_post_lds.pl tools/fsr4_pass11_guard.pl tools/Fsr4SpirvCrossFixes.pm
     install -m755 out/psport out/psport-gpu-capabilities $out/out/
     install -m755 out/gpu/libpsport-gpu.so $out/out/gpu/
     if [ -f out/gpu/libpsport-net.so ]; then install -m755 out/gpu/libpsport-net.so $out/out/gpu/; fi
@@ -48,4 +55,5 @@ pkgs.stdenv.mkDerivation {
   stripDebugList = [ "out" ];
   # patchelf corrupts the non-PIE game binary's symbol versions (see default.nix).
   dontPatchELF = true;
+  passthru = { inherit imgui; };
 }

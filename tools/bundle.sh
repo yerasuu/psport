@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 # tools/bundle.sh PORT TAG DIR: writes DIR/psport-TAG-x86_64.tar.zst and its .sha256, a bundle of
 # PORT (nix-build packaging/port.nix, or a directory laid out the same) that runs without Nix: its
-# programs, every library they link from the store, and the store's glibc loader.
+# programs, every library they link from the store, and the store's glibc loader, with LICENSE,
+# THIRD-PARTY-NOTICES and SOURCES.txt (packaging/licences.nix). psport is GPL-2.0 (kb #843), so
+# nothing under the Apache-2.0 goes in: the Vulkan loader is the host's, and the online module
+# (libpsport-net.so: OpenSSL, abseil) stays out until kb #850 replaces them; PS_BUNDLE_NET=1 keeps
+# it for a bundle that is not redistributed.
 # The bundle's programs keep starting as programs, not through `ld.so --library-path`, since a
 # loader started as the program puts the brk heap at ~85 TiB, where psport's non-PIE binary can't
 # hand heap pointers to the guest (40 bits). Instead each program's PT_INTERP names the bundled
@@ -14,16 +18,29 @@ set -euo pipefail
 (($# == 3)) || { sed -n '2,4p' "$0" | cut -c3-; exit 2; }
 port=$1 tag=$2 dest=$3
 [[ $tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Not a vX.Y.Z tag: $tag" >&2; exit 2; }
-[[ -f $port/run.sh && -x $port/out/psport && -f $port/out/gpu/libpsport-gpu.so ]] ||
+[[ -f $port/LICENSE && -f $port/run.sh && -x $port/out/psport && -f $port/out/gpu/libpsport-gpu.so ]] ||
     { echo "Not a port build: $port" >&2; exit 2; }
 name=psport-$tag-x86_64
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 bundle=$work/$name
 mkdir -p "$bundle/lib" "$bundle/out/gpu"
-cp -r "$port/run.sh" "$port/scripts" "$port/patches" "$bundle/"
+cp -r "$port/LICENSE" "$port/run.sh" "$port/scripts" "$port/patches" "$bundle/"
+mkdir -p "$bundle/tools"
+cp -- "$port"/tools/{fetch_fsr4_assets.sh,fsr4_optimize.sh,fsr4_post_lds.pl,fsr4_pass11_guard.pl,Fsr4SpirvCrossFixes.pm} \
+    "$bundle/tools/"
 install -m755 "$port/out/psport" "$port/out/psport-gpu-capabilities" "$bundle/out/"
-install -m755 "$port"/out/gpu/*.so "$bundle/out/gpu/"
+install -m755 "$port/out/gpu/libpsport-gpu.so" "$bundle/out/gpu/"
+is_with_net=false
+if [[ -f $port/out/gpu/libpsport-net.so ]]; then
+    if [[ ${PS_BUNDLE_NET:-0} == 1 ]]; then
+        install -m755 "$port/out/gpu/libpsport-net.so" "$bundle/out/gpu/"
+        is_with_net=true
+        echo "bundle: online module libpsport-net.so included (PS_BUNDLE_NET=1): it links OpenSSL and abseil (Apache-2.0), so this bundle must not be redistributed"
+    else
+        echo "bundle: online module libpsport-net.so left out: it links OpenSSL and abseil (Apache-2.0), not redistributable with GPL-2.0 psport until kb #850; PS_BUNDLE_NET=1 keeps it for local use"
+    fi
+fi
 chmod -R u+w "$bundle"
 programs=(out/psport out/psport-gpu-capabilities)
 modules=()
@@ -33,28 +50,41 @@ loader=$(readelf -lW "$bundle/out/psport" | sed -n 's|.*interpreter: \(/nix/stor
 cp -L "$loader" "$bundle/lib/ld-linux-x86-64.so.2"
 # What each one links, resolved through its RUNPATHs as it is in the store; the port's own
 # libraries ($ORIGIN/gpu) are already there. Each library is listed again on its own: a listing
-# shows a file once, under the first name it was loaded by, and libavcodec also links libvulkan.so,
-# libvulkan.so.1's file, which the host may not have. Another name for a file is a link to it.
-declare -A copied
+# shows a file once, under the first name it was loaded by, and another library may link the same
+# file by another name. Another name for a file is a link to it. The Vulkan loader is left to the
+# RPATH's host directories.
+declare -A copied packages
 pending=("${programs[@]/#/$bundle/}" "${modules[@]/#/$bundle/}")
 while ((${#pending[@]})); do
     listed=()
     for elf in "${pending[@]}"; do
+        list=$("$loader" --list "$elf") || { echo "bundle: $loader --list $elf failed" >&2; exit 1; }
         while read -r soname path; do
-            [[ -e $bundle/lib/$soname ]] && continue
+            [[ -e $bundle/lib/$soname || $soname == libvulkan.so* ]] && continue
             file=$(realpath -- "$path")
             if [[ -n ${copied[$file]:-} ]]; then
                 ln -s -- "${copied[$file]}" "$bundle/lib/$soname"
             else
                 cp -- "$file" "$bundle/lib/$soname"
                 copied[$file]=$soname
+                package=${file#/nix/store/}
+                packages[/nix/store/${package%%/*}]=1
                 listed+=("$path")
             fi
-        done < <("$loader" --list "$elf" | awk '$2 == "=>" && $3 ~ /^\/nix\/store\// { print $1, $3 }')
+        done < <(awk '$2 == "=>" && $3 ~ /^\/nix\/store\// { print $1, $3 }' <<< "$list")
     done
     pending=("${listed[@]}")
 done
 chmod -R u+w "$bundle/lib"
+[[ -e $bundle/lib/libc.so.6 ]] || { echo "bundle: no libc.so.6 among the libraries the programs link" >&2; exit 1; }
+# The nixpkgs the port was built with: packaging/port.nix's pinned one for a store path, shell.nix's
+# <nixpkgs> for a checkout built by build.sh.
+nixpkgs=()
+[[ $(realpath -- "$port") == /nix/store/* ]] || nixpkgs=(--arg pkgs 'import <nixpkgs> { }')
+licences=$(nix-build --no-out-link "$(dirname -- "$0")/../packaging/licences.nix" "${nixpkgs[@]}" \
+    --argstr storePaths "${!packages[*]}" --arg withNet "$is_with_net")
+cp -- "$licences/THIRD-PARTY-NOTICES" "$licences/SOURCES.txt" "$bundle/"
+chmod u+w "$bundle/THIRD-PARTY-NOTICES" "$bundle/SOURCES.txt"
 # The host's library directories, after the bundle's own: where the host's Vulkan drivers (loaded
 # by path from their ICD manifests or, NVIDIA's, by name) find what they link, and where SDL finds
 # the windowing and audio libraries it opens by name. NixOS keeps its drivers in /run/opengl-driver.
@@ -200,6 +230,9 @@ BODY
     echo "printf '%s\n' \"\$interp\" > lib/interp"
 } > "$bundle/relocate.sh"
 chmod 755 "$bundle/relocate.sh"
+net=0
+[[ $is_with_net == true ]] && net=1
+PS_BUNDLE_NET=$net "$(dirname -- "$0")/check_bundle_licences.sh" "$bundle"
 mkdir -p "$dest"
 tar --sort=name --owner=0 --group=0 --numeric-owner --mtime="@${SOURCE_DATE_EPOCH:-0}" -C "$work" -cf - "$name" |
     zstd -q -19 -T0 > "$dest/$name.tar.zst.partial"

@@ -746,10 +746,18 @@ session, with their install and uninstall commands in their headers.
 
 ## CI and binary cache
 
-`.github/workflows/build.yml` builds `packaging/port.nix` on every push to `develop` and `main` (and by hand), as
-a check only: nothing is published. `packaging/port.nix` is the port from source in Nix's sandbox
+`.github/workflows/build.yml` builds `packaging/port.nix` on every push to `develop` and `main` (and by hand) and
+publishes it from those two branches (below). `packaging/port.nix` is the port from source in Nix's sandbox
 with `build.sh`, LTO on, no PGO profile, nixpkgs pinned in `packaging/nixpkgs.nix` to decanter's
 revision.
+
+CI builds it with `--arg withNet false`: the public binary cache, like the bundle, has no online
+module (`libpsport-net.so`, which links OpenSSL and abseil, Apache-2.0) until kb #850, and its
+`--list-features` reports `online_module` unavailable, so decanter hides online play for it.
+`nix-build packaging/port.nix` and `build.sh` keep the module (`PS_NET=OFF` leaves it out of
+`build.sh`'s). Before anything is published, `tools/check_bundle_licences.sh --port` checks the build
+and every library its programs and modules link; the rest of the closure is nixpkgs' packages as they
+are (SDL3 brings PipeWire's, whose own plugins and tools link OpenSSL, abseil and a GPL FFmpeg).
 
 The version lives in `VERSION` alone: `0-unstable` between releases, `X.Y.Z` in a release, read by
 `build.sh`, `packaging/port.nix` (`version`) and `gpu/net/CMakeLists.txt` (the shadNet client's
@@ -765,7 +773,8 @@ the assets of the release `nix-cache`, then creates or updates the GitHub Releas
 tag's annotation as its notes, marked latest when the tag is the highest version published. Only that
 job has `contents: write`, with the workflow's `GITHUB_TOKEN`. The output is laid out as a checkout
 after `build.sh` (`run.sh`, `scripts/`, `patches/`, `out/psport`, `out/psport-gpu-capabilities`,
-`out/gpu/`); the Vulkan drivers are not in it.
+`out/gpu/`, and in `tools/` `fetch_fsr4_assets.sh` with what `fsr4_optimize.sh` needs, since the FSR 4
+v07 assets are fetched on the user's machine); the Vulkan drivers are not in it.
 
 The closure is made content-addressed before it is published (`nix store make-content-addressed`):
 Nix accepts such paths without a signature, also from a user the daemon does not trust, so the cache
@@ -814,7 +823,19 @@ The same job also publishes the release's port without Nix, as assets of the tag
 `tools/bundle.sh <store path> <tag> <directory>` and uploaded after the release is created (a release
 without them, as every one before this, is still fetched from the cache). It holds one folder,
 `psport-<tag>-x86_64/`, laid out as the output above plus `lib/` (every library the programs and
-`out/gpu/` link from the store, with the store's glibc and its loader) and `relocate.sh`. It runs
+`out/gpu/` link from the store, with the store's glibc and its loader), `relocate.sh`, and
+`THIRD-PARTY-NOTICES` and `SOURCES.txt` from `packaging/licences.nix` (each library's licence and
+the licence files of its source, the code compiled in, and the written source offer). Since psport is
+GPL-2.0 (kb #843), nothing under the Apache-2.0 goes in: not the Vulkan loader, and not the online
+module `libpsport-net.so` (OpenSSL, abseil) until kb #850 (`PS_BUNDLE_NET=1` keeps it in a bundle
+for local use; `PS_PACKAGE_NET=1` does the same for the AppImage). `tools/check_bundle_licences.sh`,
+run by `bundle.sh` and again by the job on the archive, fails the release when the bundle's tree
+holds OpenSSL, abseil, the Vulkan loader, x264, x265, xvidcore, libssh, SRT, GnuTLS, RIST,
+libunistring (LGPL-3.0-or-later in nixpkgs) or the online module, when `THIRD-PARTY-NOTICES` lists a
+GPL-3.0-only library, when libavutil is missing, reports version 3 or no licence, or when LICENSE,
+THIRD-PARTY-NOTICES or SOURCES.txt is missing; with `PS_BUNDLE_NET=1` it allows only the online
+module, OpenSSL and abseil. `licences.nix` fails when a GPL, LGPL or MPL component has no licence
+text or no source URL. It runs
 from wherever it is extracted, writable, as `PS_DATA_DIR=<writable folder> bash <path>/run.sh` with the
 host's own Vulkan drivers: `run.sh` sees `relocate.sh`, takes the build as prebuilt and runs it first.
 
@@ -826,6 +847,6 @@ link in `XDG_RUNTIME_DIR` when the path is longer than Nix's field, 82 bytes wit
 become RPATHs, `$ORIGIN/gpu:$ORIGIN/../lib` and then the host's lib directories, and the libraries'
 are removed, all in place (patchelf corrupts the non-PIE binary's symbol versions): a library without
 one, the host's Vulkan drivers included, has its dependencies searched in the program's RPATH, so the
-bundle's libraries come first and the host's after them. Nix's Vulkan loader searches the host's
-ICDs in `XDG_DATA_DIRS` and `/run/opengl-driver` but not `/etc/vulkan/icd.d`, which `run.sh` adds
-with `VK_ADD_DRIVER_FILES`.
+bundle's libraries come first and the host's after them. The Vulkan loader is the host's, found in
+those directories, and it finds the host's ICDs as the host's own programs do; a host with no
+`libvulkan.so.1` there (NixOS keeps none in `/run/opengl-driver/lib`) can't start the bundle.

@@ -96,10 +96,12 @@ Sin `--recursive`, `build.sh` descarga él mismo el submódulo (Dear ImGui).
 | Opción de compilación | Efecto |
 |---|---|
 | `PS_LTO=OFF` | desactiva la optimización en tiempo de enlazado (activa por defecto) |
+| `PS_NET=OFF` | deja fuera el módulo en línea (`libpsport-net.so`), como se compilan la caché binaria pública y el paquete |
 | `PS_PGO=generate\|use\|off` | optimización guiada por perfiles; `use` por defecto cuando `pgo/` contiene un perfil |
 | ccache instalado | la biblioteca de GPU se compila con él, una sola caché para todas las copias de trabajo (`~/.cache/psport/ccache`, o `CCACHE_DIR`) |
 
-`nix-build packaging/port.nix` compila el port desde el código fuente en el entorno aislado de Nix.
+`nix-build packaging/port.nix` compila el port desde el código fuente en el entorno aislado de Nix,
+con el módulo en línea; `--arg withNet false` lo deja fuera.
 
 ### Ejecutar un juego
 
@@ -134,8 +136,16 @@ con los controladores Vulkan del propio sistema:
 PS_DATA_DIR=<carpeta escribible> PS_GAME_DIR=/ruta/al/volcado bash <carpeta extraída>/run.sh
 ```
 
-La misma compilación se publica como caché binaria de Nix; véase
-[FORK.md](FORK.md#ci-and-binary-cache).
+El paquete no lleva el módulo en línea (`libpsport-net.so`): enlaza OpenSSL y abseil, con licencia
+Apache-2.0, que no se pueden distribuir junto a la GPL-2.0 de psport, así que el paquete solo juega
+sin conexión hasta que se sustituyan; para jugar en línea (`PS_ONLINE=1`) hay que compilar desde el
+código fuente. Tampoco lleva el cargador de Vulkan: usa el `libvulkan.so.1` del sistema, así que no
+arranca en un sistema que no lo tenga en sus carpetas de bibliotecas (NixOS no tiene ninguno en
+`/run/opengl-driver/lib`).
+
+La misma compilación, también sin el módulo en línea, se publica como caché binaria de Nix, de donde
+decanter descarga sus compilaciones ya hechas; véase [FORK.md](FORK.md#ci-and-binary-cache). Una
+compilación local (`build.sh`, `nix-build packaging/port.nix`) sí lleva el módulo en línea.
 
 ### Lanzador
 
@@ -251,8 +261,9 @@ su registro y su informe de llamadas, implementar lo que falta y comprobar el re
 
 ## Licencia y créditos
 
-psport se distribuye bajo la **GNU General Public License v2.0 o posterior** ([LICENSE](LICENSE)).
-Lo mantiene Yerasuu.
+psport se distribuye bajo la **GNU General Public License, versión 2** ([LICENSE](LICENSE)). Los
+archivos marcados como GPL-2.0-only en su cabecera solo admiten la versión 2; el resto es
+GPL-2.0-or-later y se usa como versión 2. Lo mantiene Yerasuu.
 
 ### Proyectos en los que se basa
 
@@ -282,8 +293,17 @@ Los commits de origen y los cambios en el código heredado están anotados en [F
 | [Fuentes DejaVu](https://dejavu-fonts.github.io/) | texto del menú superpuesto, alternativa para libSceFont | Bitstream Vera (cambios de DejaVu en dominio público) |
 | [dxil-spirv](https://github.com/HansKristian-Work/dxil-spirv) | generar los recursos de FSR 4.1.1 en el equipo del usuario | MIT |
 
-Enlazados desde el sistema o el entorno de Nix, no incluidos, con sus propias licencias: FFmpeg,
-FreeType, Vulkan, SDL3, Boost, fmt y el resto de `shell.nix`.
+### Bibliotecas del paquete de la versión
+
+El paquete de la versión lleva en `lib/` las bibliotecas que psport enlaza desde Nix (el AppImage,
+en su almacén de Nix), cada una con su licencia: FFmpeg (compilado como LGPL-2.1-or-later, sin los
+codificadores GPL ni los protocolos de red), SDL3, FreeType, fmt, xxHash, glibc, libstdc++ y sus
+dependencias. El archivo `THIRD-PARTY-NOTICES` del paquete enumera cada una, las bibliotecas
+compiladas dentro (Boost, xbyak, Zydis, miniz, Vulkan Memory Allocator...) y el código de la tabla
+anterior, con su licencia y los archivos de licencia de su código fuente; `SOURCES.txt` indica dónde
+está el código fuente de cada componente GPL, LGPL y MPL, con una oferta escrita del código fuente
+válida durante tres años. Los dos los genera `packaging/licences.nix`. Una compilación desde el
+código fuente enlaza las mismas bibliotecas desde el sistema o el entorno de Nix (`shell.nix`).
 
 ### Comunidad
 
@@ -293,4 +313,9 @@ comunidad (`patches/Bloodborne.xml`).
 ### Lo que no se distribuye
 
 Ningún archivo de juego ni módulo del sistema de la consola. Tampoco se incluyen las DLL y los datos
-del modelo de FSR 4 de AMD ni el SDK y las bibliotecas de DLSS de NVIDIA; los aporta el usuario.
+del modelo de FSR 4 de AMD ni el SDK y las bibliotecas de DLSS de NVIDIA; los aporta el usuario. Los
+recursos de FSR 4 v07 no van en el paquete ni en el AppImage: `tools/fetch_fsr4_assets.sh`, que
+llevan el clon, el paquete y el AppImage, los descarga en tu equipo en `fsr4_shaders/` junto a
+`run.sh` (`bash <carpeta extraída>/tools/fetch_fsr4_assets.sh` para el paquete), o con
+`PS_FSR4_DIR=<carpeta de datos>/fsr4_shaders` en la carpeta de datos, donde los buscan `run.sh` y el
+lanzador; el lanzador del AppImage muestra esa orden para su propia copia.

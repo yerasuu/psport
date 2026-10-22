@@ -14,6 +14,7 @@ import math
 import shutil
 import os
 import re
+import shlex
 import signal
 import subprocess
 import threading
@@ -325,6 +326,13 @@ def fsr411_dir():
     if os.environ.get("PS_FSR411_DIR"):
         return Path(os.environ["PS_FSR411_DIR"])
     return PORT_DIR / "fsr4_411" if (PORT_DIR / "fsr4_411").is_dir() else DATA_DIR / "fsr4_411"
+
+
+def fsr4_dir():
+    """Where the FSR 4 v07 assets are looked up, as run.sh does."""
+    if os.environ.get("PS_FSR4_DIR"):
+        return Path(os.environ["PS_FSR4_DIR"])
+    return PORT_DIR / "fsr4_shaders" if (PORT_DIR / "fsr4_shaders").is_dir() else DATA_DIR / "fsr4_shaders"
 
 
 def fsr411_build_command(upscaler, loader=None):
@@ -1004,8 +1012,10 @@ class LauncherWindow(Adw.ApplicationWindow):
     def update_upscaler_status(self):
         value = combo_value(self.upscaler_row)
         if value == "fsr4":
-            ok = (PORT_DIR / "fsr4_shaders").is_dir()
-            hint = tr("Ассеты найдены") if ok else tr("Нет ассетов: tools/fetch_fsr4_assets.sh")
+            ok = fsr4_dir().is_dir()
+            script = PORT_DIR / "tools" / "fetch_fsr4_assets.sh"
+            fetch = f"PS_FSR4_DIR={shlex.quote(str(fsr4_dir()))} bash {shlex.quote(str(script))}"
+            hint = tr("Ассеты найдены") if ok else tr("Нет ассетов: {}").format(fetch)
         elif value == "fsr411":
             directory = fsr411_dir()
             problem = fsr411_problem(directory, combo_value(self.output_row),

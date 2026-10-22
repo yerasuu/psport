@@ -16,13 +16,35 @@ let
       exit 1
     '';
   };
+  # LGPL FFmpeg (no gpl, no version3) since psport's binary is GPL-2.0 (kb #843). psport only
+  # decodes local files with FFmpeg's own decoders, so it loses nothing without the GPL encoders
+  # (x264, x265, xvid), the network protocols and the TLS, SSH, SRT and RIST libraries that brought
+  # OpenSSL into the process, teletext, Blu-ray, OpenCL, subtitle rendering and V4L2, nor without
+  # Vulkan hwaccel, for which nixpkgs adds an unversioned libvulkan.so to libavcodec's DT_NEEDED:
+  # a host without Vulkan's development files has only libvulkan.so.1, and the bundle leaves the
+  # Vulkan loader to the host.
+  ffmpeg = pkgs.ffmpeg-headless.override {
+    withGPL = false;
+    withVersion3 = false;
+    withNetwork = false;
+    withGnutls = false;
+    withSsh = false;
+    withSrt = false;
+    withRist = false;
+    withVulkan = false;
+    withZvbi = false;
+    withBluray = false;
+    withOpencl = false;
+    withAss = false;
+    withV4l2 = false;
+  };
 in
 pkgs.mkShell {
   packages = with pkgs; [
     gcc gnumake cmake ninja pkg-config python3 binutils ccache
     vulkan-headers vulkan-loader sdl3
     # GPU library (gpu/): shadPS4 video core dependencies
-    ffmpeg-headless boost fmt magic-enum robin-map xxhash vulkan-memory-allocator glslang spirv-cross xbyak zydis spirv-headers miniz libx11 libxcb xorgproto wayland
+    ffmpeg boost fmt magic-enum robin-map xxhash vulkan-memory-allocator glslang spirv-cross xbyak zydis spirv-headers miniz libx11 libxcb xorgproto wayland
     # libSceFont (gpu/font): glyphs rasterized by FreeType
     freetype
     # Online module (gpu/net): shadNet client, HTTPS, UPnP

@@ -24,14 +24,11 @@ if [[ ${1:-} == --software ]]; then
 fi
 # A relocatable bundle (tools/bundle.sh, a release's psport-<tag>-x86_64.tar.zst) is prebuilt, laid
 # out as packaging/port.nix's output; relocate.sh points its programs at its own glibc loader for
-# wherever it now is. Its Vulkan loader, Nix's, finds the host's drivers everywhere but in /etc.
+# wherever it now is. Its Vulkan loader is the host's, which finds the host's drivers itself.
 if [[ -f relocate.sh ]]; then
     export PS_PREBUILT=1
     PS_PROBE=${PS_PROBE:-out/psport}
     bash relocate.sh || exit 1
-    if [[ -z ${VK_DRIVER_FILES:-}${VK_ICD_FILENAMES:-} && -d /etc/vulkan/icd.d ]]; then
-        export VK_ADD_DRIVER_FILES=/etc/vulkan/icd.d${VK_ADD_DRIVER_FILES:+:$VK_ADD_DRIVER_FILES}
-    fi
 fi
 # PS_PREBUILT=1 (packaged builds, the AppImage): out/psport and its GPU library are installed
 # next to this script; nothing is built and no nix-shell is needed.
@@ -66,6 +63,10 @@ mkdir -p "$PS_GPU_USER_DIR"
 # FSR 4.1.1 assets (tools/fsr4cap/build_assets.sh): next to run.sh or in the data directory.
 if [[ -z ${PS_FSR411_DIR:-} && ! -d fsr4_411 && -d $data/fsr4_411 ]]; then
     export PS_FSR411_DIR=$data/fsr4_411
+fi
+# FSR 4 v07 assets (tools/fetch_fsr4_assets.sh): the same, since no package carries them.
+if [[ -z ${PS_FSR4_DIR:-} && ! -d fsr4_shaders && -d $data/fsr4_shaders ]]; then
+    export PS_FSR4_DIR=$data/fsr4_shaders
 fi
 # The same check as build.sh's: when it builds in shell.nix, the port it builds links Nix's Vulkan
 # loader and must run there too, where shell.nix gives it Nix's Mesa drivers.
@@ -288,6 +289,9 @@ export PS_GPU_WRITE_TWINS=${PS_GPU_WRITE_TWINS:-1} PS_GPU_WRITE_TWINS_MAX=${PS_G
 # title names (psport --online-overrides) are redirected, its own server to the community server,
 # its summon signs to the shadNet WebAPI; a title without any gets no redirects (scripts/online.py,
 # the one step of a launch that still runs Python, and only for online play).
+if [[ ${PS_ONLINE:-0} == 1 && ! -f $tools/gpu/libpsport-net.so ]]; then
+    echo 'psport: PS_ONLINE=1, but this build has no online module (gpu/libpsport-net.so): the game plays offline.' >&2
+fi
 if [[ ${PS_ONLINE:-0} == 1 && -f scripts/online.py ]]; then
     if [[ -z ${PYTHON:-} ]]; then
         PYTHON=$(command -v python3 || true)

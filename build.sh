@@ -80,10 +80,12 @@ if command -v ccache >/dev/null; then
     export CCACHE_DIR=${CCACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/psport/ccache}
     export CCACHE_BASEDIR=${CCACHE_BASEDIR:-$PWD} CCACHE_NOHASHDIR=${CCACHE_NOHASHDIR:-1}
 fi
+# PS_NET=OFF: no online module (gpu/net), as the public binary cache is built (packaging/port.nix);
+# CMake keeps the last value given until PS_NET is set again.
 cmake -S gpu -B out/gpu -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DPS_PGO="$pgo" \
     -DPS_LTO="${PS_LTO:-ON}" -DPS_PGO_DIR="$PWD/pgo" -DPS_TRACY="$tracy" \
     -DCMAKE_C_COMPILER_LAUNCHER="$launcher" -DCMAKE_CXX_COMPILER_LAUNCHER="$launcher" \
-    ${PS_ORIGIN_RPATH_ONLY:+-DCMAKE_BUILD_RPATH_USE_ORIGIN=ON} >/dev/null
+    ${PS_ORIGIN_RPATH_ONLY:+-DCMAKE_BUILD_RPATH_USE_ORIGIN=ON} ${PS_NET:+-DPS_NET="$PS_NET"} >/dev/null
 echo "GPU library: PGO $pgo, LTO ${PS_LTO:-ON}, Tracy $tracy"
 # A failed GPU build must stop here: an older libpsport-gpu.so would otherwise be used silently.
 if ! ninja -C out/gpu psport-gpu $(grep -q "^build psport-net:" out/gpu/build.ninja && echo psport-net) > out/gpu-build.log 2>&1; then

@@ -24,8 +24,12 @@ jobs:
       - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
         with:
           extra_nix_config: experimental-features = nix-command
+      # The public cache leaves the online module out (it links OpenSSL and abseil, Apache-2.0) until
+      # kb #850; local builds keep it (withNet defaults to true).
       - name: Build
-        run: nix-build packaging/port.nix --out-link result
+        run: nix-build packaging/port.nix --arg withNet false --out-link result
+      - name: Check the build's licences
+        run: tools/check_bundle_licences.sh --port "$(readlink result)"
       # Content-addressed here so the publish job can import it unsigned, as decanter does.
       - name: Export the closure
         if: github.repository == 'yerasuu/psport' && (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main')

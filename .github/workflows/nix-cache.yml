@@ -31,13 +31,22 @@ jobs:
         run: |
           version=$(<VERSION)
           if [[ v$version != "$TAG" ]]; then echo "::error::$TAG does not match VERSION ($version)"; exit 1; fi
+      # The public cache leaves the online module out (it links OpenSSL and abseil, Apache-2.0) until
+      # kb #850; local builds keep it (withNet defaults to true).
       - name: Build
-        run: nix-build packaging/port.nix --out-link result
+        run: nix-build packaging/port.nix --arg withNet false --out-link result
+      - name: Check the build's licences
+        run: tools/check_bundle_licences.sh --port "$(readlink result)"
       # Before anything is published, so that a bundle that fails leaves no release half done.
       - name: Bundle
         env:
           TAG: ${{ github.ref_name }}
         run: SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) tools/bundle.sh "$(readlink result)" "$TAG" dist
+      # Again on the archive itself, so that a bundle.sh run with PS_BUNDLE_NET=1 can't slip through.
+      - name: Check the bundle's licences
+        env:
+          TAG: ${{ github.ref_name }}
+        run: tools/check_bundle_licences.sh "dist/psport-$TAG-x86_64.tar.zst"
       - name: Publish the binary cache
         env:
           GH_TOKEN: ${{ github.token }}

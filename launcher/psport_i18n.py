@@ -175,7 +175,7 @@ EN = {
     "Меньше гостинга на персонажах; стоит около 10% FPS": "Less ghosting on characters; costs about 10% FPS",
     "Показывать FPS": "Show FPS",
     "Ассеты найдены": "Assets found",
-    "Нет ассетов: tools/fetch_fsr4_assets.sh": "No assets: tools/fetch_fsr4_assets.sh",
+    "Нет ассетов: {}": "No assets: {}",
     "Ассеты для выбранного режима найдены": "Assets for the selected mode found",
     "{}. Соберите FSR 4.1.1 из своей DLL кнопкой «Выбрать DLL…» ниже":
         "{}. Build FSR 4.1.1 from your own DLL with the “Choose DLL…” button below",
@@ -461,7 +461,7 @@ PT_BR = {
     "Меньше гостинга на персонажах; стоит около 10% FPS": "Menos ghosting nos personagens; custa cerca de 10% de FPS",
     "Показывать FPS": "Mostrar FPS",
     "Ассеты найдены": "Recursos encontrados",
-    "Нет ассетов: tools/fetch_fsr4_assets.sh": "Recursos ausentes: tools/fetch_fsr4_assets.sh",
+    "Нет ассетов: {}": "Recursos ausentes: {}",
     "Ассеты для выбранного режима найдены": "Recursos encontrados para o modo selecionado",
     "{}. Соберите FSR 4.1.1 из своей DLL кнопкой «Выбрать DLL…» ниже":
         "{}. Gere o FSR 4.1.1 a partir da sua própria DLL com o botão “Escolher DLL…” abaixo",
@@ -724,7 +724,7 @@ ZH_CN = {
     "Меньше гостинга на персонажах; стоит около 10% FPS": "减少角色拖影；大约损失 10% 帧率",
     "Показывать FPS": "显示帧率",
     "Ассеты найдены": "已找到资源文件",
-    "Нет ассетов: tools/fetch_fsr4_assets.sh": "缺少资源文件：请运行 tools/fetch_fsr4_assets.sh",
+    "Нет ассетов: {}": "缺少资源文件：请运行 {}",
     "Ассеты для выбранного режима найдены": "已找到所选模式对应的资源文件",
     "{}. Соберите FSR 4.1.1 из своей DLL кнопкой «Выбрать DLL…» ниже":
         "{}。请用下方的「选择 DLL…」按钮，从你自己的 DLL 构建 FSR 4.1.1",

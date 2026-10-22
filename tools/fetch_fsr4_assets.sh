@@ -1,14 +1,19 @@
 #!/usr/bin/env bash
 # Downloads the FSR 4 v07 INT8/DOT4 asset set (SPIR-V passes, model initializers, pre-pass
-# weights) used by the FSR-Vulkan provider into fsr4_shaders/. The assets were built by
-# Q2RTX from AMD's MIT-licensed FidelityFX SDK FSR 4 source (see LICENSE-FSR4-v07.txt);
-# they are not part of this repository. Output 1920x1080 needs the 1080 tier, 1440p and 2160p
+# weights) used by the FSR-Vulkan provider into fsr4_shaders/, or PS_FSR4_DIR (for a package,
+# the data directory's fsr4_shaders). The assets were built by Q2RTX from AMD's MIT-licensed
+# FidelityFX SDK FSR 4 source (see LICENSE-FSR4-v07.txt); they are not part of this repository
+# and no package redistributes them. Output 1920x1080 needs the 1080 tier, 1440p and 2160p
 # outputs (menu: output resolution) the 2160 tier; PS_FSR4_TIERS selects them.
 set -euo pipefail
-cd -- "$(dirname -- "$0")/.."
+root=$(cd -- "$(dirname -- "$0")/.." && pwd)
+# Resolved before the cd, so that a relative PS_FSR4_DIR names the caller's directory.
+PS_FSR4_DIR=$(realpath -m -- "${PS_FSR4_DIR:-$root/fsr4_shaders}")
+export PS_FSR4_DIR
+cd -- "$root"
 commit=ae8d628fae208813172446d1e49ed94150b04658
 base="https://raw.githubusercontent.com/FireBurn/Q2RTX/$commit/baseq2/fsr4_shaders"
-dest=fsr4_shaders
+dest=$PS_FSR4_DIR
 mkdir -p "$dest"
 files=(LICENSE-FSR4-v07.txt rcas.spv spd_auto_exposure.spv)
 for model in native quality balanced performance ultraperf drs; do
@@ -30,7 +35,7 @@ for file in "${files[@]}"; do
     mv "$dest/$file.part" "$dest/$file"
     fetched=$((fetched + 1))
 done
-echo "FSR 4 assets: ${#files[@]} files in $PWD/$dest ($fetched downloaded)"
+echo "FSR 4 assets: ${#files[@]} files in $dest ($fetched downloaded)"
 # Faster, bit-exact post passes (fsr4_shaders/opt), when spirv-cross and glslang are available.
 if command -v spirv-cross >/dev/null && command -v glslangValidator >/dev/null; then
     bash tools/fsr4_optimize.sh
