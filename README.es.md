@@ -36,7 +36,7 @@ ejecución guionizada del juego (primer fotograma de GPU, fotogramas dibujados, 
 
 | Juego | ID | Estado |
 |---|---|---|
-| Bloodborne (1.09) | CUSA03173 | jugable: partidas guardadas, varias zonas, sonido, mando |
+| Bloodborne (1.09) | CUSA03173 | jugable: partidas guardadas, varias zonas, sonido, mando, teclado y ratón |
 | Atelier Ryza | CUSA16458 | menú principal, prólogo, mapa con el control del jugador, sonido |
 | Atelier Ayesha DX | CUSA16921 | vídeo de introducción, menú principal, escenas iniciales, mapa, taller, sonido |
 | Tales of Symphonia Remastered | CUSA50989 | pantalla de título, la primera sala, sonido |
@@ -45,11 +45,11 @@ ejecución guionizada del juego (primer fotograma de GPU, fotogramas dibujados, 
 | ALTDEUS: Beyond Chronos | CUSA26563 | pantalla negra: requiere un casco PS VR, sin modo de pantalla plana |
 | Gal Guardians: Demon Purge | CUSA41240 | regress: fotogramas dibujados, sonido |
 | Gal Guardians: Servants of the Dark (JP) | CUSA52187 | regress: fotogramas dibujados, sonido |
-| Call of Duty: Black Ops | CUSA57547 | regress: fotogramas dibujados, sonido |
+| Call of Duty: Black Ops | CUSA57547 | regress: fotogramas dibujados, sonido; teclado y ratón con la cámara del propio juego, una distribución de shooter y una mira |
 | Call of Duty: Black Ops II | CUSA57548 | primera misión (Pyrrhic Victory) por puntos de control encadenados hasta la barcaza del río, Guardar y salir, Reanudar historia, vídeos, sonido, mando |
 | Blood Omen 2 | CUSA49769 | regress: fotogramas dibujados, sin sonido |
-| Onigiri | CUSA01458 | regress: primer fotograma de GPU y sonido, ningún fotograma iluminado en su guion |
-| OCTOPATH TRAVELER 0 (JP) | CUSA53477 | carga una partida guardada y luego falla la GPU; fuera de las ejecuciones habituales |
+| Onigiri | CUSA01458 | regress: fotogramas dibujados, sonido |
+| OCTOPATH TRAVELER 0 (JP) | CUSA53477 | carga una partida guardada y dibuja fotogramas y sonido, pero la escena 3D sigue negra (solo se ve el minimapa); fuera de las ejecuciones habituales |
 
 - Los juegos que requieren PS VR (`require_ps_vr` en `param.sfo`) no son compatibles.
 - Ningún juego probado necesita un volcado de los módulos del sistema de la consola.

@@ -32,7 +32,7 @@ frame, frames drawn, sound).
 
 | Title | Title ID | State |
 |---|---|---|
-| Bloodborne (1.09) | CUSA03173 | playable: saves, several areas, sound, pad |
+| Bloodborne (1.09) | CUSA03173 | playable: saves, several areas, sound, pad, keyboard and mouse |
 | Atelier Ryza | CUSA16458 | title menu, prologue, field with the player in control, sound |
 | Atelier Ayesha DX | CUSA16921 | intro movie, title menu, opening scenes, field, atelier, sound |
 | Tales of Symphonia Remastered | CUSA50989 | title screen, the first room, sound |
@@ -41,11 +41,11 @@ frame, frames drawn, sound).
 | ALTDEUS: Beyond Chronos | CUSA26563 | black screen: requires a PS VR headset, no flat-screen mode |
 | Gal Guardians: Demon Purge | CUSA41240 | regress: frames drawn, sound |
 | Gal Guardians: Servants of the Dark (JP) | CUSA52187 | regress: frames drawn, sound |
-| Call of Duty: Black Ops | CUSA57547 | regress: frames drawn, sound |
+| Call of Duty: Black Ops | CUSA57547 | regress: frames drawn, sound; keyboard and mouse with the game's own camera, a shooter layout and a crosshair |
 | Call of Duty: Black Ops II | CUSA57548 | first mission (Pyrrhic Victory) through chained checkpoints to the river barge, Save and Quit, Resume Story, videos, sound, pad |
 | Blood Omen 2 | CUSA49769 | regress: frames drawn, no sound |
-| Onigiri | CUSA01458 | regress: first GPU frame and sound, no lit frame in its schedule |
-| OCTOPATH TRAVELER 0 (JP) | CUSA53477 | loads a saved game, then the GPU faults; left out of routine runs |
+| Onigiri | CUSA01458 | regress: frames drawn, sound |
+| OCTOPATH TRAVELER 0 (JP) | CUSA53477 | loads a saved game and draws frames and sound, but the 3D scene stays black (only the minimap shows); left out of routine runs |
 
 - Titles that require PS VR (`require_ps_vr` in `param.sfo`) are not supported.
 - No tested title needs a dump of the console's system modules.
