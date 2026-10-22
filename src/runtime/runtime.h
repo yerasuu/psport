@@ -254,6 +254,8 @@ void runtime_net_image_ready(uintptr_t va_image, uint64_t cb_image);
 int runtime_net_enabled(void);
 int runtime_net_symbol(const char *sz_symbol);
 uintptr_t runtime_net_resolve(const char *sz_name);
+/* psport --list-features: whether this build has its online module (the online_module row). */
+void runtime_net_probe_module(void);
 /* Guest threads for host code (the online module's NP threads); 0 or a positive errno value. */
 int32_t runtime_thread_spawn(void **pp_thread, void *(ABI *pfn_entry)(void *), void *p_argument, uint64_t stack, const char *sz_name);
 int32_t runtime_thread_join_spawned(void *p_thread, void **pp_result);

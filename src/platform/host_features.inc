@@ -146,7 +146,11 @@ FEATURE_HOST(sockets, LINUX, IMPLEMENTED,
              "#540")
 
 FEATURE(online_module, net, "online play through libpsport-net.so, loaded on the first network import with PS_ONLINE=1")
-FEATURE_HOST(online_module, LINUX, IMPLEMENTED, "dlopen of gpu/libpsport-net.so when it was built (runtime_net.c)", "#540")
+FEATURE_HOST(online_module, LINUX, IMPLEMENTED,
+             "dlopen of gpu/libpsport-net.so when it was built (runtime_net.c); probed by --list-features, "
+             "unavailable in a build without it (the public binary cache and bundle, until #850)",
+             "#540")
+FEATURE_PROBED(online_module)
 
 FEATURE(upscaler_fsr4, upscaler, "FSR 4 (the v07 INT8 shaders) on the GPU the game takes")
 FEATURE_HOST(upscaler_fsr4, LINUX, IMPLEMENTED,

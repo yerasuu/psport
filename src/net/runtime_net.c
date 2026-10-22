@@ -62,22 +62,37 @@ void runtime_net_image_ready(uintptr_t va_image, uint64_t cb_image) {
 }
 
 /* The module: PS_NET_MODULE, else gpu/libpsport-net.so beside psport (where libpsport-gpu.so is). */
+static int find_module(char *sz_out_path, size_t cb_path) {
+    const char *sz_forced=runtime_env("PS_NET_MODULE",NULL);
+    if (sz_forced && sz_forced[0]) return snprintf(sz_out_path,cb_path,"%s",sz_forced)>0;
+    char sz_exe[PATH_MAX-32];
+    if (ps_host_exe_path(sz_exe,sizeof(sz_exe))<0) return 0;
+    char *sz_slash=strrchr(sz_exe,'/');
+    if (sz_slash) *sz_slash=0;
+    return snprintf(sz_out_path,cb_path,"%s/gpu/libpsport-net.so",sz_exe)>0;
+}
+
+/* Without loading the module, which would start its TLS library: a build may have none (the public
+ * binary cache and bundle leave it out until kb #850), and a launcher then hides online play. */
+void runtime_net_probe_module(void) {
+    static char s_sz_result[PATH_MAX+64];
+    char sz_path[PATH_MAX];
+    if (!find_module(sz_path,sizeof(sz_path))) {
+        ps_host_feature_probed(PS_HOST_FEATURE_online_module,0,"the module's path could not be found");
+        return;
+    }
+    const int is_present=!ps_host_fs_access(sz_path,PS_HOST_ACCESS_READ);
+    snprintf(s_sz_result,sizeof(s_sz_result),is_present ? "%s" : "no %s in this build: offline play only",sz_path);
+    ps_host_feature_probed(PS_HOST_FEATURE_online_module,is_present,s_sz_result);
+}
+
 static PsNetResolveFn module_resolve(void) {
     static int s_has_tried;
     static PsNetResolveFn s_pfn_resolve;
     if (s_has_tried) return s_pfn_resolve;
     s_has_tried=1;
     char sz_path[PATH_MAX];
-    const char *sz_forced=runtime_env("PS_NET_MODULE",NULL);
-    if (sz_forced && sz_forced[0]) {
-        snprintf(sz_path,sizeof(sz_path),"%s",sz_forced);
-    } else {
-        char sz_exe[PATH_MAX-32];
-        if (ps_host_exe_path(sz_exe,sizeof(sz_exe))<0) return NULL;
-        char *sz_slash=strrchr(sz_exe,'/');
-        if (sz_slash) *sz_slash=0;
-        snprintf(sz_path,sizeof(sz_path),"%s/gpu/libpsport-net.so",sz_exe);
-    }
+    if (!find_module(sz_path,sizeof(sz_path))) return NULL;
     /* RTLD_LOCAL: its C++ (network and NP libraries) stays out of the process's symbol scope. */
     char sz_error[512];
     PsHostLibrary *p_module=ps_host_dl_open(sz_path,sz_error,sizeof(sz_error));

@@ -141,6 +141,7 @@ int answer_query(int argc, char **argv) {
         const int h_stdout = ps_host_fs_duplicate(1, -1);
         if (h_stdout >= 0 && ps_host_fs_duplicate(2, 1) == 1) {
             psport_gpu_probe_host_features();
+            runtime_net_probe_module();
             fflush(stdout);
             (void)ps_host_fs_duplicate(h_stdout, 1);
         } else {
