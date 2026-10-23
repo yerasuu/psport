@@ -21,6 +21,30 @@ static constexpr u32 PipelineKeyVersion = 6u; // psport: SerializationSupport::x
 
 namespace Vulkan {
 
+namespace {
+bool IsMotionStage(const Shader::RuntimeInfo& info) {
+    switch (info.hw_stage) {
+    case Shader::HwStage::Vertex:
+        return info.hw.vs.motion_location != 0;
+    case Shader::HwStage::Fragment:
+        return info.hw.fs.motion_location != 0;
+    default:
+        return false;
+    }
+}
+
+bool HasMotionMismatch(const GraphicsPipelineKey& key,
+                       std::span<const Shader::RuntimeInfo, MaxShaderStages> runtime_infos) {
+    for (u32 stage = 0; stage < MaxShaderStages; ++stage) {
+        if (key.stage_hashes[stage] &&
+            IsMotionStage(runtime_infos[stage]) != (key.motion_vectors != 0)) {
+            return true;
+        }
+    }
+    return false;
+}
+} // namespace
+
 void RegisterPipelineData(const ComputePipelineKey& key,
                           ComputePipeline::SerializationSupport& sdata) {
     if (!Storage::DataBase::Instance().IsOpened()) {
@@ -279,6 +303,15 @@ bool PipelineCache::LoadGraphicsPipeline(Serialization::Archive& ar) {
         }
     }
 
+    // psport: shader metadata is stored by HashCombine(pgm_hash, perm_idx). A motion permutation
+    // left out of a preload frees its index, and a normal permutation translated in that session
+    // takes it and overwrites its metadata and SPIR-V, so this key may now name shaders whose
+    // motion state differs from its own. The draw path always builds both from one selection.
+    if (HasMotionMismatch(sel.graphics_key, sel.runtime_infos)) {
+        ++m_c_motion_mismatches;
+        return false;
+    }
+
     auto pipeline = std::make_unique<GraphicsPipeline>(
         instance, scheduler, desc_heap, profile, sel.graphics_key, *pipeline_cache, sel.infos,
         sel.runtime_infos, sel.fetch_shader, sel.modules, sdata, true);
@@ -368,6 +401,7 @@ bool PipelineCache::LoadPipelineStage(Serialization::Archive& ar, size_t stage) 
             }
         }
     }
+    sel.runtime_infos[stage] = spec.runtime_info;
     it_pgm.value()->InsertPermut(module, std::move(spec), perm_idx);
 
     sel.infos[stage] = &it_pgm.value()->info;
@@ -428,6 +462,7 @@ void PipelineCache::WarmUp() {
     u32 num_pipelines{};
     u32 num_total_pipelines{};
     u32 num_damaged{};
+    m_c_motion_mismatches = 0;
 
     Storage::DataBase::Instance().ForEachBlob(
         Storage::BlobType::PipelineKey, [&](std::vector<u8>&& data) {
@@ -488,6 +523,12 @@ void PipelineCache::WarmUp() {
     }
 
     LOG_INFO(Render, "Preloaded {} pipelines", num_pipelines);
+    if (m_c_motion_mismatches) {
+        LOG_WARNING(Render,
+                    "Pipeline cache: {} graphics pipelines not preloaded, their motion vectors "
+                    "setting differs from their cached shaders'",
+                    m_c_motion_mismatches);
+    }
     if (num_total_pipelines > num_pipelines) {
         LOG_WARNING(Render, "{} stale pipelines were found. Consider re-generating the cache",
                     num_total_pipelines - num_pipelines);

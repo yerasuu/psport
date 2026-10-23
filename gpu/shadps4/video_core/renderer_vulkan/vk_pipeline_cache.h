@@ -210,6 +210,8 @@ private:
     tsl::robin_map<size_t, std::unique_ptr<Program>> program_cache;
     /// psport: programs whose first translation failed, not tried again. GPU thread only.
     std::unordered_set<u64> m_untranslated_programs;
+    /// psport: preloaded graphics pipelines dropped by WarmUp, see LoadGraphicsPipeline.
+    u32 m_c_motion_mismatches{};
     /// psport: GetProgram's BuildSpecKey output, kept to reuse its storage. GPU thread only.
     std::vector<u32> m_spec_key;
     /// psport: exclusive for program/permutation insertions, shared for worker lookups.
