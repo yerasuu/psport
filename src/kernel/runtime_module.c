@@ -27,6 +27,7 @@ void runtime_modules_configure(unsigned char *p_base, RuntimeModule *p_table, si
 }
 int runtime_module_start(size_t h_handle, uint64_t args, const void *p_argp, int32_t *p_result) {
     if (h_handle>=s_c_modules || !h_handle) return 0;
+    if (s_p_modules[h_handle].has_np_manager_dependency) runtime_np_manager_start();
     pthread_mutex_lock(&s_start_lock);
     int32_t value=0;
     int ran=!s_p_started[h_handle];

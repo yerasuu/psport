@@ -434,6 +434,13 @@ static int linked_stem(const Linker *p_linker, const char *sz_library) {
     }
     return 0;
 }
+/* The console's dynamic linker loads libSceNpManager for such a module, and its module_start runs
+ * libSceNet's init before the module's own (kb #869). */
+static int needs_np_manager(const LoaderModule *p_module) {
+    for (size_t i = 0; i < p_module->c_modules; ++i)
+        if (!strcmp(p_module->p_modules[i].sz_name, "libSceNpManager")) return 1;
+    return 0;
+}
 static void free_module(LoaderModule *p_module) {
     free(p_module->p_elf); free(p_module->p_ph); free(p_module->p_dynamic); free(p_module->p_libraries); free(p_module->p_modules); free(p_module->p_symbols); free(p_module->p_relas);
 }
@@ -596,6 +603,7 @@ static void link_module(Linker *p_linker, const char *sz_filename, LoaderModule 
     p_runtime_module->tls_filesz = p_tls ? p_tls->filesz : 0;
     p_runtime_module->tls_module = module_id;
     p_runtime_module->deferred = (uint64_t)deferred;
+    p_runtime_module->has_np_manager_dependency = (uint64_t)needs_np_manager(p_module);
     loader_eh_frame(p_module, base, p_runtime_module);
     module_segments(p_module, base, p_runtime_module);
 }
@@ -695,6 +703,10 @@ void loader_load_game(const LoaderOptions *p_options, LoaderImage *p_out) {
     if (!(p_out->p_all_modules = calloc(c_linked + 1, sizeof(*p_out->p_all_modules)))) loader_fail("allocation failed");
     RuntimeModule *p_eboot = &p_out->p_all_modules[0];
     strcpy(p_eboot->sz_name, "eboot.bin");
+    /* A linked system libSceNpManager runs its own module_start. */
+    const int is_np_manager_linked = linked_stem(&l, "libSceNpManager");
+    p_eboot->has_np_manager_dependency = (uint64_t)(!is_np_manager_linked && needs_np_manager(&l.main));
+    for (size_t i = 0; i < c_linked && is_np_manager_linked; ++i) p_table[i].has_np_manager_dependency = 0;
     loader_eh_frame(&l.main, 0, p_eboot);
     module_segments(&l.main, 0, p_eboot);
     size_t c_export_capacity = 0;

@@ -241,6 +241,9 @@ uintptr_t runtime_trophy_resolve(const char *sz_name);
 uintptr_t runtime_json_resolve(const char *sz_name);
 /* PSN libraries offline (runtime_np.c), consulted by runtime_services_resolve. */
 uintptr_t runtime_np_resolve(const char *sz_name);
+/* libSceNpManager's network init (libSceNet, its pool, an SSL and an HTTP context), once per
+ * process, before the first module that links libSceNpManager starts. */
+void runtime_np_manager_start(void);
 int32_t *runtime_net_errno(void);
 /* The console's wired MAC address (runtime_socket.c). */
 void runtime_net_ether_address(uint8_t p_out_address[6]);
@@ -353,6 +356,8 @@ typedef struct { char sz_nid[16]; uint64_t va_export; } RuntimeModuleExport;
 typedef struct {
     char sz_name[128];
     uint64_t base, cb_module, init, va_tls, tls_memsz, tls_filesz, tls_module, deferred;
+    /* Needs libSceNpManager while the port serves it: runtime_np_manager_start runs before its start. */
+    uint64_t has_np_manager_dependency;
     uint64_t eh_frame_hdr, cb_eh_frame_hdr, eh_frame, cb_eh_frame, c_segments;
     RuntimeModuleSegment segments[4];
     uint64_t c_exports;

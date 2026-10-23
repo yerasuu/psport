@@ -352,6 +352,7 @@ int main(int argc, char **argv) {
             if (result) fail("module initializer failed");
         }
     }
+    if (s_p_all_modules && s_p_all_modules[0].has_np_manager_dependency) runtime_np_manager_start();
     printf("Entering original x86-64 code at guest offset 0x%" PRIx64 "\n", entry);
     g_has_entered_game=1;
     /* The entry's argument block: argc, then argv inline, NULL-terminated. */

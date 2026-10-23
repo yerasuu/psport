@@ -1,7 +1,7 @@
-/* PSN libraries offline: NpWebApi and NpWebApi2, NpInGameMessage, the memory pool statistics of
- * Net/Ssl/Http/WebApi, libSceSsl's certificate calls, NpGameIntent, the PS Store icon and the NpManager/NpAuth calls the
- * toolkits make. Score, Tus/Tss, WordFilter, BandwidthTest and Matching2 are in
- * runtime_np_community.c. */
+/* PSN libraries offline: NpWebApi and NpWebApi2, NpInGameMessage, libSceNet's and libSceSsl's
+ * initialization with libSceNpManager's network start, the memory pool statistics of Net/Ssl/Http/WebApi, libSceSsl's certificate calls,
+ * NpGameIntent, the PS Store icon and the NpManager/NpAuth calls the toolkits make. Score, Tus/Tss,
+ * WordFilter, BandwidthTest and Matching2 are in runtime_np_community.c. */
 #define _GNU_SOURCE
 #include "runtime_np.h"
 #include <pthread.h>
@@ -132,7 +132,7 @@ static int32_t create_or(uint32_t kind, int32_t no_memory_error) {
 
 /* ---- Memory pools: the size each library was initialized with; nothing is ever in use, since
  * no transfer starts. ---- */
-enum { POOL_NET, POOL_SSL, POOL_HTTP, POOL_WEBAPI, POOL_IN_GAME_MESSAGE };
+enum { POOL_HTTP, POOL_WEBAPI, POOL_IN_GAME_MESSAGE };
 typedef struct NpPool {
     uint32_t pool_kind;
     int32_t h_pool;
@@ -164,19 +164,138 @@ static bool pool_stats(uint32_t pool_kind, int32_t h_pool, uint64_t *p_out_stats
     return is_found;
 }
 
-static ABI int32_t net_pool_create(const char *sz_name, int32_t cb_pool, int32_t flags) {
-    (void)sz_name; (void)flags;
-    return pool_create(POOL_NET, cb_pool > 0 ? (uint64_t)cb_pool : 0);
+/* ---- libSceNet and libSceSsl initialization, as their firmware does it (kb #735); the online
+ * module (gpu/net) keeps the same ids and checks. Neither library's pool is mapped, since only
+ * their own internal allocations use it and nothing here makes any. ---- */
+#define NET_ERRNO_EBADF 9
+#define NET_ERRNO_EINVAL 22
+#define NET_ERRNO_ENFILE 23
+#define NET_ERRNO_ENAMETOOLONG 63
+#define NET_ERRNO_ENOTINIT 200
+#define NET_ERROR_EBADF ((int32_t)0x80410109)
+#define NET_ERROR_ENFILE ((int32_t)0x80410117)
+#define NET_ERROR_ENAMETOOLONG ((int32_t)0x8041013F)
+#define NET_ERROR_ENOTINIT ((int32_t)0x804101C8)
+#define NET_POOL_ID_BASE 3000
+#define CB_NET_POOL_MIN 0x1000
+#define CB_NET_POOL_NAME 32
+#define SSL_ERROR_INVALID_ID ((int32_t)0x8095F006)
+#define SSL_ERROR_NO_FREE_CONTEXT ((int32_t)0x8095F008)
+
+typedef struct LibraryPool {
+    bool is_used;
+    uint64_t cb_pool;
+} LibraryPool;
+static pthread_mutex_t s_library_pools_lock = PTHREAD_MUTEX_INITIALIZER;
+static int s_is_net_initialized;
+static LibraryPool s_net_pools[32];
+static LibraryPool s_ssl_contexts[128];
+static size_t s_i_last_ssl_context = sizeof(s_ssl_contexts) / sizeof(*s_ssl_contexts) - 1;
+
+enum { LOGGED_LIBRARY_FAILURES = 16 };
+static size_t s_c_library_failures;
+/* The call report counts every failure per call; the first ones also show here, in order. */
+static int32_t log_library_failure(const char *sz_call, int32_t error) {
+    const size_t c_failures = __atomic_add_fetch(&s_c_library_failures, 1, __ATOMIC_RELAXED);
+    if (c_failures <= LOGGED_LIBRARY_FAILURES)
+        printf("Runtime: %s failed with 0x%08X (libSceNet/libSceSsl failure %zu%s)\n", sz_call, (uint32_t)error,
+               c_failures, c_failures == LOGGED_LIBRARY_FAILURES ? ", later ones only counted in the call report" : "");
+    return error;
 }
-static ABI int32_t net_pool_stats(int32_t h_pool, uint64_t *p_out_stats) {
-    if (!p_out_stats) return NET_EINVAL;
-    pool_stats(POOL_NET, h_pool, p_out_stats);
+static int32_t net_fail(const char *sz_call, int32_t error, int32_t net_errno) {
+    *runtime_net_errno() = net_errno;
+    return log_library_failure(sz_call, error);
+}
+static bool find_pool(const LibraryPool *p_pools, size_t c_pools, int64_t i_pool, uint64_t *p_out_cb_pool) {
+    pthread_mutex_lock(&s_library_pools_lock);
+    const bool is_found = i_pool >= 0 && (uint64_t)i_pool < c_pools && p_pools[i_pool].is_used;
+    if (is_found) *p_out_cb_pool = p_pools[i_pool].cb_pool;
+    pthread_mutex_unlock(&s_library_pools_lock);
+    return is_found;
+}
+static bool release_pool(LibraryPool *p_pools, size_t c_pools, int64_t i_pool) {
+    pthread_mutex_lock(&s_library_pools_lock);
+    const bool is_found = i_pool >= 0 && (uint64_t)i_pool < c_pools && p_pools[i_pool].is_used;
+    if (is_found) p_pools[i_pool].is_used = false;
+    pthread_mutex_unlock(&s_library_pools_lock);
+    return is_found;
+}
+static void write_pool_stats(bool is_found, uint64_t cb_pool, uint64_t *p_out_stats) {
+    p_out_stats[0] = is_found ? cb_pool : 0;
+    p_out_stats[1] = p_out_stats[2] = 0;
+}
+
+/* A second call answers 0 as well. */
+static ABI int32_t net_init(void) {
+    if (!__atomic_exchange_n(&s_is_net_initialized, 1, __ATOMIC_ACQ_REL)) printf("Runtime: libSceNet initialized (offline)\n");
     return 0;
 }
-static ABI int32_t ssl_init(uint64_t cb_pool) { return pool_create(POOL_SSL, cb_pool); }
+/* libSceNet's own sceNetTerm does nothing and answers 0, so the library stays initialized. */
+static ABI int32_t net_term(void) { return 0; }
+static ABI int32_t net_pool_create(const char *sz_name, int32_t cb_pool, int32_t flags) {
+    if (!__atomic_load_n(&s_is_net_initialized, __ATOMIC_ACQUIRE))
+        return net_fail("sceNetPoolCreate", NET_ERROR_ENOTINIT, NET_ERRNO_ENOTINIT);
+    if (!sz_name || cb_pool < CB_NET_POOL_MIN || flags != 0) return net_fail("sceNetPoolCreate", NET_EINVAL, NET_ERRNO_EINVAL);
+    if (strnlen(sz_name, CB_NET_POOL_NAME) == CB_NET_POOL_NAME)
+        return net_fail("sceNetPoolCreate", NET_ERROR_ENAMETOOLONG, NET_ERRNO_ENAMETOOLONG);
+    pthread_mutex_lock(&s_library_pools_lock);
+    for (size_t i_pool = 0; i_pool < sizeof(s_net_pools) / sizeof(*s_net_pools); ++i_pool)
+        if (!s_net_pools[i_pool].is_used) {
+            s_net_pools[i_pool] = (LibraryPool){true, (uint64_t)cb_pool};
+            pthread_mutex_unlock(&s_library_pools_lock);
+            const int32_t h_pool = NET_POOL_ID_BASE + (int32_t)i_pool;
+            printf("Runtime: libSceNet pool %d '%s', %d bytes\n", h_pool, sz_name, cb_pool);
+            return h_pool;
+        }
+    pthread_mutex_unlock(&s_library_pools_lock);
+    return net_fail("sceNetPoolCreate", NET_ERROR_ENFILE, NET_ERRNO_ENFILE);
+}
+static ABI int32_t net_pool_destroy(int32_t h_pool) {
+    if (!__atomic_load_n(&s_is_net_initialized, __ATOMIC_ACQUIRE))
+        return net_fail("sceNetPoolDestroy", NET_ERROR_ENOTINIT, NET_ERRNO_ENOTINIT);
+    if (!release_pool(s_net_pools, sizeof(s_net_pools) / sizeof(*s_net_pools), (int64_t)h_pool - NET_POOL_ID_BASE))
+        return net_fail("sceNetPoolDestroy", NET_ERROR_EBADF, NET_ERRNO_EBADF);
+    printf("Runtime: libSceNet pool %d destroyed\n", h_pool);
+    return 0;
+}
+static ABI int32_t net_pool_stats(int32_t h_pool, uint64_t *p_out_stats) {
+    if (!p_out_stats) return log_library_failure("sceNetGetMemoryPoolStats", NET_EINVAL);
+    uint64_t cb_pool = 0;
+    const bool is_found = find_pool(s_net_pools, sizeof(s_net_pools) / sizeof(*s_net_pools), (int64_t)h_pool - NET_POOL_ID_BASE, &cb_pool);
+    write_pool_stats(is_found, cb_pool, p_out_stats);
+    return 0;
+}
+/* Fixed ids 1..128, handed out from the slot after the last one given and wrapping; there is no
+ * already-initialized error, each call takes a new context. */
+static ABI int32_t ssl_init(uint64_t cb_pool) {
+    const size_t c_contexts = sizeof(s_ssl_contexts) / sizeof(*s_ssl_contexts);
+    pthread_mutex_lock(&s_library_pools_lock);
+    for (size_t c_tried = 1; c_tried <= c_contexts; ++c_tried) {
+        const size_t i_context = (s_i_last_ssl_context + c_tried) % c_contexts;
+        if (!s_ssl_contexts[i_context].is_used) {
+            s_ssl_contexts[i_context] = (LibraryPool){true, cb_pool};
+            s_i_last_ssl_context = i_context;
+            pthread_mutex_unlock(&s_library_pools_lock);
+            const int32_t h_context = (int32_t)i_context + 1;
+            printf("Runtime: libSceSsl context %d, pool %llu bytes\n", h_context, (unsigned long long)cb_pool);
+            return h_context;
+        }
+    }
+    pthread_mutex_unlock(&s_library_pools_lock);
+    return log_library_failure("sceSslInit", SSL_ERROR_NO_FREE_CONTEXT);
+}
+/* The firmware waits here for the context's connections to close; none is ever opened offline. */
+static ABI int32_t ssl_term(int32_t h_context) {
+    if (!release_pool(s_ssl_contexts, sizeof(s_ssl_contexts) / sizeof(*s_ssl_contexts), (int64_t)h_context - 1))
+        return log_library_failure("sceSslTerm", SSL_ERROR_INVALID_ID);
+    printf("Runtime: libSceSsl context %d terminated\n", h_context);
+    return 0;
+}
 static ABI int32_t ssl_pool_stats(int32_t h_ssl, uint64_t *p_out_stats) {
-    if (!p_out_stats) return SSL_INVALID_VALUE;
-    pool_stats(POOL_SSL, h_ssl, p_out_stats);
+    if (!p_out_stats) return log_library_failure("sceSslGetMemoryPoolStats", SSL_INVALID_VALUE);
+    uint64_t cb_pool = 0;
+    const bool is_found = find_pool(s_ssl_contexts, sizeof(s_ssl_contexts) / sizeof(*s_ssl_contexts), (int64_t)h_ssl - 1, &cb_pool);
+    write_pool_stats(is_found, cb_pool, p_out_stats);
     return 0;
 }
 /* ---- libSceSsl certificates: offline no TLS connection is ever made, so the CA store handed to
@@ -231,6 +350,20 @@ static ABI int32_t ssl_get_serial_number(int32_t h_ssl, const void *p_cert, cons
 static ABI int32_t http_init(int32_t h_net_pool, int32_t h_ssl, uint64_t cb_pool) {
     (void)h_net_pool; (void)h_ssl;
     return pool_create(POOL_HTTP, cb_pool);
+}
+/* libSceNpManager's module_start (sceNpManagerPrxStart's network init, kb #869), which on the
+ * console runs before any game code in every process that links it: NpToolkit2's Core::init then
+ * finds libSceNet initialized, and its own pool and SSL context take ids 3001 and 2. */
+static void start_np_manager(void) {
+    net_init();
+    const int32_t h_pool = net_pool_create("SceNpSdkClient", 0x4000, 0);
+    const int32_t h_ssl = ssl_init(0x40000);
+    const int32_t h_http = http_init(h_pool, h_ssl, 0xC000);
+    printf("Runtime: libSceNpManager started: net pool %d, SSL context %d, HTTP context %d\n", h_pool, h_ssl, h_http);
+}
+void runtime_np_manager_start(void) {
+    static pthread_once_t s_once = PTHREAD_ONCE_INIT;
+    pthread_once(&s_once, start_np_manager);
 }
 static ABI int32_t http_pool_stats(int32_t h_http, uint64_t *p_out_stats) {
     if (!p_out_stats) return HTTP_INVALID_VALUE;
@@ -519,8 +652,9 @@ static ABI int32_t auth_code(int32_t h_request, const void *p_parameter, void *p
 static ABI int32_t callback_unregistered(void) { return 0; }
 
 static const RuntimeExport s_exports[] = {
-    {"sceNetPoolCreate", net_pool_create}, {"sceNetGetMemoryPoolStats", net_pool_stats},
-    {"sceSslInit", ssl_init}, {"sceSslGetMemoryPoolStats", ssl_pool_stats},
+    {"sceNetInit", net_init}, {"sceNetTerm", net_term},
+    {"sceNetPoolCreate", net_pool_create}, {"sceNetPoolDestroy", net_pool_destroy}, {"sceNetGetMemoryPoolStats", net_pool_stats},
+    {"sceSslInit", ssl_init}, {"sceSslTerm", ssl_term}, {"sceSslGetMemoryPoolStats", ssl_pool_stats},
     {"sceSslGetCaCerts", ssl_get_ca_certs}, {"sceSslFreeCaCerts", ssl_free_ca_certs},
     {"sceSslGetSubjectName", ssl_get_cert_name}, {"sceSslGetIssuerName", ssl_get_cert_name},
     {"sceSslGetNameEntryCount", ssl_no_cert_name}, {"sceSslFreeSslCertName", ssl_no_cert_name},
