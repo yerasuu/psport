@@ -1,4 +1,4 @@
-// psport: SDL3 window for the Vulkan swapchain (X11 or Wayland).
+// psport: SDL3 window for the Vulkan swapchain (X11, Wayland or Win32).
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -139,6 +139,11 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, const char* sz_title, const char* 
         m_window_info.type = WindowSystemType::Wayland;
         m_window_info.display_connection = SDL_GetPointerProperty(wp, SDL_PROP_WINDOW_WAYLAND_DISPLAY_POINTER, nullptr);
         m_window_info.render_surface = SDL_GetPointerProperty(wp, SDL_PROP_WINDOW_WAYLAND_SURFACE_POINTER, nullptr);
+#if defined(_WIN32)
+    } else if (sz_driver && !std::strcmp(sz_driver, "windows")) {
+        m_window_info.type = WindowSystemType::Windows;
+        m_window_info.render_surface = SDL_GetPointerProperty(wp, SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr);
+#endif
     } else {
         LOG_ERROR(Frontend, "Unsupported SDL video driver {}", sz_driver ? sz_driver : "(none)");
         SDL_DestroyWindow(m_p_window);
