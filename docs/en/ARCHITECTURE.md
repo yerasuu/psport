@@ -333,6 +333,9 @@ watch, all meant to behave as before:
   inside exception delivery and while a runtime lock is held, so the mask is the same at both ends.
 - `game_info.c`: the install folder (title patch files) is `PS_INSTALL_DIR`, else the nearest folder
   above the executable holding `patches/` (was always two folders up).
+- `psport_guest_memory.cpp`: when the host import probe fails on its shared view, it imports private
+  memory too and says so in the reason (`private memory imports: the driver takes anonymous memory
+  only`, RADV's case); the choice of mode is the same.
 
 The guest's memory map, its region table and the low allocator (`runtime_low_map`, host memory the
 guest sees in `[0x0800000000, 0x1000000000)`) stay in `runtime_memory.c` and reach the host only

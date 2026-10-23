@@ -51,6 +51,13 @@ FEATURE_HOST(gpu_memory_host_import, LINUX, IMPLEMENTED,
              "probed when dma-buf maps at offset 0 only or not at all, or with PS_GUEST_MEMORY=host; not preferred for "
              "being reported, since RADV passes the probe and stalls (gpu/memory/psport_guest_memory.cpp)",
              "#540")
+FEATURE_HOST(gpu_memory_host_import, WIN32, EXPERIMENTAL,
+             "the only path: the GPU imports the backing MapViewOfFile3 view of the direct memory section, probed at "
+             "start; under Proton on RADV the import of section views fails (ErrorInvalidExternalHandle; private "
+             "VirtualAlloc memory imports, as amdgpu's userptr pins anonymous memory only, and Win32 handles neither "
+             "import a section nor export memory MapViewOfFile takes), so the port stops there with the reason; not "
+             "run with a driver that imports views (NVIDIA, native Windows)",
+             "#870")
 FEATURE_PROBED(gpu_memory_host_import)
 
 FEATURE(write_traps, fault, "faults on guest memory: the write traps that track what the GPU reads, fault recovery and "

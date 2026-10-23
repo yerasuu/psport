@@ -348,6 +348,32 @@ bool RunOnce(const Vulkan::Instance& instance, Record&& record) {
     return is_ok;
 }
 
+#ifdef _WIN32
+constexpr const char* SharedViewName = "view of a section";
+#else
+constexpr const char* SharedViewName = "memfd mapping";
+#endif
+
+/// Whether the driver imports private memory where it refused a shared view: amdgpu's userptr
+/// (RADV, also under Wine) pins anonymous memory only, and the failure then needs a different
+/// sharing model, not another driver setting.
+bool ImportsPrivateMemory(u64 cb_range) {
+    void* p_private = ps_host_vm_map(nullptr, cb_range, PS_HOST_VM_READ | PS_HOST_VM_WRITE, 0);
+    if (!p_private) {
+        return false;
+    }
+    vk::Buffer buffer;
+    vk::DeviceMemory memory;
+    vk::Result error{};
+    const bool is_imported = ImportHost(p_private, cb_range, buffer, memory, error);
+    if (is_imported) {
+        s_device.destroyBuffer(buffer);
+        s_device.freeMemory(memory);
+    }
+    ps_host_vm_unmap(p_private, cb_range);
+    return is_imported;
+}
+
 /// Host import as the PC model uses it, on a small memfd mapped twice (the guest's view and the
 /// backing view): imported through one view, bound into a sparse buffer like the arena, written by
 /// the GPU and read by the CPU through the other view, and the other way round.
@@ -384,7 +410,13 @@ bool HostImportWorks(const Vulkan::Instance& instance, const char*& why) {
         why = "mmap of the memfd";
     } else if (!ImportHost(p_view, Size, buffer, memory, error)) {
         static std::string s_text;
-        s_text = "the import of a memfd mapping failed (" + vk::to_string(error) + ")";
+        s_text = std::string{"the import of a "} + SharedViewName + " failed (" +
+                 vk::to_string(error) + ")";
+        if (ImportsPrivateMemory(Size)) {
+            s_text += "; private memory imports: the driver takes anonymous memory only, and "
+                      "direct memory is mapped at several addresses through views of one shared "
+                      "memory";
+        }
         why = s_text.c_str();
     } else if (LayerMemory()) {
         // The layer's memory module binds the imported buffers themselves (no sparse arena): the
