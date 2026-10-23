@@ -16,6 +16,33 @@ changes alone make no release. What breaks is psport's launch interface: `run.sh
 The tags without a `v` (`0.1` to `0.51`) are bbport's releases, carried in psport's history; their
 notes are in [docs/en/history/](docs/en/history/).
 
+## v0.1.2
+
+GPU buffer failures no longer stop a game, and the groundwork of a Windows port lands. Windows is
+not supported yet: `psport.exe` starts under Proton and stops when it creates its window. The
+launch interface does not change.
+
+### Graphics
+- When the GPU cannot allocate a buffer, psport frees what it can and tries again over the memory
+  budget; if that fails too, it skips the copy, draw or dispatch that needed the buffer instead of
+  stopping. Each failure is logged and counted in the call summary.
+
+### Windows (groundwork, not supported)
+- The platform layer for guest memory, faults and thread interrupts, files, processes and sockets
+  exists, and `psport.exe` and the GPU library build with MSYS2's CLANG64; a CI job on `develop` and
+  `main` publishes them as an artifact to try, never as a release.
+- Under Proton, `psport.exe` creates its window and Vulkan surface and stops at the guest-memory
+  check (`Guest memory: direct memory cannot be shared with this driver`); no game has run. `--list-features` still reports every Windows capability as experimental or
+  unavailable.
+- For contributors: `tools/win32-cross.sh` builds the Windows binaries on Linux, and
+  `tools/win32-proton-run.sh` runs them under Proton and ends the prefix's Wine processes afterwards.
+- Linux runs through the same code paths as before (sockets, trophies, mutex waits, the install
+  folder lookup, which now also accepts the nearest folder above the executable holding `patches/`).
+
+### Documentation
+- The README names the AMD Radeon RX 7900 XT with Mesa (RADV) as the tested machine.
+- xbyak 7.43 ships in `gpu/third_party/xbyak`, so builds no longer need it from the Nix shell.
+
 ## v0.1.1
 
 Fixes and ports on v0.1.0: bbport 0.6-pre1's and shadPS4's later fixes ported by hand, firmware
