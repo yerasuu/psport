@@ -10,12 +10,29 @@ Whether NVIDIA, AMD or Intel's Windows drivers import section views decides how 
 
 ## Get the package
 
-Every push to `develop` and `main` runs `.github/workflows/windows.yml`. Open the run in the
-repository's Actions tab (workflow "Windows"), and under Artifacts download
-`psport-windows-<version>-<commit>-x86_64.zip`: the artifact is the package's zip itself. Next to it,
+Each release `vX.Y.Z` carries the package where anyone downloads it without an account (kb #920),
+and decanter on Windows takes it from there: `psport-windows-vX.Y.Z-x86_64.zip` and
+`psport-windows-vX.Y.Z-x86_64.zip.sha256` (`<sha256>  <zip name>`, `sha256sum` format):
+
+```sh
+tag=v0.1.5
+base=https://github.com/yerasuu/psport/releases/download/$tag
+curl -fLO "$base/psport-windows-$tag-x86_64.zip"
+curl -fLO "$base/psport-windows-$tag-x86_64.zip.sha256"
+sha256sum -c "psport-windows-$tag-x86_64.zip.sha256"
+```
+
+On Windows, PowerShell's `Get-FileHash <zip>` prints the SHA-256 to compare (in capitals).
+
+Only tags publish (decanter's decision #925): a branch is tested from its sources, built locally. A
+tag's assets appear once its workflow run finishes, before or after the Linux ones. The zip holds one
+folder, `psport-windows-<version>-<commit>-x86_64/` (the 12-character commit), whatever the asset's
+name.
+
+Every push also keeps the run's artifacts: in the repository's Actions tab (workflow "Windows"),
+`psport-windows-<version>-<commit>-x86_64.zip` is the same package, and
 `psport-windows-<version>-<commit>-x86_64-sources` holds the PKGBUILD and upstream tarball of the
-FFmpeg the package carries. GitHub keeps both 14 days and asks for a signed-in account; it is never a
-release.
+FFmpeg it carries. GitHub keeps both 14 days and asks for a signed-in account.
 
 Without CI, from Linux: `tools/win32-cross.sh sysroot`, `ffmpeg`, `build`, `runtime`, then
 `tools/win32-bundle.sh DEST` writes the same zip and sources folder (see
