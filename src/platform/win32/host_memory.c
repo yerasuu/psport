@@ -79,6 +79,11 @@ static DWORD page_protection(unsigned access) {
     return access & PS_HOST_VM_READ ? PAGE_READONLY : PAGE_NOACCESS;
 }
 
+/* A view's protection at mapping caps what VirtualProtect may grant it later (a PAGE_READWRITE view
+ * refuses PAGE_EXECUTE_READ with error 87), so views are mapped with the execute access their
+ * sections allow and narrowed after, since guest code turns executable once it is loaded. */
+#define VIEW_PROTECTION PAGE_EXECUTE_READWRITE
+
 static int report(const char *sz_call, uintptr_t va_range, uint64_t cb_range) {
     const DWORD error = GetLastError();
     printf("Host memory: %s failed at %#llx (+%#llx): Windows error %lu\n", sz_call, (unsigned long long)va_range,
@@ -373,12 +378,10 @@ static int save_protections(uintptr_t va_begin, uintptr_t va_end, ProtectionRuns
 static int map_view(size_t i_piece, int i_section, uint64_t off_section, DWORD protection) {
     Piece *p_piece = &s_p_pieces[i_piece];
     const size_t cb_view = p_piece->va_end - p_piece->va_begin;
-    /* A view cannot start without access; its protection changes after. */
-    const DWORD initial = protection == PAGE_NOACCESS ? PAGE_READWRITE : protection;
     if (!MapViewOfFile3(s_p_sections[i_section].h_mapping, GetCurrentProcess(), (void *)p_piece->va_begin, off_section,
-                        cb_view, MEM_REPLACE_PLACEHOLDER, initial, NULL, 0))
+                        cb_view, MEM_REPLACE_PLACEHOLDER, VIEW_PROTECTION, NULL, 0))
         return report("MapViewOfFile3", p_piece->va_begin, cb_view);
-    const int error = initial == protection ? 0 : protect_committed(p_piece->va_begin, cb_view, protection);
+    const int error = protection == VIEW_PROTECTION ? 0 : protect_committed(p_piece->va_begin, cb_view, protection);
     if (error && UnmapViewOfFile2(GetCurrentProcess(), (void *)p_piece->va_begin, MEM_PRESERVE_PLACEHOLDER)) return error;
     if (error) report("UnmapViewOfFile2 (a view whose protection failed)", p_piece->va_begin, cb_view);
     p_piece->i_section = i_section;
@@ -554,12 +557,11 @@ static void *view_outside(int i_section, void *p_at, size_t cb_range, unsigned a
         if (error) return failed(error);
     }
     const DWORD protection = page_protection(access);
-    const DWORD initial = protection == PAGE_NOACCESS ? PAGE_READWRITE : protection;
     unsigned char *p_view =
         MapViewOfFile3(s_p_sections[i_section].h_mapping, GetCurrentProcess(), is_placed(flags) ? p_at : NULL,
-                       off_section - cb_lead, cb_range + cb_lead, 0, initial, NULL, 0);
+                       off_section - cb_lead, cb_range + cb_lead, 0, VIEW_PROTECTION, NULL, 0);
     if (!p_view) return failed(is_placed(flags) && GetLastError() == ERROR_INVALID_ADDRESS ? EEXIST : last_error());
-    if (initial != protection) {
+    if (protection != VIEW_PROTECTION) {
         const int error = protect_committed((uintptr_t)p_view + cb_lead, cb_range, protection);
         if (error) {
             UnmapViewOfFile(p_view);
