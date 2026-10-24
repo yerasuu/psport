@@ -8,9 +8,9 @@ on:
 permissions: {}
 
 jobs:
-  # What builds on Windows so far (decision #623, #614): the GPU library, psport.exe and the
-  # capability check, with MSYS2's CLANG64 (clang, libc++, UCRT), handed over as an artifact to try.
-  # Nothing is published.
+  # What builds on Windows so far (decision #623, #614): the GPU library, psport.exe, the capability
+  # check and the Windows probe, with MSYS2's CLANG64 (clang, libc++, UCRT), handed over as the test
+  # package's zip (tools/win32-bundle.sh, kb #899) to try. Nothing is published.
   build:
     runs-on: windows-latest
     timeout-minutes: 240
@@ -36,7 +36,7 @@ jobs:
         with:
           msystem: CLANG64
           update: true
-          install: git
+          install: git zip
           pacboy: >-
             clang:p lld:p llvm-tools:p cmake:p ninja:p pkgconf:p
             vulkan-headers:p vulkan-loader:p vulkan-memory-allocator:p glslang:p
@@ -49,36 +49,27 @@ jobs:
           set -o pipefail
           mkdir -p out
           bash build.sh 2>&1 | tee out/build-output.txt
-      - name: Collect
-        if: always()
+      - name: Bundle
+        id: bundle
         run: |
-          mkdir -p dist
-          built=()
-          {
-            echo "psport Windows build of $GITHUB_SHA ($GITHUB_REF_NAME), $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-            echo "Toolchain: MSYS2 CLANG64, $(clang --version | head -n 1)"
-            for file in out/psport.exe out/gpu/libpsport-gpu.dll out/psport-gpu-capabilities.exe; do
-              if [[ -f $file ]]; then
-                echo "built: ${file##*/}"; built+=("$file")
-              else
-                echo "not built: ${file##*/} (see build-output.txt)"
-              fi
-            done
-            echo 'not built yet: libpsport-net.dll (the online module), the DLSS bridge'
-            echo 'psport.exe loads libpsport-gpu.dll from its own folder; psport.exe --list-features says'
-            echo 'what is EXPERIMENTAL or UNAVAILABLE on Windows (#614).'
-          } > dist/BUILD-STATUS.txt
-          for file in "${built[@]}"; do
-            cp "$file" dist/
-            # The CLANG64 libraries it loads (libc++, SDL3, FFmpeg...), so that it runs outside MSYS2.
-            ldd "$file" | awk '$3 ~ /^\/clang64\// { print $3 }' | xargs -r cp -n -t dist/
-          done
-          cp out/build-output.txt dist/ 2>/dev/null || true
-          cp out/gpu-build.log dist/ 2>/dev/null || true
-      - if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+          bash tools/win32-bundle.sh dist
+          echo "zip=$(ls dist/*.zip)" >> "$GITHUB_OUTPUT"
+      # The zip as it is, so that testers download the package itself and not a zip around it.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: psport-windows-${{ github.sha }}
-          path: dist
+          path: ${{ steps.bundle.outputs.zip }}
+          archive: false
           retention-days: 14
           if-no-files-found: error
+      - name: Collect the logs
+        if: failure()
+        run: |
+          mkdir -p logs
+          cp out/build-output.txt out/gpu-build.log logs/ 2>/dev/null || true
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: psport-windows-logs-${{ github.sha }}
+          path: logs
+          retention-days: 14
+          if-no-files-found: warn
