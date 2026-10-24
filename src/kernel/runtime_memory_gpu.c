@@ -118,6 +118,27 @@ void runtime_memory_note_cpu_write(uintptr_t va_range, uint64_t cb_range) {
         }
     }
 }
+/* psport: the CPU is about to write every byte of [address, address+size) (a libc copy or fill, a
+ * loader's copy). What the GPU wrote in the whole pages inside is dead, so the GPU side drops it
+ * instead of reading it back at the write's faults (a wait and a 512 KiB download per faulting
+ * window, #740). Only watched pages fault; pages partly inside keep their readback, since the
+ * write leaves some of their bytes. */
+static GpuRange s_pfn_hook_overwrite;
+void runtime_memory_set_overwrite_hook(GpuRange pfn_hook) { s_pfn_hook_overwrite=pfn_hook; }
+void runtime_memory_prepare_overwrite(uintptr_t va_range, uint64_t cb_range) {
+    if (!s_pfn_hook_overwrite || !s_p_write_watch || va_range>=WATCH_LIMIT || cb_range>WATCH_LIMIT-va_range) return;
+    const uint64_t first=(va_range+4095)>>12, end=(va_range+cb_range)>>12;
+    if (first>=end) return;
+    const uint64_t last=end-1;
+    for (uint64_t word=first>>6; word<=last>>6; ++word) {
+        const uint64_t lo=word==first>>6 ? first&63 : 0, hi=word==last>>6 ? last&63 : 63;
+        const uint64_t mask=(hi==63 ? ~0ull : (2ull<<hi)-1) & ~((1ull<<lo)-1);
+        if (atomic_load_explicit(&s_p_write_watch[word],memory_order_acquire) & mask) {
+            s_pfn_hook_overwrite(va_range,cb_range);
+            return;
+        }
+    }
+}
 /* psport: write traps the GPU side keeps on guest pages, by reason (bits: a VRAM copy of the page,
  * an image made from it, a command buffer of a frame in flight, ...). A page with any reason is read-only for the game even where its
  * own protection allows writes; the fault goes to the GPU library's handlers, and each clears

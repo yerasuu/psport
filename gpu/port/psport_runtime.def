@@ -62,6 +62,7 @@ EXPORTS
     runtime_memory_gpu_protect
     runtime_memory_is_mapped
     runtime_memory_note_write
+    runtime_memory_prepare_overwrite
     runtime_memory_read_backing
     runtime_memory_read_guest
     runtime_memory_read_guest_signal
@@ -72,6 +73,7 @@ EXPORTS
     runtime_memory_set_guest_chunk_allocator
     runtime_memory_set_guest_chunk_whole
     runtime_memory_set_note_write_hook
+    runtime_memory_set_overwrite_hook
     runtime_memory_set_write_watch
     runtime_memory_trap
     runtime_memory_trap_reasons

@@ -691,6 +691,15 @@ void VideoOutDriver::Flip(const Request& req) {
                                 updates / window, late / window, copied_back / window,
                                 readbacks / window);
                 }
+                const u64 drops = PsStats::g_c_overwrite_drops.exchange(0);
+                const u64 kept = PsStats::g_c_overwrite_drops_kept.exchange(0);
+                if (drops + kept != 0) {
+                    std::printf("GPU data overwritten by the CPU: %.1f writes/s dropped it instead of a "
+                                "readback (%.2f MB/s of whole pages), %.1f page runs/s kept for one "
+                                "(GPU write not done)\n",
+                                drops / window, PsStats::g_cb_overwrite_drop.exchange(0) / (window * 1e6),
+                                kept / window);
+                }
             }
             Libraries::Kernel::ReportEqueueWaits(frames);
             if (const Game::Profile* game = Game::Active(); game && game->pfn_report_stats) {

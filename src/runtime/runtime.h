@@ -52,6 +52,8 @@ int64_t runtime_memory_read_guest_signal(void *p_out, uintptr_t va_range, uint64
 void runtime_memory_note_write(uintptr_t va_range, uint64_t cb_range);
 void runtime_memory_note_cpu_write(uintptr_t va_range, uint64_t cb_range);
 void runtime_memory_prepare_cpu_write(uintptr_t va_range, uint64_t cb_range);
+/* Before a write of every byte of the range: GPU data in its whole pages is dropped, not read back. */
+void runtime_memory_prepare_overwrite(uintptr_t va_range, uint64_t cb_range);
 /* libkernel memory pools (runtime_mempool.c) over the runtime's direct memory and mapping table. */
 uintptr_t runtime_mempool_resolve(const char *sz_name);
 void runtime_mempool_report(void);

@@ -749,6 +749,48 @@ void BufferCache::ReadMemory(VAddr device_addr, u64 size, bool is_write, bool as
     }
 }
 
+void BufferCache::DropOverwrittenGpuData(VAddr addr, u64 size) {
+    // The layer's mirrors hold GPU data the tracker does not describe alone (LayerNoteCpuWrite):
+    // its writes keep the readback path.
+    if (LayerMode() || EmulatorSettings.GetReadbacksMode() == GpuReadbacksMode::Disabled) {
+        return;
+    }
+    const VAddr pages_start = Common::AlignUp(addr, TRACKER_BYTES_PER_PAGE);
+    const VAddr pages_end = Common::AlignDown(addr + size, TRACKER_BYTES_PER_PAGE);
+    if (pages_start >= pages_end ||
+        !memory_tracker->IsRegionGpuModified(pages_start, pages_end - pages_start)) {
+        return;
+    }
+    liverpool->SendCommand<true>([this, pages_start, pages_end] {
+        boost::container::small_vector<std::pair<VAddr, VAddr>, 8> ranges;
+        memory_tracker->ForEachDownloadRange<false>(
+            pages_start, pages_end - pages_start,
+            [&ranges](VAddr start, u64 cb_range) { ranges.emplace_back(start, start + cb_range); });
+        u64 cb_dropped = 0;
+        for (const auto& [start, end] : ranges) {
+            // A GPU write not done yet could land in the game's memory after the CPU's (a block in
+            // place) or be read back over it later: such pages wait for it at the write's fault.
+            const u64 tick = WriteTicks().Newest(start, end - start);
+            if (tick == 0 || !scheduler.IsFree(tick)) {
+                PsStats::g_c_overwrite_drops_kept.fetch_add(1, std::memory_order_relaxed);
+                continue;
+            }
+            if (TwinsEnabled()) {
+                std::scoped_lock lk{twins_mutex};
+                EraseTwins(start, end);
+            }
+            gpu_modified_ranges.Subtract(start, end - start);
+            memory_tracker->UnmarkRegionAsGpuModified(start, end - start);
+            memory_tracker->MarkRegionAsCpuModified(start, end - start);
+            cb_dropped += end - start;
+        }
+        if (cb_dropped != 0) {
+            PsStats::g_c_overwrite_drops.fetch_add(1, std::memory_order_relaxed);
+            PsStats::g_cb_overwrite_drop.fetch_add(cb_dropped, std::memory_order_relaxed);
+        }
+    });
+}
+
 bool BufferCache::LayerReadTrapHit(VAddr address, TrapCaller caller) {
     if (!(PsLayer::WriteTraps::Reasons(address) & PsLayer::WriteTraps::VramData)) {
         return false;

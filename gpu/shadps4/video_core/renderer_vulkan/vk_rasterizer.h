@@ -132,6 +132,9 @@ public:
     /// psport: a guest thread wrote [addr, addr + size) with a libc import (memcpy, memset, memmove)
     /// over pages the caches watch (no write tracking): what a write fault did.
     void OnCpuWrite(VAddr addr, u64 size);
+    /// psport: a guest thread is about to write every byte of [addr, addr + size): the GPU data in
+    /// the whole pages inside is dropped instead of read back at the write's faults.
+    void PrepareCpuOverwrite(VAddr addr, u64 size);
     /// GPU thread, before a write the guest can observe (see Scheduler::WaitHostCopies).
     void WaitHostCopies() {
         DrainDrawPipe();

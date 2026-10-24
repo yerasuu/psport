@@ -123,6 +123,9 @@ inline std::atomic<std::uint64_t> g_cb_bound_in_place_written{0};
 /// back to the game's memory before moving in place; downloads of GPU data (readbacks).
 inline std::atomic<std::uint64_t> g_c_gpu_data_updates{0}, g_c_copied_back_blocks{0}, g_c_readbacks{0};
 inline std::atomic<std::uint64_t> g_c_late_vram_writes{0}; ///< labels and the like put into VRAM copies
+/// GPU data dropped, not read back, before a CPU write of its whole pages (DropOverwrittenGpuData):
+/// writes and bytes; and page runs left to the readback since the GPU's write there was not done.
+inline std::atomic<std::uint64_t> g_c_overwrite_drops{0}, g_cb_overwrite_drop{0}, g_c_overwrite_drops_kept{0};
 /// Copies of in-place data the CPU writes into VRAM for reading (ShadowCopy).
 inline std::atomic<std::uint64_t> g_c_shadow_copies{0}, g_cb_shadow{0};
 /// Images tiled back into system memory: through VRAM with one copy (LocalTiling), and bytes.

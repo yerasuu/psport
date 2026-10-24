@@ -39,6 +39,7 @@ int32_t* runtime_errno(void);
 void runtime_memory_set_gpu_hooks(RuntimeGpuRange pfn_map, RuntimeGpuRange pfn_unmap, RuntimeGpuRange pfn_invalidate);
 void runtime_memory_set_note_write_hook(RuntimeGpuRange pfn_note);
 void runtime_memory_set_cpu_write_hook(RuntimeGpuRange pfn_hook);
+void runtime_memory_set_overwrite_hook(RuntimeGpuRange pfn_hook);
 }
 
 namespace Core {
@@ -63,6 +64,9 @@ void MemoryManager::SetRasterizer(Vulkan::Rasterizer* rasterizer_) {
     // psport: the game's libc copies (memcpy, memset, memmove) over pages the caches watch.
     runtime_memory_set_cpu_write_hook([](uintptr_t va_range, uint64_t cb_range) {
         Memory::Instance()->GetRasterizer()->OnCpuWrite(va_range, cb_range);
+    });
+    runtime_memory_set_overwrite_hook([](uintptr_t va_range, uint64_t cb_range) {
+        Memory::Instance()->GetRasterizer()->PrepareCpuOverwrite(va_range, cb_range);
     });
 }
 void MemoryManager::InvalidateMemory(VAddr va_range, u64 cb_range) {

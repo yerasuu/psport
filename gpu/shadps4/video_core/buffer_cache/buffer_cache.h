@@ -123,6 +123,11 @@ public:
     /// Flushes any GPU modified buffer in the logical page range back to CPU memory.
     void ReadMemory(VAddr device_addr, u64 size, bool is_write = false, bool assume_locks = false);
 
+    /// psport: the caller (not a GPU-side thread) is about to write every byte of
+    /// [addr, addr + size). GPU data in the whole pages inside whose writes are done is dropped
+    /// and the pages become CPU-modified: what ReadMemory does for a write, without the download.
+    void DropOverwrittenGpuData(VAddr addr, u64 size);
+
     /// Who hit a read trap: a guest (or runtime) thread, the GPU command thread (stage A, the
     /// draw pipe drained) or the draw recording thread (stage B: it may not record or flush).
     enum class TrapCaller { Guest, CommandThread, RecordingThread };

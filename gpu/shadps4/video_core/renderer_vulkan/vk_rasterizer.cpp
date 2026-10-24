@@ -4816,6 +4816,14 @@ void Rasterizer::OnCpuWrite(VAddr addr, u64 size) {
     }
 }
 
+void Rasterizer::PrepareCpuOverwrite(VAddr addr, u64 size) {
+    // The drop runs on the GPU command thread, which a GPU-side thread cannot wait for: there the
+    // write keeps its readbacks.
+    if (!IsGpuSideThread() && IsMapped(addr, size)) {
+        buffer_cache.DropOverwrittenGpuData(addr, size);
+    }
+}
+
 bool Rasterizer::OnWriteFault(VAddr addr, bool assume_locks, u64 guest_rip) {
     DrainDrawPipe();
     if (!InvalidateMemory(addr, 8, assume_locks)) {

@@ -214,19 +214,27 @@ static ABI __attribute__((noreturn)) void stack_fail(void) {
     fputs("STOP: guest stack protector detected corruption\n", stderr);
     runtime_stop(22);
 }
+/* A source inside the destination is read after part of it was written: its pages' GPU data must
+ * be read back first, so such a copy is not announced as an overwrite. */
+static void prepare_copy(void *p_dst, const void *p_src, size_t cb_copy) {
+    const uintptr_t va_dst=(uintptr_t)p_dst, va_src=(uintptr_t)p_src;
+    if (va_src>=va_dst+cb_copy || va_dst>=va_src+cb_copy) runtime_memory_prepare_overwrite(va_dst, cb_copy);
+    runtime_memory_prepare_cpu_write(va_dst, cb_copy);
+}
 static ABI void *guest_memset(void *p_dst, int value, size_t cb_fill) {
     atomic_fetch_add_explicit(&s_c_memory_calls,1,memory_order_relaxed);
+    runtime_memory_prepare_overwrite((uintptr_t)p_dst, cb_fill);
     runtime_memory_prepare_cpu_write((uintptr_t)p_dst, cb_fill);
     memset(p_dst, value, cb_fill); runtime_memory_note_cpu_write((uintptr_t)p_dst, cb_fill); return p_dst;
 }
 static ABI void *guest_memcpy(void *p_dst, const void *p_src, size_t cb_copy) {
     atomic_fetch_add_explicit(&s_c_memory_calls,1,memory_order_relaxed);
-    runtime_memory_prepare_cpu_write((uintptr_t)p_dst, cb_copy);
+    prepare_copy(p_dst, p_src, cb_copy);
     memcpy(p_dst, p_src, cb_copy); runtime_memory_note_cpu_write((uintptr_t)p_dst, cb_copy); return p_dst;
 }
 static ABI void *guest_memmove(void *p_dst, const void *p_src, size_t cb_copy) {
     atomic_fetch_add_explicit(&s_c_memory_calls,1,memory_order_relaxed);
-    runtime_memory_prepare_cpu_write((uintptr_t)p_dst, cb_copy);
+    prepare_copy(p_dst, p_src, cb_copy);
     memmove(p_dst, p_src, cb_copy); runtime_memory_note_cpu_write((uintptr_t)p_dst, cb_copy); return p_dst;
 }
 static ABI int guest_memcmp(const void *p_a, const void *p_b, size_t cb_compare) {

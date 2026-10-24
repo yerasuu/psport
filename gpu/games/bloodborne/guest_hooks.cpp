@@ -15,6 +15,7 @@
 #include <unistd.h>
 
 extern "C" void runtime_memory_note_write(uintptr_t va_range, uint64_t cb_range);
+extern "C" void runtime_memory_prepare_overwrite(uintptr_t va_range, uint64_t cb_range);
 
 namespace PsGuestHooks {
 namespace {
@@ -149,11 +150,17 @@ void LogGxNodeNull(u64 c_nulls, u64 va_gx) {
 }
 
 /// The game's memcpy at those sites: the GPU side is told before (its write traps lift: no fault
-/// per page) and after the copy (the data now there), as for file reads.
+/// per page) and after the copy (the data now there), as for file reads. The copy writes every
+/// byte, so GPU data in its whole pages is dropped first instead of read back (unless the source
+/// is inside it: it is read after part of it was written).
 void* LoaderCopy(void* p_dst, const void* p_src, std::size_t cb_copy) {
-    runtime_memory_note_write(reinterpret_cast<u64>(p_dst), cb_copy);
+    const u64 va_dst = reinterpret_cast<u64>(p_dst), va_src = reinterpret_cast<u64>(p_src);
+    if (va_src >= va_dst + cb_copy || va_dst >= va_src + cb_copy) {
+        runtime_memory_prepare_overwrite(va_dst, cb_copy);
+    }
+    runtime_memory_note_write(va_dst, cb_copy);
     std::memcpy(p_dst, p_src, cb_copy);
-    runtime_memory_note_write(reinterpret_cast<u64>(p_dst), cb_copy);
+    runtime_memory_note_write(va_dst, cb_copy);
     return p_dst;
 }
 
