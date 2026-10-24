@@ -16,6 +16,44 @@ changes alone make no release. What breaks is psport's launch interface: `run.sh
 The tags without a `v` (`0.1` to `0.51`) are bbport's releases, carried in psport's history; their
 notes are in [docs/en/history/](docs/en/history/).
 
+## v0.1.3
+
+The network libraries start as on the console, draw preparation no longer reads another draw's data,
+and the Windows test package arrives. Windows is still groundwork, not supported: no game runs there,
+and `psport.exe` does not start from the public package. The launch interface does not change.
+
+### Network
+- libSceNet and its pool, an SSL context and an HTTP context now start when a game links
+  libSceNpManager, before the game's code, as on the console. Games that do not link it see the same
+  answers as before (`not initialized`).
+
+### Graphics
+- Draw preparation follows nested command buffers and catches up with the GPU thread's registers when
+  they drift apart. In Octopath 0 the 122 728 faults of the shader resource walker become none, and
+  95.7% of the prepared pipelines are used.
+- A walker fault on a preparation thread leaves that draw to the GPU thread instead of reading
+  zeros; the call summary counts them as `speculative walks abandoned`, and the fault line shows the
+  load's real address.
+
+### Loader
+- An import that matches an export only when library and module versions are ignored is logged and
+  counted in a summary line. It stays unbound unless `PS_LOOSE_IMPORT_VERSIONS=1` is set. None of the
+  53 190 imports checked in 612 modules and games is affected.
+
+### Windows (groundwork, not supported)
+- The CI job now produces a test package, a zip with `psport.exe`, the GPU library, the capability
+  check, a probe and the DLLs they load, still never as a release. The probe
+  (`psport-windows-probe.exe`) needs no game: it writes `psport-windows-report.txt` with the
+  system, each GPU's capabilities, seven memory sharing tests and a verdict on how psport's guest
+  memory could work on that machine. `docs/en/WINDOWS_TEST.md` explains how to run it.
+- MSYS2's FFmpeg is GPL-3.0-or-later, which psport (GPL-2.0) cannot redistribute, so the package
+  leaves it out: `psport.exe` does not start from it, the probe does.
+- When the GPU cannot import guest memory, the message now says why (private memory imports,
+  shared views do not, as under Proton on RADV).
+
+### Documentation
+- `docs/en/WINDOWS_TEST.md` describes the Windows test package.
+
 ## v0.1.2
 
 GPU buffer failures no longer stop a game, and the groundwork of a Windows port lands. Windows is
