@@ -6,7 +6,8 @@
 # that both link the same headers and DLLs.
 #
 #   tools/win32-cross.sh sysroot   downloads and unpacks the packages into $PS_WIN32_SYSROOT
-#   tools/win32-cross.sh build     builds libpsport-gpu.dll and psport-gpu-capabilities.exe in out/win32
+#   tools/win32-cross.sh build     builds libpsport-gpu.dll, psport-gpu-capabilities.exe and
+#                                  psport-windows-probe.exe in out/win32
 #   tools/win32-cross.sh runtime   then psport.exe; when it fails, lists the files that do not compile
 #                                  and the symbols missing at the link
 #
@@ -114,6 +115,11 @@ build() {
         tools/gpu_capabilities.c src/runtime/runtime_quirks.c src/runtime/runtime_json_print.c "${libraries[@]}" \
         -o "$out/psport-gpu-capabilities.exe"
     echo "Built $out/psport-gpu-capabilities.exe (its DLLs: $sysroot/bin)"
+    read -r -a vulkan_headers <<< "$(pkg-config --cflags vulkan)"
+    "$out/bin/x86_64-w64-mingw32-clang" -std=c11 -O2 -Wall -Wextra -Werror -municode "${vulkan_headers[@]}" \
+        -DPS_VERSION="\"$(<VERSION)\"" -DPS_COMMIT="\"$(git rev-parse --short=12 HEAD)\"" tools/win32_probe/*.c \
+        -ladvapi32 -o "$out/psport-windows-probe.exe"
+    echo "Built $out/psport-windows-probe.exe"
 }
 
 # The runtime with build.sh's sources, src/platform/win32 in place of src/platform/linux and the same

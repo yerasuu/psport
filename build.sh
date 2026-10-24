@@ -24,7 +24,8 @@ if (( ${#deprecated[@]} )); then
 fi
 mkdir -p out
 # Windows, from MSYS2's CLANG64 shell (clang, libc++, UCRT; decision #623, the packages in
-# .github/workflows/windows.yml): the GPU library, psport.exe and the capability check (#614).
+# .github/workflows/windows.yml): the GPU library, psport.exe, the capability check (#614) and the
+# Windows probe (tools/win32_probe, #899).
 case $(uname -s) in
 MINGW* | MSYS*)
     if [[ ${MSYSTEM:-} != CLANG64 ]]; then
@@ -66,6 +67,11 @@ MINGW* | MSYS*)
     clang -std=c11 -O2 -Wall -Wextra -Werror "${includes[@]}" -Isrc/runtime tools/gpu_capabilities.c \
         src/runtime/runtime_quirks.c src/runtime/runtime_json_print.c "${libraries[@]}" -o out/psport-gpu-capabilities.exe
     echo "Built $PWD/out/psport-gpu-capabilities.exe"
+    # Vulkan only through LoadLibrary, so that it reports a machine where the loader or driver is missing.
+    read -r -a vulkan_headers <<< "$(pkg-config --cflags vulkan)"
+    clang -std=c11 -O2 -Wall -Wextra -Werror -municode "${vulkan_headers[@]}" -DPS_VERSION="\"$version\"" \
+        -DPS_COMMIT="\"$commit\"" tools/win32_probe/*.c -ladvapi32 -o out/psport-windows-probe.exe
+    echo "Built $PWD/out/psport-windows-probe.exe"
     echo 'Not built on Windows yet: the online module, the DLSS bridge.'
     exit 0
     ;;
