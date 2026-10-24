@@ -110,8 +110,11 @@ at the next 64 KiB boundary after the previous one, as one table of imports:
   and `sce_sys`, which the game loads itself with `sceKernelLoadStartModule`. Those are linked,
   relocated and bound at start but left unstarted; loading the path later runs their initializer
   once (`src/kernel/runtime_module.c`).
-- Exports are matched by (NID, library, module). Imports of `libSceLibcInternal` are served by
-  `libc.prx`'s exports with the same NID.
+- Exports are matched by (NID, library, module), library and module versions included. Imports of
+  `libSceLibcInternal` are served by `libc.prx`'s exports with the same NID. An import that only an
+  export of other versions would serve is logged (`Loader: import ... only ignoring versions`) and
+  counted after the call report, and bound to it only with `PS_LOOSE_IMPORT_VERSIONS=1`: the console's
+  kernel does this binding, and whether it compares versions is not known.
 - Initial-exec TLS loads `mov rax, fs:[0]` are rewritten to GS, because glibc owns FS on Linux.
   The eboot's `PT_TLS` and each module's TLS block get module IDs for `__tls_get_addr`.
 - The result (`LoaderImage`, `src/loader/loader.h`): segments, relocations (to an image offset, or to an

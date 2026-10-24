@@ -239,7 +239,12 @@ obvious.
 folder (`src/loader/loader_self.c` reads SELF and ELF files, `src/loader/loader_link.c` lays them out, relocates
 and binds them), with `--system-modules`, `--hle` and `--lle` as `PS_SYS_MODULES`, `PS_HLE` and
 `PS_LLE` set them. Only the permission bits of a segment's flags become its protection: some system
-modules set high bits there. The rest of the launch is in `psport` too, and no Python runs for it
+modules set high bits there. Imports bind to exports of the same NID, library, module and versions
+of both; one that only an export of other versions would serve (none of 53 190 resolved imports in
+612 modules and games does, kb #881) is logged once with both versions and counted after the call
+report, and is bound to that export only with `PS_LOOSE_IMPORT_VERSIONS=1` (otherwise the host
+runtime serves it, or it stays without implementation). The console's kernel does this binding and
+nothing read so far shows whether it compares versions, so the tolerance stays off by default. The rest of the launch is in `psport` too, and no Python runs for it
 (only `scripts/online.py`, with `PS_ONLINE=1`): the loose-file mods' view (`src/loader/loader_mods.c`), the
 AppContent profile from `param.sfo`, shadPS4/GoldHEN XML patches (`src/loader/loader_patches.c`), and
 through the game's title its own file check and patches (`Game::Title` `check_files` and
@@ -584,6 +589,7 @@ profile (or with `PS_GAME_PROFILE=none`) runs with the values in the first colum
 | Variable | What it shows |
 |---|---|
 | `PS_PERMISSIVE=1` | imports the port lacks return 0 instead of stopping, each logged once |
+| `PS_LOOSE_IMPORT_VERSIONS=1` | an import that matches a linked module's export only when library and module versions are ignored is bound to it instead of being left to the host runtime; with or without it, each such import is logged (`Loader: import <NID> (<name>) of <library> version <v>, module <module> version <v>, matches the export in <file> (library version <v>, module version <v>) only ignoring versions: bound\|left to the host runtime ...`; `... matches <n> exports of other versions ...: left to the host runtime, ambiguous` when several do, never bound) and after the call report `Loader: summary: <n> imports match an export only ignoring versions: <n> bound, <n> left to the host runtime (<n> ambiguous)` |
 | `PS_QUIRKS=none,-<id>,+<id>` | quirks of the registry turned off (all but `LAUNCH`, one) or forced on, each logged; `psport --list-quirks [--game <dir>]` lists them ([docs/en/QUIRKS.md](docs/en/QUIRKS.md)) |
 | `PS_HUD_ANCHOR=0`, `PS_HUD_DX=<pixels>`, `PS_RE_VIEWPORT=1` | Bloodborne on an output of another aspect ratio: its HUD's groups left in the 16:9 middle; another shift of them to the sides; the first 24 viewports its UI movies set, logged |
 | `PS_FRAME_HOOKS=0` | Bloodborne's frame rate presets by the community's patches instead of its profile's hooks (comparisons) |

@@ -3,7 +3,8 @@
  * linked imports their library), the user's system modules (--system-modules, never shipped)
  * likewise, and every module the game loads itself by path, linked unstarted. Each module starts
  * at the next 64 KiB after the previous one.
- * Exports are matched by (NID, library, module). Imports of libSceLibcInternal are served by
+ * Exports are matched by (NID, library, module), versions included; one that matches only without
+ * them is reported, and bound only with PS_LOOSE_IMPORT_VERSIONS=1. Imports of libSceLibcInternal are served by
  * libc.prx's same-NID exports: the internal library is not shipped with the game and exposes the
  * same functions. System modules' exports win over the host runtime's (binding kinds 3 and 4)
  * except for libraries named in --hle, so an own implementation can stand in for one and be
@@ -38,6 +39,7 @@ typedef struct { Slot *p_slots; size_t c_capacity, c_entries; } Map;
 typedef struct { LoaderIdentity id; uint64_t i_import; } Import;
 typedef struct { LoaderIdentity id; uint64_t va_export, kind; const char *sz_file; int handle_only; } Export;
 typedef struct { LoaderIdentity id; uint64_t va_export, kind; size_t c_exports; } NidExports;
+typedef struct { uint32_t i_export; size_t c_exports; } VersionlessExports;
 typedef struct {
     const char *sz_game;
     LoaderImage *p_out;
@@ -54,6 +56,10 @@ typedef struct {
     NidExports *p_nids;
     size_t c_nids, c_nid_capacity;
     Map nid_map;
+    VersionlessExports *p_versionless;
+    size_t c_versionless, c_versionless_capacity;
+    Map versionless_map;
+    int is_versionless_indexed;
     List imported_libraries, module_names, deferred, from_system, system_stems, system_paths, bundled_stems, bundled_names;
 } Linker;
 
@@ -160,6 +166,19 @@ static uint64_t nid_hash(const LoaderIdentity *p_identity) {
 static int nid_equal(const void *p_array, uint32_t i_entry, const void *p_key) {
     const LoaderIdentity *p_a = &((const NidExports *)p_array)[i_entry].id, *p_b = p_key;
     return p_a->nid_length == p_b->nid_length && !memcmp(p_a->sz_nid, p_b->sz_nid, p_a->nid_length) && !strcmp(p_a->p_library->sz_name, p_b->p_library->sz_name);
+}
+/* (NID, library name, module name): the identity without its versions. */
+static uint64_t versionless_hash(const LoaderIdentity *p_identity) {
+    uint64_t hash = fnv(0xcbf29ce484222325u, p_identity->sz_nid, p_identity->nid_length);
+    hash = fnv(hash, p_identity->p_library->sz_name, strlen(p_identity->p_library->sz_name) + 1);
+    return fnv(hash, p_identity->p_module->sz_name, strlen(p_identity->p_module->sz_name) + 1);
+}
+typedef struct { const VersionlessExports *p_entries; const Export *p_exports; } VersionlessView;
+static int versionless_equal(const void *p_array, uint32_t i_entry, const void *p_key) {
+    const VersionlessView *p_view = p_array;
+    const LoaderIdentity *p_a = &p_view->p_exports[p_view->p_entries[i_entry].i_export].id, *p_b = p_key;
+    return p_a->nid_length == p_b->nid_length && !memcmp(p_a->sz_nid, p_b->sz_nid, p_a->nid_length) &&
+           !strcmp(p_a->p_library->sz_name, p_b->p_library->sz_name) && !strcmp(p_a->p_module->sz_name, p_b->p_module->sz_name);
 }
 
 static void ensure_image(Linker *p_linker, uint64_t cb_image) {
@@ -608,6 +627,60 @@ static void link_module(Linker *p_linker, const char *sz_filename, LoaderModule 
     module_segments(p_module, base, p_runtime_module);
 }
 
+/* The console's kernel binds imports and nothing shows whether it compares library and module
+ * versions (kb #881): every import that only an export of other versions would serve is logged
+ * and counted, and bound only with PS_LOOSE_IMPORT_VERSIONS=1, since the console may refuse it. */
+static size_t s_c_versionless_matches, s_c_versionless_bound, s_c_versionless_ambiguous;
+static void versionless_summary(char *sz_out, size_t cb_out) {
+    snprintf(sz_out, cb_out, "Loader: summary: %zu imports match an export only ignoring versions: %zu bound, %zu left to the host runtime (%zu ambiguous)\n",
+             s_c_versionless_matches, s_c_versionless_bound, s_c_versionless_matches - s_c_versionless_bound, s_c_versionless_ambiguous);
+}
+static void index_versionless(Linker *p_linker) {
+    p_linker->is_versionless_indexed = 1;
+    for (size_t i = 0; i < p_linker->c_exports; ++i) {
+        const Export *p_export = &p_linker->p_exports[i];
+        if (p_export->handle_only) continue;
+        uint64_t hash = versionless_hash(&p_export->id);
+        VersionlessView view = {p_linker->p_versionless, p_linker->p_exports};
+        uint32_t same = map_find(&p_linker->versionless_map, hash, versionless_equal, &view, &p_export->id);
+        if (same != UINT32_MAX) {
+            ++p_linker->p_versionless[same].c_exports;
+            continue;
+        }
+        p_linker->p_versionless = grow(p_linker->p_versionless, &p_linker->c_versionless_capacity, p_linker->c_versionless, sizeof(*p_linker->p_versionless));
+        p_linker->p_versionless[p_linker->c_versionless] = (VersionlessExports){(uint32_t)i, 1};
+        map_insert(&p_linker->versionless_map, hash, (uint32_t)p_linker->c_versionless++);
+    }
+}
+static void match_ignoring_versions(Linker *p_linker, const LoaderIdentity *p_identity, int should_bind, uint64_t *p_out_va, uint64_t *p_out_kind) {
+    if (!p_linker->is_versionless_indexed) index_versionless(p_linker);
+    VersionlessView view = {p_linker->p_versionless, p_linker->p_exports};
+    uint32_t found = map_find(&p_linker->versionless_map, versionless_hash(p_identity), versionless_equal, &view, p_identity);
+    if (found == UINT32_MAX) return;
+    const VersionlessExports *p_match = &p_linker->p_versionless[found];
+    const Export *p_export = &p_linker->p_exports[p_match->i_export];
+    const char *sz_symbol = runtime_symbol(p_identity->sz_nid);
+    if (!s_c_versionless_matches++) runtime_calls_add_summary(versionless_summary);
+    if (p_match->c_exports > 1) {
+        ++s_c_versionless_ambiguous;
+        printf("Loader: import %.*s (%s) of %s version %#x, module %s version %#x, matches %zu exports of other versions "
+               "only ignoring versions: left to the host runtime, ambiguous\n",
+               (int)p_identity->nid_length, p_identity->sz_nid, sz_symbol ? sz_symbol : "unnamed", p_identity->p_library->sz_name,
+               p_identity->p_library->version, p_identity->p_module->sz_name, p_identity->p_module->version, p_match->c_exports);
+        return;
+    }
+    printf("Loader: import %.*s (%s) of %s version %#x, module %s version %#x, matches the export in %s "
+           "(library version %#x, module version %#x) only ignoring versions: %s\n",
+           (int)p_identity->nid_length, p_identity->sz_nid, sz_symbol ? sz_symbol : "unnamed", p_identity->p_library->sz_name,
+           p_identity->p_library->version, p_identity->p_module->sz_name, p_identity->p_module->version,
+           p_export->sz_file, p_export->id.p_library->version, p_export->id.p_module->version,
+           should_bind ? "bound (PS_LOOSE_IMPORT_VERSIONS=1)" : "left to the host runtime (PS_LOOSE_IMPORT_VERSIONS=1 binds it)");
+    if (!should_bind) return;
+    ++s_c_versionless_bound;
+    *p_out_va = p_export->va_export;
+    *p_out_kind = p_export->kind;
+}
+
 void loader_load_game(const LoaderOptions *p_options, LoaderImage *p_out) {
     static const char *const s_default_modules[] = {"libc.prx", "libSceFios2.prx"};
     Linker l = {.sz_game = p_options->sz_game, .p_out = p_out, .i_none = -1};
@@ -671,6 +744,7 @@ void loader_load_game(const LoaderOptions *p_options, LoaderImage *p_out) {
     g_sz_loader_file = NULL;
 
     size_t c_binding_capacity = 0, unresolved = l.i_none >= 0;
+    const int should_bind_versionless = runtime_env_flag("PS_LOOSE_IMPORT_VERSIONS", 0);
     for (size_t i = 0; i < l.c_imports; ++i) {
         const Import *p_import = &l.p_imports[i];
         uint32_t found = map_find(&l.export_map, identity_hash(&p_import->id), export_equal, l.p_exports, &p_import->id);
@@ -683,6 +757,7 @@ void loader_load_game(const LoaderOptions *p_options, LoaderImage *p_out) {
             uint32_t same = map_find(&l.nid_map, nid_hash(&libc), nid_equal, l.p_nids, &libc);
             if (same != UINT32_MAX && l.p_nids[same].c_exports == 1) va_export = l.p_nids[same].va_export, kind = l.p_nids[same].kind;
         }
+        if (!kind && found == UINT32_MAX) match_ignoring_versions(&l, &p_import->id, should_bind_versionless, &va_export, &kind);
         if (!kind) {
             ++unresolved;
             continue;
@@ -727,4 +802,5 @@ void loader_load_game(const LoaderOptions *p_options, LoaderImage *p_out) {
     free_module(&l.main);
     free(p_linked); free(p_table); free(l.p_imports); free(l.p_exports); free(l.p_nids);
     free(l.import_map.p_slots); free(l.export_map.p_slots); free(l.nid_map.p_slots);
+    free(l.p_versionless); free(l.versionless_map.p_slots);
 }
