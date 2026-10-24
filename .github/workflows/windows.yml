@@ -9,8 +9,9 @@ permissions: {}
 
 jobs:
   # What builds on Windows so far (decision #623, #614): the GPU library, psport.exe, the capability
-  # check and the Windows probe, with MSYS2's CLANG64 (clang, libc++, UCRT), handed over as the test
-  # package's zip (tools/win32-bundle.sh, kb #899) to try. Nothing is published.
+  # check and the Windows probe, with MSYS2's CLANG64 (clang, libc++, UCRT) and psport's own LGPL
+  # FFmpeg, handed over as the test package's zip (tools/win32-bundle.sh, kb #899) and its sources to
+  # try. Nothing is published.
   build:
     runs-on: windows-latest
     timeout-minutes: 240
@@ -31,16 +32,50 @@ jobs:
         with:
           persist-credentials: false
           submodules: true
-      # magic_enum and miniz are not packaged there: CMake fetches them, hence git.
+      # magic_enum and miniz are not packaged there: CMake fetches them, hence git. No ffmpeg: MSYS2's
+      # is GPL-3.0-or-later; base-devel and nasm build psport's own below.
       - uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2.33.0
         with:
           msystem: CLANG64
           update: true
-          install: git zip
+          install: git zip base-devel
           pacboy: >-
-            clang:p lld:p llvm-tools:p cmake:p ninja:p pkgconf:p
+            clang:p lld:p llvm-tools:p cmake:p ninja:p pkgconf:p nasm:p
             vulkan-headers:p vulkan-loader:p vulkan-memory-allocator:p glslang:p
-            sdl3:p ffmpeg:p freetype:p boost:p fmt:p robin-map:p xxhash:p zydis:p
+            sdl3:p freetype:p boost:p fmt:p robin-map:p xxhash:p zydis:p
+      # psport's LGPL FFmpeg (packaging/windows/ffmpeg/PKGBUILD, kb #906), built only when the PKGBUILD
+      # changes. The cache keeps the source tarball next to the package, since the bundle ships it.
+      - name: FFmpeg version
+        id: ffmpeg
+        run: |
+          cd packaging/windows/ffmpeg
+          echo "version=$(sed -n 's/^pkgver=//p' PKGBUILD)-$(sed -n 's/^pkgrel=//p' PKGBUILD)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: ffmpeg-cache
+        with:
+          path: |
+            packaging/windows/ffmpeg/*.pkg.tar.zst
+            packaging/windows/ffmpeg/ffmpeg-*.tar.xz
+            packaging/windows/ffmpeg/ffmpeg-*.tar.xz.asc
+          key: ffmpeg-lgpl-clang64-${{ steps.ffmpeg.outputs.version }}-${{ hashFiles('packaging/windows/ffmpeg/**') }}
+      - name: Build FFmpeg
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        env:
+          MINGW_ARCH: clang64
+        run: |
+          cd packaging/windows/ffmpeg
+          gpg --batch --import keys/pgp/*.asc
+          makepkg-mingw --cleanbuild --syncdeps --noconfirm --noprogressbar
+      - if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            packaging/windows/ffmpeg/*.pkg.tar.zst
+            packaging/windows/ffmpeg/ffmpeg-*.tar.xz
+            packaging/windows/ffmpeg/ffmpeg-*.tar.xz.asc
+          key: ${{ steps.ffmpeg-cache.outputs.cache-primary-key }}
+      - name: Install FFmpeg
+        run: pacman -U --noconfirm packaging/windows/ffmpeg/mingw-w64-clang-x86_64-ffmpeg-lgpl-[0-9]*-any.pkg.tar.zst
       # Without LTO while the Windows build is new: a failure names its file, and the job is shorter.
       - name: Build
         env:
@@ -53,12 +88,23 @@ jobs:
         id: bundle
         run: |
           bash tools/win32-bundle.sh dist
-          echo "zip=$(ls dist/*.zip)" >> "$GITHUB_OUTPUT"
+          zip=$(ls dist/*.zip)
+          echo "zip=$zip" >> "$GITHUB_OUTPUT"
+          echo "sources=${zip%.zip}-sources" >> "$GITHUB_OUTPUT"
+          echo "sources_name=$(basename -- "${zip%.zip}")-sources" >> "$GITHUB_OUTPUT"
       # The zip as it is, so that testers download the package itself and not a zip around it.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           path: ${{ steps.bundle.outputs.zip }}
           archive: false
+          retention-days: 14
+          if-no-files-found: error
+      # What SOURCES.txt says ships next to the zip: the PKGBUILDs and upstream tarballs of the DLLs
+      # built here (FFmpeg's), for as long as the zip.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ steps.bundle.outputs.sources_name }}
+          path: ${{ steps.bundle.outputs.sources }}
           retention-days: 14
           if-no-files-found: error
       - name: Collect the logs
