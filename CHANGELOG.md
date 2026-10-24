@@ -19,8 +19,16 @@ notes are in [docs/en/history/](docs/en/history/).
 ## v0.1.3
 
 The network libraries start as on the console, draw preparation no longer reads another draw's data,
-and the Windows test package arrives. Windows is still groundwork, not supported: no game runs there,
-and `psport.exe` does not start from the public package. The launch interface does not change.
+GPU memory arenas fit the driver's limits, several crashes and asserts became logged errors, and the
+Windows test package arrives with psport's own LGPL FFmpeg. Windows is still groundwork, not
+supported: no game runs there, though `psport.exe` now starts from the package (verified under
+Proton; the CI-built package is unverified). The launch interface does not change; the new
+variables are off by default.
+
+Not completely validated: the readback change for CPU overwrites (#740: the harness could not
+measure its effect, a manual offline run dropped about 13 overwrites per second, online messages
+were not tested) and the preloaded-pipeline check (#796: no effect on its own, it matters only with
+P7, #370).
 
 ### Network
 - libSceNet and its pool, an SSL context and an HTTP context now start when a game links
@@ -34,6 +42,31 @@ and `psport.exe` does not start from the public package. The launch interface do
 - A walker fault on a preparation thread leaves that draw to the GPU thread instead of reading
   zeros; the call summary counts them as `speculative walks abandoned`, and the fault line shows the
   load's real address.
+- Buffer arenas are sized from the driver's `maxBufferSize` (1 GiB pages, at most 3 per arena, on
+  RADV) instead of fixed 4 GiB pages that exceeded it. A range no arena can cover is counted and
+  clamped or left without one instead of stopping the launch.
+- Shaders that set the execution mask to a constant (one lane doing an atomic add) now run those
+  instructions in fewer lanes; Blood Omen 2's emulator dispatch finishes. Every title rebuilds its
+  shader cache once (`ShaderBinaryVersion` 15).
+- Copies and fills over whole pages the GPU wrote no longer wait for a readback of data they
+  overwrite, which removes stutters of 70 to 220 ms in Bloodborne (#740; see above). The frame
+  statistics gain a `GPU data overwritten by the CPU` line.
+- An image freed during the frame no longer crashes the upscaler or camera motion (Bloodborne's lamp
+  travel); the kept image is forgotten and logged.
+- Preloaded pipelines whose cached shaders disagree with their motion vectors setting are dropped and
+  counted at warm-up; no effect without P7.
+- Opt-in `PS_GPU_WRITE_OVERLAP=1`: a shader write refreshes every image over its memory, not only one
+  starting at the same address.
+- Opt-in `PS_SCALE_REDUCED_TARGETS=1`: live scene scaling also scales intermediate targets such as
+  Bloodborne's depth of field, which blurred the scene above 1080p (see `docs/en/upscaler.md`).
+
+### Video
+- A game that locks a display buffer again right after its flip event no longer loses its label
+  (Bloodborne's death screen).
+- AvPlayer picks the right FFmpeg stream when an unsupported stream comes before a supported one.
+- AvPlayer and Videodec2 no longer stop the run on an unknown stream type, a frame in an unexpected
+  format or too big for its buffer, a missing game allocation or a second picture info: each is
+  logged with a count, and the player stops or the call returns an error.
 
 ### Loader
 - An import that matches an export only when library and module versions are ignored is logged and
@@ -46,13 +79,28 @@ and `psport.exe` does not start from the public package. The launch interface do
   (`psport-windows-probe.exe`) needs no game: it writes `psport-windows-report.txt` with the
   system, each GPU's capabilities, seven memory sharing tests and a verdict on how psport's guest
   memory could work on that machine. `docs/en/WINDOWS_TEST.md` explains how to run it.
-- MSYS2's FFmpeg is GPL-3.0-or-later, which psport (GPL-2.0) cannot redistribute, so the package
-  leaves it out: `psport.exe` does not start from it, the probe does.
+- FFmpeg in the package is psport's own LGPL-2.1-or-later build (`packaging/windows/ffmpeg/PKGBUILD`;
+  H.264, HEVC, AAC, MP3 and MJPEG decoders, MP4 files), since MSYS2's is GPL-3.0-or-later, which
+  psport (GPL-2.0) cannot redistribute. Its PKGBUILD and source tarball ship next to the zip.
+  `psport.exe` now starts from the package; verified under Proton, the CI path is not.
+  `tools/win32-cross.sh ffmpeg` builds it from Linux.
 - When the GPU cannot import guest memory, the message now says why (private memory imports,
   shared views do not, as under Proton on RADV).
 
+### Diagnostics and tests
+- Opt-in `PS_JOB_STEP_PROBE=1` counts and logs the two failure exits of Bloodborne's render job step
+  (#683).
+- `tools/regress/octopath0-play.sched` plays Octopath 0 through character creation (not yet the 3D
+  scene), answering the dish name with `PS_IME_TEXT=Steak`.
+
 ### Documentation
-- `docs/en/WINDOWS_TEST.md` describes the Windows test package.
+- `docs/en/WINDOWS_TEST.md` describes the Windows test package and its FFmpeg.
+
+### Validation
+- Test runs of the integrated version: all 13 titles behave as before; Bloodborne holds 220-225 FPS; validation shows no new error; Octopath 0 no longer logs shader resource walker faults.
+- Included without complete validation, at the owner's request: the cut in readbacks of pages the CPU overwrites whole (the scripted runs do not stream resources; a manual offline session dropped 13 overwrites per second and the effect is not measured against a base) and the motion preload filter (no effect until P7 is integrated). The movie, flip and image fixes are in but the scripted runs do not play movies.
+- `PS_GPU_WRITE_OVERLAP=1` is very costly (Bloodborne in play 224 to 20 FPS) and stays off by default.
+- Every title rebuilds its shader cache once on its first run.
 
 ## v0.1.2
 
