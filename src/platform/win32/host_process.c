@@ -2,6 +2,7 @@
 #include "ps_host.h"
 #include "host_win32.h"
 #include <errno.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <wchar.h>
@@ -172,6 +173,20 @@ int ps_host_exec_self(char *const *pp_argv) {
 int ps_host_on_exit(void (*pfn_exit)(int status)) {
     (void)pfn_exit;
     return ENOSYS;
+}
+
+/* Not _exit: it ends in ExitProcess, which kills the other threads and then runs every library's
+ * DLL_PROCESS_DETACH, and a detach that takes a lock a killed thread held never returns (the run
+ * then lives on after its fault report until something kills it). TerminateProcess runs no detach. */
+void ps_host_exit_at_once(int status) {
+    (void)TerminateProcess(GetCurrentProcess(), (UINT)status);
+    const DWORD error = GetLastError();
+    char sz_line[96];
+    const int cb_line = snprintf(sz_line, sizeof(sz_line), "Host: TerminateProcess failed (Windows error %lu)\n",
+                                 (unsigned long)error);
+    DWORD cb_written;
+    if (cb_line > 0) (void)WriteFile(GetStdHandle(STD_ERROR_HANDLE), sz_line, (DWORD)cb_line, &cb_written, NULL);
+    _exit(status);
 }
 
 /* The cleaner would have to be psport.exe started again with an option of its own, since Windows

@@ -434,6 +434,9 @@ int ps_host_exec_self(char *const *pp_argv);
 int ps_host_remove_tree_at_exit(const char *sz_path);
 /* pfn_exit runs at exit() with its status, after the handlers registered later (atexit order). */
 int ps_host_on_exit(void (*pfn_exit)(int status));
+/* Ends the process with status at once, from a fault handler too: no atexit handlers, no stdio
+ * flush and no library teardown, since other threads may hold any lock when it is called. */
+__attribute__((noreturn)) void ps_host_exit_at_once(int status);
 /* Descriptors 1 and 2 go through pipes to a helper process, which writes each chunk on to where they
  * pointed before and hands it to pfn_chunk (is_error: it came through 2), then calls pfn_end once
  * both pipes are closed (this process and whatever inherited them ended, or ps_host_output_untee)

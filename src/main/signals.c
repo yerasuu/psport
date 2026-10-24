@@ -153,6 +153,18 @@ static void dump_fault_ranges(void) {
         if (cb_unreadable) write_unreadable(va_unreadable, cb_unreadable);
     }
 }
+/* The UTC time of day and the thread, so that a fault is placed against the launcher's own log (a
+ * stop it sent, a window it closed). */
+static void write_fault_moment(void) {
+    const uint64_t ms_of_day = ps_host_time_realtime_ns() / 1000000u % 86400000u;
+    char sz_thread[32] = "?";
+    ps_host_thread_name(sz_thread, sizeof(sz_thread));
+    char sz_line[96];
+    snprintf(sz_line, sizeof(sz_line), "  at %02u:%02u:%02u.%03u UTC, thread %s\n", (unsigned)(ms_of_day / 3600000u),
+             (unsigned)(ms_of_day / 60000u % 60u), (unsigned)(ms_of_day / 1000u % 60u), (unsigned)(ms_of_day % 1000u),
+             sz_thread);
+    write_report(sz_line, strlen(sz_line));
+}
 static int fault(PsHostFaultContext *p_context) {
     const PsHostFaultKind kind = ps_host_fault_kind(p_context);
     void *p_address = ps_host_fault_address(p_context);
@@ -178,6 +190,7 @@ static int fault(PsHostFaultContext *p_context) {
     else
         snprintf(sz_line, sizeof(sz_line), "Fault (signal %d) at RIP %p, address %p\n", sig, (void *)rip, p_address);
     write_report(sz_line, strlen(sz_line));
+    write_fault_moment();
     dump_fault_ranges();
     if (g_is_gpu_enabled) psport_gpu_dump_guest_writes(p_context);
     /* Guest code keeps frame pointers: its call chain says which caller handed over the bad
@@ -221,7 +234,9 @@ static int fault(PsHostFaultContext *p_context) {
     if (g_is_gpu_enabled) psport_gpu_flush_caches(0);
     runtime_calls_report();
     runtime_debug_finish("fault", 128 + sig);
-    _exit(128 + sig);
+    snprintf(sz_line, sizeof(sz_line), "Runtime: fault report written, the process ends with code %d\n", 128 + sig);
+    write_report(sz_line, strlen(sz_line));
+    ps_host_exit_at_once(128 + sig);
 }
 /* Watchdog: dump RIP and the rbp frame chain of every thread (guest offsets when inside the
  * image). Reads go through runtime_memory_read_guest_signal so bad frames cannot fault. */
@@ -261,7 +276,7 @@ static void watchdog(PsHostFaultContext *p_context) {
     if (g_is_gpu_enabled) psport_gpu_flush_caches(0);
     runtime_calls_report();
     runtime_debug_finish("watchdog timeout", 128 + ps_host_fault_signal(p_context));
-    _exit(128 + ps_host_fault_signal(p_context));
+    ps_host_exit_at_once(128 + ps_host_fault_signal(p_context));
 }
 void install_fault_handlers(unsigned timeout_seconds) {
     static const PsHostFaultKind s_kinds[] = {PS_HOST_FAULT_ACCESS, PS_HOST_FAULT_ILLEGAL, PS_HOST_FAULT_BUS,
