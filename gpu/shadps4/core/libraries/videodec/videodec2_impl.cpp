@@ -169,7 +169,8 @@ s32 VdecDecoder::WriteFrame(AVFrame& decoded, OrbisVideodec2FrameBuffer& frame_b
         return ORBIS_VIDEODEC2_ERROR_FRAME_BUFFER_SIZE;
     }
 
-    Videodec::CopyNV12Data((u8*)frame_buffer.frame_buffer, frame_size, *frame);
+    // psport: cannot fail, since the frame buffer was checked above to hold frame_size bytes.
+    (void)Videodec::CopyNV12Data((u8*)frame_buffer.frame_buffer, frame_size, *frame);
     frame_buffer.is_accepted = true;
 
     output_info.is_valid = true;

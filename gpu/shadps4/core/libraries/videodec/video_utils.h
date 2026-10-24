@@ -9,6 +9,7 @@ struct AVFrame;
 
 namespace Libraries::Videodec {
 
-void CopyNV12Data(u8* dst, u64 max_size, const AVFrame& src);
+// Returns false, copying nothing, when the pitched and aligned picture does not fit in max_size.
+[[nodiscard]] bool CopyNV12Data(u8* dst, u64 max_size, const AVFrame& src);
 
 }

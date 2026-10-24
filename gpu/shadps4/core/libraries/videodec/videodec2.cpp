@@ -291,8 +291,11 @@ s32 PS4_SYSV_ABI sceVideodec2GetPictureInfo(const OrbisVideodec2OutputInfo* outp
         }
     }
 
+    // psport: the decoder writes one picture info (no interlaced output), so a second one asked
+    // for is left as the caller passed it.
     if (output_info->picture_count > 1) {
-        UNREACHABLE();
+        LOG_ERROR_COUNTED(Lib_Vdec2, "(STUBBED) picture count {}, second picture info not written",
+                          output_info->picture_count);
     }
 
     return ORBIS_OK;

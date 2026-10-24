@@ -47,9 +47,7 @@ public:
         : m_memory_replacement(memory_replacement),
           m_data(is_texture ? AllocateTexture(memory_replacement, align, size)
                             : Allocate(memory_replacement, align, size)),
-          m_size(size), m_is_texture(is_texture) {
-        ASSERT_MSG(m_data, "Could not allocate frame buffer.");
-    }
+          m_size(size), m_is_texture(is_texture) {}
 
     ~GuestBuffer() {
         if (m_data != nullptr) {
@@ -196,8 +194,8 @@ private:
     AVFramePtr ConvertAudioFrame(const AVFrame& frame);
     AVFramePtr ConvertVideoFrame(const AVFrame& frame);
 
-    Frame PrepareAudioFrame(GuestBuffer buffer, const AVFrame& frame);
-    Frame PrepareVideoFrame(GuestBuffer buffer, const AVFrame& frame);
+    std::optional<Frame> PrepareAudioFrame(GuestBuffer buffer, const AVFrame& frame);
+    std::optional<Frame> PrepareVideoFrame(GuestBuffer buffer, const AVFrame& frame);
     s64 EmptyEditDelay(size_t i_stream) const;
 
     AvPlayerStateCallback& m_state;
