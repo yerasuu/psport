@@ -267,6 +267,8 @@ for short in crt compiler-rt boost fmt robin-map vulkan-memory-allocator vulkan-
 done
 # The same components as packaging/licences.nix's vendored list, which the Linux bundle carries.
 section "Code in psport's source tree under its own licence"
+deps=$out/_deps
+[[ -d $deps ]] || deps=$out/gpu/_deps
 vendored=(
     "sirit|https://github.com/shadps4-emu/sirit|BSD-3-Clause|gpu/third_party/sirit/LICENSE.txt gpu/third_party/sirit/externals/SPIRV-Headers/LICENSE"
     "AMD GCN headers|https://github.com/GPUOpen-Drivers/pal|MIT|gpu/third_party/gcn/include/gcn/si_ci_vi_merged_offset.h:24"
@@ -278,8 +280,8 @@ vendored=(
     "RenderDoc in-application API header|https://github.com/baldurk/renderdoc|MIT|gpu/third_party/renderdoc/renderdoc_app.h:24"
     "DejaVu fonts|https://dejavu-fonts.github.io/|Bitstream-Vera|gpu/third_party/fonts/LICENSE-DejaVu.txt"
     "Files in the shadPS4 tree under their own licence|https://github.com/shadps4-emu/shadPS4|MIT, BSD-3-Clause AND GPL-2.0-or-later, Zlib, CC0-1.0|gpu/shadps4/video_core/host_shaders/fsr.comp:2 gpu/shadps4/video_core/host_shaders/fsr/ffx_a.h:41 gpu/shadps4/video_core/host_shaders/fsr/ffx_fsr1.h:30 gpu/shadps4/shader_recompiler/ir/passes/ssa_rewrite_pass.cpp:2 gpu/shadps4/common/bit_field.h:3 gpu/shadps4/video_core/renderer_vulkan/vk_barrier_tracker.h:2 gpu/shadps4/common/alignment.h:2"
-    "magic_enum (fetched by gpu/CMakeLists.txt)|https://github.com/Neargye/magic_enum|MIT|$out/gpu/_deps/magic_enum-src/LICENSE"
-    "miniz (fetched by gpu/CMakeLists.txt)|https://github.com/richgel999/miniz|MIT|$out/gpu/_deps/miniz-src/LICENSE"
+    "magic_enum (fetched by gpu/CMakeLists.txt)|https://github.com/Neargye/magic_enum|MIT|$deps/magic_enum-src/LICENSE"
+    "miniz (fetched by gpu/CMakeLists.txt)|https://github.com/richgel999/miniz|MIT|$deps/miniz-src/LICENSE"
 )
 for item in "${vendored[@]}"; do
     IFS='|' read -r title url licence files <<< "$item"
