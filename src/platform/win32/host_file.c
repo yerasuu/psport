@@ -550,6 +550,10 @@ int ps_host_fs_remove(const char *sz_path) {
     const DWORD attributes = GetFileAttributesW(sz_wide);
     if (error_delete != ERROR_ACCESS_DENIED || attributes == INVALID_FILE_ATTRIBUTES)
         return ps_win32_errno(error_delete);
+    /* A link to a folder is a folder to DeleteFileW; RemoveDirectoryW takes it away without
+     * touching what it points to, as unlink(2) does a link. */
+    if (attributes & FILE_ATTRIBUTE_DIRECTORY && attributes & FILE_ATTRIBUTE_REPARSE_POINT)
+        return RemoveDirectoryW(sz_wide) ? 0 : ps_win32_errno(GetLastError());
     if (attributes & FILE_ATTRIBUTE_DIRECTORY) return EISDIR;
     if (!(attributes & FILE_ATTRIBUTE_READONLY) || !SetFileAttributesW(sz_wide, attributes & ~FILE_ATTRIBUTE_READONLY))
         return ps_win32_errno(error_delete);
@@ -569,8 +573,80 @@ int ps_host_fs_rename(const char *sz_from, const char *sz_to) {
                : ps_win32_errno(GetLastError());
 }
 
+/* REPARSE_DATA_BUFFER's mount point form, which only the driver kit's headers declare. */
+typedef struct {
+    DWORD tag;
+    WORD cb_data, reserved;
+    WORD off_substitute, cb_substitute, off_print, cb_print;
+    wchar_t sz_paths[(MAXIMUM_REPARSE_DATA_BUFFER_SIZE - 16) / sizeof(wchar_t)];
+} MountPointReparse;
+
+/* A junction to sz_existing, which must be a folder on a local volume: 0 or the Win32 error. */
+static DWORD make_junction(const wchar_t *sz_link, const wchar_t *sz_existing) {
+    wchar_t sz_full[PS_WIN32_PATH_MAX];
+    const DWORD c_full = GetFullPathNameW(sz_existing, PS_WIN32_PATH_MAX, sz_full, NULL);
+    if (!c_full) return GetLastError();
+    if (c_full >= PS_WIN32_PATH_MAX) return ERROR_FILENAME_EXCED_RANGE;
+    const wchar_t *sz_print = wcsncmp(sz_full, L"\\\\?\\", 4) ? sz_full : sz_full + 4;
+    /* A junction holds a drive's NT name; a share has none it can hold. */
+    if (!wcsncmp(sz_print, L"UNC\\", 4) || sz_print[0] == L'\\') return ERROR_NOT_SUPPORTED;
+    static const wchar_t s_nt_prefix[] = L"\\??\\";
+    const size_t c_print = wcslen(sz_print), c_prefix = sizeof(s_nt_prefix) / sizeof(*s_nt_prefix) - 1;
+    MountPointReparse reparse = {.tag = IO_REPARSE_TAG_MOUNT_POINT};
+    if (c_prefix + c_print + 1 + c_print + 1 > sizeof(reparse.sz_paths) / sizeof(*reparse.sz_paths))
+        return ERROR_FILENAME_EXCED_RANGE;
+    wmemcpy(reparse.sz_paths, s_nt_prefix, c_prefix);
+    wmemcpy(reparse.sz_paths + c_prefix, sz_print, c_print + 1);
+    wmemcpy(reparse.sz_paths + c_prefix + c_print + 1, sz_print, c_print + 1);
+    reparse.cb_substitute = (WORD)((c_prefix + c_print) * sizeof(wchar_t));
+    reparse.off_print = (WORD)(reparse.cb_substitute + sizeof(wchar_t));
+    reparse.cb_print = (WORD)(c_print * sizeof(wchar_t));
+    const DWORD cb_paths = reparse.off_print + reparse.cb_print + sizeof(wchar_t);
+    reparse.cb_data = (WORD)(offsetof(MountPointReparse, sz_paths) - offsetof(MountPointReparse, off_substitute) + cb_paths);
+    if (!CreateDirectoryW(sz_link, NULL)) return GetLastError();
+    const HANDLE h_link = CreateFileW(sz_link, GENERIC_WRITE, SHARE_ALL, NULL, OPEN_EXISTING,
+                                      FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, NULL);
+    DWORD error = h_link == INVALID_HANDLE_VALUE ? GetLastError() : ERROR_SUCCESS;
+    DWORD cb_returned;
+    if (!error && !DeviceIoControl(h_link, FSCTL_SET_REPARSE_POINT, &reparse,
+                                   (DWORD)offsetof(MountPointReparse, sz_paths) + cb_paths, NULL, 0, &cb_returned, NULL))
+        error = GetLastError();
+    if (h_link != INVALID_HANDLE_VALUE) CloseHandle(h_link);
+    if (error) (void)RemoveDirectoryW(sz_link); /* the empty folder made above; the error is what counts */
+    return error;
+}
+
+/* Without the privilege for symbolic links what a link would show is made another way: a folder as
+ * a junction, a file as a hard link (both read the target live), or, across volumes, as a copy. */
+static int link_unprivileged(const char *sz_target, const char *sz_link, const wchar_t *sz_wide_existing,
+                             const wchar_t *sz_wide_link, int is_directory) {
+    static LONG s_is_reported, s_c_copies;
+    if (!InterlockedExchange(&s_is_reported, 1))
+        fprintf(stderr,
+                "Host: CreateSymbolicLinkW: Win32 error %lu (no Developer Mode or SeCreateSymbolicLinkPrivilege): folder "
+                "links become junctions, file links hard links, or copies across volumes\n",
+                (unsigned long)ERROR_PRIVILEGE_NOT_HELD);
+    if (is_directory) {
+        const DWORD error = make_junction(sz_wide_link, sz_wide_existing);
+        if (error) fprintf(stderr, "Host: junction %s -> %s: Win32 error %lu\n", sz_link, sz_target, (unsigned long)error);
+        return ps_win32_errno(error);
+    }
+    if (CreateHardLinkW(sz_wide_link, sz_wide_existing, NULL)) return 0;
+    const DWORD error_hard = GetLastError();
+    if (!CopyFileW(sz_wide_existing, sz_wide_link, TRUE)) {
+        const DWORD error_copy = GetLastError();
+        fprintf(stderr, "Host: link %s -> %s: hard link Win32 error %lu, copy Win32 error %lu\n", sz_link, sz_target,
+                (unsigned long)error_hard, (unsigned long)error_copy);
+        return ps_win32_errno(error_copy);
+    }
+    fprintf(stderr, "Host: %s copied to %s (copy %ld): no hard link, Win32 error %lu\n", sz_target, sz_link,
+            InterlockedIncrement(&s_c_copies), (unsigned long)error_hard);
+    return 0;
+}
+
 /* Windows links to folders and to files are different kinds: the target, relative to the link's
- * folder, says which. Without the developer mode or the privilege the call fails with EPERM. */
+ * folder, says which. Without the developer mode or the privilege the link is made unprivileged
+ * (link_unprivileged), and a file's then reads as a regular file. */
 int ps_host_fs_symlink(const char *sz_target, const char *sz_link) {
     wchar_t sz_wide_target[PS_WIN32_PATH_MAX], sz_wide_link[PS_WIN32_PATH_MAX], sz_resolved[PS_WIN32_PATH_MAX];
     int error = ps_win32_to_wide(sz_target, sz_wide_target, PS_WIN32_PATH_MAX);
@@ -581,14 +657,18 @@ int ps_host_fs_symlink(const char *sz_target, const char *sz_link) {
     const int is_absolute = sz_wide_target[0] == L'\\' || (sz_wide_target[0] && sz_wide_target[1] == L':');
     const wchar_t *p_folder_end = wcsrchr(sz_wide_link, L'\\');
     const int c_folder = is_absolute || !p_folder_end ? 0 : (int)(p_folder_end - sz_wide_link + 1);
-    if (swprintf(sz_resolved, PS_WIN32_PATH_MAX, L"%.*ls%ls", c_folder, sz_wide_link, sz_wide_target) < 0)
-        return ENAMETOOLONG;
+    /* An absolute target through wide_path too, so that the hard link or copy reads it past MAX_PATH. */
+    if (is_absolute) error = wide_path(sz_target, sz_resolved, PS_WIN32_PATH_MAX);
+    else if (swprintf(sz_resolved, PS_WIN32_PATH_MAX, L"%.*ls%ls", c_folder, sz_wide_link, sz_wide_target) < 0)
+        error = ENAMETOOLONG;
+    if (error) return error;
     const DWORD attributes = GetFileAttributesW(sz_resolved);
-    const DWORD flags = SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE |
-                        (attributes != INVALID_FILE_ATTRIBUTES && attributes & FILE_ATTRIBUTE_DIRECTORY
-                             ? SYMBOLIC_LINK_FLAG_DIRECTORY
-                             : 0);
-    return CreateSymbolicLinkW(sz_wide_link, sz_wide_target, flags) ? 0 : ps_win32_errno(GetLastError());
+    const int is_directory = attributes != INVALID_FILE_ATTRIBUTES && attributes & FILE_ATTRIBUTE_DIRECTORY;
+    const DWORD flags = SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE | (is_directory ? SYMBOLIC_LINK_FLAG_DIRECTORY : 0);
+    if (CreateSymbolicLinkW(sz_wide_link, sz_wide_target, flags)) return 0;
+    const DWORD error_link = GetLastError();
+    if (error_link != ERROR_PRIVILEGE_NOT_HELD) return ps_win32_errno(error_link);
+    return link_unprivileged(sz_target, sz_link, sz_resolved, sz_wide_link, is_directory);
 }
 
 /* GetDiskFreeSpaceExW takes folders only: a file's answer is its folder's. */

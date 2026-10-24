@@ -57,7 +57,9 @@ checked against [shadPS4's sources](https://github.com/shadps4-emu/shadPS4/blob/
 
 The game's original files are never overwritten. For the launch, `psport` builds a separate merged
 tree of links in the data directory, `out/mod-game-*`; reads, stat and directory listings see the
-selected replacements and the remaining original files. The game's `/app0` and `/hostapp` are
+selected replacements and the remaining original files. On Windows without Developer Mode, where
+symbolic links need a privilege, its folder links are junctions and its file links hard links, or
+copies when the game and the data directory are on different volumes; the log says which. The game's `/app0` and `/hostapp` are
 read-only. Saves stay in the same folder and remain writable. A small process of its own
 (`mod-view-clean`) removes the tree once `psport` ends, however it ends (exit, a stop from the
 launcher, a crash, SIGKILL); an in-game restart builds a new one. After a power loss it may remain;

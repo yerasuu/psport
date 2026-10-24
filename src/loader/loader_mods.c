@@ -9,14 +9,12 @@
 #include "loader.h"
 #include "ps_host.h"
 #include <errno.h>
-#include <ftw.h>
 #include <limits.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
-#include <sys/stat.h>
 
 typedef struct { char **pp_items; size_t c_items, c_capacity; } Names;
 typedef struct { char sz_relative[PATH_MAX], sz_source[PATH_MAX]; } Replacement;
@@ -31,13 +29,7 @@ static Mods *s_p_failing;
 /* Folders at the top of the game's own dvdroot_ps4, which a mod may consist of like the profile's. */
 static Names s_game_folders;
 
-static int remove_entry(const char *sz_path, const struct stat *p_stat, int type, struct FTW *p_ftw) {
-    (void)p_stat; (void)p_ftw;
-    return type == FTW_DP ? ps_host_fs_remove_dir(sz_path) : ps_host_fs_remove(sz_path);
-}
-static void remove_tree(const char *sz_path) {
-    nftw(sz_path, remove_entry, 16, FTW_DEPTH | FTW_PHYS);
-}
+static void remove_tree(const char *sz_path);
 
 /* Errors end the launch, as a half-built view would load a game missing files. */
 __attribute__((noreturn, format(printf, 1, 2))) static void mods_fail(const char *sz_format, ...) {
@@ -70,6 +62,26 @@ static int is_symlink(const char *sz_path) {
 static int exists(const char *sz_path) {
     PsHostStat st;
     return !ps_host_fs_stat(sz_path, &st);
+}
+/* Links are removed, never followed, since the view's folders link into the game and the mods.
+ * Not nftw: MinGW's follows junctions and folder links even with FTW_PHYS. */
+static void remove_tree(const char *sz_path) {
+    if (is_symlink(sz_path) || !is_dir(sz_path)) {
+        (void)ps_host_fs_remove(sz_path); /* best effort: the launch is failing already */
+        return;
+    }
+    PsHostDir *p_dir = ps_host_dir_open(sz_path);
+    if (p_dir) {
+        for (PsHostDirEntry entry; ps_host_dir_next(p_dir, &entry);) {
+            char sz_child[PATH_MAX];
+            if (!strcmp(entry.sz_name, ".") || !strcmp(entry.sz_name, "..") ||
+                (size_t)snprintf(sz_child, sizeof(sz_child), "%s/%s", sz_path, entry.sz_name) >= sizeof(sz_child))
+                continue;
+            remove_tree(sz_child);
+        }
+        ps_host_dir_close(p_dir);
+    }
+    (void)ps_host_fs_remove_dir(sz_path);
 }
 static const char *base_name(const char *sz_path) {
     const char *p_slash = strrchr(sz_path, '/');
@@ -442,8 +454,14 @@ static void build_view(Mods *p_mods, const char *sz_game, const char *sz_out_dir
             c_replaced += !ps_host_fs_real_path(sz_destination, sz_target, sizeof(sz_target)) && is_inside(sz_target, sz_game);
             error = ps_host_fs_remove(sz_destination);
             if (error) mods_fail("%s: %s", sz_destination, strerror(error));
-        } else if (exists(sz_destination)) {
+        } else if (is_dir(sz_destination)) {
             mods_fail("File/directory conflict: %s", p_replacement->sz_relative);
+        } else if (exists(sz_destination)) {
+            /* A hard link or copy standing in for a file link, which Windows makes without the
+             * privilege for symbolic links. */
+            ++c_replaced;
+            error = ps_host_fs_remove(sz_destination);
+            if (error) mods_fail("%s: %s", sz_destination, strerror(error));
         } else {
             ++c_added;
         }
