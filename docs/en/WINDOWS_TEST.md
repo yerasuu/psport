@@ -29,7 +29,7 @@ tag's assets appear once its workflow run finishes, before or after the Linux on
 folder, `psport-windows-<version>-<commit>-x86_64/` (the 12-character commit), whatever the asset's
 name.
 
-Every push also keeps the run's artifacts: in the repository's Actions tab (workflow "Windows"),
+Every tag's run also keeps its artifacts: in the repository's Actions tab (workflow "Windows"),
 `psport-windows-<version>-<commit>-x86_64.zip` is the same package, and
 `psport-windows-<version>-<commit>-x86_64-sources` holds the PKGBUILD and upstream tarball of the
 FFmpeg it carries. GitHub keeps both 14 days and asks for a signed-in account.
