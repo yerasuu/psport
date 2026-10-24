@@ -6,7 +6,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <type_traits>
 
+#include "psport_srt_faults.h"
 #include "psport_threads.h"
 #include "psport_toggles.h"
 #include "common/debug.h"
@@ -29,7 +31,8 @@ bool IsDirectDraw(AmdGpu::PM4ItOpcode opcode) {
 
 /// Walks the type-3 packets of a command buffer (type-2 padding skipped) as the GPU thread does:
 /// packets shorter than their fields are skipped, which the GPU thread counts, so that the
-/// register checksums and the draw ordinals stay equal to its own.
+/// register checksums and the draw ordinals stay equal to its own. A `func` returning bool
+/// stops the walk by returning false.
 template <typename Func>
 void ForEachPacket(std::span<const u32> commands, Func&& func) {
     for (size_t at = 0; at < commands.size();) {
@@ -47,9 +50,116 @@ void ForEachPacket(std::span<const u32> commands, Func&& func) {
             return;
         }
         if (c_body_words >= AmdGpu::Liverpool::MinBodyWords(p_header->type3.opcode, false)) {
-            func(p_header);
+            if constexpr (std::is_same_v<std::invoke_result_t<Func&, const AmdGpu::PM4Header*>,
+                                         bool>) {
+                if (!func(p_header)) {
+                    return;
+                }
+            } else {
+                func(p_header);
+            }
         }
         at += words;
+    }
+}
+
+/// The GPU thread runs nested buffers recursively; chains deeper than this are not replayed.
+constexpr u32 MaxNestedDepth = 4;
+
+/// The scanner's register replay of one top-level buffer.
+struct ScanReplay {
+    AmdGpu::Regs& regs;
+    u64& checksum;
+    AmdGpu::RegDirty& dirty;
+    std::vector<u32>& nested_words;
+    std::atomic<u64>& c_nested_followed;
+};
+
+/// A nested buffer is guest memory read ahead of the GPU thread: it may be unmapped by now, so a
+/// fault returns here (g_p_runtime_fault_recover) instead of stopping the port.
+bool CopyGuestWords(const u32* p_guest, u32 c_words, std::vector<u32>& out_words) {
+    out_words.resize(c_words);
+    PsHostRecoveryPoint recover;
+    if (PS_HOST_RECOVERY_SET(recover)) {
+        g_p_runtime_fault_recover = nullptr;
+        return false;
+    }
+    g_p_runtime_fault_recover = &recover;
+    std::memcpy(out_words.data(), p_guest, c_words * sizeof(u32));
+    g_p_runtime_fault_recover = nullptr;
+    return true;
+}
+
+bool ScanPacket(const AmdGpu::PM4Header* p_header, const u32* p_end, u32 depth,
+                ScanReplay& replay);
+
+/// False when the replay had to stop: the registers after this buffer are unknown.
+bool ScanCommands(std::span<const u32> commands, u32 depth, ScanReplay& replay) {
+    bool is_known = true;
+    ForEachPacket(commands, [&](const AmdGpu::PM4Header* p_header) {
+        is_known = ScanPacket(p_header, commands.data() + commands.size(), depth, replay);
+        return is_known;
+    });
+    return is_known;
+}
+
+/// Applies one packet as the GPU thread would (nested indirect buffers followed, their state
+/// packets recorded for the workers). False when the registers after it cannot be known ahead
+/// of the GPU thread: a nested buffer that cannot be read or is nested too deep, or a COND_EXEC
+/// whose skip would leave other registers (or draw ordinals) than running its packets, since
+/// its condition is only known when the GPU thread gets there.
+bool ScanPacket(const AmdGpu::PM4Header* p_header, const u32* p_end, u32 depth,
+                ScanReplay& replay) {
+    using AmdGpu::PM4ItOpcode;
+    switch (p_header->type3.opcode) {
+    case PM4ItOpcode::IndirectBuffer: {
+        if (depth >= MaxNestedDepth) {
+            return false;
+        }
+        const auto* p_ib = reinterpret_cast<const AmdGpu::PM4CmdIndirectBuffer*>(p_header);
+        thread_local std::array<std::vector<u32>, MaxNestedDepth> s_nested;
+        auto& words = s_nested[depth];
+        if (!CopyGuestWords(p_ib->Address<const u32>(), p_ib->ib_size, words)) {
+            return false;
+        }
+        replay.c_nested_followed.fetch_add(1, std::memory_order_relaxed);
+        return ScanCommands(words, depth + 1, replay);
+    }
+    case PM4ItOpcode::CondExec: {
+        const auto* p_cond = reinterpret_cast<const AmdGpu::PM4CmdCondExec*>(p_header);
+        const u32* p_covered =
+            reinterpret_cast<const u32*>(p_header) + p_header->type3.NumWords() + 1;
+        const size_t c_covered =
+            std::min<size_t>(p_cond->exec_count.Value(), static_cast<size_t>(p_end - p_covered));
+        // The covered packets are applied here as if run: when that changes nothing, running or
+        // skipping them is the same; otherwise the replay stops and the registers no longer matter.
+        const u64 checksum_before = replay.checksum;
+        bool has_effect = false;
+        ForEachPacket(std::span<const u32>{p_covered, c_covered},
+                      [&](const AmdGpu::PM4Header* p_covered_header) {
+                          const auto opcode = p_covered_header->type3.opcode;
+                          if (opcode == PM4ItOpcode::IndirectBuffer ||
+                              opcode == PM4ItOpcode::CondExec) {
+                              has_effect = true;
+                              return false;
+                          }
+                          AmdGpu::Liverpool::ApplyGraphicsRegisterPacket(
+                              replay.regs, p_covered_header, replay.checksum, &replay.dirty);
+                          return true;
+                      });
+        return !has_effect && replay.checksum == checksum_before;
+    }
+    default: {
+        const u64 checksum_before = replay.checksum;
+        AmdGpu::Liverpool::ApplyGraphicsRegisterPacket(replay.regs, p_header, replay.checksum,
+                                                       &replay.dirty);
+        if (depth > 0 && replay.checksum != checksum_before) {
+            const auto* p_words = reinterpret_cast<const u32*>(p_header);
+            replay.nested_words.insert(replay.nested_words.end(), p_words,
+                                       p_words + p_header->type3.NumWords() + 1);
+        }
+        return true;
+    }
     }
 }
 
@@ -233,8 +343,9 @@ std::shared_ptr<DrawPreparation::Submission> DrawPreparation::Build(
         return {};
     }
     auto submission = std::make_shared<Submission>();
-    submission->commands.assign(commands.begin(), commands.end());
-    ForEachPacket(submission->commands, [&](const AmdGpu::PM4Header* p_header) {
+    submission->commands =
+        std::make_shared<const std::vector<u32>>(commands.begin(), commands.end());
+    ForEachPacket(*submission->commands, [&](const AmdGpu::PM4Header* p_header) {
         submission->c_draws += IsDirectDraw(p_header->type3.opcode);
     });
     submission->draws = std::make_unique<PreparedDraw[]>(submission->c_draws);
@@ -262,31 +373,64 @@ void DrawPreparation::BeginSubmission(u64 seq, const AmdGpu::Regs& regs, u64 reg
     m_gpu_seq.store(seq, std::memory_order_release);
     std::scoped_lock lk{m_mutex};
     if (!m_is_baseline_ready) {
-        m_initial_regs = std::make_unique<AmdGpu::Regs>(regs);
         m_tail_regs = std::make_unique<AmdGpu::Regs>(regs);
-        m_initial_checksum = m_tail_checksum = reg_checksum;
-        m_baseline_seq = m_tail_seq = seq;
+        m_baseline_seq = seq;
         m_is_baseline_ready = true;
-        m_cv.notify_all();
+        RebaseTail(seq, regs, reg_checksum);
     }
     // Idle helpers can starve on a busy CPU. Rather than queueing without bound, restart
     // them from the GPU thread's own state (one register copy) once the scanner lags.
     constexpr u64 MaxScanLag = 64;
     if (!m_submissions.empty() && seq > m_tail_seq + MaxScanLag &&
         m_submissions.front()->seq < seq && !m_submissions.front()->is_scanned.load()) {
-        *m_tail_regs = regs;
-        m_tail_seq = seq;
-        m_tail_checksum = reg_checksum;
-        while (!m_submissions.empty() && m_submissions.front()->seq < seq) {
-            m_submissions.pop_front();
-        }
+        RebaseTail(seq, regs, reg_checksum);
         ++m_c_rebases;
-        m_cv.notify_all();
+    } else if (!m_is_tail_known && seq >= m_tail_seq) {
+        RebaseTail(seq, regs, reg_checksum);
+        ++m_c_unknown_resyncs;
     }
-    if (!m_submissions.empty() && seq >= m_submissions.front()->seq &&
-        seq - m_submissions.front()->seq < m_submissions.size()) {
-        m_current = m_submissions[seq - m_submissions.front()->seq];
+    const auto find_current = [&]() -> std::shared_ptr<Submission> {
+        if (!m_submissions.empty() && seq >= m_submissions.front()->seq &&
+            seq - m_submissions.front()->seq < m_submissions.size()) {
+            return m_submissions[seq - m_submissions.front()->seq];
+        }
+        return {};
+    };
+    m_current = find_current();
+    // The scanner's state drifted from the command processor's (a compute queue writing SH
+    // registers in between, or anything else it cannot replay): every buffer it scanned from
+    // here on was prepared with registers this thread will never have, and walking their
+    // resource tables reads other draws' data as pointers. Fresh copies are scanned again from
+    // this thread's registers; workers still holding the old ones write only to those.
+    if (m_current && m_current->is_scanned.load(std::memory_order_acquire) &&
+        m_current->start_checksum != reg_checksum) {
+        for (auto& submission : m_submissions) {
+            if (submission->seq < seq) {
+                continue;
+            }
+            auto fresh = std::make_shared<Submission>();
+            fresh->seq = submission->seq;
+            fresh->commands = submission->commands;
+            fresh->c_draws = submission->c_draws;
+            fresh->draws = std::make_unique<PreparedDraw[]>(fresh->c_draws);
+            submission = std::move(fresh);
+        }
+        RebaseTail(seq, regs, reg_checksum);
+        ++m_c_checksum_resyncs;
+        m_current = find_current();
     }
+}
+
+void DrawPreparation::RebaseTail(u64 seq, const AmdGpu::Regs& regs, u64 reg_checksum) {
+    *m_tail_regs = regs;
+    m_tail_seq = seq;
+    m_tail_checksum = reg_checksum;
+    m_is_tail_known = true;
+    ++m_tail_epoch;
+    while (!m_submissions.empty() && m_submissions.front()->seq < seq) {
+        m_submissions.pop_front();
+    }
+    m_cv.notify_all();
 }
 
 void DrawPreparation::EndSubmission() {
@@ -322,9 +466,13 @@ void DrawPreparation::Collect() {
             if (!front->is_scanned.load(std::memory_order_acquire)) {
                 break;
             }
-            front->delta.Apply(*m_tail_regs);
             m_tail_seq = front->seq + 1;
-            m_tail_checksum = front->end_checksum;
+            if (front->is_end_known) {
+                front->delta.Apply(*m_tail_regs);
+                m_tail_checksum = front->end_checksum;
+            } else {
+                m_is_tail_known = false;
+            }
         }
         m_submissions.pop_front();
     }
@@ -333,36 +481,38 @@ void DrawPreparation::Collect() {
 void DrawPreparation::ScannerLoop(std::stop_token stop) {
     Common::SetCurrentThreadName("bb:DrawScan");
     PsThreads::MakeBackground();
-    std::unique_ptr<AmdGpu::Regs> regs;
+    auto regs = std::make_unique<AmdGpu::Regs>();
     u64 checksum = 0;
     u64 next_seq = 0;
-    {
-        std::unique_lock lk{m_mutex};
-        m_cv.wait(lk, stop, [&] { return m_is_baseline_ready; });
-        if (stop.stop_requested()) {
-            return;
-        }
-        regs = std::make_unique<AmdGpu::Regs>(*m_initial_regs);
-        checksum = m_initial_checksum;
-        next_seq = m_baseline_seq;
-    }
+    // No epoch yet: the first wait loads the tail the GPU thread hands over.
+    u64 epoch = ~0ull;
+    // False after a buffer whose end state is unknown: only a rebase moves the scanner on.
+    bool is_state_known = false;
     AmdGpu::RegDirty dirty;
     while (!stop.stop_requested()) {
         std::shared_ptr<Submission> submission;
         {
             std::unique_lock lk{m_mutex};
             m_cv.wait(lk, stop, [&] {
-                return next_seq < m_tail_seq ||
-                       (!m_submissions.empty() && m_submissions.back()->seq >= next_seq);
+                if (!m_is_baseline_ready) {
+                    return false;
+                }
+                if (epoch != m_tail_epoch) {
+                    return m_is_tail_known;
+                }
+                return is_state_known && !m_submissions.empty() &&
+                       m_submissions.back()->seq >= next_seq;
             });
             if (stop.stop_requested()) {
                 return;
             }
-            if (next_seq < m_tail_seq) {
+            if (epoch != m_tail_epoch) {
                 // Rebased by the GPU thread: continue from its state.
                 *regs = *m_tail_regs;
                 checksum = m_tail_checksum;
                 next_seq = m_tail_seq;
+                epoch = m_tail_epoch;
+                is_state_known = true;
                 continue;
             }
             // Unscanned buffers are only collected by a rebase, so `next_seq` is still queued.
@@ -370,17 +520,43 @@ void DrawPreparation::ScannerLoop(std::stop_token stop) {
         }
         ZoneScopedNC("Draw scan", RendererMarkerColor);
         submission->start_checksum = checksum;
+        submission->nested_words.clear();
+        submission->nested_ends.clear();
         dirty.Clear();
-        ForEachPacket(submission->commands, [&](const AmdGpu::PM4Header* p_header) {
-            AmdGpu::Liverpool::ApplyGraphicsRegisterPacket(*regs, p_header, checksum, &dirty);
+        ScanReplay replay{*regs, checksum, dirty, submission->nested_words, m_c_nested_followed};
+        u32 c_draws_known = 0;
+        bool is_end_known = true;
+        const auto& commands = *submission->commands;
+        ForEachPacket(commands, [&](const AmdGpu::PM4Header* p_header) {
+            if (!ScanPacket(p_header, commands.data() + commands.size(), 0, replay)) {
+                is_end_known = false;
+                return false;
+            }
+            const auto opcode = p_header->type3.opcode;
+            if (opcode == AmdGpu::PM4ItOpcode::IndirectBuffer) {
+                submission->nested_ends.push_back(
+                    static_cast<u32>(submission->nested_words.size()));
+            }
+            c_draws_known += IsDirectDraw(opcode);
+            return true;
         });
-        submission->delta.Capture(*regs, dirty);
-        submission->end_checksum = checksum;
+        submission->c_draws_known = c_draws_known;
+        submission->is_end_known = is_end_known;
+        if (is_end_known) {
+            submission->delta.Capture(*regs, dirty);
+            submission->end_checksum = checksum;
+        } else {
+            m_c_unknown_ends.fetch_add(1, std::memory_order_relaxed);
+        }
         {
             std::scoped_lock lk{m_mutex};
-            submission->is_scanned.store(true, std::memory_order_release);
+            // A rebase while this buffer was scanned replaced or dropped it; the scan is stale.
+            if (epoch == m_tail_epoch) {
+                submission->is_scanned.store(true, std::memory_order_release);
+            }
         }
         ++next_seq;
+        is_state_known = is_end_known;
         m_cv.notify_all();
     }
 }
@@ -391,6 +567,7 @@ void DrawPreparation::WorkerLoop(std::stop_token stop, u32 i_worker) {
     auto regs = std::make_unique<AmdGpu::Regs>();
     constexpr u64 NoPosition = ~0ull;
     u64 position = NoPosition; ///< `regs` holds the state at the start of this buffer
+    u64 epoch = 0;             ///< the tail epoch `position` belongs to
     PipelineSelection sel{};
     sel.regs = regs.get();
     PrepWorker prep_worker{};
@@ -417,7 +594,7 @@ void DrawPreparation::WorkerLoop(std::stop_token stop, u32 i_worker) {
             std::unique_lock lk{m_mutex};
             // m_gpu_seq moves without the lock: keep the candidate the predicate found.
             m_cv.wait(lk, stop, [&] {
-                target = m_is_baseline_ready ? claimable() : nullptr;
+                target = m_is_baseline_ready && m_is_tail_known ? claimable() : nullptr;
                 return target != nullptr;
             });
             if (stop.stop_requested() || !target) {
@@ -425,10 +602,15 @@ void DrawPreparation::WorkerLoop(std::stop_token stop, u32 i_worker) {
             }
             target->is_claimed.store(true, std::memory_order_relaxed);
             // Buffers between this worker's state and the target: their deltas. A position
-            // already collected (or past the target) restarts from the queue's tail state.
-            if (position == NoPosition || position < m_tail_seq || position > target->seq) {
+            // already collected (or past the target, or from before a rebase) restarts from the
+            // queue's tail state. Every queued scanned buffer belongs to the current epoch, and
+            // none follows one whose end state is unknown (the scanner waits for a rebase there),
+            // so every delta on the path is valid.
+            if (position == NoPosition || epoch != m_tail_epoch || position < m_tail_seq ||
+                position > target->seq) {
                 *regs = *m_tail_regs;
                 position = m_tail_seq;
+                epoch = m_tail_epoch;
             }
             const u64 front = m_submissions.front()->seq;
             path.clear();
@@ -443,11 +625,31 @@ void DrawPreparation::WorkerLoop(std::stop_token stop, u32 i_worker) {
         path.clear();
         u64 checksum = target->start_checksum;
         u32 ordinal = 0;
+        size_t i_nested = 0;
+        u32 off_nested = 0;
         arena = FlatArena{};
-        ForEachPacket(target->commands, [&](const AmdGpu::PM4Header* p_header) {
+        ForEachPacket(*target->commands, [&](const AmdGpu::PM4Header* p_header) {
+            // Past the scanner's last known state the registers are not this thread's to guess.
+            if (!target->is_end_known && ordinal >= target->c_draws_known) {
+                return false;
+            }
+            if (p_header->type3.opcode == AmdGpu::PM4ItOpcode::IndirectBuffer) {
+                if (i_nested >= target->nested_ends.size()) {
+                    return false;
+                }
+                const u32 off_end = target->nested_ends[i_nested++];
+                ForEachPacket(std::span<const u32>{target->nested_words}.subspan(
+                                  off_nested, off_end - off_nested),
+                              [&](const AmdGpu::PM4Header* p_nested) {
+                                  AmdGpu::Liverpool::ApplyGraphicsRegisterPacket(*regs, p_nested,
+                                                                                 checksum);
+                              });
+                off_nested = off_end;
+                return true;
+            }
             AmdGpu::Liverpool::ApplyGraphicsRegisterPacket(*regs, p_header, checksum);
             if (!IsDirectDraw(p_header->type3.opcode)) {
-                return;
+                return true;
             }
             // Past the GPU thread the draws are no longer worth preparing.
             if (ordinal < target->c_draws &&
@@ -484,10 +686,11 @@ void DrawPreparation::WorkerLoop(std::stop_token stop, u32 i_worker) {
                 }
             }
             ++ordinal;
+            return true;
         });
         // The arena's chunks live as long as the submission.
         target->flat_chunks = std::move(arena.m_chunks);
-        position = target->seq + 1;
+        position = target->is_end_known ? target->seq + 1 : NoPosition;
     }
 }
 
@@ -505,9 +708,18 @@ void DrawPreparation::Count(bool was_used) {
     }
     s_window = now;
     std::printf("Draw preparation: %llu prepared pipelines used, %llu not (%u workers, "
-                "%llu scanner rebases)\n",
+                "%llu scanner rebases, %llu resyncs after a buffer with unknown end state, "
+                "%llu after a register checksum mismatch; %llu nested buffers replayed, "
+                "%llu buffers with unknown end state; %llu speculative walks abandoned)\n",
                 static_cast<unsigned long long>(m_c_used), static_cast<unsigned long long>(m_c_unused),
-                m_c_workers, static_cast<unsigned long long>(m_c_rebases));
+                m_c_workers, static_cast<unsigned long long>(m_c_rebases),
+                static_cast<unsigned long long>(m_c_unknown_resyncs),
+                static_cast<unsigned long long>(m_c_checksum_resyncs),
+                static_cast<unsigned long long>(
+                    m_c_nested_followed.load(std::memory_order_relaxed)),
+                static_cast<unsigned long long>(
+                    m_c_unknown_ends.load(std::memory_order_relaxed)),
+                static_cast<unsigned long long>(PsSrtFaults::AbandonedWalks()));
     m_c_used = m_c_unused = 0;
 }
 

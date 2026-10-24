@@ -16,6 +16,8 @@ void IncrementRip(void* ctx, u64 length);
 // psport: the registers SRT walkers load into, the only ones a fault handler here rewrites.
 enum class Register : u8 { Rdi, R10 };
 
+u64 GetRegister(void* ctx, Register reg);
+
 void SetRegister(void* ctx, Register reg, u64 value);
 
 bool IsWriteError(void* ctx);

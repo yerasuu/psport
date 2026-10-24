@@ -140,6 +140,18 @@ off below 12 hardware threads (Steam Deck: no workers). Now:
 - All helpers are SCHED_IDLE (`psport_threads.h`): they only take idle cores. If the scanner
   starves (busy CPU), the GPU thread rebases it from its own register state once the lag
   passes 64 buffers instead of queueing without bound (`scanner rebases` in the stats).
+- The scanner follows nested `INDIRECT_BUFFER`s as the GPU thread does (guest memory read under
+  a recovery point) and keeps their state packets, which workers replay instead of reading the
+  nested buffer again. A nested buffer it cannot read (or nested deeper than 4) and a
+  `COND_EXEC` over packets that change registers stop the scan of that buffer: its later draws
+  are not prepared, and the scanner waits for the GPU thread's registers at the next buffer
+  (`resyncs after a buffer with unknown end state`). When the GPU thread's checksum at a buffer's
+  start differs from the scanned one (a compute queue writing SH registers in between, or
+  anything else not replayed), the buffers scanned from there are replaced by fresh copies and
+  scanned again from its registers (`after a register checksum mismatch`); before (#887) the
+  scanner never caught up and workers walked resource tables with another draw's registers.
+- A walker fault on a worker abandons the walk (its recovery point) instead of reading zeros:
+  the draw is left to the GPU thread (`speculative walks abandoned`).
 - Copy threads use the same affinity count (critical path, normal priority).
 
 A/B in one run (toggle 8192, standing still, `PS_FPS_LIMIT=0`, FSR 4), ~98% of direct draws

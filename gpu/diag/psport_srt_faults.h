@@ -41,7 +41,15 @@ inline void SetPacket(const std::uint32_t* p_dcb, const std::uint32_t* p_packet)
     g_origin.p_packet = p_packet;
 }
 
-/// From the walker fault handler, after it supplied zero for the load at `p_code`.
-void Note(const std::uint8_t* p_code, std::uintptr_t va_fault);
+/// From the walker fault handler, after it supplied zero for the load at `p_code`; `va_load` is
+/// the load's effective address (the fault address a non-canonical one reports is 0).
+void Note(const std::uint8_t* p_code, std::uintptr_t va_load);
+
+/// From the walker fault handler on a thread reading ahead of the command processor (a recovery
+/// point set): the walk is abandoned instead of supplied zero, and only counted here.
+void NoteAbandoned(const std::uint8_t* p_code, std::uintptr_t va_load);
+
+/// Walks abandoned so far (NoteAbandoned).
+std::uint64_t AbandonedWalks();
 
 } // namespace PsSrtFaults

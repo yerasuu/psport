@@ -16,6 +16,7 @@
 #include "core/emulator_settings.h"
 #include "core/signals.h"
 #include "psport_srt_faults.h"
+#include "psport_toggles.h"
 #include "shader_recompiler/info.h"
 #include "shader_recompiler/ir/ir_emitter.h"
 #include "shader_recompiler/ir/opcodes.h"
@@ -65,7 +66,7 @@ static void DumpSrtProgram(const Shader::Info& info, const u8* code, size_t code
 
 // psport: supplies zero for the faulting invocation only. Patching the shared MOV raced with
 // other threads' handlers and left later draws through the same walker reading zero for valid
-// tables (bbport 8185b88, its crash 139).
+// tables (bbport 8185b88, its crash 139). A thread with a recovery point abandons its walk instead.
 static bool SrtWalkerSignalHandler(void* context, void* fault_address) {
     const u8* code_start = g_srt_codegen_start;
     const u8* code_end = code_start + g_srt_published_size.load(std::memory_order_acquire);
@@ -86,6 +87,23 @@ static bool SrtWalkerSignalHandler(void* context, void* fault_address) {
         return false;
     }
 
+    // A non-canonical address faults with address 0 (#GP): the load's own address says what the
+    // walker read. Walkers address tables through rdi only, without an index register.
+    const auto& mem = operands[1].mem;
+    const uintptr_t va_load =
+        mem.base == ZYDIS_REGISTER_RDI && mem.index == ZYDIS_REGISTER_NONE
+            ? static_cast<uintptr_t>(Common::GetRegister(context, Common::Register::Rdi) +
+                                     static_cast<u64>(mem.disp.value))
+            : reinterpret_cast<uintptr_t>(fault_address);
+
+    // A thread reading ahead of the command processor (draw preparation workers, the draw pipe's
+    // table check) set a recovery point: abandoning the walk there leaves the draw to the GPU
+    // thread, where zeros would let it go on with tables of some other draw.
+    if (g_p_runtime_fault_recover) {
+        PsSrtFaults::NoteAbandoned(code, va_load);
+        return false;
+    }
+
     // Walkers load only into rdi or r10d; a 32-bit MOV clears the upper half too.
     switch (operands[0].reg.value) {
     case ZYDIS_REGISTER_RDI:
@@ -101,9 +119,9 @@ static bool SrtWalkerSignalHandler(void* context, void* fault_address) {
     }
     Common::IncrementRip(context, instruction.length);
 
-    LOG_ERROR_COUNTED(Render_Recompiler, "SRT walker read unavailable memory at {} (instruction {}), supplied zero",
-                      fault_address, static_cast<const void*>(code));
-    PsSrtFaults::Note(code, reinterpret_cast<uintptr_t>(fault_address));
+    LOG_ERROR_COUNTED(Render_Recompiler, "SRT walker read unavailable memory at {:#x} (instruction {}), supplied zero",
+                      va_load, static_cast<const void*>(code));
+    PsSrtFaults::Note(code, va_load);
     return true;
 }
 

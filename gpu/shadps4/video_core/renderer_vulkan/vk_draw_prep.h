@@ -3,13 +3,17 @@
 //
 // Every submitted graphics command buffer is copied. A scanner thread replays the register
 // writes of the whole stream in order (ApplyGraphicsRegisterPacket, the same code the GPU
-// thread runs) and records, per buffer, its starting checksum and a delta of the register
-// blocks it wrote. Any number of workers (one per spare hardware thread) claim the nearest
-// buffers ahead of the GPU thread, reach their starting state by applying deltas, and select
-// the graphics pipeline and resource sharps of each direct draw. All helpers run as
-// SCHED_IDLE: they only use idle cores. The GPU thread uses a prepared draw only when the
-// running register checksums match and the flattened user data it computes itself equals the
-// worker's; otherwise it takes the regular path. Workers never create or compile anything.
+// thread runs, nested indirect buffers included) and records, per buffer, its starting checksum
+// and a delta of the register blocks it wrote. Where the state stops being knowable ahead of the
+// GPU thread (a nested buffer it cannot read, a COND_EXEC over state packets) the scanner stops
+// and waits for the GPU thread's own registers at the next buffer; the GPU thread also hands its
+// registers over whenever its checksum at a buffer's start differs from the scanned one. Any
+// number of workers (one per spare hardware thread) claim the nearest buffers ahead of the GPU
+// thread, reach their starting state by applying deltas, and select the graphics pipeline and
+// resource sharps of each direct draw. All helpers run as SCHED_IDLE: they only use idle cores.
+// The GPU thread uses a prepared draw only when the running register checksums match and the
+// flattened user data it computes itself equals the worker's; otherwise it takes the regular
+// path. Workers never create or compile anything.
 
 #pragma once
 
@@ -118,12 +122,23 @@ public:
 
     struct Submission {
         u64 seq{};
-        std::vector<u32> commands;
+        /// Shared with the fresh copy a rescan puts in its place, which workers may still read.
+        std::shared_ptr<const std::vector<u32>> commands;
         std::unique_ptr<PreparedDraw[]> draws;
         u32 c_draws{};
         std::vector<std::unique_ptr<u32[]>> flat_chunks; ///< from the claiming worker
-        u64 start_checksum{}, end_checksum{}; ///< set by the scanner
-        AmdGpu::RegDelta delta;                ///< registers written, values at the end
+        // Set by the scanner before `is_scanned`.
+        u64 start_checksum{}, end_checksum{};
+        AmdGpu::RegDelta delta; ///< registers written, values at the end
+        /// State packets of the nested indirect buffers the scanner followed, in order, and where
+        /// each buffer's packets end: workers replay these instead of reading guest memory again,
+        /// so they reach the scanner's checksums even if the game rewrites a nested buffer.
+        std::vector<u32> nested_words;
+        std::vector<u32> nested_ends;
+        /// Direct draws before the first packet whose register effects are unknown ahead of the
+        /// GPU thread; when there is one, `is_end_known` is false and the delta is not recorded.
+        u32 c_draws_known{};
+        bool is_end_known{};
         std::atomic<bool> is_scanned{false};
         std::atomic<bool> is_claimed{false};
         std::atomic<bool> is_gpu_done{false};
@@ -133,17 +148,29 @@ private:
     void ScannerLoop(std::stop_token stop);
     void WorkerLoop(std::stop_token stop, u32 i_worker);
     void Collect();
+    /// Under `m_mutex`: the tail becomes the GPU thread's state at the start of `seq`, and the
+    /// scanner and workers restart from it.
+    void RebaseTail(u64 seq, const AmdGpu::Regs& regs, u64 reg_checksum);
 
     PipelineCache& m_pipeline_cache;
-    std::unique_ptr<AmdGpu::Regs> m_initial_regs; ///< state at the start of `m_baseline_seq`
-    u64 m_initial_checksum{};
     u64 m_baseline_seq{};
     /// State at the start of the oldest queued buffer (`m_tail_seq`): a worker whose position
     /// was collected restarts from here. Guarded by `m_mutex`.
     std::unique_ptr<AmdGpu::Regs> m_tail_regs;
     u64 m_tail_seq{};
     u64 m_tail_checksum{};
-    u64 m_c_rebases = 0; ///< scanner restarts from the GPU thread state (PS_FRAME_STATS)
+    /// False once a buffer whose end state the scanner could not know is collected, until the
+    /// GPU thread hands over its registers at the next buffer. Guarded by `m_mutex`.
+    bool m_is_tail_known{};
+    /// Bumped by every rebase: scans and worker positions from an older epoch are discarded.
+    /// Guarded by `m_mutex`.
+    u64 m_tail_epoch{};
+    // GPU thread only (PS_FRAME_STATS).
+    u64 m_c_rebases = 0;          ///< scanner restarts after lagging
+    u64 m_c_unknown_resyncs = 0;  ///< restarts after a buffer whose end state was unknown
+    u64 m_c_checksum_resyncs = 0; ///< restarts after a start checksum that differed
+    std::atomic<u64> m_c_nested_followed{0}; ///< nested indirect buffers the scanner replayed
+    std::atomic<u64> m_c_unknown_ends{0};    ///< buffers the scanner stopped in
     bool m_is_baseline_ready{}; ///< guarded by `m_mutex`
     std::mutex m_mutex;
     std::condition_variable_any m_cv;

@@ -16,6 +16,11 @@ void IncrementRip(void* ctx, u64 length) {
     ps_host_fault_set_register(p_context, PS_HOST_REG_RIP, ps_host_fault_register(p_context, PS_HOST_REG_RIP) + length);
 }
 
+u64 GetRegister(void* ctx, Register reg) {
+    return ps_host_fault_register(static_cast<PsHostFaultContext*>(ctx),
+                                  reg == Register::Rdi ? PS_HOST_REG_RDI : PS_HOST_REG_R10);
+}
+
 void SetRegister(void* ctx, Register reg, u64 value) {
     ps_host_fault_set_register(static_cast<PsHostFaultContext*>(ctx),
                                reg == Register::Rdi ? PS_HOST_REG_RDI : PS_HOST_REG_R10, value);

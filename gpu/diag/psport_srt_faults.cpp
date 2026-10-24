@@ -61,6 +61,7 @@ std::array<Slot, C_SLOTS> s_slots{};
 std::size_t s_c_slots = 0;
 std::uint64_t s_c_untracked = 0;
 std::uint64_t s_c_unattributed = 0;
+std::atomic<std::uint64_t> s_c_abandoned{0};
 std::atomic<bool> s_is_summary_added{false};
 
 const char* NameStage(std::uint32_t hw_stage) {
@@ -231,8 +232,10 @@ void Summarize(char* sz_out, std::size_t cb_out) {
     }
     std::sort(p_slots.begin(), p_slots.begin() + static_cast<std::ptrdiff_t>(s_c_slots),
               [](const Slot* p_left, const Slot* p_right) { return p_left->c_faults > p_right->c_faults; });
-    std::string text = fmt::format("SRT walker faults: summary: {} faults, {} tables, {} untracked, {} unattributed:",
-                                   c_faults, s_c_slots, s_c_untracked, s_c_unattributed);
+    std::string text = fmt::format(
+        "SRT walker faults: summary: {} faults, {} tables, {} untracked, {} unattributed, {} speculative walks "
+        "abandoned:",
+        c_faults, s_c_slots, s_c_untracked, s_c_unattributed, s_c_abandoned.load(std::memory_order_relaxed));
     for (std::size_t i = 0; i < s_c_slots; ++i) {
         text += fmt::format(" {} {:#018x} {} {}", NameStage(p_slots[i]->table.hw_stage), p_slots[i]->table.pgm_hash,
                             FormatTable(p_slots[i]->table), p_slots[i]->c_faults);
@@ -252,7 +255,24 @@ void Summarize(char* sz_out, std::size_t cb_out) {
 // logger's lock and are not inside the allocator. Guest memory is read only through
 // runtime_memory_read_guest_signal and user data only within c_user_data, so Note itself
 // cannot fault again while holding s_mutex.
-void Note(const std::uint8_t* p_code, std::uintptr_t va_fault) {
+void NoteAbandoned(const std::uint8_t* p_code, std::uintptr_t va_load) {
+    if (!s_is_summary_added.exchange(true, std::memory_order_relaxed)) {
+        runtime_calls_add_summary(&Summarize);
+    }
+    const std::uint64_t c_abandoned = s_c_abandoned.fetch_add(1, std::memory_order_relaxed) + 1;
+    if (std::has_single_bit(c_abandoned)) {
+        LOG_WARNING(Render_Recompiler,
+                    "SRT walker load at {} ahead of the command processor faulted at {:#x}: walk abandoned, "
+                    "the draw is left to the GPU thread ({} so far)",
+                    static_cast<const void*>(p_code), va_load, c_abandoned);
+    }
+}
+
+std::uint64_t AbandonedWalks() {
+    return s_c_abandoned.load(std::memory_order_relaxed);
+}
+
+void Note(const std::uint8_t* p_code, std::uintptr_t va_load) {
     if (!s_is_summary_added.exchange(true, std::memory_order_relaxed)) {
         runtime_calls_add_summary(&Summarize);
     }
@@ -298,7 +318,7 @@ void Note(const std::uint8_t* p_code, std::uintptr_t va_fault) {
         if (std::has_single_bit(c_fault)) {
             LOG_ERROR(Render_Recompiler,
                       "SRT walker load at {} faulted at {:#x} outside the walker this thread announced ({} so far)",
-                      static_cast<const void*>(p_code), va_fault, c_fault);
+                      static_cast<const void*>(p_code), va_load, c_fault);
         }
         return;
     }
@@ -309,9 +329,10 @@ void Note(const std::uint8_t* p_code, std::uintptr_t va_fault) {
         if (!origin.p_user_data) {
             root += "unknown";
         } else if (origin.c_user_data >= 2 && sgpr <= origin.c_user_data - 2) {
-            const std::uint64_t va_root =
-                (origin.p_user_data[sgpr] | (std::uint64_t{origin.p_user_data[sgpr + 1]} << 32)) & 0xFFFFFFFFFFFFULL;
-            root += fmt::format("{:#x}", va_root);
+            // Unmasked: the high dword tells a pointer from a sharp read as one.
+            const std::uint64_t raw_root =
+                origin.p_user_data[sgpr] | (std::uint64_t{origin.p_user_data[sgpr + 1]} << 32);
+            root += fmt::format("{:#018x}", raw_root);
         } else {
             root += fmt::format("past the {} user data registers", origin.c_user_data);
         }
@@ -321,7 +342,7 @@ void Note(const std::uint8_t* p_code, std::uintptr_t va_fault) {
               "(address {:#x}, fault {} of this table); {}",
               NameStage(load.table.hw_stage), load.table.pgm_hash, root, FormatTable(load.table),
               load.is_pointer ? "pointer" : "value",
-              load.off_dw == COMPUTED_OFFSET ? std::string("computed") : std::to_string(load.off_dw), va_fault,
+              load.off_dw == COMPUTED_OFFSET ? std::string("computed") : std::to_string(load.off_dw), va_load,
               c_fault, DescribeSource(origin, load.table.hw_stage, sgpr));
 }
 
