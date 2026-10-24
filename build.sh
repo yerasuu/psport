@@ -24,8 +24,9 @@ if (( ${#deprecated[@]} )); then
 fi
 mkdir -p out
 # Windows, from MSYS2's CLANG64 shell (clang, libc++, UCRT; decision #623, the packages in
-# .github/workflows/windows.yml): the GPU library, psport.exe, the capability check (#614) and the
-# Windows probe (tools/win32_probe, #899).
+# .github/workflows/windows.yml): CMakeLists.txt builds the GPU library, psport.exe, the capability
+# check (#614) and the Windows probe (tools/win32_probe, #899) into out/, as a toolchain file does
+# without MSYS2 (kb #926).
 case $(uname -s) in
 MINGW* | MSYS*)
     if [[ ${MSYSTEM:-} != CLANG64 ]]; then
@@ -35,43 +36,17 @@ MINGW* | MSYS*)
         command -v "$tool" >/dev/null || { echo "Need $tool (.github/workflows/windows.yml lists the packages)." >&2; exit 1; }
     done
     [[ -f gpu/third_party/imgui/imgui.h ]] || git submodule update --init --recursive
-    # No PGO (its flags are GCC's), no online module, DLSS bridge or Tracy yet.
-    cmake -S gpu -B out/gpu -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_C_COMPILER=clang \
-        -DCMAKE_CXX_COMPILER=clang++ -DPS_PGO=off -DPS_LTO="${PS_LTO:-ON}" -DPS_NET=OFF >/dev/null
+    commit=$(git rev-parse --short=12 HEAD 2>/dev/null || true)
+    cmake -S . -B out -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_C_COMPILER=clang \
+        -DCMAKE_CXX_COMPILER=clang++ -DPS_LTO="${PS_LTO:-ON}" -DPS_COMMIT="$commit" >/dev/null
     echo "GPU library: LTO ${PS_LTO:-ON} (Windows: no PGO, no online module)"
-    if ! ninja -C out/gpu psport-gpu > out/gpu-build.log 2>&1; then
+    if ! ninja -C out psport-gpu > out/gpu-build.log 2>&1; then
         grep -v '^\[' out/gpu-build.log | tail -40 >&2
         echo 'GPU library build failed (full log: out/gpu-build.log)' >&2; exit 1
     fi
     echo "Built $PWD/out/gpu/libpsport-gpu.dll"
-    read -r -a includes <<< "$(pkg-config --cflags vulkan sdl3)"
-    read -r -a libraries <<< "$(pkg-config --libs vulkan sdl3)"
-    # The runtime: the Linux build's sources with src/platform/win32, and posix_compat.h for the C
-    # library calls UCRT lacks. A console program, so that its log reaches stdout (no -mwindows);
-    # it exports what libpsport-gpu.dll imports (gpu/port/psport_runtime.def), and its low
-    # addresses stay free for the guest without high-entropy ASLR (ps_host_vm_reserve_arena).
-    read -r -a console_libraries <<< "$(pkg-config --libs vulkan sdl3 | sed 's/ -mwindows//')"
-    mkdir -p out/atrac9
-    for source in third_party/LibAtrac9/C/src/*.c; do clang -std=c99 -O2 -g -w -c "$source" -o "out/atrac9/$(basename "${source%.c}").o"; done
-    llvm-ar rcs out/libatrac9.a out/atrac9/*.o
-    mapfile -t runtime < <(printf '%s\n' src/*/runtime*.c | LC_ALL=C sort -t/ -k3)
-    areas=(main loader runtime runtime/imports kernel system audio input net platform)
-    commit=$(git rev-parse --short=12 HEAD 2>/dev/null || true)
-    clang -std=c11 -O2 -g -Wall -Wextra -Werror -include src/platform/win32/posix_compat.h -DPS_VERSION="\"$version\"" \
-        -DPS_COMMIT="\"$commit\"" "${includes[@]}" -I. "${areas[@]/#/-Isrc/}" src/main/main.c src/main/cli.c \
-        src/main/game_info.c src/main/bind.c src/main/signals.c src/loader/loader*.c "${runtime[@]}" src/platform/*.c \
-        src/platform/win32/*.c src/main/vulkan_smoke.c out/libatrac9.a gpu/port/psport_runtime.def -Lout/gpu -lpsport-gpu \
-        "${console_libraries[@]}" -pthread -lws2_32 -lbcrypt -lsynchronization -lonecore -Wl,--disable-high-entropy-va \
-        -o out/psport.exe
-    echo "Built $PWD/out/psport.exe"
-    clang -std=c11 -O2 -Wall -Wextra -Werror "${includes[@]}" -Isrc/runtime tools/gpu_capabilities.c \
-        src/runtime/runtime_quirks.c src/runtime/runtime_json_print.c "${libraries[@]}" -o out/psport-gpu-capabilities.exe
-    echo "Built $PWD/out/psport-gpu-capabilities.exe"
-    # Vulkan only through LoadLibrary, so that it reports a machine where the loader or driver is missing.
-    read -r -a vulkan_headers <<< "$(pkg-config --cflags vulkan)"
-    clang -std=c11 -O2 -Wall -Wextra -Werror -municode "${vulkan_headers[@]}" -DPS_VERSION="\"$version\"" \
-        -DPS_COMMIT="\"$commit\"" tools/win32_probe/*.c -ladvapi32 -o out/psport-windows-probe.exe
-    echo "Built $PWD/out/psport-windows-probe.exe"
+    ninja -C out
+    echo "Built $PWD/out/psport.exe, psport-gpu-capabilities.exe and psport-windows-probe.exe"
     echo 'Not built on Windows yet: the online module, the DLSS bridge.'
     exit 0
     ;;

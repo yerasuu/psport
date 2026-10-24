@@ -780,11 +780,20 @@ module (`libpsport-net.so`, which links OpenSSL and abseil, Apache-2.0) until kb
 and every library its programs and modules link; the rest of the closure is nixpkgs' packages as they
 are (SDL3 brings PipeWire's, whose own plugins and tools link OpenSSL, abseil and a GPL FFmpeg).
 
+On Windows the top-level `CMakeLists.txt` (kb #926) builds the GPU library and the programs: it adds
+`gpu/` (no PGO, no online module) and builds `psport.exe`, `psport-gpu-capabilities.exe` and
+`psport-windows-probe.exe` with the flags `build.sh` used to pass by hand (`-O2 -g` without the build
+type's `-DNDEBUG`; `psport.exe` linked with `gpu/port/psport_runtime.def` and only
+`libpsport-gpu.dll`'s import library, its `runtime*.c` in the order of their names; pkg-config's
+results as include directories and full library paths, so that a path with spaces holds).
+`build.sh`'s Windows branch runs `cmake -S . -B out` and `ninja`; on Linux the file stops and points
+to `build.sh`.
+
 `.github/workflows/windows.yml` (the same triggers plus the `vX.Y.Z` tags; its `build` job has
-`contents: read` and no secrets) builds what builds on
-Windows so far (decision #623): `build.sh`'s Windows branch in MSYS2's CLANG64 on `windows-latest`,
-without LTO, gives `psport.exe`, `libpsport-gpu.dll`, `psport-gpu-capabilities.exe` and
-`psport-windows-probe.exe`. FFmpeg is not MSYS2's (GPL-3.0-or-later) but psport's own,
+`contents: read` and no secrets) builds what builds on Windows so far (decision #623): `build.sh`'s
+Windows branch in MSYS2's CLANG64 on `windows-latest`, without LTO, gives `psport.exe`,
+`libpsport-gpu.dll`, `psport-gpu-capabilities.exe` and `psport-windows-probe.exe`. FFmpeg is not
+MSYS2's (GPL-3.0-or-later) but psport's own,
 `packaging/windows/ffmpeg/PKGBUILD` (kb #906): MSYS2's PKGBUILD for the same release (9.0.2, as
 nixpkgs' pin) reduced to `--disable-everything --disable-autodetect --disable-network
 --disable-programs --disable-avdevice --disable-avfilter --enable-shared` with the H.264, HEVC, AAC,
