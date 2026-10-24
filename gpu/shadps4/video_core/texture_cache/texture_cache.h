@@ -243,8 +243,9 @@ public:
         if (!slot_images.is_allocated(id)) {
             return false;
         }
-        const u32 flags = std::atomic_ref<const u32>(
-                              reinterpret_cast<const u32&>(slot_images[id].flags))
+        // atomic_ref<u32>, because libc++ cannot load through atomic_ref<const u32>.
+        const u32 flags = std::atomic_ref<u32>(
+                              const_cast<u32&>(reinterpret_cast<const u32&>(slot_images[id].flags)))
                               .load(std::memory_order_acquire);
         return (flags & static_cast<u32>(ImageFlagBits::Registered)) != 0;
     }
