@@ -3,6 +3,7 @@ name: Windows
 on:
   push:
     branches: [develop, main]
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
   workflow_dispatch:
 
 permissions: {}
@@ -11,12 +12,15 @@ jobs:
   # What builds on Windows so far (decision #623, #614): the GPU library, psport.exe, the capability
   # check and the Windows probe, with MSYS2's CLANG64 (clang, libc++, UCRT) and psport's own LGPL
   # FFmpeg, handed over as the test package's zip (tools/win32-bundle.sh, kb #899) and its sources to
-  # try. Nothing is published.
+  # try; for a tag, the publish job below hands it to decanter.
   build:
     runs-on: windows-latest
     timeout-minutes: 240
     permissions:
       contents: read
+    outputs:
+      zip_name: ${{ steps.bundle.outputs.zip_name }}
+      sha256: ${{ steps.bundle.outputs.sha256 }}
     concurrency:
       group: windows-${{ github.ref }}
       cancel-in-progress: true
@@ -90,6 +94,8 @@ jobs:
           bash tools/win32-bundle.sh dist
           zip=$(ls dist/*.zip)
           echo "zip=$zip" >> "$GITHUB_OUTPUT"
+          echo "zip_name=$(basename -- "$zip")" >> "$GITHUB_OUTPUT"
+          echo "sha256=$(cut -d' ' -f1 "$zip.sha256")" >> "$GITHUB_OUTPUT"
           echo "sources=${zip%.zip}-sources" >> "$GITHUB_OUTPUT"
           echo "sources_name=$(basename -- "${zip%.zip}")-sources" >> "$GITHUB_OUTPUT"
       # The zip as it is, so that testers download the package itself and not a zip around it.
@@ -119,3 +125,54 @@ jobs:
           path: logs
           retention-days: 14
           if-no-files-found: warn
+
+  # A tag's package as assets of its release, where decanter downloads it without a token (kb #920,
+  # decanter's decisions #918 and #925: only tags publish). Only tag pushes of this repository
+  # publish: forks never run it, and the workflow has no pull_request trigger.
+  publish:
+    needs: build
+    if: >-
+      github.repository == 'yerasuu/psport' && github.event_name == 'push' &&
+      startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    # Not the nix-cache group: a pending run there would cancel the Release workflow's pending one.
+    concurrency:
+      group: windows-publish-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # build.sh made the package with VERSION's number, which the assets are named after.
+      - name: Check the version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version=$(<VERSION)
+          if [[ v$version != "$TAG" ]]; then echo "::error::$TAG does not match VERSION ($version)"; exit 1; fi
+      # The artifact is the zip itself (archive: false), which must not be extracted.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ needs.build.outputs.zip_name }}
+          path: package
+          skip-decompress: true
+      - name: Check the package
+        id: package
+        env:
+          SHA256: ${{ needs.build.outputs.sha256 }}
+        run: |
+          mapfile -t files < <(find package -type f)
+          if ((${#files[@]} != 1)); then echo "::error::Expected one file in the artifact: ${files[*]}"; exit 1; fi
+          if [[ $(sha256sum -- "${files[0]}" | cut -d' ' -f1) != "$SHA256" ]]; then
+            echo "::error::${files[0]} does not match the bundle's sha256 ($SHA256)"; exit 1
+          fi
+          echo "zip=${files[0]}" >> "$GITHUB_OUTPUT"
+      - name: Publish the package
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ZIP: ${{ steps.package.outputs.zip }}
+          TAG: ${{ github.ref_name }}
+        run: tools/win32-publish.sh "$ZIP" "$TAG" "github:$GITHUB_REPOSITORY"

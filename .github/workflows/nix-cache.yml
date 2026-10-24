@@ -68,11 +68,12 @@ jobs:
           fi
           latest=$(gh release download nix-cache --repo "$GITHUB_REPOSITORY" --pattern latest-release --output - | cut -d' ' -f1)
           is_latest=$([[ $latest == "$TAG" ]] && echo true || echo false)
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+          # The Windows workflow creates it too when it gets there first (tools/win32-publish.sh), also
+          # between the check and the creation.
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 ||
+            ! gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --title "$TAG" \
+              --notes-file notes --latest="$is_latest"; then
             gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file notes --latest="$is_latest"
-          else
-            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --title "$TAG" \
-              --notes-file notes --latest="$is_latest"
           fi
       - name: Publish the bundle
         env:

@@ -780,7 +780,8 @@ module (`libpsport-net.so`, which links OpenSSL and abseil, Apache-2.0) until kb
 and every library its programs and modules link; the rest of the closure is nixpkgs' packages as they
 are (SDL3 brings PipeWire's, whose own plugins and tools link OpenSSL, abseil and a GPL FFmpeg).
 
-`.github/workflows/windows.yml` (same triggers, `contents: read`, no secrets) builds what builds on
+`.github/workflows/windows.yml` (the same triggers plus the `vX.Y.Z` tags; its `build` job has
+`contents: read` and no secrets) builds what builds on
 Windows so far (decision #623): `build.sh`'s Windows branch in MSYS2's CLANG64 on `windows-latest`,
 without LTO, gives `psport.exe`, `libpsport-gpu.dll`, `psport-gpu-capabilities.exe` and
 `psport-windows-probe.exe`. FFmpeg is not MSYS2's (GPL-3.0-or-later) but psport's own,
@@ -796,8 +797,24 @@ package for its version and PKGBUILD hash (the cache keeps the tarball too) and 
 `pacman -U`. `tools/win32-bundle.sh dist` makes them the test package (kb #899), and the artifact is
 that zip as it is (`archive: false`), `psport-windows-<version>-<commit>-x86_64.zip`, with
 `psport-windows-<version>-<commit>-x86_64-sources` beside it (FFmpeg's PKGBUILD, key and upstream
-tarball); kept 14 days, nothing published. When the build fails, `psport-windows-logs-<commit>`
-holds its output instead.
+tarball); kept 14 days. When the build fails, `psport-windows-logs-<commit>` holds its output
+instead.
+
+Its `publish` job (kb #920, decanter's decisions #918 and #925), after the bundle step succeeded,
+only on tag pushes of this repository and the only one with `contents: write`, hands the same zip to
+decanter on Windows, which downloads it without a token; only tags publish, branches keep just the
+artifact. It checks that the tag `vX.Y.Z` matches `VERSION`, takes the artifact back, checks it against
+the bundle's sha256 and runs `tools/win32-publish.sh <zip> <tag> github:yerasuu/psport`: the tag's
+release gets `psport-windows-vX.Y.Z-x86_64.zip` and then `psport-windows-vX.Y.Z-x86_64.zip.sha256`
+(`<sha256>  <zip name>`, `sha256sum` format, as the Linux bundle's). A release that already has the
+`.sha256` keeps both files, since users may have checked them; a zip without it (a stopped run) is
+replaced. Whichever of the Release workflow and this job gets there first creates the release, with
+the tag's annotation as its notes; this job never marks it latest, and the Release workflow, when it
+creates it or finds it, sets the notes and latest as before (a creation that fails because the other
+one just made it falls back to editing). A tag's publishes run one at a time in a group of their own,
+not `nix-cache`'s, since a pending run there would cancel the Release workflow's pending one. With a
+directory as its last argument the script writes the same files into `<directory>/<tag>/`. The
+package is groundwork for testers, not for playing, as its `README-WINDOWS.txt` says.
 
 The package is one folder: the four programs, the CLANG64 DLLs they load (the closure of their PE
 import tables, read with `llvm-objdump`; `vulkan-1.dll` is the GPU driver's), `psport-probe.bat`,
