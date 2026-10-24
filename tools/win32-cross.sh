@@ -6,6 +6,8 @@
 # that both link the same headers and DLLs.
 #
 #   tools/win32-cross.sh sysroot   downloads and unpacks the packages into $PS_WIN32_SYSROOT
+#   tools/win32-cross.sh ffmpeg    builds psport's LGPL FFmpeg (packaging/windows/ffmpeg/PKGBUILD) into it,
+#                                  as the CI job does with makepkg; again after every sysroot
 #   tools/win32-cross.sh build     builds libpsport-gpu.dll, psport-gpu-capabilities.exe and
 #                                  psport-windows-probe.exe in out/win32
 #   tools/win32-cross.sh runtime   then psport.exe; when it fails, lists the files that do not compile
@@ -27,7 +29,7 @@ fetch_sysroot() {
     local name
     for name in $(grep -o '[a-z0-9+-]*:p' .github/workflows/windows.yml); do
         name=${name%:p}
-        case $name in clang | lld | llvm-tools | cmake | ninja | pkgconf | glslang) ;; *) wanted+=("$name") ;; esac
+        case $name in clang | lld | llvm-tools | cmake | ninja | pkgconf | nasm | glslang) ;; *) wanted+=("$name") ;; esac
     done
     mkdir -p -- "$root/pkgs" "$root/db"
     curl -fsSL --retry 3 -o "$root/db/clang64.db" "$repo/clang64.db"
@@ -78,13 +80,13 @@ enter_nix() {
     fi
     if [[ -z ${PS_WIN32_IN_NIX:-} ]]; then
         exec env PS_WIN32_IN_NIX=1 nix-shell -p "llvmPackages_$llvm.clang-unwrapped" "llvmPackages_$llvm.lld" \
-            "llvmPackages_$llvm.llvm" cmake ninja pkg-config glslang --run "bash tools/win32-cross.sh $1"
+            "llvmPackages_$llvm.llvm" cmake ninja pkg-config glslang nasm gnupg zstd --run "bash tools/win32-cross.sh $1"
     fi
     export PKG_CONFIG_SYSROOT_DIR=$root PKG_CONFIG_LIBDIR=$sysroot/lib/pkgconfig:$sysroot/share/pkgconfig
     unset PKG_CONFIG_PATH
 }
 
-build() {
+toolchain() {
     mkdir -p -- "$out/bin" "$out/resource/lib"
     # clang's own headers from nixpkgs, the Windows compiler-rt from CLANG64: unwrapped clang has no
     # Windows runtime of its own.
@@ -96,6 +98,81 @@ build() {
             "$(command -v "$tool")" "$sysroot" "$out/resource" > "$out/bin/x86_64-w64-mingw32-$tool"
         chmod +x -- "$out/bin/x86_64-w64-mingw32-$tool"
     done
+}
+
+# What makepkg-mingw does with packaging/windows/ffmpeg/PKGBUILD in the CI job, from the same source
+# and configure flags, cross-compiled: the package replaces MSYS2's GPL-3.0-or-later FFmpeg in the
+# sysroot and is registered in its database, so that tools/win32-bundle.sh reads its licence and ships
+# its sources as it does there. The source tarball stays next to the PKGBUILD, where makepkg puts it.
+ffmpeg() (
+    local dir=packaging/windows/ffmpeg MINGW_PACKAGE_PREFIX=mingw-w64-clang-x86_64 MSYSTEM=CLANG64
+    source "$dir/PKGBUILD"
+    local tarball=$dir/$_realname-$pkgver.tar.xz download
+    for download in "${source[@]}"; do
+        [[ ! -f $dir/${download##*/} ]] || continue
+        curl -fsSL --retry 3 -o "$dir/${download##*/}.part" "$download"
+        mv -- "$dir/${download##*/}.part" "$dir/${download##*/}"
+    done
+    sha256sum --quiet -c <<< "${sha256sums[0]}  $tarball" || { echo "Checksum mismatch: $tarball" >&2; exit 1; }
+    GNUPGHOME=$(mktemp -d)
+    export GNUPGHOME
+    gpg -q --import "$dir"/keys/pgp/*.asc 2> /dev/null
+    gpg -q --status-fd 1 --verify "$tarball.asc" "$tarball" 2> /dev/null | grep -q "VALIDSIG ${validpgpkeys[0]}" ||
+        { echo "Bad or missing signature: $tarball.asc" >&2; exit 1; }
+    rm -rf -- "$GNUPGHOME"
+    local work=$out/ffmpeg stage=$out/ffmpeg/stage
+    rm -rf -- "$work" && mkdir -p -- "$work/build"
+    tar -xf "$tarball" -C "$work"
+    toolchain
+    # FFmpeg's DLLs carry version resources, which include windows.h from the sysroot, and import
+    # libraries made with the cross prefix's dlltool.
+    printf '#!/bin/sh\nexec llvm-windres --preprocessor-arg=--sysroot=%s "$@"\n' "$sysroot" > "$out/bin/x86_64-w64-mingw32-windres"
+    chmod +x -- "$out/bin/x86_64-w64-mingw32-windres"
+    ln -sfn -- "$(command -v llvm-dlltool)" "$out/bin/x86_64-w64-mingw32-dlltool"
+    (
+        cd -- "$work/build"
+        GIT_DIR=/dev/null "../$_realname-$pkgver/configure" --prefix=/clang64 --target-os=mingw32 --arch=x86_64 \
+            --enable-cross-compile --cross-prefix="$out/bin/x86_64-w64-mingw32-" --cc="$out/bin/x86_64-w64-mingw32-clang" \
+            --cxx="$out/bin/x86_64-w64-mingw32-clang++" --ar=llvm-ar --nm=llvm-nm --ranlib=llvm-ranlib --strip=llvm-strip \
+            --pkg-config=pkg-config "${_config[@]}" --logfile=config.log > configure.out 2>&1 ||
+            { tail -20 configure.out >&2; echo "FFmpeg configure failed ($work/build/config.log)" >&2; exit 1; }
+        _check_licence . || exit 1
+        make -j"$(nproc)" > make.log 2>&1 || { tail -30 make.log >&2; echo "FFmpeg build failed ($work/build/make.log)" >&2; exit 1; }
+        make DESTDIR="$stage" install > /dev/null
+        rm -f -- "$stage"/clang64/lib/*.def "$stage"/clang64/bin/*.lib
+        local licences=$stage/clang64/share/licenses/$_realname-lgpl
+        install -Dm644 "../$_realname-$pkgver/LICENSE.md" "$licences/LICENSE.md"
+        install -Dm644 "../$_realname-$pkgver/COPYING.LGPLv2.1" "$licences/COPYING.LGPLv2.1"
+        _write_configuration . "$licences/CONFIGURATION"
+    )
+    local name=$pkgname-$pkgver-$pkgrel package=$pkgname-$pkgver-$pkgrel-any.pkg.tar.zst old
+    # tar replaces files by unlinking them, but MSYS2's FFmpeg also installed libraries this one has not.
+    for old in "$root"/pkgs/"$MINGW_PACKAGE_PREFIX"-ffmpeg-[0-9]*-any.pkg.tar.zst; do
+        [[ -f $old ]] || continue
+        tar --zstd -tf "$old" | grep -v -e '^\.' -e '/$' | sed "s|^|$root/|" | xargs -r -d '\n' rm -f --
+    done
+    tar --zstd -cf "$root/pkgs/$package" -C "$stage" clang64
+    tar --zstd -xf "$root/pkgs/$package" -C "$root"
+    mkdir -p -- "$root/db/desc/$name"
+    {
+        printf '%%NAME%%\n%s\n\n%%BASE%%\n%s\n\n%%VERSION%%\n%s-%s\n\n%%DESC%%\n%s\n\n%%URL%%\n%s\n\n' \
+            "$pkgname" "$pkgbase" "$pkgver" "$pkgrel" "$pkgdesc" "$url"
+        printf '%%LICENSE%%\n'; printf '%s\n' "${license[@]}"
+        printf '\n%%PROVIDES%%\n'; printf '%s\n' "${provides[@]}"
+    } > "$root/db/desc/$name/desc"
+    local sha
+    sha=$(sha256sum < "$root/pkgs/$package" | cut -d' ' -f1)
+    grep -v -e "^$MINGW_PACKAGE_PREFIX-ffmpeg " -e "^$pkgname " "$root/db/index" > "$root/db/index.part" || true
+    echo "$pkgname $package $sha  P:$MINGW_PACKAGE_PREFIX-ffmpeg" >> "$root/db/index.part"
+    mv -f -- "$root/db/index.part" "$root/db/index"
+    { grep -vx -e "$MINGW_PACKAGE_PREFIX-ffmpeg" -e "$pkgname" "$root/packages.txt" || true; echo "$pkgname"; } > "$root/packages.txt.part"
+    mv -f -- "$root/packages.txt.part" "$root/packages.txt"
+    rm -f -- "$root/db/files/$pkgname.list"
+    echo "Installed $package into $root ($(sed -n 's/^#define FFMPEG_LICENSE "\(.*\)"$/\1/p' "$work/build/config.h"))"
+)
+
+build() {
+    toolchain
     cmake -S gpu -B "$out/gpu" -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_SYSTEM_NAME=Windows \
         -DCMAKE_SYSTEM_PROCESSOR=x86_64 -DCMAKE_C_COMPILER="$out/bin/x86_64-w64-mingw32-clang" \
         -DCMAKE_CXX_COMPILER="$out/bin/x86_64-w64-mingw32-clang++" -DCMAKE_RC_COMPILER="$(command -v llvm-windres)" \
@@ -170,7 +247,8 @@ runtime() {
 out=$PWD/out/win32 sysroot=$root/clang64
 case ${1:-} in
 sysroot) fetch_sysroot ;;
+ffmpeg) enter_nix ffmpeg; ffmpeg ;;
 build) enter_nix build; build ;;
 runtime) enter_nix runtime; runtime ;;
-*) echo "Usage: tools/win32-cross.sh sysroot|build|runtime" >&2; exit 2 ;;
+*) echo "Usage: tools/win32-cross.sh sysroot|ffmpeg|build|runtime" >&2; exit 2 ;;
 esac

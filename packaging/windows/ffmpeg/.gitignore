@@ -1,0 +1,7 @@
+# makepkg-mingw and tools/win32-cross.sh ffmpeg: downloaded sources, build trees and packages
+/*.tar.xz
+/*.tar.xz.asc
+/*.part
+/*.pkg.tar.zst
+/src/
+/pkg/

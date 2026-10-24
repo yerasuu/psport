@@ -1,0 +1,107 @@
+# psport's FFmpeg for the Windows package (kb #906), built with makepkg-mingw in MSYS2's CLANG64 by
+# .github/workflows/windows.yml. Based on MSYS2's mingw-w64-ffmpeg
+# (https://github.com/msys2/MINGW-packages/blob/master/mingw-w64-ffmpeg/PKGBUILD), the same release,
+# which is GPL-3.0-or-later (--enable-gpl --enable-version3, x264, x265, GnuTLS) and so cannot be
+# distributed with GPL-2.0 psport. This one is LGPL-2.1-or-later: only the decoders, parsers,
+# demuxer and protocol psport uses (gpu/audiodec, gpu/jpegdec, gpu/shadps4/core/libraries/avplayer
+# and videodec), no external library and no network, as the Linux bundle's FFmpeg (shell.nix).
+
+_realname=ffmpeg
+pkgbase=mingw-w64-${_realname}-lgpl
+pkgname="${MINGW_PACKAGE_PREFIX}-${_realname}-lgpl"
+pkgver=9.0.2
+pkgrel=1
+pkgdesc="FFmpeg's decoders psport uses, LGPL build without external libraries (mingw-w64)"
+arch=('any')
+mingw_arch=('clang64')
+url="https://ffmpeg.org/"
+license=('spdx:LGPL-2.1-or-later')
+provides=("${MINGW_PACKAGE_PREFIX}-${_realname}=${pkgver}")
+conflicts=("${MINGW_PACKAGE_PREFIX}-${_realname}")
+makedepends=("${MINGW_PACKAGE_PREFIX}-cc"
+             "${MINGW_PACKAGE_PREFIX}-pkgconf"
+             "${MINGW_PACKAGE_PREFIX}-nasm")
+source=(https://ffmpeg.org/releases/${_realname}-${pkgver}.tar.xz{,.asc})
+validpgpkeys=('FCF986EA15E6E293A5644F10B4322F04D67658D8') # FFmpeg release signing key, keys/pgp
+sha256sums=('8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e'
+            'SKIP')
+
+# Also read by tools/win32-cross.sh, which builds the same FFmpeg on Linux. MP4 sources come through
+# the mov demuxer, from a path (file protocol) or the game's own reads (custom I/O); AAC in LATM and
+# MP3 in both of FFmpeg's decoders, as the Linux build has them.
+_config=(
+  --disable-everything
+  --disable-autodetect
+  --disable-network
+  --disable-programs
+  --disable-avdevice
+  --disable-avfilter
+  --disable-doc
+  --disable-debug
+  --disable-static
+  --enable-shared
+  --enable-decoder=h264,hevc,aac,aac_latm,mp3,mp3float,mjpeg
+  --enable-parser=h264,hevc,aac,aac_latm,mpegaudio,mjpeg
+  --enable-demuxer=mov
+  --enable-protocol=file
+)
+
+# Fails unless configure left FFmpeg under the LGPL, since a flag added here could turn on a GPL,
+# version 3 or non-free part without saying so.
+_check_licence() {
+  local flag
+  for flag in CONFIG_GPL CONFIG_VERSION3 CONFIG_NONFREE; do
+    if ! grep -qx "#define ${flag} 0" "$1/config.h"; then
+      echo "${flag} is not 0 in $1/config.h: this FFmpeg would not be LGPL-2.1-or-later" >&2
+      return 1
+    fi
+  done
+  grep -q '^#define FFMPEG_LICENSE "LGPL version 2.1 or later"$' "$1/config.h" || {
+    echo "$1/config.h does not declare LGPL version 2.1 or later" >&2
+    return 1
+  }
+}
+
+# What LGPL-2.1 section 6 and FFmpeg's legal page ask the binaries to come with: the source is
+# unmodified and this is how it was configured.
+_write_configuration() {
+  local configuration
+  configuration=$(sed -n 's/^#define FFMPEG_CONFIGURATION "\(.*\)"$/\1/p' "$1/config.h")
+  printf 'FFmpeg %s, LGPL-2.1-or-later, built from the unmodified %s (sha256 %s) with\n  configure %s\n' \
+    "${pkgver}" "${_realname}-${pkgver}.tar.xz" "${sha256sums[0]}" "${configuration}" > "$2"
+}
+
+build() {
+  # Do not let version.sh discover the checkout around this PKGBUILD
+  export GIT_DIR=/dev/null
+
+  mkdir -p "${srcdir}/build-${MSYSTEM}" && cd "${srcdir}/build-${MSYSTEM}"
+  ../${_realname}-${pkgver}/configure \
+    --prefix=${MINGW_PREFIX} \
+    --target-os=mingw32 \
+    --arch=${CARCH%%-*} \
+    --cc=${CC} \
+    --cxx=${CXX} \
+    --disable-stripping \
+    "${_config[@]}" \
+    --logfile=config.log
+  _check_licence .
+
+  make
+}
+
+package() {
+  cd "${srcdir}/build-${MSYSTEM}"
+  make DESTDIR="${pkgdir}" install
+
+  rm -f "${pkgdir}"/${MINGW_PREFIX}/lib/*.def
+  rm -f "${pkgdir}"/${MINGW_PREFIX}/bin/*.lib
+
+  local PREFIX_DEPS=$(cygpath -am ${MINGW_PREFIX})
+  find "${pkgdir}"${MINGW_PREFIX}/lib/pkgconfig -name '*.pc' -exec sed -i -e"s|${PREFIX_DEPS}|${MINGW_PREFIX}|g" {} \;
+
+  local licences="${pkgdir}${MINGW_PREFIX}/share/licenses/${_realname}-lgpl"
+  install -Dm644 "${srcdir}/${_realname}-${pkgver}/LICENSE.md" "${licences}/LICENSE.md"
+  install -Dm644 "${srcdir}/${_realname}-${pkgver}/COPYING.LGPLv2.1" "${licences}/COPYING.LGPLv2.1"
+  _write_configuration . "${licences}/CONFIGURATION"
+}

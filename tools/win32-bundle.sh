@@ -3,15 +3,15 @@
 # Windows test package (kb #899): psport.exe, libpsport-gpu.dll, psport-gpu-capabilities.exe and
 # psport-windows-probe.exe, the CLANG64 DLLs they load (the closure of their PE import tables), the
 # testers' scripts and README-WINDOWS.txt (packaging/windows), LICENSE.txt, THIRD-PARTY-NOTICES.txt,
-# SOURCES.txt and BUILD-INFO.txt, all in one folder. From MSYS2's CLANG64 shell it takes build.sh's out/
-# and the DLLs and package database of that MSYS2 (the CI job); elsewhere tools/win32-cross.sh's
-# out/win32 and the packages of its sysroot (PS_WIN32_SYSROOT).
-# psport is GPL-2.0 (kb #843), so only DLLs whose MSYS2 licence allows that go in: vulkan-1.dll is the
-# GPU driver's (and Apache-2.0), the online module stays out, and so does MSYS2's FFmpeg, built as
-# GPL-3.0-or-later with x264, x265 and GnuTLS, together with what only it loads; psport.exe then does
-# not start until a GPL-2.0-compatible FFmpeg exists, while the probe needs none of them.
-# PS_BUNDLE_LOCAL=1 keeps those DLLs for a package used on one's own machine, never redistributed: its
-# name ends in -local and its BUILD-INFO.txt says so.
+# SOURCES.txt and BUILD-INFO.txt, all in one folder; next to it, DEST/psport-windows-...-sources holds
+# the sources of the DLLs built from psport's own PKGBUILDs (packaging/windows/*/PKGBUILD). From MSYS2's
+# CLANG64 shell it takes build.sh's out/ and the DLLs and package database of that MSYS2 (the CI job);
+# elsewhere tools/win32-cross.sh's out/win32 and the packages of its sysroot (PS_WIN32_SYSROOT).
+# psport is GPL-2.0 (kb #843), so only DLLs whose package licence allows that go in: vulkan-1.dll is
+# the GPU driver's (and Apache-2.0), the online module stays out, and FFmpeg is psport's own LGPL build
+# (packaging/windows/ffmpeg, kb #906), since MSYS2's is GPL-3.0-or-later with x264, x265 and GnuTLS.
+# PS_BUNDLE_LOCAL=1 keeps DLLs that are not redistributable with psport, for a package used on one's
+# own machine, never redistributed: its name ends in -local and its BUILD-INFO.txt says so.
 set -euo pipefail
 (($# == 1)) || { sed -n '2,4p' "$0" | cut -c3-; exit 2; }
 dest=$(realpath -m -- "$1")
@@ -39,7 +39,7 @@ name=psport-windows-$version-$commit-x86_64
 $is_local && name+=-local
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
-bundle=$work/$name
+bundle=$work/$name own_sources=$work/$name-sources
 mkdir -p "$bundle"
 
 # MSYS2's package metadata: the desc file (pacman's format, the same in its local database and in the
@@ -69,6 +69,36 @@ else
     done < "$root/packages.txt"
 fi
 field() { awk -v key="%$2%" '$0 == key { on = 1; next } on && $0 == "" { exit } on { print }' "$(desc_of "$1")"; }
+
+# Packages built from psport's own PKGBUILDs instead of MSYS2's: their source is that PKGBUILD with
+# the upstream files it names, which makepkg leaves next to it, checked against its sums and shipped
+# next to the zip.
+pkgbuild_value() { (MINGW_PACKAGE_PREFIX=mingw-w64-clang-x86_64 && source "$1" && eval "printf '%s\n' \"\${$2[@]}\""); }
+declare -A pkgbuild_of
+for pkgbuild in packaging/windows/*/PKGBUILD; do
+    [[ -f $pkgbuild ]] && pkgbuild_of[$(pkgbuild_value "$pkgbuild" pkgbase)]=$pkgbuild
+done
+ship_sources() {
+    local pkgbuild=$1 pkgbase=$2 version=$3 dir=${1%/PKGBUILD} entry file i=0
+    local target=$own_sources/$pkgbase-$version
+    if [[ $(pkgbuild_value "$pkgbuild" pkgver)-$(pkgbuild_value "$pkgbuild" pkgrel) != "$version" ]]; then
+        echo "bundle: $pkgbase $version is installed, but $pkgbuild builds another version" >&2; exit 1
+    fi
+    local -a sums
+    mapfile -t sums < <(pkgbuild_value "$pkgbuild" sha256sums)
+    mkdir -p -- "$target"
+    cp -- "$pkgbuild" "$target/"
+    [[ ! -d $dir/keys ]] || cp -r -- "$dir/keys" "$target/"
+    while read -r entry; do
+        if [[ $entry == *::* ]]; then file=${entry%%::*}; else file=${entry##*/}; fi
+        [[ -f $dir/$file ]] || { echo "bundle: $dir/$file, a source $pkgbuild names, is missing (makepkg downloads it there)" >&2; exit 1; }
+        if [[ ${sums[i]} != SKIP ]] && ! sha256sum --quiet -c <<< "${sums[i]}  $dir/$file"; then
+            echo "bundle: $dir/$file does not match $pkgbuild's sha256sums" >&2; exit 1
+        fi
+        cp -- "$dir/$file" "$target/"
+        i=$((i + 1))
+    done < <(pkgbuild_value "$pkgbuild" source)
+}
 
 # GPL-2.0-only compatible licences (SPDX). A package's %LICENSE% lines all apply; a line labelled for
 # a part (documentation:spdx:...) covers files the package carries besides its DLL, which stay out.
@@ -159,7 +189,7 @@ for dll in "${left_out[@]}"; do
     echo "bundle: $dll (${dll_package[$key]#mingw-w64-clang-x86_64-}: ${dll_licence[$key]}, needed by ${needed_by[$key]}) is not redistributable with GPL-2.0 psport: $kept"
 done
 crlf() { sed 's/\r$//; s/$/\r/' -- "$1" > "$2"; }
-for file in packaging/windows/*; do crlf "$file" "$bundle/${file##*/}"; done
+for file in packaging/windows/*; do [[ ! -f $file ]] || crlf "$file" "$bundle/${file##*/}"; done
 crlf LICENSE "$bundle/LICENSE.txt"
 
 # Notices and sources: one entry per package, with the licence files it installs.
@@ -170,8 +200,10 @@ rule() { printf "%${1}s\n" '' | tr ' ' "$2"; }
 entry() {
     local package=$1 files=$2 licence=$3 short=${1#mingw-w64-clang-x86_64-} pkgbase version url text
     pkgbase=$(field "$package" BASE) version=$(field "$package" VERSION) url=$(field "$package" URL)
+    local pkgbuild=${pkgbuild_of[$pkgbase]:-} origin="MSYS2 package $package"
+    [[ -z $pkgbuild ]] || origin="package $package, built by psport from $pkgbuild"
     {
-        echo; rule 100 -; echo "$short $version (MSYS2 package $package)"
+        echo; rule 100 -; echo "$short $version ($origin)"
         echo "Licence: $licence"
         [[ -n $files ]] && echo "Files:$files"
         echo "Upstream: $url"
@@ -180,8 +212,12 @@ entry() {
             echo; echo "--- ${text#"$rel"/share/licenses/}"; tr -d '\r' < "$base/$text"
         done < <(files_of "$package" | grep "^$rel/share/licenses/.*[^/]$")
     } >> "$notices"
-    printf '%s %s\n  Licence: %s\n  Source: https://repo.msys2.org/mingw/sources/%s-%s.src.tar.zst\n  Upstream: %s\n' \
-        "$short" "$version" "$licence" "$pkgbase" "$version" "$url" >> "$sources"
+    local where="https://repo.msys2.org/mingw/sources/$pkgbase-$version.src.tar.zst"
+    if [[ -n $pkgbuild ]]; then
+        ship_sources "$pkgbuild" "$pkgbase" "$version"
+        where="$name-sources/$pkgbase-$version/ next to this package's zip: the PKGBUILD (psport's $pkgbuild at commit $commit) and the upstream files it builds from"
+    fi
+    printf '%s %s\n  Licence: %s\n  Source: %s\n  Upstream: %s\n' "$short" "$version" "$licence" "$where" "$url" >> "$sources"
 }
 section() { { echo; rule 100 =; echo "$1"; rule 100 =; } >> "$notices"; }
 cat > "$notices" << 'HEAD'
@@ -190,9 +226,9 @@ Third-party notices for psport for Windows
 psport is licensed under the GNU General Public License version 2 (LICENSE.txt); some of its files
 are GPL-2.0-only (marked in their headers), the rest GPL-2.0-or-later used as version 2. It includes
 code from bbport and shadPS4 (GPL-2.0-or-later) and from AnyPS5 (GPL-2.0-only). Below, every other
-component this package carries: the DLLs next to psport.exe, built by MSYS2's CLANG64 environment, and
-the code compiled into psport's own programs, each with its licence and the licence files it ships
-with. Where a component offers a choice of licences, psport uses it under the one compatible with the
+component this package carries: the DLLs next to psport.exe, built in MSYS2's CLANG64 environment
+(FFmpeg's by psport itself, as LGPL-2.1-or-later, with the configure line it was built with), and the
+code compiled into psport's own programs, each with its licence and the licence files it ships with. Where a component offers a choice of licences, psport uses it under the one compatible with the
 GPL version 2. Sources: SOURCES.txt.
 HEAD
 cat > "$sources" << HEAD
@@ -207,7 +243,9 @@ machine-readable copy of the corresponding source code of psport and of every co
 on a medium customarily used for software interchange. Ask through https://github.com/yerasuu/psport/issues.
 
 Each MSYS2 package below: its version, licence, MSYS2's source package (its PKGBUILD, patches and the
-upstream source it was built from) and the upstream project.
+upstream source it was built from) and the upstream project. A package psport builds itself (FFmpeg)
+names instead the folder next to this package's zip that holds its PKGBUILD and upstream source; the
+same folder is in the CI run's artifacts beside the zip.
 
 HEAD
 section 'DLLs next to psport.exe'
@@ -285,4 +323,9 @@ rm -f -- "$dest/$name.zip.partial"
 (cd "$work" && zip -q -r -X "$dest/$name.zip.partial" "$name")
 mv -f -- "$dest/$name.zip.partial" "$dest/$name.zip"
 (cd "$dest" && sha256sum "$name.zip" > "$name.zip.sha256")
+rm -rf -- "$dest/$name-sources"
+if [[ -d $own_sources ]]; then
+    mv -- "$own_sources" "$dest/$name-sources"
+    echo "Sources of the DLLs built here: $dest/$name-sources"
+fi
 echo "Bundled $dest/$name.zip ($(du -h "$dest/$name.zip" | cut -f1), ${#included[@]} DLLs; ${#left_out[@]} not redistributable, $kept)"
