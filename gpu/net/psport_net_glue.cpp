@@ -331,7 +331,7 @@ struct HookEntry {
 std::mutex s_hook_mutex;
 std::deque<HookEntry> s_hook_entries;
 
-void DispatchHook(std::uint64_t tag, PsGuestCode::Registers* p_registers) {
+void PS4_SYSV_ABI DispatchHook(std::uint64_t tag, PsGuestCode::Registers* p_registers) {
     const auto* p_entry = reinterpret_cast<const HookEntry*>(tag);
     p_entry->pfn_hook(p_entry->tag, p_registers);
 }

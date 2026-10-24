@@ -23,6 +23,7 @@
 #include <cstring>
 #include <initializer_list>
 #include <span>
+#include "common/types.h"
 
 namespace PsGuestCode {
 
@@ -59,8 +60,9 @@ struct alignas(16) Registers {
     alignas(16) std::array<std::array<std::uint8_t, 32>, 16> ymm;
 };
 
-/// Called on the game's thread and stack (keep it small); it may change the registers.
-using PfnHook = void (*)(std::uint64_t tag, Registers* p_registers);
+/// Called on the game's thread and stack (keep it small); it may change the registers. SysV, since
+/// the trampoline passes tag and p_registers in rdi and rsi on every host.
+using PfnHook = void(PS4_SYSV_ABI*)(std::uint64_t tag, Registers* p_registers);
 
 /// An observer at va_site over expected (whole instructions, none RIP-relative). p_skip_flag, for
 /// a function's entry only: when the handler leaves it non-zero the trampoline clears it and
@@ -137,6 +139,8 @@ struct Emitter {
         Bytes({0x48, 0x81, 0xc4}); // add rsp, 256
         U32(256);
     }
+    /// p_function must be PS4_SYSV_ABI: the stubs pass arguments in rdi, rsi, rdx, rcx and leave no
+    /// shadow space, so a Win64 function would read its arguments from the wrong registers.
     void CallAbs(const void* p_function) {
         Bytes({0x48, 0xb8}); // movabs rax, p_function
         U64(reinterpret_cast<std::uint64_t>(p_function));

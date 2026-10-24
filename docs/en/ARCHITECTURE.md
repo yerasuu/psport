@@ -667,7 +667,9 @@ Hooks and patches in a game's code go through `gpu/port/psport_guest_code.h` (`P
 same for any profile: `InstallHook` (a trampoline that hands a host function every register and may
 let it return from the game's function), `InstallDetour` (a stub the profile writes with `Emitter`)
 and `RedirectOperand` (an instruction reads a value next to the image instead of its constant,
-`MapNear`). Each compares the site with the bytes the profile expects and returns a
+`MapNear`). The host functions they call (a hook's handler, `Emitter::CallAbs`) are declared
+`PS4_SYSV_ABI`, since the trampolines pass arguments in rdi, rsi and rdx on Windows too. Each
+compares the site with the bytes the profile expects and returns a
 `PsGuestCode::Error` instead of writing when they differ; each hook is logged as `Guest code: <name>
 hooked at <address>` or `... not hooked: <why>`.
 `PsGuestCode::KeepWritable` is for a game module that writes the game's code itself and switches

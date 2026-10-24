@@ -273,7 +273,7 @@ std::array<HudItem, 5> s_hud_items = {{
 }};
 
 /// Each frame, from the game's screen update: the HUD groups where the output's edges are.
-void HudFrame(u64 va_screen) {
+void PS4_SYSV_ABI HudFrame(u64 va_screen) {
     const u64 va_hud = va_screen ? *reinterpret_cast<const u64*>(va_screen + OffScreenHud) : 0;
     if (!va_hud) {
         return;
@@ -369,7 +369,7 @@ void HudFrame(u64 va_screen) {
 constexpr u64 OffSetViewportSite = 0x1f510;
 std::atomic<float> s_gfx_pixel_aspect{1.0f};
 
-void ViewportAdjust(u64 va_movie, u64 va_viewport, u64 va_caller) {
+void PS4_SYSV_ABI ViewportAdjust(u64 va_movie, u64 va_viewport, u64 va_caller) {
     auto* p_viewport = reinterpret_cast<std::int32_t*>(va_viewport);
     static const bool s_should_trace = [] {
         const char* sz_env = std::getenv("PS_RE_VIEWPORT");

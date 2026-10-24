@@ -11,6 +11,7 @@
 #include <thread>
 #include <vector>
 #include "../../../src/platform/ps_host.h"
+#include "common/types.h"
 
 namespace PsGnmHooks {
 namespace {
@@ -200,7 +201,7 @@ void Mark(std::uint32_t i_function, u64 before, u64 after, u64 va_command_buffer
     }
 }
 
-extern "C" void PsGnmEnter(std::uint32_t i_function, u64 va_command_buffer, u64* p_slot) {
+extern "C" void PS4_SYSV_ABI PsGnmEnter(std::uint32_t i_function, u64 va_command_buffer, u64* p_slot) {
     __atomic_fetch_add(CounterAt(i_function), 1, __ATOMIC_RELAXED);
     if (s_depth == MaxDepth) {
         s_overflow.fetch_add(1, std::memory_order_relaxed);
@@ -217,7 +218,7 @@ extern "C" void PsGnmEnter(std::uint32_t i_function, u64 va_command_buffer, u64*
     *p_slot = reinterpret_cast<u64>(s_p_exit_thunk);
 }
 
-extern "C" u64 PsGnmLeave() {
+extern "C" u64 PS4_SYSV_ABI PsGnmLeave() {
     const Frame f = s_frames[--s_depth];
     const bool cb_method = Table[f.i_function].cb_method;
     if (f.i_function == s_i_trace && s_trace_left.fetch_sub(1, std::memory_order_relaxed) > 0) {

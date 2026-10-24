@@ -52,7 +52,7 @@ constexpr u64 LoggedFailures = 16;
 std::array<std::atomic<u64>, Sites.size()> s_c_failures{};
 std::array<u64, Sites.size()> s_c_reported{};
 
-void OnFailure(u32 i_site, u32 result) {
+void PS4_SYSV_ABI OnFailure(u32 i_site, u32 result) {
     const u64 c_failures = s_c_failures[i_site].fetch_add(1, std::memory_order_relaxed) + 1;
     if (c_failures <= LoggedFailures || (c_failures & (c_failures - 1)) == 0) {
         std::printf("Job step probe: %s returned %u at %#llx (%llu so far; #683)\n", Sites[i_site].sz_check, result,

@@ -78,7 +78,7 @@ float EnvFloat(const char* sz_name, float fallback) {
 }
 
 /// The pacer at the main loop's step (rdi: it): this frame's values.
-void FrameStep(u64 va_pacer) {
+void PS4_SYSV_ABI FrameStep(u64 va_pacer) {
     Live& live = *s_p_live;
     const float measured = *reinterpret_cast<const float*>(va_pacer + 0x264);
     float dt = std::clamp(std::isfinite(measured) ? measured : Frame30, live.shortest, Frame30);

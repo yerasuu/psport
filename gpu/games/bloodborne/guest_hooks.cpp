@@ -4,6 +4,7 @@
 #include "psport_quirks.h"
 #include "psport_toggles.h"
 #include "../../../src/platform/ps_host.h"
+#include "common/types.h"
 
 #include <algorithm>
 #include <array>
@@ -261,7 +262,7 @@ void WriteJumpOverTrap(u64 va_guest, u8 opcode, std::uint32_t rel) {
     ps_host_vm_protect(p_page, span, PS_HOST_VM_READ | PS_HOST_VM_EXECUTE);
 }
 
-void AllocHook(u64 node) {
+void PS4_SYSV_ABI AllocHook(u64 node) {
     if (!node) {
         return;
     }
@@ -273,7 +274,7 @@ void AllocHook(u64 node) {
     }
 }
 
-void HeapHook(u64 va_range, u64 cb_range) {
+void PS4_SYSV_ABI HeapHook(u64 va_range, u64 cb_range) {
     if (va_range != 0 && cb_range != 0 && cb_range < (u64(1) << 32)) {
         s_pfn_on_range_allocated(va_range, cb_range);
     }

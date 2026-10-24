@@ -94,13 +94,13 @@ void GiveSlotBack(u64 va_runner, u64 va_pool, Counter& counter, const char* sz_w
 /// r14 the runner, the pool in the step's r12 (saved at [r12] by SaveVolatile), r15d the result:
 /// 0 only for a full success, and the step's early exits come before a slot is taken (kb note
 /// #696), so any other result with a slot held is a failed step's.
-void OnStepExit(u64 va_runner, u64 va_pool, u32 result) {
+void PS4_SYSV_ABI OnStepExit(u64 va_runner, u64 va_pool, u32 result) {
     if (result != 0) {
         GiveSlotBack(va_runner, va_pool, s_slots_after_failure, "after a failed job step");
     }
 }
 
-void OnRunnerClear(u64 va_runner) {
+void PS4_SYSV_ABI OnRunnerClear(u64 va_runner) {
     GiveSlotBack(va_runner, *reinterpret_cast<const u64*>(s_va_image + OffJobPool), s_slots_after_clear,
                  "by a runner destroyed or reset while holding it");
 }
@@ -150,7 +150,7 @@ constexpr u8 SampleParametersEntry[6] = {0x55,             // push rbp
                                          0x41, 0x57};      // push r15
 Counter s_blur_clamps;
 
-void OnBlurClamp() {
+void PS4_SYSV_ABI OnBlurClamp() {
     if (const u64 c_events = s_blur_clamps.c_events.fetch_add(1, std::memory_order_relaxed) + 1; ShouldLog(c_events)) {
         std::printf("Workarounds: Yebis blur kernel asked for 2 base samples: 3 given (%llu so far; #684)\n",
                     static_cast<unsigned long long>(c_events));
@@ -271,7 +271,7 @@ ColorClear PlanColorClear(const u8* p_target, const float* p_color) {
     return ColorClear{va_target, u32(cb_target), u32(*red) | u32(*green) << 16, nullptr};
 }
 
-void FxInitClear(void* p_context, void* p_state, const u8* p_target, const float* p_color) {
+void PS4_SYSV_ABI FxInitClear(void* p_context, void* p_state, const u8* p_target, const float* p_color) {
     const ColorClear clear = PlanColorClear(p_target, p_color);
     if (!clear.sz_refusal) {
         // Told before (its write traps lift) and after (the colour now there), as a resource copy.

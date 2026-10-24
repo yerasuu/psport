@@ -506,7 +506,7 @@ bool HasPointerMoved(const u8* p_list, float x, float y) {
 }
 
 /// The game's list update (0x1acff30) is about to run for its component (rdi; rsi its input).
-void OnListUpdate(std::uint64_t, PsGuestCode::Registers* p_registers) {
+void PS4_SYSV_ABI OnListUpdate(std::uint64_t, PsGuestCode::Registers* p_registers) {
     auto* p_component = reinterpret_cast<u8*>(p_registers->rdi);
     const auto* p_input = reinterpret_cast<const u8*>(p_registers->rsi);
     if (!p_component || !p_input || !*p_input || IsInputBlocked()) {
