@@ -506,12 +506,15 @@ static void *failed(int error) {
 }
 
 /* Outside the arena REPLACE cannot take an address something holds: it behaves as EXACT. Hints are
- * not followed, since VirtualAlloc fails instead of moving on. */
+ * not followed, since VirtualAlloc fails instead of moving on. The length is rounded up to whole
+ * pages as mmap does, since callers ask for the size of an object. */
 void *ps_host_vm_map(void *p_at, size_t cb_range, unsigned access, unsigned flags) {
     const uintptr_t va_at = (uintptr_t)p_at;
-    if (!cb_range) return failed(EINVAL);
+    const size_t cb_page = ps_host_vm_page_size();
+    if (!cb_range || cb_range > SIZE_MAX - cb_page) return failed(EINVAL);
+    cb_range = (cb_range + cb_page - 1) & ~(cb_page - 1);
     if (is_placed(flags)) {
-        if (va_at % ps_host_vm_page_size() || cb_range % ps_host_vm_page_size()) return failed(EINVAL);
+        if (va_at % cb_page) return failed(EINVAL);
         AcquireSRWLockExclusive(&s_lock);
         const int is_arena = is_in_arena(va_at, cb_range), is_straddling = !is_arena && overlaps_arena(va_at, cb_range);
         const int error = is_arena ? map_in_arena(va_at, cb_range, access, flags, -1, 0) : is_straddling ? EINVAL : 0;
