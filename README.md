@@ -54,7 +54,9 @@ state is how far a title has been seen to get, not a full play-through; what eac
 
 ## Requirements
 
-- **OS:** Linux on x86-64.
+- **OS:** Linux on x86-64. Windows is groundwork that runs no game yet; its CI build is a test
+  package with a probe that reports what the machine's GPU driver offers
+  ([Windows test guide](docs/en/WINDOWS_TEST.md)).
 - **GPU:** Vulkan 1.3 with descriptor indexing and buffer device address. The GPU path is the same
   for every vendor and chooses features by what the device reports, not by vendor. It is tested on
   AMD with RADV; NVIDIA and Intel are not verified yet

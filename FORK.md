@@ -773,19 +773,37 @@ are (SDL3 brings PipeWire's, whose own plugins and tools link OpenSSL, abseil an
 
 `.github/workflows/windows.yml` (same triggers, `contents: read`, no secrets) builds what builds on
 Windows so far (decision #623): `build.sh`'s Windows branch in MSYS2's CLANG64 on `windows-latest`,
-without LTO, gives `psport.exe`, `libpsport-gpu.dll` and `psport-gpu-capabilities.exe`. The artifact
-`psport-windows-<commit>` holds them with the CLANG64 DLLs they load, the build's output and
-`BUILD-STATUS.txt` (what built and what is not built yet); kept 14 days, nothing published.
+without LTO, gives `psport.exe`, `libpsport-gpu.dll`, `psport-gpu-capabilities.exe` and
+`psport-windows-probe.exe`. `tools/win32-bundle.sh dist` makes them the test package (kb #899), and
+the artifact is that zip as it is (`archive: false`), `psport-windows-<version>-<commit>-x86_64.zip`;
+kept 14 days, nothing published. When the build fails, `psport-windows-logs-<commit>` holds its
+output instead.
+
+The package is one folder: the four programs, the CLANG64 DLLs they load (the closure of their PE
+import tables, read with `llvm-objdump`; `vulkan-1.dll` is the GPU driver's), `psport-probe.bat`,
+`psport-probe.ps1` and `README-WINDOWS.txt` from `packaging/windows/` (CRLF), `LICENSE.txt`,
+`THIRD-PARTY-NOTICES.txt` (each DLL's MSYS2 package with its licence and licence files, the
+packages compiled in, and the tree's own third-party code as in the Linux bundle), `SOURCES.txt`
+(MSYS2's source package and upstream of each) and `BUILD-INFO.txt` (commit, DLLs in and out). Only
+DLLs whose MSYS2 licence is GPL-2.0-compatible go in: MSYS2's FFmpeg is GPL-3.0-or-later, so its
+five DLLs stay out and `psport.exe` does not start from the package until a GPL-2.0-compatible
+FFmpeg is built (`PS_BUNDLE_LOCAL=1` keeps them, and whatever only they load, for a package used
+on one's own machine, named `-local`). Testers start `psport-probe.bat`, which runs
+`psport-windows-probe.exe` (`tools/win32_probe/`: no game, Vulkan loaded at run time, only system
+DLLs) and opens `psport-windows-report.txt`: the system, each Vulkan device's capabilities, the
+memory sharing tests and a verdict on the guest-memory mode (decision #873); see
+[docs/en/WINDOWS_TEST.md](docs/en/WINDOWS_TEST.md).
 
 Locally, without Windows (#777): `tools/win32-cross.sh sysroot` unpacks the CLANG64 packages the
 workflow installs, with their dependencies, from repo.msys2.org (checksums from its database) into
 `PS_WIN32_SYSROOT` (default `~/.cache/psport/win32-sysroot`, ~2 GB); `tools/win32-cross.sh build`
-builds `out/win32/gpu/libpsport-gpu.dll` and `out/win32/psport-gpu-capabilities.exe` with nixpkgs'
+builds `out/win32/gpu/libpsport-gpu.dll`, `out/win32/psport-gpu-capabilities.exe` and `out/win32/psport-windows-probe.exe` with nixpkgs'
 clang and lld at CLANG64's LLVM version over that sysroot (same libc++, UCRT and DLLs); `tools/win32-cross.sh runtime` then links `out/win32/psport.exe` with
 `build.sh`'s Windows flags and, when that fails, lists the files that do not compile and the symbols missing
 at the link. `tools/win32-proton-run.sh EXE [ARGS...]` runs a
 result under Proton with umu-run (`PS_WIN32_PREFIX`, `PS_UMU_RUN`), the CLANG64 DLLs and
-`libpsport-gpu.dll` found through `WINEPATH`.
+`libpsport-gpu.dll` found through `WINEPATH`. `tools/win32-bundle.sh DEST` makes the test package
+from `out/win32`, the sysroot's DLLs and its packages' metadata (file lists cached in its `db/files`).
 
 The version lives in `VERSION` alone: `0-unstable` between releases, `X.Y.Z` in a release, read by
 `build.sh`, `packaging/port.nix` (`version`) and `gpu/net/CMakeLists.txt` (the shadNet client's

@@ -58,7 +58,9 @@ en [tools/regress/titles.txt](tools/regress/titles.txt) y se ejecutan sin ventan
 
 ## Requisitos
 
-- **Sistema:** Linux en x86-64.
+- **Sistema:** Linux en x86-64. Windows es una base que aún no ejecuta ningún juego; su compilación
+  de CI es un paquete de prueba con una sonda que informa de lo que ofrece el driver de la GPU
+  ([guía de pruebas en Windows](docs/en/WINDOWS_TEST.md)).
 - **GPU:** Vulkan 1.3 con descriptor indexing y buffer device address. La ruta de GPU es la misma
   para todos los fabricantes y elige las funciones según lo que informa el dispositivo, no según el
   fabricante. Está probada en AMD con RADV; NVIDIA e Intel aún no están verificadas
