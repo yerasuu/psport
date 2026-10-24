@@ -191,6 +191,7 @@ done
 crlf() { sed 's/\r$//; s/$/\r/' -- "$1" > "$2"; }
 for file in packaging/windows/*; do [[ ! -f $file ]] || crlf "$file" "$bundle/${file##*/}"; done
 crlf LICENSE "$bundle/LICENSE.txt"
+cp -r -- patches "$bundle/"
 
 # Notices and sources: one entry per package, with the licence files it installs.
 declare -A package_dlls
