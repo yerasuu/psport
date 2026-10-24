@@ -1,0 +1,244 @@
+name: Windows toolchain
+
+# The Windows toolchain package (kb #926, docs/en/WINDOWS_TOOLCHAIN.md) with which decanter builds a
+# psport branch on Windows: CLANG64's packages pinned by SHA-256, psport's LGPL FFmpeg, magic_enum and
+# miniz's sources and the CMake toolchain file, made by tools/win32-toolchain.sh. Only a tag
+# toolchain-win32-N publishes it (decanter's decisions #925 and #928); by hand it builds and checks the
+# package without publishing it.
+on:
+  push:
+    tags: ['toolchain-win32-[0-9]+']
+  workflow_dispatch:
+    inputs:
+      number:
+        description: The package's number N (psport-toolchain-win32-N-x86_64.zip)
+        required: true
+
+permissions: {}
+
+jobs:
+  # psport's FFmpeg as windows.yml builds it. A tag builds it afresh: what it publishes must not rest on
+  # a cache entry another run wrote; a run by hand may take windows.yml's.
+  ffmpeg:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      # Otherwise the checkout gets CRLF line ends, which bash reads as part of each command.
+      - name: Keep LF line ends
+        shell: pwsh
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2.33.0
+        with:
+          msystem: CLANG64
+          update: true
+          install: base-devel
+          pacboy: clang:p pkgconf:p nasm:p
+      - name: FFmpeg version
+        id: ffmpeg
+        run: |
+          cd packaging/windows/ffmpeg
+          echo "version=$(sed -n 's/^pkgver=//p' PKGBUILD)-$(sed -n 's/^pkgrel=//p' PKGBUILD)" >> "$GITHUB_OUTPUT"
+      - if: github.event_name != 'push'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: ffmpeg-cache
+        with:
+          path: |
+            packaging/windows/ffmpeg/*.pkg.tar.zst
+            packaging/windows/ffmpeg/ffmpeg-*.tar.xz
+            packaging/windows/ffmpeg/ffmpeg-*.tar.xz.asc
+          key: ffmpeg-lgpl-clang64-${{ steps.ffmpeg.outputs.version }}-${{ hashFiles('packaging/windows/ffmpeg/**') }}
+      - name: Build FFmpeg
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        env:
+          MINGW_ARCH: clang64
+        run: |
+          cd packaging/windows/ffmpeg
+          gpg --batch --import keys/pgp/*.asc
+          makepkg-mingw --cleanbuild --syncdeps --noconfirm --noprogressbar
+      - if: github.event_name != 'push' && steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            packaging/windows/ffmpeg/*.pkg.tar.zst
+            packaging/windows/ffmpeg/ffmpeg-*.tar.xz
+            packaging/windows/ffmpeg/ffmpeg-*.tar.xz.asc
+          key: ${{ steps.ffmpeg-cache.outputs.cache-primary-key }}
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ffmpeg-lgpl
+          path: |
+            packaging/windows/ffmpeg/*.pkg.tar.zst
+            packaging/windows/ffmpeg/ffmpeg-*.tar.xz
+            packaging/windows/ffmpeg/ffmpeg-*.tar.xz.asc
+          retention-days: 1
+          if-no-files-found: error
+
+  package:
+    needs: ffmpeg
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    outputs:
+      name: ${{ steps.package.outputs.name }}
+      sha256: ${{ steps.package.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Package number
+        id: number
+        env:
+          EVENT: ${{ github.event_name }}
+          TAG: ${{ github.ref_name }}
+          INPUT: ${{ inputs.number }}
+        run: |
+          if [[ $EVENT == push ]]; then number=${TAG#toolchain-win32-}; else number=$INPUT; fi
+          if [[ ! $number =~ ^[1-9][0-9]*$ ]]; then echo "::error::Not a toolchain number: $number"; exit 1; fi
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ffmpeg-lgpl
+          path: packaging/windows/ffmpeg
+      - name: Sysroot
+        env:
+          PS_WIN32_SYSROOT: ${{ runner.temp }}/win32-sysroot
+        run: |
+          tools/win32-cross.sh sysroot
+          tools/win32-cross.sh ffmpeg-package packaging/windows/ffmpeg/mingw-w64-clang-x86_64-ffmpeg-lgpl-[0-9]*-any.pkg.tar.zst
+      - name: Package
+        id: package
+        env:
+          PS_WIN32_SYSROOT: ${{ runner.temp }}/win32-sysroot
+          NUMBER: ${{ steps.number.outputs.number }}
+        run: |
+          tools/win32-toolchain.sh dist "$NUMBER"
+          name=psport-toolchain-win32-$NUMBER-x86_64
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "sha256=$(cut -d' ' -f1 "dist/$name.zip.sha256")" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ steps.package.outputs.name }}
+          path: dist
+          retention-days: 14
+          if-no-files-found: error
+
+  # The package as decanter uses it: the pinned tools from upstream, checked against the manifest,
+  # cmake and ninja with no MSYS2 and nothing else on PATH, then the programs started once.
+  check:
+    needs: package
+    runs-on: windows-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Keep LF line ends
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: true
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ needs.package.outputs.name }}
+          path: dist
+      # Windows' own tar.exe (bsdtar) unpacks zips, and far faster than Expand-Archive.
+      - name: Unpack the package and the pinned tools
+        env:
+          NAME: ${{ needs.package.outputs.name }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $tar = "$env:SystemRoot\System32\tar.exe"
+          $tools = Join-Path $env:RUNNER_TEMP 'toolchain'
+          New-Item -ItemType Directory -Force $tools | Out-Null
+          & $tar -xf "dist/$env:NAME.zip" -C $tools
+          $manifest = Get-Content -Raw "dist/$env:NAME.json" | ConvertFrom-Json
+          foreach ($tool in $manifest.tools) {
+            $archive = Join-Path $env:RUNNER_TEMP "$($tool.name).zip"
+            Invoke-WebRequest -Uri $tool.url -OutFile $archive
+            $hash = (Get-FileHash -Algorithm SHA256 $archive).Hash
+            if ($hash -ne $tool.sha256) { throw "$($tool.url): SHA-256 $hash, the manifest pins $($tool.sha256)" }
+            New-Item -ItemType Directory -Force (Join-Path $tools $tool.name) | Out-Null
+            & $tar -xf $archive -C (Join-Path $tools $tool.name)
+          }
+      - name: Build
+        env:
+          NAME: ${{ needs.package.outputs.name }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $tools = Join-Path $env:RUNNER_TEMP 'toolchain'
+          $manifest = Get-Content -Raw "dist/$env:NAME.json" | ConvertFrom-Json
+          $folder = @{}
+          foreach ($tool in $manifest.tools) { $folder[$tool.name] = "$tools/$($tool.name)/$($tool.folder)".TrimEnd('/') }
+          $cmake = Join-Path $folder['cmake'] 'bin/cmake.exe'
+          $ninja = Join-Path $folder['ninja'] 'ninja.exe'
+          $commit = (git rev-parse --short=12 HEAD)
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+          & $cmake -S . -B build -G Ninja "-DCMAKE_MAKE_PROGRAM=$ninja" `
+            "-DCMAKE_TOOLCHAIN_FILE=$tools/$env:NAME/$($manifest.toolchain_file)" `
+            "-DPS_LLVM_MINGW=$($folder['llvm-mingw'])" -DCMAKE_BUILD_TYPE=RelWithDebInfo -DPS_LTO=OFF `
+            "-DPS_COMMIT=$commit"
+          & $ninja -C build
+      - name: Start the programs
+        env:
+          NAME: ${{ needs.package.outputs.name }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $sysroot = Join-Path $env:RUNNER_TEMP "toolchain/$env:NAME/clang64/bin"
+          $env:PATH = "$PWD\build;$PWD\build\gpu;$sysroot;$env:SystemRoot\System32;$env:SystemRoot"
+          & build/psport.exe --list-features
+          if ($LASTEXITCODE -ne 0) { throw "psport.exe --list-features: exit code $LASTEXITCODE" }
+          & build/psport-windows-probe.exe
+          $probe = $LASTEXITCODE
+          Get-Content build/psport-windows-report.txt
+          if ($probe -ne 0) { throw "psport-windows-probe.exe: exit code $probe" }
+
+  # Only tag pushes of this repository publish: forks never run it, and the workflow has no
+  # pull_request trigger.
+  publish:
+    needs: [package, check]
+    if: >-
+      github.repository == 'yerasuu/psport' && github.event_name == 'push' &&
+      startsWith(github.ref, 'refs/tags/toolchain-win32-')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    concurrency:
+      group: toolchain-publish-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ needs.package.outputs.name }}
+          path: dist
+      - name: Check the package
+        env:
+          NAME: ${{ needs.package.outputs.name }}
+          SHA256: ${{ needs.package.outputs.sha256 }}
+        run: |
+          if [[ $(sha256sum -- "dist/$NAME.zip" | cut -d' ' -f1) != "$SHA256" ]]; then
+            echo "::error::dist/$NAME.zip does not match the package's sha256 ($SHA256)"; exit 1
+          fi
+      - name: Publish the package
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NAME: ${{ needs.package.outputs.name }}
+          TAG: ${{ github.ref_name }}
+        run: tools/win32-publish.sh "dist/$NAME.zip" "$TAG" "github:$GITHUB_REPOSITORY"

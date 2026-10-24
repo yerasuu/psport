@@ -36,7 +36,8 @@ FFmpeg it carries. GitHub keeps both 14 days and asks for a signed-in account.
 
 Without CI, from Linux: `tools/win32-cross.sh sysroot`, `ffmpeg`, `build`, `runtime`, then
 `tools/win32-bundle.sh DEST` writes the same zip and sources folder (see
-[FORK.md](../../FORK.md#ci-and-binary-cache)).
+[FORK.md](../../FORK.md#ci-and-binary-cache)). A branch is built on Windows without MSYS2 with the
+toolchain package, as decanter does: [WINDOWS_TOOLCHAIN.md](WINDOWS_TOOLCHAIN.md).
 
 ## Run it
 

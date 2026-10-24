@@ -842,11 +842,36 @@ DLLs) and opens `psport-windows-report.txt`: the system, each Vulkan device's ca
 memory sharing tests and a verdict on the guest-memory mode (decision #873); see
 [docs/en/WINDOWS_TEST.md](docs/en/WINDOWS_TEST.md).
 
+`.github/workflows/toolchain.yml` (kb #926, decanter's decisions #924 and #928), on tags
+`toolchain-win32-N` only (and by hand, without publishing), makes the Windows toolchain package with
+which decanter builds a branch on Windows without MSYS2: FFmpeg by `makepkg-mingw` (built afresh for a
+tag; a run by hand may take `windows.yml`'s cache), then on Linux `tools/win32-cross.sh sysroot` and
+`ffmpeg-package`, and
+`tools/win32-toolchain.sh dist N`; a `check` job on `windows-latest` builds psport from it as decanter
+does (pinned llvm-mingw, CMake and Ninja from upstream, checked against the manifest; only
+`System32` on `PATH`) and starts `psport.exe --list-features` and the probe; then `publish` uploads
+`psport-toolchain-win32-N-x86_64.zip`, its manifest `.json` and its `.sha256` (last) to the tag's
+release with `tools/win32-publish.sh`. The package: every CLANG64 package unpacked again from its
+archive after checking the SHA-256 of MSYS2's database, psport's FFmpeg with its PKGBUILD and
+upstream tarball, magic_enum and miniz at `gpu/CMakeLists.txt`'s tags for FetchContent's
+`FETCHCONTENT_SOURCE_DIR_*`, `psport-toolchain.cmake` (`packaging/windows/toolchain/`: llvm-mingw's
+clang with `--no-default-config`, `--target=x86_64-w64-windows-gnu`, `--sysroot` the package's
+`clang64/`, libc++, compiler-rt, libunwind, lld; the package's `pkgconf.exe` and `glslang.exe` on
+Windows), `manifest.json` (each package's name, version, archive, SHA-256, licence and source; the
+pinned tools' URLs and SHA-256), `SOURCES.txt` with the written offer and `LICENSE.txt`; a link, a
+name Windows can't hold or two names that differ only in case stop it. Layout, manifest and how to
+build: [docs/en/WINDOWS_TOOLCHAIN.md](docs/en/WINDOWS_TOOLCHAIN.md).
+
 Locally, without Windows (#777): `tools/win32-cross.sh sysroot` unpacks the CLANG64 packages the
 workflow installs, with their dependencies, from repo.msys2.org (checksums from its database) into
-`PS_WIN32_SYSROOT` (default `~/.cache/psport/win32-sysroot`, ~2 GB); `tools/win32-cross.sh ffmpeg`
+`PS_WIN32_SYSROOT` (default `~/.cache/psport/win32-sysroot`, ~1 GB; with CLANG64's `pkgconf` and
+`glslang`, which the toolchain package runs on Windows), after checking `clang64.db.sig` with gpg: the
+signing key must be one of MSYS2's master keys, whose fingerprints the script pins, or carry a
+certification from one, as pacman's web of trust has it (`msys2-keyring` from repo.msys2.org only
+supplies the keys); `tools/win32-cross.sh ffmpeg`
 cross-builds FFmpeg from the PKGBUILD's source and configure flags, with the same checks, and
-registers it in that sysroot as the package the job installs (again after each `sysroot`);
+registers it in that sysroot as the package the job installs (again after each `sysroot`;
+`ffmpeg-package FILE` installs one `makepkg-mingw` built instead);
 `tools/win32-cross.sh build`
 builds `out/win32/gpu/libpsport-gpu.dll`, `out/win32/psport-gpu-capabilities.exe` and `out/win32/psport-windows-probe.exe` with nixpkgs'
 clang and lld at CLANG64's LLVM version over that sysroot (same libc++, UCRT and DLLs); `tools/win32-cross.sh runtime` then links `out/win32/psport.exe` with
