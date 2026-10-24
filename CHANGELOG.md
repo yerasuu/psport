@@ -16,6 +16,16 @@ changes alone make no release. What breaks is psport's launch interface: `run.sh
 The tags without a `v` (`0.1` to `0.51`) are bbport's releases, carried in psport's history; their
 notes are in [docs/en/history/](docs/en/history/).
 
+## v0.1.4
+
+The Windows package builds again: v0.1.3's Windows build failed in MSYS2's compiler on one line of the
+texture cache, which now uses the form the code already used elsewhere. Nothing changes on Linux.
+Windows is still groundwork, not supported.
+
+### Windows (groundwork, not supported)
+- `libpsport-gpu.dll` compiles with MSYS2's libc++ again, so the CI job produces the test package
+  (`docs/en/WINDOWS_TEST.md`).
+
 ## v0.1.3
 
 The network libraries start as on the console, draw preparation no longer reads another draw's data,
