@@ -92,13 +92,25 @@ static int protect_committed(uintptr_t va_begin, size_t cb_range, DWORD protecti
     const uintptr_t va_end = va_begin + cb_range;
     for (uintptr_t va = va_begin; va < va_end;) {
         MEMORY_BASIC_INFORMATION info;
-        if (!VirtualQuery((void *)va, &info, sizeof(info))) return last_error();
-        if (info.State == MEM_FREE) return ENOMEM;
+        if (!VirtualQuery((void *)va, &info, sizeof(info))) return report("VirtualQuery (a protection change)", va, 0);
+        if (info.State == MEM_FREE) {
+            printf("Host memory: protecting %#llx (+%#llx) as %#lx: %#llx (+%#llx) is not mapped\n",
+                   (unsigned long long)va_begin, (unsigned long long)cb_range, protection, (unsigned long long)va,
+                   (unsigned long long)info.RegionSize);
+            return ENOMEM;
+        }
         uintptr_t va_next = (uintptr_t)info.BaseAddress + info.RegionSize;
         if (va_next > va_end) va_next = va_end;
         DWORD previous;
-        if (info.State == MEM_COMMIT && !VirtualProtect((void *)va, va_next - va, protection, &previous))
-            return last_error();
+        if (info.State == MEM_COMMIT && !VirtualProtect((void *)va, va_next - va, protection, &previous)) {
+            const DWORD error = GetLastError();
+            printf("Host memory: VirtualProtect failed at %#llx (+%#llx) as %#lx: Windows error %lu (%s view of "
+                   "%#llx, created %#lx, now %#lx)\n",
+                   (unsigned long long)va, (unsigned long long)(va_next - va), protection, error,
+                   info.Type == MEM_IMAGE ? "image" : info.Type == MEM_MAPPED ? "mapped" : "private",
+                   (unsigned long long)(uintptr_t)info.AllocationBase, info.AllocationProtect, info.Protect);
+            return ps_win32_errno(error);
+        }
         va = va_next;
     }
     return 0;

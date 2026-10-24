@@ -72,7 +72,12 @@ void *allocate(size_t cb_allocation) {
 }
 void protect(void *p_range, size_t cb_range, unsigned flags) {
     const unsigned access = ((flags & 4) ? PS_HOST_VM_READ : 0u) | ((flags & 2) ? PS_HOST_VM_WRITE : 0u) | ((flags & 1) ? PS_HOST_VM_EXECUTE : 0u);
-    if (ps_host_vm_protect(p_range, cb_range, access)) fail("mprotect failed");
+    const int error = ps_host_vm_protect(p_range, cb_range, access);
+    if (!error) return;
+    char sz_message[128];
+    snprintf(sz_message, sizeof(sz_message), "mprotect failed at %p (+%#zx, flags %u): %s", p_range, cb_range, flags,
+             strerror(error));
+    fail(sz_message);
 }
 /* enter_on_stack(p_entry, p_arg0, p_arg1, p_top): call p_entry(p_arg0,p_arg1) on a new stack, its
  * arguments in System V's registers on every host. */
