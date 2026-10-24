@@ -48,16 +48,19 @@ If something goes wrong
 -----------------------
 - "vulkan-1.dll does not load" in the report: install the GPU vendor's current driver.
 - psport.exe --list-features ending with exit code 0xc0000135: a DLL psport.exe needs is not in the
-  package. BUILD-INFO.txt lists the ones left out on purpose (FFmpeg's, for licence reasons); the
-  probe's own results are complete without them.
+  package (the report names it); the probe's own results are complete without it.
 - A line starting with CRASH: the report is cut at the step it names; send it anyway.
 
 Running psport.exe by hand
 --------------------------
-From a console in this folder: psport.exe --list-features lists what works on Windows, once the
-DLLs BUILD-INFO.txt lists as left out are next to it. Games are not expected to run yet.
+From a console in this folder: psport.exe --list-features lists what works on Windows. Games are
+not expected to run yet.
 
 Licences
 --------
 psport is GPL-2.0 (LICENSE.txt). The DLLs next to it and the code compiled into it are listed with
-their licences in THIRD-PARTY-NOTICES.txt; where their sources are, in SOURCES.txt.
+their licences in THIRD-PARTY-NOTICES.txt; where their sources are, in SOURCES.txt. FFmpeg's DLLs
+(avcodec, avformat, avutil, swresample, swscale) are FFmpeg under the GNU LGPL version 2.1 or later,
+built by psport without changes to its source; THIRD-PARTY-NOTICES.txt has the configure line, and
+the PKGBUILD and source it was built from come next to this package's zip (SOURCES.txt). You may
+replace those DLLs with your own build of the same FFmpeg version.

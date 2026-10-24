@@ -12,11 +12,14 @@ Whether NVIDIA, AMD or Intel's Windows drivers import section views decides how 
 
 Every push to `develop` and `main` runs `.github/workflows/windows.yml`. Open the run in the
 repository's Actions tab (workflow "Windows"), and under Artifacts download
-`psport-windows-<version>-<commit>-x86_64.zip`: the artifact is the package's zip itself. GitHub
-keeps it 14 days and asks for a signed-in account; it is never a release.
+`psport-windows-<version>-<commit>-x86_64.zip`: the artifact is the package's zip itself. Next to it,
+`psport-windows-<version>-<commit>-x86_64-sources` holds the PKGBUILD and upstream tarball of the
+FFmpeg the package carries. GitHub keeps both 14 days and asks for a signed-in account; it is never a
+release.
 
-Without CI, from Linux: `tools/win32-cross.sh sysroot`, `build`, `runtime`, then
-`tools/win32-bundle.sh DEST` writes the same zip (see [FORK.md](../../FORK.md#ci-and-binary-cache)).
+Without CI, from Linux: `tools/win32-cross.sh sysroot`, `ffmpeg`, `build`, `runtime`, then
+`tools/win32-bundle.sh DEST` writes the same zip and sources folder (see
+[FORK.md](../../FORK.md#ci-and-binary-cache)).
 
 ## Run it
 
@@ -64,9 +67,10 @@ driver still gets a report, and writes a crash inside a driver down with the ste
 
 ## Known limits
 
-- MSYS2 builds FFmpeg as GPL-3.0-or-later (with x264, x265 and GnuTLS), which GPL-2.0 psport can't
-  be redistributed with, so the package leaves its DLLs out and `psport.exe` does not start from it
-  (`0xc0000135`); the probe does not need them. `PS_BUNDLE_LOCAL=1 tools/win32-bundle.sh` keeps them
-  for a package used on one's own machine only.
+- FFmpeg is psport's own build (`packaging/windows/ffmpeg/PKGBUILD`, kb #906), LGPL-2.1-or-later
+  with only the decoders, parsers, demuxer and protocol psport uses (H.264, HEVC, AAC, MP3, MJPEG;
+  MP4 through the mov demuxer; local files), since MSYS2's is GPL-3.0-or-later, which GPL-2.0 psport
+  can't be redistributed with. A video in another codec or container than these fails to open; the
+  Linux build has the same decoders and more.
 - Under Proton on RADV the report says what kb #872 found: `[a]`, `[e1]`, `[e2]` and the CPU alias
   pass, `[b]` to `[d]` fail with `VK_ERROR_INVALID_EXTERNAL_HANDLE`.
