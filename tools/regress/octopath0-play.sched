@@ -1,0 +1,90 @@
+# Octopath 0 from boot to character creation: logos, Initial Settings (options confirms), the title
+# menu (cross: New Game), the opening book and the Physique, Learned Skill, Favorite Dish and Belongings
+# pages (options is Done, cross is Yes; the dish name comes from PS_IME_TEXT in titles.txt, the
+# ImeDialog having no pad route; Belongings needs three picks: cross, right). Stops there: it has not
+# yet been seen to reach the 3D scene (#889). Timing varies a few seconds between runs, and some runs
+# hang early (GameThread waiting for RenderThread, guest fault at 0x71467d4).
+24 shot
+44 press options
+58 shot
+62 press cross
+67 shot
+72 press cross
+77 shot
+82 press cross
+87 shot
+92 press cross
+97 shot
+102 press cross
+107 shot
+112 press cross
+117 shot
+122 press cross
+127 shot
+135 press options
+139 shot
+140 press cross
+144 shot
+145 press options
+149 shot
+150 press cross
+154 shot
+155 press options
+159 shot
+160 press cross
+164 shot
+165 press options
+169 shot
+170 press cross
+174 shot
+175 press options
+179 shot
+180 press cross
+184 shot
+185 press options
+189 shot
+190 press cross
+194 shot
+200 press cross
+211 press cross
+213 press right
+215 press cross
+217 press right
+219 press cross
+222 shot
+224 press options
+228 shot
+231 press cross
+237 shot
+240 press cross
+243 shot
+246 press cross
+249 shot
+252 press cross
+255 shot
+258 press cross
+261 shot
+264 press cross
+267 shot
+270 press cross
+273 shot
+276 press cross
+279 shot
+282 press cross
+285 shot
+288 press cross
+291 shot
+294 press cross
+297 shot
+300 press cross
+303 shot
+306 press cross
+309 shot
+312 press cross
+315 shot
+318 press cross
+321 shot
+324 press cross
+327 shot
+330 press cross
+340 end
