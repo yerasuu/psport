@@ -10,7 +10,6 @@
 #include <pthread.h>
 #include <sched.h>
 #include <signal.h>
-#include <setjmp.h>
 #include <errno.h>
 #include <unistd.h>
 #define ERR(n) ((int32_t)(UINT32_C(0x80020000)|(n)))
@@ -46,7 +45,7 @@ typedef struct GuestThread {
     /* Known once the TCB is in place; interrupts sent before then wait in early_interrupts. */
     int32_t tid;
     unsigned early_interrupts;
-    jmp_buf exit_jump;
+    PsHostRecoveryPoint exit_jump;
     struct GuestThread *next;
 } GuestThread;
 
@@ -58,7 +57,8 @@ static _Thread_local int32_t s_guest_errno;
 static _Thread_local void (*s_pfn_exit_hook)(void);
 static const unsigned char *s_p_tls_template;
 static uint64_t s_tls_filesz, s_tls_memsz, s_tls_align=16;
-static size_t s_c_created, s_c_joined, s_c_exited;
+static size_t s_c_created, s_c_joined, s_c_exited, s_c_exit_calls;
+#define C_EXIT_CALLS_LOGGED 32
 static size_t s_c_cancel_requests, s_c_cancels_taken;
 static size_t s_c_high_records;
 
@@ -327,7 +327,12 @@ static void *host_start(void *p_argument) {
         if (early_interrupts&(1u<<interrupt)) ps_host_interrupt_thread(p_thread->tid,(PsHostInterrupt)interrupt);
     record_stack(p_thread);
     ps_host_thread_set_name(p_thread->name);
-    if (!setjmp(p_thread->exit_jump)) p_thread->result=p_thread->entry(p_thread->argument);
+    if (PS_HOST_RECOVERY_SET(p_thread->exit_jump)) {
+        runtime_exception_lock(&s_lock); const size_t i_exit_call=s_c_exit_calls++; runtime_exception_unlock(&s_lock);
+        if (i_exit_call<C_EXIT_CALLS_LOGGED)
+            printf("Runtime: guest thread '%s' left through scePthreadExit (result %p)%s\n",p_thread->name,
+                   p_thread->result,i_exit_call+1==C_EXIT_CALLS_LOGGED ? "; further ones are only counted" : "");
+    } else p_thread->result=p_thread->entry(p_thread->argument);
     if (s_pfn_exit_hook) s_pfn_exit_hook();
     runtime_thread_keys_cleanup();
     runtime_exception_lock(&s_lock); p_thread->finished=1; ++s_c_exited; runtime_exception_unlock(&s_lock);
@@ -434,8 +439,9 @@ static ABI __attribute__((noreturn)) void thread_exit(void *p_value) {
     if (p_thread->host_owned) { fputs("STOP: pthread_exit on host-owned/main thread\n",stderr); runtime_stop(21); }
     while (s_p_cleanup_handlers) pop_cleanup_handler(1);
     p_thread->result=p_value;
-    /* No host unwinder: guest frames have no registered FDEs. */
-    longjmp(p_thread->exit_jump,1);
+    /* No host unwinder: guest frames have no unwind data, and on Windows the C runtime's longjmp
+     * unwinds through them (RtlUnwindEx), which ends the process with STATUS_BAD_FUNCTION_TABLE. */
+    PS_HOST_RECOVERY_JUMP(p_thread->exit_jump);
 }
 static ABI int32_t thread_yield(void) { sched_yield(); return 0; }
 static ABI int32_t thread_get_prio(GuestThread *p_thread,int *p_prio) {
@@ -591,7 +597,8 @@ uintptr_t runtime_thread_resolve(const char *sz_name) {
 }
 void runtime_thread_report(void) {
     if (!runtime_exception_report_lock(&s_lock,"thread")) return;
-    printf("Runtime: guest threads created=%zu, exited=%zu, joined=%zu\n",s_c_created,s_c_exited,s_c_joined);
+    printf("Runtime: guest threads created=%zu, exited=%zu (through scePthreadExit %zu), joined=%zu\n",s_c_created,
+           s_c_exited,s_c_exit_calls,s_c_joined);
     if (s_c_cancel_requests)
         printf("Runtime: thread cancellation: %zu requested, %zu taken at pthread_testcancel (blocking "
                "cancellation points and asynchronous cancellation are not honoured)\n",s_c_cancel_requests,

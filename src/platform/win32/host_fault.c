@@ -26,6 +26,7 @@ enum {
     HOST_SIGINT = 2,
     HOST_SIGILL = 4,
     HOST_SIGTRAP = 5,
+    HOST_SIGABRT = 6,
     HOST_SIGBUS = 7,
     HOST_SIGFPE = 8,
     HOST_SIGSEGV = 11,
@@ -348,6 +349,37 @@ static LONG dispatch_fault(PsHostFaultContext *p_context) {
     return result;
 }
 
+/* Raised by the exception dispatch or an unwind that cannot go on: a frame without unwind data (guest
+ * code, generated code), a stack outside the thread's limits. The frame walk that would reach an
+ * unhandled-exception filter is what failed, so Windows ends the process right after the vectored
+ * handlers: they are reported here, as SIGABRT, Linux's answer to an unwind that fails. */
+static const char *name_dispatch_failure(DWORD code) {
+    switch (code) {
+    case 0xC0000025: return "STATUS_NONCONTINUABLE_EXCEPTION";
+    case 0xC0000026: return "STATUS_INVALID_DISPOSITION";
+    case 0xC0000028: return "STATUS_BAD_STACK";
+    case 0xC0000029: return "STATUS_INVALID_UNWIND_TARGET";
+    case 0xC00000FF: return "STATUS_BAD_FUNCTION_TABLE";
+    }
+    return NULL;
+}
+
+static void write_dispatch_failure(const EXCEPTION_RECORD *p_exception, const char *sz_name) {
+    char sz_line[256];
+    snprintf(sz_line, sizeof(sz_line), "Host: exception 0x%08lx (%s, flags 0x%lx) at %p on thread %lu\n",
+             (unsigned long)p_exception->ExceptionCode, sz_name, (unsigned long)p_exception->ExceptionFlags,
+             p_exception->ExceptionAddress, (unsigned long)GetCurrentThreadId());
+    write_error(sz_line);
+    int depth = 0;
+    for (const EXCEPTION_RECORD *p_inner = p_exception->ExceptionRecord; p_inner && depth < 4;
+         p_inner = p_inner->ExceptionRecord, ++depth) {
+        snprintf(sz_line, sizeof(sz_line), "  nested exception record 0x%08lx (flags 0x%lx) at %p\n",
+                 (unsigned long)p_inner->ExceptionCode, (unsigned long)p_inner->ExceptionFlags,
+                 p_inner->ExceptionAddress);
+        write_error(sz_line);
+    }
+}
+
 static int describe_exception(const EXCEPTION_RECORD *p_exception, PsHostFaultContext *p_out) {
     const int has_access = p_exception->NumberParameters >= 2;
     const ULONG_PTR access = has_access ? p_exception->ExceptionInformation[0] : 0;
@@ -394,7 +426,12 @@ static int describe_exception(const EXCEPTION_RECORD *p_exception, PsHostFaultCo
     /* The trap flag's step: SIGTRAP on Linux too. */
     case EXCEPTION_SINGLE_STEP: p_out->kind = PS_HOST_FAULT_BREAKPOINT; p_out->trap_number = 1; return 1;
     }
-    return 0;
+    const char *sz_failure = name_dispatch_failure(p_exception->ExceptionCode);
+    if (!sz_failure) return 0;
+    write_dispatch_failure(p_exception, sz_failure);
+    p_out->kind = PS_HOST_FAULT_ILLEGAL;
+    p_out->signal = HOST_SIGABRT;
+    return 1;
 }
 
 /* First in line, so that the write traps see a fault before a host library's own handlers. Every
@@ -412,7 +449,7 @@ static LONG CALLBACK on_exception(EXCEPTION_POINTERS *p_pointers) {
     if (p_pointers->ExceptionRecord->ExceptionCode == EXCEPTION_BREAKPOINT) ++registers[PS_HOST_REG_RIP];
     context.p_registers = registers;
     context.p_record = p_record;
-    context.signal = s_fault_signals[context.kind];
+    if (!context.signal) context.signal = s_fault_signals[context.kind];
     context.code_selector = p_record->SegCs;
     context.p_fxsave =
         (p_record->ContextFlags & CONTEXT_FLOATING_POINT) == CONTEXT_FLOATING_POINT ? &p_record->FltSave : NULL;
