@@ -27,11 +27,17 @@ set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded")
 
 add_library(psport_dlss SHARED psport_dlss_bridge.cpp psport_dlss_bridge.h)
 set_target_properties(psport_dlss PROPERTIES OUTPUT_NAME psport_dlss)
+include(GenerateExportHeader)
+generate_export_header(psport_dlss BASE_NAME psport_dlss EXPORT_MACRO_NAME PSPORT_DLSS_EXPORT
+                       EXPORT_FILE_NAME "${CMAKE_CURRENT_BINARY_DIR}/psport_dlss_export.h")
+target_include_directories(psport_dlss PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 target_include_directories(psport_dlss PRIVATE "${DLSS_SDK_ROOT}/include" ${VULKAN_INCLUDE})
 if (WIN32)
     target_link_libraries(psport_dlss PRIVATE "${DLSS_SDK_ROOT}/lib/Windows_x86_64/x64/nvsdk_ngx_s.lib")
-    target_compile_definitions(psport_dlss PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+    target_compile_definitions(psport_dlss PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN
+                                                   PSPORT_DLSS_ENGINE_VERSION="psport-windows")
 else()
+    target_compile_definitions(psport_dlss PRIVATE PSPORT_DLSS_ENGINE_VERSION="psport-linux")
     # Only PsDlssGetApi is exported; NGX finds libnvidia-ngx-dlss.so.<version> next to psport.
     set_target_properties(psport_dlss PROPERTIES CXX_VISIBILITY_PRESET hidden)
     target_link_libraries(psport_dlss PRIVATE "${DLSS_SDK_ROOT}/lib/Linux_x86_64/libnvsdk_ngx.a"

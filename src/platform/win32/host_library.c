@@ -23,6 +23,15 @@ void *ps_host_dl_sym(PsHostLibrary *p_library, const char *sz_symbol) {
     return (void *)GetProcAddress((HMODULE)p_library, sz_symbol);
 }
 
+PsHostLibrary *ps_host_dl_find_loaded(const char *sz_name) {
+    char sz_file[256];
+    wchar_t sz_wide[PS_WIN32_PATH_MAX];
+    if (snprintf(sz_file, sizeof(sz_file), "%s.dll", sz_name) >= (int)sizeof(sz_file) ||
+        ps_win32_to_wide(sz_file, sz_wide, PS_WIN32_PATH_MAX))
+        return NULL;
+    return (PsHostLibrary *)GetModuleHandleW(sz_wide);
+}
+
 /* Module paths in UTF-8, kept for the life of the process since PsHostCodeAddress promises them
  * while the module stays loaded and nothing unloads one; filled without locks so that a fault
  * report may add one. A module past the table's end is named by its address only. */

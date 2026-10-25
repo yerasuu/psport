@@ -5575,16 +5575,13 @@ std::optional<BbscSaveSlot> BbscActiveSaveSlotUnchecked() {
     // As shadPS4 picks its user folder: <working folder>\user when it exists (portable install),
     // else %APPDATA%\shadPS4 - never both (another window may play from the other one).
     std::vector<fs::path> bases{fs::current_path(ec) / "user"};
-#ifdef _WIN32
-    if (!fs::is_directory(bases.front() / "home", ec) &&
+    if (const char* appdata = std::getenv("APPDATA");
+        appdata != nullptr && !fs::is_directory(bases.front() / "home", ec) &&
         !fs::is_directory(bases.front() / "savedata", ec)) {
         bases.clear();
-        if (const char* appdata = std::getenv("APPDATA")) {
-            bases.push_back(fs::path(appdata) / "shadPS4");
-        }
+        bases.push_back(fs::path(appdata) / "shadPS4");
+        ec.clear();
     }
-    ec.clear();
-#endif
     std::optional<BbscSaveSlot> best;
     fs::file_time_type best_time = bbsc_run_started;
     // BBSC_SAVE_DIR (2026-10-12): the folder holding userdata0000.. on hosts that keep saves
@@ -12560,11 +12557,9 @@ BbscSaveBackup BackupBbscSavesUnchecked() {
     if (runtime_user_dir != nullptr && runtime_user_dir[0]) {
         bases.push_back(fs::absolute(runtime_user_dir, ec));
     }
-#ifdef _WIN32
     if (const char* appdata = std::getenv("APPDATA")) {
         bases.push_back(fs::path(appdata) / "shadPS4");
     }
-#endif
     const auto stamp = std::chrono::system_clock::now().time_since_epoch();
     const fs::path out = Common::FS::GetUserPath(Common::FS::PathType::CapturesDir).parent_path() /
                          "save-backups" /

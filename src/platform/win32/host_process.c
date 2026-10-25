@@ -189,6 +189,8 @@ void ps_host_exit_at_once(int status) {
     _exit(status);
 }
 
+int32_t ps_host_process_id(void) { return (int32_t)GetCurrentProcessId(); }
+
 /* The cleaner would have to be psport.exe started again with an option of its own, since Windows
  * has no fork to give it the caller's code. */
 int ps_host_remove_tree_at_exit(const char *sz_path) {

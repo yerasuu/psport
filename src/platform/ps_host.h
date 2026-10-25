@@ -99,6 +99,10 @@ typedef struct PsHostLibrary PsHostLibrary;
  * sz_out_error when it is given. */
 PsHostLibrary *ps_host_dl_open(const char *sz_path, char *sz_out_error, size_t cb_out_error);
 void *ps_host_dl_sym(PsHostLibrary *p_library, const char *sz_symbol);
+/* A library the process already holds, without loading it (a tool that hooks the process from its
+ * start, which a later load would miss): sz_name is its base name without the host's prefix and
+ * suffix ("renderdoc" for librenderdoc.so and renderdoc.dll). NULL when it is not loaded. */
+PsHostLibrary *ps_host_dl_find_loaded(const char *sz_name);
 /* What a code address belongs to, for fault reports and samples: the loaded file (NULL when none
  * holds it) and the nearest exported symbol (NULL when none). The strings belong to the host loader
  * and stay valid while that file is loaded. */
@@ -469,6 +473,8 @@ int ps_host_env_set(const char *sz_name, const char *sz_value, int is_overwrite)
 /* The value of an environment variable of this process, or NULL when unset; valid until the next
  * ps_host_env_set. */
 const char *ps_host_env_get(const char *sz_name);
+/* This process's id, as the host's tools name it. */
+int32_t ps_host_process_id(void);
 
 /* ---- faults and thread interrupts ---- */
 /* What a fault or an interrupt handler is handed: the interrupted thread's registers, which it may

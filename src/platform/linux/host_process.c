@@ -119,6 +119,8 @@ int ps_host_on_exit(void (*pfn_exit)(int status)) {
 
 void ps_host_exit_at_once(int status) { _exit(status); }
 
+int32_t ps_host_process_id(void) { return (int32_t)getpid(); }
+
 int ps_host_fs_duplicate(int h_file, int h_target) {
     const int h_new = h_target < 0 ? fcntl(h_file, F_DUPFD_CLOEXEC, 3) : dup2(h_file, h_target);
     return h_new < 0 ? -errno : h_new;

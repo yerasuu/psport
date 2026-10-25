@@ -15,6 +15,12 @@ PsHostLibrary *ps_host_dl_open(const char *sz_path, char *sz_out_error, size_t c
 
 void *ps_host_dl_sym(PsHostLibrary *p_library, const char *sz_symbol) { return dlsym(p_library, sz_symbol); }
 
+PsHostLibrary *ps_host_dl_find_loaded(const char *sz_name) {
+    char sz_file[256];
+    if (snprintf(sz_file, sizeof(sz_file), "lib%s.so", sz_name) >= (int)sizeof(sz_file)) return NULL;
+    return dlopen(sz_file, RTLD_NOW | RTLD_NOLOAD);
+}
+
 int ps_host_dl_address(const void *p_code, PsHostCodeAddress *p_out) {
     Dl_info info = {0};
     const int is_found = dladdr(p_code, &info) != 0;

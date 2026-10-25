@@ -5,10 +5,9 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#ifndef _WIN32
-#include <dlfcn.h>
-#endif
 #include <renderdoc_app.h>
+
+#include "../../src/platform/ps_host.h"
 
 namespace PsRenderDoc {
 namespace {
@@ -28,21 +27,16 @@ std::uint64_t ReadCaptureFrame() {
 }
 
 RENDERDOC_API_1_1_2* LoadApi() {
-#ifdef _WIN32
-    std::printf("RenderDoc: PS_RENDERDOC_CAPTURE_FRAME is not supported on Windows yet, "
-                "no capture\n");
-    return nullptr;
-#else
-    // RTLD_NOLOAD: RenderDoc must hook the process from its start to capture it; loading it
+    // Not loaded here: RenderDoc must hook the process from its start to capture it; loading it
     // now would only add a library that sees none of the Vulkan objects already created.
-    void* h_module = dlopen("librenderdoc.so", RTLD_NOW | RTLD_NOLOAD);
-    if (!h_module) {
+    PsHostLibrary* p_library = ps_host_dl_find_loaded("renderdoc");
+    if (!p_library) {
         std::printf("RenderDoc: PS_RENDERDOC_CAPTURE_FRAME is set but RenderDoc is not loaded "
                     "(start under renderdoccmd capture), no capture\n");
         return nullptr;
     }
     const auto pfn_get_api =
-        reinterpret_cast<pRENDERDOC_GetAPI>(dlsym(h_module, "RENDERDOC_GetAPI"));
+        reinterpret_cast<pRENDERDOC_GetAPI>(ps_host_dl_sym(p_library, "RENDERDOC_GetAPI"));
     RENDERDOC_API_1_1_2* p_api = nullptr;
     if (!pfn_get_api ||
         pfn_get_api(eRENDERDOC_API_Version_1_1_2, reinterpret_cast<void**>(&p_api)) != 1) {
@@ -53,7 +47,6 @@ RENDERDOC_API_1_1_2* LoadApi() {
         p_api->SetCaptureFilePathTemplate(sz_template);
     }
     return p_api;
-#endif
 }
 } // namespace
 

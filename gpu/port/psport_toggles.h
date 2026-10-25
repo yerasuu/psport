@@ -14,13 +14,10 @@ extern "C" std::uint64_t g_runtime_disabled_optimizations;
 /// Temporary experiment bits: the second number in PS_TOGGLE_FILE (runtime_memory.c).
 extern "C" std::uint64_t g_runtime_experiment_bits;
 /// Recovery point for speculative guest memory reads on this thread (runtime_memory.c).
-#ifdef _WIN32
-// Through the runtime's accessor, since a DLL cannot import a thread_local of the executable.
+// Through the runtime's accessor on every host, since a Windows DLL cannot import a thread_local
+// of the executable.
 extern "C" PsHostRecoveryPoint** runtime_fault_recover_slot(void);
 #define g_p_runtime_fault_recover (*runtime_fault_recover_slot())
-#else
-extern "C" __thread PsHostRecoveryPoint* g_p_runtime_fault_recover;
-#endif
 
 namespace PsToggle {
 enum : std::uint64_t {

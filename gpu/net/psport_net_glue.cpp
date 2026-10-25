@@ -18,14 +18,7 @@
 #include <string>
 #include <vector>
 
-#ifdef _WIN32
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#else
-#include <unistd.h>
-#endif
+#include "../../src/platform/ps_host.h"
 
 #include "common/elf_info.h"
 #include "common/types.h"
@@ -312,11 +305,7 @@ void PushSystemServiceEvent(const OrbisSystemServiceEvent& event) {
 
 namespace Core::Debugger {
 s32 GetCurrentPid() {
-#ifdef _WIN32
-    return s32(GetCurrentProcessId());
-#else
-    return s32(getpid());
-#endif
+    return s32(ps_host_process_id());
 }
 } // namespace Core::Debugger
 

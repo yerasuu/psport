@@ -12,6 +12,7 @@
 #include <string>
 
 #include "psport_dlss_bridge.h" // Vulkan first: the NGX headers expect its types
+#include "psport_dlss_export.h"
 
 #include <nvsdk_ngx_helpers.h>
 #include <nvsdk_ngx_vk.h>
@@ -20,11 +21,7 @@
 namespace {
 
 constexpr char ProjectId[] = "42359704-c9f3-4806-9fb5-d469000fdb8a";
-#ifdef _WIN32
-constexpr char EngineVersion[] = "psport-windows";
-#else
-constexpr char EngineVersion[] = "psport-linux";
-#endif
+constexpr char EngineVersion[] = PSPORT_DLSS_ENGINE_VERSION;
 
 struct State {
     PsDlssLogFn log{};
@@ -253,12 +250,6 @@ const PsDlssApi api{PSPORT_DLSS_BRIDGE_ABI, Configure,      InstanceExtensions, 
                     Shutdown};
 
 } // namespace
-
-#ifdef _WIN32
-#define PSPORT_DLSS_EXPORT __declspec(dllexport)
-#else
-#define PSPORT_DLSS_EXPORT __attribute__((visibility("default")))
-#endif
 
 extern "C" PSPORT_DLSS_EXPORT const PsDlssApi* PsDlssGetApi() {
     return &api;

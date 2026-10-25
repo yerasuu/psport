@@ -10,6 +10,8 @@ EXPORTS
     g_runtime_quirks DATA
     ps_host_backtrace
     ps_host_dl_address
+    ps_host_dl_find_loaded
+    ps_host_dl_sym
     ps_host_env_set
     ps_host_fault_access
     ps_host_fault_install
@@ -18,6 +20,7 @@ EXPORTS
     ps_host_feature_probed
     ps_host_fs_close
     ps_host_list_mappings
+    ps_host_process_id
     ps_host_read_memory
     ps_host_recovery_jump
     ps_host_recovery_set
