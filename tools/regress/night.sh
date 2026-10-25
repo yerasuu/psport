@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # tools/regress/night.sh [options] BASE_CHECKOUT BRANCH_CHECKOUT GAMES_ROOT: the standing night order
 # for a branch against its base, each checkout with its own build in out/ (build.sh first):
+#   0. os-code: tools/check_os_code.py in report mode on the branch (OUT/os-code-report.txt, total on the
+#      console); it never stops the night;
 #   1. regress: every title of titles.txt but octopath0 on the branch with PS_CP_CENSUS=1, against
 #      the base's regress run (-r, or one run here first on the base checkout);
 #   2. perf: the branch's perf.txt with PS_FRAME_STATS=1, base and branch in turn, twice (base 1,
@@ -26,7 +28,7 @@ while getopts 'o:r:u:s:p:' opt; do
     esac
 done
 shift $((OPTIND - 1))
-(($# == 3)) || { sed -n '2,18p' "$0" | cut -c3-; exit 2; }
+(($# == 3)) || { sed -n '2,20p' "$0" | cut -c3-; exit 2; }
 base=$(realpath -- "$1") branch=$(realpath -- "$2") games=$(realpath -- "$3")
 for checkout in "$base" "$branch"; do
     [[ -x $checkout/out/psport && -x $checkout/tools/regress.sh ]] ||
@@ -36,6 +38,12 @@ printf -v stamp '%(%Y%m%d_%H%M%S)T' -1
 out=$(realpath -m -- "${out:-$branch/out/night/$stamp}")
 mkdir -p "$out"
 log() { printf '[%(%H:%M:%S)T] night: %s\n' -1 "$*" | tee -a "$out/night.log" >&2; }
+
+if (cd -- "$branch" && python3 tools/check_os_code.py) > "$out/os-code-report.txt" 2>&1; then
+    log "os-code: $(tail -n 1 "$out/os-code-report.txt")"
+else
+    log "os-code: check_os_code.py did not run, see os-code-report.txt"
+fi
 
 titles=$(awk '!/^#/ && NF && $1 != "octopath0" {print $1}' "$branch/tools/regress/titles.txt" | paste -sd,)
 shell_args=() seed_args=()
