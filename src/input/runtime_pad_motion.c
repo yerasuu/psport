@@ -21,11 +21,10 @@
 #include "gpu/psport_gpu.h"
 #include <math.h>
 #include <stdio.h>
-#include <SDL3/SDL.h>
 
-#define MOTION_KEY_HOLD SDL_SCANCODE_G
-#define MOTION_KEY_SHAKE SDL_SCANCODE_H
-#define MOTION_KEY_CENTER SDL_SCANCODE_T
+#define MOTION_KEY_HOLD PS_HOST_INPUT_KEY_G
+#define MOTION_KEY_SHAKE PS_HOST_INPUT_KEY_H
+#define MOTION_KEY_CENTER PS_HOST_INPUT_KEY_T
 #define TOUCH_WIDTH 1919.0f
 #define TOUCH_HEIGHT 942.0f
 #define AIM_LIMIT_RAD 0.61f /* 35 degrees each way: further, the game's aim leaves the picture */
@@ -117,9 +116,9 @@ static void swipe_from_sticks(PadData *p_pad_data, float dt) {
     s_motion.is_view_used=1;
 }
 
-void runtime_pad_motion_from_pad(PadData *p_pad_data, SDL_Gamepad *p_sdl_gamepad, float dt) {
-    const int is_view=SDL_GetGamepadButton(p_sdl_gamepad,SDL_GAMEPAD_BUTTON_BACK);
-    const int is_real_touchpad=SDL_GetGamepadButton(p_sdl_gamepad,SDL_GAMEPAD_BUTTON_TOUCHPAD);
+void runtime_pad_motion_from_pad(PadData *p_pad_data, PsHostPad *p_host_pad, float dt) {
+    const int is_view=ps_host_input_pad_button(p_host_pad,PS_HOST_PAD_BUTTON_BACK);
+    const int is_real_touchpad=ps_host_input_pad_button(p_host_pad,PS_HOST_PAD_BUTTON_TOUCHPAD);
     const int is_cross=(p_pad_data->buttons & BTN_CROSS)!=0, is_circle=(p_pad_data->buttons & BTN_CIRCLE)!=0;
     if (is_view) {
         if (!s_motion.is_view_held) { s_motion.is_view_held=1; s_motion.is_view_used=0; s_motion.was_cross_down=is_cross; }

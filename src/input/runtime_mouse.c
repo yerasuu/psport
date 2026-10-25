@@ -1,4 +1,4 @@
-/* libSceMouse on the host mouse. SDL events are pumped by the window thread (gpu/shim/window.cpp);
+/* libSceMouse on the host mouse. The host's events are pumped by the window thread (gpu/shim/window.cpp);
  * here they are only collected. Every game that opens a mouse port gets the host mouse: port index
  * 0 (or a merged port) reports it whenever the host has one, the other index never has a mouse.
  * A read returns one entry, the buttons held and the motion, wheel and tilt since the previous read
@@ -12,7 +12,6 @@
 #include <string.h>
 #include <pthread.h>
 #include <time.h>
-#include <SDL3/SDL.h>
 
 #define ERR_INVALID_ARG ((int32_t)0x80DF0001)
 #define ERR_INVALID_HANDLE ((int32_t)0x80DF0003)
@@ -64,10 +63,12 @@ static int32_t scaled(int32_t delta, float *p_carry) {
 
 static uint64_t now_us(void) { return ps_host_time_monotonic_ns()/1000u; }
 static MousePort *port_of(int32_t h_handle) { return h_handle>=1 && h_handle<=MOUSE_HANDLES && s_ports[h_handle-1].is_open ? &s_ports[h_handle-1] : NULL; }
-static uint32_t ps4_buttons(uint32_t sdl) {
-    return (sdl & SDL_BUTTON_LMASK ? BTN_PRIMARY : 0) | (sdl & SDL_BUTTON_RMASK ? BTN_SECONDARY : 0) |
-           (sdl & SDL_BUTTON_MMASK ? BTN_OPTIONAL : 0) | (sdl & SDL_BUTTON_X1MASK ? BTN_OPTIONAL2 : 0) |
-           (sdl & SDL_BUTTON_X2MASK ? BTN_OPTIONAL3 : 0);
+static uint32_t ps4_buttons(uint32_t host_mask) {
+    return (host_mask & PS_HOST_INPUT_MOUSE_MASK(PS_HOST_INPUT_MOUSE_LEFT) ? BTN_PRIMARY : 0) |
+           (host_mask & PS_HOST_INPUT_MOUSE_MASK(PS_HOST_INPUT_MOUSE_RIGHT) ? BTN_SECONDARY : 0) |
+           (host_mask & PS_HOST_INPUT_MOUSE_MASK(PS_HOST_INPUT_MOUSE_MIDDLE) ? BTN_OPTIONAL : 0) |
+           (host_mask & PS_HOST_INPUT_MOUSE_MASK(PS_HOST_INPUT_MOUSE_X1) ? BTN_OPTIONAL2 : 0) |
+           (host_mask & PS_HOST_INPUT_MOUSE_MASK(PS_HOST_INPUT_MOUSE_X2) ? BTN_OPTIONAL3 : 0);
 }
 /* The host's motion since the last read of any handle goes to every handle on the host mouse, so
  * two of them (one per user) each see all of it. Called under lock. */

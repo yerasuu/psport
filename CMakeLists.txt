@@ -53,9 +53,9 @@ target_sources(psport-atrac9 PRIVATE ${ps_atrac9_sources})
 set_target_properties(psport-atrac9 PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
 target_compile_options(psport-atrac9 PRIVATE -O2 -g -w)
 
-# The runtime: the Linux build's sources with src/platform/win32, and posix_compat.h for the C library
-# calls UCRT lacks. Its runtime*.c files in the order of their names, as the flat src/ listed them, so
-# that the link order and the binary's layout stay.
+# The runtime: the Linux build's sources with src/platform/win32 in place of src/platform/linux, and
+# posix_compat.h for the C library calls UCRT lacks. Its runtime*.c files in the order of their names,
+# as the flat src/ listed them, so that the link order and the binary's layout stay.
 file(GLOB ps_runtime_paths CONFIGURE_DEPENDS src/*/runtime*.c)
 set(ps_runtime_keys "")
 foreach(path IN LISTS ps_runtime_paths)
@@ -66,9 +66,10 @@ list(SORT ps_runtime_keys)
 list(TRANSFORM ps_runtime_keys REPLACE "^[^|]*\\|" "" OUTPUT_VARIABLE ps_runtime_sources)
 file(GLOB ps_loader_sources CONFIGURE_DEPENDS src/loader/loader*.c)
 file(GLOB ps_platform_sources CONFIGURE_DEPENDS src/platform/*.c)
+file(GLOB ps_common_sources CONFIGURE_DEPENDS src/platform/common/*.c)
 file(GLOB ps_win32_sources CONFIGURE_DEPENDS src/platform/win32/*.c)
 add_executable(psport src/main/main.c src/main/cli.c src/main/game_info.c src/main/bind.c src/main/signals.c
-    ${ps_loader_sources} ${ps_runtime_sources} ${ps_platform_sources} ${ps_win32_sources} src/main/vulkan_smoke.c)
+    ${ps_loader_sources} ${ps_runtime_sources} ${ps_platform_sources} ${ps_common_sources} ${ps_win32_sources} src/main/vulkan_smoke.c)
 set_target_properties(psport PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
 target_compile_options(psport PRIVATE -O2 -g -Wall -Wextra -Werror -pthread
     "SHELL:-include \"${CMAKE_CURRENT_SOURCE_DIR}/src/platform/win32/posix_compat.h\"" ${PS_VULKAN_SDL3_CFLAGS_OTHER})

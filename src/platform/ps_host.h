@@ -1,6 +1,7 @@
 /* The host platform layer (decision #540): what psport asks of the operating system, behind one
- * small C ABI with an implementation per OS in src/platform/<os>/, so that the runtime and the
- * loader name what they need instead of a Linux call. Included from C and C++ (libpsport-gpu.so
+ * small C ABI with an implementation per OS in src/platform/<os>/ (src/platform/common/ when it is
+ * the same on every OS that builds it), so that the runtime and the loader name what they need
+ * instead of a Linux call. Included from C and C++ (libpsport-gpu.so
  * reaches these through -rdynamic). Linux is implemented, Windows too (src/platform/win32/, not run
  * with a game yet); host_features.inc says what each OS has. */
 #ifndef PS_HOST_H
@@ -10,6 +11,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <time.h>
+#include "ps_host_input.h"
 #ifdef __cplusplus
 extern "C" {
 #endif

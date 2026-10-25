@@ -266,7 +266,8 @@ call report. `PS_DEBUG_KEEP` (20) run folders of the host are kept. Details:
 
 What psport asks of the operating system goes through one small C ABI, `ps_host_*`
 (`src/platform/ps_host.h`, decision #540), with an implementation per OS in `src/platform/<os>/`
-(and, when they come, `gpu/platform/<os>/` for C++-only parts). Linux is implemented; Windows
+(and, when they come, `gpu/platform/<os>/` for C++-only parts); what is the same on every OS that builds it
+lives once in `src/platform/common/` (decision #1009). Linux is implemented; Windows
 (`src/platform/win32/`, #614) has every group below, not run with a game yet. On Windows `build.sh` builds
 `psport.exe`, the GPU library (`libpsport-gpu.dll`, which imports the runtime's symbols from `psport.exe`
 through `gpu/port/psport_runtime.def`) and the capability check with MSYS2's CLANG64
@@ -292,6 +293,7 @@ moved behind the ABI area by area without changing what Linux does. So far:
 | tls | `ps_host_tls_set_base`, `ps_host_tls_base` (the guest's TCB, on GS), `ps_host_tls_init` (first thing in `main`), `ps_host_tls_tcb_offset` (the displacement the loader writes into the guest's thread pointer loads) | `arch_prctl(ARCH_SET_GS, ARCH_GET_GS)`, no reservation, displacement 0 (`linux/host_thread.c`) |
 | proc | `ps_host_close_from`, `ps_host_exec`, `ps_host_exec_self`, `ps_host_env_set`, `ps_host_remove_tree_at_exit` (the mod view's cleaner) | `close_range`, `execvp`, `execv("/proc/self/exe")` (`linux/host_process.c`), `setenv` (`linux/host_system.c`), `fork`, `setsid` and `nftw` |
 | dl | `ps_host_dl_open`, `ps_host_dl_sym`, `ps_host_dl_address` (`PsHostCodeAddress`: file, symbol, their addresses) | `dlopen(RTLD_NOW \| RTLD_LOCAL)`, `dlsym`, `dladdr` (`linux/host_library.c`) |
+| input | `ps_host_input.h`: `ps_host_input_pad_start`, `_pad_list`, `_free`, `_pad_guid`, `_pad_name_for_id`, `_pad_open`, `_pad_close`, `_pad_is_connected`, `_pad_id`, `_pad_name`, `_pad_type`, `_pad_button`, `_pad_axis`, `_pad_touchpads`, `_pad_touchpad_fingers`, `_pad_touchpad_finger`, `_pad_rumble`, `_pad_set_light_bar`, `_pad_has_sensor`, `_pad_enable_sensor`, `_pad_read_sensor`, `_pad_button_from_name`, `_pad_button_name`, `_pad_button_label`; `ps_host_input_is_window_ready`, `_keyboard_state`, `_key_from_name`, `_key_name` (keys as USB HID usages, `PS_HOST_INPUT_MOD_*`), `_mouse_buttons`; `ps_host_input_watch` (`PsHostInputEvent`, on the window thread), `ps_host_input_error` | SDL3, one shared backend for Linux and Windows (`common/host_input.c`) |
 
 On Windows: `QueryPerformanceCounter`, `GetSystemTimePreciseAsFileTime`, `GetThreadTimes` and `GetProcessTimes`,
 sleeps on a per-thread high-resolution waitable timer (`win32/host_time.c`); `BCryptGenRandom` and

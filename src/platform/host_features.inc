@@ -163,18 +163,43 @@ FEATURE(audio, io, "audio output")
 FEATURE_HOST(audio, LINUX, IMPLEMENTED, "SDL3 (runtime_audio.c); PS_AUDIO=none runs without a device", "#540")
 FEATURE_HOST(audio, WIN32, EXPERIMENTAL, "SDL3 as on Linux (runtime_audio.c), not run yet", "#614")
 
-FEATURE(input, io, "gamepads, keyboard and mouse")
-FEATURE_HOST(input, LINUX, IMPLEMENTED, "SDL3 (runtime_pad.c, runtime_keyboard.c, runtime_mouse.c)", "#540")
-FEATURE_HOST(input, WIN32, EXPERIMENTAL, "SDL3 as on Linux (runtime_pad.c, runtime_keyboard.c, runtime_mouse.c), not run yet",
-             "#614")
+FEATURE(input_pad, io, "gamepads as libScePad's pad: buttons, sticks, triggers, touchpad, rumble and light bar")
+FEATURE_HOST(input_pad, LINUX, IMPLEMENTED,
+             "SDL3, a shared backend for Linux and Windows (src/platform/common/host_input.c; libScePad in "
+             "runtime_pad.c)",
+             "#1009")
+FEATURE_HOST(input_pad, WIN32, EXPERIMENTAL,
+             "SDL3, the backend shared with Linux (src/platform/common/host_input.c), not run with a game yet",
+             "#1009")
 
-FEATURE(input_sensors, io, "the gamepad's motion sensors (gyroscope and accelerometer) as the DualShock 4's orientation, "
-                           "acceleration and angular velocity")
-FEATURE_HOST(input_sensors, LINUX, IMPLEMENTED,
-             "SDL3 gamepad sensors (runtime_pad_sensors.c); pads without them get the motion emulation or rest",
-             "#550")
-FEATURE_HOST(input_sensors, WIN32, EXPERIMENTAL, "SDL3 gamepad sensors as on Linux (runtime_pad_sensors.c), not run yet",
-             "#614")
+FEATURE(input_pad_motion, io, "the gamepad's motion sensors (gyroscope and accelerometer) as the DualShock 4's "
+                              "orientation, acceleration and angular velocity")
+FEATURE_HOST(input_pad_motion, LINUX, IMPLEMENTED,
+             "SDL3 gamepad sensors, a shared backend for Linux and Windows (src/platform/common/host_input.c; "
+             "runtime_pad_sensors.c); pads without them get the motion emulation or rest",
+             "#550, #1009")
+FEATURE_HOST(input_pad_motion, WIN32, EXPERIMENTAL,
+             "SDL3 gamepad sensors, the backend shared with Linux (src/platform/common/host_input.c), not run with "
+             "a game yet",
+             "#1009")
+
+FEATURE(input_keyboard, io, "the keyboard: its state for the pad's bindings, its keys and modifiers for libSceImeKeyboard")
+FEATURE_HOST(input_keyboard, LINUX, IMPLEMENTED,
+             "SDL3, a shared backend for Linux and Windows (src/platform/common/host_input.c; runtime_pad.c, "
+             "runtime_keyboard.c)",
+             "#1009")
+FEATURE_HOST(input_keyboard, WIN32, EXPERIMENTAL,
+             "SDL3, the backend shared with Linux (src/platform/common/host_input.c), not run with a game yet",
+             "#1009")
+
+FEATURE(input_mouse, io, "the mouse's buttons for the pad's bindings and libSceMouse")
+FEATURE_HOST(input_mouse, LINUX, IMPLEMENTED,
+             "SDL3, a shared backend for Linux and Windows (src/platform/common/host_input.c; runtime_pad.c, "
+             "runtime_mouse.c)",
+             "#1009")
+FEATURE_HOST(input_mouse, WIN32, EXPERIMENTAL,
+             "SDL3, the backend shared with Linux (src/platform/common/host_input.c), not run with a game yet",
+             "#1009")
 
 FEATURE(port_menu_binding, io, "psport.ini's key.menu and pad.menu: a key, gamepad button or two-button chord that opens "
                                "the port's menu besides Insert and L3+R3")

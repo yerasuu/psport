@@ -1,5 +1,5 @@
-/* libScePad on SDL3 gamepads and the keyboard. SDL events are pumped by the window thread
- * (gpu/shim/window.cpp); here state is only sampled.
+/* libScePad on the host's gamepads and keyboard (ps_host_input.h). The host's events are pumped by
+ * the window thread (gpu/shim/window.cpp); here state is only sampled.
  *
  * Keyboard layout (also with a gamepad connected: both drive the game; not while the game has
  * libSceImeKeyboard open, runtime_keyboard.c, when the keys are the game's), unless the game's
@@ -14,13 +14,13 @@
  *   A binding may be a chord, "Left Shift+Mouse Left": while its modifier is held, the second
  *   key's plain bindings do not count (Shift+Left is R2 alone, not R2 and R1).
  *
- * Stick neutral: SDL exposes no way to read a pad's calibration and some clones report a
+ * Stick neutral: the host exposes no way to read a pad's calibration and some clones report a
  * biased neutral (a Switch-style pad was seen returning both sticks at a constant ~ +/-16380).
- * The neutral of each axis is taken from a quiet window after the pad opens (SDL returns zero
+ * The neutral of each axis is taken from a quiet window after the pad opens (the host returns zero
  * until the first report arrives, so those samples are skipped) and subtracted when all four axes
  * are biased; otherwise (a genuine pad, perhaps opened with a stick held) the neutral is 0.
  *
- * Travel: such a clone also uses only part of SDL's -32768..32767 span (its neutral sits in the
+ * Travel: such a clone also uses only part of the host's -32768..32767 span (its neutral sits in the
  * middle of one half), so reading the axis as -128..127 would reach only half deflection and a
  * full push would never run. Each axis is instead scaled by its own travel: a biased axis starts
  * from its neutral's magnitude and is refined by the largest push seen per direction, so both
@@ -40,9 +40,6 @@
 #include <string.h>
 #include <pthread.h>
 #include <time.h>
-#include <SDL3/SDL.h>
-#include <sys/stat.h>
-#include <unistd.h>
 
 #define ERR_INVALID_ARG ((int32_t)0x80920001)
 #define ERR_INVALID_HANDLE ((int32_t)0x80920003)
@@ -74,9 +71,9 @@ _Static_assert(sizeof(DeviceClassData)==24,"ScePadDeviceClassData layout");
 
 static pthread_mutex_t s_lock=PTHREAD_MUTEX_INITIALIZER;
 static int s_is_initialized, s_is_opened;
-int g_runtime_pad_sdl_ready;
-static SDL_Gamepad *s_p_gamepad;
-static SDL_JoystickID s_latch_gamepad_id; /* s_p_gamepad's, for the window thread's press latches */
+int g_runtime_pad_host_ready;
+static PsHostPad *s_p_gamepad;
+static PsHostPadId s_h_latch_gamepad; /* s_p_gamepad's, for the window thread's press latches */
 static size_t s_c_reads;
 static uint8_t s_c_connecteds;
 
@@ -144,7 +141,7 @@ static void cal_reset(void) {
     else { s_cal_have_center=0; memset(s_cal_center,0,sizeof s_cal_center); memset(s_cal_base,0,sizeof s_cal_base); }
     if (s_cal_have_center) cal_set_base();
 }
-/* The value each axis holds while the sticks are untouched (SDL's pre-report zeros are skipped);
+/* The value each axis holds while the sticks are untouched (the host's pre-report zeros are skipped);
  * once it is known, the largest push seen per direction on a biased axis (see cal_travel). */
 static void cal_sample(const int16_t raw[4]) {
     if (s_cal_have_center) {
@@ -179,7 +176,7 @@ static void cal_sample(const int16_t raw[4]) {
 }
 /* One stick axis in the PS4 0..255 scale. The neutral is subtracted and the axis' own travel
  * (cal_travel) is read as -128..127, so a full push reaches full deflection in both directions
- * whatever part of SDL's range the pad uses; the inner/outer dead zone (PS_PAD_DEADZONE /
+ * whatever part of the host's range the pad uses; the inner/outer dead zone (PS_PAD_DEADZONE /
  * PS_PAD_DEADZONE_OUTER) then maps that travel to the full deflection, as shadPS4 does. */
 static uint8_t stick_axis(int axis,int16_t raw) {
     const int d=raw-s_cal_center[axis];
@@ -207,29 +204,29 @@ static void touch_click(PadData *p_pad_data, int right) {
     if (p_pad_data->touch_count<2) p_pad_data->touches[p_pad_data->touch_count++]=(PadTouch){.x=x,.y=471,.id=0};
 }
 
-/* PS_GAMEPAD (the launcher's controller choice): its SDL GUID, or part of its name. Issue #15:
+/* PS_GAMEPAD (the launcher's controller choice): its GUID, or part of its name. Issue #15:
  * wheels and other controllers connected for good came first. */
 static const char *preferred_gamepad(void) {
     static const char *s_sz_want; static int s_read;
     if (!s_read) { s_sz_want=runtime_env("PS_GAMEPAD",""); if (!*s_sz_want) s_sz_want=NULL; s_read=1; }
     return s_sz_want;
 }
-static int is_preferred(SDL_JoystickID id, const char *sz_want) {
+static int is_preferred(PsHostPadId h_pad, const char *sz_want) {
     char sz_guid[33];
-    SDL_GUIDToString(SDL_GetGamepadGUIDForID(id),sz_guid,sizeof sz_guid);
-    const char *sz_name=SDL_GetGamepadNameForID(id);
+    ps_host_input_pad_guid(h_pad,sz_guid,sizeof sz_guid);
+    const char *sz_name=ps_host_input_pad_name_for_id(h_pad);
     return !strcasecmp(sz_guid,sz_want) || (sz_name && strcasestr(sz_name,sz_want));
 }
 /* The chosen gamepad, else the first while it is not connected (checked again every second, it
  * is taken as soon as it connects); called under lock. PS_PAD_HOST=0 (scripted runs) opens none. */
-static SDL_Gamepad *current_gamepad(void) {
+static PsHostPad *current_gamepad(void) {
     static int s_is_on_preferred; static uint64_t s_last_scan;
-    if (!g_runtime_pad_sdl_ready) {
-        g_runtime_pad_sdl_ready = !runtime_env_flag("PS_PAD_HOST",1) ? -1 : SDL_WasInit(SDL_INIT_GAMEPAD) ? 1 : SDL_InitSubSystem(SDL_INIT_GAMEPAD) ? 1 : -1;
+    if (!g_runtime_pad_host_ready) {
+        g_runtime_pad_host_ready = !runtime_env_flag("PS_PAD_HOST",1) ? -1 : !ps_host_input_pad_start() ? 1 : -1;
     }
-    if (g_runtime_pad_sdl_ready<0) return NULL;
-    if (s_p_gamepad && !SDL_GamepadConnected(s_p_gamepad)) {
-        SDL_CloseGamepad(s_p_gamepad);
+    if (g_runtime_pad_host_ready<0) return NULL;
+    if (s_p_gamepad && !ps_host_input_pad_is_connected(s_p_gamepad)) {
+        ps_host_input_pad_close(s_p_gamepad);
         s_p_gamepad=NULL;
         runtime_pad_sensors_open(NULL);
     }
@@ -238,24 +235,24 @@ static SDL_Gamepad *current_gamepad(void) {
     if (!s_p_gamepad || (sz_want && !s_is_on_preferred && now-s_last_scan>1000000)) {
         s_last_scan=now;
         int c_gamepads=0, pick=-1;
-        SDL_JoystickID *p_ids=SDL_GetGamepads(&c_gamepads);
+        PsHostPadId *p_ids=ps_host_input_pad_list(&c_gamepads);
         for (int i=0; sz_want && p_ids && i<c_gamepads && pick<0; ++i) if (is_preferred(p_ids[i],sz_want)) pick=i;
         if (pick<0 && !s_p_gamepad && p_ids && c_gamepads>0) pick=0;
-        if (pick>=0 && (!s_p_gamepad || SDL_GetGamepadID(s_p_gamepad)!=p_ids[pick])) {
-            if (s_p_gamepad) SDL_CloseGamepad(s_p_gamepad);
-            s_p_gamepad=SDL_OpenGamepad(p_ids[pick]);
+        if (pick>=0 && (!s_p_gamepad || ps_host_input_pad_id(s_p_gamepad)!=p_ids[pick])) {
+            if (s_p_gamepad) ps_host_input_pad_close(s_p_gamepad);
+            s_p_gamepad=ps_host_input_pad_open(p_ids[pick]);
             cal_reset(); /* a new pad has its own neutral */
             s_is_on_preferred=sz_want && s_p_gamepad && is_preferred(p_ids[pick],sz_want);
             if (s_p_gamepad) {
                 ++s_c_connecteds;
-                printf("Runtime: gamepad connected: %s%s\n",SDL_GetGamepadName(s_p_gamepad),
+                printf("Runtime: gamepad connected: %s%s\n",ps_host_input_pad_name(s_p_gamepad),
                        !sz_want ? "" : s_is_on_preferred ? " (the chosen one)" : " (the chosen one is not connected)");
             }
             runtime_pad_sensors_open(s_p_gamepad);
         }
-        SDL_free(p_ids);
+        ps_host_input_free(p_ids);
     }
-    __atomic_store_n(&s_latch_gamepad_id,s_p_gamepad ? SDL_GetGamepadID(s_p_gamepad) : 0,__ATOMIC_RELAXED);
+    __atomic_store_n(&s_h_latch_gamepad,s_p_gamepad ? ps_host_input_pad_id(s_p_gamepad) : 0,__ATOMIC_RELAXED);
     return s_p_gamepad;
 }
 /* psport (frame stats): the game's libc heap, read every 5 s from a game thread (it reads the pad)
@@ -283,10 +280,10 @@ static void report_guest_heap(void) {
     }
 }
 /* Controls: what each PS4 input is bound to. Defaults below, then the title's own lines; psport.ini
- * (PS_CONFIG) lines key.<input>=<SDL key names> and pad.<input>=<SDL gamepad button names>,
+ * (PS_CONFIG) lines key.<input>=<key names> and pad.<input>=<gamepad button names> (ps_host_input.h),
  * comma-separated, replace an input's binding (empty: unbound); a key may be "<modifier>+<key>".
  * Inputs: the buttons (cross ... right, touchpad = a left-side click, touchpad_right), and on the
- * keyboard the sticks: move_* (left), look_* (right). Gamepad names as SDL's: a b x y back start leftstick rightstick leftshoulder
+ * keyboard the sticks: move_* (left), look_* (right). Gamepad names as the host's: a b x y back start leftstick rightstick leftshoulder
  * rightshoulder dpup dpdown dpleft dpright touchpad misc1 paddle1-4, plus lefttrigger and
  * righttrigger. The keyboard works next to a gamepad (the Steam Deck always has one): its buttons
  * add to the gamepad's, a held move/look key moves the stick to its edge over a short ramp (key_stick).
@@ -316,15 +313,15 @@ static const uint32_t s_input_buttons[IN_COUNT]={
 };
 #define MAX_BIND 4
 /* Mouse buttons and the wheel in key.<input> lines ("Mouse Left", "Wheel Down", ...): codes past
- * SDL's scancodes. They count only while the window holds the mouse for looking (gpu/shim
+ * the host's keys. They count only while the window holds the mouse for looking (gpu/shim
  * window.cpp): a click that takes the mouse is not an attack. */
-enum { MOUSE_KEY=SDL_SCANCODE_COUNT, MOUSE_WHEEL_UP=MOUSE_KEY+SDL_BUTTON_X2+1, MOUSE_WHEEL_DOWN };
+enum { MOUSE_KEY=PS_HOST_INPUT_KEY_COUNT, MOUSE_WHEEL_UP=MOUSE_KEY+PS_HOST_INPUT_MOUSE_X2+1, MOUSE_WHEEL_DOWN };
 static const struct { const char *sz_name; int code; } s_mouse_keys[]={
-    {"Mouse Left",MOUSE_KEY+SDL_BUTTON_LEFT}, {"Mouse Right",MOUSE_KEY+SDL_BUTTON_RIGHT},
-    {"Mouse Middle",MOUSE_KEY+SDL_BUTTON_MIDDLE}, {"Mouse X1",MOUSE_KEY+SDL_BUTTON_X1},
-    {"Mouse X2",MOUSE_KEY+SDL_BUTTON_X2}, {"Wheel Up",MOUSE_WHEEL_UP}, {"Wheel Down",MOUSE_WHEEL_DOWN},
+    {"Mouse Left",MOUSE_KEY+PS_HOST_INPUT_MOUSE_LEFT}, {"Mouse Right",MOUSE_KEY+PS_HOST_INPUT_MOUSE_RIGHT},
+    {"Mouse Middle",MOUSE_KEY+PS_HOST_INPUT_MOUSE_MIDDLE}, {"Mouse X1",MOUSE_KEY+PS_HOST_INPUT_MOUSE_X1},
+    {"Mouse X2",MOUSE_KEY+PS_HOST_INPUT_MOUSE_X2}, {"Wheel Up",MOUSE_WHEEL_UP}, {"Wheel Down",MOUSE_WHEEL_DOWN},
 };
-enum { PAD_LEFT_TRIGGER=SDL_GAMEPAD_BUTTON_COUNT, PAD_RIGHT_TRIGGER }; /* triggers as buttons */
+enum { PAD_LEFT_TRIGGER=PS_HOST_PAD_BUTTON_COUNT, PAD_RIGHT_TRIGGER }; /* triggers as buttons */
 /* keys[i] needs mods[i] held too when mods[i] is not -1 (a chord: "Left Shift+Mouse Left"); pad[i]
  * likewise needs pad_mods[i] (pad.menu only). */
 typedef struct { int c_keys, c_pads; int keys[MAX_BIND]; int mods[MAX_BIND]; int pad[MAX_BIND]; int pad_mods[MAX_BIND]; } Binding;
@@ -333,30 +330,31 @@ static int s_is_bindings_ready, s_is_menu_held;
 
 static void bind_defaults(void) {
     static const struct { int input; int key; } s_keys[]={
-        {IN_CROSS,SDL_SCANCODE_SPACE}, {IN_CIRCLE,SDL_SCANCODE_LSHIFT}, {IN_SQUARE,SDL_SCANCODE_E},
-        {IN_TRIANGLE,SDL_SCANCODE_Q}, {IN_L1,SDL_SCANCODE_1}, {IN_R1,SDL_SCANCODE_3},
-        {IN_L2,SDL_SCANCODE_R}, {IN_R2,SDL_SCANCODE_F}, {IN_L3,SDL_SCANCODE_Z}, {IN_R3,SDL_SCANCODE_C},
-        {IN_OPTIONS,SDL_SCANCODE_RETURN}, {IN_TOUCHPAD,SDL_SCANCODE_TAB},
-        {IN_TOUCHPAD_RIGHT,SDL_SCANCODE_BACKSPACE},
-        {IN_UP,SDL_SCANCODE_I}, {IN_DOWN,SDL_SCANCODE_K}, {IN_LEFT,SDL_SCANCODE_J}, {IN_RIGHT,SDL_SCANCODE_L},
-        {IN_MOVE_UP,SDL_SCANCODE_W}, {IN_MOVE_DOWN,SDL_SCANCODE_S}, {IN_MOVE_LEFT,SDL_SCANCODE_A},
-        {IN_MOVE_RIGHT,SDL_SCANCODE_D}, {IN_LOOK_UP,SDL_SCANCODE_UP}, {IN_LOOK_DOWN,SDL_SCANCODE_DOWN},
-        {IN_LOOK_LEFT,SDL_SCANCODE_LEFT}, {IN_LOOK_RIGHT,SDL_SCANCODE_RIGHT},
-        {IN_R1,MOUSE_KEY+SDL_BUTTON_LEFT}, {IN_L2,MOUSE_KEY+SDL_BUTTON_RIGHT},
-        {IN_R3,MOUSE_KEY+SDL_BUTTON_MIDDLE}, {IN_R2,MOUSE_KEY+SDL_BUTTON_X1}, {IN_L1,MOUSE_KEY+SDL_BUTTON_X2},
-        {IN_UP,MOUSE_WHEEL_UP}, {IN_DOWN,MOUSE_WHEEL_DOWN}, {IN_SKIP_MOVIE,SDL_SCANCODE_ESCAPE},
+        {IN_CROSS,PS_HOST_INPUT_KEY_SPACE}, {IN_CIRCLE,PS_HOST_INPUT_KEY_LSHIFT}, {IN_SQUARE,PS_HOST_INPUT_KEY_E},
+        {IN_TRIANGLE,PS_HOST_INPUT_KEY_Q}, {IN_L1,PS_HOST_INPUT_KEY_1}, {IN_R1,PS_HOST_INPUT_KEY_3},
+        {IN_L2,PS_HOST_INPUT_KEY_R}, {IN_R2,PS_HOST_INPUT_KEY_F}, {IN_L3,PS_HOST_INPUT_KEY_Z}, {IN_R3,PS_HOST_INPUT_KEY_C},
+        {IN_OPTIONS,PS_HOST_INPUT_KEY_RETURN}, {IN_TOUCHPAD,PS_HOST_INPUT_KEY_TAB},
+        {IN_TOUCHPAD_RIGHT,PS_HOST_INPUT_KEY_BACKSPACE},
+        {IN_UP,PS_HOST_INPUT_KEY_I}, {IN_DOWN,PS_HOST_INPUT_KEY_K}, {IN_LEFT,PS_HOST_INPUT_KEY_J}, {IN_RIGHT,PS_HOST_INPUT_KEY_L},
+        {IN_MOVE_UP,PS_HOST_INPUT_KEY_W}, {IN_MOVE_DOWN,PS_HOST_INPUT_KEY_S}, {IN_MOVE_LEFT,PS_HOST_INPUT_KEY_A},
+        {IN_MOVE_RIGHT,PS_HOST_INPUT_KEY_D}, {IN_LOOK_UP,PS_HOST_INPUT_KEY_UP}, {IN_LOOK_DOWN,PS_HOST_INPUT_KEY_DOWN},
+        {IN_LOOK_LEFT,PS_HOST_INPUT_KEY_LEFT}, {IN_LOOK_RIGHT,PS_HOST_INPUT_KEY_RIGHT},
+        {IN_R1,MOUSE_KEY+PS_HOST_INPUT_MOUSE_LEFT}, {IN_L2,MOUSE_KEY+PS_HOST_INPUT_MOUSE_RIGHT},
+        {IN_R3,MOUSE_KEY+PS_HOST_INPUT_MOUSE_MIDDLE}, {IN_R2,MOUSE_KEY+PS_HOST_INPUT_MOUSE_X1},
+        {IN_L1,MOUSE_KEY+PS_HOST_INPUT_MOUSE_X2},
+        {IN_UP,MOUSE_WHEEL_UP}, {IN_DOWN,MOUSE_WHEEL_DOWN}, {IN_SKIP_MOVIE,PS_HOST_INPUT_KEY_ESCAPE},
     };
     static const struct { int input, button; } s_pads[]={
-        {IN_CROSS,SDL_GAMEPAD_BUTTON_SOUTH}, {IN_CIRCLE,SDL_GAMEPAD_BUTTON_EAST},
-        {IN_SQUARE,SDL_GAMEPAD_BUTTON_WEST}, {IN_TRIANGLE,SDL_GAMEPAD_BUTTON_NORTH},
-        {IN_L1,SDL_GAMEPAD_BUTTON_LEFT_SHOULDER}, {IN_R1,SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER},
+        {IN_CROSS,PS_HOST_PAD_BUTTON_SOUTH}, {IN_CIRCLE,PS_HOST_PAD_BUTTON_EAST},
+        {IN_SQUARE,PS_HOST_PAD_BUTTON_WEST}, {IN_TRIANGLE,PS_HOST_PAD_BUTTON_NORTH},
+        {IN_L1,PS_HOST_PAD_BUTTON_LEFT_SHOULDER}, {IN_R1,PS_HOST_PAD_BUTTON_RIGHT_SHOULDER},
         {IN_L2,PAD_LEFT_TRIGGER}, {IN_R2,PAD_RIGHT_TRIGGER},
-        {IN_L3,SDL_GAMEPAD_BUTTON_LEFT_STICK}, {IN_R3,SDL_GAMEPAD_BUTTON_RIGHT_STICK},
-        {IN_OPTIONS,SDL_GAMEPAD_BUTTON_START},
-        {IN_TOUCHPAD,SDL_GAMEPAD_BUTTON_BACK}, {IN_TOUCHPAD,SDL_GAMEPAD_BUTTON_TOUCHPAD},
-        {IN_UP,SDL_GAMEPAD_BUTTON_DPAD_UP}, {IN_DOWN,SDL_GAMEPAD_BUTTON_DPAD_DOWN},
-        {IN_LEFT,SDL_GAMEPAD_BUTTON_DPAD_LEFT}, {IN_RIGHT,SDL_GAMEPAD_BUTTON_DPAD_RIGHT},
-        {IN_SKIP_MOVIE,SDL_GAMEPAD_BUTTON_MISC1},
+        {IN_L3,PS_HOST_PAD_BUTTON_LEFT_STICK}, {IN_R3,PS_HOST_PAD_BUTTON_RIGHT_STICK},
+        {IN_OPTIONS,PS_HOST_PAD_BUTTON_START},
+        {IN_TOUCHPAD,PS_HOST_PAD_BUTTON_BACK}, {IN_TOUCHPAD,PS_HOST_PAD_BUTTON_TOUCHPAD},
+        {IN_UP,PS_HOST_PAD_BUTTON_DPAD_UP}, {IN_DOWN,PS_HOST_PAD_BUTTON_DPAD_DOWN},
+        {IN_LEFT,PS_HOST_PAD_BUTTON_DPAD_LEFT}, {IN_RIGHT,PS_HOST_PAD_BUTTON_DPAD_RIGHT},
+        {IN_SKIP_MOVIE,PS_HOST_PAD_BUTTON_MISC1},
     };
     memset(s_bindings,0,sizeof s_bindings);
     for (size_t i=0;i<sizeof(s_keys)/sizeof(*s_keys);++i) {
@@ -369,16 +367,15 @@ static void bind_defaults(void) {
     }
 }
 static int pad_button_from_name(const char *sz_name) {
-    if (!SDL_strcasecmp(sz_name,"lefttrigger")) return PAD_LEFT_TRIGGER;
-    if (!SDL_strcasecmp(sz_name,"righttrigger")) return PAD_RIGHT_TRIGGER;
-    const SDL_GamepadButton b=SDL_GetGamepadButtonFromString(sz_name);
-    return b==SDL_GAMEPAD_BUTTON_INVALID ? -1 : (int)b;
+    if (!strcasecmp(sz_name,"lefttrigger")) return PAD_LEFT_TRIGGER;
+    if (!strcasecmp(sz_name,"righttrigger")) return PAD_RIGHT_TRIGGER;
+    const PsHostPadButton b=ps_host_input_pad_button_from_name(sz_name);
+    return b==PS_HOST_PAD_BUTTON_INVALID ? -1 : (int)b;
 }
 static int key_from_name(const char *sz_name) {
     for (size_t i=0;i<sizeof(s_mouse_keys)/sizeof(*s_mouse_keys);++i)
-        if (!SDL_strcasecmp(sz_name,s_mouse_keys[i].sz_name)) return s_mouse_keys[i].code;
-    const SDL_Scancode s=SDL_GetScancodeFromName(sz_name);
-    return s==SDL_SCANCODE_UNKNOWN ? -1 : (int)s;
+        if (!strcasecmp(sz_name,s_mouse_keys[i].sz_name)) return s_mouse_keys[i].code;
+    return ps_host_input_key_from_name(sz_name);
 }
 /* Mouse look (psport.ini): mouse_look=0 leaves the mouse alone; mouse_sensitivity (default 1:
  * ~1000 pixels/s turn the camera at full speed), mouse_invert_y=1. The stick's tuning, which a
@@ -492,12 +489,12 @@ static int apply_title_controls(const char *sz_controls) {
 static const char *key_name(int code) {
     for (size_t i=0;i<sizeof(s_mouse_keys)/sizeof(*s_mouse_keys);++i)
         if (code==s_mouse_keys[i].code) return s_mouse_keys[i].sz_name;
-    return SDL_GetScancodeName((SDL_Scancode)code);
+    return ps_host_input_key_name(code);
 }
 static const char *pad_button_name(int button) {
     if (button==PAD_LEFT_TRIGGER) return "lefttrigger";
     if (button==PAD_RIGHT_TRIGGER) return "righttrigger";
-    return SDL_GetGamepadStringForButton((SDL_GamepadButton)button);
+    return ps_host_input_pad_button_name((PsHostPadButton)button);
 }
 static void reset_look(void) {
     s_look_gain=1.0f; s_look_tau_us=LOOK_TAU_US; s_look_deadzone=LOOK_DEADZONE;
@@ -537,9 +534,9 @@ static int s_is_back_touchpad_only, s_is_touch_combo, s_is_combo_back_down;
 static int is_back_touchpad_only(void) {
     for (int input=0;input<IN_COUNT;++input)
         for (int i=0;input!=IN_TOUCHPAD && i<s_bindings[input].c_pads;++i)
-            if (s_bindings[input].pad[i]==SDL_GAMEPAD_BUTTON_BACK || s_bindings[input].pad_mods[i]==SDL_GAMEPAD_BUTTON_BACK) return 0;
+            if (s_bindings[input].pad[i]==PS_HOST_PAD_BUTTON_BACK || s_bindings[input].pad_mods[i]==PS_HOST_PAD_BUTTON_BACK) return 0;
     for (int i=0;i<s_bindings[IN_TOUCHPAD].c_pads;++i)
-        if (s_bindings[IN_TOUCHPAD].pad[i]==SDL_GAMEPAD_BUTTON_BACK && s_bindings[IN_TOUCHPAD].pad_mods[i]<0) return 1;
+        if (s_bindings[IN_TOUCHPAD].pad[i]==PS_HOST_PAD_BUTTON_BACK && s_bindings[IN_TOUCHPAD].pad_mods[i]<0) return 1;
     return 0;
 }
 /* key.<input>= / pad.<input>= lines of the settings file. */
@@ -592,7 +589,7 @@ static void load_bindings(void) {
 }
 /* The mouse while the window holds it: buttons, and the wheel as short presses (one per notch,
  * each held and released for a few frames so the game sees it). */
-static SDL_MouseButtonFlags s_mouse_buttons;
+static uint32_t s_mouse_buttons;
 static int s_wheel_pending[2], s_wheel_phase[2]; /* [up, down]; phase: 0 idle, else press/release */
 static uint64_t s_wheel_until[2];
 static void mouse_wheel_step(uint64_t now, int up, int is_down) {
@@ -608,11 +605,11 @@ static void mouse_wheel_step(uint64_t now, int up, int is_down) {
 static int mouse_key_down(int code) {
     if (code==MOUSE_WHEEL_UP) return s_wheel_phase[0]==1;
     if (code==MOUSE_WHEEL_DOWN) return s_wheel_phase[1]==1;
-    return (s_mouse_buttons & SDL_BUTTON_MASK(code-MOUSE_KEY))!=0;
+    return (s_mouse_buttons & PS_HOST_INPUT_MOUSE_MASK(code-MOUSE_KEY))!=0;
 }
 /* Short presses: a key, mouse button or gamepad button pressed and let go between two reads never
- * shows in SDL's state at the read, so a light tap did not reach the game. Each press is latched
- * when the window thread receives its event (an SDL event watch), with its own time, and the next
+ * shows in the host's state at the read, so a light tap did not reach the game. Each press is latched
+ * when the window thread receives its event (ps_host_input_watch), with its own time, and the next
  * read sees it held once; scePadInit clears the latches. A press not read within PAD_LATCH_US is
  * dropped, so it never shows later as a new one, and a newer press does not keep an older one
  * alive. A trigger keeps the furthest it was pulled. Mouse buttons are latched only while the
@@ -620,70 +617,68 @@ static int mouse_key_down(int code) {
 #define PAD_LATCH_US 100000u
 #define PAD_TRIGGER_PRESSED 30
 static uint64_t s_key_latch_us[MOUSE_WHEEL_UP]; /* the scancodes, then the mouse buttons */
-static uint64_t s_button_latch_us[SDL_GAMEPAD_BUTTON_COUNT];
+static uint64_t s_button_latch_us[PS_HOST_PAD_BUTTON_COUNT];
 static uint64_t s_trigger_latch[2];             /* (time << 8) | the analog value */
 static int s_is_latch_watched;
-static bool s_is_key_latched[MOUSE_WHEEL_UP], s_is_button_latched[SDL_GAMEPAD_BUTTON_COUNT];
+static bool s_is_key_latched[MOUSE_WHEEL_UP], s_is_button_latched[PS_HOST_PAD_BUTTON_COUNT];
 static int s_trigger_latched[2];
 static size_t s_c_short_presses, s_c_expired_presses;
 
 static void latch_press(uint64_t *p_at_us) { __atomic_store_n(p_at_us,now_us(),__ATOMIC_RELAXED); }
-static bool SDLCALL latch_event(void *p_user, SDL_Event *p_event) {
-    (void)p_user;
+static void latch_event(const PsHostInputEvent *p_event) {
     /* The watch sees an event before the overlay does: a press that closes the menu is its own. */
-    if (psport_gpu_overlay_captures_input()) return true;
-    const SDL_JoystickID id_gamepad=__atomic_load_n(&s_latch_gamepad_id,__ATOMIC_RELAXED);
-    if (p_event->type==SDL_EVENT_KEY_DOWN && !p_event->key.repeat && (int)p_event->key.scancode<SDL_SCANCODE_COUNT) {
-        latch_press(&s_key_latch_us[p_event->key.scancode]);
-    } else if (p_event->type==SDL_EVENT_MOUSE_BUTTON_DOWN && p_event->button.button<=SDL_BUTTON_X2 &&
+    if (psport_gpu_overlay_captures_input()) return;
+    const PsHostPadId h_gamepad=__atomic_load_n(&s_h_latch_gamepad,__ATOMIC_RELAXED);
+    if (p_event->kind==PS_HOST_INPUT_EVENT_KEY_DOWN && !p_event->is_repeat && p_event->code<PS_HOST_INPUT_KEY_COUNT) {
+        latch_press(&s_key_latch_us[p_event->code]);
+    } else if (p_event->kind==PS_HOST_INPUT_EVENT_MOUSE_BUTTON_DOWN && p_event->code<=PS_HOST_INPUT_MOUSE_X2 &&
                psport_gpu_mouse_captured()) {
-        latch_press(&s_key_latch_us[MOUSE_KEY+p_event->button.button]);
-    } else if (p_event->type==SDL_EVENT_GAMEPAD_BUTTON_DOWN && p_event->gbutton.which==id_gamepad &&
-               p_event->gbutton.button<SDL_GAMEPAD_BUTTON_COUNT) {
-        latch_press(&s_button_latch_us[p_event->gbutton.button]);
-    } else if (p_event->type==SDL_EVENT_GAMEPAD_AXIS_MOTION && p_event->gaxis.which==id_gamepad &&
-               (p_event->gaxis.axis==SDL_GAMEPAD_AXIS_LEFT_TRIGGER || p_event->gaxis.axis==SDL_GAMEPAD_AXIS_RIGHT_TRIGGER)) {
-        uint64_t *p_latch=&s_trigger_latch[p_event->gaxis.axis==SDL_GAMEPAD_AXIS_RIGHT_TRIGGER];
+        latch_press(&s_key_latch_us[MOUSE_KEY+p_event->code]);
+    } else if (p_event->kind==PS_HOST_INPUT_EVENT_PAD_BUTTON_DOWN && p_event->h_pad==h_gamepad &&
+               p_event->code<PS_HOST_PAD_BUTTON_COUNT) {
+        latch_press(&s_button_latch_us[p_event->code]);
+    } else if (p_event->kind==PS_HOST_INPUT_EVENT_PAD_AXIS && p_event->h_pad==h_gamepad &&
+               (p_event->code==PS_HOST_PAD_AXIS_LEFT_TRIGGER || p_event->code==PS_HOST_PAD_AXIS_RIGHT_TRIGGER)) {
+        uint64_t *p_latch=&s_trigger_latch[p_event->code==PS_HOST_PAD_AXIS_RIGHT_TRIGGER];
         const uint64_t now=now_us(), latched=__atomic_load_n(p_latch,__ATOMIC_RELAXED);
-        const int value=trigger(p_event->gaxis.value);
+        const int value=trigger(p_event->value);
         const int is_further=!latched || (latched>>8)+PAD_LATCH_US<now || value>(int)(latched & 0xff);
         if (value>PAD_TRIGGER_PRESSED && is_further) __atomic_store_n(p_latch,now<<8 | (uint64_t)value,__ATOMIC_RELAXED);
     }
-    return true;
 }
 static uint64_t latch_take_time(uint64_t *p_at_us, uint64_t now) {
     const uint64_t at=__atomic_exchange_n(p_at_us,0,__ATOMIC_RELAXED);
     if (at && at+PAD_LATCH_US<now) { ++s_c_expired_presses; return 0; }
     return at;
 }
-/* The presses latched since the last read that SDL's state no longer shows, for this read only
+/* The presses latched since the last read that the host's state no longer shows, for this read only
  * (latch_forget ends it). Under the pad's lock. */
-static void latch_take(uint64_t now, const bool *p_is_key_down, SDL_Gamepad *p_sdl_gamepad, int is_captured) {
-    if (!s_is_latch_watched && SDL_WasInit(SDL_INIT_VIDEO)) {
-        s_is_latch_watched=SDL_AddEventWatch(latch_event,NULL) ? 1 : -1;
-        if (s_is_latch_watched<0) printf("Runtime: pad: no SDL event watch (%s): short presses between reads are lost\n",SDL_GetError());
+static void latch_take(uint64_t now, const bool *p_is_key_down, PsHostPad *p_host_pad, int is_captured) {
+    if (!s_is_latch_watched && ps_host_input_is_window_ready()) {
+        s_is_latch_watched=!ps_host_input_watch(latch_event) ? 1 : -1;
+        if (s_is_latch_watched<0) printf("Runtime: pad: no host event watch (%s): short presses between reads are lost\n",ps_host_input_error());
     }
     for (int code=0;code<MOUSE_WHEEL_UP;++code) {
-        const int is_held=code>=MOUSE_KEY ? (s_mouse_buttons & SDL_BUTTON_MASK(code-MOUSE_KEY))!=0
+        const int is_held=code>=MOUSE_KEY ? (s_mouse_buttons & PS_HOST_INPUT_MOUSE_MASK(code-MOUSE_KEY))!=0
                                           : p_is_key_down && p_is_key_down[code];
         const int is_usable=code>=MOUSE_KEY ? is_captured : p_is_key_down!=NULL;
         s_is_key_latched[code]=latch_take_time(&s_key_latch_us[code],now) && is_usable && !is_held;
         s_c_short_presses+=s_is_key_latched[code];
     }
-    for (int button=0;button<SDL_GAMEPAD_BUTTON_COUNT;++button) {
-        s_is_button_latched[button]=latch_take_time(&s_button_latch_us[button],now) && p_sdl_gamepad &&
-                                    !SDL_GetGamepadButton(p_sdl_gamepad,(SDL_GamepadButton)button);
+    for (int button=0;button<PS_HOST_PAD_BUTTON_COUNT;++button) {
+        s_is_button_latched[button]=latch_take_time(&s_button_latch_us[button],now) && p_host_pad &&
+                                    !ps_host_input_pad_button(p_host_pad,(PsHostPadButton)button);
         s_c_short_presses+=s_is_button_latched[button];
     }
-    static const SDL_GamepadAxis s_triggers[2]={SDL_GAMEPAD_AXIS_LEFT_TRIGGER,SDL_GAMEPAD_AXIS_RIGHT_TRIGGER};
+    static const PsHostPadAxis s_triggers[2]={PS_HOST_PAD_AXIS_LEFT_TRIGGER,PS_HOST_PAD_AXIS_RIGHT_TRIGGER};
     for (int i=0;i<2;++i) {
         const uint64_t latched=__atomic_exchange_n(&s_trigger_latch[i],0,__ATOMIC_RELAXED);
         s_trigger_latched[i]=0;
         if (!latched) continue;
         if ((latched>>8)+PAD_LATCH_US<now) { ++s_c_expired_presses; continue; }
-        if (p_sdl_gamepad && trigger(SDL_GetGamepadAxis(p_sdl_gamepad,s_triggers[i]))<(int)(latched & 0xff)) {
+        if (p_host_pad && trigger(ps_host_input_pad_axis(p_host_pad,s_triggers[i]))<(int)(latched & 0xff)) {
             s_trigger_latched[i]=(int)(latched & 0xff);
-            s_c_short_presses+=trigger(SDL_GetGamepadAxis(p_sdl_gamepad,s_triggers[i]))<=PAD_TRIGGER_PRESSED;
+            s_c_short_presses+=trigger(ps_host_input_pad_axis(p_host_pad,s_triggers[i]))<=PAD_TRIGGER_PRESSED;
         }
     }
 }
@@ -694,7 +689,7 @@ static void latch_forget(void) {
 }
 static void latch_clear(void) {
     for (int code=0;code<MOUSE_WHEEL_UP;++code) __atomic_store_n(&s_key_latch_us[code],0,__ATOMIC_RELAXED);
-    for (int button=0;button<SDL_GAMEPAD_BUTTON_COUNT;++button) __atomic_store_n(&s_button_latch_us[button],0,__ATOMIC_RELAXED);
+    for (int button=0;button<PS_HOST_PAD_BUTTON_COUNT;++button) __atomic_store_n(&s_button_latch_us[button],0,__ATOMIC_RELAXED);
     for (int i=0;i<2;++i) __atomic_store_n(&s_trigger_latch[i],0,__ATOMIC_RELAXED);
     latch_forget();
 }
@@ -745,37 +740,37 @@ static int key_down(const bool *p__bool, int input) {
     }
     return 0;
 }
-static int pad_button_value(SDL_Gamepad *p_sdl_gamepad, int button) {
+static int pad_button_value(PsHostPad *p_host_pad, int button) {
     if (button==PAD_LEFT_TRIGGER || button==PAD_RIGHT_TRIGGER) {
         const int i_trigger=button==PAD_RIGHT_TRIGGER;
-        const int value=trigger(SDL_GetGamepadAxis(p_sdl_gamepad,i_trigger ? SDL_GAMEPAD_AXIS_RIGHT_TRIGGER : SDL_GAMEPAD_AXIS_LEFT_TRIGGER));
+        const int value=trigger(ps_host_input_pad_axis(p_host_pad,i_trigger ? PS_HOST_PAD_AXIS_RIGHT_TRIGGER : PS_HOST_PAD_AXIS_LEFT_TRIGGER));
         return value>s_trigger_latched[i_trigger] ? value : s_trigger_latched[i_trigger];
     }
-    return SDL_GetGamepadButton(p_sdl_gamepad,(SDL_GamepadButton)button) || s_is_button_latched[button] ? 255 : 0;
+    return ps_host_input_pad_button(p_host_pad,(PsHostPadButton)button) || s_is_button_latched[button] ? 255 : 0;
 }
 /* Whether button belongs to a held pad.menu binding: it then reaches no other input. */
-static int is_menu_button(SDL_Gamepad *p_sdl_gamepad, int button) {
+static int is_menu_button(PsHostPad *p_host_pad, int button) {
     const Binding *p_menu=&s_bindings[IN_MENU];
     for (int i=0;i<p_menu->c_pads;++i) {
         const int held=p_menu->pad[i], mod=p_menu->pad_mods[i];
-        if ((button==held || button==mod) && pad_button_value(p_sdl_gamepad,held)>30 &&
-            (mod<0 || pad_button_value(p_sdl_gamepad,mod)>30)) return 1;
+        if ((button==held || button==mod) && pad_button_value(p_host_pad,held)>30 &&
+            (mod<0 || pad_button_value(p_host_pad,mod)>30)) return 1;
     }
     return 0;
 }
 static int is_touch_combo_button(int button) {
-    return s_is_touch_combo && (button==SDL_GAMEPAD_BUTTON_BACK ||
-                                (s_is_combo_back_down && (button==SDL_GAMEPAD_BUTTON_DPAD_LEFT || button==SDL_GAMEPAD_BUTTON_DPAD_RIGHT)));
+    return s_is_touch_combo && (button==PS_HOST_PAD_BUTTON_BACK ||
+                                (s_is_combo_back_down && (button==PS_HOST_PAD_BUTTON_DPAD_LEFT || button==PS_HOST_PAD_BUTTON_DPAD_RIGHT)));
 }
-static void touch_combo(PadData *p_pad_data, SDL_Gamepad *p_sdl_gamepad) {
+static void touch_combo(PadData *p_pad_data, PsHostPad *p_host_pad) {
     static int s_was_back_down, s_is_combo_used;
     static uint64_t s_back_down_us, s_tap_until_us;
     const uint64_t now=p_pad_data->timestamp;
     int side=-1;
     if (s_is_combo_back_down) {
         if (!s_was_back_down) { s_is_combo_used=0; s_back_down_us=now; }
-        const int is_left=pad_button_value(p_sdl_gamepad,SDL_GAMEPAD_BUTTON_DPAD_LEFT)>30;
-        const int is_right=pad_button_value(p_sdl_gamepad,SDL_GAMEPAD_BUTTON_DPAD_RIGHT)>30;
+        const int is_left=pad_button_value(p_host_pad,PS_HOST_PAD_BUTTON_DPAD_LEFT)>30;
+        const int is_right=pad_button_value(p_host_pad,PS_HOST_PAD_BUTTON_DPAD_RIGHT)>30;
         if (is_left || is_right) { side=is_right; s_is_combo_used=1; }
         else if (!s_is_combo_used && now-s_back_down_us>=BACK_TAP_US) side=0;
     } else if (s_was_back_down && !s_is_combo_used && now-s_back_down_us<BACK_TAP_US) {
@@ -786,14 +781,14 @@ static void touch_combo(PadData *p_pad_data, SDL_Gamepad *p_sdl_gamepad) {
     if (side>=0) touch_click(p_pad_data,side);
 }
 /* The bound gamepad buttons' state; triggers as their analog value. */
-static int pad_value(SDL_Gamepad *p_sdl_gamepad, int input) {
+static int pad_value(PsHostPad *p_host_pad, int input) {
     int value=0;
     for (int i=0;i<s_bindings[input].c_pads;++i) {
         const int b=s_bindings[input].pad[i], mod=s_bindings[input].pad_mods[i];
-        if (mod>=0 && pad_button_value(p_sdl_gamepad,mod)<=30) continue;
-        if ((input!=IN_MENU && is_menu_button(p_sdl_gamepad,b)) || (input!=IN_SKIP_MOVIE && is_skip_button(b)) ||
+        if (mod>=0 && pad_button_value(p_host_pad,mod)<=30) continue;
+        if ((input!=IN_MENU && is_menu_button(p_host_pad,b)) || (input!=IN_SKIP_MOVIE && is_skip_button(b)) ||
             is_touch_combo_button(b)) continue;
-        const int v=pad_button_value(p_sdl_gamepad,b);
+        const int v=pad_button_value(p_host_pad,b);
         if (v>value) value=v;
     }
     return value;
@@ -805,7 +800,7 @@ int runtime_pad_menu_pressed(void) {
     pthread_mutex_lock(&s_lock);
     int is_held=0;
     if (s_is_bindings_ready) {
-        const bool *p_is_key_down=SDL_WasInit(SDL_INIT_VIDEO) && !runtime_keyboard_taken() ? SDL_GetKeyboardState(NULL) : NULL;
+        const bool *p_is_key_down=ps_host_input_is_window_ready() && !runtime_keyboard_taken() ? ps_host_input_keyboard_state() : NULL;
         is_held=key_down(p_is_key_down,IN_MENU) || (s_p_gamepad && pad_value(s_p_gamepad,IN_MENU)>30);
     }
     const int is_pressed=is_held && !s_is_menu_held;
@@ -957,14 +952,14 @@ static void apply_mouse_look(PadData *p_pad_data, double dx, double dy, uint64_t
  * (the game's own icons), _GAMEPAD another gamepad (its labels), _KEYBOARD the keyboard and mouse.
  * The generation changes with the device, the pad's type and the bindings. */
 static int s_prompt_device=-1;
-static SDL_GamepadType s_prompt_pad_type=SDL_GAMEPAD_TYPE_UNKNOWN;
+static int s_prompt_pad_type=PS_HOST_PAD_TYPE_UNKNOWN;
 static unsigned s_prompt_generation=1;
-static void prompt_note(SDL_Gamepad *p_sdl_gamepad, int is_pad_active, int is_keyboard_active) {
+static void prompt_note(PsHostPad *p_host_pad, int is_pad_active, int is_keyboard_active) {
     int device=s_prompt_device;
-    const SDL_GamepadType type=p_sdl_gamepad ? SDL_GetGamepadType(p_sdl_gamepad) : SDL_GAMEPAD_TYPE_UNKNOWN;
-    const int is_playstation=type==SDL_GAMEPAD_TYPE_PS3 || type==SDL_GAMEPAD_TYPE_PS4 || type==SDL_GAMEPAD_TYPE_PS5;
+    const int type=p_host_pad ? ps_host_input_pad_type(p_host_pad) : PS_HOST_PAD_TYPE_UNKNOWN;
+    const int is_playstation=type==PS_HOST_PAD_TYPE_PS3 || type==PS_HOST_PAD_TYPE_PS4 || type==PS_HOST_PAD_TYPE_PS5;
     if (is_keyboard_active) device=RUNTIME_PAD_PROMPT_KEYBOARD;
-    else if (p_sdl_gamepad && (is_pad_active || device<0))
+    else if (p_host_pad && (is_pad_active || device<0))
         device=is_playstation ? RUNTIME_PAD_PROMPT_PLAYSTATION : RUNTIME_PAD_PROMPT_GAMEPAD;
     else if (device<0) device=RUNTIME_PAD_PROMPT_KEYBOARD;
     if (device!=s_prompt_device || (device!=RUNTIME_PAD_PROMPT_KEYBOARD && type!=s_prompt_pad_type)) {
@@ -985,17 +980,17 @@ int runtime_pad_mouse_look(void) {
 }
 /* A key's name for a prompt: short (a prompt is a key cap), arrows as arrows. */
 static void key_label(int code, char *sz_out, size_t cb_out) {
-    static const struct { const char *sz_sdl, *sz_label; } s_names[]={
+    static const struct { const char *sz_host, *sz_label; } s_names[]={
         {"Left Shift","Shift"}, {"Right Shift","RShift"}, {"Left Ctrl","Ctrl"}, {"Right Ctrl","RCtrl"},
         {"Left Alt","Alt"}, {"Right Alt","AltGr"}, {"Return","Enter"}, {"Keypad Enter","Enter"},
         {"Backspace","Bksp"}, {"Escape","Esc"}, {"CapsLock","Caps"}, {"Delete","Del"},
         {"Insert","Ins"}, {"PageUp","PgUp"}, {"PageDown","PgDn"}, {"Up","\xe2\x86\x91"},
         {"Down","\xe2\x86\x93"}, {"Left","\xe2\x86\x90"}, {"Right","\xe2\x86\x92"},
     };
-    const char *sz_name=SDL_GetScancodeName((SDL_Scancode)code);
+    const char *sz_name=ps_host_input_key_name(code);
     if (!sz_name || !*sz_name) sz_name="?";
     for (size_t i=0;i<sizeof(s_names)/sizeof(*s_names);++i)
-        if (!strcmp(sz_name,s_names[i].sz_sdl)) { sz_name=s_names[i].sz_label; break; }
+        if (!strcmp(sz_name,s_names[i].sz_host)) { sz_name=s_names[i].sz_label; break; }
     if (!strncmp(sz_name,"Keypad ",7)) { snprintf(sz_out,cb_out,"Num%s",sz_name+7); return; }
     snprintf(sz_out,cb_out,"%s",sz_name);
 }
@@ -1010,7 +1005,7 @@ int runtime_pad_prompt(const char *sz_input, int should_prefer_mouse, char *sz_o
     const int device=s_prompt_device;
     const Binding binding=s_bindings[input];
     const int is_look=s_mouse_look;
-    const SDL_GamepadType type=s_prompt_pad_type;
+    const int type=s_prompt_pad_type;
     pthread_mutex_unlock(&s_lock);
     if (device==RUNTIME_PAD_PROMPT_KEYBOARD) {
         int key=-1, mouse=-1, key_mod=-1, mouse_mod=-1;
@@ -1024,7 +1019,7 @@ int runtime_pad_prompt(const char *sz_input, int should_prefer_mouse, char *sz_o
         /* A chord's modifier as a prefix: Shift as its arrow (R2: "\xe2\x87\xa7Left"). */
         char sz_prefix[24]="";
         const int mod=is_mouse ? mouse_mod : key_mod;
-        if (mod==SDL_SCANCODE_LSHIFT || mod==SDL_SCANCODE_RSHIFT) snprintf(sz_prefix,sizeof sz_prefix,"\xe2\x87\xa7");
+        if (mod==PS_HOST_INPUT_KEY_LSHIFT || mod==PS_HOST_INPUT_KEY_RSHIFT) snprintf(sz_prefix,sizeof sz_prefix,"\xe2\x87\xa7");
         else if (mod>=0) {
             char sz_mod[16];
             key_label(mod,sz_mod,sizeof sz_mod);
@@ -1045,34 +1040,34 @@ int runtime_pad_prompt(const char *sz_input, int should_prefer_mouse, char *sz_o
         return 'K';
     }
     if (device!=RUNTIME_PAD_PROMPT_GAMEPAD) return 0; /* a PlayStation pad: the game's own icons */
-    const int is_nintendo=type==SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO ||
-                          type==SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_LEFT ||
-                          type==SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_RIGHT ||
-                          type==SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_PAIR;
+    const int is_nintendo=type==PS_HOST_PAD_TYPE_SWITCH_PRO ||
+                          type==PS_HOST_PAD_TYPE_JOYCON_LEFT ||
+                          type==PS_HOST_PAD_TYPE_JOYCON_RIGHT ||
+                          type==PS_HOST_PAD_TYPE_JOYCON_PAIR;
     if (input>=IN_MOVE_UP) { snprintf(sz_out_label,cb_label,"%s",input<IN_LOOK_UP ? "LS" : "RS"); return 'C'; }
     if (binding.c_pads==0) return 0;
     const int button=binding.pad[0];
     switch (button) {
-    case SDL_GAMEPAD_BUTTON_SOUTH: case SDL_GAMEPAD_BUTTON_EAST:
-    case SDL_GAMEPAD_BUTTON_WEST: case SDL_GAMEPAD_BUTTON_NORTH: {
+    case PS_HOST_PAD_BUTTON_SOUTH: case PS_HOST_PAD_BUTTON_EAST:
+    case PS_HOST_PAD_BUTTON_WEST: case PS_HOST_PAD_BUTTON_NORTH: {
         static const char *const s_by_position[]={"A","B","X","Y"};
-        const SDL_GamepadButtonLabel label=SDL_GetGamepadButtonLabelForType(type,(SDL_GamepadButton)button);
-        const char *sz_text=label==SDL_GAMEPAD_BUTTON_LABEL_A ? "A" : label==SDL_GAMEPAD_BUTTON_LABEL_B ? "B"
-                          : label==SDL_GAMEPAD_BUTTON_LABEL_X ? "X" : label==SDL_GAMEPAD_BUTTON_LABEL_Y ? "Y"
-                          : s_by_position[button-SDL_GAMEPAD_BUTTON_SOUTH];
+        const PsHostPadLabel label=ps_host_input_pad_button_label(type,(PsHostPadButton)button);
+        const char *sz_text=label==PS_HOST_PAD_LABEL_A ? "A" : label==PS_HOST_PAD_LABEL_B ? "B"
+                          : label==PS_HOST_PAD_LABEL_X ? "X" : label==PS_HOST_PAD_LABEL_Y ? "Y"
+                          : s_by_position[button-PS_HOST_PAD_BUTTON_SOUTH];
         snprintf(sz_out_label,cb_label,"%s",sz_text);
         return 'F';
     }
-    case SDL_GAMEPAD_BUTTON_LEFT_SHOULDER: snprintf(sz_out_label,cb_label,"%s",is_nintendo ? "L" : "LB"); return 'S';
-    case SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER: snprintf(sz_out_label,cb_label,"%s",is_nintendo ? "R" : "RB"); return 'S';
+    case PS_HOST_PAD_BUTTON_LEFT_SHOULDER: snprintf(sz_out_label,cb_label,"%s",is_nintendo ? "L" : "LB"); return 'S';
+    case PS_HOST_PAD_BUTTON_RIGHT_SHOULDER: snprintf(sz_out_label,cb_label,"%s",is_nintendo ? "R" : "RB"); return 'S';
     case PAD_LEFT_TRIGGER: snprintf(sz_out_label,cb_label,"%s",is_nintendo ? "ZL" : "LT"); return 'S';
     case PAD_RIGHT_TRIGGER: snprintf(sz_out_label,cb_label,"%s",is_nintendo ? "ZR" : "RT"); return 'S';
-    case SDL_GAMEPAD_BUTTON_LEFT_STICK: snprintf(sz_out_label,cb_label,"LS"); return 'C';
-    case SDL_GAMEPAD_BUTTON_RIGHT_STICK: snprintf(sz_out_label,cb_label,"RS"); return 'C';
-    case SDL_GAMEPAD_BUTTON_START: snprintf(sz_out_label,cb_label,"%s",is_nintendo ? "+" : "Menu"); return 'C';
-    case SDL_GAMEPAD_BUTTON_BACK: snprintf(sz_out_label,cb_label,"%s",is_nintendo ? "-" : "View"); return 'C';
-    case SDL_GAMEPAD_BUTTON_MISC1: snprintf(sz_out_label,cb_label,"Share"); return 'C';
-    case SDL_GAMEPAD_BUTTON_TOUCHPAD: snprintf(sz_out_label,cb_label,"Pad"); return 'C';
+    case PS_HOST_PAD_BUTTON_LEFT_STICK: snprintf(sz_out_label,cb_label,"LS"); return 'C';
+    case PS_HOST_PAD_BUTTON_RIGHT_STICK: snprintf(sz_out_label,cb_label,"RS"); return 'C';
+    case PS_HOST_PAD_BUTTON_START: snprintf(sz_out_label,cb_label,"%s",is_nintendo ? "+" : "Menu"); return 'C';
+    case PS_HOST_PAD_BUTTON_BACK: snprintf(sz_out_label,cb_label,"%s",is_nintendo ? "-" : "View"); return 'C';
+    case PS_HOST_PAD_BUTTON_MISC1: snprintf(sz_out_label,cb_label,"Share"); return 'C';
+    case PS_HOST_PAD_BUTTON_TOUCHPAD: snprintf(sz_out_label,cb_label,"Pad"); return 'C';
     default: return 0; /* the d-pad: the game's icons fit any pad */
     }
 }
@@ -1082,10 +1077,10 @@ int runtime_pad_prompt(const char *sz_input, int should_prefer_mouse, char *sz_o
  * a movie was asked. While the port's menu or text dialog has the input, or the game the keyboard,
  * the binding counts as held, so a key still down when they let go (Escape closing them) is no
  * press. */
-static void skip_update(SDL_Gamepad *p_sdl_gamepad, const bool *p_is_key_down, int is_input_ours) {
+static void skip_update(PsHostPad *p_host_pad, const bool *p_is_key_down, int is_input_ours) {
     if (!s_is_skip_enabled) return;
     const int is_key_down=p_is_key_down && key_down(p_is_key_down,IN_SKIP_MOVIE);
-    const int is_pad_down=p_sdl_gamepad && pad_value(p_sdl_gamepad,IN_SKIP_MOVIE)>30;
+    const int is_pad_down=p_host_pad && pad_value(p_host_pad,IN_SKIP_MOVIE)>30;
     const int is_key_held=is_input_ours || !p_is_key_down || is_key_down;
     const int is_pad_held=is_input_ours || is_pad_down;
     if ((is_key_held && !s_is_skip_key_held) || (is_pad_held && !s_is_skip_pad_held)) {
@@ -1111,7 +1106,7 @@ static void sample_host(PadData *p_pad_data) {
     p_pad_data->connected=1; p_pad_data->connected_count=s_c_connecteds ? s_c_connecteds : 1;
     p_pad_data->timestamp=now_us();
     const float motion_dt=runtime_pad_motion_begin(p_pad_data->timestamp);
-    SDL_Gamepad *p_sdl_gamepad=current_gamepad();
+    PsHostPad *p_host_pad=current_gamepad();
     int is_real_motion=0;
     if (!s_is_bindings_ready) { load_bindings(); s_is_bindings_ready=1; psport_gpu_mouse_look_enable(s_mouse_look); }
     /* The mouse's motion and wheel since the last sample (always taken: none of it piles up while
@@ -1131,65 +1126,65 @@ static void sample_host(PadData *p_pad_data) {
         apply_mouse_look(p_pad_data,0,0,p_pad_data->timestamp,0);
         return;
     }
-    const bool *p__bool=SDL_WasInit(SDL_INIT_VIDEO) && !runtime_keyboard_taken() ? SDL_GetKeyboardState(NULL) : NULL;
-    s_mouse_buttons=is_captured && SDL_WasInit(SDL_INIT_VIDEO) ? SDL_GetMouseState(NULL,NULL) : 0;
+    const bool *p__bool=ps_host_input_is_window_ready() && !runtime_keyboard_taken() ? ps_host_input_keyboard_state() : NULL;
+    s_mouse_buttons=is_captured && ps_host_input_is_window_ready() ? ps_host_input_mouse_buttons() : 0;
     mouse_wheel_step(p_pad_data->timestamp,is_captured ? wheel_up : 0,is_captured ? is_wheel_down : 0);
-    latch_take(p_pad_data->timestamp,p__bool,p_sdl_gamepad,is_captured);
-    skip_update(p_sdl_gamepad,p__bool,0);
-    if (p_sdl_gamepad) {
-        s_is_touch_combo=s_is_back_touchpad_only && !SDL_GetNumGamepadTouchpads(p_sdl_gamepad) && !runtime_pad_motion_is_on();
-        s_is_combo_back_down=s_is_touch_combo && pad_button_value(p_sdl_gamepad,SDL_GAMEPAD_BUTTON_BACK)>30;
+    latch_take(p_pad_data->timestamp,p__bool,p_host_pad,is_captured);
+    skip_update(p_host_pad,p__bool,0);
+    if (p_host_pad) {
+        s_is_touch_combo=s_is_back_touchpad_only && !ps_host_input_pad_touchpads(p_host_pad) && !runtime_pad_motion_is_on();
+        s_is_combo_back_down=s_is_touch_combo && pad_button_value(p_host_pad,PS_HOST_PAD_BUTTON_BACK)>30;
         static int s_was_touch_combo;
         if (s_is_touch_combo && !s_was_touch_combo)
             puts("Runtime: gamepad without a touch surface: View + d-pad left/right clicks each touchpad half, View alone the left");
         s_was_touch_combo=s_is_touch_combo;
         int touch_right=0;
         for (int i=IN_CROSS;i<=IN_RIGHT;++i) {
-            const int v=pad_value(p_sdl_gamepad,i);
+            const int v=pad_value(p_host_pad,i);
             if (i==IN_L2) p_pad_data->l2=(uint8_t)v;
             if (i==IN_R2) p_pad_data->r2=(uint8_t)v;
             if (i==IN_TOUCHPAD_RIGHT) touch_right=v>30;
             else if (v>30) p_pad_data->buttons|=s_input_buttons[i];
         }
-        static const SDL_GamepadAxis s_stick_axes[4]={SDL_GAMEPAD_AXIS_LEFTX,SDL_GAMEPAD_AXIS_LEFTY,
-                                                    SDL_GAMEPAD_AXIS_RIGHTX,SDL_GAMEPAD_AXIS_RIGHTY};
+        static const PsHostPadAxis s_stick_axes[4]={PS_HOST_PAD_AXIS_LEFTX,PS_HOST_PAD_AXIS_LEFTY,
+                                                    PS_HOST_PAD_AXIS_RIGHTX,PS_HOST_PAD_AXIS_RIGHTY};
         int16_t raw[4];
-        for (int i=0;i<4;++i) raw[i]=(int16_t)SDL_GetGamepadAxis(p_sdl_gamepad,s_stick_axes[i]);
+        for (int i=0;i<4;++i) raw[i]=ps_host_input_pad_axis(p_host_pad,s_stick_axes[i]);
         cal_load();
         cal_sample(raw);
         uint8_t *axis_out[4]={&p_pad_data->left_x,&p_pad_data->left_y,&p_pad_data->right_x,&p_pad_data->right_y};
         for (int i=0;i<4;++i)
             *axis_out[i]=stick_axis(i,raw[i]); /* center 0 until the neutral is known */
-        if (SDL_GetNumGamepadTouchpads(p_sdl_gamepad)>0) {
-            const int fingers=SDL_GetNumGamepadTouchpadFingers(p_sdl_gamepad,0);
+        if (ps_host_input_pad_touchpads(p_host_pad)>0) {
+            const int fingers=ps_host_input_pad_touchpad_fingers(p_host_pad,0);
             for (int finger=0;finger<fingers && p_pad_data->touch_count<2;++finger) {
                 bool is_down=false;
                 float x=0, y=0;
-                if (SDL_GetGamepadTouchpadFinger(p_sdl_gamepad,0,finger,&is_down,&x,&y,NULL) && is_down) {
+                if (!ps_host_input_pad_touchpad_finger(p_host_pad,0,finger,&is_down,&x,&y) && is_down) {
                     p_pad_data->touches[p_pad_data->touch_count++]=(PadTouch){.x=touch_axis(x,1919),
                         .y=touch_axis(y,942),.id=(uint8_t)finger};
                 }
             }
         }
         is_real_motion=runtime_pad_sensors_read(p_pad_data,motion_dt);
-        if (runtime_pad_motion_is_on() && !is_real_motion) runtime_pad_motion_from_pad(p_pad_data,p_sdl_gamepad,motion_dt);
+        if (runtime_pad_motion_is_on() && !is_real_motion) runtime_pad_motion_from_pad(p_pad_data,p_host_pad,motion_dt);
         // Back/Select on pads without a touch surface is a left-side click.
         if ((p_pad_data->buttons & BTN_TOUCHPAD) && !p_pad_data->touch_count) touch_click(p_pad_data,0);
         if (touch_right) touch_click(p_pad_data,1);
-        if (s_is_touch_combo) touch_combo(p_pad_data,p_sdl_gamepad);
+        if (s_is_touch_combo) touch_combo(p_pad_data,p_host_pad);
     }
-    const int is_pad_active=p_sdl_gamepad && (p_pad_data->buttons || p_pad_data->l2>30 || p_pad_data->r2>30 ||
+    const int is_pad_active=p_host_pad && (p_pad_data->buttons || p_pad_data->l2>30 || p_pad_data->r2>30 ||
                                               p_pad_data->touch_count || is_stick_moved(p_pad_data->left_x) ||
                                               is_stick_moved(p_pad_data->left_y) || is_stick_moved(p_pad_data->right_x) ||
                                               is_stick_moved(p_pad_data->right_y));
     int is_keyboard_active=(is_captured && (mouse_dx*mouse_dx+mouse_dy*mouse_dy>9.0 || wheel_up || is_wheel_down)) ||
                            s_mouse_buttons!=0;
     for (int i=0;i<IN_COUNT && !is_keyboard_active;++i) is_keyboard_active=key_down(p__bool,i);
-    prompt_note(p_sdl_gamepad,is_pad_active,is_keyboard_active);
+    prompt_note(p_host_pad,is_pad_active,is_keyboard_active);
     apply_keyboard(p_pad_data,p__bool); /* the bound mouse buttons too */
     if (runtime_pad_motion_is_on() && !is_real_motion) {
         runtime_pad_motion_from_desktop(p_pad_data,p__bool,key_down(p__bool,IN_TOUCHPAD) || key_down(p__bool,IN_TOUCHPAD_RIGHT),
-                                        (s_mouse_buttons & SDL_BUTTON_LMASK)!=0,s_mouse_sensitivity,&mouse_dx,&mouse_dy,is_captured);
+                                        (s_mouse_buttons & PS_HOST_INPUT_MOUSE_MASK(PS_HOST_INPUT_MOUSE_LEFT))!=0,s_mouse_sensitivity,&mouse_dx,&mouse_dy,is_captured);
         runtime_pad_motion_report(p_pad_data,motion_dt);
     }
     runtime_pad_sensors_finish(p_pad_data);
@@ -1258,7 +1253,7 @@ static ABI int32_t pad_open(int32_t user, int32_t type, int32_t i_device, const 
     int already=s_is_opened; s_is_opened=1;
     pthread_mutex_unlock(&s_lock);
     if (already) return ERR_ALREADY_OPENED;
-    puts("Runtime: pad opened for user 1 (SDL gamepad or keyboard)");
+    puts("Runtime: pad opened for user 1 (host gamepad or keyboard)");
     return PAD_HANDLE;
 }
 static ABI int32_t pad_get_handle(int32_t user, int32_t type, int32_t i_device) {
@@ -1334,19 +1329,19 @@ static ABI int32_t pad_vibration(int32_t h_handle, const uint8_t *p_param) {
     if (h_handle!=PAD_HANDLE || !s_is_opened) return ERR_INVALID_HANDLE;
     if (!p_param) return ERR_INVALID_ARG;
     pthread_mutex_lock(&s_lock);
-    SDL_Gamepad *p_sdl_gamepad=current_gamepad();
+    PsHostPad *p_host_pad=current_gamepad();
     pthread_mutex_unlock(&s_lock);
     /* Not under the pad's lock: the report can be a synchronous HID write, and reads wait for the
-       lock. SDL checks the handle, so one closed meanwhile only fails. */
-    if (p_sdl_gamepad) SDL_RumbleGamepad(p_sdl_gamepad,(uint16_t)(p_param[0]*257),(uint16_t)(p_param[1]*257),1000);
+       lock. The host checks the handle, so one closed meanwhile only fails. */
+    if (p_host_pad) ps_host_input_pad_rumble(p_host_pad,(uint16_t)(p_param[0]*257),(uint16_t)(p_param[1]*257),1000);
     return 0;
 }
 /* ScePadLightBarParam: red, green, blue, reserved. Shown on the host pad when it has an LED. */
 static int set_host_light_bar(uint8_t red, uint8_t green, uint8_t blue) {
     pthread_mutex_lock(&s_lock);
-    SDL_Gamepad *p_gamepad=current_gamepad();
+    PsHostPad *p_host_pad=current_gamepad();
     pthread_mutex_unlock(&s_lock);
-    return p_gamepad && SDL_SetGamepadLED(p_gamepad,red,green,blue);
+    return p_host_pad && !ps_host_input_pad_set_light_bar(p_host_pad,red,green,blue);
 }
 static ABI int32_t pad_set_light_bar(int32_t h_pad, const uint8_t *p_param) {
     if (h_pad!=PAD_HANDLE || !s_is_opened) return ERR_INVALID_HANDLE;
@@ -1412,7 +1407,7 @@ uintptr_t runtime_pad_resolve(const char *sz_name) { return RUNTIME_LOOKUP(s_exp
 void runtime_pad_report(void) {
     /* Under the lock because a game thread's current_gamepad may close the gamepad meanwhile. */
     if (runtime_exception_report_lock(&s_lock,"pad")) {
-        const char *sz_name=s_p_gamepad ? SDL_GetGamepadName(s_p_gamepad) : NULL;
+        const char *sz_name=s_p_gamepad ? ps_host_input_pad_name(s_p_gamepad) : NULL;
         printf("Runtime: pad reads=%zu, short presses=%zu (expired unread %zu), gamepad=%s\n",s_c_reads,
                s_c_short_presses,s_c_expired_presses,s_p_gamepad ? sz_name ? sz_name : "unnamed" : "none");
         runtime_exception_unlock(&s_lock);

@@ -1,12 +1,12 @@
 /* The gamepad's own motion sensors: the gyroscope and accelerometer of a DualShock 4, DualSense,
- * Switch Pro or Steam Deck (when SDL reaches its HID device, not Steam's virtual pad), read through
- * SDL3 at every pad read and reported as the DualShock 4 does: the orientation quaternion, the
- * acceleration in g and the angular velocity in rad/s.
+ * Switch Pro or Steam Deck (when the host reaches its HID device, not Steam's virtual pad), read
+ * through ps_host_input.h at every pad read and reported as the DualShock 4 does: the orientation
+ * quaternion, the acceleration in g and the angular velocity in rad/s.
  *
- * Axes: SDL gives every gamepad's sensors in one frame, the pad held in front of you: +X right, +Y
- * up out of its face, +Z towards the player; acceleration in m/s^2 with gravity reading +Y at rest,
- * rotation in rad/s counter-clockwise seen from the positive end of each axis (x pitch, y yaw, z
- * roll). That is libScePad's DualShock 4 frame too (1 g on +Y lying flat, the frame the motion
+ * Axes: the host gives every gamepad's sensors in one frame, the pad held in front of you: +X right,
+ * +Y up out of its face, +Z towards the player; acceleration in m/s^2 with gravity reading +Y at
+ * rest, rotation in rad/s counter-clockwise seen from the positive end of each axis (x pitch, y yaw,
+ * z roll). That is libScePad's DualShock 4 frame too (1 g on +Y lying flat, the frame the motion
  * emulation and shadPS4's and AnyPS5's pads report), so the axes and signs pass through unchanged
  * and only the acceleration is divided by standard gravity.
  *
@@ -25,15 +25,15 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
-#include <SDL3/SDL.h>
 
 #define TILT_MAX_OFF_G 0.08f /* further from 1 g the pad is being moved: gravity is not what it reads */
 #define TILT_MIN_AXIS 0.01f   /* a smaller correction axis is noise */
 #define DEADBAND_RAD_PER_S 0.0174533f /* 1 degree/s, scePadSetAngularVelocityDeadbandState */
 #define MAX_STEP_S 0.1f /* a longer gap between reads (a menu, a load) is not integrated */
+#define STANDARD_GRAVITY 9.80665f
 
 static struct {
-    SDL_Gamepad *p_gamepad;
+    PsHostPad *p_pad;
     int has_gyro, has_accel;
     int has_found_gyro, has_found_accel, is_wanted, is_logged;
     float orientation[4], acceleration[3]; /* x y z w; g */
@@ -63,28 +63,28 @@ static void tilt_from_gravity(void) {
     seed_from_gravity(s_sensors.orientation,a);
 }
 
-static int enable_sensor(SDL_Gamepad *p_gamepad, SDL_SensorType type) {
-    if (!SDL_GamepadHasSensor(p_gamepad,type)) return 0;
-    if (SDL_SetGamepadSensorEnabled(p_gamepad,type,true)) return 1;
+static int enable_sensor(PsHostPad *p_pad, PsHostPadSensor sensor) {
+    if (!ps_host_input_pad_has_sensor(p_pad,sensor)) return 0;
+    if (!ps_host_input_pad_enable_sensor(p_pad,sensor)) return 1;
     ++s_sensors.c_enable_failures;
-    printf("Runtime: gamepad sensors: enabling the %s failed: %s\n",type==SDL_SENSOR_GYRO ? "gyroscope" : "accelerometer",
-           SDL_GetError());
+    printf("Runtime: gamepad sensors: enabling the %s failed: %s\n",sensor==PS_HOST_PAD_SENSOR_GYRO ? "gyroscope" : "accelerometer",
+           ps_host_input_error());
     return 0;
 }
 
-void runtime_pad_sensors_open(SDL_Gamepad *p_sdl_gamepad) {
-    s_sensors.p_gamepad=p_sdl_gamepad;
+void runtime_pad_sensors_open(PsHostPad *p_host_pad) {
+    s_sensors.p_pad=p_host_pad;
     s_sensors.has_gyro=s_sensors.has_accel=s_sensors.has_orientation=s_sensors.is_logged=0;
     set_identity(s_sensors.orientation);
     s_sensors.acceleration[0]=s_sensors.acceleration[2]=0.0f;
     s_sensors.acceleration[1]=1.0f;
-    if (!p_sdl_gamepad) return;
-    s_sensors.has_found_gyro=SDL_GamepadHasSensor(p_sdl_gamepad,SDL_SENSOR_GYRO);
-    s_sensors.has_found_accel=SDL_GamepadHasSensor(p_sdl_gamepad,SDL_SENSOR_ACCEL);
+    if (!p_host_pad) return;
+    s_sensors.has_found_gyro=ps_host_input_pad_has_sensor(p_host_pad,PS_HOST_PAD_SENSOR_GYRO);
+    s_sensors.has_found_accel=ps_host_input_pad_has_sensor(p_host_pad,PS_HOST_PAD_SENSOR_ACCEL);
     s_sensors.is_wanted=runtime_env_flag("PS_PAD_SENSORS",1);
     if (!s_sensors.is_wanted) return;
-    s_sensors.has_gyro=enable_sensor(p_sdl_gamepad,SDL_SENSOR_GYRO);
-    s_sensors.has_accel=enable_sensor(p_sdl_gamepad,SDL_SENSOR_ACCEL);
+    s_sensors.has_gyro=enable_sensor(p_host_pad,PS_HOST_PAD_SENSOR_GYRO);
+    s_sensors.has_accel=enable_sensor(p_host_pad,PS_HOST_PAD_SENSOR_ACCEL);
 }
 
 /* On the pad's first read rather than when it opens, because the motion emulation's setting is
@@ -105,13 +105,13 @@ static void log_sensors(void) {
         printf("Runtime: gamepad sensors: none: %s\n",sz_fallback);
 }
 
-static int read_sensor(SDL_SensorType type, float out[3]) {
+static int read_sensor(PsHostPadSensor sensor, float out[3]) {
     ++s_sensors.c_reads;
-    if (SDL_GetGamepadSensorData(s_sensors.p_gamepad,type,out,3)) return 1;
+    if (!ps_host_input_pad_read_sensor(s_sensors.p_pad,sensor,out)) return 1;
     const size_t c_failures=++s_sensors.c_read_failures;
     if ((c_failures&(c_failures-1))==0)
         printf("Runtime: gamepad sensors: reading the %s failed (%zu failures): %s\n",
-               type==SDL_SENSOR_GYRO ? "gyroscope" : "accelerometer",c_failures,SDL_GetError());
+               sensor==PS_HOST_PAD_SENSOR_GYRO ? "gyroscope" : "accelerometer",c_failures,ps_host_input_error());
     return 0;
 }
 
@@ -149,13 +149,13 @@ static void integrate(float rate[3], float dt) {
 }
 
 int runtime_pad_sensors_read(PadData *p_pad_data, float dt) {
-    if (!s_sensors.p_gamepad) return 0;
+    if (!s_sensors.p_pad) return 0;
     if (!s_sensors.is_logged) log_sensors();
     if (!s_sensors.has_gyro && !s_sensors.has_accel) return 0;
     float rate[3]={0.0f,0.0f,0.0f}, accel[3];
-    if (s_sensors.has_accel && read_sensor(SDL_SENSOR_ACCEL,accel))
-        for (int i=0;i<3;++i) s_sensors.acceleration[i]=accel[i]/SDL_STANDARD_GRAVITY;
-    if (s_sensors.has_gyro && !read_sensor(SDL_SENSOR_GYRO,rate)) rate[0]=rate[1]=rate[2]=0.0f;
+    if (s_sensors.has_accel && read_sensor(PS_HOST_PAD_SENSOR_ACCEL,accel))
+        for (int i=0;i<3;++i) s_sensors.acceleration[i]=accel[i]/STANDARD_GRAVITY;
+    if (s_sensors.has_gyro && !read_sensor(PS_HOST_PAD_SENSOR_GYRO,rate)) rate[0]=rate[1]=rate[2]=0.0f;
     if (s_has_deadband)
         for (int i=0;i<3;++i) if (fabsf(rate[i])<DEADBAND_RAD_PER_S) rate[i]=0.0f;
     if (!s_sensors.has_gyro) tilt_from_gravity();

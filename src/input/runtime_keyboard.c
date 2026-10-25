@@ -1,4 +1,4 @@
-/* libSceImeKeyboard on the host keyboard. SDL events are pumped by the window thread
+/* libSceImeKeyboard on the host keyboard. The host's events are pumped by the window thread
  * (gpu/shim/window.cpp), which queues the keys for the game while it has the keyboard open; here
  * they are handed to the game's handler from sceImeUpdate, on the game's thread. The host keyboard
  * is resource 1: GetResourceId and the open event list it while the host has a keyboard, and its
@@ -12,7 +12,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <pthread.h>
-#include <SDL3/SDL.h>
 
 #define IME_BUSY ((int32_t)0x80BC0001)
 #define IME_NOT_OPENED ((int32_t)0x80BC0002)
@@ -86,10 +85,12 @@ static void resource_ids(ResourceIds *p_ids, int32_t user, int is_connected) {
 }
 static uint32_t key_state(const PsKeyEvent *p_key) {
     static const struct { uint16_t mod; uint32_t state; } s_mods[]={
-        {SDL_KMOD_LCTRL,STATE_L_CTRL}, {SDL_KMOD_LSHIFT,STATE_L_SHIFT}, {SDL_KMOD_LALT,STATE_L_ALT},
-        {SDL_KMOD_LGUI,STATE_L_GUI}, {SDL_KMOD_RCTRL,STATE_R_CTRL}, {SDL_KMOD_RSHIFT,STATE_R_SHIFT},
-        {SDL_KMOD_RALT,STATE_R_ALT}, {SDL_KMOD_RGUI,STATE_R_GUI}, {SDL_KMOD_NUM,STATE_NUM_LOCK},
-        {SDL_KMOD_CAPS,STATE_CAPS_LOCK}, {SDL_KMOD_SCROLL,STATE_SCROLL_LOCK},
+        {PS_HOST_INPUT_MOD_LCTRL,STATE_L_CTRL}, {PS_HOST_INPUT_MOD_LSHIFT,STATE_L_SHIFT},
+        {PS_HOST_INPUT_MOD_LALT,STATE_L_ALT}, {PS_HOST_INPUT_MOD_LGUI,STATE_L_GUI},
+        {PS_HOST_INPUT_MOD_RCTRL,STATE_R_CTRL}, {PS_HOST_INPUT_MOD_RSHIFT,STATE_R_SHIFT},
+        {PS_HOST_INPUT_MOD_RALT,STATE_R_ALT}, {PS_HOST_INPUT_MOD_RGUI,STATE_R_GUI},
+        {PS_HOST_INPUT_MOD_NUM,STATE_NUM_LOCK}, {PS_HOST_INPUT_MOD_CAPS,STATE_CAPS_LOCK},
+        {PS_HOST_INPUT_MOD_SCROLL,STATE_SCROLL_LOCK},
     };
     uint32_t state=STATE_KEYCODE_VALID;
     if (p_key->character && p_key->character<0x10000) state|=STATE_CHARACTER_VALID;
@@ -163,7 +164,7 @@ static ABI int32_t keyboard_resource_id(int32_t user, ResourceIds *p_ids) {
     resource_ids(p_ids,user,keyboard);
     return !is_open ? IME_NOT_OPENED : keyboard ? 0 : IME_CONNECTION_FAILED;
 }
-/* The host's key repeat timing applies (SDL does not tell it), so delay and rate stay 0. */
+/* The host's key repeat timing applies (the host does not tell it), so delay and rate stay 0. */
 static ABI int32_t keyboard_info(uint32_t resource, KeyboardInfo *p_info) {
     if (!p_info) return IME_INVALID_ADDRESS;
     pthread_mutex_lock(&s_lock);

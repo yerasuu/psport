@@ -152,7 +152,7 @@ fi
 commit=$(git rev-parse --short=12 HEAD 2>/dev/null || true)
 if [[ -n $commit ]] && ! git diff --quiet HEAD 2>/dev/null; then commit+=-dirty; fi
 build_info=(-DPS_VERSION="\"$version\"" -DPS_COMMIT="\"$commit\"")
-"$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -pthread -no-pie "${profile[@]}" "${build_info[@]}" "${includes[@]}" -I. "${areas[@]/#/-Isrc/}" src/main/main.c src/main/cli.c src/main/game_info.c src/main/bind.c src/main/signals.c src/loader/loader*.c "${runtime[@]}" src/platform/*.c src/platform/linux/*.c src/main/vulkan_smoke.c out/libatrac9.a -lm "${gpu[@]}" "${libraries[@]}" -o out/psport
+"$CC" -std=c11 -O2 -g -Wall -Wextra -Werror -pthread -no-pie "${profile[@]}" "${build_info[@]}" "${includes[@]}" -I. "${areas[@]/#/-Isrc/}" src/main/main.c src/main/cli.c src/main/game_info.c src/main/bind.c src/main/signals.c src/loader/loader*.c "${runtime[@]}" src/platform/*.c src/platform/common/*.c src/platform/linux/*.c src/main/vulkan_smoke.c out/libatrac9.a -lm "${gpu[@]}" "${libraries[@]}" -o out/psport
 echo "Built $PWD/out/psport"
 # GPU check for run.sh (--host-env, live_resolution=auto) and the launcher's gamepad list (--gamepads).
 "$CC" -std=c11 -O2 -Wall -Wextra -Werror "${includes[@]}" -Isrc/runtime tools/gpu_capabilities.c src/runtime/runtime_quirks.c src/runtime/runtime_json_print.c "${libraries[@]}" -o out/psport-gpu-capabilities

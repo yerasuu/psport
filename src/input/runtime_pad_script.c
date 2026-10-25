@@ -7,7 +7,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <SDL3/SDL.h>
 
 static uint64_t now_us(void) { return ps_host_time_monotonic_ns()/1000u; }
 /* PS_PAD_FILE=<file>: scripted input for automated runs. The file holds whitespace-separated
@@ -76,9 +75,9 @@ static PadSample s_record_last;
 void runtime_pad_record_sample(const PadData *p_pad_data) {
     static const char *s_sz_path; static int s_checked, s_is_f9_held;
     if (!s_checked) { s_sz_path=runtime_env("PS_PAD_RECORD",NULL); s_checked=1; }
-    if (!s_sz_path || !*s_sz_path || !g_runtime_pad_sdl_ready) return;
-    const bool *p__bool=SDL_GetKeyboardState(NULL);
-    const int f9=p__bool && p__bool[SDL_SCANCODE_F9];
+    if (!s_sz_path || !*s_sz_path || !g_runtime_pad_host_ready) return;
+    const bool *p__bool=ps_host_input_keyboard_state();
+    const int f9=p__bool && p__bool[PS_HOST_INPUT_KEY_F9];
     if (f9 && !s_is_f9_held) {
         if (s_p_record_file) {
             fclose(s_p_record_file); s_p_record_file=NULL;
