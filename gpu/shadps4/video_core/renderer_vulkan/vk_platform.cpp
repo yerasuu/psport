@@ -27,6 +27,7 @@
 #include "video_core/renderer_vulkan/vk_platform.h"
 #include "video_core/renderer_vulkan/vk_dlss.h"
 #include "../../src/platform/ps_host.h"
+#include "../../src/platform/ps_host_window_vulkan.h"
 
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
@@ -81,68 +82,24 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL DebugUtilsCallback(
     return VK_FALSE;
 }
 
+// psport: the window system's surface is made in gpu/platform/<os>/ (ps_host_window_vulkan.h).
 vk::SurfaceKHR CreateSurface(vk::Instance instance, const Frontend::WindowSDL& emu_window) {
-    const auto& window_info = emu_window.GetWindowInfo();
-    vk::SurfaceKHR surface{};
-
-#if defined(VK_USE_PLATFORM_WIN32_KHR)
-    if (window_info.type == Frontend::WindowSystemType::Windows) {
-        const vk::Win32SurfaceCreateInfoKHR win32_ci = {
-            .hinstance = nullptr,
-            .hwnd = static_cast<HWND>(window_info.render_surface),
-        };
-
-        if (instance.createWin32SurfaceKHR(&win32_ci, nullptr, &surface) != vk::Result::eSuccess) {
-            LOG_CRITICAL(Render_Vulkan, "Failed to initialize Win32 surface");
-            return {};
-        }
-    }
-#elif defined(VK_USE_PLATFORM_XLIB_KHR) || defined(VK_USE_PLATFORM_WAYLAND_KHR)
-    if (window_info.type == Frontend::WindowSystemType::X11) {
-        const vk::XlibSurfaceCreateInfoKHR xlib_ci = {
-            .dpy = static_cast<Display*>(window_info.display_connection),
-            .window = reinterpret_cast<Window>(window_info.render_surface),
-        };
-
-        if (instance.createXlibSurfaceKHR(&xlib_ci, nullptr, &surface) != vk::Result::eSuccess) {
-            LOG_CRITICAL(Render_Vulkan, "Failed to initialize Xlib surface");
-            return {};
-        }
-    } else if (window_info.type == Frontend::WindowSystemType::Wayland) {
-        if (EmulatorSettings.IsRenderdocEnabled()) {
-            LOG_ERROR(Render_Vulkan,
-                      "RenderDoc is not compatible with Wayland, use an X11 window instead.");
-        }
-
-        const vk::WaylandSurfaceCreateInfoKHR wayland_ci = {
-            .display = static_cast<wl_display*>(window_info.display_connection),
-            .surface = static_cast<wl_surface*>(window_info.render_surface),
-        };
-
-        if (instance.createWaylandSurfaceKHR(&wayland_ci, nullptr, &surface) !=
-            vk::Result::eSuccess) {
-            LOG_CRITICAL(Render_Vulkan, "Failed to initialize Wayland surface");
-            return {};
-        }
-    }
-#elif defined(VK_USE_PLATFORM_METAL_EXT)
-    if (window_info.type == Frontend::WindowSystemType::Metal) {
-        const vk::MetalSurfaceCreateInfoEXT macos_ci = {
-            .pLayer = static_cast<const CAMetalLayer*>(window_info.render_surface),
-        };
-
-        if (instance.createMetalSurfaceEXT(&macos_ci, nullptr, &surface) != vk::Result::eSuccess) {
-            LOG_CRITICAL(Render_Vulkan, "Failed to initialize MacOS surface");
-            return {};
-        }
-    }
-#endif
-
-    if (!surface) {
+    const PsHostWindowSurface* p_surface = emu_window.GetSurface();
+    VkSurfaceKHR h_surface = VK_NULL_HANDLE;
+    if (!p_surface) {
         LOG_CRITICAL(Render_Vulkan, "Presentation not supported on this platform");
+        return {};
     }
-
-    return surface;
+    if (EmulatorSettings.IsRenderdocEnabled() && !ps_host_window_vulkan_can_capture(p_surface)) {
+        LOG_ERROR(Render_Vulkan, "RenderDoc is not compatible with Wayland, use an X11 window instead.");
+    }
+    if (ps_host_window_vulkan_surface(p_surface, static_cast<VkInstance>(instance),
+                                      VULKAN_HPP_DEFAULT_DISPATCHER.vkGetInstanceProcAddr,
+                                      &h_surface) != 0) {
+        LOG_CRITICAL(Render_Vulkan, "Failed to initialize {} surface", ps_host_window_vulkan_system(p_surface));
+        return {};
+    }
+    return vk::SurfaceKHR{h_surface};
 }
 
 static auto GetLayerExtensions(std::vector<const char*>&& extensions,
@@ -176,8 +133,7 @@ static auto GetLayerExtensions(std::vector<const char*>&& extensions,
     return extensions;
 }
 
-std::vector<const char*> GetInstanceExtensions(Frontend::WindowSystemType window_type,
-                                               bool enable_debug_utils) {
+std::vector<const char*> GetInstanceExtensions(const PsHostWindowSurface* p_surface, bool enable_debug_utils) {
     const auto [properties_result, properties] = vk::enumerateInstanceExtensionProperties();
     if (properties_result != vk::Result::eSuccess || properties.empty()) {
         LOG_ERROR(Render_Vulkan, "Failed to query extension properties: {}",
@@ -189,28 +145,13 @@ std::vector<const char*> GetInstanceExtensions(Frontend::WindowSystemType window
     std::vector<const char*> extensions;
     extensions.reserve(7);
 
-    switch (window_type) {
-    case Frontend::WindowSystemType::Headless:
-        break;
-#if defined(VK_USE_PLATFORM_WIN32_KHR)
-    case Frontend::WindowSystemType::Windows:
-        extensions.push_back(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
-        break;
-#elif defined(VK_USE_PLATFORM_XLIB_KHR) || defined(VK_USE_PLATFORM_WAYLAND_KHR)
-    case Frontend::WindowSystemType::X11:
-        extensions.push_back(VK_KHR_XLIB_SURFACE_EXTENSION_NAME);
-        break;
-    case Frontend::WindowSystemType::Wayland:
-        extensions.push_back(VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME);
-        break;
-#elif defined(VK_USE_PLATFORM_METAL_EXT)
-    case Frontend::WindowSystemType::Metal:
-        extensions.push_back(VK_EXT_METAL_SURFACE_EXTENSION_NAME);
-        break;
-#endif
-    default:
-        LOG_ERROR(Render_Vulkan, "Presentation not supported on this platform");
-        break;
+    // psport: the window system's extension comes from gpu/platform/<os>/; none headless.
+    if (p_surface) {
+        if (const char* sz_extension = ps_host_window_vulkan_extension(p_surface)) {
+            extensions.push_back(sz_extension);
+        } else {
+            LOG_ERROR(Render_Vulkan, "Presentation not supported on this platform");
+        }
     }
 
     // The headless renderer creates the same logical device with VK_KHR_swapchain enabled;
@@ -275,7 +216,7 @@ std::vector<const char*> GetInstanceLayers(bool enable_validation, bool enable_c
     return layers;
 }
 
-vk::UniqueInstance CreateInstance(Frontend::WindowSystemType window_type, bool enable_validation,
+vk::UniqueInstance CreateInstance(const PsHostWindowSurface* p_surface, bool enable_validation,
                                   bool enable_crash_diagnostic, std::string* p_out_failure) {
     const auto fail = [p_out_failure](std::string failure) -> vk::UniqueInstance {
         if (p_out_failure) {
@@ -323,7 +264,7 @@ vk::UniqueInstance CreateInstance(Frontend::WindowSystemType window_type, bool e
     }
 
     const auto layers = GetInstanceLayers(enable_validation, enable_crash_diagnostic);
-    auto extensions = GetLayerExtensions(GetInstanceExtensions(window_type, true), layers);
+    auto extensions = GetLayerExtensions(GetInstanceExtensions(p_surface, true), layers);
     // psport: DLSS (optional bridge library) needs its own instance extensions.
     if (Dlss* dlss = Dlss::Get()) {
         dlss->AppendInstanceExtensions(extensions);

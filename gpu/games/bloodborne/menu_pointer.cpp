@@ -34,9 +34,8 @@
 #include <cstdlib>
 #include <cstring>
 
-#include <SDL3/SDL.h>
-
 #include "../../psport_gpu.h"
+#include "../../../src/platform/ps_host_window.h"
 #include "psport_guest_code.h"
 #include "psport_overlay.h"
 #include "psport_settings.h"
@@ -559,9 +558,9 @@ void PS4_SYSV_ABI OnListUpdate(std::uint64_t, PsGuestCode::Registers* p_register
 }
 
 /// Window coordinates to the stage's (1920x1080, centred in the shown frame, scaled by height).
-void SetPointer(SDL_Window* p_window, float window_x, float window_y) {
+void SetPointer(PsHostWindow* p_window, float window_x, float window_y) {
     int width = 0, height = 0;
-    SDL_GetWindowSize(p_window, &width, &height);
+    ps_host_window_size(p_window, &width, &height);
     if (width <= 0 || height <= 0) {
         return;
     }
@@ -648,26 +647,25 @@ bool WantsPointer() {
     return is_menu;
 }
 
-bool WindowEvent(const void* p_sdl_event, void* p_sdl_window) {
+bool WindowEvent(const PsHostWindowEvent* p_event, PsHostWindow* p_window) {
     if (!s_is_installed.load(std::memory_order_acquire)) {
         return false;
     }
-    const auto& event = *static_cast<const SDL_Event*>(p_sdl_event);
-    auto* p_window = static_cast<SDL_Window*>(p_sdl_window);
-    switch (event.type) {
-    case SDL_EVENT_MOUSE_MOTION:
+    const PsHostWindowEvent& event = *p_event;
+    switch (event.kind) {
+    case PS_HOST_WINDOW_EVENT_MOUSE_MOTION:
         if (!psport_gpu_mouse_captured()) {
             SetPointer(p_window, event.motion.x, event.motion.y);
         }
         return false;
-    case SDL_EVENT_WINDOW_MOUSE_LEAVE:
+    case PS_HOST_WINDOW_EVENT_MOUSE_LEAVE:
         s_is_pointer_in.store(false, std::memory_order_relaxed);
         return false;
     default:
         break;
     }
     const bool is_ours = !psport_gpu_mouse_captured() && !PsOverlay::MenuOpen() && IsInMenu();
-    if (event.type == SDL_EVENT_MOUSE_BUTTON_UP && event.button.button == SDL_BUTTON_LEFT) {
+    if (event.kind == PS_HOST_WINDOW_EVENT_MOUSE_BUTTON_UP && event.button.button == PS_HOST_INPUT_MOUSE_LEFT) {
         s_is_left_held.store(false, std::memory_order_relaxed);
         s_repeat_press.store(0, std::memory_order_relaxed);
         return is_ours;
@@ -675,22 +673,22 @@ bool WindowEvent(const void* p_sdl_event, void* p_sdl_window) {
     if (!is_ours) {
         return false;
     }
-    if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
+    if (event.kind == PS_HOST_WINDOW_EVENT_MOUSE_BUTTON_DOWN) {
         SetPointer(p_window, event.button.x, event.button.y);
-        if (event.button.button == SDL_BUTTON_LEFT) {
+        if (event.button.button == PS_HOST_INPUT_MOUSE_LEFT) {
             s_is_left_held.store(true, std::memory_order_relaxed);
             s_click_ms.store(NowMs(), std::memory_order_relaxed);
             s_is_click_pending.store(true, std::memory_order_relaxed);
-        } else if (event.button.button == SDL_BUTTON_RIGHT) {
+        } else if (event.button.button == PS_HOST_INPUT_MOUSE_RIGHT) {
             s_presses.fetch_or(BackButton(), std::memory_order_relaxed);
         }
         return true;
     }
-    if (event.type == SDL_EVENT_MOUSE_BUTTON_UP) {
+    if (event.kind == PS_HOST_WINDOW_EVENT_MOUSE_BUTTON_UP) {
         return true;
     }
-    if (event.type == SDL_EVENT_MOUSE_WHEEL) {
-        const float notches = event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -event.wheel.y : event.wheel.y;
+    if (event.kind == PS_HOST_WINDOW_EVENT_MOUSE_WHEEL) {
+        const float notches = event.wheel.is_flipped ? -event.wheel.y : event.wheel.y;
         if (notches != 0.0f) {
             s_presses.fetch_or(notches > 0.0f ? Up : Down, std::memory_order_relaxed);
         }

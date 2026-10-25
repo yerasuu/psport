@@ -13,6 +13,7 @@
 #include <time.h>
 #include "ps_host_audio.h"
 #include "ps_host_input.h"
+#include "ps_host_window.h"
 #ifdef __cplusplus
 extern "C" {
 #endif

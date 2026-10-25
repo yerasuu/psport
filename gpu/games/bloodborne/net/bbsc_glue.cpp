@@ -15,8 +15,6 @@
 #include <string_view>
 #include <system_error>
 
-#include <SDL3/SDL_events.h>
-
 #include "../psport_gpu.h"
 #include "../port/psport_guest_code.h"
 #include "common/memory_patcher.h"
@@ -102,9 +100,8 @@ void ImageReady(std::uint64_t va_image, std::uint64_t cb_image) {
     // the game runs (session teardown, the host's lamp).
     PsGuestCode::KeepWritable(va_image, cb_image);
     if (Core::Bbsc::SwitchEnabled("SHADPS4_BBSC_CINEMATIC") &&
-        !psport_gpu_add_event_filter([](const void* p_event, void* p_window) -> int {
-            return Core::Bbsc::CinematicHandleEvent(*static_cast<const SDL_Event*>(p_event),
-                                                    static_cast<SDL_Window*>(p_window));
+        !psport_gpu_add_event_filter([](const PsHostWindowEvent* p_event, PsHostWindow* p_window) -> int {
+            return Core::Bbsc::CinematicHandleEvent(*p_event, p_window);
         })) {
         std::printf("BBSC: the cinematic camera gets no window events (F1 does nothing)\n");
     }

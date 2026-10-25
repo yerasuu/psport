@@ -9,11 +9,9 @@
 #include <span>
 #include <string>
 #include "../psport_gpu.h"
+#include "../../src/platform/ps_host_window.h"
 #include "common/types.h"
 #include "video_core/renderer_vulkan/vk_common.h"
-
-union SDL_Event;
-struct SDL_Window;
 
 namespace Vulkan {
 class Instance;
@@ -24,10 +22,10 @@ namespace PsOverlay {
 /// Present thread, once: the ImGui context and its Vulkan backend.
 void Init(const Vulkan::Instance& instance, vk::Format format, u32 c_images);
 
-/// Window thread, for every SDL event: true when the menu consumed it.
-bool HandleEvent(const SDL_Event& event);
-/// Turns SDL text input on while the menu edits a value (window thread, once per poll).
-void UpdateTextInput(SDL_Window* p_window);
+/// Window thread, for every window event: true when the menu consumed it.
+bool HandleEvent(const PsHostWindowEvent& event);
+/// Turns the window's text input on while the menu edits a value (window thread, once per poll).
+void UpdateTextInput(PsHostWindow* p_window);
 
 /// Whether anything is drawn this frame (menu open or FPS counter on).
 bool Visible();

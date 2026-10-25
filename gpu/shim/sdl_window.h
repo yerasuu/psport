@@ -1,5 +1,7 @@
 // psport: the game window. Created by the VideoOut driver on first open; the
-// event pump runs on the port's window thread (see window.cpp).
+// event pump runs on the port's window thread (see window.cpp). The window itself is the platform
+// layer's (src/platform/ps_host_window.h); WindowSDL keeps the name of the shadPS4 class it stands
+// in for, so that the renderer takes it unchanged.
 #pragma once
 #include <atomic>
 #include <bitset>
@@ -7,10 +9,8 @@
 #include <mutex>
 #include <string>
 #include "../psport_gpu.h"
+#include "../../src/platform/ps_host_window.h"
 #include "common/types.h"
-
-struct SDL_Window;
-union SDL_Event;
 
 namespace PsOverlay {
 struct KeyPress;
@@ -18,25 +18,16 @@ struct KeyPress;
 
 namespace Frontend {
 
-enum class WindowSystemType : u8 { Headless, Windows, X11, Wayland, Metal };
-
-struct WindowSystemInfo {
-    void* display_connection = nullptr;
-    void* render_surface = nullptr;
-    float render_surface_scale = 1.0f;
-    WindowSystemType type = WindowSystemType::Headless;
-};
-
 class WindowSDL {
 public:
     WindowSDL(s32 width, s32 height, const char* sz_title, const char* sz_icon_path);
     ~WindowSDL();
     s32 GetWidth() const { return m_width.load(std::memory_order_relaxed); }
     s32 GetHeight() const { return m_height.load(std::memory_order_relaxed); }
-    /// False when SDL video, the window or its video driver failed; the reason is in the log.
+    /// False when the host's windowing, the window or its window system failed; the reason is in the log.
     bool IsCreated() const { return m_p_window != nullptr; }
-    SDL_Window* GetSDLWindow() const { return m_p_window; }
-    WindowSystemInfo GetWindowInfo() const { return m_window_info; }
+    /// What the renderer's surface is made from (ps_host_window_vulkan.h).
+    const PsHostWindowSurface* GetSurface() const { return m_p_surface; }
     bool IsOpen() const { return m_is_open.load(std::memory_order_relaxed); }
     /// Processes pending window events. Returns false once the user closed the window.
     bool PollEvents();
@@ -58,7 +49,7 @@ public:
     static void EnableMouseLook(bool is_enabled) { m_is_mouse_look.store(is_enabled, std::memory_order_relaxed); }
     /// From any thread: the window takes the mouse at its next poll (psport_gpu_mouse_capture).
     void RequestMouseCapture() { m_is_capture_requested.store(true, std::memory_order_relaxed); }
-    /// libSceMouse (psport_gpu_game_mouse_take): the buttons held (SDL_BUTTON_MASK bits), and the motion,
+    /// libSceMouse (psport_gpu_game_mouse_take): the buttons held (PS_HOST_INPUT_MOUSE_MASK bits), and the motion,
     /// wheel and tilt since the last call, reset. False while the host has no mouse.
     bool TakeGameMouse(s32& dx, s32& dy, s32& wheel, s32& tilt, u32& buttons);
     /// libSceImeKeyboard (psport_gpu_game_keyboard_*): while open, the keys the port does not keep are
@@ -76,15 +67,15 @@ private:
     void UpdateTextTitle();
     void PressKeyboardKey(const PsOverlay::KeyPress& press);
     void UpdateCursor();
-    u64 m_last_mouse_motion_ms{}; ///< SDL_GetTicks of the last mouse motion (UpdateCursor)
+    u64 m_last_mouse_motion_ms{}; ///< ps_host_window_ticks_ms of the last mouse motion (UpdateCursor)
     bool m_is_cursor_hidden{};
-    u64 m_capture_settle_ms{};       ///< mouse motion before this (SDL_GetTicks) is not looking around
+    u64 m_capture_settle_ms{};       ///< mouse motion before this (ps_host_window_ticks_ms) is not looking around
     bool m_is_pointer_shown{};       ///< a game's pointer menu is open (Game::MouseHooks pfn_wants_pointer)
     bool m_is_released_for_pointer{}; ///< the mouse was let go for it: taken back after
     bool m_is_released_for_focus{};   ///< held when the window lost focus: taken back when it returns
-    u64 m_focus_recapture_ms{};       ///< SDL_GetTicks at which it is taken back, unless a click takes it first
+    u64 m_focus_recapture_ms{};       ///< ps_host_window_ticks_ms when it is taken back, unless a click takes it first
     void CaptureMouse(bool should_capture);
-    void GameMouseEvent(const SDL_Event& event);
+    void GameMouseEvent(const PsHostWindowEvent& event);
     std::mutex m_mouse_mutex;
     double m_mouse_dx{}, m_mouse_dy{};
     int m_c_wheel_up{}, m_c_wheel_down{};
@@ -95,7 +86,7 @@ private:
     float m_game_wheel{}, m_game_tilt{};
     u32 m_game_buttons{};
     std::atomic<bool> m_is_host_mouse{false};
-    void GameKeyEvent(const SDL_Event& event);
+    void GameKeyEvent(const PsHostWindowEvent& event);
     void SyncGameKeyboard();
     std::mutex m_key_mutex;
     std::deque<PsKeyEvent> m_game_keys;
@@ -104,8 +95,8 @@ private:
     bool m_is_game_keyboard_synced{};
     std::atomic<bool> m_is_host_keyboard{false};
     static inline std::atomic<bool> m_is_game_keyboard_open{false};
-    SDL_Window* m_p_window{};
-    WindowSystemInfo m_window_info{};
+    PsHostWindow* m_p_window{};
+    const PsHostWindowSurface* m_p_surface{};
 };
 
 } // namespace Frontend

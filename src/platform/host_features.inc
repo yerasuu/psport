@@ -233,8 +233,15 @@ FEATURE_HOST(movie_skip, WIN32, EXPERIMENTAL, "SDL3 and AvPlayer as on Linux (ru
              "#614")
 
 FEATURE(window, io, "the game's window and its Vulkan surface")
-FEATURE_HOST(window, LINUX, IMPLEMENTED, "SDL3 (gpu/shim/window.cpp)", "#540")
-FEATURE_HOST(window, WIN32, EXPERIMENTAL, "SDL3 (gpu/shim/window.cpp), not run with a game yet", "#614")
+FEATURE_HOST(window, LINUX, IMPLEMENTED,
+             "SDL3, a shared backend for Linux and Windows (gpu/platform/common/host_window.cpp; gpu/shim/window.cpp), "
+             "X11 and Wayland surfaces through VK_KHR_xlib_surface and VK_KHR_wayland_surface "
+             "(gpu/platform/linux/host_window_surface.cpp)",
+             "#1009")
+FEATURE_HOST(window, WIN32, EXPERIMENTAL,
+             "SDL3, the backend shared with Linux (gpu/platform/common/host_window.cpp), the Win32 surface through "
+             "VK_KHR_win32_surface (gpu/platform/win32/host_window_surface.cpp), not run with a game yet",
+             "#1009")
 
 FEATURE(sockets, net, "the guest's sockets (libSceNet and the POSIX socket calls) on host sockets, loopback when offline")
 FEATURE_HOST(sockets, LINUX, IMPLEMENTED,

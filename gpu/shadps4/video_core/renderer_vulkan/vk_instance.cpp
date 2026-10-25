@@ -122,17 +122,17 @@ std::string GetReadableVersion(u32 version) {
 } // Anonymous namespace
 
 Instance::Instance(bool enable_validation, bool enable_crash_diagnostic)
-    : instance{CreateInstance(Frontend::WindowSystemType::Headless, enable_validation,
+    : instance{CreateInstance(nullptr, enable_validation,
                               enable_crash_diagnostic)},
       physical_devices{EnumeratePhysicalDevices(instance)} {}
 
 Instance::Instance(Frontend::WindowSDL& window, s32 physical_device_index,
                    bool enable_validation /*= false*/, bool enable_crash_diagnostic /*= false*/)
-    : Instance(window.GetWindowInfo(), physical_device_index, enable_validation, enable_crash_diagnostic) {}
+    : Instance(window.GetSurface(), physical_device_index, enable_validation, enable_crash_diagnostic) {}
 
-Instance::Instance(const Frontend::WindowSystemInfo& window_info, s32 physical_device_index,
+Instance::Instance(const PsHostWindowSurface* p_surface, s32 physical_device_index,
                    bool enable_validation, bool enable_crash_diagnostic)
-    : instance{CreateInstance(window_info.type, enable_validation, enable_crash_diagnostic, &m_instance_failure)},
+    : instance{CreateInstance(p_surface, enable_validation, enable_crash_diagnostic, &m_instance_failure)},
       physical_devices{EnumeratePhysicalDevices(instance)} {
     if (!instance) {
         return;

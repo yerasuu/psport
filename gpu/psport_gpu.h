@@ -90,15 +90,17 @@ void psport_gpu_filter_pad(uint32_t *p_buttons, const uint8_t *p_sticks);
  * running title's own skip (Game::Profile pfn_skip_scene), 1 when it took the press. */
 int psport_gpu_skip_movies(void);
 int psport_gpu_skip_scene(int has_stopped_movie);
-/* A game module's look at every window event first (an SDL_Event and the SDL_Window, on the window
+/* A game module's look at every window event first (src/platform/ps_host_window.h, on the window
  * thread), before the profile's (Game::MouseHooks pfn_window_event): nonzero takes the event, and
  * neither the port nor the game sees it. Up to 4, never removed; 0 when all are taken. */
-typedef int (*PsGpuEventFilter)(const void *p_sdl_event, void *p_sdl_window);
+struct PsHostWindowEvent;
+struct PsHostWindow;
+typedef int (*PsGpuEventFilter)(const struct PsHostWindowEvent *p_event, struct PsHostWindow *p_window);
 int psport_gpu_add_event_filter(PsGpuEventFilter pfn_filter);
 /* A game module's line of text over the game, near the bottom, until called with NULL (any
  * thread): what it shows while the game's own picture is black (a co-op extension's loads). */
 void psport_gpu_overlay_banner(const char *sz_utf8);
-/* libSceMouse (runtime_mouse.c): the host mouse's buttons (SDL_BUTTON_MASK bits) and its motion
+/* libSceMouse (runtime_mouse.c): the host mouse's buttons (PS_HOST_INPUT_MOUSE_MASK bits) and its motion
  * (pixels), wheel and tilt (notches) since the last call, reset; returns 0 while there is no window
  * or the host has no mouse. */
 int psport_gpu_game_mouse_take(int32_t *p_dx, int32_t *p_dy, int32_t *p_wheel, int32_t *p_tilt, uint32_t *p_buttons);
@@ -110,7 +112,7 @@ int psport_gpu_game_mouse_take(int32_t *p_dx, int32_t *p_dy, int32_t *p_wheel, i
 typedef struct {
     uint64_t time_us; /* CLOCK_REALTIME */
     uint32_t character;
-    uint16_t scancode, mod; /* SDL_Scancode (USB HID usage), SDL_Keymod */
+    uint16_t scancode, mod; /* USB HID usage, PS_HOST_INPUT_MOD_* bits (src/platform/ps_host_input.h) */
     uint8_t down, repeat;
 } PsKeyEvent;
 void psport_gpu_game_keyboard_open(int is_open);

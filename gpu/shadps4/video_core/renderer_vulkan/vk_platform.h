@@ -13,9 +13,9 @@
 #include "video_core/renderer_vulkan/vk_breadcrumbs.h"
 
 namespace Frontend {
-enum class WindowSystemType : u8;
 class WindowSDL;
 } // namespace Frontend
+struct PsHostWindowSurface; // psport: src/platform/ps_host_window.h
 
 namespace Vulkan {
 
@@ -23,8 +23,8 @@ constexpr u32 TargetVulkanApiVersion = VK_API_VERSION_1_3;
 
 vk::SurfaceKHR CreateSurface(vk::Instance instance, const Frontend::WindowSDL& emu_window);
 
-/// psport: on failure (a null instance) p_out_failure, when given, says why.
-vk::UniqueInstance CreateInstance(Frontend::WindowSystemType window_type, bool enable_validation,
+/// psport: on failure (a null instance) p_out_failure, when given, says why. A null surface: headless.
+vk::UniqueInstance CreateInstance(const PsHostWindowSurface* p_surface, bool enable_validation,
                                   bool enable_crash_diagnostic, std::string* p_out_failure = nullptr);
 
 vk::UniqueDebugUtilsMessengerEXT CreateDebugCallback(vk::Instance instance);

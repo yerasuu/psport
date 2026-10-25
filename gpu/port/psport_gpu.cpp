@@ -9,7 +9,6 @@
 #include <string>
 #include <thread>
 #include <vector>
-#include <SDL3/SDL.h>
 #include <unistd.h>
 #include "../psport_gpu.h"
 #include "../../src/platform/ps_host.h"
@@ -88,7 +87,7 @@ s32 PS4_SYSV_ABI sceKernelGetCompiledSdkVersion(s32* p_ver) {
 } // namespace Libraries::Kernel
 
 namespace {
-// SDL video must be driven from one thread: the window lives on its own host thread.
+// The host's windowing must be driven from one thread: the window lives on its own host thread.
 std::thread s_window_thread;
 std::mutex s_window_mutex;
 std::condition_variable s_window_cv;
@@ -152,7 +151,7 @@ extern "C" int psport_gpu_init(const PsGpuConfig* p_config) {
         }
         s_window_cv.notify_all();
         while (p_window->PollEvents()) {
-            SDL_Delay(2);
+            ps_host_window_delay_ms(2);
         }
         psport_gpu_flush_caches(1);
         runtime_report();

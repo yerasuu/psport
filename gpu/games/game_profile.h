@@ -16,6 +16,7 @@
 #include <string>
 #include <vector>
 #include "../psport_gpu.h"
+#include "../../src/platform/ps_host_window.h"
 #include "psport_quirks.h"
 
 namespace PsGlyphs {
@@ -184,9 +185,9 @@ struct MouseHooks {
     /// (radians) at its next update. False while the camera does not take turns (lock-on, menus)
     /// or its hook is not in: the mouse drives the right stick then.
     bool (*pfn_camera_look)(float pitch, float yaw) = nullptr;
-    /// Every window event first (an SDL_Event and the SDL_Window, on the window thread): true takes
+    /// Every window event first (src/platform/ps_host_window.h, on the window thread): true takes
     /// it, and neither the port nor the game sees it.
-    bool (*pfn_window_event)(const void* p_sdl_event, void* p_sdl_window) = nullptr;
+    bool (*pfn_window_event)(const PsHostWindowEvent* p_event, PsHostWindow* p_window) = nullptr;
     /// True while the game shows a menu the mouse points into: the window lets the mouse go and
     /// shows the cursor, and takes the mouse back after (as it had it).
     bool (*pfn_wants_pointer)() = nullptr;

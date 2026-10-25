@@ -7,6 +7,7 @@
 #pragma once
 
 #include <cstdint>
+#include "../../../src/platform/ps_host_window.h"
 
 namespace PsMenuPointer {
 /// Hooks the game's list update (the profile's patch_image, before the game runs). Nothing happens
@@ -15,7 +16,7 @@ void PatchImage(unsigned char* p_image, std::uint64_t cb_image);
 
 /// Game::MouseHooks: the window's events (window thread), whether a menu wants the pointer, and
 /// the pointer's presses in the pad state the game reads (game thread).
-bool WindowEvent(const void* p_sdl_event, void* p_sdl_window);
+bool WindowEvent(const PsHostWindowEvent* p_event, PsHostWindow* p_window);
 bool WantsPointer();
 void FilterPad(std::uint32_t* p_buttons, const std::uint8_t* p_sticks);
 

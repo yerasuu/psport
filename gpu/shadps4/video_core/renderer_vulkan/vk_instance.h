@@ -13,8 +13,8 @@
 
 namespace Frontend {
 class WindowSDL;
-struct WindowSystemInfo;
 }
+struct PsHostWindowSurface; // psport: src/platform/ps_host_window.h
 
 VK_DEFINE_HANDLE(VmaAllocator)
 
@@ -598,8 +598,8 @@ public:
     /// psport: what stopped IsCreated, for a caller that reports it (empty once created).
     [[nodiscard]] std::string DescribeFailure() const;
 
-    /// psport: public for a device without a window (WindowSystemType::Headless).
-    Instance(const Frontend::WindowSystemInfo&, s32, bool, bool);
+    /// psport: public for a device without a window (a null surface).
+    Instance(const PsHostWindowSurface*, s32, bool, bool);
 
 private:
     /// Creates the logical device opportunistically enabling extensions

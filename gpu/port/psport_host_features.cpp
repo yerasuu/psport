@@ -16,7 +16,7 @@ namespace {
 std::string s_fsr4, s_fsr411, s_dlss;
 
 void ProbeUpscalers() {
-    const Vulkan::Instance instance{Frontend::WindowSystemInfo{}, EmulatorSettings.GetGpuId(),
+    const Vulkan::Instance instance{nullptr, EmulatorSettings.GetGpuId(),
                                     EmulatorSettings.IsVkValidationEnabled(),
                                     EmulatorSettings.IsVkCrashDiagnosticEnabled()};
     if (!instance.IsCreated()) {

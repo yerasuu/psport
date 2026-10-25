@@ -10,9 +10,6 @@
 
 #include <mutex>
 
-#include <SDL3/SDL_events.h>
-#include <SDL3/SDL_mouse.h>
-
 #include "common/logging/log.h"
 #include "core/bbsc_cinematic.h"
 #include "core/bbsc_persistence.h"
@@ -29,100 +26,100 @@ bool CinematicEnabledBySwitch() {
     return enabled;
 }
 
-void SetKey(SDL_Keycode key, bool down) {
+void SetKey(u32 key, bool down) {
     switch (key) {
-    case SDLK_W: cine_state.forward = down; break;
-    case SDLK_S: cine_state.back = down; break;
-    case SDLK_A: cine_state.left = down; break;
-    case SDLK_D: cine_state.right = down; break;
-    case SDLK_E:
-    case SDLK_SPACE: cine_state.up = down; break;
-    case SDLK_Q:
-    case SDLK_C: cine_state.down = down; break;
-    case SDLK_LSHIFT:
-    case SDLK_RSHIFT: cine_state.fast = down; break;
-    case SDLK_LALT:
-    case SDLK_RALT: cine_state.slow = down; break;
-    case SDLK_Z: cine_state.zoom_in = down; break;
-    case SDLK_X: cine_state.zoom_out = down; break;
-    case SDLK_V: cine_state.zoom_reset = cine_state.zoom_reset || down; break;
-    case SDLK_COMMA: cine_state.roll_left = down; break;
-    case SDLK_PERIOD: cine_state.roll_right = down; break;
-    case SDLK_SLASH: cine_state.roll_reset = cine_state.roll_reset || down; break;
-    case SDLK_UP: cine_state.look_up = down; break;
-    case SDLK_DOWN: cine_state.look_down = down; break;
-    case SDLK_LEFT: cine_state.look_left = down; break;
-    case SDLK_RIGHT: cine_state.look_right = down; break;
-    case SDLK_LEFTBRACKET:
+    case PS_HOST_WINDOW_KEYCODE_W: cine_state.forward = down; break;
+    case PS_HOST_WINDOW_KEYCODE_S: cine_state.back = down; break;
+    case PS_HOST_WINDOW_KEYCODE_A: cine_state.left = down; break;
+    case PS_HOST_WINDOW_KEYCODE_D: cine_state.right = down; break;
+    case PS_HOST_WINDOW_KEYCODE_E:
+    case PS_HOST_WINDOW_KEYCODE_SPACE: cine_state.up = down; break;
+    case PS_HOST_WINDOW_KEYCODE_Q:
+    case PS_HOST_WINDOW_KEYCODE_C: cine_state.down = down; break;
+    case PS_HOST_WINDOW_KEYCODE_LSHIFT:
+    case PS_HOST_WINDOW_KEYCODE_RSHIFT: cine_state.fast = down; break;
+    case PS_HOST_WINDOW_KEYCODE_LALT:
+    case PS_HOST_WINDOW_KEYCODE_RALT: cine_state.slow = down; break;
+    case PS_HOST_WINDOW_KEYCODE_Z: cine_state.zoom_in = down; break;
+    case PS_HOST_WINDOW_KEYCODE_X: cine_state.zoom_out = down; break;
+    case PS_HOST_WINDOW_KEYCODE_V: cine_state.zoom_reset = cine_state.zoom_reset || down; break;
+    case PS_HOST_WINDOW_KEYCODE_COMMA: cine_state.roll_left = down; break;
+    case PS_HOST_WINDOW_KEYCODE_PERIOD: cine_state.roll_right = down; break;
+    case PS_HOST_WINDOW_KEYCODE_SLASH: cine_state.roll_reset = cine_state.roll_reset || down; break;
+    case PS_HOST_WINDOW_KEYCODE_UP: cine_state.look_up = down; break;
+    case PS_HOST_WINDOW_KEYCODE_DOWN: cine_state.look_down = down; break;
+    case PS_HOST_WINDOW_KEYCODE_LEFT: cine_state.look_left = down; break;
+    case PS_HOST_WINDOW_KEYCODE_RIGHT: cine_state.look_right = down; break;
+    case PS_HOST_WINDOW_KEYCODE_LEFTBRACKET:
         if (down) --cine_state.smooth_steps;
         break;
-    case SDLK_RIGHTBRACKET:
+    case PS_HOST_WINDOW_KEYCODE_RIGHTBRACKET:
         if (down) ++cine_state.smooth_steps;
         break;
     default: break;
     }
 }
 
-void ReleaseAll(SDL_Window* window) {
+void ReleaseAll(PsHostWindow* window) {
     const bool enabled = cine_state.enabled;
     cine_state = CinematicInput{};
     cine_state.enabled = enabled;
     if (looking && window != nullptr) {
-        SDL_SetWindowRelativeMouseMode(window, false);
+        ps_host_window_set_relative_mouse(window, false);
     }
     looking = false;
 }
 
 } // namespace
 
-bool CinematicHandleEvent(const SDL_Event& event, SDL_Window* window) {
+bool CinematicHandleEvent(const PsHostWindowEvent& event, PsHostWindow* window) {
     if (!CinematicEnabledBySwitch()) {
         return false;
     }
     std::scoped_lock lock{cine_mutex};
-    if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_F1) {
-        if (!event.key.repeat) {
+    if (event.kind == PS_HOST_WINDOW_EVENT_KEY_DOWN && event.key.keycode == PS_HOST_WINDOW_KEYCODE_F1) {
+        if (!event.key.is_repeat) {
             cine_state.enabled = !cine_state.enabled;
             ReleaseAll(window);
             LOG_INFO(Debug, "BBSC cinematic camera: {} (F1)", cine_state.enabled ? "on" : "off");
         }
         return true;
     }
-    if (event.type == SDL_EVENT_KEY_UP && event.key.key == SDLK_F1) {
+    if (event.kind == PS_HOST_WINDOW_EVENT_KEY_UP && event.key.keycode == PS_HOST_WINDOW_KEYCODE_F1) {
         return true;
     }
     if (!cine_state.enabled) {
         return false;
     }
-    switch (event.type) {
-    case SDL_EVENT_KEY_DOWN:
-    case SDL_EVENT_KEY_UP: {
-        const SDL_Keycode key = event.key.key;
-        if (key >= SDLK_F2 && key <= SDLK_F12) {
+    switch (event.kind) {
+    case PS_HOST_WINDOW_EVENT_KEY_DOWN:
+    case PS_HOST_WINDOW_EVENT_KEY_UP: {
+        const u32 key = event.key.keycode;
+        if (key >= PS_HOST_WINDOW_KEYCODE_F2 && key <= PS_HOST_WINDOW_KEYCODE_F12) {
             return false; // the emulator's own hotkeys (fullscreen, fps, pause...) keep working
         }
-        SetKey(key, event.type == SDL_EVENT_KEY_DOWN);
+        SetKey(key, event.kind == PS_HOST_WINDOW_EVENT_KEY_DOWN);
         return true;
     }
-    case SDL_EVENT_MOUSE_BUTTON_DOWN:
-    case SDL_EVENT_MOUSE_BUTTON_UP:
-        if (event.button.button == SDL_BUTTON_RIGHT) {
-            looking = event.type == SDL_EVENT_MOUSE_BUTTON_DOWN;
+    case PS_HOST_WINDOW_EVENT_MOUSE_BUTTON_DOWN:
+    case PS_HOST_WINDOW_EVENT_MOUSE_BUTTON_UP:
+        if (event.button.button == PS_HOST_INPUT_MOUSE_RIGHT) {
+            looking = event.kind == PS_HOST_WINDOW_EVENT_MOUSE_BUTTON_DOWN;
             if (window != nullptr) {
-                SDL_SetWindowRelativeMouseMode(window, looking);
+                ps_host_window_set_relative_mouse(window, looking);
             }
         }
         return true;
-    case SDL_EVENT_MOUSE_MOTION:
+    case PS_HOST_WINDOW_EVENT_MOUSE_MOTION:
         if (looking) {
-            cine_state.mouse_dx += event.motion.xrel;
-            cine_state.mouse_dy += event.motion.yrel;
+            cine_state.mouse_dx += event.motion.dx;
+            cine_state.mouse_dy += event.motion.dy;
         }
         return true;
-    case SDL_EVENT_MOUSE_WHEEL:
+    case PS_HOST_WINDOW_EVENT_MOUSE_WHEEL:
         cine_state.wheel += event.wheel.y > 0.0f ? 1 : (event.wheel.y < 0.0f ? -1 : 0);
         return true;
-    case SDL_EVENT_WINDOW_FOCUS_LOST:
+    case PS_HOST_WINDOW_EVENT_FOCUS_LOST:
         ReleaseAll(window);
         return false;
     default:

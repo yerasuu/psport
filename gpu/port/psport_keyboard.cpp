@@ -8,8 +8,8 @@
 #include <mutex>
 #include <span>
 
-#include <SDL3/SDL.h>
 #include "../psport_gpu.h"
+#include "../../src/platform/ps_host_input.h"
 #include "imgui.h"
 #include "psport_settings.h"
 
@@ -183,10 +183,10 @@ KeyPress PressCursorKey() {
 
 Direction DpadDirection(u8 button) {
     switch (button) {
-    case SDL_GAMEPAD_BUTTON_DPAD_UP: return Direction::Up;
-    case SDL_GAMEPAD_BUTTON_DPAD_DOWN: return Direction::Down;
-    case SDL_GAMEPAD_BUTTON_DPAD_LEFT: return Direction::Left;
-    case SDL_GAMEPAD_BUTTON_DPAD_RIGHT: return Direction::Right;
+    case PS_HOST_PAD_BUTTON_DPAD_UP: return Direction::Up;
+    case PS_HOST_PAD_BUTTON_DPAD_DOWN: return Direction::Down;
+    case PS_HOST_PAD_BUTTON_DPAD_LEFT: return Direction::Left;
+    case PS_HOST_PAD_BUTTON_DPAD_RIGHT: return Direction::Right;
     default: return Direction::None;
     }
 }
@@ -323,27 +323,27 @@ bool KeyboardButton(u8 button, bool is_down, KeyPress& out_press) {
         return true;
     }
     switch (button) {
-    case SDL_GAMEPAD_BUTTON_SOUTH:
+    case PS_HOST_PAD_BUTTON_SOUTH:
         if (is_down) {
             out_press = PressCursorKey();
         }
         return true;
-    case SDL_GAMEPAD_BUTTON_EAST:
+    case PS_HOST_PAD_BUTTON_EAST:
         if (is_down) {
             out_press.action = KeyAction::Back;
         }
         return true;
-    case SDL_GAMEPAD_BUTTON_WEST:
+    case PS_HOST_PAD_BUTTON_WEST:
         if (is_down) {
             out_press.action = KeyAction::Erase;
         }
         return true;
-    case SDL_GAMEPAD_BUTTON_NORTH:
+    case PS_HOST_PAD_BUTTON_NORTH:
         if (is_down) {
             out_press = {KeyAction::Type, " "};
         }
         return true;
-    case SDL_GAMEPAD_BUTTON_START:
+    case PS_HOST_PAD_BUTTON_START:
         if (is_down) {
             out_press.action = KeyAction::Accept;
         }
@@ -356,20 +356,20 @@ bool KeyboardButton(u8 button, bool is_down, KeyPress& out_press) {
 void KeyboardAxis(u8 axis, s16 value) {
     std::scoped_lock lock{s_keyboard_mutex};
     switch (axis) {
-    case SDL_GAMEPAD_AXIS_LEFTX:
+    case PS_HOST_PAD_AXIS_LEFTX:
         s_stick_x = StickDirection(s_stick_x, value, Direction::Left, Direction::Right);
         UpdateHeld();
         break;
-    case SDL_GAMEPAD_AXIS_LEFTY:
+    case PS_HOST_PAD_AXIS_LEFTY:
         s_stick_y = StickDirection(s_stick_y, value, Direction::Up, Direction::Down);
         UpdateHeld();
         break;
-    case SDL_GAMEPAD_AXIS_LEFT_TRIGGER:
+    case PS_HOST_PAD_AXIS_LEFT_TRIGGER:
         if (IsTriggerPulled(s_is_l2_down, value) && !IsDigits()) {
             CycleShift();
         }
         break;
-    case SDL_GAMEPAD_AXIS_RIGHT_TRIGGER:
+    case PS_HOST_PAD_AXIS_RIGHT_TRIGGER:
         if (IsTriggerPulled(s_is_r2_down, value)) {
             ToggleSymbols();
         }

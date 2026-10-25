@@ -15,7 +15,7 @@
 #include <string_view>
 #include <vector>
 
-#include <SDL3/SDL.h>
+#include "../../src/platform/ps_host_window.h"
 #include "psport_keyboard.h"
 #include "psport_settings.h"
 #include "common/elf_info.h"
@@ -26,27 +26,7 @@
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_temporal_upscaler.h"
 
-// DejaVu Sans (Cyrillic), embedded (third_party/fonts, Bitstream Vera license).
-// Windows objects are COFF, which has neither .hidden nor .previous.
-#ifdef _WIN32
-#define PS_FONT_SECTION ".section .rdata,\"dr\"\n"
-#define PS_FONT_HIDDEN(symbol) ""
-#define PS_FONT_SECTION_END ".text\n"
-#else
-#define PS_FONT_SECTION ".section .rodata\n"
-#define PS_FONT_HIDDEN(symbol) ".hidden " symbol "\n"
-#define PS_FONT_SECTION_END ".previous\n"
-#endif
-asm(PS_FONT_SECTION
-    ".balign 16\n"
-    PS_FONT_HIDDEN("psport_font_ttf")
-    ".global psport_font_ttf\n"
-    "psport_font_ttf:\n"
-    ".incbin \"" PS_FONT_PATH "\"\n"
-    PS_FONT_HIDDEN("psport_font_ttf_end")
-    ".global psport_font_ttf_end\n"
-    "psport_font_ttf_end:\n"
-    PS_FONT_SECTION_END);
+// DejaVu Sans (Cyrillic), embedded by gpu/platform/<os>/embedded_font.cpp.
 extern "C" const unsigned char psport_font_ttf[];
 extern "C" const unsigned char psport_font_ttf_end[];
 
@@ -76,7 +56,7 @@ std::string s_prompt_title, s_prompt_text;
 // from it until released.
 std::atomic<bool> s_is_close_prompt_open{false};
 std::atomic<bool> s_is_release_pending{false};
-SDL_Keycode s_release_key = SDLK_UNKNOWN;
+u32 s_release_key = PS_HOST_WINDOW_KEYCODE_UNKNOWN;
 int s_release_button = -1;
 
 // The game's message dialog (libSceMsgDialog): up while it runs, so the game sees it running until
@@ -108,7 +88,7 @@ std::atomic<bool> s_is_game_cursor_shown{false};
 std::chrono::steady_clock::time_point s_last_present{};
 float s_frame_ms_avg = 0.0f;
 
-float PixelDensity(SDL_WindowID id);
+float PixelDensity(PsHostWindowId h_window);
 
 void SetOpen(bool is_open) {
     if (s_is_menu_open.exchange(is_open) == is_open) {
@@ -117,10 +97,10 @@ void SetOpen(bool is_open) {
     // The system cursor shows over the menu (window.cpp); ImGui learns where it is now, not at
     // the next motion: mouse motion is not passed on while the menu is closed.
     if (is_open) {
-        if (SDL_Window* p_window = SDL_GetMouseFocus()) {
-            float x = 0.0f, y = 0.0f;
-            SDL_GetMouseState(&x, &y);
-            const float density = PixelDensity(SDL_GetWindowID(p_window));
+        PsHostWindowId h_window = 0;
+        float x = 0.0f, y = 0.0f;
+        if (ps_host_window_mouse_focus(&h_window, &x, &y)) {
+            const float density = PixelDensity(h_window);
             ImGui::GetIO().AddMousePosEvent(x * density, y * density);
         }
     }
@@ -139,7 +119,7 @@ void OpenClosePrompt() {
 // The key or button that answered stays away from the game until released, as the close prompt's.
 // The answer is checked and stored under the dialog's lock, so that one the game closed meanwhile
 // gets none and the next one it opens is not answered with its button.
-void AnswerMessage(bool is_cancel, SDL_Keycode key, int button) {
+void AnswerMessage(bool is_cancel, u32 key, int button) {
     int answer = 0;
     {
         std::scoped_lock lock{s_message_mutex};
@@ -168,60 +148,57 @@ void AnswerClosePrompt(bool should_quit) {
     s_is_close_prompt_open = false;
     std::printf("Overlay: close prompt %s\n", should_quit ? "confirmed, quitting" : "cancelled");
     if (should_quit) {
-        SDL_Event event{};
-        event.type = SDL_EVENT_QUIT;
-        SDL_PushEvent(&event);
+        ps_host_window_request_quit();
     }
 }
 
-ImGuiKey KeyFromSdl(SDL_Keycode key) {
+ImGuiKey KeyFromKeycode(u32 key) {
     switch (key) {
-    case SDLK_TAB: return ImGuiKey_Tab;
-    case SDLK_LEFT: return ImGuiKey_LeftArrow;
-    case SDLK_RIGHT: return ImGuiKey_RightArrow;
-    case SDLK_UP: return ImGuiKey_UpArrow;
-    case SDLK_DOWN: return ImGuiKey_DownArrow;
-    case SDLK_PAGEUP: return ImGuiKey_PageUp;
-    case SDLK_PAGEDOWN: return ImGuiKey_PageDown;
-    case SDLK_HOME: return ImGuiKey_Home;
-    case SDLK_END: return ImGuiKey_End;
-    case SDLK_DELETE: return ImGuiKey_Delete;
-    case SDLK_BACKSPACE: return ImGuiKey_Backspace;
-    case SDLK_SPACE: return ImGuiKey_Space;
-    case SDLK_RETURN: return ImGuiKey_Enter;
-    case SDLK_KP_ENTER: return ImGuiKey_KeypadEnter;
-    case SDLK_ESCAPE: return ImGuiKey_Escape;
-    case SDLK_LCTRL: return ImGuiKey_LeftCtrl;
-    case SDLK_RCTRL: return ImGuiKey_RightCtrl;
-    case SDLK_LSHIFT: return ImGuiKey_LeftShift;
-    case SDLK_RSHIFT: return ImGuiKey_RightShift;
-    case SDLK_LALT: return ImGuiKey_LeftAlt;
-    case SDLK_RALT: return ImGuiKey_RightAlt;
+    case PS_HOST_WINDOW_KEYCODE_TAB: return ImGuiKey_Tab;
+    case PS_HOST_WINDOW_KEYCODE_LEFT: return ImGuiKey_LeftArrow;
+    case PS_HOST_WINDOW_KEYCODE_RIGHT: return ImGuiKey_RightArrow;
+    case PS_HOST_WINDOW_KEYCODE_UP: return ImGuiKey_UpArrow;
+    case PS_HOST_WINDOW_KEYCODE_DOWN: return ImGuiKey_DownArrow;
+    case PS_HOST_WINDOW_KEYCODE_PAGEUP: return ImGuiKey_PageUp;
+    case PS_HOST_WINDOW_KEYCODE_PAGEDOWN: return ImGuiKey_PageDown;
+    case PS_HOST_WINDOW_KEYCODE_HOME: return ImGuiKey_Home;
+    case PS_HOST_WINDOW_KEYCODE_END: return ImGuiKey_End;
+    case PS_HOST_WINDOW_KEYCODE_DELETE: return ImGuiKey_Delete;
+    case PS_HOST_WINDOW_KEYCODE_BACKSPACE: return ImGuiKey_Backspace;
+    case PS_HOST_WINDOW_KEYCODE_SPACE: return ImGuiKey_Space;
+    case PS_HOST_WINDOW_KEYCODE_RETURN: return ImGuiKey_Enter;
+    case PS_HOST_WINDOW_KEYCODE_KP_ENTER: return ImGuiKey_KeypadEnter;
+    case PS_HOST_WINDOW_KEYCODE_ESCAPE: return ImGuiKey_Escape;
+    case PS_HOST_WINDOW_KEYCODE_LCTRL: return ImGuiKey_LeftCtrl;
+    case PS_HOST_WINDOW_KEYCODE_RCTRL: return ImGuiKey_RightCtrl;
+    case PS_HOST_WINDOW_KEYCODE_LSHIFT: return ImGuiKey_LeftShift;
+    case PS_HOST_WINDOW_KEYCODE_RSHIFT: return ImGuiKey_RightShift;
+    case PS_HOST_WINDOW_KEYCODE_LALT: return ImGuiKey_LeftAlt;
+    case PS_HOST_WINDOW_KEYCODE_RALT: return ImGuiKey_RightAlt;
     default: return ImGuiKey_None;
     }
 }
 
 ImGuiKey KeyFromGamepad(u8 button) {
     switch (button) {
-    case SDL_GAMEPAD_BUTTON_SOUTH: return ImGuiKey_GamepadFaceDown;
-    case SDL_GAMEPAD_BUTTON_EAST: return ImGuiKey_GamepadFaceRight;
-    case SDL_GAMEPAD_BUTTON_WEST: return ImGuiKey_GamepadFaceLeft;
-    case SDL_GAMEPAD_BUTTON_NORTH: return ImGuiKey_GamepadFaceUp;
-    case SDL_GAMEPAD_BUTTON_DPAD_UP: return ImGuiKey_GamepadDpadUp;
-    case SDL_GAMEPAD_BUTTON_DPAD_DOWN: return ImGuiKey_GamepadDpadDown;
-    case SDL_GAMEPAD_BUTTON_DPAD_LEFT: return ImGuiKey_GamepadDpadLeft;
-    case SDL_GAMEPAD_BUTTON_DPAD_RIGHT: return ImGuiKey_GamepadDpadRight;
-    case SDL_GAMEPAD_BUTTON_LEFT_SHOULDER: return ImGuiKey_GamepadL1;
-    case SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER: return ImGuiKey_GamepadR1;
-    case SDL_GAMEPAD_BUTTON_START: return ImGuiKey_GamepadStart;
-    case SDL_GAMEPAD_BUTTON_BACK: return ImGuiKey_GamepadBack;
+    case PS_HOST_PAD_BUTTON_SOUTH: return ImGuiKey_GamepadFaceDown;
+    case PS_HOST_PAD_BUTTON_EAST: return ImGuiKey_GamepadFaceRight;
+    case PS_HOST_PAD_BUTTON_WEST: return ImGuiKey_GamepadFaceLeft;
+    case PS_HOST_PAD_BUTTON_NORTH: return ImGuiKey_GamepadFaceUp;
+    case PS_HOST_PAD_BUTTON_DPAD_UP: return ImGuiKey_GamepadDpadUp;
+    case PS_HOST_PAD_BUTTON_DPAD_DOWN: return ImGuiKey_GamepadDpadDown;
+    case PS_HOST_PAD_BUTTON_DPAD_LEFT: return ImGuiKey_GamepadDpadLeft;
+    case PS_HOST_PAD_BUTTON_DPAD_RIGHT: return ImGuiKey_GamepadDpadRight;
+    case PS_HOST_PAD_BUTTON_LEFT_SHOULDER: return ImGuiKey_GamepadL1;
+    case PS_HOST_PAD_BUTTON_RIGHT_SHOULDER: return ImGuiKey_GamepadR1;
+    case PS_HOST_PAD_BUTTON_START: return ImGuiKey_GamepadStart;
+    case PS_HOST_PAD_BUTTON_BACK: return ImGuiKey_GamepadBack;
     default: return ImGuiKey_None;
     }
 }
 
-float PixelDensity(SDL_WindowID id) {
-    SDL_Window* p_window = SDL_GetWindowFromID(id);
-    const float density = p_window ? SDL_GetWindowPixelDensity(p_window) : 1.0f;
+float PixelDensity(PsHostWindowId h_window) {
+    const float density = ps_host_window_pixel_density(h_window);
     return density > 0.0f ? density : 1.0f;
 }
 
@@ -507,9 +484,7 @@ void Menu() {
                                  : PsSettings::MenuText("Quit game###quit_game", "Выйти из игры###quit_game",
                                                         "Salir del juego###quit_game"))) {
         if (s_is_quit_armed) {
-            SDL_Event quit{};
-            quit.type = SDL_EVENT_QUIT;
-            SDL_PushEvent(&quit);
+            ps_host_window_request_quit();
         }
         s_is_quit_armed = !s_is_quit_armed;
     }
@@ -1340,24 +1315,21 @@ void Init(const Vulkan::Instance& instance, vk::Format format, u32 c_images) {
     std::printf("Overlay: menu ready (Insert or L3+R3)\n");
 }
 
-void UpdateTextInput(SDL_Window* p_window) {
+void UpdateTextInput(PsHostWindow* p_window) {
     bool is_wanted = false;
     {
         std::scoped_lock lock{s_imgui_mutex};
         is_wanted = s_is_initialized && s_is_menu_open && ImGui::GetIO().WantTextInput;
     }
-    if (is_wanted != SDL_TextInputActive(p_window)) {
-        if (is_wanted) {
-            SDL_StartTextInput(p_window);
-        } else {
-            SDL_StopTextInput(p_window);
-        }
+    if (is_wanted != ps_host_window_is_text_input(p_window)) {
+        ps_host_window_text_input(p_window, is_wanted);
     }
 }
 
-bool HandleEvent(const SDL_Event& event) {
-    const bool is_input_event = event.type == SDL_EVENT_KEY_DOWN || event.type == SDL_EVENT_KEY_UP ||
-                                event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN || event.type == SDL_EVENT_GAMEPAD_BUTTON_UP;
+bool HandleEvent(const PsHostWindowEvent& event) {
+    const bool is_input_event =
+        event.kind == PS_HOST_WINDOW_EVENT_KEY_DOWN || event.kind == PS_HOST_WINDOW_EVENT_KEY_UP ||
+        event.kind == PS_HOST_WINDOW_EVENT_PAD_BUTTON_DOWN || event.kind == PS_HOST_WINDOW_EVENT_PAD_BUTTON_UP;
     // Asked before taking the ImGui lock because the runtime takes its pad lock before this one.
     const bool is_menu_pressed = is_input_event && runtime_pad_menu_pressed() != 0;
     std::scoped_lock lock{s_imgui_mutex};
@@ -1366,27 +1338,28 @@ bool HandleEvent(const SDL_Event& event) {
     }
     ImGuiIO& io = ImGui::GetIO();
     const bool is_open = s_is_menu_open;
-    switch (event.type) {
-    case SDL_EVENT_KEY_DOWN:
-    case SDL_EVENT_KEY_UP: {
-        const bool is_down = event.type == SDL_EVENT_KEY_DOWN;
-        if (!is_down && s_is_release_pending && event.key.key == s_release_key) {
+    switch (event.kind) {
+    case PS_HOST_WINDOW_EVENT_KEY_DOWN:
+    case PS_HOST_WINDOW_EVENT_KEY_UP: {
+        const bool is_down = event.kind == PS_HOST_WINDOW_EVENT_KEY_DOWN;
+        const u32 keycode = event.key.keycode;
+        if (!is_down && s_is_release_pending && keycode == s_release_key) {
             s_is_release_pending = false;
             return true;
         }
         if (s_is_close_prompt_open) {
-            if (is_down && !event.key.repeat) {
-                if (event.key.key == SDLK_RETURN || event.key.key == SDLK_KP_ENTER) {
+            if (is_down && !event.key.is_repeat) {
+                if (keycode == PS_HOST_WINDOW_KEYCODE_RETURN || keycode == PS_HOST_WINDOW_KEYCODE_KP_ENTER) {
                     AnswerClosePrompt(true);
-                } else if (event.key.key == SDLK_ESCAPE || event.key.key == SDLK_HOME) {
+                } else if (keycode == PS_HOST_WINDOW_KEYCODE_ESCAPE || keycode == PS_HOST_WINDOW_KEYCODE_HOME) {
                     AnswerClosePrompt(false);
-                    s_release_key = event.key.key;
+                    s_release_key = keycode;
                     s_is_release_pending = true;
                 }
             }
             return true;
         }
-        if (is_down && !event.key.repeat && !is_open && event.key.key == SDLK_HOME) {
+        if (is_down && !event.key.is_repeat && !is_open && keycode == PS_HOST_WINDOW_KEYCODE_HOME) {
             OpenClosePrompt();
             return true;
         }
@@ -1394,19 +1367,19 @@ bool HandleEvent(const SDL_Event& event) {
             SetOpen(!is_open);
             return true;
         }
-        if (is_down && !event.key.repeat &&
-            (event.key.key == SDLK_INSERT || (is_open && event.key.key == SDLK_ESCAPE))) {
-            SetOpen(event.key.key == SDLK_INSERT ? !is_open : false);
+        if (is_down && !event.key.is_repeat &&
+            (keycode == PS_HOST_WINDOW_KEYCODE_INSERT || (is_open && keycode == PS_HOST_WINDOW_KEYCODE_ESCAPE))) {
+            SetOpen(keycode == PS_HOST_WINDOW_KEYCODE_INSERT ? !is_open : false);
             return true;
         }
         if (!is_open && s_is_message_open) {
-            if (is_down && !event.key.repeat) {
-                if (event.key.key == SDLK_RETURN || event.key.key == SDLK_KP_ENTER) {
-                    AnswerMessage(false, event.key.key, -1);
-                } else if (event.key.key == SDLK_ESCAPE) {
-                    AnswerMessage(true, event.key.key, -1);
-                } else if (event.key.key == SDLK_LEFT || event.key.key == SDLK_RIGHT) {
-                    MoveMessageFocus(event.key.key == SDLK_LEFT ? -1 : 1);
+            if (is_down && !event.key.is_repeat) {
+                if (keycode == PS_HOST_WINDOW_KEYCODE_RETURN || keycode == PS_HOST_WINDOW_KEYCODE_KP_ENTER) {
+                    AnswerMessage(false, keycode, -1);
+                } else if (keycode == PS_HOST_WINDOW_KEYCODE_ESCAPE) {
+                    AnswerMessage(true, keycode, -1);
+                } else if (keycode == PS_HOST_WINDOW_KEYCODE_LEFT || keycode == PS_HOST_WINDOW_KEYCODE_RIGHT) {
+                    MoveMessageFocus(keycode == PS_HOST_WINDOW_KEYCODE_LEFT ? -1 : 1);
                 }
             }
             return true;
@@ -1414,21 +1387,21 @@ bool HandleEvent(const SDL_Event& event) {
         if (!is_open) {
             return false;
         }
-        io.AddKeyEvent(ImGuiMod_Ctrl, (event.key.mod & SDL_KMOD_CTRL) != 0);
-        io.AddKeyEvent(ImGuiMod_Shift, (event.key.mod & SDL_KMOD_SHIFT) != 0);
-        io.AddKeyEvent(ImGuiMod_Alt, (event.key.mod & SDL_KMOD_ALT) != 0);
-        if (const ImGuiKey key = KeyFromSdl(event.key.key); key != ImGuiKey_None) {
+        io.AddKeyEvent(ImGuiMod_Ctrl, (event.key.mod & PS_HOST_WINDOW_MOD_CTRL) != 0);
+        io.AddKeyEvent(ImGuiMod_Shift, (event.key.mod & PS_HOST_WINDOW_MOD_SHIFT) != 0);
+        io.AddKeyEvent(ImGuiMod_Alt, (event.key.mod & PS_HOST_WINDOW_MOD_ALT) != 0);
+        if (const ImGuiKey key = KeyFromKeycode(keycode); key != ImGuiKey_None) {
             io.AddKeyEvent(key, is_down);
         }
         return true;
     }
-    case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
-    case SDL_EVENT_GAMEPAD_BUTTON_UP: {
-        const bool is_down = event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN;
-        const u8 button = event.gbutton.button;
-        if (button == SDL_GAMEPAD_BUTTON_LEFT_STICK) {
+    case PS_HOST_WINDOW_EVENT_PAD_BUTTON_DOWN:
+    case PS_HOST_WINDOW_EVENT_PAD_BUTTON_UP: {
+        const bool is_down = event.kind == PS_HOST_WINDOW_EVENT_PAD_BUTTON_DOWN;
+        const u8 button = u8(event.pad_button.button);
+        if (button == PS_HOST_PAD_BUTTON_LEFT_STICK) {
             s_is_l3_down = is_down;
-        } else if (button == SDL_GAMEPAD_BUTTON_RIGHT_STICK) {
+        } else if (button == PS_HOST_PAD_BUTTON_RIGHT_STICK) {
             s_is_r3_down = is_down;
         }
         if (!is_down && s_is_release_pending && button == s_release_button) {
@@ -1436,16 +1409,16 @@ bool HandleEvent(const SDL_Event& event) {
             return true;
         }
         if (s_is_close_prompt_open) {
-            if (is_down && button == SDL_GAMEPAD_BUTTON_SOUTH) {
+            if (is_down && button == PS_HOST_PAD_BUTTON_SOUTH) {
                 AnswerClosePrompt(true);
-            } else if (is_down && (button == SDL_GAMEPAD_BUTTON_EAST || button == SDL_GAMEPAD_BUTTON_GUIDE)) {
+            } else if (is_down && (button == PS_HOST_PAD_BUTTON_EAST || button == PS_HOST_PAD_BUTTON_GUIDE)) {
                 AnswerClosePrompt(false);
                 s_release_button = button;
                 s_is_release_pending = true;
             }
             return true;
         }
-        if (is_down && button == SDL_GAMEPAD_BUTTON_GUIDE) {
+        if (is_down && button == PS_HOST_PAD_BUTTON_GUIDE) {
             OpenClosePrompt();
             return true;
         }
@@ -1454,12 +1427,12 @@ bool HandleEvent(const SDL_Event& event) {
             return true;
         }
         if (!is_open && s_is_message_open) {
-            if (is_down && button == SDL_GAMEPAD_BUTTON_SOUTH) {
-                AnswerMessage(false, SDLK_UNKNOWN, button);
-            } else if (is_down && button == SDL_GAMEPAD_BUTTON_EAST) {
-                AnswerMessage(true, SDLK_UNKNOWN, button);
-            } else if (is_down && (button == SDL_GAMEPAD_BUTTON_DPAD_LEFT || button == SDL_GAMEPAD_BUTTON_DPAD_RIGHT)) {
-                MoveMessageFocus(button == SDL_GAMEPAD_BUTTON_DPAD_LEFT ? -1 : 1);
+            if (is_down && button == PS_HOST_PAD_BUTTON_SOUTH) {
+                AnswerMessage(false, PS_HOST_WINDOW_KEYCODE_UNKNOWN, button);
+            } else if (is_down && button == PS_HOST_PAD_BUTTON_EAST) {
+                AnswerMessage(true, PS_HOST_WINDOW_KEYCODE_UNKNOWN, button);
+            } else if (is_down && (button == PS_HOST_PAD_BUTTON_DPAD_LEFT || button == PS_HOST_PAD_BUTTON_DPAD_RIGHT)) {
+                MoveMessageFocus(button == PS_HOST_PAD_BUTTON_DPAD_LEFT ? -1 : 1);
             }
             return true;
         }
@@ -1471,38 +1444,38 @@ bool HandleEvent(const SDL_Event& event) {
         }
         return true;
     }
-    case SDL_EVENT_TEXT_INPUT: {
+    case PS_HOST_WINDOW_EVENT_TEXT_INPUT: {
         // Typed characters (Ctrl+click on a slider, a text field): key events alone erase but
-        // do not type. SDL sends them while text input is on (UpdateTextInput).
+        // do not type. The host sends them while text input is on (UpdateTextInput).
         if (!is_open) {
             return false;
         }
-        io.AddInputCharactersUTF8(event.text.text);
+        io.AddInputCharactersUTF8(event.text.sz_utf8);
         return true;
     }
-    case SDL_EVENT_MOUSE_MOTION: {
+    case PS_HOST_WINDOW_EVENT_MOUSE_MOTION: {
         if (!is_open) {
             return false;
         }
-        const float density = PixelDensity(event.motion.windowID);
+        const float density = PixelDensity(event.h_window);
         io.AddMousePosEvent(event.motion.x * density, event.motion.y * density);
         return true;
     }
-    case SDL_EVENT_MOUSE_BUTTON_DOWN:
-    case SDL_EVENT_MOUSE_BUTTON_UP: {
+    case PS_HOST_WINDOW_EVENT_MOUSE_BUTTON_DOWN:
+    case PS_HOST_WINDOW_EVENT_MOUSE_BUTTON_UP: {
         if (!is_open) {
             return false;
         }
-        const int button = event.button.button == SDL_BUTTON_LEFT    ? 0
-                           : event.button.button == SDL_BUTTON_RIGHT  ? 1
-                           : event.button.button == SDL_BUTTON_MIDDLE ? 2
-                                                                      : -1;
+        const int button = event.button.button == PS_HOST_INPUT_MOUSE_LEFT    ? 0
+                           : event.button.button == PS_HOST_INPUT_MOUSE_RIGHT  ? 1
+                           : event.button.button == PS_HOST_INPUT_MOUSE_MIDDLE ? 2
+                                                                               : -1;
         if (button >= 0) {
-            io.AddMouseButtonEvent(button, event.type == SDL_EVENT_MOUSE_BUTTON_DOWN);
+            io.AddMouseButtonEvent(button, event.kind == PS_HOST_WINDOW_EVENT_MOUSE_BUTTON_DOWN);
         }
         return true;
     }
-    case SDL_EVENT_MOUSE_WHEEL:
+    case PS_HOST_WINDOW_EVENT_MOUSE_WHEEL:
         if (!is_open) {
             return false;
         }
