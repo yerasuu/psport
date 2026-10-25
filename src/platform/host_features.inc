@@ -159,9 +159,14 @@ FEATURE_HOST(randomness, WIN32, EXPERIMENTAL,
              "compile-checked, not run yet",
              "#614")
 
-FEATURE(audio, io, "audio output")
-FEATURE_HOST(audio, LINUX, IMPLEMENTED, "SDL3 (runtime_audio.c); PS_AUDIO=none runs without a device", "#540")
-FEATURE_HOST(audio, WIN32, EXPERIMENTAL, "SDL3 as on Linux (runtime_audio.c), not run yet", "#614")
+FEATURE(audio_out, io, "libSceAudioOut's ports as streams to the default playback device")
+FEATURE_HOST(audio_out, LINUX, IMPLEMENTED,
+             "SDL3, a shared backend for Linux and Windows (src/platform/common/host_audio.c; libSceAudioOut in "
+             "runtime_audio.c); PS_AUDIO=none runs without a device",
+             "#540, #1009")
+FEATURE_HOST(audio_out, WIN32, EXPERIMENTAL,
+             "SDL3, the backend shared with Linux (src/platform/common/host_audio.c), not run with a game yet",
+             "#1009")
 
 FEATURE(input_pad, io, "gamepads as libScePad's pad: buttons, sticks, triggers, touchpad, rumble and light bar")
 FEATURE_HOST(input_pad, LINUX, IMPLEMENTED,
