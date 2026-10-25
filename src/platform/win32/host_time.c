@@ -193,3 +193,21 @@ int ps_host_time_zone_at(int64_t utc_sec, int32_t *p_out_standard_sec, int32_t *
     *p_out_dst_sec = (int32_t)(offset_sec - *p_out_standard_sec);
     return 0;
 }
+
+int ps_host_time_local_fields(int64_t utc_sec, struct tm *p_out) {
+    const __time64_t at = (__time64_t)utc_sec;
+    return _localtime64_s(p_out, &at);
+}
+
+int ps_host_time_utc_fields(int64_t utc_sec, struct tm *p_out) {
+    const __time64_t at = (__time64_t)utc_sec;
+    return _gmtime64_s(p_out, &at);
+}
+
+int ps_host_time_utc_seconds(const struct tm *p_fields, int64_t *p_out_utc_sec) {
+    struct tm fields = *p_fields;
+    const __time64_t at = _mkgmtime64(&fields);
+    if (at == (__time64_t)-1) return EOVERFLOW;
+    *p_out_utc_sec = (int64_t)at;
+    return 0;
+}

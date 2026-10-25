@@ -18,15 +18,15 @@ static int s_is_read;
 static pthread_once_t s_once=PTHREAD_ONCE_INIT;
 
 const char *runtime_env(const char *sz_name, const char *sz_default) {
-    const char *sz_value=getenv(sz_name);
+    const char *sz_value=ps_host_env_get(sz_name);
     return sz_value ? sz_value : sz_default;
 }
 int runtime_env_int(const char *sz_name, int fallback) {
-    const char *sz_value=getenv(sz_name);
+    const char *sz_value=ps_host_env_get(sz_name);
     return sz_value && *sz_value ? atoi(sz_value) : fallback;
 }
 int runtime_env_flag(const char *sz_name, int fallback) {
-    const char *sz_value=getenv(sz_name);
+    const char *sz_value=ps_host_env_get(sz_name);
     return sz_value && *sz_value ? *sz_value!='0' : fallback;
 }
 const char *runtime_config_path(void) {

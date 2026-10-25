@@ -7,13 +7,13 @@
 #define _GNU_SOURCE
 #include "runtime_np.h"
 #include "runtime_trophy.h"
+#include "ps_host.h"
 #include <errno.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <unistd.h>
 
 #define TROPHY_INVALID ((int32_t)0x80551604)
 #define TROPHY_OUT_OF_MEMORY ((int32_t)0x80551603)
@@ -133,9 +133,9 @@ static uint64_t current_tick(void) {
     return RTC_TICK_UNIX_EPOCH + ps_host_time_realtime_ns() / 1000;
 }
 static void format_tick(uint64_t tick, char *sz_out, size_t cb_out) {
-    const time_t seconds = (time_t)((tick - RTC_TICK_UNIX_EPOCH) / 1000000);
-    struct tm utc;
-    gmtime_r(&seconds, &utc);
+    struct tm utc = {0};
+    if (ps_host_time_utc_fields((int64_t)((tick - RTC_TICK_UNIX_EPOCH) / 1000000), &utc))
+        fprintf(stderr, "Trophy: cannot split tick %llu into calendar fields\n", (unsigned long long)tick);
     const size_t cb_used = strftime(sz_out, cb_out, "%Y-%m-%dT%H:%M:%S", &utc);
     snprintf(sz_out + cb_used, cb_out - cb_used, ".%06uZ", (unsigned)((tick - RTC_TICK_UNIX_EPOCH) % 1000000));
 }
@@ -150,7 +150,8 @@ static bool parse_tick(const char *sz_time, uint64_t *p_out_tick) {
     char *sz_rest = (char *)sz_time + cb_parsed;
     unsigned long microseconds = 0;
     if (*sz_rest == '.') microseconds = strtoul(sz_rest + 1, &sz_rest, 10);
-    const time_t seconds = timegm(&utc);
+    int64_t seconds;
+    if (ps_host_time_utc_seconds(&utc, &seconds)) return false;
     if (*sz_rest != 'Z' || seconds < 0 || microseconds >= 1000000) return false;
     *p_out_tick = RTC_TICK_UNIX_EPOCH + (uint64_t)seconds * 1000000 + microseconds;
     return true;

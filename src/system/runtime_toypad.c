@@ -567,7 +567,7 @@ static int32_t handle_toypad_events(const UsbdTimeval *p_timeout) {
         if (s_c_completed || now_ns>=deadline_ns) break;
         const uint64_t slice_ns=deadline_ns-now_ns<100000000u ? deadline_ns-now_ns : 100000000u;
         struct timespec until;
-        clock_gettime(CLOCK_REALTIME,&until);
+        ps_host_time_read(PS_HOST_CLOCK_REALTIME,&until);
         until.tv_sec+=(time_t)(slice_ns/1000000000u);
         until.tv_nsec+=(long)(slice_ns%1000000000u);
         if (until.tv_nsec>=1000000000) { until.tv_nsec-=1000000000; ++until.tv_sec; }

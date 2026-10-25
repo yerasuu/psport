@@ -6,9 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdatomic.h>
-#include <sched.h>
 #include <pthread.h>
-#include <unistd.h>
 
 typedef struct {
     union { GuestCallback pfn_plain; void (ABI *pfn_with_arg)(void *); } callback;
@@ -117,7 +115,7 @@ void runtime_stop(int status) {
     runtime_calls_report();
     runtime_debug_finish("STOP", status);
     fflush(NULL);
-    _exit(status);
+    ps_host_exit_at_once(status);
 }
 static ABI void init_env(void) {
     /* The loader checked that libc.prx's export is exactly C3 (loader_init_env_is_ret). */
@@ -198,7 +196,7 @@ static ABI int guard_acquire(uint64_t *p_guard) {
             fputs("STOP: recursive/concurrent static initialization is not supported yet\n", stderr);
             runtime_stop(21);
         }
-        sched_yield(); /* another thread is running the initializer */
+        ps_host_thread_yield(); /* another thread is running the initializer */
     }
     atomic_fetch_add(&s_c_guards_acquired, 1);
     return 1;

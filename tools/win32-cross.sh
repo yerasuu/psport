@@ -246,8 +246,9 @@ build() {
     echo "Built $out/gpu/libpsport-gpu.dll"
     read -r -a includes <<< "$(pkg-config --cflags vulkan sdl3)"
     read -r -a libraries <<< "$(pkg-config --libs vulkan sdl3)"
-    "$out/bin/x86_64-w64-mingw32-clang" -std=c11 -O2 -Wall -Wextra -Werror "${includes[@]}" -Isrc/runtime \
-        tools/gpu_capabilities.c src/runtime/runtime_quirks.c src/runtime/runtime_json_print.c "${libraries[@]}" \
+    "$out/bin/x86_64-w64-mingw32-clang" -std=c11 -O2 -Wall -Wextra -Werror "${includes[@]}" -Isrc/runtime -Isrc/platform \
+        tools/gpu_capabilities.c src/runtime/runtime_quirks.c src/runtime/runtime_json_print.c \
+        src/platform/common/host_env.c "${libraries[@]}" \
         -o "$out/psport-gpu-capabilities.exe"
     echo "Built $out/psport-gpu-capabilities.exe (its DLLs: $sysroot/bin)"
     read -r -a vulkan_headers <<< "$(pkg-config --cflags vulkan)"

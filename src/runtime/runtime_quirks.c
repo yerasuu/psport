@@ -3,6 +3,7 @@
 #define _GNU_SOURCE
 #include "runtime_quirks.h"
 #include "runtime_json_print.h"
+#include "ps_host.h"
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -107,9 +108,9 @@ static int find(const char *sz_id, RuntimeQuirkId *p_out_id) {
 static void configure(void) {
     if (s_has_configured) return;
     s_has_configured = 1;
-    const char *sz_profile = getenv("PS_GAME_PROFILE");
+    const char *sz_profile = ps_host_env_get("PS_GAME_PROFILE");
     s_is_profile_off = sz_profile && !strcmp(sz_profile, "none");
-    const char *sz_setting = getenv("PS_QUIRKS");
+    const char *sz_setting = ps_host_env_get("PS_QUIRKS");
     char *sz_copy = sz_setting ? strdup(sz_setting) : NULL;
     char *p_state = NULL;
     for (char *sz_item = sz_copy ? strtok_r(sz_copy, ",", &p_state) : NULL; sz_item; sz_item = strtok_r(NULL, ",", &p_state)) {

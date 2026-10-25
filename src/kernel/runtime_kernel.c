@@ -10,11 +10,8 @@
 #include <string.h>
 #include <errno.h>
 #include <pthread.h>
-#include <sched.h>
 #include <time.h>
-#include <unistd.h>
 #include <signal.h>
-#include <sys/time.h>
 #include <x86intrin.h>
 #define ERR(n) ((int32_t)(UINT32_C(0x80020000)|(n)))
 #define PAGE 16384
@@ -148,9 +145,8 @@ static ABI int32_t kernel_gettimezone(GuestTimezone *p_timezone) {
     return 0;
 }
 static ABI int32_t posix_gettimeofday(GuestTimeval *p_timeval,GuestTimezone *p_timezone) {
-    struct timeval t;
-    gettimeofday(&t,NULL);
-    if (p_timeval) { p_timeval->sec=t.tv_sec; p_timeval->usec=t.tv_usec; }
+    const uint64_t now_ns=ps_host_time_realtime_ns();
+    if (p_timeval) { p_timeval->sec=(int64_t)(now_ns/1000000000u); p_timeval->usec=(int64_t)(now_ns%1000000000u/1000); }
     if (p_timezone) kernel_gettimezone(p_timezone);
     return 0;
 }
@@ -228,13 +224,13 @@ static ABI int32_t cpu_mode(void) {
 }
 static ABI int32_t get_pagesize(void) { return PAGE; }
 static ABI int32_t get_pid(void) { return 1000; }
-static ABI int32_t yield(void) { sched_yield(); return 0; }
+static ABI int32_t yield(void) { ps_host_thread_yield(); return 0; }
 static ABI __attribute__((noreturn)) void hard_exit(int status) {
     printf("Runtime: guest requested _exit(%d)\n",status);
     runtime_report();
     psport_gpu_flush_caches(1);
     fflush(stdout);
-    _exit(status);
+    ps_host_exit_at_once(status);
 }
 static ABI __attribute__((noreturn)) void raise_exception(uint32_t code,uint64_t argument) {
     fprintf(stderr,"STOP: guest raised debug exception code=0x%x argument=0x%llx\n",code,(unsigned long long)argument);
@@ -309,7 +305,7 @@ static void deliver_signal(int sig) {
     const uintptr_t handler=__atomic_load_n(&s_handlers[sig],__ATOMIC_ACQUIRE);
     if (handler>1) { ((void (ABI *)(int))handler)(sig); return; }
     /* SIGUSR1 is the one host signal the guest has: its exception handler takes it, if any. */
-    if (sig==GUEST_SIGUSR1 && !handler) { pthread_kill(pthread_self(),RUNTIME_EXCEPTION_SIGNAL); return; }
+    if (sig==GUEST_SIGUSR1 && !handler) { ps_host_interrupt_thread(ps_host_thread_id(),PS_HOST_INTERRUPT_GUEST_EXCEPTION); return; }
     if (handler==1 || is_ignored_by_default(sig)) return;
     /* As on the console the process ends; the call report lists why. */
     if (!__atomic_fetch_add(&s_c_fatal_signals,1,__ATOMIC_RELAXED))
@@ -553,7 +549,7 @@ static ABI int32_t thread_once(int32_t *p_once,void (ABI *pfn_routine)(void)) {
             __atomic_store_n(p_once,1,__ATOMIC_RELEASE);
             return 0;
         }
-        sched_yield();
+        ps_host_thread_yield();
     }
 }
 static ABI int32_t posix_once(int32_t *p_once,void (ABI *pfn_routine)(void)) { return thread_once(p_once,pfn_routine) ? 22 : 0; }

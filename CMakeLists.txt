@@ -88,10 +88,10 @@ target_link_options(psport PRIVATE -O2 -g -Wl,--disable-high-entropy-va)
 set_property(TARGET psport APPEND PROPERTY LINK_DEPENDS "${ps_runtime_def}")
 
 add_executable(psport-gpu-capabilities tools/gpu_capabilities.c src/runtime/runtime_quirks.c
-    src/runtime/runtime_json_print.c)
+    src/runtime/runtime_json_print.c src/platform/common/host_env.c)
 set_target_properties(psport-gpu-capabilities PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
 target_compile_options(psport-gpu-capabilities PRIVATE -O2 -Wall -Wextra -Werror ${PS_VULKAN_SDL3_CFLAGS_OTHER})
-target_include_directories(psport-gpu-capabilities PRIVATE ${PS_VULKAN_SDL3_INCLUDE_DIRS} src/runtime)
+target_include_directories(psport-gpu-capabilities PRIVATE ${PS_VULKAN_SDL3_INCLUDE_DIRS} src/runtime src/platform)
 target_link_libraries(psport-gpu-capabilities PRIVATE ${PS_VULKAN_SDL3_LINK_LIBRARIES}
     ${PS_VULKAN_SDL3_LDFLAGS_OTHER})
 target_link_options(psport-gpu-capabilities PRIVATE -O2)

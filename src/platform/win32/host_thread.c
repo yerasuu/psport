@@ -9,6 +9,8 @@
 
 int32_t ps_host_thread_id(void) { return (int32_t)GetCurrentThreadId(); }
 
+void ps_host_thread_yield(void) { SwitchToThread(); }
+
 int ps_host_backtrace(void **pp_frames, int c_frames) {
     return c_frames > 0 ? RtlCaptureStackBackTrace(1, (DWORD)c_frames, pp_frames, NULL) : 0;
 }

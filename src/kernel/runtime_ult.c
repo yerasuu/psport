@@ -9,7 +9,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
-#include <sched.h>
 #include <setjmp.h>
 
 #define ERR_NULL ((int32_t)0x80810001)
@@ -472,7 +471,7 @@ static ABI int32_t ulthread_yield(void) {
     runtime_exception_lock(&s_lock);
     release_slot(p_runtime);
     runtime_exception_unlock(&s_lock);
-    sched_yield();
+    ps_host_thread_yield();
     runtime_exception_lock(&s_lock);
     take_slot(p_runtime);
     runtime_exception_unlock(&s_lock);

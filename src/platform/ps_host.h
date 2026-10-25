@@ -75,6 +75,12 @@ int ps_host_time_sleep_until_ns(uint64_t deadline_ns);
  * offset and the daylight saving on top of it (0 outside it, negative in zones whose standard time
  * is their summer one), so that local time is UTC plus both. 0, or the host's errno. */
 int ps_host_time_zone_at(int64_t utc_sec, int32_t *p_out_standard_sec, int32_t *p_out_dst_sec);
+/* The UTC second as calendar fields in the host's local time zone, or in UTC: 0, or the host's errno. */
+int ps_host_time_local_fields(int64_t utc_sec, struct tm *p_out);
+int ps_host_time_utc_fields(int64_t utc_sec, struct tm *p_out);
+/* The UTC second the calendar fields name (tm_wday and tm_yday ignored, the others normalised as
+ * timegm does): 0, or the host's errno (EOVERFLOW when it is not representable). */
+int ps_host_time_utc_seconds(const struct tm *p_fields, int64_t *p_out_utc_sec);
 
 /* ---- randomness ---- */
 /* Fills the buffer from the host's cryptographic source: 0, or the host's errno. */
@@ -132,6 +138,8 @@ int ps_host_thread_cpu_times(int is_whole_process, struct timespec *p_out_user, 
 /* Hardware threads this process may run on (its affinity, so that taskset can stand in for a
  * smaller machine), or 0 when the host cannot say. */
 unsigned ps_host_thread_cpu_count(void);
+/* The calling thread gives up the rest of its time slice to another ready thread. */
+void ps_host_thread_yield(void);
 /* The calling thread runs only on otherwise idle cores, or at the lowest priority when the host
  * has no such class: 0, or the host's errno when neither could be set. */
 int ps_host_thread_make_background(void);
@@ -457,6 +465,9 @@ int ps_host_host_name(char *sz_out, size_t cb_out);
 /* Sets an environment variable of this process, leaving one already set when !is_overwrite: 0, or
  * the host's errno. Not thread-safe against readers of the environment, as setenv. */
 int ps_host_env_set(const char *sz_name, const char *sz_value, int is_overwrite);
+/* The value of an environment variable of this process, or NULL when unset; valid until the next
+ * ps_host_env_set. */
+const char *ps_host_env_get(const char *sz_name);
 
 /* ---- faults and thread interrupts ---- */
 /* What a fault or an interrupt handler is handed: the interrupted thread's registers, which it may

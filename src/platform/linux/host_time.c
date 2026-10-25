@@ -69,3 +69,23 @@ int ps_host_time_sleep_until_ns(uint64_t deadline_ns) {
     const struct timespec time = {.tv_sec = (time_t)(deadline_ns / 1000000000u), .tv_nsec = (long)(deadline_ns % 1000000000u)};
     return clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &time, NULL);
 }
+
+int ps_host_time_local_fields(int64_t utc_sec, struct tm *p_out) {
+    const time_t at = (time_t)utc_sec;
+    tzset();
+    return localtime_r(&at, p_out) ? 0 : errno;
+}
+
+int ps_host_time_utc_fields(int64_t utc_sec, struct tm *p_out) {
+    const time_t at = (time_t)utc_sec;
+    return gmtime_r(&at, p_out) ? 0 : errno;
+}
+
+int ps_host_time_utc_seconds(const struct tm *p_fields, int64_t *p_out_utc_sec) {
+    struct tm fields = *p_fields;
+    errno = 0;
+    const time_t at = timegm(&fields);
+    if (at == (time_t)-1 && errno) return errno;
+    *p_out_utc_sec = (int64_t)at;
+    return 0;
+}

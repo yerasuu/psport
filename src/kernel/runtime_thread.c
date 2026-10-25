@@ -8,10 +8,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
-#include <sched.h>
 #include <signal.h>
 #include <errno.h>
-#include <unistd.h>
 #define ERR(n) ((int32_t)(UINT32_C(0x80020000)|(n)))
 #define ATTR_MAGIC UINT32_C(0x41545452)
 #define STACK_MARGIN (256*1024)
@@ -443,7 +441,7 @@ static ABI __attribute__((noreturn)) void thread_exit(void *p_value) {
      * unwinds through them (RtlUnwindEx), which ends the process with STATUS_BAD_FUNCTION_TABLE. */
     PS_HOST_RECOVERY_JUMP(p_thread->exit_jump);
 }
-static ABI int32_t thread_yield(void) { sched_yield(); return 0; }
+static ABI int32_t thread_yield(void) { ps_host_thread_yield(); return 0; }
 static ABI int32_t thread_get_prio(GuestThread *p_thread,int *p_prio) {
     if (!find_thread(p_thread)) return ERR(3);
     if (!p_prio) return ERR(22);

@@ -18,6 +18,8 @@
 
 int32_t ps_host_thread_id(void) { return (int32_t)syscall(SYS_gettid); }
 
+void ps_host_thread_yield(void) { sched_yield(); }
+
 int ps_host_wait_on_address(const void *p_word, uint32_t expected, int is_private, PsHostClock clock,
                             const struct timespec *p_deadline) {
     if (clock != PS_HOST_CLOCK_MONOTONIC && clock != PS_HOST_CLOCK_REALTIME) return EINVAL;

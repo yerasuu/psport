@@ -6,7 +6,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 /* Restarts the game through run.sh (the settings menu: a new render resolution is a patch
  * applied at start). Descriptors are closed first so the old GPU device and its memory are
@@ -26,7 +25,7 @@ void runtime_restart(void) {
     char *const pp_argv[] = {"bash", "run.sh", NULL};
     ps_host_exec("bash", pp_argv);
     perror("runtime_restart: exec");
-    _exit(1);
+    ps_host_exit_at_once(1);
 }
 static char **s_pp_argv;
 static int s_c_argv;

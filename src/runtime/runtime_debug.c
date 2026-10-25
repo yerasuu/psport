@@ -334,7 +334,7 @@ void runtime_debug_start(char **pp_argv, const char *sz_serial) {
     if (requested == 0 || (requested < 0 && !(sz_setting && atoi(sz_setting) > 0))) return;
     /* The GPU library's initializers read PS_FRAME_STATS before main: set, the process starts
      * again (as accept_deprecated_names does for BB_* names). */
-    if (!getenv("PS_FRAME_STATS")) {
+    if (!ps_host_env_get("PS_FRAME_STATS")) {
         ps_host_env_set("PS_FRAME_STATS", "1", 0);
         ps_host_exec_self(pp_argv);
         printf("Debug: restart with PS_FRAME_STATS=1 failed (%s): GPU frame statistics stay off\n", strerror(errno));
@@ -368,7 +368,7 @@ void runtime_debug_start(char **pp_argv, const char *sz_serial) {
     const time_t now = time(NULL);
     struct tm local;
     char sz_stamp[32] = "00000000-000000", sz_name[128];
-    if (localtime_r(&now, &local)) {
+    if (!ps_host_time_local_fields((int64_t)now, &local)) {
         strftime(sz_stamp, sizeof(sz_stamp), "%Y%m%d-%H%M%S", &local);
         strftime(s_sz_started, sizeof(s_sz_started), "%Y-%m-%d %H:%M:%S %z", &local);
     }

@@ -6,8 +6,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <inttypes.h>
-#include <unistd.h>
 #include "main.h"
+#include "ps_host.h"
 
 /* PS_PERMISSIVE=1: an import the runtime lacks returns 0 instead of stopping, so a title
  * the runtime does not cover fully gets past the first one and its log lists every import it reached
@@ -63,7 +63,7 @@ static ABI __attribute__((noreturn)) void unresolved(uint32_t id, uintptr_t argu
     puts(g_has_entered_game ? "Original guest entry instructions executed; game initialization is incomplete." :
                         "Native libc initialization is incomplete; game entry has not run.");
     fflush(NULL);
-    _exit(20); /* no destructors: GPU, audio and guest threads are still running */
+    ps_host_exit_at_once(20); /* no destructors: GPU, audio and guest threads are still running */
 }
 /* An import bound to the runtime's or the GPU library's own function whose result tells a failure
  * (runtime_import_failure) is called through one of these: it keeps the six argument registers on
