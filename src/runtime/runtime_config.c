@@ -41,7 +41,7 @@ static char *trimmed(char *sz_text) {
 }
 static void config_read(void) {
     const char *sz_path=runtime_config_path();
-    FILE *p_file=fopen(sz_path,"r");
+    FILE *p_file=ps_host_fs_open_stream(sz_path,"r");
     if (!p_file) {
         if (errno!=ENOENT) printf("Runtime: settings: cannot read %s: %s\n",sz_path,strerror(errno));
         return;

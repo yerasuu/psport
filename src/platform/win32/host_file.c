@@ -975,3 +975,15 @@ void ps_host_dir_close(PsHostDir *p_dir) {
     if (p_dir->h_find != INVALID_HANDLE_VALUE) FindClose(p_dir->h_find);
     free(p_dir);
 }
+
+/* fopen takes the ANSI code page's path, which cannot name every UTF-8 one. */
+FILE *ps_host_fs_open_stream(const char *sz_path, const char *sz_mode) {
+    wchar_t sz_wide[PS_WIN32_PATH_MAX], sz_wide_mode[16];
+    int error = wide_path(sz_path, sz_wide, PS_WIN32_PATH_MAX);
+    if (!error) error = ps_win32_to_wide(sz_mode, sz_wide_mode, sizeof(sz_wide_mode) / sizeof(*sz_wide_mode));
+    if (error) {
+        errno = error;
+        return NULL;
+    }
+    return _wfopen(sz_wide, sz_wide_mode);
+}

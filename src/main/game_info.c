@@ -10,7 +10,7 @@
 
 /* param.sfo lookup: string or integer value of key; the entry's format (0x0404 an integer), 0 when absent. */
 int sfo_value(const char *sz_path, const char *sz_key, char *sz_text, size_t cb_text, uint32_t *p_number) {
-    FILE *p_file=fopen(sz_path,"rb");
+    FILE *p_file=ps_host_fs_open_stream(sz_path,"rb");
     if (!p_file) return 0;
     unsigned char data[65536];
     size_t cb_read=fread(data,1,sizeof(data),p_file); fclose(p_file);
@@ -40,7 +40,7 @@ void configure_content(const char *sz_sfo) {
     if (!strcmp(sz_sku,"full")) values[0]=3;
     else if (!strcmp(sz_sku,"trial")) values[0]=1;
     else fail("PS_CONTENT_SKU must be full or trial");
-    FILE *p_file=fopen(sz_sfo,"rb");
+    FILE *p_file=ps_host_fs_open_stream(sz_sfo,"rb");
     if (!p_file) { fprintf(stderr,"ERROR: cannot read %s\n",sz_sfo); exit(1); }
     fclose(p_file);
     for (unsigned i=0;i<4;++i) {

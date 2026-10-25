@@ -272,7 +272,8 @@ runtime() {
     commit=$(git rev-parse --short=12 HEAD)
     rm -rf -- "$out/runtime" && mkdir -p -- "$out/runtime"
     for source in src/main/main.c src/main/cli.c src/main/game_info.c src/main/bind.c src/main/signals.c \
-        src/loader/loader*.c src/*/runtime*.c src/platform/*.c src/platform/win32/*.c src/main/vulkan_smoke.c; do
+        src/loader/loader*.c src/*/runtime*.c src/platform/*.c src/platform/common/*.c src/platform/win32/*.c \
+        src/main/vulkan_smoke.c; do
         object=$out/runtime/${source//\//_}.o
         if "$cc" -std=c11 -O2 -g -Wall -Wextra -Werror -include src/platform/win32/posix_compat.h \
             -DPS_VERSION="\"$version\"" -DPS_COMMIT="\"$commit\"" "${includes[@]}" -I. "${areas[@]/#/-Isrc/}" \

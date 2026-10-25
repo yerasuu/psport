@@ -35,7 +35,7 @@ __thread PsHostRecoveryPoint *g_p_runtime_fault_recover;
 PsHostRecoveryPoint **runtime_fault_recover_slot(void) { return &g_p_runtime_fault_recover; }
 static void *toggle_watcher(void *p_path) {
     for (unsigned long long last=ULLONG_MAX;;) {
-        FILE *p_file=fopen(p_path,"r");
+        FILE *p_file=ps_host_fs_open_stream(p_path,"r");
         unsigned long long value=0, experiment=0;
         if (p_file) { if (fscanf(p_file,"%llu %llu",&value,&experiment)<1) value=0; fclose(p_file); }
         __atomic_store_n(&g_runtime_experiment_bits,(uint64_t)experiment,__ATOMIC_RELEASE);

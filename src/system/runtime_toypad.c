@@ -205,7 +205,7 @@ static void format_figure_path(const Figure *p_figure, char *sz_out, size_t cb_o
 static void save_figure(const Figure *p_figure) {
     char sz_path[512];
     format_figure_path(p_figure,sz_path,sizeof(sz_path));
-    FILE *p_file=fopen(sz_path,"wb");
+    FILE *p_file=ps_host_fs_open_stream(sz_path,"wb");
     if (!p_file) { printf("Runtime: toypad: cannot write %s: %s\n",sz_path,strerror(errno)); return; }
     const size_t cb_written=fwrite(p_figure->data,1,sizeof(p_figure->data),p_file);
     if (fclose(p_file) || cb_written!=sizeof(p_figure->data)) printf("Runtime: toypad: writing %s failed\n",sz_path);
@@ -213,7 +213,7 @@ static void save_figure(const Figure *p_figure) {
 static void load_figure(Figure *p_figure) {
     char sz_path[512];
     format_figure_path(p_figure,sz_path,sizeof(sz_path));
-    FILE *p_file=fopen(sz_path,"rb");
+    FILE *p_file=ps_host_fs_open_stream(sz_path,"rb");
     const int is_loaded=p_file && fread(p_figure->data,1,sizeof(p_figure->data),p_file)==sizeof(p_figure->data);
     if (p_file) fclose(p_file);
     if (is_loaded) return;
@@ -514,7 +514,7 @@ static void sync_figures_locked(void) {
     WantedFigure wanted[SLOTS];
     unsigned c_wanted=0;
     if (has_file) {
-        FILE *p_file=fopen(s_sz_figures_file,"r");
+        FILE *p_file=ps_host_fs_open_stream(s_sz_figures_file,"r");
         if (p_file) {
             c_wanted=read_figures_file(p_file,wanted);
             fclose(p_file);

@@ -6,12 +6,9 @@
 #endif
 #include "runtime.h"
 #include <errno.h>
-#include <ftw.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
-#include <unistd.h>
 #define INVALID_ID ((int32_t)0x805a1000)
 #define NOT_LOADED ((int32_t)0x805a1001)
 #define PARAMETER ((int32_t)0x80d90002)
@@ -237,14 +234,11 @@ static ABI int32_t download_space(const char *sz_mount,uint64_t *p_kb) {
 #define TEMP_MOUNT "/temp0"
 static unsigned s_c_temp_mounts;
 static void temp_folder(char *sz_out,size_t cb_out) { snprintf(sz_out,cb_out,"%s/temp/%s",runtime_file_user_dir(),s_sz_title_id); }
-static int remove_entry(const char *sz_path,const struct stat *p_stat,int type,struct FTW *p_ftw) {
-    (void)p_stat; (void)type;
-    return p_ftw->level ? remove(sz_path) : 0;
-}
 static int temp_format(void) {
     char sz_host[4096];
     temp_folder(sz_host,sizeof(sz_host));
-    return nftw(sz_host,remove_entry,16,FTW_DEPTH|FTW_PHYS) && errno!=ENOENT ? -1 : 0;
+    const int error=ps_host_fs_remove_tree(sz_host,1);
+    return error && error!=ENOENT ? -1 : 0;
 }
 static int temp_point(const char *sz_mount) { return sz_mount && memchr(sz_mount,0,16) && !strcmp(sz_mount,TEMP_MOUNT); }
 static ABI int32_t temp_mount(uint32_t option,char *sz_mount) {

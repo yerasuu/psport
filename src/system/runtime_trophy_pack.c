@@ -29,7 +29,7 @@ int64_t trophy_pack_read(const TrophyPack *p_pack, const char *sz_entry, void *p
     const TrpEntry *p_entry = find_entry(p_pack, sz_entry);
     if (!p_entry || p_entry->cb_data > INT64_MAX) return -1;
     if (!p_buffer || cb_buffer < p_entry->cb_data) return (int64_t)p_entry->cb_data;
-    FILE *p_file = fopen(p_pack->sz_host_path, "rb");
+    FILE *p_file = ps_host_fs_open_stream(p_pack->sz_host_path, "rb");
     if (!p_file) return -1;
     const bool is_read = !fseeko(p_file, (off_t)p_entry->off_data, SEEK_SET) &&
                          fread(p_buffer, 1, p_entry->cb_data, p_file) == p_entry->cb_data;
@@ -72,7 +72,7 @@ static void count_icons(TrophyPack *p_pack) {
 bool trophy_pack_open(const char *sz_host_path, int language, TrophyPack *p_out_pack) {
     memset(p_out_pack, 0, sizeof(*p_out_pack));
     snprintf(p_out_pack->sz_host_path, sizeof(p_out_pack->sz_host_path), "%s", sz_host_path);
-    FILE *p_file = fopen(sz_host_path, "rb");
+    FILE *p_file = ps_host_fs_open_stream(sz_host_path, "rb");
     if (!p_file) return false;
     unsigned char header[CB_TRP_HEADER];
     bool is_valid = fread(header, 1, sizeof(header), p_file) == sizeof(header) && read_be32(header) == TRP_MAGIC;
@@ -127,7 +127,7 @@ bool trophy_pack_open(const char *sz_host_path, int language, TrophyPack *p_out_
  * from 0x80 on, each a run of type/length/value fields; type 0x10 is the NP communication id. */
 bool trophy_npbind_comm_id(const char *sz_host_path, uint32_t label, char sz_out_id[16]) {
     unsigned char data[0x8000];
-    FILE *p_file = fopen(sz_host_path, "rb");
+    FILE *p_file = ps_host_fs_open_stream(sz_host_path, "rb");
     if (!p_file) return false;
     const size_t cb_data = fread(data, 1, sizeof(data), p_file);
     fclose(p_file);

@@ -30,7 +30,7 @@ void runtime_pad_read_inject(void) {
     if (ps_host_fs_stat(s_sz_path,&st)) return;
     if (st.mtime.tv_sec==s_mtime.tv_sec && st.mtime.tv_nsec==s_mtime.tv_nsec) return;
     s_mtime=st.mtime;
-    FILE *p_file=fopen(s_sz_path,"r");
+    FILE *p_file=ps_host_fs_open_stream(s_sz_path,"r");
     if (!p_file) return;
     static const struct { const char *sz_name; uint32_t ps; } s_names[]={
         {"cross",BTN_CROSS}, {"circle",BTN_CIRCLE}, {"square",BTN_SQUARE}, {"triangle",BTN_TRIANGLE},
@@ -82,7 +82,7 @@ void runtime_pad_record_sample(const PadData *p_pad_data) {
         if (s_p_record_file) {
             fclose(s_p_record_file); s_p_record_file=NULL;
             printf("Runtime: pad recording stopped (%s)\n",s_sz_path);
-        } else if ((s_p_record_file=fopen(s_sz_path,"w"))) {
+        } else if ((s_p_record_file=ps_host_fs_open_stream(s_sz_path,"w"))) {
             s_record_start=now_us();
             memset(&s_record_last,0xff,sizeof(s_record_last));
             printf("Runtime: pad recording started (%s, F9 stops)\n",s_sz_path);
@@ -106,7 +106,7 @@ void runtime_pad_replay_sample(PadData *p_pad_data) {
         /* Read at every start: a test with several routes writes the next one into the same file. */
         s_c_replays=0;
         const char *sz_path=runtime_env("PS_PAD_REPLAY",NULL);
-        FILE *p_file=sz_path ? fopen(sz_path,"r") : NULL;
+        FILE *p_file=sz_path ? ps_host_fs_open_stream(sz_path,"r") : NULL;
         PadSample s; unsigned v[8];
         while (p_file && fscanf(p_file,"%u %u %u %u %u %u %u %u",&v[0],&v[1],&v[2],&v[3],&v[4],&v[5],&v[6],&v[7])==8) {
             s=(PadSample){v[0],v[1],{(uint8_t)v[2],(uint8_t)v[3],(uint8_t)v[4],(uint8_t)v[5]},(uint8_t)v[6],(uint8_t)v[7]};

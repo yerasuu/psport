@@ -250,3 +250,5 @@ int ps_host_dir_stat(PsHostDir *p_dir, const char *sz_name, PsHostStat *p_out) {
 }
 
 void ps_host_dir_close(PsHostDir *p_dir) { closedir((DIR *)p_dir); }
+
+FILE *ps_host_fs_open_stream(const char *sz_path, const char *sz_mode) { return fopen(sz_path, sz_mode); }

@@ -13,9 +13,6 @@
 #include <pthread.h>
 #include <time.h>
 #include <errno.h>
-#include <ftw.h>
-#include <sys/stat.h>
-#include <unistd.h>
 
 #define ERR_PARAMETER ((int32_t)0x809F0000)
 #define ERR_NOT_INITIALIZED ((int32_t)0x809F0001)
@@ -114,7 +111,7 @@ static int valid_name(const char *sz_name, size_t max) {
 /* A whole file replaced in one rename (a crash mid-write keeps the old one). */
 static int write_atomic(const char *sz_path, const void *p_data, size_t cb_data) {
     char sz_temp[760]; snprintf(sz_temp,sizeof(sz_temp),"%s.bbtmp",sz_path);
-    FILE *p_file=fopen(sz_temp,"wb");
+    FILE *p_file=ps_host_fs_open_stream(sz_temp,"wb");
     if (!p_file) return -1;
     int is_ok=fwrite(p_data,1,cb_data,p_file)==cb_data && !fflush(p_file) && !ps_host_fs_sync_stream(p_file);
     is_ok=!fclose(p_file) && is_ok;
@@ -129,15 +126,12 @@ static void write_param(const char *sz_meta, const Param *p_param) {
 static int read_param(const char *sz_meta, Param *p_param) {
     char sz_path[700]; snprintf(sz_path,sizeof(sz_path),"%s/param.bin",sz_meta);
     memset(p_param,0,sizeof(*p_param));
-    FILE *p_file=fopen(sz_path,"rb");
+    FILE *p_file=ps_host_fs_open_stream(sz_path,"rb");
     if (!p_file) return -1;
     size_t c_read=fread(p_param,sizeof(*p_param),1,p_file); fclose(p_file);
     PsHostStat st;
     if (!ps_host_fs_stat(sz_path,&st)) p_param->mtime=st.mtime.tv_sec;
     return c_read==1 ? 0 : -1;
-}
-static int remove_entry(const char *sz_path, const struct stat *p_stat, int flag, struct FTW *p_ftw) {
-    (void)p_stat; (void)flag; (void)p_ftw; return remove(sz_path);
 }
 
 static ABI int32_t save_initialize(const void *p_param) { (void)p_param; s_is_initialized=1; return 0; }
@@ -218,10 +212,9 @@ static int32_t umount(const MountPoint *p_point, int backup) {
 static ABI int32_t save_umount(const MountPoint *p_point) { return umount(p_point,0); }
 #define BLOCK_SIZE_BYTES 32768
 static uint64_t s_cb_used;
-static int add_used_size(const char *sz_path, const struct stat *p_stat, int flag, struct FTW *p_ftw) {
-    (void)p_stat; (void)p_ftw;
-    PsHostStat st;
-    if (flag==FTW_F && !ps_host_fs_stat_link(sz_path,&st)) s_cb_used+=(uint64_t)st.c_blocks*512;
+static int add_used_size(const PsHostWalkEntry *p_entry, void *p_context) {
+    (void)p_context;
+    if (p_entry->kind==PS_HOST_ENTRY_REGULAR || p_entry->kind==PS_HOST_ENTRY_OTHER) s_cb_used+=(uint64_t)p_entry->stat.c_blocks*512;
     return 0;
 }
 /* OrbisSaveDataMountInfo: blocks and free blocks of the mounted save, the blocks it was mounted
@@ -234,7 +227,7 @@ static ABI int32_t save_mount_info(const MountPoint *p_point, MountInfo *p_out_i
     int i_slot=slot_of(p_point);
     if (i_slot<0) { pthread_mutex_unlock(&s_lock); return ERR_NOT_MOUNTED; }
     s_cb_used=0;
-    nftw(s_slots[i_slot].sz_host,add_used_size,16,FTW_PHYS);
+    ps_host_fs_walk(s_slots[i_slot].sz_host,0,add_used_size,NULL);
     const uint64_t c_used_blocks=(s_cb_used+BLOCK_SIZE_BYTES-1)/BLOCK_SIZE_BYTES;
     memset(p_out_info,0,sizeof(*p_out_info));
     p_out_info->blocks=s_slots[i_slot].c_blocks;
@@ -331,8 +324,8 @@ static ABI int32_t save_delete(const Delete *p_delete) {
     snprintf(sz_meta,sizeof(sz_meta),"%s/%s.sce_sys",sz_base,p_delete->p_dir->data);
     PsHostStat st;
     if (ps_host_fs_stat(sz_host,&st)) return ERR_NOT_FOUND;
-    nftw(sz_host,remove_entry,16,FTW_DEPTH|FTW_PHYS);
-    nftw(sz_meta,remove_entry,16,FTW_DEPTH|FTW_PHYS);
+    ps_host_fs_remove_tree(sz_host,0);
+    ps_host_fs_remove_tree(sz_meta,0);
     printf("Runtime: save data '%s' deleted\n",p_delete->p_dir->data);
     return 0;
 }
@@ -394,8 +387,8 @@ static int32_t memory_open(int32_t user, uint32_t slot, uint64_t cb_memory, uint
     if (make_dirs(sz_dir)) return ERR_INTERNAL;
     snprintf(sz_path,sizeof(sz_path),"%s/memory.dat",sz_dir);
     pthread_mutex_lock(&s_lock);
-    FILE *p_file=fopen(sz_path,"r+b");
-    if (!p_file) p_file=fopen(sz_path,"w+b");
+    FILE *p_file=ps_host_fs_open_stream(sz_path,"r+b");
+    if (!p_file) p_file=ps_host_fs_open_stream(sz_path,"w+b");
     int32_t r=ERR_INTERNAL;
     uint64_t old=0;
     if (p_file) {
@@ -423,7 +416,7 @@ static int32_t memory_io(uint32_t slot, void *p_buffer, uint64_t cb_buffer, int6
     if (!p_buffer || off_memory<0) return ERR_PARAMETER;
     if ((uint64_t)off_memory+cb_buffer>s_memories[slot].cb_memory) return ERR_PARAMETER;
     char sz_path[700]; snprintf(sz_path,sizeof(sz_path),"%s/memory.dat",s_memories[slot].sz_dir);
-    FILE *p_file=fopen(sz_path,"r+b");
+    FILE *p_file=ps_host_fs_open_stream(sz_path,"r+b");
     int32_t r=ERR_INTERNAL;
     if (p_file && !fseek(p_file,off_memory,SEEK_SET) &&
         (write ? fwrite(p_buffer,1,cb_buffer,p_file) : fread(p_buffer,1,cb_buffer,p_file))==cb_buffer) r=0;
@@ -476,7 +469,7 @@ static ABI int32_t memory_get2(const MemoryGet2 *p_get) {
     if (!r && p_get->p_param) read_param(s_memories[p_get->slot].sz_dir,p_get->p_param);
     if (!r && p_get->p_icon && p_get->p_icon->buffer) {
         char sz_path[700]; snprintf(sz_path,sizeof(sz_path),"%s/icon0.png",s_memories[p_get->slot].sz_dir);
-        FILE *p_file=fopen(sz_path,"rb");
+        FILE *p_file=ps_host_fs_open_stream(sz_path,"rb");
         p_get->p_icon->data_size=p_file ? fread((void *)p_get->p_icon->buffer,1,p_get->p_icon->buffer_size,p_file) : 0;
         if (p_file) fclose(p_file);
     }
@@ -507,26 +500,30 @@ typedef struct { int32_t user; int32_t pad; const TitleId *p_title; const DirNam
 typedef struct { int32_t user; uint32_t slot, option; uint8_t reserved[28]; } MemorySync;
 _Static_assert(sizeof(BackupRequest)==64 && sizeof(BackupCheck)==72 && sizeof(BackupRestore)==72,"backup layouts");
 static const char *s_sz_copy_source, *s_sz_copy_target;
-static int copy_entry(const char *sz_path, const struct stat *p_stat, int flag, struct FTW *p_ftw) {
-    (void)p_stat; (void)p_ftw;
+static int copy_entry(const PsHostWalkEntry *p_entry, void *p_context) {
+    (void)p_context;
+    const char *sz_path=p_entry->sz_path;
     char sz_target[1400];
     snprintf(sz_target,sizeof(sz_target),"%s%s",s_sz_copy_target,sz_path+strlen(s_sz_copy_source));
-    if (flag==FTW_D) { const int e=ps_host_fs_make_dir(sz_target,0755); return e && e!=EEXIST ? -1 : 0; }
-    if (flag!=FTW_F) return 0;
-    FILE *p_in=fopen(sz_path,"rb"), *p_out=p_in ? fopen(sz_target,"wb") : NULL;
+    if (p_entry->kind==PS_HOST_ENTRY_DIRECTORY && !p_entry->is_unlisted) {
+        const int e=ps_host_fs_make_dir(sz_target,0755);
+        return e && e!=EEXIST ? e : 0;
+    }
+    if (p_entry->kind!=PS_HOST_ENTRY_REGULAR && p_entry->kind!=PS_HOST_ENTRY_OTHER) return 0;
+    FILE *p_in=ps_host_fs_open_stream(sz_path,"rb"), *p_out=p_in ? ps_host_fs_open_stream(sz_target,"wb") : NULL;
     int is_copied=p_out!=NULL;
     char sz_buffer[65536];
     for (size_t cb_read; is_copied && (cb_read=fread(sz_buffer,1,sizeof(sz_buffer),p_in));)
         is_copied=fwrite(sz_buffer,1,cb_read,p_out)==cb_read;
     if (p_out) is_copied=!fclose(p_out) && is_copied && !ferror(p_in);
     if (p_in) fclose(p_in);
-    return is_copied ? 0 : -1;
+    return is_copied ? 0 : EIO;
 }
 /* Replaces sz_target with a copy of the folder sz_source; requires lock. */
 static int copy_tree_locked(const char *sz_source, const char *sz_target) {
-    nftw(sz_target,remove_entry,16,FTW_DEPTH|FTW_PHYS);
+    ps_host_fs_remove_tree(sz_target,0);
     s_sz_copy_source=sz_source; s_sz_copy_target=sz_target;
-    return nftw(sz_source,copy_entry,16,FTW_PHYS);
+    return ps_host_fs_walk(sz_source,0,copy_entry,NULL);
 }
 static void save_paths(int32_t user, const TitleId *p_title, const char *sz_dir, int is_backup, char *sz_out_host,
                        char *sz_out_meta) {
@@ -576,7 +573,7 @@ static ABI int32_t save_check_backup(const BackupCheck *p_check) {
     if (p_check->p_icon && p_check->p_icon->buffer) {
         char sz_icon[700];
         snprintf(sz_icon,sizeof(sz_icon),"%s/icon0.png",sz_meta);
-        FILE *p_file=fopen(sz_icon,"rb");
+        FILE *p_file=ps_host_fs_open_stream(sz_icon,"rb");
         uint64_t cb_icon=p_file ? fread((void *)p_check->p_icon->buffer,1,p_check->p_icon->buffer_size,p_file) : 0;
         if (p_file) fclose(p_file);
         p_check->p_icon->data_size=cb_icon;
@@ -606,7 +603,7 @@ static ABI int32_t save_load_icon(const MountPoint *p_point, Icon *p_icon) {
     if (i_slot>=0) {
         char sz_icon[700];
         snprintf(sz_icon,sizeof(sz_icon),"%s/icon0.png",s_slots[i_slot].sz_meta);
-        FILE *p_file=fopen(sz_icon,"rb");
+        FILE *p_file=ps_host_fs_open_stream(sz_icon,"rb");
         result=p_file ? 0 : ERR_NOT_FOUND;
         if (p_file) { p_icon->data_size=fread((void *)p_icon->buffer,1,p_icon->buffer_size,p_file); fclose(p_file); }
     }
@@ -622,7 +619,7 @@ static ABI int32_t memory_sync(const MemorySync *p_sync) {
     if (s_memories[p_sync->slot].cb_memory) {
         char sz_path[700];
         snprintf(sz_path,sizeof(sz_path),"%s/memory.dat",s_memories[p_sync->slot].sz_dir);
-        FILE *p_file=fopen(sz_path,"r+b");
+        FILE *p_file=ps_host_fs_open_stream(sz_path,"r+b");
         result=p_file && !ps_host_fs_sync_stream(p_file) ? 0 : ERR_INTERNAL;
         if (p_file) fclose(p_file);
         if (!result) queue_event_locked(EVENT_MEMORY_SYNC,p_sync->user,NULL,NULL);

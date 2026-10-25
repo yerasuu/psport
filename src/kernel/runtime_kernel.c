@@ -741,7 +741,7 @@ void runtime_wait_report(double frames) {
     }
     if (!c_rows || frames<=0) return;
     static FILE *s_p_dump; static int s_is_dump_checked;
-    if (!s_is_dump_checked) { const char *sz_path=runtime_env("PS_WAIT_LOG",NULL); if (sz_path && *sz_path) s_p_dump=fopen(sz_path,"w"); s_is_dump_checked=1; }
+    if (!s_is_dump_checked) { const char *sz_path=runtime_env("PS_WAIT_LOG",NULL); if (sz_path && *sz_path) s_p_dump=ps_host_fs_open_stream(sz_path,"w"); s_is_dump_checked=1; }
     if (s_p_dump) {
         for (int i=0;i<c_rows;++i)
             fprintf(s_p_dump,"%s %d %s %#lx %#lx %#lx %.2f %.3f\n", rows[i].p_wait_site->sz_name, rows[i].p_wait_site->tid, s_kinds[rows[i].p_wait_site->kind&3],

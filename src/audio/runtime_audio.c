@@ -172,7 +172,7 @@ static ABI int32_t audio_open(int32_t user, int32_t type, int32_t i_device, uint
     if (sz_dump) {
         char sz_path[4096];
         snprintf(sz_path,sizeof(sz_path),"%s.port%d.%dch.%s",sz_dump,id,p_port->c_device_channels,p_port->is_float ? "f32" : "s16");
-        p_port->p_dump=fopen(sz_path,"wb");
+        p_port->p_dump=ps_host_fs_open_stream(sz_path,"wb");
     }
     pthread_mutex_lock(&s_table_lock);
     p_port->is_opening=0; p_port->used=1;

@@ -171,7 +171,7 @@ static FILE *begin_atomic(const char *sz_path, char *sz_out_temp, size_t cb_out_
         errno = ENAMETOOLONG;
         return NULL;
     }
-    return fopen(sz_out_temp, "wb");
+    return ps_host_fs_open_stream(sz_out_temp, "wb");
 }
 static bool commit_atomic(FILE *p_file, bool is_written, const char *sz_temp, const char *sz_path) {
     is_written = is_written && !fflush(p_file) && !ps_host_fs_sync_stream(p_file);
@@ -193,7 +193,7 @@ static void state_path(const TrophyContext *p_context, char *sz_out, size_t cb_o
 static uint32_t load_state(TrophyContext *p_context) {
     char sz_path[760], sz_line[128];
     state_path(p_context, sz_path, sizeof(sz_path));
-    FILE *p_file = fopen(sz_path, "r");
+    FILE *p_file = ps_host_fs_open_stream(sz_path, "r");
     if (!p_file) return 0;
     uint32_t c_unlocked = 0;
     while (fgets(sz_line, sizeof(sz_line), p_file)) {

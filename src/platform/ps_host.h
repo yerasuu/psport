@@ -291,6 +291,31 @@ int ps_host_dir_next(PsHostDir *p_dir, PsHostDirEntry *p_out);
 int ps_host_dir_stat(PsHostDir *p_dir, const char *sz_name, PsHostStat *p_out);
 void ps_host_dir_close(PsHostDir *p_dir);
 
+/* A stdio stream on a host path, sz_mode as fopen's: NULL with the host's errno in errno. */
+FILE *ps_host_fs_open_stream(const char *sz_path, const char *sz_mode);
+
+/* What ps_host_fs_walk visits: sz_path is the root as given or a path below it joined with '/',
+ * valid until the callback returns. kind comes from the entry itself, links never followed, and is
+ * UNKNOWN (stat not filled) when the entry vanished or could not be examined; is_unlisted marks a
+ * folder whose entries could not be read, visited without them. */
+typedef struct {
+    const char *sz_path;
+    PsHostEntryKind kind;
+    int is_unlisted;
+    int depth;
+    PsHostStat stat;
+} PsHostWalkEntry;
+/* POST_ORDER visits a folder after its entries, so that a callback may remove them. */
+enum { PS_HOST_WALK_POST_ORDER = 1 };
+/* Calls pfn_entry with the root and everything below it, each folder's entries in the folder's own
+ * order. pfn_entry returns 0 to go on or an errno to stop the walk with it. 0, that errno, or the
+ * host's errno when the root or a folder could not be read (ENOENT: no root). */
+int ps_host_fs_walk(const char *sz_root, unsigned flags, int (*pfn_entry)(const PsHostWalkEntry *p_entry, void *p_context),
+                    void *p_context);
+/* Removes the tree at sz_path, links removed rather than followed, the root too unless is_root_kept;
+ * stops at the first entry that cannot be removed. 0, or the host's errno (ENOENT: no root). */
+int ps_host_fs_remove_tree(const char *sz_path, int is_root_kept);
+
 /* ---- the address space ---- */
 /* What a mapping allows. Write and execute access may imply read on some hosts. */
 enum { PS_HOST_VM_NONE = 0, PS_HOST_VM_READ = 1, PS_HOST_VM_WRITE = 2, PS_HOST_VM_EXECUTE = 4 };
