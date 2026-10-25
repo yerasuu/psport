@@ -7,7 +7,6 @@
 #include <string.h>
 #include <inttypes.h>
 #include <stdatomic.h>
-#include <unistd.h>
 #include <errno.h>
 #define LIMIT 4096
 #define ERR(n) ((int32_t)(UINT32_C(0x80020000)|(n)))

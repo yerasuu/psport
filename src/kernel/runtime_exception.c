@@ -11,7 +11,6 @@
 #include <pthread.h>
 #include <signal.h>
 #include <stdatomic.h>
-#include <unistd.h>
 #define ERR(n) ((int32_t)(UINT32_C(0x80020000)|(n)))
 #define GUEST_SIGNALS 128
 #define GUEST_SIGUSR1 30

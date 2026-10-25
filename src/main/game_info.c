@@ -5,7 +5,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 #include "main.h"
 
 /* param.sfo lookup: string or integer value of key; the entry's format (0x0404 an integer), 0 when absent. */

@@ -10,7 +10,6 @@
 #include <pthread.h>
 #include <errno.h>
 #include <time.h>
-#include <unistd.h>
 #define ERR(n) ((int32_t)(UINT32_C(0x80020000)|(n)))
 enum { ATTR_FIFO=0x01, ATTR_PRIO=0x02, ATTR_SINGLE=0x10, ATTR_MULTI=0x20 };
 enum { WAIT_AND=0x01, WAIT_OR=0x02, CLEAR_ALL=0x10, CLEAR_PAT=0x20 };

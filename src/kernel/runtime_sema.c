@@ -9,7 +9,6 @@
 #include <errno.h>
 #include <time.h>
 #include <stdatomic.h>
-#include <unistd.h>
 #define ERR(n) ((int32_t)(UINT32_C(0x80020000)|(n)))
 typedef struct Waiter {
     int32_t need, result;

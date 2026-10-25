@@ -10,7 +10,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 static char s_sz_game_folder[PATH_MAX], s_sz_game_serial[16], s_sz_game_title[128], s_sz_game_version[16];
 

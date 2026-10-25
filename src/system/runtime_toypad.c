@@ -23,7 +23,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
-#include <sys/stat.h>
 #include <time.h>
 
 enum { VENDOR=0x0E6F, PRODUCT=0x0241, ENDPOINT_IN=0x81, ENDPOINT_OUT=0x01, REPORT=32 };

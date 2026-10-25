@@ -15,7 +15,6 @@
 #include <pthread.h>
 #include <time.h>
 #include "ps_host_sockets.h"
-#include <sys/stat.h>
 
 #define USER_ID 1
 #define DEFAULT_USER_NAME "Player"

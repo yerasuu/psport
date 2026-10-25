@@ -4,7 +4,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 #include "main.h"
 
 /* Fault and watchdog reports go to stderr and, in debug mode, to faults.txt too (opened by the
