@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <time.h>
 #include "ps_host_audio.h"
+#include "ps_host_gpu_memory.h"
 #include "ps_host_input.h"
 #include "ps_host_window.h"
 #ifdef __cplusplus

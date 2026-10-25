@@ -19,6 +19,11 @@ EXPORTS
     ps_host_fault_set_register
     ps_host_feature_probed
     ps_host_fs_close
+    ps_host_gpu_memory_adopt
+    ps_host_gpu_memory_describe_range
+    ps_host_gpu_memory_pointer
+    ps_host_gpu_memory_range_name
+    ps_host_gpu_memory_release
     ps_host_list_mappings
     ps_host_process_id
     ps_host_read_memory

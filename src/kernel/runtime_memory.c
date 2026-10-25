@@ -58,19 +58,23 @@ static int s_h_pool=-1;
  * into staging buffers first. Chunks are allocated when the game allocates direct memory in them;
  * a chunk the GPU library cannot provide stays in the memfd. */
 #define CHUNK (UINT64_C(256) << 20)
-typedef int (*GuestChunkAlloc)(uint64_t phys, uint64_t cb_range);
+/* 0 with *pp_out_share for GPU memory the chunk's views map, 0 with NULL when the GPU imported the chunk's
+ * memfd in place, or an errno when the chunk stays in the memfd. */
+typedef int (*GuestChunkAlloc)(uint64_t phys, uint64_t cb_range, PsHostGpuShare **pp_out_share);
 static GuestChunkAlloc s_pfn_chunk_alloc;
-static int *s_p_chunk_fds; /* per CHUNK of direct memory: -1 not decided, -2 memfd, -3 memfd the GPU
-                        * imported (host memory: VK_EXT_external_memory_host), else a dma-buf fd */
-#define CHUNK_IMPORTED (-3)
+/* Where a chunk lives: not decided, the memfd, the memfd the GPU imported (host memory:
+ * VK_EXT_external_memory_host), or GPU memory exported to the host (a dma-buf) in p_share. */
+typedef enum { CHUNK_UNDECIDED, CHUNK_MEMFD, CHUNK_IMPORTED, CHUNK_SHARED } ChunkPlace;
+typedef struct { ChunkPlace place; PsHostGpuShare *p_share; } ChunkSource;
+static ChunkSource *s_p_chunks; /* per CHUNK of direct memory */
 /* Released memory in a chunk the GPU uses is cleared, not punched out: the GPU holds those pages. */
-#define GPU_CHUNK(fd) ((fd)>=0 || (fd)==CHUNK_IMPORTED)
+#define GPU_CHUNK(source) ((source).place==CHUNK_IMPORTED || (source).place==CHUNK_SHARED)
 /* Drivers whose dma-buf maps at offset 0 only (NVIDIA): a chunk per direct allocation instead of
  * the CHUNK grid. The game maps each of its allocations once, whole, so its mappings and the
  * backing view start at offset 0 of their chunk. */
 unsigned char *g_p_backing_base; /* second view of the pool: host writes bypass guest/GPU page protection */
 static int s_has_whole_chunks;
-typedef struct { uint64_t phys, cb_range; int h_fd; } Region;
+typedef struct { uint64_t phys, cb_range; ChunkSource source; } Region;
 #define MAX_REGIONS 256
 static Region s_regions[MAX_REGIONS];
 static size_t s_c_regions;
@@ -83,16 +87,24 @@ static const Region *region_at(uint64_t phys, uint64_t *p_next) {
     }
     return NULL;
 }
+/* Asks the GPU library for the chunk [phys, phys+size) (lock held): exported GPU memory replaces the
+ * backing view there, and the chunk stays in the memfd when either fails. */
+static ChunkSource alloc_chunk(uint64_t phys, uint64_t cb_range) {
+    PsHostGpuShare *p_share=NULL;
+    if (!s_pfn_chunk_alloc || s_pfn_chunk_alloc(phys,cb_range,&p_share)) return (ChunkSource){CHUNK_MEMFD,NULL};
+    if (!p_share) return (ChunkSource){CHUNK_IMPORTED,NULL};
+    if (!ps_host_gpu_memory_map(p_share,g_p_backing_base+phys,cb_range,PS_HOST_VM_READ|PS_HOST_VM_WRITE,PS_HOST_VM_REPLACE,0)) {
+        ps_host_gpu_memory_release(p_share);
+        return (ChunkSource){CHUNK_MEMFD,NULL};
+    }
+    return (ChunkSource){CHUNK_SHARED,p_share};
+}
 static void add_region(uint64_t phys, uint64_t cb_range) {
     if (s_c_regions==MAX_REGIONS) return;
-    int h_fd=s_pfn_chunk_alloc(phys,cb_range);
-    if (h_fd>=0 && !ps_host_vm_map_shared(g_p_backing_base+phys,cb_range,PS_HOST_VM_READ|PS_HOST_VM_WRITE,PS_HOST_VM_REPLACE,h_fd,0)) {
-        ps_host_fs_close(h_fd);
-        h_fd=-1;
-    }
+    const ChunkSource source=alloc_chunk(phys,cb_range);
     size_t i=s_c_regions;
     while (i>0 && s_regions[i-1].phys>phys) { s_regions[i]=s_regions[i-1]; --i; }
-    s_regions[i]=(Region){phys,cb_range,h_fd>=0 || h_fd==CHUNK_IMPORTED ? h_fd : -2};
+    s_regions[i]=(Region){phys,cb_range,source};
     ++s_c_regions;
 }
 #define FLEX_SPAN (UINT64_C(1024) * 1024 * 1024)
@@ -110,9 +122,8 @@ int pool(void) {
     void *p_view=ps_host_vm_map_shared(NULL,POOL_SIZE+FLEX_SPAN,PS_HOST_VM_READ|PS_HOST_VM_WRITE,PS_HOST_VM_SPARSE,s_h_pool,0);
     if (!p_view) return -1;
     g_p_backing_base=p_view;
-    s_p_chunk_fds=malloc((POOL_SIZE/CHUNK+1)*sizeof(int));
-    if (!s_p_chunk_fds) return -1;
-    for (uint64_t c=0;c<=POOL_SIZE/CHUNK;++c) s_p_chunk_fds[c]=-1;
+    s_p_chunks=calloc(POOL_SIZE/CHUNK+1,sizeof(*s_p_chunks));
+    if (!s_p_chunks) return -1;
     return 0;
 }
 /* Size of direct memory chunk c (the last one may be shorter). */
@@ -122,7 +133,7 @@ static uint64_t chunk_size(uint64_t c) {
 }
 /* Decides where the chunks of [phys, phys+size) of direct memory live (lock held). */
 void ensure_chunks(uint64_t phys, uint64_t cb_range) {
-    if (!s_p_chunk_fds || phys>=POOL_SIZE) return;
+    if (!s_p_chunks || phys>=POOL_SIZE) return;
     if (s_has_whole_chunks) {
         if (!s_pfn_chunk_alloc) return;
         const uint64_t end=phys+cb_range<POOL_SIZE ? phys+cb_range : POOL_SIZE;
@@ -138,18 +149,12 @@ void ensure_chunks(uint64_t phys, uint64_t cb_range) {
     }
     const uint64_t last=(phys+cb_range-1<POOL_SIZE ? phys+cb_range-1 : POOL_SIZE-1)/CHUNK;
     for (uint64_t c=phys/CHUNK;c<=last;++c) {
-        if (s_p_chunk_fds[c]!=-1) continue;
-        int h_fd=s_pfn_chunk_alloc ? s_pfn_chunk_alloc(c*CHUNK,chunk_size(c)) : -1;
-        if (h_fd>=0 && !ps_host_vm_map_shared(g_p_backing_base+c*CHUNK,chunk_size(c),PS_HOST_VM_READ|PS_HOST_VM_WRITE,PS_HOST_VM_REPLACE,h_fd,0)) {
-            ps_host_fs_close(h_fd);
-            h_fd=-1;
-        }
-        s_p_chunk_fds[c]=h_fd>=0 || h_fd==CHUNK_IMPORTED ? h_fd : -2;
+        if (s_p_chunks[c].place==CHUNK_UNDECIDED) s_p_chunks[c]=alloc_chunk(c*CHUNK,chunk_size(c));
     }
 }
 /* A view of direct or flexible memory at phys, split where it crosses chunks. */
 static void *map_phys(uintptr_t va_range, uint64_t cb_range, unsigned access, uint64_t phys) {
-    if (!s_p_chunk_fds || phys>=POOL_SIZE)
+    if (!s_p_chunks || phys>=POOL_SIZE)
         return ps_host_vm_map_shared((void *)va_range,cb_range,access,PS_HOST_VM_REPLACE,s_h_pool,phys);
     ensure_chunks(phys,cb_range);
     for (uint64_t done=0;s_has_whole_chunks && done<cb_range;) {
@@ -157,14 +162,15 @@ static void *map_phys(uintptr_t va_range, uint64_t cb_range, unsigned access, ui
         uint64_t next;
         const Region *p_region=region_at(at,&next);
         const uint64_t room=p_region ? p_region->phys+p_region->cb_range-at : next-at, cb_chunk=cb_range-done<room ? cb_range-done : room;
-        void *p_mapping = p_region && p_region->h_fd>=0
-            ? ps_host_vm_map_shared((void *)(va_range+done),cb_chunk,access,PS_HOST_VM_REPLACE,p_region->h_fd,at-p_region->phys)
+        const int is_shared=p_region && p_region->source.place==CHUNK_SHARED;
+        void *p_mapping = is_shared
+            ? ps_host_gpu_memory_map(p_region->source.p_share,(void *)(va_range+done),cb_chunk,access,PS_HOST_VM_REPLACE,at-p_region->phys)
             : ps_host_vm_map_shared((void *)(va_range+done),cb_chunk,access,PS_HOST_VM_REPLACE,s_h_pool,at);
         if (!p_mapping) {
             static int s_has_reported;
             if (s_has_reported++ < 4)
                 fprintf(stderr,"Runtime: mapping direct memory %#" PRIx64 "+%#" PRIx64 " from %s failed: %s\n",
-                        at,cb_chunk,p_region && p_region->h_fd>=0 ? "a GPU-visible dma-buf (whole-allocation chunk)" : "the memfd",strerror(errno));
+                        at,cb_chunk,is_shared ? "a GPU-visible dma-buf (whole-allocation chunk)" : "the memfd",strerror(errno));
             return NULL;
         }
         done+=cb_chunk;
@@ -173,14 +179,15 @@ static void *map_phys(uintptr_t va_range, uint64_t cb_range, unsigned access, ui
     for (uint64_t done=0;done<cb_range;) {
         const uint64_t at=phys+done, c=at/CHUNK;
         const uint64_t room=c*CHUNK+chunk_size(c)-at, cb_chunk=cb_range-done<room ? cb_range-done : room;
-        void *p_mapping = s_p_chunk_fds[c]>=0
-            ? ps_host_vm_map_shared((void *)(va_range+done),cb_chunk,access,PS_HOST_VM_REPLACE,s_p_chunk_fds[c],at-c*CHUNK)
+        const int is_shared=s_p_chunks[c].place==CHUNK_SHARED;
+        void *p_mapping = is_shared
+            ? ps_host_gpu_memory_map(s_p_chunks[c].p_share,(void *)(va_range+done),cb_chunk,access,PS_HOST_VM_REPLACE,at-c*CHUNK)
             : ps_host_vm_map_shared((void *)(va_range+done),cb_chunk,access,PS_HOST_VM_REPLACE,s_h_pool,at);
         if (!p_mapping) {
             static int s_has_reported;
             if (s_has_reported++ < 4)
                 fprintf(stderr,"Runtime: mapping direct memory %#" PRIx64 "+%#" PRIx64 " from %s failed: %s\n",
-                        at,cb_chunk,s_p_chunk_fds[c]>=0 ? "a GPU-visible dma-buf chunk" : "the memfd",strerror(errno));
+                        at,cb_chunk,is_shared ? "a GPU-visible dma-buf chunk" : "the memfd",strerror(errno));
             return NULL;
         }
         done+=cb_chunk;
@@ -191,7 +198,7 @@ static void *map_phys(uintptr_t va_range, uint64_t cb_range, unsigned access, ui
 void zero_phys(uint64_t phys, uint64_t cb_range) {
     for (uint64_t done=0;done<cb_range;) {
         const uint64_t at=phys+done;
-        if (!s_p_chunk_fds || at>=POOL_SIZE) {
+        if (!s_p_chunks || at>=POOL_SIZE) {
             ps_host_vm_section_discard(s_h_pool,at,cb_range-done);
             return;
         }
@@ -199,13 +206,13 @@ void zero_phys(uint64_t phys, uint64_t cb_range) {
             uint64_t next;
             const Region *p_region=region_at(at,&next);
             const uint64_t room=p_region ? p_region->phys+p_region->cb_range-at : next-at, cb_chunk=cb_range-done<room ? cb_range-done : room;
-            if (p_region && GPU_CHUNK(p_region->h_fd)) memset(g_p_backing_base+at,0,cb_chunk);
+            if (p_region && GPU_CHUNK(p_region->source)) memset(g_p_backing_base+at,0,cb_chunk);
             else ps_host_vm_section_discard(s_h_pool,at,cb_chunk);
             done+=cb_chunk;
             continue;
         }
         const uint64_t c=at/CHUNK, room=c*CHUNK+chunk_size(c)-at, cb_chunk=cb_range-done<room ? cb_range-done : room;
-        if (GPU_CHUNK(s_p_chunk_fds[c])) memset(g_p_backing_base+at,0,cb_chunk);
+        if (GPU_CHUNK(s_p_chunks[c])) memset(g_p_backing_base+at,0,cb_chunk);
         else ps_host_vm_section_discard(s_h_pool,at,cb_chunk);
         done+=cb_chunk;
     }
@@ -214,10 +221,23 @@ void zero_phys(uint64_t phys, uint64_t cb_range) {
 void runtime_memory_set_guest_chunk_whole(int whole) { s_has_whole_chunks=whole; }
 /* psport: the host address of direct memory phys in the backing view (host memory import). */
 void *runtime_memory_backing_pointer(uint64_t phys) { return g_p_backing_base ? g_p_backing_base+phys : NULL; }
-void runtime_memory_set_guest_chunk_allocator(int (*pfn_alloc)(uint64_t phys, uint64_t cb_range)) {
+/* Only when a share failed, so that the summary of a run without failures stays as it was. */
+static void share_summary(char *sz_out, size_t cb_out) {
+    PsHostGpuMemoryStats stats;
+    ps_host_gpu_memory_stats(&stats);
+    const PsHostGpuShareCounts *p_export=&stats.export_fd, *p_import=&stats.import_range;
+    if (!p_export->c_failures && !p_import->c_failures) { if (cb_out) *sz_out=0; return; }
+    snprintf(sz_out,cb_out,"Runtime: summary direct memory shared with the GPU: export_fd %" PRIu64 " (%" PRIu64 " MiB) %" PRIu64
+             " failed (last: %s), import_range %" PRIu64 " (%" PRIu64 " MiB) %" PRIu64 " failed (last: %s)\n",
+             p_export->c_shares,p_export->cb_shared>>20,p_export->c_failures,p_export->c_failures ? strerror(p_export->last_error) : "none",
+             p_import->c_shares,p_import->cb_shared>>20,p_import->c_failures,p_import->c_failures ? strerror(p_import->last_error) : "none");
+}
+void runtime_memory_set_guest_chunk_allocator(GuestChunkAlloc pfn_alloc) {
+    static int s_has_summary;
     write_lock();
     s_pfn_chunk_alloc=pfn_alloc;
     write_unlock();
+    if (pfn_alloc && !__atomic_exchange_n(&s_has_summary,1,__ATOMIC_ACQ_REL)) runtime_calls_add_summary(share_summary);
 }
 void queue_hook(int kind, uintptr_t va_range, uint64_t cb_range) {
     GpuRange pfn_hook = kind==HOOK_MAP ? g_pfn_hook_map : kind==HOOK_UNMAP ? g_pfn_hook_unmap : g_pfn_hook_invalidate;

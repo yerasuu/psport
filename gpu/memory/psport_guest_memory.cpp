@@ -6,6 +6,7 @@
 #include <chrono>
 #include <string>
 #include <atomic>
+#include <cerrno>
 #include <cstdio>
 #include <cstdlib>
 #include <mutex>
@@ -15,8 +16,8 @@
 #include "psport_quirks.h"
 #include "../../src/platform/ps_host.h"
 
-extern "C" void runtime_memory_set_guest_chunk_allocator(int (*pfn_alloc)(uint64_t phys,
-                                                                      uint64_t cb_range));
+extern "C" void runtime_memory_set_guest_chunk_allocator(int (*pfn_alloc)(uint64_t phys, uint64_t cb_range,
+                                                                           PsHostGpuShare** pp_out_share));
 extern "C" void runtime_memory_set_guest_chunk_whole(int whole);
 extern "C" void* runtime_memory_backing_pointer(uint64_t phys);
 
@@ -115,16 +116,22 @@ void RegisterChunk(Chunk* p_chunk) {
                                              p_chunk);
 }
 
-/// The runtime's chunk allocator: a dma-buf fd of `cb_range` bytes of GPU-visible memory, or -1.
-int AllocChunk(u64 phys, u64 cb_range) {
+int ErrnoOf(vk::Result result) {
+    return result == vk::Result::eErrorOutOfHostMemory || result == vk::Result::eErrorOutOfDeviceMemory ? ENOMEM
+                                                                                                          : EIO;
+}
+
+/// The runtime's chunk allocator: `cb_range` bytes of GPU-visible memory exported as a dma-buf share, or
+/// an errno.
+int AllocChunk(u64 phys, u64 cb_range, PsHostGpuShare** pp_out_share) {
     {
         std::scoped_lock lk{s_mutex};
         if (s_c_chunks == MaxChunks) {
-            return -1;
+            return ENOSPC;
         }
     }
     if (!FitsInBuffer(phys, cb_range)) {
-        return -1;
+        return EFBIG;
     }
     static std::atomic<int> s_c_failures{0};
     const auto fail = [&](const char* sz_what, vk::Result result) {
@@ -132,7 +139,7 @@ int AllocChunk(u64 phys, u64 cb_range) {
             std::fprintf(stderr, "Guest memory: %s failed (%s); chunk %#llx stays in the memfd\n",
                          sz_what, vk::to_string(result).c_str(), (unsigned long long)phys);
         }
-        return -1;
+        return ErrnoOf(result);
     };
     const vk::ExternalMemoryBufferCreateInfo external{
         .handleTypes = vk::ExternalMemoryHandleTypeFlagBits::eDmaBufEXT,
@@ -184,6 +191,12 @@ int AllocChunk(u64 phys, u64 cb_range) {
         s_device.destroyBuffer(buffer);
         return fail("dma-buf export", fd_result);
     }
+    if (const int error = ps_host_gpu_memory_adopt(PS_HOST_GPU_SHARE_EXPORT_FD, static_cast<u64>(fd), cb_range,
+                                                   pp_out_share)) {
+        s_device.freeMemory(memory);
+        s_device.destroyBuffer(buffer);
+        return error;
+    }
     {
         std::scoped_lock lk{s_mutex};
         std::size_t i = s_c_chunks++;
@@ -201,7 +214,7 @@ int AllocChunk(u64 phys, u64 cb_range) {
                 "%llu MiB so far\n",
                 (unsigned long long)phys, (unsigned long long)(cb_range >> 20),
                 (unsigned long long)(cb_total >> 20));
-    return fd;
+    return 0;
 }
 
 /// Host memory import (VK_EXT_external_memory_host): the chunk stays in the runtime's memfd, the
@@ -290,34 +303,41 @@ bool ImportHost(void* p_pointer, u64 cb_range, vk::Buffer& buffer, vk::DeviceMem
     return true;
 }
 
-/// The runtime's chunk allocator in host import mode: CHUNK_IMPORTED (-3, the chunk stays in the
-/// memfd) once its backing view is imported, or -1.
-int AllocImported(u64 phys, u64 cb_range) {
+/// The runtime's chunk allocator in host import mode: 0 with no share (the chunk stays in the memfd)
+/// once its backing view is imported, or an errno.
+int AllocImported(u64 phys, u64 cb_range, PsHostGpuShare** pp_out_share) {
+    *pp_out_share = nullptr;
     {
         std::scoped_lock lk{s_mutex};
         if (s_c_chunks == MaxChunks) {
-            return -1;
+            return ENOSPC;
         }
     }
     if (!FitsInBuffer(phys, cb_range)) {
-        return -1;
+        return EFBIG;
     }
     void* p_pointer = runtime_memory_backing_pointer(phys);
     if (!p_pointer || reinterpret_cast<std::uintptr_t>(p_pointer) % s_import_alignment != 0 ||
         cb_range % s_import_alignment != 0) {
-        return -1;
+        return EINVAL;
+    }
+    PsHostGpuShare* p_range = nullptr;
+    if (const int described = ps_host_gpu_memory_describe_range(p_pointer, cb_range, &p_range)) {
+        return described;
     }
     vk::Buffer buffer;
     vk::DeviceMemory memory;
     vk::Result error{};
-    if (!ImportHost(p_pointer, cb_range, buffer, memory, error)) {
+    const bool is_imported = ImportHost(ps_host_gpu_memory_pointer(p_range), cb_range, buffer, memory, error);
+    ps_host_gpu_memory_release(p_range);
+    if (!is_imported) {
         static std::atomic<int> s_c_failures{0};
         if (s_c_failures.fetch_add(1) < 4) {
             std::fprintf(stderr, "Guest memory: importing chunk %#llx failed (%s); it stays in the "
                                  "memfd\n",
                          (unsigned long long)phys, vk::to_string(error).c_str());
         }
-        return -1;
+        return ErrnoOf(error);
     }
     {
         std::scoped_lock lk{s_mutex};
@@ -334,7 +354,7 @@ int AllocImported(u64 phys, u64 cb_range) {
                 "%llu MiB so far\n",
                 (unsigned long long)phys, (unsigned long long)(cb_range >> 20),
                 (unsigned long long)(cb_total >> 20));
-    return -3;
+    return 0;
 }
 
 /// Runs `record` on the graphics queue and waits; false on any failure.
@@ -372,12 +392,6 @@ bool RunOnce(const Vulkan::Instance& instance, Record&& record) {
     dev.destroyCommandPool(pool);
     return is_ok;
 }
-
-#ifdef _WIN32
-constexpr const char* SharedViewName = "view of a section";
-#else
-constexpr const char* SharedViewName = "memfd mapping";
-#endif
 
 /// Whether the driver imports private memory where it refused a shared view: amdgpu's userptr
 /// (RADV, also under Wine) pins anonymous memory only, and the failure then needs a different
@@ -435,7 +449,7 @@ bool HostImportWorks(const Vulkan::Instance& instance, const char*& why) {
         why = "mmap of the memfd";
     } else if (!ImportHost(p_view, Size, buffer, memory, error)) {
         static std::string s_text;
-        s_text = std::string{"the import of a "} + SharedViewName + " failed (" +
+        s_text = std::string{"the import of a "} + ps_host_gpu_memory_range_name() + " failed (" +
                  vk::to_string(error) + ")";
         if (ImportsPrivateMemory(Size)) {
             s_text += "; private memory imports: the driver takes anonymous memory only, and "

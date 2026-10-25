@@ -60,6 +60,20 @@ FEATURE_HOST(gpu_memory_host_import, WIN32, EXPERIMENTAL,
              "#870")
 FEATURE_PROBED(gpu_memory_host_import)
 
+FEATURE(gpu_memory_share, gpu_memory,
+        "the host's half of sharing guest memory with the GPU: an allocation the GPU exported, mapped at the "
+        "game's addresses, or a range of the host's view of guest memory the GPU imports in place")
+FEATURE_HOST(gpu_memory_share, LINUX, IMPLEMENTED,
+             "dma-buf descriptors adopted, mapped with mmap and closed (src/platform/linux/host_gpu_memory.c), memfd "
+             "view ranges at page granularity, failures counted per kind (src/platform/common/host_gpu_memory.c); "
+             "whether a driver's dma-buf or import works is the two probed rows above",
+             "#1009, #1017")
+FEATURE_HOST(gpu_memory_share, WIN32, EXPERIMENTAL,
+             "ranges of the direct memory section's views at page granularity (src/platform/common/host_gpu_memory.c), "
+             "the import path; no exported allocation is taken (EOPNOTSUPP, counted) until a Win32 handle export is "
+             "measured on Windows drivers; compile-checked, not run with a game yet",
+             "#1009, #1017")
+
 FEATURE(write_traps, fault, "faults on guest memory: the write traps that track what the GPU reads, fault recovery and "
                             "fault reports")
 FEATURE_HOST(write_traps, LINUX, IMPLEMENTED,
