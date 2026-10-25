@@ -13,6 +13,7 @@
 #include <array>
 #include <memory>
 #include <optional>
+#include <span>
 #include <unordered_map>
 #include <boost/container/small_vector.hpp>
 
@@ -282,6 +283,9 @@ private:
         }
         return &pending_binds.emplace_back(arena);
     }
+    /// psport: what a failed vkQueueBindSparse asked for (the first 4 failures), so that a driver's
+    /// refusal can be told from a malformed bind.
+    void LogFailedArenaBinds(std::span<const ArenaBinds> binds, vk::Result result) const;
 
     /// psport: the arena covering every block of [first_block, last_block]; null (counted and
     /// logged) when the span needs more than maxBufferSize or the arena cannot be created.
@@ -612,6 +616,7 @@ private:
     std::array<u64, 5> layer_trap_kinds{};
     std::atomic<u64> arena_bind_calls{0}, arena_bind_ranges{0}; ///< vkQueueBindSparse calls, ranges
     std::atomic<u64> arena_bind_signaled{0}; ///< memory_semaphore value the last call signals
+    std::atomic<u64> m_c_failed_arena_binds{0}, m_c_unbound_arena_ranges{0}; ///< failed after a retry
 
     struct Backing : public Interval {
         vk::DeviceMemory memory;

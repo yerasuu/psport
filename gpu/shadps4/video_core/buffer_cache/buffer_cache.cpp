@@ -1619,11 +1619,10 @@ const Buffer* BufferCache::GetArena(u64 first_block, u64 last_block) {
     const auto rebind = [&](u64 page_begin, u64 page_end) {
         const u64 base_block = page_begin << blocks_per_arena_page_shift;
         const u64 end_block = page_end << blocks_per_arena_page_shift;
-        auto* bind = BindsForArena(target);
         resident_ranges.ForEachInRange(base_block, end_block, [&](const Backing& backing) {
             const u64 start = std::max(base_block, backing.start);
             const u64 end = std::min(end_block, backing.end);
-            bind->binds.push_back(vk::SparseMemoryBind{
+            BindsForArena(target)->binds.push_back(vk::SparseMemoryBind{
                 .resourceOffset = (start << block_shift) - target->cpu_addr,
                 .size = (end - start) << block_shift,
                 .memory = backing.memory,
@@ -1773,6 +1772,9 @@ void BufferCache::EnsureResident(const Buffer* arena, u64 first_block, u64 last_
         }
     }
 
+    if (binds.empty()) {
+        return;
+    }
     u64 total_blocks = 0;
     for (const auto& bind : binds) {
         total_blocks += bind.end - bind.start;
@@ -3808,6 +3810,10 @@ void BufferCache::DropTwins(VAddr addr, u64 size) {
 void BufferCache::SubmitPendingArenaBinds(Vulkan::SubmitInfo& info) {
     // The submission going out has the tick before the current one.
     const u64 submitted = scheduler.CurrentTick() - 1;
+    // A VkSparseBufferMemoryBindInfo must have bindCount > 0 (an arena created by a readback, or
+    // whose blocks got no memory, had none): on Windows the first such call, with no ranges at
+    // all, failed with ErrorOutOfHostMemory (#1002).
+    std::erase_if(pending_binds, [](const ArenaBinds& arena_binds) { return arena_binds.binds.empty(); });
     if (pending_binds.empty()) {
         QueueCopyBacks(submitted);
         QueuePromotions(submitted);
@@ -3869,23 +3875,88 @@ void BufferCache::SubmitPendingArenaBinds(Vulkan::SubmitInfo& info) {
         if (submit_result == vk::Result::eErrorDeviceLost) {
             Vulkan::StopOnDeviceLost("binding guest memory");
         }
-        if (submit_result != vk::Result::eSuccess) {
-            LOG_ERROR_COUNTED(Render_Vulkan, "vkQueueBindSparse failed: {}",
-                              vk::to_string(submit_result));
+        if (submit_result == vk::Result::eSuccess) {
+            return;
         }
+        LOG_ERROR_COUNTED(Render_Vulkan, "vkQueueBindSparse failed: {}", vk::to_string(submit_result));
+        LogFailedArenaBinds(*binds, submit_result);
+        submit_result = instance.GetGraphicsQueue().bindSparse(sparse_info);
+        if (submit_result == vk::Result::eErrorDeviceLost) {
+            Vulkan::StopOnDeviceLost("binding guest memory");
+        }
+        if (submit_result == vk::Result::eSuccess) {
+            LOG_WARNING(Render_Vulkan, "vkQueueBindSparse of {} ranges succeeded when retried", ranges);
+            return;
+        }
+        // A failed vkQueueBindSparse leaves its semaphores untouched, so the submissions waiting
+        // for signal_tick would wait forever: an empty submission signals it in queue order.
+        m_c_failed_arena_binds.fetch_add(1, std::memory_order_relaxed);
+        m_c_unbound_arena_ranges.fetch_add(ranges, std::memory_order_relaxed);
+        const vk::PipelineStageFlags wait_stage = vk::PipelineStageFlagBits::eAllCommands;
+        const vk::SubmitInfo release_info = {
+            .pNext = &timeline_si,
+            .waitSemaphoreCount = wait_tick ? 1u : 0u,
+            .pWaitSemaphores = wait_tick ? &wait_sema : nullptr,
+            .pWaitDstStageMask = &wait_stage,
+            .signalSemaphoreCount = 1u,
+            .pSignalSemaphores = &signal_sema,
+        };
+        const auto release_result = instance.GetGraphicsQueue().submit(release_info);
+        if (release_result == vk::Result::eErrorDeviceLost) {
+            Vulkan::StopOnDeviceLost("releasing a failed guest memory bind");
+        }
+        LOG_ERROR_COUNTED(Render_Vulkan,
+                          "vkQueueBindSparse failed again ({}): {} ranges stay unbound (GPU reads "
+                          "there undefined); memory semaphore {} signaled by an empty submission: {}",
+                          vk::to_string(submit_result), ranges, signal_tick, vk::to_string(release_result));
     });
     QueueCopyBacks(submitted); // bound with the next submission
     QueuePromotions(submitted);
+}
+
+void BufferCache::LogFailedArenaBinds(std::span<const ArenaBinds> binds, vk::Result result) const {
+    static std::atomic<u32> s_c_reports{0};
+    if (s_c_reports.fetch_add(1, std::memory_order_relaxed) >= 4) {
+        return;
+    }
+    std::printf("Arena binds: vkQueueBindSparse returned %s for %zu arenas (block size %#llx)\n",
+                vk::to_string(result).c_str(), binds.size(), (unsigned long long)block_size);
+    for (const auto& arena_binds : binds) {
+        u64 cb_bound = 0, cb_min = ~0ull, cb_max = 0, c_unbinds = 0, c_misaligned = 0, c_past_end = 0;
+        for (const auto& bind : arena_binds.binds) {
+            cb_bound += bind.size;
+            cb_min = std::min<u64>(cb_min, bind.size);
+            cb_max = std::max<u64>(cb_max, bind.size);
+            c_unbinds += !bind.memory;
+            c_misaligned += ((bind.resourceOffset | bind.size | bind.memoryOffset) & (block_size - 1)) != 0;
+            c_past_end += bind.resourceOffset + bind.size > arena_binds.arena->size_bytes;
+        }
+        std::printf("  arena %#llx+%#llx: %zu ranges, %llu MiB, sizes %#llx..%#llx, %llu unbinds, "
+                    "%llu misaligned, %llu past the end\n",
+                    (unsigned long long)arena_binds.arena->cpu_addr,
+                    (unsigned long long)arena_binds.arena->size_bytes, arena_binds.binds.size(),
+                    (unsigned long long)(cb_bound >> 20), (unsigned long long)cb_min,
+                    (unsigned long long)cb_max, (unsigned long long)c_unbinds,
+                    (unsigned long long)c_misaligned, (unsigned long long)c_past_end);
+        for (std::size_t i = 0; i < std::min<std::size_t>(arena_binds.binds.size(), 4); ++i) {
+            const auto& bind = arena_binds.binds[i];
+            std::printf("    offset %#llx size %#llx memory %p memory offset %#llx\n",
+                        (unsigned long long)bind.resourceOffset, (unsigned long long)bind.size,
+                        static_cast<void*>(static_cast<VkDeviceMemory>(bind.memory)),
+                        (unsigned long long)bind.memoryOffset);
+        }
+    }
 }
 
 void BufferCache::ReportArenaBinds() {
     const u64 signaled = arena_bind_signaled.load(std::memory_order_relaxed);
     const auto [result, done] =
         instance.GetDevice().getSemaphoreCounterValue(memory_semaphore.Handle());
-    std::printf("Arena binds: %llu vkQueueBindSparse calls (%llu ranges); the last one signals %llu, "
-                "the GPU is at %llu%s\n",
+    std::printf("Arena binds: %llu vkQueueBindSparse calls (%llu ranges), %llu failed twice (%llu ranges "
+                "left unbound); the last one signals %llu, the GPU is at %llu%s\n",
                 (unsigned long long)arena_bind_calls.load(), (unsigned long long)arena_bind_ranges.load(),
-                (unsigned long long)signaled,
+                (unsigned long long)m_c_failed_arena_binds.load(),
+                (unsigned long long)m_c_unbound_arena_ranges.load(), (unsigned long long)signaled,
                 result == vk::Result::eSuccess ? (unsigned long long)done : 0ull,
                 result == vk::Result::eSuccess && done < signaled
                     ? ": the submissions after it wait for a bind not done yet"
