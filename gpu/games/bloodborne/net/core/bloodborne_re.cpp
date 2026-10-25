@@ -27,6 +27,7 @@
 #include <tuple>
 #include <vector>
 
+#include "../../../../../src/platform/ps_host.h"
 #include "common/logging/log.h"
 #include "common/memory_patcher.h"
 #include "common/path_util.h"
@@ -5575,13 +5576,14 @@ std::optional<BbscSaveSlot> BbscActiveSaveSlotUnchecked() {
     // As shadPS4 picks its user folder: <working folder>\user when it exists (portable install),
     // else %APPDATA%\shadPS4 - never both (another window may play from the other one).
     std::vector<fs::path> bases{fs::current_path(ec) / "user"};
-    if (const char* appdata = std::getenv("APPDATA");
-        appdata != nullptr && !fs::is_directory(bases.front() / "home", ec) &&
+    char sz_user_dir[4096];
+    if (ps_host_shadps4_user_dir(sz_user_dir, sizeof(sz_user_dir)) >= 0 &&
+        !fs::is_directory(bases.front() / "home", ec) &&
         !fs::is_directory(bases.front() / "savedata", ec)) {
         bases.clear();
-        bases.push_back(fs::path(appdata) / "shadPS4");
-        ec.clear();
+        bases.push_back(fs::path(sz_user_dir));
     }
+    ec.clear();
     std::optional<BbscSaveSlot> best;
     fs::file_time_type best_time = bbsc_run_started;
     // BBSC_SAVE_DIR (2026-10-12): the folder holding userdata0000.. on hosts that keep saves
@@ -10716,60 +10718,6 @@ void TickBbscLifeBroadcast() {
     }
 }
 
-// ---- Unstuck key (2026-10-01) -------------------------------------------------------------------
-// Test 2026-10-01: the host rolled into the guest at an elevator, got stuck inside the guest's
-// character, backed out and floated (no gravity) from then on. Cause not found yet. F8 in the game
-// window puts the local player back on the ground: the same in-map warp the respawn uses
-// (chr->vtable[0x5F8], see BbscRespawnInPlace) to the player's own position 0.5 m higher, then the
-// collision proxy reset 0x018BCF30(chr, 1) that the partner revive uses. Works solo and in co-op.
-#if defined(_WIN32) && defined(BBSC_MOD) // the DLL; the built-in build has no F8
-extern "C" __declspec(dllimport) short __stdcall GetAsyncKeyState(int key);
-extern "C" __declspec(dllimport) void* __stdcall GetForegroundWindow();
-extern "C" __declspec(dllimport) unsigned long __stdcall GetWindowThreadProcessId(void* window,
-                                                                                  unsigned long* pid);
-extern "C" __declspec(dllimport) unsigned long __stdcall GetCurrentProcessId();
-#endif
-
-void TickBbscUnstuckKey() {
-#if defined(_WIN32) && defined(BBSC_MOD) // the DLL; the built-in build has no F8
-    static bool was_down = false;
-    const bool down = (GetAsyncKeyState(0x77 /* VK_F8 */) & 0x8000) != 0;
-    const bool pressed = down && !was_down;
-    was_down = down;
-    if (!pressed || image_base == 0) {
-        return;
-    }
-    unsigned long pid = 0;
-    GetWindowThreadProcessId(GetForegroundWindow(), &pid);
-    if (pid != GetCurrentProcessId()) {
-        return; // F8 pressed in another window
-    }
-    const u64 player = GetLocalPlayerCharacter();
-    const auto here = ReadCharacterTransform(player);
-    if (!ReadablePointer(player, 0x410) || !here.has_value() || GetCharacterHp(player) <= 0) {
-        LOG_INFO(Debug, "BBSC unstuck: F8 ignored (no living local player)");
-        return;
-    }
-    const u64 vtable = ReadValue<u64>(player, 0);
-    const u64 warp = ReadablePointer(vtable, 0x600) ? ReadValue<u64>(vtable, 0x5F8) : 0;
-    if (!IsEbootCodeAddress(warp)) {
-        return;
-    }
-    alignas(16) std::array<float, 4> position = here->position;
-    alignas(16) std::array<float, 4> rotation = here->rotation;
-    position[1] += 0.5f;
-    position[3] = 1.0f;
-    rotation[3] = 0.0f;
-    using Warp = void PS4_SYSV_ABI (*)(u64 chr, float* position, float* rotation, u32 flag);
-    reinterpret_cast<Warp>(warp)(player, position.data(), rotation.data(), 1);
-    WriteValue<u8>(player, 0x1E4, static_cast<u8>(ReadValue<u8>(player, 0x1E4) | 0x02));
-    using PhysicsReset = void PS4_SYSV_ABI (*)(u64 chr, u8 flag);
-    reinterpret_cast<PhysicsReset>(image_base + 0x018BCF30)(player, 1);
-    LOG_INFO(Debug, "BBSC unstuck: F8 - player put back at ({:.2f}, {:.2f}, {:.2f}), map {:#x}",
-             position[0], position[1], position[2], GetCurrentPackedMap());
-#endif
-}
-
 // 2026-10-01 test: the guest saw items it could not pick up. The prompt search 0x017D9FB0 takes
 // every item with +0x48 bit 0x40 and has no session check of its own, so an item without the bit
 // is "seen but not pickable". User rule: every item the guest can see must be pickable. Once a
@@ -12557,8 +12505,9 @@ BbscSaveBackup BackupBbscSavesUnchecked() {
     if (runtime_user_dir != nullptr && runtime_user_dir[0]) {
         bases.push_back(fs::absolute(runtime_user_dir, ec));
     }
-    if (const char* appdata = std::getenv("APPDATA")) {
-        bases.push_back(fs::path(appdata) / "shadPS4");
+    char sz_user_dir[4096];
+    if (ps_host_shadps4_user_dir(sz_user_dir, sizeof(sz_user_dir)) >= 0) {
+        bases.push_back(fs::path(sz_user_dir));
     }
     const auto stamp = std::chrono::system_clock::now().time_since_epoch();
     const fs::path out = Common::FS::GetUserPath(Common::FS::PathType::CapturesDir).parent_path() /
@@ -13841,7 +13790,6 @@ void PS4_SYSV_ABI TraceEntry(u64 tag, const GuestRegisterSnapshot* registers) {
         TickBbscDream();
         TickBbscItemSurvey();
         TickBbscGuestItemsPickable();
-        TickBbscUnstuckKey();
         TickBbscLifeBroadcast();
         TickBbscSessionEnd();
         TickBbscStrayForcedWarp();

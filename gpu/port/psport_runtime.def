@@ -24,6 +24,7 @@ EXPORTS
     ps_host_read_memory
     ps_host_recovery_jump
     ps_host_recovery_set
+    ps_host_shadps4_user_dir
     ps_host_thread_cpu_count
     ps_host_thread_id
     ps_host_thread_make_background

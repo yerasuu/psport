@@ -31,6 +31,11 @@ long ps_host_exe_path(char *sz_out, size_t cb_out) {
     return (long)cb_path;
 }
 
+long ps_host_shadps4_user_dir(char *sz_out, size_t cb_out) {
+    if (cb_out) sz_out[0] = 0;
+    return -1;
+}
+
 int ps_host_host_name(char *sz_out, size_t cb_out) {
     if (!cb_out) return EINVAL;
     if (gethostname(sz_out, cb_out)) return errno;

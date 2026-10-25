@@ -31,6 +31,19 @@ long ps_host_exe_path(char *sz_out, size_t cb_out) {
     return (long)strlen(sz_out);
 }
 
+long ps_host_shadps4_user_dir(char *sz_out, size_t cb_out) {
+    static const char sz_folder[] = "\\shadPS4";
+    const char *sz_appdata = getenv("APPDATA");
+    const size_t c_appdata = sz_appdata ? strlen(sz_appdata) : 0;
+    if (!c_appdata || c_appdata + sizeof(sz_folder) > cb_out) {
+        if (cb_out) sz_out[0] = 0;
+        return -1;
+    }
+    memcpy(sz_out, sz_appdata, c_appdata);
+    memcpy(sz_out + c_appdata, sz_folder, sizeof(sz_folder));
+    return (long)(c_appdata + sizeof(sz_folder) - 1);
+}
+
 int ps_host_host_name(char *sz_out, size_t cb_out) {
     wchar_t sz_wide[256];
     DWORD c_wide = sizeof(sz_wide) / sizeof(*sz_wide);

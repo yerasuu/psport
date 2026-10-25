@@ -158,10 +158,11 @@ file(GLOB SHIM_SOURCES CONFIGURE_DEPENDS shim/*.cpp shim/*/*.cpp)
 # every OS once in platform/common/, what differs in the target's platform/<os>/.
 file(GLOB PLATFORM_SOURCES CONFIGURE_DEPENDS platform/common/*.cpp)
 if (WIN32)
-    file(GLOB PLATFORM_OS_SOURCES CONFIGURE_DEPENDS platform/win32/*.cpp)
+    set(PLATFORM_OS_DIR platform/win32)
 else()
-    file(GLOB PLATFORM_OS_SOURCES CONFIGURE_DEPENDS platform/linux/*.cpp)
+    set(PLATFORM_OS_DIR platform/linux)
 endif()
+file(GLOB PLATFORM_OS_SOURCES CONFIGURE_DEPENDS ${PLATFORM_OS_DIR}/*.cpp)
 # The port's services: its C interface, settings and overlay (port/), guest memory and copies
 # (memory/), diagnostics (diag/).
 file(GLOB PORT_SOURCES CONFIGURE_DEPENDS port/*.cpp memory/*.cpp diag/*.cpp)
@@ -214,7 +215,7 @@ target_compile_definitions(psport-gpu PRIVATE IMGUI_IMPL_VULKAN_NO_PROTOTYPES
     PS_FONT_PATH="${CMAKE_CURRENT_SOURCE_DIR}/third_party/fonts/DejaVuSans.ttf")
 set_source_files_properties(platform/linux/embedded_font.cpp platform/win32/embedded_font.cpp PROPERTIES
     OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/fonts/DejaVuSans.ttf")
-target_include_directories(psport-gpu PRIVATE shim port memory diag layer games cp shadps4 ${SHADER_INCLUDE} third_party/gcn/include third_party/half/include third_party/renderdoc
+target_include_directories(psport-gpu PRIVATE ${PLATFORM_OS_DIR} shim port memory diag layer games cp shadps4 ${SHADER_INCLUDE} third_party/gcn/include third_party/half/include third_party/renderdoc
     ../third_party/LibAtrac9/C/src)
 # Vendored (third_party/xbyak, as herumi/xbyak ships it): MSYS2 has no package of it.
 target_include_directories(psport-gpu SYSTEM PRIVATE third_party/xbyak)

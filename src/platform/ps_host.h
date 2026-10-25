@@ -92,6 +92,10 @@ int ps_host_random_bytes(void *p_buffer, size_t cb_buffer);
 /* The running executable's absolute path, NUL-terminated, with '/' between folders: its length, or
  * -1 when the host cannot say or it does not fit in cb_out. */
 long ps_host_exe_path(char *sz_out, size_t cb_out);
+/* The folder shadPS4 keeps its user data in when it is not run portable (Windows: %APPDATA%\\shadPS4),
+ * NUL-terminated: its length, or -1 when the host has none or it does not fit in cb_out (Linux:
+ * there is only <working folder>/user). */
+long ps_host_shadps4_user_dir(char *sz_out, size_t cb_out);
 
 /* ---- dynamic libraries ---- */
 typedef struct PsHostLibrary PsHostLibrary;
