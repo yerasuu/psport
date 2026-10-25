@@ -712,6 +712,7 @@ A launch runs no Python, except for online play:
 | `scripts/bbsc_gameserver/` | BBSC's game server (Bloodborne's extension), started by `run.sh` only with `PS_BBSC=1` and `PS_BBSC_LOCAL_SERVER` |
 | `scripts/sce_file.py` | `param.sfo` and SELF/ELF readers for the Python tools (`tools/got_import.py`, `tools/re/`) |
 | `tools/dcx_check.py` | every `.dcx` file of a Bloodborne folder checked (the launch checks the shaders only) |
+| `tools/check_os_code.py` | OS conditionals and OS or SDL3 includes found outside `src/platform` and `gpu/platform` (`gpu/third_party`, `gpu/shadps4` and `gpu/net/shadps4` exempt); `--strict` exits 1 while any remain; the last run reported 29 findings in 26 files (5 conditionals, 24 includes) |
 
 ## Online play
 
