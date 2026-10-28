@@ -229,7 +229,7 @@ its log and call report, implementing what is missing and checking the result.
 | Path | Contents |
 |---|---|
 | `src/` | entry point (`src/main/`), native loader and C runtime |
-| `gpu/` | GPU library: shadPS4 video core with bbport's changes ([gpu/VENDOR.txt](gpu/VENDOR.txt)), PM4 decoder (`cp/`), memory module (`layer/`), ported libraries (`ngs2_anyps5/`, `audiodec/`, `fiber/`, `font/`, `pngenc/`, `pngdec/`, `jpegdec/`), game profiles (`games/`), overlay and in-game menu (`port/`), DLSS bridge, online module (`net/`) |
+| `gpu/` | GPU library: shadPS4 video core with bbport's changes ([gpu/VENDOR.txt](gpu/VENDOR.txt)), PM4 decoder (`cp/`), memory module (`layer/`), ported libraries (`ngs2_anyps5/`, `ngs2/` its native rewrite, `audiodec/`, `fiber/`, `font/`, `pngenc/`, `pngdec/`, `jpegdec/`), game profiles (`games/`), overlay and in-game menu (`port/`), DLSS bridge, online module (`net/`) |
 | `scripts/` | `online.py` (online addresses for `PS_ONLINE=1`) and `sce_file.py` for the Python tools |
 | `launcher/`, `packaging/` | bbport's GTK4 launcher; Nix package and AppImage script |
 | `patches/` | community patches for Bloodborne |

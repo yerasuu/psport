@@ -233,7 +233,7 @@ gamescope без окна, без звука и без контроллеров 
 | Путь | Содержимое |
 |---|---|
 | `src/` | точка входа (`src/main/`), нативный загрузчик и среда выполнения на C |
-| `gpu/` | библиотека видеочипа: видеоядро shadPS4 с изменениями bbport ([gpu/VENDOR.txt](gpu/VENDOR.txt)), декодер PM4 (`cp/`), модуль памяти (`layer/`), перенесённые библиотеки (`ngs2_anyps5/`, `audiodec/`, `fiber/`, `font/`, `pngenc/`, `pngdec/`, `jpegdec/`), профили игр (`games/`), оверлей и внутриигровое меню (`port/`), мост DLSS, сетевой модуль (`net/`) |
+| `gpu/` | библиотека видеочипа: видеоядро shadPS4 с изменениями bbport ([gpu/VENDOR.txt](gpu/VENDOR.txt)), декодер PM4 (`cp/`), модуль памяти (`layer/`), перенесённые библиотеки (`ngs2_anyps5/`, `ngs2/` — её нативная переработка, `audiodec/`, `fiber/`, `font/`, `pngenc/`, `pngdec/`, `jpegdec/`), профили игр (`games/`), оверлей и внутриигровое меню (`port/`), мост DLSS, сетевой модуль (`net/`) |
 | `scripts/` | `online.py` (сетевые адреса для `PS_ONLINE=1`) и `sce_file.py` для инструментов на Python |
 | `launcher/`, `packaging/` | лаунчер bbport на GTK4; пакет Nix и скрипт AppImage |
 | `patches/` | патчи сообщества для Bloodborne |

@@ -54,7 +54,7 @@ int sceNgs2VoiceQueryInfo(uintptr_t voice_handle, uint32_t info_id, void* info, 
 int sceNgs2VoiceRunCommands(uintptr_t voice_handle, const Ngs2VoiceCommand* commands, size_t num_commands);
 }
 
-namespace Libraries::Ngs2 {
+namespace Libraries::Ngs2Anyps5 {
 namespace {
 // Within the library's 0x804Axxxx range so the title sees a failure; which code the console
 // returns in each of these cases is not known.
@@ -188,4 +188,4 @@ void RegisterLib(Core::Loader::SymbolsResolver* sym) {
     Names()[reinterpret_cast<std::uintptr_t>(&sceNgs2VoiceRunCommands)] = "sceNgs2VoiceRunCommands";
     LIB_FUNCTION("AbYvTOZ8Pts", "libSceNgs2", 1, "libSceNgs2", Guarded<sceNgs2VoiceRunCommands>::Call);
 }
-} // namespace Libraries::Ngs2
+} // namespace Libraries::Ngs2Anyps5

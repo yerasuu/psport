@@ -239,7 +239,7 @@ su registro y su informe de llamadas, implementar lo que falta y comprobar el re
 | Ruta | Contenido |
 |---|---|
 | `src/` | punto de entrada (`src/main/`), cargador nativo y runtime en C |
-| `gpu/` | biblioteca de GPU: núcleo de vídeo de shadPS4 con los cambios de bbport ([gpu/VENDOR.txt](gpu/VENDOR.txt)), decodificador PM4 (`cp/`), módulo de memoria (`layer/`), bibliotecas portadas (`ngs2_anyps5/`, `audiodec/`, `fiber/`, `font/`, `pngenc/`, `pngdec/`, `jpegdec/`), perfiles de juego (`games/`), menú superpuesto y menú del juego (`port/`), puente DLSS, módulo en línea (`net/`) |
+| `gpu/` | biblioteca de GPU: núcleo de vídeo de shadPS4 con los cambios de bbport ([gpu/VENDOR.txt](gpu/VENDOR.txt)), decodificador PM4 (`cp/`), módulo de memoria (`layer/`), bibliotecas portadas (`ngs2_anyps5/`, `ngs2/` su reescritura nativa, `audiodec/`, `fiber/`, `font/`, `pngenc/`, `pngdec/`, `jpegdec/`), perfiles de juego (`games/`), menú superpuesto y menú del juego (`port/`), puente DLSS, módulo en línea (`net/`) |
 | `scripts/` | `online.py` (direcciones en línea para `PS_ONLINE=1`) y `sce_file.py` para las herramientas en Python |
 | `launcher/`, `packaging/` | el lanzador GTK4 de bbport; paquete de Nix y script de AppImage |
 | `patches/` | parches de la comunidad para Bloodborne |
