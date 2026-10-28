@@ -9,6 +9,7 @@ EXPORTS
     g_runtime_experiment_bits DATA
     g_runtime_quirks DATA
     ps_host_backtrace
+    ps_host_command_line
     ps_host_dl_address
     ps_host_dl_find_loaded
     ps_host_dl_sym

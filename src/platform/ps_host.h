@@ -97,6 +97,10 @@ long ps_host_exe_path(char *sz_out, size_t cb_out);
  * NUL-terminated: its length, or -1 when the host has none or it does not fit in cb_out (Linux:
  * there is only <working folder>/user). */
 long ps_host_shadps4_user_dir(char *sz_out, size_t cb_out);
+/* This process's command line as UTF-8, arguments joined by single spaces and NUL-terminated (no
+ * quoting: the arguments' own spaces stay): its length, or -1 when the host cannot say or it does
+ * not fit in cb_out. Read-only view for options that code outside main's parser needs (--user-id). */
+long ps_host_command_line(char *sz_out, size_t cb_out);
 
 /* ---- dynamic libraries ---- */
 typedef struct PsHostLibrary PsHostLibrary;

@@ -5522,10 +5522,6 @@ struct BbscSaveSlot {
 };
 const auto bbsc_run_started = std::filesystem::file_time_type::clock::now();
 
-#ifdef _WIN32
-extern "C" __declspec(dllimport) wchar_t* __stdcall GetCommandLineW();
-#endif
-
 // The local user this process plays as: --user-id N on the emulator's command line, empty when
 // not given (one player per PC: the newest save is then ours). 2026-10-12 two-window test: both
 // windows share %APPDATA%\shadPS4, the guest took the host's newer save (user 1002) for its own,
@@ -5534,20 +5530,24 @@ extern "C" __declspec(dllimport) wchar_t* __stdcall GetCommandLineW();
 const std::string& BbscProcessUserId() {
     static const std::string id = [] {
         std::string out;
-#ifdef _WIN32
-        const std::wstring line = GetCommandLineW();
-        const std::wstring flag = L"--user-id";
+        char command_line[32768];
+        if (ps_host_command_line(command_line, sizeof(command_line)) < 0) {
+            LOG_WARNING(Debug, "BBSC save slot: the command line is not readable, no local user id");
+            return out;
+        }
+        constexpr std::string_view flag = "--user-id";
+        constexpr size_t max_digits = 10;
+        const std::string_view line = command_line;
         const size_t at = line.find(flag);
-        if (at != std::wstring::npos) {
+        if (at != std::string_view::npos) {
             size_t i = at + flag.size();
-            while (i < line.size() && (line[i] == L' ' || line[i] == L'=' || line[i] == L'"')) {
+            while (i < line.size() && (line[i] == ' ' || line[i] == '=' || line[i] == '"')) {
                 ++i;
             }
-            while (i < line.size() && line[i] >= L'0' && line[i] <= L'9') {
-                out += static_cast<char>(line[i++]);
+            while (i < line.size() && line[i] >= '0' && line[i] <= '9' && out.size() < max_digits) {
+                out += line[i++];
             }
         }
-#endif
         if (!out.empty()) {
             LOG_INFO(Debug, "BBSC save slot: this window plays as local user {} - only its saves "
                             "count as ours",

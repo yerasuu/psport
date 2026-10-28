@@ -31,6 +31,15 @@ long ps_host_exe_path(char *sz_out, size_t cb_out) {
     return (long)strlen(sz_out);
 }
 
+long ps_host_command_line(char *sz_out, size_t cb_out) {
+    if (!cb_out) return -1;
+    if (ps_win32_to_utf8(GetCommandLineW(), sz_out, cb_out)) {
+        sz_out[0] = 0;
+        return -1;
+    }
+    return (long)strlen(sz_out);
+}
+
 long ps_host_shadps4_user_dir(char *sz_out, size_t cb_out) {
     static const char sz_folder[] = "\\shadPS4";
     const char *sz_appdata = getenv("APPDATA");
