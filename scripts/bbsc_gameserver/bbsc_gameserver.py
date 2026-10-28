@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Copyright 2026 CLS_AMG
+# SPDX-FileCopyrightText: Copyright (c) 2026 fhody125-web
+# SPDX-License-Identifier: GPL-2.0-or-later AND MIT
 r"""BBSC local game server - the piece that makes Bloodborne think it is online.
 
 Before the game enables anything online it fetches /bb-eu/ss.info, which is base64-encoded XML

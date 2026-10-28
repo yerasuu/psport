@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: Copyright 2026 CLS_AMG
+# SPDX-License-Identifier: GPL-3.0-or-later
+# GPL-3.0-or-later rather than NOTICE.txt's GPL-2.0-or-later, because it is written from bbhost's
+# client source (droogie/bbhost, GPL-3.0-or-later); bbsc_gameserver.py's or-later grant allows that.
 r"""bbhost players on a BBSC server (2026-10-12).
 
 bbhost (droogie's Bloodborne host, github.com/droogie/bbhost) runs the game's own online code and

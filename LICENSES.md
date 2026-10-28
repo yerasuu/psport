@@ -27,7 +27,9 @@ licence applied to every file. [LICENSES.json](LICENSES.json) lists the componen
 | half, xbyak, AMD GCN headers, RenderDoc header, Dear ImGui, LibAtrac9 | MIT (half, GCN headers, RenderDoc, ImGui, LibAtrac9) and BSD-3-Clause (xbyak); copyright lines in LICENSES.json |
 | DejaVu fonts (`gpu/third_party/fonts`) | Bitstream Vera Fonts licence with public domain DejaVu changes and the Arev licence (`LICENSES/LicenseRef-DejaVu-Fonts.txt`) |
 | Tracy (`gpu/third_party/tracy`) | Unread: submodule not checked out; README.md says BSD-3-Clause (review: pending) |
-| BBSC game server scripts (`scripts/bbsc_gameserver`) | NOTICE.txt says GPL-2.0-or-later; `LICENSE.NoDreamForHunter` is MIT; `bbhost_service.py` has no licence line (review: pending) |
+| BBSC game server (`scripts/bbsc_gameserver`: `bbsc_gameserver.py`, `README.md`, `NOTICE.txt`) | GPL-2.0-or-later AND MIT; Copyright 2026 CLS_AMG (NOTICE.txt), with NoDreamForHunter's ss.info format and response shapes (MIT, fhody125-web) |
+| BBSC's bbhost service (`scripts/bbsc_gameserver/bbhost_service.py`) | GPL-3.0-or-later; written from bbhost's client source (droogie/bbhost, GPL-3.0-or-later), which NOTICE.txt's or-later grant allows |
+| NoDreamForHunter's ss.info template (`ss_info_template.xml`, `LICENSE.NoDreamForHunter`) | MIT; Copyright (c) 2026 fhody125-web |
 | Bloodborne patches (`patches`) | Community authors, no licence stated (review: pending) |
 | Documentation | Assumed GPL-2.0-or-later (review: pending) |
 | Libraries linked into the bundles (FFmpeg, SDL3, FreeType, glibc, DLLs and others) | Their own licences, listed by each bundle's generated notices |
@@ -60,6 +62,11 @@ in a package that is never redistributed. A source build keeps it.
 **Downloaded or user-supplied.** AMD's signed FSR 4 DLLs and model data, the FSR 4 v07 assets that
 `tools/fetch_fsr4_assets.sh` downloads on the user's machine, NVIDIA's DLSS SDK and libraries, game files and
 console system modules are not included in any bundle. dxil-spirv is built on the user's machine only.
+
+**BBSC game server.** `scripts/bbsc_gameserver` is a separate Python program that `run.sh` starts as a
+process; psport neither links nor imports it. Each file carries its own SPDX header: `bbsc_gameserver.py`
+imports `bbhost_service.py`, so the running server is used under GPL-3.0-or-later, which BBSC's
+GPL-2.0-or-later grant allows. psport's binaries stay GPL-2.0.
 
 **decanter.** decanter (GPL-3.0-or-later) runs psport as a separate process; it neither links psport nor
 distributes it.
