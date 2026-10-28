@@ -1,15 +1,17 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// The reverb module's processing (0x23110, spec 07 §3): the input mixed to mono, the reflection line's
-// taps (0x285c0, configured by 0x282e0), sixteen damped combs in parallel on the late tap (0x27fc0,
-// configured by 0x293a0 or 0x292d0), per output channel a selection of combs (0x296e0) through four
-// all-passes in series (0x27860), the room's high-frequency filter (0x28800) and the dry/wet mix
-// (0x28fb0). Only the full-rate network: the half-rate mode (decimation 0x297e0, interpolation 0x29990,
-// comb row 2) is never switched on by anything rea read.
+// The reverb module's processing (0x23110, spec 07 §3, spec 11): the input mixed to mono, the reflection
+// line's taps (0x285c0, configured by 0x282e0 or 0x28440), sixteen damped combs in parallel on the late tap
+// (0x27fc0, configured by 0x293a0 or 0x292d0), per output channel a selection of combs (0x296e0) through four
+// all-passes in series (0x27860), the group gains, the room's high-frequency filter (0x28800) and the dry/wet
+// mix (0x28fb0). Only the full-rate network: the half-rate mode (decimation 0x297e0, interpolation 0x29990,
+// comb row 2) hangs on the instance's +0x10, which nothing in firmware 11.00 sets (spec 11 §7).
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <cstring>
 #include <limits>
 #include <numbers>
+#include <span>
 
 #include "Internal.h"
 #include "Reverb.h"
@@ -36,133 +38,179 @@ constexpr s32 kAllpassOffsets[kMaxChannels][kReverbAllpasses] = {
 };
 // The tap that feeds the combs: tap 4, the one at the late delay.
 constexpr u32 kLateTapMask = 0x10;
-// decayHFRatio above 1: a fixed damping and the lowpass added to the direct path (spec 07 §3.4).
-constexpr float kBoostDamping = 0.9494f;
+// 0x27c00's constants (spec 11 §4), as the firmware stores them: decayHFRatio above 1 takes a fixed damping
+// and its complement; at most 1 a damping from the slope, bounded by the maximum.
+constexpr float kBoostDamping = std::bit_cast<float>(0x3f730a81u);
+constexpr float kBoostDampingComplement = std::bit_cast<float>(0x3d4f57f0u);
+constexpr float kDampingSlope = std::bit_cast<float>(0xbf5b6db8u);
+constexpr float kMaxDamping = std::bit_cast<float>(0x3f7ff194u);
+// The mono mix's scales for 8, 6 and 2 input channels (0x37b48, 0x37b40, 0x37b44).
+constexpr float kMix8 = std::bit_cast<float>(0x3e88b439u);
+constexpr float kMix6 = std::bit_cast<float>(0x3ea1cac1u);
+constexpr float kMix2 = std::bit_cast<float>(0x3f34fdf4u);
 
 bool IsBitSet(u32 mask, u32 i_bit) {
     return (mask >> i_bit) & 1;
 }
 
-u32 ToLineSamples(float seconds, float rate_hz, u32 max_delay) {
-    return std::min(u32(seconds * rate_hz + 0.5f), max_delay);
+// The firmware's order of operations for a delay in seconds (0x282e0) and one in ms (0x28440, 0x292d0).
+s32 SecondsToSamples(float seconds, float fs) {
+    return s32(seconds * fs * 1000.0f * 0.001f + 0.5f);
+}
+
+s32 MsToSamples(float ms, float fs) {
+    return s32(fs * ms * 0.001f + 0.5f);
 }
 
 // 0x282e0: the early taps follow the pattern from the reflections' delay, compressed so that its last
 // one stays before the late tap (pattern < 8) or within the line (pattern >= 8); tap 4 is the late one.
-// The group gains (reflections and reverb, both times room) ride on the taps.
-void ConfigureI3dl2Taps(const ReverbParams& params, u32 max_delay, float rate_hz, ReverbTapSet* p_taps) {
+// The group gains (reflections and reverb, both times room) are not on the taps: Configure keeps them for
+// the output.
+void ConfigureI3dl2Taps(const ReverbParams& params, u32 max_delay, float fs, ReverbTapSet* p_taps) {
     const u32 pattern = params.reflection_pattern;
     const u32 i_pattern = pattern < kPatternGroups ? pattern : pattern - kPatternGroups;
     const float* p_ms = kPatternMs[i_pattern];
-    const u32 first = ToLineSamples(params.reflections_delay_s, rate_hz, max_delay);
-    const u32 late = ToLineSamples(params.reflections_delay_s + params.reverb_delay_s, rate_hz, max_delay);
-    const u32 limit = pattern < kPatternGroups ? late : max_delay;
-    // NOTE: the spec writes the test as t0 + P[3] > tL with P in ms and t0 in samples; psport compares
-    // samples with samples.
-    const float span = p_ms[3] * rate_hz / 1000.0f;
-    const float scale = float(first) + span > float(limit) ? float(limit - first) / span : 1.0f;
-    const float early_gain = params.reflections * params.room;
-    p_taps->delays[0] = first;
-    p_taps->gains[0] = kPatternGains[i_pattern][0] * early_gain;
+    const s32 line = s32(max_delay);
+    const s32 first = std::min(SecondsToSamples(params.reflections_delay_s, fs), line);
+    const s32 late = std::min(SecondsToSamples(params.reflections_delay_s + params.reverb_delay_s, fs), line);
+    const s32 limit = pattern < kPatternGroups ? late : line;
+    const s32 span = MsToSamples(p_ms[3], fs);
+    const float scale = u32(first + span) > u32(limit) ? float(limit - first) / float(span) : 1.0f;
+    p_taps->delays[0] = u32(first);
+    p_taps->gains[0] = kPatternGains[i_pattern][0];
+    s32 previous = first;
     for (u32 i_tap = 1; i_tap < 4; ++i_tap) {
-        const float delay = float(first) + scale * p_ms[i_tap] * rate_hz / 1000.0f;
-        p_taps->delays[i_tap] = std::min(u32(delay + 0.5f), max_delay);
-        const bool is_repeated = p_taps->delays[i_tap] == p_taps->delays[i_tap - 1];
-        p_taps->gains[i_tap] = is_repeated ? 0.0f : kPatternGains[i_pattern][i_tap] * early_gain;
+        const s32 delay = first + s32(scale * p_ms[i_tap] * fs * 0.001f + 0.5f);
+        // The firmware leaves these unbounded; psport keeps them within the ring, so that a tap the
+        // rounding takes one past the line does not read outside it.
+        p_taps->delays[i_tap] = std::min(u32(delay), max_delay);
+        p_taps->gains[i_tap] = delay == previous ? 0.0f : kPatternGains[i_pattern][i_tap];
+        previous = delay;
     }
-    p_taps->delays[4] = late;
-    p_taps->gains[4] = params.reverb * params.room;
+    p_taps->delays[4] = std::min(u32(first + SecondsToSamples(params.reverb_delay_s, fs)), max_delay);
+    p_taps->gains[4] = 1.0f;
     p_taps->late_mask = kLateTapMask;
 }
 
-// The explicit network's taps: delays align8((int)(ms * fs / 1000 + 0.5)), group gains 1.0. NOTE: which
-// taps the firmware routes to the combs in this mode is not read yet; psport routes tap 4 as I3DL2 does.
-void ConfigureExplicitTaps(const ReverbParams& params, u32 max_delay, float rate_hz, ReverbTapSet* p_taps) {
+// 0x28440: the explicit network's taps, delays align8((int)(fs * ms * 0.001 + 0.5)), routed as I3DL2's. Only
+// the masked taps change, and only they are read: the others keep their delays without a gain.
+void ConfigureExplicitTaps(const ReverbParams& params, u32 max_delay, float fs, ReverbTapSet* p_taps) {
     for (u32 i_tap = 0; i_tap < kReverbTaps; ++i_tap) {
-        const u32 delay = (u32(s32(params.tap_delays_ms[i_tap] * rate_hz * 0.001f + 0.5f)) + 7) & ~7u;
+        if (!IsBitSet(params.tap_mask, i_tap)) {
+            p_taps->gains[i_tap] = 0.0f;
+            continue;
+        }
+        const u32 delay = (u32(MsToSamples(params.tap_delays_ms[i_tap], fs)) + 7) & ~7u;
         p_taps->delays[i_tap] = std::min(delay, max_delay);
-        p_taps->gains[i_tap] = IsBitSet(params.tap_mask, i_tap) ? params.tap_gains[i_tap] : 0.0f;
+        p_taps->gains[i_tap] = params.tap_gains[i_tap];
     }
     p_taps->late_mask = kLateTapMask;
 }
 
-// Lays out the combs from their 48 kHz slots and sets their gains (0x293a0 for I3DL2, 0x292d0 for the
-// explicit network). Returns whether a line was longer than its slot (rates above 48 kHz).
-bool ConfigureCombs(const ReverbParams& params, float rate_hz, ReverbState* p_state) {
+// Lays comb i_comb's line of c_length floats at *p_off_comb, after the previous one. The firmware has no
+// bound here; psport shortens a line that would run past the instance's memory (rates above 48 kHz) and
+// says so. The index goes back to 0 once the line no longer holds it, which the firmware does only when
+// it is past the new length: psport also does at the length itself, so that it never reads past the line.
+bool PlaceComb(u32 i_comb, u32 c_length, u32* p_off_comb, ReverbState* p_state) {
     ReverbState& state = *p_state;
-    const bool is_i3dl2 = params.mode == REVERB_I3DL2;
+    const u32 c_placed = std::min(c_length, state.sizes.c_comb_floats - *p_off_comb);
+    state.comb_offsets[i_comb] = *p_off_comb;
+    state.comb_lengths[i_comb] = c_placed;
+    if (state.comb_index[i_comb] >= c_placed) {
+        state.comb_index[i_comb] = 0;
+    }
+    *p_off_comb += c_placed;
+    return c_placed != c_length;
+}
+
+// 0x293a0 with 0x27c00 and 0x27eb0: every comb's length from density, rounded up to odd, the lines back to
+// back; gain from decayTime, damping from decayHFRatio; the prefilter always on, from its square root.
+// Returns whether a line was shortened.
+bool ConfigureI3dl2Combs(const ReverbParams& params, float fs, ReverbState* p_state) {
+    ReverbState& state = *p_state;
     const float ratio = params.decay_hf_ratio;
-    const float divisor = 4.0f - 0.03f * params.density;
+    const float divisor = params.density * -3.0f / 100.0f + 4.0f;
     bool is_clamped = false;
     u32 off_comb = 0;
-    state.comb_mask = 0;
     for (u32 i_comb = 0; i_comb < kReverbCombs; ++i_comb) {
-        const bool is_used = is_i3dl2 || IsBitSet(params.comb_mask, i_comb);
-        const float ms = is_i3dl2 ? kReverbCombLengthsMs[i_comb] : params.comb_delays_ms[i_comb];
-        const u32 c_slot = is_used ? GetReverbSlotSamples(ms) : 0;
-        state.comb_offsets[i_comb] = off_comb;
-        state.comb_lengths[i_comb] = 0;
-        if (c_slot == 0) {
-            continue;
-        }
-        off_comb += c_slot;
-        state.comb_mask |= 1u << i_comb;
-        u32 length;
-        if (is_i3dl2) {
-            length = u32(rate_hz * ms * 0.001f / divisor + 0.5f);
-            length += length & 1;
-        } else {
-            // NOTE: the rounding of an explicit comb's length is not read yet.
-            length = u32(s32(rate_hz * ms * 0.001f + 0.5f));
-        }
-        is_clamped |= length > c_slot;
-        length = std::clamp(length, 1u, c_slot);
-        state.comb_lengths[i_comb] = length;
-        if (!is_i3dl2) {
-            // NOTE: the explicit network gives feedback and damping; the lowpass in the loop without a
-            // direct path is psport's reading of how they combine.
-            state.comb_gains[i_comb] = params.feedback;
-            state.comb_damping[i_comb] = params.damping;
-            state.comb_direct[i_comb] = 0.0f;
-            state.comb_lowpass[i_comb] = 1.0f;
-            continue;
-        }
-        const float gain = std::pow(10.0f, -3.0f * (float(length) / rate_hz) / params.decay_time_s);
+        s32 length = s32(fs * kReverbCombLengthsMs[i_comb] / divisor * 0.001f + 0.5f);
+        length += ~length & 1;
+        is_clamped |= PlaceComb(i_comb, u32(length), &off_comb, &state);
+        const float gain = std::pow(10.0f, float(length) / fs / params.decay_time_s * -3.0f);
         state.comb_gains[i_comb] = gain;
         if (ratio > 1.0f) {
             state.comb_damping[i_comb] = kBoostDamping;
+            state.comb_damping_complement[i_comb] = kBoostDampingComplement;
             state.comb_direct[i_comb] = 1.0f;
-            state.comb_lowpass[i_comb] = 1.0f - std::pow(gain, ratio - 1.0f);
+            state.comb_lowpass[i_comb] = 1.0f - std::pow(10.0f, (ratio - 1.0f) * std::log10(gain));
         } else {
-            const float base = ratio >= 0.8f ? ratio : (0.8f - ratio) * -0.857143f + 0.8f;
-            const float k = base * base;
-            state.comb_damping[i_comb] = std::min(0.99978f, 0.25f * std::log(gain) * (1.0f - 1.0f / k));
+            float k = ratio * ratio;
+            if (ratio < 0.8f) {
+                const float base = (0.8f - ratio) * kDampingSlope + 0.8f;
+                k = base * base;
+            }
+            const float damping = std::min(kMaxDamping, std::log10(gain) * 2.3025851f * 0.25f * (1.0f - 1.0f / k));
+            state.comb_damping[i_comb] = damping;
+            state.comb_damping_complement[i_comb] = 1.0f - damping;
             state.comb_direct[i_comb] = 0.0f;
             state.comb_lowpass[i_comb] = 1.0f;
         }
     }
-    // 0x27eb0. NOTE: when the firmware turns the prefilter on is not read; psport pairs it with the
-    // lowpass loop of decayHFRatio <= 1, where it is the matching tone correction.
-    state.has_prefilter = is_i3dl2 && ratio <= 1.0f;
-    const float a = (1.0f - ratio) / (1.0f + ratio);
-    state.prefilter_k0 = 1.0f + a / (1.0f - a);
+    const float root = std::sqrt(ratio);
+    const float a = (1.0f - root) / (root + 1.0f);
+    state.has_prefilter = true;
+    state.prefilter_k0 = a / (1.0f - a) + 1.0f;
     state.prefilter_k1 = -a / (1.0f - a);
-    // The j-th comb a channel selects enters with gain 1 when j is odd, else 1 + (density - 100) / (10j + 40).
+    return is_clamped;
+}
+
+// 0x292d0: only the combs of the mask change, align4 of their delay, laid back to back from the start of
+// the memory, with lp = buf (1 - damping) + lp damping and y = lp feedback. The others keep their lines and
+// gains and still run, and nothing is cleared; the prefilter stays as the last I3DL2 grain left it.
+bool ConfigureExplicitCombs(const ReverbParams& params, float fs, ReverbState* p_state) {
+    ReverbState& state = *p_state;
+    bool is_clamped = false;
+    bool has_empty_comb = false;
+    u32 off_comb = 0;
+    for (u32 i_comb = 0; i_comb < kReverbCombs; ++i_comb) {
+        if (IsBitSet(params.comb_mask, i_comb)) {
+            const u32 length = (u32(MsToSamples(params.comb_delays_ms[i_comb], fs)) + 3) & ~3u;
+            is_clamped |= PlaceComb(i_comb, length, &off_comb, &state);
+            state.comb_gains[i_comb] = params.feedback;
+            state.comb_damping[i_comb] = params.damping;
+            state.comb_damping_complement[i_comb] = 1.0f - params.damping;
+            state.comb_direct[i_comb] = 0.0f;
+            state.comb_lowpass[i_comb] = 1.0f;
+        }
+        has_empty_comb |= state.comb_lengths[i_comb] == 0;
+    }
+    if (has_empty_comb) {
+        static std::uint64_t s_c_uses;
+        NoteUnimplemented(&s_c_uses, "Ngs2 reverb explicit comb of length 0: firmware 11.00 hangs in 0x27fc0, "
+                                     "psport keeps it silent");
+    }
+    return is_clamped;
+}
+
+// 0x296e0: the j-th comb a channel selects enters with gain 1 when j is odd, else 1 + (density - 100) /
+// (10j + 40), computed as the firmware does. density is the block's +0x3c in both modes.
+void ConfigureChannelCombGains(float density, ReverbState* p_state) {
     for (u32 i_channel = 0; i_channel < kMaxChannels; ++i_channel) {
         u32 j = 0;
         for (u32 i_comb = 0; i_comb < kReverbCombs; ++i_comb) {
             float gain = 0.0f;
             if (IsBitSet(kChannelCombMasks[i_channel], i_comb)) {
-                gain = (j & 1) ? 1.0f : 1.0f + (params.density - 100.0f) / (10.0f * float(j) + 40.0f);
+                gain = (j & 1) ? 1.0f : (1.0f / (float(j) * 0.5f * 20.0f + 40.0f)) * (density + -100.0f) + 1.0f;
                 ++j;
             }
-            state.channel_comb_gains[i_channel][i_comb] = gain;
+            p_state->channel_comb_gains[i_channel][i_comb] = gain;
         }
     }
-    return is_clamped;
 }
 
-bool ConfigureAllpasses(const ReverbParams& params, float rate_hz, ReverbState* p_state) {
+// I3DL2's all-passes (0x27770) sit in their 48 kHz slots; the explicit ones (0x27720) take align4 of their
+// delay at the rate, back to back. Returns whether a line was shortened.
+bool ConfigureAllpasses(const ReverbParams& params, float fs, ReverbState* p_state) {
     ReverbState& state = *p_state;
     const bool is_i3dl2 = params.mode == REVERB_I3DL2;
     state.allpass_gain = is_i3dl2 ? params.diffusion * 0.005f : params.allpass_gain;
@@ -170,19 +218,27 @@ bool ConfigureAllpasses(const ReverbParams& params, float rate_hz, ReverbState* 
     bool is_clamped = false;
     u32 off_allpass = 0;
     for (u32 i_allpass = 0; i_allpass < kReverbAllpasses; ++i_allpass) {
-        const bool is_used = is_i3dl2 || IsBitSet(params.allpass_mask, i_allpass);
-        const float ms = is_i3dl2 ? kReverbAllpassLengthsMs[i_allpass] : params.allpass_delays_ms[i_allpass];
-        const u32 c_slot = is_used ? GetReverbSlotSamples(ms) : 0;
         state.allpass_offsets[i_allpass] = off_allpass;
+        if (!is_i3dl2 && !IsBitSet(params.allpass_mask, i_allpass)) {
+            continue;
+        }
+        const float ms = is_i3dl2 ? kReverbAllpassLengthsMs[i_allpass] : params.allpass_delays_ms[i_allpass];
+        const s32 delay = MsToSamples(ms, fs);
+        u32 c_slot = is_i3dl2 ? GetReverbSlotSamples(ms) : (u32(delay) + 3) & ~3u;
+        const s32 base = is_i3dl2 ? delay : s32(c_slot);
+        const u32 c_free = state.sizes.c_allpass_floats - off_allpass;
+        if (c_slot > c_free) {
+            is_clamped = true;
+            c_slot = c_free;
+        }
         if (c_slot == 0) {
             continue;
         }
         off_allpass += c_slot;
         state.allpass_mask |= 1u << i_allpass;
-        const s32 base = s32(rate_hz * ms * 0.001f + 0.5f);
         for (u32 i_channel = 0; i_channel < kMaxChannels; ++i_channel) {
-            // NOTE: an explicit delay shorter than the channel's offset would go negative; psport keeps
-            // one sample.
+            // NOTE: an explicit delay shorter than the channel's offset gives the firmware a length of 0 or
+            // less; psport keeps one sample, or leaves out an all-pass whose slot is empty.
             const s32 length = base + kAllpassOffsets[i_channel][i_allpass];
             is_clamped |= length > s32(c_slot);
             state.allpass_lengths[i_channel][i_allpass] = u32(std::clamp(length, 1, s32(c_slot)));
@@ -230,26 +286,30 @@ void Configure(const ReverbParams& params, ReverbState* p_state, u32 rate_hz) {
     ReverbState& state = *p_state;
     const float fs = float(rate_hz);
     const bool was_configured = state.is_configured;
-    ReverbTapSet taps{};
+    ReverbTapSet taps = state.taps;
     if (params.mode == REVERB_I3DL2) {
         ConfigureI3dl2Taps(params, state.sizes.max_line_delay, fs, &taps);
+        state.early_gain = params.reflections * params.room;
+        state.late_gain = params.reverb * params.room;
     } else {
         ConfigureExplicitTaps(params, state.sizes.max_line_delay, fs, &taps);
     }
-    // Changed taps fade from the old set to the new one over the grain.
-    state.is_fading = was_configured && std::memcmp(&taps, &state.taps, sizeof(taps)) != 0;
+    // Every reconfiguring grain fades from the old taps to the new ones, changed or not; the first after a
+    // reset fades in from the silent set ResetReverb leaves.
+    state.is_fading = true;
     state.previous_taps = state.taps;
     state.taps = taps;
-    u32 comb_layout[2][kReverbCombs];
-    std::copy_n(state.comb_offsets, kReverbCombs, comb_layout[0]);
-    std::copy_n(state.comb_lengths, kReverbCombs, comb_layout[1]);
-    bool is_clamped = ConfigureCombs(params, fs, &state);
-    // The firmware clears the combs when density changes (spec 07 §3.4); psport also does when their
-    // layout moves, so that no index points past its line.
-    if (!was_configured || params.density != state.configured_density ||
-        !std::equal(state.comb_offsets, state.comb_offsets + kReverbCombs, comb_layout[0]) ||
-        !std::equal(state.comb_lengths, state.comb_lengths + kReverbCombs, comb_layout[1])) {
-        ClearCombs(&state);
+    bool is_clamped;
+    if (params.mode == REVERB_I3DL2) {
+        is_clamped = ConfigureI3dl2Combs(params, fs, &state);
+        if (!was_configured || params.density != state.configured_density) {
+            ClearCombs(&state);
+        }
+        state.configured_density = params.density;
+        ConfigureChannelCombGains(params.density, &state);
+    } else {
+        is_clamped = ConfigureExplicitCombs(params, fs, &state);
+        ConfigureChannelCombGains(std::bit_cast<float>(params.tap_mask), &state);
     }
     u32 allpass_layout[kMaxChannels + 1][kReverbAllpasses];
     std::copy_n(state.allpass_offsets, kReverbAllpasses, allpass_layout[kMaxChannels]);
@@ -274,27 +334,37 @@ void Configure(const ReverbParams& params, ReverbState* p_state, u32 rate_hz) {
     if (is_clamped) {
         static std::uint64_t s_c_uses;
         NoteUnimplemented(&s_c_uses, "Ngs2 reverb above 48 kHz: delay lines clamped to the memory the firmware "
-                                     "sizes at 48 kHz (its half-rate mode is not read yet)");
+                                     "sizes at 48 kHz");
     }
     state.configured_rate_hz = rate_hz;
-    state.configured_density = params.density;
     state.is_configured = true;
 }
 
-// The mono input without the LFE (spec 07 §3.2).
+// The mono input without the LFE (spec 07 §3.2), each term scaled before the sum as 0x23110 does.
 float MixDown(const Planes& in, u32 c_in, u32 i) {
+    static constexpr u32 kChannels8[] = {0, 1, 2, 4, 5, 6, 7};
+    static constexpr u32 kChannels6[] = {0, 1, 2, 4, 5};
+    static constexpr u32 kChannels2[] = {0, 1};
+    std::span<const u32> channels;
+    float k;
     switch (c_in) {
     case 8:
-        return 0.267f * (in.p_channel[0][i] + in.p_channel[1][i] + in.p_channel[2][i] + in.p_channel[4][i] +
-                         in.p_channel[5][i] + in.p_channel[6][i] + in.p_channel[7][i]);
+        channels = kChannels8, k = kMix8;
+        break;
     case 6:
-        return 0.316f * (in.p_channel[0][i] + in.p_channel[1][i] + in.p_channel[2][i] + in.p_channel[4][i] +
-                         in.p_channel[5][i]);
+        channels = kChannels6, k = kMix6;
+        break;
     case 2:
-        return 0.707f * (in.p_channel[0][i] + in.p_channel[1][i]);
+        channels = kChannels2, k = kMix2;
+        break;
     default:
         return in.p_channel[0][i];
     }
+    float mono = 0.0f;
+    for (const u32 i_channel : channels) {
+        mono += in.p_channel[i_channel][i] * k;
+    }
+    return mono;
 }
 
 // The early (not routed late) and late sums of a tap set at the line's write position.
@@ -327,6 +397,14 @@ void ResetReverb(ReverbState* p_state) {
         std::fill_n(stages, 2, 0.0f);
     }
     state.taps = {};
+    // 0x290c0 leaves every comb without a line until I3DL2 or the explicit network's mask gives it one, and
+    // the prefilter off. NOTE: with it off the firmware's four-sample path still reads its zeroed table and
+    // feeds the combs 0 (spec 11 §6.4); psport passes the late tap on, as the firmware's one-sample path
+    // does, until tools/hwtest/ngs2_reverb says which one a console plays.
+    std::fill_n(state.comb_lengths, kReverbCombs, 0u);
+    state.has_prefilter = false;
+    state.early_gain = 1.0f;
+    state.late_gain = 1.0f;
     state.is_fading = false;
     state.is_configured = false;
 }
@@ -352,15 +430,16 @@ void ProcessReverb(const ReverbParams& params, ReverbState* p_state, const Plane
             float old_late;
             ReadTaps(state.previous_taps, state.p_line, c_ring, state.i_line, &old_early, &old_late);
             const float weight = float(i) * fade_step;
-            early = old_early + (early - old_early) * weight;
-            late = old_late + (late - old_late) * weight;
+            early = early * weight + old_early * (1.0f - weight);
+            late = late * weight + old_late * (1.0f - weight);
         }
         state.i_line = state.i_line + 1 == c_ring ? 0 : state.i_line + 1;
         const float comb_in =
             state.has_prefilter ? late * state.prefilter_k0 + state.prefilter_x1 * state.prefilter_k1 : late;
         state.prefilter_x1 = late;
         for (u32 i_comb = 0; i_comb < kReverbCombs; ++i_comb) {
-            if (!IsBitSet(state.comb_mask, i_comb)) {
+            if (state.comb_lengths[i_comb] == 0) {
+                comb_out[i_comb] = 0.0f;
                 continue;
             }
             float* p_comb = state.p_combs + state.comb_offsets[i_comb];
@@ -368,7 +447,7 @@ void ProcessReverb(const ReverbParams& params, ReverbState* p_state, const Plane
             const float delayed = p_comb[i_comb_sample];
             const float damping = state.comb_damping[i_comb];
             float& lowpass = state.comb_state[i_comb];
-            lowpass = delayed * (1.0f - damping) + lowpass * damping;
+            lowpass = delayed * state.comb_damping_complement[i_comb] + lowpass * damping;
             const float y =
                 (delayed * state.comb_direct[i_comb] + lowpass * state.comb_lowpass[i_comb]) * state.comb_gains[i_comb];
             p_comb[i_comb_sample] = comb_in + y;
@@ -397,7 +476,7 @@ void ProcessReverb(const ReverbParams& params, ReverbState* p_state, const Plane
                 value = delayed - state.allpass_gain * w;
                 i_line = i_line + 1 == state.allpass_lengths[i_channel][i_allpass] ? 0 : i_line + 1;
             }
-            value += early;
+            value = early * state.early_gain + value * state.late_gain;
             if (state.has_output_filter) {
                 for (float& stage : state.filter_stages[i_channel]) {
                     stage = (1.0f - state.filter_pole) * value + state.filter_pole * stage;

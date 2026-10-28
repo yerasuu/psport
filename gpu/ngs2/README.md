@@ -152,16 +152,30 @@ and `0x20018001` reads them back in millibels, -1 while the explicit network `0x
 taps within the reflection line, combs and all-passes within their memory, else `0x804A030A`) is set.
 Per grain the input is mixed to mono without the LFE, a reflection line of 4800 or 14400 samples
 (`reverbSize` 0 or 1) gives four early taps from the reflection pattern and a late one, fading from the
-old taps to the new ones when the parameters change; the late tap feeds sixteen damped combs whose
-length follows density and whose gain follows decayTime and decayHFRatio; each output channel sums its
-own combs through four all-passes of diffusion's gain, adds the early taps, goes through the room's
-two-pole high-frequency filter (run as two one-pole sections, which float rounding cannot make
+old taps to the new ones on every grain that reconfigures (from silence after a reset); the late tap
+feeds sixteen damped combs whose length follows density and whose gain follows decayTime and
+decayHFRatio; each output channel sums its own combs through four all-passes of diffusion's gain, adds
+the early taps (each sum times its group gain, reflections or reverb times room), goes through the
+room's two-pole high-frequency filter (run as two one-pole sections, which float rounding cannot make
 unstable) and is mixed with the dry input by ramps from the last grain's levels; the LFE passes dry.
 The delay lines live in the rack's buffer, sized as the firmware sizes them at 48 kHz: above 48 kHz
-they are clamped to it, counted, until rea reads the half-rate mode. The explicit network's tap
-routing, comb filter, per-channel levels and fields at 0xa0 to 0xb8 are not read yet: it runs with
-I3DL2's choices and is counted. `0xc001` copies the fields of the 0x150-byte block rea placed.
+they are shortened to fit it and counted (the firmware's half-rate mode is never switched on).
 `tools/hwtest/ngs2_reverb` records an impulse response per test room.
+
+kb #1121 closes F5's gaps from rea spec 11: I3DL2 tap delays round in samples as 0x282e0 does; the
+combs' lengths are rounded up to odd and laid back to back, the prefilter is always on from the square
+root of decayHFRatio, the firmware's damping and mix constants are used bit for bit, and the combs are
+cleared only when density changes. The explicit network runs as 0x28440 and 0x292d0 build it: only the
+masked taps and combs change (align8 and align4 of their delays), the other combs keep their lines and
+go on sounding, nothing is cleared, the prefilter and group gains stay as the last I3DL2 grain left
+them (1 after a reset), the per-channel density is the tap mask's bits read as a float, the all-passes
+take align4 plus their channel's offset, and the first level scales the input (the reverb on the LFE)
+and the second the reverb. `0xc001` copies the 0x150-byte block both setters update. Kept apart from
+the firmware, each in `FORK.md`: a comb of length 0 is silent and counted where the firmware hangs; with
+the prefilter off after a reset the late tap reaches the combs as it is, where the firmware's
+four-sample path feeds them 0; lines that would pass the instance's memory or the reflection line are
+shortened; an index equal to a comb's new length goes back to 0; a NaN explicit delay answers
+`0x804A030A` and a NaN explicit level, gain, feedback or damping is stored as 0.
 
 Phase F6 (kb #1098) renders the custom racks `0x4001` (sampler), `0x4002` (submixer) and `0x4003`
 (mastering) as firmware 11.00 builds them (rea spec 02 §4.5, 03 §5.5, 04 §2.2, §2.5, §2.6, §4.3, 09 §12). The

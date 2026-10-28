@@ -119,10 +119,12 @@ typedef struct {
     Ngs2I3dl2 i3dl2;
 } Ngs2I3dl2Param;
 
-/* 0x20010002 as rea read the setter (spec 07 §2.2); the SDK's own name for it is not known. */
+/* 0x20010002 as rea read the setter (spec 07 §2.2, spec 11 §6); the SDK's own name for it is not known.
+ * The level names follow what the process does: the first scales the input (the reverb on the LFE), the
+ * second the reverb. */
 typedef struct {
     Ngs2ParamHeader header;
-    float wet, dry;
+    float dry, wet;
     float tap_delays_ms[5], tap_gains[5];
     uint32_t tap_mask;
     float comb_delays_ms[16];
@@ -311,13 +313,21 @@ static void destroy_graph(const Graph *p_graph) {
     sceNgs2SystemDestroy(p_graph->h_system, NULL);
 }
 
-static void render_ir(const char *sz_case, const Graph *p_graph) {
+/* Grains of silence through a playing reverb voice, so that its parameters settle before an impulse. */
+static void render_silence(const Graph *p_graph, uint32_t c_grains) {
+    for (uint32_t i_grain = 0; i_grain < c_grains; i_grain++) {
+        Ngs2RenderBufferInfo buffer = {s_pcm, GRAIN * 2 * sizeof(float), 0x18, 2};
+        record("render_silence", (uint32_t)sceNgs2SystemRender(p_graph->h_system, &buffer, 1), 0);
+    }
+}
+
+static void render_ir_playing(const char *sz_case, const Graph *p_graph, int is_reverb_playing) {
     memset(s_impulse, 0, sizeof(s_impulse));
     s_impulse[0] = 0.25f;
     Ngs2WaveformBlock b = {0, sizeof(s_impulse), 0, 0, IR_GRAINS * GRAIN, 0, 0};
     Ngs2BlocksParam blocks = {{sizeof(blocks), 0, 0x10000001}, s_impulse, 0, 1, &b};
     record("ir_blocks", (uint32_t)sceNgs2VoiceControl(p_graph->h_voice, &blocks.header), 0);
-    record("ir_play_reverb", event(p_graph->h_reverb_voice, 0), 0);
+    if (!is_reverb_playing) record("ir_play_reverb", event(p_graph->h_reverb_voice, 0), 0);
     record("ir_play_sampler", event(p_graph->h_voice, 0), 0);
     char sz_path[128];
     snprintf(sz_path, sizeof(sz_path), SZ_OUT_DIR "/%s.csv", sz_case);
@@ -331,6 +341,10 @@ static void render_ir(const char *sz_case, const Graph *p_graph) {
         }
     }
     if (p_csv) fclose(p_csv);
+}
+
+static void render_ir(const char *sz_case, const Graph *p_graph) {
+    render_ir_playing(sz_case, p_graph, 0);
 }
 
 static uint32_t first_nonzero(void) {
@@ -469,18 +483,77 @@ static void test_impulse_responses(void) {
     }
 }
 
-/* One explicit tap of 10.1 ms, gain 0.5, no combs or all-passes: 0.125 at 3 + align8(485) = 491
- * (unconfirmed: the routing of the explicit taps and the align8 rounding, spec 07 §3.3). */
+/* One explicit tap of 10.1 ms, gain 0.5: 0.125 at 3 + align8(485) = 491 (spec 11 §6.3: routing 0x10, tap
+ * 0 early). An explicit network without all its comb bits right after a reset leaves combs of length 0,
+ * on which the firmware hangs (spec 11 §6.4), so an I3DL2 grain comes first: its combs keep running, but
+ * with reverb at -10000 mB its late group gain is 0, and room and reflections at 0 mB leave the early
+ * group gain the explicit network inherits at 1. A silent grain then takes the taps' fade. */
 static void test_explicit_tap(void) {
     Graph graph = create_graph();
+    Ngs2I3dl2 prime = room(1, 0, 0, 0, 0, 1.0f, 1.0f, 0, 0.0f, -10000, 0.0f, 100, 100, 5000);
+    record("explicit_tap_prime", set_i3dl2(graph.h_reverb_voice, &prime), 0);
+    record("explicit_tap_play_reverb", event(graph.h_reverb_voice, 0), 0);
+    render_silence(&graph, 2);
     Ngs2ReverbExplicitParam param;
     memset(&param, 0, sizeof(param));
     header(&param.header, sizeof(param), 0x20010002);
     param.wet = 1, param.tap_mask = 1, param.tap_delays_ms[0] = 10.1f, param.tap_gains[0] = 0.5f;
     record("explicit_tap_set", (uint32_t)sceNgs2VoiceControl(graph.h_reverb_voice, &param.header), 0);
-    render_ir("explicit_tap", &graph);
+    render_silence(&graph, 1);
+    render_ir_playing("explicit_tap", &graph, 1);
     record("explicit_tap_first_sample", first_nonzero(), 491);
     record_near("explicit_tap_value", s_pcm[2 * 491], 0.125, 1e-7);
+    destroy_graph(&graph);
+}
+
+/* The explicit network's comb delays: the 16 full-rate lengths (they fill the comb memory exactly), so
+ * that no comb is left at length 0. */
+static void set_explicit_combs(Ngs2ReverbExplicitParam *p_param, uint32_t comb_mask) {
+    static const float s_comb_ms[16] = {22.01f, 23.25f, 24.75f, 26.6f,  28.25f, 29.63f, 31.06f, 32.44f,
+                                        33.69f, 34.95f, 36.29f, 37.65f, 38.99f, 40.35f, 41.67f, 43.05f};
+    static const float s_allpass_ms[4] = {11.58f, 9.19f, 7.1f, 4.69f};
+    memset(p_param, 0, sizeof(*p_param));
+    header(&p_param->header, sizeof(*p_param), 0x20010002);
+    p_param->wet = 1;
+    p_param->tap_mask = 0x10, p_param->tap_delays_ms[4] = 1, p_param->tap_gains[4] = 1;
+    p_param->comb_mask = comb_mask;
+    memcpy(p_param->comb_delays_ms, s_comb_ms, sizeof(s_comb_ms));
+    p_param->feedback = 0.5f, p_param->damping = 0.2f;
+    p_param->allpass_mask = 0xf;
+    memcpy(p_param->allpass_delays_ms, s_allpass_ms, sizeof(s_allpass_ms));
+    p_param->allpass_gain = 0.5f;
+}
+
+/* The explicit network right after a reset, every comb and all-pass set, only the late tap: the reset
+ * leaves the prefilter off with its table zeroed, and the firmware's four-sample comb path reads that
+ * table, so by rea's reading (spec 11 §6.4) the combs are fed 0 and the response is silent; psport passes
+ * the late tap on as the firmware's one-sample path does and rings (FORK.md). */
+static void test_explicit_after_reset(void) {
+    Graph graph = create_graph();
+    Ngs2ReverbExplicitParam param;
+    set_explicit_combs(&param, 0xffff);
+    record("explicit_after_reset_set", (uint32_t)sceNgs2VoiceControl(graph.h_reverb_voice, &param.header), 0);
+    render_ir("explicit_after_reset", &graph);
+    double energy = 0;
+    for (uint32_t n = 0; n < IR_GRAINS * GRAIN * 2; n++) energy += (double)s_pcm[n] * s_pcm[n];
+    record_open("explicit_after_reset_energy", energy);
+    record("explicit_after_reset_silent", energy == 0, 1);
+    destroy_graph(&graph);
+}
+
+/* RISK, run last: the explicit network right after a reset with one comb bit leaves 15 combs of length
+ * 0, on which firmware 11.00's 0x27fc0 loops forever by rea's reading (spec 11 §6.4). The start row is
+ * flushed first: a results.csv that ends with it means the console hung. */
+static void test_explicit_partial_mask(void) {
+    Graph graph = create_graph();
+    Ngs2ReverbExplicitParam param;
+    set_explicit_combs(&param, 0x0001);
+    record("explicit_partial_mask_set", (uint32_t)sceNgs2VoiceControl(graph.h_reverb_voice, &param.header), 0);
+    record_open("explicit_partial_mask_start", 1);
+    fflush(s_p_results);
+    printf("ngs2_reverb: explicit_partial_mask may hang the console\n");
+    render_ir("explicit_partial_mask", &graph);
+    record_open("explicit_partial_mask_done", 1);
     destroy_graph(&graph);
 }
 
@@ -502,7 +575,10 @@ static void test_module_read(void) {
     memcpy(&value, s_block + 0xd0, 4), record_near("module_read_dry_0", value, 0, 0);
     memcpy(&value, s_block + 0xf0 + 12, 4), record_near("module_read_wet_3", value, 0, 0);
     memcpy(&value, s_block + 0xf0 + 16, 4), record_near("module_read_wet_4", value, 1, 0);
-    /* Not read yet: +0x44 to +0xcf, +0x110 on (the output filter's descriptor at +0x130). */
+    /* The I3DL2 setter sets bit 3 of +0x132, the LFE's bypass of the output filter (spec 11 §8.2). */
+    record("module_read_bypass_mask", s_block[0x132], 0x08);
+    /* +0x44 to +0xbc hold the explicit network (none set here), +0xc0 to +0xcf nothing; from +0x110 the
+     * process writes the output filter's descriptor into the active block, which 0xc001 does not copy. */
     for (uint32_t off = 0x44; off < 0xd0; off += 4) {
         memcpy(&word, s_block + off, 4);
         if (word != 0) {
@@ -539,6 +615,8 @@ int main(void) {
     test_impulse_responses();
     test_explicit_tap();
     test_module_read();
+    test_explicit_after_reset();
+    test_explicit_partial_mask();
     fclose(s_p_results);
     printf("ngs2_reverb: done, %d mismatch(es) against the values the spec predicts\n", s_c_mismatches);
     return s_c_mismatches != 0;

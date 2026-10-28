@@ -1,4 +1,4 @@
-# Ngs2 reverb (kb #1097)
+# Ngs2 reverb (kb #1097, kb #1121)
 
 Checks on a PS4 what psport's native Ngs2 (`gpu/ngs2/`, phase F5 of kb #625) renders for the reverb
 rack `0x2001` and its module `0x1b`, written from firmware 11.00's `libSceNgs2.sprx` as rea read it
@@ -28,8 +28,10 @@ of history put the impulse at frame 3.
 | `ir_<room>_first_sample` | the first non-zero frame of each response | 3 + reflectionsDelay x 48000: nothing reaches the output before tap 0 |
 | `ir_<room>_energy`, `ir_<room>_state` | the response's energy, the reverb voice's state | open; flags 3 (in use, playing) |
 | `ir_bright_first_tap_*` | room and reflections at 0 mB, no delay, no high-frequency filter | tap 0 at once with the pattern's 0.7: 0.175 on both channels |
-| `explicit_tap_*` | **unconfirmed**: one explicit tap of 10.1 ms and gain 0.5, no combs or all-passes | 0.125 at frame 3 + align8(485) = 491, tap 0 routed as an early tap |
-| `module_read_*` | `0xc001` on the reverb voice after the concert hall room | the 0x150-byte block: mode 0, wet 1, room 0.3162, decayTime 3.92, reverb at -24.02 dB, HFReference 5000, the dry and wet levels at 0xd0 and 0xf0 (wet of channel 3 at 0); the rest, which rea has not placed, is open |
+| `explicit_tap_*` | **unconfirmed**: an I3DL2 grain (room and reflections 0 mB, reverb -10000 mB), then one explicit tap of 10.1 ms and gain 0.5 with no comb bits; the I3DL2 grain comes first because an explicit network without all its comb bits right after a reset hangs the firmware by rea's reading | 0.125 at frame 3 + align8(485) = 491, tap 0 routed as an early tap with the early group gain of 1 the I3DL2 grain left |
+| `module_read_*` | `0xc001` on the reverb voice after the concert hall room | the 0x150-byte block: mode 0, wet 1, room 0.3162, decayTime 3.92, reverb at -24.02 dB, HFReference 5000, the dry and wet levels at 0xd0 and 0xf0 (wet of channel 3 at 0), bit 3 of +0x132 set (`module_read_bypass_mask`); the other words are open |
+| `explicit_after_reset_*` | **unconfirmed**: the explicit network right after a reset, the 16 combs and 4 all-passes set, only the late tap | rea's reading (spec 11 §6.4): the reset leaves the prefilter's table zeroed and the four-sample comb path feeds the combs 0, so the response is silent (`explicit_after_reset_silent` 1). psport's native run rings (0) on purpose until this row is answered: it passes the late tap on as the one-sample path does (`FORK.md`) |
+| `explicit_partial_mask_*` | **RISK, runs last**: the explicit network right after a reset with only comb 0 set | rea's reading: the 15 combs of length 0 make `0x27fc0` loop forever, so the console hangs during the render. `explicit_partial_mask_start` is flushed before it; a `results.csv` that ends there means it hung (reboot the console), `explicit_partial_mask_done` means it did not. psport keeps such combs silent and counts them |
 
 The rooms are modeled on the I3DL2 presets (generic, padded cell, bathroom, stone room, concert
 hall, cave, arena, hangar, plate) plus a sparse room at the reflection line's longest delays and a
@@ -52,3 +54,9 @@ and copy `/data/psport-hwtest/ngs2_reverb/` off the console over FTP. Run the sa
 psport as a title folder (`eboot.bin` and `sce_sys/`), once with `PS_NGS2=native` and once with the
 firmware module (`PS_LLE=libSceNgs2`), and diff the three folders: `results.csv` should match, and the
 PCM files should agree to float rounding.
+
+**Risk:** the last case, `explicit_partial_mask_*`, is expected to hang firmware 11.00 (the console, and
+psport with `PS_LLE=libSceNgs2`); every other row is written by then. If the klog stops at
+`ngs2_reverb: explicit_partial_mask may hang the console` and `ngs2_reverb: done` never comes, reboot
+the console (or stop psport after a minute) and keep the folder as it is: its `results.csv` ending at
+`explicit_partial_mask_start` is the answer.

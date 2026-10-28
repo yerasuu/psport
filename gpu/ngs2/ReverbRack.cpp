@@ -92,9 +92,6 @@ s32 ControlReverb(OrbisNgs2Handle h_voice, Voice* p_voice, const OrbisNgs2VoiceP
             return result;
         }
         params.set_modules |= MODULE_REVERB;
-        static std::uint64_t s_c_uses;
-        NoteUnimplemented(&s_c_uses, "Ngs2 reverb explicit network 0x20010002: tap routing, comb filter, "
-                                     "per-channel levels and the fields at 0xa0-0xb8 not read yet");
         return ORBIS_OK;
     }
     case REVERB_PARAM_READ_SETUP: {

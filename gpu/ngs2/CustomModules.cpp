@@ -180,10 +180,6 @@ s32 SetReverbModule(OrbisNgs2Handle h_voice, const CustomModule& module, u32 sel
             result < 0) {
             return result;
         }
-        static std::uint64_t s_c_uses;
-        NoteUnimplemented(&s_c_uses, "Ngs2 custom reverb explicit network (module 0x1b sub 1): tap routing, "
-                                     "comb "
-                                     "filter, per-channel levels and the fields at 0xa0-0xb8 not read yet");
         return ORBIS_OK;
     }
     default: {
