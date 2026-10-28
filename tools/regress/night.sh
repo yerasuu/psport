@@ -2,7 +2,8 @@
 # tools/regress/night.sh [options] BASE_CHECKOUT BRANCH_CHECKOUT GAMES_ROOT: the standing night order
 # for a branch against its base, each checkout with its own build in out/ (build.sh first):
 #   0. os-code: tools/check_os_code.py in report mode on the branch (OUT/os-code-report.txt, total on the
-#      console); it never stops the night;
+#      console), and tools/check_licenses.py the same way (OUT/licenses-report.txt); neither stops
+#      the night;
 #   1. regress: every title of titles.txt but octopath0 on the branch with PS_CP_CENSUS=1, against
 #      the base's regress run (-r, or one run here first on the base checkout);
 #   2. perf: the branch's perf.txt with PS_FRAME_STATS=1, base and branch in turn, twice (base 1,
@@ -43,6 +44,12 @@ if (cd -- "$branch" && python3 tools/check_os_code.py) > "$out/os-code-report.tx
     log "os-code: $(tail -n 1 "$out/os-code-report.txt")"
 else
     log "os-code: check_os_code.py did not run, see os-code-report.txt"
+fi
+
+if (cd -- "$branch" && python3 tools/check_licenses.py) > "$out/licenses-report.txt" 2>&1; then
+    log "licenses: $(tail -n 1 "$out/licenses-report.txt")"
+else
+    log "licenses: check_licenses.py did not run, see licenses-report.txt"
 fi
 
 titles=$(awk '!/^#/ && NF && $1 != "octopath0" {print $1}' "$branch/tools/regress/titles.txt" | paste -sd,)

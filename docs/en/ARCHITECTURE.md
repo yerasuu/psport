@@ -716,6 +716,7 @@ A launch runs no Python, except for online play:
 | `scripts/sce_file.py` | `param.sfo` and SELF/ELF readers for the Python tools (`tools/got_import.py`, `tools/re/`) |
 | `tools/dcx_check.py` | every `.dcx` file of a Bloodborne folder checked (the launch checks the shaders only) |
 | `tools/check_os_code.py` | OS conditionals and OS or SDL3 includes found outside `src/platform` and `gpu/platform` (`gpu/third_party`, `gpu/shadps4` and `gpu/net/shadps4` exempt); `--strict` exits 1 while any remain; the last run reported 17 findings in 16 files (2 conditionals, 15 includes) |
+| `tools/check_licenses.py` | `LICENSES.json` against the tree: schema, paths, `LICENSES/<id>.txt` for every SPDX id, every `LicenseRef` defined, vendored trees and tracked files covered; run by `tools/regress/night.sh` in report mode, `--strict` exits 1 on any finding |
 
 ## Online play
 
