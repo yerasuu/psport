@@ -22,6 +22,25 @@ void psport_gpu_register_kernel(void);
 int psport_gpu_init(const PsGpuConfig *p_config);
 /* Function for an imported NID ("NID#lib#mod"), or 0 when the GPU library does not provide it. */
 uintptr_t psport_gpu_resolve(const char *sz_scoped_nid);
+/* One prelinked module for the red-zone guard pass: its .eh_frame (function bounds) and code
+ * bounds, as absolute addresses in the mapped image. */
+typedef struct {
+    const char *sz_name;
+    uint64_t va_eh_frame, cb_eh_frame;
+    uint64_t va_code_begin, va_code_end;
+} PsRedZoneModule;
+/* A range the loader patched (apply_patches), left alone by the pass; absolute addresses. */
+typedef struct { uint64_t va_begin, va_end; } PsRedZoneRange;
+/* The red-zone guard pass (#803, gpu/port/psport_red_zone.cpp): over the prelinked modules, after
+ * the patches and before the image is protected, send each non-stack memory access of a red-zone
+ * leaf through a trampoline that moves rsp past the red zone, so a fault there does not clobber the
+ * leaf's locals on Windows. is_clobbers is ps_host_fault_frame_clobbers_red_zone();
+ * PS_RED_ZONE_GUARD overrides it (0 off, 1 on, "report" analyse and log without patching). Sites
+ * covered and those skipped are logged, counted by reason. Returns the number of sites protected. */
+uint64_t psport_gpu_guard_red_zones(const PsRedZoneModule *p_modules, size_t c_modules,
+                                    const PsRedZoneRange *p_patched, size_t c_patched, int is_clobbers);
+/* The guest site a red-zone trampoline rip maps to, or the rip unchanged (for fault reports). */
+uint64_t psport_gpu_red_zone_site(uint64_t va_rip);
 struct PsHostFaultContext;
 /* Called first by the loader's access fault handler: 1 when a GPU page-tracking fault was handled. */
 int psport_gpu_handle_fault(struct PsHostFaultContext *p_context, void *p_address);

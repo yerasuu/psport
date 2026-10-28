@@ -179,6 +179,9 @@ static int fault(PsHostFaultContext *p_context) {
     /* The process is terminating: the loader's address lookup and snprintf are acceptable here. */
     const int sig = ps_host_fault_signal(p_context);
     uintptr_t rip = (uintptr_t)ps_host_fault_register(p_context, PS_HOST_REG_RIP);
+    /* A fault inside a red-zone guard trampoline is reported against the original guest instruction
+     * (#803), not the relocated copy outside the image. */
+    if (g_is_gpu_enabled) rip = (uintptr_t)psport_gpu_red_zone_site(rip);
     char sz_line[512];
     PsHostCodeAddress where;
     if (rip - (uintptr_t)g_p_image < 0x10000000)

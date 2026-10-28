@@ -49,6 +49,8 @@ enum class Error {
     TrampolineFailed,
     /// The code's pages could not be made writable.
     ProtectFailed,
+    /// RelocateBelowRedZone: the span reads or writes rsp, so shifting rsp around it would move it.
+    UsesStackPointer,
 };
 const char* Describe(Error error);
 
@@ -182,5 +184,17 @@ std::uint32_t KeepWritable(std::uint64_t va_image, std::uint64_t cb_image);
 /// game's code reads RIP-relative (RedirectOperand); nullptr (logged) when none is free. Never
 /// unmapped.
 void* MapNear(std::uint64_t va_near, std::size_t cb_range);
+
+/// [va_span, va_span + cb_span) (whole, position-independent instructions, none RIP- or
+/// rsp-relative, cb_span >= a near jump) becomes a jump to a trampoline that lowers rsp by 128,
+/// runs the span and raises rsp back before jumping on. An exception the span takes then writes its
+/// frame below the guest's red zone instead of over the leaf's live locals there (#803). With
+/// is_dry_run the checks run and the error is returned without changing any code (report mode).
+/// SiteOf maps a fault inside the trampoline back to va_span.
+Error RelocateBelowRedZone(const char* sz_name, std::uint64_t va_span, std::size_t cb_span, bool is_dry_run);
+
+/// va_span of the trampoline va_rip lies in (a fault inside a RelocateBelowRedZone trampoline), or
+/// va_rip unchanged. For fault reports, so the original guest instruction is named, not the copy.
+std::uint64_t SiteOf(std::uint64_t va_rip);
 
 } // namespace PsGuestCode

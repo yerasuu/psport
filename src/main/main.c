@@ -322,6 +322,40 @@ int main(int argc, char **argv) {
     bind_imports(p_segments, c_segments, p_relocs, c_relocs, native_libc, p_bindings, p_binding_kinds, &p_traps, &p_thunks);
     if (is_eboot) apply_patches(&patches, p_segments, c_segments, p_relocs, c_relocs);
     if (!cpu_only && info.title.pfn_patch_image) info.title.pfn_patch_image(g_p_image, cb_image);
+    /* The red-zone guard (#803): on a host whose fault frame clobbers the guest red zone (Windows),
+     * reroute each red-zone leaf's faulting memory accesses below the red zone. After the patches
+     * (patched bytes are left alone) and before the code is protected, while it is still writable.
+     * PS_RED_ZONE_GUARD=1|report also runs it on Linux (with PS_FAULT_CLOBBER_RED_ZONE, to validate
+     * it at night). The profile's PatchImage hooks are already in, so overlaps are refused. */
+    if (!cpu_only) {
+        const char *sz_guard = runtime_env("PS_RED_ZONE_GUARD", NULL);
+        const int clobbers = ps_host_fault_frame_clobbers_red_zone();
+        const int forced = sz_guard && (!strcmp(sz_guard, "1") || !strcmp(sz_guard, "report"));
+        if (clobbers || forced) {
+            const size_t c_rz = g_c_modules + 1; /* s_p_all_modules[0] is the eboot */
+            PsRedZoneModule *p_rz = calloc(c_rz, sizeof(*p_rz));
+            PsRedZoneRange *p_rz_patched = calloc(patches.c_writes ? patches.c_writes : 1, sizeof(*p_rz_patched));
+            if (p_rz && p_rz_patched) {
+                for (size_t m = 0; m < c_rz; ++m) {
+                    const RuntimeModule *p_mod = &s_p_all_modules[m];
+                    p_rz[m].sz_name = p_mod->sz_name[0] ? p_mod->sz_name : (m == 0 ? "eboot.bin" : "module");
+                    p_rz[m].va_eh_frame = p_mod->cb_eh_frame ? (uint64_t)(uintptr_t)(g_p_image + p_mod->eh_frame) : 0;
+                    p_rz[m].cb_eh_frame = p_mod->cb_eh_frame;
+                    p_rz[m].va_code_begin = (uint64_t)(uintptr_t)(g_p_image + p_mod->base);
+                    p_rz[m].va_code_end = p_rz[m].va_code_begin + p_mod->cb_module;
+                }
+                for (size_t w = 0; w < patches.c_writes; ++w) {
+                    p_rz_patched[w].va_begin = (uint64_t)(uintptr_t)(g_p_image + patches.p_writes[w].off_image);
+                    p_rz_patched[w].va_end = p_rz_patched[w].va_begin + patches.p_writes[w].cb_data;
+                }
+                psport_gpu_guard_red_zones(p_rz, c_rz, p_rz_patched, patches.c_writes, clobbers);
+            } else {
+                fprintf(stderr, "WARNING: red zone guard skipped: allocation failed\n");
+            }
+            free(p_rz);
+            free(p_rz_patched);
+        }
+    }
     protect(p_traps, round_page((g_c_imports + 1) * 32), 5);
     protect(p_thunks, round_page((g_c_imports + 1) * THUNK_SIZE), 5);
     protect(g_p_image, round_page(cb_image), 0);

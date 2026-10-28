@@ -228,6 +228,15 @@ void ps_host_fault_cpu(const PsHostFaultContext *p_context, PsHostFaultCpu *p_ou
     };
 }
 
+int ps_host_fault_frame_clobbers_red_zone(void) {
+    /* Win64 has no red zone (memory below rsp is volatile): the kernel copies the CONTEXT, the
+     * EXCEPTION_RECORD and a machine frame onto the faulting thread's stack below rsp before
+     * KiUserExceptionDispatcher runs, over any System V red zone a guest leaf keeps live there
+     * (#803, Supermedo bc893e2). It is done by the kernel before any handler, so no handler change
+     * prevents it; the guard pass relocates the leaves' faulting accesses below the red zone. */
+    return 1;
+}
+
 static uint16_t code_selector(void) {
     uint16_t selector;
     __asm__("mov %%cs,%0" : "=r"(selector));

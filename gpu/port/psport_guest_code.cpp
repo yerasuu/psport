@@ -39,6 +39,8 @@ constexpr std::int64_t SearchStep = 64ll << 20;
 std::mutex s_mutex;
 /// [begin, end) of every site changed, so that two never overlap.
 std::map<u64, u64> s_sites;
+/// trampoline [begin) -> (end, va_span): a fault inside a red-zone trampoline maps back to its site.
+std::map<u64, std::pair<u64, u64>> s_trampoline_sites;
 struct Area {
     u64 va_start = 0;
     std::unique_ptr<Xbyak::CodeGenerator> p_generator;
@@ -140,6 +142,33 @@ bool WriteCode(u64 va_code, std::span<const u8> bytes) {
                                       ? PS_HOST_VM_READ | PS_HOST_VM_WRITE | PS_HOST_VM_EXECUTE
                                       : PS_HOST_VM_READ | PS_HOST_VM_EXECUTE;
     return ps_host_vm_protect(p_first, cb_span, access_after) == 0;
+}
+
+/// The span at p_code is whole, position-independent instructions (none RIP-relative) for cb_code
+/// bytes, and none of them reads or writes rsp: moving rsp by 128 around the copy keeps it correct.
+Error CheckRelocatable(const u8* p_code, std::size_t cb_code) {
+    if (const Error error = CheckInstructions(p_code, cb_code, true); error != Error::None) {
+        return error;
+    }
+    for (std::size_t off_code = 0; off_code < cb_code;) {
+        ZydisDecodedInstruction instruction{};
+        std::array<ZydisDecodedOperand, ZYDIS_MAX_OPERAND_COUNT> operands{};
+        if (!ZYAN_SUCCESS(Common::Decoder::Instance()->decodeInstruction(
+                instruction, operands.data(), const_cast<u8*>(p_code) + off_code, cb_code - off_code))) {
+            return Error::NotWholeInstructions;
+        }
+        for (u8 i = 0; i < instruction.operand_count; ++i) {
+            const ZydisDecodedOperand& operand = operands[i];
+            const bool reg_rsp = operand.type == ZYDIS_OPERAND_TYPE_REGISTER && operand.reg.value == ZYDIS_REGISTER_RSP;
+            const bool mem_rsp = operand.type == ZYDIS_OPERAND_TYPE_MEMORY &&
+                                 (operand.mem.base == ZYDIS_REGISTER_RSP || operand.mem.index == ZYDIS_REGISTER_RSP);
+            if (reg_rsp || mem_rsp) {
+                return Error::UsesStackPointer;
+            }
+        }
+        off_code += instruction.length;
+    }
+    return Error::None;
 }
 
 /// A jump to va_target at va_site, the rest of cb_site int3.
@@ -309,6 +338,8 @@ const char* Describe(Error error) {
         return "the trampoline could not be assembled";
     case Error::ProtectFailed:
         return "the code could not be made writable";
+    case Error::UsesStackPointer:
+        return "an instruction reads or writes rsp";
     }
     return "unknown error";
 }
@@ -440,6 +471,58 @@ void* MapNear(std::uint64_t va_near, std::size_t cb_range) {
                     static_cast<unsigned long long>(va_near), cb_range);
     }
     return p_mapped;
+}
+
+Error RelocateBelowRedZone(const char* sz_name, std::uint64_t va_span, std::size_t cb_span, bool is_dry_run) {
+    std::scoped_lock lock{s_mutex};
+    if (cb_span < NearJumpBytes) {
+        return Error::TooShort;
+    }
+    const auto* p_span = reinterpret_cast<const u8*>(va_span);
+    if (Error error = CheckRelocatable(p_span, cb_span); error != Error::None) {
+        return error;
+    }
+    if (Overlaps(va_span, va_span + cb_span)) {
+        return Error::Overlaps;
+    }
+    if (is_dry_run) {
+        // Report mode: the checks ran; nothing is written, so nothing is registered either.
+        return Error::None;
+    }
+    Xbyak::CodeGenerator* p_gen = AreaFor(va_span);
+    if (!p_gen) {
+        return Error::OutOfReach;
+    }
+    const std::size_t off_start = p_gen->getSize();
+    const u64 va_trampoline = reinterpret_cast<u64>(p_gen->getCurr());
+    try {
+        // lea keeps the flags, so a flags-sensitive instruction in the span still reads the real
+        // ones; the span never touches rsp (CheckRelocatable), so the ±128 cancels exactly.
+        p_gen->lea(rsp, ptr[rsp - GuestRedZoneBytes]);
+        p_gen->db(p_span, cb_span);
+        p_gen->lea(rsp, ptr[rsp + GuestRedZoneBytes]);
+        p_gen->jmp(reinterpret_cast<const void*>(va_span + cb_span), Xbyak::CodeGenerator::LabelType::T_NEAR);
+        p_gen->align(16);
+    } catch (const Xbyak::Error&) {
+        p_gen->setSize(off_start);
+        return Error::TrampolineFailed;
+    }
+    if (!WriteJump(va_span, cb_span, va_trampoline)) {
+        p_gen->setSize(off_start);
+        return Error::ProtectFailed;
+    }
+    s_sites.emplace(va_span, va_span + cb_span);
+    s_trampoline_sites.emplace(va_trampoline, std::pair{reinterpret_cast<u64>(p_gen->getCurr()), va_span});
+    return Error::None;
+}
+
+std::uint64_t SiteOf(std::uint64_t va_rip) {
+    std::scoped_lock lock{s_mutex};
+    auto it = s_trampoline_sites.upper_bound(va_rip);
+    if (it != s_trampoline_sites.begin() && (--it)->second.first > va_rip) {
+        return it->second.second;
+    }
+    return va_rip;
 }
 
 } // namespace PsGuestCode

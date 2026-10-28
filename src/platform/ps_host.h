@@ -572,6 +572,11 @@ PsHostFaultAccess ps_host_fault_access(const PsHostFaultContext *p_context);
 uint64_t ps_host_fault_register(const PsHostFaultContext *p_context, PsHostRegister reg);
 void ps_host_fault_set_register(PsHostFaultContext *p_context, PsHostRegister reg, uint64_t value);
 void ps_host_fault_cpu(const PsHostFaultContext *p_context, PsHostFaultCpu *p_out);
+/* Nonzero when, taking an exception in guest code, the OS writes its exception frame into the
+ * 128-byte System V red zone below the faulting rsp before any handler runs, so a leaf's live
+ * locals there are lost (Windows; #803). Zero when the OS skips the red zone first (Linux's kernel
+ * does). The red-zone guard pass (gpu/port/psport_red_zone.cpp) runs when this is set. */
+int ps_host_fault_frame_clobbers_red_zone(void);
 /* PS_HOST_RECOVERY_SET marks a recovery point (a macro, since it must run in the reader's own
  * frame): 0 when set, nonzero when a fault or PS_HOST_RECOVERY_JUMP comes back to it. */
 #ifdef _WIN32

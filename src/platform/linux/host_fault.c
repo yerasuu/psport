@@ -7,6 +7,7 @@
 #include <pthread.h>
 #include <signal.h>
 #include <stdatomic.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/syscall.h>
 #include <sys/uio.h>
@@ -90,8 +91,24 @@ void ps_host_fault_recover(const PsHostFaultContext *p_context, PsHostRecoveryPo
     siglongjmp(*p_point, 1);
 }
 
+/* PS_FAULT_CLOBBER_RED_ZONE, read once at install (a fault handler takes no getenv). */
+static _Atomic int s_is_clobbering_red_zone;
+
+int ps_host_fault_frame_clobbers_red_zone(void) {
+    /* Linux's kernel subtracts 128 before building the signal frame (arch/x86/kernel/signal.c);
+     * the guard pass is not needed. The diagnostic below makes it behave as Windows does anyway. */
+    return atomic_load(&s_is_clobbering_red_zone);
+}
+
 static void on_fault(int sig, siginfo_t *p_info, void *p_raw) {
     PsHostFaultContext context = {sig, p_info, p_raw};
+    /* The Windows-emulation diagnostic: overwrite the 128 bytes below the faulting rsp before any
+     * handler runs, as Windows does, so the guard pass can be validated on Linux at night (#803,
+     * L3). 0xA5 since Windows leaves nothing useful there: the pass must keep live data above. */
+    if (atomic_load(&s_is_clobbering_red_zone)) {
+        unsigned char *p_rsp = (unsigned char *)(uintptr_t)((ucontext_t *)p_raw)->uc_mcontext.gregs[REG_RSP];
+        memset(p_rsp - 128, 0xa5, 128);
+    }
     const PsHostFaultKind kind = ps_host_fault_kind(&context);
     for (int i = atomic_load(&s_c_fault_handlers[kind]); i-- > 0;) {
         const PsHostFaultHandler pfn_handler = atomic_load(&s_fault_handlers[kind][i]);
@@ -103,6 +120,8 @@ static void on_fault(int sig, siginfo_t *p_info, void *p_raw) {
 
 int ps_host_fault_install(PsHostFaultKind kind, PsHostFaultHandler pfn_handler, unsigned flags) {
     pthread_mutex_lock(&s_install_lock);
+    const char *sz_clobber = getenv("PS_FAULT_CLOBBER_RED_ZONE");
+    atomic_store(&s_is_clobbering_red_zone, sz_clobber && !strcmp(sz_clobber, "1"));
     const int c_handlers = atomic_load(&s_c_fault_handlers[kind]);
     if (c_handlers == MAX_HANDLERS) {
         pthread_mutex_unlock(&s_install_lock);

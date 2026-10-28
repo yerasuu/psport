@@ -88,10 +88,15 @@ FEATURE_HOST(write_traps, WIN32, EXPERIMENTAL,
              "the dispatch; NtRead/NtWriteVirtualMemory page by page (src/platform/win32/host_fault.c); checked under "
              "Proton with a test program (recovery, int3, copies, backtrace), not run with a game yet. Windows writes "
              "the exception frame into the 128-byte System V red zone below the guest's rsp before any handler runs "
-             "(Supermedo bc893e2): a write trap in a guest leaf function can corrupt its locals, which the handler "
-             "cannot prevent; first-chance exceptions a host library would catch itself (SEH) reach psport's handlers "
-             "too",
-             "#614")
+             "(Supermedo bc893e2), where a guest leaf keeps live locals: the load-time red-zone guard "
+             "(ps_host_fault_frame_clobbers_red_zone, gpu/port/psport_red_zone.cpp, #803) reroutes every non-stack "
+             "memory access of a red-zone leaf through a trampoline that lowers rsp past the red zone first, over the "
+             ".eh_frame function bounds, conservative (no liveness) and never per title; PS_RED_ZONE_GUARD=0|1|report "
+             "switches it and its counted sites and gaps (short, jump-table, implicit-rsp, no-FDE, patched) are logged. "
+             "Still exposed inside red-zone leaves: sites shorter than a 5-byte jump in jump-table leaves, implicit-rsp "
+             "accesses, code without an FDE and the int3 diagnostics (PS_GUEST_HOOK_TRAPS, PS_LABEL_TRAP). First-chance "
+             "exceptions a host library would catch itself (SEH) reach psport's handlers too",
+             "#614, #803")
 
 FEATURE(guest_tls, tls, "the guest's thread-local storage: a TCB and static TLS per thread, the thread pointer on GS")
 FEATURE_HOST(guest_tls, LINUX, IMPLEMENTED,
