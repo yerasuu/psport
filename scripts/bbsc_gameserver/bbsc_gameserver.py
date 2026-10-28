@@ -653,10 +653,10 @@ def normal_notice(req):
         if title or text:
             stamp = int(os.path.getmtime(path))
             notices.append({"NoticeId": stamp, "Title": title, "Notice": text,
-                            "CheckTime": stamp})
+                            "CheckTime": _date(stamp)})
     except OSError:
         pass
-    return ok("NoticeNormalGetResponse", CheckTime=int(time.time()), NoticeList=notices)
+    return ok("NoticeNormalGetResponse", CheckTime=_date(time.time()), NoticeList=notices)
 
 
 # Endpoint -> response. Paths are the game's own ("Name:%hS/path" strings in the eboot). Messages and
@@ -667,7 +667,7 @@ ROUTES = {
     "/basic_utils/login": login,
     "/basic_utils/get_normal_notice": normal_notice,
     "/basic_utils/get_emergency_notice":
-        lambda req: ok("EmergencyNoticeGetResponse", NoticeList=[]),
+        lambda req: ok("EmergencyNoticeGetResponse", CheckTime=_date(time.time()), NoticeList=[]),
     "/basic_utils/get_user_agreement": lambda req: ok("UserAgreementGetResponse", Agreements=[]),
     "/basic_utils/get_datetime":
         lambda req: ok("DateTimeResponse", Timestamp=int(time.time() * 1000)),
