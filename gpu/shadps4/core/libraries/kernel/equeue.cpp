@@ -818,12 +818,10 @@ u32 PS4_SYSV_ABI sceKernelGetEventFflags(const OrbisKernelEvent* ev) {
     return ev ? ev->fflags : 0;
 }
 
-// An EV_ERROR event carries its errno in data (FreeBSD's kevent); any other has no error. Which
-// field the console's libkernel reads is not confirmed (shadPS4 reads fflags).
+// psport: as libkernel (0x1abe0): fflags whatever the flags say, added unmasked in 32 bits, and no
+// null check (a null event faults as on the console).
 int PS4_SYSV_ABI sceKernelGetEventError(const OrbisKernelEvent* ev) {
-    return ev && (ev->flags & OrbisKernelEvent::Flags::Error) && ev->data
-               ? static_cast<int>(0x80020000 | (ev->data & 0xffff))
-               : 0;
+    return ev->fflags ? static_cast<int>(0x80020000u + ev->fflags) : 0;
 }
 
 static int AddIoEvent(OrbisKernelEqueue eq, int fd, OrbisKernelEvent::Filter filter, u32 fflags, u64 data,
