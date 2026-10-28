@@ -231,11 +231,19 @@ private:
             static constexpr std::suspend_always final_suspend() noexcept {
                 return {};
             }
-            void unhandled_exception() {
+            // Returning ends the coroutine at final_suspend, so its caller sees it done and the
+            // rest of that command buffer is not decoded; the other queues go on.
+            void unhandled_exception() noexcept {
                 try {
                     std::rethrow_exception(std::current_exception());
                 } catch (const std::exception& e) {
-                    UNREACHABLE_MSG("Unhandled exception: {}", e.what());
+                    LOG_ERROR_COUNTED(Render,
+                                      "Command buffer decoding threw '{}', rest of its buffer "
+                                      "dropped",
+                                      e.what());
+                } catch (...) {
+                    LOG_ERROR_COUNTED(Render, "Command buffer decoding threw a non-standard "
+                                              "exception, rest of its buffer dropped");
                 }
             }
             void return_void() {}
@@ -318,11 +326,6 @@ private:
             ce_count = 0;
             de_count = 0;
             ce_compare_count = 0;
-        }
-
-        [[nodiscard]] u32 Diff() const {
-            ASSERT_MSG(ce_count >= de_count, "DE counter is ahead of CE");
-            return ce_count - de_count;
         }
 
         u32 ce_compare_count{};

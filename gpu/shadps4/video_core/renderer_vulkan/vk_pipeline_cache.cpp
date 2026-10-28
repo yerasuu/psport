@@ -147,7 +147,7 @@ static bool NeedsClipDistanceEmulation(const AmdGpu::Regs& regs, const Shader::P
            profile.needs_clip_distance_emulation;
 }
 
-const Shader::RuntimeInfo& PipelineCache::BuildRuntimeInfo(PipelineSelection& sel, HwStage stage,
+const Shader::RuntimeInfo* PipelineCache::BuildRuntimeInfo(PipelineSelection& sel, HwStage stage,
                                                              SwStage l_stage) {
     auto& info = sel.runtime_infos[u32(l_stage)];
     const auto& regs = (*sel.regs);
@@ -212,8 +212,11 @@ const Shader::RuntimeInfo& PipelineCache::BuildRuntimeInfo(PipelineSelection& se
         info.hw.gs.out_vertex_data_size = regs.vgt_gs_vert_itemsize[0];
         info.hw.gs.mode = regs.vgt_gs_mode.mode;
         const auto params_vc = AmdGpu::GetParams(regs.vs_program);
-        info.hw.gs.vs_copy = params_vc.code;
-        info.hw.gs.vs_copy_hash = params_vc.hash;
+        if (!params_vc) {
+            return nullptr;
+        }
+        info.hw.gs.vs_copy = params_vc->code;
+        info.hw.gs.vs_copy_hash = params_vc->hash;
         info.hw.gs.xfb_stride = StreamOutXfbStride(regs, instance);
         DumpShader(info.hw.gs.vs_copy, info.hw.gs.vs_copy_hash, Shader::HwStage::Vertex, 0,
                    "copy.bin");
@@ -323,7 +326,7 @@ const Shader::RuntimeInfo& PipelineCache::BuildRuntimeInfo(PipelineSelection& se
     default:
         break;
     }
-    return info;
+    return &info;
 }
 
 // Complete before the constructor, since libc++ instantiates the members' deleters there (for
@@ -555,12 +558,12 @@ const GraphicsPipeline* PipelineCache::TryPreparedPipeline(const PreparedDraw& p
             return nullptr;
         }
         const auto params = AmdGpu::GetParams(*pgm);
-        if (params.hash != stage.hash) {
+        if (!params || params->hash != stage.hash) {
             return nullptr;
         }
         auto& info = const_cast<Program*>(stage.p_program)->info;
-        info.pgm_base = params.Base();
-        info.user_data = params.user_data;
+        info.pgm_base = params->Base();
+        info.user_data = params->user_data;
         info.RefreshFlatBuf();
         if (info.pgm_base != stage.pgm_base || info.flattened_ud_buf.size() != stage.c_flat ||
             std::memcmp(info.flattened_ud_buf.data(), stage.p_flat,
@@ -1100,9 +1103,15 @@ bool PipelineCache::RefreshGraphicsStages(PipelineSelection& sel) {
 
         const auto params = AmdGpu::GetParams(*pgm);
         std::optional<Shader::Gcn::FetchShaderData> fetch_shader_;
-        std::tie(sel.infos[stage_out_idx], sel.modules[stage_out_idx], fetch_shader_,
-                 key.stage_hashes[stage_out_idx], bound_xfb_stride) =
-            GetProgram(sel, stage_in, stage_out, params, binding);
+        if (params) {
+            std::tie(sel.infos[stage_out_idx], sel.modules[stage_out_idx], fetch_shader_,
+                     key.stage_hashes[stage_out_idx], bound_xfb_stride) =
+                GetProgram(sel, stage_in, stage_out, *params, binding);
+        } else {
+            key.stage_hashes[stage_out_idx] = 0;
+            sel.infos[stage_out_idx] = nullptr;
+            sel.modules[stage_out_idx] = nullptr;
+        }
         if (!sel.modules[stage_out_idx]) {
             if (!has_untranslated_stage && !sel.worker) {
                 CountUntranslatedSkip();
@@ -1231,8 +1240,12 @@ bool PipelineCache::RefreshComputeKey() {
     Shader::Backend::Bindings binding{};
     const auto& cs_pgm = liverpool->GetCsRegs();
     const auto cs_params = AmdGpu::GetParams(cs_pgm);
+    if (!cs_params) {
+        CountUntranslatedSkip();
+        return false;
+    }
     std::tie(sel.infos[0], sel.modules[0], sel.fetch_shader, compute_key.value, std::ignore) =
-        GetProgram(sel, HwStage::Compute, SwStage::Compute, cs_params, binding);
+        GetProgram(sel, HwStage::Compute, SwStage::Compute, *cs_params, binding);
     if (!sel.modules[0]) {
         CountUntranslatedSkip();
         return false;
@@ -1390,7 +1403,14 @@ PipelineCache::Result PipelineCache::GetProgram(PipelineSelection& sel, HwStage 
                                                 SwStage sw_stage,
                                                 const Shader::ShaderParams& params,
                                                 Shader::Backend::Bindings& binding) {
-    auto runtime_info = BuildRuntimeInfo(sel, hw_stage, sw_stage);
+    const auto* p_built_info = BuildRuntimeInfo(sel, hw_stage, sw_stage);
+    if (!p_built_info) {
+        if (sel.worker) {
+            sel.worker->failed = true;
+        }
+        return {};
+    }
+    auto runtime_info = *p_built_info;
     if (sel.worker) {
         // psport: draw-preparation worker: look up only, with the worker's own Info copy.
         auto& worker = *sel.worker;

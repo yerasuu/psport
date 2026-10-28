@@ -1899,9 +1899,11 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                 case ContextRegs::CbColor5Base:
                 case ContextRegs::CbColor6Base:
                 case ContextRegs::CbColor7Base: {
+                    static_assert((ContextRegs::CbColor7Base - ContextRegs::CbColor0Base) /
+                                      (ContextRegs::CbColor1Base - ContextRegs::CbColor0Base) <
+                                  NUM_COLOR_BUFFERS);
                     const auto col_buf_id = (reg_addr - ContextRegs::CbColor0Base) /
                                             (ContextRegs::CbColor1Base - ContextRegs::CbColor0Base);
-                    ASSERT(col_buf_id < NUM_COLOR_BUFFERS);
 
                     const auto nop_offset = header->type3.count;
                     if (nop_offset == 0x0e || nop_offset == 0x0d || nop_offset == 0x0b) {
@@ -1923,7 +1925,9 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                     const auto col_buf_id =
                         (reg_addr - ContextRegs::CbColor0Cmask) /
                         (ContextRegs::CbColor1Cmask - ContextRegs::CbColor0Cmask);
-                    ASSERT(col_buf_id < NUM_COLOR_BUFFERS);
+                    static_assert((ContextRegs::CbColor7Cmask - ContextRegs::CbColor0Cmask) /
+                                      (ContextRegs::CbColor1Cmask - ContextRegs::CbColor0Cmask) <
+                                  NUM_COLOR_BUFFERS);
 
                     const auto nop_offset = header->type3.count;
                     if (nop_offset == 0x04) {

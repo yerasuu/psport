@@ -1,6 +1,9 @@
 // SPDX-FileCopyrightText: Copyright 2025 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <bit>
+
+#include "common/logging/log.h"
 #include "video_core/amdgpu/regs.h"
 
 namespace AmdGpu {
@@ -46,6 +49,28 @@ void Regs::SetDefaults() {
     reg_array[ContextRegWordOffset + 0x02fd] = 0x3f800000u;
     reg_array[ContextRegWordOffset + 0x0316] = 0x0000000eu;
     reg_array[ContextRegWordOffset + 0x0317] = 0x00000010u;
+}
+
+const BinaryInfo* SearchBinaryInfo(const u32* code) {
+    constexpr u32 token_mov_vcchi = 0xBEEB03FF;
+    if (code[0] == token_mov_vcchi) {
+        const auto* info = std::bit_cast<const BinaryInfo*>(code + (code[1] + 1) * 2);
+        if (info->Valid()) {
+            return info;
+        }
+    }
+    constexpr u32 search_limit = 0x4000;
+    const u32* end = code + search_limit;
+    for (const u32* it = code; it < end; ++it) {
+        if (const BinaryInfo* info = std::bit_cast<const BinaryInfo*>(it); info->Valid()) {
+            return info;
+        }
+    }
+    LOG_ERROR_COUNTED(Render_Vulkan,
+                      "Shader at {} has no OrbShdr binary info in its first {:#x} dwords, its "
+                      "draws and dispatches are skipped",
+                      fmt::ptr(code), search_limit);
+    return nullptr;
 }
 
 #define GFX6_3D_REG_INDEX(field_name) (offsetof(AmdGpu::Regs, field_name) / sizeof(u32))

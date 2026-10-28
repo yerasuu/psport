@@ -4,7 +4,7 @@
 #include <array>
 #include <atomic>
 #include <bit>
-#include "common/assert.h"
+#include "common/logging/log.h"
 #include "video_core/amdgpu/pixel_format.h"
 
 namespace AmdGpu {
@@ -88,7 +88,8 @@ std::string_view NameOf(DataFormat fmt) {
     case DataFormat::FormatBc7:
         return "FormatBc7";
     default:
-        UNREACHABLE();
+        LOG_ERROR_COUNTED(Render_Vulkan, "Name of unknown data format {} requested", u32(fmt));
+        return "FormatUnknown";
     }
 }
 
@@ -121,7 +122,8 @@ std::string_view NameOf(NumberFormat fmt) {
     case NumberFormat::Ubscaled:
         return "Unscaled";
     default:
-        UNREACHABLE();
+        LOG_ERROR_COUNTED(Render_Vulkan, "Name of unknown number format {} requested", u32(fmt));
+        return "Unknown";
     }
 }
 
@@ -172,7 +174,10 @@ static constexpr std::array NUM_COMPONENTS = {
 
 u32 NumComponents(DataFormat format) {
     const u32 index = static_cast<u32>(format);
-    ASSERT_MSG(index < NUM_COMPONENTS.size(), "Invalid data format = {}", format);
+    if (index >= NUM_COMPONENTS.size()) {
+        LOG_ERROR_COUNTED(Render_Vulkan, "Invalid data format {}, 0 components used", index);
+        return 0;
+    }
     return NUM_COMPONENTS[index];
 }
 
@@ -223,7 +228,10 @@ static constexpr std::array BITS_PER_BLOCK = {
 
 u32 NumBitsPerBlock(DataFormat format) {
     const u32 index = static_cast<u32>(format);
-    ASSERT_MSG(index < BITS_PER_BLOCK.size(), "Invalid data format = {}", format);
+    if (index >= BITS_PER_BLOCK.size()) {
+        LOG_ERROR_COUNTED(Render_Vulkan, "Invalid data format {}, 0 bits per block used", index);
+        return 0;
+    }
     return BITS_PER_BLOCK[index];
 }
 
@@ -274,7 +282,10 @@ static constexpr std::array BITS_PER_ELEMENT = {
 
 u32 NumBitsPerElement(DataFormat format) {
     const u32 index = static_cast<u32>(format);
-    ASSERT_MSG(index < BITS_PER_ELEMENT.size(), "Invalid data format = {}", format);
+    if (index >= BITS_PER_ELEMENT.size()) {
+        LOG_ERROR_COUNTED(Render_Vulkan, "Invalid data format {}, 0 bits per element used", index);
+        return 0;
+    }
     return BITS_PER_ELEMENT[index];
 }
 

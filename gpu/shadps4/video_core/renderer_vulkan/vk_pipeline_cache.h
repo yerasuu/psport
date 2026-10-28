@@ -191,7 +191,8 @@ private:
     vk::ShaderModule CompileModule(Shader::Info& info, Shader::RuntimeInfo& runtime_info,
                                    const std::span<const u32>& code, size_t perm_idx,
                                    Shader::Backend::Bindings& binding);
-    const Shader::RuntimeInfo& BuildRuntimeInfo(PipelineSelection& sel, Shader::HwStage stage,
+    /// Null when a program the stage depends on (the GS copy shader) cannot be located.
+    const Shader::RuntimeInfo* BuildRuntimeInfo(PipelineSelection& sel, Shader::HwStage stage,
                                                 Shader::SwStage l_stage);
 
     [[nodiscard]] bool IsPipelineCacheDirty() const {

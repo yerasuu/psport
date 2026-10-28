@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "common/assert.h"
+#include "common/logging/log.h"
 #include "common/types.h"
 
 namespace AmdGpu {
@@ -114,7 +114,9 @@ union ShaderStageEnable {
         case 5:
             return ls_en;
         default:
-            UNREACHABLE();
+            LOG_ERROR_COUNTED(Render_Vulkan,
+                              "Enable bit of unknown hardware stage {} read, disabled", stage);
+            return false;
         }
     }
 };
@@ -174,7 +176,10 @@ union GsOutPrimitiveType {
         case 3:
             return outprim_type3;
         default:
-            UNREACHABLE();
+            LOG_ERROR_COUNTED(Render_Vulkan,
+                              "Output primitive of unknown GS stream {} read, stream 0's used",
+                              stream);
+            return outprim_type;
         }
     }
 };
