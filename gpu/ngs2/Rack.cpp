@@ -93,7 +93,6 @@ VoiceBlocks AllocateVoiceBlocks(Arena* p_arena, const RackKind& kind, const Rack
 
 void InitVoice(Voice* p_voice, const RackKind& kind, const RackLimits& limits, const VoiceBlocks& blocks) {
     p_voice->p_params = new (blocks.p_params) VoiceParams{};
-    p_voice->p_params->c_out_channels = limits.max_channels;
     p_voice->p_params->pitch_ratio = 1.0f;
     p_voice->p_params->lfe = {0, kDefaultLfeCutoffHz};
     p_voice->p_params->gain_fbw = 1.0f;

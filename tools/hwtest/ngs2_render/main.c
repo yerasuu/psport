@@ -866,8 +866,8 @@ static void test_module_read(void) {
     destroy_graph(&graph);
 }
 
-/* Channel works: 2-channel voices in a rack of 4 works; PLAY on a voice without setup is the open
- * question (the rack's default channels are reserved, spec 02 §5, rea gap). */
+/* Channel works: 2-channel voices in a rack of 4 works; PLAY on a voice without setup reserves none and
+ * fails with 0x804A0052 (spec 09 §1). */
 static void test_channel_works(void) {
     Ngs2SamplerRackOption option = {0};
     option.rack.cb_option = sizeof(option), option.rack.max_grain_samples = 512, option.rack.max_voices = 4;
@@ -876,9 +876,8 @@ static void test_channel_works(void) {
     Graph graph = create_graph(&option, NULL);
     Ngs2Handle h_voices[4];
     for (uint32_t i = 0; i < 4; i++) sceNgs2RackGetVoiceHandle(graph.h_sampler, i, &h_voices[i]);
-    record_open("works_play_without_setup", event(h_voices[3], 0));
-    record_open("works_flags_without_setup", flags_of(h_voices[3]));
-    if (flags_of(h_voices[3]) & 1) event(h_voices[3], 3);
+    record("works_play_without_setup", event(h_voices[3], 0), E(0x52));
+    record("works_flags_without_setup", flags_of(h_voices[3]), 0);
     for (uint32_t i = 0; i < 3; i++) record("works_setup", setup_sampler(h_voices[i], 0x12, 2, RATE_HZ), 0);
     record("works_play_0", event(h_voices[0], 0), 0);
     record("works_play_1", event(h_voices[1], 0), 0);

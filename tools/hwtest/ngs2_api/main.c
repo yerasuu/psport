@@ -122,6 +122,11 @@ typedef struct {
 
 typedef struct {
     Ngs2ParamHeader header;
+    uint32_t waveform_type, c_channels, rate_hz, config_data, off_frame, cb_frame_margin, flags, reserved;
+} Ngs2SamplerSetupParam;
+
+typedef struct {
+    Ngs2ParamHeader header;
     uint32_t matrix_id, c_levels;
     const float *p_levels;
 } Ngs2MatrixParam;
@@ -892,6 +897,13 @@ static void test_voices(void) {
     record("state_idle", (uint32_t)sceNgs2VoiceGetState(h_voice, s_state, sizeof(s_state)), 0);
     record("state_idle_zeros", s_state[0] | s_state[1] | s_state[11], 0);
     event.event_id = 0;
+    record("event_play_without_setup", (uint32_t)sceNgs2VoiceControl(h_voice, &event.header), E(0x52));
+    sceNgs2VoiceGetStateFlags(h_voice, &flags);
+    record("voice_flags_after_play_without_setup", flags, 0);
+    Ngs2SamplerSetupParam setup = {0};
+    header(&setup.header, sizeof(setup), 0x10000000);
+    setup.waveform_type = 0x12, setup.c_channels = 2, setup.rate_hz = 48000;
+    record("event_play_setup", (uint32_t)sceNgs2VoiceControl(h_voice, &setup.header), 0);
     record("event_play", (uint32_t)sceNgs2VoiceControl(h_voice, &event.header), 0);
     sceNgs2VoiceGetStateFlags(h_voice, &flags);
     record("voice_flags_after_play", flags, 1);

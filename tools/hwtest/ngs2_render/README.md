@@ -29,10 +29,10 @@ It writes to `/data/psport-hwtest/ngs2_render/`:
 | `limiter_attack` | DC 0.9 through a mastering matrix of 2.0 | the setup's limiter attacking in 1 ms (spec 09 §3.1): sample i at 1.8 (T + kA^(i+1) (1 - T)), T = 1/1.8, kA = exp(-1/48) |
 | `filter_*` | DC 0.5 through a 1 kHz low-pass and high-pass before port 0 | 0.5 and 0 once settled |
 | `meters` | -0.3 / 0.6 alternating, sampler meter in mode 1 then 2 | 0.6, then RMS 0.4743 |
-| `works_*` | 2-channel voices in a sampler rack of 4 channel works | 0x804A0306 for the third; KILL frees them. PLAY on a voice without setup is open |
+| `works_*` | 2-channel voices in a sampler rack of 4 channel works | 0x804A0306 for the third; KILL frees them. PLAY on a voice without setup returns 0x804A0052 and reserves nothing (spec 09 §1) |
 | `submixer_delay` | sampler, submixer (port delay 100) and mastering | DC from sample 103 (100 of delay after the sampler's 3) |
 
-The open rows (`works_play_without_setup`, `loops_loop_callback_repeats`, `meter_decoded_*`) are the
+The open rows (`loops_loop_callback_repeats`, `meter_decoded_*`) are the
 questions the spec leaves to the console. The **unconfirmed** cases are firmware behaviour rea read in
 the disassembly that looks odd enough to check before relying on it; psport follows the reading.
 

@@ -141,7 +141,8 @@ bool TryReserve(std::atomic<u32>* p_c_used, u32 c_works, u32 c_max) {
 }
 
 // PLAY trades the voice's channel works for max(input, output) channels of its setup (spec 03 §1.3):
-// from the rack's pool, and for a rack with inputs from each input's pool too.
+// from the rack's pool, and for a rack with inputs from each input's pool too. A voice that was never
+// set up has 0 channels, so PLAY on it fails before it reserves anything (spec 09 §1).
 s32 ReserveChannelWorks(OrbisNgs2Handle h_voice, Voice* p_voice) {
     const VoiceParams& params = *p_voice->p_params;
     const u32 c_works = std::max(params.c_in_channels, params.c_out_channels);
