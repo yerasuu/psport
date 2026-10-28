@@ -2,7 +2,8 @@
 # tools/bundle.sh PORT TAG DIR: writes DIR/psport-TAG-x86_64.tar.zst and its .sha256, a bundle of
 # PORT (nix-build packaging/port.nix, or a directory laid out the same) that runs without Nix: its
 # programs, every library they link from the store, and the store's glibc loader, with LICENSE,
-# THIRD-PARTY-NOTICES and SOURCES.txt (packaging/licences.nix). psport is GPL-2.0 (kb #843), so
+# LICENSES.md, LICENSES.json and LICENSES/ (the tree's licence manifest and texts), THIRD-PARTY-NOTICES
+# and SOURCES.txt (packaging/licences.nix). psport is GPL-2.0 (kb #843), so
 # nothing under the Apache-2.0 goes in: the Vulkan loader is the host's. The online module
 # (libpsport-net.so) links neither OpenSSL nor abseil since kb #850 (mbedTLS under its
 # GPL-2.0-or-later option, miniupnpc, zlib), but stays out until online play is checked and its
@@ -19,14 +20,14 @@ set -euo pipefail
 (($# == 3)) || { sed -n '2,4p' "$0" | cut -c3-; exit 2; }
 port=$1 tag=$2 dest=$3
 [[ $tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Not a vX.Y.Z tag: $tag" >&2; exit 2; }
-[[ -f $port/LICENSE && -f $port/run.sh && -x $port/out/psport && -f $port/out/gpu/libpsport-gpu.so ]] ||
+[[ -f $port/LICENSE && -f $port/LICENSES.json && -f $port/run.sh && -x $port/out/psport && -f $port/out/gpu/libpsport-gpu.so ]] ||
     { echo "Not a port build: $port" >&2; exit 2; }
 name=psport-$tag-x86_64
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 bundle=$work/$name
 mkdir -p "$bundle/lib" "$bundle/out/gpu"
-cp -r "$port/LICENSE" "$port/run.sh" "$port/scripts" "$port/patches" "$bundle/"
+cp -r "$port/LICENSE" "$port/LICENSES" "$port/LICENSES.md" "$port/LICENSES.json" "$port/run.sh" "$port/scripts" "$port/patches" "$bundle/"
 mkdir -p "$bundle/tools"
 cp -- "$port"/tools/{fetch_fsr4_assets.sh,fsr4_optimize.sh,fsr4_post_lds.pl,fsr4_pass11_guard.pl,Fsr4SpirvCrossFixes.pm} \
     "$bundle/tools/"

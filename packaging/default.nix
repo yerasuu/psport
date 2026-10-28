@@ -18,14 +18,14 @@ let
   withNet = builtins.getEnv "PS_PACKAGE_NET" == "1";
   # The FSR 4 v07 assets (fsr4_shaders) are not redistributed: tools/fetch_fsr4_assets.sh fetches
   # them into the data directory, where run.sh finds them.
-  assetDirs = [ "scripts" "patches" "launcher" "tools/fsr4cap" ]
+  assetDirs = [ "LICENSES" "scripts" "patches" "launcher" "tools/fsr4cap" ]
     ++ lib.optional fsr411 "fsr4_411";
   fsr4Tools = map (name: "tools/${name}") [
     "fetch_fsr4_assets.sh" "fsr4_optimize.sh" "fsr4_post_lds.pl" "fsr4_pass11_guard.pl" "Fsr4SpirvCrossFixes.pm"
   ];
   # Only what the package needs (the tree also holds builds, profiles and captures).
   wanted = [
-    "LICENSE" "run.sh" "out" "out/psport" "out/psport-gpu-capabilities" "out/gpu" "out/gpu/libpsport-gpu.so" "tools"
+    "LICENSE" "LICENSES.md" "LICENSES.json" "run.sh" "out" "out/psport" "out/psport-gpu-capabilities" "out/gpu" "out/gpu/libpsport-gpu.so" "tools"
   ] ++ assetDirs ++ fsr4Tools;
   # DLSS (a build with DLSS_SDK_ROOT): the bridge, NVIDIA's runtime library and its license, as
   # NVIDIA's RTX SDK license allows in an application. Without them the launcher lets the player
@@ -70,6 +70,7 @@ let
     };
     patches = [ ../tools/fsr4cap/dxil-spirv-class-bindings.patch ];
     nativeBuildInputs = [ pkgs.cmake pkgs.ninja pkgs.python3 ];
+    meta.license = lib.licenses.mit;
     # The CLI and the shared library it links (its own install rules set the RUNPATH).
   };
   fsr4capExe = pkgs.runCommand "fsr4cap.exe" {
@@ -104,11 +105,14 @@ let
         ${mesaVulkan}/share/vulkan/icd.d/''${name}_icd.x86_64.json > $out/share/vulkan/icd.d/''${name}_icd.x86_64.json
     done
   '';
-  # The libraries psport's binaries link, and the Apache-2.0 tools the package puts on PATH.
+  # The libraries psport's binaries link, the Apache-2.0 tools the package puts on PATH and the
+  # programs and code tools/fsr4cap brings (dxil-spirv, AMD's API headers in fsr4cap.exe).
   licences = import ./licences.nix {
     inherit pkgs withNet;
     storePaths = toString runtimePaths;
-    packages = [ pkgs.vulkan-tools pkgs.spirv-tools ];
+    packages = [ pkgs.vulkan-tools pkgs.spirv-tools dxilSpirv ];
+    withDlss = builtins.pathExists ../out/libpsport_dlss.so;
+    withFsr4cap = true;
   };
   icds = lib.concatMapStringsSep ":" (name: "${vulkanDrivers}/share/vulkan/icd.d/${name}")
     [ "radeon_icd.x86_64.json" "intel_icd.x86_64.json" ];
@@ -186,8 +190,8 @@ pkgs.stdenv.mkDerivation {
     runHook preInstall
     d=$out/share/psport
     mkdir -p $d/bin $out/bin
-    cp LICENSE run.sh ${licences}/THIRD-PARTY-NOTICES ${licences}/SOURCES.txt $d/
-    cp -r scripts patches launcher $d/
+    cp LICENSE LICENSES.md LICENSES.json run.sh ${licences}/THIRD-PARTY-NOTICES ${licences}/SOURCES.txt $d/
+    cp -r LICENSES scripts patches launcher $d/
     mkdir -p $d/tools
     cp -r tools/fsr4cap ${toString fsr4Tools} $d/tools/
     rm -rf $d/tools/fsr4cap/__pycache__

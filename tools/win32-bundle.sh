@@ -2,9 +2,10 @@
 # tools/win32-bundle.sh DEST: writes DEST/psport-windows-VERSION-COMMIT-x86_64.zip and its .sha256, the
 # Windows test package (kb #899): psport.exe, libpsport-gpu.dll, psport-gpu-capabilities.exe and
 # psport-windows-probe.exe, the CLANG64 DLLs they load (the closure of their PE import tables), the
-# testers' scripts and README-WINDOWS.txt (packaging/windows), LICENSE.txt, THIRD-PARTY-NOTICES.txt,
-# SOURCES.txt and BUILD-INFO.txt, all in one folder; next to it, DEST/psport-windows-...-sources holds
-# the sources of the DLLs built from psport's own PKGBUILDs (packaging/windows/*/PKGBUILD). From MSYS2's
+# testers' scripts and README-WINDOWS.txt (packaging/windows), LICENSE.txt, LICENSES.md, LICENSES.json,
+# LICENSES/, THIRD-PARTY-NOTICES.txt, SOURCES.txt and BUILD-INFO.txt, all in one folder; next to it,
+# DEST/psport-windows-...-sources holds the sources of the DLLs built from psport's own PKGBUILDs
+# (packaging/windows/*/PKGBUILD) with the licence files beside each. From MSYS2's
 # CLANG64 shell it takes build.sh's out/ and the DLLs and package database of that MSYS2 (the CI job);
 # elsewhere tools/win32-cross.sh's out/win32 and the packages of its sysroot (PS_WIN32_SYSROOT).
 # psport is GPL-2.0 (kb #843), so only DLLs whose package licence allows that go in: vulkan-1.dll is
@@ -88,6 +89,7 @@ ship_sources() {
     mapfile -t sums < <(pkgbuild_value "$pkgbuild" sha256sums)
     mkdir -p -- "$target"
     cp -- "$pkgbuild" "$target/"
+    for file in "$dir"/LICENSE*; do [[ ! -f $file ]] || cp -- "$file" "$target/"; done
     [[ ! -d $dir/keys ]] || cp -r -- "$dir/keys" "$target/"
     while read -r entry; do
         if [[ $entry == *::* ]]; then file=${entry%%::*}; else file=${entry##*/}; fi
@@ -191,7 +193,7 @@ done
 crlf() { sed 's/\r$//; s/$/\r/' -- "$1" > "$2"; }
 for file in packaging/windows/*; do [[ ! -f $file ]] || crlf "$file" "$bundle/${file##*/}"; done
 crlf LICENSE "$bundle/LICENSE.txt"
-cp -r -- patches "$bundle/"
+cp -r -- LICENSES LICENSES.md LICENSES.json patches "$bundle/"
 
 # Notices and sources: one entry per package, with the licence files it installs.
 declare -A package_dlls
@@ -266,26 +268,18 @@ for short in crt compiler-rt boost fmt robin-map vulkan-memory-allocator vulkan-
     fi
     entry "$package" '' "$licence"
 done
-# The same components as packaging/licences.nix's vendored list, which the Linux bundle carries.
+# packaging/vendored.txt, the list the Linux bundle's notices take too (only its entries for every
+# package), and what CMake fetches here instead of taking it from Nix.
 section "Code in psport's source tree under its own licence"
 deps=$out/_deps
 [[ -d $deps ]] || deps=$out/gpu/_deps
-vendored=(
-    "sirit|https://github.com/shadps4-emu/sirit|BSD-3-Clause|gpu/third_party/sirit/LICENSE.txt gpu/third_party/sirit/externals/SPIRV-Headers/LICENSE"
-    "AMD GCN headers|https://github.com/GPUOpen-Drivers/pal|MIT|gpu/third_party/gcn/include/gcn/si_ci_vi_merged_offset.h:24"
-    "half|https://half.sourceforge.net/|MIT|gpu/third_party/half/LICENSE.txt"
-    "Xbyak|https://github.com/herumi/xbyak|BSD-3-Clause|gpu/third_party/xbyak/COPYRIGHT"
-    "FSR-Vulkan and AMD FidelityFX SDK|https://github.com/FireBurn/FSR-Vulkan|MIT|gpu/third_party/fsr-vulkan/LICENSE.txt gpu/third_party/fsr-vulkan/NOTICE.md gpu/third_party/fsr-vulkan/upstream/ffx-1.1.4/sdk/LICENSE.txt"
-    "LibAtrac9|https://github.com/Thealexbarney/LibAtrac9|MIT|third_party/LibAtrac9/LICENSE"
-    "Dear ImGui|https://github.com/ocornut/imgui|MIT|gpu/third_party/imgui/LICENSE.txt"
-    "RenderDoc in-application API header|https://github.com/baldurk/renderdoc|MIT|gpu/third_party/renderdoc/renderdoc_app.h:24"
-    "DejaVu fonts|https://dejavu-fonts.github.io/|Bitstream-Vera|gpu/third_party/fonts/LICENSE-DejaVu.txt"
-    "Files in the shadPS4 tree under their own licence|https://github.com/shadps4-emu/shadPS4|MIT, BSD-3-Clause AND GPL-2.0-or-later, Zlib, CC0-1.0|gpu/shadps4/video_core/host_shaders/fsr.comp:2 gpu/shadps4/video_core/host_shaders/fsr/ffx_a.h:41 gpu/shadps4/video_core/host_shaders/fsr/ffx_fsr1.h:30 gpu/shadps4/shader_recompiler/ir/passes/ssa_rewrite_pass.cpp:2 gpu/shadps4/common/bit_field.h:3 gpu/shadps4/video_core/renderer_vulkan/vk_barrier_tracker.h:2 gpu/shadps4/common/alignment.h:2"
+mapfile -t vendored < <(awk -F'|' '!/^#/ && NF >= 4 && $5 == ""' packaging/vendored.txt)
+vendored+=(
     "magic_enum (fetched by gpu/CMakeLists.txt)|https://github.com/Neargye/magic_enum|MIT|$deps/magic_enum-src/LICENSE"
     "miniz (fetched by gpu/CMakeLists.txt)|https://github.com/richgel999/miniz|MIT|$deps/miniz-src/LICENSE"
 )
 for item in "${vendored[@]}"; do
-    IFS='|' read -r title url licence files <<< "$item"
+    IFS='|' read -r title url licence files _ <<< "$item"
     {
         echo; rule 100 -; echo "$title"; echo "Licence: $licence"; echo "Upstream: $url"
         for file in $files; do

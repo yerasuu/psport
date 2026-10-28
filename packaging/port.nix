@@ -42,7 +42,7 @@ pkgs.stdenv.mkDerivation {
   installPhase = ''
     runHook preInstall
     mkdir -p $out/out/gpu
-    cp -r LICENSE run.sh scripts patches $out/
+    cp -r LICENSE LICENSES LICENSES.md LICENSES.json run.sh scripts patches $out/
     # FSR 4 v07 assets are fetched on the user's machine, the optimized passes built there.
     install -Dm755 -t $out/tools tools/fetch_fsr4_assets.sh tools/fsr4_optimize.sh
     install -m644 -t $out/tools tools/fsr4_post_lds.pl tools/fsr4_pass11_guard.pl tools/Fsr4SpirvCrossFixes.pm

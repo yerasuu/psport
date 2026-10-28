@@ -861,8 +861,9 @@ package is groundwork for testers, not for playing, as its `README-WINDOWS.txt` 
 The package is one folder: the four programs, the CLANG64 DLLs they load (the closure of their PE
 import tables, read with `llvm-objdump`; `vulkan-1.dll` is the GPU driver's), `psport-probe.bat`,
 `psport-probe.ps1` and `README-WINDOWS.txt` from `packaging/windows/` (CRLF), `LICENSE.txt`,
-`THIRD-PARTY-NOTICES.txt` (each DLL's MSYS2 package with its licence and licence files, the
-packages compiled in, and the tree's own third-party code as in the Linux bundle), `SOURCES.txt`
+`LICENSES.md`, `LICENSES.json`, `LICENSES/`, `THIRD-PARTY-NOTICES.txt` (each DLL's MSYS2 package with its
+licence and licence files, the packages compiled in, and the tree's own third-party code from
+`packaging/vendored.txt`, the Linux bundle's list), `SOURCES.txt`
 (MSYS2's source package and upstream of each; for a package built from one of psport's own
 PKGBUILDs, `packaging/windows/*/PKGBUILD`, the sources folder next to the zip, filled from the files
 makepkg left beside the PKGBUILD after checking them against its sums) and `BUILD-INFO.txt` (commit,
@@ -978,8 +979,8 @@ The same job also publishes the release's port without Nix, as assets of the tag
 `tools/bundle.sh <store path> <tag> <directory>` and uploaded after the release is created (a release
 without them, as every one before this, is still fetched from the cache). It holds one folder,
 `psport-<tag>-x86_64/`, laid out as the output above plus `lib/` (every library the programs and
-`out/gpu/` link from the store, with the store's glibc and its loader), `relocate.sh`, and
-`THIRD-PARTY-NOTICES` and `SOURCES.txt` from `packaging/licences.nix` (each library's licence and
+`out/gpu/` link from the store, with the store's glibc and its loader), `relocate.sh`, `LICENSES.md`,
+`LICENSES.json` and `LICENSES/`, and `THIRD-PARTY-NOTICES` and `SOURCES.txt` from `packaging/licences.nix` (each library's licence and
 the licence files of its source, the code compiled in, and the written source offer). Since psport is
 GPL-2.0 (kb #843), nothing under the Apache-2.0 goes in: not the Vulkan loader; the online module
 `libpsport-net.so` stays out until its release (kb #850) (`PS_BUNDLE_NET=1` keeps it in a bundle
@@ -987,8 +988,9 @@ for local use; `PS_PACKAGE_NET=1` does the same for the AppImage). `tools/check_
 run by `bundle.sh` and again by the job on the archive, fails the release when the bundle's tree
 holds OpenSSL, abseil, protobuf, the Vulkan loader, x264, x265, xvidcore, libssh, SRT, GnuTLS, RIST,
 libunistring (LGPL-3.0-or-later in nixpkgs) or the online module, when `THIRD-PARTY-NOTICES` lists a
-GPL-3.0-only library, when libavutil is missing, reports version 3 or no licence, or when LICENSE,
-THIRD-PARTY-NOTICES or SOURCES.txt is missing; with `PS_BUNDLE_NET=1` it allows the online module
+GPL-3.0-only library, when libavutil is missing, reports version 3 or no licence, when LICENSE,
+the licence files, THIRD-PARTY-NOTICES or SOURCES.txt is missing, or when the notices lack an entry of
+`packaging/vendored.txt`; with `PS_BUNDLE_NET=1` it allows the online module
 and nothing else (it links mbedTLS, taken under the GPL-2.0-or-later, miniupnpc and zlib). `licences.nix` fails when a GPL, LGPL or MPL component has no licence
 text or no source URL. It runs
 from wherever it is extracted, writable, as `PS_DATA_DIR=<writable folder> bash <path>/run.sh` with the

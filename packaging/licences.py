@@ -163,7 +163,6 @@ def main():
             if 'lines' in f:
                 text = b''.join(text.splitlines(keepends=True)[:f['lines']])
             texts.append((Path(f['file']).name.split('-', 1)[-1], text))
-        texts += spdx_texts([{'spdx': spdx_id} for spdx_id in v.get('spdxTexts', [])], spdx)
         notices.component(v['name'], [('Licence', v['spdx']), ('Homepage', v['url'])], texts)
     (out / 'THIRD-PARTY-NOTICES').write_text('\n'.join(notices.lines).lstrip() + '\n')
     lines = [OFFER.format(nixpkgs=manifest['nixpkgs'])]

@@ -1,0 +1,20 @@
+# Code from other projects in psport's source tree that its binaries carry, for the notices of every
+# package: packaging/licences.nix (Linux bundle, AppImage) and tools/win32-bundle.sh (Windows) read
+# this one list, and tools/check_bundle_licences.sh checks a bundle's notices against it.
+# name|upstream URL|licence|files (path[:first N lines]), the texts printed in the notices|only when
+# The last field, when set, limits an entry to packages that carry it: net (the online module), dlss
+# (the DLSS bridge) or fsr4cap (fsr4cap.exe, the AppImage); the Windows package takes only the
+# entries without it.
+sirit|https://github.com/shadps4-emu/sirit|BSD-3-Clause|gpu/third_party/sirit/LICENSE.txt gpu/third_party/sirit/externals/SPIRV-Headers/LICENSE
+AMD GCN headers|https://github.com/GPUOpen-Drivers/pal|MIT|gpu/third_party/gcn/include/gcn/si_ci_vi_merged_offset.h:24
+half|https://half.sourceforge.net/|MIT|gpu/third_party/half/LICENSE.txt
+Xbyak|https://github.com/herumi/xbyak|BSD-3-Clause|gpu/third_party/xbyak/COPYRIGHT
+FSR-Vulkan and AMD FidelityFX SDK|https://github.com/FireBurn/FSR-Vulkan|MIT|gpu/third_party/fsr-vulkan/LICENSE.txt gpu/third_party/fsr-vulkan/NOTICE.md gpu/third_party/fsr-vulkan/upstream/ffx-1.1.4/sdk/LICENSE.txt
+LibAtrac9|https://github.com/Thealexbarney/LibAtrac9|MIT|third_party/LibAtrac9/LICENSE
+Dear ImGui|https://github.com/ocornut/imgui|MIT|gpu/third_party/imgui/LICENSE.txt
+RenderDoc in-application API header|https://github.com/baldurk/renderdoc|MIT|gpu/third_party/renderdoc/renderdoc_app.h:24
+DejaVu fonts|https://dejavu-fonts.github.io/|Bitstream-Vera|gpu/third_party/fonts/LICENSE-DejaVu.txt
+Files in the shadPS4 tree under their own licence|https://github.com/shadps4-emu/shadPS4|MIT, BSD-3-Clause AND GPL-2.0-or-later, Zlib, CC0-1.0|gpu/shadps4/video_core/host_shaders/fsr.comp:2 gpu/shadps4/video_core/host_shaders/fsr/ffx_a.h:41 gpu/shadps4/video_core/host_shaders/fsr/ffx_fsr1.h:30 gpu/shadps4/shader_recompiler/ir/passes/ssa_rewrite_pass.cpp:2 gpu/shadps4/common/bit_field.h:3 gpu/shadps4/video_core/renderer_vulkan/vk_barrier_tracker.h:2 gpu/shadps4/common/alignment.h:2 LICENSES/MIT.txt LICENSES/BSD-3-Clause.txt LICENSES/Zlib.txt
+cpp-httplib|https://github.com/yhirose/cpp-httplib|MIT|gpu/third_party/httplib/LICENSE|net
+DLSS bridge|https://github.com/IFreemz/shadPS4-Bloodborne-DLSS-FSR|MIT|gpu/dlss_bridge/LICENSE.txt|dlss
+AMD FidelityFX API headers (fsr4cap.exe)|https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK|MIT|tools/fsr4cap/ffx/api/include/ffx_api.h:21|fsr4cap

@@ -10,6 +10,9 @@
   # The online module's own code (cpp-httplib, nlohmann_json), for a local bundle that keeps
   # libpsport-net.so.
 , withNet ? false
+  # The DLSS bridge and fsr4cap.exe, which only the AppImage (default.nix) carries.
+, withDlss ? false
+, withFsr4cap ? false
 }:
 let
   lib = pkgs.lib;
@@ -94,38 +97,28 @@ let
       source = source (d.src or d.out.src or null);
       outputs = map (output: baseNameOf (builtins.unsafeDiscardStringContext d.${output}.outPath)) (d.outputs or [ "out" ]);
     };
-  vendor = name: url: spdx: files: { inherit name url spdx files; };
-  vendored = [
-    (vendor "sirit" "https://github.com/shadps4-emu/sirit" "BSD-3-Clause"
-      [ { file = ../gpu/third_party/sirit/LICENSE.txt; } { file = ../gpu/third_party/sirit/externals/SPIRV-Headers/LICENSE; } ])
-    (vendor "AMD GCN headers" "https://github.com/GPUOpen-Drivers/pal" "MIT"
-      [ { file = ../gpu/third_party/gcn/include/gcn/si_ci_vi_merged_offset.h; lines = 24; } ])
-    (vendor "half" "https://half.sourceforge.net/" "MIT" [ { file = ../gpu/third_party/half/LICENSE.txt; } ])
-    (vendor "Xbyak" "https://github.com/herumi/xbyak" "BSD-3-Clause" [ { file = ../gpu/third_party/xbyak/COPYRIGHT; } ])
-    (vendor "FSR-Vulkan and AMD FidelityFX SDK" "https://github.com/FireBurn/FSR-Vulkan" "MIT" [
-      { file = ../gpu/third_party/fsr-vulkan/LICENSE.txt; }
-      { file = ../gpu/third_party/fsr-vulkan/NOTICE.md; }
-      { file = ../gpu/third_party/fsr-vulkan/upstream/ffx-1.1.4/sdk/LICENSE.txt; }
-    ])
-    (vendor "LibAtrac9" "https://github.com/Thealexbarney/LibAtrac9" "MIT" [ { file = ../third_party/LibAtrac9/LICENSE; } ])
-    (vendor "Dear ImGui" "https://github.com/ocornut/imgui" "MIT" [ { file = "${port.imgui}/LICENSE.txt"; } ])
-    (vendor "RenderDoc in-application API header" "https://github.com/baldurk/renderdoc" "MIT"
-      [ { file = ../gpu/third_party/renderdoc/renderdoc_app.h; lines = 24; } ])
-    (vendor "DejaVu fonts" "https://dejavu-fonts.github.io/" "Bitstream-Vera" [ { file = ../gpu/third_party/fonts/LICENSE-DejaVu.txt; } ])
-    # Files shadPS4 took from other projects, compiled into libpsport-gpu.so: their headers carry
-    # only the SPDX identifier, so the licences' texts follow (CC0 asks for none).
-    ((vendor "Files in the shadPS4 tree under their own licence" "https://github.com/shadps4-emu/shadPS4"
-      "MIT, BSD-3-Clause AND GPL-2.0-or-later, Zlib, CC0-1.0" [
-        { file = ../gpu/shadps4/video_core/host_shaders/fsr.comp; lines = 2; }
-        { file = ../gpu/shadps4/video_core/host_shaders/fsr/ffx_a.h; lines = 41; }
-        { file = ../gpu/shadps4/video_core/host_shaders/fsr/ffx_fsr1.h; lines = 30; }
-        { file = ../gpu/shadps4/shader_recompiler/ir/passes/ssa_rewrite_pass.cpp; lines = 2; }
-        { file = ../gpu/shadps4/common/bit_field.h; lines = 3; }
-        { file = ../gpu/shadps4/video_core/renderer_vulkan/vk_barrier_tracker.h; lines = 2; }
-        { file = ../gpu/shadps4/common/alignment.h; lines = 2; }
-      ]) // { spdxTexts = [ "MIT" "BSD-3-Clause" "Zlib" ]; })
-  ] ++ lib.optional withNet
-    (vendor "cpp-httplib" "https://github.com/yhirose/cpp-httplib" "MIT" [ { file = ../gpu/third_party/httplib/LICENSE; } ]);
+  # packaging/vendored.txt, the list the Windows package's notices take too.
+  carried = { "" = true; net = withNet; dlss = withDlss; fsr4cap = withFsr4cap; };
+  # Dear ImGui is a submodule, empty in this tree's copy in the store: its licence comes from
+  # port.nix's fetch of the same revision.
+  treeFile = path:
+    let imgui = "gpu/third_party/imgui/";
+    in if lib.hasPrefix imgui path then "${port.imgui}/${lib.removePrefix imgui path}" else ./.. + "/${path}";
+  vendorFile = spec:
+    let parts = lib.splitString ":" spec;
+    in { file = treeFile (lib.head parts); } // lib.optionalAttrs (lib.length parts > 1) { lines = lib.toInt (lib.elemAt parts 1); };
+  vendorEntry = line:
+    let fields = lib.splitString "|" line;
+    in {
+      name = lib.elemAt fields 0;
+      url = lib.elemAt fields 1;
+      spdx = lib.elemAt fields 2;
+      files = map vendorFile (lib.filter (spec: spec != "") (lib.splitString " " (lib.elemAt fields 3)));
+      when = if lib.length fields > 4 then lib.elemAt fields 4 else "";
+    };
+  vendored = map (v: removeAttrs v [ "when" ]) (lib.filter (v: carried.${v.when})
+    (map vendorEntry (lib.filter (line: line != "" && !lib.hasPrefix "#" line)
+      (lib.splitString "\n" (builtins.readFile ./vendored.txt)))));
   manifest = {
     nixpkgs = lib.version;
     components = map (component "library") libraries

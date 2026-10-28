@@ -310,6 +310,7 @@
       "paths": [
         "packaging/licences.nix",
         "packaging/licences.py",
+        "packaging/vendored.txt",
         "tools/bundle.sh",
         "tools/win32-bundle.sh",
         "tools/check_bundle_licences.sh"
