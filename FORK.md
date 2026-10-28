@@ -29,12 +29,14 @@ commit up to it was read; what was not ported yet waits as a task. Last reviewed
   and Discord status. Reviewed up to `8185b88` (0.6, 2026-10-19): its online stack is shadPS4 v0.20's
   copied whole and its The Hunter's Dream client derives from bbhost (GPL-3.0-or-later); neither is
   taken.
-- SrShadowy's fork (SrShadowy/bloodborne_pc, GPL-2.0): reviewed up to `f5d3dcb` (2026-10-20, on
+- SrShadowy's fork (SrShadowy/bloodborne_pc, GPL-2.0-or-later): reviewed up to `f5d3dcb` (2026-10-20, on
   bbport `8185b88`, after its release 0.6.1 `b1d3b8b`).
-- Teefpyre's fork (Teefpyre/bloodborne_pc-LinuxBBSCFix): reviewed up to `f3b5504` (2026-10-20, on
+- Teefpyre's fork (Teefpyre/bloodborne_pc-LinuxBBSCFix, GPL-2.0-or-later): reviewed up to `f3b5504` (2026-10-20, on
   bbport `8185b88`).
-- AnyPS5 (boykopovar/AnyPS5, GPL-2.0-only): reviewed up to `5b59fbc` (2026-10-21). Its licence keeps
-  its code out of psport; only behaviour is taken, confirmed on the firmware and written natively.
+- AnyPS5 (boykopovar/AnyPS5, GPL-2.0-only): reviewed up to `5b59fbc` (2026-10-21). Its libSceNgs2 is
+  ported as code in `gpu/ngs2_anyps5/` and keeps its GPL-2.0-only (kb #843, Ported components below); from
+  the rest only behaviour is taken, confirmed on the firmware and written natively, as the native
+  `gpu/ngs2/` and `gpu/audiodec/` are.
 - shadPS4: `b4e7ae7` (2026-10-02), the vendored commit in `gpu/VENDOR.txt`, plus the recompiler
   fixes backported after it that the same file lists. The code ported or written from shadPS4
   outside `gpu/shadps4/` (libSceFiber, libSceFont, Videodec2, the per-NID tables, Audio3d, memory
@@ -148,7 +150,7 @@ is the files as they were at the source; later commits adapt them.
 
 | Component | Directory | Source | License | Changes here |
 |---|---|---|---|---|
-| libSceNgs2 (software audio mixer) | `gpu/ngs2_anyps5/` | [AnyPS5](https://github.com/boykopovar/AnyPS5) `5edae353`, `core/libs/prx/libSceNgs2.native` | GPL-2.0-only | PS4 structure layouts (AnyPS5's are PS5's), exceptions turned into error codes at the game boundary, unimplemented effects pass audio through, decoding over the ported LibAtrac9; the mastering limiter (`Limiter.cpp`) written from firmware 11.00, not AnyPS5 |
+| libSceNgs2 (software audio mixer) | `gpu/ngs2_anyps5/` | [AnyPS5](https://github.com/boykopovar/AnyPS5) `5edae353`, `core/libs/prx/libSceNgs2.native` | GPL-2.0-only | PS4 structure layouts (AnyPS5's are PS5's), exceptions turned into error codes at the game boundary, unimplemented effects pass audio through, decoding over the ported LibAtrac9; the envelopes, filters, mastering limiter, peak meters and VAG decoding (`Envelope.cpp`, `Filter.cpp`, `Limiter.cpp`, `PeakMeter.cpp`, `Vag.cpp`) written by psport from firmware 11.00, not AnyPS5, and GPL-2.0-or-later like the glue (`Exports.cpp`, `ngs2_compat.hpp`) |
 | libSceNgs2 headers (PS4 structures and error codes) | `gpu/shadps4/core/libraries/ngs2/` | [shadPS4](https://github.com/shadps4-emu/shadPS4) `67dbc067d`, `src/core/libraries/ngs2/*.h` (the twelve headers, none of its `.cpp`) | GPL-2.0-or-later | their layouts checked against firmware 11.00 by `gpu/ngs2/Abi.cpp`, and `ngs2_impl.h`'s mutex type supplied by `gpu/shim/core/libraries/kernel/threads/pthread.h`; `ngs2_custom.h` loses the two variables its chorus option and peak meter parameter also defined (`} Name;`), which broke linking once more than one file included it |
 | libSceFiber (user-level fibers) | `gpu/fiber/` | [shadPS4](https://github.com/shadps4-emu/shadPS4) `3a9f572`, `src/core/libraries/fiber` | GPL-2.0-or-later | TCB read through GS, failures logged, `PS_FIBER_TRACE` |
 | libSceFont, libSceFontFt (text over FreeType) | `gpu/font/` | [shadPS4](https://github.com/shadps4-emu/shadPS4) `3a9f572`, `src/core/libraries/font` | GPL-2.0-or-later | guest paths through the runtime's mounts, system fonts from `PS_SYS_FONTS` else the host's Noto (or the embedded DejaVu Sans), exceptions turned into error codes, `sceFontGlyphRenderImage` and `sceFontCloseFont` implemented |

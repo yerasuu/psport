@@ -11,26 +11,28 @@ licence applied to every file. [LICENSES.json](LICENSES.json) lists the componen
 
 | Component | Terms and source |
 | --- | --- |
-| psport runtime, GPU glue, launcher and tooling (`src`, `gpu/shim`, `gpu/port`, `gpu/memory`, `gpu/diag`, `gpu/layer`, the native Ngs2 `gpu/ngs2`, `launcher`, `tools`, `packaging`, scripts) | GPL-2.0-or-later (GPL-2.0-only where a header says so); `LICENSE`, `README.md`. `src/` carries no per-file header, so README.md is its only statement |
+| psport runtime, GPU glue, launcher and tooling (`src`, `gpu/shim`, `gpu/platform`, `gpu/port`, `gpu/memory`, `gpu/diag`, `gpu/layer`, `launcher`, `tools`, `packaging`, scripts) | GPL-2.0-or-later (GPL-2.0-only where a header says so); `LICENSE`, `README.md` and each file's SPDX line (the generated import tables have none) |
 | Per-title game profiles (`gpu/games`) | GPL-2.0-or-later; the BBSC co-op code is Copyright 2026 CLS_AMG |
-| libSceNgs2 port (`gpu/ngs2_anyps5`) | GPL-2.0-only; from AnyPS5 (https://github.com/boykopovar/AnyPS5) at `5edae353` (FORK.md) |
+| libSceNgs2 port (`gpu/ngs2_anyps5`) | GPL-2.0-only; from AnyPS5 (https://github.com/boykopovar/AnyPS5) at `5edae353` (FORK.md); psport's own files in it (glue, envelope, filter, limiter, peak meter, VAG) GPL-2.0-or-later |
 | libSceAudiodec and the native libSceNgs2 (`gpu/audiodec`, `gpu/ngs2`) | GPL-2.0-or-later; psport's own, over libavcodec and LibAtrac9 (Audiodec) and shadPS4's Ngs2 headers and LibAtrac9 (Ngs2) |
 | shadPS4 vendored tree (`gpu/shadps4`) | GPL-2.0-or-later; https://github.com/shadps4-emu/shadPS4 at `b4e7ae7` and the fixes `gpu/VENDOR.txt` lists |
 | Files in that tree under their own licence | MIT (`sha1.h`, `ssa_rewrite_pass.cpp`, `fsr.comp`, AMD's `ffx_a.h` and `ffx_fsr1.h`), BSL-1.0 (`aes.h`), CC0-1.0 (`alignment.h`), BSD-3-Clause AND GPL-2.0-or-later (`bit_field.h`), Zlib (`vk_barrier_tracker.*`, DXVK) |
 | libSceFiber and libSceFont (`gpu/fiber`, `gpu/font`) | GPL-2.0-or-later; shadPS4 at `3a9f572` |
 | Online module `libpsport-net.so` (`gpu/net`) | GPL-2.0-or-later, with `np_handler.*` and `shadnet/client.*` GPL-2.0-only; shadp2p by way of bbport 0.51. Not in any public bundle, see below |
-| cpp-httplib (`gpu/third_party/httplib`) | MIT; Copyright (c) 2017 yhirose; online module only |
-| DLSS bridge (`gpu/dlss_bridge`) | MIT; Copyright (c) 2026 IFreemz and bbport contributors. NVIDIA's DLSS SDK is not included |
-| FSR-Vulkan with the AMD FidelityFX SDK sources (`gpu/third_party/fsr-vulkan`) | MIT; FireBurn's FSR-Vulkan at `c64f093`, AMD's per-file MIT notices; `NOTICE.md` |
+| cpp-httplib (`gpu/third_party/httplib`) | MIT; Copyright (c) 2017 yhirose; v0.45.0 with one psport change; online module only |
+| DLSS bridge (`gpu/dlss_bridge`) | MIT; Copyright (c) 2026 IFreemz and bbport contributors: IFreemz's bridge as Supermedo adapted it in his Windows fork of bbport (`9514b19`). NVIDIA's DLSS SDK is not included |
+| FSR-Vulkan with the AMD FidelityFX SDK sources (`gpu/third_party/fsr-vulkan`) | MIT; FireBurn's FSR-Vulkan at `c64f093`, AMD's per-file MIT notices, every SDK 2.3 file on the MIT list of SDK 2.3's `docs/license.md`; `NOTICE.md` |
 | AMD FidelityFX API headers (`tools/fsr4cap/ffx`) | MIT; Copyright (C) 2026 Advanced Micro Devices, Inc. |
-| sirit with SPIRV-Headers (`gpu/third_party/sirit`) | BSD-3-Clause (sirit) and the Khronos Group's MIT-style grant (SPIRV-Headers), recorded as MIT; JsonCpp (public domain or MIT) in its build tools |
-| half, xbyak, AMD GCN headers, RenderDoc header, Dear ImGui, LibAtrac9 | MIT (half, GCN headers, RenderDoc, ImGui, LibAtrac9) and BSD-3-Clause (xbyak); copyright lines in LICENSES.json |
-| DejaVu fonts (`gpu/third_party/fonts`) | Bitstream Vera Fonts licence with public domain DejaVu changes and the Arev licence (`LICENSES/LicenseRef-DejaVu-Fonts.txt`) |
-| Tracy (`gpu/third_party/tracy`) | Unread: submodule not checked out; README.md says BSD-3-Clause (review: pending) |
+| sirit with SPIRV-Headers (`gpu/third_party/sirit`) | BSD-3-Clause (sirit `c58f4d4`, three files changed) and the Khronos Group's MIT-style grant (SPIRV-Headers `2acb319`), recorded as MIT; JsonCpp (public domain or MIT) in its build tools |
+| half, xbyak, AMD GCN headers, RenderDoc header, Dear ImGui, LibAtrac9 | MIT (half 1.12.0, GCN headers, RenderDoc, ImGui, LibAtrac9) and BSD-3-Clause (xbyak); copyright lines in LICENSES.json |
+| DejaVu fonts 2.37 (`gpu/third_party/fonts`) | Bitstream Vera Fonts licence with public domain DejaVu changes and the Arev licence (`LICENSES/LicenseRef-DejaVu-Fonts.txt`) |
+| Tracy (`gpu/third_party/tracy`) | BSD-3-Clause; Copyright (c) 2017-2025 Bartosz Taudul; v0.13.1, only in `PS_TRACY=ON` builds |
 | BBSC game server (`scripts/bbsc_gameserver`: `bbsc_gameserver.py`, `README.md`, `NOTICE.txt`) | GPL-2.0-or-later AND MIT; Copyright 2026 CLS_AMG (NOTICE.txt), with NoDreamForHunter's ss.info format and response shapes (MIT, fhody125-web) |
 | BBSC's bbhost service (`scripts/bbsc_gameserver/bbhost_service.py`) | GPL-3.0-or-later; written from bbhost's client source (droogie/bbhost, GPL-3.0-or-later), which NOTICE.txt's or-later grant allows |
 | NoDreamForHunter's ss.info template (`ss_info_template.xml`, `LICENSE.NoDreamForHunter`) | MIT; Copyright (c) 2026 fhody125-web |
-| Bloodborne patches (`patches`) | Community authors, no licence stated (review: pending) |
+| Bloodborne patches (`patches`) | Community authors named in each patch; no licence stated, each author keeps their rights; kept as it is (kb #1131) |
+| dxil-spirv patch (`tools/fsr4cap/dxil-spirv-class-bindings.patch`) | MIT (dxil-spirv's `dxil_spirv.cpp`) AND GPL-2.0-or-later (bbport's added lines) |
+| FFmpeg recipe for Windows (`packaging/windows/ffmpeg`) | BSD-3-Clause (MSYS2's MINGW-packages, `LICENSE.MINGW-packages`) AND GPL-2.0-or-later (psport's changes) |
 | Documentation | Assumed GPL-2.0-or-later (review: pending) |
 | Libraries linked into the bundles (FFmpeg, SDL3, FreeType, glibc, DLLs and others) | Their own licences, listed by each bundle's generated notices |
 
@@ -46,9 +48,10 @@ LGPL-2.1-or-later without GPL, version 3 or network code, so it can be linked.
 read for behaviour only (`gpu/audiodec` took the contract of its exports from AnyPS5's `Export.cpp`, not its
 code); the firmware is read with REA and the result is written natively.
 
-**bbport, SrShadowy and Teefpyre.** bbport (GPL-2.0-or-later) is psport's origin; changes from SrShadowy's fork
-(GPL-2.0) and Teefpyre's fork are ported by hand and recorded in FORK.md with their source commits. Nothing is
-merged wholesale. FORK.md does not record Teefpyre's licence.
+**bbport, SrShadowy and Teefpyre.** bbport (GPL-2.0-or-later) is psport's origin; changes from SrShadowy's and
+Teefpyre's forks of bbport (both GPL-2.0-or-later: their LICENSE is bbport's, their READMEs say "or later" and the
+files taken carry GPL-2.0-or-later headers) are ported by hand and recorded in FORK.md with their source commits.
+Nothing is merged wholesale.
 
 **Online module.** `libpsport-net.so` is a separate shared library that the GPU library loads, with its own
 dependencies: OpenSSL, protobuf, nlohmann_json, zlib and miniupnpc (OpenSSL and abseil, through protobuf, are
@@ -61,7 +64,9 @@ in a package that is never redistributed. A source build keeps it.
 
 **Downloaded or user-supplied.** AMD's signed FSR 4 DLLs and model data, the FSR 4 v07 assets that
 `tools/fetch_fsr4_assets.sh` downloads on the user's machine, NVIDIA's DLSS SDK and libraries, game files and
-console system modules are not included in any bundle. dxil-spirv is built on the user's machine only.
+console system modules are not included in any bundle. dxil-spirv (with its patch) and fsr4cap.exe (with AMD's API
+headers) are built on the user's machine, or into the AppImage built locally by `packaging/default.nix`; no release
+bundle carries them.
 
 **BBSC game server.** `scripts/bbsc_gameserver` is a separate Python program that `run.sh` starts as a
 process; psport neither links nor imports it. Each file carries its own SPDX header: `bbsc_gameserver.py`
@@ -82,9 +87,10 @@ distributes it.
 - DejaVu fonts: Copyright (c) 2003 Bitstream, Inc.; the DejaVu changes are public domain; glyphs from Arev
   Fonts are (c) Tavmjong Bah. The licence text must accompany the fonts and the fonts are not sold by themselves.
 - FidelityFX SDK and FSR-Vulkan: keep AMD's MIT notices embedded in each file and `LICENSE.txt` of the SDK
-  (`gpu/third_party/fsr-vulkan/upstream/ffx-1.1.4/sdk/LICENSE.txt`). SDK 2.3's repository-level licence is more
-  restrictive than its per-file notices and is not in this tree, so every imported 2.3 file must be checked
-  individually (`UPSTREAM.md`). Do not describe the experimental source-v07 provider as AMD FSR 4.1.1, Ray
+  (`gpu/third_party/fsr-vulkan/upstream/ffx-1.1.4/sdk/LICENSE.txt`). SDK 2.3's repository-level licence
+  (`docs/license.md` at v2.3.0) allows other files in binary form only and forbids reverse engineering; it puts
+  the source files it lists under the MIT licence, and every 2.3 file psport carries is on that list (LICENSES.json).
+  A file imported from 2.3 later must be on it too (`UPSTREAM.md`). Do not describe the experimental source-v07 provider as AMD FSR 4.1.1, Ray
   Regeneration or ML Frame Generation (`NOTICE.md`).
 - Credits for the projects psport builds on and for the community patches are in README.md.
 
