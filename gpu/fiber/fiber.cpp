@@ -5,6 +5,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <string>
 #include <tuple>
 #include <type_traits>
 
@@ -13,6 +14,10 @@
 #include "fiber_error.h"
 #include "core/libraries/libs.h"
 #include "fiber_tcb.h"
+
+extern "C" void runtime_calls_report(void);
+extern "C" void runtime_debug_finish(const char* sz_how, int exit_code);
+extern "C" void psport_gpu_flush_caches(int can_wait);
 
 namespace Libraries::Fiber {
 
@@ -40,11 +45,26 @@ extern "C" void __attribute__((used)) PS4_SYSV_ABI _sceFiberForceQuit(u64 ret) {
     _sceFiberLongJmp(g_ctx);
 }
 
+// libSceFiber prints its PANIC lines and calls abort() here, so the game stops as on the console.
+// 134 is the status abort() leaves (128 + SIGABRT); the console's own exit code is inferred.
+[[noreturn]] static void StopOnFiberPanic(const char* sz_how, const std::string& panic_lines) {
+    LOG_CRITICAL(Lib_Fiber, "{}", panic_lines);
+    std::fflush(stdout);
+    std::fprintf(stderr, "%s\nSTOP: %s\n", panic_lines.c_str(), sz_how);
+    psport_gpu_flush_caches(0);
+    runtime_calls_report();
+    runtime_debug_finish(sz_how, 134);
+    std::_Exit(134);
+}
+
 void PS4_SYSV_ABI _sceFiberCheckStackOverflow(OrbisFiberContext* ctx) {
-    u64* stack_base = reinterpret_cast<u64*>(ctx->current_fiber->addr_context);
-    u64 stack_size = ctx->current_fiber->size_context;
+    const OrbisFiber* p_fiber = ctx->current_fiber;
+    const u64* stack_base = reinterpret_cast<u64*>(p_fiber->addr_context);
     if (stack_base && *stack_base != kFiberStackSignature) {
-        UNREACHABLE_MSG("Stack overflow detected in fiber with size = 0x{:x}", stack_size);
+        StopOnFiberPanic("guest abort: fiber stack overflow",
+                         fmt::format("PANIC:stack overflow in fiber.\nUse bigger memory area for context.\n"
+                                     "fiber: {:#x} ({}), context area: {:#x} bytes",
+                                     reinterpret_cast<u64>(p_fiber), p_fiber->name, p_fiber->size_context));
     }
 }
 
@@ -326,8 +346,11 @@ s32 PS4_SYSV_ABI sceFiberRunImpl(OrbisFiber* fiber, void* addr_context, u64 size
     cur_fiber->state = FiberState::Idle;
 
     if (ctx.return_val != 0) {
-        /* Fiber entry returned! This should never happen. */
-        UNREACHABLE_MSG("Fiber entry function returned.");
+        // libSceFiber stores the entry xored with 0xca953a6953c56aa5 and prints it unmasked; psport
+        // keeps it unmasked.
+        StopOnFiberPanic("guest abort: fiber entry returned",
+                         fmt::format("PANIC:fiber's entry function returned.\nfiber: {:#x}, entry: {:#x}",
+                                     reinterpret_cast<u64>(cur_fiber), reinterpret_cast<u64>(cur_fiber->entry)));
     }
 
     if (arg_on_return) {

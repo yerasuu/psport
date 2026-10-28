@@ -177,6 +177,11 @@ bool EqueueInternal::AddEvent(EqueueEvent& event) {
 
 bool EqueueInternal::ScheduleEvent(u64 id, s16 filter,
                                    void (*callback)(OrbisKernelEqueue, const OrbisKernelEvent&)) {
+    // psport: only timers schedule (the console's timers are kernel filters, nothing in libkernel).
+    if (filter != OrbisKernelEvent::Filter::Timer && filter != OrbisKernelEvent::Filter::HrTimer) {
+        LOG_ERROR_COUNTED(Kernel_Event, "ScheduleEvent: filter {} is not a timer, not scheduled", filter);
+        return false;
+    }
     std::scoped_lock lock{m_mutex};
 
     const auto& it = std::ranges::find_if(m_events, [id, filter](auto& ev) {
@@ -187,8 +192,6 @@ bool EqueueInternal::ScheduleEvent(u64 id, s16 filter,
     }
 
     const auto& event = *it;
-    ASSERT(event.event.filter == OrbisKernelEvent::Filter::Timer ||
-           event.event.filter == OrbisKernelEvent::Filter::HrTimer);
 
     if (!it->timer) {
         it->timer = std::make_unique<boost::asio::steady_timer>(io_context, event.timer_interval);
@@ -382,7 +385,9 @@ bool EqueueInternal::AddSmallTimer(EqueueEvent& ev) {
 }
 
 int EqueueInternal::WaitForSmallTimer(OrbisKernelEvent* ev, int num, u32 micros) {
-    ASSERT(num >= 1);
+    if (num < 1) {
+        return 0;
+    }
 
     auto curr_clock = std::chrono::steady_clock::now();
     const auto wait_end_us = (micros == 0) ? std::chrono::steady_clock::time_point::max()
@@ -455,8 +460,10 @@ bool SupportedEqueueFilter(OrbisKernelEvent::Filter filter) {
            filter == OrbisKernelEvent::Filter::VideoOut || IsIoFilter(filter); // psport: shadPS4 124328bcd
 }
 
-s32 PS4_SYSV_ABI posix_kevent(s32 handle, OrbisKernelEvent* changelist, u64 nchanges,
-                              OrbisKernelEvent* eventlist, u64 nevents,
+// psport: nchanges and nevents are kevent's 32-bit ints; the upper half of their registers is
+// whatever the game left there.
+s32 PS4_SYSV_ABI posix_kevent(s32 handle, OrbisKernelEvent* changelist, s32 nchanges,
+                              OrbisKernelEvent* eventlist, s32 nevents,
                               OrbisKernelTimespec* timeout) {
     LOG_INFO(Kernel_Event, "called, eq = {}, nchanges = {}, nevents = {}", handle, nchanges,
              nevents);
@@ -469,7 +476,7 @@ s32 PS4_SYSV_ABI posix_kevent(s32 handle, OrbisKernelEvent* changelist, u64 ncha
     auto equeue = kqueues[handle];
 
     // First step is to apply all changes in changelist.
-    for (u64 i = 0; i < nchanges; i++) {
+    for (s32 i = 0; i < nchanges; i++) {
         auto event = changelist[i];
         if (!SupportedEqueueFilter(event.filter)) {
             LOG_ERROR(Kernel_Event, "Unsupported event filter {}",
@@ -514,6 +521,14 @@ s32 PS4_SYSV_ABI posix_kevent(s32 handle, OrbisKernelEvent* changelist, u64 ncha
                       magic_enum::enum_name(event.filter));
             continue;
         }
+    }
+
+    // psport: libkernel passes nevents to the console's kernel unchecked; EINVAL for a negative
+    // count is FreeBSD's answer, inferred since the console's kernel was not read.
+    if (nevents < 0) {
+        LOG_ERROR_COUNTED(Kernel_Event, "kevent: negative nevents {}, EINVAL", nevents);
+        *__Error() = POSIX_EINVAL;
+        return ORBIS_FAIL;
     }
 
     // Now we need to wait on the event list.
@@ -600,6 +615,12 @@ void ReportEqueueWaits(double frames) {
 int PS4_SYSV_ABI sceKernelWaitEqueue(OrbisKernelEqueue eq, OrbisKernelEvent* ev, int num, int* out,
                                      OrbisKernelUseconds* timo) {
     HLE_TRACE;
+    // psport: libkernel checks num before the queue and ev (sceKernelWaitEqueue, 0x1acf0).
+    if (num < 1) {
+        *out = 0;
+        return ORBIS_KERNEL_ERROR_EINVAL;
+    }
+
     if (!kqueues.contains(eq)) {
         return ORBIS_KERNEL_ERROR_EBADF;
     }
@@ -611,11 +632,6 @@ int PS4_SYSV_ABI sceKernelWaitEqueue(OrbisKernelEqueue eq, OrbisKernelEvent* ev,
 
     if (ev == nullptr) {
         return ORBIS_KERNEL_ERROR_EFAULT;
-    }
-
-    if (num < 1) {
-        *out = 0;
-        return ORBIS_KERNEL_ERROR_EINVAL;
     }
 
     const auto wait_start = std::chrono::steady_clock::now();
@@ -757,8 +773,9 @@ int PS4_SYSV_ABI sceKernelAddUserEventEdge(OrbisKernelEqueue eq, int id) {
     return kqueues[eq]->AddEvent(event) ? ORBIS_OK : ORBIS_KERNEL_ERROR_ENOMEM;
 }
 
+// psport: no null check, as libkernel's (0x1abf0): a null event faults reading 0x18 and the
+// fault handler stops the game with its frames, as the console kills it.
 void* PS4_SYSV_ABI sceKernelGetEventUserData(const OrbisKernelEvent* ev) {
-    ASSERT(ev);
     return ev->udata;
 }
 
