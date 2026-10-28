@@ -195,7 +195,7 @@ void DesignFilter(FilterParams* p_filter, u32 rate_hz) {
 
 bool ProcessFilter(const FilterParams& filter, u32 location, BiquadState* p_states, const Planes& planes,
                    u32 c_channels, u32 c_samples, bool is_first_grain) {
-    if (!filter.is_set || filter.location != location) {
+    if (filter.location != location) {
         return false;
     }
     for (u32 i_channel = 0; i_channel < c_channels; ++i_channel) {

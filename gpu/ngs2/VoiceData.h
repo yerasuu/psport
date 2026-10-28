@@ -25,6 +25,28 @@ enum GrainEvent : u32 {
 };
 
 constexpr u32 kResampleHistory = 32;
+// maxWaveformBlocks' upper bound for a sampler rack (spec 02 §4).
+constexpr u32 kMaxWaveformBlocks = 16;
+
+// The modules of a voice that have a parameter since its last setup (the firmware's control word
+// +0x50, spec 09 §10): every setup clears them but for the ones it sets itself. A module without a
+// parameter does not run, keeps its state and reads back zeros; each one starts from its reset state
+// on its own first grain with a parameter after PLAY.
+enum ModuleBit : u32 {
+    MODULE_ENVELOPE = 1u << 0,
+    MODULE_DISTORTION = 1u << 1,
+    MODULE_COMPRESSOR = 1u << 2,
+    MODULE_USER_FX = 1u << 3,
+    MODULE_METER = 1u << 4,
+    MODULE_LFE = 1u << 5,
+    MODULE_GAIN = 1u << 6,
+    MODULE_OUTPUT = 1u << 7,
+    MODULE_FIRST_FILTER = 1u << 16,
+};
+
+constexpr u32 FilterModule(u32 i_filter) {
+    return MODULE_FIRST_FILTER << i_filter;
+}
 
 struct SourceFormat {
     u32 waveform_type;
@@ -43,6 +65,7 @@ struct VoiceParams {
     u32 c_in_channels;
     u32 c_out_channels;
     bool is_setup;
+    u32 set_modules;
     SourceFormat format;
     float pitch_ratio;
     EnvelopeParams envelope;
@@ -63,9 +86,8 @@ struct MasteringMatrices {
     bool is_set[kMasteringMatrixTypes];
 };
 
-// A sampler voice's waveform block queue (spec 03 §5.1, 05 §3): the game appends under the voice
-// lock, the render reads the first c_committed entries (those the last flush let through) and drops
-// the ones it finishes.
+// A slot of a sampler voice's waveform block ring (spec 05 §3.1, 09 §6, §7). Slots stay in the ring
+// after the render is done with them: the queue is the c_queued slots before i_write.
 struct WaveformBlock {
     const u8* p_data;
     u64 user_data;
@@ -76,28 +98,42 @@ struct WaveformBlock {
     u32 num_repeats;
     bool is_continuation;
     bool is_marked;
-    bool is_notified;
 };
 
+// The game's side of the ring, under the voice lock (the module 0x70 block and the control word's
+// +0x48 to +0x4b): c_valid counts the slots written since the last reset, up to c_capacity, and only
+// a reset lowers it. c_queued drops by what the render took at each render's post.
 struct WaveformQueue {
-    WaveformBlock* p_blocks;
+    WaveformBlock* p_slots;
     u32 c_capacity;
-    u32 i_head;
-    u32 c_blocks;
-    u32 c_committed;
+    u32 i_write;
+    u32 c_queued;
+    u32 c_valid;
     u32 c_exit_requests;
     bool is_terminated;
-    bool is_terminated_committed;
     bool was_reset;
 };
 
-// The sampler source's progress through its queue and its resampler (spec 05 §1, §9).
+// The render's copy, which the flush refreshes whole (process state +0x1b to +0x1e).
+struct ActiveWaveformQueue {
+    WaveformBlock* p_slots;
+    u32 i_write;
+    u32 c_queued;
+    u32 c_popped;
+    u32 c_exit_requests;
+    bool is_terminated;
+};
+
+// The sampler source's progress through its queue and its resampler (0x1e6a0 state, spec 05 §1, §9,
+// 09 §7): bytes consumed from the oldest queued slot and how many of them a callback already handed
+// back, the sample position in the block's region, and the read position the voice state publishes.
 struct SourceState {
     u64 c_decoded_samples;
     u64 cb_decoded;
     u64 block_user_data;
     const u8* p_read;
     u32 cb_consumed;
+    u32 cb_notified;
     u32 i_sample;
     u32 c_exit_consumed;
     u32 c_repeats;
@@ -107,7 +143,6 @@ struct SourceState {
     u32 step;
     u32 fraction;
     u32 c_history;
-    bool has_block;
     bool is_end;
     bool is_starved;
     float history[kMaxChannels][kResampleHistory];

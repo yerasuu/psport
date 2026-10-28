@@ -60,6 +60,8 @@ void StartVoice(System* p_system, Voice* p_voice) {
     p_voice->flags = STATE_IN_USE;
     p_voice->grain_events = 0;
     p_voice->is_first_grain = true;
+    p_voice->first_grain_modules = ~0u;
+    p_voice->first_active_modules = 0;
     p_voice->is_in_cycle = false;
     p_voice->c_in_channels = p_voice->p_params->c_in_channels;
     p_voice->c_out_channels = p_voice->p_params->c_out_channels;
@@ -112,6 +114,11 @@ void FlushVoice(System* p_system, Voice* p_voice) {
     if (control & VOICE_PENDING_START) {
         StartVoice(p_system, p_voice);
         events |= GRAIN_PLAY;
+        // A KILL posted after the PLAY (a PLAY clears an earlier one) keeps the data locked, so that
+        // a waveform freed after that KILL is not read in the grain that starts and cuts the voice.
+        if (!(control & VOICE_PENDING_KILL)) {
+            UnlockVoiceData(p_voice);
+        }
     }
     constexpr std::pair<u32, u32> kEvents[] = {{VOICE_PENDING_STOP, GRAIN_STOP},
                                                {VOICE_PENDING_STOP_IMMEDIATE, GRAIN_STOP_IMMEDIATE},
@@ -125,14 +132,16 @@ void FlushVoice(System* p_system, Voice* p_voice) {
     }
     p_voice->grain_events |= events;
     p_voice->control.fetch_and(~u32(VOICE_PENDING_EVENTS | VOICE_PENDING_SETUP), std::memory_order_relaxed);
-    WaveformQueue& queue = p_voice->queue;
-    queue.c_committed = queue.c_blocks;
-    queue.is_terminated_committed = queue.is_terminated;
+    FlushWaveformQueue(p_voice);
     const Rack& rack = *p_voice->p_rack;
     *p_voice->p_active_params = *p_voice->p_params;
+    const u32 set_modules = p_voice->p_active_params->set_modules;
+    // A module set after PLAY starts from its reset state in its own first grain (spec 09 §10).
+    p_voice->first_active_modules |= p_voice->first_grain_modules & set_modules;
+    p_voice->first_grain_modules &= ~set_modules;
     std::copy_n(p_voice->p_filters, rack.limits.max_filters, p_voice->p_active_filters);
     for (u32 i_filter = 0; i_filter < rack.limits.max_filters; ++i_filter) {
-        if (p_voice->p_active_filters[i_filter].is_set) {
+        if (set_modules & FilterModule(i_filter)) {
             DesignFilter(&p_voice->p_active_filters[i_filter], p_system->sample_rate_hz);
         }
     }
@@ -225,7 +234,8 @@ void ReleaseChannelWorks(Voice* p_voice) {
     }
 }
 
-void QueueVoiceCallback(Voice* p_voice, u32 type, const WaveformBlock& block, u32 c_repeats) {
+void QueueVoiceCallback(Voice* p_voice, u32 type, const WaveformBlock& slot, u64 user_data, u32 cb_notified,
+                        u32 c_repeats) {
     // Flags bit 0 asks for block ends (type 1), bit 1 for loops (type 2).
     if (!(p_voice->active_callback_flags & type) || !p_voice->pfn_active_callback) {
         return;
@@ -243,11 +253,11 @@ void QueueVoiceCallback(Voice* p_voice, u32 type, const WaveformBlock& block, u3
     queued.info.voiceHandle = reinterpret_cast<OrbisNgs2Handle>(&p_voice->handle);
     queued.info.flag = type;
     auto& payload = queued.info.param.waveformBlock;
-    payload.userData = block.user_data;
-    payload.data = block.p_data + block.off_data;
-    payload.dataSize = block.cb_data;
+    payload.userData = user_data;
+    payload.data = slot.p_data + slot.off_data + cb_notified;
+    payload.dataSize = slot.cb_data - cb_notified;
     payload.repeatedCount = c_repeats;
-    payload.attributeFlags = block.is_marked ? 1 : 0;
+    payload.attributeFlags = slot.is_marked ? 1 : 0;
 }
 
 void FlushRack(System* p_system, Rack* p_rack, bool can_flush) {
@@ -348,6 +358,7 @@ void ProcessVoice(RenderContext& context, Voice* p_voice) {
     }
     EndEvents(p_voice, events, event_code);
     p_voice->is_first_grain = false;
+    p_voice->first_active_modules = 0;
     p_voice->are_params_changed = false;
 }
 
@@ -359,6 +370,7 @@ void PostRack(Rack* p_rack) {
             continue;
         }
         VoiceLock lock{p_voice};
+        PostWaveformQueue(p_voice);
         if (p_voice->flags == 0) {
             ReleaseChannelWorks(p_voice);
             for (u32 i_port = 0; i_port < p_rack->limits.max_ports; ++i_port) {

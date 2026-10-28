@@ -20,9 +20,10 @@ constexpr u32 kSamplerRackId = 0x1000;
 constexpr u32 kMasteringRackId = 0x3000;
 constexpr u32 kRackFlagCallbacks = 0x40000000;
 constexpr u32 kDefaultLfeCutoffHz = 120;
-// Voice callbacks a rack can queue per voice and render; the firmware sizes its queue from a rack
-// configuration byte not read yet (spec 08 §1.4), and drops what does not fit.
-constexpr u32 kCallbacksPerVoice = 16;
+// The callbacks a rack can queue per voice and render beyond its waveform blocks (0x65f0, spec 09
+// §8.1): (maxWaveformBlocks + 8) per voice for the sampler, 8 for the other racks. What does not fit
+// is dropped.
+constexpr u32 kExtraCallbacksPerVoice = 8;
 
 template <class T>
 T* AllocateArray(Arena* p_arena, std::size_t c_items) {
@@ -47,6 +48,7 @@ struct VoiceBlocks {
     float* p_input_ring;
     bool* p_input_started;
     WaveformBlock* p_blocks;
+    WaveformBlock* p_active_blocks;
     u8* p_state;
 };
 
@@ -81,6 +83,7 @@ VoiceBlocks AllocateVoiceBlocks(Arena* p_arena, const RackKind& kind, const Rack
     }
     if (kind.rack_id == kSamplerRackId) {
         blocks.p_blocks = AllocateArray<WaveformBlock>(p_arena, limits.max_waveform_blocks);
+        blocks.p_active_blocks = AllocateArray<WaveformBlock>(p_arena, limits.max_waveform_blocks);
     }
     if (!kind.is_custom) {
         blocks.p_state = AllocateArray<u8>(p_arena, limits.cb_voice_state);
@@ -118,8 +121,9 @@ void InitVoice(Voice* p_voice, const RackKind& kind, const RackLimits& limits, c
     p_voice->p_matrix_is_set = blocks.p_matrix_is_set;
     p_voice->p_input_ring = blocks.p_input_ring;
     p_voice->p_input_started = blocks.p_input_started;
-    p_voice->queue.p_blocks = blocks.p_blocks;
+    p_voice->queue.p_slots = blocks.p_blocks;
     p_voice->queue.c_capacity = blocks.p_blocks ? limits.max_waveform_blocks : 0;
+    p_voice->active_queue.p_slots = blocks.p_active_blocks;
     p_voice->p_state = blocks.p_state;
 }
 
@@ -136,7 +140,12 @@ Rack* LayOutRack(Arena* p_arena, const RackKind& kind, const RackLimits& limits)
     float* p_decode_scratch =
         kind.rack_id == kSamplerRackId ? AllocateArray<float>(p_arena, std::size_t(kMaxChannels) * c_decode_stride)
                                        : nullptr;
-    const u32 c_callbacks = (limits.flags & kRackFlagCallbacks) ? kCallbacksPerVoice * limits.max_voices : 0;
+    // The data lock bitmap at rack+0x130: two bits per sampler voice (spec 09 §6.2).
+    const std::size_t c_lock_words = kind.rack_id == kSamplerRackId ? (std::size_t(limits.max_voices) + 15) / 16 : 0;
+    auto* p_lock_words = AllocateArray<std::atomic<u32>>(p_arena, c_lock_words);
+    const u32 c_slots_per_voice = kind.rack_id == kSamplerRackId ? limits.max_waveform_blocks : 0;
+    const u32 c_callbacks =
+        (limits.flags & kRackFlagCallbacks) ? (c_slots_per_voice + kExtraCallbacksPerVoice) * limits.max_voices : 0;
     QueuedCallback* p_callbacks = AllocateArray<QueuedCallback>(p_arena, c_callbacks);
     if (!p_object) {
         for (u32 i_voice = 0; i_voice < limits.max_voices; ++i_voice) {
@@ -157,6 +166,9 @@ Rack* LayOutRack(Arena* p_arena, const RackKind& kind, const RackLimits& limits)
     p_rack->c_decode_stride = c_decode_stride;
     p_rack->p_callbacks = p_callbacks;
     p_rack->c_callback_capacity = c_callbacks;
+    for (std::size_t i_word = 0; i_word < c_lock_words; ++i_word) {
+        new (&p_lock_words[i_word]) std::atomic<u32>{0};
+    }
     InitHandle(&p_rack->handle, p_rack, &p_rack->refs, HANDLE_RACK, 0);
     for (u32 i_voice = 0; i_voice < limits.max_voices; ++i_voice) {
         const VoiceBlocks blocks = AllocateVoiceBlocks(p_arena, kind, limits, c_input_blocks);
@@ -169,6 +181,10 @@ Rack* LayOutRack(Arena* p_arena, const RackKind& kind, const RackLimits& limits)
         p_voice->p_ports = static_cast<VoicePort*>(p_ports) + std::size_t(i_voice) * limits.max_ports;
         InitHandle(&p_voice->handle, p_rack, &p_rack->refs, HANDLE_VOICE, i_voice);
         InitVoice(p_voice, kind, limits, blocks);
+        if (p_lock_words) {
+            p_voice->p_data_lock = &p_lock_words[i_voice / 16];
+            p_voice->data_lock_shift = 2 * (i_voice % 16);
+        }
     }
     return p_rack;
 }

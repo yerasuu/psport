@@ -20,7 +20,8 @@ enum EnvelopeCurve : u32 {
 };
 
 constexpr u32 kCurveSteps = 256;
-constexpr float kCurveScale = 32768.0f;
+// 2^-15 (0x34200): the weights carry the tables' Q15 scale.
+constexpr float kWeightScale = 1.0f / 32768.0f;
 
 // Firmware 11.00's curve tables (0x34640, 0x34850, 0x34a60, 0x34c70, 0x34220 and 0x34430; spec
 // 06-tablas §A): Q15 values at 257 points of the segment, the last the segment's end.
@@ -166,14 +167,6 @@ const s16* CurveTableOf(u32 curve, float delta) {
     }
 }
 
-float CurveAt(const s16* p_table, u32 pos, u32 duration) {
-    const float x = float(pos) * float(kCurveSteps) / float(duration);
-    const u32 i_step = std::min(u32(x), kCurveSteps - 1);
-    const float fraction = x - float(i_step);
-    const float value = float(p_table[i_step]) + fraction * float(p_table[i_step + 1] - p_table[i_step]);
-    return value / kCurveScale;
-}
-
 void ScaleChannels(const Planes& planes, u32 c_channels, u32 i_first, u32 c_samples, float gain) {
     for (u32 i_channel = 0; i_channel < c_channels; ++i_channel) {
         float* p_samples = planes.p_channel[i_channel] + i_first;
@@ -189,23 +182,35 @@ void RampChannels(const Planes& planes, u32 c_channels, u32 i_first, u32 c_sampl
     }
 }
 
-void CurveChannels(const Planes& planes, u32 c_channels, u32 i_first, u32 c_samples, const s16* p_table,
-                   const EnvelopeState& state, float delta, u32 duration) {
+// Curves 1 to 5 as 0x1b2f0 runs them (spec 09 §9): the table position advances by 256 / duration per
+// sample in float, and both table values are weighted by 2^-15 before they are summed. Returns the
+// gain of the last sample.
+float CurveChannels(const Planes& planes, u32 c_channels, u32 i_first, u32 c_samples, const s16* p_table,
+                    const EnvelopeState& state, float delta, u32 duration) {
+    const float step = float(kCurveSteps) / float(duration);
+    float position = step * float(state.pos);
+    float gain = state.current;
     for (u32 i = 0; i < c_samples; ++i) {
-        const float gain = state.start + delta * CurveAt(p_table, state.pos + i, duration);
+        const s64 i_step = s64(position);
+        const float weight_next = (position - float(i_step)) * kWeightScale;
+        const float weight = kWeightScale - weight_next;
+        // The float position may round up to 256 at a segment's end, where the firmware reads the word
+        // after the table; the last table value is read instead.
+        const s16 value = p_table[std::min<s64>(i_step, kCurveSteps)];
+        const s16 value_next = p_table[std::min<s64>(i_step + 1, kCurveSteps)];
+        gain = state.start + delta * (weight * float(value) + weight_next * float(value_next));
         for (u32 i_channel = 0; i_channel < c_channels; ++i_channel) {
             planes.p_channel[i_channel][i_first + i] *= gain;
         }
+        position += step;
     }
+    return gain;
 }
 
 } // namespace
 
 float ProcessEnvelope(const EnvelopeParams& params, EnvelopeState* p_state, const Planes& planes, u32 c_channels,
                       u32 c_samples, bool is_first_grain, u32* p_flags, u32* p_event_code) {
-    if (!params.is_set) {
-        return 1.0f;
-    }
     EnvelopeState& state = *p_state;
     if (is_first_grain) {
         const float level = params.c_forward == 0 ? 1.0f : 0.0f;
@@ -241,16 +246,18 @@ float ProcessEnvelope(const EnvelopeParams& params, EnvelopeState* p_state, cons
         if (state.pos < point.duration) {
             const u32 c_segment = std::min(point.duration - state.pos, c_rest);
             const float delta = point.height - state.start;
-            if (delta == 0.0f) {
-                ScaleChannels(planes, c_channels, i_sample, c_segment, state.current);
-            } else if (point.curve == CURVE_LINEAR) {
+            if (point.curve == CURVE_LINEAR) {
                 const float end = state.current + delta * float(c_segment) / float(point.duration);
                 RampChannels(planes, c_channels, i_sample, c_segment, state.current, end);
                 state.current = end;
+            } else if (delta == 0.0f) {
+                // The firmware scales the rest of the grain, not the segment, so the samples after it
+                // take this level as well as their own segments' (spec 09 §9).
+                ScaleChannels(planes, c_channels, i_sample, c_rest, state.current);
             } else {
                 const s16* p_table = CurveTableOf(point.curve, delta);
-                CurveChannels(planes, c_channels, i_sample, c_segment, p_table, state, delta, point.duration);
-                state.current = state.start + delta * CurveAt(p_table, state.pos + c_segment, point.duration);
+                state.current =
+                    CurveChannels(planes, c_channels, i_sample, c_segment, p_table, state, delta, point.duration);
             }
             state.pos += c_segment;
             i_sample += c_segment;

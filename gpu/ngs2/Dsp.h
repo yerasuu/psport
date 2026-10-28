@@ -61,7 +61,6 @@ struct EnvelopeParams {
     u32 c_forward;
     u32 c_release;
     OrbisNgs2EnvelopePoint points[kMaxEnvelopePoints];
-    bool is_set;
 };
 
 struct EnvelopeState {
@@ -80,11 +79,19 @@ struct DistortionParams {
     float gate;
     float wet;
     float dry;
-    bool is_set;
 };
 
 // Module 0x12: sub 0 sets all of it (the submixer's compressor, the mastering setup), sub 1 only
-// enable and threshold (the mastering limiter 0x30000003, kb #395).
+// enable and threshold (the mastering limiter 0x30000003, kb #395). Flag bits (spec 09 §3.2): 0 off,
+// 1 RMS detector instead of peak, 2 detector on the submixer's second input, 3 LFE (channel 3) kept
+// out of the channel link.
+enum CompressorFlag : u32 {
+    COMPRESSOR_DISABLED = 0x1,
+    COMPRESSOR_RMS = 0x2,
+    COMPRESSOR_SIDECHAIN = 0x4,
+    COMPRESSOR_LINK_WITHOUT_LFE = 0x8,
+};
+
 struct CompressorParams {
     u32 flags;
     float threshold;
@@ -93,11 +100,12 @@ struct CompressorParams {
     float attack_s;
     float release_s;
     float level;
-    bool is_set;
 };
 
+// peak_level and peak_gain are the loudest channel's detector level and gain at the end of the
+// grain's last block of up to 32 frames.
 struct CompressorState {
-    float gain;
+    float gain[kMaxChannels];
     float peak_level;
     float peak_gain;
 };
@@ -110,7 +118,6 @@ struct FilterParams {
     u32 bypass_mask;
     float f[5];
     float coefficients[5];
-    bool is_set;
 };
 
 struct BiquadState {
@@ -132,7 +139,6 @@ struct LfeState {
 struct UserFxParams {
     OrbisNgs2UserFxProcessHandler pfn_handler;
     uintptr_t user_data[3];
-    bool is_set;
 };
 
 // Module 0x18: a ring of c_blocks grains, each kPeakValues floats: one level per channel and the
@@ -144,7 +150,8 @@ struct PeakMeterState {
 };
 
 void DesignFilter(FilterParams* p_filter, u32 rate_hz);
-// Filters the channels when the filter sits at location; true when it did.
+// Filters the channels when the filter sits at location; true when it did. is_first_grain is the
+// filter's own first grain with a parameter (spec 09 §10), as for the other modules.
 bool ProcessFilter(const FilterParams& filter, u32 location, BiquadState* p_states, const Planes& planes,
                    u32 c_channels, u32 c_samples, bool is_first_grain);
 void ProcessLfe(const LfeParams& lfe, LfeState* p_state, float* p_lfe, u32 c_samples, u32 rate_hz);
@@ -154,8 +161,9 @@ void ProcessLfe(const LfeParams& lfe, LfeState* p_state, float* p_lfe, u32 c_sam
 float ProcessEnvelope(const EnvelopeParams& params, EnvelopeState* p_state, const Planes& planes, u32 c_channels,
                       u32 c_samples, bool is_first_grain, u32* p_flags, u32* p_event_code);
 void ProcessDistortion(const DistortionParams& params, const Planes& planes, u32 c_channels, u32 c_samples);
+// detector is what the levels are measured on: planes itself, or the submixer's second input.
 void ProcessCompressor(const CompressorParams& params, CompressorState* p_state, const Planes& planes,
-                       u32 c_channels, u32 c_samples, u32 rate_hz, bool is_first_grain);
+                       const Planes& detector, u32 c_channels, u32 c_samples, u32 rate_hz, bool is_first_grain);
 // p_out_peak gets kPeakValues floats: the loudest channel, then each channel.
 void ProcessPeakMeter(u32 mode, PeakMeterState* p_state, const Planes& planes, u32 c_channels, u32 c_samples,
                       bool is_first_grain, float* p_out_peak);
@@ -164,15 +172,15 @@ void ProcessPeakMeter(u32 mode, PeakMeterState* p_state, const Planes& planes, u
 void ProcessChannelMatrix(const float* p_previous, const float* p_current, const Planes& in, u32 c_in,
                           const Planes& out, u32 c_out, u32 c_samples);
 
-static_assert(std::is_trivially_copyable_v<EnvelopeParams> && sizeof(EnvelopeParams) == 0xcc);
+static_assert(std::is_trivially_copyable_v<EnvelopeParams> && sizeof(EnvelopeParams) == 0xc8);
 static_assert(std::is_trivially_copyable_v<EnvelopeState> && sizeof(EnvelopeState) == 0x14);
-static_assert(std::is_trivially_copyable_v<DistortionParams> && sizeof(DistortionParams) == 0x20);
-static_assert(std::is_trivially_copyable_v<CompressorParams> && sizeof(CompressorParams) == 0x20);
-static_assert(std::is_trivially_copyable_v<CompressorState> && sizeof(CompressorState) == 0xc);
-static_assert(std::is_trivially_copyable_v<FilterParams> && sizeof(FilterParams) == 0x38);
+static_assert(std::is_trivially_copyable_v<DistortionParams> && sizeof(DistortionParams) == 0x1c);
+static_assert(std::is_trivially_copyable_v<CompressorParams> && sizeof(CompressorParams) == 0x1c);
+static_assert(std::is_trivially_copyable_v<CompressorState> && sizeof(CompressorState) == 0x28);
+static_assert(std::is_trivially_copyable_v<FilterParams> && sizeof(FilterParams) == 0x34);
 static_assert(std::is_trivially_copyable_v<BiquadState> && sizeof(BiquadState) == 0x10);
 static_assert(std::is_trivially_copyable_v<LfeState> && sizeof(LfeState) == 0x20);
-static_assert(std::is_trivially_copyable_v<UserFxParams> && sizeof(UserFxParams) == 0x28);
+static_assert(std::is_trivially_copyable_v<UserFxParams> && sizeof(UserFxParams) == 0x20);
 static_assert(std::is_trivially_copyable_v<PeakMeterState> && sizeof(PeakMeterState) == 0x10);
 
 } // namespace Libraries::Ngs2

@@ -32,9 +32,8 @@ constexpr u32 kClassChannels[] = {1, 2, 6, 8};
 constexpr u32 kChannelClasses = 4;
 constexpr u32 kLfeCutoffsHz[] = {80, 120, 240};
 constexpr u32 kDefaultLfeCutoffHz = 120;
-constexpr u32 kLimiterFlagDisabled = 0x1;
-// The LFE low-pass only runs on voices with a dedicated LFE channel.
-constexpr u32 kMinLfeChannels = 5;
+// The LFE low-pass runs on voices whose setup has more than 4 channels, whatever the buffer has.
+constexpr u32 kMinLfeInputChannels = 5;
 
 template <class Param>
 Param* ParamOf(const OrbisNgs2VoiceParamHeader* p_header) {
@@ -64,16 +63,19 @@ u32 ParamSize(u32 id) {
     }
 }
 
-// What the setup puts back (spec 03 §5.4, kb #395, #790): default matrices, the LFE low-pass at
-// 120 Hz, the limiter on at threshold 1.0, and render buffer 0.
+// What the setup puts back (0x13930; spec 03 §5.4, 09 §3.1, §4.1): default matrices, the LFE
+// low-pass at 120 Hz, the limiter on at threshold 1.0 with slope 0, no knee, attack 1 ms, release
+// 10 ms and unit output (kb #395 and #790 had knee and attack shifted by one field), and render
+// buffer 0. Gain and meters wait for their own parameters.
 void Setup(Voice* p_voice, u32 c_channels) {
     VoiceParams& params = *p_voice->p_params;
     params.c_in_channels = c_channels;
     params.c_out_channels = p_voice->p_rack->limits.max_channels;
     params.is_setup = true;
+    params.set_modules = MODULE_LFE | MODULE_COMPRESSOR | MODULE_OUTPUT;
     ResetMasteringMatrices(p_voice->p_mastering_matrices);
     params.lfe = {1, kDefaultLfeCutoffHz};
-    params.compressor = {0, 1.0f, 0.0f, 0.001f, 0.01f, 0.01f, 1.0f, true};
+    params.compressor = {0, 1.0f, 0.0f, 0.0f, 0.001f, 0.01f, 1.0f};
     params.i_output_buffer = 0;
     p_voice->control.fetch_or(VOICE_PENDING_SETUP, std::memory_order_relaxed);
 }
@@ -109,6 +111,10 @@ s32 SetMatrix(OrbisNgs2Handle h_voice, Voice* p_voice, const OrbisNgs2MasteringV
     return ORBIS_OK;
 }
 
+// The firmware writes the type's c_in * c_out levels whatever numLevels the game gave, an unset type
+// reading as the identity (spec 09 §4.1, §13). It neither checks the type nor the array: a type past
+// 15 keeps 0x804A0700 and a NULL array only gets the count, so that neither reads or writes outside
+// the voice's matrices.
 s32 ReadMatrix(OrbisNgs2Handle h_voice, const Voice& voice, OrbisNgs2MasteringVoiceMatrixParam* p_param) {
     if (p_param->type >= kMasteringMatrixTypes) {
         return Fail(h_voice, ORBIS_NGS2_ERROR_INVALID_MATRIX_INDEX, "Invalid mastering matrix type ({})",
@@ -116,13 +122,15 @@ s32 ReadMatrix(OrbisNgs2Handle h_voice, const Voice& voice, OrbisNgs2MasteringVo
     }
     const u32 c_in = kClassChannels[p_param->type / kChannelClasses];
     const u32 c_out = kClassChannels[p_param->type % kChannelClasses];
-    const float* p_levels = voice.p_mastering_matrices->levels[p_param->type];
-    // The game's numLevels bounds what lands in its array; the answer is the type's full count.
+    const MasteringMatrices& matrices = *voice.p_mastering_matrices;
+    const bool is_set = matrices.is_set[p_param->type];
     if (p_param->aLevel) {
         auto* p_out = const_cast<float*>(p_param->aLevel);
-        const u32 c_room = std::min(p_param->numLevels, c_in * c_out);
-        for (u32 i_level = 0; i_level < c_room; ++i_level) {
-            p_out[i_level] = p_levels[(i_level / c_out) * kMaxChannels + i_level % c_out];
+        for (u32 i_in = 0; i_in < c_in; ++i_in) {
+            for (u32 i_out = 0; i_out < c_out; ++i_out) {
+                const float identity = i_in == i_out ? 1.0f : 0.0f;
+                *p_out++ = is_set ? matrices.levels[p_param->type][i_in * kMaxChannels + i_out] : identity;
+            }
         }
     }
     p_param->numLevels = c_in * c_out;
@@ -130,7 +138,7 @@ s32 ReadMatrix(OrbisNgs2Handle h_voice, const Voice& voice, OrbisNgs2MasteringVo
 }
 
 bool IsMixerChannelCount(u32 c_channels) {
-    return ChannelClass(c_channels) >= 0;
+    return c_channels == 1 || c_channels == 2 || c_channels == 6 || c_channels == 8;
 }
 
 } // namespace
@@ -161,29 +169,32 @@ s32 ControlMastering(OrbisNgs2Handle h_voice, Voice* p_voice, const OrbisNgs2Voi
             return Fail(h_voice, ORBIS_NGS2_ERROR_INVALID_LFE_FC, "Invalid LFE cut off frequency ({})", p_param->fc);
         }
         params.lfe = {p_param->enableFlag, p_param->fc};
+        params.set_modules |= MODULE_LFE;
         return ORBIS_OK;
     }
     case MASTERING_LIMITER: {
         // Sub 1 of module 0x12 writes into the block sub 0 fills (kb #395).
         const auto* p_param = ParamOf<OrbisNgs2MasteringVoiceLimiterParam>(p_header);
         CompressorParams& limiter = params.compressor;
-        limiter.flags = p_param->enableFlag ? limiter.flags & ~kLimiterFlagDisabled
-                                            : limiter.flags | kLimiterFlagDisabled;
+        limiter.flags = p_param->enableFlag ? limiter.flags & ~COMPRESSOR_DISABLED
+                                            : limiter.flags | COMPRESSOR_DISABLED;
         limiter.threshold = std::clamp(p_param->threshold, 0.0f, 4.0f);
-        limiter.is_set = true;
+        params.set_modules |= MODULE_COMPRESSOR;
         return ORBIS_OK;
     }
     case MASTERING_GAIN: {
         const auto* p_param = ParamOf<OrbisNgs2MasteringVoiceGainParam>(p_header);
         params.gain_fbw = std::clamp(p_param->fbwLevel, 0.0f, 4.0f);
         params.gain_lfe = std::clamp(p_param->lfeLevel, 0.0f, 4.0f);
+        params.set_modules |= MODULE_GAIN;
         return ORBIS_OK;
     }
     case MASTERING_OUTPUT:
         params.i_output_buffer = ParamOf<OrbisNgs2MasteringVoiceOutputParam>(p_header)->outputId;
+        params.set_modules |= MODULE_OUTPUT;
         return ORBIS_OK;
     case MASTERING_PEAK_METER:
-        return SetPeakMeter(h_voice, ParamOf<OrbisNgs2SamplerVoicePeakMeterParam>(p_header), &params.meter_mode);
+        return SetPeakMeter(h_voice, ParamOf<OrbisNgs2SamplerVoicePeakMeterParam>(p_header), &params);
     case MASTERING_READ_SETUP:
         ParamOf<OrbisNgs2MasteringVoiceSetupParam>(p_header)->numInputChannels = params.c_in_channels;
         return ORBIS_OK;
@@ -191,27 +202,31 @@ s32 ControlMastering(OrbisNgs2Handle h_voice, Voice* p_voice, const OrbisNgs2Voi
         return ReadMatrix(h_voice, *p_voice, ParamOf<OrbisNgs2MasteringVoiceMatrixParam>(p_header));
     case MASTERING_READ_LFE: {
         auto* p_param = ParamOf<OrbisNgs2MasteringVoiceLfeParam>(p_header);
-        p_param->enableFlag = params.lfe.is_enabled;
-        p_param->fc = params.lfe.cutoff_hz;
+        const bool is_set = params.set_modules & MODULE_LFE;
+        p_param->enableFlag = is_set ? params.lfe.is_enabled : 0;
+        p_param->fc = is_set ? params.lfe.cutoff_hz : 0;
         return ORBIS_OK;
     }
     case MASTERING_READ_LIMITER: {
         auto* p_param = ParamOf<OrbisNgs2MasteringVoiceLimiterParam>(p_header);
-        p_param->enableFlag = params.compressor.is_set && !(params.compressor.flags & kLimiterFlagDisabled);
-        p_param->threshold = params.compressor.threshold;
+        const bool is_set = params.set_modules & MODULE_COMPRESSOR;
+        p_param->enableFlag = is_set && !(params.compressor.flags & COMPRESSOR_DISABLED);
+        p_param->threshold = is_set ? params.compressor.threshold : 0.0f;
         return ORBIS_OK;
     }
     case MASTERING_READ_GAIN: {
         auto* p_param = ParamOf<OrbisNgs2MasteringVoiceGainParam>(p_header);
-        p_param->fbwLevel = params.gain_fbw;
-        p_param->lfeLevel = params.gain_lfe;
+        const bool is_set = params.set_modules & MODULE_GAIN;
+        p_param->fbwLevel = is_set ? params.gain_fbw : 0.0f;
+        p_param->lfeLevel = is_set ? params.gain_lfe : 0.0f;
         return ORBIS_OK;
     }
     case MASTERING_READ_OUTPUT:
-        ParamOf<OrbisNgs2MasteringVoiceOutputParam>(p_header)->outputId = params.i_output_buffer;
+        ParamOf<OrbisNgs2MasteringVoiceOutputParam>(p_header)->outputId =
+            (params.set_modules & MODULE_OUTPUT) ? params.i_output_buffer : 0;
         return ORBIS_OK;
     case MASTERING_READ_PEAK_METER:
-        ParamOf<OrbisNgs2MasteringVoicePeakMeterParam>(p_header)->enableFlag = params.meter_mode;
+        ParamOf<OrbisNgs2MasteringVoicePeakMeterParam>(p_header)->enableFlag = ReadPeakMeter(params);
         return ORBIS_OK;
     default:
         return InvalidControlId(h_voice, p_header);
@@ -230,18 +245,24 @@ void ProcessMasteringVoice(RenderContext& context, Voice* p_voice, u32* p_event_
     for (u32 i_channel = 0; i_channel < c_in; ++i_channel) {
         std::memcpy(planes.p_channel[i_channel], input.p_channel[i_channel], c_samples * sizeof(float));
     }
-    if (!is_paused) {
-        ProcessPeakMeter(params.meter_mode, &p_voice->meters[0], planes, c_in, c_samples, p_voice->is_first_grain,
+    const u32 set_modules = params.set_modules;
+    const u32 first_modules = p_voice->first_active_modules;
+    const bool has_meters = set_modules & MODULE_METER;
+    if (!has_meters) {
+        std::fill_n(dsp.peaks[0], kPeakValues, 0.0f);
+        std::fill_n(dsp.peaks[1], kPeakValues, 0.0f);
+    } else if (!is_paused) {
+        ProcessPeakMeter(params.meter_mode, &p_voice->meters[0], planes, c_in, c_samples, first_modules & MODULE_METER,
                          dsp.peaks[0]);
     }
+    // Without a buffer to write to, the output keeps the voice's own channels (0x14280, spec 09 §4.2).
     const u32 i_buffer = params.i_output_buffer;
-    const u32 c_out = i_buffer < context.c_buffers ? context.p_buffers[i_buffer].numChannels : p_voice->c_out_channels;
-    const s32 in_class = ChannelClass(c_in);
-    const s32 out_class = ChannelClass(c_out);
+    const bool has_buffer = (set_modules & MODULE_OUTPUT) && i_buffer < context.c_buffers;
+    const u32 c_out = has_buffer ? context.p_buffers[i_buffer].numChannels : c_in;
     const Planes mixed = WorkPlanes(context, WORK_MATRIX);
     const MasteringMatrices& matrices = *p_voice->p_active_mastering_matrices;
-    const u32 i_type = in_class >= 0 && out_class >= 0 ? u32(in_class) * kChannelClasses + u32(out_class) : 0;
-    if (in_class >= 0 && out_class >= 0 && matrices.is_set[i_type]) {
+    const u32 i_type = ChannelClass(c_in) * kChannelClasses + ChannelClass(c_out);
+    if (matrices.is_set[i_type]) {
         float* p_previous = p_voice->p_previous_mastering_matrices->levels[i_type];
         if (p_voice->is_first_grain) {
             std::copy_n(matrices.levels[i_type], kMatrixCells, p_previous);
@@ -257,19 +278,23 @@ void ProcessMasteringVoice(RenderContext& context, Voice* p_voice, u32* p_event_
             }
         }
     }
-    if (c_out >= kMinLfeChannels) {
+    if ((set_modules & MODULE_LFE) && c_in >= kMinLfeInputChannels) {
         ProcessLfe(params.lfe, &dsp.lfe, mixed.p_channel[kLfeChannel], c_samples, context.sample_rate_hz);
     }
-    ProcessCompressor(params.compressor, &dsp.compressor, mixed, c_out, c_samples, context.sample_rate_hz,
-                      p_voice->is_first_grain);
-    for (u32 i_channel = 0; i_channel < c_out; ++i_channel) {
-        const float gain = i_channel == kLfeChannel ? params.gain_lfe : params.gain_fbw;
-        const float gain_start = p_voice->is_first_grain ? gain : dsp.gains[i_channel];
-        RampWrite(mixed.p_channel[i_channel], mixed.p_channel[i_channel], c_samples, gain_start, gain);
-        dsp.gains[i_channel] = gain;
+    if (set_modules & MODULE_COMPRESSOR) {
+        ProcessCompressor(params.compressor, &dsp.compressor, mixed, mixed, c_out, c_samples, context.sample_rate_hz,
+                          first_modules & MODULE_COMPRESSOR);
     }
-    if (!is_paused) {
-        ProcessPeakMeter(params.meter_mode, &p_voice->meters[1], mixed, c_out, c_samples, p_voice->is_first_grain,
+    if (set_modules & MODULE_GAIN) {
+        for (u32 i_channel = 0; i_channel < c_out; ++i_channel) {
+            const float gain = i_channel == kLfeChannel ? params.gain_lfe : params.gain_fbw;
+            const float gain_start = (first_modules & MODULE_GAIN) ? gain : dsp.gains[i_channel];
+            RampWrite(mixed.p_channel[i_channel], mixed.p_channel[i_channel], c_samples, gain_start, gain);
+            dsp.gains[i_channel] = gain;
+        }
+    }
+    if (has_meters && !is_paused) {
+        ProcessPeakMeter(params.meter_mode, &p_voice->meters[1], mixed, c_out, c_samples, first_modules & MODULE_METER,
                          dsp.peaks[1]);
     }
     ApplyEventCode(mixed, c_out, c_samples, *p_event_code);

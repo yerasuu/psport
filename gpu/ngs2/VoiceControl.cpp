@@ -170,8 +170,12 @@ s32 ReserveChannelWorks(OrbisNgs2Handle h_voice, Voice* p_voice) {
 }
 
 // Events wait in the control word for the render's flush (spec 03 §1.3); STOP to RESUME only count on
-// a voice in use and are dropped without error otherwise.
+// a voice in use and are dropped without error otherwise. KILL locks the voice's data before it
+// returns, in use or not, because the game may free the waveform right after it.
 s32 PostEvent(OrbisNgs2Handle h_voice, Voice* p_voice, u32 event) {
+    if (event == EVENT_KILL) {
+        LockVoiceData(p_voice);
+    }
     u32 control = p_voice->control.load(std::memory_order_relaxed);
     switch (event) {
     case EVENT_PLAY: {
@@ -315,12 +319,11 @@ s32 ApplyParam(OrbisNgs2Handle h_voice, Voice* p_voice, const OrbisNgs2VoicePara
         return PostEvent(h_voice, p_voice, ParamOf<OrbisNgs2VoiceEventParam>(p_header)->eventId);
     case PARAM_CALLBACK:
         return SetCallback(h_voice, p_voice, ParamOf<OrbisNgs2VoiceCallbackParam>(p_header));
-    default: {
-        // 0xc001 copies a module's own parameter block, whose layouts are the firmware's internal ones.
-        static std::uint64_t s_c_uses;
-        NoteUnimplemented(&s_c_uses, "sceNgs2VoiceControl: module parameter read 0xc001 (rea: module blocks)");
-        return Fail(h_voice, ORBIS_NGS2_ERROR_FAIL, "Voice control ID ({:#x}) not implemented yet", p_header->id);
-    }
+    case PARAM_MODULE_READ:
+        ReadModuleBlock(*p_voice, const_cast<OrbisNgs2VoiceParamHeader*>(p_header));
+        return ORBIS_OK;
+    default:
+        return InvalidControlId(h_voice, p_header);
     }
 }
 

@@ -48,7 +48,7 @@ void RampAdd(float* p_out, const float* p_in, u32 c_samples, float gain_start, f
 }
 
 void ProcessDistortion(const DistortionParams& params, const Planes& planes, u32 c_channels, u32 c_samples) {
-    if (!params.is_set || (params.flags & 1)) {
+    if (params.flags & 1) {
         return;
     }
     for (u32 i_channel = 0; i_channel < c_channels; ++i_channel) {

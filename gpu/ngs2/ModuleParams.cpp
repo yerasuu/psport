@@ -25,8 +25,7 @@ s32 InvalidControlId(OrbisNgs2Handle h_voice, const OrbisNgs2VoiceParamHeader* p
                 p_param->id);
 }
 
-s32 SetEnvelope(OrbisNgs2Handle h_voice, const Voice& voice, const OrbisNgs2SamplerVoiceEnvelopeParam* p_param,
-                EnvelopeParams* p_out) {
+s32 SetEnvelope(OrbisNgs2Handle h_voice, const Voice& voice, const OrbisNgs2SamplerVoiceEnvelopeParam* p_param) {
     const u64 c_points = u64(p_param->numForwardPoints) + p_param->numReleasePoints;
     if (c_points > 0 && !p_param->aPoint) {
         return Fail(h_voice, ORBIS_NGS2_ERROR_INVALID_ENVELOPE_POINT_ADDRESS, "Invalid envelope point address ({})",
@@ -49,12 +48,19 @@ s32 SetEnvelope(OrbisNgs2Handle h_voice, const Voice& voice, const OrbisNgs2Samp
         const OrbisNgs2EnvelopePoint& point = p_param->aPoint[i_point];
         envelope.points[i_point] = {point.curve, point.duration, std::clamp(point.height, 0.0f, 1.0f)};
     }
-    envelope.is_set = true;
-    *p_out = envelope;
+    voice.p_params->envelope = envelope;
+    voice.p_params->set_modules |= MODULE_ENVELOPE;
     return ORBIS_OK;
 }
 
-void ReadEnvelope(const EnvelopeParams& envelope, OrbisNgs2SamplerVoiceEnvelopeParam* p_param) {
+// Without a parameter the counts read 0 and the game's point array is left alone (spec 09 §13).
+void ReadEnvelope(const VoiceParams& params, OrbisNgs2SamplerVoiceEnvelopeParam* p_param) {
+    if (!(params.set_modules & MODULE_ENVELOPE)) {
+        p_param->numForwardPoints = 0;
+        p_param->numReleasePoints = 0;
+        return;
+    }
+    const EnvelopeParams& envelope = params.envelope;
     p_param->numForwardPoints = envelope.c_forward;
     p_param->numReleasePoints = envelope.c_release;
     if (p_param->aPoint) {
@@ -63,18 +69,23 @@ void ReadEnvelope(const EnvelopeParams& envelope, OrbisNgs2SamplerVoiceEnvelopeP
     }
 }
 
-void SetDistortion(const OrbisNgs2SamplerVoiceDistortionParam* p_param, DistortionParams* p_out) {
-    *p_out = {p_param->flags,
-              std::clamp(p_param->a, 0.0f, 10.0f),
-              std::clamp(p_param->b, 0.0f, 10.0f),
-              std::clamp(p_param->clip, 0.0f, 1.0f),
-              std::clamp(p_param->gate, 0.0f, 1.0f),
-              std::clamp(p_param->wetLevel, 0.0f, 32.0f),
-              std::clamp(p_param->dryLevel, 0.0f, 32.0f),
-              true};
+void SetDistortion(const OrbisNgs2SamplerVoiceDistortionParam* p_param, VoiceParams* p_params) {
+    p_params->distortion = {p_param->flags,
+                            std::clamp(p_param->a, 0.0f, 10.0f),
+                            std::clamp(p_param->b, 0.0f, 10.0f),
+                            std::clamp(p_param->clip, 0.0f, 1.0f),
+                            std::clamp(p_param->gate, 0.0f, 1.0f),
+                            std::clamp(p_param->wetLevel, 0.0f, 32.0f),
+                            std::clamp(p_param->dryLevel, 0.0f, 32.0f)};
+    p_params->set_modules |= MODULE_DISTORTION;
 }
 
-void ReadDistortion(const DistortionParams& distortion, OrbisNgs2SamplerVoiceDistortionParam* p_param) {
+void ReadDistortion(const VoiceParams& params, OrbisNgs2SamplerVoiceDistortionParam* p_param) {
+    if (!(params.set_modules & MODULE_DISTORTION)) {
+        p_param->reserved = 0;
+    }
+    const DistortionParams distortion =
+        (params.set_modules & MODULE_DISTORTION) ? params.distortion : DistortionParams{};
     p_param->flags = distortion.flags;
     p_param->a = distortion.a;
     p_param->b = distortion.b;
@@ -84,24 +95,31 @@ void ReadDistortion(const DistortionParams& distortion, OrbisNgs2SamplerVoiceDis
     p_param->dryLevel = distortion.dry;
 }
 
-void SetUserFx(const OrbisNgs2SamplerVoiceUserFxParam* p_param, UserFxParams* p_out) {
-    *p_out = {p_param->handler, {p_param->userData0, p_param->userData1, p_param->userData2}, true};
+void SetUserFx(const OrbisNgs2SamplerVoiceUserFxParam* p_param, VoiceParams* p_params) {
+    p_params->user_fx = {p_param->handler, {p_param->userData0, p_param->userData1, p_param->userData2}};
+    p_params->set_modules |= MODULE_USER_FX;
 }
 
-void ReadUserFx(const UserFxParams& user_fx, OrbisNgs2SamplerVoiceUserFxParam* p_param) {
+void ReadUserFx(const VoiceParams& params, OrbisNgs2SamplerVoiceUserFxParam* p_param) {
+    const UserFxParams user_fx = (params.set_modules & MODULE_USER_FX) ? params.user_fx : UserFxParams{};
     p_param->handler = user_fx.pfn_handler;
     p_param->userData0 = user_fx.user_data[0];
     p_param->userData1 = user_fx.user_data[1];
     p_param->userData2 = user_fx.user_data[2];
 }
 
-s32 SetPeakMeter(OrbisNgs2Handle h_voice, const OrbisNgs2SamplerVoicePeakMeterParam* p_param, u32* p_out_mode) {
+s32 SetPeakMeter(OrbisNgs2Handle h_voice, const OrbisNgs2SamplerVoicePeakMeterParam* p_param, VoiceParams* p_params) {
     if (p_param->enableFlag > kMaxPeakMeterMode) {
         return Fail(h_voice, ORBIS_NGS2_ERROR_INVALID_PEAKMETER_FLAG, "Invalid peak meter mode ({})",
                     p_param->enableFlag);
     }
-    *p_out_mode = p_param->enableFlag;
+    p_params->meter_mode = p_param->enableFlag;
+    p_params->set_modules |= MODULE_METER;
     return ORBIS_OK;
+}
+
+u32 ReadPeakMeter(const VoiceParams& params) {
+    return (params.set_modules & MODULE_METER) ? params.meter_mode : 0;
 }
 
 s32 SetFilter(OrbisNgs2Handle h_voice, const Voice& voice, const OrbisNgs2SamplerVoiceFilterParam* p_param) {
@@ -117,21 +135,48 @@ s32 SetFilter(OrbisNgs2Handle h_voice, const Voice& voice, const OrbisNgs2Sample
                                        p_param->type,
                                        p_param->channelMask,
                                        {direct.i0, direct.i1, direct.i2, direct.o1, direct.o2},
-                                       {},
-                                       true};
+                                       {}};
+    voice.p_params->set_modules |= FilterModule(p_param->index);
     return ORBIS_OK;
 }
 
+// Without a parameter everything after the index reads 0 (spec 09 §10).
 s32 ReadFilter(OrbisNgs2Handle h_voice, const Voice& voice, OrbisNgs2SamplerVoiceFilterParam* p_param) {
     if (p_param->index >= voice.p_rack->limits.max_filters) {
         return Fail(h_voice, ORBIS_NGS2_ERROR_INVALID_FILTER_INDEX, "Invalid filter index ({})", p_param->index);
     }
-    const FilterParams& filter = voice.p_filters[p_param->index];
+    const bool is_set = voice.p_params->set_modules & FilterModule(p_param->index);
+    if (!is_set) {
+        p_param->reserved3 = 0;
+    }
+    const FilterParams filter = is_set ? voice.p_filters[p_param->index] : FilterParams{};
     p_param->location = filter.location;
     p_param->type = filter.type;
     p_param->channelMask = filter.bypass_mask;
     p_param->param.direct = {filter.f[0], filter.f[1], filter.f[2], filter.f[3], filter.f[4]};
     return ORBIS_OK;
+}
+
+void RunFilters(const Voice& voice, u32 location, const Planes& planes, u32 c_channels, u32 c_samples) {
+    const u32 set_modules = voice.p_active_params->set_modules;
+    for (u32 i_filter = 0; i_filter < voice.p_rack->limits.max_filters; ++i_filter) {
+        const u32 module = FilterModule(i_filter);
+        if (set_modules & module) {
+            ProcessFilter(voice.p_active_filters[i_filter], location,
+                          voice.p_filter_states + std::size_t(i_filter) * kMaxChannels, planes, c_channels, c_samples,
+                          (voice.first_active_modules & module) != 0);
+        }
+    }
+}
+
+bool HasFilterAt(const Voice& voice, u32 location) {
+    for (u32 i_filter = 0; i_filter < voice.p_rack->limits.max_filters; ++i_filter) {
+        if ((voice.p_active_params->set_modules & FilterModule(i_filter)) &&
+            voice.p_active_filters[i_filter].location == location) {
+            return true;
+        }
+    }
+    return false;
 }
 
 } // namespace Libraries::Ngs2

@@ -4,6 +4,7 @@
 // previous grain, the inputs' delay rings (0x26210), and the conversion into the game's render
 // buffers (0x27060).
 #include <algorithm>
+#include <bit>
 #include <cstring>
 
 #include "Internal.h"
@@ -12,150 +13,150 @@ namespace Libraries::Ngs2 {
 namespace {
 
 constexpr u32 kFadeSamples = 64;
-constexpr u32 kChannelClasses = 4;
 constexpr u32 kFixedMatrixModes = 4;
+constexpr u32 kChannelClasses = 4;
 constexpr s32 kFirstFixedMatrix = 0x10;
 constexpr s32 kLastFixedMatrix = 0x13;
-// The dump of the table prints 0.7071 (spec 04 §3.2); taken as sqrt(1/2).
+constexpr u32 kClassChannels[kChannelClasses] = {1, 2, 6, 8};
 constexpr float kHalfPower = 0.70710678f;
+constexpr float kQuarterPower = 0.35355339f;
+static_assert(std::bit_cast<u32>(kHalfPower) == 0x3f3504f3 && std::bit_cast<u32>(kQuarterPower) == 0x3eb504f3);
+
+// Firmware 11.00's port matrices at 0x37d50 (spec 09 §5): a row of 17 levels per source channel, by
+// source channel count and mode (matrix id 0x10 to 0x13, mode 0 without a matrix), whose columns are
+// the destination blocks of 1, 2, 6 and 8 channels. A destination of 3 to 5 channels reads the first
+// columns of the 6-channel block and one of 7 those of the 8-channel block.
+enum DestBlock : u8 {
+    DEST_1 = 0,
+    DEST_2 = 1,
+    DEST_6 = 2,
+    DEST_8 = 3,
+};
 
 struct FixedMatrixCell {
-    u8 src_class;
+    u8 c_src;
     u8 mode;
-    u8 dst_class;
+    DestBlock dest;
     u8 i_src;
     u8 i_dst;
     float level;
 };
 
-// Firmware 11.00's fixed port matrices at 0x37d50 (rea-ngs2 out/port_default_matrices.txt): the
-// non-zero levels by source channel class, mode (matrix id 0x10 to 0x13, mode 0 without a matrix)
-// and destination channel class.
+constexpr float h = kHalfPower;
+constexpr float q = kQuarterPower;
+
+// The non-zero levels; every other cell, and modes 1 to 3 of 5, 6, 7 and 8 channels and mode 3 of
+// 3 and 4, are 0.
 constexpr FixedMatrixCell kFixedMatrixCells[] = {
-    {0, 0, 0, 0, 0, 1.0f},
-    {0, 0, 1, 0, 0, kHalfPower},
-    {0, 0, 1, 0, 1, kHalfPower},
-    {0, 0, 2, 0, 2, 1.0f},
-    {0, 0, 3, 0, 2, 1.0f},
-    {0, 1, 2, 0, 3, 1.0f},
-    {0, 1, 3, 0, 3, 1.0f},
-    {0, 2, 0, 0, 0, 1.0f},
-    {0, 2, 1, 0, 0, kHalfPower},
-    {0, 2, 1, 0, 1, kHalfPower},
-    {0, 2, 2, 0, 0, kHalfPower},
-    {0, 2, 2, 0, 1, kHalfPower},
-    {0, 2, 3, 0, 0, kHalfPower},
-    {0, 2, 3, 0, 1, kHalfPower},
-    {1, 0, 0, 0, 0, kHalfPower},
-    {1, 0, 0, 1, 0, kHalfPower},
-    {1, 0, 1, 0, 0, 1.0f},
-    {1, 0, 1, 1, 1, 1.0f},
-    {1, 0, 2, 0, 0, 1.0f},
-    {1, 0, 2, 1, 1, 1.0f},
-    {1, 0, 3, 0, 0, 1.0f},
-    {1, 0, 3, 1, 1, 1.0f},
-    {1, 1, 0, 0, 0, 1.0f},
-    {1, 1, 1, 0, 0, kHalfPower},
-    {1, 1, 1, 0, 1, kHalfPower},
-    {1, 1, 2, 0, 2, 1.0f},
-    {1, 1, 2, 1, 3, 1.0f},
-    {1, 1, 3, 0, 2, 1.0f},
-    {1, 1, 3, 1, 3, 1.0f},
-    {1, 2, 0, 0, 0, 1.0f},
-    {1, 2, 1, 0, 0, kHalfPower},
-    {1, 2, 1, 0, 1, kHalfPower},
-    {1, 2, 2, 0, 0, kHalfPower},
-    {1, 2, 2, 0, 1, kHalfPower},
-    {1, 2, 2, 1, 3, 1.0f},
-    {1, 2, 3, 0, 0, kHalfPower},
-    {1, 2, 3, 0, 1, kHalfPower},
-    {1, 2, 3, 1, 3, 1.0f},
-    {2, 0, 0, 0, 0, kHalfPower},
-    {2, 0, 0, 1, 0, kHalfPower},
-    {2, 0, 0, 2, 0, 1.0f},
-    {2, 0, 0, 4, 0, 0.5f},
-    {2, 0, 0, 5, 0, 0.5f},
-    {2, 0, 1, 0, 0, 1.0f},
-    {2, 0, 1, 1, 1, 1.0f},
-    {2, 0, 1, 2, 0, kHalfPower},
-    {2, 0, 1, 2, 1, kHalfPower},
-    {2, 0, 1, 4, 0, 0.5f},
-    {2, 0, 1, 5, 1, 0.5f},
-    {2, 0, 2, 0, 0, 1.0f},
-    {2, 0, 2, 1, 1, 1.0f},
-    {2, 0, 2, 2, 2, 1.0f},
-    {2, 0, 2, 3, 3, 1.0f},
-    {2, 0, 2, 4, 4, 1.0f},
-    {2, 0, 2, 5, 5, 1.0f},
-    {2, 0, 3, 0, 0, 1.0f},
-    {2, 0, 3, 1, 1, 1.0f},
-    {2, 0, 3, 2, 2, 1.0f},
-    {2, 0, 3, 3, 3, 1.0f},
-    {2, 0, 3, 4, 4, 1.0f},
-    {2, 0, 3, 5, 5, 1.0f},
-    {3, 0, 0, 0, 0, kHalfPower},
-    {3, 0, 0, 1, 0, kHalfPower},
-    {3, 0, 0, 2, 0, 1.0f},
-    {3, 0, 0, 4, 0, 0.5f},
-    {3, 0, 0, 5, 0, 0.5f},
-    {3, 0, 0, 6, 0, 0.5f},
-    {3, 0, 0, 7, 0, 0.5f},
-    {3, 0, 1, 0, 0, 1.0f},
-    {3, 0, 1, 1, 1, 1.0f},
-    {3, 0, 1, 2, 0, kHalfPower},
-    {3, 0, 1, 2, 1, kHalfPower},
-    {3, 0, 1, 4, 0, 0.5f},
-    {3, 0, 1, 5, 1, 0.5f},
-    {3, 0, 1, 6, 0, 0.5f},
-    {3, 0, 1, 7, 1, 0.5f},
-    {3, 0, 2, 0, 0, 1.0f},
-    {3, 0, 2, 1, 1, 1.0f},
-    {3, 0, 2, 2, 2, 1.0f},
-    {3, 0, 2, 3, 3, 1.0f},
-    {3, 0, 2, 4, 4, 1.0f},
-    {3, 0, 2, 5, 5, 1.0f},
-    {3, 0, 2, 6, 4, 1.0f},
-    {3, 0, 2, 7, 5, 1.0f},
-    {3, 0, 3, 0, 0, 1.0f},
-    {3, 0, 3, 1, 1, 1.0f},
-    {3, 0, 3, 2, 2, 1.0f},
-    {3, 0, 3, 3, 3, 1.0f},
-    {3, 0, 3, 4, 4, 1.0f},
-    {3, 0, 3, 5, 5, 1.0f},
-    {3, 0, 3, 6, 6, 1.0f},
-    {3, 0, 3, 7, 7, 1.0f},
+    {1, 0, DEST_1, 0, 0, 1.0f}, {1, 0, DEST_2, 0, 0, h}, {1, 0, DEST_2, 0, 1, h},
+    {1, 0, DEST_6, 0, 2, 1.0f}, {1, 0, DEST_8, 0, 2, 1.0f},
+    {1, 1, DEST_6, 0, 3, 1.0f}, {1, 1, DEST_8, 0, 3, 1.0f},
+    {1, 2, DEST_1, 0, 0, 1.0f}, {1, 2, DEST_2, 0, 0, h}, {1, 2, DEST_2, 0, 1, h},
+    {1, 2, DEST_6, 0, 0, h}, {1, 2, DEST_6, 0, 1, h}, {1, 2, DEST_8, 0, 0, h}, {1, 2, DEST_8, 0, 1, h},
+
+    {2, 0, DEST_1, 0, 0, h}, {2, 0, DEST_1, 1, 0, h}, {2, 0, DEST_2, 0, 0, 1.0f}, {2, 0, DEST_2, 1, 1, 1.0f},
+    {2, 0, DEST_6, 0, 0, 1.0f}, {2, 0, DEST_6, 1, 1, 1.0f}, {2, 0, DEST_8, 0, 0, 1.0f}, {2, 0, DEST_8, 1, 1, 1.0f},
+    {2, 1, DEST_1, 0, 0, 1.0f}, {2, 1, DEST_2, 0, 0, h}, {2, 1, DEST_2, 0, 1, h},
+    {2, 1, DEST_6, 0, 2, 1.0f}, {2, 1, DEST_6, 1, 3, 1.0f}, {2, 1, DEST_8, 0, 2, 1.0f}, {2, 1, DEST_8, 1, 3, 1.0f},
+    {2, 2, DEST_1, 0, 0, 1.0f}, {2, 2, DEST_2, 0, 0, h}, {2, 2, DEST_2, 0, 1, h},
+    {2, 2, DEST_6, 0, 0, h}, {2, 2, DEST_6, 0, 1, h}, {2, 2, DEST_6, 1, 3, 1.0f},
+    {2, 2, DEST_8, 0, 0, h}, {2, 2, DEST_8, 0, 1, h}, {2, 2, DEST_8, 1, 3, 1.0f},
+
+    {3, 0, DEST_1, 0, 0, h}, {3, 0, DEST_1, 1, 0, h}, {3, 0, DEST_2, 0, 0, 1.0f}, {3, 0, DEST_2, 1, 1, 1.0f},
+    {3, 0, DEST_6, 0, 0, 1.0f}, {3, 0, DEST_6, 1, 1, 1.0f}, {3, 0, DEST_6, 2, 3, 1.0f},
+    {3, 0, DEST_8, 0, 0, 1.0f}, {3, 0, DEST_8, 1, 1, 1.0f}, {3, 0, DEST_8, 2, 3, 1.0f},
+    {3, 1, DEST_1, 0, 0, h}, {3, 1, DEST_1, 1, 0, h}, {3, 1, DEST_1, 2, 0, 1.0f},
+    {3, 1, DEST_2, 0, 0, 1.0f}, {3, 1, DEST_2, 1, 1, 1.0f}, {3, 1, DEST_2, 2, 0, h}, {3, 1, DEST_2, 2, 1, h},
+    {3, 1, DEST_6, 0, 0, 1.0f}, {3, 1, DEST_6, 1, 1, 1.0f}, {3, 1, DEST_6, 2, 2, 1.0f},
+    {3, 1, DEST_8, 0, 0, 1.0f}, {3, 1, DEST_8, 1, 1, 1.0f}, {3, 1, DEST_8, 2, 2, 1.0f},
+    {3, 2, DEST_1, 0, 0, h}, {3, 2, DEST_1, 1, 0, h}, {3, 2, DEST_1, 2, 0, q},
+    {3, 2, DEST_2, 0, 0, 1.0f}, {3, 2, DEST_2, 1, 1, 1.0f}, {3, 2, DEST_2, 2, 0, q}, {3, 2, DEST_2, 2, 1, q},
+    {3, 2, DEST_6, 0, 0, 1.0f}, {3, 2, DEST_6, 1, 1, 1.0f}, {3, 2, DEST_6, 2, 4, h}, {3, 2, DEST_6, 2, 5, h},
+    {3, 2, DEST_8, 0, 0, 1.0f}, {3, 2, DEST_8, 1, 1, 1.0f}, {3, 2, DEST_8, 2, 6, h}, {3, 2, DEST_8, 2, 7, h},
+
+    {4, 0, DEST_1, 0, 0, h}, {4, 0, DEST_1, 1, 0, h}, {4, 0, DEST_1, 2, 0, 0.5f}, {4, 0, DEST_1, 3, 0, 0.5f},
+    {4, 0, DEST_2, 0, 0, 1.0f}, {4, 0, DEST_2, 1, 1, 1.0f}, {4, 0, DEST_2, 2, 0, h}, {4, 0, DEST_2, 3, 1, h},
+    {4, 0, DEST_6, 0, 0, 1.0f}, {4, 0, DEST_6, 1, 1, 1.0f}, {4, 0, DEST_6, 2, 4, 1.0f}, {4, 0, DEST_6, 3, 5, 1.0f},
+    {4, 0, DEST_8, 0, 0, 1.0f}, {4, 0, DEST_8, 1, 1, 1.0f}, {4, 0, DEST_8, 2, 4, 1.0f}, {4, 0, DEST_8, 3, 5, 1.0f},
+    {4, 1, DEST_1, 0, 0, h}, {4, 1, DEST_1, 1, 0, h}, {4, 1, DEST_1, 2, 0, 1.0f},
+    {4, 1, DEST_2, 0, 0, 1.0f}, {4, 1, DEST_2, 1, 1, 1.0f}, {4, 1, DEST_2, 2, 0, h}, {4, 1, DEST_2, 2, 1, h},
+    {4, 1, DEST_6, 0, 0, 1.0f}, {4, 1, DEST_6, 1, 1, 1.0f}, {4, 1, DEST_6, 2, 2, 1.0f}, {4, 1, DEST_6, 3, 3, 1.0f},
+    {4, 1, DEST_8, 0, 0, 1.0f}, {4, 1, DEST_8, 1, 1, 1.0f}, {4, 1, DEST_8, 2, 2, 1.0f}, {4, 1, DEST_8, 3, 3, 1.0f},
+    {4, 2, DEST_1, 0, 0, h}, {4, 2, DEST_1, 1, 0, h}, {4, 2, DEST_1, 2, 0, 1.0f}, {4, 2, DEST_1, 3, 0, q},
+    {4, 2, DEST_2, 0, 0, 1.0f}, {4, 2, DEST_2, 1, 1, 1.0f}, {4, 2, DEST_2, 2, 0, h}, {4, 2, DEST_2, 2, 1, h},
+    {4, 2, DEST_2, 3, 0, q}, {4, 2, DEST_2, 3, 1, q},
+    {4, 2, DEST_6, 0, 0, 1.0f}, {4, 2, DEST_6, 1, 1, 1.0f}, {4, 2, DEST_6, 2, 2, 1.0f},
+    {4, 2, DEST_6, 3, 4, h}, {4, 2, DEST_6, 3, 5, h},
+    {4, 2, DEST_8, 0, 0, 1.0f}, {4, 2, DEST_8, 1, 1, 1.0f}, {4, 2, DEST_8, 2, 2, 1.0f},
+    {4, 2, DEST_8, 3, 6, h}, {4, 2, DEST_8, 3, 7, h},
+
+    {5, 0, DEST_1, 0, 0, h}, {5, 0, DEST_1, 1, 0, h}, {5, 0, DEST_1, 2, 0, 1.0f},
+    {5, 0, DEST_1, 3, 0, 0.5f}, {5, 0, DEST_1, 4, 0, 0.5f},
+    {5, 0, DEST_2, 0, 0, 1.0f}, {5, 0, DEST_2, 1, 1, 1.0f}, {5, 0, DEST_2, 2, 0, h}, {5, 0, DEST_2, 2, 1, h},
+    {5, 0, DEST_6, 0, 0, 1.0f}, {5, 0, DEST_6, 1, 1, 1.0f}, {5, 0, DEST_6, 2, 2, 1.0f},
+    {5, 0, DEST_6, 3, 4, 1.0f}, {5, 0, DEST_6, 4, 5, 1.0f},
+    {5, 0, DEST_8, 0, 0, 1.0f}, {5, 0, DEST_8, 1, 1, 1.0f}, {5, 0, DEST_8, 2, 2, 1.0f},
+    {5, 0, DEST_8, 3, 4, 1.0f}, {5, 0, DEST_8, 4, 5, 1.0f},
+
+    {6, 0, DEST_1, 0, 0, h}, {6, 0, DEST_1, 1, 0, h}, {6, 0, DEST_1, 2, 0, 1.0f},
+    {6, 0, DEST_1, 4, 0, 0.5f}, {6, 0, DEST_1, 5, 0, 0.5f},
+    {6, 0, DEST_2, 0, 0, 1.0f}, {6, 0, DEST_2, 1, 1, 1.0f}, {6, 0, DEST_2, 2, 0, h}, {6, 0, DEST_2, 2, 1, h},
+    {6, 0, DEST_2, 4, 0, 0.5f}, {6, 0, DEST_2, 5, 1, 0.5f},
+    {6, 0, DEST_6, 0, 0, 1.0f}, {6, 0, DEST_6, 1, 1, 1.0f}, {6, 0, DEST_6, 2, 2, 1.0f},
+    {6, 0, DEST_6, 3, 3, 1.0f}, {6, 0, DEST_6, 4, 4, 1.0f}, {6, 0, DEST_6, 5, 5, 1.0f},
+    {6, 0, DEST_8, 0, 0, 1.0f}, {6, 0, DEST_8, 1, 1, 1.0f}, {6, 0, DEST_8, 2, 2, 1.0f},
+    {6, 0, DEST_8, 3, 3, 1.0f}, {6, 0, DEST_8, 4, 4, 1.0f}, {6, 0, DEST_8, 5, 5, 1.0f},
+
+    {7, 0, DEST_1, 0, 0, h}, {7, 0, DEST_1, 1, 0, h}, {7, 0, DEST_1, 2, 0, 1.0f},
+    {7, 0, DEST_1, 4, 0, 0.5f}, {7, 0, DEST_1, 5, 0, 0.5f}, {7, 0, DEST_1, 6, 0, q},
+    {7, 0, DEST_2, 0, 0, 1.0f}, {7, 0, DEST_2, 1, 1, 1.0f}, {7, 0, DEST_2, 2, 0, h}, {7, 0, DEST_2, 2, 1, h},
+    {7, 0, DEST_2, 4, 0, 0.5f}, {7, 0, DEST_2, 5, 1, 0.5f}, {7, 0, DEST_2, 6, 0, q}, {7, 0, DEST_2, 6, 1, q},
+    {7, 0, DEST_6, 0, 0, 1.0f}, {7, 0, DEST_6, 1, 1, 1.0f}, {7, 0, DEST_6, 2, 2, 1.0f},
+    {7, 0, DEST_6, 3, 3, 1.0f}, {7, 0, DEST_6, 4, 4, 1.0f}, {7, 0, DEST_6, 5, 5, 1.0f},
+    {7, 0, DEST_6, 6, 4, h}, {7, 0, DEST_6, 6, 5, h},
+    {7, 0, DEST_8, 0, 0, 1.0f}, {7, 0, DEST_8, 1, 1, 1.0f}, {7, 0, DEST_8, 2, 2, 1.0f},
+    {7, 0, DEST_8, 3, 3, 1.0f}, {7, 0, DEST_8, 4, 4, 1.0f}, {7, 0, DEST_8, 5, 5, 1.0f},
+    {7, 0, DEST_8, 6, 6, h}, {7, 0, DEST_8, 6, 7, h},
+
+    {8, 0, DEST_1, 0, 0, h}, {8, 0, DEST_1, 1, 0, h}, {8, 0, DEST_1, 2, 0, 1.0f}, {8, 0, DEST_1, 4, 0, 0.5f},
+    {8, 0, DEST_1, 5, 0, 0.5f}, {8, 0, DEST_1, 6, 0, 0.5f}, {8, 0, DEST_1, 7, 0, 0.5f},
+    {8, 0, DEST_2, 0, 0, 1.0f}, {8, 0, DEST_2, 1, 1, 1.0f}, {8, 0, DEST_2, 2, 0, h}, {8, 0, DEST_2, 2, 1, h},
+    {8, 0, DEST_2, 4, 0, 0.5f}, {8, 0, DEST_2, 5, 1, 0.5f}, {8, 0, DEST_2, 6, 0, 0.5f}, {8, 0, DEST_2, 7, 1, 0.5f},
+    {8, 0, DEST_6, 0, 0, 1.0f}, {8, 0, DEST_6, 1, 1, 1.0f}, {8, 0, DEST_6, 2, 2, 1.0f}, {8, 0, DEST_6, 3, 3, 1.0f},
+    {8, 0, DEST_6, 4, 4, 1.0f}, {8, 0, DEST_6, 5, 5, 1.0f}, {8, 0, DEST_6, 6, 4, 1.0f}, {8, 0, DEST_6, 7, 5, 1.0f},
+    {8, 0, DEST_8, 0, 0, 1.0f}, {8, 0, DEST_8, 1, 1, 1.0f}, {8, 0, DEST_8, 2, 2, 1.0f}, {8, 0, DEST_8, 3, 3, 1.0f},
+    {8, 0, DEST_8, 4, 4, 1.0f}, {8, 0, DEST_8, 5, 5, 1.0f}, {8, 0, DEST_8, 6, 6, 1.0f}, {8, 0, DEST_8, 7, 7, 1.0f},
 };
 
+DestBlock DestBlockOf(u32 c_dst) {
+    return c_dst == 1 ? DEST_1 : c_dst == 2 ? DEST_2 : c_dst <= 6 ? DEST_6 : DEST_8;
+}
+
+// The table expanded to one kMaxChannels x kMaxChannels matrix per source count, mode and
+// destination count, rows by source channel.
 struct FixedMatrices {
-    float levels[kChannelClasses][kFixedMatrixModes][kChannelClasses][kMatrixCells];
-    float identity[kMatrixCells];
+    float levels[kMaxChannels][kFixedMatrixModes][kMaxChannels][kMatrixCells];
 };
 
 const FixedMatrices& GetFixedMatrices() {
     static const FixedMatrices s_matrices = [] {
         FixedMatrices matrices{};
         for (const FixedMatrixCell& cell : kFixedMatrixCells) {
-            matrices.levels[cell.src_class][cell.mode][cell.dst_class][cell.i_src * kMaxChannels + cell.i_dst] =
-                cell.level;
-        }
-        for (u32 i_channel = 0; i_channel < kMaxChannels; ++i_channel) {
-            matrices.identity[i_channel * kMaxChannels + i_channel] = 1.0f;
+            for (u32 c_dst = 1; c_dst <= kMaxChannels; ++c_dst) {
+                if (DestBlockOf(c_dst) == cell.dest && cell.i_dst < c_dst) {
+                    matrices.levels[cell.c_src - 1][cell.mode][c_dst - 1][cell.i_src * kMaxChannels + cell.i_dst] =
+                        cell.level;
+                }
+            }
         }
         return matrices;
     }();
     return s_matrices;
 }
 
+// c_src and c_dst are 1 to kMaxChannels: setups refuse other counts.
 const float* FixedMatrix(u32 c_src, u32 mode, u32 c_dst) {
-    const s32 src_class = ChannelClass(c_src);
-    const s32 dst_class = ChannelClass(c_dst);
-    if (src_class < 0 || dst_class < 0) {
-        // The table only covers 1, 2, 6 and 8 channels; a sampler voice may have 3, 4, 5 or 7.
-        static std::uint64_t s_c_uses;
-        NoteUnimplemented(&s_c_uses, "Ngs2 port default matrix for 3, 4, 5 or 7 channels (identity; rea: 0x265a0)");
-        return GetFixedMatrices().identity;
-    }
-    return GetFixedMatrices().levels[src_class][mode][dst_class];
+    return GetFixedMatrices().levels[c_src - 1][mode][c_dst - 1];
 }
 
 // The matrix a port mixes through: the voice's own when it has levels, the fixed one otherwise.
@@ -186,16 +187,6 @@ float* ClaimInputBlock(const Voice& voice, u32 i_input, u32 i_block, u32 c_sampl
         is_started = true;
     }
     return p_block;
-}
-
-bool HasFilterAt(const Voice& voice, u32 location) {
-    for (u32 i_filter = 0; i_filter < voice.p_rack->limits.max_filters; ++i_filter) {
-        const FilterParams& filter = voice.p_active_filters[i_filter];
-        if (filter.is_set && filter.location == location) {
-            return true;
-        }
-    }
-    return false;
 }
 
 void MixPort(RenderContext& context, const Voice& voice, const ActivePort& port, const Planes& src, u32 c_src) {
@@ -245,18 +236,16 @@ void StoreSample(s16* p_out, float value, bool is_first) {
 
 } // namespace
 
-s32 ChannelClass(u32 c_channels) {
+u32 ChannelClass(u32 c_channels) {
     switch (c_channels) {
     case 1:
         return 0;
     case 2:
         return 1;
-    case 6:
-        return 2;
     case 8:
         return 3;
     default:
-        return -1;
+        return 2;
     }
 }
 
@@ -310,11 +299,7 @@ void MixPorts(RenderContext& context, Voice* p_voice, const Planes& planes, u32 
                 std::memcpy(src.p_channel[i_channel], planes.p_channel[i_channel],
                             context.c_grain_samples * sizeof(float));
             }
-            for (u32 i_filter = 0; i_filter < limits.max_filters; ++i_filter) {
-                ProcessFilter(p_voice->p_active_filters[i_filter], location,
-                              p_voice->p_filter_states + std::size_t(i_filter) * kMaxChannels, src, c_channels,
-                              context.c_grain_samples, p_voice->is_first_grain);
-            }
+            RunFilters(*p_voice, location, src, c_channels, context.c_grain_samples);
         }
         MixPort(context, *p_voice, port, src, c_channels);
     }
@@ -393,11 +378,15 @@ void ExpandVoiceMatrices(Voice* p_voice) {
     }
 }
 
+// The setup's defaults are the port matrices of mode 0 (spec 09 §4.1); the four types whose input and
+// output classes match get none, so their input passes as it is.
 void ResetMasteringMatrices(MasteringMatrices* p_matrices) {
+    constexpr u32 kSameClassTypes = 0x8421;
     for (u32 i_type = 0; i_type < kMasteringMatrixTypes; ++i_type) {
-        const float* p_default = GetFixedMatrices().levels[i_type / kChannelClasses][0][i_type % kChannelClasses];
+        const float* p_default =
+            FixedMatrix(kClassChannels[i_type / kChannelClasses], 0, kClassChannels[i_type % kChannelClasses]);
         std::copy_n(p_default, kMatrixCells, p_matrices->levels[i_type]);
-        p_matrices->is_set[i_type] = true;
+        p_matrices->is_set[i_type] = !((kSameClassTypes >> i_type) & 1);
     }
 }
 

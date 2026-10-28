@@ -6,8 +6,10 @@
 #include <algorithm>
 #include <bit>
 #include <cmath>
+#include <chrono>
 #include <cstring>
 #include <numbers>
+#include <thread>
 
 #include "Internal.h"
 
@@ -113,141 +115,218 @@ float ToFloat(u32 waveform_type, const u8* p_sample) {
     }
 }
 
-const WaveformBlock& BlockAt(const WaveformQueue& queue, u32 i_block) {
-    return queue.p_blocks[(queue.i_head + i_block) % queue.c_capacity];
+const WaveformBlock& QueuedSlot(const ActiveWaveformQueue& queue, u32 c_capacity, u32 i_queued) {
+    return queue.p_slots[(queue.i_write + c_capacity - queue.c_queued + i_queued) % c_capacity];
 }
 
-const u8* BlockData(const WaveformBlock& block) {
-    return block.p_data + block.off_data;
+const u8* SlotData(const WaveformBlock& slot) {
+    return slot.p_data + slot.off_data;
 }
 
-// The head block and the continuation blocks after it: the bytes the head block plays (spec 05 §3.1).
-struct Chain {
-    u32 c_blocks;
-    u64 cb_total;
-};
-
-Chain ChainOf(const WaveformQueue& queue) {
-    Chain chain{0, 0};
-    while (chain.c_blocks < queue.c_committed &&
-           (chain.c_blocks == 0 || BlockAt(queue, chain.c_blocks).is_continuation)) {
-        chain.cb_total += BlockAt(queue, chain.c_blocks).cb_data;
-        ++chain.c_blocks;
-    }
-    return chain;
-}
-
-// Locates a byte of the chain: the block that holds it and the offset in that block.
-struct ChainCursor {
-    u32 i_block;
-    u64 off;
-};
-
-ChainCursor Locate(const WaveformQueue& queue, const Chain& chain, u64 off) {
-    ChainCursor cursor{0, off};
-    while (cursor.i_block < chain.c_blocks && cursor.off >= BlockAt(queue, cursor.i_block).cb_data) {
-        cursor.off -= BlockAt(queue, cursor.i_block).cb_data;
-        ++cursor.i_block;
-    }
-    return cursor;
-}
-
-// A frame's samples may straddle two blocks of the chain; they are gathered into p_scratch then.
-const u8* SampleBytes(const WaveformQueue& queue, const Chain& chain, u64 off, u32 cb_samples, u8* p_scratch) {
-    ChainCursor cursor = Locate(queue, chain, off);
-    const WaveformBlock& block = BlockAt(queue, cursor.i_block);
-    if (cursor.off + cb_samples <= block.cb_data) {
-        return BlockData(block) + cursor.off;
-    }
-    for (u32 i_byte = 0; i_byte < cb_samples && cursor.i_block < chain.c_blocks;) {
-        const WaveformBlock& part = BlockAt(queue, cursor.i_block);
-        const u32 cb_part = u32(std::min<u64>(part.cb_data - cursor.off, cb_samples - i_byte));
-        std::memcpy(p_scratch + i_byte, BlockData(part) + cursor.off, cb_part);
-        i_byte += cb_part;
-        cursor = {cursor.i_block + 1, 0};
-    }
-    return p_scratch;
-}
-
-void PopBlock(Voice* p_voice, u32 c_repeats) {
-    WaveformQueue& queue = p_voice->queue;
-    const WaveformBlock& block = BlockAt(queue, 0);
-    if (!block.is_notified) {
-        QueueVoiceCallback(p_voice, CALLBACK_BLOCK_END, block, c_repeats);
-    }
-    queue.i_head = (queue.i_head + 1) % queue.c_capacity;
-    --queue.c_blocks;
-    --queue.c_committed;
-}
-
-// The head block and its continuation blocks leave the queue together (spec 05 §3.3 step 2).
-void EndBlock(Voice* p_voice, SourceState* p_source) {
-    const Chain chain = ChainOf(p_voice->queue);
-    for (u32 i_block = 0; i_block < chain.c_blocks; ++i_block) {
-        PopBlock(p_voice, p_source->c_repeats);
-    }
-    p_source->c_repeats = 0;
-    p_source->has_block = false;
-}
-
-bool IsEmptyBlock(const WaveformBlock& block) {
-    const bool has_no_samples = block.num_skip_samples == 0 && block.num_samples == 0;
+bool IsEmptyBlock(const WaveformBlock& slot) {
+    const bool has_no_samples = slot.num_skip_samples == 0 && slot.num_samples == 0;
     if (IsCompiledSdkAtLeast(kEmptyBlockSdkVersion)) {
         return has_no_samples;
     }
-    return has_no_samples || (block.num_samples == 0 && block.num_repeats == kInfinite);
+    return has_no_samples || (slot.num_samples == 0 && slot.num_repeats == kInfinite);
 }
 
-// 0x21fe0: starts the first block with samples, or marks the end (terminated queue) or a starved
-// voice (the game has not queued more yet).
-bool StartBlock(Voice* p_voice, SourceState* p_source) {
-    WaveformQueue& queue = p_voice->queue;
-    while (queue.c_committed > 0) {
-        const WaveformBlock& block = BlockAt(queue, 0);
-        if (IsEmptyBlock(block)) {
-            PopBlock(p_voice, 0);
-            continue;
-        }
-        p_source->num_skip_samples = block.num_skip_samples;
-        p_source->num_samples = block.num_samples;
-        p_source->num_repeats = block.num_repeats;
-        p_source->block_user_data = block.user_data;
-        p_source->cb_consumed = 0;
-        p_source->i_sample = 0;
-        p_source->c_repeats = 0;
-        p_source->has_block = true;
-        return true;
+u32 RegionEnd(const SourceState& source) {
+    if ((source.num_skip_samples | source.num_samples) == kInfinite) {
+        return kInfinite;
     }
-    if (queue.is_terminated_committed) {
+    return source.num_skip_samples + source.num_samples;
+}
+
+// The oldest slot leaves the queue; its block-end callback hands back the bytes not handed back yet.
+void PopSlot(Voice* p_voice, const SourceState& source) {
+    ActiveWaveformQueue& queue = p_voice->active_queue;
+    const WaveformBlock& slot = QueuedSlot(queue, p_voice->queue.c_capacity, 0);
+    if (source.cb_notified < slot.cb_data) {
+        QueueVoiceCallback(p_voice, CALLBACK_BLOCK_END, slot, source.block_user_data, source.cb_notified,
+                           source.c_repeats);
+    }
+    --queue.c_queued;
+    ++queue.c_popped;
+}
+
+// 0x21fe0: the oldest slot starts a block unless it continues another block, was marked by a later
+// 0x10000001 with bit 3, or has no samples; those leave the queue unplayed.
+bool StartBlock(Voice* p_voice, SourceState* p_source) {
+    ActiveWaveformQueue& queue = p_voice->active_queue;
+    while (queue.c_queued > 0) {
+        const WaveformBlock& slot = QueuedSlot(queue, p_voice->queue.c_capacity, 0);
+        if (!slot.is_continuation && !slot.is_marked && !IsEmptyBlock(slot)) {
+            p_source->num_skip_samples = slot.num_skip_samples;
+            p_source->num_samples = slot.num_samples;
+            p_source->num_repeats = slot.num_repeats;
+            p_source->block_user_data = slot.user_data;
+            p_source->p_read = SlotData(slot);
+            return true;
+        }
+        p_source->cb_decoded += slot.cb_data;
+        PopSlot(p_voice, *p_source);
+    }
+    if (queue.is_terminated) {
         p_source->is_end = true;
-    } else {
-        p_source->is_starved = true;
     }
     return false;
 }
 
-// 0x21a30 at the end of a block's region: loop back while repeats remain and no exit request waits,
-// otherwise end the block (spec 05 §3.3).
-void EndRegion(Voice* p_voice, SourceState* p_source) {
-    if (p_source->num_repeats == kInfinite || p_source->c_repeats < p_source->num_repeats) {
-        ++p_source->c_repeats;
-        if (p_voice->queue.c_exit_requests <= p_source->c_exit_consumed) {
-            p_source->i_sample = 0;
-            p_source->cb_consumed = 0;
-            QueueVoiceCallback(p_voice, CALLBACK_LOOP, BlockAt(p_voice->queue, 0), p_source->c_repeats);
-            return;
-        }
-        ++p_source->c_exit_consumed;
+// 0x21a30, ported as rea read it (spec 09 §7): takes cb_bytes and c_samples just decoded from the
+// oldest slots and moves the block on. At the end of a slot it pops the slot if the block's region
+// goes on with the next one, whatever that slot is; at the end of the region (or of a slot with
+// nothing after it in a terminated queue) the block loops back while repeats remain and no exit
+// request waits, or leaves the queue with its continuation slots. is_forced ends the block at once
+// (mode 2: what is left is not a whole frame).
+void AdvanceBlock(Voice* p_voice, SourceState* p_source, u32 cb_bytes, u32 c_samples, bool is_forced) {
+    SourceState& source = *p_source;
+    if (source.num_samples == 0 && source.num_skip_samples == 0) {
+        return;
     }
-    EndBlock(p_voice, p_source);
+    ActiveWaveformQueue& queue = p_voice->active_queue;
+    const u32 c_capacity = p_voice->queue.c_capacity;
+    source.cb_decoded += cb_bytes;
+    source.c_decoded_samples += c_samples;
+    source.i_sample += c_samples;
+    const u32 end_region = RegionEnd(source);
+    u32 cb_done = 0;
+    bool is_drained = false;
+    // Every pass takes bytes from a slot it then pops, or returns.
+    for (u32 c_passes = 0; c_passes <= c_capacity; ++c_passes) {
+        const WaveformBlock* p_slot = queue.c_queued > 0 ? &QueuedSlot(queue, c_capacity, 0) : nullptr;
+        u32 cb_part = 0;
+        bool is_region_step = !is_forced;
+        if (p_slot) {
+            cb_part = std::min(p_slot->cb_data - source.cb_consumed, cb_bytes - cb_done);
+            source.cb_consumed += cb_part;
+            if (!is_forced && source.cb_consumed >= p_slot->cb_data) {
+                is_drained = true;
+                is_region_step = queue.c_queued < 2 && !queue.is_terminated;
+            }
+        }
+        if (is_region_step) {
+            is_drained = true;
+            if (end_region > source.i_sample) {
+                // Streaming: the last queued slot of an open queue is read through, so the game may
+                // reuse it before the block ends (spec 05 §7).
+                if (p_slot && source.cb_consumed >= p_slot->cb_data && queue.c_queued == 1 && !queue.is_terminated &&
+                    source.cb_notified < source.cb_consumed && source.cb_notified < p_slot->cb_data) {
+                    QueueVoiceCallback(p_voice, CALLBACK_BLOCK_END, *p_slot, source.block_user_data,
+                                       source.cb_notified, source.c_repeats);
+                    source.cb_notified = p_slot->cb_data;
+                }
+                source.p_read += cb_part;
+                cb_done += cb_part;
+                if (cb_done >= cb_bytes || !p_slot) {
+                    return;
+                }
+                continue;
+            }
+        }
+        if (source.num_repeats == kInfinite || source.c_repeats < source.num_repeats) {
+            ++source.c_repeats;
+            if (queue.c_exit_requests <= source.c_exit_consumed) {
+                if (p_slot && source.cb_notified < p_slot->cb_data) {
+                    QueueVoiceCallback(p_voice, CALLBACK_LOOP, *p_slot, source.block_user_data, source.cb_notified,
+                                       source.c_repeats);
+                }
+                // The published read position goes on past the block's end until the next slot or block
+                // starts (spec 09 §8.4).
+                source.i_sample = 0;
+                source.cb_consumed = 0;
+                source.cb_notified = 0;
+                return;
+            }
+            ++source.c_exit_consumed;
+        }
+        if (is_drained && end_region > source.i_sample) {
+            PopSlot(p_voice, source);
+            source.c_repeats = 0;
+            source.cb_consumed = 0;
+            source.cb_notified = 0;
+            if (queue.c_queued > 0) {
+                source.p_read = SlotData(QueuedSlot(queue, c_capacity, 0));
+            }
+            cb_done += cb_part;
+            if (cb_done >= cb_bytes) {
+                return;
+            }
+            continue;
+        }
+        if (p_slot) {
+            do {
+                // NOTE: the firmware adds an adjustment here that rea did not name; the bytes of the slot
+                // left unread are taken, so that decodedDataSize counts whole blocks as 0x21fe0 does for
+                // the slots it drops.
+                const u32 cb_left = QueuedSlot(queue, c_capacity, 0).cb_data - source.cb_consumed;
+                PopSlot(p_voice, source);
+                source.c_repeats = 0;
+                source.cb_notified = 0;
+                source.cb_decoded += cb_left;
+                source.cb_consumed = 0;
+            } while (queue.c_queued > 0 && QueuedSlot(queue, c_capacity, 0).is_continuation);
+        }
+        source.i_sample = 0;
+        source.cb_consumed = 0;
+        source.cb_notified = 0;
+        source.num_samples = 0;
+        source.num_skip_samples = 0;
+        StartBlock(p_voice, p_source);
+        return;
+    }
 }
 
-u64 RegionLeft(const SourceState& source) {
-    if (source.num_skip_samples == kInfinite || source.num_samples == kInfinite) {
-        return ~u64(0);
+// The bytes the oldest slot and the continuation slots after it hold for the block being played.
+struct Spans {
+    const u8* p_data[kMaxWaveformBlocks];
+    u32 cb_data[kMaxWaveformBlocks];
+    u32 c_spans;
+    u64 cb_total;
+    u32 c_region;
+};
+
+// 0x21890 (spec 09 §7): false when not even one frame of cb_stride bytes is there. A block whose
+// slots end before its region does is ended (forced) when another block follows or the queue is
+// terminated, and the rest of the grain is silent; with nothing queued after it the voice starves.
+bool GatherSpans(Voice* p_voice, SourceState* p_source, u32 cb_stride, Spans* p_out) {
+    SourceState& source = *p_source;
+    const ActiveWaveformQueue& queue = p_voice->active_queue;
+    const u32 c_capacity = p_voice->queue.c_capacity;
+    p_out->c_spans = 0;
+    p_out->cb_total = 0;
+    bool is_other_block_next = false;
+    const bool has_block = source.num_samples != 0 || source.num_skip_samples != 0;
+    if (!source.is_end && (has_block || StartBlock(p_voice, p_source))) {
+        const u32 end_region = RegionEnd(source);
+        p_out->c_region = end_region == kInfinite ? kInfinite - source.i_sample : end_region - source.i_sample;
+        for (u32 i_slot = 0; i_slot < queue.c_queued && i_slot < kMaxWaveformBlocks; ++i_slot) {
+            const WaveformBlock& slot = QueuedSlot(queue, c_capacity, i_slot);
+            if (i_slot > 0 && !slot.is_continuation) {
+                is_other_block_next = true;
+                break;
+            }
+            const u32 off = i_slot == 0 ? source.cb_consumed : 0;
+            p_out->p_data[p_out->c_spans] = SlotData(slot) + off;
+            p_out->cb_data[p_out->c_spans] = slot.cb_data - off;
+            p_out->cb_total += slot.cb_data - off;
+            ++p_out->c_spans;
+        }
+        if (cb_stride <= p_out->cb_total) {
+            source.is_starved = false;
+            return true;
+        }
+        if (is_other_block_next) {
+            AdvanceBlock(p_voice, p_source, 0, 0, true);
+        }
     }
-    const u64 c_region = u64(source.num_skip_samples) + source.num_samples;
-    return c_region > source.i_sample ? c_region - source.i_sample : 0;
+    if (!is_other_block_next && queue.is_terminated) {
+        AdvanceBlock(p_voice, p_source, 0, 0, true);
+    }
+    p_out->c_spans = 0;
+    p_out->cb_total = 0;
+    source.is_starved = !source.is_end;
+    return false;
 }
 
 struct FrameLayout {
@@ -263,96 +342,79 @@ FrameLayout LayoutOf(const SourceFormat& format) {
     return {cb_sample, cb_samples, format.cb_frame_margin + cb_samples, format.off_frame};
 }
 
-u32 FramesAvailable(const Chain& chain, const FrameLayout& layout, u64 cb_consumed) {
-    const u64 cb_first = cb_consumed + layout.off_samples + layout.cb_samples;
-    if (chain.cb_total < cb_first) {
-        return 0;
+// A frame's samples may straddle two slots; they are gathered into p_scratch then (0x252f0).
+const u8* SampleBytes(const Spans& spans, u64 off, u32 cb_samples, u8* p_scratch) {
+    u32 i_span = 0;
+    while (i_span < spans.c_spans && off >= spans.cb_data[i_span]) {
+        off -= spans.cb_data[i_span];
+        ++i_span;
     }
-    return u32(std::min<u64>((chain.cb_total - cb_first) / layout.cb_stride + 1, kInfinite));
+    if (off + cb_samples <= spans.cb_data[i_span]) {
+        return spans.p_data[i_span] + off;
+    }
+    for (u32 i_byte = 0; i_byte < cb_samples && i_span < spans.c_spans; ++i_span, off = 0) {
+        const u32 cb_part = u32(std::min<u64>(spans.cb_data[i_span] - off, cb_samples - i_byte));
+        std::memcpy(p_scratch + i_byte, spans.p_data[i_span] + off, cb_part);
+        i_byte += cb_part;
+    }
+    return p_scratch;
 }
 
-// Streaming: once every byte of the last queued block is read, the game may refill it before the
-// block ends (spec 05 §7).
-void NotifyDrainedTail(Voice* p_voice, const SourceState& source, const Chain& chain) {
-    WaveformQueue& queue = p_voice->queue;
-    if (queue.is_terminated_committed || chain.c_blocks != queue.c_committed || source.cb_consumed < chain.cb_total) {
-        return;
-    }
-    WaveformBlock& tail = queue.p_blocks[(queue.i_head + chain.c_blocks - 1) % queue.c_capacity];
-    if (!tail.is_notified) {
-        QueueVoiceCallback(p_voice, CALLBACK_BLOCK_END, tail, source.c_repeats);
-        tail.is_notified = true;
-    }
-}
-
-void DecodeFrames(const WaveformQueue& queue, const Chain& chain, const SourceFormat& format,
-                  const FrameLayout& layout, u64 cb_consumed, float* const* pp_in, u32 i_out, u32 c_frames) {
+void DecodeFrames(const Spans& spans, const SourceFormat& format, const FrameLayout& layout, float* const* pp_in,
+                  u32 i_out, u32 c_frames) {
     u8 scratch[kMaxSampleBytes];
     for (u32 i_frame = 0; i_frame < c_frames; ++i_frame) {
-        const u64 off = cb_consumed + u64(i_frame) * layout.cb_stride + layout.off_samples;
-        const u8* p_samples = SampleBytes(queue, chain, off, layout.cb_samples, scratch);
+        const u64 off = u64(i_frame) * layout.cb_stride + layout.off_samples;
+        const u8* p_samples = SampleBytes(spans, off, layout.cb_samples, scratch);
         for (u32 i_channel = 0; i_channel < format.c_channels; ++i_channel) {
             pp_in[i_channel][i_out + i_frame] = ToFloat(format.waveform_type, p_samples + i_channel * layout.cb_sample);
         }
     }
 }
 
-// Reads up to c_wanted frames into pp_in from i_out on; returns how many it read.
+// 0x1e6a0's read loop: whole frames only, as many as the slots hold, the grain needs and the region
+// has left; returns how many it read.
 u32 Decode(Voice* p_voice, SourceState* p_source, const SourceFormat& format, float* const* pp_in, u32 i_out,
            u32 c_wanted) {
-    const WaveformQueue& queue = p_voice->queue;
     const FrameLayout layout = LayoutOf(format);
     u32 c_done = 0;
-    // Each step that reads nothing drops or loops a block, so the queue's size bounds them.
-    for (u32 c_idle_steps = 0; c_done < c_wanted && c_idle_steps <= 2 * queue.c_capacity + 2;) {
-        if (!p_source->has_block && !StartBlock(p_voice, p_source)) {
+    while (c_done < c_wanted) {
+        Spans spans;
+        if (!GatherSpans(p_voice, p_source, layout.cb_stride, &spans)) {
             break;
         }
-        const u64 c_left = RegionLeft(*p_source);
-        if (c_left == 0) {
-            EndRegion(p_voice, p_source);
-            ++c_idle_steps;
-            continue;
+        const u32 c_frames = u32(std::min<u64>({c_wanted - c_done, spans.cb_total / layout.cb_stride, spans.c_region}));
+        if (c_frames == 0) {
+            break;
         }
-        const Chain chain = ChainOf(queue);
-        const u32 c_available = FramesAvailable(chain, layout, p_source->cb_consumed);
-        if (c_available == 0) {
-            const bool can_grow = chain.c_blocks == queue.c_committed && !queue.is_terminated_committed;
-            if (can_grow) {
-                p_source->is_starved = true;
-                break;
-            }
-            // The block's data ends before its samples do; what the firmware does then is not read.
-            static std::uint64_t s_c_uses;
-            NoteUnimplemented(&s_c_uses, "Ngs2 sampler block shorter than its samples (ended early; rea: 0x21890)");
-            EndBlock(p_voice, p_source);
-            ++c_idle_steps;
-            continue;
-        }
-        const u32 c_frames = u32(std::min<u64>({c_wanted - c_done, c_left, c_available}));
-        DecodeFrames(queue, chain, format, layout, p_source->cb_consumed, pp_in, i_out + c_done, c_frames);
-        p_source->i_sample += c_frames;
-        p_source->cb_consumed += c_frames * layout.cb_stride;
-        p_source->c_decoded_samples += c_frames;
-        p_source->cb_decoded += u64(c_frames) * layout.cb_stride;
+        DecodeFrames(spans, format, layout, pp_in, i_out + c_done, c_frames);
+        AdvanceBlock(p_voice, p_source, c_frames * layout.cb_stride, c_frames, false);
         c_done += c_frames;
-        c_idle_steps = 0;
-        NotifyDrainedTail(p_voice, *p_source, chain);
     }
     return c_done;
 }
 
-const u8* ReadPosition(const WaveformQueue& queue, const SourceState& source) {
-    if (!source.has_block || queue.c_committed == 0) {
-        return nullptr;
-    }
-    const Chain chain = ChainOf(queue);
-    const ChainCursor cursor = Locate(queue, chain, source.cb_consumed);
-    if (cursor.i_block >= chain.c_blocks) {
-        const WaveformBlock& last = BlockAt(queue, chain.c_blocks - 1);
-        return BlockData(last) + last.cb_data;
-    }
-    return BlockData(BlockAt(queue, cursor.i_block)) + cursor.off;
+u32 DataLockBit(const Voice& voice) {
+    return 1u << voice.data_lock_shift;
+}
+
+u32 DataReadingBit(const Voice& voice) {
+    return 2u << voice.data_lock_shift;
+}
+
+bool BeginDataRead(Voice* p_voice) {
+    std::atomic<u32>& word = *p_voice->p_data_lock;
+    u32 value = word.load(std::memory_order_acquire);
+    do {
+        if (value & DataLockBit(*p_voice)) {
+            return false;
+        }
+    } while (!word.compare_exchange_weak(value, value | DataReadingBit(*p_voice), std::memory_order_acq_rel));
+    return true;
+}
+
+void EndDataRead(Voice* p_voice) {
+    p_voice->p_data_lock->fetch_and(~DataReadingBit(*p_voice), std::memory_order_release);
 }
 
 void Resample(const float* p_in, float* p_out, u32 c_samples, u32 step, u32 fraction) {
@@ -374,27 +436,39 @@ u32 ProcessSource(RenderContext& context, Voice* p_voice, const Planes& out) {
     const VoiceParams& params = *p_voice->p_active_params;
     const SourceFormat& format = params.format;
     SourceState& source = p_voice->p_dsp->source;
-    WaveformQueue& queue = p_voice->queue;
     const u32 c_channels = p_voice->c_out_channels;
     const u32 c_samples = context.c_grain_samples;
-    if (queue.was_reset) {
-        queue.was_reset = false;
-        source.has_block = false;
-        source.is_end = false;
-        source.c_exit_consumed = 0;
-    }
     if (p_voice->are_params_changed) {
         const double step = double(params.pitch_ratio) * kUnitStep * format.sample_rate_hz / context.sample_rate_hz;
         source.step = step > 0.0 ? u32(std::min(step, double(kMaxStep))) : 0;
     }
+    // The voice starts with four zero samples of history, so its first decoded sample comes out at
+    // output sample 3 at pitch 1 (0x1e6a0, spec 09 §2).
     if (p_voice->is_first_grain) {
         source.fraction = 0;
+        source.c_history = kHistoryTaps;
+        for (u32 i_channel = 0; i_channel < c_channels; ++i_channel) {
+            std::fill_n(source.history[i_channel], kHistoryTaps, 0.0f);
+        }
     }
     if (p_voice->flags & STATE_PAUSED) {
         for (u32 i_channel = 0; i_channel < c_channels; ++i_channel) {
             std::memset(out.p_channel[i_channel], 0, c_samples * sizeof(float));
         }
         return p_voice->flags;
+    }
+    const u32 kept_flags = p_voice->flags & (STATE_IN_USE | STATE_PAUSED | STATE_STOPPED);
+    // A locked voice fades its last history sample (the firmware's channel work +0x24) to 0 over the
+    // grain without reading or moving on (spec 09 §6.2).
+    if (!BeginDataRead(p_voice)) {
+        for (u32 i_channel = 0; i_channel < c_channels; ++i_channel) {
+            const float last = source.history[i_channel][kHistoryTaps - 1];
+            const float step = last / float(c_samples);
+            for (u32 i = 0; i < c_samples; ++i) {
+                out.p_channel[i_channel][i] = last - float(i) * step;
+            }
+        }
+        return kept_flags | STATE_PLAYING;
     }
     const u32 c_needed = ((source.step * c_samples + source.fraction) >> kFractionBits) + kHistoryTaps;
     float* pp_in[kMaxChannels];
@@ -403,7 +477,6 @@ u32 ProcessSource(RenderContext& context, Voice* p_voice, const Planes& out) {
         std::copy_n(source.history[i_channel], source.c_history, pp_in[i_channel]);
     }
     u32 c_input = source.c_history;
-    source.is_starved = false;
     if (c_input < c_needed) {
         const u32 c_decoded = Decode(p_voice, &source, format, pp_in, c_input, c_needed - c_input);
         for (u32 i_channel = 0; i_channel < c_channels; ++i_channel) {
@@ -418,8 +491,7 @@ u32 ProcessSource(RenderContext& context, Voice* p_voice, const Planes& out) {
     }
     source.c_history = c_input - c_consumed;
     source.fraction = (source.fraction + c_samples * source.step) & (kUnitStep - 1);
-    source.p_read = ReadPosition(queue, source);
-    const u32 kept_flags = p_voice->flags & (STATE_IN_USE | STATE_PAUSED | STATE_STOPPED);
+    EndDataRead(p_voice);
     if (source.is_end && source.c_history <= kHistoryTaps) {
         return 0;
     }
@@ -429,20 +501,71 @@ u32 ProcessSource(RenderContext& context, Voice* p_voice, const Planes& out) {
     return kept_flags | STATE_PLAYING;
 }
 
-void RunFilters(const Voice& voice, u32 location, const Planes& planes, u32 c_channels, u32 c_samples) {
-    for (u32 i_filter = 0; i_filter < voice.p_rack->limits.max_filters; ++i_filter) {
-        ProcessFilter(voice.p_active_filters[i_filter], location,
-                      voice.p_filter_states + std::size_t(i_filter) * kMaxChannels, planes, c_channels, c_samples,
-                      voice.is_first_grain);
-    }
-}
-
 } // namespace
 
 void ResetSource(Voice* p_voice) {
-    SourceState& source = p_voice->p_dsp->source;
-    source = {};
-    p_voice->queue.was_reset = false;
+    p_voice->p_dsp->source = {};
+}
+
+// The render sets the reading bit only while it holds the voice lock, which the caller holds too, so
+// the wait is the firmware's (0x87f0) kept for a render that would read without it.
+void LockVoiceData(Voice* p_voice) {
+    if (!p_voice->p_data_lock) {
+        return;
+    }
+    std::atomic<u32>& word = *p_voice->p_data_lock;
+    u32 value = word.load(std::memory_order_acquire);
+    for (;;) {
+        if (value & DataReadingBit(*p_voice)) {
+            std::this_thread::sleep_for(std::chrono::microseconds(100));
+            value = word.load(std::memory_order_acquire);
+        } else if (word.compare_exchange_weak(value, value | DataLockBit(*p_voice), std::memory_order_acq_rel)) {
+            return;
+        }
+    }
+}
+
+void UnlockVoiceData(Voice* p_voice) {
+    if (p_voice->p_data_lock) {
+        p_voice->p_data_lock->fetch_and(~DataLockBit(*p_voice), std::memory_order_release);
+    }
+}
+
+// After a reset of the queue (a setup, 0x10000001 with bit 2) the source starts on its new first block.
+void FlushWaveformQueue(Voice* p_voice) {
+    WaveformQueue& queue = p_voice->queue;
+    ActiveWaveformQueue& active = p_voice->active_queue;
+    if (!queue.p_slots) {
+        return;
+    }
+    std::copy_n(queue.p_slots, queue.c_capacity, active.p_slots);
+    active.i_write = queue.i_write;
+    active.c_queued = queue.c_queued;
+    active.c_exit_requests = queue.c_exit_requests;
+    active.is_terminated = queue.is_terminated;
+    if (queue.was_reset) {
+        queue.was_reset = false;
+        SourceState& source = p_voice->p_dsp->source;
+        source.num_samples = 0;
+        source.num_skip_samples = 0;
+        source.cb_consumed = 0;
+        source.cb_notified = 0;
+        source.i_sample = 0;
+        source.c_repeats = 0;
+        source.c_exit_consumed = 0;
+        source.is_end = false;
+    }
+}
+
+// The slots the render took this grain leave the game's count, unless the game reset the queue since
+// the flush, which already emptied it.
+void PostWaveformQueue(Voice* p_voice) {
+    WaveformQueue& queue = p_voice->queue;
+    ActiveWaveformQueue& active = p_voice->active_queue;
+    if (!queue.was_reset) {
+        queue.c_queued -= std::min(active.c_popped, queue.c_queued);
+    }
+    active.c_popped = 0;
 }
 
 void ProcessSamplerVoice(RenderContext& context, Voice* p_voice, u32* p_event_code) {
@@ -452,18 +575,27 @@ void ProcessSamplerVoice(RenderContext& context, Voice* p_voice, u32* p_event_co
     const Planes planes = WorkPlanes(context, WORK_VOICE);
     VoiceDsp& dsp = *p_voice->p_dsp;
     p_voice->flags = ProcessSource(context, p_voice, planes);
+    const u32 set_modules = params.set_modules;
+    const u32 first_modules = p_voice->first_active_modules;
     RunFilters(*p_voice, 0, planes, c_channels, c_samples);
-    dsp.envelope_height = ProcessEnvelope(params.envelope, &dsp.envelope, planes, c_channels, c_samples,
-                                          p_voice->is_first_grain, &p_voice->flags, p_event_code);
-    ProcessDistortion(params.distortion, planes, c_channels, c_samples);
-    if (params.user_fx.is_set && params.user_fx.pfn_handler) {
+    dsp.envelope_height = 1.0f;
+    if (set_modules & MODULE_ENVELOPE) {
+        dsp.envelope_height = ProcessEnvelope(params.envelope, &dsp.envelope, planes, c_channels, c_samples,
+                                              first_modules & MODULE_ENVELOPE, &p_voice->flags, p_event_code);
+    }
+    if (set_modules & MODULE_DISTORTION) {
+        ProcessDistortion(params.distortion, planes, c_channels, c_samples);
+    }
+    if ((set_modules & MODULE_USER_FX) && params.user_fx.pfn_handler) {
         static std::uint64_t s_c_uses;
         NoteUnimplemented(&s_c_uses, "Ngs2 sampler UserFx 0x10000008: the game's handler is not called yet (F6)");
     }
     RunFilters(*p_voice, 1, planes, c_channels, c_samples);
-    if (!(p_voice->flags & STATE_PAUSED)) {
+    if (!(set_modules & MODULE_METER)) {
+        std::fill_n(dsp.peaks[0], kPeakValues, 0.0f);
+    } else if (!(p_voice->flags & STATE_PAUSED)) {
         ProcessPeakMeter(params.meter_mode, &p_voice->meters[0], planes, c_channels, c_samples,
-                         p_voice->is_first_grain, dsp.peaks[0]);
+                         first_modules & MODULE_METER, dsp.peaks[0]);
     }
     ApplyEventCode(planes, c_channels, c_samples, *p_event_code);
     MixPorts(context, p_voice, planes, c_channels);

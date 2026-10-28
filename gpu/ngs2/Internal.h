@@ -239,6 +239,10 @@ struct Voice {
     FilterParams* p_filters;
     MasteringMatrices* p_mastering_matrices;
     WaveformQueue queue;
+    ActiveWaveformQueue active_queue;
+    // The sampler's word of the rack's data lock bitmap and this voice's two bits in it.
+    std::atomic<u32>* p_data_lock;
+    u32 data_lock_shift;
     u8* p_state;
     // The render's own, under the system's process lock.
     VoiceParams* p_active_params;
@@ -266,6 +270,10 @@ struct Voice {
     u32 grain_events;
     u32 c_in_channels;
     u32 c_out_channels;
+    // ModuleBit sets: the modules still waiting for their first grain since PLAY, and the ones whose
+    // first grain this is.
+    u32 first_grain_modules;
+    u32 first_active_modules;
     GraphMark graph_mark;
     bool is_active;
     bool is_first_grain;
@@ -431,19 +439,25 @@ s32 ControlSubmixer(OrbisNgs2Handle h_voice, Voice* p_voice, const OrbisNgs2Voic
 s32 ControlMastering(OrbisNgs2Handle h_voice, Voice* p_voice, const OrbisNgs2VoiceParamHeader* p_param);
 s32 InvalidControlSize(OrbisNgs2Handle h_voice, const OrbisNgs2VoiceParamHeader* p_param, u32 cb_expected);
 s32 InvalidControlId(OrbisNgs2Handle h_voice, const OrbisNgs2VoiceParamHeader* p_param);
+// 0xc001 (ModuleRead.cpp), under the voice lock.
+void ReadModuleBlock(const Voice& voice, OrbisNgs2VoiceParamHeader* p_header);
 
 // The modules the sampler and the submixer share (ModuleParams.cpp); the submixer's parameters have
-// the sampler's layout (Abi.cpp).
-s32 SetEnvelope(OrbisNgs2Handle h_voice, const Voice& voice, const OrbisNgs2SamplerVoiceEnvelopeParam* p_param,
-                EnvelopeParams* p_out);
-void ReadEnvelope(const EnvelopeParams& envelope, OrbisNgs2SamplerVoiceEnvelopeParam* p_param);
-void SetDistortion(const OrbisNgs2SamplerVoiceDistortionParam* p_param, DistortionParams* p_out);
-void ReadDistortion(const DistortionParams& distortion, OrbisNgs2SamplerVoiceDistortionParam* p_param);
-void SetUserFx(const OrbisNgs2SamplerVoiceUserFxParam* p_param, UserFxParams* p_out);
-void ReadUserFx(const UserFxParams& user_fx, OrbisNgs2SamplerVoiceUserFxParam* p_param);
-s32 SetPeakMeter(OrbisNgs2Handle h_voice, const OrbisNgs2SamplerVoicePeakMeterParam* p_param, u32* p_out_mode);
+// the sampler's layout (Abi.cpp). Each setter marks its module set (ModuleBit); each read of a module
+// without a parameter answers zeros.
+s32 SetEnvelope(OrbisNgs2Handle h_voice, const Voice& voice, const OrbisNgs2SamplerVoiceEnvelopeParam* p_param);
+void ReadEnvelope(const VoiceParams& params, OrbisNgs2SamplerVoiceEnvelopeParam* p_param);
+void SetDistortion(const OrbisNgs2SamplerVoiceDistortionParam* p_param, VoiceParams* p_params);
+void ReadDistortion(const VoiceParams& params, OrbisNgs2SamplerVoiceDistortionParam* p_param);
+void SetUserFx(const OrbisNgs2SamplerVoiceUserFxParam* p_param, VoiceParams* p_params);
+void ReadUserFx(const VoiceParams& params, OrbisNgs2SamplerVoiceUserFxParam* p_param);
+s32 SetPeakMeter(OrbisNgs2Handle h_voice, const OrbisNgs2SamplerVoicePeakMeterParam* p_param, VoiceParams* p_params);
+u32 ReadPeakMeter(const VoiceParams& params);
 s32 SetFilter(OrbisNgs2Handle h_voice, const Voice& voice, const OrbisNgs2SamplerVoiceFilterParam* p_param);
 s32 ReadFilter(OrbisNgs2Handle h_voice, const Voice& voice, OrbisNgs2SamplerVoiceFilterParam* p_param);
+// Runs the voice's filters that sit at location (spec 06 §4; 2 + p before port p).
+void RunFilters(const Voice& voice, u32 location, const Planes& planes, u32 c_channels, u32 c_samples);
+bool HasFilterAt(const Voice& voice, u32 location);
 
 // The render's steps (Graph.cpp), under the system's process lock.
 void FlushRack(System* p_system, Rack* p_rack, bool can_flush);
@@ -452,7 +466,10 @@ void ProcessVoice(RenderContext& context, Voice* p_voice);
 void PostRack(Rack* p_rack);
 // Drops every reference the render holds to a rack's voices before the rack leaves its system.
 void ForgetRackVoices(System* p_system, Rack* p_rack);
-void QueueVoiceCallback(Voice* p_voice, u32 type, const WaveformBlock& block, u32 c_repeats);
+// The payload of a sampler's block-end (1) or loop (2) callback (0x273f0, spec 09 §8.3): the slot's
+// bytes past the ones already handed back, with the userData of the block being played.
+void QueueVoiceCallback(Voice* p_voice, u32 type, const WaveformBlock& slot, u64 user_data, u32 cb_notified,
+                        u32 c_repeats);
 // Gives a voice's channel works back to its rack's pools; under the voice lock.
 void ReleaseChannelWorks(Voice* p_voice);
 
@@ -462,6 +479,13 @@ void ProcessSamplerVoice(RenderContext& context, Voice* p_voice, u32* p_event_co
 void ProcessSubmixerVoice(RenderContext& context, Voice* p_voice, u32* p_event_code);
 void ProcessMasteringVoice(RenderContext& context, Voice* p_voice, u32* p_event_code);
 void ResetSource(Voice* p_voice);
+// The data lock (spec 09 §6.2): once KILL returns, the render no longer reads the voice's waveform,
+// which the game may free at once, until a new PLAY reaches the render.
+void LockVoiceData(Voice* p_voice);
+void UnlockVoiceData(Voice* p_voice);
+// The render's side of a sampler voice's queue, at the flush and at the render's post.
+void FlushWaveformQueue(Voice* p_voice);
+void PostWaveformQueue(Voice* p_voice);
 
 // Ports, inputs and outputs (Mixer.cpp, 0x265a0, 0x26210, 0x27060).
 void ApplyEventCode(const Planes& planes, u32 c_channels, u32 c_samples, u32 event_code);
@@ -470,8 +494,9 @@ Planes ReadInput(RenderContext& context, Voice* p_voice, u32 i_input);
 void WriteRenderBuffer(RenderContext& context, u32 i_buffer, const Planes& planes, u32 c_channels);
 void ExpandVoiceMatrices(Voice* p_voice);
 void ResetMasteringMatrices(MasteringMatrices* p_matrices);
-// The class of a channel count in the fixed matrix tables: 1, 2, 6, 8 channels are 0 to 3.
-s32 ChannelClass(u32 c_channels);
+// The class of a channel count in the mastering's matrix types (0x14280, spec 09 §4.2): 1, 2 and 8
+// channels are classes 0, 1 and 3, every other count the 6-channel class 2.
+u32 ChannelClass(u32 c_channels);
 
 s32 PS4_SYSV_ABI sceNgs2SystemQueryBufferSize(const OrbisNgs2SystemOption* p_option,
                                               OrbisNgs2ContextBufferInfo* p_out_info);

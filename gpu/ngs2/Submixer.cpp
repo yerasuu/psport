@@ -68,18 +68,23 @@ bool IsMixerChannelCount(u32 c_channels) {
     return c_channels == 1 || c_channels == 2 || c_channels == 6 || c_channels == 8;
 }
 
-void SetCompressor(const OrbisNgs2SubmixerVoiceCompressorParam* p_param, CompressorParams* p_out) {
-    *p_out = {p_param->flags,
+// Bit 2 (sidechain) only holds on a rack with two inputs, and the read-back rebuilds the flags from
+// the four bits the firmware keeps (spec 09 §3.2).
+void SetCompressor(const OrbisNgs2SubmixerVoiceCompressorParam* p_param, u32 max_inputs, CompressorParams* p_out) {
+    const u32 flag_mask = COMPRESSOR_DISABLED | COMPRESSOR_RMS | COMPRESSOR_LINK_WITHOUT_LFE |
+                          (max_inputs >= 2 ? u32(COMPRESSOR_SIDECHAIN) : 0);
+    *p_out = {p_param->flags & flag_mask,
               std::clamp(p_param->threshold, 0.0f, 1.0f),
               std::clamp(p_param->ratio, 0.0f, 1.0f),
               std::clamp(p_param->knee, 0.0f, 1.0f),
               std::clamp(p_param->attackTime, 0.0f, 10.0f),
               std::clamp(p_param->releaseTime, 0.0f, 10.0f),
-              std::clamp(p_param->level, 0.0f, 32.0f),
-              true};
+              std::clamp(p_param->level, 0.0f, 32.0f)};
 }
 
-void ReadCompressor(const CompressorParams& compressor, OrbisNgs2SubmixerVoiceCompressorParam* p_param) {
+void ReadCompressor(const VoiceParams& params, OrbisNgs2SubmixerVoiceCompressorParam* p_param) {
+    const CompressorParams compressor =
+        (params.set_modules & MODULE_COMPRESSOR) ? params.compressor : CompressorParams{};
     p_param->flags = compressor.flags;
     p_param->threshold = compressor.threshold;
     p_param->ratio = compressor.slope;
@@ -87,14 +92,7 @@ void ReadCompressor(const CompressorParams& compressor, OrbisNgs2SubmixerVoiceCo
     p_param->attackTime = compressor.attack_s;
     p_param->releaseTime = compressor.release_s;
     p_param->level = compressor.level;
-}
-
-void RunFilters(const Voice& voice, u32 location, const Planes& planes, u32 c_channels, u32 c_samples) {
-    for (u32 i_filter = 0; i_filter < voice.p_rack->limits.max_filters; ++i_filter) {
-        ProcessFilter(voice.p_active_filters[i_filter], location,
-                      voice.p_filter_states + std::size_t(i_filter) * kMaxChannels, planes, c_channels, c_samples,
-                      voice.is_first_grain);
-    }
+    p_param->reserved = 0;
 }
 
 } // namespace
@@ -117,43 +115,44 @@ s32 ControlSubmixer(OrbisNgs2Handle h_voice, Voice* p_voice, const OrbisNgs2Voic
         params.c_in_channels = c_channels;
         params.c_out_channels = c_channels;
         params.is_setup = true;
+        params.set_modules = 0;
         p_voice->control.fetch_or(VOICE_PENDING_SETUP, std::memory_order_relaxed);
         return ORBIS_OK;
     }
     case SUBMIXER_ENVELOPE:
-        return SetEnvelope(h_voice, *p_voice, ParamOf<OrbisNgs2SamplerVoiceEnvelopeParam>(p_header),
-                           &params.envelope);
+        return SetEnvelope(h_voice, *p_voice, ParamOf<OrbisNgs2SamplerVoiceEnvelopeParam>(p_header));
     case SUBMIXER_COMPRESSOR:
-        SetCompressor(ParamOf<OrbisNgs2SubmixerVoiceCompressorParam>(p_header), &params.compressor);
+        SetCompressor(ParamOf<OrbisNgs2SubmixerVoiceCompressorParam>(p_header), p_voice->p_rack->limits.max_inputs,
+                      &params.compressor);
+        params.set_modules |= MODULE_COMPRESSOR;
         return ORBIS_OK;
     case SUBMIXER_DISTORTION:
-        SetDistortion(ParamOf<OrbisNgs2SamplerVoiceDistortionParam>(p_header), &params.distortion);
+        SetDistortion(ParamOf<OrbisNgs2SamplerVoiceDistortionParam>(p_header), &params);
         return ORBIS_OK;
     case SUBMIXER_USER_FX:
-        SetUserFx(ParamOf<OrbisNgs2SamplerVoiceUserFxParam>(p_header), &params.user_fx);
+        SetUserFx(ParamOf<OrbisNgs2SamplerVoiceUserFxParam>(p_header), &params);
         return ORBIS_OK;
     case SUBMIXER_PEAK_METER:
-        return SetPeakMeter(h_voice, ParamOf<OrbisNgs2SamplerVoicePeakMeterParam>(p_header),
-                            &params.meter_mode);
+        return SetPeakMeter(h_voice, ParamOf<OrbisNgs2SamplerVoicePeakMeterParam>(p_header), &params);
     case SUBMIXER_FILTER:
         return SetFilter(h_voice, *p_voice, ParamOf<OrbisNgs2SamplerVoiceFilterParam>(p_header));
     case SUBMIXER_READ_SETUP:
         ParamOf<OrbisNgs2SubmixerVoiceSetupParam>(p_header)->numIoChannels = params.c_out_channels;
         return ORBIS_OK;
     case SUBMIXER_READ_ENVELOPE:
-        ReadEnvelope(params.envelope, ParamOf<OrbisNgs2SamplerVoiceEnvelopeParam>(p_header));
+        ReadEnvelope(params, ParamOf<OrbisNgs2SamplerVoiceEnvelopeParam>(p_header));
         return ORBIS_OK;
     case SUBMIXER_READ_COMPRESSOR:
-        ReadCompressor(params.compressor, ParamOf<OrbisNgs2SubmixerVoiceCompressorParam>(p_header));
+        ReadCompressor(params, ParamOf<OrbisNgs2SubmixerVoiceCompressorParam>(p_header));
         return ORBIS_OK;
     case SUBMIXER_READ_DISTORTION:
-        ReadDistortion(params.distortion, ParamOf<OrbisNgs2SamplerVoiceDistortionParam>(p_header));
+        ReadDistortion(params, ParamOf<OrbisNgs2SamplerVoiceDistortionParam>(p_header));
         return ORBIS_OK;
     case SUBMIXER_READ_USER_FX:
-        ReadUserFx(params.user_fx, ParamOf<OrbisNgs2SamplerVoiceUserFxParam>(p_header));
+        ReadUserFx(params, ParamOf<OrbisNgs2SamplerVoiceUserFxParam>(p_header));
         return ORBIS_OK;
     case SUBMIXER_READ_PEAK_METER:
-        ParamOf<OrbisNgs2SubmixerVoicePeakMeterParam>(p_header)->enableFlag = params.meter_mode;
+        ParamOf<OrbisNgs2SubmixerVoicePeakMeterParam>(p_header)->enableFlag = ReadPeakMeter(params);
         return ORBIS_OK;
     case SUBMIXER_READ_FILTER:
         return ReadFilter(h_voice, *p_voice, ParamOf<OrbisNgs2SamplerVoiceFilterParam>(p_header));
@@ -177,26 +176,37 @@ void ProcessSubmixerVoice(RenderContext& context, Voice* p_voice, u32* p_event_c
     for (u32 i_channel = 0; i_channel < c_channels; ++i_channel) {
         std::memcpy(planes.p_channel[i_channel], input.p_channel[i_channel], c_samples * sizeof(float));
     }
-    const Rack& rack = *p_voice->p_rack;
-    if (rack.limits.max_inputs > 1 && p_voice->p_input_started[rack.c_input_blocks + rack.i_input_block]) {
-        // Something reached the second input (maxInputs 2), but how the submixer uses it is not read yet.
-        static std::uint64_t s_c_uses;
-        NoteUnimplemented(&s_c_uses, "Ngs2 submixer second input (maxInputs 2; rea: 0x161c0)");
-    }
+    // The second input only feeds the compressor's detector (spec 09 §11); it is cleared like the
+    // first when nothing reached it.
+    const Planes sidechain = p_voice->p_rack->limits.max_inputs > 1 ? ReadInput(context, p_voice, 1) : planes;
+    const u32 set_modules = params.set_modules;
+    const u32 first_modules = p_voice->first_active_modules;
     RunFilters(*p_voice, 0, planes, c_channels, c_samples);
-    dsp.envelope_height = ProcessEnvelope(params.envelope, &dsp.envelope, planes, c_channels, c_samples,
-                                          p_voice->is_first_grain, &p_voice->flags, p_event_code);
-    ProcessCompressor(params.compressor, &dsp.compressor, planes, c_channels, c_samples, context.sample_rate_hz,
-                      p_voice->is_first_grain);
-    ProcessDistortion(params.distortion, planes, c_channels, c_samples);
-    if (params.user_fx.is_set && params.user_fx.pfn_handler) {
+    dsp.envelope_height = 1.0f;
+    if (set_modules & MODULE_ENVELOPE) {
+        dsp.envelope_height = ProcessEnvelope(params.envelope, &dsp.envelope, planes, c_channels, c_samples,
+                                              first_modules & MODULE_ENVELOPE, &p_voice->flags, p_event_code);
+    }
+    if (set_modules & MODULE_COMPRESSOR) {
+        const Planes& detector = (params.compressor.flags & COMPRESSOR_SIDECHAIN) ? sidechain : planes;
+        ProcessCompressor(params.compressor, &dsp.compressor, planes, detector, c_channels, c_samples,
+                          context.sample_rate_hz, first_modules & MODULE_COMPRESSOR);
+    } else {
+        dsp.compressor.peak_gain = 1.0f;
+    }
+    if (set_modules & MODULE_DISTORTION) {
+        ProcessDistortion(params.distortion, planes, c_channels, c_samples);
+    }
+    if ((set_modules & MODULE_USER_FX) && params.user_fx.pfn_handler) {
         static std::uint64_t s_c_uses;
         NoteUnimplemented(&s_c_uses, "Ngs2 submixer UserFx 0x20000004: the game's handler is not called yet (F6)");
     }
     RunFilters(*p_voice, 1, planes, c_channels, c_samples);
-    if (!is_paused) {
+    if (!(set_modules & MODULE_METER)) {
+        std::fill_n(dsp.peaks[0], kPeakValues, 0.0f);
+    } else if (!is_paused) {
         ProcessPeakMeter(params.meter_mode, &p_voice->meters[0], planes, c_channels, c_samples,
-                         p_voice->is_first_grain, dsp.peaks[0]);
+                         first_modules & MODULE_METER, dsp.peaks[0]);
     }
     ApplyEventCode(planes, c_channels, c_samples, *p_event_code);
     MixPorts(context, p_voice, planes, c_channels);
