@@ -260,7 +260,7 @@ as version 2. It is maintained by Yerasuu.
 | Project | What it provides | License |
 |---|---|---|
 | [bbport](https://github.com/deadinside28/bloodborne_pc) by deadinside | psport's origin: native loader, HLE runtime, Vulkan renderer, everything for Bloodborne | GPL-2.0-or-later |
-| [shadPS4](https://github.com/shadps4-emu/shadPS4) | video core, shader recompiler, AvPlayer and other libraries carried by bbport; source of the libSceFiber and libSceFont ports | GPL-2.0-or-later |
+| [shadPS4](https://github.com/shadps4-emu/shadPS4) | video core, shader recompiler, AvPlayer and other libraries carried by bbport; source of the libSceFiber and libSceFont ports and of the libSceNgs2 headers | GPL-2.0-or-later |
 | [AnyPS5](https://github.com/boykopovar/AnyPS5) | source of the libSceNgs2 and libSceAudiodec ports | GPL-2.0-only |
 
 Source commits and changes to inherited code are recorded in [FORK.md](FORK.md) and

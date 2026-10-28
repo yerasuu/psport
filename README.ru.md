@@ -266,7 +266,7 @@ GPL-2.0-or-later и используются как версия 2. Проект
 | Проект | Что даёт | Лицензия |
 |---|---|---|
 | [bbport](https://github.com/deadinside28/bloodborne_pc) от deadinside | исток psport: нативный загрузчик, среда HLE, рендерер Vulkan, всё для Bloodborne | GPL-2.0-or-later |
-| [shadPS4](https://github.com/shadps4-emu/shadPS4) | видеоядро, рекомпилятор шейдеров, AvPlayer и другие библиотеки, пришедшие с bbport; источник портов libSceFiber и libSceFont | GPL-2.0-or-later |
+| [shadPS4](https://github.com/shadps4-emu/shadPS4) | видеоядро, рекомпилятор шейдеров, AvPlayer и другие библиотеки, пришедшие с bbport; источник портов libSceFiber и libSceFont и заголовков libSceNgs2 | GPL-2.0-or-later |
 | [AnyPS5](https://github.com/boykopovar/AnyPS5) | источник портов libSceNgs2 и libSceAudiodec | GPL-2.0 |
 
 Исходные коммиты и изменения унаследованного кода записаны в [FORK.md](FORK.md) и
