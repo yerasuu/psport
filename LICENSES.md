@@ -11,9 +11,9 @@ licence applied to every file. [LICENSES.json](LICENSES.json) lists the componen
 
 | Component | Terms and source |
 | --- | --- |
-| psport runtime, GPU glue, launcher and tooling (`src`, `gpu/shim`, `gpu/port`, `gpu/memory`, `gpu/diag`, `gpu/layer`, `launcher`, `tools`, `packaging`, scripts) | GPL-2.0-or-later (GPL-2.0-only where a header says so); `LICENSE`, `README.md`. `src/` carries no per-file header, so README.md is its only statement |
+| psport runtime, GPU glue, launcher and tooling (`src`, `gpu/shim`, `gpu/port`, `gpu/memory`, `gpu/diag`, `gpu/layer`, the native Ngs2 `gpu/ngs2`, `launcher`, `tools`, `packaging`, scripts) | GPL-2.0-or-later (GPL-2.0-only where a header says so); `LICENSE`, `README.md`. `src/` carries no per-file header, so README.md is its only statement |
 | Per-title game profiles (`gpu/games`) | GPL-2.0-or-later; the BBSC co-op code is Copyright 2026 CLS_AMG |
-| libSceNgs2 and libSceAudiodec (`gpu/ngs2`, `gpu/audiodec`) | GPL-2.0-only; from AnyPS5 (https://github.com/boykopovar/AnyPS5) at `5edae353` and `a11c8f7f` (FORK.md) |
+| libSceNgs2 and libSceAudiodec (`gpu/ngs2_anyps5`, `gpu/audiodec`) | GPL-2.0-only; from AnyPS5 (https://github.com/boykopovar/AnyPS5) at `5edae353` and `a11c8f7f` (FORK.md) |
 | shadPS4 vendored tree (`gpu/shadps4`) | GPL-2.0-or-later; https://github.com/shadps4-emu/shadPS4 at `b4e7ae7` and the fixes `gpu/VENDOR.txt` lists |
 | Files in that tree under their own licence | MIT (`sha1.h`, `ssa_rewrite_pass.cpp`, `fsr.comp`, AMD's `ffx_a.h` and `ffx_fsr1.h`), BSL-1.0 (`aes.h`), CC0-1.0 (`alignment.h`), BSD-3-Clause AND GPL-2.0-or-later (`bit_field.h`), Zlib (`vk_barrier_tracker.*`, DXVK) |
 | libSceFiber and libSceFont (`gpu/fiber`, `gpu/font`) | GPL-2.0-or-later; shadPS4 at `3a9f572` |
@@ -39,7 +39,7 @@ them. The GPL-2.0-or-later files (shadPS4, bbport, psport's own) are used as ver
 (AnyPS5's Ngs2 and Audiodec, two RPCS3-derived files in the online module) stay as they are. FFmpeg is built as
 LGPL-2.1-or-later without GPL, version 3 or network code, so it can be linked.
 
-**AnyPS5.** The code of `gpu/ngs2` and `gpu/audiodec` is AnyPS5's, GPL-2.0-only. For everything else AnyPS5 is
+**AnyPS5.** The code of `gpu/ngs2_anyps5` and `gpu/audiodec` is AnyPS5's, GPL-2.0-only. For everything else AnyPS5 is
 read for behaviour only; the firmware is read with REA and the result is written natively.
 
 **bbport, SrShadowy and Teefpyre.** bbport (GPL-2.0-or-later) is psport's origin; changes from SrShadowy's fork

@@ -21,7 +21,7 @@ The model is Wine's, not an emulator's.
 | C runtime | `src/*/runtime*.c`, `src/runtime/runtime.h`, `src/runtime/imports/import_*.inc` | `out/psport` | libkernel and the other system libraries, import resolution, the call report |
 | GPU library | `gpu/port/psport_gpu*.cpp`, `gpu/psport_gpu.h` | `out/gpu/libpsport-gpu.so` | C interface between `psport` and the C++ side |
 | Translator | `gpu/shadps4/` (inherited from shadPS4, `gpu/VENDOR.txt`), `gpu/cp/`, `gpu/layer/` | `libpsport-gpu.so` | GnmDriver, VideoOut, command processor, Vulkan rasterizer, caches, shader recompiler |
-| Ported libraries | `gpu/ngs2/`, `gpu/audiodec/`, `gpu/fiber/`, `gpu/font/`, `gpu/pngenc/`, `gpu/pngdec/`, `gpu/jpegdec/` | `libpsport-gpu.so` | libSceNgs2, libSceAudiodec, libSceFiber, libSceFont/FontFt, libScePngEnc, libScePngDec, libSceJpegDec |
+| Ported libraries | `gpu/ngs2/` (native) and `gpu/ngs2_anyps5/`, `gpu/audiodec/`, `gpu/fiber/`, `gpu/font/`, `gpu/pngenc/`, `gpu/pngdec/`, `gpu/jpegdec/` | `libpsport-gpu.so` | libSceNgs2, libSceAudiodec, libSceFiber, libSceFont/FontFt, libScePngEnc, libScePngDec, libSceJpegDec |
 | Port services | `gpu/port/`, `gpu/memory/`, `gpu/diag/` | `libpsport-gpu.so` | settings (`psport.ini`), overlay, submit guard, guest memory, diagnostics |
 | Game profiles | `gpu/games/` | `libpsport-gpu.so` | per-title launch and game data (`Game::Title`) and translator optimisations (`Game::Profile`) |
 | Online module | `gpu/net/` | `out/gpu/` (optional) | network and PSN imports with `PS_ONLINE=1` |

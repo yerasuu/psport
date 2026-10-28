@@ -24,6 +24,7 @@
         "gpu/pngenc",
         "gpu/pngdec",
         "gpu/jpegdec",
+        "gpu/ngs2",
         "gpu/cp",
         "gpu/platform",
         "gpu/tools",
@@ -56,12 +57,12 @@
     {
       "name": "libSceNgs2 and libSceAudiodec ports from AnyPS5",
       "paths": [
-        "gpu/ngs2",
+        "gpu/ngs2_anyps5",
         "gpu/audiodec"
       ],
       "license": "GPL-2.0-only",
       "review": "reviewed",
-      "provenance": "FORK.md, Ported components: libSceNgs2 from https://github.com/boykopovar/AnyPS5 commit 5edae353 and libSceAudiodec from the same repository at a11c8f7f, both GPL-2.0-only. The files carry SPDX-License-Identifier: GPL-2.0-only; gpu/ngs2/Envelope.cpp, Filter.cpp, Limiter.cpp, PeakMeter.cpp and Vag.cpp carry no header (Limiter.cpp is written from firmware 11.00, not from AnyPS5; the origin of the other four is not recorded). Linked into libpsport-gpu.so, so the binary is GPL-2.0, never GPL-3.0 (kb #843)."
+      "provenance": "FORK.md, Ported components: libSceNgs2 from https://github.com/boykopovar/AnyPS5 commit 5edae353 and libSceAudiodec from the same repository at a11c8f7f, both GPL-2.0-only. The files carry SPDX-License-Identifier: GPL-2.0-only; gpu/ngs2_anyps5/Envelope.cpp, Filter.cpp, Limiter.cpp, PeakMeter.cpp and Vag.cpp carry no header (Limiter.cpp is written from firmware 11.00, not from AnyPS5; the origin of the other four is not recorded). Linked into libpsport-gpu.so, so the binary is GPL-2.0, never GPL-3.0 (kb #843)."
     },
     {
       "name": "shadPS4 vendored tree",
