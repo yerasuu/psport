@@ -1,9 +1,11 @@
 /* NID -> function name and the result with which the export reports a state its caller polls or
  * waits for (no event pending, timed out, woken by an abort, busy, would block, already held by the
- * caller), a getter's "never set", or the error retail firmware itself always returns (the
- * GnmDriver resource registration calls, which only work under the debugger): expected results,
- * not failures, so the call report counts these apart. Sorted by NID in strcmp order, then by
- * result, for a binary search. Kept by hand from the codes the runtime's implementations return. */
+ * caller), a getter's "never set", a memory query's "nothing mapped or allocated there" (EACCES, as
+ * libkernel answers it; with find-next, the end of a walk over the ranges), or the error retail
+ * firmware itself always returns (the GnmDriver resource registration calls, which only work under
+ * the debugger): expected results, not failures, so the call report counts these apart. Sorted by
+ * NID in strcmp order, then by result, for a binary search. Kept by hand from the codes the
+ * runtime's implementations return. */
 {"0a2TBNfE3BU","sceHttpGetStatusCode",0x80431082},
 {"12wOHk8ywb0","sceKernelPollSema",0x80020010},
 {"2QfqfeLblbg","sceFontStyleFrameGetScalePixel",0x80460058},
@@ -15,6 +17,7 @@
 {"9UK1vLZQft4","scePthreadMutexLock",0x8002000b},
 {"9lvj5DjHZiA","sceKernelPollEventFlag",0x80020010},
 {"9wO9XrMsNhc","sceNetRecv",0x80410123},
+{"BHouLQzh0X0","sceKernelDirectMemoryQuery",0x8002000d},
 {"BmMjYxmew1w","scePthreadCondTimedwait",0x8002003c},
 {"Ez8xjo9UF4E","recv",35},
 {"H2a+IN9TP0E","scePthreadSemTrywait",0x80020023},
@@ -51,6 +54,7 @@
 {"nvEwfYAImTs","sceGnmRegisterResource",0x8eee00ff},
 {"oBr313PppNE","sendto",35},
 {"obuxdTiwkF8","sceNetCtlGetInfo",0x80412108},
+{"rVjRvHJ0X6c","sceKernelVirtualQuery",0x8002000d},
 {"upoVrzMHFeE","scePthreadMutexTrylock",0x80020010},
 {"w5IHyvahg-o","sem_timedwait",60},
 {"yH17Q6NWtVg","sceUserServiceGetEvent",0x80960007},

@@ -314,6 +314,9 @@ on a second `ReOpenFile` handle so that the file pointer the descriptor shares s
 end-of-file offset, folders through `FILE_FLAG_BACKUP_SEMANTICS` and `FindFirstFileExW`, paths past `MAX_PATH` with
 `\\?\`, pipes from `CreatePipe` polled with `PeekNamedPipe`, flock as `LockFileEx` over the whole file
 (mandatory locks on Windows); other modules hand handles to the table with `ps_win32_fd_adopt` and read them with `ps_win32_fd_handle`.
+The host paths `/dev/urandom` and `/dev/random`, where `runtime_file.c` mounts the guest's random devices as
+on Linux, open the `NUL` device (writes taken and dropped) whose reads come from `ps_host_random_bytes`
+(`BCryptGenRandom`), seek to 0, poll always ready and stat as a character device.
 `win32/host_process.c` has no exec: `CreateProcessW` (arguments quoted for `CommandLineToArgvW`, only descriptors 0-2
 inherited) and the caller waits for the new process and exits with its code; `ps_host_output_tee` and
 `ps_host_on_exit` answer `ENOSYS` (no `fork`, no status in `atexit`). `win32/host_net.c` starts Winsock once and

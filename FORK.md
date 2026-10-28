@@ -649,6 +649,7 @@ Every import the game calls without getting real work done is logged the first t
 | `Calls: offline <NID> (<name>) returns 0 without doing anything; arguments <a0>, ..., <a4>` | first call of a stubbed import `import_offline.inc` lists with result 0 (an NP or HTTP call that only matters with a server) |
 | `Calls: status <NID> (<name>) -> 0x8xxxxxxx; arguments <a0>, ..., <a5>` | first time an import reports a state its caller polls or waits for with that code (no event pending, timed out, busy) |
 | `Calls: status <NID> (<name>) -> -1, errno <n>; arguments <a0>, ..., <a5>` | the same for a POSIX import (`sem_trywait`'s `EAGAIN`, `sem_timedwait`'s `ETIMEDOUT`) |
+| `Calls: <failed\|status\|offline> ...; arguments <a0>, ..., <a5>; path <path>` (or `; address 0x<a>`, `; offset 0x<o>`) | the same first line of an import whose argument names a path (`sceKernelOpen`, `sceKernelStat`, `open`, `stat`, `lstat`, `fstatat`, `access`, `sceKernelCheckReachability`, the mkdir, rmdir, unlink and rename calls, `chdir`), a virtual address (`sceKernelVirtualQuery`, `sceKernelQueryMemoryProtection`, `sceKernelMprotect`) or a direct memory offset (`sceKernelDirectMemoryQuery`, `sceKernelGetDirectMemoryType`); a path the call could not read either (`EFAULT`, null) reads `(unreadable 0x<p>)` |
 
 Failures are watched for the imports bound to the runtime's or the GPU library's own functions whose
 result reports one, per shadPS4's prototypes (`src/runtime/imports/import_returns.inc`, `tools/import_returns.py`:
@@ -658,7 +659,10 @@ failure takes the slow path. The results `src/runtime/imports/import_statuses.in
 from the codes the runtime's implementations return: `sceUserServiceGetEvent`'s no event, the
 timeouts of the `Wait`/`Timedwait`/`Timedlock` calls, the busy result of the `Poll`/`Try` calls,
 `scePthreadMutexLock`'s `EDEADLK` on an error-checking or adaptive mutex the thread already holds,
-which Unreal Engine's critical sections take for a recursive lock) are no failure but the state the caller asked about: they are logged and counted all the same, as
+which Unreal Engine's critical sections take for a recursive lock, `sceKernelVirtualQuery`'s and
+`sceKernelDirectMemoryQuery`'s `EACCES` for a range with nothing mapped or allocated at or, with
+find-next, above it, which ends a walk over the ranges, as libkernel and shadPS4 answer it) are no
+failure but the state the caller asked about: they are logged and counted all the same, as
 `status`. When the process ends (the guest exits, the window is closed, SIGTERM,
 SIGINT or SIGHUP, a fault, the watchdog, a `STOP:`), a summary follows, most calls first:
 
@@ -675,7 +679,16 @@ Calls: summary offline <calls> <NID> (<name>)
 Calls: summary offline <calls> <NID> (<name>) -> 0x8xxxxxxx
 Calls: summary offline <calls> <NID> (<name>) -> -1, errno <n>
 Calls: summary fallback <times> <function> (GPU): <message format>
+Calls: summary <path|address|offset> <NID> (<name>) -> <result>: <value>
+Calls: summary <path|address|offset> <NID> (<name>) -> <result>; <n> more calls with another <path|address|offset>
 ```
+
+A `failed`, `status` or `offline` entry of an import that names a path, an address or an offset
+(the imports in the table above) is followed by one line for each distinct value its calls asked for
+with that result, up to 4, in the order they first came, and a last line counting the calls that
+asked for others. `<result>` is written as on the entry's own line (`0x8xxxxxxx` or `-1, errno <n>`).
+Their second field is not a number, so a parser of `Calls: summary <list> <calls> ...` lines skips
+them; the entry lines keep their format.
 
 `fallback` lists the GPU library's errors that took a fallback (`LOG_ERROR_COUNTED`: an unknown
 format, a pipeline the driver rejected, a skipped present...), by the function that logged them,

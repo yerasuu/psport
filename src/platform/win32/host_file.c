@@ -24,7 +24,7 @@ typedef struct {
     HANDLE h_positional;
     DWORD access, type;
     unsigned flags;
-    int is_directory, is_close_on_exec;
+    int is_directory, is_close_on_exec, is_random;
 } Descriptor;
 
 static Descriptor s_descriptors[DESCRIPTOR_MAX];
@@ -153,7 +153,33 @@ static HANDLE open_existing(const wchar_t *sz_wide, DWORD access, int is_followi
                        FILE_FLAG_BACKUP_SEMANTICS | (is_following_links ? 0 : FILE_FLAG_OPEN_REPARSE_POINT), NULL);
 }
 
+/* runtime_file.c mounts the guest's random devices on the host paths Linux has. Windows has no such
+ * file: the descriptor holds the NUL device, which takes writes as /dev/random does, and its reads
+ * come from BCryptGenRandom (ps_host_random_bytes). */
+static int is_random_device(const char *sz_path) {
+    return !strcmp(sz_path, "/dev/urandom") || !strcmp(sz_path, "/dev/random");
+}
+
+static int open_random_device(unsigned flags) {
+    if (flags & PS_HOST_OPEN_DIRECTORY) return -ENOTDIR;
+    const HANDLE h_handle =
+        CreateFileW(L"NUL", GENERIC_READ | GENERIC_WRITE, SHARE_ALL, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h_handle == INVALID_HANDLE_VALUE) return (int)win32_failure();
+    Descriptor descriptor = {.h_handle = h_handle,
+                             .access = GENERIC_READ | GENERIC_WRITE,
+                             .flags = flags & (PS_HOST_OPEN_ACCESS_MASK | PS_HOST_OPEN_NONBLOCK | PS_HOST_OPEN_APPEND),
+                             .is_close_on_exec = 1,
+                             .is_random = 1};
+    describe_handle(&descriptor);
+    return descriptor_add(&descriptor, 3);
+}
+
+static void stat_random_device(PsHostStat *p_out) {
+    *p_out = (PsHostStat){.mode = MODE_CHARACTER | 0666u, .c_links = 1, .cb_block = 4096};
+}
+
 int ps_host_fs_open(const char *sz_path, unsigned flags, unsigned mode) {
+    if (is_random_device(sz_path)) return open_random_device(flags);
     wchar_t sz_wide[PS_WIN32_PATH_MAX];
     const int error = wide_path(sz_path, sz_wide, PS_WIN32_PATH_MAX);
     if (error) return -error;
@@ -202,6 +228,12 @@ int ps_host_fs_close(int h_file) {
 
 static DWORD clamp_transfer(size_t cb_buffer) { return cb_buffer > INT32_MAX ? INT32_MAX : (DWORD)cb_buffer; }
 
+static int64_t read_random(void *p_buffer, size_t cb_buffer) {
+    const DWORD cb_read = clamp_transfer(cb_buffer);
+    const int error = ps_host_random_bytes(p_buffer, cb_read);
+    return error ? -(int64_t)error : (int64_t)cb_read;
+}
+
 /* A closed pipe's write end and the end of a file read as end of file, as read(2) has them. */
 static int64_t read_failure(void) {
     const DWORD error = GetLastError();
@@ -212,6 +244,7 @@ int64_t ps_host_fs_read(int h_file, void *p_buffer, size_t cb_buffer) {
     Descriptor descriptor;
     if (descriptor_get(h_file, &descriptor)) return -EBADF;
     if (descriptor.is_directory) return -EISDIR;
+    if (descriptor.is_random) return read_random(p_buffer, cb_buffer);
     DWORD cb_done = 0;
     return ReadFile(descriptor.h_handle, p_buffer, clamp_transfer(cb_buffer), &cb_done, NULL) ? cb_done : read_failure();
 }
@@ -258,6 +291,8 @@ static int positional_handle(int h_file, HANDLE *p_out) {
 
 int64_t ps_host_fs_pread(int h_file, void *p_buffer, size_t cb_buffer, int64_t off_file) {
     if (off_file < 0) return -EINVAL;
+    Descriptor descriptor;
+    if (!descriptor_get(h_file, &descriptor) && descriptor.is_random) return read_random(p_buffer, cb_buffer);
     HANDLE h_positional;
     const int error = positional_handle(h_file, &h_positional);
     if (error) return -error;
@@ -281,6 +316,7 @@ int64_t ps_host_fs_seek(int h_file, int64_t off_file, int whence) {
     if (whence != SEEK_SET && whence != SEEK_CUR && whence != SEEK_END) return -EINVAL;
     Descriptor descriptor;
     if (descriptor_get(h_file, &descriptor)) return -EBADF;
+    if (descriptor.is_random) return 0;
     if (descriptor.type != FILE_TYPE_DISK) return -ESPIPE;
     LARGE_INTEGER off_new;
     return SetFilePointerEx(descriptor.h_handle, (LARGE_INTEGER){.QuadPart = off_file}, &off_new, s_methods[whence])
@@ -345,6 +381,10 @@ int ps_host_fs_poll(int h_file, unsigned events, unsigned *p_out_events, int64_t
     if (descriptor_get(h_file, &descriptor)) return EBADF;
     *p_out_events = 0;
     *p_out_cb_ready = 0;
+    if (descriptor.is_random) {
+        *p_out_events = events & (PS_HOST_POLL_IN | PS_HOST_POLL_OUT);
+        return 0;
+    }
     switch (descriptor.type) {
     case FILE_TYPE_PIPE:
         if (descriptor.access & GENERIC_READ) {
@@ -461,6 +501,10 @@ static int stat_wide(const wchar_t *sz_wide, int is_following_links, PsHostStat 
 }
 
 static int stat_path(const char *sz_path, int is_following_links, PsHostStat *p_out) {
+    if (is_random_device(sz_path)) {
+        stat_random_device(p_out);
+        return 0;
+    }
     wchar_t sz_wide[PS_WIN32_PATH_MAX];
     const int error = wide_path(sz_path, sz_wide, PS_WIN32_PATH_MAX);
     return error ? error : stat_wide(sz_wide, is_following_links, p_out);
@@ -472,7 +516,12 @@ int ps_host_fs_stat_link(const char *sz_path, PsHostStat *p_out) { return stat_p
 
 int ps_host_fs_stat_file(int h_file, PsHostStat *p_out) {
     Descriptor descriptor;
-    return descriptor_get(h_file, &descriptor) ? EBADF : stat_handle(descriptor.h_handle, p_out);
+    if (descriptor_get(h_file, &descriptor)) return EBADF;
+    if (descriptor.is_random) {
+        stat_random_device(p_out);
+        return 0;
+    }
+    return stat_handle(descriptor.h_handle, p_out);
 }
 
 /* Only the read-only attribute denies anything Windows' permission bits would: write access to a
@@ -499,6 +548,7 @@ int ps_host_fs_truncate_stream(FILE *p_stream, int64_t cb_file) {
 }
 
 int ps_host_fs_access(const char *sz_path, int mode) {
+    if (is_random_device(sz_path)) return 0;
     wchar_t sz_wide[PS_WIN32_PATH_MAX];
     const int error = wide_path(sz_path, sz_wide, PS_WIN32_PATH_MAX);
     if (error) return error;
