@@ -5544,8 +5544,17 @@ const std::string& BbscProcessUserId() {
             while (i < line.size() && (line[i] == ' ' || line[i] == '=' || line[i] == '"')) {
                 ++i;
             }
-            while (i < line.size() && line[i] >= '0' && line[i] <= '9' && out.size() < max_digits) {
-                out += line[i++];
+            const size_t off_value = i;
+            while (i < line.size() && line[i] != ' ' && line[i] != '"') {
+                ++i;
+            }
+            const std::string_view value = line.substr(off_value, i - off_value);
+            const bool is_numeric = value.find_first_not_of("0123456789") == std::string_view::npos;
+            if (is_numeric && value.size() <= max_digits) {
+                out = value;
+            } else if (!value.empty()) {
+                LOG_WARNING(Debug, "BBSC save slot: --user-id must be at most {} digits, ignoring it",
+                            max_digits);
             }
         }
         if (!out.empty()) {
