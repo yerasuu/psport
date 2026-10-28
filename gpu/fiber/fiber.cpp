@@ -68,7 +68,8 @@ void PS4_SYSV_ABI _sceFiberCheckStackOverflow(OrbisFiberContext* ctx) {
     }
 }
 
-s32 PS4_SYSV_ABI _sceFiberAttachContext(OrbisFiber* fiber, void* addr_context, u64 size_context) {
+s32 PS4_SYSV_ABI _sceFiberCheckAttachContext(const OrbisFiber* fiber, const void* addr_context,
+                                             u64 size_context) {
     if (size_context && size_context < ORBIS_FIBER_CONTEXT_MINIMUM_SIZE) {
         return ORBIS_FIBER_ERROR_RANGE;
     }
@@ -81,7 +82,10 @@ s32 PS4_SYSV_ABI _sceFiberAttachContext(OrbisFiber* fiber, void* addr_context, u
     if (fiber->addr_context) {
         return ORBIS_FIBER_ERROR_INVALID;
     }
+    return ORBIS_OK;
+}
 
+void PS4_SYSV_ABI _sceFiberAttachContext(OrbisFiber* fiber, void* addr_context, u64 size_context) {
     fiber->addr_context = addr_context;
     fiber->size_context = size_context;
     fiber->context_start = addr_context;
@@ -99,8 +103,6 @@ s32 PS4_SYSV_ABI _sceFiberAttachContext(OrbisFiber* fiber, void* addr_context, u
             *stack_ptr++ = kFiberStackSizeCheck;
         }
     }
-
-    return ORBIS_OK;
 }
 
 void PS4_SYSV_ABI _sceFiberSwitchToFiber(OrbisFiber* fiber, u64 arg_on_run_to,
@@ -300,16 +302,22 @@ s32 PS4_SYSV_ABI sceFiberRunImpl(OrbisFiber* fiber, void* addr_context, u64 size
     }
 
     /* Caller wants to attach context and run. */
-    if (addr_context != nullptr || size_context != 0) {
-        s32 res = _sceFiberAttachContext(fiber, addr_context, size_context);
+    const bool has_new_context = addr_context != nullptr || size_context != 0;
+    if (has_new_context) {
+        s32 res = _sceFiberCheckAttachContext(fiber, addr_context, size_context);
         if (res < 0) {
             return res;
         }
     }
 
+    // psport: libSceFiber (0x9a0, 0xdf0) takes the fiber to Run before attaching the area, so a STATE
+    // failure leaves the fiber without one.
     FiberState expected = FiberState::Idle;
     if (!fiber->state.compare_exchange_strong(expected, FiberState::Run)) {
         return ORBIS_FIBER_ERROR_STATE;
+    }
+    if (has_new_context) {
+        _sceFiberAttachContext(fiber, addr_context, size_context);
     }
 
     OrbisFiberContext ctx{};
@@ -379,16 +387,22 @@ s32 PS4_SYSV_ABI sceFiberSwitchImpl(OrbisFiber* fiber, void* addr_context, u64 s
     }
 
     /* Caller wants to attach context and switch. */
-    if (addr_context != nullptr || size_context != 0) {
-        s32 res = _sceFiberAttachContext(fiber, addr_context, size_context);
+    const bool has_new_context = addr_context != nullptr || size_context != 0;
+    if (has_new_context) {
+        s32 res = _sceFiberCheckAttachContext(fiber, addr_context, size_context);
         if (res < 0) {
             return res;
         }
     }
 
+    // psport: libSceFiber (0x9a0, 0xdf0) takes the fiber to Run before attaching the area, so a STATE
+    // failure leaves the fiber without one.
     FiberState expected = FiberState::Idle;
     if (!fiber->state.compare_exchange_strong(expected, FiberState::Run)) {
         return ORBIS_FIBER_ERROR_STATE;
+    }
+    if (has_new_context) {
+        _sceFiberAttachContext(fiber, addr_context, size_context);
     }
 
     OrbisFiber* cur_fiber = g_ctx->current_fiber;
