@@ -1,19 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// What the codecs throw becomes a failed call, as an exception must not unwind through the C runtime.
 #include <algorithm>
-#include <atomic>
-#include <cstdio>
 #include <cstring>
-#include <exception>
 #include "../psport_gpu.h"
-#include "Codecs.hpp"
+#include "Decoders.hpp"
 
 namespace {
-
-void LogFailure(const char* sz_call, const std::exception& error) {
-    static std::atomic<unsigned> s_logged{0};
-    if (s_logged.fetch_add(1, std::memory_order_relaxed) < 8) std::printf("Audiodec: Ajm decoder %s failed: %s\n", sz_call, error.what());
-}
 
 class BitReader {
 public:
@@ -79,19 +70,19 @@ bool ReadLame(const std::uint8_t* p_cursor, const std::uint8_t* p_end, std::uint
 
 // The gapless window an MP3 frame's encoder header announces: LAME (Xing/Info), VBRI with an optional FGH in
 // the next frame, or FGH. LAME's delay counts the header frame itself and the 529-sample decoder delay.
-void ReadOfl(const std::uint8_t* p_frame, std::size_t cb_frame, const Audiodec::Mp3Header& header, std::uint32_t& delay, std::uint32_t& total) {
+void ReadOfl(const std::uint8_t* p_frame, std::size_t cb_frame, const Audiodec::Mp3FrameHeader& header, std::uint32_t& delay, std::uint32_t& total) {
     const std::uint32_t frame_samples = (header.word >> 19 & 3) == 3 ? 1152 : 576;
-    const std::uint8_t* p_end = p_frame + std::min(cb_frame, header.frameBytes);
+    const std::uint8_t* p_end = p_frame + std::min(cb_frame, header.cb_frame);
     const std::uint8_t* p_cursor = p_frame + OflOffset(p_frame, p_end - p_frame, header.word);
     if (p_cursor + 8 <= p_end && (std::memcmp(p_cursor, "Xing", 4) == 0 || std::memcmp(p_cursor, "Info", 4) == 0)) {
         ReadLame(p_cursor, p_end, frame_samples, delay, total);
     } else if (p_cursor + 26 <= p_end && std::memcmp(p_cursor, "VBRI", 4) == 0) {
         delay = std::uint32_t{p_cursor[6]} << 8 | p_cursor[7];
-        Audiodec::Mp3Header next{};
+        Audiodec::Mp3FrameHeader next{};
         std::uint32_t next_delay = 0;
-        if (Audiodec::ParseMp3Header(p_frame + header.frameBytes, cb_frame - std::min(cb_frame, header.frameBytes), next)) {
-            const std::uint8_t* p_next_end = p_frame + std::min(cb_frame, header.frameBytes + next.frameBytes);
-            const std::uint8_t* p_next_start = p_frame + header.frameBytes;
+        if (Audiodec::ParseMp3FrameHeader(p_frame + header.cb_frame, cb_frame - std::min(cb_frame, header.cb_frame), next)) {
+            const std::uint8_t* p_next_end = p_frame + std::min(cb_frame, header.cb_frame + next.cb_frame);
+            const std::uint8_t* p_next_start = p_frame + header.cb_frame;
             if (ReadFgh(p_next_start + OflOffset(p_next_start, p_next_end - p_next_start, next.word), p_next_end, next_delay, total)) delay += next_delay;
         }
     } else {
@@ -102,40 +93,30 @@ void ReadOfl(const std::uint8_t* p_frame, std::size_t cb_frame, const Audiodec::
 }
 
 extern "C" void* psport_gpu_audio_decoder_create(int aac, int adts, uint32_t i_frequency, uint32_t channels) {
-    try {
-        auto decoder = aac ? Audiodec::CreateAac(Audiodec::WORD_SIZE_FLOAT, adts != 0, i_frequency, channels) : Audiodec::CreateMp3(Audiodec::WORD_SIZE_FLOAT);
-        return decoder.release();
-    } catch (const std::exception& error) {
-        LogFailure("create", error);
-        return nullptr;
-    }
+    auto p_decoder = aac ? Audiodec::OpenAac(Audiodec::PcmFormat::Float, adts != 0, i_frequency, channels) : Audiodec::OpenMp3(Audiodec::PcmFormat::Float);
+    return p_decoder.release();
 }
 
 extern "C" int psport_gpu_audio_decoder_decode(void* p_decoder, const uint8_t* p_data, uint64_t cb_data, float* p_pcm, uint64_t cb_pcm, PsAudioFrame* p_frame) {
-    try {
-        const Audiodec::DecodeResult decoded = static_cast<Audiodec::Decoder*>(p_decoder)->Decode(p_data, cb_data, reinterpret_cast<std::uint8_t*>(p_pcm), cb_pcm);
-        switch (decoded.status) {
-            case Audiodec::DecodeStatus::Ok: break;
-            case Audiodec::DecodeStatus::PartialInput: return 1;
-            case Audiodec::DecodeStatus::InvalidData: return 2;
-            case Audiodec::DecodeStatus::NotEnoughRoom: return 3;
-        }
-        const auto samples = decoded.channels ? static_cast<std::uint32_t>(decoded.produced / (sizeof(float) * decoded.channels)) : 0;
-        const auto bitrate = decoded.mp3.word ? decoded.mp3.bitrate
-            : samples ? static_cast<std::uint32_t>(decoded.consumed * 8 * decoded.sampleRate / samples) : 0;
-        *p_frame = {decoded.consumed, samples, decoded.channels, decoded.sampleRate, bitrate, decoded.mp3.word, decoded.highEfficiency, 0, 0};
-        if (decoded.mp3.word) ReadOfl(p_data, cb_data, decoded.mp3, p_frame->encoder_delay, p_frame->total_samples);
-        return 0;
-    } catch (const std::exception& error) {
-        LogFailure("decode", error);
-        return 2;
+    const Audiodec::DecodedFrame decoded = static_cast<Audiodec::UnitDecoder*>(p_decoder)->Decode(p_data, cb_data, reinterpret_cast<std::uint8_t*>(p_pcm), cb_pcm);
+    switch (decoded.status) {
+        case Audiodec::UnitStatus::Decoded: break;
+        case Audiodec::UnitStatus::NeedsMoreInput: return 1;
+        case Audiodec::UnitStatus::Undecodable: return 2;
+        case Audiodec::UnitStatus::PcmTooSmall: return 3;
     }
+    const auto c_samples = decoded.c_channels ? static_cast<std::uint32_t>(decoded.cb_produced / (sizeof(float) * decoded.c_channels)) : 0;
+    const auto bitrate_bps = decoded.mp3.word ? decoded.mp3.bitrate_bps
+        : c_samples ? static_cast<std::uint32_t>(decoded.cb_consumed * 8 * decoded.sample_rate_hz / c_samples) : 0;
+    *p_frame = {decoded.cb_consumed, c_samples, decoded.c_channels, decoded.sample_rate_hz, bitrate_bps, decoded.mp3.word, decoded.has_sbr, 0, 0};
+    if (decoded.mp3.word) ReadOfl(p_data, cb_data, decoded.mp3, p_frame->encoder_delay, p_frame->total_samples);
+    return 0;
 }
 
 extern "C" void psport_gpu_audio_decoder_reset(void* p_decoder) {
-    static_cast<Audiodec::Decoder*>(p_decoder)->Reset();
+    static_cast<Audiodec::UnitDecoder*>(p_decoder)->Reset();
 }
 
 extern "C" void psport_gpu_audio_decoder_destroy(void* p_decoder) {
-    delete static_cast<Audiodec::Decoder*>(p_decoder);
+    delete static_cast<Audiodec::UnitDecoder*>(p_decoder);
 }
