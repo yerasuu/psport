@@ -172,8 +172,8 @@ file(GLOB LAYER_SOURCES CONFIGURE_DEPENDS layer/*.cpp)
 file(GLOB GAME_SOURCES CONFIGURE_DEPENDS games/*.cpp games/*/*.cpp)
 # The translator's own command processor (docs/en/history/TRANSLATOR_ARCHITECTURE.md, step 2): cp/.
 file(GLOB CP_SOURCES CONFIGURE_DEPENDS cp/*.cpp)
-# Ngs2, the software audio mixer (ngs2/README.md), with the ATRAC9 decoder its waveforms use.
-file(GLOB NGS2_SOURCES CONFIGURE_DEPENDS ngs2/*.cpp)
+# Ngs2, the software audio mixer (ngs2_anyps5/README.md), with the ATRAC9 decoder its waveforms use.
+file(GLOB NGS2_SOURCES CONFIGURE_DEPENDS ngs2_anyps5/*.cpp)
 # libSceFiber, the fibers libSceUlt's job threads run on (fiber/README.md).
 file(GLOB FIBER_SOURCES CONFIGURE_DEPENDS fiber/*.cpp)
 # libSceFont and libSceFontFt, text rendered over FreeType (font/README.md).

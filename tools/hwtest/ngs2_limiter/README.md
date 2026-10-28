@@ -1,6 +1,6 @@
 # Ngs2 mastering limiter and LFE (kb #395)
 
-Checks on a PS4 what psport's `gpu/ngs2/Limiter.cpp` and the mastering setup's LFE low-pass
+Checks on a PS4 what psport's `gpu/ngs2_anyps5/Limiter.cpp` and the mastering setup's LFE low-pass
 reproduce from firmware 11.00's `libSceNgs2.sprx`. Each case renders 40 grains of 256 frames at
 48 kHz from a float PCM sampler voice through a mastering voice and writes, per case, one CSV to
 `/data/psport-hwtest/ngs2_limiter/<case>.csv`: one row per frame and channel, with
