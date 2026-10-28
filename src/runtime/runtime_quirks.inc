@@ -90,3 +90,12 @@ QUIRK(bloodborne_intel_tonemap, WORKAROUND,
       "community's Intel Black Tonemap Fix (that je as NOPs) on GenuineIntel CPUs, PS_INTEL_TONEMAP_FIX=0/1 forcing "
       "it; the general fix makes those instructions answer as the Jaguar's for every title",
       "#350")
+QUIRK(bloodborne_server_chara_id, WORKAROUND,
+      "Bloodborne keeps the first PublishCharaId of the game server's sync_chara_id reply as the character's "
+      "ServerChrId (PlayerGameData + 0x690) and asks for one only while it is 0: a server answering an empty list "
+      "(BBSC's local server until #817; The Hunter's Dream's reply is not known) leaves the reply parser's "
+      "0x8000000000000000 there, kept with the character, so its CharaId is that sentinel for good. The title clears "
+      "exactly that value where the login's registration step reads it (0x1c43f0e) and the character registers "
+      "again; the general fix is a server that publishes real ids (scripts/bbsc_gameserver does since #817), and the "
+      "quirk goes once the servers players use all do",
+      "#817")

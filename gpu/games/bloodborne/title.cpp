@@ -35,7 +35,7 @@ constexpr RuntimeQuirkId Quirks[] = {
     RUNTIME_QUIRK_bloodborne_save_sound_flag, RUNTIME_QUIRK_bloodborne_gx_node_guard,
     RUNTIME_QUIRK_bloodborne_gx_command_heap, RUNTIME_QUIRK_bloodborne_render_job_slots,
     RUNTIME_QUIRK_bloodborne_blur_sample_clamp, RUNTIME_QUIRK_bloodborne_fx_init_clear,
-    RUNTIME_QUIRK_bloodborne_intel_tonemap};
+    RUNTIME_QUIRK_bloodborne_intel_tonemap, RUNTIME_QUIRK_bloodborne_server_chara_id};
 
 /// Close to Dark Souls III on PC, which Bloodborne's players know (bbport 0.6): WASD move, IJKL the
 /// camera, Space dodge and run, F or Enter interact, the mouse's left button attack and with Shift

@@ -320,6 +320,59 @@ bool InstallFxInitClear() {
     return c_installed == int(FxInitClearSites.size());
 }
 
+/// The online login's character registration step 0x1c43ee0 (bloodborne_server_chara_id, #817)
+/// asks the game server for an id (sync_chara_id) only while the character's ServerChrId
+/// ([PlayerGameData + 0x690]) is 0, and its reply callback 0x1c440a0 stores the reply's id
+/// unchecked. A server answering an empty PublishCharacterIdList leaves the reply parser's
+/// 0x8000000000000000 there, which the game then takes for a valid id. That value alone is cleared
+/// where the step reads it, so the character registers again; 0 already means no id and any other
+/// value is one a server gave. Kept with the character in its save (inferred: the sentinel outlives
+/// a session, kb #815), which is why the guard rather than the server fix recovers those saves, and
+/// a server that still answers an empty list (The Hunter's Dream's reply is not known) only gets the
+/// sentinel cleared again at the next login.
+constexpr u64 OffServerChrIdRead = 0x1c43f0e;
+constexpr u8 ServerChrIdReadCode[10] = {0x48, 0x8b, 0x80, 0x90, 0x06, 0x00, 0x00, // mov rax, [rax + 0x690]
+                                        0x48, 0x85, 0xc0};                         // test rax, rax
+constexpr u64 ServerChrIdSentinel = 0x8000000000000000;
+Counter s_server_chr_ids_cleared;
+
+void PS4_SYSV_ABI OnServerChrIdCleared() {
+    if (const u64 c_events = s_server_chr_ids_cleared.c_events.fetch_add(1, std::memory_order_relaxed) + 1;
+        ShouldLog(c_events)) {
+        std::printf("Workarounds: ServerChrId 0x8000000000000000 cleared, the character registers again (%llu so "
+                    "far; #817)\n",
+                    static_cast<unsigned long long>(c_events));
+    }
+}
+
+bool InstallServerChrIdClear() {
+    if (!HasCode(OffServerChrIdRead, ServerChrIdReadCode)) {
+        return false;
+    }
+    const u64 va_site = s_va_image + OffServerChrIdRead;
+    // rax holds PlayerGameData; rcx and the flags are dead at the site (both branches write rcx
+    // before reading it, and the replaced test sets the flags the je at the return reads).
+    Emitter e;
+    e.Bytes({0x48, 0xb9}); // movabs rcx, ServerChrIdSentinel
+    e.U64(ServerChrIdSentinel);
+    e.Bytes({0x48, 0x39, 0x88, 0x90, 0x06, 0x00, 0x00}); // cmp [rax + 0x690], rcx
+    e.Bytes({0x0f, 0x85});                               // jne to the replaced code
+    const std::size_t off_rel = e.m_cb_code;
+    e.U32(0);
+    e.SaveVolatile();
+    e.SaveXmm();
+    e.CallAbs(reinterpret_cast<const void*>(&OnServerChrIdCleared));
+    e.RestoreXmm();
+    e.RestoreVolatile();
+    e.Bytes({0x48, 0xc7, 0x80, 0x90, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}); // mov qword [rax + 0x690], 0
+    const u32 rel = u32(e.m_cb_code - (off_rel + 4));
+    std::memcpy(&e.m_code[off_rel], &rel, sizeof(rel));
+    e.Copy(ServerChrIdReadCode);
+    e.JmpAbs(va_site + sizeof(ServerChrIdReadCode));
+    return PsGuestCode::InstallDetour("Bloodborne ServerChrId sentinel clear", va_site, ServerChrIdReadCode, e) ==
+           Error::None;
+}
+
 /// The GX swap chain's two per-frame command heaps ([r12 + 0x370], [r12 + 0x378];
 /// bloodborne_gx_command_heap, #504) are set up with `mov edx, 0x40000` (256 KiB): under psport
 /// they fill, and the render command's node at 0x2199310 comes back null (the guard of
@@ -367,6 +420,8 @@ void PatchImage(unsigned char* p_image, std::uint64_t) {
              PsQuirk::Active(RUNTIME_QUIRK_bloodborne_blur_sample_clamp) && InstallBlurClamp());
     Announce(RUNTIME_QUIRK_bloodborne_fx_init_clear, "FX init targets cleared in memory",
              PsQuirk::Active(RUNTIME_QUIRK_bloodborne_fx_init_clear) && InstallFxInitClear());
+    Announce(RUNTIME_QUIRK_bloodborne_server_chara_id, "ServerChrId sentinel cleared at the login's registration",
+             PsQuirk::Active(RUNTIME_QUIRK_bloodborne_server_chara_id) && InstallServerChrIdClear());
 }
 
 void Report() {
@@ -375,5 +430,6 @@ void Report() {
     ReportCounter(s_blur_clamps, "blur kernel sample counts raised from 2 to 3");
     ReportCounter(s_fx_written, "FX init targets cleared in memory");
     ReportCounter(s_fx_native, "FX init clears left to the game");
+    ReportCounter(s_server_chr_ids_cleared, "ServerChrId sentinels cleared so the character registers again");
 }
 } // namespace PsWorkarounds
