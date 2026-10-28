@@ -247,7 +247,7 @@ TOMB_MAX_AGE = 7 * 24 * 3600
 def _as_int(value, default=0):
     try:
         return int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return default
 
 def _region(entry):
@@ -642,6 +642,20 @@ def channel_word_search(req):
     return empty("ChannelWordSearchResponse", ChannelList=found)
 
 
+def sync_chara_id(req):
+    """One new character id per CharaIdNum. The game keeps the first PublishCharaId as the
+    character's ServerChrId (0x1c440a0); an empty list leaves the parser's 0x8000000000000000 in it,
+    which the game then takes for a valid id and never asks again (kb #817). The ids come from the
+    store's counter so that CharaId tells characters apart across this server's players and restarts:
+    what range FromSoftware's server used is not in the game's code."""
+    count = min(max(_as_int(_request(req).get("CharaIdNum"), 1), 1), 16)
+    with STORE.lock:
+        ids = [STORE.next_id() for _ in range(count)]
+        STORE.save()
+    print("      chara id: published {}".format(ids), flush=True)
+    return ok("SyncCharaIdResponse", PublishCharacterIdList=[{"PublishCharaId": i} for i in ids])
+
+
 # Server notice (welcome message): server-notice.txt next to the messages file (--data). First line =
 # title, the rest = the text. Read at every request, so editing it needs no restart; no file = no
 # notice. Entry fields from the game's reply parser 0x01E7F240 (NoticeList, CheckTime, then
@@ -674,7 +688,7 @@ ROUTES = {
     "/basic_utils/get_user_agreement": lambda req: ok("UserAgreementGetResponse", Agreements=[]),
     "/basic_utils/get_datetime":
         lambda req: ok("DateTimeResponse", Timestamp=int(time.time() * 1000)),
-    "/basic_utils/sync_chara_id": lambda req: ok("SyncCharaIdResponse", PublishCharacterIdList=[]),
+    "/basic_utils/sync_chara_id": sync_chara_id,
     "/penalty/check_user_priority_move_count":
         lambda req: ok("UserPropertiesMoveCountCheckResponse"),
     "/blood_messenger/exist_messages": blood_exist,
