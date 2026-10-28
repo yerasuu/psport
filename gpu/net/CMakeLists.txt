@@ -3,16 +3,19 @@
 # (src/net/runtime_net.c). Its headers (include/) extend the port's shim for these libraries alone;
 # everything in it is hidden and bound to itself (-Bsymbolic) except psport_net.h's two calls, so its
 # copies of shadPS4's kernel shims and symbol table never meet libpsport-gpu's.
-# Needs protobuf, nlohmann_json, mbedTLS, zlib and miniupnpc (shell.nix); without them the port
-# builds without it and plays offline (gpu/CMakeLists.txt: PS_NET).
+# Needs Python 3 (to generate the shadNet messages), nlohmann_json, mbedTLS, zlib and miniupnpc
+# (shell.nix); without them the port builds without it and plays offline (gpu/CMakeLists.txt: PS_NET).
 
+# The shadNet messages as C++ classes over proto/proto_wire.h, written by proto/gen_proto.py instead
+# of protoc, so that the module links neither libprotobuf nor abseil (kb #850).
 set(SHADNET_PROTO_OUT "${CMAKE_CURRENT_BINARY_DIR}/shadnet_proto_gen")
 file(MAKE_DIRECTORY "${SHADNET_PROTO_OUT}")
 add_custom_command(
     OUTPUT "${SHADNET_PROTO_OUT}/shadnet.pb.cc" "${SHADNET_PROTO_OUT}/shadnet.pb.h"
-    COMMAND protobuf::protoc "--proto_path=${CMAKE_CURRENT_SOURCE_DIR}/shadps4/shadnet"
-            "--cpp_out=${SHADNET_PROTO_OUT}" "${CMAKE_CURRENT_SOURCE_DIR}/shadps4/shadnet/shadnet.proto"
-    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/shadps4/shadnet/shadnet.proto")
+    COMMAND Python3::Interpreter "${CMAKE_CURRENT_SOURCE_DIR}/proto/gen_proto.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/shadps4/shadnet/shadnet.proto" "${SHADNET_PROTO_OUT}"
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/shadps4/shadnet/shadnet.proto"
+            "${CMAKE_CURRENT_SOURCE_DIR}/proto/gen_proto.py")
 file(GLOB_RECURSE PSPORT_NET_SOURCES CONFIGURE_DEPENDS shadps4/core/libraries/network/*.cpp
     shadps4/core/libraries/np/*.cpp shadps4/shadnet/*.cpp)
 # Trophies and the system dialogs stay in the C runtime; their shadPS4 versions need the
@@ -28,7 +31,7 @@ file(GLOB PSPORT_NET_TITLE_DIRS LIST_DIRECTORIES true CONFIGURE_DEPENDS ../games
 add_library(psport-net SHARED ${PSPORT_NET_SOURCES} ${PSPORT_NET_TITLE_SOURCES} "${SHADNET_PROTO_OUT}/shadnet.pb.cc"
     psport_net_glue.cpp psport_net_title.cpp)
 # The module's own headers first, then the port's shim and shadPS4 (common/, logging).
-target_include_directories(psport-net PRIVATE include shadps4 shadps4/shadnet "${SHADNET_PROTO_OUT}"
+target_include_directories(psport-net PRIVATE include proto shadps4 shadps4/shadnet "${SHADNET_PROTO_OUT}"
     ${PSPORT_NET_TITLE_DIRS} ${CMAKE_CURRENT_SOURCE_DIR} ../shim ../shadps4 ../third_party/imgui ../third_party/httplib)
 # The version the shadNet client reports to the server (ShadNetClient::BuildVersionString), from
 # VERSION as build.sh and packaging/port.nix read it; between releases (0-unstable) with its commit.
@@ -53,7 +56,7 @@ target_link_options(psport-net PRIVATE -Wl,-Bsymbolic -Wl,--exclude-libs,ALL)
 # libpsport-gpu (already in the process) provides shadPS4's common code: logging, threads' names.
 set_target_properties(psport-net PROPERTIES BUILD_RPATH "\$ORIGIN" INSTALL_RPATH "\$ORIGIN"
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}") # beside libpsport-gpu.so, where the runtime looks
-target_link_libraries(psport-net PRIVATE psport-gpu nlohmann_json::nlohmann_json protobuf::libprotobuf
-    MbedTLS::mbedtls MbedTLS::mbedx509 MbedTLS::mbedcrypto ZLIB::ZLIB "${MINIUPNPC_LIBRARY}"
-    Vulkan::Headers fmt::fmt Boost::headers magic_enum::magic_enum)
+target_link_libraries(psport-net PRIVATE psport-gpu nlohmann_json::nlohmann_json MbedTLS::mbedtls
+    MbedTLS::mbedx509 MbedTLS::mbedcrypto ZLIB::ZLIB "${MINIUPNPC_LIBRARY}" Vulkan::Headers fmt::fmt
+    Boost::headers magic_enum::magic_enum)
 target_include_directories(psport-net PRIVATE "${MINIUPNPC_INCLUDE}")

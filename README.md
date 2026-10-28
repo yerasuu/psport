@@ -68,10 +68,10 @@ state is how far a title has been seen to get, not a full play-through; what eac
     [shell.nix](shell.nix) themselves.
   - Host packages: GCC (or another compiler through `CC`), CMake, Ninja, pkg-config and the
     libraries in `shell.nix` (Vulkan, SDL3, FreeType, FFmpeg, Boost, glslang and the rest of
-    shadPS4's video core dependencies; protobuf, nlohmann_json, mbedTLS, zlib and miniupnpc for the
+    shadPS4's video core dependencies; nlohmann_json, mbedTLS, zlib and miniupnpc for the
     optional online module).
-- **Python 3** only for online play, the bundled launcher and the developer tools; a normal launch
-  does not need it.
+- **Python 3** only for online play, building the online module (it writes the shadNet messages), the
+  bundled launcher and the developer tools; a normal launch does not need it.
 
 ## Getting started
 

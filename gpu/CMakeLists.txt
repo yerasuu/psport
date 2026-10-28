@@ -276,20 +276,20 @@ target_link_libraries(fsr4-bench PRIVATE ffx-vulkan::fsr4-v07-vulkan ffx-vulkan:
 # PS_NET=OFF leaves it out. Without it the port plays offline.
 option(PS_NET "Build the online module (shadNet)" ON)
 if (PS_NET)
-    find_package(Protobuf CONFIG QUIET)
+    find_package(Python3 COMPONENTS Interpreter QUIET)
     find_package(nlohmann_json CONFIG QUIET)
     find_package(MbedTLS CONFIG QUIET)
     find_package(ZLIB QUIET)
     find_path(MINIUPNPC_INCLUDE miniupnpc.h PATH_SUFFIXES miniupnpc)
     find_library(MINIUPNPC_LIBRARY NAMES miniupnpc)
-    if (Protobuf_FOUND AND nlohmann_json_FOUND AND MbedTLS_FOUND AND ZLIB_FOUND AND
+    if (Python3_FOUND AND nlohmann_json_FOUND AND MbedTLS_FOUND AND ZLIB_FOUND AND
         MINIUPNPC_INCLUDE AND MINIUPNPC_LIBRARY)
         add_subdirectory(net)
         message(STATUS "Online module: on (libpsport-net.so)")
     else()
         # Named one by one (#145: "the build has no online module" with no hint why).
         set(missing "")
-        foreach(dep Protobuf nlohmann_json MbedTLS ZLIB)
+        foreach(dep Python3 nlohmann_json MbedTLS ZLIB)
             if (NOT ${dep}_FOUND)
                 list(APPEND missing ${dep})
             endif()

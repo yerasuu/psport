@@ -72,10 +72,10 @@ en [tools/regress/titles.txt](tools/regress/titles.txt) y se ejecutan sin ventan
     [shell.nix](shell.nix).
   - Paquetes del sistema: GCC (u otro compilador mediante `CC`), CMake, Ninja, pkg-config y las
     bibliotecas de `shell.nix` (Vulkan, SDL3, FreeType, FFmpeg, Boost, glslang y el resto de
-    dependencias del núcleo de vídeo de shadPS4; protobuf, nlohmann_json, mbedTLS, zlib y miniupnpc
+    dependencias del núcleo de vídeo de shadPS4; nlohmann_json, mbedTLS, zlib y miniupnpc
     para el módulo en línea opcional).
-- **Python 3** solo para el juego en línea, el lanzador incluido y las herramientas de desarrollo;
-  un arranque normal no lo necesita.
+- **Python 3** solo para el juego en línea, la compilación del módulo en línea (genera los mensajes de
+  shadNet), el lanzador incluido y las herramientas de desarrollo; un arranque normal no lo necesita.
 
 ## Primeros pasos
 
