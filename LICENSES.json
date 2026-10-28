@@ -302,8 +302,8 @@
         "tag-changelog"
       ],
       "license": "GPL-2.0-or-later",
-      "review": "pending",
-      "provenance": "Written for this repository, except docs/en/history and docs/ru, which are bbport's notes and change logs (bbport is GPL-2.0-or-later). No file states a licence for the documentation; GPL-2.0-or-later is assumed until the owner decides."
+      "review": "reviewed",
+      "provenance": "Written for this repository, except docs/en/history and docs/ru, which are bbport's notes and change logs (bbport is GPL-2.0-or-later). The owner decided on 2026-10-28 that the documentation is GPL-2.0-or-later like the code (kb #1075)."
     },
     {
       "name": "Libraries linked into the bundles",
