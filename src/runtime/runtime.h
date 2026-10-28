@@ -95,6 +95,9 @@ unsigned runtime_import_failure(const char *sz_nid);
 /* 1 when the export reports a state its caller polls or waits for with this code (an SCE code, or
  * the errno of a POSIX export), per import_statuses.inc: counted apart from the failures. */
 int runtime_import_status(const char *sz_nid, uint32_t code);
+/* 1 when the export gives this result (0 for a stub that does nothing) only because there is no
+ * connection, per import_offline.inc: counted as `offline`, apart from failures and stubs. */
+int runtime_import_offline(const char *sz_nid, uint32_t code);
 /* Calls nothing answers for real or that fail (runtime_calls.c): logged once per import and error
  * code, counted, and summed up by runtime_calls_report (also into PS_CALL_REPORT). */
 void runtime_calls_configure(const char (*p_names)[128], uint64_t c_names);

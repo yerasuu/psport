@@ -48,10 +48,11 @@ While the game runs, `src/runtime/runtime_calls.c` logs the first call of every 
 work, and when the process ends prints a summary sorted by call count:
 
 ```
-Calls: summary: <n> unimplemented, <n> stub, <n> failed, <n> status (import and error code)
+Calls: summary: <n> unimplemented, <n> stub, <n> failed, <n> status (import and error code), <n> fallback (GPU), <n> offline (import and result)
 Calls: summary unimplemented <calls> <NID> (<name>)
 Calls: summary stub <calls> <NID> (<name>)
 Calls: summary failed <calls> <NID> (<name>) -> 0x8xxxxxxx
+Calls: summary offline <calls> <NID> (<name>)[ -> 0x8xxxxxxx]
 ```
 
 All line formats: [FORK.md](../../FORK.md#call-report). Read it in this order:
@@ -62,7 +63,9 @@ All line formats: [FORK.md](../../FORK.md#call-report). Read it in this order:
 3. `stub` entries whose result the game uses (a stub returns 0 and writes no outputs).
 4. `failed` entries: an implemented function that returned an error. Compare with what the title
    expects before treating it as a bug; many failures are normal (no file, no event).
-5. `GPU [...] (STUBBED)` lines: GPU library functions that do not do their work.
+5. `offline` entries: what the runtime answers only because there is no connection (no route, signed
+   out, an NP or HTTP call that needs a server); not a bug of the port while it runs offline.
+6. `GPU [...] (STUBBED)` lines: GPU library functions that do not do their work.
 
 The report never hides a call: an unimplemented or stubbed function is always logged and counted.
 

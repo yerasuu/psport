@@ -643,6 +643,8 @@ Every import the game calls without getting real work done is logged the first t
 | `GPU [Render.Vulkan] <Error> vk_pipeline_cache.cpp:<line> ReportUntranslated: Shader 0x<hash>: not translated: <reason> ...` | first translation failure of a shader permutation; its draws and dispatches are skipped, and the summary counts both as `stub ... (HLE)`: `GPU shader not translated by the recompiler`, `GPU draw or dispatch skipped: shader not translated` |
 | `Calls: failed <NID> (<name>) -> 0x8xxxxxxx; arguments <a0>, ..., <a5>` | first time an import fails with that SCE error code |
 | `Calls: failed <NID> (<name>) -> -1, errno <n>; arguments <a0>, ..., <a5>` | first time a POSIX import fails with that errno |
+| `Calls: offline <NID> (<name>) -> 0x8xxxxxxx; arguments <a0>, ..., <a5>` | first time an import gives that result only because there is no connection (`ENETUNREACH` from sockets and the resolver, `NP_SIGNED_OUT`), per `src/runtime/imports/import_offline.inc`; also `-> -1, errno <n>` for a POSIX import |
+| `Calls: offline <NID> (<name>) returns 0 without doing anything; arguments <a0>, ..., <a4>` | first call of a stubbed import `import_offline.inc` lists with result 0 (an NP or HTTP call that only matters with a server) |
 | `Calls: status <NID> (<name>) -> 0x8xxxxxxx; arguments <a0>, ..., <a5>` | first time an import reports a state its caller polls or waits for with that code (no event pending, timed out, busy) |
 | `Calls: status <NID> (<name>) -> -1, errno <n>; arguments <a0>, ..., <a5>` | the same for a POSIX import (`sem_trywait`'s `EAGAIN`, `sem_timedwait`'s `ETIMEDOUT`) |
 
@@ -659,7 +661,7 @@ which Unreal Engine's critical sections take for a recursive lock) are no failur
 SIGINT or SIGHUP, a fault, the watchdog, a `STOP:`), a summary follows, most calls first:
 
 ```
-Calls: summary: <n> unimplemented, <n> stub, <n> failed, <n> status (import and error code), <n> fallback (GPU)
+Calls: summary: <n> unimplemented, <n> stub, <n> failed, <n> status (import and error code), <n> fallback (GPU), <n> offline (import and result)
 Calls: summary unimplemented <calls> <NID> (<name>)
 Calls: summary stub <calls> <NID> (<name>)
 Calls: summary stub <calls> <function> (HLE)
@@ -667,6 +669,9 @@ Calls: summary failed <calls> <NID> (<name>) -> 0x8xxxxxxx
 Calls: summary failed <calls> <NID> (<name>) -> -1, errno <n>
 Calls: summary status <calls> <NID> (<name>) -> 0x8xxxxxxx
 Calls: summary status <calls> <NID> (<name>) -> -1, errno <n>
+Calls: summary offline <calls> <NID> (<name>)
+Calls: summary offline <calls> <NID> (<name>) -> 0x8xxxxxxx
+Calls: summary offline <calls> <NID> (<name>) -> -1, errno <n>
 Calls: summary fallback <times> <function> (GPU): <message format>
 ```
 
@@ -679,6 +684,12 @@ Then `Quirks: <n> active: <id>, ...` (the quirk registry, [docs/en/QUIRKS.md](do
 The `status` count is appended to the first line and its entries carry a list name of their own,
 so a parser that knows only `unimplemented`, `stub` and `failed` still reads those as before, skips
 the `status` lines and no longer sees these results among the failures.
+
+`offline` works the same way, as the last count of the first line: `src/runtime/imports/import_offline.inc`
+lists by import and result what the runtime answers only because it plays an unplugged, signed-out
+console (`SCE_NET_ERROR_ENETUNREACH`, errno 51, `SCE_NP_ERROR_SIGNED_OUT`, and the NP and HTTP
+stubs that do nothing, result 0). A call that matches is listed as `offline`, with its count, instead of
+`failed` or `stub`; a result `import_statuses.inc` lists stays `status`. A stub entry has no `->`.
 
 ## Regression runs
 

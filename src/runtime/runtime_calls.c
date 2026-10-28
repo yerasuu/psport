@@ -23,6 +23,7 @@ static RuntimeSummary s_pfn_summaries[SUMMARY_SLOTS];
 static size_t s_c_summaries;
 static pthread_mutex_t s_hle_stub_lock = PTHREAD_MUTEX_INITIALIZER;
 typedef struct { uint64_t c_calls; uint32_t id, code; int kind; const char *sz_function, *sz_detail; } Entry;
+enum { KIND_UNIMPLEMENTED, KIND_STUB, KIND_FAILED, KIND_STATUS, KIND_FALLBACK, KIND_OFFLINE, KIND_COUNT };
 static Entry *s_p_entries;
 
 void runtime_calls_configure(const char (*p_names)[128], uint64_t c_names) {
@@ -34,6 +35,15 @@ void runtime_calls_configure(const char (*p_names)[128], uint64_t c_names) {
     if (!s_p_unimplemented_calls || !s_p_stub_calls || !s_p_entries) { fputs("Cannot allocate call counters\n", stderr); exit(1); }
     atexit(runtime_calls_report);
 }
+
+static const char *const s_p_kind_names[] = {"unimplemented", "stub", "failed", "status", "fallback", "offline"};
+
+static int result_kind(uint32_t id, uint32_t code) {
+    if (runtime_import_status(s_p_import_names[id], code)) return KIND_STATUS;
+    return runtime_import_offline(s_p_import_names[id], code) ? KIND_OFFLINE : KIND_FAILED;
+}
+
+static int stub_kind(uint32_t id) { return runtime_import_offline(s_p_import_names[id], 0) ? KIND_OFFLINE : KIND_STUB; }
 
 static void put(int h_fd, const char *sz_text) {
     for (size_t left = strlen(sz_text); left;) {
@@ -58,8 +68,8 @@ ABI int64_t runtime_calls_stub(uint32_t id, uintptr_t a0, uintptr_t a1, uintptr_
     if (id >= s_c_imports || __atomic_fetch_add(&s_p_stub_calls[id], 1, __ATOMIC_RELAXED)) return 0;
     const uintptr_t arguments[5] = {a0, a1, a2, a3, a4};
     char sz_line[512];
-    int used = snprintf(sz_line, sizeof(sz_line), "Calls: stub %s (%s) returns 0 without doing anything; arguments ",
-                        s_p_import_names[id], runtime_import_name(s_p_import_names[id]));
+    int used = snprintf(sz_line, sizeof(sz_line), "Calls: %s %s (%s) returns 0 without doing anything; arguments ",
+                        s_p_kind_names[stub_kind(id)], s_p_import_names[id], runtime_import_name(s_p_import_names[id]));
     used += list_arguments(sz_line + used, sizeof(sz_line) - (size_t)used, arguments, 5);
     snprintf(sz_line + used, sizeof(sz_line) - (size_t)used, "\n");
     put(1, sz_line);
@@ -86,7 +96,7 @@ ABI int64_t runtime_calls_failed(uint32_t id, const uintptr_t *p_arguments, int6
         if (__atomic_fetch_add(&s_failures[(slot + i) % FAILURE_SLOTS].c_failures, 1, __ATOMIC_RELAXED)) return result;
         char sz_line[512];
         int used = snprintf(sz_line, sizeof(sz_line), "Calls: %s %s (%s) -> ",
-                            runtime_import_status(s_p_import_names[id], code) ? "status" : "failed", s_p_import_names[id],
+                            s_p_kind_names[result_kind(id, code)], s_p_import_names[id],
                             runtime_import_name(s_p_import_names[id]));
         used += describe_failure(sz_line + used, sizeof(sz_line) - (size_t)used, code);
         used += snprintf(sz_line + used, sizeof(sz_line) - (size_t)used, "; arguments ");
@@ -130,14 +140,13 @@ void runtime_calls_add_summary(RuntimeSummary pfn_summary) {
 }
 
 static int report_line(char *sz_out, size_t cb_out, const Entry *p_entry) {
-    static const char *const s_kinds[] = {"unimplemented", "stub", "failed", "status", "fallback"};
-    int used = snprintf(sz_out, cb_out, "Calls: summary %s %" PRIu64 " ", s_kinds[p_entry->kind], p_entry->c_calls);
+    int used = snprintf(sz_out, cb_out, "Calls: summary %s %" PRIu64 " ", s_p_kind_names[p_entry->kind], p_entry->c_calls);
     if (p_entry->sz_detail)
         return used + snprintf(sz_out + used, cb_out - (size_t)used, "%s (GPU): %s\n", p_entry->sz_function, p_entry->sz_detail);
     if (p_entry->sz_function) return used + snprintf(sz_out + used, cb_out - (size_t)used, "%s (HLE)\n", p_entry->sz_function);
     used += snprintf(sz_out + used, cb_out - (size_t)used, "%s (%s)", s_p_import_names[p_entry->id],
                      runtime_import_name(s_p_import_names[p_entry->id]));
-    if (p_entry->kind >= 2) {
+    if (p_entry->kind == KIND_FAILED || p_entry->kind == KIND_STATUS || p_entry->code) {
         used += snprintf(sz_out + used, cb_out - (size_t)used, " -> ");
         used += describe_failure(sz_out + used, cb_out - (size_t)used, p_entry->code);
     }
@@ -147,12 +156,13 @@ static int report_line(char *sz_out, size_t cb_out, const Entry *p_entry) {
 void runtime_calls_report(void) {
     static int s_has_reported;
     if (!s_p_entries || __atomic_exchange_n(&s_has_reported, 1, __ATOMIC_ACQ_REL)) return;
-    size_t c_path = 0, totals[5] = {0};
+    size_t c_path = 0, totals[KIND_COUNT] = {0};
     for (uint64_t id = 0; id < s_c_imports; ++id) {
         const uint64_t unimplemented = __atomic_load_n(&s_p_unimplemented_calls[id], __ATOMIC_RELAXED);
         const uint64_t stub = __atomic_load_n(&s_p_stub_calls[id], __ATOMIC_RELAXED);
-        if (unimplemented) s_p_entries[c_path++] = (Entry){unimplemented, (uint32_t)id, 0, 0, NULL, NULL};
-        if (stub) s_p_entries[c_path++] = (Entry){stub, (uint32_t)id, 0, 1, NULL, NULL};
+        if (unimplemented)
+            s_p_entries[c_path++] = (Entry){unimplemented, (uint32_t)id, 0, KIND_UNIMPLEMENTED, NULL, NULL};
+        if (stub) s_p_entries[c_path++] = (Entry){stub, (uint32_t)id, 0, stub_kind((uint32_t)id), NULL, NULL};
     }
     for (size_t i = 0, c_stubs = __atomic_load_n(&s_c_hle_stubs, __ATOMIC_ACQUIRE); i < c_stubs; ++i)
         s_p_entries[c_path++] = (Entry){__atomic_load_n(s_hle_stubs[i].p_count, __ATOMIC_RELAXED), 0, 0,
@@ -162,7 +172,7 @@ void runtime_calls_report(void) {
         if (!key) continue;
         const uint32_t id = (uint32_t)(key >> 32) - 1, code = (uint32_t)key;
         s_p_entries[c_path++] = (Entry){__atomic_load_n(&s_failures[i].c_failures, __ATOMIC_RELAXED), id, code,
-                                   runtime_import_status(s_p_import_names[id], code) ? 3 : 2, NULL, NULL};
+                                   result_kind(id, code), NULL, NULL};
     }
     for (size_t i = 1; i < c_path; ++i)
         for (size_t j = i; j && s_p_entries[j - 1].c_calls < s_p_entries[j].c_calls; --j) {
@@ -175,8 +185,9 @@ void runtime_calls_report(void) {
     char sz_line[512];
     snprintf(sz_line, sizeof(sz_line),
              "Calls: summary: %zu unimplemented, %zu stub, %zu failed, %zu status (import and error code), "
-             "%zu fallback (GPU)\n",
-             totals[0], totals[1], totals[2], totals[3], totals[4]);
+             "%zu fallback (GPU), %zu offline (import and result)\n",
+             totals[KIND_UNIMPLEMENTED], totals[KIND_STUB], totals[KIND_FAILED], totals[KIND_STATUS],
+             totals[KIND_FALLBACK], totals[KIND_OFFLINE]);
     put(1, sz_line);
     if (file >= 0) put(file, sz_line);
     if (h_debug >= 0) put(h_debug, sz_line);
