@@ -74,10 +74,11 @@ const std::map<std::string, const char*> ModelLod = {
     {"-2", "Model LOD -2 (Highest)"}, {"1", "Model LOD 1 (Lower)"}, {"2", "Model LOD 2 (Lowest)"}};
 
 /// Intel CPUs: the game's tone mapping turns black (DLC areas most; reported as darker than on the
-/// PS4): the game code runs natively, and Intel's approximate float instructions differ from the
-/// PS4's AMD CPU, so a block the game gates on a computed flag never runs. The community fix runs
-/// it always; on by default on Intel. PS_INTEL_TONEMAP_FIX=0/1 forces it off or on. A WORKAROUND
-/// quirk until #350 makes those instructions answer as the PS4's: PS_QUIRKS=-bloodborne_intel_tonemap
+/// PS4). The community fix NOPs the je that skips GParamManager's debug "Enable MultiThread" path
+/// (byte at +0x128, 0 on a retail PS4 too), so every enabled entry is re-blended each frame instead of
+/// only those marked changed; why that cures Intel is open (#770). On by default on Intel.
+/// PS_INTEL_TONEMAP_FIX=0/1 forces it off or on. A WORKAROUND quirk until that cause is found:
+/// PS_QUIRKS=-bloodborne_intel_tonemap
 /// leaves the game's code as it is, PS_INTEL_TONEMAP_FIX=1 included.
 constexpr const char* IntelTonemap = "Intel Black Tonemap Fix";
 /// The title's PLAY ONLINE / PLAY OFFLINE dialog: the port has no PSN, the game goes straight to

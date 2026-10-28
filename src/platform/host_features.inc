@@ -301,11 +301,10 @@ FEATURE_HOST(upscaler_dlss, LINUX, IMPLEMENTED,
              "#757")
 FEATURE_PROBED(upscaler_dlss)
 
-FEATURE(intel_tonemap_fix, cpu, "Bloodborne's Intel Black Tonemap Fix, for CPUs whose approximate float instructions "
-                                "differ from the PS4's")
+FEATURE(intel_tonemap_fix, cpu, "Bloodborne's Intel Black Tonemap Fix, for Intel CPUs; the cause is open (#770)")
 FEATURE_HOST(intel_tonemap_fix, LINUX, IMPLEMENTED,
              "the patch on by default on GenuineIntel CPUs of /proc/cpuinfo, PS_INTEL_TONEMAP_FIX=0 or 1 forces it "
-             "(gpu/games/bloodborne/patches.cpp), behind the WORKAROUND quirk bloodborne_intel_tonemap (#350); "
+             "(gpu/games/bloodborne/patches.cpp), behind the WORKAROUND quirk bloodborne_intel_tonemap (#770); "
              "probed by --list-features",
              "#757")
 FEATURE_PROBED(intel_tonemap_fix)

@@ -83,13 +83,15 @@ QUIRK(bloodborne_fx_init_clear, WORKAROUND,
       "general fix finds what the translator does wrong with those clears",
       "#685")
 QUIRK(bloodborne_intel_tonemap, WORKAROUND,
-      "Bloodborne's tone mapping turns black on Intel CPUs (DLC areas most; darker than on a PS4): the game skips a "
-      "block gated on the byte at +0x128 of its tone mapping state (je at 0x25843e5), a flag the community traces to "
-      "approximate float instructions (rcpps/rsqrtps, ~5,800 VEX and SSE ones in eboot.bin) whose results differ "
-      "between Intel and the PS4's AMD Jaguar (not yet confirmed in the code that writes it). The title applies the "
-      "community's Intel Black Tonemap Fix (that je as NOPs) on GenuineIntel CPUs, PS_INTEL_TONEMAP_FIX=0/1 forcing "
-      "it; the general fix makes those instructions answer as the Jaguar's for every title",
-      "#350")
+      "Bloodborne's tone mapping turns black on Intel CPUs (DLC areas most; darker than on a PS4): "
+      "GParamManager's debug bool \"Enable MultiThread\" at +0x128 (written only by its constructor, 0, and the "
+      "debug menu checkbox; je at 0x25843e5) selects how its entries are blended: retail blends only the entries "
+      "marked changed, the debug path re-blends every enabled entry each frame. The title applies the community's "
+      "Intel Black Tonemap Fix (that je as NOPs, forcing the debug path) on GenuineIntel CPUs, "
+      "PS_INTEL_TONEMAP_FIX=0/1 forcing it. Neither path uses rcpps/rsqrtps, so the Intel cause is still open "
+      "(candidates: an entry left unmarked holding a bad value, the NaN of #799, listeners at vtbl+0x10, the Havok "
+      "CPUID feature mask); the general fix is that cause",
+      "#770")
 QUIRK(bloodborne_server_chara_id, WORKAROUND,
       "Bloodborne keeps the first PublishCharaId of the game server's sync_chara_id reply as the character's "
       "ServerChrId (PlayerGameData + 0x690) and asks for one only while it is 0: a server answering an empty list "
