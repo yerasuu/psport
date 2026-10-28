@@ -199,7 +199,7 @@ private:
     }
 
     void Run(std::stop_token stop) {
-        Common::SetCurrentThreadName("bb:DrawRec");
+        Common::SetCurrentThreadName("psport:DrawRec");
         m_is_on_stage_b = true;
         PsSections::g_is_recording_thread = true;
         m_stage_b_tid.store(static_cast<u32>(ps_host_thread_id()), std::memory_order_release);

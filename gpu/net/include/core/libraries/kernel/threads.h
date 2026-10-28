@@ -16,7 +16,7 @@ public:
     ~Thread() { Stop(); }
     void Run(std::function<void(std::stop_token)>&& func) {
         thread = std::jthread([func = std::move(func)](std::stop_token stop) {
-            runtime_thread_attach_host("bb:hle");
+            runtime_thread_attach_host("psport:hle");
             func(stop);
         });
     }

@@ -440,7 +440,7 @@ bool Rasterizer::PendingSignalValue(VAddr address, u64& value) {
 }
 
 void Rasterizer::GpuSignalLoop(std::stop_token token) {
-    Common::SetCurrentThreadName("bb:GpuSignals");
+    Common::SetCurrentThreadName("psport:Signals");
     auto* semaphore = scheduler.GetWorkSemaphore();
     const vk::Semaphore handle = semaphore->Handle();
     while (!token.stop_requested()) {
@@ -661,7 +661,7 @@ VideoCore::ImageId Rasterizer::FindTargetMemoized(VideoCore::TextureCache::Image
 }
 
 bool Rasterizer::PrepareRenderState(const GraphicsPipeline* pipeline) {
-    BB_SECTION(PrepareRenderState);
+    PS_SECTION(PrepareRenderState);
     // Prefetch render targets to handle overlaps with bound textures (e.g. mipgen)
     const auto& key = pipeline->GetGraphicsKey();
     const auto& regs = Regs();
@@ -1370,10 +1370,10 @@ std::array<u64, TaskKinds> task_cycles{}, task_counts{};
 } // namespace
 
 void Rasterizer::RunDrawPacket(void* context, const u8* data, u32 size) {
-    BB_SECTION(Packet);
+    PS_SECTION(Packet);
     auto& self = *static_cast<Rasterizer*>(context);
     if (*reinterpret_cast<const PacketKind*>(data) == PacketKind::Task) {
-        BB_SECTION(Task);
+        PS_SECTION(Task);
         self.buffer_cache.NewPacket();
         const auto& task = *reinterpret_cast<const TaskPacket*>(data);
         if (PsSections::Enabled()) {
@@ -1858,7 +1858,7 @@ void Rasterizer::StreamOutBufferUpdate(const StreamOutUpdate& update) {
 
 void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw* used_prepared,
                             bool is_indexed, u32 index_offset) {
-    BB_SECTION(DrawRecord);
+    PS_SECTION(DrawRecord);
     PsNativeProbe::DrawScope probe_scope;
     buffer_cache.NewPacket();
     if (DrawPipe::OnStageB()) {
@@ -1948,7 +1948,7 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
     push_data.yscale *= target_scale[1];
     push_data.yoffset *= target_scale[1];
     if (motion_draw && motion_geometry) {
-        BB_SECTION(Motion);
+        PS_SECTION(Motion);
         const auto& vs = pipeline->GetStage(Shader::SwStage::Vertex);
         const auto [base_vertex, first_instance] =
             GetDrawOffsets(regs, vs, pipeline->GetFetchShader());
@@ -2047,7 +2047,7 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
     // occlusion resolve's compute dispatch (OcclusionQueries), whose push constants would
     // otherwise replace the draw's xoffset/yoffset (frames shifted by half the screen).
     {
-        BB_SECTION(PipelineBind);
+        PS_SECTION(PipelineBind);
         pipeline->BindResources(set_writes, push_data, {image_infos.data(), image_infos.size()},
                                 {buffer_infos.data(), buffer_infos.size()});
     }
@@ -2105,7 +2105,7 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
     }
     DebugState.IncDrawCall();
 
-    BB_SECTION(Kick);
+    PS_SECTION(Kick);
     ResetBindings(false);
     scheduler.KickRecording();
 }
@@ -2330,7 +2330,7 @@ void Rasterizer::DispatchDirect() {
 }
 
 void Rasterizer::DispatchRecord(const ComputePipeline* pipeline) {
-    BB_SECTION(DispatchRecord);
+    PS_SECTION(DispatchRecord);
     PsNativeProbe::StreamScope probe_scope;
     buffer_cache.NewPacket();
     FrameCapture::Poll();
@@ -2355,7 +2355,7 @@ void Rasterizer::DispatchRecord(const ComputePipeline* pipeline) {
     }
     bool hle;
     {
-        BB_SECTION(ShaderHle);
+        PS_SECTION(ShaderHle);
         hle = ExecuteShaderHLE(cs, Regs(), cs_program, *this);
     }
     if (hle) {
@@ -2486,7 +2486,7 @@ void Rasterizer::DispatchIndirectRecord(const ComputePipeline* pipeline, VAddr a
 }
 
 u64 Rasterizer::Flush() {
-    BB_SECTION(Flush);
+    PS_SECTION(Flush);
     DrainDrawPipe();
     PublishSignals(); // the recording thread's (it is idle here, or this is it)
     last_flush_ns.store(std::chrono::steady_clock::now().time_since_epoch().count(),
@@ -2723,7 +2723,7 @@ void NoteResStats(const Pipeline* pipeline) {
 } // namespace
 
 bool Rasterizer::BindResources(const Pipeline* pipeline) {
-    BB_SECTION(BindResources);
+    PS_SECTION(BindResources);
     NoteResStats(pipeline);
     {
         // psport PS_HLE_STATS=1 (diagnostics): how often the compute shader substitutions fire.
@@ -2924,7 +2924,7 @@ void Rasterizer::BindVertexBuffers(const GraphicsPipeline* pipeline, const Prepa
 }
 
 void Rasterizer::EmitVertexBuffers() {
-    BB_SECTION(EmitVertexBuffers);
+    PS_SECTION(EmitVertexBuffers);
     // psport: only the used entries go into the recording chunk (the static vectors hold 32 of
     // each: ~3 KiB copied per draw).
     auto& v = vertex_binds;
@@ -2962,7 +2962,7 @@ void Rasterizer::EmitVertexBuffers() {
 
 void Rasterizer::ResolveVertexBuffers(const GraphicsPipeline* pipeline,
                                       const PreparedDraw* prepared) {
-    BB_SECTION(ResolveVertexBuffers);
+    PS_SECTION(ResolveVertexBuffers);
     const auto& regs = Regs();
     auto& v = vertex_binds;
     v.num_buffers = 0;
@@ -3146,7 +3146,7 @@ void Rasterizer::EmitIndexBuffer() {
 }
 
 bool Rasterizer::ResolveIndexBuffer(u32 index_offset, bool is_indirect) {
-    BB_SECTION(ResolveIndexBuffer);
+    PS_SECTION(ResolveIndexBuffer);
     const auto& regs = Regs();
 
     // Figure out index type and size.
@@ -3500,7 +3500,7 @@ void Rasterizer::BindDynamicBuffer(const Shader::Info& stage, const Shader::Buff
 void Rasterizer::BindBuffers(const Shader::Info& stage, const PreparedStage* prepared,
                              Shader::Backend::Bindings& binding,
                              Shader::PushData& push_data, u32& write_index) {
-    BB_SECTION(BindBuffers);
+    PS_SECTION(BindBuffers);
     const u64 alignment = instance.StorageMinAlignment();
     for (u32 buffer_index = 0; buffer_index < stage.buffers.size(); ++buffer_index) {
         const auto& desc = stage.buffers[buffer_index];
@@ -3742,7 +3742,7 @@ Rasterizer::ImageDescCacheEntry& Rasterizer::CachedImageDescEntry(const AmdGpu::
 void Rasterizer::BindTextures(const Shader::Info& stage, const PreparedStage* prepared,
                               Shader::Backend::Bindings& binding, u32& write_index,
                               bool& barrier, bool on_helper) {
-    BB_SECTION(BindTextures);
+    PS_SECTION(BindTextures);
     const u32 first_image_idx = image_infos.size();
     TextureSet* set_slot = nullptr;
     if (!on_helper && BindTexturesFromSet(stage, prepared, first_image_idx, barrier, set_slot)) {
@@ -4237,7 +4237,7 @@ bool Rasterizer::CanDrawAttachments() const {
 }
 
 RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
-    BB_SECTION(BeginRendering);
+    PS_SECTION(BeginRendering);
     // psport: RenderStateMemo (see BeginMemo).
     const bool memo_on = !PsToggle::Disabled(PsToggle::RenderStateMemo) && !FrameCapture::Active();
     if (PsStats::g_is_enabled && ((begin_memo_hits + begin_memo_misses) & 0x3FFFF) == 0x3FFFF) {
@@ -4920,7 +4920,7 @@ void Rasterizer::UnmapMemory(VAddr addr, u64 size) {
 }
 
 void Rasterizer::UpdateDynamicState(const GraphicsPipeline* pipeline, const bool is_indexed) const {
-    BB_SECTION(UpdateDynamicState);
+    PS_SECTION(UpdateDynamicState);
     UpdateViewportScissorState();
     UpdateDepthStencilState();
     UpdatePrimitiveState(is_indexed);

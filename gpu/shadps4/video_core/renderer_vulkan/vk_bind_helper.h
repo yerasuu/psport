@@ -81,7 +81,7 @@ public:
 
 private:
     void Run(std::stop_token stop) {
-        Common::SetCurrentThreadName("bb:TexBind");
+        Common::SetCurrentThreadName("psport:TexBind");
         m_is_on_helper = true;
         u64 seen = 0;
         while (!stop.stop_requested()) {

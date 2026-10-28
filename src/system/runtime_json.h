@@ -4,8 +4,8 @@
  * the eboots that link it lay them out), so each one fits in the storage a caller gives it. Elements
  * live in nodes of their own because operator[], back() and getString() hand out references that
  * must survive later insertions. */
-#ifndef BB_RUNTIME_JSON_H
-#define BB_RUNTIME_JSON_H
+#ifndef PS_RUNTIME_JSON_H
+#define PS_RUNTIME_JSON_H
 #include "runtime.h"
 #include <stdbool.h>
 

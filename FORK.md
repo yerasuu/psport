@@ -129,7 +129,12 @@ shadPS4's own headers (`common/`, `core/`), so a bare `settings.h` would be foun
 `psport_net_*`, `PsNet*`) and the DLSS bridge's interface `psport_dlss_bridge.h` (`PsDlss*`, entry
 point `PsDlssGetApi`; a bridge built before exports `BbDlssGetApi` and is reported unavailable until
 `build.sh` builds it again). The comments that mark psport's lines in inherited code say
-`psport:` (bbport's `bbport:`), as do the Vulkan debug names of its buffers.
+`psport:` (bbport's `bbport:`), as do the Vulkan debug names of its buffers. The runtime's include
+guards are `PS_RUNTIME*_H` (`BB_RUNTIME*_H`), the GPU section profiler's macro `PS_SECTION`
+(`BB_SECTION`), CMake's LTO check `ps_ipo_*` (`bb_ipo_*`), and psport's host threads `psport:*`
+within Linux's 15 characters (`bb:*`; `psport:Prep<N>`, `psport:Signals`, `psport:VkRec[<N>]` and
+`psport:kernel` were `bb:DrawPrep<N>`, `bb:GpuSignals`, `bb:VkRecorder[<N>]` and
+`bb:kernel_service`).
 
 The settings file is `psport.ini` and the GPU check `out/psport-gpu-capabilities` (bbport's
 `bbport.ini` and `out/bb-gpu-capabilities`). When `PS_CONFIG` is unset and the data directory has a

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-#ifndef BB_RUNTIME_PAD_H
-#define BB_RUNTIME_PAD_H
+#ifndef PS_RUNTIME_PAD_H
+#define PS_RUNTIME_PAD_H
 /* libScePad's data and the scripted input that runtime_pad.c mixes into it (runtime_pad_script.c). */
 #include <stdbool.h>
 #include <stddef.h>

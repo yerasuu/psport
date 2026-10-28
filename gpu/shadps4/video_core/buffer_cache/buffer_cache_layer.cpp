@@ -77,7 +77,7 @@ std::optional<std::pair<const Buffer*, u64>> BufferCache::LayerBind(VAddr va_ran
                                                                     bool is_written,
                                                                     bool is_texel_buffer,
                                                                     bool can_promote) {
-    BB_SECTION(LayerBind);
+    PS_SECTION(LayerBind);
     // Residency changes queued since the last packet: loads, demotions, unmaps, idle blocks.
     if (maintained_epoch != packet_epoch) {
         Maintain();

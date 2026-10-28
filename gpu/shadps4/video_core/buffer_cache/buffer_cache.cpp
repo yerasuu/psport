@@ -1125,7 +1125,7 @@ void PrintBufferStats() {
 
 std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 size,
                                                         bool is_written, bool is_texel_buffer) {
-    BB_SECTION(ObtainBuffer);
+    PS_SECTION(ObtainBuffer);
     const bool stats = BufferStatsEnabled();
     if (stats) {
         PrintBufferStats();
@@ -1239,7 +1239,7 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
     }
     // For read-only buffers use device local stream buffer to reduce renderpass breaks.
     if (!is_written && size <= STREAM_THRESHOLD && !IsRegionGpuModified(device_addr, size)) {
-        BB_SECTION(ObtainStream);
+        PS_SECTION(ObtainStream);
         if (stats) {
             auto& region = Stats().regions[RegionKey(device_addr)];
             ++region.stream_count;
@@ -1280,7 +1280,7 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
     size =
         static_cast<u32>(std::min<u64>(size, ((last_block + 1) << block_shift) - device_addr));
     EnsureResident(arena, first_block, last_block);
-    BB_SECTION(ObtainVram);
+    PS_SECTION(ObtainVram);
     if (!is_written) {
     }
     const u64 uploaded_before = PsStats::g_cb_buffer_upload.load(std::memory_order_relaxed);
@@ -1672,7 +1672,7 @@ std::pair<const Buffer*, u64> BufferCache::NullBinding() {
 
 void BufferCache::EnsureResident(const Buffer* arena, u64 first_block, u64 last_block,
                                  bool in_place) {
-    BB_SECTION(EnsureResident);
+    PS_SECTION(EnsureResident);
     NoteUse(first_block << block_shift, (last_block - first_block + 1) << block_shift);
     if (maintained_epoch != packet_epoch) {
         Maintain();

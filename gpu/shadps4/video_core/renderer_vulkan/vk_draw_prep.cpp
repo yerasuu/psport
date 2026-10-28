@@ -479,7 +479,7 @@ void DrawPreparation::Collect() {
 }
 
 void DrawPreparation::ScannerLoop(std::stop_token stop) {
-    Common::SetCurrentThreadName("bb:DrawScan");
+    Common::SetCurrentThreadName("psport:DrawScan");
     PsThreads::MakeBackground();
     auto regs = std::make_unique<AmdGpu::Regs>();
     u64 checksum = 0;
@@ -562,7 +562,7 @@ void DrawPreparation::ScannerLoop(std::stop_token stop) {
 }
 
 void DrawPreparation::WorkerLoop(std::stop_token stop, u32 i_worker) {
-    Common::SetCurrentThreadName(("bb:DrawPrep" + std::to_string(i_worker)).c_str());
+    Common::SetCurrentThreadName(("psport:Prep" + std::to_string(i_worker)).c_str());
     PsThreads::MakeBackground();
     auto regs = std::make_unique<AmdGpu::Regs>();
     constexpr u64 NoPosition = ~0ull;

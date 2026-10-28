@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-#ifndef BB_RUNTIME_H
-#define BB_RUNTIME_H
+#ifndef PS_RUNTIME_H
+#define PS_RUNTIME_H
 #include <time.h>
 #include <stdint.h>
 #include <stddef.h>

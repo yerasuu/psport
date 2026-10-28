@@ -103,7 +103,7 @@ extern "C" void __gcov_reset(void);
 // intervals.
 static void StartProfileWriter() {
     std::thread([] {
-        Common::SetCurrentThreadName("bb:pgo");
+        Common::SetCurrentThreadName("psport:pgo");
         for (;;) {
             std::this_thread::sleep_for(std::chrono::seconds(30));
             __gcov_dump();
@@ -134,7 +134,7 @@ extern "C" int psport_gpu_init(const PsGpuConfig* p_config) {
     const std::string icon = std::string(p_config->sz_app0 ? p_config->sz_app0 : ".") + "/sce_sys/icon0.png";
     const s32 width = p_config->width, height = p_config->height;
     s_window_thread = std::thread([title, icon, width, height] {
-        Common::SetCurrentThreadName("bb:window");
+        Common::SetCurrentThreadName("psport:window");
         auto* p_window = new Frontend::WindowSDL(width, height, title.c_str(), icon.c_str());
         if (!p_window->IsCreated()) {
             delete p_window;

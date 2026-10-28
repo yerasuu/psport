@@ -45,13 +45,13 @@ Zones:
 | Zone | Thread | Where |
 |---|---|---|
 | `Stage A decode` | GPU command thread (`shadPS4:GpuCommandProcessor`) | one resumption of a queue's decoding task, `Liverpool::Process` |
-| `Stage B packet` | draw recording thread (`bb:DrawRec`) | one packet of the draw pipe, `DrawPipe::Run` |
-| `Draw scan` | `bb:DrawScan` | register scan of one submission, `DrawPreparation::ScannerLoop` |
-| `Draw prep` | `bb:DrawPrep<N>` | one claimed submission, `DrawPreparation::WorkerLoop` |
+| `Stage B packet` | draw recording thread (`psport:DrawRec`) | one packet of the draw pipe, `DrawPipe::Run` |
+| `Draw scan` | `psport:DrawScan` | register scan of one submission, `DrawPreparation::ScannerLoop` |
+| `Draw prep` | `psport:Prep<N>` | one claimed submission, `DrawPreparation::WorkerLoop` |
 | `Shader compile` | wherever pipelines are built | `PipelineCache::CompileModule` (GCN to SPIR-V and the module) |
 | `Graphics pipeline`, `Compute pipeline` | same | pipeline construction, `vkCreate*Pipelines` included |
 | `Present` | present or swap thread | `Presenter::Present` |
-| `Swap` | `bb:Present` | one queued presentation, `VideoOutDriver::SwapThread` |
+| `Swap` | `psport:Present` | one queued presentation, `VideoOutDriver::SwapThread` |
 | `mutex wait`, `cond wait`, `sema wait`, `event flag wait`, `sleep` | the game's threads | the runtime's blocking waits (`src/kernel/`), the same ones `PS_FRAME_STATS` times |
 | shadPS4's `RENDERER_TRACE` / `HLE_TRACE` | various | draws and dispatches in `vk_rasterizer.cpp`, page and region tracking, texture cache, `sceGnm*` submits, event queues |
 

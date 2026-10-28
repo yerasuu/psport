@@ -752,10 +752,10 @@ void Scheduler::LeaveDirectSegment() {
 
 void Scheduler::RecorderThread(std::stop_token stoken, u32 index) {
     if (index == 0) {
-        Common::SetCurrentThreadName("bb:VkRecorder");
+        Common::SetCurrentThreadName("psport:VkRec");
     } else {
         char name[16];
-        std::snprintf(name, sizeof(name), "bb:VkRecorder%u", index);
+        std::snprintf(name, sizeof(name), "psport:VkRec%u", index);
         Common::SetCurrentThreadName(name);
     }
     Worker& worker = *workers[index];

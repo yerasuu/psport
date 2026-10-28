@@ -21,7 +21,7 @@ public:
         std::scoped_lock lock{mutex};
         previous = std::move(thread);
         thread = std::jthread([func = std::move(func)](std::stop_token stop) {
-            runtime_thread_attach_host("bb:hle");
+            runtime_thread_attach_host("psport:hle");
             func(stop);
         });
         id = thread.get_id();

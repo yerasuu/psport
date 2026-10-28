@@ -67,6 +67,6 @@ struct Scope {
 };
 } // namespace PsSections
 
-#define BB_SECTION_JOIN2(a, b) a##b
-#define BB_SECTION_JOIN(a, b) BB_SECTION_JOIN2(a, b)
-#define BB_SECTION(id) PsSections::Scope BB_SECTION_JOIN(bb_section_scope_, __LINE__){PsSections::id}
+#define PS_SECTION_JOIN2(a, b) a##b
+#define PS_SECTION_JOIN(a, b) PS_SECTION_JOIN2(a, b)
+#define PS_SECTION(id) PsSections::Scope PS_SECTION_JOIN(ps_section_scope_, __LINE__){PsSections::id}

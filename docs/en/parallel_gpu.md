@@ -59,7 +59,7 @@ Must scale down to the Steam Deck (4 cores / 8 threads): worker count follows
 
 Step 1 (draw preparation, 4 workers, toggle 8192), Hunter's Nightmare, same view:
 71.5 FPS with prepared draws vs 64.1 without (+11.5%), identical screenshots.
-97–98% of direct draws use the prepared pipeline; each `bb:DrawPrep` worker ~10% of a core.
+97–98% of direct draws use the prepared pipeline; each `psport:Prep` worker ~10% of a core.
 The GPU thread is still ~90% busy: texture/buffer binding is the next target (step 2).
 
 Guest write faults (same view, toggle 65536): the game fills its per-frame buffers
@@ -130,10 +130,10 @@ input state from the resolved handles.
 Draw preparation used to replay the whole command stream in every worker and was switched
 off below 12 hardware threads (Steam Deck: no workers). Now:
 
-- One scanner (`bb:DrawScan`) replays the register writes in order and stores, per buffer,
+- One scanner (`psport:DrawScan`) replays the register writes in order and stores, per buffer,
   its starting checksum and a delta of the 32-word register blocks it wrote
   (`AmdGpu::RegDirty/RegDelta`, recorded by `ApplyGraphicsRegisterPacket`).
-- Workers (`bb:DrawPrepN`, half the hardware threads in the affinity mask, 1..8) claim the
+- Workers (`psport:PrepN`, half the hardware threads in the affinity mask, 1..8) claim the
   nearest scanned buffer ahead of the GPU thread, reach its starting state by applying the
   deltas since their last buffer (or from the queue's tail state), and prepare its draws.
   More workers now mean more buffers prepared in parallel, not more duplicated replay.
@@ -249,7 +249,7 @@ into it) and, when `pgo/` holds a profile, with `-fprofile-use` (`-fprofile-part
 the same build runs on the Steam Deck.
 
 Collecting a profile: `PS_PGO=generate bash run.sh` builds an instrumented library
-(`-fprofile-generate -fprofile-update=atomic`) that writes `pgo/` every 30 s (`bb:pgo` thread:
+(`-fprofile-generate -fprofile-update=atomic`) that writes `pgo/` every 30 s (`psport:pgo` thread:
 `__gcov_dump` + `__gcov_reset`, since the game often ends through `_exit`); play a few minutes
 of ordinary gameplay. The next plain build uses it. `PS_PGO=off` / `PS_LTO=OFF` disable them.
 Regenerate the profile after larger code changes.
@@ -283,7 +283,7 @@ itself works ~40% (the rest is its spin); it is not the limit.
 
 ### Texture binding on a helper thread (opt-in: `PS_TEXTURE_HELPER=1`, toggle 1 << 22)
 
-`bb:TexBind` binds a draw's textures while the GPU thread binds its buffers and resolves its
+`psport:TexBind` binds a draw's textures while the GPU thread binds its buffers and resolves its
 vertex/index buffers (split into Resolve/Emit, toggle 1 << 23); the GPU thread joins before
 `BeginRendering`. The helper takes only the memoized path (FindImage memo valid, image clean,
 no scene-target proxy, no upscaler redirect, no storage images, no mip arrays, no storage
@@ -347,7 +347,7 @@ constant engine and pipeline selection. A direct draw or dispatch becomes a pack
 ring: the 32-word register blocks written since the previous packet (`Liverpool::pipe_dirty`,
 marked by `ApplyGraphicsRegisterPacket`), the CB/DB size hints, each stage's user data, flattened
 user data and program base, and the draw parameters (for a dispatch the `ComputeProgram`).
-The draw recording thread `bb:DrawRec` (stage B) applies the blocks to its own register copy and
+The draw recording thread `psport:DrawRec` (stage B) applies the blocks to its own register copy and
 runs the rest of the draw (`DrawRecord`, `DispatchRecord`): textures, buffers, render targets,
 barriers, descriptors, dynamic state, recording. While packets are in flight stage B owns the
 texture/buffer caches, the runtime, the scheduler, the scene targets, the upscaler and the motion

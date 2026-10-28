@@ -100,7 +100,7 @@ void VideoOutDriver::RunPresenter(std::function<void()> work, bool if_idle) {
 }
 
 void VideoOutDriver::SwapThread(std::stop_token token) {
-    Common::SetCurrentThreadName("bb:Present");
+    Common::SetCurrentThreadName("psport:Present");
     while (true) {
         std::function<void()> work;
         {

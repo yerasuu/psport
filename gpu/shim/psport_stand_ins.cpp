@@ -197,7 +197,7 @@ void KernelSignalRequest() {
     s_cv_asio_req.notify_one();
 }
 static void KernelServiceThread(std::stop_token stoken) {
-    Common::SetCurrentThreadName("bb:kernel_service");
+    Common::SetCurrentThreadName("psport:kernel");
     while (!stoken.stop_requested()) {
         {
             std::unique_lock lock{s_asio_req};

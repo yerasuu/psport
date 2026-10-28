@@ -185,7 +185,7 @@ private:
     }
 
     void Loop(unsigned i_thread) {
-        Common::SetCurrentThreadName(("bb:Copy" + std::to_string(i_thread)).c_str());
+        Common::SetCurrentThreadName(("psport:Copy" + std::to_string(i_thread)).c_str());
         u64 seen = 0;
         std::unique_lock lk{m_mutex};
         while (true) {

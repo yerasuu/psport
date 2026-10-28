@@ -2,8 +2,8 @@
 /* PSN libraries on an unplugged console, signed out (decision #207): contexts, handles, requests and
  * callbacks are created and tracked locally; whatever needs the PSN servers fails with the
  * library's not-signed-in or network error. */
-#ifndef BB_RUNTIME_NP_H
-#define BB_RUNTIME_NP_H
+#ifndef PS_RUNTIME_NP_H
+#define PS_RUNTIME_NP_H
 #include "runtime.h"
 #include <stdbool.h>
 

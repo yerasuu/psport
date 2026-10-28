@@ -2,8 +2,8 @@
 /* Shared by the runtime_memory*.c files: the region table and its lock, the direct and flexible
  * memory backing, and the queued GPU notifications. Hidden, so that the host libraries the binary
  * exports its symbols to (-rdynamic) never bind to these. */
-#ifndef BB_RUNTIME_MEMORY_H
-#define BB_RUNTIME_MEMORY_H
+#ifndef PS_RUNTIME_MEMORY_H
+#define PS_RUNTIME_MEMORY_H
 #include "runtime.h"
 #pragma GCC visibility push(hidden)
 uint64_t pool_size_bytes(void);
