@@ -495,7 +495,7 @@ static constexpr vk::FormatFeatureFlags2 ImageWrite =
 static constexpr vk::FormatFeatureFlags2 Mrt = vk::FormatFeatureFlagBits2::eColorAttachment;
 
 // Table 8.13 Data and Image Formats [Sea Islands Series Instruction Set Architecture]
-static constexpr vk::FormatFeatureFlags2 GetDataFormatFeatureFlags(
+static consteval vk::FormatFeatureFlags2 GetDataFormatFeatureFlags(
     const AmdGpu::DataFormat data_format) {
     switch (data_format) {
     case AmdGpu::DataFormat::FormatInvalid:
@@ -557,11 +557,12 @@ static constexpr vk::FormatFeatureFlags2 GetDataFormatFeatureFlags(
     case AmdGpu::DataFormat::FormatFmask64_S16_F8:
         return ImageRead | ImageWrite;
     }
-    UNREACHABLE_MSG("Missing feature flags for data format {}", static_cast<u32>(data_format));
+    // Only SurfaceFormats()'s table reaches this, at compile time, where the throw fails the build.
+    throw "Missing feature flags for a data format";
 }
 
 // Table 8.13 Data and Image Formats [Sea Islands Series Instruction Set Architecture]
-static constexpr vk::FormatFeatureFlags2 GetNumberFormatFeatureFlags(
+static consteval vk::FormatFeatureFlags2 GetNumberFormatFeatureFlags(
     const AmdGpu::NumberFormat number_format) {
     switch (number_format) {
     case AmdGpu::NumberFormat::Unorm:
@@ -582,10 +583,10 @@ static constexpr vk::FormatFeatureFlags2 GetNumberFormatFeatureFlags(
     case AmdGpu::NumberFormat::Ubscaled:
         return ImageRead;
     }
-    UNREACHABLE_MSG("Missing feature flags for number format {}", static_cast<u32>(number_format));
+    throw "Missing feature flags for a number format";
 }
 
-static constexpr SurfaceFormatInfo CreateSurfaceFormatInfo(const AmdGpu::DataFormat data_format,
+static consteval SurfaceFormatInfo CreateSurfaceFormatInfo(const AmdGpu::DataFormat data_format,
                                                            const AmdGpu::NumberFormat number_format,
                                                            const vk::Format vk_format) {
     return {

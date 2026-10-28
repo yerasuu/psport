@@ -644,6 +644,9 @@ VideoCore::ImageId Rasterizer::FindTargetMemoized(VideoCore::TextureCache::Image
     PsNativeProbe::Note(PsNativeProbe::MemoMiss);
     make_desc();
     const VideoCore::ImageId image_id = texture_cache.FindImage(desc);
+    if (!image_id) {
+        return image_id;
+    }
     if (generation == texture_cache.RegistryGeneration()) {
         memo.key = key;
         memo.key_size = key_size;
@@ -679,9 +682,14 @@ bool Rasterizer::PrepareRenderState(const GraphicsPipeline* pipeline) {
         }
         const auto& hint = CbExtent(cb);
         const u32 tag = 1;
-        image_id = bound_images.emplace_back(FindTargetMemoized(
+        image_id = FindTargetMemoized(
             desc, last_targets[cb], [&] { std::construct_at(&desc, col_buf, hint); }, tag,
-            col_buf, hint));
+            col_buf, hint);
+        if (!image_id) {
+            is_target_missing = true;
+            continue;
+        }
+        bound_images.emplace_back(image_id);
         auto& image = texture_cache.GetImage(image_id);
         image.binding.is_target = 1u;
         is_target_missing |= !image.IsAllocated();
@@ -698,16 +706,21 @@ bool Rasterizer::PrepareRenderState(const GraphicsPipeline* pipeline) {
                 return p_info && p_info->stores.GetAny(Shader::IR::Attribute::RenderTargetIndex);
             });
         const auto depth_view = regs.depth_view.ForDraw(is_layered);
-        image_id = bound_images.emplace_back(FindTargetMemoized(
+        image_id = FindTargetMemoized(
             desc, last_targets[AmdGpu::NUM_COLOR_BUFFERS],
             [&] {
                 std::construct_at(&desc, regs.depth_buffer, depth_view, regs.depth_control,
                                   htile_address, hint);
             },
-            tag, regs.depth_buffer, depth_view, regs.depth_control, htile_address, hint));
-        auto& image = texture_cache.GetImage(image_id);
-        image.binding.is_target = 1u;
-        is_target_missing |= !image.IsAllocated();
+            tag, regs.depth_buffer, depth_view, regs.depth_control, htile_address, hint);
+        if (!image_id) {
+            is_target_missing = true;
+        } else {
+            bound_images.emplace_back(image_id);
+            auto& image = texture_cache.GetImage(image_id);
+            image.binding.is_target = 1u;
+            is_target_missing |= !image.IsAllocated();
+        }
     } else {
         db_desc.first = {};
     }
@@ -4637,8 +4650,13 @@ void Rasterizer::Resolve() {
     const auto& mrt1_hint = CbExtent(1);
     VideoCore::TextureCache::ImageDesc mrt0_desc{Regs().color_buffers[0], mrt0_hint};
     VideoCore::TextureCache::ImageDesc mrt1_desc{Regs().color_buffers[1], mrt1_hint};
-    auto& mrt0_image = texture_cache.GetImage(texture_cache.FindImage(mrt0_desc, true));
-    auto& mrt1_image = texture_cache.GetImage(texture_cache.FindImage(mrt1_desc, true));
+    const auto mrt0_id = texture_cache.FindImage(mrt0_desc, true);
+    const auto mrt1_id = texture_cache.FindImage(mrt1_desc, true);
+    if (!mrt0_id || !mrt1_id) {
+        return;
+    }
+    auto& mrt0_image = texture_cache.GetImage(mrt0_id);
+    auto& mrt1_image = texture_cache.GetImage(mrt1_id);
 
     ScopeMarkerBegin(fmt::format("Resolve:MRT0={:#x}:MRT1={:#x}",
                                  Regs().color_buffers[0].Address(),
@@ -4663,6 +4681,9 @@ void Rasterizer::DepthStencilCopy(bool is_depth, bool is_stencil) {
 
     const auto read_id = texture_cache.FindImage(read_desc);
     const auto write_id = texture_cache.FindImage(write_desc);
+    if (!read_id || !write_id) {
+        return;
+    }
     // The copy destination is never bound as a target, so its stencil plane is linked here.
     texture_cache.AssociateStencil(write_id, write_desc.info);
 

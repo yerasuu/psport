@@ -143,8 +143,15 @@ static bool ShouldTexturesPreferHost(VmaAllocator allocator) {
 
 bool UniqueImage::Create(const vk::ImageCreateInfo& image_ci, bool can_exceed_budget,
                          bool is_sampled_only) {
+    if (image) [[unlikely]] {
+        LOG_ERROR_COUNTED(Render_Vulkan,
+                          "Image creation over a live image ({}x{}x{} {}) refused, the live one "
+                          "kept",
+                          image_ci.extent.width, image_ci.extent.height, image_ci.extent.depth,
+                          vk::to_string(image_ci.format));
+        return false;
+    }
     this->image_ci = image_ci;
-    ASSERT(!image);
     // psport: images of PS_VMA_DEDICATED_MB (4) or more get memory of their own, given back to
     // the driver when they are freed. In shared VMA blocks the texture collector's evictions left
     // holes (~0.9 GB on an RX 7800 XT) that a block only returns once wholly empty.
@@ -347,7 +354,13 @@ void Image::GetBarriers(Barriers& barriers, vk::ImageLayout dst_layout, vk::Acce
                 // NOTE: these loops may produce a lot of small barriers.
                 // If this becomes a problem, we can optimize it by merging adjacent barriers.
                 const auto subres_idx = mip * info.resources.layers + layer;
-                ASSERT(subres_idx < subresource_states.size());
+                if (subres_idx >= subresource_states.size()) [[unlikely]] {
+                    LOG_ERROR_COUNTED(Render_Vulkan,
+                                      "Transition of mip {} layer {} outside the image's {} levels "
+                                      "and {} layers, skipped",
+                                      mip, layer, info.resources.levels, info.resources.layers);
+                    continue;
+                }
                 auto& state = subresource_states[subres_idx];
 
                 constexpr auto write_flags = vk::AccessFlagBits2::eTransferWrite |

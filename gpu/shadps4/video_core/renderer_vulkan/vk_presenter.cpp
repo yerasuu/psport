@@ -369,6 +369,9 @@ Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& 
     if (!upscaled) {
         auto desc = VideoCore::TextureCache::ImageDesc{attribute, cpu_address};
         image_id = texture_cache.FindImage(desc);
+        if (!image_id) {
+            return PrepareBlankFrame(false);
+        }
         texture_cache.UpdateImage(image_id);
     }
 

@@ -397,7 +397,12 @@ ImageId TextureCache::ResolveDepthOverlap(const ImageInfo& requested_info, Bindi
     case BindingType::RenderTarget:
         // Render target can have only Rxf format. If the cache contains only Dx[S8] we need to
         // re-create the image.
-        ASSERT(!requested_info.props.is_depth);
+        if (requested_info.props.is_depth) [[unlikely]] {
+            LOG_ERROR_COUNTED(Render_Vulkan,
+                              "Render target at {:#x} requested with a depth format, resolved as a "
+                              "color target",
+                              requested_info.guest_address);
+        }
         recreate |= cache_image.info.props.is_depth;
         break;
     case BindingType::DepthTarget:
@@ -709,7 +714,13 @@ ImageId TextureCache::ExpandImage(const ImageInfo& info, ImageId image_id) {
 
 ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
     const auto& info = desc.info;
-    ASSERT(info.guest_address != 0);
+    if (info.guest_address == 0) [[unlikely]] {
+        LOG_ERROR_COUNTED(Render_Vulkan,
+                          "Image {}x{} at guest address 0 not created: the draw, copy or flip "
+                          "that uses it is skipped",
+                          info.size.width, info.size.height);
+        return {};
+    }
 
     std::scoped_lock lock{mutex};
 
@@ -1204,8 +1215,12 @@ vk::Sampler TextureCache::GetSampler(const AmdGpu::Sampler& sampler,
 void TextureCache::RegisterImage(ImageId image_id) {
     PsStats::g_images_registered.fetch_add(1, std::memory_order_relaxed);
     Image& image = slot_images[image_id];
-    ASSERT_MSG(False(image.flags & ImageFlagBits::Registered),
-               "Trying to register an already registered image");
+    if (True(image.flags & ImageFlagBits::Registered)) [[unlikely]] {
+        LOG_ERROR_COUNTED(Render_Vulkan,
+                          "Image at {:#x} registered twice, the second time ignored",
+                          image.info.guest_address);
+        return;
+    }
     image.flags |= ImageFlagBits::Registered;
     ++registry_generation;
     total_used_memory += Common::AlignUp(image.info.guest_size, 1024);
@@ -1221,8 +1236,12 @@ void TextureCache::RegisterImage(ImageId image_id) {
 void TextureCache::UnregisterImage(ImageId image_id) {
     PsStats::g_images_unregistered.fetch_add(1, std::memory_order_relaxed);
     Image& image = slot_images[image_id];
-    ASSERT_MSG(True(image.flags & ImageFlagBits::Registered),
-               "Trying to unregister an already unregistered image");
+    if (False(image.flags & ImageFlagBits::Registered)) [[unlikely]] {
+        LOG_ERROR_COUNTED(Render_Vulkan,
+                          "Image at {:#x} unregistered twice, the second time ignored",
+                          image.info.guest_address);
+        return;
+    }
     image.flags &= ~ImageFlagBits::Registered;
     ++registry_generation;
     lru_cache.Free(image.lru_id);
@@ -1232,14 +1251,18 @@ void TextureCache::UnregisterImage(ImageId image_id) {
     PsStats::g_c_live_images.fetch_sub(1, std::memory_order_relaxed);
     ForEachPage(image.info.guest_address, image.info.guest_size, [this, image_id](u64 page) {
         const auto page_it = page_table.find(page);
-        if (page_it == nullptr) {
-            UNREACHABLE_MSG("Unregistering unregistered page=0x{:x}", page << PageShift);
+        if (page_it == nullptr) [[unlikely]] {
+            LOG_ERROR_COUNTED(Render_Vulkan,
+                              "Unregistered image's page {:#x} has no entry, skipped",
+                              page << PageShift);
             return;
         }
         auto& image_ids = *page_it;
         const auto vector_it = std::ranges::find(image_ids, image_id);
-        if (vector_it == image_ids.end()) {
-            ASSERT_MSG(false, "Unregistering unregistered image in page=0x{:x}", page << PageShift);
+        if (vector_it == image_ids.end()) [[unlikely]] {
+            LOG_ERROR_COUNTED(Render_Vulkan,
+                              "Unregistered image is missing from page {:#x}, skipped",
+                              page << PageShift);
             return;
         }
         image_ids.erase(vector_it);
@@ -1281,7 +1304,12 @@ void TextureCache::TrackImageHead(ImageId image_id) {
     if (image_begin == image.track_addr) {
         return;
     }
-    ASSERT(image.track_addr != 0 && image_begin < image.track_addr);
+    if (image.track_addr == 0 || image_begin > image.track_addr) [[unlikely]] {
+        LOG_ERROR_COUNTED(Render_Vulkan,
+                          "Image at {:#x} has no tracked head before {:#x}, head left untracked",
+                          image_begin, image.track_addr);
+        return;
+    }
     const auto size = image.track_addr - image_begin;
     image.track_addr = image_begin;
     tracker.UpdatePageWatchers<1>(image_begin, size);
@@ -1296,7 +1324,13 @@ void TextureCache::TrackImageTail(ImageId image_id) {
     if (image_end == image.track_addr_end) {
         return;
     }
-    ASSERT(image.track_addr_end != 0 && image.track_addr_end < image_end);
+    if (image.track_addr_end == 0 || image.track_addr_end > image_end) [[unlikely]] {
+        LOG_ERROR_COUNTED(Render_Vulkan,
+                          "Image ending at {:#x} has no tracked tail after {:#x}, tail left "
+                          "untracked",
+                          image_end, image.track_addr_end);
+        return;
+    }
     const auto addr = image.track_addr_end;
     const auto size = image_end - image.track_addr_end;
     image.track_addr_end = image_end;
@@ -1341,7 +1375,6 @@ void TextureCache::UntrackImageTail(ImageId image_id) {
     if (!image.IsTracked() || image.track_addr_end < image_end) {
         return;
     }
-    ASSERT(image.track_addr_end != 0);
     const auto addr = tracker.GetPageAddr(image_end);
     const auto size = image_end - addr;
     image.track_addr_end = addr;
@@ -1702,8 +1735,18 @@ void TextureCache::TouchImage(const Image& image) {
 
 void TextureCache::DeleteImage(ImageId image_id) {
     Image& image = slot_images[image_id];
-    ASSERT_MSG(!image.IsTracked(), "Image was not untracked");
-    ASSERT_MSG(False(image.flags & ImageFlagBits::Registered), "Image was not unregistered");
+    // Otherwise the page watchers and the page table would keep a freed image's slot.
+    if (image.IsTracked()) [[unlikely]] {
+        LOG_ERROR_COUNTED(Render_Vulkan, "Image at {:#x} deleted while tracked, untracked first",
+                          image.info.guest_address);
+        UntrackImage(image_id);
+    }
+    if (True(image.flags & ImageFlagBits::Registered)) [[unlikely]] {
+        LOG_ERROR_COUNTED(Render_Vulkan,
+                          "Image at {:#x} deleted while registered, unregistered first",
+                          image.info.guest_address);
+        UnregisterImage(image_id);
+    }
 
     // Remove any registered meta areas.
     const auto& meta_info = image.info.meta_info;
