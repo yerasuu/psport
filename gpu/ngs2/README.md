@@ -45,7 +45,8 @@ sampler plays linear PCM (`0x10` to `0x1b`) from its waveform block queue with l
 requests, streaming and the callbacks of block ends and loops, resampled by the pitch with the
 firmware's 4-tap interpolation; the envelope, distortion, filters and peak meter follow. The submixer
 adds the compressor; the mastering applies its sixteen channel matrices, the LFE low-pass, the
-limiter, the gain and its two meters.
+limiter, the gain and its two meters. `tools/hwtest/ngs2_render` compares the rendered PCM of a
+console, the firmware module and this one.
 
 Still missing, each counted in the call report (`Calls: summary stub <n> ...`) or returned as
 `0x804A0001`: VAG and ATRAC9 waveforms (F4) and the waveform generators, the reverb (F5), custom
