@@ -7,6 +7,7 @@
 #include <cstring>
 #include <utility>
 
+#include "Custom.h"
 #include "Internal.h"
 #include "Reverb.h"
 
@@ -152,6 +153,9 @@ void FlushVoice(System* p_system, Voice* p_voice) {
     }
     if (p_voice->p_reverb_params) {
         *p_voice->p_active_reverb_params = *p_voice->p_reverb_params;
+    }
+    if (p_voice->p_custom) {
+        FlushCustomVoice(p_voice);
     }
     p_voice->are_params_changed = true;
     ExpandVoiceMatrices(p_voice);
@@ -358,12 +362,9 @@ void ProcessVoice(RenderContext& context, Voice* p_voice) {
     case kReverbRackId:
         ProcessReverbVoice(context, p_voice, &event_code);
         break;
-    default: {
-        // A custom (F6) voice cannot pass its setup yet, so it cannot play either.
-        static std::uint64_t s_c_uses;
-        NoteUnimplemented(&s_c_uses, "Ngs2 custom rack processing (F6)");
+    default:
+        ProcessCustomVoice(context, p_voice, &event_code);
         break;
-    }
     }
     EndEvents(p_voice, events, event_code);
     p_voice->is_first_grain = false;

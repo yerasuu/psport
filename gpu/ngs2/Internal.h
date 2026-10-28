@@ -24,6 +24,7 @@
 #include "core/libraries/ngs2/ngs2_error.h"
 #include "core/libraries/ngs2/ngs2_report.h"
 #include "core/libraries/ngs2/ngs2_sampler.h"
+#include "core/libraries/ngs2/ngs2_submixer.h"
 
 #include "Dsp.h"
 #include "VoiceData.h"
@@ -149,6 +150,20 @@ struct RackKind {
     bool is_custom;
 };
 
+// What a custom module's option settles (spec 03 §6, 07 §1): value is the peak meter's blocks or the
+// reverb's word at 4; the rest is UserFx2's handlers, block sizes and user data.
+struct CustomModuleOption {
+    u32 value;
+    OrbisNgs2UserFx2SetupHandler pfn_setup;
+    OrbisNgs2UserFx2CleanupHandler pfn_cleanup;
+    OrbisNgs2UserFx2ControlHandler pfn_control;
+    OrbisNgs2UserFx2ProcessHandler pfn_process;
+    u64 cb_common;
+    u64 cb_param;
+    u64 cb_work;
+    uintptr_t user_data;
+};
+
 struct CustomModule {
     u32 module_id;
     u32 source_buffer_id;
@@ -156,6 +171,7 @@ struct CustomModule {
     u32 dest_buffer_id;
     u32 off_state;
     u32 cb_state;
+    CustomModuleOption option;
 };
 
 // What a rack's option settles, defaults applied (spec 02 §2, §4).
@@ -191,6 +207,8 @@ struct Rack;
 struct Voice;
 struct ReverbParams;
 struct ReverbState;
+struct CustomRack;
+struct CustomVoice;
 
 // One of a sampler rack's ATRAC9 decoders (spec 05 §6, 08 §2): LibAtrac9's state and the planes of the
 // frame it decoded last, both in the rack's buffer. The first maxAtrac9Decoders stand for the
@@ -270,6 +288,7 @@ struct Voice {
     MasteringMatrices* p_previous_mastering_matrices;
     ReverbParams* p_active_reverb_params;
     ReverbState* p_reverb;
+    CustomVoice* p_custom;
     VoiceDsp* p_dsp;
     BiquadState* p_filter_states;
     PeakMeterState meters[2];
@@ -310,8 +329,11 @@ struct QueuedCallback {
 // The rack queues these by copy.
 static_assert(std::is_trivially_copyable_v<QueuedCallback> && sizeof(QueuedCallback) == 0x40);
 
-// Holds the voice's busy bit, the firmware's per-voice spinlock, for a whole VoiceControl chain or
-// a state read.
+// The voice's busy bit, the firmware's per-voice spinlock.
+void LockVoice(Voice* p_voice);
+void UnlockVoice(Voice* p_voice);
+
+// Holds the voice's busy bit for a whole VoiceControl chain or a state read.
 class VoiceLock {
 public:
     explicit VoiceLock(Voice* p_voice);
@@ -359,6 +381,7 @@ struct Rack {
     QueuedCallback* p_callbacks;
     u32 c_callbacks;
     u32 c_callback_capacity;
+    CustomRack* p_custom;
 };
 
 struct System {
@@ -509,6 +532,15 @@ void SetUserFx(const OrbisNgs2SamplerVoiceUserFxParam* p_param, VoiceParams* p_p
 void ReadUserFx(const VoiceParams& params, OrbisNgs2SamplerVoiceUserFxParam* p_param);
 s32 SetPeakMeter(OrbisNgs2Handle h_voice, const OrbisNgs2SamplerVoicePeakMeterParam* p_param, VoiceParams* p_params);
 u32 ReadPeakMeter(const VoiceParams& params);
+// Module 0x12 sub 0, the submixer's 0x20000002 and a custom rack's compressor; p_compressor is null
+// while the module has no parameter.
+void SetCompressor(const OrbisNgs2SubmixerVoiceCompressorParam& param, u32 max_inputs, CompressorParams* p_out);
+void ReadCompressor(const CompressorParams* p_compressor, OrbisNgs2SubmixerVoiceCompressorParam* p_param);
+// Module 0x19 (0x24020, spec 04 §2.2): calls the game's handler on planes, without the voice lock so
+// that the handler may call back into Ngs2; a negative answer sets ERROR and clears PLAYING. module is
+// the voice's set_modules bit of the module, whose first grain and change the context's flags carry.
+void RunVoiceUserFx(const RenderContext& context, Voice* p_voice, const UserFxParams& user_fx, const Planes& planes,
+                    u32 c_channels, u32 module);
 s32 SetFilter(OrbisNgs2Handle h_voice, const Voice& voice, const OrbisNgs2SamplerVoiceFilterParam* p_param);
 s32 ReadFilter(OrbisNgs2Handle h_voice, const Voice& voice, OrbisNgs2SamplerVoiceFilterParam* p_param);
 // Runs the voice's filters that sit at location (spec 06 §4; 2 + p before port p).
@@ -535,6 +567,9 @@ void ProcessSamplerVoice(RenderContext& context, Voice* p_voice, u32* p_event_co
 void ProcessSubmixerVoice(RenderContext& context, Voice* p_voice, u32* p_event_code);
 void ProcessMasteringVoice(RenderContext& context, Voice* p_voice, u32* p_event_code);
 void ProcessReverbVoice(RenderContext& context, Voice* p_voice, u32* p_event_code);
+// The sampler source (module 0x70) over the voice's c_out_channels planes of out; answers the state
+// flags it leaves. A custom sampler runs it into its buffer 0.
+u32 RunSamplerSource(RenderContext& context, Voice* p_voice, const Planes& out);
 void ResetSource(Voice* p_voice);
 // The bytes a rack lays out for one ATRAC9 decoder's state, 16-byte aligned.
 std::size_t GetAtrac9StateSize();
@@ -551,6 +586,9 @@ void PostWaveformQueue(Voice* p_voice);
 // Ports, inputs and outputs (Mixer.cpp, 0x265a0, 0x26210, 0x27060).
 void ApplyEventCode(const Planes& planes, u32 c_channels, u32 c_samples, u32 event_code);
 void MixPorts(RenderContext& context, Voice* p_voice, const Planes& planes, u32 c_channels);
+// A custom rack's ports (spec 04 §4.3): port p mixes the buffer aPort[p].sourceBufferId of p_buffers
+// when its bit is in valid_mask.
+void MixCustomPorts(RenderContext& context, Voice* p_voice, const Planes* p_buffers, u32 valid_mask, u32 c_channels);
 Planes ReadInput(RenderContext& context, Voice* p_voice, u32 i_input);
 void WriteRenderBuffer(RenderContext& context, u32 i_buffer, const Planes& planes, u32 c_channels);
 void ExpandVoiceMatrices(Voice* p_voice);

@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstring>
 
+#include "Custom.h"
 #include "Internal.h"
 #include "Reverb.h"
 
@@ -36,10 +37,12 @@ enum ModuleKind : u32 {
     KIND_USER_FX,
     KIND_OUTPUT,
     KIND_REVERB,
+    KIND_CUSTOM,
 };
 
 // A module of the voice's rack by its index there (0x15640, 0x161c0, 0x14280, 0x14b60; spec 09 §10.1, §4.1),
-// with the filter or matrix it is.
+// with the filter or matrix it is; in a custom rack, i_item is the module's index (spec 02 §1: the game's
+// modules, then the custom sampler's source and pitch or the custom mastering's output).
 struct ModuleRef {
     ModuleKind kind;
     u32 i_item;
@@ -79,8 +82,16 @@ ModuleRef FindModule(const Voice& voice, u32 i_module) {
     case kReverbRackId:
         return i_module == 0 ? ModuleRef{KIND_REVERB, 0} : ModuleRef{KIND_NONE, 0};
     default: {
-        static std::uint64_t s_c_uses;
-        NoteUnimplemented(&s_c_uses, "sceNgs2VoiceControl 0xc001: custom rack modules read as unset (F6)");
+        const u32 c_modules = limits.c_custom_modules;
+        if (i_module < c_modules) {
+            return {KIND_CUSTOM, i_module};
+        }
+        if (voice.p_rack->p_kind->rack_class == RACK_CLASS_SOURCE && i_module <= c_modules + 1) {
+            return {i_module == c_modules ? KIND_SOURCE : KIND_PITCH, i_module};
+        }
+        if (voice.p_rack->p_kind->rack_class == RACK_CLASS_MASTERING && i_module == c_modules) {
+            return {KIND_OUTPUT, i_module};
+        }
         return {KIND_NONE, 0};
     }
     }
@@ -88,6 +99,9 @@ ModuleRef FindModule(const Voice& voice, u32 i_module) {
 
 bool IsModuleSet(const Voice& voice, ModuleRef module) {
     const VoiceParams& params = *voice.p_params;
+    if (voice.p_rack->p_kind->is_custom && (module.kind == KIND_CUSTOM || module.kind == KIND_OUTPUT)) {
+        return params.set_modules & (1u << module.i_item);
+    }
     switch (module.kind) {
     case KIND_SOURCE:
     case KIND_PITCH:
@@ -114,6 +128,7 @@ bool IsModuleSet(const Voice& voice, ModuleRef module) {
         return params.set_modules & MODULE_OUTPUT;
     case KIND_REVERB:
         return params.set_modules & MODULE_REVERB;
+    case KIND_CUSTOM:
     case KIND_NONE:
         break;
     }
@@ -240,6 +255,8 @@ u32 WriteModule(const Voice& voice, ModuleRef module, u8* p_block) {
     case KIND_REVERB:
         WriteReverbBlock(*voice.p_reverb_params, p_block);
         return kReverbBlockSize;
+    case KIND_CUSTOM:
+        return WriteCustomModuleBlock(voice, module.i_item, p_block, kMaxBlockSize);
     case KIND_NONE:
         break;
     }
@@ -247,6 +264,54 @@ u32 WriteModule(const Voice& voice, ModuleRef module, u8* p_block) {
 }
 
 } // namespace
+
+u32 WriteCustomModuleBlock(const Voice& voice, u32 i_module, u8* p_block, u32 cb_block) {
+    const CustomModuleLayout& layout = voice.p_rack->p_custom->layout.modules[i_module];
+    const u8* p_pending = voice.p_custom->p_blocks + layout.off_pending;
+    switch (layout.module_id) {
+    case CUSTOM_MODULE_COMPRESSOR:
+        return WriteCompressor(*reinterpret_cast<const CompressorParams*>(p_pending), p_block);
+    case CUSTOM_MODULE_FILTER: {
+        const auto& filter = *reinterpret_cast<const FilterParams*>(p_pending);
+        Put(p_block, 0, u8(filter.location));
+        Put(p_block, 1, u8(filter.type));
+        Put(p_block, 2, u8(filter.bypass_mask));
+        std::memcpy(p_block + 4, filter.f, sizeof(filter.f));
+        return 0x20;
+    }
+    case CUSTOM_MODULE_LFE: {
+        const auto& lfe = *reinterpret_cast<const LfeParams*>(p_pending);
+        Put(p_block, 0, lfe.is_enabled);
+        Put(p_block, 4, lfe.cutoff_hz);
+        return 8;
+    }
+    case CUSTOM_MODULE_GAIN:
+        std::memcpy(p_block, p_pending, kMaxChannels * sizeof(float));
+        return kMaxChannels * sizeof(float);
+    case CUSTOM_MODULE_PEAK_METER:
+        Put(p_block, 0, u8(*reinterpret_cast<const u32*>(p_pending)));
+        return 1;
+    case CUSTOM_MODULE_USER_FX:
+        std::memcpy(p_block, p_pending, sizeof(UserFxParams));
+        return sizeof(UserFxParams);
+    case CUSTOM_MODULE_REVERB:
+        WriteReverbBlock(*reinterpret_cast<const ReverbParams*>(p_pending), p_block);
+        return kReverbBlockSize;
+    case CUSTOM_MODULE_USER_FX2: {
+        // NOTE: inferred: spec 09 §12 does not list UserFx2; its block is taken to be the game's own
+        // parameter block, as the getter sizes it from the option's paramSize.
+        const u32 cb_copied = u32(std::min<std::size_t>(layout.cb_params, cb_block));
+        std::memcpy(p_block, p_pending, cb_copied);
+        return cb_copied;
+    }
+    default: {
+        static std::uint64_t s_c_uses;
+        NoteUnimplemented(&s_c_uses, "sceNgs2VoiceControl 0xc001: block of a custom module without DSP yet "
+                                     "reads as unset");
+        return 0;
+    }
+    }
+}
 
 // The game's parameter: the module index at 8, the destination at 0x10 and its size at 0x18. The
 // firmware copies dstSize bytes from the block whatever the block's size (what follows it in its

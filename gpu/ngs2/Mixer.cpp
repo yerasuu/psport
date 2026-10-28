@@ -234,6 +234,19 @@ void StoreSample(s16* p_out, float value, bool is_first) {
     *p_out = s16(is_first ? sample : std::clamp(s32(*p_out) + sample, -32768, 32767));
 }
 
+// The next grain's ramps start from this grain's volumes and matrices.
+void EndPortsGrain(Voice* p_voice) {
+    const RackLimits& limits = p_voice->p_rack->limits;
+    for (u32 i_port = 0; i_port < limits.max_ports; ++i_port) {
+        ActivePort& port = p_voice->p_active_ports[i_port];
+        port.previous_volume = port.volume;
+        port.previous_matrix_id = port.matrix_id;
+        port.is_fresh = false;
+    }
+    std::copy_n(p_voice->p_matrix_levels, std::size_t(limits.max_matrices) * kMatrixCells,
+                p_voice->p_previous_matrix_levels);
+}
+
 } // namespace
 
 u32 ChannelClass(u32 c_channels) {
@@ -303,14 +316,19 @@ void MixPorts(RenderContext& context, Voice* p_voice, const Planes& planes, u32 
         }
         MixPort(context, *p_voice, port, src, c_channels);
     }
+    EndPortsGrain(p_voice);
+}
+
+void MixCustomPorts(RenderContext& context, Voice* p_voice, const Planes* p_buffers, u32 valid_mask, u32 c_channels) {
+    const RackLimits& limits = p_voice->p_rack->limits;
     for (u32 i_port = 0; i_port < limits.max_ports; ++i_port) {
-        ActivePort& port = p_voice->p_active_ports[i_port];
-        port.previous_volume = port.volume;
-        port.previous_matrix_id = port.matrix_id;
-        port.is_fresh = false;
+        const ActivePort& port = p_voice->p_active_ports[i_port];
+        const u32 i_buffer = limits.custom_port_sources[i_port];
+        if (port.p_dest && port.p_dest->is_active && (valid_mask & (1u << i_buffer))) {
+            MixPort(context, *p_voice, port, p_buffers[i_buffer], c_channels);
+        }
     }
-    std::copy_n(p_voice->p_matrix_levels, std::size_t(limits.max_matrices) * kMatrixCells,
-                p_voice->p_previous_matrix_levels);
+    EndPortsGrain(p_voice);
 }
 
 Planes ReadInput(RenderContext& context, Voice* p_voice, u32 i_input) {

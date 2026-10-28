@@ -541,6 +541,10 @@ u32 ProcessSource(RenderContext& context, Voice* p_voice, const Planes& out) {
 
 } // namespace
 
+u32 RunSamplerSource(RenderContext& context, Voice* p_voice, const Planes& out) {
+    return ProcessSource(context, p_voice, out);
+}
+
 void ResetSource(Voice* p_voice) {
     p_voice->p_dsp->source = {};
 }
@@ -628,9 +632,8 @@ void ProcessSamplerVoice(RenderContext& context, Voice* p_voice, u32* p_event_co
     if (set_modules & MODULE_DISTORTION) {
         ProcessDistortion(params.distortion, planes, c_channels, c_samples);
     }
-    if ((set_modules & MODULE_USER_FX) && params.user_fx.pfn_handler) {
-        static std::uint64_t s_c_uses;
-        NoteUnimplemented(&s_c_uses, "Ngs2 sampler UserFx 0x10000008: the game's handler is not called yet (F6)");
+    if (set_modules & MODULE_USER_FX) {
+        RunVoiceUserFx(context, p_voice, params.user_fx, planes, c_channels, MODULE_USER_FX);
     }
     RunFilters(*p_voice, 1, planes, c_channels, c_samples);
     if (!(set_modules & MODULE_METER)) {

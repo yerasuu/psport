@@ -108,6 +108,32 @@ void ReadUserFx(const VoiceParams& params, OrbisNgs2SamplerVoiceUserFxParam* p_p
     p_param->userData2 = user_fx.user_data[2];
 }
 
+// Bit 2 (sidechain) only holds on a rack with two inputs, and the read-back rebuilds the flags from
+// the four bits the firmware keeps (spec 09 §3.2).
+void SetCompressor(const OrbisNgs2SubmixerVoiceCompressorParam& param, u32 max_inputs, CompressorParams* p_out) {
+    const u32 flag_mask = COMPRESSOR_DISABLED | COMPRESSOR_RMS | COMPRESSOR_LINK_WITHOUT_LFE |
+                          (max_inputs >= 2 ? u32(COMPRESSOR_SIDECHAIN) : 0);
+    *p_out = {param.flags & flag_mask,
+              std::clamp(param.threshold, 0.0f, 1.0f),
+              std::clamp(param.ratio, 0.0f, 1.0f),
+              std::clamp(param.knee, 0.0f, 1.0f),
+              std::clamp(param.attackTime, 0.0f, 10.0f),
+              std::clamp(param.releaseTime, 0.0f, 10.0f),
+              std::clamp(param.level, 0.0f, 32.0f)};
+}
+
+void ReadCompressor(const CompressorParams* p_compressor, OrbisNgs2SubmixerVoiceCompressorParam* p_param) {
+    const CompressorParams compressor = p_compressor ? *p_compressor : CompressorParams{};
+    p_param->flags = compressor.flags;
+    p_param->threshold = compressor.threshold;
+    p_param->ratio = compressor.slope;
+    p_param->knee = compressor.knee;
+    p_param->attackTime = compressor.attack_s;
+    p_param->releaseTime = compressor.release_s;
+    p_param->level = compressor.level;
+    p_param->reserved = 0;
+}
+
 s32 SetPeakMeter(OrbisNgs2Handle h_voice, const OrbisNgs2SamplerVoicePeakMeterParam* p_param, VoiceParams* p_params) {
     if (p_param->enableFlag > kMaxPeakMeterMode) {
         return Fail(h_voice, ORBIS_NGS2_ERROR_INVALID_PEAKMETER_FLAG, "Invalid peak meter mode ({})",

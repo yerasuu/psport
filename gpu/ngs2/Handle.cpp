@@ -143,6 +143,14 @@ void* Arena::Allocate(std::size_t cb_block, std::size_t cb_align) {
 }
 
 VoiceLock::VoiceLock(Voice* p_voice) : m_p_voice{p_voice} {
+    LockVoice(p_voice);
+}
+
+VoiceLock::~VoiceLock() {
+    UnlockVoice(m_p_voice);
+}
+
+void LockVoice(Voice* p_voice) {
     for (u32 i_attempt = 0;; ++i_attempt) {
         u32 control = p_voice->control.load(std::memory_order_relaxed);
         if (!(control & VOICE_BUSY) &&
@@ -157,8 +165,8 @@ VoiceLock::VoiceLock(Voice* p_voice) : m_p_voice{p_voice} {
     }
 }
 
-VoiceLock::~VoiceLock() {
-    m_p_voice->control.fetch_and(~u32(VOICE_BUSY), std::memory_order_release);
+void UnlockVoice(Voice* p_voice) {
+    p_voice->control.fetch_and(~u32(VOICE_BUSY), std::memory_order_release);
 }
 
 void NoteUnimplemented(std::uint64_t* p_c_uses, const char* sz_what) {

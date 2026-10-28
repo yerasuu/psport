@@ -56,12 +56,7 @@ s32 PS4_SYSV_ABI sceNgs2VoiceGetState(OrbisNgs2Handle h_voice, void* p_out_state
     if (control & VOICE_INITIAL_STATE) {
         *static_cast<u32*>(p_out_state) = VOICE_FLAG_IN_USE;
     } else if (control & VOICE_STATE_MASK) {
-        if (p_voice->p_state) {
-            std::memcpy(p_out_state, p_voice->p_state, cb_voice_state);
-        } else {
-            // A custom rack's module states come with its modules (F6).
-            *static_cast<u32*>(p_out_state) = control & VOICE_STATE_MASK;
-        }
+        std::memcpy(p_out_state, p_voice->p_state, cb_voice_state);
     }
     return ORBIS_OK;
 }

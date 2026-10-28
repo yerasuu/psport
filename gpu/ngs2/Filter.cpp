@@ -224,6 +224,11 @@ bool ProcessFilter(const FilterParams& filter, u32 location, BiquadState* p_stat
 }
 
 void ProcessLfe(const LfeParams& lfe, LfeState* p_state, float* p_lfe, u32 c_samples, u32 rate_hz) {
+    ProcessLfe(lfe, p_state, p_lfe, p_lfe, c_samples, rate_hz);
+}
+
+// Both stages read p_in (0x1c690, spec 06 §5): the cascade only happens in place.
+void ProcessLfe(const LfeParams& lfe, LfeState* p_state, const float* p_in, float* p_out, u32 c_samples, u32 rate_hz) {
     if (!lfe.is_enabled) {
         *p_state = {};
         return;
@@ -233,7 +238,7 @@ void ProcessLfe(const LfeParams& lfe, LfeState* p_state, float* p_lfe, u32 c_sam
     const LfeCoefficients& coefficients = kLfeCoefficients[i_rate * std::size(kLfeCutoffs) + i_cutoff];
     for (u32 i_stage = 0; i_stage < 2; ++i_stage) {
         for (u32 i = 0; i < c_samples; ++i) {
-            p_lfe[i] = RunBiquad(coefficients.stages[i_stage], &p_state->stages[i_stage], p_lfe[i]);
+            p_out[i] = RunBiquad(coefficients.stages[i_stage], &p_state->stages[i_stage], p_in[i]);
         }
     }
 }

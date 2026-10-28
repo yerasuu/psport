@@ -68,33 +68,6 @@ bool IsMixerChannelCount(u32 c_channels) {
     return c_channels == 1 || c_channels == 2 || c_channels == 6 || c_channels == 8;
 }
 
-// Bit 2 (sidechain) only holds on a rack with two inputs, and the read-back rebuilds the flags from
-// the four bits the firmware keeps (spec 09 §3.2).
-void SetCompressor(const OrbisNgs2SubmixerVoiceCompressorParam* p_param, u32 max_inputs, CompressorParams* p_out) {
-    const u32 flag_mask = COMPRESSOR_DISABLED | COMPRESSOR_RMS | COMPRESSOR_LINK_WITHOUT_LFE |
-                          (max_inputs >= 2 ? u32(COMPRESSOR_SIDECHAIN) : 0);
-    *p_out = {p_param->flags & flag_mask,
-              std::clamp(p_param->threshold, 0.0f, 1.0f),
-              std::clamp(p_param->ratio, 0.0f, 1.0f),
-              std::clamp(p_param->knee, 0.0f, 1.0f),
-              std::clamp(p_param->attackTime, 0.0f, 10.0f),
-              std::clamp(p_param->releaseTime, 0.0f, 10.0f),
-              std::clamp(p_param->level, 0.0f, 32.0f)};
-}
-
-void ReadCompressor(const VoiceParams& params, OrbisNgs2SubmixerVoiceCompressorParam* p_param) {
-    const CompressorParams compressor =
-        (params.set_modules & MODULE_COMPRESSOR) ? params.compressor : CompressorParams{};
-    p_param->flags = compressor.flags;
-    p_param->threshold = compressor.threshold;
-    p_param->ratio = compressor.slope;
-    p_param->knee = compressor.knee;
-    p_param->attackTime = compressor.attack_s;
-    p_param->releaseTime = compressor.release_s;
-    p_param->level = compressor.level;
-    p_param->reserved = 0;
-}
-
 } // namespace
 
 s32 ControlSubmixer(OrbisNgs2Handle h_voice, Voice* p_voice, const OrbisNgs2VoiceParamHeader* p_header) {
@@ -122,7 +95,7 @@ s32 ControlSubmixer(OrbisNgs2Handle h_voice, Voice* p_voice, const OrbisNgs2Voic
     case SUBMIXER_ENVELOPE:
         return SetEnvelope(h_voice, *p_voice, ParamOf<OrbisNgs2SamplerVoiceEnvelopeParam>(p_header));
     case SUBMIXER_COMPRESSOR:
-        SetCompressor(ParamOf<OrbisNgs2SubmixerVoiceCompressorParam>(p_header), p_voice->p_rack->limits.max_inputs,
+        SetCompressor(*ParamOf<OrbisNgs2SubmixerVoiceCompressorParam>(p_header), p_voice->p_rack->limits.max_inputs,
                       &params.compressor);
         params.set_modules |= MODULE_COMPRESSOR;
         return ORBIS_OK;
@@ -143,7 +116,8 @@ s32 ControlSubmixer(OrbisNgs2Handle h_voice, Voice* p_voice, const OrbisNgs2Voic
         ReadEnvelope(params, ParamOf<OrbisNgs2SamplerVoiceEnvelopeParam>(p_header));
         return ORBIS_OK;
     case SUBMIXER_READ_COMPRESSOR:
-        ReadCompressor(params, ParamOf<OrbisNgs2SubmixerVoiceCompressorParam>(p_header));
+        ReadCompressor((params.set_modules & MODULE_COMPRESSOR) ? &params.compressor : nullptr,
+                       ParamOf<OrbisNgs2SubmixerVoiceCompressorParam>(p_header));
         return ORBIS_OK;
     case SUBMIXER_READ_DISTORTION:
         ReadDistortion(params, ParamOf<OrbisNgs2SamplerVoiceDistortionParam>(p_header));
@@ -197,9 +171,8 @@ void ProcessSubmixerVoice(RenderContext& context, Voice* p_voice, u32* p_event_c
     if (set_modules & MODULE_DISTORTION) {
         ProcessDistortion(params.distortion, planes, c_channels, c_samples);
     }
-    if ((set_modules & MODULE_USER_FX) && params.user_fx.pfn_handler) {
-        static std::uint64_t s_c_uses;
-        NoteUnimplemented(&s_c_uses, "Ngs2 submixer UserFx 0x20000004: the game's handler is not called yet (F6)");
+    if (set_modules & MODULE_USER_FX) {
+        RunVoiceUserFx(context, p_voice, params.user_fx, planes, c_channels, MODULE_USER_FX);
     }
     RunFilters(*p_voice, 1, planes, c_channels, c_samples);
     if (!(set_modules & MODULE_METER)) {

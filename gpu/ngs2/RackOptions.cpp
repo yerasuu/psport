@@ -2,6 +2,7 @@
 // The seven rack kinds of firmware 11.00's table at 0x50140 and their options: ranges, defaults and
 // the order the firmware checks them in (spec 02 §1, §2, §4, 08 §2).
 #include <algorithm>
+#include <cstring>
 #include <iterator>
 
 #include "Internal.h"
@@ -310,6 +311,163 @@ s32 ParseCommonLimits(RackClass rack_class, const RackLimits& limits) {
     return ORBIS_OK;
 }
 
+// Option sizes the module getters accept (spec 03 §6.9, 07 §1); NOTE: inferred: the envelope's and the
+// peak meter's are those of shadPS4's structures, which rea has not confirmed.
+constexpr u32 kEnvelopeOptionSize = sizeof(OrbisNgs2CustomEnvelopeModuleOption);
+constexpr u32 kPeakMeterOptionSize = sizeof(OrbisNgs2CustomPeakMeterModuleOption);
+constexpr u32 kReverbOptionSize = 0xc;
+constexpr u32 kChorusOptionSize = 0xc;
+constexpr u32 kDelayOptionSize = 0x14;
+constexpr u32 kUserFx2OptionSize = 0x48;
+constexpr u32 kPitchShiftOptionSize = 8;
+static_assert(sizeof(OrbisNgs2CustomUserFx2ModuleOption) == kUserFx2OptionSize);
+static_assert(sizeof(OrbisNgs2CustomDelayModuleOption) == kDelayOptionSize);
+static_assert(sizeof(OrbisNgs2CustomReverbModuleOption) == kReverbOptionSize);
+// Defaults without an option: the reverb's {0xc, 8, 1} (spec 07 §1) and, NOTE: inferred, the peak
+// meter's 8 blocks of the sampler and submixer options.
+constexpr u32 kDefaultReverbOptionWord = 8;
+constexpr u32 kDefaultPeakMeterBlocks = 8;
+// UserFx2's blocks live in the rack's buffer; psport refuses sizes past 2 GiB, which no rack could hold,
+// with the option size error rather than let the layout's sums wrap.
+constexpr u64 kMaxUserFx2BlockSize = 0x7fffffff;
+
+template <class Option>
+s32 ReadModuleOption(const OrbisNgs2CustomModuleOption* p_option, u32 cb_expected, Option* p_out) {
+    if (p_option->size != cb_expected) {
+        return Fail(0, ORBIS_NGS2_ERROR_INVALID_OPTION_SIZE, "Invalid option size ({}!={})", p_option->size,
+                    cb_expected);
+    }
+    std::memcpy(p_out, p_option, sizeof(*p_out));
+    return ORBIS_OK;
+}
+
+// The getters of the modules that take an option (spec 03 §6, 04 §4, 07 §1), which the firmware runs when
+// it lays the rack out: NOTE: inferred: after the rack's own checks.
+s32 ParseModuleOption(const OrbisNgs2CustomRackModuleInfo& info, CustomModuleOption* p_out) {
+    const OrbisNgs2CustomModuleOption* p_option = info.option;
+    *p_out = {};
+    switch (info.moduleId) {
+    case 0x10: {
+        OrbisNgs2CustomEnvelopeModuleOption option{};
+        if (!p_option) {
+            return ORBIS_OK;
+        }
+        if (const s32 result = ReadModuleOption(p_option, kEnvelopeOptionSize, &option); result < 0) {
+            return result;
+        }
+        // NOTE: inferred: the code is shadPS4's name for "Invalid maximum of envelope points".
+        if (option.maxPoints > 32) {
+            return Fail(0, ORBIS_NGS2_ERROR_INVALID_MAX_ENVELOPE_POINTS, "Invalid maximum of envelope points ({})",
+                        option.maxPoints);
+        }
+        p_out->value = option.maxPoints;
+        return ORBIS_OK;
+    }
+    case 0x18: {
+        OrbisNgs2CustomPeakMeterModuleOption option{};
+        option.numBlocks = kDefaultPeakMeterBlocks;
+        if (p_option) {
+            if (const s32 result = ReadModuleOption(p_option, kPeakMeterOptionSize, &option); result < 0) {
+                return result;
+            }
+            NGS2_CHECK_RANGE(ORBIS_NGS2_ERROR_INVALID_NUM_PEAKMETER_BLOCKS, "numPeakMeterBlocks", option.numBlocks, 1u,
+                             256u);
+        }
+        p_out->value = option.numBlocks;
+        return ORBIS_OK;
+    }
+    case 0x1b: {
+        OrbisNgs2CustomReverbModuleOption option{};
+        option.reverbSize = kDefaultReverbOptionWord;
+        if (p_option) {
+            if (const s32 result = ReadModuleOption(p_option, kReverbOptionSize, &option); result < 0) {
+                return result;
+            }
+        }
+        p_out->value = option.reverbSize;
+        return ORBIS_OK;
+    }
+    case 0x1c: {
+        OrbisNgs2CustomChorusModuleOption option{};
+        if (!p_option) {
+            return ORBIS_OK;
+        }
+        if (const s32 result = ReadModuleOption(p_option, kChorusOptionSize, &option); result < 0) {
+            return result;
+        }
+        // NOTE: inferred: spec 03 §6.9 gives no code for the option; this is shadPS4's name for it.
+        NGS2_CHECK_RANGE(ORBIS_NGS2_ERROR_INVALID_MAX_CHORUS_PHASES, "maxPhases", option.maxPhases, 1u, 4u);
+        return ORBIS_OK;
+    }
+    case 0x1d: {
+        OrbisNgs2CustomDelayModuleOption option{};
+        if (!p_option) {
+            return ORBIS_OK;
+        }
+        if (const s32 result = ReadModuleOption(p_option, kDelayOptionSize, &option); result < 0) {
+            return result;
+        }
+        NGS2_CHECK_RANGE(ORBIS_NGS2_ERROR_INVALID_DELAY_TYPE, "type", option.type, 0u, 1u);
+        NGS2_CHECK_RANGE(ORBIS_NGS2_ERROR_INVALID_MAX_DELAY_TAPS, "maxTaps", option.maxTaps, 1u, 8u);
+        if (!(option.maxLength >= 1.0f && option.maxLength <= 20000.0f)) {
+            return Fail(0, ORBIS_NGS2_ERROR_INVALID_MAX_DELAY_LENGTH, "Invalid maximum of delay length ({})",
+                        option.maxLength);
+        }
+        return ORBIS_OK;
+    }
+    case 0x1f: {
+        OrbisNgs2CustomUserFx2ModuleOption option{};
+        if (!p_option) {
+            return ORBIS_OK;
+        }
+        if (const s32 result = ReadModuleOption(p_option, kUserFx2OptionSize, &option); result < 0) {
+            return result;
+        }
+        if (option.commonSize > kMaxUserFx2BlockSize || option.paramSize > kMaxUserFx2BlockSize ||
+            option.workSize > kMaxUserFx2BlockSize) {
+            return Fail(0, ORBIS_NGS2_ERROR_INVALID_OPTION_SIZE, "Invalid user fx2 sizes ({},{},{})",
+                        option.commonSize, option.paramSize, option.workSize);
+        }
+        *p_out = {0,
+                  option.setupHandler,
+                  option.cleanupHandler,
+                  option.controlHandler,
+                  option.processHandler,
+                  option.commonSize,
+                  option.paramSize,
+                  option.workSize,
+                  option.userData};
+        return ORBIS_OK;
+    }
+    case 0x20: {
+        OrbisNgs2CustomPitchShiftModuleOption option{};
+        if (!p_option) {
+            return ORBIS_OK;
+        }
+        if (const s32 result = ReadModuleOption(p_option, kPitchShiftOptionSize, &option); result < 0) {
+            return result;
+        }
+        if (option.quality != 0) {
+            return Fail(0, ORBIS_NGS2_ERROR_INVALID_PITCH_SHIFT_QUALITY, "Invalid pitch shift quality ({})",
+                        option.quality);
+        }
+        return ORBIS_OK;
+    }
+    default:
+        return ORBIS_OK;
+    }
+}
+
+s32 ParseModuleOptions(const OrbisNgs2CustomRackOption* p_option, RackLimits* p_limits) {
+    for (u32 i_module = 0; i_module < p_limits->c_custom_modules; ++i_module) {
+        CustomModuleOption* p_out = &p_limits->custom_modules[i_module].option;
+        if (const s32 result = ParseModuleOption(p_option->aModule[i_module], p_out); result < 0) {
+            return result;
+        }
+    }
+    return ORBIS_OK;
+}
+
 #undef NGS2_CHECK_RANGE
 
 } // namespace
@@ -379,6 +537,13 @@ s32 ParseRackOption(const RackKind& kind, const OrbisNgs2RackOption* p_option, R
     }
     if (const s32 common_result = ParseCommonLimits(kind.rack_class, limits); common_result < 0) {
         return common_result;
+    }
+    if (kind.is_custom && p_option) {
+        if (const s32 module_result =
+                ParseModuleOptions(reinterpret_cast<const OrbisNgs2CustomRackOption*>(p_option), &limits);
+            module_result < 0) {
+            return module_result;
+        }
     }
     *p_out_limits = limits;
     return ORBIS_OK;

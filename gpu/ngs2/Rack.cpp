@@ -10,6 +10,7 @@
 #include <cstring>
 #include <new>
 
+#include "Custom.h"
 #include "Internal.h"
 #include "Reverb.h"
 #include "core/libraries/ngs2/ngs2_mastering.h"
@@ -20,7 +21,6 @@
 namespace Libraries::Ngs2 {
 namespace {
 
-constexpr u32 kSamplerRackId = 0x1000;
 constexpr u32 kReverbRackId = 0x2001;
 constexpr u32 kMasteringRackId = 0x3000;
 constexpr u32 kRackFlagCallbacks = 0x40000000;
@@ -58,13 +58,15 @@ struct VoiceBlocks {
     WaveformBlock* p_blocks;
     WaveformBlock* p_active_blocks;
     u8* p_state;
+    CustomVoice* p_custom;
 };
 
 u32 MeterCount(const RackKind& kind) {
     return kind.rack_id == kMasteringRackId ? 2 : 1;
 }
 
-VoiceBlocks AllocateVoiceBlocks(Arena* p_arena, const RackKind& kind, const RackLimits& limits, u32 c_input_blocks) {
+VoiceBlocks AllocateVoiceBlocks(Arena* p_arena, const RackKind& kind, const RackLimits& limits, u32 c_input_blocks,
+                                const CustomRack* p_custom_rack) {
     VoiceBlocks blocks{};
     blocks.p_params = AllocateArray<VoiceParams>(p_arena, 1);
     blocks.p_active_params = AllocateArray<VoiceParams>(p_arena, 1);
@@ -99,12 +101,14 @@ VoiceBlocks AllocateVoiceBlocks(Arena* p_arena, const RackKind& kind, const Rack
             c_input_slots * limits.max_channels * limits.max_grain_samples * sizeof(float), 64));
         blocks.p_input_started = AllocateArray<bool>(p_arena, c_input_slots);
     }
-    if (kind.rack_id == kSamplerRackId) {
+    if (kind.rack_class == RACK_CLASS_SOURCE) {
         blocks.p_blocks = AllocateArray<WaveformBlock>(p_arena, limits.max_waveform_blocks);
         blocks.p_active_blocks = AllocateArray<WaveformBlock>(p_arena, limits.max_waveform_blocks);
     }
-    if (!kind.is_custom) {
-        blocks.p_state = AllocateArray<u8>(p_arena, limits.cb_voice_state);
+    // A custom module's state, which UserFx2 hands to the game, is aligned as the state's structures.
+    blocks.p_state = static_cast<u8*>(p_arena->Allocate(limits.cb_voice_state, 16));
+    if (kind.is_custom) {
+        blocks.p_custom = LayOutCustomVoice(p_arena, limits, p_custom_rack);
     }
     return blocks;
 }
@@ -156,6 +160,7 @@ void InitVoice(Voice* p_voice, const RackKind& kind, const RackLimits& limits, c
     p_voice->queue.c_capacity = blocks.p_blocks ? limits.max_waveform_blocks : 0;
     p_voice->active_queue.p_slots = blocks.p_active_blocks;
     p_voice->p_state = blocks.p_state;
+    p_voice->p_custom = blocks.p_custom;
 }
 
 Rack* LayOutRack(Arena* p_arena, const RackKind& kind, const RackLimits& limits) {
@@ -168,11 +173,11 @@ Rack* LayOutRack(Arena* p_arena, const RackKind& kind, const RackLimits& limits)
     const u32 c_input_blocks = kind.rack_class == RACK_CLASS_SOURCE ? 0 : limits.max_input_delay_blocks + 1;
     // The source decodes up to four input samples per output sample (pitch below 4.0) plus its history.
     const u32 c_decode_stride = 4 * limits.max_grain_samples + kResampleHistory + 8;
-    float* p_decode_scratch =
-        kind.rack_id == kSamplerRackId ? AllocateArray<float>(p_arena, std::size_t(kMaxChannels) * c_decode_stride)
-                                       : nullptr;
+    float* p_decode_scratch = kind.rack_class == RACK_CLASS_SOURCE
+                                  ? AllocateArray<float>(p_arena, std::size_t(kMaxChannels) * c_decode_stride)
+                                  : nullptr;
     const u32 c_atrac9_decoders =
-        kind.rack_id == kSamplerRackId ? limits.max_atrac9_decoders + limits.max_ajm_atrac9_decoders : 0;
+        kind.rack_class == RACK_CLASS_SOURCE ? limits.max_atrac9_decoders + limits.max_ajm_atrac9_decoders : 0;
     auto* p_atrac9_decoders = AllocateArray<Atrac9Decoder>(p_arena, c_atrac9_decoders);
     const std::size_t cb_atrac9_state = GetAtrac9StateSize();
     auto* p_atrac9_states =
@@ -180,15 +185,17 @@ Rack* LayOutRack(Arena* p_arena, const RackKind& kind, const RackLimits& limits)
     const std::size_t c_atrac9_frame_floats = std::size_t(kMaxChannels) * kMaxAtrac9FrameSamples;
     float* p_atrac9_frames = AllocateArray<float>(p_arena, c_atrac9_decoders * c_atrac9_frame_floats);
     // The data lock bitmap at rack+0x130: two bits per sampler voice (spec 09 §6.2).
-    const std::size_t c_lock_words = kind.rack_id == kSamplerRackId ? (std::size_t(limits.max_voices) + 15) / 16 : 0;
+    const std::size_t c_lock_words =
+        kind.rack_class == RACK_CLASS_SOURCE ? (std::size_t(limits.max_voices) + 15) / 16 : 0;
     auto* p_lock_words = AllocateArray<std::atomic<u32>>(p_arena, c_lock_words);
-    const u32 c_slots_per_voice = kind.rack_id == kSamplerRackId ? limits.max_waveform_blocks : 0;
+    const u32 c_slots_per_voice = kind.rack_class == RACK_CLASS_SOURCE ? limits.max_waveform_blocks : 0;
     const u32 c_callbacks =
         (limits.flags & kRackFlagCallbacks) ? (c_slots_per_voice + kExtraCallbacksPerVoice) * limits.max_voices : 0;
     QueuedCallback* p_callbacks = AllocateArray<QueuedCallback>(p_arena, c_callbacks);
+    CustomRack* p_custom = kind.is_custom ? LayOutCustomRack(p_arena, limits) : nullptr;
     if (!p_object) {
         for (u32 i_voice = 0; i_voice < limits.max_voices; ++i_voice) {
-            AllocateVoiceBlocks(p_arena, kind, limits, c_input_blocks);
+            AllocateVoiceBlocks(p_arena, kind, limits, c_input_blocks, nullptr);
         }
         return nullptr;
     }
@@ -205,6 +212,7 @@ Rack* LayOutRack(Arena* p_arena, const RackKind& kind, const RackLimits& limits)
     p_rack->c_decode_stride = c_decode_stride;
     p_rack->p_callbacks = p_callbacks;
     p_rack->c_callback_capacity = c_callbacks;
+    p_rack->p_custom = p_custom;
     p_rack->p_atrac9_decoders = p_atrac9_decoders;
     p_rack->c_atrac9_decoders = c_atrac9_decoders;
     for (u32 i_decoder = 0; i_decoder < c_atrac9_decoders; ++i_decoder) {
@@ -218,7 +226,7 @@ Rack* LayOutRack(Arena* p_arena, const RackKind& kind, const RackLimits& limits)
     }
     InitHandle(&p_rack->handle, p_rack, &p_rack->refs, HANDLE_RACK, 0);
     for (u32 i_voice = 0; i_voice < limits.max_voices; ++i_voice) {
-        const VoiceBlocks blocks = AllocateVoiceBlocks(p_arena, kind, limits, c_input_blocks);
+        const VoiceBlocks blocks = AllocateVoiceBlocks(p_arena, kind, limits, c_input_blocks, p_custom);
         if (p_arena->HasOverflowed()) {
             return nullptr;
         }
@@ -297,9 +305,8 @@ s32 CreateRack(OrbisNgs2Handle h_system, const RackKind& kind, const OrbisNgs2Ra
             return result;
         }
     }
-    if (limits.c_custom_modules > 0) {
-        static std::uint64_t s_c_uses;
-        NoteUnimplemented(&s_c_uses, "sceNgs2RackCreate: custom rack modules (options unchecked, no DSP until F6)");
+    if (p_rack->p_custom) {
+        StartCustomModules(p_rack);
     }
     *p_out_handle = reinterpret_cast<OrbisNgs2Handle>(&p_rack->handle);
     return ORBIS_OK;
@@ -483,6 +490,9 @@ s32 PS4_SYSV_ABI sceNgs2RackDestroy(OrbisNgs2Handle h_rack, OrbisNgs2ContextBuff
             UnlinkRack(p_system, p_rack);
         }
     }
+    if (p_rack->p_custom) {
+        StopCustomModules(p_rack);
+    }
     // The buffer may go back to the game's allocator below, so nothing in it is read afterwards.
     OrbisNgs2ContextBufferInfo buffer_info = p_rack->buffer_info;
     const OrbisNgs2BufferFreeHandler pfn_free = p_rack->pfn_free;
@@ -622,10 +632,12 @@ s32 PS4_SYSV_ABI sceNgs2CustomRackGetModuleInfo(OrbisNgs2Handle h_rack, u32 i_mo
     const CustomModule& module = limits.custom_modules[i_module];
     *p_out_info = {module.module_id, module.source_buffer_id, module.extra_buffer_id, module.dest_buffer_id,
                    module.off_state, module.cb_state,         0,                      0};
-    // A module with its own info callback (UserFx2 at least) adds its part after these 0x20 bytes.
-    if (module.module_id == 0x1f) {
+    // A module with its own info callback (UserFx2 and others, spec 02 §4.5) adds its part after these
+    // 0x20 bytes, failing with 0x804A0B01 when cb_info is too short; which modules and what they write
+    // is not read yet.
+    if (cb_info > sizeof(OrbisNgs2CustomModuleInfo) || module.module_id == 0x1f) {
         static std::uint64_t s_c_uses;
-        NoteUnimplemented(&s_c_uses, "sceNgs2CustomRackGetModuleInfo: module info callbacks (F6)");
+        NoteUnimplemented(&s_c_uses, "sceNgs2CustomRackGetModuleInfo: module info callbacks");
     }
     return ORBIS_OK;
 }

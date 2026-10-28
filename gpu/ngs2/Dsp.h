@@ -155,6 +155,7 @@ void DesignFilter(FilterParams* p_filter, u32 rate_hz);
 bool ProcessFilter(const FilterParams& filter, u32 location, BiquadState* p_states, const Planes& planes,
                    u32 c_channels, u32 c_samples, bool is_first_grain);
 void ProcessLfe(const LfeParams& lfe, LfeState* p_state, float* p_lfe, u32 c_samples, u32 rate_hz);
+void ProcessLfe(const LfeParams& lfe, LfeState* p_state, const float* p_in, float* p_out, u32 c_samples, u32 rate_hz);
 
 // Returns the envelope height; clears *p_flags when the envelope ends the voice and *p_event_code
 // when it takes over a STOP's fade (release).

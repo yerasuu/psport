@@ -2,10 +2,11 @@
 // sceNgs2VoiceControl (spec 03 §1): walks the game's chain of parameters under the voice's lock,
 // applies the parameters every rack shares, hands the rack's own to its dispatcher and stops at the
 // first error, leaving the earlier ones applied. What a parameter changes only reaches the sound at
-// the render's flush. Custom racks (F6) still refuse their own parameters.
+// the render's flush.
 #include <algorithm>
 #include <cstring>
 
+#include "Custom.h"
 #include "Internal.h"
 
 namespace Libraries::Ngs2 {
@@ -314,12 +315,8 @@ s32 ApplyParam(OrbisNgs2Handle h_voice, Voice* p_voice, const OrbisNgs2VoicePara
             case kMasteringRackId:
                 return ControlMastering(h_voice, p_voice, p_header);
             default:
-                break;
+                return ControlCustom(h_voice, p_voice, p_header);
             }
-            static std::uint64_t s_c_uses;
-            NoteUnimplemented(&s_c_uses, "sceNgs2VoiceControl: custom rack parameters (F6)");
-            return Fail(h_voice, ORBIS_NGS2_ERROR_FAIL, "Voice control ID ({:#x}) not implemented yet",
-                        p_header->id);
         }
         return Fail(h_voice, ORBIS_NGS2_ERROR_INVALID_VOICE_CONTROL_ID, "Invalid voice control ID ({})",
                     p_header->id);

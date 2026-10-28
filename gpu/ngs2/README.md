@@ -32,6 +32,9 @@ parity (kb #625, decision #809).
 | `ModuleParams.cpp` | the parameters the sampler and submixer share: envelope, distortion, UserFx, peak meter, filters |
 | `Dsp.h`, `Gain.cpp`, `Envelope.cpp`, `Filter.cpp`, `Limiter.cpp`, `PeakMeter.cpp` | the DSP modules: ramps, distortion, channel matrix, envelope, biquad and LFE filters, compressor and limiter, peak meter |
 | `Reverb.h`, `ReverbModule.cpp`, `ReverbDsp.cpp` | the reverb module `0x1b`: its parameter block, the explicit network's checks, and its network |
+| `Custom.h`, `CustomRack.cpp` | the custom racks `0x4001` to `0x4003`: their blocks, setups, module parameter routing and module chain |
+| `CustomModules.cpp` | the modules a custom rack's list may hold: their blocks, parameters by selector and processing |
+| `UserFx.cpp` | the game's UserFx and UserFx2 handlers, called without the voice's lock |
 
 Phase F2 (kb #1094) implements the system, rack, voice and report API: the validation order and
 error codes of each export, the game's buffers and allocators, handles, locks, user data,
@@ -160,5 +163,42 @@ routing, comb filter, per-channel levels and fields at 0xa0 to 0xb8 are not read
 I3DL2's choices and is counted. `0xc001` copies the fields of the 0x150-byte block rea placed.
 `tools/hwtest/ngs2_reverb` records an impulse response per test room.
 
+Phase F6 (kb #1098) renders the custom racks `0x4001` (sampler), `0x4002` (submixer) and `0x4003`
+(mastering) as firmware 11.00 builds them (rea spec 02 §4.5, 03 §5.5, 04 §2.2, §2.5, §2.6, §4.3, 09 §12). The
+creation checks the module list in the firmware's order and codes (`0x804A0A06` stateSize, `0A02`
+numBuffers, `0A01` numModules, `0A00` a module id outside the table at 0x50000, `0A03` a buffer id,
+`0A04`/`0A05` a module's state against the rack's own 0x30 or 0xc bytes and stateSize, `0A00` a port's
+buffer) and, after the rack's common fields, the options of the modules that take one (peak meter blocks,
+reverb line, envelope points, chorus phases, delay type, taps and length, pitch shift quality, UserFx2's
+0x48 bytes; `0x804A0081` for a wrong size). `QueryBufferSize` counts the work buffers, each voice's state
+(stateSize, 16-byte aligned) and every module's blocks: two copies of its parameters, its DSP state and
+what that points into (meter ring, reverb lines sized from its option, UserFx2's common, parameter and
+work blocks). `0x40010000` to `0x40010005` and `0x40018000/1` are the sampler's own ids on the custom
+sampler; `0x40020000` sets a custom submixer's input and output channels and `0x40030000`/`0x40030001`
+a custom mastering's channels and output buffer. A module's parameter id is `0x40000000 | 0x8000 (read) |
+moduleId << 8 | sub << 5 | index`, refused with `0x804A0308` unless the list holds that module at that
+index. Implemented, with their parameters, read-backs, `0xc001` blocks and DSP: the compressor and
+limiter `0x12` (sub 0 and 1; the sidechain reads the module's extra buffer), the filter `0x13` (sub 0
+keeps type and mask as bytes at location 0; sub 1 the rack's layout), the LFE filter `0x14` (channel 3,
+whose second stage reads the source again when the destination differs), the gain `0x15` (8 levels in
+[-32, 32], ramps from the last grain), the peak meter `0x18`, UserFx `0x19`, the reverb `0x1b` (the F5
+network: I3DL2 and the explicit network) and UserFx2 `0x1f`. Each grain the voice state is cleared, the
+source or the inputs fill buffer 0 (and 1 with two inputs), the modules run in list order: one without
+a parameter copies its source buffer into its destination, one with a parameter gets a cleared source
+if nothing wrote it, writes its destination and its part of the voice state (compressor level and gain,
+meter peaks); the grain's events fade every buffer written, and the ports mix their source buffers or
+the output module writes buffer 0 to the game's. The other modules (`0x10`, `0x11`, `0x16`, `0x17`,
+`0x1a`, `0x1c` to `0x1e`, `0x20`, `0x70` and `0x71` in a list) take their parameters, pass their input
+through and are counted. The UserFx handlers of the sampler (`0x10000008`), the submixer (`0x20000004`)
+and custom racks are now called, with the module's grain flags; a negative answer sets `ERROR`. The voice's
+lock is released around the game's code, so a handler may call back into Ngs2 for its own voice; the
+render's process lock stays held, as the firmware does around voice callbacks. UserFx2's control handler
+takes its parameter (or the data is copied when its size is paramSize, else `0x804A0209`), its process
+handler gets the common, parameter, work and state blocks, and its setup and cleanup handlers run once per
+voice when the rack is created and destroyed (inferred, until rea reads when 0x243c0 runs).
+`tools/hwtest/ngs2_custom` compares the checks and the PCM of filter, gain, compressor, meter, LFE, reverb
+and UserFx chains on a console, the firmware module and this one.
+
 Still missing, each counted in the call report (`Calls: summary stub <n> ...`) or returned as
-`0x804A0001`: custom racks and the UserFx handlers (F6), and pan, geom and FFT (F7).
+`0x804A0001`: the custom modules rea has not specified as DSP for custom racks yet (see above), the
+module info callbacks of `sceNgs2CustomRackGetModuleInfo`, and pan, geom and FFT (F7).
