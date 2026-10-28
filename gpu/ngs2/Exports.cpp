@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // libSceNgs2's export table for the native Ngs2 (PS_NGS2=native, kb #625). The system, rack, voice
-// and report API (phase F2, kb #1094), the render (F3, kb #1095) and the waveform parsing (F4, kb
-// #1096) are implemented; what is still missing returns ORBIS_NGS2_ERROR_FAIL, the firmware's internal
-// failure, logs its first call and is counted in the call report, so a title on this backend shows what
-// it still needs: pan, geom and FFT (F7) and the three PS5 exports.
+// and report API (phase F2, kb #1094), the render (F3, kb #1095), the waveform parsing (F4, kb #1096)
+// and pan, geom and FFT (F7, kb #1099) are implemented; the three PS5 exports return
+// ORBIS_NGS2_ERROR_FAIL, the firmware's internal failure, log their first call and are counted in the
+// call report.
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -15,6 +15,7 @@
 #include "core/libraries/ngs2/ngs2_error.h"
 
 #include "Internal.h"
+#include "Spatial.h"
 
 namespace Libraries::Ngs2 {
 namespace {
@@ -24,18 +25,9 @@ struct Export {
     const char* sz_name;
 };
 
-// The exports not implemented yet: 9 of firmware 11.00's 47, then the three PS5 ones
-// gpu/ngs2_anyps5 also registers, so that switching backends leaves every import bound the same.
+// The three PS5 exports gpu/ngs2_anyps5 also registers, so that switching backends leaves every
+// import bound the same; firmware 11.00 has none of them.
 constexpr std::array UNIMPLEMENTED_EXPORTS{
-    Export{"-YNfTO6KOMY", "sceNgs2FftQuerySize"},
-    Export{"Kg1MA5j7KFk", "sceNgs2FftInit"},
-    Export{"D8eCqBxSojA", "sceNgs2FftProcess"},
-    Export{"1WsleK-MTkE", "sceNgs2GeomCalcListener"},
-    Export{"7Lcfo8SmpsU", "sceNgs2GeomResetListenerParam"},
-    Export{"0lbbayqDNoE", "sceNgs2GeomResetSourceParam"},
-    Export{"eF8yRCC6W64", "sceNgs2GeomApply"},
-    Export{"xa8oL9dmXkM", "sceNgs2PanInit"},
-    Export{"gbMKV+8Enuo", "sceNgs2PanGetVolumeMatrix"},
     Export{"AQkj7C0f3PY", "sceNgs2SystemResetOption"},
     Export{"9eic4AmjGVI", "sceNgs2VoiceQueryInfo"},
     Export{"AbYvTOZ8Pts", "sceNgs2VoiceRunCommands"},
@@ -98,6 +90,15 @@ void RegisterLib(Core::Loader::SymbolsResolver* sym) {
     LIB_FUNCTION("t9T0QM17Kvo", "libSceNgs2", 1, "libSceNgs2", sceNgs2ParseWaveformUser);
     LIB_FUNCTION("3pCNbVM11UA", "libSceNgs2", 1, "libSceNgs2", sceNgs2CalcWaveformBlock);
     LIB_FUNCTION("ekGJmmoc8j4", "libSceNgs2", 1, "libSceNgs2", sceNgs2GetWaveformFrameInfo);
+    LIB_FUNCTION("xa8oL9dmXkM", "libSceNgs2", 1, "libSceNgs2", sceNgs2PanInit);
+    LIB_FUNCTION("gbMKV+8Enuo", "libSceNgs2", 1, "libSceNgs2", sceNgs2PanGetVolumeMatrix);
+    LIB_FUNCTION("1WsleK-MTkE", "libSceNgs2", 1, "libSceNgs2", sceNgs2GeomCalcListener);
+    LIB_FUNCTION("7Lcfo8SmpsU", "libSceNgs2", 1, "libSceNgs2", sceNgs2GeomResetListenerParam);
+    LIB_FUNCTION("0lbbayqDNoE", "libSceNgs2", 1, "libSceNgs2", sceNgs2GeomResetSourceParam);
+    LIB_FUNCTION("eF8yRCC6W64", "libSceNgs2", 1, "libSceNgs2", sceNgs2GeomApply);
+    LIB_FUNCTION("-YNfTO6KOMY", "libSceNgs2", 1, "libSceNgs2", sceNgs2FftQuerySize);
+    LIB_FUNCTION("Kg1MA5j7KFk", "libSceNgs2", 1, "libSceNgs2", sceNgs2FftInit);
+    LIB_FUNCTION("D8eCqBxSojA", "libSceNgs2", 1, "libSceNgs2", sceNgs2FftProcess);
     RegisterExports(sym, std::make_index_sequence<UNIMPLEMENTED_EXPORTS.size()>{});
 }
 

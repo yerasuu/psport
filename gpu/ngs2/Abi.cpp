@@ -6,7 +6,9 @@
 
 #include "core/libraries/ngs2/ngs2.h"
 #include "core/libraries/ngs2/ngs2_custom.h"
+#include "core/libraries/ngs2/ngs2_geom.h"
 #include "core/libraries/ngs2/ngs2_mastering.h"
+#include "core/libraries/ngs2/ngs2_pan.h"
 #include "core/libraries/ngs2/ngs2_report.h"
 #include "core/libraries/ngs2/ngs2_reverb.h"
 #include "core/libraries/ngs2/ngs2_sampler.h"
@@ -246,5 +248,36 @@ static_assert(offsetof(OrbisNgs2ReportDataHeader, handle) == 8);
 static_assert(offsetof(OrbisNgs2ReportDataHeader, type) == 0x10);
 static_assert(offsetof(OrbisNgs2ReportMessageData, message) == 0x18);
 static_assert(sizeof(OrbisNgs2ReportMessageData) == 0x20);
+
+static_assert(sizeof(OrbisNgs2PanParam) == 0x10);
+static_assert(sizeof(OrbisNgs2PanWork) == 0x28);
+static_assert(offsetof(OrbisNgs2PanWork, unitAngle) == 0x20);
+static_assert(offsetof(OrbisNgs2PanWork, numSpeakers) == 0x24);
+
+static_assert(sizeof(OrbisNgs2GeomListenerParam) == 0x3c);
+static_assert(offsetof(OrbisNgs2GeomListenerParam, orientFront) == 0xc);
+static_assert(offsetof(OrbisNgs2GeomListenerParam, orientUp) == 0x18);
+static_assert(offsetof(OrbisNgs2GeomListenerParam, velocity) == 0x24);
+static_assert(offsetof(OrbisNgs2GeomListenerParam, soundSpeed) == 0x30);
+static_assert(sizeof(OrbisNgs2GeomListenerWork) == 0x60);
+static_assert(offsetof(OrbisNgs2GeomListenerWork, velocity) == 0x40);
+static_assert(offsetof(OrbisNgs2GeomListenerWork, soundSpeed) == 0x4c);
+static_assert(offsetof(OrbisNgs2GeomListenerWork, coordinate) == 0x50);
+static_assert(sizeof(OrbisNgs2GeomSourceParam) == 0x6c);
+static_assert(offsetof(OrbisNgs2GeomSourceParam, direction) == 0x18);
+static_assert(offsetof(OrbisNgs2GeomSourceParam, cone) == 0x24);
+static_assert(offsetof(OrbisNgs2GeomSourceParam, rolloff) == 0x34);
+static_assert(offsetof(OrbisNgs2GeomSourceParam, dopplerFactor) == 0x44);
+static_assert(offsetof(OrbisNgs2GeomSourceParam, fbwLevel) == 0x48);
+static_assert(offsetof(OrbisNgs2GeomSourceParam, lfeLevel) == 0x4c);
+static_assert(offsetof(OrbisNgs2GeomSourceParam, maxLevel) == 0x50);
+static_assert(offsetof(OrbisNgs2GeomSourceParam, minLevel) == 0x54);
+static_assert(offsetof(OrbisNgs2GeomSourceParam, radius) == 0x58);
+static_assert(offsetof(OrbisNgs2GeomSourceParam, numSpeakers) == 0x5c);
+static_assert(offsetof(OrbisNgs2GeomSourceParam, matrixFormat) == 0x60);
+static_assert(sizeof(OrbisNgs2GeomAttribute) == 0x134);
+static_assert(offsetof(OrbisNgs2GeomAttribute, aLevel) == 0x4);
+static_assert(offsetof(OrbisNgs2GeomAttribute, a3dAttrib) == 0x104);
+static_assert(offsetof(OrbisNgs2GeomA3dAttribute, volume) == 0xc);
 
 } // namespace Libraries::Ngs2

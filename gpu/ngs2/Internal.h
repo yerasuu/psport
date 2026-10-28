@@ -592,6 +592,8 @@ void MixCustomPorts(RenderContext& context, Voice* p_voice, const Planes* p_buff
 Planes ReadInput(RenderContext& context, Voice* p_voice, u32 i_input);
 void WriteRenderBuffer(RenderContext& context, u32 i_buffer, const Planes& planes, u32 c_channels);
 void ExpandVoiceMatrices(Voice* p_voice);
+// A fixed port matrix (0x37d50) in rows of kMaxChannels by source channel; mode 0 is the default one.
+const float* FixedMatrix(u32 c_src, u32 mode, u32 c_dst);
 void ResetMasteringMatrices(MasteringMatrices* p_matrices);
 // The class of a channel count in the mastering's matrix types (0x14280, spec 09 §4.2): 1, 2 and 8
 // channels are classes 0, 1 and 3, every other count the 6-channel class 2.

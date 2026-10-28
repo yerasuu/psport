@@ -35,6 +35,7 @@ parity (kb #625, decision #809).
 | `Custom.h`, `CustomRack.cpp` | the custom racks `0x4001` to `0x4003`: their blocks, setups, module parameter routing and module chain |
 | `CustomModules.cpp` | the modules a custom rack's list may hold: their blocks, parameters by selector and processing |
 | `UserFx.cpp` | the game's UserFx and UserFx2 handlers, called without the voice's lock |
+| `Spatial.h`, `Pan.cpp`, `Geom.cpp`, `Fft.cpp` | `sceNgs2Pan*`, `sceNgs2Geom*` and `sceNgs2Fft*`: pure math over the game's structures |
 
 Phase F2 (kb #1094) implements the system, rack, voice and report API: the validation order and
 error codes of each export, the game's buffers and allocators, handles, locks, user data,
@@ -213,6 +214,29 @@ voice when the rack is created and destroyed (inferred, until rea reads when 0x2
 `tools/hwtest/ngs2_custom` compares the checks and the PCM of filter, gain, compressor, meter, LFE, reverb
 and UserFx chains on a console, the firmware module and this one.
 
+Phase F7 (kb #1099) adds pan, geom and FFT as firmware 11.00 computes them (rea spec 12), none of which
+any title on disk imports. `sceNgs2PanInit` keeps a custom layout's angles wrapped onto the circle (360
+degrees or 2π, else `0x804A0910`; 2, 4, 5 or 7 speakers, else `0x804A0911`) in the order round it from
+the front speaker, closed by that speaker one unit on; the default layouts (0 speakers is 7) take any
+unit and convert to radians only the speakers asked for, the closing angle staying in degrees.
+`sceNgs2PanGetVolumeMatrix` (checks `0x804A0913`, `0914`, `0053`, `0912` for formats other than 1, 2, 6
+and 8, `0911`, `0910`, `0052` past 8 parameters) pans each source between the two speakers around it
+with sine weights, adds its opposite point weighted by `distance` (1 the source alone, 0 both halves,
+-1 the opposite), scales by the full-band and LFE levels and folds the speakers into the format
+through the fixed port matrices of `Mixer.cpp`, laid out by output channel then parameter. The geom
+builds the listener's frame (left-handed with coordinate 1, sound speed at least 0.1) and, for a
+source, the distance gain of the six rolloff models (inverse, linear and exponential, clamped or not),
+the cone, the level between minLevel and maxLevel, the A3D position and volume, the Doppler pitch, the
+second-order spherical harmonics or the speaker matrix through the pan, with the firmware's fast
+inverse square roots and table arctangent kept word for word, so that its results match the
+firmware's bit for bit. The FFT takes 2^8 to 2^12 points (-1 otherwise or for a short buffer) and
+gives the unscaled DFT, packed as [X0, X(N/2), Re X1, Im X1, ...], or in the firmware's internal order
+(its zreorder ported exactly) when unordered, scaled by 1/N with flag 8; Init's flag 0x2 asks for the
+real transform, and without it 11.00 only moves the game's buffers, which psport does too. Where the
+firmware would loop forever or fault (an angle its wrap never brings onto the circle, null FFT
+pointers), psport answers `0x804A0911`, `0x804A0914` or -1, counted. `tools/hwtest/ngs2_pan` dumps the
+matrices, attributes and spectra of a console, the firmware module and this one.
+
 Still missing, each counted in the call report (`Calls: summary stub <n> ...`) or returned as
 `0x804A0001`: the custom modules rea has not specified as DSP for custom racks yet (see above), the
-module info callbacks of `sceNgs2CustomRackGetModuleInfo`, and pan, geom and FFT (F7).
+module info callbacks of `sceNgs2CustomRackGetModuleInfo`, and the three PS5 exports.

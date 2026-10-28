@@ -154,10 +154,14 @@ const FixedMatrices& GetFixedMatrices() {
     return s_matrices;
 }
 
+} // namespace
+
 // c_src and c_dst are 1 to kMaxChannels: setups refuse other counts.
 const float* FixedMatrix(u32 c_src, u32 mode, u32 c_dst) {
     return GetFixedMatrices().levels[c_src - 1][mode][c_dst - 1];
 }
+
+namespace {
 
 // The matrix a port mixes through: the voice's own when it has levels, the fixed one otherwise.
 const float* PortMatrix(const Voice& voice, s32 matrix_id, const float* p_levels, u32 c_src, u32 c_dst) {
