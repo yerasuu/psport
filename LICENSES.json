@@ -234,7 +234,7 @@
       ],
       "license": "MIT",
       "review": "reviewed",
-      "provenance": "https://github.com/Thealexbarney/LibAtrac9 commit efca2e3, C/src (FORK.md); Copyright (c) 2018 Alex Barney (LICENSE). Local change: Atrac9Decode takes the input's size."
+      "provenance": "https://github.com/Thealexbarney/LibAtrac9 commit efca2e3, C/src (FORK.md); Copyright (c) 2018 Alex Barney (LICENSE). Local changes: Atrac9Decode takes the input's size; unpack.c rejects a band extension outside 13 to 20 quantization units, a gradient past 31 units and reused stereo units above the block's count (kb #1096)."
     },
     {
       "name": "BBSC game server scripts",

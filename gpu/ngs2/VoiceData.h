@@ -146,6 +146,22 @@ struct SourceState {
     bool is_end;
     bool is_starved;
     float history[kMaxChannels][kResampleHistory];
+    // The codecs' own (+0x50 on, spec 05 §1, §4, §5): a VAG block's loop start frame and each channel's
+    // y[-1] to y[-4], kept across blocks; the generators' phase and noise registers; a decoding error,
+    // which silences the voice until it starts again.
+    u32 i_vag_loop_frame;
+    float vag_history[kMaxChannels][4];
+    float phase;
+    u32 noise;
+    u32 i_noise_period;
+    u32 i_noise_bit;
+    s32 codec_error;
+    // ATRAC9 (spec 05 §6.2): the next frame of the superframe being read and its byte offset, and the
+    // samples of the last decoded frame still to hand out, from i_codec_sample to c_codec_samples.
+    u32 i_codec_frame;
+    u32 off_codec_frame;
+    u32 i_codec_sample;
+    u32 c_codec_samples;
 };
 
 struct VoiceDsp {

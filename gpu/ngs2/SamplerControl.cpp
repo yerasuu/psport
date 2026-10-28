@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // The sampler rack's VoiceControl parameters, 0x1000xxxx (0x153a0, 0x1dbd0; spec 03 §5.1, 05 §3.1,
 // 09 §6): the source's setup, waveform block ring and its address change, pitch, envelope,
-// distortion, UserFx, peak meter and filters, and their read-back. Phase F3 plays linear PCM; VAG and
-// ATRAC9 (F4) and the waveform generators are refused with a counted 0x804A0001.
+// distortion, UserFx, peak meter and filters, and their read-back.
 #include <algorithm>
 #include <cstring>
 
@@ -34,15 +33,6 @@ enum SamplerParamId : u32 {
     SAMPLER_READ_MAX_FILTERS = 0x1000800b,
 };
 
-enum WaveformType : u32 {
-    WAVEFORM_FIRST_PCM = 0x10,
-    WAVEFORM_LAST_PCM = 0x1b,
-    WAVEFORM_VAG = 0x1c,
-    WAVEFORM_ATRAC9 = 0x40,
-    WAVEFORM_FIRST_GENERATOR = 0x80,
-    WAVEFORM_LAST_GENERATOR = 0x87,
-};
-
 enum AddBlocksFlag : u32 {
     ADD_BLOCKS_NOT_LAST = 0x1,
     ADD_BLOCKS_CONTINUE = 0x2,
@@ -56,11 +46,6 @@ constexpr u32 kMaxFrameField = 0xffff;
 constexpr u32 kInfiniteRepeats = 0xffffffffu;
 // Blocks with no samples and endless repeats are refused for titles built with SDK 1.70 or later.
 constexpr u32 kEndlessEmptyBlockSdkVersion = 0x1700000;
-
-bool IsWaveformType(u32 type) {
-    return (type >= WAVEFORM_FIRST_PCM && type <= WAVEFORM_VAG) || type == WAVEFORM_ATRAC9 ||
-           (type >= WAVEFORM_FIRST_GENERATOR && type <= WAVEFORM_LAST_GENERATOR);
-}
 
 template <class Param>
 Param* ParamOf(const OrbisNgs2VoiceParamHeader* p_header) {
@@ -95,14 +80,28 @@ s32 Setup(OrbisNgs2Handle h_voice, Voice* p_voice, const OrbisNgs2SamplerVoiceSe
         return Fail(h_voice, ORBIS_NGS2_ERROR_INVALID_WAVEFORM_FRAME, "Invalid waveform frame ({},{})",
                     format.frameOffset, format.frameMargin);
     }
-    if (format.waveformType > WAVEFORM_LAST_PCM) {
-        static std::uint64_t s_c_uses;
-        NoteUnimplemented(&s_c_uses, "Ngs2 sampler setup: VAG, ATRAC9 and generator waveforms (F4)");
-        return Fail(h_voice, ORBIS_NGS2_ERROR_FAIL, "Waveform type ({:#x}) not implemented yet",
-                    format.waveformType);
+    if (format.waveformType == WAVEFORM_ATRAC9) {
+        // Flags bit 0 picks the rack's AJM decoders instead of its internal ones (spec 05 §6.1).
+        const RackLimits& limits = p_voice->p_rack->limits;
+        const bool is_ajm = p_param->flags & 1;
+        if ((is_ajm ? limits.max_ajm_atrac9_decoders : limits.max_atrac9_decoders) == 0) {
+            return Fail(h_voice, ORBIS_NGS2_ERROR_INVALID_WAVEFORM_TYPE, "No ATRAC9 decoders");
+        }
+        Atrac9Config config;
+        if (!ParseAtrac9Config(format.configData, &config)) {
+            return Fail(h_voice, ORBIS_NGS2_ERROR_INVALID_WAVEFORM_CONFIG, "Invalid ATRAC9 config data ({:#x})",
+                        format.configData);
+        }
+        if (config.c_channels != format.numChannels) {
+            return Fail(h_voice, ORBIS_NGS2_ERROR_INVALID_NUM_CHANNELS, "Invaild voice channels ({}!={})",
+                        format.numChannels, config.c_channels);
+        }
     }
+    // A generator's configData is its starting phase in degrees.
+    const u32 config_data =
+        format.waveformType >= WAVEFORM_FIRST_GENERATOR ? format.configData % 360 : format.configData;
     VoiceParams& params = *p_voice->p_params;
-    params.format = {format.waveformType, format.numChannels, format.sampleRate, format.configData,
+    params.format = {format.waveformType, format.numChannels, format.sampleRate, config_data,
                      format.frameOffset,  format.frameMargin, p_param->flags};
     params.pitch_ratio = 1.0f;
     params.c_in_channels = 0;

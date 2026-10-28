@@ -24,7 +24,10 @@ parity (kb #625, decision #809).
 | `Voice.cpp` | the voice queries: state, flags, owner, matrix and port information |
 | `Graph.cpp` | the render's voice life cycle: flush, graph order, grain events, post and voice callbacks |
 | `Mixer.cpp` | event fades, ports into inputs through matrices and delays, the fixed port matrices, render buffer output |
+| `Waveform.cpp` | `sceNgs2ParseWaveformData`, `File` and `User`, `sceNgs2CalcWaveformBlock`, `sceNgs2GetWaveformFrameInfo`, and the frame shape of each waveform type |
 | `SamplerControl.cpp`, `Sampler.cpp` | the sampler's parameters and waveform block queue; its source (linear PCM, loops, streaming, pitch) and chain |
+| `Source.h`, `Vag.cpp`, `Generator.cpp` | the queue as the decoders use it; the VAG and HEVAG decoder; the waveform generators |
+| `Atrac9Source.cpp`, `Atrac9Glue.c` | ATRAC9 waveforms over LibAtrac9 (`third_party/LibAtrac9`, MIT), whose decoders live in the rack's buffer |
 | `Submixer.cpp`, `Mastering.cpp` | those racks' parameters and processing |
 | `ModuleParams.cpp` | the parameters the sampler and submixer share: envelope, distortion, UserFx, peak meter, filters |
 | `Dsp.h`, `Gain.cpp`, `Envelope.cpp`, `Filter.cpp`, `Limiter.cpp`, `PeakMeter.cpp` | the DSP modules: ramps, distortion, channel matrix, envelope, biquad and LFE filters, compressor and limiter, peak meter |
@@ -72,6 +75,52 @@ returns: from then on the render fades the voice's last sample out instead of re
 which the game may free at once, until a new PLAY reaches the render. `0xc001` copies a module's
 pending block in the firmware's own layout, zeros for a module without a parameter.
 
+Phase F4 (kb #1096) reads waveform files. `sceNgs2ParseWaveformData`, `File` (a guest path through
+the runtime's mounts, from an offset) and `User` (the game's read handler) take RIFF WAVE with PCM of
+8 to 32 bits, IEEE float of 32 and 64 bits, WAVE_FORMAT_EXTENSIBLE with either or with ATRAC9's
+subformat (configData from its fmt chunk, samples and delay from `fact`), and VAGp files; a `smpl`
+loop, or the loop flags of a VAG's blocks, gives the loop points and up to three blocks: before the
+loop, the loop itself (endless for a play count of 0) and after it, which an exit-loop request reaches.
+The loop of an `.at9` file counts the codec's delay and is moved back by it. `sceNgs2CalcWaveformBlock`
+covers samples with whole frames from the one holding the first sample after the delay, skipping up to
+it, and `sceNgs2GetWaveformFrameInfo` answers a frame's bytes and samples, its units (ATRAC9 frames per
+superframe) and the delay (one ATRAC9 frame). Every size and offset is checked in 64 bits before it
+becomes a 32-bit field, a chunk walk stops after 64 chunks, and a parse reads nothing past the data it
+was given. rea has not read these functions yet (spec 08 §4): their checking order and codes are
+psport's (`0x804A0401` an unknown file, `0x804A0400` a missing or unusable fmt chunk, `0x804A0408` a
+malformed chunk or no data, `0x804A0407` data past the end or past 32 bits, and the setup's codes for
+channels, sample rate, frame and ATRAC9 config).
+
+The sampler decodes VAG and HEVAG (`0x1c`): per channel a 16-byte block of 28 nibbles, low nibble
+first, worth nibble / 8 / 2^shift with no clamp, through the 4th-order predictor of the firmware's
+128 (`0x45dc0`, kept as its IEEE-754 words; an index past 127, where the firmware reads past its
+table, decodes without one and is counted), with each channel's history kept across blocks. With
+configData bit 0 the last channel's flags drive the block: 6 marks the loop start, 3 repeats from it
+(a forced repeat of 0x21a30: an exit request ends the block there instead) and 1 ends the voice once
+its history drains. Frames are decoded whole and what the grain does not use waits in the resampler's
+history. The generators (`0x80` silence, `0x81` sine, `0x82`/`0x83` saws, `0x84` triangle, `0x85`
+square, `0x86` white noise from the LCG 0x19660D, `0x87` the periodic noise register) run at the
+system's rate from the setup's frequency and starting phase (configData modulo 360), the same on every
+channel, without data, resampler or end. Where the firmware seeds its noise registers is not read yet:
+they start at 0.
+
+ATRAC9 (`0x40`) decodes over LibAtrac9. The setup asks for the rack's internal decoders
+(`maxAtrac9Decoders`) or, with flags bit 0, its AJM ones (`maxAjmAtrac9Decoders`), refusing with
+`0x804A0402` when the rack has none of that kind, `0x804A0403` without the 0xFE header byte and
+`0x804A0052` when the config's channels differ. Each kind is a pool of decoders laid out in the rack's
+buffer (LibAtrac9's state, about 90 KiB, and one frame of float planes each, which `QueryBufferSize`
+counts: 27.5 MB for the default sampler option's 256 decoders, against 1.7 MB without any); the
+render lends one to a voice at its first ATRAC9 grain and takes it back when the voice ends or is set
+up again, and a voice that finds none reports `ERROR` (`0x804A0801`). Every pass through a block
+restarts the decoder at the block's first superframe, the first `numSkipSamples` of the pass are
+decoded and dropped, frames come back as float planes before LibAtrac9 rounds them to 16 bits, and a
+decoding failure (`0x804A0805`, or `0x804A0803` for a sample rate index the firmware's frame table
+leaves out) silences the voice with `ERROR` until it starts again, logged with its count. The firmware
+runs its AJM decoders a grain ahead through libSceAjm; here they decode at once, the same samples one
+grain sooner. `maxAtrac9ChannelWorks` and `maxCodecCaches` are checked but bound nothing, LibAtrac9
+holding every channel. `tools/hwtest/ngs2_waveform` compares the parse, frame and block answers and
+the VAG, generator and ATRAC9 renders of a console, the firmware module and this one.
+
 Still missing, each counted in the call report (`Calls: summary stub <n> ...`) or returned as
-`0x804A0001`: VAG and ATRAC9 waveforms (F4) and the waveform generators, the reverb (F5), custom
+`0x804A0001`: the reverb (F5), custom
 racks and the UserFx handlers (F6), and pan, geom and FFT (F7).

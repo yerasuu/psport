@@ -174,7 +174,7 @@ file(GLOB GAME_SOURCES CONFIGURE_DEPENDS games/*.cpp games/*/*.cpp)
 file(GLOB CP_SOURCES CONFIGURE_DEPENDS cp/*.cpp)
 # Ngs2, the software audio mixer: AnyPS5's (ngs2_anyps5/README.md), with the ATRAC9 decoder its
 # waveforms use, and the native rewrite (ngs2/README.md); PS_NGS2 picks one at start-up.
-file(GLOB NGS2_SOURCES CONFIGURE_DEPENDS ngs2/*.cpp ngs2_anyps5/*.cpp)
+file(GLOB NGS2_SOURCES CONFIGURE_DEPENDS ngs2/*.cpp ngs2/*.c ngs2_anyps5/*.cpp)
 # libSceFiber, the fibers libSceUlt's job threads run on (fiber/README.md).
 file(GLOB FIBER_SOURCES CONFIGURE_DEPENDS fiber/*.cpp)
 # libSceFont and libSceFontFt, text rendered over FreeType (font/README.md).

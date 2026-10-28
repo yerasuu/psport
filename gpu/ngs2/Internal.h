@@ -188,6 +188,18 @@ struct RackLimits {
 
 struct System;
 struct Rack;
+struct Voice;
+
+// One of a sampler rack's ATRAC9 decoders (spec 05 §6, 08 §2): LibAtrac9's state and the planes of the
+// frame it decoded last, both in the rack's buffer. The first maxAtrac9Decoders stand for the
+// firmware's internal decoders, the maxAjmAtrac9Decoders after them for its AJM instances; the render
+// lends one to a voice from its first ATRAC9 grain until it ends or is set up again.
+struct Atrac9Decoder {
+    void* p_state;
+    float* p_frame;
+    Voice* p_owner;
+    bool is_ajm;
+};
 
 struct VoiceMatrix {
     u32 c_levels;
@@ -250,6 +262,7 @@ struct Voice {
     MasteringMatrices* p_active_mastering_matrices;
     MasteringMatrices* p_previous_mastering_matrices;
     VoiceDsp* p_dsp;
+    Atrac9Decoder* p_atrac9;
     BiquadState* p_filter_states;
     PeakMeterState meters[2];
     ActivePort* p_active_ports;
@@ -331,6 +344,8 @@ struct Rack {
     Voice* p_last_active;
     float* p_decode_scratch;
     u32 c_decode_stride;
+    Atrac9Decoder* p_atrac9_decoders;
+    u32 c_atrac9_decoders;
     QueuedCallback* p_callbacks;
     u32 c_callbacks;
     u32 c_callback_capacity;
@@ -376,6 +391,53 @@ enum SystemStateBits : u32 {
     SYSTEM_STATE_LOCKED = 0x8,
     SYSTEM_STATE_RENDER_ERROR = 0x80000000,
 };
+
+// The waveform types a sampler setup accepts (spec 05 §2, 03 §5.1): linear PCM, VAG, ATRAC9 and the
+// generators, which read no data.
+enum WaveformType : u32 {
+    WAVEFORM_FIRST_PCM = 0x10,
+    WAVEFORM_LAST_PCM = 0x1b,
+    WAVEFORM_VAG = 0x1c,
+    WAVEFORM_ATRAC9 = 0x40,
+    WAVEFORM_FIRST_GENERATOR = 0x80,
+    WAVEFORM_LAST_GENERATOR = 0x87,
+};
+
+constexpr u32 kVagFrameSamples = 28;
+constexpr u32 kVagBlockBytes = 16;
+constexpr u32 kMaxAtrac9FrameSamples = 256;
+
+bool IsWaveformType(u32 type);
+u32 BytesPerSample(u32 waveform_type);
+
+// An ATRAC9 configData (spec 05 §6.1): the four bytes of the codec's header read big-endian.
+struct Atrac9Config {
+    u32 c_channels;
+    u32 cb_frame;
+    u32 c_frames_per_superframe;
+    u32 c_frame_samples;
+};
+
+// False unless the top byte is 0xFE. c_frame_samples is 0 for the sample rate indices the firmware's
+// table at 0x35860 leaves out (all but 12, 24 and 48 kHz), c_channels 0 for configurations 6 and 7.
+bool ParseAtrac9Config(u32 config_data, Atrac9Config* p_out_config);
+
+// One frame of a waveform as the sampler reads it (spec 05 §2): cb_frame bytes, frameMargin included,
+// holding c_frame_samples samples per channel in c_units units of cb_unit bytes and c_unit_samples
+// samples (an ATRAC9 superframe holds frames; every other format one unit). c_delay_samples is the
+// codec's own delay.
+struct FrameShape {
+    u32 cb_frame;
+    u32 c_frame_samples;
+    u32 cb_unit;
+    u32 c_unit_samples;
+    u32 c_units;
+    u32 c_delay_samples;
+};
+
+// False for the generators, which have no data, and for an ATRAC9 config without frames; the format's
+// type and channels have been checked.
+bool GetFrameShape(u32 waveform_type, u32 c_channels, u32 config_data, u32 cb_frame_margin, FrameShape* p_out_shape);
 
 // Rack topology, under the system's process lock.
 s32 LinkRack(System* p_system, Rack* p_rack);
@@ -479,6 +541,9 @@ void ProcessSamplerVoice(RenderContext& context, Voice* p_voice, u32* p_event_co
 void ProcessSubmixerVoice(RenderContext& context, Voice* p_voice, u32* p_event_code);
 void ProcessMasteringVoice(RenderContext& context, Voice* p_voice, u32* p_event_code);
 void ResetSource(Voice* p_voice);
+// The bytes a rack lays out for one ATRAC9 decoder's state, 16-byte aligned.
+std::size_t GetAtrac9StateSize();
+void ReleaseAtrac9Decoder(Voice* p_voice);
 // The data lock (spec 09 §6.2): once KILL returns, the render no longer reads the voice's waveform,
 // which the game may free at once, until a new PLAY reaches the render.
 void LockVoiceData(Voice* p_voice);
@@ -545,6 +610,16 @@ s32 PS4_SYSV_ABI sceNgs2VoiceGetMatrixInfo(OrbisNgs2Handle h_voice, u32 matrix_i
                                            std::size_t cb_info);
 s32 PS4_SYSV_ABI sceNgs2VoiceGetPortInfo(OrbisNgs2Handle h_voice, u32 i_port, OrbisNgs2VoicePortInfo* p_out_info,
                                          std::size_t cb_info);
+
+s32 PS4_SYSV_ABI sceNgs2ParseWaveformData(const void* p_data, std::size_t cb_data, OrbisNgs2WaveformInfo* p_out_info);
+s32 PS4_SYSV_ABI sceNgs2ParseWaveformFile(const char* sz_path, u64 off_file, OrbisNgs2WaveformInfo* p_out_info);
+s32 PS4_SYSV_ABI sceNgs2ParseWaveformUser(OrbisNgs2ParseReadHandler pfn_read, uintptr_t user_data,
+                                          OrbisNgs2WaveformInfo* p_out_info);
+s32 PS4_SYSV_ABI sceNgs2CalcWaveformBlock(const OrbisNgs2WaveformFormat* p_format, u32 i_sample, u32 c_samples,
+                                          OrbisNgs2WaveformBlock* p_out_block);
+s32 PS4_SYSV_ABI sceNgs2GetWaveformFrameInfo(const OrbisNgs2WaveformFormat* p_format, u32* p_out_cb_frame,
+                                             u32* p_out_c_frame_samples, u32* p_out_c_units_per_frame,
+                                             u32* p_out_c_delay_samples);
 
 s32 PS4_SYSV_ABI sceNgs2ReportRegisterHandler(u32 report_type, OrbisNgs2ReportHandler pfn_handler,
                                               uintptr_t user_data, OrbisNgs2Handle* p_out_handle);

@@ -86,6 +86,12 @@ static At9Status UnpackStandardBlock(Block* block, BitReaderCxt* br)
 		ERROR_CHECK(ReadBandParams(block, br));
 	}
 
+	// Reused band parameters may be the leftovers of a frame that failed halfway through them
+	if (block->BlockType == Stereo && block->StereoQuantizationUnit > block->QuantizationUnitCount)
+	{
+		return ERR_UNPACK_BAND_PARAMS_INVALID;
+	}
+
 	ERROR_CHECK(ReadGradientParams(block, br));
 	ERROR_CHECK(CreateGradient(block));
 	ERROR_CHECK(ReadStereoParams(block, br));
@@ -186,7 +192,8 @@ static At9Status ReadGradientParams(Block* block, BitReaderCxt* br)
 	{
 		return ERR_UNPACK_GRAD_START_UNIT_OOB;
 	}
-	if (block->GradientEndUnit < 0 || block->GradientEndUnit >= 48)
+	// Gradient holds 31 units, the most a block has
+	if (block->GradientEndUnit < 0 || block->GradientEndUnit > 31)
 	{
 		return ERR_UNPACK_GRAD_END_UNIT_OOB;
 	}
@@ -248,6 +255,11 @@ static At9Status ReadExtensionParams(Block* block, BitReaderCxt* br)
 	int bexBand = 0;
 	if (block->BandExtensionEnabled)
 	{
+		// BexGroupInfo only covers 13 to 20 units, which a corrupt stream can leave
+		if (block->QuantizationUnitCount < 13 || block->QuantizationUnitCount > 20)
+		{
+			return ERR_UNPACK_EXTENSION_DATA_INVALID;
+		}
 		bexBand = BexGroupInfo[block->QuantizationUnitCount - 13].BandCount;
 		if (block->BlockType == Stereo)
 		{

@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // sceNgs2Rack* and sceNgs2CustomRackGetModuleInfo (spec 02 §3, §4). A rack's buffer holds the rack, its
 // voices (all of them exist from creation on), each voice's matrices and ports, and everything the
-// render keeps for a voice: parameters, DSP state, input rings, the waveform queue. QueryBufferSize
-// answers what this layout needs, which differs from the console's sum (spec 08 §2).
+// render keeps for a voice: parameters, DSP state, input rings, the waveform queue, and a sampler's
+// ATRAC9 decoders. QueryBufferSize answers what this layout needs, which differs from the console's sum
+// (spec 08 §2): LibAtrac9's state is about 90 KiB a decoder where the firmware's takes 0xF0 bytes plus
+// 0x280 per channel work.
 #include <algorithm>
 #include <cstring>
 #include <new>
@@ -139,6 +141,14 @@ Rack* LayOutRack(Arena* p_arena, const RackKind& kind, const RackLimits& limits)
     float* p_decode_scratch =
         kind.rack_id == kSamplerRackId ? AllocateArray<float>(p_arena, std::size_t(kMaxChannels) * c_decode_stride)
                                        : nullptr;
+    const u32 c_atrac9_decoders =
+        kind.rack_id == kSamplerRackId ? limits.max_atrac9_decoders + limits.max_ajm_atrac9_decoders : 0;
+    auto* p_atrac9_decoders = AllocateArray<Atrac9Decoder>(p_arena, c_atrac9_decoders);
+    const std::size_t cb_atrac9_state = GetAtrac9StateSize();
+    auto* p_atrac9_states =
+        c_atrac9_decoders ? static_cast<u8*>(p_arena->Allocate(c_atrac9_decoders * cb_atrac9_state, 16)) : nullptr;
+    const std::size_t c_atrac9_frame_floats = std::size_t(kMaxChannels) * kMaxAtrac9FrameSamples;
+    float* p_atrac9_frames = AllocateArray<float>(p_arena, c_atrac9_decoders * c_atrac9_frame_floats);
     // The data lock bitmap at rack+0x130: two bits per sampler voice (spec 09 §6.2).
     const std::size_t c_lock_words = kind.rack_id == kSamplerRackId ? (std::size_t(limits.max_voices) + 15) / 16 : 0;
     auto* p_lock_words = AllocateArray<std::atomic<u32>>(p_arena, c_lock_words);
@@ -165,6 +175,14 @@ Rack* LayOutRack(Arena* p_arena, const RackKind& kind, const RackLimits& limits)
     p_rack->c_decode_stride = c_decode_stride;
     p_rack->p_callbacks = p_callbacks;
     p_rack->c_callback_capacity = c_callbacks;
+    p_rack->p_atrac9_decoders = p_atrac9_decoders;
+    p_rack->c_atrac9_decoders = c_atrac9_decoders;
+    for (u32 i_decoder = 0; i_decoder < c_atrac9_decoders; ++i_decoder) {
+        new (&p_atrac9_decoders[i_decoder])
+            Atrac9Decoder{p_atrac9_states + i_decoder * cb_atrac9_state,
+                          p_atrac9_frames + i_decoder * c_atrac9_frame_floats, nullptr,
+                          i_decoder >= limits.max_atrac9_decoders};
+    }
     for (std::size_t i_word = 0; i_word < c_lock_words; ++i_word) {
         new (&p_lock_words[i_word]) std::atomic<u32>{0};
     }

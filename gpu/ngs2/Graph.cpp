@@ -373,6 +373,7 @@ void PostRack(Rack* p_rack) {
         PostWaveformQueue(p_voice);
         if (p_voice->flags == 0) {
             ReleaseChannelWorks(p_voice);
+            ReleaseAtrac9Decoder(p_voice);
             for (u32 i_port = 0; i_port < p_rack->limits.max_ports; ++i_port) {
                 p_voice->p_active_ports[i_port].p_dest = nullptr;
             }

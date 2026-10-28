@@ -14,7 +14,7 @@ licence applied to every file. [LICENSES.json](LICENSES.json) lists the componen
 | psport runtime, GPU glue, launcher and tooling (`src`, `gpu/shim`, `gpu/port`, `gpu/memory`, `gpu/diag`, `gpu/layer`, the native Ngs2 `gpu/ngs2`, `launcher`, `tools`, `packaging`, scripts) | GPL-2.0-or-later (GPL-2.0-only where a header says so); `LICENSE`, `README.md`. `src/` carries no per-file header, so README.md is its only statement |
 | Per-title game profiles (`gpu/games`) | GPL-2.0-or-later; the BBSC co-op code is Copyright 2026 CLS_AMG |
 | libSceNgs2 port (`gpu/ngs2_anyps5`) | GPL-2.0-only; from AnyPS5 (https://github.com/boykopovar/AnyPS5) at `5edae353` (FORK.md) |
-| libSceAudiodec and the native libSceNgs2 (`gpu/audiodec`, `gpu/ngs2`) | GPL-2.0-or-later; psport's own, over libavcodec and LibAtrac9 (Audiodec) and shadPS4's Ngs2 headers (Ngs2) |
+| libSceAudiodec and the native libSceNgs2 (`gpu/audiodec`, `gpu/ngs2`) | GPL-2.0-or-later; psport's own, over libavcodec and LibAtrac9 (Audiodec) and shadPS4's Ngs2 headers and LibAtrac9 (Ngs2) |
 | shadPS4 vendored tree (`gpu/shadps4`) | GPL-2.0-or-later; https://github.com/shadps4-emu/shadPS4 at `b4e7ae7` and the fixes `gpu/VENDOR.txt` lists |
 | Files in that tree under their own licence | MIT (`sha1.h`, `ssa_rewrite_pass.cpp`, `fsr.comp`, AMD's `ffx_a.h` and `ffx_fsr1.h`), BSL-1.0 (`aes.h`), CC0-1.0 (`alignment.h`), BSD-3-Clause AND GPL-2.0-or-later (`bit_field.h`), Zlib (`vk_barrier_tracker.*`, DXVK) |
 | libSceFiber and libSceFont (`gpu/fiber`, `gpu/font`) | GPL-2.0-or-later; shadPS4 at `3a9f572` |
