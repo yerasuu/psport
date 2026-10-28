@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// libSceNgs2's export table for the native Ngs2 (PS_NGS2=native, kb #625). The system, rack and
-// report API is implemented (phase F2, kb #1094); what is still missing returns
+// libSceNgs2's export table for the native Ngs2 (PS_NGS2=native, kb #625). The system, rack, voice
+// and report API is implemented (phase F2, kb #1094); what is still missing returns
 // ORBIS_NGS2_ERROR_FAIL, the firmware's internal failure, logs its first call and is counted in the
-// call report, so a title on this backend shows what it still needs.
+// call report, so a title on this backend shows what it still needs: waveform parsing (F4), pan,
+// geom and FFT (F7) and the three PS5 exports.
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -23,15 +24,9 @@ struct Export {
     const char* sz_name;
 };
 
-// The exports not implemented yet: 20 of firmware 11.00's 47, then the three PS5 ones
+// The exports not implemented yet: 14 of firmware 11.00's 47, then the three PS5 ones
 // gpu/ngs2_anyps5 also registers, so that switching backends leaves every import bound the same.
 constexpr std::array UNIMPLEMENTED_EXPORTS{
-    Export{"uu94irFOGpA", "sceNgs2VoiceControl"},
-    Export{"rEh728kXk3w", "sceNgs2VoiceGetStateFlags"},
-    Export{"-TOuuAQ-buE", "sceNgs2VoiceGetState"},
-    Export{"W-Z8wWMBnhk", "sceNgs2VoiceGetOwner"},
-    Export{"jjBVvPN9964", "sceNgs2VoiceGetMatrixInfo"},
-    Export{"WCayTgob7-o", "sceNgs2VoiceGetPortInfo"},
     Export{"-YNfTO6KOMY", "sceNgs2FftQuerySize"},
     Export{"Kg1MA5j7KFk", "sceNgs2FftInit"},
     Export{"D8eCqBxSojA", "sceNgs2FftProcess"},
@@ -80,6 +75,12 @@ void RegisterLib(Core::Loader::SymbolsResolver* sym) {
     LIB_FUNCTION("Mn4XNDg03XY", "libSceNgs2", 1, "libSceNgs2", sceNgs2RackGetUserData);
     LIB_FUNCTION("MwmHz8pAdAo", "libSceNgs2", 1, "libSceNgs2", sceNgs2RackGetVoiceHandle);
     LIB_FUNCTION("M4LYATRhRUE", "libSceNgs2", 1, "libSceNgs2", sceNgs2RackGetInfo);
+    LIB_FUNCTION("uu94irFOGpA", "libSceNgs2", 1, "libSceNgs2", sceNgs2VoiceControl);
+    LIB_FUNCTION("rEh728kXk3w", "libSceNgs2", 1, "libSceNgs2", sceNgs2VoiceGetStateFlags);
+    LIB_FUNCTION("-TOuuAQ-buE", "libSceNgs2", 1, "libSceNgs2", sceNgs2VoiceGetState);
+    LIB_FUNCTION("W-Z8wWMBnhk", "libSceNgs2", 1, "libSceNgs2", sceNgs2VoiceGetOwner);
+    LIB_FUNCTION("jjBVvPN9964", "libSceNgs2", 1, "libSceNgs2", sceNgs2VoiceGetMatrixInfo);
+    LIB_FUNCTION("WCayTgob7-o", "libSceNgs2", 1, "libSceNgs2", sceNgs2VoiceGetPortInfo);
     LIB_FUNCTION("uBIN24Tv2MI", "libSceNgs2", 1, "libSceNgs2", sceNgs2ReportRegisterHandler);
     LIB_FUNCTION("nPzb7Ly-VjE", "libSceNgs2", 1, "libSceNgs2", sceNgs2ReportUnregisterHandler);
     LIB_FUNCTION("pgFAiLR5qT4", "libSceNgs2", 1, "libSceNgs2", sceNgs2SystemQueryBufferSize);
