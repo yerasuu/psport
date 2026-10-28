@@ -5,7 +5,6 @@
 #include "psport_toggles.h"
 #include "pslayer_write_traps.h"
 #include "psport_guest_memory.h"
-#include "common/assert.h"
 #include "common/debug.h"
 #include "common/div_ceil.h"
 #include "common/error.h"
@@ -18,8 +17,12 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <bit>
+#include <cerrno>
 #include <cstdio>
+#include <cstring>
 #include <string>
+#include <utility>
 #include <fmt/format.h>
 #include <unistd.h>
 #include "core/signals.h"
@@ -145,6 +148,65 @@ void NoteFaultSite(void* context, VAddr address) {
     }
     fault_sites_dropped.fetch_add(1, std::memory_order_relaxed);
 }
+
+/// psport: page manager invariants found broken; each site goes on with a defined result. The
+/// sites also run inside the fault handler (a fault lifts watches and traps), where nothing may
+/// allocate or log, so they only count there and the counts are logged from outside it.
+enum class Broken : u32 {
+    ReadWatchers,
+    WriteWatchers,
+    TrapOwners,
+    TrapTable,
+    WriteOnly,
+    UnalignedRegion,
+    Count,
+};
+constexpr std::array<const char*, size_t(Broken::Count)> BROKEN_REASONS = {
+    "read watch removed from a page without one (left at 0)",
+    "write watch removed from a page without one (left at 0)",
+    "trap owner removed from a page without one (trap left as it is)",
+    "trap change without its owner table (not trapped)",
+    "write-only protection asked, which the host has not (read-write, reads not trapped)",
+    "watch region not aligned to its lock (the locks of all its pages taken)",
+};
+std::array<std::uint64_t, size_t(Broken::Count)> s_c_broken{};
+std::array<std::uint64_t, size_t(Broken::Count)> s_c_broken_logged{};
+bool s_has_broken_pending = false;
+thread_local bool s_is_in_fault_handler = false;
+
+/// Logs each count on its 1st, 2nd, 4th, 8th... occurrence, as LOG_ERROR_COUNTED does, and lists
+/// it in the call summary from its first.
+void LogBroken() {
+    __atomic_store_n(&s_has_broken_pending, false, __ATOMIC_RELAXED);
+    for (size_t i_reason = 0; i_reason < BROKEN_REASONS.size(); ++i_reason) {
+        const u64 c_hits = __atomic_load_n(&s_c_broken[i_reason], __ATOMIC_RELAXED);
+        u64 c_logged = __atomic_load_n(&s_c_broken_logged[i_reason], __ATOMIC_RELAXED);
+        if (std::bit_width(c_hits) <= std::bit_width(c_logged) ||
+            !__atomic_compare_exchange_n(&s_c_broken_logged[i_reason], &c_logged, c_hits, false,
+                                         __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {
+            continue;
+        }
+        if (c_logged == 0) {
+            Common::Log::Fallback("PageManager", BROKEN_REASONS[i_reason], &s_c_broken[i_reason]);
+        }
+        LOG_ERROR(Render, "Page manager: {} ({} so far)", BROKEN_REASONS[i_reason], c_hits);
+    }
+}
+
+void LogPendingBroken() {
+    if (__atomic_load_n(&s_has_broken_pending, __ATOMIC_RELAXED) && !s_is_in_fault_handler) {
+        LogBroken();
+    }
+}
+
+void NoteBroken(Broken broken) {
+    __atomic_add_fetch(&s_c_broken[size_t(broken)], 1, __ATOMIC_RELAXED);
+    if (s_is_in_fault_handler) {
+        __atomic_store_n(&s_has_broken_pending, true, __ATOMIC_RELAXED);
+        return;
+    }
+    LogBroken();
+}
 } // namespace
 
 static void ReportImageFaultSites() {
@@ -193,6 +255,7 @@ void PageManager::NoteImageFault(VAddr image_address, u64 image_size, u32 width,
 }
 
 void PageManager::ReportFaultSites() {
+    LogPendingBroken();
     struct Row {
         u64 rip, caller, count, address;
     };
@@ -273,7 +336,10 @@ struct PageManager::Impl {
                 if constexpr (delta == 1) {
                     return ++num_read_watchers;
                 } else if (delta == -1) {
-                    ASSERT_MSG(num_read_watchers > 0, "Not enough watchers");
+                    if (num_read_watchers == 0) [[unlikely]] {
+                        NoteBroken(Broken::ReadWatchers);
+                        return 0;
+                    }
                     return --num_read_watchers;
                 } else {
                     return num_read_watchers;
@@ -282,7 +348,10 @@ struct PageManager::Impl {
                 if constexpr (delta == 1) {
                     return ++num_write_watchers;
                 } else if (delta == -1) {
-                    ASSERT_MSG(num_write_watchers > 0, "Not enough watchers");
+                    if (num_write_watchers == 0) [[unlikely]] {
+                        NoteBroken(Broken::WriteWatchers);
+                        return 0;
+                    }
                     return --num_write_watchers;
                 } else {
                     return num_write_watchers;
@@ -310,6 +379,12 @@ struct PageManager::Impl {
     virtual void Protect(VAddr address, size_t size, Core::MemoryPermission perms) = 0;
 
     static bool GuestFaultSignalHandler(void* context, void* fault_address) {
+        struct HandlerScope {
+            bool was_in_handler = std::exchange(s_is_in_fault_handler, true);
+            ~HandlerScope() {
+                s_is_in_fault_handler = was_in_handler;
+            }
+        } scope;
         const auto addr = reinterpret_cast<VAddr>(fault_address);
         NoteFaultSite(context, addr);
         // psport: the draw recording thread handles its faults inline too (vk_draw_pipe.h).
@@ -414,6 +489,14 @@ struct PageManager::Impl {
         release_pending();
     }
 
+    /// psport: the lock of a region's pages, and the next ones when the region is not aligned.
+    auto LockRegion(size_t base_page, size_t c_pages) {
+        const size_t i_lock = base_page / PAGES_PER_LOCK;
+        const size_t i_lock_end =
+            std::max(i_lock + 1, Common::DivCeil(base_page + c_pages, PAGES_PER_LOCK));
+        return Common::RangeLockGuard{locks.begin() + i_lock, locks.begin() + i_lock_end};
+    }
+
     template <bool track, bool is_read>
     void UpdatePageWatchersForRegion(VAddr base_addr, RegionBits& mask) {
         RENDERER_TRACE;
@@ -428,8 +511,10 @@ struct PageManager::Impl {
         }
 
         size_t base_page = (base_addr >> PM_PAGE_BITS);
-        ASSERT(base_page % PAGES_PER_LOCK == 0);
-        std::scoped_lock lk(locks[base_page / PAGES_PER_LOCK]);
+        if (base_page % PAGES_PER_LOCK != 0) [[unlikely]] {
+            NoteBroken(Broken::UnalignedRegion);
+        }
+        auto lk = LockRegion(base_page, end_range.second);
         auto perms = cached_pages[base_page + start_range.first].Perms();
         u64 range_begin = 0;
         u64 range_bytes = 0;
@@ -489,18 +574,31 @@ struct PageManager::Impl {
     /// going would lift or leave the other's trap (left, the write faults again forever).
     struct TrapOwners {
         u16* counts = nullptr;
-        std::once_flag once;
     };
+
+    static bool MapTrapOwners(TrapOwners& owners, const char* sz_owner) {
+        constexpr size_t cb_table = NUM_ADDRESS_PAGES * sizeof(u16);
+        void* p_table =
+            ps_host_vm_map(nullptr, cb_table, PS_HOST_VM_READ | PS_HOST_VM_WRITE, PS_HOST_VM_SPARSE);
+        if (!p_table) {
+            const int error = errno;
+            LOG_CRITICAL(Render,
+                         "Write traps: the {} trap owner table ({} MiB of address space) could "
+                         "not be mapped: {} (errno {})",
+                         sz_owner, cb_table >> 20, std::strerror(error), error);
+            return false;
+        }
+        owners.counts = static_cast<u16*>(p_table);
+        return true;
+    }
 
     template <bool track, typename ForEachPage>
     static void UpdateTraps(TrapOwners& owners, PsLayer::WriteTraps::Reason reason,
                             ForEachPage&& for_each_page) {
-        std::call_once(owners.once, [&owners] {
-            void* mem = ps_host_vm_map(nullptr, NUM_ADDRESS_PAGES * sizeof(u16), PS_HOST_VM_READ | PS_HOST_VM_WRITE,
-                                       PS_HOST_VM_SPARSE);
-            ASSERT_MSG(mem != nullptr, "trap owner table");
-            owners.counts = static_cast<u16*>(mem);
-        });
+        if (!owners.counts) [[unlikely]] {
+            NoteBroken(Broken::TrapTable);
+            return;
+        }
         // Runs of pages whose first owner came or last one went: one trap change each.
         u64 run_begin = 0, run_pages = 0;
         const auto flush = [&] {
@@ -516,7 +614,10 @@ struct PageManager::Impl {
             if constexpr (track) {
                 change = count++ == 0;
             } else {
-                ASSERT_MSG(count > 0, "trap owners below zero");
+                if (count == 0) [[unlikely]] {
+                    NoteBroken(Broken::TrapOwners);
+                    return;
+                }
                 change = --count == 0;
             }
             if (!change) {
@@ -552,7 +653,7 @@ struct PageManager::Impl {
     template <bool track>
     void UpdateBufferTraps(VAddr base_addr, RegionBits& mask) {
         const size_t base_page = base_addr >> PM_PAGE_BITS;
-        std::scoped_lock lk(locks[base_page / PAGES_PER_LOCK]);
+        auto lk = LockRegion(base_page, mask.LastRange().second);
         UpdateTraps<track>(buffer_owners, PsLayer::WriteTraps::Buffer, [&](auto&& visit) {
             for (size_t page = mask.FirstRange().first; page < mask.LastRange().second; ++page) {
                 if (mask.Get(page)) {
@@ -593,8 +694,10 @@ struct SignalImpl : public PageManager::Impl {
         }
         auto* memory = Core::Memory::Instance();
         auto& impl = memory->GetAddressSpace();
-        ASSERT_MSG(perms != Core::MemoryPermission::Write,
-                   "Attempted to protect region as write-only which is not a valid permission");
+        if (perms == Core::MemoryPermission::Write) [[unlikely]] {
+            NoteBroken(Broken::WriteOnly);
+            perms = Core::MemoryPermission::ReadWrite;
+        }
         impl.Protect(address, size, perms);
     }
 
@@ -605,6 +708,11 @@ PageManager::PageManager(Vulkan::Rasterizer* rasterizer_) {
 }
 
 PageManager::~PageManager() = default;
+
+bool PageManager::ReserveTraps() {
+    return (!ImageTraps() || Impl::MapTrapOwners(impl->image_owners, "image")) &&
+           (!BufferTraps() || Impl::MapTrapOwners(impl->buffer_owners, "buffer"));
+}
 
 void PageManager::OnGpuMap(VAddr address, size_t size) {
     impl->OnMap(address, size);
@@ -621,6 +729,7 @@ void PageManager::UpdatePageWatchers(VAddr addr, u64 size) const {
     if (ImageTraps()) {
         impl->UpdateImageTraps<track>(addr, size);
     }
+    LogPendingBroken();
 }
 
 template <bool track, bool is_read>
@@ -629,6 +738,7 @@ void PageManager::UpdatePageWatchersForRegion(VAddr base_addr, RegionBits& mask)
     if (BufferTraps()) {
         impl->UpdateBufferTraps<track>(base_addr, mask);
     }
+    LogPendingBroken();
 }
 
 template void PageManager::UpdatePageWatchers<true>(VAddr addr, u64 size) const;

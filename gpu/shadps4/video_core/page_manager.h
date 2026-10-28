@@ -31,6 +31,11 @@ public:
     explicit PageManager(Vulkan::Rasterizer* rasterizer);
     ~PageManager();
 
+    /// psport: maps the trap owner tables the write traps use, before the first trap, so that a
+    /// host that cannot map them fails the GPU start instead of a game's first image. False when
+    /// it could not (logged with the host's error).
+    [[nodiscard]] bool ReserveTraps();
+
     /// psport: the guest code behind write faults on tracked pages over the last window (frame
     /// stats): which game functions write GPU memory, to replace tracking by explicit hooks.
     static void ReportFaultSites();

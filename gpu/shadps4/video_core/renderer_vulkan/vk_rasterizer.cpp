@@ -78,6 +78,10 @@ Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_, Runtime
         liverpool->BindRasterizer(this);
     }
     PsGuestMemory::Install(instance); // psport: before the runtime maps direct memory
+    // psport: once the buffer cache settled PsGuestMemory::LayerMemory (it decides the buffer traps).
+    if (!page_manager.ReserveTraps()) {
+        ReportInitFailure();
+    }
     memory->SetRasterizer(this);
 
     GpuProfiler::Init(instance, scheduler);
