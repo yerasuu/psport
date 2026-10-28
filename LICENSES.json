@@ -1,0 +1,295 @@
+{
+  "schema_version": 1,
+  "review_date": "2026-10-28",
+  "original_code_license": "GPL-2.0-or-later (files marked GPL-2.0-only stay GPL-2.0-only); the combined binaries are distributed under GPL-2.0 (LICENSE, kb #843)",
+  "license_references": {
+    "LicenseRef-DejaVu-Fonts": "The Bitstream Vera Fonts licence together with the DejaVu changes (public domain) and the Arev Fonts licence, exactly as gpu/third_party/fonts/LICENSE-DejaVu.txt states it. Not the SIL OFL.",
+    "LicenseRef-Bundled-Libraries": "Libraries psport links from Nix (the Linux bundle's lib/) or from MSYS2 CLANG64 (the Windows bundle's DLLs), and packages compiled into its binaries. Each keeps its own licence; packaging/licences.nix and tools/win32-bundle.sh write them, with their licence texts and source URLs, into the THIRD-PARTY-NOTICES and SOURCES.txt of every bundle. Nothing under the Apache-2.0 or GPL-3.0-only is allowed in a bundle (tools/check_bundle_licences.sh).",
+    "LicenseRef-bbsc-gameserver": "scripts/bbsc_gameserver/NOTICE.txt states GPL-2.0-or-later for BBSC (Copyright 2026 CLS_AMG). The folder also holds LICENSE.NoDreamForHunter, the MIT licence of NoDreamForHunter by fhody125-web, whose ss.info format, endpoint list and JSON shapes bbsc_gameserver.py takes; bbhost_service.py is written from bbhost's client source (GPL-3.0-or-later per FORK.md) and states no licence of its own. The two statements are not reconciled: see the provenance of the component.",
+    "LicenseRef-Tracy-unverified": "FORK.md and README.md list Tracy as BSD-3-Clause; the submodule is not checked out here, so its licence file was not read.",
+    "LicenseRef-game-patch-authors": "patches/Bloodborne.xml carries patches whose authors are named in each Metadata element (Kyo, illusion, auser1337, Lance McDonald, emoose, Dasaav and others). No licence is stated for them anywhere in the repository.",
+    "LicenseRef-dxil-spirv-patch": "A patch against dxil-spirv (https://github.com/HansKristian-Work/dxil-spirv, listed as MIT in README.md). The upstream licence file is not in the repository and was not read.",
+    "LicenseRef-msys2-pkgbuild": "A PKGBUILD derived from MSYS2's mingw-w64-ffmpeg recipe (MINGW-packages). It states license=('spdx:LGPL-2.1-or-later') for the FFmpeg it builds, which is not the licence of the recipe file; the recipe's own licence is not stated in the repository."
+  },
+  "components": [
+    {
+      "name": "psport runtime, GPU glue, launcher and build tooling",
+      "paths": [
+        "src",
+        "gpu/shim",
+        "gpu/port",
+        "gpu/memory",
+        "gpu/diag",
+        "gpu/layer",
+        "gpu/pngenc",
+        "gpu/pngdec",
+        "gpu/jpegdec",
+        "gpu/cp",
+        "gpu/platform",
+        "gpu/tools",
+        "gpu/psport_gpu.h",
+        "gpu/CMakeLists.txt",
+        "CMakeLists.txt",
+        "build.sh",
+        "run.sh",
+        "launcher",
+        "scripts/online.py",
+        "scripts/sce_file.py",
+        "tools",
+        "packaging",
+        "shell.nix",
+        ".github"
+      ],
+      "license": "GPL-2.0-or-later",
+      "review": "reviewed",
+      "provenance": "LICENSE (GPL version 2) and README.md: files marked GPL-2.0-only are under version 2 only, the rest is GPL-2.0-or-later used as version 2. About 640 files carry SPDX-License-Identifier: GPL-2.0-or-later; src/, gpu/shim and gpu/platform carry no per-file header, so for them README.md is the only statement. Origin: bbport (https://github.com/deadinside28/bloodborne_pc, GPL-2.0-or-later, last merged 3c57da4), ports by hand recorded in FORK.md with their source commits, from SrShadowy/bloodborne_pc (GPL-2.0) and Teefpyre/bloodborne_pc-LinuxBBSCFix (licence not recorded in FORK.md)."
+    },
+    {
+      "name": "Per-title game profiles",
+      "paths": [
+        "gpu/games"
+      ],
+      "license": "GPL-2.0-or-later",
+      "review": "reviewed",
+      "provenance": "All 59 files carry SPDX-License-Identifier: GPL-2.0-or-later. The BBSC co-op code under gpu/games/bloodborne/net is Copyright 2026 CLS_AMG (BBSC, GPL-2.0-or-later per scripts/bbsc_gameserver/NOTICE.txt) and ported by hand, see FORK.md."
+    },
+    {
+      "name": "libSceNgs2 and libSceAudiodec ports from AnyPS5",
+      "paths": [
+        "gpu/ngs2",
+        "gpu/audiodec"
+      ],
+      "license": "GPL-2.0-only",
+      "review": "reviewed",
+      "provenance": "FORK.md, Ported components: libSceNgs2 from https://github.com/boykopovar/AnyPS5 commit 5edae353 and libSceAudiodec from the same repository at a11c8f7f, both GPL-2.0-only. The files carry SPDX-License-Identifier: GPL-2.0-only; gpu/ngs2/Envelope.cpp, Filter.cpp, Limiter.cpp, PeakMeter.cpp and Vag.cpp carry no header (Limiter.cpp is written from firmware 11.00, not from AnyPS5; the origin of the other four is not recorded). Linked into libpsport-gpu.so, so the binary is GPL-2.0, never GPL-3.0 (kb #843)."
+    },
+    {
+      "name": "shadPS4 vendored tree",
+      "paths": [
+        "gpu/shadps4",
+        "gpu/VENDOR.txt"
+      ],
+      "license": "GPL-2.0-or-later",
+      "review": "reviewed",
+      "provenance": "https://github.com/shadps4-emu/shadPS4 commit b4e7ae776071ceb1dd35004577a8719481e1d258 (gpu/VENDOR.txt, GPL-2.0-or-later; gpu/shadps4/LICENSE is GPL version 2) plus the later fixes backported by hand that gpu/VENDOR.txt lists. Local changes are marked psport:. Other copyright holders in the SPDX lines (yuzu, Citra, Dolphin, shadLauncher4) are GPL-2.0-or-later too; files under other licences are the next component."
+    },
+    {
+      "name": "Files in the shadPS4 tree under their own licence",
+      "paths": [
+        "gpu/shadps4/common/sha1.h",
+        "gpu/shadps4/common/aes.h",
+        "gpu/shadps4/common/alignment.h",
+        "gpu/shadps4/common/bit_field.h",
+        "gpu/shadps4/shader_recompiler/ir/passes/ssa_rewrite_pass.cpp",
+        "gpu/shadps4/video_core/host_shaders/fsr.comp",
+        "gpu/shadps4/video_core/host_shaders/fsr/ffx_a.h",
+        "gpu/shadps4/video_core/host_shaders/fsr/ffx_fsr1.h",
+        "gpu/shadps4/video_core/renderer_vulkan/vk_barrier_tracker.cpp",
+        "gpu/shadps4/video_core/renderer_vulkan/vk_barrier_tracker.h"
+      ],
+      "license": "MIT AND BSD-3-Clause AND GPL-2.0-or-later AND Zlib AND CC0-1.0 AND BSL-1.0",
+      "review": "reviewed",
+      "provenance": "SPDX-License-Identifier in each header: sha1.h MIT (SAURAV MOHAPATRA), aes.h BSL-1.0 (kkAyataka), alignment.h CC0-1.0 (Jannik Vogel), bit_field.h BSD-3-Clause AND GPL-2.0-or-later (Tony Wasserka, Dolphin), ssa_rewrite_pass.cpp MIT, fsr.comp MIT (AMD), vk_barrier_tracker.* Zlib (DXVK Project). ffx_a.h and ffx_fsr1.h carry AMD's MIT permission text in their headers. Their texts are in the THIRD-PARTY-NOTICES of each bundle (packaging/licences.nix)."
+    },
+    {
+      "name": "libSceFiber and libSceFont ports from shadPS4",
+      "paths": [
+        "gpu/fiber",
+        "gpu/font"
+      ],
+      "license": "GPL-2.0-or-later",
+      "review": "reviewed",
+      "provenance": "FORK.md, Ported components: https://github.com/shadps4-emu/shadPS4 commit 3a9f572, src/core/libraries/fiber and font. All files carry SPDX-License-Identifier: GPL-2.0-or-later."
+    },
+    {
+      "name": "Online module (libpsport-net.so)",
+      "paths": [
+        "gpu/net"
+      ],
+      "license": "GPL-2.0-or-later AND GPL-2.0-only",
+      "review": "reviewed",
+      "provenance": "FORK.md: shadp2p (a shadPS4 fork) by way of the Linux and Windows co-op forks of bbport, inherited with bbport 0.51 (3c57da4). Headers say GPL-2.0-or-later, except gpu/net/shadps4/core/libraries/np/np_handler.{h,cpp} and gpu/net/shadps4/shadnet/client.{h,cpp}, GPL-2.0-only. Copyright holders in the SPDX lines: shadPS4 Emulator Project, rpcs3 Project, rpcsn Project, shadNet Project, CLS_AMG. A separate shared library that links OpenSSL (Apache-2.0), protobuf, nlohmann_json, zlib and miniupnpc (gpu/CMakeLists.txt, gpu/net/CMakeLists.txt, shell.nix). OpenSSL and abseil are Apache-2.0, which GPL-2.0 does not allow, so no public bundle carries it until kb #850 replaces them."
+    },
+    {
+      "name": "cpp-httplib",
+      "paths": [
+        "gpu/third_party/httplib"
+      ],
+      "license": "MIT",
+      "review": "reviewed",
+      "provenance": "https://github.com/yhirose/cpp-httplib, Copyright (c) 2017 yhirose (gpu/third_party/httplib/LICENSE). Used by the online module only. The upstream commit or version is not recorded in the repository."
+    },
+    {
+      "name": "DLSS bridge",
+      "paths": [
+        "gpu/dlss_bridge"
+      ],
+      "license": "MIT",
+      "review": "reviewed",
+      "provenance": "gpu/dlss_bridge/LICENSE.txt: Copyright (c) 2026 IFreemz and bbport contributors; covers the files in that directory only. Adapted from the shadps4_dlss bridge of https://github.com/IFreemz/shadPS4-Bloodborne-DLSS-FSR by way of Supermedo's Windows port (README.md). Building it needs the NVIDIA DLSS SDK, licensed separately by NVIDIA and not in the repository nor in any bundle; the user supplies it."
+    },
+    {
+      "name": "FSR-Vulkan and AMD FidelityFX SDK sources",
+      "paths": [
+        "gpu/third_party/fsr-vulkan"
+      ],
+      "license": "MIT",
+      "review": "reviewed",
+      "provenance": "https://github.com/FireBurn/FSR-Vulkan at c64f093 (FORK.md); LICENSE.txt is MIT, Copyright (c) 2026 Q2RTX FSR Vulkan contributors, for the portability layer outside upstream/. upstream/ffx-1.1.4 is AMD FidelityFX SDK v1.1.4 (c6efa6bf7f2027b3ec94f28578bb5965eabb9e55) and upstream/ffx-2.3.0 the FSR SDK v2.3.0 subset (60f4ea81909200d8542eca14dccb2628b763a9a3); every one of their 288 files carries AMD's MIT permission notice. UPSTREAM.md warns that SDK 2.3's repository-level licence is more restrictive than the per-file notices and covers signed binaries: that file is not in the repository. NOTICE.md: AMD's signed FSR 4.1.1 and other DLLs and the source-v07 FSR 4 shader binaries and weights are not included."
+    },
+    {
+      "name": "AMD FidelityFX API headers for fsr4cap",
+      "paths": [
+        "tools/fsr4cap/ffx"
+      ],
+      "license": "MIT",
+      "review": "reviewed",
+      "provenance": "tools/fsr4cap/ffx/README.md: https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK commit 60f4ea81909200d8542eca14dccb2628b763a9a3; each header starts with AMD's MIT permission notice (Copyright (C) 2026 Advanced Micro Devices, Inc.). Used to build fsr4cap.exe on the user's machine."
+    },
+    {
+      "name": "sirit with SPIRV-Headers",
+      "paths": [
+        "gpu/third_party/sirit"
+      ],
+      "license": "BSD-3-Clause AND MIT",
+      "review": "reviewed",
+      "provenance": "https://github.com/shadps4-emu/sirit (README.md): LICENSE.txt is the BSD 3-clause licence, Copyright (c) 2019 sirit. externals/SPIRV-Headers/LICENSE is the Khronos Group's MIT-style grant (recorded as MIT) and also reproduces the JsonCpp licence (public domain or MIT) for tools/buildHeaders/jsoncpp. The pinned sirit and SPIRV-Headers commits are not recorded in the repository. Local changes: OpNClamp (gpu/VENDOR.txt)."
+    },
+    {
+      "name": "half",
+      "paths": [
+        "gpu/third_party/half"
+      ],
+      "license": "MIT",
+      "review": "reviewed",
+      "provenance": "https://half.sourceforge.net/, Copyright (c) 2012-2017 Christian Rau (gpu/third_party/half/LICENSE.txt); vendored by gpu/VENDOR.txt as shadPS4's externals/half. The version is in gpu/third_party/half/ChangeLog.txt."
+    },
+    {
+      "name": "xbyak",
+      "paths": [
+        "gpu/third_party/xbyak"
+      ],
+      "license": "BSD-3-Clause",
+      "review": "reviewed",
+      "provenance": "https://github.com/herumi/xbyak, Copyright (c) 2007 MITSUNARI Shigeo (COPYRIGHT is the BSD 3-clause text). README.md says version 7.43. Emits x86-64 code at run time."
+    },
+    {
+      "name": "AMD GCN register headers",
+      "paths": [
+        "gpu/third_party/gcn"
+      ],
+      "license": "MIT",
+      "review": "reviewed",
+      "provenance": "Both headers carry AMD's MIT permission notice (Copyright (c) 2014-2021 Advanced Micro Devices, Inc.); packaging/licences.nix names https://github.com/GPUOpen-Drivers/pal as their source; gpu/VENDOR.txt lists them as shadPS4's externals/gcn."
+    },
+    {
+      "name": "RenderDoc in-application API header",
+      "paths": [
+        "gpu/third_party/renderdoc"
+      ],
+      "license": "MIT",
+      "review": "reviewed",
+      "provenance": "https://github.com/baldurk/renderdoc v1.46 (102e541), renderdoc/api/app/renderdoc_app.h (FORK.md); the header carries the MIT notice, Copyright (c) 2015-2026 Baldur Karlsson."
+    },
+    {
+      "name": "Dear ImGui",
+      "paths": [
+        "gpu/third_party/imgui"
+      ],
+      "license": "MIT",
+      "review": "reviewed",
+      "provenance": "Git submodule of https://github.com/ocornut/imgui at f1cc2ae15e53a861a874c3034aae6798fde194ab (.gitmodules; packaging/port.nix pins the same revision). LICENSE.txt at that commit, read in the development checkout, is the MIT licence, Copyright (c) 2014-2026 Omar Cornut. The submodule is empty in a fresh worktree until it is initialised."
+    },
+    {
+      "name": "Tracy profiler",
+      "paths": [
+        "gpu/third_party/tracy"
+      ],
+      "license": "LicenseRef-Tracy-unverified",
+      "review": "pending",
+      "provenance": "Git submodule of https://github.com/wolfpld/tracy at 05cceee0df3b8d7c6fa87e9638af311dbabc63cb (.gitmodules, shallow, update = none), fetched only for PS_TRACY=ON builds. README.md says BSD-3-Clause; the submodule is not checked out anywhere here, so its licence file was not read. Needed: its LICENSE at that commit."
+    },
+    {
+      "name": "DejaVu fonts",
+      "paths": [
+        "gpu/third_party/fonts"
+      ],
+      "license": "LicenseRef-DejaVu-Fonts",
+      "review": "reviewed",
+      "provenance": "https://dejavu-fonts.github.io/ (README.md); DejaVuSans.ttf and DejaVuSerif.ttf with LICENSE-DejaVu.txt: Bitstream Vera Fonts Copyright (c) 2003 Bitstream, Inc., DejaVu changes public domain, glyphs from Arev Fonts (c) Tavmjong Bah. The font version is not recorded in the repository."
+    },
+    {
+      "name": "LibAtrac9",
+      "paths": [
+        "third_party/LibAtrac9"
+      ],
+      "license": "MIT",
+      "review": "reviewed",
+      "provenance": "https://github.com/Thealexbarney/LibAtrac9 commit efca2e3, C/src (FORK.md); Copyright (c) 2018 Alex Barney (LICENSE). Local change: Atrac9Decode takes the input's size."
+    },
+    {
+      "name": "BBSC game server scripts",
+      "paths": [
+        "scripts/bbsc_gameserver"
+      ],
+      "license": "LicenseRef-bbsc-gameserver",
+      "review": "pending",
+      "provenance": "NOTICE.txt (Copyright 2026 CLS_AMG, BBSC, https://github.com/Classmg22/BBSC) says GPL-2.0-or-later and says shadPS4 and shadp2p are what BBSC builds on. LICENSE.NoDreamForHunter is the MIT licence of fhody125-web's NoDreamForHunter, whose formats bbsc_gameserver.py takes. bbhost_service.py is written from bbhost's client source (github.com/droogie/bbhost, GPL-3.0-or-later per FORK.md) and has no licence line; kb #843 records it as GPL-3.0 and a separate program, NOTICE.txt says GPL-2.0-or-later. Needed: the owner's decision on which terms bbhost_service.py carries."
+    },
+    {
+      "name": "Bloodborne game patches",
+      "paths": [
+        "patches"
+      ],
+      "license": "LicenseRef-game-patch-authors",
+      "review": "pending",
+      "provenance": "patches/Bloodborne.xml, from the community (README.md: Kyo, Lance McDonald, auser1337, illusion, emoose and others; the Author= attributes name a dozen people). No licence or permission to redistribute is stated in the repository. Needed: each author's terms, or the patch collection's source."
+    },
+    {
+      "name": "dxil-spirv patch",
+      "paths": [
+        "tools/fsr4cap/dxil-spirv-class-bindings.patch"
+      ],
+      "license": "LicenseRef-dxil-spirv-patch",
+      "review": "pending",
+      "provenance": "Applied by packaging/default.nix to https://github.com/HansKristian-Work/dxil-spirv, fetched at build time and not distributed. README.md says MIT; no licence file of it is in the repository."
+    },
+    {
+      "name": "FFmpeg recipe for the Windows package",
+      "paths": [
+        "packaging/windows/ffmpeg"
+      ],
+      "license": "LicenseRef-msys2-pkgbuild",
+      "review": "pending",
+      "provenance": "PKGBUILD derived from MSYS2's mingw-w64-ffmpeg; the FFmpeg it builds is LGPL-2.1-or-later (no GPL, version3 or nonfree, checked in the build). keys/pgp holds FFmpeg's public release signing key. Needed: the licence of MSYS2's MINGW-packages recipes."
+    },
+    {
+      "name": "psport documentation",
+      "paths": [
+        "docs",
+        "README.md",
+        "README.es.md",
+        "README.ru.md",
+        "CHANGELOG.md",
+        "FORK.md",
+        "tag-changelog"
+      ],
+      "license": "GPL-2.0-or-later",
+      "review": "pending",
+      "provenance": "Written for this repository, except docs/en/history and docs/ru, which are bbport's notes and change logs (bbport is GPL-2.0-or-later). No file states a licence for the documentation; GPL-2.0-or-later is assumed until the owner decides."
+    },
+    {
+      "name": "Libraries linked into the bundles",
+      "paths": [
+        "packaging/licences.nix",
+        "packaging/licences.py",
+        "tools/bundle.sh",
+        "tools/win32-bundle.sh",
+        "tools/check_bundle_licences.sh"
+      ],
+      "license": "LicenseRef-Bundled-Libraries",
+      "review": "generated",
+      "provenance": "Not in the tree. The Linux bundle's THIRD-PARTY-NOTICES and SOURCES.txt come from packaging/licences.nix and licences.py; the Windows bundle's from tools/win32-bundle.sh (THIRD-PARTY-NOTICES.txt, SOURCES.txt, BUILD-INFO.txt). FFmpeg is built as LGPL-2.1-or-later (shell.nix; packaging/windows/ffmpeg). Also compiled in or fetched at build time: Boost, magic_enum (v0.9.7), robin-map, Vulkan Memory Allocator, Vulkan-Headers (Apache-2.0 OR MIT, used under the MIT), Zydis, miniz (3.1.2)."
+    }
+  ]
+}
