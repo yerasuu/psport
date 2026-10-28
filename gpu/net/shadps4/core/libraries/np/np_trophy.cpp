@@ -286,13 +286,15 @@ s32 PS4_SYSV_ABI sceNpTrophyDestroyHandle(OrbisNpTrophyHandle handle) {
     return ORBIS_OK;
 }
 
-u64 ReadFile(Common::FS::IOFile& file, void* buf, u64 nbytes) {
+/// psport: false when the host reads less than the file holds up to nbytes (IOFile logs its errno).
+bool ReadFile(Common::FS::IOFile& file, void* buf, u64 nbytes) {
     const auto* memory = Core::Memory::Instance();
     // Invalidate up to the actual number of bytes that could be read.
     const auto remaining = file.GetSize() - file.Tell();
-    memory->InvalidateMemory(reinterpret_cast<VAddr>(buf), std::min<u64>(nbytes, remaining));
+    const auto cb_expected = std::min<u64>(nbytes, remaining);
+    memory->InvalidateMemory(reinterpret_cast<VAddr>(buf), cb_expected);
 
-    return file.ReadRaw<u8>(buf, nbytes);
+    return file.ReadRaw<u8>(buf, nbytes) >= cb_expected;
 }
 
 int PS4_SYSV_ABI sceNpTrophyGetGameIcon(OrbisNpTrophyContext context, OrbisNpTrophyHandle handle,
@@ -321,7 +323,11 @@ int PS4_SYSV_ABI sceNpTrophyGetGameIcon(OrbisNpTrophyContext context, OrbisNpTro
     u64 icon_size = icon.GetSize();
 
     if (buffer != nullptr) {
-        ReadFile(icon, buffer, *size);
+        if (!ReadFile(icon, buffer, *size)) {
+            LOG_ERROR_COUNTED(Lib_NpTrophy, "Failed to read trophy icon file: {}",
+                              icon_file.string());
+            return ORBIS_NP_TROPHY_ERROR_ICON_FILE_NOT_FOUND;
+        }
     } else {
         *size = icon_size;
     }
@@ -633,7 +639,10 @@ int PS4_SYSV_ABI sceNpTrophyGetTrophyIcon(OrbisNpTrophyContext context, OrbisNpT
     }
 
     if (buffer != nullptr) {
-        ReadFile(icon, buffer, *size);
+        if (!ReadFile(icon, buffer, *size)) {
+            LOG_ERROR_COUNTED(Lib_NpTrophy, "Failed to read trophy icon: {}", icon_path.string());
+            return ORBIS_NP_TROPHY_ERROR_ICON_FILE_NOT_FOUND;
+        }
     } else {
         *size = icon.GetSize();
     }

@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: Copyright 2021 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <cerrno>
 #include <vector>
 
 #include "common/alignment.h"
-#include "common/assert.h"
 #include "common/error.h"
 #include "common/io_file.h"
 #include "common/logging/log.h"
@@ -126,6 +126,7 @@ namespace {
 
 #endif
 
+/// psport: -1 for a value outside the enum, which Seek refuses.
 [[nodiscard]] constexpr int ToSeekOrigin(SeekOrigin origin) {
     switch (origin) {
     case SeekOrigin::SetOrigin:
@@ -135,7 +136,7 @@ namespace {
     case SeekOrigin::End:
         return SEEK_END;
     default:
-        UNREACHABLE_MSG("Impossible SeekOrigin {}", static_cast<u32>(origin));
+        return -1;
     }
 }
 
@@ -274,12 +275,30 @@ uintptr_t IOFile::GetFileMapping() {
     }
 
     file_mapping = std::bit_cast<uintptr_t>(mapping);
-    ASSERT_MSG(file_mapping, "{}", Common::GetLastErrorMsg());
+    if (!file_mapping) {
+        LOG_ERROR_COUNTED(Common_Filesystem, "Failed to map the file at path={}: {}",
+                          PathToUTF8String(file_path), Common::GetLastErrorMsg());
+    }
     return file_mapping;
 #else
     file_mapping = fileno(file);
     return file_mapping;
 #endif
+}
+
+void IOFile::ReportStreamError(bool is_write) const {
+    const int error = errno;
+    std::clearerr(file);
+    const auto ec = std::error_code{error, std::generic_category()};
+    if (is_write) {
+        LOG_ERROR_COUNTED(Common_Filesystem,
+                          "Failed to write the file at path={}, errno={}, ec_message={}",
+                          PathToUTF8String(file_path), error, ec.message());
+    } else {
+        LOG_ERROR_COUNTED(Common_Filesystem,
+                          "Failed to read the file at path={}, errno={}, ec_message={}",
+                          PathToUTF8String(file_path), error, ec.message());
+    }
 }
 
 std::string IOFile::ReadString(size_t length) const {
@@ -383,9 +402,17 @@ bool IOFile::Seek(s64 offset, SeekOrigin origin) const {
         return false;
     }
 
+    const int whence = ToSeekOrigin(origin);
+    if (whence < 0) {
+        LOG_ERROR_COUNTED(Common_Filesystem,
+                          "Failed to seek the file at path={}: unknown origin {}",
+                          PathToUTF8String(file_path), static_cast<u32>(origin));
+        return false;
+    }
+
     errno = 0;
 
-    const auto seek_result = fseeko(file, offset, ToSeekOrigin(origin)) == 0;
+    const auto seek_result = fseeko(file, offset, whence) == 0;
 
     if (!seek_result) {
         const auto ec = std::error_code{errno, std::generic_category()};

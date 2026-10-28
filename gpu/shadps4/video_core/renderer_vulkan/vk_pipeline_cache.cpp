@@ -1618,7 +1618,11 @@ std::optional<std::vector<u32>> PipelineCache::GetShaderPatch(u64 hash, Shader::
     }
     const auto file = IOFile{patch_dir / filename, FileAccessMode::Read};
     std::vector<u32> code(file.GetSize() / sizeof(u32));
-    file.Read(code);
+    if (const auto c_read = file.Read(code); c_read != code.size()) {
+        LOG_ERROR_COUNTED(Render_Vulkan, "Shader patch {} read short ({} of {} words), not applied",
+                          filepath.string(), c_read, code.size());
+        return {};
+    }
     return code;
 }
 } // namespace Vulkan

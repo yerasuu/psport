@@ -113,7 +113,8 @@ void ProcessIO(const std::stop_token& stoken) {
     }
 }
 
-constexpr std::string GetBlobFileExtension(BlobType type) {
+/// psport: empty for a type outside the enum, which the callers treat as a blob that is absent.
+std::string_view GetBlobFileExtension(BlobType type) {
     switch (type) {
     case BlobType::ShaderMeta: {
         return "meta";
@@ -128,7 +129,9 @@ constexpr std::string GetBlobFileExtension(BlobType type) {
         return "bin";
     }
     default:
-        UNREACHABLE();
+        LOG_ERROR_COUNTED(Render, "Pipeline cache: unknown blob type {} (taken as absent)",
+                          static_cast<u32>(type));
+        return {};
     }
 }
 
@@ -214,7 +217,11 @@ void DataBase::Close() {
 
 template <typename T>
 bool WriteVector(const BlobType type, std::filesystem::path&& path, std::vector<T>&& v) {
-    path.replace_extension(GetBlobFileExtension(type));
+    const auto ext = GetBlobFileExtension(type);
+    if (ext.empty()) {
+        return false;
+    }
+    path.replace_extension(ext);
     BlobWrite write{std::move(path), {}};
     if constexpr (std::is_same_v<T, u8>) {
         write.bytes = std::move(v);
@@ -275,7 +282,11 @@ void DataBase::FlushForExit() {
 template <typename T>
 void LoadVector(BlobType type, std::filesystem::path& path, std::vector<T>& v) {
     using namespace Common::FS;
-    path.replace_extension(GetBlobFileExtension(type));
+    const auto ext = GetBlobFileExtension(type);
+    if (ext.empty()) {
+        return;
+    }
+    path.replace_extension(ext);
     if (EmulatorSettings.IsPipelineCacheArchived()) {
         if (!s_has_zip_reader) {
             return;
@@ -293,7 +304,12 @@ void LoadVector(BlobType type, std::filesystem::path& path, std::vector<T>& v) {
     } else {
         const auto file = IOFile{path, FileAccessMode::Read};
         v.resize(file.GetSize() / sizeof(T));
-        file.Read(v);
+        // psport: a blob the host cannot read whole is absent, so the shader is compiled again.
+        if (const auto c_read = file.Read(v); c_read != v.size()) {
+            LOG_ERROR_COUNTED(Render, "Pipeline cache: {} read short ({} of {} elements), absent",
+                              path.string(), c_read, v.size());
+            v.clear();
+        }
     }
 }
 
@@ -338,7 +354,10 @@ void DataBase::Load(BlobType type, const std::string& name, std::vector<u32>& da
 }
 
 void DataBase::ForEachBlob(BlobType type, const std::function<void(std::vector<u8>&& data)>& func) {
-    const auto& ext = GetBlobFileExtension(type);
+    const auto ext = GetBlobFileExtension(type);
+    if (ext.empty()) {
+        return;
+    }
     if (EmulatorSettings.IsPipelineCacheArchived()) {
         const auto num_files = s_has_zip_reader ? mz_zip_reader_get_num_files(&s_zip_reader) : 0;
         for (int index = 0; index < num_files; ++index) {
@@ -361,7 +380,12 @@ void DataBase::ForEachBlob(BlobType type, const std::function<void(std::vector<u
                 const auto& file = IOFile{file_name, FileAccessMode::Read};
                 if (file.IsOpen()) {
                     std::vector<u8> data(file.GetSize());
-                    file.Read(data);
+                    if (const auto cb_read = file.Read(data); cb_read != data.size()) {
+                        LOG_ERROR_COUNTED(Render,
+                                          "Pipeline cache: {} read short ({} of {} bytes), absent",
+                                          file_name.path().string(), cb_read, data.size());
+                        continue;
+                    }
                     func(std::move(data));
                 }
             }

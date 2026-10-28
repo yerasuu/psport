@@ -9,8 +9,8 @@
 #include <vector>
 
 #include <map>
-#include "assert.h"
 #include "bit_field.h"
+#include "common/logging/log.h"
 #include "singleton.h"
 #include "types.h"
 
@@ -78,6 +78,13 @@ class ElfInfo {
     std::vector<std::string> npCommIds{};
     std::map<s32, std::string> trophy_index_map{};
 
+    /// psport: read before the port fills it, the title's info is empty and its versions 0.
+    void NoteIfUninitialized() const {
+        if (!initialized) [[unlikely]] {
+            LOG_ERROR_COUNTED(Loader, "ElfInfo read before the title's info was filled (empty)");
+        }
+    }
+
 public:
     static constexpr u32 FW_100 = 0x1000000;
     static constexpr u32 FW_150 = 0x1500000;
@@ -104,37 +111,37 @@ public:
     }
 
     [[nodiscard]] std::string_view GameSerial() const {
-        ASSERT(initialized);
+        NoteIfUninitialized();
         return Instance().game_serial;
     }
 
     [[nodiscard]] std::string_view Title() const {
-        ASSERT(initialized);
+        NoteIfUninitialized();
         return title;
     }
 
     [[nodiscard]] std::string_view AppVer() const {
-        ASSERT(initialized);
+        NoteIfUninitialized();
         return app_ver;
     }
 
     [[nodiscard]] u32 FirmwareVer() const {
-        ASSERT(initialized);
+        NoteIfUninitialized();
         return firmware_ver;
     }
 
     [[nodiscard]] u32 RawFirmwareVer() const {
-        ASSERT(initialized);
+        NoteIfUninitialized();
         return raw_firmware_ver;
     }
 
     [[nodiscard]] u32 CompiledSdkVer() const {
-        ASSERT(initialized);
+        NoteIfUninitialized();
         return sdk_ver;
     }
 
     [[nodiscard]] const PSFAttributes& GetPSFAttributes() const {
-        ASSERT(initialized);
+        NoteIfUninitialized();
         return psf_attributes;
     }
 

@@ -8,7 +8,6 @@
 #include <span>
 #include <type_traits>
 
-#include "common/assert.h"
 #include "common/concepts.h"
 #include "common/types.h"
 #include "enum.h"
@@ -170,7 +169,9 @@ public:
     template <typename T>
     size_t ReadRaw(void* data, size_t size) const {
         u64 read = std::fread(data, sizeof(T), size, file);
-        ASSERT_MSG(std::ferror(file) == 0, "Failed to read file, error = {}", std::strerror(errno));
+        if (std::ferror(file) != 0) [[unlikely]] {
+            ReportStreamError(false);
+        }
         return read;
     }
 
@@ -183,8 +184,9 @@ public:
         }
 
         u64 written = std::fwrite(data.data(), sizeof(T), data.size(), file);
-        ASSERT_MSG(std::ferror(file) == 0, "Failed to write to file, error = {}",
-                   std::strerror(errno));
+        if (std::ferror(file) != 0) [[unlikely]] {
+            ReportStreamError(true);
+        }
         std::fflush(file);
         return written;
     }
@@ -199,15 +201,18 @@ public:
         }
 
         bool success = std::fread(&object, sizeof(T), 1, file) == 1;
-        ASSERT_MSG(std::ferror(file) == 0, "Failed to read file, error = {}", std::strerror(errno));
+        if (std::ferror(file) != 0) [[unlikely]] {
+            ReportStreamError(false);
+        }
         return success;
     }
 
     template <typename T>
     size_t WriteRaw(const void* data, size_t size) const {
         u64 bytes = std::fwrite(data, sizeof(T), size, file);
-        ASSERT_MSG(std::ferror(file) == 0, "Failed to write to file, error = {}",
-                   std::strerror(errno));
+        if (std::ferror(file) != 0) [[unlikely]] {
+            ReportStreamError(true);
+        }
         std::fflush(file);
         return bytes;
     }
@@ -222,7 +227,9 @@ public:
         }
 
         u64 bytes = std::fwrite(&object, sizeof(T), 1, file) == 1;
-        ASSERT_MSG(std::ferror(file) == 0, "Failed to read file, error = {}", std::strerror(errno));
+        if (std::ferror(file) != 0) [[unlikely]] {
+            ReportStreamError(true);
+        }
         std::fflush(file);
         return bytes;
     }
@@ -240,6 +247,10 @@ public:
     std::FILE* file = nullptr;
 
 private:
+    /// psport: logs and counts a host read or write error with its errno and clears the stream's
+    /// error flag, so the caller sees only the short count and the next call is judged alone.
+    void ReportStreamError(bool is_write) const;
+
     std::filesystem::path file_path;
     FileAccessMode file_access_mode{};
     FileType file_type{};
