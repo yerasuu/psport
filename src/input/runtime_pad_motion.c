@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Motion for controllers without sensors. Some games read the DualShock 4's sensors: one asks to
  * hold the controller sideways like a spray can, shake it and aim by tilting it, others to swipe
  * the touchpad. Keyboard and mouse:

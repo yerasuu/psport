@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* libSceVoice on a console with no microphone and no remote talker: ports and the graph that
  * connects them behave as on the console, an input device captures silence and an output port
  * never has anything to read. Error codes follow the 0x804E08xx family (ARGUMENT_INVALID is

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* libkernel barriers behind the PS4 pointer-to-handle ABI. Waiters sleep on one condition per
  * barrier; a generation count tells a released waiter from one woken early to take a guest
  * exception. */

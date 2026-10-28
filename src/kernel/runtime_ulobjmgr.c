@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* ulobjmgr: where libSceUlt registers its user-level objects. Contracts as shadPS4's
  * (core/libraries/ulobjmgr): a registered object gets an id below 0x4000; nothing here tracks
  * the objects themselves, as nothing else asks about them. */

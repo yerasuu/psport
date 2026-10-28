@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* The quirk registry's entries (docs/en/QUIRKS.md), expanded by runtime_quirks.h and
  * runtime_quirks.c, which define each macro before including this file:
  *

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* libSceSystemGesture: touch pad gesture recognizers. The primitive touch recognizer follows the
  * firmware (kb #689): every touch the title's pad reports carry becomes a primitive that begins,
  * stays active while its id is reported, and ends or is cancelled. The touch recognizers (tap, drag,

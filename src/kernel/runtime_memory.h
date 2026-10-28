@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Shared by the runtime_memory*.c files: the region table and its lock, the direct and flexible
  * memory backing, and the queued GPU notifications. Hidden, so that the host libraries the binary
  * exports its symbols to (-rdynamic) never bind to these. */

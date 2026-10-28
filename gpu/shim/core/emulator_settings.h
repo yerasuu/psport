@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // psport: shadPS4 settings used by the video core, read once from PS_* environment
 // variables (defaults match shadPS4 except the pipeline cache, which is on).
 #pragma once

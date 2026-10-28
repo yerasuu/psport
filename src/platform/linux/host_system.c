@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Linux: randomness, the executable's path, the machine's name and the environment (ps_host.h). */
 #define _GNU_SOURCE
 #include "ps_host.h"

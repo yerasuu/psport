@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* The game's trophy pack (sce_sys/trophy/trophy<label>.trp), as libSceNpTrophy (runtime_trophy.c)
  * reads it: the TRP container (runtime_trophy_pack.c) and the trophy configuration and names in its
  * SFM files (runtime_trophy_sfm.c). */

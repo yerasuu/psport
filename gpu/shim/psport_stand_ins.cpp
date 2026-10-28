@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // psport: stand-ins for the shadPS4 parts the port replaces (memory manager, address space,
 // kernel services and RenderDoc hooks), over the C runtime.
 #include <algorithm>

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Trophy SFM files (TROPCONF.SFM, TROP.SFM, TROP_<language>.SFM): a signature comment and an XML
  * trophyconf document. Only the elements libSceNpTrophy reports are read: npcommid, title-name,
  * title-detail, group and trophy with their name and detail. */

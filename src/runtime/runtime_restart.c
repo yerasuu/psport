@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* The process starting again on itself: the settings menu's restart through run.sh, and
  * sceSystemServiceLoadExec on psport's own command line. */
 #define _GNU_SOURCE

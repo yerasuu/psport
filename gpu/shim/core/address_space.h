@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // psport: address-space operations the video core needs, backed by the C
 // runtime's VMA table (runtime_memory.c).
 #pragma once

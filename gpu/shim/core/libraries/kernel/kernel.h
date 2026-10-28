@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // psport: the parts of shadPS4's kernel.h used by vendored libraries.
 #pragma once
 #include "common/types.h"

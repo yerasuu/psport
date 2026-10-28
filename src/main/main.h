@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* What the launch's parts share: main.c maps the image and binds its imports (bind.c), the import
  * traps and the fault handlers (signals.c) read it, and game_info.c and cli.c answer for the game. */
 #ifndef MAIN_H

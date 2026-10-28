@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Scripted pad input for automated runs: PS_PAD_FILE, PS_PAD_RECORD and PS_PAD_REPLAY. */
 #define _GNU_SOURCE
 #include "runtime.h"

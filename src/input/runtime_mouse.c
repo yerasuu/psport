@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* libSceMouse on the host mouse. The host's events are pumped by the window thread (gpu/shim/window.cpp);
  * here they are only collected. Every game that opens a mouse port gets the host mouse: port index
  * 0 (or a merged port) reports it whenever the host has one, the other index never has a mouse.

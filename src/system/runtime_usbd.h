@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 #ifndef PS_RUNTIME_USBD_H
 #define PS_RUNTIME_USBD_H
 /* libSceUsbd (the SDK's libusb) as both runtime_devices.c, with no device plugged in, and the

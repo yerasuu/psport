@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* libSceJson's text side: sce::Json::Parser::parse (RFC 8259) and Value::serialize. */
 #define _GNU_SOURCE
 #include "runtime_json.h"

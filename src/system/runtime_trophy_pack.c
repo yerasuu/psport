@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* TRP containers: a big-endian header (magic 0xDCA24D00, version, file size, entry count and size)
  * and a table of named entries. The icons are plain PNG; the SFM files are XML, or ESFM when the
  * console's trophy key encrypts them, as in every retail pack: the port has no key, so it reads such a

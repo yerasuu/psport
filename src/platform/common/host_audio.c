@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* ps_host_audio.h on SDL3 audio streams, the same on Linux and Windows. SDL's channel orders are the
  * contract's. */
 #include "ps_host_audio.h"

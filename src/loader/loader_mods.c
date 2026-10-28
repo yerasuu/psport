@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Loose-file mods: the game folder is loaded through a private view of links, the game's entries
  * with the enabled mods' files linked over them, so neither the game nor the mods are written.
  * A mod replaces or adds files under dvdroot_ps4; the executable and the system folders stay the

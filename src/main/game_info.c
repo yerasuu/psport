@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* What psport knows of the game from its folder or its title: param.sfo, its title's patch file,
  * its external patch folder and its mods' rules. */
 #define _GNU_SOURCE

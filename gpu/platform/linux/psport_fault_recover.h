@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // psport: the recovery point of speculative guest memory reads on this thread, on Linux: the
 // runtime's thread-local, read directly (runtime_memory_gpu.c).
 #pragma once

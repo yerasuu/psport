@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* The quirk registry's evaluation (docs/en/QUIRKS.md): PS_QUIRKS, the policy per kind, the log
  * lines, the published bitset, the exit summary and psport --list-quirks. */
 #define _GNU_SOURCE

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* ps_host_input.h on SDL3, the same on Linux and Windows. The contract's codes are SDL's own values
  * (checked below), so keys, buttons and types pass through unchanged. */
 #include "ps_host_input.h"

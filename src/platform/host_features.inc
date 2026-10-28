@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* The host capability table (decision #540, docs/en/ARCHITECTURE.md), expanded by ps_host.h and
  * host_features.c, which define each macro before including this file:
  *

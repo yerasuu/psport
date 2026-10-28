@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* psport.ini and the PS_* environment, read through one place. The file is read once, on first
  * use, and kept as its key=value lines in file order, duplicates included: a reader that applies
  * every line (the settings menu's Set, the controls) sees what it saw reading the file itself, and

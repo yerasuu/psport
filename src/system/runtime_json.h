@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* libSceJson's sce::Json classes as the C++ ABI of the games sees them. The SDK's objects are bigger
  * than these (Value 0x20 bytes, String, Object and Array 8, Initializer at most 4, as NpCppWebApi and
  * the eboots that link it lay them out), so each one fits in the storage a caller gives it. Elements

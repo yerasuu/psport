@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Windows: guest memory shared with the GPU API (ps_host_gpu_memory.h): ranges of the direct memory section's
  * views imported in place. No exported allocation is taken (adopt answers EOPNOTSUPP), since whether a
  * Win32 handle the API exports maps on the CPU is not measured on a Windows driver yet. */

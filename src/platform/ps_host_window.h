@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* The game's window (decision #1009, phase 2b): one window on a display of the host, the events that
  * reach it, the pointer over it and text entry into it. The window thread (gpu/port/psport_gpu.cpp)
  * starts the host's windowing, creates the window and pumps its events; the calls are made on that

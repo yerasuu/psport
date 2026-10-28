@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Scheduling parameters and names of guest threads, over the entry points of runtime_thread.c:
  * their checks decide whether a handle is a live thread. Nothing enforces PS4 scheduling, so a
  * policy is only kept to be reported back. */

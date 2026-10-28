@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Linux: faults, thread interrupts and the signals behind them (ps_host.h). */
 #define _GNU_SOURCE
 #include "ps_host.h"

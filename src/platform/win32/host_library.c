@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Windows: host libraries and code addresses (ps_host.h). */
 #include "ps_host.h"
 #include "host_win32.h"

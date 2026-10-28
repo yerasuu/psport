@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* libSceHttp and libSceHttp2 on an unplugged console (decision #207): templates, connections and
  * requests are created and tracked so setup code proceeds; any transfer fails as unplugged, so no
  * response, header, redirect or TLS handshake ever arrives. The URI and header parsers work on the

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* The XML reader for shadPS4/GoldHEN patch files (loader_patches.c): elements, attributes and the
  * text before an element's first child, with errors worded and placed as expat reports them. */
 #ifndef LOADER_XML_H

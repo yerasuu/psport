@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Patches to the game's executable in shadPS4/GoldHEN's XML format: <Metadata Name AppVer AppElf
  * isEnabled> entries with <Line Type Address Value> writes, in files whose <ID>s name the titles
  * they are for. Literal writes only (bytes, bytes16/32/64, float32/64, utf8, utf16); pattern

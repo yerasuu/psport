@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* The middleware a game is built with, read from its files without running any of its code: the
  * eboot's module and library names, the file names of the modules it ships, its data files'
  * names and extensions. Informational for now; the quirk registry will select entries by them. */

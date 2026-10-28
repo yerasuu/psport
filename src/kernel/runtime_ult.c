@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* libSceUlt: user-level threads. The console switches its user-level threads on a runtime's worker
  * threads in user space; here each one runs on a host thread of its own and the runtime's worker
  * count is a set of slots: a user-level thread holds one while it runs and gives it up while it

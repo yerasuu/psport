@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* The host capability table's evaluation (host_features.inc): this host's state per feature, the
  * run-time probes' answers, the startup line, the exit summary and psport --list-features. */
 #include "ps_host.h"

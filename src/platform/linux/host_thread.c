@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Linux: thread ids, names, stacks and scheduling, address waits and the guest's thread pointer
  * (ps_host.h). */
 #define _GNU_SOURCE

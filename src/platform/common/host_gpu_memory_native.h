@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* What common/host_gpu_memory.c asks of src/platform/<os>/host_gpu_memory.c: the native half of an exported
  * share, which only the OS knows how to view and close. Reached only for the export kinds
  * ps_host_gpu_memory_kinds names. */

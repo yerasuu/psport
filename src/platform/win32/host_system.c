@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Windows: randomness, the executable's path, the machine's name and the environment (ps_host.h). */
 #include "ps_host.h"
 #include "host_win32.h"

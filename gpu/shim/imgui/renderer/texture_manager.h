@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // psport: no ImGui overlay in the port; hooks used by the renderer are no-ops.
 #pragma once
 #include "video_core/renderer_vulkan/vk_common.h"

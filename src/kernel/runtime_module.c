@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* libkernel module services over what the loader prelinked (src/loader/loader_link.c). Modules the game loads by path
  * (Unity's Media/Modules, Media/Plugins) are already in the image, relocated and bound; loading
  * one runs its initializer once, as the PS4 linker's module_start. Handles are table indices

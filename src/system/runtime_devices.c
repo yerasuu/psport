@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Peripherals a console without them answers for: no USB device is plugged in (libSceUsbd, the
  * SDK's libusb) unless the emulated toy pad is (runtime_toypad.c, whose exports come first), and no
  * PlayStation Camera is attached. The libraries run; device lists are empty and anything that needs

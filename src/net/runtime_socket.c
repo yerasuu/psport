@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* libSceNet and POSIX sockets offline, as on a console with its cable unplugged: sockets, binds and traffic
  * over the loopback interface work (host sockets bound to 127.0.0.1), anything addressed beyond it
  * is unreachable. Game libraries that open their sockets at startup (Demonware's bdNet) need that

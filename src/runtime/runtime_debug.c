@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Debug mode (PS_DEBUG=1 or psport.ini debug=1, decision #620): a run's logs in one folder,
  * <PS_DEBUG_DIR>/<host>/<YYYYmmdd-HHMMSS>-<serial>/, which a file synchroniser copies between
  * machines. Each file is written as <name>.partial and renamed once nothing writes it any more;

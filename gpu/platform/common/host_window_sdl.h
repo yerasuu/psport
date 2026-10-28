@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // psport: what the shared SDL3 window backend (host_window.cpp) and each OS's surface part
 // (gpu/platform/<os>/host_window_surface.cpp) share, inside the platform layer.
 #pragma once

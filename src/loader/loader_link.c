@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Links the eboot with the modules it needs into one image, as one table of imports: the game's
  * bundled modules (libc.prx and libSceFios2.prx always, the others of sce_module once something
  * linked imports their library), the user's system modules (--system-modules, never shipped)

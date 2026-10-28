@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Linux: folder listings, descriptors, exec and the output helper (ps_host.h). */
 #define _GNU_SOURCE
 #include "ps_host.h"

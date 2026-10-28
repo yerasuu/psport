@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Windows: Win32 errors as errno values and UTF-8 conversions (host_win32.h). */
 #include "host_win32.h"
 #include <errno.h>

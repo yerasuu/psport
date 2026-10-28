@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* The host platform layer (decision #540): what psport asks of the operating system, behind one
  * small C ABI with an implementation per OS in src/platform/<os>/ (src/platform/common/ when it is
  * the same on every OS that builds it), so that the runtime and the loader name what they need

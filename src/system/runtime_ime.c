@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* libSceIme's on-screen keyboard over the port's text entry: the game window takes the host
  * keyboard's typing or the controller's on the overlay's keyboard, which draws the panel, as for
  * the IME dialog. sceImeUpdate (runtime_keyboard.c) hands the game's handler the open event, the

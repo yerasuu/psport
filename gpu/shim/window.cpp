@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // psport: the game window for the Vulkan swapchain, on the platform layer's (ps_host_window.h).
 #include <array>
 #include <atomic>

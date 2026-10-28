@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Online play (PS_ONLINE=1): the game's network and PSN imports go to the online module
  * (gpu/net: libpsport-net.so beside libpsport-gpu.so), loaded here on the first such import. Offline,
  * or when the module is missing or fails to start, they stay with the runtime's offline

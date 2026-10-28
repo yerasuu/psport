@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* PSN libraries offline: NpWebApi and NpWebApi2, NpInGameMessage, libSceNet's and libSceSsl's
  * initialization with libSceNpManager's network start, the memory pool statistics of Net/Ssl/Http/WebApi, libSceSsl's certificate calls,
  * NpGameIntent, the PS Store icon and the NpManager/NpAuth calls the toolkits make. Score, Tus/Tss,

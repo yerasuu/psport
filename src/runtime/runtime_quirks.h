@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* The quirk registry (runtime_quirks.inc, docs/en/QUIRKS.md): fixes that concern one title, one
  * host or one middleware, declared once, evaluated before the game's code runs and published as a
  * bitset. Included from C and C++ (libpsport-gpu.so reads g_runtime_quirks through -rdynamic). */

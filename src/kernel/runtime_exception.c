@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* libkernel exception handlers (libkernel_unity): the guest's handler runs on the target thread,
  * on that thread's own stack, with a FreeBSD ucontext of the interrupted registers. Unity's
  * IL2CPP garbage collector suspends each thread this way (sceKernelRaiseException with SIGUSR1)

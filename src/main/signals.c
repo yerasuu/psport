@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Fault, watchdog and termination signal handlers: what the log shows when the process stops. */
 #include <errno.h>
 #include <stdint.h>

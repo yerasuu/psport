@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* libSceNpTrophy over the game's trophy pack (runtime_trophy.h) and a per-user unlock state kept in
  * the user directory:
  *   <user>/trophy/<NP communication id>/unlocks_<user id>.tsv  id, unlocked, unlock time (UTC)

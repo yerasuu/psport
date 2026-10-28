@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Windows: faults through a vectored exception handler, thread interrupts by redirecting the
  * suspended thread, and the recovery points' own setjmp and longjmp (ps_host.h). Ported by hand from
  * bbport 0.6-pre1 (gpu/platform/win32/posix_win32.cpp: the handler, bb_setjmp and bb_longjmp) and

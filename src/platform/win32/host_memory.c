@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Windows: mappings, sections and the process's list of mappings (ps_host.h).
  *
  * The guest's arena (ps_host_vm_reserve_arena) is one placeholder reservation that REPLACE and

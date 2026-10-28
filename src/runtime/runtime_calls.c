@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Calls the game makes that nothing answers for real, or that fail or report a polled state: each
  * kind logged once per import (and error code) with its first arguments, every call counted, and the
  * counts summed up when the process ends. Writes go straight to the descriptors so the report can

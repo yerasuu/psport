@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* The game window's Vulkan surface (decision #1009, phase 2b): the renderer creates its instance and
  * surface from the opaque PsHostWindowSurface that ps_host_window_surface hands out, and never names a
  * window system. Which ones an OS presents to, and how, is gpu/platform/<os>/'s (Xlib and Wayland on

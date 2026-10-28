@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // psport: the game window's surface on Windows: SDL3's Win32 window, presented to through
 // VK_KHR_win32_surface.
 #include <cerrno>

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Audio output to the host (decision #1009, phase 1b): libSceAudioOut's ports as streams to the host's
  * default playback device. A stream takes interleaved frames at a fixed format, channel count and rate,
  * queues what it is given and plays it on the host's own audio thread; libSceAudioOut paces and steers

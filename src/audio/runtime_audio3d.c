@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* libSceAudio3d: ports that queue bed and object frames of `granularity`
  * samples. sceAudio3dPortAdvance mixes the head of each queue into one frame
  * and sceAudio3dPortPush sends the mixed frames, once the port's queue is full,

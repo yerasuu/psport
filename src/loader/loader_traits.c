@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Middleware traits from the game's files. Each rule names what its engine or library leaves in
  * every build: module names its toolchain gives, file names and extensions its runtime opens. Data
  * that only some titles use the same way stays out, so a trait is never guessed from one game. */

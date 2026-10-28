@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* NID -> function name and the result with which the export reports a state its caller polls or
  * waits for (no event pending, timed out, woken by an abort, busy, would block, already held by the
  * caller), a getter's "never set", a memory query's "nothing mapped or allocated there" (EACCES, as

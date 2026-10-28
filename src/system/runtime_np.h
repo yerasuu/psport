@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* PSN libraries on an unplugged console, signed out (decision #207): contexts, handles, requests and
  * callbacks are created and tracked locally; whatever needs the PSN servers fails with the
  * library's not-signed-in or network error. */

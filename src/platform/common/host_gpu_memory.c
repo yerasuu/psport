@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Guest memory shared with the GPU API (ps_host_gpu_memory.h): shares, ranges and their counts, one
  * definition for every OS; src/platform/<os>/host_gpu_memory.c maps and closes what the API exports. */
 #define _GNU_SOURCE

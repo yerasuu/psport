@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* The identity of a game's executable: the SHA-256 of eboot.bin's loadable segments placed at their
  * addresses. It is the same whatever tool dumped the game, since the SELF headers around the
  * segments, which differ between dumpers, are left out. */

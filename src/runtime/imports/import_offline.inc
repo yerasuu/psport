@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* NID -> function name and the result an import gives only because the console has no connection
  * (psport runs as an unplugged, signed-out console), so the call report lists it as `offline`
  * instead of `failed` or `stub`: still counted and named, never hidden. A result the status table

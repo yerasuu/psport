@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // psport: shadPS4's frame/register dump tooling is not part of this port.
 #pragma once
 #include <span>

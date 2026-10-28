@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Linux: guest memory shared with the GPU API (ps_host_gpu_memory.h): exported dma-buf descriptors mapped with
  * mmap and closed, ranges of the memfd's views imported in place. */
 #define _GNU_SOURCE

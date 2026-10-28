@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Guest memory shared with the GPU API (decision #1009, phase 2c, #1017): only how the host makes a range
  * of the guest's direct memory and a GPU allocation alias. Which memory type and placement the GPU library
  * picks, and whether the device is unified memory, come from the API's own properties, the same on every OS,

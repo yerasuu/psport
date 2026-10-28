@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* The environment's reader: the same on every OS (ps_host.h); the setter differs (host_system.c). */
 #define _GNU_SOURCE
 #include "ps_host.h"

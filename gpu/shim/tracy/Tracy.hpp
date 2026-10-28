@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // psport: Tracy's client (third_party/tracy) with PS_TRACY=ON; otherwise its macros compile to
 // nothing.
 #pragma once

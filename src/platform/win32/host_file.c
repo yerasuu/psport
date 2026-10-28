@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Windows: files and folders on Win32 handles, behind psport's int descriptors (ps_host.h). */
 #include "ps_host.h"
 #include "host_win32.h"

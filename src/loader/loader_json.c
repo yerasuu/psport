@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* The launchers' selection files (mods.json, patches.json): a JSON object whose members of interest
  * are arrays of strings. Read here rather than with the runtime's libSceJson, whose state and
  * diagnostics belong to the game. */

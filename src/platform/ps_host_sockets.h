@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* The host's BSD socket calls and constants (bind, listen, getsockname, setsockopt, AF_INET,
  * SO_*, inet_pton...), which Linux and Winsock 2 spell alike; what differs is ps_host_net_* in
  * ps_host.h. */

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // psport: ps_host_window.h on SDL3, the same on Linux and Windows. The contract's keycodes are SDL's
 // own values (checked below), as ps_host_input.h's keys, buttons and modifiers are, so they pass
 // through unchanged.

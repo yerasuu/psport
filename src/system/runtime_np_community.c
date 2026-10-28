@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* PSN community services offline: NpScore and NpTus/Tss title contexts need the signed-in user, so
  * they are refused; requests are local objects and every query or update fails signed out, as the
  * Score calls in runtime_services.c do. NpUtility's WordFilter and BandwidthTest, and the

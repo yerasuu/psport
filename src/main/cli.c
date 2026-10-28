@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* The command line's other uses: the BB_* names of older launchers, and the questions a launcher
  * asks about a game, answered before any game is loaded. */
 #define _GNU_SOURCE

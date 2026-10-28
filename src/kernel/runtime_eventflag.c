@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Kernel event flags: a 64-bit pattern that threads wait on for all (AND) or any (OR) of a set
  * of bits, optionally clearing them when the wait is satisfied. The handle is a 64-bit value the
  * guest only passes back. Waiters are woken together and each re-checks its condition, so the

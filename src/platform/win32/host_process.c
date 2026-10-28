@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Windows: folder listings, exec as a new process and the output helper (ps_host.h). */
 #include "ps_host.h"
 #include "host_win32.h"

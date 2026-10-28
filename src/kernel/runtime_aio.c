@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* libkernel asynchronous file I/O: each submission (one id) keeps the commands copied in when it
  * was submitted and runs on the runtime's I/O workers, higher priority first, writing every
  * command's result as it completes. An id stays valid until the game deletes it. */

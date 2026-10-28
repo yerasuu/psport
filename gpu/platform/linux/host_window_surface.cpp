@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // psport: the game window's surface on Linux: SDL3's X11 or Wayland window, presented to through
 // VK_KHR_xlib_surface or VK_KHR_wayland_surface.
 #include <cerrno>

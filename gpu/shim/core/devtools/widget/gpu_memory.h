@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // psport: devtools GPU memory viewer is not part of the port.
 #pragma once
 #include <string>

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* libScePad on the host's gamepads and keyboard (ps_host_input.h). The host's events are pumped by
  * the window thread (gpu/shim/window.cpp); here state is only sampled.
  *

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* The glibc and POSIX calls psport's generic code uses that MinGW's C runtime (UCRT with winpthreads)
  * lacks, force-included into every runtime source by the Windows build (-include), so that the
  * generic code keeps one spelling for both. Only C library gaps belong here; what is the operating

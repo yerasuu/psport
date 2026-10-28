@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* PS4 virtual memory: the region table and the storage behind direct (physical) and flexible
  * memory (the guest's calls: runtime_memory_kernel.c). One sparse memfd backs the whole direct
  * pool, so any mapping of any physical range aliases the same storage.

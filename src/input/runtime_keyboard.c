@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* libSceImeKeyboard on the host keyboard. The host's events are pumped by the window thread
  * (gpu/shim/window.cpp), which queues the keys for the game while it has the keyboard open; here
  * they are handed to the game's handler from sceImeUpdate, on the game's thread. The host keyboard

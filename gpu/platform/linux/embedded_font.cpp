@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // psport: the overlay's DejaVu Sans (Cyrillic), embedded (third_party/fonts, Bitstream Vera license)
 // in an ELF object: read-only data, hidden in libpsport-gpu.
 asm(".section .rodata\n"

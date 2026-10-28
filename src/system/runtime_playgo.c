@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* libScePlayGo for a package installed in full: every chunk listed in
  * sce_sys/playgo-chunk.dat is local (LocalFast), nothing is left to download,
  * and progress reports each chunk's size, summed from its mchunks, as done. */

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* PlayStation VR on a console with no headset connected: libSceHmd initializes and reports no
  * device, so no headset can be opened and reprojection, though it can be set up, never starts;
  * libSceVrTracker initializes but has no device to track, since the headset cannot be opened and

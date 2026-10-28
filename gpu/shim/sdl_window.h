@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // psport: the game window. Created by the VideoOut driver on first open; the
 // event pump runs on the port's window thread (see window.cpp). The window itself is the platform
 // layer's (src/platform/ps_host_window.h); WindowSDL keeps the name of the shadPS4 class it stands

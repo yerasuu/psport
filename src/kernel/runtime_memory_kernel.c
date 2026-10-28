@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* libkernel memory calls: direct memory allocation and mapping, flexible memory, mmap,
  * virtual ranges, protection, queries, batch maps and the memory pools' side (runtime_mempool.c). */
 #define _GNU_SOURCE

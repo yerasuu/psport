@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // psport: profiler disabled.
 #pragma once
 #include "Tracy.hpp"

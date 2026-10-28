@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // psport: shadPS4 debug/profiler helpers: its own over Tracy with PS_TRACY=ON, else without it.
 #pragma once
 #ifdef TRACY_ENABLE

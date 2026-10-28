@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // psport: GPU-side assertion failures stop the port with exit code 23.
 #include <atomic>
 #include <cstdio>

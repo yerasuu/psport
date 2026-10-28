@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Streaming, capture and crash reporting on a console where none of them is running: no Remote
  * Play or Share Play session ever connects, nothing is recorded, and no debugger collects core
  * dumps. The game's permissions and handlers are accepted and kept. */

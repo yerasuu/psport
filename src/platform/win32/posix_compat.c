@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Windows: the C library gaps posix_compat.h declares. */
 #include "posix_compat.h"
 #include "ps_host.h"

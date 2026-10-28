@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* The gamepad's own motion sensors: the gyroscope and accelerometer of a DualShock 4, DualSense,
  * Switch Pro or Steam Deck (when the host reaches its HID device, not Steam's virtual pad), read
  * through ps_host_input.h at every pad read and reported as the DualShock 4 does: the orientation

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* The LEGO Dimensions toy pad, a USB peripheral emulated behind libSceUsbd for any game that looks
  * for it, offered only with PS_TOYPAD=1 (else toypad=1 in psport.ini): otherwise these exports stay
  * out and runtime_devices.c answers that no USB device is plugged in.

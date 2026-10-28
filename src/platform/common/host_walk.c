@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Walking and removing folder trees: the same on every OS (ps_host.h), over the folder listing and
  * link-aware stat each OS implements. */
 #define _GNU_SOURCE

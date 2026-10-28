@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Import binding: every relocation pointed at the runtime's implementation, a native module's
  * export, a stub or a trap that stops (or, with PS_PERMISSIVE, answers 0); then the patches. */
 #define _GNU_SOURCE

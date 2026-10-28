@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* GPU library interface (gpu/port/psport_gpu.cpp): GPU hooks, write watches and traps, backing view
  * reads and writes, and the region lookups of its per-draw queries. */
 #define _GNU_SOURCE

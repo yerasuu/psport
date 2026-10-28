@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Offline AppContent provider for the configured base-game profile.
  * No packages, downloads or license emulation; add-on folders in <user>/addcont are reported as
  * installed and entitled (see addon_list), and mounted as /addcont<n> when the game asks. */

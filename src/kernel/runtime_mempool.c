@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* libkernel memory pools: sceKernelMemoryPoolExpand takes direct memory out of
  * the direct pool for the process's memory pool, sceKernelMemoryPoolReserve
  * reserves a virtual range for it, and commits map the pool's memory into that

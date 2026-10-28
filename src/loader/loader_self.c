@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* PS4 SELF and plain ELF files for the loader: program headers, the dynamic section and the SCE
  * dynamic tables (strings, symbols, relocations, library and module ids), every offset checked
  * before use. Decrypted dumps only: an encrypted or compressed SELF segment is an error. */

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Input from the host (decision #1009, phase 1a): gamepads, the keyboard and the mouse as libScePad,
  * libSceImeKeyboard, libSceMouse and the port's bindings read them. The window thread pumps the host's
  * events (gpu/shim/window.cpp); these calls sample the state that pumping leaves, and a watch sees each

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // psport: the recovery point of speculative guest memory reads on this thread, on Windows: through
 // the runtime's accessor, since a DLL cannot import a thread_local of the executable.
 #pragma once

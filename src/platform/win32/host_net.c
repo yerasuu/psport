@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Windows: what sockets need beyond the BSD socket calls, on Winsock 2 (ps_host.h). Socket
  * descriptors are SOCKET values, which fit an int since 64-bit Windows keeps handle values within
  * 32 bits for 32-bit processes to share them. */

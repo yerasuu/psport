@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* libSceJson: sce::Json values, strings, containers and the library's allocator. Parsing and
  * serializing are in runtime_json_text.c. */
 #define _GNU_SOURCE

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /* Windows: what the win32 files share, Win32 errors as errno values and UTF-8 paths as the wide
  * strings the W APIs take. Not part of ps_host.h. */
 #ifndef PS_HOST_WIN32_H
