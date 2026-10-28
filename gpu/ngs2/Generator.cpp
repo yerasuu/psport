@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// The sampler's waveform generators, types 0x80 to 0x87 (0x21210; spec 05 §5): the setup's sampleRate
-// is the frequency in Hz and configData (already modulo 360) the starting phase in degrees; every
-// channel gets the same waveform, made at the system's rate.
+// The sampler's waveform generators, types 0x80 to 0x87 (0x21210; spec 05 §5, 10 §4): the setup's
+// sampleRate is the frequency in Hz and configData (already modulo 360) the starting phase in degrees.
+// They fill the source's input like a decoder, every channel the same, and the resampler plays them at
+// the voice's pitch as if they were waveforms at the system's rate. Their state starts at 0 with the
+// voice's.
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <cstring>
-#include <numbers>
 
 #include "Source.h"
 
@@ -24,11 +26,14 @@ enum Generator : u32 {
 };
 
 constexpr float kTwoToMinus31 = 1.0f / 2147483648.0f;
+// The firmware's float constants: 2 pi (0x40c90fdb) and 1/360 (0x3b360b61).
+constexpr float kTwoPi = std::bit_cast<float>(0x40c90fdbu);
+constexpr float kPerDegree = std::bit_cast<float>(0x3b360b61u);
 
 float Shape(u32 type, float phase) {
     switch (type) {
     case GENERATOR_SINE:
-        return std::sin(2.0f * std::numbers::pi_v<float> * phase);
+        return std::sin(phase * kTwoPi);
     case GENERATOR_SAW_UP:
         return phase < 0.5f ? 2.0f * phase : 2.0f * phase - 2.0f;
     case GENERATOR_SAW_DOWN:
@@ -41,36 +46,36 @@ float Shape(u32 type, float phase) {
 }
 
 // 0x87's shift register: configData picks a period of 0x4000 >> (v >> 2) samples and a 32-bit pattern
-// whose bits say which periods step the register, read from bit 0 down, modulo 32.
+// whose bits, from bit 0 then down from 31, say which periods step the register. A sample shows the
+// register before its step, and a step comes every period + 1 samples.
 float StepPeriodicNoise(u32 config_data, SourceState* p_source) {
     SourceState& source = *p_source;
     const u32 v = std::min(config_data, 63u);
     const u32 c_period = v < 60 ? 0x4000u >> (v >> 2) : 1;
     const u32 pattern = v < 60 ? ((0xffffeeaau >> ((v & 3) * 4)) & 0xff) * 0x01010101u : 0xffffffffu;
-    if (source.i_noise_period == 0) {
+    const float sample = float(s32(source.noise)) * kTwoToMinus31;
+    if (s32(source.i_noise_period) < 1) {
         if ((pattern >> source.i_noise_bit) & 1) {
             const u32 x = source.noise;
             source.noise = 2 * x + (((x >> 14) ^ (0x69u >> ((x >> 9) & 7))) & 1);
         }
         source.i_noise_bit = (source.i_noise_bit - 1) & 31;
         source.i_noise_period = c_period;
+    } else {
+        --source.i_noise_period;
     }
-    --source.i_noise_period;
-    return float(s32(source.noise)) * kTwoToMinus31;
+    return sample;
 }
 
 } // namespace
 
-// NOTE: the noise registers start at 0 and the phase at configData / 360, the voice's fresh state; rea
-// has not read where 0x21210 seeds them.
-void Generate(const SourceFormat& format, SourceState* p_source, const Planes& out, u32 c_channels, u32 c_samples,
-              u32 rate_hz, bool is_first_grain) {
+// NOTE: 0x80 writes nothing and lets the resampler read the rack's shared decode buffer as the previous
+// voice left it (spec 10 §4), which depends on the order of the voices; it is silence here.
+void Generate(const SourceFormat& format, SourceState* p_source, float* const* pp_in, u32 c_channels, u32 i_out,
+              u32 c_samples, u32 rate_hz) {
     SourceState& source = *p_source;
     const u32 type = format.waveform_type;
-    if (is_first_grain) {
-        source.phase = float(format.config_data) / 360.0f;
-    }
-    float* p_first = out.p_channel[0];
+    float* p_first = pp_in[0] + i_out;
     if (type == GENERATOR_NONE) {
         std::fill_n(p_first, c_samples, 0.0f);
     } else if (type == GENERATOR_NOISE) {
@@ -83,15 +88,21 @@ void Generate(const SourceFormat& format, SourceState* p_source, const Planes& o
             p_first[i] = StepPeriodicNoise(format.config_data, &source);
         }
     } else {
-        const float increment = float(format.sample_rate_hz) / float(rate_hz);
+        const float start_phase = float(format.config_data) * kPerDegree;
+        const float increment = 1.0f / float(rate_hz) * float(format.sample_rate_hz);
+        float phase = start_phase + source.phase;
         for (u32 i = 0; i < c_samples; ++i) {
-            p_first[i] = Shape(type, source.phase);
-            source.phase += increment;
-            source.phase -= std::floor(source.phase);
+            p_first[i] = Shape(type, phase);
+            const float x = phase + increment;
+            phase = x - float(s32(x));
+            if (x < 0.0f) {
+                phase += 1.0f;
+            }
         }
+        source.phase = phase - start_phase;
     }
     for (u32 i_channel = 1; i_channel < c_channels; ++i_channel) {
-        std::memcpy(out.p_channel[i_channel], p_first, c_samples * sizeof(float));
+        std::memcpy(pp_in[i_channel] + i_out, p_first, c_samples * sizeof(float));
     }
 }
 

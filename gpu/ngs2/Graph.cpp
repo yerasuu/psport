@@ -237,6 +237,7 @@ void ReleaseChannelWorks(Voice* p_voice) {
     for (u32 i_input = 0; i_input < p_rack->limits.max_inputs; ++i_input) {
         p_rack->c_input_works_used[i_input].fetch_sub(c_works, std::memory_order_relaxed);
     }
+    ReleaseAtrac9Decoder(p_voice);
 }
 
 void QueueVoiceCallback(Voice* p_voice, u32 type, const WaveformBlock& slot, u64 user_data, u32 cb_notified,
@@ -381,7 +382,6 @@ void PostRack(Rack* p_rack) {
         PostWaveformQueue(p_voice);
         if (p_voice->flags == 0) {
             ReleaseChannelWorks(p_voice);
-            ReleaseAtrac9Decoder(p_voice);
             for (u32 i_port = 0; i_port < p_rack->limits.max_ports; ++i_port) {
                 p_voice->p_active_ports[i_port].p_dest = nullptr;
             }

@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// The sampler's ATRAC9 waveforms, type 0x40 (0x29ac0, 0x29c70, 0x16c60 to 0x17160; spec 05 §3.3, §6).
-// Each frame of the superframe being read is decoded by LibAtrac9 into float planes, from a decoder of
-// the rack's pool restarted at the start of every pass through a block; the first numSkipSamples of a
-// pass are decoded and dropped. The firmware's AJM path (setup flags bit 0) queues superframes to
-// libSceAjm a grain ahead; decoding them here at once gives the same samples a grain sooner.
+// The sampler's ATRAC9 waveforms, type 0x40 (0x29ac0, 0x29c70, 0x16c60 to 0x17160; spec 05 §3.3, §6,
+// 10 §3). Each frame of the superframe being read is decoded by LibAtrac9 into float planes, with the
+// decoder PLAY reserved for the voice. The decoder restarts, overlap included, only on its first use by
+// the voice and at the start of a pass through a block that skips samples, whose first numSkipSamples
+// are decoded and dropped; a block that skips none goes on from the decoder's state, so that streamed
+// blocks join without a gap. The firmware's AJM path (setup flags bit 0) queues superframes to libSceAjm
+// a grain ahead; decoding them here at once gives the same samples a grain sooner.
 #include <algorithm>
+#include <utility>
 
 #include "Atrac9Glue.h"
 #include "Source.h"
@@ -13,7 +16,8 @@ namespace Libraries::Ngs2 {
 namespace {
 
 constexpr u32 kInfinite = 0xffffffffu;
-constexpr u32 kMaxSuperframeBytes = 2048 * 4;
+// A config's frames take up to 2048 bytes, and a superframe holds up to 8 of them.
+constexpr u32 kMaxSuperframeBytes = 2048 * 8;
 
 // A failure the voice reports as its state (spec 05 §3.4): logged with its count, the first time and
 // on every power of two after it, so that a broken stream stays visible without flooding the log.
@@ -29,23 +33,6 @@ s32 FailCodec(std::uint64_t* p_c_failures, s32 code, const char* sz_what, s32 de
     return code;
 }
 
-Atrac9Decoder* AcquireDecoder(Voice* p_voice, bool is_ajm) {
-    if (p_voice->p_atrac9 && p_voice->p_atrac9->is_ajm == is_ajm) {
-        return p_voice->p_atrac9;
-    }
-    ReleaseAtrac9Decoder(p_voice);
-    Rack& rack = *p_voice->p_rack;
-    for (u32 i_decoder = 0; i_decoder < rack.c_atrac9_decoders; ++i_decoder) {
-        Atrac9Decoder& decoder = rack.p_atrac9_decoders[i_decoder];
-        if (decoder.is_ajm == is_ajm && !decoder.p_owner) {
-            decoder.p_owner = p_voice;
-            p_voice->p_atrac9 = &decoder;
-            return &decoder;
-        }
-    }
-    return nullptr;
-}
-
 } // namespace
 
 std::size_t GetAtrac9StateSize() {
@@ -54,26 +41,30 @@ std::size_t GetAtrac9StateSize() {
 
 void ReleaseAtrac9Decoder(Voice* p_voice) {
     if (p_voice->p_atrac9) {
-        p_voice->p_atrac9->p_owner = nullptr;
-        p_voice->p_atrac9 = nullptr;
+        Voice* p_owner = p_voice;
+        p_voice->p_atrac9->p_owner.compare_exchange_strong(p_owner, nullptr, std::memory_order_release);
     }
+    const u32 c_works = std::exchange(p_voice->c_atrac9_channel_works, 0);
+    p_voice->p_rack->c_atrac9_channel_works_used.fetch_sub(c_works, std::memory_order_relaxed);
 }
 
 u32 DecodeAtrac9(Voice* p_voice, SourceState* p_source, const SourceFormat& format, float* const* pp_in, u32 i_out,
                  u32 c_wanted) {
     SourceState& source = *p_source;
+    Atrac9Decoder* p_decoder = p_voice->p_atrac9;
+    // PLAY reserves the decoder a setup asks for, so a voice reaches here without one only when its
+    // setup changed after its PLAY; that is psport's own failure, not a code of the SDK.
+    if (!p_decoder || p_decoder->is_ajm != bool(format.flags & 1)) {
+        static std::uint64_t s_c_uses;
+        NoteDropped(&s_c_uses, "Ngs2 ATRAC9: a voice decodes without the decoder PLAY reserves");
+        return 0;
+    }
+    // The firmware ignores what 0x29ac0 answers and fails at the first frame instead (spec 10 §3, §5).
     Atrac9Config config;
     if (!ParseAtrac9Config(format.config_data, &config) || config.c_frame_samples == 0) {
         static std::uint64_t s_c_failures;
-        source.codec_error = FailCodec(&s_c_failures, ORBIS_NGS2_ERROR_CODEC_SETUP_FAIL,
+        source.codec_error = FailCodec(&s_c_failures, ORBIS_NGS2_ERROR_CODEC_DECODE_FAIL,
                                        "Ngs2 ATRAC9: invalid config data", s32(format.config_data));
-        return 0;
-    }
-    Atrac9Decoder* p_decoder = AcquireDecoder(p_voice, format.flags & 1);
-    if (!p_decoder) {
-        static std::uint64_t s_c_failures;
-        source.codec_error = FailCodec(&s_c_failures, ORBIS_NGS2_ERROR_CODEC_EMPTY_INSTANCE,
-                                       "Ngs2 ATRAC9: every decoder of the rack is in use", s32(format.flags & 1));
         return 0;
     }
     const u32 cb_superframe = config.cb_frame * config.c_frames_per_superframe;
@@ -100,13 +91,15 @@ u32 DecodeAtrac9(Voice* p_voice, SourceState* p_source, const SourceFormat& form
         if (!GatherSpans(p_voice, p_source, cb_stride, &spans)) {
             break;
         }
-        if (source.i_sample == 0 && source.i_codec_frame == 0) {
+        const bool is_skipping_pass = source.i_sample == 0 && source.i_codec_frame == 0 && source.num_skip_samples > 0;
+        if (!source.is_atrac9_ready || is_skipping_pass) {
             if (const int result = ngs2_atrac9_reset(p_decoder->p_state, header); result != 0) {
                 static std::uint64_t s_c_failures;
-                source.codec_error = FailCodec(&s_c_failures, ORBIS_NGS2_ERROR_CODEC_SETUP_FAIL,
+                source.codec_error = FailCodec(&s_c_failures, ORBIS_NGS2_ERROR_CODEC_DECODE_FAIL,
                                                "Ngs2 ATRAC9: failed to initialize the decoder", result);
                 return c_done;
             }
+            source.is_atrac9_ready = true;
         }
         const u8* p_superframe = SampleBytes(spans, format.off_frame, cb_superframe, scratch);
         int cb_used = 0;

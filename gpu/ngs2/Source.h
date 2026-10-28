@@ -41,7 +41,8 @@ u32 DecodeVag(Voice* p_voice, SourceState* p_source, const SourceFormat& format,
               u32 c_wanted);
 u32 DecodeAtrac9(Voice* p_voice, SourceState* p_source, const SourceFormat& format, float* const* pp_in, u32 i_out,
                  u32 c_wanted);
-void Generate(const SourceFormat& format, SourceState* p_source, const Planes& out, u32 c_channels, u32 c_samples,
-              u32 rate_hz, bool is_first_grain);
+// Fills pp_in[channel][i_out...] with c_samples of the generator, rate_hz being the system's rate.
+void Generate(const SourceFormat& format, SourceState* p_source, float* const* pp_in, u32 c_channels, u32 i_out,
+              u32 c_samples, u32 rate_hz);
 
 } // namespace Libraries::Ngs2

@@ -2,8 +2,8 @@
 // The sampler rack's processing (0x15640; spec 04 §2.2) and its source, modules 0x70 and 0x71
 // (0x1e6a0, 0x21890, 0x21a30, 0x21fe0, 0x223c0; spec 05 §1 to §4, §7, §9): the queued waveform
 // blocks, with their loops, exit-loop requests and streaming, read frame by frame as linear PCM or by
-// the VAG and ATRAC9 decoders (Vag.cpp, Atrac9Source.cpp), or the generators' waveforms
-// (Generator.cpp), then resampled by the pitch with the firmware's 4-tap windowed sinc at 512 phases.
+// the VAG and ATRAC9 decoders (Vag.cpp, Atrac9Source.cpp), or made by the generators (Generator.cpp),
+// then resampled by the pitch with the firmware's 4-tap windowed sinc at 512 phases.
 #include <algorithm>
 #include <bit>
 #include <cmath>
@@ -439,6 +439,37 @@ void Resample(const float* p_in, float* p_out, u32 c_samples, u32 step, u32 frac
     }
 }
 
+// Resamples one grain into out from the source's history and what pfn_fill(pp_in, i_out, c_wanted)
+// adds behind it, keeping the samples the grain did not use as the next history.
+template <class Fill>
+void ResampleGrain(RenderContext& context, Voice* p_voice, const Planes& out, Fill&& pfn_fill) {
+    SourceState& source = p_voice->p_dsp->source;
+    const u32 c_channels = p_voice->c_out_channels;
+    const u32 c_samples = context.c_grain_samples;
+    const u32 c_needed = ((source.step * c_samples + source.fraction) >> kFractionBits) + kHistoryTaps;
+    float* pp_in[kMaxChannels];
+    for (u32 i_channel = 0; i_channel < c_channels; ++i_channel) {
+        pp_in[i_channel] = p_voice->p_rack->p_decode_scratch + std::size_t(i_channel) * p_voice->p_rack->c_decode_stride;
+        std::copy_n(source.history[i_channel], source.c_history, pp_in[i_channel]);
+    }
+    u32 c_input = source.c_history;
+    if (c_input < c_needed) {
+        // Whole frames may bring more than the grain needs; the rest waits in the history.
+        c_input += pfn_fill(pp_in, c_input, c_needed - c_input);
+        for (u32 i_channel = 0; c_input < c_needed && i_channel < c_channels; ++i_channel) {
+            std::fill(pp_in[i_channel] + c_input, pp_in[i_channel] + c_needed, 0.0f);
+        }
+        c_input = std::max(c_input, c_needed);
+    }
+    const u32 c_consumed = c_needed - kHistoryTaps;
+    for (u32 i_channel = 0; i_channel < c_channels; ++i_channel) {
+        Resample(pp_in[i_channel], out.p_channel[i_channel], c_samples, source.step, source.fraction);
+        std::copy(pp_in[i_channel] + c_consumed, pp_in[i_channel] + c_input, source.history[i_channel]);
+    }
+    source.c_history = c_input - c_consumed;
+    source.fraction = (source.fraction + c_samples * source.step) & (kUnitStep - 1);
+}
+
 // Fills the voice's planes with one grain of the source and answers the state flags it leaves.
 u32 ProcessSource(RenderContext& context, Voice* p_voice, const Planes& out) {
     const VoiceParams& params = *p_voice->p_active_params;
@@ -446,8 +477,11 @@ u32 ProcessSource(RenderContext& context, Voice* p_voice, const Planes& out) {
     SourceState& source = p_voice->p_dsp->source;
     const u32 c_channels = p_voice->c_out_channels;
     const u32 c_samples = context.c_grain_samples;
+    const bool is_generator = format.waveform_type >= WAVEFORM_FIRST_GENERATOR;
     if (p_voice->are_params_changed) {
-        const double step = double(params.pitch_ratio) * kUnitStep * format.sample_rate_hz / context.sample_rate_hz;
+        // A generator plays as a waveform at the system's rate (spec 10 §4).
+        const u32 rate_hz = is_generator ? context.sample_rate_hz : format.sample_rate_hz;
+        const double step = double(params.pitch_ratio) * kUnitStep * rate_hz / context.sample_rate_hz;
         source.step = step > 0.0 ? u32(std::min(step, double(kMaxStep))) : 0;
     }
     // The voice starts with four zero samples of history, so its first decoded sample comes out at
@@ -464,8 +498,11 @@ u32 ProcessSource(RenderContext& context, Voice* p_voice, const Planes& out) {
         return p_voice->flags;
     }
     const u32 kept_flags = p_voice->flags & (STATE_IN_USE | STATE_PAUSED | STATE_STOPPED);
-    if (format.waveform_type >= WAVEFORM_FIRST_GENERATOR) {
-        Generate(format, &source, out, c_channels, c_samples, context.sample_rate_hz, p_voice->is_first_grain);
+    if (is_generator) {
+        ResampleGrain(context, p_voice, out, [&](float* const* pp_in, u32 i_out, u32 c_wanted) {
+            Generate(format, &source, pp_in, c_channels, i_out, c_wanted, context.sample_rate_hz);
+            return c_wanted;
+        });
         return kept_flags | STATE_PLAYING;
     }
     // A decoding error silences the voice until its next start (spec 05 §3.4).
@@ -485,34 +522,14 @@ u32 ProcessSource(RenderContext& context, Voice* p_voice, const Planes& out) {
         }
         return kept_flags | STATE_PLAYING;
     }
-    const u32 c_needed = ((source.step * c_samples + source.fraction) >> kFractionBits) + kHistoryTaps;
-    float* pp_in[kMaxChannels];
-    for (u32 i_channel = 0; i_channel < c_channels; ++i_channel) {
-        pp_in[i_channel] = p_voice->p_rack->p_decode_scratch + std::size_t(i_channel) * p_voice->p_rack->c_decode_stride;
-        std::copy_n(source.history[i_channel], source.c_history, pp_in[i_channel]);
-    }
-    u32 c_input = source.c_history;
-    if (c_input < c_needed) {
-        // Whole frames may bring more than the grain needs; the rest waits in the history.
-        c_input += Decode(p_voice, &source, format, pp_in, c_input, c_needed - c_input);
-        for (u32 i_channel = 0; c_input < c_needed && i_channel < c_channels; ++i_channel) {
-            std::fill(pp_in[i_channel] + c_input, pp_in[i_channel] + c_needed, 0.0f);
-        }
-        c_input = std::max(c_input, c_needed);
-    }
+    ResampleGrain(context, p_voice, out, [&](float* const* pp_in, u32 i_out, u32 c_wanted) {
+        return Decode(p_voice, &source, format, pp_in, i_out, c_wanted);
+    });
+    EndDataRead(p_voice);
     if (source.codec_error < 0) {
-        EndDataRead(p_voice);
         ClearPlanes(out, c_channels, c_samples);
         return kept_flags | STATE_ERROR;
     }
-    const u32 c_consumed = c_needed - kHistoryTaps;
-    for (u32 i_channel = 0; i_channel < c_channels; ++i_channel) {
-        Resample(pp_in[i_channel], out.p_channel[i_channel], c_samples, source.step, source.fraction);
-        std::copy(pp_in[i_channel] + c_consumed, pp_in[i_channel] + c_input, source.history[i_channel]);
-    }
-    source.c_history = c_input - c_consumed;
-    source.fraction = (source.fraction + c_samples * source.step) & (kUnitStep - 1);
-    EndDataRead(p_voice);
     if (source.is_end && source.c_history <= kHistoryTaps) {
         return 0;
     }
@@ -525,7 +542,6 @@ u32 ProcessSource(RenderContext& context, Voice* p_voice, const Planes& out) {
 } // namespace
 
 void ResetSource(Voice* p_voice) {
-    ReleaseAtrac9Decoder(p_voice);
     p_voice->p_dsp->source = {};
 }
 

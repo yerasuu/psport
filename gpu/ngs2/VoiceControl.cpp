@@ -141,9 +141,46 @@ bool TryReserve(std::atomic<u32>* p_c_used, u32 c_works, u32 c_max) {
     return true;
 }
 
+// An ATRAC9 setup's decoder (spec 10 §5): one of the rack's internal decoders and a channel work of
+// maxAtrac9ChannelWorks per channel, or with setup flags bit 0 one of its AJM decoders. A pool of one
+// decoder per voice gives each voice its own. False, with nothing reserved, when a pool is empty.
+bool ReserveAtrac9Decoder(Voice* p_voice) {
+    const SourceFormat& format = p_voice->p_params->format;
+    p_voice->p_atrac9 = nullptr;
+    if (format.waveform_type != WAVEFORM_ATRAC9) {
+        return true;
+    }
+    Rack& rack = *p_voice->p_rack;
+    const bool is_ajm = format.flags & 1;
+    const u32 i_first = is_ajm ? rack.limits.max_atrac9_decoders : 0;
+    const u32 c_pool = is_ajm ? rack.limits.max_ajm_atrac9_decoders : rack.limits.max_atrac9_decoders;
+    const u32 i_voice = u32(p_voice - rack.p_voices);
+    const u32 i_start = c_pool == rack.limits.max_voices ? i_voice : 0;
+    for (u32 i = 0; i < c_pool && !p_voice->p_atrac9; ++i) {
+        Atrac9Decoder& decoder = rack.p_atrac9_decoders[i_first + (i_start + i) % c_pool];
+        Voice* p_owner = nullptr;
+        if (decoder.p_owner.compare_exchange_strong(p_owner, p_voice, std::memory_order_acquire)) {
+            p_voice->p_atrac9 = &decoder;
+        }
+    }
+    if (!p_voice->p_atrac9) {
+        return false;
+    }
+    if (!is_ajm) {
+        if (!TryReserve(&rack.c_atrac9_channel_works_used, format.c_channels, rack.limits.max_atrac9_channel_works)) {
+            ReleaseAtrac9Decoder(p_voice);
+            p_voice->p_atrac9 = nullptr;
+            return false;
+        }
+        p_voice->c_atrac9_channel_works = format.c_channels;
+    }
+    return true;
+}
+
 // PLAY trades the voice's channel works for max(input, output) channels of its setup (spec 03 §1.3):
-// from the rack's pool, and for a rack with inputs from each input's pool too. A voice that was never
-// set up has 0 channels, so PLAY on it fails before it reserves anything (spec 09 §1).
+// from the rack's pool, and for a rack with inputs from each input's pool too, then the decoder an
+// ATRAC9 setup asks for. A voice that was never set up has 0 channels, so PLAY on it fails before it
+// reserves anything (spec 09 §1); a failure later gives back what PLAY took.
 s32 ReserveChannelWorks(OrbisNgs2Handle h_voice, Voice* p_voice) {
     const VoiceParams& params = *p_voice->p_params;
     const u32 c_works = std::max(params.c_in_channels, params.c_out_channels);
@@ -168,6 +205,11 @@ s32 ReserveChannelWorks(OrbisNgs2Handle h_voice, Voice* p_voice) {
         }
     }
     p_voice->c_channel_works = c_works;
+    if (!ReserveAtrac9Decoder(p_voice)) {
+        ReleaseChannelWorks(p_voice);
+        return Fail(h_voice, ORBIS_NGS2_ERROR_EMPTY_CODEC_DECODER, "Empty ATRAC9 decoder ({}, {} channels)",
+                    p_voice->p_params->format.flags & 1 ? "AJM" : "internal", p_voice->p_params->format.c_channels);
+    }
     return ORBIS_OK;
 }
 

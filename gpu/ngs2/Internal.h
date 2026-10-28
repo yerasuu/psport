@@ -194,12 +194,12 @@ struct ReverbState;
 
 // One of a sampler rack's ATRAC9 decoders (spec 05 §6, 08 §2): LibAtrac9's state and the planes of the
 // frame it decoded last, both in the rack's buffer. The first maxAtrac9Decoders stand for the
-// firmware's internal decoders, the maxAjmAtrac9Decoders after them for its AJM instances; the render
-// lends one to a voice from its first ATRAC9 grain until it ends or is set up again.
+// firmware's internal decoders, the maxAjmAtrac9Decoders after them for its AJM instances. PLAY reserves
+// one for a voice until it gives its channel works back (spec 10 §5); p_owner is that voice.
 struct Atrac9Decoder {
     void* p_state;
     float* p_frame;
-    Voice* p_owner;
+    std::atomic<Voice*> p_owner;
     bool is_ajm;
 };
 
@@ -249,6 +249,10 @@ struct Voice {
     VoicePort* p_ports;
     // Under the voice lock: what VoiceControl sets and the voice state the game reads.
     u32 c_channel_works;
+    // The ATRAC9 decoder and channel works PLAY reserved last; the render decodes with p_atrac9 until the
+    // next PLAY, even after the reservation is given back, as the firmware's voice keeps its index.
+    Atrac9Decoder* p_atrac9;
+    u32 c_atrac9_channel_works;
     VoiceParams* p_params;
     FilterParams* p_filters;
     MasteringMatrices* p_mastering_matrices;
@@ -267,7 +271,6 @@ struct Voice {
     ReverbParams* p_active_reverb_params;
     ReverbState* p_reverb;
     VoiceDsp* p_dsp;
-    Atrac9Decoder* p_atrac9;
     BiquadState* p_filter_states;
     PeakMeterState meters[2];
     ActivePort* p_active_ports;
@@ -340,6 +343,8 @@ struct Rack {
     // racks with inputs.
     std::atomic<u32> c_channel_works_used;
     std::atomic<u32> c_input_works_used[2];
+    // maxAtrac9ChannelWorks, the ATRAC9 channels the internal decoders may decode at once.
+    std::atomic<u32> c_atrac9_channel_works_used;
     std::atomic<u32> c_active_voices;
     std::atomic<s64> c_renders;
     // The render's own, under the system's process lock.
@@ -426,23 +431,6 @@ struct Atrac9Config {
 // False unless the top byte is 0xFE. c_frame_samples is 0 for the sample rate indices the firmware's
 // table at 0x35860 leaves out (all but 12, 24 and 48 kHz), c_channels 0 for configurations 6 and 7.
 bool ParseAtrac9Config(u32 config_data, Atrac9Config* p_out_config);
-
-// One frame of a waveform as the sampler reads it (spec 05 §2): cb_frame bytes, frameMargin included,
-// holding c_frame_samples samples per channel in c_units units of cb_unit bytes and c_unit_samples
-// samples (an ATRAC9 superframe holds frames; every other format one unit). c_delay_samples is the
-// codec's own delay.
-struct FrameShape {
-    u32 cb_frame;
-    u32 c_frame_samples;
-    u32 cb_unit;
-    u32 c_unit_samples;
-    u32 c_units;
-    u32 c_delay_samples;
-};
-
-// False for the generators, which have no data, and for an ATRAC9 config without frames; the format's
-// type and channels have been checked.
-bool GetFrameShape(u32 waveform_type, u32 c_channels, u32 config_data, u32 cb_frame_margin, FrameShape* p_out_shape);
 
 // Rack topology, under the system's process lock.
 s32 LinkRack(System* p_system, Rack* p_rack);
@@ -550,6 +538,7 @@ void ProcessReverbVoice(RenderContext& context, Voice* p_voice, u32* p_event_cod
 void ResetSource(Voice* p_voice);
 // The bytes a rack lays out for one ATRAC9 decoder's state, 16-byte aligned.
 std::size_t GetAtrac9StateSize();
+// Gives the voice's ATRAC9 decoder and channel works back to their pools; ReleaseChannelWorks does.
 void ReleaseAtrac9Decoder(Voice* p_voice);
 // The data lock (spec 09 §6.2): once KILL returns, the render no longer reads the voice's waveform,
 // which the game may free at once, until a new PLAY reaches the render.

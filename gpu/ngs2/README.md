@@ -76,21 +76,33 @@ returns: from then on the render fades the voice's last sample out instead of re
 which the game may free at once, until a new PLAY reaches the render. `0xc001` copies a module's
 pending block in the firmware's own layout, zeros for a module without a parameter.
 
-Phase F4 (kb #1096) reads waveform files. `sceNgs2ParseWaveformData`, `File` (a guest path through
-the runtime's mounts, from an offset) and `User` (the game's read handler) take RIFF WAVE with PCM of
-8 to 32 bits, IEEE float of 32 and 64 bits, WAVE_FORMAT_EXTENSIBLE with either or with ATRAC9's
-subformat (configData from its fmt chunk, samples and delay from `fact`), and VAGp files; a `smpl`
-loop, or the loop flags of a VAG's blocks, gives the loop points and up to three blocks: before the
-loop, the loop itself (endless for a play count of 0) and after it, which an exit-loop request reaches.
-The loop of an `.at9` file counts the codec's delay and is moved back by it. `sceNgs2CalcWaveformBlock`
-covers samples with whole frames from the one holding the first sample after the delay, skipping up to
-it, and `sceNgs2GetWaveformFrameInfo` answers a frame's bytes and samples, its units (ATRAC9 frames per
-superframe) and the delay (one ATRAC9 frame). Every size and offset is checked in 64 bits before it
-becomes a 32-bit field, a chunk walk stops after 64 chunks, and a parse reads nothing past the data it
-was given. rea has not read these functions yet (spec 08 §4): their checking order and codes are
-psport's (`0x804A0401` an unknown file, `0x804A0400` a missing or unusable fmt chunk, `0x804A0408` a
-malformed chunk or no data, `0x804A0407` data past the end or past 32 bits, and the setup's codes for
-channels, sample rate, frame and ATRAC9 config).
+Phase F4 (kb #1096) reads waveform files, and F4b (kb #1119) does it as the firmware's own parse
+functions do (spec 10 §1, §2). `sceNgs2ParseWaveformData`, `File` (a guest path through the runtime's
+mounts, from an offset) and `User` (the game's read handler) clear the info's type and channels first,
+then check in the firmware's order: `Data` the info (`0x804A0053`), a size below 4 (`0x804A0408`) and
+null data (`0x804A0406`); `File` opens the file before anything (`0x8002000E` when it cannot); `User`
+the null handler (`0x804A0408`) before the info. A failed read, or a handler answering below 0, is
+`0x804A0408`. Only `VAGp` and `RIFF` files are taken, the `WAVE` form not looked at. Each RIFF chunk is
+searched from offset 12 up to riffSize - 4 with no padding between chunks, a chunk of size 0 ending the
+search; without `fmt ` or `data` the parse fails with `0x804A0408`. `fmt ` gives PCM of 8 to 32 bits,
+IEEE float of 32 and 64 bits, or WAVE_FORMAT_EXTENSIBLE with the PCM subformat or ATRAC9 (its GUID, or
+any fmt chunk of 0x34 bytes); any other format is `0x804A0401`. Channels, sample rates, nBlockAlign,
+the ATRAC9 config and the data's size against the file are not checked. `fact` gives the samples
+(required for ATRAC9; PCM counts them from the data when it is missing or 0), and the first `smpl` loop
+the loop points, its end + 1 as the exclusive end, its play count ignored, both moved back by ATRAC9's
+delay of one frame (256 samples at 48 kHz, 128 at 24 kHz, 64 at 12 kHz). A VAGp's loop comes from
+channel 0's block flags (6 its start, 3 its end) when frame 1 has the loop bit, and without it the last
+frame is left out; configData stays 0, the blocks doing the loop. The blocks are the part before the
+loop (left out when empty for SDK 1.70 and later), the loop repeating until an exit request, and the
+part after it; the game's info gets its fields and those blocks only. `sceNgs2CalcWaveformBlock` and
+`sceNgs2GetWaveformFrameInfo` clear their outputs first, then answer `0x804A0053` for a null block,
+`0x804A0400` for a null format and `0x804A0401` for any type but PCM, VAG and ATRAC9: PCM by samples,
+VAG by whole frames, ATRAC9 from the superframe holding the first sample, skipping up to it plus the
+frame of delay, frameMargin ignored, in 32-bit arithmetic. Where the firmware would loop forever, divide
+by zero or read its stack, psport departs from it: a chunk search gives up after 64 chunks, PCM with 0
+channels and no `fact` and an ATRAC9 config without frames (sample rate indices other than 1, 4 and 7,
+in a parse or in `sceNgs2CalcWaveformBlock`) are `0x804A0401`, and the bytes a chunk shorter than the
+firmware's read leaves out count as zeros.
 
 The sampler decodes VAG and HEVAG (`0x1c`): per channel a 16-byte block of 28 nibbles, low nibble
 first, worth nibble / 8 / 2^shift with no clamp, through the 4th-order predictor of the firmware's
@@ -99,27 +111,34 @@ table, decodes without one and is counted), with each channel's history kept acr
 configData bit 0 the last channel's flags drive the block: 6 marks the loop start, 3 repeats from it
 (a forced repeat of 0x21a30: an exit request ends the block there instead) and 1 ends the voice once
 its history drains. Frames are decoded whole and what the grain does not use waits in the resampler's
-history. The generators (`0x80` silence, `0x81` sine, `0x82`/`0x83` saws, `0x84` triangle, `0x85`
-square, `0x86` white noise from the LCG 0x19660D, `0x87` the periodic noise register) run at the
-system's rate from the setup's frequency and starting phase (configData modulo 360), the same on every
-channel, without data, resampler or end. Where the firmware seeds its noise registers is not read yet:
-they start at 0.
+history. The generators (`0x81` sine, `0x82`/`0x83` saws, `0x84` triangle, `0x85` square, `0x86`
+white noise from the LCG 0x19660D, `0x87` the periodic noise register) fill the source's input like a
+decoder, the same on every channel, without data or end, and go through the resampler as waveforms at
+the system's rate: the voice's pitch applies and their first sample comes out at output 3 (spec 10 §4).
+The phase runs in float from configData / 360 (configData modulo 360) by (1 / system rate) * frequency,
+its fraction by truncation; the noise registers start at 0, and the periodic one shows its value before
+each step, steps every period + 1 samples and reads its pattern from bit 0, then down from bit 31.
+`0x80` is silence, where the firmware lets the resampler read the rack's shared decode buffer as the
+previous voice left it.
 
 ATRAC9 (`0x40`) decodes over LibAtrac9. The setup asks for the rack's internal decoders
 (`maxAtrac9Decoders`) or, with flags bit 0, its AJM ones (`maxAjmAtrac9Decoders`), refusing with
 `0x804A0402` when the rack has none of that kind, `0x804A0403` without the 0xFE header byte and
 `0x804A0052` when the config's channels differ. Each kind is a pool of decoders laid out in the rack's
 buffer (LibAtrac9's state, about 90 KiB, and one frame of float planes each, which `QueryBufferSize`
-counts: 27.5 MB for the default sampler option's 256 decoders, against 1.7 MB without any); the
-render lends one to a voice at its first ATRAC9 grain and takes it back when the voice ends or is set
-up again, and a voice that finds none reports `ERROR` (`0x804A0801`). Every pass through a block
-restarts the decoder at the block's first superframe, the first `numSkipSamples` of the pass are
-decoded and dropped, frames come back as float planes before LibAtrac9 rounds them to 16 bits, and a
-decoding failure (`0x804A0805`, or `0x804A0803` for a sample rate index the firmware's frame table
-leaves out) silences the voice with `ERROR` until it starts again, logged with its count. The firmware
-runs its AJM decoders a grain ahead through libSceAjm; here they decode at once, the same samples one
-grain sooner. `maxAtrac9ChannelWorks` and `maxCodecCaches` are checked but bound nothing, LibAtrac9
-holding every channel. `tools/hwtest/ngs2_waveform` compares the parse, frame and block answers and
+counts: 27.5 MB for the default sampler option's 256 decoders, against 1.7 MB without any). PLAY
+reserves what the setup asks for (spec 10 §5): an internal decoder and one of `maxAtrac9ChannelWorks`
+per channel, or an AJM decoder; a pool of one decoder per voice gives each voice its own. An empty pool
+fails PLAY with `0x804A0307`, keeping nothing, and the voice gives its decoder back with its channel
+works (STOP_IMMEDIATE, KILL, its end, its next PLAY). The decoder restarts, overlap included, on the
+voice's first decode and at the start of each pass through a block that skips samples, whose first
+`numSkipSamples` are decoded and dropped; a block that skips none goes on from the decoder's state, so
+that streamed blocks and their loops join without a gap (spec 10 §3). Frames come back as float planes
+before LibAtrac9 rounds them to 16 bits, and a decoding failure or a config the decoder cannot start
+with (`0x804A0805`) silences the voice with `ERROR` until it starts again, logged with its count. The
+firmware runs its AJM decoders a grain ahead through libSceAjm; here they decode at once, the same
+samples one grain sooner. `maxCodecCaches` is checked but bounds nothing, LibAtrac9 holding every
+channel. `tools/hwtest/ngs2_waveform` compares the parse, frame and block answers, the decoder pools and
 the VAG, generator and ATRAC9 renders of a console, the firmware module and this one.
 
 Phase F5 (kb #1097) renders the reverb rack `0x2001` with module `0x1b` as firmware 11.00 builds it
