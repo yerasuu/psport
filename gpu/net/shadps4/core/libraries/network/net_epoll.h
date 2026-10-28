@@ -49,15 +49,18 @@ struct Epoll {
     int abort_fd{-1};
     int c_waiters{};
 #endif
+    // psport: the host errno of a failed epoll_create1, which sceNetEpollCreate returns mapped.
+    int create_errno{};
 
     explicit Epoll(const char* name_) : name(name_), epoll_fd(epoll_create1(0)) {
-#ifdef _WIN32
-        ASSERT(epoll_fd != nullptr);
-#else
-        ASSERT(epoll_fd != -1);
-#endif
         if (name_ == nullptr) {
             name = "anon";
+        }
+        if (!IsCreated()) {
+            create_errno = errno;
+            LOG_ERROR_COUNTED(Lib_Net, "epoll {}: host epoll_create1 failed: {}", name,
+                              Common::GetLastErrorMsg());
+            return;
         }
 #ifdef __linux__
         abort_fd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
@@ -66,6 +69,14 @@ struct Epoll {
             LOG_ERROR(Lib_Net, "epoll {}: no abort eventfd ({}), sceNetEpollAbort will not wake it",
                       name, Common::GetLastErrorMsg());
         }
+#endif
+    }
+
+    bool IsCreated() const noexcept {
+#ifdef _WIN32
+        return epoll_fd != nullptr;
+#else
+        return epoll_fd != -1;
 #endif
     }
 

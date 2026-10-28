@@ -403,8 +403,10 @@ int NetUtilInternal::ResolveHostname(const char* hostname, Libraries::Net::Orbis
         // handle more errors
         LOG_ERROR(Lib_Net, "address resolution for {} failed: {}", hostname, gai_result);
         ret = ORBIS_NET_ERETURN;
+    } else if (info == nullptr || info->ai_addr == nullptr) {
+        LOG_ERROR_COUNTED(Lib_Net, "address resolution for {} returned no address", hostname);
+        ret = ORBIS_NET_ERETURN;
     } else {
-        ASSERT(info && info->ai_addr);
         in_addr resolved_addr = ((sockaddr_in*)info->ai_addr)->sin_addr;
         LOG_DEBUG(Lib_Net, "resolved address for {}: {}", hostname, inet_ntoa(resolved_addr));
         addr->inaddr_addr = resolved_addr.s_addr;

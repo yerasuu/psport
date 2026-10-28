@@ -297,7 +297,10 @@ u64 ReadFile(Common::FS::IOFile& file, void* buf, u64 nbytes) {
 
 int PS4_SYSV_ABI sceNpTrophyGetGameIcon(OrbisNpTrophyContext context, OrbisNpTrophyHandle handle,
                                         void* buffer, u64* size) {
-    ASSERT(size != nullptr);
+    if (size == nullptr) {
+        LOG_ERROR_COUNTED(Lib_NpTrophy, "sceNpTrophyGetGameIcon: null size");
+        return ORBIS_NP_TROPHY_ERROR_INVALID_ARGUMENT;
+    }
 
     Common::SlotId contextId;
     contextId.index = context - 1;

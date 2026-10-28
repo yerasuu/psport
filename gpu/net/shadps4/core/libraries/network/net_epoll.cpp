@@ -4,7 +4,6 @@
 #include <algorithm>
 #include <ranges>
 
-#include "common/assert.h"
 #include "common/types.h"
 #include "net_epoll.h"
 
@@ -64,7 +63,12 @@ int EpollTable::CreateHandle(const char* name) {
 }
 
 void EpollTable::DeleteHandle(int d) {
-    UNREACHABLE();
+    std::scoped_lock lock{m_mutex};
+    if (d < 0 || static_cast<size_t>(d) >= epolls.size() || epolls[d].Destroyed()) {
+        LOG_ERROR_COUNTED(Lib_Net, "epollid {} is not open, nothing deleted", d);
+        return;
+    }
+    epolls[d].Destroy();
 }
 
 Epoll* EpollTable::GetEpoll(int epollid) {

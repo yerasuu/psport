@@ -50,7 +50,7 @@ static int ConvertFamilies(int family) {
     case ORBIS_NET_AF_INET6:
         return AF_INET6;
     default:
-        UNREACHABLE_MSG("unsupported socket family {}", family);
+        return -1;
     }
 }
 
@@ -91,6 +91,29 @@ auto NetErrorHandler(auto f) -> decltype(f()) {
     *sceNetErrnoLoc() = -result;
 
     return (-result) | ORBIS_NET_ERROR_BASE; // Convert to official ORBIS_NET_ERROR code
+}
+
+static int ConvertEpollCtlErrno(int host_errno) {
+    switch (host_errno) {
+    case EBADF:
+        return ORBIS_NET_EBADF;
+    case EEXIST:
+        return ORBIS_NET_EEXIST;
+    case ENOENT:
+        return ORBIS_NET_ENOENT;
+    case ENOMEM:
+        return ORBIS_NET_ENOMEM;
+    case ENOSPC:
+        return ORBIS_NET_ENOSPC;
+    case EPERM:
+        return ORBIS_NET_EPERM;
+    case ELOOP:
+        return ORBIS_NET_ELOOP;
+    case EINVAL:
+        return ORBIS_NET_EINVAL;
+    default:
+        return ORBIS_NET_EINTERNAL;
+    }
 }
 
 int PS4_SYSV_ABI in6addr_any() {
@@ -690,7 +713,13 @@ int PS4_SYSV_ABI sceNetEpollControl(OrbisNetId epollid, OrbisNetEpollFlag op, Or
 #ifndef __FreeBSD__
             epoll_event native_event = {.events = ConvertEpollEventsIn(event->events),
                                         .data = {.fd = id}};
-            ASSERT(epoll_ctl(epoll->epoll_fd, EPOLL_CTL_ADD, *native_handle, &native_event) == 0);
+            if (epoll_ctl(epoll->epoll_fd, EPOLL_CTL_ADD, *native_handle, &native_event) != 0) {
+                const int net_errno = ConvertEpollCtlErrno(errno);
+                LOG_ERROR_COUNTED(Lib_Net, "epoll {}: host epoll_ctl ADD of socket {} failed: {}",
+                                  epoll->name, id, Common::GetLastErrorMsg());
+                *sceNetErrnoLoc() = net_errno;
+                return net_errno | ORBIS_NET_ERROR_BASE;
+            }
             epoll->events.emplace_back(id, *event);
 #endif
             break;
@@ -739,7 +768,13 @@ int PS4_SYSV_ABI sceNetEpollControl(OrbisNetId epollid, OrbisNetEpollFlag op, Or
 #ifndef __FreeBSD__
             epoll_event native_event = {.events = ConvertEpollEventsIn(event->events),
                                         .data = {.fd = id}};
-            ASSERT(epoll_ctl(epoll->epoll_fd, EPOLL_CTL_MOD, *native_handle, &native_event) == 0);
+            if (epoll_ctl(epoll->epoll_fd, EPOLL_CTL_MOD, *native_handle, &native_event) != 0) {
+                const int net_errno = ConvertEpollCtlErrno(errno);
+                LOG_ERROR_COUNTED(Lib_Net, "epoll {}: host epoll_ctl MOD of socket {} failed: {}",
+                                  epoll->name, id, Common::GetLastErrorMsg());
+                *sceNetErrnoLoc() = net_errno;
+                return net_errno | ORBIS_NET_ERROR_BASE;
+            }
             *it = {id, *event};
 #endif
             break;
@@ -779,7 +814,19 @@ int PS4_SYSV_ABI sceNetEpollControl(OrbisNetId epollid, OrbisNetEpollFlag op, Or
                 return ORBIS_NET_ERROR_EBADF;
             }
 #ifndef __FreeBSD__
-            ASSERT(epoll_ctl(epoll->epoll_fd, EPOLL_CTL_DEL, *native_handle, nullptr) == 0);
+            if (epoll_ctl(epoll->epoll_fd, EPOLL_CTL_DEL, *native_handle, nullptr) != 0) {
+                const int host_errno = errno;
+                LOG_ERROR_COUNTED(Lib_Net, "epoll {}: host epoll_ctl DEL of socket {} failed: {}",
+                                  epoll->name, id, Common::GetLastErrorMsg());
+                // ENOENT or EBADF: the host already dropped it (its socket was closed), so the
+                // entry goes too, otherwise adding the same id again would fail with EEXIST.
+                if (host_errno == ENOENT || host_errno == EBADF) {
+                    epoll->events.erase(it);
+                }
+                const int net_errno = ConvertEpollCtlErrno(host_errno);
+                *sceNetErrnoLoc() = net_errno;
+                return net_errno | ORBIS_NET_ERROR_BASE;
+            }
             epoll->events.erase(it);
 #endif
             break;
@@ -811,11 +858,18 @@ int PS4_SYSV_ABI sceNetEpollCreate(const char* name, int flags) {
         return ORBIS_NET_ERROR_EINVAL;
     }
 
+    auto native_epoll = std::make_shared<Epoll>(name);
+    if (!native_epoll->IsCreated()) {
+        const int net_errno = native_epoll->create_errno == ENOMEM ? ORBIS_NET_ENOMEM
+                                                                   : ORBIS_NET_EMFILE;
+        *sceNetErrnoLoc() = net_errno;
+        return net_errno | ORBIS_NET_ERROR_BASE;
+    }
     auto fd = FDTable::Instance()->CreateHandle();
     auto* epoll = FDTable::Instance()->GetFile(fd);
     epoll->is_opened = true;
     epoll->type = Core::FileSys::FileType::Epoll;
-    epoll->epoll = std::make_shared<Epoll>(name);
+    epoll->epoll = std::move(native_epoll);
     epoll->m_guest_name = name;
     return fd;
 }
@@ -929,13 +983,19 @@ int PS4_SYSV_ABI sceNetEpollWait(OrbisNetId epollid, OrbisNetEpollEvent* events,
     } else if (result == 0) {
         LOG_TRACE(Lib_Net, "timed out");
     } else {
-        for (; i < result; ++i) {
-            const auto& current_event = native_events[i];
-            LOG_DEBUG(Lib_Net, "native_event[{}] = ( .events = {}, .data = {:#x} )", i,
+        for (int i_native = 0; i_native < result; ++i_native) {
+            const auto& current_event = native_events[i_native];
+            LOG_DEBUG(Lib_Net, "native_event[{}] = ( .events = {}, .data = {:#x} )", i_native,
                       current_event.events, current_event.data.u64);
             const auto it = std::ranges::find_if(
                 epoll->events, [&](auto& el) { return el.first == current_event.data.fd; });
-            ASSERT(it != epoll->events.end());
+            // A sceNetEpollControl DEL on another thread may remove the entry between the host
+            // wait and this lookup; that event is dropped.
+            if (it == epoll->events.end()) {
+                LOG_ERROR_COUNTED(Lib_Net, "epoll {}: host event for unregistered id {} dropped",
+                                  epoll->name, current_event.data.fd);
+                continue;
+            }
             events[i] = {
                 .events = ConvertEpollEventsOut(current_event.events),
                 .ident = static_cast<u64>(current_event.data.fd),
@@ -943,6 +1003,7 @@ int PS4_SYSV_ABI sceNetEpollWait(OrbisNetId epollid, OrbisNetEpollEvent* events,
             };
             LOG_DEBUG(Lib_Net, "event[{}] = ( .events = {:#x}, .ident = {}, .data = {:#x} )", i,
                       events[i].events, events[i].ident, events[i].data.data_u64);
+            ++i;
         }
     }
 
@@ -967,7 +1028,11 @@ int PS4_SYSV_ABI sceNetEpollWait(OrbisNetId epollid, OrbisNetEpollEvent* events,
 
             const auto it =
                 std::ranges::find_if(epoll->events, [&](auto& el) { return el.first == rid; });
-            ASSERT(it != epoll->events.end());
+            if (it == epoll->events.end()) {
+                LOG_ERROR_COUNTED(Lib_Net, "epoll {}: unregistered resolver {} dropped",
+                                  epoll->name, rid);
+                continue;
+            }
             events[i] = {
                 .events = ORBIS_NET_EPOLLDESCID,
                 .ident = static_cast<u64>(rid),
@@ -1305,13 +1370,22 @@ int PS4_SYSV_ABI sceNetInetNtopWithScopeId() {
 }
 
 int PS4_SYSV_ABI sceNetInetPton(int af, const char* src, void* dst) {
+    // -1 with EAFNOSUPPORT, as FreeBSD's inet_pton, since sceNetInetNtop follows its inet_ntop.
+    const int native_af = ConvertFamilies(af);
+    if (native_af < 0) {
+        LOG_ERROR_COUNTED(Lib_Net, "sceNetInetPton: address family {} not supported", af);
+        *sceNetErrnoLoc() = ORBIS_NET_EAFNOSUPPORT;
+        return -1;
+    }
 #ifdef WIN32
-    int res = InetPtonA(ConvertFamilies(af), src, dst);
+    int res = InetPtonA(native_af, src, dst);
 #else
-    int res = inet_pton(ConvertFamilies(af), src, dst);
+    int res = inet_pton(native_af, src, dst);
 #endif
     if (res < 0) {
-        UNREACHABLE_MSG("af = {}, src = {}, dst = {}", af, src, fmt::ptr(dst));
+        LOG_ERROR_COUNTED(Lib_Net, "sceNetInetPton: host inet_pton failed for family {}: {}", af,
+                          Common::GetLastErrorMsg());
+        *sceNetErrnoLoc() = ORBIS_NET_EAFNOSUPPORT;
     }
     return res;
 }

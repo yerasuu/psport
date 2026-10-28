@@ -1203,8 +1203,10 @@ void DeregisterNpCallback(std::string key) {
 }
 
 void RegisterLib(Core::Loader::SymbolsResolver* sym) {
-    ASSERT_MSG(Libraries::Kernel::sceKernelGetCompiledSdkVersion(&g_firmware_version) == ORBIS_OK,
-               "Failed to get compiled SDK version.");
+    if (Libraries::Kernel::sceKernelGetCompiledSdkVersion(&g_firmware_version) != ORBIS_OK) {
+        g_firmware_version = -1;
+        LOG_ERROR_COUNTED(Lib_NpManager, "compiled SDK version unknown (-1)");
+    }
     g_shadnet_enabled = EmulatorSettings.IsShadNetEnabled();
 
     // Route live NP state changes from NpHandler into the dispatch queue so they are

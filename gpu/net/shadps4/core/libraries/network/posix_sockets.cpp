@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <vector>
-#include <common/assert.h>
 #include "common/error.h"
 #include "core/libraries/kernel/file_system.h"
 #include "core/libraries/kernel/kernel.h"
@@ -129,6 +128,13 @@ static int ConvertLevels(int level) {
     case ORBIS_NET_IPPROTO_IPV6:
         return IPPROTO_IPV6;
     }
+    return -1;
+}
+
+// An unknown level is EINVAL and an unknown option of a known level ENOPROTOOPT, since the PS4
+// kernel's FreeBSD sosetopt and ip_ctloutput answer so.
+static int ReturnUnknownSocketOption(s32 native_level) {
+    *Libraries::Kernel::__Error() = native_level == -1 ? ORBIS_NET_EINVAL : ORBIS_NET_ENOPROTOOPT;
     return -1;
 }
 
@@ -591,8 +597,8 @@ int PosixSocket::SetSocketOptions(int level, int optname, const void* optval, u3
         }
     }
 
-    UNREACHABLE_MSG("Unknown level ={} optname ={}", level, optname);
-    return 0;
+    LOG_ERROR_COUNTED(Lib_Net, "setsockopt: unknown level {:#x} or option {:#x}", level, optname);
+    return ReturnUnknownSocketOption(native_level);
 }
 
 #define CASE_GETSOCKOPT(opt)                                                                       \
@@ -670,8 +676,8 @@ int PosixSocket::GetSocketOptions(int level, int optname, void* optval, u32* opt
             CASE_GETSOCKOPT_VALUE(ORBIS_NET_TCP_MSS_TO_ADVERTISE, sockopt_tcp_mss_to_advertise);
         }
     }
-    UNREACHABLE_MSG("Unknown level ={} optname ={}", level, optname);
-    return 0;
+    LOG_ERROR_COUNTED(Lib_Net, "getsockopt: unknown level {:#x} or option {:#x}", level, optname);
+    return ReturnUnknownSocketOption(native_level);
 }
 
 int PosixSocket::GetPeerName(OrbisNetSockaddr* name, u32* namelen) {

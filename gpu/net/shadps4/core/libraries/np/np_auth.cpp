@@ -149,7 +149,11 @@ sceNpAuthGetAuthorizationCode(s32 req_id, const OrbisNpAuthGetAuthorizationCodeP
 
     // For simplicity, call sceUserServiceGetInitialUser to get the user_id.
     s32 user_id = 0;
-    ASSERT(UserService::sceUserServiceGetInitialUser(&user_id) == 0);
+    if (const s32 result = UserService::sceUserServiceGetInitialUser(&user_id);
+        result != ORBIS_OK) {
+        LOG_ERROR_COUNTED(Lib_NpAuth, "authorization code: no initial user ({:#x})", u32(result));
+        return ORBIS_NP_ERROR_USER_NOT_FOUND;
+    }
 
     // Library constructs an OrbisNpAuthGetAuthorizationCodeParameterA struct,
     // then uses that to call GetAuthorizationCode.
@@ -244,7 +248,11 @@ s32 PS4_SYSV_ABI sceNpAuthGetIdToken(s32 req_id, const OrbisNpAuthGetIdTokenPara
 
     // For simplicity, call sceUserServiceGetInitialUser to get the user_id.
     s32 user_id = 0;
-    ASSERT(UserService::sceUserServiceGetInitialUser(&user_id) == 0);
+    if (const s32 result = UserService::sceUserServiceGetInitialUser(&user_id);
+        result != ORBIS_OK) {
+        LOG_ERROR_COUNTED(Lib_NpAuth, "id token: no initial user ({:#x})", u32(result));
+        return ORBIS_NP_ERROR_USER_NOT_FOUND;
+    }
 
     // Library constructs an OrbisNpAuthGetIdTokenParameterA struct,
     // then uses that to call GetIdToken.

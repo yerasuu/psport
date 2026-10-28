@@ -469,8 +469,14 @@ s32 createRequest(s32 titleUserCtxId, const char* pApiGroup, const char* pPath,
     while (user_context->requests.contains(request_id)) {
         request_id--;
     }
-    // Real library would hang if this assert fails.
-    ASSERT_MSG(request_id > (user_ctx_id << 0x20), "Too many requests!");
+    // The firmware hangs here; a game that holds 2^32 requests gets an error instead.
+    if (request_id <= (user_ctx_id << 0x20)) {
+        LOG_ERROR_COUNTED(Lib_NpWebApi, "user context {:#x}: no request id left", titleUserCtxId);
+        unlockContext(user_context->parentContext);
+        releaseUserContext(user_context);
+        releaseContext(context);
+        return ORBIS_NP_WEBAPI_ERROR_OUT_OF_MEMORY;
+    }
     user_context->requests[request_id] = new OrbisNpWebApiRequest{};
 
     auto& request = user_context->requests[request_id];
@@ -496,10 +502,10 @@ s32 createRequest(s32 titleUserCtxId, const char* pApiGroup, const char* pPath,
         }
     }
 
-    if (pInternalArgs != nullptr) {
-        ASSERT_MSG(pInternalArgs->unk_0 == nullptr && pInternalArgs->unk_1 == nullptr &&
-                       pInternalArgs->unk_2 == nullptr,
-                   "Internal arguments for requests not supported");
+    if (pInternalArgs != nullptr &&
+        (pInternalArgs->unk_0 != nullptr || pInternalArgs->unk_1 != nullptr ||
+         pInternalArgs->unk_2 != nullptr)) {
+        LOG_ERROR_COUNTED(Lib_NpWebApi, "(STUBBED) internal request arguments ignored");
     }
 
     unlockContext(user_context->parentContext);

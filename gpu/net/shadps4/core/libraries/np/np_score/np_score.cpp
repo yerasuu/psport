@@ -1741,8 +1741,10 @@ int PS4_SYSV_ABI sceNpScoreSetTimeout(s32 id, s32 resolveRetry, s32 resolveTimeo
 }
 
 void RegisterLib(Core::Loader::SymbolsResolver* sym) {
-    ASSERT_MSG(Libraries::Kernel::sceKernelGetCompiledSdkVersion(&g_firmware_version) == ORBIS_OK,
-               "Failed to get compiled SDK version.");
+    if (Libraries::Kernel::sceKernelGetCompiledSdkVersion(&g_firmware_version) != ORBIS_OK) {
+        g_firmware_version = -1;
+        LOG_ERROR_COUNTED(Lib_NpScore, "compiled SDK version unknown (-1)");
+    }
 
     LIB_FUNCTION("1i7kmKbX6hk", "libSceNpScore", 1, "libSceNpScore", sceNpScoreAbortRequest);
     LIB_FUNCTION("2b3TI0mDYiI", "libSceNpScore", 1, "libSceNpScore", sceNpScoreCensorComment);
