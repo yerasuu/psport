@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// libSceNgs2's export table for the native Ngs2 (PS_NGS2=native, kb #625). The system and report
-// API is implemented (phase F2, kb #1094); what is still missing returns ORBIS_NGS2_ERROR_FAIL,
-// the firmware's internal failure, logs its first call and is counted in the call report, so a
-// title on this backend shows what it still needs.
+// libSceNgs2's export table for the native Ngs2 (PS_NGS2=native, kb #625). The system, rack and
+// report API is implemented (phase F2, kb #1094); what is still missing returns
+// ORBIS_NGS2_ERROR_FAIL, the firmware's internal failure, logs its first call and is counted in the
+// call report, so a title on this backend shows what it still needs.
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -23,26 +23,15 @@ struct Export {
     const char* sz_name;
 };
 
-// The exports not implemented yet: 31 of firmware 11.00's 47, then the three PS5 ones
+// The exports not implemented yet: 20 of firmware 11.00's 47, then the three PS5 ones
 // gpu/ngs2_anyps5 also registers, so that switching backends leaves every import bound the same.
 constexpr std::array UNIMPLEMENTED_EXPORTS{
-    Export{"0eFLVCfWVds", "sceNgs2RackQueryBufferSize"},
-    Export{"cLV4aiT9JpA", "sceNgs2RackCreate"},
-    Export{"U546k6orxQo", "sceNgs2RackCreateWithAllocator"},
-    Export{"lCqD7oycmIM", "sceNgs2RackDestroy"},
-    Export{"MzTa7VLjogY", "sceNgs2RackLock"},
-    Export{"++YZ7P9e87U", "sceNgs2RackUnlock"},
-    Export{"JNTMIaBIbV4", "sceNgs2RackSetUserData"},
-    Export{"Mn4XNDg03XY", "sceNgs2RackGetUserData"},
-    Export{"MwmHz8pAdAo", "sceNgs2RackGetVoiceHandle"},
-    Export{"M4LYATRhRUE", "sceNgs2RackGetInfo"},
     Export{"uu94irFOGpA", "sceNgs2VoiceControl"},
     Export{"rEh728kXk3w", "sceNgs2VoiceGetStateFlags"},
     Export{"-TOuuAQ-buE", "sceNgs2VoiceGetState"},
     Export{"W-Z8wWMBnhk", "sceNgs2VoiceGetOwner"},
     Export{"jjBVvPN9964", "sceNgs2VoiceGetMatrixInfo"},
     Export{"WCayTgob7-o", "sceNgs2VoiceGetPortInfo"},
-    Export{"6qN1zaEZuN0", "sceNgs2CustomRackGetModuleInfo"},
     Export{"-YNfTO6KOMY", "sceNgs2FftQuerySize"},
     Export{"Kg1MA5j7KFk", "sceNgs2FftInit"},
     Export{"D8eCqBxSojA", "sceNgs2FftProcess"},
@@ -81,6 +70,16 @@ void RegisterExports(Core::Loader::SymbolsResolver* sym, std::index_sequence<I..
 } // namespace
 
 void RegisterLib(Core::Loader::SymbolsResolver* sym) {
+    LIB_FUNCTION("0eFLVCfWVds", "libSceNgs2", 1, "libSceNgs2", sceNgs2RackQueryBufferSize);
+    LIB_FUNCTION("cLV4aiT9JpA", "libSceNgs2", 1, "libSceNgs2", sceNgs2RackCreate);
+    LIB_FUNCTION("U546k6orxQo", "libSceNgs2", 1, "libSceNgs2", sceNgs2RackCreateWithAllocator);
+    LIB_FUNCTION("lCqD7oycmIM", "libSceNgs2", 1, "libSceNgs2", sceNgs2RackDestroy);
+    LIB_FUNCTION("MzTa7VLjogY", "libSceNgs2", 1, "libSceNgs2", sceNgs2RackLock);
+    LIB_FUNCTION("++YZ7P9e87U", "libSceNgs2", 1, "libSceNgs2", sceNgs2RackUnlock);
+    LIB_FUNCTION("JNTMIaBIbV4", "libSceNgs2", 1, "libSceNgs2", sceNgs2RackSetUserData);
+    LIB_FUNCTION("Mn4XNDg03XY", "libSceNgs2", 1, "libSceNgs2", sceNgs2RackGetUserData);
+    LIB_FUNCTION("MwmHz8pAdAo", "libSceNgs2", 1, "libSceNgs2", sceNgs2RackGetVoiceHandle);
+    LIB_FUNCTION("M4LYATRhRUE", "libSceNgs2", 1, "libSceNgs2", sceNgs2RackGetInfo);
     LIB_FUNCTION("uBIN24Tv2MI", "libSceNgs2", 1, "libSceNgs2", sceNgs2ReportRegisterHandler);
     LIB_FUNCTION("nPzb7Ly-VjE", "libSceNgs2", 1, "libSceNgs2", sceNgs2ReportUnregisterHandler);
     LIB_FUNCTION("pgFAiLR5qT4", "libSceNgs2", 1, "libSceNgs2", sceNgs2SystemQueryBufferSize);
@@ -97,6 +96,7 @@ void RegisterLib(Core::Loader::SymbolsResolver* sym) {
     LIB_FUNCTION("i0VnXM-C9fc", "libSceNgs2", 1, "libSceNgs2", sceNgs2SystemRender);
     LIB_FUNCTION("U-+7HsswcIs", "libSceNgs2", 1, "libSceNgs2", sceNgs2SystemEnumRackHandles);
     LIB_FUNCTION("vubFP0T6MP0", "libSceNgs2", 1, "libSceNgs2", sceNgs2SystemEnumHandles);
+    LIB_FUNCTION("6qN1zaEZuN0", "libSceNgs2", 1, "libSceNgs2", sceNgs2CustomRackGetModuleInfo);
     RegisterExports(sym, std::make_index_sequence<UNIMPLEMENTED_EXPORTS.size()>{});
 }
 
