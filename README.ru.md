@@ -71,7 +71,7 @@ psport активно разрабатывается. Игра может быт
     [shell.nix](shell.nix).
   - Пакеты системы: GCC (или другой компилятор через `CC`), CMake, Ninja, pkg-config и библиотеки
     из `shell.nix` (Vulkan, SDL3, FreeType, FFmpeg, Boost, glslang и остальные зависимости
-    видеоядра shadPS4; protobuf, nlohmann_json, OpenSSL, zlib и miniupnpc для необязательного
+    видеоядра shadPS4; protobuf, nlohmann_json, mbedTLS, zlib и miniupnpc для необязательного
     сетевого модуля).
 - **Python 3** нужен только для сетевой игры, встроенного лаунчера и инструментов разработчика;
   обычному запуску он не нужен.
@@ -285,7 +285,7 @@ GPL-2.0-or-later и используются как версия 2. Проект
 | [Dear ImGui](https://github.com/ocornut/imgui) | оверлей и внутриигровые меню | MIT |
 | [Tracy](https://github.com/wolfpld/tracy) (подмодуль, загружается только при `PS_TRACY=ON`) | сборки для профилирования | BSD-3-Clause |
 | Заголовок in-application API из RenderDoc (`gpu/third_party/renderdoc`) | захват одного кадра | MIT |
-| [cpp-httplib](https://github.com/yhirose/cpp-httplib) | сетевой модуль | MIT |
+| [cpp-httplib](https://github.com/yhirose/cpp-httplib) 0.45.0 (`gpu/third_party/httplib`), с бэкендом mbedTLS | сетевой модуль | MIT |
 | Мост DLSS (`gpu/dlss_bridge`) из [порта для Windows от Supermedo](https://github.com/Supermedo/bloodborne_pc), адаптированный из [IFreemz/shadPS4-Bloodborne-DLSS-FSR](https://github.com/IFreemz/shadPS4-Bloodborne-DLSS-FSR) | DLSS | MIT |
 | [Шрифты DejaVu](https://dejavu-fonts.github.io/) | текст оверлея, запасной вариант для libSceFont | Bitstream Vera (изменения DejaVu — общественное достояние) |
 | [dxil-spirv](https://github.com/HansKristian-Work/dxil-spirv) | сборка ресурсов FSR 4.1.1 на машине пользователя | MIT |

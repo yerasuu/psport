@@ -3,7 +3,7 @@
 # (src/net/runtime_net.c). Its headers (include/) extend the port's shim for these libraries alone;
 # everything in it is hidden and bound to itself (-Bsymbolic) except psport_net.h's two calls, so its
 # copies of shadPS4's kernel shims and symbol table never meet libpsport-gpu's.
-# Needs protobuf, nlohmann_json, OpenSSL, zlib and miniupnpc (shell.nix); without them the port
+# Needs protobuf, nlohmann_json, mbedTLS, zlib and miniupnpc (shell.nix); without them the port
 # builds without it and plays offline (gpu/CMakeLists.txt: PS_NET).
 
 set(SHADNET_PROTO_OUT "${CMAKE_CURRENT_BINARY_DIR}/shadnet_proto_gen")
@@ -46,7 +46,7 @@ endif()
 set_property(SOURCE shadps4/shadnet/client.cpp APPEND PROPERTY COMPILE_DEFINITIONS
     PSPORT_NET_VERSION="${PSPORT_NET_VERSION}")
 target_compile_definitions(psport-net PRIVATE BOOST_ASIO_STANDALONE NDEBUG
-    CPPHTTPLIB_OPENSSL_SUPPORT CPPHTTPLIB_ZLIB_SUPPORT)
+    CPPHTTPLIB_MBEDTLS_SUPPORT CPPHTTPLIB_ZLIB_SUPPORT)
 target_compile_options(psport-net PRIVATE -fvisibility=hidden -fvisibility-inlines-hidden
     -Wno-deprecated-declarations -Wno-missing-field-initializers)
 target_link_options(psport-net PRIVATE -Wl,-Bsymbolic -Wl,--exclude-libs,ALL)
@@ -54,6 +54,6 @@ target_link_options(psport-net PRIVATE -Wl,-Bsymbolic -Wl,--exclude-libs,ALL)
 set_target_properties(psport-net PROPERTIES BUILD_RPATH "\$ORIGIN" INSTALL_RPATH "\$ORIGIN"
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}") # beside libpsport-gpu.so, where the runtime looks
 target_link_libraries(psport-net PRIVATE psport-gpu nlohmann_json::nlohmann_json protobuf::libprotobuf
-    OpenSSL::SSL OpenSSL::Crypto ZLIB::ZLIB "${MINIUPNPC_LIBRARY}" Vulkan::Headers fmt::fmt
-    Boost::headers magic_enum::magic_enum)
+    MbedTLS::mbedtls MbedTLS::mbedx509 MbedTLS::mbedcrypto ZLIB::ZLIB "${MINIUPNPC_LIBRARY}"
+    Vulkan::Headers fmt::fmt Boost::headers magic_enum::magic_enum)
 target_include_directories(psport-net PRIVATE "${MINIUPNPC_INCLUDE}")

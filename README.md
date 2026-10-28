@@ -68,7 +68,7 @@ state is how far a title has been seen to get, not a full play-through; what eac
     [shell.nix](shell.nix) themselves.
   - Host packages: GCC (or another compiler through `CC`), CMake, Ninja, pkg-config and the
     libraries in `shell.nix` (Vulkan, SDL3, FreeType, FFmpeg, Boost, glslang and the rest of
-    shadPS4's video core dependencies; protobuf, nlohmann_json, OpenSSL, zlib and miniupnpc for the
+    shadPS4's video core dependencies; protobuf, nlohmann_json, mbedTLS, zlib and miniupnpc for the
     optional online module).
 - **Python 3** only for online play, the bundled launcher and the developer tools; a normal launch
   does not need it.
@@ -279,7 +279,7 @@ Source commits and changes to inherited code are recorded in [FORK.md](FORK.md) 
 | [Dear ImGui](https://github.com/ocornut/imgui) | overlay and in-game menus | MIT |
 | [Tracy](https://github.com/wolfpld/tracy) (submodule, fetched only for `PS_TRACY=ON`) | profiling builds | BSD-3-Clause |
 | RenderDoc's in-application API header (`gpu/third_party/renderdoc`) | one-frame captures | MIT |
-| [cpp-httplib](https://github.com/yhirose/cpp-httplib) | online module | MIT |
+| [cpp-httplib](https://github.com/yhirose/cpp-httplib) 0.45.0 (`gpu/third_party/httplib`), over its mbedTLS backend | online module | MIT |
 | DLSS bridge (`gpu/dlss_bridge`) from [Supermedo's Windows port](https://github.com/Supermedo/bloodborne_pc), adapted from [IFreemz/shadPS4-Bloodborne-DLSS-FSR](https://github.com/IFreemz/shadPS4-Bloodborne-DLSS-FSR) | DLSS | MIT |
 | [DejaVu fonts](https://dejavu-fonts.github.io/) | overlay text, fallback for libSceFont | Bitstream Vera (DejaVu changes public domain) |
 | [dxil-spirv](https://github.com/HansKristian-Work/dxil-spirv) | building the FSR 4.1.1 assets on the user's machine | MIT |

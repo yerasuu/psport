@@ -58,6 +58,8 @@
 #include "psport_net.h"
 #include "psport_net_title.h"
 
+#include <psa/crypto.h>
+
 namespace {
 /// The runtime's side (psport_net_init).
 PsNetHost s_host{};
@@ -494,6 +496,13 @@ extern "C" __attribute__((visibility("default"))) int psport_net_init(const PsNe
         return -1;
     }
     s_host = *p_host;
+    // mbedTLS 3.6 negotiates TLS 1.3 through PSA Crypto, to be initialised before any handshake
+    // (mbedtls/ssl.h: mbedtls_ssl_handshake); cpp-httplib never does it, so the first handshake
+    // would, from whichever game thread gets there first. shadNet's own TCP needs none of it.
+    if (const psa_status_t status = psa_crypto_init(); status != PSA_SUCCESS) {
+        std::printf("Online: psa_crypto_init failed (status %d): every HTTPS request will fail\n",
+                    static_cast<int>(status));
+    }
     Configure(p_host->sz_app0, p_host->sz_serial, p_host->sz_title, p_host->sz_app_ver);
     if (p_host->sz_summon_route) {
         std::printf("Co-op: summon route %s (the title's)\n", p_host->sz_summon_route);

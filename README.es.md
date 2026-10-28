@@ -72,7 +72,7 @@ en [tools/regress/titles.txt](tools/regress/titles.txt) y se ejecutan sin ventan
     [shell.nix](shell.nix).
   - Paquetes del sistema: GCC (u otro compilador mediante `CC`), CMake, Ninja, pkg-config y las
     bibliotecas de `shell.nix` (Vulkan, SDL3, FreeType, FFmpeg, Boost, glslang y el resto de
-    dependencias del núcleo de vídeo de shadPS4; protobuf, nlohmann_json, OpenSSL, zlib y miniupnpc
+    dependencias del núcleo de vídeo de shadPS4; protobuf, nlohmann_json, mbedTLS, zlib y miniupnpc
     para el módulo en línea opcional).
 - **Python 3** solo para el juego en línea, el lanzador incluido y las herramientas de desarrollo;
   un arranque normal no lo necesita.
@@ -291,7 +291,7 @@ Los commits de origen y los cambios en el código heredado están anotados en [F
 | [Dear ImGui](https://github.com/ocornut/imgui) | menú superpuesto y menús del juego | MIT |
 | [Tracy](https://github.com/wolfpld/tracy) (submódulo, solo se descarga con `PS_TRACY=ON`) | compilaciones para perfilado | BSD-3-Clause |
 | Cabecera de la API in-application de RenderDoc (`gpu/third_party/renderdoc`) | capturas de un fotograma | MIT |
-| [cpp-httplib](https://github.com/yhirose/cpp-httplib) | módulo en línea | MIT |
+| [cpp-httplib](https://github.com/yhirose/cpp-httplib) 0.45.0 (`gpu/third_party/httplib`), sobre su backend mbedTLS | módulo en línea | MIT |
 | Puente DLSS (`gpu/dlss_bridge`) del [port para Windows de Supermedo](https://github.com/Supermedo/bloodborne_pc), adaptado de [IFreemz/shadPS4-Bloodborne-DLSS-FSR](https://github.com/IFreemz/shadPS4-Bloodborne-DLSS-FSR) | DLSS | MIT |
 | [Fuentes DejaVu](https://dejavu-fonts.github.io/) | texto del menú superpuesto, alternativa para libSceFont | Bitstream Vera (cambios de DejaVu en dominio público) |
 | [dxil-spirv](https://github.com/HansKristian-Work/dxil-spirv) | generar los recursos de FSR 4.1.1 en el equipo del usuario | MIT |

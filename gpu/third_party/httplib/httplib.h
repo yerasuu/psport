@@ -18117,15 +18117,18 @@ inline bool is_peer_closed(session_t session, socket_t sock) {
   auto cleanup =
       detail::scope_exit([&]() { detail::set_nonblocking(sock, false); });
 
-  // Try a 1-byte read to check connection status
-  // Note: This will consume the byte if data is available, but for the
-  // purpose of checking if peer is closed, this should be acceptable
-  // since we're only called when we expect the connection might be closing
+  // psport: a zero-length read processes the next record without taking any
+  // of its data. A 1-byte read here (the client calls this right after
+  // sending its request) dropped the first byte of a response that had
+  // already arrived, about one TLS 1.2 request in 500 on 127.0.0.1 (kb #850).
   unsigned char buf;
-  int ret = mbedtls_ssl_read(&msession->ssl, &buf, 1);
+  int ret = mbedtls_ssl_read(&msession->ssl, &buf, 0);
 
-  // If we got data or WANT_READ (would block), connection is alive
-  if (ret > 0 || ret == MBEDTLS_ERR_SSL_WANT_READ) { return false; }
+  // Data waiting or WANT_READ (would block): the connection is alive
+  if (mbedtls_ssl_get_bytes_avail(&msession->ssl) > 0 || ret > 0 ||
+      ret == MBEDTLS_ERR_SSL_WANT_READ) {
+    return false;
+  }
 
   // If we get a peer close notify or a connection reset, the peer is closed
   return ret == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY ||

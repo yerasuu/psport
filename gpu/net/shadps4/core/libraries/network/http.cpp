@@ -24,6 +24,7 @@
 #include "common/logging/log.h"
 #include "common/path_util.h"
 #include "psport_net_title.h"
+#include "psport_net_tls.h"
 #include "core/debugger.h"
 #include "core/emulator_settings.h"
 #include "core/libraries/error_codes.h"
@@ -558,7 +559,7 @@ static void LogSendRequestSettings(const HttpRequest& req, int reqId, u64 body_s
     LOG_INFO(Lib_Http, "--- end dump reqId={} ---", reqId);
 }
 
-#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
+#ifdef CPPHTTPLIB_SSL_ENABLED
 #define ORBIS_HTTP_HAS_HTTPS 1
 #else
 #define ORBIS_HTTP_HAS_HTTPS 0
@@ -726,7 +727,7 @@ s32 RunRealHttpRequest(const SendRequestPlan& plan_in, HttpResponse& out_res,
 
     for (int depth = 0; depth <= MaxRedirects; ++depth) {
         if (plan.scheme == "https" && !ORBIS_HTTP_HAS_HTTPS) {
-            LOG_ERROR(Lib_Http, "HTTPS request but cpp-httplib lacks OpenSSL support");
+            LOG_ERROR(Lib_Http, "HTTPS request but cpp-httplib was built without a TLS backend");
             SynthesizeTransportFailureResponse(out_res);
             return ORBIS_HTTP_ERROR_SSL;
         }
@@ -748,7 +749,7 @@ s32 RunRealHttpRequest(const SendRequestPlan& plan_in, HttpResponse& out_res,
         cli.set_decompress(plan.settings.inflate_gzip);
 #endif
 
-#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
+#ifdef CPPHTTPLIB_SSL_ENABLED
         if (plan.scheme == "https") {
             const bool game_disabled_verify =
                 (plan.settings.ssl_flags & ORBIS_HTTPS_FLAG_SERVER_VERIFY) == 0;
@@ -761,6 +762,7 @@ s32 RunRealHttpRequest(const SendRequestPlan& plan_in, HttpResponse& out_res,
                          plan.scheme, plan.host);
             }
             cli.enable_server_certificate_verification(verify_server);
+            PsNetTls::UseCaBundle(cli);
             if (game_disabled_verify) {
                 LOG_INFO(Lib_Http, "{}://{}: server cert verification disabled (ssl_flags={:#x})",
                          plan.scheme, plan.host, plan.settings.ssl_flags);

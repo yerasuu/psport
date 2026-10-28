@@ -21,6 +21,7 @@
 #include "imgui/invitation_prompt_layer.h"
 #include "imgui/shadnet_notifications_layer.h"
 #include "np_handler.h"
+#include "psport_net_tls.h"
 #include "shadnet.pb.h"
 #include "shadnet/server_probe.h"
 
@@ -551,6 +552,7 @@ bool NpHandler::SendSessionInvitation(s32 user_id, const std::string& session_id
     const std::string content_type = "multipart/mixed; boundary=" + boundary;
 
     httplib::Client cli(base_url);
+    PsNetTls::UseCaBundle(cli);
     cli.set_connection_timeout(5);
     cli.set_read_timeout(10);
     const httplib::Headers headers = {{"Authorization", "Bearer " + token}};
@@ -652,6 +654,7 @@ bool NpHandler::AcceptSessionInvitation(s32 user_id, const std::string& invitati
         return false;
     }
     httplib::Client cli(base_url);
+    PsNetTls::UseCaBundle(cli);
     cli.set_connection_timeout(5);
     cli.set_read_timeout(10);
     const httplib::Headers headers = {{"Authorization", "Bearer " + token}};
