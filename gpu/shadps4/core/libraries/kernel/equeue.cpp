@@ -238,12 +238,13 @@ int EqueueInternal::WaitForEvents(OrbisKernelEvent* ev, int num, const OrbisKern
         // Effectively acts as a poll; only events that have already
         // arrived at the time of this function call can be received
         std::scoped_lock lock{m_mutex}; // psport: shadPS4 124328bcd
-        return GetTriggeredEvents(ev, num);
+        return GetReadyEvents(ev, num);
     }
     const auto micros = timo ? *timo : 0u;
 
     if (HasSmallTimer()) {
-        // If a small timer is set, just wait for it to expire.
+        // psport: spin while a small timer is set so that it keeps its precision; the queue's other
+        // events come back from the same wait.
         return WaitForSmallTimer(ev, num, micros);
     }
 
@@ -300,6 +301,35 @@ bool EqueueInternal::TriggerEvent(u64 ident, s16 filter, void* trigger_data) {
     }
     m_cond.notify_one();
     return has_found;
+}
+
+// psport: the console's HR timers are kernel filters that come back through the same kevent as
+// every other filter, so a wait takes the expired small timers along with the queue's events. The
+// timers go first since they fire once, while a level-triggered event left on would starve them.
+int EqueueInternal::GetReadyEvents(OrbisKernelEvent* ev, int num) {
+    if (m_small_timers.empty()) {
+        return GetTriggeredEvents(ev, num);
+    }
+    int count = TakeExpiredSmallTimers(ev, num);
+    if (count < num) {
+        count += GetTriggeredEvents(ev + count, num - count);
+    }
+    return count;
+}
+
+int EqueueInternal::TakeExpiredSmallTimers(OrbisKernelEvent* ev, int num) {
+    const auto now = std::chrono::steady_clock::now();
+    int count = 0;
+    for (auto it = m_small_timers.begin(); it != m_small_timers.end() && count < num;) {
+        const SmallTimer& st = it->second;
+        if (now - st.added >= st.interval) {
+            ev[count++] = st.event;
+            it = m_small_timers.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    return count;
 }
 
 int EqueueInternal::GetTriggeredEvents(OrbisKernelEvent* ev, int num) {
@@ -397,17 +427,7 @@ int EqueueInternal::WaitForSmallTimer(OrbisKernelEvent* ev, int num, u32 micros)
         curr_clock = std::chrono::steady_clock::now();
         {
             std::scoped_lock lock{m_mutex};
-            for (auto it = m_small_timers.begin(); it != m_small_timers.end() && count < num;) {
-                const SmallTimer& st = it->second;
-
-                if (curr_clock - st.added >= st.interval) {
-                    ev[count++] = st.event;
-                    it = m_small_timers.erase(it);
-                } else {
-                    ++it;
-                }
-            }
-
+            count = GetReadyEvents(ev, num);
             if (count > 0)
                 return count;
         }
