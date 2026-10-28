@@ -168,6 +168,13 @@ void NoteUnimplemented(std::uint64_t* p_c_uses, const char* sz_what) {
     }
 }
 
+void NoteDropped(std::uint64_t* p_c_uses, const char* sz_what) {
+    if (__atomic_fetch_add(p_c_uses, 1, __ATOMIC_RELAXED) == 0) {
+        Common::Log::Stubbed(sz_what, p_c_uses);
+        LOG_WARNING(Lib_Ngs2, "{}: dropped, as the firmware does", sz_what);
+    }
+}
+
 // Some behaviour depends on the SDK the title was built with (spec 04 §5); without an answer the
 // native Ngs2 behaves as for current SDKs.
 bool IsCompiledSdkAtLeast(u32 version) {

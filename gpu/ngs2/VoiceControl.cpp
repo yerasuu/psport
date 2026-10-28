@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // sceNgs2VoiceControl (spec 03 §1): walks the game's chain of parameters under the voice's lock,
-// applies the parameters every rack shares and stops at the first error, leaving the earlier ones
-// applied. What a parameter changes only reaches the sound at the render's flush (F3); the racks'
-// own parameters (sampler, submixer, reverb, mastering, custom modules) come with their DSP.
+// applies the parameters every rack shares, hands the rack's own to its dispatcher and stops at the
+// first error, leaving the earlier ones applied. What a parameter changes only reaches the sound at
+// the render's flush. The reverb (F5) and custom racks (F6) still refuse their own parameters.
 #include <algorithm>
 #include <cstring>
 
@@ -22,6 +22,9 @@ enum VoiceParamId : u32 {
     PARAM_MODULE_READ = 0xc001,
 };
 constexpr u32 kParamReadFlag = 0x8000;
+constexpr u32 kSamplerRackId = 0x1000;
+constexpr u32 kSubmixerRackId = 0x2000;
+constexpr u32 kMasteringRackId = 0x3000;
 
 enum VoiceEvent : u32 {
     EVENT_PLAY = 0,
@@ -59,7 +62,7 @@ s32 CheckPort(OrbisNgs2Handle h_voice, const Voice* p_voice, u32 i_port) {
 VoicePort& TouchPort(Voice* p_voice, u32 i_port) {
     VoicePort& port = p_voice->p_ports[i_port];
     if (!port.is_used) {
-        port = {0, 0, 0, 0, 1.0f, -1, true};
+        port = {0, 0, 0, 0, 0, 1.0f, -1, true};
     }
     return port;
 }
@@ -101,6 +104,7 @@ s32 SetPatch(OrbisNgs2Handle h_voice, Voice* p_voice, const OrbisNgs2VoicePatchP
         VoicePort& port = TouchPort(p_voice, p_param->port);
         port.h_dest = 0;
         port.dest_rack_uid = 0;
+        port.i_dest_voice = 0;
         port.i_dest_input = 0;
         return ORBIS_OK;
     }
@@ -121,7 +125,47 @@ s32 SetPatch(OrbisNgs2Handle h_voice, Voice* p_voice, const OrbisNgs2VoicePatchP
     VoicePort& port = TouchPort(p_voice, p_param->port);
     port.h_dest = p_param->destHandle;
     port.dest_rack_uid = p_dest_rack->uid;
+    port.i_dest_voice = dest_ref.VoiceIndex();
     port.i_dest_input = p_param->destInputId;
+    return ORBIS_OK;
+}
+
+bool TryReserve(std::atomic<u32>* p_c_used, u32 c_works, u32 c_max) {
+    u32 c_used = p_c_used->load(std::memory_order_relaxed);
+    do {
+        if (c_used + c_works > c_max) {
+            return false;
+        }
+    } while (!p_c_used->compare_exchange_weak(c_used, c_used + c_works, std::memory_order_relaxed));
+    return true;
+}
+
+// PLAY trades the voice's channel works for max(input, output) channels of its setup (spec 03 §1.3):
+// from the rack's pool, and for a rack with inputs from each input's pool too.
+s32 ReserveChannelWorks(OrbisNgs2Handle h_voice, Voice* p_voice) {
+    const VoiceParams& params = *p_voice->p_params;
+    const u32 c_works = std::max(params.c_in_channels, params.c_out_channels);
+    if (c_works < 1 || c_works > kMaxChannels) {
+        return Fail(h_voice, ORBIS_NGS2_ERROR_INVALID_NUM_CHANNELS, "Invaild voice channels ({})", c_works);
+    }
+    ReleaseChannelWorks(p_voice);
+    Rack* p_rack = p_voice->p_rack;
+    const u32 c_max = p_rack->limits.max_channel_works;
+    if (!TryReserve(&p_rack->c_channel_works_used, c_works, c_max)) {
+        return Fail(h_voice, ORBIS_NGS2_ERROR_EMPTY_CHANNEL_WORK, "Empty channel work ({}+{}>{})",
+                    p_rack->c_channel_works_used.load(), c_works, c_max);
+    }
+    for (u32 i_input = 0; i_input < p_rack->limits.max_inputs; ++i_input) {
+        if (!TryReserve(&p_rack->c_input_works_used[i_input], c_works, c_max)) {
+            for (u32 i_reserved = 0; i_reserved < i_input; ++i_reserved) {
+                p_rack->c_input_works_used[i_reserved].fetch_sub(c_works, std::memory_order_relaxed);
+            }
+            p_rack->c_channel_works_used.fetch_sub(c_works, std::memory_order_relaxed);
+            return Fail(h_voice, ORBIS_NGS2_ERROR_EMPTY_CODEC_DECODER, "Empty input channel work ({}:{}>{})",
+                        i_input, c_works, c_max);
+        }
+    }
+    p_voice->c_channel_works = c_works;
     return ORBIS_OK;
 }
 
@@ -131,9 +175,10 @@ s32 PostEvent(OrbisNgs2Handle h_voice, Voice* p_voice, u32 event) {
     u32 control = p_voice->control.load(std::memory_order_relaxed);
     switch (event) {
     case EVENT_PLAY: {
+        if (const s32 result = ReserveChannelWorks(h_voice, p_voice); result < 0) {
+            return result;
+        }
         control = (control & 0xdf000000u) | VOICE_INITIAL_STATE | VOICE_PENDING_START | VOICE_FLAG_IN_USE;
-        static std::uint64_t s_c_uses;
-        NoteUnimplemented(&s_c_uses, "sceNgs2VoiceControl: voice playback (channel works and rendering, F3)");
         break;
     }
     case EVENT_STOP:
@@ -142,6 +187,11 @@ s32 PostEvent(OrbisNgs2Handle h_voice, Voice* p_voice, u32 event) {
     case EVENT_PAUSE:
     case EVENT_RESUME:
         if (control & VOICE_FLAG_IN_USE) {
+            // STOP_IMM and KILL hand the channel works back at once; the voice still fades out in
+            // its next grain. KILL waits for the render to leave the voice, which the voice lock does.
+            if (event == EVENT_STOP_IMMEDIATE || event == EVENT_KILL) {
+                ReleaseChannelWorks(p_voice);
+            }
             constexpr u32 kEventBits[] = {0, VOICE_PENDING_STOP, VOICE_PENDING_STOP_IMMEDIATE, VOICE_PENDING_KILL,
                                           VOICE_PENDING_PAUSE, VOICE_PENDING_RESUME};
             if (event == EVENT_PAUSE) {
@@ -204,9 +254,20 @@ u32 CommonParamSize(u32 id) {
 s32 ApplyParam(OrbisNgs2Handle h_voice, Voice* p_voice, const OrbisNgs2VoiceParamHeader* p_header) {
     const u32 cb_expected = CommonParamSize(p_header->id);
     if (cb_expected == 0) {
-        if (IsRackParameter(*p_voice->p_rack->p_kind, p_header->id)) {
+        const RackKind& kind = *p_voice->p_rack->p_kind;
+        if (IsRackParameter(kind, p_header->id)) {
+            switch (kind.rack_id) {
+            case kSamplerRackId:
+                return ControlSampler(h_voice, p_voice, p_header);
+            case kSubmixerRackId:
+                return ControlSubmixer(h_voice, p_voice, p_header);
+            case kMasteringRackId:
+                return ControlMastering(h_voice, p_voice, p_header);
+            default:
+                break;
+            }
             static std::uint64_t s_c_uses;
-            NoteUnimplemented(&s_c_uses, "sceNgs2VoiceControl: rack and module parameters (F3 to F6)");
+            NoteUnimplemented(&s_c_uses, "sceNgs2VoiceControl: reverb and custom rack parameters (F5, F6)");
             return Fail(h_voice, ORBIS_NGS2_ERROR_FAIL, "Voice control ID ({:#x}) not implemented yet",
                         p_header->id);
         }
@@ -255,9 +316,9 @@ s32 ApplyParam(OrbisNgs2Handle h_voice, Voice* p_voice, const OrbisNgs2VoicePara
     case PARAM_CALLBACK:
         return SetCallback(h_voice, p_voice, ParamOf<OrbisNgs2VoiceCallbackParam>(p_header));
     default: {
-        // 0xc001 copies a module's parameter block, which the modules' DSP brings (F3 to F6).
+        // 0xc001 copies a module's own parameter block, whose layouts are the firmware's internal ones.
         static std::uint64_t s_c_uses;
-        NoteUnimplemented(&s_c_uses, "sceNgs2VoiceControl: module parameter read 0xc001 (F3 to F6)");
+        NoteUnimplemented(&s_c_uses, "sceNgs2VoiceControl: module parameter read 0xc001 (rea: module blocks)");
         return Fail(h_voice, ORBIS_NGS2_ERROR_FAIL, "Voice control ID ({:#x}) not implemented yet", p_header->id);
     }
     }

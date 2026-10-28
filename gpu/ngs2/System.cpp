@@ -17,6 +17,7 @@ constexpr u32 kDefaultMaxGrainSamples = 512;
 constexpr u32 kDefaultNumGrainSamples = 256;
 constexpr u32 kDefaultSampleRateHz = 48000;
 static_assert(sizeof(System) <= kCbSystemObject);
+static_assert(kCbGrainWorkPerSample >= WORK_SETS * kMaxChannels * sizeof(float));
 
 struct SystemSettings {
     const char* sz_name;
@@ -204,6 +205,7 @@ void UnlinkRack(System* p_system, Rack* p_rack) {
     p_rack->p_system = nullptr;
     p_system->c_racks.fetch_sub(1, std::memory_order_relaxed);
     DisconnectPatchesTo(p_system, p_rack->uid);
+    ForgetRackVoices(p_system, p_rack);
     UpdateMaxGrain(p_system);
 }
 

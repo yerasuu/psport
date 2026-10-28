@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // sceNgs2Rack* and sceNgs2CustomRackGetModuleInfo (spec 02 §3, §4). A rack's buffer holds the rack, its
-// voices (all of them exist from creation on) and each voice's matrices and ports. QueryBufferSize
-// answers what this layout needs: the firmware's own sum also counts the DSP modules' blocks, whose
-// sizes are not all read yet (spec 08 §2), so the native size stays below the console's.
+// voices (all of them exist from creation on), each voice's matrices and ports, and everything the
+// render keeps for a voice: parameters, DSP state, input rings, the waveform queue. QueryBufferSize
+// answers what this layout needs, which differs from the console's sum (spec 08 §2).
 #include <algorithm>
 #include <cstring>
 #include <new>
@@ -16,6 +16,113 @@
 namespace Libraries::Ngs2 {
 namespace {
 
+constexpr u32 kSamplerRackId = 0x1000;
+constexpr u32 kMasteringRackId = 0x3000;
+constexpr u32 kRackFlagCallbacks = 0x40000000;
+constexpr u32 kDefaultLfeCutoffHz = 120;
+// Voice callbacks a rack can queue per voice and render; the firmware sizes its queue from a rack
+// configuration byte not read yet (spec 08 §1.4), and drops what does not fit.
+constexpr u32 kCallbacksPerVoice = 16;
+
+template <class T>
+T* AllocateArray(Arena* p_arena, std::size_t c_items) {
+    return c_items ? static_cast<T*>(p_arena->Allocate(c_items * sizeof(T), alignof(T))) : nullptr;
+}
+
+// Everything the render needs for a voice lives in the rack's buffer, so that a render never
+// allocates (spec 08 §2 lists the firmware's own blocks).
+struct VoiceBlocks {
+    VoiceParams* p_params;
+    VoiceParams* p_active_params;
+    FilterParams* p_filters;
+    FilterParams* p_active_filters;
+    BiquadState* p_filter_states;
+    MasteringMatrices* p_mastering[3];
+    VoiceDsp* p_dsp;
+    float* p_meter_rings;
+    ActivePort* p_active_ports;
+    float* p_matrix_levels;
+    float* p_previous_matrix_levels;
+    bool* p_matrix_is_set;
+    float* p_input_ring;
+    bool* p_input_started;
+    WaveformBlock* p_blocks;
+    u8* p_state;
+};
+
+u32 MeterCount(const RackKind& kind) {
+    return kind.rack_id == kMasteringRackId ? 2 : 1;
+}
+
+VoiceBlocks AllocateVoiceBlocks(Arena* p_arena, const RackKind& kind, const RackLimits& limits, u32 c_input_blocks) {
+    VoiceBlocks blocks{};
+    blocks.p_params = AllocateArray<VoiceParams>(p_arena, 1);
+    blocks.p_active_params = AllocateArray<VoiceParams>(p_arena, 1);
+    blocks.p_filters = AllocateArray<FilterParams>(p_arena, limits.max_filters);
+    blocks.p_active_filters = AllocateArray<FilterParams>(p_arena, limits.max_filters);
+    blocks.p_filter_states = AllocateArray<BiquadState>(p_arena, std::size_t(limits.max_filters) * kMaxChannels);
+    if (kind.rack_id == kMasteringRackId) {
+        for (MasteringMatrices*& p_matrices : blocks.p_mastering) {
+            p_matrices = AllocateArray<MasteringMatrices>(p_arena, 1);
+        }
+    }
+    blocks.p_dsp = AllocateArray<VoiceDsp>(p_arena, 1);
+    blocks.p_meter_rings =
+        AllocateArray<float>(p_arena, std::size_t(MeterCount(kind)) * limits.num_peak_meter_blocks * kPeakValues);
+    blocks.p_active_ports = AllocateArray<ActivePort>(p_arena, limits.max_ports);
+    blocks.p_matrix_levels = AllocateArray<float>(p_arena, std::size_t(limits.max_matrices) * kMatrixCells);
+    blocks.p_previous_matrix_levels = AllocateArray<float>(p_arena, std::size_t(limits.max_matrices) * kMatrixCells);
+    blocks.p_matrix_is_set = AllocateArray<bool>(p_arena, limits.max_matrices);
+    const std::size_t c_input_slots = std::size_t(limits.max_inputs) * c_input_blocks;
+    if (c_input_slots) {
+        blocks.p_input_ring = static_cast<float*>(p_arena->Allocate(
+            c_input_slots * limits.max_channels * limits.max_grain_samples * sizeof(float), 64));
+        blocks.p_input_started = AllocateArray<bool>(p_arena, c_input_slots);
+    }
+    if (kind.rack_id == kSamplerRackId) {
+        blocks.p_blocks = AllocateArray<WaveformBlock>(p_arena, limits.max_waveform_blocks);
+    }
+    if (!kind.is_custom) {
+        blocks.p_state = AllocateArray<u8>(p_arena, limits.cb_voice_state);
+    }
+    return blocks;
+}
+
+void InitVoice(Voice* p_voice, const RackKind& kind, const RackLimits& limits, const VoiceBlocks& blocks) {
+    p_voice->p_params = new (blocks.p_params) VoiceParams{};
+    p_voice->p_params->c_out_channels = limits.max_channels;
+    p_voice->p_params->pitch_ratio = 1.0f;
+    p_voice->p_params->lfe = {0, kDefaultLfeCutoffHz};
+    p_voice->p_params->gain_fbw = 1.0f;
+    p_voice->p_params->gain_lfe = 1.0f;
+    p_voice->p_active_params = new (blocks.p_active_params) VoiceParams{*p_voice->p_params};
+    p_voice->p_filters = blocks.p_filters;
+    p_voice->p_active_filters = blocks.p_active_filters;
+    p_voice->p_filter_states = blocks.p_filter_states;
+    p_voice->p_mastering_matrices = blocks.p_mastering[0];
+    p_voice->p_active_mastering_matrices = blocks.p_mastering[1];
+    p_voice->p_previous_mastering_matrices = blocks.p_mastering[2];
+    p_voice->p_dsp = new (blocks.p_dsp) VoiceDsp{};
+    for (u32 i_meter = 0; i_meter < MeterCount(kind); ++i_meter) {
+        float* p_ring = blocks.p_meter_rings
+                            ? blocks.p_meter_rings + std::size_t(i_meter) * limits.num_peak_meter_blocks * kPeakValues
+                            : nullptr;
+        p_voice->meters[i_meter] = {p_ring, limits.num_peak_meter_blocks, 0};
+    }
+    p_voice->p_active_ports = blocks.p_active_ports;
+    for (u32 i_port = 0; i_port < limits.max_ports; ++i_port) {
+        new (&p_voice->p_active_ports[i_port]) ActivePort{nullptr, 0, 0, 1.0f, 1.0f, -1, -1, true};
+    }
+    p_voice->p_matrix_levels = blocks.p_matrix_levels;
+    p_voice->p_previous_matrix_levels = blocks.p_previous_matrix_levels;
+    p_voice->p_matrix_is_set = blocks.p_matrix_is_set;
+    p_voice->p_input_ring = blocks.p_input_ring;
+    p_voice->p_input_started = blocks.p_input_started;
+    p_voice->queue.p_blocks = blocks.p_blocks;
+    p_voice->queue.c_capacity = blocks.p_blocks ? limits.max_waveform_blocks : 0;
+    p_voice->p_state = blocks.p_state;
+}
+
 Rack* LayOutRack(Arena* p_arena, const RackKind& kind, const RackLimits& limits) {
     const std::size_t c_voices = limits.max_voices;
     void* p_object = p_arena->Allocate(sizeof(Rack), alignof(Rack));
@@ -23,7 +130,21 @@ Rack* LayOutRack(Arena* p_arena, const RackKind& kind, const RackLimits& limits)
     void* p_matrices =
         limits.max_matrices ? p_arena->Allocate(c_voices * limits.max_matrices * sizeof(VoiceMatrix)) : nullptr;
     void* p_ports = limits.max_ports ? p_arena->Allocate(c_voices * limits.max_ports * sizeof(VoicePort)) : nullptr;
-    if (!p_object || !p_voices || p_arena->HasOverflowed()) {
+    const u32 c_input_blocks = kind.rack_class == RACK_CLASS_SOURCE ? 0 : limits.max_input_delay_blocks + 1;
+    // The source decodes up to four input samples per output sample (pitch below 4.0) plus its history.
+    const u32 c_decode_stride = 4 * limits.max_grain_samples + kResampleHistory + 8;
+    float* p_decode_scratch =
+        kind.rack_id == kSamplerRackId ? AllocateArray<float>(p_arena, std::size_t(kMaxChannels) * c_decode_stride)
+                                       : nullptr;
+    const u32 c_callbacks = (limits.flags & kRackFlagCallbacks) ? kCallbacksPerVoice * limits.max_voices : 0;
+    QueuedCallback* p_callbacks = AllocateArray<QueuedCallback>(p_arena, c_callbacks);
+    if (!p_object) {
+        for (u32 i_voice = 0; i_voice < limits.max_voices; ++i_voice) {
+            AllocateVoiceBlocks(p_arena, kind, limits, c_input_blocks);
+        }
+        return nullptr;
+    }
+    if (!p_voices || p_arena->HasOverflowed()) {
         return nullptr;
     }
     auto* p_rack = new (p_object) Rack{};
@@ -31,13 +152,23 @@ Rack* LayOutRack(Arena* p_arena, const RackKind& kind, const RackLimits& limits)
     p_rack->limits = limits;
     p_rack->refs = 1;
     p_rack->p_voices = static_cast<Voice*>(p_voices);
+    p_rack->c_input_blocks = c_input_blocks;
+    p_rack->p_decode_scratch = p_decode_scratch;
+    p_rack->c_decode_stride = c_decode_stride;
+    p_rack->p_callbacks = p_callbacks;
+    p_rack->c_callback_capacity = c_callbacks;
     InitHandle(&p_rack->handle, p_rack, &p_rack->refs, HANDLE_RACK, 0);
     for (u32 i_voice = 0; i_voice < limits.max_voices; ++i_voice) {
+        const VoiceBlocks blocks = AllocateVoiceBlocks(p_arena, kind, limits, c_input_blocks);
+        if (p_arena->HasOverflowed()) {
+            return nullptr;
+        }
         auto* p_voice = new (&p_rack->p_voices[i_voice]) Voice{};
         p_voice->p_rack = p_rack;
         p_voice->p_matrices = static_cast<VoiceMatrix*>(p_matrices) + std::size_t(i_voice) * limits.max_matrices;
         p_voice->p_ports = static_cast<VoicePort*>(p_ports) + std::size_t(i_voice) * limits.max_ports;
         InitHandle(&p_voice->handle, p_rack, &p_rack->refs, HANDLE_VOICE, i_voice);
+        InitVoice(p_voice, kind, limits, blocks);
     }
     return p_rack;
 }
@@ -401,6 +532,9 @@ s32 PS4_SYSV_ABI sceNgs2RackGetInfo(OrbisNgs2Handle h_rack, OrbisNgs2RackInfo* p
     info.maxMatrices = limits.max_matrices;
     info.maxPorts = limits.max_ports;
     info.stateFlags = 1u | (p_rack->c_flush_locks ? 4u : 0u);
+    info.renderCount = u64(p_rack->c_renders.load(std::memory_order_relaxed));
+    info.activeVoiceCount = p_rack->c_active_voices;
+    info.activeChannelWorkCount = p_rack->c_channel_works_used;
     *p_out_info = info;
     return ORBIS_OK;
 }

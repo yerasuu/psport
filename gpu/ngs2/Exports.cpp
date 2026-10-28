@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // libSceNgs2's export table for the native Ngs2 (PS_NGS2=native, kb #625). The system, rack, voice
-// and report API is implemented (phase F2, kb #1094); what is still missing returns
-// ORBIS_NGS2_ERROR_FAIL, the firmware's internal failure, logs its first call and is counted in the
-// call report, so a title on this backend shows what it still needs: waveform parsing (F4), pan,
-// geom and FFT (F7) and the three PS5 exports.
+// and report API (phase F2, kb #1094) and the render (F3, kb #1095) are implemented; what is still
+// missing returns ORBIS_NGS2_ERROR_FAIL, the firmware's internal failure, logs its first call and is
+// counted in the call report, so a title on this backend shows what it still needs: waveform parsing
+// (F4), pan, geom and FFT (F7) and the three PS5 exports.
 #include <array>
 #include <cstddef>
 #include <cstdint>

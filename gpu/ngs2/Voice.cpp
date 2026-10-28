@@ -27,9 +27,8 @@ s32 PS4_SYSV_ABI sceNgs2VoiceGetStateFlags(OrbisNgs2Handle h_voice, u32* p_out_f
     return ORBIS_OK;
 }
 
-// A voice that has not been rendered since its PLAY reads as {IN_USE, 0...}, an idle one as zeros
-// (spec 02 §5, 03 §3). Every rendered state comes from the racks' processing (F3), so until then
-// these two are the only ones a voice can be in.
+// A voice that has not been rendered since its PLAY reads as {IN_USE, 0...}, an idle one as zeros, a
+// playing one as its rack's process left it in the last render (spec 02 §5, 03 §3).
 s32 PS4_SYSV_ABI sceNgs2VoiceGetState(OrbisNgs2Handle h_voice, void* p_out_state, std::size_t cb_state) {
     if (!p_out_state) {
         return Fail(h_voice, ORBIS_NGS2_ERROR_INVALID_OUT_ADDRESS, "Invalid voice state address ({})", p_out_state);
@@ -57,9 +56,12 @@ s32 PS4_SYSV_ABI sceNgs2VoiceGetState(OrbisNgs2Handle h_voice, void* p_out_state
     if (control & VOICE_INITIAL_STATE) {
         *static_cast<u32*>(p_out_state) = VOICE_FLAG_IN_USE;
     } else if (control & VOICE_STATE_MASK) {
-        *static_cast<u32*>(p_out_state) = control & VOICE_STATE_MASK;
-        static std::uint64_t s_c_uses;
-        NoteUnimplemented(&s_c_uses, "sceNgs2VoiceGetState: rendered voice state (F3)");
+        if (p_voice->p_state) {
+            std::memcpy(p_out_state, p_voice->p_state, cb_voice_state);
+        } else {
+            // A custom rack's module states come with its modules (F6).
+            *static_cast<u32*>(p_out_state) = control & VOICE_STATE_MASK;
+        }
     }
     return ORBIS_OK;
 }

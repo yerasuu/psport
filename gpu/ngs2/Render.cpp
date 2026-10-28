@@ -1,9 +1,14 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// sceNgs2SystemRender (spec 01 §5, 04 §1). Phase F2 validates the buffers as the firmware does and
-// writes what it writes when no voice reaches an output, silence; the flush, the racks' processing
-// and the output conversion come in F3, and until then a render with a voice in use is counted.
+// sceNgs2SystemRender (spec 01 §5, 04 §1): checks the game's buffers, flushes what VoiceControl left
+// pending unless the game holds SystemLock or RackLock, processes the sampler voices in start order
+// and the submixer and mastering voices in graph order, clears the buffers no voice wrote and swaps
+// the big-endian ones, then retires finished voices and calls the voice callbacks.
+#include <bit>
 #include <chrono>
 #include <cstring>
+#if defined(__SSE__)
+#include <xmmintrin.h>
+#endif
 
 #include "Internal.h"
 
@@ -53,17 +58,74 @@ s32 ValidateBuffers(OrbisNgs2Handle h_system, const OrbisNgs2RenderBufferInfo* p
     return ORBIS_OK;
 }
 
-bool HasVoiceInUse(const System& system) {
-    for (const Rack* p_first : system.p_first_rack) {
-        for (const Rack* p_rack = p_first; p_rack; p_rack = p_rack->p_next) {
-            for (u32 i_voice = 0; i_voice < p_rack->limits.max_voices; ++i_voice) {
-                if (p_rack->p_voices[i_voice].control.load(std::memory_order_relaxed) & VOICE_FLAG_IN_USE) {
-                    return true;
-                }
+// Denormals would stall the decaying filters and envelopes; the firmware flushes them to zero for
+// the render (spec 04 §1.4).
+class FlushDenormals {
+public:
+#if defined(__SSE__)
+    FlushDenormals() : m_csr{_mm_getcsr()} {
+        _mm_setcsr(m_csr | 0x8000);
+    }
+    ~FlushDenormals() {
+        _mm_setcsr(m_csr);
+    }
+
+private:
+    unsigned m_csr;
+#endif
+};
+
+template <class T>
+void SwapSamples(void* p_buffer, std::size_t c_samples) {
+    auto* p_samples = static_cast<T*>(p_buffer);
+    for (std::size_t i = 0; i < c_samples; ++i) {
+        p_samples[i] = std::byteswap(p_samples[i]);
+    }
+}
+
+void RenderGrain(RenderContext& context) {
+    System* p_system = context.p_system;
+    const bool can_flush = p_system->flush_lock.TryLock();
+    for (Rack* p_first : p_system->p_first_rack) {
+        for (Rack* p_rack = p_first; p_rack; p_rack = p_rack->p_next) {
+            FlushRack(p_system, p_rack, can_flush);
+        }
+    }
+    if (can_flush) {
+        if (p_system->is_topology_dirty) {
+            OrderGraph(p_system);
+        }
+        p_system->flush_lock.Unlock();
+    }
+    {
+        FlushDenormals flush_denormals;
+        for (Rack* p_rack = p_system->p_first_rack[RACK_CLASS_SOURCE]; p_rack; p_rack = p_rack->p_next) {
+            for (Voice* p_voice = p_rack->p_first_active; p_voice; p_voice = p_voice->p_next_active) {
+                ProcessVoice(context, p_voice);
+            }
+        }
+        for (Voice* p_voice = p_system->p_first_ordered; p_voice; p_voice = p_voice->p_next_ordered) {
+            if (p_voice->is_active) {
+                ProcessVoice(context, p_voice);
             }
         }
     }
-    return false;
+    for (u32 i_buffer = 0; i_buffer < context.c_buffers; ++i_buffer) {
+        const OrbisNgs2RenderBufferInfo& buffer = context.p_buffers[i_buffer];
+        const std::size_t c_samples = std::size_t(context.c_grain_samples) * buffer.numChannels;
+        if (!(context.written_mask & (1u << i_buffer))) {
+            std::memset(buffer.buffer, 0, c_samples * BytesPerSample(buffer.waveformType));
+        } else if (buffer.waveformType == 0x13) {
+            SwapSamples<u16>(buffer.buffer, c_samples);
+        } else if (buffer.waveformType == 0x19) {
+            SwapSamples<u32>(buffer.buffer, c_samples);
+        }
+    }
+    for (Rack* p_first : p_system->p_first_rack) {
+        for (Rack* p_rack = p_first; p_rack; p_rack = p_rack->p_next) {
+            PostRack(p_rack);
+        }
+    }
 }
 
 s64 NowMicroseconds() {
@@ -91,22 +153,17 @@ s32 PS4_SYSV_ABI sceNgs2SystemRender(OrbisNgs2Handle h_system, const OrbisNgs2Re
     const u32 num_grain_samples = p_system->num_grain_samples;
     const u32 sample_rate_hz = p_system->sample_rate_hz;
     const s32 result = ValidateBuffers(h_system, p_buffers, c_buffers, num_grain_samples);
-    for (u32 i_buffer = 0; i_buffer < c_buffers; ++i_buffer) {
-        const OrbisNgs2RenderBufferInfo& buffer = p_buffers[i_buffer];
-        if (!buffer.buffer) {
-            continue;
+    if (result < 0) {
+        // A failed render clears every buffer as the game declared it.
+        for (u32 i_buffer = 0; i_buffer < c_buffers; ++i_buffer) {
+            if (p_buffers[i_buffer].buffer) {
+                std::memset(p_buffers[i_buffer].buffer, 0, p_buffers[i_buffer].bufferSize);
+            }
         }
-        // A failed render clears every buffer as the game declared it; a good one clears the grain
-        // each output holds when no voice wrote to it.
-        const std::size_t cb_grain =
-            std::size_t(num_grain_samples) * buffer.numChannels * BytesPerSample(buffer.waveformType);
-        std::memset(buffer.buffer, 0, result < 0 ? buffer.bufferSize : cb_grain);
-    }
-    if (result >= 0) {
-        if (HasVoiceInUse(*p_system)) {
-            static std::uint64_t s_c_uses;
-            NoteUnimplemented(&s_c_uses, "sceNgs2SystemRender: voice processing (renders silence until F3)");
-        }
+    } else {
+        RenderContext context{p_system, p_buffers, c_buffers, 0, num_grain_samples, sample_rate_hz,
+                              static_cast<float*>(p_system->p_grain_work)};
+        RenderGrain(context);
         const double elapsed_s = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
         p_system->last_render_ratio = float(elapsed_s * sample_rate_hz / num_grain_samples);
         p_system->last_render_tick_us = NowMicroseconds();

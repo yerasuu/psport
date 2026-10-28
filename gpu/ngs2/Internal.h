@@ -12,6 +12,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <type_traits>
 #include <utility>
 
 #include <fmt/format.h>
@@ -22,6 +23,10 @@
 #include "core/libraries/ngs2/ngs2_custom.h"
 #include "core/libraries/ngs2/ngs2_error.h"
 #include "core/libraries/ngs2/ngs2_report.h"
+#include "core/libraries/ngs2/ngs2_sampler.h"
+
+#include "Dsp.h"
+#include "VoiceData.h"
 
 namespace Libraries::Ngs2 {
 
@@ -193,6 +198,7 @@ static_assert(sizeof(VoiceMatrix) == 0x104);
 struct VoicePort {
     OrbisNgs2Handle h_dest;
     u32 dest_rack_uid;
+    u32 i_dest_voice;
     u32 i_dest_input;
     u32 delay_samples;
     float volume;
@@ -211,7 +217,9 @@ enum VoiceControlBits : u32 {
     VOICE_PENDING_KILL = 0x800,
     VOICE_PENDING_PAUSE = 0x1000,
     VOICE_PENDING_RESUME = 0x2000,
+    VOICE_PENDING_EVENTS = 0xffff00,
     VOICE_INITIAL_STATE = 0x20000000,
+    VOICE_PENDING_SETUP = 0x40000000,
     VOICE_BUSY = 0x80000000,
 };
 
@@ -219,13 +227,59 @@ struct Voice {
     HandleBlock handle;
     Rack* p_rack;
     std::atomic<u32> control;
-    bool is_dirty;
+    std::atomic<bool> is_dirty;
     OrbisNgs2VoiceCallbackHandler pfn_callback;
     uintptr_t callback_data;
     u32 callback_flags;
     VoiceMatrix* p_matrices;
     VoicePort* p_ports;
+    // Under the voice lock: what VoiceControl sets and the voice state the game reads.
+    u32 c_channel_works;
+    VoiceParams* p_params;
+    FilterParams* p_filters;
+    MasteringMatrices* p_mastering_matrices;
+    WaveformQueue queue;
+    u8* p_state;
+    // The render's own, under the system's process lock.
+    VoiceParams* p_active_params;
+    FilterParams* p_active_filters;
+    MasteringMatrices* p_active_mastering_matrices;
+    MasteringMatrices* p_previous_mastering_matrices;
+    VoiceDsp* p_dsp;
+    BiquadState* p_filter_states;
+    PeakMeterState meters[2];
+    ActivePort* p_active_ports;
+    float* p_matrix_levels;
+    float* p_previous_matrix_levels;
+    bool* p_matrix_is_set;
+    float* p_input_ring;
+    bool* p_input_started;
+    Voice* p_next_active;
+    Voice* p_prev_active;
+    Voice* p_next_ordered;
+    Voice* p_graph_parent;
+    GraphCursor graph_cursor;
+    OrbisNgs2VoiceCallbackHandler pfn_active_callback;
+    uintptr_t active_callback_data;
+    u32 active_callback_flags;
+    u32 flags;
+    u32 grain_events;
+    u32 c_in_channels;
+    u32 c_out_channels;
+    GraphMark graph_mark;
+    bool is_active;
+    bool is_first_grain;
+    bool are_params_changed;
+    bool is_in_cycle;
 };
+
+struct QueuedCallback {
+    OrbisNgs2VoiceCallbackHandler pfn_handler;
+    OrbisNgs2VoiceCallbackInfo info;
+};
+
+// The rack queues these by copy.
+static_assert(std::is_trivially_copyable_v<QueuedCallback> && sizeof(QueuedCallback) == 0x40);
 
 // Holds the voice's busy bit, the firmware's per-voice spinlock, for a whole VoiceControl chain or
 // a state read.
@@ -256,6 +310,22 @@ struct Rack {
     RecursiveLock flush_lock;
     std::atomic<u32> c_flush_locks;
     Voice* p_voices;
+    // Channel works reserved by PLAY (spec 03 §1.3): the rack's pool, and one per input for the
+    // racks with inputs.
+    std::atomic<u32> c_channel_works_used;
+    std::atomic<u32> c_input_works_used[2];
+    std::atomic<u32> c_active_voices;
+    std::atomic<s64> c_renders;
+    // The render's own, under the system's process lock.
+    u32 c_input_blocks;
+    u32 i_input_block;
+    Voice* p_first_active;
+    Voice* p_last_active;
+    float* p_decode_scratch;
+    u32 c_decode_stride;
+    QueuedCallback* p_callbacks;
+    u32 c_callbacks;
+    u32 c_callback_capacity;
 };
 
 struct System {
@@ -285,6 +355,9 @@ struct System {
     System* p_next;
     System* p_prev;
     void* p_grain_work;
+    // The class 1 and 2 voices in graph order (spec 04 §1.3), rebuilt when the topology changes.
+    Voice* p_first_ordered;
+    bool is_topology_dirty;
 };
 
 // sceNgs2SystemGetInfo stateFlags (spec 01 §5).
@@ -326,7 +399,79 @@ s32 Fail(OrbisNgs2Handle h_object, s32 code, fmt::format_string<Args...> format,
 // Logs the first use of something the native Ngs2 accepts but does not do yet, and counts every use
 // in the call report, so that nothing it skips is silent.
 void NoteUnimplemented(std::uint64_t* p_c_uses, const char* sz_what);
+// Logs the first time the render drops something as the firmware does (a full callback queue, an
+// output to a buffer the render was not given), and counts every time in the call report.
+void NoteDropped(std::uint64_t* p_c_uses, const char* sz_what);
 bool IsCompiledSdkAtLeast(u32 version);
+
+// One sceNgs2SystemRender (spec 04 §1.4): the game's buffers, the grain, and the system's work area
+// split into sets of kMaxChannels planes.
+struct RenderContext {
+    System* p_system;
+    const OrbisNgs2RenderBufferInfo* p_buffers;
+    u32 c_buffers;
+    u32 written_mask;
+    u32 c_grain_samples;
+    u32 sample_rate_hz;
+    float* p_work;
+};
+
+enum WorkSet : u32 {
+    WORK_VOICE = 0,
+    WORK_PORT = 1,
+    WORK_MATRIX = 2,
+    WORK_SETS = 3,
+};
+Planes WorkPlanes(const RenderContext& context, WorkSet set);
+
+// The racks' own VoiceControl parameters (spec 03 §5), under the voice lock; the id's family has
+// been checked.
+s32 ControlSampler(OrbisNgs2Handle h_voice, Voice* p_voice, const OrbisNgs2VoiceParamHeader* p_param);
+s32 ControlSubmixer(OrbisNgs2Handle h_voice, Voice* p_voice, const OrbisNgs2VoiceParamHeader* p_param);
+s32 ControlMastering(OrbisNgs2Handle h_voice, Voice* p_voice, const OrbisNgs2VoiceParamHeader* p_param);
+s32 InvalidControlSize(OrbisNgs2Handle h_voice, const OrbisNgs2VoiceParamHeader* p_param, u32 cb_expected);
+s32 InvalidControlId(OrbisNgs2Handle h_voice, const OrbisNgs2VoiceParamHeader* p_param);
+
+// The modules the sampler and the submixer share (ModuleParams.cpp); the submixer's parameters have
+// the sampler's layout (Abi.cpp).
+s32 SetEnvelope(OrbisNgs2Handle h_voice, const Voice& voice, const OrbisNgs2SamplerVoiceEnvelopeParam* p_param,
+                EnvelopeParams* p_out);
+void ReadEnvelope(const EnvelopeParams& envelope, OrbisNgs2SamplerVoiceEnvelopeParam* p_param);
+void SetDistortion(const OrbisNgs2SamplerVoiceDistortionParam* p_param, DistortionParams* p_out);
+void ReadDistortion(const DistortionParams& distortion, OrbisNgs2SamplerVoiceDistortionParam* p_param);
+void SetUserFx(const OrbisNgs2SamplerVoiceUserFxParam* p_param, UserFxParams* p_out);
+void ReadUserFx(const UserFxParams& user_fx, OrbisNgs2SamplerVoiceUserFxParam* p_param);
+s32 SetPeakMeter(OrbisNgs2Handle h_voice, const OrbisNgs2SamplerVoicePeakMeterParam* p_param, u32* p_out_mode);
+s32 SetFilter(OrbisNgs2Handle h_voice, const Voice& voice, const OrbisNgs2SamplerVoiceFilterParam* p_param);
+s32 ReadFilter(OrbisNgs2Handle h_voice, const Voice& voice, OrbisNgs2SamplerVoiceFilterParam* p_param);
+
+// The render's steps (Graph.cpp), under the system's process lock.
+void FlushRack(System* p_system, Rack* p_rack, bool can_flush);
+void OrderGraph(System* p_system);
+void ProcessVoice(RenderContext& context, Voice* p_voice);
+void PostRack(Rack* p_rack);
+// Drops every reference the render holds to a rack's voices before the rack leaves its system.
+void ForgetRackVoices(System* p_system, Rack* p_rack);
+void QueueVoiceCallback(Voice* p_voice, u32 type, const WaveformBlock& block, u32 c_repeats);
+// Gives a voice's channel works back to its rack's pools; under the voice lock.
+void ReleaseChannelWorks(Voice* p_voice);
+
+// The racks' processing of one voice over a grain; *p_event_code is the grain's event code (spec 04
+// §2.1), which the envelope may take over.
+void ProcessSamplerVoice(RenderContext& context, Voice* p_voice, u32* p_event_code);
+void ProcessSubmixerVoice(RenderContext& context, Voice* p_voice, u32* p_event_code);
+void ProcessMasteringVoice(RenderContext& context, Voice* p_voice, u32* p_event_code);
+void ResetSource(Voice* p_voice);
+
+// Ports, inputs and outputs (Mixer.cpp, 0x265a0, 0x26210, 0x27060).
+void ApplyEventCode(const Planes& planes, u32 c_channels, u32 c_samples, u32 event_code);
+void MixPorts(RenderContext& context, Voice* p_voice, const Planes& planes, u32 c_channels);
+Planes ReadInput(RenderContext& context, Voice* p_voice, u32 i_input);
+void WriteRenderBuffer(RenderContext& context, u32 i_buffer, const Planes& planes, u32 c_channels);
+void ExpandVoiceMatrices(Voice* p_voice);
+void ResetMasteringMatrices(MasteringMatrices* p_matrices);
+// The class of a channel count in the fixed matrix tables: 1, 2, 6, 8 channels are 0 to 3.
+s32 ChannelClass(u32 c_channels);
 
 s32 PS4_SYSV_ABI sceNgs2SystemQueryBufferSize(const OrbisNgs2SystemOption* p_option,
                                               OrbisNgs2ContextBufferInfo* p_out_info);
