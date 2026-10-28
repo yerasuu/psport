@@ -326,6 +326,7 @@ s32 Fail(OrbisNgs2Handle h_object, s32 code, fmt::format_string<Args...> format,
 // Logs the first use of something the native Ngs2 accepts but does not do yet, and counts every use
 // in the call report, so that nothing it skips is silent.
 void NoteUnimplemented(std::uint64_t* p_c_uses, const char* sz_what);
+bool IsCompiledSdkAtLeast(u32 version);
 
 s32 PS4_SYSV_ABI sceNgs2SystemQueryBufferSize(const OrbisNgs2SystemOption* p_option,
                                               OrbisNgs2ContextBufferInfo* p_out_info);

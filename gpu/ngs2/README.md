@@ -21,6 +21,7 @@ parity (kb #625, decision #809).
 | `Rack.cpp` | `sceNgs2Rack*` and `sceNgs2CustomRackGetModuleInfo` |
 | `VoiceControl.cpp` | `sceNgs2VoiceControl` and the parameters every rack shares |
 | `Voice.cpp` | the voice queries: state, flags, owner, matrix and port information |
+| `Dsp.h`, `Gain.cpp`, `Envelope.cpp`, `Filter.cpp`, `Limiter.cpp`, `PeakMeter.cpp` | the DSP modules: ramps, distortion, channel matrix, envelope, biquad and LFE filters, compressor and limiter, peak meter |
 
 Phase F2 (kb #1094) implements the system, rack, voice and report API: the validation order and
 error codes of each export, the game's buffers and allocators, handles, locks, user data,

@@ -5,6 +5,7 @@
 #include <thread>
 
 #include "Internal.h"
+#include "core/libraries/kernel/process.h"
 
 namespace Libraries::Ngs2 {
 
@@ -165,6 +166,17 @@ void NoteUnimplemented(std::uint64_t* p_c_uses, const char* sz_what) {
         Common::Log::Stubbed(sz_what, p_c_uses);
         LOG_ERROR(Lib_Ngs2, "{}: not implemented by the native Ngs2 yet", sz_what);
     }
+}
+
+// Some behaviour depends on the SDK the title was built with (spec 04 §5); without an answer the
+// native Ngs2 behaves as for current SDKs.
+bool IsCompiledSdkAtLeast(u32 version) {
+    static const u32 s_sdk_version = [] {
+        s32 sdk_version = 0;
+        return Libraries::Kernel::sceKernelGetCompiledSdkVersion(&sdk_version) == ORBIS_OK ? u32(sdk_version)
+                                                                                            : 0xffffffffu;
+    }();
+    return s_sdk_version >= version;
 }
 
 } // namespace Libraries::Ngs2
