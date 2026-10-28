@@ -181,7 +181,7 @@ while ((${#pending[@]})); do
 done
 for program in "${programs[@]}"; do install -m755 -- "$program" "$bundle/"; done
 if [[ -f $out/gpu/libpsport-net.dll ]]; then
-    echo "bundle: online module libpsport-net.dll left out: it links OpenSSL and abseil (Apache-2.0), not redistributable with GPL-2.0 psport until kb #850"
+    echo "bundle: online module libpsport-net.dll left out: not released yet (kb #850)"
 fi
 if $is_local; then kept='kept (PS_BUNDLE_LOCAL=1: this package must not be redistributed)'; else kept='left out'; fi
 for dll in "${left_out[@]}"; do

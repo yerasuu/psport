@@ -7,7 +7,8 @@
 { pkgs ? import ./nixpkgs.nix
 , storePaths ? ""
 , packages ? [ ]
-  # The online module's own code (cpp-httplib), for a local bundle that keeps libpsport-net.so.
+  # The online module's own code (cpp-httplib, nlohmann_json), for a local bundle that keeps
+  # libpsport-net.so.
 , withNet ? false
 }:
 let
@@ -15,7 +16,8 @@ let
   shell = import ../shell.nix { inherit pkgs; };
   port = import ./port.nix { inherit pkgs; };
   # Header-only or static: in psport's binaries, never in lib/ (gpu/CMakeLists.txt).
-  compiledIn = with pkgs; [ boost magic-enum robin-map vulkan-memory-allocator vulkan-headers zydis miniz ];
+  compiledIn = with pkgs; [ boost magic-enum robin-map vulkan-memory-allocator vulkan-headers zydis miniz ]
+    ++ lib.optional withNet pkgs.nlohmann_json;
   dependencies = d: lib.filter lib.isDerivation (lib.flatten [ (d.buildInputs or [ ]) (d.propagatedBuildInputs or [ ]) ]);
   key = d: builtins.unsafeDiscardStringContext d.drvPath;
   # The runtime libraries are among the build inputs of what shell.nix lists, plus the compiler's
@@ -66,6 +68,12 @@ let
     vulkan-headers = {
       licences = [ { spdx = "Apache-2.0 OR MIT"; name = ""; } ];
       note = "the headers compiled in (include/) are Apache-2.0 OR MIT; psport uses them under the MIT";
+    };
+    # Every file is "Apache-2.0 OR GPL-2.0-or-later" (its headers' SPDX lines); nixpkgs lists both
+    # licences as if both applied. The online module links it (kb #850).
+    mbedtls = {
+      licences = [ { spdx = "Apache-2.0 OR GPL-2.0-or-later"; name = ""; } ];
+      note = "dual-licensed Apache-2.0 OR GPL-2.0-or-later; psport uses it under the GPL-2.0-or-later";
     };
     libglvnd = {
       note = "its libraries are MIT (its own code, Mesa's, X.Org's list.h, cJSON) and BSD-1-Clause "

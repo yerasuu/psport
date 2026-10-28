@@ -12,8 +12,9 @@ let
   # FSR 4.1.1 models are extracted from AMD's DLLs: never in a public package. PS_PACKAGE_FSR411=1
   # (appimage.sh runs nix with --impure) bundles the local fsr4_411 for one's own devices.
   fsr411 = builtins.getEnv "PS_PACKAGE_FSR411" == "1";
-  # The online module links OpenSSL and abseil (Apache-2.0), which GPL-2.0 psport can't ship until
-  # kb #850 replaces them: PS_PACKAGE_NET=1 (appimage.sh) packages it for one's own devices.
+  # The online module links neither OpenSSL nor abseil since kb #850, but stays out until online play
+  # over mbedTLS is checked and its release decided: PS_PACKAGE_NET=1 (appimage.sh) packages it for
+  # one's own devices.
   withNet = builtins.getEnv "PS_PACKAGE_NET" == "1";
   # The FSR 4 v07 assets (fsr4_shaders) are not redistributed: tools/fetch_fsr4_assets.sh fetches
   # them into the data directory, where run.sh finds them.

@@ -303,7 +303,8 @@ if [[ ${PS_ONLINE:-0} == 1 && -f scripts/online.py ]]; then
     fi
     if [[ -z ${PYTHON:-} ]]; then echo 'Online play (PS_ONLINE=1) needs Python 3: install it or set PYTHON.' >&2; exit 1; fi
     export PS_SHADNET_SERVER=${PS_SHADNET_SERVER:-play.seamlesshunt.com:31313}
-    # HTTPS needs CA certificates: OpenSSL from Nix looks only in its own store path (the
+    # HTTPS needs CA certificates: the online module reads them from SSL_CERT_FILE, else from the
+    # usual system paths, which the AppImage on NixOS can't follow into the host's store (the
     # packaged wrapper brings a bundle; from source the system's is taken).
     if [[ ! -r ${SSL_CERT_FILE:-} ]]; then
         for bundle in "${NIX_SSL_CERT_FILE:-}" /etc/ssl/certs/ca-certificates.crt /etc/pki/tls/certs/ca-bundle.crt /etc/ssl/cert.pem /etc/ssl/ca-bundle.pem; do

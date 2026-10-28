@@ -2,8 +2,8 @@
 # is laid out as a checkout after build.sh (run.sh, scripts/, patches/, out/psport,
 # out/psport-gpu-capabilities, out/gpu/), so run.sh runs from it with PS_PREBUILT=1 and
 # PS_PROBE=<output>/out/psport. CI publishes it to the binary cache (tools/nix_cache.sh) with
-# withNet = false: the online module (libpsport-net.so) links OpenSSL and abseil (Apache-2.0), which
-# GPL-2.0 psport can't redistribute until kb #850, so the public cache leaves it and their closure out.
+# withNet = false: the public cache leaves the online module (libpsport-net.so) out until its release
+# (kb #850: it links mbedTLS instead of OpenSSL and abseil, and online play over it is not checked yet).
 # `nix-build packaging/port.nix [--arg withNet false]`
 { pkgs ? import ./nixpkgs.nix
 , withNet ? true

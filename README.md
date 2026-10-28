@@ -133,9 +133,10 @@ Vulkan drivers:
 PS_DATA_DIR=<writable folder> PS_GAME_DIR=/path/to/dump bash <extracted folder>/run.sh
 ```
 
-The bundle has no online module (`libpsport-net.so`): it links OpenSSL and abseil, under the
-Apache-2.0, which can't be distributed with psport's GPL-2.0, so the bundle plays offline until
-they are replaced; online play (`PS_ONLINE=1`) needs a build from source. It doesn't carry the
+The bundle has no online module (`libpsport-net.so`) yet: it no longer links OpenSSL, abseil or
+protobuf (Apache-2.0, which can't be distributed with psport's GPL-2.0) but mbedTLS under its
+GPL-2.0-or-later option, and it stays out until online play over it is checked; until then online
+play (`PS_ONLINE=1`) needs a build from source. It doesn't carry the
 Vulkan loader either: it uses the host's `libvulkan.so.1`, so a host without one in its library
 directories can't start it (NixOS keeps none in `/run/opengl-driver/lib`).
 

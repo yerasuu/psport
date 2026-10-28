@@ -13,9 +13,9 @@ net=
 if [[ -f out/gpu/libpsport-net.so ]]; then
     if [[ ${PS_PACKAGE_NET:-0} == 1 ]]; then
         net=out/gpu/libpsport-net.so
-        echo 'appimage: online module libpsport-net.so included (PS_PACKAGE_NET=1): it links OpenSSL and abseil (Apache-2.0), so this AppImage must not be redistributed'
+        echo 'appimage: online module libpsport-net.so included (PS_PACKAGE_NET=1): not released yet (kb #850), so this AppImage must not be redistributed'
     else
-        echo 'appimage: online module libpsport-net.so left out: it links OpenSSL and abseil (Apache-2.0), not redistributable with GPL-2.0 psport until kb #850; PS_PACKAGE_NET=1 keeps it for local use'
+        echo 'appimage: online module libpsport-net.so left out: not released yet (kb #850: online play over mbedTLS still to be checked); PS_PACKAGE_NET=1 keeps it for local use'
     fi
 fi
 # The libraries' store paths: for each library a binary needs (NEEDED), the RUNPATH directory it

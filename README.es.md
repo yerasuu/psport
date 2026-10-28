@@ -138,10 +138,10 @@ con los controladores Vulkan del propio sistema:
 PS_DATA_DIR=<carpeta escribible> PS_GAME_DIR=/ruta/al/volcado bash <carpeta extraída>/run.sh
 ```
 
-El paquete no lleva el módulo en línea (`libpsport-net.so`): enlaza OpenSSL y abseil, con licencia
-Apache-2.0, que no se pueden distribuir junto a la GPL-2.0 de psport, así que el paquete solo juega
-sin conexión hasta que se sustituyan; para jugar en línea (`PS_ONLINE=1`) hay que compilar desde el
-código fuente. Tampoco lleva el cargador de Vulkan: usa el `libvulkan.so.1` del sistema, así que no
+El paquete aún no lleva el módulo en línea (`libpsport-net.so`): ya no enlaza OpenSSL, abseil ni
+protobuf (Apache-2.0, que no se puede distribuir junto a la GPL-2.0 de psport), sino mbedTLS con su
+opción GPL-2.0-or-later, y queda fuera hasta que se compruebe el juego en línea con él; mientras
+tanto, para jugar en línea (`PS_ONLINE=1`) hay que compilar desde el código fuente. Tampoco lleva el cargador de Vulkan: usa el `libvulkan.so.1` del sistema, así que no
 arranca en un sistema que no lo tenga en sus carpetas de bibliotecas (NixOS no tiene ninguno en
 `/run/opengl-driver/lib`).
 

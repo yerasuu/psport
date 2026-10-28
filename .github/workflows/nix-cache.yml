@@ -31,8 +31,8 @@ jobs:
         run: |
           version=$(<VERSION)
           if [[ v$version != "$TAG" ]]; then echo "::error::$TAG does not match VERSION ($version)"; exit 1; fi
-      # The public cache leaves the online module out (it links OpenSSL and abseil, Apache-2.0) until
-      # kb #850; local builds keep it (withNet defaults to true).
+      # The public cache leaves the online module out until its release (kb #850); local builds keep
+      # it (withNet defaults to true).
       - name: Build
         run: nix-build packaging/port.nix --arg withNet false --out-link result
       - name: Check the build's licences

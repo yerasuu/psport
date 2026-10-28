@@ -3,9 +3,10 @@
 # PORT (nix-build packaging/port.nix, or a directory laid out the same) that runs without Nix: its
 # programs, every library they link from the store, and the store's glibc loader, with LICENSE,
 # THIRD-PARTY-NOTICES and SOURCES.txt (packaging/licences.nix). psport is GPL-2.0 (kb #843), so
-# nothing under the Apache-2.0 goes in: the Vulkan loader is the host's, and the online module
-# (libpsport-net.so: OpenSSL, abseil) stays out until kb #850 replaces them; PS_BUNDLE_NET=1 keeps
-# it for a bundle that is not redistributed.
+# nothing under the Apache-2.0 goes in: the Vulkan loader is the host's. The online module
+# (libpsport-net.so) links neither OpenSSL nor abseil since kb #850 (mbedTLS under its
+# GPL-2.0-or-later option, miniupnpc, zlib), but stays out until online play is checked and its
+# release decided; PS_BUNDLE_NET=1 keeps it for a bundle that is not redistributed.
 # The bundle's programs keep starting as programs, not through `ld.so --library-path`, since a
 # loader started as the program puts the brk heap at ~85 TiB, where psport's non-PIE binary can't
 # hand heap pointers to the guest (40 bits). Instead each program's PT_INTERP names the bundled
@@ -36,9 +37,9 @@ if [[ -f $port/out/gpu/libpsport-net.so ]]; then
     if [[ ${PS_BUNDLE_NET:-0} == 1 ]]; then
         install -m755 "$port/out/gpu/libpsport-net.so" "$bundle/out/gpu/"
         is_with_net=true
-        echo "bundle: online module libpsport-net.so included (PS_BUNDLE_NET=1): it links OpenSSL and abseil (Apache-2.0), so this bundle must not be redistributed"
+        echo "bundle: online module libpsport-net.so included (PS_BUNDLE_NET=1): not released yet (kb #850), so this bundle must not be redistributed"
     else
-        echo "bundle: online module libpsport-net.so left out: it links OpenSSL and abseil (Apache-2.0), not redistributable with GPL-2.0 psport until kb #850; PS_BUNDLE_NET=1 keeps it for local use"
+        echo "bundle: online module libpsport-net.so left out: not released yet (kb #850: online play over mbedTLS still to be checked); PS_BUNDLE_NET=1 keeps it for local use"
     fi
 fi
 chmod -R u+w "$bundle"

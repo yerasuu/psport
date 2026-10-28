@@ -801,7 +801,8 @@ with `build.sh`, LTO on, no PGO profile, nixpkgs pinned in `packaging/nixpkgs.ni
 revision.
 
 CI builds it with `--arg withNet false`: the public binary cache, like the bundle, has no online
-module (`libpsport-net.so`, which links OpenSSL and abseil, Apache-2.0) until kb #850, and its
+module (`libpsport-net.so`) until its release (kb #850: it links mbedTLS instead of OpenSSL, abseil
+and protobuf, and online play over it is not checked yet), and its
 `--list-features` reports `online_module` unavailable, so decanter hides online play for it.
 `nix-build packaging/port.nix` and `build.sh` keep the module (`PS_NET=OFF` leaves it out of
 `build.sh`'s). Before anything is published, `tools/check_bundle_licences.sh --port` checks the build
@@ -976,15 +977,15 @@ without them, as every one before this, is still fetched from the cache). It hol
 `out/gpu/` link from the store, with the store's glibc and its loader), `relocate.sh`, and
 `THIRD-PARTY-NOTICES` and `SOURCES.txt` from `packaging/licences.nix` (each library's licence and
 the licence files of its source, the code compiled in, and the written source offer). Since psport is
-GPL-2.0 (kb #843), nothing under the Apache-2.0 goes in: not the Vulkan loader, and not the online
-module `libpsport-net.so` (OpenSSL, abseil) until kb #850 (`PS_BUNDLE_NET=1` keeps it in a bundle
+GPL-2.0 (kb #843), nothing under the Apache-2.0 goes in: not the Vulkan loader; the online module
+`libpsport-net.so` stays out until its release (kb #850) (`PS_BUNDLE_NET=1` keeps it in a bundle
 for local use; `PS_PACKAGE_NET=1` does the same for the AppImage). `tools/check_bundle_licences.sh`,
 run by `bundle.sh` and again by the job on the archive, fails the release when the bundle's tree
-holds OpenSSL, abseil, the Vulkan loader, x264, x265, xvidcore, libssh, SRT, GnuTLS, RIST,
+holds OpenSSL, abseil, protobuf, the Vulkan loader, x264, x265, xvidcore, libssh, SRT, GnuTLS, RIST,
 libunistring (LGPL-3.0-or-later in nixpkgs) or the online module, when `THIRD-PARTY-NOTICES` lists a
 GPL-3.0-only library, when libavutil is missing, reports version 3 or no licence, or when LICENSE,
-THIRD-PARTY-NOTICES or SOURCES.txt is missing; with `PS_BUNDLE_NET=1` it allows only the online
-module, OpenSSL and abseil. `licences.nix` fails when a GPL, LGPL or MPL component has no licence
+THIRD-PARTY-NOTICES or SOURCES.txt is missing; with `PS_BUNDLE_NET=1` it allows the online module
+and nothing else (it links mbedTLS, taken under the GPL-2.0-or-later, miniupnpc and zlib). `licences.nix` fails when a GPL, LGPL or MPL component has no licence
 text or no source URL. It runs
 from wherever it is extracted, writable, as `PS_DATA_DIR=<writable folder> bash <path>/run.sh` with the
 host's own Vulkan drivers: `run.sh` sees `relocate.sh`, takes the build as prebuilt and runs it first.

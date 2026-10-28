@@ -5,10 +5,10 @@
 # only links when built with gpl), libssh, SRT, GnuTLS, RIST (what brings OpenSSL or LGPL-3 in), an
 # FFmpeg built with version3 or whose licence can't be read, libunistring or another GPL-3.0-only
 # library (THIRD-PARTY-NOTICES: nixpkgs lists the licences of every part of a source, so a library
-# counts only when that is all it lists or an AND names it), or the online module, which links
-# OpenSSL and abseil until kb #850; or when it lacks LICENSE, THIRD-PARTY-NOTICES or SOURCES.txt.
-# PS_BUNDLE_NET=1 (a bundle kept for local use) allows the online module and the OpenSSL and
-# abseil it links, and nothing else.
+# counts only when that is all it lists or an AND names it), protobuf (which brings abseil), or the
+# online module, not released yet (kb #850); or when it lacks LICENSE, THIRD-PARTY-NOTICES or
+# SOURCES.txt. PS_BUNDLE_NET=1 (a bundle kept for local use) allows the online module, and nothing
+# else: since kb #850 it links mbedTLS instead of OpenSSL, abseil and protobuf.
 # --port checks a port build in the store (packaging/port.nix with withNet = false, what the public
 # binary cache publishes) the same way: the build and every library its programs and modules link,
 # as they resolve in the store, except nixpkgs' Vulkan loader, which a Nix build links by store path
@@ -21,7 +21,7 @@ if [[ ${1:-} == --port ]]; then is_port=true; shift; fi
 (($# == 1)) || { sed -n '2,17p' "$0" | cut -c3-; exit 2; }
 bundle=$1
 forbidden=('libx264.so*' 'libx265.so*' 'libxvidcore.so*' 'libssh.so*' 'libsrt.so*' 'libgnutls*.so*' 'librist.so*'
-    'libunistring.so*')
+    'libunistring.so*' 'libssl.so*' 'libcrypto.so*' 'libabsl_*.so*' 'libprotobuf*.so*' 'libutf8_validity.so*')
 if $is_port; then
     bundle=${bundle%/}
     [[ -f $bundle/LICENSE && -x $bundle/out/psport ]] || { echo "check_bundle_licences: not a port build: $1" >&2; exit 2; }
@@ -64,7 +64,7 @@ problems=()
 for file in "${required[@]}"; do
     [[ -s $bundle/$file ]] || problems+=("no $file")
 done
-[[ ${PS_BUNDLE_NET:-0} == 1 ]] || forbidden+=('libssl.so*' 'libcrypto.so*' 'libabsl_*.so*' libpsport-net.so)
+[[ ${PS_BUNDLE_NET:-0} == 1 ]] || forbidden+=(libpsport-net.so)
 names=()
 for pattern in "${forbidden[@]}"; do names+=(-o -name "$pattern"); done
 while IFS= read -r -d '' file; do
