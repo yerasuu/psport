@@ -52,9 +52,9 @@ struct Epoll {
     // psport: the host errno of a failed epoll_create1, which sceNetEpollCreate returns mapped.
     int create_errno{};
 
-    explicit Epoll(const char* name_) : name(name_), epoll_fd(epoll_create1(0)) {
+    explicit Epoll(const char* name_) : name(name_ != nullptr ? name_ : "anon"), epoll_fd(epoll_create1(0)) {
         if (name_ == nullptr) {
-            name = "anon";
+            LOG_ERROR_COUNTED(Lib_Net, "sceNetEpollCreate: null name, using \"anon\"");
         }
         if (!IsCreated()) {
             create_errno = errno;
