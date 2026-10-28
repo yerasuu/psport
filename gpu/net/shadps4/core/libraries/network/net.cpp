@@ -855,12 +855,41 @@ int PS4_SYSV_ABI sceNetEpollWait(OrbisNetId epollid, OrbisNetEpollEvent* events,
     int result = ORBIS_OK;
     if (sockets_waited_on) {
 #ifdef __linux__
-        const timespec epoll_timeout{.tv_sec = timeout / 1000000,
-                                     .tv_nsec = (timeout % 1000000) * 1000};
+        timespec epoll_timeout{.tv_sec = timeout / 1000000,
+                               .tv_nsec = (timeout % 1000000) * 1000};
+        timespec ts_deadline{};
+        clock_gettime(CLOCK_MONOTONIC, &ts_deadline);
+        ts_deadline.tv_sec += epoll_timeout.tv_sec;
+        ts_deadline.tv_nsec += epoll_timeout.tv_nsec;
+        if (ts_deadline.tv_nsec >= 1000000000) {
+            ++ts_deadline.tv_sec;
+            ts_deadline.tv_nsec -= 1000000000;
+        }
         std::atomic_ref c_waiters{epoll->c_waiters};
         ++c_waiters;
-        result = epoll_pwait2(epoll->epoll_fd, native_events.data(), maxevents,
-                              timeout < 0 ? nullptr : &epoll_timeout, nullptr);
+        // A host signal is not an abort: the firmware retries it with the time left, and only
+        // sceNetEpollAbort (EPOLL_ABORT_TAG) surfaces EINTR to the guest.
+        for (;;) {
+            result = epoll_pwait2(epoll->epoll_fd, native_events.data(), maxevents,
+                                  timeout < 0 ? nullptr : &epoll_timeout, nullptr);
+            if (result >= 0 || errno != EINTR) {
+                break;
+            }
+            if (timeout < 0) {
+                continue;
+            }
+            timespec ts_now{};
+            clock_gettime(CLOCK_MONOTONIC, &ts_now);
+            epoll_timeout.tv_sec = ts_deadline.tv_sec - ts_now.tv_sec;
+            epoll_timeout.tv_nsec = ts_deadline.tv_nsec - ts_now.tv_nsec;
+            if (epoll_timeout.tv_nsec < 0) {
+                --epoll_timeout.tv_sec;
+                epoll_timeout.tv_nsec += 1000000000;
+            }
+            if (epoll_timeout.tv_sec < 0) {
+                epoll_timeout = {};
+            }
+        }
         const bool is_aborted =
             result > 0 && std::ranges::any_of(native_events | std::views::take(result),
                                               [](const epoll_event& native_event) {
@@ -887,9 +916,6 @@ int PS4_SYSV_ABI sceNetEpollWait(OrbisNetId epollid, OrbisNetEpollEvent* events,
     if (result < 0) {
         LOG_ERROR(Lib_Net, "epoll_wait failed with {}", Common::GetLastErrorMsg());
         switch (errno) {
-        case EINTR:
-            *sceNetErrnoLoc() = ORBIS_NET_EINTR;
-            return ORBIS_NET_ERROR_EINTR;
         case EINVAL:
             *sceNetErrnoLoc() = ORBIS_NET_EINVAL;
             return ORBIS_NET_ERROR_EINVAL;
