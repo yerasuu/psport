@@ -189,6 +189,8 @@ struct RackLimits {
 struct System;
 struct Rack;
 struct Voice;
+struct ReverbParams;
+struct ReverbState;
 
 // One of a sampler rack's ATRAC9 decoders (spec 05 §6, 08 §2): LibAtrac9's state and the planes of the
 // frame it decoded last, both in the rack's buffer. The first maxAtrac9Decoders stand for the
@@ -250,6 +252,7 @@ struct Voice {
     VoiceParams* p_params;
     FilterParams* p_filters;
     MasteringMatrices* p_mastering_matrices;
+    ReverbParams* p_reverb_params;
     WaveformQueue queue;
     ActiveWaveformQueue active_queue;
     // The sampler's word of the rack's data lock bitmap and this voice's two bits in it.
@@ -261,6 +264,8 @@ struct Voice {
     FilterParams* p_active_filters;
     MasteringMatrices* p_active_mastering_matrices;
     MasteringMatrices* p_previous_mastering_matrices;
+    ReverbParams* p_active_reverb_params;
+    ReverbState* p_reverb;
     VoiceDsp* p_dsp;
     Atrac9Decoder* p_atrac9;
     BiquadState* p_filter_states;
@@ -499,6 +504,7 @@ Planes WorkPlanes(const RenderContext& context, WorkSet set);
 s32 ControlSampler(OrbisNgs2Handle h_voice, Voice* p_voice, const OrbisNgs2VoiceParamHeader* p_param);
 s32 ControlSubmixer(OrbisNgs2Handle h_voice, Voice* p_voice, const OrbisNgs2VoiceParamHeader* p_param);
 s32 ControlMastering(OrbisNgs2Handle h_voice, Voice* p_voice, const OrbisNgs2VoiceParamHeader* p_param);
+s32 ControlReverb(OrbisNgs2Handle h_voice, Voice* p_voice, const OrbisNgs2VoiceParamHeader* p_param);
 s32 InvalidControlSize(OrbisNgs2Handle h_voice, const OrbisNgs2VoiceParamHeader* p_param, u32 cb_expected);
 s32 InvalidControlId(OrbisNgs2Handle h_voice, const OrbisNgs2VoiceParamHeader* p_param);
 // 0xc001 (ModuleRead.cpp), under the voice lock.
@@ -540,6 +546,7 @@ void ReleaseChannelWorks(Voice* p_voice);
 void ProcessSamplerVoice(RenderContext& context, Voice* p_voice, u32* p_event_code);
 void ProcessSubmixerVoice(RenderContext& context, Voice* p_voice, u32* p_event_code);
 void ProcessMasteringVoice(RenderContext& context, Voice* p_voice, u32* p_event_code);
+void ProcessReverbVoice(RenderContext& context, Voice* p_voice, u32* p_event_code);
 void ResetSource(Voice* p_voice);
 // The bytes a rack lays out for one ATRAC9 decoder's state, 16-byte aligned.
 std::size_t GetAtrac9StateSize();

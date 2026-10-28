@@ -4,12 +4,14 @@
 // render keeps for a voice: parameters, DSP state, input rings, the waveform queue, and a sampler's
 // ATRAC9 decoders. QueryBufferSize answers what this layout needs, which differs from the console's sum
 // (spec 08 §2): LibAtrac9's state is about 90 KiB a decoder where the firmware's takes 0xF0 bytes plus
-// 0x280 per channel work.
+// 0x280 per channel work. A reverb voice's delay lines take what the firmware's module 0x1b sizes for them
+// (spec 07 §1) plus one float.
 #include <algorithm>
 #include <cstring>
 #include <new>
 
 #include "Internal.h"
+#include "Reverb.h"
 #include "core/libraries/ngs2/ngs2_mastering.h"
 #include "core/libraries/ngs2/ngs2_reverb.h"
 #include "core/libraries/ngs2/ngs2_sampler.h"
@@ -19,6 +21,7 @@ namespace Libraries::Ngs2 {
 namespace {
 
 constexpr u32 kSamplerRackId = 0x1000;
+constexpr u32 kReverbRackId = 0x2001;
 constexpr u32 kMasteringRackId = 0x3000;
 constexpr u32 kRackFlagCallbacks = 0x40000000;
 constexpr u32 kDefaultLfeCutoffHz = 120;
@@ -41,6 +44,9 @@ struct VoiceBlocks {
     FilterParams* p_active_filters;
     BiquadState* p_filter_states;
     MasteringMatrices* p_mastering[3];
+    ReverbParams* p_reverb_params[2];
+    ReverbState* p_reverb;
+    float* p_reverb_lines;
     VoiceDsp* p_dsp;
     float* p_meter_rings;
     ActivePort* p_active_ports;
@@ -69,6 +75,16 @@ VoiceBlocks AllocateVoiceBlocks(Arena* p_arena, const RackKind& kind, const Rack
         for (MasteringMatrices*& p_matrices : blocks.p_mastering) {
             p_matrices = AllocateArray<MasteringMatrices>(p_arena, 1);
         }
+    }
+    if (kind.rack_id == kReverbRackId) {
+        for (ReverbParams*& p_params : blocks.p_reverb_params) {
+            p_params = AllocateArray<ReverbParams>(p_arena, 1);
+        }
+        blocks.p_reverb = AllocateArray<ReverbState>(p_arena, 1);
+        const ReverbSizes sizes = GetReverbSizes(limits.reverb_size);
+        const std::size_t c_floats = std::size_t(sizes.max_line_delay) + 1 + sizes.c_comb_floats +
+                                     std::size_t(limits.max_channels) * sizes.c_allpass_floats;
+        blocks.p_reverb_lines = static_cast<float*>(p_arena->Allocate(c_floats * sizeof(float), 64));
     }
     blocks.p_dsp = AllocateArray<VoiceDsp>(p_arena, 1);
     blocks.p_meter_rings =
@@ -106,6 +122,20 @@ void InitVoice(Voice* p_voice, const RackKind& kind, const RackLimits& limits, c
     p_voice->p_mastering_matrices = blocks.p_mastering[0];
     p_voice->p_active_mastering_matrices = blocks.p_mastering[1];
     p_voice->p_previous_mastering_matrices = blocks.p_mastering[2];
+    if (blocks.p_reverb) {
+        p_voice->p_reverb_params = new (blocks.p_reverb_params[0]) ReverbParams{};
+        SetReverbDefaults(p_voice->p_reverb_params);
+        p_voice->p_active_reverb_params = new (blocks.p_reverb_params[1]) ReverbParams{*p_voice->p_reverb_params};
+        const ReverbSizes sizes = GetReverbSizes(limits.reverb_size);
+        float* p_combs = blocks.p_reverb_lines + sizes.max_line_delay + 1;
+        ReverbState* p_reverb = new (blocks.p_reverb) ReverbState{};
+        p_reverb->p_line = blocks.p_reverb_lines;
+        p_reverb->p_combs = p_combs;
+        p_reverb->p_allpasses = p_combs + sizes.c_comb_floats;
+        p_reverb->sizes = sizes;
+        p_reverb->c_allpass_channels = limits.max_channels;
+        p_voice->p_reverb = p_reverb;
+    }
     p_voice->p_dsp = new (blocks.p_dsp) VoiceDsp{};
     for (u32 i_meter = 0; i_meter < MeterCount(kind); ++i_meter) {
         float* p_ring = blocks.p_meter_rings

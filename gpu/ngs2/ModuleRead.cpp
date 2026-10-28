@@ -6,17 +6,20 @@
 #include <cstring>
 
 #include "Internal.h"
+#include "Reverb.h"
 
 namespace Libraries::Ngs2 {
 namespace {
 
 constexpr u32 kSamplerRackId = 0x1000;
 constexpr u32 kSubmixerRackId = 0x2000;
+constexpr u32 kReverbRackId = 0x2001;
 constexpr u32 kMasteringRackId = 0x3000;
 // The largest block: the source with a ring of kMaxWaveformBlocks slots.
 constexpr u32 kSourceHeaderSize = 0x30;
 constexpr u32 kSlotSize = 0x30;
 constexpr std::size_t kMaxBlockSize = kSourceHeaderSize + kMaxWaveformBlocks * kSlotSize;
+static_assert(kMaxBlockSize >= kReverbBlockSize);
 
 enum ModuleKind : u32 {
     KIND_NONE,
@@ -32,9 +35,10 @@ enum ModuleKind : u32 {
     KIND_METER,
     KIND_USER_FX,
     KIND_OUTPUT,
+    KIND_REVERB,
 };
 
-// A module of the voice's rack by its index there (0x15640, 0x161c0, 0x14280; spec 09 §10.1, §4.1),
+// A module of the voice's rack by its index there (0x15640, 0x161c0, 0x14280, 0x14b60; spec 09 §10.1, §4.1),
 // with the filter or matrix it is.
 struct ModuleRef {
     ModuleKind kind;
@@ -72,10 +76,11 @@ ModuleRef FindModule(const Voice& voice, u32 i_module) {
         return i_after < std::size(kMasteringModules) ? ModuleRef{kMasteringModules[i_after], 0}
                                                       : ModuleRef{KIND_NONE, 0};
     }
+    case kReverbRackId:
+        return i_module == 0 ? ModuleRef{KIND_REVERB, 0} : ModuleRef{KIND_NONE, 0};
     default: {
         static std::uint64_t s_c_uses;
-        NoteUnimplemented(&s_c_uses,
-                          "sceNgs2VoiceControl 0xc001: reverb and custom rack modules read as unset (F5, F6)");
+        NoteUnimplemented(&s_c_uses, "sceNgs2VoiceControl 0xc001: custom rack modules read as unset (F6)");
         return {KIND_NONE, 0};
     }
     }
@@ -107,6 +112,8 @@ bool IsModuleSet(const Voice& voice, ModuleRef module) {
         return params.set_modules & MODULE_USER_FX;
     case KIND_OUTPUT:
         return params.set_modules & MODULE_OUTPUT;
+    case KIND_REVERB:
+        return params.set_modules & MODULE_REVERB;
     case KIND_NONE:
         break;
     }
@@ -230,6 +237,9 @@ u32 WriteModule(const Voice& voice, ModuleRef module, u8* p_block) {
     case KIND_OUTPUT:
         Put(p_block, 0, params.i_output_buffer);
         return 4;
+    case KIND_REVERB:
+        WriteReverbBlock(*voice.p_reverb_params, p_block);
+        return kReverbBlockSize;
     case KIND_NONE:
         break;
     }

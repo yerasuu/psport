@@ -28,9 +28,10 @@ parity (kb #625, decision #809).
 | `SamplerControl.cpp`, `Sampler.cpp` | the sampler's parameters and waveform block queue; its source (linear PCM, loops, streaming, pitch) and chain |
 | `Source.h`, `Vag.cpp`, `Generator.cpp` | the queue as the decoders use it; the VAG and HEVAG decoder; the waveform generators |
 | `Atrac9Source.cpp`, `Atrac9Glue.c` | ATRAC9 waveforms over LibAtrac9 (`third_party/LibAtrac9`, MIT), whose decoders live in the rack's buffer |
-| `Submixer.cpp`, `Mastering.cpp` | those racks' parameters and processing |
+| `Submixer.cpp`, `Mastering.cpp`, `ReverbRack.cpp` | those racks' parameters and processing |
 | `ModuleParams.cpp` | the parameters the sampler and submixer share: envelope, distortion, UserFx, peak meter, filters |
 | `Dsp.h`, `Gain.cpp`, `Envelope.cpp`, `Filter.cpp`, `Limiter.cpp`, `PeakMeter.cpp` | the DSP modules: ramps, distortion, channel matrix, envelope, biquad and LFE filters, compressor and limiter, peak meter |
+| `Reverb.h`, `ReverbModule.cpp`, `ReverbDsp.cpp` | the reverb module `0x1b`: its parameter block, the explicit network's checks, and its network |
 
 Phase F2 (kb #1094) implements the system, rack, voice and report API: the validation order and
 error codes of each export, the game's buffers and allocators, handles, locks, user data,
@@ -121,6 +122,24 @@ grain sooner. `maxAtrac9ChannelWorks` and `maxCodecCaches` are checked but bound
 holding every channel. `tools/hwtest/ngs2_waveform` compares the parse, frame and block answers and
 the VAG, generator and ATRAC9 renders of a console, the firmware module and this one.
 
+Phase F5 (kb #1097) renders the reverb rack `0x2001` with module `0x1b` as firmware 11.00 builds it
+(rea spec 07), not AnyPS5's network. The setup `0x20010000` (1, 2, 6 or 8 channels in and out, no more
+than `maxChannels`, else `0x804A0052`) applies the I3DL2 defaults; `0x20010001` stores I3DL2 levels as
+linear gains, reverb 24 dB lower, with the firmware's clamps (wet and dry up to 32 from SDK 6.00 on),
+and `0x20018001` reads them back in millibels, -1 while the explicit network `0x20010002` (0xBC bytes;
+taps within the reflection line, combs and all-passes within their memory, else `0x804A030A`) is set.
+Per grain the input is mixed to mono without the LFE, a reflection line of 4800 or 14400 samples
+(`reverbSize` 0 or 1) gives four early taps from the reflection pattern and a late one, fading from the
+old taps to the new ones when the parameters change; the late tap feeds sixteen damped combs whose
+length follows density and whose gain follows decayTime and decayHFRatio; each output channel sums its
+own combs through four all-passes of diffusion's gain, adds the early taps, goes through the room's
+two-pole high-frequency filter (run as two one-pole sections, which float rounding cannot make
+unstable) and is mixed with the dry input by ramps from the last grain's levels; the LFE passes dry.
+The delay lines live in the rack's buffer, sized as the firmware sizes them at 48 kHz: above 48 kHz
+they are clamped to it, counted, until rea reads the half-rate mode. The explicit network's tap
+routing, comb filter, per-channel levels and fields at 0xa0 to 0xb8 are not read yet: it runs with
+I3DL2's choices and is counted. `0xc001` copies the fields of the 0x150-byte block rea placed.
+`tools/hwtest/ngs2_reverb` records an impulse response per test room.
+
 Still missing, each counted in the call report (`Calls: summary stub <n> ...`) or returned as
-`0x804A0001`: the reverb (F5), custom
-racks and the UserFx handlers (F6), and pan, geom and FFT (F7).
+`0x804A0001`: custom racks and the UserFx handlers (F6), and pan, geom and FFT (F7).

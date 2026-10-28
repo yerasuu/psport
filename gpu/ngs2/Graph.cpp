@@ -8,12 +8,14 @@
 #include <utility>
 
 #include "Internal.h"
+#include "Reverb.h"
 
 namespace Libraries::Ngs2 {
 namespace {
 
 constexpr u32 kSamplerRackId = 0x1000;
 constexpr u32 kSubmixerRackId = 0x2000;
+constexpr u32 kReverbRackId = 0x2001;
 constexpr u32 kMasteringRackId = 0x3000;
 // Re-setting a voice without PLAY kills it only when it is in use since SDK 1.75 (spec 04 §5).
 constexpr u32 kSetupKillsIdleSdkVersion = 0x1750000;
@@ -147,6 +149,9 @@ void FlushVoice(System* p_system, Voice* p_voice) {
     }
     if (p_voice->p_mastering_matrices) {
         *p_voice->p_active_mastering_matrices = *p_voice->p_mastering_matrices;
+    }
+    if (p_voice->p_reverb_params) {
+        *p_voice->p_active_reverb_params = *p_voice->p_reverb_params;
     }
     p_voice->are_params_changed = true;
     ExpandVoiceMatrices(p_voice);
@@ -349,10 +354,13 @@ void ProcessVoice(RenderContext& context, Voice* p_voice) {
     case kMasteringRackId:
         ProcessMasteringVoice(context, p_voice, &event_code);
         break;
+    case kReverbRackId:
+        ProcessReverbVoice(context, p_voice, &event_code);
+        break;
     default: {
-        // A reverb (F5) or custom (F6) voice cannot pass its setup yet, so it cannot play either.
+        // A custom (F6) voice cannot pass its setup yet, so it cannot play either.
         static std::uint64_t s_c_uses;
-        NoteUnimplemented(&s_c_uses, "Ngs2 reverb and custom rack processing (F5, F6)");
+        NoteUnimplemented(&s_c_uses, "Ngs2 custom rack processing (F6)");
         break;
     }
     }

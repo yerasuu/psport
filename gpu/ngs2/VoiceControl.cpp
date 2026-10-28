@@ -2,7 +2,7 @@
 // sceNgs2VoiceControl (spec 03 §1): walks the game's chain of parameters under the voice's lock,
 // applies the parameters every rack shares, hands the rack's own to its dispatcher and stops at the
 // first error, leaving the earlier ones applied. What a parameter changes only reaches the sound at
-// the render's flush. The reverb (F5) and custom racks (F6) still refuse their own parameters.
+// the render's flush. Custom racks (F6) still refuse their own parameters.
 #include <algorithm>
 #include <cstring>
 
@@ -24,6 +24,7 @@ enum VoiceParamId : u32 {
 constexpr u32 kParamReadFlag = 0x8000;
 constexpr u32 kSamplerRackId = 0x1000;
 constexpr u32 kSubmixerRackId = 0x2000;
+constexpr u32 kReverbRackId = 0x2001;
 constexpr u32 kMasteringRackId = 0x3000;
 
 enum VoiceEvent : u32 {
@@ -266,13 +267,15 @@ s32 ApplyParam(OrbisNgs2Handle h_voice, Voice* p_voice, const OrbisNgs2VoicePara
                 return ControlSampler(h_voice, p_voice, p_header);
             case kSubmixerRackId:
                 return ControlSubmixer(h_voice, p_voice, p_header);
+            case kReverbRackId:
+                return ControlReverb(h_voice, p_voice, p_header);
             case kMasteringRackId:
                 return ControlMastering(h_voice, p_voice, p_header);
             default:
                 break;
             }
             static std::uint64_t s_c_uses;
-            NoteUnimplemented(&s_c_uses, "sceNgs2VoiceControl: reverb and custom rack parameters (F5, F6)");
+            NoteUnimplemented(&s_c_uses, "sceNgs2VoiceControl: custom rack parameters (F6)");
             return Fail(h_voice, ORBIS_NGS2_ERROR_FAIL, "Voice control ID ({:#x}) not implemented yet",
                         p_header->id);
         }

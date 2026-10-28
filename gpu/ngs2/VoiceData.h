@@ -41,6 +41,7 @@ enum ModuleBit : u32 {
     MODULE_LFE = 1u << 5,
     MODULE_GAIN = 1u << 6,
     MODULE_OUTPUT = 1u << 7,
+    MODULE_REVERB = 1u << 8,
     MODULE_FIRST_FILTER = 1u << 16,
 };
 
