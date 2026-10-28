@@ -1326,8 +1326,9 @@ static ABI int32_t pad_class_parse(int32_t h_pad, const PadData *p_data, DeviceC
     return 0;
 }
 static ABI int32_t pad_vibration(int32_t h_handle, const uint8_t *p_param) {
-    if (h_handle!=PAD_HANDLE || !s_is_opened) return ERR_INVALID_HANDLE;
+    if (!s_is_initialized) return ERR_NOT_INITIALIZED;
     if (!p_param) return ERR_INVALID_ARG;
+    if (h_handle!=PAD_HANDLE || !s_is_opened) return ERR_INVALID_HANDLE;
     pthread_mutex_lock(&s_lock);
     PsHostPad *p_host_pad=current_gamepad();
     pthread_mutex_unlock(&s_lock);
