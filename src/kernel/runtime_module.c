@@ -162,12 +162,36 @@ static ptrdiff_t system_library(const char *sz_path) {
     const char *const *pp_found=bsearch(sz_stem,s_sz_system_libraries,C_SYSTEM_LIBRARIES,sizeof(*s_sz_system_libraries),compare_library);
     return pp_found ? pp_found-s_sz_system_libraries : -1;
 }
+/* Libraries the runtime serves whose service counts its own module references, as psport's
+ * sceSysmoduleLoadModule does: a dumped libSceSysmodule loads them by path instead (kb #1263), so
+ * that load and its unload count there too. */
+typedef struct { const char *sz_library; void (*pfn_load)(void); void (*pfn_unload)(void); } NativeReferences;
+static const NativeReferences s_native_references[]={
+    {"libSceAppContent",runtime_content_module_load,runtime_content_module_unload},
+};
+#define C_NATIVE_REFERENCES (sizeof(s_native_references)/sizeof(*s_native_references))
+static uint64_t s_c_native_reference_loads[C_NATIVE_REFERENCES], s_c_native_reference_unloads[C_NATIVE_REFERENCES];
+static int s_has_native_reference_summary;
+static const NativeReferences *native_references(const char *sz_library) {
+    for (size_t i=0;i<C_NATIVE_REFERENCES;++i)
+        if (!strcmp(s_native_references[i].sz_library,sz_library)) return &s_native_references[i];
+    return NULL;
+}
+static void native_reference_summary(char *sz_out, size_t cb_out) {
+    size_t cb_used=(size_t)snprintf(sz_out,cb_out,"Runtime: native libraries counted as loaded by the system module loader:");
+    for (size_t i=0;i<C_NATIVE_REFERENCES && cb_used<cb_out;++i)
+        cb_used+=(size_t)snprintf(sz_out+cb_used,cb_out-cb_used," %s loads=%llu unloads=%llu",s_native_references[i].sz_library,
+                                  (unsigned long long)__atomic_load_n(&s_c_native_reference_loads[i],__ATOMIC_RELAXED),
+                                  (unsigned long long)__atomic_load_n(&s_c_native_reference_unloads[i],__ATOMIC_RELAXED));
+    if (cb_used<cb_out) snprintf(sz_out+cb_used,cb_out-cb_used,"\n");
+}
 static int is_unlinked(int32_t h_handle) {
     return h_handle>=0 && (size_t)h_handle>=s_c_modules && (size_t)h_handle-s_c_modules<C_SYSTEM_LIBRARIES;
 }
 static int32_t load_unlinked(const char *sz_path, size_t i_library, uint32_t flags, int32_t *p_result) {
     const char *sz_library=s_sz_system_libraries[i_library];
-    const char *sz_why=runtime_module_is_native(sz_library) ? "served by the runtime" : "a console's system library nothing imports";
+    const NativeReferences *p_references=native_references(sz_library);
+    const char *sz_why=runtime_module_is_native(sz_library) || p_references ? "served by the runtime" : "a console's system library nothing imports";
     if (!__atomic_fetch_add(&s_c_unlinked_loads[i_library],1,__ATOMIC_RELAXED)) {
         snprintf(s_sz_unlinked_reports[i_library],sizeof(*s_sz_unlinked_reports),
                  "sceKernelLoadStartModule %s (%s: handle without an image)",sz_library,sz_why);
@@ -176,6 +200,12 @@ static int32_t load_unlinked(const char *sz_path, size_t i_library, uint32_t fla
     const size_t h_handle=s_c_modules+i_library;
     if (!__atomic_fetch_add(&s_c_unlinked_references[i_library],1,__ATOMIC_ACQ_REL))
         printf("Runtime: sceKernelLoadStartModule %s (flags %#x): %s, handle %zu without an image\n",sz_path,flags,sz_why,h_handle);
+    if (p_references) {
+        if (!__atomic_exchange_n(&s_has_native_reference_summary,1,__ATOMIC_ACQ_REL)) runtime_calls_add_summary(native_reference_summary);
+        if (!__atomic_fetch_add(&s_c_native_reference_loads[p_references-s_native_references],1,__ATOMIC_RELAXED))
+            printf("Runtime: %s counted as loaded by the system module loader\n",sz_library);
+        p_references->pfn_load();
+    }
     if (p_result) *p_result=0;
     return (int32_t)h_handle;
 }
@@ -218,6 +248,11 @@ static ABI int32_t stop_unload_module(int32_t h_handle, uint64_t args, const voi
         do {
             if (!c_references) return ESRCH_;
         } while (!__atomic_compare_exchange_n(p_references,&c_references,c_references-1,0,__ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE));
+        const NativeReferences *p_native=native_references(s_sz_system_libraries[(size_t)h_handle-s_c_modules]);
+        if (p_native) {
+            __atomic_fetch_add(&s_c_native_reference_unloads[p_native-s_native_references],1,__ATOMIC_RELAXED);
+            p_native->pfn_unload();
+        }
         if (!__atomic_fetch_add(&s_c_unlinked_unloads,1,__ATOMIC_RELAXED))
             runtime_calls_hle_stub("sceKernelStopUnloadModule of a handle without an image (nothing to stop)",&s_c_unlinked_unloads);
         if (p_result) *p_result=0;

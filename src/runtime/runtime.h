@@ -209,6 +209,10 @@ void runtime_content_title(const char *sz_title);
 const char *runtime_content_title_id(void);
 uintptr_t runtime_content_resolve(const char *sz_name);
 void runtime_content_report(void);
+/* A reference to the AppContent module as sceSysmoduleLoadModule(0xb4) and its unload count one,
+ * for a libSceSysmodule that loads libSceAppContent by path (runtime_module.c). */
+void runtime_content_module_load(void);
+void runtime_content_module_unload(void);
 typedef struct { const char *sz_name; void *p_function; } RuntimeExport;
 /* What an export table lists for a function the runtime does not implement but answers with
  * success: runtime_lookup reports each import resolved to it (g_runtime_last_stub). */

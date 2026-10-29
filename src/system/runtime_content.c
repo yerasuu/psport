@@ -58,6 +58,8 @@ static ABI int32_t module_unload(uint16_t id) {
     if (id==0xb4) { s_c_refs=s_c_module_refs[id]; if (!s_c_refs) s_c_initializations=0; }
     return 0;
 }
+void runtime_content_module_load(void) { module_load(0xb4); }
+void runtime_content_module_unload(void) { module_unload(0xb4); }
 /* Internal ids (bit 31 set) name what the SDK's own libraries load; those are the host's too, so
  * loading one counts a reference and reports the start result of a module that has none: 0. */
 static unsigned s_c_internal_refs[0x10000];
