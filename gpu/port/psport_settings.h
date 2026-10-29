@@ -116,12 +116,15 @@ struct Values {
     /// DLSS (gpu/dlss_bridge, NVIDIA RTX) is ready, or why not (null before the device exists).
     std::atomic<bool> is_dlss_supported{false};
     std::atomic<const char*> sz_dlss_problem{nullptr};
-    /// Frame generation, chosen at start (psport.ini frame_gen, PS_FRAME_GEN): the presentation
-    /// frames' format and the swapchain's image count follow it. The renderer turns it off when it
-    /// cannot run (sz_frame_gen_problem says why).
+    /// Frame generation now (psport.ini frame_gen, PS_FRAME_GEN at start; the menu in a session set
+    /// up for it). The renderer turns it off when it cannot run (sz_frame_gen_problem says why).
     std::atomic<int> frame_gen{FrameGenOff};
     std::atomic<const char*> sz_frame_gen_problem{nullptr};
-    /// The menu's choice, written by Save(); it runs from the next start.
+    /// The presentation was set up for frame generation at start (RGBA8 frames, one more swapchain
+    /// image, twice the pass buffers), so the menu switches it on and off at once; otherwise the
+    /// menu's choice runs from the next start.
+    std::atomic<bool> is_frame_gen_live{false};
+    /// The menu's choice, written by Save().
     std::atomic<int> frame_gen_chosen{FrameGenOff};
     /// PS_FRAME_GEN was set (a launcher's per-game value): it wins over psport.ini, which the menu
     /// then leaves alone; the launcher learns the menu's changes from ChooseFrameGen's line.
@@ -170,7 +173,8 @@ int RenderPreset();
 bool ResolutionNeedsRestart();
 /// Writes the file (menu changes).
 void Save();
-/// The menu's frame generation choice: prints `Frame generation setting: <off|fsr>` on its own line
+/// The menu's frame generation choice, applied at once when is_frame_gen_live (a failure's reason is
+/// cleared, so FSR 3.1 is tried again): prints `Frame generation setting: <off|fsr>` on its own line
 /// (launchers read it from the output to keep the choice per game).
 void ChooseFrameGen(int frame_gen);
 /// Before the menu's restart through run.sh, which inherits this process's environment: a

@@ -60,11 +60,11 @@ void Summarize(char* sz_out, std::size_t cb_out) {
     std::snprintf(sz_out + cb_used, cb_out - cb_used,
                   "Frame generation: game frames without a generated frame: %llu HDR output, %llu without "
                   "capture, %llu paused, %llu no room on the display, %llu no memory, %llu after a failure, "
-                  "%llu dropped (the game waited), %llu no swapchain image\n",
+                  "%llu dropped (the game waited), %llu no swapchain image, %llu switched off in the menu\n",
                   skipped(FrameGenSkip::HdrOutput), skipped(FrameGenSkip::WithoutCapture),
                   skipped(FrameGenSkip::Paused), skipped(FrameGenSkip::NoRoom), skipped(FrameGenSkip::NoMemory),
                   skipped(FrameGenSkip::Failed), skipped(FrameGenSkip::GameWaited),
-                  skipped(FrameGenSkip::NoSwapchainImage));
+                  skipped(FrameGenSkip::NoSwapchainImage), skipped(FrameGenSkip::SwitchedOff));
 }
 
 // A line of its own: the report gives each summary 512 bytes, which the two lines above nearly fill.
@@ -100,6 +100,8 @@ const char* SkipName(FrameGenSkip reason) {
         return "dropped, the game waited for a presentation frame";
     case FrameGenSkip::NoSwapchainImage:
         return "dropped, the swapchain gave no image";
+    case FrameGenSkip::SwitchedOff:
+        return "switched off in the menu";
     case FrameGenSkip::None:
     case FrameGenSkip::Count:
         break;
@@ -161,6 +163,39 @@ void FrameGenerator::Skip() {
     m_is_captured = false;
     m_is_hudless_captured = false;
     m_should_reset = true;
+}
+
+void FrameGenerator::Release() {
+    Skip();
+    if (!m_p_fsr3 && !m_depth_view && !m_motion_view && !m_hudless_image) {
+        return;
+    }
+    double mb_fsr3 = 0.0;
+    if (m_p_fsr3) {
+        FfxVkFsr3_3_1_6FrameGenerationMemoryUsage usage{};
+        ffxVkFsr3_3_1_6FrameGenerationContextGetMemoryUsage(m_p_fsr3, &usage);
+        mb_fsr3 = double(usage.totalUsageInBytes) / 1e6;
+        DestroyFsr3();
+    }
+    const double mb_inputs =
+        double(u64(m_input_width) * m_input_height * (4 + 4) + u64(m_hudless_width) * m_hudless_height * 4) / 1e6;
+    m_scheduler.DeferOperation([depth_view = std::move(m_depth_view), motion_view = std::move(m_motion_view),
+                                hudless_views = std::move(m_hudless_views), depth = std::move(m_depth_image),
+                                motion = std::move(m_motion_image),
+                                hudless = std::move(m_hudless_image)]() mutable {
+        depth_view.reset();
+        motion_view.reset();
+        hudless_views.clear();
+        depth.Destroy();
+        motion.Destroy();
+        hudless.Destroy();
+    });
+    m_input_width = m_input_height = 0;
+    m_hudless_width = m_hudless_height = 0;
+    m_hudless_format = {};
+    m_is_released = true;
+    std::printf("Frame generation: off; FSR 3.1 context (%.1f MB) and its inputs (%.1f MB) freed\n", mb_fsr3,
+                mb_inputs);
 }
 
 bool FrameGenerator::CreatePipelines() {
@@ -476,6 +511,11 @@ FrameGenSkip FrameGenerator::Generate(vk::CommandBuffer cmdbuf, vk::Image color,
         frame_ms = 16.6f;
     }
     RetireFinished();
+    if (m_is_released && IsWanted()) {
+        m_is_released = false;
+        std::printf("Frame generation: on again; its FSR 3.1 context and inputs are made at the next scene "
+                    "frame\n");
+    }
     const bool had_capture = m_is_captured;
     const bool was_scene_without_depth = m_is_scene_without_depth;
     m_is_captured = false;

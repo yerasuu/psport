@@ -5,10 +5,10 @@
 `frame_gen=fsr` in `psport.ini` (`PS_FRAME_GEN=fsr`) turns on FSR 3.1 frame generation (frame
 interpolation 3.1.6 and optical flow from FireBurn's FSR-Vulkan, native Vulkan): between two
 finished frames of the game the presenter shows one generated frame, so the display gets two images
-per game frame. It is off by default and read at start (the presentation frames are composed in
-RGBA8 with it, whose storage every device supports, and the swapchain gets one image more); off,
-nothing of it is made. `auto` and `dlss` are recognised but not available yet: they are logged and
-leave it off.
+per game frame. It is off by default and set up at start (the presentation frames are composed in
+RGBA8 with it, whose storage every device supports, and the swapchain gets one image more); a game
+started without it makes nothing of it. `auto` and `dlss` are recognised but not available yet: they
+are logged and leave it off.
 
 - Capability: chosen by what the device reports, never by vendor. At start, before the swapchain is
   made, `FrameGenerator::IsFsrSupported` asks FSR-Vulkan for `fsr3FrameGenerationPrerequisites`
@@ -17,8 +17,17 @@ leave it off.
   with `shaderStorageImageWriteWithoutFormat`; without them, or without the game profile's
   upscaler placement, `fsr` is turned off with the reason logged. `psport --list-features` reports
   the same probe as the `frame_gen_fsr` row, in the `upscaler` area so that launchers treat it as
-  an option, not as something a game needs. The in-game menu offers the switch (applied at the next
-  start) only where the probe says yes.
+  an option, not as something a game needs. The in-game menu offers the switch only where the probe
+  says yes.
+- Switching while the game runs: in a game started with it on (`PsSettings::is_frame_gen_live`),
+  the menu switches it off and on at once. Off frees the FSR 3.1 context (about 100 MB at 1080p) and
+  the depth, motion and UI-less copies once the GPU has passed the commands that may still capture
+  into them (`FrameGenerator::Release`, logged as `Frame generation: off; FSR 3.1 context (N MB)
+  and its inputs (N MB) freed`), and the presenter's generated frames and its UI-less frame; game
+  frames shown meanwhile count as `switched off in the menu`, and the FIFO cap is lifted. On again
+  makes them at the next scene frame (`Frame generation: on again`). The RGBA8 frames, the extra
+  swapchain image and the doubled pass buffers stay for the session, as they cost little. A game
+  started with it off needs a restart to turn it on; what that would take is below.
 
 - Launchers: every change in the menu prints `Frame generation setting: off` or
   `Frame generation setting: fsr` on a line of its own (flushed), which a launcher reads from the
@@ -61,6 +70,37 @@ leave it off.
   generated.
 - HDR output presents without generated frames. DLSS Frame Generation is NVIDIA-only and is not
   in the port.
+
+### Turning it on in a game started without it (not done)
+
+What depends on the start-time choice, in `gpu/shadps4/video_core/renderer_vulkan/` (develop after
+#1165):
+
+- Frame format: `vk_presenter.cpp:184` fixes `m_frame_format` (RGBA8 with it, else the swapchain's
+  format, which may be B8G8R8A8 without storage support or 10-bit for HDR); `RecreateFrame`
+  (`:261`) makes every presentation frame in it, `pp_pass.Create(device, m_frame_format)` (`:212`,
+  `host_passes/pp_pass.h:23`) builds the post-process pipeline for that one attachment format, and
+  `DumpFinalFrameIfDue` (`:990`) reads it on the present thread. Switching needs the frames remade
+  in the new format (lazily in `GetRenderFrame`, `:1162`, as a size change is) and the post-process
+  pass to hold a pipeline per format chosen per frame, since frames of both formats coexist until
+  each has come back.
+- The last presented frame is shown again by the present thread (`Present(last_submit_frame, true)`,
+  `:781`, `PrepareLastFrame`, `:339`) while it sits in the free queue, where the GPU thread may
+  remake it: a size change has the same window, a menu switch would open it on demand.
+- Pass buffers: `c_pass_images` (`:187`) sizes the FSR pass's per-image buffers and
+  `PsOverlay::Init` (`:215`) for two images per game frame only with it on; both would have to be
+  made for the larger count at start (or remade with every frame idle).
+- Swapchain: its image count (`vk_swapchain.cpp:306`) follows `is_frame_gen_live`; a switch would
+  recreate it on the present thread under `Scheduler::submit_mutex`, as a resize does.
+- Generator: `m_p_frame_generator` is made in the constructor (`:179`) and handed to the upscaler
+  (`:180`, `vk_temporal_upscaler.h:71`), which reads it on the GPU thread without a lock; it would
+  have to be made on the GPU thread at a frame boundary, and its exit summaries registered once
+  (`vk_frame_generation.cpp:148`).
+
+Each is ordinary work, but together they change the off path every game runs (frame format,
+pass buffers, the free-queue reuse) and need a handshake between the GPU, present and recording
+threads that only a person at the display can check (no black frame, no stutter, memory back
+down); the night harness cannot switch the menu. Hence the restart for now.
 
 ## Intermediate targets under live scaling (2026-10-22)
 

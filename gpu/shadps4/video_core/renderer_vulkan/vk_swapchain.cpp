@@ -301,9 +301,10 @@ bool Swapchain::SetSurfaceProperties() {
     }
 
     // Select number of images in swap chain, we prefer one buffer in the background to work on
-    // (psport: two with frame generation, which presents two images per game frame).
-    image_count = capabilities.minImageCount +
-                  (PsSettings::Get().frame_gen.load(std::memory_order_relaxed) != PsSettings::FrameGenOff ? 2 : 1);
+    // (psport: two in a session set up for frame generation, which presents two images per game
+    // frame; kept while it is switched off in the menu, so that switching it on again needs none).
+    image_count =
+        capabilities.minImageCount + (PsSettings::Get().is_frame_gen_live.load(std::memory_order_relaxed) ? 2 : 1);
     if (capabilities.maxImageCount > 0) {
         image_count = std::min(image_count, capabilities.maxImageCount);
     }

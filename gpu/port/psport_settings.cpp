@@ -505,6 +505,10 @@ void ChooseFrameGen(int frame_gen) {
     auto& v = Get();
     frame_gen = std::clamp(frame_gen, 0, FrameGenCount - 1);
     v.frame_gen_chosen = frame_gen;
+    if (v.is_frame_gen_live) {
+        v.sz_frame_gen_problem = nullptr;
+        v.frame_gen = frame_gen;
+    }
     std::printf("Frame generation setting: %s\n", FrameGenName(frame_gen));
     std::fflush(stdout);
 }

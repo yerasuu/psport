@@ -820,16 +820,32 @@ void Menu() {
                 }
                 ImGui::EndCombo();
             }
-            Hint(PsSettings::MenuText(
-                "One generated frame between two of the game's: smoother motion on a display with room for "
-                "twice the game's frame rate. It adds input latency (about half a game frame) and works best "
-                "from about 60 FPS. Applies after restarting the game.",
-                "Один сгенерированный кадр между двумя кадрами игры: плавнее движение на дисплее, у которого "
-                "есть запас на удвоенную частоту кадров игры. Добавляет задержку ввода (около половины кадра "
-                "игры), лучше всего работает примерно от 60 FPS. Применяется после перезапуска игры.",
-                "Un fotograma generado entre dos del juego: movimiento más fluido en una pantalla con margen "
-                "para el doble de fotogramas del juego. Añade latencia de entrada (alrededor de medio fotograma "
-                "del juego) y funciona mejor a partir de unos 60 FPS. Se aplica tras reiniciar el juego."));
+            Hint(s.is_frame_gen_live
+                     ? PsSettings::MenuText(
+                           "One generated frame between two of the game's: smoother motion on a display with room "
+                           "for twice the game's frame rate. It adds input latency (about half a game frame) and "
+                           "works best from about 60 FPS. Switches at once; off frees its memory.",
+                           "Один сгенерированный кадр между двумя кадрами игры: плавнее движение на дисплее, у "
+                           "которого есть запас на удвоенную частоту кадров игры. Добавляет задержку ввода (около "
+                           "половины кадра игры), лучше всего работает примерно от 60 FPS. Переключается сразу; "
+                           "выключение освобождает её память.",
+                           "Un fotograma generado entre dos del juego: movimiento más fluido en una pantalla con "
+                           "margen para el doble de fotogramas del juego. Añade latencia de entrada (alrededor de "
+                           "medio fotograma del juego) y funciona mejor a partir de unos 60 FPS. Cambia al momento; "
+                           "desactivada libera su memoria.")
+                     : PsSettings::MenuText(
+                           "One generated frame between two of the game's: smoother motion on a display with room "
+                           "for twice the game's frame rate. It adds input latency (about half a game frame) and "
+                           "works best from about 60 FPS. Applies after restarting the game, which started "
+                           "without it.",
+                           "Один сгенерированный кадр между двумя кадрами игры: плавнее движение на дисплее, у "
+                           "которого есть запас на удвоенную частоту кадров игры. Добавляет задержку ввода (около "
+                           "половины кадра игры), лучше всего работает примерно от 60 FPS. Применяется после "
+                           "перезапуска игры, запущенной без неё.",
+                           "Un fotograma generado entre dos del juego: movimiento más fluido en una pantalla con "
+                           "margen para el doble de fotogramas del juego. Añade latencia de entrada (alrededor de "
+                           "medio fotograma del juego) y funciona mejor a partir de unos 60 FPS. Se aplica tras "
+                           "reiniciar el juego, que empezó sin ella."));
             if (s.is_frame_gen_from_env) {
                 ImGui::PushTextWrapPos();
                 ImGui::TextDisabled("%s", PsSettings::MenuText(
@@ -1007,7 +1023,8 @@ void Menu() {
 
     bool should_restart =
         s.should_use_object_motion != s.is_object_motion_at_startup || s.model_lod != s.startup_model_lod ||
-        s.live_resolution != s.startup_live_resolution || s.frame_gen_chosen != s.startup_frame_gen ||
+        s.live_resolution != s.startup_live_resolution ||
+        (!s.is_frame_gen_live && s.frame_gen_chosen != s.startup_frame_gen) ||
         PsSettings::ResolutionNeedsRestart();
     for (int e = 0; e < s.c_effects; ++e) {
         should_restart |= s.effects[e] != s.startup_effects[e];

@@ -39,6 +39,7 @@ enum class FrameGenSkip : u8 {
     Failed,           ///< FSR 3.1 failed, frame generation is off since
     GameWaited,       ///< generated but dropped: the game waited for a presentation frame
     NoSwapchainImage, ///< generated but the swapchain gave no image for it
+    SwitchedOff,      ///< switched off in the menu (PsSettings::is_frame_gen_live)
     Count,
 };
 
@@ -49,7 +50,7 @@ inline std::atomic<u64> g_c_generated{0};       ///< frames generated
 inline std::atomic<u64> g_c_presented{0};       ///< generated frames presented
 inline std::atomic<u64> g_c_dropped{0};         ///< generated but not presented: the game waited for a frame
 inline std::atomic<u64> g_c_without_capture{0}; ///< game frames without the scene's depth and motion (menus, movies)
-inline std::atomic<u64> g_c_without_scene_pass{0}; ///< of those, the profile's scene pass (upscaler trigger) did not run
+inline std::atomic<u64> g_c_without_scene_pass{0}; ///< of those, the profile's scene pass (trigger) did not run
 inline std::atomic<u64> g_c_without_scene_depth{0}; ///< of those, it ran but the scene had no depth to take
 inline std::atomic<u64> g_us_without_capture{0};  ///< game time of the frames without capture, microseconds
 inline std::atomic<u64> g_us_captured{0};         ///< game time of the frames with capture, microseconds
@@ -96,6 +97,11 @@ public:
     /// A presented frame without generation (HDR output): its captured inputs are dropped and the
     /// next generation starts over.
     void Skip();
+    /// Off (switched in the menu, or after a failure), at a frame boundary on the GPU thread: the
+    /// FSR 3.1 context is destroyed and the depth, motion and UI-less copies are freed once the GPU
+    /// has passed the commands recorded so far, which may still capture into them. All of them are
+    /// made again at the first frame after it is switched on.
+    void Release();
 
     /// At the upscaler's trigger, render size `w` x `h`: records the copy of the scene depth
     /// (`depth`: depth aspect view in General layout) and returns the motion vector image to
@@ -174,6 +180,7 @@ private:
     std::array<float, 2> m_capture_jitter{};
     FrameGenCamera m_capture_camera{};
     bool m_should_reset = true;
+    bool m_is_released = false; ///< Release ran and nothing was generated since
     bool m_was_hudless = false;
     u32 m_c_hudless_changes = 0; ///< reported the first few times
     std::chrono::steady_clock::time_point m_last_generate{};

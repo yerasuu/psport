@@ -143,6 +143,7 @@ void ConfigureFrameGen(const Instance& instance) {
         std::printf("Frame generation: off, the game has no upscaler placement (its profile's scene "
                     "combine shader), so no scene depth or motion vectors\n");
     }
+    settings.is_frame_gen_live = settings.frame_gen != PsSettings::FrameGenOff;
 }
 } // namespace
 
@@ -663,8 +664,29 @@ void Presenter::WaitRendered(const Frame* frame) {
 
 void Presenter::GenerateFrame(Frame* frame, vk::Format view_format, vk::Extent2D image_size) {
     FrameGenerator& generator = *m_p_frame_generator;
-    if (frame->is_hdr || !generator.IsWanted()) {
-        frame->frame_gen_skip = frame->is_hdr ? FrameGenSkip::HdrOutput : FrameGenSkip::Failed;
+    if (!generator.IsWanted()) {
+        frame->frame_gen_skip = PsSettings::Get().sz_frame_gen_problem.load() ? FrameGenSkip::Failed
+                                                                               : FrameGenSkip::SwitchedOff;
+        generator.Release();
+        // GetRenderFrame waited for this frame's presentation, the generated frame's blit included.
+        DestroyGenerated(frame);
+        if (m_hudless_frame.image) {
+            // Earlier frames' commands may still read it.
+            draw_scheduler.DeferOperation([device = instance.GetDevice(), allocator = instance.GetAllocator(),
+                                           image = m_hudless_frame.image, allocation = m_hudless_frame.allocation,
+                                           view = m_hudless_frame.image_view] {
+                device.destroyImageView(view);
+                vmaDestroyImage(allocator, image, allocation);
+            });
+            m_hudless_frame.image = vk::Image{};
+            m_hudless_frame.image_view = vk::ImageView{};
+            m_hudless_frame.allocation = {};
+            m_hudless_frame.width = m_hudless_frame.height = 0;
+        }
+        return;
+    }
+    if (frame->is_hdr) {
+        frame->frame_gen_skip = FrameGenSkip::HdrOutput;
         generator.Skip();
         return;
     }
