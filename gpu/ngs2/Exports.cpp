@@ -3,11 +3,20 @@
 // and report API (phase F2, kb #1094), the render (F3, kb #1095), the waveform parsing (F4, kb #1096)
 // and pan, geom and FFT (F7, kb #1099) are implemented; the three PS5 exports return
 // ORBIS_NGS2_ERROR_FAIL, the firmware's internal failure, log their first call and are counted in the
-// call report.
+// call report. Every other export runs inside an ExportCall, which logs and counts its failures, and
+// PS_NGS2_TRACE=1 traces its first calls.
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <iterator>
+#include <string_view>
+#include <type_traits>
 #include <utility>
+
+#include <fmt/format.h>
 
 #include "common/logging/log.h"
 #include "core/libraries/libs.h"
@@ -49,57 +58,182 @@ void RegisterExports(Core::Loader::SymbolsResolver* sym, std::index_sequence<I..
     (LIB_FUNCTION(UNIMPLEMENTED_EXPORTS[I].sz_nid, "libSceNgs2", 1, "libSceNgs2", &FailUnimplemented<I>), ...);
 }
 
+// PS_NGS2_TRACE=1: each export's first calls with their arguments and result, to find which call of a
+// title's audio set-up fails or answers differently; the cap keeps the render and voice control, called
+// every grain, from flooding the log.
+constexpr u32 kTracedCallsPerExport = 64;
+
+bool IsTracing() {
+    static const bool s_is_tracing = [] {
+        const char* sz_value = std::getenv("PS_NGS2_TRACE");
+        return sz_value && sz_value[0] == '1';
+    }();
+    return s_is_tracing;
+}
+
+// The structures that size and shape a system or rack are shown whole, since a title's set-up is
+// mostly told by them; outputs only once the call succeeded and wrote them.
+template <class T>
+void DescribeArgument(fmt::memory_buffer& text, T value, bool has_succeeded) {
+    const auto out = std::back_inserter(text);
+    if constexpr (std::is_pointer_v<T>) {
+        using Pointee = std::remove_cv_t<std::remove_pointer_t<T>>;
+        fmt::format_to(out, "{:#x}", reinterpret_cast<uintptr_t>(value));
+        if (!value) {
+            return;
+        }
+        if constexpr (std::is_same_v<Pointee, OrbisNgs2ContextBufferInfo>) {
+            if (std::is_const_v<std::remove_pointer_t<T>> || has_succeeded) {
+                fmt::format_to(out, " {{buffer {:#x}, size {:#x}}}", reinterpret_cast<uintptr_t>(value->hostBuffer),
+                               value->hostBufferSize);
+            }
+        } else if constexpr (std::is_same_v<Pointee, OrbisNgs2SystemOption>) {
+            fmt::format_to(out, " {{size {:#x}", value->size);
+            if (value->size >= sizeof(OrbisNgs2SystemOption)) {
+                fmt::format_to(out, ", flags {:#x}, max grain {}, grain {}, rate {}", value->flags,
+                               value->maxGrainSamples, value->numGrainSamples, value->sampleRate);
+            }
+            fmt::format_to(out, "}}");
+        } else if constexpr (std::is_same_v<Pointee, OrbisNgs2RackOption>) {
+            fmt::format_to(out, " {{size {:#x}", value->size);
+            if (value->size >= sizeof(OrbisNgs2RackOption)) {
+                fmt::format_to(out, ", flags {:#x}, max grain {}, voices {}, delay blocks {}, matrices {}, ports {}",
+                               value->flags, value->maxGrainSamples, value->maxVoices, value->maxInputDelayBlocks,
+                               value->maxMatrices, value->maxPorts);
+            }
+            fmt::format_to(out, "}}");
+        } else if constexpr (std::is_same_v<Pointee, OrbisNgs2BufferAllocator>) {
+            fmt::format_to(out, " {{alloc {:#x}, free {:#x}, user data {:#x}}}",
+                           reinterpret_cast<uintptr_t>(value->allocHandler),
+                           reinterpret_cast<uintptr_t>(value->freeHandler), value->userData);
+        } else if constexpr (std::is_same_v<Pointee, OrbisNgs2VoiceParamHeader>) {
+            fmt::format_to(out, " {{id {:#x}, size {:#x}, next {}}}", value->id, value->size, value->next);
+        } else if constexpr (std::is_same_v<Pointee, char>) {
+            fmt::format_to(out, " \"{:.128}\"", value);
+        } else if constexpr (!std::is_const_v<std::remove_pointer_t<T>> &&
+                             (std::is_same_v<Pointee, uintptr_t> || std::is_same_v<Pointee, u32>)) {
+            if (has_succeeded) {
+                fmt::format_to(out, " -> {:#x}", *value);
+            }
+        }
+    } else if constexpr (std::is_floating_point_v<T>) {
+        fmt::format_to(out, "{}", value);
+    } else {
+        fmt::format_to(out, "{:#x}", value);
+    }
+}
+
+template <class... Args>
+void Trace(const char* sz_export, std::atomic<u32>* p_c_traced, s32 result, Args... args) {
+    const u32 i_call = p_c_traced->fetch_add(1, std::memory_order_relaxed);
+    if (i_call > kTracedCallsPerExport) {
+        return;
+    }
+    if (i_call == kTracedCallsPerExport) {
+        std::printf("Ngs2 trace: %s: calls past the first %u not traced\n", sz_export, kTracedCallsPerExport);
+        return;
+    }
+    fmt::memory_buffer text;
+    bool is_first = true;
+    const auto describe = [&](auto value) {
+        if (!is_first) {
+            text.append(std::string_view{", "});
+        }
+        is_first = false;
+        DescribeArgument(text, value, result == ORBIS_OK);
+    };
+    (describe(args), ...);
+    std::printf("Ngs2 trace: %s(%.*s) -> %#x\n", sz_export, static_cast<int>(text.size()), text.data(),
+                static_cast<u32>(result));
+}
+
+template <auto F>
+struct Observed;
+
+template <class... Args, s32 (PS4_SYSV_ABI* F)(Args...)>
+struct Observed<F> {
+    static inline const char* s_sz_name;
+    static inline std::atomic<u32> s_c_traced;
+
+    static s32 PS4_SYSV_ABI Call(Args... args) {
+        s32 result;
+        {
+            ExportCall call{s_sz_name};
+            result = F(args...);
+            call.NoteResult(result);
+        }
+        if (IsTracing()) {
+            Trace(s_sz_name, &s_c_traced, result, args...);
+        }
+        return result;
+    }
+};
+
+template <auto F>
+auto Observe(const char* sz_name) {
+    Observed<F>::s_sz_name = sz_name;
+    return &Observed<F>::Call;
+}
+
 } // namespace
 
+#define NGS2_EXPORT(nid, function) LIB_FUNCTION(nid, "libSceNgs2", 1, "libSceNgs2", Observe<&function>(#function))
+
 void RegisterLib(Core::Loader::SymbolsResolver* sym) {
-    LIB_FUNCTION("0eFLVCfWVds", "libSceNgs2", 1, "libSceNgs2", sceNgs2RackQueryBufferSize);
-    LIB_FUNCTION("cLV4aiT9JpA", "libSceNgs2", 1, "libSceNgs2", sceNgs2RackCreate);
-    LIB_FUNCTION("U546k6orxQo", "libSceNgs2", 1, "libSceNgs2", sceNgs2RackCreateWithAllocator);
-    LIB_FUNCTION("lCqD7oycmIM", "libSceNgs2", 1, "libSceNgs2", sceNgs2RackDestroy);
-    LIB_FUNCTION("MzTa7VLjogY", "libSceNgs2", 1, "libSceNgs2", sceNgs2RackLock);
-    LIB_FUNCTION("++YZ7P9e87U", "libSceNgs2", 1, "libSceNgs2", sceNgs2RackUnlock);
-    LIB_FUNCTION("JNTMIaBIbV4", "libSceNgs2", 1, "libSceNgs2", sceNgs2RackSetUserData);
-    LIB_FUNCTION("Mn4XNDg03XY", "libSceNgs2", 1, "libSceNgs2", sceNgs2RackGetUserData);
-    LIB_FUNCTION("MwmHz8pAdAo", "libSceNgs2", 1, "libSceNgs2", sceNgs2RackGetVoiceHandle);
-    LIB_FUNCTION("M4LYATRhRUE", "libSceNgs2", 1, "libSceNgs2", sceNgs2RackGetInfo);
-    LIB_FUNCTION("uu94irFOGpA", "libSceNgs2", 1, "libSceNgs2", sceNgs2VoiceControl);
-    LIB_FUNCTION("rEh728kXk3w", "libSceNgs2", 1, "libSceNgs2", sceNgs2VoiceGetStateFlags);
-    LIB_FUNCTION("-TOuuAQ-buE", "libSceNgs2", 1, "libSceNgs2", sceNgs2VoiceGetState);
-    LIB_FUNCTION("W-Z8wWMBnhk", "libSceNgs2", 1, "libSceNgs2", sceNgs2VoiceGetOwner);
-    LIB_FUNCTION("jjBVvPN9964", "libSceNgs2", 1, "libSceNgs2", sceNgs2VoiceGetMatrixInfo);
-    LIB_FUNCTION("WCayTgob7-o", "libSceNgs2", 1, "libSceNgs2", sceNgs2VoiceGetPortInfo);
-    LIB_FUNCTION("uBIN24Tv2MI", "libSceNgs2", 1, "libSceNgs2", sceNgs2ReportRegisterHandler);
-    LIB_FUNCTION("nPzb7Ly-VjE", "libSceNgs2", 1, "libSceNgs2", sceNgs2ReportUnregisterHandler);
-    LIB_FUNCTION("pgFAiLR5qT4", "libSceNgs2", 1, "libSceNgs2", sceNgs2SystemQueryBufferSize);
-    LIB_FUNCTION("koBbCMvOKWw", "libSceNgs2", 1, "libSceNgs2", sceNgs2SystemCreate);
-    LIB_FUNCTION("mPYgU4oYpuY", "libSceNgs2", 1, "libSceNgs2", sceNgs2SystemCreateWithAllocator);
-    LIB_FUNCTION("u-WrYDaJA3k", "libSceNgs2", 1, "libSceNgs2", sceNgs2SystemDestroy);
-    LIB_FUNCTION("gThZqM5PYlQ", "libSceNgs2", 1, "libSceNgs2", sceNgs2SystemLock);
-    LIB_FUNCTION("JXRC5n0RQls", "libSceNgs2", 1, "libSceNgs2", sceNgs2SystemUnlock);
-    LIB_FUNCTION("GZB2v0XnG0k", "libSceNgs2", 1, "libSceNgs2", sceNgs2SystemSetUserData);
-    LIB_FUNCTION("4lFaRxd-aLs", "libSceNgs2", 1, "libSceNgs2", sceNgs2SystemGetUserData);
-    LIB_FUNCTION("vU7TQ62pItw", "libSceNgs2", 1, "libSceNgs2", sceNgs2SystemGetInfo);
-    LIB_FUNCTION("l4Q2dWEH6UM", "libSceNgs2", 1, "libSceNgs2", sceNgs2SystemSetGrainSamples);
-    LIB_FUNCTION("-tbc2SxQD60", "libSceNgs2", 1, "libSceNgs2", sceNgs2SystemSetSampleRate);
-    LIB_FUNCTION("i0VnXM-C9fc", "libSceNgs2", 1, "libSceNgs2", sceNgs2SystemRender);
-    LIB_FUNCTION("U-+7HsswcIs", "libSceNgs2", 1, "libSceNgs2", sceNgs2SystemEnumRackHandles);
-    LIB_FUNCTION("vubFP0T6MP0", "libSceNgs2", 1, "libSceNgs2", sceNgs2SystemEnumHandles);
-    LIB_FUNCTION("6qN1zaEZuN0", "libSceNgs2", 1, "libSceNgs2", sceNgs2CustomRackGetModuleInfo);
-    LIB_FUNCTION("hyVLT2VlOYk", "libSceNgs2", 1, "libSceNgs2", sceNgs2ParseWaveformData);
-    LIB_FUNCTION("iprCTXPVWMI", "libSceNgs2", 1, "libSceNgs2", sceNgs2ParseWaveformFile);
-    LIB_FUNCTION("t9T0QM17Kvo", "libSceNgs2", 1, "libSceNgs2", sceNgs2ParseWaveformUser);
-    LIB_FUNCTION("3pCNbVM11UA", "libSceNgs2", 1, "libSceNgs2", sceNgs2CalcWaveformBlock);
-    LIB_FUNCTION("ekGJmmoc8j4", "libSceNgs2", 1, "libSceNgs2", sceNgs2GetWaveformFrameInfo);
-    LIB_FUNCTION("xa8oL9dmXkM", "libSceNgs2", 1, "libSceNgs2", sceNgs2PanInit);
-    LIB_FUNCTION("gbMKV+8Enuo", "libSceNgs2", 1, "libSceNgs2", sceNgs2PanGetVolumeMatrix);
-    LIB_FUNCTION("1WsleK-MTkE", "libSceNgs2", 1, "libSceNgs2", sceNgs2GeomCalcListener);
-    LIB_FUNCTION("7Lcfo8SmpsU", "libSceNgs2", 1, "libSceNgs2", sceNgs2GeomResetListenerParam);
-    LIB_FUNCTION("0lbbayqDNoE", "libSceNgs2", 1, "libSceNgs2", sceNgs2GeomResetSourceParam);
-    LIB_FUNCTION("eF8yRCC6W64", "libSceNgs2", 1, "libSceNgs2", sceNgs2GeomApply);
-    LIB_FUNCTION("-YNfTO6KOMY", "libSceNgs2", 1, "libSceNgs2", sceNgs2FftQuerySize);
-    LIB_FUNCTION("Kg1MA5j7KFk", "libSceNgs2", 1, "libSceNgs2", sceNgs2FftInit);
-    LIB_FUNCTION("D8eCqBxSojA", "libSceNgs2", 1, "libSceNgs2", sceNgs2FftProcess);
+    NGS2_EXPORT("0eFLVCfWVds", sceNgs2RackQueryBufferSize);
+    NGS2_EXPORT("cLV4aiT9JpA", sceNgs2RackCreate);
+    NGS2_EXPORT("U546k6orxQo", sceNgs2RackCreateWithAllocator);
+    NGS2_EXPORT("lCqD7oycmIM", sceNgs2RackDestroy);
+    NGS2_EXPORT("MzTa7VLjogY", sceNgs2RackLock);
+    NGS2_EXPORT("++YZ7P9e87U", sceNgs2RackUnlock);
+    NGS2_EXPORT("JNTMIaBIbV4", sceNgs2RackSetUserData);
+    NGS2_EXPORT("Mn4XNDg03XY", sceNgs2RackGetUserData);
+    NGS2_EXPORT("MwmHz8pAdAo", sceNgs2RackGetVoiceHandle);
+    NGS2_EXPORT("M4LYATRhRUE", sceNgs2RackGetInfo);
+    NGS2_EXPORT("uu94irFOGpA", sceNgs2VoiceControl);
+    NGS2_EXPORT("rEh728kXk3w", sceNgs2VoiceGetStateFlags);
+    NGS2_EXPORT("-TOuuAQ-buE", sceNgs2VoiceGetState);
+    NGS2_EXPORT("W-Z8wWMBnhk", sceNgs2VoiceGetOwner);
+    NGS2_EXPORT("jjBVvPN9964", sceNgs2VoiceGetMatrixInfo);
+    NGS2_EXPORT("WCayTgob7-o", sceNgs2VoiceGetPortInfo);
+    NGS2_EXPORT("uBIN24Tv2MI", sceNgs2ReportRegisterHandler);
+    NGS2_EXPORT("nPzb7Ly-VjE", sceNgs2ReportUnregisterHandler);
+    NGS2_EXPORT("pgFAiLR5qT4", sceNgs2SystemQueryBufferSize);
+    NGS2_EXPORT("koBbCMvOKWw", sceNgs2SystemCreate);
+    NGS2_EXPORT("mPYgU4oYpuY", sceNgs2SystemCreateWithAllocator);
+    NGS2_EXPORT("u-WrYDaJA3k", sceNgs2SystemDestroy);
+    NGS2_EXPORT("gThZqM5PYlQ", sceNgs2SystemLock);
+    NGS2_EXPORT("JXRC5n0RQls", sceNgs2SystemUnlock);
+    NGS2_EXPORT("GZB2v0XnG0k", sceNgs2SystemSetUserData);
+    NGS2_EXPORT("4lFaRxd-aLs", sceNgs2SystemGetUserData);
+    NGS2_EXPORT("vU7TQ62pItw", sceNgs2SystemGetInfo);
+    NGS2_EXPORT("l4Q2dWEH6UM", sceNgs2SystemSetGrainSamples);
+    NGS2_EXPORT("-tbc2SxQD60", sceNgs2SystemSetSampleRate);
+    NGS2_EXPORT("i0VnXM-C9fc", sceNgs2SystemRender);
+    NGS2_EXPORT("U-+7HsswcIs", sceNgs2SystemEnumRackHandles);
+    NGS2_EXPORT("vubFP0T6MP0", sceNgs2SystemEnumHandles);
+    NGS2_EXPORT("6qN1zaEZuN0", sceNgs2CustomRackGetModuleInfo);
+    NGS2_EXPORT("hyVLT2VlOYk", sceNgs2ParseWaveformData);
+    NGS2_EXPORT("iprCTXPVWMI", sceNgs2ParseWaveformFile);
+    NGS2_EXPORT("t9T0QM17Kvo", sceNgs2ParseWaveformUser);
+    NGS2_EXPORT("3pCNbVM11UA", sceNgs2CalcWaveformBlock);
+    NGS2_EXPORT("ekGJmmoc8j4", sceNgs2GetWaveformFrameInfo);
+    NGS2_EXPORT("xa8oL9dmXkM", sceNgs2PanInit);
+    NGS2_EXPORT("gbMKV+8Enuo", sceNgs2PanGetVolumeMatrix);
+    NGS2_EXPORT("1WsleK-MTkE", sceNgs2GeomCalcListener);
+    NGS2_EXPORT("7Lcfo8SmpsU", sceNgs2GeomResetListenerParam);
+    NGS2_EXPORT("0lbbayqDNoE", sceNgs2GeomResetSourceParam);
+    NGS2_EXPORT("eF8yRCC6W64", sceNgs2GeomApply);
+    NGS2_EXPORT("-YNfTO6KOMY", sceNgs2FftQuerySize);
+    NGS2_EXPORT("Kg1MA5j7KFk", sceNgs2FftInit);
+    NGS2_EXPORT("D8eCqBxSojA", sceNgs2FftProcess);
     RegisterExports(sym, std::make_index_sequence<UNIMPLEMENTED_EXPORTS.size()>{});
+    if (IsTracing()) {
+        std::printf("Ngs2 trace: on (native): the first %u calls of each export with their arguments and result\n",
+                    kTracedCallsPerExport);
+    }
 }
+
+#undef NGS2_EXPORT
 
 } // namespace Libraries::Ngs2

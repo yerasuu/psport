@@ -11,7 +11,8 @@ parity (kb #625, decision #809).
 
 | File | What it holds |
 |---|---|
-| `Exports.cpp` | the NID table: firmware 11.00's 47 exports plus the three PS5 ones `gpu/ngs2_anyps5` answers |
+| `Exports.cpp` | the NID table: firmware 11.00's 47 exports, each wrapped in an `ExportCall` and traced by `PS_NGS2_TRACE=1`, plus the three PS5 ones `gpu/ngs2_anyps5` answers |
+| `ExportCall.cpp` | each export's failing results: logged the first time an export, code and cause meet, counted for the `Ngs2: summary` line after the call report |
 | `Internal.h`, `VoiceData.h` | the objects (system, rack, voice) the game's buffers hold, what the render keeps per voice, and the declarations |
 | `Handle.cpp` | the firmware's 0x20-byte handles, the game-visible recursive locks, the buffer allocator |
 | `Report.cpp` | `sceNgs2Report*` and the error message every failing call hands to report handlers |

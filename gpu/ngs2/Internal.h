@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <type_traits>
 #include <utility>
@@ -465,17 +466,49 @@ bool IsRackParameter(const RackKind& kind, u32 id);
 bool HasReportHandlers(u32 type);
 void EmitErrorReport(OrbisNgs2Handle h_object, s32 code, const std::string& message);
 
+// One call of an export, which Exports.cpp wraps around each: Fail notes in it why the call fails,
+// and a failing result is logged the first time its export, code and cause meet and counted for the
+// Ngs2 summary after the call report, so that no failing call is silent (kb #1161). A game callback
+// that calls another export from inside one nests a second call over the first.
+class ExportCall {
+public:
+    explicit ExportCall(const char* sz_export);
+    ~ExportCall();
+    ExportCall(const ExportCall&) = delete;
+    ExportCall& operator=(const ExportCall&) = delete;
+    void NoteResult(s32 result);
+
+private:
+    friend bool IsNewFailureCause(s32 code, const char* p_format);
+    friend void NoteFailureReason(s32 code, const char* p_format, std::string_view message);
+
+    const char* m_sz_export;
+    ExportCall* m_p_outer;
+    s32 m_code = ORBIS_OK;
+    const char* m_p_format = nullptr;
+    char m_sz_reason[160];
+};
+
+// Whether the export being called has not failed yet with this code from this Fail format, so that
+// its message must be kept for the log; false outside an export.
+bool IsNewFailureCause(s32 code, const char* p_format);
+void NoteFailureReason(s32 code, const char* p_format, std::string_view message);
+
 // The firmware's error report (spec 01 §2, 0xbf30): returns code, after passing the message to the
 // game's report handlers of type 0 when there are any. The message is only formatted when someone
-// reads it.
+// reads it: those handlers, the debug log, or the log line of the export's first failure from it.
 template <class... Args>
 s32 Fail(OrbisNgs2Handle h_object, s32 code, fmt::format_string<Args...> format, Args&&... args) {
+    const char* p_format = format.get().data();
+    const bool is_new_cause = IsNewFailureCause(code, p_format);
     const bool is_reported = HasReportHandlers(0);
-    if (!is_reported && !Common::Log::ShouldLog(Common::Log::Level::debug)) {
+    if (!is_new_cause && !is_reported && !Common::Log::ShouldLog(Common::Log::Level::debug)) {
+        NoteFailureReason(code, p_format, {});
         return code;
     }
     std::string message = fmt::format(format, std::forward<Args>(args)...);
     LOG_DEBUG(Lib_Ngs2, "{:#x}: {}", static_cast<u32>(code), message);
+    NoteFailureReason(code, p_format, message);
     if (is_reported) {
         EmitErrorReport(h_object, code, message);
     }
