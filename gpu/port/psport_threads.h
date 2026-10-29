@@ -12,12 +12,16 @@
 
 namespace PsThreads {
 
-/// Hardware threads available to the process.
+/// Hardware threads available to the process: affinity mask capped by the cgroup CPU quota.
+/// Read once, since callers poll it from hot paths and the limits do not change during a run.
 inline unsigned Available() {
-    if (const unsigned c_cpus = ps_host_thread_cpu_count()) {
-        return c_cpus;
-    }
-    return std::max(1u, std::thread::hardware_concurrency());
+    static const unsigned c_cpus = [] {
+        if (const unsigned c_host = ps_host_thread_cpu_count()) {
+            return c_host;
+        }
+        return std::max(1u, std::thread::hardware_concurrency());
+    }();
+    return c_cpus;
 }
 
 /// The calling thread only runs on otherwise idle cores (falls back to the lowest nice level).

@@ -41,6 +41,7 @@
 #include "video_core/buffer_cache/buffer_cache.h"
 #include "psport_guest_memory.h"
 #include "psport_settings.h"
+#include "psport_threads.h"
 #include "game_profile.h"
 #include "psport_toggles.h"
 #include "psport_native_probe.h"
@@ -668,11 +669,11 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline(const DrawIndirectPar
         if (!compiler) {
             const char* env = std::getenv("PS_ASYNC_PIPELINE_THREADS");
             const u32 threads = env && *env ? u32(std::strtoul(env, nullptr, 10))
-                                            : std::clamp(std::thread::hardware_concurrency() / 4, 1u, 4u);
+                                            : std::clamp(PsThreads::Available() / 4, 1u, 4u);
             compiler = std::make_unique<PipelineCompiler>(std::max(threads, 1u));
             std::printf("GPU: new pipelines of passes drawn every frame compile on %u threads "
-                        "(PS_ASYNC_PIPELINES=0: on the GPU thread, the game waits)\n",
-                        std::max(threads, 1u));
+                        "(%u hardware threads available; PS_ASYNC_PIPELINES=0: on the GPU thread, the game waits)\n",
+                        std::max(threads, 1u), PsThreads::Available());
         }
         auto job = std::make_shared<PendingPipeline>();
         job->modules = sel.modules;

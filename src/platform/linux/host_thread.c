@@ -82,10 +82,39 @@ int ps_host_thread_cpu_times(int is_whole_process, struct timespec *p_out_user, 
     return 0;
 }
 
+/* cgroup v2 CPU quota of the process's own cgroup: ceil(quota / period), 0 when unlimited or unreadable. */
+static unsigned cgroup_cpu_quota(void) {
+    char sz_path[PATH_MAX], sz_line[256];
+    char sz_group[PATH_MAX - 64] = "";
+    FILE *p_file = fopen("/proc/self/cgroup", "r");
+    if (!p_file) return 0;
+    while (fgets(sz_line, sizeof sz_line, p_file)) {
+        if (strncmp(sz_line, "0::", 3) == 0) {
+            sz_line[strcspn(sz_line, "\n")] = '\0';
+            snprintf(sz_group, sizeof sz_group, "%s", sz_line + 3);
+            break;
+        }
+    }
+    fclose(p_file);
+    snprintf(sz_path, sizeof sz_path, "/sys/fs/cgroup%s/cpu.max", sz_group);
+    p_file = fopen(sz_path, "r");
+    if (!p_file) return 0;
+    unsigned long long cb_quota = 0, cb_period = 0;
+    const int c_fields = fscanf(p_file, "%llu %llu", &cb_quota, &cb_period);
+    fclose(p_file);
+    if (c_fields != 2 || !cb_quota || !cb_period) return 0;
+    const unsigned long long c_cpus = (cb_quota + cb_period - 1) / cb_period;
+    return c_cpus > UINT_MAX ? UINT_MAX : (unsigned)c_cpus;
+}
+
 unsigned ps_host_thread_cpu_count(void) {
     cpu_set_t set;
     CPU_ZERO(&set);
-    return sched_getaffinity(0, sizeof(set), &set) ? 0u : (unsigned)CPU_COUNT(&set);
+    if (sched_getaffinity(0, sizeof(set), &set)) return 0u;
+    unsigned c_cpus = (unsigned)CPU_COUNT(&set);
+    const unsigned c_quota = cgroup_cpu_quota();
+    if (c_quota && c_quota < c_cpus) c_cpus = c_quota;
+    return c_cpus;
 }
 
 int ps_host_thread_make_background(void) {
