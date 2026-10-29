@@ -40,6 +40,9 @@ typedef struct GuestThread {
     ThreadAttr attr;
     char name[32];
     int detached, finished, joined, host_owned, is_cancel_requested;
+    /* is_starting: create() still reads the record after the thread runs; is_join_done: the host
+     * thread is joined; is_high: from calloc, outside low memory. */
+    int is_starting, is_join_done, is_high;
     /* The creator's interrupt mask, which the thread takes once its TCB is in place. */
     PsHostInterruptMask start_mask;
     /* Known once the TCB is in place; interrupts sent before then wait in early_interrupts. */
@@ -60,7 +63,17 @@ static uint64_t s_tls_filesz, s_tls_memsz, s_tls_align=16;
 static size_t s_c_created, s_c_joined, s_c_exited, s_c_exit_calls;
 #define C_EXIT_CALLS_LOGGED 32
 static size_t s_c_cancel_requests, s_c_cancels_taken;
-static size_t s_c_high_records;
+static size_t s_c_high_records, s_c_high_window, s_c_low_records, s_c_recycled_records, s_c_live, s_c_peak_live;
+static uint64_t s_ms_high_digest;
+#define C_HIGH_LOGGED 3
+#define MS_HIGH_DIGEST 10000
+/* Guarded by s_lock: records of threads that ended and were joined or detached, oldest first. A low
+ * record waits behind C_RECORD_QUARANTINE newer ones before it is reused while the pool still grows,
+ * so that a game's late use of a handle it has joined fails with ESRCH instead of reaching the next
+ * thread that gets it. */
+#define C_RECORD_QUARANTINE 64
+static GuestThread *s_p_free_low, *s_p_free_low_tail, *s_p_free_high;
+static size_t s_c_free_low;
 #define C_CREATE_NAMES 64
 #define C_CREATE_LOGGED 3
 #define C_CREATE_SUMMARY_NAMES 8
@@ -113,7 +126,9 @@ static void attach(GuestThread *p_thread) {
  * hybrid lock that masks its owner to 0xffffffffff and compares it with the whole handle never
  * matches its own thread when the handle is above 40 bits, and the thread sleeps forever (a
  * loading screen that never ended, bbport #193). Records are carved from low memory in 256 KiB
- * pieces; records are never freed. */
+ * pieces and never returned to the host: once a thread has ended and been joined or detached its
+ * record is reused (release_if_done), as FreeBSD's libthr reuses its thread structures, so that
+ * games that start workers by the thousand (Atelier Ryza) do not run the low pool dry. */
 static GuestThread *allocate_low_record(void) {
     static pthread_mutex_t s_pool_lock=PTHREAD_MUTEX_INITIALIZER;
     static unsigned char *s_p_pool;
@@ -129,14 +144,62 @@ static GuestThread *allocate_low_record(void) {
     pthread_mutex_unlock(&s_pool_lock);
     return p_record;
 }
-static GuestThread *new_thread(void) {
-    GuestThread *p_thread=allocate_low_record();
-    if (!p_thread) {
-        fputs("Runtime: no low memory for a thread record; its handle may not fit 40 bits\n",stderr);
-        __atomic_add_fetch(&s_c_high_records,1,__ATOMIC_RELAXED);
-        p_thread=calloc(1,sizeof(*p_thread));
-    }
+static uint64_t now_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC,&ts);
+    return (uint64_t)ts.tv_sec*1000+(uint64_t)ts.tv_nsec/1000000;
+}
+/* Under s_lock. */
+static GuestThread *take_free_low(void) {
+    GuestThread *p_thread=s_p_free_low;
     if (!p_thread) return NULL;
+    s_p_free_low=p_thread->next;
+    if (!s_p_free_low) s_p_free_low_tail=NULL;
+    --s_c_free_low;
+    return p_thread;
+}
+static GuestThread *take_free_record(int is_pool_dry) {
+    runtime_exception_lock(&s_lock);
+    GuestThread *p_thread=NULL;
+    if (s_c_free_low>C_RECORD_QUARANTINE || is_pool_dry) p_thread=take_free_low();
+    if (!p_thread && is_pool_dry && s_p_free_high) { p_thread=s_p_free_high; s_p_free_high=p_thread->next; }
+    if (p_thread) ++s_c_recycled_records;
+    runtime_exception_unlock(&s_lock);
+    return p_thread;
+}
+static void count_high_record(void) {
+    char sz_digest[160];
+    sz_digest[0]=0;
+    runtime_exception_lock(&s_lock);
+    const size_t i_record=s_c_high_records++;
+    ++s_c_high_window;
+    const uint64_t ms_now=now_ms();
+    if (!s_ms_high_digest) s_ms_high_digest=ms_now;
+    else if (ms_now-s_ms_high_digest>=MS_HIGH_DIGEST) {
+        snprintf(sz_digest,sizeof(sz_digest),"Runtime: %zu thread records outside low memory in the last 10 s (%zu in all)",
+                 s_c_high_window,s_c_high_records);
+        s_ms_high_digest=ms_now; s_c_high_window=0;
+    }
+    runtime_exception_unlock(&s_lock);
+    if (i_record<C_HIGH_LOGGED)
+        fprintf(stderr,"Runtime: no low memory for a thread record; its handle may not fit 40 bits%s\n",
+                i_record+1==C_HIGH_LOGGED ? "; further ones are only counted" : "");
+    if (sz_digest[0]) fprintf(stderr,"%s\n",sz_digest);
+}
+static GuestThread *new_thread(void) {
+    GuestThread *p_thread=take_free_record(0);
+    if (!p_thread && (p_thread=allocate_low_record())) __atomic_add_fetch(&s_c_low_records,1,__ATOMIC_RELAXED);
+    if (!p_thread) p_thread=take_free_record(1);
+    if (p_thread) {
+        const int is_high=p_thread->is_high;
+        memset(p_thread,0,sizeof(*p_thread));
+        p_thread->is_high=is_high;
+    } else {
+        count_high_record();
+        p_thread=calloc(1,sizeof(*p_thread));
+        if (!p_thread) return NULL;
+        p_thread->is_high=1;
+    }
     p_thread->attr=(ThreadAttr){.magic=ATTR_MAGIC,.policy=1,.prio=DEFAULT_PRIO,.inherit=4,.stack=DEFAULT_STACK,.guard=DEFAULT_GUARD,.affinity=0x7f};
     return p_thread;
 }
@@ -170,12 +233,35 @@ void runtime_thread_set_stack(void *p_addr, uint64_t cb_stack) {
     GuestThread *p_thread=runtime_thread_current();
     p_thread->attr.p_stack_addr=p_addr; p_thread->attr.stack=cb_stack;
 }
+/* Under s_lock. A recycled record is off the list, so its stale handle is not found. */
+static GuestThread *find_listed(const void *p_handle) {
+    for (GuestThread *p_thread=s_p_threads;p_thread;p_thread=p_thread->next) if (p_thread==p_handle) return p_thread;
+    return NULL;
+}
 static GuestThread *find_thread(void *p_handle) {
-    GuestThread *p_found=NULL;
     runtime_exception_lock(&s_lock);
-    for (GuestThread *p_thread=s_p_threads;p_thread;p_thread=p_thread->next) if (p_thread==p_handle) { p_found=p_thread; break; }
+    GuestThread *p_found=find_listed(p_handle);
     runtime_exception_unlock(&s_lock);
     return p_found;
+}
+/* Under s_lock. The guest may use a handle until it joins or detaches the thread, and the host
+ * thread may still be on its way out after it set finished: a detached one no longer reads its
+ * record past that point (host_start), a joined one is gone. */
+static void release_if_done(GuestThread *p_thread) {
+    if (!p_thread->finished || p_thread->is_starting || !(p_thread->detached || p_thread->is_join_done)) return;
+    GuestThread **pp_link=&s_p_threads;
+    while (*pp_link && *pp_link!=p_thread) pp_link=&(*pp_link)->next;
+    if (!*pp_link) return;
+    *pp_link=p_thread->next;
+    p_thread->next=NULL;
+    if (p_thread->is_high) {
+        p_thread->next=s_p_free_high; s_p_free_high=p_thread;
+        return;
+    }
+    if (s_p_free_low_tail) s_p_free_low_tail->next=p_thread;
+    else s_p_free_low=p_thread;
+    s_p_free_low_tail=p_thread;
+    ++s_c_free_low;
 }
 /* Under the table's lock, so the host thread cannot be joined and its id reused between
  * the lookup and the kill. */
@@ -359,13 +445,15 @@ static void *host_start(void *p_argument) {
     } else p_thread->result=runtime_thread_enter_guest(p_thread->entry,p_thread->argument);
     if (s_pfn_exit_hook) s_pfn_exit_hook();
     runtime_thread_keys_cleanup();
-    runtime_exception_lock(&s_lock); p_thread->finished=1; ++s_c_exited; runtime_exception_unlock(&s_lock);
-    return p_thread->result;
-}
-static uint64_t now_ms(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC,&ts);
-    return (uint64_t)ts.tv_sec*1000+(uint64_t)ts.tv_nsec/1000000;
+    /* A detached thread's record may go to another thread as soon as finished is set: no guest
+     * exception handler may run here after that, and the result is read before. */
+    ps_host_interrupts_hold(1,NULL);
+    void *p_result=p_thread->result;
+    runtime_exception_lock(&s_lock);
+    p_thread->finished=1; ++s_c_exited; --s_c_live;
+    release_if_done(p_thread);
+    runtime_exception_unlock(&s_lock);
+    return p_result;
 }
 /* Guest names are arbitrary bytes: control and non-ASCII bytes would corrupt the log. */
 static void printable_name(char *out_name,const char *sz_name) {
@@ -432,6 +520,10 @@ static int32_t create(GuestThread **pp_out,ThreadAttr **pp_attr_slot,GuestEntry 
     pthread_attr_t host;
     pthread_attr_init(&host);
     uint64_t stack=p_thread->attr.stack<MIN_STACK ? MIN_STACK : p_thread->attr.stack;
+    p_thread->is_starting=1;
+    runtime_exception_lock(&s_lock);
+    if (++s_c_live>s_c_peak_live) s_c_peak_live=s_c_live;
+    runtime_exception_unlock(&s_lock);
     publish(p_thread);
     /* Publish the handle before the thread can run and inspect itself. */
     *pp_out=p_thread;
@@ -472,29 +564,50 @@ static int32_t create(GuestThread **pp_out,ThreadAttr **pp_attr_slot,GuestEntry 
     if (e) { fprintf(stderr,"STOP: host pthread_create failed: %d\n",e); runtime_stop(21); }
     if (p_thread->detached) pthread_detach(p_thread->host);
     log_created(p_thread,stack);
+    runtime_exception_lock(&s_lock);
+    p_thread->is_starting=0;
+    release_if_done(p_thread);
+    runtime_exception_unlock(&s_lock);
     return 0;
 }
 static ABI int32_t thread_create(GuestThread **pp_out,ThreadAttr **pp_attr,GuestEntry pfn_entry,void *p_argument,const char *sz_name) {
     return create(pp_out,pp_attr,pfn_entry,p_argument,sz_name);
 }
+/* Join and detach claim the thread under s_lock, so that only one of them reaches the host thread
+ * and the record is released exactly once. */
 static ABI int32_t thread_join(GuestThread *p_thread,void **pp_result) {
-    if (!find_thread(p_thread) || p_thread->host_owned) return ERR(3);
-    if (p_thread==s_p_current) return ERR(11);
-    if (p_thread->detached || p_thread->joined) return ERR(22);
-    p_thread->joined=1;
+    runtime_exception_lock(&s_lock);
+    int32_t result=!find_listed(p_thread) || p_thread->host_owned ? ERR(3) : p_thread==s_p_current ? ERR(11)
+                   : p_thread->detached || p_thread->joined ? ERR(22) : 0;
+    pthread_t host={0};
+    if (!result) { p_thread->joined=1; host=p_thread->host; }
+    runtime_exception_unlock(&s_lock);
+    if (result) return result;
     void *p_value=NULL;
-    int e=pthread_join(p_thread->host,&p_value);
+    int e=pthread_join(host,&p_value);
     if (e) { fprintf(stderr,"STOP: host pthread_join failed: %d\n",e); runtime_stop(21); }
-    if (pp_result) *pp_result=p_thread->result;
-    runtime_exception_lock(&s_lock); ++s_c_joined; runtime_exception_unlock(&s_lock);
+    runtime_exception_lock(&s_lock);
+    p_value=p_thread->result;
+    ++s_c_joined; p_thread->is_join_done=1;
+    release_if_done(p_thread);
+    runtime_exception_unlock(&s_lock);
+    if (pp_result) *pp_result=p_value;
     return 0;
 }
+/* FreeBSD refuses to detach a thread another one is joining (EINVAL). */
 static ABI int32_t thread_detach(GuestThread *p_thread) {
-    if (!find_thread(p_thread)) return ERR(3);
-    if (p_thread->detached) return ERR(22);
-    p_thread->detached=1;
-    if (!p_thread->host_owned) pthread_detach(p_thread->host);
-    return 0;
+    runtime_exception_lock(&s_lock);
+    int32_t result=!find_listed(p_thread) ? ERR(3) : p_thread->detached || p_thread->joined ? ERR(22) : 0;
+    pthread_t host={0};
+    int is_host_thread=0;
+    if (!result) {
+        p_thread->detached=1;
+        is_host_thread=!p_thread->host_owned; host=p_thread->host;
+        release_if_done(p_thread);
+    }
+    runtime_exception_unlock(&s_lock);
+    if (is_host_thread) pthread_detach(host);
+    return result;
 }
 /* FreeBSD's struct pthread_cleanup, laid over the _pthread_cleanup_info the guest's
  * pthread_cleanup_push macro keeps on its stack. */
@@ -688,6 +801,10 @@ void runtime_thread_report(void) {
         printf("Runtime: thread cancellation: %zu requested, %zu taken at pthread_testcancel (blocking "
                "cancellation points and asynchronous cancellation are not honoured)\n",s_c_cancel_requests,
                s_c_cancels_taken);
+    if (s_c_created)
+        printf("Runtime: guest thread records: %zu carved from low memory, %zu reused after join or detach, "
+               "%zu outside low memory; peak live guest threads %zu\n",s_c_low_records,s_c_recycled_records,
+               s_c_high_records,s_c_peak_live);
     if (s_c_high_records)
         printf("Runtime: %zu thread records outside low memory (handles above 40 bits)\n",s_c_high_records);
     runtime_exception_unlock(&s_lock);
