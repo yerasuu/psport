@@ -635,6 +635,11 @@ private:
     std::atomic<u64> arena_bind_calls{0}, arena_bind_ranges{0}; ///< vkQueueBindSparse calls, ranges
     std::atomic<u64> arena_bind_signaled{0}; ///< memory_semaphore value the last call signals
     std::atomic<u64> m_c_failed_arena_binds{0}, m_c_unbound_arena_ranges{0}; ///< failed after a retry
+    /// psport: driver time of bind batches not yet charged to the budget of moves to VRAM.
+    std::atomic<s64> m_ns_bind_uncharged{0};
+    std::atomic<u64> m_ns_per_bind_range{0}; ///< recent driver time a range (0: none measured yet)
+    std::atomic<u64> m_c_merged_bind_ranges{0}, m_c_slow_arena_binds{0}; ///< statistics
+    std::atomic<u64> m_ns_arena_binds{0}, m_ns_longest_arena_bind{0};     ///< statistics
 
     struct Backing : public Interval {
         vk::DeviceMemory memory;
@@ -675,6 +680,16 @@ private:
     IntervalList<> copy_back_blocks;   ///< VRAM blocks with GPU data, handed out again in part
     IntervalList<> gpu_written_bytes;  ///< bound for GPU writes since handed out (known data too)
     u64 promoted_bytes = 0;
+    /// psport: moves to VRAM bind on the submitting thread and some drivers take most of a frame
+    /// for a hundred ranges (#1273): they spend a budget of driver time refilled with wall time.
+    u64 PromotionRangeBudget();
+    void PrechargePromotionBinds(u64 c_ranges);
+    s64 m_ns_promote_budget = 0;
+    u64 m_ns_promote_refilled = 0;
+    u64 m_c_promote_ranges_queued = 0; ///< ranges QueuePromotions added to the next bind batch
+    s64 m_ns_promote_precharged = 0;   ///< their estimated driver time, already charged
+    u64 m_c_promote_deferrals = 0;     ///< statistics: submissions that left blocks for later
+    u32 m_promote_report_second = 0;
     /// VRAM slots of blocks that left VRAM, for the next blocks moved there (in their chunks).
     u64 free_slot_count = 0;
     std::mutex pending_assets_mutex;

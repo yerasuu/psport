@@ -3237,6 +3237,38 @@ void BufferCache::ReportInPlaceBlocks() {
     }
 }
 
+u64 BufferCache::PromotionRangeBudget() {
+    // RADV took 73-77 ms for 168-172 ranges (#1273). An eighth of the wall time keeps a 60 Hz
+    // frame within ~2 ms of binds; every batch's time is charged, so that loading a level (binds
+    // that cannot wait) holds the moves back too.
+    constexpr s64 NsBudgetCap = 3'000'000, NsDebtFloor = -50'000'000, WallShare = 8;
+    constexpr u64 RangesUnmeasured = 32;
+    const u64 ns_now = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                           std::chrono::steady_clock::now().time_since_epoch())
+                           .count();
+    m_ns_promote_budget = m_ns_promote_refilled == 0
+                              ? NsBudgetCap
+                              : std::min(NsBudgetCap, m_ns_promote_budget +
+                                                          s64(ns_now - m_ns_promote_refilled) / WallShare);
+    m_ns_promote_refilled = ns_now;
+    m_ns_promote_budget = std::max(NsDebtFloor, m_ns_promote_budget -
+                                                    m_ns_bind_uncharged.exchange(0, std::memory_order_relaxed));
+    if (m_ns_promote_budget <= 0) {
+        return 0;
+    }
+    const u64 ns_per_range = m_ns_per_bind_range.load(std::memory_order_relaxed);
+    return ns_per_range ? std::max<u64>(1, u64(m_ns_promote_budget) / ns_per_range) : RangesUnmeasured;
+}
+
+void BufferCache::PrechargePromotionBinds(u64 c_ranges) {
+    // The binds go out with a later submission, whose measured time comes back after the next
+    // budget is drawn: their estimate is charged now and the batch settles the difference.
+    const s64 ns_estimate = s64(c_ranges * m_ns_per_bind_range.load(std::memory_order_relaxed));
+    m_ns_promote_budget -= ns_estimate;
+    m_ns_promote_precharged += ns_estimate;
+    m_c_promote_ranges_queued += c_ranges;
+}
+
 void BufferCache::QueuePromotions(u64 submitted) {
     if (VramTrapsEnabled()) {
         ReportVramTraps();
@@ -3253,6 +3285,34 @@ void BufferCache::QueuePromotions(u64 submitted) {
     if (VramPromotionsPaused()) {
         return;
     }
+    const auto note_deferred = [this](u64 c_waiting) {
+        ++m_c_promote_deferrals;
+        const u32 now = PsStats::g_coarse_second.load(std::memory_order_relaxed);
+        if (now - m_promote_report_second < 10) {
+            return;
+        }
+        m_promote_report_second = now;
+        std::printf("Guest memory: moves to VRAM paced by the driver's bind time (%llu us a range): "
+                    "%llu blocks wait, %llu submissions deferred some so far; vkQueueBindSparse: "
+                    "%llu calls, %llu ranges (%llu merged away), %llu ms in the driver, longest "
+                    "%llu ms, %llu over 8 ms\n",
+                    (unsigned long long)(m_ns_per_bind_range.load(std::memory_order_relaxed) / 1000),
+                    (unsigned long long)c_waiting, (unsigned long long)m_c_promote_deferrals,
+                    (unsigned long long)arena_bind_calls.load(), (unsigned long long)arena_bind_ranges.load(),
+                    (unsigned long long)m_c_merged_bind_ranges.load(std::memory_order_relaxed),
+                    (unsigned long long)(m_ns_arena_binds.load(std::memory_order_relaxed) / 1'000'000),
+                    (unsigned long long)(m_ns_longest_arena_bind.load(std::memory_order_relaxed) / 1'000'000),
+                    (unsigned long long)m_c_slow_arena_binds.load(std::memory_order_relaxed));
+    };
+    const u64 c_max_ranges = LayerMode() ? ~0ull : PromotionRangeBudget();
+    if (c_max_ranges == 0) {
+        u64 c_waiting = 0;
+        for (const auto& range : promote_candidates) {
+            c_waiting += range.end - range.start;
+        }
+        note_deferred(c_waiting);
+        return;
+    }
     std::vector<u64> blocks;
     for (const auto& range : promote_candidates) {
         for (u64 block = range.start; block < range.end; ++block) {
@@ -3264,8 +3324,11 @@ void BufferCache::QueuePromotions(u64 submitted) {
         LayerPromote(blocks); // mirrors in VRAM (buffer_cache_layer.cpp)
         return;
     }
-    u64 moved = 0;
-    for (const u64 block : blocks) {
+    u64 moved = 0, c_ranges = 0;
+    std::size_t i_block = 0;
+    bool is_short = false;
+    for (; i_block < blocks.size() && c_ranges < c_max_ranges; ++i_block) {
+        const u64 block = blocks[i_block];
         const VAddr address = block << block_shift;
         // What the GPU wrote in place is in the game's memory: the copy is filled from there.
         if (!in_place_blocks.Contains(block) || !resident_ranges.Contains(block) ||
@@ -3276,6 +3339,7 @@ void BufferCache::QueuePromotions(u64 submitted) {
         const auto [memory, offset] = AllocateResidency(block_size);
         if (!memory) {
             NoteResidencyShort(block_size);
+            is_short = true;
             break;
         }
         memory_tracker->UnmarkRegionAsGpuModified(address, block_size);
@@ -3298,6 +3362,7 @@ void BufferCache::QueuePromotions(u64 submitted) {
                     .memory = memory,
                     .memoryOffset = offset,
                 });
+                ++c_ranges;
             }
         }
         memory_tracker->MarkRegionAsCpuModified(address, block_size);
@@ -3317,6 +3382,15 @@ void BufferCache::QueuePromotions(u64 submitted) {
             ps_host_vm_protect(reinterpret_cast<void*>(address), block_size, PS_HOST_VM_NONE);
         }
     }
+    // Blocks past the budget stay candidates (read in place meanwhile, as while VRAM is nearly
+    // full); with VRAM short they go, as before.
+    if (!is_short && i_block < blocks.size()) {
+        for (std::size_t i = i_block; i < blocks.size(); ++i) {
+            promote_candidates.Add({blocks[i], blocks[i] + 1});
+        }
+        note_deferred(blocks.size() - i_block);
+    }
+    PrechargePromotionBinds(c_ranges);
     if (moved == 0) {
         return;
     }
@@ -3829,11 +3903,40 @@ void BufferCache::SubmitPendingArenaBinds(Vulkan::SubmitInfo& info) {
     const auto signal_sema = memory_semaphore.Handle();
     info.AddWait(signal_sema, signal_tick);
 
+    // psport: some drivers spend their bind time per range (RADV, #1273), and blocks moved one by
+    // one usually land side by side in the arena and in their memory. Only neighbours in the list
+    // merge, so that the order of overlapping binds stays.
+    u64 c_unmerged = 0, c_merged = 0;
+    for (auto& arena_binds : pending_binds) {
+        auto& list = arena_binds.binds;
+        c_unmerged += list.size();
+        std::size_t i_last = 0;
+        for (std::size_t i = 1; i < list.size(); ++i) {
+            auto& last = list[i_last];
+            const auto& next = list[i];
+            if (next.memory == last.memory && next.flags == last.flags &&
+                next.resourceOffset == last.resourceOffset + last.size &&
+                (!next.memory || next.memoryOffset == last.memoryOffset + last.size)) {
+                last.size += next.size;
+                ++c_merged;
+                continue;
+            }
+            list[++i_last] = next;
+        }
+        list.resize(i_last + 1);
+    }
+    m_c_merged_bind_ranges.fetch_add(c_merged, std::memory_order_relaxed);
+    const u64 c_promote_ranges = m_c_promote_ranges_queued;
+    const s64 ns_precharged = m_ns_promote_precharged;
+    m_c_promote_ranges_queued = 0;
+    m_ns_promote_precharged = 0;
+
     // The binds go into the queue right before the submission (PS_ASYNC_SUBMIT: later, from a
     // recording thread), after the submissions still on their way there.
     auto binds = std::make_shared<std::vector<ArenaBinds>>(std::move(pending_binds));
     pending_binds.clear();
-    info.before_submit.push_back([this, binds, wait_tick, wait_sema, signal_tick, signal_sema] {
+    info.before_submit.push_back([this, binds, wait_tick, wait_sema, signal_tick, signal_sema, c_unmerged,
+                                  c_promote_ranges, ns_precharged] {
         std::vector<vk::SparseBufferMemoryBindInfo> buffer_binds;
         buffer_binds.reserve(binds->size());
         u64 ranges = 0;
@@ -3862,15 +3965,38 @@ void BufferCache::SubmitPendingArenaBinds(Vulkan::SubmitInfo& info) {
         };
         const auto bind_start = std::chrono::steady_clock::now();
         auto submit_result = instance.GetGraphicsQueue().bindSparse(sparse_info);
-        const double bind_ms = std::chrono::duration<double, std::milli>(
-                                   std::chrono::steady_clock::now() - bind_start)
-                                   .count();
+        const u64 ns_bind = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                std::chrono::steady_clock::now() - bind_start)
+                                .count();
+        const double bind_ms = double(ns_bind) / 1e6;
         arena_bind_calls.fetch_add(1, std::memory_order_relaxed);
         arena_bind_ranges.fetch_add(ranges, std::memory_order_relaxed);
         arena_bind_signaled.store(signal_tick, std::memory_order_relaxed);
-        if (bind_ms >= 50.0) {
-            std::printf("Guest memory: vkQueueBindSparse of %llu ranges took %.0f ms in the driver\n",
-                        (unsigned long long)ranges, bind_ms);
+        m_ns_bind_uncharged.fetch_add(s64(ns_bind) - ns_precharged, std::memory_order_relaxed);
+        m_ns_arena_binds.fetch_add(ns_bind, std::memory_order_relaxed);
+        if (ns_bind > m_ns_longest_arena_bind.load(std::memory_order_relaxed)) {
+            m_ns_longest_arena_bind.store(ns_bind, std::memory_order_relaxed);
+        }
+        // Batches of a few ranges are mostly the call's fixed cost: they would make every range
+        // look as dear as a whole call.
+        if (ranges >= 8) {
+            const u64 ns_range = ns_bind / ranges;
+            const u64 ns_previous = m_ns_per_bind_range.load(std::memory_order_relaxed);
+            m_ns_per_bind_range.store(ns_previous ? (ns_previous * 3 + ns_range) / 4 : ns_range,
+                                      std::memory_order_relaxed);
+        }
+        if (bind_ms >= 8.0) {
+            const u64 c_slow = m_c_slow_arena_binds.fetch_add(1, std::memory_order_relaxed);
+            if (c_slow < 32 || bind_ms >= 50.0) {
+                std::array<char, 16> sz_thread{};
+                pthread_getname_np(pthread_self(), sz_thread.data(), sz_thread.size());
+                std::printf("Guest memory: vkQueueBindSparse of %llu ranges took %.1f ms in the driver "
+                            "(thread %s; %llu ranges before merging, %llu from moves to VRAM; waits "
+                            "for submission %llu)\n",
+                            (unsigned long long)ranges, bind_ms, sz_thread.data(),
+                            (unsigned long long)c_unmerged, (unsigned long long)c_promote_ranges,
+                            (unsigned long long)wait_tick);
+            }
         }
         if (submit_result == vk::Result::eErrorDeviceLost) {
             Vulkan::StopOnDeviceLost("binding guest memory");
@@ -3952,9 +4078,13 @@ void BufferCache::ReportArenaBinds() {
     const u64 signaled = arena_bind_signaled.load(std::memory_order_relaxed);
     const auto [result, done] =
         instance.GetDevice().getSemaphoreCounterValue(memory_semaphore.Handle());
-    std::printf("Arena binds: %llu vkQueueBindSparse calls (%llu ranges), %llu failed twice (%llu ranges "
-                "left unbound); the last one signals %llu, the GPU is at %llu%s\n",
+    std::printf("Arena binds: %llu vkQueueBindSparse calls (%llu ranges, %llu merged away, %llu ms in the "
+                "driver, %llu over 8 ms), %llu failed twice (%llu ranges left unbound); the last one "
+                "signals %llu, the GPU is at %llu%s\n",
                 (unsigned long long)arena_bind_calls.load(), (unsigned long long)arena_bind_ranges.load(),
+                (unsigned long long)m_c_merged_bind_ranges.load(),
+                (unsigned long long)(m_ns_arena_binds.load() / 1'000'000),
+                (unsigned long long)m_c_slow_arena_binds.load(),
                 (unsigned long long)m_c_failed_arena_binds.load(),
                 (unsigned long long)m_c_unbound_arena_ranges.load(), (unsigned long long)signaled,
                 result == vk::Result::eSuccess ? (unsigned long long)done : 0ull,
