@@ -2,8 +2,10 @@
 #include "video_core/renderer_vulkan/vk_frame_generation.h"
 
 #include <algorithm>
+#include <array>
 #include <cstdio>
 #include <cstring>
+#include <span>
 
 #include "common/logging/log.h"
 #include "ffx_vk_fsr3_3_1_5_bridge.h"
@@ -39,6 +41,23 @@ vk::Format HudlessViewFormat(vk::Format storage, vk::Format requested) {
         return is_srgb ? vk::Format::eB8G8R8A8Srgb : vk::Format::eB8G8R8A8Unorm;
     default:
         return requested;
+    }
+}
+
+/// Every format HudlessViewFormat views the copy in, listed at its creation so that a mutable
+/// image keeps the driver's compression; empty for a copy outside the RGBA8 and BGRA8 classes.
+std::span<const vk::Format> HudlessViewFormats(vk::Format storage) {
+    static constexpr std::array RGBA8{vk::Format::eR8G8B8A8Unorm, vk::Format::eR8G8B8A8Srgb};
+    static constexpr std::array BGRA8{vk::Format::eB8G8R8A8Unorm, vk::Format::eB8G8R8A8Srgb};
+    switch (storage) {
+    case vk::Format::eR8G8B8A8Unorm:
+    case vk::Format::eR8G8B8A8Srgb:
+        return RGBA8;
+    case vk::Format::eB8G8R8A8Unorm:
+    case vk::Format::eB8G8R8A8Srgb:
+        return BGRA8;
+    default:
+        return {};
     }
 }
 
@@ -379,7 +398,13 @@ void FrameGenerator::CaptureHudless(vk::CommandBuffer cmdbuf, vk::Image source, 
         m_hudless_views.clear();
         m_hudless_width = m_hudless_height = 0;
         m_hudless_image = VideoCore::UniqueImage(m_instance.GetDevice(), m_instance.GetAllocator());
+        const auto view_formats = HudlessViewFormats(format);
+        const vk::ImageFormatListCreateInfo format_list{
+            .viewFormatCount = u32(view_formats.size()),
+            .pViewFormats = view_formats.data(),
+        };
         if (!m_hudless_image.Create(vk::ImageCreateInfo{
+                .pNext = &format_list,
                 .flags = vk::ImageCreateFlagBits::eMutableFormat,
                 .imageType = vk::ImageType::e2D,
                 .format = format,

@@ -182,6 +182,16 @@ Presenter::Presenter(Frontend::WindowSDL& window_, AmdGpu::Liverpool* liverpool_
     // Composed in RGBA8 for frame generation, which writes storage images (B8G8R8A8 storage is
     // optional), and blitted into the swapchain's format.
     m_frame_format = m_p_frame_generator ? FrameGenerator::ColorFormat : swapchain.GetSurfaceFormat().format;
+    // Named at start because a generated frame decoded apart from the game's, through its own sRGB
+    // view, lifts its blacks on some drivers and strobes at the refresh rate; here generation reads
+    // frames the same pass already decoded and composed.
+    if (m_p_frame_generator) {
+        std::printf("Frame generation: sampling: display buffer and picture before the UI decoded by their "
+                    "sRGB views in the presenter's pass; the composed %s frames interpolated and blitted "
+                    "unsampled into the %s swapchain\n",
+                    vk::to_string(m_frame_format).c_str(),
+                    vk::to_string(swapchain.GetSurfaceFormat().format).c_str());
+    }
     // The overlay draws over every presented image and FSR's pass runs again for the picture without
     // UI: their per-image buffers must not be reused while one of them is still in use.
     const u32 c_pass_images = num_images * (m_p_frame_generator ? 2 : 1);
