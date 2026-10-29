@@ -4199,9 +4199,11 @@ bool Rasterizer::BindTexturesFromSet(const Shader::Info& stage, const PreparedSt
         auto& image = texture_cache.GetImage(entry.id);
         // Proxy entries need a current proxy; native entries of a proxied image go through
         // BindTextures, which may sample the proxy instead, as one now replaced by a picture
-        // samples it.
+        // samples it. An image linked since to a depth image as its stencil plane
+        // (AssociateStencil) does not bump the registry, so it is checked here.
         const bool proxies_on = !PsToggle::Disabled(PsToggle::SampleSceneProxies);
         if (image.backing != entry.backing || image.binding.needs_rebind ||
+            texture_cache.GetAssociatedDepth(image) ||
             image.binding.is_target || !texture_cache.IsUpToDate(entry.id) ||
             texture_cache.Substitutes().Replaces(image) ||
             (entry.proxy ? !proxies_on ||

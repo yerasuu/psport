@@ -794,8 +794,11 @@ namespace {
 // tile mode. The depth lives only in the GPU's image, so any image but the depth image itself
 // (a view of its depth aspect) holds stale data. Counted per resolution, not per draw: the binding
 // and texture-set memos reuse a resolution until an image is registered or unregistered.
+// The stencil plane has its own base (DB_STENCIL_READ_BASE) and is read as an 8-bit uint T# with
+// a depth tile mode; it lives only in the depth image's stencil aspect.
 struct DepthSurfaceReads {
     std::atomic<u64> c_live{0};         ///< resolved to the depth image (depth-aspect view)
+    std::atomic<u64> c_stencil{0};      ///< resolved to the depth image (stencil-aspect view)
     std::atomic<u64> c_other_image{0};  ///< a depth image overlapped, another image was bound
     std::atomic<u64> c_guest_memory{0}; ///< depth-tiled T#, no depth image: made from guest memory
     std::atomic<u64> c_cached_color{0}; ///< depth-tiled T#, no depth image: a colour image
@@ -816,9 +819,11 @@ void SummarizeDepthSurfaceReads(char* sz_out, std::size_t cb_out) {
     std::snprintf(
         sz_out, cb_out,
         "Texture cache: depth surfaces read as textures: %llu resolutions to the live depth image, "
-        "%llu to another image over a depth image, %llu depth-tiled reads made from guest memory "
-        "and %llu bound to a colour image, without a depth image\n",
+        "%llu bound to the live stencil plane, %llu to another image over a depth image, %llu "
+        "depth-tiled reads made from guest memory and %llu bound to a colour image, without a "
+        "depth image\n",
         (unsigned long long)s_depth_reads.c_live.load(std::memory_order_relaxed),
+        (unsigned long long)s_depth_reads.c_stencil.load(std::memory_order_relaxed),
         (unsigned long long)s_depth_reads.c_other_image.load(std::memory_order_relaxed),
         (unsigned long long)s_depth_reads.c_guest_memory.load(std::memory_order_relaxed),
         (unsigned long long)s_depth_reads.c_cached_color.load(std::memory_order_relaxed));
@@ -829,7 +834,8 @@ bool IsDepthTileMode(AmdGpu::TileMode tile_mode) {
 }
 
 void NoteDepthSurfaceRead(const ImageInfo& info, TextureCache::BindingType binding,
-                          const DepthSurfaceAlias& depth, const Image& image, bool is_created) {
+                          const DepthSurfaceAlias& depth, const Image& image, bool is_created,
+                          bool is_stencil_plane) {
     static const bool s_is_registered = [] {
         runtime_calls_add_summary(&SummarizeDepthSurfaceReads);
         return true;
@@ -837,7 +843,10 @@ void NoteDepthSurfaceRead(const ImageInfo& info, TextureCache::BindingType bindi
     (void)s_is_registered;
     const char* sz_outcome;
     u64 c_outcome;
-    if (image.info.props.is_depth) {
+    if (is_stencil_plane) {
+        sz_outcome = "bound to the live stencil plane";
+        c_outcome = s_depth_reads.c_stencil.fetch_add(1, std::memory_order_relaxed) + 1;
+    } else if (image.info.props.is_depth) {
         sz_outcome = "live depth image";
         c_outcome = s_depth_reads.c_live.fetch_add(1, std::memory_order_relaxed) + 1;
     } else if (depth.is_found) {
@@ -958,8 +967,47 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
 
     ImageId image_id{};
 
+    // psport: a uint 8-bit T# at the stencil base of a depth image (linked by AssociateStencil)
+    // reads that image's stencil aspect (ImageView); a colour image there would be made from guest
+    // memory, where the stencil the GPU wrote never lands.
+    bool is_stencil_plane = false;
+    if (desc.type == BindingType::Texture &&
+        (info.pixel_format == vk::Format::eR8Uint || info.pixel_format == vk::Format::eS8Uint)) {
+        for (const auto& cache_id : image_ids) {
+            Image& cache_image = slot_images[cache_id];
+            if (cache_image.info.guest_address != info.guest_address) {
+                continue;
+            }
+            const ImageId depth_id = GetAssociatedDepth(cache_image);
+            if (!depth_id) {
+                continue;
+            }
+            const Image& depth_image = slot_images[depth_id];
+            if (!depth_image.info.props.has_stencil || depth_image.info.num_samples != 1 ||
+                depth_image.info.size.width != info.size.width ||
+                depth_image.info.size.height != info.size.height ||
+                !depth_image.info.resources.Contains(info.resources)) {
+                continue;
+            }
+            image_id = depth_id;
+            is_stencil_plane = true;
+            depth_alias = {
+                .va_image = depth_image.info.guest_address,
+                .width = depth_image.info.size.width,
+                .height = depth_image.info.size.height,
+                .format = depth_image.info.pixel_format,
+                .is_gpu_written = True(depth_image.flags & ImageFlagBits::GpuModified),
+                .is_found = true,
+            };
+            break;
+        }
+    }
+
     // Check for a perfect match first
     for (const auto& cache_id : image_ids) {
+        if (is_stencil_plane) {
+            break;
+        }
         auto& cache_image = slot_images[cache_id];
         if (cache_image.info.guest_address != info.guest_address) {
             continue;
@@ -1022,7 +1070,9 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
     image.tick_accessed_last = scheduler.CurrentTick();
     TouchImage(image);
     if (is_texture_read && (depth_alias.is_found || IsDepthTileMode(info.tile_mode))) {
-        NoteDepthSurfaceRead(info, desc.type, depth_alias, image, is_created);
+        // A colour image linked to a depth image is redirected to it where it is bound.
+        is_stencil_plane |= !image.info.props.is_depth && GetAssociatedDepth(image);
+        NoteDepthSurfaceRead(info, desc.type, depth_alias, image, is_created, is_stencil_plane);
     }
 
     // If the image requested is a subresource of the image from cache record its location.
@@ -1220,28 +1270,34 @@ void TextureCache::AssociateStencil(ImageId depth_id, const ImageInfo& depth_inf
         depth_info.stencil_size == 0 || depth_info.stencil_addr == depth_info.guest_address) {
         return;
     }
-    ImageId stencil_id{};
+    const u64 depth_uid = slot_images[depth_id].image_uid;
+    // psport: every stencil-compatible image at the base is linked, not the last one found, so
+    // that a colour image made for a stencil read before this target was bound is redirected too.
+    bool is_linked = false;
     ForEachImageInRegion(
-        depth_info.stencil_addr, depth_info.stencil_size, [&](ImageId image_id, Image& image) {
+        depth_info.stencil_addr, depth_info.stencil_size, [&](ImageId, Image& image) {
             if (image.info.guest_address != depth_info.stencil_addr) {
                 return;
             }
             if (image.info.pixel_format == vk::Format::eUndefined ||
                 Vulkan::LiverpoolToVK::IsFormatStencilCompatible(image.info.pixel_format)) {
-                stencil_id = image_id;
+                TouchImage(image);
+                image.AssociateDepth(depth_id, depth_uid);
+                is_linked = true;
             }
         });
-    if (!stencil_id) {
-        ImageInfo info{};
-        info.guest_address = depth_info.stencil_addr;
-        info.guest_size = depth_info.stencil_size;
-        info.size = depth_info.size;
-        stencil_id = CreateImage(info, false);
-        RegisterImage(stencil_id);
+    if (is_linked) {
+        return;
     }
+    ImageInfo info{};
+    info.guest_address = depth_info.stencil_addr;
+    info.guest_size = depth_info.stencil_size;
+    info.size = depth_info.size;
+    const ImageId stencil_id = CreateImage(info, false);
+    RegisterImage(stencil_id);
     Image& stencil_image = slot_images[stencil_id];
     TouchImage(stencil_image);
-    stencil_image.AssociateDepth(depth_id, slot_images[depth_id].image_uid);
+    stencil_image.AssociateDepth(depth_id, depth_uid);
 }
 
 void TextureCache::RefreshImage(Image& image) {
