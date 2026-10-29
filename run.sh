@@ -278,13 +278,6 @@ if [[ ${MANGOHUD:-0} == 1 ]]; then
         export VK_LOADER_LAYERS_DISABLE=${VK_LOADER_LAYERS_DISABLE:+$VK_LOADER_LAYERS_DISABLE,}VK_LAYER_MANGOHUD_overlay_64_x86_64
     fi
 fi
-# The command buffers of each submission are copied when the game submits them and decoded from
-# the copy: while an area loads the game reused that memory before the GPU thread got to it
-# ("Unimplemented PM4 type 0" a few seconds after loading a save). 0 decodes guest memory.
-export PS_COPY_GPU_BUFFERS=${PS_COPY_GPU_BUFFERS:-1}
-# A guest write next to small GPU outputs the GPU is still writing (counters, compute results,
-# up to PS_GPU_WRITE_TWINS_MAX bytes per page) does not wait for the GPU (BufferCache twins).
-export PS_GPU_WRITE_TWINS=${PS_GPU_WRITE_TWINS:-1} PS_GPU_WRITE_TWINS_MAX=${PS_GPU_WRITE_TWINS_MAX:-65536}
 # Online play (PS_ONLINE=1, launcher: Online; the online module gpu/net): the servers the game's
 # title names (psport --online-overrides) are redirected, its own server to the community server,
 # its summon signs to the shadNet WebAPI; a title without any gets no redirects (scripts/online.py,

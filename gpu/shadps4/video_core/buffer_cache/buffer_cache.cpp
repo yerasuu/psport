@@ -287,27 +287,36 @@ FastReadback& SharedReadback(const Vulkan::Instance& instance) {
     return readback;
 }
 
-// psport: PS_GPU_WRITE_TWINS=1 — a guest write into a page that holds bytes the GPU is still
+// psport: write twins, on by default on every host (PS_GPU_WRITE_TWINS=0 turns them off) — a guest write into a page that holds bytes the GPU is still
 // writing (counters, small compute outputs rewritten every frame) does not wait for the GPU: the
 // guest's copy of those bytes is kept as a "twin" and the page becomes CPU-modified at once.
 // Uploads leave the GPU's bytes in the arena while the guest bytes still match their twin (the
 // guest did not write them); downloads do not overwrite guest bytes that no longer match it (the
-// guest wrote them since). Only pages with at most PS_GPU_WRITE_TWINS_MAX (1024) GPU-written
+// guest wrote them since). Only pages with at most PS_GPU_WRITE_TWINS_MAX (65536) GPU-written
 // bytes: larger outputs (vertices the CPU reads back, FaceGen) keep waiting for the GPU.
 // Not with PS_READBACKS=2: a twinned page stays GPU-modified (read-protected) while the guest may
 // write it, a write-only page the page manager cannot make (it stopped at the first cutscene).
 bool TwinsEnabled() {
     static const bool enabled = [] {
         const char* env = std::getenv("PS_GPU_WRITE_TWINS");
-        return env && env[0] == '1' &&
-               EmulatorSettings.GetReadbacksMode() != GpuReadbacksMode::Precise;
+        const bool is_wanted = env ? env[0] == '1' : true;
+        const bool is_precise = EmulatorSettings.GetReadbacksMode() == GpuReadbacksMode::Precise;
+        const bool is_on = is_wanted && !is_precise;
+        LOG_INFO(Render_Vulkan, "GPU write twins {} ({})", is_on ? "on" : "off",
+                 is_precise ? "PS_READBACKS=2 keeps pages GPU-modified"
+                 : env      ? "PS_GPU_WRITE_TWINS"
+                            : "default: a guest write next to small GPU outputs must not wait for the GPU");
+        return is_on;
     }();
     return enabled;
 }
 u64 TwinsMaxBytes() {
     static const u64 max_bytes = [] {
         const char* env = std::getenv("PS_GPU_WRITE_TWINS_MAX");
-        return env ? std::strtoull(env, nullptr, 10) : 1024ull;
+        const u64 value = env ? std::strtoull(env, nullptr, 10) : 65536ull;
+        LOG_INFO(Render_Vulkan, "GPU write twins: pages with up to {} GPU-written bytes ({})", value,
+                 env ? "PS_GPU_WRITE_TWINS_MAX" : "default");
+        return value;
     }();
     return max_bytes;
 }

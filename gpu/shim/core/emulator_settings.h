@@ -3,6 +3,7 @@
 // variables (defaults match shadPS4 except the pipeline cache, which is on).
 #pragma once
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <string>
@@ -69,7 +70,19 @@ public:
     /// PS_DRIVER_PIPELINE_CACHE=0: the driver's pipeline cache is not saved beside the shader
     /// cache (vk_driver_pipeline_cache.h).
     bool IsDriverPipelineCacheEnabled() { static const auto value = Flag("PS_DRIVER_PIPELINE_CACHE", true); return value; }
-    bool IsCopyGpuBuffers() { static const auto value = Flag("PS_COPY_GPU_BUFFERS", false); return value; }
+    /// PS_COPY_GPU_BUFFERS=0 decodes guest memory instead of a copy. On by default on every host:
+    /// the GPU thread decodes a submission after the game's call returns, so a game that refills
+    /// that memory meanwhile would change what the GPU gets.
+    bool IsCopyGpuBuffers() {
+        static const auto value = [] {
+            const bool is_set = std::getenv("PS_COPY_GPU_BUFFERS") != nullptr;
+            const bool is_on = Flag("PS_COPY_GPU_BUFFERS", true);
+            std::fprintf(stderr, "GPU buffers: submission copy %s (%s)\n", is_on ? "on" : "off",
+                         is_set ? "PS_COPY_GPU_BUFFERS" : "default: the GPU thread decodes after the game's call returns");
+            return is_on;
+        }();
+        return value;
+    }
     bool IsDirectMemoryAccessEnabled() { static const auto value = Flag("PS_DIRECT_MEMORY_ACCESS", false); return value; }
     bool IsDumpShaders() { static const auto value = Flag("PS_DUMP_SHADERS", false); return value; }
     bool IsFsrEnabled() { static const auto value = Flag("PS_FSR1", false); return value; }
