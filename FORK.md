@@ -26,29 +26,31 @@ commit up to it was read; what was not ported yet waits as a task. Last reviewed
   version report and `sceNpLookupNpId`, and its seamless co-op (BBSC: its game code, the online
   module's relay, signaling and summon broker changes, the image-ready call, event filter and overlay
   line, the launcher switch and the local game server; rows below), except BBSC's animated title card
-  and Discord status. Reviewed up to `8185b88` (0.6, 2026-10-19): its online stack is shadPS4 v0.20's
-  copied whole and its The Hunter's Dream client derives from bbhost (GPL-3.0-or-later); neither is
-  taken.
-- SrShadowy's fork (SrShadowy/bloodborne_pc, GPL-2.0-or-later): reviewed up to `f5d3dcb` (2026-10-20, on
-  bbport `8185b88`, after its release 0.6.1 `b1d3b8b`).
-- Teefpyre's fork (Teefpyre/bloodborne_pc-LinuxBBSCFix, GPL-2.0-or-later): reviewed up to `f3b5504` (2026-10-20, on
-  bbport `8185b88`).
-- willl03's fork (willl03/bloodborne_pc, GPL-2.0 per its LICENSE file): fetched up to `ed844f8` (2026-10-25,
-  0.6.6-dev-net.2, on bbport `8185b88`), not reviewed yet. 112 commits over bbport 0.6, 108 of them SrShadowy's; its
-  own four are the BBSC co-op relay by online id and the dispatch of BBSC packets past 0x22.
-- Supermedo's fork (Supermedo/bloodborne_pc, branch `windows`, GPL-2.0-or-later): reviewed in full (every branch,
-  per commit), the Windows port above all; the rows below name what was ported. Its `thd/` and bbbridge
+  and Discord status. Reviewed up to `0fc2921c45` (0.7, 2026-10-29, one commit read by behaviour area): its
+  online stack is shadPS4 v0.20's copied whole and its The Hunter's Dream client derives from bbhost
+  (GPL-3.0-or-later); neither is taken.
+- SrShadowy's fork (SrShadowy/bloodborne_pc, GPL-2.0-or-later): reviewed up to `0b96acfc50` (2026-10-26) and its
+  `testing` branch `d390bb20db` (2026-10-27).
+- Teefpyre's fork (Teefpyre/bloodborne_pc-LinuxBBSCFix, GPL-2.0-or-later): reviewed up to `b6328ee031` (2026-10-20).
+- willl03's fork (willl03/bloodborne_pc, GPL-2.0 per its LICENSE file): reviewed up to `ed844f895c` (2026-10-25,
+  0.6.6-dev-net.2): 108 of its 112 commits over bbport 0.6 are SrShadowy's; its own four are the BBSC co-op relay
+  by online id (waits for the owner's decision) and the dispatch of BBSC packets past 0x22.
+- Supermedo's fork (Supermedo/bloodborne_pc, branch `windows`, GPL-2.0-or-later): reviewed up to `ff42e28bbd` (2026-10-28), per
+  commit, the Windows port above all; the rows below name what was ported. Its `thd/` and bbbridge
   (GPL-3.0) and `dlss_bridge` (MIT) are not taken.
-- Mrsuss60's fork (Mrsuss60/bloodborne_pc_windows_port, licence not checked): read at `7c0e5f0d20` only as a second
-  view of the Windows port; nothing is taken from it yet.
-- AnyPS5 (boykopovar/AnyPS5, GPL-2.0-only): reviewed up to `5b59fbc` (2026-10-21). Its libSceNgs2 is
+- Mrsuss60's fork (Mrsuss60/bloodborne_pc_windows_port, GPL-2.0, README "v2 or later", with menu-pointer
+  code from bbhost (GPL-3.0-or-later) that is never taken): reviewed up to `f8f450b19f` (2026-10-28), 137 commits,
+  the diffs of 11 of them read and the rest by subject and file list.
+- AnyPS5 (boykopovar/AnyPS5, GPL-2.0-only): classified by cluster up to `aaccd0ba39` (2026-10-29), no diff read: about
+  5100 commits since `5b59fbc` (2026-10-21), of which 230 were read by subject and message; it is now a PS5
+  relinker, so every behaviour taken is confirmed on PS4 firmware. Its libSceNgs2 is
   ported as code in `gpu/ngs2_anyps5/` and keeps its GPL-2.0-only (kb #843, Ported components below); from
   the rest only behaviour is taken, confirmed on the firmware and written natively, as the native
   `gpu/ngs2/` and `gpu/audiodec/` are.
 - shadPS4: `b4e7ae7` (2026-10-02), the vendored commit in `gpu/VENDOR.txt`, plus the recompiler
   fixes backported after it that the same file lists. The code ported or written from shadPS4
   outside `gpu/shadps4/` (libSceFiber, libSceFont, Videodec2, the per-NID tables, Audio3d, memory
-  pools) follows `3a9f572`, as its rows say. Reviewed up to `c1b2655` (2026-10-21).
+  pools) follows `3a9f572`, as its rows say. Reviewed up to `0614ce324b` (2026-10-28).
 
 ### Ported from bbport
 
