@@ -709,6 +709,96 @@ void Runtime::CopyDepthStencil(VideoCore::Image* src, VideoCore::Image* dst,
     dst->flags &= ~VideoCore::ImageFlagBits::Dirty;
 }
 
+// Texel size of one plane of a depth/stencil format in a buffer copy (Vulkan spec, "Copying Data
+// Between Buffers and Images", depth/stencil formats): 1 byte of stencil, 2 of D16, 4 of the
+// 24-bit (8 bits undefined) and 32-bit depth formats.
+static u32 CopyPlaneTexelSize(vk::Format format, bool is_stencil) {
+    if (is_stencil) {
+        return 1;
+    }
+    switch (format) {
+    case vk::Format::eD16Unorm:
+    case vk::Format::eD16UnormS8Uint:
+        return 2;
+    default:
+        return 4;
+    }
+}
+
+bool Runtime::CopyDepthPlaneToColor(VideoCore::Image* src, VideoCore::Image* dst, bool is_stencil,
+                                    u32 i_src_layer, u32 i_dst_layer) {
+    if (IsMissing(src) || IsMissing(dst)) {
+        return true;
+    }
+    const auto aspect =
+        is_stencil ? vk::ImageAspectFlagBits::eStencil : vk::ImageAspectFlagBits::eDepth;
+    // A 24-bit host depth stands in for the guest's 32-bit float one: its bits are not the guest's.
+    const bool is_24_bit_depth = src->info.pixel_format == vk::Format::eX8D24UnormPack32 ||
+                                 src->info.pixel_format == vk::Format::eD24UnormS8Uint;
+    if (!(src->aspect_mask & aspect) || (!is_stencil && is_24_bit_depth) ||
+        vk::blockExtent(dst->info.pixel_format)[0] != 1 ||
+        CopyPlaneTexelSize(src->info.pixel_format, is_stencil) !=
+            vk::blockSize(dst->info.pixel_format)) {
+        return false;
+    }
+    const u32 width = std::min(src->info.size.width, dst->info.size.width);
+    const u32 height = std::min(src->info.size.height, dst->info.size.height);
+    const u64 cb_copy = u64(width) * height * vk::blockSize(dst->info.pixel_format);
+    const auto copy_ref = staging_pool.Request(cb_copy, VideoCore::MemoryType::DeviceLocal);
+    if (IsMissing(copy_ref.buffer)) {
+        return true;
+    }
+
+    SetBackingSamples(dst, dst->info.num_samples, false);
+    SetBackingSamples(src, src->info.num_samples);
+    scheduler.EndRendering();
+    bool needs_flush =
+        Transit(src, vk::ImageLayout::eTransferSrcOptimal, vk::PipelineStageFlagBits2::eCopy,
+                vk::AccessFlagBits2::eTransferRead);
+    needs_flush |= Transit(dst, vk::ImageLayout::eTransferDstOptimal,
+                           vk::PipelineStageFlagBits2::eCopy, vk::AccessFlagBits2::eTransferWrite);
+    needs_flush |= IsBufferAccessed(copy_ref.buffer, copy_ref.offset, cb_copy);
+    if (needs_flush) {
+        FlushBarriers();
+    }
+
+    const vk::BufferImageCopy download = {
+        .bufferOffset = copy_ref.offset,
+        .imageSubresource{
+            .aspectMask = aspect,
+            .mipLevel = 0,
+            .baseArrayLayer = i_src_layer,
+            .layerCount = 1,
+        },
+        .imageExtent = {width, height, 1},
+    };
+    vk::BufferImageCopy upload = download;
+    upload.imageSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
+    upload.imageSubresource.baseArrayLayer = i_dst_layer;
+    scheduler.Record([src_image = src->GetImage(), dst_image = dst->GetImage(),
+                      handle = copy_ref.buffer->Handle(), download,
+                      upload](vk::CommandBuffer cmdbuf) {
+        cmdbuf.copyImageToBuffer(src_image, vk::ImageLayout::eTransferSrcOptimal, handle,
+                                 download);
+        const vk::MemoryBarrier2 post_copy_barrier = {
+            .srcStageMask = vk::PipelineStageFlagBits2::eCopy,
+            .srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
+            .dstStageMask = vk::PipelineStageFlagBits2::eCopy,
+            .dstAccessMask = vk::AccessFlagBits2::eTransferRead,
+        };
+        cmdbuf.pipelineBarrier2(vk::DependencyInfo{
+            .dependencyFlags = vk::DependencyFlagBits::eByRegion,
+            .memoryBarrierCount = 1u,
+            .pMemoryBarriers = &post_copy_barrier,
+        });
+        cmdbuf.copyBufferToImage(handle, dst_image, vk::ImageLayout::eTransferDstOptimal, upload);
+    });
+
+    dst->flags |= VideoCore::ImageFlagBits::GpuModified;
+    dst->flags &= ~VideoCore::ImageFlagBits::Dirty;
+    return true;
+}
+
 void Runtime::ResolveImage(VideoCore::Image* src, VideoCore::Image* dst,
                            const VideoCore::SubresourceRange& src_range,
                            const VideoCore::SubresourceRange& dst_range) {

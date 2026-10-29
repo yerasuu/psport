@@ -553,6 +553,14 @@ bool IsKnownFormat(AmdGpu::DataFormat data_fmt, AmdGpu::NumberFormat num_fmt) {
 }
 } // namespace
 
+// psport: DB_RENDER_CONTROL DEPTH_COPY/STENCIL_COPY make the DB write the bound depth or stencil
+// into the color target in place of the pixel shader's output (the DB->CB copy radeonsi's
+// si_blit_dbcb_copy runs on GFX6-8); drawn as an ordinary draw, the target got the shader's colour.
+static bool IsDepthToColorCopy(const AmdGpu::Regs& regs) {
+    return (regs.depth_render_control.depth_copy || regs.depth_render_control.stencil_copy) &&
+           regs.color_control.mode != AmdGpu::ColorControl::OperationMode::Disable;
+}
+
 bool Rasterizer::FilterDraw() {
     const auto& regs = Regs();
     if (regs.color_control.mode == AmdGpu::ColorControl::OperationMode::EliminateFastClear) {
@@ -575,6 +583,10 @@ bool Rasterizer::FilterDraw() {
     if (regs.primitive_type == AmdGpu::PrimitiveType::None) {
         LOG_TRACE(Render_Vulkan, "Primitive type 'None' skipped");
         ScopedMarkerInsert("PrimitiveTypeNone");
+        return false;
+    }
+    if (IsDepthToColorCopy(regs)) {
+        DepthToColorCopy();
         return false;
     }
 
@@ -1634,7 +1646,8 @@ bool Rasterizer::FilterDrawPasses() const {
     using Mode = AmdGpu::ColorControl::OperationMode;
     const auto mode = regs.color_control.mode;
     if (mode == Mode::EliminateFastClear || mode == Mode::FmaskDecompress ||
-        mode == Mode::Resolve || regs.primitive_type == AmdGpu::PrimitiveType::None) {
+        mode == Mode::Resolve || regs.primitive_type == AmdGpu::PrimitiveType::None ||
+        IsDepthToColorCopy(regs)) {
         return false;
     }
     const bool depth_copy =
@@ -4712,6 +4725,72 @@ void Rasterizer::DepthStencilCopy(bool is_depth, bool is_stencil) {
                              sub_range);
 
     ScopeMarkerEnd();
+}
+
+void Rasterizer::DepthToColorCopy() {
+    const auto& regs = Regs();
+    const bool is_stencil = !regs.depth_render_control.depth_copy;
+    if (regs.depth_render_control.depth_copy && regs.depth_render_control.stencil_copy) {
+        LOG_ERROR_COUNTED(Render_Vulkan,
+                          "Depth and stencil copied together into one color target: depth only");
+    }
+    if (!regs.color_buffers[0] ||
+        !(is_stencil ? regs.depth_buffer.StencilValid() : regs.depth_buffer.DepthValid())) {
+        LOG_ERROR_COUNTED(Render_Vulkan,
+                          "Depth to color copy without a color target 0 or a valid {} plane, "
+                          "skipped",
+                          is_stencil ? "stencil" : "depth");
+        return;
+    }
+    const auto depth_view = regs.depth_view.ForDraw(false);
+    auto depth_desc = VideoCore::TextureCache::ImageDesc(
+        regs.depth_buffer, depth_view, regs.depth_control,
+        regs.depth_htile_data_base.GetAddress(), DbExtent(), false);
+    VideoCore::TextureCache::ImageDesc color_desc{regs.color_buffers[0], CbExtent(0)};
+    const auto depth_id = texture_cache.FindImage(depth_desc);
+    const auto color_id = texture_cache.FindImage(color_desc);
+    if (!depth_id || !color_id) {
+        LOG_ERROR_COUNTED(Render_Vulkan,
+                          "Depth to color copy {:#x} -> {:#x}: no image for one side, skipped",
+                          regs.depth_buffer.DepthAddress(), regs.color_buffers[0].Address());
+        return;
+    }
+    // psport: fetched last because FindImage may create images and move the earlier ones.
+    auto& depth_image = texture_cache.GetImage(depth_id);
+    auto& color_image = texture_cache.GetImage(color_id);
+    if (depth_image.info.num_samples > 1 || color_image.info.num_samples > 1) {
+        LOG_ERROR_COUNTED(Render_Vulkan,
+                          "Depth to color copy {:#x} -> {:#x} of a multisampled image "
+                          "(COPY_SAMPLE), skipped",
+                          depth_image.info.guest_address, color_image.info.guest_address);
+        return;
+    }
+
+    ScopeMarkerBegin(fmt::format("DepthToColorCopy:{}={:#x}:CB0={:#x}", is_stencil ? "S" : "Z",
+                                 depth_image.info.guest_address, color_image.info.guest_address));
+    const bool is_copied = runtime.CopyDepthPlaneToColor(
+        &depth_image, &color_image, is_stencil, depth_desc.view_info.range.base.layer,
+        color_desc.view_info.range.base.layer);
+    ScopeMarkerEnd();
+    if (!is_copied) {
+        LOG_ERROR_COUNTED(Render_Vulkan,
+                          "Depth to color copy {:#x} ({}) -> {:#x} ({}): texels differ in size "
+                          "or encoding, skipped",
+                          depth_image.info.guest_address, vk::to_string(depth_image.info.pixel_format),
+                          color_image.info.guest_address, vk::to_string(color_image.info.pixel_format));
+        return;
+    }
+    static std::atomic<u64> s_c_copies;
+    const u64 c_copies = s_c_copies.fetch_add(1, std::memory_order_relaxed) + 1;
+    if ((c_copies & (c_copies - 1)) == 0) {
+        std::printf("GPU: depth to color copies (DB_RENDER_CONTROL %s_COPY) so far: %llu, last "
+                    "%#llx %ux%u -> %#llx %ux%u\n",
+                    is_stencil ? "STENCIL" : "DEPTH", static_cast<unsigned long long>(c_copies),
+                    static_cast<unsigned long long>(depth_image.info.guest_address),
+                    depth_image.info.size.width, depth_image.info.size.height,
+                    static_cast<unsigned long long>(color_image.info.guest_address),
+                    color_image.info.size.width, color_image.info.size.height);
+    }
 }
 
 void Rasterizer::FillBuffer(VAddr address, u32 num_bytes, u32 value, bool is_gds) {

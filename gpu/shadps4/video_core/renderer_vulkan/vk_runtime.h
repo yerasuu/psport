@@ -87,6 +87,13 @@ public:
     void CopyDepthStencil(VideoCore::Image* src, VideoCore::Image* dst,
                           const VideoCore::SubresourceRange& sub_range);
 
+    /// psport: the depth or stencil plane of `src` (layer i_src_layer) into level 0, layer
+    /// i_dst_layer of the color image `dst`, bit for bit over the area both cover, as the DB
+    /// writes it into a CB in a DB_RENDER_CONTROL depth or stencil copy. False when that plane's
+    /// texels and those of `dst` differ in size or encoding: nothing is copied.
+    bool CopyDepthPlaneToColor(VideoCore::Image* src, VideoCore::Image* dst, bool is_stencil,
+                               u32 i_src_layer, u32 i_dst_layer);
+
     void ResolveImage(VideoCore::Image* src, VideoCore::Image* dst,
                       const VideoCore::SubresourceRange& src_range,
                       const VideoCore::SubresourceRange& dst_range);

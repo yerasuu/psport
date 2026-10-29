@@ -332,6 +332,7 @@ private:
     u64 begin_memo_hits = 0, begin_memo_misses = 0;
     void Resolve();
     void DepthStencilCopy(bool is_depth, bool is_stencil);
+    void DepthToColorCopy();
     void EliminateFastClear();
 
     void UpdateDynamicState(const GraphicsPipeline* pipeline, bool is_indexed) const;
