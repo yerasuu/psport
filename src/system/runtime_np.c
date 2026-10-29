@@ -717,5 +717,7 @@ static const RuntimeExport s_exports[] = {
 };
 uintptr_t runtime_np_resolve(const char *sz_name) {
     const uintptr_t va_found = RUNTIME_LOOKUP(s_exports, sz_name);
-    return va_found ? va_found : runtime_np_community_resolve(sz_name);
+    if (va_found) return va_found;
+    const uintptr_t va_heap = runtime_np_heap_resolve(sz_name);
+    return va_heap ? va_heap : runtime_np_community_resolve(sz_name);
 }

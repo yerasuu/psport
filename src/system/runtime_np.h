@@ -46,4 +46,6 @@ uint32_t np_object_kind(int64_t h_object);
 bool np_object_change(int64_t h_object, uint32_t kind);
 
 uintptr_t runtime_np_community_resolve(const char *sz_name);
+/* libSceNpCommon's kernel memory, NpHeap and sce::np::Object operators (runtime_np_heap.c). */
+uintptr_t runtime_np_heap_resolve(const char *sz_name);
 #endif
