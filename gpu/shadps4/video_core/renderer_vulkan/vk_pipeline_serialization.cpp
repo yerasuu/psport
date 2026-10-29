@@ -14,7 +14,7 @@
 
 namespace Serialization {
 /* You should increment versions below once corresponding serialization scheme is changed. */
-static constexpr u32 ShaderBinaryVersion = 15u; // psport: vector instructions under a constant EXEC
+static constexpr u32 ShaderBinaryVersion = 16u; // psport: valid-mask exports outside EXEC scopes
 static constexpr u32 ShaderMetaVersion = 12u; // psport: BufferResource::dynamic
 static constexpr u32 PipelineKeyVersion = 6u; // psport: SerializationSupport::xfb_stride
 } // namespace Serialization

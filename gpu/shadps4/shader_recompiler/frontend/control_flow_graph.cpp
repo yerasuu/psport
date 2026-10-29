@@ -61,7 +61,10 @@ static bool IgnoresExecMask(const GcnInst& inst) {
     default:
         break;
     }
-    return false;
+    // psport: an export with VM set takes EXEC as the pixels' valid mask, so it runs in every lane;
+    // wrapped in the scope of an `s_mov_b64 exec, 0` kill, its discard of the lanes outside EXEC
+    // never ran and the killed pixels were written with undefined colour
+    return inst.category == InstCategory::Export && inst.control.exp.vm;
 }
 
 static std::optional<u32> ResolveSetPcTarget(std::span<const GcnInst> list, u32 setpc_index,
