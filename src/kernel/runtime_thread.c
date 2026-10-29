@@ -313,6 +313,14 @@ static ABI int32_t attr_get_guard(ThreadAttr **pp_slot,uint64_t *p_size) {
     *p_size=p_thread_attr->guard; return 0;
 }
 
+/* The console's thread start leaves the outermost guest frame linked to a null frame pointer and a
+ * null return address, where frame-pointer walkers (Unity's stack traces) stop; a host frame there
+ * holds whatever rbp the host code kept, which they follow into a fault. The record of two zeros
+ * stands for that frame; rsp, balanced by the entry's return, finds the host's rbp again. */
+__asm__(".text\n.globl runtime_thread_enter_guest\nruntime_thread_enter_guest:\n"
+        " push %rbp\n pushq $0\n pushq $0\n mov %rsp,%rbp\n"
+        " mov %rdi,%rax\n mov %rsi,%rdi\n call *%rax\n"
+        " add $16,%rsp\n pop %rbp\n ret\n");
 static void *host_start(void *p_argument) {
     GuestThread *p_thread=p_argument;
     attach(p_thread);
@@ -331,7 +339,7 @@ static void *host_start(void *p_argument) {
         if (i_exit_call<C_EXIT_CALLS_LOGGED)
             printf("Runtime: guest thread '%s' left through scePthreadExit (result %p)%s\n",p_thread->name,
                    p_thread->result,i_exit_call+1==C_EXIT_CALLS_LOGGED ? "; further ones are only counted" : "");
-    } else p_thread->result=p_thread->entry(p_thread->argument);
+    } else p_thread->result=runtime_thread_enter_guest(p_thread->entry,p_thread->argument);
     if (s_pfn_exit_hook) s_pfn_exit_hook();
     runtime_thread_keys_cleanup();
     runtime_exception_lock(&s_lock); p_thread->finished=1; ++s_c_exited; runtime_exception_unlock(&s_lock);

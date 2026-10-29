@@ -269,6 +269,9 @@ int32_t runtime_thread_join_spawned(void *p_thread, void **pp_result);
 /* Run on the calling guest thread once it ends, whether its entry returns or it leaves by
  * scePthreadExit or a cancel: libSceUlt finishes a user-level thread there. */
 void runtime_thread_set_exit_hook(void (*pfn_hook)(void));
+/* Calls pfn_entry(p_argument) on this stack with its frame-pointer chain ending in a null frame
+ * pointer and a null return address, as the console's thread start ends it. */
+ABI void *runtime_thread_enter_guest(void *(ABI *pfn_entry)(void *), void *p_argument);
 void runtime_file_report(void);
 void runtime_file_unmounted_report(void);
 void runtime_file_configure(const char *sz_app0, const char *sz_user);

@@ -81,12 +81,15 @@ void protect(void *p_range, size_t cb_range, unsigned flags) {
     fail(sz_message);
 }
 /* enter_on_stack(p_entry, p_arg0, p_arg1, p_top): call p_entry(p_arg0,p_arg1) on a new stack, its
- * arguments in System V's registers on every host. */
+ * arguments in System V's registers on every host. The entry's frame-pointer chain ends in a null
+ * frame pointer and a null return address (runtime_thread_enter_guest says why); the host's rsp
+ * is kept above them, in the top slot of the 16-aligned p_top. */
 ABI void enter_on_stack(void *p_entry, void *p_arg0, void *p_arg1, void *p_top);
 __asm__(".text\n.globl enter_on_stack\nenter_on_stack:\n"
-        " push %rbp\n mov %rsp,%rbp\n and $-16,%rcx\n mov %rcx,%rsp\n"
+        " push %rbp\n and $-16,%rcx\n mov %rsp,-8(%rcx)\n lea -32(%rcx),%rsp\n"
+        " movq $0,(%rsp)\n movq $0,8(%rsp)\n mov %rsp,%rbp\n"
         " mov %rdi,%rax\n mov %rsi,%rdi\n mov %rdx,%rsi\n call *%rax\n"
-        " mov %rbp,%rsp\n pop %rbp\n ret\n");
+        " mov 24(%rsp),%rsp\n pop %rbp\n ret\n");
 static ABI void guest_exit(void) { puts("Runtime: process finalizer callback reached"); }
 
 int main(int argc, char **argv) {
