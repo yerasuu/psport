@@ -2,7 +2,8 @@
 /* Guest file system: PS4 mount points mapped onto host directories.
  *   /app0, /hostapp  -> game package root (read-only by convention)
  *   /temp0, /download0, /data, and mounts added by SaveData -> user directory
- * Guest descriptors are small integers in our own table; stdio 0-2 pass through.
+ * Guest descriptors are small integers in our own table; stdio 0-2 are the host's, and writes to
+ * 1 and 2 become lines of the log (runtime_guest_output.c).
  * Paths containing ".." components are rejected rather than normalized. */
 #define _GNU_SOURCE
 #include "runtime.h"
@@ -551,6 +552,11 @@ static int64_t do_write(int h_fd,const void *p_buffer,uint64_t cb_buffer) {
     int h=host_fd_written(h_fd);
     if (h<0) return -EBADF;
     touch_for_read(p_buffer,cb_buffer);
+    if (h_fd==1 || h_fd==2) {
+        runtime_guest_output(h_fd==1 ? RUNTIME_GUEST_OUTPUT_STDOUT : RUNTIME_GUEST_OUTPUT_STDERR,p_buffer,cb_buffer);
+        __atomic_add_fetch(&s_c_writes,1,__ATOMIC_RELAXED);
+        return (int64_t)cb_buffer;
+    }
     int64_t cb_transferred=ps_host_fs_write(h,p_buffer,cb_buffer);
     if (cb_transferred<0) return cb_transferred;
     __atomic_add_fetch(&s_c_writes,1,__ATOMIC_RELAXED);

@@ -216,6 +216,11 @@ void runtime_process_configure(uint32_t sdk_version, uint32_t psf_attributes);
 /* The SDK version the eboot was built with (its process parameters), for behaviour tied to it. */
 uint32_t runtime_process_sdk_version(void);
 uintptr_t runtime_file_resolve(const char *sz_name);
+/* The guest's console output as lines of psport's log (runtime_guest_output.c): its writes to
+ * descriptors 1 and 2 and sceKernelDebugOutText, each channel cut into lines of its own. */
+enum { RUNTIME_GUEST_OUTPUT_STDOUT, RUNTIME_GUEST_OUTPUT_STDERR, RUNTIME_GUEST_OUTPUT_DEBUG, RUNTIME_GUEST_OUTPUT_CHANNELS };
+void runtime_guest_output(int i_channel, const void *p_text, uint64_t cb_text);
+uintptr_t runtime_guest_output_resolve(const char *sz_name);
 /* Size of the guest's descriptor table (files, pipes and sockets), what RLIMIT_NOFILE reports. */
 #define RUNTIME_MAX_FILES 1024
 uintptr_t runtime_services_resolve(const char *sz_name);

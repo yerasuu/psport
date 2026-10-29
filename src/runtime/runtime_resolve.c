@@ -12,7 +12,7 @@ static uintptr_t (*const s_pfn_resolvers[])(const char *sz_name)={
     runtime_voice_resolve, runtime_services_resolve, runtime_ajm_resolve, runtime_audio_resolve,
     runtime_audio3d_resolve, runtime_pad_resolve, runtime_gesture_resolve, runtime_devices_resolve,
     runtime_capture_resolve, runtime_vr_resolve, runtime_mouse_resolve, runtime_keyboard_resolve,
-    runtime_rtc_resolve, runtime_savedata_resolve, runtime_file_resolve, runtime_aio_resolve,
+    runtime_rtc_resolve, runtime_savedata_resolve, runtime_file_resolve, runtime_aio_resolve, runtime_guest_output_resolve,
     psport_gpu_resolve,
 };
 uintptr_t runtime_library_resolve(const char *sz_name) {
