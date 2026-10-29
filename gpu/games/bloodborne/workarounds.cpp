@@ -75,7 +75,7 @@ constexpr u8 StepExitCode[7] = {0x48, 0x8b, 0x03,        // mov rax, [rbx]
 constexpr u64 OffRunnerDestroy = 0x106798a, OffRunnerReset = 0x1067a5c;
 constexpr u8 RunnerClearCode[11] = {0x48, 0xc7, 0x83, 0x20, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 constexpr u64 OffHeldSlot = 0x120;
-using PfnGiveSlotBack = void (*)(u64 va_pool, u64 va_slot);
+using PfnGiveSlotBack = void(PS4_SYSV_ABI*)(u64 va_pool, u64 va_slot);
 Counter s_slots_after_failure, s_slots_after_clear;
 
 void GiveSlotBack(u64 va_runner, u64 va_pool, Counter& counter, const char* sz_when) {
@@ -201,7 +201,7 @@ constexpr std::array<CallSite, 3> FxInitClearSites = {{
     {0xebbca4, {0xe8, 0x87, 0xc9, 0x2a, 0x01}},
     {0xebbcc2, {0xe8, 0x69, 0xc9, 0x2a, 0x01}},
 }};
-using PfnGraphicsClear = void (*)(void* p_context, void* p_state, const u8* p_target, const float* p_color);
+using PfnGraphicsClear = void(PS4_SYSV_ABI*)(void* p_context, void* p_state, const u8* p_target, const float* p_color);
 Counter s_fx_written, s_fx_native;
 
 struct ColorClear {

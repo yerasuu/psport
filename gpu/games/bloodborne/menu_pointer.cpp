@@ -154,7 +154,7 @@ public:
         }
         const u64 va_interface = Field<u64>(m_bytes, 0x40);
         if (const u64 va_release = va_interface ? VirtualFunction(va_interface, 0x18) : 0) {
-            using PfnRelease = void (*)(void*, void*, u64);
+            using PfnRelease = void(PS4_SYSV_ABI*)(void*, void*, u64);
             reinterpret_cast<PfnRelease>(va_release)(reinterpret_cast<void*>(va_interface), m_bytes + 0x30,
                                                      Field<u64>(m_bytes, 0x50));
         }
@@ -172,14 +172,14 @@ public:
     }
     /// Its child at sz_path ("Cursor", "Widgets/Slider/LeftArrow").
     void Child(const char* sz_path, Value& out) {
-        using PfnFind = void (*)(void*, const void*, const char*, int);
+        using PfnFind = void(PS4_SYSV_ABI*)(void*, const void*, const char*, int);
         reinterpret_cast<PfnFind>(At(OffFindChild))(out.Raw(), m_bytes, sz_path, 0);
     }
     void SetVisible(bool is_visible) {
         const u64 va_vtable = Field<u64>(m_bytes, 0);
         const u64 va_set = va_vtable ? Get<u64>(va_vtable + 8) : 0;
         if (DisplayObject() && IsGameFunction(va_set)) {
-            using PfnSet = void (*)(void*, int);
+            using PfnSet = void(PS4_SYSV_ABI*)(void*, int);
             reinterpret_cast<PfnSet>(va_set)(m_bytes, is_visible ? 1 : 0);
         }
     }
@@ -215,13 +215,13 @@ bool Contains(u64 va_object, float x, float y, Rect* p_out_stage, float grow = 0
     }
     alignas(16) const float identity[8] = {1, 0, 0, 0, 0, 1, 0, 0};
     alignas(16) float local[4] = {};
-    using PfnBounds = void (*)(float*, void*, const float*);
+    using PfnBounds = void(PS4_SYSV_ABI*)(float*, void*, const float*);
     reinterpret_cast<PfnBounds>(va_get_bounds)(local, reinterpret_cast<void*>(va_object), identity);
     if (!(local[2] > local[0]) || !(local[3] > local[1])) {
         return false;
     }
     alignas(16) float m[8] = {1, 0, 0, 0, 0, 1, 0, 0};
-    using PfnMatrix = void (*)(void*, float*);
+    using PfnMatrix = void(PS4_SYSV_ABI*)(void*, float*);
     reinterpret_cast<PfnMatrix>(At(OffWorldMatrix))(reinterpret_cast<void*>(va_object), m);
     constexpr float Twips = 20.0f;
     if (p_out_stage) {
@@ -354,14 +354,14 @@ public:
         }
         const int line_scroll = Field<std::int32_t>(m_p_component, OffLineScroll);
         const int scroll = Field<std::int32_t>(m_p_component, OffScroll);
-        using PfnSetCursor = std::int32_t (*)(u8*, int);
+        using PfnSetCursor = std::int32_t(PS4_SYSV_ABI*)(u8*, int);
         const int scrolled = reinterpret_cast<PfnSetCursor>(At(OffSetCursor))(m_p_component, i_item);
         const int d_line = line_scroll - Field<std::int32_t>(m_p_component, OffLineScroll);
         const int d_scroll = scroll - Field<std::int32_t>(m_p_component, OffScroll);
         if (scrolled == 1 && (d_line || d_scroll)) {
             // The list scrolled to it: back where the pointer is, with the cursor on that item.
-            using PfnScrollBy = void (*)(u8*, int, int);
-            using PfnHideCursors = void (*)(u8*);
+            using PfnScrollBy = void(PS4_SYSV_ABI*)(u8*, int, int);
+            using PfnHideCursors = void(PS4_SYSV_ABI*)(u8*);
             reinterpret_cast<PfnScrollBy>(At(OffScrollBy))(m_p_component, d_line, d_scroll);
             reinterpret_cast<PfnHideCursors>(At(OffHideCursors))(m_p_component);
             if (IsMakerReady()) {
@@ -385,7 +385,7 @@ private:
         return m_va_make_item != 0;
     }
     void MakeItem(u64 slot, Value& out) {
-        using PfnMake = void (*)(void*, void*, const u64*);
+        using PfnMake = void(PS4_SYSV_ABI*)(void*, void*, const u64*);
         reinterpret_cast<PfnMake>(m_va_make_item)(out.Raw(), reinterpret_cast<void*>(m_va_provider), &slot);
     }
     /// The item's own cursor area if it has one, else the item; its combo box and slider too.
@@ -410,7 +410,7 @@ private:
         const u64 va_listener = Field<u64>(m_p_component, OffListener);
         if (const u64 va_moved = va_listener ? VirtualFunction(va_listener, 0x10) : 0) {
             std::int32_t at = i_item;
-            using PfnMoved = void (*)(void*, std::int32_t*);
+            using PfnMoved = void(PS4_SYSV_ABI*)(void*, std::int32_t*);
             reinterpret_cast<PfnMoved>(va_moved)(reinterpret_cast<void*>(va_listener), &at);
         }
         // The cursor's sound, unless one is already queued.

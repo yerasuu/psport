@@ -14,6 +14,7 @@
 #include <string>
 #include <vector>
 
+#include "common/types.h"
 #include "psport_settings.h"
 #include "effects.h"
 
@@ -302,7 +303,7 @@ void DestroyFunction(u8* p_function) {
     if (!p_impl) {
         return;
     }
-    using Destroy = void (*)(void*, int);
+    using Destroy = void(PS4_SYSV_ABI*)(void*, int);
     Destroy pfn_destroy = (*reinterpret_cast<Destroy**>(p_impl))[4];
     pfn_destroy(p_impl, p_impl != p_function);
     *reinterpret_cast<void**>(p_function + 0x20) = nullptr;
@@ -312,7 +313,7 @@ void DestroyFunction(u8* p_function) {
 void DestroyText(u8* p_text) {
     if (*reinterpret_cast<u64*>(p_text + 0x28) >= 8) {
         void* p_allocator = *reinterpret_cast<void**>(p_text + 0x30);
-        using Free = void (*)(void*, void*);
+        using Free = void(PS4_SYSV_ABI*)(void*, void*);
         (*reinterpret_cast<Free**>(p_allocator))[0x70 / 8](p_allocator, *reinterpret_cast<void**>(p_text + 0x10));
     }
     *reinterpret_cast<u64*>(p_text + 0x28) = 7;
@@ -332,7 +333,7 @@ void DestroyValues(u8* p_list, std::size_t c_offsets) {
 }
 
 void MakeTexts(u8* p_pair, u32 name, u32 help) {
-    using Make = void* (*)(void*, u32, u32);
+    using Make = void*(PS4_SYSV_ABI*)(void*, u32, u32);
     Game<Make>(MakeText)(p_pair, TextName, name);
     Game<Make>(MakeText)(p_pair + TextSize, TextHelp, help);
 }
@@ -347,20 +348,20 @@ bool UpscalerAvailable(int i) {
 }
 
 void AddRows(void* p_page, const std::vector<Row>& rows) {
-    using Push = void (*)(void*, void*);
-    using AddRow = void (*)(void*, void*, int*, void*, const int*);
-    using Make = void* (*)(void*, u32, u32);
+    using Push = void(PS4_SYSV_ABI*)(void*, void*);
+    using AddRow = void(PS4_SYSV_ABI*)(void*, void*, int*, void*, const int*);
+    using Make = void*(PS4_SYSV_ABI*)(void*, u32, u32);
     for (const Row& row : rows) {
         alignas(16) u8 pair[2 * TextSize] = {};
         MakeTexts(pair, row.name, row.help);
         if (row.kind == Kind::Slider || row.kind == Kind::Steps) {
-            using Slider = void (*)(void*, void*, u8*, const u8*);
+            using Slider = void(PS4_SYSV_ABI*)(void*, void*, u8*, const u8*);
             Game<Slider>(SliderRow)(p_page, pair, &s_bytes[row.field], &s_default_bytes[row.field]);
             DestroyTexts(pair);
             continue;
         }
         if (row.kind == Kind::Toggle) {
-            using PairRowFn = void (*)(void*, void*, u8*, void*, const u8*);
+            using PairRowFn = void(PS4_SYSV_ABI*)(void*, void*, u8*, void*, const u8*);
             u8* p_two = static_cast<u8*>(::operator new(PairListSize, std::align_val_t{16}));
             std::memset(p_two, 0, PairListSize);
             for (std::size_t i = 0; i < 2; ++i) {
@@ -398,19 +399,19 @@ void AddRows(void* p_page, const std::vector<Row>& rows) {
 std::atomic<const char16_t*> s_p_title_override{nullptr}; // while the game builds one of our pages (its menu thread)
 // Called by the game's menu code (guest threads, System V ABI like the game), one set per page.
 template <int P>
-void Rows(void* p_page, void*) {
+void PS4_SYSV_ABI Rows(void* p_page, void*) {
     LoadValues();
     AddRows(p_page, s_pages[P].rows);
 }
 template <int P>
-void* Content(void* p_a, void* p_b) {
-    using Open = void* (*)(void*, void*, const char*, void*, u64, u64);
+void* PS4_SYSV_ABI Content(void* p_a, void* p_b) {
+    using Open = void*(PS4_SYSV_ABI*)(void*, void*, const char*, void*, u64, u64);
     s_p_title_override = nullptr; // the title was looked up just before
     return Game<Open>(OpenPage)(p_a, p_b, Game<const char*>(ControlsLayout),
                                 reinterpret_cast<void*>(&Rows<P>), 0, 0);
 }
 void* Factory(void* p_out, void* p_arg, void* p_content, const char16_t* p_title) {
-    using Create = void* (*)(void*, void*, void*);
+    using Create = void*(PS4_SYSV_ABI*)(void*, void*, void*);
     alignas(16) u8 function[FunctionSize] = {};
     *reinterpret_cast<u64*>(function) = s_image_base + ContentVtable;
     *reinterpret_cast<void**>(function + 8) = p_content;
@@ -423,7 +424,7 @@ void* Factory(void* p_out, void* p_arg, void* p_content, const char16_t* p_title
     return p_out;
 }
 template <int P>
-void* PageFactory(void* p_out, void* p_arg) {
+void* PS4_SYSV_ABI PageFactory(void* p_out, void* p_arg) {
     return Factory(p_out, p_arg, reinterpret_cast<void*>(&Content<P>), TextOf(s_pages[P].name));
 }
 constexpr std::size_t MaxPages = 6;
@@ -433,13 +434,15 @@ void* const s_factories[MaxPages] = {
     reinterpret_cast<void*>(&PageFactory<4>), reinterpret_cast<void*>(&PageFactory<5>)};
 
 // ---- Hooks ----
-using LookupFn = const char16_t* (*)(void*, u32, u32, u32);
-using AddFn = void* (*)(void*, void*, void*, void*);
+// SysV on every host: the detours jump here straight from the game's code, with its arguments in
+// rdi, rsi, rdx and rcx, and the originals are the game's code too.
+using LookupFn = const char16_t*(PS4_SYSV_ABI*)(void*, u32, u32, u32);
+using AddFn = void*(PS4_SYSV_ABI*)(void*, void*, void*, void*);
 LookupFn s_pfn_lookup_original = nullptr;
 AddFn s_pfn_add_original = nullptr;
 std::atomic<const void*> s_p_screen_sound_text{nullptr};
 
-const char16_t* LookupHook(void* p_repository, u32 table, u32 category, u32 id) {
+const char16_t* PS4_SYSV_ABI LookupHook(void* p_repository, u32 table, u32 category, u32 id) {
     if (id >= IdBase && id < IdBase + s_texts.size()) {
         // PS_GAME_MENU_TRACE=1: how often the game asks for our texts (per 2 s).
         static const bool s_should_count = [] {
@@ -485,7 +488,7 @@ const char16_t* LookupHook(void* p_repository, u32 table, u32 category, u32 id) 
 }
 
 void AddItem(void* p_menu, u32 name, u32 help, void* p_factory) {
-    using ToFunction = void* (*)(void*, void*);
+    using ToFunction = void*(PS4_SYSV_ABI*)(void*, void*);
     alignas(16) u8 pair[2 * TextSize] = {};
     MakeTexts(pair, name, help);
     alignas(16) u8 source[FunctionSize] = {};
@@ -500,7 +503,7 @@ void AddItem(void* p_menu, u32 name, u32 help, void* p_factory) {
     DestroyTexts(pair);
 }
 
-void* AddHook(void* p_menu, void* p_pair, void* p_function, void* p_out) {
+void* PS4_SYSV_ABI AddHook(void* p_menu, void* p_pair, void* p_function, void* p_out) {
     void* p_result = s_pfn_add_original(p_menu, p_pair, p_function, p_out);
     const void* p_screen_sound = s_p_screen_sound_text.load();
     if (p_screen_sound && *reinterpret_cast<const void* const*>(p_pair) == p_screen_sound) {

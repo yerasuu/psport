@@ -13,6 +13,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
+#include "common/types.h"
 
 extern "C" std::uint64_t runtime_heap_growths(void);
 
@@ -28,12 +29,12 @@ constexpr u64 LibcBase = ImageBase + 0x56e0000ull;
 constexpr u64 SlotMalloc = 0xba190, SlotFree = 0xba198, SlotCalloc = 0xba1a0,
               SlotRealloc = 0xba1a8, SlotMemalign = 0xba1b0, SlotPosixMemalign = 0xba1b8;
 
-using MallocFn = void* (*)(std::size_t);
-using FreeFn = void (*)(void*);
-using CallocFn = void* (*)(std::size_t, std::size_t);
-using ReallocFn = void* (*)(void*, std::size_t);
-using MemalignFn = void* (*)(std::size_t, std::size_t);
-using PosixMemalignFn = int (*)(void**, std::size_t, std::size_t);
+using MallocFn = void*(PS4_SYSV_ABI*)(std::size_t);
+using FreeFn = void(PS4_SYSV_ABI*)(void*);
+using CallocFn = void*(PS4_SYSV_ABI*)(std::size_t, std::size_t);
+using ReallocFn = void*(PS4_SYSV_ABI*)(void*, std::size_t);
+using MemalignFn = void*(PS4_SYSV_ABI*)(std::size_t, std::size_t);
+using PosixMemalignFn = int(PS4_SYSV_ABI*)(void**, std::size_t, std::size_t);
 
 MallocFn s_pfn_orig_malloc;
 FreeFn s_pfn_orig_free;
@@ -158,27 +159,27 @@ void Remove(void* p_ptr, const u64* p_frame) {
     ++s_untracked_frees;
 }
 
-void* WrapMalloc(std::size_t cb_allocation) {
+void* PS4_SYSV_ABI WrapMalloc(std::size_t cb_allocation) {
     void* p_allocation = s_pfn_orig_malloc(cb_allocation);
     if (p_allocation && (s_c_count_allocs.fetch_add(1, std::memory_order_relaxed), s_is_tracking)) {
         Add(p_allocation, cb_allocation, static_cast<const u64*>(__builtin_frame_address(0)));
     }
     return p_allocation;
 }
-void WrapFree(void* p_allocation) {
+void PS4_SYSV_ABI WrapFree(void* p_allocation) {
     if (p_allocation && (s_c_count_frees.fetch_add(1, std::memory_order_relaxed), s_is_tracking)) {
         Remove(p_allocation, static_cast<const u64*>(__builtin_frame_address(0)));
     }
     s_pfn_orig_free(p_allocation);
 }
-void* WrapCalloc(std::size_t c_elements, std::size_t cb_element) {
+void* PS4_SYSV_ABI WrapCalloc(std::size_t c_elements, std::size_t cb_element) {
     void* p_allocation = s_pfn_orig_calloc(c_elements, cb_element);
     if (p_allocation && (s_c_count_allocs.fetch_add(1, std::memory_order_relaxed), s_is_tracking)) {
         Add(p_allocation, c_elements * cb_element, static_cast<const u64*>(__builtin_frame_address(0)));
     }
     return p_allocation;
 }
-void* WrapRealloc(void* p_old, std::size_t cb_allocation) {
+void* PS4_SYSV_ABI WrapRealloc(void* p_old, std::size_t cb_allocation) {
     void* p_allocation = s_pfn_orig_realloc(p_old, cb_allocation);
     if (!p_old && p_allocation) {
         s_c_count_allocs.fetch_add(1, std::memory_order_relaxed);
@@ -195,14 +196,14 @@ void* WrapRealloc(void* p_old, std::size_t cb_allocation) {
     }
     return p_allocation;
 }
-void* WrapMemalign(std::size_t alignment, std::size_t cb_allocation) {
+void* PS4_SYSV_ABI WrapMemalign(std::size_t alignment, std::size_t cb_allocation) {
     void* p_allocation = s_pfn_orig_memalign(alignment, cb_allocation);
     if (p_allocation && (s_c_count_allocs.fetch_add(1, std::memory_order_relaxed), s_is_tracking)) {
         Add(p_allocation, cb_allocation, static_cast<const u64*>(__builtin_frame_address(0)));
     }
     return p_allocation;
 }
-int WrapPosixMemalign(void** pp_out, std::size_t alignment, std::size_t cb_allocation) {
+int PS4_SYSV_ABI WrapPosixMemalign(void** pp_out, std::size_t alignment, std::size_t cb_allocation) {
     const int result = s_pfn_orig_posix_memalign(pp_out, alignment, cb_allocation);
     if (result == 0 && pp_out && *pp_out &&
         (s_c_count_allocs.fetch_add(1, std::memory_order_relaxed), s_is_tracking)) {

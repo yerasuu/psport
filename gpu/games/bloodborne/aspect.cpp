@@ -192,9 +192,11 @@ constexpr std::uint32_t GfxManaged = 0x40, GfxNumber = 5, GfxDisplayObject = 10;
 /// ObjectInterface's methods in Scaleform 4's order: AddRef, Release, HasMember, GetMember (the slot
 /// the game's path lookup calls), SetMember.
 constexpr std::size_t OffSlotRelease = 0x18, OffSlotGetMember = 0x28, OffSlotSetMember = 0x30;
-using PfnGfxRef = void (*)(void* p_interface, GfxValue* p_value, void* p_data);
-using PfnGfxGet = bool (*)(void* p_interface, void* p_data, const char* sz_name, GfxValue* p_out, bool is_dobj);
-using PfnGfxSet = bool (*)(void* p_interface, void* p_data, const char* sz_name, const GfxValue* p_value, bool is_dobj);
+using PfnGfxRef = void(PS4_SYSV_ABI*)(void* p_interface, GfxValue* p_value, void* p_data);
+using PfnGfxGet = bool(PS4_SYSV_ABI*)(void* p_interface, void* p_data, const char* sz_name, GfxValue* p_out,
+                                      bool is_dobj);
+using PfnGfxSet = bool(PS4_SYSV_ABI*)(void* p_interface, void* p_data, const char* sz_name, const GfxValue* p_value,
+                                      bool is_dobj);
 template <typename F>
 F GfxMethod(void* p_interface, std::size_t off_slot) {
     return *reinterpret_cast<F*>(*reinterpret_cast<u8**>(p_interface) + off_slot);
