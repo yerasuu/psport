@@ -585,7 +585,52 @@ static ABI const char *net_inet_ntop(int family, const void *p_address, char *sz
     return sz_out;
 }
 
+/* libkernel's socket system calls, which a console's libSceNet makes itself: sceNetInit, in its
+ * module_start, asks netcontrol for an int (command 0x14), opens a "SceNetInit" datagram socket,
+ * hands it 36 bytes of seed (ioctl 0x802450C9) and closes it, and fails unless all of it succeeds. */
+static ABI int32_t sys_socketex(const char *sz_name, int family, int type, int protocol) {
+    (void)sz_name;
+    return (int32_t)posix(do_socket(family,type,protocol));
+}
+static ABI int32_t sys_socketclose(int32_t h_socket) { return (int32_t)posix(do_close(h_socket)); }
+#define SOCKET_IOCTL_SEED UINT32_C(0x802450C9)
+#define CB_SOCKET_IOCTL_SEED 36
+#define GUEST_ENOTSOCK 38
+#define GUEST_ENOTTY 25
+static uint64_t s_c_seed_ioctls;
+int64_t runtime_socket_ioctl(int32_t h_socket, uint32_t command, const void *p_argument) {
+    int h_host=host_socket(h_socket), type;
+    socklen_t cb_type=sizeof(type);
+    if (h_host<0 || getsockopt(h_host,SOL_SOCKET,SO_TYPE,(void *)&type,&cb_type)) return -GUEST_ENOTSOCK;
+    if (command!=SOCKET_IOCTL_SEED) return -GUEST_ENOTTY;
+    if (!runtime_memory_is_guest_range(p_argument,CB_SOCKET_IOCTL_SEED)) return -GUEST_EFAULT;
+    if (!__atomic_fetch_add(&s_c_seed_ioctls,1,__ATOMIC_RELAXED))
+        runtime_calls_hle_stub("socket ioctl 0x802450C9 (libSceNet's seed, accepted: the loopback stack has no use for it)",&s_c_seed_ioctls);
+    return 0;
+}
+/* The interface's state an unplugged console reports: zeroes. Command 0x14 is the int sceNetInit
+ * asks for and 1 the memory statistics (0x10 bytes); what the others mean was not read, so they are
+ * zeroed too, and counted. */
+#define NETCONTROL_INIT_QUERY 0x14
+#define NETCONTROL_MEMORY_STATISTICS 1
+#define CB_NETCONTROL_MAX 0x1000
+static uint64_t s_c_netcontrol_unknown;
+static ABI int32_t sys_netcontrol(int32_t h_interface, uint32_t command, void *p_inout_buffer, uint32_t cb_buffer) {
+    if (cb_buffer>CB_NETCONTROL_MAX) return (int32_t)posix(-GUEST_EINVAL);
+    if (command==NETCONTROL_INIT_QUERY && cb_buffer<sizeof(int32_t)) return (int32_t)posix(-GUEST_EINVAL);
+    if (cb_buffer && !runtime_memory_is_guest_range(p_inout_buffer,cb_buffer)) return (int32_t)posix(-GUEST_EFAULT);
+    if (cb_buffer) memset(p_inout_buffer,0,cb_buffer);
+    if (command!=NETCONTROL_INIT_QUERY && command!=NETCONTROL_MEMORY_STATISTICS) {
+        const uint64_t c_before=__atomic_fetch_add(&s_c_netcontrol_unknown,1,__ATOMIC_RELAXED);
+        if (c_before<8) printf("Runtime: __sys_netcontrol interface %d command %#x (%u bytes) answered with zeroes\n",
+                               h_interface,command,cb_buffer);
+        if (!c_before) runtime_calls_hle_stub("__sys_netcontrol command whose meaning was not read (zeroed)",&s_c_netcontrol_unknown);
+    }
+    return 0;
+}
+
 static const RuntimeExport s_exports[]={
+    {"__sys_socketex",sys_socketex}, {"__sys_socketclose",sys_socketclose}, {"__sys_netcontrol",sys_netcontrol},
     {"sceNetErrnoLoc",net_errno_loc}, {"sceNetSocket",net_socket}, {"sceNetSocketClose",net_close},
     {"sceNetSocketAbort",net_abort}, {"sceNetShutdown",net_shutdown}, {"sceNetBind",net_bind},
     {"sceNetConnect",net_connect}, {"sceNetListen",net_listen}, {"sceNetAccept",net_accept}, {"sceNetGetsockname",net_getsockname}, {"sceNetRecvfrom",net_recvfrom},

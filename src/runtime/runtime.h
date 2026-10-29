@@ -258,6 +258,11 @@ uintptr_t runtime_vr_resolve(const char *sz_name);
 uintptr_t runtime_voice_resolve(const char *sz_name);
 /* Offline libSceNet sockets (runtime_socket.c), consulted by runtime_services_resolve. */
 uintptr_t runtime_socket_resolve(const char *sz_name);
+/* _ioctl on a guest descriptor that may be a socket: 0, or -(FreeBSD errno), -ENOTSOCK (38) when it
+ * is not one. */
+int64_t runtime_socket_ioctl(int32_t h_socket, uint32_t command, const void *p_argument);
+/* libkernel's _ioctl (runtime_ioctl.c) over sockets and the kernel's virtual devices. */
+uintptr_t runtime_ioctl_resolve(const char *sz_name);
 /* libSceHttp offline (runtime_http.c), consulted by runtime_services_resolve. */
 uintptr_t runtime_http_resolve(const char *sz_name);
 /* libSceNpTrophy (runtime_trophy.c), consulted by runtime_services_resolve. */
