@@ -103,6 +103,7 @@ EXPORTS
     runtime_savedata_title
     runtime_sleep_stats
     runtime_thread_attach_host
+    runtime_thread_is_guest
     runtime_toypad_file
     runtime_toypad_lights
     runtime_tsc_frequency

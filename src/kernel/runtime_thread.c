@@ -145,6 +145,8 @@ void runtime_thread_attach_host(const char *sz_name) {
     GuestThread *p_thread=runtime_thread_current();
     snprintf(p_thread->name,sizeof(p_thread->name),"%s",sz_name ? sz_name : "host");
 }
+/* A thread with a guest record: created by the guest, or attached to call guest code. */
+int runtime_thread_is_guest(void) { return s_p_current!=NULL; }
 void runtime_thread_attach_main(void) {
     GuestThread *p_thread=runtime_thread_current();
     snprintf(p_thread->name,sizeof(p_thread->name),"main");

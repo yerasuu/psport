@@ -253,6 +253,11 @@ public:
     /// The CPU wrote [address, address + size): VRAM copies there are refreshed before paged
     /// bindings read them.
     void LayerNoteCpuWrite(VAddr address, u64 size);
+    /// A thread outside the GPU side is about to write blocks [first, end) that still have their
+    /// write traps: the GPU's data in their VRAM copies goes into the game's memory first on the GPU
+    /// command thread, and the caller waits for it. Copied back after the CPU's access, it landed
+    /// over the CPU's newer bytes (a guest heap's links overwritten with vertex data, #1218).
+    void LayerReturnBeforeCpuWrite(u64 first_block, u64 end_block);
     /// psport PS_LAYER_MEMORY: [address, address + size) in place as a range of its chunk's buffer,
     /// when the layer's memory module finds it whole in one chunk.
     /// clamp_huge: a binding of 64 MiB or more that runs on past its chunk is cut at the end of
@@ -493,8 +498,20 @@ private:
     /// copy, removed when it goes back in place or the CPU announces a write there (then it goes
     /// back in place too); hits are handled before the next binding.
     void LayerArmTraps(u64 first_block, u64 end_block);
-    void LayerDisarmTraps(u64 first_block, u64 end_block, bool demote);
+    /// `is_returned`: the GPU's data there went back before the CPU's write
+    /// (LayerReturnBeforeCpuWrite), so the demotion that follows copies none back.
+    void LayerDisarmTraps(u64 first_block, u64 end_block, bool demote, bool is_returned = false);
     void LayerProcessTraps();
+    /// Blocks with traps that may hold GPU data in VRAM (a superset of gpu_modified_ranges over
+    /// mirrored blocks), readable by the threads the traps catch.
+    void LayerNoteGpuData(const std::vector<std::pair<u64, u64>>& runs);
+    bool LayerHasGpuDataArmed(u64 first_block, u64 end_block);
+    void LayerReturnGpuData(u64 first_block, u64 end_block);
+    /// A demotion's copy back is in flight until `tick`: its blocks keep their traps meanwhile, and
+    /// a CPU write there waits for the copy (LayerReturnGpuData); released by LayerReleaseHeldTraps.
+    /// Returns the blocks that had no trap to hold.
+    u64 LayerHoldTraps(u64 first_block, u64 end_block, u64 tick);
+    void LayerReleaseHeldTraps();
     static u64 LayerTrapFaults();
     /// Before a binding of a mirror over volatile blocks: their bytes in it refreshed.
     void LayerRefreshVolatile(VAddr address, u64 size);
@@ -550,6 +567,7 @@ private:
     std::vector<std::pair<std::unique_ptr<Buffer>, u64>> layer_retired;
     u64 layer_generation = 0;
     u64 layer_copied_back_bytes = 0; ///< statistics
+    u64 layer_demote_copied_bytes = 0; ///< statistics: the GPU's data copied back by demotions
     IntervalList<> layer_published; ///< blocks whose page table entries are written
     std::mutex layer_uploads_mutex;
     std::vector<std::pair<VAddr, u64>> layer_pending_uploads;

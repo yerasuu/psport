@@ -387,6 +387,7 @@ uintptr_t runtime_savedata_resolve(const char *sz_name);
 int runtime_savedata_param(int32_t user, const char *sz_title, const char *sz_dir, void *p_param);
 void runtime_savedata_report(void);
 void runtime_thread_attach_host(const char *sz_name);
+int runtime_thread_is_guest(void);
 /* What the loader prelinked (src/loader/loader_link.c), at image offsets; [0] is the eboot. Deferred modules (loaded by
  * the game with sceKernelLoadStartModule) start there, the others at boot through
  * runtime_module_start, which runs an initializer at most once. */

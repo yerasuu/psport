@@ -30,8 +30,11 @@
 #include "video_core/buffer_cache/buffer_cache.h"
 #include "video_core/buffer_cache/memory_tracker.h"
 #include "common/signal_context.h"
+#include "core/memory.h"
 #include "core/signals.h"
+#include "video_core/amdgpu/liverpool.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
+#include "video_core/renderer_vulkan/vk_rasterizer.h"
 #include "video_core/renderer_vulkan/vk_runtime.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/texture_cache/texture_cache.h"
@@ -40,6 +43,8 @@
 #include "pslayer_write_traps.h"
 
 extern "C" int runtime_memory_vma_info(uintptr_t va_guest, int* p_prot, int* p_type, uintptr_t* p_end);
+extern "C" void runtime_calls_add_summary(void (*pfn_summary)(char* sz_out, std::size_t cb_out));
+extern "C" int runtime_thread_is_guest(void);
 
 namespace VideoCore {
 
@@ -70,6 +75,49 @@ bool LayerVolatileAllowed() {
         return sz_env && sz_env[0] == '1';
     }();
     return s_is_on;
+}
+
+/// Guest threads (and host threads attached to call guest code) may wait for the GPU command
+/// thread. The GPU side's own threads cannot, nor can the threads it waits for (copy threads
+/// running deferred signals, the signal thread).
+bool CanWaitForGpuThread() {
+    const auto* p_rasterizer = Core::Memory::Instance()->GetRasterizer();
+    return p_rasterizer && runtime_thread_is_guest() && !p_rasterizer->IsGpuSideThread();
+}
+
+/// CPU writes over blocks whose VRAM copy may hold the GPU's data, since the start (the 10 s
+/// report and the exit summary).
+struct LayerReturnStats {
+    std::atomic<u64> c_returns{0};    ///< returns asked for before a CPU write
+    std::atomic<u64> cb_returned{0};  ///< bytes they copied back
+    std::atomic<u64> c_waits{0};      ///< of them, waits for the GPU
+    std::atomic<u64> c_held{0};       ///< blocks kept trapped while their demotion's copy ran
+    std::atomic<u64> c_held_hits{0};  ///< CPU writes that waited for such a copy
+    std::atomic<u64> c_untrapped{0};  ///< blocks copied back without a trap (the CPU may write them)
+    std::atomic<u64> c_late{0};       ///< CPU writes by threads that cannot wait: copied back after
+    std::atomic<u64> cb_dropped{0};   ///< GPU data marked after a CPU write, not copied back
+};
+LayerReturnStats s_layer_returns;
+std::atomic<u32> s_c_layer_return_logs{0};
+
+void FormatLayerReturns(char* sz_out, std::size_t cb_out, const char* sz_kind) {
+    std::snprintf(sz_out, cb_out,
+                  "Layer memory: %sCPU writes over GPU data in VRAM: %llu returned first (%llu KiB "
+                  "copied back, %llu waits for the GPU); %llu blocks held trapped for their copy back, "
+                  "%llu writes waited for one; %llu blocks copied back without a trap; %llu late "
+                  "(threads that cannot wait); %llu KiB of GPU data dropped after CPU writes\n",
+                  sz_kind, (unsigned long long)s_layer_returns.c_returns.load(std::memory_order_relaxed),
+                  (unsigned long long)(s_layer_returns.cb_returned.load(std::memory_order_relaxed) >> 10),
+                  (unsigned long long)s_layer_returns.c_waits.load(std::memory_order_relaxed),
+                  (unsigned long long)s_layer_returns.c_held.load(std::memory_order_relaxed),
+                  (unsigned long long)s_layer_returns.c_held_hits.load(std::memory_order_relaxed),
+                  (unsigned long long)s_layer_returns.c_untrapped.load(std::memory_order_relaxed),
+                  (unsigned long long)s_layer_returns.c_late.load(std::memory_order_relaxed),
+                  (unsigned long long)(s_layer_returns.cb_dropped.load(std::memory_order_relaxed) >> 10));
+}
+
+void SummarizeLayerReturns(char* sz_out, std::size_t cb_out) {
+    FormatLayerReturns(sz_out, cb_out, "summary ");
 }
 } // namespace
 
@@ -366,6 +414,7 @@ std::optional<std::pair<const Buffer*, u64>> BufferCache::LayerBind(VAddr va_ran
         if (is_written) {
             // The GPU's data is in VRAM only: copied back before the blocks go in place.
             gpu_modified_ranges.Add(va_range, cb_range);
+            LayerNoteGpuData({{first, end}});
             NoteWriteTick(va_range, cb_range);
             LayerArmReadTraps(va_range, cb_range); // and before the CPU reads it
         }
@@ -730,6 +779,7 @@ void BufferCache::LayerDemote(u64 first, u64 end, bool should_copy_back, int rea
     for (const auto& [a, b] : runs) {
         const VAddr from = a << block_shift;
         const u64 cb_range = (b - a) << block_shift;
+        u64 cb_copied = 0;
         if (should_copy_back) {
             // What the GPU wrote in VRAM goes back into the game's memory first.
             const auto mirror = Layer().MirrorAt(from);
@@ -741,6 +791,7 @@ void BufferCache::LayerDemote(u64 first, u64 end, bool should_copy_back, int rea
                         const vk::BufferCopy copy{p_buffer->Offset(w_from), target->second,
                                                   w_to - w_from};
                         runtime.CopyBuffer(p_buffer, target->first, std::span{&copy, 1});
+                        cb_copied += w_to - w_from;
                     } else if (const auto span = Layer().ResolvePrefix(w_from, w_to - w_from);
                                span && span->cb_span == w_to - w_from) {
                         is_target_missing = true; // whole in its chunk, which has no buffer
@@ -775,7 +826,22 @@ void BufferCache::LayerDemote(u64 first, u64 end, bool should_copy_back, int rea
             });
         }
         layer_watched.Subtract(a, b);
-        LayerDisarmTraps(a, b, false);
+        if (cb_copied != 0) {
+            // The copy runs when the GPU gets to it: a CPU write lifting the trap before then
+            // would be overwritten by it.
+            layer_demote_copied_bytes += cb_copied;
+            layer_copy_back_tick = scheduler.CurrentTick();
+            if (const u64 c_untrapped = LayerHoldTraps(a, b, layer_copy_back_tick); c_untrapped != 0) {
+                s_layer_returns.c_untrapped.fetch_add(c_untrapped, std::memory_order_relaxed);
+            }
+        } else {
+            if (!should_copy_back && reason == 3) {
+                gpu_modified_ranges.ForEachInRange(from, cb_range, [&](VAddr w_from, VAddr w_to) {
+                    s_layer_returns.cb_dropped.fetch_add(w_to - w_from, std::memory_order_relaxed);
+                });
+            }
+            LayerDisarmTraps(a, b, false);
+        }
         Layer().MarkInvalid(a, b);
         // In place from now on: never uploaded or watched again (writes go where the GPU reads).
         memory_tracker->MarkRegionAsCpuModified(from, cb_range);
@@ -807,6 +873,7 @@ void BufferCache::LayerReleaseRetired() {
 
 void BufferCache::LayerMaintain() {
     LayerProcessTraps();
+    LayerReleaseHeldTraps();
     LayerReleaseRetired();
     static u32 s_c_printed = 0;
     const u32 now = PsStats::g_coarse_second.load(std::memory_order_relaxed);
@@ -872,7 +939,8 @@ void BufferCache::LayerMaintain() {
                         (unsigned long long)layer_read_trap_stale.exchange(0));
         }
         std::printf("Layer memory: back in place (MiB): written %llu, mixed %llu, command %llu, "
-                    "request %llu, copy back %llu, unmap %llu, idle %llu; GPU data copied back %llu MiB\n",
+                    "request %llu, copy back %llu, unmap %llu, idle %llu; GPU data copied back %llu MiB "
+                    "(by demotions %llu MiB)\n",
                     (unsigned long long)(s_cb_layer_demoted[0].load() >> 20),
                     (unsigned long long)(s_cb_layer_demoted[1].load() >> 20),
                     (unsigned long long)(s_cb_layer_demoted[2].load() >> 20),
@@ -880,7 +948,11 @@ void BufferCache::LayerMaintain() {
                     (unsigned long long)(s_cb_layer_demoted[4].load() >> 20),
                     (unsigned long long)(s_cb_layer_demoted[5].load() >> 20),
                     (unsigned long long)(s_cb_layer_demoted[6].load() >> 20),
-                    (unsigned long long)(layer_copied_back_bytes >> 20));
+                    (unsigned long long)(layer_copied_back_bytes >> 20),
+                    (unsigned long long)(layer_demote_copied_bytes >> 20));
+        char sz_returns[512];
+        FormatLayerReturns(sz_returns, sizeof(sz_returns), "since the start, ");
+        std::fputs(sz_returns, stdout);
         // What keeps blocks in place for good, and loaded data without a copy: over a long session
         // the copies' share fell (84 % -> 50 %) while these marks only grew.
         const auto mib = [&](const auto& list) {
@@ -1245,8 +1317,15 @@ void BufferCache::LayerNoteCpuWrite(VAddr va_range, u64 cb_range) {
         return;
     }
     // Announced: the write must not fault (a file read into it would fail): unprotected now, and
-    // the block goes back in place.
-    LayerDisarmTraps(va_range >> block_shift, ((va_range + cb_range - 1) >> block_shift) + 1, true);
+    // the block goes back in place. Unprotected, the CPU writes the rest of the block too unseen
+    // (a heap's headers beside a file read's buffer): the GPU's data goes back before that.
+    const u64 first = va_range >> block_shift;
+    const u64 end = ((va_range + cb_range - 1) >> block_shift) + 1;
+    const bool can_wait = CanWaitForGpuThread();
+    if (can_wait && LayerHasGpuDataArmed(first, end)) {
+        LayerReturnBeforeCpuWrite(first, end);
+    }
+    LayerDisarmTraps(first, end, true, can_wait);
     std::scoped_lock lk{layer_uploads_mutex};
     layer_pending_uploads.emplace_back(va_range, cb_range);
     layer_uploads_pending.store(true, std::memory_order_release);
@@ -1338,9 +1417,12 @@ void BufferCache::LayerPagedPublish(VAddr va_range, u64 cb_range, bool is_writte
         // Where it writes is unknown: what is in VRAM there may now differ from the game's
         // memory; it is copied back before it goes in place (LayerDemote).
         if (!force_writes_in_place) {
+            std::vector<std::pair<u64, u64>> runs;
             Layer().ForEachValid(first, end, [&](u64 a, u64 b) {
                 gpu_modified_ranges.Add(a << block_shift, (b - a) << block_shift);
+                runs.emplace_back(a, b);
             });
+            LayerNoteGpuData(runs);
         }
     }
 }
@@ -1596,12 +1678,37 @@ void BufferCache::LayerRefreshVolatile(VAddr va_range, u64 cb_range) {
 // writers seen often stay there: NoteCpuWrite).
 namespace VideoCore {
 namespace {
+/// How the GPU's data in a block's VRAM copy was dealt with before the CPU's write: Late (a thread
+/// that cannot wait for the GPU command thread: copied back at the demotion, as before), Returned
+/// (copied back first), Held (the block was in place already with its copy back in flight, waited
+/// for unless the thread cannot wait).
+enum class TrapHitKind : u8 { Late, Returned, Held };
+struct TrapHit {
+    u64 block;
+    u64 rip; ///< guest instruction (0: announced)
+    TrapHitKind kind;
+};
+
 std::mutex s_layer_trap_mutex;
-std::unordered_set<u64> s_layer_trap_armed;              // blocks protected now
-std::vector<std::pair<u64, u64>> s_layer_trap_hits;      // block, guest instruction (0: announced)
+std::unordered_set<u64> s_layer_trap_armed; // blocks protected now
+std::vector<TrapHit> s_layer_trap_hits;
 std::atomic<bool> s_is_layer_trap_pending{false};
 std::atomic<u64> s_c_layer_trap_faults{0};
 u32 s_layer_trap_shift = 16;
+/// Armed blocks whose VRAM copy may hold the GPU's data (LayerNoteGpuData), and demoted blocks
+/// still trapped until their copy back's tick (LayerHoldTraps).
+IntervalList<> s_layer_gpu_data;
+std::unordered_map<u64, u64> s_layer_held;
+std::atomic<bool> s_has_layer_held{false};
+BufferCache* s_p_layer_cache = nullptr;
+
+void LogLayerReturn(const char* sz_what, u64 block) {
+    if (s_c_layer_return_logs.fetch_add(1, std::memory_order_relaxed) < 16) {
+        std::printf("Layer memory: CPU write at block %#llx: %s; the first 16 are listed, the rest "
+                    "counted in the summary\n",
+                    (unsigned long long)(block << s_layer_trap_shift), sz_what);
+    }
+}
 
 bool LayerTrapsOn() {
     static const bool s_is_on = [] {
@@ -1622,16 +1729,42 @@ bool LayerTrapHandler(void* p_context, void* p_fault_address) {
         return false;
     }
     const u64 block = reinterpret_cast<u64>(p_fault_address) >> s_layer_trap_shift;
+    const u64 rip = u64(Common::GetRip(p_context));
+    bool has_gpu_data = false;
+    {
+        std::scoped_lock lk{s_layer_trap_mutex};
+        if (!s_layer_trap_armed.contains(block)) {
+            return false;
+        }
+        has_gpu_data = s_layer_gpu_data.Contains(block) || s_layer_held.contains(block);
+    }
+    // The GPU's data goes into the game's memory before the write, not after it (where it landed
+    // over the CPU's bytes). The trap stays set meanwhile: other threads' writes wait too.
+    bool is_returned = true;
+    if (has_gpu_data) {
+        if (s_p_layer_cache && CanWaitForGpuThread()) {
+            s_p_layer_cache->LayerReturnBeforeCpuWrite(block, block + 1);
+        } else {
+            is_returned = false;
+        }
+    }
     {
         std::scoped_lock lk{s_layer_trap_mutex};
         if (!s_layer_trap_armed.erase(block)) {
-            return false;
+            return true; // lifted meanwhile (another thread's hit, a demotion): the write runs again
         }
         // Under the lock, before the hit is visible: LayerProcessTraps re-arms a watched block
         // under this lock, and an unprotect after it took that new trap away while the block still
         // counted as armed, so the CPU's next writes went unseen and the VRAM copy stayed stale.
         LayerUnprotect(block); // the write runs again, now through
-        s_layer_trap_hits.emplace_back(block, u64(Common::GetRip(p_context)));
+        const bool is_held = s_layer_held.erase(block) != 0;
+        s_has_layer_held.store(!s_layer_held.empty(), std::memory_order_release);
+        s_layer_gpu_data.Subtract(block, block + 1);
+        if (is_held && !is_returned) {
+            s_layer_returns.c_late.fetch_add(1, std::memory_order_relaxed);
+        }
+        const auto kind = is_held ? TrapHitKind::Held : is_returned ? TrapHitKind::Returned : TrapHitKind::Late;
+        s_layer_trap_hits.push_back({block, rip, kind});
     }
     s_c_layer_trap_faults.fetch_add(1, std::memory_order_relaxed);
     s_is_layer_trap_pending.store(true, std::memory_order_release);
@@ -1645,6 +1778,8 @@ void BufferCache::LayerArmTraps(u64 first, u64 end) {
     }
     static const bool s_has_registered = [this] {
         s_layer_trap_shift = static_cast<u32>(block_shift);
+        s_p_layer_cache = this;
+        runtime_calls_add_summary(&SummarizeLayerReturns);
         Core::Signals::Instance()->RegisterAccessViolationHandler(LayerTrapHandler, 0);
         return true;
     }();
@@ -1693,11 +1828,12 @@ void BufferCache::LayerArmTraps(u64 first, u64 end) {
     flush();
 }
 
-void BufferCache::LayerDisarmTraps(u64 first, u64 end, bool should_demote) {
+void BufferCache::LayerDisarmTraps(u64 first, u64 end, bool should_demote, bool is_returned) {
     std::scoped_lock lk{s_layer_trap_mutex};
     if (s_layer_trap_armed.empty()) {
         return;
     }
+    s_layer_gpu_data.Subtract(first, end);
     // As LayerArmTraps: one mprotect per run of blocks that were armed.
     u64 run_first = 0, run_end = 0;
     const auto flush = [&] {
@@ -1720,12 +1856,158 @@ void BufferCache::LayerDisarmTraps(u64 first, u64 end, bool should_demote) {
             run_first = block;
         }
         run_end = block + 1;
+        const bool is_held = s_layer_held.erase(block) != 0;
         if (should_demote) {
-            s_layer_trap_hits.emplace_back(block, 0);
+            if (is_held && !is_returned) {
+                s_layer_returns.c_late.fetch_add(1, std::memory_order_relaxed);
+            }
+            const auto kind = is_held       ? TrapHitKind::Held
+                              : is_returned ? TrapHitKind::Returned
+                                            : TrapHitKind::Late;
+            s_layer_trap_hits.push_back({block, 0, kind});
             s_is_layer_trap_pending.store(true, std::memory_order_release);
         }
     }
+    s_has_layer_held.store(!s_layer_held.empty(), std::memory_order_release);
     flush();
+}
+
+void BufferCache::LayerNoteGpuData(const std::vector<std::pair<u64, u64>>& runs) {
+    if (runs.empty() || !LayerTrapsOn()) {
+        return;
+    }
+    std::scoped_lock lk{s_layer_trap_mutex};
+    for (const auto& [a, b] : runs) {
+        s_layer_gpu_data.Add({a, b});
+    }
+}
+
+bool BufferCache::LayerHasGpuDataArmed(u64 first, u64 end) {
+    std::scoped_lock lk{s_layer_trap_mutex};
+    if (!s_layer_gpu_data.Overlaps(first, end) && s_layer_held.empty()) {
+        return false;
+    }
+    for (u64 block = first; block < end; ++block) {
+        if (s_layer_trap_armed.contains(block) &&
+            (s_layer_gpu_data.Contains(block) || s_layer_held.contains(block))) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void BufferCache::LayerReturnBeforeCpuWrite(u64 first, u64 end) {
+    liverpool->SendCommand<true>([this, first, end] { LayerReturnGpuData(first, end); });
+}
+
+void BufferCache::LayerReturnGpuData(u64 first, u64 end) {
+    // Memory the game unmapped gets nothing back (its blocks go in place without a copy first).
+    ProcessPendingUnmaps();
+    LayerForgetGpuData(); // the bytes of announced writes are the CPU's
+    std::vector<std::pair<u64, u64>> runs;
+    u64 tick = 0;
+    {
+        // Only blocks still trapped: one the CPU may have written since its trap went holds the
+        // CPU's bytes, which a copy back would overwrite.
+        std::scoped_lock lk{s_layer_trap_mutex};
+        for (u64 block = first; block < end; ++block) {
+            if (!s_layer_trap_armed.contains(block)) {
+                continue;
+            }
+            if (const auto it = s_layer_held.find(block); it != s_layer_held.end()) {
+                tick = std::max(tick, it->second);
+                s_layer_returns.c_held_hits.fetch_add(1, std::memory_order_relaxed);
+            }
+            if (!s_layer_gpu_data.Contains(block)) {
+                continue;
+            }
+            if (!runs.empty() && runs.back().second == block) {
+                runs.back().second = block + 1;
+            } else {
+                runs.emplace_back(block, block + 1);
+            }
+        }
+    }
+    const u64 cb_before = layer_copied_back_bytes;
+    for (const auto& [a, b] : runs) {
+        LayerCopyBack(a, b);
+    }
+    const u64 cb_copied = layer_copied_back_bytes - cb_before;
+    if (cb_copied != 0) {
+        tick = std::max(tick, layer_copy_back_tick);
+    }
+    s_layer_returns.c_returns.fetch_add(1, std::memory_order_relaxed);
+    s_layer_returns.cb_returned.fetch_add(cb_copied, std::memory_order_relaxed);
+    if (tick != 0 && !scheduler.IsFree(tick)) {
+        s_layer_returns.c_waits.fetch_add(1, std::memory_order_relaxed);
+        scheduler.Wait(tick);
+    }
+    if (cb_copied != 0) {
+        LogLayerReturn("the GPU's data copied back before it", first);
+    }
+    std::scoped_lock lk{s_layer_trap_mutex};
+    for (const auto& [a, b] : runs) {
+        s_layer_gpu_data.Subtract(a, b);
+    }
+}
+
+u64 BufferCache::LayerHoldTraps(u64 first, u64 end, u64 tick) {
+    std::scoped_lock lk{s_layer_trap_mutex};
+    u64 c_untrapped = 0;
+    for (u64 block = first; block < end; ++block) {
+        if (!s_layer_trap_armed.contains(block)) {
+            ++c_untrapped;
+            continue;
+        }
+        auto& held_tick = s_layer_held[block];
+        held_tick = std::max(held_tick, tick);
+        s_layer_returns.c_held.fetch_add(1, std::memory_order_relaxed);
+    }
+    s_layer_gpu_data.Subtract(first, end);
+    s_has_layer_held.store(!s_layer_held.empty(), std::memory_order_release);
+    return c_untrapped;
+}
+
+void BufferCache::LayerReleaseHeldTraps() {
+    if (!s_has_layer_held.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::vector<std::pair<u64, u64>> held;
+    {
+        std::scoped_lock lk{s_layer_trap_mutex};
+        held.assign(s_layer_held.begin(), s_layer_held.end());
+    }
+    std::erase_if(held, [&](const auto& entry) { return !scheduler.IsFree(entry.second); });
+    if (held.empty()) {
+        return;
+    }
+    std::vector<u64> released;
+    {
+        std::scoped_lock lk{s_layer_trap_mutex};
+        for (const auto& [block, tick] : held) {
+            // Not if lifted meanwhile, or held again for a newer copy.
+            if (const auto it = s_layer_held.find(block); it != s_layer_held.end() && it->second == tick) {
+                s_layer_held.erase(it);
+                released.push_back(block);
+            }
+        }
+        s_has_layer_held.store(!s_layer_held.empty(), std::memory_order_release);
+    }
+    // Blocks with a VRAM copy again (promoted since) keep the trap for that copy.
+    std::ranges::sort(released);
+    for (size_t i = 0; i < released.size();) {
+        if (Layer().AnyValid(released[i], released[i] + 1)) {
+            ++i;
+            continue;
+        }
+        u64 run_end = released[i] + 1;
+        size_t j = i + 1;
+        for (; j < released.size() && released[j] == run_end && !Layer().AnyValid(run_end, run_end + 1); ++j) {
+            ++run_end;
+        }
+        LayerDisarmTraps(released[i], run_end, false);
+        i = j;
+    }
 }
 
 void BufferCache::LayerProcessTraps() {
@@ -1734,13 +2016,16 @@ void BufferCache::LayerProcessTraps() {
         return; // every binding asks: no clock read when there is nothing to do
     }
     PsStats::Timer timer{PsStats::g_t_layer[3]};
-    std::vector<std::pair<u64, u64>> hits;
+    std::vector<TrapHit> hits;
     {
         std::scoped_lock lk{s_layer_trap_mutex};
         hits.swap(s_layer_trap_hits);
         s_is_layer_trap_pending.store(false, std::memory_order_release);
     }
-    for (const auto& [block, rip] : hits) {
+    for (const auto& [block, rip, kind] : hits) {
+        if (kind == TrapHitKind::Held && !Layer().AnyValid(block, block + 1)) {
+            continue; // in place already: only its copy back was waited for
+        }
         const bool is_watched = layer_watched.Contains(block, block + 1);
         // The CPU wrote beside a range the GPU writes in VRAM: the GPU's bytes there are copied
         // back below before the block goes in place.
@@ -1763,10 +2048,18 @@ void BufferCache::LayerProcessTraps() {
             continue;
         }
         // Written by the CPU since its copy was made: in place from now on, until it is known
-        // data again. An announced write: the GPU's data beside its bytes is copied back first
-        // (LayerForgetGpuData took its bytes out). A write nobody announced: the CPU reuses the
-        // memory, the GPU's data there is dead (copying it back would land over the CPU's).
-        LayerDemote(block, block + 1, rip == 0 || is_edge, 3);
+        // data again. The GPU's data there went back before the write (LayerReturnGpuData); what
+        // the GPU wrote since raced the CPU's writes, and copied back now it would land over them.
+        // Only a write by a thread that cannot wait for that keeps the old rule: an announced
+        // write or one beside a range the GPU writes in VRAM gets the GPU's data copied back after
+        // it (LayerForgetGpuData took an announced write's bytes out); a write nobody announced
+        // finds it dead.
+        const bool should_copy_back = kind == TrapHitKind::Late && (rip == 0 || is_edge);
+        if (should_copy_back && gpu_modified_ranges.Intersects(block << block_shift, block_size)) {
+            s_layer_returns.c_late.fetch_add(1, std::memory_order_relaxed);
+            LogLayerReturn("by a thread that cannot wait, the GPU's data copied back after it", block);
+        }
+        LayerDemote(block, block + 1, should_copy_back, 3);
     }
 }
 
