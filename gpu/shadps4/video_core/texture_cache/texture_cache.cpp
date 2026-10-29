@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <limits>
 #include <xxhash.h>
 
 #include "psport_toggles.h"
@@ -109,12 +110,19 @@ TextureCache::TextureCache(const Vulkan::Instance& instance_, Vulkan::Scheduler&
     const s64 min_vacancy_expected =
         std::min<s64>((6 * mem_threshold) / 10, std::max<s64>((3 * device_local_memory) / 10, 2_GB));
     const s64 min_vacancy_critical = (2 * mem_threshold) / 10;
+    // The floors are signed too: a u64 max turned a negative mark on a small budget into ~2^64, so
+    // the pressure mode never started. Below 2 GB the marks are capped at the budget; from 2 GB up
+    // they keep their historical values (the critical floor of 3 GB may sit above a 2-3 GB budget).
+    const s64 mark_cap =
+        device_local_memory < 2_GB ? device_local_memory : std::numeric_limits<s64>::max();
     pressure_gc_memory = static_cast<u64>(
-        std::max<u64>(std::min(device_local_memory - min_vacancy_expected, min_spacing_expected),
-                      DEFAULT_PRESSURE_GC_MEMORY));
+        std::min(std::max(std::min(device_local_memory - min_vacancy_expected, min_spacing_expected),
+                          DEFAULT_PRESSURE_GC_MEMORY),
+                 mark_cap));
     critical_gc_memory = static_cast<u64>(
-        std::max<u64>(std::min(device_local_memory - min_vacancy_critical, min_spacing_critical),
-                      DEFAULT_CRITICAL_GC_MEMORY));
+        std::min(std::max(std::min(device_local_memory - min_vacancy_critical, min_spacing_critical),
+                          DEFAULT_CRITICAL_GC_MEMORY),
+                 mark_cap));
     // psport: below 8 GB the pressure mark fell to 40-50 % of the budget (1.3 GB of 3.3 GB), under
     // what a game holds outside textures (~2.2 GB for Bloodborne), so such cards evicted textures
     // unused for 5 s all session (Supermedo a02c38f: 13528 evictions on a route, 1398 at 60 %, same
