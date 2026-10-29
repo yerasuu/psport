@@ -37,10 +37,14 @@ static void host_check(int e) {
     if (e) { fprintf(stderr,"STOP: semaphore host error %d\n",e); runtime_stop(21); }
 }
 static uint64_t now_ns(void) { return ps_host_time_monotonic_ns(); }
+/* Set by the creator of a semaphore other processes open by name (sceKernelOpenSema), as the
+ * system dialog libraries do for the pair they share with the dialog process; no other process
+ * runs here, so it changes nothing. libkernel refuses any options before the system call. */
+#define SEMA_ATTR_SHARED 0x100u
 static ABI int32_t sem_create(uint32_t *p_out,const char *sz_name,uint32_t attr,
                               int32_t initial,int32_t maximum,const void *p_options) {
-    if (!p_out || !sz_name || attr>2 || initial<0 || maximum<=0 || initial>maximum) return ERR(22);
-    if (p_options) { fputs("STOP: semaphore options are not implemented\n",stderr); runtime_stop(21); }
+    if (p_options || !p_out || !sz_name || (attr&~SEMA_ATTR_SHARED)>2 || initial<0 || maximum<=0 || initial>maximum)
+        return ERR(22);
     Sema *p_sema=calloc(1,sizeof(*p_sema));
     if (!p_sema) return ERR(12);
     runtime_exception_lock(&s_lock);

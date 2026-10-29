@@ -12,7 +12,9 @@
 #include <errno.h>
 #include <time.h>
 #define ERR(n) ((int32_t)(UINT32_C(0x80020000)|(n)))
-enum { ATTR_FIFO=0x01, ATTR_PRIO=0x02, ATTR_SINGLE=0x10, ATTR_MULTI=0x20 };
+/* ATTR_SHARED: set by the creator of a flag other processes open by name (sceKernelOpenEventFlag),
+ * as the system dialog libraries do; no other process runs here, so it changes nothing. */
+enum { ATTR_FIFO=0x01, ATTR_PRIO=0x02, ATTR_SINGLE=0x10, ATTR_MULTI=0x20, ATTR_SHARED=0x100 };
 enum { WAIT_AND=0x01, WAIT_OR=0x02, CLEAR_ALL=0x10, CLEAR_PAT=0x20 };
 typedef struct Flag {
     uint64_t id, pattern;
@@ -41,8 +43,8 @@ static void host_check(int e) {
 }
 static uint64_t now_ns(void) { return ps_host_time_monotonic_ns(); }
 static ABI int32_t flag_create(uint64_t *p_out,const char *sz_name,uint32_t attr,uint64_t pattern,const void *p_options) {
-    (void)p_options; /* only a size field on the console; nothing in it changes behaviour here */
-    if (!p_out || !sz_name || (attr & ~(uint32_t)(ATTR_FIFO|ATTR_PRIO|ATTR_SINGLE|ATTR_MULTI)) ||
+    /* libkernel refuses any options before the system call. */
+    if (p_options || !p_out || !sz_name || (attr & ~(uint32_t)(ATTR_FIFO|ATTR_PRIO|ATTR_SINGLE|ATTR_MULTI|ATTR_SHARED)) ||
         (attr&(ATTR_FIFO|ATTR_PRIO))==(ATTR_FIFO|ATTR_PRIO) || (attr&(ATTR_SINGLE|ATTR_MULTI))==(ATTR_SINGLE|ATTR_MULTI))
         return ERR(22);
     if (strlen(sz_name)>31) return ERR(63);
