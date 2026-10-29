@@ -58,8 +58,93 @@ struct Counts {
     }
 };
 
+/// Why the pass drops functions and where non-leaf red-zone uses sit; filled only when the diagnostics
+/// are on (report mode or PS_RED_ZONE_GUARD_DIAG=1), per module, with fixed-size buffers.
+struct Diag {
+    static constexpr std::size_t MaxFailures = 8;
+    static constexpr std::size_t MaxStatuses = 16;
+    static constexpr std::size_t FailureBytes = 16;
+
+    struct Failure {
+        u64 va = 0, off = 0, cb_function = 0;
+        ZyanStatus status = 0;
+        ZydisMnemonic prev = ZYDIS_MNEMONIC_INVALID;
+        bool is_after_terminator = false;
+        u8 c_bytes = 0;
+        std::array<u8, FailureBytes> bytes{};
+    };
+    struct StatusBin {
+        ZyanStatus status = 0;
+        u64 c = 0;
+    };
+
+    u64 va_code_end = 0; // bounds the raw bytes read at a failure
+    u64 cb_fde = 0, cb_dropped = 0;
+    u64 c_length_zero = 0, c_crosses_end = 0, c_status_other = 0;
+    std::size_t c_bins = 0, c_failures = 0;
+    std::array<StatusBin, MaxStatuses> bins{};
+    std::array<Failure, MaxFailures> failures{};
+    u64 c_failures_total = 0;
+    u64 c_after_terminator = 0;
+    u64 non_leaf = 0, non_leaf_rsp = 0, non_leaf_rbp = 0, non_leaf_before_call = 0, non_leaf_between = 0,
+        non_leaf_after_call = 0, non_leaf_lea_only = 0;
+};
+
 Counts g_totals;
 bool g_is_summary_registered = false;
+
+const char* DecodeStatusName(ZyanStatus status) {
+    switch (status) {
+    case ZYDIS_STATUS_NO_MORE_DATA: return "NO_MORE_DATA";
+    case ZYDIS_STATUS_DECODING_ERROR: return "DECODING_ERROR";
+    case ZYDIS_STATUS_INSTRUCTION_TOO_LONG: return "INSTRUCTION_TOO_LONG";
+    case ZYDIS_STATUS_BAD_REGISTER: return "BAD_REGISTER";
+    case ZYDIS_STATUS_ILLEGAL_LOCK: return "ILLEGAL_LOCK";
+    case ZYDIS_STATUS_ILLEGAL_LEGACY_PFX: return "ILLEGAL_LEGACY_PFX";
+    case ZYDIS_STATUS_ILLEGAL_REX: return "ILLEGAL_REX";
+    case ZYDIS_STATUS_INVALID_MAP: return "INVALID_MAP";
+    case ZYDIS_STATUS_MALFORMED_EVEX: return "MALFORMED_EVEX";
+    case ZYDIS_STATUS_MALFORMED_MVEX: return "MALFORMED_MVEX";
+    case ZYDIS_STATUS_INVALID_MASK: return "INVALID_MASK";
+    case ZYDIS_STATUS_IMPOSSIBLE_INSTRUCTION: return "IMPOSSIBLE_INSTRUCTION";
+    default: return "UNKNOWN";
+    }
+}
+
+void NoteDecodeFailure(Diag& diag, u64 va_begin, u64 va_end, u64 va, ZyanStatus status, bool is_status_failure,
+                       const ZydisDecodedInstruction& instruction, ZydisMnemonic prev, bool is_after_terminator) {
+    diag.cb_dropped += va_end - va_begin;
+    ++diag.c_failures_total;
+    diag.c_after_terminator += is_after_terminator;
+    if (!is_status_failure) {
+        ++(instruction.length == 0 ? diag.c_length_zero : diag.c_crosses_end);
+    } else {
+        std::size_t i = 0;
+        while (i < diag.c_bins && diag.bins[i].status != status) {
+            ++i;
+        }
+        if (i < diag.c_bins) {
+            ++diag.bins[i].c;
+        } else if (diag.c_bins < Diag::MaxStatuses) {
+            diag.bins[diag.c_bins++] = {status, 1};
+        } else {
+            ++diag.c_status_other;
+        }
+    }
+    if (diag.c_failures >= Diag::MaxFailures) {
+        return;
+    }
+    Diag::Failure& failure = diag.failures[diag.c_failures++];
+    failure.va = va;
+    failure.off = va - va_begin;
+    failure.cb_function = va_end - va_begin;
+    failure.status = is_status_failure ? status : 0;
+    failure.prev = prev;
+    failure.is_after_terminator = is_after_terminator;
+    const u64 va_limit = diag.va_code_end > va_end ? diag.va_code_end : va_end;
+    failure.c_bytes = u8(va_limit - va < Diag::FailureBytes ? va_limit - va : Diag::FailureBytes);
+    std::memcpy(failure.bytes.data(), reinterpret_cast<const void*>(va), failure.c_bytes);
+}
 
 u64 ReadUleb(const u8*& p, const u8* p_end) {
     u64 value = 0;
@@ -225,6 +310,12 @@ struct Insn {
 
 bool IsStackPointer(ZydisRegister reg) { return reg == ZYDIS_REGISTER_RSP; }
 
+/// Red-zone-form operands of one function, positioned by the number of calls seen before each.
+struct RedZoneUses {
+    bool is_rsp = false, is_rbp = false, is_before_call = false, is_non_lea = false;
+    u64 k_min_after_call = ~u64(0), k_max = 0;
+};
+
 bool OverlapsRange(u64 va_begin, u64 va_end, const PsRedZoneRange* p_ranges, std::size_t c_ranges) {
     for (std::size_t i = 0; i < c_ranges; ++i) {
         if (va_begin < p_ranges[i].va_end && p_ranges[i].va_begin < va_end) {
@@ -235,8 +326,15 @@ bool OverlapsRange(u64 va_begin, u64 va_end, const PsRedZoneRange* p_ranges, std
 }
 
 void AnalyzeFunction(u64 va_begin, u64 va_end, const PsRedZoneRange* p_patched, std::size_t c_patched,
-                     bool is_dry_run, Counts& counts) {
+                     bool is_dry_run, Counts& counts, Diag* p_diag = nullptr) {
     ++counts.functions;
+    if (p_diag) {
+        p_diag->cb_fde += va_end - va_begin;
+    }
+    RedZoneUses uses;
+    u64 c_calls = 0;
+    ZydisMnemonic prev_mnemonic = ZYDIS_MNEMONIC_INVALID;
+    bool is_prev_terminator = false;
     std::vector<Insn> instructions;
     std::map<u64, bool> branch_targets;
     bool has_call = false;
@@ -250,10 +348,15 @@ void AnalyzeFunction(u64 va_begin, u64 va_end, const PsRedZoneRange* p_patched, 
     for (u64 va = va_begin; va < va_end;) {
         ZydisDecodedInstruction instruction{};
         std::array<ZydisDecodedOperand, ZYDIS_MAX_OPERAND_COUNT> operands{};
-        if (!ZYAN_SUCCESS(Common::Decoder::Instance()->decodeInstruction(
-                instruction, operands.data(), reinterpret_cast<void*>(va), va_end - va)) ||
-            instruction.length == 0 || va + instruction.length > va_end) {
+        const ZyanStatus status = Common::Decoder::Instance()->decodeInstruction(
+            instruction, operands.data(), reinterpret_cast<void*>(va), va_end - va);
+        const bool is_status_failure = !ZYAN_SUCCESS(status);
+        if (is_status_failure || instruction.length == 0 || va + instruction.length > va_end) {
             ++counts.skip_decode;
+            if (p_diag) {
+                NoteDecodeFailure(*p_diag, va_begin, va_end, va, status, is_status_failure, instruction,
+                                  prev_mnemonic, is_prev_terminator);
+            }
             return; // a mid-function decode failure makes the rest unsafe to reason about
         }
         Insn insn;
@@ -297,6 +400,15 @@ void AnalyzeFunction(u64 va_begin, u64 va_end, const PsRedZoneRange* p_patched, 
                 const std::int64_t addr_off = anchor + operand.mem.disp.value;
                 if (addr_off < rsp_off && addr_off >= rsp_off - RedZoneBytes) {
                     uses_red_zone = true;
+                    uses.is_rsp = uses.is_rsp || base == ZYDIS_REGISTER_RSP;
+                    uses.is_rbp = uses.is_rbp || base == ZYDIS_REGISTER_RBP;
+                    uses.is_non_lea = uses.is_non_lea || mnemonic != ZYDIS_MNEMONIC_LEA;
+                    if (c_calls == 0) {
+                        uses.is_before_call = true;
+                    } else if (c_calls < uses.k_min_after_call) {
+                        uses.k_min_after_call = c_calls;
+                    }
+                    uses.k_max = c_calls > uses.k_max ? c_calls : uses.k_max;
                 }
             }
             if (!is_stack_base && base != ZYDIS_REGISTER_NONE) {
@@ -334,6 +446,10 @@ void AnalyzeFunction(u64 va_begin, u64 va_end, const PsRedZoneRange* p_patched, 
             fp_off = rsp_off + (mnemonic == ZYDIS_MNEMONIC_LEA ? operands[1].mem.disp.value : 0);
         }
 
+        c_calls += category == ZYDIS_CATEGORY_CALL;
+        prev_mnemonic = mnemonic;
+        is_prev_terminator = category == ZYDIS_CATEGORY_RET || category == ZYDIS_CATEGORY_UNCOND_BR ||
+                             mnemonic == ZYDIS_MNEMONIC_UD2 || mnemonic == ZYDIS_MNEMONIC_INT3;
         insn.is_site = is_site;
         instructions.push_back(insn);
         va += instruction.length;
@@ -344,6 +460,15 @@ void AnalyzeFunction(u64 va_begin, u64 va_end, const PsRedZoneRange* p_patched, 
     }
     if (has_call) {
         ++counts.non_leaf; // a red-zone access in a non-leaf: the leaf assumption does not hold here
+        if (p_diag) {
+            ++p_diag->non_leaf;
+            p_diag->non_leaf_rsp += uses.is_rsp;
+            p_diag->non_leaf_rbp += uses.is_rbp;
+            p_diag->non_leaf_before_call += uses.is_before_call;
+            p_diag->non_leaf_between += uses.k_min_after_call < c_calls;
+            p_diag->non_leaf_after_call += uses.k_max == c_calls;
+            p_diag->non_leaf_lea_only += !uses.is_non_lea;
+        }
         return;
     }
     ++counts.red_zone_functions;
@@ -436,7 +561,10 @@ void AnalyzeFunction(u64 va_begin, u64 va_end, const PsRedZoneRange* p_patched, 
 }
 
 void AnalyzeModule(const PsRedZoneModule& module, const PsRedZoneRange* p_patched, std::size_t c_patched,
-                   bool is_dry_run, Counts& counts) {
+                   bool is_dry_run, Counts& counts, Diag* p_diag = nullptr) {
+    if (p_diag) {
+        p_diag->va_code_end = module.va_code_end;
+    }
     if (!module.va_eh_frame || !module.cb_eh_frame) {
         ++counts.fde_errors; // no .eh_frame: its functions cannot be bounded, so none is touched
         return;
@@ -482,7 +610,7 @@ void AnalyzeModule(const PsRedZoneModule& module, const PsRedZoneRange* p_patche
                 (p_range = p, ReadEncoded(p_range, p_end, enc & 0x0f, 0, range)) && range) {
                 const u64 va_end = va_begin + range;
                 if (va_begin >= module.va_code_begin && va_end <= module.va_code_end && va_end > va_begin) {
-                    AnalyzeFunction(va_begin, va_end, p_patched, c_patched, is_dry_run, counts);
+                    AnalyzeFunction(va_begin, va_end, p_patched, c_patched, is_dry_run, counts, p_diag);
                 } else {
                     ++counts.fde_errors; // an FDE outside the module's code (AnyPS5 saw bad bounds)
                 }
@@ -507,6 +635,41 @@ void Report(const char* sz_name, const Counts& counts, bool is_dry_run) {
                 (unsigned long long)counts.skip_patched, (unsigned long long)counts.skip_overlap,
                 (unsigned long long)counts.skip_reach, (unsigned long long)counts.skip_decode,
                 (unsigned long long)counts.non_leaf, (unsigned long long)counts.fde_errors);
+}
+
+void ReportDiag(const char* sz_name, const Counts& counts, const Diag& diag) {
+    std::printf("Red zone guard: %s: decode diagnostics: %llu bytes covered by FDEs, %llu functions dropped "
+                "(%llu bytes), %llu after a terminator; length 0 x%llu, crosses FDE end x%llu",
+                sz_name, (unsigned long long)diag.cb_fde, (unsigned long long)counts.skip_decode,
+                (unsigned long long)diag.cb_dropped, (unsigned long long)diag.c_after_terminator,
+                (unsigned long long)diag.c_length_zero, (unsigned long long)diag.c_crosses_end);
+    for (std::size_t i = 0; i < diag.c_bins; ++i) {
+        std::printf("; status 0x%08x %s x%llu", diag.bins[i].status, DecodeStatusName(diag.bins[i].status),
+                    (unsigned long long)diag.bins[i].c);
+    }
+    if (diag.c_status_other) {
+        std::printf("; other statuses x%llu", (unsigned long long)diag.c_status_other);
+    }
+    std::printf("\n");
+    for (std::size_t i = 0; i < diag.c_failures; ++i) {
+        const Diag::Failure& f = diag.failures[i];
+        char sz_bytes[Diag::FailureBytes * 3 + 1] = "";
+        for (std::size_t b = 0; b < f.c_bytes; ++b) {
+            std::snprintf(sz_bytes + b * 3, 4, "%02x ", f.bytes[b]);
+        }
+        std::printf("Red zone guard: %s: decode failure at 0x%llx (+%llu/%llu) status=0x%08x %s after %s (%s) "
+                    "bytes %s\n",
+                    sz_name, (unsigned long long)f.va, (unsigned long long)f.off, (unsigned long long)f.cb_function,
+                    f.status, f.status ? DecodeStatusName(f.status) : "LENGTH_OR_FDE_END",
+                    f.prev == ZYDIS_MNEMONIC_INVALID ? "function start" : ZydisMnemonicGetString(f.prev),
+                    f.is_after_terminator ? "after terminator" : "mid-function", sz_bytes);
+    }
+    std::printf("Red zone guard: %s: non-leaf red-zone uses by form: %llu functions; rsp-based %llu, rbp-based "
+                "%llu; before first call %llu, between calls %llu, after last call %llu; lea only %llu\n",
+                sz_name, (unsigned long long)diag.non_leaf, (unsigned long long)diag.non_leaf_rsp,
+                (unsigned long long)diag.non_leaf_rbp, (unsigned long long)diag.non_leaf_before_call,
+                (unsigned long long)diag.non_leaf_between, (unsigned long long)diag.non_leaf_after_call,
+                (unsigned long long)diag.non_leaf_lea_only);
 }
 
 void Summarize(char* sz_out, std::size_t cb_out) {
@@ -546,14 +709,21 @@ extern "C" uint64_t psport_gpu_guard_red_zones(const PsRedZoneModule* p_modules,
     if (is_dry_run) {
         std::printf("Red zone guard: report mode (PS_RED_ZONE_GUARD=report): analysing without patching\n");
     }
+    const char* sz_diag = runtime_env("PS_RED_ZONE_GUARD_DIAG", nullptr);
+    const bool is_diag = is_dry_run || (sz_diag && !std::strcmp(sz_diag, "1"));
     if (!g_is_summary_registered) {
         runtime_calls_add_summary(&Summarize);
         g_is_summary_registered = true;
     }
     for (std::size_t i = 0; i < c_modules; ++i) {
         Counts counts;
-        AnalyzeModule(p_modules[i], p_patched, c_patched, is_dry_run, counts);
-        Report(p_modules[i].sz_name ? p_modules[i].sz_name : "?", counts, is_dry_run);
+        Diag diag;
+        AnalyzeModule(p_modules[i], p_patched, c_patched, is_dry_run, counts, is_diag ? &diag : nullptr);
+        const char* sz_name = p_modules[i].sz_name ? p_modules[i].sz_name : "?";
+        Report(sz_name, counts, is_dry_run);
+        if (is_diag) {
+            ReportDiag(sz_name, counts, diag);
+        }
         g_totals.Add(counts);
     }
     return g_totals.protected_sites;
