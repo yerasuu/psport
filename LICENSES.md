@@ -48,10 +48,14 @@ LGPL-2.1-or-later without GPL, version 3 or network code, so it can be linked.
 read for behaviour only (`gpu/audiodec` took the contract of its exports from AnyPS5's `Export.cpp`, not its
 code); the firmware is read with REA and the result is written natively.
 
-**bbport, SrShadowy and Teefpyre.** bbport (GPL-2.0-or-later) is psport's origin; changes from SrShadowy's and
+**bbport and its forks.** bbport (GPL-2.0-or-later) is psport's origin; changes from SrShadowy's and
 Teefpyre's forks of bbport (both GPL-2.0-or-later: their LICENSE is bbport's, their READMEs say "or later" and the
 files taken carry GPL-2.0-or-later headers) are ported by hand and recorded in FORK.md with their source commits.
-Nothing is merged wholesale.
+Supermedo's fork (`windows` branch, GPL-2.0-or-later) is read the same way; its `thd/` and bbbridge parts are
+GPL-3.0 and are never taken, and its `dlss_bridge` is MIT (see the DLSS bridge row). Mrsuss60's Windows port
+(GPL-2.0, its README says "v2 or later") is read for its Windows runtime and GPU parts; its menu pointer comes from
+bbhost (GPL-3.0-or-later) and is never taken. willl03's fork carries a plain GPL-2.0 LICENSE, so only its behaviour is
+taken, written natively. Nothing is merged wholesale.
 
 **Online module.** `libpsport-net.so` is a separate shared library that the GPU library loads, with its own
 dependencies: OpenSSL, protobuf, nlohmann_json, zlib and miniupnpc (OpenSSL and abseil, through protobuf, are
