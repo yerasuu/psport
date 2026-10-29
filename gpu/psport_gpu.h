@@ -22,11 +22,13 @@ void psport_gpu_register_kernel(void);
 int psport_gpu_init(const PsGpuConfig *p_config);
 /* Function for an imported NID ("NID#lib#mod"), or 0 when the GPU library does not provide it. */
 uintptr_t psport_gpu_resolve(const char *sz_scoped_nid);
-/* One prelinked module for the red-zone guard pass: its .eh_frame (function bounds) and code
- * bounds, as absolute addresses in the mapped image. */
+/* One prelinked module for the red-zone guard pass: its .eh_frame (function bounds), its
+ * .eh_frame_hdr and the bounds of its executable segments, as absolute addresses in the mapped
+ * image. An FDE whose range falls in either unwind section is the linker's tombstone, not code. */
 typedef struct {
     const char *sz_name;
     uint64_t va_eh_frame, cb_eh_frame;
+    uint64_t va_eh_frame_hdr, cb_eh_frame_hdr;
     uint64_t va_code_begin, va_code_end;
 } PsRedZoneModule;
 /* A range the loader patched (apply_patches), left alone by the pass; absolute addresses. */

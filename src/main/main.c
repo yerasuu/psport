@@ -341,8 +341,19 @@ int main(int argc, char **argv) {
                     p_rz[m].sz_name = p_mod->sz_name[0] ? p_mod->sz_name : (m == 0 ? "eboot.bin" : "module");
                     p_rz[m].va_eh_frame = p_mod->cb_eh_frame ? (uint64_t)(uintptr_t)(g_p_image + p_mod->eh_frame) : 0;
                     p_rz[m].cb_eh_frame = p_mod->cb_eh_frame;
-                    p_rz[m].va_code_begin = (uint64_t)(uintptr_t)(g_p_image + p_mod->base);
-                    p_rz[m].va_code_end = p_rz[m].va_code_begin + p_mod->cb_module;
+                    p_rz[m].va_eh_frame_hdr = p_mod->cb_eh_frame_hdr ? (uint64_t)(uintptr_t)(g_p_image + p_mod->eh_frame_hdr) : 0;
+                    p_rz[m].cb_eh_frame_hdr = p_mod->cb_eh_frame_hdr;
+                    uint64_t off_code_begin = p_mod->base + p_mod->cb_module, off_code_end = p_mod->base;
+                    for (uint64_t s = 0; s < p_mod->c_segments; ++s) {
+                        const RuntimeModuleSegment *p_segment = &p_mod->segments[s];
+                        if (!(p_segment->prot & 1)) continue;
+                        if (p_segment->va_module_segment < off_code_begin) off_code_begin = p_segment->va_module_segment;
+                        if (p_segment->va_module_segment + p_segment->cb_module_segment > off_code_end)
+                            off_code_end = p_segment->va_module_segment + p_segment->cb_module_segment;
+                    }
+                    if (off_code_begin >= off_code_end) { off_code_begin = p_mod->base; off_code_end = p_mod->base + p_mod->cb_module; }
+                    p_rz[m].va_code_begin = (uint64_t)(uintptr_t)(g_p_image + off_code_begin);
+                    p_rz[m].va_code_end = (uint64_t)(uintptr_t)(g_p_image + off_code_end);
                 }
                 for (size_t w = 0; w < patches.c_writes; ++w) {
                     p_rz_patched[w].va_begin = (uint64_t)(uintptr_t)(g_p_image + patches.p_writes[w].off_image);

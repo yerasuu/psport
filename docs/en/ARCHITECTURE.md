@@ -336,7 +336,9 @@ rsp by 128 first, so the frame lands below the live locals (`PsGuestCode::Reloca
 Windows-only by the capability, conservative (every such site, no liveness) and never per title; everything
 it cannot prove safe — sites shorter than a 5-byte jump in jump-table leaves, RIP- or rsp-relative sites,
 code without an FDE, patched or already-hooked bytes — is skipped and counted (one line per module and an
-exit summary). `PS_RED_ZONE_GUARD=0|1|report` switches it; `PS_FAULT_CLOBBER_RED_ZONE=1` makes the Linux
+exit summary). FDEs whose range falls in `.eh_frame` itself (the SDK linker's tombstones of discarded
+functions) are counted apart; jump tables inside a function's range are stepped over as data, and bytes that
+do not decode leave the code before the last terminator analysed and the rest untouched (#1173). `PS_RED_ZONE_GUARD=0|1|report` switches it; `PS_FAULT_CLOBBER_RED_ZONE=1` makes the Linux
 fault handler clobber the red zone as Windows does, so the pass is validated on Linux at night.
 
 What the Windows port changed in code Linux runs too (feat/614-win32), for the Linux regress to
