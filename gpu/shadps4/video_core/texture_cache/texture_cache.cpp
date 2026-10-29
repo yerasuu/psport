@@ -785,6 +785,101 @@ static void ClampViewRange(ImageViewInfo& view_info, const Image& image) {
     range.extent.layers = std::clamp(range.extent.layers, 1u, c_layers - range.base.layer);
 }
 
+extern "C" void runtime_calls_add_summary(void (*pfn_summary)(char* sz_out, std::size_t cb_out));
+
+namespace {
+
+// psport: a depth surface read as a texture (soft particles, fog, water thickness, SSAO): the T#
+// aliases the depth target's memory with a colour format (R32_FLOAT, R16_UNORM) and, often, a depth
+// tile mode. The depth lives only in the GPU's image, so any image but the depth image itself
+// (a view of its depth aspect) holds stale data. Counted per resolution, not per draw: the binding
+// and texture-set memos reuse a resolution until an image is registered or unregistered.
+struct DepthSurfaceReads {
+    std::atomic<u64> c_live{0};         ///< resolved to the depth image (depth-aspect view)
+    std::atomic<u64> c_other_image{0};  ///< a depth image overlapped, another image was bound
+    std::atomic<u64> c_guest_memory{0}; ///< depth-tiled T#, no depth image: made from guest memory
+    std::atomic<u64> c_cached_color{0}; ///< depth-tiled T#, no depth image: a colour image
+    std::atomic<u32> c_printed{0};
+};
+DepthSurfaceReads s_depth_reads;
+
+struct DepthSurfaceAlias {
+    VAddr va_image = 0;
+    u32 width = 0;
+    u32 height = 0;
+    vk::Format format = vk::Format::eUndefined;
+    bool is_gpu_written = false;
+    bool is_found = false;
+};
+
+void SummarizeDepthSurfaceReads(char* sz_out, std::size_t cb_out) {
+    std::snprintf(
+        sz_out, cb_out,
+        "Texture cache: depth surfaces read as textures: %llu resolutions to the live depth image, "
+        "%llu to another image over a depth image, %llu depth-tiled reads made from guest memory "
+        "and %llu bound to a colour image, without a depth image\n",
+        (unsigned long long)s_depth_reads.c_live.load(std::memory_order_relaxed),
+        (unsigned long long)s_depth_reads.c_other_image.load(std::memory_order_relaxed),
+        (unsigned long long)s_depth_reads.c_guest_memory.load(std::memory_order_relaxed),
+        (unsigned long long)s_depth_reads.c_cached_color.load(std::memory_order_relaxed));
+}
+
+bool IsDepthTileMode(AmdGpu::TileMode tile_mode) {
+    return tile_mode <= AmdGpu::TileMode::Depth2DThinPrt1K;
+}
+
+void NoteDepthSurfaceRead(const ImageInfo& info, TextureCache::BindingType binding,
+                          const DepthSurfaceAlias& depth, const Image& image, bool is_created) {
+    static const bool s_is_registered = [] {
+        runtime_calls_add_summary(&SummarizeDepthSurfaceReads);
+        return true;
+    }();
+    (void)s_is_registered;
+    const char* sz_outcome;
+    u64 c_outcome;
+    if (image.info.props.is_depth) {
+        sz_outcome = "live depth image";
+        c_outcome = s_depth_reads.c_live.fetch_add(1, std::memory_order_relaxed) + 1;
+    } else if (depth.is_found) {
+        sz_outcome = "another image, stale";
+        c_outcome = s_depth_reads.c_other_image.fetch_add(1, std::memory_order_relaxed) + 1;
+        LOG_ERROR_COUNTED(Render_Vulkan,
+                          "Depth surface {:#x} read as a texture through another image {:#x} ({}): "
+                          "it does not hold the depth the GPU wrote",
+                          depth.va_image, image.info.guest_address,
+                          vk::to_string(image.info.pixel_format));
+    } else if (is_created) {
+        sz_outcome = "new image from guest memory, stale";
+        c_outcome = s_depth_reads.c_guest_memory.fetch_add(1, std::memory_order_relaxed) + 1;
+        LOG_ERROR_COUNTED(Render_Vulkan,
+                          "Depth-tiled texture {:#x} ({}) without a depth image: made from guest "
+                          "memory, which never holds a depth the GPU wrote",
+                          info.guest_address, vk::to_string(info.pixel_format));
+    } else {
+        sz_outcome = "colour image without a depth image";
+        c_outcome = s_depth_reads.c_cached_color.fetch_add(1, std::memory_order_relaxed) + 1;
+    }
+    const bool is_first = s_depth_reads.c_printed.fetch_add(1, std::memory_order_relaxed) < 32;
+    if (!is_first && (c_outcome & (c_outcome - 1)) != 0) {
+        return;
+    }
+    std::printf("Texture cache: depth surface read as a %s, %s (%llu so far): T# %#llx %ux%u %s "
+                "tile %u mips %u layers %u; depth image %#llx %ux%u %s%s; bound %#llx %ux%u %s\n",
+                binding == TextureCache::BindingType::Storage ? "storage image" : "texture",
+                sz_outcome, (unsigned long long)c_outcome,
+                (unsigned long long)info.guest_address, info.size.width, info.size.height,
+                vk::to_string(info.pixel_format).c_str(), u32(info.tile_mode),
+                info.resources.levels, info.resources.layers, (unsigned long long)depth.va_image,
+                depth.width, depth.height, vk::to_string(depth.format).c_str(),
+                !depth.is_found        ? " (none)"
+                : depth.is_gpu_written ? " (GPU-written)"
+                                       : " (not GPU-written)",
+                (unsigned long long)image.info.guest_address, image.info.size.width,
+                image.info.size.height, vk::to_string(image.info.pixel_format).c_str());
+}
+
+} // namespace
+
 ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
     const auto& info = desc.info;
     if (info.guest_address == 0) [[unlikely]] {
@@ -840,6 +935,26 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
     ImageIds image_ids;
     ForEachImageInRegion(info.guest_address, info.guest_size,
                          [&](ImageId image_id, Image& image) { image_ids.push_back(image_id); });
+
+    const bool is_texture_read =
+        desc.type == BindingType::Texture || desc.type == BindingType::Storage;
+    DepthSurfaceAlias depth_alias{};
+    if (is_texture_read) {
+        for (const auto& cache_id : image_ids) {
+            const Image& cache_image = slot_images[cache_id];
+            if (cache_image.info.props.is_depth) {
+                depth_alias = {
+                    .va_image = cache_image.info.guest_address,
+                    .width = cache_image.info.size.width,
+                    .height = cache_image.info.size.height,
+                    .format = cache_image.info.pixel_format,
+                    .is_gpu_written = True(cache_image.flags & ImageFlagBits::GpuModified),
+                    .is_found = true,
+                };
+                break;
+            }
+        }
+    }
 
     ImageId image_id{};
 
@@ -897,6 +1012,7 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
         }
     }
     // Create and register a new image
+    const bool is_created = !image_id;
     if (!image_id) {
         image_id = CreateImage(info, true);
         RegisterImage(image_id);
@@ -905,6 +1021,9 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
     Image& image = slot_images[image_id];
     image.tick_accessed_last = scheduler.CurrentTick();
     TouchImage(image);
+    if (is_texture_read && (depth_alias.is_found || IsDepthTileMode(info.tile_mode))) {
+        NoteDepthSurfaceRead(info, desc.type, depth_alias, image, is_created);
+    }
 
     // If the image requested is a subresource of the image from cache record its location.
     if (view_mip > 0) {
