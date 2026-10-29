@@ -232,7 +232,7 @@ its log and call report, implementing what is missing and checking the result.
 | Path | Contents |
 |---|---|
 | `src/` | entry point (`src/main/`), native loader and C runtime |
-| `gpu/` | GPU library: shadPS4 video core with bbport's changes ([gpu/VENDOR.txt](gpu/VENDOR.txt)), PM4 decoder (`cp/`), memory module (`layer/`), ported libraries (`ngs2_anyps5/`, `ngs2/` its native rewrite, `fiber/`, `font/`, `pngenc/`, `pngdec/`, `jpegdec/`), libSceAudiodec (`audiodec/`), game profiles (`games/`), overlay and in-game menu (`port/`), DLSS bridge, online module (`net/`) |
+| `gpu/` | GPU library: shadPS4 video core with bbport's changes ([gpu/VENDOR.txt](gpu/VENDOR.txt)), PM4 decoder (`cp/`), memory module (`layer/`), ported libraries (`fiber/`, `font/`, `pngenc/`, `pngdec/`, `jpegdec/`), libSceNgs2 (`ngs2/`), libSceAudiodec (`audiodec/`), game profiles (`games/`), overlay and in-game menu (`port/`), DLSS bridge, online module (`net/`) |
 | `scripts/` | `online.py` (online addresses for `PS_ONLINE=1`) and `sce_file.py` for the Python tools |
 | `launcher/`, `packaging/` | bbport's GTK4 launcher; Nix package and AppImage script |
 | `patches/` | community patches for Bloodborne |
@@ -264,7 +264,7 @@ as version 2. It is maintained by Yerasuu.
 |---|---|---|
 | [bbport](https://github.com/deadinside28/bloodborne_pc) by deadinside | psport's origin: native loader, HLE runtime, Vulkan renderer, everything for Bloodborne | GPL-2.0-or-later |
 | [shadPS4](https://github.com/shadps4-emu/shadPS4) | video core, shader recompiler, AvPlayer and other libraries carried by bbport; source of the libSceFiber and libSceFont ports and of the libSceNgs2 headers | GPL-2.0-or-later |
-| [AnyPS5](https://github.com/boykopovar/AnyPS5) | source of the libSceNgs2 port | GPL-2.0-only |
+| [AnyPS5](https://github.com/boykopovar/AnyPS5) | behaviour read for the native libSceNgs2 and libSceAudiodec, no code | GPL-2.0-only |
 
 Source commits and changes to inherited code are recorded in [FORK.md](FORK.md) and
 [gpu/VENDOR.txt](gpu/VENDOR.txt).

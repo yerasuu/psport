@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// libSceNgs2's export table for the native Ngs2 (PS_NGS2=native, kb #625). The system, rack, voice
+// libSceNgs2's export table for the native Ngs2 (kb #625). The system, rack, voice
 // and report API (phase F2, kb #1094), the render (F3, kb #1095), the waveform parsing (F4, kb #1096)
 // and pan, geom and FFT (F7, kb #1099) are implemented; the three PS5 exports return
 // ORBIS_NGS2_ERROR_FAIL, the firmware's internal failure, log their first call and are counted in the
@@ -34,8 +34,8 @@ struct Export {
     const char* sz_name;
 };
 
-// The three PS5 exports gpu/ngs2_anyps5 also registers, so that switching backends leaves every
-// import bound the same; firmware 11.00 has none of them.
+// Three PS5 exports AnyPS5's retired port registered (decision #1206), kept so that a game importing
+// them still binds and its calls are counted; firmware 11.00 has none of them.
 constexpr std::array UNIMPLEMENTED_EXPORTS{
     Export{"AQkj7C0f3PY", "sceNgs2SystemResetOption"},
     Export{"9eic4AmjGVI", "sceNgs2VoiceQueryInfo"},

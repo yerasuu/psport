@@ -38,7 +38,6 @@ namespace Libraries::GnmDriver { bool RegisterLib(Core::Loader::SymbolsResolver*
 namespace Libraries::AvPlayer { void RegisterLib(Core::Loader::SymbolsResolver* p_sym); }
 namespace Libraries::VideoOut { void RegisterLib(Core::Loader::SymbolsResolver* p_sym); }
 namespace Libraries::Ngs2 { void RegisterLib(Core::Loader::SymbolsResolver* p_sym); }
-namespace Libraries::Ngs2Anyps5 { void RegisterLib(Core::Loader::SymbolsResolver* p_sym); }
 namespace Libraries::Fiber { void RegisterLib(Core::Loader::SymbolsResolver* p_sym); }
 namespace Libraries::Font { void RegisterLib(Core::Loader::SymbolsResolver* p_sym); }
 namespace Libraries::FontFt { void RegisterLib(Core::Loader::SymbolsResolver* p_sym); }
@@ -176,21 +175,17 @@ extern "C" int psport_gpu_init(const PsGpuConfig* p_config) {
 }
 
 namespace Libraries::Kernel { void StartKernelService(); }
-// PS_NGS2=native|anyps5 (kb #809): the native Ngs2 grows phase by phase next to AnyPS5's, which
-// stays the default until the night runs show the native one at parity (kb #625).
+// PS_NGS2=anyps5 named AnyPS5's port, retired once the native Ngs2 matched it (decision #1206); a run
+// that still sets it says so instead of silently getting another backend.
 static void RegisterNgs2(Core::Loader::SymbolsResolver* p_resolver) {
     const char* sz_backend = std::getenv("PS_NGS2");
-    const bool is_native = sz_backend && !std::strcmp(sz_backend, "native");
-    if (sz_backend && !is_native && std::strcmp(sz_backend, "anyps5")) {
-        std::printf("Runtime: PS_NGS2=%s is neither native nor anyps5; using anyps5\n", sz_backend);
+    if (sz_backend && !std::strcmp(sz_backend, "anyps5")) {
+        std::printf("Runtime: PS_NGS2=anyps5 names a retired backend; using native\n");
+    } else if (sz_backend && std::strcmp(sz_backend, "native")) {
+        std::printf("Runtime: PS_NGS2=%s is not native; using native\n", sz_backend);
     }
-    std::printf("Runtime: Ngs2 backend: %s\n",
-                is_native ? "native (gpu/ngs2)" : "anyps5 (gpu/ngs2_anyps5)");
-    if (is_native) {
-        Libraries::Ngs2::RegisterLib(p_resolver);
-    } else {
-        Libraries::Ngs2Anyps5::RegisterLib(p_resolver);
-    }
+    std::printf("Runtime: Ngs2 backend: native (gpu/ngs2)\n");
+    Libraries::Ngs2::RegisterLib(p_resolver);
 }
 extern "C" void psport_gpu_register_kernel(void) {
     Libraries::Kernel::StartKernelService();

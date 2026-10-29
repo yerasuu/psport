@@ -18,7 +18,7 @@ verifies that it matches the tree. File notices remain authoritative.
 | | Licence | What it covers |
 | --- | --- | --- |
 | **psport's own code** | GPL-2.0-or-later (GPL-2.0-only where a header says so) | runtime, GPU glue, launcher, tooling, per-title profiles, native Audiodec and Ngs2 |
-| **Ported by hand** | GPL-2.0-or-later, except AnyPS5's Ngs2 (GPL-2.0-only) | shadPS4 tree and ports, bbport and its forks, AnyPS5's libSceNgs2 |
+| **Ported by hand** | GPL-2.0-or-later, except two files of the online module (GPL-2.0-only) | shadPS4 tree and ports, bbport and its forks |
 | **Third-party, vendored** | MIT, BSD-3-Clause, BSL-1.0, Zlib, CC0-1.0, Bitstream Vera | FSR and FidelityFX sources, sirit, xbyak, half, Dear ImGui, Tracy, fonts and others |
 | **Never in a public bundle** | Apache-2.0 and others that cannot combine with GPL-2.0 | the online module, the Vulkan loader, AMD's FSR 4 DLLs, NVIDIA's DLSS SDK, game files, console modules |
 
@@ -37,7 +37,6 @@ verifies that it matches the tree. File notices remain authoritative.
 
 | Component | Paths | Licence | Origin and notes |
 | --- | --- | --- | --- |
-| libSceNgs2 port | `gpu/ngs2_anyps5` | GPL-2.0-only | AnyPS5 (https://github.com/boykopovar/AnyPS5) at `5edae353` (FORK.md); psport's own files in it (glue, envelope, filter, limiter, peak meter, VAG) are GPL-2.0-or-later |
 | shadPS4 vendored tree | `gpu/shadps4` | GPL-2.0-or-later | https://github.com/shadps4-emu/shadPS4 at `b4e7ae7` and the fixes `gpu/VENDOR.txt` lists |
 | Files in that tree under their own licence | `sha1.h`, `ssa_rewrite_pass.cpp`, `fsr.comp`, `aes.h`, `alignment.h`, `bit_field.h`, `vk_barrier_tracker.*` | MIT (`sha1.h`, `ssa_rewrite_pass.cpp`, `fsr.comp`, AMD's `ffx_a.h` and `ffx_fsr1.h`), BSL-1.0 (`aes.h`), CC0-1.0 (`alignment.h`), BSD-3-Clause AND GPL-2.0-or-later (`bit_field.h`), Zlib (`vk_barrier_tracker.*`, DXVK) | |
 | libSceFiber and libSceFont | `gpu/fiber`, `gpu/font` | GPL-2.0-or-later | shadPS4 at `3a9f572` |
@@ -82,18 +81,18 @@ Nothing is merged wholesale.
 | **Supermedo** (`windows` branch) | GPL-2.0-or-later | ported commits | `thd/` and bbbridge (GPL-3.0); `dlss_bridge` is MIT (see the DLSS bridge row) |
 | **Mrsuss60** (Windows port) | GPL-2.0 (README: "v2 or later") | its Windows runtime and GPU parts | the menu pointer, which comes from bbhost (GPL-3.0-or-later) |
 | **willl03** | GPL-2.0, no or-later grant | behaviour only, written natively | its code |
-| **AnyPS5** | GPL-2.0-only | the code of `gpu/ngs2_anyps5`; for everything else, behaviour only, confirmed on the firmware and written natively | the rest of its code (`gpu/audiodec` took the contract of its exports from AnyPS5's `Export.cpp`, not its code) |
+| **AnyPS5** | GPL-2.0-only | behaviour only, confirmed on the firmware and written natively | its code (`gpu/audiodec` took the contract of its exports from AnyPS5's `Export.cpp`, not its code; the libSceNgs2 port taken from it was retired for the native `gpu/ngs2`, decision #1206) |
 
 ## Boundaries between components
 
-**GPL-2.0 binary.** psport's programs and `libpsport-gpu.so` link GPL-2.0-or-later and GPL-2.0-only code into
-one binary, so they are distributed under GPL-2.0 and nothing under GPL-3.0 or the Apache-2.0 may be linked into
-them. The GPL-2.0-or-later files (shadPS4, bbport, psport's own) are used as version 2; the GPL-2.0-only files
-(AnyPS5's Ngs2, two RPCS3-derived files in the online module) stay as they are. FFmpeg is built as
+**GPL-2.0 binary.** psport's programs and `libpsport-gpu.so` link GPL-2.0-or-later code into one binary, so
+they are distributed under GPL-2.0 and nothing under GPL-3.0 or the Apache-2.0 may be linked into them. The
+GPL-2.0-or-later files (shadPS4, bbport, psport's own) are used as version 2; the GPL-2.0-only files (two
+RPCS3-derived files in the online module) stay as they are. FFmpeg is built as
 LGPL-2.1-or-later without GPL, version 3 or network code, so it can be linked.
 
-**AnyPS5.** The code of `gpu/ngs2_anyps5` is AnyPS5's, GPL-2.0-only. For everything else AnyPS5 is
-read for behaviour only; the firmware is read with REA and the result is written natively.
+**AnyPS5.** No code of AnyPS5 remains: its libSceNgs2 port was retired for the native `gpu/ngs2` (decision
+#1206). AnyPS5 is read for behaviour only; the firmware is read with REA and the result is written natively.
 
 **Online module.** `libpsport-net.so` is a separate shared library that the GPU library loads, with its own
 dependencies: OpenSSL, protobuf, nlohmann_json, zlib and miniupnpc (OpenSSL and abseil, through protobuf, are

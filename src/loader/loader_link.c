@@ -28,7 +28,7 @@
  * writes into GPU memory (memcpy, memset): a native copy of this one would bypass that. */
 static const char *const s_never_system[] = {"libSceLibcInternal"};
 /* The runtime's kernel, GPU, video, pad, audio output, clock and user-level threads; the ported
- * gpu/fiber, gpu/font, gpu/audiodec and gpu/ngs2 or gpu/ngs2_anyps5 (PS_NGS2). */
+ * gpu/fiber, gpu/font, gpu/audiodec and gpu/ngs2. */
 static const char *const s_port_implements[] = {"libkernel", "libkernel_unity", "libkernel_sys", "libSceGnmDriver",
                                               "libSceVideoOut", "libScePad", "libSceAudioOut", "libSceFiber",
                                               "libSceFont", "libSceFontFt", "libSceAudiodec", "libSceNgs2",

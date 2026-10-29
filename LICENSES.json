@@ -50,15 +50,6 @@
       "provenance": "All 59 files carry SPDX-License-Identifier: GPL-2.0-or-later. The BBSC co-op code under gpu/games/bloodborne/net is Copyright 2026 CLS_AMG (BBSC, GPL-2.0-or-later per scripts/bbsc_gameserver/NOTICE.txt) and ported by hand, see FORK.md. Teefpyre's 734218ca6 (BBSC's param tables and hunter's kit, FORK.md) is GPL-2.0-or-later: its bloodborne_re.cpp and bbsc_memscan.cpp carry SPDX GPL-2.0-or-later (shadPS4 Emulator Project, CLS_AMG)."
     },
     {
-      "name": "libSceNgs2 port from AnyPS5",
-      "paths": [
-        "gpu/ngs2_anyps5"
-      ],
-      "license": "GPL-2.0-only",
-      "review": "reviewed",
-      "provenance": "FORK.md, Ported components: libSceNgs2 from https://github.com/boykopovar/AnyPS5 commit 5edae353, GPL-2.0-only (its LICENSE is the GPL version 2). The files from AnyPS5 carry SPDX-License-Identifier: GPL-2.0-only. psport's own files in the directory carry GPL-2.0-or-later: Exports.cpp and ngs2_compat.hpp (the glue to libpsport-gpu), and Envelope.cpp, Filter.cpp (001828f), PeakMeter.cpp (83633e5), Vag.cpp (250f21e) and Limiter.cpp (1cfbf78), which psport's commits added, written from firmware 11.00; AnyPS5's libSceNgs2.native tree at 5edae35361e9b7f7061f28c6e80ed075312b8105 has no such files. Linked into libpsport-gpu.so, so the binary is GPL-2.0, never GPL-3.0 (kb #843)."
-    },
-    {
       "name": "libSceAudiodec and the native libSceNgs2",
       "paths": [
         "gpu/audiodec",
@@ -66,7 +57,7 @@
       ],
       "license": "GPL-2.0-or-later",
       "review": "reviewed",
-      "provenance": "psport's own code; every source file carries SPDX-License-Identifier: GPL-2.0-or-later. gpu/audiodec (kb #624) replaces the AnyPS5 a11c8f7f port and keeps none of its code: NIDs, structure layouts and error codes are the API's, the contract of each export was read as facts from AnyPS5's Export.cpp (FORK.md), and it decodes through FFmpeg's libavcodec (LGPL-2.1-or-later, a bundled library) and LibAtrac9 (MIT, its own component). gpu/ngs2 (kb #625) is the native libSceNgs2, written from firmware 11.00 over shadPS4's Ngs2 headers (part of the shadPS4 vendored tree)."
+      "provenance": "psport's own code; every source file carries SPDX-License-Identifier: GPL-2.0-or-later. gpu/audiodec (kb #624) replaces the AnyPS5 a11c8f7f port and keeps none of its code: NIDs, structure layouts and error codes are the API's, the contract of each export was read as facts from AnyPS5's Export.cpp (FORK.md), and it decodes through FFmpeg's libavcodec (LGPL-2.1-or-later, a bundled library) and LibAtrac9 (MIT, its own component). gpu/ngs2 (kb #625) is the native libSceNgs2, written from firmware 11.00 over shadPS4's Ngs2 headers (part of the shadPS4 vendored tree); it replaced the GPL-2.0-only port from AnyPS5 5edae353 (gpu/ngs2_anyps5), retired with all its code (decision #1206)."
     },
     {
       "name": "shadPS4 vendored tree",

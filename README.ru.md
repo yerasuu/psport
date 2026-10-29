@@ -236,7 +236,7 @@ gamescope без окна, без звука и без контроллеров 
 | Путь | Содержимое |
 |---|---|
 | `src/` | точка входа (`src/main/`), нативный загрузчик и среда выполнения на C |
-| `gpu/` | библиотека видеочипа: видеоядро shadPS4 с изменениями bbport ([gpu/VENDOR.txt](gpu/VENDOR.txt)), декодер PM4 (`cp/`), модуль памяти (`layer/`), перенесённые библиотеки (`ngs2_anyps5/`, `ngs2/` — её нативная переработка, `fiber/`, `font/`, `pngenc/`, `pngdec/`, `jpegdec/`), libSceAudiodec (`audiodec/`), профили игр (`games/`), оверлей и внутриигровое меню (`port/`), мост DLSS, сетевой модуль (`net/`) |
+| `gpu/` | библиотека видеочипа: видеоядро shadPS4 с изменениями bbport ([gpu/VENDOR.txt](gpu/VENDOR.txt)), декодер PM4 (`cp/`), модуль памяти (`layer/`), перенесённые библиотеки (`fiber/`, `font/`, `pngenc/`, `pngdec/`, `jpegdec/`), libSceNgs2 (`ngs2/`), libSceAudiodec (`audiodec/`), профили игр (`games/`), оверлей и внутриигровое меню (`port/`), мост DLSS, сетевой модуль (`net/`) |
 | `scripts/` | `online.py` (сетевые адреса для `PS_ONLINE=1`) и `sce_file.py` для инструментов на Python |
 | `launcher/`, `packaging/` | лаунчер bbport на GTK4; пакет Nix и скрипт AppImage |
 | `patches/` | патчи сообщества для Bloodborne |
@@ -270,7 +270,7 @@ GPL-2.0-or-later и используются как версия 2. Проект
 |---|---|---|
 | [bbport](https://github.com/deadinside28/bloodborne_pc) от deadinside | исток psport: нативный загрузчик, среда HLE, рендерер Vulkan, всё для Bloodborne | GPL-2.0-or-later |
 | [shadPS4](https://github.com/shadps4-emu/shadPS4) | видеоядро, рекомпилятор шейдеров, AvPlayer и другие библиотеки, пришедшие с bbport; источник портов libSceFiber и libSceFont и заголовков libSceNgs2 | GPL-2.0-or-later |
-| [AnyPS5](https://github.com/boykopovar/AnyPS5) | источник порта libSceNgs2 | GPL-2.0 |
+| [AnyPS5](https://github.com/boykopovar/AnyPS5) | поведение, прочитанное для нативных libSceNgs2 и libSceAudiodec, без кода | GPL-2.0 |
 
 Исходные коммиты и изменения унаследованного кода записаны в [FORK.md](FORK.md) и
 [gpu/VENDOR.txt](gpu/VENDOR.txt).

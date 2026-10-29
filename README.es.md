@@ -241,7 +241,7 @@ su registro y su informe de llamadas, implementar lo que falta y comprobar el re
 | Ruta | Contenido |
 |---|---|
 | `src/` | punto de entrada (`src/main/`), cargador nativo y runtime en C |
-| `gpu/` | biblioteca de GPU: núcleo de vídeo de shadPS4 con los cambios de bbport ([gpu/VENDOR.txt](gpu/VENDOR.txt)), decodificador PM4 (`cp/`), módulo de memoria (`layer/`), bibliotecas portadas (`ngs2_anyps5/`, `ngs2/` su reescritura nativa, `fiber/`, `font/`, `pngenc/`, `pngdec/`, `jpegdec/`), libSceAudiodec (`audiodec/`), perfiles de juego (`games/`), menú superpuesto y menú del juego (`port/`), puente DLSS, módulo en línea (`net/`) |
+| `gpu/` | biblioteca de GPU: núcleo de vídeo de shadPS4 con los cambios de bbport ([gpu/VENDOR.txt](gpu/VENDOR.txt)), decodificador PM4 (`cp/`), módulo de memoria (`layer/`), bibliotecas portadas (`fiber/`, `font/`, `pngenc/`, `pngdec/`, `jpegdec/`), libSceNgs2 (`ngs2/`), libSceAudiodec (`audiodec/`), perfiles de juego (`games/`), menú superpuesto y menú del juego (`port/`), puente DLSS, módulo en línea (`net/`) |
 | `scripts/` | `online.py` (direcciones en línea para `PS_ONLINE=1`) y `sce_file.py` para las herramientas en Python |
 | `launcher/`, `packaging/` | el lanzador GTK4 de bbport; paquete de Nix y script de AppImage |
 | `patches/` | parches de la comunidad para Bloodborne |
@@ -275,7 +275,7 @@ GPL-2.0-or-later y se usa como versión 2. Lo mantiene Yerasuu.
 |---|---|---|
 | [bbport](https://github.com/deadinside28/bloodborne_pc), de deadinside | el origen de psport: cargador nativo, runtime HLE, renderizador Vulkan, todo lo de Bloodborne | GPL-2.0-or-later |
 | [shadPS4](https://github.com/shadps4-emu/shadPS4) | núcleo de vídeo, recompilador de shaders, AvPlayer y otras bibliotecas que trae bbport; origen de los ports de libSceFiber y libSceFont y de las cabeceras de libSceNgs2 | GPL-2.0-or-later |
-| [AnyPS5](https://github.com/boykopovar/AnyPS5) | origen del port de libSceNgs2 | GPL-2.0 |
+| [AnyPS5](https://github.com/boykopovar/AnyPS5) | comportamiento leído para libSceNgs2 y libSceAudiodec nativas, sin código | GPL-2.0 |
 
 Los commits de origen y los cambios en el código heredado están anotados en [FORK.md](FORK.md) y
 [gpu/VENDOR.txt](gpu/VENDOR.txt).

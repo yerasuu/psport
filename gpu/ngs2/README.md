@@ -3,15 +3,15 @@
 psport's own `libSceNgs2`, written from firmware 11.00's `libSceNgs2.sprx` (read with rea, kb #812
 and #813) and the PS4 structures and error codes of shadPS4's headers
 (`gpu/shadps4/core/libraries/ngs2/`, checked against the firmware in `Abi.cpp`). No code from
-AnyPS5: the implementation it replaces lives apart in `gpu/ngs2_anyps5/` until this one reaches
-parity (kb #625, decision #809).
+AnyPS5: it replaced AnyPS5's port (`gpu/ngs2_anyps5/`, kb #625), retired once this one matched it
+(decision #1206).
 
-`PS_NGS2` picks the one a run registers, once at start-up (`Runtime: Ngs2 backend: ...`):
-`anyps5` (the default) or `native`.
+It is the only backend (`Runtime: Ngs2 backend: native (gpu/ngs2)` at start-up); `PS_NGS2=native`
+is still accepted, and `PS_NGS2=anyps5` logs that the backend was retired.
 
 | File | What it holds |
 |---|---|
-| `Exports.cpp` | the NID table: firmware 11.00's 47 exports, each wrapped in an `ExportCall` and traced by `PS_NGS2_TRACE=1`, plus the three PS5 ones `gpu/ngs2_anyps5` answers |
+| `Exports.cpp` | the NID table: firmware 11.00's 47 exports, each wrapped in an `ExportCall` and traced by `PS_NGS2_TRACE=1`, plus the three PS5 ones AnyPS5's retired port answered |
 | `ExportCall.cpp` | each export's failing results: logged the first time an export, code and cause meet, counted for the `Ngs2: summary` line after the call report |
 | `Internal.h`, `VoiceData.h` | the objects (system, rack, voice) the game's buffers hold, what the render keeps per voice, and the declarations |
 | `Handle.cpp` | the firmware's 0x20-byte handles, the game-visible recursive locks, the buffer allocator |

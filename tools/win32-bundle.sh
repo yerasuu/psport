@@ -228,7 +228,7 @@ Third-party notices for psport for Windows
 
 psport is licensed under the GNU General Public License version 2 (LICENSE.txt); some of its files
 are GPL-2.0-only (marked in their headers), the rest GPL-2.0-or-later used as version 2. It includes
-code from bbport and shadPS4 (GPL-2.0-or-later) and from AnyPS5 (GPL-2.0-only). Below, every other
+code from bbport and shadPS4 (GPL-2.0-or-later). Below, every other
 component this package carries: the DLLs next to psport.exe, built in MSYS2's CLANG64 environment
 (FFmpeg's by psport itself, as LGPL-2.1-or-later, with the configure line it was built with), and the
 code compiled into psport's own programs, each with its licence and the licence files it ships with. Where a component offers a choice of licences, psport uses it under the one compatible with the
