@@ -220,6 +220,10 @@ public:
     boost::container::static_vector<u64, 16> mip_hashes{};
     u64 lru_id{};
     u64 hash{};
+    /// psport: hashes of the head and tail pages taken when they stopped being tracked (another
+    /// image or buffer shares them), compared before the image is tracked again or evicted; 0 none.
+    u64 head_hash{};
+    u64 tail_hash{};
 
 private:
     static Common::IncrementalIdProvider<u64> global_image_uid;

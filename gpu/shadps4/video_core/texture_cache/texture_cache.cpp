@@ -30,6 +30,42 @@ namespace VideoCore {
 static constexpr u64 PageShift = 12;
 static constexpr u64 NumFramesBeforeRemoval = 32;
 
+// psport: guest bytes hashed as an upload reads them (CopySparseMemory): unmapped pages as zeros,
+// and through the backing view while PS_READBACKS=2 read-protects GPU-written pages. A direct read
+// faulted on a texture in memory the guest had not mapped yet (Supermedo e6324aae4b), and on a
+// protected page it asked the GPU thread for a readback it cannot do (shadPS4 0918faa025).
+static u64 HashGuestMemory(VAddr va_range, u64 cb_range) {
+    static const bool s_is_precise =
+        EmulatorSettings.GetReadbacksMode() == GpuReadbacksMode::Precise;
+    auto* p_memory = Core::Memory::Instance();
+    const bool is_mapped = p_memory->ClampRangeSize(va_range, cb_range) == cb_range;
+    if (is_mapped && !s_is_precise) {
+        return XXH3_64bits(std::bit_cast<const u8*>(va_range), cb_range);
+    }
+    if (!is_mapped) {
+        LOG_ERROR_COUNTED(Render_Vulkan,
+                          "Image memory {:#x}+{:#x} not wholly mapped: hashed with its unmapped "
+                          "pages as zeros",
+                          va_range, cb_range);
+    }
+    thread_local const std::unique_ptr<XXH3_state_t, decltype(&XXH3_freeState)> s_p_state{
+        XXH3_createState(), XXH3_freeState};
+    if (!s_p_state || XXH3_64bits_reset(s_p_state.get()) != XXH_OK) {
+        LOG_ERROR_COUNTED(Render_Vulkan, "No hash state for image memory {:#x}: left unhashed",
+                          va_range);
+        return 0;
+    }
+    thread_local std::array<u8, 64_KB> s_chunk;
+    while (cb_range != 0) {
+        const u64 cb_chunk = std::min<u64>(cb_range, s_chunk.size());
+        p_memory->CopySparseMemory(va_range, s_chunk.data(), cb_chunk);
+        XXH3_64bits_update(s_p_state.get(), s_chunk.data(), cb_chunk);
+        va_range += cb_chunk;
+        cb_range -= cb_chunk;
+    }
+    return XXH3_64bits_digest(s_p_state.get());
+}
+
 TextureCache::TextureCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& scheduler_,
                            Vulkan::Runtime& runtime_, AmdGpu::Liverpool* liverpool_,
                            BufferCache& buffer_cache_, PageManager& tracker_)
@@ -92,6 +128,13 @@ TextureCache::TextureCache(const Vulkan::Instance& instance_, Vulkan::Scheduler&
                                            static_cast<u64>(device_local_memory / 100 * percent));
     }
     trigger_gc_memory = static_cast<u64>((device_local_memory - mem_threshold) / 2);
+    // psport: a player's log tells where eviction starts on that card (Supermedo 4009083499).
+    std::printf("Texture cache: VRAM budget %lld MiB; marks: collect %llu, pressure %llu, critical "
+                "%llu MiB\n",
+                static_cast<long long>(device_local_memory >> 20),
+                static_cast<unsigned long long>(trigger_gc_memory >> 20),
+                static_cast<unsigned long long>(pressure_gc_memory >> 20),
+                static_cast<unsigned long long>(critical_gc_memory >> 20));
 }
 
 TextureCache::~TextureCache() = default;
@@ -381,7 +424,7 @@ ImageId TextureCache::ResolveDepthOverlap(const ImageInfo& requested_info, Bindi
     const bool bpp_match = requested_info.num_bits == cache_image.info.num_bits;
 
     // If an image in the cache has less slices we need to expand it
-    bool recreate = cache_image.info.resources < requested_info.resources;
+    bool recreate = !cache_image.info.resources.Contains(requested_info.resources);
 
     switch (binding) {
     case BindingType::Texture:
@@ -504,7 +547,7 @@ std::tuple<ImageId, int, int> TextureCache::ResolveOverlap(const ImageInfo& imag
 
         // Size and resources are greater, expand the image.
         if (image_info.type == cache_image.info.type &&
-            image_info.resources > cache_image.info.resources) {
+            !cache_image.info.resources.Contains(image_info.resources)) {
             return {ExpandImage(image_info, cache_image_id), -1, -1};
         }
 
@@ -712,6 +755,29 @@ ImageId TextureCache::ExpandImage(const ImageInfo& info, ImageId image_id) {
     return new_image_id;
 }
 
+// psport: an overlap can resolve to an image with fewer mips or layers than the descriptor asks
+// for (another format or size at the same address, or a constant mip index moved the base), and a
+// view past the image is invalid and its transitions fall outside it (Supermedo d259c2f595).
+static void ClampViewRange(ImageViewInfo& view_info, const Image& image) {
+    auto& range = view_info.range;
+    const u32 c_levels = std::max(image.info.resources.levels, 1u);
+    const u32 c_layers = std::max(image.info.resources.layers, 1u);
+    if (range.base.level + range.extent.levels <= c_levels &&
+        range.base.layer + range.extent.layers <= c_layers) {
+        return;
+    }
+    LOG_ERROR_COUNTED(Render_Vulkan,
+                      "View of mips {}+{} layers {}+{} clamped to image {:#x} ({} mips, {} layers, "
+                      "{})",
+                      range.base.level, range.extent.levels, range.base.layer, range.extent.layers,
+                      image.info.guest_address, c_levels, c_layers,
+                      vk::to_string(image.info.pixel_format));
+    range.base.level = std::min(range.base.level, c_levels - 1);
+    range.base.layer = std::min(range.base.layer, c_layers - 1);
+    range.extent.levels = std::clamp(range.extent.levels, 1u, c_levels - range.base.level);
+    range.extent.layers = std::clamp(range.extent.layers, 1u, c_layers - range.base.layer);
+}
+
 ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
     const auto& info = desc.info;
     if (info.guest_address == 0) [[unlikely]] {
@@ -759,6 +825,7 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
         if (cached.view_slice > 0) {
             desc.view_info.range.base.layer = cached.view_slice;
         }
+        ClampViewRange(desc.view_info, image);
         return cached.image_id;
     }
     PsNativeProbe::Note(PsNativeProbe::MemoMiss);
@@ -815,7 +882,7 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
         if (exact_fmt && info.pixel_format != image_resolved.info.pixel_format) {
             // Cannot reuse this image as we need the exact requested format.
             image_id = {};
-        } else if (image_resolved.info.resources < info.resources) {
+        } else if (!image_resolved.info.resources.Contains(info.resources)) {
             // The image was clearly picked up wrong.
             FreeImage(image_id);
             image_id = {};
@@ -839,6 +906,7 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
     if (view_slice > 0) {
         desc.view_info.range.base.layer = view_slice;
     }
+    ClampViewRange(desc.view_info, image);
 
     cached = FindImageCacheEntry{
         .address = info.guest_address,
@@ -1133,9 +1201,8 @@ void TextureCache::RefreshImage(Image& image) {
         // unchanged memory over the GPU's data (a 1x1 exposure written by a compute shader went
         // to 0, bbport #178).
         if (is_gpu_modified) {
-            const u8* addr = std::bit_cast<u8*>(image.info.guest_address);
-            const u64 hash = XXH3_64bits(addr + mip_offset, mip_size);
-            if (!is_gpu_dirty && image.mip_hashes[m] == hash) {
+            const u64 hash = HashGuestMemory(image.info.guest_address + mip_offset, mip_size);
+            if (!is_gpu_dirty && hash != 0 && image.mip_hashes[m] == hash) {
                 continue;
             }
             image.mip_hashes[m] = hash;
@@ -1293,6 +1360,9 @@ void TextureCache::TrackImage(ImageId image_id) {
             TrackImageTail(image_id);
         }
     }
+    MarkDirtyIfEdgesWritten(image);
+    image.head_hash = 0;
+    image.tail_hash = 0;
 }
 
 void TextureCache::TrackImageHead(ImageId image_id) {
@@ -1359,6 +1429,8 @@ void TextureCache::UntrackImageHead(ImageId image_id) {
     }
     const auto addr = tracker.GetNextPageAddr(image_begin);
     const auto size = addr - image_begin;
+    // Read directly: only InvalidateMemory comes here, for a fault on this very page.
+    image.head_hash = XXH3_64bits(std::bit_cast<const u8*>(image_begin), size);
     image.track_addr = addr;
     if (image.track_addr == image.track_addr_end) {
         // This image spans only 2 pages and both are modified,
@@ -1377,6 +1449,7 @@ void TextureCache::UntrackImageTail(ImageId image_id) {
     }
     const auto addr = tracker.GetPageAddr(image_end);
     const auto size = image_end - addr;
+    image.tail_hash = XXH3_64bits(std::bit_cast<const u8*>(addr), size);
     image.track_addr_end = addr;
     if (image.track_addr == image.track_addr_end) {
         // This image spans only 2 pages and both are modified,
@@ -1385,6 +1458,26 @@ void TextureCache::UntrackImageTail(ImageId image_id) {
         MarkAsMaybeDirty(image_id, image);
     }
     tracker.UpdatePageWatchers<false>(addr, size);
+}
+
+// psport: an untracked head or tail page reports no writes, so a guest that reused that memory
+// went unseen and the image's stale GPU data was used or written back over it (shadPS4
+// eedf851ade). Only the image's own bytes on those pages are compared.
+void TextureCache::MarkDirtyIfEdgesWritten(Image& image) {
+    const VAddr va_begin = image.info.guest_address;
+    const VAddr va_end = va_begin + image.info.guest_size;
+    if (image.head_hash != 0) {
+        const VAddr va_head_end = std::min(tracker.GetNextPageAddr(va_begin), va_end);
+        if (HashGuestMemory(va_begin, va_head_end - va_begin) != image.head_hash) {
+            image.flags |= ImageFlagBits::CpuDirty;
+        }
+    }
+    if (image.tail_hash != 0) {
+        const VAddr va_tail = std::max(tracker.GetPageAddr(va_end), va_begin);
+        if (HashGuestMemory(va_tail, va_end - va_tail) != image.tail_hash) {
+            image.flags |= ImageFlagBits::CpuDirty;
+        }
+    }
 }
 
 void TextureCache::GarbageCollectImages() {
@@ -1478,10 +1571,20 @@ void TextureCache::GarbageCollectImages() {
     u32 c_kept = 0;
     PsStats::g_c_gc_passes.fetch_add(1, std::memory_order_relaxed);
 
+    // psport: a mark counts only where evicting at most half of the textures can bring the usage
+    // under it. Where the game's other memory alone sat over the pressure mark (8 GB cards), the
+    // usage hardly fell with what went, and every texture unused for 5 s was evicted and uploaded
+    // again all session, 1200-3000 a minute (Supermedo 4009083499); there the idle rule goes on.
+    const auto is_relievable = [&](u64 cb_mark) {
+        const u64 cb_images = PsStats::g_cb_live_image.load(std::memory_order_relaxed);
+        return PsToggle::Disabled(PsToggle::GcRelievableMarks) ||
+               total_used_memory - cb_mark < cb_images / 2;
+    };
     // emergency: over the critical mark after evicting what was unused for a second.
     const auto configure = [&](bool allow_aggressive, bool emergency = false) {
-        pressured = total_used_memory >= pressure_gc_memory;
-        aggresive = allow_aggressive && total_used_memory >= critical_gc_memory;
+        pressured = total_used_memory >= pressure_gc_memory && is_relievable(pressure_gc_memory);
+        aggresive = allow_aggressive && total_used_memory >= critical_gc_memory &&
+                    is_relievable(critical_gc_memory);
         const u64 ticks_to_destroy = std::min<u64>(aggresive ? 160 : pressured ? 80 : 16, gc_tick);
         below_tick = gc_tick - ticks_to_destroy;
         if (!pressured && !aggresive) {
@@ -1498,6 +1601,8 @@ void TextureCache::GarbageCollectImages() {
             return true;
         }
         auto& image = slot_images[image_id];
+        // An edge the guest wrote means it reused the memory: freed without a write-back over it.
+        MarkDirtyIfEdgesWritten(image);
         const bool download = image.SafeToDownload();
         const bool tiled = image.info.IsTiled();
         // psport: images that cannot go now (GPU-written: their contents exist only here, and
@@ -1567,6 +1672,21 @@ void TextureCache::GarbageCollectImages() {
                         (unsigned long long)gc_evictions, (unsigned long long)gc_downloads);
             gc_report_time = now;
             gc_evictions = gc_downloads = 0;
+        }
+    } else if (gc_evictions != 0) {
+        // psport: evictions by the idle rule too, so that two runs or two cards compare.
+        const auto now = std::chrono::steady_clock::now();
+        if (now - gc_report_time >= std::chrono::seconds(5)) {
+            std::printf("Texture cache: %llu of %llu MiB: %llu idle images evicted since the last "
+                        "report (textures %llu MiB)\n",
+                        (unsigned long long)(total_used_memory >> 20),
+                        (unsigned long long)(pressure_gc_memory >> 20),
+                        (unsigned long long)gc_evictions,
+                        (unsigned long long)(PsStats::g_cb_live_image.load(
+                                                 std::memory_order_relaxed) >>
+                                             20));
+            gc_report_time = now;
+            gc_evictions = 0;
         }
     }
 }

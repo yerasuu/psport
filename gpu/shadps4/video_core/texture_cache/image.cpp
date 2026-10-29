@@ -237,15 +237,33 @@ Image::Image(const Vulkan::Instance& instance, Vulkan::Runtime& runtime_,
 
     constexpr auto tiling = vk::ImageTiling::eOptimal;
     const auto supported_format = instance.GetSupportedFormat(info.pixel_format, format_features);
-    const vk::PhysicalDeviceImageFormatInfo2 format_info{
+    vk::PhysicalDeviceImageFormatInfo2 format_info{
         .format = supported_format,
         .type = ConvertImageType(info.type),
         .tiling = tiling,
         .usage = usage_flags,
         .flags = flags,
     };
-    const auto image_format_properties =
+    auto image_format_properties =
         instance.GetPhysicalDevice().getImageFormatProperties2(format_info);
+    // psport: some drivers refuse storage usage on block formats such as BC6H even with extended
+    // usage, and the image was made with a usage they had rejected; without storage it is
+    // supported (Mrsuss60 f8f450b19f).
+    if (image_format_properties.result == vk::Result::eErrorFormatNotSupported &&
+        (usage_flags & vk::ImageUsageFlagBits::eStorage)) {
+        auto info_without_storage = format_info;
+        info_without_storage.usage &= ~vk::ImageUsageFlagBits::eStorage;
+        const auto properties_without_storage =
+            instance.GetPhysicalDevice().getImageFormatProperties2(info_without_storage);
+        if (properties_without_storage.result == vk::Result::eSuccess) {
+            LOG_ERROR_COUNTED(Render_Vulkan,
+                              "Image format {} type {} refuses storage usage: made without it",
+                              vk::to_string(supported_format), vk::to_string(format_info.type));
+            format_info = info_without_storage;
+            usage_flags = info_without_storage.usage;
+            image_format_properties = properties_without_storage;
+        }
+    }
     if (image_format_properties.result == vk::Result::eErrorFormatNotSupported) {
         LOG_ERROR(Render_Vulkan, "image format {} type {} is not supported (flags {}, usage {})",
                   vk::to_string(supported_format), vk::to_string(format_info.type),

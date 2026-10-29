@@ -194,6 +194,34 @@ union Regs {
         return nullptr;
     }
 
+    /// psport: the screen, window and generic scissors intersected, the window offset applied and
+    /// negative corners clamped to 0 (shadPS4 0cd6e4f2cb).
+    Scissor GetCombinedScissor() const {
+        const bool is_offset_enabled = !window_scissor.window_offset_disable;
+        const s16 off_x = is_offset_enabled ? s16(window_offset.window_x_offset) : s16(0);
+        const s16 off_y = is_offset_enabled ? s16(window_offset.window_y_offset) : s16(0);
+        const auto top_left = [](s16 screen, s16 window, s16 generic, s16 offset) {
+            return s16(Scissor::Clamp(
+                std::max({screen, s16(window + offset), s16(generic + offset)})));
+        };
+        const auto bottom_right = [](s16 screen, s16 window, s16 generic, s16 offset) {
+            return s16(Scissor::Clamp(
+                std::min({screen, s16(window + offset), s16(generic + offset)})));
+        };
+        Scissor scissor{};
+        scissor.top_left_x = top_left(screen_scissor.top_left_x, s16(window_scissor.top_left_x),
+                                      s16(generic_scissor.top_left_x), off_x);
+        scissor.top_left_y = top_left(screen_scissor.top_left_y, s16(window_scissor.top_left_y),
+                                      s16(generic_scissor.top_left_y), off_y);
+        scissor.bottom_right_x =
+            bottom_right(screen_scissor.bottom_right_x, s16(window_scissor.bottom_right_x),
+                         s16(generic_scissor.bottom_right_x), off_x);
+        scissor.bottom_right_y =
+            bottom_right(screen_scissor.bottom_right_y, s16(window_scissor.bottom_right_y),
+                         s16(generic_scissor.bottom_right_y), off_y);
+        return scissor;
+    }
+
     bool IsClipDisabled() const {
         return clipper_control.clip_disable || primitive_type == PrimitiveType::RectList;
     }

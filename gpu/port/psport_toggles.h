@@ -48,6 +48,9 @@ enum : std::uint64_t {
     PipelinedTasks = 1ull << 38,
     PendingFenceWaits = 1ull << 39,
     PipelinedDispatch = 1ull << 40,
+    /// The texture collector's pressure and critical marks count only where evicting at most half
+    /// of the textures brings the usage under them; bit set: every mark counts, as before.
+    GcRelievableMarks = 1ull << 41,
     PipelinedMemoryWrites = 1ull << 42,
     MultiCopyShader = 1ull << 43,
     RenderStateMemo = 1ull << 44,

@@ -443,6 +443,9 @@ private:
     void UntrackImageHead(ImageId image_id);
     void UntrackImageTail(ImageId image_id);
 
+    /// psport: marks the image CPU dirty when the guest wrote its untracked head or tail page.
+    void MarkDirtyIfEdgesWritten(Image& image);
+
     void MarkAsMaybeDirty(ImageId image_id, Image& image);
     static u64 MaybeDirtyHash(const Image& image);
 

@@ -310,6 +310,9 @@ private:
         u32 depth_control = 0;
         bool depth_valid = false;
         bool stencil_valid = false;
+        /// psport: bottom-right corner of the scissors of a pass without attachments, which
+        /// bounds its render area; 0 for any other pass.
+        u32 scissor_corner = 0;
         bool operator==(const BeginSignature&) const = default;
     };
     BeginSignature MakeBeginSignature(const GraphicsPipeline* pipeline) const;

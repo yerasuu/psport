@@ -64,6 +64,13 @@ struct SubresourceExtent {
     u32 layers = 1;
 
     auto operator<=>(const SubresourceExtent&) const = default;
+
+    /// psport: whether an image of this extent holds every subresource of `other`. The defaulted
+    /// ordering compares levels first and layers only on a tie, so an image short of layers but
+    /// with more mips looked large enough (shadPS4 ca36c7e31e).
+    bool Contains(const SubresourceExtent& other) const noexcept {
+        return levels >= other.levels && layers >= other.layers;
+    }
 };
 
 struct SubresourceRange {
