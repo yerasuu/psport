@@ -96,6 +96,9 @@ int psport_gpu_overlay_pad_file_press(int guide, int cross, int circle);
 void psport_gpu_mouse_take(double *p_dx, double *p_dy, int *p_wheel_up, int *p_wheel_down);
 int psport_gpu_mouse_captured(void);
 void psport_gpu_mouse_look_enable(int is_enabled);
+/* mouse_pad_filter (on by default): the window drops mouse motion while a controller's stick is
+ * pushed, since a mapping program (Steam's Desktop Layout, reWASD) makes it from that stick. */
+void psport_gpu_mouse_pad_filter(int is_on);
 /* Asks the window to take the mouse at its next poll, as a click in the game does (motion
  * emulation's spray can: the mouse aims); not while a menu or a text entry wants the cursor. */
 void psport_gpu_mouse_capture(void);

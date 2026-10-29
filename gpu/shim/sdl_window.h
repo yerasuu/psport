@@ -4,6 +4,7 @@
 // layer's (src/platform/ps_host_window.h); WindowSDL keeps the name of the shadPS4 class it stands
 // in for, so that the renderer takes it unchanged.
 #pragma once
+#include <array>
 #include <atomic>
 #include <bitset>
 #include <deque>
@@ -48,6 +49,8 @@ public:
     bool MouseCaptured() const { return m_is_mouse_captured.load(std::memory_order_relaxed); }
     /// mouse_look=0: a click does not take the mouse.
     static void EnableMouseLook(bool is_enabled) { m_is_mouse_look.store(is_enabled, std::memory_order_relaxed); }
+    /// mouse_pad_filter=0: mouse motion while a controller's stick is pushed reaches the game.
+    static void FilterPadMouse(bool is_on) { m_is_pad_mouse_filtered.store(is_on, std::memory_order_relaxed); }
     /// From any thread: the window takes the mouse at its next poll (psport_gpu_mouse_capture).
     void RequestMouseCapture() { m_is_capture_requested.store(true, std::memory_order_relaxed); }
     /// libSceMouse (psport_gpu_game_mouse_take): the buttons held (PS_HOST_INPUT_MOUSE_MASK bits), and the motion,
@@ -83,6 +86,16 @@ private:
     std::atomic<bool> m_is_mouse_captured{false};
     std::atomic<bool> m_is_capture_requested{false};
     static inline std::atomic<bool> m_is_mouse_look{true};
+    static inline std::atomic<bool> m_is_pad_mouse_filtered{true};
+    /// Each controller's sticks as its axis events left them, by pad id (0: a free slot); a fifth
+    /// controller is not followed.
+    struct PadSticks {
+        PsHostPadId h_pad;
+        s16 axes[4];
+    };
+    std::array<PadSticks, 4> m_pad_sticks{};
+    void TrackPadSticks(const PsHostWindowEvent& event);
+    bool IsPadMouseMotion(const PsHostWindowEvent& event) const;
     double m_game_dx{}, m_game_dy{};
     float m_game_wheel{}, m_game_tilt{};
     u32 m_game_buttons{};

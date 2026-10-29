@@ -162,6 +162,7 @@ are changed from the overlay menu, which writes the file. Commonly used keys and
 | `frame_gen` (`PS_FRAME_GEN`) | `off` (default) or `fsr`: FSR 3.1 frame generation, one generated frame per game frame, where the GPU has its prerequisites (`--list-features` row `frame_gen_fsr`); `auto` and `dlss` are not available yet and leave it off; read at start ([frame generation](docs/en/upscaler.md#frame-generation)) |
 | `menu_language` (`PS_MENU_LANGUAGE`) | overlay language: `en`, `es` or `ru` |
 | `game_mouse_sensitivity` | scale of the host mouse motion a game receives (0.05 to 20, default 1) |
+| `mouse_pad_filter` (`PS_MOUSE_PAD_FILTER`) | on by default: mouse motion while a controller stick is pushed is dropped, since Steam's Desktop Layout or reWASD makes it from the stick and it would turn the camera twice; `0` keeps it |
 | `PS_LANGUAGE` | the system language the game reads (1 English, 3 Spanish, 8 Russian) |
 | `PS_FPS` | frame rate preset for titles that have presets (Bloodborne: 30, 60, 90, `uncap`) |
 | `PS_ONLINE=1` | online play through the title's community servers ([online play](docs/en/ARCHITECTURE.md#online-play)) |

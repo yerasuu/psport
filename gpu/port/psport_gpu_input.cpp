@@ -68,6 +68,10 @@ extern "C" void psport_gpu_mouse_look_enable(int is_enabled) {
     Frontend::WindowSDL::EnableMouseLook(is_enabled != 0);
 }
 
+extern "C" void psport_gpu_mouse_pad_filter(int is_on) {
+    Frontend::WindowSDL::FilterPadMouse(is_on != 0);
+}
+
 extern "C" int psport_gpu_camera_look(float pitch, float yaw) {
     const Game::MouseHooks mouse = Game::Mouse();
     return mouse.pfn_camera_look && mouse.pfn_camera_look(pitch, yaw) ? 1 : 0;

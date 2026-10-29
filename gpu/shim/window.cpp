@@ -13,8 +13,18 @@
 #include "psport_overlay.h"
 #include "psport_settings.h"
 
+extern "C" void runtime_calls_add_summary(void (*pfn_summary)(char* sz_out, std::size_t cb_out));
+
 namespace {
 std::array<std::atomic<PsGpuEventFilter>, 4> s_event_filters{};
+std::atomic<u64> s_c_pad_mouse_dropped{0};
+std::atomic<bool> s_is_pad_mouse_summary_added{false};
+
+void SummarizePadMouse(char* sz_out, std::size_t cb_out) {
+    std::snprintf(sz_out, cb_out,
+                  "Mouse: %llu motion events dropped while a controller stick was pushed (mouse_pad_filter)\n",
+                  static_cast<unsigned long long>(s_c_pad_mouse_dropped.load(std::memory_order_relaxed)));
+}
 
 bool IsTakenByModule(const PsHostWindowEvent* p_event, PsHostWindow* p_window) {
     for (const auto& slot : s_event_filters) {
@@ -354,6 +364,19 @@ bool WindowSDL::PollEvents() {
     const bool is_pointer_wanted = game_mouse.pfn_wants_pointer && game_mouse.pfn_wants_pointer();
     PsHostWindowEvent event;
     while (ps_host_window_poll_event(&event)) {
+        TrackPadSticks(event);
+        if (IsPadMouseMotion(event)) {
+            if (!s_is_pad_mouse_summary_added.exchange(true, std::memory_order_relaxed)) {
+                runtime_calls_add_summary(&SummarizePadMouse);
+                const char* sz_mouse = ps_host_window_mouse_name(event.motion.h_mouse);
+                std::printf("Mouse: motion from mouse %u (%s) while a controller stick is pushed is dropped: a mapping "
+                            "program (Steam's Desktop Layout, reWASD) makes it from the stick; mouse_pad_filter=0 "
+                            "keeps it\n",
+                            event.motion.h_mouse, sz_mouse ? sz_mouse : "no name");
+            }
+            s_c_pad_mouse_dropped.fetch_add(1, std::memory_order_relaxed);
+            continue;
+        }
         if (IsTakenByModule(&event, m_p_window) ||
             (game_mouse.pfn_window_event && game_mouse.pfn_window_event(&event, m_p_window))) {
             continue;
@@ -510,6 +533,56 @@ bool WindowSDL::PollEvents() {
     m_is_pointer_shown = is_pointer_wanted;
     UpdateCursor();
     return m_is_open;
+}
+
+void WindowSDL::TrackPadSticks(const PsHostWindowEvent& event) {
+    if (event.kind == PS_HOST_WINDOW_EVENT_PAD_REMOVED) {
+        for (PadSticks& pad : m_pad_sticks) {
+            if (pad.h_pad == event.pad_button.h_pad) {
+                pad = {};
+            }
+        }
+        return;
+    }
+    if (event.kind != PS_HOST_WINDOW_EVENT_PAD_AXIS || event.pad_axis.axis < 0 ||
+        event.pad_axis.axis >= PS_HOST_PAD_AXIS_LEFT_TRIGGER) {
+        return;
+    }
+    PadSticks* p_free = nullptr;
+    for (PadSticks& pad : m_pad_sticks) {
+        if (pad.h_pad == event.pad_axis.h_pad) {
+            pad.axes[event.pad_axis.axis] = event.pad_axis.value;
+            return;
+        }
+        if (!p_free && pad.h_pad == 0) {
+            p_free = &pad;
+        }
+    }
+    if (p_free) {
+        p_free->h_pad = event.pad_axis.h_pad;
+        p_free->axes[event.pad_axis.axis] = event.pad_axis.value;
+    }
+}
+
+// Issue #1185: Steam's Desktop Layout (what Steam applies to a controller it manages for a program
+// it did not start) and reWASD turn a controller's stick into mouse motion besides the controller's
+// input, so the stick turned the camera and the motion made from it turned it again. That motion is
+// told by the stick, not by the device, since under XWayland every pointer reaches the game as one
+// mouse. About a third of the stick's travel: far above a resting stick's drift, so a mouse player
+// with a controller lying beside them keeps the mouse.
+bool WindowSDL::IsPadMouseMotion(const PsHostWindowEvent& event) const {
+    constexpr int stick_turning = 12000;
+    if (event.kind != PS_HOST_WINDOW_EVENT_MOUSE_MOTION || !m_is_pad_mouse_filtered.load(std::memory_order_relaxed)) {
+        return false;
+    }
+    for (const PadSticks& pad : m_pad_sticks) {
+        for (const s16 value : pad.axes) {
+            if (pad.h_pad != 0 && std::abs(int(value)) > stick_turning) {
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 // Issue #3: the OS cursor over the game. Hidden in fullscreen, while the game draws its own

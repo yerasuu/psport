@@ -168,6 +168,7 @@ utilizadas:
 | `frame_gen` (`PS_FRAME_GEN`) | `off` (por defecto) o `fsr`: generación de fotogramas FSR 3.1, un fotograma generado por cada fotograma del juego, donde la GPU cumple sus requisitos (fila `frame_gen_fsr` de `--list-features`); `auto` y `dlss` aún no están disponibles y la dejan desactivada; se lee al arrancar ([generación de fotogramas](docs/en/upscaler.md#frame-generation)) |
 | `menu_language` (`PS_MENU_LANGUAGE`) | idioma del menú superpuesto: `en`, `es` o `ru` |
 | `game_mouse_sensitivity` | escala del movimiento del ratón del sistema que recibe el juego (de 0,05 a 20; 1 por defecto) |
+| `mouse_pad_filter` (`PS_MOUSE_PAD_FILTER`) | activado por defecto: se descarta el movimiento del ratón mientras un stick del mando está desplazado, porque lo genera el Desktop Layout de Steam o reWASD a partir del stick y giraría la cámara dos veces; `0` lo mantiene |
 | `PS_LANGUAGE` | el idioma del sistema que lee el juego (1 inglés, 3 español, 8 ruso) |
 | `PS_FPS` | preajuste de fotogramas por segundo en los juegos que los tienen (Bloodborne: 30, 60, 90, `uncap`) |
 | `PS_ONLINE=1` | juego en línea mediante los servidores comunitarios del título ([juego en línea](docs/en/ARCHITECTURE.md#online-play)) |

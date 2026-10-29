@@ -384,7 +384,7 @@ static int key_from_name(const char *sz_name) {
  * mouse_look_gain (scales the stick's deflection with mouse_sensitivity, default 1),
  * mouse_look_smoothing_ms (the integrator's time constant, default 60) and mouse_look_deadzone
  * (the deflection a moving mouse starts from, default 16 of 127; PS_MOUSE_DEADZONE wins). */
-static int s_mouse_look=1, s_mouse_invert_y, s_is_skip_enabled;
+static int s_mouse_look=1, s_mouse_invert_y, s_is_skip_enabled, s_is_mouse_pad_filtered=1;
 static float s_mouse_sensitivity=1.0f;
 #define LOOK_TAU_US 60000.0f
 #define LOOK_DEADZONE 16
@@ -550,7 +550,7 @@ static void load_bindings(void) {
                apply_title_controls(sz_controls));
     s_mouse_look=1; s_mouse_invert_y=0; s_mouse_sensitivity=1.0f;
     s_is_key_opposite_last=1; s_key_hold_us=KEY_HOLD_US;
-    int pad_motion=-1, skip_movies=0;
+    int pad_motion=-1, skip_movies=0, mouse_pad_filter=1;
     const char *sz_key, *sz_value;
     for (size_t i_entry=0; runtime_config_entry(i_entry,&sz_key,&sz_value); ++i_entry) {
         if (apply_binding_line(sz_key,sz_value,"psport.ini")!=LINE_OTHER || apply_mouse_look_line(sz_key,sz_value,"psport.ini")!=LINE_OTHER)
@@ -558,6 +558,7 @@ static void load_bindings(void) {
         if (!strcmp(sz_key,"mouse_look")) s_mouse_look=atoi(sz_value)!=0;
         else if (!strcmp(sz_key,"pad_motion")) pad_motion=atoi(sz_value)!=0;
         else if (!strcmp(sz_key,"skip_movies")) skip_movies=atoi(sz_value)!=0;
+        else if (!strcmp(sz_key,"mouse_pad_filter")) mouse_pad_filter=atoi(sz_value)!=0;
         else if (!strcmp(sz_key,"mouse_invert_y")) s_mouse_invert_y=atoi(sz_value)!=0;
         else if (!strcmp(sz_key,"key_stick_opposite")) {
             if (!strcmp(sz_value,"last") || !strcmp(sz_value,"neutral")) s_is_key_opposite_last=!strcmp(sz_value,"last");
@@ -580,6 +581,10 @@ static void load_bindings(void) {
     if (!s_is_key_opposite_last || s_key_hold_us!=KEY_HOLD_US)
         printf("Runtime: controls: keyboard stick: opposite keys %s, move held %u ms after release\n",
                s_is_key_opposite_last ? "last wins" : "cancel",s_key_hold_us/1000u);
+    s_is_mouse_pad_filtered=runtime_env_flag("PS_MOUSE_PAD_FILTER",mouse_pad_filter);
+    if (!s_is_mouse_pad_filtered)
+        printf("Runtime: controls: mouse_pad_filter off: mouse motion while a controller stick is pushed "
+               "reaches the game\n");
     runtime_pad_motion_configure(pad_motion);
     s_is_skip_enabled=runtime_env_flag("PS_SKIP_MOVIES",skip_movies);
     if (!s_is_skip_enabled) s_bindings[IN_SKIP_MOVIE].c_keys=s_bindings[IN_SKIP_MOVIE].c_pads=0;
@@ -1109,7 +1114,12 @@ static void sample_host(PadData *p_pad_data) {
     const float motion_dt=runtime_pad_motion_begin(p_pad_data->timestamp);
     PsHostPad *p_host_pad=current_gamepad();
     int is_real_motion=0;
-    if (!s_is_bindings_ready) { load_bindings(); s_is_bindings_ready=1; psport_gpu_mouse_look_enable(s_mouse_look); }
+    if (!s_is_bindings_ready) {
+        load_bindings();
+        s_is_bindings_ready=1;
+        psport_gpu_mouse_look_enable(s_mouse_look);
+        psport_gpu_mouse_pad_filter(s_is_mouse_pad_filtered);
+    }
     /* The mouse's motion and wheel since the last sample (always taken: none of it piles up while
      * the menu is open); it counts while the window holds the mouse. */
     double mouse_dx=0, mouse_dy=0;

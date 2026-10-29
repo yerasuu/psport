@@ -24,6 +24,8 @@ typedef struct PsHostWindow PsHostWindow;
 typedef uint32_t PsHostWindowId;
 /* Names a connected display; 0 is none. */
 typedef uint32_t PsHostDisplayId;
+/* Names a mouse for as long as it stays connected; 0 when the host does not say which one moved. */
+typedef uint32_t PsHostMouseId;
 /* What a window system's surface is made of, for the GPU API (ps_host_window_vulkan.h). */
 typedef struct PsHostWindowSurface PsHostWindowSurface;
 
@@ -93,6 +95,8 @@ void ps_host_window_delay_ms(uint32_t delay_ms);
 /* Whether a mouse, or a keyboard, is connected. */
 bool ps_host_window_has_mouse(void);
 bool ps_host_window_has_keyboard(void);
+/* The name the host gives a mouse, NULL when it has none. */
+const char *ps_host_window_mouse_name(PsHostMouseId h_mouse);
 /* The keycode a key gives in the host's layout with the modifiers held, for libSceImeKeyboard's
  * characters. */
 uint32_t ps_host_window_keycode(int scancode, uint16_t mod);
@@ -178,6 +182,7 @@ typedef enum {
     PS_HOST_WINDOW_EVENT_PAD_BUTTON_DOWN, /* pad_button */
     PS_HOST_WINDOW_EVENT_PAD_BUTTON_UP,   /* pad_button */
     PS_HOST_WINDOW_EVENT_PAD_AXIS,        /* pad_axis */
+    PS_HOST_WINDOW_EVENT_PAD_REMOVED,     /* pad_button.h_pad */
 } PsHostWindowEventKind;
 typedef struct PsHostWindowEvent {
     PsHostWindowEventKind kind;
@@ -196,6 +201,7 @@ typedef struct PsHostWindowEvent {
         struct {
             float x, y;   /* where the pointer is, in host coordinates */
             float dx, dy; /* how far it moved, also in relative mode */
+            PsHostMouseId h_mouse; /* in relative mode only; 0 otherwise */
         } motion;
         struct {
             int button; /* PS_HOST_INPUT_MOUSE_* */

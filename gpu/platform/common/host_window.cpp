@@ -48,6 +48,7 @@ uint64_t ps_host_window_ticks_ms(void) { return SDL_GetTicks(); }
 void ps_host_window_delay_ms(uint32_t delay_ms) { SDL_Delay(delay_ms); }
 bool ps_host_window_has_mouse(void) { return SDL_HasMouse(); }
 bool ps_host_window_has_keyboard(void) { return SDL_HasKeyboard(); }
+const char* ps_host_window_mouse_name(PsHostMouseId h_mouse) { return SDL_GetMouseNameForID(h_mouse); }
 uint32_t ps_host_window_keycode(int scancode, uint16_t mod) {
     return SDL_GetKeyFromScancode(SDL_Scancode(scancode), mod, false);
 }
@@ -193,7 +194,7 @@ bool ps_host_window_poll_event(PsHostWindowEvent* p_out) {
     case SDL_EVENT_MOUSE_MOTION:
         p_out->kind = PS_HOST_WINDOW_EVENT_MOUSE_MOTION;
         p_out->h_window = event.motion.windowID;
-        p_out->motion = {event.motion.x, event.motion.y, event.motion.xrel, event.motion.yrel};
+        p_out->motion = {event.motion.x, event.motion.y, event.motion.xrel, event.motion.yrel, event.motion.which};
         return true;
     case SDL_EVENT_MOUSE_BUTTON_DOWN:
     case SDL_EVENT_MOUSE_BUTTON_UP:
@@ -228,6 +229,10 @@ bool ps_host_window_poll_event(PsHostWindowEvent* p_out) {
     case SDL_EVENT_GAMEPAD_AXIS_MOTION:
         p_out->kind = PS_HOST_WINDOW_EVENT_PAD_AXIS;
         p_out->pad_axis = {event.gaxis.which, event.gaxis.axis, event.gaxis.value};
+        return true;
+    case SDL_EVENT_GAMEPAD_REMOVED:
+        p_out->kind = PS_HOST_WINDOW_EVENT_PAD_REMOVED;
+        p_out->pad_button = {event.gdevice.which, PS_HOST_PAD_BUTTON_INVALID};
         return true;
     default:
         return true;
