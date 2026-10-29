@@ -11,6 +11,7 @@
 #include <errno.h>
 
 #define NET_ERR(e) ((int32_t)(UINT32_C(0x80410100)|(uint32_t)(e)))
+#define GUEST_ENOENT 2
 #define GUEST_EBADF 9
 #define GUEST_EFAULT 14
 #define GUEST_EMFILE 24
@@ -22,6 +23,7 @@
 #define GUEST_ENOPROTOOPT 42
 #define GUEST_EPROTONOSUPPORT 43
 #define GUEST_EOPNOTSUPP 45
+#define GUEST_AF_UNIX 1
 #define GUEST_AF_INET6 28
 #define GUEST_SOCK_CLOEXEC 0x10000000
 #define GUEST_SOCK_NONBLOCK 0x20000000
@@ -81,7 +83,20 @@ static void guest_address(const struct sockaddr_in *p_address, GuestSockaddr *p_
 }
 static int loopback(const struct sockaddr_in *p_address) { return (ntohl(p_address->sin_addr.s_addr)>>24)==127; }
 
+/* A local (AF_UNIX) socket, which a console creates for any game: libSceDiscMap opens a stream one
+ * to reach the bitmap service at /<sandbox word>/common_temp/sceDiscMapBitmapInfo. */
+static int64_t local_socket(int type, int protocol) {
+    const int is_nonblocking=(type&GUEST_SOCK_NONBLOCK)!=0;
+    type&=~(GUEST_SOCK_CLOEXEC|GUEST_SOCK_NONBLOCK);
+    const int host_type=type==1 ? SOCK_STREAM : type==2 ? SOCK_DGRAM : type==5 ? SOCK_SEQPACKET : -1;
+    if (host_type<0) return -GUEST_EPROTONOSUPPORT;
+    int e=ps_host_net_init();
+    if (e) return -runtime_guest_errno(e);
+    const int h_host=ps_host_net_socket(AF_UNIX,host_type,protocol,is_nonblocking);
+    return h_host<0 ? -runtime_guest_errno(-h_host) : adopt(h_host);
+}
 static int64_t do_socket(int family, int type, int protocol) {
+    if (family==GUEST_AF_UNIX) return local_socket(type,protocol);
     if (family!=AF_INET) return -GUEST_EAFNOSUPPORT;
     const int is_nonblocking=(type&GUEST_SOCK_NONBLOCK)!=0;
     type&=~(GUEST_SOCK_CLOEXEC|GUEST_SOCK_NONBLOCK);
@@ -113,10 +128,23 @@ static int64_t do_bind(int32_t s, const GuestSockaddr *p_addr, uint32_t len) {
     else if (!loopback(&a)) return -GUEST_EADDRNOTAVAIL;
     return bind(h,(struct sockaddr *)&a,sizeof(a)) ? host_failure() : 0;
 }
+/* No system service listens here, and guest paths are not host ones: a connection to a local
+ * address finds no socket file, as a console where nothing bound that path. FreeBSD's sockaddr_un
+ * has the path after sun_len and sun_family. */
+static uint64_t s_c_local_connects;
+static int64_t local_connect(const GuestSockaddr *p_addr, uint32_t len) {
+    const uint32_t cb_path=len>2 ? len-2 : 0;
+    const uint64_t c_before=__atomic_fetch_add(&s_c_local_connects,1,__ATOMIC_RELAXED);
+    if (c_before<8) printf("Runtime: connect to local socket %.*s: no service listens there (ENOENT)\n",(int)(cb_path<104 ? cb_path : 104),
+                           (const char *)p_addr+2);
+    if (!c_before) runtime_calls_hle_stub("connect to a local (AF_UNIX) socket path: no system service listens (ENOENT)",&s_c_local_connects);
+    return -GUEST_ENOENT;
+}
 static int64_t do_connect(int32_t s, const GuestSockaddr *p_addr, uint32_t len) {
     struct sockaddr_in a;
     int h=host_socket(s);
     if (h<0) return -GUEST_EBADF;
+    if (p_addr && len>=2 && p_addr->family==GUEST_AF_UNIX) return local_connect(p_addr,len);
     if (!host_address(p_addr,len,&a)) return -GUEST_EINVAL;
     if (!loopback(&a)) return -GUEST_ENETUNREACH;
     int e=ps_host_net_connect(h,&a,sizeof(a));
