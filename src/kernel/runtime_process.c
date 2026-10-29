@@ -100,6 +100,7 @@ static ABI int32_t title_workaround_is_enabled(const void *p_block, uint32_t id,
 /* Every game runs in a sandbox; the system libraries build their paths from its random word. */
 static ABI int32_t is_in_sandbox(void) { return 1; }
 static const char s_sz_sandbox_word[]="psportsbox";
+const char *runtime_process_sandbox_word(void) { return s_sz_sandbox_word; }
 static uint64_t s_c_sandbox_word;
 static ABI const char *sandbox_random_word(void) {
     note_inferred(&s_c_sandbox_word,"sceKernelGetFsSandboxRandomWord (a fixed word; nothing is mounted under it)");

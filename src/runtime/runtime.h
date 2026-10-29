@@ -224,6 +224,8 @@ uint32_t runtime_process_sdk_version(void);
 /* The process's identity as the kernel reports it (runtime_process.c): authinfo, process type,
  * application info, sandbox, registry. */
 uintptr_t runtime_process_resolve(const char *sz_name);
+/* The sandbox's random word, the first component of the system library paths the guest builds. */
+const char *runtime_process_sandbox_word(void);
 /* sysctl kern.proc.appinfo (MIB 1.14.35.pid) into p_old, at most *p_inout_cb bytes, with *p_inout_cb
  * set to the size it has; 0 or the host errno. */
 int runtime_process_app_info(int32_t pid, void *p_old, uint64_t *p_inout_cb);
@@ -410,6 +412,9 @@ int runtime_module_start(size_t h_handle, uint64_t args, const void *p_argp, int
 uintptr_t runtime_module_resolve(const char *sz_name);
 /* The loaded module holding va_guest (its file name) and the offset in it; NULL outside them all. */
 const char *runtime_module_locate(uintptr_t va_guest, uint64_t *p_out_offset);
+/* 1 when the runtime serves this system library (a file stem, "libSceUlt") itself: the console's
+ * module of it is linked only when --lle names it. */
+int runtime_module_is_native(const char *sz_library);
 /* psport.ini (runtime_config.c), read once on first use from PS_CONFIG, else psport.ini in the
  * working directory; the C++ side declares what it uses itself. Keys and values are trimmed, #
  * starts a comment line. The strings stay valid for the process. */

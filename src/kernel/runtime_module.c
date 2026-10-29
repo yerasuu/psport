@@ -6,6 +6,7 @@
 #define _GNU_SOURCE
 #include "runtime.h"
 #include <pthread.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,6 +16,20 @@
 #define ESRCH_ ERR(3)
 #define EFAULT_ ERR(14)
 #define EINVAL_ ERR(22)
+
+/* The runtime's kernel, GPU, video, pad, audio output, clock and user-level threads; the ported
+ * gpu/fiber, gpu/font, gpu/audiodec and gpu/ngs2; libSceHmd, since the console's module_start fails
+ * without the headset's devices (/dev/hmd_cmd) while runtime_vr.c answers as a console with no
+ * headset (kb #1248). */
+static const char *const s_sz_native_libraries[]={"libkernel", "libkernel_unity", "libkernel_sys", "libSceGnmDriver",
+                                                  "libSceVideoOut", "libScePad", "libSceAudioOut", "libSceFiber",
+                                                  "libSceFont", "libSceFontFt", "libSceAudiodec", "libSceNgs2",
+                                                  "libSceUlt", "libSceRtc", "libSceHmd"};
+int runtime_module_is_native(const char *sz_library) {
+    for (size_t i=0;i<sizeof(s_sz_native_libraries)/sizeof(*s_sz_native_libraries);++i)
+        if (!strcmp(s_sz_native_libraries[i],sz_library)) return 1;
+    return 0;
+}
 
 static unsigned char *s_p_image;
 static RuntimeModule *s_p_modules;
@@ -106,12 +121,72 @@ static size_t find_path(const char *sz_path) {
     }
     return 0;
 }
+
+/* A system library the guest loads by path that no linked image provides: libSceSysmodule loads
+ * every library of a module id (id 7, libSceUlt, starts with libSceRazorCpu), and the loader links
+ * only what something imports or what the runtime does not serve. Where a console has the file,
+ * the load succeeds with a handle past the table's that has no image; anything the guest imports
+ * from it stays resolved, or unimplemented, as at link time. */
+static const char *const s_sz_system_libraries[]={
+#include "system_libraries.inc"
+};
+#define C_SYSTEM_LIBRARIES (sizeof(s_sz_system_libraries)/sizeof(*s_sz_system_libraries))
+/* Per library: loads not yet unloaded (the handle is valid while nonzero), loads in total, and the
+ * call report's line, written once before its first count. */
+static uint64_t s_c_unlinked_references[C_SYSTEM_LIBRARIES], s_c_unlinked_loads[C_SYSTEM_LIBRARIES];
+static char s_sz_unlinked_reports[C_SYSTEM_LIBRARIES][160];
+static uint64_t s_c_unlinked_unloads, s_c_unlinked_infos, s_c_unlinked_lookups;
+static int compare_library(const void *p_key, const void *p_entry) { return strcmp(p_key,*(const char *const *)p_entry); }
+/* The index in s_sz_system_libraries of a file in a system library folder (/system or /<sandbox
+ * word>, then common, priv, common_ex or priv_ex, then lib), -1 for any other path. */
+static ptrdiff_t system_library(const char *sz_path) {
+    static const char *const s_sz_folders[]={"common/lib/","priv/lib/","common_ex/lib/","priv_ex/lib/"};
+    if (sz_path[0]!='/') return -1;
+    const char *sz_root=sz_path+1, *sz_after_root=strchr(sz_root,'/');
+    if (!sz_after_root) return -1;
+    const size_t cb_root=(size_t)(sz_after_root-sz_root);
+    const char *sz_word=runtime_process_sandbox_word();
+    if (!(cb_root==6 && !memcmp(sz_root,"system",6)) && !(cb_root==strlen(sz_word) && !memcmp(sz_root,sz_word,cb_root)))
+        return -1;
+    const char *sz_file=NULL;
+    for (size_t i=0;i<sizeof(s_sz_folders)/sizeof(*s_sz_folders) && !sz_file;++i)
+        if (!strncmp(sz_after_root+1,s_sz_folders[i],strlen(s_sz_folders[i]))) sz_file=sz_after_root+1+strlen(s_sz_folders[i]);
+    if (!sz_file || strchr(sz_file,'/')) return -1;
+    const char *sz_extension=strrchr(sz_file,'.');
+    if (!sz_extension || (strcmp(sz_extension,".sprx") && strcmp(sz_extension,".prx"))) return -1;
+    char sz_stem[128];
+    const size_t cb_stem=(size_t)(sz_extension-sz_file);
+    if (cb_stem>=sizeof(sz_stem)) return -1;
+    memcpy(sz_stem,sz_file,cb_stem);
+    sz_stem[cb_stem]=0;
+    const char *const *pp_found=bsearch(sz_stem,s_sz_system_libraries,C_SYSTEM_LIBRARIES,sizeof(*s_sz_system_libraries),compare_library);
+    return pp_found ? pp_found-s_sz_system_libraries : -1;
+}
+static int is_unlinked(int32_t h_handle) {
+    return h_handle>=0 && (size_t)h_handle>=s_c_modules && (size_t)h_handle-s_c_modules<C_SYSTEM_LIBRARIES;
+}
+static int32_t load_unlinked(const char *sz_path, size_t i_library, uint32_t flags, int32_t *p_result) {
+    const char *sz_library=s_sz_system_libraries[i_library];
+    const char *sz_why=runtime_module_is_native(sz_library) ? "served by the runtime" : "a console's system library nothing imports";
+    if (!__atomic_fetch_add(&s_c_unlinked_loads[i_library],1,__ATOMIC_RELAXED)) {
+        snprintf(s_sz_unlinked_reports[i_library],sizeof(*s_sz_unlinked_reports),
+                 "sceKernelLoadStartModule %s (%s: handle without an image)",sz_library,sz_why);
+        runtime_calls_hle_stub(s_sz_unlinked_reports[i_library],&s_c_unlinked_loads[i_library]);
+    }
+    const size_t h_handle=s_c_modules+i_library;
+    if (!__atomic_fetch_add(&s_c_unlinked_references[i_library],1,__ATOMIC_ACQ_REL))
+        printf("Runtime: sceKernelLoadStartModule %s (flags %#x): %s, handle %zu without an image\n",sz_path,flags,sz_why,h_handle);
+    if (p_result) *p_result=0;
+    return (int32_t)h_handle;
+}
 static ABI int32_t load_start_module(const char *sz_path, uint64_t args, const void *p_argp, uint32_t flags,
                                      const void *p_options, int32_t *p_result) {
     (void)p_options;
     if (!sz_path) return EINVAL_;
     size_t h_handle=find_path(sz_path);
     if (!h_handle) {
+        const ptrdiff_t i_library=system_library(sz_path);
+        if (i_library>=0) return load_unlinked(sz_path,(size_t)i_library,flags,p_result);
         printf("Runtime: sceKernelLoadStartModule %s: no such module linked\n",sz_path);
         return ENOENT_;
     }
@@ -137,11 +212,27 @@ static ABI int32_t executable_module_handle(void) { return 0; }
 static ABI int32_t stop_unload_module(int32_t h_handle, uint64_t args, const void *p_argp, uint32_t flags,
                                       const void *p_options, int32_t *p_result) {
     (void)args; (void)p_argp; (void)flags; (void)p_options;
+    if (is_unlinked(h_handle)) {
+        uint64_t *p_references=&s_c_unlinked_references[(size_t)h_handle-s_c_modules];
+        uint64_t c_references=__atomic_load_n(p_references,__ATOMIC_ACQUIRE);
+        do {
+            if (!c_references) return ESRCH_;
+        } while (!__atomic_compare_exchange_n(p_references,&c_references,c_references-1,0,__ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE));
+        if (!__atomic_fetch_add(&s_c_unlinked_unloads,1,__ATOMIC_RELAXED))
+            runtime_calls_hle_stub("sceKernelStopUnloadModule of a handle without an image (nothing to stop)",&s_c_unlinked_unloads);
+        if (p_result) *p_result=0;
+        return 0;
+    }
     if (!loaded(h_handle)) return ESRCH_;
     if (p_result) *p_result=0;
     return 0;
 }
 static ABI int32_t dlsym(int32_t h_handle, const char *sz_symbol, void **pp_address) {
+    if (is_unlinked(h_handle) && __atomic_load_n(&s_c_unlinked_references[(size_t)h_handle-s_c_modules],__ATOMIC_ACQUIRE)) {
+        if (!__atomic_fetch_add(&s_c_unlinked_lookups,1,__ATOMIC_RELAXED))
+            runtime_calls_hle_stub("sceKernelDlsym in a system library without an image (ESRCH)",&s_c_unlinked_lookups);
+        return ESRCH_;
+    }
     if (!loaded(h_handle)) return ESRCH_;
     if (!sz_symbol || !pp_address) return EFAULT_;
     char sz_nid[12];
@@ -194,6 +285,14 @@ static uint64_t absolute(uint64_t off_image) { return (uint64_t)(uintptr_t)(s_p_
 static ABI int32_t module_info(int32_t h_handle, GuestModuleInfo *p_inout_info) {
     if (!runtime_memory_is_guest_range(p_inout_info,sizeof(*p_inout_info))) return EFAULT_;
     if (p_inout_info->st_size<sizeof(*p_inout_info)) return EINVAL_;
+    if (is_unlinked(h_handle) && __atomic_load_n(&s_c_unlinked_references[(size_t)h_handle-s_c_modules],__ATOMIC_ACQUIRE)) {
+        if (!__atomic_fetch_add(&s_c_unlinked_infos,1,__ATOMIC_RELAXED))
+            runtime_calls_hle_stub("sceKernelGetModuleInfo of a handle without an image (name only, no segments)",&s_c_unlinked_infos);
+        memset(p_inout_info,0,sizeof(*p_inout_info));
+        p_inout_info->st_size=sizeof(*p_inout_info);
+        snprintf(p_inout_info->name,sizeof(p_inout_info->name),"%s.sprx",s_sz_system_libraries[(size_t)h_handle-s_c_modules]);
+        return 0;
+    }
     if (!loaded(h_handle)) return ESRCH_;
     const RuntimeModule *p_module=&s_p_modules[h_handle];
     memset(p_inout_info,0,sizeof(*p_inout_info));
