@@ -134,6 +134,30 @@ static ABI int32_t lnc_app_status(void *p_out_status) {
     return 0;
 }
 
+/* CommonDialog hands the name of its work page's shared memory object ("/<app id>CdlgShWk", at
+ * most 31 characters as it copies it) to the shell, whose dialog process maps the same object, and
+ * takes it back on termination; it ignores both results. No dialog process runs here, so nothing
+ * maps it: the name is checked and logged. libSceLncUtil itself is not in the firmware dump, so its
+ * error codes were not read; the kernel's EFAULT stands in for a bad pointer. */
+#define CB_CDLG_SHM_NAME 32
+static uint64_t s_c_cdlg_registered, s_c_cdlg_unregistered;
+static int32_t cdlg_shared_memory_name(const char *sz_name, const char *sz_call, uint64_t *p_count) {
+    if (!runtime_memory_is_guest_range(sz_name,CB_CDLG_SHM_NAME) || !memchr(sz_name,0,CB_CDLG_SHM_NAME)) return EFAULT_;
+    if (!__atomic_fetch_add(p_count,1,__ATOMIC_RELAXED)) {
+        printf("Runtime: %s %s: no system dialog process maps it\n",sz_call,sz_name);
+        runtime_calls_hle_stub(p_count==&s_c_cdlg_registered
+                                   ? "sceLncUtilRegisterCdlgSharedMemoryName (no system dialog process to share it with)"
+                                   : "sceLncUtilUnregisterCdlgSharedMemoryName (no system dialog process to share it with)",p_count);
+    }
+    return 0;
+}
+static ABI int32_t lnc_register_cdlg_shm_name(const char *sz_name) {
+    return cdlg_shared_memory_name(sz_name,"sceLncUtilRegisterCdlgSharedMemoryName",&s_c_cdlg_registered);
+}
+static ABI int32_t lnc_unregister_cdlg_shm_name(const char *sz_name) {
+    return cdlg_shared_memory_name(sz_name,"sceLncUtilUnregisterCdlgSharedMemoryName",&s_c_cdlg_unregistered);
+}
+
 /* The registry (libSceRegMgr's system call): GetInt is op 2 with the key as id and a 4-byte value,
  * NonSysGetInt op 0x19 with {key, index, value} in the buffer. No key's console value has been read
  * yet, so each one answers 0, the value an unset setting has, and the first ones are logged with
@@ -179,6 +203,8 @@ static const RuntimeExport s_exports[]={
     {"sceKernelTitleWorkdaroundIsEnabled",title_workaround_is_enabled},
     {"sceKernelIsInSandbox",is_in_sandbox}, {"sceKernelGetFsSandboxRandomWord",sandbox_random_word},
     {"sceKernelGetVrCaptureSize",vr_capture_size}, {"sceLncUtilGetAppStatus",lnc_app_status},
+    {"sceLncUtilRegisterCdlgSharedMemoryName",lnc_register_cdlg_shm_name},
+    {"sceLncUtilUnregisterCdlgSharedMemoryName",lnc_unregister_cdlg_shm_name},
     {"__sys_regmgr_call",regmgr_call},
 };
 uintptr_t runtime_process_resolve(const char *sz_name) { return RUNTIME_LOOKUP(s_exports,sz_name); }
