@@ -30,6 +30,7 @@ void runtime_content_configure(const uint32_t values[5]) {
 void runtime_content_title(const char *sz_title) {
     if (sz_title && *sz_title) snprintf(s_sz_title_id,sizeof(s_sz_title_id),"%s",sz_title);
 }
+const char *runtime_content_title_id(void) { return s_sz_title_id; }
 static void require_provider(void) {
     if (!s_configured) { fputs("STOP: AppContent needs --app0 (its param.sfo)\n",stderr); runtime_stop(21); }
 }

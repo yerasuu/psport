@@ -341,6 +341,15 @@ int64_t runtime_memory_read_guest(void *p_out, uintptr_t va_range, uint64_t cb_r
     read_unlock();
     return cb_read ? (int64_t)cb_read : cb_host;
 }
+int runtime_memory_is_guest_range(const void *p_range, uint64_t cb_range) {
+    if (!p_range || (uintptr_t)p_range+cb_range<(uintptr_t)p_range) return 0;
+    unsigned char chunk[256];
+    for (uint64_t off_range=0;off_range<cb_range;off_range+=sizeof(chunk)) {
+        const uint64_t cb_chunk=cb_range-off_range<sizeof(chunk) ? cb_range-off_range : sizeof(chunk);
+        if (runtime_memory_read_guest(chunk,(uintptr_t)p_range+off_range,cb_chunk)!=(int64_t)cb_chunk) return 0;
+    }
+    return 1;
+}
 int64_t runtime_memory_read_guest_signal(void *p_out, uintptr_t va_range, uint64_t cb_range) {
     const int64_t cb_host=ps_host_read_memory(p_out,(const void *)va_range,cb_range);
     uint64_t cb_read=cb_host>0 ? (uint64_t)cb_host : 0;

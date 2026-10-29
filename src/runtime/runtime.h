@@ -46,6 +46,10 @@ int runtime_memory_is_mapped(uintptr_t va_range, uint64_t cb_range);
  * cannot pin the dma-buf mappings of direct memory) and the range is mapped guest memory, through
  * the backing view. */
 int64_t runtime_memory_read_guest(void *p_out, uintptr_t va_range, uint64_t cb_range);
+/* 1 when p_range is non-NULL and all cb_range bytes from it can be read: how an HLE call checks a
+ * pointer the guest hands it before using it, since the guest's stacks and module images are host
+ * mappings runtime_memory_is_mapped does not know. */
+int runtime_memory_is_guest_range(const void *p_range, uint64_t cb_range);
 /* The same from a signal handler: never waits and never allocates. The backing view is skipped
  * (the host's bytes only) while a writer holds the mapping table, this thread included. */
 int64_t runtime_memory_read_guest_signal(void *p_out, uintptr_t va_range, uint64_t cb_range);
@@ -201,6 +205,8 @@ void runtime_eventflag_report(void);
 void runtime_eventflag_created_report(void);
 void runtime_content_configure(const uint32_t values[5]);
 void runtime_content_title(const char *sz_title);
+/* The game's title ID (CUSA00000), "UNKNOWN" when its package has none. */
+const char *runtime_content_title_id(void);
 uintptr_t runtime_content_resolve(const char *sz_name);
 void runtime_content_report(void);
 typedef struct { const char *sz_name; void *p_function; } RuntimeExport;
@@ -215,6 +221,12 @@ uintptr_t runtime_kernel_resolve(const char *sz_name);
 void runtime_process_configure(uint32_t sdk_version, uint32_t psf_attributes);
 /* The SDK version the eboot was built with (its process parameters), for behaviour tied to it. */
 uint32_t runtime_process_sdk_version(void);
+/* The process's identity as the kernel reports it (runtime_process.c): authinfo, process type,
+ * application info, sandbox, registry. */
+uintptr_t runtime_process_resolve(const char *sz_name);
+/* sysctl kern.proc.appinfo (MIB 1.14.35.pid) into p_old, at most *p_inout_cb bytes, with *p_inout_cb
+ * set to the size it has; 0 or the host errno. */
+int runtime_process_app_info(int32_t pid, void *p_old, uint64_t *p_inout_cb);
 uintptr_t runtime_file_resolve(const char *sz_name);
 /* POSIX shared memory objects (runtime_shm.c) over anonymous host files in the guest's file table. */
 uintptr_t runtime_shm_resolve(const char *sz_name);

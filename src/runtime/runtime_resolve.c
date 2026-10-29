@@ -8,7 +8,7 @@ static uintptr_t (*const s_pfn_resolvers[])(const char *sz_name)={
     runtime_mutex_resolve, runtime_thread_resolve, runtime_sched_resolve, runtime_content_resolve,
     runtime_sema_resolve, runtime_eventflag_resolve, runtime_ulobjmgr_resolve, runtime_ult_resolve,
     runtime_rwlock_resolve, runtime_barrier_resolve, runtime_memory_resolve, runtime_mempool_resolve,
-    runtime_exception_resolve, runtime_kernel_resolve, runtime_module_resolve, runtime_playgo_resolve,
+    runtime_exception_resolve, runtime_kernel_resolve, runtime_module_resolve, runtime_process_resolve, runtime_playgo_resolve,
     runtime_voice_resolve, runtime_services_resolve, runtime_ajm_resolve, runtime_audio_resolve,
     runtime_audio3d_resolve, runtime_pad_resolve, runtime_gesture_resolve, runtime_devices_resolve,
     runtime_capture_resolve, runtime_vr_resolve, runtime_mouse_resolve, runtime_keyboard_resolve,

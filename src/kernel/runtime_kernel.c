@@ -41,6 +41,8 @@ int32_t runtime_guest_errno(int e) {
     }
 }
 static int32_t fail_posix(int e) { *runtime_errno()=runtime_guest_errno(e); return -1; }
+/* A guest errno as libkernel's SCE code: sums, not ORs, as libkernel does. */
+static ABI int32_t kernel_error(int32_t guest_errno) { return guest_errno ? (int32_t)(UINT32_C(0x80020000)+(uint32_t)guest_errno) : 0; }
 
 /* ---- clocks and sleeping ---- */
 static struct timespec s_process_start;
@@ -461,6 +463,11 @@ static ABI int32_t guest_sysctl(const int32_t *p_name,uint32_t namelen,void *p_o
         if (p_old) { if (*p_oldlen<4) return fail_posix(ENOMEM); memcpy(p_old,&value,4); }
         *p_oldlen=4; return 0;
     }
+    if (namelen==4 && p_name[0]==1 && p_name[1]==14 && p_name[2]==35) { /* kern.proc.appinfo */
+        if (p_new_value) return fail_posix(EPERM);
+        const int e=runtime_process_app_info(p_name[3],p_old,p_oldlen);
+        return e ? fail_posix(e) : 0;
+    }
     /* What the kernel answers for a name it does not have; the first ones are listed with their MIB. */
     const uint64_t c_unknown=__atomic_fetch_add(&s_c_unknown_mibs,1,__ATOMIC_RELAXED);
     if (c_unknown<8) {
@@ -669,6 +676,7 @@ static const RuntimeExport s_exports[]={
     {"getrusage",guest_getrusage}, {"sysctl",guest_sysctl}, {"sceKernelUuidCreate",uuid_create},
     {"raise",guest_raise}, {"kill",guest_kill}, {"sigtimedwait",guest_sigtimedwait},
     {"sigwaitinfo",guest_sigwaitinfo}, {"sigwait",guest_sigwait},
+    {"sceKernelError",kernel_error},
     {"sceKernelGetProcessType",get_process_type}, {"getrlimit",guest_getrlimit}, {"setrlimit",guest_setrlimit},
     {"htonl",byte_order_32}, {"ntohl",byte_order_32}, {"htons",byte_order_16}, {"ntohs",byte_order_16},
     {"sceRandomGetRandomNumber",random_number},

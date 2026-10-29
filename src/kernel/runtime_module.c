@@ -122,6 +122,17 @@ static ABI int32_t load_start_module(const char *sz_path, uint64_t args, const v
     if (p_result) *p_result=value;
     return (int32_t)h_handle;
 }
+/* What libSceSysmodule loads system libraries with: sceKernelLoadStartModule with the system flag
+ * 0x10000 that the public call would refuse. */
+static ABI int32_t load_start_module_for_sysmodule(const char *sz_path, uint64_t args, const void *p_argp, uint32_t flags,
+                                                   const void *p_options, int32_t *p_result) {
+    if (p_options) return EINVAL_;
+    if (sz_path && !runtime_memory_is_guest_range(sz_path,1)) return EFAULT_;
+    if (p_result && !runtime_memory_is_guest_range(p_result,sizeof(*p_result))) return EFAULT_;
+    return load_start_module(sz_path,args,p_argp,flags|0x10000,NULL,p_result);
+}
+/* The eboot is always the table's first module. */
+static ABI int32_t executable_module_handle(void) { return 0; }
 /* Nothing is unmapped: the image stays one mapping and a later load finds the module started. */
 static ABI int32_t stop_unload_module(int32_t h_handle, uint64_t args, const void *p_argp, uint32_t flags,
                                       const void *p_options, int32_t *p_result) {
@@ -169,7 +180,30 @@ typedef struct {
     char name[256];
     uint64_t eh_frame_hdr_addr, eh_frame_addr, eh_frame_size, seg0_addr, seg0_size;
 } GuestModuleInfoForUnwind;
+/* The caller presets st_size; a non-zero result makes libSceSysmodule's initialization fail. */
+typedef struct {
+    uint64_t st_size;
+    char name[256];
+    GuestSegment segments[4];
+    uint32_t segment_count;
+    uint8_t fingerprint[20];
+} GuestModuleInfo;
+_Static_assert(sizeof(GuestModuleInfo)==0x160,"SceKernelModuleInfo layout");
 static uint64_t absolute(uint64_t off_image) { return (uint64_t)(uintptr_t)(s_p_image+off_image); }
+/* The fingerprint stays zero: the loader keeps no SELF fingerprint, and nothing read compares it. */
+static ABI int32_t module_info(int32_t h_handle, GuestModuleInfo *p_inout_info) {
+    if (!runtime_memory_is_guest_range(p_inout_info,sizeof(*p_inout_info))) return EFAULT_;
+    if (p_inout_info->st_size<sizeof(*p_inout_info)) return EINVAL_;
+    if (!loaded(h_handle)) return ESRCH_;
+    const RuntimeModule *p_module=&s_p_modules[h_handle];
+    memset(p_inout_info,0,sizeof(*p_inout_info));
+    p_inout_info->st_size=sizeof(*p_inout_info);
+    snprintf(p_inout_info->name,sizeof(p_inout_info->name),"%s",strrchr(p_module->sz_name,'/') ? strrchr(p_module->sz_name,'/')+1 : p_module->sz_name);
+    for (uint64_t i=0;i<p_module->c_segments;++i)
+        p_inout_info->segments[i]=(GuestSegment){absolute(p_module->segments[i].va_module_segment),(uint32_t)p_module->segments[i].cb_module_segment,(int32_t)p_module->segments[i].prot};
+    p_inout_info->segment_count=(uint32_t)p_module->c_segments;
+    return 0;
+}
 static ABI int32_t module_info_from_address(uintptr_t va_guest, int32_t flags, GuestModuleInfoEx *p_info) {
     if (flags>=3) { if (p_info) memset(p_info,0,sizeof(*p_info)); return EINVAL_; }
     if (!p_info) return EFAULT_;
@@ -211,6 +245,8 @@ static ABI int32_t module_info_for_unwind(uintptr_t va_guest, int32_t flags, Gue
 
 static const RuntimeExport s_exports[]={
     {"sceKernelLoadStartModule",load_start_module}, {"sceKernelStopUnloadModule",stop_unload_module},
+    {"sceKernelLoadStartModuleForSysmodule",load_start_module_for_sysmodule},
+    {"sceKernelGetExecutableModuleHandle",executable_module_handle}, {"sceKernelGetModuleInfo",module_info},
     {"sceKernelDlsym",dlsym}, {"sceKernelGetModuleInfoFromAddr",module_info_from_address},
     {"sceKernelGetModuleInfoForUnwind",module_info_for_unwind},
     {"sceSysmoduleGetModuleInfoForUnwind",module_info_for_unwind},
