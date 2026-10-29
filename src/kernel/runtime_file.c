@@ -471,12 +471,57 @@ static int64_t read_retrying(int h,void *p_buffer,uint64_t cb_buffer,int64_t off
     }
     return cb_transferred;
 }
+/* The console's kernel never reads a regular file short of its end, and games take a short read
+ * for the end of their data. Here one happens when the kernel's copy stops at a page the GPU side
+ * protected again (Linux returns what it copied before the fault) or the host moves less per call
+ * (Windows' ReadFile): the rest is read until the end, an error or SHORT_READ_RESUMES tries. */
+#define SHORT_READ_RESUMES 64
+static uint64_t s_c_short_reads_completed, s_c_short_reads_given_up;
+static int s_has_short_read_summary;
+/* Part of the call report: no stdio, no lock. */
+static void short_read_summary(char *sz_out,size_t cb_out) {
+    snprintf(sz_out,cb_out,"Runtime: summary short reads of regular files: %llu completed, %llu given up\n",
+             (unsigned long long)__atomic_load_n(&s_c_short_reads_completed,__ATOMIC_RELAXED),
+             (unsigned long long)__atomic_load_n(&s_c_short_reads_given_up,__ATOMIC_RELAXED));
+}
+static void note_short_read(int h_fd,int h,int64_t off_file,int positional,uint64_t cb_buffer,int64_t cb_first,int64_t cb_total,int64_t result) {
+    const int is_given_up=result!=0 && (uint64_t)cb_total<cb_buffer;
+    if (__atomic_fetch_add(is_given_up ? &s_c_short_reads_given_up : &s_c_short_reads_completed,1,__ATOMIC_RELAXED)) return;
+    if (!__atomic_exchange_n(&s_has_short_read_summary,1,__ATOMIC_ACQ_REL)) runtime_calls_add_summary(short_read_summary);
+    char sz_path[sizeof(((File *)0)->sz_path)]="(stdio)";
+    pthread_mutex_lock(&s_lock);
+    const File *p_file=get(h_fd);
+    if (p_file) snprintf(sz_path,sizeof(sz_path),"%s",p_file->sz_path);
+    pthread_mutex_unlock(&s_lock);
+    const int64_t off_start=positional ? off_file : ps_host_fs_seek(h,0,1)-cb_total;
+    if (is_given_up)
+        printf("Runtime: short read of %s (fd %d) at %lld: %llu bytes asked, %lld read, then %lld (%s); "
+               "returned short, further ones are only counted\n",sz_path,h_fd,(long long)off_start,(unsigned long long)cb_buffer,
+               (long long)cb_first,(long long)result,result<0 ? strerror((int)-result) : "resume limit");
+    else
+        printf("Runtime: short read of %s (fd %d) at %lld: %llu bytes asked, %lld read; the rest was read again, "
+               "further ones are only counted\n",sz_path,h_fd,(long long)off_start,(unsigned long long)cb_buffer,(long long)cb_first);
+}
+static int64_t read_completely(int h_fd,int h,void *p_buffer,uint64_t cb_buffer,int64_t off_file,int positional) {
+    const int64_t cb_first=read_retrying(h,p_buffer,cb_buffer,off_file,positional);
+    PsHostStat s;
+    if (cb_first<=0 || (uint64_t)cb_first>=cb_buffer || ps_host_fs_stat_file(h,&s) || !PS_HOST_MODE_IS_REGULAR(s.mode)) return cb_first;
+    int64_t cb_total=cb_first, result=-EAGAIN;
+    for (int resume=0; resume<SHORT_READ_RESUMES && (uint64_t)cb_total<cb_buffer; ++resume) {
+        result=read_retrying(h,(unsigned char *)p_buffer+cb_total,cb_buffer-(uint64_t)cb_total,off_file+cb_total,positional);
+        if (result==-EINTR || result==-EAGAIN) continue;
+        if (result<=0) break;
+        cb_total+=result;
+    }
+    if (result!=0 || cb_total>cb_first) note_short_read(h_fd,h,off_file,positional,cb_buffer,cb_first,cb_total,result);
+    return cb_total;
+}
 static int64_t do_read(int h_fd,void *p_buffer,uint64_t cb_buffer) {
     int h=host_fd(h_fd);
     if (h<0) return -EBADF;
     runtime_memory_note_write((uintptr_t)p_buffer,cb_buffer);
     touch_for_write(p_buffer,cb_buffer);
-    int64_t cb_transferred=read_retrying(h,p_buffer,cb_buffer,0,0);
+    int64_t cb_transferred=read_completely(h_fd,h,p_buffer,cb_buffer,0,0);
     if (cb_transferred<0) { if (audio_trace()) printf("Audio trace: read(fd %d, %llu) failed, errno %d\n",h_fd,(unsigned long long)cb_buffer,(int)-cb_transferred); return cb_transferred; }
     if (cb_transferred>0) runtime_memory_note_write((uintptr_t)p_buffer,(uint64_t)cb_transferred); /* and once the data is there */
     __atomic_add_fetch(&s_c_reads,1,__ATOMIC_RELAXED); __atomic_add_fetch(&s_cb_read,(uint64_t)cb_transferred,__ATOMIC_RELAXED);
@@ -487,7 +532,7 @@ static int64_t do_pread(int h_fd,void *p_buffer,uint64_t cb_buffer,int64_t off_f
     if (h<0) return -EBADF;
     runtime_memory_note_write((uintptr_t)p_buffer,cb_buffer);
     touch_for_write(p_buffer,cb_buffer);
-    int64_t cb_transferred=read_retrying(h,p_buffer,cb_buffer,off_file,1);
+    int64_t cb_transferred=read_completely(h_fd,h,p_buffer,cb_buffer,off_file,1);
     if (cb_transferred<0) { if (audio_trace()) printf("Audio trace: pread(fd %d, %llu @%lld) failed, errno %d\n",h_fd,(unsigned long long)cb_buffer,(long long)off_file,(int)-cb_transferred); return cb_transferred; }
     if (cb_transferred>0) runtime_memory_note_write((uintptr_t)p_buffer,(uint64_t)cb_transferred); /* and once the data is there */
     __atomic_add_fetch(&s_c_reads,1,__ATOMIC_RELAXED); __atomic_add_fetch(&s_cb_read,(uint64_t)cb_transferred,__ATOMIC_RELAXED);
