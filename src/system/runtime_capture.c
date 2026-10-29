@@ -58,7 +58,49 @@ static ABI int32_t coredump_debug_text_out(const char *p_text,int32_t length) {
     return 0;
 }
 
+/* ---- libSceVideoOut's driver registry ---- */
+/* The system's capture path registers a video out driver (bus type 4): a 0x108-byte table of
+ * callbacks, those at 0 to 0x28, 0x38 and 0x40 mandatory, and a 32-byte context. psport drives video
+ * out itself, so the table is kept and never called. The console returns a slot value whose meaning
+ * was not read; 0 is what the callers have worked with so far. */
+#define VIDEO_OUT_INVALID_VALUE ((int32_t)0x80290001)
+#define VIDEO_OUT_INVALID_ADDRESS ((int32_t)0x80290002)
+#define CB_VIDEO_OUT_DRIVER_OPS 0x108
+#define CB_VIDEO_OUT_DRIVER_CONTEXT 32
+#define VIDEO_OUT_BUS_TYPES 8
+static const void *s_p_video_out_drivers[VIDEO_OUT_BUS_TYPES];
+static uint64_t s_c_video_out_drivers;
+static ABI int64_t video_out_add_driver(int32_t bus_type, const void *const *pp_callbacks, const void *p_context, const void *p_reserved) {
+    static const unsigned char s_i_mandatory[]={0,1,2,3,4,5,7,8};
+    if (p_reserved || bus_type<0 || bus_type>=VIDEO_OUT_BUS_TYPES) return VIDEO_OUT_INVALID_VALUE;
+    if (!runtime_memory_is_guest_range(pp_callbacks,CB_VIDEO_OUT_DRIVER_OPS) ||
+        (p_context && !runtime_memory_is_guest_range(p_context,CB_VIDEO_OUT_DRIVER_CONTEXT)))
+        return VIDEO_OUT_INVALID_ADDRESS;
+    for (size_t i=0;i<sizeof(s_i_mandatory);++i)
+        if (!pp_callbacks[s_i_mandatory[i]]) return VIDEO_OUT_INVALID_VALUE;
+    __atomic_store_n(&s_p_video_out_drivers[bus_type],(const void *)pp_callbacks,__ATOMIC_RELEASE);
+    if (!__atomic_fetch_add(&s_c_video_out_drivers,1,__ATOMIC_RELAXED))
+        runtime_calls_hle_stub("sceVideoOutAddDriver (callbacks kept, never called: psport drives video out)",&s_c_video_out_drivers);
+    printf("Runtime: VideoOut driver for bus type %d registered (callbacks %p); psport never calls it\n",bus_type,(const void *)pp_callbacks);
+    return 0;
+}
+/* AddDriver hands out no slot, so there is none to find: the call is accepted. */
+static ABI int32_t video_out_delete_driver(int64_t slot) { (void)slot; return 0; }
+
+/* ---- libSceAvcap ---- */
+/* sceVshAvcapInit connects to the system's capture service, which psport does not have: Init and
+ * Term only succeed, counted, and the capture calls stay unimplemented. */
+static uint64_t s_c_avcap_inits;
+static ABI int32_t avcap_init(void) {
+    if (!__atomic_fetch_add(&s_c_avcap_inits,1,__ATOMIC_RELAXED))
+        runtime_calls_hle_stub("sceVshAvcapInit (no capture service: counted only)",&s_c_avcap_inits);
+    return 0;
+}
+static ABI int32_t avcap_term(void) { return 0; }
+
 static const RuntimeExport s_exports[]={
+    {"sceVideoOutAddDriver",video_out_add_driver}, {"sceVideoOutDeleteDriver",video_out_delete_driver},
+    {"sceVshAvcapInit",avcap_init}, {"sceVshAvcapTerm",avcap_term},
     {"sceRemoteplayInitialize",remoteplay_initialize}, {"sceRemoteplayTerminate",remoteplay_terminate},
     {"sceRemoteplayApprove",remoteplay_permission}, {"sceRemoteplayProhibit",remoteplay_permission},
     {"sceRemoteplayProhibitStreaming",remoteplay_prohibit_streaming},

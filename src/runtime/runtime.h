@@ -324,6 +324,9 @@ int runtime_file_adopt(int h_host);
 int runtime_file_adopt_shared_memory(int h_host, const char *sz_name);
 /* The host descriptor behind a guest one, or -1. */
 int runtime_file_host(int h_fd);
+/* The guest path a descriptor was opened at (empty for sockets and pipes): 0, or -EBADF when it is
+ * not open. Virtual devices (/dev/dipsw) have this and no host descriptor. */
+int runtime_file_guest_path(int h_fd, char *sz_out, size_t cb_out);
 int64_t runtime_file_write(int h_fd, const void *p_buffer, uint64_t cb_buffer);
 int64_t runtime_file_pwrite(int h_fd, const void *p_buffer, uint64_t cb_buffer, int64_t off_file);
 int64_t runtime_file_lseek(int h_fd, int64_t off_file, int whence);

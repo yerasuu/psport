@@ -346,9 +346,31 @@ static int commit_file(const File *p_file) {
     return 0;
 }
 /* All operations return >=0 or -(host errno); wrappers adapt the convention. */
+/* Kernel devices with no host file behind them: the descriptor has no host side, and _ioctl
+ * (runtime_ioctl.c) answers their requests by the path they were opened at. */
+static int is_virtual_device(const char *sz_guest) { return !strcmp(sz_guest,"/dev/dipsw"); }
+static int64_t open_virtual_device(const char *sz_guest) {
+    pthread_mutex_lock(&s_lock);
+    int h_fd=-1;
+    for (int i=3;i<MAX_FILES;++i) if (!s_files[i].used) { h_fd=i; break; }
+    if (h_fd>=0) {
+        s_files[h_fd]=(File){.used=1,.host=-1,.serial=++s_last_serial};
+        absolute_path(sz_guest,s_files[h_fd].sz_path,sizeof(s_files[h_fd].sz_path));
+    }
+    pthread_mutex_unlock(&s_lock);
+    return h_fd<0 ? -EMFILE : h_fd;
+}
+int runtime_file_guest_path(int h_fd,char *sz_out,size_t cb_out) {
+    pthread_mutex_lock(&s_lock);
+    const File *p_file=get(h_fd);
+    if (p_file) snprintf(sz_out,cb_out,"%s",p_file->sz_path);
+    pthread_mutex_unlock(&s_lock);
+    return p_file ? 0 : -EBADF;
+}
 static int64_t do_open(const char *sz_guest,int flags,int mode) {
     char sz_absolute[1024];
     if (sz_guest) { absolute_path(sz_guest,sz_absolute,sizeof(sz_absolute)); sz_guest=sz_absolute; }
+    if (sz_guest && is_virtual_device(sz_guest)) return open_virtual_device(sz_guest);
     if (game_path(sz_guest) && (flags & (3|0x8|0x200|0x400|0x800))) return -EROFS;
     char sz_path[1024];
     int e=translate(sz_guest,sz_path,sizeof(sz_path));
