@@ -28,6 +28,8 @@ int pthread_cond_clockwait(pthread_cond_t *p_cond, pthread_mutex_t *p_mutex, clo
 int pthread_mutex_clocklock(pthread_mutex_t *p_mutex, clockid_t clock, const struct timespec *p_deadline);
 int pthread_rwlock_clockrdlock(pthread_rwlock_t *p_rwlock, clockid_t clock, const struct timespec *p_deadline);
 int pthread_rwlock_clockwrlock(pthread_rwlock_t *p_rwlock, clockid_t clock, const struct timespec *p_deadline);
+/* glibc's name for winpthreads' _pthread_tryjoin: EBUSY while the thread runs. */
+int pthread_tryjoin_np(pthread_t thread, void **pp_result);
 
 void *memmem(const void *p_haystack, size_t cb_haystack, const void *p_needle, size_t cb_needle);
 char *strcasestr(const char *sz_haystack, const char *sz_needle);

@@ -51,6 +51,8 @@ int pthread_rwlock_clockwrlock(pthread_rwlock_t *p_rwlock, clockid_t clock, cons
     return error ? error : pthread_rwlock_timedwrlock(p_rwlock, &deadline);
 }
 
+int pthread_tryjoin_np(pthread_t thread, void **pp_result) { return _pthread_tryjoin(thread, pp_result); }
+
 int pthread_cond_clockwait(pthread_cond_t *p_cond, pthread_mutex_t *p_mutex, clockid_t clock,
                            const struct timespec *p_deadline) {
     if (clock != CLOCK_MONOTONIC && clock != CLOCK_REALTIME) return EINVAL;

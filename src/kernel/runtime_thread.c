@@ -34,6 +34,10 @@ typedef struct GuestThread {
     /* Guest-visible TCB is allocated separately; this is the ScePthread handle. */
     uint64_t *tcb;
     unsigned char *tls_block;
+    /* What recycle() hands to the next thread once the host thread is gone: the TLS block as
+     * malloc gave it, and the stack the runtime mapped for it (none on the game's or the host's). */
+    unsigned char *p_tls_raw, *p_owned_stack;
+    size_t cb_tls_raw, cb_owned_stack;
     pthread_t host;
     GuestEntry entry;
     void *argument, *result;
@@ -74,6 +78,22 @@ static uint64_t s_ms_high_digest;
 #define C_RECORD_QUARANTINE 64
 static GuestThread *s_p_free_low, *s_p_free_low_tail, *s_p_free_high;
 static size_t s_c_free_low;
+/* Guarded by s_lock. A thread's stack and TLS block go to another thread only once its host thread
+ * is gone, joined: glibc keeps the thread's descriptor at the top of a stack it was given, and a
+ * detached thread still runs on its stack after it sets finished. Host threads are therefore never
+ * detached; a detached guest thread's record waits in s_p_exited until pthread_tryjoin_np finds
+ * its host thread gone (reap_exited_hosts). Free stacks are reused as they are, as FreeBSD's libthr
+ * reuses its cached stacks, and none is unmapped since runtime_low_map cannot take the range back:
+ * the free ones are what the peak of each size alive at once leaves. */
+typedef struct FreeBlock {
+    struct FreeBlock *p_next;
+    size_t cb;
+} FreeBlock;
+static GuestThread *s_p_exited;
+static FreeBlock *s_p_free_stacks, *s_p_free_tls;
+static size_t s_c_stacks_mapped, s_c_stacks_reused, s_c_free_stacks, s_c_stack_fallbacks, s_c_stack_fallback_window;
+static size_t s_c_tls_allocated, s_c_tls_reused, s_c_hosts_reaped, s_c_hosts_lost;
+static uint64_t s_ms_stack_fallback_digest;
 #define C_CREATE_NAMES 64
 #define C_CREATE_LOGGED 3
 #define C_CREATE_SUMMARY_NAMES 8
@@ -104,12 +124,34 @@ static void record_stack(GuestThread *p_thread) {
     uintptr_t va_low; size_t cb_stack;
     if (!ps_host_thread_stack(&va_low,&cb_stack)) { p_thread->attr.p_stack_addr=(void *)va_low; p_thread->attr.stack=cb_stack; }
 }
+/* Under s_lock. */
+static void push_free(FreeBlock **pp_list,unsigned char *p_block,size_t cb_block) {
+    FreeBlock *p_free=(FreeBlock *)p_block;
+    p_free->cb=cb_block; p_free->p_next=*pp_list; *pp_list=p_free;
+}
+static unsigned char *take_free(FreeBlock **pp_list,size_t cb_block) {
+    for (FreeBlock **pp_link=pp_list;*pp_link;pp_link=&(*pp_link)->p_next) {
+        FreeBlock *p_free=*pp_link;
+        if (p_free->cb!=cb_block) continue;
+        *pp_link=p_free->p_next;
+        return (unsigned char *)p_free;
+    }
+    return NULL;
+}
 static void attach(GuestThread *p_thread) {
     uint64_t off_tls=tls_offset();
     size_t cb_block=off_tls+256;
-    /* Never freed, so aligned by hand: UCRT has no aligned_alloc whose memory free() takes. */
-    unsigned char *p_raw=malloc(cb_block+63);
+    /* Never freed but reused (recycle), so aligned by hand: UCRT has no aligned_alloc whose memory
+     * free() takes. */
+    const size_t cb_raw=cb_block+63;
+    runtime_exception_lock(&s_lock);
+    unsigned char *p_raw=take_free(&s_p_free_tls,cb_raw);
+    if (p_raw) ++s_c_tls_reused;
+    else ++s_c_tls_allocated;
+    runtime_exception_unlock(&s_lock);
+    if (!p_raw) p_raw=malloc(cb_raw);
     if (!p_raw) { fputs("Cannot allocate guest TLS\n",stderr); exit(1); }
+    p_thread->p_tls_raw=p_raw; p_thread->cb_tls_raw=cb_raw;
     unsigned char *p_block=(unsigned char *)(((uintptr_t)p_raw+63)&~(uintptr_t)63);
     memset(p_block,0,cb_block);
     if (s_tls_filesz) memcpy(p_block,s_p_tls_template,s_tls_filesz);
@@ -244,15 +286,13 @@ static GuestThread *find_thread(void *p_handle) {
     runtime_exception_unlock(&s_lock);
     return p_found;
 }
-/* Under s_lock. The guest may use a handle until it joins or detaches the thread, and the host
- * thread may still be on its way out after it set finished: a detached one no longer reads its
- * record past that point (host_start), a joined one is gone. */
-static void release_if_done(GuestThread *p_thread) {
-    if (!p_thread->finished || p_thread->is_starting || !(p_thread->detached || p_thread->is_join_done)) return;
-    GuestThread **pp_link=&s_p_threads;
-    while (*pp_link && *pp_link!=p_thread) pp_link=&(*pp_link)->next;
-    if (!*pp_link) return;
-    *pp_link=p_thread->next;
+/* Under s_lock, once the host thread is joined: nothing runs on its stack or reads its TLS block. */
+static void recycle(GuestThread *p_thread) {
+    if (p_thread->p_owned_stack) {
+        push_free(&s_p_free_stacks,p_thread->p_owned_stack,p_thread->cb_owned_stack);
+        ++s_c_free_stacks;
+    }
+    if (p_thread->p_tls_raw) push_free(&s_p_free_tls,p_thread->p_tls_raw,p_thread->cb_tls_raw);
     p_thread->next=NULL;
     if (p_thread->is_high) {
         p_thread->next=s_p_free_high; s_p_free_high=p_thread;
@@ -262,6 +302,86 @@ static void release_if_done(GuestThread *p_thread) {
     else s_p_free_low=p_thread;
     s_p_free_low_tail=p_thread;
     ++s_c_free_low;
+}
+/* Under s_lock. The guest may use a handle until it joins or detaches the thread, and the host
+ * thread may still be on its way out after it set finished: a detached one no longer reads its
+ * record past that point (host_start) but still runs on its stack, a joined one is gone. */
+static void release_if_done(GuestThread *p_thread) {
+    if (!p_thread->finished || p_thread->is_starting || !(p_thread->detached || p_thread->is_join_done)) return;
+    GuestThread **pp_link=&s_p_threads;
+    while (*pp_link && *pp_link!=p_thread) pp_link=&(*pp_link)->next;
+    if (!*pp_link) return;
+    *pp_link=p_thread->next;
+    if (p_thread->is_join_done) { recycle(p_thread); return; }
+    p_thread->next=s_p_exited; s_p_exited=p_thread;
+}
+/* Guest names are arbitrary bytes: control and non-ASCII bytes would corrupt the log. */
+static void printable_name(char *out_name,const char *sz_name) {
+    size_t i=0;
+    for (;i<31 && sz_name[i];++i) {
+        const unsigned char c=(unsigned char)sz_name[i];
+        out_name[i]=c>=0x20 && c<0x7f ? (char)c : '?';
+    }
+    out_name[i]=0;
+}
+/* Joins the host threads of detached guest threads that have left, so that their stacks and TLS
+ * blocks go to the threads created next. pthread_tryjoin_np runs outside s_lock, since a join frees
+ * glibc's TLS of the thread. */
+static void reap_exited_hosts(void) {
+    runtime_exception_lock(&s_lock);
+    GuestThread *p_pending=s_p_exited;
+    s_p_exited=NULL;
+    runtime_exception_unlock(&s_lock);
+    if (!p_pending) return;
+    GuestThread *p_gone=NULL, *p_running=NULL;
+    while (p_pending) {
+        GuestThread *p_thread=p_pending;
+        p_pending=p_thread->next;
+        const int e=pthread_tryjoin_np(p_thread->host,NULL);
+        if (e==EBUSY) { p_thread->next=p_running; p_running=p_thread; continue; }
+        if (e) {
+            char sz_name[32];
+            printable_name(sz_name,p_thread->name);
+            fprintf(stderr,"Runtime: the host thread of guest thread '%s' cannot be joined (%d); its stack, TLS "
+                    "block and record are not reused\n",sz_name,e);
+            __atomic_add_fetch(&s_c_hosts_lost,1,__ATOMIC_RELAXED);
+            continue;
+        }
+        p_thread->next=p_gone; p_gone=p_thread;
+    }
+    runtime_exception_lock(&s_lock);
+    while (p_gone) {
+        GuestThread *p_thread=p_gone;
+        p_gone=p_thread->next;
+        p_thread->is_join_done=1; ++s_c_hosts_reaped;
+        recycle(p_thread);
+    }
+    while (p_running) {
+        GuestThread *p_thread=p_running;
+        p_running=p_thread->next;
+        p_thread->next=s_p_exited; s_p_exited=p_thread;
+    }
+    runtime_exception_unlock(&s_lock);
+}
+static void count_stack_fallback(uint64_t cb_stack) {
+    char sz_digest[160];
+    sz_digest[0]=0;
+    runtime_exception_lock(&s_lock);
+    const size_t i_fallback=s_c_stack_fallbacks++;
+    ++s_c_stack_fallback_window;
+    const uint64_t ms_now=now_ms();
+    if (!s_ms_stack_fallback_digest) s_ms_stack_fallback_digest=ms_now;
+    else if (ms_now-s_ms_stack_fallback_digest>=MS_HIGH_DIGEST) {
+        snprintf(sz_digest,sizeof(sz_digest),"Runtime: %zu guest thread stacks on host stacks for lack of low "
+                 "memory in the last 10 s (%zu in all)",s_c_stack_fallback_window,s_c_stack_fallbacks);
+        s_ms_stack_fallback_digest=ms_now; s_c_stack_fallback_window=0;
+    }
+    runtime_exception_unlock(&s_lock);
+    if (i_fallback<C_HIGH_LOGGED)
+        fprintf(stderr,"Runtime: no low memory for a %llu-byte guest thread stack; it runs on a host stack above "
+                "1 TiB%s\n",(unsigned long long)cb_stack,
+                i_fallback+1==C_HIGH_LOGGED ? "; further ones are only counted" : "");
+    if (sz_digest[0]) fprintf(stderr,"%s\n",sz_digest);
 }
 /* Under the table's lock, so the host thread cannot be joined and its id reused between
  * the lookup and the kill. */
@@ -445,8 +565,9 @@ static void *host_start(void *p_argument) {
     } else p_thread->result=runtime_thread_enter_guest(p_thread->entry,p_thread->argument);
     if (s_pfn_exit_hook) s_pfn_exit_hook();
     runtime_thread_keys_cleanup();
-    /* A detached thread's record may go to another thread as soon as finished is set: no guest
-     * exception handler may run here after that, and the result is read before. */
+    /* A detached thread's record leaves the thread list as soon as finished is set: no guest
+     * exception handler may run here after that, and the result is read before. Its stack and TLS
+     * block wait until the host thread is joined (reap_exited_hosts). */
     ps_host_interrupts_hold(1,NULL);
     void *p_result=p_thread->result;
     runtime_exception_lock(&s_lock);
@@ -454,15 +575,6 @@ static void *host_start(void *p_argument) {
     release_if_done(p_thread);
     runtime_exception_unlock(&s_lock);
     return p_result;
-}
-/* Guest names are arbitrary bytes: control and non-ASCII bytes would corrupt the log. */
-static void printable_name(char *out_name,const char *sz_name) {
-    size_t i=0;
-    for (;i<31 && sz_name[i];++i) {
-        const unsigned char c=(unsigned char)sz_name[i];
-        out_name[i]=c>=0x20 && c<0x7f ? (char)c : '?';
-    }
-    out_name[i]=0;
 }
 static void log_created(const GuestThread *p_thread,uint64_t stack) {
     char sz_name[32], sz_digest[512];
@@ -512,6 +624,7 @@ static int32_t create(GuestThread **pp_out,ThreadAttr **pp_attr_slot,GuestEntry 
     if (!pp_out || !pfn_entry) return ERR(22);
     ThreadAttr *p_thread_attr=NULL;
     if (pp_attr_slot && !(p_thread_attr=find_attr(pp_attr_slot))) return ERR(22);
+    reap_exited_hosts();
     GuestThread *p_thread=new_thread();
     if (!p_thread) return ERR(12);
     if (p_thread_attr) { p_thread->attr=*p_thread_attr; p_thread->attr.p_next=NULL; }
@@ -550,19 +663,27 @@ static int32_t create(GuestThread **pp_out,ThreadAttr **pp_attr_slot,GuestEntry 
     if (e==EINVAL && !p_thread->attr.p_stack_addr) {
         /* Stacks below 1 TiB as on PS4; guest code may pack stack addresses. */
         size_t cb_stack=(size_t)stack+STACK_MARGIN;
-        void *p_stack_memory=runtime_low_map(cb_stack,PS_HOST_VM_READ|PS_HOST_VM_WRITE);
+        runtime_exception_lock(&s_lock);
+        unsigned char *p_stack_memory=take_free(&s_p_free_stacks,cb_stack);
+        if (p_stack_memory) { --s_c_free_stacks; ++s_c_stacks_reused; }
+        runtime_exception_unlock(&s_lock);
+        if (!p_stack_memory && (p_stack_memory=runtime_low_map(cb_stack,PS_HOST_VM_READ|PS_HOST_VM_WRITE)))
+            __atomic_add_fetch(&s_c_stacks_mapped,1,__ATOMIC_RELAXED);
         if (p_stack_memory) {
+            p_thread->p_owned_stack=p_stack_memory; p_thread->cb_owned_stack=cb_stack;
             pthread_attr_setstack(&host,p_stack_memory,cb_stack);
             /* Known before the thread runs: libSceUlt reads it (scePthreadAttrGet) right after
              * creating its workers, and builds their fibers' contexts on it. */
             p_thread->attr.p_stack_addr=p_stack_memory; p_thread->attr.stack=cb_stack;
-        } else pthread_attr_setstacksize(&host,cb_stack);
+        } else {
+            count_stack_fallback(cb_stack);
+            pthread_attr_setstacksize(&host,cb_stack);
+        }
         e=pthread_create(&p_thread->host,&host,host_start,p_thread);
     }
     pthread_attr_destroy(&host);
     ps_host_interrupts_restore(&p_thread->start_mask);
     if (e) { fprintf(stderr,"STOP: host pthread_create failed: %d\n",e); runtime_stop(21); }
-    if (p_thread->detached) pthread_detach(p_thread->host);
     log_created(p_thread,stack);
     runtime_exception_lock(&s_lock);
     p_thread->is_starting=0;
@@ -594,19 +715,16 @@ static ABI int32_t thread_join(GuestThread *p_thread,void **pp_result) {
     if (pp_result) *pp_result=p_value;
     return 0;
 }
-/* FreeBSD refuses to detach a thread another one is joining (EINVAL). */
+/* FreeBSD refuses to detach a thread another one is joining (EINVAL). The host thread stays
+ * joinable: reap_exited_hosts joins it once it has left its stack. */
 static ABI int32_t thread_detach(GuestThread *p_thread) {
     runtime_exception_lock(&s_lock);
     int32_t result=!find_listed(p_thread) ? ERR(3) : p_thread->detached || p_thread->joined ? ERR(22) : 0;
-    pthread_t host={0};
-    int is_host_thread=0;
     if (!result) {
         p_thread->detached=1;
-        is_host_thread=!p_thread->host_owned; host=p_thread->host;
         release_if_done(p_thread);
     }
     runtime_exception_unlock(&s_lock);
-    if (is_host_thread) pthread_detach(host);
     return result;
 }
 /* FreeBSD's struct pthread_cleanup, laid over the _pthread_cleanup_info the guest's
@@ -790,6 +908,7 @@ uintptr_t runtime_thread_resolve(const char *sz_name) {
     return 0;
 }
 void runtime_thread_report(void) {
+    const size_t cb_low_left=runtime_low_left();
     if (!runtime_exception_report_lock(&s_lock,"thread")) return;
     printf("Runtime: guest threads created=%zu, exited=%zu (through scePthreadExit %zu), joined=%zu\n",s_c_created,
            s_c_exited,s_c_exit_calls,s_c_joined);
@@ -805,6 +924,17 @@ void runtime_thread_report(void) {
         printf("Runtime: guest thread records: %zu carved from low memory, %zu reused after join or detach, "
                "%zu outside low memory; peak live guest threads %zu\n",s_c_low_records,s_c_recycled_records,
                s_c_high_records,s_c_peak_live);
+    if (s_c_created) {
+        size_t c_exited_hosts=0;
+        for (const GuestThread *p_thread=s_p_exited;p_thread;p_thread=p_thread->next) ++c_exited_hosts;
+        printf("Runtime: guest thread stacks: %zu mapped from low memory, %zu reused, %zu held by threads not yet "
+               "joined or reaped, %zu free, %zu on host stacks for lack of low memory; TLS blocks: %zu allocated, "
+               "%zu reused; detached threads' host threads: %zu joined after they left, %zu still awaited, %zu not "
+               "joinable; low memory left %zu MiB\n",
+               s_c_stacks_mapped,s_c_stacks_reused,s_c_stacks_mapped-s_c_free_stacks,s_c_free_stacks,
+               s_c_stack_fallbacks,s_c_tls_allocated,
+               s_c_tls_reused,s_c_hosts_reaped,c_exited_hosts,s_c_hosts_lost,cb_low_left>>20);
+    }
     if (s_c_high_records)
         printf("Runtime: %zu thread records outside low memory (handles above 40 bits)\n",s_c_high_records);
     runtime_exception_unlock(&s_lock);

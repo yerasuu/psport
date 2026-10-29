@@ -242,7 +242,9 @@ keyboard asks ime after its own table.
 Guest-visible errno values are FreeBSD's (`runtime_guest_errno`). Sockets, libSceNet's and POSIX's,
 take their descriptors from the file table (`runtime_file.c`), as kernel descriptors do on the console,
 so `close`, `read`, `write`, `fcntl` and `select` serve both. Guest threads are host pthreads
-with PS4 stacks below 1 TiB.
+with PS4 stacks below 1 TiB. Host threads are never detached: a thread's stack, TLS block and
+record go to the next thread only once its host thread is joined, by the guest's join or, for a
+detached thread, by `pthread_tryjoin_np` when the next thread is created (`runtime_thread.c`).
 
 ### Call report
 

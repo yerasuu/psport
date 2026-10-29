@@ -397,9 +397,13 @@ void *runtime_low_map(size_t cb_range, unsigned access) {
     void *p_mapping=NULL;
     while (s_low_next+cb_range<=USER_MIN) {
         p_mapping=ps_host_vm_map((void *)s_low_next,cb_range,access,PS_HOST_VM_EXACT);
-        s_low_next+=cb_range+PAGE; /* unmapped gap catches overruns */
+        __atomic_store_n(&s_low_next,s_low_next+cb_range+PAGE,__ATOMIC_RELAXED); /* unmapped gap catches overruns */
         if (p_mapping) break;
     }
     write_unlock();
     return p_mapping;
+}
+size_t runtime_low_left(void) {
+    const uintptr_t va_next=__atomic_load_n(&s_low_next,__ATOMIC_RELAXED);
+    return va_next<USER_MIN ? (size_t)(USER_MIN-va_next) : 0;
 }

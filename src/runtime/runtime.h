@@ -346,6 +346,8 @@ int32_t runtime_guest_errno(int host_errno);
  * once, first thing in main. 0, or the host's errno. */
 int runtime_memory_reserve_arena(void);
 void *runtime_low_map(size_t cb_range, unsigned access);
+/* What runtime_low_map can still hand out, read without its lock so that an exit report never waits. */
+size_t runtime_low_left(void);
 uintptr_t runtime_ajm_resolve(const char *sz_name);
 void runtime_ajm_report(void);
 uintptr_t runtime_audio_resolve(const char *sz_name);
