@@ -158,6 +158,57 @@ static ABI int32_t lnc_unregister_cdlg_shm_name(const char *sz_name) {
     return cdlg_shared_memory_name(sz_name,"sceLncUtilUnregisterCdlgSharedMemoryName",&s_c_cdlg_unregistered);
 }
 
+/* CommonDialog launches the system dialog process (NPXS22010) from sceCommonDialogInitialize and
+ * polls the launch from its pump: a negative result other than EAGAIN leaves it launching, so no
+ * dialog process id is ever stored and its watchdog never fires. No launcher runs here: the request
+ * is accepted, so that sceCommonDialogInitialize answers 0 as on a console (Ryza ignores it, other
+ * titles may not), and its result is ESRCH, a kernel code like the EAGAIN LncUtil answers while a
+ * launch is pending. libSceLncUtil is not in the dump, so its own codes were not read. */
+#define CB_TITLE_ID 10
+#define LNC_LAUNCH_REQUEST 1
+typedef struct { uint32_t cb_param; int32_t user_id; uint32_t reserved, flags; uint64_t reserved2; } GuestLaunchParam;
+_Static_assert(sizeof(GuestLaunchParam)==0x18,"LaunchParam layout");
+static uint64_t s_c_launch_started, s_c_launch_results;
+static ABI int32_t lnc_start_launch_app(const char *sz_title_id, const void *p_args, const GuestLaunchParam *p_param,
+                                        int32_t *p_out_request) {
+    (void)p_args;
+    if (!runtime_memory_is_guest_range(sz_title_id,CB_TITLE_ID) || !memchr(sz_title_id,0,CB_TITLE_ID) ||
+        !runtime_memory_is_guest_range(p_param,sizeof(*p_param)) ||
+        !runtime_memory_is_guest_range(p_out_request,sizeof(*p_out_request)))
+        return EFAULT_;
+    if (p_param->cb_param!=sizeof(*p_param)) return EINVAL_;
+    *p_out_request=LNC_LAUNCH_REQUEST;
+    if (!__atomic_fetch_add(&s_c_launch_started,1,__ATOMIC_RELAXED)) {
+        printf("Runtime: sceLncUtilStartLaunchAppByTitleId %s: no launcher service, the launch never completes\n",sz_title_id);
+        runtime_calls_hle_stub("sceLncUtilStartLaunchAppByTitleId (no launcher service: accepted, never completes)",
+                               &s_c_launch_started);
+    }
+    return 0;
+}
+static ABI int32_t lnc_launch_app_result(int32_t h_request) {
+    (void)h_request;
+    note_inferred(&s_c_launch_results,"sceLncUtilGetResultLaunchAppByTitleId (no launcher service: ESRCH)");
+    return ERR(3);
+}
+
+/* The only call CommonDialog makes between a dialog's set-up and its RUNNING state, which it then
+ * leaves only when the dialog process reports a result: a title waiting on the status (Ryza's
+ * sceWebBrowserDialogOpen loops until FINISHED) would wait forever, so the dialog fails to open
+ * instead, with this code as its error. */
+static uint64_t s_c_cdlg_activations;
+static ABI int32_t lnc_activate_cdlg(void) {
+    note_inferred(&s_c_cdlg_activations,"sceLncUtilActivateCdlg (no system dialog process: ESRCH, the dialog does not open)");
+    return ERR(3);
+}
+
+/* CommonDialog resumes the dialog process with it and ignores the result. */
+static uint64_t s_c_cdlg_exec;
+static ABI int32_t lnc_set_cdlg_exec(int32_t app_id, int32_t should_execute) {
+    (void)app_id; (void)should_execute;
+    note_inferred(&s_c_cdlg_exec,"sceLncUtilSetCdlgExec (no system dialog process: ESRCH)");
+    return ERR(3);
+}
+
 /* The registry (libSceRegMgr's system call): GetInt is op 2 with the key as id and a 4-byte value,
  * NonSysGetInt op 0x19 with {key, index, value} in the buffer. No key's console value has been read
  * yet, so each one answers 0, the value an unset setting has, and the first ones are logged with
@@ -205,6 +256,9 @@ static const RuntimeExport s_exports[]={
     {"sceKernelGetVrCaptureSize",vr_capture_size}, {"sceLncUtilGetAppStatus",lnc_app_status},
     {"sceLncUtilRegisterCdlgSharedMemoryName",lnc_register_cdlg_shm_name},
     {"sceLncUtilUnregisterCdlgSharedMemoryName",lnc_unregister_cdlg_shm_name},
+    {"sceLncUtilStartLaunchAppByTitleId",lnc_start_launch_app},
+    {"sceLncUtilGetResultLaunchAppByTitleId",lnc_launch_app_result},
+    {"sceLncUtilActivateCdlg",lnc_activate_cdlg}, {"sceLncUtilSetCdlgExec",lnc_set_cdlg_exec},
     {"__sys_regmgr_call",regmgr_call},
 };
 uintptr_t runtime_process_resolve(const char *sz_name) { return RUNTIME_LOOKUP(s_exports,sz_name); }
