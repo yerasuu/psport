@@ -23,6 +23,9 @@
 #define PT_SCE_PROCPARAM 0x61000001
 #define PT_SCE_RELRO 0x61000010
 #define IMAGE_LIMIT (512u * 1024 * 1024)
+#define DT_NEEDED 1
+#define DT_SCE_MODULE_INFO 0x6100000d
+#define DT_SCE_NEEDED_MODULE 0x6100000f
 
 /* Served by the game's libc.prx, whose functions the runtime partly replaces to track the game's
  * writes into GPU memory (memcpy, memset): a native copy of this one would bypass that. */
@@ -463,6 +466,96 @@ static int needs_np_manager(const LoaderModule *p_module) {
         if (!strcmp(p_module->p_modules[i].sz_name, "libSceNpManager")) return 1;
     return 0;
 }
+static const char *dynamic_string(const LoaderModule *p_module, uint64_t off_string) {
+    if (!p_module->p_strings || off_string >= p_module->cb_strings ||
+        !memchr(p_module->p_strings + off_string, 0, p_module->cb_strings - off_string))
+        return "";
+    return (const char *)p_module->p_strings + off_string;
+}
+static const char *own_module_name(const LoaderModule *p_module) {
+    for (size_t i = 0; i < p_module->c_dynamic_entries; ++i)
+        if (p_module->p_dynamic[i].tag == DT_SCE_MODULE_INFO) return dynamic_string(p_module, p_module->p_dynamic[i].value & 0xffffffff);
+    return "";
+}
+/* Whether the module needs the other one: a DT_SCE_NEEDED_MODULE entry with its module name, or a
+ * DT_NEEDED entry with its file. */
+static int needs_module(const LoaderModule *p_module, const char *sz_other_name, const char *sz_other_stem) {
+    char sz_needed[256];
+    for (size_t i = 0; i < p_module->c_dynamic_entries; ++i) {
+        const uint64_t tag = p_module->p_dynamic[i].tag, value = p_module->p_dynamic[i].value;
+        if (tag == DT_SCE_NEEDED_MODULE) {
+            const char *sz_name = dynamic_string(p_module, value & 0xffffffff);
+            if (*sz_name && (!strcmp(sz_name, sz_other_name) || !strcmp(sz_name, sz_other_stem))) return 1;
+        } else if (tag == DT_NEEDED) {
+            stem(dynamic_string(p_module, value), sz_needed, sizeof(sz_needed));
+            if (*sz_needed && !strcmp(sz_needed, sz_other_stem)) return 1;
+        }
+    }
+    return 0;
+}
+enum { START_UNSEEN, START_ORDERING, START_ORDERED };
+typedef struct {
+    const LoaderModule *p_linked;
+    const RuntimeModule *p_table;
+    const char **pp_names;
+    char (*p_stems)[128];
+    unsigned char *p_states;
+    uint64_t *p_order;
+    size_t c_linked, c_ordered, i_top;
+} StartOrder;
+static void order_after_needs(StartOrder *p_start, size_t i) {
+    p_start->p_states[i] = START_ORDERING;
+    for (size_t j = 0; j < p_start->c_linked; ++j) {
+        if (j == i || p_start->p_table[j].deferred || !needs_module(&p_start->p_linked[i], p_start->pp_names[j], p_start->p_stems[j]))
+            continue;
+        if (p_start->p_states[j] == START_ORDERING) {
+            printf("Loader: modules %s and %s need each other: that link is ignored and %s starts first\n",
+                   p_start->p_table[i].sz_name, p_start->p_table[j].sz_name, p_start->p_table[i].sz_name);
+        } else if (p_start->p_states[j] == START_UNSEEN) {
+            if (j > p_start->i_top)
+                printf("Loader: %s starts before %s, which needs it\n", p_start->p_table[j].sz_name, p_start->p_table[i].sz_name);
+            order_after_needs(p_start, j);
+        }
+    }
+    p_start->p_states[i] = START_ORDERED;
+    p_start->p_order[p_start->c_ordered++] = i;
+}
+/* The console's dynamic linker runs the module_start of the modules a module needs before its own
+ * (libSceHttp2's fails unless libSceNet's has run, kb #1248), so modules start dependencies first,
+ * each otherwise in link order. Modules the game loads by path start when it loads them. */
+static uint64_t *start_order(const LoaderModule *p_linked, const RuntimeModule *p_table, size_t c_linked) {
+    StartOrder start = {.p_linked = p_linked,
+                        .p_table = p_table,
+                        .pp_names = calloc(c_linked ? c_linked : 1, sizeof(*start.pp_names)),
+                        .p_stems = calloc(c_linked ? c_linked : 1, sizeof(*start.p_stems)),
+                        .p_states = calloc(c_linked ? c_linked : 1, sizeof(*start.p_states)),
+                        .p_order = calloc(c_linked ? c_linked : 1, sizeof(*start.p_order)),
+                        .c_linked = c_linked};
+    if (!start.pp_names || !start.p_stems || !start.p_states || !start.p_order) loader_fail("allocation failed");
+    for (size_t i = 0; i < c_linked; ++i) {
+        start.pp_names[i] = own_module_name(&p_linked[i]);
+        stem(p_table[i].sz_name, start.p_stems[i], sizeof(start.p_stems[i]));
+    }
+    for (start.i_top = 0; start.i_top < c_linked; ++start.i_top) {
+        if (start.p_states[start.i_top] != START_UNSEEN) continue;
+        if (p_table[start.i_top].deferred) {
+            start.p_states[start.i_top] = START_ORDERED;
+            start.p_order[start.c_ordered++] = start.i_top;
+        } else
+            order_after_needs(&start, start.i_top);
+    }
+    int is_reordered = 0;
+    for (size_t i = 0; i < c_linked; ++i) is_reordered |= start.p_order[i] != i;
+    if (is_reordered) {
+        printf("Loader: linked modules start dependencies first, not in link order:");
+        for (size_t i = 0; i < c_linked; ++i) printf("%s %s", i ? "," : "", p_table[start.p_order[i]].sz_name);
+        printf("\n");
+    }
+    free(start.pp_names);
+    free(start.p_stems);
+    free(start.p_states);
+    return start.p_order;
+}
 static void free_module(LoaderModule *p_module) {
     free(p_module->p_elf); free(p_module->p_ph); free(p_module->p_dynamic); free(p_module->p_libraries); free(p_module->p_modules); free(p_module->p_symbols); free(p_module->p_relas);
 }
@@ -803,6 +896,7 @@ void loader_load_game(const LoaderOptions *p_options, LoaderImage *p_out) {
                p_table[i].deferred ? " (loaded by the game)" : "");
     printf("; %llu native bindings, %zu imports left to the host runtime, fs->gs patched=%llu\n",
            (unsigned long long)p_out->c_bindings, unresolved, (unsigned long long)fs_patched);
+    p_out->p_start_order = start_order(p_linked, p_table, c_linked);
     loader_record_game_traits(l.sz_game, &l.main);
     for (size_t i = 0; i < c_linked; ++i) free_module(&p_linked[i]);
     free_module(&l.main);

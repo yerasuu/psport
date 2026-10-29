@@ -54,7 +54,7 @@ run.sh
     psport_gpu_init()                      game title and profile, settings, saves, window thread, GnmDriver, VideoOut
     bind every import                 native binding or runtime_resolve() or trap
     apply the patches, PsTitleInfo's pfn_patch_image
-    protect segments, set TLS, start linked modules in link order
+    protect segments, set TLS, start linked modules dependencies first
     enter the eboot's entry on an 8 MiB stack below 1 TiB
 ```
 
@@ -196,7 +196,9 @@ without implementation N`.
 
 After binding: the patches are applied (pointer writes into relocated slots are rebased), the
 profile's and the title's `patch_image` run, segments get their protections, TLS is set up, linked modules start
-in link order (libc first) and the eboot's entry runs with `argv[0] = /app0/eboot.bin`.
+dependencies first (each after the modules its `DT_SCE_NEEDED_MODULE` and `DT_NEEDED` entries name among the
+linked ones, otherwise in link order, libc first; a cycle is logged and broken in link order; the log names the
+order when it differs from link order) and the eboot's entry runs with `argv[0] = /app0/eboot.bin`.
 
 ## C runtime
 

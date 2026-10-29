@@ -18,6 +18,8 @@ typedef struct {
     /* p_all_modules[0] is the eboot; c_modules counts the modules after it. */
     RuntimeModule *p_all_modules;
     uint64_t c_modules;
+    /* The order the modules after the eboot start in: their indices, dependencies first. */
+    uint64_t *p_start_order;
     LoaderSegment *p_segments;
     uint64_t c_segments;
     LoaderReloc *p_relocs;

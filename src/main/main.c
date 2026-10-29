@@ -238,6 +238,8 @@ int main(int argc, char **argv) {
         g_c_modules=boot_image.c_modules;
         g_p_modules=s_p_all_modules+1;
         if (!g_c_modules || g_c_modules>1024) fail("invalid module count");
+        for (uint64_t k=0;k<g_c_modules;++k)
+            if (boot_image.p_start_order[k]>=g_c_modules) fail("invalid module start order");
         for (uint64_t m=0;m<g_c_modules;++m)
             for (uint64_t e=0;e<g_p_modules[m].c_exports;++e)
                 if (g_p_modules[m].p_exports[e].va_export-g_p_modules[m].base>=g_p_modules[m].cb_module) fail("module export outside its module");
@@ -394,8 +396,9 @@ int main(int argc, char **argv) {
         runtime_set_main_tls(g_p_image+p_main_tls[0],p_main_tls[1],p_main_tls[2],p_main_tls[3]);
         runtime_thread_attach_main();
         runtime_set_procparam(g_p_image+procparam);
-        /* Dependencies start in link order (libc first), as the PS4 dynamic linker does. */
-        for (uint64_t m=0;m<g_c_modules;++m) {
+        /* Dependencies first (the loader's start order, libc first), as the PS4 dynamic linker does. */
+        for (uint64_t k=0;k<g_c_modules;++k) {
+            const uint64_t m=boot_image.p_start_order[k];
             if (g_p_modules[m].deferred) {
                 printf("Linked module %" PRIu64 " (%s) waits for the game to load it\n",m,g_p_modules[m].sz_name);
                 continue;
