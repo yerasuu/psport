@@ -202,9 +202,9 @@ bool PipelineCache::LoadComputePipeline(Serialization::Archive& ar) {
 
     // psport: built before it is inserted: a pipeline the driver rejects while preloading is a
     // damaged entry and leaves no empty entry behind.
-    auto pipeline =
-        std::make_unique<ComputePipeline>(instance, scheduler, desc_heap, profile, *pipeline_cache,
-                                          compute_key, *sel.infos[0], sel.modules[0], sdata, true);
+    auto pipeline = std::make_unique<ComputePipeline>(instance, scheduler, desc_heap, profile,
+                                                      pipeline_cache->Handle(), compute_key,
+                                                      *sel.infos[0], sel.modules[0], sdata, true);
     if (!pipeline->Handle()) {
         ar.MarkCorrupt("a cached compute pipeline rejected by the driver");
         return false;
@@ -313,8 +313,8 @@ bool PipelineCache::LoadGraphicsPipeline(Serialization::Archive& ar) {
     }
 
     auto pipeline = std::make_unique<GraphicsPipeline>(
-        instance, scheduler, desc_heap, profile, sel.graphics_key, *pipeline_cache, sel.infos,
-        sel.runtime_infos, sel.fetch_shader, sel.modules, sdata, true);
+        instance, scheduler, desc_heap, profile, sel.graphics_key, pipeline_cache->Handle(),
+        sel.infos, sel.runtime_infos, sel.fetch_shader, sel.modules, sdata, true);
     if (!pipeline->Handle()) {
         ar.MarkCorrupt("a cached graphics pipeline rejected by the driver");
         return false;

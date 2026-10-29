@@ -47,6 +47,10 @@ public:
 
     void ForEachBlob(BlobType type, const std::function<void(std::vector<u8>&& data)>& func);
 
+    /// psport: the file of the Vulkan driver's pipeline cache, beside the blobs; empty while the
+    /// cache is not open. It belongs to the device and driver, not to a build: Clear() keeps it.
+    [[nodiscard]] std::filesystem::path DriverCachePath() const;
+
 private:
     std::jthread io_worker{};
     std::filesystem::path cache_path{};

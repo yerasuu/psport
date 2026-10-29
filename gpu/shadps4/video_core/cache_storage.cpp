@@ -45,6 +45,8 @@ bool s_has_reported_refusal{};
 // Close: what the writer has not finished by then is lost and recompiled at the next start.
 constexpr std::chrono::milliseconds EXIT_FLUSH_LIMIT{2000};
 
+constexpr const char* DRIVER_CACHE_EXTENSION = ".vkcache";
+
 // psport: the archive is read from <serial>.zip and written to <serial>.zip.tmp (the entries
 // kept copied over), which replaces it when the cache is closed, so a crash or an exit before
 // that leaves the old archive, never one cut short without its central directory.
@@ -393,6 +395,16 @@ void DataBase::ForEachBlob(BlobType type, const std::function<void(std::vector<u
     }
 }
 
+std::filesystem::path DataBase::DriverCachePath() const {
+    if (!opened) {
+        return {};
+    }
+    if (EmulatorSettings.IsPipelineCacheArchived()) {
+        return std::filesystem::path{cache_path}.replace_extension(DRIVER_CACHE_EXTENSION);
+    }
+    return cache_path / (std::string{"driver"} + DRIVER_CACHE_EXTENSION);
+}
+
 void DataBase::Clear() {
     if (!opened) {
         return;
@@ -409,7 +421,8 @@ void DataBase::Clear() {
     std::error_code ec;
     u64 removed = 0;
     for (const auto& entry : std::filesystem::directory_iterator(cache_path, ec)) {
-        if (entry.is_regular_file(ec) && std::filesystem::remove(entry.path(), ec)) {
+        if (entry.is_regular_file(ec) && entry.path().extension() != DRIVER_CACHE_EXTENSION &&
+            std::filesystem::remove(entry.path(), ec)) {
             ++removed;
         }
     }

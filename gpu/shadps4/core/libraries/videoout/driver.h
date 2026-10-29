@@ -104,6 +104,9 @@ public:
                               const BufferAttribute* attribute);
 
     bool SubmitFlip(VideoOutPort* port, s32 index, s64 flip_arg, bool is_eop = false);
+    /// psport PS_PACE_AT_START: the game's thread, after it submitted a flip, waits here for the
+    /// slot of its next frame instead of the finished frame waiting in VideoOut for its own.
+    void PaceFrameStart();
 
 private:
     struct Request {
@@ -142,6 +145,9 @@ private:
     VideoOutPort main_port{};
     std::jthread present_thread;
     std::queue<Request> requests;
+
+    std::mutex pace_mutex;
+    std::chrono::steady_clock::time_point next_frame_start{};
 };
 
 } // namespace Libraries::VideoOut

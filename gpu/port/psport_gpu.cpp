@@ -23,6 +23,7 @@
 #include "psport_small_textures.h"
 #include "sdl_window.h"
 #include "video_core/cache_storage.h"
+#include "video_core/renderer_vulkan/vk_driver_pipeline_cache.h"
 
 extern "C" {
 void runtime_report(void); // runtime.c
@@ -249,6 +250,7 @@ extern "C" void psport_gpu_flush_caches(int can_wait) {
     // second waits here for the first flush instead of cutting it short with its own _exit.
     static std::once_flag s_flush_once;
     std::call_once(s_flush_once, [] {
+        Vulkan::DriverPipelineCache::SaveForExit();
         Storage::DataBase::Instance().FlushForExit();
         PsSmallTextures::WriteIndexAtExit();
     });

@@ -469,11 +469,13 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
         .scene_width = GetUpscalerPlacement().scene_width,
         .scene_height = GetUpscalerPlacement().scene_height,
     };
+    // psport: the driver's cache is read before WarmUp, so the preload builds its pipelines
+    // through it; it used to be made empty after the preload.
+    if (EmulatorSettings.IsPipelineCacheEnabled()) {
+        Storage::DataBase::Instance().Open();
+    }
+    pipeline_cache = std::make_unique<DriverPipelineCache>(instance);
     WarmUp();
-
-    // psport: without one (VK_NULL_HANDLE) pipelines are created all the same, as WarmUp does.
-    pipeline_cache =
-        Check<"create the pipeline cache">(instance.GetDevice().createPipelineCacheUnique({}));
 }
 
 PipelineCache::~PipelineCache() = default;
@@ -682,7 +684,7 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline(const DrawIndirectPar
                           modules = sel.modules]() mutable {
             GraphicsPipeline::SerializationSupport sdata{};
             auto pipeline = std::make_unique<GraphicsPipeline>(
-                instance, scheduler, desc_heap, profile, key, *pipeline_cache, infos,
+                instance, scheduler, desc_heap, profile, key, pipeline_cache->Handle(), infos,
                 runtime_infos, fetch, modules, sdata, false);
             std::scoped_lock lk{job->mutex};
             job->pipeline = std::move(pipeline);
@@ -701,8 +703,8 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline(const DrawIndirectPar
 
         GraphicsPipeline::SerializationSupport sdata{};
         it.value() = std::make_unique<GraphicsPipeline>(
-            instance, scheduler, desc_heap, profile, sel.graphics_key, *pipeline_cache, sel.infos,
-            sel.runtime_infos, sel.fetch_shader, sel.modules, sdata, false);
+            instance, scheduler, desc_heap, profile, sel.graphics_key, pipeline_cache->Handle(),
+            sel.infos, sel.runtime_infos, sel.fetch_shader, sel.modules, sdata, false);
 
         RegisterPipelineData(sel.graphics_key, pipeline_hash, sdata);
         ++num_new_pipelines;
@@ -801,8 +803,9 @@ const ComputePipeline* PipelineCache::GetComputePipeline() {
 
         ComputePipeline::SerializationSupport sdata{};
         it.value() = std::make_unique<ComputePipeline>(instance, scheduler, desc_heap, profile,
-                                                       *pipeline_cache, compute_key, *sel.infos[0],
-                                                       sel.modules[0], sdata, false);
+                                                       pipeline_cache->Handle(), compute_key,
+                                                       *sel.infos[0], sel.modules[0], sdata,
+                                                       false);
         RegisterPipelineData(compute_key, sdata);
         ++num_new_pipelines;
 

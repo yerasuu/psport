@@ -925,6 +925,68 @@ void VideoOutDriver::SubmitFlipInternal(VideoOutPort* port, s32 index, s64 flip_
     request_cv.notify_one();
 }
 
+// psport PS_VRR: the highest frame rate that keeps a variable refresh display in its range, 3 FPS
+// or 2.5% under its refresh rate: at the refresh rate itself FIFO queues frames (a frame or two of
+// latency). Follows Supermedo/bloodborne_pc 3ec217b (GPL-2.0-or-later).
+static u32 GetVrrFrameCap(u32 refresh_hz) {
+    const u32 margin = std::max(3u, refresh_hz / 40);
+    return refresh_hz > margin ? refresh_hz - margin : 0;
+}
+
+// The frame rate VideoOut keeps now, 0 for none: PS_FPS_LIMIT, held under the display's refresh
+// rate with PS_VRR, and lowered by frame generation while FIFO shows its generated frames
+// (PsSettings::frame_gen_flip_limit, set by the Presenter) so that they fit too. The refresh rate is
+// read each time: it is known once the window is on a display, and changes with the display.
+static u32 GetFrameLimitNow() {
+    u32 limit = EmulatorSettings.GetFrameLimit();
+    if (EmulatorSettings.IsVrr() && (limit != 0 || EmulatorSettings.IsUncappedVblank())) {
+        static std::atomic<int> s_reported_hz{-1};
+        const int refresh_hz = PsSettings::Get().display_refresh_hz.load(std::memory_order_relaxed);
+        const u32 cap = refresh_hz > 0 ? GetVrrFrameCap(u32(refresh_hz)) : 0;
+        if (s_reported_hz.exchange(refresh_hz, std::memory_order_relaxed) != refresh_hz) {
+            if (cap != 0) {
+                std::printf("VRR: frame rate held at %u FPS at most (display %d Hz)\n", cap,
+                            refresh_hz);
+            } else {
+                std::printf("VRR: display refresh rate unknown, frame rate not held under it\n");
+            }
+        }
+        if (cap != 0 && (limit == 0 || limit > cap)) {
+            limit = cap;
+        }
+    }
+    const int fg_limit = PsSettings::Get().frame_gen_flip_limit.load(std::memory_order_relaxed);
+    return fg_limit > 0 && limit ? std::min(limit, u32(fg_limit)) : limit;
+}
+
+// With frame generation limiting the flips, VideoOut keeps the limit as before: the generated
+// frames are paced between the game's.
+static bool IsPacingAtStart() {
+    static const bool is_paced_at_start = EmulatorSettings.IsPacedAtStart();
+    return is_paced_at_start &&
+           PsSettings::Get().frame_gen_flip_limit.load(std::memory_order_relaxed) <= 0;
+}
+
+// Follows Supermedo/bloodborne_pc bfd9b38 (GPL-2.0-or-later): measured there at 120 FPS, about
+// 5 ms from the game starting a frame to its present instead of 12. The slots follow the rule of
+// PresentThread's limiter below.
+void VideoOutDriver::PaceFrameStart() {
+    if (!IsPacingAtStart()) {
+        return;
+    }
+    const u32 limit = GetFrameLimitNow();
+    if (limit == 0) {
+        return;
+    }
+    const std::chrono::nanoseconds period(1000000000 / limit);
+    std::scoped_lock lock{pace_mutex};
+    if (std::chrono::steady_clock::now() < next_frame_start) {
+        Common::PreciseSleepUntil(next_frame_start);
+    }
+    const auto started = std::chrono::steady_clock::now();
+    next_frame_start = std::max(next_frame_start + period, started + period - period / 16);
+}
+
 void VideoOutDriver::PresentThread(std::stop_token token) {
     const std::chrono::nanoseconds vblank_period(1000000000 /
                                                  EmulatorSettings.GetVblankFrequency());
@@ -939,13 +1001,12 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
     // slot is a period after the planned one but never sooner than a period minus `slack` after
     // the flip made: on a fixed grid the frame after a late one flipped early (single 6 ms
     // intervals at a cap of 120), and counting only from the flip added the wake-up delay to
-    // every frame (116 FPS at 120). Slots are waited for precisely (PreciseSleepUntil).
+    // every frame (116 FPS at 120). Slots are waited for precisely (PreciseSleepUntil). With
+    // PS_PACE_AT_START the game's thread waits for them instead (PaceFrameStart) and a finished
+    // frame is shown at once.
     const u32 frame_limit = EmulatorSettings.GetFrameLimit();
-    // Frame generation with FIFO presentation lowers the limit while it runs
-    // (PsSettings::frame_gen_flip_limit, set by the Presenter), so the generated frames fit too.
-    const auto get_frame_period = [frame_limit] {
-        const int fg_limit = PsSettings::Get().frame_gen_flip_limit.load(std::memory_order_relaxed);
-        const u32 limit = fg_limit > 0 && frame_limit ? std::min(frame_limit, u32(fg_limit)) : frame_limit;
+    const auto get_frame_period = [] {
+        const u32 limit = IsPacingAtStart() ? 0 : GetFrameLimitNow();
         return limit ? std::chrono::nanoseconds(1000000000 / limit) : std::chrono::nanoseconds(0);
     };
     auto frame_period = get_frame_period();
@@ -955,8 +1016,12 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
                         std::chrono::steady_clock::now() + frame_period - slack);
     };
     auto next_flip = std::chrono::steady_clock::now();
-    std::printf("VideoOut: vblank %u Hz, frame limit %u FPS\n",
-                EmulatorSettings.GetVblankFrequency(), frame_limit);
+    std::printf("VideoOut: vblank %u Hz, frame limit %u FPS%s, kept %s\n",
+                EmulatorSettings.GetVblankFrequency(), frame_limit,
+                EmulatorSettings.IsVrr() ? ", VRR (PS_VRR=1): held under the refresh rate" : "",
+                EmulatorSettings.IsPacedAtStart()
+                    ? "before the game starts a frame (PS_PACE_AT_START=0: at its flip)"
+                    : "at the flip (PS_PACE_AT_START=1: before the game starts a frame)");
 
     const auto receive_request = [this] -> Request {
         std::scoped_lock lk{mutex};
@@ -987,10 +1052,10 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
         // Check if it's time to take a request.
         auto& vblank_status = main_port.vblank_status;
         const auto now = std::chrono::steady_clock::now();
-        const bool flip_slot = !frame_limit || now >= next_flip;
+        const bool flip_slot = frame_period.count() == 0 || now >= next_flip;
         if (flip_slot && vblank_status.count % (main_port.flip_rate + 1) == 0) {
             const auto request = receive_request();
-            if (request && frame_limit) {
+            if (request && frame_period.count() != 0) {
                 next_flip = get_next_slot(next_flip);
             }
             if (!request) {

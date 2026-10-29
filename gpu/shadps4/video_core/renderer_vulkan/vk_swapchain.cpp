@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
+#include <cstdio>
 #include <limits>
+#include <string>
 #include "common/assert.h"
 #include "common/logging/log.h"
 #include "core/emulator_settings.h"
@@ -261,7 +263,14 @@ void Swapchain::FindPresentMode() {
         return;
     }
 
-    const auto requested_mode = EmulatorSettings.GetPresentMode();
+    // psport PS_VRR: FIFO, which every device supports, whatever PS_PRESENT_MODE asks for.
+    const auto requested_mode =
+        EmulatorSettings.IsVrr() ? std::string{"Fifo"} : EmulatorSettings.GetPresentMode();
+    if (EmulatorSettings.IsVrr()) {
+        std::printf("VRR (PS_VRR=1): FIFO presentation%s\n",
+                    EmulatorSettings.GetPresentMode() == "Fifo" ? ""
+                                                                : ", PS_PRESENT_MODE not used");
+    }
     if (requested_mode == "Mailbox") {
         present_mode = vk::PresentModeKHR::eMailbox;
     } else if (requested_mode == "Fifo") {

@@ -140,6 +140,8 @@ s32 PS4_SYSV_ABI sceVideoOutAdjustColor(s32 handle, const SceVideoOutColorSettin
 
 // Internal system functions
 s32 sceVideoOutSubmitEopFlip(s32 handle, u32 buf_id, u32 mode, s64 flip_arg, void** unk);
+/// psport: called by the game's thread once a flip is submitted (VideoOutDriver::PaceFrameStart).
+void PaceFrameStart();
 
 void RegisterLib(Core::Loader::SymbolsResolver* sym);
 

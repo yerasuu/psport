@@ -205,7 +205,14 @@ s32 PS4_SYSV_ABI sceVideoOutSubmitFlip(s32 handle, s32 bufferIndex, s32 flipMode
         return ORBIS_VIDEO_OUT_ERROR_FLIP_QUEUE_FULL;
     }
 
+    driver->PaceFrameStart();
     return ORBIS_OK;
+}
+
+void PaceFrameStart() {
+    if (driver) {
+        driver->PaceFrameStart();
+    }
 }
 
 s32 PS4_SYSV_ABI sceVideoOutGetEventId(const Kernel::OrbisKernelEvent* ev) {

@@ -2637,7 +2637,7 @@ s32 PS4_SYSV_ABI sceGnmSubmitAndFlipCommandBuffersForWorkload(
     auto* cmdbuf = dcb_gpu_addrs[count - 1];
     const auto size_dw = dcb_sizes_in_bytes[count - 1] / 4;
 
-    std::scoped_lock lk{m_submit_lock};
+    std::unique_lock lk{m_submit_lock};
     if (!SubmitLockOnDecode()) {
         WaitGpuIdle();
     }
@@ -2652,6 +2652,11 @@ s32 PS4_SYSV_ABI sceGnmSubmitAndFlipCommandBuffersForWorkload(
                                      const_cast<const u32**>(ccb_gpu_addrs), ccb_sizes_in_bytes);
     if (SubmitLockOnDecode()) {
         WaitPreviousFrameAtSubmit();
+    }
+    if (result == ORBIS_OK) {
+        // Outside the submission lock, which the game's other submitting threads wait on.
+        lk.unlock();
+        VideoOut::PaceFrameStart();
     }
     return result;
 }

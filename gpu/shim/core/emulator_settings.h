@@ -57,6 +57,18 @@ public:
         static const u32 value = u32(std::max(0L, Number("PS_FPS_LIMIT", 0)));
         return value;
     }
+    /// PS_VRR=1: the display follows the game's frames (G-Sync, FreeSync, HDMI VRR), which Vulkan
+    /// does not report. Presentation is FIFO, whose images such a display shows as they come
+    /// (with Mailbox it does not follow the game on every driver), and the frame rate is held a
+    /// little under the display's refresh rate (VideoOut), where FIFO would queue frames.
+    bool IsVrr() { static const auto value = Flag("PS_VRR", false); return value; }
+    /// PS_PACE_AT_START: the frame limit is kept before the game starts a frame, and VideoOut
+    /// shows a finished frame at once, instead of holding it for its slot while the game makes the
+    /// next one (a frame of latency). On with PS_VRR, off otherwise; 0 or 1 overrides.
+    bool IsPacedAtStart() { static const auto value = Flag("PS_PACE_AT_START", IsVrr()); return value; }
+    /// PS_DRIVER_PIPELINE_CACHE=0: the driver's pipeline cache is not saved beside the shader
+    /// cache (vk_driver_pipeline_cache.h).
+    bool IsDriverPipelineCacheEnabled() { static const auto value = Flag("PS_DRIVER_PIPELINE_CACHE", true); return value; }
     bool IsCopyGpuBuffers() { static const auto value = Flag("PS_COPY_GPU_BUFFERS", false); return value; }
     bool IsDirectMemoryAccessEnabled() { static const auto value = Flag("PS_DIRECT_MEMORY_ACCESS", false); return value; }
     bool IsDumpShaders() { static const auto value = Flag("PS_DUMP_SHADERS", false); return value; }
