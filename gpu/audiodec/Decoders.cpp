@@ -7,6 +7,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
+#include <iterator>
 #include <new>
 #include "libatrac9.h"
 
