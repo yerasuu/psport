@@ -101,7 +101,10 @@ const Packet* Cursor::Next() {
     if (m_is_pending) {
         m_is_pending = false;
         const int depth = m_levels.back().depth + 1;
-        if (depth >= MaxDepth) {
+        if (m_is_chain_pending) {
+            // A chained buffer replaces the one that chained it: the CP never returns to its rest.
+            m_levels.back().rest = m_sink.ResolveIndirectBuffer(m_va_pending, m_pending_dwords);
+        } else if (depth >= MaxDepth) {
             ++stats.bad;
             m_sink.OnBadPacket({}, "indirect buffers nested too deep", depth);
         } else if (const auto nested = m_sink.ResolveIndirectBuffer(m_va_pending, m_pending_dwords);
@@ -149,6 +152,7 @@ const Packet* Cursor::Next() {
                 m_is_pending = true;
                 m_va_pending = packet.Word(0) | u64(packet.Word(1) & 0xFFFF) << 32;
                 m_pending_dwords = packet.Word(2) & 0xFFFFF;
+                m_is_chain_pending = (packet.Word(2) >> 20 & 1) != 0;
             }
         }
         return &m_current;

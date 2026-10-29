@@ -59,8 +59,11 @@ void Translator::S_GETPC_B64(const GcnInst& inst) {
 void Translator::S_GETREG_B32(const GcnInst& inst) {
     constexpr u32 HW_REG_HW_ID = 4;
     const u32 hw_reg = u16(inst.control.sopk.simm) & 0x3f;
-    SHADER_ASSERT_MSG(hw_reg == HW_REG_HW_ID, "S_GETREG_B32 of unhandled hardware register {}",
-                      hw_reg);
+    if (hw_reg != HW_REG_HW_ID) {
+        LOG_ERROR_COUNTED(Render_Recompiler,
+                          "S_GETREG_B32 of unhandled hardware register {} at pc {:#x}, reads 0",
+                          hw_reg, pc);
+    }
     // psport: Vulkan exposes no wave placement, so every field reads 0; for the CU, SH and SE
     // ids that is a placement the hardware can also give (a dispatch may be limited to one unit).
     SetDst(inst.dst[0], ir.Imm32(0U));

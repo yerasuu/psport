@@ -105,7 +105,8 @@ bool ScanCommands(std::span<const u32> commands, u32 depth, ScanReplay& replay) 
 
 /// Applies one packet as the GPU thread would (nested indirect buffers followed, their state
 /// packets recorded for the workers). False when the registers after it cannot be known ahead
-/// of the GPU thread: a nested buffer that cannot be read or is nested too deep, or a COND_EXEC
+/// of the GPU thread: a nested buffer that cannot be read, is nested too deep or is chained (it
+/// replaces the rest of its parent, which this walk would go on to replay), or a COND_EXEC
 /// whose skip would leave other registers (or draw ordinals) than running its packets, since
 /// its condition is only known when the GPU thread gets there.
 bool ScanPacket(const AmdGpu::PM4Header* p_header, const u32* p_end, u32 depth,
@@ -113,10 +114,10 @@ bool ScanPacket(const AmdGpu::PM4Header* p_header, const u32* p_end, u32 depth,
     using AmdGpu::PM4ItOpcode;
     switch (p_header->type3.opcode) {
     case PM4ItOpcode::IndirectBuffer: {
-        if (depth >= MaxNestedDepth) {
+        const auto* p_ib = reinterpret_cast<const AmdGpu::PM4CmdIndirectBuffer*>(p_header);
+        if (depth >= MaxNestedDepth || p_ib->chain) {
             return false;
         }
-        const auto* p_ib = reinterpret_cast<const AmdGpu::PM4CmdIndirectBuffer*>(p_header);
         thread_local std::array<std::vector<u32>, MaxNestedDepth> s_nested;
         auto& words = s_nested[depth];
         if (!CopyGuestWords(p_ib->Address<const u32>(), p_ib->ib_size, words)) {

@@ -247,6 +247,7 @@ private:
     u64 m_va_pending = 0; ///< an indirect buffer to descend into on the next call
     u32 m_pending_dwords = 0;
     bool m_is_pending = false;
+    bool m_is_chain_pending = false; ///< the pending buffer replaces the current one (IB chain bit)
     Packet m_current{};
 };
 

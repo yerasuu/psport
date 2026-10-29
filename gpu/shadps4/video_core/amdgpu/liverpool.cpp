@@ -964,8 +964,11 @@ Liverpool::Task Liverpool::ProcessCeUpdate(std::span<const u32> ccb) {
         }
 
         const PM4ItOpcode opcode = header->type3.opcode;
-        if (IsBodyShort(opcode, header->type3.NumWords(), false)) {
-            ccb = NextPacket(ccb, header->type3.NumWords() + 1);
+        // psport: read before the packet runs, since the guest may reuse the buffer once the
+        // engines signal it.
+        const u32 c_body_dwords = header->type3.NumWords();
+        if (IsBodyShort(opcode, c_body_dwords, false)) {
+            ccb = NextPacket(ccb, c_body_dwords + 1);
             continue;
         }
         const auto* it_body = reinterpret_cast<const u32*>(header) + 1;
@@ -1045,11 +1048,10 @@ Liverpool::Task Liverpool::ProcessCeUpdate(std::span<const u32> ccb) {
         }
         default:
             Pm4Faults::Note(Pm4Faults::Kind::Skipped, u32(opcode),
-                            "constant engine: unknown opcode, %u body dwords",
-                            header->type3.NumWords());
+                            "constant engine: unknown opcode, %u body dwords", c_body_dwords);
             break;
         }
-        ccb = NextPacket(ccb, header->type3.NumWords() + 1);
+        ccb = NextPacket(ccb, c_body_dwords + 1);
     }
 
     FIBER_EXIT;
@@ -1724,11 +1726,11 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
     if (seq != NoSeq && is_translating) {
         CpTranslatorRecord(dcb, regs, indirect_args_addr);
     }
-    const auto base_addr = reinterpret_cast<uintptr_t>(dcb.data());
-    const std::size_t dcb_dwords = dcb.size();
+    auto base_addr = reinterpret_cast<uintptr_t>(dcb.data());
+    std::size_t dcb_dwords = dcb.size();
     // psport PS_CP_DECODER=1: packets and their register writes come from the
     // translator's own decoder (gpu/cp); what each packet does stays below.
-    const u32* const dcb_end = dcb.data() + dcb.size();
+    const u32* dcb_end = dcb.data() + dcb.size();
     struct CpSink final : PsCp::Sink {
         uintptr_t base;
         std::size_t dwords;
@@ -2558,8 +2560,29 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
             }
             case PM4ItOpcode::IndirectBuffer: {
                 const auto* indirect_buffer = reinterpret_cast<const PM4CmdIndirectBuffer*>(header);
-                auto task = ProcessGraphics(
-                    {indirect_buffer->Address<const u32>(), indirect_buffer->ib_size}, {});
+                const std::span<const u32> ib{indirect_buffer->Address<const u32>(),
+                                              indirect_buffer->ib_size};
+                if (indirect_buffer->chain) {
+                    // psport: a chained buffer replaces this one, since the CP never returns to
+                    // the rest of it: in a reused segment that rest still holds old commands.
+                    if (dcb_stats) {
+                        ScanDcb(ib, dcb_depth);
+                    }
+                    if (PsCpCensus::g_is_enabled) {
+                        PsCpCensus::ScanGraphics(ib, {}, dcb_depth);
+                    }
+                    dcb = ib;
+                    base_addr = reinterpret_cast<uintptr_t>(dcb.data());
+                    dcb_dwords = dcb.size();
+                    dcb_end = dcb.data() + dcb.size();
+                    cp_sink.base = base_addr;
+                    cp_sink.dwords = dcb_dwords;
+                    if (cp_cursor) {
+                        cp_cursor.emplace(CpDecoder(), dcb, cp_sink, dcb_depth, false);
+                    }
+                    continue;
+                }
+                auto task = ProcessGraphics(ib, {});
                 // Tasks start suspended: the nested body (and its scan) runs on this resume.
                 g_dcb_depth = dcb_depth + 1;
                 RESUME_GFX(task);
@@ -2664,8 +2687,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                     if (cp_cursor) {
                         cp_cursor->Skip(cond_exec->exec_count.Value());
                     }
-                    dcb = NextPacket(dcb,
-                                     header->type3.NumWords() + 1 + cond_exec->exec_count.Value());
+                    dcb = NextPacket(dcb, count + 1 + cond_exec->exec_count.Value());
                     continue;
                 }
                 break;
@@ -2675,7 +2697,9 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                                 "unknown opcode, %u body dwords (IB depth %d)", count, dcb_depth);
                 break;
             }
-            dcb = NextPacket(dcb, header->type3.NumWords() + 1);
+            // psport: the size read before the packet ran, since a flip or an EOP interrupt lets
+            // the guest reuse this buffer at once and the header may already be overwritten.
+            dcb = NextPacket(dcb, count + 1);
             break;
         }
     }
@@ -2838,8 +2862,21 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
         }
         case PM4ItOpcode::IndirectBuffer: {
             const auto* indirect_buffer = reinterpret_cast<const PM4CmdIndirectBuffer*>(header);
-            auto task = ProcessCompute<true>(
-                {indirect_buffer->Address<const u32>(), indirect_buffer->ib_size}, vqid);
+            const std::span<const u32> ib{indirect_buffer->Address<const u32>(),
+                                          indirect_buffer->ib_size};
+            if constexpr (is_indirect) {
+                // psport: as in ProcessGraphics, a chained buffer replaces this one.
+                if (indirect_buffer->chain) {
+                    if (PsCpCensus::g_is_enabled) {
+                        PsCpCensus::ScanCompute(ib, true);
+                    }
+                    acb = ib;
+                    base_addr = reinterpret_cast<VAddr>(acb.data());
+                    acb_size = acb.size_bytes();
+                    continue;
+                }
+            }
+            auto task = ProcessCompute<true>(ib, vqid);
             RESUME_ASC(task, vqid);
 
             while (!task.handle.done()) {
