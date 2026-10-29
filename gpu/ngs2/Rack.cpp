@@ -2,10 +2,10 @@
 // sceNgs2Rack* and sceNgs2CustomRackGetModuleInfo (spec 02 §3, §4). A rack's buffer holds the rack, its
 // voices (all of them exist from creation on), each voice's matrices and ports, and everything the
 // render keeps for a voice: parameters, DSP state, input rings, the waveform queue, and a sampler's
-// ATRAC9 decoders. QueryBufferSize answers what this layout needs, which differs from the console's sum
-// (spec 08 §2): LibAtrac9's state is about 90 KiB a decoder where the firmware's takes 0xF0 bytes plus
-// 0x280 per channel work. A reverb voice's delay lines take what the firmware's module 0x1b sizes for them
-// (spec 07 §1) plus one float.
+// ATRAC9 decoder slots. QueryBufferSize answers what this layout needs, which differs from the console's
+// sum (spec 08 §2). LibAtrac9's state and frame planes, about 98 KiB a decoder where the firmware's
+// takes 0xF0 bytes plus 0x280 per channel work, live in host memory instead (kb #1170). A reverb voice's
+// delay lines take what the firmware's module 0x1b sizes for them (spec 07 §1) plus one float.
 #include <algorithm>
 #include <cstring>
 #include <new>
@@ -179,11 +179,6 @@ Rack* LayOutRack(Arena* p_arena, const RackKind& kind, const RackLimits& limits)
     const u32 c_atrac9_decoders =
         kind.rack_class == RACK_CLASS_SOURCE ? limits.max_atrac9_decoders + limits.max_ajm_atrac9_decoders : 0;
     auto* p_atrac9_decoders = AllocateArray<Atrac9Decoder>(p_arena, c_atrac9_decoders);
-    const std::size_t cb_atrac9_state = GetAtrac9StateSize();
-    auto* p_atrac9_states =
-        c_atrac9_decoders ? static_cast<u8*>(p_arena->Allocate(c_atrac9_decoders * cb_atrac9_state, 16)) : nullptr;
-    const std::size_t c_atrac9_frame_floats = std::size_t(kMaxChannels) * kMaxAtrac9FrameSamples;
-    float* p_atrac9_frames = AllocateArray<float>(p_arena, c_atrac9_decoders * c_atrac9_frame_floats);
     // The data lock bitmap at rack+0x130: two bits per sampler voice (spec 09 §6.2).
     const std::size_t c_lock_words =
         kind.rack_class == RACK_CLASS_SOURCE ? (std::size_t(limits.max_voices) + 15) / 16 : 0;
@@ -217,9 +212,7 @@ Rack* LayOutRack(Arena* p_arena, const RackKind& kind, const RackLimits& limits)
     p_rack->c_atrac9_decoders = c_atrac9_decoders;
     for (u32 i_decoder = 0; i_decoder < c_atrac9_decoders; ++i_decoder) {
         new (&p_atrac9_decoders[i_decoder])
-            Atrac9Decoder{p_atrac9_states + i_decoder * cb_atrac9_state,
-                          p_atrac9_frames + i_decoder * c_atrac9_frame_floats, nullptr,
-                          i_decoder >= limits.max_atrac9_decoders};
+            Atrac9Decoder{nullptr, nullptr, nullptr, i_decoder >= limits.max_atrac9_decoders};
     }
     for (std::size_t i_word = 0; i_word < c_lock_words; ++i_word) {
         new (&p_lock_words[i_word]) std::atomic<u32>{0};
@@ -256,6 +249,10 @@ void TearDownRack(Rack* p_rack) {
         Voice* p_voice = &p_rack->p_voices[i_voice];
         std::memset(static_cast<void*>(&p_voice->handle), 0, sizeof(p_voice->handle));
         p_voice->~Voice();
+    }
+    for (u32 i_decoder = 0; i_decoder < p_rack->c_atrac9_decoders; ++i_decoder) {
+        FreeAtrac9Decoder(&p_rack->p_atrac9_decoders[i_decoder]);
+        p_rack->p_atrac9_decoders[i_decoder].~Atrac9Decoder();
     }
     std::memset(static_cast<void*>(&p_rack->handle), 0, sizeof(p_rack->handle));
     p_rack->~Rack();

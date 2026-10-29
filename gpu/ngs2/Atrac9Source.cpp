@@ -7,6 +7,7 @@
 // blocks join without a gap. The firmware's AJM path (setup flags bit 0) queues superframes to libSceAjm
 // a grain ahead; decoding them here at once gives the same samples a grain sooner.
 #include <algorithm>
+#include <new>
 #include <utility>
 
 #include "Atrac9Glue.h"
@@ -33,10 +34,35 @@ s32 FailCodec(std::uint64_t* p_c_failures, s32 code, const char* sz_what, s32 de
     return code;
 }
 
-} // namespace
-
 std::size_t GetAtrac9StateSize() {
     return (ngs2_atrac9_get_decoder_size() + 15) & ~std::size_t(15);
+}
+
+} // namespace
+
+std::size_t GetAtrac9DecoderSize() {
+    return GetAtrac9StateSize() + std::size_t(kMaxChannels) * kMaxAtrac9FrameSamples * sizeof(float);
+}
+
+bool PrepareAtrac9Decoder(Atrac9Decoder* p_decoder) {
+    if (p_decoder->p_state) {
+        return true;
+    }
+    void* p_block = ::operator new(GetAtrac9DecoderSize(), std::align_val_t{16}, std::nothrow);
+    if (!p_block) {
+        return false;
+    }
+    p_decoder->p_frame = reinterpret_cast<float*>(static_cast<u8*>(p_block) + GetAtrac9StateSize());
+    p_decoder->p_state = p_block;
+    return true;
+}
+
+void FreeAtrac9Decoder(Atrac9Decoder* p_decoder) {
+    if (p_decoder->p_state) {
+        ::operator delete(p_decoder->p_state, std::align_val_t{16});
+    }
+    p_decoder->p_state = nullptr;
+    p_decoder->p_frame = nullptr;
 }
 
 void ReleaseAtrac9Decoder(Voice* p_voice) {

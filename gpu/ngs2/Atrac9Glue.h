@@ -8,7 +8,7 @@
 extern "C" {
 #endif
 
-/* The bytes one decoder's state takes, which a sampler rack lays out in its buffer. */
+/* The bytes one decoder's state takes, in the host block of a sampler rack's decoder. */
 size_t ngs2_atrac9_get_decoder_size(void);
 /* Starts p_decoder afresh, overlap and band history cleared, for the 4-byte ATRAC9 header p_config;
  * 0, or LibAtrac9's error. */

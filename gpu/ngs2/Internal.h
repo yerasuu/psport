@@ -211,10 +211,13 @@ struct ReverbState;
 struct CustomRack;
 struct CustomVoice;
 
-// One of a sampler rack's ATRAC9 decoders (spec 05 §6, 08 §2): LibAtrac9's state and the planes of the
-// frame it decoded last, both in the rack's buffer. The first maxAtrac9Decoders stand for the
+// One of a sampler rack's ATRAC9 decoders (spec 05 §6, 08 §2). The first maxAtrac9Decoders stand for the
 // firmware's internal decoders, the maxAjmAtrac9Decoders after them for its AJM instances. PLAY reserves
-// one for a voice until it gives its channel works back (spec 10 §5); p_owner is that voice.
+// one for a voice until it gives its channel works back (spec 10 §5); p_owner is that voice. LibAtrac9's
+// state and the planes of the frame it decoded last are one block of host memory, not of the rack's
+// buffer, because games size a fixed heap from QueryBufferSize and LibAtrac9 takes about 98 KiB a
+// decoder where the firmware takes 0xF0 bytes (kb #1170): the first PLAY that reserves the decoder
+// allocates it, and it stays until the rack's destruction, so that p_state never changes once set.
 struct Atrac9Decoder {
     void* p_state;
     float* p_frame;
@@ -604,8 +607,12 @@ void ProcessReverbVoice(RenderContext& context, Voice* p_voice, u32* p_event_cod
 // flags it leaves. A custom sampler runs it into its buffer 0.
 u32 RunSamplerSource(RenderContext& context, Voice* p_voice, const Planes& out);
 void ResetSource(Voice* p_voice);
-// The bytes a rack lays out for one ATRAC9 decoder's state, 16-byte aligned.
-std::size_t GetAtrac9StateSize();
+// The host bytes one ATRAC9 decoder takes: LibAtrac9's state, 16-byte aligned, and its frame planes.
+std::size_t GetAtrac9DecoderSize();
+// Gives the decoder its host block unless it has one; false when the host has no memory for it. Only the
+// decoder's owner calls it, before the render can reach the decoder through the voice.
+bool PrepareAtrac9Decoder(Atrac9Decoder* p_decoder);
+void FreeAtrac9Decoder(Atrac9Decoder* p_decoder);
 // Gives the voice's ATRAC9 decoder and channel works back to their pools; ReleaseChannelWorks does.
 void ReleaseAtrac9Decoder(Voice* p_voice);
 // The data lock (spec 09 §6.2): once KILL returns, the render no longer reads the voice's waveform,

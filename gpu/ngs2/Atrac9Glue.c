@@ -1,8 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-/* LibAtrac9's decoder as the sampler uses it (phase F4, kb #1096). Its state lives in a rack's buffer
- * instead of the heap, so that a render never allocates; only C sees its layout, since its headers name
- * members after their types, which C++ refuses. A frame comes back as float planes read from the
- * decoder's own samples, before LibAtrac9 rounds them to 16 bits. */
+/* LibAtrac9's decoder as the sampler uses it (phase F4, kb #1096). Its state lives in a block the PLAY
+ * that first reserves the decoder allocates (kb #1170), so that a render never allocates; only C sees
+ * its layout, since its headers name members after their types, which C++ refuses. A frame comes back
+ * as float planes read from the decoder's own samples, before LibAtrac9 rounds them to 16 bits. */
 #include <string.h>
 
 #include "Atrac9Glue.h"

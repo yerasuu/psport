@@ -28,7 +28,7 @@ parity (kb #625, decision #809).
 | `Waveform.cpp` | `sceNgs2ParseWaveformData`, `File` and `User`, `sceNgs2CalcWaveformBlock`, `sceNgs2GetWaveformFrameInfo`, and the frame shape of each waveform type |
 | `SamplerControl.cpp`, `Sampler.cpp` | the sampler's parameters and waveform block queue; its source (linear PCM, loops, streaming, pitch) and chain |
 | `Source.h`, `Vag.cpp`, `Generator.cpp` | the queue as the decoders use it; the VAG and HEVAG decoder; the waveform generators |
-| `Atrac9Source.cpp`, `Atrac9Glue.c` | ATRAC9 waveforms over LibAtrac9 (`third_party/LibAtrac9`, MIT), whose decoders live in the rack's buffer |
+| `Atrac9Source.cpp`, `Atrac9Glue.c` | ATRAC9 waveforms over LibAtrac9 (`third_party/LibAtrac9`, MIT), whose decoder states live in host memory |
 | `Submixer.cpp`, `Mastering.cpp`, `ReverbRack.cpp` | those racks' parameters and processing |
 | `ModuleParams.cpp` | the parameters the sampler and submixer share: envelope, distortion, UserFx, peak meter, filters |
 | `Dsp.h`, `Gain.cpp`, `Envelope.cpp`, `Filter.cpp`, `Limiter.cpp`, `PeakMeter.cpp` | the DSP modules: ramps, distortion, channel matrix, envelope, biquad and LFE filters, compressor and limiter, peak meter |
@@ -129,12 +129,16 @@ previous voice left it.
 ATRAC9 (`0x40`) decodes over LibAtrac9. The setup asks for the rack's internal decoders
 (`maxAtrac9Decoders`) or, with flags bit 0, its AJM ones (`maxAjmAtrac9Decoders`), refusing with
 `0x804A0402` when the rack has none of that kind, `0x804A0403` without the 0xFE header byte and
-`0x804A0052` when the config's channels differ. Each kind is a pool of decoders laid out in the rack's
-buffer (LibAtrac9's state, about 90 KiB, and one frame of float planes each, which `QueryBufferSize`
-counts: 27.5 MB for the default sampler option's 256 decoders, against 1.7 MB without any). PLAY
+`0x804A0052` when the config's channels differ. Each kind is a pool of decoder slots laid out in the
+rack's buffer; LibAtrac9's state and one frame of float planes, 100544 bytes a decoder, are host memory
+that the first PLAY reserving the decoder allocates and `RackDestroy` frees (kb #1170). Games size a
+fixed heap from `QueryBufferSize`, so it counts only the slots: the default sampler option's 256
+decoders ask for 1.77 MB (27.5 MB when the states were in the buffer), Ryza's 128-voice rack 1068640
+bytes instead of 13938272, and a rack never allocates host memory for decoders no voice plays. PLAY
 reserves what the setup asks for (spec 10 §5): an internal decoder and one of `maxAtrac9ChannelWorks`
-per channel, or an AJM decoder; a pool of one decoder per voice gives each voice its own. An empty pool
-fails PLAY with `0x804A0307`, keeping nothing, and the voice gives its decoder back with its channel
+per channel, or an AJM decoder; a pool of one decoder per voice gives each voice its own. An empty pool,
+or a decoder's first PLAY the host has no memory for, fails PLAY with `0x804A0307`, keeping nothing
+(the host's failure logged and counted as its own cause), and the voice gives its decoder back with its channel
 works (STOP_IMMEDIATE, KILL, its end, its next PLAY). The decoder restarts, overlap included, on the
 voice's first decode and at the start of each pass through a block that skips samples, whose first
 `numSkipSamples` are decoded and dropped; a block that skips none goes on from the decoder's state, so
