@@ -226,7 +226,8 @@ void ShadNetClient::ReaderThread() {
         u8 hdr[SHAD_HEADER_SIZE];
         if (!RecvN(hdr, SHAD_HEADER_SIZE)) {
             if (!m_terminate)
-                LOG_WARNING(ShadNet, "Reader header recv failed, disconnecting");
+                LOG_WARNING(ShadNet, "Reader header recv failed (recv {}, error {}), disconnecting",
+                            m_last_recv_result, m_last_recv_error);
             break;
         }
         const auto ptype = static_cast<PacketType>(hdr[0]);
@@ -245,7 +246,8 @@ void ShadNetClient::ReaderThread() {
             payload.resize(payload_sz);
             if (!RecvN(payload.data(), payload_sz)) {
                 if (!m_terminate)
-                    LOG_WARNING(ShadNet, "Reader payload recv failed");
+                    LOG_WARNING(ShadNet, "Reader payload recv failed (recv {}, error {})",
+                                m_last_recv_result, m_last_recv_error);
                 break;
             }
         }
@@ -361,6 +363,7 @@ bool ShadNetClient::DoConnect() {
         ::fcntl(m_sock, F_SETFL, fl & ~O_NONBLOCK);
     }
 #endif
+    EnableKeepalive();
 
     struct sockaddr_in local{};
     socklen_t alen = sizeof(local);
@@ -446,6 +449,36 @@ void ShadNetClient::DoDisconnect() {
     }
 }
 
+void ShadNetClient::EnableKeepalive() {
+#ifdef _WIN32
+    const BOOL is_on = TRUE;
+    if (::setsockopt(m_sock, SOL_SOCKET, SO_KEEPALIVE, reinterpret_cast<const char*>(&is_on),
+                     sizeof(is_on)) != 0) {
+        LOG_WARNING(ShadNet, "TCP keepalive not enabled (error {})", WSAGetLastError());
+        return;
+    }
+    // Windows sends 10 probes before it gives up; its count cannot be set here.
+    tcp_keepalive values{1, SHAD_KEEPALIVE_IDLE_MS, SHAD_KEEPALIVE_INTERVAL_MS};
+    DWORD cb_returned = 0;
+    if (::WSAIoctl(m_sock, SIO_KEEPALIVE_VALS, &values, sizeof(values), nullptr, 0, &cb_returned,
+                   nullptr, nullptr) != 0)
+        LOG_WARNING(ShadNet, "TCP keepalive timing not set (error {})", WSAGetLastError());
+#else
+    const int is_on = 1;
+    const int idle_s = SHAD_KEEPALIVE_IDLE_MS / 1000;
+    const int interval_s = SHAD_KEEPALIVE_INTERVAL_MS / 1000;
+    const int c_probes = SHAD_KEEPALIVE_PROBES;
+    if (::setsockopt(m_sock, SOL_SOCKET, SO_KEEPALIVE, &is_on, sizeof(is_on)) != 0) {
+        LOG_WARNING(ShadNet, "TCP keepalive not enabled (errno {})", errno);
+        return;
+    }
+    if (::setsockopt(m_sock, IPPROTO_TCP, TCP_KEEPIDLE, &idle_s, sizeof(idle_s)) != 0 ||
+        ::setsockopt(m_sock, IPPROTO_TCP, TCP_KEEPINTVL, &interval_s, sizeof(interval_s)) != 0 ||
+        ::setsockopt(m_sock, IPPROTO_TCP, TCP_KEEPCNT, &c_probes, sizeof(c_probes)) != 0)
+        LOG_WARNING(ShadNet, "TCP keepalive timing not set (errno {})", errno);
+#endif
+}
+
 bool ShadNetClient::RecvN(u8* buf, u32 n) {
     u32 received = 0;
     while (received < n) {
@@ -453,8 +486,15 @@ bool ShadNetClient::RecvN(u8* buf, u32 n) {
             return false;
         const int r = static_cast<int>(::recv(m_sock, reinterpret_cast<char*>(buf + received),
                                               static_cast<int>(n - received), 0));
-        if (r <= 0)
+        if (r <= 0) {
+            m_last_recv_result = r;
+#ifdef _WIN32
+            m_last_recv_error = r < 0 ? WSAGetLastError() : 0;
+#else
+            m_last_recv_error = r < 0 ? errno : 0;
+#endif
             return false;
+        }
         received += static_cast<u32>(r);
     }
     return true;

@@ -869,6 +869,18 @@ SignalingHandshake MakeHandshakeLocked(const ConnectionInfo& ci, HandshakeKind k
     return pkt;
 }
 
+// psport: replies go where the peer's packet came from. The peer's mapped (public) address is
+// wrong for a peer on our own network, where the router may not loop it back; it only stands in
+// when the source is unknown.
+void TakeSourceEndpointLocked(ConnectionInfo& ci, u32 from_addr, u16 from_port, u32 mapped_addr) {
+    if (from_addr != 0) {
+        ci.addr = from_addr;
+        ci.port = from_port;
+    } else if (mapped_addr != 0) {
+        ci.addr = mapped_addr;
+    }
+}
+
 void SendHandshakeLocked(ConnectionInfo& ci, const SignalingHandshake& pkt) {
     if (ci.addr == 0 || ci.port == 0) {
         return;
@@ -1054,12 +1066,8 @@ void HandleHandshakePacket(u32 from_addr, u16 from_port, const SignalingHandshak
             if (pkt.from_conn_id != 0) {
                 ci.peer_conn_id = pkt.from_conn_id;
             }
-            ci.addr = from_addr;
-            ci.port = from_port;
+            TakeSourceEndpointLocked(ci, from_addr, from_port, pkt.mapped_addr);
             ci.peer_activated = true;
-            if (pkt.mapped_addr != 0) {
-                ci.addr = pkt.mapped_addr;
-            }
             if (ci.state != ConnState::Established) {
                 SetConnStateLocked(ci, ConnState::SendingAccept);
                 if (!ci.timeout_callout_armed) {
@@ -1078,12 +1086,7 @@ void HandleHandshakePacket(u32 from_addr, u16 from_port, const SignalingHandshak
                 ci.peer_conn_id = pkt.from_conn_id;
             }
             ci.peer_activated = true;
-            if (pkt.mapped_addr != 0) {
-                ci.addr = pkt.mapped_addr;
-            } else {
-                ci.addr = from_addr;
-                ci.port = from_port;
-            }
+            TakeSourceEndpointLocked(ci, from_addr, from_port, pkt.mapped_addr);
             if (ci.state == ConnState::SendingOffer || ci.state == ConnState::WaitAccept ||
                 ci.state == ConnState::SendingAccept || ci.state == ConnState::WaitOffer) {
                 SetConnStateLocked(ci, ConnState::ConnCheck);
@@ -1353,8 +1356,7 @@ void HandleControlPacket(u32 from_addr, u16 from_port, const SignalingControl& p
                 ci.peer_conn_id = pkt.from_conn_id;
             }
             ci.peer_activated = true;
-            ci.addr = pkt.mapped_addr != 0 ? pkt.mapped_addr : from_addr;
-            ci.port = from_port;
+            TakeSourceEndpointLocked(ci, from_addr, from_port, pkt.mapped_addr);
             if (ci.state == ConnState::Inactive) {
                 if (!ci.timeout_callout_armed) {
                     ArmTimeoutCalloutLocked(ci, kHandshakeConnectTimeoutMs * 1000);
@@ -1373,9 +1375,7 @@ void HandleControlPacket(u32 from_addr, u16 from_port, const SignalingControl& p
         } else if (kind == ControlKind::ActivationAck) {
             ConnectionInfo& ci = g_connections[conn_id];
             ci.peer_activated = true;
-            if (pkt.mapped_addr != 0) {
-                ci.addr = pkt.mapped_addr;
-            }
+            TakeSourceEndpointLocked(ci, from_addr, from_port, pkt.mapped_addr);
         } else if (kind == ControlKind::Established) {
             ConnectionInfo& ci = g_connections[conn_id];
             ci.peer_established = true;

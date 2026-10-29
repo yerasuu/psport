@@ -232,13 +232,21 @@ private:
     // Start the health-monitor worker thread if not already running (idempotent).
     void StartWorker();
 
-    // Disconnect and remove one user's client.
-    void DisconnectUser(s32 user_id);
+    // Disconnect and remove one user's client. should_tell_game false: a network drop, whose
+    // SignedOut waits until the reconnect has missed SIGNED_OUT_GRACE (GraceThread).
+    void DisconnectUser(s32 user_id, bool should_tell_game = true);
 
     void WorkerThread();
-    // Transparent reconnect after a network drop
-    void MarkForReconnect(s32 user_id);
+    // Transparent reconnect after a network drop. False when online is off: nothing to reconnect
+    // to, and the caller tells the game now.
+    bool MarkForReconnect(s32 user_id);
     void TryReconnect();
+    // psport: its own thread because a reconnect attempt holds the worker for a minute and more.
+    void GraceThread();
+    void TellOverdueSignedOut();
+    // Stops reconnecting the user (logout, rejection, online off) and tells the game the SignedOut
+    // still held back for it, if any.
+    void ForgetReconnect(s32 user_id);
     void FireStateCallback(s32 user_id, NpManager::OrbisNpState state);
 
     // Notification forwarders wired into each client
@@ -301,11 +309,19 @@ private:
     std::atomic<bool> m_initialized{false};
     std::atomic<bool> m_worker_running{false};
     std::thread m_worker_thread;
+    std::thread m_grace_thread;
+    // psport: held while a reconnect's SignedIn or a held-back SignedOut is decided and fired, so
+    // the game hears them in the order they were decided and cannot end on SignedOut while
+    // signed in. Taken before m_mutex_clients and never under it: the callbacks read the clients.
+    std::mutex m_mutex_sign_state;
 
     // Users dropped by a network error and awaiting transparent reconnect
     struct ReconnectState {
         std::chrono::steady_clock::time_point next_attempt{};
         std::chrono::milliseconds backoff{0};
+        // psport: the game hears SignedOut at tell_game_at unless the reconnect made it first.
+        std::chrono::steady_clock::time_point tell_game_at{};
+        bool is_game_told = false;
     };
     std::unordered_map<s32, ReconnectState> m_reconnect;
 
@@ -327,4 +343,4 @@ private:
     std::map<s32, FriendListSnapshot> m_friend_state;
 };
 
-} // namespace Libraries::Np
+} // namespace Libraries::Np

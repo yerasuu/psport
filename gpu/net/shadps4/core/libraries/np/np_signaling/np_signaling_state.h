@@ -63,6 +63,12 @@ enum class SignalingPacketType : u8 {
     // the host's world state (bosses, doors, shortcuts) instead of whatever its own flags say.
     // 0x21 is taken (Matching2 frames, see P2PTransport::ClassifyInternal).
     BbscWorldFlags = 0x22,
+    // BBSC's other packets; the layouts are their senders' in games/bloodborne/net/core.
+    BbscLife = 0x23,     // 14 bytes: player id u32, dead u8, sequence u32
+    BbscScale = 0x24,    // 15 bytes: the host's five scaling percentages, u16 each
+    BbscPvp = 0x25,      // 11 bytes: kind u8, on u8, sequence u32
+    BbscProgress = 0x26, // 6 + 4n bytes: count u8, then that many boss-defeat flags u32
+    BbscHostBoss = 0x27, // 9 bytes: the boss on the host's boss bar s32 (-1 none)
 };
 static_assert(static_cast<u8>(SignalingPacketType::BbscWorldFlags) == kSignalingBbscWorldFlagsType);
 

@@ -505,7 +505,7 @@ public:
     //   "BBR1" 0x05 dst[16]                      dst is not on the relay (direct only for 10 s)
     // ep = the sender's own public address and port as shadNet sees them (its STUN echo), so the
     // receiver files the frame under the same endpoint its signaling code uses for that peer (an
-    // ActivationRequest answer goes to the packet's mapped_addr + the frame's source port).
+    // ActivationRequest answer goes to the frame's source address and port).
     // A peer that reaches us through the relay is answered through it at once.
     // 0.0.2 (2026-10-13): every known peer goes through the relay from the first frame (public
     // players behind CGNAT/strict routers could not reach each other; direct copies still go out

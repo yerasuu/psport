@@ -27,6 +27,11 @@
 
 namespace Libraries::Np {
 
+// psport: how long a dropped connection has to come back before the game hears SignedOut. The
+// first reconnect comes 2 s after the drop, and a router or provider hiccup is back in a few
+// seconds; the game said "disconnected" for each of them before.
+constexpr auto SIGNED_OUT_GRACE = std::chrono::seconds(20);
+
 NpHandler& NpHandler::GetInstance() {
     static NpHandler s_instance;
     return s_instance;
@@ -90,6 +95,7 @@ void NpHandler::StartWorker() {
     bool expected = false;
     if (m_worker_running.compare_exchange_strong(expected, true)) {
         m_worker_thread = std::thread(&NpHandler::WorkerThread, this);
+        m_grace_thread = std::thread(&NpHandler::GraceThread, this);
     }
 }
 
@@ -191,6 +197,8 @@ void NpHandler::Shutdown() {
 
     if (m_worker_thread.joinable())
         m_worker_thread.join();
+    if (m_grace_thread.joinable())
+        m_grace_thread.join();
 
     LOG_INFO(NpHandler, "Shutdown complete");
 }
@@ -300,16 +308,23 @@ bool NpHandler::ConnectUser(s32 user_id, const std::string& host, u16 port, cons
 
     NpMatching2::SetMmShadNetClient(client, host, port);
 
-    // Build OrbisNpId
+    std::lock_guard sign_lock(m_mutex_sign_state);
+    bool has_game_seen_sign_out = true;
     {
         OrbisNpId np_id{};
         SetNpId(np_id, npid);
         std::lock_guard lock(m_mutex_clients);
         m_np_ids[user_id] = np_id;
         m_clients[user_id] = std::move(client);
+        // psport: a reconnect within SIGNED_OUT_GRACE brings no SignedIn, since the game never
+        // heard the SignedOut.
+        if (const auto it = m_reconnect.find(user_id);
+            it != m_reconnect.end() && !it->second.is_game_told)
+            has_game_seen_sign_out = false;
     }
 
-    FireStateCallback(user_id, NpManager::OrbisNpState::SignedIn);
+    if (has_game_seen_sign_out)
+        FireStateCallback(user_id, NpManager::OrbisNpState::SignedIn);
     return true;
 }
 
@@ -322,7 +337,7 @@ void NpHandler::SetAppearOffline(bool enable) {
     }
 }
 
-void NpHandler::DisconnectUser(s32 user_id) {
+void NpHandler::DisconnectUser(s32 user_id, bool should_tell_game) {
     std::shared_ptr<ShadNet::ShadNetClient> client;
     {
         std::lock_guard lock(m_mutex_clients);
@@ -337,7 +352,8 @@ void NpHandler::DisconnectUser(s32 user_id) {
         m_friend_state.erase(user_id);
     }
     client->Stop();
-    FireStateCallback(user_id, NpManager::OrbisNpState::SignedOut);
+    if (should_tell_game)
+        FireStateCallback(user_id, NpManager::OrbisNpState::SignedOut);
     LOG_INFO(NpHandler, "user_id={} disconnected", user_id);
 }
 
@@ -347,10 +363,7 @@ void NpHandler::OnUserLoggedIn(s32 user_id) {
 }
 
 void NpHandler::OnUserLoggedOut(s32 user_id) {
-    {
-        std::lock_guard lock(m_mutex_clients);
-        m_reconnect.erase(user_id); // do not auto-reconnect
-    }
+    ForgetReconnect(user_id);
     DisconnectUser(user_id);
 }
 
@@ -371,23 +384,30 @@ void NpHandler::WorkerThread() {
         }
 
         for (s32 uid : dropped) {
-            LOG_WARNING(NpHandler, "user_id={} connection dropped (network); will retry", uid);
-            DisconnectUser(uid);   // reports SignedOut + stops/removes the dead client
-            MarkForReconnect(uid); // schedule transparent reconnect (network drop, not logout)
+            const bool should_retry = EmulatorSettings.IsShadNetEnabled();
+            LOG_WARNING(NpHandler, "user_id={} connection dropped (network); {}", uid,
+                        should_retry ? "reconnecting before the game is told"
+                                     : "online is off for this session");
+            DisconnectUser(uid, !should_retry);
+            if (should_retry && !MarkForReconnect(uid))
+                FireStateCallback(uid, NpManager::OrbisNpState::SignedOut);
         }
 
         TryReconnect();
     }
 }
 
-void NpHandler::MarkForReconnect(s32 user_id) {
+bool NpHandler::MarkForReconnect(s32 user_id) {
     if (!EmulatorSettings.IsShadNetEnabled())
-        return; // offline mode: nothing to reconnect to
+        return false;
     constexpr auto kInitialBackoff = std::chrono::milliseconds(2000);
     std::lock_guard lock(m_mutex_clients);
     auto& st = m_reconnect[user_id];
     st.backoff = kInitialBackoff;
     st.next_attempt = std::chrono::steady_clock::now() + st.backoff;
+    st.tell_game_at = std::chrono::steady_clock::now() + SIGNED_OUT_GRACE;
+    st.is_game_told = false;
+    return true;
 }
 
 void NpHandler::TryReconnect() {
@@ -407,22 +427,68 @@ void NpHandler::TryReconnect() {
         if (!m_worker_running)
             return;
         if (!EmulatorSettings.IsShadNetEnabled()) {
-            std::lock_guard lock(m_mutex_clients);
-            m_reconnect.erase(uid);
+            ForgetReconnect(uid);
             continue;
         }
         // ConnectUserById locks m_mutex_clients internally; call it unlocked.
         const bool ok = ConnectUserById(uid);
         std::lock_guard lock(m_mutex_clients);
         if (ok || m_clients.count(uid)) {
+            const auto it = m_reconnect.find(uid);
+            const bool was_game_told = it != m_reconnect.end() && it->second.is_game_told;
             m_reconnect.erase(uid);
-            LOG_INFO(NpHandler, "user_id={} reconnected to shadNet", uid);
+            LOG_WARNING(NpHandler, "user_id={} reconnected to shadNet{}", uid,
+                        was_game_told ? "" : " before the game was told of the drop");
         } else if (auto it = m_reconnect.find(uid); it != m_reconnect.end()) {
             it->second.backoff = std::min(it->second.backoff * 2, kMaxBackoff);
             it->second.next_attempt = std::chrono::steady_clock::now() + it->second.backoff;
             LOG_DEBUG(NpHandler, "user_id={} reconnect failed; next attempt in {}ms", uid,
                       it->second.backoff.count());
         }
+    }
+}
+
+void NpHandler::GraceThread() {
+    while (m_worker_running) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        TellOverdueSignedOut();
+    }
+}
+
+void NpHandler::TellOverdueSignedOut() {
+    std::lock_guard sign_lock(m_mutex_sign_state);
+    const auto now = std::chrono::steady_clock::now();
+    std::vector<s32> overdue;
+    {
+        std::lock_guard lock(m_mutex_clients);
+        for (auto& [uid, st] : m_reconnect) {
+            if (!st.is_game_told && now >= st.tell_game_at && !m_clients.count(uid)) {
+                st.is_game_told = true;
+                overdue.push_back(uid);
+            }
+        }
+    }
+    for (s32 uid : overdue) {
+        LOG_WARNING(NpHandler, "user_id={} not reconnected within {} s; the game hears SignedOut",
+                    uid, SIGNED_OUT_GRACE.count());
+        FireStateCallback(uid, NpManager::OrbisNpState::SignedOut);
+    }
+}
+
+void NpHandler::ForgetReconnect(s32 user_id) {
+    std::lock_guard sign_lock(m_mutex_sign_state);
+    bool is_sign_out_held = false;
+    {
+        std::lock_guard lock(m_mutex_clients);
+        if (const auto it = m_reconnect.find(user_id); it != m_reconnect.end()) {
+            is_sign_out_held = !it->second.is_game_told && !m_clients.count(user_id);
+            m_reconnect.erase(it);
+        }
+    }
+    if (is_sign_out_held) {
+        LOG_WARNING(NpHandler, "user_id={} no longer reconnecting; the game hears SignedOut",
+                    user_id);
+        FireStateCallback(user_id, NpManager::OrbisNpState::SignedOut);
     }
 }
 
@@ -2284,10 +2350,7 @@ void NpHandler::OnScoreReply(s32 user_id, ShadNet::CommandType cmd, u64 pkt_id,
 // no reconnects into the same refusal; the player is told why.
 void NpHandler::OnClientRejected(s32 user_id, const ShadNet::NotifyClientRejected& n) {
     EmulatorSettings.SetShadNetSessionDisabled(true);
-    {
-        std::lock_guard lock(m_mutex_clients);
-        m_reconnect.erase(user_id);
-    }
+    ForgetReconnect(user_id);
     const std::string text =
         n.message.empty() ? std::string("The shadNet server doesn't accept this client. "
                                         "Online features are off for this session.")

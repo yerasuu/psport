@@ -5,18 +5,23 @@
 // of shadPS4's UI is answered by the port's: its loading screen is a line in the overlay, its
 // cinematic camera sees the window's events first. From bbport (gpu/bbnet/bbsc_glue.cpp and the
 // BBSC part of bbnet_image_ready in gpu/bbnet/bbnet_glue.cpp).
+#include <algorithm>
+#include <array>
 #include <atomic>
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <string>
 #include <string_view>
 #include <system_error>
 
 #include "../psport_gpu.h"
 #include "../port/psport_guest_code.h"
+#include "common/logging/log.h"
 #include "common/memory_patcher.h"
 #include "common/singleton.h"
 #include "core/bbsc_cinematic.h"
@@ -112,6 +117,71 @@ void ImageReady(std::uint64_t va_image, std::uint64_t cb_image) {
     Core::Bloodborne::InstallReverseEngineeringTrace();
 }
 
+constexpr std::uint8_t BBSC_FIRST_SESSION_TYPE = 0x23;
+// Types up to here are BBSC's, also those a newer BBSC build sends that this one does not know.
+constexpr std::uint8_t BBSC_LAST_TYPE = 0x2F;
+constexpr std::size_t C_BBSC_SESSION_TYPES = BBSC_LAST_TYPE - BBSC_FIRST_SESSION_TYPE + 1;
+constexpr std::array<std::string_view, 5> BBSC_SESSION_PACKET_NAMES{"life", "scaling", "PvP", "progress", "host boss"};
+std::array<std::atomic<std::uint64_t>, C_BBSC_SESSION_TYPES> s_c_session_handled{};
+std::array<std::atomic<std::uint64_t>, C_BBSC_SESSION_TYPES> s_c_session_dropped{};
+
+/// False when the size does not match the layout of the packet's type.
+bool DispatchSessionPacket(const std::uint8_t* p_packet, std::size_t cb_packet) {
+    using Libraries::Np::NpSignaling::SignalingPacketType;
+    switch (static_cast<SignalingPacketType>(p_packet[4])) {
+    case SignalingPacketType::BbscLife: {
+        if (cb_packet != 14) {
+            return false;
+        }
+        std::uint32_t player = 0;
+        std::uint32_t sequence = 0;
+        std::memcpy(&player, p_packet + 5, sizeof(player));
+        std::memcpy(&sequence, p_packet + 10, sizeof(sequence));
+        Core::Bloodborne::OnBbscLifePacket(player, p_packet[9], sequence);
+        return true;
+    }
+    case SignalingPacketType::BbscScale: {
+        if (cb_packet != 15) {
+            return false;
+        }
+        std::uint16_t percent[5]{};
+        std::memcpy(percent, p_packet + 5, sizeof(percent));
+        Core::Bloodborne::OnBbscScalePacket(percent);
+        return true;
+    }
+    case SignalingPacketType::BbscPvp:
+        if (cb_packet != 11) {
+            return false;
+        }
+        Core::Bloodborne::OnBbscPvpPacket(p_packet[5], p_packet[6]);
+        return true;
+    case SignalingPacketType::BbscProgress: {
+        if (cb_packet < 6) {
+            return false;
+        }
+        const std::size_t c_flags = p_packet[5];
+        if (cb_packet != 6 + c_flags * sizeof(std::uint32_t)) {
+            return false;
+        }
+        std::array<std::uint32_t, 255> flags{};
+        std::memcpy(flags.data(), p_packet + 6, c_flags * sizeof(std::uint32_t));
+        Core::Bloodborne::OnBbscProgressPacket(flags.data(), c_flags);
+        return true;
+    }
+    case SignalingPacketType::BbscHostBoss: {
+        if (cb_packet != 9) {
+            return false;
+        }
+        std::int32_t boss = 0;
+        std::memcpy(&boss, p_packet + 5, sizeof(boss));
+        Core::Bloodborne::OnBbscHostBossPacket(boss);
+        return true;
+    }
+    default:
+        return false;
+    }
+}
+
 bool ReceiveSignaling(const std::uint8_t* p_packet, std::size_t cb_packet) {
     using namespace Libraries::Np::NpSignaling;
     if ((cb_packet == sizeof(SignalingBbscFollow) || cb_packet == kSignalingBbscFollowV1Size) &&
@@ -127,7 +197,32 @@ bool ReceiveSignaling(const std::uint8_t* p_packet, std::size_t cb_packet) {
         Core::Bloodborne::OnBbscWorldFlagsPacket(p_packet, static_cast<u32>(cb_packet));
         return true;
     }
-    return false;
+    const std::uint8_t type = p_packet[4];
+    if (type < BBSC_FIRST_SESSION_TYPE || type > BBSC_LAST_TYPE) {
+        return false;
+    }
+    const std::size_t i_type = type - BBSC_FIRST_SESSION_TYPE;
+    const bool is_known = i_type < BBSC_SESSION_PACKET_NAMES.size();
+    if (is_known && DispatchSessionPacket(p_packet, cb_packet)) {
+        const std::uint64_t c_handled = s_c_session_handled[i_type].fetch_add(1, std::memory_order_relaxed) + 1;
+        if (std::has_single_bit(c_handled)) {
+            LOG_INFO(Lib_NpSignaling, "BBSC {} packet (type {:#x}): {} received", BBSC_SESSION_PACKET_NAMES[i_type],
+                     type, c_handled);
+        }
+        return true;
+    }
+    // Taken either way, so that the library does not warn about BBSC's own traffic once per packet.
+    const std::uint64_t c_dropped = s_c_session_dropped[i_type].fetch_add(1, std::memory_order_relaxed) + 1;
+    if (std::has_single_bit(c_dropped)) {
+        std::string bytes;
+        for (std::size_t i = 0; i < std::min<std::size_t>(cb_packet, 32); ++i) {
+            bytes += fmt::format("{:02x}", p_packet[i]);
+        }
+        LOG_WARNING(Lib_NpSignaling, "BBSC packet type {:#x} size {} dropped ({}): {} so far, first bytes {}", type,
+                    cb_packet, is_known ? "the size does not match its layout" : "a type this build does not know",
+                    c_dropped, bytes);
+    }
+    return true;
 }
 
 const bool s_is_registered = PsNetTitle::Register({.sz_name = "bbsc",
