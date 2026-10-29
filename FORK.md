@@ -33,6 +33,14 @@ commit up to it was read; what was not ported yet waits as a task. Last reviewed
   bbport `8185b88`, after its release 0.6.1 `b1d3b8b`).
 - Teefpyre's fork (Teefpyre/bloodborne_pc-LinuxBBSCFix, GPL-2.0-or-later): reviewed up to `f3b5504` (2026-10-20, on
   bbport `8185b88`).
+- willl03's fork (willl03/bloodborne_pc, GPL-2.0 per its LICENSE file): fetched up to `ed844f8` (2026-10-25,
+  0.6.6-dev-net.2, on bbport `8185b88`), not reviewed yet. 112 commits over bbport 0.6, 108 of them SrShadowy's; its
+  own four are the BBSC co-op relay by online id and the dispatch of BBSC packets past 0x22.
+- Supermedo's fork (Supermedo/bloodborne_pc, branch `windows`, GPL-2.0-or-later): reviewed in full (every branch,
+  per commit), the Windows port above all; the rows below name what was ported. Its `thd/` and bbbridge
+  (GPL-3.0) and `dlss_bridge` (MIT) are not taken.
+- Mrsuss60's fork (Mrsuss60/bloodborne_pc_windows_port, licence not checked): read at `7c0e5f0d20` only as a second
+  view of the Windows port; nothing is taken from it yet.
 - AnyPS5 (boykopovar/AnyPS5, GPL-2.0-only): reviewed up to `5b59fbc` (2026-10-21). Its libSceNgs2 is
   ported as code in `gpu/ngs2_anyps5/` and keeps its GPL-2.0-only (kb #843, Ported components below); from
   the rest only behaviour is taken, confirmed on the firmware and written natively, as the native
