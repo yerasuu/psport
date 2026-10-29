@@ -28,11 +28,13 @@
  * writes into GPU memory (memcpy, memset): a native copy of this one would bypass that. */
 static const char *const s_never_system[] = {"libSceLibcInternal"};
 /* The runtime's kernel, GPU, video, pad, audio output, clock and user-level threads; the ported
- * gpu/fiber, gpu/font, gpu/audiodec and gpu/ngs2. */
+ * gpu/fiber, gpu/font, gpu/audiodec and gpu/ngs2; libSceHmd, since the console's module_start fails
+ * without the headset's devices (/dev/hmd_cmd) while runtime_vr.c answers as a console with no
+ * headset (kb #1248). */
 static const char *const s_port_implements[] = {"libkernel", "libkernel_unity", "libkernel_sys", "libSceGnmDriver",
                                               "libSceVideoOut", "libScePad", "libSceAudioOut", "libSceFiber",
                                               "libSceFont", "libSceFontFt", "libSceAudiodec", "libSceNgs2",
-                                              "libSceUlt", "libSceRtc"};
+                                              "libSceUlt", "libSceRtc", "libSceHmd"};
 
 typedef struct { char **pp_items; size_t c_items, c_capacity; } List;
 typedef struct { uint64_t hash; uint32_t i_entry; } Slot;
@@ -707,9 +709,12 @@ void loader_load_game(const LoaderOptions *p_options, LoaderImage *p_out) {
         for (size_t i = 0; i < files.c_items; ++i) {
             char sz_name[256];
             stem(files.pp_items[i], sz_name, sizeof(sz_name));
-            if (listed(s_never_system, sizeof(s_never_system) / sizeof(*s_never_system), sz_name) || list_has(&hle, sz_name) ||
-                (listed(s_port_implements, sizeof(s_port_implements) / sizeof(*s_port_implements), sz_name) && !list_has(&lle, sz_name)))
+            if (listed(s_never_system, sizeof(s_never_system) / sizeof(*s_never_system), sz_name) || list_has(&hle, sz_name))
                 continue;
+            if (listed(s_port_implements, sizeof(s_port_implements) / sizeof(*s_port_implements), sz_name) && !list_has(&lle, sz_name)) {
+                printf("Loader: system module %s not linked: served natively (PS_LLE=%s links it)\n", files.pp_items[i], sz_name);
+                continue;
+            }
             join(sz_path, sizeof(sz_path), p_options->sz_system_modules, files.pp_items[i]);
             list_add(&l.system_stems, sz_name);
             list_add(&l.system_paths, sz_path);

@@ -126,7 +126,7 @@ System module rules, from `src/loader/loader_link.c`:
 | Library | Rule |
 |---|---|
 | `libSceLibcInternal` | never taken from the system dump: the game's `libc.prx` serves it, so the runtime's replacements (`memcpy`, `memset`) keep tracking writes to GPU memory |
-| `libkernel`, `libkernel_unity`, `libkernel_sys`, `libSceGnmDriver`, `libSceVideoOut`, `libScePad`, `libSceAudioOut`, `libSceFiber`, `libSceFont`, `libSceFontFt`, `libSceAudiodec`, `libSceNgs2`, `libSceUlt`, `libSceRtc` | implemented by psport (`port_implements`): the system module is skipped unless `--lle` (`PS_LLE`) names it |
+| `libkernel`, `libkernel_unity`, `libkernel_sys`, `libSceGnmDriver`, `libSceVideoOut`, `libScePad`, `libSceAudioOut`, `libSceFiber`, `libSceFont`, `libSceFontFt`, `libSceAudiodec`, `libSceNgs2`, `libSceUlt`, `libSceRtc`, `libSceHmd` | implemented by psport (`port_implements`): the system module is skipped, with a `served natively` line in the log, unless `--lle` (`PS_LLE`) names it. The dumped `libSceHmd` fails its `module_start` without the headset's devices, while psport's answers as a console with no headset |
 | a library named in `--hle` (`PS_HLE`) | system module skipped, psport's implementation used |
 | any other library a linked module imports | the bundled `sce_module` copy, else the system dump's; its exports win over psport's (binding kinds 3 and 4) |
 
