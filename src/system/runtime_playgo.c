@@ -124,14 +124,24 @@ static ABI int32_t playgo_chunk_ids(int32_t h_handle, uint16_t *p_ids, uint32_t 
     *p_out=c_copied;
     return 0;
 }
+/* libScePlayGo's checks in its order; no locus is written unless every id is a chunk, listed once.
+ * A title asking for a chunk its package lacks gets BAD_CHUNK on a console too: Ryza asks for
+ * chunk 1 of its single chunk every frame and takes the error as installed. */
+#define LOCUS_MAX_IDS 1000
 static ABI int32_t playgo_locus(int32_t h_handle, const uint16_t *p_ids, uint32_t c_ids, int8_t *p_loci) {
-    if (bad_handle(h_handle)) return PLAYGO_BAD_HANDLE;
+    if (!s_is_initialized) return PLAYGO_NOT_INITIALIZED;
     if (!p_ids || !p_loci) return PLAYGO_BAD_POINTER;
-    if (!c_ids) return PLAYGO_BAD_SIZE;
+    if (!c_ids || c_ids>LOCUS_MAX_IDS) return PLAYGO_BAD_SIZE;
+    if (bad_handle(h_handle)) return PLAYGO_BAD_HANDLE;
+    if (c_ids>s_c_chunks) return PLAYGO_BAD_SIZE;
+    if (!runtime_memory_is_guest_range(p_ids,c_ids*sizeof(*p_ids)) || !runtime_memory_is_guest_range(p_loci,c_ids))
+        return PLAYGO_BAD_POINTER;
     for (uint32_t i=0;i<c_ids;++i) {
-        if (p_ids[i]>=s_c_chunks) { p_loci[i]=LOCUS_NOT_DOWNLOADED; return PLAYGO_BAD_CHUNK; }
-        p_loci[i]=LOCUS_LOCAL_FAST;
+        if (p_ids[i]>=s_c_chunks) return PLAYGO_BAD_CHUNK;
+        for (uint32_t j=0;j<i;++j)
+            if (p_ids[j]==p_ids[i]) return PLAYGO_BAD_CHUNK;
     }
+    memset(p_loci,LOCUS_LOCAL_FAST,c_ids);
     return 0;
 }
 static ABI int32_t playgo_progress(int32_t h_handle, const uint16_t *p_ids, uint32_t c_ids, Progress *p_out) {
