@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
+#include <atomic>
+#include <cstdio>
 #include <utility>
 #include <boost/container/small_vector.hpp>
 
@@ -139,7 +141,16 @@ GraphicsPipeline::GraphicsPipeline(
                 key.num_samples, instance.GetColorSampleCounts() & instance.GetDepthSampleCounts()),
             .sampleShadingEnable =
                 fs_info.addr_flags.persp_sample_ena || fs_info.addr_flags.linear_sample_ena,
+            .alphaToCoverageEnable = key.alpha_to_coverage,
         };
+    }
+    if (key.alpha_to_coverage) {
+        static std::atomic<u32> s_c_pipelines;
+        const u32 c_pipelines = s_c_pipelines.fetch_add(1, std::memory_order_relaxed) + 1;
+        if ((c_pipelines & (c_pipelines - 1)) == 0) {
+            std::printf("GPU: alpha to coverage (DB_ALPHA_TO_MASK) on %u pipelines so far\n",
+                        c_pipelines);
+        }
     }
 
     const vk::PipelineViewportDepthClipControlCreateInfoEXT clip_control = {

@@ -40,6 +40,10 @@ struct DepthShaderControl {
     ConservativeDepth conservative_z_export : 2;
 };
 
+struct AlphaToMask {
+    u32 enable : 1;
+};
+
 enum class CompareFunc : u32 {
     Never = 0,
     Less = 1,

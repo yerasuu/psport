@@ -896,6 +896,19 @@ bool PipelineCache::RefreshGraphicsKey(PipelineSelection& sel) {
             bc.color_dst_factor == AmdGpu::BlendControl::BlendFactor::DstColor;
     }
 
+    // psport: the DB takes alpha-to-mask coverage from MRT0's exported alpha even when no color
+    // target is written (alpha-tested depth pre-passes), so MRT0 keeps its export for
+    // alphaToCoverageEnable to read; its attachment format stays undefined and gets no view.
+    const bool is_alpha_to_mask =
+        regs.alpha_to_mask.enable && !regs.depth_shader_control.alpha_to_mask_disable;
+    if (is_alpha_to_mask &&
+        key.color_buffers[0].export_format == AmdGpu::ShaderExportFormat::Zero) {
+        auto& color_buffer = key.color_buffers[0];
+        color_buffer.num_format = AmdGpu::NumberFormat::Float;
+        color_buffer.export_format = regs.color_export_format.GetFormat(0);
+        color_buffer.swizzle = AmdGpu::IdentityMapping;
+    }
+
     // Compile and bind shader stages
     if (!RefreshGraphicsStages(sel)) {
         return false;
@@ -1008,6 +1021,23 @@ bool PipelineCache::RefreshGraphicsKey(PipelineSelection& sel) {
             all_color_samples_same && depth_mismatch && !instance.IsMixedDepthSamplesSupported()) {
             key.color_samples.fill(key.depth_samples);
             key.num_samples = key.depth_samples;
+        }
+    }
+
+    if (is_alpha_to_mask) {
+        const auto* fs_info = sel.infos[static_cast<u32>(Shader::SwStage::Fragment)];
+        const auto& mrt0 = key.color_buffers[0];
+        const bool has_alpha = fs_info && (key.mrt_mask & 1u) != 0 &&
+                               fs_info->stores.Get(Shader::IR::Attribute::RenderTarget0, 3);
+        if (!has_alpha) {
+            LOG_ERROR_COUNTED(Render_Vulkan,
+                              "Alpha to mask without an MRT0 alpha export, drawn without coverage");
+        } else if (mrt0.swizzle.Map(3) != 3 || AmdGpu::IsInteger(mrt0.num_format)) {
+            LOG_ERROR_COUNTED(Render_Vulkan,
+                              "Alpha to mask on an MRT0 whose alpha is swizzled or integer, drawn "
+                              "without coverage");
+        } else {
+            key.alpha_to_coverage = 1;
         }
     }
 
