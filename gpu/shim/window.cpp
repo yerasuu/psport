@@ -492,7 +492,8 @@ bool WindowSDL::PollEvents() {
             // SIGTERM and SIGINT become a quit event too, so a quit is not always the user's.
             if (m_is_open) {
                 std::printf(event.kind == PS_HOST_WINDOW_EVENT_QUIT
-                                ? "Window: quit requested (in-game menu, SIGTERM or SIGINT), the game ends\n"
+                                ? "Window: quit requested (in-game menu, PS_STOP_FILE, SIGTERM or SIGINT), the "
+                                  "game ends\n"
                                 : "Window: closed by the user, the game ends\n");
             }
             m_is_open = false;

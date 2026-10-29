@@ -12,6 +12,7 @@
 #include <unistd.h>
 #include "../psport_gpu.h"
 #include "../../src/platform/ps_host.h"
+#include "../../src/platform/ps_host_window.h"
 #include "common/elf_info.h"
 #include "common/thread.h"
 #include "core/libraries/kernel/orbis_error.h"
@@ -249,6 +250,10 @@ extern "C" void psport_gpu_flush_caches(int can_wait) {
         Storage::DataBase::Instance().FlushForExit();
         PsSmallTextures::WriteIndexAtExit();
     });
+}
+
+extern "C" int psport_gpu_request_quit(void) {
+    return ps_host_window_request_quit();
 }
 
 extern "C" unsigned psport_gpu_symbol_count(void) {

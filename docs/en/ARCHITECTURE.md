@@ -251,7 +251,9 @@ detached thread, by `pthread_tryjoin_np` when the next thread is created (`runti
 `src/runtime/runtime_calls.c` logs, once per import (and error code), every call that gets no real work
 done: imports without implementation, stubs, GPU library functions marked `(STUBBED)`, failures
 (SCE error codes, `-1` with errno) and polled states (`src/runtime/imports/import_statuses.inc`). Counts are summed
-when the process ends, by any route (guest exit, window close, signal, fault, watchdog, `STOP:`).
+when the process ends, by any route (guest exit, window close, signal, `PS_STOP_FILE`, fault, watchdog,
+`STOP:`); the watchdog, the termination signals and `PS_STOP_FILE` write the whole exit summary
+(`runtime_report`: guest threads, locks, memory, calls) as a window close does.
 Line formats: [FORK.md](../../FORK.md#call-report). `PS_CALL_REPORT=<file>` also writes the summary to
 a file.
 

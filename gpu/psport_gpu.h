@@ -52,6 +52,9 @@ void psport_gpu_dump_guest_writes(const struct PsHostFaultContext *p_context);
  * finish what is queued and logs what was flushed or dropped. can_wait=0 (signal handlers, failed
  * assertions) takes no lock and only reports the blobs still queued. */
 void psport_gpu_flush_caches(int can_wait);
+/* From any thread: the window thread ends the game as when its window closes (caches flushed, exit
+ * summary, exit 0). 0, or EIO when the request could not be queued. */
+int psport_gpu_request_quit(void);
 /* What a text entry accepts, from the game's OrbisImeType: any text (default), Basic Latin (Basic
  * Latin, URL, mail) or digits (number). */
 enum { PS_TEXT_ANY, PS_TEXT_LATIN, PS_TEXT_DIGITS };

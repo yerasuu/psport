@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /* Fault, watchdog and termination signal handlers: what the log shows when the process stops. */
 #include <errno.h>
+#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,6 +24,13 @@ static void write_report(const char *p_text, size_t cb_text) {
     (void)ps_host_fs_write(h_faults, p_text, cb_text);
 }
 static void dump_frames(const PsHostFaultContext *p_context);
+/* The exit summary a closed window writes (runtime_report: guest threads, locks, memory, calls),
+ * also from the watchdog and termination handlers: each report takes its lock with a bound, so one
+ * held by the thread a handler interrupted is skipped and named instead of hanging the exit. */
+static void report_exit(const char *sz_how, int exit_code) {
+    runtime_report();
+    runtime_debug_finish(sz_how, exit_code);
+}
 typedef struct { uintptr_t va; int is_found; } MappingSearch;
 static int write_mapping_of(const PsHostMapping *p_mapping, void *p_context) {
     MappingSearch *p_search = p_context;
@@ -277,8 +285,7 @@ static void watchdog(PsHostFaultContext *p_context) {
     ps_host_thread_each(dump_other_thread,NULL);
     ps_host_time_sleep_ns(100000000,NULL);
     if (g_is_gpu_enabled) psport_gpu_flush_caches(0);
-    runtime_calls_report();
-    runtime_debug_finish("watchdog timeout", 128 + ps_host_fault_signal(p_context));
+    report_exit("watchdog timeout", 128 + ps_host_fault_signal(p_context));
     ps_host_exit_at_once(128 + ps_host_fault_signal(p_context));
 }
 void install_fault_handlers(unsigned timeout_seconds) {
@@ -293,9 +300,54 @@ void install_fault_handlers(unsigned timeout_seconds) {
     ps_host_interrupt_install(PS_HOST_INTERRUPT_WATCHDOG, watchdog, 0);
     ps_host_watchdog_arm(timeout_seconds); /* 0 disables the watchdog */
 }
-/* Termination requests SDL does not take (--cpu-only): the call summary, then the default action. */
-static void report_termination(int sig) {
-    runtime_calls_report();
-    runtime_debug_finish("termination signal", 128 + sig);
+/* Termination requests SDL does not take (--cpu-only): the exit summary, then the default action. */
+static void report_termination(int sig) { report_exit("termination signal", 128 + sig); }
+/* PS_STOP_FILE: a launcher with no SIGTERM to send (Windows, where a Job Object can only be killed and
+ * WM_CLOSE was seen not to end Bloodborne, #1274) asks for an orderly end by creating this file. The
+ * window thread then ends the game as when its window closes; if it has not within STOP_GRACE_NS the
+ * summary is written from here and the process ends, before the launcher's own grace runs out. */
+#define STOP_POLL_NS 250000000ull
+#define STOP_GRACE_NS 5000000000ull
+static void *watch_stop_file(void *p_path) {
+    const char *sz_path = p_path;
+    ps_host_thread_set_name("psport:stop");
+    int error;
+    while ((error = ps_host_fs_access(sz_path, 0)) == ENOENT) ps_host_time_sleep_ns(STOP_POLL_NS, NULL);
+    if (error) {
+        printf("Runtime: PS_STOP_FILE %s cannot be watched (%s): a launcher's stop request ends the game "
+               "without its exit summary\n", sz_path, strerror(error));
+        return NULL;
+    }
+    printf("Runtime: stop requested by the launcher (%s exists), the game ends\n", sz_path);
+    if (g_is_gpu_enabled) {
+        const int error_quit = psport_gpu_request_quit();
+        if (error_quit)
+            printf("Runtime: the window thread could not be asked to quit (%s), ending from the stop watcher\n",
+                   strerror(error_quit));
+        else {
+            ps_host_time_sleep_ns(STOP_GRACE_NS, NULL);
+            printf("Runtime: the window thread has not ended the game %llu s after the stop request, ending from "
+                   "the stop watcher\n", STOP_GRACE_NS / 1000000000ull);
+        }
+        psport_gpu_flush_caches(0);
+        report_exit("stop request (window thread did not end)", 143);
+        fflush(NULL);
+        ps_host_exit_at_once(143);
+    }
+    report_exit("stop request", 0);
+    fflush(NULL);
+    ps_host_exit_at_once(0);
 }
-void install_shutdown_signals(void) { ps_host_on_termination(report_termination); }
+void install_shutdown_signals(void) {
+    ps_host_on_termination(report_termination);
+    const char *sz_stop_file = runtime_env("PS_STOP_FILE", NULL);
+    if (!sz_stop_file || !*sz_stop_file) return;
+    pthread_t h_watcher;
+    const int error = pthread_create(&h_watcher, NULL, watch_stop_file, (void *)sz_stop_file);
+    if (error) {
+        printf("Runtime: PS_STOP_FILE not watched, its thread could not start (%s): a launcher's stop request ends "
+               "the game without its exit summary\n", strerror(error));
+        return;
+    }
+    pthread_detach(h_watcher);
+}
