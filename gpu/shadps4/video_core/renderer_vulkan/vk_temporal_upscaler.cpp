@@ -1678,6 +1678,7 @@ void TemporalUpscaler::OnDraw(u64 vs_hash, VideoCore::ImageId color,
 
 void TemporalUpscaler::CaptureFrameGen() {
     if (!m_camera_motion.Depth()) {
+        m_p_frame_generator->NoteSceneWithoutDepth();
         return;
     }
     auto& depth = m_texture_cache.GetImage(m_camera_motion.Depth());

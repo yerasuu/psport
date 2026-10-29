@@ -67,6 +67,21 @@ void Summarize(char* sz_out, std::size_t cb_out) {
                   skipped(FrameGenSkip::NoSwapchainImage));
 }
 
+// A line of its own: the report gives each summary 512 bytes, which the two lines above nearly fill.
+void SummarizeCauses(char* sz_out, std::size_t cb_out) {
+    using namespace FrameGenStats;
+    // Frame counts alone mislead: a title menu flipping at the display's rate outnumbers the
+    // play that follows it, so the game time of each side is given too.
+    std::snprintf(sz_out, cb_out,
+                  "Frame generation: without capture: %llu without the scene pass (the profile's upscaler "
+                  "trigger did not run: menus, movies, loading), %llu with the scene pass but no scene depth; "
+                  "game time %.1f s without capture, %.1f s with; generated: %llu with the UI interpolated "
+                  "(no picture before the UI), %llu restarted (camera cut or after a frame without one)\n",
+                  (unsigned long long)g_c_without_scene_pass.load(), (unsigned long long)g_c_without_scene_depth.load(),
+                  double(g_us_without_capture.load()) / 1e6, double(g_us_captured.load()) / 1e6,
+                  (unsigned long long)g_c_ui_interpolated.load(), (unsigned long long)g_c_restarted.load());
+}
+
 const char* SkipName(FrameGenSkip reason) {
     switch (reason) {
     case FrameGenSkip::HdrOutput:
@@ -129,6 +144,7 @@ FrameGenerator::FrameGenerator(const Instance& instance, Scheduler& scheduler)
     : m_instance{instance}, m_scheduler{scheduler} {
     if (IsWanted()) {
         runtime_calls_add_summary(&Summarize);
+        runtime_calls_add_summary(&SummarizeCauses);
         std::printf("Frame generation: FSR 3.1, 2x\n");
     }
 }
@@ -245,7 +261,11 @@ bool FrameGenerator::EnsureInputs(u32 w, u32 h) {
 }
 
 vk::ImageView FrameGenerator::BeginCapture(vk::CommandBuffer cmdbuf, vk::ImageView depth, u32 w, u32 h) {
-    if (!IsWanted() || !depth || !w || !h) {
+    if (!IsWanted()) {
+        return {};
+    }
+    if (!depth || !w || !h) {
+        NoteSceneWithoutDepth();
         return {};
     }
     if (!CreatePipelines()) {
@@ -457,13 +477,23 @@ FrameGenSkip FrameGenerator::Generate(vk::CommandBuffer cmdbuf, vk::Image color,
     }
     RetireFinished();
     const bool had_capture = m_is_captured;
+    const bool was_scene_without_depth = m_is_scene_without_depth;
     m_is_captured = false;
     m_is_hudless_captured = false;
+    m_is_scene_without_depth = false;
+    if (IsWanted()) {
+        const auto us = u64(frame_ms * 1000.0f);
+        (had_capture ? FrameGenStats::g_us_captured : FrameGenStats::g_us_without_capture) += us;
+    }
     if (!IsWanted() || !had_capture || !should_generate || !output.image || !width || !height) {
         // A frame without the game's scene (menu, movie, loading), or none wanted (paused, the
         // display has no room): the frames after it are not interpolated from the ones before.
         if (IsWanted()) {
             ++(!had_capture ? FrameGenStats::g_c_without_capture : FrameGenStats::g_c_held);
+            if (!had_capture) {
+                ++(was_scene_without_depth ? FrameGenStats::g_c_without_scene_depth
+                                           : FrameGenStats::g_c_without_scene_pass);
+            }
         }
         m_should_reset = true;
         return !IsWanted()        ? FrameGenSkip::Failed
@@ -517,6 +547,11 @@ FrameGenSkip FrameGenerator::Generate(vk::CommandBuffer cmdbuf, vk::Image color,
     }
     if (is_hudless) {
         ComposeUi(cmdbuf, color_view, hudless_view, output, width, height);
+    } else {
+        ++FrameGenStats::g_c_ui_interpolated;
+    }
+    if (m_should_reset) {
+        ++FrameGenStats::g_c_restarted;
     }
     m_should_reset = false;
     // Presented after this submission: the present queue's blit reads it.

@@ -49,6 +49,12 @@ inline std::atomic<u64> g_c_generated{0};       ///< frames generated
 inline std::atomic<u64> g_c_presented{0};       ///< generated frames presented
 inline std::atomic<u64> g_c_dropped{0};         ///< generated but not presented: the game waited for a frame
 inline std::atomic<u64> g_c_without_capture{0}; ///< game frames without the scene's depth and motion (menus, movies)
+inline std::atomic<u64> g_c_without_scene_pass{0}; ///< of those, the profile's scene pass (upscaler trigger) did not run
+inline std::atomic<u64> g_c_without_scene_depth{0}; ///< of those, it ran but the scene had no depth to take
+inline std::atomic<u64> g_us_without_capture{0};  ///< game time of the frames without capture, microseconds
+inline std::atomic<u64> g_us_captured{0};         ///< game time of the frames with capture, microseconds
+inline std::atomic<u64> g_c_ui_interpolated{0};   ///< generated without a picture before the UI
+inline std::atomic<u64> g_c_restarted{0};         ///< generated with FSR 3.1's history reset (cut, gap)
 inline std::atomic<u64> g_c_held{0};            ///< game frames not generated: paused, or no room on the display
 inline std::atomic<u64> g_c_pauses{0};          ///< pauses because presenting fell behind
 inline std::atomic<u64> g_c_failures{0};        ///< FSR 3.1 calls that failed (it is then off)
@@ -99,6 +105,11 @@ public:
     /// cut, the next frame is not interpolated from this one.
     void EndCapture(vk::CommandBuffer cmdbuf, std::array<float, 2> jitter, bool is_motion_valid,
                     const FrameGenCamera& camera);
+    /// The upscaler's trigger ran but the scene had no depth: counted apart from frames without
+    /// the scene pass at all.
+    void NoteSceneWithoutDepth() noexcept {
+        m_is_scene_without_depth = true;
+    }
 
     /// The game's picture before its UI (`source` in TransferSrcOptimal layout): copied, once a
     /// frame and only after BeginCapture.
@@ -159,6 +170,7 @@ private:
     bool m_is_hudless_captured = false; ///< this frame's
 
     bool m_is_captured = false; ///< BeginCapture ran since the last Generate
+    bool m_is_scene_without_depth = false; ///< NoteSceneWithoutDepth since the last Generate
     std::array<float, 2> m_capture_jitter{};
     FrameGenCamera m_capture_camera{};
     bool m_should_reset = true;

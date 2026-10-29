@@ -41,7 +41,18 @@ leave it off.
   pauses, failures, the flip limit) and a `Frame generation: game frames without a generated frame:`
   line counting each game frame shown without one by reason (HDR output, without capture, paused,
   no room on the display, no memory, after a failure, dropped because the game waited, no swapchain
-  image); the first frame of each reason is logged when it happens.
+  image); the first frame of each reason is logged when it happens. A third line,
+  `Frame generation: without capture:`, splits the frames without capture into those where the game
+  profile's upscaler trigger never ran (no scene pass: menus, movies, loading) and those where it ran
+  without a scene depth, gives the game time spent without and with capture, and counts the
+  generated frames whose UI was interpolated (no picture before the UI) and those that restarted
+  FSR 3.1's history (a camera cut, or the first after a frame without capture). Frame counts alone
+  mislead: in night n1029 (Bloodborne, `bloodborne-perf.sched`) 28797 of 43401 game frames had no
+  capture, all of them the title menu and loading flipping uncapped at the 480 Hz vblank (about 60 s
+  at 480 FPS by the `Frame stats` lines, 6 to 24 draws a frame, no scene pass), while the ~90 s of
+  play at 160 FPS that followed (about 14500 frames) got 14605 generated frames, none held or
+  dropped; the validation step, playing at 50 FPS, had the same ~28000 menu frames and 4259
+  generated.
 - HDR output presents without generated frames. DLSS Frame Generation is NVIDIA-only and is not
   in the port.
 
