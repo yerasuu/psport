@@ -813,8 +813,9 @@ void Menu() {
                                                        "Generación de fotogramas##frame_gen"),
                                   frame_gens[chosen])) {
                 for (int i = 0; i < PsSettings::FrameGenCount; ++i) {
-                    if (ImGui::Selectable(frame_gens[i], i == chosen)) {
-                        Store(s.frame_gen_chosen, i, i != chosen);
+                    if (ImGui::Selectable(frame_gens[i], i == chosen) && i != chosen) {
+                        PsSettings::ChooseFrameGen(i);
+                        s_is_dirty = true;
                     }
                 }
                 ImGui::EndCombo();
@@ -829,6 +830,17 @@ void Menu() {
                 "Un fotograma generado entre dos del juego: movimiento más fluido en una pantalla con margen "
                 "para el doble de fotogramas del juego. Añade latencia de entrada (alrededor de medio fotograma "
                 "del juego) y funciona mejor a partir de unos 60 FPS. Se aplica tras reiniciar el juego."));
+            if (s.is_frame_gen_from_env) {
+                ImGui::PushTextWrapPos();
+                ImGui::TextDisabled("%s", PsSettings::MenuText(
+                                              "Set by the launcher for this game (PS_FRAME_GEN): a change here is "
+                                              "kept by the launcher for this game, not in psport.ini.",
+                                              "Задано лаунчером для этой игры (PS_FRAME_GEN): изменение здесь "
+                                              "лаунчер сохранит для этой игры, а не в psport.ini.",
+                                              "Lo fija el lanzador para este juego (PS_FRAME_GEN): un cambio aquí "
+                                              "lo guarda el lanzador para este juego, no psport.ini."));
+                ImGui::PopTextWrapPos();
+            }
             if (s.frame_gen != PsSettings::FrameGenOff) {
                 ImGui::TextDisabled("%s", s.c_frame_gen_now > 0
                                               ? PsSettings::MenuText("Now: 2x", "Сейчас: 2x", "Ahora: 2x")
@@ -1009,6 +1021,7 @@ void Menu() {
                 PsSettings::MenuText("Apply and restart game", "Применить и перезапустить игру",
                                      "Aplicar y reiniciar el juego"))) {
             PsSettings::Save();
+            PsSettings::PrepareRestart();
             runtime_restart();
         }
     }

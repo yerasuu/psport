@@ -123,6 +123,9 @@ struct Values {
     std::atomic<const char*> sz_frame_gen_problem{nullptr};
     /// The menu's choice, written by Save(); it runs from the next start.
     std::atomic<int> frame_gen_chosen{FrameGenOff};
+    /// PS_FRAME_GEN was set (a launcher's per-game value): it wins over psport.ini, which the menu
+    /// then leaves alone; the launcher learns the menu's changes from ChooseFrameGen's line.
+    bool is_frame_gen_from_env = false;
     /// FSR 3.1 frame generation's prerequisites on the device the game takes (set at start).
     std::atomic<bool> is_frame_gen_fsr_supported{false};
     /// Generated frames only where the display's refresh rate has room for them (frame_gen_fit_display).
@@ -167,6 +170,12 @@ int RenderPreset();
 bool ResolutionNeedsRestart();
 /// Writes the file (menu changes).
 void Save();
+/// The menu's frame generation choice: prints `Frame generation setting: <off|fsr>` on its own line
+/// (launchers read it from the output to keep the choice per game).
+void ChooseFrameGen(int frame_gen);
+/// Before the menu's restart through run.sh, which inherits this process's environment: a
+/// launcher's PS_FRAME_GEN would otherwise bring back the value the menu changed.
+void PrepareRestart();
 
 /// Render resolution divisor of a preset (1.0 native, 1.5 quality, ...).
 float PresetScale(int preset);

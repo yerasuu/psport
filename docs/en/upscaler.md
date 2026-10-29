@@ -20,6 +20,12 @@ leave it off.
   an option, not as something a game needs. The in-game menu offers the switch (applied at the next
   start) only where the probe says yes.
 
+- Launchers: every change in the menu prints `Frame generation setting: off` or
+  `Frame generation setting: fsr` on a line of its own (flushed), which a launcher reads from the
+  run's output to keep the choice per game (decision #1146, as decanter learns `frame_overlap_off`).
+  When `PS_FRAME_GEN` is set the launcher owns the value: it wins over `psport.ini`, the menu says so
+  and does not write `frame_gen` to `psport.ini` (one file for every game), and the menu's restart
+  sets `PS_FRAME_GEN` to the menu's choice so that run.sh starts with it.
 - Inputs: the scene depth (copied to R32F) and the motion vectors (`CameraMotion`, camera and object
   motion) at the upscaler's trigger, so it needs the game profile's upscaler placement and runs with
   the upscaler off too. Frames without them (menus, movies, loading) are presented alone and the

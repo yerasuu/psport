@@ -12,6 +12,7 @@
 #include <utility>
 #include <vector>
 
+#include "../../src/platform/ps_host.h"
 #include "game_profile.h"
 
 extern "C" {
@@ -335,6 +336,7 @@ void Load() {
     v.startup_preset = v.preset;
     v.startup_upscaler = v.upscaler;
     v.startup_frame_gen = v.frame_gen;
+    v.is_frame_gen_from_env = runtime_env("PS_FRAME_GEN", nullptr) != nullptr;
     v.is_object_motion_at_startup = v.should_use_object_motion;
     for (int e = 0; e < v.c_effects; ++e) {
         v.startup_effects[e] = v.effects[e];
@@ -418,8 +420,9 @@ void Save() {
                                                                         : "en");
     }
     put("upscaler", UpscalerName(v.upscaler));
-    // Only once chosen, so that a file never touched by frame generation stays as it was.
-    if (v.frame_gen_chosen != FrameGenOff || v.startup_frame_gen != FrameGenOff) {
+    // Only once chosen, so that a file never touched by frame generation stays as it was; never
+    // when a launcher set it, since psport.ini is shared by every game and the value is per game.
+    if (!v.is_frame_gen_from_env && (v.frame_gen_chosen != FrameGenOff || v.startup_frame_gen != FrameGenOff)) {
         put("frame_gen", FrameGenName(v.frame_gen_chosen));
     }
     put("preset", std::to_string(v.preset.load()));
@@ -495,6 +498,24 @@ void Save() {
     is_ok = p_file && std::fclose(p_file) == 0 && is_ok;
     if (!is_ok || std::rename(temporary.c_str(), Path()) != 0) {
         std::printf("Settings: cannot write %s\n", Path());
+    }
+}
+
+void ChooseFrameGen(int frame_gen) {
+    auto& v = Get();
+    frame_gen = std::clamp(frame_gen, 0, FrameGenCount - 1);
+    v.frame_gen_chosen = frame_gen;
+    std::printf("Frame generation setting: %s\n", FrameGenName(frame_gen));
+    std::fflush(stdout);
+}
+
+void PrepareRestart() {
+    const auto& v = Get();
+    // Set only now: the environment is not safe against the game's threads reading it.
+    if (v.is_frame_gen_from_env &&
+        ps_host_env_set("PS_FRAME_GEN", FrameGenName(v.frame_gen_chosen), 1) != 0) {
+        std::printf("Settings: cannot set PS_FRAME_GEN=%s for the restart; the launcher's value comes back\n",
+                    FrameGenName(v.frame_gen_chosen));
     }
 }
 
