@@ -216,6 +216,8 @@ void runtime_process_configure(uint32_t sdk_version, uint32_t psf_attributes);
 /* The SDK version the eboot was built with (its process parameters), for behaviour tied to it. */
 uint32_t runtime_process_sdk_version(void);
 uintptr_t runtime_file_resolve(const char *sz_name);
+/* POSIX shared memory objects (runtime_shm.c) over anonymous host files in the guest's file table. */
+uintptr_t runtime_shm_resolve(const char *sz_name);
 /* The guest's console output as lines of psport's log (runtime_guest_output.c): its writes to
  * descriptors 1 and 2 and sceKernelDebugOutText, each channel cut into lines of its own. */
 enum { RUNTIME_GUEST_OUTPUT_STDOUT, RUNTIME_GUEST_OUTPUT_STDERR, RUNTIME_GUEST_OUTPUT_DEBUG, RUNTIME_GUEST_OUTPUT_CHANNELS };
@@ -300,6 +302,9 @@ int runtime_file_shared_host(int h_fd);
 /* A host descriptor (a socket) as a guest descriptor in the file table, which owns it from then on;
  * the descriptor, or -EMFILE with the table full (the caller still owns h_host then). */
 int runtime_file_adopt(int h_host);
+/* A shared memory object's host descriptor (runtime_shm.c) as a guest file named sz_name, owned as
+ * runtime_file_adopt's. */
+int runtime_file_adopt_shared_memory(int h_host, const char *sz_name);
 /* The host descriptor behind a guest one, or -1. */
 int runtime_file_host(int h_fd);
 int64_t runtime_file_write(int h_fd, const void *p_buffer, uint64_t cb_buffer);

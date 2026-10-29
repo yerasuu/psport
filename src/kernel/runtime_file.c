@@ -432,15 +432,19 @@ static int host_fd(int h_fd) {
 }
 /* Sockets (runtime_socket.c) take descriptors from this table too, so close, read, write and fcntl
  * find them as the console's kernel would. The table owns the host descriptor once adopted. */
-static int adopt(int h_host,int is_socket) {
+static int adopt(int h_host,int is_socket,const char *sz_path) {
     pthread_mutex_lock(&s_lock);
     int h_fd=-1;
     for (int i=3;i<MAX_FILES;++i) if (!s_files[i].used) { h_fd=i; break; }
-    if (h_fd>=0) s_files[h_fd]=(File){.used=1,.host=h_host,.is_socket=is_socket,.serial=++s_last_serial};
+    if (h_fd>=0) {
+        s_files[h_fd]=(File){.used=1,.host=h_host,.is_socket=is_socket,.serial=++s_last_serial};
+        if (sz_path) snprintf(s_files[h_fd].sz_path,sizeof(s_files[h_fd].sz_path),"%s",sz_path);
+    }
     pthread_mutex_unlock(&s_lock);
     return h_fd<0 ? -EMFILE : h_fd;
 }
-int runtime_file_adopt(int h_host) { return adopt(h_host,1); }
+int runtime_file_adopt(int h_host) { return adopt(h_host,1,NULL); }
+int runtime_file_adopt_shared_memory(int h_host,const char *sz_name) { return adopt(h_host,0,sz_name); }
 int runtime_file_host(int h_fd) { return host_fd(h_fd); }
 static int host_fd_written(int h_fd) {
     if (h_fd>=0 && h_fd<3) return h_fd;
@@ -861,8 +865,8 @@ static int64_t do_pipe(int32_t *p_out_fds) {
     int h_hosts[2];
     const int e=ps_host_fs_pipe(h_hosts);
     if (e) return -e;
-    const int h_read=adopt(h_hosts[0],0);
-    const int h_write=h_read<0 ? -EMFILE : adopt(h_hosts[1],0);
+    const int h_read=adopt(h_hosts[0],0,NULL);
+    const int h_write=h_read<0 ? -EMFILE : adopt(h_hosts[1],0,NULL);
     if (h_write<0) {
         if (h_read>=0) do_close(h_read); else ps_host_fs_close(h_hosts[0]);
         ps_host_fs_close(h_hosts[1]);

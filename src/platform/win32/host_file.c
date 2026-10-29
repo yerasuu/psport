@@ -355,6 +355,37 @@ int ps_host_fs_pipe(int p_out_h_files[2]) {
     return 0;
 }
 
+/* A temporary file that Windows deletes once its last handle closes, since a section cannot change
+ * its size as ftruncate changes a file's. */
+int ps_host_fs_open_anonymous(const char *sz_name) {
+    (void)sz_name;
+    wchar_t sz_dir[MAX_PATH + 1], sz_file[MAX_PATH];
+    const DWORD c_dir = GetTempPathW(MAX_PATH + 1, sz_dir);
+    if (!c_dir) return (int)win32_failure();
+    if (c_dir > MAX_PATH - 14) return -ENAMETOOLONG;
+    if (!GetTempFileNameW(sz_dir, L"psp", 0, sz_file)) return (int)win32_failure();
+    const HANDLE h_handle = CreateFileW(sz_file, GENERIC_READ | GENERIC_WRITE, SHARE_ALL, NULL, OPEN_EXISTING,
+                                        FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE, NULL);
+    if (h_handle == INVALID_HANDLE_VALUE) {
+        const int error = (int)win32_failure();
+        DeleteFileW(sz_file);
+        return error;
+    }
+    return ps_win32_fd_adopt(h_handle, PS_HOST_OPEN_READ_WRITE);
+}
+
+int ps_host_fs_reopen(int h_file, unsigned flags) {
+    Descriptor descriptor;
+    if (descriptor_get(h_file, &descriptor)) return -EBADF;
+    const unsigned access_mode = flags & PS_HOST_OPEN_ACCESS_MASK;
+    DWORD access = FILE_READ_ATTRIBUTES;
+    if (access_mode != PS_HOST_OPEN_WRITE) access |= GENERIC_READ;
+    if (access_mode != PS_HOST_OPEN_READ) access |= GENERIC_WRITE;
+    const HANDLE h_handle = ReOpenFile(descriptor.h_handle, access, SHARE_ALL, 0);
+    if (h_handle == INVALID_HANDLE_VALUE) return (int)win32_failure();
+    return ps_win32_fd_adopt(h_handle, access_mode);
+}
+
 /* LockFileEx over the whole file stands in for flock. Unlike flock's advisory locks, Windows' are
  * mandatory: other handles' reads and writes of a locked range fail while it is held. A change
  * between shared and exclusive lets the old lock go first, as flock's conversion is not atomic

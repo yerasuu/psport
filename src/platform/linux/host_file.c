@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <sys/file.h>
 #include <sys/ioctl.h>
+#include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
@@ -188,6 +189,18 @@ int ps_host_fs_set_close_on_exec(int h_file, int is_set) {
 int ps_host_fs_sync_data(int h_file) { return fdatasync(h_file) ? errno : 0; }
 
 int ps_host_fs_pipe(int p_out_h_files[2]) { return pipe2(p_out_h_files, O_CLOEXEC) ? errno : 0; }
+
+int ps_host_fs_open_anonymous(const char *sz_name) {
+    const int h_file = memfd_create(sz_name, MFD_CLOEXEC);
+    return h_file < 0 ? -errno : h_file;
+}
+
+/* Through /proc, since dup would share the offset and the access of the first descriptor. */
+int ps_host_fs_reopen(int h_file, unsigned flags) {
+    char sz_path[32];
+    snprintf(sz_path, sizeof(sz_path), "/proc/self/fd/%d", h_file);
+    return ps_host_fs_open(sz_path, flags & PS_HOST_OPEN_ACCESS_MASK, 0);
+}
 
 int ps_host_fs_lock(int h_file, unsigned operation) {
     int host = operation & PS_HOST_LOCK_UNLOCK ? LOCK_UN : operation & PS_HOST_LOCK_EXCLUSIVE ? LOCK_EX : LOCK_SH;

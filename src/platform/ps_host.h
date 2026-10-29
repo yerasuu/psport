@@ -269,6 +269,13 @@ int ps_host_fs_sync_data(int h_file);
 /* A pipe whose p_out_h_files[0] reads what p_out_h_files[1] writes, both close-on-exec: 0, or the
  * host's errno. */
 int ps_host_fs_pipe(int p_out_h_files[2]);
+/* A file with no path, empty and open for reading and writing, which the host frees once its last
+ * descriptor closes (the guest's shared memory objects). sz_name only labels it where the host
+ * shows one. A descriptor, or minus the host's errno. */
+int ps_host_fs_open_anonymous(const char *sz_name);
+/* The same file opened again with flags' access mode, as a second open of its path would: an offset
+ * and access of its own. A descriptor, or minus the host's errno. */
+int ps_host_fs_reopen(int h_file, unsigned flags);
 /* flock's whole-file advisory locks: SHARED or EXCLUSIVE (with NONBLOCK, EWOULDBLOCK instead of
  * waiting), or UNLOCK. 0, or the host's errno. */
 enum { PS_HOST_LOCK_SHARED = 1, PS_HOST_LOCK_EXCLUSIVE = 2, PS_HOST_LOCK_NONBLOCK = 4, PS_HOST_LOCK_UNLOCK = 8 };
