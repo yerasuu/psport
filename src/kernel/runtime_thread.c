@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <pthread.h>
 #include <signal.h>
 #include <errno.h>
@@ -60,6 +61,20 @@ static size_t s_c_created, s_c_joined, s_c_exited, s_c_exit_calls;
 #define C_EXIT_CALLS_LOGGED 32
 static size_t s_c_cancel_requests, s_c_cancels_taken;
 static size_t s_c_high_records;
+#define C_CREATE_NAMES 64
+#define C_CREATE_LOGGED 3
+#define C_CREATE_SUMMARY_NAMES 8
+#define MS_CREATE_SUMMARY 10000
+typedef struct {
+    char name[32];
+    size_t c_total, c_window;
+} CreateCount;
+/* Guarded by s_lock. Games spawn short-lived workers by the thousand under a few names; the table
+ * keeps the log to the first creations of each name plus a periodic digest. Index C_CREATE_NAMES is
+ * the shared slot of the names that do not fit. */
+static CreateCount s_create_counts[C_CREATE_NAMES+1];
+static size_t s_c_create_names;
+static uint64_t s_ms_create_summary;
 
 void runtime_set_main_tls(const void *p_data,uint64_t filesz,uint64_t memsz,uint64_t align) {
     s_p_tls_template=p_data; s_tls_filesz=filesz; s_tls_memsz=memsz; s_tls_align=align ? align : 16;
@@ -347,6 +362,64 @@ static void *host_start(void *p_argument) {
     runtime_exception_lock(&s_lock); p_thread->finished=1; ++s_c_exited; runtime_exception_unlock(&s_lock);
     return p_thread->result;
 }
+static uint64_t now_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC,&ts);
+    return (uint64_t)ts.tv_sec*1000+(uint64_t)ts.tv_nsec/1000000;
+}
+/* Guest names are arbitrary bytes: control and non-ASCII bytes would corrupt the log. */
+static void printable_name(char *out_name,const char *sz_name) {
+    size_t i=0;
+    for (;i<31 && sz_name[i];++i) {
+        const unsigned char c=(unsigned char)sz_name[i];
+        out_name[i]=c>=0x20 && c<0x7f ? (char)c : '?';
+    }
+    out_name[i]=0;
+}
+static void log_created(const GuestThread *p_thread,uint64_t stack) {
+    char sz_name[32], sz_digest[512];
+    printable_name(sz_name,p_thread->name);
+    sz_digest[0]=0;
+    runtime_exception_lock(&s_lock);
+    ++s_c_created;
+    size_t i_slot=0;
+    while (i_slot<s_c_create_names && strcmp(s_create_counts[i_slot].name,sz_name)) ++i_slot;
+    if (i_slot==s_c_create_names) {
+        if (s_c_create_names<C_CREATE_NAMES) {
+            memcpy(s_create_counts[i_slot].name,sz_name,sizeof(sz_name));
+            ++s_c_create_names;
+        } else i_slot=C_CREATE_NAMES;
+    }
+    CreateCount *p_count=&s_create_counts[i_slot];
+    const int is_logged=p_count->c_total<C_CREATE_LOGGED;
+    const int is_last_logged=p_count->c_total+1==C_CREATE_LOGGED;
+    ++p_count->c_total; ++p_count->c_window;
+    const uint64_t ms_now=now_ms();
+    if (!s_ms_create_summary) s_ms_create_summary=ms_now;
+    else if (ms_now-s_ms_create_summary>=MS_CREATE_SUMMARY) {
+        s_ms_create_summary=ms_now;
+        size_t cb_used=(size_t)snprintf(sz_digest,sizeof(sz_digest),"Runtime: guest threads created in the last 10 s:");
+        for (int i_top=0;i_top<C_CREATE_SUMMARY_NAMES;++i_top) {
+            size_t i_best=C_CREATE_NAMES+1;
+            for (size_t i=0;i<=C_CREATE_NAMES;++i)
+                if (s_create_counts[i].c_window
+                    && (i_best>C_CREATE_NAMES || s_create_counts[i].c_window>s_create_counts[i_best].c_window))
+                    i_best=i;
+            if (i_best>C_CREATE_NAMES || cb_used>=sizeof(sz_digest)) break;
+            const CreateCount *p_best=&s_create_counts[i_best];
+            const int cb_written=snprintf(sz_digest+cb_used,sizeof(sz_digest)-cb_used,"%s %s x%zu",i_top ? "," : "",
+                                          i_best==C_CREATE_NAMES ? "other names" : p_best->name,p_best->c_window);
+            if (cb_written>0) cb_used+=(size_t)cb_written;
+            s_create_counts[i_best].c_window=0;
+        }
+        for (size_t i=0;i<=C_CREATE_NAMES;++i) s_create_counts[i].c_window=0;
+    }
+    runtime_exception_unlock(&s_lock);
+    if (is_logged)
+        printf("Runtime: guest thread '%s' created (stack=%llu, prio=%d)%s\n",sz_name,(unsigned long long)stack,
+               p_thread->attr.prio,is_last_logged ? "; further ones are only counted" : "");
+    if (sz_digest[0]) printf("%s\n",sz_digest);
+}
 static int32_t create(GuestThread **pp_out,ThreadAttr **pp_attr_slot,GuestEntry pfn_entry,void *p_argument,const char *sz_name) {
     if (!pp_out || !pfn_entry) return ERR(22);
     ThreadAttr *p_thread_attr=NULL;
@@ -398,8 +471,7 @@ static int32_t create(GuestThread **pp_out,ThreadAttr **pp_attr_slot,GuestEntry 
     ps_host_interrupts_restore(&p_thread->start_mask);
     if (e) { fprintf(stderr,"STOP: host pthread_create failed: %d\n",e); runtime_stop(21); }
     if (p_thread->detached) pthread_detach(p_thread->host);
-    runtime_exception_lock(&s_lock); ++s_c_created; runtime_exception_unlock(&s_lock);
-    printf("Runtime: guest thread '%s' created (stack=%llu, prio=%d)\n",p_thread->name,(unsigned long long)stack,p_thread->attr.prio);
+    log_created(p_thread,stack);
     return 0;
 }
 static ABI int32_t thread_create(GuestThread **pp_out,ThreadAttr **pp_attr,GuestEntry pfn_entry,void *p_argument,const char *sz_name) {
@@ -608,6 +680,10 @@ void runtime_thread_report(void) {
     if (!runtime_exception_report_lock(&s_lock,"thread")) return;
     printf("Runtime: guest threads created=%zu, exited=%zu (through scePthreadExit %zu), joined=%zu\n",s_c_created,
            s_c_exited,s_c_exit_calls,s_c_joined);
+    for (size_t i=0;i<=C_CREATE_NAMES;++i)
+        if (s_create_counts[i].c_total)
+            printf("Runtime: guest threads created by name: '%s' x%zu\n",
+                   i==C_CREATE_NAMES ? "other names" : s_create_counts[i].name,s_create_counts[i].c_total);
     if (s_c_cancel_requests)
         printf("Runtime: thread cancellation: %zu requested, %zu taken at pthread_testcancel (blocking "
                "cancellation points and asynchronous cancellation are not honoured)\n",s_c_cancel_requests,
