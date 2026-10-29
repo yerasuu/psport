@@ -74,6 +74,8 @@ static ABI int32_t user_color(int32_t id,int32_t *p_color) {
     if (id!=USER_ID || !p_color) return USER_INVALID_ARGUMENT;
     *p_color=0; return 0;
 }
+/* libSceUserService's own test, on the id alone and without initialization: top nibble 3. */
+static ABI int32_t user_is_share_play_client(int32_t id) { return ((uint32_t)id&0xF0000000u)==0x30000000u; }
 static ABI int32_t user_event(int32_t *p_event) {
     if (!p_event) return USER_INVALID_ARGUMENT;
     pthread_mutex_lock(&s_lock);
@@ -890,6 +892,7 @@ static const RuntimeExport s_exports[]={
     {"sceUserServiceGetInitialUser",user_initial}, {"sceUserServiceGetLoginUserIdList",user_list},
     {"sceUserServiceGetUserName",user_name}, {"sceUserServiceGetEvent",user_event},
     {"sceUserServiceGetUserColor",user_color}, {"sceUserServiceRegisterEventCallback",runtime_stub},
+    {"sceUserServiceIsSharePlayClientUser",user_is_share_play_client},
     {"sceSystemServiceParamGetInt",system_param}, {"sceSystemServiceParamGetString",system_param_string},
     {"sceSystemServiceGetStatus",system_status}, {"sceSystemServiceGetHdrToneMapLuminance",hdr_tone_map_luminance},
     {"sceSystemServiceDisableMusicPlayer",runtime_stub}, {"sceSystemServiceReenableMusicPlayer",runtime_stub},
