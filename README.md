@@ -268,6 +268,10 @@ as version 2. It is maintained by Yerasuu.
 Source commits and changes to inherited code are recorded in [FORK.md](FORK.md) and
 [gpu/VENDOR.txt](gpu/VENDOR.txt).
 
+The license of every file and component, and what is taken from each fork (bbport, SrShadowy, Teefpyre,
+Supermedo, Mrsuss60, willl03 and AnyPS5), is detailed in [LICENSES.md](LICENSES.md) (machine-readable:
+[LICENSES.json](LICENSES.json)).
+
 ### Bundled third-party code
 
 | Component | Used for | License |

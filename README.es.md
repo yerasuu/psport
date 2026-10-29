@@ -279,6 +279,10 @@ GPL-2.0-or-later y se usa como versión 2. Lo mantiene Yerasuu.
 Los commits de origen y los cambios en el código heredado están anotados en [FORK.md](FORK.md) y
 [gpu/VENDOR.txt](gpu/VENDOR.txt).
 
+La licencia de cada fichero y componente, y lo que se toma de cada fork (bbport, SrShadowy, Teefpyre,
+Supermedo, Mrsuss60, willl03 y AnyPS5), está detallada en [LICENSES.md](LICENSES.md) (legible por máquina:
+[LICENSES.json](LICENSES.json)).
+
 ### Código de terceros incluido
 
 | Componente | Uso | Licencia |

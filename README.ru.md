@@ -274,6 +274,10 @@ GPL-2.0-or-later и используются как версия 2. Проект
 Исходные коммиты и изменения унаследованного кода записаны в [FORK.md](FORK.md) и
 [gpu/VENDOR.txt](gpu/VENDOR.txt).
 
+Лицензия каждого файла и компонента и то, что берётся из каждого форка (bbport, SrShadowy, Teefpyre,
+Supermedo, Mrsuss60, willl03 и AnyPS5), подробно описаны в [LICENSES.md](LICENSES.md) (в машиночитаемом виде:
+[LICENSES.json](LICENSES.json)).
+
 ### Встроенный сторонний код
 
 | Компонент | Для чего | Лицензия |
