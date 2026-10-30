@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // psport online module: the CA bundle of its HTTPS clients (cpp-httplib over mbedTLS, kb #850) and
-// the shadNet connection's TLS and login policy (kb #1297).
+// the shadNet connection's TLS and login policy (kb #1297) and its WebAPI's (kb #1302).
 #pragma once
 #include <cstdint>
 #include <cstdlib>
 #include <mutex>
+#include <optional>
 #include <string>
 
 #include <httplib.h>
@@ -29,6 +30,18 @@ enum class LoginTransport { Tls, PlainLoopback, PlainAllowed, Refused };
 /// choice.
 LoginTransport ChooseLoginTransport(bool is_tls, std::uint32_t va_peer_ipv4, const std::string& host,
                                     std::uint16_t port);
+
+/// The shadNet WebAPI base URL (PS_SHADNET_WEBAPI) a request carrying the account's bearer token
+/// may use, or nothing when it may not (kb #1302): https always, its certificate and host name
+/// checked; http only to a host whose every address is loopback, or with
+/// PS_ONLINE_ALLOW_PLAINTEXT_LOGIN=1. With PS_SHADNET_TLS=1 the address run.sh and the launchers
+/// derive from the shadNet server (http://<host>:31315) becomes https on the same host and port.
+/// Counts and logs the choice.
+std::optional<std::string> WebApiUrl();
+
+/// Whether scheme://host:port is the shadNet WebAPI over https, whose certificate libhttp must
+/// check whatever the game's context asked for.
+bool IsWebApiEndpoint(const std::string& scheme, const std::string& host, std::uint16_t port);
 
 /// A TLS client stream over a connected TCP socket the caller owns and closes. One reader and one
 /// writer thread may use it at once: an mbedTLS context is not thread-safe, so every call into the

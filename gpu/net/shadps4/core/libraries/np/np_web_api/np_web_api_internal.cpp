@@ -17,6 +17,7 @@
 #include "core/libraries/np/np_error.h"
 #include "core/libraries/np/np_handler.h"
 #include "np_web_api_internal.h"
+#include "psport_net_tls.h"
 
 namespace Libraries::Np::NpWebApi {
 
@@ -783,7 +784,14 @@ s32 sendRequest(s64 requestId, s32 partIndex, const void* pData, u64 dataSize, s
     }
 
     if (request->http_request_id == 0) {
-        std::string base_url = EmulatorSettings.GetShadNetWebApiServer();
+        const auto webapi_url = PsNetTls::WebApiUrl();
+        if (!webapi_url) {
+            releaseRequest(request);
+            releaseUserContext(user_context);
+            releaseContext(context);
+            return ORBIS_NP_WEBAPI_ERROR_NOT_SIGNED_IN;
+        }
+        const std::string& base_url = *webapi_url;
         // sceHttpCreateConnectionWithURL expects a template id, not the raw libhttp
         // context id that NpWebApi was initialized with. Create a template from the
         // context first, then open the connection against it.

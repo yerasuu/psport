@@ -1,8 +1,13 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// psport online module: the shadNet connection's TLS stream and login policy (kb #1297).
+// psport online module: the shadNet connection's TLS stream and login policy (kb #1297) and its
+// WebAPI's (kb #1302).
 #include "psport_net_tls.h"
 
+#include <algorithm>
 #include <atomic>
+#include <cctype>
+#include <charconv>
+#include <string_view>
 #include <fmt/format.h>
 
 #include "common/logging/log.h"
@@ -15,9 +20,151 @@ namespace {
 namespace tls = httplib::tls;
 
 constexpr std::uint32_t WRITE_WAIT_MS = 10000;
+constexpr std::uint16_t WEBAPI_PORT = 31315;
 
 bool IsLoopback(std::uint32_t va_peer_ipv4) {
     return (ntohl(va_peer_ipv4) >> 24) == 127;
+}
+
+bool IsPowerOfTwo(std::uint64_t c_value) {
+    return (c_value & (c_value - 1)) == 0;
+}
+
+std::string Lowercase(std::string_view text) {
+    std::string lower(text);
+    std::ranges::transform(lower, lower.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return lower;
+}
+
+struct BaseUrl {
+    std::string scheme;
+    std::string host;
+    std::uint16_t port = 0;
+    bool has_scheme = false;
+    bool has_path = false;
+};
+
+// As cpp-httplib's Client reads a base URL, where no scheme means http. User info is refused, so
+// that no credential in the address reaches a log line.
+std::optional<BaseUrl> ParseBaseUrl(std::string_view url) {
+    BaseUrl parsed;
+    parsed.scheme = "http";
+    if (const auto off_scheme = url.find("://"); off_scheme != std::string_view::npos) {
+        parsed.scheme = Lowercase(url.substr(0, off_scheme));
+        parsed.has_scheme = true;
+        url.remove_prefix(off_scheme + 3);
+    }
+    if (parsed.scheme != "http" && parsed.scheme != "https")
+        return std::nullopt;
+    const auto off_path = url.find_first_of("/?#");
+    const std::string_view authority = url.substr(0, off_path);
+    parsed.has_path = off_path != std::string_view::npos && url.substr(off_path) != "/";
+    if (authority.empty() || authority.find('@') != std::string_view::npos)
+        return std::nullopt;
+    std::string_view port_text;
+    if (authority.front() == '[') {
+        const auto off_close = authority.find(']');
+        if (off_close == std::string_view::npos)
+            return std::nullopt;
+        parsed.host = Lowercase(authority.substr(1, off_close - 1));
+        const std::string_view after = authority.substr(off_close + 1);
+        if (!after.empty()) {
+            if (after.front() != ':')
+                return std::nullopt;
+            port_text = after.substr(1);
+        }
+    } else if (const auto off_colon = authority.rfind(':'); off_colon != std::string_view::npos) {
+        parsed.host = Lowercase(authority.substr(0, off_colon));
+        port_text = authority.substr(off_colon + 1);
+    } else {
+        parsed.host = Lowercase(authority);
+    }
+    if (parsed.host.empty())
+        return std::nullopt;
+    parsed.port = parsed.scheme == "https" ? 443 : 80;
+    if (!port_text.empty()) {
+        unsigned value = 0;
+        const char* p_end = port_text.data() + port_text.size();
+        const auto [p_parsed, error] = std::from_chars(port_text.data(), p_end, value);
+        if (error != std::errc{} || p_parsed != p_end || value == 0 || value > 0xFFFF)
+            return std::nullopt;
+        parsed.port = static_cast<std::uint16_t>(value);
+    }
+    return parsed;
+}
+
+// run.sh (${PS_SHADNET_SERVER%:*}) and the launchers always pass the WebAPI they derive from the
+// shadNet server, so the address alone tells a derived one from one set apart.
+bool IsDerivedWebApi(const BaseUrl& parsed) {
+    const std::string server = EmulatorSettings.GetShadNetServer();
+    const auto off_colon = server.rfind(':');
+    const std::string server_host =
+        Lowercase(off_colon == std::string::npos ? server : server.substr(0, off_colon));
+    return parsed.has_scheme && parsed.scheme == "http" && !parsed.has_path &&
+           parsed.port == WEBAPI_PORT && parsed.host == server_host;
+}
+
+struct WebApiTarget {
+    bool is_valid = false;
+    bool is_https = false;
+    std::string host;
+    std::uint16_t port = 0;
+    std::string url;
+};
+
+const WebApiTarget& GetWebApiTarget() {
+    static const WebApiTarget s_target = [] {
+        WebApiTarget target;
+        const std::string url = EmulatorSettings.GetShadNetWebApiServer();
+        const auto parsed = ParseBaseUrl(url);
+        if (!parsed) {
+            LOG_ERROR(ShadNet, "PS_SHADNET_WEBAPI is not http(s)://host[:port][/path] without user "
+                               "info; every WebAPI request is refused");
+            return target;
+        }
+        target = {true, parsed->scheme == "https", parsed->host, parsed->port, url};
+        if (target.is_https || !EmulatorSettings.IsShadNetTlsRequired())
+            return target;
+        if (IsDerivedWebApi(*parsed)) {
+            target.is_https = true;
+            target.url = "https://" + url.substr(url.find("://") + 3);
+            LOG_INFO(ShadNet, "WebAPI {}:{} upgraded from http to https since PS_SHADNET_TLS=1",
+                     target.host, target.port);
+        } else {
+            LOG_WARNING(ShadNet,
+                        "WebAPI {}:{} stays http though PS_SHADNET_TLS=1: PS_SHADNET_WEBAPI names "
+                        "an address apart from the shadNet server's, so it is not upgraded",
+                        target.host, target.port);
+        }
+        return target;
+    }();
+    return s_target;
+}
+
+// Every address must be loopback, since cpp-httplib may connect to any of them.
+bool ResolvesToLoopbackOnly(const std::string& host) {
+    addrinfo hints{};
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    addrinfo* p_results = nullptr;
+    if (::getaddrinfo(host.c_str(), nullptr, &hints, &p_results) != 0 || !p_results)
+        return false;
+    bool is_loopback = true;
+    for (const addrinfo* p_result = p_results; p_result && is_loopback;
+         p_result = p_result->ai_next) {
+        if (p_result->ai_family == AF_INET) {
+            is_loopback = IsLoopback(
+                reinterpret_cast<const sockaddr_in*>(p_result->ai_addr)->sin_addr.s_addr);
+        } else if (p_result->ai_family == AF_INET6) {
+            is_loopback = IN6_IS_ADDR_LOOPBACK(
+                &reinterpret_cast<const sockaddr_in6*>(p_result->ai_addr)->sin6_addr);
+        } else {
+            is_loopback = false;
+        }
+    }
+    ::freeaddrinfo(p_results);
+    return is_loopback;
 }
 
 ssize_t WaitForSocket(socket_t h_socket, bool should_read, std::uint32_t wait_ms) {
@@ -56,6 +203,58 @@ LoginTransport ChooseLoginTransport(bool is_tls, std::uint32_t va_peer_ipv4, con
                       "PS_ONLINE_ALLOW_PLAINTEXT_LOGIN=1 to accept the risk",
                       host, port);
     return LoginTransport::Refused;
+}
+
+std::optional<std::string> WebApiUrl() {
+    static std::atomic<std::uint64_t> s_c_tls{0};
+    static std::atomic<std::uint64_t> s_c_loopback{0};
+    static std::atomic<std::uint64_t> s_c_plain_allowed{0};
+    const WebApiTarget& target = GetWebApiTarget();
+    if (!target.is_valid) {
+        LOG_ERROR_COUNTED(ShadNet, "WebAPI request refused: PS_SHADNET_WEBAPI is not usable");
+        return std::nullopt;
+    }
+    if (target.is_https) {
+        if (const auto c_tls = ++s_c_tls; IsPowerOfTwo(c_tls))
+            LOG_INFO(ShadNet, "WebAPI {}:{} over TLS ({} so far)", target.host, target.port, c_tls);
+        return target.url;
+    }
+    if (ResolvesToLoopbackOnly(target.host)) {
+        if (const auto c_loopback = ++s_c_loopback; IsPowerOfTwo(c_loopback))
+            LOG_INFO(ShadNet, "WebAPI {}:{} over plain HTTP to a loopback address ({} so far)",
+                     target.host, target.port, c_loopback);
+        return target.url;
+    }
+    if (EmulatorSettings.IsPlaintextLoginAllowed()) {
+        const auto c_plain = ++s_c_plain_allowed;
+        if (c_plain == 1)
+            LOG_WARNING(ShadNet,
+                        "WebAPI {}:{} over plain HTTP: the account's bearer token crosses the "
+                        "network unencrypted, allowed by PS_ONLINE_ALLOW_PLAINTEXT_LOGIN",
+                        target.host, target.port);
+        else if (IsPowerOfTwo(c_plain))
+            LOG_INFO(ShadNet, "WebAPI {}:{} over plain HTTP ({} so far)", target.host, target.port,
+                     c_plain);
+        return target.url;
+    }
+    LOG_ERROR_COUNTED(ShadNet,
+                      "WebAPI request to {}:{} refused: plain HTTP to a server off this machine "
+                      "would send the bearer token unencrypted; an https PS_SHADNET_WEBAPI or "
+                      "PS_SHADNET_TLS=1 for a TLS server, or PS_ONLINE_ALLOW_PLAINTEXT_LOGIN=1 to "
+                      "accept the risk",
+                      target.host, target.port);
+    return std::nullopt;
+}
+
+bool IsWebApiEndpoint(const std::string& scheme, const std::string& host, std::uint16_t port) {
+    if (!EmulatorSettings.IsConnectedToNetwork() || Lowercase(scheme) != "https")
+        return false;
+    const WebApiTarget& target = GetWebApiTarget();
+    std::string_view bare_host = host;
+    if (bare_host.size() > 2 && bare_host.front() == '[' && bare_host.back() == ']')
+        bare_host = bare_host.substr(1, bare_host.size() - 2);
+    return target.is_valid && target.is_https && port == target.port &&
+           Lowercase(bare_host) == target.host;
 }
 
 Stream::~Stream() {

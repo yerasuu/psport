@@ -10,6 +10,7 @@
 #include "core/libraries/np/np_web_api2/np_web_api2_context.h"
 #include "core/libraries/np/np_web_api2/np_web_api2_internal.h"
 #include "core/libraries/system/userservice.h"
+#include "psport_net_tls.h"
 
 #include <map>
 #include <mutex>
@@ -672,7 +673,14 @@ s32 sendRequest(s64 request_id, s32 part_index, void* data, u64 data_size,
     }
 
     if (request->GetHttpRequestId() == 0) {
-        std::string base_url = EmulatorSettings.GetShadNetWebApiServer();
+        const auto webapi_url = PsNetTls::WebApiUrl();
+        if (!webapi_url) {
+            request->RemoveUser();
+            user_ctx->RemoveUser();
+            lib_ctx->RemoveUser();
+            return ORBIS_NP_WEBAPI2_ERROR_NOT_SIGNED_IN;
+        }
+        const std::string& base_url = *webapi_url;
         s32 template_id = user_ctx->GetHttpTemplateId();
         // Technically this should be base_url + api_group + path,
         // but shadNet doesn't seem to use the api_group for endpoints?

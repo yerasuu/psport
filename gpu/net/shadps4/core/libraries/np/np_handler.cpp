@@ -602,9 +602,9 @@ bool NpHandler::SendSessionInvitation(s32 user_id, const std::string& session_id
         LOG_ERROR(NpHandler, "SendSessionInvitation: empty session_id or recipient list");
         return false;
     }
-    const std::string base_url = EmulatorSettings.GetShadNetWebApiServer();
-    if (base_url.empty()) {
-        LOG_ERROR(NpHandler, "SendSessionInvitation: WebAPI server address is empty");
+    const auto base_url = PsNetTls::WebApiUrl();
+    if (!base_url) {
+        LOG_ERROR(NpHandler, "SendSessionInvitation: no WebAPI server the token may go to");
         return false;
     }
     const std::string token = GetBearerToken(user_id);
@@ -643,7 +643,7 @@ bool NpHandler::SendSessionInvitation(s32 user_id, const std::string& session_id
     const std::string path = "/v1/sessions/" + session_id + "/invitations";
     const std::string content_type = "multipart/mixed; boundary=" + boundary;
 
-    httplib::Client cli(base_url);
+    httplib::Client cli(*base_url);
     PsNetTls::UseCaBundle(cli);
     cli.set_connection_timeout(5);
     cli.set_read_timeout(10);
@@ -738,14 +738,14 @@ bool NpHandler::AcceptSessionInvitation(s32 user_id, const std::string& invitati
     // emulator's system-UI equivalent).
     PostSessionInvitationEvent(inv.session_id, invitation_id, inv.to_npid);
     // Consume it server-side (PUT usedFlag=true).
-    const std::string base_url = EmulatorSettings.GetShadNetWebApiServer();
+    const auto base_url = PsNetTls::WebApiUrl();
     const std::string token = GetBearerToken(user_id);
-    if (base_url.empty() || token.empty()) {
+    if (!base_url || token.empty()) {
         LOG_ERROR(NpHandler, "AcceptSessionInvitation: no WebAPI server/token for user_id={}",
                   user_id);
         return false;
     }
-    httplib::Client cli(base_url);
+    httplib::Client cli(*base_url);
     PsNetTls::UseCaBundle(cli);
     cli.set_connection_timeout(5);
     cli.set_read_timeout(10);

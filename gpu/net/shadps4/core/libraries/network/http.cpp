@@ -751,10 +751,13 @@ s32 RunRealHttpRequest(const SendRequestPlan& plan_in, HttpResponse& out_res,
 
 #ifdef CPPHTTPLIB_SSL_ENABLED
         if (plan.scheme == "https") {
+            // psport: the shadNet WebAPI receives the account's bearer token (kb #1302), so its
+            // certificate is checked whatever the game's flags or loaded CAs ask for.
+            const bool is_webapi = PsNetTls::IsWebApiEndpoint(plan.scheme, plan.host, plan.port);
             const bool game_disabled_verify =
-                (plan.settings.ssl_flags & ORBIS_HTTPS_FLAG_SERVER_VERIFY) == 0;
+                !is_webapi && (plan.settings.ssl_flags & ORBIS_HTTPS_FLAG_SERVER_VERIFY) == 0;
             bool verify_server = !game_disabled_verify;
-            if (verify_server && plan.ctx_has_loaded_certs) {
+            if (verify_server && plan.ctx_has_loaded_certs && !is_webapi) {
                 verify_server = false;
                 LOG_INFO(Lib_Http,
                          "{}://{}: ctx loaded custom CAs (libSceSsl integration absent) -> "

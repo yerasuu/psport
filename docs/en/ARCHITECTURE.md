@@ -785,6 +785,15 @@ loopback address; for any other server the login is refused before it is sent, s
 for the session and the player is told, unless `PS_ONLINE_ALLOW_PLAINTEXT_LOGIN=1`, which sends it
 in clear with a warning naming the host on every login.
 
+Every WebAPI request carries the account's bearer token (kb #1302), so it follows the same policy
+(`PsNetTls::WebApiUrl`): an https `PS_SHADNET_WEBAPI` is used with its certificate and host name
+checked, libhttp checking them even when the game's context turned verification off; with
+`PS_SHADNET_TLS=1` the address derived from the shadNet server (`http://<host>:31315`) becomes
+`https://<host>:31315`, while an address set apart stays as given; plain HTTP goes only to a host
+whose every address is loopback, else the request is refused (the game sees `NOT_SIGNED_IN`) unless
+`PS_ONLINE_ALLOW_PLAINTEXT_LOGIN=1`, which warns with the host on the first request and counts the
+rest.
+
 The module learns the summon route through `PsNetHost` `sz_summon_route` (`PSPORT_NET_ABI_VERSION`
 3; a runtime and a module of different versions refuse each other and the game stays offline). The
 route picks the title's summon client (`PsNetTitle::SummonClient`, `gpu/net/psport_net_title.h`),
