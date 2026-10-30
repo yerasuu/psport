@@ -345,6 +345,9 @@ int32_t runtime_guest_errno(int host_errno);
 /* Takes the guest's whole range, [0x0800000000, 0xfc00000000), before the host places anything there:
  * once, first thing in main. 0, or the host's errno. */
 int runtime_memory_reserve_arena(void);
+/* The most direct memory in MiB the host holds for the guest (5056-16384): a larger PS_DMEM_MB is
+ * cut to it when the pool is sized, so a title that cannot run with less must not ask for more. */
+uint64_t runtime_direct_memory_limit_mb(void);
 void *runtime_low_map(size_t cb_range, unsigned access);
 /* What runtime_low_map can still hand out, read without its lock so that an exit report never waits. */
 size_t runtime_low_left(void);

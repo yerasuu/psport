@@ -12,6 +12,17 @@
 #include <inttypes.h>
 #include <pthread.h>
 #include <errno.h>
+#define RETAIL_DIRECT_MB UINT64_C(5056)
+#define MAX_DIRECT_MB UINT64_C(16384)
+/* The pool is sparse and committed as the game touches it, so a larger pool costs nothing until
+ * used; but a game that asked for more does use it, and past what the host holds it swaps or is
+ * killed. Growth above retail is granted only within the host's guest budget (flexible memory
+ * counted with it); retail itself always is, since no game runs with less. */
+uint64_t runtime_direct_memory_limit_mb(void) {
+    const uint64_t cb_budget = ps_host_memory_guest_budget();
+    const uint64_t mb_fit = cb_budget > FLEXIBLE_SIZE ? (cb_budget - FLEXIBLE_SIZE) >> 20 : 0;
+    return mb_fit < RETAIL_DIRECT_MB ? RETAIL_DIRECT_MB : mb_fit > MAX_DIRECT_MB ? MAX_DIRECT_MB : mb_fit;
+}
 /* sceKernelGetDirectMemorySize on retail PS4: 5056 MiB. PS_DMEM_MB raises it (the resolution
  * patches above 1080p need about 4 GiB more; run.sh or the title's profile sets it). */
 uint64_t pool_size_bytes(void) {
@@ -19,10 +30,25 @@ uint64_t pool_size_bytes(void) {
     if (!s_cb_pool) {
         const char *sz_env = runtime_env("PS_DMEM_MB", NULL);
         uint64_t mb = sz_env ? strtoull(sz_env, NULL, 10) : 0;
-        if (mb < 5056 || mb > 16384) {
+        if (mb < RETAIL_DIRECT_MB || mb > MAX_DIRECT_MB) {
             if (sz_env && *sz_env)
                 fprintf(stderr,"Runtime: PS_DMEM_MB=%s is outside 5056-16384 MiB: direct memory stays at the retail 5056 MiB\n",sz_env);
-            mb = 5056;
+            mb = RETAIL_DIRECT_MB;
+        }
+        const uint64_t mb_limit = runtime_direct_memory_limit_mb();
+        const uint64_t cb_budget = ps_host_memory_guest_budget();
+        if (mb > mb_limit) {
+            fprintf(stderr,"WARNING: Runtime: direct memory %" PRIu64 " MiB (PS_DMEM_MB) and %" PRIu64 " MiB of flexible memory exceed the host's guest budget of %" PRIu64 " MiB: "
+                    "direct memory %" PRIu64 " MiB\n",mb,FLEXIBLE_SIZE>>20,cb_budget>>20,mb_limit);
+            mb = mb_limit;
+        } else if (mb > RETAIL_DIRECT_MB && cb_budget == UINT64_MAX) {
+            printf("Runtime: direct memory %" PRIu64 " MiB (PS_DMEM_MB) granted unchecked: the host's memory was not read\n",mb);
+        } else if (mb > RETAIL_DIRECT_MB) {
+            printf("Runtime: direct memory %" PRIu64 " MiB (PS_DMEM_MB) granted: with %" PRIu64 " MiB of flexible memory it fits the host's guest budget of %" PRIu64 " MiB\n",
+                   mb,FLEXIBLE_SIZE>>20,cb_budget>>20);
+        } else if (cb_budget != UINT64_MAX && (mb<<20)+FLEXIBLE_SIZE > cb_budget) {
+            fprintf(stderr,"WARNING: Runtime: the retail %" PRIu64 " MiB of direct memory and %" PRIu64 " MiB of flexible memory exceed the host's guest budget of %" PRIu64 " MiB: "
+                    "the game may swap or be killed once it uses them\n",mb,FLEXIBLE_SIZE>>20,cb_budget>>20);
         }
         s_cb_pool = mb * 1024 * 1024;
     }

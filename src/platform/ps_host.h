@@ -393,6 +393,41 @@ typedef struct {
  * cannot be read. */
 int ps_host_list_mappings(int (*pfn_mapping)(const PsHostMapping *p_mapping, void *p_context), void *p_context);
 
+/* ---- host memory ---- */
+typedef struct {
+    uint64_t cb_total;
+    /* What the host can still hand out without swapping (Linux MemAvailable, Windows ullAvailPhys). */
+    uint64_t cb_available;
+    /* The tightest limit on this process (cgroup v2 memory.max or memory.high of its group or an
+     * ancestor, a Job Object's memory limit), UINT64_MAX without one, and what that group or job
+     * uses now that the host cannot simply drop (its page cache left out). */
+    uint64_t cb_limit, cb_limit_used;
+    /* PSI memory "some avg10" in hundredths of a percent (0-10000), -1 where the host has no PSI. */
+    int32_t pressure_permyriad;
+    /* Where cb_limit comes from, for logs ("" without one). */
+    char sz_limit_source[192];
+} PsHostMemory;
+/* Reads the host's memory state now (a few small file reads or system calls): 0, or the host's
+ * errno when not even the total and available memory could be read. */
+int ps_host_memory_read(PsHostMemory *p_out_memory);
+/* What this process may still take: the smaller of the available memory and what the limit leaves. */
+uint64_t ps_host_memory_headroom(const PsHostMemory *p_memory);
+/* The most memory the guest's direct and flexible memory may together take: 7/8 of the headroom
+ * read at the first call, which logs the probe ("Host memory: ..."); later calls return the same
+ * value, so that every decision at launch sees one host. UINT64_MAX when the host could not be read. */
+uint64_t ps_host_memory_guest_budget(void);
+typedef enum {
+    PS_HOST_MEMORY_PRESSURE_NONE,
+    PS_HOST_MEMORY_PRESSURE_MODERATE,
+    PS_HOST_MEMORY_PRESSURE_HIGH,
+    PS_HOST_MEMORY_PRESSURE_CRITICAL,
+} PsHostMemoryPressure;
+/* How hard the host is pressed for memory now, from the headroom left of the limit (or of the total)
+ * and PSI where the host has it; each change of level is logged with how often that level was
+ * entered. Reads the host at every call: callers that can shrink caches poll it at most a few times a
+ * second. Any thread. */
+PsHostMemoryPressure ps_host_memory_pressure(void);
+
 /* ---- sockets ---- */
 /* Sockets are int descriptors like files (runtime_file.c keeps both in the guest's table) and use
  * the BSD socket calls of ps_host_sockets.h, except what follows. ps_host_net_init comes before the

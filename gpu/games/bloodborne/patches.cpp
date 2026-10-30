@@ -25,6 +25,8 @@ extern "C" {
 // runtime_config.c
 const char* runtime_config_get(const char* sz_key);
 const char* runtime_env(const char* sz_name, const char* sz_default);
+// runtime_memory.c
+uint64_t runtime_direct_memory_limit_mb(void);
 }
 
 namespace PsLaunch {
@@ -327,6 +329,24 @@ bool NeedsGraphicsHeap(int width, int height) {
     return static_cast<long long>(width) * height > UiWidth * UiHeight;
 }
 
+/// The runtime cuts direct memory to what the host holds, and the heap patch with less than it needs
+/// crashes the game, so on such a host the patch is left out instead (said once).
+bool HostHoldsGraphicsHeap() {
+    const unsigned long long mb_limit = runtime_direct_memory_limit_mb();
+    if (mb_limit >= GraphicsHeapDirectMemoryMb) {
+        return true;
+    }
+    static bool s_is_said = false;
+    if (!s_is_said) {
+        s_is_said = true;
+        std::fprintf(stderr,
+                     "WARNING: Patches: '%s' left out: it needs %llu MiB of direct memory and the host holds %llu MiB "
+                     "for the guest (the Host memory line); the scene stays at %dx%d\n",
+                     GraphicsHeap, GraphicsHeapDirectMemoryMb, mb_limit, UiWidth, UiHeight);
+    }
+    return false;
+}
+
 /// Raises the direct memory for the heap patch, whichever way it was selected (the scene size,
 /// PS_PATCHES or an external patch). Every way runs before runtime_start, and the pool is sized on
 /// the guest's first memory call, so PS_DMEM_MB set here still counts.
@@ -427,6 +447,9 @@ bool AddPatches(const PsGameFiles& game, const PsPatchServices& services) {
         return false;
     }
     CheckDebugMenu(names, game.sz_game_dir);
+    if (std::find(names.begin(), names.end(), GraphicsHeap) != names.end() && !HostHoldsGraphicsHeap()) {
+        names.erase(std::remove(names.begin(), names.end(), GraphicsHeap), names.end());
+    }
     const std::string file = game.sz_patch_file ? game.sz_patch_file : PatchFile;
     if (!Add(services, file, names)) {
         return false;
@@ -436,6 +459,12 @@ bool AddPatches(const PsGameFiles& game, const PsPatchServices& services) {
         if (!ParseSize(size, width, height)) {
             std::fprintf(stderr, "ERROR: Patches: PS_RENDER_RES=%s: expected WIDTHxHEIGHT\n", size.c_str());
             return false;
+        }
+        if (NeedsGraphicsHeap(width, height) && !HostHoldsGraphicsHeap()) {
+            width = UiWidth;
+            height = UiHeight;
+            // The upscaler and the overlay read the scene size from PS_RENDER_RES once the GPU starts.
+            ps_host_env_set("PS_RENDER_RES", (std::to_string(width) + "x" + std::to_string(height)).c_str(), 1);
         }
         if (!AddResolution(services, file, width, height)) {
             return false;
@@ -481,6 +510,9 @@ const char* ExternalPatchRefusal(const char* sz_name) {
     // The loader asks here for each external patch it is about to apply: the one point where the
     // profile learns that the heap patch was selected outside PS_PATCHES and the scene size.
     if (std::strcmp(sz_name, GraphicsHeap) == 0) {
+        if (!HostHoldsGraphicsHeap()) {
+            return "the host's memory cannot hold the direct memory it needs (the Host memory line)";
+        }
         ReserveGraphicsHeapMemory();
     }
     if (!s_frame_hooks_rate) {

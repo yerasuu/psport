@@ -34,6 +34,18 @@ FEATURE_HOST(guest_memory, WIN32, EXPERIMENTAL,
              "(ENODEV), malloc stays low as psport.exe is linked --disable-high-entropy-va",
              "#614")
 
+FEATURE(host_memory, vm, "the host's free memory, the process's memory limit and memory pressure: direct memory above "
+                         "retail only within what the host holds, and a pressure level for caches")
+FEATURE_HOST(host_memory, LINUX, IMPLEMENTED,
+             "MemAvailable from /proc/meminfo, memory.max, memory.high and memory.current less page cache of the "
+             "process's cgroup v2 group and its ancestors, PSI some avg10 of the group or /proc/pressure/memory "
+             "(src/platform/linux/host_memory_probe.c; budget and levels in src/platform/common/host_memory_probe.c)",
+             "#1290")
+FEATURE_HOST(host_memory, WIN32, EXPERIMENTAL,
+             "GlobalMemoryStatusEx and the Job Object's process or job memory limit against the process's private "
+             "bytes, no PSI (src/platform/win32/host_memory_probe.c), compile-checked, not run yet",
+             "#1290")
+
 FEATURE(gpu_memory_dmabuf, gpu_memory, "the GPU uses guest memory in place: cached system memory exported as a dma-buf and "
                                        "mapped at the game's addresses")
 FEATURE_HOST(gpu_memory_dmabuf, LINUX, IMPLEMENTED,
