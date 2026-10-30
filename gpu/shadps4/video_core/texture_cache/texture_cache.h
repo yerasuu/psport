@@ -42,11 +42,6 @@ class BufferCache;
 class PageManager;
 
 class TextureCache {
-    // Default values for garbage collection
-    static constexpr s64 DEFAULT_PRESSURE_GC_MEMORY = 1_GB + 512_MB;
-    static constexpr s64 DEFAULT_CRITICAL_GC_MEMORY = 3_GB;
-    static constexpr s64 TARGET_GC_THRESHOLD = 8_GB;
-
     using ImageIds = boost::container::small_vector<ImageId, 16>;
 
     struct Traits {
@@ -470,6 +465,9 @@ private:
     /// usage grows, VRAM runs short or its ticks or seconds have passed.
     bool IsCollectorBackedOff(u64 second);
     void BackOffCollector(u64 second, u32 c_kept);
+    /// psport: trigger, pressure and critical as 70/85/95 % of the budget (capped by
+    /// PS_GC_BUDGET_MB); logged when the budget moves by more than 5 % since the last line.
+    void SetMemoryMarks(u64 cb_budget, const char* sz_source);
 
     /// psport: inserts a new image. When its memory cannot be had within the budget, images
     /// unused in this submission go first (can_evict: only with `mutex` held and no other
@@ -514,6 +512,10 @@ private:
     u64 trigger_gc_memory = 0;
     u64 pressure_gc_memory = 0;
     u64 critical_gc_memory = 0;
+    u64 m_cb_gc_budget = 0;
+    u64 m_cb_gc_budget_logged = 0;
+    u64 m_c_gc_passes_unlogged = 0;
+    u64 m_c_gc_zero_budgets = 0;
     u64 total_used_samplers = 0;
     u64 trigger_gc_samplers = 0;
     u64 pressure_gc_samplers = 0;

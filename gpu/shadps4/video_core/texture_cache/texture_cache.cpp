@@ -92,56 +92,65 @@ TextureCache::TextureCache(const Vulkan::Instance& instance_, Vulkan::Scheduler&
     pressure_gc_samplers = max_samplers * 7 / 8;
     critical_gc_samplers = max_samplers * 15 / 16;
 
-    // Set up garbage collection parameters.
-    if (!instance.CanReportMemoryUsage()) {
-        trigger_gc_memory = 0;
-        pressure_gc_memory = DEFAULT_PRESSURE_GC_MEMORY;
-        critical_gc_memory = DEFAULT_CRITICAL_GC_MEMORY;
+    // psport: without VK_EXT_memory_budget the usage counts only images, so the marks come from
+    // the device-local heap size (less the system reserve) and stay as set here.
+    if (instance.CanReportMemoryUsage()) {
+        SetMemoryMarks(instance.GetDeviceMemoryBudgetNow(), "live");
+    } else {
+        SetMemoryMarks(instance.GetTotalMemoryBudget(), "heap size, no VK_EXT_memory_budget");
+    }
+}
+
+void TextureCache::SetMemoryMarks(u64 cb_budget, const char* sz_source) {
+    static const u64 s_cb_forced_budget = [] {
+        const char* sz_env = std::getenv("PS_GC_BUDGET_MB");
+        return sz_env && *sz_env ? std::strtoull(sz_env, nullptr, 10) << 20 : 0;
+    }();
+    if (s_cb_forced_budget != 0 && (cb_budget == 0 || s_cb_forced_budget < cb_budget)) {
+        cb_budget = s_cb_forced_budget;
+        sz_source = "PS_GC_BUDGET_MB";
+    }
+    if (cb_budget == 0) {
+        // A driver reporting no budget keeps the last marks rather than collecting everything.
+        ++m_c_gc_zero_budgets;
+        if ((m_c_gc_zero_budgets & (m_c_gc_zero_budgets - 1)) == 0) {
+            std::printf("Texture cache: the driver reports a VRAM budget of 0 (%s, %llu times); "
+                        "marks kept at collect %llu, pressure %llu, critical %llu MiB\n",
+                        sz_source, (unsigned long long)m_c_gc_zero_budgets,
+                        (unsigned long long)(trigger_gc_memory >> 20),
+                        (unsigned long long)(pressure_gc_memory >> 20),
+                        (unsigned long long)(critical_gc_memory >> 20));
+        }
         return;
     }
-
-    const s64 device_local_memory = static_cast<s64>(instance.GetTotalMemoryBudget());
-    const s64 min_spacing_expected = device_local_memory - 1_GB;
-    const s64 min_spacing_critical = device_local_memory - 512_MB;
-    const s64 mem_threshold = std::min<s64>(device_local_memory, TARGET_GC_THRESHOLD);
-    // psport: 60 % of the threshold free, but at most 30 % of the budget (at least 2 GB): on an
-    // 8 GB card 60 % had the collector evicting hundreds of images every 5 s at 3 GB used (bbport
-    // 8185b88, its #204).
-    const s64 min_vacancy_expected =
-        std::min<s64>((6 * mem_threshold) / 10, std::max<s64>((3 * device_local_memory) / 10, 2_GB));
-    const s64 min_vacancy_critical = (2 * mem_threshold) / 10;
-    // The floors are signed too: a u64 max turned a negative mark on a small budget into ~2^64, so
-    // the pressure mode never started. Every mark is capped at the budget because the 3 GB critical
-    // floor sat above a 2-3.5 GB budget: the collector never went aggressive, while guest memory
-    // copies waited at 90 % of the VRAM limit for room it never made (#1245: 42 FPS at 2560 MiB).
-    pressure_gc_memory = static_cast<u64>(
-        std::min(std::max(std::min(device_local_memory - min_vacancy_expected, min_spacing_expected),
-                          DEFAULT_PRESSURE_GC_MEMORY),
-                 device_local_memory));
-    critical_gc_memory = static_cast<u64>(
-        std::min(std::max(std::min(device_local_memory - min_vacancy_critical, min_spacing_critical),
-                          DEFAULT_CRITICAL_GC_MEMORY),
-                 device_local_memory));
-    // psport: below 8 GB the pressure mark fell to 40-50 % of the budget (1.3 GB of 3.3 GB), under
-    // what a game holds outside textures (~2.2 GB for Bloodborne), so such cards evicted textures
-    // unused for 5 s all session (Supermedo a02c38f: 13528 evictions on a route, 1398 at 60 %, same
-    // FPS). PS_GC_PRESSURE_PERCENT (10-75) raises it, never lowers it.
-    if (device_local_memory < TARGET_GC_THRESHOLD) {
-        static const s64 percent = [] {
-            const char* sz_env = std::getenv("PS_GC_PRESSURE_PERCENT");
-            return std::clamp<s64>(sz_env ? std::strtoll(sz_env, nullptr, 10) : 60, 10, 75);
-        }();
-        pressure_gc_memory = std::max<u64>(pressure_gc_memory,
-                                           static_cast<u64>(device_local_memory / 100 * percent));
+    // Fractions of one budget, all unsigned and none above it: absolute floors next to percentages
+    // overflowed below 2 GB (d0b055e238) and left pressure and critical equal to the budget below
+    // ~3 GB (#1245), so the collector only went aggressive at 100 %. Critical stays one residency
+    // block (64 MiB) over pressure so that the aggressive pass has room to act before the budget.
+    static constexpr u64 CB_MARK_SPACING = 64_MB;
+    m_cb_gc_budget = cb_budget;
+    trigger_gc_memory = cb_budget / 100 * 70;
+    pressure_gc_memory = cb_budget / 100 * 85;
+    critical_gc_memory =
+        std::min(std::max(cb_budget / 100 * 95, pressure_gc_memory + CB_MARK_SPACING), cb_budget);
+    const u64 cb_change = cb_budget > m_cb_gc_budget_logged ? cb_budget - m_cb_gc_budget_logged
+                                                            : m_cb_gc_budget_logged - cb_budget;
+    if (m_cb_gc_budget_logged != 0 && cb_change * 20 <= m_cb_gc_budget_logged) {
+        return;
     }
-    trigger_gc_memory = static_cast<u64>((device_local_memory - mem_threshold) / 2);
     // psport: a player's log tells where eviction starts on that card (Supermedo 4009083499).
-    std::printf("Texture cache: VRAM budget %lld MiB; marks: collect %llu, pressure %llu, critical "
-                "%llu MiB\n",
-                static_cast<long long>(device_local_memory >> 20),
-                static_cast<unsigned long long>(trigger_gc_memory >> 20),
-                static_cast<unsigned long long>(pressure_gc_memory >> 20),
-                static_cast<unsigned long long>(critical_gc_memory >> 20));
+    std::printf("Texture cache: VRAM budget %llu MiB (%s, was %llu); marks: collect %llu, pressure "
+                "%llu, critical %llu MiB; usage %llu MiB; %llu collector passes since the last "
+                "such line\n",
+                (unsigned long long)(cb_budget >> 20), sz_source,
+                (unsigned long long)(m_cb_gc_budget_logged >> 20),
+                (unsigned long long)(trigger_gc_memory >> 20),
+                (unsigned long long)(pressure_gc_memory >> 20),
+                (unsigned long long)(critical_gc_memory >> 20),
+                (unsigned long long)(total_used_memory >> 20),
+                (unsigned long long)m_c_gc_passes_unlogged);
+    m_cb_gc_budget_logged = cb_budget;
+    m_c_gc_passes_unlogged = 0;
 }
 
 TextureCache::~TextureCache() = default;
@@ -1672,24 +1681,6 @@ void TextureCache::GarbageCollectImages() {
     if (instance.CanReportMemoryUsage() && (frame != m_gc_query_frame || second != gc_second)) {
         m_gc_query_frame = frame;
         total_used_memory = instance.GetDeviceMemoryUsage();
-        // psport: on integrated GPUs (Steam Deck) the usage covers system-memory heaps holding
-        // much more than images (buffers backing guest memory), and the startup budget left
-        // ~1 GB after its 8 GB system reserve: usage stayed above the critical mark, so the
-        // collector evicted images used two or three frames ago on every submission and wrote
-        // GPU-written ones back. Compare with the driver's current budget instead.
-        // PS_GC_BUDGET_MB=N: this rule with a fixed budget on any GPU (tests on a desktop).
-        static const u64 forced_budget = [] {
-            const char* env = std::getenv("PS_GC_BUDGET_MB");
-            return env ? std::strtoull(env, nullptr, 10) << 20 : 0;
-        }();
-        if (instance.IsIntegrated() || forced_budget) {
-            const u64 budget = forced_budget ? forced_budget : instance.GetDeviceMemoryBudgetNow();
-            if (budget != 0) {
-                trigger_gc_memory = budget / 10 * 7;
-                pressure_gc_memory = budget / 100 * 85;
-                critical_gc_memory = budget / 100 * 95;
-            }
-        }
     }
     PsStats::g_cb_gc_used.store(total_used_memory, std::memory_order_relaxed);
     PsStats::g_cb_gc_trigger.store(trigger_gc_memory, std::memory_order_relaxed);
@@ -1701,11 +1692,16 @@ void TextureCache::GarbageCollectImages() {
     // once unused for PS_GC_IDLE_SECONDS (20): the textures of an area left behind.
     if (second != gc_second) {
         gc_second = second;
-        // psport: the driver's budget for our process, once a second: near it the collector evicts
-        // by submissions (as before 0.5) rather than keeping textures for seconds (NoteVramShort).
-        if (instance.CanReportMemoryUsage() && !instance.IsIntegrated()) {
-            const u64 budget = instance.GetDeviceMemoryBudgetNow();
-            if (budget != 0 && total_used_memory >= budget / 100 * 92 &&
+        // psport: the marks follow the driver's budget for our process, once a second on every
+        // GPU: a startup budget went stale once other processes took VRAM, and on integrated GPUs
+        // (Steam Deck) the usage covers system-memory heaps the startup budget left ~1 GB of, so
+        // the collector evicted images used two or three frames ago on every submission.
+        if (instance.CanReportMemoryUsage()) {
+            SetMemoryMarks(instance.GetDeviceMemoryBudgetNow(), "live");
+            // Near the budget the collector evicts by submissions (as before 0.5) rather than
+            // keeping textures for seconds (NoteVramShort).
+            if (!instance.IsIntegrated() && m_cb_gc_budget != 0 &&
+                total_used_memory >= m_cb_gc_budget / 100 * 92 &&
                 vram_short_until.load(std::memory_order_relaxed) < second + 2) {
                 vram_short_until.store(second + 2, std::memory_order_relaxed);
             }
@@ -1730,7 +1726,7 @@ void TextureCache::GarbageCollectImages() {
     }();
     // Under pressure an image goes once unused for PS_GC_PRESSURE_IDLE_SECONDS (5), over the
     // critical mark for 1 s first, and only then by submissions as before (80/160 ticks, a
-    // fraction of a second). On cards up to 8 GB the pressure mark is 40 % of the budget: the
+    // fraction of a second). On cards up to 8 GB the pressure mark was 40 % of the budget: the
     // usage stayed over it, so textures off screen for a moment were evicted and uploaded again
     // when the camera turned back (9000 a minute with a 4.5 GB budget), read over the bus each
     // time: NVIDIA testers saw the frame rate fall the longer they played.
@@ -1752,6 +1748,7 @@ void TextureCache::GarbageCollectImages() {
     u32 c_freed = 0;
     u32 c_kept = 0;
     PsStats::g_c_gc_passes.fetch_add(1, std::memory_order_relaxed);
+    ++m_c_gc_passes_unlogged;
 
     // psport: a mark counts only where evicting at most half of the textures can bring the usage
     // under it. Where the game's other memory alone sat over the pressure mark (8 GB cards), the
