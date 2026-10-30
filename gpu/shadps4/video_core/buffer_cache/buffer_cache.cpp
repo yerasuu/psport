@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include <algorithm>
 #include <bit>
+#include <cstdio>
 #include <cstdlib>
 #include <magic_enum/magic_enum.hpp>
 #include "psport_copy.h"
@@ -302,10 +303,12 @@ bool TwinsEnabled() {
         const bool is_wanted = env ? env[0] == '1' : true;
         const bool is_precise = EmulatorSettings.GetReadbacksMode() == GpuReadbacksMode::Precise;
         const bool is_on = is_wanted && !is_precise;
-        LOG_INFO(Render_Vulkan, "GPU write twins {} ({})", is_on ? "on" : "off",
-                 is_precise ? "PS_READBACKS=2 keeps pages GPU-modified"
-                 : env      ? "PS_GPU_WRITE_TWINS"
-                            : "default: a guest write next to small GPU outputs must not wait for the GPU");
+        // stderr, as the submission copy's line: LOG_INFO does not reach a run's log on Windows or the
+        // regress logs, and which setting a run had must be read from them.
+        std::fprintf(stderr, "GPU write twins %s (%s)\n", is_on ? "on" : "off",
+                     is_precise ? "PS_READBACKS=2 keeps pages GPU-modified"
+                     : env      ? "PS_GPU_WRITE_TWINS"
+                                : "default: a guest write next to small GPU outputs must not wait for the GPU");
         return is_on;
     }();
     return enabled;
@@ -314,8 +317,9 @@ u64 TwinsMaxBytes() {
     static const u64 max_bytes = [] {
         const char* env = std::getenv("PS_GPU_WRITE_TWINS_MAX");
         const u64 value = env ? std::strtoull(env, nullptr, 10) : 1024ull;
-        LOG_INFO(Render_Vulkan, "GPU write twins: pages with up to {} GPU-written bytes ({})", value,
-                 env ? "PS_GPU_WRITE_TWINS_MAX" : "default");
+        std::fprintf(stderr, "GPU write twins: pages with up to %llu GPU-written bytes (%s)\n",
+                     static_cast<unsigned long long>(value),
+                     env ? "PS_GPU_WRITE_TWINS_MAX" : "default 1024: 65536 cost 4-8% FPS in Bloodborne");
         return value;
     }();
     return max_bytes;
