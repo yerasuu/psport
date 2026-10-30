@@ -807,10 +807,26 @@ the block the process started with, whose bounds `/proc/self/stat` gives, since 
 through `PsNetHost` (`sz_shadnet_password`, `sz_shadnet_token`, ABI 4), and `UserManager` wipes its
 copies when it is destroyed. A restart through `run.sh` or `sceSystemServiceLoadExec` writes them to
 a pipe that becomes the new image's stdin, with `PS_SHADNET_SECRETS=stdin`. What stays: the
-secrets in the runtime's and the module's memory for the whole run (a core still has them), the
-copies the shadNet client makes for its login, the launcher's own environment, and on Windows bytes
-of the PEB's block that `SetEnvironmentVariableW` leaves past its new end; Windows takes no file,
-since its ACL is not checked.
+secrets in the runtime's and the module's memory for the whole run, the copies the shadNet client
+makes for its login, the launcher's own environment, and on Windows bytes of the PEB's block that
+`SetEnvironmentVariableW` leaves past its new end; Windows takes no file, since its ACL is not
+checked.
+
+Since they stay in memory, a run handed shadNet secrets is kept out of dumps on Linux (kb #1362,
+decision #1360): before reading them `runtime_secrets_take` sets the process non-dumpable
+(`ps_host_set_dumpable(0)`, [`PR_SET_DUMPABLE`](https://man7.org/linux/man-pages/man2/prctl.2.html)),
+so the kernel writes no core and calls no crash handler's `core_pattern` pipe (SteamOS's
+`steamos_log_submitter`) for it ([core(5)](https://man7.org/linux/man-pages/man5/core.5.html)), and
+other processes of the player can neither attach to it nor read its memory. It stays so until the
+process ends, a session signed out included, and the log says `Online: process <pid> made
+non-dumpable for the shadNet secrets (dumpable 1 before, 0 now)`. Only when none was taken (a
+refused file, an empty stdin) and none is left in the environment does it set the previous value
+back (`dumpable again`). A run given no secrets never changes it and keeps its cores. A restart's
+exec makes the new image dumpable until its own `runtime_secrets_take`. Meanwhile `/proc/<pid>/*`
+belongs to root: `status`, `stat`, `maps`, `cmdline`, `task/`, `fd/` and `process_vm_readv` keep
+working for the process itself, `environ` and `mem` no longer open, even from it, and `gdb -p`
+needs root (a debugger that started psport, `PS_PROBE=gdb`, keeps tracing it). Windows has no such
+switch: `ps_host_set_dumpable` answers `ENOSYS` and the log says a crash dump may carry them.
 
 The module learns the summon route through `PsNetHost` `sz_summon_route` (`PSPORT_NET_ABI_VERSION`
 4; a runtime and a module of different versions refuse each other and the game stays offline). The

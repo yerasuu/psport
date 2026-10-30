@@ -152,6 +152,45 @@ static int is_variable_set(const char *sz_name) {
     return sz_value && sz_value[0];
 }
 
+/* From before the secrets are read until the process ends (kb #1362), not only while a session is
+ * signed in, since they stay in this file's and the online module's memory for the whole run. A
+ * restart's exec makes the new image dumpable again until its own take. -1 when nothing changed. */
+static int hide_from_dumps(void) {
+    const int32_t pid = ps_host_process_id();
+    const int was_dumpable = ps_host_dumpable();
+    const int error = was_dumpable < 0 ? -was_dumpable : ps_host_set_dumpable(0);
+    if (error == ENOSYS) {
+        printf("Online: this host cannot keep process %d out of crash dumps: one may carry the shadNet secrets\n", pid);
+        return -1;
+    }
+    if (error) {
+        printf("Online: process %d could not be made non-dumpable (%s): a core or a crash handler's dump may carry "
+               "the shadNet secrets\n", pid, strerror(error));
+        return -1;
+    }
+    printf("Online: process %d made non-dumpable for the shadNet secrets (dumpable %d before, %d now): no core, no "
+           "crash handler dump, no ptrace from other processes\n", pid, was_dumpable, ps_host_dumpable());
+    return was_dumpable;
+}
+
+static void show_to_dumps(int was_dumpable) {
+    if (was_dumpable < 0) return;
+    const int32_t pid = ps_host_process_id();
+    const int is_dumpable = ps_host_dumpable();
+    if (was_dumpable != 1) {
+        printf("Online: process %d left non-dumpable (dumpable %d now), as it was before the shadNet secrets (%d)\n",
+               pid, is_dumpable, was_dumpable);
+        return;
+    }
+    const int error = ps_host_set_dumpable(1);
+    if (error)
+        printf("Online: process %d stays non-dumpable (dumpable %d): setting it back failed (%s)\n", pid, is_dumpable,
+               strerror(error));
+    else
+        printf("Online: process %d dumpable again, since it holds no shadNet secret (dumpable %d before, %d now)\n",
+               pid, is_dumpable, ps_host_dumpable());
+}
+
 static void wipe_secrets(void) {
     ps_host_wipe(s_sz_password, sizeof(s_sz_password));
     ps_host_wipe(s_sz_token, sizeof(s_sz_token));
@@ -168,6 +207,7 @@ void runtime_secrets_take(void) {
         return;
     }
     if (atexit(wipe_secrets)) printf("Online: atexit failed: the shadNet secrets stay in memory until the end\n");
+    const int was_dumpable = hide_from_dumps();
     int is_taken = 0;
     if (sz_file && sz_file[0]) {
         char sz_path[4096];
@@ -188,11 +228,12 @@ void runtime_secrets_take(void) {
     } else if (has_variables) {
         printf("Online: PS_SHADNET_PASSWORD or PS_SHADNET_TOKEN also set: ignored\n");
     }
-    int c_removed = 0;
+    int c_removed = 0, is_left_behind = 0;
     for (size_t i = 0; i < sizeof(s_variables) / sizeof(*s_variables); ++i) {
         int is_set;
         const int error = ps_host_env_scrub(s_variables[i], &is_set);
         c_removed += is_set;
+        is_left_behind |= is_set && error;
         if (error == ENOSYS && is_set)
             printf("Online: %s left the environment, but the block the process started with could not be "
                    "overwritten: it may still show there\n", s_variables[i]);
@@ -200,6 +241,7 @@ void runtime_secrets_take(void) {
             printf("Online: %s could not be removed from the environment: %s\n", s_variables[i], strerror(error));
     }
     printf("Online: %d shadNet secret variables removed from the environment and overwritten\n", c_removed);
+    if (!s_sz_password[0] && !s_sz_token[0] && !is_left_behind) show_to_dumps(was_dumpable);
 }
 
 const char *runtime_secrets_password(void) { return s_sz_password; }

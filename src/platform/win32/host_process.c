@@ -198,6 +198,13 @@ void ps_host_exit(int status) {
 
 int32_t ps_host_process_id(void) { return (int32_t)GetCurrentProcessId(); }
 
+int ps_host_dumpable(void) { return -ENOSYS; }
+
+int ps_host_set_dumpable(int is_dumpable) {
+    (void)is_dumpable;
+    return ENOSYS;
+}
+
 /* The cleaner would have to be psport.exe started again with an option of its own, since Windows
  * has no fork to give it the caller's code. */
 int ps_host_remove_tree_at_exit(const char *sz_path) {

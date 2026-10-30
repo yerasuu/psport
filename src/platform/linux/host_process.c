@@ -124,6 +124,13 @@ void ps_host_exit(int status) { exit(status); }
 
 int32_t ps_host_process_id(void) { return (int32_t)getpid(); }
 
+int ps_host_dumpable(void) {
+    const int state = prctl(PR_GET_DUMPABLE, 0, 0, 0, 0);
+    return state < 0 ? -errno : state;
+}
+
+int ps_host_set_dumpable(int is_dumpable) { return prctl(PR_SET_DUMPABLE, is_dumpable ? 1 : 0, 0, 0, 0) ? errno : 0; }
+
 int ps_host_fs_duplicate(int h_file, int h_target) {
     const int h_new = h_target < 0 ? fcntl(h_file, F_DUPFD_CLOEXEC, 3) : dup2(h_file, h_target);
     return h_new < 0 ? -errno : h_new;

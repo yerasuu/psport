@@ -572,6 +572,16 @@ int ps_host_env_scrub(const char *sz_name, int *p_out_is_set);
 void ps_host_wipe(void *p_bytes, size_t cb_bytes);
 /* This process's id, as the host's tools name it. */
 int32_t ps_host_process_id(void);
+/* Whether the host may take a core or a crash handler's dump of this process, and let other
+ * processes of its user attach to it or read its memory: 1, 0 (2 on Linux: dumps readable only by
+ * root), or minus the host's errno (-ENOSYS where the host has no such switch: Windows). Linux:
+ * PR_GET_DUMPABLE, which an exec sets back to 1 and a fork keeps. */
+int ps_host_dumpable(void);
+/* Sets it to 1 or 0: 0, or the host's errno (ENOSYS where the host has no such switch). With 0 on
+ * Linux the process's /proc entries belong to root, so that /proc/self/environ and /proc/self/mem
+ * no longer open even from the process itself; the rest of /proc/self and process_vm_readv on
+ * itself keep working. */
+int ps_host_set_dumpable(int is_dumpable);
 
 /* ---- faults and thread interrupts ---- */
 /* What a fault or an interrupt handler is handed: the interrupted thread's registers, which it may
