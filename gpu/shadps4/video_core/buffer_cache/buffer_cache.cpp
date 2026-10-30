@@ -292,7 +292,7 @@ FastReadback& SharedReadback(const Vulkan::Instance& instance) {
 // guest's copy of those bytes is kept as a "twin" and the page becomes CPU-modified at once.
 // Uploads leave the GPU's bytes in the arena while the guest bytes still match their twin (the
 // guest did not write them); downloads do not overwrite guest bytes that no longer match it (the
-// guest wrote them since). Only pages with at most PS_GPU_WRITE_TWINS_MAX (65536) GPU-written
+// guest wrote them since). Only pages with at most PS_GPU_WRITE_TWINS_MAX (1024) GPU-written
 // bytes: larger outputs (vertices the CPU reads back, FaceGen) keep waiting for the GPU.
 // Not with PS_READBACKS=2: a twinned page stays GPU-modified (read-protected) while the guest may
 // write it, a write-only page the page manager cannot make (it stopped at the first cutscene).
@@ -313,7 +313,7 @@ bool TwinsEnabled() {
 u64 TwinsMaxBytes() {
     static const u64 max_bytes = [] {
         const char* env = std::getenv("PS_GPU_WRITE_TWINS_MAX");
-        const u64 value = env ? std::strtoull(env, nullptr, 10) : 65536ull;
+        const u64 value = env ? std::strtoull(env, nullptr, 10) : 1024ull;
         LOG_INFO(Render_Vulkan, "GPU write twins: pages with up to {} GPU-written bytes ({})", value,
                  env ? "PS_GPU_WRITE_TWINS_MAX" : "default");
         return value;
