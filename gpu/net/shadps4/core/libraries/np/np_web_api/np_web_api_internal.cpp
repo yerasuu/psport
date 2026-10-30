@@ -17,6 +17,7 @@
 #include "core/libraries/np/np_error.h"
 #include "core/libraries/np/np_handler.h"
 #include "np_web_api_internal.h"
+#include "psport_net_redact.h"
 #include "psport_net_tls.h"
 
 namespace Libraries::Np::NpWebApi {
@@ -882,7 +883,7 @@ s32 sendRequest(s64 requestId, s32 partIndex, const void* pData, u64 dataSize, s
             LOG_WARNING(Lib_NpWebApi,
                         "no bearer token for user_id={}; request to '{}' will "
                         "be unauthenticated (expect 401 from server)",
-                        user_context->userId, request->userPath);
+                        user_context->userId, PsNetRedact::Url(request->userPath));
         }
 
         // Replay app-supplied headers. Content-Type is already emitted above from the
@@ -927,7 +928,7 @@ s32 sendRequest(s64 requestId, s32 partIndex, const void* pData, u64 dataSize, s
     }
 
     LOG_INFO(Lib_NpWebApi, "requestId={:#x} apiGroup='{}' path='{}' method={} httpReqId={}",
-             requestId, request->userApiGroup, request->userPath,
+             requestId, request->userApiGroup, PsNetRedact::Url(request->userPath),
              magic_enum::enum_name(request->userMethod), request->http_request_id);
 
     s32 sendResult = ORBIS_OK;

@@ -28,6 +28,7 @@
 #include "core/debugger.h"
 #include "core/emulator_settings.h"
 #include "core/libraries/network/http_plan.h"
+#include "psport_net_redact.h"
 #include "psport_net_title.h"
 
 namespace {
@@ -281,7 +282,8 @@ bool ApplyBloodborneSeamlessRoute(SendRequestPlan& plan) {
     RewriteConnectFirstAreaId(plan);
 
     LOG_INFO(Lib_Http, "Bloodborne seamless route active: {}://{}:{}{} -> {}://{}:{}{}", old_scheme,
-             old_host, old_port, plan.path, plan.scheme, plan.host, plan.port, plan.path);
+             old_host, old_port, PsNetRedact::Url(plan.path), plan.scheme, plan.host, plan.port,
+             PsNetRedact::Url(plan.path));
     return true;
 }
 

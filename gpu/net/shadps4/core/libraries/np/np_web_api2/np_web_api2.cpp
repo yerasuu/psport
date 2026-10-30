@@ -11,6 +11,7 @@
 #include "core/libraries/np/np_web_api2/np_web_api2.h"
 #include "core/libraries/np/np_web_api2/np_web_api2_internal.h"
 #include "core/libraries/system/userservice.h"
+#include "psport_net_redact.h"
 
 namespace Libraries::Np::NpWebApi2 {
 
@@ -26,7 +27,7 @@ s32 PS4_SYSV_ABI sceNpWebApi2AddHttpRequestHeader(s64 request_id, const char* fi
         return ORBIS_NP_WEBAPI2_ERROR_INVALID_ARGUMENT;
     }
     LOG_INFO(Lib_NpWebApi2, "called, request_id = {:#x}, field_name = {}, field_value = {}",
-             request_id, field_name, field_value);
+             request_id, field_name, PsNetRedact::HeaderValue(field_name, field_value));
     return addHttpRequestHeader(request_id, field_name, field_value);
 }
 
@@ -40,7 +41,8 @@ s32 PS4_SYSV_ABI sceNpWebApi2AddWebTraceTag(s64 request_id, const char* value) {
         LOG_ERROR(Lib_NpWebApi2, "Invalid parameters");
         return ORBIS_NP_WEBAPI2_ERROR_INVALID_ARGUMENT;
     }
-    LOG_INFO(Lib_NpWebApi2, "called, request_id = {:#x}, value = {}", request_id, value);
+    LOG_INFO(Lib_NpWebApi2, "called, request_id = {:#x}, value = {}", request_id,
+             PsNetRedact::HeaderValue("X-Psn-WebTrace-Tag", value));
     return addHttpRequestHeader(request_id, "X-Psn-WebTrace-Tag", value);
 }
 
@@ -58,7 +60,7 @@ s32 PS4_SYSV_ABI sceNpWebApi2CreateMultipartRequest(s32 user_ctx_id, const char*
     }
 
     LOG_INFO(Lib_NpWebApi2, "called, user_ctx_id = {:#x}, api_group = {}, path = {}, method = {}",
-             user_ctx_id, api_group, path, method);
+             user_ctx_id, api_group, PsNetRedact::Url(path), method);
     s64 temp_request_id = 0;
     s32 result =
         createRequest(user_ctx_id, api_group, path, method, nullptr, true, &temp_request_id);
@@ -86,7 +88,7 @@ s32 PS4_SYSV_ABI sceNpWebApi2CreateRequest(s32 user_ctx_id, const char* api_grou
     }
 
     LOG_INFO(Lib_NpWebApi2, "called, user_ctx_id = {:#x}, api_group = {}, path = {}, method = {}",
-             user_ctx_id, api_group, path, method);
+             user_ctx_id, api_group, PsNetRedact::Url(path), method);
     s64 temp_request_id = 0;
     s32 result = createRequest(user_ctx_id, api_group, path, method, content_parameter, false,
                                &temp_request_id);

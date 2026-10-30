@@ -23,6 +23,7 @@
 #include "common/elf_info.h"
 #include "common/logging/log.h"
 #include "common/path_util.h"
+#include "psport_net_redact.h"
 #include "psport_net_title.h"
 #include "psport_net_tls.h"
 #include "core/debugger.h"
@@ -498,7 +499,7 @@ static void LogSendRequestSettings(const HttpRequest& req, int reqId, u64 body_s
         }
     }
     LOG_INFO(Lib_Http, "  method={} url={} body_size={}", method_name,
-             req.url.empty() ? "(unset)" : req.url.c_str(), body_size);
+             req.url.empty() ? "(unset)" : PsNetRedact::Url(req.url), body_size);
 
     // Resolve the owning connection + template (for full URL context and
     // header inheritance dump).
@@ -546,7 +547,8 @@ static void LogSendRequestSettings(const HttpRequest& req, int reqId, u64 body_s
             return;
         }
         for (const auto& [name, value] : h) {
-            LOG_INFO(Lib_Http, "  header[{}] {}: {}", origin, name, value);
+            LOG_INFO(Lib_Http, "  header[{}] {}: {}", origin, name,
+                     PsNetRedact::HeaderValue(name, value));
         }
     };
     if (tmpl) {
@@ -827,7 +829,7 @@ s32 RunRealHttpRequest(const SendRequestPlan& plan_in, HttpResponse& out_res,
         if (!result) {
             const int err_val = static_cast<int>(result.error());
             LOG_ERROR(Lib_Http, "cpp-httplib failed for {} {}{}: error={} ({})",
-                      HttpMethodName(plan.method), base_url, plan.path, err_val,
+                      HttpMethodName(plan.method), base_url, PsNetRedact::Url(plan.path), err_val,
                       httplib::to_string(static_cast<httplib::Error>(err_val)));
             SynthesizeTransportFailureResponse(out_res);
             return TranslateHttplibError(result.error());
@@ -883,7 +885,7 @@ s32 RunRealHttpRequest(const SendRequestPlan& plan_in, HttpResponse& out_res,
             LOG_INFO(Lib_Http,
                      "{} response Location='{}' unresolvable (relative or malformed); "
                      "returning as-is",
-                     out_res.status_code, location);
+                     out_res.status_code, PsNetRedact::Url(location));
             break;
         }
 
@@ -931,7 +933,7 @@ s32 RunRealHttpRequest(const SendRequestPlan& plan_in, HttpResponse& out_res,
 
         LOG_INFO(Lib_Http, "redirect: depth={} status={} {} -> {} {}://{}:{}{}", depth, prev_status,
                  HttpMethodName(prev_method), HttpMethodName(next_method), plan.scheme, plan.host,
-                 plan.port, plan.path);
+                 plan.port, PsNetRedact::Url(plan.path));
     }
 
     out_event_bits =
@@ -1098,7 +1100,7 @@ static bool ContainsCrLf(const char* s) {
 int PS4_SYSV_ABI sceHttpAddCookie(int libhttpCtxId, const char* url, const char* cookie,
                                   u64 cookieLength) {
     LOG_ERROR(Lib_Http, "(STUBBED) called libhttpCtxId={}, url={}, cookie={}, cookieLength={}",
-              libhttpCtxId, url ? url : "(null)", cookie ? cookie : "(null)", cookieLength);
+              libhttpCtxId, PsNetRedact::Url(url), PsNetRedact::Cookie(cookie), cookieLength);
     return ORBIS_OK;
 }
 
@@ -1200,8 +1202,8 @@ int PS4_SYSV_ABI sceHttpCreateConnection(int tmplId, const char* serverName, con
 }
 
 int PS4_SYSV_ABI sceHttpCreateConnectionWithURL(int tmplId, const char* url, bool enableKeepalive) {
-    LOG_INFO(Lib_Http, "called tmplId={}, url={}, enableKeepalive={}", tmplId, url ? url : "(null)",
-             enableKeepalive);
+    LOG_INFO(Lib_Http, "called tmplId={}, url={}, enableKeepalive={}", tmplId,
+             PsNetRedact::Url(url), enableKeepalive);
     {
         std::lock_guard<std::mutex> lock(g_state.m_mutex);
         if (!g_state.inited) {
@@ -1281,7 +1283,7 @@ int PS4_SYSV_ABI sceHttpCreateConnectionWithURL(int tmplId, const char* url, boo
 
 int PS4_SYSV_ABI sceHttpCreateRequest(int connId, int method, const char* path, u64 contentLength) {
     LOG_INFO(Lib_Http, "called connId={}, method={}, path={}, contentLength={}", connId, method,
-             path ? path : "(null)", contentLength);
+             PsNetRedact::Url(path), contentLength);
     std::string url;
     {
         std::lock_guard<std::mutex> lock(g_state.m_mutex);
@@ -1299,7 +1301,8 @@ int PS4_SYSV_ABI sceHttpCreateRequest(int connId, int method, const char* path, 
             return ORBIS_HTTP_ERROR_INVALID_VALUE;
         }
         if (ContainsCrLf(path)) {
-            LOG_ERROR(Lib_Http, "path contains CR/LF (CRLF-injection rejected): {}", path);
+            LOG_ERROR(Lib_Http, "path contains CR/LF (CRLF-injection rejected): {}",
+                      PsNetRedact::Url(path));
             return ORBIS_HTTP_ERROR_INVALID_VALUE;
         }
         const auto& conn = it->second;
@@ -1317,7 +1320,7 @@ int PS4_SYSV_ABI sceHttpCreateRequest(int connId, int method, const char* path, 
 int PS4_SYSV_ABI sceHttpCreateRequestWithURL(int connId, s32 method, const char* url,
                                              u64 contentLength) {
     LOG_INFO(Lib_Http, "called connId={}, method={}, url={}, contentLength={}", connId, method,
-             url ? url : "(null)", contentLength);
+             PsNetRedact::Url(url), contentLength);
     std::lock_guard<std::mutex> lock(g_state.m_mutex);
     if (!g_state.inited) {
         LOG_ERROR(Lib_Http, "Not initialized");
@@ -1431,7 +1434,7 @@ int PS4_SYSV_ABI sceHttpGetCookie(int libhttpCtxId, const char* url, char* cooki
     LOG_ERROR(Lib_Http,
               "(STUBBED) called libhttpCtxId={}, url={}, cookie={}, required={}, prepared={}, "
               "isSecure={}",
-              libhttpCtxId, url ? url : "(null)", fmt::ptr(cookie), fmt::ptr(required), prepared,
+              libhttpCtxId, PsNetRedact::Url(url), fmt::ptr(cookie), fmt::ptr(required), prepared,
               isSecure);
     return ORBIS_OK;
 }
@@ -1571,7 +1574,7 @@ int PS4_SYSV_ABI sceHttpSendRequest(int reqId, const void* postData, u64 size) {
     const bool online = EmulatorSettings.IsConnectedToNetwork();
     LOG_INFO(Lib_Http, "reqId={} dispatched to async worker [{} {} {}://{}:{}{}]", reqId,
              online ? "ONLINE" : "OFFLINE", HttpMethodName(plan.method), plan.scheme, plan.host,
-             plan.port, plan.path);
+             plan.port, PsNetRedact::Url(plan.path));
 
     std::thread([req_ptr, reqId, plan = std::move(plan), online, p_summon]() {
         HttpResponse local_res;
@@ -2645,7 +2648,7 @@ int PS4_SYSV_ABI sceHttpSetInflateGZIPEnabled(int id, int isEnable) {
 //***********************************
 int PS4_SYSV_ABI sceHttpAddRequestHeader(int id, const char* name, const char* value, s32 mode) {
     LOG_INFO(Lib_Http, "called id={}, name={}, value={}, mode={}", id, name ? name : "(null)",
-             value ? value : "(null)", mode);
+             PsNetRedact::HeaderValue(name, value), mode);
     std::lock_guard<std::mutex> lock(g_state.m_mutex);
     if (!g_state.inited) {
         LOG_ERROR(Lib_Http, "Not initialized");
@@ -2673,7 +2676,7 @@ int PS4_SYSV_ABI sceHttpAddRequestHeader(int id, const char* name, const char* v
     }
     headers->emplace_back(name, value);
     LOG_INFO(Lib_Http, "added header at {} id={}: {}: {} (mode={}, total now {})", level, id, name,
-             value, mode, headers->size());
+             PsNetRedact::HeaderValue(name, value), mode, headers->size());
     return ORBIS_OK;
 }
 
@@ -2913,7 +2916,7 @@ int PS4_SYSV_ABI sceHttpDeleteRequest(int reqId) {
 int PS4_SYSV_ABI sceHttpCreateRequest2(int connId, const char* method, const char* path,
                                        u64 contentLength) {
     LOG_INFO(Lib_Http, "called connId={}, method={}, path={}, contentLength={}", connId,
-             method ? method : "(null)", path ? path : "(null)", contentLength);
+             method ? method : "(null)", PsNetRedact::Url(path), contentLength);
     auto map_method = [](const char* m) -> int {
         if (!m)
             return -1;
@@ -2952,7 +2955,8 @@ int PS4_SYSV_ABI sceHttpCreateRequest2(int connId, const char* method, const cha
             return ORBIS_HTTP_ERROR_INVALID_VALUE;
         }
         if (ContainsCrLf(path)) {
-            LOG_ERROR(Lib_Http, "path contains CR/LF (CRLF-injection rejected): {}", path);
+            LOG_ERROR(Lib_Http, "path contains CR/LF (CRLF-injection rejected): {}",
+                      PsNetRedact::Url(path));
             return ORBIS_HTTP_ERROR_INVALID_VALUE;
         }
         int_method = map_method(method);
@@ -2988,7 +2992,7 @@ int PS4_SYSV_ABI sceHttpCreateRequest2(int connId, const char* method, const cha
 int PS4_SYSV_ABI sceHttpCreateRequestWithURL2(int connId, const char* method, const char* url,
                                               u64 contentLength) {
     LOG_INFO(Lib_Http, "called connId={}, method={}, url={}, contentLength={}", connId,
-             method ? method : "(null)", url ? url : "(null)", contentLength);
+             method ? method : "(null)", PsNetRedact::Url(url), contentLength);
     int int_method;
     {
         std::lock_guard<std::mutex> lock(g_state.m_mutex);
@@ -3490,7 +3494,7 @@ int PS4_SYSV_ABI sceHttpUriMerge(char* mergedUrl, char* url, char* relativeUri, 
                                  u64 prepare, u32 option) {
     LOG_TRACE(Lib_Http,
               "called mergedUrl={}, url={}, relativeUri={}, require={}, prepare={}, option={:#x}",
-              fmt::ptr(mergedUrl), url ? url : "(null)", relativeUri ? relativeUri : "(null)",
+              fmt::ptr(mergedUrl), PsNetRedact::Url(url), PsNetRedact::Url(relativeUri),
               fmt::ptr(require), prepare, option);
 
     u64 requiredLength;
@@ -3589,7 +3593,7 @@ int PS4_SYSV_ABI sceHttpUriMerge(char* mergedUrl, char* url, char* relativeUri, 
 int PS4_SYSV_ABI sceHttpUriParse(OrbisHttpUriElement* out, const char* srcUri, void* pool,
                                  u64* require, u64 prepare) {
     LOG_TRACE(Lib_Http, "called out={}, srcUri={}, pool={}, require={}, prepare={}", fmt::ptr(out),
-              srcUri ? srcUri : "(null)", fmt::ptr(pool), fmt::ptr(require), prepare);
+              PsNetRedact::Url(srcUri), fmt::ptr(pool), fmt::ptr(require), prepare);
     if (!srcUri) {
         LOG_ERROR(Lib_Http, "invalid url: srcUri is null");
         return ORBIS_HTTP_ERROR_INVALID_URL;

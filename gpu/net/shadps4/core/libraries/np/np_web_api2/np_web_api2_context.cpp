@@ -8,6 +8,7 @@
 #include "core/libraries/np/np_error.h"
 #include "core/libraries/np/np_handler.h"
 #include "core/libraries/np/np_web_api2/np_web_api2_context.h"
+#include "psport_net_redact.h"
 
 namespace Libraries::Np::NpWebApi2 {
 
@@ -509,7 +510,8 @@ s32 Request::CreateHttpRequest(s32 http_template_id, const char* url) {
         if (result < 0) {
             LOG_ERROR(Lib_NpWebApi2,
                       "Failed to add request header, name = {}, value = {}, error = {:#x}",
-                      header->field_name.data(), header->field_value.data(), result);
+                      header->field_name,
+                      PsNetRedact::HeaderValue(header->field_name, header->field_value), result);
             user_ctx->RemoveUser();
             return result;
         }

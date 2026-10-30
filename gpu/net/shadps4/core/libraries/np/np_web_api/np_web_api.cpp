@@ -9,6 +9,7 @@
 #include "core/libraries/np/np_manager.h"
 #include "core/libraries/np/np_web_api/np_web_api.h"
 #include "core/libraries/np/np_web_api/np_web_api_internal.h"
+#include "psport_net_redact.h"
 
 #include <magic_enum/magic_enum.hpp>
 
@@ -171,7 +172,7 @@ s32 PS4_SYSV_ABI sceNpWebApiAbortRequest(s64 requestId) {
 s32 PS4_SYSV_ABI sceNpWebApiAddHttpRequestHeader(s64 requestId, const char* pFieldName,
                                                  const char* pValue) {
     LOG_INFO(Lib_NpWebApi, "called, requestId = {:#x}, pFieldName = '{}', pValue = '{}'", requestId,
-             (pFieldName ? pFieldName : "null"), (pValue ? pValue : "null"));
+             (pFieldName ? pFieldName : "null"), PsNetRedact::HeaderValue(pFieldName, pValue));
     if (pFieldName == nullptr || pValue == nullptr)
         return ORBIS_NP_WEBAPI_ERROR_INVALID_ARGUMENT;
     return addHttpRequestHeaderInternal(requestId, pFieldName, pValue);
@@ -257,7 +258,7 @@ s32 PS4_SYSV_ABI sceNpWebApiCreateMultipartRequest(s32 titleUserCtxId, const cha
 
     LOG_INFO(Lib_NpWebApi,
              "called, titleUserCtxId = {:#x}, pApiGroup = '{}', pPath = '{}', method = {}",
-             titleUserCtxId, pApiGroup, pPath, magic_enum::enum_name(method));
+             titleUserCtxId, pApiGroup, PsNetRedact::Url(pPath), magic_enum::enum_name(method));
 
     return createRequest(titleUserCtxId, pApiGroup, pPath, method, nullptr, nullptr, pRequestId,
                          true);
@@ -283,7 +284,7 @@ s32 PS4_SYSV_ABI sceNpWebApiCreateRequest(s32 titleUserCtxId, const char* pApiGr
 
     LOG_INFO(Lib_NpWebApi,
              "called, titleUserCtxId = {:#x}, pApiGroup = '{}', pPath = '{}', method = {}",
-             titleUserCtxId, pApiGroup, pPath, magic_enum::enum_name(method));
+             titleUserCtxId, pApiGroup, PsNetRedact::Url(pPath), magic_enum::enum_name(method));
 
     return createRequest(titleUserCtxId, pApiGroup, pPath, method, pContentParameter, nullptr,
                          pRequestId, false);
@@ -424,7 +425,7 @@ s32 PS4_SYSV_ABI sceNpWebApiIntCreateRequest(
 
     LOG_INFO(Lib_NpWebApi,
              "called, titleUserCtxId = {:#x}, pApiGroup = '{}', pPath = '{}', method = {}",
-             titleUserCtxId, pApiGroup, pPath, magic_enum::enum_name(method));
+             titleUserCtxId, pApiGroup, PsNetRedact::Url(pPath), magic_enum::enum_name(method));
 
     return createRequest(titleUserCtxId, pApiGroup, pPath, method, pContentParameter, pInternalArgs,
                          pRequestId, false);
