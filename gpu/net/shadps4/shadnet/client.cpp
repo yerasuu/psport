@@ -11,6 +11,8 @@
 #include "common/elf_info.h"
 #include "common/logging/log.h"
 #include "common/thread.h"
+#include "core/emulator_settings.h"
+#include "psport_net_tls.h"
 #include "shadnet.pb.h"
 
 #ifdef _WIN32
@@ -97,6 +99,7 @@ void ShadNetClient::Stop() {
         m_thread_reader.join();
     if (m_thread_writer.joinable())
         m_thread_writer.join();
+    CloseTls();
 }
 
 ShadNetState ShadNetClient::WaitForConnection() {
@@ -177,7 +180,8 @@ void ShadNetClient::ConnectThread() {
             connected = true;
             break;
         }
-        if (m_state == ShadNetState::FailureProtocol)
+        if (m_state == ShadNetState::FailureProtocol || m_state == ShadNetState::FailureTls ||
+            m_state == ShadNetState::FailureInsecure)
             break;
         if (m_terminate || attempt == SHAD_CONNECT_MAX_ATTEMPTS)
             break;
@@ -289,6 +293,7 @@ void ShadNetClient::WriterThread() {
 
 bool ShadNetClient::DoConnect() {
     m_state = ShadNetState::Ok; // reset; this attempt sets a failure code only on error
+    CloseTls();
     struct addrinfo hints{}, *res_list = nullptr;
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_STREAM;
@@ -377,6 +382,28 @@ bool ShadNetClient::DoConnect() {
 
     LOG_INFO(ShadNet, "TCP connected to {}:{}", m_host, m_port);
 
+    // psport: the login carries the account's password and token (kb #1297), so the connection is
+    // TLS when asked for, and plain TCP is refused off this machine unless the player allows it.
+    if (EmulatorSettings.IsShadNetTlsRequired()) {
+        auto tls_stream = std::make_unique<PsNetTls::Stream>();
+        std::string error;
+        if (!tls_stream->Connect(m_sock, m_host, SHAD_CONNECT_TIMEOUT_MS, error)) {
+            LOG_ERROR(ShadNet, "TLS with {}:{} failed: {}; nothing sent", m_host, m_port, error);
+            DoDisconnect();
+            m_state = ShadNetState::FailureTls;
+            return false;
+        }
+        m_tls_stream = std::move(tls_stream);
+        LOG_INFO(ShadNet, "TLS established with {}:{}, certificate verified", m_host, m_port);
+    }
+    if (PsNetTls::ChooseLoginTransport(m_tls_stream != nullptr, m_addr_server.load(), m_host,
+                                       m_port) == PsNetTls::LoginTransport::Refused) {
+        DoDisconnect();
+        m_state = ShadNetState::FailureInsecure;
+        return false;
+    }
+    m_tls_read_timeout_ms = SHAD_CONNECT_TIMEOUT_MS;
+
     // Apply receive timeout for the ServerInfo handshake.
     // Cleared after success so ReaderThread's RecvN blocks indefinitely as intended.
 #ifdef _WIN32
@@ -432,6 +459,7 @@ bool ShadNetClient::DoConnect() {
 #endif
     ::setsockopt(m_sock, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&no_timeout),
                  sizeof(no_timeout));
+    m_tls_read_timeout_ms = 0;
 
     m_connected = true;
     return true;
@@ -444,6 +472,21 @@ void ShadNetClient::DoDisconnect() {
 #else
         ::shutdown(m_sock, SHUT_RDWR);
 #endif
+        // psport: the TLS stream holds the descriptor and the reader may be inside it, so it is
+        // closed once the threads are gone (CloseTls); otherwise another socket could take its
+        // number under the reader.
+        if (m_tls_stream)
+            return;
+        SHAD_CLOSE(m_sock);
+        m_sock = SHAD_INVALID_SOCK;
+    }
+}
+
+void ShadNetClient::CloseTls() {
+    if (!m_tls_stream)
+        return;
+    m_tls_stream.reset();
+    if (m_sock != SHAD_INVALID_SOCK) {
         SHAD_CLOSE(m_sock);
         m_sock = SHAD_INVALID_SOCK;
     }
@@ -481,6 +524,30 @@ void ShadNetClient::EnableKeepalive() {
 
 bool ShadNetClient::RecvN(u8* buf, u32 n) {
     u32 received = 0;
+    if (m_tls_stream) {
+        u32 waited_ms = 0;
+        while (received < n) {
+            if (m_terminate)
+                return false;
+            size_t cb_read = 0;
+            const auto result =
+                m_tls_stream->ReadSome(buf + received, n - received, SHAD_TLS_READ_SLICE_MS, cb_read);
+            if (result == PsNetTls::Stream::ReadResult::Ok) {
+                received += static_cast<u32>(cb_read);
+                waited_ms = 0;
+                continue;
+            }
+            if (result == PsNetTls::Stream::ReadResult::TimedOut) {
+                waited_ms += SHAD_TLS_READ_SLICE_MS;
+                if (m_tls_read_timeout_ms == 0 || waited_ms < m_tls_read_timeout_ms)
+                    continue;
+            }
+            m_last_recv_result = result == PsNetTls::Stream::ReadResult::Closed ? 0 : -1;
+            m_last_recv_error = 0;
+            return false;
+        }
+        return true;
+    }
     while (received < n) {
         if (m_terminate)
             return false;
@@ -502,6 +569,13 @@ bool ShadNetClient::RecvN(u8* buf, u32 n) {
 
 bool ShadNetClient::SendAll(const std::vector<u8>& data) {
     std::lock_guard lock(m_mutex_send_direct);
+    if (m_tls_stream) {
+        if (!m_tls_stream->WriteAll(data.data(), data.size())) {
+            LOG_ERROR(ShadNet, "TLS send failed");
+            return false;
+        }
+        return true;
+    }
     int sent = 0;
     const int total = static_cast<int>(data.size());
     while (sent < total) {

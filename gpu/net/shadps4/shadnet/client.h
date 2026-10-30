@@ -6,6 +6,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <semaphore>
@@ -35,6 +36,10 @@ static constexpr ShadSocketHandle SHAD_INVALID_SOCK = -1;
 #define SHAD_CLOSE(s) ::close(s)
 #endif
 
+namespace PsNetTls {
+class Stream;
+}
+
 namespace ShadNet {
 
 // Protocol constants
@@ -50,6 +55,8 @@ static constexpr u32 SHAD_CONNECT_RETRY_BACKOFF_MS =
 static constexpr u32 SHAD_KEEPALIVE_IDLE_MS = 60000;
 static constexpr u32 SHAD_KEEPALIVE_INTERVAL_MS = 10000;
 static constexpr u32 SHAD_KEEPALIVE_PROBES = 10;
+// psport: how long a TLS read waits before RecvN looks at m_terminate again.
+static constexpr u32 SHAD_TLS_READ_SLICE_MS = 500;
 static constexpr u32 SHAD_PROTOCOL_VERSION = 1;
 static constexpr u32 SHAD_MAX_PACKET_SIZE = 0x800000; // 8 MiB
 
@@ -168,6 +175,9 @@ enum class ShadNetState {
     FailureToken,
     FailureProtocol,
     FailureRejected, // the server does not accept this client (its version)
+    // psport: the TLS handshake failed, or the login would have crossed the network in clear.
+    FailureTls,
+    FailureInsecure,
     FailureOther,
 };
 
@@ -354,6 +364,7 @@ private:
     void WriterThread();
     bool DoConnect();
     void DoDisconnect();
+    void CloseTls();
     void EnableKeepalive();
     bool RecvN(u8* buf, u32 n);
     bool SendAll(const std::vector<u8>& data);
@@ -377,6 +388,10 @@ private:
     static u64 GetLE64(const u8* p);
 
     ShadSocketHandle m_sock = SHAD_INVALID_SOCK;
+    // psport: with PS_SHADNET_TLS=1 every byte goes through it; RecvN gives up after
+    // m_tls_read_timeout_ms without data (0: never), as SO_RCVTIMEO does on the plain socket.
+    std::unique_ptr<PsNetTls::Stream> m_tls_stream;
+    u32 m_tls_read_timeout_ms = 0;
     // psport: the last failed recv() for the drop's log (0: the server closed; -1 with the error).
     int m_last_recv_result = 0;
     int m_last_recv_error = 0;

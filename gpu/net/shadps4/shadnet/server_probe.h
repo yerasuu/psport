@@ -16,6 +16,7 @@ enum class ProbeResult {
     Unreachable,     // DNS failure, connect failure, or timeout
     VersionMismatch, // reachable, but ServerInfo protocol version differs from ours
     ProtocolError,   // reachable, but the ServerInfo handshake was malformed/absent
+    TlsFailed,       // psport: PS_SHADNET_TLS=1 and the handshake or the certificate failed
 };
 
 struct ProbeInfo {

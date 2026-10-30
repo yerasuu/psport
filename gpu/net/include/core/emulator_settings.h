@@ -85,6 +85,8 @@ public:
     void SetShadNetSessionDisabled(bool v) { shadnet_session_disabled.store(v); }
     std::string GetShadNetServer() { return Text("PS_SHADNET_SERVER", "127.0.0.1:31313"); }
     std::string GetShadNetWebApiServer() { return Text("PS_SHADNET_WEBAPI", "http://127.0.0.1:31315"); }
+    bool IsShadNetTlsRequired() { static const auto value = Flag("PS_SHADNET_TLS", false); return value; }
+    bool IsPlaintextLoginAllowed() { static const auto value = Flag("PS_ONLINE_ALLOW_PLAINTEXT_LOGIN", false); return value; }
     bool IsUPnPEnabled() { static const auto value = Flag("PS_UPNP", true); return value; }
 
 private:

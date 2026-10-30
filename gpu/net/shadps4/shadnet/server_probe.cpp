@@ -1,9 +1,12 @@
 // SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <memory>
 #include <string>
 #include <vector>
 #include "common/logging/log.h"
+#include "core/emulator_settings.h"
+#include "psport_net_tls.h"
 #include "shadnet/client.h" // socket platform typedefs + protocol constants
 #include "shadnet/server_probe.h"
 
@@ -129,10 +132,26 @@ ProbeInfo ProbeServer(const std::string& host, u16 port, u32 timeout_ms) {
     ::setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&so_rcv),
                  sizeof(so_rcv));
 
+    // psport: with PS_SHADNET_TLS=1 the probe reads ServerInfo through TLS as the client does.
+    std::unique_ptr<PsNetTls::Stream> tls_stream;
+    if (EmulatorSettings.IsShadNetTlsRequired()) {
+        tls_stream = std::make_unique<PsNetTls::Stream>();
+        std::string error;
+        if (!tls_stream->Connect(sock, host, timeout_ms, error)) {
+            SHAD_CLOSE(sock);
+            LOG_WARNING(ShadNet, "probe: TLS with {}:{} failed: {}", host, port, error);
+            info.result = ProbeResult::TlsFailed;
+            return info;
+        }
+    }
+    const auto recv_exact = [&](u8* buf, u32 n) {
+        return tls_stream ? tls_stream->ReadExact(buf, n, timeout_ms) : ProbeRecvN(sock, buf, n);
+    };
+
     info.result = ProbeResult::ProtocolError;
 
     u8 hdr[SHAD_HEADER_SIZE];
-    if (!ProbeRecvN(sock, hdr, SHAD_HEADER_SIZE)) {
+    if (!recv_exact(hdr, SHAD_HEADER_SIZE)) {
         SHAD_CLOSE(sock);
         LOG_WARNING(ShadNet, "probe: {}:{} reachable but no ServerInfo header received", host,
                     port);
@@ -154,7 +173,7 @@ ProbeInfo ProbeServer(const std::string& host, u16 port, u32 timeout_ms) {
     }
     const u32 payload_sz = total_sz - SHAD_HEADER_SIZE;
     std::vector<u8> payload(payload_sz);
-    if (payload_sz > 0 && !ProbeRecvN(sock, payload.data(), payload_sz)) {
+    if (payload_sz > 0 && !recv_exact(payload.data(), payload_sz)) {
         SHAD_CLOSE(sock);
         LOG_WARNING(ShadNet, "probe: {}:{} ServerInfo payload read failed", host, port);
         return info;

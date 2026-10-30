@@ -139,6 +139,17 @@ void NpHandler::Initialize() {
                                 "features are disabled for this session.",
                                 host, port));
                 break;
+            case ShadNet::ProbeResult::TlsFailed:
+                LOG_WARNING(NpHandler,
+                            "shadNet server {}:{}: TLS failed (PS_SHADNET_TLS=1); disabling "
+                            "shadNet for this run (saved setting unchanged)",
+                            host, port);
+                ImGui::ShadNetNotify::Push(
+                    ImGui::ShadNetNotify::Kind::Info,
+                    fmt::format("shadNet server ({}:{}): secure connection failed. Online "
+                                "features are disabled for this session.",
+                                host, port));
+                break;
             default: // Unreachable
                 LOG_WARNING(NpHandler,
                             "shadNet server {}:{} is offline/unreachable; disabling shadNet for "
@@ -279,6 +290,21 @@ bool NpHandler::ConnectUser(s32 user_id, const std::string& host, u16 port, cons
         LOG_ERROR(NpHandler, "user_id={} connection failed (state={})", user_id,
                   static_cast<int>(conn_state));
         handle_protocol_mismatch(conn_state);
+        // psport: neither failure changes by retrying (the server's TLS, or the player's choice to
+        // send the password in clear), so shadNet stays off for the session (kb #1297).
+        if (conn_state == ShadNet::ShadNetState::FailureTls ||
+            conn_state == ShadNet::ShadNetState::FailureInsecure) {
+            EmulatorSettings.SetShadNetSessionDisabled(true);
+            ImGui::ShadNetNotify::Push(
+                ImGui::ShadNetNotify::Kind::Info,
+                conn_state == ShadNet::ShadNetState::FailureTls
+                    ? fmt::format("shadNet server ({}:{}): secure connection failed. Online "
+                                  "features are disabled for this session.",
+                                  host, port)
+                    : fmt::format("shadNet server ({}:{}) has no secure connection: the login "
+                                  "was not sent. Online features are disabled for this session.",
+                                  host, port));
+        }
         client->Stop();
         return false;
     }

@@ -777,6 +777,14 @@ After login the client reports its version (command 13, `psport <VERSION>[-<comm
 player is told; one that never answers counts as accepting after 15 s. Notification 18 (a service
 refused, e.g. matchmaking full) is shown to the player.
 
+The login request carries the account's password and token (kb #1297). With `PS_SHADNET_TLS=1`
+the whole shadNet connection, probe included, is TLS (`PsNetTls::Stream` over cpp-httplib's mbedTLS
+layer: certificate verified against `SSL_CERT_FILE` and the system roots, name checked against the
+configured host, no fallback to plain TCP). Without it plain TCP is used only when the peer is a
+loopback address; for any other server the login is refused before it is sent, shadNet stays off
+for the session and the player is told, unless `PS_ONLINE_ALLOW_PLAINTEXT_LOGIN=1`, which sends it
+in clear with a warning naming the host on every login.
+
 The module learns the summon route through `PsNetHost` `sz_summon_route` (`PSPORT_NET_ABI_VERSION`
 3; a runtime and a module of different versions refuse each other and the game stays offline). The
 route picks the title's summon client (`PsNetTitle::SummonClient`, `gpu/net/psport_net_title.h`),

@@ -29,7 +29,7 @@ file(GLOB_RECURSE PSPORT_NET_TITLE_SOURCES CONFIGURE_DEPENDS ../games/*/net/*.cp
 file(GLOB PSPORT_NET_TITLE_DIRS LIST_DIRECTORIES true CONFIGURE_DEPENDS ../games/*/net)
 
 add_library(psport-net SHARED ${PSPORT_NET_SOURCES} ${PSPORT_NET_TITLE_SOURCES} "${SHADNET_PROTO_OUT}/shadnet.pb.cc"
-    psport_net_glue.cpp psport_net_title.cpp)
+    psport_net_glue.cpp psport_net_title.cpp psport_net_tls.cpp)
 # The module's own headers first, then the port's shim and shadPS4 (common/, logging).
 target_include_directories(psport-net PRIVATE include proto shadps4 shadps4/shadnet "${SHADNET_PROTO_OUT}"
     ${PSPORT_NET_TITLE_DIRS} ${CMAKE_CURRENT_SOURCE_DIR} ../shim ../shadps4 ../third_party/imgui ../third_party/httplib)
