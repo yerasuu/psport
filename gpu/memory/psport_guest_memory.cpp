@@ -16,6 +16,8 @@
 #include "psport_quirks.h"
 #include "../../src/platform/ps_host.h"
 
+extern "C" void runtime_calls_report(void);
+extern "C" void runtime_debug_finish(const char* sz_how, int exit_code);
 extern "C" void runtime_memory_set_guest_chunk_allocator(int (*pfn_alloc)(uint64_t phys, uint64_t cb_range,
                                                                            PsHostGpuShare** pp_out_share));
 extern "C" void runtime_memory_set_guest_chunk_whole(int whole);
@@ -722,7 +724,9 @@ void Unsupported(const std::string& why) {
                 why.c_str());
     std::fflush(stdout);
     std::fflush(stderr);
-    std::_Exit(1);
+    runtime_calls_report();
+    runtime_debug_finish("guest memory unsupported by the GPU driver", 1);
+    ps_host_exit_at_once(1);
 }
 
 bool HostImported() {

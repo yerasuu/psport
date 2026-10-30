@@ -14,6 +14,7 @@
 #include "fiber_error.h"
 #include "core/libraries/libs.h"
 #include "fiber_tcb.h"
+#include "../../src/platform/ps_host.h"
 
 extern "C" void runtime_calls_report(void);
 extern "C" void runtime_debug_finish(const char* sz_how, int exit_code);
@@ -54,7 +55,7 @@ extern "C" void __attribute__((used)) PS4_SYSV_ABI _sceFiberForceQuit(u64 ret) {
     psport_gpu_flush_caches(0);
     runtime_calls_report();
     runtime_debug_finish(sz_how, 134);
-    std::_Exit(134);
+    ps_host_exit_at_once(134);
 }
 
 void PS4_SYSV_ABI _sceFiberCheckStackOverflow(OrbisFiberContext* ctx) {

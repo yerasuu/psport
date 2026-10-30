@@ -36,6 +36,7 @@
 
 extern "C" volatile int runtime_restarting;
 extern "C" void runtime_calls_report(void);
+extern "C" void runtime_debug_finish(const char* sz_how, int exit_code);
 extern "C" int runtime_debug_open(const char* sz_name);
 extern "C" void psport_gpu_flush_caches(int can_wait);
 
@@ -450,7 +451,8 @@ void StopOnDeviceLost(const char* sz_where) {
     std::fprintf(stderr, "STOP: GPU device lost (%s)\n", sz_where);
     psport_gpu_flush_caches(1);
     runtime_calls_report();
-    std::_Exit(24);
+    runtime_debug_finish("GPU device lost", 24);
+    ps_host_exit_at_once(24);
 }
 
 } // namespace Vulkan
