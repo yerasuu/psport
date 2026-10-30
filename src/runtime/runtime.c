@@ -119,10 +119,12 @@ void runtime_stop(int status) {
     ps_host_exit_at_once(status);
 }
 void runtime_exit(int status) {
+    psport_gpu_flush_caches(1);
     runtime_calls_report();
-    runtime_debug_finish_exit(status);
+    runtime_debug_finish("exit", status);
+    printf("Runtime: exit(%d) ends at once: no atexit handler or library teardown runs\n", status);
     fflush(NULL);
-    ps_host_exit(status);
+    ps_host_exit_at_once(status);
 }
 static ABI void init_env(void) {
     /* The loader checked that libc.prx's export is exactly C3 (loader_init_env_is_ret). */
