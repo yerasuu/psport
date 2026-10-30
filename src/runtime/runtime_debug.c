@@ -25,7 +25,7 @@
 
 enum { DEBUG_KEEP_DEFAULT = 20, DEBUG_TAIL_LINES = 40, DEBUG_SERIAL_MAX = 40 };
 static char s_sz_run_dir[4352];
-static int s_is_active, s_is_tee_active, s_has_finished;
+static int s_is_active, s_is_tee_active, s_has_finished, s_has_exit_hook;
 static uint64_t s_start_ns;
 static char s_sz_started[40];
 static char s_sz_calls[512];
@@ -388,12 +388,17 @@ void runtime_debug_start(char **pp_argv, const char *sz_serial) {
     s_is_active = 1;
     write_env();
     write_config(pp_argv, sz_host_raw[0] ? sz_host_raw : sz_host);
-    if (ps_host_on_exit(debug_exit)) printf("Debug: exit hook not installed: an exit() leaves summary.txt to the output helper\n");
+    s_has_exit_hook = !ps_host_on_exit(debug_exit);
+    if (!s_has_exit_hook) printf("Debug: exit hook not installed: an exit() writes summary.txt before it ends\n");
     const int error_tee = ps_host_output_tee(tee_chunk, tee_end);
     s_is_tee_active = !error_tee;
     if (error_tee) printf("Debug: output not captured (%s): no run.log, frame-stats.txt or tail in summary.txt\n", strerror(error_tee));
     printf("Debug: run folder %s (complete once summary.txt is there)\n", s_sz_run_dir);
     keep_newest(sz_host_dir, sz_name, c_keep);
+}
+
+void runtime_debug_finish_exit(int exit_code) {
+    if (!s_has_exit_hook) runtime_debug_finish("exit", exit_code);
 }
 
 void runtime_debug_finish(const char *sz_how, int exit_code) {

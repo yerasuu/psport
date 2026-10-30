@@ -245,7 +245,9 @@ static ABI __attribute__((noreturn)) void guest_libc_exit(int status) {
     runtime_finalize(NULL);
     runtime_report();
     psport_gpu_flush_caches(1);
-    exit(status);
+    runtime_debug_finish_exit(status);
+    fflush(NULL);
+    ps_host_exit(status);
 }
 /* Imports the runtime answers itself ahead of the libraries (the game's libc wrappers, TLS, its
  * process parameters), whichever library the executable names for them. */

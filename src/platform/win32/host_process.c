@@ -146,7 +146,7 @@ static int replace_process(const wchar_t *sz_application, char *const *pp_argv) 
     DWORD exit_code = 1;
     if (WaitForSingleObject(process.hProcess, INFINITE) != WAIT_OBJECT_0 || !GetExitCodeProcess(process.hProcess, &exit_code))
         exit_code = 1;
-    ExitProcess(exit_code);
+    ps_host_exit_at_once((int)exit_code);
 }
 
 /* A name without a separator is looked up as execvp does in PATH, by SearchPathW (the executable's
@@ -188,6 +188,12 @@ void ps_host_exit_at_once(int status) {
     DWORD cb_written;
     if (cb_line > 0) (void)WriteFile(GetStdHandle(STD_ERROR_HANDLE), sz_line, (DWORD)cb_line, &cb_written, NULL);
     _exit(status);
+}
+
+void ps_host_exit(int status) {
+    printf("Host: exit(%d) ends through TerminateProcess: no atexit handler or DLL detach runs\n", status);
+    fflush(stdout);
+    ps_host_exit_at_once(status);
 }
 
 int32_t ps_host_process_id(void) { return (int32_t)GetCurrentProcessId(); }

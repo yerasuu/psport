@@ -120,6 +120,8 @@ int ps_host_on_exit(void (*pfn_exit)(int status)) {
 
 void ps_host_exit_at_once(int status) { _exit(status); }
 
+void ps_host_exit(int status) { exit(status); }
+
 int32_t ps_host_process_id(void) { return (int32_t)getpid(); }
 
 int ps_host_fs_duplicate(int h_file, int h_target) {

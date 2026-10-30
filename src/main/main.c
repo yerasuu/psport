@@ -425,5 +425,9 @@ int main(int argc, char **argv) {
     if (!p_stack) fail("cannot allocate guest main stack");
     if (native_libc) runtime_thread_set_stack(p_stack,MAIN_STACK);
     enter_on_stack(g_p_image+entry,p_params,(void *)guest_exit,p_stack+MAIN_STACK-64);
-    fail("entry unexpectedly returned");
+    fputs("ERROR: entry unexpectedly returned\n", stderr);
+    runtime_calls_report();
+    runtime_debug_finish_exit(1);
+    fflush(NULL);
+    ps_host_exit(1);
 }

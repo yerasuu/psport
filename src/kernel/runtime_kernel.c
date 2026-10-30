@@ -232,7 +232,8 @@ static ABI __attribute__((noreturn)) void hard_exit(int status) {
     printf("Runtime: guest requested _exit(%d)\n",status);
     runtime_report();
     psport_gpu_flush_caches(1);
-    fflush(stdout);
+    runtime_debug_finish("_exit", status);
+    fflush(NULL);
     ps_host_exit_at_once(status);
 }
 static ABI __attribute__((noreturn)) void raise_exception(uint32_t code,uint64_t argument) {

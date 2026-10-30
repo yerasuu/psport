@@ -136,6 +136,8 @@ void runtime_debug_note_calls(const char *sz_line);
 /* Every route out of the process calls it once its call report is written, with how it ends and the
  * exit status: summary.txt and the renames, done by the first call. Safe in signal handlers. */
 void runtime_debug_finish(const char *sz_how, int exit_code);
+/* Before ps_host_exit: what the exit hook writes, written now where none is installed. */
+void runtime_debug_finish_exit(int exit_code);
 uintptr_t runtime_rwlock_resolve(const char *sz_name);
 void runtime_rwlock_report(void);
 uintptr_t runtime_barrier_resolve(const char *sz_name);
