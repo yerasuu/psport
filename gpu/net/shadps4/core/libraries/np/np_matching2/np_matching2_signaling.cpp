@@ -237,8 +237,8 @@ bool ResolvePeerEndpointUnremembered(const MemberCache& member, PeerInfo& peer) 
             peer.online_id = member.np_id.handle;
         }
         if (changed) {
-            LOG_INFO(Lib_NpMatching2, "BBSC direct peer '{}' -> {:#x}:{} (no broker lookup)",
-                     online_id, peer.addr, Libraries::Net::sceNetNtohs(peer.port));
+            LOG_DEBUG(Lib_NpMatching2, "BBSC direct peer '{}' -> {:#x}:{} (no broker lookup)",
+                      online_id, peer.addr, Libraries::Net::sceNetNtohs(peer.port));
         }
         return true;
     }

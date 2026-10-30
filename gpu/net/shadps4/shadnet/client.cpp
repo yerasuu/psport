@@ -31,6 +31,11 @@ static void PlatformInit() {}
 
 namespace ShadNet {
 
+// Run logs are attached to reports, so the account's own NPID keeps its first 3 characters only.
+static std::string MaskNpid(const std::string& npid) {
+    return npid.substr(0, 3) + "***";
+}
+
 // Build a u32-LE-prefixed proto blob payload for a request packet.
 template <typename T>
 static std::vector<u8> MakeProtoPayload(const T& msg) {
@@ -221,7 +226,7 @@ void ShadNetClient::ConnectThread() {
         m_state = ShadNetState::FailureOther;
         return;
     }
-    LOG_INFO(ShadNet, "Login packet sent for '{}'", m_npid);
+    LOG_DEBUG(ShadNet, "Login packet sent for '{}'", m_npid);
 }
 
 void ShadNetClient::ReaderThread() {
@@ -759,8 +764,8 @@ void ShadNetClient::HandleLoginReply(const std::vector<u8>& payload) {
                     m_friends = res.friends;
                 }
                 m_authenticated = true;
-                LOG_INFO(ShadNet, "Logged in npid='{}' userId={} friends={}", m_npid, m_user_id,
-                         m_friends.size());
+                LOG_INFO(ShadNet, "Logged in npid='{}' userId={} friends={}", MaskNpid(m_npid),
+                         m_user_id, m_friends.size());
 
                 const u64 pkt_id = m_pkt_counter.fetch_add(1);
                 std::vector<u8> empty_payload;
@@ -830,8 +835,8 @@ void ShadNetClient::HandleGetTokenReply(const std::vector<u8>& payload) {
         std::lock_guard lock(m_mutex_bearer);
         m_bearer_token = pb.token();
     }
-    LOG_INFO(ShadNet, "Bearer token captured ({} chars) for accountID={} canonical npid='{}'",
-             pb.token().size(), pb.user_id(), pb.npid());
+    LOG_DEBUG(ShadNet, "Bearer token captured ({} chars) for accountID={} canonical npid='{}'",
+              pb.token().size(), pb.user_id(), pb.npid());
     RequestServerFeatures();
 }
 

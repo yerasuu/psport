@@ -47,9 +47,9 @@ s32 PS4_SYSV_ABI sceNpLookupNpId(s32 req_id, const OrbisNpOnlineId* online_id, O
     std::memset(np_id, 0, sizeof(*np_id));
     std::memcpy(np_id->handle.data, online_id->data, sizeof(np_id->handle.data));
     np_id->handle.term = 0;
-    LOG_INFO(Lib_NpUtility, "lookup {}: NpId for '{}'", req_id,
-             std::string(np_id->handle.data, strnlen(np_id->handle.data,
-                                                     sizeof(np_id->handle.data))));
+    LOG_DEBUG(Lib_NpUtility, "lookup {}: NpId for '{}'", req_id,
+              std::string(np_id->handle.data, strnlen(np_id->handle.data,
+                                                      sizeof(np_id->handle.data))));
     return ORBIS_OK;
 }
 

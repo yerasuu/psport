@@ -216,8 +216,8 @@ void NpHandler::Shutdown() {
 
 bool NpHandler::ConnectUser(s32 user_id, const std::string& host, u16 port, const std::string& npid,
                             const std::string& password, const std::string& token) {
-    LOG_INFO(NpHandler, "Connecting user_id={} npid='{}' to {}:{} (timeout {}s)", user_id, npid,
-             host, port, ShadNet::SHAD_CONNECT_TIMEOUT_MS / 1000);
+    LOG_INFO(NpHandler, "Connecting user_id={} to {}:{} (timeout {}s)", user_id, host, port,
+             ShadNet::SHAD_CONNECT_TIMEOUT_MS / 1000);
 
     auto client = std::make_shared<ShadNet::ShadNetClient>();
 
@@ -324,8 +324,7 @@ bool NpHandler::ConnectUser(s32 user_id, const std::string& host, u16 port, cons
         return false;
     }
 
-    LOG_INFO(NpHandler, "user_id={} signed in npid='{}' accountId={}", user_id, npid,
-             client->GetUserId());
+    LOG_INFO(NpHandler, "user_id={} signed in accountId={}", user_id, client->GetUserId());
 
     Net::UPnPClient::Instance().SetP2PFeaturesEnabled(client->IsMatching2Enabled());
     if (client->IsMatching2Enabled() && EmulatorSettings.IsUPnPEnabled()) {
@@ -685,8 +684,8 @@ void NpHandler::PostSessionInvitationEvent(const std::string& session_id,
                  sizeof(param->onlineId.data) - 1);
 
     Libraries::SystemService::PushSystemServiceEvent(event);
-    LOG_INFO(NpHandler, "Posted SESSION_INVITATION session='{}' flag={} onlineId='{}'", session_id,
-             param->flag, accepter_online_id);
+    LOG_DEBUG(NpHandler, "Posted SESSION_INVITATION session='{}' flag={} onlineId='{}'", session_id,
+              param->flag, accepter_online_id);
 }
 
 std::vector<NpHandler::PendingInvitation> NpHandler::GetPendingInvitations(s32 user_id) const {
@@ -816,7 +815,7 @@ std::optional<std::string> NpHandler::GetFriendNpid(s32 user_id, u32 index) cons
 }
 
 void NpHandler::OnFriendQuery(s32 user_id, const ShadNet::NotifyFriendQuery& n) {
-    LOG_INFO(NpHandler, "user_id={} FriendQuery from '{}'", user_id, n.fromNpid);
+    LOG_DEBUG(NpHandler, "user_id={} FriendQuery from '{}'", user_id, n.fromNpid);
     ImGui::ShadNetNotify::Push(ImGui::ShadNetNotify::Kind::FriendRequest,
                                "Friend request from " + n.fromNpid);
     std::lock_guard lock(m_mutex_friend_state);
@@ -828,8 +827,8 @@ void NpHandler::OnFriendQuery(s32 user_id, const ShadNet::NotifyFriendQuery& n) 
 }
 
 void NpHandler::OnFriendNew(s32 user_id, const ShadNet::NotifyFriendNew& n) {
-    LOG_INFO(NpHandler, "user_id={} FriendNew '{}' ({})", user_id, n.npid,
-             n.online ? "online" : "offline");
+    LOG_DEBUG(NpHandler, "user_id={} FriendNew '{}' ({})", user_id, n.npid,
+              n.online ? "online" : "offline");
     ImGui::ShadNetNotify::Push(ImGui::ShadNetNotify::Kind::FriendNew,
                                n.npid + " is now your friend");
     std::lock_guard lock(m_mutex_friend_state);
@@ -849,7 +848,7 @@ void NpHandler::OnFriendNew(s32 user_id, const ShadNet::NotifyFriendNew& n) {
 }
 
 void NpHandler::OnFriendLost(s32 user_id, const ShadNet::NotifyFriendLost& n) {
-    LOG_INFO(NpHandler, "user_id={} FriendLost '{}'", user_id, n.npid);
+    LOG_DEBUG(NpHandler, "user_id={} FriendLost '{}'", user_id, n.npid);
     ImGui::ShadNetNotify::Push(ImGui::ShadNetNotify::Kind::FriendLost,
                                n.npid + " removed you as a friend");
     std::lock_guard lock(m_mutex_friend_state);
@@ -996,7 +995,7 @@ s32 NpHandler::SendFriendRequest(s32 user_id, const std::string& npid) {
         return ORBIS_NP_ERROR_SIGNED_OUT;
     }
     client->AddFriend(npid);
-    LOG_INFO(NpHandler, "user_id={} AddFriend '{}'", user_id, npid);
+    LOG_DEBUG(NpHandler, "user_id={} AddFriend '{}'", user_id, npid);
 
     std::lock_guard lock(m_mutex_friend_state);
     auto& st = m_friend_state[user_id];
@@ -1023,7 +1022,7 @@ s32 NpHandler::RemoveFriend(s32 user_id, const std::string& npid) {
         return ORBIS_NP_ERROR_SIGNED_OUT;
     }
     client->RemoveFriend(npid);
-    LOG_INFO(NpHandler, "user_id={} RemoveFriend '{}'", user_id, npid);
+    LOG_DEBUG(NpHandler, "user_id={} RemoveFriend '{}'", user_id, npid);
 
     std::lock_guard lock(m_mutex_friend_state);
     auto& st = m_friend_state[user_id];
@@ -1052,7 +1051,7 @@ s32 NpHandler::BlockUser(s32 user_id, const std::string& npid) {
         return ORBIS_NP_ERROR_SIGNED_OUT;
     }
     client->AddBlock(npid);
-    LOG_INFO(NpHandler, "user_id={} AddBlock '{}'", user_id, npid);
+    LOG_DEBUG(NpHandler, "user_id={} AddBlock '{}'", user_id, npid);
 
     std::lock_guard lock(m_mutex_friend_state);
     auto& st = m_friend_state[user_id];
@@ -1084,7 +1083,7 @@ s32 NpHandler::UnblockUser(s32 user_id, const std::string& npid) {
         return ORBIS_NP_ERROR_SIGNED_OUT;
     }
     client->RemoveBlock(npid);
-    LOG_INFO(NpHandler, "user_id={} RemoveBlock '{}'", user_id, npid);
+    LOG_DEBUG(NpHandler, "user_id={} RemoveBlock '{}'", user_id, npid);
 
     std::lock_guard lock(m_mutex_friend_state);
     auto& st = m_friend_state[user_id];

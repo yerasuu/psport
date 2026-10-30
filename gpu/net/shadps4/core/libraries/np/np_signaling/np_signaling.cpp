@@ -279,8 +279,8 @@ s32 PS4_SYSV_ABI sceNpSignalingDeleteContext(OrbisNpSignalingContextId ctxId) {
 s32 PS4_SYSV_ABI sceNpSignalingActivateConnection(OrbisNpSignalingContextId ctxId,
                                                   const void* peerNpId,
                                                   OrbisNpSignalingConnectionId* outConnId) {
-    LOG_INFO(Lib_NpSignaling, "t={} ctxId={} peerNpId={:p} connId={:p}", NowMs(), ctxId, peerNpId,
-             fmt::ptr(outConnId));
+    LOG_DEBUG(Lib_NpSignaling, "t={} ctxId={} peerNpId={:p} connId={:p}", NowMs(), ctxId, peerNpId,
+              fmt::ptr(outConnId));
 
     {
         SignalingMutexGuard lock;
@@ -397,14 +397,14 @@ s32 PS4_SYSV_ABI sceNpSignalingActivateConnection(OrbisNpSignalingContextId ctxI
         }
         const auto logged = g_connections.find(cid);
         const bool revalidating = logged != g_connections.end() && logged->second.revalidating;
-        LOG_INFO(Lib_NpSignaling, "ctxId={} peer='{}' connId={} Status: {}", ctxId,
-                 peer_online_id_str, cid,
-                 created_new          ? "queued, async"
-                 : revalidating       ? "deactivated connection activated again - checking the "
-                                        "peer is still there (10 s)"
-                 : reused_established ? "queued local activation on established connection"
-                 : queue_activation   ? "queued local activation on existing connection"
-                                      : "reused transient");
+        LOG_DEBUG(Lib_NpSignaling, "ctxId={} peer='{}' connId={} Status: {}", ctxId,
+                  peer_online_id_str, cid,
+                  created_new          ? "queued, async"
+                  : revalidating       ? "deactivated connection activated again - checking the "
+                                         "peer is still there (10 s)"
+                  : reused_established ? "queued local activation on established connection"
+                  : queue_activation   ? "queued local activation on existing connection"
+                                       : "reused transient");
     }
 
     *outConnId = cid;
@@ -483,8 +483,8 @@ s32 PS4_SYSV_ABI sceNpSignalingDeactivateConnection(OrbisNpSignalingContextId ct
             return ORBIS_NP_SIGNALING_ERROR_CONN_NOT_FOUND;
         }
 
-        LOG_INFO(Lib_NpSignaling, "t={} ctxId={} connId={} peer='{}' status={}", NowMs(), ctxId,
-                 connId, OnlineIdToString(it->second.online_id), it->second.status);
+        LOG_DEBUG(Lib_NpSignaling, "t={} ctxId={} connId={} peer='{}' status={}", NowMs(), ctxId,
+                  connId, OnlineIdToString(it->second.online_id), it->second.status);
     }
     DeactivateConnectionFaithful(connId);
     return ORBIS_OK;
@@ -550,8 +550,8 @@ s32 PS4_SYSV_ABI sceNpSignalingGetConnectionStatus(OrbisNpSignalingContextId ctx
         *outStatus = ORBIS_NP_SIGNALING_CONN_STATUS_INACTIVE;
     }
 
-    LOG_INFO(Lib_NpSignaling, "t={} ctxId={} connId={} peer='{}' status={}", NowMs(), ctxId, connId,
-             OnlineIdToString(it->second.online_id), *outStatus);
+    LOG_DEBUG(Lib_NpSignaling, "t={} ctxId={} connId={} peer='{}' status={}", NowMs(), ctxId, connId,
+              OnlineIdToString(it->second.online_id), *outStatus);
     return ORBIS_OK;
 }
 
@@ -624,8 +624,8 @@ s32 PS4_SYSV_ABI sceNpSignalingGetConnectionFromNpId(OrbisNpSignalingContextId c
     }
 
     *outConnId = it->second;
-    LOG_INFO(Lib_NpSignaling, "ctxId={} npid='{}' connId={}", ctxId,
-             OnlineIdToString(peer_online_id), it->second);
+    LOG_DEBUG(Lib_NpSignaling, "ctxId={} npid='{}' connId={}", ctxId,
+              OnlineIdToString(peer_online_id), it->second);
     return ORBIS_OK;
 }
 

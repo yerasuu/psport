@@ -1119,8 +1119,8 @@ void HandleHandshakePacket(u32 from_addr, u16 from_port, const SignalingHandshak
             }
             if (ci.revalidating) {
                 ci.revalidating = false;
-                LOG_INFO(Lib_NpSignaling, "Connection {} to '{}': the peer answered - kept",
-                         conn_id, from_id);
+                LOG_DEBUG(Lib_NpSignaling, "Connection {} to '{}': the peer answered - kept",
+                          conn_id, from_id);
                 establish_conn = conn_id;
             } else if (ci.state != ConnState::Established) {
                 establish_conn = conn_id;
