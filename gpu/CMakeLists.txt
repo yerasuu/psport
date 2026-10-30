@@ -2,6 +2,13 @@
 # drivers, adapted to the native_probe runtime through shims in shim/.
 cmake_minimum_required(VERSION 3.24)
 project(psport-gpu LANGUAGES C CXX)
+# CMP0167: Boost's own BoostConfig.cmake replaces the FindBoost module that CMake dropped. CMP0218,
+# for the vendored sirit, which still sets CMAKE_WARN_DEPRECATED: the variable is ignored now, and
+# its default is set here so third_party/sirit stays as it was taken.
+if(POLICY CMP0167)
+    cmake_policy(SET CMP0167 NEW)
+endif()
+set(CMAKE_POLICY_DEFAULT_CMP0218 NEW)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
