@@ -40,7 +40,8 @@ run.sh
   scripts/online.py (PS_ONLINE=1 only)
   psport --game <dir> [--system-modules <dir> --hle <libs> --lle <libs>]
            [--mods <dir> --mods-config <file> --out <dir>]
-           --patches-dir <dir> --patches-config <file> --app0 <dir> --user <dir> [--user-id <N>]
+           --patches-dir <dir> --patches-config <file> [--builtin-patches-dir <dir>]
+           --app0 <dir> --user <dir> [--user-id <N>]
     loader_mods_view()                the game folder, or a view of it with the mods linked in
     AppContent profile                param.sfo's user parameters, PS_CONTENT_SKU
     psport_gpu_register_kernel()           event queues and the ported libraries register their exports
@@ -67,7 +68,8 @@ directory from `PS_DATA_DIR` (default the checkout: `out/`, `user/`, `psport.ini
 
 - passes the mods folder and `mods.json` (`PS_MODS_DIR`, `PS_MODS_CONFIG`; none with
   `PS_MODS_ENABLED=0`) and the external patch folder and `patches.json` (`PS_PATCHES_DIR`,
-  `PS_PATCHES_CONFIG`), by default in the data directory;
+  `PS_PATCHES_CONFIG`), by default in the data directory, and the launcher's folder of built-in
+  patch files (`PS_BUILTIN_PATCHES_DIR`, as `--builtin-patches-dir`) when set;
 - for a `psport.ini` `output_res` other than 1080p, chooses between live resolution changes and a
   scene size patched in at start (`PS_RENDER_RES`, `PS_OUTPUT_RES`, `PS_DMEM_MB`): the output
   divided by the upscaler preset's ratio, rounded half to even to an even size;
@@ -148,7 +150,11 @@ library.
   whose `<ID>`s name one of the game's title IDs (or that have none), entries for its `APP_VER` and
   `eboot.bin`, selected by `patches.json` or their `isEnabled`. A patch with an unsupported line or
   an address outside the eboot's `PT_LOAD` segments is skipped whole, and said; the title's own
-  file is left out of the folder.
+  file is left out of the folder. The title's built-in patch file (`Game::Title` `sz_patch_file`) is
+  its file name in the folder the launcher gives (`--builtin-patches-dir`, else
+  `PS_BUILTIN_PATCHES_DIR`; decanter ships Bloodborne's `Bloodborne.xml`); without a folder, that
+  path in psport's folder. When the file is in neither, the launch goes on without the title's
+  own patches (`pfn_add_patches` is not called) and says so in one `Patches:` line.
 - The eboot's identity (`src/loader/loader_hash.c`): the SHA-256 of its loadable segments at their
   addresses, the same whatever tool dumped the game; computed when a title's check asks for it.
 - For launchers, without starting the game: `psport --list-mods <dir> [--game <dir>]` and
@@ -362,7 +368,7 @@ watch, all meant to behave as before:
 - `runtime_ult.c`: `sceUltUlthreadExit` jumps back through `PS_HOST_RECOVERY_JUMP`, which does not
   save and restore the signal mask (`sigsetjmp` savemask 1 before, 0 now); the exit is refused
   inside exception delivery and while a runtime lock is held, so the mask is the same at both ends.
-- `game_info.c`: the install folder (title patch files) is `PS_INSTALL_DIR`, else the nearest folder
+- `game_info.c`: the install folder (title patch files without `PS_BUILTIN_PATCHES_DIR`) is `PS_INSTALL_DIR`, else the nearest folder
   above the executable holding `patches/` (was always two folders up).
 - `psport_guest_memory.cpp`: when the host import probe fails on its shared view, it imports private
   memory too and says so in the reason (`private memory imports: the driver takes anonymous memory
@@ -720,7 +726,7 @@ shows its HUD, unless `PS_FORCE_CROSSHAIR=0`) bring no patches, nor does Atelier
 `PS_FPS` presets 30/60/90/uncap (by hooks in its code, `frame_rate.cpp`, unless `PS_FRAME_HOOKS=0`
 or the executable is not 1.09), `PS_PATCHES`, the effect switches and `model_lod` of `psport.ini`,
 the `PS_RENDER_RES` scene size, the Intel tone mapping and online-choice fixes, all from
-`patches/Bloodborne.xml`; `game_check.cpp`: the 1.09 executable and intact shaders; the in-game menu
+`Bloodborne.xml`, which decanter ships and hands over with `PS_BUILTIN_PATCHES_DIR`; `game_check.cpp`: the 1.09 executable and intact shaders; the in-game menu
 pages, `game_menu.cpp`; its profile in `profile.cpp`, with Gnm entry hooks and `gnm_table.inc`,
 guest hooks and heap sites; its button prompts for the device in use, the glyph table in
 `button_prompts.cpp` read from `menu/common.tpf.dcx` by `fromsoftware_tpf.cpp`, unless
@@ -881,7 +887,8 @@ stay on this PC.
 
 - `launcher/`: bbport's GTK4 launcher, built around Bloodborne.
 - `packaging/`: `port.nix` (build in Nix's sandbox) and the AppImage script.
-- `patches/Bloodborne.xml`: community patches for Bloodborne.
+- `patches/`: marks psport's folder; the titles' built-in patch files come from the launcher
+  (`PS_BUILTIN_PATCHES_DIR`).
 - `tools/`: regression runs, GCN disassembler (`gcn_dis.sh`), FSR 4 asset tools, scripted-run
   helpers, `import_outparams.py` and `import_returns.py` (generate `src/runtime/imports/import_*.inc`).
 - [history/](history/): bbport's design notes, plans, measurements and change logs in English; the

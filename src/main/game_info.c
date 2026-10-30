@@ -53,9 +53,10 @@ void configure_content(const char *sz_sfo) {
     printf("AppContent profile: SKU=%s (probe setting), user params=[%u, %u, %u, %u], mounted add-ons=0\n",
            sz_sku,values[1],values[2],values[3],values[4]);
 }
-/* psport's own folder, the one holding patches/: PS_INSTALL_DIR when set, else the nearest folder
- * above the executable with a patches/ folder, since the executable sits at different depths below
- * it (out/psport, out/win32/psport.exe, a package's bin/psport, or beside patches/). */
+/* psport's own folder, the one holding patches/ (kept as its marker): PS_INSTALL_DIR when set,
+ * else the nearest folder above the executable with a patches/ folder, since the executable sits
+ * at different depths below it (out/psport, out/win32/psport.exe, a package's bin/psport, or
+ * beside patches/). */
 static void install_dir(char *sz_out, size_t cb_out) {
     const char *sz_set=runtime_env("PS_INSTALL_DIR","");
     if (*sz_set) {
@@ -87,6 +88,40 @@ static void install_path(const char *sz_relative, char *sz_out, size_t cb_out) {
     install_dir(sz_dir,sizeof(sz_dir));
     if ((size_t)snprintf(sz_out,cb_out,"%s/%s",sz_dir,sz_relative)>=cb_out) fail("install path too long");
 }
+static const char *s_sz_builtin_patches_dir;
+void builtin_patches_configure(const char *sz_dir) { s_sz_builtin_patches_dir=sz_dir; }
+static const char *file_name(const char *sz_path) {
+    const char *p_slash=strrchr(sz_path,'/');
+    return p_slash ? p_slash+1 : sz_path;
+}
+/* The title's built-in patch file is the launcher's (--builtin-patches-dir, else
+ * PS_BUILTIN_PATCHES_DIR); without a folder, psport's own folder, where older checkouts keep it.
+ * sz_patch_file stays "" when the file is not there. */
+static void resolve_builtin_patch_file(const char *sz_title_file, GameInfo *p_info) {
+    const char *sz_dir=s_sz_builtin_patches_dir ? s_sz_builtin_patches_dir : runtime_env("PS_BUILTIN_PATCHES_DIR","");
+    const size_t cb_path=sizeof(p_info->sz_patch_file);
+    if ((size_t)snprintf(p_info->sz_patch_folder,sizeof(p_info->sz_patch_folder),"%s",sz_dir)>=sizeof(p_info->sz_patch_folder) ||
+        (*sz_dir && (size_t)snprintf(p_info->sz_patch_file,cb_path,"%s/%s",sz_dir,file_name(sz_title_file))>=cb_path)) {
+        p_info->sz_patch_file[0]=0;
+        return;
+    }
+    if (!*sz_dir) install_path(sz_title_file,p_info->sz_patch_file,cb_path);
+    PsHostStat stat;
+    if (ps_host_fs_stat(p_info->sz_patch_file,&stat) || !PS_HOST_MODE_IS_REGULAR(stat.mode)) p_info->sz_patch_file[0]=0;
+}
+int announce_builtin_patch_file(const GameInfo *p_info) {
+    const char *sz_title_file=p_info->title.sz_patch_file;
+    if (!sz_title_file) return 1;
+    if (!p_info->sz_patch_file[0]) {
+        printf("Patches: the title's built-in patch file %s was not found in %s: its built-in patches are skipped "
+               "(set PS_BUILTIN_PATCHES_DIR)\n",file_name(sz_title_file),
+               p_info->sz_patch_folder[0] ? p_info->sz_patch_folder : "no folder given");
+        return 0;
+    }
+    printf("Patches: the title's built-in patch file is %s%s\n",p_info->sz_patch_file,
+           p_info->sz_patch_folder[0] ? "" : " (psport's folder: no PS_BUILTIN_PATCHES_DIR given)");
+    return 1;
+}
 /* sz_game_dir may be NULL: a launcher asking about a title by its TITLE_ID and APP_VER. */
 void game_info_of(const char *sz_game_dir, const char *sz_serial, const char *sz_version, GameInfo *p_out_info) {
     memset(p_out_info,0,sizeof(*p_out_info));
@@ -97,9 +132,9 @@ void game_info_of(const char *sz_game_dir, const char *sz_serial, const char *sz
     for (size_t i=0; i<p_out_info->title.c_serials && p_out_info->c_serials<64; ++i)
         p_out_info->serials[p_out_info->c_serials++]=p_out_info->title.pp_serials[i];
     const char *sz_patch_file=p_out_info->title.sz_patch_file;
-    if (sz_patch_file) install_path(sz_patch_file,p_out_info->sz_patch_file,sizeof(p_out_info->sz_patch_file));
+    if (sz_patch_file) resolve_builtin_patch_file(sz_patch_file,p_out_info);
     p_out_info->files=(PsGameFiles){sz_game_dir,p_out_info->sz_serial,p_out_info->sz_version,
-                                    sz_patch_file ? p_out_info->sz_patch_file : NULL,loader_eboot_sha256};
+                                    p_out_info->sz_patch_file[0] ? p_out_info->sz_patch_file : NULL,loader_eboot_sha256};
 }
 void game_info(const char *sz_game_dir, GameInfo *p_out_info) {
     char sz_sfo[4096], sz_serial[16]="", sz_version[16]="";

@@ -34,7 +34,9 @@ void protect(void *p_range, size_t cb_range, unsigned flags);
 /* What psport knows of the game for its title and the external patches: param.sfo's TITLE_ID
  * and APP_VER, and the TITLE_IDs of the same executable. */
 typedef struct {
-    char sz_serial[16], sz_version[16], sz_patch_file[4096];
+    /* sz_patch_file: the title's built-in patch file found, "" without one; sz_patch_folder: the
+     * folder the launcher gave for it, "" for none. */
+    char sz_serial[16], sz_version[16], sz_patch_file[4096], sz_patch_folder[4096];
     const char *serials[64];
     size_t c_serials;
     PsGameFiles files;
@@ -42,6 +44,10 @@ typedef struct {
 } GameInfo;
 void game_info_of(const char *sz_game_dir, const char *sz_serial, const char *sz_version, GameInfo *p_out_info);
 void game_info(const char *sz_game_dir, GameInfo *p_out_info);
+void builtin_patches_configure(const char *sz_dir);
+/* Prints where the title's built-in patch file was found or why it was not: 0 when the title has
+ * one and it is missing, so its built-in patches are skipped. */
+int announce_builtin_patch_file(const GameInfo *p_info);
 int sfo_value(const char *sz_path, const char *sz_key, char *sz_text, size_t cb_text, uint32_t *p_number);
 void configure_content(const char *sz_sfo);
 LoaderPatchFolder patch_folder(const char *sz_dir, const GameInfo *p_info);

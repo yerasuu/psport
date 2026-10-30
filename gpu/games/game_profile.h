@@ -322,8 +322,9 @@ struct Title {
     /// Folders a loose-file mod may consist of without dvdroot_ps4 around them (src/loader/loader_mods.c
     /// adds the game's own): those of the game's dvdroot_ps4 and the ones mods add to it.
     std::span<const char* const> mod_folders;
-    /// Its own patch file (shadPS4 XML), relative to psport's folder; external patch folders leave
-    /// it out.
+    /// Its built-in patch file (shadPS4 XML): its file name in the launcher's built-in patch folder
+    /// (PS_BUILTIN_PATCHES_DIR), relative to psport's folder without one; external patch folders
+    /// leave it out.
     const char* sz_patch_file = nullptr;
     /// Before anything of the game runs, before psport_gpu_init: environment defaults it chooses.
     void (*pfn_prepare_environment)() = nullptr;

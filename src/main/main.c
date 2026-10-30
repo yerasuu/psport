@@ -133,6 +133,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--user") && i+1<argc) sz_user_dir=argv[++i];
         else if (!strcmp(argv[i], "--patches-dir") && i+1<argc) sz_patches_dir=argv[++i];
         else if (!strcmp(argv[i], "--patches-config") && i+1<argc) sz_patches_config=argv[++i];
+        else if (!strcmp(argv[i], "--builtin-patches-dir") && i+1<argc) builtin_patches_configure(argv[++i]);
         else if (!strcmp(argv[i], "--mods") && i+1<argc) sz_mods_dir=argv[++i];
         else if (!strcmp(argv[i], "--mods-config") && i+1<argc) sz_mods_config=argv[++i];
         else if (!strcmp(argv[i], "--out") && i+1<argc) sz_out_dir=argv[++i];
@@ -143,7 +144,7 @@ int main(int argc, char **argv) {
         else { fprintf(stderr, "Unknown option: %s\n", argv[i]); return 1; }
     }
     if (!game.sz_game) {
-        fprintf(stderr, "Usage: %s --game dir [--system-modules dir] [--hle libs] [--lle libs] [--cpu-only] [--strict-imports] [--app0 dir] [--user dir] [--user-id N] [--patches-dir dir [--patches-config file]] [--mods dir [--mods-config file]] [--out dir] [--timeout seconds] [--exec guest-path [--arg value]...] | --check-game dir | --has-presets dir | --list-patches dir (--game dir | --title id [--version v]) | --list-mods dir [--game dir | --title id] | --list-quirks [--game dir] | --list-features | --list-traits --game dir | --online-overrides (--game dir | --title id) | --list-effects (--game dir | --title id) | --list-controls [--game dir | --title id] | --vulkan-only\n", argv[0]);
+        fprintf(stderr, "Usage: %s --game dir [--system-modules dir] [--hle libs] [--lle libs] [--cpu-only] [--strict-imports] [--app0 dir] [--user dir] [--user-id N] [--patches-dir dir [--patches-config file]] [--builtin-patches-dir dir] [--mods dir [--mods-config file]] [--out dir] [--timeout seconds] [--exec guest-path [--arg value]...] | --check-game dir | --has-presets dir | --list-patches dir (--game dir | --title id [--version v]) | --list-mods dir [--game dir | --title id] | --list-quirks [--game dir] | --list-features | --list-traits --game dir | --online-overrides (--game dir | --title id) | --list-effects (--game dir | --title id) | --list-controls [--game dir | --title id] | --vulkan-only\n", argv[0]);
         return 1;
     }
     {
@@ -210,7 +211,9 @@ int main(int argc, char **argv) {
     if (is_eboot) {
         PsPatchServices patch_services;
         loader_patch_services(&patches,&patch_services);
-        int own_patches=info.title.pfn_add_patches ? info.title.pfn_add_patches(&info.files,&patch_services) : -1;
+        int own_patches=-1;
+        if (info.title.pfn_add_patches && announce_builtin_patch_file(&info))
+            own_patches=info.title.pfn_add_patches(&info.files,&patch_services);
         if (!own_patches) runtime_exit(1);
         if (sz_patches_dir) {
             LoaderPatchFolder folder=patch_folder(sz_patches_dir,&info);

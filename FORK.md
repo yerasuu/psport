@@ -312,7 +312,10 @@ nothing read so far shows whether it compares versions, so the tolerance stays o
 AppContent profile from `param.sfo`, shadPS4/GoldHEN XML patches (`src/loader/loader_patches.c`), and
 through the game's title its own file check and patches (`Game::Title` `check_files` and
 `add_patches`; Bloodborne's check of the 1.09 executable and intact shaders and its frame rate,
-resolution and effect presets live in `gpu/games/bloodborne/`).
+resolution and effect presets live in `gpu/games/bloodborne/`). A title's built-in patch file is not
+in psport's tree: the launcher ships it (decanter's `Bloodborne.xml`) and names its folder with
+`--builtin-patches-dir` or `PS_BUILTIN_PATCHES_DIR`; without the file the launch goes on without the
+title's own patches and says so (bbport kept it as `patches/Bloodborne.xml`).
 
 ## Memory model
 

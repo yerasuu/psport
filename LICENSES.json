@@ -4,8 +4,7 @@
   "original_code_license": "GPL-2.0-or-later (files marked GPL-2.0-only stay GPL-2.0-only); the combined binaries are distributed under GPL-2.0 (LICENSE, kb #843)",
   "license_references": {
     "LicenseRef-DejaVu-Fonts": "The Bitstream Vera Fonts licence together with the DejaVu changes (public domain) and the Arev Fonts licence, exactly as gpu/third_party/fonts/LICENSE-DejaVu.txt states it. Not the SIL OFL.",
-    "LicenseRef-Bundled-Libraries": "Libraries psport links from Nix (the Linux bundle's lib/) or from MSYS2 CLANG64 (the Windows bundle's DLLs), and packages compiled into its binaries. Each keeps its own licence; packaging/licences.nix and tools/win32-bundle.sh write them, with their licence texts and source URLs, into the THIRD-PARTY-NOTICES and SOURCES.txt of every bundle. Nothing under the Apache-2.0 or GPL-3.0-only is allowed in a bundle (tools/check_bundle_licences.sh).",
-    "LicenseRef-game-patch-authors": "patches/Bloodborne.xml carries patches whose authors are named in their Author attributes: Kyo, auser1337, Lance McDonald (manfightdragon), illusion, emoose, Dasaav, Foxy Hooligans, Imedved, Whitehawkx, bloo, stagvant, yogesh1239 and bbport. No licence is stated for them; each author keeps their rights, and the file is redistributed as it is with their names (owner decision, kb #1131)."
+    "LicenseRef-Bundled-Libraries": "Libraries psport links from Nix (the Linux bundle's lib/) or from MSYS2 CLANG64 (the Windows bundle's DLLs), and packages compiled into its binaries. Each keeps its own licence; packaging/licences.nix and tools/win32-bundle.sh write them, with their licence texts and source URLs, into the THIRD-PARTY-NOTICES and SOURCES.txt of every bundle. Nothing under the Apache-2.0 or GPL-3.0-only is allowed in a bundle (tools/check_bundle_licences.sh)."
   },
   "components": [
     {
@@ -28,6 +27,7 @@
         "CMakeLists.txt",
         "build.sh",
         "run.sh",
+        "patches/README",
         "launcher",
         "scripts/online.py",
         "scripts/sce_file.py",
@@ -253,15 +253,6 @@
       "license": "MIT",
       "review": "reviewed",
       "provenance": "README.md of the folder: 'ss_info_template.xml is his [fhody125's] file with the shadnet address left as a placeholder' (NoDreamForHunter's real_ss_info.txt, https://github.com/fhody125-web/NoDreamForHunter at 0786f69dc890e021e8352bfa7561e8234f37a0bb, the server list Bloodborne fetches). MIT, Copyright (c) 2026 fhody125-web (LICENSE.NoDreamForHunter). The template is served to the game as it is, so its licence is in ss_info_template.xml.license instead of a comment."
-    },
-    {
-      "name": "Bloodborne game patches",
-      "paths": [
-        "patches"
-      ],
-      "license": "LicenseRef-game-patch-authors",
-      "review": "reviewed",
-      "provenance": "patches/Bloodborne.xml, from the community (README.md credits Kyo, Lance McDonald, auser1337, illusion, emoose and others). The Author attributes name Kyo, auser1337, Lance McDonald (manfightdragon), illusion, emoose, Dasaav, Foxy Hooligans, Imedved, Whitehawkx, bloo, stagvant, yogesh1239 and bbport. No licence or permission is stated in the file or the repository; each author keeps their rights in their patches. Kept and redistributed as it is, with the authors' names, by the owner's decision (kb #1131): reviewed as it is, not relicensed."
     },
     {
       "name": "dxil-spirv patch",

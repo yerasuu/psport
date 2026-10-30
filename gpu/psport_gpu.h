@@ -149,7 +149,7 @@ typedef struct {
     const char *sz_game_dir;   /* the folder loaded (the mods' view when mods are on) */
     const char *sz_serial;     /* param.sfo TITLE_ID and APP_VER, "" when absent */
     const char *sz_version;
-    const char *sz_patch_file; /* the title's own patch file, resolved; NULL without one */
+    const char *sz_patch_file; /* the title's built-in patch file, resolved; NULL without one or when not found */
     /* The SHA-256 of eboot.bin's loadable segments at their addresses, the same whatever tool
      * dumped the game; read from the folder on each call. */
     void (*pfn_eboot_sha256)(const char *sz_game_dir, unsigned char *p_out_digest);
@@ -198,8 +198,9 @@ typedef struct {
      * added by src/loader/loader_mods.c). */
     const char *const *pp_mod_folders;
     size_t c_mod_folders;
-    /* Its own patch file (shadPS4 XML), relative to psport's folder (the one holding out/ or bin/).
-     * External patch folders leave it out. */
+    /* Its built-in patch file (shadPS4 XML): its file name in the launcher's built-in patch folder
+     * (--builtin-patches-dir, PS_BUILTIN_PATCHES_DIR), relative to psport's folder (the one holding
+     * out/ or bin/) without one. External patch folders leave it out. */
     const char *sz_patch_file;
     /* 1 when it has its own frame rate and resolution presets (pfn_add_patches): only such a title
      * takes run.sh's scaled output path and its larger direct memory. */

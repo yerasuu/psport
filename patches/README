@@ -1,0 +1,7 @@
+This folder marks psport's own folder (the one run.sh, scripts/ and out/ or bin/ sit in): psport
+finds its install folder as the nearest folder above its executable holding patches/.
+
+A title's built-in patch file (Bloodborne.xml) is not kept here: the launcher ships it and hands
+psport its folder with --builtin-patches-dir or PS_BUILTIN_PATCHES_DIR. Without that folder psport
+still looks here, for older layouts; when the file is in neither place, the title's built-in
+patches are skipped and the log says so.

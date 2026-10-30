@@ -44,7 +44,6 @@ verifies that it matches the tree. File notices remain authoritative.
 | DLSS bridge | `gpu/dlss_bridge` | MIT | Copyright (c) 2026 IFreemz and bbport contributors: IFreemz's bridge as Supermedo adapted it in his Windows fork of bbport (`9514b19`); NVIDIA's DLSS SDK is not included |
 | dxil-spirv patch | `tools/fsr4cap/dxil-spirv-class-bindings.patch` | MIT AND GPL-2.0-or-later | MIT: dxil-spirv's `dxil_spirv.cpp`; GPL-2.0-or-later: bbport's added lines |
 | FFmpeg recipe for Windows | `packaging/windows/ffmpeg` | BSD-3-Clause AND GPL-2.0-or-later | BSD-3-Clause: MSYS2's MINGW-packages (`LICENSE.MINGW-packages`); GPL-2.0-or-later: psport's changes |
-| Bloodborne patches | `patches` | none stated | community authors named in each patch; each author keeps their rights; kept as it is (kb #1131) |
 
 ### Third-party code and fonts
 
@@ -133,7 +132,8 @@ distributes it.
   the source files it lists under the MIT licence, and every 2.3 file psport carries is on that list (LICENSES.json).
   A file imported from 2.3 later must be on it too (`UPSTREAM.md`). Do not describe the experimental source-v07 provider as AMD FSR 4.1.1, Ray
   Regeneration or ML Frame Generation (`NOTICE.md`).
-- Credits for the projects psport builds on and for the community patches are in README.md.
+- Credits for the projects psport builds on and for the community Bloodborne patches are in README.md; the
+  patches now ship with decanter (`crates/ps/data/bloodborne/Bloodborne.xml`), not in psport.
 
 ## Release contents
 

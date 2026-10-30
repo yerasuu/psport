@@ -236,6 +236,10 @@ elif [[ -n ${scaled_output:-} ]]; then
 fi
 # Third-party shadPS4/GoldHEN XML patches for the game, selected in patches.json (src/loader/loader_patches.c).
 patch_args=(--patches-dir "${PS_PATCHES_DIR:-$data/patches}" --patches-config "${PS_PATCHES_CONFIG:-$data/patches.json}")
+# The title's built-in patch file (Bloodborne.xml) comes from the launcher's folder.
+if [[ -n ${PS_BUILTIN_PATCHES_DIR:-} ]]; then
+    patch_args+=(--builtin-patches-dir "$PS_BUILTIN_PATCHES_DIR")
+fi
 # The GPU uses the game's memory where it is (GPU-visible system memory) and keeps the data it reads
 # often in VRAM, as a PC release would; the command processor's work is translated rather than
 # emulated. A GPU that binds sparse buffers fast keeps the game's memory in a sparse arena; others,

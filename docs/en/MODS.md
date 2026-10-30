@@ -106,7 +106,7 @@ comes from the file's `isEnabled`; the launcher's choice is saved in the data di
 Supported lines: `bytes`, `bytes16/32/64`, `float32/64`, `utf8`, `utf16`. A patch with `mask`
 lines (pattern search) or with an address outside the eboot is skipped whole, with a message in
 the log. Third-party patches are applied after the game profile's own (for Bloodborne its presets
-from `patches/Bloodborne.xml`, `gpu/games/bloodborne/patches.cpp`): where they overlap, the
+from `Bloodborne.xml` in `PS_BUILTIN_PATCHES_DIR`, `gpu/games/bloodborne/patches.cpp`): where they overlap, the
 third-party one wins. From a terminal:
 `PS_PATCHES_DIR=/path PS_PATCHES_CONFIG=/path/patches.json bash run.sh`.
 

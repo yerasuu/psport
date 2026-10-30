@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Bloodborne's part of the launch (Game::Title): its frame rate presets and the community
-// patches the player's settings choose (patches/Bloodborne.xml, app version 01.09), and the check
-// that the game folder holds the one executable they and the profile's hooks are written for.
+// patches the player's settings choose (Bloodborne.xml, app version 01.09, shipped by the
+// launcher), and the check that the game folder holds the one executable they and the profile's
+// hooks are written for.
 #pragma once
 
 #include <string>
 #include "../../psport_gpu.h"
 
 namespace PsLaunch {
-/// The XML the presets come from, relative to psport's folder.
+/// The XML the presets come from: its name in the launcher's built-in patch folder, this path in
+/// psport's folder without one.
 inline constexpr const char* PatchFile = "patches/Bloodborne.xml";
 /// PS_VBLANK_HZ for the PS_FPS preset, unless it is set.
 void PrepareEnvironment();

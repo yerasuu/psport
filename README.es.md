@@ -244,7 +244,7 @@ su registro y su informe de llamadas, implementar lo que falta y comprobar el re
 | `gpu/` | biblioteca de GPU: núcleo de vídeo de shadPS4 con los cambios de bbport ([gpu/VENDOR.txt](gpu/VENDOR.txt)), decodificador PM4 (`cp/`), módulo de memoria (`layer/`), bibliotecas portadas (`fiber/`, `font/`, `pngenc/`, `pngdec/`, `jpegdec/`), libSceNgs2 (`ngs2/`), libSceAudiodec (`audiodec/`), perfiles de juego (`games/`), menú superpuesto y menú del juego (`port/`), puente DLSS, módulo en línea (`net/`) |
 | `scripts/` | `online.py` (direcciones en línea para `PS_ONLINE=1`) y `sce_file.py` para las herramientas en Python |
 | `launcher/`, `packaging/` | el lanzador GTK4 de bbport; paquete de Nix y script de AppImage |
-| `patches/` | parches de la comunidad para Bloodborne |
+| `patches/` | marca la carpeta de psport; el archivo de parches propio de un juego lo da el lanzador (`PS_BUILTIN_PATCHES_DIR`) |
 | `tools/` | ejecuciones de regresión, desensamblador GCN, herramientas de FSR 4, utilidades para ejecuciones guionizadas, paquete de versión |
 | `docs/` | `docs/en/` (arquitectura, poner en marcha un juego, notas de funciones, historial de bbport en inglés), `docs/ru/` (los originales en ruso de bbport) |
 
@@ -317,7 +317,9 @@ código fuente enlaza las mismas bibliotecas desde el sistema o el entorno de Ni
 ### Comunidad
 
 Parches de Bloodborne de Kyo, Lance McDonald, auser1337, illusion, emoose y otros miembros de la
-comunidad (`patches/Bloodborne.xml`).
+comunidad. Ahora se distribuyen con decanter (`crates/ps/data/bloodborne/Bloodborne.xml`), no con
+psport, que los lee de la carpeta que le da el lanzador (`--builtin-patches-dir`,
+`PS_BUILTIN_PATCHES_DIR`).
 
 ### Lo que no se distribuye
 

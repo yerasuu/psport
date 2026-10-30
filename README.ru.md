@@ -239,7 +239,7 @@ gamescope без окна, без звука и без контроллеров 
 | `gpu/` | библиотека видеочипа: видеоядро shadPS4 с изменениями bbport ([gpu/VENDOR.txt](gpu/VENDOR.txt)), декодер PM4 (`cp/`), модуль памяти (`layer/`), перенесённые библиотеки (`fiber/`, `font/`, `pngenc/`, `pngdec/`, `jpegdec/`), libSceNgs2 (`ngs2/`), libSceAudiodec (`audiodec/`), профили игр (`games/`), оверлей и внутриигровое меню (`port/`), мост DLSS, сетевой модуль (`net/`) |
 | `scripts/` | `online.py` (сетевые адреса для `PS_ONLINE=1`) и `sce_file.py` для инструментов на Python |
 | `launcher/`, `packaging/` | лаунчер bbport на GTK4; пакет Nix и скрипт AppImage |
-| `patches/` | патчи сообщества для Bloodborne |
+| `patches/` | отмечает папку psport; собственный файл патчей игры передаёт лаунчер (`PS_BUILTIN_PATCHES_DIR`) |
 | `tools/` | регрессионные прогоны, дизассемблер GCN, инструменты FSR 4, помощники сценарных прогонов, архив релиза |
 | `docs/` | `docs/en/` (архитектура, запуск новой игры, заметки о возможностях, история bbport на английском), `docs/ru/` (русские оригиналы bbport) |
 
@@ -311,8 +311,9 @@ Supermedo, Mrsuss60, willl03 и AnyPS5), подробно описаны в [LIC
 
 ### Сообщество
 
-Патчи Bloodborne от Kyo, Lance McDonald, auser1337, illusion, emoose и других участников сообщества
-(`patches/Bloodborne.xml`).
+Патчи Bloodborne от Kyo, Lance McDonald, auser1337, illusion, emoose и других участников сообщества.
+Теперь они поставляются с decanter (`crates/ps/data/bloodborne/Bloodborne.xml`), а не с psport,
+который читает их из папки, переданной лаунчером (`--builtin-patches-dir`, `PS_BUILTIN_PATCHES_DIR`).
 
 ### Что не распространяется
 

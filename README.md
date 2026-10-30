@@ -235,7 +235,7 @@ its log and call report, implementing what is missing and checking the result.
 | `gpu/` | GPU library: shadPS4 video core with bbport's changes ([gpu/VENDOR.txt](gpu/VENDOR.txt)), PM4 decoder (`cp/`), memory module (`layer/`), ported libraries (`fiber/`, `font/`, `pngenc/`, `pngdec/`, `jpegdec/`), libSceNgs2 (`ngs2/`), libSceAudiodec (`audiodec/`), game profiles (`games/`), overlay and in-game menu (`port/`), DLSS bridge, online module (`net/`) |
 | `scripts/` | `online.py` (online addresses for `PS_ONLINE=1`) and `sce_file.py` for the Python tools |
 | `launcher/`, `packaging/` | bbport's GTK4 launcher; Nix package and AppImage script |
-| `patches/` | community patches for Bloodborne |
+| `patches/` | marks psport's folder; a title's built-in patch file comes from the launcher (`PS_BUILTIN_PATCHES_DIR`) |
 | `tools/` | regression runs, GCN disassembler, FSR 4 tools, scripted-run helpers, release bundle |
 | `docs/` | `docs/en/` (architecture, bringing up a title, feature notes, bbport's history in English), `docs/ru/` (bbport's Russian originals) |
 
@@ -305,8 +305,9 @@ shell (`shell.nix`).
 
 ### Community
 
-Bloodborne patches by Kyo, Lance McDonald, auser1337, illusion, emoose and other community members
-(`patches/Bloodborne.xml`).
+Bloodborne patches by Kyo, Lance McDonald, auser1337, illusion, emoose and other community members.
+They now ship with decanter (`crates/ps/data/bloodborne/Bloodborne.xml`), not in psport, which reads
+them from the folder the launcher gives (`--builtin-patches-dir`, `PS_BUILTIN_PATCHES_DIR`).
 
 ### Not distributed
 
