@@ -39,6 +39,11 @@ public:
     static void BeginPass(const VideoCore::ImageInfo* const* pp_colors, u32 c_colors,
                           const VideoCore::ImageInfo* p_depth);
     static void Draw(u64 vs_hash, u64 ps_hash, u32 c_indices, u32 c_instances);
+    /// After Draw: the draw's depth and stencil state, accumulated over the pass.
+    static void DepthUse(bool is_test, bool is_write, bool is_stencil);
+    /// A copy between depth surfaces outside any pass (DB override copy), kept in order.
+    static void DepthCopy(const VideoCore::ImageInfo& src, const VideoCore::ImageInfo& dst,
+                          bool is_depth, bool is_stencil);
     static void Dispatch(u64 cs_hash, u32 x, u32 y, u32 z);
     static void Sampled(const VideoCore::ImageInfo& info, bool is_storage);
     /// Contents of a bound buffer (first 1 KiB), kept for small passes and a pass's first draw.

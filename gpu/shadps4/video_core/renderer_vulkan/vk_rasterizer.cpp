@@ -2106,6 +2106,9 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
     if (FrameCapture::Active()) {
         const auto* ps = pipeline->GetStages()[u32(Shader::SwStage::Fragment)];
         FrameCapture::Draw(vs_info.pgm_hash, ps ? ps->pgm_hash : 0, num_indices, num_instances);
+        FrameCapture::DepthUse(regs.depth_control.depth_enable,
+                               regs.depth_control.depth_enable && regs.depth_control.depth_write_enable,
+                               regs.depth_control.stencil_enable);
         if (const auto& bc = regs.blend_control[0]; bc.enable && regs.color_buffers[0]) {
             char note[128];
             std::snprintf(note, sizeof(note), "\n  blend ps %08x idx %u: src %u dst %u func %u z %u%u",
@@ -4709,6 +4712,10 @@ void Rasterizer::DepthStencilCopy(bool is_depth, bool is_stencil) {
     const auto read_id = texture_cache.FindImage(read_desc);
     const auto write_id = texture_cache.FindImage(write_desc);
     if (!read_id || !write_id) {
+        LOG_ERROR_COUNTED(Render_Vulkan,
+                          "Depth/stencil override copy {:#x} -> {:#x} skipped: no {} image",
+                          read_desc.info.guest_address, write_desc.info.guest_address,
+                          read_id ? "destination" : "source");
         return;
     }
     // The copy destination is never bound as a target, so its stencil plane is linked here.
@@ -4723,8 +4730,33 @@ void Rasterizer::DepthStencilCopy(bool is_depth, bool is_stencil) {
 
     // psport: fetched last because FindImage and AssociateStencil may create images and move
     // the earlier ones.
-    runtime.CopyDepthStencil(&texture_cache.GetImage(read_id), &texture_cache.GetImage(write_id),
-                             sub_range);
+    auto& read_image = texture_cache.GetImage(read_id);
+    auto& write_image = texture_cache.GetImage(write_id);
+    runtime.CopyDepthStencil(&read_image, &write_image, sub_range);
+
+    // Games sample this copy of the depth (decompress to copy), never the depth target itself,
+    // so which copies run and when decides what a later pass reads (kb #1268).
+    static std::atomic<u64> s_c_copies;
+    const u64 c_copies = s_c_copies.fetch_add(1, std::memory_order_relaxed) + 1;
+    if (c_copies <= 16 || (c_copies & (c_copies - 1)) == 0) {
+        std::printf("GPU: depth/stencil override copies so far: %llu, last %s%s DR %#llx SR %#llx "
+                    "-> DW %#llx SW %#llx, images %#llx %ux%u %s -> %#llx %ux%u %s\n",
+                    static_cast<unsigned long long>(c_copies), is_depth ? "depth" : "",
+                    is_stencil ? (is_depth ? "+stencil" : "stencil") : "",
+                    static_cast<unsigned long long>(regs.depth_buffer.DepthAddress()),
+                    static_cast<unsigned long long>(regs.depth_buffer.StencilAddress()),
+                    static_cast<unsigned long long>(regs.depth_buffer.DepthWriteAddress()),
+                    static_cast<unsigned long long>(regs.depth_buffer.StencilWriteAddress()),
+                    static_cast<unsigned long long>(read_image.info.guest_address),
+                    read_image.info.size.width, read_image.info.size.height,
+                    vk::to_string(read_image.info.pixel_format).c_str(),
+                    static_cast<unsigned long long>(write_image.info.guest_address),
+                    write_image.info.size.width, write_image.info.size.height,
+                    vk::to_string(write_image.info.pixel_format).c_str());
+    }
+    if (FrameCapture::Active()) {
+        FrameCapture::DepthCopy(read_image.info, write_image.info, is_depth, is_stencil);
+    }
 
     ScopeMarkerEnd();
 }

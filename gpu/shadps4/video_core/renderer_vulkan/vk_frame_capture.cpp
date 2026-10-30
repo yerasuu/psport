@@ -22,10 +22,15 @@ struct Target {
     bool operator==(const Target&) const = default;
 };
 
+enum DepthUseBits : u32 { DepthTest = 1, DepthWrite = 2, StencilTest = 4 };
+
 struct Entry {
     bool is_compute{};
+    bool is_copy{};
     std::vector<Target> colors;
     Target depth;
+    u32 depth_use{}; ///< DepthUseBits over the pass's draws; for a copy, depth and stencil moved
+    Target copy_dst;
     u32 draws{};
     u64 indices{};
     std::vector<u64> shaders; ///< vs/ps pairs (graphics) or cs (compute), first few
@@ -95,6 +100,13 @@ void Write(VAddr presented) {
     std::fprintf(p_file, "presented buffer %#llx\n", static_cast<unsigned long long>(presented));
     u32 i_file = 0;
     for (const auto& e : s_entries) {
+        if (e.is_copy) {
+            std::fprintf(p_file, "\n#%u DEPTH COPY%s%s\n  from %s\n  to   %s\n", i_file++,
+                         (e.depth_use & DepthTest) ? " depth" : "",
+                         (e.depth_use & StencilTest) ? " stencil" : "", Describe(e.depth).c_str(),
+                         Describe(e.copy_dst).c_str());
+            continue;
+        }
         if (e.is_compute) {
             std::fprintf(p_file, "\n#%u COMPUTE dispatches %u, cs", i_file++, e.draws);
         } else {
@@ -109,7 +121,10 @@ void Write(VAddr presented) {
             std::fprintf(p_file, "  color%zu %s\n", i, Describe(e.colors[i]).c_str());
         }
         if (!e.is_compute) {
-            std::fprintf(p_file, "  depth  %s\n", Describe(e.depth).c_str());
+            std::fprintf(p_file, "  depth  %s%s%s%s\n", Describe(e.depth).c_str(),
+                         (e.depth_use & DepthTest) ? " test" : "",
+                         (e.depth_use & DepthWrite) ? " write" : "",
+                         (e.depth_use & StencilTest) ? " stencil" : "");
         }
         for (const auto& [t, storage] : e.sampled) {
             std::fprintf(p_file, "  %s %s\n", storage ? "writes " : "samples", Describe(t).c_str());
@@ -214,7 +229,7 @@ void FrameCapture::BeginPass(const VideoCore::ImageInfo* const* pp_colors, u32 c
 
 void FrameCapture::Draw(u64 vs_hash, u64 ps_hash, u32 c_indices, u32 c_instances) {
     if (m_state.load(std::memory_order_relaxed) != Recording || s_entries.empty() ||
-        s_entries.back().is_compute) {
+        s_entries.back().is_compute || s_entries.back().is_copy) {
         return;
     }
     auto& e = s_entries.back();
@@ -224,6 +239,27 @@ void FrameCapture::Draw(u64 vs_hash, u64 ps_hash, u32 c_indices, u32 c_instances
     AddShader(e, ps_hash);
     AddSampled(e);
     AddBuffers(e);
+}
+
+void FrameCapture::DepthUse(bool is_test, bool is_write, bool is_stencil) {
+    if (m_state.load(std::memory_order_relaxed) != Recording || s_entries.empty() ||
+        s_entries.back().is_compute || s_entries.back().is_copy) {
+        return;
+    }
+    s_entries.back().depth_use |=
+        (is_test ? DepthTest : 0u) | (is_write ? DepthWrite : 0u) | (is_stencil ? StencilTest : 0u);
+}
+
+void FrameCapture::DepthCopy(const VideoCore::ImageInfo& src, const VideoCore::ImageInfo& dst,
+                             bool is_depth, bool is_stencil) {
+    if (m_state.load(std::memory_order_relaxed) != Recording) {
+        return;
+    }
+    s_entries.push_back({.is_copy = true,
+                         .depth = ToTarget(src),
+                         .depth_use = (is_depth ? DepthTest : 0u) | (is_stencil ? StencilTest : 0u),
+                         .copy_dst = ToTarget(dst)});
+    s_is_pass_open = false;
 }
 
 void FrameCapture::Dispatch(u64 cs_hash, u32 x, u32 y, u32 z) {
