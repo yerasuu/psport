@@ -805,12 +805,15 @@ namespace {
 // and texture-set memos reuse a resolution until an image is registered or unregistered.
 // The stencil plane has its own base (DB_STENCIL_READ_BASE) and is read as an 8-bit uint T# with
 // a depth tile mode; it lives only in the depth image's stencil aspect.
+// A colour-tiled T# at another base that only overlaps a depth image's memory is not a depth read:
+// it is a colour target sharing a pool with the depth surface, and its own image is the right one.
 struct DepthSurfaceReads {
-    std::atomic<u64> c_live{0};         ///< resolved to the depth image (depth-aspect view)
-    std::atomic<u64> c_stencil{0};      ///< resolved to the depth image (stencil-aspect view)
-    std::atomic<u64> c_other_image{0};  ///< a depth image overlapped, another image was bound
-    std::atomic<u64> c_guest_memory{0}; ///< depth-tiled T#, no depth image: made from guest memory
-    std::atomic<u64> c_cached_color{0}; ///< depth-tiled T#, no depth image: a colour image
+    std::atomic<u64> c_live{0};          ///< resolved to the depth image (depth-aspect view)
+    std::atomic<u64> c_stencil{0};       ///< resolved to the depth image (stencil-aspect view)
+    std::atomic<u64> c_other_image{0};   ///< a depth image overlapped, another image was bound
+    std::atomic<u64> c_shared_memory{0}; ///< colour-tiled T# at another base over a depth image
+    std::atomic<u64> c_guest_memory{0};  ///< depth-tiled T#, no depth image: made from guest memory
+    std::atomic<u64> c_cached_color{0};  ///< depth-tiled T#, no depth image: a colour image
     std::atomic<u32> c_printed{0};
 };
 DepthSurfaceReads s_depth_reads;
@@ -830,12 +833,13 @@ void SummarizeDepthSurfaceReads(char* sz_out, std::size_t cb_out) {
         "Texture cache: depth surfaces read as textures: %llu resolutions to the live depth image, "
         "%llu bound to the live stencil plane, %llu to another image over a depth image, %llu "
         "depth-tiled reads made from guest memory and %llu bound to a colour image, without a "
-        "depth image\n",
+        "depth image; %llu colour textures sharing memory with a depth image\n",
         (unsigned long long)s_depth_reads.c_live.load(std::memory_order_relaxed),
         (unsigned long long)s_depth_reads.c_stencil.load(std::memory_order_relaxed),
         (unsigned long long)s_depth_reads.c_other_image.load(std::memory_order_relaxed),
         (unsigned long long)s_depth_reads.c_guest_memory.load(std::memory_order_relaxed),
-        (unsigned long long)s_depth_reads.c_cached_color.load(std::memory_order_relaxed));
+        (unsigned long long)s_depth_reads.c_cached_color.load(std::memory_order_relaxed),
+        (unsigned long long)s_depth_reads.c_shared_memory.load(std::memory_order_relaxed));
 }
 
 bool IsDepthTileMode(AmdGpu::TileMode tile_mode) {
@@ -858,6 +862,10 @@ void NoteDepthSurfaceRead(const ImageInfo& info, TextureCache::BindingType bindi
     } else if (image.info.props.is_depth) {
         sz_outcome = "live depth image";
         c_outcome = s_depth_reads.c_live.fetch_add(1, std::memory_order_relaxed) + 1;
+    } else if (depth.is_found && info.guest_address != depth.va_image &&
+               !IsDepthTileMode(info.tile_mode)) {
+        sz_outcome = "colour texture sharing memory with a depth image";
+        c_outcome = s_depth_reads.c_shared_memory.fetch_add(1, std::memory_order_relaxed) + 1;
     } else if (depth.is_found) {
         sz_outcome = "another image, stale";
         c_outcome = s_depth_reads.c_other_image.fetch_add(1, std::memory_order_relaxed) + 1;
@@ -882,7 +890,8 @@ void NoteDepthSurfaceRead(const ImageInfo& info, TextureCache::BindingType bindi
         return;
     }
     std::printf("Texture cache: depth surface read as a %s, %s (%llu so far): T# %#llx %ux%u %s "
-                "tile %u mips %u layers %u; depth image %#llx %ux%u %s%s; bound %#llx %ux%u %s\n",
+                "tile %u mips %u layers %u; depth image %#llx %ux%u %s%s; bound %#llx %ux%u "
+                "%s%s%s\n",
                 binding == TextureCache::BindingType::Storage ? "storage image" : "texture",
                 sz_outcome, (unsigned long long)c_outcome,
                 (unsigned long long)info.guest_address, info.size.width, info.size.height,
@@ -893,7 +902,9 @@ void NoteDepthSurfaceRead(const ImageInfo& info, TextureCache::BindingType bindi
                 : depth.is_gpu_written ? " (GPU-written)"
                                        : " (not GPU-written)",
                 (unsigned long long)image.info.guest_address, image.info.size.width,
-                image.info.size.height, vk::to_string(image.info.pixel_format).c_str());
+                image.info.size.height, vk::to_string(image.info.pixel_format).c_str(),
+                True(image.flags & ImageFlagBits::GpuModified) ? " (GPU-written)" : "",
+                is_created ? " (new)" : "");
 }
 
 } // namespace
