@@ -6,6 +6,9 @@
 # user's) nothing happens and it exits with 1; FORCE_RESTART=1 closes that one too.
 cd -- "$(dirname -- "$0")/.."
 T=tools
+source tools/builtin_patches.sh
+resolve_builtin_patches "$PWD" restart
+echo "$BUILTIN_PATCHES_NOTE" >&2
 own=$(cat out/tools_game.pid 2>/dev/null)
 for pid in $(pgrep -x psport); do
     if [[ $pid != "$own" ]]; then

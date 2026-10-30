@@ -7,6 +7,9 @@ cd "$(dirname "$0")/.."
 mode=${1:?usage: tools/play_ab.sh MODE [ENV=VALUE...]}
 shift
 env_args=("$@")
+source tools/builtin_patches.sh
+resolve_builtin_patches "$PWD" play_ab
+echo "$BUILTIN_PATCHES_NOTE" >&2
 base=out/ab_${mode}_$(date +%m%d_%H%M%S)
 echo "Log: $base.log"
 env PS_FRAME_LOG="$PWD/$base.frames.csv" PS_FRAME_STATS=1 \

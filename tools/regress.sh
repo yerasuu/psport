@@ -14,6 +14,9 @@
 #               as decanter's bbport.nix); without it, run.sh as it is
 #   -u EARLIER  start each title's user folder (saves, settings) as a copy of its folder in the
 #               EARLIER output folder, to load in this run what that one saved
+# PS_DECANTER_DIR: a decanter checkout; PS_BUILTIN_PATCHES_DIR defaults to its
+#   crates/ps/data/bloodborne (then ~/Projects/dev/decanter's and ../decanter's) when it holds
+#   Bloodborne.xml. An explicit PS_BUILTIN_PATCHES_DIR wins; its value is recorded in run.tsv.
 # Variables the titles file refers to ($SYS_MODULES...) come from the environment; an entry whose
 # variable is empty is left out, so nothing user-specific lives in the repository.
 # Uses the build in out/ (PS_PREBUILT=1): build.sh first.
@@ -28,13 +31,16 @@ while getopts 'j:o:c:t:n:s:u:' opt; do
 done
 shift $((OPTIND - 1))
 [[ $jobs =~ ^[1-9][0-9]*$ ]] || { echo "regress.sh: -j needs a positive integer" >&2; exit 2; }
-(($# == 1)) || { sed -n '2,18p' "$0" | cut -c3-; exit 2; }
+(($# == 1)) || { sed -n '2,21p' "$0" | cut -c3-; exit 2; }
 games=$(realpath -- "$1")
 [[ -x $root/out/psport ]] || { echo "regress.sh: no out/psport (run build.sh)" >&2; exit 1; }
 printf -v stamp '%(%Y%m%d_%H%M%S)T' -1
 out=$(realpath -m -- "${out:-$root/out/regress/$stamp}")
 mkdir -p "$out"
 sched_dir=$(dirname -- "$(realpath -- "$titles")")
+source "$root/tools/builtin_patches.sh"
+resolve_builtin_patches "$root" regress
+echo "$BUILTIN_PATCHES_NOTE" >&2
 launch=(bash run.sh)
 if [[ -n $shell_file ]]; then
     nix_shell=$(command -v nix-shell || echo /nix/var/nix/profiles/default/bin/nix-shell)
@@ -73,7 +79,8 @@ run_title() {
     local dir=$out/$name
     rm -rf -- "$dir"; mkdir -p "$dir/shots"; : > "$dir/pad"
     [[ -n $seed && -d $seed/$name/user ]] && cp -a -- "$seed/$name/user" "$dir/user"
-    printf 'name\t%s\ntitle\t%s\ngame\t%s\nschedule\t%s\n' "$name" "$title" "$game" "$schedule" > "$dir/run.tsv"
+    printf 'name\t%s\ntitle\t%s\ngame\t%s\nschedule\t%s\nbuiltin_patches_dir\t%s\n' \
+        "$name" "$title" "$game" "$schedule" "${PS_BUILTIN_PATCHES_DIR:-none}" > "$dir/run.tsv"
     # Inside a headless gamescope (its own X display, no window) and without the desktop's display
     # variables, with PS_AUDIO=none and PS_PAD_HOST=0 last so a title's env can't turn sound or the
     # user's controllers back on: a run never shows anything, plays sound or reads a pad on the
