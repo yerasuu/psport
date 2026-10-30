@@ -33,6 +33,9 @@ typedef struct NpKernelMemory {
     uint64_t reserved;
     void *p_memory;
 } NpKernelMemory;
+typedef struct NpHeapStat {
+    uint64_t cb_pool, cb_max_in_use, cb_in_use;
+} NpHeapStat;
 typedef struct NpAllocator {
     void *(ABI *pfn_malloc)(uint64_t cb_block, void *p_user);
     void *(ABI *pfn_realloc)(void *p_block, uint64_t cb_block, void *p_user);
@@ -48,7 +51,7 @@ typedef struct HeapBlock {
 } HeapBlock;
 typedef struct Heap {
     uintptr_t va_base;
-    uint64_t cb_heap, cb_live;
+    uint64_t cb_heap, cb_live, cb_max_live;
     HeapBlock *p_blocks;
     size_t c_blocks, c_block_capacity;
     char sz_name[CB_NAME];
@@ -161,6 +164,7 @@ static void *heap_allocate_locked(Heap *p_heap, uint64_t cb_request) {
         HeapBlock *p_block = &p_heap->p_blocks[i_block];
         p_block->is_used = true;
         p_heap->cb_live += p_block->cb_block;
+        if (p_heap->cb_live > p_heap->cb_max_live) p_heap->cb_max_live = p_heap->cb_live;
         __atomic_add_fetch(&s_cb_live, p_block->cb_block, __ATOMIC_RELAXED);
         return (void *)(p_heap->va_base + p_block->off_block);
     }
@@ -269,6 +273,7 @@ static ABI void *heap_realloc(void *p_block, uint64_t cb_request, void *p_user) 
         if (p_result) {
             const uint64_t cb_new = p_heap->p_blocks[i_block].cb_block;
             p_heap->cb_live = p_heap->cb_live - cb_old + cb_new;
+            if (p_heap->cb_live > p_heap->cb_max_live) p_heap->cb_max_live = p_heap->cb_live;
             if (cb_new >= cb_old) __atomic_add_fetch(&s_cb_live, cb_new - cb_old, __ATOMIC_RELAXED);
             else __atomic_sub_fetch(&s_cb_live, cb_old - cb_new, __ATOMIC_RELAXED);
         } else if ((p_result = heap_allocate_locked(p_heap, cb_request))) {
@@ -323,7 +328,7 @@ static ABI int32_t heap_init(uint64_t *p_heap, void *p_base, uint64_t cb_base, c
         if (!p_old->va_base && !p_slot) p_slot = p_old;
     }
     if (p_slot) {
-        *p_slot = (Heap){va_base, cb_heap, 0, p_blocks, 1, 64, {0}};
+        *p_slot = (Heap){va_base, cb_heap, 0, 0, p_blocks, 1, 64, {0}};
         memcpy(p_slot->sz_name, sz_heap_name, sizeof(sz_heap_name));
     }
     pthread_mutex_unlock(&s_heaps_lock);
@@ -371,6 +376,26 @@ static ABI void heap_get_allocator(uint64_t *p_heap, NpAllocator *p_out_allocato
         return;
     }
     *p_out_allocator = (NpAllocator){heap_malloc, heap_realloc, heap_free, p_heap};
+}
+/* The heap-first forms libraries such as libSceNpAuth call directly, over the same mspace. */
+static ABI void *heap_malloc_in(uint64_t *p_heap, uint64_t cb_request) { return heap_malloc(cb_request, p_heap); }
+static ABI void *heap_realloc_in(uint64_t *p_heap, void *p_block, uint64_t cb_request) {
+    return heap_realloc(p_block, cb_request, p_heap);
+}
+static ABI void heap_free_in(uint64_t *p_heap, void *p_block) { heap_free(p_block, p_heap); }
+/* The console fills it from sceLibcMspaceMallocStats: the pool is the mspace's maxSystemSize, and
+ * the stat is left untouched when that call fails. */
+static ABI int32_t heap_get_stat(uint64_t *p_heap, NpHeapStat *p_out_stat) {
+    if (!is_guest_range((uintptr_t)p_out_stat, sizeof(*p_out_stat))) {
+        log_failure("sceNpHeapGetStat", "unwritable SceNpHeapStat", (uintptr_t)p_out_stat);
+        return NP_COMMON_INVALID_ARGUMENT;
+    }
+    Heap *p_found = lock_heap_of("sceNpHeapGetStat", p_heap);
+    if (!p_found) return NP_COMMON_INVALID_ARGUMENT;
+    const NpHeapStat stat = {p_found->cb_heap, p_found->cb_max_live, p_found->cb_live};
+    pthread_mutex_unlock(&s_heaps_lock);
+    *p_out_stat = stat;
+    return 0;
 }
 
 static int32_t allocate_kernel_memory(const char *sz_call, uint64_t cb_memory, const char *sz_name, void **pp_out_memory,
@@ -480,6 +505,8 @@ static const RuntimeExport s_exports[] = {
     {"sceNpAllocateKernelMemoryNoAlignment", allocate_kernel_memory_unaligned},
     {"sceNpFreeKernelMemory", free_kernel_memory},
     {"sceNpHeapInit", heap_init}, {"sceNpHeapDestroy", heap_destroy}, {"sceNpHeapGetAllocator", heap_get_allocator},
+    {"_sceNpHeapMalloc", heap_malloc_in}, {"_sceNpHeapRealloc", heap_realloc_in}, {"_sceNpHeapFree", heap_free_in},
+    {"sceNpHeapGetStat", heap_get_stat},
     {"_ZN3sce2np6ObjectnwEmR14SceNpAllocator", object_new}, {"_ZN3sce2np6ObjectnaEmR14SceNpAllocator", object_new},
     {"_ZN3sce2np6ObjectdlEPv", object_delete}, {"_ZN3sce2np6ObjectdaEPv", object_delete},
     {"_ZN3sce2np6ObjectdlEPvR14SceNpAllocator", object_delete_placed},
