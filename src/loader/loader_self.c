@@ -4,6 +4,7 @@
  * before use. Decrypted dumps only: an encrypted or compressed SELF segment is an error. */
 #define _GNU_SOURCE
 #include "loader.h"
+#include "runtime.h"
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -33,7 +34,7 @@ void loader_fail(const char *sz_format, ...) {
     vfprintf(stderr, sz_format, args);
     fputc('\n', stderr);
     va_end(args);
-    exit(1);
+    runtime_exit(1);
 }
 
 unsigned char *loader_read_file(const char *sz_path, size_t *p_size) {

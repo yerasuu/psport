@@ -23,7 +23,7 @@ static uint32_t s_parameters[5];
 static unsigned s_c_queries, s_c_lists;
 void runtime_content_configure(const uint32_t values[5]) {
     if (s_c_refs || s_c_initializations || (values[0]!=1 && values[0]!=3)) {
-        fputs("ERROR: invalid or late content profile\n",stderr); exit(1);
+        fputs("ERROR: invalid or late content profile\n",stderr); runtime_exit(1);
     }
     memcpy(s_parameters,values,sizeof(s_parameters)); s_configured=1;
 }

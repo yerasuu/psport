@@ -26,7 +26,7 @@ int g_has_entered_game;
 int g_is_gpu_enabled;
 int vulkan_smoke(void);
 
-void fail(const char *sz_message) { fprintf(stderr, "ERROR: %s\n", sz_message); exit(1); }
+void fail(const char *sz_message) { fprintf(stderr, "ERROR: %s\n", sz_message); runtime_exit(1); }
 
 /* The game's code was compiled for the PS4's CPU (AMD Jaguar) and runs as it is: AVX, BMI1
  * (andn/bextr/blsr/tzcnt), MOVBE, LZCNT and POPCNT, thousands of each in eboot.bin. A CPU without
@@ -201,7 +201,7 @@ int main(int argc, char **argv) {
     char sz_problem[64], sz_advice[2048];
     if (info.title.pfn_check_files && info.title.pfn_check_files(&info.files,sz_problem,sizeof(sz_problem),sz_advice,sizeof(sz_advice))) {
         fprintf(stderr,"ERROR: Unsupported game files: %s Set PS_SKIP_GAME_CHECK=1 to start anyway.\n",sz_advice);
-        exit(2);
+        runtime_exit(2);
     }
     /* The patches' addresses are eboot.bin's: an executable sceSystemServiceLoadExec started gets
      * none of them. */
@@ -211,7 +211,7 @@ int main(int argc, char **argv) {
         PsPatchServices patch_services;
         loader_patch_services(&patches,&patch_services);
         int own_patches=info.title.pfn_add_patches ? info.title.pfn_add_patches(&info.files,&patch_services) : -1;
-        if (!own_patches) exit(1);
+        if (!own_patches) runtime_exit(1);
         if (sz_patches_dir) {
             LoaderPatchFolder folder=patch_folder(sz_patches_dir,&info);
             loader_patches_external(&patches,&folder,sz_patches_config);
@@ -426,8 +426,5 @@ int main(int argc, char **argv) {
     if (native_libc) runtime_thread_set_stack(p_stack,MAIN_STACK);
     enter_on_stack(g_p_image+entry,p_params,(void *)guest_exit,p_stack+MAIN_STACK-64);
     fputs("ERROR: entry unexpectedly returned\n", stderr);
-    runtime_calls_report();
-    runtime_debug_finish_exit(1);
-    fflush(NULL);
-    ps_host_exit(1);
+    runtime_exit(1);
 }

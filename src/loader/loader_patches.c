@@ -7,6 +7,7 @@
 #define _GNU_SOURCE
 #include "runtime_json_print.h"
 #include "loader.h"
+#include "runtime.h"
 #include "loader_xml.h"
 #include <limits.h>
 #include <math.h>
@@ -443,7 +444,7 @@ void loader_patches_external(PsPatchList *p_list, const LoaderPatchFolder *p_fol
     PsHostStat st;
     if (sz_config && !ps_host_fs_stat(sz_config, &st) && PS_HOST_MODE_IS_REGULAR(st.mode) && !loader_json_lists(sz_config, settings, 2)) {
         fprintf(stderr, "ERROR: Patches: %s is not a JSON object\n", sz_config);
-        exit(1);
+        runtime_exit(1);
     }
     for (size_t i = 0; i < externals.c_items; ++i) {
         const External *p_external = &externals.p_items[i];

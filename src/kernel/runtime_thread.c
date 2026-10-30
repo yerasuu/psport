@@ -150,7 +150,7 @@ static void attach(GuestThread *p_thread) {
     else ++s_c_tls_allocated;
     runtime_exception_unlock(&s_lock);
     if (!p_raw) p_raw=malloc(cb_raw);
-    if (!p_raw) { fputs("Cannot allocate guest TLS\n",stderr); exit(1); }
+    if (!p_raw) { fputs("Cannot allocate guest TLS\n",stderr); runtime_exit(1); }
     p_thread->p_tls_raw=p_raw; p_thread->cb_tls_raw=cb_raw;
     unsigned char *p_block=(unsigned char *)(((uintptr_t)p_raw+63)&~(uintptr_t)63);
     memset(p_block,0,cb_block);
@@ -253,7 +253,7 @@ static void publish(GuestThread *p_thread) {
 GuestThread *runtime_thread_current(void) {
     if (s_p_current) return s_p_current;
     GuestThread *p_thread=new_thread();
-    if (!p_thread) { fputs("Cannot allocate guest thread\n",stderr); exit(1); }
+    if (!p_thread) { fputs("Cannot allocate guest thread\n",stderr); runtime_exit(1); }
     p_thread->host=pthread_self(); p_thread->host_owned=1; p_thread->tid=ps_host_thread_id();
     snprintf(p_thread->name,sizeof(p_thread->name),"host");
     attach(p_thread); record_stack(p_thread); publish(p_thread);

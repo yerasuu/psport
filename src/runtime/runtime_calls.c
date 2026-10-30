@@ -54,7 +54,12 @@ void runtime_calls_configure(const char (*p_names)[128], uint64_t c_names) {
     s_p_unimplemented_calls = calloc(c_names ? c_names : 1, sizeof(*s_p_unimplemented_calls));
     s_p_stub_calls = calloc(c_names ? c_names : 1, sizeof(*s_p_stub_calls));
     s_p_entries = calloc(2 * c_names + FAILURE_SLOTS + HLE_STUB_SLOTS, sizeof(*s_p_entries));
-    if (!s_p_unimplemented_calls || !s_p_stub_calls || !s_p_entries) { fputs("Cannot allocate call counters\n", stderr); exit(1); }
+    if (!s_p_unimplemented_calls || !s_p_stub_calls || !s_p_entries) {
+        free(s_p_entries);
+        s_p_entries = NULL; /* so that runtime_exit's call report does not read the missing counters */
+        fputs("Cannot allocate call counters\n", stderr);
+        runtime_exit(1);
+    }
     atexit(runtime_calls_report);
 }
 

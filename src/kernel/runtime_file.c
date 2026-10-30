@@ -228,7 +228,7 @@ static Listing *list_directory(const char *sz_path) {
             p_listing->p_types=realloc(p_listing->p_types,c_capacity);
         }
         if (cb_names+cb_name>cap_names) { cap_names=(cb_names+cb_name)*2; p_listing->sz_names=realloc(p_listing->sz_names,cap_names); }
-        if (!p_listing->p_offsets || !p_listing->p_types || !p_listing->sz_names) { fputs("Out of memory listing directory\n",stderr); exit(1); }
+        if (!p_listing->p_offsets || !p_listing->p_types || !p_listing->sz_names) { fputs("Out of memory listing directory\n",stderr); runtime_exit(1); }
         memcpy(p_listing->sz_names+cb_names,entry.sz_name,cb_name);
         p_listing->p_offsets[p_listing->c_names]=cb_names;
         PsHostEntryKind kind=entry.kind;

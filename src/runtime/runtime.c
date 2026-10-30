@@ -60,7 +60,7 @@ static ABI void *guest_tls_get_addr(const uint64_t *p_index) {
     unsigned char **pp_block=&s_tls_blocks[p_index[0]];
     if (!*pp_block) {
         *pp_block=calloc(1,s_tls_modules[p_index[0]].memsz);
-        if (!*pp_block) { fputs("Cannot allocate module TLS\n",stderr); exit(1); }
+        if (!*pp_block) { fputs("Cannot allocate module TLS\n",stderr); runtime_exit(1); }
         memcpy(*pp_block,s_tls_modules[p_index[0]].p_data,s_tls_modules[p_index[0]].filesz);
     }
     return *pp_block+p_index[1];
@@ -70,7 +70,7 @@ void runtime_start(uint64_t flags) {
     s_capabilities = flags;
     if (!(flags & 1)) return;
     if (ps_host_random_bytes(&s_stack_canary, sizeof(s_stack_canary))) {
-        fputs("Cannot initialize stack canary\n", stderr); exit(1);
+        fputs("Cannot initialize stack canary\n", stderr); runtime_exit(1);
     }
     s_stack_canary &= ~UINT64_C(255);
 }
@@ -117,6 +117,12 @@ void runtime_stop(int status) {
     runtime_debug_finish("STOP", status);
     fflush(NULL);
     ps_host_exit_at_once(status);
+}
+void runtime_exit(int status) {
+    runtime_calls_report();
+    runtime_debug_finish_exit(status);
+    fflush(NULL);
+    ps_host_exit(status);
 }
 static ABI void init_env(void) {
     /* The loader checked that libc.prx's export is exactly C3 (loader_init_env_is_ret). */

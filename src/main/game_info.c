@@ -41,7 +41,7 @@ void configure_content(const char *sz_sfo) {
     else if (!strcmp(sz_sku,"trial")) values[0]=1;
     else fail("PS_CONTENT_SKU must be full or trial");
     FILE *p_file=ps_host_fs_open_stream(sz_sfo,"rb");
-    if (!p_file) { fprintf(stderr,"ERROR: cannot read %s\n",sz_sfo); exit(1); }
+    if (!p_file) { fprintf(stderr,"ERROR: cannot read %s\n",sz_sfo); runtime_exit(1); }
     fclose(p_file);
     for (unsigned i=0;i<4;++i) {
         char sz_key[32];

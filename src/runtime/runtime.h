@@ -32,6 +32,9 @@ void runtime_report(void);
 /* Ends the process after a STOP: the call report, then _exit, since exit() from a game thread runs the
  * GPU library's destructors while its threads are still running and never returns. */
 __attribute__((noreturn)) void runtime_stop(int status);
+/* Ends the process after a host failure as exit(status) does on Linux, from any thread once the game
+ * runs: the call report and summary.txt, then ps_host_exit, which skips ExitProcess on Windows. */
+__attribute__((noreturn)) void runtime_exit(int status);
 void runtime_finalize(void *p_dso);
 uintptr_t runtime_mutex_resolve(const char *sz_name);
 void runtime_mutex_report(void);

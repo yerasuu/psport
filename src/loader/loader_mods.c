@@ -8,6 +8,7 @@
 #define _GNU_SOURCE
 #include "runtime_json_print.h"
 #include "loader.h"
+#include "runtime.h"
 #include "ps_host.h"
 #include <errno.h>
 #include <limits.h>
@@ -41,7 +42,7 @@ __attribute__((noreturn, format(printf, 1, 2))) static void mods_fail(const char
     fputc('\n', stderr);
     va_end(args);
     if (s_p_failing && s_p_failing->sz_view[0]) remove_tree(s_p_failing->sz_view);
-    exit(1);
+    runtime_exit(1);
 }
 
 static void join_path(char *sz_out, const char *sz_folder, const char *sz_name) {
