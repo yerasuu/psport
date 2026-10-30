@@ -69,6 +69,7 @@ source -- "$plan" || { echo "plan.sh: $plan failed" >&2; exit 2; }
 
 online_switches=(PS_ONLINE PS_BBSC PS_BBSC_LOCAL_SERVER PS_UPNP)
 online_servers=(PS_SHADNET_SERVER PS_SHADNET_WEBAPI PS_SHADNET_NPID PS_SHADNET_PASSWORD PS_SHADNET_TOKEN
+    PS_SHADNET_SECRETS_FILE PS_SHADNET_SECRETS
     PS_SHADNET_CLIENT_VERSION PS_COMMUNITY_SERVER PS_NET_MODULE SHADPS4_HTTP_HOST_OVERRIDES_JSON)
 for name in "${online_switches[@]}"; do export "$name=0"; unset "BB_${name#PS_}"; done
 for name in "${online_servers[@]}"; do unset "$name" "BB_${name#PS_}"; done

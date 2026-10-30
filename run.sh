@@ -74,6 +74,13 @@ if [[ -z ${PS_PREBUILT:-} && -z ${PS_IN_NIX_SHELL:-} ]] && ! { command -v pkg-co
     args=''; if (( $# )); then args=$(printf '%q ' "$@"); fi
     exec env PS_IN_NIX_SHELL=1 nix-shell shell.nix --run "bash run.sh $args"
 fi
+# PS_SHADNET_SECRETS=stdin: the launcher (or psport's own restart) writes the shadNet password and
+# token to stdin, for psport alone; the commands below read /dev/null instead, so that none takes
+# them or waits on them, and psport gets the original stdin back at exec. PS_SHADNET_SECRETS_FILE
+# passes through as any variable does: psport reads and removes the file.
+if [[ ${PS_SHADNET_SECRETS:-} == stdin ]]; then
+    exec {secrets_fd}<&0 < /dev/null
+fi
 # PS_SAVE_LOG=1 (launcher: "Save the log and statistics to a file"): this run's output and its
 # per-frame statistics also go to $data/logs/<time>.log, .frames.csv and .readbacks.csv.
 if [[ ${PS_SAVE_LOG:-} == 1 ]]; then
@@ -329,4 +336,5 @@ if [[ ${PS_ONLINE:-0} == 1 && -f scripts/online.py ]]; then
     export SHADPS4_HTTP_HOST_OVERRIDES_JSON
 fi
 probe_args=("${boot_args[@]}" "${patch_args[@]}" --app0 "$game" --user "${PS_USER_DIR:-$data/user}" --timeout "${PS_TIMEOUT:-0}" "$@")
+if [[ -n ${secrets_fd:-} ]]; then exec "$probe" "${probe_args[@]}" <&"$secrets_fd" {secrets_fd}<&-; fi
 exec "$probe" "${probe_args[@]}"

@@ -107,7 +107,8 @@ static PsNetResolveFn module_resolve(void) {
         .abi=PSPORT_NET_ABI_VERSION, .sz_app0=s_sz_game_folder, .sz_serial=s_sz_game_serial, .sz_title=s_sz_game_title,
         .sz_app_ver=s_sz_game_version, .pfn_thread_spawn=runtime_thread_spawn,
         .pfn_thread_join=runtime_thread_join_spawned, .sz_summon_route=title.online.sz_summon_route,
-        .sz_extension=title_extension(&title.online.extension),
+        .sz_extension=title_extension(&title.online.extension), .sz_shadnet_password=runtime_secrets_password(),
+        .sz_shadnet_token=runtime_secrets_token(),
     };
     if (!pfn_init || !pfn_found || pfn_init(&host)!=0) {
         printf("Online: %s did not start: offline play\n",sz_path);

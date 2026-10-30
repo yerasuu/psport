@@ -556,6 +556,12 @@ int ps_host_fs_stat_file(int h_file, PsHostStat *p_out) {
     return stat_handle(descriptor.h_handle, p_out);
 }
 
+/* Who may read a file is its ACL, which the mode stat_handle fills in does not reflect. */
+int ps_host_fs_is_owner_only(int h_file) {
+    (void)h_file;
+    return -ENOSYS;
+}
+
 /* Only the read-only attribute denies anything Windows' permission bits would: write access to a
  * read-only file. */
 static HANDLE stream_handle(FILE *p_stream) {

@@ -295,6 +295,20 @@ FEATURE_HOST(online_module, LINUX, IMPLEMENTED,
              "#540")
 FEATURE_PROBED(online_module)
 
+FEATURE(secrets_handoff, net, "the shadNet password and token from a one-use file (PS_SHADNET_SECRETS_FILE) or stdin "
+                              "(PS_SHADNET_SECRETS=stdin) instead of the environment, which loses them at start")
+FEATURE_HOST(secrets_handoff, LINUX, IMPLEMENTED,
+             "password= and token= lines, at most 4096 bytes; the file only regular, the player's and mode 0600, "
+             "removed once read; PS_SHADNET_PASSWORD and PS_SHADNET_TOKEN still read when neither is given; all four "
+             "variables then overwritten and unset, in the block /proc/<pid>/environ shows too (its bounds from "
+             "/proc/self/stat); a restart passes them on through stdin (src/net/runtime_secrets.c)",
+             "#1336")
+FEATURE_HOST(secrets_handoff, WIN32, EXPERIMENTAL,
+             "stdin only, the file refused since its ACL is not checked; the CRT's copies overwritten and the variables "
+             "removed with SetEnvironmentVariableW, which may leave bytes of the PEB's block behind; compile-checked, "
+             "not run yet",
+             "#1336")
+
 FEATURE(upscaler_fsr4, upscaler, "FSR 4 (the v07 INT8 shaders) on the GPU the game takes")
 FEATURE_HOST(upscaler_fsr4, LINUX, IMPLEMENTED,
              "vk_fsr4.cpp when the device has Float16, Int8, Int16, integer dot products and linear compute "

@@ -22,6 +22,7 @@ void runtime_restart(void) {
     __sync_synchronize();
     runtime_debug_finish("restart through run.sh", 0);
     ps_host_output_untee();
+    runtime_secrets_pass_on();
     ps_host_close_from(3, -1, 0);
     char *const pp_argv[] = {"bash", "run.sh", NULL};
     ps_host_exec("bash", pp_argv);
@@ -62,6 +63,7 @@ void runtime_load_exec(const char *sz_path, char *const *pp_arguments) {
     /* The calling thread's signal mask outlives the exec and would be the new main thread's. */
     PsHostInterruptMask previous;
     ps_host_interrupts_hold(0, &previous);
+    runtime_secrets_pass_on();
     ps_host_close_from(3, -1, 1);
     ps_host_exec_self(pp_argv);
     perror("runtime_load_exec: exec");

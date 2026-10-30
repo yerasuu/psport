@@ -496,6 +496,7 @@ extern "C" __attribute__((visibility("default"))) int psport_net_init(const PsNe
         return -1;
     }
     s_host = *p_host;
+    g_shadnet_secrets = {p_host->sz_shadnet_password, p_host->sz_shadnet_token};
     // mbedTLS 3.6 negotiates TLS 1.3 through PSA Crypto, to be initialised before any handshake
     // (mbedtls/ssl.h: mbedtls_ssl_handshake); cpp-httplib never does it, so the first handshake
     // would, from whichever game thread gets there first. shadNet's own TCP needs none of it.

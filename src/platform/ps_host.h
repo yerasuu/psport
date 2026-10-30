@@ -233,6 +233,10 @@ int ps_host_fs_truncate_path(const char *sz_path, int64_t cb_file);
 int ps_host_fs_stat(const char *sz_path, PsHostStat *p_out);
 int ps_host_fs_stat_link(const char *sz_path, PsHostStat *p_out);
 int ps_host_fs_stat_file(int h_file, PsHostStat *p_out);
+/* Whether only this process's user may read the open file: 1, 0 (its group or other users may, or
+ * it is another user's), or minus the host's errno; -ENOSYS where psport cannot check who may
+ * (Windows keeps ACLs, not a mode). */
+int ps_host_fs_is_owner_only(int h_file);
 /* The same calls on a stdio stream's file, whose fileno is the C runtime's descriptor and need not
  * be one of psport's. */
 int ps_host_fs_stat_stream(FILE *p_stream, PsHostStat *p_out);
@@ -551,6 +555,16 @@ int ps_host_env_set(const char *sz_name, const char *sz_value, int is_overwrite)
 /* The value of an environment variable of this process, or NULL when unset; valid until the next
  * ps_host_env_set. */
 const char *ps_host_env_get(const char *sz_name);
+/* Removes an environment variable after overwriting its value wherever this process keeps a copy
+ * the host knows of, the block the process started with included, since the host may still show
+ * that one to other processes and in crash dumps (Linux: /proc/<pid>/environ). *p_out_is_set says
+ * whether it was set. 0, or the host's errno: EINVAL for a name that cannot be one, ENOSYS when it
+ * is gone from the environment but the start block could not be found to overwrite. Not
+ * thread-safe against readers of the environment, as unsetenv. */
+int ps_host_env_scrub(const char *sz_name, int *p_out_is_set);
+/* Overwrites the bytes with zeros in a way the compiler cannot drop as a dead store: secrets
+ * before their memory is freed or reused. */
+void ps_host_wipe(void *p_bytes, size_t cb_bytes);
 /* This process's id, as the host's tools name it. */
 int32_t ps_host_process_id(void);
 

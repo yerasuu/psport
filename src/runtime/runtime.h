@@ -293,6 +293,14 @@ int runtime_net_symbol(const char *sz_symbol);
 uintptr_t runtime_net_resolve(const char *sz_name);
 /* psport --list-features: whether this build has its online module (the online_module row). */
 void runtime_net_probe_module(void);
+/* The shadNet password and token (runtime_secrets.c): taken once, after the early restarts of main
+ * and before any thread reads the environment, which no longer holds them afterwards. The getters
+ * give "" when none was given; the strings live until exit. Before the process starts again on
+ * itself, runtime_secrets_pass_on hands them to the new image on its stdin. */
+void runtime_secrets_take(void);
+const char *runtime_secrets_password(void);
+const char *runtime_secrets_token(void);
+void runtime_secrets_pass_on(void);
 /* Guest threads for host code (the online module's NP threads); 0 or a positive errno value. */
 int32_t runtime_thread_spawn(void **pp_thread, void *(ABI *pfn_entry)(void *), void *p_argument, uint64_t stack, const char *sz_name);
 int32_t runtime_thread_join_spawned(void *p_thread, void **pp_result);

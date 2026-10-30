@@ -1,10 +1,26 @@
 // psport co-op: shadPS4's user list, reduced to the one user the runtime logs in (id 1).
-// The shadNet account comes from the launcher through PS_SHADNET_NPID / PS_SHADNET_PASSWORD.
+// The shadNet account comes from the launcher through PS_SHADNET_NPID; its password and token
+// from the runtime (PsNetHost, src/net/runtime_secrets.c), never from the environment.
 #pragma once
 #include <array>
 #include <cstdlib>
 #include <string>
 #include "common/types.h"
+#include "../../../../src/platform/ps_host.h"
+
+struct ShadNetSecrets {
+    const char* sz_password = nullptr;
+    const char* sz_token = nullptr;
+};
+// Set by psport_net_init, before any NP library can construct the UserManager.
+inline ShadNetSecrets g_shadnet_secrets;
+
+// Over the whole capacity: a shorter value assigned since may have left the old bytes behind it.
+inline void WipeSecret(std::string& secret) {
+    secret.resize(secret.capacity());
+    ps_host_wipe(secret.data(), secret.size());
+    secret.clear();
+}
 
 struct User {
     s32 user_id = -1;
@@ -39,12 +55,19 @@ public:
         user.player_index = 1;
         user.logged_in = true;
         user.shadnet_npid = text("PS_SHADNET_NPID", "");
-        user.shadnet_password = text("PS_SHADNET_PASSWORD", "");
-        user.shadnet_token = text("PS_SHADNET_TOKEN", "");
+        user.shadnet_password = g_shadnet_secrets.sz_password ? g_shadnet_secrets.sz_password : "";
+        user.shadnet_token = g_shadnet_secrets.sz_token ? g_shadnet_secrets.sz_token : "";
         user.shadnet_enabled = !user.shadnet_npid.empty();
         user.np_country = text("PS_NP_COUNTRY", "us");
         user.np_language = text("PS_NP_LANGUAGE", "en");
     }
+
+    ~UserManager() {
+        WipeSecret(user.shadnet_password);
+        WipeSecret(user.shadnet_token);
+    }
+    UserManager(const UserManager&) = delete;
+    UserManager& operator=(const UserManager&) = delete;
 
     User* GetUserByID(s32 user_id) { return user_id == RuntimeUserId ? &user : nullptr; }
     LoggedInUsers GetLoggedInUsers() const {

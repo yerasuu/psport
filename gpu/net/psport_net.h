@@ -10,7 +10,7 @@
 extern "C" {
 #endif
 
-#define PSPORT_NET_ABI_VERSION 3
+#define PSPORT_NET_ABI_VERSION 4
 
 /* What the runtime gives the module: the game's identity (param.sfo, its folder for
  * sce_sys/npbind.dat), guest threads for the NP libraries' callbacks into the game and what its
@@ -31,6 +31,11 @@ typedef struct PsNetHost {
     /* The title's own part of the module to start (Game::OnlineExtension sz_name), NULL when it
      * has none or the player left it off: the module starts it if it carries it. Since ABI 3. */
     const char *sz_extension;
+    /* The shadNet account's password and token, "" when not given, valid until exit: the runtime
+     * took them from where the launcher put them and removed them from the environment
+     * (runtime_secrets.c), so the module reads them only here. Since ABI 4. */
+    const char *sz_shadnet_password;
+    const char *sz_shadnet_token;
 } PsNetHost;
 
 /* Registers the libraries; 0 on success, else the module cannot run (the game stays offline). */

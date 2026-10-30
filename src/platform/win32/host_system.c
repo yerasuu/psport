@@ -71,3 +71,28 @@ int ps_host_env_set(const char *sz_name, const char *sz_value, int is_overwrite)
     if (!is_overwrite && _wgetenv(sz_wide_name)) return 0;
     return _wputenv_s(sz_wide_name, sz_wide_value);
 }
+
+/* The CRT's narrow and wide copies are overwritten in place; Windows' own block (the PEB's) is
+ * rewritten by SetEnvironmentVariableW, which moves the entries after it down and may leave stale
+ * bytes past the block's new end that psport cannot reach. */
+int ps_host_env_scrub(const char *sz_name, int *p_out_is_set) {
+    *p_out_is_set = 0;
+    if (!sz_name[0] || strchr(sz_name, '=')) return EINVAL;
+    wchar_t sz_wide_name[256];
+    const int error = ps_win32_to_wide(sz_name, sz_wide_name, sizeof(sz_wide_name) / sizeof(*sz_wide_name));
+    if (error) return error;
+    char *sz_value = getenv(sz_name);
+    if (sz_value) {
+        ps_host_wipe(sz_value, strlen(sz_value));
+        *p_out_is_set = 1;
+    }
+    wchar_t *sz_wide_value = _wgetenv(sz_wide_name);
+    if (sz_wide_value) {
+        ps_host_wipe(sz_wide_value, wcslen(sz_wide_value) * sizeof(*sz_wide_value));
+        *p_out_is_set = 1;
+    }
+    if (_wputenv_s(sz_wide_name, L"")) return errno;
+    if (!SetEnvironmentVariableW(sz_wide_name, NULL) && GetLastError() != ERROR_ENVVAR_NOT_FOUND)
+        return ps_win32_errno(GetLastError());
+    return 0;
+}

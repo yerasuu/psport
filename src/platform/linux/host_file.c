@@ -112,6 +112,12 @@ int ps_host_fs_stat_file(int h_file, PsHostStat *p_out) {
     return 0;
 }
 
+int ps_host_fs_is_owner_only(int h_file) {
+    struct stat info;
+    if (fstat(h_file, &info)) return -errno;
+    return info.st_uid == geteuid() && !(info.st_mode & (S_IRWXG | S_IRWXO));
+}
+
 int ps_host_fs_stat_stream(FILE *p_stream, PsHostStat *p_out) { return ps_host_fs_stat_file(fileno(p_stream), p_out); }
 
 int ps_host_fs_sync_stream(FILE *p_stream) { return ps_host_fs_sync(fileno(p_stream)); }

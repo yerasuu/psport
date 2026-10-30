@@ -152,6 +152,7 @@ int main(int argc, char **argv) {
         sfo_value(sz_sfo,"TITLE_ID",sz_serial,sizeof(sz_serial),NULL);
         runtime_debug_start(argv,sz_serial);
     }
+    runtime_secrets_take();
     const char *mod_folders[256];
     if (sz_mods_dir) {
         GameInfo original;
