@@ -42,7 +42,7 @@ void assert_fail_impl() {
     psport_gpu_flush_caches(0);
     runtime_calls_report();
     runtime_debug_finish("GPU library assertion", 23);
-    std::_Exit(23);
+    ps_host_exit_at_once(23);
 }
 
 [[noreturn]] void unreachable_impl() {

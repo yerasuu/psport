@@ -158,7 +158,10 @@ extern "C" int psport_gpu_init(const PsGpuConfig* p_config) {
         psport_gpu_flush_caches(1);
         runtime_report();
         runtime_debug_finish("window closed", 0);
-        std::_Exit(0);
+        // Not _Exit: on Windows it ends in ExitProcess, which kills the other threads (the stop
+        // watcher too) and then hangs in a DLL detach after the summary (#1274).
+        std::fflush(nullptr);
+        ps_host_exit_at_once(0);
     });
     s_window_thread.detach();
     {

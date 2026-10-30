@@ -14,6 +14,7 @@ EXPORTS
     ps_host_dl_find_loaded
     ps_host_dl_sym
     ps_host_env_set
+    ps_host_exit_at_once
     ps_host_fault_access
     ps_host_fault_install
     ps_host_fault_register
