@@ -14,6 +14,9 @@
 // PS_CAPTURE_DUMP=1 writes each pass's colour attachment 0 as a small PNG beside the frame file,
 // 2 every attachment; PS_CAPTURE_DUMP_TEX=<vs>:<ps>[@<target>][#<n>] adds the textures the draws
 // it selects sample, with their samplers in the index (vk_frame_capture_dump.h).
+// PS_CAPTURE_DUMP_VSCONST=<vs>:<ps>[@<target>][#<n>] writes the user data and the buffers the
+// vertex and pixel stages of the draws it selects read, with the writes into those ranges the GPU
+// side saw since the capture was armed (vk_frame_capture_consts.h).
 
 #pragma once
 
@@ -32,6 +35,10 @@ namespace AmdGpu {
 union Regs;
 struct Sampler;
 } // namespace AmdGpu
+
+namespace Shader {
+struct Info;
+}
 
 namespace VideoCore {
 struct Image;
@@ -84,6 +91,48 @@ public:
         vk::QueryPool statistics{};
         u32 i_query{};
         bool is_precise{};
+    };
+
+    /// What the buffer cache said about a bound guest range just before it resolved it.
+    enum MemoryBits : u32 {
+        InPlace = 1,     ///< the GPU reads the game's memory itself; CPU writes are not tracked
+        CpuModified = 2, ///< the CPU wrote it since its last upload (page protection)
+        GpuModified = 4, ///< the GPU's newest data there is not in the game's memory
+        VramMirror = 8,  ///< PS_LAYER_MEMORY: a VRAM mirror holds it
+    };
+
+    /// A buffer a stage reads, for PS_CAPTURE_DUMP_VSCONST. `p_bytes`: what the GPU reads when
+    /// the CPU holds it (the constant ring, the flattened user data), else null and the guest
+    /// memory is read; `h_buffer`: the GPU buffer to copy at the pass's end, or null.
+    struct StageBuffer {
+        u32 i_slot{};
+        u32 i_resource{};
+        const char* sz_route{};
+        VAddr va_buffer{};
+        u64 cb_buffer{};
+        u32 cb_stride{};
+        const void* p_bytes{};
+        vk::Buffer h_buffer{};
+        u64 off_buffer{};
+        u32 memory{};
+        const char* sz_skipped{}; ///< why its contents cannot be dumped, or null
+    };
+
+    /// Who wrote guest memory, as the GPU side records or hears of it.
+    enum class WriteSource : u32 {
+        DrawBinding,
+        DispatchBinding,
+        StorageImage,
+        RenderTarget,
+        DmaFill,
+        DmaCopy,
+        CommandWrite,
+        GpuCommandWrite,
+        GpuLabel,
+        LateLabel,
+        Timestamp,
+        CpuWriteFault,
+        CpuWriteNote,
     };
 
     /// Rasterizer construction: where summaries resolve images and record their readbacks.
@@ -152,6 +201,20 @@ public:
     /// Contents of a bound buffer (first 1 KiB), kept for small passes and a pass's first draw.
     static void Buffer(u64 stage_hash, u32 slot, VAddr va_buffer, const void* p_data, u64 cb_data);
     static void Note(const char* sz_text);
+
+    /// A draw's or dispatch's bindings begin (before its first stage binds anything).
+    static void BeginBindings(bool is_compute, u64 vs_hash, u64 ps_hash);
+    /// Whether PS_CAPTURE_DUMP_VSCONST wants this stage's user data and buffers: a vertex or
+    /// pixel stage of a draw whose pair it selects, while a frame is recorded.
+    static bool IsConstantDump(const Shader::Info& stage);
+    /// The stage's user data SGPRs as bound; `i_first_push`: the push constant slot of its first.
+    static void UserData(const Shader::Info& stage, u32 i_first_push);
+    static void ConstantBuffer(const Shader::Info& stage, const StageBuffer& buffer);
+    /// Guest memory written or about to be written by the GPU side, or a CPU write it heard of
+    /// (any thread); `detail`: a copy's source, a fault's guest rip.
+    static void GuestWrite(VAddr va_range, u64 cb_range, WriteSource source, u64 detail = 0);
+    /// A buffer binding of the draw or dispatch being bound that the shader writes.
+    static void WrittenBinding(VAddr va_range, u64 cb_range);
 
 private:
     enum : u32 { Idle, Armed, Recording };

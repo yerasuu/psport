@@ -300,6 +300,73 @@ min/max and alpha) or why it was not dumped; those reasons are also logged as `F
 texture of pass <n> draw <d> binding <b> not dumped: <reason>`, and a frame in which the selector
 took no draw says so in the index and the log. A malformed selector is logged and ignored.
 
+`PS_CAPTURE_DUMP_VSCONST=<vs>:<ps>[@<target>][#<n>]` (with the frame capture alone: neither
+`PS_CAPTURE_DUMP` nor `PS_CAPTURE_SUMMARIZE` is needed) writes, for every draw of the recorded frame
+the selector takes, the constants its vertex and pixel stages read, to see where a draw's positions
+and scale come from when its vertex buffer does not change. The selector is one `PS_SKIP_DRAWS`
+entry as for `PS_CAPTURE_DUMP_TEX`, but without `#<n>` it takes every draw of the pair (and target)
+in the frame, at most 64; `#<n>` takes the n-th alone. The file is `<frame file stem>_vsconst.txt`
+beside the frame file (written whether or not a draw was selected), its summary logged as
+`Frame capture: vs constants: <n> draws, <n> buffers, <n> gpu copies, <n> not dumped (<reasons>),
+journal <n> writes (<n> dropped), <path>`. Its text is capped at 128 KiB, the rest counted in a
+`truncated:` line (also in the log line). Per selected draw (`draw #<pass> draw <i>: vs ... ps ...
+nth <n> target ...`, its scheduler tick and when it was recorded):
+
+- each stage's user data SGPRs as the draw saw them (`s<k> raw` and `s<k> f32` rows), and which of
+  them the translated shader reads as push constants (`s<k>->ud_regs[<slot>]`, the slots in stage
+  order);
+- every buffer each of the two stages binds, in binding order (`<stage> <hash> buffer <resource>
+  (binding <n>, <route>): address size stride`): `constant ring` (a read-only V# up to 16 KiB the
+  GPU command thread copied from the game's memory when it decoded the draw: the ring's bytes are
+  exactly what the GPU reads), `flattened user data` (the SGPRs followed by what the SRT walker
+  loaded through them, as uploaded), `V#` (a guest buffer resolved by the buffer cache), `V#, page
+  table (PS_LAYER_MEMORY)`; a null V#, a V# the shader picks at run time and the special buffers
+  (GDS, clip planes, page table, fault buffer, LDS) are listed as not dumped with the reason.
+  `as bound` gives the first 256 bytes (words as floats when 0 or between 1e-6 and 1e7 in
+  magnitude, else hexadecimal) and an XXH3 of the range (up to 16 MiB): the ring's or the user
+  data's bytes, or for a guest V# the game's memory read when the draw was recorded. For a `V#` the
+  Vulkan buffer the draw binds is also copied by the GPU at the pass's end (up to 1 MiB, in the
+  capture's buffer-copy budget of 128 MiB): `gpu at the pass's end` says whether it holds the same
+  bytes, or lists them. A copy at the pass's end, not ahead of the draw, since a copy inside the
+  pass would end its rendering; a pass rarely writes the constants it draws with, and the journal
+  below shows it when it does. Memory bound in place is read by the GPU when it runs the draw, so a
+  CPU write after the draw was recorded shows as a difference there.
+- who last wrote each guest range. `memory when bound` is what the buffer cache said just before
+  it resolved the binding: in place (the GPU reads the game's memory; the buffer cache does not
+  write-protect it, so CPU writes there are invisible to psport) or a copy in a GPU buffer, with
+  whether its pages were CPU-modified since their last upload (a write the page protection caught)
+  or GPU-modified, and a PS_LAYER_MEMORY mirror. Then the write journal: from the moment the
+  capture is armed (and from the previous frame's file on, for `PS_CAPTURE_FRAMES`), the capture
+  records the guest ranges written by the storage buffers and storage images of every draw and
+  dispatch, the render targets of the recorded frame's passes, DMA_DATA and COPY_DATA fills and
+  copies (with the source), RELEASE_MEM copies from GDS, WRITE_DATA by the GPU or the command
+  processor, EOP/EOS/RELEASE_MEM labels and GPU timestamps, each with the pass and draw the command
+  stream was at and the scheduler tick; and the CPU writes the GPU side hears of: write faults on
+  pages the buffer cache protects (with the guest instruction's address) and CPU write notices.
+  Each range lists how many of those entries overlap it before the draw was recorded and after it,
+  the last before and the first after, with their time relative to the draw's recording, and a
+  `writer:` line: the last journaled writer, else `the CPU` when the pages were CPU-modified (the
+  fault came before the capture was armed, so its time and code are unknown), `the GPU` when they
+  were GPU-modified, or `unknown` with the reason. The journal keeps 65536 entries, then counts
+  what it drops.
+
+A summary at the end lists, for every stage buffer and the user data, the words that differ between
+the selected draws (`d<k>` names them in order: `#<pass>.<draw>`), from the GPU copy when it landed,
+else as bound, and V# addresses that differ. What could not be dumped is counted per reason in the
+file's first line and in the log line (null V#, run-time V#, special buffer, unmapped range, a GPU
+copy over the budget, over 64 buffers per draw or 64 draws per frame). Not known: a CPU write to
+memory bound in place, or to a page whose write fault came before the capture was armed (that would
+need write protection of the range for the capture, or a hook in the guest code that writes it, by
+its instruction address); writes made by the guest outside both (a DMA engine psport does not run,
+a write through the backing mapping) are not journaled either. Compute-queue WRITE_DATA goes
+through the command processor write; images a render target writes are journaled only within the
+recorded frame.
+
+For the lens flare of a pass `#99` with draws 0 to 9 of one pair:
+`PS_CAPTURE_DUMP_VSCONST=0000000051ab849c:000000005bcf574f`, or with `@<W>x<H>` / `@0x<address>`
+of its target when the pair draws elsewhere in the frame too, and `PS_CAPTURE_FRAMES=2` or more to
+compare a frame where the quads are clipped out with one where they are not.
+
 Every pass also lists each of its draws on a line of its own, indirect draws included (marked
 `indirect`): `#<pass> draw <i>: vs <16 hex digits> ps <16 hex digits> nth <n> target <W>x<H>
 <address>`, `ps` all zeros for a draw without a pixel shader, `nth` the draw's index, from 0,

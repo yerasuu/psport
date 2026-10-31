@@ -19,6 +19,7 @@
 #include "video_core/amdgpu/resource.h"
 #include "video_core/buffer_cache/buffer.h"
 #include "video_core/renderer_vulkan/vk_common.h"
+#include "video_core/renderer_vulkan/vk_frame_capture_consts.h"
 #include "video_core/renderer_vulkan/vk_frame_capture_draw.h"
 #include "video_core/renderer_vulkan/vk_frame_capture_dump.h"
 #include "video_core/renderer_vulkan/vk_graphics_pipeline.h"
@@ -1095,6 +1096,8 @@ void SummarizeOpenPass(bool is_wait_allowed = true) {
     if (!s_entries.empty()) {
         SummarizePassEnd(s_entries.back(), is_wait_allowed);
         DumpPassEnd(s_entries.back(), u32(s_entries.size() - 1), is_wait_allowed);
+        // At the pass's end for the reason CopyPassGeometry gives.
+        RecordBufferCopies(CaptureConsts::PassRanges(u32(s_entries.size() - 1)));
     }
 }
 
@@ -1387,11 +1390,14 @@ void StartRecording() {
     if (!s_p_readback && (SummarizeLevel() || CaptureDump::Level())) {
         s_p_readback = CreateReadbackBuffer(CB_READBACK, "frame capture readback");
     }
+    if (CaptureConsts::Selector()) {
+        CaptureConsts::StartFrame();
+    }
+    if (!s_p_gpu_copies && (SummarizeLevel() || CaptureConsts::Selector())) {
+        s_p_gpu_copies = CreateReadbackBuffer(CB_GPU_COPIES, "frame capture buffer copies");
+    }
     if (!SummarizeLevel()) {
         return;
-    }
-    if (!s_p_gpu_copies) {
-        s_p_gpu_copies = CreateReadbackBuffer(CB_GPU_COPIES, "frame capture buffer copies");
     }
     if (!s_p_full_start || !s_p_full_end) {
         s_p_full_start = CreateReadbackBuffer(CB_FULL_PLANES, "frame capture pass start planes");
@@ -1565,6 +1571,7 @@ void Write(VAddr presented) {
             ? std::format("{}/frame_{}.txt", sz_dir ? sz_dir : ".", s_id_capture)
             : std::format("{}/frame_{}_{}.txt", sz_dir ? sz_dir : ".", s_id_capture, s_i_frame);
     const std::string dump_line = WriteDump(p_readback, path.substr(0, path.size() - 4));
+    CaptureConsts::WriteFrame(path.substr(0, path.size() - 4), p_gpu_copies);
     FILE* p_file = std::fopen(path.c_str(), "w");
     if (!p_file) {
         std::printf("Frame capture: cannot write %s\n", path.c_str());
@@ -1803,6 +1810,7 @@ void FrameCapture::OnFlip(VAddr va_presented) {
                     FramesPerCapture());
         return;
     }
+    CaptureConsts::ClearJournal();
     m_state.store(Armed, std::memory_order_release);
     if (FramesPerCapture() == 1) {
         std::printf("Frame capture: armed\n");
@@ -1929,14 +1937,33 @@ void FrameCapture::BeginPass(std::span<const PassTarget> colors, PassTarget dept
     }
     s_entries.push_back(std::move(entry));
     s_is_pass_open = true;
+    if (CaptureConsts::Selector()) {
+        const u32 i_pass = u32(s_entries.size() - 1);
+        CaptureConsts::SetPosition(i_pass, 0);
+        for (const auto& color : colors) {
+            if (const VideoCore::Image* p_image = resolve(color)) {
+                CaptureConsts::Journal(p_image->info.guest_address, p_image->info.guest_size,
+                                       WriteSource::RenderTarget, 0, CurrentTick());
+            }
+        }
+        if (p_depth) {
+            CaptureConsts::Journal(p_depth->info.guest_address, p_depth->info.guest_size,
+                                   WriteSource::RenderTarget, 0, CurrentTick());
+        }
+    }
 }
 
 void FrameCapture::Draw(u64 vs_hash, u64 ps_hash, u32 c_indices, u32 c_instances,
                         u32 i_pair_draw, const PsSkipDraws::Target& color0, bool is_skipped,
                         bool is_indirect) {
     s_pending_bindings.clear();
-    if (m_state.load(std::memory_order_relaxed) != Recording || s_entries.empty() ||
-        s_entries.back().is_compute || s_entries.back().is_copy) {
+    const bool is_in_pass = m_state.load(std::memory_order_relaxed) == Recording &&
+                            !s_entries.empty() && !s_entries.back().is_compute &&
+                            !s_entries.back().is_copy;
+    CaptureConsts::TakeDraw(is_in_pass ? u32(s_entries.size() - 1) : ~0u,
+                            is_in_pass ? s_entries.back().draws : 0, vs_hash, ps_hash, i_pair_draw,
+                            color0, is_skipped, CurrentTick());
+    if (!is_in_pass) {
         s_pending_samplers.clear();
         return;
     }
@@ -2044,6 +2071,7 @@ void FrameCapture::DepthCopy(const VideoCore::Image& src, VideoCore::ImageId src
 
 void FrameCapture::Dispatch(u64 cs_hash, u32 x, u32 y, u32 z) {
     if (m_state.load(std::memory_order_relaxed) != Recording) {
+        CaptureConsts::TakeDispatch(~0u, CurrentTick());
         s_pending_sampled.clear();
         s_pending_samplers.clear();
         s_pending_buffers.clear();
@@ -2076,6 +2104,7 @@ void FrameCapture::Dispatch(u64 cs_hash, u32 x, u32 y, u32 z) {
             RecordBufferCopies(ranges);
         }
     }
+    CaptureConsts::TakeDispatch(u32(s_entries.size() - 1), CurrentTick());
     s_pending_bindings.clear();
     s_pending_samplers.clear();
     AddSampled(s_entries.back());
@@ -2114,6 +2143,9 @@ void FrameCapture::AfterDispatch() {
 
 void FrameCapture::BoundBuffer(u32 i_slot, VAddr va_buffer, u64 cb_buffer, bool is_written,
                                vk::Buffer h_buffer, u64 off_buffer) {
+    if (is_written) {
+        CaptureConsts::NotePendingWrite(va_buffer, cb_buffer, WriteSource::DrawBinding);
+    }
     if (!SummarizeLevel() || m_state.load(std::memory_order_relaxed) != Recording ||
         s_pending_bindings.size() >= C_BINDINGS_KEPT) {
         return;
@@ -2152,6 +2184,10 @@ void FrameCapture::Buffer(u64 stage_hash, u32 slot, VAddr va_buffer, const void*
 void FrameCapture::Sampled(const VideoCore::Image& image, VideoCore::ImageId id, VAddr va_requested,
                            vk::ImageView view, const VideoCore::ImageViewInfo& view_info,
                            bool is_storage, const char* sz_route, u64 stage_hash, u32 i_binding) {
+    if (is_storage) {
+        CaptureConsts::NotePendingWrite(image.info.guest_address, image.info.guest_size,
+                                        WriteSource::StorageImage);
+    }
     if (s_pending_sampled.size() >= 64) {
         return;
     }
@@ -2188,6 +2224,35 @@ void FrameCapture::Note(const char* sz_text) {
     if (!s_entries.empty()) {
         s_entries.back().note += sz_text;
     }
+}
+
+void FrameCapture::BeginBindings(bool is_compute, u64 vs_hash, u64 ps_hash) {
+    CaptureConsts::BeginBindings(m_state.load(std::memory_order_relaxed) == Recording, is_compute,
+                                 vs_hash, ps_hash);
+}
+
+bool FrameCapture::IsConstantDump(const Shader::Info& stage) {
+    return CaptureConsts::IsCandidate(stage);
+}
+
+void FrameCapture::UserData(const Shader::Info& stage, u32 i_first_push) {
+    CaptureConsts::NoteUserData(stage, i_first_push);
+}
+
+void FrameCapture::ConstantBuffer(const Shader::Info& stage, const StageBuffer& buffer) {
+    CaptureConsts::NoteBuffer(stage, buffer);
+}
+
+void FrameCapture::GuestWrite(VAddr va_range, u64 cb_range, WriteSource source, u64 detail) {
+    if (!Active() || !CaptureConsts::Selector()) {
+        return;
+    }
+    const bool is_cpu = source == WriteSource::CpuWriteFault || source == WriteSource::CpuWriteNote;
+    CaptureConsts::Journal(va_range, cb_range, source, detail, is_cpu ? 0 : CurrentTick());
+}
+
+void FrameCapture::WrittenBinding(VAddr va_range, u64 cb_range) {
+    CaptureConsts::NotePendingWrite(va_range, cb_range, WriteSource::DrawBinding);
 }
 
 } // namespace Vulkan

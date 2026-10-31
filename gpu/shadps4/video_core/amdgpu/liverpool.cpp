@@ -45,6 +45,7 @@
 #include "cp_decoder.h"
 #include "cp_stream.h"
 #include "video_core/renderdoc.h"
+#include "video_core/renderer_vulkan/vk_frame_capture.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
 
 extern "C" int runtime_memory_vma_info(uintptr_t address, int* prot, int* type, uintptr_t* end);
@@ -561,6 +562,11 @@ void RunEventWriteEop(Vulkan::Rasterizer& rasterizer, const u8* data) {
         }
         return;
     }
+    if (writes && Vulkan::FrameCapture::Active()) {
+        Vulkan::FrameCapture::GuestWrite(reinterpret_cast<VAddr>(eop.Address<u8>()),
+                                         eop.data_sel.Value() == DataSelect::Data32Low ? 4 : 8,
+                                         Vulkan::FrameCapture::WriteSource::LateLabel);
+    }
     rasterizer.SignalAfterGpu([eop, seq] { SignalEop(eop, seq); },
                               writes ? reinterpret_cast<VAddr>(eop.Address<u8>()) : 0, value);
 }
@@ -867,6 +873,10 @@ void RunEventWriteEos(Vulkan::Rasterizer& rasterizer, const u8* data) {
             return; // written by the GPU once the shaders before it are done
         }
         const PM4CmdEventWriteEos eos = event_eos;
+        if (Vulkan::FrameCapture::Active()) {
+            Vulkan::FrameCapture::GuestWrite(reinterpret_cast<VAddr>(eos.Address()), sizeof(u32),
+                                             Vulkan::FrameCapture::WriteSource::LateLabel);
+        }
         rasterizer.SignalAfterGpu([eos] { eos.SignalFence(&WriteEosLabel); },
                                   reinterpret_cast<VAddr>(eos.Address()), eos.DataDWord());
         return;
@@ -3106,6 +3116,12 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
                 const PM4CmdReleaseMem release = *rm;
                 const u32 pipe_id = queue.pipe_id;
                 const bool writes = release.data_sel.Value() != DataSelect::None;
+                if (writes && Vulkan::FrameCapture::Active()) {
+                    Vulkan::FrameCapture::GuestWrite(
+                        release.Address<VAddr>(),
+                        release.data_sel.Value() == DataSelect::Data32Low ? 4 : 8,
+                        Vulkan::FrameCapture::WriteSource::LateLabel);
+                }
                 rasterizer->SignalAfterGpu(
                     [release, pipe_id] {
                         release.SignalFence(

@@ -224,6 +224,9 @@ bool Rasterizer::WriteDataOnGpu(VAddr address, const void* data, u32 size) {
         runtime.UpdateBuffer(mirror->first, mirror->second, {static_cast<const u8*>(data), size});
     }
     runtime.UpdateBuffer(target->first, target->second, {static_cast<const u8*>(data), size});
+    if (FrameCapture::Active()) {
+        FrameCapture::GuestWrite(address, size, FrameCapture::WriteSource::GpuCommandWrite);
+    }
     // psport: a bulk WRITE_DATA may initialise texture memory (bbport 8185b88: the FX history
     // clears); an image there written whole is uploaded again from the new bytes, else a reload
     // kept the previous owner's image. Fences and labels keep their fast path.
@@ -307,7 +310,11 @@ bool Rasterizer::WriteTimestampOnGpu(VAddr address, bool end_of_pipe) {
     if (!timestamps) {
         timestamps = std::make_unique<GpuTimestamps>(instance, scheduler, buffer_cache);
     }
-    return timestamps->Write(address, end_of_pipe);
+    const bool is_written = timestamps->Write(address, end_of_pipe);
+    if (is_written && FrameCapture::Active()) {
+        FrameCapture::GuestWrite(address, sizeof(u64), FrameCapture::WriteSource::Timestamp);
+    }
+    return is_written;
 }
 
 bool Rasterizer::WriteLabelOnGpu(VAddr address, u64 value, u32 num_bytes) {
@@ -367,6 +374,9 @@ bool Rasterizer::WriteLabelOnGpu(VAddr address, u64 value, u32 num_bytes) {
     // A VRAM copy of these bytes gets them too, at its next binding (as for CPU-written labels).
     buffer_cache.NoteLateCommandWrite(address, &value, num_bytes);
     PsStats::g_c_gpu_labels.fetch_add(1, std::memory_order_relaxed);
+    if (FrameCapture::Active()) {
+        FrameCapture::GuestWrite(address, num_bytes, FrameCapture::WriteSource::GpuLabel);
+    }
     // In stream order for WAIT_REG_MEM, and the submission policy (HasUnsubmittedSignals).
     SignalAfterGpu([] {}, address, value);
     return true;
@@ -2946,6 +2956,13 @@ bool Rasterizer::BindResources(const Pipeline* pipeline) {
     // Bind resource buffers and textures.
     Shader::Backend::Bindings binding{};
     push_data = MakeUserData(Regs());
+    if (FrameCapture::Active()) {
+        const auto stages = pipeline->GetStages();
+        const auto* p_vs = pipeline->IsCompute() ? nullptr : stages[u32(Shader::SwStage::Vertex)];
+        const auto* p_ps = pipeline->IsCompute() ? nullptr : stages[u32(Shader::SwStage::Fragment)];
+        FrameCapture::BeginBindings(pipeline->IsCompute(), p_vs ? p_vs->pgm_hash : 0,
+                                    p_ps ? p_ps->pgm_hash : 0);
+    }
     if (!HelperEligible(pipeline)) {
         ++helper_serial;
         for (const auto* stage : pipeline->GetStages()) {
@@ -2954,6 +2971,9 @@ bool Rasterizer::BindResources(const Pipeline* pipeline) {
             }
             set_writes.resize(set_writes.size() + stage->buffers.size() + stage->images.size() +
                               stage->samplers.size());
+            if (FrameCapture::Active()) {
+                FrameCapture::UserData(*stage, binding.user_data);
+            }
             stage->PushUd(binding, push_data);
             const PreparedStage* prepared = FindPreparedStage(*stage);
             BindBuffers(*stage, prepared, binding, push_data, set_write_index);
@@ -3606,6 +3626,20 @@ void TraceShaderBinding(const Shader::Info& stage, VAddr addr, u64 size, bool wr
 }
 } // namespace
 
+namespace {
+// psport PS_CAPTURE_DUMP_VSCONST: asked before the binding is resolved, which uploads the
+// CPU-modified pages and clears their mark.
+u32 CaptureMemoryBits(VideoCore::BufferCache& buffer_cache, VAddr va_range, u64 cb_range) {
+    u32 bits = 0;
+    bits |= buffer_cache.IsInPlace(va_range, cb_range) ? FrameCapture::InPlace : 0u;
+    bits |= buffer_cache.IsRegionCpuModified(va_range, cb_range) ? FrameCapture::CpuModified : 0u;
+    bits |= buffer_cache.IsRegionGpuModified(va_range, cb_range) ? FrameCapture::GpuModified : 0u;
+    bits |= VideoCore::BufferCache::LayerMirrored(va_range, cb_range) ? FrameCapture::VramMirror
+                                                                       : 0u;
+    return bits;
+}
+} // namespace
+
 // psport: a binding whose V# the shader picks at run time reaches the game's memory through the
 // page table: every V# it can pick that the CPU reads is prepared as a written or read range,
 // and, as for a paged binding, barriers cover any buffer of the game's memory.
@@ -3629,6 +3663,9 @@ void Rasterizer::BindDynamicBuffer(const Shader::Info& stage, const Shader::Buff
         buffer_cache.PrepareDynamicRange(vsharp.base_address, size, desc.is_written);
         if (desc.is_written) {
             texture_cache.InvalidateMemoryFromGPU(vsharp.base_address, size);
+            if (FrameCapture::Active()) {
+                FrameCapture::WrittenBinding(vsharp.base_address, size);
+            }
         }
     }
     bound_buffers.emplace_back(nullptr, 0, 0, desc.is_written);
@@ -3653,7 +3690,36 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, const PreparedStage* pre
                 push_data.AddOffset(binding.buffer, 0);
             }
             buffer_infos.emplace_back(constant_ring->Handle(), ring->offset, ring->size);
+            if (FrameCapture::Active() && FrameCapture::IsConstantDump(stage)) {
+                const auto vsharp =
+                    desc.IsSpecial() ? AmdGpu::Buffer{}
+                                     : (prepared ? prepared->p_buffer_sharps[buffer_index]
+                                                 : desc.GetSharp(stage));
+                FrameCapture::ConstantBuffer(
+                    stage, {.i_slot = binding.buffer,
+                            .i_resource = buffer_index,
+                            .sz_route = desc.IsSpecial() ? "flattened user data, constant ring"
+                                                         : "constant ring",
+                            .va_buffer = ring->address,
+                            .cb_buffer = ring->size,
+                            .cb_stride = vsharp.GetStride(),
+                            .p_bytes = constant_ring->Data(ring->offset),
+                            .memory = ring->address ? CaptureMemoryBits(buffer_cache, ring->address,
+                                                                        ring->size)
+                                                    : 0u});
+            }
         } else if (desc.IsSpecial()) {
+            if (desc.buffer_type != Shader::BufferType::Flatbuf && FrameCapture::Active() &&
+                FrameCapture::IsConstantDump(stage)) {
+                const bool is_dynamic = desc.buffer_type == Shader::BufferType::Dynamic;
+                FrameCapture::ConstantBuffer(
+                    stage, {.i_slot = binding.buffer,
+                            .i_resource = buffer_index,
+                            .sz_route = is_dynamic ? "run-time V#" : "special",
+                            .sz_skipped = is_dynamic ? "its V# is picked by the shader at run time"
+                                                     : "not guest memory (GDS, clip planes, page "
+                                                       "table, fault buffer or LDS)"});
+            }
             if (desc.buffer_type == Shader::BufferType::GdsBuffer) {
                 const auto* gds_buf = buffer_cache.GetGdsBuffer();
                 is_buffer_missing |= !gds_buf->IsAllocated();
@@ -3665,6 +3731,14 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, const PreparedStage* pre
                 if (FrameCapture::Active()) {
                     FrameCapture::Buffer(stage.pgm_hash, binding.buffer, 0,
                                          stage.FlatUserData().data(), ubo_size);
+                    if (FrameCapture::IsConstantDump(stage)) {
+                        FrameCapture::ConstantBuffer(
+                            stage, {.i_slot = binding.buffer,
+                                    .i_resource = buffer_index,
+                                    .sz_route = "flattened user data",
+                                    .cb_buffer = ubo_size,
+                                    .p_bytes = stage.FlatUserData().data()});
+                    }
                 }
                 const auto offset =
                     vk_buffer.Copy(stage.FlatUserData().data(), ubo_size, alignment);
@@ -3745,9 +3819,34 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, const PreparedStage* pre
                                      reinterpret_cast<const void*>(vsharp.base_address),
                                      memory->ClampRangeSize(vsharp.base_address, vsharp.GetSize()));
             }
+            const bool is_constant_dump =
+                FrameCapture::Active() && FrameCapture::IsConstantDump(stage);
             if (vsharp.base_address == 0 || vsharp.GetSize() == 0) {
+                if (is_constant_dump) {
+                    FrameCapture::ConstantBuffer(
+                        stage, {.i_slot = binding.buffer,
+                                .i_resource = buffer_index,
+                                .sz_route = "V#",
+                                .va_buffer = vsharp.base_address,
+                                .cb_buffer = vsharp.GetSize(),
+                                .cb_stride = vsharp.GetStride(),
+                                .sz_skipped = "null V# (address or size 0), bound null"});
+                }
                 buffer_infos.emplace_back(VK_NULL_HANDLE, 0, VK_WHOLE_SIZE);
             } else if (Shader::IsPagedBuffer(VideoCore::BufferCache::LayerPagedActive(), vsharp)) {
+                if (is_constant_dump) {
+                    const u64 cb_range =
+                        memory->ClampRangeSize(vsharp.base_address, vsharp.GetSize());
+                    FrameCapture::ConstantBuffer(
+                        stage, {.i_slot = binding.buffer,
+                                .i_resource = buffer_index,
+                                .sz_route = "V#, page table (PS_LAYER_MEMORY)",
+                                .va_buffer = vsharp.base_address,
+                                .cb_buffer = vsharp.GetSize(),
+                                .cb_stride = vsharp.GetStride(),
+                                .memory = CaptureMemoryBits(buffer_cache, vsharp.base_address,
+                                                            std::max<u64>(cb_range, 1))});
+                }
                 // psport PS_LAYER_MEMORY: nearly all memory as one buffer: the shader reaches it
                 // through the page table; the descriptor holds its record. It may touch any
                 // buffer of the game's memory: barriers before it, and after it if it writes.
@@ -3797,6 +3896,9 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, const PreparedStage* pre
                     LOG_ERROR(Render, "Clamped size from {} to {} for stage {:#x}",
                               vsharp.GetSize(), size, stage.pgm_hash);
                 }
+                const u32 memory_bits =
+                    is_constant_dump ? CaptureMemoryBits(buffer_cache, vsharp.base_address, size)
+                                     : 0u;
                 const bool is_write_overlap =
                     desc.is_written && VideoCore::TextureCache::SyncsGpuWriteOverlap();
                 if (is_write_overlap) {
@@ -3822,6 +3924,17 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, const PreparedStage* pre
                 if (FrameCapture::Active()) {
                     FrameCapture::BoundBuffer(binding.buffer, vsharp.base_address, size,
                                               desc.is_written, buffer->Handle(), offset);
+                }
+                if (is_constant_dump) {
+                    FrameCapture::ConstantBuffer(stage, {.i_slot = binding.buffer,
+                                                         .i_resource = buffer_index,
+                                                         .sz_route = "V#",
+                                                         .va_buffer = vsharp.base_address,
+                                                         .cb_buffer = size,
+                                                         .cb_stride = vsharp.GetStride(),
+                                                         .h_buffer = buffer->Handle(),
+                                                         .off_buffer = offset,
+                                                         .memory = memory_bits});
                 }
                 if (is_write_overlap) {
                     texture_cache.InvalidateImagesUnder(vsharp.base_address, size);
@@ -4986,6 +5099,9 @@ void Rasterizer::DepthToColorCopy() {
 
 void Rasterizer::FillBuffer(VAddr address, u32 num_bytes, u32 value, bool is_gds) {
     DrainDrawPipe();
+    if (!is_gds && FrameCapture::Active()) {
+        FrameCapture::GuestWrite(address, num_bytes, FrameCapture::WriteSource::DmaFill);
+    }
     if (address % 4 != 0 || num_bytes % 4 != 0) {
         LOG_ERROR_COUNTED(Render_Vulkan,
                           "Fill of {} bytes at {:#x} not 4-byte aligned, skipped", num_bytes,
@@ -5027,6 +5143,10 @@ bool Rasterizer::DmaMayWriteOnCpu(VAddr dst, u32 num_bytes) {
 
 void Rasterizer::CopyBuffer(VAddr dst, VAddr src, u32 num_bytes, bool dst_gds, bool src_gds) {
     DrainDrawPipe();
+    if (!dst_gds && FrameCapture::Active()) {
+        FrameCapture::GuestWrite(dst, num_bytes, FrameCapture::WriteSource::DmaCopy,
+                                 src_gds ? 0 : src);
+    }
     // psport: see FillBuffer (in place: the GPU, in stream order).
     if (!dst_gds && !buffer_cache.IsAnyInPlace(dst, num_bytes) &&
         !buffer_cache.IsRegionGpuModified(dst, num_bytes) &&
@@ -5114,6 +5234,9 @@ void Rasterizer::NoteCommandWrite(VAddr addr, const void* data, u64 size, bool r
     if (!recording_thread) {
         DrainDrawPipe();
     }
+    if (FrameCapture::Active()) {
+        FrameCapture::GuestWrite(addr, size, FrameCapture::WriteSource::CommandWrite);
+    }
     buffer_cache.DropShadows(addr, size);
     // An invalidation would read the GPU's data back over these bytes first (a readback).
     if (!buffer_cache.UpdateGpuWritten(addr, std::span{static_cast<const u8*>(data), size})) {
@@ -5125,6 +5248,9 @@ void Rasterizer::NoteCommandWrite(VAddr addr, const void* data, u64 size, bool r
 void Rasterizer::OnCpuWrite(VAddr addr, u64 size) {
     PsStats::g_c_cpu_write_notes.fetch_add(1, std::memory_order_relaxed);
     PsStats::g_cb_cpu_write_note.fetch_add(size, std::memory_order_relaxed);
+    if (FrameCapture::Active()) {
+        FrameCapture::GuestWrite(addr, size, FrameCapture::WriteSource::CpuWriteNote);
+    }
     if (IsMapped(addr, size)) {
         InvalidateAfterWrite(addr, size);
         buffer_cache.NoteCpuWriteRange(addr, size);
@@ -5143,6 +5269,9 @@ bool Rasterizer::OnWriteFault(VAddr addr, bool assume_locks, u64 guest_rip) {
     DrainDrawPipe();
     if (!InvalidateMemory(addr, 8, assume_locks)) {
         return false;
+    }
+    if (FrameCapture::Active()) {
+        FrameCapture::GuestWrite(addr, 8, FrameCapture::WriteSource::CpuWriteFault, guest_rip);
     }
     buffer_cache.ExtendWriteFault(addr, guest_rip);
     return true;
