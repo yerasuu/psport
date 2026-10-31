@@ -10,8 +10,10 @@
  * same functions. System modules' exports win over the host runtime's (binding kinds 3 and 4)
  * except for libraries named in --hle, so an own implementation can stand in for one and be
  * compared with it, and for those the port implements unless --lle names them. System modules that
- * are clients of system services are never linked (ipmi_client). Modules the game loads by path
- * win too (kinds 5 and 6), as the PS4 linker rebinds imports once one is loaded. */
+ * are clients of system services are never linked (ipmi_client), nor those that draw through the
+ * system dialog process while the port serves every import of their library (cdlg_client). Modules
+ * the game loads by path win too (kinds 5 and 6), as the PS4 linker rebinds imports once one is
+ * loaded. */
 #define _GNU_SOURCE
 #include "loader.h"
 #include "loader_traits.h"
@@ -58,6 +60,10 @@ typedef struct {
     Map versionless_map;
     int is_versionless_indexed;
     List imported_libraries, module_names, deferred, from_system, system_stems, system_paths, bundled_stems, bundled_names;
+    /* cdlg_client's answers: the libraries found to draw through the dialog process with their
+     * reasons, the system modules that import no *Cdlg* call themselves, and the libraries already
+     * reported as served by the port. */
+    List cdlg_clients, cdlg_reasons, cdlg_free, cdlg_served;
 } Linker;
 
 static void *grow(void *p_array, size_t *p_capacity, size_t c_used, size_t cb_element) {
@@ -573,6 +579,78 @@ static int ipmi_client(const char *sz_path, char *sz_why, size_t cb_why) {
     g_sz_loader_file = NULL;
     return is_found;
 }
+/* A *Cdlg* call of libSceLncUtil the module imports, written to why; the libraries it imports are
+ * added to p_out_libraries when given. */
+static int imports_cdlg(const char *sz_path, char *sz_why, size_t cb_why, List *p_out_libraries) {
+    LoaderModule m = {0};
+    g_sz_loader_file = sz_path;
+    loader_module(sz_path, &m);
+    int is_found = 0;
+    for (size_t i = 0; i < m.c_symbols; ++i) {
+        const LoaderIdentity *p_identity = &m.p_symbols[i].identity;
+        if (m.p_symbols[i].section || !p_identity->is_valid) continue;
+        const char *sz_library = p_identity->p_library->sz_name;
+        if (p_out_libraries && !list_has(p_out_libraries, sz_library)) list_add(p_out_libraries, sz_library);
+        const char *sz_symbol = runtime_symbol(p_identity->sz_nid);
+        if (!is_found && sz_symbol && strstr(sz_symbol, "Cdlg") && !strcmp(sz_library, "libSceLncUtil")) {
+            snprintf(sz_why, cb_why, "%s from %s", sz_symbol, sz_library);
+            is_found = 1;
+        }
+    }
+    free_module(&m);
+    g_sz_loader_file = NULL;
+    return is_found;
+}
+/* On the console these libraries hand their dialog to the system's common-dialog process, directly
+ * or through a module they import (libSceCommonDialog): libSceLncUtil's *Cdlg* calls and shared
+ * memory no process here maps. Linked, they fail on the services behind it (libSceSaveDataDialog's
+ * Open answered Atelier Ryza's save list with PARAM_INVALID) or wait for a dialog that never opens,
+ * so the port's own library serves them. One level of imports is followed: every such
+ * module reaches the process through libSceCommonDialog, which calls it itself. */
+static int cdlg_client(Linker *p_linker, const char *sz_library, const char *sz_path, char *sz_why, size_t cb_why) {
+    for (size_t i = 0; i < p_linker->cdlg_clients.c_items; ++i)
+        if (!strcmp(p_linker->cdlg_clients.pp_items[i], sz_library)) {
+            snprintf(sz_why, cb_why, "%s", p_linker->cdlg_reasons.pp_items[i]);
+            return 1;
+        }
+    List libraries = {0};
+    int is_client = imports_cdlg(sz_path, sz_why, cb_why, &libraries);
+    for (size_t i = 0; i < libraries.c_items && !is_client; ++i) {
+        const char *sz_dependency = libraries.pp_items[i];
+        if (!strcmp(sz_dependency, sz_library) || list_has(&p_linker->cdlg_free, sz_dependency)) continue;
+        char sz_dependency_path[4096], sz_dependency_why[192];
+        PsHostStat st;
+        snprintf(sz_dependency_path, sizeof(sz_dependency_path), "%.*s/%s.sprx", (int)(strrchr(sz_path, '/') - sz_path), sz_path, sz_dependency);
+        if (ps_host_fs_stat(sz_dependency_path, &st) || !imports_cdlg(sz_dependency_path, sz_dependency_why, sizeof(sz_dependency_why), NULL)) {
+            list_add(&p_linker->cdlg_free, sz_dependency);
+            continue;
+        }
+        snprintf(sz_why, cb_why, "%s through %s", sz_dependency_why, sz_dependency);
+        is_client = 1;
+    }
+    for (size_t i = 0; i < libraries.c_items; ++i) free(libraries.pp_items[i]);
+    free(libraries.pp_items);
+    if (is_client) {
+        list_add(&p_linker->cdlg_clients, sz_library);
+        list_add(&p_linker->cdlg_reasons, sz_why);
+    }
+    return is_client;
+}
+/* The imports of the library, by everything linked so far, the port has neither a function nor a
+ * stub for; the first is named in first. */
+static size_t count_unserved(const Linker *p_linker, const char *sz_library, char *sz_first, size_t cb_first) {
+    size_t c_unserved = 0;
+    for (size_t i = 0; i < p_linker->c_imports; ++i) {
+        const LoaderIdentity *p_identity = &p_linker->p_imports[i].id;
+        if (strcmp(p_identity->p_library->sz_name, sz_library) || runtime_library_serves(p_identity->sz_nid)) continue;
+        if (!c_unserved++) {
+            const char *sz_symbol = runtime_symbol(p_identity->sz_nid);
+            if (sz_symbol) snprintf(sz_first, cb_first, "%s", sz_symbol);
+            else snprintf(sz_first, cb_first, "%.*s", (int)p_identity->nid_length, p_identity->sz_nid);
+        }
+    }
+    return c_unserved;
+}
 /* Bundled and system modules whose library something linked imports and nothing linked provides:
  * the system ones in their order, then the bundled ones no system module shares a name with. */
 static void link_wanted(Linker *p_linker) {
@@ -590,7 +668,8 @@ static void link_wanted(Linker *p_linker) {
         size_t s = 0;
         while (strcmp(p_linker->system_stems.pp_items[s], sz_library)) ++s;
         char sz_why[256];
-        if (ipmi_client(p_linker->system_paths.pp_items[s], sz_why, sizeof(sz_why))) {
+        const char *sz_file = strrchr(p_linker->system_paths.pp_items[s], '/') + 1;
+        if (!list_has(&p_linker->cdlg_clients, sz_library) && ipmi_client(p_linker->system_paths.pp_items[s], sz_why, sizeof(sz_why))) {
             printf("Loader: system module %s not linked, the port serves %s: it is a client of a system service (imports %s)\n",
                    strrchr(p_linker->system_paths.pp_items[s], '/') + 1, sz_library, sz_why);
             list_remove(&p_linker->system_stems, s);
@@ -599,7 +678,22 @@ static void link_wanted(Linker *p_linker) {
             --candidates;
             continue;
         }
-        const char *sz_file = strrchr(p_linker->system_paths.pp_items[s], '/') + 1;
+        /* Asked again on every pass while not linked: a module linked later may import from the
+         * library what the port lacks, and only the console's module then has it. */
+        if (cdlg_client(p_linker, sz_library, p_linker->system_paths.pp_items[s], sz_why, sizeof(sz_why))) {
+            char sz_first[256];
+            const size_t c_unserved = count_unserved(p_linker, sz_library, sz_first, sizeof(sz_first));
+            if (!c_unserved) {
+                if (!list_has(&p_linker->cdlg_served, sz_library)) {
+                    printf("Loader: system module %s not linked, the port serves %s: it draws through the system dialog process (imports %s)\n",
+                           sz_file, sz_library, sz_why);
+                    list_add(&p_linker->cdlg_served, sz_library);
+                }
+                continue;
+            }
+            printf("Loader: system module %s linked although it draws through the system dialog process (imports %s): the port lacks %zu of the imports of %s, first %s\n",
+                   sz_file, sz_why, c_unserved, sz_library, sz_first);
+        }
         list_add(&p_linker->module_names, sz_file);
         list_add(&p_linker->from_system, sz_file);
     }

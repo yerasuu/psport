@@ -121,7 +121,7 @@ static PsNetResolveFn module_resolve(void) {
 }
 
 uintptr_t runtime_net_resolve(const char *sz_name) {
-    if (!runtime_net_enabled()) return 0;
+    if (!runtime_net_enabled() || g_is_runtime_net_held) return 0;
     const char *sz_symbol=runtime_symbol(sz_name);
     if (!runtime_net_symbol(sz_symbol)) return 0;
     const PsNetResolveFn pfn_resolve=module_resolve();

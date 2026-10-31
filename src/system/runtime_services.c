@@ -64,6 +64,20 @@ static ABI int32_t user_list(int32_t *p_ids) {
     if (!p_ids) return USER_INVALID_ARGUMENT;
     p_ids[0]=USER_ID; p_ids[1]=p_ids[2]=p_ids[3]=-1; return 0;
 }
+/* libSceUserService looks the id up in its list of logged-in users: 1 when there, else 0, and
+ * NOT_INITIALIZED as the result before Initialize. */
+static ABI int32_t user_is_logged_in(int32_t id) {
+    if (!__atomic_load_n(&s_is_user_initialized,__ATOMIC_ACQUIRE)) return USER_NOT_INITIALIZED;
+    return id==USER_ID;
+}
+/* SceUserServiceRegisteredUserIdList holds SCE_USER_SERVICE_MAX_REGISTER_USERS (16) ids; the ones
+ * no user is registered under are -1. */
+static ABI int32_t user_registered_list(int32_t *p_ids) {
+    if (!p_ids) return USER_INVALID_ARGUMENT;
+    p_ids[0]=USER_ID;
+    for (int i=1;i<16;++i) p_ids[i]=-1;
+    return 0;
+}
 static ABI int32_t user_name(int32_t id,char *sz_name,uint64_t cb_name) {
     if (id!=USER_ID || !sz_name) return USER_INVALID_ARGUMENT;
     const char *sz_value=runtime_env("PS_USER_NAME",DEFAULT_USER_NAME);
@@ -893,6 +907,7 @@ static const RuntimeExport s_exports[]={
     {"sceUserServiceGetUserName",user_name}, {"sceUserServiceGetEvent",user_event},
     {"sceUserServiceGetUserColor",user_color}, {"sceUserServiceRegisterEventCallback",runtime_stub},
     {"sceUserServiceIsSharePlayClientUser",user_is_share_play_client},
+    {"sceUserServiceIsLoggedIn",user_is_logged_in}, {"sceUserServiceGetRegisteredUserIdList",user_registered_list},
     {"sceSystemServiceParamGetInt",system_param}, {"sceSystemServiceParamGetString",system_param_string},
     {"sceSystemServiceGetStatus",system_status}, {"sceSystemServiceGetHdrToneMapLuminance",hdr_tone_map_luminance},
     {"sceSystemServiceDisableMusicPlayer",runtime_stub}, {"sceSystemServiceReenableMusicPlayer",runtime_stub},

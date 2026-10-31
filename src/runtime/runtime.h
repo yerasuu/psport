@@ -24,6 +24,11 @@ void runtime_start(uint64_t capabilities);
 uintptr_t runtime_resolve(const char *sz_name, int is_data);
 /* The libraries after the runtime's own exports (runtime_resolve.c), in a fixed order. */
 uintptr_t runtime_library_resolve(const char *sz_name);
+/* Whether those libraries have a function or a stub for the import, asked by the loader before the
+ * game's image exists: the online module, which starts with that image, is left out of the answer. */
+int runtime_library_serves(const char *sz_nid);
+/* Set only while runtime_library_serves asks: runtime_net_resolve then answers without the module. */
+extern int g_is_runtime_net_held;
 /* Equal NIDs whatever their "#<library>#<module>" scope: one title's scope letters are not another's. */
 int runtime_same_nid(const char *sz_a, const char *sz_b);
 /* Linked modules' dynamic TLS ids run from 2 (1 is the eboot's static TLS) below this. */

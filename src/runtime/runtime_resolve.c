@@ -22,6 +22,13 @@ uintptr_t runtime_library_resolve(const char *sz_name) {
     }
     return 0;
 }
+int g_is_runtime_net_held;
+int runtime_library_serves(const char *sz_nid) {
+    g_is_runtime_net_held=1;
+    const int is_served=runtime_library_resolve(sz_nid)!=0;
+    g_is_runtime_net_held=0;
+    return is_served;
+}
 /* The NIDs before any "#<library>#<module>" scope are equal. */
 int runtime_same_nid(const char *sz_a, const char *sz_b) {
     while (*sz_a && *sz_a!='#' && *sz_a==*sz_b) ++sz_a, ++sz_b;
