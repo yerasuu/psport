@@ -254,6 +254,25 @@ trigger again while a multi-frame capture runs removes the file and is logged
 (`Frame capture: trigger ignored: a capture of <n> frames is in progress`); with 1, such a touch
 still arms the next capture once the current one is written.
 
+`PS_CAPTURE_DUMP=1` writes, for every recorded frame, colour attachment 0 of each pass as a PNG
+beside the frame file (the depth attachment for a pass without one), `2` every colour attachment
+and the depth attachment: `<frame file stem>_p<pass>_c<k>.png` and `_p<pass>_d.png`, `<pass>` the
+frame file's `#<pass>`, the stem holding `_<k>` with `PS_CAPTURE_FRAMES`. At the end of each pass
+the attachment is blitted on the GPU into a small image (linear filtering where the format allows
+it, nearest for depth; at most 480x270, aspect ratio kept, never enlarged) and copied to a 64 MiB
+host buffer; a format the blit cannot take (integer, stencil only, no blit support, linear
+tiling) is read through the summaries' 64x64 grid instead and enlarged nearest to the same size.
+Conversion on the CPU: 8- and 16-bit UNORM as stored, sRGB encoded back after the blit's
+linearisation, SNORM as (x+1)/2, float formats (R16G16B16A16F, B10G11R11, R32F...) through
+x/(1+x) and gamma 2.2, integer formats and depth stretched to the image's own min/max; one channel
+is grey, alpha is dropped, non-finite texels are magenta. `<stem>_dump.txt` lists every image
+(file, pass, attachment, target address, format, size, level, layer, output size, method,
+conversion, min/max and non-finite count) and every attachment not dumped with its reason; the
+frame file's header counts them, names the formats that took the grid, and the log prints each
+depth image's min/max. Budgets: 160 images per frame, then `not dumped: budget`; a full staging
+buffer is drained (the GPU waited for) where the pass end allows a wait, otherwise the image is
+skipped as over the budget. Only recorded frames record anything or wait.
+
 Every pass also lists each of its draws on a line of its own, indirect draws included (marked
 `indirect`): `#<pass> draw <i>: vs <16 hex digits> ps <16 hex digits> nth <n> target <W>x<H>
 <address>`, `ps` all zeros for a draw without a pixel shader, `nth` the draw's index, from 0,

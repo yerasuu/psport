@@ -11,6 +11,8 @@
 // It also gives every draw its viewport, scissor, rasterizer and index/vertex inputs, Vulkan
 // occlusion and pipeline statistics queries around it, and every pass that writes depth or stencil
 // whole-image counts of the depth and stencil texels it changed.
+// PS_CAPTURE_DUMP=1 writes each pass's colour attachment 0 as a small PNG beside the frame file,
+// 2 every attachment (vk_frame_capture_dump.h).
 
 #pragma once
 

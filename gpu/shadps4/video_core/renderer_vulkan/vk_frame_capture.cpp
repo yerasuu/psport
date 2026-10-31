@@ -18,6 +18,7 @@
 #include "video_core/buffer_cache/buffer.h"
 #include "video_core/renderer_vulkan/vk_common.h"
 #include "video_core/renderer_vulkan/vk_frame_capture_draw.h"
+#include "video_core/renderer_vulkan/vk_frame_capture_dump.h"
 #include "video_core/renderer_vulkan/vk_graphics_pipeline.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_runtime.h"
@@ -83,6 +84,12 @@ struct Readback {
     u32 cb_stride{};
     u64 off_data{};
     std::string skipped; ///< why nothing was read back; empty when it was
+};
+
+/// A PS_CAPTURE_DUMP target the blit could not take, read through the summaries' grid.
+struct DumpGrid {
+    u32 i_item{};
+    Readback readback;
 };
 
 struct Sample {
@@ -174,6 +181,9 @@ struct Entry {
     bool is_dispatch_copied{};
     FullPlanes full_start;
     std::string full_text;
+    // PS_CAPTURE_DUMP only.
+    bool is_dumped{};
+    std::vector<DumpGrid> dump_grids;
 };
 
 constexpr u32 SUMMARY_GRID = 64;
@@ -880,9 +890,68 @@ void SummarizePassEnd(Entry& entry, bool is_wait_allowed) {
     entry.full_text = CompareFull(entry.full_start, end);
 }
 
+void DumpTarget(Entry& entry, const ImageRef& ref, CaptureDump::Source source,
+                bool is_wait_allowed) {
+    if (!CaptureDump::HasRoom(source)) {
+        return;
+    }
+    VideoCore::Image* p_image = Resolve(ref);
+    if (!p_image || !s_p_runtime) {
+        CaptureDump::Skip(source, "image gone before its dump");
+        return;
+    }
+    const auto& ci = p_image->backing->image.image_ci;
+    source.format = ci.format;
+    source.width = std::max(ci.extent.width >> ref.i_level, 1u);
+    source.height = std::max(ci.extent.height >> ref.i_level, 1u);
+    source.i_level = ref.i_level;
+    source.i_layer = ref.i_layer;
+    if (auto obstacle = CopyObstacle(*p_image, ref.i_level, ref.i_layer); !obstacle.empty()) {
+        CaptureDump::Skip(source, std::move(obstacle));
+        return;
+    }
+    std::string reason;
+    if (CaptureDump::RecordBlit(*s_p_runtime, *p_image, source, is_wait_allowed, reason) !=
+        CaptureDump::BlitResult::Fallback) {
+        return;
+    }
+    const u32 i_item = CaptureDump::BeginGrid(source, std::move(reason));
+    // The summaries' counters stay theirs: the grid belongs to the dump.
+    const u32 c_readbacks = s_c_readbacks;
+    const u32 c_skipped = s_c_skipped;
+    std::vector<Readback> grids;
+    ReadBack(*p_image, ref.id, ref.i_level, ref.i_layer, "dump", grids);
+    s_c_readbacks = c_readbacks;
+    s_c_skipped = c_skipped;
+    entry.dump_grids.push_back({i_item, std::move(grids.front())});
+}
+
+/// PS_CAPTURE_DUMP: the pass's attachments as images, after its summaries.
+void DumpPassEnd(Entry& entry, u32 i_pass, bool is_wait_allowed) {
+    if (!CaptureDump::Level() || entry.is_compute || entry.is_copy || entry.is_dumped) {
+        return;
+    }
+    entry.is_dumped = true;
+    const bool is_every_target = CaptureDump::Level() >= 2;
+    const bool has_color0 = !entry.color_refs.empty() && entry.color_refs[0].id;
+    for (u32 i = 0; i < entry.color_refs.size() && (i == 0 || is_every_target); ++i) {
+        if (entry.color_refs[i].id) {
+            DumpTarget(entry, entry.color_refs[i],
+                       {.i_pass = i_pass, .i_color = i, .va_target = entry.colors[i].va_target},
+                       is_wait_allowed);
+        }
+    }
+    if (entry.depth_ref.id && (is_every_target || !has_color0)) {
+        DumpTarget(entry, entry.depth_ref,
+                   {.i_pass = i_pass, .is_depth = true, .va_target = entry.depth.va_target},
+                   is_wait_allowed);
+    }
+}
+
 void SummarizeOpenPass(bool is_wait_allowed = true) {
     if (!s_entries.empty()) {
         SummarizePassEnd(s_entries.back(), is_wait_allowed);
+        DumpPassEnd(s_entries.back(), u32(s_entries.size() - 1), is_wait_allowed);
     }
 }
 
@@ -1164,11 +1233,17 @@ void StartRecording() {
     s_c_gpu_copies = 0;
     s_c_gpu_copies_skipped = 0;
     s_pending_bindings.clear();
-    if (!SummarizeLevel() || !s_p_runtime) {
+    if (!s_p_runtime) {
         return;
     }
-    if (!s_p_readback) {
+    if (CaptureDump::Level()) {
+        CaptureDump::StartFrame(*s_p_runtime);
+    }
+    if (!s_p_readback && (SummarizeLevel() || CaptureDump::Level())) {
         s_p_readback = CreateReadbackBuffer(CB_READBACK, "frame capture readback");
+    }
+    if (!SummarizeLevel()) {
+        return;
     }
     if (!s_p_gpu_copies) {
         s_p_gpu_copies = CreateReadbackBuffer(CB_GPU_COPIES, "frame capture buffer copies");
@@ -1298,6 +1373,32 @@ std::string FindProducer(size_t i_entry, VAddr va_range, u64 cb_range) {
     return {};
 }
 
+/// The dump's grids decoded from the readback buffer, then its images written beside the frame
+/// file; the header line of the frame file, empty without PS_CAPTURE_DUMP.
+std::string WriteDump(const u8* p_readback, const std::string& stem) {
+    if (!CaptureDump::Level() || !s_p_runtime) {
+        return {};
+    }
+    for (const auto& e : s_entries) {
+        for (const auto& [i_item, r] : e.dump_grids) {
+            if (!r.skipped.empty() || !p_readback) {
+                CaptureDump::FailGrid(i_item,
+                                      r.skipped.empty() ? "readback not mapped" : r.skipped);
+                continue;
+            }
+            std::vector<float> rgba;
+            rgba.reserve(size_t(r.c_columns) * r.c_rows * 4);
+            for (u32 i = 0; i < r.c_columns * r.c_rows; ++i) {
+                const auto values =
+                    DecodeTexel(r.layout, p_readback + r.off_data + u64(i) * r.cb_stride);
+                rgba.insert(rgba.end(), values.begin(), values.end());
+            }
+            CaptureDump::FillGrid(i_item, rgba, r.c_columns, r.c_rows);
+        }
+    }
+    return CaptureDump::WriteFrame(*s_p_runtime, stem);
+}
+
 void Write(VAddr presented) {
     const u8* p_readback = FinishReadbacks();
     const u8* p_gpu_copies =
@@ -1313,6 +1414,7 @@ void Write(VAddr presented) {
         c_frames == 1
             ? std::format("{}/frame_{}.txt", sz_dir ? sz_dir : ".", s_id_capture)
             : std::format("{}/frame_{}_{}.txt", sz_dir ? sz_dir : ".", s_id_capture, s_i_frame);
+    const std::string dump_line = WriteDump(p_readback, path.substr(0, path.size() - 4));
     FILE* p_file = std::fopen(path.c_str(), "w");
     if (!p_file) {
         std::printf("Frame capture: cannot write %s\n", path.c_str());
@@ -1349,6 +1451,9 @@ void Write(VAddr presented) {
                      s_c_gpu_copies, static_cast<unsigned long long>(s_off_gpu_copies >> 10),
                      s_c_gpu_copies_skipped,
                      static_cast<unsigned long long>(CB_GPU_RANGE_MAX >> 10));
+    }
+    if (!dump_line.empty()) {
+        std::fprintf(p_file, "%s\n", dump_line.c_str());
     }
     const auto write_summaries = [&](const Entry& e) {
         if (!e.readbacks.empty() && p_readback) {
@@ -1646,6 +1751,12 @@ void FrameCapture::BeginPass(std::span<const PassTarget> colors, PassTarget dept
     }
     SummarizeOpenPass();
     Entry entry{.is_compute = false, .colors = std::move(targets), .depth = d};
+    if (SummarizeLevel() || CaptureDump::Level()) {
+        if (p_depth) {
+            entry.depth_ref = {depth.id, p_depth->image_uid, depth.i_level, depth.i_layer};
+        }
+        entry.color_refs = std::move(refs);
+    }
     if (SummarizeLevel()) {
         entry.tick = CurrentTick();
         entry.route = sz_route ? sz_route : "";
@@ -1655,9 +1766,7 @@ void FrameCapture::BeginPass(std::span<const PassTarget> colors, PassTarget dept
         }
         if (p_depth) {
             entry.identities.push_back(Identify(*p_depth, depth.id));
-            entry.depth_ref = {depth.id, p_depth->image_uid, depth.i_level, depth.i_layer};
         }
-        entry.color_refs = std::move(refs);
         SummarizePassStart(entry);
         if (entry.depth_ref.id && s_p_full_start) {
             entry.full_start = CopyFull(entry.depth_ref, *s_p_full_start);
