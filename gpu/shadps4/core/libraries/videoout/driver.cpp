@@ -770,6 +770,19 @@ void VideoOutDriver::Flip(const Request& req) {
                             "system memory\n",
                             tilings / double(frames), PsStats::g_cb_local_tiling.exchange(0) / (frames * 1e6));
             }
+            {
+                const u64 c_readbacks = PsStats::g_c_tiled_readbacks.exchange(0);
+                const u64 c_over_bound = PsStats::g_c_tiled_readbacks_over_bound.exchange(0);
+                const u64 c_untileable = PsStats::g_c_tiled_readbacks_untileable.exchange(0);
+                if (c_readbacks != 0 || c_untileable != 0) {
+                    std::printf("Tiled readbacks: %.1f images/frame, %.1f KB/frame written back for the "
+                                "CPU; skipped %.1f binds/frame over PS_READBACK_TILED_KB, %.1f/frame "
+                                "without a tiler\n",
+                                c_readbacks / double(frames),
+                                PsStats::g_cb_tiled_readback.exchange(0) / (frames * 1e3),
+                                c_over_bound / double(frames), c_untileable / double(frames));
+                }
+            }
             if (const u64 allocs = PsStats::g_c_gpu_range_allocs.exchange(0)) {
                 std::printf("Guest GPU memory: %.0f ranges/s handed out, %.2f MB/s\n", allocs / window,
                             PsStats::g_cb_gpu_range_alloc.exchange(0) / (window * 1e6));

@@ -48,8 +48,13 @@ public:
 
     /// psport: `is_host_destination` says the bytes at `out_offset` are system memory the GPU
     /// writes over the bus, whatever `out_buffer`'s own type (a sparse arena's block in place).
-    void TileImage(Image& in_image, std::span<vk::BufferImageCopy> buffer_copies,
+    /// False: nothing recorded (no tiler for the image, or no memory to tile it; logged).
+    bool TileImage(Image& in_image, std::span<vk::BufferImageCopy> buffer_copies,
                    const VideoCore::Buffer* out_buffer, u64 out_offset, bool is_host_destination);
+
+    /// psport: TileImage writes a tiled image back only where a tiler exists for its tile mode and
+    /// pixel width; elsewhere it leaves the destination untouched.
+    bool HasTiler(const ImageInfo& info);
 
     /// psport: the buffer is null when there was no memory to detile; the caller uploads later.
     std::pair<const Buffer*, u64> DetileImage(const VideoCore::Buffer* in_buffer, u64 in_offset,

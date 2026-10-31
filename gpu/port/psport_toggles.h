@@ -130,6 +130,11 @@ inline std::atomic<std::uint64_t> g_c_arena_spans_split{0}, g_c_arena_spans_clam
 inline std::atomic<std::uint64_t> g_c_shadow_copies{0}, g_cb_shadow{0};
 /// Images tiled back into system memory: through VRAM with one copy (LocalTiling), and bytes.
 inline std::atomic<std::uint64_t> g_c_local_tilings{0}, g_cb_local_tiling{0};
+/// Tiled render targets and storage images written back in their tiled layout for the CPU to read:
+/// images and bytes; binds skipped over PS_READBACK_TILED_KB, and downloads skipped for a tile mode
+/// or pixel width without a tiler.
+inline std::atomic<std::uint64_t> g_c_tiled_readbacks{0}, g_cb_tiled_readback{0},
+    g_c_tiled_readbacks_over_bound{0}, g_c_tiled_readbacks_untileable{0};
 /// Submissions sent early because the GPU had finished everything before them.
 inline std::atomic<std::uint64_t> g_c_idle_flushes{0};
 /// EOP fences with data: decoded, and their labels written (a growing gap: lost fences, guest leaks).

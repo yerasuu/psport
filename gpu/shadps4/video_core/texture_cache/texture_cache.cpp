@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <limits>
+#include <magic_enum/magic_enum.hpp>
 #include <xxhash.h>
 
 #include "psport_toggles.h"
@@ -74,7 +75,11 @@ TextureCache::TextureCache(const Vulkan::Instance& instance_, Vulkan::Scheduler&
       buffer_cache{buffer_cache_}, tracker{tracker_}, blit_helper{instance, scheduler},
       tile_manager{instance, scheduler, runtime, buffer_cache.GetStreamBuffer()},
       m_substitutes{instance, scheduler, runtime, buffer_cache},
-      readback_linear_images{EmulatorSettings.IsReadbackLinearImagesEnabled()} {
+      readback_linear_images{EmulatorSettings.IsReadbackLinearImagesEnabled()},
+      m_cb_tiled_readback_limit{u64(EmulatorSettings.GetReadbackTiledLimitKb()) << 10} {
+    std::printf("Texture cache: tiled render targets and storage images up to %llu KiB are written "
+                "back to the game's memory after each GPU write (PS_READBACK_TILED_KB)\n",
+                (unsigned long long)(m_cb_tiled_readback_limit >> 10));
 
     m_default_sampler = Vulkan::Check<"create the default sampler">(
         instance.GetDevice().createSamplerUnique({
@@ -185,14 +190,134 @@ void TextureCache::ProcessDownloadImages() {
     std::unique_lock lk{download_images_mutex};
     downloads_queued.store(false, std::memory_order_relaxed);
     for (const ImageId image_id : download_images) {
-        DownloadImageMemory(image_id, true);
+        // psport: tiled images wider than 8 texels land at a later fence once the GPU is done,
+        // since a Finish here would stall the frame after every write of such a target.
+        const ImageInfo& info = slot_images[image_id].info;
+        DownloadImageMemory(image_id, !info.props.is_tiled || info.size.width <= 8);
     }
     download_images.clear();
+    LandTiledReadbacks();
+    if (!m_tiled_readbacks.empty()) {
+        downloads_queued.store(true, std::memory_order_relaxed);
+    }
+}
+
+bool TextureCache::ShouldReadBackOnWrite(const Image& image) const {
+    if (!image.info.props.is_tiled || image.info.size.width <= 8) {
+        return readback_linear_images;
+    }
+    // psport: a tiled target costs a tiling dispatch and a copy over the bus per write, so only
+    // small ones the CPU may read (readback and query targets) go back; full-screen targets
+    // (about 8 MiB at 1080p and 32 bits) would cost that every frame for data no CPU reads.
+    if (image.info.guest_size > m_cb_tiled_readback_limit) {
+        PsStats::g_c_tiled_readbacks_over_bound.fetch_add(1, std::memory_order_relaxed);
+        return false;
+    }
+    return true;
+}
+
+bool TextureCache::DownloadTiledImageMemory(Image& image, bool sync) {
+    const ImageInfo& info = image.info;
+    if (!tile_manager.HasTiler(info)) {
+        PsStats::g_c_tiled_readbacks_untileable.fetch_add(1, std::memory_order_relaxed);
+        if (False(image.flags & ImageFlagBits::TilerMissing)) {
+            image.flags |= ImageFlagBits::TilerMissing;
+            LOG_WARNING(Render_Vulkan,
+                        "Tiled image {:#x} {}x{} tile mode {} ({}), {} bits, has no tiler: not "
+                        "written back to the game's memory",
+                        info.guest_address, info.size.width, info.size.height,
+                        magic_enum::enum_name(info.tile_mode), u32(info.tile_mode), info.num_bits);
+        }
+        return false;
+    }
+    if (info.guest_address == 0) {
+        return true;
+    }
+    boost::container::small_vector<vk::BufferImageCopy, 8> copies;
+    for (u32 mip = 0; mip < info.resources.levels; ++mip) {
+        const auto& mip_info = info.mips_layout[mip];
+        if (mip_info.offset + mip_info.size > info.guest_size) {
+            break;
+        }
+        copies.push_back(vk::BufferImageCopy{
+            .bufferOffset = mip_info.offset,
+            .bufferRowLength = mip_info.pitch,
+            .bufferImageHeight = mip_info.height,
+            .imageSubresource{
+                .aspectMask = image.aspect_mask & ~vk::ImageAspectFlagBits::eStencil,
+                .mipLevel = mip,
+                .baseArrayLayer = 0,
+                .layerCount = info.resources.layers,
+            },
+            .imageOffset = {0, 0, 0},
+            .imageExtent = {std::max(info.size.width >> mip, 1u),
+                            std::max(info.size.height >> mip, 1u),
+                            std::max(info.size.depth >> mip, 1u)},
+        });
+    }
+    if (copies.empty()) {
+        return true;
+    }
+    // As the linear path: the arena first, so that bindings over this memory read the image in
+    // stream order; where it is the game's memory nothing else is needed.
+    auto arena_copies = copies;
+    const auto [arena, off_arena] =
+        buffer_cache.ObtainBuffer(info.guest_address, info.guest_size, true);
+    if (!arena ||
+        !tile_manager.TileImage(image, arena_copies, arena, off_arena,
+                                buffer_cache.IsHostMemory(arena, info.guest_address, info.guest_size))) {
+        LOG_ERROR_COUNTED(Render_Vulkan, "Tiled image at {:#x} not written back to its memory",
+                          info.guest_address);
+        return true;
+    }
+    PsStats::g_c_tiled_readbacks.fetch_add(1, std::memory_order_relaxed);
+    PsStats::g_cb_tiled_readback.fetch_add(info.guest_size, std::memory_order_relaxed);
+    if (buffer_cache.IsInPlace(info.guest_address, info.guest_size)) {
+        return true;
+    }
+    const auto download =
+        runtime.GetStagingPool().Request(info.guest_size, MemoryType::HostCached, 16, true);
+    if (!download.buffer) {
+        LOG_ERROR_COUNTED(Render_Vulkan, "Tiled image at {:#x} not copied to the game's memory: "
+                          "no staging memory", info.guest_address);
+        return true;
+    }
+    if (!tile_manager.TileImage(image, copies, download.buffer, download.offset, true)) {
+        runtime.GetStagingPool().FreeDeferred(download);
+        return true;
+    }
+    m_tiled_readbacks.push_back({download, info.guest_address, info.guest_size,
+                                 scheduler.CurrentTick()});
+    if (sync) {
+        scheduler.Finish();
+        LandTiledReadbacks();
+    }
+    return true;
+}
+
+void TextureCache::LandTiledReadbacks() {
+    while (!m_tiled_readbacks.empty() && scheduler.IsFree(m_tiled_readbacks.front().tick)) {
+        const TiledReadback readback = m_tiled_readbacks.front();
+        m_tiled_readbacks.pop_front();
+        readback.download.Invalidate();
+        PsFreeCheck::Check(readback.va_image, readback.cb_image, readback.download.mapped,
+                           PsFreeCheck::ImageDownload);
+        Core::Memory::Instance()->TryWriteBacking(std::bit_cast<u8*>(readback.va_image),
+                                                  readback.download.mapped, readback.cb_image);
+        buffer_cache.InvalidateMemory(readback.va_image, readback.cb_image, true);
+        runtime.GetStagingPool().FreeDeferred(readback.download);
+    }
 }
 
 void TextureCache::DownloadImageMemory(ImageId image_id, bool sync) {
     Image& image = slot_images[image_id];
     if (False(image.flags & ImageFlagBits::GpuModified) || !image.IsAllocated()) {
+        return;
+    }
+    // Tiled images at most 8 texels wide were copied back linearly before a tiler was used here;
+    // with none for their mode they still are.
+    if (image.info.props.is_tiled &&
+        (DownloadTiledImageMemory(image, sync) || image.info.size.width > 8)) {
         return;
     }
     const u32 download_size = image.info.pitch * image.info.size.height * image.info.size.depth *
@@ -1159,8 +1284,7 @@ ImageView& TextureCache::FindTexture(ImageId image_id, const ImageDesc& desc, Vi
     if (desc.type == BindingType::Storage) {
         image.flags |= ImageFlagBits::GpuModified;
         image.gpu_write_tick = scheduler.CurrentTick();
-        if (readback_linear_images && (!image.info.props.is_tiled || image.info.size.width <= 8) &&
-            image.info.guest_address != 0) {
+        if (image.info.guest_address != 0 && ShouldReadBackOnWrite(image)) {
             std::unique_lock lk{download_images_mutex};
             download_images.emplace(image_id);
             downloads_queued.store(true, std::memory_order_release);
@@ -1216,7 +1340,7 @@ ImageView& TextureCache::FindRenderTarget(ImageId image_id, const ImageDesc& des
     WatchImage(image, "render target");
     image.flags |= ImageFlagBits::GpuModified;
     image.gpu_write_tick = scheduler.CurrentTick();
-    if (readback_linear_images && (!image.info.props.is_tiled || image.info.size.width <= 8)) {
+    if (ShouldReadBackOnWrite(image)) {
         std::unique_lock lk{download_images_mutex};
         download_images.emplace(image_id);
         downloads_queued.store(true, std::memory_order_release);
@@ -1796,7 +1920,7 @@ void TextureCache::GarbageCollectImages() {
         const bool download = image.SafeToDownload();
         const bool tiled = image.info.IsTiled();
         // psport: images that cannot go now (GPU-written: their contents exist only here, and
-        // tiled ones cannot be written back at all) neither use up the deletions nor stay first
+        // tiled ones are not written back on eviction) neither use up the deletions nor stay first
         // in line. The oldest ten being such render targets stopped the collector for good, and
         // VRAM grew with every area visited up to the pressure mark (~10 GB on 16 GB).
         if ((tiled && download) || (download && !pressured)) {
@@ -2075,6 +2199,15 @@ void TextureCache::DeleteImage(ImageId image_id) {
         if (download_images.contains(image_id)) {
             download_images.erase(image_id);
         }
+        // A readback landing after the image is gone would write over whatever the game stores
+        // there next.
+        std::erase_if(m_tiled_readbacks, [&](const TiledReadback& readback) {
+            if (readback.va_image != image.info.guest_address) {
+                return false;
+            }
+            runtime.GetStagingPool().FreeDeferred(readback.download);
+            return true;
+        });
     }
 
     // Reclaim image and any image views it references.

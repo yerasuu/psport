@@ -309,7 +309,11 @@ std::pair<const Buffer*, u64> TileManager::DetileImage(const VideoCore::Buffer* 
     return {staging.buffer, staging.offset};
 }
 
-void TileManager::TileImage(Image& in_image, std::span<vk::BufferImageCopy> buffer_copies,
+bool TileManager::HasTiler(const ImageInfo& info) {
+    return info.props.is_tiled && GetTilingPipeline(info, true);
+}
+
+bool TileManager::TileImage(Image& in_image, std::span<vk::BufferImageCopy> buffer_copies,
                             const VideoCore::Buffer* out_buffer, u64 out_offset,
                             bool is_host_destination) {
     const auto& info = in_image.info;
@@ -318,11 +322,11 @@ void TileManager::TileImage(Image& in_image, std::span<vk::BufferImageCopy> buff
             copy.bufferOffset += out_offset;
         }
         runtime.DownloadImage(&in_image, out_buffer, buffer_copies);
-        return;
+        return true;
     }
     const vk::Pipeline pipeline = GetTilingPipeline(info, true);
     if (!pipeline) {
-        return;
+        return false;
     }
 
     TilingInfo params{};
@@ -343,7 +347,7 @@ void TileManager::TileImage(Image& in_image, std::span<vk::BufferImageCopy> buff
     if (!off_params || !staging.buffer) {
         LOG_ERROR_COUNTED(Render_Vulkan, "Image at {:#x} not written back: no memory to tile it",
                           info.guest_address);
-        return;
+        return false;
     }
     const vk::DescriptorBufferInfo params_buffer_info{
         .buffer = stream_buffer.Handle(),
@@ -399,7 +403,7 @@ void TileManager::TileImage(Image& in_image, std::span<vk::BufferImageCopy> buff
         runtime.CopyBuffer(local.buffer, out_buffer, {&copy, 1});
         PsStats::g_c_local_tilings.fetch_add(1, std::memory_order_relaxed);
         PsStats::g_cb_local_tiling.fetch_add(info.guest_size, std::memory_order_relaxed);
-        return;
+        return true;
     }
     // psport: recorded with copies of the descriptor infos (threaded recording).
     RecordTilingDispatch(pipeline, tiled_buffer_info, linear_buffer_info,
@@ -408,6 +412,7 @@ void TileManager::TileImage(Image& in_image, std::span<vk::BufferImageCopy> buff
     runtime.AccessBuffer(out_buffer, out_offset, info.guest_size,
                          vk::PipelineStageFlagBits2::eComputeShader,
                          vk::AccessFlagBits2::eShaderWrite);
+    return true;
 }
 
 } // namespace VideoCore

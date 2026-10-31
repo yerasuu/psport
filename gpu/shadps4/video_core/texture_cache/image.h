@@ -38,6 +38,7 @@ enum ImageFlagBits : u32 {
     GpuModified = 1 << 3, ///< Contents have been modified from the GPU
     Registered = 1 << 6,  ///< True when the image is registered
     Picked = 1 << 7,      ///< Temporary flag to mark the image as picked
+    TilerMissing = 1 << 8, ///< psport: no tiler for its tile mode, logged once for the image
 };
 DECLARE_ENUM_FLAG_OPERATORS(ImageFlagBits)
 

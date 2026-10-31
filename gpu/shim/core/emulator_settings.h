@@ -93,6 +93,7 @@ public:
     bool IsPipelineCacheEnabled() { static const auto value = Flag("PS_PIPELINE_CACHE", true); return value; }
     bool IsRcasEnabled() { static const auto value = Flag("PS_RCAS", true); return value; }
     bool IsReadbackLinearImagesEnabled() { static const auto value = Flag("PS_READBACK_LINEAR", true); return value; }
+    u32 GetReadbackTiledLimitKb() { static const auto value = u32(std::clamp(Number("PS_READBACK_TILED_KB", 64), 0L, 1L << 20)); return value; }
     bool IsRenderdocEnabled() { return false; }
     bool IsShaderCollect() { return false; }
     bool IsUserfaultfdTracking() { return false; }

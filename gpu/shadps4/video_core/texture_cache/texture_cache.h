@@ -9,6 +9,7 @@
 #include "psport_toggles.h"
 
 #include <condition_variable>
+#include <deque>
 #include <mutex>
 #include <optional>
 #include <thread>
@@ -21,6 +22,7 @@
 #include "common/slot_vector.h"
 #include "shader_recompiler/resource.h"
 #include "video_core/multi_level_page_table.h"
+#include "video_core/renderer_vulkan/vk_staging_buffer_pool.h"
 #include "video_core/texture_cache/blit_helper.h"
 #include "video_core/texture_cache/image.h"
 #include "video_core/texture_cache/image_view.h"
@@ -416,6 +418,17 @@ private:
     /// Copies image memory back to CPU.
     void DownloadImageMemory(ImageId image_id, bool sync = false);
 
+    /// psport: whether a GPU write to the image is copied back to the game's memory at the next
+    /// fence, so that a CPU sharing that memory reads it as on the console.
+    bool ShouldReadBackOnWrite(const Image& image) const;
+
+    /// psport: DownloadImageMemory for a tiled image: false when no tiler exists for its mode.
+    bool DownloadTiledImageMemory(Image& image, bool sync);
+
+    /// psport: copies tiled readbacks whose submission the GPU has finished into the game's
+    /// memory (all of them after a Finish). Called with download_images_mutex held.
+    void LandTiledReadbacks();
+
     /// Thread function for copying downloaded images out to CPU memory.
     void DownloadedImagesThread(const std::stop_token& token);
 
@@ -491,6 +504,15 @@ private:
     tsl::robin_map<u64, Sampler> samplers;
     vk::UniqueSampler m_default_sampler; ///< psport: stands in for a sampler that fails
     std::unordered_set<ImageId> download_images;
+    struct TiledReadback {
+        Vulkan::StagingBufferRef download;
+        VAddr va_image;
+        u32 cb_image;
+        u64 tick;
+    };
+    /// psport: tiled images copied to host memory by the GPU, waiting for it to finish (guarded
+    /// by download_images_mutex), oldest first.
+    std::deque<TiledReadback> m_tiled_readbacks;
     u64 total_used_memory = 0;
     u64 gc_evictions = 0, gc_downloads = 0; ///< psport: pressure report
     /// psport: a pass over the trigger that freed nothing (everything old enough GPU-written and
@@ -524,6 +546,7 @@ private:
     Common::LeastRecentlyUsedCache<ImageId, u64> lru_cache;
     Common::LeastRecentlyUsedCache<u64, u64> sampler_lru_cache;
     const bool readback_linear_images;
+    const u64 m_cb_tiled_readback_limit;
     PageTable page_table;
     std::mutex mutex;
     static inline std::atomic<u64> vram_short_until{0}; ///< steady seconds (NoteVramShort)
