@@ -15,7 +15,7 @@
 namespace Serialization {
 /* You should increment versions below once corresponding serialization scheme is changed. */
 static constexpr u32 ShaderBinaryVersion = 16u; // psport: valid-mask exports outside EXEC scopes
-static constexpr u32 ShaderMetaVersion = 12u; // psport: BufferResource::dynamic
+static constexpr u32 ShaderMetaVersion = 13u; // psport: Info::stores, stream-out copy data
 static constexpr u32 PipelineKeyVersion = 6u; // psport: SerializationSupport::xfb_stride
 } // namespace Serialization
 
@@ -550,6 +550,25 @@ void Info::Serialize(Serialization::Archive& ar) const {
 
     info.Write(this, sizeof(InfoPersistent));
     info.Write(flattened_ud_buf);
+    // psport: draws read these from a preloaded program's Info (the exports for alpha to mask
+    // and layered depth, the stream-out records for transform feedback); without them a warm
+    // cache dropped every stream-out capture.
+    info.Write(&stores, sizeof(stores));
+    const auto& copy = gs_copy_data;
+    info.Write(u8(copy.stream_out_parsed));
+    info.Write(u32(copy.stream_out_buffers.size()));
+    for (const auto& buffer : copy.stream_out_buffers) {
+        info.Write(buffer.sgpr_pair);
+        info.Write(buffer.byte_offset);
+    }
+    info.Write(u32(copy.stream_out_stores.size()));
+    for (const auto& store : copy.stream_out_stores) {
+        info.Write(store.buffer);
+        info.Write(store.byte_offset);
+        info.Write(u32(store.attr));
+        info.Write(store.comp);
+    }
+    // Last, so that a walker is registered only once the rest of the entry has been read.
     srt_info.Serialize(ar);
 }
 
@@ -558,6 +577,54 @@ bool Info::Deserialize(Serialization::Archive& ar) {
 
     info.Read(this, sizeof(Shader::InfoPersistent));
     info.Read(flattened_ud_buf);
+
+    info.Read(&stores, sizeof(stores));
+    auto& copy = gs_copy_data;
+    u8 is_parsed{};
+    info.Read(is_parsed);
+    if (is_parsed > 1) {
+        ar.MarkCorrupt("a damaged stream-out parse flag");
+        return false;
+    }
+    copy.stream_out_parsed = is_parsed != 0;
+
+    constexpr size_t cb_buffer_record = 2 * sizeof(u32);
+    u32 c_buffers{};
+    info.Read(c_buffers);
+    if (ar.IsCorrupt() || c_buffers > ar.RemainingBytes() / cb_buffer_record) {
+        ar.MarkCorrupt("a stream-out buffer count past the end of the entry");
+        return false;
+    }
+    copy.stream_out_buffers.resize(c_buffers);
+    for (auto& buffer : copy.stream_out_buffers) {
+        info.Read(buffer.sgpr_pair);
+        info.Read(buffer.byte_offset);
+    }
+
+    constexpr size_t cb_store_record = 4 * sizeof(u32);
+    u32 c_stores{};
+    info.Read(c_stores);
+    if (ar.IsCorrupt() || c_stores > ar.RemainingBytes() / cb_store_record) {
+        ar.MarkCorrupt("a stream-out store count past the end of the entry");
+        return false;
+    }
+    copy.stream_out_stores.resize(c_stores);
+    for (auto& store : copy.stream_out_stores) {
+        u32 attr{};
+        info.Read(store.buffer);
+        info.Read(store.byte_offset);
+        info.Read(attr);
+        info.Read(store.comp);
+        // StreamOutUnexported is Attribute::Max, the one value past the real attributes.
+        if (store.buffer >= c_buffers || attr > u32(IR::Attribute::Max) || store.comp >= 4) {
+            ar.MarkCorrupt("a stream-out store out of range");
+            return false;
+        }
+        store.attr = IR::Attribute(attr);
+    }
+    if (ar.IsCorrupt()) {
+        return false;
+    }
 
     return srt_info.Deserialize(ar);
 }

@@ -365,6 +365,9 @@ private:
     /// NOTE: the one place deciding it, to switch to the shader translation's own accessor.
     const Shader::Info* StreamOutStage(const GraphicsPipeline& pipeline,
                                        const AmdGpu::Regs& regs) const;
+    /// Logs and counts a draw whose pipeline captures stream-out while StreamOutStage found no
+    /// stream-out data in its geometry stage (recording side only, once per draw).
+    void NoteMissingStreamOutData(const GraphicsPipeline& pipeline, const AmdGpu::Regs& regs);
     /// Stream-out buffer 0's V#, loaded the way the copy shader loads it (S_LOAD_DWORDX4 from the
     /// pointer in its user SGPR pair); zero when that pointer is not GPU memory.
     AmdGpu::Buffer ReadStreamOutSharp(const Shader::Info& gs, const AmdGpu::Regs& regs) const;

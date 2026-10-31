@@ -1721,6 +1721,31 @@ const Shader::Info* Rasterizer::StreamOutStage(const GraphicsPipeline& pipeline,
     return gs;
 }
 
+void Rasterizer::NoteMissingStreamOutData(const GraphicsPipeline& pipeline,
+                                          const AmdGpu::Regs& regs) {
+    // The GS module was translated with transform feedback outputs, so its Info must hold the
+    // copy shader's stream-out stores; without them the capture never begins and the guest's
+    // stream-out buffer stays unwritten.
+    if (!regs.vgt_strmout_config.streamout_0_en || pipeline.GetXfbStride() == 0) {
+        return;
+    }
+    const auto* p_gs = pipeline.GetStages()[u32(Shader::SwStage::Geometry)];
+    const u64 pgm_hash = p_gs ? p_gs->pgm_hash : 0;
+    static std::unordered_set<u64> s_described;
+    if (s_described.insert(pgm_hash).second) {
+        const auto* p_copy = p_gs ? &p_gs->gs_copy_data : nullptr;
+        LOG_WARNING(Render_Vulkan,
+                    "GS {:#x} draw captures stream-out (xfb stride {}) but its stage has no "
+                    "stream-out data (parsed {}, {} stores, {} buffers): drawn without capture",
+                    pgm_hash, pipeline.GetXfbStride(), p_copy && p_copy->stream_out_parsed,
+                    p_copy ? p_copy->stream_out_stores.size() : 0,
+                    p_copy ? p_copy->stream_out_buffers.size() : 0);
+    }
+    LOG_ERROR_COUNTED(Render_Vulkan,
+                      "GS draw with a transform feedback pipeline drawn without capture, its "
+                      "stage has no stream-out data");
+}
+
 AmdGpu::Buffer Rasterizer::ReadStreamOutSharp(const Shader::Info& gs,
                                               const AmdGpu::Regs& regs) const {
     const auto& source = gs.gs_copy_data.stream_out_buffers[0];
@@ -1757,6 +1782,7 @@ bool Rasterizer::ObtainStreamOut(const GraphicsPipeline* pipeline, StreamOutBind
     const auto& regs = Regs();
     const auto* gs = StreamOutStage(*pipeline, regs);
     if (!gs) {
+        NoteMissingStreamOutData(*pipeline, regs);
         return true;
     }
     const auto skip = [&](const char* why) {
