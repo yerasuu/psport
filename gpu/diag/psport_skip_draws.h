@@ -14,6 +14,8 @@
 
 #include <cstdint>
 #include <cstdlib>
+#include <string>
+#include <string_view>
 
 namespace PsSkipDraws {
 
@@ -35,6 +37,26 @@ struct Verdict {
     /// entry without `*` or `@`.
     std::uint32_t i_pair_draw;
 };
+
+/// One entry of the grammar above; the frame capture's PS_CAPTURE_DUMP_TEX takes one too.
+struct Selector {
+    std::uint64_t vs_hash;
+    std::uint64_t ps_hash;
+    bool is_any_vs;
+    bool is_any_ps;
+    bool has_target;
+    Target target; ///< by address when `va_target` is not 0, else by size
+    bool has_nth;
+    std::uint32_t i_nth;
+    std::string text; ///< the entry as parsed, for logs
+};
+
+/// Null on success, else why `entry` was rejected.
+const char* ParseSelector(std::string_view entry, Selector& out_selector);
+
+/// Whether the draw matches the selector's pair and target; `#<n>` is counted by the caller, among
+/// the frame's draws for which this holds.
+bool IsMatch(const Selector& selector, std::uint64_t vs_hash, std::uint64_t ps_hash, const Target& color0);
 
 /// The recording thread, for every graphics draw about to record its draw command, while
 /// PS_SKIP_DRAWS is set or the frame capture looks at draws (it prints `i_pair_draw`).

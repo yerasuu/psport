@@ -4083,7 +4083,8 @@ void Rasterizer::BindTextures(const Shader::Info& stage, const PreparedStage* pr
                         texture_cache.Substitutes().View(image, desc.view_info)) {
                     if (FrameCapture::Active()) {
                         FrameCapture::Sampled(image, image_id, desc.info.guest_address, substitute,
-                                              false, "substitute");
+                                              desc.view_info, false, "substitute", stage.pgm_hash,
+                                              binding_index);
                     }
                     image.usage.texture = 1u;
                     image_infos.emplace_back(VK_NULL_HANDLE, substitute,
@@ -4101,7 +4102,8 @@ void Rasterizer::BindTextures(const Shader::Info& stage, const PreparedStage* pr
                 if (const auto proxy = scene_targets->SampleProxy(image, desc.view_info)) {
                     if (FrameCapture::Active()) {
                         FrameCapture::Sampled(image, image_id, desc.info.guest_address,
-                                              proxy->view, false, "scene proxy");
+                                              proxy->view, desc.view_info, false, "scene proxy",
+                                              stage.pgm_hash, binding_index);
                     }
                     image.usage.texture = 1u;
                     image_infos.emplace_back(VK_NULL_HANDLE, proxy->view, proxy->layout);
@@ -4152,8 +4154,10 @@ void Rasterizer::BindTextures(const Shader::Info& stage, const PreparedStage* pr
                 upscaler->RedirectSampled(image_id, image_view.info, view, layout);
             }
             if (FrameCapture::Active()) {
-                FrameCapture::Sampled(image, image_id, desc.info.guest_address, view, is_storage,
-                                      view != *image_view.image_view ? "upscaler output" : nullptr);
+                FrameCapture::Sampled(image, image_id, desc.info.guest_address, view,
+                                      image_view.info, is_storage,
+                                      view != *image_view.image_view ? "upscaler output" : nullptr,
+                                      stage.pgm_hash, binding_index);
             }
             image_infos.emplace_back(VK_NULL_HANDLE, view, layout);
             if (set_ok && binding_index < resolved.size()) {
@@ -4252,6 +4256,9 @@ void Rasterizer::BindSamplers(const Shader::Info& stage, const PreparedStage* pr
             ssharp = AmdGpu::Sampler{};
         }
         ForceAnisotropy(ssharp, sampler.is_depth);
+        if (FrameCapture::Active()) {
+            FrameCapture::SamplerBound(stage.pgm_hash, sampler_index, ssharp);
+        }
         const auto vk_sampler = texture_cache.GetSampler(
             ssharp, Regs().ta_bc_base, sampler.is_depth, sampler.is_depth ? 0.0f : sampler_lod_bias);
         image_infos.emplace_back(vk_sampler, VK_NULL_HANDLE, vk::ImageLayout::eGeneral);
@@ -4802,7 +4809,8 @@ RenderState Rasterizer::BeginRenderingFull(const GraphicsPipeline* pipeline) {
         std::array<FrameCapture::PassTarget, AmdGpu::NUM_COLOR_BUFFERS> colors{};
         for (u32 cb = 0; cb < state.num_color_attachments; ++cb) {
             const auto& base = cb_descs[cb].second.view_info.range.base;
-            colors[cb] = {cb_descs[cb].first, base.level, base.layer};
+            colors[cb] = {cb_descs[cb].first, base.level, base.layer,
+                          LiverpoolToVK::ComponentMapping(key.color_buffers[cb].swizzle.Inverse())};
         }
         const auto& depth_base = db_desc.second.view_info.range.base;
         FrameCapture::BeginPass(std::span(colors.data(), state.num_color_attachments),

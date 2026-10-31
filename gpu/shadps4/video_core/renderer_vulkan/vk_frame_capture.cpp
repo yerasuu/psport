@@ -12,9 +12,11 @@
 #include <format>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <xxhash.h>
 
 #include "video_core/amdgpu/regs.h"
+#include "video_core/amdgpu/resource.h"
 #include "video_core/buffer_cache/buffer.h"
 #include "video_core/renderer_vulkan/vk_common.h"
 #include "video_core/renderer_vulkan/vk_frame_capture_draw.h"
@@ -24,6 +26,7 @@
 #include "video_core/renderer_vulkan/vk_runtime.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/texture_cache/image_info.h"
+#include "video_core/texture_cache/image_view.h"
 #include "video_core/texture_cache/texture_cache.h"
 
 namespace Vulkan {
@@ -95,10 +98,27 @@ struct DumpGrid {
 struct Sample {
     Target target;
     bool is_storage{};
-    ImageRef ref;
+    ImageRef ref; ///< with the view's first level and layer
     vk::ImageView view{};
     bool is_render_target{};
     std::string identity;
+    vk::Format view_format{};
+    vk::ComponentMapping mapping{};
+    u64 stage_hash{};
+    u32 i_stage_binding{};
+};
+
+/// PS_CAPTURE_DUMP_TEX: a texture of a selected draw, dumped at its pass's end.
+struct TexturePick {
+    u32 i_draw{};
+    u32 i_binding{}; ///< among all the draw's image bindings, in binding order
+    Sample sample;
+};
+
+struct BoundSampler {
+    u64 stage_hash{};
+    u32 i_sampler{};
+    AmdGpu::Sampler sharp{};
 };
 
 struct StateRun {
@@ -184,6 +204,8 @@ struct Entry {
     // PS_CAPTURE_DUMP only.
     bool is_dumped{};
     std::vector<DumpGrid> dump_grids;
+    std::vector<vk::ComponentMapping> color_mappings;
+    std::vector<TexturePick> textures;
 };
 
 constexpr u32 SUMMARY_GRID = 64;
@@ -232,9 +254,38 @@ u32 FramesPerCapture() {
     return s_c_frames;
 }
 
+/// PS_CAPTURE_DUMP_TEX, parsed once; null when unset, malformed or without PS_CAPTURE_DUMP.
+const PsSkipDraws::Selector* TextureSelector() {
+    static const std::optional<PsSkipDraws::Selector> s_selector =
+        []() -> std::optional<PsSkipDraws::Selector> {
+        const char* sz_value = std::getenv("PS_CAPTURE_DUMP_TEX");
+        if (!sz_value || !sz_value[0]) {
+            return std::nullopt;
+        }
+        PsSkipDraws::Selector selector{};
+        if (const char* sz_why = PsSkipDraws::ParseSelector(sz_value, selector)) {
+            std::printf("Frame capture: PS_CAPTURE_DUMP_TEX='%s' ignored: %s\n", sz_value, sz_why);
+            return std::nullopt;
+        }
+        if (!CaptureDump::Level()) {
+            std::printf("Frame capture: PS_CAPTURE_DUMP_TEX='%s' ignored: it needs "
+                        "PS_CAPTURE_DUMP=1 or 2\n",
+                        sz_value);
+            return std::nullopt;
+        }
+        std::printf("Frame capture: PS_CAPTURE_DUMP_TEX dumps the textures of %s\n",
+                    selector.text.c_str());
+        return selector;
+    }();
+    return s_selector ? &*s_selector : nullptr;
+}
+
 // GPU thread only.
 std::vector<Entry> s_entries;
 std::vector<Sample> s_pending_sampled;
+std::vector<BoundSampler> s_pending_samplers;
+u32 s_c_texture_matches = 0;
+u32 s_c_texture_draws = 0;
 std::vector<std::string> s_pending_buffers;
 VideoCore::TextureCache* s_p_texture_cache = nullptr;
 Runtime* s_p_runtime = nullptr;
@@ -937,7 +988,11 @@ void DumpPassEnd(Entry& entry, u32 i_pass, bool is_wait_allowed) {
     for (u32 i = 0; i < entry.color_refs.size() && (i == 0 || is_every_target); ++i) {
         if (entry.color_refs[i].id) {
             DumpTarget(entry, entry.color_refs[i],
-                       {.i_pass = i_pass, .i_color = i, .va_target = entry.colors[i].va_target},
+                       {.i_pass = i_pass,
+                        .i_color = i,
+                        .va_target = entry.colors[i].va_target,
+                        .mapping = i < entry.color_mappings.size() ? entry.color_mappings[i]
+                                                                   : vk::ComponentMapping{}},
                        is_wait_allowed);
         }
     }
@@ -945,6 +1000,94 @@ void DumpPassEnd(Entry& entry, u32 i_pass, bool is_wait_allowed) {
         DumpTarget(entry, entry.depth_ref,
                    {.i_pass = i_pass, .is_depth = true, .va_target = entry.depth.va_target},
                    is_wait_allowed);
+    }
+    // After the pass, not at the draw: a copy inside the pass would end its rendering, which
+    // resumes with the attachments' clears replayed.
+    for (const auto& pick : entry.textures) {
+        const Sample& sample = pick.sample;
+        CaptureDump::Source source{
+            .i_pass = i_pass,
+            .va_target = sample.target.va_target,
+            .format = sample.target.format,
+            .width = sample.target.width,
+            .height = sample.target.height,
+            .i_level = sample.ref.i_level,
+            .i_layer = sample.ref.i_layer,
+            .mapping = sample.mapping,
+            .is_texture = true,
+            .i_draw = pick.i_draw,
+            .i_binding = pick.i_binding,
+            .detail = std::format("view {} stage {:016x} image binding {} {}",
+                                  vk::to_string(sample.view_format), sample.stage_hash,
+                                  sample.i_stage_binding, sample.identity),
+        };
+        if (sample.is_storage) {
+            CaptureDump::Skip(source, "storage image: the pass may have written it");
+            continue;
+        }
+        DumpTarget(entry, sample.ref, std::move(source), is_wait_allowed);
+    }
+}
+
+const char* ClampName(AmdGpu::ClampMode mode) {
+    static constexpr std::array<const char*, 8> s_names{
+        "Wrap",           "Mirror",     "ClampLastTexel", "MirrorOnceLastTexel", "ClampHalfBorder",
+        "MirrorOnceHalfBorder", "ClampBorder", "MirrorOnceBorder"};
+    return s_names[u32(mode) & 7];
+}
+
+const char* FilterName(AmdGpu::Filter filter) {
+    static constexpr std::array<const char*, 4> s_names{"Point", "Bilinear", "AnisoPoint",
+                                                        "AnisoLinear"};
+    return s_names[u32(filter) & 3];
+}
+
+std::string DescribeSampler(const AmdGpu::Sampler& sharp) {
+    static constexpr std::array<const char*, 4> s_mip_names{"None", "Point", "Linear", "?"};
+    static constexpr std::array<const char*, 4> s_border_names{"TransparentBlack", "OpaqueBlack",
+                                                               "White", "Custom"};
+    return std::format("min {} mag {} mip {} address {} {} {} aniso {}x lod {:.4g}..{:.4g} bias "
+                       "{:.4g} border {}{} raw {:016x} {:016x}",
+                       FilterName(sharp.xy_min_filter.Value()),
+                       FilterName(sharp.xy_mag_filter.Value()),
+                       s_mip_names[u32(sharp.mip_filter.Value()) & 3],
+                       ClampName(sharp.clamp_x.Value()), ClampName(sharp.clamp_y.Value()),
+                       ClampName(sharp.clamp_z.Value()), 1u << (u32(sharp.max_aniso.Value()) & 7),
+                       float(sharp.min_lod.Value()) / 256.0f,
+                       float(sharp.max_lod.Value()) / 256.0f, sharp.LodBias(),
+                       s_border_names[u32(sharp.border_color_type.Value()) & 3],
+                       sharp.force_unnormalized ? " unnormalized" : "", sharp.raw0, sharp.raw1);
+}
+
+/// PS_CAPTURE_DUMP_TEX: the images the draw just recorded binds, when the selector takes it.
+void PickTextures(Entry& entry, u64 vs_hash, u64 ps_hash, u32 i_pair_draw,
+                  const PsSkipDraws::Target& color0) {
+    const PsSkipDraws::Selector* p_selector = TextureSelector();
+    if (!p_selector || !PsSkipDraws::IsMatch(*p_selector, vs_hash, ps_hash, color0)) {
+        return;
+    }
+    const u32 i_match = s_c_texture_matches++;
+    if (p_selector->has_nth && i_match != p_selector->i_nth) {
+        return;
+    }
+    ++s_c_texture_draws;
+    const u32 i_draw = entry.draws - 1;
+    std::string samplers;
+    for (const auto& bound : s_pending_samplers) {
+        samplers += std::format("\n  sampler {} of stage {:016x}: {}", bound.i_sampler,
+                                bound.stage_hash, DescribeSampler(bound.sharp));
+    }
+    CaptureDump::Note(std::format(
+        "PS_CAPTURE_DUMP_TEX {} selects pass {} draw {}: vs {:016x} ps {:016x} nth {} target {}; "
+        "{} images bound, dumped at the pass's end; {} samplers as bound (which image each "
+        "samples is in the shader code):{}",
+        p_selector->text, s_entries.size() - 1, i_draw, vs_hash, ps_hash, i_pair_draw,
+        color0.va_target
+            ? std::format("{}x{} {:#x}", color0.width, color0.height, color0.va_target)
+            : std::string{"-"},
+        s_pending_sampled.size(), s_pending_samplers.size(), samplers));
+    for (u32 i = 0; i < s_pending_sampled.size(); ++i) {
+        entry.textures.push_back({.i_draw = i_draw, .i_binding = i, .sample = s_pending_sampled[i]});
     }
 }
 
@@ -1222,6 +1365,8 @@ constexpr vk::QueryPipelineStatisticFlags STATISTICS =
     vk::QueryPipelineStatisticFlagBits::eFragmentShaderInvocations;
 
 void StartRecording() {
+    s_c_texture_matches = 0;
+    s_c_texture_draws = 0;
     s_off_readback = 0;
     s_c_readbacks = 0;
     s_c_skipped = 0;
@@ -1395,6 +1540,11 @@ std::string WriteDump(const u8* p_readback, const std::string& stem) {
             }
             CaptureDump::FillGrid(i_item, rgba, r.c_columns, r.c_rows);
         }
+    }
+    if (const PsSkipDraws::Selector* p_selector = TextureSelector(); p_selector && !s_c_texture_draws) {
+        CaptureDump::Note(std::format("PS_CAPTURE_DUMP_TEX {} selected no draw of this frame ({} "
+                                      "draws matched its shaders and target)",
+                                      p_selector->text, s_c_texture_matches));
     }
     return CaptureDump::WriteFrame(*s_p_runtime, stem);
 }
@@ -1724,6 +1874,7 @@ void FrameCapture::BeginPass(std::span<const PassTarget> colors, PassTarget dept
         }
         s_entries.clear();
         s_pending_sampled.clear();
+        s_pending_samplers.clear();
         s_pending_buffers.clear();
         if (is_recording && ++s_i_frame >= FramesPerCapture()) {
             m_state.store(Idle, std::memory_order_release);
@@ -1740,6 +1891,7 @@ void FrameCapture::BeginPass(std::span<const PassTarget> colors, PassTarget dept
     }
     if (m_state.load(std::memory_order_relaxed) != Recording) {
         s_pending_sampled.clear();
+        s_pending_samplers.clear();
         s_pending_buffers.clear();
         return;
     }
@@ -1756,6 +1908,9 @@ void FrameCapture::BeginPass(std::span<const PassTarget> colors, PassTarget dept
             entry.depth_ref = {depth.id, p_depth->image_uid, depth.i_level, depth.i_layer};
         }
         entry.color_refs = std::move(refs);
+        for (const auto& color : colors) {
+            entry.color_mappings.push_back(color.mapping);
+        }
     }
     if (SummarizeLevel()) {
         entry.tick = CurrentTick();
@@ -1782,6 +1937,7 @@ void FrameCapture::Draw(u64 vs_hash, u64 ps_hash, u32 c_indices, u32 c_instances
     s_pending_bindings.clear();
     if (m_state.load(std::memory_order_relaxed) != Recording || s_entries.empty() ||
         s_entries.back().is_compute || s_entries.back().is_copy) {
+        s_pending_samplers.clear();
         return;
     }
     auto& e = s_entries.back();
@@ -1792,6 +1948,8 @@ void FrameCapture::Draw(u64 vs_hash, u64 ps_hash, u32 c_indices, u32 c_instances
     }
     AddShader(e, vs_hash);
     AddShader(e, ps_hash);
+    PickTextures(e, vs_hash, ps_hash, i_pair_draw, color0);
+    s_pending_samplers.clear();
     AddSampled(e);
     AddBuffers(e);
 }
@@ -1887,6 +2045,7 @@ void FrameCapture::DepthCopy(const VideoCore::Image& src, VideoCore::ImageId src
 void FrameCapture::Dispatch(u64 cs_hash, u32 x, u32 y, u32 z) {
     if (m_state.load(std::memory_order_relaxed) != Recording) {
         s_pending_sampled.clear();
+        s_pending_samplers.clear();
         s_pending_buffers.clear();
         s_pending_bindings.clear();
         return;
@@ -1918,6 +2077,7 @@ void FrameCapture::Dispatch(u64 cs_hash, u32 x, u32 y, u32 z) {
         }
     }
     s_pending_bindings.clear();
+    s_pending_samplers.clear();
     AddSampled(s_entries.back());
     AddBuffers(s_entries.back());
     s_is_pass_open = false;
@@ -1990,7 +2150,8 @@ void FrameCapture::Buffer(u64 stage_hash, u32 slot, VAddr va_buffer, const void*
 }
 
 void FrameCapture::Sampled(const VideoCore::Image& image, VideoCore::ImageId id, VAddr va_requested,
-                           vk::ImageView view, bool is_storage, const char* sz_route) {
+                           vk::ImageView view, const VideoCore::ImageViewInfo& view_info,
+                           bool is_storage, const char* sz_route, u64 stage_hash, u32 i_binding) {
     if (s_pending_sampled.size() >= 64) {
         return;
     }
@@ -2003,11 +2164,24 @@ void FrameCapture::Sampled(const VideoCore::Image& image, VideoCore::ImageId id,
     }
     s_pending_sampled.push_back({.target = ToTarget(image.info),
                                  .is_storage = is_storage,
-                                 .ref = {id, image.image_uid},
+                                 .ref = {id, image.image_uid, view_info.range.base.level,
+                                         view_info.range.base.layer},
                                  .view = view,
                                  .is_render_target =
                                      image.usage.render_target || image.usage.depth_target,
-                                 .identity = std::move(identity)});
+                                 .identity = std::move(identity),
+                                 .view_format = view_info.format,
+                                 .mapping = view_info.mapping,
+                                 .stage_hash = stage_hash,
+                                 .i_stage_binding = i_binding});
+}
+
+void FrameCapture::SamplerBound(u64 stage_hash, u32 i_sampler, const AmdGpu::Sampler& sharp) {
+    if (!TextureSelector() || m_state.load(std::memory_order_relaxed) != Recording ||
+        s_pending_samplers.size() >= 64) {
+        return;
+    }
+    s_pending_samplers.push_back({stage_hash, i_sampler, sharp});
 }
 
 void FrameCapture::Note(const char* sz_text) {

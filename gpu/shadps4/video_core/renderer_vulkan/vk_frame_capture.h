@@ -12,7 +12,8 @@
 // occlusion and pipeline statistics queries around it, and every pass that writes depth or stencil
 // whole-image counts of the depth and stencil texels it changed.
 // PS_CAPTURE_DUMP=1 writes each pass's colour attachment 0 as a small PNG beside the frame file,
-// 2 every attachment (vk_frame_capture_dump.h).
+// 2 every attachment; PS_CAPTURE_DUMP_TEX=<vs>:<ps>[@<target>][#<n>] adds the textures the draws
+// it selects sample, with their samplers in the index (vk_frame_capture_dump.h).
 
 #pragma once
 
@@ -29,11 +30,13 @@
 
 namespace AmdGpu {
 union Regs;
-}
+struct Sampler;
+} // namespace AmdGpu
 
 namespace VideoCore {
 struct Image;
 struct ImageInfo;
+struct ImageViewInfo;
 class TextureCache;
 } // namespace VideoCore
 
@@ -50,6 +53,9 @@ public:
         VideoCore::ImageId id{};
         u32 i_level{};
         u32 i_layer{};
+        /// The inverse of the colour buffer's export swizzle: where the shader's channels went
+        /// among the stored ones.
+        vk::ComponentMapping mapping{};
     };
 
     /// The draw's index and vertex range as the rasterizer resolved it.
@@ -136,9 +142,13 @@ public:
                             vk::Buffer h_buffer, u64 off_buffer);
     /// A bound texture or storage image. `va_requested` is the T#'s address (a stencil plane
     /// read through its depth image differs from the image's); `view` the view the descriptor
-    /// got; `sz_route` a replacement of the image's own view (scene proxy, substitute), or null.
+    /// got, described by `view_info`; `sz_route` a replacement of the image's own view (scene
+    /// proxy, substitute), or null. `i_binding`: its index among the stage's image bindings.
     static void Sampled(const VideoCore::Image& image, VideoCore::ImageId id, VAddr va_requested,
-                        vk::ImageView view, bool is_storage, const char* sz_route);
+                        vk::ImageView view, const VideoCore::ImageViewInfo& view_info,
+                        bool is_storage, const char* sz_route, u64 stage_hash, u32 i_binding);
+    /// A sampler of the stage being bound, as bound, for PS_CAPTURE_DUMP_TEX's index.
+    static void SamplerBound(u64 stage_hash, u32 i_sampler, const AmdGpu::Sampler& sharp);
     /// Contents of a bound buffer (first 1 KiB), kept for small passes and a pass's first draw.
     static void Buffer(u64 stage_hash, u32 slot, VAddr va_buffer, const void* p_data, u64 cb_data);
     static void Note(const char* sz_text);

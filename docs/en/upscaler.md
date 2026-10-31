@@ -265,13 +265,40 @@ tiling) is read through the summaries' 64x64 grid instead and enlarged nearest t
 Conversion on the CPU: 8- and 16-bit UNORM as stored, sRGB encoded back after the blit's
 linearisation, SNORM as (x+1)/2, float formats (R16G16B16A16F, B10G11R11, R32F...) through
 x/(1+x) and gamma 2.2, integer formats and depth stretched to the image's own min/max; one channel
-is grey, alpha is dropped, non-finite texels are magenta. `<stem>_dump.txt` lists every image
+is grey, alpha is dropped, non-finite texels are magenta. Colour channels are shown as the pixel
+shader wrote them: a colour buffer's component swap (`comp_swap`, which the translated shader
+applies on export, so that the stored bytes keep the guest's memory order) is undone through its
+inverse, listed as `swizzle <s>` when it is not `rgba`. `<stem>_dump.txt` lists every image
 (file, pass, attachment, target address, format, size, level, layer, output size, method,
 conversion, min/max and non-finite count) and every attachment not dumped with its reason; the
 frame file's header counts them, names the formats that took the grid, and the log prints each
 depth image's min/max. Budgets: 160 images per frame, then `not dumped: budget`; a full staging
 buffer is drained (the GPU waited for) where the pass end allows a wait, otherwise the image is
 skipped as over the budget. Only recorded frames record anything or wait.
+
+`PS_CAPTURE_DUMP_TEX=<vs>:<ps>[@<target>][#<n>]`, with `PS_CAPTURE_DUMP` set, also dumps the
+images the draws it selects sample, to see what a draw reads. The selector is one `PS_SKIP_DRAWS`
+entry (same grammar: hashes as the draw lines print them or `*`, `@<W>x<H>` or `@0x<address>` for
+colour attachment 0, `#<n>` the n-th draw of the recorded frame matching the rest); for a draw line
+`#99 draw 5: vs <vs> ps <ps> nth 5 ...` it is `PS_CAPTURE_DUMP_TEX=<vs>:<ps>#5`. Every image the
+draw binds, in binding order over its stages, becomes `<stem>_tex_p<pass>_d<draw>_b<binding>.png`
+(`<draw>` the draw's index in its pass, as the draw line's `draw <i>`), dumped at the end of the
+pass (a copy inside it would end its rendering, and the resumed rendering would replay the
+attachments' clears): mip level and array layer of the view's first subresource, at most 480x270
+like the targets and counted in the same budgets. BC1 to BC5 are copied whole into the staging
+buffer (an image over 64 MiB of blocks is `not dumped: too large`) and decoded on the CPU, box
+filtered down; other formats go through the targets' blit or grid. Channels are the ones the
+shader reads, through the view's swizzle (`r g b a`, `0`, `1` of the stored channels), sRGB stays
+encoded; an alpha that is not constant is written beside it as a grey `<...>_a.png`, otherwise its
+value is listed. A storage image is listed as not dumped. `<stem>_dump.txt` starts with a line per
+selected draw (its pair, `nth`, target, how many images it binds) followed by every sampler its
+stages bound (filters, address modes, anisotropy, LOD range and bias, border, the raw S# words;
+which image a sampler is used with is decided in the shader code), then lists each texture
+(`tex pass <n> draw <d> binding <b> image <address> <format> <W>x<H> level <l> layer <m> swizzle
+<s> view <format> stage <hash> image binding <i> <identity>`, its output size, method, conversion,
+min/max and alpha) or why it was not dumped; those reasons are also logged as `Frame capture:
+texture of pass <n> draw <d> binding <b> not dumped: <reason>`, and a frame in which the selector
+took no draw says so in the index and the log. A malformed selector is logged and ignored.
 
 Every pass also lists each of its draws on a line of its own, indirect draws included (marked
 `indirect`): `#<pass> draw <i>: vs <16 hex digits> ps <16 hex digits> nth <n> target <W>x<H>
