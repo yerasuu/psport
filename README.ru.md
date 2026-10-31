@@ -39,7 +39,7 @@ psport активно разрабатывается. Игра может быт
 | Bloodborne (1.09) | CUSA03173 | играбельна |
 | Atelier Ryza | CUSA16458 | играбельна |
 | Atelier Ayesha DX | CUSA16921 | играбельна |
-| Tales of Symphonia Remastered | CUSA50989 | экспериментально |
+| Symphonia | CUSA50989 | экспериментально |
 | Astrea | CUSA49515 | экспериментально |
 | SaGa Emerald Beyond | CUSA43027 | экспериментально |
 | ALTDEUS: Beyond Chronos | CUSA26563 | не поддерживается |

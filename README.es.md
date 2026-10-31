@@ -40,7 +40,7 @@ en [tools/regress/titles.txt](tools/regress/titles.txt) y se ejecutan sin ventan
 | Bloodborne (1.09) | CUSA03173 | jugable |
 | Atelier Ryza | CUSA16458 | jugable |
 | Atelier Ayesha DX | CUSA16921 | jugable |
-| Tales of Symphonia Remastered | CUSA50989 | experimental |
+| Symphonia | CUSA50989 | experimental |
 | Astrea | CUSA49515 | experimental |
 | SaGa Emerald Beyond | CUSA43027 | experimental |
 | ALTDEUS: Beyond Chronos | CUSA26563 | no soportado |

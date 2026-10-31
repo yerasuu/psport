@@ -36,7 +36,7 @@ state is how far a title has been seen to get, not a full play-through; what eac
 | Bloodborne (1.09) | CUSA03173 | playable |
 | Atelier Ryza | CUSA16458 | playable |
 | Atelier Ayesha DX | CUSA16921 | playable |
-| Tales of Symphonia Remastered | CUSA50989 | experimental |
+| Symphonia | CUSA50989 | experimental |
 | Astrea | CUSA49515 | experimental |
 | SaGa Emerald Beyond | CUSA43027 | experimental |
 | ALTDEUS: Beyond Chronos | CUSA26563 | not supported |

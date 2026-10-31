@@ -24,7 +24,7 @@ frame, frames drawn, sound. The detail was last checked against the regress of 2
 | Bloodborne (1.09) | CUSA03173 | playable | Saves, several areas, sound, pad, keyboard and mouse (the key prompts are drawn over the pad's), frame-rate presets 30, 60, 90 and uncapped, 3840x2160 output (about 80 FPS in the test scene on an RX 7900 XT). Online play through the title's community servers (`PS_ONLINE=1`) works, with occasional stutters when interacting with messages. Per-title fixes are declared in [QUIRKS.md](QUIRKS.md). |
 | Atelier Ryza | CUSA16458 | playable | Title menu, prologue, the field with the player in control, sound; the river and the forest draw correctly. Saving and loading work. |
 | Atelier Ayesha DX | CUSA16921 | playable | Intro movie, title menu, opening scenes, the field, the atelier, sound; the key prompts are drawn for keyboard play. |
-| Tales of Symphonia Remastered | CUSA50989 | experimental | Title screen, the first room, sound. |
+| Symphonia | CUSA50989 | experimental | Title screen, the first room, sound. |
 | Astrea | CUSA49515 | experimental | The intro's story panels, sound. |
 | SaGa Emerald Beyond | CUSA43027 | experimental | Title screen, first story scenes with dialogue, sound. |
 | ALTDEUS: Beyond Chronos | CUSA26563 | not supported | Black screen: it requires a PS VR headset and has no flat-screen mode. |
