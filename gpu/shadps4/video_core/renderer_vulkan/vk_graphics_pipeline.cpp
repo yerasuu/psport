@@ -410,6 +410,8 @@ GraphicsPipeline::GraphicsPipeline(
         }
     }
 
+    m_blend_attachments = attachments;
+
     const vk::PipelineColorBlendStateCreateInfo color_blending = {
         .logicOpEnable =
             instance.IsLogicOpSupported() && key.logic_op != AmdGpu::ColorControl::LogicOp::Copy,

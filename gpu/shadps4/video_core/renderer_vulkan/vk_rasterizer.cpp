@@ -86,6 +86,7 @@ Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_, Runtime
 
     GpuProfiler::Init(instance, scheduler);
     GpuBusySampler::Init(instance, scheduler);
+    FrameCapture::Attach(texture_cache, runtime);
     if (DrawPipeWanted()) {
         constant_ring = std::make_unique<ConstantRing>(instance, scheduler);
         draw_pipe = std::make_unique<DrawPipe>(&RunDrawPacket, this);
@@ -2111,10 +2112,22 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
     const vk::DeviceSize xfb_offset = strmout.offset;
     const vk::DeviceSize xfb_size = strmout.size;
     const vk::Buffer xfb_counter = xfb_buffer ? StreamOutCounters()->Handle() : vk::Buffer{};
+    const auto capture_queries =
+        FrameCapture::Active()
+            ? FrameCapture::TakeDrawQueries(!occlusion || !occlusion->HasStarted())
+            : FrameCapture::DrawQueries{};
     // One closure with the draw: a chunk boundary or EndRendering cannot fall between the
     // capture's begin and end, which must stay in the render pass instance the draw is in.
     scheduler.RecordCrumb(crumb, [=](vk::CommandBuffer cmdbuf) {
         cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, handle);
+        if (capture_queries.statistics) {
+            cmdbuf.beginQuery(capture_queries.statistics, capture_queries.i_query, {});
+        }
+        if (capture_queries.occlusion) {
+            cmdbuf.beginQuery(capture_queries.occlusion, capture_queries.i_query,
+                              capture_queries.is_precise ? vk::QueryControlFlagBits::ePrecise
+                                                         : vk::QueryControlFlags{});
+        }
         if (xfb_buffer) {
             cmdbuf.bindTransformFeedbackBuffersEXT(0, xfb_buffer, xfb_offset, xfb_size);
             cmdbuf.beginTransformFeedbackEXT(0, xfb_counter, vk::DeviceSize{0});
@@ -2127,6 +2140,12 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
         if (xfb_buffer) {
             cmdbuf.endTransformFeedbackEXT(0, xfb_counter, vk::DeviceSize{0});
         }
+        if (capture_queries.occlusion) {
+            cmdbuf.endQuery(capture_queries.occlusion, capture_queries.i_query);
+        }
+        if (capture_queries.statistics) {
+            cmdbuf.endQuery(capture_queries.statistics, capture_queries.i_query);
+        }
     });
     NoteStreamOut(strmout);
     if (FrameCapture::Active()) {
@@ -2135,6 +2154,24 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
         FrameCapture::DepthUse(regs.depth_control.depth_enable,
                                regs.depth_control.depth_enable && regs.depth_control.depth_write_enable,
                                regs.depth_control.stencil_enable);
+        const u32 cb_index =
+            regs.index_buffer_type.index_type == AmdGpu::IndexType::Index16 ? 2u : 4u;
+        FrameCapture::DrawState(
+            regs, scheduler.GetDynamicState(), *pipeline,
+            {.va_indices = is_indexed ? regs.index_base_address.Address<VAddr>() +
+                                            u64(index_offset) * cb_index
+                                      : 0,
+             .cb_index = is_indexed ? cb_index : 0,
+             .c_indices = num_indices,
+             .c_instances = num_instances,
+             .vertex_offset = first_vertex,
+             .first_instance = first_instance,
+             .vertex_buffers = {vertex_binds.host_buffers.data(), vertex_binds.num_buffers},
+             .vertex_offsets = {vertex_binds.host_offsets.data(), vertex_binds.num_buffers},
+             .vertex_sizes = {vertex_binds.host_sizes.data(), vertex_binds.num_buffers},
+             .index_buffer = is_indexed ? index_bind.handle : vk::Buffer{},
+             .off_index_buffer = index_bind.offset,
+             .cb_index_buffer = index_bind.size});
         if (const auto& bc = regs.blend_control[0]; bc.enable && regs.color_buffers[0]) {
             char note[128];
             std::snprintf(note, sizeof(note), "\n  blend ps %08x idx %u: src %u dst %u func %u z %u%u",
@@ -2376,6 +2413,9 @@ void Rasterizer::DispatchRecord(const ComputePipeline* pipeline) {
     PsNativeProbe::StreamScope probe_scope;
     buffer_cache.NewPacket();
     FrameCapture::Poll();
+    if (FrameCapture::Active()) {
+        FrameCapture::EndPass();
+    }
     gbuffer_draw = false;
 
     scheduler.PopPendingOperations();
@@ -2440,6 +2480,9 @@ void Rasterizer::DispatchRecord(const ComputePipeline* pipeline) {
         cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, handle);
         cmdbuf.dispatch(dim_x, dim_y, dim_z);
     });
+    if (FrameCapture::Active()) {
+        FrameCapture::AfterDispatch();
+    }
     DebugState.IncDispatch();
 
     ResetBindings(true);
@@ -3684,6 +3727,10 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, const PreparedStage* pre
                 push_data.AddOffset(binding.buffer, 0);
                 is_buffer_missing |= !record;
                 buffer_infos.emplace_back(record ? record->Handle() : vk::Buffer{}, record_offset, 32);
+                if (FrameCapture::Active()) {
+                    FrameCapture::BoundBuffer(binding.buffer, vsharp.base_address,
+                                              vsharp.GetSize(), desc.is_written, {}, 0);
+                }
                 bound_buffers.emplace_back(nullptr, 0, 0, desc.is_written);
                 if (desc.is_written) {
                     texture_cache.InvalidateMemoryFromGPU(
@@ -3719,6 +3766,10 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, const PreparedStage* pre
                     buffer->Handle(), offset_aligned,
                     std::min<u64>(size + adjust, buffer->SizeBytes() - offset_aligned));
                 bound_buffers.emplace_back(buffer, offset, size, desc.is_written);
+                if (FrameCapture::Active()) {
+                    FrameCapture::BoundBuffer(binding.buffer, vsharp.base_address, size,
+                                              desc.is_written, buffer->Handle(), offset);
+                }
                 if (is_write_overlap) {
                     texture_cache.InvalidateImagesUnder(vsharp.base_address, size);
                 } else if (desc.is_written) {
@@ -3977,6 +4028,10 @@ void Rasterizer::BindTextures(const Shader::Info& stage, const PreparedStage* pr
             if (!is_storage && texture_cache.Substitutes().Replaces(image)) {
                 if (const vk::ImageView substitute =
                         texture_cache.Substitutes().View(image, desc.view_info)) {
+                    if (FrameCapture::Active()) {
+                        FrameCapture::Sampled(image, image_id, desc.info.guest_address, substitute,
+                                              false, "substitute");
+                    }
                     image.usage.texture = 1u;
                     image_infos.emplace_back(VK_NULL_HANDLE, substitute,
                                              vk::ImageLayout::eShaderReadOnlyOptimal);
@@ -3991,6 +4046,10 @@ void Rasterizer::BindTextures(const Shader::Info& stage, const PreparedStage* pr
                 !binding.is_target &&
                 !(upscaler->Enabled() && upscaler->RedirectsSampled(image_id))) {
                 if (const auto proxy = scene_targets->SampleProxy(image, desc.view_info)) {
+                    if (FrameCapture::Active()) {
+                        FrameCapture::Sampled(image, image_id, desc.info.guest_address,
+                                              proxy->view, false, "scene proxy");
+                    }
                     image.usage.texture = 1u;
                     image_infos.emplace_back(VK_NULL_HANDLE, proxy->view, proxy->layout);
                     if (set_ok && binding_index < resolved.size()) {
@@ -4032,15 +4091,16 @@ void Rasterizer::BindTextures(const Shader::Info& stage, const PreparedStage* pr
             }
             image.usage.storage |= is_storage;
             image.usage.texture |= !is_storage;
-            if (FrameCapture::Active()) {
-                FrameCapture::Sampled(image.info, is_storage);
-            }
 
             vk::ImageView view = *image_view.image_view;
             vk::ImageLayout layout = image.backing->state.layout;
             if (upscaler->Enabled()) {
                 // psport: the display pass reads the upscaled frame (scaled presets).
                 upscaler->RedirectSampled(image_id, image_view.info, view, layout);
+            }
+            if (FrameCapture::Active()) {
+                FrameCapture::Sampled(image, image_id, desc.info.guest_address, view, is_storage,
+                                      view != *image_view.image_view ? "upscaler output" : nullptr);
             }
             image_infos.emplace_back(VK_NULL_HANDLE, view, layout);
             if (set_ok && binding_index < resolved.size()) {
@@ -4363,6 +4423,7 @@ RenderState Rasterizer::BeginRenderingFull(const GraphicsPipeline* pipeline) {
     using VulkanUpscalerTarget = TemporalUpscaler::Target;
     VulkanUpscalerTarget redirect{};
     bool color_redirected = false, depth_redirected = false;
+    bool is_redirected = false;
     std::pair<u32, u32> guest_extent{1, 1};
     std::pair<vk::ImageView, vk::ImageLayout> original_color{};
     const auto& regs = Regs();
@@ -4642,6 +4703,7 @@ RenderState Rasterizer::BeginRenderingFull(const GraphicsPipeline* pipeline) {
                 state.depth_stencil_attachment.image_layout = depth_image.backing->state.layout;
             }
         } else {
+            is_redirected = true;
             state.width = redirect.width;
             state.height = redirect.height;
             // The UI movie viewport is now 1920x1080 even when the scene is 960x540.
@@ -4684,15 +4746,17 @@ RenderState Rasterizer::BeginRenderingFull(const GraphicsPipeline* pipeline) {
                         float(size.height) / float(native.height)};
     }
     if (FrameCapture::Active()) {
-        std::array<const VideoCore::ImageInfo*, AmdGpu::NUM_COLOR_BUFFERS> colors{};
+        std::array<FrameCapture::PassTarget, AmdGpu::NUM_COLOR_BUFFERS> colors{};
         for (u32 cb = 0; cb < state.num_color_attachments; ++cb) {
-            if (cb_descs[cb].first) {
-                colors[cb] = &texture_cache.GetImage(cb_descs[cb].first).info;
-            }
+            const auto& base = cb_descs[cb].second.view_info.range.base;
+            colors[cb] = {cb_descs[cb].first, base.level, base.layer};
         }
-        const auto* depth =
-            db_desc.first ? &texture_cache.GetImage(db_desc.first).info : nullptr;
-        FrameCapture::BeginPass(colors.data(), state.num_color_attachments, depth);
+        const auto& depth_base = db_desc.second.view_info.range.base;
+        FrameCapture::BeginPass(std::span(colors.data(), state.num_color_attachments),
+                                {db_desc.first, depth_base.level, depth_base.layer},
+                                reduced         ? "scene proxy"
+                                : is_redirected ? "upscaler output"
+                                                : nullptr);
     }
     // psport: object motion vector attachment of G-buffer pipelines.
     if (key.motion_vectors) {
@@ -4758,6 +4822,9 @@ void Rasterizer::DepthStencilCopy(bool is_depth, bool is_stencil) {
     // the earlier ones.
     auto& read_image = texture_cache.GetImage(read_id);
     auto& write_image = texture_cache.GetImage(write_id);
+    if (FrameCapture::Active()) {
+        FrameCapture::EndPass();
+    }
     runtime.CopyDepthStencil(&read_image, &write_image, sub_range);
 
     // Games sample this copy of the depth (decompress to copy), never the depth target itself,
@@ -4781,7 +4848,7 @@ void Rasterizer::DepthStencilCopy(bool is_depth, bool is_stencil) {
                     vk::to_string(write_image.info.pixel_format).c_str());
     }
     if (FrameCapture::Active()) {
-        FrameCapture::DepthCopy(read_image.info, write_image.info, is_depth, is_stencil);
+        FrameCapture::DepthCopy(read_image, read_id, write_image, write_id, is_depth, is_stencil);
     }
 
     ScopeMarkerEnd();
@@ -4826,6 +4893,9 @@ void Rasterizer::DepthToColorCopy() {
         return;
     }
 
+    if (FrameCapture::Active()) {
+        FrameCapture::EndPass();
+    }
     ScopeMarkerBegin(fmt::format("DepthToColorCopy:{}={:#x}:CB0={:#x}", is_stencil ? "S" : "Z",
                                  depth_image.info.guest_address, color_image.info.guest_address));
     const bool is_copied = runtime.CopyDepthPlaneToColor(

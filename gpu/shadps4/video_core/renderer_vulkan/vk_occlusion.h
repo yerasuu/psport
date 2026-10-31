@@ -58,6 +58,12 @@ public:
     /// PS_OCCLUSION_LABEL_ORDER=0: labels may go ahead (statistics only).
     void WriteBeforeLabel();
 
+    /// Whether the game has used occlusion queries: from then on one of these is active in every
+    /// render pass, and Vulkan allows no second occlusion query alongside it.
+    bool HasStarted() const noexcept {
+        return m_has_started;
+    }
+
     /// Events so far (PS_PM4_SELFTEST and the frame stats).
     u64 Events() const noexcept {
         return m_c_events;

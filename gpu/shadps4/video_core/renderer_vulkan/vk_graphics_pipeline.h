@@ -105,6 +105,12 @@ public:
         return key;
     }
 
+    /// psport: the blend state the pipeline was created with, after translation (frame capture).
+    const std::array<vk::PipelineColorBlendAttachmentState, AmdGpu::NUM_COLOR_BUFFERS>&
+    BlendAttachments() const noexcept {
+        return m_blend_attachments;
+    }
+
     /// psport: stride in bytes of transform feedback buffer 0, which the GS captures its copy
     /// shader's stream-out into (vertex records in emission order, as the copy shader writes
     /// them); 0 when it captures nothing. Nonzero only while the draw's stream-out setup asks for
@@ -131,6 +137,8 @@ private:
     GraphicsPipelineKey key;
     std::optional<const Shader::Gcn::FetchShaderData> fetch_shader{};
     u32 xfb_stride{};
+    std::array<vk::PipelineColorBlendAttachmentState, AmdGpu::NUM_COLOR_BUFFERS>
+        m_blend_attachments{};
 };
 
 struct ClipDistanceShaderKey {

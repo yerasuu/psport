@@ -145,6 +145,11 @@ public:
         return features.occlusionQueryPrecise;
     }
 
+    /// psport: pipeline statistics queries can be used (frame captures).
+    bool IsPipelineStatisticsQuerySupported() const {
+        return features.pipelineStatisticsQuery;
+    }
+
     /// Returns true if 16-bit ints are supported in shaders
     bool IsShaderInt16Supported() const {
         return features.shaderInt16;

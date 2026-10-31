@@ -212,6 +212,31 @@ buffers. `PS_PRESET_FILE` accepts
 Frame analyzer: `PS_CAPTURE_TRIGGER=<file> PS_CAPTURE_DIR=<dir>`; creating the file records
 the next frame (boundary: the pass writing a display buffer) — passes, targets, shaders,
 sampled textures, and the first 1 KiB of bound constants for small passes and first draws.
+Each sampled texture names the texture-cache image, Vulkan image and view behind it, so two
+images at one address (a stale copy) tell apart. `PS_CAPTURE_SUMMARIZE=1` adds, for that frame
+only, each draw's depth, stencil and blend state (guest registers next to the Vulkan state) and a
+value summary of 64x64 texels (per-channel min/mean/max, hash, stencil value counts) of every
+target at the end of its pass, of the render targets a pass's first draw samples and of depth
+copy destinations; `2` adds a 16x16 grid of the first channel. The readbacks wait for the GPU
+once, when the frame is written; frames without a capture are untouched. The same mode lists,
+per draw, the viewport, scissor, clipping and rasterizer state (Vulkan next to the guest), and for
+the first 16 draws of a pass the topology, index range, fetched vertex attributes read from the
+game's memory (first vertices of the first 4 draws, vertex shader buffers of the first) and the
+results of Vulkan queries around each draw: samples passed (an occlusion query, unless the game's
+own occlusion queries are in use, beside which Vulkan allows no second one) and pipeline
+statistics (vertices, primitives entering and leaving clipping, fragment shader invocations).
+Each pass that writes depth or tests stencil also gets its whole depth/stencil image compared
+between its start and its end (texels changed, stencil values now and written), which waits for
+the GPU once per such pass of the captured frame. The game's memory lags behind what the GPU
+holds for anything a shader writes during the frame, so the first 4 draws of a pass also get
+their index buffer and vertex streams copied from the Vulkan buffers they are bound to, at the
+pass's end, and decoded the same way (`gpu` lines next to the `guest` ones). Each compute
+entry's first dispatch lists its buffer bindings, with up to 4 read ones copied from the GPU
+before it runs and up to 4 written ones after it (1 MiB each, as 32-bit floats: min, mean, max,
+non-finite count, hash, first 32 values), plus a grid summary of up to 2 storage images it
+writes; a binding or draw input that overlaps an earlier dispatch's written binding says
+`matches output of #N binding K`. The copies share a 128 MiB buffer; what does not fit is listed
+as not copied.
 
 ## Bloodborne's frame (1920x1080, Hunter's Dream / Nightmare)
 

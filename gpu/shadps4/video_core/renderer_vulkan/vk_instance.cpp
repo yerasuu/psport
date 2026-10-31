@@ -577,6 +577,9 @@ bool Instance::CreateDevice() {
                 .samplerAnisotropy = features.samplerAnisotropy,
                 // psport: exact sample counts for the game's occlusion queries (vk_occlusion.h).
                 .occlusionQueryPrecise = features.occlusionQueryPrecise,
+                // psport: per-draw primitive and fragment counts of frame captures
+                // (PS_CAPTURE_SUMMARIZE, vk_frame_capture.h).
+                .pipelineStatisticsQuery = features.pipelineStatisticsQuery,
                 .vertexPipelineStoresAndAtomics = features.vertexPipelineStoresAndAtomics,
                 .fragmentStoresAndAtomics = features.fragmentStoresAndAtomics,
                 .shaderImageGatherExtended = features.shaderImageGatherExtended,
