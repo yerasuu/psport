@@ -238,6 +238,22 @@ writes; a binding or draw input that overlaps an earlier dispatch's written bind
 `matches output of #N binding K`. The copies share a 128 MiB buffer; what does not fit is listed
 as not copied.
 
+`PS_CAPTURE_FRAMES=<n>`, an integer from 1 to 8 (default 1), makes one trigger record `n`
+consecutive frames, with the same frame boundary, so that a glitch that shows on alternate frames
+is caught on both: captures taken by hand seconds apart are an even number of frames apart and
+keep landing on the same one. Each frame is written to its own file, `frame_<id>_<k>.txt` with `k`
+from 0 and one `<id>` for all the files of a trigger, whose first line reads
+`frame <k> of <n>, consecutive frames of one trigger`; each written file logs
+`Frame capture: frame <k> of <n> written to <path> (<n> passes)`. With 1 the file keeps its
+single-frame name, `frame_<id>.txt`, and its contents. Every frame gets everything above, its
+own summaries, queries and buffer copies, and their whole budgets (48 MiB of readbacks, 128 MiB of
+buffer copies, reused from their start once the previous frame is written), so the GPU waits are
+paid on every recorded frame: `n` frames cost `n` times one. A value that is not such an integer
+is logged (`Frame capture: PS_CAPTURE_FRAMES='<value>' ignored: ...`) and 1 is used. Touching the
+trigger again while a multi-frame capture runs removes the file and is logged
+(`Frame capture: trigger ignored: a capture of <n> frames is in progress`); with 1, such a touch
+still arms the next capture once the current one is written.
+
 Every pass also lists each of its draws on a line of its own, indirect draws included (marked
 `indirect`): `#<pass> draw <i>: vs <16 hex digits> ps <16 hex digits> nth <n>`, `ps` all zeros
 for a draw without a pixel shader and `nth` the draw's index, from 0, among the frame's draws of

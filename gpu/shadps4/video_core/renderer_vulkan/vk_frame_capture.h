@@ -3,6 +3,7 @@
 // frame: every render pass (targets, depth, draw count, shaders, sampled textures) and compute
 // dispatch, in order, plus the buffer that was presented. Input for placing a temporal
 // upscaler (scene color, depth, motion vectors, UI) in a game's frame (Game::UpscalerPlacement).
+// PS_CAPTURE_FRAMES=<1..8> records that many consecutive frames per trigger, one file each.
 // PS_CAPTURE_SUMMARIZE=1 adds, for the recorded frame only, each draw's depth, stencil and blend
 // state as the guest set it and as translated for Vulkan, and a value summary of every target at
 // the end of its pass, of the render targets a pass samples at its first draw and of depth copy

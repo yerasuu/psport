@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <charconv>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -190,6 +191,7 @@ constexpr size_t C_BINDINGS_KEPT = 32;
 constexpr u32 C_BINDINGS_COPIED = 4;
 constexpr u32 C_STORAGE_IMAGES_READ = 2;
 constexpr u32 C_WORDS_SHOWN = 32;
+constexpr u32 C_FRAMES_MAX = 8;
 
 u32 SummarizeLevel() {
     static const u32 s_level = [] {
@@ -197,6 +199,26 @@ u32 SummarizeLevel() {
         return sz_value ? u32(std::strtoul(sz_value, nullptr, 10)) : 0u;
     }();
     return s_level;
+}
+
+u32 FramesPerCapture() {
+    static const u32 s_c_frames = [] {
+        const char* sz_value = std::getenv("PS_CAPTURE_FRAMES");
+        if (!sz_value) {
+            return 1u;
+        }
+        const char* p_end = sz_value + std::strlen(sz_value);
+        u32 c_frames = 0;
+        const auto [p_parsed, ec] = std::from_chars(sz_value, p_end, c_frames);
+        if (ec != std::errc{} || p_parsed != p_end || c_frames < 1 || c_frames > C_FRAMES_MAX) {
+            std::printf("Frame capture: PS_CAPTURE_FRAMES='%s' ignored: expected an integer from 1 "
+                        "to %u; recording 1 frame per trigger\n",
+                        sz_value, C_FRAMES_MAX);
+            return 1u;
+        }
+        return c_frames;
+    }();
+    return s_c_frames;
 }
 
 // GPU thread only.
@@ -223,6 +245,8 @@ u64 s_off_gpu_copies = 0;
 u32 s_c_gpu_copies = 0;
 u32 s_c_gpu_copies_skipped = 0;
 std::vector<BindingCopy> s_pending_bindings;
+u32 s_i_frame = 0;
+long long s_id_capture = 0;
 
 void AddBuffers(Entry& entry) {
     // Constants of full-screen passes (post-processing: camera matrices) and of the first draw
@@ -1280,12 +1304,22 @@ void Write(VAddr presented) {
     const std::vector<u64> occlusion_results = QueryResults(s_h_occlusion_pool, 1);
     const std::vector<u64> statistics_results = QueryResults(s_h_statistics_pool, C_STATISTICS);
     const char* sz_dir = std::getenv("PS_CAPTURE_DIR");
+    const u32 c_frames = FramesPerCapture();
+    if (s_i_frame == 0) {
+        s_id_capture = static_cast<long long>(std::time(nullptr));
+    }
     const std::string path =
-        std::format("{}/frame_{}.txt", sz_dir ? sz_dir : ".", static_cast<long long>(std::time(nullptr)));
+        c_frames == 1
+            ? std::format("{}/frame_{}.txt", sz_dir ? sz_dir : ".", s_id_capture)
+            : std::format("{}/frame_{}_{}.txt", sz_dir ? sz_dir : ".", s_id_capture, s_i_frame);
     FILE* p_file = std::fopen(path.c_str(), "w");
     if (!p_file) {
         std::printf("Frame capture: cannot write %s\n", path.c_str());
         return;
+    }
+    if (c_frames > 1) {
+        std::fprintf(p_file, "frame %u of %u, consecutive frames of one trigger\n", s_i_frame,
+                     c_frames);
     }
     std::fprintf(p_file, "presented buffer %#llx\n", static_cast<unsigned long long>(presented));
     std::fprintf(p_file, "draw lines: '#<pass> draw <i>: vs <hash> ps <hash> nth <n>', n counting "
@@ -1462,7 +1496,12 @@ void Write(VAddr presented) {
         }
     }
     std::fclose(p_file);
-    std::printf("Frame capture: %zu passes written to %s\n", s_entries.size(), path.c_str());
+    if (c_frames == 1) {
+        std::printf("Frame capture: %zu passes written to %s\n", s_entries.size(), path.c_str());
+    } else {
+        std::printf("Frame capture: frame %u of %u written to %s (%zu passes)\n", s_i_frame,
+                    c_frames, path.c_str(), s_entries.size());
+    }
     if (SummarizeLevel()) {
         std::printf("Frame capture: %u summaries read back, %u not read, %u draw queries, %u "
                     "whole-image waits, %u gpu buffer copies (%u not copied)\n",
@@ -1482,12 +1521,30 @@ void FrameCapture::OnFlip(VAddr va_presented) {
     m_last_presented.store(va_presented, std::memory_order_relaxed);
     m_c_flips.fetch_add(1, std::memory_order_release);
     static const char* s_sz_trigger = std::getenv("PS_CAPTURE_TRIGGER");
-    if (s_sz_trigger && m_state.load(std::memory_order_relaxed) == Idle &&
-        std::filesystem::exists(s_sz_trigger)) {
-        std::error_code ec;
-        std::filesystem::remove(s_sz_trigger, ec);
-        m_state.store(Armed, std::memory_order_release);
+    if (!s_sz_trigger) {
+        return;
+    }
+    const bool is_idle = m_state.load(std::memory_order_relaxed) == Idle;
+    // A single-frame capture leaves a touch during it for the next arming, as it always did; a
+    // multi-frame one drops it so that its frames stay one consecutive run per touch.
+    if (!is_idle && FramesPerCapture() == 1) {
+        return;
+    }
+    if (!std::filesystem::exists(s_sz_trigger)) {
+        return;
+    }
+    std::error_code ec;
+    std::filesystem::remove(s_sz_trigger, ec);
+    if (!is_idle) {
+        std::printf("Frame capture: trigger ignored: a capture of %u frames is in progress\n",
+                    FramesPerCapture());
+        return;
+    }
+    m_state.store(Armed, std::memory_order_release);
+    if (FramesPerCapture() == 1) {
         std::printf("Frame capture: armed\n");
+    } else {
+        std::printf("Frame capture: armed for %u consecutive frames\n", FramesPerCapture());
     }
 }
 
@@ -1547,18 +1604,23 @@ void FrameCapture::BeginPass(std::span<const PassTarget> colors, PassTarget dept
     const bool is_new_pass = !(s_is_pass_open && !s_entries.empty() && !s_entries.back().is_compute &&
                             s_entries.back().colors == targets);
     if (is_display && is_new_pass) {
-        if (m_state.load(std::memory_order_relaxed) == Recording) {
+        const bool is_recording = m_state.load(std::memory_order_relaxed) == Recording;
+        if (is_recording) {
             SummarizeOpenPass();
             Write(m_last_presented.load(std::memory_order_relaxed));
-            s_entries.clear();
-            s_pending_sampled.clear();
-            s_pending_buffers.clear();
-            m_state.store(Idle, std::memory_order_release);
-            return;
         }
         s_entries.clear();
         s_pending_sampled.clear();
         s_pending_buffers.clear();
+        if (is_recording && ++s_i_frame >= FramesPerCapture()) {
+            m_state.store(Idle, std::memory_order_release);
+            return;
+        }
+        if (!is_recording) {
+            s_i_frame = 0;
+        }
+        // Write waited for the GPU, so the next frame reuses the readback and copy buffers and
+        // the query pools from their start: each frame gets the whole budget, never a share.
         s_is_pass_open = false;
         StartRecording();
         m_state.store(Recording, std::memory_order_release);
