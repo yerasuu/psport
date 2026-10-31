@@ -37,7 +37,7 @@ psport активно разрабатывается. Игра может быт
 | Игра | ID | Состояние |
 |---|---|---|
 | Bloodborne (1.09) | CUSA03173 | играбельна |
-| Atelier Ryza | CUSA16458 | играбельна |
+| Atelier Ryza | CUSA16458 | экспериментально |
 | Atelier Ayesha DX | CUSA16921 | играбельна |
 | Tales of Symphonia Remastered | CUSA50989 | экспериментально |
 | Astrea | CUSA49515 | экспериментально |

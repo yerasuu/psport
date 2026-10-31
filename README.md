@@ -34,7 +34,7 @@ state is how far a title has been seen to get, not a full play-through; what eac
 | Title | Title ID | State |
 |---|---|---|
 | Bloodborne (1.09) | CUSA03173 | playable |
-| Atelier Ryza | CUSA16458 | playable |
+| Atelier Ryza | CUSA16458 | experimental |
 | Atelier Ayesha DX | CUSA16921 | playable |
 | Tales of Symphonia Remastered | CUSA50989 | experimental |
 | Astrea | CUSA49515 | experimental |
