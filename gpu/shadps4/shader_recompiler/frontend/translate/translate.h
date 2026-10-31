@@ -5,6 +5,7 @@
 
 #include <span>
 #include <unordered_map>
+#include "shader_recompiler/frontend/control_flow_graph.h"
 #include "shader_recompiler/frontend/fetch_shader.h"
 #include "shader_recompiler/frontend/instruction.h"
 #include "shader_recompiler/info.h"
@@ -67,6 +68,11 @@ public:
 
     void Translate(IR::Block* block, u32 pc, IR::Condition cond,
                    std::span<const GcnInst> inst_list);
+    /// tables must outlive the translation: their loads are emitted from it.
+    void SetJumpTables(std::span<const JumpTable> tables) {
+        m_jump_tables = tables;
+    }
+    void EmitJumpTableCase(IR::Block* block, const Block& case_block);
     void TranslateInstruction(const GcnInst& inst);
 
     // Instruction categories
@@ -394,6 +400,7 @@ private:
     void ExportRenderTarget(const GcnInst& inst);
     void ExportDepth(const GcnInst& inst);
     void LogMissingOpcode(const GcnInst& inst);
+    void EmitJumpTableLoad(const JumpTable& table);
 
     IR::VectorReg GetScratchVgpr(u32 offset);
 
@@ -408,6 +415,7 @@ private:
     std::optional<FetchShaderData> fetch_data{};
     bool opcode_missing = false;
     u32 pc{};
+    std::span<const JumpTable> m_jump_tables;
 };
 
 } // namespace Shader::Gcn

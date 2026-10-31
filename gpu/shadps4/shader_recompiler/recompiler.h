@@ -31,7 +31,8 @@ struct Pools {
 
 /// Runs the frontend and the IR passes. A shader it cannot translate comes back as the error,
 /// with info and pools left partly written: the caller drops info, and the next call releases
-/// the pools.
+/// the pools. code must be the shader in guest memory, followed by its OrbShdr footer and the
+/// data the compiler appends, where jump tables are read from.
 [[nodiscard]] std::expected<IR::Program, TranslationError> TranslateProgram(
     const std::span<const u32>& code, Pools& pools, Info& info, RuntimeInfo& runtime_info,
     const Profile& profile);

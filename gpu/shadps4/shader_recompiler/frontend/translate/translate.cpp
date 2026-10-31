@@ -1235,6 +1235,15 @@ void Translator::Translate(IR::Block* block, u32 start_pc, IR::Condition cond,
     for (const auto& inst : inst_list) {
         pc += inst.length;
 
+        if (inst.opcode == Opcode::S_LOAD_DWORDX2) {
+            const u32 off_inst = pc - inst.length;
+            const auto it_table = std::ranges::find(m_jump_tables, off_inst, &JumpTable::off_load);
+            if (it_table != m_jump_tables.end()) {
+                EmitJumpTableLoad(*it_table);
+                continue;
+            }
+        }
+
         // Special case for emitting fetch shader.
         if (inst.opcode == Opcode::S_SWAPPC_B64) {
             SHADER_ASSERT(info.hw_stage == HwStage::Vertex || info.hw_stage == HwStage::Export ||
@@ -1248,6 +1257,34 @@ void Translator::Translate(IR::Block* block, u32 start_pc, IR::Condition cond,
     if (cond != IR::Condition::True && cond != IR::Condition::False) {
         block->branch_cond = ir.ConditionRef(ir.Condition(cond));
     }
+}
+
+// psport: the entry is chosen from the table already read by the CFG instead of a ReadConst,
+// whose pc-relative address the user data passes cannot follow; every offset the clamped index
+// gives is matched, and the last entry is also what an index past the clamp reads.
+void Translator::EmitJumpTableLoad(const JumpTable& table) {
+    const IR::U32 offset = ir.GetScalarReg(IR::ScalarReg(table.i_sgpr_offset));
+    const u64 default_entry = table.entries.back();
+    IR::U32 entry_lo = ir.Imm32(static_cast<u32>(default_entry));
+    IR::U32 entry_hi = ir.Imm32(static_cast<u32>(default_entry >> 32));
+    for (size_t i_entry = 0; i_entry + 1 < table.entries.size(); ++i_entry) {
+        const u64 entry = table.entries[i_entry];
+        if (entry == default_entry) {
+            continue;
+        }
+        const u32 off_entry = table.off_first_entry + static_cast<u32>(i_entry * sizeof(u64));
+        const IR::U1 is_entry = ir.IEqual(offset, ir.Imm32(off_entry));
+        entry_lo = IR::U32{ir.Select(is_entry, ir.Imm32(static_cast<u32>(entry)), entry_lo)};
+        entry_hi = IR::U32{ir.Select(is_entry, ir.Imm32(static_cast<u32>(entry >> 32)), entry_hi)};
+    }
+    ir.SetScalarReg(IR::ScalarReg(table.i_sgpr_entry), entry_lo);
+    ir.SetScalarReg(IR::ScalarReg(table.i_sgpr_entry + 1), entry_hi);
+}
+
+void Translator::EmitJumpTableCase(IR::Block* block, const Block& case_block) {
+    ir = IR::IREmitter{*block, block->begin()};
+    const IR::U32 entry_lo = ir.GetScalarReg(IR::ScalarReg(case_block.i_sgpr_case));
+    block->branch_cond = ir.ConditionRef(ir.IEqual(entry_lo, ir.Imm32(case_block.case_value)));
 }
 
 void Translator::TranslateInstruction(const GcnInst& inst) {

@@ -18,6 +18,8 @@ enum class Condition : u32 {
     Vccnz,
     Execz,
     Execnz,
+    // psport: a jump table's case test, compared from an SGPR in the block itself (Gcn::Block).
+    JumpTableCase,
 };
 
 constexpr std::string_view NameOf(Condition condition) {
@@ -38,6 +40,8 @@ constexpr std::string_view NameOf(Condition condition) {
         return "Execz";
     case Condition::Execnz:
         return "Execnz";
+    case Condition::JumpTableCase:
+        return "JumpTableCase";
     default:
         SHADER_UNREACHABLE();
     }

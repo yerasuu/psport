@@ -6,6 +6,9 @@
 #include <algorithm>
 #include <span>
 #include <string>
+#include <tuple>
+#include <utility>
+#include <vector>
 #include <boost/container/small_vector.hpp>
 #include <boost/intrusive/set.hpp>
 
@@ -33,8 +36,13 @@ enum class EndClass {
 struct Block : Hook {
     [[nodiscard]] bool Contains(u32 pc) const noexcept;
 
+    // psport: a jump table's case blocks begin where the block ending in its S_SETPC_B64 ends,
+    // and sort before the block that begins there, in chain order: the structurizer lays the
+    // blocks out in this order, and tests placed apart from the switch made it move every case
+    // branch across the enclosing loops.
     bool operator<(const Block& rhs) const noexcept {
-        return begin < rhs.begin;
+        return std::tuple(begin, !is_jump_table_case, i_case) <
+               std::tuple(rhs.begin, !rhs.is_jump_table_case, rhs.i_case);
     }
 
     u32 begin;
@@ -49,6 +57,35 @@ struct Block : Hook {
     Block* branch_false{};
     IR::Block* ir_block{};
     bool is_dummy{};
+    // psport: one test of a jump table's compare chain, with no instructions: it branches to
+    // branch_true when the SGPR holds case_value, the low dword of that case's table entry.
+    bool is_jump_table_case{};
+    u32 i_case{};
+    u32 i_sgpr_case{};
+    u32 case_value{};
+};
+
+/// psport: a `switch` the compiler lowered to a table of 64-bit offsets read by
+/// s_load_dwordx2 from data appended after the OrbShdr footer, then taken by S_SETPC_B64:
+///   s_min_u32  sR, sIdx, N
+///   s_lshl_b32 sR, sR, 3
+///   s_add_u32  sR, sR, <first entry>     (optional)
+///   s_getpc_b64 s[T:T+1]; s_add_u32 sT, <lit>, sT; s_addc_u32 sT+1, 0, sT+1
+///   s_load_dwordx2 s[X:X+1], s[T:T+1], sR
+///   s_getpc_b64 s[B:B+1]; s_add_u32 sB, sB, sX; s_addc_u32 sB+1, sB+1, sX+1
+///   s_setpc_b64 s[B:B+1]
+/// sR only takes off_first_entry + 8 * k for k <= N, so the table's N + 1 entries are every
+/// value s[X:X+1] can load, and entry N is also where an index past N goes.
+struct JumpTable {
+    u32 i_first;
+    u32 i_setpc;
+    u32 i_load;
+    u32 off_load;
+    u32 i_sgpr_offset;
+    u32 i_sgpr_entry;
+    u32 off_first_entry;
+    std::vector<u64> entries;
+    std::vector<u32> off_targets;
 };
 
 class CFG {
@@ -57,7 +94,10 @@ class CFG {
     using iterator = BlockList::iterator;
 
 public:
-    explicit CFG(Common::ObjectPool<Block>& block_pool, std::span<const GcnInst> inst_list);
+    /// code must be the shader in guest memory: jump tables are read from the data the compiler
+    /// appends after it, which the hardware reads from the same place.
+    explicit CFG(Common::ObjectPool<Block>& block_pool, std::span<const GcnInst> inst_list,
+                 std::span<const u32> code);
 
     [[nodiscard]] iterator begin() {
         return blocks.begin();
@@ -74,6 +114,9 @@ private:
     void LinkBlocks();
     void SplitDivergenceScopes();
     void RemoveUnreachableBlocks();
+    [[nodiscard]] JumpTable ResolveJumpTable(u32 i_setpc) const;
+    void CheckNoBranchInto(const JumpTable& table) const;
+    void LinkJumpTable(Block& block, const JumpTable& table);
 
     void AddLabel(Label address) {
         const auto it = std::ranges::find(labels, address);
@@ -97,6 +140,10 @@ public:
     std::vector<u32> index_to_pc;
     boost::container::small_vector<Label, 16> labels;
     BlockList blocks;
+    std::span<const u32> m_code;
+    // psport: the target of each S_SETPC_B64 with a pc-relative literal, by instruction index.
+    std::vector<std::pair<u32, u32>> m_setpc_targets;
+    std::vector<JumpTable> m_jump_tables;
 };
 
 } // namespace Shader::Gcn
