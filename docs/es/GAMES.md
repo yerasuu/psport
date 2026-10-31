@@ -23,7 +23,7 @@ comprobó por última vez con la regress del 22-10-2026.
 | Juego | ID | Estado | Detalle |
 |---|---|---|---|
 | Bloodborne (1.09) | CUSA03173 | jugable | Partidas guardadas, varias zonas, sonido, mando, teclado y ratón (las indicaciones de teclas se dibujan sobre las del mando), ajustes de fotogramas 30, 60, 90 y sin límite, salida a 3840x2160 (unos 80 FPS en la escena de prueba con una RX 7900 XT). El juego en línea mediante los servidores comunitarios del título (`PS_ONLINE=1`) funciona, con tirones ocasionales al interactuar con mensajes. Las correcciones por título se declaran en [QUIRKS.md](../en/QUIRKS.md). |
-| Atelier Ryza | CUSA16458 | experimental | Menú principal, prólogo, el mapa con el control del jugador, sonido; el río y el bosque se dibujan bien. Guardar falla: el diálogo de guardado se rechaza y no se escribe ninguna partida. |
+| Atelier Ryza | CUSA16458 | jugable | Menú principal, prólogo, el mapa con el control del jugador, sonido; el río y el bosque se dibujan bien. Guardar y cargar funcionan. |
 | Atelier Ayesha DX | CUSA16921 | jugable | Vídeo de introducción, menú principal, escenas iniciales, el mapa, el taller, sonido; las indicaciones de teclas se dibujan para jugar con teclado. |
 | Tales of Symphonia Remastered | CUSA50989 | experimental | Pantalla de título, la primera sala, sonido. |
 | Astrea | CUSA49515 | experimental | Las viñetas de la historia de la introducción, sonido. |

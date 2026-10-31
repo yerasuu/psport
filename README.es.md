@@ -38,7 +38,7 @@ en [tools/regress/titles.txt](tools/regress/titles.txt) y se ejecutan sin ventan
 | Juego | ID | Estado |
 |---|---|---|
 | Bloodborne (1.09) | CUSA03173 | jugable |
-| Atelier Ryza | CUSA16458 | experimental |
+| Atelier Ryza | CUSA16458 | jugable |
 | Atelier Ayesha DX | CUSA16921 | jugable |
 | Tales of Symphonia Remastered | CUSA50989 | experimental |
 | Astrea | CUSA49515 | experimental |
