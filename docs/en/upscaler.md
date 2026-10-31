@@ -238,6 +238,32 @@ writes; a binding or draw input that overlaps an earlier dispatch's written bind
 `matches output of #N binding K`. The copies share a 128 MiB buffer; what does not fit is listed
 as not copied.
 
+Every pass also lists each of its draws on a line of its own, indirect draws included (marked
+`indirect`): `#<pass> draw <i>: vs <16 hex digits> ps <16 hex digits> nth <n>`, `ps` all zeros
+for a draw without a pixel shader and `nth` the draw's index, from 0, among the frame's draws of
+that shader pair, so that one draw of a pair several draws share can be named.
+
+Draw skipping: `PS_SKIP_DRAWS=<entry>[,<entry>...]`, `<entry>` being `<vs>:<ps>[#<n>]`, leaves out
+the graphics draws whose vertex and pixel shader hashes match, to find which draw paints something
+(it disappears). A hash is hexadecimal, with or without `0x` and leading zeros (the capture's
+16-digit form pastes as it is), or `*` for any; `#<n>` (decimal) keeps only the n-th draw, from 0,
+matching that entry in each frame, which for an entry without `*` is the capture's `nth`. Frames
+start, as the capture's do, at the first draw into a display buffer after draws into other
+targets (without such draws `#<n>` counts from the start). Example:
+`PS_SKIP_DRAWS=00000000be30c20c:00000000a5278660#2,f1d2402d:*`. Entries are read once at the first
+draw; a malformed one is logged (`Debug: PS_SKIP_DRAWS entry '<entry>' ignored: <why>`) and
+ignored alone, those in force are logged once, the first skip of each pair logs
+`Debug: PS_SKIP_DRAWS skipping <vs>:<ps>`, and after the call report
+`Skip draws: summary: PS_SKIP_DRAWS skipped <n> draws of <n> pairs: <vs>:<ps> <n> ...; by entry:
+<entry> <n> ...`. Only the draw command is left out: the draw's pass still begins (clears,
+layout transitions), its resources are bound and its barriers recorded, so later draws see the
+state they would after it; what the draw itself would have produced is missing (its colour,
+depth and stencil writes, its samples in the game's occlusion queries, its transform feedback
+output, its object motion vectors). It applies to direct and indirect graphics draws, captured
+frames included (the capture lists them as `skipped by PS_SKIP_DRAWS`, counted in the pass's
+draws but not in its indices); compute dispatches are never skipped. Unset, each draw tests one
+constant flag besides the capture's state, which it tested already.
+
 ## Bloodborne's frame (1920x1080, Hunter's Dream / Nightmare)
 
 | Passes | What |

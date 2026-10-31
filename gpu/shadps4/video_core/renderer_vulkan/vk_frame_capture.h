@@ -99,7 +99,10 @@ public:
     /// `sz_route` names an attachment redirection (scene proxy, upscaler output), or null.
     static void BeginPass(std::span<const PassTarget> colors, PassTarget depth,
                           const char* sz_route);
-    static void Draw(u64 vs_hash, u64 ps_hash, u32 c_indices, u32 c_instances);
+    /// Every graphics draw, also those PS_SKIP_DRAWS left out (`is_skipped`) and indirect ones
+    /// (no index count); `i_pair_draw` is its index among the frame's draws of its shader pair.
+    static void Draw(u64 vs_hash, u64 ps_hash, u32 c_indices, u32 c_instances, u32 i_pair_draw,
+                     bool is_skipped, bool is_indirect);
     /// After Draw: the draw's depth and stencil state, accumulated over the pass.
     static void DepthUse(bool is_test, bool is_write, bool is_stencil);
     /// GPU thread, before recording a draw, with PS_CAPTURE_SUMMARIZE while recording: query

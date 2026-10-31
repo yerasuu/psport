@@ -15,6 +15,7 @@
 #include "psport_write_log.h"
 #include "psport_free_check.h"
 #include "psport_srt_faults.h"
+#include "psport_skip_draws.h"
 #include "psport_guest_memory.h"
 #include "video_core/renderer_vulkan/vk_frame_capture.h"
 #include "common/hash.h"
@@ -1886,6 +1887,19 @@ void Rasterizer::StreamOutBufferUpdate(const StreamOutUpdate& update) {
     }
 }
 
+namespace {
+// psport: PS_SKIP_DRAWS, and the frame capture's per-draw lines (each draw's index among the
+// frame's draws of its shader pair).
+PsSkipDraws::Verdict CheckSkip(const AmdGpu::Regs& regs, u64 vs_hash, u64 ps_hash) {
+    if (!PsSkipDraws::g_is_enabled && !FrameCapture::Active()) {
+        return {};
+    }
+    const bool is_display_target =
+        regs.color_buffers[0] && FrameCapture::IsDisplayBuffer(regs.color_buffers[0].Address());
+    return PsSkipDraws::Check(vs_hash, ps_hash, is_display_target);
+}
+} // namespace
+
 void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw* used_prepared,
                             bool is_indexed, u32 index_offset) {
     PS_SECTION(DrawRecord);
@@ -2098,6 +2112,20 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
         .program = {vs_info.ProgramBase(), ps_info ? ps_info->ProgramBase() : 0},
         .count = {num_indices, num_instances, 0},
     };
+    const auto skip = CheckSkip(regs, vs_info.pgm_hash, ps_info ? ps_info->pgm_hash : 0);
+    if (skip.is_skipped) {
+        // psport: only the draw command is left out. Its pass began, its attachments and
+        // resources were transitioned and bound, so later draws find the state they would after
+        // it. What the draw would produce is missing: its writes, its samples in the guest's
+        // occlusion queries, its transform feedback output and its object motion.
+        if (FrameCapture::Active()) {
+            FrameCapture::Draw(vs_info.pgm_hash, ps_info ? ps_info->pgm_hash : 0, num_indices,
+                               num_instances, skip.i_pair_draw, true, false);
+        }
+        ResetBindings(false);
+        scheduler.KickRecording();
+        return;
+    }
     const vk::Buffer xfb_buffer = strmout.buffer ? strmout.buffer->Handle() : vk::Buffer{};
     const vk::DeviceSize xfb_offset = strmout.offset;
     const vk::DeviceSize xfb_size = strmout.size;
@@ -2140,7 +2168,8 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
     NoteStreamOut(strmout);
     if (FrameCapture::Active()) {
         const auto* ps = pipeline->GetStages()[u32(Shader::SwStage::Fragment)];
-        FrameCapture::Draw(vs_info.pgm_hash, ps ? ps->pgm_hash : 0, num_indices, num_instances);
+        FrameCapture::Draw(vs_info.pgm_hash, ps ? ps->pgm_hash : 0, num_indices, num_instances,
+                           skip.i_pair_draw, false, false);
         FrameCapture::DepthUse(regs.depth_control.depth_enable,
                                regs.depth_control.depth_enable && regs.depth_control.depth_write_enable,
                                regs.depth_control.stencil_enable);
@@ -2345,6 +2374,18 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
         .va_arguments = indirect.args,
         .count = {max_count, stride, 0},
     };
+    const u64 vs_hash = vs_crumb ? vs_crumb->pgm_hash : 0;
+    const u64 ps_hash = ps_crumb ? ps_crumb->pgm_hash : 0;
+    const auto skip = CheckSkip(Regs(), vs_hash, ps_hash);
+    if (skip.is_skipped) {
+        // psport: as in DrawRecord, only the draw command is left out.
+        if (FrameCapture::Active()) {
+            FrameCapture::Draw(vs_hash, ps_hash, 0, 0, skip.i_pair_draw, true, true);
+        }
+        ResetBindings(false);
+        scheduler.KickRecording();
+        return;
+    }
     const vk::Buffer xfb_buffer = strmout.buffer ? strmout.buffer->Handle() : vk::Buffer{};
     const vk::DeviceSize xfb_offset = strmout.offset;
     const vk::DeviceSize xfb_size = strmout.size;
@@ -2373,6 +2414,9 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
         }
     });
     NoteStreamOut(strmout);
+    if (FrameCapture::Active()) {
+        FrameCapture::Draw(vs_hash, ps_hash, 0, 0, skip.i_pair_draw, false, true);
+    }
     DebugState.IncDrawCall();
 
     ResetBindings(false);

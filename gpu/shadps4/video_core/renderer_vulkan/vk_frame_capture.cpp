@@ -134,6 +134,15 @@ struct FullPlanes {
     u64 off_stencil{};
 };
 
+/// One line per draw, so that each draw's shader pair can be named in PS_SKIP_DRAWS.
+struct DrawLine {
+    u64 vs_hash{};
+    u64 ps_hash{};
+    u32 i_pair_draw{};
+    bool is_skipped{};
+    bool is_indirect{};
+};
+
 struct Entry {
     bool is_compute{};
     bool is_copy{};
@@ -147,6 +156,7 @@ struct Entry {
     std::vector<Sample> sampled; ///< textures and storage images
     std::string note;
     std::vector<std::string> buffers; ///< dumped constants, per draw
+    std::vector<DrawLine> draw_lines;
     // PS_CAPTURE_SUMMARIZE only.
     u64 tick{};
     std::string route;
@@ -1278,6 +1288,9 @@ void Write(VAddr presented) {
         return;
     }
     std::fprintf(p_file, "presented buffer %#llx\n", static_cast<unsigned long long>(presented));
+    std::fprintf(p_file, "draw lines: '#<pass> draw <i>: vs <hash> ps <hash> nth <n>', n counting "
+                         "the frame's draws of that pair from 0; PS_SKIP_DRAWS=<vs>:<ps>#<n> skips "
+                         "that draw alone\n");
     if (SummarizeLevel()) {
         std::fprintf(p_file,
                      "summaries: %u read back (%llu KiB), %u not read; grid %ux%u texels, "
@@ -1323,6 +1336,7 @@ void Write(VAddr presented) {
             write_summaries(e);
             continue;
         }
+        const u32 i_pass = i_file;
         if (e.is_compute) {
             std::fprintf(p_file, "\n#%u COMPUTE dispatches %u, cs", i_file++, e.draws);
         } else {
@@ -1353,6 +1367,14 @@ void Write(VAddr presented) {
                                  e.identities[i].c_str());
                 }
             }
+        }
+        for (u32 i = 0; i < e.draw_lines.size(); ++i) {
+            const auto& line = e.draw_lines[i];
+            std::fprintf(p_file, "  #%u draw %u: vs %016llx ps %016llx nth %u%s%s\n", i_pass, i,
+                         static_cast<unsigned long long>(line.vs_hash),
+                         static_cast<unsigned long long>(line.ps_hash), line.i_pair_draw,
+                         line.is_indirect ? " indirect" : "",
+                         line.is_skipped ? " skipped by PS_SKIP_DRAWS" : "");
         }
         for (const auto& s : e.sampled) {
             std::fprintf(p_file, "  %s %s | %s\n", s.is_storage ? "writes " : "samples",
@@ -1575,7 +1597,8 @@ void FrameCapture::BeginPass(std::span<const PassTarget> colors, PassTarget dept
     s_is_pass_open = true;
 }
 
-void FrameCapture::Draw(u64 vs_hash, u64 ps_hash, u32 c_indices, u32 c_instances) {
+void FrameCapture::Draw(u64 vs_hash, u64 ps_hash, u32 c_indices, u32 c_instances,
+                        u32 i_pair_draw, bool is_skipped, bool is_indirect) {
     s_pending_bindings.clear();
     if (m_state.load(std::memory_order_relaxed) != Recording || s_entries.empty() ||
         s_entries.back().is_compute || s_entries.back().is_copy) {
@@ -1583,7 +1606,10 @@ void FrameCapture::Draw(u64 vs_hash, u64 ps_hash, u32 c_indices, u32 c_instances
     }
     auto& e = s_entries.back();
     ++e.draws;
-    e.indices += u64(c_indices) * std::max(c_instances, 1u);
+    e.draw_lines.push_back({vs_hash, ps_hash, i_pair_draw, is_skipped, is_indirect});
+    if (!is_skipped) {
+        e.indices += u64(c_indices) * std::max(c_instances, 1u);
+    }
     AddShader(e, vs_hash);
     AddShader(e, ps_hash);
     AddSampled(e);
