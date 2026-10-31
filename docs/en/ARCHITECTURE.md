@@ -267,9 +267,11 @@ a file.
 
 `PS_DEBUG=1` (or `debug=1` in `psport.ini`) makes `src/runtime/runtime_debug.c` gather a run's logs in
 `<PS_DEBUG_DIR>/<host>/<YYYYmmdd-HHMMSS>-<serial>/` (`run.log`, `gpu.log`, `calls.txt`, `faults.txt`,
-`validation.txt`, `frame-stats.txt`, `env.txt`, `config.txt`, `summary.txt`), for a folder synchronised
+`validation.txt`, `frame-stats.txt`, `link.txt`, `imports.txt`, `env.txt`, `config.txt`, `summary.txt`), for a folder synchronised
 between machines: each file is written as `<name>.partial` and renamed when complete, `summary.txt`
-last. A helper process (`ps_host_output_tee`) copies stdout and stderr into `run.log` and finishes the
+last. `link.txt` holds the loader's linking decisions and `imports.txt` the imports psport does not
+cover (no implementation, stub, left to the host runtime), so what a title still lacks reads without
+the rest of `run.log`. A helper process (`ps_host_output_tee`) copies stdout and stderr into `run.log` and finishes the
 folder once the process is gone, by any route; every exit path calls `runtime_debug_finish` after the
 call report. `PS_DEBUG_KEEP` (20) run folders of the host are kept. Details:
 [FORK.md](../../FORK.md#diagnostics).

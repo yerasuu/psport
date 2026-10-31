@@ -3,7 +3,7 @@
  * <PS_DEBUG_DIR>/<host>/<YYYYmmdd-HHMMSS>-<serial>/, which a file synchroniser copies between
  * machines. Each file is written as <name>.partial and renamed once nothing writes it any more;
  * summary.txt comes last, so a folder holding it is complete. The output helper
- * (ps_host_output_tee) owns run.log and frame-stats.txt and finishes the folder once the process
+ * (ps_host_output_tee) owns run.log, frame-stats.txt, link.txt and imports.txt and finishes the folder once the process
  * and whatever inherited its output are gone, by any route. */
 #define _GNU_SOURCE
 #include "runtime.h"
@@ -249,13 +249,32 @@ static void sanitise_host(char *sz_out, size_t cb_out, const char *sz_in) {
 static void debug_exit(int status) { runtime_debug_finish("exit", status); }
 
 /* The output helper's side, in its own process. */
-static int s_h_run_log = -1, s_h_frame_stats = -1;
+static int s_h_run_log = -1, s_h_frame_stats = -1, s_h_link = -1, s_h_imports = -1;
 static char s_tail[32768];
 static size_t s_off_tail;
 static int s_is_tail_wrapped, s_is_stats_block;
 static char s_sz_stats_line[2048];
 static size_t s_cb_stats_line;
 /* The frame statistics' report lines (PS_FRAME_STATS), with the indented lines under them. */
+static int has_prefix(const char *sz_line, const char *sz_prefix) { return !strncmp(sz_line, sz_prefix, strlen(sz_prefix)); }
+/* The loader's linking decisions and the imports psport does not cover, each in a file of its own so a
+ * run's missing pieces are read without the rest of run.log. */
+static void split_line(void) {
+    static const char *const s_link_heads[] = {"Loader:", "Linked modules:"};
+    static const char *const s_import_heads[] = {"Loader: import ", "Runtime: import ", "Runtime: unsupported import ", "Runtime: imports "};
+    int is_import = 0, is_link = 0;
+    for (size_t i = 0; i < sizeof(s_import_heads) / sizeof(*s_import_heads); ++i)
+        if (has_prefix(s_sz_stats_line, s_import_heads[i])) is_import = 1;
+    if (!is_import)
+        for (size_t i = 0; i < sizeof(s_link_heads) / sizeof(*s_link_heads); ++i)
+            if (has_prefix(s_sz_stats_line, s_link_heads[i])) is_link = 1;
+    int *ph_file = is_import ? &s_h_imports : is_link ? &s_h_link : NULL;
+    if (!ph_file) return;
+    if (*ph_file < 0) *ph_file = runtime_debug_open(is_import ? "imports.txt" : "link.txt");
+    if (*ph_file < 0) return;
+    put(*ph_file, s_sz_stats_line, s_cb_stats_line);
+    put_text(*ph_file, "\n");
+}
 static void end_stats_line(void) {
     static const char *const s_heads[] = {"Frame stats:", "Stall:", "Draw pipe:", "Shader specializations:",
                                           "Native probe:", "Guest waits per frame", "Guest heap:"};
@@ -271,6 +290,7 @@ static void end_stats_line(void) {
             put_text(s_h_frame_stats, "\n");
         }
     }
+    split_line();
     s_cb_stats_line = 0;
 }
 static void tee_chunk(int is_error, const char *p_data, size_t cb_data) {
@@ -306,8 +326,12 @@ static void tee_end(void) {
     if (s_cb_stats_line) end_stats_line();
     if (s_h_run_log >= 0) ps_host_fs_close(s_h_run_log);
     if (s_h_frame_stats >= 0) ps_host_fs_close(s_h_frame_stats);
+    if (s_h_link >= 0) ps_host_fs_close(s_h_link);
+    if (s_h_imports >= 0) ps_host_fs_close(s_h_imports);
     publish("run.log");
     publish("frame-stats.txt");
+    publish("link.txt");
+    publish("imports.txt");
     /* psport ended: nothing writes its files any more, also when it could not finish them itself. */
     for (size_t i = 0; i < sizeof(s_psport_files) / sizeof(*s_psport_files); ++i) publish(s_psport_files[i]);
     const int h_summary = runtime_debug_open("summary.txt");
