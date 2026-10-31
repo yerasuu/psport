@@ -21,12 +21,15 @@ namespace PsSkipDraws {
 namespace {
 
 constexpr std::size_t C_RULES_MAX = 64;
+constexpr std::uint32_t TARGET_SIDE_MAX = 16384;
 
 struct Rule {
     std::uint64_t vs_hash;
     std::uint64_t ps_hash;
     bool is_any_vs;
     bool is_any_ps;
+    bool has_target;
+    Target target; ///< by address when `va_target` is not 0, else by size
     bool has_nth;
     std::uint32_t i_nth;
     std::uint32_t c_frame_matches;
@@ -88,23 +91,80 @@ const char* ParseHash(std::string_view text, std::uint64_t& out_hash, bool& out_
     return nullptr;
 }
 
+/// Null on success, else why `text` is not a decimal side of a target size.
+const char* ParseSide(std::string_view text, std::uint32_t& out_side) {
+    const char* p_end = text.data() + text.size();
+    const auto [p_parsed, ec] = std::from_chars(text.data(), p_end, out_side, 10);
+    if (text.empty() || ec != std::errc{} || p_parsed != p_end) {
+        return "a target width or height is not decimal";
+    }
+    if (out_side == 0 || out_side > TARGET_SIDE_MAX) {
+        return "a target width or height is 0 or above 16384";
+    }
+    return nullptr;
+}
+
+/// Null on success, else why `text` is neither `<W>x<H>` nor `0x<address>`.
+const char* ParseTarget(std::string_view text, Target& out_target) {
+    out_target = {};
+    if (text.starts_with("0x") || text.starts_with("0X")) {
+        text.remove_prefix(2);
+        const char* p_end = text.data() + text.size();
+        const auto [p_parsed, ec] = std::from_chars(text.data(), p_end, out_target.va_target, 16);
+        if (ec == std::errc::result_out_of_range) {
+            return "a target address does not fit 64 bits";
+        }
+        if (text.empty() || ec != std::errc{} || p_parsed != p_end) {
+            return "a target address is not hexadecimal";
+        }
+        if (out_target.va_target == 0) {
+            return "a target address is 0, which no colour attachment has";
+        }
+        return nullptr;
+    }
+    const auto i_x = text.find('x');
+    if (i_x == std::string_view::npos) {
+        return "@<target> is neither <W>x<H> nor 0x<address>";
+    }
+    if (const char* sz_why = ParseSide(text.substr(0, i_x), out_target.width)) {
+        return sz_why;
+    }
+    return ParseSide(text.substr(i_x + 1), out_target.height);
+}
+
 /// Null on success, else why `entry` was rejected.
 const char* ParseEntry(std::string_view entry, Rule& out_rule) {
     if (entry.empty()) {
         return "empty entry";
     }
     std::string_view pair = entry;
+    out_rule.has_target = false;
+    out_rule.target = {};
     out_rule.has_nth = false;
     out_rule.i_nth = 0;
     if (const auto i_hash = entry.find('#'); i_hash != std::string_view::npos) {
         pair = entry.substr(0, i_hash);
         const std::string_view nth = entry.substr(i_hash + 1);
+        if (nth.find('@') != std::string_view::npos) {
+            return "@<target> must come before #<n>";
+        }
         const char* p_end = nth.data() + nth.size();
         const auto [p_parsed, ec] = std::from_chars(nth.data(), p_end, out_rule.i_nth, 10);
         if (nth.empty() || ec != std::errc{} || p_parsed != p_end) {
             return "#<n> is not a decimal draw index below 2^32";
         }
         out_rule.has_nth = true;
+    }
+    if (const auto i_at = pair.find('@'); i_at != std::string_view::npos) {
+        const std::string_view target = pair.substr(i_at + 1);
+        pair = pair.substr(0, i_at);
+        if (target.find('@') != std::string_view::npos) {
+            return "more than one @<target>";
+        }
+        if (const char* sz_why = ParseTarget(target, out_rule.target)) {
+            return sz_why;
+        }
+        out_rule.has_target = true;
     }
     const auto i_colon = pair.find(':');
     if (i_colon == std::string_view::npos || pair.find(':', i_colon + 1) != std::string_view::npos) {
@@ -120,6 +180,11 @@ const char* ParseEntry(std::string_view entry, Rule& out_rule) {
         return is_any ? std::string{"*"} : fmt::format("{:016x}", hash);
     };
     out_rule.text = side(out_rule.is_any_vs, out_rule.vs_hash) + ":" + side(out_rule.is_any_ps, out_rule.ps_hash);
+    if (out_rule.has_target) {
+        out_rule.text += out_rule.target.va_target
+                             ? fmt::format("@{:#x}", out_rule.target.va_target)
+                             : fmt::format("@{}x{}", out_rule.target.width, out_rule.target.height);
+    }
     if (out_rule.has_nth) {
         out_rule.text += fmt::format("#{}", out_rule.i_nth);
     }
@@ -185,20 +250,31 @@ void Parse() {
     LOG_WARNING(Render_Vulkan, "Debug: PS_SKIP_DRAWS: {} entries in force:{}", s_c_rules, in_force);
 }
 
+bool IsTargetMatch(const Rule& rule, const Target& color0) {
+    if (!rule.has_target) {
+        return true;
+    }
+    if (!color0.va_target) {
+        return false;
+    }
+    if (rule.target.va_target) {
+        return rule.target.va_target == color0.va_target;
+    }
+    return rule.target.width == color0.width && rule.target.height == color0.height;
+}
+
+std::string DescribeTarget(const Target& color0) {
+    return color0.va_target ? fmt::format("{}x{} {:#x}", color0.width, color0.height, color0.va_target) : "-";
+}
+
 void NoteSkip(std::uint64_t vs_hash, std::uint64_t ps_hash) {
-    bool is_first = false;
-    {
-        std::scoped_lock lock{s_mutex};
-        is_first = s_skipped_pairs[{vs_hash, ps_hash}]++ == 0;
-    }
-    if (is_first) {
-        LOG_WARNING(Render_Vulkan, "Debug: PS_SKIP_DRAWS skipping {:016x}:{:016x}", vs_hash, ps_hash);
-    }
+    std::scoped_lock lock{s_mutex};
+    ++s_skipped_pairs[{vs_hash, ps_hash}];
 }
 
 } // namespace
 
-Verdict Check(std::uint64_t vs_hash, std::uint64_t ps_hash, bool is_display_target) {
+Verdict Check(std::uint64_t vs_hash, std::uint64_t ps_hash, const Target& color0, bool is_display_target) {
     static const bool s_is_parsed = (Parse(), true);
     (void)s_is_parsed;
     if (is_display_target && !s_is_last_display) {
@@ -212,14 +288,19 @@ Verdict Check(std::uint64_t vs_hash, std::uint64_t ps_hash, bool is_display_targ
     bool is_skipped = false;
     for (std::size_t i = 0; i < s_c_rules; ++i) {
         Rule& rule = s_rules[i];
-        if ((!rule.is_any_vs && rule.vs_hash != vs_hash) || (!rule.is_any_ps && rule.ps_hash != ps_hash)) {
+        if ((!rule.is_any_vs && rule.vs_hash != vs_hash) || (!rule.is_any_ps && rule.ps_hash != ps_hash) ||
+            !IsTargetMatch(rule, color0)) {
             continue;
         }
         const std::uint32_t i_match = rule.c_frame_matches++;
         if (rule.has_nth && i_match != rule.i_nth) {
             continue;
         }
-        rule.c_skipped.fetch_add(1, std::memory_order_relaxed);
+        if (rule.c_skipped.fetch_add(1, std::memory_order_relaxed) == 0) {
+            LOG_WARNING(Render_Vulkan,
+                        "Debug: PS_SKIP_DRAWS entry '{}' skipping its first draw: {:016x}:{:016x} target {}",
+                        rule.text, vs_hash, ps_hash, DescribeTarget(color0));
+        }
         is_skipped = true;
     }
     if (is_skipped) {

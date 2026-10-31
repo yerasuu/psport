@@ -1888,15 +1888,30 @@ void Rasterizer::StreamOutBufferUpdate(const StreamOutUpdate& update) {
 }
 
 namespace {
+struct SkipCheck {
+    PsSkipDraws::Verdict verdict;
+    PsSkipDraws::Target color0;
+};
+
 // psport: PS_SKIP_DRAWS, and the frame capture's per-draw lines (each draw's index among the
-// frame's draws of its shader pair).
-PsSkipDraws::Verdict CheckSkip(const AmdGpu::Regs& regs, u64 vs_hash, u64 ps_hash) {
+// frame's draws of its shader pair, and its colour attachment 0). The attachment is read from the
+// same image the capture's pass lines describe, so the values it prints select the draw.
+SkipCheck CheckSkip(const AmdGpu::Regs& regs, VideoCore::TextureCache& texture_cache,
+                    const RenderState& state, VideoCore::ImageId id_color0, u64 vs_hash,
+                    u64 ps_hash) {
     if (!PsSkipDraws::g_is_enabled && !FrameCapture::Active()) {
         return {};
     }
+    const VideoCore::Image* p_color0 = state.num_color_attachments && id_color0
+                                           ? texture_cache.TryGetImage(id_color0, 0)
+                                           : nullptr;
+    const PsSkipDraws::Target color0 =
+        p_color0 ? PsSkipDraws::Target{p_color0->info.guest_address, p_color0->info.size.width,
+                                       p_color0->info.size.height}
+                 : PsSkipDraws::Target{};
     const bool is_display_target =
         regs.color_buffers[0] && FrameCapture::IsDisplayBuffer(regs.color_buffers[0].Address());
-    return PsSkipDraws::Check(vs_hash, ps_hash, is_display_target);
+    return {PsSkipDraws::Check(vs_hash, ps_hash, color0, is_display_target), color0};
 }
 } // namespace
 
@@ -2112,15 +2127,16 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
         .program = {vs_info.ProgramBase(), ps_info ? ps_info->ProgramBase() : 0},
         .count = {num_indices, num_instances, 0},
     };
-    const auto skip = CheckSkip(regs, vs_info.pgm_hash, ps_info ? ps_info->pgm_hash : 0);
-    if (skip.is_skipped) {
+    const auto skip = CheckSkip(regs, texture_cache, state, cb_descs[0].first, vs_info.pgm_hash,
+                                ps_info ? ps_info->pgm_hash : 0);
+    if (skip.verdict.is_skipped) {
         // psport: only the draw command is left out. Its pass began, its attachments and
         // resources were transitioned and bound, so later draws find the state they would after
         // it. What the draw would produce is missing: its writes, its samples in the guest's
         // occlusion queries, its transform feedback output and its object motion.
         if (FrameCapture::Active()) {
             FrameCapture::Draw(vs_info.pgm_hash, ps_info ? ps_info->pgm_hash : 0, num_indices,
-                               num_instances, skip.i_pair_draw, true, false);
+                               num_instances, skip.verdict.i_pair_draw, skip.color0, true, false);
         }
         ResetBindings(false);
         scheduler.KickRecording();
@@ -2169,7 +2185,7 @@ void Rasterizer::DrawRecord(const GraphicsPipeline* pipeline, const PreparedDraw
     if (FrameCapture::Active()) {
         const auto* ps = pipeline->GetStages()[u32(Shader::SwStage::Fragment)];
         FrameCapture::Draw(vs_info.pgm_hash, ps ? ps->pgm_hash : 0, num_indices, num_instances,
-                           skip.i_pair_draw, false, false);
+                           skip.verdict.i_pair_draw, skip.color0, false, false);
         FrameCapture::DepthUse(regs.depth_control.depth_enable,
                                regs.depth_control.depth_enable && regs.depth_control.depth_write_enable,
                                regs.depth_control.stencil_enable);
@@ -2376,11 +2392,13 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
     };
     const u64 vs_hash = vs_crumb ? vs_crumb->pgm_hash : 0;
     const u64 ps_hash = ps_crumb ? ps_crumb->pgm_hash : 0;
-    const auto skip = CheckSkip(Regs(), vs_hash, ps_hash);
-    if (skip.is_skipped) {
+    const auto skip =
+        CheckSkip(Regs(), texture_cache, state, cb_descs[0].first, vs_hash, ps_hash);
+    if (skip.verdict.is_skipped) {
         // psport: as in DrawRecord, only the draw command is left out.
         if (FrameCapture::Active()) {
-            FrameCapture::Draw(vs_hash, ps_hash, 0, 0, skip.i_pair_draw, true, true);
+            FrameCapture::Draw(vs_hash, ps_hash, 0, 0, skip.verdict.i_pair_draw, skip.color0, true,
+                               true);
         }
         ResetBindings(false);
         scheduler.KickRecording();
@@ -2415,7 +2433,8 @@ void Rasterizer::DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_in
     });
     NoteStreamOut(strmout);
     if (FrameCapture::Active()) {
-        FrameCapture::Draw(vs_hash, ps_hash, 0, 0, skip.i_pair_draw, false, true);
+        FrameCapture::Draw(vs_hash, ps_hash, 0, 0, skip.verdict.i_pair_draw, skip.color0, false,
+                           true);
     }
     DebugState.IncDrawCall();
 

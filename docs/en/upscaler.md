@@ -255,23 +255,36 @@ trigger again while a multi-frame capture runs removes the file and is logged
 still arms the next capture once the current one is written.
 
 Every pass also lists each of its draws on a line of its own, indirect draws included (marked
-`indirect`): `#<pass> draw <i>: vs <16 hex digits> ps <16 hex digits> nth <n>`, `ps` all zeros
-for a draw without a pixel shader and `nth` the draw's index, from 0, among the frame's draws of
-that shader pair, so that one draw of a pair several draws share can be named.
+`indirect`): `#<pass> draw <i>: vs <16 hex digits> ps <16 hex digits> nth <n> target <W>x<H>
+<address>`, `ps` all zeros for a draw without a pixel shader, `nth` the draw's index, from 0,
+among the frame's draws of that shader pair, and `target` the draw's colour attachment 0 (its
+size and guest address, the image the pass's `color0` line describes; `target -` for a draw
+without one, depth-only for instance), so that one draw of a pair several draws share can be
+named.
 
-Draw skipping: `PS_SKIP_DRAWS=<entry>[,<entry>...]`, `<entry>` being `<vs>:<ps>[#<n>]`, leaves out
-the graphics draws whose vertex and pixel shader hashes match, to find which draw paints something
-(it disappears). A hash is hexadecimal, with or without `0x` and leading zeros (the capture's
-16-digit form pastes as it is), or `*` for any; `#<n>` (decimal) keeps only the n-th draw, from 0,
-matching that entry in each frame, which for an entry without `*` is the capture's `nth`. Frames
-start, as the capture's do, at the first draw into a display buffer after draws into other
-targets (without such draws `#<n>` counts from the start). Example:
-`PS_SKIP_DRAWS=00000000be30c20c:00000000a5278660#2,f1d2402d:*`. Entries are read once at the first
-draw; a malformed one is logged (`Debug: PS_SKIP_DRAWS entry '<entry>' ignored: <why>`) and
-ignored alone, those in force are logged once, the first skip of each pair logs
-`Debug: PS_SKIP_DRAWS skipping <vs>:<ps>`, and after the call report
+Draw skipping: `PS_SKIP_DRAWS=<entry>[,<entry>...]`, `<entry>` being
+`<vs>:<ps>[@<target>][#<n>]`, leaves out the graphics draws whose vertex and pixel shader hashes
+match, to find which draw paints something (it disappears). A hash is hexadecimal, with or
+without `0x` and leading zeros (the capture's 16-digit form pastes as it is), or `*` for any.
+`@<target>` keeps only the draws whose colour attachment 0 is `<W>x<H>` (decimal width and
+height, each 1 to 16384) or `0x<address>` (its guest address, hexadecimal, up to 64 bits), the
+two values of the capture's `target`; a draw without colour attachment 0 never matches it.
+`#<n>` (decimal) keeps only the n-th draw, from 0, matching the rest of that entry in each frame,
+which for an entry without `*` or `@` is the capture's `nth`; `@` comes before `#` when both are
+given, and `#<n>` then counts only the draws into that target. Frames start, as the capture's do,
+at the first draw into a display buffer after draws into other targets (without such draws
+`#<n>` counts from the start). A bare `#<n>` is unreliable across frames: a pair shared by many
+passes (a full-screen copy, say) has draws that come and go from frame to frame, so its n-th
+draw in one frame can be another pass's in the next; `@<address>` (or `@<W>x<H>`) names the
+pass by where it renders and is the stable way, with `#<n>` after it only for draws of one pair
+into one target. Examples: `PS_SKIP_DRAWS=00000000be30c20c:00000000a5278660#2,f1d2402d:*`,
+`PS_SKIP_DRAWS=4da1ea6f:bec8f549@0x1052b50000`, `PS_SKIP_DRAWS=4da1ea6f:bec8f549@1920x1080#1`.
+Entries are read once at the first draw; a malformed one is logged
+(`Debug: PS_SKIP_DRAWS entry '<entry>' ignored: <why>`) and ignored alone, those in force are
+logged once, the first skip of each entry logs `Debug: PS_SKIP_DRAWS entry '<entry>' skipping its
+first draw: <vs>:<ps> target <W>x<H> <address>`, and after the call report
 `Skip draws: summary: PS_SKIP_DRAWS skipped <n> draws of <n> pairs: <vs>:<ps> <n> ...; by entry:
-<entry> <n> ...`. Only the draw command is left out: the draw's pass still begins (clears,
+<entry> <n> ...`, each entry written in full with its `@<target>` and `#<n>`. Only the draw command is left out: the draw's pass still begins (clears,
 layout transitions), its resources are bound and its barriers recorded, so later draws see the
 state they would after it; what the draw itself would have produced is missing (its colour,
 depth and stencil writes, its samples in the game's occlusion queries, its transform feedback

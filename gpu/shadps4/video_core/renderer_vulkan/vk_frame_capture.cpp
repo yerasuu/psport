@@ -140,6 +140,7 @@ struct DrawLine {
     u64 vs_hash{};
     u64 ps_hash{};
     u32 i_pair_draw{};
+    PsSkipDraws::Target color0{};
     bool is_skipped{};
     bool is_indirect{};
 };
@@ -1322,9 +1323,12 @@ void Write(VAddr presented) {
                      c_frames);
     }
     std::fprintf(p_file, "presented buffer %#llx\n", static_cast<unsigned long long>(presented));
-    std::fprintf(p_file, "draw lines: '#<pass> draw <i>: vs <hash> ps <hash> nth <n>', n counting "
-                         "the frame's draws of that pair from 0; PS_SKIP_DRAWS=<vs>:<ps>#<n> skips "
-                         "that draw alone\n");
+    std::fprintf(p_file, "draw lines: '#<pass> draw <i>: vs <hash> ps <hash> nth <n> target "
+                         "<W>x<H> <address>', n counting the frame's draws of that pair from 0, "
+                         "target colour attachment 0 ('-' without one); "
+                         "PS_SKIP_DRAWS=<vs>:<ps>@<address> (or @<W>x<H>) skips that pair's draws "
+                         "into that target, and #<n> after it the n-th of those alone (a bare #<n> "
+                         "may name another draw each frame)\n");
     if (SummarizeLevel()) {
         std::fprintf(p_file,
                      "summaries: %u read back (%llu KiB), %u not read; grid %ux%u texels, "
@@ -1404,10 +1408,14 @@ void Write(VAddr presented) {
         }
         for (u32 i = 0; i < e.draw_lines.size(); ++i) {
             const auto& line = e.draw_lines[i];
-            std::fprintf(p_file, "  #%u draw %u: vs %016llx ps %016llx nth %u%s%s\n", i_pass, i,
-                         static_cast<unsigned long long>(line.vs_hash),
+            const std::string target =
+                line.color0.va_target ? std::format("{}x{} {:#x}", line.color0.width,
+                                                    line.color0.height, line.color0.va_target)
+                                      : std::string{"-"};
+            std::fprintf(p_file, "  #%u draw %u: vs %016llx ps %016llx nth %u target %s%s%s\n",
+                         i_pass, i, static_cast<unsigned long long>(line.vs_hash),
                          static_cast<unsigned long long>(line.ps_hash), line.i_pair_draw,
-                         line.is_indirect ? " indirect" : "",
+                         target.c_str(), line.is_indirect ? " indirect" : "",
                          line.is_skipped ? " skipped by PS_SKIP_DRAWS" : "");
         }
         for (const auto& s : e.sampled) {
@@ -1660,7 +1668,8 @@ void FrameCapture::BeginPass(std::span<const PassTarget> colors, PassTarget dept
 }
 
 void FrameCapture::Draw(u64 vs_hash, u64 ps_hash, u32 c_indices, u32 c_instances,
-                        u32 i_pair_draw, bool is_skipped, bool is_indirect) {
+                        u32 i_pair_draw, const PsSkipDraws::Target& color0, bool is_skipped,
+                        bool is_indirect) {
     s_pending_bindings.clear();
     if (m_state.load(std::memory_order_relaxed) != Recording || s_entries.empty() ||
         s_entries.back().is_compute || s_entries.back().is_copy) {
@@ -1668,7 +1677,7 @@ void FrameCapture::Draw(u64 vs_hash, u64 ps_hash, u32 c_indices, u32 c_instances
     }
     auto& e = s_entries.back();
     ++e.draws;
-    e.draw_lines.push_back({vs_hash, ps_hash, i_pair_draw, is_skipped, is_indirect});
+    e.draw_lines.push_back({vs_hash, ps_hash, i_pair_draw, color0, is_skipped, is_indirect});
     if (!is_skipped) {
         e.indices += u64(c_indices) * std::max(c_instances, 1u);
     }

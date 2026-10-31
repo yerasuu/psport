@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "common/types.h"
+#include "psport_skip_draws.h"
 #include "video_core/renderer_vulkan/vk_common.h"
 #include "video_core/texture_cache/types.h"
 
@@ -101,9 +102,10 @@ public:
     static void BeginPass(std::span<const PassTarget> colors, PassTarget depth,
                           const char* sz_route);
     /// Every graphics draw, also those PS_SKIP_DRAWS left out (`is_skipped`) and indirect ones
-    /// (no index count); `i_pair_draw` is its index among the frame's draws of its shader pair.
+    /// (no index count); `i_pair_draw` is its index among the frame's draws of its shader pair,
+    /// `color0` its colour attachment 0 as PS_SKIP_DRAWS's `@<target>` matches it.
     static void Draw(u64 vs_hash, u64 ps_hash, u32 c_indices, u32 c_instances, u32 i_pair_draw,
-                     bool is_skipped, bool is_indirect);
+                     const PsSkipDraws::Target& color0, bool is_skipped, bool is_indirect);
     /// After Draw: the draw's depth and stencil state, accumulated over the pass.
     static void DepthUse(bool is_test, bool is_write, bool is_stencil);
     /// GPU thread, before recording a draw, with PS_CAPTURE_SUMMARIZE while recording: query
