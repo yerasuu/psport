@@ -15,8 +15,34 @@
 namespace Serialization {
 /* You should increment versions below once corresponding serialization scheme is changed. */
 static constexpr u32 ShaderBinaryVersion = 16u; // psport: valid-mask exports outside EXEC scopes
-static constexpr u32 ShaderMetaVersion = 13u; // psport: Info::stores, stream-out copy data
-static constexpr u32 PipelineKeyVersion = 6u; // psport: SerializationSupport::xfb_stride
+static constexpr u32 ShaderMetaVersion = 14u; // psport: StageSpecialization::xfb_source
+static constexpr u32 PipelineKeyVersion = 7u; // psport: SerializationSupport::xfb_source
+
+using XfbSource = std::optional<Shader::CopyShaderData::StreamOutBuffer>;
+
+static void WriteXfbSource(Writer& writer, const XfbSource& source) {
+    writer.Write(u8(source.has_value()));
+    if (source) {
+        writer.Write(source->sgpr_pair);
+        writer.Write(source->byte_offset);
+    }
+}
+
+static void ReadXfbSource(Reader& reader, XfbSource& out_source) {
+    out_source.reset();
+    u8 has_source{};
+    reader.Read(has_source);
+    if (has_source > 1) {
+        reader.ar.MarkCorrupt("a damaged stream-out source flag");
+        return;
+    }
+    if (has_source) {
+        Shader::CopyShaderData::StreamOutBuffer source{};
+        reader.Read(source.sgpr_pair);
+        reader.Read(source.byte_offset);
+        out_source = source;
+    }
+}
 } // namespace Serialization
 
 namespace Vulkan {
@@ -246,6 +272,7 @@ void GraphicsPipeline::SerializationSupport::Serialize(Serialization::Archive& a
     sdata.Write(tcs);
     sdata.Write(tes);
     sdata.Write(xfb_stride);
+    Serialization::WriteXfbSource(sdata, xfb_source);
     sdata.Write(fragment);
 }
 
@@ -259,7 +286,8 @@ bool GraphicsPipeline::SerializationSupport::Deserialize(Serialization::Archive&
     sdata.Read(tcs);
     sdata.Read(tes);
     sdata.Read(xfb_stride);
-    // psport: the clip distance discard shader is stored after xfb_stride; older entries end
+    Serialization::ReadXfbSource(sdata, xfb_source);
+    // psport: the clip distance discard shader is stored after xfb_source; older entries end
     // before it and their pipelines are created without it, as they were.
     if (!ar.IsEoS()) {
         sdata.Read(fragment);
@@ -550,9 +578,10 @@ void Info::Serialize(Serialization::Archive& ar) const {
 
     info.Write(this, sizeof(InfoPersistent));
     info.Write(flattened_ud_buf);
-    // psport: draws read these from a preloaded program's Info (the exports for alpha to mask
-    // and layered depth, the stream-out records for transform feedback); without them a warm
-    // cache dropped every stream-out capture.
+    // psport: draws read the exports from a preloaded program's Info (alpha to mask, layered
+    // depth). The stream-out records are the program's first permutation's, which later
+    // permutations are compared against (NoteStreamOutLayout); draws capture with their own
+    // permutation's StageSpecialization::xfb_source.
     info.Write(&stores, sizeof(stores));
     const auto& copy = gs_copy_data;
     info.Write(u8(copy.stream_out_parsed));
@@ -704,6 +733,7 @@ void StageSpecialization::Serialize(Serialization::Archive& ar) const {
     spec.Write(fmasks);
     spec.Write(samplers);
     spec.Write(xfb_stride);
+    Serialization::WriteXfbSource(spec, xfb_source);
 }
 
 bool StageSpecialization::Deserialize(Serialization::Archive& ar) {
@@ -744,6 +774,7 @@ bool StageSpecialization::Deserialize(Serialization::Archive& ar) {
     spec.Read(fmasks);
     spec.Read(samplers);
     spec.Read(xfb_stride);
+    Serialization::ReadXfbSource(spec, xfb_source);
 
     return true;
 }

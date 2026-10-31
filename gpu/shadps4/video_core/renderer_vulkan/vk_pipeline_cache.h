@@ -105,6 +105,7 @@ struct PipelineSelection {
     std::array<const Shader::Info*, MaxShaderStages> infos{};
     std::array<vk::ShaderModule, MaxShaderStages> modules{};
     std::optional<Shader::Gcn::FetchShaderData> fetch_shader{};
+    std::optional<Shader::CopyShaderData::StreamOutBuffer> xfb_source{}; ///< the bound GS module's
     GraphicsPipelineKey graphics_key{};
     bool motion = false;
     u8 motion_location{}; ///< first free varying location after the draw's parameters
@@ -164,9 +165,11 @@ public:
 
     const ComputePipeline* GetComputePipeline();
 
-    /// psport: the last element is the module's StageSpecialization::xfb_stride.
+    /// psport: the last two elements are the module's StageSpecialization::xfb_stride and
+    /// xfb_source.
     using Result = std::tuple<const Shader::Info*, vk::ShaderModule,
-                              std::optional<Shader::Gcn::FetchShaderData>, u64, u32>;
+                              std::optional<Shader::Gcn::FetchShaderData>, u64, u32,
+                              std::optional<Shader::CopyShaderData::StreamOutBuffer>>;
     Result GetProgram(PipelineSelection& sel, Shader::HwStage stage, Shader::SwStage l_stage,
                       const Shader::ShaderParams& params, Shader::Backend::Bindings& binding);
 

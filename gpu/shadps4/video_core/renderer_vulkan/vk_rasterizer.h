@@ -361,16 +361,19 @@ private:
     void DrawIndirectRecord(const GraphicsPipeline* pipeline, bool is_indexed,
                             const IndirectDraw& indirect);
     /// The geometry stage whose copy shader writes stream-out buffer 0, when this draw captures
-    /// it (stream 0 enabled, a parsed copy shader, transform feedback on the device), else null.
+    /// it (stream 0 enabled, a GS permutation translated with its copy shader's stream-out, which
+    /// gives the pipeline its buffer source), else null.
     /// NOTE: the one place deciding it, to switch to the shader translation's own accessor.
     const Shader::Info* StreamOutStage(const GraphicsPipeline& pipeline,
                                        const AmdGpu::Regs& regs) const;
     /// Logs and counts a draw whose pipeline captures stream-out while StreamOutStage found no
-    /// stream-out data in its geometry stage (recording side only, once per draw).
+    /// stream-out buffer source in its pipeline (recording side only, once per draw).
     void NoteMissingStreamOutData(const GraphicsPipeline& pipeline, const AmdGpu::Regs& regs);
-    /// Stream-out buffer 0's V#, loaded the way the copy shader loads it (S_LOAD_DWORDX4 from the
-    /// pointer in its user SGPR pair); zero when that pointer is not GPU memory.
-    AmdGpu::Buffer ReadStreamOutSharp(const Shader::Info& gs, const AmdGpu::Regs& regs) const;
+    /// Stream-out buffer 0's V#, loaded the way the pipeline's GS permutation's copy shader loads
+    /// it (S_LOAD_DWORDX4 from the pointer in its user SGPR pair); zero when that pointer is not
+    /// GPU memory or the pipeline has no buffer source.
+    AmdGpu::Buffer ReadStreamOutSharp(const GraphicsPipeline& pipeline,
+                                      const AmdGpu::Regs& regs) const;
     /// Bytes of buffer 0 from its V# base that stream-out may write: the V# and
     /// VGT_STRMOUT_BUFFER_SIZE bound it; 0 when nothing can be written.
     u64 StreamOutSize(const AmdGpu::Buffer& sharp, const AmdGpu::Regs& regs) const;

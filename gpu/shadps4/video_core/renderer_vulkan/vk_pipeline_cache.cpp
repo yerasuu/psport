@@ -682,8 +682,8 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline(const DrawIndirectPar
         ++g_bb_compiles;
         compiler->Submit([this, job, key = sel.graphics_key, infos = sel.infos,
                           runtime_infos = sel.runtime_infos, fetch = sel.fetch_shader,
-                          modules = sel.modules]() mutable {
-            GraphicsPipeline::SerializationSupport sdata{};
+                          modules = sel.modules, xfb_source = sel.xfb_source]() mutable {
+            GraphicsPipeline::SerializationSupport sdata{.xfb_source = xfb_source};
             auto pipeline = std::make_unique<GraphicsPipeline>(
                 instance, scheduler, desc_heap, profile, key, pipeline_cache->Handle(), infos,
                 runtime_infos, fetch, modules, sdata, false);
@@ -702,7 +702,7 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline(const DrawIndirectPar
         LOG_INFO(Render_Vulkan, "Compiling graphics pipeline {:#x}", pipeline_hash);
         CompileTimer timer;
 
-        GraphicsPipeline::SerializationSupport sdata{};
+        GraphicsPipeline::SerializationSupport sdata{.xfb_source = sel.xfb_source};
         it.value() = std::make_unique<GraphicsPipeline>(
             instance, scheduler, desc_heap, profile, sel.graphics_key, pipeline_cache->Handle(),
             sel.infos, sel.runtime_infos, sel.fetch_shader, sel.modules, sdata, false);
@@ -1115,6 +1115,7 @@ bool PipelineCache::RefreshGraphicsStages(PipelineSelection& sel) {
     const auto& regs = (*sel.regs);
     auto& key = sel.graphics_key;
     sel.fetch_shader = std::nullopt;
+    sel.xfb_source.reset();
 
     Shader::Backend::Bindings binding{};
     u32 bound_xfb_stride{};
@@ -1139,7 +1140,7 @@ bool PipelineCache::RefreshGraphicsStages(PipelineSelection& sel) {
         std::optional<Shader::Gcn::FetchShaderData> fetch_shader_;
         if (params) {
             std::tie(sel.infos[stage_out_idx], sel.modules[stage_out_idx], fetch_shader_,
-                     key.stage_hashes[stage_out_idx], bound_xfb_stride) =
+                     key.stage_hashes[stage_out_idx], bound_xfb_stride, sel.xfb_source) =
                 GetProgram(sel, stage_in, stage_out, *params, binding);
         } else {
             key.stage_hashes[stage_out_idx] = 0;
@@ -1278,7 +1279,8 @@ bool PipelineCache::RefreshComputeKey() {
         CountUntranslatedSkip();
         return false;
     }
-    std::tie(sel.infos[0], sel.modules[0], sel.fetch_shader, compute_key.value, std::ignore) =
+    std::tie(sel.infos[0], sel.modules[0], sel.fetch_shader, compute_key.value, std::ignore,
+             std::ignore) =
         GetProgram(sel, HwStage::Compute, SwStage::Compute, *cs_params, binding);
     if (!sel.modules[0]) {
         CountUntranslatedSkip();
@@ -1431,6 +1433,38 @@ bool BuildSpecKey(const Shader::Info& info, const Shader::Profile& profile,
     }
     return true;
 }
+
+void SetXfbCapture(Shader::StageSpecialization& spec, const Shader::Info& translated) {
+    spec.xfb_stride = translated.xfb_stride;
+    const auto& buffers = translated.gs_copy_data.stream_out_buffers;
+    if (translated.xfb_stride != 0 && !buffers.empty()) {
+        spec.xfb_source = buffers[0];
+    }
+}
+
+/// A GS program used with copy shaders whose stream-out layouts differ: before stream-out was
+/// captured per permutation, the later ones captured with the first one's buffer source.
+void NoteStreamOutLayout(const Shader::Info& program_info, const Shader::Info& translated,
+                         size_t perm_idx) {
+    const auto& first = program_info.gs_copy_data;
+    const auto& copy = translated.gs_copy_data;
+    if (translated.sw_stage != SwStage::Geometry ||
+        (first.stream_out_parsed == copy.stream_out_parsed &&
+         first.stream_out_buffers == copy.stream_out_buffers &&
+         first.stream_out_stores == copy.stream_out_stores)) {
+        return;
+    }
+    static std::unordered_set<u64> s_noted;
+    if (s_noted.insert(translated.pgm_hash).second) {
+        LOG_WARNING(Render_Vulkan,
+                    "GS {:#x} permutation {} has a copy shader whose stream-out layout differs "
+                    "from the program's first ({} stores, {} buffers against {}, {}): captured "
+                    "per permutation ({} GS programs so far)",
+                    translated.pgm_hash, perm_idx, copy.stream_out_stores.size(),
+                    copy.stream_out_buffers.size(), first.stream_out_stores.size(),
+                    first.stream_out_buffers.size(), s_noted.size());
+    }
+}
 } // namespace
 
 PipelineCache::Result PipelineCache::GetProgram(PipelineSelection& sel, HwStage hw_stage,
@@ -1482,7 +1516,8 @@ PipelineCache::Result PipelineCache::GetProgram(PipelineSelection& sel, HwStage 
         worker.stages.push_back(
             {program, params.hash, hw_stage, info.pgm_base, &info.flattened_ud_buf});
         return std::make_tuple(&info, it->module, it->spec.fetch_shader_data,
-                               HashCombine(params.hash, perm_idx), it->spec.xfb_stride);
+                               HashCombine(params.hash, perm_idx), it->spec.xfb_stride,
+                               it->spec.xfb_source);
     }
 
     auto it_pgm = program_cache.find(params.hash); // this thread is the only writer
@@ -1499,7 +1534,7 @@ PipelineCache::Result PipelineCache::GetProgram(PipelineSelection& sel, HwStage 
             return {};
         }
         auto spec = Shader::StageSpecialization(new_program->info, runtime_info, profile, start);
-        spec.xfb_stride = new_program->info.xfb_stride;
+        SetXfbCapture(spec, new_program->info);
         const auto perm_hash = HashCombine(params.hash, 0);
 
         RegisterShaderMeta(new_program->info, spec.fetch_shader_data, spec, perm_hash, 0);
@@ -1511,7 +1546,8 @@ PipelineCache::Result PipelineCache::GetProgram(PipelineSelection& sel, HwStage 
             program_cache.emplace(params.hash, std::move(new_program));
         }
         return std::make_tuple(&program->info, module, program->modules[0].spec.fetch_shader_data,
-                               perm_hash, program->modules[0].spec.xfb_stride);
+                               perm_hash, program->modules[0].spec.xfb_stride,
+                               program->modules[0].spec.xfb_source);
     }
 
     auto& program = it_pgm.value();
@@ -1533,7 +1569,7 @@ PipelineCache::Result PipelineCache::GetProgram(PipelineSelection& sel, HwStage 
         const auto& used = program->modules[program->last_used];
         return std::make_tuple(&program->info, used.module, used.spec.fetch_shader_data,
                                HashCombine(params.hash, program->last_used),
-                               used.spec.xfb_stride);
+                               used.spec.xfb_stride, used.spec.xfb_source);
     }
     PsStats::g_c_spec_builds.fetch_add(1, std::memory_order_relaxed);
     auto spec = Shader::StageSpecialization(info, runtime_info, profile, binding);
@@ -1568,7 +1604,8 @@ PipelineCache::Result PipelineCache::GetProgram(PipelineSelection& sel, HwStage 
             program->untranslated_specs.push_back(std::move(spec));
             return {};
         }
-        spec.xfb_stride = new_info.xfb_stride;
+        SetXfbCapture(spec, new_info);
+        NoteStreamOutLayout(info, new_info, perm_idx);
 
         RegisterShaderMeta(info, spec.fetch_shader_data, spec, perm_hash, perm_idx);
         std::unique_lock lk{programs_mutex};
@@ -1581,7 +1618,8 @@ PipelineCache::Result PipelineCache::GetProgram(PipelineSelection& sel, HwStage 
     }
     return std::make_tuple(&program->info, module,
                            program->modules[perm_idx].spec.fetch_shader_data, perm_hash,
-                           program->modules[perm_idx].spec.xfb_stride);
+                           program->modules[perm_idx].spec.xfb_stride,
+                           program->modules[perm_idx].spec.xfb_source);
 }
 
 std::optional<vk::ShaderModule> PipelineCache::ReplaceShader(vk::ShaderModule module,

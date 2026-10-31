@@ -26,12 +26,16 @@ struct CopyShaderData {
         u32 byte_offset;
         IR::Attribute attr;
         u32 comp;
+
+        bool operator==(const StreamOutStore&) const = default;
     };
     /// Where a stream-out buffer's V# comes from: S_LOAD_DWORDX4 from the pointer in user SGPR
     /// pair sgpr_pair (1 = s[2:3]) at byte_offset.
     struct StreamOutBuffer {
         u32 sgpr_pair;
         u32 byte_offset;
+
+        bool operator==(const StreamOutBuffer&) const = default;
     };
     static constexpr IR::Attribute StreamOutUnexported = IR::Attribute::Max;
     std::vector<StreamOutStore> stream_out_stores;

@@ -51,7 +51,11 @@ GraphicsPipeline::GraphicsPipeline(
                                ? runtime_infos[u32(Shader::SwStage::Geometry)].hw.gs.xfb_stride
                                : 0;
     }
+    if (sdata.xfb_stride == 0) {
+        sdata.xfb_source.reset();
+    }
     xfb_stride = sdata.xfb_stride;
+    xfb_source = sdata.xfb_source;
     BuildDescSetLayout(preloading);
     const auto debug_str = GetDebugString();
 

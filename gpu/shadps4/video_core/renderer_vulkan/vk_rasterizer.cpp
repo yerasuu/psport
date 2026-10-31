@@ -1250,7 +1250,7 @@ void Rasterizer::PostDraw(const Pipeline* pipeline, const PreparedDraw* used_pre
         const auto& regs = liverpool->regs;
         const auto& graphics = *static_cast<const GraphicsPipeline*>(pipeline);
         if (const auto* gs = StreamOutStage(graphics, regs)) {
-            strmout_sharp = ReadStreamOutSharp(*gs, regs);
+            strmout_sharp = ReadStreamOutSharp(graphics, regs);
             NotePendingGpuWrite(strmout_sharp.base_address, StreamOutSize(strmout_sharp, regs));
         }
     }
@@ -1711,12 +1711,7 @@ const Shader::Info* Rasterizer::StreamOutStage(const GraphicsPipeline& pipeline,
         return nullptr;
     }
     const auto* gs = pipeline.GetStages()[u32(Shader::SwStage::Geometry)];
-    if (!gs) {
-        return nullptr;
-    }
-    const auto& copy = gs->gs_copy_data;
-    if (!copy.stream_out_parsed || copy.stream_out_stores.empty() ||
-        copy.stream_out_buffers.empty()) {
+    if (!gs || !pipeline.GetXfbSource()) {
         return nullptr;
     }
     return gs;
@@ -1724,9 +1719,9 @@ const Shader::Info* Rasterizer::StreamOutStage(const GraphicsPipeline& pipeline,
 
 void Rasterizer::NoteMissingStreamOutData(const GraphicsPipeline& pipeline,
                                           const AmdGpu::Regs& regs) {
-    // The GS module was translated with transform feedback outputs, so its Info must hold the
-    // copy shader's stream-out stores; without them the capture never begins and the guest's
-    // stream-out buffer stays unwritten.
+    // The GS module was translated with transform feedback outputs, so its permutation must
+    // carry the copy shader's stream-out buffer source; without it the capture never begins and
+    // the guest's stream-out buffer stays unwritten.
     if (!regs.vgt_strmout_config.streamout_0_en || pipeline.GetXfbStride() == 0) {
         return;
     }
@@ -1734,22 +1729,23 @@ void Rasterizer::NoteMissingStreamOutData(const GraphicsPipeline& pipeline,
     const u64 pgm_hash = p_gs ? p_gs->pgm_hash : 0;
     static std::unordered_set<u64> s_described;
     if (s_described.insert(pgm_hash).second) {
-        const auto* p_copy = p_gs ? &p_gs->gs_copy_data : nullptr;
         LOG_WARNING(Render_Vulkan,
-                    "GS {:#x} draw captures stream-out (xfb stride {}) but its stage has no "
-                    "stream-out data (parsed {}, {} stores, {} buffers): drawn without capture",
-                    pgm_hash, pipeline.GetXfbStride(), p_copy && p_copy->stream_out_parsed,
-                    p_copy ? p_copy->stream_out_stores.size() : 0,
-                    p_copy ? p_copy->stream_out_buffers.size() : 0);
+                    "GS {:#x} draw captures stream-out (xfb stride {}) but its pipeline has no "
+                    "stream-out buffer source: drawn without capture",
+                    pgm_hash, pipeline.GetXfbStride());
     }
     LOG_ERROR_COUNTED(Render_Vulkan,
                       "GS draw with a transform feedback pipeline drawn without capture, its "
-                      "stage has no stream-out data");
+                      "pipeline has no stream-out buffer source");
 }
 
-AmdGpu::Buffer Rasterizer::ReadStreamOutSharp(const Shader::Info& gs,
+AmdGpu::Buffer Rasterizer::ReadStreamOutSharp(const GraphicsPipeline& pipeline,
                                               const AmdGpu::Regs& regs) const {
-    const auto& source = gs.gs_copy_data.stream_out_buffers[0];
+    const auto& xfb_source = pipeline.GetXfbSource();
+    if (!xfb_source) {
+        return {};
+    }
+    const auto& source = *xfb_source;
     const auto& user_data = regs.vs_program.user_data;
     const u32 sgpr = source.sgpr_pair * 2;
     if (sgpr + 1 >= user_data.size()) {
@@ -1798,17 +1794,11 @@ bool Rasterizer::ObtainStreamOut(const GraphicsPipeline* pipeline, StreamOutBind
         }
         return false;
     };
-    // The translation captures buffer 0 only; a store to another would go nowhere bound.
-    for (const auto& store : gs->gs_copy_data.stream_out_stores) {
-        if (store.buffer != 0) {
-            return skip("the copy shader writes a stream-out buffer other than 0");
-        }
-    }
     // An in-place arena or chunk buffer over guest memory may lack transform feedback usage.
     if (!PsGuestMemory::TransformFeedbackUsage(instance)) {
         return skip("guest memory buffers have no transform feedback usage on this driver");
     }
-    const auto sharp = DrawPipe::OnStageB() ? packet_strmout : ReadStreamOutSharp(*gs, regs);
+    const auto sharp = DrawPipe::OnStageB() ? packet_strmout : ReadStreamOutSharp(*pipeline, regs);
     // Bound from the V# base: the write offset is the counter's (StreamOutCounters), which is what
     // VGT_STRMOUT_BUFFER_OFFSET holds and the filled size the guest is told, both from the base.
     const VAddr address = sharp.base_address;

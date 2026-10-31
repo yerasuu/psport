@@ -95,6 +95,11 @@ struct StageSpecialization {
     /// psport: Info::xfb_stride of this permutation's translation. A result of the translation
     /// rather than an input that selects it, so operator== leaves it out.
     u32 xfb_stride{};
+    /// psport: where this permutation's copy shader loads stream-out buffer 0's V# from, set
+    /// whenever xfb_stride is. Kept per permutation because the copy shader is part of the runtime
+    /// info, while the program's shared Info holds the stream-out data of whichever permutation
+    /// filled it first. Left out of operator== as xfb_stride is.
+    std::optional<CopyShaderData::StreamOutBuffer> xfb_source{};
 
     StageSpecialization() = default;
     StageSpecialization(const Info& info_, RuntimeInfo runtime_info_, const Profile& profile_,

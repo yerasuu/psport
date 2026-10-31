@@ -82,6 +82,9 @@ public:
         std::vector<u32> fragment{};
         /// psport: GetXfbStride, saved because a preloaded pipeline has no runtime infos.
         u32 xfb_stride{};
+        /// psport: GetXfbSource. The creator sets it from the GS permutation it selected
+        /// (PipelineSelection::xfb_source), since the stage Infos are shared by all permutations.
+        std::optional<Shader::CopyShaderData::StreamOutBuffer> xfb_source{};
 
         void Serialize(Serialization::Archive& ar) const;
         bool Deserialize(Serialization::Archive& ar);
@@ -120,6 +123,12 @@ public:
         return xfb_stride;
     }
 
+    /// psport: where the GS permutation's copy shader loads stream-out buffer 0's V# from; set
+    /// whenever GetXfbStride is nonzero.
+    const std::optional<Shader::CopyShaderData::StreamOutBuffer>& GetXfbSource() const noexcept {
+        return xfb_source;
+    }
+
     /// Gets the attributes and bindings for vertex inputs.
     /// psport: `sharps`, when given, are the V#s of the fetch shader's attributes as the GPU
     /// command thread read them (in the draw packet): the V# tables they come from may have been
@@ -137,6 +146,7 @@ private:
     GraphicsPipelineKey key;
     std::optional<const Shader::Gcn::FetchShaderData> fetch_shader{};
     u32 xfb_stride{};
+    std::optional<Shader::CopyShaderData::StreamOutBuffer> xfb_source{};
     std::array<vk::PipelineColorBlendAttachmentState, AmdGpu::NUM_COLOR_BUFFERS>
         m_blend_attachments{};
 };
