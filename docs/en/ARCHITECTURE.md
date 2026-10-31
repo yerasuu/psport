@@ -271,7 +271,8 @@ a file.
 between machines: each file is written as `<name>.partial` and renamed when complete, `summary.txt`
 last. `link.txt` holds the loader's linking decisions and `imports.txt` the imports psport does not
 cover (no implementation, stub, left to the host runtime), so what a title still lacks reads without
-the rest of `run.log`. A helper process (`ps_host_output_tee`) copies stdout and stderr into `run.log` and finishes the
+the rest of `run.log`. `tools/missing_imports.py <debug-dir> [--all] [--title ID] [--out FILE.md]` maps those
+imports per title across the run folders as Markdown (newest folder per title, `--all` for every one). A helper process (`ps_host_output_tee`) copies stdout and stderr into `run.log` and finishes the
 folder once the process is gone, by any route; every exit path calls `runtime_debug_finish` after the
 call report. `PS_DEBUG_KEEP` (20) run folders of the host are kept. Details:
 [FORK.md](../../FORK.md#diagnostics).
