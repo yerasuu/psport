@@ -17,6 +17,9 @@ A state is how far a title has been seen to get, not a full play-through. Every 
 (see Testing in the README); "regress" below means what that scripted run records: the first GPU
 frame, frames drawn, sound. The detail was last checked against the regress of 2026-10-22.
 
+The table below is written from [src/main/compat_titles.inc](../../src/main/compat_titles.inc), which
+`psport --list-compat` prints for launchers: edit a title there and run `python3 tools/games_table.py`.
+
 ## Titles
 
 | Title | Title ID | State | Detail |

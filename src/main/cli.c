@@ -63,6 +63,34 @@ static void print_effects(const char *sz_serial) {
     puts("]}]");
 }
 
+typedef enum { COMPAT_playable, COMPAT_experimental, COMPAT_broken, COMPAT_unsupported } CompatState;
+#define TITLE(title_id, sz_name, sz_version, state, sz_note_en, sz_note_es, sz_note_ru) \
+    _Static_assert(COMPAT_##state >= 0, "title " #title_id ": unknown state");
+#include "compat_titles.inc"
+#undef TITLE
+
+static void print_compat(void) {
+    static const struct {
+        const char *sz_title_id, *sz_name, *sz_state, *sz_note;
+    } s_titles[] = {
+#define TITLE(title_id, sz_name, sz_version, state, sz_note_en, sz_note_es, sz_note_ru) \
+    {#title_id, sz_name, #state, sz_note_en},
+#include "compat_titles.inc"
+#undef TITLE
+    };
+    fputs("{\"titles\":[",stdout);
+    for (size_t i=0; i<sizeof(s_titles)/sizeof(s_titles[0]); ++i) {
+        fputs(i ? ",{\"title_id\":" : "{\"title_id\":",stdout);
+        runtime_json_print_string(s_titles[i].sz_title_id);
+        fputs(",\"name\":",stdout);
+        runtime_json_print_string(s_titles[i].sz_name);
+        printf(",\"state\":\"%s\",\"note\":",s_titles[i].sz_state);
+        runtime_json_print_string(s_titles[i].sz_note);
+        putchar('}');
+    }
+    puts("]}");
+}
+
 /* bbport, and psport releases before the rename, read BB_* names: launchers written for them keep
    working for a transition. Each one set is copied to its PS_* name unless that is set too, then
    the process starts again, since the GPU library's initializers have already read the
@@ -147,6 +175,11 @@ int answer_query(int argc, char **argv) {
         }
         if (h_stdout >= 0) ps_host_fs_close(h_stdout);
         ps_host_features_list();
+        return 0;
+    }
+    if (argc >= 2 && !strcmp(argv[1], "--list-compat")) {
+        if (argc != 2) { fprintf(stderr, "Usage: %s --list-compat\n", argv[0]); return 1; }
+        print_compat();
         return 0;
     }
     /* key=value lines for scripts/online.py; none for a title without online servers. */

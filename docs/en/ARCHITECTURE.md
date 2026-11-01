@@ -11,7 +11,7 @@ The model is Wine's, not an emulator's.
 |---|---|---|---|
 | Launch script | `run.sh` | - | environment and settings, then `psport` |
 | Entry | `src/main/main.c`, `src/main/main.h` | `out/psport` | launch sequence: arguments, image mapping, entering the game |
-| Launcher queries | `src/main/cli.c`, `src/main/game_info.c` | `out/psport` | `--check-game`, `--has-presets`, `--list-patches`, `--list-mods`, `--list-quirks`, `--list-features`, `--list-traits`, `--list-effects`, `--list-controls`, `--online-overrides`, `BB_*` names; `param.sfo` and the game's identity |
+| Launcher queries | `src/main/cli.c`, `src/main/game_info.c` | `out/psport` | `--check-game`, `--has-presets`, `--list-patches`, `--list-mods`, `--list-quirks`, `--list-features`, `--list-compat`, `--list-traits`, `--list-effects`, `--list-controls`, `--online-overrides`, `BB_*` names; `param.sfo` and the game's identity; `compat_titles.inc`, the titles' state |
 | Import binding | `src/main/bind.c` | `out/psport` | traps, failure thunks, relocation walk, patch writes |
 | Signals | `src/main/signals.c` | `out/psport` | fault, watchdog, thread dump and termination handlers |
 | Native loader | `src/loader/loader.h`, `src/loader/loader_self.c`, `src/loader/loader_link.c`, `src/loader/loader_traits.c` | `out/psport` | SELF/ELF parsing, module linking, relocations, TLS, bindings; middleware traits (`Middleware:` line) |
@@ -175,6 +175,12 @@ library.
   layout of `src/input/runtime_pad.c` with the title's `sz_default_controls` over it, the neutral
   layout alone without a game; the launcher's
   controls page shows these as defaults.
+  `psport --list-compat` prints the titles psport has been seen to run, from
+  `src/main/compat_titles.inc` (compiled in), as JSON:
+  `{"titles":[{"title_id":"CUSA03173","name":"Bloodborne","state":"playable","note":"..."}]}`,
+  `state` one of `playable`, `experimental`, `broken`, `unsupported` ([GAMES.md](GAMES.md#states)),
+  `note` GAMES.md's English detail as Markdown. The same table writes the title tables of the
+  READMEs and `docs/<lang>/GAMES.md` (`tools/games_table.py`), so a state is changed only there.
 - Middleware traits (`src/loader/loader_traits.c`): read once at load from the eboot's module and
   library names (`PS4Player*`, `Il2CppUserAssemblies`, `libkernel_unity`, `<Project>-PS4-Shipping`,
   `libfmod*`), Havok's class names in the eboot, and the game's file names (`PS4Util.prx`,
@@ -750,6 +756,7 @@ A launch runs no Python, except for online play:
 | `scripts/sce_file.py` | `param.sfo` and SELF/ELF readers for the Python tools (`tools/got_import.py`, `tools/re/`) |
 | `tools/dcx_check.py` | every `.dcx` file of a Bloodborne folder checked (the launch checks the shaders only) |
 | `tools/check_os_code.py` | OS conditionals and OS or SDL3 includes found outside `src/platform` and `gpu/platform` (`gpu/third_party`, `gpu/shadps4` and `gpu/net/shadps4` exempt); `--strict` exits 1 while any remain; the last run reported 17 findings in 16 files (2 conditionals, 15 includes) |
+| `tools/games_table.py` | the title tables of `README.md`, `README.es.md`, `README.ru.md` and `docs/<lang>/GAMES.md` written from `src/main/compat_titles.inc` (`psport --list-compat`'s table); `--check` writes nothing and exits 1 naming each document that differs |
 | `tools/check_licenses.py` | `LICENSES.json` against the tree: schema, paths, `LICENSES/<id>.txt` for every SPDX id, every `LicenseRef` defined, vendored trees and tracked files covered; run by `tools/regress/night.sh` in report mode, `--strict` exits 1 on any finding |
 
 ## Online play

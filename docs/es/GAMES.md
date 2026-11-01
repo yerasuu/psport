@@ -18,6 +18,9 @@ figuran en [tools/regress/titles.txt](../../tools/regress/titles.txt) y se ejecu
 guionizada: el primer fotograma de la GPU, los fotogramas dibujados y el sonido. El detalle se
 comprobó por última vez con la regress del 22-10-2026.
 
+La tabla de abajo se escribe desde [src/main/compat_titles.inc](../../src/main/compat_titles.inc), que
+`psport --list-compat` muestra a los lanzadores: edita un juego allí y ejecuta `python3 tools/games_table.py`.
+
 ## Juegos
 
 | Juego | ID | Estado | Detalle |
