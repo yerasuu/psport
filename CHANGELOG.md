@@ -16,6 +16,107 @@ changes alone make no release. What breaks is psport's launch interface: `run.sh
 The tags without a `v` (`0.1` to `0.51`) are bbport's releases, carried in psport's history; their
 notes are in [docs/en/history/](docs/en/history/).
 
+## v0.2.0
+
+The shadNet login now goes over TLS or is refused in clear, and the account secrets leave the
+environment; the Ngs2 and Audiodec audio libraries are psport's own, FSR 3.1 frame generation, a
+driver pipeline cache and VRR pacing arrive, and Atelier Ryza saves and loads. Windows is still
+groundwork, not supported.
+
+Breaking: online play against a shadNet server off this machine without TLS, including the default
+`play.seamlesshunt.com:31313`, needs `PS_ONLINE_ALLOW_PLAINTEXT_LOGIN=1`; use `PS_SHADNET_TLS=1` for a
+server that speaks TLS. Launchers should also pass the title's built-in patch folder with
+`--builtin-patches-dir` (or `PS_BUILTIN_PATCHES_DIR`), since `Bloodborne.xml` no longer ships in psport.
+Every title rebuilds its shader cache once.
+
+### Network
+- The shadNet login and the WebAPI token no longer travel in clear to a remote server: TLS with full
+  certificate checks (`PS_SHADNET_TLS=1`), or loopback, or `PS_ONLINE_ALLOW_PLAINTEXT_LOGIN=1`.
+- The password and token can come from a one-use file (`PS_SHADNET_SECRETS_FILE`) or stdin
+  (`PS_SHADNET_SECRETS=stdin`) instead of the environment, and a run holding them is kept out of core
+  dumps. The old variables still work.
+- Logs redact header values, cookies and URL queries, and other players' NPIDs move to debug.
+- The online module uses mbedTLS and no longer needs OpenSSL or protobuf.
+- Bloodborne online: more BBSC packets are understood, shadNet drops get a 20 s grace, and characters
+  get their own ids from the local server.
+- libSceNet's own socket calls are served offline, local sockets can be created, and epoll waits retry
+  after a host signal. Calls with no connection are counted as `offline` in the call report.
+
+### Audio
+- libSceNgs2 is native (racks, voices, sampler, submixer, mastering, reverb, custom racks, waveforms,
+  pan, geometry and FFT), written from the firmware; AnyPS5's port is retired and `PS_NGS2=native` is the
+  only backend. Ryza's sound set-up no longer runs out of memory (ATRAC9 state moves to host memory).
+- libSceAudiodec is native too; its output matches the old port byte for byte offline.
+- Pad vibration checks its arguments in the firmware's order. Mouse motion made by a pushed controller
+  stick (Steam's Desktop Layout, reWASD) is dropped so the camera does not turn twice;
+  `mouse_pad_filter=0` or `PS_MOUSE_PAD_FILTER=0` turns it off.
+
+### Graphics
+- Off by default: FSR 3.1 frame generation (`frame_gen=fsr`, `PS_FRAME_GEN`, `frame_gen_fit_display`),
+  switchable from the menu in a session started with it. Launchers read the choice from the line
+  `Frame generation setting: <off|fsr>`.
+- `PS_VRR=1` paces frames under the refresh rate; the driver's pipeline cache is saved beside the shader
+  cache (`PS_DRIVER_PIPELINE_CACHE=0` turns it off); pipeline compile threads respect the CPU affinity
+  and cgroup limits.
+- The texture collector follows the live VRAM budget (70, 85 and 95 %), fixing pressure never starting
+  on budgets under 2 GB; moves to VRAM are paced by the driver's sparse bind time (100 ms stalls on
+  RADV); empty or failed sparse binds no longer hang the queue.
+- Tiled render targets up to `PS_READBACK_TILED_KB` (64) are read back for the CPU, which fixes Atelier
+  Ryza's lens flare.
+- Shader translation: switch jump tables, geometry shader stream-out (Ryza's water), valid-mask exports
+  inside EXEC scopes (Ryza's foliage), alpha to mask, depth to colour copies and stencil planes of
+  depth images.
+- Chained command buffers and packet sizes are followed correctly, and more asserts in the GPU code
+  became counted, logged errors.
+- Layer mode copies GPU data back before CPU writes (Saga's heap corruption on an RTX 2080).
+
+### Kernel and system
+- Guest threads, stacks and TLS are reused, so Atelier Ryza's thousands of workers no longer exhaust
+  memory; the thread creation log is throttled.
+- `PS_DMEM_MB` growth is limited by the memory the host has free; the guest's debug output and
+  `/dev/dipsw`, `shm_open`, process identity calls and shared semaphores are handled natively.
+- The system-dialog modules (CommonDialog, SaveDataDialog, WebBrowserDialog) are served by psport:
+  Atelier Ryza saves and loads again. NpCommon's heap, PlayGo locus queries and more UserService calls
+  are implemented.
+- Short reads of regular files are completed, queue events come back beside small timers, and fiber
+  and queue asserts are counted errors.
+- Exits end in order after writing the call report and `summary.txt`; a launcher without SIGTERM
+  creates `PS_STOP_FILE`.
+
+### Loader
+- Linked modules start after their dependencies; libSceHmd is served natively.
+- The red zone guard (`PS_RED_ZONE_GUARD`) protects guest leaf functions from Windows' exception
+  frame; it does nothing on Linux, where `PS_FAULT_CLOBBER_RED_ZONE` simulates that frame to test it.
+- A `--user-id` longer than 10 digits is rejected instead of cut.
+
+### Launcher interface
+- New query `psport --list-compat`: the titles psport has been seen to run and their state.
+- New option `--builtin-patches-dir` and variable `PS_BUILTIN_PATCHES_DIR`; a missing built-in patch
+  file no longer stops the launch.
+- `--list-features` gains `secrets_handoff` and `frame_gen_fsr`; `audio` is `audio_out` and `input` is
+  split in four rows.
+- `run.sh` no longer exports `PS_COPY_GPU_BUFFERS` or the write twins variables: psport picks them on
+  every host and logs why. `PS_GC_PRESSURE_PERCENT` is removed (`PS_GC_BUDGET_MB` still caps).
+- A debug run folder gains `link.txt` and `imports.txt`.
+
+### Windows (groundwork, not supported)
+- The platform layer moves window, audio, input, files and GPU memory sharing behind `ps_host_*`;
+  Linux behaves as before. Several Windows-only crashes and hangs are fixed (hook ABI, view
+  protections, exits).
+- A tag publishes `psport-windows-vX.Y.Z-x86_64.zip` on its release, built with a top-level
+  `CMakeLists.txt`.
+
+### Diagnostics and tests
+- Frame captures gain `PS_SKIP_DRAWS`, `PS_CAPTURE_FRAMES`, `PS_CAPTURE_SUMMARIZE` and the dumps
+  `PS_CAPTURE_DUMP`, `PS_CAPTURE_DUMP_TEX` and `PS_CAPTURE_DUMP_VSCONST`.
+- OpenOrbis hardware tests for Ngs2 and Audio3d in `tools/hwtest/`; `tools/missing_imports.py` lists
+  what each title imports that psport does not cover.
+
+### Documentation and licences
+- `LICENSES.json`, `LICENSES/` and `tools/check_licenses.py`; every bundle carries the licence files.
+  Supermedo, Mrsuss60 and willl03 are credited for what was taken from their forks.
+- Atelier Ryza is marked playable; CUSA50989 is named Symphonia as its `param.sfo` does.
+
 ## v0.1.4
 
 The Windows package builds again: v0.1.3's Windows build failed in MSYS2's compiler on one line of the
