@@ -27,12 +27,12 @@ names the package, not a psport release, and any psport commit from the one that
 The workflow ([filter patterns](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#filter-pattern-cheat-sheet):
 `toolchain-win32-[0-9]+`) runs four jobs:
 
-1. `ffmpeg` (`windows-latest`, MSYS2 CLANG64): `packaging/windows/ffmpeg/PKGBUILD` with
+1. `ffmpeg` (`windows-2025`, MSYS2 CLANG64): `packaging/windows/ffmpeg/PKGBUILD` with
    `makepkg-mingw`, as `windows.yml` builds it. A tag builds it afresh, so that what it publishes rests
    on no cache entry another run wrote; a run by hand may take `windows.yml`'s cached package.
 2. `package` (`ubuntu-24.04`): `tools/win32-cross.sh sysroot`, `tools/win32-cross.sh ffmpeg-package
    <that package>` (which takes exactly one), `tools/win32-toolchain.sh dist N`.
-3. `check` (`windows-latest`, PowerShell, no MSYS2): what decanter does. It downloads the three tools
+3. `check` (`windows-2025`, PowerShell, no MSYS2): what decanter does. It downloads the three tools
    from the manifest's URLs, compares their SHA-256, unpacks them and the package with Windows'
    `tar.exe`, runs `cmake` and `ninja` with only `System32` on `PATH`, then `psport.exe
    --list-features` and `psport-windows-probe.exe`.

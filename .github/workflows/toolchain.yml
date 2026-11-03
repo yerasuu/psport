@@ -20,7 +20,7 @@ jobs:
   # psport's FFmpeg as windows.yml builds it. A tag builds it afresh: what it publishes must not rest on
   # a cache entry another run wrote; a run by hand may take windows.yml's.
   ffmpeg:
-    runs-on: windows-latest
+    runs-on: windows-2025
     timeout-minutes: 120
     permissions:
       contents: read
@@ -135,7 +135,7 @@ jobs:
   # cmake and ninja with no MSYS2 and nothing else on PATH, then the programs started once.
   check:
     needs: package
-    runs-on: windows-latest
+    runs-on: windows-2025
     timeout-minutes: 120
     permissions:
       contents: read

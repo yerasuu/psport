@@ -13,7 +13,7 @@ jobs:
   # FFmpeg, handed over as the test package's zip (tools/win32-bundle.sh, kb #899) and its sources to
   # try; for a tag, the publish job below hands it to decanter.
   build:
-    runs-on: windows-latest
+    runs-on: windows-2025
     timeout-minutes: 240
     permissions:
       contents: read
