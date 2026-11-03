@@ -9,7 +9,7 @@ permissions: {}
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 240
     permissions:
       contents: read
@@ -52,7 +52,7 @@ jobs:
   publish:
     needs: build
     if: github.repository == 'yerasuu/psport' && (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
       contents: write
