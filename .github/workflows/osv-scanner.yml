@@ -22,6 +22,7 @@ jobs:
     uses: "google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@ef6dfdf01765802d5a8dbc3c39852a6128b00af0" # v2.7.0
     with:
       scan-args: |-
+        --config=osv-scanner.toml
         --include-git-root
         -r
         ./
@@ -34,6 +35,7 @@ jobs:
     uses: "google/osv-scanner-action/.github/workflows/osv-scanner-reusable-pr.yml@ef6dfdf01765802d5a8dbc3c39852a6128b00af0" # v2.7.0
     with:
       scan-args: |-
+        --config=osv-scanner.toml
         --include-git-root
         -r
         ./

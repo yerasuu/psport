@@ -1,0 +1,7 @@
+# gpu/third_party/half/docs/sphinx/requirements.txt pins the Python packages that build the half
+# library's documentation (certifi 2024.2.2, cryptography 42.0.5 ...). psport never builds that
+# documentation, so none of them is installed or shipped, and the file is vendored verbatim.
+[[PackageOverrides]]
+ecosystem = "PyPI"
+ignore = true
+reason = "only the vendored half library's documentation requirements, never installed or shipped"
